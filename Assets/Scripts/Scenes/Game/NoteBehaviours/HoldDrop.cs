@@ -45,6 +45,18 @@ namespace MajdataPlay.Scenes.Game.Notes.Behaviours
         SpriteRenderer _thisRenderer;
         SpriteRenderer _tapLineRenderer;
 
+        MaterialPropertyBlock _holdPropertyBlock;
+        MaterialPropertyBlock _exPropertyBlock;
+        Material _holdSizeMaterial;
+        Vector2 _holdSize = new(1.22f, 1.4f);
+
+        static readonly int HoldTargetSizeID = Shader.PropertyToID("_HoldTargetSize");
+        static readonly int HoldSourceSizeID = Shader.PropertyToID("_HoldSourceSize");
+        static readonly int HoldBorderID = Shader.PropertyToID("_HoldBorder");
+        static readonly int HoldPivotID = Shader.PropertyToID("_HoldPivot");
+        static readonly int HoldUvRectID = Shader.PropertyToID("_HoldUvRect");
+        static readonly int ShineModeID = Shader.PropertyToID("_ShineMode");
+
         NotePoolManager _poolManager;
 
         Vector3 _innerPos = NoteHelper.GetTapPosition(1, 1.225f);
@@ -62,6 +74,10 @@ namespace MajdataPlay.Scenes.Game.Notes.Behaviours
 
         readonly float _noteAppearRate = MajEnv.Settings?.Debug.NoteAppearRate ?? 0.265f;
         //readonly float _touchPanelOffset = MajEnv.UserSetting?.Judge.TouchPanelOffset ?? 0;
+
+        const float _shineModeNone = 0f;
+        const float _shineModeBreak = 1f;
+        const float _shineModeHold = 2f;
 
         const int _spriteSortOrder = 1;
         const int _exSortOrder = 0;
@@ -83,6 +99,13 @@ namespace MajdataPlay.Scenes.Game.Notes.Behaviours
             _exRenderer = _exObject.GetComponent<SpriteRenderer>();
 
             _thisRenderer = GetComponent<SpriteRenderer>();
+            _holdPropertyBlock = new MaterialPropertyBlock();
+            _exPropertyBlock = new MaterialPropertyBlock();
+            _holdSizeMaterial = Resources.Load<Material>("Materials/HoldSize");
+            if (_holdSizeMaterial == null)
+            {
+                throw new InvalidOperationException("Missing Resources/Materials/HoldSize material.");
+            }
 
             _endPointObject = Transform.GetChild(1).gameObject;
             _endPointTransform = _endPointObject.transform;
@@ -134,7 +157,7 @@ namespace MajdataPlay.Scenes.Game.Notes.Behaviours
             _lastHeadState = HOLD_HEAD_STATE_NOT_JUDGED;
             _waitReleaseTimeSec = 0;
 
-            if(IsClassic)
+            if (IsClassic)
             {
                 _bodyCheckRange = new Range<float>(JudgeTimingWithOffset - TAP_JUDGE_GOOD_AREA_MSEC / 1000, float.MaxValue, ContainsType.Closed);
             }
@@ -151,13 +174,12 @@ namespace MajdataPlay.Scenes.Game.Notes.Behaviours
             Transform.localScale = new Vector3(0, 0);
 
             _tapLineTransform.rotation = Quaternion.Euler(0, 0, -22.5f + -45f * (StartPos - 1));
-            _thisRenderer.size = new Vector2(1.22f, 1.4f);
-            _exRenderer.size = new Vector2(1.22f, 1.4f);
             _thisRenderer.sortingOrder = SortOrder - _spriteSortOrder;
             _exRenderer.sortingOrder = SortOrder - _exSortOrder;
             _endRenderer.sortingOrder = SortOrder - _endSortOrder;
 
             LoadSkin();
+            SetHoldSize(new Vector2(1.22f, 1.4f));
             SetActiveWithoutRenderer(true);
 
             State = NoteStatus.Inited;
@@ -273,8 +295,7 @@ namespace MajdataPlay.Scenes.Game.Notes.Behaviours
                     case NoteStatus.Inited:
                         if (destScale >= 0f)
                         {
-                            _exRenderer.size = new Vector2(1.22f, 1.42f);
-                            _thisRenderer.size = new Vector2(1.22f, 1.42f);
+                            SetHoldSize(new Vector2(1.22f, 1.42f));
                             _tapLineTransform.localScale = new Vector3(0.2552f, 0.2552f, 1f);
                             Transform.position = _innerPos;
                             SetExRendererActive(true);
@@ -335,8 +356,7 @@ namespace MajdataPlay.Scenes.Game.Notes.Behaviours
 
                         Transform.position = _outerPos * (dis / 4.8f); //0.325
                         _tapLineTransform.localScale = new Vector3(lineScale, lineScale, 1f);
-                        _thisRenderer.size = new Vector2(1.22f, size);
-                        _exRenderer.size = new Vector2(1.22f, size);
+                        SetHoldSize(new Vector2(1.22f, size));
                         _endPointTransform.localPosition = new Vector3(0f, 0.6825f - size / 2);
 
                         break;
@@ -474,7 +494,7 @@ namespace MajdataPlay.Scenes.Game.Notes.Behaviours
             var isSensorPressed = NoteManager.CheckSensorStatusInThisFrame(SensorPos, SwitchStatus.On);
             var isPressed = isButtonPressed || isSensorPressed;
 
-            if(isPressed)
+            if (isPressed)
             {
                 JudgeResult = JudgeGrade.Miss;
                 End();
@@ -501,10 +521,9 @@ namespace MajdataPlay.Scenes.Game.Notes.Behaviours
                 EffectManager.PlayHoldEffect(StartPos, JudgeResult);
                 EffectManager.ResetEffect(StartPos);
                 _lastHeadState = HOLD_HEAD_STATE_JUDGED;
-                if(IsClassic)
+                if (IsClassic)
                 {
-                    _thisRenderer.sprite = _holdOnSprite;
-                    _thisRenderer.sharedMaterial = HoldShineMaterial;
+                    SetHoldSprite(_holdOnSprite, _shineModeHold);
                 }
             }
             if (!_bodyCheckRange.InRange(ThisFrameSec) || !NoteController.IsStart)
@@ -515,7 +534,7 @@ namespace MajdataPlay.Scenes.Game.Notes.Behaviours
             var isSensorPressed = NoteManager.CheckSensorStatusInThisFrame(SensorPos, SwitchStatus.On);
             var isPressed = isButtonPressed || isSensorPressed;
 
-            if(IsClassic)
+            if (IsClassic)
             {
                 if (!IsJudged || AutoplayMode == AutoplayModeOption.Enable)
                 {
@@ -523,7 +542,7 @@ namespace MajdataPlay.Scenes.Game.Notes.Behaviours
                 }
                 if (isPressed)
                 {
-                    if(GetRemainingTime() == 0)
+                    if (GetRemainingTime() == 0)
                     {
                         EffectManager.ResetHoldEffect(StartPos);
                     }
@@ -554,7 +573,7 @@ namespace MajdataPlay.Scenes.Game.Notes.Behaviours
                         _waitReleaseTimeSec += MajTimeline.DeltaTime;
                         return;
                     }
-                    else if(_waitReleaseTimeSec != 0)
+                    else if (_waitReleaseTimeSec != 0)
                     {
                         PlayerReleaseTimeSec += _waitReleaseTimeSec;
                         _waitReleaseTimeSec = 0;
@@ -597,8 +616,7 @@ namespace MajdataPlay.Scenes.Game.Notes.Behaviours
             if (_lastHoldState != HOLD_STATE_PRESSED)
             {
                 EffectManager.PlayHoldEffect(StartPos, JudgeResult);
-                _thisRenderer.sprite = _holdOnSprite;
-                _thisRenderer.sharedMaterial = HoldShineMaterial;
+                SetHoldSprite(_holdOnSprite, _shineModeHold);
             }
         }
         private void StopHoldEffect()
@@ -606,8 +624,7 @@ namespace MajdataPlay.Scenes.Game.Notes.Behaviours
             if (_lastHoldState != HOLD_STATE_RELEASED)
             {
                 EffectManager.ResetHoldEffect(StartPos);
-                _thisRenderer.sprite = _holdOffSprite;
-                _thisRenderer.sharedMaterial = DefaultMaterial;
+                SetHoldSprite(_holdOffSprite, _shineModeNone);
             }
         }
         public override void SetActive(bool state)
@@ -674,7 +691,6 @@ namespace MajdataPlay.Scenes.Game.Notes.Behaviours
                 _exRenderer.sprite = skin.Ex;
                 _exRenderer.color = skin.ExEffects[0];
                 _endRenderer.sprite = skin.Ends[0];
-                _thisRenderer.sharedMaterial = DefaultMaterial;
                 _tapLineRenderer.sprite = skin.GuideLines[0];
 
                 if (IsBreak)
@@ -682,7 +698,6 @@ namespace MajdataPlay.Scenes.Game.Notes.Behaviours
                     _holdSprite = skin.BreakMine;
                     _holdOnSprite = skin.BreakMine_On;
                     _endRenderer.sprite = skin.Ends[2];
-                    _thisRenderer.sharedMaterial = BreakMaterial;
                     _tapLineRenderer.sprite = skin.GuideLines[2];
                     _exRenderer.color = skin.ExEffects[2];
                 }
@@ -696,7 +711,6 @@ namespace MajdataPlay.Scenes.Game.Notes.Behaviours
                 _exRenderer.sprite = skin.Ex;
                 _exRenderer.color = skin.ExEffects[0];
                 _endRenderer.sprite = skin.Ends[0];
-                _thisRenderer.sharedMaterial = DefaultMaterial;
                 _tapLineRenderer.sprite = skin.GuideLines[0];
 
                 if (IsEach)
@@ -713,12 +727,76 @@ namespace MajdataPlay.Scenes.Game.Notes.Behaviours
                     _holdSprite = skin.Break;
                     _holdOnSprite = skin.Break_On;
                     _endRenderer.sprite = skin.Ends[2];
-                    _thisRenderer.sharedMaterial = BreakMaterial;
                     _tapLineRenderer.sprite = skin.GuideLines[2];
                     _exRenderer.color = skin.ExEffects[2];
                 }
             }
-            _thisRenderer.sprite = _holdSprite;
+            SetRendererSprite(_exRenderer, _exPropertyBlock, skin.Ex, _shineModeNone);
+            SetHoldSprite(_holdSprite, IsBreak ? _shineModeBreak : _shineModeNone);
+        }
+
+        private void SetHoldSprite(Sprite sprite, float shineMode)
+        {
+            SetRendererSprite(_thisRenderer, _holdPropertyBlock, sprite, shineMode);
+        }
+
+        private void SetRendererSprite(SpriteRenderer renderer, MaterialPropertyBlock properties,
+            Sprite sprite, float shineMode)
+        {
+            renderer.sprite = sprite;
+            renderer.drawMode = SpriteDrawMode.Simple;
+            renderer.sharedMaterial = _holdSizeMaterial;
+
+            var rect = sprite.rect;
+            var sourceSize = rect.size / sprite.pixelsPerUnit;
+            var border = sprite.border / sprite.pixelsPerUnit;
+            var pivot = new Vector2(sprite.pivot.x / rect.width, sprite.pivot.y / rect.height);
+            var textureRect = sprite.textureRect;
+            var textureSize = new Vector2(sprite.texture.width, sprite.texture.height);
+            var uvRect = new Vector4(
+                textureRect.x / textureSize.x,
+                textureRect.y / textureSize.y,
+                textureRect.width / textureSize.x,
+                textureRect.height / textureSize.y);
+
+            properties.Clear();
+            properties.SetVector(HoldTargetSizeID, _holdSize);
+            properties.SetVector(HoldSourceSizeID, sourceSize);
+            properties.SetVector(HoldBorderID, border);
+            properties.SetVector(HoldPivotID, pivot);
+            properties.SetVector(HoldUvRectID, uvRect);
+            properties.SetFloat(ShineModeID, shineMode);
+            renderer.SetPropertyBlock(properties);
+            SetRendererBounds(renderer, sprite, _holdSize);
+        }
+
+        private void SetHoldSize(Vector2 size)
+        {
+            if (_holdSize == size)
+            {
+                return;
+            }
+
+            _holdSize = size;
+            _holdPropertyBlock.SetVector(HoldTargetSizeID, size);
+            _exPropertyBlock.SetVector(HoldTargetSizeID, size);
+            _thisRenderer.SetPropertyBlock(_holdPropertyBlock);
+            _exRenderer.SetPropertyBlock(_exPropertyBlock);
+            SetRendererBounds(_thisRenderer, _thisRenderer.sprite, size);
+            SetRendererBounds(_exRenderer, _exRenderer.sprite, size);
+        }
+
+        private static void SetRendererBounds(SpriteRenderer renderer, Sprite sprite, Vector2 size)
+        {
+            if (sprite == null || float.IsNaN(size.x) || float.IsNaN(size.y))
+            {
+                return;
+            }
+
+            var rect = sprite.rect;
+            var pivot = new Vector2(sprite.pivot.x / rect.width, sprite.pivot.y / rect.height);
+            var center = Vector2.Scale(new Vector2(0.5f, 0.5f) - pivot, size);
+            renderer.localBounds = new Bounds(center, new Vector3(size.x, size.y, 0.01f));
         }
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         protected override void Autoplay()
