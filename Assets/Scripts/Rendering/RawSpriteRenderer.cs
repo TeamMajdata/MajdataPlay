@@ -95,7 +95,9 @@ namespace MajdataPlay.Rendering
             set
             {
                 if (_color == value)
+                {
                     return;
+                }
 
                 _color = value;
                 MarkColorDirty();
@@ -108,7 +110,9 @@ namespace MajdataPlay.Rendering
             set
             {
                 if (_flipX == value)
+                {
                     return;
+                }
 
                 _flipX = value;
                 MarkGeometryDirty();
@@ -121,7 +125,9 @@ namespace MajdataPlay.Rendering
             set
             {
                 if (_flipY == value)
+                {
                     return;
+                }
 
                 _flipY = value;
                 MarkGeometryDirty();
@@ -134,7 +140,9 @@ namespace MajdataPlay.Rendering
             set
             {
                 if (_drawMode == value)
+                {
                     return;
+                }
                 _drawMode = value;
                 MarkGeometryDirty();
             }
@@ -147,7 +155,9 @@ namespace MajdataPlay.Rendering
             {
                 value = new Vector2(SanitizeSize(value.x), SanitizeSize(value.y));
                 if (_size.Equals(value))
+                {
                     return;
+                }
                 _size = value;
                 MarkGeometryDirty();
             }
@@ -159,7 +169,9 @@ namespace MajdataPlay.Rendering
             set
             {
                 if (_tileMode == value)
+                {
                     return;
+                }
                 _tileMode = value;
                 MarkGeometryDirty();
             }
@@ -172,15 +184,12 @@ namespace MajdataPlay.Rendering
             {
                 value = float.IsNaN(value) ? 0.5f : Mathf.Clamp01(value);
                 if (_adaptiveModeThreshold == value)
+                {
                     return;
+                }
                 _adaptiveModeThreshold = value;
                 MarkGeometryDirty();
             }
-        }
-
-        private static float SanitizeSize(float value)
-        {
-            return float.IsNaN(value) || float.IsInfinity(value) ? 0f : Mathf.Max(0f, value);
         }
 
         public string SortingLayerName
@@ -191,7 +200,9 @@ namespace MajdataPlay.Rendering
                 value ??= "Default";
 
                 if (_sortingLayerName == value)
+                {
                     return;
+                }
 
                 _sortingLayerName = value;
                 MarkSortingDirty();
@@ -202,25 +213,19 @@ namespace MajdataPlay.Rendering
         {
             get
             {
-                EnsureRenderer();
-                return _meshRenderer != null
-                    ? _meshRenderer.sortingLayerID
-                    : SortingLayer.NameToID(_sortingLayerName);
+                return _meshRenderer.sortingLayerID;
             }
 
             set
             {
-                EnsureRenderer();
-
-                if (_meshRenderer == null)
-                    return;
 
                 if (_meshRenderer.sortingLayerID == value)
+                {
                     return;
+                }
 
                 _meshRenderer.sortingLayerID = value;
 
-                // 保证 Name 属性同步。
                 _sortingLayerName = SortingLayer.IDToName(value);
             }
         }
@@ -242,17 +247,21 @@ namespace MajdataPlay.Rendering
         {
             get
             {
-                EnsureRenderer();
-                return _sharedMaterial != null
-                    ? _sharedMaterial
-                    : _meshRenderer != null
-                        ? _meshRenderer.sharedMaterial
-                        : null;
+                if (_sharedMaterial != null)
+                {
+                    return _sharedMaterial;
+                }
+                else
+                {
+                    return _meshRenderer.sharedMaterial;
+                }
             }
             set
             {
                 if (_sharedMaterial == value)
+                {
                     return;
+                }
 
                 _sharedMaterial = value;
                 ApplyMaterial();
@@ -299,23 +308,40 @@ namespace MajdataPlay.Rendering
         }
 
 
-        public Bounds Vounds
+        public Bounds Bounds
         {
             get
             {
-                EnsureRenderer();
-                return _meshRenderer != null
-                    ? _meshRenderer.bounds
-                    : default;
+                return _meshRenderer.bounds;
             }
         }
 
+        /// <summary>
+        /// Gets or overrides the renderer's local-space axis-aligned bounds.
+        /// Custom bounds are not serialized; use ResetLocalBounds to restore automatic bounds.
+        /// </summary>
+        public Bounds LocalBounds
+        {
+            get
+            {
+                // Property changes normally wait until PreLateUpdate to rebuild geometry.
+                if (_spriteDirty || _geometryDirty)
+                {
+                    ApplyGeometry();
+                }
+
+                return _meshRenderer.localBounds;
+            }
+            set
+            {
+                _meshRenderer.localBounds = value;
+            }
+        }
         public bool IsVisible
         {
             get
             {
-                EnsureRenderer();
-                return _meshRenderer != null && _meshRenderer.isVisible;
+                return _meshRenderer.isVisible;
             }
         }
 
@@ -323,7 +349,6 @@ namespace MajdataPlay.Rendering
         {
             get
             {
-                EnsureRenderer();
                 return _meshRenderer;
             }
         }
@@ -376,13 +401,14 @@ namespace MajdataPlay.Rendering
 
         private void Awake()
         {
-            Initialize();
+            _propertyBlock = new();
+            _meshRenderer = GetComponent<MeshRenderer>();
+            _meshFilter = GetComponent<MeshFilter>();
             Updater.Register(this);
         }
 
         private void OnEnable()
         {
-            Initialize();
             _meshRenderer.enabled = true;
 
             _spriteDirty = true;
@@ -498,6 +524,14 @@ namespace MajdataPlay.Rendering
             RawSpriteResources.Release(_meshEntry);
             RawSpriteResources.Release(_materialEntry);
         }
+        public void ResetLocalBounds()
+        {
+            _meshRenderer.ResetLocalBounds();
+        }
+        public void ResetBounds()
+        {
+            _meshRenderer.ResetBounds();
+        }
         public void GetPropertyBlock(MaterialPropertyBlock properties)
         {
             if (properties == null)
@@ -538,36 +572,6 @@ namespace MajdataPlay.Rendering
             _meshRenderer.SetPropertyBlock(properties, materialIndex);
         }
 
-        // ============================================================
-        // Initialization
-        // ============================================================
-
-        private void Initialize()
-        {
-            EnsureRenderer();
-            EnsurePropertyBlock();
-        }
-
-        private void EnsureRenderer()
-        {
-            if (_meshFilter == null)
-            {
-                _meshFilter = GetComponent<MeshFilter>();
-            }
-
-            if (_meshRenderer == null)
-            {
-                _meshRenderer = GetComponent<MeshRenderer>();
-            }
-        }
-
-        private void EnsurePropertyBlock()
-        {
-            if (_propertyBlock == null)
-            {
-                _propertyBlock = new MaterialPropertyBlock();
-            }
-        }
 
         // ============================================================
         // Dirty
@@ -622,22 +626,31 @@ namespace MajdataPlay.Rendering
 
         private void ApplyDirty()
         {
-            Initialize();
 
             if (_spriteDirty || _geometryDirty)
+            {
                 ApplyGeometry();
+            }
 
             if (_colorDirty)
+            {
                 ApplyColor();
+            }
 
             if (_sortingDirty)
+            {
                 ApplySorting();
+            }
 
             if (_materialDirty)
+            {
                 ApplyMaterial();
+            }
 
             if (_rendererSettingsDirty)
+            {
                 ApplyRendererSettings();
+            }
         }
 
         // ============================================================
@@ -697,8 +710,6 @@ namespace MajdataPlay.Rendering
 
             _appliedColor = _color;
 
-            EnsurePropertyBlock();
-
             _meshRenderer.GetPropertyBlock(_propertyBlock);
 
             // 与 SpriteRenderer / Sprites shader 使用方式一致。
@@ -735,8 +746,6 @@ namespace MajdataPlay.Rendering
         {
             _materialDirty = false;
 
-            EnsureRenderer();
-
             _meshRenderer.sharedMaterial = AcquireMaterial(_sharedMaterial, _sprite != null ? _sprite.texture : null);
 
             _appliedMaterial = _sharedMaterial;
@@ -758,6 +767,10 @@ namespace MajdataPlay.Rendering
 
             _meshRenderer.motionVectorGenerationMode =
                 _motionVectorGenerationMode;
+        }
+        private static float SanitizeSize(float value)
+        {
+            return float.IsNaN(value) || float.IsInfinity(value) ? 0f : Mathf.Max(0f, value);
         }
 
         public static class Updater

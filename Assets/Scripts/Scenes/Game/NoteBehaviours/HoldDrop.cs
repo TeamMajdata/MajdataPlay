@@ -47,7 +47,6 @@ namespace MajdataPlay.Scenes.Game.Notes.Behaviours
 
         MaterialPropertyBlock _holdPropertyBlock;
         MaterialPropertyBlock _exPropertyBlock;
-        Material _holdSizeMaterial;
         Vector2 _holdSize = new(1.22f, 1.4f);
 
         static readonly int HoldTargetSizeID = Shader.PropertyToID("_HoldTargetSize");
@@ -101,11 +100,6 @@ namespace MajdataPlay.Scenes.Game.Notes.Behaviours
             _thisRenderer = GetComponent<SpriteRenderer>();
             _holdPropertyBlock = new MaterialPropertyBlock();
             _exPropertyBlock = new MaterialPropertyBlock();
-            _holdSizeMaterial = Resources.Load<Material>("Materials/HoldSize");
-            if (_holdSizeMaterial == null)
-            {
-                throw new InvalidOperationException("Missing Resources/Materials/HoldSize material.");
-            }
 
             _endPointObject = Transform.GetChild(1).gameObject;
             _endPointTransform = _endPointObject.transform;
@@ -744,8 +738,7 @@ namespace MajdataPlay.Scenes.Game.Notes.Behaviours
             Sprite sprite, float shineMode)
         {
             renderer.sprite = sprite;
-            renderer.drawMode = SpriteDrawMode.Simple;
-            renderer.sharedMaterial = _holdSizeMaterial;
+            //renderer.drawMode = SpriteDrawMode.Simple;
 
             var rect = sprite.rect;
             var sourceSize = rect.size / sprite.pixelsPerUnit;
@@ -788,7 +781,7 @@ namespace MajdataPlay.Scenes.Game.Notes.Behaviours
 
         private static void SetRendererBounds(SpriteRenderer renderer, Sprite sprite, Vector2 size)
         {
-            if (sprite == null || float.IsNaN(size.x) || float.IsNaN(size.y))
+            if (float.IsNaN(size.x) || float.IsNaN(size.y))
             {
                 return;
             }

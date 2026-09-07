@@ -1,4 +1,4 @@
-Shader "Notes/HoldSize"
+Shader "Notes/Hold"
 {
     Properties
     {

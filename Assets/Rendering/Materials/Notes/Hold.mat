@@ -7,7 +7,7 @@ Material:
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
-  m_Name: HoldSize
+  m_Name: Hold
   m_Shader: {fileID: 4800000, guid: 78b2315244494eec8522a9fd4b4dfeb2, type: 3}
   m_Parent: {fileID: 0}
   m_ModifiedSerializedProperties: 0
@@ -34,6 +34,7 @@ Material:
     - _HoldBorder: {r: 0, g: 0, b: 0, a: 0}
     - _HoldPivot: {r: 0.5, g: 0.5, b: 0, a: 0}
     - _HoldSourceSize: {r: 1, g: 1, b: 0, a: 0}
-    - _HoldTargetSize: {r: 1, g: 1, b: 0, a: 0}
+    - _HoldTargetSize: {r: 1.22, g: 5.61, b: 0, a: 0}
     - _HoldUvRect: {r: 0, g: 0, b: 1, a: 1}
   m_BuildTextureStacks: []
+  m_AllowLocking: 1
