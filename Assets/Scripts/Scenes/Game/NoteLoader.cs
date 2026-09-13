@@ -120,7 +120,7 @@ namespace MajdataPlay.Scenes.Game
         readonly static IReadOnlyDictionary<SimaiNoteType, int> NOTE_LAYER_COUNT = new Dictionary<SimaiNoteType, int>()
         {
             {SimaiNoteType.Tap, 2 },
-            {SimaiNoteType.Hold, 3 },
+            {SimaiNoteType.Hold, 2 },
             {SimaiNoteType.Slide, 2 },
             {SimaiNoteType.Touch, 6 },
             {SimaiNoteType.TouchHold, 6 },
