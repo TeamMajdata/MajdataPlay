@@ -33,6 +33,7 @@ public sealed class RadarEvent
     public RadarEventKind Kind { get; set; }
     public bool? IsSlideHead { get; set; }
     public double? SlideDeclareTimeSeconds { get; set; }
+    public BeatPosition? SlideDeclareBeat { get; set; }
     public double StartTimeSeconds { get; set; }
     public double EndTimeSeconds { get; set; }
     public BeatPosition StartBeat { get; set; }
@@ -40,6 +41,7 @@ public sealed class RadarEvent
     public double? Bpm { get; set; }
     public string? Position { get; set; }
     public int? HeadEventId { get; set; }
+    public int? SlideGroupId { get; set; }
     public IReadOnlyList<SlidePathSegment>? SlidePath { get; set; }
     public bool? IsBreak { get; set; }
     public bool? IsEx { get; set; }

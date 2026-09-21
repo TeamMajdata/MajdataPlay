@@ -81,8 +81,16 @@ public readonly struct BeatPosition : IComparable<BeatPosition>, IEquatable<Beat
         new(checked(left.Numerator * right.Denominator + right.Numerator * left.Denominator),
             checked(left.Denominator * right.Denominator));
 
+    public static BeatPosition operator -(BeatPosition left, BeatPosition right) =>
+        new(checked(left.Numerator * right.Denominator - right.Numerator * left.Denominator),
+            checked(left.Denominator * right.Denominator));
+
     public static bool operator ==(BeatPosition left, BeatPosition right) => left.Equals(right);
     public static bool operator !=(BeatPosition left, BeatPosition right) => !left.Equals(right);
+    public static bool operator <(BeatPosition left, BeatPosition right) => left.CompareTo(right) < 0;
+    public static bool operator <=(BeatPosition left, BeatPosition right) => left.CompareTo(right) <= 0;
+    public static bool operator >(BeatPosition left, BeatPosition right) => left.CompareTo(right) > 0;
+    public static bool operator >=(BeatPosition left, BeatPosition right) => left.CompareTo(right) >= 0;
 
     private static long GreatestCommonDivisor(long left, long right)
     {

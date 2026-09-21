@@ -50,11 +50,15 @@ public sealed class MajSimaiChartAdapter
             AddTimingEvents(timeline, pending);
 
             var declarationOrder = pending.Count;
+            var slideGroupId = 0;
             foreach (var timing in chart.NoteTimings)
             {
                 RejectAmbiguousNoHeadGrouping(timing);
                 var declarationBeat = timeline.BeatAt(timing.Timing);
+                var declarationTime = timeline.TimeAt(declarationBeat);
                 PendingEvent? currentHead = null;
+                int? currentSlideGroupId = null;
+                int? currentSlideStartPosition = null;
                 foreach (var note in timing.Notes)
                 {
                     declarationOrder++;
@@ -62,23 +66,31 @@ public sealed class MajSimaiChartAdapter
                     {
                         if (!note.IsSlideNoHead)
                         {
-                            currentHead = CreateHead(note, timing, declarationBeat, declarationOrder);
+                            currentHead = CreateHead(
+                                note, timing, declarationTime, declarationBeat, declarationOrder);
                             pending.Add(currentHead);
+                            currentSlideGroupId = ++slideGroupId;
+                            currentSlideStartPosition = note.StartPosition;
                         }
-                        else if (currentHead is not null &&
-                                 currentHead.Event.Position != note.StartPosition.ToString())
+                        else if (currentSlideGroupId is null ||
+                                 currentSlideStartPosition != note.StartPosition)
                         {
                             currentHead = null;
+                            currentSlideGroupId = ++slideGroupId;
+                            currentSlideStartPosition = note.StartPosition;
                         }
 
                         pending.Add(CreateSlide(
-                            note, timing, declarationOrder,
-                            currentHead?.TemporaryId, timeline));
+                            note, timing, declarationTime, declarationBeat, declarationOrder,
+                            currentHead?.TemporaryId, currentSlideGroupId.Value, timeline));
                         continue;
                     }
 
                     currentHead = null;
-                    pending.Add(CreateOrdinary(note, timing, declarationBeat, declarationOrder, timeline));
+                    currentSlideGroupId = null;
+                    currentSlideStartPosition = null;
+                    pending.Add(CreateOrdinary(
+                        note, timing, declarationTime, declarationBeat, declarationOrder, timeline));
                 }
             }
 
@@ -101,6 +113,7 @@ public sealed class MajSimaiChartAdapter
                     Kind = source.Kind,
                     IsSlideHead = source.IsSlideHead,
                     SlideDeclareTimeSeconds = source.SlideDeclareTimeSeconds,
+                    SlideDeclareBeat = source.SlideDeclareBeat,
                     StartTimeSeconds = source.StartTimeSeconds,
                     EndTimeSeconds = source.EndTimeSeconds,
                     StartBeat = source.StartBeat,
@@ -108,6 +121,7 @@ public sealed class MajSimaiChartAdapter
                     Bpm = source.Bpm,
                     Position = source.Position,
                     HeadEventId = ordered[index].HeadTemporaryId is int head ? idMap[head] : null,
+                    SlideGroupId = source.SlideGroupId,
                     SlidePath = source.SlidePath,
                     IsBreak = source.IsBreak,
                     IsEx = source.IsEx,
@@ -124,7 +138,7 @@ public sealed class MajSimaiChartAdapter
                 Chart = new RadarChartInput
                 {
                     Events = events,
-                    ChartEndTimeSeconds = commaTimings[^1].Timing,
+                    ChartEndTimeSeconds = timeline.Points[^1].CanonicalTime,
                     LastEventEndTimeSeconds = objects.Length == 0
                         ? null
                         : objects.Max(item => item.EndTimeSeconds)
@@ -140,23 +154,31 @@ public sealed class MajSimaiChartAdapter
     private PendingEvent CreateSlide(
         SimaiNote note,
         SimaiTimingPoint timing,
+        double declarationTime,
+        BeatPosition declarationBeat,
         int order,
         int? headTemporaryId,
+        int slideGroupId,
         Timeline timeline)
     {
-        var endTime = note.SlideStartTime + note.SlideTime;
+        var startBeat = timeline.BeatAt(note.SlideStartTime);
+        var endBeat = timeline.BeatAt(note.SlideStartTime + note.SlideTime);
+        var startTime = timeline.TimeAt(startBeat);
+        var endTime = timeline.TimeAt(endBeat);
         return NewPending(new RadarEvent
         {
             EventId = 0,
             Kind = RadarEventKind.Slide,
             IsSlideHead = false,
-            SlideDeclareTimeSeconds = timing.Timing,
-            StartTimeSeconds = note.SlideStartTime,
+            SlideDeclareTimeSeconds = declarationTime,
+            SlideDeclareBeat = declarationBeat,
+            StartTimeSeconds = startTime,
             EndTimeSeconds = endTime,
-            StartBeat = timeline.BeatAt(note.SlideStartTime),
-            EndBeat = timeline.BeatAt(endTime),
+            StartBeat = startBeat,
+            EndBeat = endBeat,
             Position = note.StartPosition.ToString(),
-            SlidePath = _slidePaths.Resolve(note.RawContent, note.SlideStartTime, endTime),
+            SlideGroupId = slideGroupId,
+            SlidePath = _slidePaths.Resolve(note.RawContent, startTime, endTime),
             IsBreak = note.IsSlideBreak,
             IsEx = false,
             IsMine = note.IsMineSlide,
@@ -169,6 +191,7 @@ public sealed class MajSimaiChartAdapter
     private static PendingEvent CreateHead(
         SimaiNote note,
         SimaiTimingPoint timing,
+        double declarationTime,
         BeatPosition declarationBeat,
         int order) =>
         NewPending(new RadarEvent
@@ -176,8 +199,8 @@ public sealed class MajSimaiChartAdapter
             EventId = 0,
             Kind = RadarEventKind.Tap,
             IsSlideHead = true,
-            StartTimeSeconds = timing.Timing,
-            EndTimeSeconds = timing.Timing,
+            StartTimeSeconds = declarationTime,
+            EndTimeSeconds = declarationTime,
             StartBeat = declarationBeat,
             EndBeat = declarationBeat,
             Position = note.StartPosition.ToString(),
@@ -192,6 +215,7 @@ public sealed class MajSimaiChartAdapter
     private static PendingEvent CreateOrdinary(
         SimaiNote note,
         SimaiTimingPoint timing,
+        double declarationTime,
         BeatPosition declarationBeat,
         int order,
         Timeline timeline)
@@ -204,16 +228,17 @@ public sealed class MajSimaiChartAdapter
             SimaiNoteType.TouchHold => RadarEventKind.TouchHold,
             _ => throw new MajSimaiAdaptationException($"Unsupported MajSimai note type: {note.Type}")
         };
-        var endTime = timing.Timing + note.HoldTime;
+        var endBeat = timeline.BeatAt(timing.Timing + note.HoldTime);
+        var endTime = timeline.TimeAt(endBeat);
         return NewPending(new RadarEvent
         {
             EventId = 0,
             Kind = kind,
             IsSlideHead = false,
-            StartTimeSeconds = timing.Timing,
+            StartTimeSeconds = declarationTime,
             EndTimeSeconds = endTime,
             StartBeat = declarationBeat,
-            EndBeat = timeline.BeatAt(endTime),
+            EndBeat = endBeat,
             Position = kind is RadarEventKind.Touch or RadarEventKind.TouchHold
                 ? TouchPosition(note)
                 : note.StartPosition.ToString(),
@@ -266,8 +291,8 @@ public sealed class MajSimaiChartAdapter
             {
                 EventId = 0,
                 Kind = RadarEventKind.Timing,
-                StartTimeSeconds = point.Time,
-                EndTimeSeconds = point.Time,
+                StartTimeSeconds = point.CanonicalTime,
+                EndTimeSeconds = point.CanonicalTime,
                 StartBeat = point.Beat,
                 EndBeat = point.Beat,
                 Bpm = point.Bpm,
@@ -281,6 +306,7 @@ public sealed class MajSimaiChartAdapter
     {
         var points = new List<TimelinePoint>(commaTimings.Length);
         var beatValue = 0.0;
+        var canonicalTime = 0.0;
         for (var index = 0; index < commaTimings.Length; index++)
         {
             var point = commaTimings[index];
@@ -296,7 +322,14 @@ public sealed class MajSimaiChartAdapter
                 beatValue += elapsed * previous.Bpm / 60.0;
             }
             var beat = SnapBeatValue(beatValue);
-            points.Add(new TimelinePoint(point.Timing, beat, point.Bpm, point.RawTextPosition));
+            if (index > 0)
+            {
+                var previous = points[index - 1];
+                canonicalTime = previous.CanonicalTime +
+                    (beat - previous.Beat).ToDouble() * 60.0 / previous.Bpm;
+            }
+            points.Add(new TimelinePoint(
+                point.Timing, canonicalTime, beat, point.Bpm, point.RawTextPosition));
         }
         return new Timeline(points);
     }
@@ -323,28 +356,46 @@ public sealed class MajSimaiChartAdapter
             for (var index = Points.Count - 1; index >= 0; index--)
             {
                 var point = Points[index];
-                if (Math.Abs(time - point.Time) <= TimeTolerance) return point.Beat;
-                if (time > point.Time)
+                if (Math.Abs(time - point.RawTime) <= TimeTolerance) return point.Beat;
+                if (time > point.RawTime)
                     return BeatPosition.SnapFromDouble(
-                        point.Beat.ToDouble() + (time - point.Time) * point.Bpm / 60.0,
+                        point.Beat.ToDouble() + (time - point.RawTime) * point.Bpm / 60.0,
                         MaximumBeatDenominator,
                         BeatSnapTolerance);
             }
             throw new MajSimaiAdaptationException($"Time {time} precedes the MajSimai timeline.");
         }
+
+        public double TimeAt(BeatPosition beat)
+        {
+            for (var index = Points.Count - 1; index >= 0; index--)
+            {
+                var point = Points[index];
+                if (point.Beat <= beat)
+                    return point.CanonicalTime + (beat - point.Beat).ToDouble() * 60.0 / point.Bpm;
+            }
+            throw new MajSimaiAdaptationException($"Beat {beat} precedes the MajSimai timeline.");
+        }
     }
 
     private sealed class TimelinePoint
     {
-        public TimelinePoint(double time, BeatPosition beat, float bpm, int sourcePosition)
+        public TimelinePoint(
+            double rawTime,
+            double canonicalTime,
+            BeatPosition beat,
+            float bpm,
+            int sourcePosition)
         {
-            Time = time;
+            RawTime = rawTime;
+            CanonicalTime = canonicalTime;
             Beat = beat;
             Bpm = bpm;
             SourcePosition = sourcePosition;
         }
 
-        public double Time { get; }
+        public double RawTime { get; }
+        public double CanonicalTime { get; }
         public BeatPosition Beat { get; }
         public float Bpm { get; }
         public int SourcePosition { get; }
