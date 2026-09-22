@@ -29,6 +29,13 @@ public static class ChartRadarOutputDimensions
     {
         Note, Peak, Sweep, SlideTricky, SlideSequence, Jack, FittedConstant
     });
+
+    internal static IReadOnlyDictionary<string, double?> EmptyValues()
+    {
+        var output = new Dictionary<string, double?>();
+        foreach (var name in DefaultOrder) output[name] = null;
+        return output;
+    }
 }
 
 /// <summary>UI-facing scalar snapshot with no parser or analysis implementation details.</summary>
@@ -36,10 +43,10 @@ public sealed class ChartRadarSnapshot
 {
     public bool IsSuccess { get; set; }
     public string Status { get; set; } = "error";
-    public IReadOnlyDictionary<string, double> RawValues { get; set; } =
-        new Dictionary<string, double>();
-    public IReadOnlyDictionary<string, double> Scores { get; set; } =
-        new Dictionary<string, double>();
+    public IReadOnlyDictionary<string, double?> RawValues { get; set; } =
+        ChartRadarOutputDimensions.EmptyValues();
+    public IReadOnlyDictionary<string, double?> Scores { get; set; } =
+        ChartRadarOutputDimensions.EmptyValues();
     public IReadOnlyList<string> DimensionOrder { get; set; } =
         ChartRadarOutputDimensions.DefaultOrder;
     public double? FittedConstant { get; set; }
@@ -81,13 +88,13 @@ public sealed class ChartRadarService
         };
     }
 
-    private static IReadOnlyDictionary<string, double> Project(
+    private static IReadOnlyDictionary<string, double?> Project(
         IReadOnlyDictionary<string, double>? source)
     {
-        var output = new Dictionary<string, double>();
-        if (source is null) return output;
+        var output = new Dictionary<string, double?>();
         foreach (var name in ChartRadarOutputDimensions.DefaultOrder)
-            if (source.TryGetValue(name, out var value)) output[name] = value;
+            output[name] = source is not null && source.TryGetValue(name, out var value)
+                ? value : null;
         return output;
     }
 }
