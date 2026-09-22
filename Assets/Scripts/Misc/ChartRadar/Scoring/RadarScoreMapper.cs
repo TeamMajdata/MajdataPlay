@@ -17,7 +17,7 @@ public sealed class RadarScoreResult
 public sealed class RadarScoreMapper
 {
     public const string MappingVersion = "mapping-profile-2026-09-16T15-44-08-825Z";
-    private const double MaximumScore = 220;
+    private const double MaximumScore = 250;
 
     // Fixed calibration for the seven raw dimensions. FittedConstant is appended
     // unchanged. UI code may select axes only after this mapping step.
