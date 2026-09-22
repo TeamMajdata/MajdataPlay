@@ -22,7 +22,17 @@ public sealed class MajSimaiChartAdapter
     private const double TimeTolerance = 1e-8;
     private const int MaximumBeatDenominator = 4096;
     private const double BeatSnapTolerance = 1e-7;
-    private readonly SlidePathResolver _slidePaths = new();
+    private readonly SlidePathResolver _slidePaths;
+
+    public MajSimaiChartAdapter()
+        : this(new MajdataPlayExtendedSlideBarCountProvider())
+    {
+    }
+
+    public MajSimaiChartAdapter(IExtendedSlideBarCountProvider? extendedSlides)
+    {
+        _slidePaths = new SlidePathResolver(extendedSlides);
+    }
 
     public async Task<AdaptationResult> ParseAndAdaptAsync(string inote)
     {

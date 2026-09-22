@@ -14,6 +14,12 @@ namespace SimaiRadar.MajSimaiAdapter;
 internal sealed class SlidePathResolver
 {
     private const string SingleCharacterShapes = "-^v<>Vpqszw";
+    private readonly IExtendedSlideBarCountProvider? _extendedSlides;
+
+    internal SlidePathResolver(IExtendedSlideBarCountProvider? extendedSlides = null)
+    {
+        _extendedSlides = extendedSlides;
+    }
 
     public IReadOnlyList<SlidePathSegment> Resolve(
         string rawContent,
@@ -23,7 +29,7 @@ internal sealed class SlidePathResolver
         if (string.IsNullOrEmpty(rawContent) || rawContent[0] is < '1' or > '8')
             throw new MajSimaiAdaptationException($"Invalid MajSimai Slide RawContent: {rawContent}");
         if (rawContent.Contains('K'))
-            throw new MajSimaiAdaptationException("Extended K Slides are not part of the fixed standard geometry.");
+            return ResolveExtended(rawContent, slideStartTimeSeconds, slideEndTimeSeconds);
 
         var parsed = new List<ParsedSegment>();
         var start = rawContent[0] - '0';
@@ -99,6 +105,38 @@ internal sealed class SlidePathResolver
             });
         }
         return output;
+    }
+
+    private IReadOnlyList<SlidePathSegment> ResolveExtended(
+        string rawContent,
+        double slideStartTimeSeconds,
+        double slideEndTimeSeconds)
+    {
+        if (_extendedSlides is null)
+            throw new MajSimaiAdaptationException(
+                "Extended K Slides require the MajdataPlay geometry provider.");
+        var marker = rawContent.IndexOf('K');
+        if (marker < 1 || marker + 1 >= rawContent.Length)
+            throw new MajSimaiAdaptationException($"Incomplete extended Slide endpoint: {rawContent}");
+        var start = ParsePosition(rawContent[0], rawContent);
+        var end = ParsePosition(rawContent[marker + 1], rawContent);
+        var barCount = _extendedSlides.ResolveBarCount(rawContent);
+        if (barCount <= 0)
+            throw new MajSimaiAdaptationException(
+                $"Non-positive Play arrow count for extended Slide: {rawContent}");
+        return new[]
+        {
+            new SlidePathSegment
+            {
+                Shape = "slidecode",
+                StartPosition = start,
+                EndPosition = end,
+                BarCount = barCount,
+                StartTimeSeconds = slideStartTimeSeconds,
+                EndTimeSeconds = slideEndTimeSeconds,
+                RawSegment = rawContent
+            }
+        };
     }
 
     private static int ParsePosition(char value, string rawContent)
