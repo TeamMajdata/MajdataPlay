@@ -14,7 +14,8 @@ public sealed class RadarAnalyzer
         new (string, IRadarFeatureAnalyzer)[]
         {
             (RadarFeatureNames.Note, new NoteDensityAnalyzer()),
-            (RadarFeatureNames.Peak, new PeakDensityAnalyzer())
+            (RadarFeatureNames.Peak, new PeakDensityAnalyzer()),
+            (RadarFeatureNames.Sweep, new SweepBurstAnalyzer())
         };
 
     public RadarAnalysisResult Analyze(RadarChartInput? chart)
