@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
 using MajSimai;
 using SimaiRadar.Analysis;
 using SimaiRadar.Runtime;
@@ -42,9 +44,15 @@ public static class ChartRadarOutputDimensions
 public sealed class ChartRadarSnapshot
 {
     public bool IsSuccess { get; set; }
+    public bool IsCancelled { get; set; }
     public string Status { get; set; } = "error";
+    /// <summary>Fixed public keys; unavailable or failed dimensions are null.</summary>
     public IReadOnlyDictionary<string, double?> RawValues { get; set; } =
         ChartRadarOutputDimensions.EmptyValues();
+    /// <summary>
+    /// Mapped radar values. FittedConstant is intentionally identity-mapped and
+    /// is not on the same 0-250 scale as the seven radar dimensions.
+    /// </summary>
     public IReadOnlyDictionary<string, double?> Scores { get; set; } =
         ChartRadarOutputDimensions.EmptyValues();
     public IReadOnlyList<string> DimensionOrder { get; set; } =
@@ -55,19 +63,21 @@ public sealed class ChartRadarSnapshot
 }
 
 /// <summary>
-/// Thin entry point for selection/game UI. The caller owns background scheduling,
-/// cancellation and per-song/difficulty caching; this service never reparses a chart.
+/// Thin entry point for selection/game UI. The caller owns per-song/difficulty
+/// caching; cancellation is cooperatively propagated into analysis loops.
 /// </summary>
 public sealed class ChartRadarService
 {
     private readonly RadarRuntime _runtime = new();
 
-    public ChartRadarSnapshot Analyze(SimaiChart? chart)
+    public ChartRadarSnapshot Analyze(
+        SimaiChart? chart,
+        CancellationToken cancellationToken = default)
     {
         if (chart is null)
             return new ChartRadarSnapshot { Errors = new[] { "SimaiChart is null." } };
 
-        var result = _runtime.Analyze(chart);
+        var result = _runtime.Analyze(chart, cancellationToken);
         var raw = result.Analysis?.Features
             .Where(pair => pair.Value.IsSuccess && pair.Value.Value is not null)
             .ToDictionary(pair => pair.Key, pair => pair.Value.Value!.Value)
@@ -78,7 +88,11 @@ public sealed class ChartRadarService
         return new ChartRadarSnapshot
         {
             IsSuccess = result.IsSuccess,
-            Status = result.Analysis?.Status ?? "error",
+            IsCancelled = result.IsCancelled,
+            Status = result.IsCancelled ? "cancelled" :
+                result.IsSuccess ? "ok" :
+                result.Analysis?.IsSuccess == true ? "error" :
+                result.Analysis?.Status ?? "error",
             RawValues = Project(raw),
             Scores = Project(result.Scores?.Values),
             DimensionOrder = ChartRadarOutputDimensions.DefaultOrder,
@@ -87,6 +101,15 @@ public sealed class ChartRadarService
             Errors = result.Errors
         };
     }
+
+    /// <summary>
+    /// Runs the Unity-free calculation off the caller thread. Cancellation returns
+    /// a snapshot with IsCancelled=true rather than faulting the task.
+    /// </summary>
+    public Task<ChartRadarSnapshot> AnalyzeAsync(
+        SimaiChart? chart,
+        CancellationToken cancellationToken = default) =>
+        Task.Run(() => Analyze(chart, cancellationToken));
 
     private static IReadOnlyDictionary<string, double?> Project(
         IReadOnlyDictionary<string, double>? source)

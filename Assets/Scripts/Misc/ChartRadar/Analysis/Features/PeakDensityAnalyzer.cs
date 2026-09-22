@@ -28,6 +28,7 @@ internal sealed class PeakDensityAnalyzer : IRadarFeatureAnalyzer
 
     public RadarFeatureResult Analyze(AnalysisContext context)
     {
+        context.ThrowIfCancellationRequested();
         if (context.DurationSeconds <= 0) return RadarFeatureResult.Failure("Chart duration must be positive.");
         return RadarFeatureResult.Success(PeakDensity(Points(context.Events), context.DurationSeconds));
     }

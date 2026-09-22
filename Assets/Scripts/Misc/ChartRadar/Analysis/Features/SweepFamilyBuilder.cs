@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading;
 
 #nullable enable
 
@@ -19,19 +20,27 @@ internal static class SweepFamilyBuilder
     private const double SameDirectionIncrement = 0.1;
     private const double ReversalIncrement = 0.2;
     private const double Tolerance = 1e-9;
+    private const int MaximumConnectionChecks = 1_000_000;
 
     internal static (IReadOnlyList<ScoredSweepGroup> Groups, IReadOnlyList<SweepFamily> Families)
-        Build(IReadOnlyList<SweepSequence> sequences)
+        Build(
+            IReadOnlyList<SweepSequence> sequences,
+            CancellationToken cancellationToken = default)
     {
         var ordered = sequences.OrderBy(item => item.StartTime).ThenBy(item => item.EndTime)
             .ThenBy(item => item, Comparer<SweepSequence>.Create(CompareLanes)).ToArray();
         var multipliers = Enumerable.Repeat(1.0, ordered.Length).ToArray();
         var parents = new int?[ordered.Length];
+        var connectionChecks = 0;
         for (var childIndex = 0; childIndex < ordered.Length; childIndex++)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             (double Multiplier, double Nearness, int Earlier, int Parent)? best = null;
             for (var parentIndex = 0; parentIndex < childIndex; parentIndex++)
             {
+                if (++connectionChecks > MaximumConnectionChecks)
+                    throw new InvalidOperationException(
+                        $"Sweep family connection budget exceeded ({MaximumConnectionChecks}).");
                 var increment = ConnectionIncrement(ordered[parentIndex], ordered[childIndex]);
                 if (increment is null) continue;
                 var candidate = (

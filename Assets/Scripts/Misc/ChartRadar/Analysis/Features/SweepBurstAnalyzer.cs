@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading;
 using SimaiRadar.Core;
 
 #nullable enable
@@ -54,18 +55,25 @@ internal sealed class SweepBurstAnalyzer : IRadarFeatureAnalyzer
 
     public RadarFeatureResult Analyze(AnalysisContext context)
     {
+        context.ThrowIfCancellationRequested();
         if (context.DurationSeconds <= 0)
             return RadarFeatureResult.Failure("Chart duration must be positive.");
-        return RadarFeatureResult.Success(Score(context.Events, context.DurationSeconds).Value);
+        return RadarFeatureResult.Success(Score(
+            context.Events, context.DurationSeconds, context.CancellationToken).Value);
     }
 
-    internal static SweepBurstResult Score(IReadOnlyList<RadarEvent> events, double durationSeconds)
+    internal static SweepBurstResult Score(
+        IReadOnlyList<RadarEvent> events,
+        double durationSeconds,
+        CancellationToken cancellationToken = default)
     {
-        var sequences = SweepRecognizer.Recognize(events);
-        var (groups, families) = SweepFamilyBuilder.Build(sequences);
+        cancellationToken.ThrowIfCancellationRequested();
+        var sequences = SweepRecognizer.Recognize(events, cancellationToken);
+        var (groups, families) = SweepFamilyBuilder.Build(sequences, cancellationToken);
         var groupsById = groups.ToDictionary(item => item.Id);
         var motions = families.ToDictionary(
-            family => family.Id, family => SweepHandMotion.ForFamily(family, groups));
+            family => family.Id, family => SweepHandMotion.ForFamily(
+                family, groups, cancellationToken));
         var eighthBonusGroups = EighthBonusGroups(groups);
         var points = new SortedDictionary<double, PointValue>();
 
@@ -80,6 +88,7 @@ internal sealed class SweepBurstAnalyzer : IRadarFeatureAnalyzer
         var firstBatchPhysicalBase = new Dictionary<int, double>();
         foreach (var group in groups)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             var sequence = group.Sequence;
             var speedByBatch = new[] { sequence.UnitTimeIntervals[0] }
                 .Concat(sequence.UnitTimeIntervals).ToArray();
@@ -120,6 +129,7 @@ internal sealed class SweepBurstAnalyzer : IRadarFeatureAnalyzer
         var sameDirectionGroups = new HashSet<int>();
         foreach (var group in groups)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             if (group.ParentId is null) continue;
             var parent = groupsById[group.ParentId.Value];
             if (!SweepFamilyBuilder.SameDirection(parent, group)) continue;
@@ -130,6 +140,7 @@ internal sealed class SweepBurstAnalyzer : IRadarFeatureAnalyzer
 
         foreach (var family in families)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             var motion = motions[family.Id];
             var regularStarts = RegularPatternGroups(
                     family, groupsById, motion, sameDirectionGroups)
@@ -137,6 +148,7 @@ internal sealed class SweepBurstAnalyzer : IRadarFeatureAnalyzer
             double? lastLeftUse = null, lastRightUse = null;
             foreach (var assignment in motion.Assignments)
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 var weightedIdle = 0.0;
                 if (assignment.LeftIdleDistance != 0)
                 {
@@ -165,6 +177,7 @@ internal sealed class SweepBurstAnalyzer : IRadarFeatureAnalyzer
                 AddPoint(assignment.Time, motion: adjusted, rawMotion: rawBonus);
             }
         }
+        cancellationToken.ThrowIfCancellationRequested();
         return Windows(points, durationSeconds);
     }
 

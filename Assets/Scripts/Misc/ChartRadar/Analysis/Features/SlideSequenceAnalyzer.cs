@@ -46,6 +46,7 @@ internal sealed class SlideSequenceAnalyzer : IRadarFeatureAnalyzer
 
     public RadarFeatureResult Analyze(AnalysisContext context)
     {
+        context.ThrowIfCancellationRequested();
         if (context.DurationSeconds <= 0) return RadarFeatureResult.Failure("Chart duration must be positive.");
         var groups = Groups(context.Events);
         if (groups.Count == 0) return RadarFeatureResult.Success(0);

@@ -14,7 +14,8 @@ public sealed class AdaptationResult
 {
     public RadarChartInput? Chart { get; set; }
     public IReadOnlyList<string> Errors { get; set; } = Array.Empty<string>();
-    public bool IsSuccess => Chart is not null && Errors.Count == 0;
+    public bool IsCancelled { get; set; }
+    public bool IsSuccess => Chart is not null && Errors.Count == 0 && !IsCancelled;
 }
 
 public sealed class MajSimaiChartAdapter
@@ -34,12 +35,15 @@ public sealed class MajSimaiChartAdapter
         _slidePaths = new SlidePathResolver(extendedSlides);
     }
 
-    public async Task<AdaptationResult> ParseAndAdaptAsync(string inote)
+    public async Task<AdaptationResult> ParseAndAdaptAsync(
+        string inote,
+        CancellationToken cancellationToken = default)
     {
         try
         {
+            if (cancellationToken.IsCancellationRequested) return Cancelled();
             var chart = await SimaiParser.ParseChartAsync(inote).ConfigureAwait(false);
-            return Adapt(chart);
+            return Adapt(chart, cancellationToken);
         }
         catch (Exception exception)
         {
@@ -47,10 +51,13 @@ public sealed class MajSimaiChartAdapter
         }
     }
 
-    public AdaptationResult Adapt(SimaiChart chart)
+    public AdaptationResult Adapt(
+        SimaiChart chart,
+        CancellationToken cancellationToken = default)
     {
         try
         {
+            if (cancellationToken.IsCancellationRequested) return Cancelled();
             var commaTimings = chart.CommaTimings.ToArray();
             if (commaTimings.Length == 0)
                 return Failure("MajSimai returned no comma timing points.");
@@ -63,6 +70,7 @@ public sealed class MajSimaiChartAdapter
             var slideGroupId = 0;
             foreach (var timing in chart.NoteTimings)
             {
+                if (cancellationToken.IsCancellationRequested) return Cancelled();
                 var containsExplicitNoHead = timing.RawContent.IndexOf('?') >= 0 ||
                                              timing.RawContent.IndexOf('!') >= 0;
                 var declarationBeat = timeline.BeatAt(timing.Timing);
@@ -72,6 +80,7 @@ public sealed class MajSimaiChartAdapter
                 int? currentSlideStartPosition = null;
                 foreach (var note in timing.Notes)
                 {
+                    if (cancellationToken.IsCancellationRequested) return Cancelled();
                     declarationOrder++;
                     if (note.Type == SimaiNoteType.Slide)
                     {
@@ -124,6 +133,7 @@ public sealed class MajSimaiChartAdapter
             var events = new List<RadarEvent>(ordered.Length);
             for (var index = 0; index < ordered.Length; index++)
             {
+                if (cancellationToken.IsCancellationRequested) return Cancelled();
                 var source = ordered[index].Event;
                 events.Add(new RadarEvent
                 {
@@ -151,15 +161,15 @@ public sealed class MajSimaiChartAdapter
             }
 
             var objects = events.Where(item => item.Kind != RadarEventKind.Timing).ToArray();
+            if (objects.Length == 0)
+                return Failure("MajSimai returned no analyzable chart objects.");
             return new AdaptationResult
             {
                 Chart = new RadarChartInput
                 {
                     Events = events,
                     ChartEndTimeSeconds = timeline.Points[^1].CanonicalTime,
-                    LastEventEndTimeSeconds = objects.Length == 0
-                        ? null
-                        : objects.Max(item => item.EndTimeSeconds)
+                    LastEventEndTimeSeconds = objects.Max(item => item.EndTimeSeconds)
                 }
             };
         }
@@ -348,6 +358,8 @@ public sealed class MajSimaiChartAdapter
 
     private static AdaptationResult Failure(string message) =>
         new() { Errors = new[] { message } };
+
+    private static AdaptationResult Cancelled() => new() { IsCancelled = true };
 
     private sealed class Timeline
     {

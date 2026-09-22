@@ -9,6 +9,7 @@ internal sealed class NoteDensityAnalyzer : IRadarFeatureAnalyzer
 
     public RadarFeatureResult Analyze(AnalysisContext context)
     {
+        context.ThrowIfCancellationRequested();
         var duration = context.DurationSeconds;
         if (duration <= 0) return RadarFeatureResult.Failure("Chart duration must be positive.");
         var ratio = duration / Workload.WindowSeconds;
@@ -18,6 +19,7 @@ internal sealed class NoteDensityAnalyzer : IRadarFeatureAnalyzer
         var workload = new double[count];
         foreach (var point in Workload.CorrectedPoints(context.Events))
         {
+            context.ThrowIfCancellationRequested();
             var index = Math.Min(
                 (int)Math.Floor((point.TimeSeconds + 1e-9) / Workload.WindowSeconds),
                 count - 1);

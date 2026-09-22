@@ -43,6 +43,7 @@ internal sealed class SlideCumulateAnalyzer : IRadarFeatureAnalyzer
 
     public RadarFeatureResult Analyze(AnalysisContext context)
     {
+        context.ThrowIfCancellationRequested();
         var duration = context.DurationSeconds;
         if (duration <= 0) return RadarFeatureResult.Failure("Chart duration must be positive.");
         var groups = Groups(context.Events);
@@ -52,6 +53,7 @@ internal sealed class SlideCumulateAnalyzer : IRadarFeatureAnalyzer
         var totalLoad = 0.0;
         foreach (var section in Sections(onsets))
         {
+            context.ThrowIfCancellationRequested();
             var loads = section.Select(onset => OnsetLoad(onset, assigned[onsets.IndexOf(onset)])).ToArray();
             var mean = loads.Sum() / loads.Length;
             var rms = Math.Sqrt(loads.Sum(load => load * load) / loads.Length);

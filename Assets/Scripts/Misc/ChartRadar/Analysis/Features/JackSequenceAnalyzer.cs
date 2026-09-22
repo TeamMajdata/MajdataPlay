@@ -41,6 +41,7 @@ internal sealed class JackSequenceAnalyzer : IRadarFeatureAnalyzer
 
     public RadarFeatureResult Analyze(AnalysisContext context)
     {
+        context.ThrowIfCancellationRequested();
         if (context.DurationSeconds <= 0) return RadarFeatureResult.Failure("Chart duration must be positive.");
         var sequences = Sequences(context.Events);
         var score = sequences.Take(TopK).Select((item, index) =>

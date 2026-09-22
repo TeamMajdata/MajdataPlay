@@ -82,6 +82,7 @@ internal sealed class SlideTrickyAnalyzer : IRadarFeatureAnalyzer
 
     public RadarFeatureResult Analyze(AnalysisContext context)
     {
+        context.ThrowIfCancellationRequested();
         if (context.DurationSeconds <= 0) return RadarFeatureResult.Failure("Chart duration must be positive.");
         var groups = Groups(context.Events);
         if (groups.Count == 0) return RadarFeatureResult.Success(0);
@@ -92,6 +93,7 @@ internal sealed class SlideTrickyAnalyzer : IRadarFeatureAnalyzer
         var loads = new List<double>();
         for (var index = 0; index < clusters.Count; index++)
         {
+            context.ThrowIfCancellationRequested();
             var filtered = Filter(clusters[index], modeWait);
             if (filtered is null) continue;
             var clusterPoints = assigned[index];

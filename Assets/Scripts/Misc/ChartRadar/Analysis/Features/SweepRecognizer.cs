@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Numerics;
+using System.Threading;
 using SimaiRadar.Core;
 
 #nullable enable
@@ -15,6 +16,10 @@ namespace SimaiRadar.Analysis.Features;
 internal static class SweepRecognizer
 {
     internal const int MaximumStates = 100_000;
+    internal const int MaximumButtonAttacks = 20_000;
+    internal const long MaximumSpineHistoryUnits = 2_000_000;
+    internal const long MaximumCandidateHistoryUnits = 500_000;
+    internal const int MaximumCandidates = 8_192;
     internal const double SpeedRelativeTolerance = 0.005;
     private static readonly BeatPosition ShortHoldMaximum = new(1, 4);
     private static readonly BeatPosition BaseMaximumUnit = new(1, 3);
@@ -113,12 +118,19 @@ internal static class SweepRecognizer
         return output;
     }
 
-    internal static IReadOnlyList<SweepSequence> Recognize(IReadOnlyList<RadarEvent> events)
+    internal static IReadOnlyList<SweepSequence> Recognize(
+        IReadOnlyList<RadarEvent> events,
+        CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         var attacks = ButtonAttacks(events);
+        if (attacks.Count > MaximumButtonAttacks)
+            throw new InvalidOperationException(
+                $"Sweep attack budget exceeded ({attacks.Count} > {MaximumButtonAttacks}).");
         var batches = Batches(attacks);
-        var candidates = CandidateSequences(attacks, batches, LongHolds(events));
-        return SelectDisjoint(candidates);
+        var candidates = CandidateSequences(
+            attacks, batches, LongHolds(events), cancellationToken);
+        return SelectDisjoint(candidates, cancellationToken);
     }
 
     private static IReadOnlyList<HoldOccupancy> LongHolds(IReadOnlyList<RadarEvent> events) =>
@@ -150,13 +162,18 @@ internal static class SweepRecognizer
     private static IReadOnlyList<SweepSequence> CandidateSequences(
         IReadOnlyList<SweepAttack> attacks,
         IReadOnlyList<AttackBatch> batches,
-        IReadOnlyList<HoldOccupancy> holds)
+        IReadOnlyList<HoldOccupancy> holds,
+        CancellationToken cancellationToken)
     {
         var candidates = new List<SweepSequence>();
         var active = new List<SpineState>();
         var visited = 0;
+        long historyUnits = 0;
+        long candidateHistoryUnits = 0;
+
         for (var batchIndex = 0; batchIndex < batches.Count; batchIndex++)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             var batch = batches[batchIndex];
             if (batch.AttackIds.Count > 3)
             {
@@ -174,9 +191,15 @@ internal static class SweepRecognizer
                 foreach (var entry in batch.AttackIds)
                     foreach (var exit in batch.AttackIds)
                     {
+                        cancellationToken.ThrowIfCancellationRequested();
                         var advanced = Advance(
                             state, batchIndex, entry, exit, attacks, batches, holds);
-                        if (advanced is not null) next.Add(advanced);
+                        if (advanced is null) continue;
+                        historyUnits += advanced.EntryAttackIds.Count;
+                        if (historyUnits > MaximumSpineHistoryUnits)
+                            throw new InvalidOperationException(
+                                $"Sweep history budget exceeded ({MaximumSpineHistoryUnits}).");
+                        next.Add(advanced);
                     }
 
             var keys = new List<StateKey>();
@@ -196,8 +219,17 @@ internal static class SweepRecognizer
                     deduplicated[key] = state;
             }
             active = keys.Select(key => deduplicated[key]).ToList();
-            candidates.AddRange(active.Where(state => Complete(state, attacks))
-                .Select(state => ToSequence(state, attacks, batches)));
+            foreach (var state in active.Where(state => Complete(state, attacks)))
+            {
+                candidateHistoryUnits += state.EntryAttackIds.Count;
+                if (candidateHistoryUnits > MaximumCandidateHistoryUnits)
+                    throw new InvalidOperationException(
+                        $"Sweep candidate history budget exceeded ({MaximumCandidateHistoryUnits}).");
+                if (candidates.Count >= MaximumCandidates)
+                    throw new InvalidOperationException(
+                        $"Sweep candidate budget exceeded ({MaximumCandidates}).");
+                candidates.Add(ToSequence(state, attacks, batches));
+            }
         }
 
         var uniqueOrder = new List<string>();
@@ -213,11 +245,29 @@ internal static class SweepRecognizer
             else if (CompareCandidateQuality(candidate, previous) > 0)
                 unique[key] = candidate;
         }
-        var items = uniqueOrder.Select(key => (Events: EventSet(unique[key]), Item: unique[key])).ToArray();
-        return items.Where((left, index) => !items.Where((_, other) => other != index)
-                .Any(right => left.Events.Count < right.Events.Count &&
-                              left.Events.IsSubsetOf(right.Events)))
-            .Select(item => item.Item).ToArray();
+        var items = uniqueOrder.Select((key, index) =>
+            (Index: index, Events: EventSet(unique[key]), Item: unique[key])).ToArray();
+        var retained = new List<(int Index, HashSet<int> Events, SweepSequence Item)>();
+        var retainedByEvent = new Dictionary<int, List<int>>();
+        foreach (var item in items.OrderByDescending(item => item.Events.Count)
+                     .ThenBy(item => item.Index))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var probeEvent = item.Events.First();
+            var contained = retainedByEvent.TryGetValue(probeEvent, out var possible) &&
+                possible.Any(index => retained[index].Events.Count > item.Events.Count &&
+                                      item.Events.IsSubsetOf(retained[index].Events));
+            if (contained) continue;
+            var retainedIndex = retained.Count;
+            retained.Add(item);
+            foreach (var eventId in item.Events)
+            {
+                if (!retainedByEvent.TryGetValue(eventId, out var indexes))
+                    retainedByEvent[eventId] = indexes = new List<int>();
+                indexes.Add(retainedIndex);
+            }
+        }
+        return retained.OrderBy(item => item.Index).Select(item => item.Item).ToArray();
     }
 
     private static SpineState? Advance(
@@ -366,40 +416,94 @@ internal static class SweepRecognizer
         };
     }
 
-    private static IReadOnlyList<SweepSequence> SelectDisjoint(IReadOnlyList<SweepSequence> sequences)
+    private static IReadOnlyList<SweepSequence> SelectDisjoint(
+        IReadOnlyList<SweepSequence> sequences,
+        CancellationToken cancellationToken)
     {
         if (sequences.Count == 0) return Array.Empty<SweepSequence>();
         var eventSets = sequences.Select(EventSet).ToArray();
-        var conflicts = Enumerable.Range(0, sequences.Count)
-            .Select(index => BigInteger.One << index).ToArray();
-        for (var left = 0; left < sequences.Count; left++)
-            for (var right = left + 1; right < sequences.Count; right++)
-                if (eventSets[left].Overlaps(eventSets[right]))
+        var adjacency = Enumerable.Range(0, sequences.Count)
+            .Select(_ => new HashSet<int>()).ToArray();
+        var byEvent = new Dictionary<int, List<int>>();
+        for (var index = 0; index < eventSets.Length; index++)
+            foreach (var eventId in eventSets[index])
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                if (!byEvent.TryGetValue(eventId, out var previous))
+                    byEvent[eventId] = previous = new List<int>();
+                foreach (var other in previous)
                 {
-                    conflicts[left] |= BigInteger.One << right;
-                    conflicts[right] |= BigInteger.One << left;
+                    adjacency[index].Add(other);
+                    adjacency[other].Add(index);
                 }
+                previous.Add(index);
+            }
 
-        var memo = new Dictionary<BigInteger, int[]>();
-        var states = 0;
-        int[] Solve(BigInteger mask)
+        var components = new List<int[]>();
+        var seen = new bool[sequences.Count];
+        for (var start = 0; start < sequences.Count; start++)
         {
-            if (mask.IsZero) return Array.Empty<int>();
-            if (memo.TryGetValue(mask, out var cached)) return cached;
-            if (++states > MaximumStates)
-                throw new InvalidOperationException(
-                    "Sweep family selection limit exceeded; no partial result returned.");
-            var pivot = LowestBitIndex(mask);
-            var included = new[] { pivot }.Concat(Solve(mask & ~conflicts[pivot])).ToArray();
-            var excluded = Solve(mask ^ (BigInteger.One << pivot));
-            var comparison = CompareSelection(included, excluded, eventSets, sequences);
-            var chosen = comparison > 0 ? included : comparison < 0 ? excluded :
-                (LexicographicCompare(included, excluded) <= 0 ? included : excluded);
-            memo[mask] = chosen;
-            return chosen;
+            if (seen[start]) continue;
+            var members = new List<int>();
+            var pending = new Stack<int>();
+            pending.Push(start);
+            seen[start] = true;
+            while (pending.Count > 0)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var current = pending.Pop();
+                members.Add(current);
+                foreach (var neighbor in adjacency[current])
+                    if (!seen[neighbor]) { seen[neighbor] = true; pending.Push(neighbor); }
+            }
+            components.Add(members.OrderBy(index => index).ToArray());
         }
 
-        var indexes = Solve((BigInteger.One << sequences.Count) - 1);
+        var states = 0;
+        int[] SolveComponent(int[] component)
+        {
+            if (component.Length == 1) return component;
+            var localByGlobal = component.Select((global, local) => (global, local))
+                .ToDictionary(item => item.global, item => item.local);
+            var conflicts = new BigInteger[component.Length];
+            for (var local = 0; local < component.Length; local++)
+            {
+                conflicts[local] = BigInteger.One << local;
+                foreach (var neighbor in adjacency[component[local]])
+                    conflicts[local] |= BigInteger.One << localByGlobal[neighbor];
+            }
+            var full = (BigInteger.One << component.Length) - 1;
+            var memo = new Dictionary<BigInteger, int[]> { [BigInteger.Zero] = Array.Empty<int>() };
+            var stack = new Stack<(BigInteger Mask, bool Expanded)>();
+            stack.Push((full, false));
+            while (stack.Count > 0)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var (mask, expanded) = stack.Pop();
+                if (memo.ContainsKey(mask)) continue;
+                var pivot = LowestBitIndex(mask);
+                var includedMask = mask & ~conflicts[pivot];
+                var excludedMask = mask ^ (BigInteger.One << pivot);
+                if (!expanded)
+                {
+                    if (++states > MaximumStates)
+                        throw new InvalidOperationException(
+                            "Sweep family selection budget exceeded; no partial result returned.");
+                    stack.Push((mask, true));
+                    if (!memo.ContainsKey(excludedMask)) stack.Push((excludedMask, false));
+                    if (!memo.ContainsKey(includedMask)) stack.Push((includedMask, false));
+                    continue;
+                }
+                var included = new[] { component[pivot] }.Concat(memo[includedMask]).ToArray();
+                var excluded = memo[excludedMask];
+                var comparison = CompareSelection(included, excluded, eventSets, sequences);
+                memo[mask] = comparison > 0 ? included : comparison < 0 ? excluded :
+                    (LexicographicCompare(included, excluded) <= 0 ? included : excluded);
+            }
+            return memo[full];
+        }
+
+        var indexes = components.SelectMany(SolveComponent).OrderBy(index => index).ToArray();
         return indexes.Select(index => sequences[index]).OrderBy(item => item,
             Comparer<SweepSequence>.Create(CompareSequenceOrder)).ToArray();
     }

@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading;
 
 #nullable enable
 
@@ -57,12 +58,15 @@ internal static class SweepHandMotion
     }
 
     internal static HandMotionResult ForFamily(
-        SweepFamily family, IReadOnlyList<ScoredSweepGroup> groups)
+        SweepFamily family,
+        IReadOnlyList<ScoredSweepGroup> groups,
+        CancellationToken cancellationToken = default)
     {
         var byId = groups.ToDictionary(item => item.Id);
         var batches = new SortedDictionary<double, HashSet<int>>();
         foreach (var groupId in family.GroupIds)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             var group = byId[groupId];
             for (var index = 0; index < group.Sequence.Times.Count; index++)
             {
@@ -74,13 +78,15 @@ internal static class SweepHandMotion
         }
         return Calculate(
             batches.Keys.ToArray(),
-            batches.Values.Select(lanes => (IReadOnlyList<int>)lanes.OrderBy(x => x).ToArray()).ToArray());
+            batches.Values.Select(lanes => (IReadOnlyList<int>)lanes.OrderBy(x => x).ToArray()).ToArray(),
+            cancellationToken: cancellationToken);
     }
 
     internal static HandMotionResult Calculate(
         IReadOnlyList<double> times,
         IReadOnlyList<IReadOnlyList<int>> lanesByBatch,
-        IReadOnlyCollection<int>? idleTransitionIndexes = null)
+        IReadOnlyCollection<int>? idleTransitionIndexes = null,
+        CancellationToken cancellationToken = default)
     {
         if (times.Count == 0 || times.Count != lanesByBatch.Count)
             throw new InvalidOperationException(
@@ -102,10 +108,12 @@ internal static class SweepHandMotion
         };
         for (var batchIndex = 0; batchIndex < times.Count; batchIndex++)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             var next = new Dictionary<MotionState, MotionRecord>();
             foreach (var pair in states)
                 foreach (var option in Options(lanes[batchIndex]))
                 {
+                    cancellationToken.ThrowIfCancellationRequested();
                     var previousLeftUsed = pair.Key.LeftBatch == batchIndex - 1;
                     var previousRightUsed = pair.Key.RightBatch == batchIndex - 1;
                     var left = Cost(pair.Key.Left, option.LeftTarget, pair.Key.LeftBatch,
