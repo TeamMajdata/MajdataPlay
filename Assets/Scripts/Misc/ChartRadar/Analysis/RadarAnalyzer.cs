@@ -18,7 +18,8 @@ public sealed class RadarAnalyzer
             (RadarFeatureNames.Sweep, new SweepBurstAnalyzer()),
             (RadarFeatureNames.SlideTricky, new SlideTrickyAnalyzer()),
             (RadarFeatureNames.SlideSequence, new SlideSequenceAnalyzer()),
-            (RadarFeatureNames.Jack, new JackSequenceAnalyzer())
+            (RadarFeatureNames.Jack, new JackSequenceAnalyzer()),
+            (RadarFeatureNames.SlideCumulate, new SlideCumulateAnalyzer())
         };
 
     public RadarAnalysisResult Analyze(RadarChartInput? chart)
