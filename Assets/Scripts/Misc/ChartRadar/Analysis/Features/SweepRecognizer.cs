@@ -18,8 +18,8 @@ internal static class SweepRecognizer
     internal const int MaximumStates = 100_000;
     internal const int MaximumButtonAttacks = 20_000;
     internal const long MaximumSpineHistoryUnits = 2_000_000;
-    internal const long MaximumCandidateHistoryUnits = 500_000;
-    internal const int MaximumCandidates = 8_192;
+    internal const long MaximumCandidateHistoryUnits = 100_000;
+    internal const int MaximumCandidates = 512;
     internal const double SpeedRelativeTolerance = 0.005;
     private static readonly BeatPosition ShortHoldMaximum = new(1, 4);
     private static readonly BeatPosition BaseMaximumUnit = new(1, 3);

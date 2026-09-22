@@ -91,7 +91,7 @@ public sealed class RadarRuntime
             result.Scores = _scorer.Map(analysis, result.FittedConstant.Value);
             return result;
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
             result.IsCancelled = true;
             return result;

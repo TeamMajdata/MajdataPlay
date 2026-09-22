@@ -61,7 +61,7 @@ public sealed class RadarAnalyzer
                     throw new InvalidOperationException("Successful feature returned a non-finite value.");
                 results[feature.Name] = result;
             }
-            catch (OperationCanceledException)
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
                 return new RadarAnalysisResult { Features = results, IsCancelled = true };
             }
