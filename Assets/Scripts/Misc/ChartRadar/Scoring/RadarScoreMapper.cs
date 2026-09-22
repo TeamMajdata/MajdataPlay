@@ -19,6 +19,8 @@ public sealed class RadarScoreMapper
     public const string MappingVersion = "mapping-profile-2026-09-16T15-44-08-825Z";
     private const double MaximumScore = 220;
 
+    // Fixed calibration for the seven raw dimensions. FittedConstant is appended
+    // unchanged. UI code may select axes only after this mapping step.
     private static readonly IReadOnlyDictionary<string, Parameters> Dimensions =
         new Dictionary<string, Parameters>
         {
@@ -53,8 +55,8 @@ public sealed class RadarScoreMapper
             throw new ArgumentOutOfRangeException(nameof(fittedConstant));
 
         var values = new Dictionary<string, double>();
-        foreach (var pair in Dimensions)
-            values[pair.Key] = MapValue(analysis.Features[pair.Key].Value!.Value, pair.Value);
+        foreach (var name in RadarFeatureNames.ModelInputOrder)
+            values[name] = MapValue(analysis.Features[name].Value!.Value, Dimensions[name]);
         values[RadarFeatureNames.FittedConstant] = fittedConstant;
         return new RadarScoreResult { Values = values, MappingVersion = MappingVersion };
     }

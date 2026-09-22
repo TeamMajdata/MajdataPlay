@@ -18,9 +18,23 @@ public static class RadarFeatureNames
     public const string SlideCumulate = "slide_cumulate";
     public const string FittedConstant = "fitted_constant";
 
+    // Fixed regression input columns. These indexes also align Center, Scale and
+    // the first seven linear coefficients in RegressionBetaParameters:
+    //   0 Note, 1 Peak, 2 Sweep, 3 SlideTricky,
+    //   4 SlideSequence, 5 Jack, 6 SlideCumulate.
+    // This is not a UI-axis setting. Changing a name or its position requires
+    // retraining the model and replacing all fitted constants together.
     public static readonly IReadOnlyList<string> ModelInputOrder = Array.AsReadOnly(new[]
     {
         Note, Peak, Sweep, SlideTricky, SlideSequence, Jack, SlideCumulate
+    });
+
+    // Stable enumeration order for callers that expose every scored scalar.
+    // A UI may display a subset, but model input always remains ModelInputOrder.
+    public static readonly IReadOnlyList<string> ScoredOutputOrder = Array.AsReadOnly(new[]
+    {
+        Note, Peak, Sweep, SlideTricky, SlideSequence, Jack, SlideCumulate,
+        FittedConstant
     });
 }
 

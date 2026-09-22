@@ -10,6 +10,8 @@ namespace SimaiRadar.Analysis;
 
 public sealed class RadarAnalyzer
 {
+    // Keep this fixed execution/output order identical to ModelInputOrder.
+    // Display-axis selection belongs after scoring and must not edit this list.
     private readonly IReadOnlyList<(string Name, IRadarFeatureAnalyzer Analyzer)> _features =
         new (string, IRadarFeatureAnalyzer)[]
         {

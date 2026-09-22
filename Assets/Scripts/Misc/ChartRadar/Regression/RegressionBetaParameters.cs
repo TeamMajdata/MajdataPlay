@@ -2,6 +2,8 @@ namespace SimaiRadar.Regression;
 
 internal static class RegressionBetaParameters
 {
+    // Every per-feature array index uses RadarFeatureNames.ModelInputOrder:
+    // Note, Peak, Sweep, SlideTricky, SlideSequence, Jack, SlideCumulate.
     internal const double Intercept = 13.421390240489782;
 
     internal static readonly double[] Center =
