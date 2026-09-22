@@ -13,7 +13,8 @@ public sealed class RadarAnalyzer
     private readonly IReadOnlyList<(string Name, IRadarFeatureAnalyzer Analyzer)> _features =
         new (string, IRadarFeatureAnalyzer)[]
         {
-            (RadarFeatureNames.Note, new NoteDensityAnalyzer())
+            (RadarFeatureNames.Note, new NoteDensityAnalyzer()),
+            (RadarFeatureNames.Peak, new PeakDensityAnalyzer())
         };
 
     public RadarAnalysisResult Analyze(RadarChartInput? chart)
