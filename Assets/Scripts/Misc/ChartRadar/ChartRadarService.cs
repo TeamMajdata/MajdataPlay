@@ -9,6 +9,28 @@ using SimaiRadar.Runtime;
 
 namespace MajdataPlay.ChartRadar;
 
+/// <summary>
+/// Fixed public projection. The regression still consumes all seven entries in
+/// RadarFeatureNames.ModelInputOrder; SlideCumulate is intentionally internal.
+/// To change the UI axes, edit these constants and DefaultOrder together.
+/// </summary>
+public static class ChartRadarOutputDimensions
+{
+    public const string Note = RadarFeatureNames.Note;
+    public const string Peak = RadarFeatureNames.Peak;
+    public const string Sweep = RadarFeatureNames.Sweep;
+    public const string SlideTricky = RadarFeatureNames.SlideTricky;
+    public const string SlideSequence = RadarFeatureNames.SlideSequence;
+    public const string Jack = RadarFeatureNames.Jack;
+    public const string FittedConstant = RadarFeatureNames.FittedConstant;
+
+    // Default public order: six displayed raw dimensions plus fitted constant.
+    public static readonly IReadOnlyList<string> DefaultOrder = Array.AsReadOnly(new[]
+    {
+        Note, Peak, Sweep, SlideTricky, SlideSequence, Jack, FittedConstant
+    });
+}
+
 /// <summary>UI-facing scalar snapshot with no parser or analysis implementation details.</summary>
 public sealed class ChartRadarSnapshot
 {
@@ -18,6 +40,8 @@ public sealed class ChartRadarSnapshot
         new Dictionary<string, double>();
     public IReadOnlyDictionary<string, double> Scores { get; set; } =
         new Dictionary<string, double>();
+    public IReadOnlyList<string> DimensionOrder { get; set; } =
+        ChartRadarOutputDimensions.DefaultOrder;
     public double? FittedConstant { get; set; }
     public string? MappingVersion { get; set; }
     public IReadOnlyList<string> Errors { get; set; } = Array.Empty<string>();
@@ -48,11 +72,22 @@ public sealed class ChartRadarService
         {
             IsSuccess = result.IsSuccess,
             Status = result.Analysis?.Status ?? "error",
-            RawValues = raw,
-            Scores = result.Scores?.Values ?? new Dictionary<string, double>(),
+            RawValues = Project(raw),
+            Scores = Project(result.Scores?.Values),
+            DimensionOrder = ChartRadarOutputDimensions.DefaultOrder,
             FittedConstant = result.FittedConstant,
             MappingVersion = result.Scores?.MappingVersion,
             Errors = result.Errors
         };
+    }
+
+    private static IReadOnlyDictionary<string, double> Project(
+        IReadOnlyDictionary<string, double>? source)
+    {
+        var output = new Dictionary<string, double>();
+        if (source is null) return output;
+        foreach (var name in ChartRadarOutputDimensions.DefaultOrder)
+            if (source.TryGetValue(name, out var value)) output[name] = value;
+        return output;
     }
 }
