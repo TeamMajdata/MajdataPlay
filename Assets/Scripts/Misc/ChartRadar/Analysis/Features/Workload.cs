@@ -76,8 +76,9 @@ internal static class Workload
         IReadOnlyList<RadarEvent> slides,
         int? lengthUnit)
     {
-        var groups = slides.GroupBy(item => item.SlideGroupId ??
-            throw new InvalidOperationException("Slide is missing its local group id."));
+        var groups = slides.GroupBy(item => item.SlideGroupId is int groupId
+            ? (Grouped: true, Id: groupId)
+            : (Grouped: false, Id: item.EventId));
         var output = new List<Point>();
         foreach (var group in groups)
         {

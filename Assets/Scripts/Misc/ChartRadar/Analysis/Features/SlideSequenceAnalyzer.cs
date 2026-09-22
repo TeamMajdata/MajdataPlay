@@ -58,9 +58,9 @@ internal sealed class SlideSequenceAnalyzer : IRadarFeatureAnalyzer
     private static List<Group> Groups(IReadOnlyList<RadarEvent> events)
     {
         var output = new List<Group>();
-        foreach (var grouping in events.Where(item => item.Kind == RadarEventKind.Slide)
-                     .GroupBy(item => item.SlideGroupId ??
-                         throw new InvalidOperationException("Slide is missing its local group id.")))
+        foreach (var grouping in events.Where(item =>
+                         item.Kind == RadarEventKind.Slide && item.SlideGroupId is not null)
+                     .GroupBy(item => item.SlideGroupId!.Value))
         {
             var valid = grouping.Where(item => item.EndTimeSeconds > item.StartTimeSeconds).ToArray();
             if (valid.Length == 0) continue;

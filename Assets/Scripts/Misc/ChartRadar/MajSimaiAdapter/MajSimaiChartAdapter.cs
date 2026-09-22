@@ -63,7 +63,8 @@ public sealed class MajSimaiChartAdapter
             var slideGroupId = 0;
             foreach (var timing in chart.NoteTimings)
             {
-                RejectAmbiguousNoHeadGrouping(timing);
+                var containsExplicitNoHead = timing.RawContent.IndexOf('?') >= 0 ||
+                                             timing.RawContent.IndexOf('!') >= 0;
                 var declarationBeat = timeline.BeatAt(timing.Timing);
                 var declarationTime = timeline.TimeAt(declarationBeat);
                 PendingEvent? currentHead = null;
@@ -74,6 +75,13 @@ public sealed class MajSimaiChartAdapter
                     declarationOrder++;
                     if (note.Type == SimaiNoteType.Slide)
                     {
+                        if (note.IsSlideNoHead && containsExplicitNoHead)
+                        {
+                            pending.Add(CreateSlide(
+                                note, timing, declarationTime, declarationBeat, declarationOrder,
+                                null, null, timeline));
+                            continue;
+                        }
                         if (!note.IsSlideNoHead)
                         {
                             currentHead = CreateHead(
@@ -92,7 +100,7 @@ public sealed class MajSimaiChartAdapter
 
                         pending.Add(CreateSlide(
                             note, timing, declarationTime, declarationBeat, declarationOrder,
-                            currentHead?.TemporaryId, currentSlideGroupId.Value, timeline));
+                            currentHead?.TemporaryId, currentSlideGroupId, timeline));
                         continue;
                     }
 
@@ -168,7 +176,7 @@ public sealed class MajSimaiChartAdapter
         BeatPosition declarationBeat,
         int order,
         int? headTemporaryId,
-        int slideGroupId,
+        int? slideGroupId,
         Timeline timeline)
     {
         var startBeat = timeline.BeatAt(note.SlideStartTime);
@@ -263,21 +271,6 @@ public sealed class MajSimaiChartAdapter
 
     private static string TouchPosition(SimaiNote note) =>
         note.TouchArea == 'C' ? "C" : $"{note.TouchArea}{note.StartPosition}";
-
-    private static void RejectAmbiguousNoHeadGrouping(SimaiTimingPoint timing)
-    {
-        if (timing.RawContent.IndexOf('?') < 0 && timing.RawContent.IndexOf('!') < 0) return;
-
-        var slides = timing.Notes.Where(note => note.Type == SimaiNoteType.Slide).ToArray();
-        var explicitStarts = new HashSet<int>(
-            slides.Where(note => !note.IsSlideNoHead).Select(note => note.StartPosition));
-        if (slides.Any(note => note.IsSlideNoHead && explicitStarts.Contains(note.StartPosition)))
-        {
-            throw new MajSimaiAdaptationException(
-                "MajSimai output cannot distinguish a same-head branch from an independent " +
-                "no-head Slide at the same timing and position. The chart was not analyzed.");
-        }
-    }
 
     private static IReadOnlyDictionary<string, bool> Flags(SimaiNote note) =>
         new Dictionary<string, bool>

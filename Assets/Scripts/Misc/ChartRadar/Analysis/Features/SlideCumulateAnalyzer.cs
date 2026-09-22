@@ -64,9 +64,9 @@ internal sealed class SlideCumulateAnalyzer : IRadarFeatureAnalyzer
     private static List<SlideGroup> Groups(IReadOnlyList<RadarEvent> events)
     {
         var output = new List<SlideGroup>();
-        foreach (var grouping in events.Where(item => item.Kind == RadarEventKind.Slide)
-                     .GroupBy(item => item.SlideGroupId ??
-                         throw new InvalidOperationException("Slide is missing its local group id.")))
+        foreach (var grouping in events.Where(item =>
+                         item.Kind == RadarEventKind.Slide && item.SlideGroupId is not null)
+                     .GroupBy(item => item.SlideGroupId!.Value))
         {
             var paths = grouping.ToArray();
             var declarationTimes = paths.Select(item => item.SlideDeclareTimeSeconds).Distinct().ToArray();

@@ -110,9 +110,9 @@ internal sealed class SlideTrickyAnalyzer : IRadarFeatureAnalyzer
             .Select(item => new TempoPoint(item.StartTimeSeconds, item.StartBeat, item.Bpm!.Value))
             .OrderBy(item => item.Beat).ToArray();
         var output = new List<Group>();
-        foreach (var grouping in events.Where(item => item.Kind == RadarEventKind.Slide)
-                     .GroupBy(item => item.SlideGroupId ??
-                         throw new InvalidOperationException("Slide is missing its local group id.")))
+        foreach (var grouping in events.Where(item =>
+                         item.Kind == RadarEventKind.Slide && item.SlideGroupId is not null)
+                     .GroupBy(item => item.SlideGroupId!.Value))
         {
             var paths = grouping.ToArray();
             var valid = paths.Where(item => item.EndTimeSeconds > item.StartTimeSeconds).ToArray();
