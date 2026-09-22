@@ -1,4 +1,5 @@
 using System;
+using System.Buffers;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
@@ -28,6 +29,26 @@ internal static class SweepHandMotion
         public override int GetHashCode() => HashCode.Combine(Left, Right, LeftBatch, RightBatch);
     }
 
+    private readonly struct MotionLexKey : IComparable<MotionLexKey>, IEquatable<MotionLexKey>
+    {
+        internal MotionLexKey(int prefix, int left, int right)
+        { Prefix = prefix; Left = left; Right = right; }
+        internal int Prefix { get; }
+        internal int Left { get; }
+        internal int Right { get; }
+        public int CompareTo(MotionLexKey other)
+        {
+            var result = Prefix.CompareTo(other.Prefix);
+            if (result != 0) return result;
+            result = Left.CompareTo(other.Left);
+            return result != 0 ? result : Right.CompareTo(other.Right);
+        }
+        public bool Equals(MotionLexKey other) =>
+            Prefix == other.Prefix && Left == other.Left && Right == other.Right;
+        public override bool Equals(object? obj) => obj is MotionLexKey other && Equals(other);
+        public override int GetHashCode() => HashCode.Combine(Prefix, Left, Right);
+    }
+
     private sealed class MotionRecord
     {
         internal int FastJumps { get; set; }
@@ -35,8 +56,19 @@ internal static class SweepHandMotion
         internal int ActiveDistance { get; set; }
         internal int IdleDistance { get; set; }
         internal int Takeovers { get; set; }
-        internal IReadOnlyList<HandAssignment> Assignments { get; set; } =
-            Array.Empty<HandAssignment>();
+        internal MotionRecord? Previous { get; set; }
+        internal int Length { get; set; }
+        internal int LexRank { get; set; }
+        internal MotionLexKey LexKey { get; set; }
+        internal double Time { get; set; }
+        internal IReadOnlyList<int> LeftLanes { get; set; } = Array.Empty<int>();
+        internal IReadOnlyList<int> RightLanes { get; set; } = Array.Empty<int>();
+        internal int? LeftPosition { get; set; }
+        internal int? RightPosition { get; set; }
+        internal int LeftIdleDistance { get; set; }
+        internal int RightIdleDistance { get; set; }
+        internal int AssignmentTakeover { get; set; }
+        internal int AssignmentFastJumps { get; set; }
     }
 
     private sealed class AssignmentOption
@@ -62,6 +94,14 @@ internal static class SweepHandMotion
         IReadOnlyList<ScoredSweepGroup> groups,
         CancellationToken cancellationToken = default)
     {
+        if (family.GroupIds.Count == 1)
+        {
+            var sequence = groups[family.GroupIds[0] - 1].Sequence;
+            return Calculate(
+                sequence.Times,
+                sequence.LanesByBatch,
+                cancellationToken: cancellationToken);
+        }
         var byId = groups.ToDictionary(item => item.Id);
         var batches = new SortedDictionary<double, HashSet<int>>();
         foreach (var groupId in family.GroupIds)
@@ -106,12 +146,16 @@ internal static class SweepHandMotion
         {
             [new MotionState(null, null, null, null)] = new MotionRecord()
         };
+        var optionCache = new Dictionary<int, IReadOnlyList<AssignmentOption>>();
         for (var batchIndex = 0; batchIndex < times.Count; batchIndex++)
         {
             cancellationToken.ThrowIfCancellationRequested();
+            var laneMask = lanes[batchIndex].Aggregate(0, (mask, lane) => mask | 1 << (lane - 1));
+            if (!optionCache.TryGetValue(laneMask, out var options))
+                optionCache[laneMask] = options = Options(lanes[batchIndex]);
             var next = new Dictionary<MotionState, MotionRecord>();
             foreach (var pair in states)
-                foreach (var option in Options(lanes[batchIndex]))
+                foreach (var option in options)
                 {
                     cancellationToken.ThrowIfCancellationRequested();
                     var previousLeftUsed = pair.Key.LeftBatch == batchIndex - 1;
@@ -128,10 +172,28 @@ internal static class SweepHandMotion
                     var state = new MotionState(
                         usedLeft ? option.LeftTarget : pair.Key.Left,
                         usedRight ? option.RightTarget : pair.Key.Right,
-                        usedLeft ? batchIndex : pair.Key.LeftBatch,
-                        usedRight ? batchIndex : pair.Key.RightBatch);
-                    var assignment = new HandAssignment
+                        usedLeft ? batchIndex : pair.Key.Left is null ? null : -1,
+                        usedRight ? batchIndex : pair.Key.Right is null ? null : -1);
+                    var fastJumps = pair.Value.FastJumps + left.Fast + right.Fast;
+                    var totalDistance = pair.Value.TotalDistance + left.Distance + right.Distance;
+                    var activeDistance = pair.Value.ActiveDistance + left.Active + right.Active;
+                    var idleDistance = pair.Value.IdleDistance + left.Idle + right.Idle;
+                    var takeovers = pair.Value.Takeovers + takeover;
+                    var lexKey = new MotionLexKey(
+                        pair.Value.LexRank, state.Left ?? 0, state.Right ?? 0);
+                    if (next.TryGetValue(state, out var previous) && CompareCandidate(
+                            fastJumps, takeovers, totalDistance, activeDistance, lexKey, previous) >= 0)
+                        continue;
+                    next[state] = new MotionRecord
                     {
+                        FastJumps = fastJumps,
+                        TotalDistance = totalDistance,
+                        ActiveDistance = activeDistance,
+                        IdleDistance = idleDistance,
+                        Takeovers = takeovers,
+                        Previous = pair.Value,
+                        Length = pair.Value.Length + 1,
+                        LexKey = lexKey,
                         Time = times[batchIndex],
                         LeftLanes = option.LeftLanes,
                         RightLanes = option.RightLanes,
@@ -139,24 +201,46 @@ internal static class SweepHandMotion
                         RightPosition = state.Right,
                         LeftIdleDistance = left.Idle,
                         RightIdleDistance = right.Idle,
-                        FreeHandTakeover = takeover,
-                        FastJumpViolations = left.Fast + right.Fast
+                        AssignmentTakeover = takeover,
+                        AssignmentFastJumps = left.Fast + right.Fast
                     };
-                    var record = new MotionRecord
-                    {
-                        FastJumps = pair.Value.FastJumps + left.Fast + right.Fast,
-                        TotalDistance = pair.Value.TotalDistance + left.Distance + right.Distance,
-                        ActiveDistance = pair.Value.ActiveDistance + left.Active + right.Active,
-                        IdleDistance = pair.Value.IdleDistance + left.Idle + right.Idle,
-                        Takeovers = pair.Value.Takeovers + takeover,
-                        Assignments = pair.Value.Assignments.Concat(new[] { assignment }).ToArray()
-                    };
-                    if (!next.TryGetValue(state, out var previous) || Compare(record, previous) < 0)
-                        next[state] = record;
                 }
+
+            var ranks = ArrayPool<MotionLexKey>.Shared.Rent(next.Count);
+            var rankIndex = 0;
+            foreach (var record in next.Values) ranks[rankIndex++] = record.LexKey;
+            Array.Sort(ranks, 0, next.Count);
+            var uniqueRankCount = 0;
+            for (var index = 0; index < next.Count; index++)
+                if (uniqueRankCount == 0 || !ranks[index].Equals(ranks[uniqueRankCount - 1]))
+                    ranks[uniqueRankCount++] = ranks[index];
+            try
+            {
+                foreach (var record in next.Values)
+                    record.LexRank = Array.BinarySearch(
+                        ranks, 0, uniqueRankCount, record.LexKey);
+            }
+            finally
+            {
+                ArrayPool<MotionLexKey>.Shared.Return(ranks);
+            }
             states = next;
         }
         var best = states.Values.Aggregate((left, right) => Compare(left, right) <= 0 ? left : right);
+        var assignments = new HandAssignment[best.Length];
+        for (var record = best; record.Previous is not null; record = record.Previous)
+            assignments[record.Length - 1] = new HandAssignment
+            {
+                Time = record.Time,
+                LeftLanes = record.LeftLanes,
+                RightLanes = record.RightLanes,
+                LeftPosition = record.LeftPosition,
+                RightPosition = record.RightPosition,
+                LeftIdleDistance = record.LeftIdleDistance,
+                RightIdleDistance = record.RightIdleDistance,
+                FreeHandTakeover = record.AssignmentTakeover,
+                FastJumpViolations = record.AssignmentFastJumps
+            };
         return new HandMotionResult
         {
             TotalDistance = best.TotalDistance,
@@ -164,8 +248,26 @@ internal static class SweepHandMotion
             IdleDistance = best.IdleDistance,
             FreeHandTakeovers = best.Takeovers,
             FastJumpViolations = best.FastJumps,
-            Assignments = best.Assignments
+            Assignments = assignments
         };
+    }
+
+    private static int CompareCandidate(
+        int fastJumps,
+        int takeovers,
+        int totalDistance,
+        int activeDistance,
+        MotionLexKey lexKey,
+        MotionRecord right)
+    {
+        var result = fastJumps.CompareTo(right.FastJumps);
+        if (result != 0) return result;
+        result = takeovers.CompareTo(right.Takeovers);
+        if (result != 0) return result;
+        result = totalDistance.CompareTo(right.TotalDistance);
+        if (result != 0) return result;
+        result = activeDistance.CompareTo(right.ActiveDistance);
+        return result != 0 ? result : lexKey.CompareTo(right.LexKey);
     }
 
     private static IReadOnlyList<AssignmentOption> Options(IReadOnlyList<int> lanes)
@@ -225,23 +327,14 @@ internal static class SweepHandMotion
 
     private static int Compare(MotionRecord left, MotionRecord right)
     {
-        var values = new[]
-        {
-            left.FastJumps.CompareTo(right.FastJumps),
-            left.Takeovers.CompareTo(right.Takeovers),
-            left.TotalDistance.CompareTo(right.TotalDistance),
-            left.ActiveDistance.CompareTo(right.ActiveDistance)
-        };
-        foreach (var value in values) if (value != 0) return value;
-        for (var index = 0; index < Math.Min(left.Assignments.Count, right.Assignments.Count); index++)
-        {
-            var l = left.Assignments[index];
-            var r = right.Assignments[index];
-            var value = (l.LeftPosition ?? 0).CompareTo(r.LeftPosition ?? 0);
-            if (value != 0) return value;
-            value = (l.RightPosition ?? 0).CompareTo(r.RightPosition ?? 0);
-            if (value != 0) return value;
-        }
-        return left.Assignments.Count.CompareTo(right.Assignments.Count);
+        var result = left.FastJumps.CompareTo(right.FastJumps);
+        if (result != 0) return result;
+        result = left.Takeovers.CompareTo(right.Takeovers);
+        if (result != 0) return result;
+        result = left.TotalDistance.CompareTo(right.TotalDistance);
+        if (result != 0) return result;
+        result = left.ActiveDistance.CompareTo(right.ActiveDistance);
+        if (result != 0) return result;
+        return left.LexRank.CompareTo(right.LexRank);
     }
 }

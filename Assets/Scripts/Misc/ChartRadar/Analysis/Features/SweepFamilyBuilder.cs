@@ -31,12 +31,20 @@ internal static class SweepFamilyBuilder
             .ThenBy(item => item, Comparer<SweepSequence>.Create(CompareLanes)).ToArray();
         var multipliers = Enumerable.Repeat(1.0, ordered.Length).ToArray();
         var parents = new int?[ordered.Length];
+        var activeParents = new List<int>();
         var connectionChecks = 0;
         for (var childIndex = 0; childIndex < ordered.Length; childIndex++)
         {
             cancellationToken.ThrowIfCancellationRequested();
+            for (var index = activeParents.Count - 1; index >= 0; index--)
+            {
+                var parent = ordered[activeParents[index]];
+                if (parent.EndTime + parent.MedianIntervalSeconds + Tolerance <
+                    ordered[childIndex].StartTime)
+                    activeParents.RemoveAt(index);
+            }
             (double Multiplier, double Nearness, int Earlier, int Parent)? best = null;
-            for (var parentIndex = 0; parentIndex < childIndex; parentIndex++)
+            foreach (var parentIndex in activeParents)
             {
                 if (++connectionChecks > MaximumConnectionChecks)
                     throw new InvalidOperationException(
@@ -50,9 +58,12 @@ internal static class SweepFamilyBuilder
                     parentIndex);
                 if (best is null || CompareChoice(candidate, best.Value) > 0) best = candidate;
             }
-            if (best is null) continue;
-            multipliers[childIndex] = best.Value.Multiplier;
-            parents[childIndex] = best.Value.Parent;
+            if (best is not null)
+            {
+                multipliers[childIndex] = best.Value.Multiplier;
+                parents[childIndex] = best.Value.Parent;
+            }
+            activeParents.Add(childIndex);
         }
 
         var groups = ordered.Select((sequence, index) => new ScoredSweepGroup
@@ -62,10 +73,11 @@ internal static class SweepFamilyBuilder
             ParentId = parents[index] is null ? null : parents[index] + 1
         }).ToArray();
         var byRoot = new SortedDictionary<int, List<int>>();
+        var roots = new int[groups.Length];
         for (var index = 0; index < groups.Length; index++)
         {
-            var root = index;
-            while (parents[root] is not null) root = parents[root]!.Value;
+            var root = parents[index] is int parent ? roots[parent] : index;
+            roots[index] = root;
             if (!byRoot.TryGetValue(root, out var members)) byRoot[root] = members = new List<int>();
             members.Add(groups[index].Id);
         }

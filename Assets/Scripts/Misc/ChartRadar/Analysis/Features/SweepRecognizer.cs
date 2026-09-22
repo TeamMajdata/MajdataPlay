@@ -1,7 +1,7 @@
 using System;
+using System.Buffers;
 using System.Collections.Generic;
 using System.Linq;
-using System.Numerics;
 using System.Threading;
 using SimaiRadar.Core;
 
@@ -10,16 +10,16 @@ using SimaiRadar.Core;
 namespace SimaiRadar.Analysis.Features;
 
 /// <summary>
-/// Recognizes maximal one-spine, variable-width button sweeps. This is kept
-/// separate from scoring so recognition regressions can be reviewed directly.
+/// Recognizes maximal one-spine, variable-width button sweeps. Scan states and
+/// prefix candidates are persistent/lightweight; only selected sequences expand
+/// their per-batch arrays.
 /// </summary>
 internal static class SweepRecognizer
 {
-    internal const int MaximumStates = 100_000;
-    internal const int MaximumButtonAttacks = 20_000;
-    internal const long MaximumSpineHistoryUnits = 2_000_000;
-    internal const long MaximumCandidateHistoryUnits = 100_000;
-    internal const int MaximumCandidates = 512;
+    internal const int MaximumStates = 300_000;
+    internal const int MaximumButtonAttacks = 30_000;
+    internal const int MaximumLightweightCandidates = 50_000;
+    internal const int MaximumSelectionStates = 100_000;
     internal const double SpeedRelativeTolerance = 0.005;
     private static readonly BeatPosition ShortHoldMaximum = new(1, 4);
     private static readonly BeatPosition BaseMaximumUnit = new(1, 3);
@@ -42,17 +42,63 @@ internal static class SweepRecognizer
 
     private sealed class SpineState
     {
-        internal IReadOnlyList<int> BatchIndexes { get; set; } = Array.Empty<int>();
-        internal IReadOnlyList<int> EntryAttackIds { get; set; } = Array.Empty<int>();
-        internal IReadOnlyList<int> ExitAttackIds { get; set; } = Array.Empty<int>();
+        internal SpineState? Previous { get; set; }
+        internal int BatchIndex { get; set; }
+        internal int StartBatchIndex { get; set; }
+        internal int EntryAttackId { get; set; }
+        internal int ExitAttackId { get; set; }
+        internal int Length { get; set; }
         internal int? Direction { get; set; }
         internal int RunSteps { get; set; }
         internal int TurnCount { get; set; }
-        internal IReadOnlyList<BeatPosition> UnitBeatIntervals { get; set; } =
-            Array.Empty<BeatPosition>();
-        internal IReadOnlyList<double> UnitTimeIntervals { get; set; } = Array.Empty<double>();
-        internal IReadOnlyList<bool> SpeedSwitches { get; set; } = Array.Empty<bool>();
-        internal IReadOnlyList<bool> DirectionSwitches { get; set; } = Array.Empty<bool>();
+        internal BeatPosition? UnitBeatInterval { get; set; }
+        internal double? UnitTimeInterval { get; set; }
+        internal bool SpeedSwitched { get; set; }
+        internal bool DirectionSwitched { get; set; }
+        internal int SpeedSwitchCount { get; set; }
+        internal int DirectionSwitchCount { get; set; }
+        internal int WidthSwitchCount { get; set; }
+        internal int HandoffCount { get; set; }
+        internal int LaneMask { get; set; }
+        internal int EntryLexRank { get; set; }
+        internal int ExitLexRank { get; set; }
+    }
+
+    private sealed class Candidate
+    {
+        internal SpineState State { get; set; } = null!;
+        internal int OriginalIndex { get; set; }
+        internal int StartBatch => State.StartBatchIndex;
+        internal int EndBatch => State.BatchIndex;
+        internal int EventCount { get; set; }
+        internal int LaneCount { get; set; }
+    }
+
+    private sealed class Selection
+    {
+        internal static readonly Selection Empty = new();
+        internal int EventCount { get; set; }
+        internal int SequenceCount { get; set; }
+        internal int BatchCount { get; set; }
+        internal int[] CandidateIndexes { get; set; } = Array.Empty<int>();
+
+        internal Selection Add(Candidate candidate)
+        {
+            var indexes = new int[CandidateIndexes.Length + 1];
+            var insert = Array.BinarySearch(CandidateIndexes, candidate.OriginalIndex);
+            insert = insert < 0 ? ~insert : insert;
+            Array.Copy(CandidateIndexes, 0, indexes, 0, insert);
+            indexes[insert] = candidate.OriginalIndex;
+            Array.Copy(CandidateIndexes, insert, indexes, insert + 1,
+                CandidateIndexes.Length - insert);
+            return new Selection
+            {
+                EventCount = EventCount + candidate.EventCount,
+                SequenceCount = SequenceCount + 1,
+                BatchCount = BatchCount + candidate.State.Length,
+                CandidateIndexes = indexes
+            };
+        }
     }
 
     private readonly struct StateKey : IEquatable<StateKey>
@@ -65,12 +111,12 @@ internal static class SweepRecognizer
 
         internal StateKey(SpineState state)
         {
-            _exit = state.ExitAttackIds[^1];
+            _exit = state.ExitAttackId;
             _direction = state.Direction;
             _run = Math.Min(state.RunSteps, 2);
-            _seconds = state.UnitTimeIntervals.Count == 0
-                ? null : Math.Round(state.UnitTimeIntervals[^1], 9);
-            _beats = state.UnitBeatIntervals.Count == 0 ? null : state.UnitBeatIntervals[^1];
+            _seconds = state.UnitTimeInterval is double seconds
+                ? Math.Round(seconds, 9) : null;
+            _beats = state.UnitBeatInterval;
         }
 
         public bool Equals(StateKey other) => _exit == other._exit &&
@@ -79,6 +125,26 @@ internal static class SweepRecognizer
         public override bool Equals(object? obj) => obj is StateKey other && Equals(other);
         public override int GetHashCode() =>
             HashCode.Combine(_exit, _direction, _run, _seconds, _beats);
+    }
+
+    private readonly struct LexKey : IComparable<LexKey>, IEquatable<LexKey>
+    {
+        internal LexKey(int length, int prefix, int current)
+        { Length = length; Prefix = prefix; Current = current; }
+        internal int Length { get; }
+        internal int Prefix { get; }
+        internal int Current { get; }
+        public int CompareTo(LexKey other)
+        {
+            var result = Length.CompareTo(other.Length);
+            if (result != 0) return result;
+            result = Prefix.CompareTo(other.Prefix);
+            return result != 0 ? result : Current.CompareTo(other.Current);
+        }
+        public bool Equals(LexKey other) =>
+            Length == other.Length && Prefix == other.Prefix && Current == other.Current;
+        public override bool Equals(object? obj) => obj is LexKey other && Equals(other);
+        public override int GetHashCode() => HashCode.Combine(Length, Prefix, Current);
     }
 
     internal static IReadOnlyList<SweepAttack> ButtonAttacks(IReadOnlyList<RadarEvent> events)
@@ -128,9 +194,12 @@ internal static class SweepRecognizer
             throw new InvalidOperationException(
                 $"Sweep attack budget exceeded ({attacks.Count} > {MaximumButtonAttacks}).");
         var batches = Batches(attacks);
-        var candidates = CandidateSequences(
+        var candidates = CandidateStates(
             attacks, batches, LongHolds(events), cancellationToken);
-        return SelectDisjoint(candidates, cancellationToken);
+        var selected = SelectDisjoint(candidates, cancellationToken);
+        return selected.Select(candidate => ToSequence(candidate.State, attacks, batches))
+            .OrderBy(item => item, Comparer<SweepSequence>.Create(CompareSequenceOrder))
+            .ToArray();
     }
 
     private static IReadOnlyList<HoldOccupancy> LongHolds(IReadOnlyList<RadarEvent> events) =>
@@ -159,18 +228,25 @@ internal static class SweepRecognizer
             };
         }).ToArray();
 
-    private static IReadOnlyList<SweepSequence> CandidateSequences(
+    private static IReadOnlyList<Candidate> CandidateStates(
         IReadOnlyList<SweepAttack> attacks,
         IReadOnlyList<AttackBatch> batches,
         IReadOnlyList<HoldOccupancy> holds,
         CancellationToken cancellationToken)
     {
-        var candidates = new List<SweepSequence>();
+        var attackPrefix = new int[batches.Count + 1];
+        var eventPrefix = new int[batches.Count + 1];
+        for (var index = 0; index < batches.Count; index++)
+        {
+            attackPrefix[index + 1] = attackPrefix[index] + batches[index].AttackIds.Count;
+            eventPrefix[index + 1] = eventPrefix[index] + batches[index].AttackIds
+                .Sum(id => attacks[id].EventIds.Count);
+        }
+
+        var orderedKeys = new List<(int Start, int End)>();
+        var candidates = new Dictionary<(int Start, int End), Candidate>();
         var active = new List<SpineState>();
         var visited = 0;
-        long historyUnits = 0;
-        long candidateHistoryUnits = 0;
-
         for (var batchIndex = 0; batchIndex < batches.Count; batchIndex++)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -181,12 +257,8 @@ internal static class SweepRecognizer
                 continue;
             }
 
-            var next = batch.AttackIds.Select(attackId => new SpineState
-            {
-                BatchIndexes = new[] { batchIndex },
-                EntryAttackIds = new[] { attackId },
-                ExitAttackIds = new[] { attackId }
-            }).ToList();
+            var next = batch.AttackIds.Select(attackId => InitialState(
+                batchIndex, attackId, attacks[attackId].Lane)).ToList();
             foreach (var state in active)
                 foreach (var entry in batch.AttackIds)
                     foreach (var exit in batch.AttackIds)
@@ -194,21 +266,18 @@ internal static class SweepRecognizer
                         cancellationToken.ThrowIfCancellationRequested();
                         var advanced = Advance(
                             state, batchIndex, entry, exit, attacks, batches, holds);
-                        if (advanced is null) continue;
-                        historyUnits += advanced.EntryAttackIds.Count;
-                        if (historyUnits > MaximumSpineHistoryUnits)
-                            throw new InvalidOperationException(
-                                $"Sweep history budget exceeded ({MaximumSpineHistoryUnits}).");
-                        next.Add(advanced);
+                        if (advanced is not null) next.Add(advanced);
                     }
 
             var keys = new List<StateKey>();
             var deduplicated = new Dictionary<StateKey, SpineState>();
+            AssignLexRanks(next, entry: true);
+            AssignLexRanks(next, entry: false);
             foreach (var state in next)
             {
                 if (++visited > MaximumStates)
                     throw new InvalidOperationException(
-                        "Sweep main-spine candidate limit exceeded; no partial result returned.");
+                        "Sweep main-spine state budget exceeded; no partial result returned.");
                 var key = new StateKey(state);
                 if (!deduplicated.TryGetValue(key, out var previous))
                 {
@@ -219,56 +288,56 @@ internal static class SweepRecognizer
                     deduplicated[key] = state;
             }
             active = keys.Select(key => deduplicated[key]).ToList();
-            foreach (var state in active.Where(state => Complete(state, attacks)))
+            foreach (var state in active.Where(Complete))
             {
-                candidateHistoryUnits += state.EntryAttackIds.Count;
-                if (candidateHistoryUnits > MaximumCandidateHistoryUnits)
-                    throw new InvalidOperationException(
-                        $"Sweep candidate history budget exceeded ({MaximumCandidateHistoryUnits}).");
-                if (candidates.Count >= MaximumCandidates)
-                    throw new InvalidOperationException(
-                        $"Sweep candidate budget exceeded ({MaximumCandidates}).");
-                candidates.Add(ToSequence(state, attacks, batches));
+                var range = (state.StartBatchIndex, state.BatchIndex);
+                var candidate = new Candidate
+                {
+                    State = state,
+                    EventCount = eventPrefix[range.Item2 + 1] - eventPrefix[range.Item1],
+                    LaneCount = attackPrefix[range.Item2 + 1] - attackPrefix[range.Item1]
+                };
+                if (!candidates.TryGetValue(range, out var previous))
+                {
+                    if (orderedKeys.Count >= MaximumLightweightCandidates)
+                        throw new InvalidOperationException(
+                            $"Sweep lightweight candidate budget exceeded ({MaximumLightweightCandidates}).");
+                    candidate.OriginalIndex = orderedKeys.Count;
+                    orderedKeys.Add(range);
+                    candidates[range] = candidate;
+                }
+                else if (CompareCandidateQuality(candidate, previous) > 0)
+                {
+                    candidate.OriginalIndex = previous.OriginalIndex;
+                    candidates[range] = candidate;
+                }
             }
         }
 
-        var uniqueOrder = new List<string>();
-        var unique = new Dictionary<string, SweepSequence>();
-        foreach (var candidate in candidates)
-        {
-            var key = EventSetKey(candidate);
-            if (!unique.TryGetValue(key, out var previous))
-            {
-                uniqueOrder.Add(key);
-                unique[key] = candidate;
-            }
-            else if (CompareCandidateQuality(candidate, previous) > 0)
-                unique[key] = candidate;
-        }
-        var items = uniqueOrder.Select((key, index) =>
-            (Index: index, Events: EventSet(unique[key]), Item: unique[key])).ToArray();
-        var retained = new List<(int Index, HashSet<int> Events, SweepSequence Item)>();
-        var retainedByEvent = new Dictionary<int, List<int>>();
-        foreach (var item in items.OrderByDescending(item => item.Events.Count)
-                     .ThenBy(item => item.Index))
+        var unique = orderedKeys.Select(key => candidates[key]).ToArray();
+        var retained = new bool[unique.Length];
+        var furthestEnd = -1;
+        foreach (var candidate in unique.OrderBy(item => item.StartBatch)
+                     .ThenByDescending(item => item.EndBatch)
+                     .ThenBy(item => item.OriginalIndex))
         {
             cancellationToken.ThrowIfCancellationRequested();
-            var probeEvent = item.Events.First();
-            var contained = retainedByEvent.TryGetValue(probeEvent, out var possible) &&
-                possible.Any(index => retained[index].Events.Count > item.Events.Count &&
-                                      item.Events.IsSubsetOf(retained[index].Events));
-            if (contained) continue;
-            var retainedIndex = retained.Count;
-            retained.Add(item);
-            foreach (var eventId in item.Events)
-            {
-                if (!retainedByEvent.TryGetValue(eventId, out var indexes))
-                    retainedByEvent[eventId] = indexes = new List<int>();
-                indexes.Add(retainedIndex);
-            }
+            if (candidate.EndBatch <= furthestEnd) continue;
+            retained[candidate.OriginalIndex] = true;
+            furthestEnd = candidate.EndBatch;
         }
-        return retained.OrderBy(item => item.Index).Select(item => item.Item).ToArray();
+        return unique.Where(item => retained[item.OriginalIndex]).ToArray();
     }
+
+    private static SpineState InitialState(int batchIndex, int attackId, int lane) => new()
+    {
+        BatchIndex = batchIndex,
+        StartBatchIndex = batchIndex,
+        EntryAttackId = attackId,
+        ExitAttackId = attackId,
+        Length = 1,
+        LaneMask = 1 << (lane - 1)
+    };
 
     private static SpineState? Advance(
         SpineState state,
@@ -279,10 +348,10 @@ internal static class SweepRecognizer
         IReadOnlyList<AttackBatch> batches,
         IReadOnlyList<HoldOccupancy> holds)
     {
-        var move = Move(attacks[state.ExitAttackIds[^1]], attacks[entryId], holds);
+        var move = Move(attacks[state.ExitAttackId], attacks[entryId], holds);
         if (move is null) return null;
         var (direction, units) = move.Value;
-        var previousBatch = batches[state.BatchIndexes[^1]];
+        var previousBatch = batches[state.BatchIndex];
         var currentBatch = batches[batchIndex];
         var gapBeat = currentBatch.Beat - previousBatch.Beat;
         var gapTime = currentBatch.Time - previousBatch.Time;
@@ -291,18 +360,18 @@ internal static class SweepRecognizer
         var unitTime = gapTime / units;
 
         bool speedSwitch;
-        if (state.UnitTimeIntervals.Count == 0)
+        if (state.UnitTimeInterval is null)
         {
             if (unitBeat > BaseMaximumUnit) return null;
             speedSwitch = false;
         }
         else
         {
-            var previousTime = state.UnitTimeIntervals[^1];
+            var previousTime = state.UnitTimeInterval.Value;
             speedSwitch = !SameSpeed(unitTime, previousTime, SpeedRelativeTolerance);
             var ordinary = unitBeat <= BaseMaximumUnit;
             var continuingEighth = unitBeat == EighthBeat &&
-                state.UnitBeatIntervals[^1] == EighthBeat && !speedSwitch;
+                state.UnitBeatInterval == EighthBeat && !speedSwitch;
             var deceleratingToEighth = unitBeat == EighthBeat && speedSwitch &&
                 unitTime > previousTime;
             if (!ordinary && !continuingEighth && !deceleratingToEighth) return null;
@@ -329,16 +398,27 @@ internal static class SweepRecognizer
         }
         return new SpineState
         {
-            BatchIndexes = Append(state.BatchIndexes, batchIndex),
-            EntryAttackIds = Append(state.EntryAttackIds, entryId),
-            ExitAttackIds = Append(state.ExitAttackIds, exitId),
+            Previous = state,
+            BatchIndex = batchIndex,
+            StartBatchIndex = state.StartBatchIndex,
+            EntryAttackId = entryId,
+            ExitAttackId = exitId,
+            Length = state.Length + 1,
             Direction = direction,
             RunSteps = runSteps,
             TurnCount = turns,
-            UnitBeatIntervals = Append(state.UnitBeatIntervals, unitBeat),
-            UnitTimeIntervals = Append(state.UnitTimeIntervals, unitTime),
-            SpeedSwitches = Append(state.SpeedSwitches, speedSwitch),
-            DirectionSwitches = Append(state.DirectionSwitches, directionSwitched)
+            UnitBeatInterval = unitBeat,
+            UnitTimeInterval = unitTime,
+            SpeedSwitched = speedSwitch,
+            DirectionSwitched = directionSwitched,
+            SpeedSwitchCount = state.SpeedSwitchCount + (speedSwitch ? 1 : 0),
+            DirectionSwitchCount = state.DirectionSwitchCount + (directionSwitched ? 1 : 0),
+            WidthSwitchCount = state.WidthSwitchCount +
+                (previousBatch.AttackIds.Count != currentBatch.AttackIds.Count ? 1 : 0),
+            HandoffCount = state.HandoffCount + (entryId != exitId ? 1 : 0),
+            LaneMask = state.LaneMask |
+                1 << (attacks[entryId].Lane - 1) |
+                1 << (attacks[exitId].Lane - 1)
         };
     }
 
@@ -357,212 +437,243 @@ internal static class SweepRecognizer
             ? (direction, 2) : null;
     }
 
-    private static bool Complete(SpineState state, IReadOnlyList<SweepAttack> attacks) =>
-        state.EntryAttackIds.Count >= 3 && state.Direction is not null &&
-        (state.TurnCount == 0 || state.RunSteps >= 2) &&
-        state.EntryAttackIds.Concat(state.ExitAttackIds)
-            .Select(id => attacks[id].Lane).Distinct().Count() >= 3;
+    private static bool Complete(SpineState state) =>
+        state.Length >= 3 && state.Direction is not null &&
+        (state.TurnCount == 0 || state.RunSteps >= 2) && CountBits(state.LaneMask) >= 3;
 
     private static SweepSequence ToSequence(
         SpineState state,
         IReadOnlyList<SweepAttack> attacks,
         IReadOnlyList<AttackBatch> batches)
     {
-        var included = state.BatchIndexes.Select(index => batches[index].AttackIds).ToArray();
-        var widths = included.Select(batch => batch.Count).ToArray();
-        var main = state.EntryAttackIds.Select(id => attacks[id]).ToArray();
-        var directions = state.ExitAttackIds.Take(state.ExitAttackIds.Count - 1)
-            .Zip(state.EntryAttackIds.Skip(1), (left, right) =>
-                Mod(attacks[right].Lane - attacks[left].Lane, 8) is 1 or 2 ? 1 : -1)
-            .ToArray();
+        var chain = new SpineState[state.Length];
+        for (var current = state; current is not null; current = current.Previous)
+            chain[current.Length - 1] = current;
+        var widths = new int[chain.Length];
+        var lanes = new IReadOnlyList<int>[chain.Length];
+        var times = new double[chain.Length];
+        var normal = new int[chain.Length];
+        var protectedCounts = new int[chain.Length];
+        var unitTimes = new double[chain.Length - 1];
+        var mainAttackIds = new int[chain.Length];
+        var mainLanes = new int[chain.Length];
+        var speedSwitches = new HashSet<int>();
+        var directionSwitches = new HashSet<int>();
+        var widthSwitches = new HashSet<int>();
+        var doubleHandoffs = new HashSet<int>();
+
+        for (var index = 0; index < chain.Length; index++)
+        {
+            var item = chain[index];
+            var batch = batches[item.BatchIndex];
+            widths[index] = batch.AttackIds.Count;
+            lanes[index] = batch.AttackIds.Select(id => attacks[id].Lane).ToArray();
+            times[index] = batch.Time;
+            normal[index] = batch.AttackIds.Sum(id => attacks[id].NormalDeclarations);
+            protectedCounts[index] = batch.AttackIds.Sum(id => attacks[id].ProtectedDeclarations);
+            mainAttackIds[index] = item.EntryAttackId;
+            mainLanes[index] = attacks[item.EntryAttackId].Lane;
+            if (index == 0) continue;
+            unitTimes[index - 1] = item.UnitTimeInterval!.Value;
+            if (item.SpeedSwitched) speedSwitches.Add(index);
+            if (item.DirectionSwitched) directionSwitches.Add(index - 1);
+            if (widths[index - 1] != widths[index]) widthSwitches.Add(index);
+            if (item.EntryAttackId != item.ExitAttackId) doubleHandoffs.Add(index);
+        }
+
         return new SweepSequence
         {
-            LanesByBatch = included.Select(batch =>
-                (IReadOnlyList<int>)batch.Select(id => attacks[id].Lane).ToArray()).ToArray(),
-            AttackIdsByBatch = included,
-            EventIdsByBatch = included.Select(batch =>
-                (IReadOnlyList<int>)batch.SelectMany(id => attacks[id].EventIds).ToArray()).ToArray(),
-            Beats = state.BatchIndexes.Select(index => batches[index].Beat).ToArray(),
-            Times = state.BatchIndexes.Select(index => batches[index].Time).ToArray(),
-            UnitBeatIntervals = state.UnitBeatIntervals,
-            UnitTimeIntervals = state.UnitTimeIntervals,
-            SpeedSwitches = state.SpeedSwitches.Select((changed, index) => (changed, index))
-                .Where(item => item.changed).Select(item => item.index + 1).ToHashSet(),
-            DirectionSwitches = state.DirectionSwitches.Select((changed, index) => (changed, index))
-                .Where(item => item.changed).Select(item => item.index).ToHashSet(),
-            WidthSwitches = widths.Zip(widths.Skip(1), (left, right) => (left, right))
-                .Select((pair, index) => (pair, index: index + 1))
-                .Where(item => item.pair.left != item.pair.right)
-                .Select(item => item.index).ToHashSet(),
-            DoubleHandoffs = state.EntryAttackIds.Zip(state.ExitAttackIds,
-                    (entry, exit) => entry != exit)
-                .Select((changed, index) => (changed, index)).Where(item => item.changed)
-                .Select(item => item.index).ToHashSet(),
-            NormalDeclarations = included.Select(batch =>
-                batch.Sum(id => attacks[id].NormalDeclarations)).ToArray(),
-            ProtectedDeclarations = included.Select(batch =>
-                batch.Sum(id => attacks[id].ProtectedDeclarations)).ToArray(),
+            LanesByBatch = lanes,
+            Times = times,
+            UnitTimeIntervals = unitTimes,
+            SpeedSwitches = speedSwitches,
+            DirectionSwitches = directionSwitches,
+            WidthSwitches = widthSwitches,
+            DoubleHandoffs = doubleHandoffs,
+            NormalDeclarations = normal,
+            ProtectedDeclarations = protectedCounts,
+            Widths = widths,
+            StartBeat = batches[chain[0].BatchIndex].Beat,
+            EndBeat = batches[chain[^1].BatchIndex].Beat,
+            AttackCount = widths.Sum(),
+            BatchCount = chain.Length,
+            MedianIntervalSeconds = Median(unitTimes),
             Strands = new[]
             {
                 new SweepStrand
                 {
-                    AttackIds = state.EntryAttackIds,
-                    Lanes = main.Select(item => item.Lane).ToArray(),
-                    InitialDirection = directions[0],
-                    FinalDirection = directions[^1],
+                    AttackIds = mainAttackIds,
+                    Lanes = mainLanes,
+                    InitialDirection = chain[1].Direction!.Value,
+                    FinalDirection = chain[^1].Direction!.Value,
                     TurnCount = state.TurnCount
                 }
             }
         };
     }
 
-    private static IReadOnlyList<SweepSequence> SelectDisjoint(
-        IReadOnlyList<SweepSequence> sequences,
+    private static IReadOnlyList<Candidate> SelectDisjoint(
+        IReadOnlyList<Candidate> candidates,
         CancellationToken cancellationToken)
     {
-        if (sequences.Count == 0) return Array.Empty<SweepSequence>();
-        var eventSets = sequences.Select(EventSet).ToArray();
-        var adjacency = Enumerable.Range(0, sequences.Count)
-            .Select(_ => new HashSet<int>()).ToArray();
-        var byEvent = new Dictionary<int, List<int>>();
-        for (var index = 0; index < eventSets.Length; index++)
-            foreach (var eventId in eventSets[index])
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                if (!byEvent.TryGetValue(eventId, out var previous))
-                    byEvent[eventId] = previous = new List<int>();
-                foreach (var other in previous)
-                {
-                    adjacency[index].Add(other);
-                    adjacency[other].Add(index);
-                }
-                previous.Add(index);
-            }
-
-        var components = new List<int[]>();
-        var seen = new bool[sequences.Count];
-        for (var start = 0; start < sequences.Count; start++)
+        if (candidates.Count == 0) return Array.Empty<Candidate>();
+        var byOriginal = candidates.ToDictionary(item => item.OriginalIndex);
+        var components = new List<List<Candidate>>();
+        List<Candidate>? current = null;
+        var furthestEnd = -1;
+        foreach (var candidate in candidates.OrderBy(item => item.StartBatch)
+                     .ThenBy(item => item.EndBatch).ThenBy(item => item.OriginalIndex))
         {
-            if (seen[start]) continue;
-            var members = new List<int>();
-            var pending = new Stack<int>();
-            pending.Push(start);
-            seen[start] = true;
-            while (pending.Count > 0)
+            cancellationToken.ThrowIfCancellationRequested();
+            if (current is null || candidate.StartBatch > furthestEnd)
             {
-                cancellationToken.ThrowIfCancellationRequested();
-                var current = pending.Pop();
-                members.Add(current);
-                foreach (var neighbor in adjacency[current])
-                    if (!seen[neighbor]) { seen[neighbor] = true; pending.Push(neighbor); }
+                current = new List<Candidate>();
+                components.Add(current);
+                furthestEnd = candidate.EndBatch;
             }
-            components.Add(members.OrderBy(index => index).ToArray());
+            else furthestEnd = Math.Max(furthestEnd, candidate.EndBatch);
+            current.Add(candidate);
         }
 
-        var states = 0;
-        int[] SolveComponent(int[] component)
+        var selected = new List<Candidate>();
+        var selectionStates = 0;
+        foreach (var component in components)
         {
-            if (component.Length == 1) return component;
-            var localByGlobal = component.Select((global, local) => (global, local))
-                .ToDictionary(item => item.global, item => item.local);
-            var conflicts = new BigInteger[component.Length];
-            for (var local = 0; local < component.Length; local++)
+            cancellationToken.ThrowIfCancellationRequested();
+            if (component.Count == 1)
             {
-                conflicts[local] = BigInteger.One << local;
-                foreach (var neighbor in adjacency[component[local]])
-                    conflicts[local] |= BigInteger.One << localByGlobal[neighbor];
+                selected.Add(component[0]);
+                continue;
             }
-            var full = (BigInteger.One << component.Length) - 1;
-            var memo = new Dictionary<BigInteger, int[]> { [BigInteger.Zero] = Array.Empty<int>() };
-            var stack = new Stack<(BigInteger Mask, bool Expanded)>();
-            stack.Push((full, false));
-            while (stack.Count > 0)
+            var ordered = component.OrderBy(item => item.EndBatch)
+                .ThenBy(item => item.StartBatch).ThenBy(item => item.OriginalIndex).ToArray();
+            var ends = ordered.Select(item => item.EndBatch).ToArray();
+            var best = new Selection[ordered.Length + 1];
+            best[0] = Selection.Empty;
+            for (var index = 0; index < ordered.Length; index++)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                var (mask, expanded) = stack.Pop();
-                if (memo.ContainsKey(mask)) continue;
-                var pivot = LowestBitIndex(mask);
-                var includedMask = mask & ~conflicts[pivot];
-                var excludedMask = mask ^ (BigInteger.One << pivot);
-                if (!expanded)
-                {
-                    if (++states > MaximumStates)
-                        throw new InvalidOperationException(
-                            "Sweep family selection budget exceeded; no partial result returned.");
-                    stack.Push((mask, true));
-                    if (!memo.ContainsKey(excludedMask)) stack.Push((excludedMask, false));
-                    if (!memo.ContainsKey(includedMask)) stack.Push((includedMask, false));
-                    continue;
-                }
-                var included = new[] { component[pivot] }.Concat(memo[includedMask]).ToArray();
-                var excluded = memo[excludedMask];
-                var comparison = CompareSelection(included, excluded, eventSets, sequences);
-                memo[mask] = comparison > 0 ? included : comparison < 0 ? excluded :
-                    (LexicographicCompare(included, excluded) <= 0 ? included : excluded);
+                if (++selectionStates > MaximumSelectionStates)
+                    throw new InvalidOperationException(
+                        $"Sweep selection budget exceeded ({MaximumSelectionStates}).");
+                var previous = LastBefore(ends, ordered[index].StartBatch, index);
+                var included = best[previous + 1].Add(ordered[index]);
+                var excluded = best[index];
+                best[index + 1] = CompareSelection(included, excluded) >= 0
+                    ? included : excluded;
             }
-            return memo[full];
+            selected.AddRange(best[^1].CandidateIndexes.Select(index => byOriginal[index]));
         }
-
-        var indexes = components.SelectMany(SolveComponent).OrderBy(index => index).ToArray();
-        return indexes.Select(index => sequences[index]).OrderBy(item => item,
-            Comparer<SweepSequence>.Create(CompareSequenceOrder)).ToArray();
+        return selected;
     }
 
     private static int CompareStateQuality(SpineState left, SpineState right)
     {
-        var result = left.EntryAttackIds.Count.CompareTo(right.EntryAttackIds.Count);
+        var result = left.Length.CompareTo(right.Length);
         if (result != 0) return result;
-        result = right.SpeedSwitches.Count(value => value).CompareTo(left.SpeedSwitches.Count(value => value));
+        result = right.SpeedSwitchCount.CompareTo(left.SpeedSwitchCount);
         if (result != 0) return result;
         result = right.TurnCount.CompareTo(left.TurnCount);
         if (result != 0) return result;
-        var leftHandoffs = left.EntryAttackIds.Zip(left.ExitAttackIds, (a, b) => a != b).Count(x => x);
-        var rightHandoffs = right.EntryAttackIds.Zip(right.ExitAttackIds, (a, b) => a != b).Count(x => x);
-        result = rightHandoffs.CompareTo(leftHandoffs);
+        result = right.HandoffCount.CompareTo(left.HandoffCount);
         if (result != 0) return result;
-        result = -LexicographicCompare(left.EntryAttackIds, right.EntryAttackIds);
-        return result != 0 ? result : -LexicographicCompare(left.ExitAttackIds, right.ExitAttackIds);
+        result = right.EntryLexRank.CompareTo(left.EntryLexRank);
+        return result != 0 ? result : right.ExitLexRank.CompareTo(left.ExitLexRank);
     }
 
-    private static int CompareCandidateQuality(SweepSequence left, SweepSequence right)
+    private static int CompareCandidateQuality(Candidate left, Candidate right)
     {
-        var result = left.LanesByBatch.Sum(batch => batch.Count)
-            .CompareTo(right.LanesByBatch.Sum(batch => batch.Count));
+        var result = left.LaneCount.CompareTo(right.LaneCount);
         if (result != 0) return result;
-        result = right.SpeedSwitches.Count.CompareTo(left.SpeedSwitches.Count);
+        result = right.State.SpeedSwitchCount.CompareTo(left.State.SpeedSwitchCount);
         if (result != 0) return result;
-        result = left.Strands.Max(strand => strand.AttackIds.Count)
-            .CompareTo(right.Strands.Max(strand => strand.AttackIds.Count));
+        result = left.State.Length.CompareTo(right.State.Length);
         if (result != 0) return result;
-        result = right.DirectionSwitches.Count.CompareTo(left.DirectionSwitches.Count);
-        return result != 0 ? result : right.WidthSwitches.Count.CompareTo(left.WidthSwitches.Count);
+        result = right.State.DirectionSwitchCount.CompareTo(left.State.DirectionSwitchCount);
+        return result != 0 ? result :
+            right.State.WidthSwitchCount.CompareTo(left.State.WidthSwitchCount);
     }
 
-    private static int CompareSelection(
-        IReadOnlyList<int> left, IReadOnlyList<int> right,
-        IReadOnlyList<HashSet<int>> eventSets, IReadOnlyList<SweepSequence> sequences)
+    private static int CompareSelection(Selection left, Selection right)
     {
-        var result = left.Sum(index => eventSets[index].Count)
-            .CompareTo(right.Sum(index => eventSets[index].Count));
+        var result = left.EventCount.CompareTo(right.EventCount);
         if (result != 0) return result;
-        result = right.Count.CompareTo(left.Count);
-        return result != 0 ? result : left.Sum(index => sequences[index].Beats.Count)
-            .CompareTo(right.Sum(index => sequences[index].Beats.Count));
+        result = right.SequenceCount.CompareTo(left.SequenceCount);
+        if (result != 0) return result;
+        result = left.BatchCount.CompareTo(right.BatchCount);
+        return result != 0 ? result : -LexicographicCompare(
+            left.CandidateIndexes, right.CandidateIndexes);
     }
+
+    private static void AssignLexRanks(IReadOnlyList<SpineState> states, bool entry)
+    {
+        var keys = ArrayPool<LexKey>.Shared.Rent(states.Count);
+        try
+        {
+            for (var index = 0; index < states.Count; index++)
+                keys[index] = LexKeyFor(states[index], entry);
+            Array.Sort(keys, 0, states.Count);
+            var uniqueCount = 0;
+            for (var index = 0; index < states.Count; index++)
+                if (uniqueCount == 0 || !keys[index].Equals(keys[uniqueCount - 1]))
+                    keys[uniqueCount++] = keys[index];
+            foreach (var item in states)
+            {
+                var rank = Array.BinarySearch(keys, 0, uniqueCount, LexKeyFor(item, entry));
+                if (entry) item.EntryLexRank = rank;
+                else item.ExitLexRank = rank;
+            }
+        }
+        finally
+        {
+            ArrayPool<LexKey>.Shared.Return(keys);
+        }
+    }
+
+    private static LexKey LexKeyFor(SpineState item, bool entry) => new(
+        item.Length,
+        item.Previous is null ? 0 :
+            entry ? item.Previous.EntryLexRank : item.Previous.ExitLexRank,
+        entry ? item.EntryAttackId : item.ExitAttackId);
 
     private static int CompareSequenceOrder(SweepSequence left, SweepSequence right)
     {
         var result = left.StartBeat.CompareTo(right.StartBeat);
         if (result != 0) return result;
         result = left.EndBeat.CompareTo(right.EndBeat);
-        if (result != 0) return result;
-        return CompareNested(left.LanesByBatch, right.LanesByBatch);
+        return result != 0 ? result : CompareNested(left.LanesByBatch, right.LanesByBatch);
     }
 
-    private static HashSet<int> EventSet(SweepSequence sequence) =>
-        sequence.EventIdsByBatch.SelectMany(batch => batch).ToHashSet();
-    private static string EventSetKey(SweepSequence sequence) =>
-        string.Join(",", EventSet(sequence).OrderBy(value => value));
+    private static int LastBefore(int[] sortedEnds, int start, int exclusiveEnd)
+    {
+        var low = 0;
+        var high = exclusiveEnd;
+        while (low < high)
+        {
+            var middle = low + (high - low) / 2;
+            if (sortedEnds[middle] < start) low = middle + 1;
+            else high = middle;
+        }
+        return low - 1;
+    }
+
+    private static double Median(double[] values)
+    {
+        var ordered = (double[])values.Clone();
+        Array.Sort(ordered);
+        var middle = ordered.Length / 2;
+        return ordered.Length % 2 == 1
+            ? ordered[middle]
+            : (ordered[middle - 1] + ordered[middle]) / 2;
+    }
+
+    private static int CountBits(int value)
+    {
+        var count = 0;
+        while (value != 0) { value &= value - 1; count++; }
+        return count;
+    }
+
     private static BeatPosition Divide(BeatPosition value, int divisor) =>
         new(value.Numerator, checked(value.Denominator * divisor));
     private static int Ring(int lane) => Mod(lane - 1, 8) + 1;
@@ -575,9 +686,6 @@ internal static class SweepRecognizer
     private static bool SameSpeed(double left, double right, double tolerance) =>
         Math.Abs(left - right) <= Math.Max(TimeTolerance,
             tolerance * Math.Max(Math.Abs(left), Math.Abs(right)));
-
-    private static T[] Append<T>(IReadOnlyList<T> source, T value) =>
-        source.Concat(new[] { value }).ToArray();
 
     private static int LexicographicCompare<T>(IReadOnlyList<T> left, IReadOnlyList<T> right)
         where T : IComparable<T>
@@ -600,12 +708,5 @@ internal static class SweepRecognizer
             if (result != 0) return result;
         }
         return left.Count.CompareTo(right.Count);
-    }
-
-    private static int LowestBitIndex(BigInteger value)
-    {
-        var index = 0;
-        while ((value & BigInteger.One).IsZero) { value >>= 1; index++; }
-        return index;
     }
 }

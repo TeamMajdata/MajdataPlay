@@ -32,14 +32,7 @@ internal sealed class SweepSequence
 {
     internal IReadOnlyList<IReadOnlyList<int>> LanesByBatch { get; set; } =
         Array.Empty<IReadOnlyList<int>>();
-    internal IReadOnlyList<IReadOnlyList<int>> AttackIdsByBatch { get; set; } =
-        Array.Empty<IReadOnlyList<int>>();
-    internal IReadOnlyList<IReadOnlyList<int>> EventIdsByBatch { get; set; } =
-        Array.Empty<IReadOnlyList<int>>();
-    internal IReadOnlyList<BeatPosition> Beats { get; set; } = Array.Empty<BeatPosition>();
     internal IReadOnlyList<double> Times { get; set; } = Array.Empty<double>();
-    internal IReadOnlyList<BeatPosition> UnitBeatIntervals { get; set; } =
-        Array.Empty<BeatPosition>();
     internal IReadOnlyList<double> UnitTimeIntervals { get; set; } = Array.Empty<double>();
     internal IReadOnlyCollection<int> SpeedSwitches { get; set; } = new HashSet<int>();
     internal IReadOnlyCollection<int> DirectionSwitches { get; set; } = new HashSet<int>();
@@ -48,25 +41,15 @@ internal sealed class SweepSequence
     internal IReadOnlyList<int> NormalDeclarations { get; set; } = Array.Empty<int>();
     internal IReadOnlyList<int> ProtectedDeclarations { get; set; } = Array.Empty<int>();
     internal IReadOnlyList<SweepStrand> Strands { get; set; } = Array.Empty<SweepStrand>();
+    internal IReadOnlyList<int> Widths { get; set; } = Array.Empty<int>();
+    internal BeatPosition StartBeat { get; set; }
+    internal BeatPosition EndBeat { get; set; }
+    internal int AttackCount { get; set; }
+    internal int BatchCount { get; set; }
+    internal double MedianIntervalSeconds { get; set; }
 
-    internal BeatPosition StartBeat => Beats[0];
-    internal BeatPosition EndBeat => Beats[^1];
     internal double StartTime => Times[0];
     internal double EndTime => Times[^1];
-    internal int AttackCount => AttackIdsByBatch.Sum(batch => batch.Count);
-    internal IReadOnlyList<int> Widths => LanesByBatch.Select(batch => batch.Count).ToArray();
-
-    internal double MedianIntervalSeconds
-    {
-        get
-        {
-            var ordered = UnitTimeIntervals.OrderBy(value => value).ToArray();
-            var middle = ordered.Length / 2;
-            return ordered.Length % 2 == 1
-                ? ordered[middle]
-                : (ordered[middle - 1] + ordered[middle]) / 2;
-        }
-    }
 }
 
 internal sealed class ScoredSweepGroup
