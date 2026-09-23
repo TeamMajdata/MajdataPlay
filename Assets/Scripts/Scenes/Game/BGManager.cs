@@ -15,7 +15,6 @@ using LibVLCSharp;
 using UnityEngine.UI;
 using System.Runtime.CompilerServices;
 using System.Diagnostics;
-using MajdataPlay.Settings;
 using MajdataPlay.Diagnostics;
 using MajdataPlay.Numerics;
 #nullable enable
@@ -80,9 +79,6 @@ namespace MajdataPlay.Scenes.Game
 
         long _mediaLengthMs = 0;
 
-        GameplayScreenRotationAngleOption _screenRotationAngle = GameplayScreenRotationAngleOption.Zero;
-
-
         protected override void Awake()
         {
             base.Awake();
@@ -101,10 +97,7 @@ namespace MajdataPlay.Scenes.Game
             _videoPlayer = GetComponent<VideoPlayer>();
 #endif
             _backgroundMaterial = _coverRenderer.material;
-            _screenRotationAngle = MajEnv.Settings.Display.GameplayScreenRotationAngle;
             _defaultScale = transform.localScale;
-            var angle = Quaternion.Euler(0, 0, (int)_screenRotationAngle * -90);
-            transform.localRotation = angle;
         }
         void OnDestroy()
         {
