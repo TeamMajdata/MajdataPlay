@@ -15,39 +15,8 @@ using UnityEngine.Profiling;
 #nullable enable
 namespace MajdataPlay.Scenes.Game.Notes.Behaviours
 {
-    internal sealed class TapDrop : NoteDrop, IDistanceProvider, INoteQueueMember<TapQueueInfo>, IRendererContainer, IPoolableNote<TapPoolingInfo, TapQueueInfo>, IMajComponent
+    internal sealed class TapDrop : NoteDrop, IDistanceProvider, INoteQueueMember<TapQueueInfo>, IPoolableNote<TapPoolingInfo, TapQueueInfo>, IMajComponent
     {
-        public RendererStatus RendererState
-        {
-            get => _rendererState;
-            set
-            {
-                if (State < NoteStatus.Inited)
-                {
-                    return;
-                }
-
-                switch (value)
-                {
-                    case RendererStatus.Off:
-                        _thisRenderer.enabled = false;
-                        _exRenderer.enabled = false;
-                        _tapLineRenderer.enabled = false;
-                        //_thisRenderer.forceRenderingOff = true;
-                        //_exRenderer.forceRenderingOff = true;
-                        //_tapLineRenderer.forceRenderingOff = true;
-                        break;
-                    case RendererStatus.On:
-                        _thisRenderer.enabled = true;
-                        _exRenderer.enabled = IsEX;
-                        _tapLineRenderer.enabled = true;
-                        //_thisRenderer.forceRenderingOff = false;
-                        //_exRenderer.forceRenderingOff = !IsEX;
-                        //_tapLineRenderer.forceRenderingOff = false;
-                        break;
-                }
-            }
-        }
         public TapQueueInfo QueueInfo { get; set; } = TapQueueInfo.Default;
         public float RotateSpeed { get; set; } = 0f;
         public bool IsDouble { get; set; } = false;
@@ -87,7 +56,7 @@ namespace MajdataPlay.Scenes.Game.Notes.Behaviours
             base.Awake();
             _noteAppearRate = MajEnv.Settings.Debug.NoteAppearRate;
             _isStarRotation = Settings.Game.StarRotation;
-            _notePoolManager = FindObjectOfType<NotePoolManager>();
+            _notePoolManager = FindAnyObjectByType<NotePoolManager>();
             _thisRenderer = GetComponent<SpriteRenderer>();
 
             _exObject = Transform.GetChild(0).gameObject;
@@ -100,15 +69,7 @@ namespace MajdataPlay.Scenes.Game.Notes.Behaviours
 
             Transform.localScale = new Vector3(0, 0);
 
-            base.SetActive(false);
-            _tapLineObject.layer = MajEnv.HIDDEN_LAYER;
-            _exObject.layer = MajEnv.HIDDEN_LAYER;
-
-            _thisRenderer.enabled = false;
-            _exRenderer.enabled = false;
-            _tapLineRenderer.enabled = false;
-
-            Active = false;
+            SetActiveWithRenderer(false);
         }
         public void Init(TapPoolingInfo poolingInfo)
         {
@@ -157,12 +118,11 @@ namespace MajdataPlay.Scenes.Game.Notes.Behaviours
             _exRenderer.sortingOrder = SortOrder - TAP_EX_SORT_ORDER;
 
             LoadSkin();
-            SetActive(true);
-            SetTapLineActive(false);
+            SetActiveWithoutRenderer(true);
 
             State = NoteStatus.Inited;
         }
-        void End()
+        private void End()
         {
             if (IsEnded)
             {
@@ -176,7 +136,6 @@ namespace MajdataPlay.Scenes.Game.Notes.Behaviours
                 _eachLineBinding = null;
             }
             SetActive(false);
-            RendererState = RendererStatus.Off;
             var result = new NoteJudgeResult()
             {
                 Grade = JudgeResult,
@@ -218,54 +177,6 @@ namespace MajdataPlay.Scenes.Game.Notes.Behaviours
                 Autoplay();
             }
         }
-        protected override void Autoplay()
-        {
-            if (IsMine)
-            {
-                return;
-            }
-            switch(AutoplayMode)
-            {
-                case AutoplayModeOption.Enable:
-                    base.Autoplay();
-                    if(IsJudged)
-                    {
-                        End();
-                    }
-                    break;
-                case AutoplayModeOption.DJAuto_TouchPanel_First:
-                case AutoplayModeOption.DJAuto_ButtonRing_First:
-                    DJAutoplay();
-                    break;
-            }
-        }
-        void DJAutoplay()
-        {
-            if (IsJudged || !IsAutoplay)
-            {
-                return;
-            }
-            else if (!NoteManager.IsCurrentNoteJudgeable(QueueInfo))
-            {
-                return;
-            }
-            else if (GetTimeSpanToArriveTiming() < (-FRAME_LENGTH_SEC * 2 + FRAME_LENGTH_SEC / 2))
-            {
-                return;
-            }
-            var isBtnFirst = AutoplayMode == AutoplayModeOption.DJAuto_ButtonRing_First;
-
-            if (isBtnFirst)
-            {
-                _ = NoteManager.SimulateButtonClick(_buttonPos) ||
-                    (USERSETTING_DJAUTO_POLICY == DJAutoPolicyOption.Permissive && NoteManager.SimulateSensorClick(SensorPos));
-            }
-            else
-            {
-                _ = NoteManager.SimulateSensorClick(SensorPos) ||
-                    (USERSETTING_DJAUTO_POLICY == DJAutoPolicyOption.Permissive && NoteManager.SimulateButtonClick(_buttonPos));
-            }
-        }
         [OnUpdate]
         internal void OnUpdate()
         {
@@ -283,8 +194,8 @@ namespace MajdataPlay.Scenes.Game.Notes.Behaviours
                         {
                             Transform.position = _innerPos;
                             _tapLineTransform.localScale = new Vector3(1.225f / 4.8f, 1.225f / 4.8f, 1f);
-
-                            RendererState = RendererStatus.On;
+                            SetNoteRendererActive(true);
+                            SetExRendererActive(true);
                             State = NoteStatus.Scaling;
                             goto case NoteStatus.Scaling;
                         }
@@ -322,11 +233,62 @@ namespace MajdataPlay.Scenes.Game.Notes.Behaviours
                 if (IsStar)
                 {
                     if (NoteController.IsStart && _isStarRotation)
+                    {
                         Transform.Rotate(0f, 0f, RotateSpeed * MajTimeline.DeltaTime);
+                    }
                 }
             }
         }
-        void TooLateCheck()
+        protected override void Autoplay()
+        {
+            if (IsMine)
+            {
+                return;
+            }
+            switch(AutoplayMode)
+            {
+                case AutoplayModeOption.Enable:
+                    base.Autoplay();
+                    if(IsJudged)
+                    {
+                        End();
+                    }
+                    break;
+                case AutoplayModeOption.DJAuto_TouchPanel_First:
+                case AutoplayModeOption.DJAuto_ButtonRing_First:
+                    DJAutoplay();
+                    break;
+            }
+        }
+        private void DJAutoplay()
+        {
+            if (IsJudged || !IsAutoplay)
+            {
+                return;
+            }
+            else if (!NoteManager.IsCurrentNoteJudgeable(QueueInfo))
+            {
+                return;
+            }
+            else if (GetTimeSpanToArriveTiming() < (-FRAME_LENGTH_SEC * 2 + FRAME_LENGTH_SEC / 2))
+            {
+                return;
+            }
+            var isBtnFirst = AutoplayMode == AutoplayModeOption.DJAuto_ButtonRing_First;
+
+            if (isBtnFirst)
+            {
+                _ = NoteManager.SimulateButtonClick(_buttonPos) ||
+                    (USERSETTING_DJAUTO_POLICY == DJAutoPolicyOption.Permissive && NoteManager.SimulateSensorClick(SensorPos));
+            }
+            else
+            {
+                _ = NoteManager.SimulateSensorClick(SensorPos) ||
+                    (USERSETTING_DJAUTO_POLICY == DJAutoPolicyOption.Permissive && NoteManager.SimulateButtonClick(_buttonPos));
+            }
+        }
+        
+        private void TooLateCheck()
         {
             // Too late check
             if (IsJudged || IsEnded || AutoplayMode == AutoplayModeOption.Enable)
@@ -345,7 +307,7 @@ namespace MajdataPlay.Scenes.Game.Notes.Behaviours
                 End();
             }
         }
-        void Check()
+        private void Check()
         {
             if (IsEnded || !IsInited)
             {
@@ -386,7 +348,7 @@ namespace MajdataPlay.Scenes.Game.Notes.Behaviours
                 End();
             }
         }
-        void MineCheck()
+        private void MineCheck()
         {
             if (!IsMine || IsEnded || !IsInited || IsJudged)
             {
@@ -401,9 +363,6 @@ namespace MajdataPlay.Scenes.Game.Notes.Behaviours
         }
         protected override void LoadSkin()
         {
-
-            RendererState = RendererStatus.Off;
-
             if (IsStar)
             {
                 LoadStarSkin();
@@ -419,32 +378,39 @@ namespace MajdataPlay.Scenes.Game.Notes.Behaviours
             {
                 return;
             }
-            base.SetActive(state);
-            switch (state)
-            {
-                case true:
-                    _exObject.layer = MajEnv.DEFAULT_LAYER;
-                    break;
-                case false:
-                    _exObject.layer = MajEnv.HIDDEN_LAYER;
-                    break;
-            }
-            SetTapLineActive(state);
-            Active = state;
+            SetActiveWithRenderer(state);
         }
-        void SetTapLineActive(bool state)
+        private void SetActiveWithoutRenderer(bool state)
         {
-            switch (state)
+            base.SetActive(state);
+        }
+        private void SetActiveWithRenderer(bool state)
+        {
+            base.SetActive(state);
+            SetNoteRendererActive(state);
+            SetExRendererActive(state);
+            SetTapLineActive(state);
+        }
+        private void SetNoteRendererActive(bool state)
+        {
+            _thisRenderer.enabled = state;
+        }
+        private void SetExRendererActive(bool state)
+        {
+            if(state)
             {
-                case true:
-                    _tapLineObject.layer = MajEnv.DEFAULT_LAYER;
-                    break;
-                case false:
-                    _tapLineObject.layer = MajEnv.HIDDEN_LAYER;
-                    break;
+                _exRenderer.enabled = IsEX;
+            }
+            else
+            {
+                _exRenderer.enabled = false;
             }
         }
-        void LoadTapSkin()
+        private void SetTapLineActive(bool state)
+        {
+            _tapLineRenderer.enabled = state;
+        }
+        private void LoadTapSkin()
         {
             var skin = MajInstances.SkinManager.GetTapSkin();
 
@@ -489,7 +455,7 @@ namespace MajdataPlay.Scenes.Game.Notes.Behaviours
                 }
             }
         }
-        void LoadStarSkin()
+        private void LoadStarSkin()
         {
             var skin = MajInstances.SkinManager.GetStarSkin();
             _thisRenderer.sharedMaterial = DefaultMaterial;
@@ -566,6 +532,5 @@ namespace MajdataPlay.Scenes.Game.Notes.Behaviours
                 }
             }
         }
-        RendererStatus _rendererState = RendererStatus.Off;
     }
 }

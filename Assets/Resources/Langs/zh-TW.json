@@ -163,6 +163,8 @@
     "MAJSETTING_PROPERTY_RecordMode_DESC": "Disable：停用錄製。OBS：使用OBS WebSocket伺服器控制開始和停止錄製；請在OBS的工具中開啟WebSocket伺服器並關閉身分驗證。",
     "MAJSETTING_PROPERTY_RenderQuality": "渲染品質",
     "MAJSETTING_PROPERTY_RenderQuality_DESC": "調整遊戲的渲染品質，越高越清晰，越低越模糊。",
+    "MAJSETTING_PROPERTY_RenderScale": "渲染比例",
+    "MAJSETTING_PROPERTY_RenderScale_DESC": "調整內部渲染解析度。100% 為原始解析度；降低可減輕 GPU 負載，但畫面和文字會變模糊，不改變版面或判定。",
     "MAJSETTING_PROPERTY_Resolution": "解析度",
     "MAJSETTING_PROPERTY_Resolution_DESC": "不可調整",
     "MAJSETTING_PROPERTY_Rotation": "旋轉",

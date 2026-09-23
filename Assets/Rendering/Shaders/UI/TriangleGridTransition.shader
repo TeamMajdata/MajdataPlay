@@ -12,6 +12,12 @@ Shader "UI/Majdata Triangle Grid Transition"
         [HideInInspector] _StencilReadMask ("Stencil Read Mask", Float) = 255
         [HideInInspector] _ColorMask ("Color Mask", Float) = 15
         [Toggle(UNITY_UI_ALPHACLIP)] _UseUIAlphaClip ("Use Alpha Clip", Float) = 0
+
+        // Shader-based circular clip. Replaces the stencil UI Mask that used to
+        // clip MainImage (and its stencil-copied siblings) into the 1080 circle.
+        _Center ("Mask Center", Vector) = (0.5, 0.5, 0, 0)
+        _Radius ("Mask Radius", Range(0, 1)) = 0.5
+        _Feather ("Mask Feather", Range(0, 0.2)) = 0.0035
     }
 
     SubShader
@@ -81,6 +87,13 @@ Shader "UI/Majdata Triangle Grid Transition"
             float _MajSceneTriangleClosing;
             float _MajSceneTransitionProgress;
 
+            // Circular clip, ported from UI/Circle Mask. Kept as regular (non-global)
+            // material properties since the circle is intrinsic to this quad's UV
+            // space, not something the scene transition needs to drive per-frame.
+            float2 _Center;
+            float _Radius;
+            float _Feather;
+
             static const float SQRT_THREE = 1.73205080757;
 
             v2f vert(appdata_t input)
@@ -102,6 +115,18 @@ Shader "UI/Majdata Triangle Grid Transition"
                     sine * value.x + cosine * value.y);
             }
 
+            // Same falloff as UI/Circle Mask: a distance-to-center smoothstep,
+            // widened by fwidth so the edge stays a stable ~1px wide at any scale.
+            float CircleMaskAlpha(float2 uv)
+            {
+                float dist = distance(uv, _Center);
+                float aa = fwidth(dist);
+                return 1.0 - smoothstep(
+                    _Radius - _Feather - aa,
+                    _Radius + aa,
+                    dist);
+            }
+
             half4 frag(v2f input) : SV_Target
             {
                 float coverage = saturate(_MajSceneTransitionProgress);
@@ -118,7 +143,7 @@ Shader "UI/Majdata Triangle Grid Transition"
                 {
                     half4 fullColor = tex2D(_MainTex, input.texcoord) + _TextureSampleAdd;
                     fullColor.rgb *= input.color.rgb;
-                    fullColor.a *= input.color.a;
+                    fullColor.a *= input.color.a * CircleMaskAlpha(input.texcoord);
 
                     #ifdef UNITY_UI_ALPHACLIP
                         clip(fullColor.a - 0.001);
@@ -233,16 +258,16 @@ Shader "UI/Majdata Triangle Grid Transition"
                 float foldPulse = 4.0 * tileAlpha * (1.0 - tileAlpha);
                 float foldHighlight = foldPulse * (1.0 - saturate(
                     abs(minimumBarycentric)
-                    / (antialiasWidth * 4.5))) * 0.24;
+                                        / (antialiasWidth * 4.5))) * 0.24;
                 tileAlpha *= foldShape;
 
                 half4 color = tex2D(_MainTex, foldedTextureUv) + _TextureSampleAdd;
                 color.rgb *= input.color.rgb;
                 color.rgb = lerp(color.rgb, half3(1.0, 1.0, 1.0), foldHighlight);
-                // The original HEAD UI Mask performs the circular clipping. Keeping
-                // that single authority ensures the blue loading image fills the
-                // entire 1080 circle when coverage reaches 1.
-                color.a *= input.color.a * tileAlpha;
+                // Circular clipping now lives entirely in this shader (see
+                // CircleMaskAlpha) instead of relying on a stencil UI Mask, so the
+                // fold effect and the 1080 circle boundary share one code path.
+                color.a *= input.color.a * tileAlpha * CircleMaskAlpha(input.texcoord);
 
                 #ifdef UNITY_UI_ALPHACLIP
                     clip(color.a - 0.001);

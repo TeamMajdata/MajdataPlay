@@ -16,6 +16,9 @@ public sealed class EngineNumberSettingEnumerator : DefaultNumberEnumerator, IOp
             case "FPSLimit":
                 Application.targetFrameRate = (int)CurrentValue;
                 break;
+            case "RenderScale":
+                GameManager.ApplyRenderScale((int)CurrentValue);
+                break;
         }
         _lastValue = (int)CurrentValue;
     }

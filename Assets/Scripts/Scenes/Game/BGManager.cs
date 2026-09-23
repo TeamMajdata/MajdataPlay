@@ -17,6 +17,7 @@ using System.Runtime.CompilerServices;
 using System.Diagnostics;
 using MajdataPlay.Settings;
 using MajdataPlay.Diagnostics;
+using MajdataPlay.Numerics;
 #nullable enable
 namespace MajdataPlay.Scenes.Game
 {
@@ -45,20 +46,23 @@ namespace MajdataPlay.Scenes.Game
         
         [SerializeField]
         Vector3 _defaultScale;
-        
+
+        [SerializeField]
+        Image _coverRenderer;
 
         [SerializeField]
         RawImage _videoRenderer;
+
         [SerializeField]
         Sprite _defaultSprite;
+
+        Material _backgroundMaterial;
+
         // This is the texture libVLC writes to directly. It's private.
         Texture2D? _vlcTexture = null;
         // We copy it into this texture which we actually use in unity.
         [SerializeField]
         RenderTexture? _renderTexture = null;
-
-        SpriteRenderer _pictureCover;
-        SpriteRenderer _pictureRenderer;
 
 #if UNITY_STANDALONE_WIN
         MediaPlayer _videoPlayer;
@@ -96,15 +100,10 @@ namespace MajdataPlay.Scenes.Game
 #else
             _videoPlayer = GetComponent<VideoPlayer>();
 #endif
+            _backgroundMaterial = _coverRenderer.material;
             _screenRotationAngle = MajEnv.Settings.Display.GameplayScreenRotationAngle;
-            _pictureCover = GameObject.Find("BackgroundCover").GetComponent<SpriteRenderer>();
-            _pictureRenderer = GetComponent<SpriteRenderer>();
             _defaultScale = transform.localScale;
             var angle = Quaternion.Euler(0, 0, (int)_screenRotationAngle * -90);
-            if(_videoRenderer != null)
-            {
-                _videoRenderer.transform.localRotation = angle;
-            }
             transform.localRotation = angle;
         }
         void OnDestroy()
@@ -179,16 +178,20 @@ namespace MajdataPlay.Scenes.Game
         public void SetBackgroundPic(Sprite? sprite)
         {
             DisableVideo();
+            var rectTransform = _coverRenderer.transform.GetComponent<RectTransform>();
             if (sprite is null) 
             { 
-                _pictureRenderer.sprite = _defaultSprite;
-                transform.localScale = _defaultScale;
+                _coverRenderer.sprite = _defaultSprite;
+                _coverRenderer.transform.localScale = _defaultScale;
+                rectTransform.sizeDelta = new Vector2(1080, 1080);
                 return; 
             }
-            _pictureRenderer.sprite = sprite;
+            _coverRenderer.sprite = sprite;
             //todo:set correct scale
-            var scale = 1080f / sprite.texture.width;
-            gameObject.transform.localScale = new Vector3(scale, scale, scale);
+            var tex = sprite.texture;
+            var scale = 1080f / tex.width;
+            rectTransform.sizeDelta = new Vector2(tex.width, tex.height);
+            _coverRenderer.transform.localScale = new Vector3(scale, scale, scale);
         }
 
         public void DisableVideo()
@@ -199,6 +202,7 @@ namespace MajdataPlay.Scenes.Game
             }
             _usePictureAsBackground = true;
             //Disable rawimage optional
+            _videoRenderer.enabled = false;
 #if UNITY_STANDALONE_WIN
             _videoPlayer.Media = null;
 #else
@@ -206,9 +210,9 @@ namespace MajdataPlay.Scenes.Game
             _videoPlayer.Stop();
 #endif
         }
-        public void SetBackgroundDim(float dim)
+        public void SetBrightness(float brightness)
         {
-            _pictureCover.color = new Color(0f, 0f, 0f, dim);
+            _backgroundMaterial.SetFloat("_Brightness", brightness.Clamp(0, 1));
         }
 
         public async UniTask SetMovieAsync(string path, Sprite? fallback)
@@ -239,7 +243,7 @@ namespace MajdataPlay.Scenes.Game
                     return;
                 }
                 MajDebug.LogInfo("[VLC] " + ret);
-                _pictureRenderer.forceRenderingOff = true;
+                _coverRenderer.enabled = false;
                 _usePictureAsBackground = false;
                 _videoPlayer.Play();
                 _mediaLengthMs = media.Duration;
@@ -276,7 +280,7 @@ namespace MajdataPlay.Scenes.Game
                     await UniTask.Yield();
                 }
             }
-            _pictureRenderer.forceRenderingOff = true;
+            _coverRenderer.enabled = false;
             _videoRenderer.texture = _videoPlayer.texture;
             var scale = (float)_videoPlayer.height / (float)_videoPlayer.width;
             _videoRenderer.gameObject.transform.localScale = new Vector3(1f, scale, 1f);

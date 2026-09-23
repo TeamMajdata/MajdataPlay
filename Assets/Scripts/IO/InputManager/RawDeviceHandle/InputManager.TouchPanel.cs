@@ -55,7 +55,7 @@ namespace MajdataPlay.IO
             #region Public Methods
             public static void Init()
             {
-                if(Interlocked.CompareExchange(ref _isInited, 0, 1) == 1)
+                if (Interlocked.CompareExchange(ref _isInited, 1, 0) != 0)
                 {
                     return;
                 }
@@ -532,7 +532,7 @@ namespace MajdataPlay.IO
                 var vid = usbOptions.VendorId;
                 var manufacturer = IODetector.DeviceManufacturer;
                 var deviceName = string.IsNullOrEmpty(usbOptions.DeviceName) ? GetUsbDeviceName(manufacturer) : usbOptions.DeviceName;
-                
+
                 var deviceFinder = new UsbDeviceFinder(vid, pid);
                 var usbDevice = UsbDevice.OpenUsbDevice(deviceFinder);
 
@@ -545,7 +545,7 @@ namespace MajdataPlay.IO
                     MajDebug.LogError("[TouchPanel]usb device not found or cannot open usb device");
                     return;
                 }
-                else if(usbDevice is IUsbDevice wholeDevice)
+                else if (usbDevice is IUsbDevice wholeDevice)
                 {
                     wholeDevice.SetConfiguration(usbOptions.Configuration);
                     wholeDevice.ClaimInterface(usbOptions.Interface);
@@ -573,7 +573,7 @@ namespace MajdataPlay.IO
                                     break;
                                 }
                             }
-                            else if(bytesRead != usbOptions.PacketSize)
+                            else if (bytesRead != usbOptions.PacketSize)
                             {
                                 continue;
                             }
@@ -660,7 +660,7 @@ namespace MajdataPlay.IO
                         try
                         {
                             _ioThreadSync.WaitReadReady();
-                            switch(manufacturer)
+                            switch (manufacturer)
                             {
                                 case DeviceManufacturerOption.Dao:
                                     DaoHIDTouchPanel.Parse(buffer, _sensorRealTimeStates);
@@ -669,7 +669,7 @@ namespace MajdataPlay.IO
                                     PipeTouchPanel.Parse(buffer, _sensorRealTimeStates);
                                     break;
                             }
-                            
+
                             _ioThreadSync.SignalReadConsumed();
                             var isLocked = false;
                             try
@@ -721,21 +721,21 @@ namespace MajdataPlay.IO
                 /// |<-            Device states             ->|                         
                 /// 00000000 00000000 00000000 00000000 00000000
                 /// 
-                
+
                 ref var @lock = ref _syncLock;
                 var pipeName = $"MajdataPlay.IO.TouchPanel.{IODetector.PlayerIndex}P";
                 var token = MajEnv.GlobalCT;
-                var pollingRate = _btnPollingRateMs;
+                var pollingRate = _sensorPollingRateMs;
                 var stopwatch = new Stopwatch();
                 var t1 = stopwatch.Elapsed;
                 var currentThread = Thread.CurrentThread;
                 var callback = (PipePacket.PacketReceivedCallback)((PipePacket packet) =>
                 {
-                    if(packet.Type == PipePacketType.HeartBeat)
+                    if (packet.Type == PipePacketType.HeartBeat)
                     {
                         return;
                     }
-                    else if(packet.Payload.Length != 64 / 8)
+                    else if (packet.Payload.Length != 64 / 8)
                     {
                         return;
                     }
@@ -773,14 +773,16 @@ namespace MajdataPlay.IO
                 MajDebug.LogInfo(nameof(TouchPanel), $"Managed thread id: {currentThread.ManagedThreadId}");
                 MajDebug.LogInfo(nameof(TouchPanel), $"OS thread id: {PlatformInfo.GetCurrentOSThreadId()}");
 
+                Span<byte> rawBuffer = stackalloc byte[1024];
+                Span<byte> accumulationBuffer = stackalloc byte[8192];
                 while (!token.IsCancellationRequested)
                 {
-                    Thread.Sleep(MajEnv.IO_DEVICE_RECONNECT_INTERVAL_MSEC);
-                    var pipeClientStream = new NamedPipeClientStream(".", pipeName, PipeDirection.InOut, PipeOptions.Asynchronous)
+                    if (token.WaitHandle.WaitOne(MajEnv.IO_DEVICE_RECONNECT_INTERVAL_MSEC))
                     {
-                        ReadTimeout = 2000,
-                        WriteTimeout = 2000
-                    };
+                        break;
+                    }
+                    using var pipeClientStream = new NamedPipeClientStream(".", pipeName, PipeDirection.InOut, PipeOptions.Asynchronous);
+                    using var cancellation = token.Register(() => pipeClientStream.Dispose());
                     try
                     {
                         try
@@ -789,29 +791,32 @@ namespace MajdataPlay.IO
                             pipeClientStream.Connect(2000);
                             MajDebug.LogInfo(nameof(TouchPanel), "Connected");
                         }
+                        catch (Exception) when (token.IsCancellationRequested)
+                        {
+                            break;
+                        }
                         catch (Exception e)
                         {
                             MajDebug.LogError(nameof(TouchPanel), $"Failed to connect to pipe\n{e}");
                             continue;
                         }
                         IsConnected = true;
-                        var rawBuffer = (stackalloc byte[1024]);
-                        var buffer = new SpanBuffer((stackalloc byte[8192]));
-                        stopwatch.Start();
-                        while (true)
+                        var buffer = new SpanBuffer(accumulationBuffer);
+                        stopwatch.Restart();
+                        while (!token.IsCancellationRequested)
                         {
-                            token.ThrowIfCancellationRequested();
+                            t1 = stopwatch.Elapsed;
                             try
                             {
-                                var now = MajTimeline.UnscaledTime;
                                 var read = pipeClientStream.Read(rawBuffer);
-                                if(read != 0)
+                                if (read == 0)
                                 {
-                                    buffer.Write(rawBuffer.Slice(0, read));
-                                    PipePacket.Parse(ref buffer, 1024, callback);
-                                }                                                             
+                                    break;
+                                }
+                                buffer.Write(rawBuffer.Slice(0, read));
+                                PipePacket.Parse(ref buffer, 1024, callback);
                             }
-                            catch (OperationCanceledException)
+                            catch (Exception) when (token.IsCancellationRequested)
                             {
                                 break;
                             }
@@ -824,10 +829,11 @@ namespace MajdataPlay.IO
                             catch (Exception e)
                             {
                                 MajDebug.LogError(nameof(TouchPanel), $"{e}");
+                                break;
                             }
                             finally
                             {
-                                buffer.Clear();
+                                // Preserve incomplete packets until the next read.
                                 if (pollingRate.TotalMilliseconds > 0)
                                 {
                                     var t2 = stopwatch.Elapsed;
@@ -843,7 +849,20 @@ namespace MajdataPlay.IO
                     }
                     finally
                     {
-                        pipeClientStream.Dispose();
+                        IsConnected = false;
+                        var isLocked = false;
+                        try
+                        {
+                            @lock.Enter(ref isLocked);
+                            _sensorRealTimeStates.AsSpan().Clear();
+                            _isSensorHadOffInternal.AsSpan().Fill(true);
+                        }
+                        finally
+                        {
+                            if (isLocked)
+                                @lock.Exit();
+                            pipeClientStream.Dispose();
+                        }
                     }
                 }
             }
@@ -860,11 +879,11 @@ namespace MajdataPlay.IO
             {
                 try
                 {
-                    MajDebug.LogInfo(nameof(TouchPanel),  $"Starting to initialize the touch panel...");
+                    MajDebug.LogInfo(nameof(TouchPanel), $"Starting to initialize the touch panel...");
                     var sensConfig = MajEnv.Settings.IO.InputDevice.TouchPanel.Sensitivities;
                     var index = IODetector.PlayerIndex == 1 ? 'L' : 'R';
                     var sens = (sensConfig.A, sensConfig.B, sensConfig.C, sensConfig.D, sensConfig.E);
-                    MajDebug.LogInfo(nameof(TouchPanel),  $"Sensitivities:\nA:{sens.A}\nB:{sens.B}\nC:{sens.C}\nD:{sens.D}\nE:{sens.E}");
+                    MajDebug.LogInfo(nameof(TouchPanel), $"Sensitivities:\nA:{sens.A}\nB:{sens.B}\nC:{sens.C}\nD:{sens.D}\nE:{sens.E}");
                     //see also https://github.com/Sucareto/Mai2Touch/tree/main/Mai2Touch
                     serialStream.Write("{RSET}");
                     MajDebug.LogDebug(nameof(TouchPanel), $"Sent: {{REST}}");
@@ -899,7 +918,7 @@ namespace MajdataPlay.IO
                     {
                         var cmd = $"{{{index}{(char)a}r2}}";
                         serialStream.Write(cmd);
-                        MajDebug.LogDebug(nameof(TouchPanel),  $"Sent: {cmd}");
+                        MajDebug.LogDebug(nameof(TouchPanel), $"Sent: {cmd}");
                     }
                     try
                     {
@@ -908,21 +927,21 @@ namespace MajdataPlay.IO
                             var value = GetSensitivityValue(a, sens);
                             var cmd = $"{{{index}{(char)a}k{(char)value}}}";
                             serialStream.Write(cmd);
-                            MajDebug.LogDebug(nameof(TouchPanel),  $"Sent: {cmd}");
+                            MajDebug.LogDebug(nameof(TouchPanel), $"Sent: {cmd}");
                         }
                     }
                     catch (TimeoutException)
                     {
-                        MajDebug.LogWarning(nameof(TouchPanel),  $"TouchPanel does not support sensitivity override: Write timeout");
+                        MajDebug.LogWarning(nameof(TouchPanel), $"TouchPanel does not support sensitivity override: Write timeout");
                     }
                     catch (Exception e)
                     {
-                        MajDebug.LogError(nameof(TouchPanel),  $"Failed to override sensitivity: \n{e}");
+                        MajDebug.LogError(nameof(TouchPanel), $"Failed to override sensitivity: \n{e}");
                         return false;
                     }
                     serialStream.Write("{STAT}");
-                    MajDebug.LogDebug(nameof(TouchPanel),  $"Sent: {{STAT}}");
-                    MajDebug.LogInfo(nameof(TouchPanel),  "Initialization complete.");
+                    MajDebug.LogDebug(nameof(TouchPanel), $"Sent: {{STAT}}");
+                    MajDebug.LogInfo(nameof(TouchPanel), "Initialization complete.");
                     return true;
                 }
                 catch (Exception e)
@@ -1195,7 +1214,7 @@ namespace MajdataPlay.IO
                     const int Y_POINT_INDEX_OFFSET = 4;
 
                     var now = MajTimeline.UnscaledTime;
-                    if(reportData.IsEmpty)
+                    if (reportData.IsEmpty)
                     {
                         ReadFingerPoints(buffer, now);
                         return;
@@ -1281,12 +1300,12 @@ namespace MajdataPlay.IO
                     private readonly bool _flip;
                     private readonly RadiusOffset _radiusOffset;
 
-                    public TouchSensorMapper(float minX, 
-                        float minY, 
-                        float maxX, 
-                        float maxY, 
-                        float radius, 
-                        CapacitiveTouchPanelRadiusOffsetConfig radiusOffset, 
+                    public TouchSensorMapper(float minX,
+                        float minY,
+                        float maxX,
+                        float maxY,
+                        float radius,
+                        CapacitiveTouchPanelRadiusOffsetConfig radiusOffset,
                         bool flip)
                     {
                         _minX = minX;
@@ -1619,7 +1638,7 @@ namespace MajdataPlay.IO
                 }
             }
 
-            
+
         }
 #endif
     }

@@ -171,6 +171,8 @@
     "MAJSETTING_PROPERTY_RecordMode_DESC": "無効化: 無効。OBS: OBS WebSocketサーバーを使用して録画の開始と停止を制御します。OBSのツールからWebSocketサーバーを開始し、認証を無効にします。",
     "MAJSETTING_PROPERTY_RenderQuality": "クオリティ",
     "MAJSETTING_PROPERTY_RenderQuality_DESC": "クオリティを高くすれば高くするほど、画質が良くなります。その反面負荷がかかりやすくなるので、性能の低いPCや、スマホなどでは低くすることを推奨します。",
+    "MAJSETTING_PROPERTY_RenderScale": "描画解像度",
+    "MAJSETTING_PROPERTY_RenderScale_DESC": "内部描画解像度を調整します。100% は元の解像度です。下げると GPU 負荷が軽くなりますが、映像や文字がぼやけます。レイアウトや判定は変わりません。",
     "MAJSETTING_PROPERTY_Resolution": "解像度",
     "MAJSETTING_PROPERTY_Resolution_DESC": "変更できません。",
     "MAJSETTING_PROPERTY_Rotation": "回転",

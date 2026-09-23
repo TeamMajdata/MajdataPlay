@@ -205,6 +205,11 @@ namespace MajdataPlay.Settings
 
         [OptionEnumerator(typeof(EngineEnumSettingEnumerator))]
         public RenderQualityOption RenderQuality { get; set; } = RenderQualityOption.Low;
+
+        [Step("5")]
+        [Range("50", "100", HasMax = true, HasMin = true)]
+        [OptionEnumerator(typeof(EngineNumberSettingEnumerator))]
+        public int RenderScale { get; set; } = 100;
 #if UNITY_STANDALONE
         [HideInSettingUI]
         public bool Topmost { get; set; } = false;
@@ -681,6 +686,7 @@ namespace MajdataPlay.Settings
     {
         public bool Exclusive { get; set; } = true;
         public bool RawMode { get; set; } = true;
+        public bool AsyncMode { get; set; } = true;
         public float BufferSize { get; set; } = 0.02f;
         public float Period { get; set; } = 0.005f;
     }

@@ -18,43 +18,8 @@ using UnityEngine.Profiling;
 #nullable enable
 namespace MajdataPlay.Scenes.Game.Notes.Behaviours
 {
-    internal sealed class HoldDrop : NoteLongDrop, IDistanceProvider, INoteQueueMember<TapQueueInfo>, IPoolableNote<HoldPoolingInfo, TapQueueInfo>, IRendererContainer, IMajComponent
+    internal sealed class HoldDrop : NoteLongDrop, IDistanceProvider, INoteQueueMember<TapQueueInfo>, IPoolableNote<HoldPoolingInfo, TapQueueInfo>, IMajComponent
     {
-        public RendererStatus RendererState
-        {
-            get => _rendererState;
-            set
-            {
-                if (State < NoteStatus.Inited)
-                {
-                    return;
-                }
-
-                switch (value)
-                {
-                    case RendererStatus.Off:
-                        _thisRenderer.enabled = false;
-                        _exRenderer.enabled = false;
-                        _tapLineRenderer.enabled = false;
-                        _endRenderer.enabled = false;
-                        //_thisRenderer.forceRenderingOff = true;
-                        //_exRenderer.forceRenderingOff = true;
-                        //_tapLineRenderer.forceRenderingOff = true;
-                        //_endRenderer.forceRenderingOff = true;
-                        break;
-                    case RendererStatus.On:
-                        _thisRenderer.enabled = true;
-                        _exRenderer.enabled = IsEX;
-                        _tapLineRenderer.enabled = true;
-                        _endRenderer.enabled = true;
-                        //_thisRenderer.forceRenderingOff = false;
-                        //_exRenderer.forceRenderingOff = !IsEX;
-                        //_tapLineRenderer.forceRenderingOff = false;
-                        //_endRenderer.forceRenderingOff = false;
-                        break;
-                }
-            }
-        }
         public TapQueueInfo QueueInfo { get; set; } = TapQueueInfo.Default;
         public float Distance { get; private set; } = -100;
 
@@ -68,11 +33,11 @@ namespace MajdataPlay.Scenes.Game.Notes.Behaviours
         Sprite _holdOffSprite;
 
         GameObject _exObject;
-        GameObject _endObject;
+        GameObject _endPointObject;
         GameObject _tapLineObject;
 
         Transform _exTransform;
-        Transform _endTransform;
+        Transform _endPointTransform;
         Transform _tapLineTransform;
 
         SpriteRenderer _exRenderer;
@@ -119,118 +84,13 @@ namespace MajdataPlay.Scenes.Game.Notes.Behaviours
 
             _thisRenderer = GetComponent<SpriteRenderer>();
 
-            _endObject = Transform.GetChild(1).gameObject;
-            _endTransform = _endObject.transform;
-            _endRenderer = _endObject.GetComponent<SpriteRenderer>();
+            _endPointObject = Transform.GetChild(1).gameObject;
+            _endPointTransform = _endPointObject.transform;
+            _endRenderer = _endPointObject.GetComponent<SpriteRenderer>();
 
             Transform.localScale = new Vector3(0, 0);
 
-            base.SetActive(false);
-            _tapLineObject.layer = MajEnv.HIDDEN_LAYER;
-            _exObject.layer = MajEnv.HIDDEN_LAYER;
-            _endObject.layer = MajEnv.HIDDEN_LAYER;
-
-            _thisRenderer.enabled = false;
-            _exRenderer.enabled = false;
-            _tapLineRenderer.enabled = false;
-            _endRenderer.enabled = false;
-
-            Active = false;
-        }
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        protected override void Autoplay()
-        {
-            if (IsMine)
-            {
-                return;
-            }
-            switch (AutoplayMode)
-            {
-                case AutoplayModeOption.Enable:
-                    if (!IsAutoplay)
-                    {
-                        return;
-                    }
-                    else if(IsJudged)
-                    {
-                        if (GetRemainingTime() == 0)
-                        {
-                            End();
-                        }
-                        return;
-                    }
-                    if (GetTimeSpanToJudgeTiming() >= -0.016667f)
-                    {
-                        var autoplayGrade = AutoplayGrade;
-                        if (((int)autoplayGrade).InRange(0, 14))
-                        {
-                            JudgeResult = autoplayGrade;
-                        }
-                        else
-                        {
-                            JudgeResult = (JudgeGrade)Randomizer.Next(0, 15);
-                        }
-                        ConvertJudgeGrade(ref JudgeResult);
-                        IsJudged = true;
-                        JudgeDiff = JudgeResult switch
-                        {
-                            < JudgeGrade.Perfect => 1,
-                            > JudgeGrade.Perfect => -1,
-                            _ => 0
-                        };
-                        PlaySFX();
-                        _lastHeadState = HOLD_HEAD_STATE_JUDGED_AND_NOT_FEEDBACK;
-                    }
-                    break;
-                case AutoplayModeOption.DJAuto_TouchPanel_First:
-                case AutoplayModeOption.DJAuto_ButtonRing_First:
-                    DJAutoplay();
-                    break;
-            }
-        }
-        void DJAutoplay()
-        {
-            var isBtnFirst = AutoplayMode == AutoplayModeOption.DJAuto_ButtonRing_First;
-            if (!IsAutoplay || IsEnded)
-            {
-                return;
-            }
-            else if (IsJudged)
-            {
-                var remainingTime = GetRemainingTime();
-                if(remainingTime <= 2 * FRAME_LENGTH_SEC)
-                {
-                    return;
-                }
-                if (isBtnFirst)
-                {
-                    NoteManager.SimulateButtonPress(_buttonPos);
-                }
-                else
-                {
-                    NoteManager.SimulateSensorPress(SensorPos);
-                }
-                return;
-            }
-            else if (!NoteManager.IsCurrentNoteJudgeable(QueueInfo))
-            {
-                return;
-            }
-            else if (GetTimeSpanToArriveTiming() < (-FRAME_LENGTH_SEC * 2 + FRAME_LENGTH_SEC / 2))
-            {
-                return;
-            }
-
-            if (isBtnFirst)
-            {
-                _ = NoteManager.SimulateButtonClick(_buttonPos) ||
-                    (USERSETTING_DJAUTO_POLICY == DJAutoPolicyOption.Permissive && NoteManager.SimulateSensorClick(SensorPos));
-            }
-            else
-            {
-                _ = NoteManager.SimulateSensorClick(SensorPos) ||
-                    (USERSETTING_DJAUTO_POLICY == DJAutoPolicyOption.Permissive &&  NoteManager.SimulateButtonClick(_buttonPos));
-            }
+            SetActiveWithRenderer(false);
         }
         public void Init(HoldPoolingInfo poolingInfo)
         {
@@ -298,13 +158,11 @@ namespace MajdataPlay.Scenes.Game.Notes.Behaviours
             _endRenderer.sortingOrder = SortOrder - _endSortOrder;
 
             LoadSkin();
-            SetActive(true);
-            SetTapLineActive(false);
-            SetEndActive(false);
+            SetActiveWithoutRenderer(true);
 
             State = NoteStatus.Inited;
         }
-        void End(float endJudgeOffset = 0)
+        private void End(float endJudgeOffset = 0)
         {
             if (IsEnded)
             {
@@ -352,11 +210,7 @@ namespace MajdataPlay.Scenes.Game.Notes.Behaviours
                 IsEX = false,
                 Diff = JudgeDiff
             });
-            _lastHeadState = HOLD_HEAD_STATE_NOT_JUDGED;
-            _lastHoldState = HOLD_STATE_NONE;
-            _thisRenderer.sharedMaterial = DefaultMaterial;
             SetActive(false);
-            RendererState = RendererStatus.Off;
             EffectManager.ResetHoldEffect(StartPos);
             EffectManager.PlayTapJudgeResult(StartPos, result);
             ObjectCounter.ReportResult(this, result);
@@ -419,26 +273,22 @@ namespace MajdataPlay.Scenes.Game.Notes.Behaviours
                     case NoteStatus.Inited:
                         if (destScale >= 0f)
                         {
-                            //transform.rotation = Quaternion.Euler(0, 0, -22.5f + -45f * (StartPos - 1));
-                            //_tapLineTransform.rotation = transform.rotation;
-                            //_thisRenderer.size = new Vector2(1.22f, 1.4f);
                             _exRenderer.size = new Vector2(1.22f, 1.42f);
                             _thisRenderer.size = new Vector2(1.22f, 1.42f);
                             _tapLineTransform.localScale = new Vector3(0.2552f, 0.2552f, 1f);
                             Transform.position = _innerPos;
-                            RendererState = RendererStatus.On;
+                            SetExRendererActive(true);
+                            SetNoteRendererActive(true);
 
                             State = NoteStatus.Scaling;
                             goto case NoteStatus.Scaling;
                         }
-                        //else
-                        //{
-                        //    Transform.localScale = new Vector3(0, 0);
-                        //}
                         return;
                     case NoteStatus.Scaling:
                         if (destScale > 0.3f)
+                        {
                             SetTapLineActive(true);
+                        }
                         if (distance < 1.225f)
                         {
                             Distance = distance;
@@ -470,13 +320,11 @@ namespace MajdataPlay.Scenes.Game.Notes.Behaviours
                         {
                             distance = 4.8f;
 
-                            SetEndActive(true);
-                            //_endRenderer.enabled = true;
+                            SetEndPointActive(true);
                         }
                         else if (holdDistance >= 1.225f && distance < 4.8f) // 头未到达 尾出现
                         {
-                            SetEndActive(true);
-                            //_endRenderer.enabled = true;
+                            SetEndPointActive(true);
                         }
                         Distance = distance;
                         var dis = (distance - holdDistance) / 2 + holdDistance;
@@ -489,7 +337,7 @@ namespace MajdataPlay.Scenes.Game.Notes.Behaviours
                         _tapLineTransform.localScale = new Vector3(lineScale, lineScale, 1f);
                         _thisRenderer.size = new Vector2(1.22f, size);
                         _exRenderer.size = new Vector2(1.22f, size);
-                        _endTransform.localPosition = new Vector3(0f, 0.6825f - size / 2);
+                        _endPointTransform.localPosition = new Vector3(0f, 0.6825f - size / 2);
 
                         break;
                     case NoteStatus.Arrived:
@@ -505,12 +353,9 @@ namespace MajdataPlay.Scenes.Game.Notes.Behaviours
                     default:
                         return;
                 }
-
-                //if (IsEX)
-                //    _exRenderer.size = _thisRenderer.size;
             }
         }
-        void TooLateCheck()
+        private void TooLateCheck()
         {
             // Too late check
             if (IsEnded || IsJudged || AutoplayMode == AutoplayModeOption.Enable)
@@ -540,7 +385,7 @@ namespace MajdataPlay.Scenes.Game.Notes.Behaviours
                 }
             }
         }
-        void MineHeadCheck()
+        private void MineHeadCheck()
         {
             if (!IsMine || IsEnded || !IsInited || IsJudged)
             {
@@ -556,7 +401,7 @@ namespace MajdataPlay.Scenes.Game.Notes.Behaviours
                 _lastHoldState = HOLD_STATE_PRESSED;
             }
         }
-        void HeadCheck()
+        private void HeadCheck()
         {
             if (IsEnded || !IsInited || IsJudged)
             {
@@ -615,7 +460,7 @@ namespace MajdataPlay.Scenes.Game.Notes.Behaviours
                 }
             }
         }
-        void MineBodyCheck()
+        private void MineBodyCheck()
         {
             if (!IsMine)
             {
@@ -635,7 +480,7 @@ namespace MajdataPlay.Scenes.Game.Notes.Behaviours
                 End();
             }
         }
-        void BodyCheck()
+        private void BodyCheck()
         {
             if (IsMine)
             {
@@ -720,7 +565,7 @@ namespace MajdataPlay.Scenes.Game.Notes.Behaviours
                 }
             }
         }
-        void ForceEndCheck()
+        private void ForceEndCheck()
         {
             if (!IsJudged || IsEnded)
             {
@@ -747,7 +592,7 @@ namespace MajdataPlay.Scenes.Game.Notes.Behaviours
                 End();
             }
         }
-        void PlayHoldEffect()
+        private void PlayHoldEffect()
         {
             if (_lastHoldState != HOLD_STATE_PRESSED)
             {
@@ -756,7 +601,7 @@ namespace MajdataPlay.Scenes.Game.Notes.Behaviours
                 _thisRenderer.sharedMaterial = HoldShineMaterial;
             }
         }
-        void StopHoldEffect()
+        private void StopHoldEffect()
         {
             if (_lastHoldState != HOLD_STATE_RELEASED)
             {
@@ -771,21 +616,36 @@ namespace MajdataPlay.Scenes.Game.Notes.Behaviours
             {
                 return;
             }
-            base.SetActive(state);
-            switch (state)
-            {
-                case true:
-                    _exObject.layer = MajEnv.DEFAULT_LAYER;
-                    break;
-                case false:
-                    _exObject.layer = MajEnv.HIDDEN_LAYER;
-                    break;
-            }
-            SetTapLineActive(state);
-            SetEndActive(state);
-            Active = state;
+            SetActiveWithRenderer(state);
         }
-        void SetTapLineActive(bool state)
+        private void SetActiveWithoutRenderer(bool state)
+        {
+            base.SetActive(state);
+        }
+        private void SetActiveWithRenderer(bool state)
+        {
+            base.SetActive(state);
+            SetNoteRendererActive(state);
+            SetExRendererActive(state);
+            SetTapLineActive(state);
+            SetEndPointActive(state);
+        }
+        private void SetNoteRendererActive(bool state)
+        {
+            _thisRenderer.enabled = state;
+        }
+        private void SetExRendererActive(bool state)
+        {
+            if (state)
+            {
+                _exRenderer.enabled = IsEX;
+            }
+            else
+            {
+                _exRenderer.enabled = false;
+            }
+        }
+        private void SetTapLineActive(bool state)
         {
             switch (state)
             {
@@ -797,24 +657,13 @@ namespace MajdataPlay.Scenes.Game.Notes.Behaviours
                     break;
             }
         }
-        void SetEndActive(bool state)
+        private void SetEndPointActive(bool state)
         {
-            switch (state)
-            {
-                case true:
-                    _endObject.layer = MajEnv.DEFAULT_LAYER;
-                    break;
-                case false:
-                    _endObject.layer = MajEnv.HIDDEN_LAYER;
-                    break;
-            }
+            _endRenderer.enabled = state;
         }
         protected override void LoadSkin()
         {
             var skin = MajInstances.SkinManager.GetHoldSkin();
-            //var _thisRenderer = GetComponent<SpriteRenderer>();
-            //var _exRenderer = transform.GetChild(0).GetComponent<SpriteRenderer>();
-            //var _tapLineRenderer = tapLine.GetComponent<SpriteRenderer>();
 
             if (IsMine)
             {
@@ -869,11 +718,102 @@ namespace MajdataPlay.Scenes.Game.Notes.Behaviours
                     _exRenderer.color = skin.ExEffects[2];
                 }
             }
-
-            RendererState = RendererStatus.Off;
             _thisRenderer.sprite = _holdSprite;
         }
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        protected override void Autoplay()
+        {
+            if (IsMine)
+            {
+                return;
+            }
+            switch (AutoplayMode)
+            {
+                case AutoplayModeOption.Enable:
+                    if (!IsAutoplay)
+                    {
+                        return;
+                    }
+                    else if (IsJudged)
+                    {
+                        if (GetRemainingTime() == 0)
+                        {
+                            End();
+                        }
+                        return;
+                    }
+                    if (GetTimeSpanToJudgeTiming() >= -0.016667f)
+                    {
+                        var autoplayGrade = AutoplayGrade;
+                        if (((int)autoplayGrade).InRange(0, 14))
+                        {
+                            JudgeResult = autoplayGrade;
+                        }
+                        else
+                        {
+                            JudgeResult = (JudgeGrade)Randomizer.Next(0, 15);
+                        }
+                        ConvertJudgeGrade(ref JudgeResult);
+                        IsJudged = true;
+                        JudgeDiff = JudgeResult switch
+                        {
+                            < JudgeGrade.Perfect => 1,
+                            > JudgeGrade.Perfect => -1,
+                            _ => 0
+                        };
+                        PlaySFX();
+                        _lastHeadState = HOLD_HEAD_STATE_JUDGED_AND_NOT_FEEDBACK;
+                    }
+                    break;
+                case AutoplayModeOption.DJAuto_TouchPanel_First:
+                case AutoplayModeOption.DJAuto_ButtonRing_First:
+                    DJAutoplay();
+                    break;
+            }
+        }
+        private void DJAutoplay()
+        {
+            var isBtnFirst = AutoplayMode == AutoplayModeOption.DJAuto_ButtonRing_First;
+            if (!IsAutoplay || IsEnded)
+            {
+                return;
+            }
+            else if (IsJudged)
+            {
+                var remainingTime = GetRemainingTime();
+                if (remainingTime <= 2 * FRAME_LENGTH_SEC)
+                {
+                    return;
+                }
+                if (isBtnFirst)
+                {
+                    NoteManager.SimulateButtonPress(_buttonPos);
+                }
+                else
+                {
+                    NoteManager.SimulateSensorPress(SensorPos);
+                }
+                return;
+            }
+            else if (!NoteManager.IsCurrentNoteJudgeable(QueueInfo))
+            {
+                return;
+            }
+            else if (GetTimeSpanToArriveTiming() < (-FRAME_LENGTH_SEC * 2 + FRAME_LENGTH_SEC / 2))
+            {
+                return;
+            }
 
-        RendererStatus _rendererState = RendererStatus.Off;
+            if (isBtnFirst)
+            {
+                _ = NoteManager.SimulateButtonClick(_buttonPos) ||
+                    (USERSETTING_DJAUTO_POLICY == DJAutoPolicyOption.Permissive && NoteManager.SimulateSensorClick(SensorPos));
+            }
+            else
+            {
+                _ = NoteManager.SimulateSensorClick(SensorPos) ||
+                    (USERSETTING_DJAUTO_POLICY == DJAutoPolicyOption.Permissive && NoteManager.SimulateButtonClick(_buttonPos));
+            }
+        }
     }
 }

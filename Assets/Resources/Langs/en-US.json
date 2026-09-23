@@ -175,6 +175,8 @@
     "MAJSETTING_PROPERTY_RecordMode": "Record Mode",
     "MAJSETTING_PROPERTY_RenderQuality": "Render Quality",
     "MAJSETTING_PROPERTY_RenderQuality_DESC": "Adjust render quality",
+    "MAJSETTING_PROPERTY_RenderScale": "Render Scale",
+    "MAJSETTING_PROPERTY_RenderScale_DESC": "Adjust the internal rendering resolution. 100% uses full resolution. Lower values reduce GPU load but soften graphics and text, without changing layout or judgment.",
     "MAJSETTING_PROPERTY_Resolution": "Resolution",
     "MAJSETTING_PROPERTY_Resolution_DESC": "Change the game's resolution",
     "MAJSETTING_PROPERTY_Rotation": "Rotation",

@@ -88,6 +88,11 @@ namespace MajdataPlay.IO
                     continue;
                 }
 
+                if (data.Length < packetLen)
+                {
+                    return;
+                }
+
                 if (data.Length >= packetLen)
                 {
                     var rawPacket = data.Slice(0, packetLen);

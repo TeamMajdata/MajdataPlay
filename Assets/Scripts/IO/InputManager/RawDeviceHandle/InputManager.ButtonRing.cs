@@ -49,7 +49,7 @@ namespace MajdataPlay.IO
             static SpinLock _syncLock = new();
             static Task _buttonRingUpdateLoop = Task.CompletedTask;
             static MobileExternalButtonRingOption _mobileExternalbuttonRingOption;
-            
+
             readonly static bool[] _buttonStates = new bool[12];
             readonly static bool[] _buttonRealTimeStates = new bool[12];
             readonly static bool[] _isBtnHadOn = new bool[12];
@@ -61,7 +61,7 @@ namespace MajdataPlay.IO
             #region Public Methods
             public static void Init()
             {
-                if (Interlocked.CompareExchange(ref _isInited, 0, 1) == 1)
+                if (Interlocked.CompareExchange(ref _isInited, 1, 0) != 0)
                 {
                     return;
                 }
@@ -314,12 +314,12 @@ namespace MajdataPlay.IO
             {
                 return IsCurrentlyOff(GetIndexFromArea(area));
             }
-#endregion
+            #endregion
 
             [MethodImpl(MethodImplOptions.AggressiveInlining)]
             static int GetIndexFromArea(ButtonZone area)
             {
-                if(area < ButtonZone.A1 || area > ButtonZone.P2)
+                if (area < ButtonZone.A1 || area > ButtonZone.P2)
                 {
                     ThrowHelper.OutOfRange(nameof(area));
                 }
@@ -498,7 +498,7 @@ namespace MajdataPlay.IO
                             fnBuffer.Clear();
                             UpdateKeyboardFn(fnButtons, fnBuffer);
                             IsConnected = true;
-                            
+
                             var isLocked = false;
                             try
                             {
@@ -516,7 +516,7 @@ namespace MajdataPlay.IO
                             }
                             finally
                             {
-                                if(isLocked)
+                                if (isLocked)
                                 {
                                     @lock.Exit();
                                 }
@@ -588,12 +588,12 @@ namespace MajdataPlay.IO
                 try
                 {
                     Memory<byte> memory = Array.Empty<byte>();
-                    while(!token.IsCancellationRequested)
+                    while (!token.IsCancellationRequested)
                     {
                         Thread.Sleep(MajEnv.IO_DEVICE_RECONNECT_INTERVAL_MSEC);
                         hidDevice = default;
                         hidStream = default;
-                        if (!HidHelper.TryGetAndOpenDevice(nameof(ButtonRing), 
+                        if (!HidHelper.TryGetAndOpenDevice(nameof(ButtonRing),
                             filter, hidConfig, out hidDevice, out hidStream, isReconnecting))
                         {
                             continue;
@@ -768,14 +768,16 @@ namespace MajdataPlay.IO
                 MajDebug.LogInfo(nameof(ButtonRing), $"Managed thread id: {currentThread.ManagedThreadId}");
                 MajDebug.LogInfo(nameof(ButtonRing), $"OS thread id: {PlatformInfo.GetCurrentOSThreadId()}");
 
+                Span<byte> rawBuffer = stackalloc byte[1024];
+                Span<byte> accumulationBuffer = stackalloc byte[8192];
                 while (!token.IsCancellationRequested)
                 {
-                    Thread.Sleep(MajEnv.IO_DEVICE_RECONNECT_INTERVAL_MSEC);
-                    var pipeClientStream = new NamedPipeClientStream(".", pipeName, PipeDirection.InOut, PipeOptions.Asynchronous)
+                    if (token.WaitHandle.WaitOne(MajEnv.IO_DEVICE_RECONNECT_INTERVAL_MSEC))
                     {
-                        ReadTimeout = 2000,
-                        WriteTimeout = 2000
-                    };
+                        break;
+                    }
+                    using var pipeClientStream = new NamedPipeClientStream(".", pipeName, PipeDirection.InOut, PipeOptions.Asynchronous);
+                    using var cancellation = token.Register(() => pipeClientStream.Dispose());
                     try
                     {
                         try
@@ -784,29 +786,32 @@ namespace MajdataPlay.IO
                             pipeClientStream.Connect(2000);
                             MajDebug.LogInfo(nameof(ButtonRing), "Connected");
                         }
+                        catch (Exception) when (token.IsCancellationRequested)
+                        {
+                            break;
+                        }
                         catch (Exception e)
                         {
                             MajDebug.LogError(nameof(ButtonRing), $"Failed to connect to pipe\n{e}");
                             continue;
                         }
                         IsConnected = true;
-                        var rawBuffer = (stackalloc byte[1024]);
-                        var buffer = new SpanBuffer((stackalloc byte[8192]));
-                        stopwatch.Start();
-                        while (true)
+                        var buffer = new SpanBuffer(accumulationBuffer);
+                        stopwatch.Restart();
+                        while (!token.IsCancellationRequested)
                         {
-                            token.ThrowIfCancellationRequested();
+                            t1 = stopwatch.Elapsed;
                             try
                             {
-                                var now = MajTimeline.UnscaledTime;
                                 var read = pipeClientStream.Read(rawBuffer);
-                                if (read != 0)
+                                if (read == 0)
                                 {
-                                    buffer.Write(rawBuffer.Slice(0, read));
-                                    PipePacket.Parse(ref buffer, 1024, callback);
+                                    break;
                                 }
+                                buffer.Write(rawBuffer.Slice(0, read));
+                                PipePacket.Parse(ref buffer, 1024, callback);
                             }
-                            catch (OperationCanceledException)
+                            catch (Exception) when (token.IsCancellationRequested)
                             {
                                 break;
                             }
@@ -819,10 +824,11 @@ namespace MajdataPlay.IO
                             catch (Exception e)
                             {
                                 MajDebug.LogError(nameof(ButtonRing), $"{e}");
+                                break;
                             }
                             finally
                             {
-                                buffer.Clear();
+                                // Preserve incomplete packets until the next read.
                                 if (pollingRate.TotalMilliseconds > 0)
                                 {
                                     var t2 = stopwatch.Elapsed;
@@ -838,6 +844,12 @@ namespace MajdataPlay.IO
                     }
                     finally
                     {
+                        IsConnected = false;
+                        using (new LockDisposable())
+                        {
+                            _buttonRealTimeStates.AsSpan().Clear();
+                            _isBtnHadOffInternal.AsSpan().Fill(true);
+                        }
                         pipeClientStream.Dispose();
                     }
                 }
@@ -855,14 +867,14 @@ namespace MajdataPlay.IO
             }
             static string GetHIDDeviceName(ButtonRingDeviceOption deviceType, DeviceManufacturerOption manufacturer)
             {
-                switch(deviceType)
+                switch (deviceType)
                 {
                     case ButtonRingDeviceOption.HID:
-                        if(manufacturer == DeviceManufacturerOption.General)
+                        if (manufacturer == DeviceManufacturerOption.General)
                         {
                             return string.Empty;
                         }
-                        else if(manufacturer == DeviceManufacturerOption.Yuan)
+                        else if (manufacturer == DeviceManufacturerOption.Yuan)
                         {
                             //return "MusicGame Composite USB";
                             return string.Empty;
@@ -899,7 +911,7 @@ namespace MajdataPlay.IO
                     reportData = reportData.Slice(1); // skip report id
                     for (var i = 1; i < 13; i++)
                     {
-                        switch(i)
+                        switch (i)
                         {
                             case HID_BA1_INDEX:
                                 buffer[0] = reportData[i] == 1;
@@ -978,7 +990,7 @@ namespace MajdataPlay.IO
                 const int IO4_SELECT_P1_INDEX = 28;
                 const int IO4_SERVICE_INDEX = 25;
                 const int IO4_SELECT_P2_INDEX = 28;
-                public static void Parse(ReadOnlySpan<byte> reportData,Span<bool> buffer)
+                public static void Parse(ReadOnlySpan<byte> reportData, Span<bool> buffer)
                 {
                     reportData = reportData.Slice(1); // skip report id
                     switch (IODetector.PlayerIndex)

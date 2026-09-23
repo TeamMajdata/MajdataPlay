@@ -58,8 +58,6 @@ namespace MajdataPlay
         MotionHandle _subImageMotion;
         MotionHandle _mainImageMotion;
         MotionHandle _loadingTextMotion;
-        Image? _mainMaskImage;
-        Mask? _mainMask;
         [Header("Transition Rendering")]
         [SerializeField]
         Canvas _transitionOverlayCanvas = null!;
@@ -222,22 +220,14 @@ namespace MajdataPlay
             {
                 _mainMaskRect = MainImage.rectTransform.parent as RectTransform;
             }
-            if (_mainMaskRect != null && _mainMaskImage == null)
+            if (_mainMaskRect != null)
             {
-                _mainMaskImage = _mainMaskRect.GetComponent<Image>();
-                _mainMask = _mainMaskRect.GetComponent<Mask>();
-                if (_mainMask != null)
-                {
-                    _mainMask.showMaskGraphic = false;
-                }
                 _maskDecorations = _mainMaskRect
                     .GetComponentsInChildren<Graphic>(true)
-                    .Where(graphic => graphic != _mainMaskImage && graphic != MainImage)
+                    .Where(graphic => graphic != MainImage)
                     .ToArray();
             }
             return _mainMaskRect != null
-                && _mainMaskImage != null
-                && _mainMask != null
                 && MainImage != null
                 && SubImage != null
                 && loadingText != null;
@@ -386,10 +376,7 @@ namespace MajdataPlay
             Shader.SetGlobalFloat(TRIANGLE_GRID_ROTATION_ID, _triangleGridRotation);
             Shader.SetGlobalFloat(TRIANGLE_SPIN_DEGREES_ID, _triangleSpinDegrees);
             Shader.SetGlobalFloat(TRIANGLE_CLOSING_ID, _isClosingTransition ? 1f : 0f);
-            if (_mainMaskImage != null)
-            {
-                SetGraphicAlpha(_mainMaskImage, 1f);
-            }
+
             SetGraphicAlpha(MainImage, 1f);
         }
 

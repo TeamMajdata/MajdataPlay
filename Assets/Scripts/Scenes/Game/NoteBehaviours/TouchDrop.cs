@@ -16,42 +16,11 @@ using UnityEngine.Profiling;
 #nullable enable
 namespace MajdataPlay.Scenes.Game.Notes.Behaviours
 {
-    internal sealed class TouchDrop : NoteDrop, IRendererContainer, IPoolableNote<TouchPoolingInfo, TouchQueueInfo>, INoteQueueMember<TouchQueueInfo>, IMajComponent
+    internal sealed class TouchDrop : NoteDrop, IPoolableNote<TouchPoolingInfo, TouchQueueInfo>, INoteQueueMember<TouchQueueInfo>, IMajComponent
     {
         public TouchGroup? GroupInfo { get; set; }
         public TouchQueueInfo QueueInfo { get; set; } = TouchQueueInfo.Default;
-        public RendererStatus RendererState
-        {
-            get => _rendererState;
-            set
-            {
-                if (State < NoteStatus.Inited)
-                {
-                    return;
-                }
 
-                switch (value)
-                {
-                    case RendererStatus.Off:
-                        for (var i = 0; i < _fanRenderers.Length; i++)
-                        {
-                            var renderer = _fanRenderers[i];
-                            renderer.enabled = false;
-                        }                                
-                        break;
-                    case RendererStatus.On:
-                        for (var i = 0; i < _fanRenderers.Length; i++)
-                        {
-                            var renderer = _fanRenderers[i];
-                            renderer.enabled = true;
-                        }
-                        break;
-                    default:
-                        return;
-                }
-                _rendererState = value;
-            }
-        }
 
         bool _isFirework = false;
         /// <summary>
@@ -122,11 +91,7 @@ namespace MajdataPlay.Scenes.Game.Notes.Behaviours
             SetFansColor(new Color(1f, 1f, 1f, 0f));
             SetFansPosition(0.4f);
 
-            base.SetActive(false);
-            SetFanActive(false);
-            SetJustBorderActive(false);
-            SetPointActive(false);
-            Active = false;
+            SetActiveWithRenderer(false);
 
             for (var i = 0; i < _fanRenderers.Length; i++)
             {
@@ -179,7 +144,7 @@ namespace MajdataPlay.Scenes.Game.Notes.Behaviours
 
             SetFansColor(new Color(1f, 1f, 1f, 0f));
             SetFansPosition(0.4f);
-            RendererState = RendererStatus.Off;
+            SetActiveWithoutRenderer(true);
 
             for (var i = 0; i < 4; i++)
             {
@@ -188,14 +153,9 @@ namespace MajdataPlay.Scenes.Game.Notes.Behaviours
             _pointRenderer.sortingOrder = SortOrder - _pointBorderSortOrder;
             _justBorderRenderer.sortingOrder = SortOrder - _justBorderSortOrder;
 
-            SetActive(true);
-            SetFanActive(false);
-            SetJustBorderActive(false);
-            SetPointActive(false);
-
             State = NoteStatus.Inited;
         }
-        void End()
+        private void End()
         {
             if (IsEnded)
             {
@@ -214,7 +174,6 @@ namespace MajdataPlay.Scenes.Game.Notes.Behaviours
                 IsMine = IsMine
             };
             // disable SpriteRenderer
-            RendererState = RendererStatus.Off;
             SetActive(false);
 
             if (_isFirework && !result.IsMissOrTooFast)
@@ -268,7 +227,7 @@ namespace MajdataPlay.Scenes.Game.Notes.Behaviours
             }
             _justBorderRenderer.sprite = skin.JustBorder;
         }
-        void TooLateCheck()
+        private void TooLateCheck()
         {
             // Too late check
             if (IsEnded || IsJudged || AutoplayMode == AutoplayModeOption.Enable)
@@ -298,7 +257,7 @@ namespace MajdataPlay.Scenes.Game.Notes.Behaviours
                 End();
             }
         }
-        void Check()
+        private void Check()
         {
             if (IsEnded || !IsInited)
             {
@@ -350,7 +309,7 @@ namespace MajdataPlay.Scenes.Game.Notes.Behaviours
                 End();
             }
         }
-        void MineCheck()
+        private void MineCheck()
         {
             if (!IsMine || IsEnded || !IsInited || IsJudged)
             {
@@ -384,7 +343,7 @@ namespace MajdataPlay.Scenes.Game.Notes.Behaviours
                     break;
             }
         }
-        void DJAutoplay()
+        private void DJAutoplay()
         {
             if (IsJudged)
             {
@@ -401,7 +360,7 @@ namespace MajdataPlay.Scenes.Game.Notes.Behaviours
 
             NoteManager.SimulateSensorClick(SensorPos);
         }
-        void RegisterGrade()
+        private void RegisterGrade()
         {
             if (GroupInfo is not null && !JudgeResult.IsMissOrTooFast())
             {
@@ -434,8 +393,6 @@ namespace MajdataPlay.Scenes.Game.Notes.Behaviours
                         if (-timing < _wholeDuration)
                         {
                             _multTouchHandler.Register(SensorPos, IsEach, IsBreak);
-                            RendererState = RendererStatus.On;
-                            //_pointObject.SetActive(true);
                             SetPointActive(true);
                             SetFanActive(true);
                             State = NoteStatus.Scaling;
@@ -461,7 +418,9 @@ namespace MajdataPlay.Scenes.Game.Notes.Behaviours
                             var pow = -Mathf.Exp(8 * (timing * 0.43f / _moveDuration) - 0.85f) + 0.42f;
                             var distance = Mathf.Clamp(pow, 0f, 0.4f);
                             if (float.IsNaN(distance))
+                            {
                                 distance = 0f;
+                            }
 
                             if (timing >= 0)
                             {
@@ -521,50 +480,34 @@ namespace MajdataPlay.Scenes.Game.Notes.Behaviours
             SetPointActive(state);
             Active = state;
         }
-        void SetFanActive(bool state)
+        private void SetActiveWithoutRenderer(bool state)
         {
-            switch (state)
+            base.SetActive(state);
+        }
+        private void SetActiveWithRenderer(bool state)
+        {
+            base.SetActive(state);
+            SetFanActive(state);
+            SetJustBorderActive(state);
+            SetPointActive(state);
+        }
+        private void SetFanActive(bool state)
+        {
+            for(var i = 0; i < _fanRenderers.Length; i++)
             {
-                case true:
-                    foreach (var fanObj in _fans.AsSpan())
-                    {
-                        fanObj.layer = MajEnv.DEFAULT_LAYER;
-                    }
-                    break;
-                case false:
-                    foreach (var fanObj in _fans.AsSpan())
-                    {
-                        fanObj.layer = MajEnv.HIDDEN_LAYER;
-                    }
-                    break;
+                _fanRenderers[i].enabled = state;
             }
         }
-        void SetPointActive(bool state)
+        private void SetPointActive(bool state)
         {
-            switch (state)
-            {
-                case true:
-                    _pointObject.layer = MajEnv.DEFAULT_LAYER;
-                    break;
-                case false:
-                    _pointObject.layer = MajEnv.HIDDEN_LAYER;
-                    break;
-            }
+            _pointRenderer.enabled = state;
         }
-        void SetJustBorderActive(bool state)
+        private void SetJustBorderActive(bool state)
         {
-            switch (state)
-            {
-                case true:
-                    _justBorderObject.layer = MajEnv.DEFAULT_LAYER;
-                    break;
-                case false:
-                    _justBorderObject.layer = MajEnv.HIDDEN_LAYER;
-                    break;
-            }
+            _justBorderRenderer.enabled = state;
         }
 
-        void SetFansPosition(in float distance)
+        private void SetFansPosition(in float distance)
         {
             for (var i = 0; i < 4; i++)
             {
@@ -572,21 +515,21 @@ namespace MajdataPlay.Scenes.Game.Notes.Behaviours
                 _fanTransforms[i].localPosition = pos;
             }
         }
-        Vector3 GetAngle(int index)
+        private Vector3 GetAngle(int index)
         {
             var angle = index * (Mathf.PI / 2);
             return new Vector3(Mathf.Sin(angle), Mathf.Cos(angle));
         }
-        void SetFansColor(Color color)
+        private void SetFansColor(Color color)
         {
             foreach (var fan in _fanRenderers) fan.color = color;
         }
-        void SetFansSprite(Sprite sprite)
+        private void SetFansSprite(Sprite sprite)
         {
             for (var i = 0; i < 4; i++)
                 _fanRenderers[i].sprite = sprite;
         }
-        void SetFansMaterial(Material material)
+        private void SetFansMaterial(Material material)
         {
             for (var i = 0; i < 4; i++)
                 _fanRenderers[i].sharedMaterial = material;
@@ -620,6 +563,5 @@ namespace MajdataPlay.Scenes.Game.Notes.Behaviours
                 AudioEffMana.PlayHanabiSound();
             }
         }
-        RendererStatus _rendererState = RendererStatus.Off;
     }
 }

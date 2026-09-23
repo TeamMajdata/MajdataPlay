@@ -95,20 +95,13 @@ namespace MajdataPlay.IO
                                                                  .ToArray();
 
                 var backend = MajEnv.Settings.Audio.Backend;
-                var isBass = backend is (SoundBackendOption.BassSimple or SoundBackendOption.Asio or SoundBackendOption.Wasapi);
+                var isBassBackend = backend is (SoundBackendOption.BassSimple or SoundBackendOption.Asio or SoundBackendOption.Wasapi);
 #if UNITY_STANDALONE_WIN
                 var wasapiOptions = MajEnv.Settings.Audio.Wasapi;
                 var asioOptions = MajEnv.Settings.Audio.Asio;
-                var isExclusiveRequest = wasapiOptions.Exclusive;
+                
                 var deviceIndex = asioOptions.DeviceIndex;
-                var isRawMode = wasapiOptions.RawMode;
-#endif
-#if !UNITY_EDITOR && UNITY_STANDALONE_WIN
-                if (MajEnv.Mode == RunningMode.View)
-                {
-                    backend = SoundBackendOption.Wasapi;
-                    isExclusiveRequest = false;
-                }
+                
 #endif
 #if UNITY_ANDROID || UNITY_IOS || !UNITY_STANDALONE_WIN
                 switch (backend)
@@ -124,25 +117,53 @@ namespace MajdataPlay.IO
                         backend = SoundBackendOption.Unity;
 #endif
                         MajEnv.Settings.Audio.Backend = backend;
-                        MajDebug.LogDebug($"Fallback to {backend}");
+                        MajDebug.LogDebug($"[Audio]Fallback to {backend}");
                         break;
                 }
 #endif
+                if (isBassBackend)
+                {
+                    var bassAudioOptions = MajEnv.Settings.Audio.Bass;
+                    bassAudioOptions.UpdatePeriodMs = bassAudioOptions.UpdatePeriodMs.Clamp(5, 100);
+                    bassAudioOptions.BufferLengthMs = bassAudioOptions.BufferLengthMs.Clamp(bassAudioOptions.UpdatePeriodMs + 1, 5000);
+                    bassAudioOptions.DeviceUpdatePeriodMs = bassAudioOptions.DeviceUpdatePeriodMs.Clamp(1, int.MaxValue);
+                    bassAudioOptions.DeviceBufferLengthMs = bassAudioOptions.DeviceBufferLengthMs.Clamp(bassAudioOptions.DeviceUpdatePeriodMs * 2, int.MaxValue);
+                    var @return = default(bool);
+#if UNITY_ANDROID // Android Only (AAudio Config)
+                    @return = Bass.Configure(Configuration.AndroidAAudio, bassAudioOptions.EnableAAudio);
+                    MajDebug.LogInfo($"[Audio][Bass]Set AndroidAAudio: {@return}");
+#endif
+                    @return = Bass.Configure(Configuration.UpdatePeriod, bassAudioOptions.UpdatePeriodMs);
+                    MajDebug.LogInfo($"[Audio][Bass]Set UpdatePeriod: {@return}");
+                    @return = Bass.Configure(Configuration.PlaybackBufferLength, bassAudioOptions.BufferLengthMs);
+                    MajDebug.LogInfo($"[Audio][Bass]Set PlaybackBufferLength: {@return}");
+                    @return = Bass.Configure(Configuration.DevicePeriod, bassAudioOptions.DeviceUpdatePeriodMs);
+                    MajDebug.LogInfo($"[Audio][Bass]Set DevicePeriod: {@return}");
+                    @return = Bass.Configure(Configuration.DeviceBufferLength, bassAudioOptions.DeviceBufferLengthMs);
+                    MajDebug.LogInfo($"[Audio][Bass]Set DeviceBufferLength: {@return}");
+
+                    Bass.Configure(Configuration.DevNonStop, true);
+                }
                 switch (backend)
                 {
 #if UNITY_STANDALONE_WIN
                     case SoundBackendOption.Asio:
                         {
-                            MajDebug.LogInfo("Bass Init: " + Bass.Init(Bass.NoSoundDevice));
+                            MajDebug.LogInfo("[Audio][Bass]Init: " + Bass.Init(Bass.NoSoundDevice));
                             var asioCount = BassAsio.DeviceCount;
                             for (int i = 0; i < asioCount; i++)
                             {
                                 BassAsio.GetDeviceInfo(i, out var info);
-                                MajDebug.LogInfo("ASIO Device " + i + ": " + info.Name);
+                                var text = "[Audio][BassAsio]ASIO Device " + i + ": " + info.Name;
+                                if(i == deviceIndex)
+                                {
+                                    text += " (Selected)";
+                                }
+                                MajDebug.LogInfo(text);
                             }
 
-                            MajDebug.LogInfo("Asio Init: " + BassAsio.Init(deviceIndex, AsioInitFlags.Thread));
-                            MajDebug.LogInfo($"[BassAsio] LastError = {Bass.LastError}");
+                            MajDebug.LogInfo("[Audio][BassAsio]Init: " + BassAsio.Init(deviceIndex, AsioInitFlags.Thread));
+                            MajDebug.LogInfo($"[Audio][BassAsio]LastError = {Bass.LastError}");
                             var asioInfo = BassAsio.Info;
                             var deviceInfo = BassAsio.GetDeviceInfo(BassAsio.CurrentDevice);
                             BassAsio.Rate = asioOptions.SampleRate;
@@ -157,14 +178,14 @@ namespace MajdataPlay.IO
                             {
                                 if (!BassAsio.ChannelJoin(false, i, 0)) // let channel i follow channel 0
                                 {
-                                    MajDebug.LogError($"ASIO Channel {i} Join to 0 Failed: " + BassAsio.LastError);
+                                    MajDebug.LogError($"[Audio][BassAsio]ASIO Channel {i} Join to 0 Failed: " + BassAsio.LastError);
                                 }
                                 else
                                 {
                                     BassAsio.ChannelSetFormat(false, i, AsioSampleFormat.Float);
                                 }
                             }
-                            MajDebug.LogInfo($"[BassAsio] Channel count: {asioInfo.Outputs}");
+                            MajDebug.LogInfo($"[Audio][BassAsio]Channel count: {asioInfo.Outputs}");
                             GenerateMixingMatrix(asioInfo.Outputs);
 
                             BassAsio.Start();
@@ -172,8 +193,10 @@ namespace MajdataPlay.IO
                         break;
                     case SoundBackendOption.Wasapi:
                         {
-                            MajDebug.LogInfo("Bass Init: " + Bass.Init(Bass.NoSoundDevice));
-
+                            MajDebug.LogInfo("[Audio][Bass]Init: " + Bass.Init(Bass.NoSoundDevice));
+                            var isExclusiveRequest = wasapiOptions.Exclusive;
+                            var isRawMode = wasapiOptions.RawMode;
+                            var isAsyncMode = wasapiOptions.AsyncMode;
                             bool wasapiOk = false;
                             // Priority order: exclusive+raw > exclusive > shared+raw > shared
                             // Start from user config, fall through on failure.
@@ -201,7 +224,11 @@ namespace MajdataPlay.IO
                                 var flags = WasapiInitFlags.EventDriven;
                                 if (exclusive)
                                 {
-                                    flags |= WasapiInitFlags.Exclusive | WasapiInitFlags.Async;
+                                    flags |= WasapiInitFlags.Exclusive;
+                                    if(isAsyncMode)
+                                    {
+                                        flags |= WasapiInitFlags.Async;
+                                    }
                                 }
                                 else
                                 {
@@ -214,7 +241,7 @@ namespace MajdataPlay.IO
                                 float buffer = exclusive ? wasapiOptions.BufferSize : 0f;
                                 float period = exclusive ? wasapiOptions.Period : 0f;
                                 wasapiOk = BassWasapi.Init(-1, 0, 0, flags, buffer, period, _wasapiProcedure);
-                                MajDebug.LogInfo($"Wasapi Init (exclusive={exclusive}, raw={raw}): {wasapiOk} (LastError={Bass.LastError})");
+                                MajDebug.LogInfo($"[Audio][BassWasapi]Init (exclusive={exclusive}, raw={raw}): {wasapiOk} (LastError={Bass.LastError})");
                                 if (wasapiOk)
                                 {
                                     successIdx = i;
@@ -225,19 +252,19 @@ namespace MajdataPlay.IO
 
                             if (!wasapiOk)
                             {
-                                MajDebug.LogError("All WASAPI init combinations failed");
+                                MajDebug.LogError("[Audio][BassWasapi]All WASAPI init combinations failed");
                             }
                             else if (successIdx != startIdx)
                             {
                                 var (exclusive, raw) = combos[successIdx];
-                                MajDebug.LogWarning($"WASAPI fallback: config requested (exclusive={isExclusiveRequest}, raw={isRawMode}) but succeeded with (exclusive={exclusive}, raw={raw})");
+                                MajDebug.LogWarning($"[Audio][BassWasapi]WASAPI fallback: config requested (exclusive={isExclusiveRequest}, raw={isRawMode}) but succeeded with (exclusive={exclusive}, raw={raw})");
                             }
 
                             BassWasapi.GetInfo(out var wasapiInfo);
                             BassGlobalMixer = BassMix.CreateMixerStream(wasapiInfo.Frequency, wasapiInfo.Channels, BassFlags.MixerNonStop | BassFlags.Decode | BassFlags.Float);
                             Bass.ChannelSetAttribute(BassGlobalMixer, ChannelAttribute.Buffer, 0);
                             Bass.ChannelSetAttribute(BassGlobalMixer, (ChannelAttribute)86017, 8);
-                            MajDebug.LogInfo($"[BassWasapi] Channel count: {wasapiInfo.Channels}");
+                            MajDebug.LogInfo($"[Audio][BassWasapi]Channel count: {wasapiInfo.Channels}");
                             GenerateMixingMatrix(wasapiInfo.Channels);
                             BassWasapi.Start();
                         }
@@ -245,39 +272,13 @@ namespace MajdataPlay.IO
 #endif
                     case SoundBackendOption.BassSimple:
                         {
-
-                            var bassAudioOptions = MajEnv.Settings.Audio.Bass;
-                            bassAudioOptions.UpdatePeriodMs = bassAudioOptions.UpdatePeriodMs.Clamp(5, 100);
-                            bassAudioOptions.BufferLengthMs = bassAudioOptions.BufferLengthMs.Clamp(bassAudioOptions.UpdatePeriodMs + 1, 5000);
-                            bassAudioOptions.DeviceUpdatePeriodMs = bassAudioOptions.DeviceUpdatePeriodMs.Clamp(1, int.MaxValue);
-                            bassAudioOptions.DeviceBufferLengthMs = bassAudioOptions.DeviceBufferLengthMs.Clamp(bassAudioOptions.DeviceUpdatePeriodMs * 2, int.MaxValue);
-                            var @return = default(bool);
-#if UNITY_ANDROID // Android Only (AAudio Config)
-                            @return = Bass.Configure(Configuration.AndroidAAudio, bassAudioOptions.EnableAAudio);
-                            MajDebug.LogInfo($"[Bass] Set AndroidAAudio: {@return}");
-#endif
-                            @return = Bass.Configure(Configuration.UpdatePeriod, bassAudioOptions.UpdatePeriodMs);
-                            MajDebug.LogInfo($"[Bass] Set UpdatePeriod: {@return}");
-                            @return = Bass.Configure(Configuration.PlaybackBufferLength, bassAudioOptions.BufferLengthMs);
-                            MajDebug.LogInfo($"[Bass] Set PlaybackBufferLength: {@return}");
-                            @return = Bass.Configure(Configuration.DevicePeriod, bassAudioOptions.DeviceUpdatePeriodMs);
-                            MajDebug.LogInfo($"[Bass] Set DevicePeriod: {@return}");
-                            @return = Bass.Configure(Configuration.DeviceBufferLength, bassAudioOptions.DeviceBufferLengthMs);
-                            MajDebug.LogInfo($"[Bass] Set DeviceBufferLength: {@return}");
-                            
-                            Bass.Configure(Configuration.DevNonStop, true);
-                            MajDebug.LogInfo("Bass Init: " + Bass.Init());
-                            MajDebug.LogInfo($"[Bass] LastError = {Bass.LastError}");
-                            var info = Bass.Info;
-                            MajDebug.LogInfo($"[Bass] Min playback buffer length: {info.MinBufferLength}");
-                            MajDebug.LogInfo($"[Bass] Current device buffer length: {Bass.GetConfig(Configuration.DeviceBufferLength)}");
-                            MajDebug.LogInfo($"[Bass] Current device period: {Bass.GetConfig(Configuration.DevicePeriod)}");
-                            MajDebug.LogInfo($"[Bass] Channel count: {Bass.Info.SpeakerCount}");
+                            MajDebug.LogInfo("[Audio][Bass]Init: " + Bass.Init());
+                            MajDebug.LogInfo($"[Audio][Bass]LastError = {Bass.LastError}");
                             GenerateMixingMatrix(Bass.Info.SpeakerCount);
                         }
                         break;
                 }
-                if (isBass)
+                if (isBassBackend)
                 {
                     unsafe
                     {
@@ -285,14 +286,19 @@ namespace MajdataPlay.IO
                         fixed (char* ptr = &MemoryMarshal.GetReference(ua.AsSpan()))
                         {
                             var isSuccess = Bass.Configure(Configuration.NetAgent, (IntPtr)ptr);
-                            MajDebug.LogInfo($"[Bass] Set user-agent: {isSuccess}");
+                            MajDebug.LogInfo($"[Audio][Bass]Set user-agent: {isSuccess}");
                         }
                     }
+                    var info = Bass.Info;
+                    MajDebug.LogInfo($"[Audio][Bass]Min playback buffer length: {info.MinBufferLength}");
+                    MajDebug.LogInfo($"[Audio][Bass]Current device buffer length: {Bass.GetConfig(Configuration.DeviceBufferLength)}");
+                    MajDebug.LogInfo($"[Audio][Bass]Current device period: {Bass.GetConfig(Configuration.DevicePeriod)}");
+                    MajDebug.LogInfo($"[Audio][Bass]Channel count: {Bass.Info.SpeakerCount}");
                 }
                 InitSFXSample(SFXFileNames, SFXFilePath);
                 InitSFXSample(VoiceFileNames, VoiceFilePath);
 
-                if (backend == SoundBackendOption.Wasapi || backend == SoundBackendOption.Asio || backend == SoundBackendOption.BassSimple)
+                if (isBassBackend)
                 {
                     MajDebug.LogInfo(Bass.LastError);
                 }
@@ -317,10 +323,6 @@ namespace MajdataPlay.IO
             {
                 return 0;
             }
-            if (Bass.LastError != Errors.OK)
-            {
-                MajDebug.LogError(Bass.LastError);
-            }
 
             var bytesRead = Bass.ChannelGetData(BassGlobalMixer, buffer, length);
 
@@ -332,10 +334,6 @@ namespace MajdataPlay.IO
             if (BassGlobalMixer == -114514)
             {
                 return 0;
-            }
-            if (Bass.LastError != Errors.OK)
-            {
-                MajDebug.LogError(Bass.LastError);
             }
             var bytesRead = Bass.ChannelGetData(BassGlobalMixer, buffer, length);
 

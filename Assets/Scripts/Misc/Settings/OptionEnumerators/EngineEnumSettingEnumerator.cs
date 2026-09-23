@@ -15,6 +15,7 @@ public sealed class EngineEnumSettingEnumerator: DefaultEnumEnumerator, IOptionE
         {
             case "RenderQuality":
                 QualitySettings.SetQualityLevel(Convert.ToInt32(Current), true);
+                GameManager.ApplyRenderScale(((DisplayOptions)Target).RenderScale);
                 break;
         }
         _lastValue = Current;

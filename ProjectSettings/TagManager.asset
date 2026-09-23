@@ -80,6 +80,9 @@ TagManager:
   - name: Tap
     uniqueID: 1842247769
     locked: 0
+  - name: TouchHold Border
+    uniqueID: 2053073107
+    locked: 0
   - name: Touch
     uniqueID: 2327307507
     locked: 0

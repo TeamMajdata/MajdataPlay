@@ -46,7 +46,7 @@ namespace MajdataPlay.IO
 
             public static void Init()
             {
-                if (Interlocked.CompareExchange(ref _isInited, 0, 1) == 1)
+                if (Interlocked.CompareExchange(ref _isInited, 1, 0) != 0)
                 {
                     return;
                 }
@@ -67,7 +67,7 @@ namespace MajdataPlay.IO
                 try
                 {
                     var manufacturer = IODetector.DeviceManufacturer;
-                    if(manufacturer is DeviceManufacturerOption.Yuan)
+                    if (manufacturer is DeviceManufacturerOption.Yuan)
                     {
                         _refreshRateMs = Mathf.Max(_refreshRateMs, 100);
                     }
@@ -80,6 +80,9 @@ namespace MajdataPlay.IO
                             break;
                         case DeviceManufacturerOption.Dao:
                             _ledDeviceUpdateLoop = Task.Factory.StartNew(HIDUpdateLoop, TaskCreationOptions.LongRunning);
+                            break;
+                        case DeviceManufacturerOption.Pipe:
+                            _ledDeviceUpdateLoop = Task.Factory.StartNew(PipeUpdateLoop, TaskCreationOptions.LongRunning);
                             break;
                         default:
                             MajDebug.LogWarning(nameof(LedDevice), $"Not supported led device manufacturer: {manufacturer}");
@@ -463,7 +466,7 @@ namespace MajdataPlay.IO
                 {
                     IsConnected = false;
                     hidStream?.Close();
-                    hidStream?.Dispose();                    
+                    hidStream?.Dispose();
                     MajDebug.LogWarning(nameof(LedDevice), "Thread has exited");
 
                 }
@@ -485,7 +488,7 @@ namespace MajdataPlay.IO
                 var refreshRate = TimeSpan.FromMilliseconds(ledOptions.RefreshRateMs);
                 var currentThread = Thread.CurrentThread;
 
-                if(refreshRate.TotalMilliseconds > 500)
+                if (refreshRate.TotalMilliseconds > 500)
                 {
                     refreshRate = TimeSpan.FromMilliseconds(500);
                 }
@@ -551,12 +554,12 @@ namespace MajdataPlay.IO
 
                 while (!token.IsCancellationRequested)
                 {
-                    Thread.Sleep(MajEnv.IO_DEVICE_RECONNECT_INTERVAL_MSEC);
-                    var pipeClientStream = new NamedPipeClientStream(".", pipeName, PipeDirection.InOut, PipeOptions.Asynchronous)
+                    if (token.WaitHandle.WaitOne(MajEnv.IO_DEVICE_RECONNECT_INTERVAL_MSEC))
                     {
-                        ReadTimeout = 2000,
-                        WriteTimeout = 2000
-                    };
+                        break;
+                    }
+                    using var pipeClientStream = new NamedPipeClientStream(".", pipeName, PipeDirection.InOut, PipeOptions.Asynchronous);
+                    using var cancellation = token.Register(() => pipeClientStream.Dispose());
                     try
                     {
                         try
@@ -565,27 +568,30 @@ namespace MajdataPlay.IO
                             pipeClientStream.Connect(2000);
                             MajDebug.LogInfo(nameof(LedDevice), "Connected");
                         }
+                        catch (Exception) when (token.IsCancellationRequested)
+                        {
+                            break;
+                        }
                         catch (Exception e)
                         {
                             MajDebug.LogError(nameof(LedDevice), $"Failed to connect to pipe\n{e}");
                             continue;
                         }
                         IsConnected = true;
-                        
-                        stopwatch.Start();
-                        while (true)
+                        var forceUpdate = true;
+                        stopwatch.Restart();
+                        while (!token.IsCancellationRequested)
                         {
-                            token.ThrowIfCancellationRequested();
+                            t1 = stopwatch.Elapsed;
                             try
                             {
-                                var now = MajTimeline.UnscaledTime;
                                 var needUpdate = false;
                                 var writtenBytes = 0;
                                 for (var i = 0; i < 8; i++)
                                 {
                                     var color = ledRingColors[i];
                                     ref var latestReport = ref latestReports[i];
-                                    if (latestReport.Color == color && _isThrottlerEnabled)
+                                    if (!forceUpdate && latestReport.Color == color && _isThrottlerEnabled)
                                     {
                                         continue;
                                     }
@@ -610,13 +616,14 @@ namespace MajdataPlay.IO
                                 if (needUpdate)
                                 {
                                     pipeClientStream.Write(packetBuffer.Slice(0, packetLen));
+                                    forceUpdate = false;
                                 }
                                 else
                                 {
                                     pipeClientStream.Write(heartBeatData);
                                 }
                             }
-                            catch (OperationCanceledException)
+                            catch (Exception) when (token.IsCancellationRequested)
                             {
                                 break;
                             }
@@ -629,6 +636,7 @@ namespace MajdataPlay.IO
                             catch (Exception e)
                             {
                                 MajDebug.LogError(nameof(LedDevice), $"{e}");
+                                break;
                             }
                             finally
                             {
@@ -647,6 +655,7 @@ namespace MajdataPlay.IO
                     }
                     finally
                     {
+                        IsConnected = false;
                         pipeClientStream.Dispose();
                     }
                 }

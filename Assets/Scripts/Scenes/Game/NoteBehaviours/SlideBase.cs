@@ -175,8 +175,9 @@ namespace MajdataPlay.Scenes.Game.Notes.Behaviours
         /// <summary>
         /// Slide star
         /// </summary>
-        protected readonly Memory<GameObject?> Stars = Memory<GameObject?>.Empty;
-        protected readonly Memory<Transform> StarTransforms = Memory<Transform>.Empty;
+        protected readonly Memory<GameObject?> Stars = new GameObject?[3];
+        protected readonly Memory<SpriteRenderer?> StarRenderers = new SpriteRenderer?[3];
+        protected readonly Memory<Transform?> StarTransforms = new Transform?[3];
 
         protected SlideOK? SlideOK;
 
@@ -209,22 +210,8 @@ namespace MajdataPlay.Scenes.Game.Notes.Behaviours
         [ReadOnlyField, SerializeField]
         private int _multiple = 1;
 
-        private GameObject?[] _rentedArrayForStars;
-        private Transform[] _rentedArrayForStarTransforms;
         private SlideArea?[] _lastTriggerAreas = new SlideArea?[3];
 
-        protected SlideBase()
-        {
-            _rentedArrayForStars = Pool<GameObject?>.RentArray(3, true);
-            _rentedArrayForStarTransforms = Pool<Transform>.RentArray(3, true);
-
-            Stars = _rentedArrayForStars.AsMemory(0, 3);
-            StarTransforms = _rentedArrayForStarTransforms.AsMemory(0, 3);
-        }
-        ~SlideBase()
-        {
-            Dispose();
-        }
         public abstract void Init();
         protected void MineCheck()
         {
@@ -504,12 +491,12 @@ namespace MajdataPlay.Scenes.Game.Notes.Behaviours
             {
                 return;
             }
-            ref var slideBarRef = ref MemoryMarshal.GetReference(SlideBars.AsSpan());
+            ref var slideBarRenderersRef = ref MemoryMarshal.GetReference(SlideBarRenderers.AsSpan());
             for (; LastHiddenSlideBarIndex <= endIndex; LastHiddenSlideBarIndex++)
             {
-                ref var slideBar = ref Unsafe.Add(ref slideBarRef, LastHiddenSlideBarIndex);
+                ref var slideBarRenderer = ref Unsafe.Add(ref slideBarRenderersRef, LastHiddenSlideBarIndex);
                 //_slideBarRenderers[i].forceRenderingOff = true;
-                slideBar.layer = MajEnv.HIDDEN_LAYER;
+                slideBarRenderer.enabled = false;
             }
         }
         [Il2CppSetOption(Option.NullChecks, false)]
@@ -555,24 +542,22 @@ namespace MajdataPlay.Scenes.Game.Notes.Behaviours
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         void SetSlideBarRender(float alpha, Material? material, int setMode)
         {
-            ref var slideBarRef = ref MemoryMarshal.GetReference(SlideBars.AsSpan());
             ref var rendererRef = ref MemoryMarshal.GetReference(SlideBarRenderers.AsSpan());
             var count = SlideBars.Count;
             var newColor = new Color(1f, 1f, 1f, alpha);
             for (var i = 0; i < count; i++)
             {
                 ref var sr = ref Unsafe.Add(ref rendererRef, i);
-                ref var obj = ref Unsafe.Add(ref slideBarRef, i);
                 switch(setMode)
                 {
                     case SLIDE_BAR_MODE_SET_ALPHA:
                         if (alpha <= 0f)
                         {
-                            obj.layer = MajEnv.HIDDEN_LAYER;
+                            sr.enabled = false;
                         }
                         else
                         {
-                            obj.layer = MajEnv.DEFAULT_LAYER;
+                            sr.enabled = true;
                             sr.color = newColor;
                         }
                         break;
@@ -582,11 +567,11 @@ namespace MajdataPlay.Scenes.Game.Notes.Behaviours
                     case SLIDE_BAR_MODE_SET_ALPHA_AND_MATERIAL:
                         if (alpha <= 0f)
                         {
-                            obj.layer = MajEnv.HIDDEN_LAYER;
+                            sr.enabled = false;
                         }
                         else
                         {
-                            obj.layer = MajEnv.DEFAULT_LAYER;
+                            sr.enabled = true;
                             sr.color = newColor;
                         }
                         sr.sharedMaterial = material;
@@ -600,17 +585,12 @@ namespace MajdataPlay.Scenes.Game.Notes.Behaviours
         public sealed override void SetActive(bool state)
         {
             base.SetActive(state);
-            ref var slideBarRef = ref MemoryMarshal.GetReference(SlideBars.AsSpan());
-            var count = SlideBars.Count;
-            var layer = MajEnv.HIDDEN_LAYER;
-            if (state)
-            {
-                layer = MajEnv.DEFAULT_LAYER;
-            }
+            ref var slideBarRenderersRef = ref MemoryMarshal.GetReference(SlideBarRenderers.AsSpan());
+            var count = SlideBarRenderers.Count;
             for (var i = 0; i < count; i++)
             {
-                ref var slideBar = ref Unsafe.Add(ref slideBarRef, i);
-                slideBar.layer = layer;
+                ref var slideBarRenderer = ref Unsafe.Add(ref slideBarRenderersRef, i);
+                slideBarRenderer.enabled = state;
             }
             SetStarActive(state);
         }
@@ -619,31 +599,15 @@ namespace MajdataPlay.Scenes.Game.Notes.Behaviours
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         protected void SetStarActive(bool state)
         {
-            var stars = Stars.Span;
-            switch (state)
+            var starRenderers = StarRenderers.Span;
+            for (var i = 0; i < starRenderers.Length; i++)
             {
-                case true:
-                    for (var i = 0; i < stars.Length; i++)
-                    {
-                        var star = stars[i];
-                        if (star is null)
-                        {
-                            continue;
-                        }
-                        star.layer = MajEnv.DEFAULT_LAYER;
-                    }
-                    break;
-                case false:
-                    for (var i = 0; i < stars.Length; i++)
-                    {
-                        var star = stars[i];
-                        if (star is null)
-                        {
-                            continue;
-                        }
-                        star.layer = MajEnv.HIDDEN_LAYER;
-                    }
-                    break;
+                var starRenderer = starRenderers[i];
+                if (starRenderer is null)
+                {
+                    continue;
+                }
+                starRenderer.enabled = state;
             }
         }
         [Il2CppSetOption(Option.NullChecks, false)]
@@ -752,11 +716,15 @@ namespace MajdataPlay.Scenes.Game.Notes.Behaviours
                 return;
             }
             SetStarActive(false);
-            foreach (ref var star in Stars.Span)
+            var stars = Stars.Span;
+            var starTransforms = StarTransforms.Span;
+            var starRenderers = StarRenderers.Span;
+            for (var i = 0; i < 3; i++)
             {
-                star = null;
+                stars[i] = null;
+                starTransforms[i] = null;
+                starRenderers[i] = null;
             }
-            //GameObjectHelper.Destroy(ref _stars);
         }
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         protected void SlideBarFadeIn()
@@ -841,10 +809,6 @@ namespace MajdataPlay.Scenes.Game.Notes.Behaviours
                 }
             }
         }
-        protected virtual void OnDestroy()
-        {
-            Dispose();
-        }
         protected void JudgeGradeCorrection(ref JudgeGrade result)
         {
             switch (result)
@@ -863,22 +827,7 @@ namespace MajdataPlay.Scenes.Game.Notes.Behaviours
         protected sealed override float GetRemainingTimeWithoutOffset() => MathF.Max(ArriveTiming - ThisFrameSec, 0);
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         protected sealed override float GetTimeSpanToArriveTiming() => ThisFrameSec - ArriveTiming;
-        void Dispose()
-        {
-            if(_rentedArrayForStars.Length != 0)
-            {
-                Pool<GameObject?>.ReturnArray(_rentedArrayForStars, true);
-                _rentedArrayForStars = Array.Empty<GameObject?>();
-            }
-            if(_rentedArrayForStarTransforms.Length != 0)
-            {
-                Pool<Transform>.ReturnArray(_rentedArrayForStarTransforms, true);
-                _rentedArrayForStarTransforms = Array.Empty<Transform>();
-            }
-            SlideBars.Dispose();
-            SlideBarTransforms.Dispose();
-            SlideBarRenderers.Dispose();
-        }
+
         [ReadOnlyField, SerializeField]
         float _startTiming;
         [ReadOnlyField, SerializeField]

@@ -21,10 +21,7 @@ namespace MajdataPlay.Scenes.Game.Notes.Behaviours
 {
     internal sealed class WifiDrop : SlideBase, IMajComponent
     {
-
         readonly Vector3[] _starEndPositions = new Vector3[3];
-
-        readonly SpriteRenderer[] _starRenderers = new SpriteRenderer[3];
 
         Vector3[] _starStartPositions = new Vector3[3];
 
@@ -36,6 +33,7 @@ namespace MajdataPlay.Scenes.Game.Notes.Behaviours
             EndPos = 5;
             var stars = Stars.Span;
             var starTransforms = StarTransforms.Span;
+            var starRenderers = StarRenderers.Span;
 
             var slideParent = NoteManager.transform.GetChild(3);
             var centerStar = Instantiate(SlideStarPrefab, slideParent);
@@ -52,9 +50,9 @@ namespace MajdataPlay.Scenes.Game.Notes.Behaviours
             stars[0] = rightStar;
             stars[1] = centerStar;
             stars[2] = leftStar;
-            _starRenderers[0] = stars[0]!.GetComponent<SpriteRenderer>();
-            _starRenderers[1] = stars[1]!.GetComponent<SpriteRenderer>();
-            _starRenderers[2] = stars[2]!.GetComponent<SpriteRenderer>();
+            starRenderers[0] = stars[0]!.GetComponent<SpriteRenderer>();
+            starRenderers[1] = stars[1]!.GetComponent<SpriteRenderer>();
+            starRenderers[2] = stars[2]!.GetComponent<SpriteRenderer>();
             JudgeQueues[0] = _wifiTable.Left;
             JudgeQueues[1] = _wifiTable.Center;
             JudgeQueues[2] = _wifiTable.Right;
@@ -68,8 +66,8 @@ namespace MajdataPlay.Scenes.Game.Notes.Behaviours
                 _starStartPositions[1] = NoteHelper.GetTapPosition(StartPos, 4.8f);
                 _starStartPositions[2] = NoteHelper.GetTapPosition(StartPos - 0.13f, 4.55f);
 
-                _starRenderers[0].sortingOrder = -1;
-                _starRenderers[2].sortingOrder = -1;
+                starRenderers[0].sortingOrder = -1;
+                starRenderers[2].sortingOrder = -1;
             }
             else
             {
@@ -315,6 +313,7 @@ namespace MajdataPlay.Scenes.Game.Notes.Behaviours
 
                 var stars = Stars.Span;
                 var starTransforms = StarTransforms.Span;
+                var starRenderers = StarRenderers.Span;
                 switch (State)
                 {
                     case NoteStatus.Inited:
@@ -340,7 +339,7 @@ namespace MajdataPlay.Scenes.Game.Notes.Behaviours
                             {
                                 var starTransform = starTransforms[i];
 
-                                _starRenderers[i].color = new Color(1, 1, 1, 1);
+                                starRenderers[i].color = new Color(1, 1, 1, 1);
                                 if (!IsSlideNoHead)
                                 {
                                     starTransform.localScale = new Vector3(1.5f, 1.5f, 1.5f);
@@ -359,7 +358,7 @@ namespace MajdataPlay.Scenes.Game.Notes.Behaviours
                         {
                             var starTransform = starTransforms[i];
 
-                            _starRenderers[i].color = new Color(1, 1, 1, alpha);
+                            starRenderers[i].color = new Color(1, 1, 1, alpha);
                             if (IsClassic)
                             {
                                 var scale = 1 + alpha / 2;
@@ -531,7 +530,7 @@ namespace MajdataPlay.Scenes.Game.Notes.Behaviours
         {
             var barRenderers = SlideBarRenderers;
             var skin = MajInstances.SkinManager.GetWifiSkin();
-
+            var starRenderers = StarRenderers.Span;
             var barSprites = skin.Normal;
             var starSprite = skin.Star.Normal;
             Material? breakMaterial = null;
@@ -571,7 +570,7 @@ namespace MajdataPlay.Scenes.Game.Notes.Behaviours
             }
             foreach (var (i, star) in Stars.Span.WithIndex())
             {
-                var starRenderer = _starRenderers[i];
+                var starRenderer = starRenderers[i];
                 starRenderer.sprite = starSprite;
                 if (breakMaterial is not null)
                 {
@@ -591,9 +590,8 @@ namespace MajdataPlay.Scenes.Game.Notes.Behaviours
                 SlideOK!.transform.Rotate(new Vector3(0f, 0f, 180f));
             }
         }
-        protected override void OnDestroy()
+        void OnDestroy()
         {
-            base.OnDestroy();
             _wifiTable.Dispose();
         }
     }

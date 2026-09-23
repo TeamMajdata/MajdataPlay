@@ -1,5 +1,7 @@
 ﻿using Cysharp.Text;
 using Cysharp.Threading.Tasks;
+using MajdataPlay.Rendering;
+using MajdataPlay.Databases;
 using MajdataPlay.Buffers;
 using MajdataPlay.Collections;
 using MajdataPlay.Diagnostics;
@@ -167,7 +169,7 @@ namespace MajdataPlay.Scenes.Game
             {"L3", 38 },
             {"L4", 39 },
             {"L5", 40 },
-            {"Ex", 41 },
+            {"Ex", 42 },
         };
 
         readonly static IReadOnlyDictionary<SensorArea, SensorArea[]> TOUCH_GROUPS = new Dictionary<SensorArea, SensorArea[]>()
@@ -260,6 +262,12 @@ namespace MajdataPlay.Scenes.Game
         }
         internal async UniTask LoadNotesIntoPoolAsync(SimaiChart maiChart, CancellationToken token = default)
         {
+            await UniTask.SwitchToMainThread(token);
+            var skin = MajInstances.SkinManager.SelectedSkin;
+            var materials = GameRuntime.Instance.Note;
+            NoteSpriteResources.PreloadMaterials(skin, materials.DefaultMaterial,
+                materials.BreakMaterial, materials.HoldShineMaterial, breakMaterial);
+
             List<Task> touchTasks = new();
 
             _noteManager.ResetCounter();
@@ -288,7 +296,7 @@ namespace MajdataPlay.Scenes.Game
             {
 
                 var lastNoteTime = maiChart.NoteTimings[^1].Timing;
-                var randomMappingTableLifeTime = new Range<double>(double.MinValue,double.MinValue, ContainsType.Closed);
+                var randomMappingTableLifeTime = new Range<double>(double.MinValue, double.MinValue, ContainsType.Closed);
                 var isSRandomEnabled = MajEnv.Settings.Game.Random == RandomModeOption.S_RANDOM;
                 for (var i = 0; i < maiChart.NoteTimings.Length; i++)
                 {
@@ -328,7 +336,7 @@ namespace MajdataPlay.Scenes.Game
                                         if (isSRandomEnabled)
                                         {
                                             var endTiming = timing.Timing + note.HoldTime;
-                                            if(!randomMappingTableLifeTime.InRange(endTiming))
+                                            if (!randomMappingTableLifeTime.InRange(endTiming))
                                             {
                                                 randomMappingTableLifeTime = new Range<double>(randomMappingTableLifeTime.Start, endTiming, ContainsType.RightOpen);
                                             }
@@ -436,7 +444,7 @@ namespace MajdataPlay.Scenes.Game
                             {
                                 _poolManager.AddEachLine(eachLinePoolingInfo);
                             }
-                        }                            
+                        }
                     }
                 }
 
@@ -463,7 +471,7 @@ namespace MajdataPlay.Scenes.Game
                 {
                     tapInfo.EachLineBinding = binding;
                 }
-                else if(note is HoldPoolingInfo holdInfo)
+                else if (note is HoldPoolingInfo holdInfo)
                 {
                     holdInfo.EachLineBinding = binding;
                 }
@@ -953,7 +961,7 @@ namespace MajdataPlay.Scenes.Game
                 }
             });
         }
-        
+
         private void CreateSlideGroup(SimaiTimingPoint timing, FoldedSimaiNote note, in IList<NotePoolingInfo?> eachNotes)
         {
             try
@@ -1019,7 +1027,7 @@ namespace MajdataPlay.Scenes.Game
                                 }
                             }
                             var endPos = noteContent[ptr++];
-                            
+
                             sb.Append(latestStartIndex);
                             sb.Append(slideTypeChar);
                             sb.Append(endPos);
@@ -1072,10 +1080,10 @@ namespace MajdataPlay.Scenes.Game
                                                                           "组合星星有错误\nSLIDE CHAIN ERROR");
                             }
                         }
-                        if(string.IsNullOrEmpty(slidePart.RawContent))
+                        if (string.IsNullOrEmpty(slidePart.RawContent))
                         {
                             slidePart.RawContent = sb.ToString();
-                        }                        
+                        }
                         string slideShape = NoteCreateHelper.DetectShapeFromText(slidePart.RawContent);
                         if (slideShape.StartsWith("-"))
                         {
@@ -1095,7 +1103,7 @@ namespace MajdataPlay.Scenes.Game
                         preprocessSubSlides.Add(slidePart);
                     }
                 }
-                foreach(var subSlide in preprocessSubSlides)
+                foreach (var subSlide in preprocessSubSlides)
                 {
                     subSlide.IsBreak = note.IsBreak;
                     subSlide.IsEx = note.IsEx;
@@ -1146,9 +1154,9 @@ namespace MajdataPlay.Scenes.Game
                         }
                         var result = CreateWifi(timing, preprocessSubSlides[i], note.Count);
                         sliObj = result.SlideInstance;
-                        foreach(var starInfo in result.StarInfos)
+                        foreach (var starInfo in result.StarInfos)
                         {
-                            if(starInfo is null)
+                            if (starInfo is null)
                             {
                                 continue;
                             }
@@ -1206,7 +1214,7 @@ namespace MajdataPlay.Scenes.Game
                         judgeQueueLen += table!.JudgeQueue.Length - 1;
                     }
                 }
-                foreach(var subSlide in subSlides)
+                foreach (var subSlide in subSlides)
                 {
                     //subSlide.ConnectInfo.TotalSlideLen = totalSlideLen;
                     subSlide.ConnectInfo.TotalJudgeQueueLen = judgeQueueLen;
@@ -1240,7 +1248,7 @@ namespace MajdataPlay.Scenes.Game
             var speed = (totalSlideLen * 0.47f) / (totalLen * 1000);
             var ratio = speed / 0.0034803742562305f;
 
-            foreach(var starInfo in result.StarInfos)
+            foreach (var starInfo in result.StarInfos)
             {
                 if (starInfo is not null)
                 {
@@ -1286,7 +1294,7 @@ namespace MajdataPlay.Scenes.Game
 
             //slide_star.SetActive(true);
             slide.SetActive(true);
-            if(extraRotation is null)
+            if (extraRotation is null)
             {
                 startPos = NoteCreateHelper.Rotation(startPos, ChartRotation);
                 endPos = NoteCreateHelper.Rotation(endPos, ChartRotation);
@@ -1303,7 +1311,7 @@ namespace MajdataPlay.Scenes.Game
                 }
                 extraRotation = diff;
             }
-            else if(extraRotation is int eR)
+            else if (extraRotation is int eR)
             {
                 startPos = NoteCreateHelper.Rotation(startPos, ChartRotation + eR);
                 endPos = NoteCreateHelper.Rotation(endPos, ChartRotation + eR);
@@ -1558,7 +1566,7 @@ namespace MajdataPlay.Scenes.Game
             }
             public static bool IsEachNote(SimaiNote origin, SimaiNoteType type, ReadOnlySpan<SimaiNote> notes)
             {
-                switch(type)
+                switch (type)
                 {
                     case SimaiNoteType.Tap:
                     case SimaiNoteType.Hold:
@@ -1635,7 +1643,7 @@ namespace MajdataPlay.Scenes.Game
             }
             public static int MirrorKeys(int key)
             {
-                switch(key)
+                switch (key)
                 {
                     case 1:
                         return 1;
@@ -1659,7 +1667,7 @@ namespace MajdataPlay.Scenes.Game
             }
             public static bool IsRightHalf(int key)
             {
-                switch(key)
+                switch (key)
                 {
                     case 1:
                     case 2:
@@ -1972,17 +1980,17 @@ namespace MajdataPlay.Scenes.Game
                 }
                 return true;
             }
-            public static (IReadOnlyDictionary<int, int> ,IReadOnlyDictionary<SensorArea, SensorArea>) GenerateMappingTable()
+            public static (IReadOnlyDictionary<int, int>, IReadOnlyDictionary<SensorArea, SensorArea>) GenerateMappingTable()
             {
                 var touchPannelMappingTable = GenerateTouchPanelMappingTable();
                 var buttonRingMappingTable = GenerateButtonRingMappingTable();
-                foreach(var (k,v) in buttonRingMappingTable)
+                foreach (var (k, v) in buttonRingMappingTable)
                 {
                     touchPannelMappingTable[(SensorArea)(k - 1)] = (SensorArea)(v - 1);
                 }
                 return (buttonRingMappingTable, touchPannelMappingTable);
             }
-            static Dictionary<SensorArea,SensorArea> GenerateTouchPanelMappingTable()
+            static Dictionary<SensorArea, SensorArea> GenerateTouchPanelMappingTable()
             {
                 var areas = ((SensorArea[])Enum.GetValues(typeof(SensorArea))).ToArray();
                 var newAreas = new SensorArea?[33];
@@ -1993,12 +2001,12 @@ namespace MajdataPlay.Scenes.Game
                 {
                     var originArea = (SensorArea)i;
                     SensorArea value;
-                    if(i < 8)
+                    if (i < 8)
                     {
                         newAreas[i] = originArea;
                         continue;
                     }
-                    while(true)
+                    while (true)
                     {
                         value = (SensorArea)rd.Next(0, 33);
                         if (value > SensorArea.E8 || value < SensorArea.A1)
@@ -2050,11 +2058,11 @@ namespace MajdataPlay.Scenes.Game
             {
                 return mappingTable[originKeyIndex];
             }
-            static SensorArea RandomTouch(SensorArea originArea, IReadOnlyDictionary<SensorArea,SensorArea> mappingTable)
+            static SensorArea RandomTouch(SensorArea originArea, IReadOnlyDictionary<SensorArea, SensorArea> mappingTable)
             {
                 return mappingTable[originArea];
             }
-            static (int,int) RandomSlide(int startPos,int endPos, IReadOnlyDictionary<int, int> mappingTable)
+            static (int, int) RandomSlide(int startPos, int endPos, IReadOnlyDictionary<int, int> mappingTable)
             {
                 var diff = startPos - endPos;
                 if (diff > 0)
@@ -2097,10 +2105,10 @@ namespace MajdataPlay.Scenes.Game
 
                 return (newStartPos, newEndPos);
             }
-            public static void SetNewPositionIfRequested(ref int originPos, 
+            public static void SetNewPositionIfRequested(ref int originPos,
                                                          IReadOnlyDictionary<int, int> mappingTable)
             {
-                switch(MajEnv.Settings.Game.Random)
+                switch (MajEnv.Settings.Game.Random)
                 {
                     case RandomModeOption.Disabled:
                         return;
@@ -2110,7 +2118,7 @@ namespace MajdataPlay.Scenes.Game
                         break;
                 }
             }
-            public static void SetNewPositionIfRequested(ref SensorArea originPos, 
+            public static void SetNewPositionIfRequested(ref SensorArea originPos,
                                                          IReadOnlyDictionary<SensorArea, SensorArea> mappingTable)
             {
                 switch (MajEnv.Settings.Game.Random)
@@ -2123,7 +2131,7 @@ namespace MajdataPlay.Scenes.Game
                         break;
                 }
             }
-            public static void SetSlideNewPositionIfRequested(ref int originStartPos, 
+            public static void SetSlideNewPositionIfRequested(ref int originStartPos,
                                                               ref int originEndPos,
                                                               IReadOnlyDictionary<int, int> mappingTable)
             {
@@ -2139,7 +2147,7 @@ namespace MajdataPlay.Scenes.Game
             }
             public static SimaiNote[] NoteFolding(SimaiNote[] simaiNotes)
             {
-                if(!USERSETTING_NOTE_FOLDING)
+                if (!USERSETTING_NOTE_FOLDING)
                 {
                     return simaiNotes;
                 }
@@ -2297,7 +2305,7 @@ namespace MajdataPlay.Scenes.Game
 
             readonly SimaiNote? _origin;
             readonly int _hashCode;
-            public FoldingSimaiNote(SimaiNote origin,bool? isSlideNoHead = null)
+            public FoldingSimaiNote(SimaiNote origin, bool? isSlideNoHead = null)
             {
                 _origin = origin;
                 var hash1 = HashCode.Combine(
@@ -2349,7 +2357,7 @@ namespace MajdataPlay.Scenes.Game
             }
             public override bool Equals(object obj)
             {
-                if(obj is not FoldingSimaiNote obj2)
+                if (obj is not FoldingSimaiNote obj2)
                 {
                     return false;
                 }

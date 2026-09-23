@@ -28,6 +28,8 @@ using Unity.VisualScripting;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 using UnityEngine.Scripting;
+using UnityEngine.Rendering;
+using UnityEngine.Rendering.Universal;
 using MajdataPlay.Diagnostics;
 using MajdataPlay.Databases; // DO NOT REMOVE IT !!!
 
@@ -175,6 +177,7 @@ namespace MajdataPlay
             }
 
             QualitySettings.SetQualityLevel((int)Settings.Display.RenderQuality, true);
+            ApplyRenderScale(Settings.Display.RenderScale);
 #if !(UNITY_ANDROID || UNITY_IOS)
             QualitySettings.vSyncCount = Settings.Display.VSync ? 1 : 0;
 #endif
@@ -278,6 +281,14 @@ namespace MajdataPlay
             MajEnv.GameProcess.PriorityClass = ProcessPriorityClass.BelowNormal;
 #endif
             SceneManager.LoadScene("View");
+        }
+
+        internal static void ApplyRenderScale(int percentage)
+        {
+            if (GraphicsSettings.currentRenderPipeline is UniversalRenderPipelineAsset pipeline)
+            {
+                pipeline.renderScale = Mathf.Clamp(percentage, 50, 100) / 100f;
+            }
         }
 
         public void ApplyScreenConfig()

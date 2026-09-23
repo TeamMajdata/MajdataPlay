@@ -75,11 +75,13 @@ namespace MajdataPlay.Scenes.Game.Notes.Behaviours
             };
             var stars = Stars.Span;
             var starTransforms = StarTransforms.Span;
+            var starRenderers = StarRenderers.Span;
 
             star.SetActive(true);
             stars[0] = star;
             starTransforms[0] = star.transform;
             StarRenderer = star.GetComponent<SpriteRenderer>();
+            starRenderers[0] = StarRenderer;
 
             var slideOK = transform.GetChild(transform.childCount - 1).gameObject; //slideok is the last one
             slideOK.SetActive(true);
@@ -330,9 +332,8 @@ namespace MajdataPlay.Scenes.Game.Notes.Behaviours
             }
         }
 
-        protected override void OnDestroy()
+        void OnDestroy()
         {
-            base.OnDestroy();
             Table?.Dispose();
             StarPositions.Dispose();
             StarRotations.Dispose();

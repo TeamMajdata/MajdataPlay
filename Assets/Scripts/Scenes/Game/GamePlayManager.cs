@@ -904,7 +904,7 @@ namespace MajdataPlay.Scenes.Game
                 }
             }
 
-            _bgManager.SetBackgroundDim(1.0f);
+            _bgManager.SetBrightness(0f);
         }
         /// <summary>
         /// Parse and load notes into NotePool
@@ -1072,8 +1072,8 @@ namespace MajdataPlay.Scenes.Game
                     if (timeDiff > bgFadeStartTiming)
                     {
                         var fadeProgress = ((timeDiff - bgFadeStartTiming) / BG_FADE_IN_LENGTH_SEC).Clamp(0f, 1f);
-                        var dim = 1 - (fadeProgress * dimDiff);
-                        _bgManager.SetBackgroundDim(dim);
+                        var dim = fadeProgress * dimDiff;
+                        _bgManager.SetBrightness(dim);
                     }
                     await UniTask.Yield(PlayerLoopTiming.LastPostLateUpdate);
                     token.ThrowIfCancellationRequested();
@@ -1094,7 +1094,7 @@ namespace MajdataPlay.Scenes.Game
                 _bgManager.PlayVideo(videoStartAt, PlaybackSpeed);
                 MajDebug.LogDebug("Video wait loop exited");
             });
-            _bgManager.SetBackgroundDim(_gameSettings.Game.BackgroundDim);
+            _bgManager.SetBrightness(1 - _gameSettings.Game.BackgroundDim);
             _audioSample.Play();
             _audioSample.Volume = 0;
             _audioSample.CurrentSec = startSec;
@@ -1202,7 +1202,7 @@ namespace MajdataPlay.Scenes.Game
                 _recorderStateDisplayer.OnLateUpdate();
                 if (_bgManager.CurrentSec > _bgManager.MediaLength.TotalSeconds)
                 {
-                    _bgManager.SetBackgroundDim(1.0f);
+                    _bgManager.SetBrightness(0f);
                 }
                 else
                 {

@@ -1,5 +1,6 @@
 ﻿using Cysharp.Threading.Tasks;
 using MajdataPlay.Drawing;
+using MajdataPlay.Rendering;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -168,7 +169,7 @@ namespace MajdataPlay.Scenes.Game.Notes.Skins
                 IsLoaded = true,
                 IsOutlineAvailable = false,
                 _canUnload = false,
-            };           
+            };
 
             Empty = skin;
         }
@@ -294,8 +295,9 @@ namespace MajdataPlay.Scenes.Game.Notes.Skins
             Array.Fill(EachLines, _dummySprite);
         }
 
-        public CustomSkin(string skinCollectionPath, bool loadIntoMemory) : 
-            this(new DirectoryInfo(skinCollectionPath).Name, skinCollectionPath, loadIntoMemory) { }
+        public CustomSkin(string skinCollectionPath, bool loadIntoMemory) :
+            this(new DirectoryInfo(skinCollectionPath).Name, skinCollectionPath, loadIntoMemory)
+        { }
         public CustomSkin(string name, string skinCollectionPath, bool loadIntoMemory) : this(name)
         {
             _path = skinCollectionPath;
@@ -350,6 +352,8 @@ namespace MajdataPlay.Scenes.Game.Notes.Skins
             try
             {
                 await UniTask.SwitchToMainThread();
+                if (!IsLoaded) return;
+                NoteSpriteResources.Unload(this);
 
                 SubDisplay = SafeDestroyIndependent(SubDisplay);
                 LoadingSplash = SafeDestroyIndependent(LoadingSplash);
@@ -515,6 +519,7 @@ namespace MajdataPlay.Scenes.Game.Notes.Skins
             _atlasTexture = await builder.BuildAndAssignAsync();
 
             ProcessFallbacks();
+            NoteSpriteResources.PreloadMeshes(this, builder.Sprites);
             IsLoaded = true;
         }
 
@@ -531,6 +536,7 @@ namespace MajdataPlay.Scenes.Game.Notes.Skins
             _atlasTexture = builder.BuildAndAssign();
 
             ProcessFallbacks();
+            NoteSpriteResources.PreloadMeshes(this, builder.Sprites);
             IsLoaded = true;
         }
 
@@ -775,6 +781,8 @@ namespace MajdataPlay.Scenes.Game.Notes.Skins
         }
 
         private readonly List<SpriteTask> _tasks = new();
+        private readonly List<Sprite> _sprites = new();
+        internal IEnumerable<Sprite> Sprites => _sprites;
         private readonly string _basePath;
 
         public AtlasBuilder(string basePath)
@@ -863,6 +871,7 @@ namespace MajdataPlay.Scenes.Game.Notes.Skins
 
         private Texture2D? ExecutePack(List<Texture2D> textures, List<SpriteTask> validTasks)
         {
+            _sprites.Clear();
             if (textures.Count == 0) return null;
 
             var atlas = new Texture2D(8192, 8192);
@@ -884,6 +893,7 @@ namespace MajdataPlay.Scenes.Game.Notes.Skins
 
                 var sprite = Sprite.Create(atlas, pixelRect, new Vector2(0.5f, 0.5f), 100f, 0, SpriteMeshType.FullRect, validTasks[i].Border);
                 validTasks[i].Assigner(sprite);
+                _sprites.Add(sprite);
             }
 
             foreach (var t in textures)

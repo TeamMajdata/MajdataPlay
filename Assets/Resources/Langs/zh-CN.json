@@ -171,6 +171,8 @@
     "MAJSETTING_PROPERTY_RecordMode_DESC": "OBS：连接OBS WebSocket自动录制。需在OBS开启WebSocket服务并关闭身份验证",
     "MAJSETTING_PROPERTY_RenderQuality": "渲染质量",
     "MAJSETTING_PROPERTY_RenderQuality_DESC": "渲染质量，值越高画面越清晰",
+    "MAJSETTING_PROPERTY_RenderScale": "渲染比例",
+    "MAJSETTING_PROPERTY_RenderScale_DESC": "调整内部渲染分辨率。100% 为原始分辨率；降低可减轻 GPU 负载，但画面和文字会变模糊，不改变布局或判定。",
     "MAJSETTING_PROPERTY_Resolution": "分辨率",
     "MAJSETTING_PROPERTY_Resolution_DESC": "不可调整",
     "MAJSETTING_PROPERTY_Rotation": "旋转",
