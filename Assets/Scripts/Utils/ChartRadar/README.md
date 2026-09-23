@@ -3,17 +3,15 @@
 The radar implementation lives in the `Assets/Plugins/MajRadar` submodule. This
 folder contains only the Play-facing boundary:
 
-- `ChartRadarService` owns one reusable `RadarRuntime` and returns a lightweight
-  `ChartRadarSnapshot` suitable for UI caches.
+- The static `ChartRadarService` owns one reusable `RadarRuntime` and returns a
+  lightweight `ChartRadarSnapshot` suitable for UI caches.
 - `PlayExtendedSlideBarCountProvider` supplies extended `K` Slide geometry with
   Play's existing `SlideCodeParser` and `SlideDataBuilder`.
 
-Callers should retain one service instead of constructing one for every chart:
+Callers invoke the facade directly and do not hold a service instance:
 
 ```csharp
-private readonly ChartRadarService _chartRadarService = new();
-
-var snapshot = await _chartRadarService.AnalyzeAsync(chart, cancellationToken);
+var snapshot = await ChartRadarService.AnalyzeAsync(chart, cancellationToken);
 ```
 
 Selection code continues to own cancellation, generation checks, logging, and

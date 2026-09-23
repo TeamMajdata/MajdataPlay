@@ -45,21 +45,21 @@ public sealed class ChartRadarSnapshot
 /// Play's long-lived radar service. The only supported gameplay geometry is
 /// wired directly here; callers do not select or replace dependencies per call.
 /// </summary>
-public sealed class ChartRadarService
+public static class ChartRadarService
 {
-    private readonly RadarRuntime _runtime =
+    private static readonly RadarRuntime Runtime =
         new(new PlayExtendedSlideBarCountProvider());
 
-    public ChartRadarSnapshot Analyze(
+    public static ChartRadarSnapshot Analyze(
         SimaiChart chart,
         CancellationToken cancellationToken = default) =>
-        ChartRadarSnapshot.From(_runtime.Analyze(chart, cancellationToken));
+        ChartRadarSnapshot.From(Runtime.Analyze(chart, cancellationToken));
 
-    public async Task<ChartRadarSnapshot> AnalyzeAsync(
+    public static async Task<ChartRadarSnapshot> AnalyzeAsync(
         SimaiChart chart,
         CancellationToken cancellationToken = default)
     {
-        var result = await _runtime.AnalyzeAsync(chart, cancellationToken);
+        var result = await Runtime.AnalyzeAsync(chart, cancellationToken);
         return ChartRadarSnapshot.From(result);
     }
 }
