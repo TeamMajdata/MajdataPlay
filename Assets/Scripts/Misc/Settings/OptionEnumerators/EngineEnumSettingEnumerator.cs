@@ -19,7 +19,9 @@ public sealed class EngineEnumSettingEnumerator: DefaultEnumEnumerator, IOptionE
                 var displayOptions = (DisplayOptions)Target;
                 QualitySettings.SetQualityLevel(Convert.ToInt32(Current), true);
                 displayOptions.RenderScale = (int)((GraphicsSettings.currentRenderPipeline as UniversalRenderPipelineAsset).renderScale * 100);
+#if UNITY_STANDALONE
                 displayOptions.VSync = QualitySettings.vSyncCount is 1 ? true : false;
+#endif
                 break;
         }
         _lastValue = Current;
