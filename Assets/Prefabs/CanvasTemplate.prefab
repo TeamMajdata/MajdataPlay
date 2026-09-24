@@ -243,8 +243,6 @@ GameObject:
   - component: {fileID: 1902335688730886507}
   - component: {fileID: 5782943442011133486}
   - component: {fileID: 5182002033360230505}
-  - component: {fileID: 4024133187929974755}
-  - component: {fileID: 7786198245277591769}
   m_Layer: 5
   m_Name: Sub_Display
   m_TagString: Untagged
@@ -302,49 +300,6 @@ Canvas:
   m_SortingLayerID: 0
   m_SortingOrder: 0
   m_TargetDisplay: 0
---- !u!114 &4024133187929974755
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 7848876556989961994}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: fe87c0e1cc204ed48ad3b37840f39efc, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: UnityEngine.UI::UnityEngine.UI.Image
-  m_Material: {fileID: 0}
-  m_Color: {r: 0, g: 0, b: 0, a: 0}
-  m_RaycastTarget: 1
-  m_RaycastPadding: {x: 0, y: 0, z: 0, w: 0}
-  m_Maskable: 1
-  m_OnCullStateChanged:
-    m_PersistentCalls:
-      m_Calls: []
-  m_Sprite: {fileID: 0}
-  m_Type: 0
-  m_PreserveAspect: 0
-  m_FillCenter: 1
-  m_FillMethod: 4
-  m_FillAmount: 1
-  m_FillClockwise: 1
-  m_FillOrigin: 0
-  m_UseSpriteMesh: 0
-  m_PixelsPerUnitMultiplier: 1
---- !u!114 &7786198245277591769
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 7848876556989961994}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: bbcb1a226660b7c46a46d00e4b8a78ce, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: Assembly-CSharp::MajdataPlay.LoadSubBg
-  <RuntimeDatabase>k__BackingField: {fileID: 0}
 --- !u!1 &7942307277902318624
 GameObject:
   m_ObjectHideFlags: 0
@@ -498,8 +453,8 @@ RectTransform:
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
   m_AnchorMin: {x: 0.5, y: 0}
   m_AnchorMax: {x: 0.5, y: 0}
-  m_AnchoredPosition: {x: 0, y: 1500}
-  m_SizeDelta: {x: 1080, y: 840}
+  m_AnchoredPosition: {x: 0, y: 1275}
+  m_SizeDelta: {x: 1080, y: 390}
   m_Pivot: {x: 0.5, y: 0.5}
 --- !u!222 &8343533234234080899
 CanvasRenderer:

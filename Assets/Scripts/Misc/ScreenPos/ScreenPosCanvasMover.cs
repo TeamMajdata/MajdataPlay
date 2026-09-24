@@ -21,9 +21,9 @@ namespace MajdataPlay
         const float SCREEN_CANVAS_WIDTH = 1080;
 
         const float MAIN_DISPLAY_POS_Y = 540;
-        const float SUB_COVER_HEIGHT = 840;
+        const float SUB_COVER_HEIGHT = 390;
         const float SUB_COVER_WIDTH = 1080;
-        const float SUB_COVER_POS_Y = 1500;
+        const float SUB_COVER_POS_Y = 1275;
 
         const float SUB_COVER_BOTTOM_HEIGHT = 0;
         const float SUB_COVER_BOTTOM_WIDTH = 1080;
@@ -221,7 +221,7 @@ namespace MajdataPlay
                 _subCoverRectTransform.anchoredPosition = new Vector2(0, SUB_COVER_POS_Y);
                 _subCoverRectTransform.sizeDelta = new Vector2(SUB_COVER_WIDTH, SUB_COVER_HEIGHT);
             }
-            if(_subCoverBottomRectTransform != null)
+            if (_subCoverBottomRectTransform != null)
             {
                 _subCoverBottomRectTransform.anchoredPosition = new Vector2(0, SUB_COVER_BOTTOM_POS_Y);
                 _subCoverBottomRectTransform.sizeDelta = new Vector2(SUB_COVER_BOTTOM_WIDTH, SUB_COVER_BOTTOM_HEIGHT);
@@ -287,20 +287,20 @@ namespace MajdataPlay
 
         void UpdateSubCover()
         {
-            if(_subCoverRectTransform != null)
+            if (_subCoverRectTransform != null && _subDisplay != null)
             {
-                // Sub_Display底边 (pivot 0.5,0.5)
-                //float subDisplayBottom = _subDisplay.anchoredPosition.y - SUB_DISPLAY_HEIGHT / 2f;
-                // Main_Display顶边 (pivot 0.5,0.5)
-                var mainDisplayTop = _rt.anchoredPosition.y + (MAIN_DISPLAY_HEIGHT / 2f);
+                // 主副屏锚点不同，统一使用父容器坐标，并计入各自的实际尺寸和缩放。
+                var mainDisplayTop = _rt.localPosition.y + _rt.rect.yMax * _rt.localScale.y;
+                var subDisplayBottom = _subDisplay.localPosition.y + _subDisplay.rect.yMin * _subDisplay.localScale.y;
 
-                var coverHeight = Mathf.Max(0f, SCREEN_CANVAS_HEIGHT - mainDisplayTop);
-                var coverCenterY = (SCREEN_CANVAS_HEIGHT + mainDisplayTop) / 2f;
-
-                _subCoverRectTransform.anchoredPosition = new Vector2(0, coverCenterY);
+                var coverHeight = Mathf.Max(0f, subDisplayBottom - mainDisplayTop);
                 _subCoverRectTransform.sizeDelta = new Vector2(SUB_COVER_WIDTH, coverHeight);
+
+                var coverPosition = _subCoverRectTransform.localPosition;
+                coverPosition.y = mainDisplayTop + coverHeight * _subCoverRectTransform.pivot.y;
+                _subCoverRectTransform.localPosition = coverPosition;
             }
-            if(_subCoverBottomRectTransform != null)
+            if (_subCoverBottomRectTransform != null)
             {
                 var mainDisplayBottom = _rt.anchoredPosition.y - (MAIN_DISPLAY_HEIGHT / 2f);
                 var coverHeight = Mathf.Max(0f, mainDisplayBottom);
@@ -308,7 +308,7 @@ namespace MajdataPlay
 
                 _subCoverBottomRectTransform.anchoredPosition = new Vector2(0, coverCenterY);
                 _subCoverBottomRectTransform.sizeDelta = new(SUB_COVER_BOTTOM_WIDTH, coverHeight);
-            }            
+            }
         }
 
         void ApplyTransform()
@@ -387,7 +387,7 @@ namespace MajdataPlay
                         {
                             _lastSubDisplayOffset = subDisplayOffset;
                             _lastSubDisplayScale = subDisplayScale;
-                            ApplySubDisplayTransform(subDisplayOffset * 100f , subDisplayScale);
+                            ApplySubDisplayTransform(subDisplayOffset * 100f, subDisplayScale);
                         }
 
                         if (mainChanged)

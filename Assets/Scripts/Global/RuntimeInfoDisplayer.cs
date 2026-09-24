@@ -14,7 +14,7 @@ namespace MajdataPlay
         const float REFRESH_INTERVAL_SECONDS = 1f;
 
         FPSMonitor _fpsMonitor = null!;
-        TextMeshPro _textDisplayer = null!;
+        TextMeshProUGUI _textDisplayer = null!;
         GameSetting _setting = null!;
 
         string _versionText = string.Empty;
@@ -28,7 +28,7 @@ namespace MajdataPlay
             base.Awake();
             Majdata<RuntimeInfoDisplayer>.SetAsSingleton(this);
             _fpsMonitor = GetComponent<FPSMonitor>();
-            _textDisplayer = GetComponent<TextMeshPro>();
+            _textDisplayer = GetComponent<TextMeshProUGUI>();
             _textDisplayer.enabled = false;
             _lastUpdateTiming = MajTimeline.UnscaledTime;
             Localization.OnLanguageChanged += OnLanguageChanged;

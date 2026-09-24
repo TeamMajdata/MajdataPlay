@@ -14,6 +14,7 @@ using UnityEngine;
 using UnityEngine.SceneManagement;
 using UnityEngine.Scripting;
 using UnityEngine.UI;
+using UnityEngine.Serialization;
 #nullable enable
 namespace MajdataPlay
 {
@@ -30,11 +31,27 @@ namespace MajdataPlay
         public static MajScenes CurrentScene { get; private set; } = MajScenes.Init;
         public static MajScenes LastScene { get; private set; } = MajScenes.Init;
 
-        Canvas _canvas;
-        public Image SubImage;
-        public Image MainImage;
-        public TMP_Text loadingText;
-        public Color LoadingLightColor;
+        private Canvas _canvas;
+
+        [SerializeField]
+        [FormerlySerializedAs("SubImage")]
+        private Image _subImage;
+
+        [SerializeField]
+        [FormerlySerializedAs("OverlayImage")]
+        private Image _overlayImage;
+
+        [SerializeField]
+        [FormerlySerializedAs("MainImage")]
+        private Image _mainImage;
+
+        [SerializeField]
+        [FormerlySerializedAs("loadingText")]
+        private TMP_Text _loadingText;
+
+        [SerializeField]
+        [FormerlySerializedAs("LoadingLightColor")]
+        private Color _loadingLightColor;
 
         [Header("Transition Animation")]
         [SerializeField]
@@ -55,7 +72,7 @@ namespace MajdataPlay
         float _triangleSpinDegrees = 90f;
 
         MotionHandle _maskMotion;
-        MotionHandle _subImageMotion;
+        MotionHandle _overlayImageMotion;
         MotionHandle _mainImageMotion;
         MotionHandle _loadingTextMotion;
         [Header("Transition Rendering")]
@@ -72,7 +89,7 @@ namespace MajdataPlay
         const int AUTO_FADE_OUT_DELAY_MS = 50;
         const float CLOSE_CONTENT_START_SCALE = 1.015f;
         const float OPEN_CONTENT_END_SCALE = 1.01f;
-        const float SUB_IMAGE_DELAY_SEC = 0.05f;
+        const float OVERLAY_IMAGE_DELAY_SEC = 0.05f;
         const float LOADING_TEXT_FADE_DURATION_SEC = 0.2f;
         static readonly int TRIANGLE_COLUMNS_ID = Shader.PropertyToID("_MajSceneTriangleColumns");
         static readonly int TRIANGLE_FADE_SPAN_ID = Shader.PropertyToID("_MajSceneTriangleFadeSpan");
@@ -103,12 +120,12 @@ namespace MajdataPlay
                 _mainMaskRect.sizeDelta = Vector2.one * _coveredMaskSize;
                 ConfigureTransitionShader();
                 SetMaskProgress(_maskProgress);
-                SetGraphicAlpha(SubImage, 0f);
-                MainImage.rectTransform.localScale = Vector3.one * OPEN_CONTENT_END_SCALE;
-                MainImage.gameObject.SetActive(false);
+                SetGraphicAlpha(_overlayImage, 0f);
+                _mainImage.rectTransform.localScale = Vector3.one * OPEN_CONTENT_END_SCALE;
+                _mainImage.gameObject.SetActive(false);
             }
-            SetGraphicAlpha(loadingText, 0f);
-            loadingText.gameObject.SetActive(false);
+            SetGraphicAlpha(_loadingText, 0f);
+            _loadingText.gameObject.SetActive(false);
         }
         void OnDestroy()
         {
@@ -162,40 +179,40 @@ namespace MajdataPlay
         }
         public void FadeIn()
         {
-            loadingText.text = string.Empty;
-            loadingText.gameObject.SetActive(true);
+            _loadingText.text = string.Empty;
+            _loadingText.gameObject.SetActive(true);
             StartTransition(true);
-            CabinetLed.SetAllLight(LoadingLightColor);
+            CabinetLed.SetAllLight(_loadingLightColor);
             CabinetLed.SetCabinetLight(0.5f);
         }
         public async UniTask FadeInAsync()
         {
-            loadingText.text = string.Empty;
-            loadingText.gameObject.SetActive(true);
+            _loadingText.text = string.Empty;
+            _loadingText.gameObject.SetActive(true);
             await PlayTransitionAsync(true);
-            CabinetLed.SetAllLight(LoadingLightColor);
+            CabinetLed.SetAllLight(_loadingLightColor);
             CabinetLed.SetCabinetLight(0.5f);
         }
         public void SetLoadingText(string text , Color color)
         {
-            loadingText.text = text;
-            loadingText.color = color;
+            _loadingText.text = text;
+            _loadingText.color = color;
         }
         public void SetLoadingText(string text)
         {
-            loadingText.text = text;
-            loadingText.color = Color.white;
+            _loadingText.text = text;
+            _loadingText.color = Color.white;
         }
 
         async UniTask SwitchSceneInternal(string sceneName, bool autoFadeOut)
         {
             InputManager.ClearAllSubscriber();
-            SubImage.sprite = MajInstances.SkinManager?.SelectedSkin?.SubDisplay!;
+            UpdateBGSprite();
             //MainImage.sprite = MajInstances.SkinManager.SelectedSkin.LoadingSplash;
-            loadingText.text = "";
-            loadingText.gameObject.SetActive(true);
+            _loadingText.text = "";
+            _loadingText.gameObject.SetActive(true);
             await PlayTransitionAsync(true);
-            CabinetLed.SetAllLight(LoadingLightColor);
+            CabinetLed.SetAllLight(_loadingLightColor);
             CabinetLed.SetCabinetLight(0.5f);
             await SwitchSceneCoreAsync(sceneName, autoFadeOut);
         }
@@ -216,21 +233,21 @@ namespace MajdataPlay
 
         bool ResolveTransitionReferences()
         {
-            if (_mainMaskRect == null && MainImage != null)
+            if (_mainMaskRect == null && _mainImage != null)
             {
-                _mainMaskRect = MainImage.rectTransform.parent as RectTransform;
+                _mainMaskRect = _mainImage.rectTransform.parent as RectTransform;
             }
             if (_mainMaskRect != null)
             {
                 _maskDecorations = _mainMaskRect
                     .GetComponentsInChildren<Graphic>(true)
-                    .Where(graphic => graphic != MainImage)
+                    .Where(graphic => graphic != _mainImage)
                     .ToArray();
             }
             return _mainMaskRect != null
-                && MainImage != null
-                && SubImage != null
-                && loadingText != null;
+                && _mainImage != null
+                && _overlayImage != null
+                && _loadingText != null;
         }
 
         void BindTransitionOverlay()
@@ -250,7 +267,7 @@ namespace MajdataPlay
         void CancelTransitionMotions()
         {
             _maskMotion.TryCancel();
-            _subImageMotion.TryCancel();
+            _overlayImageMotion.TryCancel();
             _mainImageMotion.TryCancel();
             _loadingTextMotion.TryCancel();
         }
@@ -271,10 +288,10 @@ namespace MajdataPlay
                 return false;
             }
 
-            MainImage.gameObject.SetActive(true);
+            _mainImage.gameObject.SetActive(true);
             if (closing)
             {
-                loadingText.gameObject.SetActive(true);
+                _loadingText.gameObject.SetActive(true);
             }
             _mainMaskRect.sizeDelta = Vector2.one * _coveredMaskSize;
             ConfigureTransitionShader();
@@ -282,7 +299,7 @@ namespace MajdataPlay
 
             if (closing && _maskProgress <= 0.001f)
             {
-                MainImage.rectTransform.localScale = Vector3.one * CLOSE_CONTENT_START_SCALE;
+                _mainImage.rectTransform.localScale = Vector3.one * CLOSE_CONTENT_START_SCALE;
             }
 
             var duration = closing ? _closeDuration : _openDuration;
@@ -295,29 +312,29 @@ namespace MajdataPlay
                 .Bind(SetMaskProgress);
 
             var targetAlpha = closing ? 1f : 0f;
-            _subImageMotion = LMotion.Create(SubImage.color.a, targetAlpha, Mathf.Max(0.01f, duration - SUB_IMAGE_DELAY_SEC))
-                .WithDelay(SUB_IMAGE_DELAY_SEC)
+            _overlayImageMotion = LMotion.Create(_overlayImage.color.a, targetAlpha, Mathf.Max(0.01f, duration - OVERLAY_IMAGE_DELAY_SEC))
+                .WithDelay(OVERLAY_IMAGE_DELAY_SEC)
                 .WithEase(Ease.OutQuint)
-                .BindToColorA(SubImage);
+                .BindToColorA(_overlayImage);
 
             var targetScale = Vector3.one * (closing ? 1f : OPEN_CONTENT_END_SCALE);
-            _mainImageMotion = LMotion.Create(MainImage.rectTransform.localScale, targetScale, duration)
+            _mainImageMotion = LMotion.Create(_mainImage.rectTransform.localScale, targetScale, duration)
                 .WithEase(Ease.OutQuint)
-                .BindToLocalScale(MainImage.rectTransform);
+                .BindToLocalScale(_mainImage.rectTransform);
 
             if (closing)
             {
-                _loadingTextMotion = LMotion.Create(loadingText.color.a, 1f, LOADING_TEXT_FADE_DURATION_SEC)
+                _loadingTextMotion = LMotion.Create(_loadingText.color.a, 1f, LOADING_TEXT_FADE_DURATION_SEC)
                     .WithDelay(Mathf.Max(0f, duration - LOADING_TEXT_FADE_DURATION_SEC))
                     .WithEase(Ease.OutQuint)
-                    .BindToColorA(loadingText);
+                    .BindToColorA(_loadingText);
             }
             else
             {
-                _loadingTextMotion = LMotion.Create(loadingText.color.a, 0f, LOADING_TEXT_FADE_DURATION_SEC)
+                _loadingTextMotion = LMotion.Create(_loadingText.color.a, 0f, LOADING_TEXT_FADE_DURATION_SEC)
                     .WithEase(Ease.OutQuint)
-                    .WithOnComplete(() => loadingText.gameObject.SetActive(false))
-                    .BindToColorA(loadingText);
+                    .WithOnComplete(() => _loadingText.gameObject.SetActive(false))
+                    .BindToColorA(_loadingText);
             }
             return true;
         }
@@ -355,17 +372,17 @@ namespace MajdataPlay
         void ApplyTransitionState(bool closed)
         {
             _isClosingTransition = closed;
-            MainImage.gameObject.SetActive(true);
+            _mainImage.gameObject.SetActive(true);
             _mainMaskRect.sizeDelta = Vector2.one * _coveredMaskSize;
             ConfigureTransitionShader();
             SetMaskProgress(closed ? 1f : 0f);
-            SetGraphicAlpha(SubImage, closed ? 1f : 0f);
-            MainImage.rectTransform.localScale = Vector3.one * (closed ? 1f : OPEN_CONTENT_END_SCALE);
-            SetGraphicAlpha(loadingText, closed ? 1f : 0f);
-            loadingText.gameObject.SetActive(closed);
+            SetGraphicAlpha(_overlayImage, closed ? 1f : 0f);
+            _mainImage.rectTransform.localScale = Vector3.one * (closed ? 1f : OPEN_CONTENT_END_SCALE);
+            SetGraphicAlpha(_loadingText, closed ? 1f : 0f);
+            _loadingText.gameObject.SetActive(closed);
             if (!closed)
             {
-                MainImage.gameObject.SetActive(false);
+                _mainImage.gameObject.SetActive(false);
             }
         }
 
@@ -377,7 +394,7 @@ namespace MajdataPlay
             Shader.SetGlobalFloat(TRIANGLE_SPIN_DEGREES_ID, _triangleSpinDegrees);
             Shader.SetGlobalFloat(TRIANGLE_CLOSING_ID, _isClosingTransition ? 1f : 0f);
 
-            SetGraphicAlpha(MainImage, 1f);
+            SetGraphicAlpha(_mainImage, 1f);
         }
 
         void SetMaskProgress(float progress)
@@ -389,6 +406,25 @@ namespace MajdataPlay
             {
                 SetGraphicAlpha(decoration, decorationAlpha);
             }
+        }
+
+        private void UpdateBGSprite()
+        {
+            var sprite = MajInstances.SkinManager?.SelectedSkin?.SubDisplay;
+            if(sprite == null)
+            {
+                var oColor = _overlayImage.color;
+                _overlayImage.color = new(0, 0, 0, oColor.a);
+                _subImage.color = Color.black;
+            }
+            else
+            {
+                _overlayImage.sprite = sprite;
+                _subImage.sprite = sprite;
+                var oColor = _overlayImage.color;
+                _overlayImage.color = new(1, 1, 1, oColor.a);
+                _subImage.color = Color.white;
+            }            
         }
 
         static void SetGraphicAlpha(Graphic graphic, float alpha)
@@ -404,9 +440,9 @@ namespace MajdataPlay
         async UniTask SwitchSceneInternalAsync(string sceneName, Task taskToRun)
         {
             InputManager.ClearAllSubscriber();
-            SubImage.sprite = MajInstances.SkinManager?.SelectedSkin?.SubDisplay!;
+            UpdateBGSprite();
             //MainImage.sprite = MajInstances.SkinManager.SelectedSkin.LoadingSplash;
-            loadingText.gameObject.SetActive(true);
+            _loadingText.gameObject.SetActive(true);
             await PlayTransitionAsync(true);
             while (!taskToRun.IsCompleted)
             {
@@ -416,7 +452,7 @@ namespace MajdataPlay
             {
                 throw taskToRun.Exception;
             }
-            CabinetLed.SetAllLight(LoadingLightColor);
+            CabinetLed.SetAllLight(_loadingLightColor);
             CabinetLed.SetCabinetLight(0.5f);
             await SwitchSceneCoreAsync(sceneName, true);
         }
@@ -428,9 +464,9 @@ namespace MajdataPlay
         async UniTask SwitchSceneInternalAsync(string sceneName, ValueTask taskToRun)
         {
             InputManager.ClearAllSubscriber();
-            SubImage.sprite = MajInstances.SkinManager.SelectedSkin.SubDisplay;
+            UpdateBGSprite();
             //MainImage.sprite = MajInstances.SkinManager.SelectedSkin.LoadingSplash;
-            loadingText.gameObject.SetActive(true);
+            _loadingText.gameObject.SetActive(true);
             await PlayTransitionAsync(true);
             while (!taskToRun.IsCompleted)
             {
@@ -440,7 +476,7 @@ namespace MajdataPlay
             {
                 throw taskToRun.AsTask().Exception;
             }
-            CabinetLed.SetAllLight(LoadingLightColor);
+            CabinetLed.SetAllLight(_loadingLightColor);
             CabinetLed.SetCabinetLight(0.5f);
             await SwitchSceneCoreAsync(sceneName, true);
         }
@@ -452,9 +488,9 @@ namespace MajdataPlay
         async UniTask SwitchSceneInternalAsync(string sceneName, UniTask taskToRun)
         {
             InputManager.ClearAllSubscriber();
-            SubImage.sprite = MajInstances.SkinManager.SelectedSkin.SubDisplay;
+            UpdateBGSprite();
             //MainImage.sprite = MajInstances.SkinManager.SelectedSkin.LoadingSplash;
-            loadingText.gameObject.SetActive(true);
+            _loadingText.gameObject.SetActive(true);
             await PlayTransitionAsync(true);
             while (taskToRun.Status is not (UniTaskStatus.Succeeded or UniTaskStatus.Faulted or UniTaskStatus.Canceled))
             {
@@ -466,7 +502,7 @@ namespace MajdataPlay
                 case UniTaskStatus.Faulted:
                     throw taskToRun.AsTask().Exception;
             }            
-            CabinetLed.SetAllLight(LoadingLightColor);
+            CabinetLed.SetAllLight(_loadingLightColor);
             CabinetLed.SetCabinetLight(0.5f);
             await SwitchSceneCoreAsync(sceneName, true);
         }
@@ -480,9 +516,9 @@ namespace MajdataPlay
         async UniTask<T> SwitchSceneInternalAsync<T>(string sceneName, Task<T> taskToRun)
         {
             InputManager.ClearAllSubscriber();
-            SubImage.sprite = MajInstances.SkinManager.SelectedSkin.SubDisplay;
+            UpdateBGSprite();
             //MainImage.sprite = MajInstances.SkinManager.SelectedSkin.LoadingSplash;
-            loadingText.gameObject.SetActive(true);
+            _loadingText.gameObject.SetActive(true);
             await PlayTransitionAsync(true);
             while (!taskToRun.IsCompleted)
             {
@@ -492,7 +528,7 @@ namespace MajdataPlay
             {
                 throw taskToRun.Exception;
             }
-            CabinetLed.SetAllLight(LoadingLightColor);
+            CabinetLed.SetAllLight(_loadingLightColor);
             CabinetLed.SetCabinetLight(0.5f);
             await SwitchSceneCoreAsync(sceneName, true);
             return taskToRun.Result;
@@ -505,9 +541,9 @@ namespace MajdataPlay
         async UniTask<T> SwitchSceneInternalAsync<T>(string sceneName, ValueTask<T> taskToRun)
         {
             InputManager.ClearAllSubscriber();
-            SubImage.sprite = MajInstances.SkinManager.SelectedSkin.SubDisplay;
+            UpdateBGSprite();
             //MainImage.sprite = MajInstances.SkinManager.SelectedSkin.LoadingSplash;
-            loadingText.gameObject.SetActive(true);
+            _loadingText.gameObject.SetActive(true);
             await PlayTransitionAsync(true);
             while (!taskToRun.IsCompleted)
             {
@@ -517,7 +553,7 @@ namespace MajdataPlay
             {
                 throw taskToRun.AsTask().Exception;
             }
-            CabinetLed.SetAllLight(LoadingLightColor);
+            CabinetLed.SetAllLight(_loadingLightColor);
             CabinetLed.SetCabinetLight(0.5f);
             await SwitchSceneCoreAsync(sceneName, true);
             return taskToRun.Result;
@@ -530,9 +566,9 @@ namespace MajdataPlay
         async UniTask<T> SwitchSceneInternalAsync<T>(string sceneName, UniTask<T> taskToRun)
         {
             InputManager.ClearAllSubscriber();
-            SubImage.sprite = MajInstances.SkinManager.SelectedSkin.SubDisplay;
+            UpdateBGSprite();
             //MainImage.sprite = MajInstances.SkinManager.SelectedSkin.LoadingSplash;
-            loadingText.gameObject.SetActive(true);
+            _loadingText.gameObject.SetActive(true);
             await PlayTransitionAsync(true);
             while (taskToRun.Status is not (UniTaskStatus.Succeeded or UniTaskStatus.Faulted or UniTaskStatus.Canceled))
             {
@@ -544,7 +580,7 @@ namespace MajdataPlay
                 case UniTaskStatus.Faulted:
                     throw taskToRun.AsTask().Exception;
             }
-            CabinetLed.SetAllLight(LoadingLightColor);
+            CabinetLed.SetAllLight(_loadingLightColor);
             CabinetLed.SetCabinetLight(0.5f);
             await SwitchSceneCoreAsync(sceneName, true);
 
