@@ -176,8 +176,7 @@ namespace MajdataPlay
                 }  
             }
 
-            QualitySettings.SetQualityLevel((int)Settings.Display.RenderQuality, true);
-            ApplyRenderScale(Settings.Display.RenderScale);
+            ApplyDisplaySettings();
 #if !(UNITY_ANDROID || UNITY_IOS)
             QualitySettings.vSyncCount = Settings.Display.VSync ? 1 : 0;
 #endif
@@ -282,6 +281,16 @@ namespace MajdataPlay
 #endif
             SceneManager.LoadScene("View");
         }
+        private void ApplyDisplaySettings()
+        {
+            var displayOptions = MajEnv.Settings.Display;
+            QualitySettings.SetQualityLevel((int)displayOptions.RenderQuality, true);
+#if UNITY_STANDALONE
+            QualitySettings.vSyncCount = displayOptions.VSync ? 1 : 0;
+#endif
+            Application.targetFrameRate = displayOptions.FPSLimit;
+            ApplyRenderScale(displayOptions.RenderScale);
+        }
 
         internal static void ApplyRenderScale(int percentage)
         {
@@ -291,7 +300,7 @@ namespace MajdataPlay
             }
         }
 
-        public void ApplyScreenConfig()
+        private void ApplyScreenConfig()
         {
 #if UNITY_STANDALONE_WIN || UNITY_STANDALONE_OSX
             if (MajEnv.Mode != RunningMode.View)

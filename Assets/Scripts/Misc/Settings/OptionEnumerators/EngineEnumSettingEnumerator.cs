@@ -1,5 +1,7 @@
 ﻿using System;
 using UnityEngine;
+using UnityEngine.Rendering;
+using UnityEngine.Rendering.Universal;
 
 namespace MajdataPlay.Settings.OptionEnumerators;
 public sealed class EngineEnumSettingEnumerator: DefaultEnumEnumerator, IOptionEnumerator
@@ -14,8 +16,10 @@ public sealed class EngineEnumSettingEnumerator: DefaultEnumEnumerator, IOptionE
         switch (PropertyInfo.Name)
         {
             case "RenderQuality":
+                var displayOptions = (DisplayOptions)Target;
                 QualitySettings.SetQualityLevel(Convert.ToInt32(Current), true);
-                GameManager.ApplyRenderScale(((DisplayOptions)Target).RenderScale);
+                displayOptions.RenderScale = (int)((GraphicsSettings.currentRenderPipeline as UniversalRenderPipelineAsset).renderScale * 100);
+                displayOptions.VSync = QualitySettings.vSyncCount is 1 ? true : false;
                 break;
         }
         _lastValue = Current;

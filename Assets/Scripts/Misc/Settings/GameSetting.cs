@@ -115,7 +115,17 @@ namespace MajdataPlay.Settings
     
     public class DisplayOptions
     {
-        
+#if UNITY_ANDROID || UNITY_IOS
+        private const RenderQualityOption DefaultQuality = RenderQualityOption.Low;
+        private const int DefaultRednerScale = 75;
+        private const bool DefaultVSync = true;
+#else
+        private const RenderQualityOption DefaultQuality = RenderQualityOption.Medium;
+        private const int DefaultRednerScale = 100;
+        private const bool DefaultVSync = true;
+#endif
+
+
         [OptionEnumerator(typeof(LanguageEnumerator))]
         public string Language { get; set; } = "";
         
@@ -204,12 +214,12 @@ namespace MajdataPlay.Settings
         public GameplayScreenRotationAngleOption GameplayScreenRotationAngle { get; set; } = GameplayScreenRotationAngleOption.Zero;
 
         [OptionEnumerator(typeof(EngineEnumSettingEnumerator))]
-        public RenderQualityOption RenderQuality { get; set; } = RenderQualityOption.Low;
+        public RenderQualityOption RenderQuality { get; set; } = DefaultQuality;
 
         [Step("5")]
         [Range("50", "100", HasMax = true, HasMin = true)]
         [OptionEnumerator(typeof(EngineNumberSettingEnumerator))]
-        public int RenderScale { get; set; } = 100;
+        public int RenderScale { get; set; } = DefaultRednerScale;
 #if UNITY_STANDALONE
         [HideInSettingUI]
         public bool Topmost { get; set; } = false;
@@ -222,7 +232,7 @@ namespace MajdataPlay.Settings
 #if !(UNITY_ANDROID || UNITY_IOS)
         
         [OptionEnumerator(typeof(EngineBooleanSettingEnumerator))]
-        public bool VSync { get; set; } = true;
+        public bool VSync { get; set; } = DefaultVSync;
 #endif
         
         public bool SkipVideoDownload { get; set; } = false;
