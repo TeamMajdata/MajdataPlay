@@ -1042,11 +1042,13 @@ namespace MajdataPlay.Scenes.Game
             if (_isManualStartGame)
             {
                 _sceneSwitcher.SetLoadingText($"{"MAJTEXT_GAME_PRESS_4TH_BUTTON_TO_CONTINUE".i18n()}...");
-                while (!(InputManager.IsButtonClickedInThisFrame(ButtonZone.A4) ||
-                         InputManager.IsSensorClickedInThisFrame(SensorArea.A4)))
+                do
                 {
-                    await UniTask.Yield(token);
+                    // Read the shared scene input after GameUpdater has sampled this frame.
+                    await UniTask.Yield(PlayerLoopTiming.LastUpdate, token);
                 }
+                while (!(InputManager.IsButtonPressedInThisFrame(ButtonZone.A4) ||
+                         InputManager.IsSensorPressedInThisFrame(SensorArea.A4)));
                 _sceneSwitcher.SetLoadingText("Loading...");
                 await UniTask.Yield(token);
             }
