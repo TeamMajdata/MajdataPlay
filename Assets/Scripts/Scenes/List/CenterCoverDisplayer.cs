@@ -46,6 +46,10 @@ namespace MajdataPlay.Scenes.List
         ChartVisualDisplayer _chartAnalyzer;
 
         [SerializeField]
+        [FormerlySerializedAs("majRadar")]
+        MajRadarDisplayer _majRadar;
+
+        [SerializeField]
         [FormerlySerializedAs("onlineInfoDisplayer")]
         OnlineInfoDisplayer _onlineInfoDisplayer;
 
@@ -330,6 +334,7 @@ namespace MajdataPlay.Scenes.List
             _scoreDisplayer.SetScore(_currentSongDetail, (ChartLevel)_diff);
             _onlineInfoDisplayer.SetSongDetail(_currentSongDetail, loadDelayMS, cancellationToken);
             _chartAnalyzer.SetSongDeatil(_currentSongDetail, (ChartLevel)_diff, null, loadDelayMS, cancellationToken);
+            _majRadar.SetRadarFromSongDetail(_currentSongDetail, (ChartLevel)_diff, loadDelayMS, cancellationToken);
             _onlineScoreRankDisplayer.SetSongDetail(_currentSongDetail, (ChartLevel)_diff, loadDelayMS, cancellationToken);
         }
         void UpdateBGSongCoverAnim(float progress)
