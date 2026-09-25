@@ -1,19 +1,17 @@
 using Cysharp.Threading.Tasks;
 using MajdataPlay.Diagnostics;
 using MajdataPlay.Scenes.List;
-using MajdataPlay.Utils;
 using MajdataPlay.Utils.ChartRadar;
 using MajSimai;
-using NUnit.Framework;
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Runtime.InteropServices;
 using System.Threading;
 using System.Threading.Tasks;
 using TMPro;
 using UnityEngine;
 using UnityEngine.UI;
+using LitMotion;
 
 #nullable enable
 namespace MajdataPlay
@@ -25,6 +23,7 @@ namespace MajdataPlay
         public TextMeshProUGUI EstiText;
         public Color[] RadarFillColors = new Color[6];
         public Color[] RadarOutlineColors = new Color[6];
+        private MotionHandle[] _scoreHandles = new MotionHandle[6];
         public void Start()
         {
             _radarMaterial = MajRadarRawImage.material;
@@ -44,7 +43,7 @@ namespace MajdataPlay
             {
                 foreach (var dimension in result.DimensionOrder)
                 {
-                    scores.Add((float)(result.Scores[dimension]/250f ?? 0f));
+                    scores.Add((float)(result.Scores[dimension] / 250f ?? 0f));
                     //MajDebug.LogInfo(dimension + ": " + (result.Scores[dimension] ?? 0f));
                 }
                 SetRadar(scores, (float)(result.FittedConstant ?? 0f));
@@ -62,16 +61,62 @@ namespace MajdataPlay
                 Debug.LogError("[MajRadar] Radar material is not initialized.");
                 return;
             }
-            _radarMaterial.SetFloat("_V0", scores[0]);
-            _radarMaterial.SetFloat("_V1", scores[1]);
-            _radarMaterial.SetFloat("_V2", scores[2]);
-            _radarMaterial.SetFloat("_V3", scores[3]);
-            _radarMaterial.SetFloat("_V4", scores[4]);
-            _radarMaterial.SetFloat("_V5", scores[5]);
-            var maxindex = scores.IndexOf(scores.Max());
-            _radarMaterial.SetColor("_FillColor", RadarFillColors[maxindex]);
-            _radarMaterial.SetColor("_OutlineColor", RadarOutlineColors[maxindex]);
-            EstiText.text = String.Format("{0:F2}", esti);
+
+            var scoreZero = new List<float> { 0, 0, 0, 0, 0, 0, 0 };
+
+            // 雷达图数值动画
+            for (int i = 0; i < 6; i++)
+            {
+                int index = i;
+                _scoreHandles[index].TryCancel();
+                _scoreHandles[index] = LMotion.Create(scoreZero[index], scores[index], 0.5f)
+                .WithEase(Ease.OutCubic)
+                .Bind(value =>
+                {
+                    scoreZero[index] = value;
+                    _radarMaterial.SetFloat($"_V{index}", value);
+                });
+            }
+
+            // 颜色切换动画
+            var maxIndex = scores.IndexOf(scores.Max());
+
+            Color startFill = _radarMaterial.GetColor("_FillColor");
+            Color targetFill = RadarFillColors[maxIndex];
+
+            LMotion.Create(startFill, targetFill, 0.5f)
+            .Bind(color =>
+            {
+                _radarMaterial.SetColor("_FillColor", color);
+            });
+
+            Color startOutline = _radarMaterial.GetColor("_OutlineColor");
+            Color targetOutline = RadarOutlineColors[maxIndex];
+
+            LMotion.Create(startOutline, targetOutline, 0.5f)
+            .Bind(color =>
+            {
+                _radarMaterial.SetColor("_OutlineColor", color);
+            });
+
+            // 估算值数字滚动动画
+            if (esti > 0)
+            {
+                float currentEsti = float.TryParse(EstiText.text, out var oldValue)
+                ? oldValue
+                : 0f;
+
+                LMotion.Create(currentEsti, esti, 0.5f)
+                .WithEase(Ease.OutCubic)
+                .Bind(value =>
+                {
+                    EstiText.text = value.ToString("F2");
+                });
+            }
+            else
+            {
+                EstiText.text = "";
+            }
         }
 
         float _loadTimer = 0f;
@@ -143,8 +188,7 @@ namespace MajdataPlay
         {
             _currentSongDetail = songDetail;
             _currentLevel = level;
-            SetRadar(new List<float> { 0,0,0,0,0,0,0}, 0);
-            EstiText.text = "";
+            SetRadar(new List<float> { 0, 0, 0, 0, 0, 0, 0 }, 0);
             _cancellationToken = token;
             _loadDelayTimer = loadDelayMS / 1000f;
         }
