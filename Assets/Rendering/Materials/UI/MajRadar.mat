@@ -125,12 +125,12 @@ Material:
     - _SrcBlend: 1
     - _SrcBlendAlpha: 1
     - _Surface: 0
-    - _V0: 0.293
-    - _V1: 0.698
-    - _V2: 1
-    - _V3: 0.489
-    - _V4: 0.699
-    - _V5: 0.433
+    - _V0: 0
+    - _V1: 0
+    - _V2: 0
+    - _V3: 0
+    - _V4: 0
+    - _V5: 0
     - _WorkflowMode: 1
     - _XRMotionVectorsPass: 1
     - _ZWrite: 1
@@ -138,8 +138,8 @@ Material:
     - _BaseColor: {r: 1, g: 1, b: 1, a: 1}
     - _Color: {r: 1, g: 1, b: 1, a: 1}
     - _EmissionColor: {r: 0, g: 0, b: 0, a: 1}
-    - _FillColor: {r: 1, g: 0.016982466, b: 0, a: 0.30588236}
-    - _OutlineColor: {r: 1, g: 0.3075471, b: 0.3075471, a: 1}
+    - _FillColor: {r: 0.92549026, g: 0.7058824, b: 0.48235297, a: 0.78431374}
+    - _OutlineColor: {r: 0.854902, g: 0.43137258, b: 0, a: 1}
     - _SpecColor: {r: 0.2, g: 0.2, b: 0.2, a: 1}
   m_BuildTextureStacks: []
   m_AllowLocking: 1

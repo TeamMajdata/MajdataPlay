@@ -95,7 +95,7 @@ Shader "UI/MajRadar"
                     default: value = _V5; break;
                 }
 
-                float angle = radians(idx * 60.0 - 90.0);
+                float angle = radians(90.0 - idx * 60.0);
 
                 return float2(
                     cos(angle),
@@ -153,6 +153,18 @@ Shader "UI/MajRadar"
 
             half4 frag(Varyings IN) : SV_Target
             {
+                float total =
+                _V0 +
+                _V1 +
+                _V2 +
+                _V3 +
+                _V4 +
+                _V5;
+
+                if (total <= 0.0001)
+                {
+                return float4(0, 0, 0, 0);
+                }
                 float2 p = IN.uv * 2.0 - 1.0;
 
                 float2 verts[6];

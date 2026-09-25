@@ -7,6 +7,7 @@ using MajSimai;
 using NUnit.Framework;
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Runtime.InteropServices;
 using System.Threading;
 using System.Threading.Tasks;
@@ -22,8 +23,8 @@ namespace MajdataPlay
         public RawImage MajRadarRawImage;
         private Material _radarMaterial;
         public TextMeshProUGUI EstiText;
-        public Color[] RadarFillColors;
-        public Color[] RadarOutlineColors;
+        public Color[] RadarFillColors = new Color[6];
+        public Color[] RadarOutlineColors = new Color[6];
         public void Start()
         {
             _radarMaterial = MajRadarRawImage.material;
@@ -43,7 +44,7 @@ namespace MajdataPlay
             {
                 foreach (var dimension in result.DimensionOrder)
                 {
-                    scores.Add((float)(result.Scores[dimension] ?? 0f));
+                    scores.Add((float)(result.Scores[dimension]/250f ?? 0f));
                     MajDebug.LogInfo(dimension + ": " + (result.Scores[dimension] ?? 0f));
                 }
                 SetRadar(scores, (float)(result.FittedConstant ?? 0f));
@@ -67,6 +68,9 @@ namespace MajdataPlay
             _radarMaterial.SetFloat("_V3", scores[3]);
             _radarMaterial.SetFloat("_V4", scores[4]);
             _radarMaterial.SetFloat("_V5", scores[5]);
+            var maxindex = scores.IndexOf(scores.Max());
+            _radarMaterial.SetColor("_FillColor", RadarFillColors[maxindex]);
+            _radarMaterial.SetColor("_OutlineColor", RadarOutlineColors[maxindex]);
             EstiText.text = String.Format("{0:F2}", esti);
         }
 
@@ -139,7 +143,7 @@ namespace MajdataPlay
         {
             _currentSongDetail = songDetail;
             _currentLevel = level;
-
+            SetRadar(new List<float> { 0,0,0,0,0,0,0}, 0);
             EstiText.text = "";
             _cancellationToken = token;
             _loadDelayTimer = loadDelayMS / 1000f;
