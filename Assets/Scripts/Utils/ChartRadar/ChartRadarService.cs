@@ -26,6 +26,12 @@ public sealed class ChartRadarSnapshot
     public string? MappingVersion { get; init; }
     public IReadOnlyList<string> Errors { get; init; } = Array.Empty<string>();
 
+    public double? GetRawValue(RadarOutputDimension dimension) =>
+        Value(RawValues, dimension);
+
+    public double? GetScore(RadarOutputDimension dimension) =>
+        Value(Scores, dimension);
+
     internal static ChartRadarSnapshot From(RadarResult result) => new()
     {
         IsSuccess = result.IsSuccess,
@@ -39,6 +45,13 @@ public sealed class ChartRadarSnapshot
         MappingVersion = result.MappingVersion,
         Errors = result.Errors
     };
+
+    private static double? Value(
+        IReadOnlyDictionary<string, double?> values,
+        RadarOutputDimension dimension) =>
+        values.TryGetValue(RadarOutputDimensions.Key(dimension), out var value)
+            ? value
+            : null;
 }
 
 /// <summary>
