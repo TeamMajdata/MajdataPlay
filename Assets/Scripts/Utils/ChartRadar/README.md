@@ -12,6 +12,15 @@ Callers invoke the facade directly and do not hold a service instance:
 
 ```csharp
 var snapshot = await ChartRadarService.AnalyzeAsync(chart, cancellationToken);
+
+var noteScore = snapshot.GetScore(RadarOutputDimension.Note);
+var trickyRaw = snapshot.GetRawValue(RadarOutputDimension.SlideTricky);
+```
+
+String-keyed access remains compatible for existing and dynamic UI code:
+
+```csharp
+var sameNoteScore = snapshot.Scores["note"];
 ```
 
 Selection code continues to own cancellation, generation checks, logging, and
