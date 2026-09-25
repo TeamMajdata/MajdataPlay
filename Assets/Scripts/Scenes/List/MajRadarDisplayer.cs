@@ -37,7 +37,7 @@ namespace MajdataPlay
             List<float> scores = new();
             if (result.DimensionOrder.Count != 7)
             {
-                MajDebug.LogError($"Unexpected dimension count: {result.DimensionOrder.Count}");
+                MajDebug.LogError($"[MajRadar] Unexpected dimension count: {result.DimensionOrder.Count}");
                 return;
             }
             if (result.IsSuccess)
@@ -45,13 +45,13 @@ namespace MajdataPlay
                 foreach (var dimension in result.DimensionOrder)
                 {
                     scores.Add((float)(result.Scores[dimension]/250f ?? 0f));
-                    MajDebug.LogInfo(dimension + ": " + (result.Scores[dimension] ?? 0f));
+                    //MajDebug.LogInfo(dimension + ": " + (result.Scores[dimension] ?? 0f));
                 }
                 SetRadar(scores, (float)(result.FittedConstant ?? 0f));
             }
             else if (!result.IsCancelled)
             {
-                MajDebug.LogError(result.Errors);
+                MajDebug.LogError($"[MajRadar] Error while processing radar values{result.Errors}");
             }
         }
 
@@ -59,7 +59,7 @@ namespace MajdataPlay
         {
             if (_radarMaterial == null)
             {
-                Debug.LogError("Radar material is not initialized.");
+                Debug.LogError("[MajRadar] Radar material is not initialized.");
                 return;
             }
             _radarMaterial.SetFloat("_V0", scores[0]);

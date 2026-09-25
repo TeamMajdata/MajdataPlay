@@ -9,8 +9,6 @@ namespace MajdataPlay
 {
     internal readonly struct MaidataLineGraphAnalyzeResult
     {
-        public float PeakDensity { get; init; }
-        public float Esti { get; init; }
         public TimeSpan Length { get; init; }
         public float MaxBPM { get; init; }
         public float MinBPM { get; init; }
