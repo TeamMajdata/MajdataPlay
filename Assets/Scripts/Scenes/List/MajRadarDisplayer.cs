@@ -12,23 +12,36 @@ using TMPro;
 using UnityEngine;
 using UnityEngine.UI;
 using LitMotion;
+using UnityEngine.Serialization;
 
 #nullable enable
 namespace MajdataPlay
 {
     public class MajRadarDisplayer : MonoBehaviour
     {
-        public RawImage MajRadarRawImage;
+        [SerializeField]
+        [FormerlySerializedAs("MajRadarRawImage")]
+        private RawImage _radarRawImage;
+
+        [SerializeField]
+        [FormerlySerializedAs("EstiText")]
+        private TextMeshProUGUI _estiText;
+
+        [SerializeField]
+        [FormerlySerializedAs("RadarFillColors")]
+        private Color[] _radarFillColors = new Color[6];
+
+        [SerializeField]
+        [FormerlySerializedAs("RadarOutlineColors")]
+        private Color[] _radarOutlineColors = new Color[6];
+
         private Material _radarMaterial;
-        public TextMeshProUGUI EstiText;
-        public Color[] RadarFillColors = new Color[6];
-        public Color[] RadarOutlineColors = new Color[6];
-        private MotionHandle[] _scoreHandles = new MotionHandle[6];
-        public void Start()
+        private readonly MotionHandle[] _scoreHandles = new MotionHandle[6];
+        private void Awake()
         {
-            _radarMaterial = MajRadarRawImage.material;
+            _radarMaterial = (_radarRawImage.material = new(_radarRawImage.material));
         }
-        public async UniTask AnalyzeAsync(SimaiChart simaiChart, CancellationToken cts)
+        private async UniTask AnalyzeAsync(SimaiChart simaiChart, CancellationToken cts)
         {
             ChartRadarSnapshot result = await ChartRadarService.AnalyzeAsync(
                                             simaiChart,
@@ -82,7 +95,7 @@ namespace MajdataPlay
             var maxIndex = scores.IndexOf(scores.Max());
 
             Color startFill = _radarMaterial.GetColor("_FillColor");
-            Color targetFill = RadarFillColors[maxIndex];
+            Color targetFill = _radarFillColors[maxIndex];
 
             LMotion.Create(startFill, targetFill, 0.5f)
             .Bind(color =>
@@ -91,7 +104,7 @@ namespace MajdataPlay
             });
 
             Color startOutline = _radarMaterial.GetColor("_OutlineColor");
-            Color targetOutline = RadarOutlineColors[maxIndex];
+            Color targetOutline = _radarOutlineColors[maxIndex];
 
             LMotion.Create(startOutline, targetOutline, 0.5f)
             .Bind(color =>
@@ -102,7 +115,7 @@ namespace MajdataPlay
             // 估算值数字滚动动画
             if (esti > 0)
             {
-                float currentEsti = float.TryParse(EstiText.text, out var oldValue)
+                float currentEsti = float.TryParse(_estiText.text, out var oldValue)
                 ? oldValue
                 : 0f;
 
@@ -110,12 +123,12 @@ namespace MajdataPlay
                 .WithEase(Ease.OutCubic)
                 .Bind(value =>
                 {
-                    EstiText.text = value.ToString("F2");
+                    _estiText.text = value.ToString("F2");
                 });
             }
             else
             {
-                EstiText.text = "";
+                _estiText.text = "";
             }
         }
 
