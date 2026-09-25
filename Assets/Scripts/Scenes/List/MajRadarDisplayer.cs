@@ -28,7 +28,7 @@ namespace MajdataPlay
         {
             _radarMaterial = MajRadarRawImage.material;
         }
-        public async UniTask Analyze(SimaiChart simaiChart, CancellationToken cts)
+        public async UniTask AnalyzeAsync(SimaiChart simaiChart, CancellationToken cts)
         {
             ChartRadarSnapshot result = await ChartRadarService.AnalyzeAsync(
                                             simaiChart,
@@ -169,7 +169,9 @@ namespace MajdataPlay
                     var simaiFile = _maidataLoadTask.Result;
                     var simaiChart = simaiFile.Charts[(int)_currentLevel];
                     //TODO AllBackgroundTasks?
-                    Analyze(simaiChart, _cancellationToken).Forget();
+                    var task = AnalyzeAsync(simaiChart, _cancellationToken);
+                    task.Forget();
+                    ListManager.AllBackgroundTasks.Add(task.AsTask());
                 }
                 else
                 {
