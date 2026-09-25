@@ -49,29 +49,24 @@ namespace MajdataPlay.Utils
 
         public static MaidataAnalyzeResult AnalyzeMaidata(SimaiChart data, float? chartLength = null)
         {
-            if(data.NoteTimings.IsEmpty)
+            if (data.NoteTimings.IsEmpty)
             {
                 return default;
             }
             var noteTimings = data.NoteTimings;
             var length = chartLength ?? (float)noteTimings[noteTimings.Length - 1].Timing;
-            var result = AnalyzeMaidataCore(noteTimings, length);
+            GetBpmRange(noteTimings, out var minBpm, out var maxBpm);
 
-            result.TapPoints.Dispose();
-            result.TouchPoints.Dispose();
-            result.SlidePoints.Dispose();
-            return new ()
+            return new()
             {
-                Esti = result.Esti,
-                Length = result.Length,
-                MaxBPM = result.MaxBPM,
-                MinBPM = result.MinBPM,
-                PeakDensity = result.PeakDensity,
+                Length = TimeSpan.FromSeconds(length),
+                MaxBPM = maxBpm,
+                MinBPM = minBpm,
             };
         }
-        public static MaidataLineGraphAnalyzeResult AnalyzeMaidataWithGraph(SimaiChart data, 
-                                                                            int height, 
-                                                                            int width, 
+        public static MaidataLineGraphAnalyzeResult AnalyzeMaidataWithGraph(SimaiChart data,
+                                                                            int height,
+                                                                            int width,
                                                                             float? chartLength = null)
         {
             if (data.NoteTimings.IsEmpty)
@@ -80,45 +75,57 @@ namespace MajdataPlay.Utils
             }
             var noteTimings = data.NoteTimings;
             var length = chartLength ?? (float)noteTimings[noteTimings.Length - 1].Timing;
-            var result = AnalyzeMaidataCore(noteTimings, length);
-            var graph = DrawGraph(result, height, width);
+            var bars = BuildBars(noteTimings, length);
+            var graph = DrawGraph(bars, height, width);
+            GetBpmRange(noteTimings, out var minBpm, out var maxBpm);
 
-            result.TapPoints.Dispose();
-            result.TouchPoints.Dispose();
-            result.SlidePoints.Dispose();
-            return new ()
+            return new()
             {
-                Esti = result.Esti,
-                Length = result.Length,
-                MaxBPM = result.MaxBPM,
-                MinBPM = result.MinBPM,
-                PeakDensity = result.PeakDensity,
+                Length = TimeSpan.FromSeconds(length),
+                MaxBPM = maxBpm,
+                MinBPM = minBpm,
                 LineGraph = graph
             };
         }
-        static unsafe Texture DrawGraph(InternalMaidataAnalyzeResult analyzeResult,
-                                 int height,
-                                 int width)
+
+        static void GetBpmRange(
+            ReadOnlySpan<SimaiTimingPoint> data,
+            out float minBpm,
+            out float maxBpm)
+        {
+            minBpm = float.MaxValue;
+            maxBpm = float.MinValue;
+
+            for (int i = 0; i < data.Length; i++)
+            {
+                float bpm = data[i].Bpm;
+
+                minBpm = Mathf.Min(minBpm, bpm);
+                maxBpm = Mathf.Max(maxBpm, bpm);
+            }
+
+            if (data.Length == 0)
+            {
+                minBpm = 0f;
+                maxBpm = 0f;
+            }
+        }
+
+        static unsafe Texture DrawGraph(
+                            NativeArray<GraphBar> bars,
+                            int height,
+                            int width)
         {
             const int BarCount = 64;
 
             EnsureSakaComponentIsInited();
-            var tapPoints = analyzeResult.TapPoints;
-            var slidePoints = analyzeResult.SlidePoints;
-            var touchPoints = analyzeResult.TouchPoints;
 
             var imageInfo = new SKImageInfo(width, height);
+
             using var surface = SKSurface.Create(imageInfo);
+
             var canvas = surface.Canvas;
             canvas.Clear(SKColor.Empty);
-
-            var count = tapPoints.Length;
-
-            var bars = BuildBars(
-                tapPoints,
-                slidePoints,
-                touchPoints,
-                BarCount);
 
             var step = (float)width / BarCount;
 
@@ -128,38 +135,42 @@ namespace MajdataPlay.Utils
             for (var i = 0; i < BarCount; i++)
             {
                 var x = (i + 0.5f) * step;
+
                 var barInfo = bars[i];
-                var tapBarHeight = barInfo.Tap * height;
-                var touchBarHeight = barInfo.Touch * height;
-                var slideBarHeight = barInfo.Slide * height;
 
-                //MajDebug.LogInfo(String.Format("Heights {0} {1} {2} Total:{3}", tapBarHeight, touchBarHeight, slideBarHeight, tapBarHeight + touchBarHeight + slideBarHeight));
+                var tapHeight = barInfo.Tap * height;
+                var slideHeight = barInfo.Slide * height;
+                var touchHeight = barInfo.Touch * height;
 
-                // Draw touch bar
+                // Touch (最底层)
                 DrawRoundRectBar(
-                        canvas,
-                        x,
-                        height,
-                        touchBarHeight + slideBarHeight + tapBarHeight,
-                        barWidth,
-                        radius,
-                        s_touchPaint);
+                    canvas,
+                    x,
+                    height,
+                    tapHeight + slideHeight + touchHeight,
+                    barWidth,
+                    radius,
+                    s_touchPaint);
+
+                // Slide
                 DrawRoundRectBar(
-                        canvas,
-                        x,
-                        height ,
-                        slideBarHeight + tapBarHeight,
-                        barWidth,
-                        radius,
-                        s_slidePaint);
+                    canvas,
+                    x,
+                    height,
+                    tapHeight + slideHeight,
+                    barWidth,
+                    radius,
+                    s_slidePaint);
+
+                // Tap (顶部)
                 DrawRoundRectBar(
-                        canvas,
-                        x,
-                        height,
-                        tapBarHeight,
-                        barWidth,
-                        radius,
-                        s_tapPaint);
+                    canvas,
+                    x,
+                    height,
+                    tapHeight,
+                    barWidth,
+                    radius,
+                    s_tapPaint);
             }
 
             return surface.ToTexture2D(imageInfo);
@@ -193,207 +204,105 @@ namespace MajdataPlay.Utils
 
             canvas.DrawRoundRect(s_roundRect, paint);
         }
-        static NativeArray<GraphBar> BuildBars(NativeArray<Vector2> tapPoints,
-                                               NativeArray<Vector2> slidePoints,
-                                               NativeArray<Vector2> touchPoints,
-                                               int barCount)
+        static NativeArray<GraphBar> BuildBars(
+            ReadOnlySpan<SimaiTimingPoint> data,
+            float length,
+            int barCount = 64)
         {
-            var sampleCount = tapPoints.Length;
-
             var bars = new NativeArray<GraphBar>(barCount, Allocator.Temp);
-            var max = 0f;
 
-            for (var i = 0; i < barCount; i++)
+            float max = 0f;
+
+            for (int i = 0; i < data.Length; i++)
             {
-                var begin = i * sampleCount / barCount;
-                var end = (i + 1) * sampleCount / barCount;
+                var timingPoint = data[i];
 
-                var tap = 0f;
-                var slide = 0f;
-                var touch = 0f;
+                int barIndex = (int)(timingPoint.Timing / length * barCount);
 
-                for (var j = begin; j < end; j++)
+                if (barIndex < 0)
+                    continue;
+
+                if (barIndex >= barCount)
+                    barIndex = barCount - 1;
+
+                var bar = bars[barIndex];
+
+                foreach (var note in timingPoint.Notes)
                 {
-                    tap += tapPoints[j].y;
-                    slide += slidePoints[j].y;
-                    touch += touchPoints[j].y;
+                    switch (note.Type)
+                    {
+                        case SimaiNoteType.Tap:
+                        case SimaiNoteType.Hold:
+                            bar.Tap += 1;
+                            break;
+
+                        case SimaiNoteType.Slide:
+                            bar.Slide += 2;
+                            break;
+
+                        case SimaiNoteType.Touch:
+                        case SimaiNoteType.TouchHold:
+                            bar.Touch += 1;
+                            break;
+                    }
                 }
-                max = Mathf.Max(max, tap + slide + touch);
 
-                bars[i] = new ()
-                {
-                    Tap = tap,
-                    Slide = slide,
-                    Touch = touch
-                };
+                bars[barIndex] = bar;
             }
-            // normalize
-            for (var i = 0; i < barCount; i++)
+
+            // 求最大柱高度
+            for (int i = 0; i < barCount; i++)
             {
-                var bar = bars[i];
-                bars[i] = new GraphBar
-                {
-                    Tap = bar.Tap / max,
-                    Slide = bar.Slide / max,
-                    Touch = bar.Touch / max
-                };
-                //MajDebug.LogInfo(String.Format("{0} {1} {2} {3}", bars[i].Tap, bars[i].Slide, bars[i].Touch, bars[i].Tap + bars[i].Slide + bars[i].Touch));
+                var sum = bars[i].Tap + bars[i].Slide + bars[i].Touch;
+                max = Mathf.Max(max, sum);
             }
 
+            // 归一化
+            if (max > 0)
+            {
+                for (int i = 0; i < barCount; i++)
+                {
+                    var bar = bars[i];
+
+                    bars[i] = new GraphBar
+                    {
+                        Tap = bar.Tap / max,
+                        Slide = bar.Slide / max,
+                        Touch = bar.Touch / max
+                    };
+                }
+            }
 
             return bars;
         }
-        static InternalMaidataAnalyzeResult AnalyzeMaidataCore(ReadOnlySpan<SimaiTimingPoint> data, float length)
-        {
-            var pointIndex = 0;
-            var sampleCount = (int)(length / 0.5f);
-            if(Mathf.Floor(length) > 0.5)
-            {
-                sampleCount += 1;
-            }
-            var tapPoints = new NativeArray<Vector2>(sampleCount, Allocator.TempJob);
-            var slidePoints = new NativeArray<Vector2>(sampleCount, Allocator.TempJob);
-            var touchPoints = new NativeArray<Vector2>(sampleCount, Allocator.TempJob);
-            var max = 0f;
-            var maxBPM = 0f;
-            var minBPM = float.MaxValue;
-            var y0 = 0f;
-            var y1 = 0f;
-            var y2 = 0f;
-            var window = new Range<int>(0, 0, ContainsType.RightOpen);
-            var tapYSum = 0f;
-            var touchYSum = 0f;
-            var slideYSum = 0f;
-            for (float time = 0; time < length; time += 0.5f)
-            {
-                var windowStartTiming = time - 0.75f;
-                var windowEndTiming = time + 0.75f;
-                var rIndex = window.End;
-                var lIndex = window.Start;
-                for (; rIndex < data.Length; rIndex++)
-                {
-                    var timingPoint = data[rIndex];
-                    if(timingPoint.Timing > windowEndTiming)
-                    {
-                        break;
-                    }
-                    maxBPM = Mathf.Max(maxBPM, timingPoint.Bpm);
-                    minBPM = Mathf.Min(minBPM, timingPoint.Bpm);
-                    AddSample(timingPoint.Notes, ref y0, ref y1, ref y2);
-                }
-                for (; lIndex < window.End; lIndex++)
-                {
-                    var timingPoint = data[lIndex];
-                    if (timingPoint.Timing >= windowStartTiming)
-                    {
-                        break;
-                    }
-                    DelSample(timingPoint.Notes, ref y0, ref y1, ref y2);
-                }
-                window = new Range<int>(lIndex, rIndex, ContainsType.RightOpen);
-                var sum = y0 + y1 + y2;
-                max = Mathf.Max(sum, max);
 
-                var x = time / length;
-                tapPoints[pointIndex] = new Vector2(x, y0);
-                slidePoints[pointIndex] = new Vector2(x, y1);
-                touchPoints[pointIndex] = new Vector2(x, y2);
-                tapYSum += y0;
-                slideYSum += y1;
-                touchYSum += y2;
-                pointIndex++;
-            }
-            var tapYAvg = tapYSum / tapPoints.Length;
-            var touchYAvg = touchYSum / touchPoints.Length;
-            var slideYAvg = slideYSum / slidePoints.Length;
-            var avg = tapYAvg + (3f * slideYAvg) + (0.5f * touchYAvg);
-            var esti = 7.5f * Mathf.Log10(3.8f * (avg + (0.3f * max)));
-
-            return new()
-            {
-                Average = avg,
-                Esti = esti,
-                Length = TimeSpan.FromSeconds(length),
-                MaxBPM = maxBPM,
-                MinBPM = minBPM,
-                PeakDensity = max,
-
-                TapPoints = tapPoints,
-                TouchPoints = touchPoints,
-                SlidePoints = slidePoints,
-            };
-        }
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        static void AddSample(ReadOnlySpan<SimaiNote> notes, ref float y0, ref float y1, ref float y2)
-        {
-            for (var i = 0; i < notes.Length; i++)
-            {
-                var note = notes[i];
-                switch (note.Type)
-                {
-                    case SimaiNoteType.Tap:
-                    case SimaiNoteType.Hold:
-                        y0++;
-                        break;
-                    case SimaiNoteType.Slide:
-                        y1 += 2;
-                        break;
-                    case SimaiNoteType.Touch:
-                    case SimaiNoteType.TouchHold:
-                        y2++;
-                        break;
-                }
-            }
-        }
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        static void DelSample(ReadOnlySpan<SimaiNote> notes, ref float y0, ref float y1, ref float y2)
-        {
-            for (var i = 0; i < notes.Length; i++)
-            {
-                var note = notes[i];
-                switch (note.Type)
-                {
-                    case SimaiNoteType.Tap:
-                    case SimaiNoteType.Hold:
-                        y0--;
-                        break;
-                    case SimaiNoteType.Slide:
-                        y1 -= 2;
-                        break;
-                    case SimaiNoteType.Touch:
-                    case SimaiNoteType.TouchHold:
-                        y2--;
-                        break;
-                }
-            }
-        }
         [MemberNotNull(nameof(s_tapPaint), nameof(s_slidePaint), nameof(s_touchPaint))]
         [MemberNotNull(nameof(s_tapPath), nameof(s_slidePath), nameof(s_touchPath))]
         [MemberNotNull(nameof(s_radii), nameof(s_roundRect))]
         static void EnsureSakaComponentIsInited()
         {
-            if(s_tapPaint is null)
+            if (s_tapPaint is null)
             {
                 s_tapPaint = new();
                 s_tapPaint.Color = TapColor.ToSkColor();
                 s_tapPaint.IsAntialias = true;
                 s_tapPaint.Style = SKPaintStyle.Fill;
             }
-            if(s_slidePaint is null)
+            if (s_slidePaint is null)
             {
                 s_slidePaint = new();
                 s_slidePaint.Color = SlideColor.ToSkColor();
                 s_slidePaint.IsAntialias = true;
                 s_slidePaint.Style = SKPaintStyle.Fill;
             }
-            if(s_touchPaint is null)
+            if (s_touchPaint is null)
             {
                 s_touchPaint = new();
                 s_touchPaint.Color = TouchColor.ToSkColor();
                 s_touchPaint.IsAntialias = true;
                 s_touchPaint.Style = SKPaintStyle.Fill;
             }
-            if(s_tapPath is null)
+            if (s_tapPath is null)
             {
                 s_tapPath = new();
             }
@@ -418,7 +327,7 @@ namespace MajdataPlay.Utils
                 s_slidePath.Rewind();
             }
 
-            if(s_radii is null)
+            if (s_radii is null)
             {
                 s_radii = new SKPoint[4]
                 {
@@ -435,7 +344,7 @@ namespace MajdataPlay.Utils
                 s_radii[2] = SKPoint.Empty;
                 s_radii[3] = SKPoint.Empty;
             }
-            if(s_roundRect is null)
+            if (s_roundRect is null)
             {
                 s_roundRect = new();
             }
@@ -444,47 +353,11 @@ namespace MajdataPlay.Utils
                 s_roundRect.SetEmpty();
             }
         }
-        struct InternalMaidataAnalyzeResult
+        struct GraphBar
         {
-            public float PeakDensity { get; init; }
-            public float Esti { get; init; }
-            public float Average { get; init; }
-            public TimeSpan Length { get; init; }
-            public float MaxBPM { get; init; }
-            public float MinBPM { get; init; }            
-
-            public NativeArray<Vector2> TapPoints { get; init; }
-            public NativeArray<Vector2> TouchPoints { get; init; }
-            public NativeArray<Vector2> SlidePoints { get; init; }
-        }
-        readonly struct GraphBar
-        {
-            public float Tap { get; init; }
-            public float Slide { get; init; }
-            public float Touch { get; init; }
-        }
-
-        [BurstCompile]
-        struct SampleNormalizeJob : IJobParallelFor
-        {
-            public NativeArray<Vector2> TapPoints;
-            public NativeArray<Vector2> SlidePoints;
-            public NativeArray<Vector2> TouchPoints;
-
-            [ReadOnly]
-            public float Max;
-
-            public void Execute(int i)
-            {
-                var invMax = 1f / Max;
-                var tapPoint = TapPoints[i];
-                var slidePoint = SlidePoints[i];
-                var touchPoint = TouchPoints[i];
-
-                TapPoints[i] = new Vector2(tapPoint.x, tapPoint.y * invMax);
-                SlidePoints[i] = new Vector2(slidePoint.x, slidePoint.y * invMax);
-                TouchPoints[i] = new Vector2(touchPoint.x, touchPoint.y * invMax);
-            }
+            public float Tap { get; set; }
+            public float Slide { get; set; }
+            public float Touch { get; set; }
         }
     }
 }
