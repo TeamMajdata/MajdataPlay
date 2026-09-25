@@ -71,7 +71,7 @@ namespace MajdataPlay
         {
             if (_radarMaterial == null)
             {
-                Debug.LogError("[MajRadar] Radar material is not initialized.");
+                MajDebug.LogError("[MajRadar] Radar material is not initialized.");
                 return;
             }
 
