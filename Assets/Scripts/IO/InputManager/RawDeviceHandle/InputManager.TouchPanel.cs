@@ -535,9 +535,11 @@ namespace MajdataPlay.IO
                 currentThread.IsBackground = true;
                 currentThread.Priority = MajEnv.THREAD_PRIORITY_IO;
 
-                ExclusiveTouchHost.Start(() => new PdxTouchDevice(
-                    (ushort)usbOptions.VendorId, (ushort)usbOptions.ProductId, usbOptions.DeviceName,
-                    capacitiveOptions.TouchRadius, capacitiveOptions.RadiusOffset));
+                ExclusiveTouchHost.Start(
+                    () => new PdxTouchDevice((ushort)usbOptions.VendorId, (ushort)usbOptions.ProductId,
+                        usbOptions.DeviceName, capacitiveOptions.TouchRadius, capacitiveOptions.RadiusOffset),
+                    () => new FlTouchDevice(usbOptions.DeviceName, capacitiveOptions.TouchRadius,
+                        capacitiveOptions.RadiusOffset));
 
                 try
                 {
