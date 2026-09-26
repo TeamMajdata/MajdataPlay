@@ -7,6 +7,7 @@ using MajdataPlay.i18n;
 using MajdataPlay.Numerics;
 using MajdataPlay.Scenes.List.Models;
 using MajdataPlay.Settings.Runtime;
+using MajdataPlay.Threading;
 using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
@@ -641,7 +642,7 @@ namespace MajdataPlay.Scenes.List
                 var preloadTask = SongDetail.PreloadAsync();
                 if(!preloadTask.IsCompleted)
                 {
-                    ListManager.AllBackgroundTasks.Add(preloadTask.AsTask());
+                    ListManager.AllBackgroundTasks.Add(preloadTask.AsTask().Register($"[{nameof(CoverListManager)}]Song detail preload"));
                 }
                 PreloadTask = preloadTask;
             }

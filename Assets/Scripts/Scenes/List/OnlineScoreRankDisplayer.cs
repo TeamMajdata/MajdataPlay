@@ -3,6 +3,7 @@ using MajdataPlay.Diagnostics;
 using MajdataPlay.i18n;
 using MajdataPlay.Net;
 using MajdataPlay.Scenes.Game;
+using MajdataPlay.Threading;
 using MajdataPlay.Utils;
 using System;
 using System.Collections.Generic;
@@ -134,7 +135,9 @@ namespace MajdataPlay.Scenes.List
                     _loadTimer = 0f;
                     return;
                 }
-                _onlineScoreFetchTask = Online.GetChartScoreInfoAsync(_currentSongDetail, _cancellationToken).AsTask();
+                _onlineScoreFetchTask = Online.GetChartScoreInfoAsync(_currentSongDetail, _cancellationToken)
+                                              .AsTask()
+                                              .Register($"[{nameof(OnlineScoreRankDisplayer)}]Fetch online ranking");
                 ListManager.AllBackgroundTasks.Add(_onlineScoreFetchTask);
                 return;
             }

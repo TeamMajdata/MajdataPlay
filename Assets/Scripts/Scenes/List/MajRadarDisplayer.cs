@@ -1,6 +1,8 @@
 using Cysharp.Threading.Tasks;
+using LitMotion;
 using MajdataPlay.Diagnostics;
 using MajdataPlay.Scenes.List;
+using MajdataPlay.Threading;
 using MajdataPlay.Utils.ChartRadar;
 using MajSimai;
 using System;
@@ -10,9 +12,8 @@ using System.Threading;
 using System.Threading.Tasks;
 using TMPro;
 using UnityEngine;
-using UnityEngine.UI;
-using LitMotion;
 using UnityEngine.Serialization;
+using UnityEngine.UI;
 
 #nullable enable
 namespace MajdataPlay
@@ -168,6 +169,7 @@ namespace MajdataPlay
                     return;
                 }
                 _maidataLoadTask = _currentSongDetail.GetMaidataAsync(true, token: _cancellationToken).AsTask();
+                _maidataLoadTask.Register($"[{nameof(MajRadarDisplayer)}]Load maidata");
                 ListManager.AllBackgroundTasks.Add(_maidataLoadTask);
                 return;
             }
@@ -182,7 +184,7 @@ namespace MajdataPlay
                     var simaiFile = _maidataLoadTask.Result;
                     var simaiChart = simaiFile.Charts[(int)_currentLevel];
                     //TODO AllBackgroundTasks?
-                    var task = AnalyzeAsync(simaiChart, _cancellationToken);
+                    var task = AnalyzeAsync(simaiChart, _cancellationToken).Register($"[{nameof(MajRadarDisplayer)}]Chart analyze");
                     task.Forget();
                     ListManager.AllBackgroundTasks.Add(task.AsTask());
                 }

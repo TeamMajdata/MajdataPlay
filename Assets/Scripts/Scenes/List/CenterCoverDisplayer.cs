@@ -6,6 +6,7 @@ using MajdataPlay.Scenes.Game;
 using MajdataPlay.Scenes.Game.Notes;
 using MajdataPlay.Settings;
 using MajdataPlay.Settings.Runtime;
+using MajdataPlay.Threading;
 using MajdataPlay.Utils;
 using System;
 using System.Collections;
@@ -231,7 +232,8 @@ namespace MajdataPlay.Scenes.List
             UpdateMetadataAndScoreDisplayer(loadDelayMS);
             _previewPlayer.PlayPreviewSound(detail, 1000, _cts.Token);
             _favoriteAdder.SetSong(detail);
-            ListManager.AllBackgroundTasks.Add(SetCoverAsync(detail, loadDelayMS, _cts.Token, immediateCover));
+            ListManager.AllBackgroundTasks.Add(SetCoverAsync(detail, loadDelayMS, _cts.Token, immediateCover)
+                                               .Register($"[{nameof(CenterCoverDisplayer)}]Load song cover"));
         }
         public void SetEmbeddedCoverVisible(bool visible)
         {

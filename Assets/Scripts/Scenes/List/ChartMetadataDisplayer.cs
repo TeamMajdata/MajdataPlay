@@ -1,5 +1,6 @@
 ﻿using ExCSS;
 using MajdataPlay.Diagnostics;
+using MajdataPlay.Threading;
 using MajdataPlay.Utils;
 using MajSimai;
 using System;
@@ -76,6 +77,7 @@ namespace MajdataPlay.Scenes.List
                     return;
                 }
                 _maidataLoadTask = _currentSongDetail.GetMaidataAsync(true, token: _cancellationToken).AsTask();
+                _maidataLoadTask.Register($"[{nameof(ChartMetadataDisplayer)}]Load maidata");
                 ListManager.AllBackgroundTasks.Add(_maidataLoadTask);
                 return;
             }

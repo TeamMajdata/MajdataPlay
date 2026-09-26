@@ -1,6 +1,7 @@
 using Cysharp.Threading.Tasks;
 using MajdataPlay.Diagnostics;
 using MajdataPlay.IO;
+using MajdataPlay.Threading;
 using MajdataPlay.Utils;
 using ManagedBass;
 using System;
@@ -37,7 +38,8 @@ namespace MajdataPlay.Scenes.List
             var previewVersion = ++_previewVersion;
             CabinetLed.SetButtonLight(Color.green, 3);
             CabinetLed.SetCabinetLight(1.0f);
-            ListManager.AllBackgroundTasks.Add(PlayPreviewAsync(info, loadDelayMS, token, previewVersion));
+            ListManager.AllBackgroundTasks.Add(PlayPreviewAsync(info, loadDelayMS, token, previewVersion)
+                                               .Register($"[{nameof(PreviewSoundPlayer)}]Load song preview"));
         }
         async Task PlayPreviewAsync(ISongDetail info, int loadDelayMS, CancellationToken token, int previewVersion)
         {
