@@ -1,6 +1,12 @@
-# MajdataPlay
+# MajdataPlay Oniimai
 
-## Oniimai Android integration
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="Doc/Oniimai/overview-dark.svg" />
+  <source media="(prefers-color-scheme: light)" srcset="Doc/Oniimai/overview-light.svg" />
+  <img src="Doc/Oniimai/overview-light.svg" alt="Oniimai USB touch and IO4 buttons connect to MajdataPlay on Android, with RGB feedback, rotated external game output, and a separate phone dashboard." width="1200" />
+</picture>
+
+## Overview
 
 This repository contains **MajdataPlay Oniimai 0.2.18**, based on the latest
 published upstream Nightly checked on September 27, 2026:
