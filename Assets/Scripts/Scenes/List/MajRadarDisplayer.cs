@@ -38,6 +38,19 @@ namespace MajdataPlay
 
         private Material _radarMaterial;
         private readonly MotionHandle[] _scoreHandles = new MotionHandle[6];
+        private float _loadTimer = 0f;
+        private float _loadDelayTimer = 0f;
+
+        private ISongDetail? _currentSongDetail;
+        private ChartLevel _currentLevel;
+        private Task<SimaiFile>? _maidataLoadTask;
+        private CancellationToken _cancellationToken = default;
+
+        const float LOAD_DEBOUNCE_INTERVAL_SEC = 0.4f;
+
+
+
+
         private void Awake()
         {
             _radarMaterial = (_radarRawImage.material = new(_radarRawImage.material));
@@ -133,17 +146,7 @@ namespace MajdataPlay
             }
         }
 
-        float _loadTimer = 0f;
-        float _loadDelayTimer = 0f;
-
-        ISongDetail? _currentSongDetail;
-        ChartLevel _currentLevel;
-        Task<SimaiFile>? _maidataLoadTask;
-        CancellationToken _cancellationToken = default;
-
-        const float LOAD_DEBOUNCE_INTERVAL_SEC = 0.4f;
-
-        void LateUpdate()
+        private void LateUpdate()
         {
             if (_currentSongDetail is null)
             {

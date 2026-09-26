@@ -101,6 +101,7 @@ namespace MajdataPlay.Scenes.List
         LevelDisplayer[] _levelDisplayers = Array.Empty<LevelDisplayer>();
 
         CancellationTokenSource _cts = new();
+        CancellationTokenSource _ctsOnLevelChanged = new();
 
         readonly ListConfig _listConfig = MajEnv.RuntimeConfig?.List ?? new();
         readonly ChartLevel[] _levelValues = (ChartLevel[])Enum.GetValues(typeof(ChartLevel));
@@ -164,14 +165,21 @@ namespace MajdataPlay.Scenes.List
         void OnDestroy()
         {
             _cts.Cancel();
+            _ctsOnLevelChanged.Cancel();
         }
         void OnDisable()
         {
             _cts.Cancel();
+            _ctsOnLevelChanged.Cancel();
         }
 
         public void SetDifficulty(int i)
         {
+            if(!_ctsOnLevelChanged.IsCancellationRequested)
+            {
+                _ctsOnLevelChanged.Cancel();
+            }
+            _ctsOnLevelChanged = new();
             _levelRingDisplayer.color = RuntimeDatabase.DifficultyColors[i];
             _selectedLevelColor.color = RuntimeDatabase.DifficultyColors[i];
             _diff = i;
@@ -243,6 +251,10 @@ namespace MajdataPlay.Scenes.List
                 if(!_cts.IsCancellationRequested)
                 {
                     _cts.Cancel();
+                }
+                if (!_ctsOnLevelChanged.IsCancellationRequested)
+                {
+                    _ctsOnLevelChanged.Cancel();
                 }
             }
             _embeddedCoverRoot?.SetActive(visible);
@@ -331,13 +343,15 @@ namespace MajdataPlay.Scenes.List
             {
                 return;
             }
-            var cancellationToken = _cts?.Token ?? default;
-            _metadataDisplayer.SetMetadataFromSongDetail(_currentSongDetail, (ChartLevel)_diff, loadDelayMS, cancellationToken);
+            var cancellationToken = _cts.Token;
+            var cancellationTokenOnLevelChanged = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _ctsOnLevelChanged.Token)
+                                                                         .Token;
+            _metadataDisplayer.SetMetadataFromSongDetail(_currentSongDetail, (ChartLevel)_diff, loadDelayMS, cancellationTokenOnLevelChanged);
             _scoreDisplayer.SetScore(_currentSongDetail, (ChartLevel)_diff);
             _onlineInfoDisplayer.SetSongDetail(_currentSongDetail, loadDelayMS, cancellationToken);
-            _chartAnalyzer.SetSongDeatil(_currentSongDetail, (ChartLevel)_diff, null, loadDelayMS, cancellationToken);
-            _majRadar.SetRadarFromSongDetail(_currentSongDetail, (ChartLevel)_diff, loadDelayMS, cancellationToken);
-            _onlineScoreRankDisplayer.SetSongDetail(_currentSongDetail, (ChartLevel)_diff, loadDelayMS, cancellationToken);
+            _chartAnalyzer.SetSongDeatil(_currentSongDetail, (ChartLevel)_diff, null, loadDelayMS, cancellationTokenOnLevelChanged);
+            _majRadar.SetRadarFromSongDetail(_currentSongDetail, (ChartLevel)_diff, loadDelayMS, cancellationTokenOnLevelChanged);
+            _onlineScoreRankDisplayer.SetSongDetail(_currentSongDetail, (ChartLevel)_diff, loadDelayMS, cancellationTokenOnLevelChanged);
         }
         void UpdateBGSongCoverAnim(float progress)
         {
