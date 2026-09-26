@@ -101,3 +101,8 @@ out.log
 
 /.idea/*
 /.continue/agents
+
+# Hand-written Oniimai regression harness (not a Unity-generated project).
+!Tools/OniimaiTests/FrameMerge/FrameMerge.csproj
+Tools/OniimaiTests/FrameMerge/bin/
+Tools/OniimaiTests/FrameMerge/obj/

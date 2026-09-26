@@ -313,7 +313,7 @@ namespace MajdataPlay
 
         void ApplyTransform()
         {
-            var initTransform = _displayOptions!.MainScreenTransform;
+            var initTransform = MajdataPlay.IO.OniimaiLayout.PhoneTransform(_displayOptions!.MainScreenTransform);
             _lastTransformDisplay = initTransform;
             if (initTransform)
             {
@@ -353,7 +353,7 @@ namespace MajdataPlay
                     goto case FLAG_INITED;
                 case FLAG_INITED:
                     {
-                        var transformDisplay = _displayOptions!.MainScreenTransform;
+                        var transformDisplay = MajdataPlay.IO.OniimaiLayout.PhoneTransform(_displayOptions!.MainScreenTransform);
 
                         if (!transformDisplay)
                         {

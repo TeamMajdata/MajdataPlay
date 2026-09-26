@@ -1,4 +1,4 @@
-﻿using MajdataPlay.Collections;
+using MajdataPlay.Collections;
 using MajdataPlay.Diagnostics;
 using MajdataPlay.Utils;
 using System;
@@ -92,6 +92,11 @@ namespace MajdataPlay.IO
             {
                 FromMouse(Mouse.current, buttonClickedCount, sensorClickedCount, newStates, extraButtonStates, mainCamera);
             }
+#endif
+#if UNITY_ANDROID && !UNITY_EDITOR
+            // OR physical input with phone touches before queuing. One source must never
+            // release a zone still held by the other. No Android touch/key injection.
+            OniimaiController.MergeInput(newStates, extraButtonStates, sensorClickedCount, buttonClickedCount);
 #endif
             var now = MajTimeline.UnscaledTime;
             foreach (var (i, state) in newStates.WithIndex())

@@ -36,6 +36,10 @@ namespace MajdataPlay.IO
         {
 #if UNITY_STANDALONE
             IsEnabled = MajEnv.Settings.IO.OutputDevice.Led.Enable;
+#elif UNITY_ANDROID
+            // Produce game lighting independently of the on-screen dummy button display.
+            // The USB worker applies the player's output toggle and brightness.
+            IsEnabled = true;
 #else
             IsEnabled = false;
 #endif
@@ -70,7 +74,7 @@ namespace MajdataPlay.IO
             }
         }
 
-        [Conditional("UNITY_STANDALONE")]
+        [Conditional("UNITY_STANDALONE"), Conditional("UNITY_ANDROID")]
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         internal static void OnLateUpdate()
         {
@@ -93,14 +97,14 @@ namespace MajdataPlay.IO
             DummyLedRenderer.SetLedRingColorData(ledColors);
         }
         #region Cabinet light
-        [Conditional("UNITY_STANDALONE")]
+        [Conditional("UNITY_STANDALONE"), Conditional("UNITY_ANDROID")]
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static void SetCabinetLight(byte brightness)
         {
             SetCabinetLight(brightness / 255f);
         }
 
-        [Conditional("UNITY_STANDALONE")]
+        [Conditional("UNITY_STANDALONE"), Conditional("UNITY_ANDROID")]
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static void SetCabinetLight(float brightness)
         {
@@ -112,7 +116,7 @@ namespace MajdataPlay.IO
             func.SetColor(Color.white * Mathf.Clamp01(brightness));
             _cabinetLight.UpdateFunction = func;
         }
-        [Conditional("UNITY_STANDALONE")]
+        [Conditional("UNITY_STANDALONE"), Conditional("UNITY_ANDROID")]
         public static void SetCabinetLightSineFunc(float brightness, long T_Ms, float phi = 0.5f)
         {
             if (!IsEnabled)
@@ -121,7 +125,7 @@ namespace MajdataPlay.IO
             }
             SetCabinetLightSineFunc(brightness, TimeSpan.FromMilliseconds(T_Ms), phi);
         }
-        [Conditional("UNITY_STANDALONE")]
+        [Conditional("UNITY_STANDALONE"), Conditional("UNITY_ANDROID")]
         public static void SetCabinetLightSineFunc(float brightness, TimeSpan T, float phi = 0.5f)
         {
             if (!IsEnabled)
@@ -134,7 +138,7 @@ namespace MajdataPlay.IO
         }
         #endregion
         #region Led ring
-        [Conditional("UNITY_STANDALONE")]
+        [Conditional("UNITY_STANDALONE"), Conditional("UNITY_ANDROID")]
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static void SetAllLight(Color lightColor)
         {
@@ -149,7 +153,7 @@ namespace MajdataPlay.IO
                 _ledRingDevices[i].UpdateFunction = func;
             }
         }
-        [Conditional("UNITY_STANDALONE")]
+        [Conditional("UNITY_STANDALONE"), Conditional("UNITY_ANDROID")]
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static void SetAllLightLinearTo(Color from, Color to, long durationMs)
         {
@@ -159,7 +163,7 @@ namespace MajdataPlay.IO
             }
             SetAllLightLinearTo(from, to, TimeSpan.FromMilliseconds(durationMs));
         }
-        [Conditional("UNITY_STANDALONE")]
+        [Conditional("UNITY_STANDALONE"), Conditional("UNITY_ANDROID")]
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static void SetAllLightLinearTo(Color from, Color to, TimeSpan duration)
         {
@@ -174,7 +178,7 @@ namespace MajdataPlay.IO
                 _ledRingDevices[i].UpdateFunction = func;
             }
         }
-        [Conditional("UNITY_STANDALONE")]
+        [Conditional("UNITY_STANDALONE"), Conditional("UNITY_ANDROID")]
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static void SetAllLightSineFunc(Color color, long T_Ms, float phi = 0.5f)
         {
@@ -184,7 +188,7 @@ namespace MajdataPlay.IO
             }
             SetAllLightSineFunc(color, TimeSpan.FromMilliseconds(T_Ms), phi);
         }
-        [Conditional("UNITY_STANDALONE")]
+        [Conditional("UNITY_STANDALONE"), Conditional("UNITY_ANDROID")]
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static void SetAllLightSineFunc(Color color, TimeSpan T, float phi = 0.5f)
         {
@@ -199,7 +203,7 @@ namespace MajdataPlay.IO
                 _ledRingDevices[i].UpdateFunction = func;
             }
         }
-        [Conditional("UNITY_STANDALONE")]
+        [Conditional("UNITY_STANDALONE"), Conditional("UNITY_ANDROID")]
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static void SetAllLightUpdateFunc(ReadOnlySpan<ILedUpdateFunction> funcs)
         {
@@ -216,7 +220,7 @@ namespace MajdataPlay.IO
                 _ledRingDevices[i].UpdateFunction = funcs[i];
             }
         }
-        [Conditional("UNITY_STANDALONE")]
+        [Conditional("UNITY_STANDALONE"), Conditional("UNITY_ANDROID")]
         public static void SetButtonLight(Color lightColor, int button)
         {
             if (!IsEnabled)
@@ -227,7 +231,7 @@ namespace MajdataPlay.IO
             func.SetColor(lightColor);
             _ledRingDevices[button].UpdateFunction = func;
         }
-        [Conditional("UNITY_STANDALONE")]
+        [Conditional("UNITY_STANDALONE"), Conditional("UNITY_ANDROID")]
         public static void SetButtonLightWithTimeout(Color lightColor, int button, long durationMs = 500)
         {
             if (!IsEnabled)
@@ -238,7 +242,7 @@ namespace MajdataPlay.IO
             func.SetColor(lightColor, durationMs);
             _ledRingDevices[button].UpdateFunction = func;
         }
-        [Conditional("UNITY_STANDALONE")]
+        [Conditional("UNITY_STANDALONE"), Conditional("UNITY_ANDROID")]
         public static void SetButtonLightWithTimeout(Color lightColor, int button, TimeSpan duration)
         {
             if (!IsEnabled)
@@ -249,7 +253,7 @@ namespace MajdataPlay.IO
             func.SetColor(lightColor, duration);
             _ledRingDevices[button].UpdateFunction = func;
         }
-        [Conditional("UNITY_STANDALONE")]
+        [Conditional("UNITY_STANDALONE"), Conditional("UNITY_ANDROID")]
         public static void LinearTo(int button, Color from, Color to, long durationMs)
         {
             if (!IsEnabled)
@@ -258,7 +262,7 @@ namespace MajdataPlay.IO
             }
             LinearTo(button, from, to, TimeSpan.FromMilliseconds(durationMs));
         }
-        [Conditional("UNITY_STANDALONE")]
+        [Conditional("UNITY_STANDALONE"), Conditional("UNITY_ANDROID")]
         public static void LinearTo(int button, Color from, Color to, TimeSpan duration)
         {
             if (!IsEnabled)
@@ -269,7 +273,7 @@ namespace MajdataPlay.IO
             func.LinearTo(from, to, duration);
             _ledRingDevices[button].UpdateFunction = func;
         }
-        [Conditional("UNITY_STANDALONE")]
+        [Conditional("UNITY_STANDALONE"), Conditional("UNITY_ANDROID")]
         public static void SetSineFunc(int button, Color color, long T_Ms, float phi = 0.5f)
         {
             if (!IsEnabled)
@@ -278,7 +282,7 @@ namespace MajdataPlay.IO
             }
             SetSineFunc(button, color, TimeSpan.FromMilliseconds(T_Ms), phi);
         }
-        [Conditional("UNITY_STANDALONE")]
+        [Conditional("UNITY_STANDALONE"), Conditional("UNITY_ANDROID")]
         public static void SetSineFunc(int button, Color color, TimeSpan T, float phi = 0.5f)
         {
             if (!IsEnabled)
@@ -289,7 +293,7 @@ namespace MajdataPlay.IO
             func.SetSineFunc(color, T, phi);
             _ledRingDevices[button].UpdateFunction = func;
         }
-        [Conditional("UNITY_STANDALONE")]
+        [Conditional("UNITY_STANDALONE"), Conditional("UNITY_ANDROID")]
         public static void SetUpdateFunc(int button, ILedUpdateFunction func)
         {
             if (!IsEnabled)

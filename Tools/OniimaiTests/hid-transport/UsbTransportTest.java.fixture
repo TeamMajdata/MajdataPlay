@@ -1,0 +1,69 @@
+package net.majdata.majdataplay.oniimai;
+import android.hardware.usb.*;
+import java.io.IOException;
+import java.util.*;
+import java.util.concurrent.*;
+import java.util.concurrent.atomic.AtomicReference;
+
+public final class UsbTransportTest {
+    private static int checks;
+    private static void check(boolean ok,String message){if(!ok)throw new AssertionError(message);checks++;}
+    private static UsbIo.Hid hid(UsbDeviceConnection conn,boolean withOut,UsbIo.Bytes bytes,UsbIo.Failure failure)throws Exception{
+        UsbInterface intf=withOut?new UsbInterface(7,3,new UsbEndpoint(128,3),new UsbEndpoint(0,3)):new UsbInterface(7,3,new UsbEndpoint(128,3));
+        UsbIo.Hid hid=new UsbIo.Hid(new UsbManager(conn),new UsbIo.Port(new UsbDevice(intf),intf,"IO4"),bytes,failure);
+        check(conn.inputQueued.await(1,TimeUnit.SECONDS),"HID input reader did not queue");return hid;
+    }
+    private static void writeFails(UsbIo.Hid h){try{h.writeCeiling(0x123456);throw new AssertionError("output failure not reported");}catch(IOException expected){checks++;}}
+    public static void main(String[] args)throws Exception { ceilingTests(); System.out.println("PASS: "+checks+" real HID transport checks"); }
+    private static void ceilingTests()throws Exception{
+        UsbDeviceConnection out=new UsbDeviceConnection();List<String> errors=Collections.synchronizedList(new ArrayList<>());
+        CountDownLatch input=new CountDownLatch(1);AtomicReference<byte[]> inputBytes=new AtomicReference<>();
+        UsbIo.Hid h=hid(out,true,(bytes,n)->{inputBytes.set(bytes);input.countDown();},errors::add);
+        h.writeCeiling(0x12d0e0);
+        check(out.outputWrites.get()==1&&out.setReports.get()==0,"interrupt OUT must be preferred to control");
+        check(Arrays.equals(out.lastReport,Io4Output.ceiling(0x12d0e0)),"interrupt report packing");
+        check(out.claims.equals(Arrays.asList(7)),"ceiling output claimed another USB handle/interface");
+        out.deliverInput(new byte[]{1,2,3});check(input.await(1,TimeUnit.SECONDS),"input lost after output completion");
+        check(Arrays.equals(inputBytes.get(),new byte[]{1,2,3})&&errors.isEmpty(),"output completion was dispatched as button input");
+        h.writeCeiling(0);check(out.outputWrites.get()==2,"second output failed");h.close();h.close();
+        writeFails(h);check(out.closes.get()==1&&out.outputWrites.get()==2,"closed HID sent report or double closed fd");
+
+        UsbDeviceConnection control=new UsbDeviceConnection();UsbIo.Hid c=hid(control,false,(bytes,n)->{},errors::add);
+        c.writeCeiling(0x123456);
+        check(control.setReports.get()==1&&control.outputWrites.get()==0,"missing OUT did not use SET_REPORT");
+        check(control.reportType==0x21&&control.reportRequest==9&&control.reportValue==0x210&&control.reportIndex==7,"SET_REPORT setup incorrect");
+        check(control.reportTimeout>0&&control.reportTimeout<=500&&Arrays.equals(control.lastReport,Io4Output.ceiling(0x123456)),"SET_REPORT bound or payload incorrect");c.close();
+
+        UsbDeviceConnection shortReport=new UsbDeviceConnection();shortReport.shortOutput=true;
+        UsbIo.Hid sh=hid(shortReport,true,(bytes,n)->{},errors::add);writeFails(sh);writeFails(sh);
+        check(shortReport.outputWrites.get()==1&&shortReport.closes.get()==0,"short report should disable only output");sh.close();
+
+        UsbDeviceConnection stall=new UsbDeviceConnection();stall.blockOutput=true;
+        CountDownLatch stillInput=new CountDownLatch(1);UsbIo.Hid st=hid(stall,true,(bytes,n)->stillInput.countDown(),errors::add);
+        long before=System.nanoTime();writeFails(st);
+        check(System.nanoTime()-before<TimeUnit.SECONDS.toNanos(2),"output timeout is not bounded");
+        stall.deliverInput(new byte[]{1});check(stillInput.await(1,TimeUnit.SECONDS),"output timeout canceled button input");
+        writeFails(st);check(stall.outputWrites.get()==1&&stall.closes.get()==0&&errors.isEmpty(),"timed-out output reused request or closed input");st.close();
+
+        UsbDeviceConnection closing=new UsbDeviceConnection();closing.blockOutput=true;
+        UsbIo.Hid ch=hid(closing,true,(bytes,n)->{},errors::add);AtomicReference<Throwable> failure=new AtomicReference<>();
+        Thread writer=new Thread(()->{try{ch.writeCeiling(0xff0000);}catch(Throwable e){failure.set(e);}});writer.start();
+        check(closing.outputQueued.await(1,TimeUnit.SECONDS),"close test output did not queue");
+        Thread close=new Thread(ch::close);close.start();writer.join(1500);close.join(1500);
+        check(!writer.isAlive()&&!close.isAlive()&&failure.get() instanceof IOException,"HID close did not cancel pending output");
+        check(closing.closes.get()==1&&closing.outputWrites.get()==1,"pending output cleanup count");
+
+        UsbDeviceConnection controlClosing=new UsbDeviceConnection();controlClosing.writing=new CountDownLatch(1);controlClosing.proceed=new CountDownLatch(1);
+        UsbIo.Hid cc=hid(controlClosing,false,(bytes,n)->{},errors::add);AtomicReference<Throwable> controlFailure=new AtomicReference<>();
+        Thread controlWriter=new Thread(()->{try{cc.writeCeiling(0xabc123);}catch(Throwable e){controlFailure.set(e);}});controlWriter.start();
+        check(controlClosing.writing.await(1,TimeUnit.SECONDS),"control write did not start");
+        Thread controlCloser=new Thread(cc::close);controlCloser.start();
+        long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(1);
+        while(controlCloser.getState()!=Thread.State.BLOCKED&&System.nanoTime()<deadline)Thread.yield();
+        check(controlCloser.getState()==Thread.State.BLOCKED&&controlClosing.closes.get()==0,"closed fd during SET_REPORT");
+        controlClosing.proceed.countDown();controlWriter.join(1500);controlCloser.join(1500);
+        check(!controlWriter.isAlive()&&!controlCloser.isAlive()&&controlClosing.closes.get()==1,"control close deadlock or leak");
+        check(controlFailure.get()==null||controlFailure.get() instanceof IOException,"unexpected control close failure");
+        check(errors.isEmpty(),"ceiling errors leaked into input failure callback");
+    }
+}

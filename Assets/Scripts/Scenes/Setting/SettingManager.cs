@@ -63,6 +63,9 @@ namespace MajdataPlay.Scenes.Setting
         }
         void Start()
         {
+#if UNITY_ANDROID && !UNITY_EDITOR
+            OniimaiController.SetSettingsVisible(true);
+#endif
             var type = Setting.GetType();
             var properties = type.GetProperties()
                                  .Where(x => !x.GetCustomAttributes<HideInSettingUIAttribute>().Any())
@@ -385,6 +388,9 @@ namespace MajdataPlay.Scenes.Setting
         }
         private void OnDestroy()
         {
+#if UNITY_ANDROID && !UNITY_EDITOR
+            OniimaiController.SetSettingsVisible(false);
+#endif
             _isExited = true;
             _menuTitleDisplayerAnim.TryCancel();
             InputManager.TouchButtonRingEdge = 5.4f;

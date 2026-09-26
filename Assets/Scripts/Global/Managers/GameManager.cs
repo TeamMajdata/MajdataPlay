@@ -339,6 +339,9 @@ namespace MajdataPlay
             }
 #endif
             Application.targetFrameRate = Settings.Display.FPSLimit;
+#if UNITY_ANDROID && !UNITY_EDITOR
+            MajDebug.LogInfo($"Oniimai Android FPS selected: target={Application.targetFrameRate}, setting={Settings.Display.FPSLimit}");
+#endif
         }
 
 #if UNITY_STANDALONE_OSX && !UNITY_EDITOR

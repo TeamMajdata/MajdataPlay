@@ -42,6 +42,8 @@ namespace MajdataPlay.IO
             {
 #if UNITY_STANDALONE
                 return TouchPanel.IsConnected;
+#elif UNITY_ANDROID && !UNITY_EDITOR
+                return OniimaiController.TouchConnected;
 #else
                 return false;
 #endif
@@ -53,6 +55,8 @@ namespace MajdataPlay.IO
             {
 #if UNITY_STANDALONE
                 return ButtonRing.IsConnected;
+#elif UNITY_ANDROID && !UNITY_EDITOR
+                return ButtonRing.IsConnected || OniimaiController.ButtonConnected;
 #else
                 return false;
 #endif
@@ -480,7 +484,7 @@ namespace MajdataPlay.IO
                 var cExtraRad = Override_TouchCAreaExtraRadius ?? debugOptions.TouchCAreaExtraRadius;
                 var dExtraRad = Override_TouchDAreaExtraRadius ?? debugOptions.TouchDAreaExtraRadius;
                 var eExtraRad = Override_TouchEAreaExtraRadius ?? debugOptions.TouchEAreaExtraRadius;
-                var mainScreenTransform = displayOptions.MainScreenTransform;
+                var mainScreenTransform = OniimaiLayout.PhoneTransform(displayOptions.MainScreenTransform);
                 var mainScreenOffset = displayOptions.MainScreenOffset;
 
                 var isModified = height != _lastScreenHeight ||

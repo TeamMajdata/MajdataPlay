@@ -157,6 +157,8 @@ namespace MajdataPlay.Scenes.Game
         long _lostDXScore = 0;
 
         long _combo = 0; // Combo
+        internal long OniimaiCombo => _combo;
+        internal long OniimaiRemainingDxScore => _totalDXScore + _lostDXScore;
         long _pCombo = 0; // Perfect Combo
         long _cPCombo = 0; // Critical Perfect
 
