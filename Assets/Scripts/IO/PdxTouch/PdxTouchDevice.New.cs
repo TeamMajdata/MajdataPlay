@@ -5,6 +5,9 @@ namespace MajdataPlay.IO
 {
     internal sealed partial class PdxTouchDevice
     {
+        private const int NewSlotCount = 10;
+        private const int NewSlotSize = 6;
+
         private void OnNewTouchData(byte[] data)
         {
             if (data[0] != ReportId) return;
