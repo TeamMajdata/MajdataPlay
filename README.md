@@ -1,5 +1,78 @@
 # MajdataPlay
 
+## Oniimai Android integration
+
+This repository contains **MajdataPlay Oniimai 0.2.18**, based on the latest
+published upstream Nightly checked on September 27, 2026:
+[2.0.3-20260925-5e9c2aa](https://github.com/TeamMajdata/MajdataPlay/tree/5e9c2aa9d0aec133c5dcfca9e0dbcc228d39416b).
+The upstream base is a Nightly snapshot; upstream's latest stable release remains
+2.0.3 as of that date. This is an **unofficial public fork** of TeamMajdata/MajdataPlay
+with the original Git history preserved. The integration runs inside the Android
+game; it does not require LSPosed, NPatch, or root.
+
+**[Download the Oniimai Android APK](https://github.com/kyarameru0/MajdataPlay/releases/tag/oniimai-v0.2.18)**
+— Android 8.0+ / ARM64. The maintainer confirmed normal operation of this exact
+APK on their test setup. Install it as a separate Oniimai app; it can also update
+an existing Oniimai installation signed with the same key.
+
+- USB touch input, IO4 HID buttons and P1, saved device selection, and sensitivity settings.
+- Game-driven button/ring LEDs and upper-speaker RGB output.
+- Rotated external game output with a separate, customizable phone dashboard.
+- First-run setup in Korean or Simplified Chinese, saved widget layouts, and result retention.
+- A 60fps default with a 120fps option and supported external display mode requests.
+  Actual refresh rate depends on the phone, adapter, and monitor; 120Hz output has
+  not been verified on the available hardware.
+
+### Why the 60/120fps lock exists
+
+Without a fixed frame-rate target, frame drops and uneven motion were observed
+on the external display in the tested Oniimai setup, even when the phone's own
+display appeared smooth. The integration therefore defaults to a **60fps lock**
+and offers a **120fps lock** for a compatible 120Hz display setup.
+
+The option sets the game's render target and requests the corresponding external
+60/120Hz mode. It cannot force an unsupported refresh rate: the UI reports the
+actual monitor rate separately, and an unsuccessful 120Hz request falls back to
+60Hz. This is a workaround for the observed setup, not a guarantee that every
+phone, USB-C adapter, or monitor will sustain the selected rate.
+
+### How it works
+
+An Android bridge reads the controller's USB interfaces and passes input snapshots
+to Unity through JNI. The game uses its normal input/judgment path and sends its
+lighting state back to dedicated USB workers. External output uses a separate
+Android Presentation, leaving the phone available for native statistics widgets.
+
+```mermaid
+flowchart LR
+    Controller[Oniimai USB controller] <--> Android[Android USB bridge]
+    Android <--> Unity[Unity input and lighting]
+    Unity --> Surface[External game surface]
+    Surface --> Monitor[External monitor]
+    Unity --> Stats[Statistics and artwork]
+    Stats --> Phone[Native phone dashboard]
+```
+
+The [developer guide](ONIIMAI-DEVELOPMENT.md#architecture) walks through each
+flow, the input snapshot contract, surface lifecycle, result retention, and the
+source files and tests to inspect before an upstream PR.
+
+| Start here | Purpose |
+| --- | --- |
+| [Developer guide](ONIIMAI-DEVELOPMENT.md) | Clone, build, architecture, tests, and preparation for an upstream PR |
+| [Asset provenance](Assets/StreamingAssets/OniimaiUI/README.md) | Original MajdataPlay artwork and fonts used by the Android UI |
+| [Review diff](https://github.com/kyarameru0/MajdataPlay/compare/upstream-nightly-20260925...main) | Oniimai changes against the pinned upstream Nightly base |
+
+The Oniimai additions were written and iterated with **OpenAI Codex (AI-generated
+code)** and human-directed device testing. This statement does not describe the
+authorship of the upstream project or its third-party dependencies. The original
+[GPL-3.0 license](LICENSE) and dependency/asset notices are retained.
+
+The instructions below describe the upstream project. Use the developer guide
+above to build the Oniimai variant (`net.majdata.majdataplay.oniimai`).
+
+---
+
 ![license GPL-3.0](https://img.shields.io/badge/license-GPL--3.0-blue)
 ![GitHub Release](https://img.shields.io/github/v/release/LingFeng-bbben/MajdataPlay)
 ![Discord](https://badgen.net/discord/online-members/AcWgZN7j6K)
