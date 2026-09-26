@@ -25,93 +25,90 @@ namespace MajdataPlay.Scenes.List
     {
         [SerializeField]
         [FormerlySerializedAs("levelRingDisplayer")]
-        Image _levelRingDisplayer;
+        private Image _levelRingDisplayer;
         [SerializeField]
         [FormerlySerializedAs("songCoverDisplayer")]
-        Image _songCoverDisplayer;
+        private Image _songCoverDisplayer;
 
         [SerializeField]
         [FormerlySerializedAs("loadingObj")]
-        GameObject _loadingObj;
+        private GameObject _loadingObj;
 
         [SerializeField]
         [FormerlySerializedAs("scoreDisplayer")]
-        MaiScoreDisplayer _scoreDisplayer;
+        private MaiScoreDisplayer _scoreDisplayer;
 
         [SerializeField]
         [FormerlySerializedAs("metadataDisplayer")]
-        ChartMetadataDisplayer _metadataDisplayer;
+        private ChartMetadataDisplayer _metadataDisplayer;
 
         [SerializeField]
         [FormerlySerializedAs("chartAnalyzer")]
-        ChartVisualDisplayer _chartAnalyzer;
+        private ChartVisualDisplayer _chartAnalyzer;
 
         [SerializeField]
         [FormerlySerializedAs("majRadar")]
-        MajRadarDisplayer _majRadar;
+        private MajRadarDisplayer _majRadar;
 
         [SerializeField]
         [FormerlySerializedAs("onlineInfoDisplayer")]
-        OnlineInfoDisplayer _onlineInfoDisplayer;
+        private OnlineInfoDisplayer _onlineInfoDisplayer;
 
         [SerializeField]
         [FormerlySerializedAs("onlineScoreRankDisplayer")]
-        OnlineScoreRankDisplayer _onlineScoreRankDisplayer;
+        private OnlineScoreRankDisplayer _onlineScoreRankDisplayer;
 
         [SerializeField]
         [FormerlySerializedAs("previewPlayer")]
-        PreviewSoundPlayer _previewPlayer;
+        private PreviewSoundPlayer _previewPlayer;
 
         [SerializeField]
         [FormerlySerializedAs("favoriteAdder")]
-        FavoriteAdder _favoriteAdder;
+        private FavoriteAdder _favoriteAdder;
 
         [SerializeField]
         [FormerlySerializedAs("bgSongCoverDisplayer")]
-        Image _bgSongCoverDisplayer;
+        private Image _bgSongCoverDisplayer;
 
         [SerializeField]
         [FormerlySerializedAs("levelDisplayerListRoot")]
-        GameObject _levelDisplayerListRoot;
+        private GameObject _levelDisplayerListRoot;
 
         [SerializeField]
         [FormerlySerializedAs("selectedLevelTitle")]
-        TextMeshProUGUI _selectedLevelTitle;
+        private TextMeshProUGUI _selectedLevelTitle;
 
         [SerializeField]
         [FormerlySerializedAs("selectedLevelText")]
-        TextMeshProUGUI _selectedLevelText;
+        private TextMeshProUGUI _selectedLevelText;
 
         [SerializeField]
         [FormerlySerializedAs("selectedLevelColor")]
-        Image _selectedLevelColor;
+        private Image _selectedLevelColor;
 
-        int _diff = 0;
+        private int _diff = 0;
 
-        ISongDetail? _currentSongDetail = null;
-        
-        ListManager _listManager;
-        GameObject? _embeddedCoverRoot;
-        GameObject? _favoriteRoot;
-        RectTransform _bgSongCoverTransform;
+        private ISongDetail? _currentSongDetail = null;
 
-        MotionHandle _bgSongCoverAnim;
+        private ListManager _listManager;
+        private GameObject? _embeddedCoverRoot;
+        private GameObject? _favoriteRoot;
+        private RectTransform _bgSongCoverTransform;
 
-        LevelBinding[] _levelBindings = Array.Empty<LevelBinding>();
-        LevelDisplayer[] _levelDisplayers = Array.Empty<LevelDisplayer>();
+        private MotionHandle _bgSongCoverAnim;
 
-        CancellationTokenSource _cts = new();
-        CancellationTokenSource _ctsOnLevelChanged = new();
+        private LevelBinding[] _levelBindings = Array.Empty<LevelBinding>();
+        private LevelDisplayer[] _levelDisplayers = Array.Empty<LevelDisplayer>();
 
-        readonly ListConfig _listConfig = MajEnv.RuntimeConfig?.List ?? new();
-        readonly ChartLevel[] _levelValues = (ChartLevel[])Enum.GetValues(typeof(ChartLevel));
+        private CancellationTokenSource _cts = new();
+        private CancellationTokenSource _ctsOnLevelChanged = new();
 
-        static Color[] _difficultyColors = Array.Empty<Color>();
+        private readonly ListConfig _listConfig = MajEnv.RuntimeConfig?.List ?? new();
 
-        const float LEVEL_RING_LEFT_START_ROTATION = 67.5f;
-        const float LEVEL_RING_RIGHT_START_ROTATION = 32.5f;
-        const float LEVEL_RING_ROTATION_STEP = 10f;
-        const float BG_COVER_FADE_IN_DURATION_SEC = 0.3f;
+        private const float LEVEL_RING_LEFT_START_ROTATION = 67.5f;
+        private const float LEVEL_RING_RIGHT_START_ROTATION = 32.5f;
+        private const float LEVEL_RING_ROTATION_STEP = 10f;
+        private const float BG_COVER_FADE_IN_DURATION_SEC = 0.3f;
         
         protected override void Awake()
         {
@@ -158,16 +155,16 @@ namespace MajdataPlay.Scenes.List
             _favoriteRoot = transform.Find("Favorite")?.gameObject;
             _bgSongCoverTransform = _bgSongCoverDisplayer.GetComponent<RectTransform>();
         }
-        void Start()
+        private void Start()
         {
             _listManager = Majdata<ListManager>.Instance!;
         }
-        void OnDestroy()
+        private void OnDestroy()
         {
             _cts.Cancel();
             _ctsOnLevelChanged.Cancel();
         }
-        void OnDisable()
+        private void OnDisable()
         {
             _cts.Cancel();
             _ctsOnLevelChanged.Cancel();
@@ -175,10 +172,7 @@ namespace MajdataPlay.Scenes.List
 
         public void SetDifficulty(int i)
         {
-            if(!_ctsOnLevelChanged.IsCancellationRequested)
-            {
-                _ctsOnLevelChanged.Cancel();
-            }
+            _ctsOnLevelChanged.Cancel();
             _ctsOnLevelChanged = new();
             _levelRingDisplayer.color = RuntimeDatabase.DifficultyColors[i];
             _selectedLevelColor.color = RuntimeDatabase.DifficultyColors[i];
@@ -200,7 +194,7 @@ namespace MajdataPlay.Scenes.List
                 CabinetLed.SetButtonLight(RuntimeDatabase.DifficultyColors[6], 7);
             }
             UpdateLevelRing();
-            UpdateMetadataAndScoreDisplayer();
+            UpdateMetadataAndScoreDisplayer(false, true);
             
         }
         public void SetSongDetail(ISongDetail detail, int loadDelayMS = 0, Sprite? immediateCover = null)
@@ -209,11 +203,10 @@ namespace MajdataPlay.Scenes.List
             {
                 return;
             }
-            else if(!_cts.IsCancellationRequested)
-            {
-                _cts.Cancel();
-            }
+            _cts.Cancel();
+            _ctsOnLevelChanged.Cancel();
             _cts = new();
+            _ctsOnLevelChanged = new();
             _currentSongDetail = detail;
             
             var chartLevels = detail.Levels;
@@ -237,7 +230,7 @@ namespace MajdataPlay.Scenes.List
                 displayer.Object.SetActive(true);
             }
             UpdateLevelRing();
-            UpdateMetadataAndScoreDisplayer(loadDelayMS);
+            UpdateMetadataAndScoreDisplayer(true, false, loadDelayMS);
             _previewPlayer.PlayPreviewSound(detail, 1000, _cts.Token);
             _favoriteAdder.SetSong(detail);
             ListManager.AllBackgroundTasks.Add(SetCoverAsync(detail, loadDelayMS, _cts.Token, immediateCover)
@@ -248,14 +241,8 @@ namespace MajdataPlay.Scenes.List
             if (!visible)
             {
                 _onlineScoreRankDisplayer.Hide();
-                if(!_cts.IsCancellationRequested)
-                {
-                    _cts.Cancel();
-                }
-                if (!_ctsOnLevelChanged.IsCancellationRequested)
-                {
-                    _ctsOnLevelChanged.Cancel();
-                }
+                _cts.Cancel();
+                _ctsOnLevelChanged.Cancel();
             }
             _embeddedCoverRoot?.SetActive(visible);
             _favoriteRoot?.SetActive(visible);
@@ -268,7 +255,7 @@ namespace MajdataPlay.Scenes.List
                 _bgSongCoverDisplayer.sprite = SpriteLoader.EmptySprite;
             }
         }
-        void UpdateLevelRing()
+        private void UpdateLevelRing()
         {
             var currentLevel = (ChartLevel)_diff;
             var currentLevelBinding = _levelBindings[_diff];
@@ -337,23 +324,31 @@ namespace MajdataPlay.Scenes.List
                 }
             }
         }
-        void UpdateMetadataAndScoreDisplayer(int loadDelayMS = 0)
+        private void UpdateMetadataAndScoreDisplayer(bool songChanged, bool levelChanged, int loadDelayMS = 0)
         {
             if(_currentSongDetail is null)
             {
                 return;
             }
             var cancellationToken = _cts.Token;
-            var cancellationTokenOnLevelChanged = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _ctsOnLevelChanged.Token)
-                                                                         .Token;
-            _metadataDisplayer.SetMetadataFromSongDetail(_currentSongDetail, (ChartLevel)_diff, loadDelayMS, cancellationTokenOnLevelChanged);
-            _scoreDisplayer.SetScore(_currentSongDetail, (ChartLevel)_diff);
-            _onlineInfoDisplayer.SetSongDetail(_currentSongDetail, loadDelayMS, cancellationToken);
-            _chartAnalyzer.SetSongDeatil(_currentSongDetail, (ChartLevel)_diff, null, loadDelayMS, cancellationTokenOnLevelChanged);
-            _majRadar.SetRadarFromSongDetail(_currentSongDetail, (ChartLevel)_diff, loadDelayMS, cancellationTokenOnLevelChanged);
-            _onlineScoreRankDisplayer.SetSongDetail(_currentSongDetail, (ChartLevel)_diff, loadDelayMS, cancellationTokenOnLevelChanged);
+
+            if(songChanged)
+            {
+                _onlineInfoDisplayer.SetSongDetail(_currentSongDetail, loadDelayMS, cancellationToken);
+            }
+
+            if(songChanged || levelChanged)
+            {
+                var cancellationTokenOnLevelChanged = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _ctsOnLevelChanged.Token)
+                                                                             .Token;
+                _metadataDisplayer.SetMetadataFromSongDetail(_currentSongDetail, (ChartLevel)_diff, loadDelayMS, cancellationTokenOnLevelChanged);
+                _chartAnalyzer.SetSongDeatil(_currentSongDetail, (ChartLevel)_diff, null, loadDelayMS, cancellationTokenOnLevelChanged);
+                _majRadar.SetRadarFromSongDetail(_currentSongDetail, (ChartLevel)_diff, loadDelayMS, cancellationTokenOnLevelChanged);
+                _onlineScoreRankDisplayer.SetSongDetail(_currentSongDetail, (ChartLevel)_diff, loadDelayMS, cancellationTokenOnLevelChanged);
+                _scoreDisplayer.SetScore(_currentSongDetail, (ChartLevel)_diff);
+            }
         }
-        void UpdateBGSongCoverAnim(float progress)
+        private void UpdateBGSongCoverAnim(float progress)
         {
             const float MaxFadeInAlpha = 0.3f;
             const float CoverEndYPos = 0;
@@ -366,7 +361,7 @@ namespace MajdataPlay.Scenes.List
             _bgSongCoverTransform.anchoredPosition = nP;
         }
         
-        async Task SetCoverAsync(ISongDetail detail, int loadDelayMS, CancellationToken token = default, Sprite? immediateCover = null)
+        private async Task SetCoverAsync(ISongDetail detail, int loadDelayMS, CancellationToken token = default, Sprite? immediateCover = null)
         {
             _bgSongCoverAnim.TryCancel();
             _bgSongCoverDisplayer.sprite = SpriteLoader.EmptySprite;
@@ -399,14 +394,14 @@ namespace MajdataPlay.Scenes.List
             _loadingObj.SetActive(false);
         }
 
-        readonly struct LevelDisplayer
+        private readonly struct LevelDisplayer
         {
             public required GameObject Object { get; init; }
             public required Transform Transform { get; init; }
             public required Transform TextTransform { get; init; }
             public required TextMeshProUGUI TextDisplayer { get; init; }
         }
-        struct LevelBinding
+        private struct LevelBinding
         {
             public required ChartLevel Level { get; init; }
             public bool IsLevelEmpty { get; set; }
