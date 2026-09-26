@@ -1,4 +1,4 @@
-﻿using MajdataPlay.Numerics;
+using MajdataPlay.Numerics;
 using MajdataPlay.Settings;
 using System;
 using System.Collections.Generic;
@@ -33,6 +33,9 @@ namespace MajdataPlay.IO
         public static void SetCabinetLightBrightness(float brightness)
         {
             _cabinetLightBrightness = (byte)Mathf.RoundToInt(Mathf.Clamp01(brightness) * 255f);
+#if UNITY_ANDROID && !UNITY_EDITOR
+            OniimaiController.SubmitLights(_ledRingColors, _cabinetLightBrightness);
+#endif
         }
     }
 }

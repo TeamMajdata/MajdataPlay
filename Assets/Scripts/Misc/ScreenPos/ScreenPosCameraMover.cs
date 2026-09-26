@@ -91,8 +91,23 @@ namespace MajdataPlay
             }
         }
 
+        int _lastViewportWidth, _lastViewportHeight;
+        bool _lastExternal;
+        void UpdateViewport()
+        {
+            var external = MajdataPlay.IO.OniimaiLayout.ExternalActive;
+            if (_lastViewportWidth == Screen.width && _lastViewportHeight == Screen.height && _lastExternal == external) return;
+            _lastViewportWidth = Screen.width;
+            _lastViewportHeight = Screen.height;
+            _lastExternal = external;
+            var aspect = (float)Screen.width / Screen.height;
+            _cam.rect = external ? new Rect(0, 0, 1, 1)
+                : aspect < 9f / 18f ? new Rect(0, .22f, 1, 1)
+                : aspect < 9f / 16f ? new Rect(0, .12f, 1, 1) : new Rect(0, 0, 1, 1);
+        }
         void Update()
         {
+            UpdateViewport();
             switch (_flag)
             {
                 case FLAG_NOT_INIT:
@@ -104,34 +119,21 @@ namespace MajdataPlay
                         }
                         _flag = FLAG_INITED;
                         
-                        _lastTransformDisplay = _displayOptions.MainScreenTransform;
+                        _lastTransformDisplay = MajdataPlay.IO.OniimaiLayout.PhoneTransform(_displayOptions.MainScreenTransform);
                         _lastMainScreenOffset = _displayOptions.MainScreenOffset;
                         _lastMainScreenScale = _displayOptions.MainScreenScale;
                         ApplyTransform();
                         //transform.position = new Vector3(0, 1.5f + 2.7f * (MajEnv.Settings?.Display.MainScreenPosition ?? 1f), -10); //Original
 
 
-                        var aspectratio = (float)Screen.width / (float)Screen.height;
+                        UpdateViewport();
 
-
-                        if (aspectratio < (9f / 18f))
-                        {
-                            _cam.rect = new Rect(0, 0.22f, 1, 1);
-                        }
-                        else if (aspectratio < (9f / 16f))
-                        {
-                            _cam.rect = new Rect(0, 0.12f, 1, 1);
-                        }
-                        else
-                        {
-                            _cam.rect = new Rect(0, 0, 1, 1);
-                        }
                     }
                     goto case FLAG_INITED;
                 case FLAG_INITED:
                     {
                         var transformDisplay = _lastTransformDisplay;
-                        _lastTransformDisplay = _displayOptions!.MainScreenTransform;
+                        _lastTransformDisplay = MajdataPlay.IO.OniimaiLayout.PhoneTransform(_displayOptions!.MainScreenTransform);
                         _lastMainScreenOffset = _displayOptions!.MainScreenOffset;
                         _lastMainScreenScale = _displayOptions!.MainScreenScale;
                         //如果没开调整显示位置，就直接return
