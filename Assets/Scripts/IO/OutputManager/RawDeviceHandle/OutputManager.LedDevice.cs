@@ -14,6 +14,8 @@ using UnityEngine;
 using MajdataPlay.Diagnostics;
 using MajdataPlay.Runtime;
 using System.IO.Pipes;
+using MajdataPlay.Threading;
+
 
 
 
@@ -94,6 +96,7 @@ namespace MajdataPlay.IO
                     //MajDebug.LogWarning($"Cannot open {comPortStr}, using dummy lights");
                     IsConnected = false;
                 }
+                _ledDeviceUpdateLoop.RegisterAsWorker("LedRing I/O Worker");
                 MajDebug.LogInfo(nameof(LedDevice), "Initialization completed");
             }
             static void SerialPortUpdateLoop()

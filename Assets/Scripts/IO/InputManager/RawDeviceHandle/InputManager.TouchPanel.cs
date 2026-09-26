@@ -9,6 +9,7 @@ using MajdataPlay.Diagnostics;
 using MajdataPlay.Numerics;
 using MajdataPlay.Runtime;
 using MajdataPlay.Settings;
+using MajdataPlay.Threading;
 using MajdataPlay.Utils;
 using System;
 using System.Buffers.Binary;
@@ -90,6 +91,7 @@ namespace MajdataPlay.IO
                         MajDebug.LogWarning($"Not supported touch panel manufacturer: {MajEnv.Settings.IO.Manufacturer}");
                         break;
                 }
+                _touchPanelUpdateLoop.RegisterAsWorker("TouchPanel I/O Worker");
                 MajDebug.LogInfo("[TouchPanel]Initialization completed");
             }
             /// <summary>

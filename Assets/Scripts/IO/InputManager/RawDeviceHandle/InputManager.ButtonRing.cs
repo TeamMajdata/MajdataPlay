@@ -24,6 +24,8 @@ using MajdataPlay.Platform.Android.IO;
 #endif
 #if UNITY_IOS || UNITY_EDITOR
 using MajdataPlay.Platform.iOS;
+using MajdataPlay.Threading;
+
 #endif
 
 #if UNITY_STANDALONE
@@ -110,6 +112,7 @@ namespace MajdataPlay.IO
                 {
                     MajDebug.LogWarning(nameof(ButtonRing), $"Not supported button ring manufacturer: {manufacturer}");
                 }
+                _buttonRingUpdateLoop.RegisterAsWorker("ButtonRing I/O Worker");
 #elif UNITY_ANDROID || UNITY_IOS
                 _mobileExternalbuttonRingOption = MajEnv.Settings.IO.InputDevice.ExternalButtonRing;
 #endif
