@@ -10,7 +10,7 @@ The upstream base is a Nightly snapshot; upstream's latest stable release remain
 with the original Git history preserved. The integration runs inside the Android
 game; it does not require LSPosed, NPatch, or root.
 
-**[Download the Oniimai Android APK](https://github.com/kyarameru0/MajdataPlay/releases/tag/oniimai-v0.2.18)**
+**[Download the Oniimai Android APK](https://github.com/kyarameru0/MajdataPlay-Oniimai/releases/tag/oniimai-v0.2.18)**
 — Android 8.0+ / ARM64. The maintainer confirmed normal operation of this exact
 APK on their test setup. Install it as a separate Oniimai app; it can also update
 an existing Oniimai installation signed with the same key.
@@ -61,7 +61,7 @@ source files and tests to inspect before an upstream PR.
 | --- | --- |
 | [Developer guide](ONIIMAI-DEVELOPMENT.md) | Clone, build, architecture, tests, and preparation for an upstream PR |
 | [Asset provenance](Assets/StreamingAssets/OniimaiUI/README.md) | Original MajdataPlay artwork and fonts used by the Android UI |
-| [Review diff](https://github.com/kyarameru0/MajdataPlay/compare/upstream-nightly-20260925...main) | Oniimai changes against the pinned upstream Nightly base |
+| [Review diff](https://github.com/kyarameru0/MajdataPlay-Oniimai/compare/upstream-nightly-20260925...main) | Oniimai changes against the pinned upstream Nightly base |
 
 The Oniimai additions were written and iterated with **OpenAI Codex (AI-generated
 code)** and human-directed device testing. This statement does not describe the

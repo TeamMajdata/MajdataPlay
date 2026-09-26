@@ -20,7 +20,7 @@ APK, start with [Clone and build](#clone-and-build).
 
 This public fork preserves the original commit ancestry. `main` contains the
 Oniimai integration; `dev` is the upstream branch copied when the fork was created.
-The APK is published in the [Oniimai 0.2.18 release](https://github.com/kyarameru0/MajdataPlay/releases/tag/oniimai-v0.2.18).
+The APK is published in the [Oniimai 0.2.18 release](https://github.com/kyarameru0/MajdataPlay-Oniimai/releases/tag/oniimai-v0.2.18).
 No upstream PR has been opened. The integration is kept separate for review first.
 
 The 0.2.18 integration uses the latest published upstream build available on
@@ -36,8 +36,8 @@ submodule. Build outputs, signing keys, and device logs are not committed.
 Clone the public fork, including its dependencies:
 
 ```powershell
-git clone --recurse-submodules https://github.com/kyarameru0/MajdataPlay.git
-cd MajdataPlay
+git clone --recurse-submodules https://github.com/kyarameru0/MajdataPlay-Oniimai.git
+cd MajdataPlay-Oniimai
 git remote add upstream https://github.com/TeamMajdata/MajdataPlay.git
 ```
 
