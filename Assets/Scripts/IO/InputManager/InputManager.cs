@@ -1,8 +1,6 @@
 #if UNITY_STANDALONE
 using HidSharp;
 using HidSharp.Platform.Windows;
-using LibUsbDotNet;
-using LibUsbDotNet.Main;
 #endif
 using MajdataPlay.Collections;
 using MajdataPlay.Diagnostics;
