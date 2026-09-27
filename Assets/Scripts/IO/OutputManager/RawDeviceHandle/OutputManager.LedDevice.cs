@@ -80,6 +80,11 @@ namespace MajdataPlay.IO
                         case DeviceManufacturerOption.Nov:
                             _ledDeviceUpdateLoop = Task.Factory.StartNew(SerialPortUpdateLoop, TaskCreationOptions.LongRunning);
                             break;
+#if UNITY_STANDALONE_WIN
+                        case DeviceManufacturerOption.NPro:
+                            _ledDeviceUpdateLoop = Task.Factory.StartNew(NProUpdateLoop, TaskCreationOptions.LongRunning);
+                            break;
+#endif
                         case DeviceManufacturerOption.Dao:
                             _ledDeviceUpdateLoop = Task.Factory.StartNew(HIDUpdateLoop, TaskCreationOptions.LongRunning);
                             break;
@@ -282,6 +287,95 @@ namespace MajdataPlay.IO
                     MajDebug.LogWarning(nameof(LedDevice), "Thread has exited");
                 }
             }
+#if UNITY_STANDALONE_WIN
+            static void NProUpdateLoop()
+            {
+                var ledOptions = MajEnv.Settings.IO.OutputDevice.Led;
+                var currentThread = Thread.CurrentThread;
+                var token = MajEnv.GlobalCT;
+                var refreshRate = TimeSpan.FromMilliseconds(ledOptions.RefreshRateMs);
+                var stopwatch = new Stopwatch();
+                var t1 = stopwatch.Elapsed;
+                var ledRingColors = _ledRingColors.AsSpan();
+                var updatePacket = GeneralSerialLedDevice.BuildUpdatePacket();
+                Span<byte> buffer = stackalloc byte[10];
+                Span<LedReport> latestReports = stackalloc LedReport[8]
+                {
+                    new LedReport() { Index = 0, Color = Color.black },
+                    new LedReport() { Index = 1, Color = Color.black },
+                    new LedReport() { Index = 2, Color = Color.black },
+                    new LedReport() { Index = 3, Color = Color.black },
+                    new LedReport() { Index = 4, Color = Color.black },
+                    new LedReport() { Index = 5, Color = Color.black },
+                    new LedReport() { Index = 6, Color = Color.black },
+                    new LedReport() { Index = 7, Color = Color.black },
+                };
+
+                currentThread.Name = DAEMON_THREAD_NAME;
+                currentThread.IsBackground = true;
+                currentThread.Priority = MajEnv.THREAD_PRIORITY_IO;
+
+                MajDebug.LogInfo(nameof(LedDevice), $"Managed thread id: {currentThread.ManagedThreadId}");
+                MajDebug.LogInfo(nameof(LedDevice), $"OS thread id: {PlatformInfo.GetCurrentOSThreadId()}");
+
+                stopwatch.Start();
+                try
+                {
+                    while (!token.IsCancellationRequested)
+                    {
+                        if (!NproDeviceHost.EnsureConnected())
+                        {
+                            IsConnected = false;
+                            Thread.Sleep(MajEnv.IO_DEVICE_RECONNECT_INTERVAL_MSEC);
+                            continue;
+                        }
+
+                        IsConnected = true;
+                        var needUpdate = false;
+                        for (var i = 0; i < 8; i++)
+                        {
+                            var color = ledRingColors[i];
+                            ref var latestReport = ref latestReports[i];
+                            if (latestReport.Color == color && _isThrottlerEnabled)
+                            {
+                                continue;
+                            }
+
+                            var packet = GeneralSerialLedDevice.BuildSetColorPacket(buffer, i, color);
+                            NproDeviceHost.SendLedPacket(packet);
+                            latestReport = new LedReport()
+                            {
+                                Index = i,
+                                Color = color,
+                            };
+                            needUpdate = true;
+                        }
+
+                        if (needUpdate)
+                        {
+                            NproDeviceHost.SendLedPacket(updatePacket);
+                        }
+                        NproDeviceHost.TickKeepAlive();
+
+                        if (refreshRate.TotalMilliseconds > 0)
+                        {
+                            var t2 = stopwatch.Elapsed;
+                            var elapsed = t2 - t1;
+                            t1 = t2;
+                            if (elapsed < refreshRate)
+                            {
+                                Thread.Sleep(refreshRate - elapsed);
+                            }
+                        }
+                    }
+                }
+                finally
+                {
+                    IsConnected = false;
+                    MajDebug.LogWarning(nameof(LedDevice), "Thread has exited");
+                }
+            }
+#endif
             static void HIDUpdateLoop()
             {
                 var ledOptions = MajEnv.Settings.IO.OutputDevice.Led;
