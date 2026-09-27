@@ -80,7 +80,7 @@ namespace MajdataPlay.IO
                 }
                 var manufacturer = IODetector.DeviceManufacturer;
                 var buttonRingDevice = IODetector.ButtonRingDevice;
-                if (manufacturer == DeviceManufacturerOption.General)
+                if (manufacturer is (DeviceManufacturerOption.General or DeviceManufacturerOption.Nov))
                 {
                     switch (buttonRingDevice)
                     {
@@ -98,10 +98,6 @@ namespace MajdataPlay.IO
                 else if (manufacturer is DeviceManufacturerOption.Yuan or DeviceManufacturerOption.Dao)
                 {
                     _buttonRingUpdateLoop = Task.Factory.StartNew(HIDUpdateLoop, TaskCreationOptions.LongRunning);
-                }
-                else if (manufacturer is DeviceManufacturerOption.Nov)
-                {
-                    _buttonRingUpdateLoop = Task.Factory.StartNew(KeyboardUpdateLoop, TaskCreationOptions.LongRunning);
                 }
                 else if (manufacturer is DeviceManufacturerOption.Pipe)
                 {
@@ -633,6 +629,7 @@ namespace MajdataPlay.IO
                                 switch (manufacturer)
                                 {
                                     case DeviceManufacturerOption.General:
+                                    case DeviceManufacturerOption.Nov:
                                         GeneralHIDDevice.Parse(buffer, _buttonRealTimeStates);
                                         break;
                                     case DeviceManufacturerOption.Yuan:
