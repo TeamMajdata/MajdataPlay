@@ -191,6 +191,13 @@ namespace MajdataPlay.Scenes.Game
         SimaiChart _chart;
         ChartSetting _chartSetting;
         ISongDetail _songDetail;
+        internal string OniimaiSongTitle => _songDetail?.Title ?? "MajdataPlay";
+        internal string OniimaiArtist => _chartInfoDisplayer?.artist?.text ?? "";
+        internal string OniimaiDesigner => _chartInfoDisplayer?.designer?.text ?? "";
+        internal string OniimaiLevel => _chartInfoDisplayer?.level?.text ?? "";
+        internal Sprite OniimaiCover => _chartInfoDisplayer?.coverImg?.sprite;
+        internal Texture OniimaiGraph => _chartVisualDisplayer != null ? _chartVisualDisplayer.GetComponent<RawImage>().texture : null;
+        internal Color OniimaiLevelColor => _levelCircleDisplayer != null ? _levelCircleDisplayer.color : Color.magenta;
 
         float _trackVolume = 1f;
 
@@ -1664,6 +1671,9 @@ namespace MajdataPlay.Scenes.Game
             print("GameResult: " + accStats.Achievement_A);
             var result = _objectCounter.GetPlayRecord(_songDetail, _listConfig.SelectedDiff);
             _gameInfo.RecordResult(result);
+#if UNITY_ANDROID && !UNITY_EDITOR
+            OniimaiController.CaptureResult(this, _objectCounter, result);
+#endif
 
             if (!playEffect)
             {

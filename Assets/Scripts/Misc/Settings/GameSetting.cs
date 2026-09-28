@@ -225,10 +225,25 @@ namespace MajdataPlay.Settings
         public bool Topmost { get; set; } = false;
 #endif
         
+#if UNITY_ANDROID
+        [HideInSettingUI]
+        // The native Oniimai display panel owns this setting, across user profiles.
+        // Accept old JSON files without letting them override the saved 60/120 choice.
+        public int FPSLimit
+        {
+#if UNITY_EDITOR
+            get => 60;
+#else
+            get => IO.OniimaiController.GameFrameRate;
+#endif
+            set { }
+        }
+#else
         [Step("1")]
         [Range("-1", null, HasMax = false, HasMin = true)]
         [OptionEnumerator(typeof(EngineNumberSettingEnumerator))]
         public int FPSLimit { get; set; } = 120;
+#endif
 #if !(UNITY_ANDROID || UNITY_IOS)
         
         [OptionEnumerator(typeof(EngineBooleanSettingEnumerator))]

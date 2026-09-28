@@ -144,6 +144,9 @@ namespace MajdataPlay
                         break;
                 }
                 CabinetLed.OnLateUpdate();
+#if UNITY_ANDROID && !UNITY_EDITOR
+                OniimaiController.UpdateStats();
+#endif
                 _dummyLedRenderer.OnLateUpdate();
             }
             catch (Exception e)

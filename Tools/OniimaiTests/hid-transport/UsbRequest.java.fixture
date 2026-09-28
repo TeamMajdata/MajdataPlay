@@ -1,0 +1,22 @@
+package android.hardware.usb;
+import java.nio.ByteBuffer;
+public final class UsbRequest {
+    UsbDeviceConnection connection;UsbEndpoint endpoint;ByteBuffer buffer;
+    volatile boolean queued;volatile int transferred;
+    public boolean initialize(UsbDeviceConnection connection,UsbEndpoint endpoint){this.connection=connection;this.endpoint=endpoint;return true;}
+    public boolean queue(ByteBuffer buffer){
+        if(connection.closes.get()!=0)throw new IllegalStateException("queue raced closed fd");
+        this.buffer=buffer;queued=true;transferred=0;
+        if(endpoint.getDirection()==128){connection.input=this;connection.inputQueued.countDown();}
+        else {
+            if(connection.failOutputQueue){queued=false;return false;}
+            connection.output=this;connection.outputWrites.incrementAndGet();
+            byte[] report=new byte[buffer.remaining()];buffer.duplicate().get(report);connection.lastReport=report;
+            connection.outputQueued.countDown();
+            if(!connection.blockOutput){transferred=connection.shortOutput?10:report.length;connection.completed.offer(this);}
+        }
+        return true;
+    }
+    public boolean cancel(){if(queued){queued=false;transferred=0;connection.completed.offer(this);}return true;}
+    public void close(){if(queued)throw new IllegalStateException("request closed before cancellation");}
+}

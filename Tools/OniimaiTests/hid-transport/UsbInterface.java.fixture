@@ -1,0 +1,12 @@
+package android.hardware.usb;
+public final class UsbInterface {
+    private final int id,type;private final UsbEndpoint[] endpoints;
+    public UsbInterface(int id,int type,UsbEndpoint... endpoints){this.id=id;this.type=type;this.endpoints=endpoints;}
+    public int getId(){return id;}
+    public int getInterfaceClass(){return type;}
+    public int getInterfaceSubclass(){return 2;}
+    public int getAlternateSetting(){return 0;}
+    public String getName(){return "Test IF"+id;}
+    public int getEndpointCount(){return endpoints.length;}
+    public UsbEndpoint getEndpoint(int n){return endpoints[n];}
+}

@@ -1,0 +1,46 @@
+package android.hardware.usb;
+import java.util.*;
+import java.util.concurrent.*;
+import java.util.concurrent.atomic.AtomicInteger;
+public final class UsbDeviceConnection {
+    public int failClaim=-1,throwRelease=-1;public boolean failCoding;
+    public final List<Integer> claims=Collections.synchronizedList(new ArrayList<>()),releases=Collections.synchronizedList(new ArrayList<>());
+    public final AtomicInteger dtrOn=new AtomicInteger(),dtrOff=new AtomicInteger(),coding=new AtomicInteger(),closes=new AtomicInteger(),writes=new AtomicInteger();
+    public volatile CountDownLatch writing,proceed;
+    public final CountDownLatch inputQueued=new CountDownLatch(1),outputQueued=new CountDownLatch(1);
+    public final LinkedBlockingQueue<UsbRequest> completed=new LinkedBlockingQueue<>();
+    public final AtomicInteger outputWrites=new AtomicInteger(),setReports=new AtomicInteger();
+    public volatile UsbRequest input,output;
+    public volatile boolean blockOutput,shortOutput,failOutputQueue;
+    public volatile byte[] lastReport;
+    public int reportType,reportRequest,reportValue,reportIndex,reportTimeout;
+    public final List<Integer> lineStates=new ArrayList<>();
+    public byte[] getRawDescriptors(){return null;}
+    public boolean claimInterface(UsbInterface value,boolean force){claims.add(value.getId());return value.getId()!=failClaim;}
+    public boolean releaseInterface(UsbInterface value){releases.add(value.getId());if(value.getId()==throwRelease)throw new IllegalStateException("Release failed");return true;}
+    public int controlTransfer(int type,int request,int value,int index,byte[] data,int length,int timeout){
+        if(request==0x20){coding.incrementAndGet();return failCoding?-1:length;}
+        if(request==0x22){lineStates.add(value);if(value==0)dtrOff.incrementAndGet();else dtrOn.incrementAndGet();}
+        if(request==9){
+            setReports.incrementAndGet();lastReport=Arrays.copyOf(data,length);
+            reportType=type;reportRequest=request;reportValue=value;reportIndex=index;reportTimeout=timeout;
+            blockWrite();if(closes.get()!=0)throw new IllegalStateException("control raced closed fd");
+            return shortOutput?10:length;
+        }
+        return length;
+    }
+    public int bulkTransfer(UsbEndpoint endpoint,byte[] data,int length,int timeout){return -1;}
+    public int bulkTransfer(UsbEndpoint endpoint,byte[] data,int offset,int length,int timeout){
+        writes.incrementAndGet();blockWrite();
+        if(closes.get()!=0)throw new IllegalStateException("write raced closed fd");return length;
+    }
+    private void blockWrite(){CountDownLatch started=writing,go=proceed;
+        if(started!=null){started.countDown();try{if(!go.await(2,TimeUnit.SECONDS))throw new IllegalStateException("test write stalled");}catch(InterruptedException e){throw new IllegalStateException(e);}}
+    }
+    public UsbRequest requestWait(long timeout)throws TimeoutException{
+        try{UsbRequest done=completed.poll(timeout,TimeUnit.MILLISECONDS);if(done==null)throw new TimeoutException();done.queued=false;done.buffer.position(done.transferred);return done;}
+        catch(InterruptedException e){Thread.currentThread().interrupt();throw new IllegalStateException(e);}
+    }
+    public void deliverInput(byte[] bytes){UsbRequest r=input;if(r==null||!r.queued)throw new IllegalStateException("input not queued");r.buffer.clear();r.buffer.put(bytes);r.transferred=bytes.length;completed.offer(r);}
+    public void close(){closes.incrementAndGet();if(input!=null)input.cancel();if(output!=null)output.cancel();}
+}

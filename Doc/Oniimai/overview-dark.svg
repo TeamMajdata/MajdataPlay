@@ -1,0 +1,94 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="666" viewBox="0 0 1200 666" role="img" aria-labelledby="title description">
+  <title id="title">MajdataPlay Oniimai overview</title>
+  <desc id="description">Native Android integration. An Oniimai USB controller supplies touch and IO4 button input and receives RGB lighting. MajdataPlay renders the game on a rotated external display while the phone shows configurable statistics widgets. Rendering defaults to 60fps with an optional 120fps target; actual output refresh rate depends on hardware.</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M1 1L7 4L1 7" fill="none" stroke="#7894A6" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></marker>
+  </defs>
+  <style>
+    text { font-family: 'Segoe UI', Arial, sans-serif; fill: #EDF3F8; }
+    .muted { fill: #B2C0CD; }
+    .accent { fill: #71D7C5; }
+    .gold { fill: #E8CE91; }
+    .label { font-size: 13px; font-weight: 700; letter-spacing: 1.8px; }
+    .body { font-size: 17px; }
+    .small { font-size: 15px; }
+    .wire { fill: none; stroke: #7894A6; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+  </style>
+  <rect width="1200" height="666" rx="24" fill="#101923"/>
+  <path d="M40 171H1160" stroke="#354452"/>
+  <text class="label accent" x="40" y="43">NATIVE ANDROID INTEGRATION</text>
+  <text x="40" y="101" font-size="43" font-weight="700" letter-spacing="-1.2">MajdataPlay Oniimai</text>
+  <text class="muted" x="40" y="138" font-size="19">USB input, RGB lighting and a separate phone dashboard.</text>
+  <rect x="867" y="36" width="293" height="43" rx="21" fill="#203C3D"/>
+  <circle cx="891" cy="57" r="4" fill="#71D7C5"/>
+  <text class="accent" x="909" y="63" font-size="17" font-weight="600">Android 8.0+ · ARM64</text>
+  <text class="muted body" x="1160" y="111" text-anchor="end">No root, LSPosed or NPatch required</text>
+  <text class="label muted" x="40" y="198">CONNECTION OVERVIEW</text>
+  <rect x="40" y="217" width="280" height="281" rx="19" fill="#182430" stroke="#354452"/>
+  <text class="label muted" x="62" y="251">ONIIMAI CONTROLLER</text>
+  <path d="M119.04 294.08 A58 58 0 0 1 154.81 308.90" fill="none" stroke="#71D7C5" stroke-width="11"/>
+  <path d="M159.10 313.19 A58 58 0 0 1 173.92 348.96" fill="none" stroke="#71D7C5" stroke-width="11"/>
+  <path d="M173.92 355.04 A58 58 0 0 1 159.10 390.81" fill="none" stroke="#7894A6" stroke-width="11"/>
+  <path d="M154.81 395.10 A58 58 0 0 1 119.04 409.92" fill="none" stroke="#7894A6" stroke-width="11"/>
+  <path d="M112.96 409.92 A58 58 0 0 1 77.19 395.10" fill="none" stroke="#7894A6" stroke-width="11"/>
+  <path d="M72.90 390.81 A58 58 0 0 1 58.08 355.04" fill="none" stroke="#7894A6" stroke-width="11"/>
+  <path d="M58.08 348.96 A58 58 0 0 1 72.90 313.19" fill="none" stroke="#7894A6" stroke-width="11"/>
+  <path d="M77.19 308.90 A58 58 0 0 1 112.96 294.08" fill="none" stroke="#71D7C5" stroke-width="11"/>
+
+  <circle cx="116" cy="352" r="42" fill="#202F3D" stroke="#354452"/>
+  <circle cx="116" cy="352" r="27" fill="none" stroke="#7894A6" stroke-width="1.5"/>
+  <circle cx="116" cy="352" r="5" fill="#E8CE91"/>
+  <text x="195" y="318" font-size="25" font-weight="700">34</text>
+  <text class="small muted" x="195" y="341">touch zones</text>
+  <text x="195" y="378" font-size="25" font-weight="700">8 + P1</text>
+  <text class="small muted" x="195" y="401">buttons</text>
+  <rect x="62" y="445" width="236" height="32" rx="10" fill="#243340"/>
+  <text class="small muted" x="180" y="467" text-anchor="middle">Touch protocol + IO4 HID</text>
+
+  <path class="wire" d="M334 352H376" marker-start="url(#arrow)" marker-end="url(#arrow)"/>
+  <text class="small muted" x="355" y="332" text-anchor="middle">USB</text>
+
+  <rect x="390" y="217" width="342" height="281" rx="19" fill="#242B30" stroke="#354452"/>
+  <text class="label gold" x="414" y="251">ANDROID GAME</text>
+  <text x="414" y="299" font-size="27" font-weight="700">MajdataPlay Oniimai</text>
+  <text class="body muted" x="414" y="328">Native game integration</text>
+  <rect x="414" y="353" width="294" height="53" rx="12" fill="#182430" stroke="#354452"/>
+  <text x="561" y="386" font-size="20" font-weight="600" text-anchor="middle">USB bridge ↔ Unity</text>
+  <text class="body muted" x="414" y="445">In-game setup</text>
+  <text class="body muted" x="414" y="472">Saved input and display settings</text>
+
+  <path class="wire" d="M746 352H766V281H790" marker-end="url(#arrow)"/>
+  <path class="wire" d="M766 352V434H790" marker-end="url(#arrow)"/>
+  <circle cx="766" cy="352" r="3.5" fill="#7894A6"/>
+
+  <rect x="804" y="217" width="356" height="130" rx="19" fill="#182430" stroke="#354452"/>
+  <rect x="825" y="242" width="94" height="63" rx="6" fill="#202F3D" stroke="#7894A6" stroke-width="2"/>
+  <path d="M872 306V318M852 318H892" class="wire"/>
+  <rect x="833" y="250" width="19" height="47" rx="3" fill="#203C3D"/>
+  <path d="M839 260H846M839 266H846M839 272H846" stroke="#71D7C5" stroke-width="2"/>
+  <circle cx="884" cy="274" r="21" fill="none" stroke="#71D7C5" stroke-width="3"/>
+  <circle cx="884" cy="274" r="14" fill="none" stroke="#7894A6" stroke-width="1.5"/>
+  <text x="938" y="257" font-size="21" font-weight="600">External display</text>
+  <text class="muted" x="938" y="285" font-size="16">90° / 270° rotation</text>
+  <text class="muted" x="938" y="312" font-size="16">Game output</text>
+
+  <rect x="804" y="368" width="356" height="130" rx="19" fill="#182430" stroke="#354452"/>
+  <rect x="842" y="383" width="58" height="101" rx="10" fill="#202F3D" stroke="#7894A6" stroke-width="2"/>
+  <path class="wire" d="M865 391H878"/>
+  <rect x="850" y="400" width="18" height="27" rx="3" fill="#203C3D"/>
+  <rect x="874" y="400" width="18" height="27" rx="3" fill="#243340"/>
+  <rect x="850" y="433" width="18" height="27" rx="3" fill="#243340"/>
+  <rect x="874" y="433" width="18" height="27" rx="3" fill="#203C3D"/>
+  <path class="wire" d="M862 474H880"/>
+  <text x="928" y="405" font-size="20" font-weight="600">Phone dashboard</text>
+  <text class="muted" x="928" y="434" font-size="16">Widgets + live statistics</text>
+  <text class="muted" x="928" y="464" font-size="16">Results stay until exit</text>
+
+  <rect x="40" y="536" width="348" height="54" rx="13" fill="#203C3D"/>
+  <text class="accent" x="214" y="569" text-anchor="middle" font-size="17" font-weight="600">RGB: buttons · ring · speakers</text>
+  <rect x="426" y="536" width="348" height="54" rx="13" fill="#243340"/>
+  <text x="600" y="569" text-anchor="middle" font-size="17" font-weight="600">60fps default · 120fps option*</text>
+  <rect x="812" y="536" width="348" height="54" rx="13" fill="#243340"/>
+  <text x="986" y="569" text-anchor="middle" font-size="17" font-weight="600">Korean + Simplified Chinese setup</text>
+  <text class="small muted" x="40" y="629">* Actual refresh rate depends on the device, adapter and monitor. 120Hz output has not been verified.</text>
+</svg>

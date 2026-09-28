@@ -1,0 +1,2 @@
+package net.majdata.majdataplay.oniimai;
+final class UiText {static String t(String value){return value;}}

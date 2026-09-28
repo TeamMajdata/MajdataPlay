@@ -1,0 +1,11 @@
+package android.hardware.usb;
+public final class UsbDevice {
+    private final UsbInterface[] interfaces;
+    public UsbDevice(UsbInterface... interfaces){this.interfaces=interfaces;}
+    public int getVendorId(){return 1;}
+    public int getProductId(){return 2;}
+    public String getSerialNumber(){return "TEST";}
+    public String getDeviceName(){return "/test/composite";}
+    public int getInterfaceCount(){return interfaces.length;}
+    public UsbInterface getInterface(int n){return interfaces[n];}
+}
