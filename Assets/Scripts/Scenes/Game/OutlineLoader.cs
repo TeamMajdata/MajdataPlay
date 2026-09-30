@@ -7,13 +7,14 @@ namespace MajdataPlay.Scenes.Game
     public class OutlineLoader : MonoBehaviour
     {
         [SerializeField]
-        Animator _effectAnim;
+        private Animator _effectAnim;
 
-        bool _effectAvailable = false;
-        GameManager _gameManager;
-        SpriteRenderer _renderer;
-        GamePlayManager _gpManager;
-        readonly int OUTLINE_ANIM_HASH = Animator.StringToHash("play");
+        private bool _isClassicMode = false;
+        private bool _effectAvailable = false;
+        private GameManager _gameManager;
+        private SpriteRenderer _renderer;
+        private GamePlayManager _gpManager;
+        private readonly int OUTLINE_ANIM_HASH = Animator.StringToHash("play");
         void Awake()
         {
             Majdata<OutlineLoader>.Instance = this;
@@ -24,21 +25,32 @@ namespace MajdataPlay.Scenes.Game
             _gpManager = Majdata<GamePlayManager>.Instance!;
             _renderer = GetComponent<SpriteRenderer>();
             _renderer.sprite = MajInstances.SkinManager.SelectedSkin.Outline;
+            _isClassicMode = _gpManager.IsClassicMode;
             if(MajEnv.Mode != RunningMode.View)
-                _effectAvailable = MajInstances.SkinManager.SelectedSkin.IsOutlineAvailable && _gpManager.IsClassicMode;
+            {
+                _effectAvailable = MajInstances.SkinManager.SelectedSkin.IsOutlineAvailable && _isClassicMode;
+            }
             if (_effectAvailable)
+            {
                 SetColor();
+            }
+            else
+            {
+                _effectAnim.gameObject.SetActive(false);
+            }
         }
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public void Play()
         {
             if (!_effectAvailable)
+            {
                 return;
+            }
             _effectAnim.SetTrigger(OUTLINE_ANIM_HASH);
         }
         void OnDestroy()
         {
-            Majdata<GamePlayManager>.Free();
+            Majdata<OutlineLoader>.Free();
         }
         void SetColor()
         {
