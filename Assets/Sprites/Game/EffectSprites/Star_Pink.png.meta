@@ -53,7 +53,7 @@ TextureImporter:
   spriteGenerateFallbackPhysicsShape: 1
   alphaUsage: 1
   alphaIsTransparency: 1
-  spriteTessellationDetail: -1
+  spriteTessellationDetail: 0.492
   textureType: 8
   textureShape: 1
   singleChannelComponent: 0
@@ -119,15 +119,155 @@ TextureImporter:
     ignorePlatformSupport: 0
     androidETC2FallbackOverride: 0
     forceMaximumCompressionQuality_BC6H_BC7: 0
+  - serializedVersion: 4
+    buildTarget: iOS
+    maxTextureSize: 2048
+    resizeAlgorithm: 0
+    textureFormat: -1
+    textureCompression: 1
+    compressionQuality: 50
+    crunchedCompression: 0
+    allowsAlphaSplitting: 0
+    overridden: 0
+    ignorePlatformSupport: 0
+    androidETC2FallbackOverride: 0
+    forceMaximumCompressionQuality_BC6H_BC7: 0
   spriteSheet:
     serializedVersion: 2
     sprites: []
-    outline: []
+    outline:
+    - - {x: 32, y: -78}
+      - {x: 33, y: -64}
+      - {x: 35, y: -44}
+      - {x: 36, y: -33}
+      - {x: 41, y: -29}
+      - {x: 48, y: -26}
+      - {x: 55, y: -22}
+      - {x: 57, y: -20}
+      - {x: 75, y: -11}
+      - {x: 79, y: -6}
+      - {x: 80, y: -2}
+      - {x: 77, y: 3}
+      - {x: 69, y: 7}
+      - {x: 60, y: 11}
+      - {x: 49, y: 16}
+      - {x: 44, y: 18}
+      - {x: 37, y: 21}
+      - {x: 34, y: 26}
+      - {x: 33, y: 35}
+      - {x: 28, y: 56}
+      - {x: 27, y: 60}
+      - {x: 26, y: 65}
+      - {x: 25, y: 68}
+      - {x: 20, y: 73}
+      - {x: 16, y: 73}
+      - {x: 13, y: 72}
+      - {x: 0, y: 58}
+      - {x: -8, y: 49}
+      - {x: -18, y: 38}
+      - {x: -39, y: 39}
+      - {x: -40, y: 40}
+      - {x: -55, y: 42}
+      - {x: -68, y: 42}
+      - {x: -72, y: 38}
+      - {x: -72, y: 33}
+      - {x: -68, y: 24}
+      - {x: -64, y: 17}
+      - {x: -57, y: 5}
+      - {x: -50, y: -5}
+      - {x: -50, y: -12}
+      - {x: -60, y: -32}
+      - {x: -67, y: -47}
+      - {x: -69, y: -56}
+      - {x: -63, y: -61}
+      - {x: -57, y: -60}
+      - {x: -33, y: -55}
+      - {x: -24, y: -53}
+      - {x: -14, y: -52}
+      - {x: -5, y: -60}
+      - {x: 14, y: -78}
+      - {x: 18, y: -82}
+      - {x: 23, y: -84}
+      - {x: 28, y: -84}
+    - - {x: 16, y: -57}
+      - {x: 14, y: -56}
+      - {x: 2, y: -45}
+      - {x: 1, y: -45}
+      - {x: -7, y: -37}
+      - {x: -11, y: -36}
+      - {x: -12, y: -35}
+      - {x: -19, y: -35}
+      - {x: -20, y: -36}
+      - {x: -23, y: -36}
+      - {x: -24, y: -37}
+      - {x: -28, y: -37}
+      - {x: -29, y: -38}
+      - {x: -33, y: -38}
+      - {x: -34, y: -39}
+      - {x: -38, y: -39}
+      - {x: -39, y: -40}
+      - {x: -43, y: -40}
+      - {x: -45, y: -41}
+      - {x: -46, y: -41}
+      - {x: -45, y: -37}
+      - {x: -44, y: -36}
+      - {x: -44, y: -34}
+      - {x: -34, y: -14}
+      - {x: -34, y: -12}
+      - {x: -33, y: -11}
+      - {x: -33, y: -4}
+      - {x: -36, y: 3}
+      - {x: -40, y: 8}
+      - {x: -43, y: 15}
+      - {x: -45, y: 17}
+      - {x: -49, y: 24}
+      - {x: -48, y: 25}
+      - {x: -43, y: 25}
+      - {x: -42, y: 24}
+      - {x: -35, y: 24}
+      - {x: -34, y: 23}
+      - {x: -27, y: 23}
+      - {x: -26, y: 22}
+      - {x: -13, y: 22}
+      - {x: -11, y: 24}
+      - {x: -10, y: 24}
+      - {x: -1, y: 33}
+      - {x: -1, y: 34}
+      - {x: 9, y: 43}
+      - {x: 10, y: 45}
+      - {x: 13, y: 46}
+      - {x: 14, y: 43}
+      - {x: 14, y: 39}
+      - {x: 15, y: 38}
+      - {x: 15, y: 34}
+      - {x: 16, y: 33}
+      - {x: 17, y: 23}
+      - {x: 18, y: 22}
+      - {x: 19, y: 16}
+      - {x: 25, y: 9}
+      - {x: 34, y: 5}
+      - {x: 36, y: 5}
+      - {x: 45, y: 0}
+      - {x: 47, y: 0}
+      - {x: 53, y: -4}
+      - {x: 49, y: -7}
+      - {x: 31, y: -16}
+      - {x: 30, y: -18}
+      - {x: 29, y: -18}
+      - {x: 22, y: -24}
+      - {x: 21, y: -27}
+      - {x: 21, y: -30}
+      - {x: 20, y: -31}
+      - {x: 19, y: -50}
+      - {x: 18, y: -51}
+      - {x: 18, y: -56}
+      - {x: 17, y: -57}
+      - {x: 17, y: -58}
     customData: 
     physicsShape: []
     bones: []
     spriteID: 5e97eb03825dee720800000000000000
-    internalID: 0
+    internalID: 1537655665
     vertices: []
     indices: 
     edges: []

@@ -56,7 +56,7 @@ TextureImporter:
   spriteGenerateFallbackPhysicsShape: 1
   alphaUsage: 1
   alphaIsTransparency: 1
-  spriteTessellationDetail: -1
+  spriteTessellationDetail: 0.519
   textureType: 8
   textureShape: 1
   singleChannelComponent: 0
@@ -122,6 +122,19 @@ TextureImporter:
     ignorePlatformSupport: 0
     androidETC2FallbackOverride: 0
     forceMaximumCompressionQuality_BC6H_BC7: 0
+  - serializedVersion: 4
+    buildTarget: iOS
+    maxTextureSize: 2048
+    resizeAlgorithm: 0
+    textureFormat: -1
+    textureCompression: 1
+    compressionQuality: 50
+    crunchedCompression: 0
+    allowsAlphaSplitting: 0
+    overridden: 0
+    ignorePlatformSupport: 0
+    androidETC2FallbackOverride: 0
+    forceMaximumCompressionQuality_BC6H_BC7: 0
   spriteSheet:
     serializedVersion: 2
     sprites:
@@ -134,7 +147,7 @@ TextureImporter:
         width: 212
         height: 212
       alignment: 0
-      pivot: {x: 0, y: 0}
+      pivot: {x: 0.5, y: 0.5}
       border: {x: 0, y: 0, z: 0, w: 0}
       customData: 
       outline: []
@@ -147,12 +160,140 @@ TextureImporter:
       indices: 
       edges: []
       weights: []
-    outline: []
+    outline:
+    - - {x: 24, y: -98}
+      - {x: 32, y: -96}
+      - {x: 38, y: -95}
+      - {x: 53, y: -87}
+      - {x: 60, y: -82}
+      - {x: 68, y: -75}
+      - {x: 76, y: -67}
+      - {x: 79, y: -63}
+      - {x: 86, y: -55}
+      - {x: 96, y: -34}
+      - {x: 97, y: -30}
+      - {x: 99, y: -24}
+      - {x: 101, y: -12}
+      - {x: 101, y: 12}
+      - {x: 99, y: 24}
+      - {x: 98, y: 27}
+      - {x: 96, y: 34}
+      - {x: 90, y: 47}
+      - {x: 86, y: 55}
+      - {x: 83, y: 58}
+      - {x: 75, y: 68}
+      - {x: 68, y: 75}
+      - {x: 60, y: 82}
+      - {x: 53, y: 87}
+      - {x: 46, y: 90}
+      - {x: 43, y: 92}
+      - {x: 38, y: 94}
+      - {x: 32, y: 96}
+      - {x: 24, y: 98}
+      - {x: 13, y: 100}
+      - {x: -12, y: 100}
+      - {x: -17, y: 99}
+      - {x: -26, y: 97}
+      - {x: -35, y: 94}
+      - {x: -42, y: 91}
+      - {x: -54, y: 85}
+      - {x: -61, y: 80}
+      - {x: -78, y: 62}
+      - {x: -81, y: 59}
+      - {x: -86, y: 51}
+      - {x: -91, y: 41}
+      - {x: -93, y: 36}
+      - {x: -96, y: 27}
+      - {x: -98, y: 18}
+      - {x: -99, y: 11}
+      - {x: -99, y: -11}
+      - {x: -98, y: -18}
+      - {x: -96, y: -27}
+      - {x: -93, y: -36}
+      - {x: -91, y: -41}
+      - {x: -86, y: -52}
+      - {x: -78, y: -62}
+      - {x: -72, y: -69}
+      - {x: -61, y: -80}
+      - {x: -54, y: -85}
+      - {x: -42, y: -91}
+      - {x: -35, y: -94}
+      - {x: -26, y: -97}
+      - {x: -17, y: -99}
+      - {x: -12, y: -100}
+      - {x: 13, y: -100}
+    - - {x: -1, y: -80}
+      - {x: -11, y: -79}
+      - {x: -21, y: -77}
+      - {x: -30, y: -74}
+      - {x: -39, y: -70}
+      - {x: -52, y: -61}
+      - {x: -59, y: -55}
+      - {x: -59, y: -54}
+      - {x: -62, y: -50}
+      - {x: -69, y: -41}
+      - {x: -69, y: -39}
+      - {x: -71, y: -35}
+      - {x: -75, y: -25}
+      - {x: -76, y: -17}
+      - {x: -78, y: -13}
+      - {x: -79, y: -12}
+      - {x: -79, y: 12}
+      - {x: -78, y: 13}
+      - {x: -76, y: 22}
+      - {x: -74, y: 30}
+      - {x: -72, y: 33}
+      - {x: -69, y: 39}
+      - {x: -65, y: 46}
+      - {x: -58, y: 53}
+      - {x: -54, y: 59}
+      - {x: -48, y: 64}
+      - {x: -44, y: 66}
+      - {x: -38, y: 70}
+      - {x: -33, y: 74}
+      - {x: -30, y: 74}
+      - {x: -21, y: 77}
+      - {x: -11, y: 79}
+      - {x: -1, y: 80}
+      - {x: 6, y: 81}
+      - {x: 7, y: 80}
+      - {x: 14, y: 80}
+      - {x: 18, y: 78}
+      - {x: 31, y: 75}
+      - {x: 38, y: 71}
+      - {x: 43, y: 68}
+      - {x: 51, y: 63}
+      - {x: 52, y: 63}
+      - {x: 65, y: 50}
+      - {x: 65, y: 49}
+      - {x: 73, y: 38}
+      - {x: 73, y: 36}
+      - {x: 75, y: 31}
+      - {x: 78, y: 21}
+      - {x: 80, y: 13}
+      - {x: 81, y: 4}
+      - {x: 82, y: -3}
+      - {x: 81, y: -4}
+      - {x: 80, y: -14}
+      - {x: 79, y: -19}
+      - {x: 74, y: -34}
+      - {x: 71, y: -40}
+      - {x: 67, y: -45}
+      - {x: 65, y: -49}
+      - {x: 52, y: -63}
+      - {x: 51, y: -63}
+      - {x: 43, y: -68}
+      - {x: 31, y: -75}
+      - {x: 29, y: -75}
+      - {x: 22, y: -78}
+      - {x: 18, y: -78}
+      - {x: 14, y: -80}
+      - {x: 0, y: -81}
     customData: 
     physicsShape: []
     bones: []
     spriteID: 5e97eb03825dee720800000000000000
-    internalID: 0
+    internalID: 1537655665
     vertices: []
     indices: 
     edges: []

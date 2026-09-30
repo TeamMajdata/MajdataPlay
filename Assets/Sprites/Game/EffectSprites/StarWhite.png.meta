@@ -53,7 +53,7 @@ TextureImporter:
   spriteGenerateFallbackPhysicsShape: 1
   alphaUsage: 1
   alphaIsTransparency: 1
-  spriteTessellationDetail: -1
+  spriteTessellationDetail: 0.492
   textureType: 8
   textureShape: 1
   singleChannelComponent: 0
@@ -119,15 +119,153 @@ TextureImporter:
     ignorePlatformSupport: 0
     androidETC2FallbackOverride: 0
     forceMaximumCompressionQuality_BC6H_BC7: 0
+  - serializedVersion: 4
+    buildTarget: iOS
+    maxTextureSize: 2048
+    resizeAlgorithm: 0
+    textureFormat: -1
+    textureCompression: 1
+    compressionQuality: 50
+    crunchedCompression: 0
+    allowsAlphaSplitting: 0
+    overridden: 0
+    ignorePlatformSupport: 0
+    androidETC2FallbackOverride: 0
+    forceMaximumCompressionQuality_BC6H_BC7: 0
   spriteSheet:
     serializedVersion: 2
     sprites: []
-    outline: []
+    outline:
+    - - {x: 29, y: -81}
+      - {x: 31, y: -76}
+      - {x: 32, y: -68}
+      - {x: 35, y: -41}
+      - {x: 40, y: -31}
+      - {x: 54, y: -24}
+      - {x: 73, y: -14}
+      - {x: 78, y: -10}
+      - {x: 79, y: -7}
+      - {x: 79, y: -1}
+      - {x: 68, y: 7}
+      - {x: 59, y: 10}
+      - {x: 50, y: 14}
+      - {x: 37, y: 20}
+      - {x: 33, y: 27}
+      - {x: 31, y: 39}
+      - {x: 27, y: 62}
+      - {x: 25, y: 67}
+      - {x: 20, y: 72}
+      - {x: 15, y: 72}
+      - {x: 2, y: 60}
+      - {x: -7, y: 49}
+      - {x: -19, y: 37}
+      - {x: -31, y: 38}
+      - {x: -44, y: 40}
+      - {x: -59, y: 43}
+      - {x: -69, y: 42}
+      - {x: -72, y: 37}
+      - {x: -72, y: 32}
+      - {x: -69, y: 25}
+      - {x: -60, y: 9}
+      - {x: -54, y: -1}
+      - {x: -50, y: -12}
+      - {x: -67, y: -46}
+      - {x: -69, y: -52}
+      - {x: -69, y: -56}
+      - {x: -65, y: -60}
+      - {x: -53, y: -60}
+      - {x: -49, y: -59}
+      - {x: -34, y: -56}
+      - {x: -25, y: -54}
+      - {x: -15, y: -53}
+      - {x: -5, y: -62}
+      - {x: 15, y: -81}
+      - {x: 19, y: -84}
+      - {x: 22, y: -85}
+      - {x: 25, y: -85}
+    - - {x: 15, y: -59}
+      - {x: 15, y: -58}
+      - {x: 12, y: -56}
+      - {x: 11, y: -56}
+      - {x: -6, y: -39}
+      - {x: -7, y: -39}
+      - {x: -9, y: -37}
+      - {x: -11, y: -37}
+      - {x: -12, y: -36}
+      - {x: -21, y: -36}
+      - {x: -22, y: -37}
+      - {x: -26, y: -37}
+      - {x: -27, y: -38}
+      - {x: -35, y: -39}
+      - {x: -36, y: -40}
+      - {x: -39, y: -40}
+      - {x: -40, y: -41}
+      - {x: -46, y: -41}
+      - {x: -45, y: -36}
+      - {x: -35, y: -17}
+      - {x: -35, y: -15}
+      - {x: -33, y: -11}
+      - {x: -33, y: -6}
+      - {x: -34, y: -5}
+      - {x: -35, y: -1}
+      - {x: -37, y: 2}
+      - {x: -39, y: 7}
+      - {x: -41, y: 9}
+      - {x: -43, y: 14}
+      - {x: -45, y: 16}
+      - {x: -48, y: 21}
+      - {x: -48, y: 23}
+      - {x: -49, y: 24}
+      - {x: -43, y: 24}
+      - {x: -42, y: 23}
+      - {x: -35, y: 23}
+      - {x: -34, y: 22}
+      - {x: -28, y: 22}
+      - {x: -27, y: 21}
+      - {x: -13, y: 21}
+      - {x: -10, y: 22}
+      - {x: 2, y: 35}
+      - {x: 2, y: 36}
+      - {x: 11, y: 45}
+      - {x: 13, y: 45}
+      - {x: 14, y: 39}
+      - {x: 15, y: 38}
+      - {x: 15, y: 32}
+      - {x: 16, y: 31}
+      - {x: 16, y: 27}
+      - {x: 17, y: 26}
+      - {x: 17, y: 21}
+      - {x: 18, y: 20}
+      - {x: 18, y: 17}
+      - {x: 20, y: 12}
+      - {x: 24, y: 9}
+      - {x: 25, y: 9}
+      - {x: 26, y: 7}
+      - {x: 35, y: 3}
+      - {x: 37, y: 3}
+      - {x: 52, y: -5}
+      - {x: 52, y: -6}
+      - {x: 42, y: -11}
+      - {x: 40, y: -13}
+      - {x: 31, y: -17}
+      - {x: 29, y: -19}
+      - {x: 26, y: -20}
+      - {x: 22, y: -25}
+      - {x: 21, y: -29}
+      - {x: 20, y: -30}
+      - {x: 20, y: -35}
+      - {x: 19, y: -36}
+      - {x: 19, y: -44}
+      - {x: 18, y: -45}
+      - {x: 18, y: -52}
+      - {x: 17, y: -53}
+      - {x: 17, y: -58}
+      - {x: 16, y: -59}
     customData: 
     physicsShape: []
     bones: []
     spriteID: 5e97eb03825dee720800000000000000
-    internalID: 0
+    internalID: 1537655665
     vertices: []
     indices: 
     edges: []

@@ -109,6 +109,32 @@ TextureImporter:
     ignorePlatformSupport: 0
     androidETC2FallbackOverride: 0
     forceMaximumCompressionQuality_BC6H_BC7: 0
+  - serializedVersion: 4
+    buildTarget: Android
+    maxTextureSize: 2048
+    resizeAlgorithm: 0
+    textureFormat: -1
+    textureCompression: 1
+    compressionQuality: 50
+    crunchedCompression: 0
+    allowsAlphaSplitting: 0
+    overridden: 0
+    ignorePlatformSupport: 0
+    androidETC2FallbackOverride: 0
+    forceMaximumCompressionQuality_BC6H_BC7: 0
+  - serializedVersion: 4
+    buildTarget: iOS
+    maxTextureSize: 2048
+    resizeAlgorithm: 0
+    textureFormat: -1
+    textureCompression: 1
+    compressionQuality: 50
+    crunchedCompression: 0
+    allowsAlphaSplitting: 0
+    overridden: 0
+    ignorePlatformSupport: 0
+    androidETC2FallbackOverride: 0
+    forceMaximumCompressionQuality_BC6H_BC7: 0
   spriteSheet:
     serializedVersion: 2
     sprites:
@@ -121,12 +147,38 @@ TextureImporter:
         width: 94
         height: 80
       alignment: 0
-      pivot: {x: 0, y: 0}
+      pivot: {x: 0.5, y: 0.5}
       border: {x: 0, y: 0, z: 0, w: 0}
       customData: 
-      outline: []
+      outline:
+      - - {x: 6, y: -39}
+        - {x: 42, y: -3}
+        - {x: 46, y: 7}
+        - {x: 47, y: 11}
+        - {x: 47, y: 17}
+        - {x: 45, y: 23}
+        - {x: 43, y: 28}
+        - {x: 35, y: 36}
+        - {x: 28, y: 39}
+        - {x: 21, y: 40}
+        - {x: 16, y: 40}
+        - {x: 7, y: 37}
+        - {x: 1, y: 31}
+        - {x: -3, y: 34}
+        - {x: -11, y: 38}
+        - {x: -17, y: 40}
+        - {x: -25, y: 40}
+        - {x: -35, y: 37}
+        - {x: -46, y: 24}
+        - {x: -47, y: 20}
+        - {x: -47, y: 11}
+        - {x: -46, y: 6}
+        - {x: -42, y: -3}
+        - {x: -6, y: -39}
+        - {x: -3, y: -40}
+        - {x: 3, y: -40}
       physicsShape: []
-      tessellationDetail: -1
+      tessellationDetail: 0.486
       bones: []
       spriteID: 1c0f598a22ed51fe0800000000000000
       internalID: -1218823883695198015
@@ -138,7 +190,7 @@ TextureImporter:
     customData: 
     physicsShape: []
     bones: []
-    spriteID: 
+    spriteID: 4a27930c63b02c946af759e67966f16a
     internalID: 0
     vertices: []
     indices: 
