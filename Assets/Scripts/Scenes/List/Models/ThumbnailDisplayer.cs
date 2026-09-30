@@ -1,5 +1,6 @@
 ﻿using Cysharp.Threading.Tasks;
 using MajdataPlay.Drawing;
+using MajdataPlay.Threading;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -34,7 +35,8 @@ namespace MajdataPlay.Scenes.List.Models
                 _cts.Cancel();
             }
             _cts = new();
-            ListManager.AllBackgroundTasks.Add(SetCoverAsync(detail, loadDelayMS, _cts.Token));
+            ListManager.AllBackgroundTasks.Add(SetCoverAsync(detail, loadDelayMS, _cts.Token)
+                                               .Register($"[{nameof(ThumbnailDisplayer)}]Load song thumbnail"));
         }
 
         async Task SetCoverAsync(ISongDetail songDetail, int loadDelayMS, CancellationToken token = default)

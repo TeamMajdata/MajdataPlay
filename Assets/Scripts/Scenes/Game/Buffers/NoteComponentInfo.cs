@@ -64,10 +64,10 @@ namespace MajdataPlay.Scenes.Game.Buffers
         ReadOnlyMemory<PlayerLoopFunction> _onFixedUpdateFunctions = ReadOnlyMemory<PlayerLoopFunction>.Empty;
         ReadOnlyMemory<PlayerLoopFunction> _onLateUpdateFunctions = ReadOnlyMemory<PlayerLoopFunction>.Empty;
 
-        PlayerLoopFunction[] _rentedArrayForOnPreUpdateFunctions = Array.Empty<PlayerLoopFunction>();
-        PlayerLoopFunction[] _rentedArrayForOnUpdateFunctions = Array.Empty<PlayerLoopFunction>();
-        PlayerLoopFunction[] _rentedArrayForOnFixedUpdateFunctions = Array.Empty<PlayerLoopFunction>();
-        PlayerLoopFunction[] _rentedArrayForOnLateUpdateFunctions = Array.Empty<PlayerLoopFunction>();
+        PooledArray<PlayerLoopFunction> _rentedArrayForOnPreUpdateFunctions = default;
+        PooledArray<PlayerLoopFunction> _rentedArrayForOnUpdateFunctions = default;
+        PooledArray<PlayerLoopFunction> _rentedArrayForOnFixedUpdateFunctions = default;
+        PooledArray<PlayerLoopFunction> _rentedArrayForOnLateUpdateFunctions = default;
 
         delegate void PlayerLoopFunction();
         public NoteComponentInfo(object component)
@@ -101,10 +101,10 @@ namespace MajdataPlay.Scenes.Game.Buffers
                 methods = MajCache<(Type, BindingFlags), MethodInfo[]>.GetOrAdd((componentType, flags), componentType.GetMethods(flags));
             }
             var delegateType = typeof(PlayerLoopFunction);
-            _rentedArrayForOnPreUpdateFunctions = Pool<PlayerLoopFunction>.RentArray(methods.Length, true);
-            _rentedArrayForOnUpdateFunctions = Pool<PlayerLoopFunction>.RentArray(methods.Length, true);
-            _rentedArrayForOnFixedUpdateFunctions = Pool<PlayerLoopFunction>.RentArray(methods.Length, true);
-            _rentedArrayForOnLateUpdateFunctions = Pool<PlayerLoopFunction>.RentArray(methods.Length, true);
+            _rentedArrayForOnPreUpdateFunctions = Pool<PlayerLoopFunction>.Rent(methods.Length, true);
+            _rentedArrayForOnUpdateFunctions = Pool<PlayerLoopFunction>.Rent(methods.Length, true);
+            _rentedArrayForOnFixedUpdateFunctions = Pool<PlayerLoopFunction>.Rent(methods.Length, true);
+            _rentedArrayForOnLateUpdateFunctions = Pool<PlayerLoopFunction>.Rent(methods.Length, true);
 
             var onPreUpdateFuncCount = 0;
             var onUpdateFuncCount = 0;
@@ -322,20 +322,20 @@ namespace MajdataPlay.Scenes.Game.Buffers
             _component = default;
             _gameObject = default;
 
-            Pool<PlayerLoopFunction>.ReturnArray(_rentedArrayForOnPreUpdateFunctions, true);
-            Pool<PlayerLoopFunction>.ReturnArray(_rentedArrayForOnUpdateFunctions, true);
-            Pool<PlayerLoopFunction>.ReturnArray(_rentedArrayForOnFixedUpdateFunctions, true);
-            Pool<PlayerLoopFunction>.ReturnArray(_rentedArrayForOnLateUpdateFunctions, true);
+            _rentedArrayForOnFixedUpdateFunctions.Dispose();
+            _rentedArrayForOnLateUpdateFunctions.Dispose();
+            _rentedArrayForOnPreUpdateFunctions.Dispose();
+            _rentedArrayForOnUpdateFunctions.Dispose();
 
             _onPreUpdateFunctions = ReadOnlyMemory<PlayerLoopFunction>.Empty;
             _onUpdateFunctions = ReadOnlyMemory<PlayerLoopFunction>.Empty;
             _onFixedUpdateFunctions = ReadOnlyMemory<PlayerLoopFunction>.Empty;
             _onLateUpdateFunctions = ReadOnlyMemory<PlayerLoopFunction>.Empty;
 
-            _rentedArrayForOnPreUpdateFunctions = Array.Empty<PlayerLoopFunction>();
-            _rentedArrayForOnUpdateFunctions = Array.Empty<PlayerLoopFunction>();
-            _rentedArrayForOnFixedUpdateFunctions = Array.Empty<PlayerLoopFunction>();
-            _rentedArrayForOnLateUpdateFunctions = Array.Empty<PlayerLoopFunction>();
+            _rentedArrayForOnPreUpdateFunctions = default;
+            _rentedArrayForOnUpdateFunctions = default;
+            _rentedArrayForOnFixedUpdateFunctions = default;
+            _rentedArrayForOnLateUpdateFunctions = default;
         }
         void ThrowIfDisposed()
         {

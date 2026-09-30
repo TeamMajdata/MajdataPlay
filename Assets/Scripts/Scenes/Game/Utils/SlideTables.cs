@@ -20,7 +20,7 @@ namespace MajdataPlay.Scenes.Game.Notes.Slide.Utils
             public float ClassicConst { get; init; } = 0f;
             public SlideTable Build()
             {
-                var rentedArray = Pool<SlideArea>.RentArray(JudgeQueue.Length, true);
+                var rentedArray = Pool<SlideArea>.Rent(JudgeQueue.Length, true);
                 for (var i = 0; i < JudgeQueue.Length; i++)
                 {
                     rentedArray[i] = JudgeQueue[i].Build();
@@ -42,9 +42,9 @@ namespace MajdataPlay.Scenes.Game.Notes.Slide.Utils
             public float Const { get; init; } = 0f;
             public WifiTable Build()
             {
-                var rentedArrayForLeft = Pool<SlideArea>.RentArray(Left.Length, true);
-                var rentedArrayForCenter = Pool<SlideArea>.RentArray(Center.Length, true);
-                var rentedArrayForRight = Pool<SlideArea>.RentArray(Right.Length, true);
+                var rentedArrayForLeft = Pool<SlideArea>.Rent(Left.Length, true);
+                var rentedArrayForCenter = Pool<SlideArea>.Rent(Center.Length, true);
+                var rentedArrayForRight = Pool<SlideArea>.Rent(Right.Length, true);
                 for (var i = 0; i < Left.Length; i++)
                 {
                     rentedArrayForLeft[i] = Left[i].Build();

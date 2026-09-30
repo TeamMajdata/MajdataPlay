@@ -89,7 +89,7 @@ namespace MajdataPlay.Scenes.List
             InputManager.TouchButtonRingEdge = 4.8f;
             if (AllBackgroundTasks.Count > 4096)
             {
-                var indexs = Pool<int>.RentArray(AllBackgroundTasks.Count);
+                using var indexs = Pool<int>.Rent(AllBackgroundTasks.Count, true);
                 try
                 {
                     var i2 = -1;
@@ -111,10 +111,6 @@ namespace MajdataPlay.Scenes.List
                 catch (Exception ex)
                 {
                     MajDebug.LogError("[ListManager] [Awake] " + ex.Message);
-                }
-                finally
-                {
-                    Pool<int>.ReturnArray(indexs);
                 }
             }
             else
@@ -663,7 +659,7 @@ namespace MajdataPlay.Scenes.List
                 return Task.CompletedTask;
             }
             var isAnyRunning = false;
-            using var tasks = new RentedList<Task>();
+            using var tasks = new PooledList<Task>();
             foreach(var task in AllBackgroundTasks)
             {
                 if (!task.IsCompleted)

@@ -70,7 +70,7 @@ namespace MajdataPlay.Scenes.Login
         {
             _apiEndpoints = MajEnv.ApiEndpoints;
             _qrCodeRawImage = _qrCodeComponent.GetComponent<RawImage>();
-            using var rentedApiEndpoints = new RentedList<ApiEndpoint>();
+            using var rentedApiEndpoints = new PooledList<ApiEndpoint>();
             for (var i = 0; i < _apiEndpoints.Length; i++)
             {
                 var endpoint = _apiEndpoints[i];

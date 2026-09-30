@@ -7,6 +7,7 @@ using MajdataPlay.i18n;
 using MajdataPlay.Numerics;
 using MajdataPlay.Scenes.List.Models;
 using MajdataPlay.Settings.Runtime;
+using MajdataPlay.Threading;
 using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
@@ -84,9 +85,9 @@ namespace MajdataPlay.Scenes.List
 
         MotionHandle _scrollMotion;
 
-        readonly RentedList<ISongDetail> _songDetails = new();
-        readonly RentedList<SongCoverBinding> _songCoverBindings = new();
-        readonly RentedList<SongThumbnailBinding> _songThumbnailBindings = new();
+        readonly PooledList<ISongDetail> _songDetails = new();
+        readonly PooledList<SongCoverBinding> _songCoverBindings = new();
+        readonly PooledList<SongThumbnailBinding> _songThumbnailBindings = new();
 
         readonly Queue<SongCoverDisplayer> _idleSongCoverDisplayer = new();
         readonly Queue<ThumbnailDisplayer> _idleSongThumbnailDisplayer = new();
@@ -641,7 +642,7 @@ namespace MajdataPlay.Scenes.List
                 var preloadTask = SongDetail.PreloadAsync();
                 if(!preloadTask.IsCompleted)
                 {
-                    ListManager.AllBackgroundTasks.Add(preloadTask.AsTask());
+                    ListManager.AllBackgroundTasks.Add(preloadTask.AsTask().Register($"[{nameof(CoverListManager)}]Song detail preload"));
                 }
                 PreloadTask = preloadTask;
             }

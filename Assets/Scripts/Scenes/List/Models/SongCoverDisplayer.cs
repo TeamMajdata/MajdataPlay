@@ -1,6 +1,7 @@
 ﻿using Cysharp.Threading.Tasks;
 using MajdataPlay.Drawing;
 using MajdataPlay.Settings.Runtime;
+using MajdataPlay.Threading;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -109,7 +110,8 @@ namespace MajdataPlay.Scenes.List.Models
                 _cts.Cancel();
                 _cts = new();
             }
-            ListManager.AllBackgroundTasks.Add(SetCoverAsync(detail, loadDelayMS, _cts.Token));
+            ListManager.AllBackgroundTasks.Add(SetCoverAsync(detail, loadDelayMS, _cts.Token)
+                                               .Register($"[{nameof(SongCoverDisplayer)}]Load song cover"));
         }
         public void SetActive(bool state)
         {

@@ -33,7 +33,7 @@ namespace MajdataPlay.IO
                 var pid = filter.ProductId;
                 var vid = filter.VendorId;
                 var deviceName = filter.DeviceName;
-                var result = new RentedList<HidDevice>();
+                var result = new PooledList<HidDevice>();
 
                 foreach (var d in Devices)
                 {

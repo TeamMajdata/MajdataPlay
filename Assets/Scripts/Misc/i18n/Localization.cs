@@ -149,7 +149,7 @@ namespace MajdataPlay.i18n
         }
         public static Language[] Parse(IEnumerable<string> jsons)
         {
-            using var loadedLangs = new RentedList<Language>();
+            using var loadedLangs = new PooledList<Language>();
             foreach (var json in jsons)
             {
                 var lang = Parse(json);

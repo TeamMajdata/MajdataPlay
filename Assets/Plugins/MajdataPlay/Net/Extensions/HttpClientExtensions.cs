@@ -123,9 +123,8 @@ namespace MajdataPlay.Net
 
             using var contentStream = await response.Content.ReadAsStreamAsync();
 
-            using (var lease = ArrayLease<byte>.Rent(8192, false))
+            using (var buffer = Pool<byte>.Rent(8192))
             {
-                var buffer = lease.Array;
                 int bytesRead;
 
                 while ((bytesRead = await contentStream.ReadAsync(buffer, 0, buffer.Length, token)) > 0)

@@ -164,14 +164,14 @@ namespace MajdataPlay.Scenes.Game.Notes.Behaviours
         /// </summary>
         [ReadOnlyField]
         [SerializeField]
-        protected readonly RentedList<GameObject> SlideBars = new();
+        protected readonly PooledList<GameObject> SlideBars = new();
         /// <summary>
         /// Arrow Renderers
         /// </summary>
         [ReadOnlyField]
         [SerializeField]
-        protected readonly RentedList<SpriteRenderer> SlideBarRenderers = new();
-        protected readonly RentedList<Transform> SlideBarTransforms = new();
+        protected readonly PooledList<SpriteRenderer> SlideBarRenderers = new();
+        protected readonly PooledList<Transform> SlideBarTransforms = new();
         /// <summary>
         /// Slide star
         /// </summary>

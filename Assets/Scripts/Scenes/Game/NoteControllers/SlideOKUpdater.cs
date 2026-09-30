@@ -18,8 +18,8 @@ namespace MajdataPlay.Scenes.Game.Notes.Controllers
         const string FIXED_UPDATE_METHOD_NAME = UPDATER_NAME + ".FixedUpdate";
         const string LATE_UPDATE_METHOD_NAME = UPDATER_NAME + ".LateUpdate";
 
-        readonly RentedList<SlideOK> _activeSlideOKs = new();
-        readonly RentedList<SlideOK> _inactiveSlideOKs = new();
+        readonly PooledList<SlideOK> _activeSlideOKs = new();
+        readonly PooledList<SlideOK> _inactiveSlideOKs = new();
 
         void Awake()
         {

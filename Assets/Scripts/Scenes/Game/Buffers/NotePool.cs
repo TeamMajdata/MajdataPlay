@@ -29,8 +29,8 @@ namespace MajdataPlay.Scenes.Game.Buffers
 
         protected uint _flag = 0;
 
-        TimingPoint<TInfo>[] _rentedArrayForTimingPoints = Array.Empty<TimingPoint<TInfo>>();
-        TInfo[] _rentedArrayForNotePoolingInfos = Array.Empty<TInfo>();
+        PooledArray<TimingPoint<TInfo>> _rentedArrayForTimingPoints = default;
+        PooledArray<TInfo> _rentedArrayForNotePoolingInfos = default;
 
         ~NotePool()
         {
@@ -39,7 +39,7 @@ namespace MajdataPlay.Scenes.Game.Buffers
         public NotePool(GameObject prefab, Transform parent, TInfo[] noteInfos, int capacity)
         {
             Capacity = capacity;
-            var rentedArray = Pool<IPoolableNote<TInfo, TMember>?>.RentArray(capacity);
+            var rentedArray = Pool<IPoolableNote<TInfo, TMember>?>.Rent(capacity);
             _parent = parent;
             for (var i = 0; i < capacity; i++)
             {
@@ -54,14 +54,14 @@ namespace MajdataPlay.Scenes.Game.Buffers
             }
             _storage = new Bucket(rentedArray, capacity);
 
-            using var orderedTimingPoints = new RentedList<IGrouping<float, TInfo>>(noteInfos.GroupBy(x => x.AppearTiming)
+            using var orderedTimingPoints = new PooledList<IGrouping<float, TInfo>>(noteInfos.GroupBy(x => x.AppearTiming)
                                                                                              .OrderBy(x => x.Key));
-            _rentedArrayForTimingPoints = Pool<TimingPoint<TInfo>>.RentArray(orderedTimingPoints.Count, true);
-            _rentedArrayForNotePoolingInfos = Pool<TInfo>.RentArray(noteInfos.Length, true);
+            _rentedArrayForTimingPoints = Pool<TimingPoint<TInfo>>.Rent(orderedTimingPoints.Count, true);
+            _rentedArrayForNotePoolingInfos = Pool<TInfo>.Rent(noteInfos.Length, true);
             _timingPoints = _rentedArrayForTimingPoints.AsMemory(0, orderedTimingPoints.Count);
             var timingPoints = _timingPoints.Span;
             var notePoolingInfoArrayCursor = 0;
-            using var cacheList = new RentedList<TInfo>(16);
+            using var cacheList = new PooledList<TInfo>(16);
             foreach (var (i, timingPoint) in orderedTimingPoints.WithIndex())
             {
                 cacheList.AddRange(timingPoint);
@@ -184,10 +184,13 @@ namespace MajdataPlay.Scenes.Game.Buffers
             _isDisposed = true;
             _storage.Dispose();
             _timingPoints = Memory<TimingPoint<TInfo>>.Empty;
-            _rentedArrayForNotePoolingInfos = Array.Empty<TInfo>();
-            _rentedArrayForTimingPoints = Array.Empty<TimingPoint<TInfo>>();
-            Pool<TimingPoint<TInfo>>.ReturnArray(_rentedArrayForTimingPoints, true);
-            Pool<TInfo>.ReturnArray(_rentedArrayForNotePoolingInfos, true);
+
+            _rentedArrayForTimingPoints.Dispose();
+            _rentedArrayForTimingPoints = default;
+
+            _rentedArrayForNotePoolingInfos.Dispose();
+            _rentedArrayForNotePoolingInfos = default;
+            
             var childCount = _parent.childCount;
             for (var i = 0; i < childCount; i++)
             {
@@ -230,7 +233,7 @@ namespace MajdataPlay.Scenes.Game.Buffers
             bool _isDisposed = false;
             readonly int _size = 0;
             Memory<IPoolableNote<TInfo, TMember>?> _storage = Memory<IPoolableNote<TInfo, TMember>?>.Empty;
-            IPoolableNote<TInfo, TMember>?[] _rentedArray = Array.Empty<IPoolableNote<TInfo, TMember>?>();
+            PooledArray<IPoolableNote<TInfo, TMember>?> _rentedArray = default;
 
             public Bucket(IPoolableNote<TInfo, TMember>?[] rentedArray, int size)
             {
@@ -287,7 +290,7 @@ namespace MajdataPlay.Scenes.Game.Buffers
             }
             public void Dispose()
             {
-                Pool<IPoolableNote<TInfo, TMember>?>.ReturnArray(_rentedArray, true);
+                _rentedArray.Dispose();
                 _isDisposed = true;
             }
             void ThrowIfDisposed()

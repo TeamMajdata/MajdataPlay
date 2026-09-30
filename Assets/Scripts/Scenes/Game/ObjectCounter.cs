@@ -685,20 +685,23 @@ namespace MajdataPlay.Scenes.Game
             if (!judgeResult.IsMissOrTooFast)
             {
                 _combo += multiple;
-                switch (note)
+                if(!judgeResult.IsMine)
                 {
-                    case TapDrop:
-                    case HoldDrop:
-                        _isOutlinePlayRequested = true;
-                        var diffMSec = judgeResult.Diff;
-                        _noteJudgeDiffList.Add(diffMSec);
-                        if(_isJudgeTimingGaugeEnabled)
-                        {
-                            ref var binding = ref _gaugeScaleBindings[_gaugeScaleBindingCursor++ % _judgeTimingGaugeScaleCount];
-                            binding.DiffMSec = diffMSec;
-                        }
-                        break;
-                }
+                    switch (note)
+                    {
+                        case TapDrop:
+                        case HoldDrop:
+                            _isOutlinePlayRequested = true;
+                            var diffMSec = judgeResult.Diff;
+                            _noteJudgeDiffList.Add(diffMSec);
+                            if (_isJudgeTimingGaugeEnabled)
+                            {
+                                ref var binding = ref _gaugeScaleBindings[_gaugeScaleBindingCursor++ % _judgeTimingGaugeScaleCount];
+                                binding.DiffMSec = diffMSec;
+                            }
+                            break;
+                    }
+                }                
             }
 
             if (MajEnv.Mode == RunningMode.Play && _gameInfo.IsDanLifeEnabled)

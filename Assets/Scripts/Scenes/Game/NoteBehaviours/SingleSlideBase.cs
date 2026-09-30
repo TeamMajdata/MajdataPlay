@@ -17,8 +17,8 @@ namespace MajdataPlay.Scenes.Game.Notes.Behaviours
         [field: ReadOnlyField]
         public bool IsMirror { get; set; }
 
-        protected RentedList<Vector3> StarPositions = new();
-        protected RentedList<Quaternion> StarRotations = new();
+        protected PooledList<Vector3> StarPositions = new();
+        protected PooledList<Quaternion> StarRotations = new();
 
         protected SpriteRenderer StarRenderer;
 

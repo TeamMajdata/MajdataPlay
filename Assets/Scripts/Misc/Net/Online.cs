@@ -66,7 +66,7 @@ namespace MajdataPlay.Net
 
         public static async ValueTask HeartbeatAsync(CancellationToken token = default)
         {
-            using var rentedBuffer = new RentedList<ApiEndpointStatistics>();
+            using var rentedBuffer = new PooledList<ApiEndpointStatistics>();
             await UniTask.SwitchToThreadPool();
             MajDebug.LogDebug("Online heartbeat executing");
             GetAllApiEndpointStatistic(rentedBuffer);
@@ -382,7 +382,7 @@ namespace MajdataPlay.Net
         }
         public static async ValueTask LogoutAllAsync(CancellationToken token = default)
         {
-            using var rentedBuffer = new RentedList<ApiEndpointStatistics>();
+            using var rentedBuffer = new PooledList<ApiEndpointStatistics>();
             await UniTask.SwitchToThreadPool();
             GetAllApiEndpointStatistic(rentedBuffer);
             foreach (var statistics in rentedBuffer)

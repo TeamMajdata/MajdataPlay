@@ -20,13 +20,13 @@ namespace MajdataPlay.Scenes.Game.Notes.Slide
 
         bool _isDisposed = false;
         readonly Memory<SlideArea> _judgeQueue;
-        readonly SlideArea[] _rentedArray;
+        readonly PooledArray<SlideArea> _rentedArray;
 
         ~SlideTable()
         {
             Dispose();
         }
-        public SlideTable(SlideArea[] rentedArray, int length)
+        public SlideTable(PooledArray<SlideArea> rentedArray, int length)
         {
             _rentedArray = rentedArray;
             _judgeQueue = rentedArray.AsMemory(0, length);
@@ -64,10 +64,7 @@ namespace MajdataPlay.Scenes.Game.Notes.Slide
                 ref var area = ref areas[i];
                 area.Dispose();
             }
-            if (_rentedArray != null)
-            {
-                Pool<SlideArea>.ReturnArray(_rentedArray, true);
-            }
+            _rentedArray.Dispose();
         }
         public void ThrowIfDisposed()
         {

@@ -81,8 +81,8 @@ namespace MajdataPlay.Scenes.Game.Notes.Slide
         Memory<Area> _areas = Memory<Area>.Empty;
         Memory<SensorArea> _includedAreas = Memory<SensorArea>.Empty;
 
-        Area[] _rentedArrayForAreas = Array.Empty<Area>();
-        SensorArea[] _rentedArrayForIncludedAreas = Array.Empty<SensorArea>();
+        PooledArray<Area> _rentedArrayForAreas = default;
+        PooledArray<SensorArea> _rentedArrayForIncludedAreas = default;
         public SlideArea(ReadOnlySpan<(SensorArea, bool)> types, int progressWhenOn, int progressWhenFinished)
         {
             if (types.Length == 0)
@@ -120,8 +120,8 @@ namespace MajdataPlay.Scenes.Game.Notes.Slide
             {
                 _areas[j] = (Area)areas[j]!;
             }
-            _rentedArrayForAreas = Pool<Area>.RentArray(_areas.Length, true);
-            _rentedArrayForIncludedAreas = Pool<SensorArea>.RentArray(_registeredAreas.Length, true);
+            _rentedArrayForAreas = Pool<Area>.Rent(_areas.Length, true);
+            _rentedArrayForIncludedAreas = Pool<SensorArea>.Rent(_registeredAreas.Length, true);
             _areas.CopyTo(_rentedArrayForAreas);
             _registeredAreas.CopyTo(_rentedArrayForIncludedAreas);
             this._areas = _rentedArrayForAreas.AsMemory(0, _areas.Length);
@@ -245,14 +245,14 @@ namespace MajdataPlay.Scenes.Game.Notes.Slide
             _isDisposed = true;
             if (_rentedArrayForAreas.Length > 0)
             {
-                Pool<Area>.ReturnArray(_rentedArrayForAreas, true);
-                _rentedArrayForAreas = Array.Empty<Area>();
+                _rentedArrayForAreas.Dispose();
+                _rentedArrayForAreas = default;
                 _areas = Memory<Area>.Empty;
             }
             if (_rentedArrayForIncludedAreas.Length > 0)
             {
-                Pool<SensorArea>.ReturnArray(_rentedArrayForIncludedAreas, true);
-                _rentedArrayForIncludedAreas = Array.Empty<SensorArea>();
+                _rentedArrayForIncludedAreas.Dispose();
+                _rentedArrayForIncludedAreas = default;
                 _includedAreas = Memory<SensorArea>.Empty;
             }
         }

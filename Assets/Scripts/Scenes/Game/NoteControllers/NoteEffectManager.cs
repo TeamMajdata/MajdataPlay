@@ -16,8 +16,7 @@ namespace MajdataPlay.Scenes.Game.Notes.Controllers
     public class NoteEffectManager : MonoBehaviour
     {
         NoteEffectPool _effectPool;
-        GameObject _fireworkEffect;
-        Animator _fireworkEffectAnimator;
+        private FireworkDisplayer _fireworkDisplayer;
 
         public Color buttonGoodColor = Color.green;
         public Color buttonGreatColor = Color.red;
@@ -100,15 +99,13 @@ namespace MajdataPlay.Scenes.Game.Notes.Controllers
         }
         void Start()
         {
-            _fireworkEffect = GameObject.Find("FireworkEffect");
-            _fireworkEffectAnimator = _fireworkEffect.GetComponent<Animator>();
+            _fireworkDisplayer = Majdata<FireworkDisplayer>.Instance!;
             _effectPool = Majdata<NoteEffectPool>.Instance!;
         }
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public void PlayFireworkEffect(in Vector3 position)
         {
-            _fireworkEffectAnimator.SetTrigger(FIREWORK_ANIM_HASH);
-            _fireworkEffect.transform.position = position;
+            _fireworkDisplayer.Play(position);
         }
         /// <summary>
         /// Tap, Hold, Star

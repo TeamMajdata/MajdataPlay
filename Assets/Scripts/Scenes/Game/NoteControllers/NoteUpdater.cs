@@ -55,7 +55,7 @@ namespace MajdataPlay.Scenes.Game.Notes.Controllers
         public virtual void Init()
         {
             var noteCount = _noteListRoot.childCount;
-            using var noteInstances = new RentedList<TNote>(noteCount);
+            using var noteInstances = new PooledList<TNote>(noteCount);
             for (var i = 0; i < noteCount; i++)
             {
                 var noteObject = _noteListRoot.GetChild(i);

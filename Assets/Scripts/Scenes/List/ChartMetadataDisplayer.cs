@@ -1,5 +1,6 @@
 ﻿using ExCSS;
 using MajdataPlay.Diagnostics;
+using MajdataPlay.Threading;
 using MajdataPlay.Utils;
 using MajSimai;
 using System;
@@ -31,18 +32,6 @@ namespace MajdataPlay.Scenes.List
         [SerializeField]
         [FormerlySerializedAs("artist")]
         TextMeshProUGUI _artist;
-
-        [SerializeField]
-        [FormerlySerializedAs("estiDisplayer")]
-        TextMeshProUGUI _estiDisplayer;
-
-        [SerializeField]
-        [FormerlySerializedAs("peakDensityDisplayer")]
-        TextMeshProUGUI _peakDensityDisplayer;
-
-        [SerializeField]
-        [FormerlySerializedAs("avgDensityDisplayer")]
-        TextMeshProUGUI _avgDensityDisplayer;
 
         [SerializeField]
         [FormerlySerializedAs("bpmDisplayer")]
@@ -88,6 +77,7 @@ namespace MajdataPlay.Scenes.List
                     return;
                 }
                 _maidataLoadTask = _currentSongDetail.GetMaidataAsync(true, token: _cancellationToken).AsTask();
+                _maidataLoadTask.Register($"[{nameof(ChartMetadataDisplayer)}]Load maidata");
                 ListManager.AllBackgroundTasks.Add(_maidataLoadTask);
                 return;
             }
@@ -106,8 +96,6 @@ namespace MajdataPlay.Scenes.List
                     {
                         return;
                     }
-                    _estiDisplayer.text = $"{analyzeResult.Esti:F2}";
-                    _peakDensityDisplayer.text = $"{analyzeResult.PeakDensity}";
                     if (analyzeResult.MaxBPM != analyzeResult.MinBPM)
                     {
                         _bpmDisplayer.text = $"{analyzeResult.MinBPM}-{analyzeResult.MaxBPM}";
@@ -147,9 +135,6 @@ namespace MajdataPlay.Scenes.List
             _artist.text = songDetail.Artist;
             _charter.text = songDetail.Designers[(int)level];
 
-            _estiDisplayer.text = "--";
-            _peakDensityDisplayer.text = "--";
-            _avgDensityDisplayer.text = "--";
             _bpmDisplayer.text = "--";
             _durationDisplayer.text = "--:--";
 

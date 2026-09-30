@@ -123,7 +123,7 @@ namespace MajdataPlay.Extensions
         }
         public static SimaiChart Clamp(this SimaiChart source,Range<long> noteIndexRange)
         {
-            using RentedList<SimaiTimingPoint> newTimingList = new();
+            using PooledList<SimaiTimingPoint> newTimingList = new();
             var currentIndex = 0;
             for (var i = 0; i < source.NoteTimings.Length; i++)
             {
@@ -188,21 +188,16 @@ namespace MajdataPlay.Extensions
                     newTimingList.Add(newTimingPoint);
                 }
             }
-            var buffer = Pool<SimaiTimingPoint>.RentArray(newTimingList.Count);
-            try
+            using (var buffer = Pool<SimaiTimingPoint>.Rent(newTimingList.Count))
             {
                 newTimingList.CopyTo(buffer);
                 return new SimaiChart(source.Level, source.Designer, source.Fumen, buffer.AsSpan(0, newTimingList.Count), null);
-            }
-            finally
-            {
-                Pool<SimaiTimingPoint>.ReturnArray(buffer);
             }
             //source.NoteTimings = newTimingList.ToArray();
         }
         public static SimaiChart Clamp(this SimaiChart source, Range<double> timestampRange)
         {
-            using RentedList<SimaiTimingPoint> newTimingList = new();
+            using PooledList<SimaiTimingPoint> newTimingList = new();
             foreach(var noteTiming in source.NoteTimings)
             {
                 if(timestampRange.InRange(noteTiming.Timing))
@@ -211,15 +206,10 @@ namespace MajdataPlay.Extensions
                 }
             }
             //source.NoteTimings = newTimingList.ToArray();
-            var buffer = Pool<SimaiTimingPoint>.RentArray(newTimingList.Count);
-            try
+            using (var buffer = Pool<SimaiTimingPoint>.Rent(newTimingList.Count, true))
             {
                 newTimingList.CopyTo(buffer);
                 return new SimaiChart(source.Level, source.Designer, source.Fumen, buffer.AsSpan(0, newTimingList.Count), null);
-            }
-            finally
-            {
-                Pool<SimaiTimingPoint>.ReturnArray(buffer);
             }
         }
         public static SimaiChart AddOffset(this SimaiChart source, float timingOffsetMSec)

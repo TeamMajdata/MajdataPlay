@@ -27,7 +27,7 @@ namespace MajdataPlay.Scenes.Game.Notes.Controllers
         bool _isTouchHoldRiserPlaying = false;
 
         Memory<AnswerSoundPoint> _answerTimingPoints = Memory<AnswerSoundPoint>.Empty;
-        AnswerSoundPoint[] _rentedArrayForAnswerSoundPoints = Array.Empty<AnswerSoundPoint>();
+        PooledArray<AnswerSoundPoint> _rentedArrayForAnswerSoundPoints = default;
 
         readonly static bool[] _noteSFXPlaybackRequests = new bool[16];
         readonly static AudioSampleWrap[] _noteSFXs = new AudioSampleWrap[16];
@@ -111,8 +111,8 @@ namespace MajdataPlay.Scenes.Game.Notes.Controllers
             }
             Array.Clear(_noteSFXPlaybackRequests, 0, _noteSFXPlaybackRequests.Length);
             Array.Clear(_noteSFXs, 0, _noteSFXs.Length);
-            Pool<AnswerSoundPoint>.ReturnArray(_rentedArrayForAnswerSoundPoints, true);
-            _rentedArrayForAnswerSoundPoints = Array.Empty<AnswerSoundPoint>();
+            _rentedArrayForAnswerSoundPoints.Dispose();
+            _rentedArrayForAnswerSoundPoints = default;
             _answerTimingPoints = Memory<AnswerSoundPoint>.Empty;
         }
         [Il2CppSetOption(Option.NullChecks, false)]
@@ -404,7 +404,7 @@ namespace MajdataPlay.Scenes.Game.Notes.Controllers
                     firstBpm = chart.NoteTimings[0].Bpm;
                 }
                 var interval = 60 / firstBpm;
-                using RentedList<AnswerSoundPoint> answerTimingPoints = new();
+                using PooledList<AnswerSoundPoint> answerTimingPoints = new();
 
                 if (!isPracticeMode)
                 {
@@ -437,12 +437,12 @@ namespace MajdataPlay.Scenes.Game.Notes.Controllers
                 }
 
                 //Generate AnwserSounds
-                using var simaiTimingBuffer = new RentedList<SimaiTimingPoint>();
+                using var simaiTimingBuffer = new PooledList<SimaiTimingPoint>();
                 simaiTimingBuffer.AddRange(chart.NoteTimings);
                 var timings = simaiTimingBuffer.SelectMany(x =>
                                           {
                                               var timing = x.Timing + _answerOffsetSec;
-                                              using var buffer = new RentedList<AnswerSoundPoint>();
+                                              using var buffer = new PooledList<AnswerSoundPoint>();
                                               var isAnswer = false;
                                               var isMine = false;
                                               foreach (var note in x.Notes)
@@ -501,7 +501,7 @@ namespace MajdataPlay.Scenes.Game.Notes.Controllers
                                               };
                                           })
                                           .OrderBy(x => x.Timing);
-                using (var timingBuffer = new RentedList<AnswerSoundPoint>())
+                using (var timingBuffer = new PooledList<AnswerSoundPoint>())
                 {
                     timingBuffer.AddRange(timings);
                     for (var i = 0; i < timingBuffer.Count; i++)
@@ -530,7 +530,7 @@ namespace MajdataPlay.Scenes.Game.Notes.Controllers
                     answerTimingPoints.AddRange(timingBuffer);
                 }
 
-                _rentedArrayForAnswerSoundPoints = Pool<AnswerSoundPoint>.RentArray(answerTimingPoints.Count, true);
+                _rentedArrayForAnswerSoundPoints = Pool<AnswerSoundPoint>.Rent(answerTimingPoints.Count, true);
                 foreach(var (i, tp) in answerTimingPoints.OrderBy(o => o.Timing).WithIndex())
                 {
                     _rentedArrayForAnswerSoundPoints[i] = tp;

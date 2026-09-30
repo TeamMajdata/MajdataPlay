@@ -41,33 +41,21 @@ public class WifiTable: IDisposable
     Memory<SlideArea> _center;
     Memory<SlideArea> _right;
 
-    readonly SlideArea[] _rentedArrayForLeft;    
-    readonly SlideArea[] _rentedArrayForCenter;    
-    readonly SlideArea[] _rentedArrayForRight;   
+    readonly PooledArray<SlideArea> _rentedArrayForLeft;    
+    readonly PooledArray<SlideArea> _rentedArrayForCenter;    
+    readonly PooledArray<SlideArea> _rentedArrayForRight;   
     
     ~WifiTable()
     {
         Dispose();
     }
-    public WifiTable(SlideArea[] rentedArrayForLeft, 
-                     SlideArea[] rentedArrayForCenter, 
-                     SlideArea[] rentedArrayForRight, 
+    public WifiTable(PooledArray<SlideArea> rentedArrayForLeft,
+                     PooledArray<SlideArea> rentedArrayForCenter,
+                     PooledArray<SlideArea> rentedArrayForRight, 
                      int lengthForLeft,
                      int lengthForCenter,
                      int LengthForRight)
     {
-        if(rentedArrayForLeft is null)
-        {
-            throw new ArgumentNullException(nameof(rentedArrayForLeft));
-        }
-        if(rentedArrayForCenter is null)
-        {
-            throw new ArgumentNullException(nameof(rentedArrayForCenter));
-        }
-        if(rentedArrayForRight is null)
-        {
-            throw new ArgumentNullException(nameof(rentedArrayForRight));
-        }
         _rentedArrayForLeft = rentedArrayForLeft;
         _rentedArrayForCenter = rentedArrayForCenter;
         _rentedArrayForRight = rentedArrayForRight;
@@ -150,9 +138,9 @@ public class WifiTable: IDisposable
         _left = Memory<SlideArea>.Empty;
         _center = Memory<SlideArea>.Empty;
         _right = Memory<SlideArea>.Empty;
-        Pool<SlideArea>.ReturnArray(_rentedArrayForLeft, true);
-        Pool<SlideArea>.ReturnArray(_rentedArrayForCenter, true);
-        Pool<SlideArea>.ReturnArray(_rentedArrayForRight, true);
+        _rentedArrayForLeft.Dispose();
+        _rentedArrayForCenter.Dispose();
+        _rentedArrayForRight.Dispose();
     }
     void ThrowIfDisposed()
     {

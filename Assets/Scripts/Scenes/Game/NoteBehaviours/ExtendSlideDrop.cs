@@ -93,7 +93,7 @@ namespace MajdataPlay.Scenes.Game.Notes.Behaviours
 
         private void InitSlideTable(ExtendSlideMetadata metadata)
         {
-            using var areas = new RentedList<SlideArea>();
+            using var areas = new PooledList<SlideArea>();
             var parsingAreas = metadata.JudgeAreaQueue;
             var areaQueue = (stackalloc (SensorArea, bool)[2]);
             for (var i = 0; i < parsingAreas.Length; i++)
@@ -123,7 +123,7 @@ namespace MajdataPlay.Scenes.Game.Notes.Behaviours
                 area.IsSkippable = false;
             }
 
-            var rentedBuffer = Pool<SlideArea>.RentArray(areas.Count);
+            var rentedBuffer = Pool<SlideArea>.Rent(areas.Count);
             areas.CopyTo(rentedBuffer);            
 
             Table = new SlideTable(rentedBuffer, areas.Count)

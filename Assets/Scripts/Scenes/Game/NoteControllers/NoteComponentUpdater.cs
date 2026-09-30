@@ -25,11 +25,11 @@ namespace MajdataPlay.Scenes.Game.Notes.Controllers
         protected ReadOnlyMemory<NoteComponentInfo> FixedUpdatebleComponents = ReadOnlyMemory<NoteComponentInfo>.Empty;
         protected ReadOnlyMemory<NoteComponentInfo> LateUpdatebleComponents = ReadOnlyMemory<NoteComponentInfo>.Empty;
 
-        NoteComponentInfo[] _rentedArrayForComponents = Array.Empty<NoteComponentInfo>();
-        NoteComponentInfo[] _rentedArrayForPreUpdatebleComponents = Array.Empty<NoteComponentInfo>();
-        NoteComponentInfo[] _rentedArrayForUpdatebleComponents = Array.Empty<NoteComponentInfo>();
-        NoteComponentInfo[] _rentedArrayForFixedUpdatebleComponents = Array.Empty<NoteComponentInfo>();
-        NoteComponentInfo[] _rentedArrayForLateUpdatebleComponents = Array.Empty<NoteComponentInfo>();
+        PooledArray<NoteComponentInfo> _rentedArrayForComponents = default;
+        PooledArray<NoteComponentInfo> _rentedArrayForPreUpdatebleComponents = default;
+        PooledArray<NoteComponentInfo> _rentedArrayForUpdatebleComponents = default;
+        PooledArray<NoteComponentInfo> _rentedArrayForFixedUpdatebleComponents = default;
+        PooledArray<NoteComponentInfo> _rentedArrayForLateUpdatebleComponents = default;
 
         [ReadOnlyField]
         [SerializeField]
@@ -50,12 +50,12 @@ namespace MajdataPlay.Scenes.Game.Notes.Controllers
             await UniTask.SwitchToMainThread();
             var children = transform.GetChildren();
 
-            using RentedList<NoteComponentInfo> noteComponents = new();
-            using RentedList<NoteComponentInfo> preUpdatableComponents = new();
-            using RentedList<NoteComponentInfo> updatableComponents = new();
-            using RentedList<NoteComponentInfo> fixedUpdatableComponents = new();
-            using RentedList<NoteComponentInfo> lateUpdatableComponents = new();
-            using RentedList<MonoBehaviour> components = new();
+            using PooledList<NoteComponentInfo> noteComponents = new();
+            using PooledList<NoteComponentInfo> preUpdatableComponents = new();
+            using PooledList<NoteComponentInfo> updatableComponents = new();
+            using PooledList<NoteComponentInfo> fixedUpdatableComponents = new();
+            using PooledList<NoteComponentInfo> lateUpdatableComponents = new();
+            using PooledList<MonoBehaviour> components = new();
 
             foreach (var child in children)
             {
@@ -96,11 +96,11 @@ namespace MajdataPlay.Scenes.Game.Notes.Controllers
                 }
             }
             
-            _rentedArrayForComponents = Pool<NoteComponentInfo>.RentArray(noteComponents.Count, true);
-            _rentedArrayForPreUpdatebleComponents = Pool<NoteComponentInfo>.RentArray(preUpdatableComponents.Count, true);
-            _rentedArrayForUpdatebleComponents = Pool<NoteComponentInfo>.RentArray(updatableComponents.Count, true);
-            _rentedArrayForFixedUpdatebleComponents = Pool<NoteComponentInfo>.RentArray(fixedUpdatableComponents.Count, true);
-            _rentedArrayForLateUpdatebleComponents = Pool<NoteComponentInfo>.RentArray(lateUpdatableComponents.Count, true);
+            _rentedArrayForComponents = Pool<NoteComponentInfo>.Rent(noteComponents.Count, true);
+            _rentedArrayForPreUpdatebleComponents = Pool<NoteComponentInfo>.Rent(preUpdatableComponents.Count, true);
+            _rentedArrayForUpdatebleComponents = Pool<NoteComponentInfo>.Rent(updatableComponents.Count, true);
+            _rentedArrayForFixedUpdatebleComponents = Pool<NoteComponentInfo>.Rent(fixedUpdatableComponents.Count, true);
+            _rentedArrayForLateUpdatebleComponents = Pool<NoteComponentInfo>.Rent(lateUpdatableComponents.Count, true);
 
             noteComponents.CopyTo(_rentedArrayForComponents);
             preUpdatableComponents.CopyTo(_rentedArrayForPreUpdatebleComponents);
@@ -133,17 +133,17 @@ namespace MajdataPlay.Scenes.Game.Notes.Controllers
             FixedUpdatebleComponents = ReadOnlyMemory<NoteComponentInfo>.Empty;
             LateUpdatebleComponents = ReadOnlyMemory<NoteComponentInfo>.Empty;
 
-            Pool<NoteComponentInfo>.ReturnArray(_rentedArrayForComponents, true);
-            Pool<NoteComponentInfo>.ReturnArray(_rentedArrayForPreUpdatebleComponents, true);
-            Pool<NoteComponentInfo>.ReturnArray(_rentedArrayForUpdatebleComponents, true);
-            Pool<NoteComponentInfo>.ReturnArray(_rentedArrayForFixedUpdatebleComponents, true);
-            Pool<NoteComponentInfo>.ReturnArray(_rentedArrayForLateUpdatebleComponents, true);
+            _rentedArrayForComponents.Dispose();
+            _rentedArrayForPreUpdatebleComponents.Dispose();
+            _rentedArrayForUpdatebleComponents.Dispose();
+            _rentedArrayForFixedUpdatebleComponents.Dispose();
+            _rentedArrayForLateUpdatebleComponents.Dispose();
 
-            _rentedArrayForComponents = Array.Empty<NoteComponentInfo>();
-            _rentedArrayForPreUpdatebleComponents = Array.Empty<NoteComponentInfo>();
-            _rentedArrayForUpdatebleComponents = Array.Empty<NoteComponentInfo>();
-            _rentedArrayForFixedUpdatebleComponents = Array.Empty<NoteComponentInfo>();
-            _rentedArrayForLateUpdatebleComponents = Array.Empty<NoteComponentInfo>();
+            _rentedArrayForComponents = default;
+            _rentedArrayForPreUpdatebleComponents = default;
+            _rentedArrayForUpdatebleComponents = default;
+            _rentedArrayForFixedUpdatebleComponents = default;
+            _rentedArrayForLateUpdatebleComponents = default;
         }
         [Il2CppSetOption(Option.NullChecks, false)]
         [Il2CppSetOption(Option.ArrayBoundsChecks, false)]

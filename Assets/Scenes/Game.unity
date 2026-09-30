@@ -1251,7 +1251,6 @@ MonoBehaviour:
   StartDelay: 2
   ScrollSpeed: 48
   EndRatio: 0.25
-  RefreshRate: 30
 --- !u!1001 &196941428
 PrefabInstance:
   m_ObjectHideFlags: 0
@@ -8095,11 +8094,15 @@ PrefabInstance:
       objectReference: {fileID: 0}
     - target: {fileID: 3245564988085515829, guid: c1701d28c8a13d74a90a9e4dea169092, type: 3}
       propertyPath: m_Enabled
-      value: 1
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 3354720466617861448, guid: c1701d28c8a13d74a90a9e4dea169092, type: 3}
+      propertyPath: m_Enabled
+      value: 0
       objectReference: {fileID: 0}
     - target: {fileID: 3354720466617861448, guid: c1701d28c8a13d74a90a9e4dea169092, type: 3}
       propertyPath: m_SortingLayer
-      value: 2
+      value: 5
       objectReference: {fileID: 0}
     - target: {fileID: 3354720466617861448, guid: c1701d28c8a13d74a90a9e4dea169092, type: 3}
       propertyPath: m_SortingLayerID
@@ -8122,8 +8125,12 @@ PrefabInstance:
       value: 1
       objectReference: {fileID: 0}
     - target: {fileID: 3454400208233166282, guid: c1701d28c8a13d74a90a9e4dea169092, type: 3}
+      propertyPath: m_Enabled
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 3454400208233166282, guid: c1701d28c8a13d74a90a9e4dea169092, type: 3}
       propertyPath: m_SortingLayer
-      value: 2
+      value: 5
       objectReference: {fileID: 0}
     - target: {fileID: 3454400208233166282, guid: c1701d28c8a13d74a90a9e4dea169092, type: 3}
       propertyPath: m_SortingLayerID
@@ -8150,8 +8157,12 @@ PrefabInstance:
       value: 0
       objectReference: {fileID: 0}
     - target: {fileID: 8195539550868284023, guid: c1701d28c8a13d74a90a9e4dea169092, type: 3}
+      propertyPath: m_Enabled
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 8195539550868284023, guid: c1701d28c8a13d74a90a9e4dea169092, type: 3}
       propertyPath: m_SortingLayer
-      value: 2
+      value: 5
       objectReference: {fileID: 0}
     - target: {fileID: 8195539550868284023, guid: c1701d28c8a13d74a90a9e4dea169092, type: 3}
       propertyPath: m_SortingLayerID
@@ -8164,13 +8175,53 @@ PrefabInstance:
     m_RemovedComponents: []
     m_RemovedGameObjects: []
     m_AddedGameObjects: []
-    m_AddedComponents: []
+    m_AddedComponents:
+    - targetCorrespondingSourceObject: {fileID: 4239088390834088340, guid: c1701d28c8a13d74a90a9e4dea169092, type: 3}
+      insertIndex: -1
+      addedObject: {fileID: 775789387}
   m_SourcePrefab: {fileID: 100100000, guid: c1701d28c8a13d74a90a9e4dea169092, type: 3}
 --- !u!4 &775789382 stripped
 Transform:
   m_CorrespondingSourceObject: {fileID: 1219397163196343875, guid: c1701d28c8a13d74a90a9e4dea169092, type: 3}
   m_PrefabInstance: {fileID: 775789381}
   m_PrefabAsset: {fileID: 0}
+--- !u!212 &775789383 stripped
+SpriteRenderer:
+  m_CorrespondingSourceObject: {fileID: 3354720466617861448, guid: c1701d28c8a13d74a90a9e4dea169092, type: 3}
+  m_PrefabInstance: {fileID: 775789381}
+  m_PrefabAsset: {fileID: 0}
+--- !u!212 &775789384 stripped
+SpriteRenderer:
+  m_CorrespondingSourceObject: {fileID: 3454400208233166282, guid: c1701d28c8a13d74a90a9e4dea169092, type: 3}
+  m_PrefabInstance: {fileID: 775789381}
+  m_PrefabAsset: {fileID: 0}
+--- !u!212 &775789385 stripped
+SpriteRenderer:
+  m_CorrespondingSourceObject: {fileID: 8195539550868284023, guid: c1701d28c8a13d74a90a9e4dea169092, type: 3}
+  m_PrefabInstance: {fileID: 775789381}
+  m_PrefabAsset: {fileID: 0}
+--- !u!1 &775789386 stripped
+GameObject:
+  m_CorrespondingSourceObject: {fileID: 4239088390834088340, guid: c1701d28c8a13d74a90a9e4dea169092, type: 3}
+  m_PrefabInstance: {fileID: 775789381}
+  m_PrefabAsset: {fileID: 0}
+--- !u!114 &775789387
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 775789386}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 427e000c95a3dec40aa05a234c5e34cb, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::MajdataPlay.Scenes.Game.FireworkDisplayer
+  <RuntimeDatabase>k__BackingField: {fileID: 0}
+  _colorBallRenderer: {fileID: 775789385}
+  _fireworkRenderer: {fileID: 775789384}
+  _bigColorBallRenderer: {fileID: 775789383}
+  _animator: {fileID: 1195385485}
 --- !u!1 &780996234
 GameObject:
   m_ObjectHideFlags: 0
@@ -11576,7 +11627,6 @@ MonoBehaviour:
   StartDelay: 2
   ScrollSpeed: 48
   EndRatio: 0.25
-  RefreshRate: 30
 --- !u!1 &1188181738
 GameObject:
   m_ObjectHideFlags: 0
@@ -11608,6 +11658,11 @@ Transform:
   m_Children: []
   m_Father: {fileID: 592746511}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!95 &1195385485 stripped
+Animator:
+  m_CorrespondingSourceObject: {fileID: 3245564988085515829, guid: c1701d28c8a13d74a90a9e4dea169092, type: 3}
+  m_PrefabInstance: {fileID: 775789381}
+  m_PrefabAsset: {fileID: 0}
 --- !u!1 &1200937769
 GameObject:
   m_ObjectHideFlags: 1
@@ -12178,7 +12233,6 @@ MonoBehaviour:
   StartDelay: 2
   ScrollSpeed: 48
   EndRatio: 0.25
-  RefreshRate: 30
 --- !u!1 &1265281306
 GameObject:
   m_ObjectHideFlags: 0

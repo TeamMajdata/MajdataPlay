@@ -301,9 +301,9 @@ namespace MajdataPlay.Scenes.Game
                 for (var i = 0; i < maiChart.NoteTimings.Length; i++)
                 {
                     var timing = maiChart.NoteTimings[i];
-                    RentedList<NotePoolingInfo?> eachNotes = new();
-                    RentedList<ITouchGroupInfoProvider> touchGroupMembers = new();
-                    RentedList<ITouchHoldGroupInfoProvider> touchHoldGroupMembers = new();
+                    PooledList<NotePoolingInfo?> eachNotes = new();
+                    PooledList<ITouchGroupInfoProvider> touchGroupMembers = new();
+                    PooledList<ITouchHoldGroupInfoProvider> touchHoldGroupMembers = new();
                     var foldedNotes = NoteCreateHelper.NoteFolding(timing.Notes);
                     if (isSRandomEnabled)
                     {
@@ -846,12 +846,12 @@ namespace MajdataPlay.Scenes.Game
                 var sensorTypes = members.GroupBy(x => x.SensorPos)
                                          .Select(x => x.Key)
                                          .ToList();
-                using var sensorGroups = new RentedList<RentedList<SensorArea>>();
+                using var sensorGroups = new PooledList<PooledList<SensorArea>>();
 
                 while (sensorTypes.Count > 0)
                 {
                     var sensorType = sensorTypes[0];
-                    var groupMembers = new RentedList<SensorArea>();
+                    var groupMembers = new PooledList<SensorArea>();
                     groupMembers.Add(sensorType);
 
                     for (var i = 0; i < groupMembers.Count; i++)
@@ -882,7 +882,7 @@ namespace MajdataPlay.Scenes.Game
                     token.ThrowIfCancellationRequested();
                     sensorGroups.Add(groupMembers);
                 }
-                using var touchGroups = new RentedList<TouchGroup>();
+                using var touchGroups = new PooledList<TouchGroup>();
                 var memberMapping = members.GroupBy(x => x.SensorPos).ToDictionary(x => x.Key);
                 token.ThrowIfCancellationRequested();
                 foreach (var group in sensorGroups)
@@ -907,12 +907,12 @@ namespace MajdataPlay.Scenes.Game
                 var sensorTypes = members.GroupBy(x => x.SensorPos)
                                          .Select(x => x.Key)
                                          .ToList();
-                using var sensorGroups = new RentedList<RentedList<SensorArea>>();
+                using var sensorGroups = new PooledList<PooledList<SensorArea>>();
 
                 while (sensorTypes.Count > 0)
                 {
                     var sensorType = sensorTypes[0];
-                    var groupMembers = new RentedList<SensorArea>();
+                    var groupMembers = new PooledList<SensorArea>();
                     groupMembers.Add(sensorType);
 
                     for (var i = 0; i < groupMembers.Count; i++)
@@ -943,7 +943,7 @@ namespace MajdataPlay.Scenes.Game
                     token.ThrowIfCancellationRequested();
                     sensorGroups.Add(groupMembers);
                 }
-                using var touchHoldGroups = new RentedList<TouchHoldGroup>();
+                using var touchHoldGroups = new PooledList<TouchHoldGroup>();
                 var memberMapping = members.GroupBy(x => x.SensorPos).ToDictionary(x => x.Key);
                 token.ThrowIfCancellationRequested();
                 foreach (var group in sensorGroups)
@@ -971,8 +971,8 @@ namespace MajdataPlay.Scenes.Game
                     return c - '0';
                 }
 
-                using var preprocessSubSlides = new RentedList<SubSlideNote>();
-                using var subBarCount = new RentedList<int>();
+                using var preprocessSubSlides = new PooledList<SubSlideNote>();
+                using var subBarCount = new PooledList<int>();
                 var sumBarCount = 0;
 
                 var noteContent = note.RawContent;
@@ -1133,7 +1133,7 @@ namespace MajdataPlay.Scenes.Game
                 }
 
                 IConnectableSlide? parent = null;
-                using var subSlides = new RentedList<SlideDrop>();
+                using var subSlides = new PooledList<SlideDrop>();
                 float totalLen = (float)preprocessSubSlides.Select(x => x.SlideTime).Sum();
                 float startTiming = (float)preprocessSubSlides[0].SlideStartTime;
                 float totalSlideLen = 0;
@@ -2151,84 +2151,75 @@ namespace MajdataPlay.Scenes.Game
                 {
                     return simaiNotes;
                 }
-                var buffer = Pool<FoldingSimaiNote>.RentArray(4);
-                var buffer2 = Pool<FoldingSimaiNote>.RentArray(4);
-                var buffer3 = Pool<FoldedSimaiNote>.RentArray(4);
-                try
+                using var buffer = Pool<FoldingSimaiNote>.Rent(4);
+                using var buffer2 = Pool<FoldingSimaiNote>.Rent(4);
+                using var buffer3 = Pool<FoldedSimaiNote>.Rent(4);
+                Array.Clear(buffer, 0, buffer.Length);
+                Array.Clear(buffer2, 0, buffer2.Length);
+                Array.Clear(buffer3, 0, buffer3.Length);
+                var bufferIndex = 0;
+                var buffer2Index = 0;
+                var buffer3Index = 0;
+
+                foreach (var note in simaiNotes)
                 {
-                    Array.Clear(buffer, 0, buffer.Length);
-                    Array.Clear(buffer2, 0, buffer2.Length);
-                    Array.Clear(buffer3, 0, buffer3.Length);
-                    var bufferIndex = 0;
-                    var buffer2Index = 0;
-                    var buffer3Index = 0;
-
-                    foreach (var note in simaiNotes)
+                    var foldingNote = new FoldingSimaiNote(note);
+                    if (foldingNote.Type == SimaiNoteType.Slide)
                     {
-                        var foldingNote = new FoldingSimaiNote(note);
-                        if (foldingNote.Type == SimaiNoteType.Slide)
-                        {
-                            BufferHelper.EnsureBufferLength(bufferIndex + 1, ref buffer);
-                            buffer[bufferIndex++] = foldingNote;
-                            continue;
-                        }
-                        else
-                        {
-                            BufferHelper.EnsureBufferLength(buffer2Index + 1, ref buffer2);
-                            buffer2[buffer2Index++] = foldingNote;
-                            continue;
-                        }
+                        buffer.EnsureLength(bufferIndex + 1);
+                        buffer[bufferIndex++] = foldingNote;
+                        continue;
                     }
-                    var groupedSlides = buffer.GroupBy(x => x);
-                    foreach (var slides in groupedSlides)
+                    else
                     {
-                        var key = slides.Key;
-                        if (key.Origin == null)
-                        {
-                            continue;
-                        }
-                        BufferHelper.EnsureBufferLength(buffer3Index + 1, ref buffer3);
-
-                        buffer3[buffer3Index++] = new()
-                        {
-                            Type = key.Type,
-                            StartPosition = key.StartPosition,
-                            HoldTime = key.HoldTime,
-                            IsBreak = key.IsBreak,
-                            IsEx = key.IsEx,
-                            IsFakeRotate = key.IsFakeRotate,
-                            IsForceStar = key.IsForceStar,
-                            IsHanabi = key.IsHanabi,
-                            IsSlideBreak = key.IsSlideBreak,
-                            IsSlideNoHead = key.IsSlideNoHead,
-                            IsMine = key.IsMine,
-                            IsMineSlide = key.IsMineSlide,
-                            RawContent = key.RawContent,
-                            SlideStartTime = key.SlideStartTime,
-                            SlideTime = key.SlideTime,
-                            TouchArea = key.TouchArea,
-                            Count = slides.Count()
-                        };
+                        buffer2.EnsureLength(buffer2Index + 1);
+                        buffer2[buffer2Index++] = foldingNote;
+                        continue;
                     }
-                    var result = new SimaiNote[buffer2Index + buffer3Index];
-                    var resultIndex = 0;
-                    foreach (var note in buffer2.AsSpan(0, buffer2Index))
-                    {
-                        result[resultIndex++] = note.Origin!;
-                    }
-                    foreach (var note in buffer3.AsSpan(0, buffer3Index))
-                    {
-                        result[resultIndex++] = note;
-                    }
-
-                    return result;
                 }
-                finally
+                var groupedSlides = buffer.GroupBy(x => x);
+                foreach (var slides in groupedSlides)
                 {
-                    Pool<FoldingSimaiNote>.ReturnArray(buffer);
-                    Pool<FoldingSimaiNote>.ReturnArray(buffer2);
-                    Pool<FoldedSimaiNote>.ReturnArray(buffer3);
+                    var key = slides.Key;
+                    if (key.Origin == null)
+                    {
+                        continue;
+                    }
+                    buffer3.EnsureLength(buffer3Index + 1);
+
+                    buffer3[buffer3Index++] = new()
+                    {
+                        Type = key.Type,
+                        StartPosition = key.StartPosition,
+                        HoldTime = key.HoldTime,
+                        IsBreak = key.IsBreak,
+                        IsEx = key.IsEx,
+                        IsFakeRotate = key.IsFakeRotate,
+                        IsForceStar = key.IsForceStar,
+                        IsHanabi = key.IsHanabi,
+                        IsSlideBreak = key.IsSlideBreak,
+                        IsSlideNoHead = key.IsSlideNoHead,
+                        IsMine = key.IsMine,
+                        IsMineSlide = key.IsMineSlide,
+                        RawContent = key.RawContent,
+                        SlideStartTime = key.SlideStartTime,
+                        SlideTime = key.SlideTime,
+                        TouchArea = key.TouchArea,
+                        Count = slides.Count()
+                    };
                 }
+                var result = new SimaiNote[buffer2Index + buffer3Index];
+                var resultIndex = 0;
+                foreach (var note in buffer2.AsSpan(0, buffer2Index))
+                {
+                    result[resultIndex++] = note.Origin!;
+                }
+                foreach (var note in buffer3.AsSpan(0, buffer3Index))
+                {
+                    result[resultIndex++] = note;
+                }
+
+                return result;
             }
         }
 

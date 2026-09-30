@@ -118,7 +118,7 @@ namespace MajdataPlay
                 return;
             }
             await UniTask.SwitchToThreadPool();
-            using var chartListBackup = new RentedList<ISongDetail>(_allCharts);
+            using var chartListBackup = new PooledList<ISongDetail>(_allCharts);
             try
             {
                 _allCharts.Clear();
@@ -196,7 +196,7 @@ namespace MajdataPlay
                 return;
             }
             await UniTask.SwitchToThreadPool();
-            using var chartListBackup = new RentedList<ISongDetail>(_allCharts);
+            using var chartListBackup = new PooledList<ISongDetail>(_allCharts);
             var onlineCollections = MajEnv.Settings.Online.Enable
                 ? Collections.Where(x => x.IsOnline).ToArray()
                 : Array.Empty<SongCollection>();
@@ -282,7 +282,7 @@ namespace MajdataPlay
                 return true;
             }
             var isSuccessful = true;
-            using var collections = new RentedList<SongCollection>(Collections);
+            using var collections = new PooledList<SongCollection>(Collections);
             for (var i = 0; i < collections.Count; i++)
             {
                 var collection = collections[i];
@@ -521,8 +521,8 @@ namespace MajdataPlay
                 MajDebug.LogDebug($"[MaiChart Scanner][{thisDir.Name}]Empty folder, skipping");
                 return SongCollection.Empty(rootPath, thisDir.Name);
             }
-            using var charts = new RentedList<SongDetail>();
-            using var tasks = new RentedList<Task<SongDetail?>>();
+            using var charts = new PooledList<SongDetail>();
+            using var tasks = new PooledList<Task<SongDetail?>>();
             
             foreach (var songDir in dirs)
             {

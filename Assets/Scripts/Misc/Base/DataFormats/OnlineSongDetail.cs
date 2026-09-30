@@ -827,10 +827,9 @@ namespace MajdataPlay
         private async Task DownloadStreamWithProgressAsync(Stream src, Stream dst, INetProgress? progress, long existingLength, long totalFileBytes, CancellationToken token)
         {
             var bufferSize = MajEnv.HTTP_BUFFER_SIZE;
-            var rentBuffer = Pool<byte>.RentArray(bufferSize, true);
-            try
+            using (var readBuffer = Pool<byte>.Rent(bufferSize, true))
             {
-                var buffer = rentBuffer.AsMemory();
+                var buffer = readBuffer.AsMemory();
                 int read;
                 var totalRead = existingLength;
 
@@ -847,10 +846,6 @@ namespace MajdataPlay
                     }
                 }
                 await dst.FlushAsync(token);
-            }
-            finally
-            {
-                Pool<byte>.ReturnArray(rentBuffer, true);
             }
         }
 

@@ -555,9 +555,9 @@ namespace MajdataPlay
         static void InitOnlineEndpoints()
         {
             UnityWebRequest.ClearCookieCache();
-            using (var buffer = new RentedList<ApiEndpoint>())
+            using (var buffer = new PooledList<ApiEndpoint>())
             {
-                using var apiEndpoints = new RentedList<ApiEndpoint>();
+                using var apiEndpoints = new PooledList<ApiEndpoint>();
                 apiEndpoints.AddRange(Settings.Online.ApiEndpoints.AsSpan());
 
 #if UNITY_IOS && !UNITY_EDITOR

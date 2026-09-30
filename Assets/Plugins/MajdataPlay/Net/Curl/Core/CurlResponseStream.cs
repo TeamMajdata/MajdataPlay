@@ -86,7 +86,7 @@ namespace MajdataPlay.Net.Curl.Core
                     var buffer = _writingChunk.Buffer;
                     if (!_writingChunk.IsValid)
                     {
-                        buffer = Pool<byte>.RentArray(_chunkSize);
+                        buffer = Pool<byte>.Rent(_chunkSize);
                         chunkInfo = new MemoryChunk()
                         {
                             Buffer = buffer,
@@ -150,7 +150,7 @@ namespace MajdataPlay.Net.Curl.Core
             {
                 if (_currentChunk.IsCompleted)
                 {
-                    Pool<byte>.ReturnArray(_currentChunk.Buffer ?? Array.Empty<byte>());
+                    _currentChunk.Buffer.Dispose();
                     _currentChunk = default;
                     if (_bufferQueue.IsCompleted)
                     {
@@ -228,13 +228,10 @@ namespace MajdataPlay.Net.Curl.Core
             }
             while (_bufferQueue.TryTake(out var chunk))
             {
-                if (chunk.Buffer != null)
-                {
-                    Pool<byte>.ReturnArray(chunk.Buffer);
-                }
+                chunk.Buffer.Dispose();
             }
-            Pool<byte>.ReturnArray(_currentChunk.Buffer ?? Array.Empty<byte>());
-            Pool<byte>.ReturnArray(_writingChunk.Buffer ?? Array.Empty<byte>());
+            _currentChunk.Buffer.Dispose();
+            _writingChunk.Buffer.Dispose();
             _currentChunk = default;
             _writingChunk = default;
             _bufferQueue.Dispose();
@@ -258,7 +255,7 @@ namespace MajdataPlay.Net.Curl.Core
 
         struct MemoryChunk
         {
-            public byte[]? Buffer { get; init; }
+            public PooledArray<byte> Buffer { get; init; }
             public int Length { get; set; }
             public int Offset { get; set; }
             public bool IsCompleted
@@ -267,8 +264,7 @@ namespace MajdataPlay.Net.Curl.Core
             }
             public bool IsValid
             {
-                [MemberNotNullWhen(true, nameof(Buffer))]
-                get => Buffer is not null;
+                get => !Buffer.IsEmpty;
             }
         }
     }

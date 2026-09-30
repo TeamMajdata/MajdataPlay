@@ -1,6 +1,4 @@
-﻿using LibUsbDotNet;
-using LibUsbDotNet.Main;
-using MajdataPlay.Diagnostics;
+﻿using MajdataPlay.Diagnostics;
 using MajdataPlay.Settings;
 using System;
 using System.Collections.Generic;
@@ -24,6 +22,8 @@ namespace MajdataPlay.IO
         const int DAO_HID_VID = 3727;
         const int NOV_USB_PID = 0x3003;
         const int NOV_USB_VID = 0x3356;
+        const int FL_USB_PID = 0x0103;
+        const int FL_USB_VID = 0x227D;
         const int GENERAL_HID_1P_PID = 33;
         const int GENERAL_HID_1P_VID = 3235;
         const int GENERAL_HID_2P_PID = 33;
@@ -51,9 +51,11 @@ namespace MajdataPlay.IO
             }
             var hidDevices = HidHelper.Devices;
 #if UNITY_STANDALONE_WIN
-            var usbDevices = UsbDevice.AllDevices;
+            // 独占触摸只走 WinUSB，只有绑定到 winusb.sys 的设备才可用
+            var hasNovUsbDevice = HasWinUsbDevice(NOV_USB_VID, NOV_USB_PID) ||
+                                  HasWinUsbDevice(FL_USB_VID, FL_USB_PID);
 #else
-            var usbDevices = Array.Empty<UsbRegistry>();
+            var hasNovUsbDevice = false;
 #endif
 #if ENABLE_IL2CPP
             var serialPorts = "NotSupported";
@@ -72,7 +74,7 @@ namespace MajdataPlay.IO
             var manufacturer = DeviceManufacturerOption.General;
             var buttonRingType = userButtonRingType ?? ButtonRingDeviceOption.Keyboard;
 
-            MajDebug.LogInfo($"All available USB devices:\n{string.Join('\n', usbDevices.Select(x => $"{x.FullName} (VID {x.Vid}, PID {x.Pid})"))}");
+            MajDebug.LogInfo($"Nov USB device present: {hasNovUsbDevice}");
             MajDebug.LogInfo($"All available HID devices:\n{string.Join('\n', hidDevices)}");
             MajDebug.LogInfo($"All available serial ports:\n{string.Join('\n', serialPorts)}");
 
@@ -249,14 +251,7 @@ namespace MajdataPlay.IO
 
                         return result;
                     });
-                    var filteredUsbDevices = usbDevices.Where(x =>
-                    {
-                        var isNov = x.Pid == novDefaultUsbPID && x.Vid == novDefaultUsbVID;
-                        var result = isNov;
-
-                        return result;
-                    });
-                    if (filteredHidDevices.Count() != 0 || filteredUsbDevices.Count() != 0)
+                    if (filteredHidDevices.Count() != 0 || hasNovUsbDevice)
                     {
                         if (hidDevices.Any(x => x.ProductID == yuanDefaultHidPID && x.VendorID == yuanDefaultHidVID))
                         {
@@ -312,7 +307,7 @@ namespace MajdataPlay.IO
                                 OpenPriority = HidOpenPriority.VeryHigh
                             };
                         }
-                        else if (usbDevices.Any(x => x.Pid == novDefaultUsbPID && x.Vid == novDefaultUsbVID))
+                        else if (hasNovUsbDevice)
                         {
                             MajDebug.LogInfo("Manufacturer detect result: Nov");
                             manufacturer = DeviceManufacturerOption.Nov;
@@ -416,6 +411,20 @@ namespace MajdataPlay.IO
             }
 #endif
         }
+#if UNITY_STANDALONE_WIN
+        static bool HasWinUsbDevice(int vid, int pid)
+        {
+            try
+            {
+                return WinUsbIo.EnumerateWinUsbInterfaces((ushort)vid, (ushort)pid).Count > 0;
+            }
+            catch (Exception e)
+            {
+                MajDebug.LogWarning($"WinUSB 设备枚举失败 (VID {vid:X4}, PID {pid:X4}): {e.Message}");
+                return false;
+            }
+        }
+#endif
         static string WinSerialPortToLinuxPortName(int port)
         {
             return $"/dev/ttyUSB{port - 1}";

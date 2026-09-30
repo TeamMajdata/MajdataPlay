@@ -15,6 +15,7 @@ using System.IO.Pipes;
 using System.Buffers.Binary;
 using MajdataPlay.Buffers;
 using MajdataPlay.Diagnostics;
+using MajdataPlay.Threading;
 #if UNITY_STANDALONE_WIN
 using MajdataPlay.Platform.Win32.IO;
 #endif
@@ -79,7 +80,7 @@ namespace MajdataPlay.IO
                 }
                 var manufacturer = IODetector.DeviceManufacturer;
                 var buttonRingDevice = IODetector.ButtonRingDevice;
-                if (manufacturer == DeviceManufacturerOption.General)
+                if (manufacturer is (DeviceManufacturerOption.General or DeviceManufacturerOption.Nov))
                 {
                     switch (buttonRingDevice)
                     {
@@ -98,10 +99,6 @@ namespace MajdataPlay.IO
                 {
                     _buttonRingUpdateLoop = Task.Factory.StartNew(HIDUpdateLoop, TaskCreationOptions.LongRunning);
                 }
-                else if (manufacturer is DeviceManufacturerOption.Nov)
-                {
-                    _buttonRingUpdateLoop = Task.Factory.StartNew(KeyboardUpdateLoop, TaskCreationOptions.LongRunning);
-                }
                 else if (manufacturer is DeviceManufacturerOption.Pipe)
                 {
                     _buttonRingUpdateLoop = Task.Factory.StartNew(PipeUpdateLoop, TaskCreationOptions.LongRunning);
@@ -110,6 +107,7 @@ namespace MajdataPlay.IO
                 {
                     MajDebug.LogWarning(nameof(ButtonRing), $"Not supported button ring manufacturer: {manufacturer}");
                 }
+                _buttonRingUpdateLoop.RegisterAsWorker("ButtonRing I/O Worker");
 #elif UNITY_ANDROID || UNITY_IOS
                 _mobileExternalbuttonRingOption = MajEnv.Settings.IO.InputDevice.ExternalButtonRing;
 #endif
@@ -631,6 +629,7 @@ namespace MajdataPlay.IO
                                 switch (manufacturer)
                                 {
                                     case DeviceManufacturerOption.General:
+                                    case DeviceManufacturerOption.Nov:
                                         GeneralHIDDevice.Parse(buffer, _buttonRealTimeStates);
                                         break;
                                     case DeviceManufacturerOption.Yuan:

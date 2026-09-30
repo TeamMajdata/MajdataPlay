@@ -4,6 +4,7 @@ using MajdataPlay.Buffers;
 using MajdataPlay.Diagnostics;
 using MajdataPlay.Drawing;
 using MajdataPlay.Scenes.List;
+using MajdataPlay.Threading;
 using MajdataPlay.Utils;
 using MajSimai;
 using Nito.AsyncEx;
@@ -152,6 +153,7 @@ namespace MajdataPlay.Scenes.Game
             _loadTask.SongDetail = songDetail;
             _loadTask.Level = chartLevel;
             _loadTask.MaidataLoadTask = songDetail.GetMaidataAsync(true, token: token).AsTask();
+            _loadTask.MaidataLoadTask.Register($"[{nameof(ChartVisualDisplayer)}]Load maidata");
             ListManager.AllBackgroundTasks.Add(_loadTask.MaidataLoadTask);
             _loadTask.Length = length;
             _loadTask.Maidata = null;

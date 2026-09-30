@@ -1,0 +1,5 @@
+{
+    "name": "MajdataPlay.Threading.Editor",
+    "references": ["MajdataPlay.Threading"],
+    "includePlatforms": ["Editor"]
+}

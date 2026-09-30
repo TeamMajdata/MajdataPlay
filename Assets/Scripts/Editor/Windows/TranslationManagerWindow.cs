@@ -51,7 +51,7 @@ namespace MajdataPlay.Editor.Windows
                 }
             }
             _windowSerializedObject = new SerializedObject(this);
-            using var jsons = new RentedList<string>();
+            using var jsons = new PooledList<string>();
             foreach (var lang in langJsonPaths)
             {
                 if (lang == null || lang.name.EndsWith(".tpl"))

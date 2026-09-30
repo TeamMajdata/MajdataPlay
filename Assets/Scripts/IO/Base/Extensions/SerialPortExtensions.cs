@@ -17,16 +17,11 @@ namespace MajdataPlay.IO
                 return 0;
             }
             var byte2Read = Math.Min(serial.BytesToRead , buffer.Length);
-            var rentedBuffer = Pool<byte>.RentArray(byte2Read);
-            try
+            using (var readBuffer = Pool<byte>.Rent(byte2Read))
             {
-                serial.Read(rentedBuffer, 0, byte2Read);
-                rentedBuffer.AsSpan(0, byte2Read)
-                            .CopyTo(buffer);
-            }
-            finally
-            {
-                Pool<byte>.ReturnArray(rentedBuffer);
+                serial.Read(readBuffer, 0, byte2Read);
+                readBuffer.AsSpan(0, byte2Read)
+                          .CopyTo(buffer);
             }
 
             return byte2Read;
@@ -37,15 +32,10 @@ namespace MajdataPlay.IO
             {
                 return;
             }
-            var rentedBuffer = Pool<byte>.RentArray(buffer.Length);
-            try
+            using (var writeBuffer = Pool<byte>.Rent(buffer.Length))
             {
-                buffer.CopyTo(rentedBuffer);
-                serial.Write(rentedBuffer, 0, buffer.Length);
-            }
-            finally
-            {
-                Pool<byte>.ReturnArray(rentedBuffer);
+                buffer.CopyTo(writeBuffer);
+                serial.Write(writeBuffer, 0, buffer.Length);
             }
         }
     }

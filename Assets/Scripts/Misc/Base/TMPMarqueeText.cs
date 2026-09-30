@@ -12,7 +12,7 @@ namespace MajdataPlay.Misc.Base
         public float StartDelay = 2f;
         public float ScrollSpeed = 48f;
         public float EndRatio = 0.25f;
-        public float RefreshRate = 30f;
+        private const float RefreshRate = 60f;
 
         private TextMeshProUGUI? _sourceText;
         private TextMeshProUGUI? _mainText;
@@ -106,7 +106,7 @@ namespace MajdataPlay.Misc.Base
             }
 
             _movementAccumulator += deltaTime;
-            var refreshInterval = 1f / Mathf.Max(1f, RefreshRate);
+            var refreshInterval = 1f / RefreshRate;
             if (_movementAccumulator < refreshInterval)
             {
                 return;

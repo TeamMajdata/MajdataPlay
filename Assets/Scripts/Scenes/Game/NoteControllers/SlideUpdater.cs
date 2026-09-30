@@ -26,12 +26,12 @@ namespace MajdataPlay.Scenes.Game.Notes.Controllers
 
         ReadOnlyMemory<SlideQueueInfo> _queueInfos = ReadOnlyMemory<SlideQueueInfo>.Empty;
 
-        readonly RentedList<SlideBinding> _slideBindings = new RentedList<SlideBinding>();
-        readonly RentedList<SlideBinding> _activatedSlides = new RentedList<SlideBinding>();
+        readonly PooledList<SlideBinding> _slideBindings = new PooledList<SlideBinding>();
+        readonly PooledList<SlideBinding> _activatedSlides = new PooledList<SlideBinding>();
 
         int _slideBindingCursor = 0;
 
-        SlideQueueInfo[] _rentedArrayForQueueInfos = Array.Empty<SlideQueueInfo>();
+        PooledArray<SlideQueueInfo> _rentedArrayForQueueInfos = default;
         INoteTimeProvider _noteTimeProvider;
         
 
@@ -64,8 +64,8 @@ namespace MajdataPlay.Scenes.Game.Notes.Controllers
         void Clear()
         {
             _queueInfos = ReadOnlyMemory<SlideQueueInfo>.Empty;
-            Pool<SlideQueueInfo>.ReturnArray(_rentedArrayForQueueInfos, true);
-            _rentedArrayForQueueInfos = Array.Empty<SlideQueueInfo>();
+            _rentedArrayForQueueInfos.Dispose();
+            _rentedArrayForQueueInfos = default;
         }
         internal void AddSlideQueueInfos(IEnumerable<SlideQueueInfo> infos)
         {
@@ -73,9 +73,9 @@ namespace MajdataPlay.Scenes.Game.Notes.Controllers
             {
                 throw new ArgumentNullException();
             }
-            using var buffer = new RentedList<SlideQueueInfo>();
+            using var buffer = new PooledList<SlideQueueInfo>();
             buffer.AddRange(infos.Where(x => x is not null).OrderBy(x => x.AppearTiming));
-            _rentedArrayForQueueInfos = Pool<SlideQueueInfo>.RentArray(buffer.Count, true);
+            _rentedArrayForQueueInfos = Pool<SlideQueueInfo>.Rent(buffer.Count, true);
             var queueInfos = _rentedArrayForQueueInfos.AsMemory(0, buffer.Count);
             buffer.CopyTo(queueInfos.Span);
             _queueInfos = queueInfos;
