@@ -4,14 +4,15 @@ Shader "Common/Opaque"
     {
         [MainTexture] _MainTex ("Texture", 2D) = "white" {}
         [MainColor] _Color ("Tint", Color) = (1,1,1,1)
+        _Cutoff ("Alpha Cutoff", Range(0, 1)) = 0.5
     }
 
     SubShader
     {
         Tags
         {
-            "Queue" = "Geometry"
-            "RenderType" = "Opaque"
+            "Queue" = "AlphaTest"
+            "RenderType" = "TransparentCutout"
             "RenderPipeline" = "UniversalPipeline"
             "IgnoreProjector" = "True"
             "PreviewType" = "Plane"
@@ -42,6 +43,7 @@ Shader "Common/Opaque"
             CBUFFER_START(UnityPerMaterial)
                 float4 _MainTex_ST;
                 half4 _Color;
+                float _Cutoff;
             CBUFFER_END
 
             struct Attributes
@@ -75,8 +77,11 @@ Shader "Common/Opaque"
             half4 frag(Varyings input) : SV_Target
             {
                 UNITY_SETUP_STEREO_EYE_INDEX_POST_VERTEX(input);
-                half3 color = SAMPLE_TEXTURE2D(_MainTex, sampler_MainTex, input.uv).rgb;
-                return half4(color * input.color.rgb, 1.0h);
+                half4 color = SAMPLE_TEXTURE2D(_MainTex, sampler_MainTex, input.uv) * input.color;
+
+                // Fully transparent pixels remain holes even when the cutoff is zero.
+                clip(color.a - max(_Cutoff, 0.0001));
+                return half4(color.rgb, 1.0h);
             }
             ENDHLSL
         }
