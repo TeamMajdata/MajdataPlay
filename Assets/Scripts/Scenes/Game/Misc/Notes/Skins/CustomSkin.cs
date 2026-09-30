@@ -920,7 +920,7 @@ namespace MajdataPlay.Scenes.Game.Notes.Skins
             // Polygon is an editor import mode, not a runtime SpriteMeshType.
             // Tight supplies the initial mesh; OverrideGeometry installs our polygon mesh.
             var sprite = Sprite.Create(texture, rect, new Vector2(0.5f, 0.5f), 100f, 0,
-                SpriteMeshType.Tight, border, false);
+                SpriteMeshType.FullRect, border, false);
             try
             {
                 sprite.name = name;
