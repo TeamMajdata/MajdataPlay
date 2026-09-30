@@ -116,7 +116,7 @@ namespace MajdataPlay.Buffers
                 {
                     return;
                 }
-                var newArray = new PooledArray<T>(_pool.Rent(value), _pool, false);
+                var newArray = new PooledArray<T>(_pool.Rent(value), _pool, true);
                 if (_size > 0)
                 {
                     Array.Copy(_array, newArray, _size);
@@ -186,7 +186,7 @@ namespace MajdataPlay.Buffers
         public PooledList(int capacity, ArrayPool<T> pool)
         {
             _pool = pool;
-            _array = new PooledArray<T>(_pool.Rent(capacity), _pool, false);
+            _array = new PooledArray<T>(_pool.Rent(capacity), _pool, true);
         }
         public void Add(T item)
         {
