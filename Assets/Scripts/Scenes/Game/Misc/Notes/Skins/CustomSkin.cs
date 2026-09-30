@@ -1,12 +1,20 @@
 ﻿using Cysharp.Threading.Tasks;
+using MajdataPlay.Buffers;
+
 using MajdataPlay.Diagnostics;
 using MajdataPlay.Drawing;
 using MajdataPlay.Rendering;
 using System;
 using System.Collections.Generic;
 using System.IO;
-using System.Linq;
+
 using System.Threading;
+using Unity.Burst;
+using Unity.Collections;
+using Unity.Collections.LowLevel.Unsafe;
+using Unity.Jobs;
+using Unity.Mathematics;
+
 using Unity.VectorGraphics;
 using UnityEngine;
 #nullable enable
@@ -842,8 +850,8 @@ namespace MajdataPlay.Scenes.Game.Notes.Skins
         /// </summary>
         public async UniTask<Texture2D?> BuildAndAssignAsync()
         {
-            var textures = new List<Texture2D>();
-            var validTasks = new List<SpriteTask>();
+            using var textures = new PooledList<Texture2D>(_tasks.Count);
+            using var validTasks = new PooledList<SpriteTask>(_tasks.Count);
 
             foreach (var task in _tasks)
             {
@@ -878,8 +886,8 @@ namespace MajdataPlay.Scenes.Game.Notes.Skins
         /// </summary>
         public Texture2D? BuildAndAssign()
         {
-            var textures = new List<Texture2D>();
-            var validTasks = new List<SpriteTask>();
+            using var textures = new PooledList<Texture2D>(_tasks.Count);
+            using var validTasks = new PooledList<SpriteTask>(_tasks.Count);
 
             foreach (var task in _tasks)
             {
@@ -928,18 +936,21 @@ namespace MajdataPlay.Scenes.Game.Notes.Skins
 
         private static void ApplyCustomOutline(Sprite sprite, Texture2D source, float snap, float detail, byte alphaTolerance)
         {
-            var outlines = BuildOutlines(source.GetPixels32(), source.width, source.height, snap, detail, alphaTolerance);
-            if (outlines.Count == 0)
+            using var points = new NativeList<float2>(128, Allocator.TempJob);
+            using var outlines = new NativeList<int2>(16, Allocator.TempJob);
+            var complete = BuildOutlines(source.GetPixelData<Color32>(0), source.width, source.height,
+                snap, detail, alphaTolerance, points, outlines);
+            if (complete && outlines.Length == 0)
             {
                 // Nothing exceeds the alpha threshold: emit no visible triangles.
                 sprite.OverrideGeometry(new Vector2[3], new ushort[] { 0, 1, 2 });
                 return;
             }
 
-            if (!TryTriangulate(outlines, out var vertices, out var triangles))
+            if (!complete || !TryTriangulate(points, outlines, out var vertices, out var triangles))
             {
                 // Never keep a partial mesh (which would hide disconnected regions).
-                MajDebug.LogWarning(nameof(AtlasBuilder),$"Custom outline too complex for sprite '{sprite.name}'; using its full rectangle.");
+                MajDebug.LogWarning(nameof(AtlasBuilder), $"Custom outline too complex for sprite '{sprite.name}'; using its full rectangle.");
                 var rect = sprite.rect;
                 sprite.OverrideGeometry(new[] { Vector2.zero, new Vector2(rect.width, 0),
                     new Vector2(rect.width, rect.height), new Vector2(0, rect.height) },
@@ -959,163 +970,278 @@ namespace MajdataPlay.Scenes.Game.Notes.Skins
             sprite.OverrideGeometry(vertices, triangles);
         }
 
-        private static List<List<Vector2>> BuildOutlines(Color32[] pixels, int width, int height,
-            float snap, float detail, byte alphaTolerance)
+        private static unsafe bool BuildOutlines(NativeArray<Color32> pixels, int width, int height,
+    float snap, float detail, byte alphaTolerance, NativeList<float2> points, NativeList<int2> outlines)
         {
-            var edges = new List<(Vector2Int From, Vector2Int To)>();
-            var outgoing = new Dictionary<Vector2Int, List<int>>();
-            bool Solid(int x, int y) => x >= 0 && x < width && y >= 0 && y < height && pixels[y * width + x].a > alphaTolerance;
-            void AddEdge(Vector2Int a, Vector2Int b)
+            var pixelCount = checked(width * height);
+            if (width <= 0 || height <= 0 || pixels.Length < pixelCount)
+                throw new ArgumentException("Invalid sprite pixel dimensions.");
+
+            // Four directed boundary bits per pixel, plus one completion byte. The
+            // rental may be dirty; Execute overwrites EVERY used byte before reading.
+            using var edges = Pool<byte>.Rent(checked(pixelCount + 1));
+            using var loop = new NativeList<float2>(128, Allocator.TempJob);
+            using var cleaned = new NativeList<float2>(128, Allocator.TempJob);
+            using var snapped = new NativeList<float2>(128, Allocator.TempJob);
+            using var simplified = new NativeList<float2>(128, Allocator.TempJob);
+            using var keep = new NativeList<byte>(128, Allocator.TempJob);
+            using var pending = new NativeList<int2>(32, Allocator.TempJob);
+
+            // Run is deliberately synchronous: no job may outlive the fixed block,
+            // the rented array, or the texture-owned pixel view. Do not Schedule this.
+            fixed (byte* edgeBits = edges.AsArray())
             {
-                if (!outgoing.TryGetValue(a, out var list))
-                    outgoing.Add(a, list = new List<int>(2));
-                list.Add(edges.Count);
-                edges.Add((a, b));
+                new OutlineJob
+                {
+                    Pixels = pixels,
+                    Width = width,
+                    Height = height,
+                    Snap = snap,
+                    Tolerance = 4f * (1f - Mathf.Clamp01(detail)),
+                    AlphaTolerance = alphaTolerance,
+                    EdgeBits = edgeBits,
+                    Points = points,
+                    Outlines = outlines,
+                    Loop = loop,
+                    Cleaned = cleaned,
+                    Snapped = snapped,
+                    Simplified = simplified,
+                    Keep = keep,
+                    Pending = pending
+                }.Run();
+                return edgeBits[pixelCount] == 1;
+            }
+        }
+
+        [BurstCompile(FloatMode = FloatMode.Strict)]
+        private unsafe struct OutlineJob : IJob
+        {
+            [ReadOnly] public NativeArray<Color32> Pixels;
+            [NativeDisableUnsafePtrRestriction] public byte* EdgeBits;
+            public int Width, Height;
+            public float Snap, Tolerance;
+            public byte AlphaTolerance;
+            public NativeList<float2> Points, Loop, Cleaned, Snapped, Simplified;
+            public NativeList<int2> Outlines, Pending;
+            public NativeList<byte> Keep;
+
+            public void Execute()
+            {
+                Points.Clear();
+                Outlines.Clear();
+                var pixelCount = Width * Height;
+                EdgeBits[pixelCount] = 0;
+                for (var y = 0; y < Height; y++)
+                {
+                    for (var x = 0; x < Width; x++)
+                    {
+                        var mask = 0;
+                        if (Solid(x, y))
+                        {
+                            // East, north, west, south: solid pixels stay on the left.
+                            if (!Solid(x, y - 1)) mask |= 1;
+                            if (!Solid(x + 1, y)) mask |= 2;
+                            if (!Solid(x, y + 1)) mask |= 4;
+                            if (!Solid(x - 1, y)) mask |= 8;
+                        }
+                        EdgeBits[y * Width + x] = (byte)mask;
+                    }
+                }
+
+                for (var pixel = 0; pixel < pixelCount; pixel++)
+                {
+                    for (var direction = 0; direction < 4; direction++)
+                    {
+                        if ((EdgeBits[pixel] & (1 << direction)) == 0) continue;
+                        if (!Trace(pixel, direction)) return;
+                        ProcessLoop();
+                        // Match the tessellator's input budget; never emit a partial mesh.
+                        if (Points.Length > ushort.MaxValue / 2) return;
+                    }
+                }
+                EdgeBits[pixelCount] = 1;
             }
 
-            for (var y = 0; y < height; y++)
+            private bool Solid(int x, int y) => (uint)x < (uint)Width && (uint)y < (uint)Height
+                && Pixels[y * Width + x].a > AlphaTolerance;
+
+            private static int2 Step(int direction)
             {
-                for (var x = 0; x < width; x++)
+                switch (direction)
                 {
-                    if (!Solid(x, y)) continue;
-                    // Orient every edge with solid pixels on the left.
-                    if (!Solid(x, y - 1)) AddEdge(new Vector2Int(x, y), new Vector2Int(x + 1, y));
-                    if (!Solid(x + 1, y)) AddEdge(new Vector2Int(x + 1, y), new Vector2Int(x + 1, y + 1));
-                    if (!Solid(x, y + 1)) AddEdge(new Vector2Int(x + 1, y + 1), new Vector2Int(x, y + 1));
-                    if (!Solid(x - 1, y)) AddEdge(new Vector2Int(x, y + 1), new Vector2Int(x, y));
+                    case 0: return new int2(1, 0);
+                    case 1: return new int2(0, 1);
+                    case 2: return new int2(-1, 0);
+                    default: return new int2(0, -1);
                 }
             }
 
-            var outlines = new List<List<Vector2>>();
-            var visited = new bool[edges.Count];
-            // Runtime detail mapping: at most 4 source pixels of simplification error.
-            var tolerance = 4f * (1f - Mathf.Clamp01(detail));
-            for (var first = 0; first < edges.Count; first++)
+            private bool TryEdge(int2 vertex, int direction, out int pixel)
             {
-                if (visited[first]) continue;
-                var loop = new List<Vector2>();
-                var current = first;
+                // Recover the owning solid pixel from a directed lattice edge.
+                var x = vertex.x - (direction == 1 || direction == 2 ? 1 : 0);
+                var y = vertex.y - (direction >= 2 ? 1 : 0);
+                pixel = -1;
+                if ((uint)x >= (uint)Width || (uint)y >= (uint)Height) return false;
+                pixel = y * Width + x;
+                return (EdgeBits[pixel] & (1 << direction)) != 0;
+            }
+
+            private bool Trace(int pixel, int direction)
+            {
+                Loop.Clear();
+                var first = new int2(pixel % Width, pixel / Width);
+                if (direction == 1 || direction == 2) first.x++;
+                if (direction >= 2) first.y++;
+                var vertex = first;
                 while (true)
                 {
-                    var edge = edges[current];
-                    visited[current] = true;
-                    loop.Add(new Vector2(edge.From.x, edge.From.y));
-                    if (edge.To == edges[first].From) break;
+                    Loop.Add(new float2(vertex.x, vertex.y));
+                    EdgeBits[pixel] = (byte)(EdgeBits[pixel] & ~(1 << direction));
+                    vertex += Step(direction);
+                    if (math.all(vertex == first)) return true;
 
-                    // A diagonal contact has TWO outgoing edges. Prefer a left turn
-                    // to keep the two islands separate instead of overwriting an edge.
-                    var direction = edge.To - edge.From;
-                    var next = -1;
-                    var bestTurn = -1;
-                    foreach (var candidate in outgoing[edge.To])
+                    // Prefer left, then straight, right, back. Diagonally touching
+                    // islands must remain separate, just as in the original tracer.
+                    var next = (direction + 1) & 3;
+                    if (!TryEdge(vertex, next, out pixel))
                     {
-                        if (visited[candidate]) continue;
-                        var delta = edges[candidate].To - edge.To;
-                        var cross = direction.x * delta.y - direction.y * delta.x;
-                        var dot = direction.x * delta.x + direction.y * delta.y;
-                        var turn = cross > 0 ? 3 : dot > 0 ? 2 : cross < 0 ? 1 : 0;
-                        if (turn <= bestTurn) continue;
-                        bestTurn = turn;
-                        next = candidate;
+                        next = direction;
+                        if (!TryEdge(vertex, next, out pixel))
+                        {
+                            next = (direction + 3) & 3;
+                            if (!TryEdge(vertex, next, out pixel))
+                            {
+                                next = (direction + 2) & 3;
+                                if (!TryEdge(vertex, next, out pixel)) return false;
+                            }
+                        }
                     }
-                    if (next < 0) throw new InvalidOperationException("Could not close a sprite alpha contour.");
-                    current = next;
+                    direction = next;
                 }
-
-                // Remove collinear pixel edges before snapping/RDP to bound the work.
-                loop = RemoveCollinear(loop);
-                var snapped = new List<Vector2>(loop.Count);
-                foreach (var point in loop)
-                {
-                    var p = snap >= 1f
-                        ? new Vector2(Mathf.Round(point.x / snap) * snap, Mathf.Round(point.y / snap) * snap)
-                        : point;
-                    p.x = Mathf.Clamp(p.x, 0f, width);
-                    p.y = Mathf.Clamp(p.y, 0f, height);
-                    if (snapped.Count == 0 || (snapped[^1] - p).sqrMagnitude > 0.0001f) snapped.Add(p);
-                }
-                if (snapped.Count > 1 && (snapped[0] - snapped[^1]).sqrMagnitude < 0.0001f)
-                    snapped.RemoveAt(snapped.Count - 1);
-                snapped = RemoveCollinear(snapped);
-                // Coarse snapping must not erase tiny islands or holes.
-                if (snapped.Count < 3 || SignedArea(snapped) * SignedArea(loop) <= 0f) snapped = loop;
-                var simplified = SimplifyClosed(snapped, tolerance);
-                if (simplified.Count < 3 || SignedArea(simplified) * SignedArea(snapped) <= 0f) simplified = snapped;
-                outlines.Add(simplified);
             }
-            return outlines;
-        }
 
-        private static List<Vector2> RemoveCollinear(List<Vector2> points)
-        {
-            if (points.Count < 3) return points;
-            var result = new List<Vector2>(points.Count);
-            for (var i = 0; i < points.Count; i++)
+            private void ProcessLoop()
             {
-                var a = points[(i + points.Count - 1) % points.Count];
-                var b = points[i];
-                var c = points[(i + 1) % points.Count];
-                if (Mathf.Abs(Cross(a, b, c)) > 0.0001f || Vector2.Dot(b - a, c - b) < 0f)
-                    result.Add(b);
-            }
-            return result;
-        }
-
-        private static List<Vector2> SimplifyClosed(List<Vector2> points, float tolerance)
-        {
-            if (tolerance <= 0f || points.Count < 4) return points;
-            // Split the ring at a distant vertex and run iterative Ramer-Douglas-Peucker
-            // on both arcs. Distance is to a SEGMENT, not a signed angle.
-            var split = 1;
-            for (var i = 2; i < points.Count; i++)
-                if ((points[i] - points[0]).sqrMagnitude > (points[split] - points[0]).sqrMagnitude) split = i;
-            var keep = new bool[points.Count];
-            keep[0] = keep[split] = true;
-            var pending = new Stack<(int Start, int End)>();
-            pending.Push((0, split));
-            pending.Push((split, points.Count));
-            while (pending.Count > 0)
-            {
-                var (start, end) = pending.Pop();
-                var a = points[start];
-                var b = points[end % points.Count];
-                var line = b - a;
-                var furthest = -1;
-                var maxDistance = tolerance * tolerance;
-                for (var i = start + 1; i < end; i++)
+                RemoveCollinear(Loop, Cleaned);
+                Snapped.Clear();
+                for (var i = 0; i < Cleaned.Length; i++)
                 {
-                    var t = line.sqrMagnitude > 0f ? Mathf.Clamp01(Vector2.Dot(points[i] - a, line) / line.sqrMagnitude) : 0f;
-                    var distance = (points[i] - (a + t * line)).sqrMagnitude;
-                    if (distance <= maxDistance) continue;
-                    maxDistance = distance;
-                    furthest = i;
+                    var point = Cleaned[i];
+                    if (Snap >= 1f) point = math.round(point / Snap) * Snap;
+                    point = math.clamp(point, float2.zero, new float2(Width, Height));
+                    if (Snapped.Length == 0 || math.lengthsq(Snapped[Snapped.Length - 1] - point) > 0.0001f)
+                        Snapped.Add(point);
                 }
-                if (furthest < 0) continue;
-                keep[furthest] = true;
-                pending.Push((start, furthest));
-                pending.Push((furthest, end));
+                if (Snapped.Length > 1 && math.lengthsq(Snapped[0] - Snapped[Snapped.Length - 1]) < 0.0001f)
+                    Snapped.RemoveAt(Snapped.Length - 1);
+
+                // Loop is no longer needed; reuse its allocation for cleaned snapping.
+                RemoveCollinear(Snapped, Loop);
+                var source = Loop;
+                if (source.Length < 3 || SignedArea(source) * SignedArea(Cleaned) <= 0f) source = Cleaned;
+                SimplifyClosed(source);
+                var result = Simplified;
+                if (result.Length < 3 || SignedArea(result) * SignedArea(source) <= 0f) result = source;
+                var start = Points.Length;
+                for (var i = 0; i < result.Length; i++) Points.Add(result[i]);
+                Outlines.Add(new int2(start, result.Length));
             }
-            var result = new List<Vector2>();
-            for (var i = 0; i < points.Count; i++)
-                if (keep[i]) result.Add(points[i]);
-            return result;
+
+            private static void RemoveCollinear(NativeList<float2> source, NativeList<float2> destination)
+            {
+                destination.Clear();
+                for (var i = 0; i < source.Length; i++)
+                {
+                    var a = source[(i + source.Length - 1) % source.Length];
+                    var b = source[i];
+                    var c = source[(i + 1) % source.Length];
+                    var ab = b - a;
+                    var bc = c - b;
+                    var ac = c - a;
+                    if (source.Length < 3 || math.abs(ab.x * ac.y - ab.y * ac.x) > 0.0001f || math.dot(ab, bc) < 0f)
+                        destination.Add(b);
+                }
+            }
+
+            private void SimplifyClosed(NativeList<float2> source)
+            {
+                Simplified.Clear();
+                if (Tolerance <= 0f || source.Length < 4)
+                {
+                    for (var i = 0; i < source.Length; i++) Simplified.Add(source[i]);
+                    return;
+                }
+
+                var split = 1;
+                for (var i = 2; i < source.Length; i++)
+                    if (math.lengthsq(source[i] - source[0]) > math.lengthsq(source[split] - source[0])) split = i;
+                Keep.ResizeUninitialized(source.Length);
+                for (var i = 0; i < Keep.Length; i++) Keep[i] = 0;
+                Keep[0] = Keep[split] = 1;
+                Pending.Clear();
+                Pending.Add(new int2(0, split));
+                Pending.Add(new int2(split, source.Length));
+                while (Pending.Length > 0)
+                {
+                    var arc = Pending[Pending.Length - 1];
+                    Pending.RemoveAt(Pending.Length - 1);
+                    var a = source[arc.x];
+                    var line = source[arc.y % source.Length] - a;
+                    var lengthSquared = math.lengthsq(line);
+                    var furthest = -1;
+                    var maxDistance = Tolerance * Tolerance;
+                    for (var i = arc.x + 1; i < arc.y; i++)
+                    {
+                        var t = lengthSquared > 0f ? math.saturate(math.dot(source[i] - a, line) / lengthSquared) : 0f;
+                        var distance = math.lengthsq(source[i] - (a + t * line));
+                        if (distance <= maxDistance) continue;
+                        maxDistance = distance;
+                        furthest = i;
+                    }
+                    if (furthest < 0) continue;
+                    Keep[furthest] = 1;
+                    Pending.Add(new int2(arc.x, furthest));
+                    Pending.Add(new int2(furthest, arc.y));
+                }
+                for (var i = 0; i < source.Length; i++)
+                    if (Keep[i] != 0) Simplified.Add(source[i]);
+            }
+
+            private static float SignedArea(NativeList<float2> polygon)
+            {
+                double area = 0;
+                for (var i = 0; i < polygon.Length; i++)
+                {
+                    var a = polygon[i];
+                    var b = polygon[(i + 1) % polygon.Length];
+                    area += (double)a.x * b.y - (double)b.x * a.y;
+                }
+                return (float)(area * 0.5);
+            }
         }
 
-        private static bool TryTriangulate(List<List<Vector2>> outlines, out Vector2[] vertices, out ushort[] triangles)
+
+        private static bool TryTriangulate(NativeList<float2> points, NativeList<int2> outlines,
+            out Vector2[] vertices, out ushort[] triangles)
         {
             vertices = Array.Empty<Vector2>();
             triangles = Array.Empty<ushort>();
             // Leave headroom for tessellator-generated intersection vertices.
-            if (outlines.Sum(p => (long)p.Count) > ushort.MaxValue / 2) return false;
-            var contours = new BezierContour[outlines.Count];
-            for (var i = 0; i < outlines.Count; i++)
+            if (points.Length > ushort.MaxValue / 2) return false;
+            // Vector Graphics consumes entire arrays, not count-limited spans. Pool
+            // rentals can be oversized, so these API-boundary arrays must be exact.
+            var contours = new BezierContour[outlines.Length];
+            for (var i = 0; i < outlines.Length; i++)
             {
-                var points = outlines[i];
-                var segments = new BezierPathSegment[points.Count];
-                for (var j = 0; j < points.Count; j++)
+                var range = outlines[i];
+                var segments = new BezierPathSegment[range.y];
+                for (var j = 0; j < range.y; j++)
                 {
-                    var a = points[j];
-                    var b = points[(j + 1) % points.Count];
+                    var p0 = points[range.x + j];
+                    var p1 = points[range.x + (j + 1) % range.y];
+                    var a = new Vector2(p0.x, p0.y);
+                    var b = new Vector2(p1.x, p1.y);
                     segments[j] = new BezierPathSegment
                     {
                         P0 = a,
@@ -1145,45 +1271,40 @@ namespace MajdataPlay.Scenes.Game.Notes.Skins
                 SamplingStepSize = 1f
             };
             var geometry = VectorUtils.TessellateScene(scene, options, null);
-            var vertexCount = geometry.Sum(g => (long)g.Vertices.Length);
-            if (vertexCount < 3 || vertexCount > ushort.MaxValue) return false;
-            var combinedVertices = new List<Vector2>((int)vertexCount);
-            var combinedTriangles = new List<ushort>();
+            long vertexCount = 0, indexCount = 0;
             foreach (var part in geometry)
             {
                 if (part.Indices.Length % 3 != 0) return false;
-                var offset = combinedVertices.Count;
-                combinedVertices.AddRange(part.Vertices);
+                vertexCount += part.Vertices.Length;
+                indexCount += part.Indices.Length;
                 foreach (var index in part.Indices)
-                {
                     if (index >= part.Vertices.Length) return false;
-                    combinedTriangles.Add(checked((ushort)(offset + index)));
-                }
             }
-            if (combinedTriangles.Count == 0) return false;
-            vertices = combinedVertices.ToArray();
-            triangles = combinedTriangles.ToArray();
+            if (vertexCount < 3 || vertexCount > ushort.MaxValue || indexCount == 0 || indexCount > int.MaxValue)
+                return false;
+
+            // Allocate the final exact-size arrays once, without intermediate Lists
+            // or ToArray copies. OverrideGeometry also consumes the full array lengths.
+            vertices = new Vector2[(int)vertexCount];
+            triangles = new ushort[(int)indexCount];
+            var vertexOffset = 0;
+            var indexOffset = 0;
+            foreach (var part in geometry)
+            {
+                Array.Copy(part.Vertices, 0, vertices, vertexOffset, part.Vertices.Length);
+                foreach (var index in part.Indices)
+                    triangles[indexOffset++] = checked((ushort)(vertexOffset + index));
+                vertexOffset += part.Vertices.Length;
+            }
             return true;
         }
 
-        private static float SignedArea(List<Vector2> polygon)
-        {
-            double area = 0;
-            for (var i = 0; i < polygon.Count; i++)
-            {
-                var a = polygon[i];
-                var b = polygon[(i + 1) % polygon.Count];
-                area += (double)a.x * b.y - (double)b.x * a.y;
-            }
-            return (float)(area * 0.5);
-        }
-
-        private static float Cross(Vector2 a, Vector2 b, Vector2 c) => (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
 
 
 
 
-        private Texture2D? ExecutePack(List<Texture2D> textures, List<SpriteTask> validTasks)
+
+        private Texture2D? ExecutePack(PooledList<Texture2D> textures, PooledList<SpriteTask> validTasks)
         {
             _sprites.Clear();
             if (textures.Count == 0) return null;
