@@ -26,6 +26,7 @@ namespace MajdataPlay.Scenes.Game
 
         private FireworkRequest _request;
         private float _animRemainingTime = -1f;
+        private float _fireworkZPosition = 0f;
         private const float AnimDurationSec = 1.5f;
         private readonly static int FireworkAnimHash = Animator.StringToHash("Fire");
 
@@ -33,6 +34,7 @@ namespace MajdataPlay.Scenes.Game
         {
             base.Awake();
             Majdata<FireworkDisplayer>.Instance = this;
+            _fireworkZPosition = Transform.position.z;
         }
         internal void OnLateUpdate()
         {
@@ -66,6 +68,7 @@ namespace MajdataPlay.Scenes.Game
         }
         public void Play(Vector3 position)
         {
+            position.z = _fireworkZPosition;
             _request = new()
             {
                 IsValid = true,
