@@ -77,7 +77,7 @@ namespace MajdataPlay.IO
                         break;
                 }
             }
-            InputManager.ReadFunctionButtons(buffer);
+            KeyboardHelper.ReadFunctionButtons(buffer);
             _buttons.Publish(buffer);
         }
     }

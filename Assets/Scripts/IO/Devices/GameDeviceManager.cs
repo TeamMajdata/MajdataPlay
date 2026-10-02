@@ -41,7 +41,7 @@ namespace MajdataPlay.IO
                         case DeviceManufacturerOption.General:
                         case DeviceManufacturerOption.Nov:
                             ButtonRing = IODetector.ButtonRingDevice == ButtonRingDeviceOption.Keyboard
-                                ? new InputManager.KeyboardButtonRingDevice() : new RosenButtonRingDevice();
+                                ? new KeyboardButtonRingDevice() : new RosenButtonRingDevice();
                             break;
                         case DeviceManufacturerOption.Yuan: ButtonRing = new YuanButtonRingDevice(); break;
                         case DeviceManufacturerOption.Pipe: ButtonRing = new PipeButtonRingDevice(); break;
@@ -71,7 +71,7 @@ namespace MajdataPlay.IO
                 }
             }
 #elif UNITY_ANDROID || UNITY_IOS
-            ButtonRing = new InputManager.KeyboardButtonRingDevice();
+            ButtonRing = new KeyboardButtonRingDevice();
 #endif
             Register(ButtonRing);
             Register(TouchPanel);

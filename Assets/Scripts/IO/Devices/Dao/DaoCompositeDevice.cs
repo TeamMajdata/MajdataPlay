@@ -72,7 +72,7 @@ namespace MajdataPlay.IO
                 states[9] = (data[6] & 8) != 0;
                 states[10] = (data[6] & 1) != 0;
                 states[11] = (data[6] & 2) != 0;
-                InputManager.ReadFunctionButtons(states);
+                KeyboardHelper.ReadFunctionButtons(states);
 
                 for (var i = 0; i < 8; i++)
                 {

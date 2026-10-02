@@ -85,7 +85,7 @@ namespace MajdataPlay.IO
             buffer[9] = (reportData[IO4_SELECT_P1_INDEX] & IO4_SELECT_P1_OFFSET) != 0;
             buffer[10] = (reportData[IO4_SERVICE_INDEX] & IO4_SERVICE_OFFSET) != 0;
             buffer[11] = (reportData[IO4_SELECT_P2_INDEX] & IO4_SELECT_P2_OFFSET) != 0;
-            InputManager.ReadFunctionButtons(buffer);
+            KeyboardHelper.ReadFunctionButtons(buffer);
             _buttons.Publish(buffer);
         }
     }

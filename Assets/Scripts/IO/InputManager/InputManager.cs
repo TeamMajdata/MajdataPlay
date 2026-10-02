@@ -159,42 +159,11 @@ namespace MajdataPlay.IO
 
         static TimeSpan _btnDebounceThresholdMs = TimeSpan.Zero;
         static TimeSpan _sensorDebounceThresholdMs = TimeSpan.Zero;
-        static TimeSpan _btnPollingRateMs = TimeSpan.Zero;
-        static TimeSpan _sensorPollingRateMs = TimeSpan.Zero;
 
         readonly static ConcurrentQueue<InputDeviceReport> _touchPanelInputBuffer = new();
         readonly static ConcurrentQueue<InputDeviceReport> _buttonRingInputBuffer = new();
 
-        readonly static ReadOnlyMemory<KeyCode> _bindingKeys = new KeyCode[12]
-        {
-            KeyCode.B1,
-            KeyCode.B2,
-            KeyCode.B3,
-            KeyCode.B4,
-            KeyCode.B5,
-            KeyCode.B6,
-            KeyCode.B7,
-            KeyCode.B8,
-            KeyCode.Test,
-            KeyCode.SelectP1,
-            KeyCode.Service,
-            KeyCode.SelectP2
-        };
-        readonly static ReadOnlyMemory<Button> _buttons = new Button[12]
-        {
-            new Button(KeyCode.B1,ButtonZone.A1),
-            new Button(KeyCode.B2,ButtonZone.A2),
-            new Button(KeyCode.B3,ButtonZone.A3),
-            new Button(KeyCode.B4,ButtonZone.A4),
-            new Button(KeyCode.B5,ButtonZone.A5),
-            new Button(KeyCode.B6,ButtonZone.A6),
-            new Button(KeyCode.B7,ButtonZone.A7),
-            new Button(KeyCode.B8,ButtonZone.A8),
-            new Button(KeyCode.Test,ButtonZone.Test),
-            new Button(KeyCode.SelectP1,ButtonZone.P1),
-            new Button(KeyCode.Service,ButtonZone.Service),
-            new Button(KeyCode.SelectP2,ButtonZone.P2),
-        };
+        readonly static ReadOnlyMemory<Button> _buttons = CreateButtons();
         readonly static TimeSpan[] _btnLastTriggerTimes = new TimeSpan[12];
         readonly static SwitchStatus[] _btnStatusInPreviousFrame = new SwitchStatus[12];
         readonly static SwitchStatus[] _btnStatusInThisFrame = new SwitchStatus[12];
@@ -367,16 +336,12 @@ namespace MajdataPlay.IO
             _isSensorRendererEnabled = MajEnv.Settings.Debug.DisplaySensor;
 #if UNITY_STANDALONE
             _btnDebounceThresholdMs = TimeSpan.FromMilliseconds(MajEnv.Settings.IO.InputDevice.ButtonRing.DebounceThresholdMs);
-            _btnPollingRateMs = TimeSpan.FromMilliseconds(MajEnv.Settings.IO.InputDevice.ButtonRing.PollingRateMs);
             _sensorDebounceThresholdMs = TimeSpan.FromMilliseconds(MajEnv.Settings.IO.InputDevice.TouchPanel.DebounceThresholdMs);
-            _sensorPollingRateMs = TimeSpan.FromMilliseconds(MajEnv.Settings.IO.InputDevice.TouchPanel.PollingRateMs);
             _isBtnDebounceEnabled = MajEnv.Settings.IO.InputDevice.ButtonRing.Debounce;
             _isSensorDebounceEnabled = MajEnv.Settings.IO.InputDevice.TouchPanel.Debounce;
 #else
             _btnDebounceThresholdMs = TimeSpan.Zero;
-            _btnPollingRateMs = TimeSpan.Zero;
             _sensorDebounceThresholdMs = TimeSpan.Zero;
-            _sensorPollingRateMs = TimeSpan.Zero;
             _isBtnDebounceEnabled = false;
             _isSensorDebounceEnabled = false;
 #endif
@@ -876,6 +841,15 @@ namespace MajdataPlay.IO
             }
             return true;
         }
+        static Button[] CreateButtons()
+        {
+            var bindings = KeyboardHelper.ButtonBindings;
+            var buttons = new Button[bindings.Length];
+            for (var i = 0; i < bindings.Length; i++)
+                buttons[i] = new Button(bindings[i], (ButtonZone)i);
+            return buttons;
+        }
+
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         static Button? GetButton(ButtonZone zone)
         {
