@@ -31,13 +31,17 @@ namespace MajdataPlay.Scenes.Setting
         RectTransform _titleRectTransform = null!;
         Vector2 _unselectedSize;
         Vector2 _selectedSize;
-        Vector2 _unselectedTitleSizeDelta;
         Color _unselectedBackgroundColor;
         Color _selectedBackgroundColor;
         Color _unselectedTextColor;
         float _unselectedFontSizeMax;
         float _selectedTitleScale = 1f;
         string _localizationKey = string.Empty;
+        string? _displayedTitle;
+        SettingTextTint _textTint = null!;
+        bool _isLocalizationSubscribed;
+
+        internal TMP_FontAsset Font => _titleDisplayer.font;
 
         void Awake()
         {
@@ -45,23 +49,50 @@ namespace MajdataPlay.Scenes.Setting
             _titleRectTransform = _titleDisplayer.rectTransform;
             _unselectedSize = _rectTransform.rect.size;
             _selectedSize = _selectedBackground.rectTransform.rect.size;
-            _unselectedTitleSizeDelta = _titleRectTransform.sizeDelta;
+            // A stretch-anchored title changes its width whenever the background
+            // expands, causing TMP to parse and auto-size it on every motion frame.
+            var titleSize = _titleRectTransform.rect.size;
+            var titlePosition = _titleRectTransform.localPosition;
+            _titleRectTransform.anchorMin = new Vector2(0.5f, 0.5f);
+            _titleRectTransform.anchorMax = new Vector2(0.5f, 0.5f);
+            _titleRectTransform.sizeDelta = titleSize;
+            _titleRectTransform.localPosition = titlePosition;
             _unselectedBackgroundColor = _unselectedBackground.color;
             _selectedBackgroundColor = _selectedBackground.color;
             _unselectedTextColor = _titleDisplayer.color;
             _unselectedFontSizeMax = _titleDisplayer.fontSizeMax;
             _selectedTitleScale = _selectedFontSizeMax / Mathf.Max(1f, _unselectedFontSizeMax);
+            _textTint = new SettingTextTint(_titleDisplayer);
         }
 
         void OnEnable()
         {
-            Localization.OnLanguageChanged += OnLanguageChanged;
+            if (!_isLocalizationSubscribed)
+            {
+                Localization.OnLanguageChanged += OnLanguageChanged;
+                _isLocalizationSubscribed = true;
+            }
             UpdateLocalizedText();
         }
 
         void OnDisable()
         {
-            Localization.OnLanguageChanged -= OnLanguageChanged;
+            UnsubscribeLocalization();
+        }
+
+        void OnDestroy()
+        {
+            UnsubscribeLocalization();
+            _textTint?.Dispose();
+        }
+
+        void UnsubscribeLocalization()
+        {
+            if (_isLocalizationSubscribed)
+            {
+                Localization.OnLanguageChanged -= OnLanguageChanged;
+                _isLocalizationSubscribed = false;
+            }
         }
 
         internal void Initialize(string localizationKey)
@@ -77,7 +108,6 @@ namespace MajdataPlay.Scenes.Setting
 
             _rectTransform.anchoredPosition = new Vector2(GetHorizontalPosition(distance, absDistance), 0);
             _rectTransform.sizeDelta = Vector2.Lerp(_unselectedSize, _selectedSize, selectedAmount);
-            _titleRectTransform.sizeDelta = Vector2.Lerp(_unselectedTitleSizeDelta, Vector2.zero, selectedAmount);
 
             _unselectedBackground.color = WithAlpha(
                 _unselectedBackgroundColor,
@@ -87,7 +117,7 @@ namespace MajdataPlay.Scenes.Setting
                 _selectedBackgroundColor.a * selectedAmount);
 
             var textColor = Color.Lerp(_unselectedTextColor, _selectedTextColor, selectedAmount);
-            _titleDisplayer.color = textColor;
+            _textTint.SetColor(textColor);
             var titleScale = Mathf.Lerp(1f, _selectedTitleScale, selectedAmount);
             _titleRectTransform.localScale = new Vector3(titleScale, titleScale, 1f);
         }
@@ -109,7 +139,12 @@ namespace MajdataPlay.Scenes.Setting
         {
             if (!string.IsNullOrEmpty(_localizationKey))
             {
-                _titleDisplayer.text = _localizationKey.i18n();
+                var title = _localizationKey.i18n();
+                if (_displayedTitle != title)
+                {
+                    _titleDisplayer.text = title;
+                    _displayedTitle = title;
+                }
             }
         }
 

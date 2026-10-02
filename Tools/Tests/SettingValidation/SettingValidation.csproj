@@ -19,6 +19,8 @@
     <Compile Include="../../../Assets/Scripts/Scenes/Setting/Menu.cs" Link="Production/Menu.cs" />
     <Compile Include="../../../Assets/Scripts/Scenes/Setting/Option.cs" Link="Production/Option.cs" />
     <Compile Include="../../../Assets/Scripts/Scenes/Setting/OptionData.cs" Link="Production/OptionData.cs" />
+    <Compile Include="../../../Assets/Scripts/Scenes/Setting/SettingTextTint.cs" Link="Production/SettingTextTint.cs" />
+    <Compile Include="../../../Assets/Scripts/Scenes/Setting/SettingFontWarmup.cs" Link="Production/SettingFontWarmup.cs" />
     <Compile Include="../../../Assets/Scripts/Scenes/Setting/SettingManager.cs" Link="Production/SettingManager.cs" />
     <Compile Include="../../../Assets/Scripts/Misc/Settings/OptionEnumerators/OptionEnumeratorBase.cs" Link="Production/OptionEnumeratorBase.cs" />
     <Compile Include="../../../Assets/Scripts/Misc/Settings/OptionEnumerators/Default*.cs" Link="Production/%(Filename)%(Extension)" />

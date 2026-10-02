@@ -38,3 +38,7 @@ are narrow test doubles. The tests check production control flow and TMP setter
 calls, not rendered pixels, Canvas rebuilds, real LitMotion timing, or Unity's
 native lifecycle. Compile the project with Unity and inspect Setting in Play Mode
 for those integration checks.
+
+[Setting text validation](../SettingTextValidation.md) additionally runs the
+production tint, category title, and font warmup against real TMP in an isolated
+Unity project, including dirty callbacks and fallback glyph meshes.

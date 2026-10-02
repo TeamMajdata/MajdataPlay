@@ -3,6 +3,7 @@ using MajdataPlay.Settings;
 using MajdataPlay.Collections;
 using MajdataPlay.Extensions;
 using MajdataPlay.IO;
+using MajdataPlay.i18n;
 using MajdataPlay.Utils;
 using System;
 using System.Collections.Generic;
@@ -50,6 +51,7 @@ namespace MajdataPlay.Scenes.Setting
         int _listCursorTarget = 0;
         MotionHandle _menuTitleDisplayerAnim;
         readonly Stack<Option> _optionPool = new(Menu.OPTION_POOL_CAPACITY);
+        readonly HashSet<TMP_FontAsset> _optionFonts = new();
         Transform _optionPoolRoot = null!;
         string _descriptionText = null!;
 
@@ -121,8 +123,36 @@ namespace MajdataPlay.Scenes.Setting
                 displayer.Initialize($"MAJSETTING_CATEGORY_{menu.Name}");
                 _menuTitleDisplayers[i] = displayer;
             }
+            WarmupTextFonts();
+            Localization.OnLanguageChanged += OnLanguageChanged;
             UpdateMenuTitleDisplayerPosition();
             InitializeCurrentMenu().Forget();
+        }
+        void OnLanguageChanged(object sender, Language language)
+        {
+            // Complete glyph/feature discovery before TMP reaches Canvas PreRender.
+            WarmupTextFonts();
+        }
+        void WarmupTextFonts()
+        {
+            var warmup = new SettingFontWarmup();
+            var descriptionFont = _descriptionTextDisplayer.font;
+            foreach (var font in _optionFonts)
+            {
+                // Numeric values may change without visiting a new enum label.
+                warmup.AddText(font, "0123456789.,+-:%/()eE NaNInfinity∞");
+            }
+            foreach (var menu in menus)
+            {
+                menu.CollectWarmupText(warmup, _optionFonts, descriptionFont);
+            }
+            for (var i = 0; i < _menuTitleDisplayers.Length; i++)
+            {
+                warmup.AddText(_menuTitleDisplayers[i].Font, $"MAJSETTING_CATEGORY_{menus[i].Name}".i18n());
+            }
+            warmup.AddText(descriptionFont, $"MAJTEXT_SETTING_OFFSETUNIT_{OffsetUnitOption.Second}".i18n());
+            warmup.AddText(descriptionFont, $"MAJTEXT_SETTING_OFFSETUNIT_{OffsetUnitOption.Frame}".i18n());
+            warmup.Warmup();
         }
         static MenuMetadata[] GetMenuMetadata(Type settingType)
         {
@@ -348,7 +378,9 @@ namespace MajdataPlay.Scenes.Setting
             {
                 var optionObject = Instantiate(prefab, _optionPoolRoot);
                 optionObject.SetActive(false);
-                _optionPool.Push(optionObject.GetComponent<Option>());
+                var option = optionObject.GetComponent<Option>();
+                option.CollectFontAssets(_optionFonts);
+                _optionPool.Push(option);
             }
         }
         internal Option RentOption(Transform parent)
@@ -467,6 +499,7 @@ namespace MajdataPlay.Scenes.Setting
         private void OnDestroy()
         {
             _isExited = true;
+            Localization.OnLanguageChanged -= OnLanguageChanged;
             _menuTitleDisplayerAnim.TryCancel();
             InputManager.TouchButtonRingEdge = 5.4f;
             GameManager.RequestSave(this);

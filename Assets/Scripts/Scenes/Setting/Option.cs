@@ -6,6 +6,7 @@ using MajdataPlay.Settings;
 using MajdataPlay.Settings.OptionEnumerators;
 using MajdataPlay.Utils;
 using System;
+using System.Collections.Generic;
 using System.Reflection;
 using TMPro;
 using UnityEngine;
@@ -27,6 +28,8 @@ namespace MajdataPlay.Scenes.Setting
         bool _isLocalizationSubscribed;
         string? _displayedName;
         string? _displayedValue;
+        SettingTextTint? _nameTextTint;
+        SettingTextTint? _valueTextTint;
         OptionData? _data;
         SettingManager _manager = null!;
         InputRepeatState _inputRepeat;
@@ -37,8 +40,8 @@ namespace MajdataPlay.Scenes.Setting
             Unbind();
             _manager = manager;
             _data = data;
-            _displayedName = null;
-            _displayedValue = null;
+            _nameTextTint ??= new SettingTextTint(_nameTextDisplayer);
+            _valueTextTint ??= new SettingTextTint(_valueTextDisplayer);
             data.Refresh();
             data.RefreshLocalization();
             RefreshTexts();
@@ -69,13 +72,19 @@ namespace MajdataPlay.Scenes.Setting
 
         internal void SetTextColor(Color newColor)
         {
-            if (_nameTextDisplayer.color != newColor)
+            _nameTextTint?.SetColor(newColor);
+            _valueTextTint?.SetColor(newColor);
+        }
+
+        internal void CollectFontAssets(HashSet<TMP_FontAsset> fonts)
+        {
+            if (_nameTextDisplayer.font != null)
             {
-                _nameTextDisplayer.color = newColor;
+                fonts.Add(_nameTextDisplayer.font);
             }
-            if (_valueTextDisplayer.color != newColor)
+            if (_valueTextDisplayer.font != null)
             {
-                _valueTextDisplayer.color = newColor;
+                fonts.Add(_valueTextDisplayer.font);
             }
         }
 
@@ -211,6 +220,8 @@ namespace MajdataPlay.Scenes.Setting
         void OnDestroy()
         {
             UnsubscribeLocalization();
+            _nameTextTint?.Dispose();
+            _valueTextTint?.Dispose();
         }
 
         void OnEnable()

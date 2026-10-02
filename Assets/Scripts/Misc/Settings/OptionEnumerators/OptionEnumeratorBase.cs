@@ -37,6 +37,8 @@ namespace MajdataPlay.Settings.OptionEnumerators
                 return LocalizedValueTexts[ValueIndex];
             }
         }
+        // Setting preloads the finite value labels before navigation starts.
+        internal IReadOnlyList<string> LocalizedValuesForWarmup => LocalizedValueTexts;
         protected int ModeFlag = 0;
 
         protected object Value

@@ -42,9 +42,20 @@ namespace UnityEngine
         public Transform transform => gameObject.transform;
         public bool isActiveAndEnabled => gameObject.activeInHierarchy;
         public T GetComponent<T>() where T : Component => gameObject.GetComponent<T>();
+        public void GetComponentsInChildren<T>(bool includeInactive, List<T> results) where T : Component
+        {
+            results.Clear();
+            results.AddRange(gameObject.Descendants().Where(x => includeInactive || x.activeInHierarchy).SelectMany(x => x.Components).OfType<T>());
+        }
     }
     public class MonoBehaviour : Component { }
     public class Canvas : Component { }
+    public class CanvasRenderer : Component
+    {
+        Color _color = Color.white;
+        public void SetColor(Color value) => _color = value;
+        public Color GetColor() => _color;
+    }
     public class GameObject : Object
     {
         internal static readonly HashSet<GameObject> TransitionRoots = new();
@@ -66,6 +77,7 @@ namespace UnityEngine
         {
             var component = new T { gameObject = this };
             Components.Add(component);
+            if (component is TMPro.TextMeshProUGUI) AddComponent<CanvasRenderer>();
             return component;
         }
         public T GetComponent<T>() where T : Component => Components.OfType<T>().First();
@@ -91,7 +103,7 @@ namespace UnityEngine
             }
             finally { TransitionRoots.Remove(this); }
         }
-        IEnumerable<GameObject> Descendants()
+        internal IEnumerable<GameObject> Descendants()
         {
             yield return this;
             foreach (var child in transform.Children.ToArray())
@@ -164,6 +176,29 @@ namespace UnityEngine.Rendering { public static class GraphicsSettings { public 
 namespace UnityEngine.Rendering.Universal { public class UniversalRenderPipelineAsset { public float renderScale = 1; } }
 namespace TMPro
 {
+    public enum AtlasPopulationMode { Static, Dynamic }
+    public sealed class TMP_Character { }
+    public sealed class TMP_TextInfo { }
+    public sealed class TMP_FontAsset
+    {
+        public readonly Dictionary<uint, TMP_Character> characterLookupTable = new();
+        public List<TMP_FontAsset> fallbackFontAssetTable = new();
+        public AtlasPopulationMode atlasPopulationMode = AtlasPopulationMode.Dynamic;
+        public bool getFontFeatures = true;
+        public bool TryAddCharacters(uint[] values, out uint[] missing, bool includeFontFeatures)
+        {
+            foreach (var value in values) characterLookupTable[value] = new();
+            missing = Array.Empty<uint>();
+            return true;
+        }
+    }
+    public static class TMP_Settings
+    {
+        public static int missingGlyphCharacter;
+        public static bool getFontFeaturesAtRuntime = true;
+        public static readonly List<TMP_FontAsset> fallbackFontAssets = new();
+        public static TMP_FontAsset defaultFontAsset;
+    }
     public class TextMeshProUGUI : UnityEngine.Component
     {
         string _text = string.Empty;
@@ -171,6 +206,8 @@ namespace TMPro
         public int Writes;
         public string text { get => _text; set { _text = value; Writes++; TotalWrites++; } }
         public UnityEngine.Color color;
+        public TMP_FontAsset font;
+        public event Action<TMP_TextInfo> OnPreRenderText;
     }
 }
 namespace LitMotion
@@ -323,7 +360,7 @@ namespace MajdataPlay.Settings
 }
 namespace MajdataPlay.Scenes.Setting
 {
-    public class MenuTitleDisplayer : UnityEngine.MonoBehaviour { public void Initialize(string key) { } public void SetVisible(bool value) { } public void SetDistance(float value) { } }
+    public class MenuTitleDisplayer : UnityEngine.MonoBehaviour { public TMPro.TMP_FontAsset Font; public void Initialize(string key) { } public void SetVisible(bool value) { } public void SetDistance(float value) { } }
 }
 namespace MajdataPlay
 {

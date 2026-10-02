@@ -5,7 +5,9 @@ using MajdataPlay.Settings;
 using MajdataPlay.Settings.Runtime;
 using MajdataPlay.Utils;
 using System;
+using System.Collections.Generic;
 using System.Reflection;
+using TMPro;
 using UnityEngine;
 using UnityEngine.Serialization;
 #nullable enable
@@ -124,6 +126,13 @@ namespace MajdataPlay.Scenes.Setting
             foreach (var option in _visibleOptions)
             {
                 option?.RefreshEnumerator();
+            }
+        }
+        internal void CollectWarmupText(SettingFontWarmup warmup, IEnumerable<TMP_FontAsset> optionFonts, TMP_FontAsset descriptionFont)
+        {
+            foreach (var data in _optionData)
+            {
+                data.CollectWarmupText(warmup, optionFonts, descriptionFont);
             }
         }
         void MoveOption(int direction)
