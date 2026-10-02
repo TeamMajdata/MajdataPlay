@@ -2,6 +2,7 @@ Shader "Common/Opaque"
 {
     Properties
     {
+        _ListDepthOffset ("List Depth Offset", Float) = 0
         [MainTexture] _MainTex ("Texture", 2D) = "white" {}
         [MainColor] _Color ("Tint", Color) = (1,1,1,1)
         _Cutoff ("Alpha Cutoff", Range(0, 1)) = 0.5
@@ -41,6 +42,7 @@ Shader "Common/Opaque"
             SAMPLER(sampler_MainTex);
 
             CBUFFER_START(UnityPerMaterial)
+                float _ListDepthOffset;
                 float4 _MainTex_ST;
                 half4 _Color;
                 float _Cutoff;
@@ -68,6 +70,8 @@ Shader "Common/Opaque"
                 UNITY_SETUP_INSTANCE_ID(input);
                 UNITY_INITIALIZE_VERTEX_OUTPUT_STEREO(output);
 
+                // Keep list geometry coplanar for Canvas batching; restore depth on the GPU.
+                input.positionOS.z += _ListDepthOffset;
                 output.positionCS = TransformObjectToHClip(input.positionOS.xyz);
                 output.uv = TRANSFORM_TEX(input.uv, _MainTex);
                 output.color = input.color * _Color;

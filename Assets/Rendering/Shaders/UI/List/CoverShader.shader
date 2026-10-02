@@ -2,6 +2,7 @@ Shader "UI/List/CoverShader"
 {
     Properties
     {
+        _ListDepthOffset ("List Depth Offset", Float) = 0
         [PerRendererData] [MainTexture] _MainTex ("Sprite Texture", 2D) = "white" {}
         [MainColor] _Color ("Tint", Color) = (1,1,1,1)
         _Brightness ("Brightness", Range(0.0, 1.0)) = 1.0
@@ -63,6 +64,7 @@ Shader "UI/List/CoverShader"
             SAMPLER(sampler_MainTex);
 
             CBUFFER_START(UnityPerMaterial)
+                float _ListDepthOffset;
                 float4 _MainTex_ST;
                 half4 _Color;
                 float4 _Center;
@@ -104,6 +106,8 @@ Shader "UI/List/CoverShader"
                 UNITY_TRANSFER_INSTANCE_ID(input, output);
                 UNITY_INITIALIZE_VERTEX_OUTPUT_STEREO(output);
 
+                // Keep list geometry coplanar for Canvas batching; restore depth on the GPU.
+                input.positionOS.z += _ListDepthOffset;
                 output.positionCS = TransformObjectToHClip(input.positionOS.xyz);
                 output.uv = TRANSFORM_TEX(input.uv, _MainTex);
                 output.color = input.color * _Color;

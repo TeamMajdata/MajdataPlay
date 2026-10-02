@@ -2,6 +2,7 @@ Shader "UI/CircleMaskWithOutlineShadow"
 {
     Properties
     {
+        _ListDepthOffset ("List Depth Offset", Float) = 0
         [MainTexture] _MainTex ("Sprite Texture", 2D) = "white" {}
         _Color ("Tint", Color) = (1,1,1,1)
 
@@ -81,6 +82,7 @@ Shader "UI/CircleMaskWithOutlineShadow"
             float4 _MainTex_ST;
             float4 _Color;
 
+            float _ListDepthOffset;
             float _Radius;
             float4 _OutlineColor;
             float _OutlineWidth;
@@ -92,6 +94,7 @@ Shader "UI/CircleMaskWithOutlineShadow"
             v2f vert (appdata v)
             {
                 v2f o;
+                v.vertex.z += _ListDepthOffset;
                 o.vertex = TransformObjectToHClip(v.vertex.xyz);
                 o.uv = TRANSFORM_TEX(v.uv, _MainTex);
                 o.color = v.color * _Color;
