@@ -353,9 +353,6 @@ namespace MajdataPlay.IO
 
         static IReadOnlyDictionary<int, int> _instanceID2SensorIndexMappingTable = new Dictionary<int, int>();
 
-#if UNITY_STANDALONE
-        readonly static IOThreadSynchronization _ioThreadSync = new IOThreadSynchronization();     
-#endif
         internal static void Init(IReadOnlyDictionary<int, int> instanceID2SensorIndexMappingTable)
         {
             if(_isInited)
@@ -460,6 +457,7 @@ namespace MajdataPlay.IO
                 Array.Fill(_sensorClickedCountInThisFrame, 0);
 #endif
                 InputSystem.Update();
+                GameDeviceManager.OnPreUpdate();
 #if UNITY_STANDALONE || UNITY_ANDROID || UNITY_IOS
                 ButtonRing.OnPreUpdate();
 #endif
@@ -989,51 +987,6 @@ namespace MajdataPlay.IO
         {
             return (int)area;
         }
-#if UNITY_STANDALONE
-        class IOThreadSynchronization
-        {
-            public ReadOnlySpan<byte> ReadBuffer
-            {
-                get
-                {
-                    return ReadBufferMemory.Span;
-                }
-            }
-            public Span<byte> WriteBuffer
-            {
-                get
-                {
-                    return WriteBufferMemory.Span;
-                }
-            }
-            public Memory<byte> WriteBufferMemory { get; set; } = Memory<byte>.Empty;
-            public ReadOnlyMemory<byte> ReadBufferMemory { get; set; } = ReadOnlyMemory<byte>.Empty;
-            public NamedPipeClientStream PipeClientStream { get; set; }
 
-            readonly EventWaitHandle _readReadyEvent = new(false, EventResetMode.AutoReset);
-            readonly EventWaitHandle _readConsumedEvent = new(false, EventResetMode.AutoReset);
-
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            public bool WaitReadReady()
-            {
-                return _readReadyEvent.WaitOne();
-            }
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            public void SignalReadReady()
-            {
-                _readReadyEvent.Set();
-            }
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            public bool WaitReadConsumed()
-            {
-                return _readConsumedEvent.WaitOne();
-            }
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            public void SignalReadConsumed()
-            {
-                _readConsumedEvent.Set();
-            }
-        }
-#endif
     }
 }

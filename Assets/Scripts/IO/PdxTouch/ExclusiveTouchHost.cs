@@ -1,89 +1,84 @@
 #if UNITY_STANDALONE_WIN
 using System;
 using System.Threading;
-using MajdataPlay.Diagnostics;
 
+#nullable enable
 namespace MajdataPlay.IO
 {
-    /// <summary>
-    /// 独占触摸设备槽：按顺序尝试各设备工厂，未连接时后台轮询重试。
-    /// 已连接的设备由自身的读线程负责断线重连。
-    /// </summary>
-    internal static class ExclusiveTouchHost
+    /// <summary>Selects the first available exclusive touch protocol on one device worker.</summary>
+    internal sealed class ExclusiveTouchHost : IODevice, ITouchPanelDevice
     {
-        private static ExclusiveTouchBase? _device;
-        private static volatile bool _quitting;
+        readonly UsbDevice[] _candidates;
+        readonly bool[] _states = new bool[35];
+        readonly bool[] _hadOn = new bool[35];
+        readonly bool[] _hadOff = new bool[35];
+        UsbDevice? _active;
 
-        public static bool IsConnected => Volatile.Read(ref _device)?.IsConnected ?? false;
-
-        public static ulong GetTouchState() => Volatile.Read(ref _device)?.GetTouchState() ?? 0;
-
-        public static void WaitForData(int millisecondsTimeout)
+        public ExclusiveTouchHost()
         {
-            var device = Volatile.Read(ref _device);
-            if (device == null)
+            var connection = IODetector.TouchPanelUsbConnInfo;
+            var options = MajEnv.Settings.IO.InputDevice.TouchPanel.CapacitivePanelOptions;
+            _candidates = new UsbDevice[]
             {
-                Thread.Sleep(millisecondsTimeout);
-                return;
-            }
-            device.WaitForData(millisecondsTimeout);
-        }
-
-        public static void Start(params Func<ExclusiveTouchBase>[] factories)
-        {
-            _quitting = false;
-            MajEnv.GlobalCT.Register(() => _quitting = true);
-
-            var device = StartDevice(factories, logConnectionFailure: true);
-            if (device != null)
-            {
-                Volatile.Write(ref _device, device);
-                return;
-            }
-
-            MajDebug.LogInfo("[ExclusiveTouch] 等待设备连接");
-            var retryThread = new Thread(() => Retry(factories))
-            {
-                IsBackground = true,
-                Name = "IO/ExclusiveTouch Retry Thread",
-                Priority = MajEnv.THREAD_PRIORITY_IO
+                new PdxTouchDevice((ushort)connection.VendorId, (ushort)connection.ProductId,
+                    connection.DeviceName, options.TouchRadius, options.RadiusOffset),
+                new FlTouchDevice(connection.DeviceName, options.TouchRadius, options.RadiusOffset)
             };
-            retryThread.Start();
         }
 
-        public static void Stop()
-        {
-            _quitting = true;
-            Volatile.Read(ref _device)?.Stop();
-            Volatile.Write(ref _device, null);
-        }
+        protected override string DaemonThreadName => "IO/ExclusiveTouch Thread";
+        // Drain multi-report USB frames immediately; game-frame publication happens in OnPreUpdate.
+        protected override TimeSpan PollingInterval => TimeSpan.Zero;
 
-        private static void Retry(Func<ExclusiveTouchBase>[] factories)
+        protected override bool Connect(CancellationToken token)
         {
-            while (!_quitting)
+            foreach (var candidate in _candidates)
             {
-                Thread.Sleep(1000);
-                if (_quitting) return;
+                Volatile.Write(ref _active, candidate);
+                token.ThrowIfCancellationRequested();
+                if (candidate.ConnectTransport(token))
+                    return true;
+                candidate.CloseTransport();
+                candidate.ResetTransport();
+            }
+            Volatile.Write(ref _active, null);
+            return false;
+        }
 
-                var device = StartDevice(factories, logConnectionFailure: false);
-                if (device == null) continue;
+        protected override void Update(CancellationToken token) =>
+            Volatile.Read(ref _active)!.UpdateTransport(token);
+        protected override void Parse(ReadOnlySpan<byte> data) =>
+            Volatile.Read(ref _active)?.ParseReport(data);
 
-                Volatile.Write(ref _device, device);
-                MajDebug.LogInfo("[ExclusiveTouch] 设备已连接");
-                return;
+        protected override void Disconnect() => Volatile.Read(ref _active)?.CloseTransport();
+        protected override void OnDisconnected() =>
+            Interlocked.Exchange(ref _active, null)?.ResetTransport();
+
+        public override void OnPreUpdate()
+        {
+            var active = Volatile.Read(ref _active);
+            if (active != null)
+            {
+                active.OnPreUpdate();
+                ((ITouchPanelDevice)active).ReadTouchPanel(_states, _hadOn, _hadOff);
+            }
+            else
+            {
+                _states.AsSpan().Clear();
+                _hadOn.AsSpan().Clear();
+                _hadOff.AsSpan().Fill(true);
             }
         }
 
-        private static ExclusiveTouchBase? StartDevice(Func<ExclusiveTouchBase>[] factories, bool logConnectionFailure)
+        public void ReadTouchPanel(Span<bool> states, Span<bool> hadOn, Span<bool> hadOff)
         {
-            foreach (var factory in factories)
-            {
-                var device = factory();
-                if (device.Start(logConnectionFailure)) return device;
-            }
-
-            return null;
+            _states.AsSpan().CopyTo(states);
+            _hadOn.AsSpan().CopyTo(hadOn);
+            _hadOff.AsSpan().CopyTo(hadOff);
         }
+
+        public bool IsSensorCurrentlyOn(int index) =>
+            (Volatile.Read(ref _active) as ITouchPanelDevice)?.IsSensorCurrentlyOn(index) ?? false;
     }
 }
 #endif
