@@ -132,7 +132,7 @@ Shader "UI/MajRadar"
                 );
             }
 
-            float DistanceToSegment(
+            float SquaredDistanceToSegment(
                 float2 p,
                 float2 a,
                 float2 b)
@@ -148,7 +148,8 @@ Shader "UI/MajRadar"
 
                 float2 closest = a + ab * t;
 
-                return distance(p, closest);
+                float2 delta = p - closest;
+                return dot(delta, delta);
             }
 
             half4 frag(Varyings IN) : SV_Target
@@ -181,16 +182,16 @@ Shader "UI/MajRadar"
                         );
                 }
 
-                float edgeDist = 999.0;
+                float edgeDistSq = 999.0 * 999.0;
 
                 [unroll]
                 for (int edge = 0; edge < 6; edge++)
                 {
                     int next = (edge + 1) % 6;
 
-                    edgeDist = min(
-                        edgeDist,
-                        DistanceToSegment(
+                    edgeDistSq = min(
+                        edgeDistSq,
+                        SquaredDistanceToSegment(
                             p,
                             verts[edge],
                             verts[next]
@@ -198,6 +199,8 @@ Shader "UI/MajRadar"
                     );
                 }
 
+                // Select the nearest edge before taking a single square root.
+                float edgeDist = sqrt(edgeDistSq);
                 float aa = fwidth(edgeDist);
 
                 float outline =

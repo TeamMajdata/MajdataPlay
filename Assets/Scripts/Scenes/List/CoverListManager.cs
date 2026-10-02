@@ -73,6 +73,11 @@ namespace MajdataPlay.Scenes.List
         bool _isNeedPreload = false;
         bool _isEmptyCollection = true;
         int _scrollMotionVersion = 0;
+        int _firstVisibleCoverIndex = 0;
+        int _lastVisibleCoverIndex = -1;
+        int _firstVisibleThumbnailIndex = 0;
+        int _lastVisibleThumbnailIndex = -1;
+        bool _hasPendingBindings = false;
 
         ListManager _listManager;
         PreviewSoundPlayer _previewSoundPlayer;
@@ -95,6 +100,8 @@ namespace MajdataPlay.Scenes.List
         readonly ListConfig _listConfig = MajEnv.RuntimeConfig?.List ?? new();
 
         const int DISPLAYER_ANIM_DURATION_MS = 250;
+        const int COVER_VISIBLE_DISTANCE = 3;
+        const int THUMBNAIL_VISIBLE_DISTANCE = 6;
         const float SELECTED_COVER_SCALE = 1f;
         const float UNSELECTED_COVER_SCALE = 0.86f;
 
@@ -145,6 +152,7 @@ namespace MajdataPlay.Scenes.List
         }
         void OnDestroy()
         {
+            _scrollMotion.TryCancel();
             Localization.OnLanguageChanged -= OnLanguageChanged;
             Majdata<CoverListManager>.Free();
             
@@ -316,32 +324,50 @@ namespace MajdataPlay.Scenes.List
 
         void Clear()
         {
+            _scrollMotion.TryCancel();
+            _scrollMotionVersion++;
             SelectedSong = null;
-            var songCoverBindings = _songCoverBindings.AsSpan();
-            var songThumbnailBindings = _songThumbnailBindings.AsSpan();
-            for (var i = 0; i < _songCount; i++)
+            for (var i = _firstVisibleCoverIndex; i <= _lastVisibleCoverIndex; i++)
             {
-                ref var coverBinding = ref songCoverBindings[i];
-                ref var thumbnailBinding = ref songThumbnailBindings[i];
-                var coverDisplayer = coverBinding.Displayer;
-                var thumbnailDisplayer = thumbnailBinding.Displayer;
-                if (coverDisplayer is not null)
-                {
-                    coverBinding.Displayer = null;
-                    coverDisplayer.SetActive(false);
-                    _idleSongCoverDisplayer.Enqueue(coverDisplayer);
-                }
-                if (thumbnailDisplayer is not null)
-                {
-                    thumbnailBinding.Displayer = null;
-                    thumbnailDisplayer.SetActive(false);
-                    _idleSongThumbnailDisplayer.Enqueue(thumbnailDisplayer);
-                }
+                ReleaseSongCoverBinding(i);
             }
+            for (var i = _firstVisibleThumbnailIndex; i <= _lastVisibleThumbnailIndex; i++)
+            {
+                ReleaseSongThumbnailBinding(i);
+            }
+            _firstVisibleCoverIndex = 0;
+            _lastVisibleCoverIndex = -1;
+            _firstVisibleThumbnailIndex = 0;
+            _lastVisibleThumbnailIndex = -1;
+            _hasPendingBindings = false;
             _songCount = 0;
             _songDetails.Clear();
             _songCoverBindings.Clear();
             _songThumbnailBindings.Clear();
+        }
+        void ReleaseSongCoverBinding(int index)
+        {
+            ref var binding = ref _songCoverBindings.AsSpan()[index];
+            var displayer = binding.Displayer;
+            if (displayer is null)
+            {
+                return;
+            }
+            binding.Displayer = null;
+            displayer.SetActive(false);
+            _idleSongCoverDisplayer.Enqueue(displayer);
+        }
+        void ReleaseSongThumbnailBinding(int index)
+        {
+            ref var binding = ref _songThumbnailBindings.AsSpan()[index];
+            var displayer = binding.Displayer;
+            if (displayer is null)
+            {
+                return;
+            }
+            binding.Displayer = null;
+            displayer.SetActive(false);
+            _idleSongThumbnailDisplayer.Enqueue(displayer);
         }
         void DisplayerMoveTo(float targetPos, float duration, int loadDelayMS, Action? onComplete = null)
         {
@@ -377,112 +403,132 @@ namespace MajdataPlay.Scenes.List
         }
         void UpdateDisplayerBinding(int loadDelayMS)
         {
-            if(_isEmptyCollection)
+            if (_isEmptyCollection)
             {
                 return;
             }
-            var songCoverBindings = _songCoverBindings.AsSpan();
-            var songThumbnailBindings = _songThumbnailBindings.AsSpan();
             var currentListCursorPos = (int)_listCursorPos;
-            for (var i = 0; i < _songCount; i++)
+            var firstCoverIndex = Math.Max(0, currentListCursorPos - COVER_VISIBLE_DISTANCE);
+            var lastCoverIndex = Math.Min(_songCount - 1, currentListCursorPos + COVER_VISIBLE_DISTANCE);
+            var firstThumbnailIndex = Math.Max(0, currentListCursorPos - THUMBNAIL_VISIBLE_DISTANCE);
+            var lastThumbnailIndex = Math.Min(_songCount - 1, currentListCursorPos + THUMBNAIL_VISIBLE_DISTANCE);
+            if (!_hasPendingBindings &&
+                firstCoverIndex == _firstVisibleCoverIndex && lastCoverIndex == _lastVisibleCoverIndex &&
+                firstThumbnailIndex == _firstVisibleThumbnailIndex && lastThumbnailIndex == _lastVisibleThumbnailIndex)
             {
-                ref var coverBinding = ref songCoverBindings[i];
-                ref var thumbnailBinding = ref songThumbnailBindings[i];
-                var absDistance = Math.Abs(i - currentListCursorPos);
+                return;
+            }
 
-                // Update song cover binding
-                var coverDisplayer = coverBinding.Displayer;
-                if (absDistance > 3)
+            // Return every outgoing displayer before binding incoming songs. This also
+            // keeps backward scrolling and long jumps from temporarily exhausting the pool.
+            for (var i = _firstVisibleCoverIndex; i <= _lastVisibleCoverIndex; i++)
+            {
+                if (i < firstCoverIndex || i > lastCoverIndex)
                 {
-                    if(coverDisplayer is not null)
-                    {
-                        coverBinding.Displayer = null;
-                        coverDisplayer.SetActive(false);
-                        _idleSongCoverDisplayer.Enqueue(coverDisplayer);
-                    }
+                    ReleaseSongCoverBinding(i);
+                }
+            }
+            for (var i = _firstVisibleThumbnailIndex; i <= _lastVisibleThumbnailIndex; i++)
+            {
+                if (i < firstThumbnailIndex || i > lastThumbnailIndex)
+                {
+                    ReleaseSongThumbnailBinding(i);
+                }
+            }
+
+            _firstVisibleCoverIndex = firstCoverIndex;
+            _lastVisibleCoverIndex = lastCoverIndex;
+            _firstVisibleThumbnailIndex = firstThumbnailIndex;
+            _lastVisibleThumbnailIndex = lastThumbnailIndex;
+            _hasPendingBindings = false;
+            var songCoverBindings = _songCoverBindings.AsSpan();
+            for (var i = firstCoverIndex; i <= lastCoverIndex; i++)
+            {
+                ref var binding = ref songCoverBindings[i];
+                if (binding.Displayer is not null)
+                {
+                    continue;
+                }
+                if (_idleSongCoverDisplayer.TryDequeue(out var displayer))
+                {
+                    binding.Displayer = displayer;
+                    displayer.SetSongDetail(binding.SongDetail, loadDelayMS);
+                    displayer.SetActive(true);
                 }
                 else
                 {
-                    if (coverDisplayer is null)
-                    {
-                        if (_idleSongCoverDisplayer.TryDequeue(out coverDisplayer))
-                        {
-                            coverBinding.Displayer = coverDisplayer;
-                            coverDisplayer.SetSongDetail(coverBinding.SongDetail, loadDelayMS);
-                            coverDisplayer.SetActive(true);
-                        }
-                        else
-                        {
-                            MajDebug.LogWarning("No idle song cover displayer available.");
-                        }                            
-                    }                    
+                    _hasPendingBindings = true;
+                    MajDebug.LogWarning("No idle song cover displayer available.");
                 }
-
-                // Update thumbnail binding
-                var thumbnailDisplayer = thumbnailBinding.Displayer;
-                if (absDistance > 6)
+            }
+            var songThumbnailBindings = _songThumbnailBindings.AsSpan();
+            for (var i = firstThumbnailIndex; i <= lastThumbnailIndex; i++)
+            {
+                ref var binding = ref songThumbnailBindings[i];
+                if (binding.Displayer is not null)
                 {
-                    if (thumbnailDisplayer is not null)
-                    {
-                        thumbnailBinding.Displayer = null;
-                        thumbnailDisplayer.SetActive(false);
-                        _idleSongThumbnailDisplayer.Enqueue(thumbnailDisplayer);
-                    }
+                    continue;
+                }
+                if (_idleSongThumbnailDisplayer.TryDequeue(out var displayer))
+                {
+                    binding.Displayer = displayer;
+                    displayer.SetSongDetail(binding.SongDetail, loadDelayMS);
+                    displayer.SetActive(true);
                 }
                 else
                 {
-                    if (thumbnailDisplayer is null)
-                    {
-                        if (_idleSongThumbnailDisplayer.TryDequeue(out thumbnailDisplayer))
-                        {
-                            thumbnailBinding.Displayer = thumbnailDisplayer;
-                            thumbnailDisplayer.SetSongDetail(thumbnailBinding.SongDetail, loadDelayMS);
-                            thumbnailDisplayer.SetActive(true);
-                        }
-                        else
-                        {
-                            MajDebug.LogWarning("No idle song thumbnail displayer available.");
-                        }
-                    }
+                    _hasPendingBindings = true;
+                    MajDebug.LogWarning("No idle song thumbnail displayer available.");
                 }
             }
         }
         void UpdateDisplayerPosition()
         {
             var songCoverBindings = _songCoverBindings.AsSpan();
-            var songThumbnailBindings = _songThumbnailBindings.AsSpan();
             SongCoverDisplayer? frontCoverDisplayer = null;
             var frontCoverAbsDelta = float.MaxValue;
-            for (var i = 0; i < _songCount; i++)
+            for (var i = _firstVisibleCoverIndex; i <= _lastVisibleCoverIndex; i++)
             {
-                ref var coverBinding = ref songCoverBindings[i];
-                ref var thumbnailBinding = ref songThumbnailBindings[i];
-                var delta = i - _listCursorPos;
-
-                // Update song cover position
-                var coverDisplayer = coverBinding.Displayer;
-                if (coverDisplayer is not null)
+                var coverDisplayer = songCoverBindings[i].Displayer;
+                if (coverDisplayer is null)
                 {
-                    coverDisplayer.RectTransform.anchoredPosition = GetCoverDisplayerPositionFromDelta(delta);
-                    coverDisplayer.RectTransform.localScale = GetCoverDisplayerScaleFromDelta(delta);
-                    coverDisplayer.SetSelectedProgress(GetCoverDisplayerSelectedProgressFromDelta(delta));
-
-                    var absDelta = Mathf.Abs(delta);
-                    if (absDelta < frontCoverAbsDelta)
-                    {
-                        frontCoverAbsDelta = absDelta;
-                        frontCoverDisplayer = coverDisplayer;
-                    }
+                    continue;
                 }
+                var delta = i - _listCursorPos;
+                var rectTransform = coverDisplayer.RectTransform;
+                rectTransform.anchoredPosition = GetCoverDisplayerPositionFromDelta(delta);
+                var scale = GetCoverDisplayerScaleFromDelta(delta);
+                if (rectTransform.localScale != scale)
+                {
+                    rectTransform.localScale = scale;
+                }
+                coverDisplayer.SetSelectedProgress(GetCoverDisplayerSelectedProgressFromDelta(delta));
 
-                // Update thumbnail position
-                var thumbnailDisplayer = thumbnailBinding.Displayer;
+                var absDelta = Mathf.Abs(delta);
+                if (absDelta < frontCoverAbsDelta)
+                {
+                    frontCoverAbsDelta = absDelta;
+                    frontCoverDisplayer = coverDisplayer;
+                }
+            }
+            var songThumbnailBindings = _songThumbnailBindings.AsSpan();
+            for (var i = _firstVisibleThumbnailIndex; i <= _lastVisibleThumbnailIndex; i++)
+            {
+                var thumbnailDisplayer = songThumbnailBindings[i].Displayer;
                 if (thumbnailDisplayer is not null)
                 {
+                    var delta = i - _listCursorPos;
                     thumbnailDisplayer.RectTransform.anchoredPosition = GetThumbnailDisplayerPositionFromDelta(delta);
                 }
             }
-            frontCoverDisplayer?.RectTransform.SetAsLastSibling();
+            if (frontCoverDisplayer is not null)
+            {
+                var rectTransform = frontCoverDisplayer.RectTransform;
+                if (rectTransform.GetSiblingIndex() != rectTransform.parent.childCount - 1)
+                {
+                    rectTransform.SetAsLastSibling();
+                }
+            }
         }
         void UpdateListConfiguration()
         {

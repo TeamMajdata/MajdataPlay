@@ -52,6 +52,7 @@ namespace MajdataPlay.Scenes.List.Models
         Vector2 _backgroundOriginSize;
         Vector2 _coverOriginPosition;
         Vector2 _coverOriginSize;
+        float _selectedProgress = float.NaN;
 
         LevelDisplayer[] _levelDisplayers = Array.Empty<LevelDisplayer>();
         LevelDPOriginPosition[] _levelDPOriginPositions = Array.Empty<LevelDPOriginPosition>();
@@ -124,6 +125,11 @@ namespace MajdataPlay.Scenes.List.Models
         public void SetSelectedProgress(float progress)
         {
             progress = Mathf.Clamp01(progress);
+            if (_selectedProgress == progress)
+            {
+                return;
+            }
+            _selectedProgress = progress;
 
             var t = Mathf.SmoothStep(0f, 1f, progress);
             ApplySelectedProgress(t);
