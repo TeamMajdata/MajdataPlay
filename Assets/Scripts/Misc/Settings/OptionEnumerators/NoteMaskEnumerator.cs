@@ -18,7 +18,7 @@ public sealed class NoteMaskEnumerator : OptionEnumeratorBase, IOptionEnumerator
         };
         InitValueTexts();
         var current = Value;
-        ValueIndex = OptionValues.FindIndex(x => x == current);
+        ValueIndex = OptionValues.FindIndex(x => Equals(x, current));
         if(ValueIndex == -1)
         {
             ValueIndex = 0;

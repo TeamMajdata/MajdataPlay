@@ -11,6 +11,13 @@ public class DefaultNumberEnumerator : OptionEnumeratorBase, IOptionEnumerator
     protected decimal? MaxValue = null;
     protected decimal? MinValue = null;
 
+    public override void Refresh()
+    {
+        CurrentValue = Convert.ToDecimal(Value);
+        OptionValues[0] = CurrentValue;
+        UpdateValueText();
+    }
+
     public override bool MoveNext()
     {
         if (IsReadOnly)

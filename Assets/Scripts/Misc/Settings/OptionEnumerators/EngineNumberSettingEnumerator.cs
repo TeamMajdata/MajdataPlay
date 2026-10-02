@@ -7,6 +7,7 @@ public sealed class EngineNumberSettingEnumerator : DefaultNumberEnumerator, IOp
 
     public override void Refresh()
     {
+        base.Refresh();
         if(_lastValue == CurrentValue)
         {
             return;

@@ -8,6 +8,7 @@ public sealed class AudioVolumeEnumerator : DefaultNumberEnumerator, IOptionEnum
 
     public override void Refresh()
     {
+        base.Refresh();
         if(_lastValue != CurrentValue)
         {
             UpdateVolume();

@@ -9,7 +9,8 @@ public sealed class EngineEnumSettingEnumerator: DefaultEnumEnumerator, IOptionE
     object _lastValue;
     public override void Refresh()
     {
-        if (Current == _lastValue)
+        base.Refresh();
+        if (Equals(Current, _lastValue))
         {
             return;
         }

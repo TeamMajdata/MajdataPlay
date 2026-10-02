@@ -5,7 +5,7 @@ using MajdataPlay.Extensions;
 using MajdataPlay.IO;
 using MajdataPlay.Utils;
 using System;
-using System.Linq;
+using System.Collections.Generic;
 using System.Reflection;
 using UnityEngine;
 using MajdataPlay.Settings.Runtime;
@@ -18,6 +18,9 @@ namespace MajdataPlay.Scenes.Setting
     public class SettingManager : MonoBehaviour
     {
         const float MENU_TITLE_VISIBLE_DISTANCE = 3.5f;
+
+        // Metadata survives scene changes, but never retains a GameSetting/ChartSetting instance.
+        static readonly Dictionary<Type, MenuMetadata[]> _menuMetadataCache = new();
 
         public int Index { get; private set; } = 0;
         public GameSetting Setting => MajEnv.Settings;
@@ -46,6 +49,9 @@ namespace MajdataPlay.Scenes.Setting
         float _listCursorPos = 0;
         int _listCursorTarget = 0;
         MotionHandle _menuTitleDisplayerAnim;
+        readonly Stack<Option> _optionPool = new(Menu.OPTION_POOL_CAPACITY);
+        Transform _optionPoolRoot = null!;
+        string _descriptionText = null!;
 
         bool _isExited = false;
         bool _isInited = false;
@@ -63,15 +69,12 @@ namespace MajdataPlay.Scenes.Setting
         }
         void Start()
         {
-            var type = Setting.GetType();
-            var properties = type.GetProperties()
-                                 .Where(x => !x.GetCustomAttributes<HideInSettingUIAttribute>().Any())
-                                 .ToArray();
+            var categories = GetMenuMetadata(Setting.GetType());
             var offset = 0;
             var listRoot = _menuListRoot.transform;
             if (!_settingConfig.IgnoreChartSettingPage && !string.IsNullOrEmpty(MajEnv.RuntimeConfig.List.SelectedSongHash))
             {
-                menus = new Menu[properties.Length + 1];
+                menus = new Menu[categories.Length + 1];
                 offset = 1;
                 var chartSetting = ChartSettingStorage.GetSetting(MajEnv.RuntimeConfig.List.SelectedSongHash);
                 var chartSettingType = chartSetting.GetType();
@@ -85,29 +88,26 @@ namespace MajdataPlay.Scenes.Setting
             }
             else
             {
-                menus = new Menu[properties.Length];
+                menus = new Menu[categories.Length];
             }
-            foreach (var (i, property) in properties.WithIndex())
+            foreach (var (i, category) in categories.WithIndex())
             {
-                object root = Setting;
-                var _property = property;
-
-                if (property.Name == "Audio")
-                {
-                    root = property.GetValue(Setting);
-                    _property = property.PropertyType.GetProperty("Volume");
-                }
-
                 var menuObj = Instantiate(menuPrefab, listRoot);
                 menuObj.SetActive(false);
-                menuObj.name = _property.Name;
+                menuObj.name = category.Name;
                 var menu = menuObj.GetComponent<Menu>();
                 menus[i + offset] = menu;
-                menu.Instance = _property.GetValue(root);
-                menu.Name = _property.Name;
+                menu.Instance = category.GetInstance(Setting);
+                menu.Name = category.Name;
+            }
+            // Build scene-local enumerators before the fade opens and before any navigation.
+            // Only immutable reflection metadata is shared with subsequent Setting visits.
+            foreach (var menu in menus)
+            {
+                menu.Init();
             }
             RestoreSelectedMenu();
-            menus[Index].Init();
+            menus[Index].ToOption(_settingConfig.SelectedOption);
             menus[Index].gameObject.SetActive(true);
 
             MajInstances.AudioManager.PlaySFX("settings.wav");
@@ -123,6 +123,50 @@ namespace MajdataPlay.Scenes.Setting
             }
             UpdateMenuTitleDisplayerPosition();
             InitializeCurrentMenu().Forget();
+        }
+        static MenuMetadata[] GetMenuMetadata(Type settingType)
+        {
+            if (_menuMetadataCache.TryGetValue(settingType, out var cached))
+            {
+                return cached;
+            }
+
+            var properties = SettingReflectionCache.GetVisibleProperties(settingType);
+            var categories = new MenuMetadata[properties.Length];
+            for (var i = 0; i < properties.Length; i++)
+            {
+                var property = properties[i];
+                var valueProperty = property.Name == nameof(GameSetting.Audio)
+                    ? SettingReflectionCache.GetProperty(property.PropertyType, "Volume")
+                    : property;
+                categories[i] = new MenuMetadata(property, valueProperty);
+                SettingReflectionCache.GetVisibleProperties(valueProperty.PropertyType);
+            }
+            // Include chart options even if the first visit has no selected chart.
+            SettingReflectionCache.GetVisibleProperties(typeof(ChartSetting));
+            _menuMetadataCache.Add(settingType, categories);
+            return categories;
+        }
+
+        sealed class MenuMetadata
+        {
+            readonly PropertyInfo _categoryProperty;
+            readonly PropertyInfo _valueProperty;
+            internal string Name => _valueProperty.Name;
+
+            internal MenuMetadata(PropertyInfo categoryProperty, PropertyInfo valueProperty)
+            {
+                _categoryProperty = categoryProperty;
+                _valueProperty = valueProperty;
+            }
+
+            internal object GetInstance(GameSetting setting)
+            {
+                var root = _categoryProperty == _valueProperty
+                    ? (object)setting
+                    : _categoryProperty.GetValue(setting);
+                return _valueProperty.GetValue(root);
+            }
         }
         void Update()
         {
@@ -219,7 +263,6 @@ namespace MajdataPlay.Scenes.Setting
         async UniTaskVoid InitializeCurrentMenu()
         {
             await UniTask.DelayFrame(3);
-            menus[Index].ToOption(_settingConfig.SelectedOption);
             MajInstances.SceneSwitcher.FadeOut();
             SetSettingLights();
             _categoryInput.SuppressUntilRelease();
@@ -283,10 +326,55 @@ namespace MajdataPlay.Scenes.Setting
         }
         public void SetDescriptionText(string text)
         {
+            if (_descriptionText == text)
+            {
+                return;
+            }
+            _descriptionText = text;
             _descriptionTextDisplayer.text = text.Replace('\n', ',');
+        }
+        internal void InitializeOptionPool(GameObject prefab)
+        {
+            if (_optionPoolRoot != null)
+            {
+                return;
+            }
+
+            var poolRoot = new GameObject("Option Pool", typeof(RectTransform));
+            _optionPoolRoot = poolRoot.transform;
+            _optionPoolRoot.SetParent(_menuListRoot.transform, false);
+            poolRoot.SetActive(false);
+            for (var i = 0; i < Menu.OPTION_POOL_CAPACITY; i++)
+            {
+                var optionObject = Instantiate(prefab, _optionPoolRoot);
+                optionObject.SetActive(false);
+                _optionPool.Push(optionObject.GetComponent<Option>());
+            }
+        }
+        internal Option RentOption(Transform parent)
+        {
+            var option = _optionPool.Pop();
+            option.transform.SetParent(parent, false);
+            return option;
+        }
+        internal void ReturnOption(Option option)
+        {
+            option.Unbind();
+            option.gameObject.SetActive(false);
+            // OnDisable can run while Unity is deactivating the parent hierarchy.
+            // Reparent only on rent, after that transition has finished.
+            _optionPool.Push(option);
         }
         void UpdateMenu(int direction, bool animateTitle = true)
         {
+            // Return the old category's views before the new category rents them.
+            foreach (var (i, menu) in menus.WithIndex())
+            {
+                if (i != Index)
+                {
+                    menu.gameObject.SetActive(false);
+                }
+            }
             var currentMenu = menus[Index];
             currentMenu.Init();
             if (direction > 0)
@@ -298,13 +386,6 @@ namespace MajdataPlay.Scenes.Setting
                 currentMenu.ToTail();
             }
             currentMenu.gameObject.SetActive(true);
-            foreach (var (i, menu) in menus.WithIndex())
-            {
-                if (i != Index)
-                {
-                    menu.gameObject.SetActive(false);
-                }
-            }
             _menuTitleDisplayerAnim.TryCancel();
             if (!animateTitle)
             {
