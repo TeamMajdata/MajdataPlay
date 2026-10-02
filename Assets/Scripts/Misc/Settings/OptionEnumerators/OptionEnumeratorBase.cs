@@ -37,6 +37,8 @@ namespace MajdataPlay.Settings.OptionEnumerators
                 return LocalizedValueTexts[ValueIndex];
             }
         }
+        // Setting preloads the finite value labels before navigation starts.
+        internal IReadOnlyList<string> LocalizedValuesForWarmup => LocalizedValueTexts;
         protected int ModeFlag = 0;
 
         protected object Value
@@ -96,6 +98,7 @@ namespace MajdataPlay.Settings.OptionEnumerators
 
 
         Type _memberType = null!;
+        Attribute[] _attributes = Array.Empty<Attribute>();
 
         public void Init(FieldInfo fieldInfo, object field)
         {
@@ -111,6 +114,7 @@ namespace MajdataPlay.Settings.OptionEnumerators
             Target = field;
             ModeFlag = FLAG_FIELD_MODE;
             _memberType = fieldInfo.FieldType;
+            _attributes = SettingReflectionCache.GetAttributes(fieldInfo);
             IsFloatType = _memberType == typeof(float) || _memberType == typeof(double) ||
                           _memberType == typeof(decimal);
             IsIntType = _memberType == typeof(int) || _memberType == typeof(long) ||
@@ -136,6 +140,7 @@ namespace MajdataPlay.Settings.OptionEnumerators
             Target = property;
             ModeFlag = FLAG_PROPERTY_MODE;
             _memberType = propertyInfo.PropertyType;
+            _attributes = SettingReflectionCache.GetAttributes(propertyInfo);
             IsFloatType = _memberType == typeof(float) || _memberType == typeof(double) ||
                           _memberType == typeof(decimal);
             IsIntType = _memberType == typeof(int) || _memberType == typeof(long) ||
@@ -184,7 +189,15 @@ namespace MajdataPlay.Settings.OptionEnumerators
         }
         public virtual void Refresh()
         {
-
+            var value = Value;
+            for (var i = 0; i < OptionValues.Length; i++)
+            {
+                if (Equals(OptionValues[i], value))
+                {
+                    ValueIndex = i;
+                    return;
+                }
+            }
         }
 
         protected abstract void InitInternal();
@@ -221,26 +234,23 @@ namespace MajdataPlay.Settings.OptionEnumerators
         }
         protected T? GetCustomAttribute<T>() where T : Attribute
         {
-            switch(ModeFlag)
+            foreach (var attribute in _attributes)
             {
-                case FLAG_FIELD_MODE:
-                    return FieldInfo.GetCustomAttribute<T>();
-                case FLAG_PROPERTY_MODE:
-                    return PropertyInfo.GetCustomAttribute<T>();
-                default:
-                    return null;
+                if (attribute is T result)
+                {
+                    return result;
+                }
             }
+            return null;
         }
         protected IEnumerable<T> GetCustomAttributes<T>() where T : Attribute
         {
-            switch (ModeFlag)
+            foreach (var attribute in _attributes)
             {
-                case FLAG_FIELD_MODE:
-                    return FieldInfo.GetCustomAttributes<T>();
-                case FLAG_PROPERTY_MODE:
-                    return PropertyInfo.GetCustomAttributes<T>();
-                default:
-                    return Array.Empty<T>();
+                if (attribute is T result)
+                {
+                    yield return result;
+                }
             }
         }
     }

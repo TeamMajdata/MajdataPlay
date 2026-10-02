@@ -1,13 +1,13 @@
 using LitMotion;
 using MajdataPlay.Editor;
-using MajdataPlay.Extensions;
 using MajdataPlay.Numerics;
 using MajdataPlay.Settings;
 using MajdataPlay.Settings.Runtime;
 using MajdataPlay.Utils;
 using System;
-using System.Linq;
+using System.Collections.Generic;
 using System.Reflection;
+using TMPro;
 using UnityEngine;
 using UnityEngine.Serialization;
 #nullable enable
@@ -16,7 +16,9 @@ namespace MajdataPlay.Scenes.Setting
     public class Menu : MonoBehaviour
     {
         const float OPTION_MOVE_DURATION = 0.18f;
-        const int VISIBLE_OPTION_RADIUS = 2;
+        const int VISIBLE_OPTION_RADIUS = 1;
+        // Three resting views plus one incoming/outgoing view during a slide.
+        internal const int OPTION_POOL_CAPACITY = VISIBLE_OPTION_RADIUS * 2 + 2;
         static readonly Vector3 UNSELECTED_OPTION_SCALE = Vector3.one * 0.6f;
         static readonly Color SELECTED_OPTION_COLOR = new(0.8823529f, 0.8078431f, 0.6392157f, 1f);
         static readonly Color UNSELECTED_OPTION_COLOR = new(0.3607843f, 0.3098039f, 0.2862745f, 1f);
@@ -41,13 +43,13 @@ namespace MajdataPlay.Scenes.Setting
         float _listCursorPos = 0;
 
         PropertyInfo[] _properties = Array.Empty<PropertyInfo>();
-        Option?[] _options = Array.Empty<Option?>();
+        OptionData[] _optionData = Array.Empty<OptionData>();
+        readonly Option?[] _visibleOptions = new Option?[OPTION_POOL_CAPACITY];
+        readonly int[] _visibleIndices = { -1, -1, -1, -1 };
 
         MotionHandle _optionAnim;
-        int _visibleStart = -1;
-        int _visibleEnd = -1;
-        int _appliedSelectedIndex = -1;
         bool _isInitialized = false;
+        bool _needsLayout;
 
         readonly SettingConfig _settingConfig = MajEnv.RuntimeConfig?.Setting ?? new();
         void Awake()
@@ -61,21 +63,41 @@ namespace MajdataPlay.Scenes.Setting
                 return;
             }
 
-            var type = Instance.GetType();
-            _properties = type.GetProperties()
-                              .Where(x => !x.GetCustomAttributes<HideInSettingUIAttribute>().Any())
-                              .ToArray();
-            _options = new Option?[_properties.Length];
+            _properties = SettingReflectionCache.GetVisibleProperties(Instance.GetType());
+            _optionData = new OptionData[_properties.Length];
+            // Prepare every model while entering Setting, never inside a scrolling callback.
+            for (var i = 0; i < _properties.Length; i++)
+            {
+                _optionData[i] = new OptionData(_properties[i], Instance);
+            }
+            _manager.InitializeOptionPool(_optionPrefab);
             _isInitialized = true;
+        }
+        void OnEnable()
+        {
+            // Do not reparent pooled children while Unity is activating this hierarchy.
+            _needsLayout = _isInitialized && FindVisibleOption(SelectedIndex) is null;
+        }
+        void LateUpdate()
+        {
+            if (_needsLayout)
+            {
+                SnapDisplayerTo(SelectedIndex);
+            }
         }
         void OnDisable()
         {
+            _needsLayout = false;
             _optionAnim.TryCancel();
-            SelectedIndex = 0;
+            ReleaseVisibleOptions();
         }
         void OnDestroy()
         {
             _optionAnim.TryCancel();
+            foreach (var data in _optionData)
+            {
+                data?.Dispose();
+            }
         }
         internal void SwitchOption(int direction)
         {
@@ -87,12 +109,12 @@ namespace MajdataPlay.Scenes.Setting
         }
         internal void HandleInput()
         {
-            if (!_isInitialized || _options.Length == 0)
+            if (!_isInitialized || _properties.Length == 0)
             {
                 return;
             }
 
-            EnsureOption(SelectedIndex).HandleInput();
+            FindVisibleOption(SelectedIndex)?.HandleInput();
         }
         internal void RefreshVisibleEnumerators()
         {
@@ -101,13 +123,16 @@ namespace MajdataPlay.Scenes.Setting
                 return;
             }
 
-            for (var i = _visibleStart; i <= _visibleEnd; i++)
+            foreach (var option in _visibleOptions)
             {
-                var option = i >= 0 ? _options[i] : null;
-                if (option is not null)
-                {
-                    option.RefreshEnumerator();
-                }
+                option?.RefreshEnumerator();
+            }
+        }
+        internal void CollectWarmupText(SettingFontWarmup warmup, IEnumerable<TMP_FontAsset> optionFonts, TMP_FontAsset descriptionFont)
+        {
+            foreach (var data in _optionData)
+            {
+                data.CollectWarmupText(warmup, optionFonts, descriptionFont);
             }
         }
         void MoveOption(int direction)
@@ -118,7 +143,7 @@ namespace MajdataPlay.Scenes.Setting
                 _manager.PreviousMenu();
                 return;
             }
-            if (targetIndex >= _options.Length)
+            if (targetIndex >= _properties.Length)
             {
                 _manager.NextMenu();
                 return;
@@ -130,42 +155,50 @@ namespace MajdataPlay.Scenes.Setting
         void DisplayerMoveTo(float targetPos, float duration)
         {
             _optionAnim.TryCancel();
-            UpdateOptionSelectionState();
+            // Keep the selected view in the bounded window even after rapid repeated input.
+            _listCursorPos = Mathf.Clamp(_listCursorPos, targetPos - 1, targetPos + 1);
+            UpdateDisplayerPosition();
             _optionAnim = LMotion.Create(_listCursorPos, targetPos, duration)
                                      .WithScheduler(MotionScheduler.PostLateUpdate)
                                      .WithEase(Ease.OutQuad)
-                                     .Bind(x =>
+                                     .WithOnComplete(CompleteOptionMove)
+                                     .Bind(this, static (x, menu) =>
                                      {
-                                         _listCursorPos = x;
-                                         UpdateDisplayerPosition();
+                                         menu._listCursorPos = x;
+                                         menu.UpdateDisplayerPosition();
                                      });
+        }
+        void CompleteOptionMove()
+        {
+            _listCursorPos = SelectedIndex;
+            UpdateDisplayerPosition();
         }
         void UpdateDisplayerPosition()
         {
-            if (_options.Length == 0)
+            _needsLayout = false;
+            if (_properties.Length == 0)
             {
+                _manager.SetDescriptionText(string.Empty);
                 return;
             }
 
             var visibleStart = Mathf.Max(0, Mathf.FloorToInt(_listCursorPos) - VISIBLE_OPTION_RADIUS);
-            var visibleEnd = Mathf.Min(_options.Length - 1, Mathf.CeilToInt(_listCursorPos) + VISIBLE_OPTION_RADIUS);
-            if (visibleStart != _visibleStart || visibleEnd != _visibleEnd)
+            var visibleEnd = Mathf.Min(_properties.Length - 1, Mathf.CeilToInt(_listCursorPos) + VISIBLE_OPTION_RADIUS);
+            // Release first, so every incoming view can reuse an outgoing view.
+            for (var slot = 0; slot < _visibleOptions.Length; slot++)
             {
-                for (var i = _visibleStart; i <= _visibleEnd; i++)
+                var index = _visibleIndices[slot];
+                if (index >= 0 && (index < visibleStart || index > visibleEnd))
                 {
-                    if (i >= 0 && (i < visibleStart || i > visibleEnd))
-                    {
-                        _options[i]?.gameObject.SetActive(false);
-                    }
+                    ReleaseOption(slot);
                 }
-                _visibleStart = visibleStart;
-                _visibleEnd = visibleEnd;
             }
 
             for (var i = visibleStart; i <= visibleEnd; i++)
             {
                 var distance = i - _listCursorPos;
                 var optionDisplayer = EnsureOption(i);
+                optionDisplayer.SetSelected(i == SelectedIndex);
                 optionDisplayer.transform.localPosition = GetOptionTransformPosition(distance);
                 optionDisplayer.transform.localScale = GetOptionTransformScale(distance);
                 optionDisplayer.SetTextColor(GetOptionTextColor(distance));
@@ -175,32 +208,29 @@ namespace MajdataPlay.Scenes.Setting
                 }
             }
         }
-        void UpdateOptionSelectionState()
+        Option? FindVisibleOption(int index)
         {
-            if (_appliedSelectedIndex == SelectedIndex)
+            for (var slot = 0; slot < _visibleOptions.Length; slot++)
             {
-                return;
+                if (_visibleIndices[slot] == index)
+                {
+                    return _visibleOptions[slot];
+                }
             }
-
-            if (_appliedSelectedIndex >= 0 && _appliedSelectedIndex < _options.Length)
-            {
-                _options[_appliedSelectedIndex]?.SetSelected(false);
-            }
-            EnsureOption(SelectedIndex).SetSelected(true);
-            _appliedSelectedIndex = SelectedIndex;
+            return null;
         }
 
         internal void ToTail()
         {
-            if (!_isInitialized || _options.Length == 0)
+            if (!_isInitialized || _properties.Length == 0)
             {
                 return;
             }
-            SelectOption(_options.Length - 1, false);
+            SelectOption(_properties.Length - 1, false);
         }
         internal void ToHead()
         {
-            if (!_isInitialized || _options.Length == 0)
+            if (!_isInitialized || _properties.Length == 0)
             {
                 return;
             }
@@ -209,7 +239,7 @@ namespace MajdataPlay.Scenes.Setting
 
         internal void ToOption(string optionName)
         {
-            if (!_isInitialized || _options.Length == 0)
+            if (!_isInitialized || _properties.Length == 0)
             {
                 return;
             }
@@ -220,7 +250,7 @@ namespace MajdataPlay.Scenes.Setting
         }
         void SelectOption(int index, bool useAnimation)
         {
-            SelectedIndex = index.Clamp(0, _options.Length - 1);
+            SelectedIndex = index.Clamp(0, _properties.Length - 1);
             _settingConfig.SelectedOption = _properties[SelectedIndex].Name;
             if (useAnimation)
             {
@@ -233,24 +263,41 @@ namespace MajdataPlay.Scenes.Setting
         }
         Option EnsureOption(int index)
         {
-            var option = _options[index];
+            var option = FindVisibleOption(index);
             if (option is not null)
             {
                 return option;
             }
 
-            var optionObj = Instantiate(_optionPrefab, transform);
-            optionObj.SetActive(false);
-            option = optionObj.GetComponent<Option>();
-            _options[index] = option;
-            option.Init(_manager, _properties[index], Instance);
+            var slot = Array.IndexOf(_visibleIndices, -1);
+            var data = _optionData[index];
+            option = _manager.RentOption(transform);
+            _visibleIndices[slot] = index;
+            _visibleOptions[slot] = option;
+            option.Bind(_manager, data);
             return option;
+        }
+        void ReleaseOption(int slot)
+        {
+            var option = _visibleOptions[slot];
+            _visibleOptions[slot] = null;
+            _visibleIndices[slot] = -1;
+            if (option != null && _manager != null)
+            {
+                _manager.ReturnOption(option);
+            }
+        }
+        void ReleaseVisibleOptions()
+        {
+            for (var slot = 0; slot < _visibleOptions.Length; slot++)
+            {
+                ReleaseOption(slot);
+            }
         }
         void SnapDisplayerTo(float targetPos)
         {
             _optionAnim.TryCancel();
             _listCursorPos = targetPos;
-            UpdateOptionSelectionState();
             UpdateDisplayerPosition();
         }
 

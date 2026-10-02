@@ -6,6 +6,7 @@ public sealed class GameOffsetEnumerator : DefaultNumberEnumerator, IOptionEnume
     OffsetUnitOption _lastOffsetUnit;
     public override void Refresh()
     {
+        base.Refresh();
         CheckOffsetUnit();
     }
     protected override void InitInternal()

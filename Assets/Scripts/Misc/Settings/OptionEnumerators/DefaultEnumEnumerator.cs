@@ -15,16 +15,10 @@ public class DefaultEnumEnumerator : OptionEnumeratorBase, IOptionEnumerator
         {
             throw new InvalidOperationException("Type provided must be an Enum");
         }
-        var values = Enum.GetValues(Type);
-        OptionValues = new object[values.Length];
-        ValueTexts = new string[values.Length];
-        LocalizedValueTexts = new string[values.Length];
-        for (int i = 0; i < values.Length; i++)
-        {
-            OptionValues[i] = values.GetValue(i);
-        }
+        // Enumerators may mutate their arrays; keep the global constants immutable.
+        OptionValues = (object[])SettingReflectionCache.GetEnumValues(Type).Clone();
         InitValueTexts();
         var value = Value;
-        ValueIndex = OptionValues.FindIndex(x => (int)x == (int)value);
+        ValueIndex = Array.IndexOf(OptionValues, value);
     }
 }

@@ -32,7 +32,7 @@ Shader "UI/Rounded Rect"
         }
 
         Stencil { Ref [_Stencil] Comp [_StencilComp] Pass [_StencilOp] ReadMask [_StencilReadMask] WriteMask [_StencilWriteMask] }
-        Cull Off Lighting Off ZWrite Off ZTest [ZBottom] Blend SrcAlpha OneMinusSrcAlpha ColorMask [_ColorMask]
+        Cull Off Lighting Off ZWrite Off ZTest [unity_GUIZTestMode] Blend SrcAlpha OneMinusSrcAlpha ColorMask [_ColorMask]
 
         Pass
         {

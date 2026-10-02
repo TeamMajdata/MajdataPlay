@@ -7,6 +7,7 @@ public sealed class EngineBooleanSettingEnumerator : DefaultBooleanEnumerator, I
 
     public override void Refresh()
     {
+        base.Refresh();
         var currentValue = (bool)Value;
         if (_lastValue == currentValue)
         {

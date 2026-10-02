@@ -1,0 +1,38 @@
+<Project>
+  <PropertyGroup>
+    <BaseIntermediateOutputPath>../../../Temp/SettingValidation/obj/</BaseIntermediateOutputPath>
+    <OutputPath>../../../Temp/SettingValidation/bin/</OutputPath>
+  </PropertyGroup>
+  <Import Project="Sdk.props" Sdk="Microsoft.NET.Sdk" />
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net9.0</TargetFramework>
+    <LangVersion>preview</LangVersion>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <DefineConstants>UNITY_STANDALONE</DefineConstants>
+    <RestoreSources>$(MSBuildThisFileDirectory)</RestoreSources>
+    <NuGetAudit>false</NuGetAudit>
+    <NoWarn>CS0649;CS8632</NoWarn>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../../../Assets/Scripts/Scenes/Setting/Menu.cs" Link="Production/Menu.cs" />
+    <Compile Include="../../../Assets/Scripts/Scenes/Setting/Option.cs" Link="Production/Option.cs" />
+    <Compile Include="../../../Assets/Scripts/Scenes/Setting/OptionData.cs" Link="Production/OptionData.cs" />
+    <Compile Include="../../../Assets/Scripts/Scenes/Setting/SettingTextTint.cs" Link="Production/SettingTextTint.cs" />
+    <Compile Include="../../../Assets/Scripts/Scenes/Setting/SettingFontWarmup.cs" Link="Production/SettingFontWarmup.cs" />
+    <Compile Include="../../../Assets/Scripts/Scenes/Setting/SettingManager.cs" Link="Production/SettingManager.cs" />
+    <Compile Include="../../../Assets/Scripts/Misc/Settings/OptionEnumerators/OptionEnumeratorBase.cs" Link="Production/OptionEnumeratorBase.cs" />
+    <Compile Include="../../../Assets/Scripts/Misc/Settings/OptionEnumerators/Default*.cs" Link="Production/%(Filename)%(Extension)" />
+    <Compile Include="../../../Assets/Scripts/Misc/Settings/OptionEnumerators/Engine*Enumerator.cs" Link="Production/%(Filename)%(Extension)" />
+    <Compile Include="../../../Assets/Scripts/Misc/Settings/OptionEnumerators/AudioVolumeEnumerator.cs" Link="Production/AudioVolumeEnumerator.cs" />
+    <Compile Include="../../../Assets/Scripts/Misc/Settings/OptionEnumerators/GameOffsetEnumerator.cs" Link="Production/GameOffsetEnumerator.cs" />
+    <Compile Include="../../../Assets/Scripts/Misc/Settings/OptionEnumerators/NoteMaskEnumerator.cs" Link="Production/NoteMaskEnumerator.cs" />
+    <Compile Include="../../../Assets/Scripts/Misc/Settings/Interfaces/IOptionEnumerator.cs" Link="Production/IOptionEnumerator.cs" />
+    <Compile Include="../../../Assets/Scripts/Misc/Settings/Attributes/*.cs" Link="Production/%(Filename)%(Extension)" />
+    <Compile Include="../../../Assets/Scripts/Misc/Settings/Runtime/SettingReflectionCache.cs" Link="Production/SettingReflectionCache.cs" />
+    <Compile Include="../../../Assets/Scripts/Misc/Base/Extensions/TypeExtensions.cs" Link="Production/TypeExtensions.cs" />
+    <Compile Include="../../../Assets/Scripts/IO/Base/InputState.cs" Link="Production/InputState.cs" />
+  </ItemGroup>
+  <Import Project="Sdk.targets" Sdk="Microsoft.NET.Sdk" />
+</Project>
