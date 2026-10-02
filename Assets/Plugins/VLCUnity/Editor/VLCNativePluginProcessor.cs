@@ -37,7 +37,7 @@ namespace Videolabs.VLCUnity.Editor
         string[] UWP_ARCH = { "x86_64", "ARM64" };
 
         const string UWP_PATH = "VLCUnity/Plugins/WSA/UWP";
-        const string WINDOWS_PATH = "VLCUnity/Plugins/Windows/x86_64";
+        const string WINDOWS_PATH = "VLCUnity/Runtime/Plugins/Windows/x86_64";
         const string ANDROID_PATH = "VLCUnity/Plugins/Android/libs";
         const string IOS_PATH = "VLCUnity/Plugins/iOS/";
         const string IOS_LOADPLUGIN_SOURCE = "LoadPlugin.mm";

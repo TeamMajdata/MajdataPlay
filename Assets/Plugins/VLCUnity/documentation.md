@@ -1,5 +1,19 @@
 Welcome to VLC for Unity on Windows!
 
+## MajdataPlay Windows x64 integration
+
+This project supplies a source-built native bridge for Direct3D 11, Direct3D 12,
+OpenGL Core and Vulkan. Use `LibVLCSharp.VlcVideoOutput`, which selects D3D11 GPU
+texture sharing when the active graphics API and driver support it, and portable
+RGBA callbacks otherwise. `BGManager` uses this wrapper. The GPU path avoids CPU
+pixel transfers but still performs video color conversion and a GPU presentation
+blit. Keep the native plugin preloaded and restart Unity after replacing it.
+
+Build instructions, capability requirements and validation commands are in
+[`Tools/VLCUnity/README.md`](../../../Tools/VLCUnity/README.md).
+The upstream documentation below also describes platforms not shipped by this
+repository; this addition targets Windows x64 only.
+
 ## Docs reference
 
 See the [LibVLCSharp documentation](https://code.videolan.org/videolan/LibVLCSharp/-/blob/master/docs/home.md).

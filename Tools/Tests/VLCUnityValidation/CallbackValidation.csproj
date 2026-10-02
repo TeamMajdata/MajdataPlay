@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <OutputType>Exe</OutputType>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <Nullable>disable</Nullable>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../../../Assets/Plugins/VLCUnity/Runtime/Internal/VlcCpuVideoOutput.cs" />
+    <Compile Include="CallbackValidation.cs" />
+  </ItemGroup>
+</Project>

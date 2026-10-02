@@ -57,14 +57,9 @@ namespace MajdataPlay.Scenes.Game
 
         Material _backgroundMaterial;
 
-        // This is the texture libVLC writes to directly. It's private.
-        Texture2D? _vlcTexture = null;
-        // We copy it into this texture which we actually use in unity.
-        [SerializeField]
-        RenderTexture? _renderTexture = null;
-
 #if UNITY_STANDALONE_WIN
         MediaPlayer _videoPlayer;
+        VlcVideoOutput _videoOutput;
 #else
         VideoPlayer _videoPlayer;
 #endif
@@ -88,11 +83,10 @@ namespace MajdataPlay.Scenes.Game
                 _defaultSprite = RuntimeDatabase.Sprite.EmptySongCover;
             }
 #if UNITY_STANDALONE_WIN
-            _videoPlayer = new MediaPlayer(MajEnv.VLCLibrary)
-            {
-                FileCaching = 0,
-                NetworkCaching = 0,
-            };
+            _videoOutput = new VlcVideoOutput(MajEnv.VLCLibrary, _flipTextureX, _flipTextureY);
+            _videoPlayer = _videoOutput.Player;
+            _videoPlayer.FileCaching = 0;
+            _videoPlayer.NetworkCaching = 0;
 #else
             _videoPlayer = GetComponent<VideoPlayer>();
 #endif
@@ -103,8 +97,8 @@ namespace MajdataPlay.Scenes.Game
         {
 #if UNITY_STANDALONE_WIN
             MajDebug.LogInfo("[VLC] DestroyMediaPlayer");
-            _videoPlayer.Stop();
-            _videoPlayer.Dispose();
+            _videoRenderer.texture = null;
+            _videoOutput?.Dispose();
 #endif
             Majdata<BGManager>.Free();
         }
@@ -189,14 +183,12 @@ namespace MajdataPlay.Scenes.Game
 
         public void DisableVideo()
         {
-            if (_usePictureAsBackground)
-            {
-                return;
-            }
             _usePictureAsBackground = true;
             //Disable rawimage optional
             _videoRenderer.enabled = false;
+            _coverRenderer.enabled = true;
 #if UNITY_STANDALONE_WIN
+            _videoPlayer.Stop();
             _videoPlayer.Media = null;
 #else
             _videoPlayer.url = null;
@@ -211,38 +203,68 @@ namespace MajdataPlay.Scenes.Game
         public async UniTask SetMovieAsync(string path, Sprite? fallback)
         {
 #if UNITY_STANDALONE_WIN // VLC Unity
+            var cancellationToken = destroyCancellationToken;
             try
             {
-
-                MajDebug.LogInfo("[VLC] LoadMedia");
-                if (_videoPlayer.Media != null)
+                var previousMedia = _videoPlayer.Media;
+                DisableVideo();
+                previousMedia?.Dispose();
+                _videoRenderer.texture = null;
+                var initializedAt = MajTimeline.UnscaledTime;
+                while (true)
                 {
-                    _videoPlayer.Media.Dispose();
+                    cancellationToken.ThrowIfCancellationRequested();
+                    var state = _videoPlayer.State;
+                    if (_videoOutput.IsReady && (state == VLCState.NothingSpecial || state == VLCState.Stopped))
+                        break;
+                    if (MajTimeline.UnscaledTime - initializedAt > TimeSpan.FromSeconds(5))
+                        throw new TimeoutException("VLC graphics output initialization timed out.");
+                    await UniTask.Yield(PlayerLoopTiming.Update, cancellationToken);
                 }
+                MajDebug.LogInfo("[VLC] LoadMedia");
 
                 var trimmedPath = path.Trim(new char[] { '"' });//Windows likes to copy paths with quotes but Uri does not like to open them
                 var uri = new Uri(trimmedPath);
                 MajDebug.LogInfo("[VLC] Uri: " + uri.ToString());
-                var media = new Media(uri);
+                using var media = new Media(uri);
                 //media.AddOption(":start-paused");
                 _videoPlayer.Media = media;
 
 
                 MajDebug.LogInfo("[VLC] BeginParse");
-                var ret = await _videoPlayer.Media.ParseAsync(MajEnv.VLCLibrary!);
+                var ret = await media.ParseAsync(MajEnv.VLCLibrary!);
+                cancellationToken.ThrowIfCancellationRequested();
                 if(ret != MediaParsedStatus.Done)
                 {
                     SetBackgroundPic(fallback);
                     return;
                 }
                 MajDebug.LogInfo("[VLC] " + ret);
-                _coverRenderer.enabled = false;
-                _usePictureAsBackground = false;
-                _videoPlayer.Play();
+                if (!_videoPlayer.Play())
+                    throw new InvalidOperationException("VLC could not start the background video.");
                 _mediaLengthMs = media.Duration;
-                await UniTask.Delay(200);
-                _videoPlayer.Pause();
+                var preparingAt = MajTimeline.UnscaledTime;
+                // Keep picture mode until a frame is available: normal LateUpdate
+                // must not consume the first frame while imports/fallback initialize.
+                while (!_videoOutput.TryUpdateTexture() || _videoOutput.Texture == null)
+                {
+                    if (MajTimeline.UnscaledTime - preparingAt > TimeSpan.FromSeconds(15))
+                        throw new TimeoutException("VLC background video did not produce a frame.");
+                    await UniTask.Yield(PlayerLoopTiming.Update, cancellationToken);
+                }
+                cancellationToken.ThrowIfCancellationRequested();
+                var texture = _videoOutput.Texture;
+                _videoRenderer.texture = texture;
+                _videoRenderer.gameObject.transform.localScale = new Vector3(1f, (float)texture.height / texture.width, 1f);
+                _videoPlayer.SetPause(true);
                 _videoPlayer.SeekTo(TimeSpan.Zero);
+                _coverRenderer.enabled = false;
+                _videoRenderer.enabled = true;
+                _usePictureAsBackground = false;
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                // OnDestroy already owns player/texture cleanup.
             }
             catch(Exception e)
             {
@@ -288,54 +310,14 @@ namespace MajdataPlay.Scenes.Game
             {
                 return;
             }
-            if (!_videoPlayer.IsPlaying)
+            // Also drain the last decoded frame after pause or a seek.
+            if (!_videoOutput.TryUpdateTexture())
             {
                 return;
             }
-
-            //Get size every frame
-            uint height = 0;
-            uint width = 0;
-            IntPtr texPtr;
-            _videoPlayer.Size(0, ref width, ref height);
-            //Update the vlc texture (tex)
-            texPtr = _videoPlayer.GetTexture(width, height, out var isUpdated);
-
-            if (!isUpdated)
-            {
-                return;
-            }
-
-            if (_vlcTexture is null || _vlcTexture.width != width || _vlcTexture.height != height)
-            {
-                var px = width;
-                var py = height;
-                //If the currently playing video uses the Bottom Right orientation, we have to do this to avoid stretching it.
-                if (GetVideoOrientation() == VideoOrientation.BottomRight)
-                {
-                    uint swap = px;
-                    px = py;
-                    py = swap;
-                }
-
-                var scale = (float)py / (float)px;
-
-                //Make a texture of the proper size for the video to output to
-                _vlcTexture = Texture2D.CreateExternalTexture((int)px, (int)py, TextureFormat.RGBA32, false, true, texPtr);
-                //Make a renderTexture the same size as vlctex
-                _renderTexture = new RenderTexture(_vlcTexture.width, _vlcTexture.height, 0, RenderTextureFormat.ARGB32);
-
-                _videoRenderer.texture = _renderTexture;
-                _videoRenderer.gameObject.transform.localScale = new Vector3(1f, scale, 1f);
-            }
-
-
-            _vlcTexture.UpdateExternalTexture(texPtr);
-
-            //Copy the vlc texture into the output texture, automatically flipped over
-            var flip = new Vector2(_flipTextureX ? -1 : 1, _flipTextureY ? -1 : 1);
-            //If you wanted to do post processing outside of VLC you could use a shader here.
-            Graphics.Blit(_vlcTexture, _renderTexture, flip, Vector2.zero);
+            var texture = _videoOutput.Texture;
+            _videoRenderer.texture = texture;
+            _videoRenderer.gameObject.transform.localScale = new Vector3(1f, (float)texture.height / texture.width, 1f);
         }
 
         public VideoOrientation? GetVideoOrientation()

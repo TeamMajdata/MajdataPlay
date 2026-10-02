@@ -25,8 +25,9 @@ public class CopyLibVLCFiles : IPostprocessBuildWithReport
             return;
 
         var buildOutput = Path.GetDirectoryName(report.summary.outputPath);
-        var libvlcBuildOutput = Path.Combine(buildOutput, $"{Application.productName}{Data}", Plugins, x64);
-        var sourceLibvlcLocation = Path.Combine(Path.GetFullPath(Application.dataPath), VLCUnity, Plugins, Windows, x64);
+        var playerName = Path.GetFileNameWithoutExtension(report.summary.outputPath);
+        var libvlcBuildOutput = Path.Combine(buildOutput, $"{playerName}{Data}", Plugins, x64);
+        var sourceLibvlcLocation = Path.Combine(Path.GetFullPath(Application.dataPath), Plugins, VLCUnity, "Runtime", Plugins, Windows, x64);
         var sourcePluginsLibvlcLocation = Path.Combine(sourceLibvlcLocation, plugins);
 
         CopyFolder(Path.Combine(sourceLibvlcLocation, lua), Path.Combine(libvlcBuildOutput, lua));

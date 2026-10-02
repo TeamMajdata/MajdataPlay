@@ -26,9 +26,8 @@ namespace Videolabs.VLCUnity.Editor
         "\n\nPlease go to Player Settings > Android > Auto Graphics API and remove Vulkan from the list." +
         "\nOnly OpenGL ES 2.0 and 3.0 are currently supported on Android.";
 
-        const string WindowsD3D12ErrorMessage = "The Direct3D12 graphics API is not supported by the VLC Unity plugin." +
-        "\n\nPlease go to Player Settings > Windows or UWP > Auto Graphics API and remove Direct3D12 from the list." +
-        "\nOnly Direct3D11 is currently supported on Windows and UWP targets.";
+        const string WindowsD3D12ErrorMessage = "The bundled UWP VLC Unity plugin supports only Direct3D11." +
+        "\n\nPlease go to Player Settings > UWP > Auto Graphics API and remove Direct3D12 from the list.";
 
 #if UNITY_SUPPORTS_BUILD_REPORT
         public void OnPreprocessBuild(BuildReport report)
@@ -47,7 +46,9 @@ namespace Videolabs.VLCUnity.Editor
                 //    throw new BuildFailedException(AndroidVulkanErrorMessage);
                 //}
             }
-            else if(target == BuildTarget.StandaloneWindows64 || target == BuildTarget.WSAPlayer)
+            // The bundled Windows x64 bridge supports D3D12. The separate UWP
+            // binaries still have their original D3D11-only restriction.
+            else if(target == BuildTarget.WSAPlayer)
             {
                 if(IsD3D12Configured(target))
                 {
