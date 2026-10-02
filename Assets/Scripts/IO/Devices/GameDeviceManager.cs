@@ -5,7 +5,7 @@ using MajdataPlay.Settings;
 #nullable enable
 namespace MajdataPlay.IO
 {
-    /// <summary>Owns physical devices; capabilities may refer to the same instance.</summary>
+    /// <summary>Owns input and output devices; capabilities may refer to the same instance.</summary>
     internal static class GameDeviceManager
     {
         static bool _initialized;
@@ -13,6 +13,8 @@ namespace MajdataPlay.IO
         public static IButtonRingDevice? ButtonRing { get; private set; }
         public static ITouchPanelDevice? TouchPanel { get; private set; }
         public static ILedDevice? LedDevice { get; private set; }
+        public static ScreenTouchPanelDevice ScreenTouchPanel { get; } = new ScreenTouchPanelDevice();
+        public static MouseTouchPanelDevice MouseTouchPanel { get; } = new MouseTouchPanelDevice();
 
         public static void Init()
         {
@@ -71,11 +73,25 @@ namespace MajdataPlay.IO
                 }
             }
 #elif UNITY_ANDROID || UNITY_IOS
-            ButtonRing = new KeyboardButtonRingDevice();
+            switch (MajEnv.Settings.IO.InputDevice.ExternalButtonRing)
+            {
+                case MobileExternalButtonRingOption.Keyboard:
+#if UNITY_ANDROID
+                    ButtonRing = new AndroidKeyboardButtonRingDevice();
+#else
+                    ButtonRing = new IOSKeyboardButtonRingDevice();
+#endif
+                    break;
+                case MobileExternalButtonRingOption.Gamepad:
+                    ButtonRing = new GamepadButtonRingDevice();
+                    break;
+            }
 #endif
             Register(ButtonRing);
             Register(TouchPanel);
             Register(LedDevice);
+            Register(ScreenTouchPanel);
+            Register(MouseTouchPanel);
 #if UNITY_STANDALONE
             foreach (var device in _devices)
                 if (device is IODevice io) io.Start();

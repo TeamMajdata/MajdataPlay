@@ -9,7 +9,7 @@ using UnityEngine;
 using UnityEngine.InputSystem;
 using UnityEngine.InputSystem.LowLevel;
 
-internal static class Program
+internal static partial class Program
 {
     static int _assertions;
 
@@ -28,6 +28,8 @@ internal static class Program
         VerifySerialLedPackets();
         VerifyDaoLedPackets();
         VerifySharedDeviceFactory();
+        VerifyPointerDevices();
+        VerifySupplementalDeviceFactory();
         Console.WriteLine($"IO_VALIDATION_PASSED ({_assertions} assertions)");
     }
 
@@ -514,7 +516,13 @@ internal static class Program
     static List<IGameDevice> RegisteredDevices() =>
         (List<IGameDevice>)typeof(GameDeviceManager).GetField("_devices", BindingFlags.NonPublic | BindingFlags.Static)!.GetValue(null)!;
 
-    static int RegisteredDeviceCount() => RegisteredDevices().Count;
+    static int RegisteredDeviceCount()
+    {
+        var count = 0;
+        foreach (var device in RegisteredDevices())
+            if (device is IODevice) count++;
+        return count;
+    }
 
     static void ResetDeviceFactory()
     {

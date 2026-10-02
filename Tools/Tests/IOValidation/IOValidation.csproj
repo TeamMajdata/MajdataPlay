@@ -27,6 +27,9 @@
     <Compile Include="../../../Assets/Scripts/IO/Devices/Pipe/PipeButtonRingDevice.cs" Link="Production/PipeButtonRingDevice.cs" />
     <Compile Include="../../../Assets/Scripts/IO/Devices/Pipe/PipeLedDevice.cs" Link="Production/PipeLedDevice.cs" />
     <Compile Include="../../../Assets/Scripts/IO/Devices/General/KeyboardButtonRingDevice.cs" Link="Production/KeyboardButtonRingDevice.cs" />
+    <Compile Include="../../../Assets/Scripts/IO/Devices/General/ScreenTouchPanelDevice.cs" Link="Production/ScreenTouchPanelDevice.cs" />
+    <Compile Include="../../../Assets/Scripts/IO/Devices/General/MouseTouchPanelDevice.cs" Link="Production/MouseTouchPanelDevice.cs" />
+    <Compile Include="../../../Assets/Scripts/IO/Devices/General/PointerInputState.cs" Link="Production/PointerInputState.cs" />
     <Compile Include="../../../Assets/Scripts/IO/KeyboardHelper.cs" Link="Production/KeyboardHelper.cs" />
     <Compile Include="../../../Assets/Scripts/IO/Base/KeyCode.cs" Link="Production/KeyCode.cs" />
     <Compile Include="../../../Assets/Scripts/IO/Base/Enums/ButtonZone.cs" Link="Production/ButtonZone.cs" />

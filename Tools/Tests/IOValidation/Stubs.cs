@@ -91,6 +91,7 @@ namespace MajdataPlay.Diagnostics
     public static class MajDebug
     {
         public static void LogInfo(string tag, string message) { }
+        public static void LogInfo(string message) { }
         public static void LogDebug(string tag, string message) { }
         public static void LogWarning(string tag, string message) { }
         public static void LogError(string tag, string message) { }
