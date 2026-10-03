@@ -3,11 +3,13 @@ using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 using MajdataPlay.Video.Internal;
+using MajdataPlay.Diagnostics;
 using UnityEngine;
 
 namespace MajdataPlay.Video
 {
     public enum VideoPlaybackState { Idle, Preparing, Prepared, Playing, Paused, Seeking, Stopped, Ended, Error }
+    public enum VideoDecoderType { Software, Hardware }
 
     /// <summary>
     /// Silent video player. All public methods/events run on the Unity main thread.
@@ -23,8 +25,11 @@ namespace MajdataPlay.Video
         [SerializeField, Range(0.0625f, 16)] float _playbackRate = 1;
         [SerializeField, Range(1, 8)] int _bufferedFrameLimit = 3;
         [SerializeField, Min(1)] int _ioTimeoutSeconds = 15;
-        [SerializeField, Tooltip("Attempt native GPU interoperability, otherwise use software RGBA upload.")]
+        // Retain the serialized bool so existing scenes keep their decoder preference.
+        [SerializeField, HideInInspector]
         bool _preferHardwareDecoding = true;
+        [SerializeField, Tooltip("Prefer native GPU texture sharing. If unavailable, retain hardware decoding with CPU upload when supported. Applies when opening media.")]
+        bool _preferNativeTextures = true;
         [SerializeField, Tooltip("Require native GPU frames. Unsupported codecs/devices report an error instead of uploading CPU pixels. Applies when opening media.")]
         bool _requireHardwareDecoding;
         [SerializeField] Renderer _targetRenderer;
@@ -40,7 +45,8 @@ namespace MajdataPlay.Video
         MaterialPropertyBlock _materialProperties;
         TaskCompletionSource<bool> _prepareCompletion, _seekCompletion;
         CancellationToken _prepareCancellation;
-        bool _playWhenReady, _waitingForFrame, _prepared, _hardwareActive, _hardwareRequired, _stepRequested;
+        bool _playWhenReady, _waitingForFrame, _prepared, _hardwareActive, _hardwareRequired, _hardwareCpuUploadAttempted, _stepRequested;
+        string _reportedTransferMode;
         VideoPlaybackState _afterSeek;
         double _seekTarget, _lastFrameEnd;
         long _frameNumber, _lastReportedTime = -1, _controlRevision;
@@ -73,6 +79,9 @@ namespace MajdataPlay.Video
         public uint Height => (uint)(_texture != null ? _texture.height : _info?.Height ?? 0);
         public double FrameRate => _info?.FrameRate ?? 0;
         public string CodecName => _info?.Codec ?? "";
+        public string DecoderName => _info?.DecoderName ?? "";
+        public string DecoderDevice => _info?.DecoderDevice ?? "";
+        public VideoDecoderType DecoderType => _info?.HardwareDecoding == true ? VideoDecoderType.Hardware : VideoDecoderType.Software;
         public double LengthSeconds => _info?.Duration ?? 0;
         public long Length => (long)(LengthSeconds * 1000);
         public long Time { get => (long)(time * 1000); set => SeekTo(TimeSpan.FromMilliseconds(value)); }
@@ -86,10 +95,32 @@ namespace MajdataPlay.Video
             get => LengthSeconds > 0 ? (float)(time / LengthSeconds) : 0;
             set { if (LengthSeconds <= 0) throw new InvalidOperationException("This input has no known duration."); time = Mathf.Clamp01(value) * LengthSeconds; }
         }
-        public float Rate { get => _playbackRate; set { CheckThread(); _clock.Rate = value; _playbackRate = value; } }
+        public float Rate
+        {
+            get => _playbackRate;
+            set
+            {
+                CheckThread(); _clock.Rate = value;
+                if (_playbackRate != value) MajDebug.LogDebug("FFmpeg", "[Player] Playback rate=" + value + ".");
+                _playbackRate = value;
+            }
+        }
         public float playbackSpeed { get => Rate; set => Rate = value; }
         public bool Loop { get => _loop; set => _loop = value; }
         public bool PreferHardwareDecoding { get => _preferHardwareDecoding; set => _preferHardwareDecoding = value; }
+        /// <summary>Applies to the next media open. Existing PreferHardwareDecoding is an alias.</summary>
+        public VideoDecoderType PreferredDecoderType
+        {
+            get => _preferHardwareDecoding ? VideoDecoderType.Hardware : VideoDecoderType.Software;
+            set
+            {
+                if (value != VideoDecoderType.Hardware && value != VideoDecoderType.Software)
+                    throw new ArgumentOutOfRangeException(nameof(value));
+                _preferHardwareDecoding = value == VideoDecoderType.Hardware;
+            }
+        }
+        /// <summary>False requests hardware decode with CPU upload; strict GPU mode overrides this.</summary>
+        public bool PreferNativeTextures { get => _preferNativeTextures; set => _preferNativeTextures = value; }
         /// <summary>Overrides PreferHardwareDecoding; takes effect the next time media opens.</summary>
         public bool RequireHardwareDecoding { get => _requireHardwareDecoding; set => _requireHardwareDecoding = value; }
         public RenderTexture TargetTexture { get => _targetTexture; set => _targetTexture = value; }
@@ -122,15 +153,20 @@ namespace MajdataPlay.Video
             State = VideoPlaybackState.Preparing;
             LastError = null;
             HardwareFallbackReason = null;
+            _reportedTransferMode = null;
             try
             {
                 _hardwareRequired = _requireHardwareDecoding;
                 var options = new DecoderOptions { IOTimeoutMilliseconds = Math.Max(1, _ioTimeoutSeconds) * 1000,
-                    RequireHardwareDecoding = _hardwareRequired };
-                ConfigureHardware(options);
+                    RequireHardwareDecoding = _hardwareRequired, AllowHardwareCpuUpload = !_hardwareRequired };
+                MajDebug.LogInfo("FFmpeg", "[Player] Preparing video; preferred decoder=" + PreferredDecoderType +
+                    ", prefer native textures=" + _preferNativeTextures + ", require GPU-only=" + _hardwareRequired + ".");
+                if (_preferHardwareDecoding || _hardwareRequired)
+                    ConfigureHardware(options, _preferNativeTextures || _hardwareRequired);
                 if (_hardwareRequired && !options.KeepNativeFrames)
                     throw new NotSupportedException(HardwareFallbackReason ?? "Native GPU video playback is unavailable.");
-                _hardwareActive = options.KeepNativeFrames;
+                _hardwareActive = options.HardwareDeviceType != FFmpeg.AutoGen.AVHWDeviceType.AV_HWDEVICE_TYPE_NONE;
+                _hardwareCpuUploadAttempted = !options.KeepNativeFrames;
                 _session = new VideoDecodeSession(NormalizeSource(_source), options, _bufferedFrameLimit);
             }
             catch (Exception error) { Fail(error); }
@@ -159,6 +195,7 @@ namespace MajdataPlay.Video
             if (IsPlaying) return;
             State = VideoPlaybackState.Playing;
             _clock.Start();
+            MajDebug.LogDebug("FFmpeg", "[Player] Play at " + time.ToString("F3") + " s.");
             Started?.Invoke(this);
         }
         public void Pause()
@@ -168,6 +205,7 @@ namespace MajdataPlay.Video
             if (!IsPrepared) return;
             _clock.Pause(); _waitingForFrame = false;
             State = VideoPlaybackState.Paused;
+            MajDebug.LogDebug("FFmpeg", "[Player] Pause at " + time.ToString("F3") + " s.");
             Paused?.Invoke(this);
         }
         public void SetPause(bool pause) { if (pause) Pause(); else Play(); }
@@ -177,6 +215,7 @@ namespace MajdataPlay.Video
         public void Stop()
         {
             CheckThread(); _playWhenReady = false;
+            MajDebug.LogDebug("FFmpeg", "[Player] Stop requested.");
             if (!IsPrepared || !IsSeekable)
             {
                 var closeRevision = _controlRevision + 1;
@@ -196,6 +235,7 @@ namespace MajdataPlay.Video
         public void Close()
         {
             CheckThread();
+            if (_session != null) MajDebug.LogDebug("FFmpeg", "[Player] Closing decoder session.");
             _controlRevision++;
             _session?.Dispose(); _session = null;
             _prepareCompletion?.TrySetCanceled(); _prepareCompletion = null;
@@ -221,6 +261,7 @@ namespace MajdataPlay.Video
             // Observe failures for fire-and-forget VLC-style setters too.
             Observe(_seekCompletion.Task);
             _seekTarget = ClampTime(seconds);
+            MajDebug.LogDebug("FFmpeg", "[Player] Seek to " + _seekTarget.ToString("F3") + " s; resume=" + afterSeek + ".");
             _clock.Pause(); _clock.Set(_seekTarget);
             _afterSeek = afterSeek; _waitingForFrame = false; _stepRequested = false;
             State = VideoPlaybackState.Seeking;
@@ -230,6 +271,9 @@ namespace MajdataPlay.Video
         void Update()
         {
             if (_session == null) return;
+#if ENABLE_PROFILER && (UNITY_EDITOR || DEBUG)
+            using var profile = UnityProfiler.Create("FFmpeg.Player.Update");
+#endif
             var session = _session;
             var revision = _controlRevision;
             try
@@ -238,7 +282,7 @@ namespace MajdataPlay.Video
                 if (State == VideoPlaybackState.Preparing && _prepareCancellation.IsCancellationRequested) { Close(); return; }
                 if (_session.Error != null)
                 {
-                    if (_hardwareActive) RecoverInSoftware(_session.Error);
+                    if (_hardwareActive && _session.Info?.HardwareDecoding != false) RecoverHardwarePlayback(_session.Error);
                     else Fail(_session.Error);
                     return;
                 }
@@ -253,7 +297,13 @@ namespace MajdataPlay.Video
                         using (frame) { if (!Present(frame)) return; }
                         if (State == VideoPlaybackState.Preparing)
                         {
+                            // A first-texture/frame listener may Pause or Play the same
+                            // preparing session. Its frame still completes preparation;
+                            // only a replacement session invalidates it.
+                            revision = _controlRevision;
                             _clock.Set(0); _prepared = true; State = VideoPlaybackState.Prepared;
+                            MajDebug.LogInfo("FFmpeg", "[Player] Prepared; encoding=" + CodecName + ", decoder=" + DecoderName +
+                                ", type=" + DecoderType + ", device=" + DecoderDevice + ".");
                             var completion = _prepareCompletion; _prepareCompletion = null;
                             _prepareCancellation = default;
                             completion?.TrySetResult(true);
@@ -285,7 +335,7 @@ namespace MajdataPlay.Video
                 var position = Time;
                 if (position != _lastReportedTime) { _lastReportedTime = position; TimeChanged?.Invoke(this, position); }
             }
-            catch (NotSupportedException error) when (_hardwareActive) { RecoverInSoftware(error); }
+            catch (NotSupportedException error) when (_hardwareActive) { RecoverHardwarePlayback(error); }
             catch (Exception error) { Fail(error); }
         }
         void FinishSeek()
@@ -294,6 +344,7 @@ namespace MajdataPlay.Video
             if (IsPlaying) _clock.Start();
             var completion = _seekCompletion; _seekCompletion = null;
             completion?.TrySetResult(true);
+            MajDebug.LogDebug("FFmpeg", "[Player] Seek completed at " + _seekTarget.ToString("F3") + " s.");
             SeekCompleted?.Invoke(this);
         }
         void AdvancePlayback()
@@ -318,6 +369,7 @@ namespace MajdataPlay.Video
             {
                 _clock.Pause(); _clock.Set(LengthSeconds > 0 ? LengthSeconds : _lastFrameEnd);
                 _waitingForFrame = false; State = VideoPlaybackState.Ended;
+                MajDebug.LogDebug("FFmpeg", "[Player] End reached; loop=" + _loop + ".");
                 EndReached?.Invoke(this);
                 if (_loop && IsSeekable && State == VideoPlaybackState.Ended) BeginSeek(0, VideoPlaybackState.Playing);
             }
@@ -332,6 +384,9 @@ namespace MajdataPlay.Video
         }
         bool Present(DecodedVideoFrame frame)
         {
+#if ENABLE_PROFILER && (UNITY_EDITOR || DEBUG)
+            using var profile = UnityProfiler.Create("FFmpeg.Player.Present");
+#endif
             var session = _session;
             var revision = _controlRevision;
             Texture output = null;
@@ -345,18 +400,30 @@ namespace MajdataPlay.Video
                     _uploadTexture = new Texture2D(frame.Width, frame.Height, TextureFormat.RGBA32, false, false)
                     { name = "FFmpeg video", wrapMode = TextureWrapMode.Clamp, filterMode = FilterMode.Bilinear };
                 }
-                _uploadTexture.LoadRawTextureData(frame.Data, frame.DataSize);
-                _uploadTexture.Apply(false, false);
+#if ENABLE_PROFILER && (UNITY_EDITOR || DEBUG)
+                using (UnityProfiler.Create("FFmpeg.Player.CpuUpload"))
+#endif
+                {
+                    _uploadTexture.LoadRawTextureData(frame.Data, frame.DataSize);
+                    _uploadTexture.Apply(false, false);
+                }
                 output = _uploadTexture;
-                TransferMode = "Software RGBA upload";
+                TransferMode = frame.HardwareDecoded ? "Hardware decode + CPU RGBA upload" : "Software RGBA upload";
+            }
+            if (_reportedTransferMode != TransferMode)
+            {
+                _reportedTransferMode = TransferMode;
+                MajDebug.LogInfo("FFmpeg", "[Player] Texture transfer=" + TransferMode + ".");
             }
             if (_targetTexture != null) { Graphics.Blit(output, _targetTexture); output = _targetTexture; }
             SetTexture(output);
-            if (!IsCurrent(session, revision)) return false;
+            if (!IsPresentationCurrent(session, revision)) return false;
             _lastFrameEnd = frame.PresentationTime + Math.Max(0.001, frame.Duration);
             FrameReady?.Invoke(this, ++_frameNumber);
-            return IsCurrent(session, revision);
+            return IsPresentationCurrent(session, revision);
         }
+        bool IsPresentationCurrent(VideoDecodeSession session, long revision) =>
+            IsCurrent(session, revision) || (_session == session && State == VideoPlaybackState.Preparing);
         bool IsCurrent(VideoDecodeSession session, long revision) => _session == session && _controlRevision == revision;
         void SetTexture(Texture value)
         {
@@ -385,13 +452,27 @@ namespace MajdataPlay.Video
                 State = VideoPlaybackState.Error; LastError = error.Message;
                 ErrorReceived?.Invoke(this, LastError);
             }
-            Debug.LogException(error, this);
+            MajDebug.LogError("FFmpeg", "[Player] Playback failed: " + error);
+        }
+        void RecoverHardwarePlayback(Exception reason)
+        {
+            HardwareFallbackReason = reason.Message;
+            if (_hardwareRequired) { Fail(reason); return; }
+            if (_hardwareCpuUploadAttempted) { RecoverInSoftware(reason); return; }
+            _hardwareCpuUploadAttempted = true;
+            MajDebug.LogWarning("FFmpeg", "[Player] Hardware playback path failed; retrying hardware decoding with CPU upload. " + reason.Message);
+            RecoverPlayback(reason, true);
         }
         void RecoverInSoftware(Exception reason)
         {
             HardwareFallbackReason = reason.Message;
             if (_hardwareRequired) { Fail(reason); return; }
-            _hardwareActive = false;
+            MajDebug.LogWarning("FFmpeg", "[Player] Hardware playback unavailable; retrying software decoding with CPU upload. " + reason.Message);
+            RecoverPlayback(reason, false);
+        }
+        void RecoverPlayback(Exception reason, bool hardwareCpuUpload)
+        {
+            _hardwareActive = hardwareCpuUpload;
             var resume = State == VideoPlaybackState.Seeking ? _afterSeek : State;
             double position = time;
             _clock.Pause();
@@ -401,9 +482,11 @@ namespace MajdataPlay.Video
                 _session?.Dispose();
                 _session = null;
                 ReleasePresentation();
-                TransferMode = "Software RGBA upload";
-                _session = new VideoDecodeSession(NormalizeSource(_source),
-                    new DecoderOptions { IOTimeoutMilliseconds = Math.Max(1, _ioTimeoutSeconds) * 1000 }, _bufferedFrameLimit);
+                TransferMode = hardwareCpuUpload ? "Reopening hardware decoder for CPU upload" : "Reopening software decoder";
+                _reportedTransferMode = null;
+                var options = new DecoderOptions { IOTimeoutMilliseconds = Math.Max(1, _ioTimeoutSeconds) * 1000 };
+                if (hardwareCpuUpload) ConfigureHardware(options, false);
+                _session = new VideoDecodeSession(NormalizeSource(_source), options, _bufferedFrameLimit);
                 if (_prepared && _info != null && _info.CanSeek)
                 {
                     _seekTarget = position; _afterSeek = resume;
@@ -426,7 +509,8 @@ namespace MajdataPlay.Video
             }
             catch (Exception recoveryError)
             {
-                Fail(recoveryError);
+                if (hardwareCpuUpload) RecoverInSoftware(recoveryError);
+                else Fail(recoveryError);
             }
             // The original preload completion remains pending while the replacement opens.
         }
@@ -445,7 +529,7 @@ namespace MajdataPlay.Video
             path = path.Trim().Trim('"');
             return Uri.TryCreate(path, UriKind.Absolute, out var uri) && uri.IsFile ? uri.LocalPath : path;
         }
-        partial void ConfigureHardware(DecoderOptions options);
+        partial void ConfigureHardware(DecoderOptions options, bool preferNative);
         partial void PresentHardware(DecodedVideoFrame frame, ref Texture output);
         partial void CheckHardwareErrors();
         partial void ReleasePresentation();

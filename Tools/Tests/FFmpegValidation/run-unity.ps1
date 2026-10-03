@@ -7,10 +7,15 @@ param(
     [switch] $Hardware,
     [switch] $RequireHardware,
     [switch] $TestRecovery,
+    [switch] $HardwareCpuUpload,
+    [switch] $TestDecoderPreference,
     [switch] $SkipBuild,
     [string] $Media = ''
 )
 $ErrorActionPreference = 'Stop'
+if (($HardwareCpuUpload -or $TestDecoderPreference) -and ($RequireHardware -or $TestRecovery)) { throw 'CPU transport / preference tests must permit CPU upload; do not combine with RequireHardware or TestRecovery' }
+if ($HardwareCpuUpload -or $TestDecoderPreference) { $Hardware = $true }
+if (($HardwareCpuUpload -or $TestDecoderPreference) -and $Platform -ne 'Windows') { throw 'Decoder preference / CPU transport validation currently requires a Windows Player' }
 if ($TestRecovery) { $RequireHardware = $true }
 if ($RequireHardware) { $Hardware = $true }
 if ($TestRecovery -and $Platform -ne 'Windows') { throw 'Recovery fault injection currently requires a Windows Player' }
@@ -27,11 +32,26 @@ $utf8 = New-Object Text.UTF8Encoding($false)
 if (-not $Media) { $Media = Join-Path $repo 'Assets/StreamingAssets/MaiCharts/Original/Zunda Overdance/bg.mp4' }
 if (-not (Test-Path -LiteralPath $Media)) { throw "Missing media: $Media" }
 function Write-Json([string] $Path, $Value) { [IO.File]::WriteAllText($Path, ($Value | ConvertTo-Json -Depth 8), $utf8) }
-foreach ($folder in @('Assets/Editor', 'Assets/Plugins/FFmpeg', 'Assets/StreamingAssets', 'Packages', 'ProjectSettings')) {
+foreach ($folder in @('Assets/Editor', 'Assets/Smoke', 'Assets/Plugins/FFmpeg', 'Assets/StreamingAssets', 'Packages', 'ProjectSettings')) {
     New-Item -ItemType Directory -Path (Join-Path $project $folder) -Force | Out-Null
 }
 New-Item -ItemType Directory -Path $result -Force | Out-Null
 if (-not $SkipBuild) {
+    # An asmdef at Assets/ would scope the PolySharp analyzer to only the smoke
+    # assembly. Keep the harness below Smoke/ so the analyzer applies globally.
+    foreach ($obsolete in @('Assets/FFmpeg.Player.Smoke.asmdef', 'Assets/FFmpeg.Player.Smoke.asmdef.meta', 'Assets/UnitySmoke.cs', 'Assets/UnitySmoke.cs.meta')) {
+        $obsoleteFile = Join-Path $project $obsolete
+        if (Test-Path -LiteralPath $obsoleteFile) { Remove-Item -LiteralPath $obsoleteFile }
+    }
+    # Use the product diagnostics and formatting implementation, including its real
+    # GUID references and C# required/init polyfills. Do not replace logging with stubs.
+    New-Item -ItemType Directory -Path (Join-Path $project 'Assets/Plugins/MajdataPlay') -Force | Out-Null
+    New-Item -ItemType Directory -Path (Join-Path $project 'Assets/Packages') -Force | Out-Null
+    Copy-Item -LiteralPath (Join-Path $repo 'Assets/Plugins/MajdataPlay/Diagnostics') -Destination (Join-Path $project 'Assets/Plugins/MajdataPlay') -Recurse -Force
+    Copy-Item -LiteralPath (Join-Path $repo 'Assets/Plugins/ZString') -Destination (Join-Path $project 'Assets/Plugins') -Recurse -Force
+    Copy-Item -LiteralPath (Join-Path $repo 'Assets/Packages/PolySharp.1.15.0') -Destination (Join-Path $project 'Assets/Packages') -Recurse -Force
+    Copy-Item -LiteralPath (Join-Path $repo 'Assets/Packages/System.Runtime.CompilerServices.Unsafe.6.1.2') -Destination (Join-Path $project 'Assets/Packages') -Recurse -Force
+    Copy-Item -LiteralPath (Join-Path $repo 'Assets/csc.rsp') -Destination (Join-Path $project 'Assets/csc.rsp') -Force
     Copy-Item -LiteralPath (Join-Path $repo 'Assets/Plugins/FFmpeg/Runtime') -Destination (Join-Path $project 'Assets/Plugins/FFmpeg') -Recurse -Force
     if (Test-Path -LiteralPath (Join-Path $repo 'Assets/Plugins/FFmpeg/Shaders')) {
         Copy-Item -LiteralPath (Join-Path $repo 'Assets/Plugins/FFmpeg/Shaders') -Destination (Join-Path $project 'Assets/Plugins/FFmpeg') -Recurse -Force
@@ -44,11 +64,11 @@ if (-not $SkipBuild) {
         Copy-Item -LiteralPath (Join-Path $repo 'Assets/Plugins/FFmpeg/Native/Android') -Destination (Join-Path $project 'Assets/Plugins/FFmpeg/Native') -Recurse -Force
     }
     Copy-Item -LiteralPath $Media -Destination (Join-Path $project 'Assets/StreamingAssets/test.mp4') -Force
-    Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'UnitySmoke.cs') -Destination (Join-Path $project 'Assets/UnitySmoke.cs') -Force
+    Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'UnitySmoke.cs') -Destination (Join-Path $project 'Assets/Smoke/UnitySmoke.cs') -Force
     Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'UnitySmokeBuild.cs') -Destination (Join-Path $project 'Assets/Editor/UnitySmokeBuild.cs') -Force
     $package = (Join-Path $repo 'ThirdParty/FFmpeg.AutoGen/Unity') -replace '\\', '/'
-    Write-Json (Join-Path $project 'Packages/manifest.json') @{ dependencies = @{ 'net.majdata.ffmpeg-autogen' = "file:$package"; 'com.unity.modules.imageconversion' = '1.0.0'; 'com.unity.modules.androidjni' = '1.0.0'; 'com.unity.modules.unitywebrequest' = '1.0.0' } }
-    Write-Json (Join-Path $project 'Assets/FFmpeg.Player.Smoke.asmdef') @{ name = 'FFmpeg.Player.Smoke'; references = @('MajdataPlay.Video') }
+    Write-Json (Join-Path $project 'Packages/manifest.json') @{ dependencies = @{ 'net.majdata.ffmpeg-autogen' = "file:$package"; 'com.unity.ugui' = '2.0.0'; 'com.unity.modules.ui' = '1.0.0'; 'com.unity.modules.imageconversion' = '1.0.0'; 'com.unity.modules.androidjni' = '1.0.0'; 'com.unity.modules.unitywebrequest' = '1.0.0' } }
+    Write-Json (Join-Path $project 'Assets/Smoke/FFmpeg.Player.Smoke.asmdef') @{ name = 'FFmpeg.Player.Smoke'; references = @('MajdataPlay.Video', 'MajdataPlay.Diagnostics') }
     Write-Json (Join-Path $project 'Assets/Editor/FFmpeg.Player.Smoke.Editor.asmdef') @{ name = 'FFmpeg.Player.Smoke.Editor'; references = @('FFmpeg.Player.Smoke'); includePlatforms = @('Editor') }
     [IO.File]::WriteAllText((Join-Path $project 'ProjectSettings/ProjectVersion.txt'), "m_EditorVersion: 6000.3.17f1`n", $utf8)
     $target = if ($Platform -eq 'Android') { 'Android' } elseif ($Platform -eq 'Linux') { 'Linux64' } elseif ($Architecture -eq 'x86') { 'Win' } else { 'Win64' }
@@ -90,14 +110,16 @@ if ($Platform -eq 'Linux') {
     Write-Output 'Run playback validation on Linux/WSLg with Tools/Tests/FFmpegValidation/run-linux-player.sh.'
     return
 }
-$suffix = if ($TestRecovery) { '-recovery' } elseif ($Hardware) { '-hardware' } else { '-software' }
+$suffix = if ($TestRecovery) { '-recovery' } elseif ($TestDecoderPreference) { '-decoder-preference' } elseif ($HardwareCpuUpload) { '-hardware-cpu' } elseif ($Hardware) { '-hardware' } else { '-software' }
 $report = Join-Path $result "$Graphics$suffix.txt"
 $log = Join-Path $result "$Graphics$suffix.log"
 if (Test-Path -LiteralPath $report) { Remove-Item -LiteralPath $report }
 $hardwareValue = if ($Hardware) { 'true' } else { 'false' }
 $requireHardwareValue = if ($RequireHardware) { 'true' } else { 'false' }
 $testRecoveryValue = if ($TestRecovery) { 'true' } else { 'false' }
-$playerArgs = @('-batchmode', "-force-$Graphics", '-logFile', ('"' + $log + '"'), '-videoHardware', $hardwareValue, '-videoRequireHardware', $requireHardwareValue, '-videoTestRecovery', $testRecoveryValue, '-videoReport', ('"' + $report + '"'))
+$hardwareCpuValue = if ($HardwareCpuUpload) { 'true' } else { 'false' }
+$decoderPreferenceValue = if ($TestDecoderPreference) { 'true' } else { 'false' }
+$playerArgs = @('-batchmode', "-force-$Graphics", '-logFile', ('"' + $log + '"'), '-videoHardware', $hardwareValue, '-videoRequireHardware', $requireHardwareValue, '-videoTestRecovery', $testRecoveryValue, '-videoHardwareCpuUpload', $hardwareCpuValue, '-videoTestDecoderPreference', $decoderPreferenceValue, '-videoReport', ('"' + $report + '"'))
 $process = Start-Process -FilePath (Join-Path $result 'VideoSmoke.exe') -ArgumentList $playerArgs -WindowStyle Hidden -PassThru
 if (-not $process.WaitForExit(120000)) { $process.Kill(); throw "Player timed out: $log" }
 if (-not (Test-Path -LiteralPath $report)) { Get-Content -LiteralPath $log -Tail 60; throw "Player produced no result: $log" }

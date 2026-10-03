@@ -3,6 +3,7 @@ using System.Collections;
 using System.IO;
 using System.Reflection;
 using System.Threading.Tasks;
+using MajdataPlay.Diagnostics;
 using MajdataPlay.Video;
 using UnityEngine;
 
@@ -20,6 +21,8 @@ public sealed class FFmpegPlayerSmoke : MonoBehaviour
 #if UNITY_ANDROID && !UNITY_EDITOR
         if (string.IsNullOrEmpty(_report)) _report = Path.Combine(Application.persistentDataPath, "ffmpeg-smoke.txt");
 #endif
+        if (!string.IsNullOrEmpty(_report))
+            MajDebug.SetLogWriter(new StreamWriter(_report + ".diagnostics.log", false));
         Application.runInBackground = true;
         StartCoroutine(RunSafely());
     }
@@ -41,6 +44,7 @@ public sealed class FFmpegPlayerSmoke : MonoBehaviour
         Debug.Log(result);
         if (!string.IsNullOrEmpty(_report)) File.WriteAllText(_report, result);
         if (_player != null) _player.Close();
+        MajDebug.FlushLog();
         Application.Quit(_failure == null ? 0 : 1);
     }
     IEnumerator Run()
@@ -48,6 +52,7 @@ public sealed class FFmpegPlayerSmoke : MonoBehaviour
         _player = gameObject.AddComponent<FFmpegVideoPlayer>();
         _player.PreferHardwareDecoding = Argument("-videoHardware") == "true";
         _player.RequireHardwareDecoding = Argument("-videoRequireHardware") == "true" && Argument("-videoTestRecovery") != "true";
+        _player.PreferNativeTextures = Argument("-videoHardwareCpuUpload") != "true";
         _player.FrameReady += (_, __) => _frames++;
         _player.ErrorReceived += (_, error) => _failure = new Exception(error);
         var path = Path.Combine(Application.streamingAssetsPath, "test.mp4");
@@ -71,6 +76,7 @@ public sealed class FFmpegPlayerSmoke : MonoBehaviour
         prepare.GetAwaiter().GetResult();
         Check(_player.IsPrepared && !_player.IsPlaying, "preload is paused");
         CheckHardwarePath();
+        CheckDecoderIdentity();
         Check(_player.Texture != null && _player.Width > 0 && _player.Height > 0, "preload presents first texture");
         Check(_player.Length > 0 && _player.IsSeekable, "timeline metadata");
         var first = _player.Time;
@@ -119,6 +125,7 @@ public sealed class FFmpegPlayerSmoke : MonoBehaviour
         while (!_player.IsPlaying) { CheckTimeout(start); yield return null; }
         Check(_player.Time < 1000, "loop returns to beginning");
         CheckHardwarePath();
+        CheckDecoderIdentity();
         _player.Close();
         Check(!_player.IsPrepared && _player.Texture == null, "close releases texture and session");
         var interrupted = _player.PreloadAsync(path);
@@ -135,6 +142,93 @@ public sealed class FFmpegPlayerSmoke : MonoBehaviour
             var stress = TestSustainedPlayback(path);
             while (stress.MoveNext()) yield return stress.Current;
         }
+        if (Argument("-videoTestDecoderPreference") == "true")
+        {
+            var preference = TestDecoderPreference(path);
+            while (preference.MoveNext()) yield return preference.Current;
+        }
+        if (!string.IsNullOrEmpty(_report))
+        {
+            MajDebug.FlushLog();
+            string diagnostics;
+            using (var reader = new StreamReader(new FileStream(_report + ".diagnostics.log", FileMode.Open, FileAccess.Read, FileShare.ReadWrite)))
+                diagnostics = reader.ReadToEnd();
+            Check(diagnostics.Contains("[FFmpeg]") && diagnostics.Contains("decoder=") && diagnostics.Contains("device="),
+                "real MajDebug log records selected decoder and device");
+            Check(diagnostics.Contains("transport="), "real MajDebug log records frame transport selection");
+        }
+    }
+    IEnumerator TestDecoderPreference(string path)
+    {
+        _player.Loop = false;
+        _player.Rate = 1;
+        _player.RequireHardwareDecoding = false;
+        foreach (var preference in new[] { VideoDecoderType.Software, VideoDecoderType.Hardware })
+        {
+            _player.PreferredDecoderType = preference;
+            _player.PreferNativeTextures = false;
+            Check(_player.PreferHardwareDecoding == (preference == VideoDecoderType.Hardware), "preferred decoder enum maps to legacy preference");
+            int beforePreload = _frames, pauseCallbacks = 0;
+            Action<FFmpegVideoPlayer, Texture> pauseFirstTexture = (player, texture) => {
+                if (texture != null && pauseCallbacks++ == 0) player.Pause();
+            };
+            _player.TextureChanged += pauseFirstTexture;
+            var prepare = _player.PreloadAsync(path);
+            var start = UnityEngine.Time.realtimeSinceStartup;
+            while (!prepare.IsCompleted) { CheckTimeout(start); yield return null; }
+            _player.TextureChanged -= pauseFirstTexture;
+            prepare.GetAwaiter().GetResult();
+            Check(_player.IsPrepared && !_player.IsPlaying && _frames == beforePreload + 1 && pauseCallbacks == 1,
+                "Pause from the first texture callback still completes exactly one prepared frame");
+            Check(_player.DecoderType == preference, "actual decoder follows " + preference + " preference: " + _player.DecoderName);
+            Check(!string.IsNullOrEmpty(_player.DecoderName) && !string.IsNullOrEmpty(_player.DecoderDevice), "actual decoder name and device are populated");
+            Check(_player.TransferMode == (preference == VideoDecoderType.Hardware ? "Hardware decode + CPU RGBA upload" : "Software RGBA upload"),
+                "decoder identity is independent of CPU texture transport: " + _player.TransferMode);
+            var seek = _player.SeekAsync(Math.Min(1, _player.LengthSeconds / 2));
+            start = UnityEngine.Time.realtimeSinceStartup;
+            while (!seek.IsCompleted) { CheckTimeout(start); yield return null; }
+            seek.GetAwaiter().GetResult();
+            yield return null;
+            CheckTextureContents();
+            _player.PreferHardwareDecoding = preference != VideoDecoderType.Hardware;
+            Check(_player.PreferredDecoderType != preference, "legacy preference setter maps back to enum");
+            Check(_player.DecoderType == preference, "preference changes do not mislabel the already-open decoder");
+            _player.Close();
+        }
+
+        _player.PreferredDecoderType = VideoDecoderType.Hardware;
+        _player.PreferNativeTextures = true;
+        var nativePrepare = _player.PreloadAsync(path);
+        var waitStart = UnityEngine.Time.realtimeSinceStartup;
+        while (!nativePrepare.IsCompleted) { CheckTimeout(waitStart); yield return null; }
+        nativePrepare.GetAwaiter().GetResult();
+        Check(_player.DecoderType == VideoDecoderType.Hardware && _player.TransferMode != "Hardware decode + CPU RGBA upload" &&
+            !_player.TransferMode.StartsWith("Software", StringComparison.Ordinal), "fallback scenario starts on a real native texture path");
+        _player.Play();
+        var recover = typeof(FFmpegVideoPlayer).GetMethod("RecoverHardwarePlayback", BindingFlags.Instance | BindingFlags.NonPublic);
+        Check(recover != null, "native presentation recovery entry point exists");
+        recover.Invoke(_player, new object[] { new NotSupportedException("Injected native texture import failure for hardware CPU fallback") });
+        waitStart = UnityEngine.Time.realtimeSinceStartup;
+        while (!_player.IsPrepared || _player.TransferMode != "Hardware decode + CPU RGBA upload") { CheckTimeout(waitStart); yield return null; }
+        Check(_player.DecoderType == VideoDecoderType.Hardware, "native presentation failure retains hardware decoding through CPU transport");
+        Check(_player.IsPlaying && !string.IsNullOrEmpty(_player.HardwareFallbackReason), "recovery retains play intent and reports the failed native path");
+        var recoveredSeek = _player.SeekAsync(Math.Min(1, _player.LengthSeconds / 2));
+        waitStart = UnityEngine.Time.realtimeSinceStartup;
+        while (!recoveredSeek.IsCompleted) { CheckTimeout(waitStart); yield return null; }
+        recoveredSeek.GetAwaiter().GetResult();
+        yield return null;
+        CheckTextureContents();
+        Check(_player.IsPlaying && _player.DecoderType == VideoDecoderType.Hardware, "hardware CPU fallback remains seekable and playing");
+        _player.Close();
+        // Reopening restores the preferred native path; keep the final report's
+        // transport representative of normal hardware playback on device runners.
+        var restored = _player.PreloadAsync(path);
+        waitStart = UnityEngine.Time.realtimeSinceStartup;
+        while (!restored.IsCompleted) { CheckTimeout(waitStart); yield return null; }
+        restored.GetAwaiter().GetResult();
+        Check(_player.DecoderType == VideoDecoderType.Hardware && _player.TransferMode != "Hardware decode + CPU RGBA upload" &&
+            !_player.TransferMode.StartsWith("Software", StringComparison.Ordinal), "a new open restores preferred native texture transport");
+        _player.Close();
     }
     IEnumerator TestSustainedPlayback(string path)
     {
@@ -294,6 +388,17 @@ public sealed class FFmpegPlayerSmoke : MonoBehaviour
             Check(!_player.TransferMode.StartsWith("Software", StringComparison.Ordinal) && string.IsNullOrEmpty(_player.HardwareFallbackReason),
                 "hardware presentation required; actual=" + _player.TransferMode + "; fallback=" + _player.HardwareFallbackReason);
     }
+    void CheckDecoderIdentity()
+    {
+        if (Argument("-videoHardwareCpuUpload") == "true")
+        {
+            Check(_player.DecoderType == VideoDecoderType.Hardware, "CPU upload still uses an actual hardware decoder: " + _player.DecoderName);
+            Check(_player.TransferMode == "Hardware decode + CPU RGBA upload", "explicit CPU texture transport is reported accurately");
+            Check(!string.IsNullOrEmpty(_player.DecoderName) && !string.IsNullOrEmpty(_player.DecoderDevice), "hardware decoder diagnostics are available");
+        }
+        else if (Argument("-videoHardware") != "true")
+            Check(_player.DecoderType == VideoDecoderType.Software, "software preference uses a software decoder");
+    }
     void CheckTextureContents()
     {
         var target = RenderTexture.GetTemporary(32, 32, 0, RenderTextureFormat.ARGB32);
@@ -323,7 +428,7 @@ public sealed class FFmpegPlayerSmoke : MonoBehaviour
         var args = Environment.GetCommandLineArgs();
         for (int i = 0; i + 1 < args.Length; i++) if (args[i] == name) return args[i + 1];
 #if UNITY_ANDROID && !UNITY_EDITOR
-        if (name == "-videoHardware" || name == "-videoRequireHardware" || name == "-videoStress") return "true";
+        if (name == "-videoHardware" || name == "-videoRequireHardware" || name == "-videoStress" || name == "-videoTestDecoderPreference") return "true";
 #endif
         return null;
     }

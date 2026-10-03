@@ -35,6 +35,8 @@ do {
         Write-Output $result
         $destination = Join-Path (Split-Path -Parent $apkPath) 'vulkan-hardware-device.txt'
         [IO.File]::WriteAllText($destination, $result)
+        $diagnostics = Invoke-Adb @('shell','cat',"$report.diagnostics.log")
+        [IO.File]::WriteAllLines("$destination.diagnostics.log", [string[]]$diagnostics)
         if ($result -notmatch '^PASS:.*Vulkan.*AHardwareBuffer') { throw 'Android hardware playback failed.' }
         exit 0
     }

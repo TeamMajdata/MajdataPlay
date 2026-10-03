@@ -1,6 +1,6 @@
 # FFmpeg 播放器验收
 
-这些测试使用真实 FFmpeg 库和 Unity 程序集，不使用模拟解码器。运行前先构建 `Tools/FFmpeg`。
+这些测试使用真实 FFmpeg 库、Unity 程序集及项目的 Diagnostics/ZString 源码，不使用模拟解码器或日志桩。运行前先构建 `Tools/FFmpeg`。
 
 ## 托管与真实解码
 
@@ -10,9 +10,9 @@ dotnet run --project Tools/Tests/FFmpegValidation/FFmpegValidation.csproj -- `
   "Assets/StreamingAssets/MaiCharts/Original/Zunda Overdance/bg.mp4"
 ```
 
-需要 .NET 9 SDK，默认 Unity Editor 路径为 `C:/Program Files/Unity Editors/6000.3.17f1/Editor`；其他安装路径可用 `-p:UnityEditor=...`。此命令在 Windows x64 进程中运行；不带两个参数只运行不依赖 native 的时钟测试。
+需要 .NET 9 SDK，默认 Unity Editor 路径为 `C:/Program Files/Unity Editors/6000.3.17f1/Editor`；其他安装路径可用 `-p:UnityEditor=...`。此命令在 Windows x64 进程中运行，新增硬件下载检查需要支持 H.264 D3D11VA 的实际 GPU；不带两个参数只运行不依赖 native 的时钟测试。.NET 工程编译真实 Diagnostics/ZString 并引用项目 PolySharp 分析器，不定义 `ENABLE_PROFILER`，因而不调用 Unity 原生 profiler；日志保留在真实 MajDebug 队列，未调用 Unity 初始化或连接未初始化的 Unity logger。
 
-覆盖：真实视频元数据、RGBA 解码、PTS、前后 seek、EOF 延迟帧排空、预取消、有界预载、连续 seek、快速关闭，以及人工 AVFrame 的像素级上下方向、四方向旋转、非方形尺寸、YUV limited/full range、动态像素格式、裁剪与超限拒绝。
+覆盖：真实视频元数据、RGBA 解码、PTS、前后 seek、EOF 延迟帧排空、预取消、有界预载、连续 seek、快速关闭，以及人工 AVFrame 的像素级上下方向、四方向旋转、非方形尺寸、YUV limited/full range、动态像素格式、裁剪与超限拒绝。硬件测试创建独立 D3D11VA 设备，在没有 Unity 纹理互操作回调的情况下解码、下载 RGBA、跳转并检查真实像素，断言 `HardwareDecoded` 与 CPU 像素存储同时成立。
 
 ## Unity Player
 
@@ -28,6 +28,8 @@ dotnet run --project Tools/Tests/FFmpegValidation/FFmpegValidation.csproj -- `
 ./Tools/Tests/FFmpegValidation/run-unity.ps1 -Backend IL2CPP -Architecture x64 -Graphics vulkan -RequireHardware -SkipBuild
 ./Tools/Tests/FFmpegValidation/run-unity.ps1 -Backend IL2CPP -Architecture x64 -Graphics glcore -RequireHardware -SkipBuild
 ./Tools/Tests/FFmpegValidation/run-unity.ps1 -Backend Mono -Architecture x64 -Graphics d3d11 -TestRecovery
+./Tools/Tests/FFmpegValidation/run-unity.ps1 -Backend Mono -Architecture x64 -Graphics d3d11 -HardwareCpuUpload
+./Tools/Tests/FFmpegValidation/run-unity.ps1 -Backend Mono -Architecture x64 -Graphics d3d11 -TestDecoderPreference -SkipBuild
 ./Tools/Tests/FFmpegValidation/run-unity.ps1 -Platform Android -Backend IL2CPP -Architecture arm64
 ./Tools/Tests/FFmpegValidation/run-unity.ps1 -Platform Android -Backend IL2CPP -Architecture armv7
 ./Tools/Tests/FFmpegValidation/run-unity.ps1 -Platform Linux -Backend Mono -Architecture x64 -Graphics glcore
@@ -39,13 +41,17 @@ dotnet run --project Tools/Tests/FFmpegValidation/FFmpegValidation.csproj -- `
 
 `-TestRecovery` 隐含 `-RequireHardware`，通过反射注入托管层的 GPU 失败通知，不损坏驱动资源。它检查纹理清空回调中的 Pause、SeekAsync、Close，以及终止错误后的重新 Play；报告保存为独立 `*-recovery.*`。日志中的 `Expected recovery test terminal failure` 是该测试主动触发的预期错误，以最终断言报告判断结果。
 
+`-HardwareCpuUpload` 设置硬件解码偏好和 `PreferNativeTextures=false`，在完整控制/像素测试中强制检查实际 `DecoderType=Hardware` 且传输方式为 `Hardware decode + CPU RGBA upload`。`-TestDecoderPreference` 额外检查软件/硬件偏好枚举与旧布尔属性的双向映射、已打开会话的实际解码器身份、重新打开后的选型，以及原生纹理失败后保留硬件解码、转 CPU 上传继续播放和跳转。后者通过 `RecoverHardwarePlayback(Exception)` 注入真实恢复流程的失败通知。报告分别为 `*-hardware-cpu.*` 和 `*-decoder-preference.*`；这两个选项不能与禁止 CPU 上传的 `-RequireHardware` 同时使用。
+
+隔离 Unity 工程会复制项目的 Diagnostics、完整 ZString、Unsafe 6.1.2 程序集与 PolySharp Roslyn 分析器，保留 `.asmdef` GUID 和 `csc.rsp`，并引入 ZString 引用的 UGUI/TextMeshPro 包。实际 MajDebug 日志写入报告旁的 `.diagnostics.log`，测试检查其中有解码器、设备和传输模式记录；Android runner 也会拉回该日志。首次新增这些依赖或修改测试源码后必须重新构建，不能使用旧 Player 的 `-SkipBuild` 结果。
+
 Android 分支构建 APK，并检查七个 FFmpeg `.so` 和 GPU 桥接的存在、目录、ELF 位数/机器架构。随后连接 API 26+ Vulkan 真机运行：
 
 ```powershell
 ./Tools/Tests/FFmpegValidation/run-android-player.ps1 -Apk ./Tools/Tests/FFmpegValidation/.work/Android-arm64-IL2CPP/VideoSmoke.apk -Serial <adb设备编号> -Adb <adb.exe路径>
 ```
 
-测试 APK 自动提取编码后的 StreamingAssets 文件并开启严格硬件模式。除基本 API 与纹理检查外，还播放至少 300 帧并连续 seek 10 次；素材应长于 12 秒。测试期间请保持应用未被冻结、屏幕解锁且在前台。`-SkipInstall` 可直接复用已安装的同一 APK。脚本仅安装/更新专用包 `net.majdata.ffmpegplayer.validation`，结果保存在 APK 旁的 `vulkan-hardware-device.txt`。测试中的 `ReadPixels` 仅验证输出；播放器的硬件路径不调用它。
+测试 APK 自动提取编码后的 StreamingAssets 文件，先开启严格硬件模式，播放至少 300 帧并连续 seek 10 次；随后关闭严格模式，验证软件/硬件偏好、MediaCodec ByteBuffer 的 CPU 上传、共享失败恢复与日志，最后重新打开原生 GPU 路径。素材应长于 12 秒。测试期间请保持应用未被冻结、屏幕解锁且在前台。`-SkipInstall` 可直接复用已安装的同一 APK。脚本仅安装/更新专用包 `net.majdata.ffmpegplayer.validation`，结果保存在 APK 旁的 `vulkan-hardware-device.txt`。测试中的 `ReadPixels` 仅验证输出；播放器的 GPU 共享路径不调用它。
 
 Linux 分支从 Windows Editor 构建独立 Linux x64 Mono Player，需要安装 Linux Build Support。随后在 Linux 桌面或 WSLg 中运行：
 

@@ -12,6 +12,17 @@ namespace MajdataPlay.Video.Editor
             var previousRate = player.Rate;
             var previousSource = player.Url;
             DrawDefaultInspector();
+            // Keep the serialized bool for existing scenes while presenting an explicit type selector.
+            serializedObject.Update();
+            var preference = serializedObject.FindProperty("_preferHardwareDecoding");
+            EditorGUI.BeginChangeCheck();
+            var decoderType = (VideoDecoderType)EditorGUILayout.EnumPopup("Preferred Decoder Type",
+                preference.boolValue ? VideoDecoderType.Hardware : VideoDecoderType.Software);
+            if (EditorGUI.EndChangeCheck())
+            {
+                preference.boolValue = decoderType == VideoDecoderType.Hardware;
+                serializedObject.ApplyModifiedProperties();
+            }
             if (!Application.isPlaying) return;
             // Serialized fields bypass the Url setter; release the previous input
             // so the next Play / Preload opens the path now shown in the Inspector.
@@ -19,7 +30,9 @@ namespace MajdataPlay.Video.Editor
             if (player.Rate != previousRate) player.SetRate(player.Rate);
             EditorGUILayout.Space();
             EditorGUILayout.LabelField("State", player.State.ToString());
-            EditorGUILayout.LabelField("Decoder", player.CodecName);
+            EditorGUILayout.LabelField("Encoding", player.CodecName);
+            EditorGUILayout.LabelField("Decoder", player.DecoderName + " (" + player.DecoderType + ")");
+            EditorGUILayout.LabelField("Decode device", player.DecoderDevice);
             EditorGUILayout.LabelField("Texture transfer", player.TransferMode);
             EditorGUILayout.LabelField("Video", $"{player.Width} x {player.Height}, {player.FrameRate:F3} fps");
             EditorGUILayout.LabelField("Buffered frames", player.BufferedFrames.ToString());

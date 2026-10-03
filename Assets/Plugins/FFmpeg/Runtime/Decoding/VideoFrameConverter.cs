@@ -1,5 +1,6 @@
 using System;
 using FFmpeg.AutoGen;
+using MajdataPlay.Diagnostics;
 
 namespace MajdataPlay.Video.Internal
 {
@@ -16,8 +17,15 @@ namespace MajdataPlay.Video.Internal
 
         public DecodedVideoFrame Convert(AVFrame* source, double pts, double duration, double rotation, int maximumPixels)
         {
+#if (UNITY_EDITOR || DEBUG) && ENABLE_PROFILER
+            using var profile = UnityProfiler.Create("FFmpeg.Decoder.ConvertRGBA");
+#endif
+            var hardware = source->hw_frames_ctx != null;
             if (source->hw_frames_ctx != null)
             {
+#if (UNITY_EDITOR || DEBUG) && ENABLE_PROFILER
+                using var downloadProfile = UnityProfiler.Create("FFmpeg.Decoder.DownloadHardwareFrame");
+#endif
                 if (_download == null)
                     _download = ffmpeg.av_frame_alloc();
                 if (_download == null)
@@ -27,6 +35,8 @@ namespace MajdataPlay.Video.Internal
                 FFmpegVideoDecoder.Check(ffmpeg.av_frame_copy_props(_download, source), "Copy hardware frame properties");
                 source = _download;
             }
+            else if ((AVPixelFormat)source->format == AVPixelFormat.AV_PIX_FMT_MEDIACODEC)
+                throw new NotSupportedException("Opaque MediaCodec surface frames cannot be downloaded; reopen the hardware decoder in byte-buffer mode.");
 
             // Hardware frames can retain left/top crop metadata that the codec could not
             // apply by adjusting opaque texture pointers. It is safe after GPU download.
@@ -95,6 +105,8 @@ namespace MajdataPlay.Video.Internal
                     PresentationTime = pts,
                     Duration = duration,
                     RotationDegrees = 0,
+                    HardwareDecoded = hardware,
+                    TransferMode = hardware ? "Hardware decode + CPU RGBA upload" : "Software RGBA upload",
                     PixelAspectRatio = (quarterTurns & 1) == 0 ? aspect : 1.0 / aspect
                 };
                 result = null;

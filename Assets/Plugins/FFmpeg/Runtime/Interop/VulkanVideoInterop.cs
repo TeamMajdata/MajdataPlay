@@ -1,5 +1,6 @@
 using System;
 using System.Runtime.InteropServices;
+using MajdataPlay.Diagnostics;
 using MajdataPlay.Video.Internal;
 
 namespace MajdataPlay.Video.Interop
@@ -7,6 +8,10 @@ namespace MajdataPlay.Video.Interop
     /// <summary>Linux DMA-BUF and Android AHardwareBuffer transport. No CPU image mapping.</summary>
     internal static class VulkanVideoInterop
     {
+#if UNITY_ANDROID && !UNITY_EDITOR
+        static readonly object AndroidInitializationLock = new object();
+        static bool _androidInitialized;
+#endif
         internal static string DescribeError(int error)
         {
             string detail;
@@ -34,7 +39,10 @@ namespace MajdataPlay.Video.Interop
         internal static IntPtr AcquireLinuxDevice()
         {
 #if UNITY_STANDALONE_LINUX || UNITY_EDITOR_LINUX
-            return Native.ffu_vulkan_acquire_decode_device(0, 0);
+            var device = Native.ffu_vulkan_acquire_decode_device(0, 0);
+            if (device != IntPtr.Zero)
+                MajDebug.LogDebug("FFmpeg", "[Interop] Acquired a VAAPI device matched to Unity's Vulkan render node.");
+            return device;
 #else
             throw new PlatformNotSupportedException();
 #endif
@@ -43,8 +51,20 @@ namespace MajdataPlay.Video.Interop
         internal static void InitializeAndroid()
         {
 #if UNITY_ANDROID && !UNITY_EDITOR
-            int result = Native.ffu_android_set_java_vm(UnityEngine.AndroidJNI.GetJavaVM());
-            if (result < 0) throw new NotSupportedException("Could not initialize FFmpeg's Android Java VM (" + result + ").");
+            lock (AndroidInitializationLock)
+            {
+                if (_androidInitialized) return;
+                var javaVm = UnityEngine.AndroidJNI.GetJavaVM();
+                if (javaVm == IntPtr.Zero)
+                    throw new NotSupportedException("Unity's Android Java VM is unavailable.");
+                // ByteBuffer decoding needs libavcodec's JVM registration even when
+                // the optional graphics bridge is absent or cannot share textures.
+                int result = Native.av_jni_set_java_vm(javaVm, IntPtr.Zero);
+                if (result < 0)
+                    throw new NotSupportedException("Could not initialize FFmpeg's Android Java VM (" + result + ").");
+                _androidInitialized = true;
+                MajDebug.LogDebug("FFmpeg", "[Interop] Registered Android's Java VM directly with libavcodec.");
+            }
 #else
             throw new PlatformNotSupportedException();
 #endif
@@ -53,6 +73,9 @@ namespace MajdataPlay.Video.Interop
         internal static IntPtr MapLinuxFrame(IntPtr frame)
         {
 #if UNITY_STANDALONE_LINUX || UNITY_EDITOR_LINUX
+#if ENABLE_PROFILER && (UNITY_EDITOR || DEBUG)
+            using var profile = UnityProfiler.Create("FFmpeg.Interop.MapVaapiToDrm");
+#endif
             int result = Native.ffu_vulkan_map_frame(frame, out var mapped);
             if (result < 0 || mapped == IntPtr.Zero)
                 throw new NotSupportedException(DescribeError(result));
@@ -127,10 +150,14 @@ namespace MajdataPlay.Video.Interop
                 _session = Native.ffu_android_create(width, height);
                 if (_session == IntPtr.Zero)
                     throw new NotSupportedException(DescribeError(Native.ffu_android_error(IntPtr.Zero)));
+                MajDebug.LogDebug("FFmpeg", "[Interop] Created Android GPU image session " + width + "x" + height + ".");
             }
             public IntPtr AcquireDevice() => Native.ffu_android_device(_session);
             public IntPtr CaptureFrame(IntPtr frame)
             {
+#if ENABLE_PROFILER && (UNITY_EDITOR || DEBUG)
+                using var profile = UnityProfiler.Create("FFmpeg.Interop.CaptureAndroidImage");
+#endif
                 // Rendering a MediaCodec buffer consumes it exactly once. A timeout
                 // fails this session; retrying the same AVFrame could reorder images.
                 IntPtr image = Native.ffu_android_capture(_session, frame, 500);
@@ -146,6 +173,7 @@ namespace MajdataPlay.Video.Interop
                 if (_session == IntPtr.Zero) return;
                 Native.ffu_android_release(_session);
                 _session = IntPtr.Zero;
+                MajDebug.LogDebug("FFmpeg", "[Interop] Released Android GPU image session; pending images retain their own native references.");
             }
         }
 #endif
@@ -166,7 +194,7 @@ namespace MajdataPlay.Video.Interop
             [DllImport(Library, CallingConvention = CallingConvention.Cdecl)] internal static extern IntPtr ffu_vulkan_prepare(IntPtr presenter, IntPtr frame, IntPtr target);
 #endif
 #if UNITY_ANDROID && !UNITY_EDITOR
-            [DllImport(Library, CallingConvention = CallingConvention.Cdecl)] internal static extern int ffu_android_set_java_vm(IntPtr javaVm);
+            [DllImport("avcodec", CallingConvention = CallingConvention.Cdecl)] internal static extern int av_jni_set_java_vm(IntPtr javaVm, IntPtr logContext);
             [DllImport(Library, CallingConvention = CallingConvention.Cdecl)] internal static extern IntPtr ffu_android_create(int width, int height);
             [DllImport(Library, CallingConvention = CallingConvention.Cdecl)] internal static extern IntPtr ffu_android_device(IntPtr session);
             [DllImport(Library, CallingConvention = CallingConvention.Cdecl)] internal static extern IntPtr ffu_android_capture(IntPtr session, IntPtr frame, int timeoutMs);

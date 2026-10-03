@@ -10,14 +10,18 @@ namespace MajdataPlay.Video.Internal
         public int MaximumPixelCount { get; set; } = 4096 * 4096;
         public int ThreadCount { get; set; } = Math.Min(Environment.ProcessorCount, 8);
         public bool KeepNativeFrames { get; set; }
+        /// <summary>Allow hardware decoding followed by a worker-thread download and CPU texture upload.</summary>
+        public bool AllowHardwareCpuUpload { get; set; } = true;
+        /// <summary>Diagnostic description of the supplied hardware device; never used for selection.</summary>
+        public string HardwareDeviceDescription { get; set; }
         /// <summary>Fail before software conversion when GPU-only playback was requested.</summary>
         public bool RequireHardwareDecoding { get; set; }
         public AVHWDeviceType HardwareDeviceType { get; set; } = AVHWDeviceType.AV_HWDEVICE_TYPE_NONE;
 
         /// <summary>
-        /// For D3D11VA, returns an AddRef'ed Unity ID3D11Device. Invoked on the worker.
+        /// For native D3D11VA transport, returns an AddRef'ed Unity ID3D11Device. Invoked on the worker.
         /// Ownership transfers to libavutil, including when device initialization fails.
-        /// Do not return a device from another Unity graphics backend.
+        /// When omitted, ordinary hardware playback can create its own device for CPU upload.
         /// </summary>
         public Func<IntPtr> AcquireD3D11Device { get; set; }
 

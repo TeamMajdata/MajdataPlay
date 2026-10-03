@@ -30,6 +30,9 @@ namespace MajdataPlay.Video.Internal
         public double RotationDegrees { get; internal set; }
         public double PixelAspectRatio { get; internal set; } = 1;
         public bool IsHardwareFrame => _nativeFrame != IntPtr.Zero || _nativeImage != IntPtr.Zero;
+        /// <summary>The decoder used hardware, including frames downloaded for CPU upload.</summary>
+        public bool HardwareDecoded { get; internal set; }
+        public string TransferMode { get; internal set; }
 
         internal DecodedVideoFrame(IntPtr data, IntPtr nativeFrame)
         {
@@ -53,7 +56,12 @@ namespace MajdataPlay.Video.Internal
             if (_nativeFrame == IntPtr.Zero)
                 throw new InvalidOperationException("This frame does not own a native hardware frame.");
             using (var converter = new VideoFrameConverter())
-                return converter.Convert((AVFrame*)_nativeFrame, PresentationTime, Duration, RotationDegrees, int.MaxValue / 4);
+            {
+                var result = converter.Convert((AVFrame*)_nativeFrame, PresentationTime, Duration, RotationDegrees, int.MaxValue / 4);
+                result.HardwareDecoded = true;
+                result.TransferMode = "Hardware decode + CPU RGBA upload";
+                return result;
+            }
         }
 
         public void Dispose()

@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Threading;
+using MajdataPlay.Diagnostics;
 
 namespace MajdataPlay.Video.Internal
 {
@@ -8,14 +9,16 @@ namespace MajdataPlay.Video.Internal
     {
         public readonly int Width, Height;
         public readonly double Duration, FrameRate;
-        public readonly bool CanSeek, HasAudio;
-        public readonly string Codec, HardwareFallbackReason;
+        public readonly bool CanSeek, HasAudio, HardwareDecoding;
+        public readonly string Codec, HardwareFallbackReason, DecoderName, DecoderDevice, TransferMode;
         public VideoInfo(FFmpegVideoDecoder decoder)
         {
             Width = decoder.Width; Height = decoder.Height;
             Duration = decoder.Duration; FrameRate = decoder.FrameRate;
             CanSeek = decoder.CanSeek; HasAudio = decoder.HasAudio; Codec = decoder.CodecName;
             HardwareFallbackReason = decoder.HardwareFallbackReason;
+            DecoderName = decoder.DecoderName; DecoderDevice = decoder.DecoderDevice;
+            HardwareDecoding = decoder.HardwareDecoding; TransferMode = decoder.TransferMode;
         }
     }
 
@@ -57,6 +60,7 @@ namespace MajdataPlay.Video.Internal
         }
         public void Seek(double seconds)
         {
+            MajDebug.LogDebug("FFmpeg", "[Session] Scheduling seek to " + seconds + " seconds.");
             lock (_gate)
             {
                 if (_disposed) throw new ObjectDisposedException(nameof(VideoDecodeSession));
@@ -67,12 +71,18 @@ namespace MajdataPlay.Video.Internal
         }
         void Run()
         {
+#if (UNITY_EDITOR || DEBUG) && ENABLE_PROFILER
+            UnityEngine.Profiling.Profiler.BeginThreadProfiling("FFmpeg", "Decoder");
+#endif
+            MajDebug.LogDebug("FFmpeg", "[Session] Decode worker started; queue capacity=" + _capacity + ".");
             try
             {
                 using (var decoder = new FFmpegVideoDecoder(_options))
                 {
                     decoder.Open(_path, _cancel.Token);
                     lock (_gate) _info = new VideoInfo(decoder);
+                    MajDebug.LogInfo("FFmpeg", "[Session] Media ready; codec=" + decoder.CodecName +
+                        ", decoder=" + decoder.DecoderName + ", device=" + decoder.DecoderDevice + ".");
                     long decodedRevision = 0;
                     while (true)
                     {
@@ -90,14 +100,23 @@ namespace MajdataPlay.Video.Internal
                             decoder.Seek(seek);
                             decodedRevision = revision;
                         }
+#if (UNITY_EDITOR || DEBUG) && ENABLE_PROFILER
+                        using var profile = UnityProfiler.Create("FFmpeg.Session.DecodeAndQueue");
+#endif
                         var frame = decoder.ReadFrame();
                         lock (_gate)
                         {
                             if (_info.Width != decoder.Width || _info.Height != decoder.Height ||
-                                _info.HardwareFallbackReason != decoder.HardwareFallbackReason)
+                                _info.HardwareFallbackReason != decoder.HardwareFallbackReason ||
+                                _info.HardwareDecoding != decoder.HardwareDecoding || _info.DecoderName != decoder.DecoderName ||
+                                _info.DecoderDevice != decoder.DecoderDevice || _info.TransferMode != decoder.TransferMode)
                                 _info = new VideoInfo(decoder);
                             if (_disposed || revision != _revision) frame?.Dispose();
-                            else if (frame == null) _eof = true;
+                            else if (frame == null)
+                            {
+                                _eof = true;
+                                MajDebug.LogDebug("FFmpeg", "[Session] Decoder drained at end of input.");
+                            }
                             else _frames.Enqueue(frame);
                         }
                     }
@@ -105,7 +124,10 @@ namespace MajdataPlay.Video.Internal
             }
             catch (Exception error)
             {
-                lock (_gate) { if (!_disposed) _error = error; }
+                bool report;
+                lock (_gate) { report = !_disposed; if (report) _error = error; }
+                if (report) MajDebug.LogError("FFmpeg", "[Session] Decode worker failed: " + error.Message);
+                else MajDebug.LogDebug("FFmpeg", "[Session] Worker stopped after cancellation.");
             }
             finally
             {
@@ -115,6 +137,10 @@ namespace MajdataPlay.Video.Internal
                     if (_disposed) ClearFrames();
                     _cancel.Dispose();
                 }
+                MajDebug.LogDebug("FFmpeg", "[Session] Decode worker exited.");
+#if (UNITY_EDITOR || DEBUG) && ENABLE_PROFILER
+                UnityEngine.Profiling.Profiler.EndThreadProfiling();
+#endif
             }
         }
         void ClearFrames() { while (_frames.Count != 0) _frames.Dequeue().Dispose(); }

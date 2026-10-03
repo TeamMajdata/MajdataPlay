@@ -1,5 +1,6 @@
 using System;
 using FFmpeg.AutoGen;
+using MajdataPlay.Diagnostics;
 using MajdataPlay.Video.Internal;
 using MajdataPlay.Video.Interop;
 using UnityEngine;
@@ -10,39 +11,71 @@ namespace MajdataPlay.Video
     {
         HardwareVideoPresenter _hardwarePresenter;
         partial void CheckHardwareErrors() => _hardwarePresenter?.CheckErrors();
-        partial void ConfigureHardware(DecoderOptions options)
+        partial void ConfigureHardware(DecoderOptions options, bool preferNative)
         {
-            if (!_preferHardwareDecoding && !options.RequireHardwareDecoding) return;
-            if (HardwareVideoPresenter.SupportsD3D11)
+            var platform = Application.platform;
+            bool windows = platform == RuntimePlatform.WindowsPlayer || platform == RuntimePlatform.WindowsEditor;
+            bool linux = platform == RuntimePlatform.LinuxPlayer || platform == RuntimePlatform.LinuxEditor;
+            bool apple = platform == RuntimePlatform.OSXPlayer || platform == RuntimePlatform.OSXEditor || platform == RuntimePlatform.IPhonePlayer;
+            options.HardwareDeviceType = windows ? AVHWDeviceType.AV_HWDEVICE_TYPE_D3D11VA :
+                linux ? AVHWDeviceType.AV_HWDEVICE_TYPE_VAAPI :
+                apple ? AVHWDeviceType.AV_HWDEVICE_TYPE_VIDEOTOOLBOX :
+                platform == RuntimePlatform.Android ? AVHWDeviceType.AV_HWDEVICE_TYPE_MEDIACODEC : AVHWDeviceType.AV_HWDEVICE_TYPE_NONE;
+            string graphics = SystemInfo.graphicsDeviceType + "; GPU=" + SystemInfo.graphicsDeviceName +
+                "; vendor=" + SystemInfo.graphicsDeviceVendor + "; device ID=0x" + SystemInfo.graphicsDeviceID.ToString("X") +
+                "; driver=" + SystemInfo.graphicsDeviceVersion;
+            // A standalone decode device may differ from Unity's renderer on multi-GPU systems.
+            options.HardwareDeviceDescription = "Default " + options.HardwareDeviceType + " decode device; Unity renderer: " + graphics;
+            if (platform == RuntimePlatform.Android)
             {
-                options.HardwareDeviceType = AVHWDeviceType.AV_HWDEVICE_TYPE_D3D11VA;
-                options.AcquireD3D11Device = HardwareVideoPresenter.AcquireD3D11Device;
+                try { VulkanVideoInterop.InitializeAndroid(); }
+                catch (Exception error) when (!options.RequireHardwareDecoding)
+                {
+                    HardwareFallbackReason = error.Message;
+                    options.HardwareDeviceType = AVHWDeviceType.AV_HWDEVICE_TYPE_NONE;
+                    MajDebug.LogWarning("FFmpeg", "[Interop] MediaCodec initialization failed; using software decoding. " + error.Message);
+                    return;
+                }
             }
-            else if (HardwareVideoPresenter.SupportsMetal)
-                options.HardwareDeviceType = AVHWDeviceType.AV_HWDEVICE_TYPE_VIDEOTOOLBOX;
-            else if (HardwareVideoPresenter.SupportsLinuxVulkan)
+            if (preferNative)
             {
-                options.HardwareDeviceType = AVHWDeviceType.AV_HWDEVICE_TYPE_VAAPI;
-                options.AcquireHardwareDevice = VulkanVideoInterop.AcquireLinuxDevice;
-                options.MapHardwareFrame = VulkanVideoInterop.MapLinuxFrame;
+                if (windows && HardwareVideoPresenter.SupportsD3D11)
+                {
+                    options.AcquireD3D11Device = HardwareVideoPresenter.AcquireD3D11Device;
+                    options.KeepNativeFrames = true;
+                    options.HardwareDeviceDescription = "D3D11VA device matched to Unity renderer: " + graphics;
+                }
+                else if (apple && HardwareVideoPresenter.SupportsMetal)
+                    options.KeepNativeFrames = true;
+                else if (linux && HardwareVideoPresenter.SupportsLinuxVulkan)
+                {
+                    options.AcquireHardwareDevice = VulkanVideoInterop.AcquireLinuxDevice;
+                    options.MapHardwareFrame = VulkanVideoInterop.MapLinuxFrame;
+                    options.KeepNativeFrames = true;
+                    options.HardwareDeviceDescription = "VAAPI DRM render node matched to Unity Vulkan renderer: " + graphics;
+                }
+                else if (platform == RuntimePlatform.Android && HardwareVideoPresenter.SupportsAndroidVulkan)
+                {
+                    options.CreateHardwareSession = VulkanVideoInterop.CreateAndroidSession;
+                    options.KeepNativeFrames = true;
+                }
+                else
+                {
+                    HardwareFallbackReason = HardwareVideoPresenter.AvailabilityReason ?? "Native texture transport is unavailable.";
+                    if (!options.RequireHardwareDecoding)
+                        MajDebug.LogWarning("FFmpeg", "[Interop] GPU texture sharing unavailable; attempting hardware decoding with CPU upload. " + HardwareFallbackReason);
+                }
             }
-            else if (HardwareVideoPresenter.SupportsAndroidVulkan)
-            {
-                VulkanVideoInterop.InitializeAndroid();
-                options.HardwareDeviceType = AVHWDeviceType.AV_HWDEVICE_TYPE_MEDIACODEC;
-                options.CreateHardwareSession = VulkanVideoInterop.CreateAndroidSession;
-            }
-            else
-            {
-                HardwareFallbackReason = HardwareVideoPresenter.AvailabilityReason;
-                return;
-            }
-            options.KeepNativeFrames = true;
+            MajDebug.LogInfo("FFmpeg", "[Interop] Requested hardware API=" + options.HardwareDeviceType +
+                "; native textures=" + options.KeepNativeFrames + "; " + options.HardwareDeviceDescription + ".");
         }
 
         partial void PresentHardware(DecodedVideoFrame frame, ref Texture output)
         {
             if (!frame.IsHardwareFrame) return;
+#if ENABLE_PROFILER && (UNITY_EDITOR || DEBUG)
+            using var profile = UnityProfiler.Create("FFmpeg.Interop.PresentHardware");
+#endif
             _hardwarePresenter ??= new HardwareVideoPresenter();
             if (!_hardwarePresenter.TryPresent(frame, out output))
                 throw new NotSupportedException("The decoded surface cannot be shared safely with the active Unity graphics device.");

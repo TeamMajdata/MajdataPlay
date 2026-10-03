@@ -26,6 +26,8 @@ static class Program
             if (!SetDllDirectory(native)) throw new Exception("SetDllDirectory failed.");
             _checks += ConverterChecks.Run();
             TestHardwareRequirement(Path.GetFullPath(args[1]));
+            TestHardwareCpuUpload(Path.GetFullPath(args[1]));
+            TestHardwareMappingFailure(Path.GetFullPath(args[1]));
             TestConversion();
             TestDecoder(Path.GetFullPath(args[1]));
             TestSession(Path.GetFullPath(args[1]));
@@ -72,6 +74,7 @@ static class Program
         using (var decoder = new FFmpegVideoDecoder())
         {
             decoder.Open(media, CancellationToken.None);
+            Check(!decoder.HardwareDecoding && !string.IsNullOrEmpty(decoder.DecoderName), "default CPU decoder reports software identity");
             Check(decoder.Width > 0 && decoder.Height > 0 && decoder.Duration > 0, "metadata");
             Console.WriteLine($"{decoder.CodecName}: {decoder.Width}x{decoder.Height}, {decoder.Duration:F3}s, {decoder.FrameRate:F3}fps");
             double previous = -1;
@@ -125,6 +128,85 @@ static class Program
             bool cancelled = false;
             try { decoder.Open(media, cancel.Token); } catch (OperationCanceledException) { cancelled = true; }
             Check(cancelled, "cancelled open");
+        }
+    }
+    static void TestHardwareCpuUpload(string media)
+    {
+        using (var decoder = new FFmpegVideoDecoder(new DecoderOptions {
+            HardwareDeviceType = AVHWDeviceType.AV_HWDEVICE_TYPE_D3D11VA,
+            KeepNativeFrames = false, AllowHardwareCpuUpload = true }))
+        {
+            // This owns a separate D3D11 video device. The test has no Unity graphics
+            // context or interop bridge callback, so success must use real HW download.
+            decoder.Open(media, CancellationToken.None);
+            Check(decoder.HardwareDecoding, "D3D11VA CPU transport keeps actual hardware decoding");
+            Check(!string.IsNullOrEmpty(decoder.DecoderName) && !string.IsNullOrEmpty(decoder.DecoderDevice), "hardware decoder name/device diagnostics");
+            double previous = -1;
+            for (int i = 0; i < 6; i++)
+                using (var frame = decoder.ReadFrame())
+                {
+                    Check(frame != null && frame.HardwareDecoded, "downloaded frame retains hardware decode identity");
+                    Check(!frame.IsHardwareFrame && frame.Data != IntPtr.Zero && frame.DataSize == frame.Width * frame.Height * 4,
+                        "hardware download delivers packed CPU RGBA, not a native texture handle");
+                    Check(frame.PresentationTime >= previous, "hardware CPU frames stay ordered");
+                    previous = frame.PresentationTime;
+                }
+            double target = Math.Min(1, decoder.Duration / 2);
+            decoder.Seek(target);
+            using (var frame = decoder.ReadFrame())
+            {
+                Check(frame != null && frame.HardwareDecoded && frame.PresentationTime + frame.Duration >= target - 0.05,
+                    "hardware CPU decode remains seekable");
+                var pixels = new byte[frame.DataSize];
+                Marshal.Copy(frame.Data, pixels, 0, pixels.Length);
+                int low = 765, high = 0;
+                for (int offset = 0; offset < pixels.Length; offset += 4)
+                {
+                    int brightness = pixels[offset] + pixels[offset + 1] + pixels[offset + 2];
+                    low = Math.Min(low, brightness); high = Math.Max(high, brightness);
+                }
+                Check(high - low > 15, "real hardware-decoded pixels survive CPU conversion");
+            }
+            Console.WriteLine("Hardware CPU transport: " + decoder.DecoderName + "; " + decoder.DecoderDevice);
+        }
+    }
+    static unsafe void TestHardwareMappingFailure(string media)
+    {
+        foreach (bool strict in new[] { false, true })
+        {
+            int mappings = 0;
+            var options = new DecoderOptions {
+                HardwareDeviceType = AVHWDeviceType.AV_HWDEVICE_TYPE_D3D11VA,
+                KeepNativeFrames = true, AllowHardwareCpuUpload = true, RequireHardwareDecoding = strict,
+                AcquireHardwareDevice = () => {
+                    AVBufferRef* device = null;
+                    FFmpegVideoDecoder.Check(ffmpeg.av_hwdevice_ctx_create(&device,
+                        AVHWDeviceType.AV_HWDEVICE_TYPE_D3D11VA, null, null, 0), "create mapping test D3D11 device");
+                    return (IntPtr)device;
+                },
+                MapHardwareFrame = _ => { mappings++; throw new NotSupportedException("injected mapper failure"); }
+            };
+            using (var decoder = new FFmpegVideoDecoder(options))
+            {
+                decoder.Open(media, CancellationToken.None);
+                if (strict)
+                {
+                    bool rejected = false;
+                    try { using (decoder.ReadFrame()) { } }
+                    catch (NotSupportedException error) { rejected = error.Message.Contains("injected mapper failure"); }
+                    Check(rejected, "strict GPU mode refuses mapper failure instead of downloading CPU pixels");
+                }
+                else
+                {
+                    for (int index = 0; index < 2; index++)
+                        using (var frame = decoder.ReadFrame())
+                            Check(frame != null && frame.HardwareDecoded && !frame.IsHardwareFrame && frame.Data != IntPtr.Zero,
+                                "native mapper failure downloads the original hardware frame");
+                    Check(decoder.HardwareDecoding, "mapper failure preserves hardware decoder identity");
+                    Check(decoder.HardwareFallbackReason.Contains("injected mapper failure"), "mapper failure remains diagnosable");
+                }
+                Check(mappings == 1, "failed native mapping is attempted only once per session");
+            }
         }
     }
     static unsafe void TestConversion()

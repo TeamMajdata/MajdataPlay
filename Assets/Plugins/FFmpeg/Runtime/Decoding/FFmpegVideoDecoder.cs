@@ -5,6 +5,7 @@ using System.Runtime.InteropServices;
 using System.Threading;
 using AOT;
 using FFmpeg.AutoGen;
+using MajdataPlay.Diagnostics;
 
 namespace MajdataPlay.Video.Internal
 {
@@ -32,6 +33,10 @@ namespace MajdataPlay.Video.Internal
         private AVRational _timeBase;
         private AVPixelFormat _hardwarePixelFormat = AVPixelFormat.AV_PIX_FMT_NONE;
         private IHardwareDecodeSession _hardwareSession;
+        private bool _cpuTransport;
+        private bool _mediaCodecHardware;
+        private string _lastReportedTransport;
+        private string _hardwareDeviceDescription;
         private bool _packetPending;
         private bool _inputEnded;
         private bool _draining;
@@ -53,6 +58,9 @@ namespace MajdataPlay.Video.Internal
         public bool HasAudio { get; private set; }
         public bool CanSeek { get; private set; }
         public string CodecName { get; private set; }
+        public string DecoderName { get; private set; }
+        public string DecoderDevice { get; private set; } = "Software";
+        public string TransferMode { get; private set; } = "Software RGBA upload";
         public bool HardwareDecoding { get; private set; }
         public string HardwareFallbackReason { get; private set; }
 
@@ -67,12 +75,18 @@ namespace MajdataPlay.Video.Internal
 
         public void Open(string path, CancellationToken cancellationToken)
         {
+#if (UNITY_EDITOR || DEBUG) && ENABLE_PROFILER
+            using var profile = UnityProfiler.Create("FFmpeg.Decoder.Open");
+#endif
             if (_disposed) throw new ObjectDisposedException(nameof(FFmpegVideoDecoder));
             if (_format != null) throw new InvalidOperationException("Decoder is already open.");
             if (string.IsNullOrWhiteSpace(path)) throw new ArgumentException("A media path or URL is required.", nameof(path));
             _ownerThread = Thread.CurrentThread.ManagedThreadId;
             _cancellation = cancellationToken;
             _cancellation.ThrowIfCancellationRequested();
+            _cpuTransport = !_options.KeepNativeFrames;
+            MajDebug.LogDebug("FFmpeg", "[Decoder] Opening media; requested device=" + _options.HardwareDeviceType +
+                ", native frames=" + _options.KeepNativeFrames + ", strict GPU=" + _options.RequireHardwareDecoding + ".");
 
             try
             {
@@ -105,6 +119,7 @@ namespace MajdataPlay.Video.Internal
                 Check(_videoStreamIndex, "Find video stream");
                 if (codec == null) throw new NotSupportedException("This FFmpeg build has no decoder for the video codec.");
                 var stream = _format->streams[_videoStreamIndex];
+                CodecName = ffmpeg.avcodec_get_name(stream->codecpar->codec_id);
                 _timeBase = stream->time_base;
                 if (_timeBase.num <= 0 || _timeBase.den <= 0)
                     throw new InvalidOperationException("The video stream has an invalid time base.");
@@ -142,10 +157,22 @@ namespace MajdataPlay.Video.Internal
                     else HardwareFallbackReason = "This FFmpeg build has no " + name + " decoder.";
                 }
                 AllocateCodec(codec, stream);
-                if (!mediaCodec || codec != softwareCodec) ConfigureHardware(codec);
+                bool selectedMediaCodec = mediaCodec && ffmpeg.PtrToStringUTF8(codec->name).EndsWith("_mediacodec", StringComparison.Ordinal);
+                if (!mediaCodec || (selectedMediaCodec && !_cpuTransport))
+                {
+                    try { ConfigureHardware(codec); }
+                    catch (Exception error) when (!_options.RequireHardwareDecoding && !(error is OperationCanceledException) && !(error is OutOfMemoryException))
+                    {
+                        HardwareFallbackReason = "Hardware device initialization failed: " + error.Message;
+                        MajDebug.LogWarning("FFmpeg", "[Decoder] " + HardwareFallbackReason);
+                    }
+                }
                 if (_options.RequireHardwareDecoding && _codec->hw_device_ctx == null)
                     throw new NotSupportedException(HardwareFallbackReason ?? "A hardware decoding device is required.");
-                if (mediaCodec && _codec->hw_device_ctx == null)
+                bool mediaCodecCpu = selectedMediaCodec && _codec->hw_device_ctx == null &&
+                    _options.AllowHardwareCpuUpload && !_options.RequireHardwareDecoding;
+                if (mediaCodecCpu) _cpuTransport = true;
+                if (mediaCodec && _codec->hw_device_ctx == null && !mediaCodecCpu)
                 {
                     ReleaseCodec();
                     codec = softwareCodec;
@@ -157,30 +184,59 @@ namespace MajdataPlay.Video.Internal
                 {
                     // The JNI path explicitly filters software codecs. NDK create-by-MIME
                     // may silently select a software decoder when no hardware codec exists.
-                    if (mediaCodec && _codec->hw_device_ctx != null)
+                    if (selectedMediaCodec && (_codec->hw_device_ctx != null || mediaCodecCpu))
                         Check(ffmpeg.av_dict_set(&codecOptions, "ndk_codec", "0", 0), "Select hardware MediaCodec");
                     codecResult = ffmpeg.avcodec_open2(_codec, codec, &codecOptions);
                 }
                 finally { ffmpeg.av_dict_free(&codecOptions); }
-                if (codecResult < 0 && _codec->hw_device_ctx != null && !_options.RequireHardwareDecoding)
+                if (codecResult < 0 && selectedMediaCodec && _codec->hw_device_ctx != null &&
+                    _options.AllowHardwareCpuUpload && !_options.RequireHardwareDecoding)
+                {
+                    HardwareFallbackReason = "MediaCodec Surface open failed: " + ErrorText(codecResult);
+                    MajDebug.LogWarning("FFmpeg", "[Decoder] " + HardwareFallbackReason + "; retrying hardware byte-buffer output.");
+                    ReleaseCodec();
+                    AllocateCodec(codec, stream);
+                    _cpuTransport = true;
+                    mediaCodecCpu = true;
+                    try
+                    {
+                        Check(ffmpeg.av_dict_set(&codecOptions, "ndk_codec", "0", 0), "Select hardware MediaCodec");
+                        codecResult = ffmpeg.avcodec_open2(_codec, codec, &codecOptions);
+                    }
+                    finally { ffmpeg.av_dict_free(&codecOptions); }
+                }
+                if (codecResult < 0 && (_codec->hw_device_ctx != null || mediaCodecCpu) && !_options.RequireHardwareDecoding)
                 {
                     // Some codecs reject a hardware configuration at open instead of get_format.
                     HardwareFallbackReason = "Hardware decoder open failed: " + ErrorText(codecResult);
+                    MajDebug.LogWarning("FFmpeg", "[Decoder] " + HardwareFallbackReason + "; opening software decoder.");
                     ReleaseCodec();
                     codec = softwareCodec;
                     AllocateCodec(codec, stream);
                     HardwareDecoding = false;
+                    selectedMediaCodec = false;
+                    mediaCodecCpu = false;
                     codecResult = ffmpeg.avcodec_open2(_codec, codec, null);
                 }
                 Check(codecResult, "Open video decoder");
-                CodecName = ffmpeg.PtrToStringUTF8(codec->name);
+                DecoderName = ffmpeg.PtrToStringUTF8(codec->name);
+                _mediaCodecHardware = selectedMediaCodec && (mediaCodecCpu || _codec->hw_device_ctx != null);
+                HardwareDecoding = _mediaCodecHardware || _codec->hw_device_ctx != null;
+                if (_mediaCodecHardware)
+                    DecoderDevice = DescribeHardwareDevice(mediaCodecCpu ? "MediaCodec hardware byte-buffer output" : "MediaCodec hardware Surface output");
+                if (!HardwareDecoding) DecoderDevice = "Software";
+                else _hardwareDeviceDescription = DecoderDevice;
+                TransferMode = HardwareDecoding ? (_cpuTransport ? "Hardware decode + CPU RGBA upload" : "Native GPU frames") : "Software RGBA upload";
+                MajDebug.LogInfo("FFmpeg", "[Decoder] Opened codec=" + CodecName + ", decoder=" + DecoderName +
+                    ", device=" + DecoderDevice + ", transport=" + TransferMode + ", size=" + Width + "x" + Height + ".");
                 _packet = ffmpeg.av_packet_alloc();
                 _frame = ffmpeg.av_frame_alloc();
                 if (_packet == null || _frame == null) throw new OutOfMemoryException("Cannot allocate decoder packet/frame.");
                 Interlocked.Exchange(ref _ioDeadline, 0);
             }
-            catch
+            catch (Exception error)
             {
+                if (!(error is OperationCanceledException)) MajDebug.LogError("FFmpeg", "[Decoder] Open failed: " + error.Message);
                 Dispose();
                 throw;
             }
@@ -189,6 +245,9 @@ namespace MajdataPlay.Video.Internal
         /// <summary>Returns null only after every delayed frame has been drained at end of input.</summary>
         public DecodedVideoFrame ReadFrame()
         {
+#if (UNITY_EDITOR || DEBUG) && ENABLE_PROFILER
+            using var profile = UnityProfiler.Create("FFmpeg.Decoder.ReadFrame");
+#endif
             EnsureOwner();
             if (_codec == null) throw new InvalidOperationException("Open the media before reading.");
             if (_ended) return null;
@@ -277,6 +336,10 @@ namespace MajdataPlay.Video.Internal
 
         public void Seek(double seconds)
         {
+#if (UNITY_EDITOR || DEBUG) && ENABLE_PROFILER
+            using var profile = UnityProfiler.Create("FFmpeg.Decoder.Seek");
+#endif
+            MajDebug.LogDebug("FFmpeg", "[Decoder] Seeking to " + seconds.ToString("F3", CultureInfo.InvariantCulture) + " seconds.");
             EnsureOwner();
             if (_format == null) throw new InvalidOperationException("Open the media before seeking.");
             if (!CanSeek) throw new NotSupportedException("This media input is not seekable.");
@@ -306,14 +369,18 @@ namespace MajdataPlay.Video.Internal
 
         private DecodedVideoFrame CreatePresentationFrame(AVFrame* frame, double seconds, double duration)
         {
+#if (UNITY_EDITOR || DEBUG) && ENABLE_PROFILER
+            using var profile = UnityProfiler.Create("FFmpeg.Decoder.PreparePresentationFrame");
+#endif
             var rotation = ReadFrameRotation(frame, RotationDegrees);
             UpdateDimensions(frame->width, frame->height, rotation);
             var hardware = frame->hw_frames_ctx != null ||
                 ((AVPixelFormat)frame->format == AVPixelFormat.AV_PIX_FMT_MEDIACODEC && frame->data[3] != null);
-            HardwareDecoding = hardware;
+            HardwareDecoding = hardware || _mediaCodecHardware;
+            DecoderDevice = HardwareDecoding ? _hardwareDeviceDescription ?? DecoderDevice : "Software";
             if (_options.RequireHardwareDecoding && (!hardware || !_options.KeepNativeFrames))
                 throw new NotSupportedException(HardwareFallbackReason ?? "The decoder did not produce a shareable hardware frame.");
-            if (hardware && _options.KeepNativeFrames)
+            if (hardware && _options.KeepNativeFrames && !_cpuTransport)
             {
                 var aspect = frame->sample_aspect_ratio;
                 DecodedVideoFrame result;
@@ -325,9 +392,25 @@ namespace MajdataPlay.Video.Internal
                 }
                 else
                 {
-                    var clone = _options.MapHardwareFrame != null
-                        ? (AVFrame*)_options.MapHardwareFrame((IntPtr)frame)
-                        : ffmpeg.av_frame_clone(frame);
+                    AVFrame* clone;
+                    try
+                    {
+                        clone = _options.MapHardwareFrame != null
+                            ? (AVFrame*)_options.MapHardwareFrame((IntPtr)frame)
+                            : ffmpeg.av_frame_clone(frame);
+                        if (clone == null && _options.MapHardwareFrame != null)
+                            throw new NotSupportedException("The native graphics mapper returned no imported frame.");
+                    }
+                    catch (Exception error) when (_options.AllowHardwareCpuUpload && !_options.RequireHardwareDecoding &&
+                        frame->hw_frames_ctx != null && !(error is OperationCanceledException) && !(error is OutOfMemoryException))
+                    {
+                        // Download the original VAAPI/D3D11/VideoToolbox frame, never a
+                        // mapped DRM_PRIME frame whose transfer implementation may differ.
+                        _cpuTransport = true;
+                        HardwareFallbackReason = "Native frame mapping failed: " + error.Message;
+                        MajDebug.LogWarning("FFmpeg", "[Decoder] " + HardwareFallbackReason + "; keeping hardware decode with CPU upload.");
+                        return ConvertForCpu(frame, seconds, duration, rotation);
+                    }
                     if (clone == null) throw new OutOfMemoryException("Cannot reference hardware video frame.");
                     result = new DecodedVideoFrame(IntPtr.Zero, (IntPtr)clone);
                 }
@@ -339,10 +422,36 @@ namespace MajdataPlay.Video.Internal
                 result.PixelFormat = result.NativeFrame != IntPtr.Zero
                     ? (AVPixelFormat)((AVFrame*)result.NativeFrame)->format : (AVPixelFormat)frame->format;
                 result.PixelAspectRatio = aspect.num > 0 && aspect.den > 0 ? ffmpeg.av_q2d(aspect) : 1;
+                result.HardwareDecoded = true;
+                result.TransferMode = "Native GPU frames";
+                ReportTransport(result.TransferMode);
                 return result;
             }
-            return _converter.Convert(frame, seconds, duration, rotation, _options.MaximumPixelCount);
+            return ConvertForCpu(frame, seconds, duration, rotation);
         }
+
+        private DecodedVideoFrame ConvertForCpu(AVFrame* frame, double seconds, double duration, double rotation)
+        {
+            if (HardwareDecoding && (!_options.AllowHardwareCpuUpload || _options.RequireHardwareDecoding))
+                throw new NotSupportedException("Hardware decoding is available, but CPU texture transport was disabled.");
+            var result = _converter.Convert(frame, seconds, duration, rotation, _options.MaximumPixelCount);
+            result.HardwareDecoded = HardwareDecoding;
+            result.TransferMode = HardwareDecoding ? "Hardware decode + CPU RGBA upload" : "Software RGBA upload";
+            if (!HardwareDecoding) DecoderDevice = "Software";
+            ReportTransport(result.TransferMode);
+            return result;
+        }
+
+        private void ReportTransport(string transport)
+        {
+            TransferMode = transport;
+            if (_lastReportedTransport == transport) return;
+            _lastReportedTransport = transport;
+            MajDebug.LogInfo("FFmpeg", "[Decoder] Active decoder=" + DecoderName + ", device=" + DecoderDevice + ", transport=" + transport + ".");
+        }
+
+        private string DescribeHardwareDevice(string kind) => string.IsNullOrWhiteSpace(_options.HardwareDeviceDescription)
+            ? kind : kind + "; " + _options.HardwareDeviceDescription;
 
         private DecodedVideoFrame FinishInput()
         {
@@ -374,44 +483,84 @@ namespace MajdataPlay.Video.Internal
             if (configuration == null)
             {
                 HardwareFallbackReason = "This codec/build has no hardware configuration for " + _options.HardwareDeviceType + ".";
+                MajDebug.LogWarning("FFmpeg", "[Decoder] " + HardwareFallbackReason);
                 return;
             }
             AVBufferRef* device = null;
             try
             {
-                int result;
-                if (_options.CreateHardwareSession != null)
+                int result = -1;
+                bool suppliedDevice = false;
+                bool genericDevice = false;
+                try
                 {
-                    _hardwareSession = _options.CreateHardwareSession(_codec->width, _codec->height);
-                    device = _hardwareSession == null ? null : (AVBufferRef*)_hardwareSession.AcquireDevice();
-                    if (device == null) { HardwareFallbackReason = "The native hardware decoder surface is unavailable."; return; }
-                    result = 0;
+                    if (_options.CreateHardwareSession != null && !_cpuTransport)
+                    {
+                        suppliedDevice = true;
+                        _hardwareSession = _options.CreateHardwareSession(_codec->width, _codec->height);
+                        device = _hardwareSession == null ? null : (AVBufferRef*)_hardwareSession.AcquireDevice();
+                        if (device != null) result = 0;
+                        else HardwareFallbackReason = "The native hardware decoder surface is unavailable.";
+                    }
+                    else if (_options.AcquireHardwareDevice != null)
+                    {
+                        suppliedDevice = true;
+                        device = (AVBufferRef*)_options.AcquireHardwareDevice();
+                        if (device != null) result = 0;
+                        else HardwareFallbackReason = "No hardware decode device matches Unity's graphics device.";
+                    }
+                    else if (_options.HardwareDeviceType == AVHWDeviceType.AV_HWDEVICE_TYPE_D3D11VA && _options.AcquireD3D11Device != null)
+                    {
+                        suppliedDevice = true;
+                        device = ffmpeg.av_hwdevice_ctx_alloc(_options.HardwareDeviceType);
+                        if (device == null) throw new OutOfMemoryException("Cannot allocate D3D11 video device.");
+                        var deviceContext = (AVHWDeviceContext*)device->data;
+                        var d3d11 = (AVD3D11VADeviceContext*)deviceContext->hwctx;
+                        d3d11->device = (ID3D11Device*)_options.AcquireD3D11Device();
+                        if (d3d11->device != null) result = ffmpeg.av_hwdevice_ctx_init(device);
+                        else HardwareFallbackReason = "The Unity D3D11 device is unavailable.";
+                    }
                 }
-                else if (_options.AcquireHardwareDevice != null)
+                catch (Exception error) when (_options.AllowHardwareCpuUpload && !_options.RequireHardwareDecoding &&
+                    !(error is OperationCanceledException) && !(error is OutOfMemoryException))
                 {
-                    device = (AVBufferRef*)_options.AcquireHardwareDevice();
-                    if (device == null) { HardwareFallbackReason = "No hardware decode device matches Unity's graphics device."; return; }
-                    result = 0;
+                    HardwareFallbackReason = "Unity-compatible hardware device unavailable: " + error.Message;
                 }
-                else if (_options.HardwareDeviceType == AVHWDeviceType.AV_HWDEVICE_TYPE_D3D11VA)
+                if (result < 0)
                 {
-                    if (_options.AcquireD3D11Device == null)
-                    { HardwareFallbackReason = "The Unity D3D11 device was not supplied."; return; }
-                    device = ffmpeg.av_hwdevice_ctx_alloc(_options.HardwareDeviceType);
-                    if (device == null) throw new OutOfMemoryException("Cannot allocate D3D11 video device.");
-                    var deviceContext = (AVHWDeviceContext*)device->data;
-                    var d3d11 = (AVD3D11VADeviceContext*)deviceContext->hwctx;
-                    d3d11->device = (ID3D11Device*)_options.AcquireD3D11Device();
-                    if (d3d11->device == null) { HardwareFallbackReason = "The Unity D3D11 device is unavailable."; return; }
-                    result = ffmpeg.av_hwdevice_ctx_init(device);
+                    if (device != null) ffmpeg.av_buffer_unref(&device);
+                    bool canCreateNativeDevice = !suppliedDevice &&
+                        _options.HardwareDeviceType == AVHWDeviceType.AV_HWDEVICE_TYPE_VIDEOTOOLBOX;
+                    if (!canCreateNativeDevice && (_options.RequireHardwareDecoding || !_options.AllowHardwareCpuUpload ||
+                        _options.HardwareDeviceType == AVHWDeviceType.AV_HWDEVICE_TYPE_MEDIACODEC))
+                    {
+                        HardwareFallbackReason ??= "A compatible native hardware device was not supplied.";
+                        MajDebug.LogWarning("FFmpeg", "[Decoder] " + HardwareFallbackReason);
+                        return;
+                    }
+                    if (suppliedDevice)
+                    {
+                        HardwareFallbackReason ??= "Unity-compatible hardware device initialization failed: " + ErrorText(result);
+                        MajDebug.LogWarning("FFmpeg", "[Decoder] " + HardwareFallbackReason + "; trying an independent hardware device for CPU upload.");
+                    }
+                    result = ffmpeg.av_hwdevice_ctx_create(&device, _options.HardwareDeviceType, null, null, 0);
+                    genericDevice = true;
+                    if (!canCreateNativeDevice) _cpuTransport = true;
                 }
-                else result = ffmpeg.av_hwdevice_ctx_create(&device, _options.HardwareDeviceType, null, null, 0);
-                if (result < 0) { HardwareFallbackReason = ErrorText(result); return; }
+                if (result < 0)
+                {
+                    HardwareFallbackReason = "Hardware device creation failed: " + ErrorText(result);
+                    MajDebug.LogWarning("FFmpeg", "[Decoder] " + HardwareFallbackReason);
+                    return;
+                }
                 _hardwarePixelFormat = configuration->pix_fmt;
                 _codec->hw_device_ctx = device;
                 device = null;
                 _codec->get_format = FormatCallback;
                 HardwareDecoding = true;
+                var kind = _options.HardwareDeviceType.ToString().Replace("AV_HWDEVICE_TYPE_", "");
+                DecoderDevice = genericDevice && suppliedDevice ? kind + " (FFmpeg default hardware device)" :
+                    DescribeHardwareDevice(genericDevice ? kind + " (FFmpeg default hardware device)" : kind);
             }
             finally { if (device != null) ffmpeg.av_buffer_unref(&device); }
         }
@@ -446,6 +595,7 @@ namespace MajdataPlay.Video.Internal
                     if (*cursor == self._hardwarePixelFormat) return *cursor;
                 self.HardwareDecoding = false;
                 self.HardwareFallbackReason = "The decoder rejected the requested hardware pixel format.";
+                MajDebug.LogWarning("FFmpeg", "[Decoder] " + self.HardwareFallbackReason);
                 if (self._options.RequireHardwareDecoding) return AVPixelFormat.AV_PIX_FMT_NONE;
                 for (var cursor = formats; *cursor != AVPixelFormat.AV_PIX_FMT_NONE; cursor++)
                 {
@@ -561,6 +711,9 @@ namespace MajdataPlay.Video.Internal
 
         public void Dispose()
         {
+#if (UNITY_EDITOR || DEBUG) && ENABLE_PROFILER
+            using var profile = UnityProfiler.Create("FFmpeg.Decoder.Dispose");
+#endif
             if (_disposed) return;
             EnsureOwner();
             _disposed = true;
@@ -577,6 +730,7 @@ namespace MajdataPlay.Video.Internal
             if (format != null) ffmpeg.avformat_close_input(&format);
             _format = null;
             if (_selfHandle.IsAllocated) _selfHandle.Free();
+            MajDebug.LogDebug("FFmpeg", "[Decoder] Decoder and input resources released.");
         }
     }
 }

@@ -2,7 +2,26 @@
 
 执行日期：2026-10-03。Windows / Unity 6000.3.17f1 / AMD Radeon RX 580 2048SP；Linux 使用本机 WSL Ubuntu 24.04；Android 真机为 Mi MIX 2S / Android 15 API 35 / Adreno 630 / Vulkan 1.1.128；Apple 构建测试使用用户提供的 Mac mini M4。FFmpeg 库均为本次从锁定源码编译的产物。Windows/Apple 图形桥接 ABI 为 **2**，Linux/Android 为 **3**。
 
-## Windows Unity 硬件播放
+## 本次日志、解码偏好与 CPU 上传回退验证
+
+2026-10-03 更新：运行时已引用真实 `MajdataPlay.Diagnostics`，新增首选解码器类型、硬件解码加 CPU 上传回退、四级日志和 Profiler 作用域。本轮未改动原生库；下方此前的完整平台矩阵保留原验证范围，不将其视为本轮托管改动在所有设备上的重测。
+
+| 本轮目标 | CPU 硬解上传 | 偏好切换与原生纹理失败恢复 | 严格 GPU 模式 | 原有控制回调故障恢复 |
+| --- | --- | --- | --- | --- |
+| Windows x64 Mono，D3D12 / Vulkan | 各 24 assertions PASS | 各 41 assertions PASS | 各 20 assertions PASS | D3D12，52 assertions PASS |
+| Windows x64 IL2CPP，D3D12 / Vulkan | 各 24 assertions PASS | 各 41 assertions PASS | 各 20 assertions PASS | D3D12，52 assertions PASS |
+| Android ARM64 IL2CPP，Vulkan | MediaCodec ByteBuffer 实际像素/seek 通过 | 与软件/硬件偏好、共享失败恢复合计 58 assertions PASS、342 帧 | 同次运行先验证原生 GPU 共享与 300 帧持续播放 | — |
+| Android ARMv7 IL2CPP，Vulkan | MediaCodec ByteBuffer 实际像素/seek 通过 | 同一真机合计 58 assertions PASS、340 帧 | 同上 | — |
+
+Windows 共 14 个独立场景通过。两种 Android ABI 都在无 Surface 的 `h264_mediacodec` 硬件解码后得到 CPU 像素，并以 `Hardware decode + CPU RGBA upload` 呈现；故障注入后继续播放和 seek，最后重新打开媒体恢复 AHardwareBuffer 共享。最终报告的 `fallback=` 为空是因为最后一次重新打开已恢复原生路径，测试过程中的故意回退与 Warning 完整保留在日志中。
+
+真实 MajDebug 日志验证 `Debug`、`Info`、`Warning`、`Error` 四等级与 `[FFmpeg][component]` 标签；记录 h264 编码、实际软件/硬件后端、`h264_mediacodec` / D3D11VA、设备选择及 Unity 渲染 GPU/驱动、纹理传输路径。Error 来自故障恢复测试主动注入的终止错误。预载首帧回调中 Pause 的检查也通过：首帧可完成准备，无需丢弃后等待第二帧。
+
+真实 FFmpeg 解码测试扩展至 **335 assertions PASS**，新增独立 D3D11VA 设备下载、下载后的 seek、硬件身份与 CPU 像素并存、原生映射失败仅尝试一次后保留硬解，以及严格模式禁止下载。**13 组**真实程序集宏编译通过，覆盖九组平台/IL2CPP 组合和四组 Editor/Debug/Profiler 组合（含 Inspector 与 iOS 后处理）。Profiler 工作线程已配对注册/注销；未将宏编译当作 Profiler 界面的采样录制验证。
+
+证据位于 `.work/windows-decoder-diagnostics-matrix.json`、各 Windows 目录的 `*-hardware-cpu.*` / `*-decoder-preference.*` / `*-recovery.*`、两种 Android 目录的 `vulkan-hardware-device.txt` 及 `.diagnostics.log`，以及 `.work/DecoderTransportManagedReview/`。本轮没有补做 Linux VAAPI 物理 GPU 或 Apple Unity Player 实机验证，相关限制仍适用。
+
+## 此前的 Windows Unity 硬件播放矩阵
 
 下列 **16 组**均已真实启动 Player，包含纹理像素读回、时间轴和生命周期检查。每组 **18 assertions 通过**；要求真实硬件路径，软件回退即失败。
 
