@@ -50,7 +50,6 @@ public sealed class VideoExample : MonoBehaviour
 | `DecoderType`, `DecoderName`, `DecoderDevice` | 当前会话的实际解码后端类型、AVCodec 名称与设备描述；需在准备后读取 |
 | `TransferMode`, `HardwareFallbackReason`, `LastError` | 实际纹理传输模式和诊断 |
 | `PreferredDecoderType` | Software 使用 FFmpeg 软件解码；Hardware 优先硬件后端，依次尝试 GPU 共享、硬件解码加 CPU 上传、软件解码 |
-| `PreferHardwareDecoding` | 兼容旧 API，与 PreferredDecoderType 映射到同一份设置 |
 | `PreferNativeTextures` | 默认 true；false 可直接选择硬件解码加 CPU 上传，便于兼容性排查 |
 | `RequireHardwareDecoding` | 保留已有严格 GPU 模式语义，覆盖上述偏好；硬件共享不支持或运行中失败时报告错误，禁止 CPU 上传及软件回退 |
 | `Prepared`, `Started`, `Paused`, `Stopped`, `EndReached`, `SeekCompleted` | 主线程事件 |

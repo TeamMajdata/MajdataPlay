@@ -41,7 +41,7 @@ dotnet run --project Tools/Tests/FFmpegValidation/FFmpegValidation.csproj -- `
 
 `-TestRecovery` 隐含 `-RequireHardware`，通过反射注入托管层的 GPU 失败通知，不损坏驱动资源。它检查纹理清空回调中的 Pause、SeekAsync、Close，以及终止错误后的重新 Play；报告保存为独立 `*-recovery.*`。日志中的 `Expected recovery test terminal failure` 是该测试主动触发的预期错误，以最终断言报告判断结果。
 
-`-HardwareCpuUpload` 设置硬件解码偏好和 `PreferNativeTextures=false`，在完整控制/像素测试中强制检查实际 `DecoderType=Hardware` 且传输方式为 `Hardware decode + CPU RGBA upload`。`-TestDecoderPreference` 额外检查软件/硬件偏好枚举与旧布尔属性的双向映射、已打开会话的实际解码器身份、重新打开后的选型，以及原生纹理失败后保留硬件解码、转 CPU 上传继续播放和跳转。后者通过 `RecoverHardwarePlayback(Exception)` 注入真实恢复流程的失败通知。报告分别为 `*-hardware-cpu.*` 和 `*-decoder-preference.*`；这两个选项不能与禁止 CPU 上传的 `-RequireHardware` 同时使用。
+`-HardwareCpuUpload` 设置硬件解码偏好和 `PreferNativeTextures=false`，在完整控制/像素测试中强制检查实际 `DecoderType=Hardware` 且传输方式为 `Hardware decode + CPU RGBA upload`。`-TestDecoderPreference` 通过 `PreferredDecoderType` 选择软件或硬件解码，检查修改偏好不会改变已打开会话的实际解码器身份、重新打开后的选型，以及原生纹理失败后保留硬件解码、转 CPU 上传继续播放和跳转。后者通过 `RecoverHardwarePlayback(Exception)` 注入真实恢复流程的失败通知。报告分别为 `*-hardware-cpu.*` 和 `*-decoder-preference.*`；这两个选项不能与禁止 CPU 上传的 `-RequireHardware` 同时使用。
 
 隔离 Unity 工程会复制项目的 Diagnostics、完整 ZString、Unsafe 6.1.2 程序集与 PolySharp Roslyn 分析器，保留 `.asmdef` GUID 和 `csc.rsp`，并引入 ZString 引用的 UGUI/TextMeshPro 包。实际 MajDebug 日志写入报告旁的 `.diagnostics.log`，测试检查其中有解码器、设备和传输模式记录；Android runner 也会拉回该日志。首次新增这些依赖或修改测试源码后必须重新构建，不能使用旧 Player 的 `-SkipBuild` 结果。
 

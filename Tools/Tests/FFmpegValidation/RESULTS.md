@@ -2,6 +2,10 @@
 
 最近验证日期：2026-10-04；此前跨平台矩阵执行于 2026-10-03。Windows / Unity 6000.3.17f1 / AMD Radeon RX 580 2048SP；Linux 使用本机 WSL Ubuntu 24.04；Android 真机为 Mi MIX 2S / Android 15 API 35 / Adreno 630 / Vulkan 1.1.128；Apple 构建测试使用用户提供的 Mac mini M4。FFmpeg 库均为本次从锁定源码编译的产物。Windows/Apple 图形桥接 ABI 为 **2**，Linux/Android 为 **3**。
 
+## 删除兼容解码偏好属性
+
+2026-10-04 后续更新：移除 `PreferHardwareDecoding`，测试调用统一使用 `PreferredDecoderType`，并删除四项旧布尔属性映射断言，保留修改偏好后实际会话身份不变的检查。更新后的 `UnitySmoke.cs` 已与最新 Runtime、真实 Unity/AutoGen/Diagnostics 依赖一起编译通过；严格 XML 文档检查通过，现为 **128 个条目**。本次仅执行编译验证，证据在 `.work/DecoderPreferenceApiReview/`；下方 41/58 等播放断言数量保留为删除兼容性断言之前的历史实测记录，没有据此宣称新版 Player 已重跑。
+
 ## API 命名、XML 文档与 Profiler 调整验证
 
 2026-10-04 更新：秒单位时间属性改为 `TimeSeconds`，测试调用已同步更新；移除旧小写别名，公共 API 使用 PascalCase 并补充英文 XML 文档。调用处不再使用额外的 Profiler 条件编译包装。本轮未修改原生代码，也未重新执行此前全部设备矩阵。

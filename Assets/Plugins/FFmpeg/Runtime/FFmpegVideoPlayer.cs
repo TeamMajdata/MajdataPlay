@@ -183,9 +183,6 @@ namespace MajdataPlay.Video
         }
         /// <summary>Gets or sets whether seekable media restarts when playback reaches its end.</summary>
         public bool Loop { get => _loop; set => _loop = value; }
-        /// <summary>Gets or sets whether the next media open prefers hardware decoding.</summary>
-        /// <remarks>Maps to <see cref="PreferredDecoderType"/> for compatibility with existing callers.</remarks>
-        public bool PreferHardwareDecoding { get => _preferHardwareDecoding; set => _preferHardwareDecoding = value; }
         /// <summary>Gets or sets the preferred decoder backend for the next media open.</summary>
         /// <remarks>Hardware preference permits CPU upload or software fallback unless <see cref="RequireHardwareDecoding"/> is enabled.</remarks>
         /// <exception cref="ArgumentOutOfRangeException">The value is not a defined decoder type.</exception>

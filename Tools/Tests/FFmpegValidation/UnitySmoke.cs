@@ -50,7 +50,7 @@ public sealed class FFmpegPlayerSmoke : MonoBehaviour
     IEnumerator Run()
     {
         _player = gameObject.AddComponent<FFmpegVideoPlayer>();
-        _player.PreferHardwareDecoding = Argument("-videoHardware") == "true";
+        _player.PreferredDecoderType = Argument("-videoHardware") == "true" ? VideoDecoderType.Hardware : VideoDecoderType.Software;
         _player.RequireHardwareDecoding = Argument("-videoRequireHardware") == "true" && Argument("-videoTestRecovery") != "true";
         _player.PreferNativeTextures = Argument("-videoHardwareCpuUpload") != "true";
         _player.FrameReady += (_, __) => _frames++;
@@ -167,7 +167,6 @@ public sealed class FFmpegPlayerSmoke : MonoBehaviour
         {
             _player.PreferredDecoderType = preference;
             _player.PreferNativeTextures = false;
-            Check(_player.PreferHardwareDecoding == (preference == VideoDecoderType.Hardware), "preferred decoder enum maps to legacy preference");
             int beforePreload = _frames, pauseCallbacks = 0;
             Action<FFmpegVideoPlayer, Texture> pauseFirstTexture = (player, texture) => {
                 if (texture != null && pauseCallbacks++ == 0) player.Pause();
@@ -190,8 +189,7 @@ public sealed class FFmpegPlayerSmoke : MonoBehaviour
             seek.GetAwaiter().GetResult();
             yield return null;
             CheckTextureContents();
-            _player.PreferHardwareDecoding = preference != VideoDecoderType.Hardware;
-            Check(_player.PreferredDecoderType != preference, "legacy preference setter maps back to enum");
+            _player.PreferredDecoderType = preference == VideoDecoderType.Hardware ? VideoDecoderType.Software : VideoDecoderType.Hardware;
             Check(_player.DecoderType == preference, "preference changes do not mislabel the already-open decoder");
             _player.Close();
         }
