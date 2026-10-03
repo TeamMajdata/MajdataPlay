@@ -28,12 +28,12 @@ foreach ($directory in @($projectRoot, $resultRoot, $pluginTarget, $runtimeTarge
 # No source project settings or imported assets are changed. All generated
 # fixtures, player logs and library imports stay in this ignored Temp project.
 Copy-Item -Path (Join-Path $pluginSource '*') -Destination $pluginTarget -Recurse -Force
+Copy-Item -LiteralPath (Join-Path $repoRoot 'Assets/Plugins/VLCUnity/Runtime/Plugins/LibVLCSharp.dll') -Destination $pluginTarget -Force
 if ($NativePlugin) {
     Copy-Item -LiteralPath $NativePlugin -Destination (Join-Path $pluginTarget 'VLCUnityPlugin.dll') -Force
 }
 Copy-Item -LiteralPath (Join-Path $repoRoot 'Assets/Plugins/VLCUnity/Runtime/VlcVideoOutput.cs') -Destination $runtimeTarget -Force
-Copy-Item -LiteralPath (Join-Path $repoRoot 'Assets/Plugins/VLCUnity/Runtime/Internal/VlcCpuVideoOutput.cs') -Destination $runtimeTarget -Force
-Copy-Item -LiteralPath (Join-Path $repoRoot 'Assets/Plugins/VLCUnity/Runtime/Internal/OnLoad.cs') -Destination $runtimeTarget -Force
+Copy-Item -Path (Join-Path $repoRoot 'Assets/Plugins/VLCUnity/Runtime/Internal/*.cs') -Destination $runtimeTarget -Force
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'UnityGraphicsValidation.cs') -Destination $editorTarget -Force
 Copy-Item -LiteralPath (Join-Path $repoRoot 'ProjectSettings/ProjectVersion.txt') -Destination (Join-Path $projectRoot 'ProjectSettings/ProjectVersion.txt') -Force
 [IO.File]::WriteAllText((Join-Path $projectRoot 'Packages/manifest.json'), '{"dependencies":{"com.unity.modules.imageconversion":"1.0.0"}}')

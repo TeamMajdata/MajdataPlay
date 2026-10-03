@@ -13,35 +13,41 @@ namespace LibVLCSharp
     /// </summary>
     public sealed class VlcVideoOutput : IDisposable
     {
-        const string Plugin = "VLCUnityPlugin";
-        const int Initializing = 4;
         readonly int _mainThread = Thread.CurrentThread.ManagedThreadId;
-        readonly Vector2 _nativeScale;
-        readonly Vector2 _nativeOffset;
         VlcCpuVideoOutput _cpu;
         Texture2D _uploadTexture;
+        byte[] _pixels;
+        bool _ready;
+        bool _disposed;
+        string _reportedError;
+#if UNITY_IOS && !UNITY_EDITOR
+        const string Plugin = "__Internal";
+#else
+        const string Plugin = "VLCUnityPlugin";
+#endif
+        const int Initializing = 4;
+        readonly Vector2 _nativeScale;
+        readonly Vector2 _nativeOffset;
+        TextureFormat _nativeTextureFormat;
         Texture2D _externalTexture;
         RenderTexture _renderTexture;
         CommandBuffer _commands;
-        byte[] _pixels;
         IntPtr _renderEvent;
         int _renderEventBase;
         IntPtr _renderContext;
         IntPtr _externalPointer;
         ulong _version;
-        bool _ready;
-        bool _disposed;
         bool _fallingBack;
         bool _restartAfterFallback;
         bool _pauseAfterFallback;
         bool _restoreAfterFallback;
         long _fallbackTime;
-        string _reportedError;
 
         public MediaPlayer Player { get; }
 
         /// <summary>Unity-owned texture, safe for normal materials and RawImage.</summary>
-        public Texture Texture => _cpu != null ? (Texture)_uploadTexture : _renderTexture;
+        public Texture Texture =>
+            _cpu != null ? (Texture)_uploadTexture : _renderTexture;
 
         /// <summary>
         /// True when frames stay on the GPU between VLC and Unity. VLC may still
@@ -108,8 +114,9 @@ namespace LibVLCSharp
                 _cpu.Attach(Player.NativeReference);
                 UsesGpuInterop = false;
             }
-            else if (capability == 1 || capability == 2 || capability == 3 || capability == 5)
+            else if (capability == 1 || capability == 2 || capability == 3 || capability == 5 || capability == 6)
             {
+                _nativeTextureFormat = capability == 6 ? TextureFormat.BGRA32 : TextureFormat.RGBA32;
                 _commands = new CommandBuffer { name = "VLC present shared video frame" };
                 UsesGpuInterop = true;
             }
@@ -157,7 +164,7 @@ namespace LibVLCSharp
                 DestroyTexture(_externalTexture);
                 DestroyTexture(_renderTexture);
                 _externalTexture = Texture2D.CreateExternalTexture((int)width, (int)height,
-                    TextureFormat.RGBA32, false, true, pointer);
+                    _nativeTextureFormat, false, true, pointer);
                 _externalTexture.wrapMode = TextureWrapMode.Clamp;
                 _externalTexture.filterMode = FilterMode.Bilinear;
                 _renderTexture = new RenderTexture((int)width, (int)height, 0, RenderTextureFormat.ARGB32)
@@ -209,7 +216,6 @@ namespace LibVLCSharp
                 Player.Play();
             }
         }
-
         void RestorePlaybackAfterFallback()
         {
             if (!_restoreAfterFallback || (Player.State != VLCState.Playing && Player.State != VLCState.Paused))
@@ -262,11 +268,12 @@ namespace LibVLCSharp
             // them on the render thread after all queued acquire/blit/release work.
             QueueEvent(3);
             _commands?.Dispose();
-            DestroyTexture(_uploadTexture);
             DestroyTexture(_externalTexture);
             DestroyTexture(_renderTexture);
-            _uploadTexture = _externalTexture = null;
+            _externalTexture = null;
             _renderTexture = null;
+            DestroyTexture(_uploadTexture);
+            _uploadTexture = null;
             _pixels = null;
         }
 

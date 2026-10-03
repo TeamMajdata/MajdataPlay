@@ -1,167 +1,129 @@
-Welcome to VLC for Unity on Windows!
+# VLCUnity in MajdataPlay
 
-## MajdataPlay Windows x64 integration
+This repository integrates VLC with Unity on Windows, Linux, macOS, Android and
+iOS. Use `LibVLCSharp.VlcRuntime` and `LibVLCSharp.VlcVideoOutput`; `BGManager`
+already uses them and falls back to Unity VideoPlayer when VLC is unavailable.
 
-This project supplies a source-built native bridge for Direct3D 11, Direct3D 12,
-OpenGL Core and Vulkan. Use `LibVLCSharp.VlcVideoOutput`, which selects D3D11 GPU
-texture sharing when the active graphics API and driver support it, and portable
-RGBA callbacks otherwise. `BGManager` uses this wrapper. The GPU path avoids CPU
-pixel transfers but still performs video color conversion and a GPU presentation
-blit. Keep the native plugin preloaded and restart Unity after replacing it.
+**Only the Windows x64 decoder distribution is included.** Other targets need
+the matching native VLC engine, modules and dependencies in addition to the
+bridge. Source support, a compiled bridge and a complete working decoder bundle
+are different deliverables. The build validator rejects incomplete bundles.
 
-Build instructions, capability requirements and validation commands are in
-[`Tools/VLCUnity/README.md`](../../../Tools/VLCUnity/README.md).
-The upstream documentation below also describes platforms not shipped by this
-repository; this addition targets Windows x64 only.
+Full build commands, dependency layout, iOS manifest examples and the validation
+record are in [`Tools/VLCUnity/README.md`](../../../Tools/VLCUnity/README.md).
 
-## Docs reference
+## Graphics output
 
-See the [LibVLCSharp documentation](https://code.videolan.org/videolan/LibVLCSharp/-/blob/master/docs/home.md).
+| Platform | GPU presentation route |
+| --- | --- |
+| Windows | D3D11 shared output for D3D11, D3D12, OpenGL Core through WGL interop, and Vulkan through Win32 external memory |
+| Linux | GLX/EGL context sharing for OpenGL Core; EGL DMA-BUF export and Vulkan import with DRM modifiers for Vulkan |
+| Android | EGL context sharing for OpenGL ES 3; AHardwareBuffer sharing for Vulkan on compatible API 26+ devices |
+| macOS | CoreVideo/IOSurface sharing with Metal; independent shared CGL context for OpenGL Core |
+| iOS | CoreVideo/IOSurface sharing with Metal; independent shared EAGL context when Unity exposes an actual GLES 3 renderer |
 
-It includes [best practices](https://code.videolan.org/videolan/LibVLCSharp/blob/master/docs/best_practices.md), [Q&A guide](https://code.videolan.org/videolan/LibVLCSharp/blob/master/docs/how_do_I_do_X.md), [libvlc specific information](https://code.videolan.org/videolan/LibVLCSharp/blob/master/docs/libvlc_documentation.md) and [tutorials](https://code.videolan.org/videolan/LibVLCSharp/blob/master/docs/tutorials.md).
+The selected route depends on the active device, extensions and decoder output.
+An unavailable interop route falls back to portable RGBA callbacks and Unity
+texture uploads. The CPU path is available independently of the active graphics
+API. `new VlcVideoOutput(library, forceCpu: true)` explicitly exercises it.
 
-## Components included
+GPU interop avoids CPU pixel readback and upload between VLC output and Unity.
+Video color conversion and a GPU blit into a Unity-owned texture still occur.
+`UsesGpuInterop` reports this presentation path; it does **not** prove that VLC
+selected a hardware decoder. End-to-end hardware decoding also depends on the
+codec, driver and modules supplied with the pinned VLC build.
 
-For reference, you need to a bunch of components to get this working. On Windows, for example:
-- libvlc.dll, libvlccore.dll (and its plugins in /plugins folder): These are nightly build DLLs of the VLC player libraries https://code.videolan.org/videolan/vlc
-- Custom build of libvlcsharp, the official VideoLAN C# binding to libvlc https://code.videolan.org/videolan/LibVLCSharp
-- VLCUnityPlugin.dll, the VLC-Unity native plugin https://code.videolan.org/videolan/vlc-unity
+Actual decoded Unity playback has been verified on Windows D3D11, D3D12,
+OpenGL Core and Vulkan, including forced CPU output. Linux has a separate Mesa
+llvmpipe EGL and GLX texture-sharing tests; these are software-renderer surface tests,
+not VLC decoding or hardware-decoding validation. Android device playback and
+Apple native builds/playback remain unverified. Consult the main validation
+record before treating a platform as tested.
 
-This is all included in this package and it all works automatically for you.
+## Required binaries and bindings
 
-LibVLCSharp docs (not Unity specific) https://code.videolan.org/videolan/LibVLCSharp/blob/master/docs/getting_started.md
+The native ABI is pinned to LibVLC **`4.0.0-dev-33583-gd94fd0473f`** and
+LibVLCSharp **`4.0.0+a296e6f14b326bde2e7796439ea883b6c6040fb9`**. LibVLC 3 or a
+newer nightly cannot be substituted without adapting and validating the ABI.
+The portable bridge checks the engine changeset before creating a player.
 
-## Windows
+The shared managed binding is `Runtime/Plugins/LibVLCSharp.dll`. The iOS player
+uses `Runtime/Plugins/iOS/LibVLCSharp.dll`, whose native imports resolve through
+`__Internal`. Editors always use the shared binding for their host platform,
+regardless of the selected player target. The original binding is preserved
+outside Assets at `Tools/VLCUnity/Bindings/LibVLCSharp.upstream.dll`.
 
-!! You need to set your Unity target platform to "PC, Mac & Linux Standalone" to target Windows classic. Go for the x86_64 architecture.
+Run `Tools/VLCUnity/Prepare-Bindings.ps1` to regenerate both variants. Its pinned
+input hash and explicit transformations are documented in
+[Bindings/README.md](../../../Tools/VLCUnity/Bindings/README.md).
 
-## Android
+Native bundles belong under `Runtime/Plugins/`:
 
-For the Unity Android target, we support:
-- armeabi-v7a,
-- arm64-v8a,
-- x86,
-- x86_64.
+- `Windows/x86_64/` and `Linux/x86_64/`: bridge, engine, core, dependencies and
+  the complete matching `plugins/` directory.
+- `MacOS/universal/`, or `MacOS/x86_64/` / `MacOS/ARM64/`: matching bridge,
+  engine, core and module dylibs with the selected slices.
+- `Android/libs/<abi>/`: bridge, engine with its registered decoder modules,
+  and all transitive dependencies for `armeabi-v7a`, `arm64-v8a` or `x86_64`.
+- `iOS/Device/` and `iOS/Simulator/`: platform-specific static archives, static
+  module registration source and `vlc-unity-bundle.json`.
 
-/!\ OpenGL ES MUST be selected in the project settings as a target graphics API. Vulkan is NOT supported at this time.
+Use **Tools > VLCUnity > Configure platform plugins** and **Validate current
+platform bundle** after installing a bundle. Desktop staging preserves decoder
+module subdirectories. Keep the renderer bridge preloaded and restart the
+editor after replacing native binaries.
 
-/!\ If the plugin complains about missing binaries and there is an error about this, make sure you have each architecture properly setup in the inspector for each binaries in each VLCUnity/Plugins/Android/libs folders. Select a libvlc.so in any given folder, check the Inspector window of the Unity Editor and make sure the selected "Platform" and "CPU" are correct.
+Android initialization loads `vlc` and then `VLCUnityPlugin` through Java so the
+libraries receive the real JavaVM in `JNI_OnLoad`. A decoder using MediaCodec
+also needs the matching VideoLAN Java helpers, including
+`org.videolan.libvlc.AWindow`; native `.so` files alone do not supply those
+classes. Package the corresponding helpers/AAR from the pinned decoder build.
+If using minification, retain `AWindow`, its `SurfaceCallback` and JNI helpers
+with that AAR's consumer ProGuard rules or equivalent application rules.
+An Android Vulkan presentation path does not by itself establish MediaCodec
+decoding. Network media requires the application's ordinary Internet permission.
 
-/!\ If the scene starts but no video plays, make sure you set internet access to "required" in Unity player settings. The demo scenes play HTTP videos so your app needs the Android Internet permission.
+iOS requires IL2CPP, the generated binding, static renderer registration and an
+implementation of `VLCUnityRegisterStaticModules(void)` from the actual decoder
+bundle. Its manifest records module/contrib archives and SDK dependencies.
+Device and simulator archives are distinct, even when both use ARM64. See the
+main build guide for the manifest and UnityFramework linking requirements.
+UWP, WebGL and 32-bit Windows are outside this integration's build targets.
 
-/!\ If running on Oculus, you may need to disable "Low Overhead Mode" which is not yet supported by vlc-unity. https://code.videolan.org/videolan/vlc-unity/-/issues/164
+## Playback and resource lifetime
 
-Reminded: If you want to target arm64-v8a CPU architecture, you must select it in the player settings. To be able to select it, you need to switch the scripting backend to IL2CPP (as opposed to Mono). This is a Unity requirement unrelated to libvlc.
+On Unity's main thread:
 
-VLC for Unity requires Android 16 minimum.
+1. Call `VlcRuntime.TryCreateLibrary(out library, out diagnostic)` and handle an
+   unavailable library. The portable bootstrap validates native dependencies
+   and registers static modules before constructing LibVLC.
+2. Construct `VlcVideoOutput`, wait for `IsReady`, assign `output.Player.Media`
+   and start playback. Initialization can require a rendering event.
+3. Call `output.TryUpdateTexture()` each frame and use `output.Texture` for
+   display. Wait for an actual first frame before assuming playback is ready.
+4. Dispose the output before disposing its LibVLC library. The output owns its
+   player and presentation textures.
 
-## UWP
+Do not sample `MediaPlayer.GetTexture` directly. The wrapper schedules the
+acquire, blit and release operations required to synchronize shared GPU
+surfaces. It also handles resize, unavailable imports and decoder callbacks.
+CPU callbacks run without Unity API calls and keep aligned buffers/delegates
+alive until player release joins the native output threads. LibVLC 4's
+asynchronous `Stop()` alone does not finish resource cleanup.
 
-For the Unity UWP target, we support:
-- x86_64,
-- ARM64.
+`BGManager` waits for output initialization and a first decoded frame, cancels
+preparation on destruction, and keeps a still-image background when playback
+cannot be prepared.
 
-If you need 32 bit versions, feel free to email us with information regarding your use case at unity@videolabs.io
+## Upstream references
 
-> In the publisher manifest, make sure the 'InternetClient' capability is enabled so that VLC can access remote streams.
+These links describe the upstream projects, not the contents or validation
+status of this repository:
 
-For Hololens support and HTTPS, be aware that the Hololens device has very few SSL certificate by default. This means some HTTPS streams may not work since gnutls cannot find the required certificate. You have 2 options:
-1. Install the certificat globally on the device. This is a viable option only if you own the distribution (e.g. can install the required certificate on all client's Hololens devices). This guide should prove helpful: https://learn.microsoft.com/en-us/hololens/certificate-manager
-2. Ship your game with the required certificate and tell LibVLC to load using `--gnutls-dir-trust=PATH_TO_CERT_FOLDER` where `PATH_TO_CERT_FOLDER` is a folder inside your appx that contains the cert.
+- [LibVLCSharp documentation](https://code.videolan.org/videolan/LibVLCSharp/-/blob/master/docs/home.md)
+- [VLC Unity source](https://code.videolan.org/videolan/vlc-unity)
+- [Pinned managed source](https://github.com/videolan/libvlcsharp/tree/a296e6f14b326bde2e7796439ea883b6c6040fb9)
 
-You can export the global certificate from your Windows machine using the certlm.exe app. Look for `GlobalSign Root CA` and export the .per.
-
-## iOS
-
-For the initial release, only ARM64 device builds are provided. Simulator support is not yet included.
-
-It is possible to test things via the Editor on macOS beforehand though, on both Apple Silicon and Apple Intel macOS. And for Apple Silicon users, iOS apps can be ran on the mac.
-
-> For Apple validation errors regarding OS Minimal version of the plugin when pushing to the AppStore, see this issue for a solution: https://code.videolan.org/videolan/vlc-unity/-/issues/227
-
-## macOS
-
-Both Apple Silicon (ARM64) and Intel Macs builds are supported, in Editor and through XCode.
-
-The following build scenario is currently unsupported for the beta release:
-- Universal builds (binaries with both Intel64 and Apple Silicon binaries) currently are not supported nor tested.
-
-## General
-
-The scenes are located in `Assets/VLCUnity/Demos/Scenes` and provide a way to get started quickly. 
-
-Select any scene (*.unity) and press play in the Unity Editor (or make a standalone build), and the video will start playing.
-
-## Getting started with the minimal sample script 
-
-The following information is to give you more context regarding what happens in the Demo scenes provided in the Asset.
-Understanding the scripts will allow you to know where to look when customizing your own player.
-
-Regarding the basic integration code that you need, you will find it in MinimalPlayback.cs.
-
-First, you need to load the native libraries (libvlc):
-```
-Core.Initialize(UnityEngine.Application.dataPath);
-```
-
-You can then create LibVLCSharp objects like so:
-```
-LibVLC = new LibVLC();
-MediaPlayer = new MediaPlayer(LibVLC);
-```
-
-The frame updating is done in a Unity coroutine or Update() function:
-```
-IntPtr texptr = MediaPlayer.GetFrame(width, height, out bool updated);
-if (updated)
-{
-    tex.UpdateExternalTexture(texptr);
-}
-```
-
-See Update() function for more details.
-
-Once that is all setup, you can create a new Media and start playback like so
-```
-MediaPlayer.Play(new Media(new Uri("http://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4")));
-```
-
-To get up and running easily and quickly, I recommend you to load the Assets/VLCUnity/Demos/Scenes/MinimalPlayback.unity scene and press "Play". 
-The few lines of setup code I mentioned above are located in Assets/VLCUnity/Demos/Scripts/MinimalPlayback.cs.
-
-## Scenes
-
-- A minimal playback example with buttons,
-- 360 playback with keyboard navigation built-in,
-- A video with subtitles showcasing support,
-- The VLCPlayerExample provides a great base with more controls,
-- 3D scene you can move around in with a movie screen and chairs in a cinema room.
-
-For more API usage information, explore our [online docs](https://code.videolan.org/videolan/LibVLCSharp/-/blob/master/docs/home.md).
-
-For VLC Unity specific questions and support, open an issue on our GitLab and browse our opensource plugin code at https://code.videolan.org/videolan/vlc-unity
-
-We also provide support through StackOverflow, you may browse the [libvlcsharp](https://stackoverflow.com/questions/tagged/libvlcsharp) and [vlc-unity](https://stackoverflow.com/questions/tagged/vlc-unity) tags.
-
-## Misc
-
-/!\ There seems to be issues when using VLC Unity and MRTK in the same Unity project. Both LibVLCSharp and MRTK rely on System.Numerics.Vectors and this triggers an issue with IL2CPP. 
-Removing one of the System.Numerics.Vectors.dll in your project seems to be a valid workaround (but be aware of versioning mismatch).
-
-## Asset import management
-
-All releases include binaries for all platforms.
-
-The free trial contains binaries that are watermarked on all platforms.
-
-The Windows paid version contains binaries that are watermarked on all platforms, _except_ on Windows. The iOS paid version contains binaries that are watermarked on all platforms, _except_ iOS. And so on...
-
-VLC Unity is provided as standalone .unitypackage files, that you can import using the Unity Editor. 
-
-In the scenario that you have bought multiple plugins, let's say Android and Windows, you want to have no watermark on Android and Windows inside your single project.
-This can be achieved by selectively importing binaries of the plugins during the import process. Let's walk through the necessary steps:
-
-1. So first, import the Windows asset for example, but untick the Android specific binaries. All binaries will be included in your project except for the Android ones from the Windows asset (which are watermarked).
-2. Then, import the Android asset, and untick all binaries except for the Android ones (which are watermark-free).
-
-This way you will have imported your paid, watermark-free binaries for Windows and Android into your project but still retain the free, watermark binaries for all other platforms, such as UWP, macOS and iOS.
+The original package's platform matrix, bundled-binary, watermark and demo
+scene instructions were historical vendor documentation. This project guide
+replaces those claims with the actual integration and dependency requirements.

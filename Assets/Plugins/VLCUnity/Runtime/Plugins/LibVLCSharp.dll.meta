@@ -33,7 +33,7 @@ PluginImporter:
       enabled: 1
       settings: {}
   - first:
-      Standalone: Win
+      Standalone: Linux64
     second:
       enabled: 1
       settings: {}
@@ -43,15 +43,9 @@ PluginImporter:
       enabled: 1
       settings: {}
   - first:
-      Windows Store Apps: WindowsStoreApps
+      iPhone: iOS
     second:
-      enabled: 1
-      settings:
-        CPU: AnyCPU
-  - first:
-      XboxOne: XboxOne
-    second:
-      enabled: 1
+      enabled: 0
       settings: {}
   userData: 
   assetBundleName: 

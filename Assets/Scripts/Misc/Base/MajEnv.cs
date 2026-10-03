@@ -1,9 +1,12 @@
+﻿#if UNITY_EDITOR || UNITY_STANDALONE_WIN || UNITY_STANDALONE_LINUX || UNITY_STANDALONE_OSX || UNITY_ANDROID || UNITY_IOS
+#define VLCUNITY_SUPPORTED
+#endif
 using Cysharp.Threading.Tasks;
 #if UNITY_STANDALONE
 using HidSharp.Platform.Windows;
 using HidSharp.Platform.MacOS;
 #endif
-#if UNITY_STANDALONE_WIN
+#if VLCUNITY_SUPPORTED
 using LibVLCSharp;
 #endif
 using MajdataPlay.Buffers;
@@ -86,8 +89,9 @@ namespace MajdataPlay
 #else
         public static bool IsEditor { get; } = false;
 #endif
-#if UNITY_STANDALONE_WIN
-        public static LibVLC VLCLibrary { get; private set; }
+#if VLCUNITY_SUPPORTED
+        public static LibVLC? VLCLibrary { get; private set; }
+        public static string? VLCInitializationError { get; private set; }
 #endif
 #if UNITY_ANDROID // Android Only (Sdk Version Declare)
         public static int AndroidSdkVersion
@@ -691,14 +695,20 @@ namespace MajdataPlay
         }
         static void InitOthers()
         {            
-#if UNITY_STANDALONE_WIN
+#if VLCUNITY_SUPPORTED
             MajDebug.LogInfo("[VLC] init");
-            if (VLCLibrary != null)
+            VLCLibrary?.Dispose();
+            VLCLibrary = null;
+            if (VlcRuntime.TryCreateLibrary(out var library, out var diagnostic, enableDebugLogs: true))
             {
-                VLCLibrary.Dispose();
+                VLCLibrary = library;
+                VLCInitializationError = null;
             }
-            Core.Initialize(Path.Combine(Application.dataPath, "Plugins")); //Load VLC dlls
-            VLCLibrary = new LibVLC(enableDebugLogs: true, "--no-audio"); // we dont need it to produce sound here
+            else
+            {
+                VLCInitializationError = diagnostic;
+                MajDebug.LogWarning("[VLC] " + diagnostic + " Using Unity VideoPlayer for background video.");
+            }
 #endif
         }
 #endregion
@@ -727,11 +737,9 @@ namespace MajdataPlay
             GameManager.OnSave -= OnSave;
             SharedHttpClient.CancelPendingRequests();
             SharedHttpClient.Dispose();
-#if UNITY_STANDALONE_WIN
-            if( VLCLibrary != null )
-            {
-                VLCLibrary.Dispose();
-            }
+#if VLCUNITY_SUPPORTED
+            VLCLibrary?.Dispose();
+            VLCLibrary = null;
 #endif
             _globalCTS.Cancel();
 #if UNITY_STANDALONE_WIN

@@ -6,18 +6,13 @@ namespace LibVLCSharp
 {
     class OnLoad
     {
-#if !UNITY_EDITOR_WIN && (UNITY_ANDROID || UNITY_STANDALONE_OSX || UNITY_EDITOR_OSX)
-        const string UnityPlugin = "libVLCUnityPlugin";
-#elif UNITY_IOS
-        const string UnityPlugin = "@rpath/VLCUnityPlugin.framework/VLCUnityPlugin";
+#if UNITY_IOS && !UNITY_EDITOR
+        const string UnityPlugin = "__Internal";
 #else
         const string UnityPlugin = "VLCUnityPlugin";
 #endif
         [DllImport(UnityPlugin, CallingConvention = CallingConvention.Cdecl, EntryPoint = "libvlc_unity_set_color_space")]
         static extern void SetColorSpace(UnityColorSpace colorSpace);
-
-        [DllImport(UnityPlugin, CallingConvention = CallingConvention.Cdecl)]
-        static extern IntPtr GetRenderEventFunc();
 
         enum UnityColorSpace
         {
@@ -25,17 +20,17 @@ namespace LibVLCSharp
             Linear = 1,
         }
 
-#if UNITY_STANDALONE_WIN
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSceneLoad)]
         static void OnBeforeSceneLoadRuntimeMethod()
         {
-          //  Debug.Log("UnityEngine.QualitySettings.activeColorSpace: " + PlayerColorSpace);
-            SetColorSpace(PlayerColorSpace);
-#if UNITY_ANDROID || UNITY_IOS
-            GL.IssuePluginEvent(GetRenderEventFunc(), 1);
-#endif
+            try
+            {
+                SetColorSpace(PlayerColorSpace);
+            }
+            catch (DllNotFoundException) { } // Bootstrap reports availability once.
+            catch (EntryPointNotFoundException) { }
+            catch (BadImageFormatException) { }
         }
-#endif
         static UnityColorSpace PlayerColorSpace => QualitySettings.activeColorSpace == 0 ? UnityColorSpace.Gamma : UnityColorSpace.Linear;
     }
 }

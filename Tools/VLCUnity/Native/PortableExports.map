@@ -1,0 +1,15 @@
+{
+    global:
+        libvlc_unity_*;
+        GetRenderEventFunc;
+        SetPluginPath;
+        Print;
+        UnityPluginLoad;
+        UnityPluginUnload;
+        VLCUnity_UnityPluginLoad;
+        VLCUnity_UnityPluginUnload;
+        JNI_OnLoad;
+        JNI_OnUnload;
+    local:
+        *;
+};

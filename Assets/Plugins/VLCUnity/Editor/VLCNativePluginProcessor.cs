@@ -1,497 +1,248 @@
-#if UNITY_2018_1_OR_NEWER
-#define UNITY_SUPPORTS_BUILD_REPORT
-#endif
-using System.Collections;
-using System.Collections.Generic;
-using System.Text.RegularExpressions;
-using System.Linq;
+using System;
 using System.IO;
+using System.Linq;
 using System.Runtime.InteropServices;
-using UnityEngine;
 using UnityEditor;
-using UnityEngine.Rendering;
 using UnityEditor.Build;
-using UnityEditor.Callbacks;
-
-#if UNITY_SUPPORTS_BUILD_REPORT
 using UnityEditor.Build.Reporting;
-#endif
-
-#if UNITY_IPHONE
+using UnityEditor.Callbacks;
+using UnityEngine;
+#if UNITY_IOS
 using UnityEditor.iOS.Xcode;
-using UnityEditor.iOS.Xcode.Extensions;
 #endif
 
 namespace Videolabs.VLCUnity.Editor
 {
-    public class VLCNativePluginProcessor :
-#if UNITY_SUPPORTS_BUILD_REPORT
-        IPreprocessBuildWithReport
-#else
-        IPreprocessBuild
-#endif
+    internal static class VlcPluginLayout
     {
-        public int callbackOrder { get { return 0; } }
-
-        const string SDK = "sdk";
-        string[] UWP_ARCH = { "x86_64", "ARM64" };
-
-        const string UWP_PATH = "VLCUnity/Plugins/WSA/UWP";
-        const string WINDOWS_PATH = "VLCUnity/Runtime/Plugins/Windows/x86_64";
-        const string ANDROID_PATH = "VLCUnity/Plugins/Android/libs";
-        const string IOS_PATH = "VLCUnity/Plugins/iOS/";
-        const string IOS_LOADPLUGIN_SOURCE = "LoadPlugin.mm";
-
-#if UNITY_SUPPORTS_BUILD_REPORT
-        public void OnPreprocessBuild(BuildReport report)
+        internal const string Root = "Assets/Plugins/VLCUnity/Runtime/Plugins";
+        internal const string SharedBinding = Root + "/LibVLCSharp.dll";
+        internal const string IosBinding = Root + "/iOS/LibVLCSharp.dll";
+        internal const string ManifestName = "vlc-unity-bundle.json";
+        internal static string FullPath(string relative) => Path.GetFullPath(Root + "/" + relative);
+        internal static string IosDirectory => PlayerSettings.iOS.sdkVersion == iOSSdkVersion.SimulatorSDK ? "iOS/Simulator" : "iOS/Device";
+        internal static bool HasUniversalMac => File.Exists(FullPath("MacOS/universal/libVLCUnityPlugin.dylib"));
+        internal static string MacDirectory
         {
-            OnPreprocessBuild(report.summary.platform, report.summary.outputPath);
-        }
-#endif
-
-        public void OnPreprocessBuild(BuildTarget target, string path)
-        {
-            ConfigureUWPNativePlugins();
-            ConfigureWindowsNativePlugins();
-            ConfigureAndroidNativePlugins();
-            ConfigureiOSNativePlugins();
-            ConfigureLibVLCSharp();
-        }
-
-        static void ConfigureLibVLCSharp()
-        {
-            var libvlcsharpDlls = PluginImporter.GetAllImporters().Where(pi => pi.assetPath.EndsWith("LibVLCSharp.dll")).ToList();
-         
-            foreach(var pi in libvlcsharpDlls)
-            {                
-                if(pi.assetPath.Contains(IOS_PATH))
-                {
-                    pi.SetCompatibleWithAnyPlatform(false);
-                    pi.SetCompatibleWithEditor(false);
-                    pi.SetCompatibleWithPlatform(BuildTarget.iOS, true);
-                }
-                else
-                {
-                    pi.SetCompatibleWithPlatform(BuildTarget.StandaloneOSX, true);
-                    pi.SetCompatibleWithPlatform(BuildTarget.StandaloneWindows, true);
-                    pi.SetCompatibleWithPlatform(BuildTarget.Android, true);
-                    pi.SetCompatibleWithPlatform(BuildTarget.StandaloneWindows64, true);
-                    pi.SetCompatibleWithPlatform(BuildTarget.WSAPlayer, true);
-                    pi.SetCompatibleWithPlatform(BuildTarget.XboxOne, true);
-
-                    pi.SetCompatibleWithPlatform(BuildTarget.iOS, false);
-
-                    pi.SetCompatibleWithAnyPlatform(false);
-                    pi.SetCompatibleWithEditor(true);
-                }
-                pi.SaveAndReimport();
-            }
-        }
-
-        void ConfigureWindowsNativePlugins()
-        {
-            PluginImporter[] importers = PluginImporter.GetAllImporters();
-            foreach (PluginImporter pi in importers)
+            get
             {
-                if(!pi.isNativePlugin) continue;
-
-                if(!pi.assetPath.Contains(WINDOWS_PATH)) continue;
-                // pi.ClearSettings();
-
-                var dirty = false;
-
-                if(pi.GetCompatibleWithAnyPlatform() || !pi.GetCompatibleWithEditor() || !pi.GetCompatibleWithPlatform(BuildTarget.StandaloneWindows64))
-                {
-                    pi.SetCompatibleWithAnyPlatform(false);
-                    pi.SetCompatibleWithEditor(true);
-                    pi.SetCompatibleWithPlatform(BuildTarget.StandaloneWindows64, true);
-
-                    dirty = true;
-                }
-
-                var cpu = pi.GetPlatformData(BuildTarget.StandaloneWindows64, "CPU");
-                if(cpu != "x86_64")
-                {
-                    pi.SetPlatformData(BuildTarget.StandaloneWindows64, "CPU", "x86_64");
-                    dirty = true;
-                }
-
-                if(dirty)
-                {
-                    pi.SaveAndReimport();
-                }
+                if (HasUniversalMac) return "MacOS/universal";
+                var architecture = PlayerSettings.GetArchitecture(NamedBuildTarget.Standalone);
+                return architecture == 1 ? "MacOS/ARM64" : architecture == 2 ? "MacOS/universal" : "MacOS/x86_64";
             }
         }
 
-        void ConfigureUWPNativePlugins()
+        [Serializable]
+        internal sealed class IosBundleManifest
         {
-            PluginImporter[] importers = PluginImporter.GetAllImporters();
-            foreach (PluginImporter pi in importers)
-            {
-                if(!pi.isNativePlugin) continue;
-
-                if(!pi.assetPath.Contains(UWP_PATH)) continue;
-
-                var isX64 = pi.assetPath.Contains($"{UWP_PATH}/{UWP_ARCH[0]}");
-
-                // pi.ClearSettings();
-                var dirty = false;
-                if(pi.GetCompatibleWithAnyPlatform() || pi.GetCompatibleWithEditor() || !pi.GetCompatibleWithPlatform(BuildTarget.WSAPlayer))
-                {
-                    pi.SetCompatibleWithAnyPlatform(false);
-                    pi.SetCompatibleWithEditor(false);
-                    pi.SetCompatibleWithPlatform(BuildTarget.WSAPlayer, true);
-
-                    dirty = true;
-                }
-
-                var cpu = pi.GetPlatformData(BuildTarget.WSAPlayer, "CPU");
-
-                if(isX64)
-                {
-                    if(cpu != "X64")
-                    {
-                        pi.SetPlatformData(BuildTarget.WSAPlayer, "CPU", "X64");
-                        dirty = true;
-                    }
-                }
-                else
-                {
-                    if(cpu != "ARM64")
-                    {
-                        pi.SetPlatformData(BuildTarget.WSAPlayer, "CPU", "ARM64");
-                        dirty = true;
-                    }
-                }
-
-                if(dirty)
-                {
-                    pi.SaveAndReimport();
-                }
-            }
+            public int schemaVersion;
+            public string staticPluginRegistration;
+            public string[] forceLoadArchives;
+            public string[] frameworks;
+            public string[] libraries;
         }
 
-        void ConfigureAndroidNativePlugins()
+        internal static IosBundleManifest ReadIosManifest()
         {
-            PluginImporter[] importers = PluginImporter.GetAllImporters();
-            foreach (PluginImporter pi in importers)
-            {
-                if(!pi.isNativePlugin) continue;
-
-                if(!pi.assetPath.Contains(ANDROID_PATH)) continue;
-
-                var dirty = false;
-                if(pi.GetCompatibleWithAnyPlatform() || pi.GetCompatibleWithEditor() || !pi.GetCompatibleWithPlatform(BuildTarget.Android))
-                {
-                    pi.SetCompatibleWithAnyPlatform(false);
-                    pi.SetCompatibleWithEditor(false);
-                    pi.SetCompatibleWithPlatform(BuildTarget.Android, true);
-
-                    dirty = true;
-                }
-
-                if(pi.assetPath.Contains($"{ANDROID_PATH}/armeabi-v7a/"))
-                {
-                    if(pi.GetPlatformData(BuildTarget.Android, "CPU") != "ARMv7")
-                    {
-                        pi.SetPlatformData(BuildTarget.Android, "CPU", "ARMv7");
-                        dirty = true;
-                    }
-                }
-                else if(pi.assetPath.Contains($"{ANDROID_PATH}/arm64-v8a/"))
-                {
-                    if(pi.GetPlatformData(BuildTarget.Android, "CPU") != "ARM64")
-                    {
-                        pi.SetPlatformData(BuildTarget.Android, "CPU", "ARM64");
-                        dirty = true;
-                    }
-                }
-                else if(pi.assetPath.Contains($"{ANDROID_PATH}/x86/"))
-                {
-                    if(pi.GetPlatformData(BuildTarget.Android, "CPU") != "X86")
-                    {
-                        pi.SetPlatformData(BuildTarget.Android, "CPU", "X86");
-                        dirty = true;
-                    }
-                }
-                else if(pi.assetPath.Contains($"{ANDROID_PATH}/x86_64/"))
-                {
-                    if(pi.GetPlatformData(BuildTarget.Android, "CPU") != "X86_64")
-                    {
-                        pi.SetPlatformData(BuildTarget.Android, "CPU", "X86_64");
-                        dirty = true;
-                    }
-                }
-
-                if(dirty)
-                {
-                    pi.SaveAndReimport();
-                }
-            }
+            var path = FullPath(IosDirectory + "/" + ManifestName);
+            if (!File.Exists(path))
+                throw new BuildFailedException("VLCUnity: missing iOS decoder bundle manifest: " + path +
+                    ". Supply the matching LibVLC static module registration source, module/contrib archives and system dependencies; see Tools/VLCUnity/README.md.");
+            IosBundleManifest manifest;
+            try { manifest = JsonUtility.FromJson<IosBundleManifest>(File.ReadAllText(path)); }
+            catch (Exception error) { throw new BuildFailedException("VLCUnity: invalid " + path + ": " + error.Message); }
+            if (manifest == null || manifest.schemaVersion != 1 || string.IsNullOrWhiteSpace(manifest.staticPluginRegistration) ||
+                manifest.forceLoadArchives == null || manifest.frameworks == null || manifest.libraries == null)
+                throw new BuildFailedException("VLCUnity: " + path + " must declare schemaVersion 1, staticPluginRegistration, forceLoadArchives, frameworks and libraries.");
+            return manifest;
         }
 
-        void ConfigureiOSNativePlugins()
+        internal static string BundleFile(string directory, string relative)
         {
-            PluginImporter[] importers = PluginImporter.GetAllImporters();
-            foreach (PluginImporter pi in importers)
-            {
-                if(!pi.isNativePlugin || !pi.assetPath.Contains(IOS_PATH))
-                {
-                    continue;
-                }
-
-                var isX64 = pi.assetPath.Contains("iOS/x86_64");
-
-                // pi.ClearSettings();
-                var dirty = false;
-                if(pi.GetCompatibleWithAnyPlatform() || pi.GetCompatibleWithEditor() || !pi.GetCompatibleWithPlatform(BuildTarget.iOS))
-                {
-                    pi.SetCompatibleWithAnyPlatform(false);
-                    pi.SetCompatibleWithEditor(false);
-                    pi.SetCompatibleWithPlatform(BuildTarget.iOS, true);
-
-                    dirty = true;
-                }
-
-                var cpu = pi.GetPlatformData(BuildTarget.iOS, "CPU");
-
-                if(isX64)
-                {
-                    if(cpu != "X64")
-                    {
-                        pi.SetPlatformData(BuildTarget.iOS, "CPU", "X64");
-                        dirty = true;
-                    }
-                }
-                else
-                {
-                    if(cpu != "ARM64")
-                    {
-                        pi.SetPlatformData(BuildTarget.iOS, "CPU", "ARM64");
-                        dirty = true;
-                    }
-                }
-
-                if(dirty)
-                {
-                    pi.SaveAndReimport();
-                }
-            }
+            if (string.IsNullOrWhiteSpace(relative) || Path.IsPathRooted(relative))
+                throw new BuildFailedException("VLCUnity: bundle file paths must be nonempty relative paths.");
+            var root = FullPath(directory).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
+            var resolved = Path.GetFullPath(Path.Combine(root, relative.Replace('/', Path.DirectorySeparatorChar).Replace('\\', Path.DirectorySeparatorChar)));
+            if (!resolved.StartsWith(root, Application.platform == RuntimePlatform.WindowsEditor ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal))
+                throw new BuildFailedException("VLCUnity: bundle path escapes its platform directory: " + relative);
+            return resolved;
         }
+    }
 
-        internal static void CopyAndReplaceDirectory(string srcPath, string dstPath)
+    public sealed class VLCNativePluginProcessor : IPreprocessBuildWithReport
+    {
+        public int callbackOrder => -200;
+        private static readonly BuildTarget[] ManagedTargets =
         {
-            if (Directory.Exists(dstPath))
-                Directory.Delete(dstPath);
-            if (File.Exists(dstPath))
-                File.Delete(dstPath);
-
-            Directory.CreateDirectory(dstPath);
-
-            foreach (var file in Directory.GetFiles(srcPath))
-                File.Copy(file, Path.Combine(dstPath, Path.GetFileName(file)));
-
-            foreach (var dir in Directory.GetDirectories(srcPath))
-                CopyAndReplaceDirectory(dir, Path.Combine(dstPath, Path.GetFileName(dir)));
-        }
-
-        [PostProcessBuildAttribute(1)]
-        public static void OnPostprocessBuild(BuildTarget buildTarget, string path)
+            BuildTarget.StandaloneWindows64, BuildTarget.StandaloneLinux64,
+            BuildTarget.StandaloneOSX, BuildTarget.Android
+        };
+        private static readonly BuildTarget[] KnownTargets =
         {
-            if (buildTarget == BuildTarget.StandaloneOSX || buildTarget == BuildTarget.iOS)
-            {
-                OnPostprocessBuildMac(buildTarget, path);
-#if UNITY_IPHONE
-                OnPostprocessBuildiPhone(path);
-#endif
-            }
-        }
+            BuildTarget.StandaloneWindows, BuildTarget.StandaloneWindows64,
+            BuildTarget.StandaloneLinux64, BuildTarget.StandaloneOSX,
+            BuildTarget.Android, BuildTarget.iOS, BuildTarget.WebGL, BuildTarget.WSAPlayer
+        };
+        public void OnPreprocessBuild(BuildReport report) => ConfigureAll();
 
-        internal static void OnPostprocessBuildMac(BuildTarget buildTarget, string path)
+        [MenuItem("Tools/VLCUnity/Configure platform plugins")]
+        public static void ConfigureAll()
         {
-            if(path.EndsWith(".app") || buildTarget != BuildTarget.StandaloneOSX)
-            {
-                // "Create XCode Project" is unchecked
-                return;
-            }
-
-            // XCode patching
-            var projectPath = Path.Combine(path, Path.GetFileName(path) + ".xcodeproj", "project.pbxproj");
-
-            string originalPbxprojContent = File.ReadAllText(projectPath);
-
-            Regex regex = new Regex(@"VALID_ARCHS\s*=\s*([^;]+)");
-            Match match = regex.Match(originalPbxprojContent);
-
-            bool appleSiliconBuild = false;
-
-            if (match.Success)
-            {
-                string arch = match.Groups[1].Value;
-                if(arch == "arm64")
-                {
-                    appleSiliconBuild = true;
-                }
-                else if(arch == "x86_64")
-                {
-                    appleSiliconBuild = false;
-                }
-                else // likely "arm64 x86_64"
-                {
-                    Debug.LogError("Universal macOS binary is not yet supported, reach out on our gitlab for updates");
-                }
-            }
-            else
-            {
-                Debug.LogError("No CPU target found while parsing the XCode project file.");
-            }
-
-            string pattern = @"(path\s*=\s*""[^""]*/Plugins/)(ARM64/|x86_64/)?([^""]+\.dylib)"";";
-            string replacement;
-            if (appleSiliconBuild)
-            {
-                replacement = @"$1ARM64/$3"";";
-            }
-            else
-            {
-                replacement = @"$1x86_64/$3"";";
-            }
-            string modifiedContent = Regex.Replace(originalPbxprojContent, pattern, replacement);
-            File.WriteAllText(projectPath, modifiedContent);
+            foreach (var importer in PluginImporter.GetAllImporters())
+                if (Configure(importer)) importer.SaveAndReimport();
         }
 
-#if UNITY_IPHONE
-        internal static void AddIOSPlugin(PBXProject proj, string target, string plugin)
+        internal static bool Configure(PluginImporter importer)
         {
-          string fileName = Path.GetFullPath(plugin);
-          string fileRef = proj.AddFile(fileName, plugin, PBXSourceTree.Source);
-          proj.AddFileToEmbedFrameworks(target, fileRef);
-        }
-
-        internal static void OnPostprocessBuildiPhone(string path)
-        {
-            string projPath = PBXProject.GetPBXProjectPath(path);
-            PBXProject proj = new PBXProject();
-
-            proj.ReadFromString(File.ReadAllText(projPath));
-            #if UNITY_2020_2_OR_NEWER
-            string target = proj.GetUnityMainTargetGuid();
-            #else
-            string target = proj.TargetGuidByName("Unity-iPhone");
-            #endif
-            proj.SetBuildProperty(target, "ENABLE_BITCODE", "NO");
-
-            string frameworkTarget = proj.GetUnityFrameworkTargetGuid();
-            proj.SetBuildProperty(frameworkTarget, "ENABLE_BITCODE", "NO");
-
-            PluginImporter[] importers = PluginImporter.GetAllImporters();
-            foreach (PluginImporter pi in importers)
+            var path = importer.assetPath.Replace('\\', '/');
+            if (!path.StartsWith(VlcPluginLayout.Root + "/", StringComparison.Ordinal)) return false;
+            var relative = path.Substring(VlcPluginLayout.Root.Length + 1);
+            bool dirty = false;
+            if (path.EndsWith("/LibVLCSharp.dll", StringComparison.OrdinalIgnoreCase))
             {
-                if(!pi.isNativePlugin || !pi.assetPath.Contains(IOS_PATH) || pi.assetPath.Contains(IOS_LOADPLUGIN_SOURCE))
-                {
-                    continue;
-                }
-
-                var isX64 = pi.assetPath.Contains("iOS/x86_64");
-
-                // XCode patching
-                if((PlayerSettings.iOS.sdkVersion == iOSSdkVersion.DeviceSDK && !isX64)
-                    || (PlayerSettings.iOS.sdkVersion == iOSSdkVersion.SimulatorSDK && isX64))
-                {
-                    AddIOSPlugin(proj, target, pi.assetPath);
-                }
+                // The shared binary has verified platform-neutral library names.
+                // Only the generated iOS variant imports statically via __Internal.
+                bool shared = path == VlcPluginLayout.SharedBinding;
+                bool ios = path == VlcPluginLayout.IosBinding;
+                SetCompatibility(importer, target => shared ? ManagedTargets.Contains(target) : ios && target == BuildTarget.iOS, shared, ref dirty);
+                SetEditorData(importer, "CPU", "AnyCPU", ref dirty);
+                SetEditorData(importer, "OS", "AnyOS", ref dirty);
+                return dirty;
             }
-            File.WriteAllText(projPath, proj.WriteToString());
+            if (!importer.isNativePlugin) return false;
+            var filename = Path.GetFileName(path);
+            // Vulkan extension interception must run before Unity creates its
+            // device. Newly installed bundles otherwise default to lazy load.
+            if ((filename == "VLCUnityPlugin.dll" || filename == "libVLCUnityPlugin.so" || filename == "libVLCUnityPlugin.dylib") && !importer.isPreloaded)
+            { importer.isPreloaded = true; dirty = true; }
+
+            BuildTarget? platform = null;
+            string cpu = "AnyCPU", editorOS = "", editorCPU = "AnyCPU";
+            bool editor = false, player = true;
+            if (relative.StartsWith("Windows/x86_64/", StringComparison.Ordinal))
+            { platform = BuildTarget.StandaloneWindows64; cpu = editorCPU = "x86_64"; editorOS = "Windows"; editor = true; }
+            else if (relative.StartsWith("Linux/x86_64/", StringComparison.Ordinal))
+            { platform = BuildTarget.StandaloneLinux64; cpu = editorCPU = "x86_64"; editorOS = "Linux"; editor = true; }
+            else if (relative.StartsWith("MacOS/", StringComparison.Ordinal))
+            {
+                platform = BuildTarget.StandaloneOSX; editorOS = "OSX";
+                var parts = relative.Split('/');
+                var architecture = parts.Length > 2 ? parts[1] : "";
+                cpu = editorCPU = architecture == "universal" ? "AnyCPU" : architecture;
+                var editorArchitecture = RuntimeInformation.ProcessArchitecture == Architecture.Arm64 ? "ARM64" : "x86_64";
+                editor = VlcPluginLayout.HasUniversalMac ? architecture == "universal" : architecture == editorArchitecture;
+                player = relative.StartsWith(VlcPluginLayout.MacDirectory + "/", StringComparison.Ordinal);
+                if (architecture != "universal" && architecture != "ARM64" && architecture != "x86_64") player = editor = false;
+            }
+            else if (relative.StartsWith("Android/libs/", StringComparison.Ordinal))
+            {
+                platform = BuildTarget.Android;
+                var parts = relative.Split('/');
+                cpu = parts.Length < 4 ? "" : AndroidCpu(parts[2]);
+                player = cpu.Length != 0;
+            }
+            else if (relative.StartsWith("iOS/", StringComparison.Ordinal))
+            {
+                platform = BuildTarget.iOS;
+                // arm64 device and arm64 simulator archives use different SDKs.
+                player = relative == "iOS/LoadPlugin.mm" || relative.StartsWith(VlcPluginLayout.IosDirectory + "/", StringComparison.Ordinal);
+                SetPlatformData(importer, BuildTarget.iOS, "AddToEmbeddedBinaries", "false", ref dirty);
+            }
+            SetCompatibility(importer, target => player && platform == target, editor, ref dirty);
+            if (platform.HasValue) SetPlatformData(importer, platform.Value, "CPU", cpu, ref dirty);
+            if (editorOS.Length > 0)
+            {
+                SetEditorData(importer, "OS", editorOS, ref dirty);
+                SetEditorData(importer, "CPU", editorCPU, ref dirty);
+            }
+            return dirty;
         }
+
+        private static string AndroidCpu(string abi)
+        {
+            switch (abi)
+            {
+                case "armeabi-v7a": return "ARMv7";
+                case "arm64-v8a": return "ARM64";
+                case "x86_64": return "X86_64";
+                default: return "";
+            }
+        }
+        private static void SetCompatibility(PluginImporter importer, Func<BuildTarget, bool> allow, bool editor, ref bool dirty)
+        {
+            if (importer.GetCompatibleWithAnyPlatform()) { importer.SetCompatibleWithAnyPlatform(false); dirty = true; }
+            if (importer.GetCompatibleWithEditor() != editor) { importer.SetCompatibleWithEditor(editor); dirty = true; }
+            foreach (var target in KnownTargets)
+                if (importer.GetCompatibleWithPlatform(target) != allow(target))
+                { importer.SetCompatibleWithPlatform(target, allow(target)); dirty = true; }
+        }
+        private static void SetEditorData(PluginImporter importer, string key, string value, ref bool dirty)
+        {
+            if (importer.GetEditorData(key) == value) return;
+            importer.SetEditorData(key, value); dirty = true;
+        }
+        private static void SetPlatformData(PluginImporter importer, BuildTarget target, string key, string value, ref bool dirty)
+        {
+            if (importer.GetPlatformData(target, key) == value) return;
+            importer.SetPlatformData(target, key, value); dirty = true;
+        }
+
+#if UNITY_IOS
+        [PostProcessBuild(100)]
+        public static void OnPostprocessBuild(BuildTarget target, string outputPath)
+        {
+            if (target != BuildTarget.iOS) return;
+            var manifest = VlcPluginLayout.ReadIosManifest();
+            var projectPath = PBXProject.GetPBXProjectPath(outputPath);
+            var project = new PBXProject();
+            project.ReadFromFile(projectPath);
+            var frameworkTarget = project.GetUnityFrameworkTargetGuid();
+            var mainTarget = project.GetUnityMainTargetGuid();
+            project.SetBuildProperty(frameworkTarget, "ENABLE_BITCODE", "NO");
+            project.SetBuildProperty(mainTarget, "ENABLE_BITCODE", "NO");
+            foreach (var framework in new[] { "Foundation.framework", "Metal.framework", "CoreVideo.framework", "IOSurface.framework", "OpenGLES.framework" })
+                project.AddFrameworkToProject(frameworkTarget, framework, false);
+
+            // Static archives are linked to UnityFramework, never embedded.
+            var registration = ProjectPluginPath(manifest.staticPluginRegistration);
+            var registrationGuid = project.FindFileGuidByProjectPath(registration);
+            if (string.IsNullOrEmpty(registrationGuid))
+                throw new BuildFailedException("VLCUnity: static module registration source was not exported to Xcode: " + registration);
+            project.RemoveFileFromBuild(mainTarget, registrationGuid);
+            project.RemoveFileFromBuild(frameworkTarget, registrationGuid);
+            project.AddFileToBuild(frameworkTarget, registrationGuid);
+            var loader = "Libraries/Plugins/VLCUnity/Runtime/Plugins/iOS/LoadPlugin.mm";
+            var loaderGuid = project.FindFileGuidByProjectPath(loader);
+            if (string.IsNullOrEmpty(loaderGuid))
+                throw new BuildFailedException("VLCUnity: rendering plugin registration source was not exported to Xcode: " + loader);
+            project.RemoveFileFromBuild(mainTarget, loaderGuid);
+            project.RemoveFileFromBuild(frameworkTarget, loaderGuid);
+            project.AddFileToBuild(frameworkTarget, loaderGuid);
+            foreach (var archive in manifest.forceLoadArchives)
+                project.AddBuildProperty(frameworkTarget, "OTHER_LDFLAGS", "-Wl,-force_load,\"$(PROJECT_DIR)/" + ProjectPluginPath(archive) + "\"");
+            foreach (var framework in manifest.frameworks)
+                project.AddFrameworkToProject(frameworkTarget, framework, false);
+            foreach (var library in manifest.libraries)
+            {
+                var sdkPath = "usr/lib/lib" + library + ".tbd";
+                var guid = project.FindFileGuidByProjectPath(sdkPath);
+                if (string.IsNullOrEmpty(guid)) guid = project.AddFile(sdkPath, sdkPath, PBXSourceTree.Sdk);
+                project.RemoveFileFromBuild(frameworkTarget, guid);
+                project.AddFileToBuild(frameworkTarget, guid);
+            }
+            project.WriteToFile(projectPath);
+        }
+        private static string ProjectPluginPath(string relative) =>
+            "Libraries/Plugins/VLCUnity/Runtime/Plugins/" + VlcPluginLayout.IosDirectory + "/" + relative.Replace('\\', '/');
 #endif
     }
 
-    class MacOSPluginPostprocessor : AssetPostprocessor
+    internal sealed class VlcPluginAssetPostprocessor : AssetPostprocessor
     {
-        private const string MACOS_PATH = "VLCUnity/Plugins/MacOS";
-        static void OnPostprocessAllAssets(string[] importedAssets, string[] _, string[] __, string[] ___)
+        private void OnPreprocessAsset()
         {
-            bool isArm64Host = RuntimeInformation.ProcessArchitecture == Architecture.Arm64;
-
-            AssetDatabase.StartAssetEditing();
-            try
-            {
-                foreach (string assetPath in importedAssets)
-                {
-                    if (!assetPath.Contains(MACOS_PATH))
-                    {
-                        continue;
-                    }
-
-                    PluginImporter pi = AssetImporter.GetAtPath(assetPath) as PluginImporter;
-                    if (pi == null || !pi.isNativePlugin) continue;
-
-                    // Ensure the plugin is macOS-only
-                    if (pi.GetCompatibleWithAnyPlatform() || !pi.GetCompatibleWithPlatform(BuildTarget.StandaloneOSX))
-                    {
-                        pi.SetCompatibleWithAnyPlatform(false);
-                        pi.SetCompatibleWithPlatform(BuildTarget.StandaloneOSX, true);
-                    }
-                    // AnyCPU / macOS universal binary is not yet supported.
-                    var isEditorCompatible = pi.GetCompatibleWithEditor();
-                    if(pi.assetPath.Contains($"{MACOS_PATH}/ARM64/"))
-                    {
-                        if(isArm64Host)
-                        {
-                            if(!isEditorCompatible)
-                            {
-                                pi.SetCompatibleWithEditor(true);
-                            }
-                        }
-                        else
-                        {
-                            if(isEditorCompatible)
-                            {
-                                pi.SetCompatibleWithEditor(false);
-                            }
-                        }
-                        if(pi.GetPlatformData(BuildTarget.StandaloneOSX, "CPU") != "ARM64")
-                        {
-                            pi.SetPlatformData(BuildTarget.StandaloneOSX, "CPU", "ARM64");
-                        }
-                    }
-                    else if(pi.assetPath.Contains($"{MACOS_PATH}/x86_64/"))
-                    {
-                        if(!isArm64Host)
-                        {
-                            if(!isEditorCompatible)
-                            {
-                                pi.SetCompatibleWithEditor(true);
-                            }
-                        }
-                        else
-                        {
-                            if(isEditorCompatible)
-                            {
-                                pi.SetCompatibleWithEditor(false);
-                            }
-                        }
-                        if(pi.GetPlatformData(BuildTarget.StandaloneOSX, "CPU") != "x86_64")
-                        {
-                            pi.SetPlatformData(BuildTarget.StandaloneOSX, "CPU", "x86_64");
-                        }
-                    }
-                    pi.SaveAndReimport();
-                }
-            }
-            finally
-            {
-                AssetDatabase.StopAssetEditing();
-                AssetDatabase.SaveAssets();
-                AssetDatabase.Refresh();
-                ClearConsole(); // hack to clear console after false errors show up.
-            }
-        }
-        static void ClearConsole()
-        {
-            var logEntries = System.Type.GetType("UnityEditor.LogEntries, UnityEditor");
-            var clearMethod = logEntries?.GetMethod("Clear", System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.Public);
-            clearMethod?.Invoke(null, null);
+            var importer = assetImporter as PluginImporter;
+            if (importer != null) VLCNativePluginProcessor.Configure(importer);
         }
     }
 }

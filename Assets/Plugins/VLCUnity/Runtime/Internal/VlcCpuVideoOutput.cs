@@ -11,6 +11,11 @@ namespace LibVLCSharp
     // Only display publishes a frame, so presentation still follows VLC's clock.
     internal sealed class VlcCpuVideoOutput : IDisposable
     {
+#if UNITY_IOS && !UNITY_EDITOR
+        const string NativeLibrary = "__Internal";
+#else
+        const string NativeLibrary = "libvlc";
+#endif
         const int BufferCount = 3;
         const int MaxFrameBytes = 128 * 1024 * 1024;
         // At most 384 MiB native buffers plus one 128 MiB packed upload array.
@@ -43,10 +48,10 @@ namespace LibVLCSharp
         static readonly FormatCallback FormatThunk = Setup;
         static readonly CleanupCallback CleanupThunk = Cleanup;
 
-        [DllImport("libvlc", CallingConvention = CallingConvention.Cdecl)]
+        [DllImport(NativeLibrary, CallingConvention = CallingConvention.Cdecl)]
         static extern void libvlc_video_set_callbacks(IntPtr player,
             LockCallback @lock, UnlockCallback unlock, DisplayCallback display, IntPtr opaque);
-        [DllImport("libvlc", CallingConvention = CallingConvention.Cdecl)]
+        [DllImport(NativeLibrary, CallingConvention = CallingConvention.Cdecl)]
         static extern void libvlc_video_set_format_callbacks(IntPtr player,
             FormatCallback setup, CleanupCallback cleanup);
 
