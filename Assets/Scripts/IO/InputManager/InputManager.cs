@@ -912,6 +912,9 @@ namespace MajdataPlay.IO
         }
         static void OnApplicationQuit(object? sender, EventArgs? e)
         {
+#if UNITY_STANDALONE_WIN
+            NproDeviceHost.Stop();
+#endif
             if (_posData is not null)
             {
                 UnsafeHelper.Free(_posData);

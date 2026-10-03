@@ -99,6 +99,12 @@ namespace MajdataPlay.IO
                 {
                     _buttonRingUpdateLoop = Task.Factory.StartNew(HIDUpdateLoop, TaskCreationOptions.LongRunning);
                 }
+#if UNITY_STANDALONE_WIN
+                else if (manufacturer is DeviceManufacturerOption.NPro)
+                {
+                    _buttonRingUpdateLoop = Task.Factory.StartNew(NProUpdateLoop, TaskCreationOptions.LongRunning);
+                }
+#endif
                 else if (manufacturer is DeviceManufacturerOption.Pipe)
                 {
                     _buttonRingUpdateLoop = Task.Factory.StartNew(PipeUpdateLoop, TaskCreationOptions.LongRunning);
@@ -709,6 +715,99 @@ namespace MajdataPlay.IO
                     MajDebug.LogWarning(nameof(ButtonRing), "Thread has exited");
                 }
             }
+#if UNITY_STANDALONE_WIN
+            static void NProUpdateLoop()
+            {
+                var token = MajEnv.GlobalCT;
+                var pollingRate = _btnPollingRateMs;
+                var stopwatch = new Stopwatch();
+                var t1 = stopwatch.Elapsed;
+                var currentThread = Thread.CurrentThread;
+
+                currentThread.Name = DAEMON_THREAD_NAME;
+                currentThread.IsBackground = true;
+                currentThread.Priority = MajEnv.THREAD_PRIORITY_IO;
+
+                MajDebug.LogInfo(nameof(ButtonRing), $"Managed thread id: {currentThread.ManagedThreadId}");
+                MajDebug.LogInfo(nameof(ButtonRing), $"OS thread id: {PlatformInfo.GetCurrentOSThreadId()}");
+
+                stopwatch.Start();
+                try
+                {
+                    while (!token.IsCancellationRequested)
+                    {
+                        try
+                        {
+                            if (!NproDeviceHost.EnsureConnected())
+                            {
+                                IsConnected = false;
+                                using (new LockDisposable())
+                                {
+                                    _buttonRealTimeStates.AsSpan().Clear();
+                                    _isBtnHadOffInternal.AsSpan().Fill(true);
+                                }
+                            }
+                            else
+                            {
+                                NproDeviceHost.GetInput(out _, out var buttons, out var extButtons);
+                                var states = _buttonRealTimeStates.AsSpan();
+
+                                for (var i = 0; i < 8; i++)
+                                {
+                                    states[i] = (buttons & (1 << i)) != 0;
+                                }
+
+                                // ext 低 4 位依次对应 P1、Service、P2、Test。
+                                states[9] = (extButtons & 0b0001) != 0;
+                                states[10] = (extButtons & 0b0010) != 0;
+                                states[11] = (extButtons & 0b0100) != 0;
+                                states[8] = (extButtons & 0b1000) != 0;
+                                IsConnected = true;
+
+                                using (new LockDisposable())
+                                {
+                                    var hadOn = _isBtnHadOnInternal.AsSpan();
+                                    var hadOff = _isBtnHadOffInternal.AsSpan();
+                                    for (var i = 0; i < 12; i++)
+                                    {
+                                        var state = states[i];
+                                        hadOn[i] |= state;
+                                        hadOff[i] |= !state;
+                                    }
+                                }
+                            }
+                        }
+                        catch (Exception e)
+                        {
+                            IsConnected = false;
+                            MajDebug.LogError(nameof(ButtonRing), e);
+                        }
+                        finally
+                        {
+                            if (pollingRate.TotalMilliseconds > 0)
+                            {
+                                var t2 = stopwatch.Elapsed;
+                                var elapsed = t2 - t1;
+                                t1 = t2;
+                                if (elapsed < pollingRate)
+                                {
+                                    Thread.Sleep(pollingRate - elapsed);
+                                }
+                            }
+                            else
+                            {
+                                Thread.Sleep(1);
+                            }
+                        }
+                    }
+                }
+                finally
+                {
+                    IsConnected = false;
+                    MajDebug.LogWarning(nameof(ButtonRing), "Thread has exited");
+                }
+            }
+#endif
             static void PipeUpdateLoop()
             {
                 /// Payload structure
