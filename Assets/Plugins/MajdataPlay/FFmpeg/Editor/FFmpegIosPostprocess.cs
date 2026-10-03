@@ -3,7 +3,7 @@ using UnityEditor;
 using UnityEditor.Callbacks;
 using UnityEditor.iOS.Xcode;
 
-namespace MajdataPlay.Video.Editor
+namespace MajdataPlay.FFmpeg.Editor
 {
     /// <summary>System frameworks used by the pinned VideoToolbox/AudioToolbox static build.</summary>
     internal static class FFmpegIosPostprocess

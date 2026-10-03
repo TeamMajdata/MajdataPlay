@@ -1,9 +1,9 @@
 using System;
 using System.Runtime.InteropServices;
 using MajdataPlay.Diagnostics;
-using MajdataPlay.Video.Internal;
+using MajdataPlay.FFmpeg.Internal;
 
-namespace MajdataPlay.Video.Interop
+namespace MajdataPlay.FFmpeg.Interop
 {
     /// <summary>Linux DMA-BUF and Android AHardwareBuffer transport. No CPU image mapping.</summary>
     internal static class VulkanVideoInterop

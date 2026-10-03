@@ -1,7 +1,0 @@
-{
-  "name": "MajdataPlay.Video.Editor",
-  "rootNamespace": "MajdataPlay.Video.Editor",
-  "references": ["MajdataPlay.Video", "FFmpeg.AutoGen"],
-  "includePlatforms": ["Editor"],
-  "autoReferenced": true
-}

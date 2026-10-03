@@ -7,7 +7,7 @@ using AOT;
 using FFmpeg.AutoGen;
 using MajdataPlay.Diagnostics;
 
-namespace MajdataPlay.Video.Internal
+namespace MajdataPlay.FFmpeg.Internal
 {
     /// <summary>
     /// Decodes video synchronously on a single worker and skips audio packets.

@@ -2,7 +2,7 @@ using System;
 using System.Threading;
 using FFmpeg.AutoGen;
 
-namespace MajdataPlay.Video.Internal
+namespace MajdataPlay.FFmpeg.Internal
 {
     /// <summary>
     /// Owns a decoded presentation frame stored as CPU pixels or native GPU resources.

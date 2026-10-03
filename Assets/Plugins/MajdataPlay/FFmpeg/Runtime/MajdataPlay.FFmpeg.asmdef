@@ -1,0 +1,25 @@
+{
+    "name": "MajdataPlay.FFmpeg",
+    "rootNamespace": "MajdataPlay.FFmpeg",
+    "references": [
+        "FFmpeg.AutoGen",
+        "MajdataPlay.Diagnostics"
+    ],
+    "includePlatforms": [
+        "Android",
+        "Editor",
+        "iOS",
+        "LinuxStandalone64",
+        "macOSStandalone",
+        "WindowsStandalone32",
+        "WindowsStandalone64"
+    ],
+    "excludePlatforms": [],
+    "allowUnsafeCode": true,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

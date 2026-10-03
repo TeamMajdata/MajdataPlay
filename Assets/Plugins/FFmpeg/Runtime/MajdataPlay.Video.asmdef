@@ -1,8 +1,0 @@
-{
-  "name": "MajdataPlay.Video",
-  "rootNamespace": "MajdataPlay.Video",
-  "references": ["FFmpeg.AutoGen", "MajdataPlay.Diagnostics"],
-  "includePlatforms": ["Editor", "WindowsStandalone32", "WindowsStandalone64", "LinuxStandalone64", "macOSStandalone", "Android", "iOS"],
-  "allowUnsafeCode": true,
-  "autoReferenced": true
-}

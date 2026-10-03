@@ -1,7 +1,7 @@
 using System;
 using FFmpeg.AutoGen;
 
-namespace MajdataPlay.Video.Internal
+namespace MajdataPlay.FFmpeg.Internal
 {
     /// <summary>Configures video decoding, resource limits, and hardware frame transport.</summary>
     /// <remarks>Set these options before creating the decoder and do not modify them while it is in use.</remarks>

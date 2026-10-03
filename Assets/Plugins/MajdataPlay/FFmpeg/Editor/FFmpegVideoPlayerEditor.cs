@@ -1,7 +1,7 @@
 using UnityEditor;
 using UnityEngine;
 
-namespace MajdataPlay.Video.Editor
+namespace MajdataPlay.FFmpeg.Editor
 {
     [CustomEditor(typeof(FFmpegVideoPlayer))]
     sealed class FFmpegVideoPlayerEditor : UnityEditor.Editor

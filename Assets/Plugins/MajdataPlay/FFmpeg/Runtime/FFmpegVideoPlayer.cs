@@ -2,11 +2,11 @@ using System;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
-using MajdataPlay.Video.Internal;
+using MajdataPlay.FFmpeg.Internal;
 using MajdataPlay.Diagnostics;
 using UnityEngine;
 
-namespace MajdataPlay.Video
+namespace MajdataPlay.FFmpeg
 {
     /// <summary>Describes the current state of a video player.</summary>
     public enum VideoPlaybackState
@@ -254,7 +254,7 @@ namespace MajdataPlay.Video
                     ConfigureHardware(options, _preferNativeTextures || _hardwareRequired);
                 if (_hardwareRequired && !options.KeepNativeFrames)
                     throw new NotSupportedException(HardwareFallbackReason ?? "Native GPU video playback is unavailable.");
-                _hardwareActive = options.HardwareDeviceType != FFmpeg.AutoGen.AVHWDeviceType.AV_HWDEVICE_TYPE_NONE;
+                _hardwareActive = options.HardwareDeviceType != global::FFmpeg.AutoGen.AVHWDeviceType.AV_HWDEVICE_TYPE_NONE;
                 _hardwareCpuUploadAttempted = !options.KeepNativeFrames;
                 _session = new VideoDecodeSession(NormalizeSource(_source), options, _bufferedFrameLimit);
             }

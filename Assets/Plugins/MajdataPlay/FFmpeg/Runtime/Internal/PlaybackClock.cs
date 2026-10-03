@@ -1,7 +1,7 @@
 using System;
 using System.Diagnostics;
 
-namespace MajdataPlay.Video.Internal
+namespace MajdataPlay.FFmpeg.Internal
 {
     // Monotonic, independent of Time.timeScale; injecting time makes discontinuities testable.
     internal sealed class PlaybackClock

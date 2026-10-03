@@ -2,7 +2,7 @@ using System;
 using FFmpeg.AutoGen;
 using MajdataPlay.Diagnostics;
 
-namespace MajdataPlay.Video.Internal
+namespace MajdataPlay.FFmpeg.Internal
 {
     /// <summary>Owned by one decoder worker; no Unity API calls or pinned managed pixel arrays.</summary>
     internal sealed unsafe class VideoFrameConverter : IDisposable

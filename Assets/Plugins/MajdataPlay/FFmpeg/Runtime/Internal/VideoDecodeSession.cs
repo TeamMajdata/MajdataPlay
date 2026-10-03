@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using System.Threading;
 using MajdataPlay.Diagnostics;
 
-namespace MajdataPlay.Video.Internal
+namespace MajdataPlay.FFmpeg.Internal
 {
     internal sealed class VideoInfo
     {

@@ -1,6 +1,6 @@
 using UnityEngine;
 
-namespace MajdataPlay.Video.Interop
+namespace MajdataPlay.FFmpeg.Interop
 {
     // Close/Destroy can remove the last player before the render thread unregisters
     // its GL texture or finishes a Vulkan fence. This collector outlives that player only

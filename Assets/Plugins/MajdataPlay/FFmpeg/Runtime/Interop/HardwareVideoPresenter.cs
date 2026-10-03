@@ -1,11 +1,11 @@
 using System;
 using System.Collections.Generic;
 using System.Runtime.InteropServices;
-using MajdataPlay.Video.Internal;
+using MajdataPlay.FFmpeg.Internal;
 using UnityEngine;
 using UnityEngine.Rendering;
 
-namespace MajdataPlay.Video.Interop
+namespace MajdataPlay.FFmpeg.Interop
 {
     /// <summary>
     /// Optional native surface interoperability. A capability is reported only

@@ -1,11 +1,11 @@
 using System;
 using FFmpeg.AutoGen;
 using MajdataPlay.Diagnostics;
-using MajdataPlay.Video.Internal;
-using MajdataPlay.Video.Interop;
+using MajdataPlay.FFmpeg.Internal;
+using MajdataPlay.FFmpeg.Interop;
 using UnityEngine;
 
-namespace MajdataPlay.Video
+namespace MajdataPlay.FFmpeg
 {
     public sealed partial class FFmpegVideoPlayer
     {
