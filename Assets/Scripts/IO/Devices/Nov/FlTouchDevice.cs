@@ -2,13 +2,14 @@
 using System;
 using System.Collections.Generic;
 using MajdataPlay.Settings;
+using TouchUpdate = MajdataPlay.IO.TouchPanelState.TouchUpdate;
 
 namespace MajdataPlay.IO
 {
     /// <summary>
     /// FLTouch 独占触摸。需要先发 Feature Report 切到多点输入模式才能拿到完整触点。
     /// </summary>
-    internal sealed class FlTouchDevice : ExclusiveTouchBase
+    internal sealed class FlTouchDevice : UsbDevice, ITouchPanelDevice
     {
         private const ushort Vid = 0x227D;
         private const ushort Pid = 0x0103;
@@ -23,19 +24,22 @@ namespace MajdataPlay.IO
         private readonly List<TouchUpdate> _pendingUpdates = new(SlotsPerReport * 2);
         private readonly List<TouchUpdate> _releaseUpdates = new(SlotsPerReport);
         private readonly object _reportLock = new();
+        private readonly TouchPanelState _touch;
 
         public FlTouchDevice(string identifier, int radius, CapacitiveTouchPanelRadiusOffsetConfig radiusOffset)
-            : base(Vid, Pid, identifier, packetSize: 64,
+            : base(Vid, Pid, identifier, packetSize: 64)
+        {
+            _touch = new TouchPanelState(
                 minX: 18432, minY: 0, maxX: 0, maxY: 32767, flip: true, radius,
                 radiusOffset.A, radiusOffset.B, radiusOffset.C, radiusOffset.D, radiusOffset.E,
-                timeoutMilliseconds: 100)
-        { }
+                timeoutMilliseconds: 100);
+        }
 
         protected override string DiagnosticName => "FL";
 
-        protected override TouchEndpoint ResolveEndpoint(WinUsbIo.DevicePath devicePath)
+        protected override UsbEndpoint ResolveEndpoint(WinUsbIo.DevicePath devicePath)
             => devicePath.InterfaceNumber == 0
-                ? new TouchEndpoint(0, 0x81)
+                ? new UsbEndpoint(0, 0x81)
                 : throw new InvalidOperationException($"FLTouch 设备接口号不支持: {devicePath.InterfaceNumber}");
 
         protected override void InitializeDevice(WinUsbIo.Device device)
@@ -65,13 +69,19 @@ namespace MajdataPlay.IO
             }
         }
 
-        protected override void OnDeviceDisconnected()
+        protected override void OnDisconnected()
         {
             lock (_reportLock)
             {
                 ResetFrameState();
+                _touch.Clear();
             }
         }
+
+        public override void OnPreUpdate() => _touch.OnPreUpdate();
+        public void ReadTouchPanel(Span<bool> states, Span<bool> hadOn, Span<bool> hadOff) =>
+            _touch.ReadTouchPanel(states, hadOn, hadOff);
+        public bool IsSensorCurrentlyOn(int index) => _touch.IsSensorCurrentlyOn(index);
 
         private void ResetFrameState()
         {
@@ -80,15 +90,16 @@ namespace MajdataPlay.IO
             _releaseUpdates.Clear();
         }
 
-        protected override void OnTouchData(byte[] data)
+        protected override void Parse(ReadOnlySpan<byte> data)
         {
+            if (data.Length < 62) return;
             lock (_reportLock)
             {
                 OnTouchDataCore(data);
             }
         }
 
-        private void OnTouchDataCore(byte[] data)
+        private void OnTouchDataCore(ReadOnlySpan<byte> data)
         {
             if (data[0] != ReportId) return;
 
@@ -112,10 +123,10 @@ namespace MajdataPlay.IO
             {
                 var index = SlotStart + i * SlotSize;
                 var fingerId = data[index + 1];
-                ushort x = BitConverter.ToUInt16(data, index + 2);
-                ushort y = BitConverter.ToUInt16(data, index + 4);
-                ushort w = BitConverter.ToUInt16(data, index + 6);
-                ushort h = BitConverter.ToUInt16(data, index + 8);
+                ushort x = BitConverter.ToUInt16(data.Slice(index + 2, 2));
+                ushort y = BitConverter.ToUInt16(data.Slice(index + 4, 2));
+                ushort w = BitConverter.ToUInt16(data.Slice(index + 6, 2));
+                ushort h = BitConverter.ToUInt16(data.Slice(index + 8, 2));
 
                 // 一次触摸的状态序列是 04(有面积) -> 07 -> 04(面积归零) -> 00，
                 // Tip Switch 位只在 07 出现。用面积判定比等 Tip Switch 早一帧
@@ -131,12 +142,12 @@ namespace MajdataPlay.IO
             _remaining -= take;
             if (_releaseUpdates.Count > 0)
             {
-                HandleReleases(_releaseUpdates);
+                _touch.HandleReleases(_releaseUpdates);
             }
 
             if (_remaining == 0)
             {
-                HandleFrame(_pendingUpdates);
+                _touch.HandleFrame(_pendingUpdates);
                 _pendingUpdates.Clear();
             }
         }

@@ -1,5 +1,6 @@
 #if UNITY_STANDALONE_WIN
 using System;
+using TouchUpdate = MajdataPlay.IO.TouchPanelState.TouchUpdate;
 
 namespace MajdataPlay.IO
 {
@@ -9,7 +10,7 @@ namespace MajdataPlay.IO
         private const int OldSlotSize = 10;
         private const int OldCountIndex = 61;
 
-        private void OnOldTouchData(byte[] data)
+        private void OnOldTouchData(ReadOnlySpan<byte> data)
         {
             if (data[0] != ReportId) return;
 
@@ -32,10 +33,10 @@ namespace MajdataPlay.IO
             {
                 var index = OldSlotStart + i * OldSlotSize;
                 var fingerId = data[index + 1];
-                ushort x = BitConverter.ToUInt16(data, index + 2);
-                ushort y = BitConverter.ToUInt16(data, index + 4);
-                ushort w = BitConverter.ToUInt16(data, index + 6);
-                ushort h = BitConverter.ToUInt16(data, index + 8);
+                ushort x = BitConverter.ToUInt16(data.Slice(index + 2, 2));
+                ushort y = BitConverter.ToUInt16(data.Slice(index + 4, 2));
+                ushort w = BitConverter.ToUInt16(data.Slice(index + 6, 2));
+                ushort h = BitConverter.ToUInt16(data.Slice(index + 8, 2));
 
                 // 旧 PDX 首帧 status=04 也带面积，用面积判定比 Tip Switch 早一帧
                 bool isPressed = w > 0 || h > 0;
@@ -50,12 +51,12 @@ namespace MajdataPlay.IO
             _remaining -= take;
             if (_releaseUpdates.Count > 0)
             {
-                HandleReleases(_releaseUpdates);
+                _touch.HandleReleases(_releaseUpdates);
             }
 
             if (_remaining == 0)
             {
-                HandleFrame(_pendingUpdates);
+                _touch.HandleFrame(_pendingUpdates);
                 _pendingUpdates.Clear();
             }
         }

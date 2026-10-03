@@ -1,0 +1,40 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net9.0</TargetFramework>
+    <LangVersion>preview</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <DefineConstants>UNITY_STANDALONE</DefineConstants>
+    <RestoreSources>$(MSBuildThisFileDirectory)</RestoreSources>
+    <NuGetAudit>false</NuGetAudit>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../../../Assets/Scripts/IO/Base/Devices/IODevice.cs" Link="Production/IODevice.cs" />
+    <Compile Include="../../../Assets/Scripts/IO/Base/Devices/InputStateBuffer.cs" Link="Production/InputStateBuffer.cs" />
+    <Compile Include="../../../Assets/Scripts/IO/Base/Devices/IGameDevice.cs" Link="Production/IGameDevice.cs" />
+    <Compile Include="../../../Assets/Scripts/IO/Base/Devices/IButtonRingDevice.cs" Link="Production/IButtonRingDevice.cs" />
+    <Compile Include="../../../Assets/Scripts/IO/Base/Devices/ITouchPanelDevice.cs" Link="Production/ITouchPanelDevice.cs" />
+    <Compile Include="../../../Assets/Scripts/IO/Base/Devices/ILedDevice.cs" Link="Production/ILedDevice.cs" />
+    <Compile Include="../../../Assets/Scripts/IO/Devices/Rosen/RosenButtonRingDevice.cs" Link="Production/RosenButtonRingDevice.cs" />
+    <Compile Include="../../../Assets/Scripts/IO/Devices/Yuan/YuanButtonRingDevice.cs" Link="Production/YuanButtonRingDevice.cs" />
+    <Compile Include="../../../Assets/Scripts/IO/Devices/Dao/DaoCompositeDevice.cs" Link="Production/DaoCompositeDevice.cs" />
+    <Compile Include="../../../Assets/Scripts/IO/Devices/Rosen/RosenTouchPanelDevice.cs" Link="Production/RosenTouchPanelDevice.cs" />
+    <Compile Include="../../../Assets/Scripts/IO/Devices/Rosen/RosenLedDevice.cs" Link="Production/RosenLedDevice.cs" />
+    <Compile Include="../../../Assets/Scripts/IO/Devices/Dao/DaoLedOutput.cs" Link="Production/DaoLedOutput.cs" />
+    <Compile Include="../../../Assets/Scripts/IO/Base/Devices/LedOutputState.cs" Link="Production/LedOutputState.cs" />
+    <Compile Include="../../../Assets/Scripts/IO/Devices/Pipe/PipeTouchPanelDevice.cs" Link="Production/PipeTouchPanelDevice.cs" />
+    <Compile Include="../../../Assets/Scripts/IO/Devices/Pipe/PipeButtonRingDevice.cs" Link="Production/PipeButtonRingDevice.cs" />
+    <Compile Include="../../../Assets/Scripts/IO/Devices/Pipe/PipeLedDevice.cs" Link="Production/PipeLedDevice.cs" />
+    <Compile Include="../../../Assets/Scripts/IO/Devices/General/KeyboardButtonRingDevice.cs" Link="Production/KeyboardButtonRingDevice.cs" />
+    <Compile Include="../../../Assets/Scripts/IO/Devices/General/ScreenTouchPanelDevice.cs" Link="Production/ScreenTouchPanelDevice.cs" />
+    <Compile Include="../../../Assets/Scripts/IO/Devices/General/MouseTouchPanelDevice.cs" Link="Production/MouseTouchPanelDevice.cs" />
+    <Compile Include="../../../Assets/Scripts/IO/Devices/General/PointerInputState.cs" Link="Production/PointerInputState.cs" />
+    <Compile Include="../../../Assets/Scripts/IO/KeyboardHelper.cs" Link="Production/KeyboardHelper.cs" />
+    <Compile Include="../../../Assets/Scripts/IO/Base/KeyCode.cs" Link="Production/KeyCode.cs" />
+    <Compile Include="../../../Assets/Scripts/IO/Base/Enums/ButtonZone.cs" Link="Production/ButtonZone.cs" />
+    <Compile Include="../../../Assets/Scripts/IO/Devices/GameDeviceManager.cs" Link="Production/GameDeviceManager.cs" />
+    <Compile Include="../../../Assets/Scripts/IO/Base/PipePacket.cs" Link="Production/PipePacket.cs" />
+    <Compile Include="../../../Assets/Plugins/MajdataPlay/Buffers/SpanBuffer.cs" Link="Production/SpanBuffer.cs" />
+  </ItemGroup>
+</Project>

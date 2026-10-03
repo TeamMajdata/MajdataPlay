@@ -1,32 +1,12 @@
-#if UNITY_STANDALONE
-using HidSharp;
-using HidSharp.Platform.Windows;
-#endif
-using MajdataPlay.Collections;
 using MajdataPlay.Diagnostics;
 using MajdataPlay.Numerics;
-using MajdataPlay.Settings;
-using MajdataPlay.UnsafeKit;
 using MajdataPlay.Utils;
 using System;
-using System.Buffers.Binary;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
-using System.Drawing;
-using System.IO.Pipes;
-using System.IO.Ports;
-using System.Linq;
 using System.Runtime.CompilerServices;
-using System.Security.Policy;
-using System.Threading;
-using UnityEngine;
 using UnityEngine.InputSystem;
-using UnityEngine.InputSystem.EnhancedTouch;
 using UnityEngine.Profiling;
-//using Microsoft.Win32;
-//using System.Windows.Forms;
-//using Application = UnityEngine.Application;
-//using System.Security.Policy;
 #nullable enable
 namespace MajdataPlay.IO
 {
@@ -54,18 +34,6 @@ namespace MajdataPlay.IO
 #else
                 return false;
 #endif
-            }
-        }
-        public static float TouchButtonRingEdge
-        {
-            get => _lastTouchButtonRingEdge;
-            set => _lastTouchButtonRingEdge = value;
-        }
-        public static float FingerRadius
-        {
-            get
-            {
-                return MajEnv.Settings.Debug.TouchSimulationRadius;
             }
         }
         public static ReadOnlySpan<SwitchStatus> ButtonStatusInThisFrame
@@ -134,67 +102,16 @@ namespace MajdataPlay.IO
                 return _sensorStates.Span;
             }
         }
-        public static ReadOnlySpan<Vector4> UnitCircle
-        {
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            get
-            {
-                return _unitCircle.Span;
-            }
-        }
-        public static ReadOnlySpan<ulong> TouchPanelPositionSamples
-        {
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            get
-            {
-                return new ReadOnlySpan<ulong>(_posData, 1280 * 1280);
-            }
-        }
-        /// <summary>
-        /// Left, Top, Right, Bottom edge
-        /// </summary>
-        public static Vector4 SubScreenEdge { get; set; } = new Vector4();
 
         public static event EventHandler<InputEventArgs>? OnAnyAreaTrigger;
 
         static TimeSpan _btnDebounceThresholdMs = TimeSpan.Zero;
         static TimeSpan _sensorDebounceThresholdMs = TimeSpan.Zero;
-        static TimeSpan _btnPollingRateMs = TimeSpan.Zero;
-        static TimeSpan _sensorPollingRateMs = TimeSpan.Zero;
 
         readonly static ConcurrentQueue<InputDeviceReport> _touchPanelInputBuffer = new();
         readonly static ConcurrentQueue<InputDeviceReport> _buttonRingInputBuffer = new();
 
-        readonly static ReadOnlyMemory<KeyCode> _bindingKeys = new KeyCode[12]
-        {
-            KeyCode.B1,
-            KeyCode.B2,
-            KeyCode.B3,
-            KeyCode.B4,
-            KeyCode.B5,
-            KeyCode.B6,
-            KeyCode.B7,
-            KeyCode.B8,
-            KeyCode.Test,
-            KeyCode.SelectP1,
-            KeyCode.Service,
-            KeyCode.SelectP2
-        };
-        readonly static ReadOnlyMemory<Button> _buttons = new Button[12]
-        {
-            new Button(KeyCode.B1,ButtonZone.A1),
-            new Button(KeyCode.B2,ButtonZone.A2),
-            new Button(KeyCode.B3,ButtonZone.A3),
-            new Button(KeyCode.B4,ButtonZone.A4),
-            new Button(KeyCode.B5,ButtonZone.A5),
-            new Button(KeyCode.B6,ButtonZone.A6),
-            new Button(KeyCode.B7,ButtonZone.A7),
-            new Button(KeyCode.B8,ButtonZone.A8),
-            new Button(KeyCode.Test,ButtonZone.Test),
-            new Button(KeyCode.SelectP1,ButtonZone.P1),
-            new Button(KeyCode.Service,ButtonZone.Service),
-            new Button(KeyCode.SelectP2,ButtonZone.P2),
-        };
+        readonly static ReadOnlyMemory<Button> _buttons = CreateButtons();
         readonly static TimeSpan[] _btnLastTriggerTimes = new TimeSpan[12];
         readonly static SwitchStatus[] _btnStatusInPreviousFrame = new SwitchStatus[12];
         readonly static SwitchStatus[] _btnStatusInThisFrame = new SwitchStatus[12];
@@ -346,16 +263,12 @@ namespace MajdataPlay.IO
         readonly static int[] _sensorClickedCountInThisFrame = new int[33];
 #endif
         static bool _isInited = false;
-        static bool _useDummy = false;
         static bool _isBtnDebounceEnabled = false;
         static bool _isSensorDebounceEnabled = false;
         static bool _isSensorRendererEnabled = false;
 
         static IReadOnlyDictionary<int, int> _instanceID2SensorIndexMappingTable = new Dictionary<int, int>();
 
-#if UNITY_STANDALONE
-        readonly static IOThreadSynchronization _ioThreadSync = new IOThreadSynchronization();     
-#endif
         internal static void Init(IReadOnlyDictionary<int, int> instanceID2SensorIndexMappingTable)
         {
             if(_isInited)
@@ -364,22 +277,16 @@ namespace MajdataPlay.IO
             }
             MajDebug.LogInfo("[InputManager]Start initialization");
             _isInited = true;
-            Input.multiTouchEnabled = true;
-            EnhancedTouchSupport.Enable();
             MajDebug.LogDebug("[InputManager]Reading config from game settings");
             _isSensorRendererEnabled = MajEnv.Settings.Debug.DisplaySensor;
 #if UNITY_STANDALONE
             _btnDebounceThresholdMs = TimeSpan.FromMilliseconds(MajEnv.Settings.IO.InputDevice.ButtonRing.DebounceThresholdMs);
-            _btnPollingRateMs = TimeSpan.FromMilliseconds(MajEnv.Settings.IO.InputDevice.ButtonRing.PollingRateMs);
             _sensorDebounceThresholdMs = TimeSpan.FromMilliseconds(MajEnv.Settings.IO.InputDevice.TouchPanel.DebounceThresholdMs);
-            _sensorPollingRateMs = TimeSpan.FromMilliseconds(MajEnv.Settings.IO.InputDevice.TouchPanel.PollingRateMs);
             _isBtnDebounceEnabled = MajEnv.Settings.IO.InputDevice.ButtonRing.Debounce;
             _isSensorDebounceEnabled = MajEnv.Settings.IO.InputDevice.TouchPanel.Debounce;
 #else
             _btnDebounceThresholdMs = TimeSpan.Zero;
-            _btnPollingRateMs = TimeSpan.Zero;
             _sensorDebounceThresholdMs = TimeSpan.Zero;
-            _sensorPollingRateMs = TimeSpan.Zero;
             _isBtnDebounceEnabled = false;
             _isSensorDebounceEnabled = false;
 #endif
@@ -391,50 +298,10 @@ namespace MajdataPlay.IO
                 }
                 _sensorLastTriggerTimes[i] = TimeSpan.Zero;
             }
-            _posData = UnsafeHelper.Alloc<ulong>(1280 * 1280);
-            var samples = new Vector4[TOUCH_ANGLE_SMAPLE_COUNT];
-            var step = 2f * Mathf.PI / TOUCH_ANGLE_SMAPLE_COUNT;
-
-            for (int i = 0; i < TOUCH_ANGLE_SMAPLE_COUNT; i++)
-            {
-                var angle = step * i;
-                samples[i] = new Vector3(Mathf.Sin(angle), Mathf.Cos(angle));
-            }
-
-            _unitCircle = samples;
-            GameManager.OnAppQuit += OnApplicationQuit;
             _instanceID2SensorIndexMappingTable = instanceID2SensorIndexMappingTable;
-            _lastScreenHeight = Screen.height;
-            _lastScreenWidth = Screen.width;
-            MajDebug.LogDebug("[InputManager]Screen dimensions initialized");
-            MajDebug.LogDebug("[InputManager]Start generating sensor map");
-            for (var x = -540; x <= 540; x++)
-            {
-                if ((x + 540) % 100 == 0)
-                {
-                    MajDebug.LogDebug($"[InputManager]Progress: {x + 540}/1080");
-                }
-                for (var y = -540; y <= 540; y++)
-                {
-                    var point = new Vector3(x / 100f, y / 100f, -10);
-                    var ray = new Ray(point, Vector3.forward);
-                    var ishit = Physics.Raycast(ray, out var hitInfom);
-                    ref var posData = ref _posData[((x + 540) * 1280) + y + 540];
-                    if (ishit)
-                    {
-                        var id = hitInfom.colliderInstanceID;
-                        if (_instanceID2SensorIndexMappingTable.TryGetValue(id, out var index))
-                        {
-                            posData |= 1UL << (index + 12);
-                        }
-                        else
-                        {
-                            MajDebug.LogWarning($"[InputManager]Unknown collider instance id: {id}");
-                        }
-                    }
-                }
-            }
-            MajDebug.LogDebug($"[InputManager]Sensor map generate finished");
+            ScreenTouchMapper.Init(instanceID2SensorIndexMappingTable);
+            GameManager.OnAppQuit += OnApplicationQuit;
+            GameDeviceManager.Init();
 #if UNITY_STANDALONE || UNITY_ANDROID || UNITY_IOS
             ButtonRing.Init();
 #endif
@@ -460,60 +327,13 @@ namespace MajdataPlay.IO
                 Array.Fill(_sensorClickedCountInThisFrame, 0);
 #endif
                 InputSystem.Update();
-#if UNITY_STANDALONE || UNITY_ANDROID || UNITY_IOS
+                ScreenTouchMapper.OnPreUpdate();
+                GameDeviceManager.OnPreUpdate();
                 ButtonRing.OnPreUpdate();
-#endif
 #if UNITY_STANDALONE
                 TouchPanel.OnPreUpdate();
-                
 #endif
-                var debugOptions = MajEnv.Settings.Debug;
-                var displayOptions = MajEnv.Settings.Display;
-                var height = Screen.height;
-                var width = Screen.width;
-                var fingerRad = Override_TouchSimulationRadius ?? FingerRadius;
-                var touchRadiusAdjust = debugOptions.TouchRadiusAdjust;
-                var aExtraRad = Override_TouchAAreaExtraRadius ?? debugOptions.TouchAAreaExtraRadius;
-                var bExtraRad = Override_TouchBAreaExtraRadius ?? debugOptions.TouchBAreaExtraRadius;
-                var cExtraRad = Override_TouchCAreaExtraRadius ?? debugOptions.TouchCAreaExtraRadius;
-                var dExtraRad = Override_TouchDAreaExtraRadius ?? debugOptions.TouchDAreaExtraRadius;
-                var eExtraRad = Override_TouchEAreaExtraRadius ?? debugOptions.TouchEAreaExtraRadius;
-                var mainScreenTransform = displayOptions.MainScreenTransform;
-                var mainScreenOffset = displayOptions.MainScreenOffset;
-
-                var isModified = height != _lastScreenHeight ||
-                                 width != _lastScreenWidth ||
-                                 fingerRad != _lastFingerRadius ||
-                                 aExtraRad != _lastAAreaExtraRadius ||
-                                 bExtraRad != _lastBAreaExtraRadius ||
-                                 cExtraRad != _lastCAreaExtraRadius ||
-                                 dExtraRad != _lastDAreaExtraRadius ||
-                                 eExtraRad != _lastEAreaExtraRadius ||
-                                 touchRadiusAdjust != _lastTouchRadiusAdjust ||
-                                 mainScreenOffset != _lastMainScreenOffset;
-                if (isModified)
-                {
-                    _lastScreenWidth = width;
-                    _lastScreenHeight = height;
-                    _lastFingerRadius = fingerRad;
-                    _lastAAreaExtraRadius = aExtraRad;
-                    _lastBAreaExtraRadius = bExtraRad;
-                    _lastCAreaExtraRadius = cExtraRad;
-                    _lastDAreaExtraRadius = dExtraRad;
-                    _lastEAreaExtraRadius = eExtraRad;
-                    _lastTouchRadiusAdjust = touchRadiusAdjust;
-                    _lastMainScreenTransform = mainScreenTransform;
-                    if(_lastMainScreenTransform)
-                    {
-                        _lastMainScreenOffset = mainScreenOffset;
-                    }
-                    else
-                    {
-                        _lastMainScreenOffset = 1f;
-                    }
-                    _version++;
-                }                
-                UpdateMousePosition();
+                UpdatePointerInput();
                 UpdateButtonState();
                 UpdateSensorState();
             }
@@ -878,6 +698,15 @@ namespace MajdataPlay.IO
             }
             return true;
         }
+        static Button[] CreateButtons()
+        {
+            var bindings = KeyboardHelper.ButtonBindings;
+            var buttons = new Button[bindings.Length];
+            for (var i = 0; i < bindings.Length; i++)
+                buttons[i] = new Button(bindings[i], (ButtonZone)i);
+            return buttons;
+        }
+
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         static Button? GetButton(ButtonZone zone)
         {
@@ -912,10 +741,7 @@ namespace MajdataPlay.IO
         }
         static void OnApplicationQuit(object? sender, EventArgs? e)
         {
-            if (_posData is not null)
-            {
-                UnsafeHelper.Free(_posData);
-            }
+            ScreenTouchMapper.Dispose();
             GameManager.OnAppQuit -= OnApplicationQuit;
         }
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -989,51 +815,6 @@ namespace MajdataPlay.IO
         {
             return (int)area;
         }
-#if UNITY_STANDALONE
-        class IOThreadSynchronization
-        {
-            public ReadOnlySpan<byte> ReadBuffer
-            {
-                get
-                {
-                    return ReadBufferMemory.Span;
-                }
-            }
-            public Span<byte> WriteBuffer
-            {
-                get
-                {
-                    return WriteBufferMemory.Span;
-                }
-            }
-            public Memory<byte> WriteBufferMemory { get; set; } = Memory<byte>.Empty;
-            public ReadOnlyMemory<byte> ReadBufferMemory { get; set; } = ReadOnlyMemory<byte>.Empty;
-            public NamedPipeClientStream PipeClientStream { get; set; }
 
-            readonly EventWaitHandle _readReadyEvent = new(false, EventResetMode.AutoReset);
-            readonly EventWaitHandle _readConsumedEvent = new(false, EventResetMode.AutoReset);
-
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            public bool WaitReadReady()
-            {
-                return _readReadyEvent.WaitOne();
-            }
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            public void SignalReadReady()
-            {
-                _readReadyEvent.Set();
-            }
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            public bool WaitReadConsumed()
-            {
-                return _readConsumedEvent.WaitOne();
-            }
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            public void SignalReadConsumed()
-            {
-                _readConsumedEvent.Set();
-            }
-        }
-#endif
     }
 }
