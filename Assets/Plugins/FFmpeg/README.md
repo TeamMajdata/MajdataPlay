@@ -1,0 +1,87 @@
+# FFmpeg Video Player
+
+将 **FFmpeg Video Player** 挂在 GameObject 上，填写 Source，在 Play Mode Inspector 中可以预载、播放、暂停、停止和拖动时间轴。组件只播放视频；音轨由 MajdataPlay 现有音频系统处理。
+
+运行时程序集为 `MajdataPlay.Video`，依赖项目已接入的 `FFmpeg.AutoGen`。本项目绑定的原生 ABI 是 FFmpeg **9.0.1**；请使用 [Tools/FFmpeg](../../../Tools/FFmpeg) 的构建脚本，不能混用其他主版本的库。Mono / IL2CPP 使用同一套直接 P/Invoke 和带 `MonoPInvokeCallback` 的静态回调。
+
+## 使用
+
+```csharp
+using MajdataPlay.Video;
+using UnityEngine;
+using UnityEngine.UI;
+
+public sealed class VideoExample : MonoBehaviour
+{
+    public FFmpegVideoPlayer player;
+    public RawImage image;
+
+    async void Start()
+    {
+        // 分辨率变化和硬件回退时纹理可能更换，所以应持续监听。
+        player.TextureChanged += (_, texture) => image.texture = texture;
+        player.ErrorReceived += (_, message) => Debug.LogError(message);
+        await player.PreloadAsync(System.IO.Path.Combine(Application.persistentDataPath, "movie.mp4"));
+        player.SetRate(1.25f);
+        await player.SeekAsync(3.5); // seconds，精确解码到目标所在帧
+        player.Play();
+    }
+}
+```
+
+可以在 Inspector 指定 Target Renderer（默认材质属性 `_MainTex`），或 Target Texture（已有 RenderTexture）。不指定输出对象时，直接使用 `Texture` / `TextureChanged`；`RawImage` 的 UV 不需要额外上下翻转。URP 材质可把 Texture Property 改为 `_BaseMap`。保持播放器组件启用，异步准备、显示与事件依赖 `Update`。
+
+| API | 语义 |
+| --- | --- |
+| `Url`, `Preload(path)`, `PreloadAsync(path, token)` | 路径/URL；打开、读取信息并显示首帧，时间不推进 |
+| `Prepare()`, `PrepareAsync(token)` | 使用已设置的 Url；异步完成意味着首帧已显示 |
+| `Play()`, `Play(path)`, `Pause()`, `SetPause(bool)` | 基本控制；预载中调用 Play 会在准备后播放 |
+| `Stop()` | 暂停并异步回到开头，保留已准备资源；不可 seek 的输入则关闭 |
+| `Close()` | 取消工作、关闭媒体和释放显示资源；主线程不等待阻塞 I/O |
+| `Time`, `Length` | 与 VLC 一致，毫秒；Time 可写 |
+| `time`, `LengthSeconds`, `SeekAsync(double)` | 秒；SeekAsync 完成意味着目标帧已显示 |
+| `SeekTo(TimeSpan)`, `Position` | 时间跳转；Position 是 0–1 的归一化位置 |
+| `SetRate(float)`, `Rate`, `playbackSpeed` | 1/16–16 倍速；不支持倒放；倍速变化保持时间连续 |
+| `Loop`, `NextFrame()` | 循环；暂停并向前显示一帧 |
+| `State`, `IsPrepared`, `IsPlaying`, `IsBuffering`, `IsSeekable` | 状态；准备或缓冲期间时间不推进 |
+| `Texture`, `Width`, `Height`, `FrameRate`, `CodecName` | 当前输出与媒体信息 |
+| `TransferMode`, `HardwareFallbackReason`, `LastError` | 实际纹理传输模式和诊断 |
+| `PreferHardwareDecoding`, `RequireHardwareDecoding` | 打开媒体时应用；Require 优先，硬件不支持或运行中失败时报告错误，禁止软件解码/CPU 上传回退 |
+| `Prepared`, `Started`, `Paused`, `Stopped`, `EndReached`, `SeekCompleted` | 主线程事件 |
+| `TextureChanged`, `FrameReady`, `TimeChanged`, `ErrorReceived` | 输出变化、帧序号、毫秒位置、错误信息 |
+
+所有组件 API 在 Unity 主线程调用。控制时间使用单调时钟，不受 `Time.timeScale` 影响。连续 seek 只保留最后一次请求，旧 `SeekAsync` 被取消。更换 Url / Close / 销毁对象会取消尚未完成的任务；后台线程退出后关闭 FFmpeg。音轨数据包被跳过。预载不是将整个文件读入内存，帧队列默认仅 3 帧，Inspector 可调整到 1–8 帧。
+
+## 图形后端与纹理传输
+
+五种请求的图形后端均有 Unity 纹理上传通用路径。硬件路径在运行时探测；`TransferMode` 反映实际路径。需要保证显示帧不经过 CPU 像素回读/上传时，请在 Preload/Prepare 前设置 `player.RequireHardwareDecoding = true`：这时驱动、格式或插件不满足条件会直接报错，不会自动上传 CPU 像素。FFmpeg 打开输入时仍可能为获取元数据执行软件探测解码，这些探测帧不用于显示。
+
+| 后端 | 通用播放 | 可选原生路径 |
+| --- | --- | --- |
+| D3D11 | RGBA 上传 | 同 Unity device 的 D3D11VA 解码，视频处理器在 GPU 上转为 RGBA，无 CPU 回读；有 GPU 转换，不是严格零拷贝 |
+| D3D12 | RGBA 上传 | Windows：同适配器 D3D11VA 解码，经共享 RGBA 资源、双向 GPU fence、GPU copy 进入 Unity；无 CPU 回读 |
+| OpenGL / OpenGL ES | RGBA 上传 | Windows OpenGL Core：WGL_NV_DX_interop2 共享 D3D11VA 转换后的 RGBA 纹理，lock/unlock 保护访问；其他平台目前走通用路径 |
+| Vulkan | RGBA 上传 | Windows：D3D11VA 共享 RGBA 导入；Linux：VAAPI → DRM_PRIME/DMA-BUF 平面导入；Android：MediaCodec Surface → AImageReader/AHardwareBuffer 导入。三者均在 GPU 上转换/复制至 Unity RenderTexture，无 CPU 像素回读 |
+| Metal | RGBA 上传 | VideoToolbox 的 NV12 CVPixelBuffer 通过 CVMetalTextureCache 零拷贝映射平面；着色器再在 GPU 转为 RGBA |
+
+Metal 的平面映射和 Windows OpenGL 的纹理映射不复制像素，但最终 RGBA 显示包含 GPU 转换。Windows 四条硬件路径都避免 CPU 像素回读/上传；D3D12、Vulkan 仍有 GPU copy，不能将其称为严格的端到端零拷贝。外部纹理必须保留帧引用直到 GPU 完成；原生桥接承担此生命周期，不应自行释放返回的 Texture。
+
+Windows/Linux/Android 的 Vulkan 桥接必须保持 PluginImporter 的 **Preload** 开启，以便在 Unity 创建设备前启用共享扩展；Apple 桥接使用显式注册。替换原生库或更改该设置后重启 Editor。Windows/Apple 桥接 ABI 为 2，Linux/Android 为 3。D3D12 需要 Unity D3D12 V8 插件接口和支持共享 fence 的驱动；OpenGL 需要 WGL_NV_DX_interop2；Windows Vulkan 需要 Win32 外部内存与 keyed mutex。Inspector 显示失败原因，RequireHardwareDecoding 决定报错还是回退。
+
+Linux 路径按 Vulkan 物理设备的 DRM render node 创建 VAAPI 解码设备，使用 `AV_HWFRAME_MAP_READ | AV_HWFRAME_MAP_DIRECT` 导出 DMA-BUF；解码完成同步在工作线程等待，不映射视频像素。需要系统提供对应显卡的 VAAPI 驱动、DRM render node 访问权限，以及 Vulkan DMA-BUF、DRM modifier、foreign queue 扩展。播放器随库打包 libva/libdrm，不打包显卡驱动。目前硬件转换支持 8-bit NV12 SDR BT.601/709；不支持的 P010/HDR 等格式明确失败，严格模式下不回读。
+
+Android GPU 路径需要 API 26+、Vulkan 1.1 与 AHardwareBuffer/外部同步/YCbCr 采样能力。通过 JNI MediaCodec 的硬件 codec 选择器输出到 PRIVATE AImageReader，导入 AHardwareBuffer 和 acquire fence；帧被 GPU 使用完后才归还 reader。API 23–25 仍可加载 FFmpeg 和桥接库，但不能开启这条硬件路径。首版支持 SDR BT.601/709，HDR 不做隐式错误转换。APK 内输入文件需先提取；这只复制编码后的文件，不是解码像素回读。
+
+原生互操作代码在 [Tools/FFmpeg/Native](../../../Tools/FFmpeg/Native)，附有 Unity `PluginAPI` 和 Vulkan 头文件及许可。平台编译与实际设备验证范围见下方测试结果；尤其 Android/Linux Vulkan 的设备兼容性不能由交叉编译结果代替。另见 [Unity 外部纹理文档](https://docs.unity3d.com/6000.3/Documentation/ScriptReference/Texture2D.CreateExternalTexture.html) 和 [FFmpeg 硬件帧接口](https://ffmpeg.org/doxygen/trunk/hwcontext_8h.html)。
+
+## 平台与输入边界
+
+- Windows x86 / x64、Linux x64、Android ARMv7 / ARM64、macOS x64 / ARM64、iOS ARM64；使用各目标的原生库及正确 PluginImporter 设置。当前 Apple 产物最低 macOS 11 / iOS 15，构建需要 macOS 与 Xcode SDK。
+- Android APK/JAR 中的 StreamingAssets 不是普通文件：先通过 UnityWebRequest 复制到 `persistentDataPath` 再打开。普通本地路径、`file://` 和 FFmpeg 构建启用的 URL 协议可以使用；HTTPS 能力取决于构建的 TLS 后端。
+- 默认 I/O 超时 15 秒，探测大小、分析时长和图像大小均有上限。销毁对象通过 AVIO interrupt 中断阻塞 I/O；第三方协议若不检查该回调，工作线程仍需等它返回。
+- 软件路径处理 BT.601 / BT.709 / BT.2020 矩阵和 full/limited range，输出 RGBA8；支持常见 90° 倍数旋转。没有 HDR 色调映射、字幕、DRM 或音轨输出。
+- 这是独立组件，不会自动替换 `BGManager` 或修改既有场景。现有背景播放器可按上述 API 接入；保留原有音频同步方式。
+
+## 验证
+
+[Tools/Tests/FFmpegValidation](../../../Tools/Tests/FFmpegValidation) 包含真实 FFmpeg 解码/seek/EOF/取消/有界队列测试，以及隔离 Unity Player 验证脚本。构建成功、Player 启动成功、纹理互操作通过是不同验收项；实际结果见 [RESULTS.md](../../../Tools/Tests/FFmpegValidation/RESULTS.md)。其他 OS 和移动设备的图形/驱动行为需要在目标设备复验。

@@ -1,0 +1,115 @@
+{
+  "schema": 1,
+  "artifact": "FFmpegUnityBridge.dll",
+  "bridgeAbi": 2,
+  "platform": "Windows",
+  "architecture": "x86_64",
+  "compiler": "LLVM-MinGW 20260922 ucrt, clang 23.1.2",
+  "ffmpegAbi": {
+    "avutil": 61
+  },
+  "sha256": "2a7aef282d3e7a5b26cd96f831513970fd6a4daa76e4887277846cd6d62c64a8",
+  "sources": [
+    {
+      "path": "Tools/FFmpeg/Native/Bridge.cpp",
+      "sha256": "04e0c267d3d11859491f8205c298a126a6305276525efcd761d8a4ea998691b2"
+    },
+    {
+      "path": "Tools/FFmpeg/Native/Bridge.h",
+      "sha256": "2af18ab67e888fa0b9f977d620ff335126f8acdf530cb44df91675a11d63e37c"
+    },
+    {
+      "path": "Tools/FFmpeg/Native/D3D11.cpp",
+      "sha256": "03f7ce3cd24f7cebdb15f5990b76c3637cce3f2b3755ee7146ff5b0a1f427bfe"
+    },
+    {
+      "path": "Tools/FFmpeg/Native/D3D12.cpp",
+      "sha256": "1111dab071131d93d62802a469971efc25e61e3fdfcd1633cbfaede817bc39c1"
+    },
+    {
+      "path": "Tools/FFmpeg/Native/D3D12.h",
+      "sha256": "4fa5e13899a793545712b9caf2c8ffeebd3e7edba4ff2a1ba6dbd38df133f4d5"
+    },
+    {
+      "path": "Tools/FFmpeg/Native/WglInterop.cpp",
+      "sha256": "142f395a2f50d827d1f0cbcdf44c45fc7072a39bf32e05d5bc32e83ab0136534"
+    },
+    {
+      "path": "Tools/FFmpeg/Native/WglInterop.h",
+      "sha256": "7f044ebca6b389eae55a9d697303b86ca998b516ac4b52194efce9aa715ea8bd"
+    },
+    {
+      "path": "Tools/FFmpeg/Native/VulkanInterop.cpp",
+      "sha256": "22ddb09fb37b5f11f765fcae4d41378f8cb339d3f0bd073c0fd56fdedacddb61"
+    },
+    {
+      "path": "Tools/FFmpeg/Native/VulkanInterop.h",
+      "sha256": "a5425c2c48c3fefc8091a42f97e3bac44ba040aecf715a471a87cff8f208c959"
+    },
+    {
+      "path": "Tools/FFmpeg/Native/CMakeLists.txt",
+      "sha256": "adcfb0a44bbc5923d718e7055e5a706c674089d6463eb51c683d60a931edb439"
+    },
+    {
+      "path": "Tools/FFmpeg/Native/ExportsWin32MinGW.def",
+      "sha256": "5c7b2c2167e666d495ceba0181f4df9a7f4e2d80a91ce41e947d3042e6386bbe"
+    },
+    {
+      "path": "Tools/FFmpeg/Native/Unity/IUnityInterface.h",
+      "sha256": "e23e267b57c049b438307542d62c30fbcd3fa77b6dac3b08842eae0df10b8239"
+    },
+    {
+      "path": "Tools/FFmpeg/Native/Unity/IUnityGraphics.h",
+      "sha256": "524ca42ff0274feec5aea17a5275b774ffc1a031bdc9378f3e3eb2be787a7fa6"
+    },
+    {
+      "path": "Tools/FFmpeg/Native/Unity/IUnityGraphicsD3D11.h",
+      "sha256": "873389c2bc367b7ef7be4809059133b692a1c03eb268cfebf5bcb290c511bace"
+    },
+    {
+      "path": "Tools/FFmpeg/Native/Unity/IUnityGraphicsD3D12.h",
+      "sha256": "275bf9e6dc0781255a8b12defa85e4a1cbd4e8327f56f861949c19baf46c525a"
+    },
+    {
+      "path": "Tools/FFmpeg/Native/Unity/IUnityGraphicsVulkan.h",
+      "sha256": "de4c4c2a712ad996371ca9bbf513eff1ae31e68b5bc9548c7af68798a1ff72ea"
+    },
+    {
+      "path": "Tools/FFmpeg/Native/tests/D3D11Smoke.cpp",
+      "sha256": "57da5c1185626d5bcc519b2f65fc42dc419ff0c4dc6c20efb8b2c8902a3f52dd"
+    },
+    {
+      "path": "Tools/FFmpeg/Native/tests/D3D12InteropProbe.cpp",
+      "sha256": "bad358e49b10775b471a83a98c43b05a4420f8f9a30f17290fea7e1b0dd8bf61"
+    },
+    {
+      "path": "Tools/FFmpeg/Native/tests/WglInteropSmoke.cpp",
+      "sha256": "804c7378a5c64258477207924eb524d6da6a6fb3142b3889fc296b2cbfdd6b89"
+    },
+    {
+      "path": "Tools/FFmpeg/Native/tests/VulkanInteropSmoke.cpp",
+      "sha256": "45e0b6d9aa3f517fd343b3e516a7dee9f1f0ad53bc749804e1eae7c7591af56d"
+    },
+    {
+      "sha256": "4167bbc7f5e4fa7e0926384fa3a8fbb12c5ecc7f3a0e94631b108587ef246b78",
+      "path": "Tools/FFmpeg/Native/tests/D3D12Smoke.cpp"
+    }
+  ],
+  "command": "cmake --build Tools/FFmpeg/.build/bridge-win-x64-5e0d2d1fd70d --config Release --parallel 8",
+  "verification": {
+    "date": "2026-10-03",
+    "build": "PASS: CMake current sources; Windows remains ABI 2",
+    "unityHardwarePlayback": "PASS: Mono and IL2CPP, D3D11/D3D12/OpenGL Core/Vulkan; each 18 assertions with hardware required and empty fallback. See Tools/Tests/FFmpegValidation/RESULTS.md."
+  },
+  "previousNativeVerification": {
+    "date": "2026-10-03",
+    "nativeD3D11Smoke": "PASS: NV12 array slice 1, white255/black0, AVFrame GPU completion lifetime, reserved event ID",
+    "nativeD3D12Probe": "PASS: NV12 VPP -> sharedRGBA -> D3D12 fence wait and GPU copy, white255/black0",
+    "nativeWglProbe": "PASS: 3 ownership/storage variants, 10 iterations each, NV12 conversion, incorrect context rejection, deferred cleanup",
+    "nativeVulkanProbe": "PASS: 16 frames, 196608 exact bytes, keyed-mutex GPU copy and deferred caller-release lifetime",
+    "unityHardwarePlayback": "See Tools/Tests/FFmpegValidation/RESULTS.md for final source/binary Unity Player validation",
+    "dependencies": "avutil-61.dll and Windows system/UCRT libraries; no external C++ runtime DLL",
+    "exports": "Cdecl ffu exports; plain and decorated x86 Unity lifecycle aliases",
+    "nativeD3D12LinkedSmoke": "PASS: actual linked bridge, 4 completed packets + 1 cancellation, AVFrame retirement, white255/black0"
+  }
+}

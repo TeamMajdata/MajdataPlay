@@ -1,0 +1,84 @@
+{
+  "target": "ios-arm64",
+  "source": {
+    "repository": "https://github.com/FFmpeg/FFmpeg.git",
+    "tag": "n9.0.1",
+    "commit": "bf1b838f2ab88b4f8fd83443325c782ea0e0f7fa",
+    "abi": {
+      "avcodec": 63,
+      "avdevice": 63,
+      "avfilter": 12,
+      "avformat": 63,
+      "avutil": 61,
+      "swresample": 7,
+      "swscale": 10
+    },
+    "bindingHeaders": "ThirdParty/FFmpeg.AutoGen/FFmpeg/include",
+    "note": "All upstream public headers present in the binding header snapshot are compared after CRLF normalization before building. Generated avconfig.h and ffversion.h are excluded."
+  },
+  "host": "macOS-27.0.1-arm64-arm-64bit-Mach-O",
+  "builtUtc": "2026-10-03T13:50:49.622293+00:00",
+  "configure": [
+    "--prefix=/Users/codex/codex-work/majdata-ffmpeg-20261003/Tools/FFmpeg/.build/install/ios-arm64",
+    "--disable-doc",
+    "--disable-programs",
+    "--disable-debug",
+    "--disable-autodetect",
+    "--disable-encoders",
+    "--disable-muxers",
+    "--disable-filters",
+    "--disable-devices",
+    "--enable-pic",
+    "--disable-gpl",
+    "--disable-nonfree",
+    "--disable-shared",
+    "--enable-static",
+    "--target-os=darwin",
+    "--enable-cross-compile",
+    "--arch=aarch64",
+    "--cc=/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang",
+    "--sysroot=/Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS27.0.sdk",
+    "--extra-cflags=-target arm64-apple-ios15.0",
+    "--extra-ldflags=-target arm64-apple-ios15.0",
+    "--enable-videotoolbox",
+    "--enable-audiotoolbox",
+    "--enable-securetransport"
+  ],
+  "files": [
+    {
+      "file": "libavcodec.a",
+      "bytes": 14981208,
+      "sha256": "638adc518c1e49e3b32050ef2fba55fe6c14c3c999239b64a534ecad9764d760"
+    },
+    {
+      "file": "libavdevice.a",
+      "bytes": 9440,
+      "sha256": "990cff1e3370dee985edc068b811555f49f1f19efb342c3358e98a5eba516a90"
+    },
+    {
+      "file": "libavfilter.a",
+      "bytes": 213536,
+      "sha256": "cc1623ba144d9f32caf814b3e186c6aed6106139e5aed61e76b70da84886b1c8"
+    },
+    {
+      "file": "libavformat.a",
+      "bytes": 3160864,
+      "sha256": "2a0914c500d90b1a9515e09a86d96180597624baa4f41c4374f2550c25d75b82"
+    },
+    {
+      "file": "libavutil.a",
+      "bytes": 1036736,
+      "sha256": "c7232b748b4e6b5ef51003a2a748de8c88bd57ce97fd1ecb9d2930c8c7212467"
+    },
+    {
+      "file": "libswresample.a",
+      "bytes": 131648,
+      "sha256": "9fb5c9ecc0310307408ec4377b078db379fcd1673406ad1aaaa354bd45535b61"
+    },
+    {
+      "file": "libswscale.a",
+      "bytes": 1611776,
+      "sha256": "bbead8b0ce970ec10d3a20727af356f0309ee9193d6f21861e7c102aeff908c6"
+    }
+  ]
+}

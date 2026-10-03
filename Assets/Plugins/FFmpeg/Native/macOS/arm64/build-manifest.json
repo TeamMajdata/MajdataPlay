@@ -1,0 +1,85 @@
+{
+  "target": "macos-arm64",
+  "source": {
+    "repository": "https://github.com/FFmpeg/FFmpeg.git",
+    "tag": "n9.0.1",
+    "commit": "bf1b838f2ab88b4f8fd83443325c782ea0e0f7fa",
+    "abi": {
+      "avcodec": 63,
+      "avdevice": 63,
+      "avfilter": 12,
+      "avformat": 63,
+      "avutil": 61,
+      "swresample": 7,
+      "swscale": 10
+    },
+    "bindingHeaders": "ThirdParty/FFmpeg.AutoGen/FFmpeg/include",
+    "note": "All upstream public headers present in the binding header snapshot are compared after CRLF normalization before building. Generated avconfig.h and ffversion.h are excluded."
+  },
+  "host": "macOS-27.0.1-arm64-arm-64bit-Mach-O",
+  "builtUtc": "2026-10-03T13:28:18.451538+00:00",
+  "configure": [
+    "--prefix=/Users/codex/codex-work/majdata-ffmpeg-20261003/Tools/FFmpeg/.build/install/macos-arm64",
+    "--disable-doc",
+    "--disable-programs",
+    "--disable-debug",
+    "--disable-autodetect",
+    "--disable-encoders",
+    "--disable-muxers",
+    "--disable-filters",
+    "--disable-devices",
+    "--enable-pic",
+    "--disable-gpl",
+    "--disable-nonfree",
+    "--enable-shared",
+    "--disable-static",
+    "--target-os=darwin",
+    "--enable-cross-compile",
+    "--arch=aarch64",
+    "--cc=/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang",
+    "--sysroot=/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX27.0.sdk",
+    "--extra-cflags=-target arm64-apple-macos11.0",
+    "--extra-ldflags=-target arm64-apple-macos11.0",
+    "--enable-videotoolbox",
+    "--enable-audiotoolbox",
+    "--enable-securetransport",
+    "--install-name-dir=@loader_path"
+  ],
+  "files": [
+    {
+      "file": "libavcodec.63.dylib",
+      "bytes": 11485672,
+      "sha256": "e95c6612c3a52640fb88d999782b3b94813cc2d2795e6a4a4c1f580bec82aef6"
+    },
+    {
+      "file": "libavdevice.63.dylib",
+      "bytes": 52232,
+      "sha256": "805a1c91d7a98d7f4b66a6a4d79fcf7bf6092b666d4be88b61f0ddb65345979c"
+    },
+    {
+      "file": "libavfilter.12.dylib",
+      "bytes": 183864,
+      "sha256": "345849e580110f4942e9e70617ce4df4620d74c1a2aa85f4b9145565f0516f40"
+    },
+    {
+      "file": "libavformat.63.dylib",
+      "bytes": 1802856,
+      "sha256": "711461241cb8471cbbaf0d52b8ff36eab3076c5ae58cfba36dbeeadf88c738bd"
+    },
+    {
+      "file": "libavutil.61.dylib",
+      "bytes": 744840,
+      "sha256": "1349a60cae4d9204682f8b6a3c97c07fcc403d62b3fdcbc64cb6fbf35893e21a"
+    },
+    {
+      "file": "libswresample.7.dylib",
+      "bytes": 120312,
+      "sha256": "88a2ccca8195e37dc4a4166eff3cd964121df2b35acc3feaf93f6e99faa8675b"
+    },
+    {
+      "file": "libswscale.10.dylib",
+      "bytes": 1218376,
+      "sha256": "cc9b8983578274a297570c043ff34740525da34742db5ab5f77f3ff26e5f9a2b"
+    }
+  ]
+}

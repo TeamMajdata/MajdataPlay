@@ -1,0 +1,87 @@
+{
+  "target": "android-arm64",
+  "source": {
+    "repository": "https://github.com/FFmpeg/FFmpeg.git",
+    "tag": "n9.0.1",
+    "commit": "bf1b838f2ab88b4f8fd83443325c782ea0e0f7fa",
+    "abi": {
+      "avcodec": 63,
+      "avdevice": 63,
+      "avfilter": 12,
+      "avformat": 63,
+      "avutil": 61,
+      "swresample": 7,
+      "swscale": 10
+    },
+    "bindingHeaders": "ThirdParty/FFmpeg.AutoGen/FFmpeg/include",
+    "note": "All upstream public headers present in the binding header snapshot are compared after CRLF normalization before building. Generated avconfig.h and ffversion.h are excluded."
+  },
+  "host": "Linux-6.18.40.1-microsoft-standard-WSL2-x86_64-with-glibc2.39",
+  "builtUtc": "2026-10-03T10:10:01.504427+00:00",
+  "configure": [
+    "--prefix=/tmp/majdata-ffmpeg-build/install/android-arm64",
+    "--disable-doc",
+    "--disable-programs",
+    "--disable-debug",
+    "--disable-autodetect",
+    "--disable-encoders",
+    "--disable-muxers",
+    "--disable-filters",
+    "--disable-devices",
+    "--enable-pic",
+    "--disable-gpl",
+    "--disable-nonfree",
+    "--enable-shared",
+    "--disable-static",
+    "--target-os=android",
+    "--enable-cross-compile",
+    "--arch=aarch64",
+    "--cc=clang --target=aarch64-linux-android23",
+    "--cxx=clang++ --target=aarch64-linux-android23",
+    "--ar=llvm-ar",
+    "--ranlib=llvm-ranlib",
+    "--nm=llvm-nm",
+    "--strip=llvm-strip",
+    "--sysroot=/tmp/majdata-ffmpeg-build/toolchains/android-ndk-r27c/toolchains/llvm/prebuilt/linux-x86_64/sysroot",
+    "--enable-jni",
+    "--enable-mediacodec",
+    "--extra-ldflags=-Wl,-z,max-page-size=16384"
+  ],
+  "files": [
+    {
+      "file": "libavcodec.so",
+      "bytes": 11140208,
+      "sha256": "3151d4887b00a5c8f4c9881a7970ed18fd1327836d1e60ff7cd0832485bcee3c"
+    },
+    {
+      "file": "libavdevice.so",
+      "bytes": 8688,
+      "sha256": "e983eda89f552ebb7c28c1bc587a42c18336a256d4056c7301ca24a501ec7608"
+    },
+    {
+      "file": "libavfilter.so",
+      "bytes": 137784,
+      "sha256": "975ca34b25caee9c9d14697fd959b3fb3f8cda33f801b275c17a8663e4dd998d"
+    },
+    {
+      "file": "libavformat.so",
+      "bytes": 1840872,
+      "sha256": "429af20f1ab03f350d42c8f38e6c1ea8256637e3a014bea91526cca3c7441b77"
+    },
+    {
+      "file": "libavutil.so",
+      "bytes": 739560,
+      "sha256": "921aaf50133d76a19d5e238df8009de65a1f5acb28dfb183b8b2f8e8b5f4b5d2"
+    },
+    {
+      "file": "libswresample.so",
+      "bytes": 97336,
+      "sha256": "95aef49910aad94731ecd02dcbd8cd0d96ef332564068af700ad3fcafd8be0bb"
+    },
+    {
+      "file": "libswscale.so",
+      "bytes": 1240056,
+      "sha256": "da401de2695549de50ddc65685725d3d13faf641db48c8c8f402bc30f6543c6f"
+    }
+  ]
+}

@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net9.0</TargetFramework>
+    <LangVersion>9</LangVersion>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <DefineConstants>UNITY_EDITOR;UNITY_EDITOR_WIN;UNITY_STANDALONE_WIN</DefineConstants>
+    <UnityEditor Condition="'$(UnityEditor)' == ''">C:/Program Files/Unity Editors/6000.3.17f1/Editor</UnityEditor>
+    <RestoreSources>$(MSBuildThisFileDirectory)</RestoreSources>
+    <NuGetAudit>false</NuGetAudit>
+    <NoWarn>$(NoWarn);8981;0108;0169</NoWarn>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="Program.cs" />
+    <Compile Include="ConverterChecks.cs" />
+    <Compile Include="../../../Assets/Plugins/FFmpeg/Runtime/**/*.cs" />
+    <Compile Include="../../../ThirdParty/FFmpeg.AutoGen/Unity/Runtime/**/*.cs" />
+    <Reference Include="UnityEngine.CoreModule"><HintPath>$(UnityEditor)/Data/Managed/UnityEngine/UnityEngine.CoreModule.dll</HintPath></Reference>
+    <Reference Include="UnityEngine.ImageConversionModule"><HintPath>$(UnityEditor)/Data/Managed/UnityEngine/UnityEngine.ImageConversionModule.dll</HintPath></Reference>
+    <Reference Include="UnityEngine.AndroidJNIModule"><HintPath>$(UnityEditor)/Data/Managed/UnityEngine/UnityEngine.AndroidJNIModule.dll</HintPath></Reference>
+  </ItemGroup>
+</Project>

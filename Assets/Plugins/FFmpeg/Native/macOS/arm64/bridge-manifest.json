@@ -1,0 +1,63 @@
+{
+  "target": "macos-arm64",
+  "host": "macOS-27.0.1-arm64-arm-64bit-Mach-O",
+  "builtUtc": "2026-10-03T13:58:57.623142+00:00",
+  "cmake": [
+    "/opt/homebrew/Cellar/cmake/4.4.2/bin/cmake",
+    "-S",
+    "/Users/codex/codex-work/majdata-ffmpeg-20261003/Tools/FFmpeg/Native",
+    "-B",
+    "/Users/codex/codex-work/majdata-ffmpeg-20261003/Tools/FFmpeg/.build/bridge-macos-arm64-983cc8a7df61",
+    "-DCMAKE_BUILD_TYPE=Release",
+    "-DFFMPEG_ROOT=/Users/codex/codex-work/majdata-ffmpeg-20261003/Tools/FFmpeg/.build/install/macos-arm64",
+    "-G",
+    "Ninja",
+    "-DCMAKE_MAKE_PROGRAM=/opt/homebrew/Cellar/ninja/1.13.2/bin/ninja",
+    "-DCMAKE_OSX_ARCHITECTURES=arm64",
+    "-DCMAKE_OSX_DEPLOYMENT_TARGET=11.0"
+  ],
+  "files": [
+    {
+      "file": "libFFmpegUnityBridge.dylib",
+      "sha256": "6636ae992adbfde91c3f77a2f4c8b8143c756da7d41c5e44e6bfc2f55ba6f687",
+      "bytes": 72696
+    }
+  ],
+  "sourceSha256": {
+    "Bridge.h": "2af18ab67e888fa0b9f977d620ff335126f8acdf530cb44df91675a11d63e37c",
+    "CMakeLists.txt": "adcfb0a44bbc5923d718e7055e5a706c674089d6463eb51c683d60a931edb439",
+    "RegisterPlugin.mm": "202747f522bb2001da360cf0f179de0bb0a27cde6f617ce4642aa65b3806f4e3",
+    "VulkanInterop.h": "a5425c2c48c3fefc8091a42f97e3bac44ba040aecf715a471a87cff8f208c959",
+    "WglInterop.h": "7f044ebca6b389eae55a9d697303b86ca998b516ac4b52194efce9aa715ea8bd",
+    "WglInterop.cpp": "142f395a2f50d827d1f0cbcdf44c45fc7072a39bf32e05d5bc32e83ab0136534",
+    "Metal.mm": "2b719df892d8e8434961a7029c541c270a3aedc6cee53d1609891ab11d6a8d1d",
+    "D3D12.h": "4fa5e13899a793545712b9caf2c8ffeebd3e7edba4ff2a1ba6dbd38df133f4d5",
+    "Bridge.cpp": "04e0c267d3d11859491f8205c298a126a6305276525efcd761d8a4ea998691b2",
+    "D3D12.cpp": "1111dab071131d93d62802a469971efc25e61e3fdfcd1633cbfaede817bc39c1",
+    "D3D11.cpp": "03f7ce3cd24f7cebdb15f5990b76c3637cce3f2b3755ee7146ff5b0a1f427bfe",
+    "VulkanInterop.cpp": "22ddb09fb37b5f11f765fcae4d41378f8cb339d3f0bd073c0fd56fdedacddb61",
+    "Unity/IUnityInterface.h": "e23e267b57c049b438307542d62c30fbcd3fa77b6dac3b08842eae0df10b8239",
+    "Unity/IUnityGraphicsD3D12.h": "275bf9e6dc0781255a8b12defa85e4a1cbd4e8327f56f861949c19baf46c525a",
+    "Unity/IUnityGraphics.h": "524ca42ff0274feec5aea17a5275b774ffc1a031bdc9378f3e3eb2be787a7fa6",
+    "Unity/IUnityGraphicsVulkan.h": "de4c4c2a712ad996371ca9bbf513eff1ae31e68b5bc9548c7af68798a1ff72ea",
+    "Unity/IUnityGraphicsMetal.h": "7d56510757a1f1c1653137d1f901c14a132779841f03427dcfa20efdca521090",
+    "Unity/IUnityGraphicsD3D11.h": "873389c2bc367b7ef7be4809059133b692a1c03eb268cfebf5bcb290c511bace",
+    "tests/VulkanInteropSmoke.cpp": "45e0b6d9aa3f517fd343b3e516a7dee9f1f0ad53bc749804e1eae7c7591af56d",
+    "tests/D3D12Smoke.cpp": "4167bbc7f5e4fa7e0926384fa3a8fbb12c5ecc7f3a0e94631b108587ef246b78",
+    "tests/WglInteropSmoke.cpp": "804c7378a5c64258477207924eb524d6da6a6fb3142b3889fc296b2cbfdd6b89",
+    "tests/MetalSmoke.mm": "eff004f101bda277fc0a37a451d6ac9e1d2d491d78546832f64503a9c43f6296",
+    "tests/D3D12InteropProbe.cpp": "bad358e49b10775b471a83a98c43b05a4420f8f9a30f17290fea7e1b0dd8bf61",
+    "tests/D3D11Smoke.cpp": "57da5c1185626d5bcc519b2f65fc42dc419ff0c4dc6c20efb8b2c8902a3f52dd",
+    "ThirdParty/Vulkan-Headers/include/vk_video/vulkan_video_codec_h264std.h": "072ee6eac80e73d93bb4bfe0059f99e581fc8b55b1437236185bb4ff377914b1",
+    "ThirdParty/Vulkan-Headers/include/vk_video/vulkan_video_codec_h265std.h": "0cbdfd6c45ee8ca902e9c961cd7e49a4d601d443ea0ef2a60a8496b127ed397c",
+    "ThirdParty/Vulkan-Headers/include/vk_video/vulkan_video_codec_h264std_decode.h": "e1708b3996a740eeedb79f51d0f0e379f9bcae13566538375acaf73301023b58",
+    "ThirdParty/Vulkan-Headers/include/vk_video/vulkan_video_codec_h264std_encode.h": "052a6e357be8d88bf4be0db1b3da5a9cc1a6011cf4b3533759ff588e1e26f9f1",
+    "ThirdParty/Vulkan-Headers/include/vk_video/vulkan_video_codecs_common.h": "78cf3c99d3d57afa7ab1782ec6018b4bcdbe273f2843d76e3375282db875b71e",
+    "ThirdParty/Vulkan-Headers/include/vk_video/vulkan_video_codec_h265std_encode.h": "7239f9f4e811546639111e562a8be1ec73ad5bef1c23d5fad80889f35e125e9c",
+    "ThirdParty/Vulkan-Headers/include/vk_video/vulkan_video_codec_h265std_decode.h": "800946aa19d83d305d504e2e4141bc938f989e0cf8872cef97480238eefef1ea",
+    "ThirdParty/Vulkan-Headers/include/vulkan/vulkan.h": "52297513cc6b6cc8db2921aa849f72e3f55d678b3a58a2c3eb297c02ded7a837",
+    "ThirdParty/Vulkan-Headers/include/vulkan/vk_platform.h": "c4cabbcf699c90cde344095ae54da9435d117951aad114ba3a540c5997d7906f",
+    "ThirdParty/Vulkan-Headers/include/vulkan/vulkan_win32.h": "fa3a9263d1764b82b634180ec5d3010adc216108bae11c02b157f733073f87f8",
+    "ThirdParty/Vulkan-Headers/include/vulkan/vulkan_core.h": "3dba3ef8adaff8f24e9080e74d365fc64b5fe53ec8bda607c29c103e15888fcf"
+  }
+}

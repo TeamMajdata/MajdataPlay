@@ -1,0 +1,8 @@
+{
+  "repository": "https://github.com/FFmpeg/FFmpeg.git",
+  "tag": "n9.0.1",
+  "commit": "bf1b838f2ab88b4f8fd83443325c782ea0e0f7fa",
+  "abi": {"avcodec":63,"avdevice":63,"avfilter":12,"avformat":63,"avutil":61,"swresample":7,"swscale":10},
+  "bindingHeaders": "ThirdParty/FFmpeg.AutoGen/FFmpeg/include",
+  "note": "All upstream public headers present in the binding header snapshot are compared after CRLF normalization before building. Generated avconfig.h and ffversion.h are excluded."
+}

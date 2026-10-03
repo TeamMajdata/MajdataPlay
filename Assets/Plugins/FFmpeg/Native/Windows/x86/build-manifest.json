@@ -1,0 +1,83 @@
+{
+  "target": "win-x86",
+  "source": {
+    "repository": "https://github.com/FFmpeg/FFmpeg.git",
+    "tag": "n9.0.1",
+    "commit": "bf1b838f2ab88b4f8fd83443325c782ea0e0f7fa",
+    "abi": {
+      "avcodec": 63,
+      "avdevice": 63,
+      "avfilter": 12,
+      "avformat": 63,
+      "avutil": 61,
+      "swresample": 7,
+      "swscale": 10
+    },
+    "bindingHeaders": "ThirdParty/FFmpeg.AutoGen/FFmpeg/include",
+    "note": "All upstream public headers present in the binding header snapshot are compared after CRLF normalization before building. Generated avconfig.h and ffversion.h are excluded."
+  },
+  "host": "Linux-6.18.40.1-microsoft-standard-WSL2-x86_64-with-glibc2.39",
+  "builtUtc": "2026-10-03T10:17:07.490146+00:00",
+  "configure": [
+    "--prefix=/tmp/majdata-ffmpeg-build/install/win-x86",
+    "--disable-doc",
+    "--disable-programs",
+    "--disable-debug",
+    "--disable-autodetect",
+    "--disable-encoders",
+    "--disable-muxers",
+    "--disable-filters",
+    "--disable-devices",
+    "--enable-pic",
+    "--disable-gpl",
+    "--disable-nonfree",
+    "--enable-shared",
+    "--disable-static",
+    "--cross-prefix=i686-w64-mingw32-",
+    "--extra-ldflags=-static-libgcc",
+    "--target-os=mingw32",
+    "--arch=x86",
+    "--enable-cross-compile",
+    "--enable-w32threads",
+    "--enable-d3d11va",
+    "--enable-dxva2",
+    "--enable-schannel"
+  ],
+  "files": [
+    {
+      "file": "avcodec-63.dll",
+      "bytes": 12824078,
+      "sha256": "5a5100db6219f1da76f318423c3cb25fee1d01c4f5b8e4d4a38a853309c6add9"
+    },
+    {
+      "file": "avdevice-63.dll",
+      "bytes": 17934,
+      "sha256": "a228ce394d738af3fcd03181eb9fc4ddb2b6d51abdfcb21afc8c41fdebd35d45"
+    },
+    {
+      "file": "avfilter-12.dll",
+      "bytes": 167950,
+      "sha256": "10baf7d1531c18aeb9c192b04db552e44e666016b61d5da58b6b935f13488fdf"
+    },
+    {
+      "file": "avformat-63.dll",
+      "bytes": 2141198,
+      "sha256": "e1f526e1fb92e2b1360c34f37b7226a6531f8443955e72afc32766897b022a99"
+    },
+    {
+      "file": "avutil-61.dll",
+      "bytes": 965134,
+      "sha256": "1a3b171b15ca571a636b00952e73109ae780020ba4d3ab0c766818a8d7272733"
+    },
+    {
+      "file": "swresample-7.dll",
+      "bytes": 128526,
+      "sha256": "7870092ce48bba2d3b966b6e5b25d8295f36df5c7acd2a1f728bb27618dfcff4"
+    },
+    {
+      "file": "swscale-10.dll",
+      "bytes": 937486,
+      "sha256": "8c789179d640209a3e0c31a722b27ef403b2d9c063aaf3e699b7b1ae377e0a88"
+    }
+  ]
+}

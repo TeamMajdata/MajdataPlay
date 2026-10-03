@@ -1,0 +1,6 @@
+LIBRARY FFmpegUnityBridge
+EXPORTS
+    UnityPluginLoad=UnityPluginLoad@4
+    "_UnityPluginLoad@4"=UnityPluginLoad@4
+    UnityPluginUnload=UnityPluginUnload@0
+    "_UnityPluginUnload@0"=UnityPluginUnload@0
