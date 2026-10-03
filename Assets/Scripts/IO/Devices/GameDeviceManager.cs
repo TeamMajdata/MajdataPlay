@@ -18,7 +18,10 @@ namespace MajdataPlay.IO
 
         public static void Init()
         {
-            if (_initialized) return;
+            if (_initialized)
+            {
+                return;
+            }
             _initialized = true;
 #if UNITY_STANDALONE
             var input = MajEnv.Settings.IO.InputDevice;
@@ -29,9 +32,18 @@ namespace MajdataPlay.IO
                 if (input.ButtonRing.Enable || input.TouchPanel.Enable || output.Led.Enable)
                 {
                     var device = new DaoCompositeDevice(output.Led.Enable);
-                    if (input.ButtonRing.Enable) ButtonRing = device;
-                    if (input.TouchPanel.Enable) TouchPanel = device;
-                    if (output.Led.Enable) LedDevice = device;
+                    if (input.ButtonRing.Enable)
+                    {
+                        ButtonRing = device;
+                    }
+                    if (input.TouchPanel.Enable)
+                    {
+                        TouchPanel = device;
+                    }
+                    if (output.Led.Enable)
+                    {
+                        LedDevice = device;
+                    }
                 }
             }
             else
@@ -94,22 +106,38 @@ namespace MajdataPlay.IO
             Register(MouseTouchPanel);
 #if UNITY_STANDALONE
             foreach (var device in _devices)
-                if (device is IODevice io) io.Start();
+            {
+                if (device is IODevice io)
+                {
+                    io.Start();
+                }
+            }
 #endif
         }
 
         static void Register(IGameDevice? device)
         {
-            if (device == null) return;
+            if (device == null)
+            {
+                return;
+            }
             foreach (var registered in _devices)
-                if (ReferenceEquals(registered, device)) return;
+            {
+                if (ReferenceEquals(registered, device))
+                {
+                    return;
+                }
+            }
             _devices.Add(device);
         }
 
         public static void OnPreUpdate()
         {
             // Snapshot each device once even when several facades consume it.
-            foreach (var device in _devices) device.OnPreUpdate();
+            foreach (var device in _devices)
+            {
+                device.OnPreUpdate();
+            }
         }
 
     }

@@ -57,6 +57,7 @@ namespace MajdataPlay
         public const float FRAME_LENGTH_MSEC = FRAME_LENGTH_SEC * 1000;
 
         public const int IO_DEVICE_RECONNECT_INTERVAL_MSEC = 2000;
+        public const int IO_DEVICE_RECONNECT_MAX_RETRIES = 5;
 
         public const int ONLINE_RESPONSE_CACHE_TTL_SEC = 30 * 60;
 

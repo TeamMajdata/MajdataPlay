@@ -1,4 +1,5 @@
 using MajdataPlay.Diagnostics;
+using MajdataPlay.Runtime;
 using MajdataPlay.Threading;
 using System;
 using System.Diagnostics;
@@ -20,11 +21,11 @@ namespace MajdataPlay.IO
         protected virtual string DaemonThreadName => $"IO/{GetType().Name} Thread";
         protected virtual TimeSpan PollingInterval => TimeSpan.Zero;
 
-        readonly object _lifetimeLock = new();
-        CancellationTokenSource? _cancellationSource;
-        Thread? _daemon;
-        int _isConnected;
-        bool _isDisposed;
+        private readonly object _lifetimeLock = new();
+        private CancellationTokenSource? _cancellationSource;
+        private Thread? _daemon;
+        private int _isConnected;
+        private bool _isDisposed;
 
         public void Start()
         {
@@ -83,6 +84,11 @@ namespace MajdataPlay.IO
 
         void Run(CancellationToken token, TaskCompletionSource<bool> completion)
         {
+            var daemonThread = DaemonThreadName;
+            var reconnectAttempt = 0;
+            MajDebug.LogInfo("IO", $"[{daemonThread}]Starting IO device daemon");
+            MajDebug.LogInfo("IO", $"[{daemonThread}]Managed thread id: {Thread.CurrentThread.ManagedThreadId}");
+            MajDebug.LogInfo("IO", $"[{daemonThread}]Native thread id: {PlatformInfo.GetCurrentOSThreadId()}");
             try
             {
                 using (token.Register(DisconnectSafely))
@@ -91,8 +97,11 @@ namespace MajdataPlay.IO
                     {
                         try
                         {
+                            MajDebug.LogInfo("IO", $"[{daemonThread}]Attempting to connect to device");
                             if (Connect(token))
                             {
+                                MajDebug.LogInfo("IO", $"[{daemonThread}]Connected to device");
+                                reconnectAttempt = 0;
                                 token.ThrowIfCancellationRequested();
                                 IsConnected = true;
                                 while (!token.IsCancellationRequested)
@@ -110,6 +119,10 @@ namespace MajdataPlay.IO
                                     }
                                 }
                             }
+                            else
+                            {
+                                MajDebug.LogError("IO", $"[{daemonThread}]Failed to connect to device");
+                            }
                         }
                         catch (OperationCanceledException) when (token.IsCancellationRequested)
                         {
@@ -119,27 +132,38 @@ namespace MajdataPlay.IO
                         {
                             if (!token.IsCancellationRequested)
                             {
-                                MajDebug.LogError(GetType().Name, e);
+                                MajDebug.LogError("IO", $"[{daemonThread}]Error occurred while updating device:\n{e}");
                             }
                         }
                         finally
                         {
+                            if (IsConnected)
+                            {
+                                MajDebug.LogWarning("IO", $"[{daemonThread}]Device update loop exited");
+                            }
                             IsConnected = false;
                             DisconnectSafely();
+                            MajDebug.LogInfo("IO", $"[{daemonThread}]Disconnected from device");
                             try
                             {
                                 OnDisconnected();
                             }
                             catch (Exception e)
                             {
-                                MajDebug.LogError(GetType().Name, e);
+                                MajDebug.LogError("IO", $"[{daemonThread}]Error occurred while handling disconnection:\n{e}");
                             }
                         }
 
-                        if (token.WaitHandle.WaitOne(MajEnv.IO_DEVICE_RECONNECT_INTERVAL_MSEC))
+                        if(reconnectAttempt >= MajEnv.IO_DEVICE_RECONNECT_MAX_RETRIES)
+                        {
+                            MajDebug.LogError("IO", $"[{daemonThread}]Reached maximum reconnect attempts ({MajEnv.IO_DEVICE_RECONNECT_MAX_RETRIES})");
+                            break;
+                        }
+                        else if (token.WaitHandle.WaitOne(MajEnv.IO_DEVICE_RECONNECT_INTERVAL_MSEC))
                         {
                             break;
                         }
+                        reconnectAttempt++;
                     }
                 }
             }
@@ -163,7 +187,7 @@ namespace MajdataPlay.IO
             }
             catch (Exception e)
             {
-                MajDebug.LogError(GetType().Name, e);
+                MajDebug.LogError("IO", $"[{DaemonThreadName}]Error occurred while disconnecting device:\n{e}");
             }
         }
 
