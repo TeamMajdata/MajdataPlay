@@ -1,17 +1,18 @@
 using System;
+using System.Threading;
 
 namespace MajdataPlay.IO
 {
     /// <summary>Separates live I/O state from a frame snapshot while retaining short pulses.</summary>
     internal sealed class InputStateBuffer
     {
-        readonly object _sync = new();
-        readonly bool[] _current;
-        readonly bool[] _pendingOn;
-        readonly bool[] _pendingOff;
-        readonly bool[] _states;
-        readonly bool[] _hadOn;
-        readonly bool[] _hadOff;
+        private SpinLock _sync = new();
+        private readonly bool[] _current;
+        private readonly bool[] _pendingOn;
+        private readonly bool[] _pendingOff;
+        private readonly bool[] _states;
+        private readonly bool[] _hadOn;
+        private readonly bool[] _hadOff;
 
         public InputStateBuffer(int count)
         {
@@ -33,7 +34,7 @@ namespace MajdataPlay.IO
             {
                 throw new ArgumentException("The number of states must match the device.", nameof(states));
             }
-            lock (_sync)
+            using (AcquireLock())
             {
                 for (var i = 0; i < states.Length; i++)
                 {
@@ -47,7 +48,7 @@ namespace MajdataPlay.IO
 
         public void Clear()
         {
-            lock (_sync)
+            using (AcquireLock())
             {
                 _current.AsSpan().Clear();
                 for (var i = 0; i < _pendingOff.Length; i++)
@@ -59,7 +60,7 @@ namespace MajdataPlay.IO
 
         public void OnPreUpdate()
         {
-            lock (_sync)
+            using (AcquireLock())
             {
                 _current.AsSpan().CopyTo(_states);
                 _pendingOn.AsSpan().CopyTo(_hadOn);
@@ -75,7 +76,7 @@ namespace MajdataPlay.IO
             {
                 throw new ArgumentException("The destination spans must fit all device states.");
             }
-            lock (_sync)
+            using (AcquireLock())
             {
                 _states.AsSpan().CopyTo(states);
                 _hadOn.AsSpan().CopyTo(hadOn);
@@ -85,9 +86,46 @@ namespace MajdataPlay.IO
 
         public bool IsCurrentlyOn(int index)
         {
-            lock (_sync)
+            using (AcquireLock())
             {
                 return index >= 0 && index < _current.Length && _current[index];
+            }
+        }
+
+        private DisposableLock AcquireLock()
+        {
+            return new DisposableLock(this);
+        }
+        private readonly ref struct DisposableLock
+        {
+            private readonly bool _isLocked;
+            private readonly InputStateBuffer _buffer;
+            
+            public DisposableLock(InputStateBuffer buffer)
+            {
+                _buffer = buffer;
+                ref var sync = ref buffer._sync;
+                var isLocked = false;
+                try
+                {
+                    sync.Enter(ref isLocked);
+                }
+                catch
+                {
+                    if (isLocked)
+                    {
+                        sync.Exit();
+                    }
+                    throw;
+                }
+                _isLocked = isLocked;
+            }
+            public void Dispose()
+            {
+                if(_isLocked)
+                {
+                    _buffer._sync.Exit();
+                }
             }
         }
     }
