@@ -7,7 +7,7 @@ using System.IO;
 using UnityEngine;
 using UnityEngine.Serialization;
 
-namespace MajdataPlay.Scenes.Title
+namespace MajdataPlay.UI
 {
     public class LoadVideoFromSA : MonoBehaviour
     {
