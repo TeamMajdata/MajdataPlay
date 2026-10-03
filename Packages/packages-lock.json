@@ -418,6 +418,12 @@
       },
       "url": "https://packages.unity.com"
     },
+    "net.majdata.ffmpeg-autogen": {
+      "version": "file:../ThirdParty/FFmpeg.AutoGen/Unity",
+      "depth": 0,
+      "source": "local",
+      "dependencies": {}
+    },
     "unity-missing-scripts-finder": {
       "version": "https://github.com/RimuruDev/Unity-MissingScriptsFinder.git",
       "depth": 0,

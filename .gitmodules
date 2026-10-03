@@ -13,3 +13,6 @@
 [submodule "Assets/Plugins/MajRadar"]
 	path = Assets/Plugins/MajRadar
 	url = https://github.com/TeamMajdata/MajRadar
+[submodule "Assets/Plugins/FFmpeg.AutoGen"]
+	path = ThirdParty/FFmpeg.AutoGen
+	url = https://github.com/TeamMajdata/FFmpeg.AutoGen.git
