@@ -4,6 +4,7 @@ using System.Runtime.InteropServices;
 using MajdataPlay.FFmpeg.Internal;
 using UnityEngine;
 using UnityEngine.Rendering;
+using FFmpeg.AutoGen;
 
 namespace MajdataPlay.FFmpeg.Interop
 {
@@ -14,17 +15,21 @@ namespace MajdataPlay.FFmpeg.Interop
     /// </summary>
     internal sealed class HardwareVideoPresenter : IDisposable
     {
-        const int D3D11Capability = 1, MetalCapability = 2, D3D12Capability = 4, WglCapability = 8, VulkanCapability = 16;
+        const int D3D11Capability = 1, MetalCapability = 2, D3D12Capability = 4, WglCapability = 8, WindowsVulkanCapability = 16;
         const int LinuxVulkanCapability = 32, AndroidVulkanCapability = 64;
-        const int D3DDecodeCapabilities = D3D11Capability | D3D12Capability | WglCapability | VulkanCapability;
+        const int D3D12VideoCapability = 128, VulkanVideoDecodeCapability = 256;
+        const int D3DDecodeCapabilities = D3D11Capability | D3D12Capability | WglCapability | WindowsVulkanCapability;
         const int SubmitD3D11 = 1, CompleteMetal = 2, Drain = 3, PrepareD3D12 = 4, SubmitD3D12 = 5,
-            SubmitWgl = 6, CompleteWgl = 7, DestroyWgl = 8, SubmitVulkan = 9, ReleaseVulkan = 10, SubmitNativeVulkan = 11;
+            SubmitWgl = 6, CompleteWgl = 7, DestroyWgl = 8, SubmitVulkan = 9, ReleaseVulkan = 10, SubmitNativeVulkan = 11,
+            PrepareNativeD3D12 = 12, SubmitNativeD3D12 = 13;
         static readonly int ChromaId = Shader.PropertyToID("_FFUChroma");
         static readonly int TransformId = Shader.PropertyToID("_FFUTransform");
         static readonly int ColorId = Shader.PropertyToID("_FFUColor");
         IntPtr _d3d11, _callback, _d3d11Output, _sharedSurface;
         IntPtr _vulkan;
         readonly int _backend;
+        readonly int _capabilities;
+        IntPtr _nativeD3D12;
         RenderTexture _output, _copyTarget;
         Texture2D _nativeOutput;
         Texture2D _luma, _chroma;
@@ -40,6 +45,8 @@ namespace MajdataPlay.FFmpeg.Interop
         public static bool SupportsMetal => (Capabilities & MetalCapability) != 0;
         public static bool SupportsLinuxVulkan => (Capabilities & LinuxVulkanCapability) != 0;
         public static bool SupportsAndroidVulkan => (Capabilities & AndroidVulkanCapability) != 0;
+        internal static bool SupportsD3D12Video => (Capabilities & D3D12VideoCapability) != 0;
+        internal static bool SupportsVulkanVideoDecoding => (Capabilities & VulkanVideoDecodeCapability) != 0;
         public static bool IsAvailable => Capabilities != 0;
         static int Capabilities
         {
@@ -61,9 +68,10 @@ namespace MajdataPlay.FFmpeg.Interop
                     Native.ffu_register_ios();
 #endif
                     int abi = Native.ffu_abi_version();
-                    if (abi != (vulkanHost ? 3 : 2))
+                    int expectedAbi = windows || vulkanHost ? 4 : 2;
+                    if (abi != expectedAbi)
                     {
-                        AvailabilityReason = "The FFmpeg Unity bridge ABI does not match this player (version " + (vulkanHost ? 3 : 2) + " required). Restart Unity after replacing the native library.";
+                        AvailabilityReason = "The FFmpeg Unity bridge ABI does not match this player (version " + expectedAbi + " required). Restart Unity after replacing the native library.";
                         return 0;
                     }
                     int capabilities = Native.ffu_capabilities();
@@ -105,36 +113,40 @@ namespace MajdataPlay.FFmpeg.Interop
         // Does not call SystemInfo: this is passed directly to the decoder worker.
         // The returned COM reference belongs to libavutil's D3D11VA device context.
         public static IntPtr AcquireD3D11Device() => Native.ffu_d3d11_acquire_device();
+        internal static IntPtr AcquireD3D12Device()
+        {
+            var device = Native.ffu_d3d12va_acquire_device();
+            if (device == IntPtr.Zero)
+                throw new NotSupportedException("The native D3D12VA device is unavailable (status 0x" + Native.ffu_d3d12va_status().ToString("X8") + ").");
+            return device;
+        }
+
+        internal static string DescribeNativeBackendStatus(GraphicsDeviceType api)
+        {
+            try
+            {
+                if (Capabilities == 0 && AvailabilityReason != null) return AvailabilityReason;
+                return api == GraphicsDeviceType.Direct3D12
+                    ? "D3D12VA status 0x" + Native.ffu_d3d12va_status().ToString("X8")
+                    : VulkanVideoInterop.DescribeError(VulkanVideoInterop.VideoStatus());
+            }
+            catch (DllNotFoundException error) { return error.Message; }
+            catch (EntryPointNotFoundException error) { return error.Message; }
+            catch (BadImageFormatException error) { return error.Message; }
+        }
 
         public HardwareVideoPresenter()
         {
             CollectRetiredWglTextures();
-            _backend = Capabilities;
-            if (_backend == 0) throw new NotSupportedException(AvailabilityReason);
+            _capabilities = Capabilities;
+            _backend = _capabilities & ~(D3D12VideoCapability | VulkanVideoDecodeCapability);
+            if (_capabilities == 0) throw new NotSupportedException(AvailabilityReason);
             var shader = Resources.Load<Shader>("FFmpegVideoPlanes");
             if (shader == null || !shader.isSupported)
                 throw new NotSupportedException("The FFmpeg video conversion shader is unavailable.");
             _material = new Material(shader) { hideFlags = HideFlags.HideAndDontSave };
             _callback = Native.ffu_render_callback();
             _commands = new CommandBuffer { name = "FFmpeg video surface conversion" };
-            if ((_backend & D3DDecodeCapabilities) != 0)
-            {
-                _d3d11 = Native.ffu_d3d11_create();
-                if (_d3d11 == IntPtr.Zero)
-                {
-                    Dispose();
-                    throw new NotSupportedException("Unity's D3D11 device does not support video processing.");
-                }
-            }
-            else if ((_backend & (LinuxVulkanCapability | AndroidVulkanCapability)) != 0)
-            {
-                _vulkan = VulkanVideoInterop.Create();
-                if (_vulkan == IntPtr.Zero)
-                {
-                    Dispose();
-                    throw new NotSupportedException("Unity's Vulkan device could not create a native video presenter.");
-                }
-            }
         }
 
         void Event(int id, IntPtr data) => _commands.IssuePluginEventAndData(_callback, Native.ffu_event_id(id), data);
@@ -142,6 +154,8 @@ namespace MajdataPlay.FFmpeg.Interop
         public void CheckErrors()
         {
             CollectRetiredWglTextures();
+            if (_nativeD3D12 != IntPtr.Zero && Native.ffu_d3d12va_error(_nativeD3D12) != 0)
+                throw new NotSupportedException("D3D12VA GPU presentation failed (native 0x" + Native.ffu_d3d12va_error(_nativeD3D12).ToString("X8") + ").");
             if (_vulkan != IntPtr.Zero && VulkanVideoInterop.Error(_vulkan) != 0)
                 throw new NotSupportedException(VulkanVideoInterop.DescribeError(VulkanVideoInterop.Error(_vulkan)));
             int error = _d3d11 == IntPtr.Zero ? 0 : Native.ffu_d3d11_error(_d3d11);
@@ -182,8 +196,31 @@ namespace MajdataPlay.FFmpeg.Interop
             // Native surfaces have top-left origins. Rotate from Unity's bottom-left
             // UV convention before sampling the retained decoded surface.
             _commands.SetGlobalVector(TransformId, new Vector4(rotation, 0, 0, 0));
-            if (_d3d11 != IntPtr.Zero)
+            if (frame.PixelFormat == AVPixelFormat.AV_PIX_FMT_D3D12)
             {
+                if ((_capabilities & D3D12VideoCapability) == 0) return false;
+                if (_nativeD3D12 == IntPtr.Zero) _nativeD3D12 = Native.ffu_d3d12va_create();
+                if (_nativeD3D12 == IntPtr.Zero) return false;
+                CheckErrors();
+                EnsureCopyTarget(frame.Width, frame.Height);
+                IntPtr packet = Native.ffu_d3d12va_prepare(_nativeD3D12, frame.NativeFrame, _copyTarget.GetNativeTexturePtr());
+                if (packet == IntPtr.Zero) { CheckErrors(); return false; }
+                try
+                {
+                    Event(PrepareNativeD3D12, packet);
+                    Event(SubmitNativeD3D12, packet);
+                    _commands.Blit(_copyTarget, _output, _material, 1);
+                    Graphics.ExecuteCommandBuffer(_commands);
+                    packet = IntPtr.Zero;
+                }
+                finally { if (packet != IntPtr.Zero) Native.ffu_d3d12va_cancel(packet); }
+                TransferMode = "D3D12VA native decode + GPU conversion (no CPU readback)";
+            }
+            else if (frame.PixelFormat == AVPixelFormat.AV_PIX_FMT_D3D11)
+            {
+                if ((_backend & D3DDecodeCapabilities) == 0) return false;
+                if (_d3d11 == IntPtr.Zero) _d3d11 = Native.ffu_d3d11_create();
+                if (_d3d11 == IntPtr.Zero) return false;
                 CheckErrors();
                 bool d3d12 = _backend == D3D12Capability;
                 if (!EnsureWindowsOutput(frame.Width, frame.Height)) return false;
@@ -198,7 +235,7 @@ namespace MajdataPlay.FFmpeg.Interop
                 {
                     if (d3d12) Event(PrepareD3D12, packet);
                     Event(d3d12 ? SubmitD3D12 : _backend == WglCapability ? SubmitWgl :
-                        _backend == VulkanCapability ? SubmitVulkan : SubmitD3D11, packet);
+                        _backend == WindowsVulkanCapability ? SubmitVulkan : SubmitD3D11, packet);
                     _commands.Blit(_copyTarget != null ? (Texture)_copyTarget : _nativeOutput, _output, _material, 1);
                     if (_backend == WglCapability) Event(CompleteWgl, _sharedSurface);
                     Graphics.ExecuteCommandBuffer(_commands);
@@ -215,11 +252,14 @@ namespace MajdataPlay.FFmpeg.Interop
                 }
                 TransferMode = _backend == D3D12Capability ? "D3D12 GPU conversion + shared-resource copy (no CPU readback)" :
                     _backend == WglCapability ? "OpenGL shared RGBA + GPU conversion (no CPU readback)" :
-                    _backend == VulkanCapability ? "Vulkan GPU conversion + shared-resource copy (no CPU readback)" :
+                    _backend == WindowsVulkanCapability ? "Vulkan GPU conversion + shared-resource copy (no CPU readback)" :
                     "D3D11 GPU conversion (no CPU readback)";
             }
-            else if (_vulkan != IntPtr.Zero)
+            else if (frame.PixelFormat == AVPixelFormat.AV_PIX_FMT_VULKAN ||
+                (_backend & (LinuxVulkanCapability | AndroidVulkanCapability)) != 0)
             {
+                if (_vulkan == IntPtr.Zero) _vulkan = VulkanVideoInterop.Create();
+                if (_vulkan == IntPtr.Zero) return false;
                 CheckErrors();
                 EnsureCopyTarget(frame.Width, frame.Height);
                 IntPtr packet = VulkanVideoInterop.Prepare(_vulkan, frame, _copyTarget.GetNativeTexturePtr());
@@ -232,7 +272,9 @@ namespace MajdataPlay.FFmpeg.Interop
                     packet = IntPtr.Zero;
                 }
                 finally { if (packet != IntPtr.Zero) VulkanVideoInterop.Cancel(packet); }
-                TransferMode = _backend == AndroidVulkanCapability
+                TransferMode = frame.PixelFormat == AVPixelFormat.AV_PIX_FMT_VULKAN
+                    ? "Vulkan Video native decode + GPU conversion (no CPU readback)"
+                    : _backend == AndroidVulkanCapability
                     ? "Android MediaCodec AHardwareBuffer + Vulkan GPU conversion (no CPU readback)"
                     : "Linux VAAPI DMA-BUF + Vulkan GPU conversion (no CPU readback)";
             }
@@ -270,13 +312,13 @@ namespace MajdataPlay.FFmpeg.Interop
             if (_backend == WglCapability && RetiredWglTextures.Count >= 24)
                 throw new NotSupportedException("The graphics driver has not released prior OpenGL video surfaces.");
             if (_nativeOutput != null && _nativeOutput.width == width && _nativeOutput.height == height) return true;
-            if (_backend == VulkanCapability && _copyTarget != null && _copyTarget.width == width &&
+            if (_backend == WindowsVulkanCapability && _copyTarget != null && _copyTarget.width == width &&
                 _copyTarget.height == height && _sharedSurface != IntPtr.Zero) return true;
             IntPtr native = Native.ffu_d3d11_create_output(_d3d11, width, height);
             if (native == IntPtr.Zero) return false;
             ReleaseWindowsOutput();
             _d3d11Output = native;
-            if (_backend == VulkanCapability)
+            if (_backend == WindowsVulkanCapability)
             {
                 EnsureCopyTarget(width, height);
                 _sharedSurface = Native.ffu_shared_surface_create(_d3d11, native, 0);
@@ -372,6 +414,7 @@ namespace MajdataPlay.FFmpeg.Interop
 
         public void Dispose()
         {
+            if (_nativeD3D12 != IntPtr.Zero) { Native.ffu_d3d12va_release(_nativeD3D12); _nativeD3D12 = IntPtr.Zero; }
             if (_disposed) return;
             _disposed = true;
             if (_commands != null)
@@ -427,6 +470,23 @@ namespace MajdataPlay.FFmpeg.Interop
             [DllImport(Library, CallingConvention = CallingConvention.Cdecl)] internal static extern IntPtr ffu_d3d11_prepare(IntPtr presenter, IntPtr frame, IntPtr target);
             [DllImport(Library, CallingConvention = CallingConvention.Cdecl)] internal static extern IntPtr ffu_d3d12_prepare(IntPtr presenter, IntPtr frame, IntPtr target);
             [DllImport(Library, CallingConvention = CallingConvention.Cdecl)] internal static extern void ffu_d3d12_cancel(IntPtr packet);
+#if UNITY_STANDALONE_WIN || UNITY_EDITOR_WIN
+            [DllImport(Library, CallingConvention = CallingConvention.Cdecl)] internal static extern IntPtr ffu_d3d12va_acquire_device();
+            [DllImport(Library, CallingConvention = CallingConvention.Cdecl)] internal static extern int ffu_d3d12va_status();
+            [DllImport(Library, CallingConvention = CallingConvention.Cdecl)] internal static extern IntPtr ffu_d3d12va_create();
+            [DllImport(Library, CallingConvention = CallingConvention.Cdecl)] internal static extern void ffu_d3d12va_release(IntPtr presenter);
+            [DllImport(Library, CallingConvention = CallingConvention.Cdecl)] internal static extern IntPtr ffu_d3d12va_prepare(IntPtr presenter, IntPtr frame, IntPtr target);
+            [DllImport(Library, CallingConvention = CallingConvention.Cdecl)] internal static extern void ffu_d3d12va_cancel(IntPtr packet);
+            [DllImport(Library, CallingConvention = CallingConvention.Cdecl)] internal static extern int ffu_d3d12va_error(IntPtr presenter);
+#else
+            internal static IntPtr ffu_d3d12va_acquire_device() => IntPtr.Zero;
+            internal static int ffu_d3d12va_status() => -1;
+            internal static IntPtr ffu_d3d12va_create() => IntPtr.Zero;
+            internal static void ffu_d3d12va_release(IntPtr presenter) { }
+            internal static IntPtr ffu_d3d12va_prepare(IntPtr presenter, IntPtr frame, IntPtr target) => IntPtr.Zero;
+            internal static void ffu_d3d12va_cancel(IntPtr packet) { }
+            internal static int ffu_d3d12va_error(IntPtr presenter) => -1;
+#endif
             [DllImport(Library, CallingConvention = CallingConvention.Cdecl)] internal static extern IntPtr ffu_shared_surface_create(IntPtr presenter, IntPtr texture, uint glName);
             [DllImport(Library, CallingConvention = CallingConvention.Cdecl)] internal static extern IntPtr ffu_shared_prepare(IntPtr presenter, IntPtr frame, IntPtr texture, IntPtr surface, IntPtr target);
             [DllImport(Library, CallingConvention = CallingConvention.Cdecl)] internal static extern int ffu_shared_error(IntPtr surface);

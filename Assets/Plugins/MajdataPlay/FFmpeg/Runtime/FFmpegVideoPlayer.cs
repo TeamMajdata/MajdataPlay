@@ -80,6 +80,7 @@ namespace MajdataPlay.FFmpeg
         TaskCompletionSource<bool> _prepareCompletion, _seekCompletion;
         CancellationToken _prepareCancellation;
         bool _playWhenReady, _waitingForFrame, _prepared, _hardwareActive, _hardwareRequired, _hardwareCpuUploadAttempted, _stepRequested;
+        bool _platformBackendOnly;
         string _reportedTransferMode;
         VideoPlaybackState _afterSeek;
         double _seekTarget, _lastFrameEnd;
@@ -246,6 +247,7 @@ namespace MajdataPlay.FFmpeg
             try
             {
                 _hardwareRequired = _requireHardwareDecoding;
+                _platformBackendOnly = false;
                 var options = new DecoderOptions { IOTimeoutMilliseconds = Math.Max(1, _ioTimeoutSeconds) * 1000,
                     RequireHardwareDecoding = _hardwareRequired, AllowHardwareCpuUpload = !_hardwareRequired };
                 MajDebug.LogInfo("FFmpeg", "[Player] Preparing video; preferred decoder=" + PreferredDecoderType +
@@ -574,6 +576,16 @@ namespace MajdataPlay.FFmpeg
         void RecoverHardwarePlayback(Exception reason)
         {
             HardwareFallbackReason = reason.Message;
+            var device = (_session?.Info ?? _info)?.HardwareDeviceType;
+            if (!_platformBackendOnly && (device == global::FFmpeg.AutoGen.AVHWDeviceType.AV_HWDEVICE_TYPE_D3D12VA ||
+                device == global::FFmpeg.AutoGen.AVHWDeviceType.AV_HWDEVICE_TYPE_VULKAN))
+            {
+                _platformBackendOnly = true;
+                MajDebug.LogWarning("FFmpeg", "[Player] Native video decoder failed; retrying the platform hardware backend. " + reason.Message);
+                bool native = _preferNativeTextures || _hardwareRequired;
+                RecoverPlayback(reason, !native, native);
+                return;
+            }
             if (_hardwareRequired) { Fail(reason); return; }
             if (_hardwareCpuUploadAttempted) { RecoverInSoftware(reason); return; }
             _hardwareCpuUploadAttempted = true;
@@ -587,9 +599,9 @@ namespace MajdataPlay.FFmpeg
             MajDebug.LogWarning("FFmpeg", "[Player] Hardware playback unavailable; retrying software decoding with CPU upload. " + reason.Message);
             RecoverPlayback(reason, false);
         }
-        void RecoverPlayback(Exception reason, bool hardwareCpuUpload)
+        void RecoverPlayback(Exception reason, bool hardwareCpuUpload, bool platformNative = false)
         {
-            _hardwareActive = hardwareCpuUpload;
+            _hardwareActive = hardwareCpuUpload || platformNative;
             var resume = State == VideoPlaybackState.Seeking ? _afterSeek : State;
             double position = TimeSeconds;
             _clock.Pause();
@@ -599,10 +611,12 @@ namespace MajdataPlay.FFmpeg
                 _session?.Dispose();
                 _session = null;
                 ReleasePresentation();
-                TransferMode = hardwareCpuUpload ? "Reopening hardware decoder for CPU upload" : "Reopening software decoder";
+                TransferMode = platformNative ? "Reopening platform hardware decoder" :
+                    hardwareCpuUpload ? "Reopening hardware decoder for CPU upload" : "Reopening software decoder";
                 _reportedTransferMode = null;
-                var options = new DecoderOptions { IOTimeoutMilliseconds = Math.Max(1, _ioTimeoutSeconds) * 1000 };
-                if (hardwareCpuUpload) ConfigureHardware(options, false);
+                var options = new DecoderOptions { IOTimeoutMilliseconds = Math.Max(1, _ioTimeoutSeconds) * 1000,
+                    RequireHardwareDecoding = _hardwareRequired, AllowHardwareCpuUpload = !_hardwareRequired };
+                if (hardwareCpuUpload || platformNative) ConfigureHardware(options, platformNative);
                 _session = new VideoDecodeSession(NormalizeSource(_source), options, _bufferedFrameLimit);
                 if (_prepared && _info != null && _info.CanSeek)
                 {
@@ -626,7 +640,13 @@ namespace MajdataPlay.FFmpeg
             }
             catch (Exception recoveryError)
             {
-                if (hardwareCpuUpload) RecoverInSoftware(recoveryError);
+                if (platformNative && !_hardwareRequired)
+                {
+                    _hardwareCpuUploadAttempted = true;
+                    MajDebug.LogWarning("FFmpeg", "[Player] Platform GPU transport failed; retrying hardware decoding with CPU upload. " + recoveryError.Message);
+                    RecoverPlayback(recoveryError, true);
+                }
+                else if (hardwareCpuUpload) RecoverInSoftware(recoveryError);
                 else Fail(recoveryError);
             }
             // The original preload completion remains pending while the replacement opens.

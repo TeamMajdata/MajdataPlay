@@ -17,9 +17,9 @@
     "note": "All upstream public headers present in the binding header snapshot are compared after CRLF normalization before building. Generated avconfig.h and ffversion.h are excluded."
   },
   "host": "Linux-6.18.40.1-microsoft-standard-WSL2-x86_64-with-glibc2.39",
-  "builtUtc": "2026-10-03T10:11:17.444010+00:00",
+  "builtUtc": "2026-10-03T17:32:36.715900+00:00",
   "configure": [
-    "--prefix=/tmp/majdata-ffmpeg-build/install/android-armv7",
+    "--prefix=/tmp/majdata-ffmpeg-native-video/install/android-armv7",
     "--disable-doc",
     "--disable-programs",
     "--disable-debug",
@@ -42,48 +42,92 @@
     "--ranlib=llvm-ranlib",
     "--nm=llvm-nm",
     "--strip=llvm-strip",
-    "--sysroot=/tmp/majdata-ffmpeg-build/toolchains/android-ndk-r27c/toolchains/llvm/prebuilt/linux-x86_64/sysroot",
+    "--sysroot=/mnt/c/Users/LeZi/source/repos/LingFeng-bbben/MajdataPlay/Tools/FFmpeg/.build/toolchains/android-ndk-r27c/toolchains/llvm/prebuilt/linux-x86_64/sysroot",
     "--enable-jni",
     "--enable-mediacodec",
     "--extra-ldflags=-Wl,-z,max-page-size=16384",
     "--cpu=armv7-a",
-    "--extra-cflags=-march=armv7-a -mfloat-abi=softfp -mfpu=neon"
+    "--extra-cflags=-march=armv7-a -mfloat-abi=softfp -mfpu=neon",
+    "--enable-vulkan",
+    "--disable-vulkan-static",
+    "--extra-cflags=-I/mnt/c/Users/LeZi/source/repos/LingFeng-bbben/MajdataPlay/Tools/FFmpeg/.build/toolchains/Vulkan-Headers-vulkan-sdk-1.4.328.1/include",
+    "--disable-hwaccel=apv_vulkan,dpx_vulkan,ffv1_vulkan,prores_raw_vulkan,prores_vulkan"
   ],
   "files": [
     {
       "file": "libavcodec.so",
-      "bytes": 10552604,
-      "sha256": "6b2b278f77fa4be2bec81fead5dea09a83dcf2c4914c447b8a6c6bb3fd01786a"
+      "bytes": 10653924,
+      "sha256": "2e5630a57b0f5ab0375621308f62510f1dd79d4df51dc036a12d4be8bb274de2"
     },
     {
       "file": "libavdevice.so",
-      "bytes": 6564,
-      "sha256": "40b06d58d3a27e77e72e2c42144cfdb1c3e55cef2e3e7241fbffe0304b807bf6"
+      "bytes": 6900,
+      "sha256": "514f020b1afa0b55f3eb4155177084ef6e472ead1296f4d569e9d81a1e8404eb"
     },
     {
       "file": "libavfilter.so",
-      "bytes": 118764,
-      "sha256": "ea1051dafda233c54ac89fb20dc5931d98fc700819ed9fe6e79de23f93e04298"
+      "bytes": 119100,
+      "sha256": "4df378935c3ca82040f931f0bcdbc1576ba09af851935fd85f98feb76ecb4ffb"
     },
     {
       "file": "libavformat.so",
-      "bytes": 1707988,
-      "sha256": "fcad646d3fbdc339823bc85e9aaed5dffb9c7d6bd8c3acef6197d6d07a5783cc"
+      "bytes": 1708324,
+      "sha256": "77e264c6876175f5a1d3c31a09cca94e4b0b846e98748103506849848d2bd5d8"
     },
     {
       "file": "libavutil.so",
-      "bytes": 648164,
-      "sha256": "0485f7af50f7ee93f8d4c59117ae0c39ec1facaa176f7e3d71a3ab070aee4c25"
+      "bytes": 732188,
+      "sha256": "4792c146eecffd027cd0324546500e4b57a7bb4942fe9981c364380993c1dc63"
     },
     {
       "file": "libswresample.so",
-      "bytes": 88524,
-      "sha256": "9b244a9f69227e1493e16ddbe95e60938c5be91d1024517f7444ac28940237a5"
+      "bytes": 88860,
+      "sha256": "7d041e3f37631a8c79869252d9d60485ab652871efdf04279bfa1d181b37db91"
     },
     {
       "file": "libswscale.so",
-      "bytes": 807060,
-      "sha256": "3a1141e98399019b9c937a116ceb2c3d1565976d3c9d75cc15190086cd40d482"
+      "bytes": 846920,
+      "sha256": "f554c86c09e0f1ca4cb3ff6b370e0c044250ac1251a3ad461c1d3dfc3eb34f37"
+    }
+  ],
+  "buildDependencies": {
+    "vulkanHeaders": {
+      "repository": "https://github.com/KhronosGroup/Vulkan-Headers.git",
+      "tag": "vulkan-sdk-1.4.328.1",
+      "commit": "19725e4d48082fe78e26622b15d3080ccd54112b",
+      "minimumHeaderVersion": 317
+    },
+    "llvmMingw": {
+      "version": "20260922",
+      "repository": "https://github.com/mstorsjo/llvm-mingw",
+      "archives": {
+        "Linux-x86_64": {
+          "file": "llvm-mingw-20260922-ucrt-ubuntu-22.04-x86_64.tar.xz",
+          "sha256": "bb7bb7654b33d5aa8712acb837c963b2e0c56352560c76105270a3268c665c21"
+        },
+        "Darwin-universal": {
+          "file": "llvm-mingw-20260922-ucrt-macos-universal.tar.xz",
+          "sha256": "52e5f5a7b131021d0c39a37a38fa380a1da7885cd04bd61afd0cd4ecfb8bc1f3"
+        },
+        "Windows-x86_64": {
+          "file": "llvm-mingw-20260922-ucrt-x86_64.zip",
+          "sha256": "e3ad77d117a4bea19a7a3b333341824d79a5a371004a10e25b8504e7b3047666"
+        }
+      }
+    }
+  },
+  "verifiedHardwareBackends": [
+    "VULKAN",
+    "H264_VULKAN_HWACCEL",
+    "HEVC_VULKAN_HWACCEL",
+    "AV1_VULKAN_HWACCEL",
+    "VP9_VULKAN_HWACCEL"
+  ],
+  "buildDependencyLicenses": [
+    {
+      "file": "Vulkan-Headers.LICENSE.txt",
+      "sha256": "dd5e3849fb892384ba4b7e88b73e87600d3164f1ec3216b44b06a6458fff483a",
+      "license": "Apache-2.0"
     }
   ]
 }

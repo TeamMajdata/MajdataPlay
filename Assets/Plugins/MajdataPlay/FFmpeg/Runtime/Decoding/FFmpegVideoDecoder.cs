@@ -21,7 +21,7 @@ namespace MajdataPlay.FFmpeg.Internal
     {
         private static readonly AVIOInterruptCB_callback InterruptCallback = Interrupt;
         private static readonly AVCodecContext_get_format FormatCallback = SelectPixelFormat;
-        private readonly DecoderOptions _options;
+        private DecoderOptions _options;
         private readonly VideoFrameConverter _converter = new VideoFrameConverter();
         private AVFormatContext* _format;
         private AVCodecContext* _codec;
@@ -77,6 +77,7 @@ namespace MajdataPlay.FFmpeg.Internal
         /// <summary>Gets whether the active decoder uses hardware, including when its output is uploaded through CPU pixels.</summary>
         /// <remarks>The value is updated when frames reveal whether the requested hardware pixel format was accepted.</remarks>
         public bool HardwareDecoding { get; private set; }
+        internal AVHWDeviceType ActiveHardwareDeviceType => HardwareDecoding ? _options.HardwareDeviceType : AVHWDeviceType.AV_HWDEVICE_TYPE_NONE;
         /// <summary>Gets the most recent explanation for a hardware device or native frame transport fallback, or null when none has occurred.</summary>
         public string HardwareFallbackReason { get; private set; }
 
@@ -173,87 +174,97 @@ namespace MajdataPlay.FFmpeg.Internal
                 RotationDegrees = ReadStreamRotation(stream);
                 UpdateDimensions(stream->codecpar->width, stream->codecpar->height, RotationDegrees);
                 var softwareCodec = codec;
-                bool mediaCodec = _options.HardwareDeviceType == AVHWDeviceType.AV_HWDEVICE_TYPE_MEDIACODEC;
-                if (mediaCodec)
+                while (true)
                 {
-                    // MediaCodec is a distinct decoder, unlike VAAPI/D3D11 hwaccels.
-                    var name = stream->codecpar->codec_id == AVCodecID.AV_CODEC_ID_MPEG2VIDEO
-                        ? "mpeg2_mediacodec" : ffmpeg.avcodec_get_name(stream->codecpar->codec_id) + "_mediacodec";
-                    var androidCodec = ffmpeg.avcodec_find_decoder_by_name(name);
-                    if (androidCodec != null) codec = androidCodec;
-                    else HardwareFallbackReason = "This FFmpeg build has no " + name + " decoder.";
-                }
-                AllocateCodec(codec, stream);
-                bool selectedMediaCodec = mediaCodec && ffmpeg.PtrToStringUTF8(codec->name).EndsWith("_mediacodec", StringComparison.Ordinal);
-                if (!mediaCodec || (selectedMediaCodec && !_cpuTransport))
-                {
-                    try { ConfigureHardware(codec); }
-                    catch (Exception error) when (!_options.RequireHardwareDecoding && !(error is OperationCanceledException) && !(error is OutOfMemoryException))
-                    {
-                        HardwareFallbackReason = "Hardware device initialization failed: " + error.Message;
-                        MajDebug.LogWarning("FFmpeg", "[Decoder] " + HardwareFallbackReason);
-                    }
-                }
-                if (_options.RequireHardwareDecoding && _codec->hw_device_ctx == null)
-                    throw new NotSupportedException(HardwareFallbackReason ?? "A hardware decoding device is required.");
-                bool mediaCodecCpu = selectedMediaCodec && _codec->hw_device_ctx == null &&
-                    _options.AllowHardwareCpuUpload && !_options.RequireHardwareDecoding;
-                if (mediaCodecCpu) _cpuTransport = true;
-                if (mediaCodec && _codec->hw_device_ctx == null && !mediaCodecCpu)
-                {
-                    ReleaseCodec();
                     codec = softwareCodec;
+                    bool mediaCodec = _options.HardwareDeviceType == AVHWDeviceType.AV_HWDEVICE_TYPE_MEDIACODEC;
+                    if (mediaCodec)
+                    {
+                        // MediaCodec is a distinct decoder, unlike VAAPI/D3D11 hwaccels.
+                        var name = stream->codecpar->codec_id == AVCodecID.AV_CODEC_ID_MPEG2VIDEO
+                            ? "mpeg2_mediacodec" : ffmpeg.avcodec_get_name(stream->codecpar->codec_id) + "_mediacodec";
+                        var androidCodec = ffmpeg.avcodec_find_decoder_by_name(name);
+                        if (androidCodec != null) codec = androidCodec;
+                        else HardwareFallbackReason = "This FFmpeg build has no " + name + " decoder.";
+                    }
                     AllocateCodec(codec, stream);
-                }
-                AVDictionary* codecOptions = null;
-                int codecResult;
-                try
-                {
-                    // The JNI path explicitly filters software codecs. NDK create-by-MIME
-                    // may silently select a software decoder when no hardware codec exists.
-                    if (selectedMediaCodec && (_codec->hw_device_ctx != null || mediaCodecCpu))
-                        Check(ffmpeg.av_dict_set(&codecOptions, "ndk_codec", "0", 0), "Select hardware MediaCodec");
-                    codecResult = ffmpeg.avcodec_open2(_codec, codec, &codecOptions);
-                }
-                finally { ffmpeg.av_dict_free(&codecOptions); }
-                if (codecResult < 0 && selectedMediaCodec && _codec->hw_device_ctx != null &&
-                    _options.AllowHardwareCpuUpload && !_options.RequireHardwareDecoding)
-                {
-                    HardwareFallbackReason = "MediaCodec Surface open failed: " + ErrorText(codecResult);
-                    MajDebug.LogWarning("FFmpeg", "[Decoder] " + HardwareFallbackReason + "; retrying hardware byte-buffer output.");
-                    ReleaseCodec();
-                    AllocateCodec(codec, stream);
-                    _cpuTransport = true;
-                    mediaCodecCpu = true;
+                    bool selectedMediaCodec = mediaCodec && ffmpeg.PtrToStringUTF8(codec->name).EndsWith("_mediacodec", StringComparison.Ordinal);
+                    if (!mediaCodec || (selectedMediaCodec && !_cpuTransport))
+                    {
+                        try { ConfigureHardware(codec); }
+                        catch (Exception error) when ((!_options.RequireHardwareDecoding || _options.FallbackHardwareOptions != null) &&
+                            !(error is OperationCanceledException) && !(error is OutOfMemoryException))
+                        {
+                            HardwareFallbackReason = "Hardware device initialization failed: " + error.Message;
+                            MajDebug.LogWarning("FFmpeg", "[Decoder] " + HardwareFallbackReason);
+                        }
+                    }
+                    if (_codec->hw_device_ctx == null && !selectedMediaCodec && TryNextHardwareBackend(HardwareFallbackReason))
+                        continue;
+                    if (_options.RequireHardwareDecoding && _codec->hw_device_ctx == null)
+                        throw new NotSupportedException(HardwareFallbackReason ?? "A hardware decoding device is required.");
+                    bool mediaCodecCpu = selectedMediaCodec && _codec->hw_device_ctx == null &&
+                        _options.AllowHardwareCpuUpload && !_options.RequireHardwareDecoding;
+                    if (mediaCodecCpu) _cpuTransport = true;
+                    if (mediaCodec && _codec->hw_device_ctx == null && !mediaCodecCpu)
+                    {
+                        ReleaseCodec();
+                        codec = softwareCodec;
+                        AllocateCodec(codec, stream);
+                    }
+                    AVDictionary* codecOptions = null;
+                    int codecResult;
                     try
                     {
-                        Check(ffmpeg.av_dict_set(&codecOptions, "ndk_codec", "0", 0), "Select hardware MediaCodec");
+                        // The JNI path explicitly filters software codecs. NDK create-by-MIME
+                        // may silently select a software decoder when no hardware codec exists.
+                        if (selectedMediaCodec && (_codec->hw_device_ctx != null || mediaCodecCpu))
+                            Check(ffmpeg.av_dict_set(&codecOptions, "ndk_codec", "0", 0), "Select hardware MediaCodec");
                         codecResult = ffmpeg.avcodec_open2(_codec, codec, &codecOptions);
                     }
                     finally { ffmpeg.av_dict_free(&codecOptions); }
+                    if (codecResult < 0 && TryNextHardwareBackend("Hardware decoder open failed: " + ErrorText(codecResult)))
+                        continue;
+                    if (codecResult < 0 && selectedMediaCodec && _codec->hw_device_ctx != null &&
+                        _options.AllowHardwareCpuUpload && !_options.RequireHardwareDecoding)
+                    {
+                        HardwareFallbackReason = "MediaCodec Surface open failed: " + ErrorText(codecResult);
+                        MajDebug.LogWarning("FFmpeg", "[Decoder] " + HardwareFallbackReason + "; retrying hardware byte-buffer output.");
+                        ReleaseCodec();
+                        AllocateCodec(codec, stream);
+                        _cpuTransport = true;
+                        mediaCodecCpu = true;
+                        try
+                        {
+                            Check(ffmpeg.av_dict_set(&codecOptions, "ndk_codec", "0", 0), "Select hardware MediaCodec");
+                            codecResult = ffmpeg.avcodec_open2(_codec, codec, &codecOptions);
+                        }
+                        finally { ffmpeg.av_dict_free(&codecOptions); }
+                    }
+                    if (codecResult < 0 && (_codec->hw_device_ctx != null || mediaCodecCpu) && !_options.RequireHardwareDecoding)
+                    {
+                        // Some codecs reject a hardware configuration at open instead of get_format.
+                        HardwareFallbackReason = "Hardware decoder open failed: " + ErrorText(codecResult);
+                        MajDebug.LogWarning("FFmpeg", "[Decoder] " + HardwareFallbackReason + "; opening software decoder.");
+                        ReleaseCodec();
+                        codec = softwareCodec;
+                        AllocateCodec(codec, stream);
+                        HardwareDecoding = false;
+                        selectedMediaCodec = false;
+                        mediaCodecCpu = false;
+                        codecResult = ffmpeg.avcodec_open2(_codec, codec, null);
+                    }
+                    Check(codecResult, "Open video decoder");
+                    DecoderName = ffmpeg.PtrToStringUTF8(codec->name);
+                    _mediaCodecHardware = selectedMediaCodec && (mediaCodecCpu || _codec->hw_device_ctx != null);
+                    HardwareDecoding = _mediaCodecHardware || _codec->hw_device_ctx != null;
+                    if (_mediaCodecHardware)
+                        DecoderDevice = DescribeHardwareDevice(mediaCodecCpu ? "MediaCodec hardware byte-buffer output" : "MediaCodec hardware Surface output");
+                    if (!HardwareDecoding) DecoderDevice = "Software";
+                    else _hardwareDeviceDescription = DecoderDevice;
+                    TransferMode = HardwareDecoding ? (_cpuTransport ? "Hardware decode + CPU RGBA upload" : "Native GPU frames") : "Software RGBA upload";
+                    break;
                 }
-                if (codecResult < 0 && (_codec->hw_device_ctx != null || mediaCodecCpu) && !_options.RequireHardwareDecoding)
-                {
-                    // Some codecs reject a hardware configuration at open instead of get_format.
-                    HardwareFallbackReason = "Hardware decoder open failed: " + ErrorText(codecResult);
-                    MajDebug.LogWarning("FFmpeg", "[Decoder] " + HardwareFallbackReason + "; opening software decoder.");
-                    ReleaseCodec();
-                    codec = softwareCodec;
-                    AllocateCodec(codec, stream);
-                    HardwareDecoding = false;
-                    selectedMediaCodec = false;
-                    mediaCodecCpu = false;
-                    codecResult = ffmpeg.avcodec_open2(_codec, codec, null);
-                }
-                Check(codecResult, "Open video decoder");
-                DecoderName = ffmpeg.PtrToStringUTF8(codec->name);
-                _mediaCodecHardware = selectedMediaCodec && (mediaCodecCpu || _codec->hw_device_ctx != null);
-                HardwareDecoding = _mediaCodecHardware || _codec->hw_device_ctx != null;
-                if (_mediaCodecHardware)
-                    DecoderDevice = DescribeHardwareDevice(mediaCodecCpu ? "MediaCodec hardware byte-buffer output" : "MediaCodec hardware Surface output");
-                if (!HardwareDecoding) DecoderDevice = "Software";
-                else _hardwareDeviceDescription = DecoderDevice;
-                TransferMode = HardwareDecoding ? (_cpuTransport ? "Hardware decode + CPU RGBA upload" : "Native GPU frames") : "Software RGBA upload";
                 MajDebug.LogInfo("FFmpeg", "[Decoder] Opened codec=" + CodecName + ", decoder=" + DecoderName +
                     ", device=" + DecoderDevice + ", transport=" + TransferMode + ", size=" + Width + "x" + Height + ".");
                 _packet = ffmpeg.av_packet_alloc();
@@ -613,6 +624,22 @@ namespace MajdataPlay.FFmpeg.Internal
             _codec->opaque = (void*)GCHandle.ToIntPtr(_selfHandle);
         }
 
+        private bool TryNextHardwareBackend(string reason)
+        {
+            var fallback = _options.FallbackHardwareOptions;
+            if (fallback == null) return false;
+            var previous = _options.HardwareDeviceType;
+            ReleaseCodec();
+            _options = fallback;
+            _cpuTransport = !_options.KeepNativeFrames;
+            _hardwarePixelFormat = AVPixelFormat.AV_PIX_FMT_NONE;
+            _hardwareDeviceDescription = null;
+            HardwareDecoding = false;
+            HardwareFallbackReason = reason ?? "The preferred hardware decoding backend is unavailable.";
+            MajDebug.LogWarning("FFmpeg", "[Decoder] " + previous + " unavailable; trying " + _options.HardwareDeviceType + ". " + HardwareFallbackReason);
+            return true;
+        }
+
         private void ReleaseCodec()
         {
             var codec = _codec;
@@ -633,7 +660,7 @@ namespace MajdataPlay.FFmpeg.Internal
                 self.HardwareDecoding = false;
                 self.HardwareFallbackReason = "The decoder rejected the requested hardware pixel format.";
                 MajDebug.LogWarning("FFmpeg", "[Decoder] " + self.HardwareFallbackReason);
-                if (self._options.RequireHardwareDecoding) return AVPixelFormat.AV_PIX_FMT_NONE;
+                if (self._options.RequireHardwareDecoding || self._options.FallbackHardwareOptions != null) return AVPixelFormat.AV_PIX_FMT_NONE;
                 for (var cursor = formats; *cursor != AVPixelFormat.AV_PIX_FMT_NONE; cursor++)
                 {
                     var descriptor = ffmpeg.av_pix_fmt_desc_get(*cursor);

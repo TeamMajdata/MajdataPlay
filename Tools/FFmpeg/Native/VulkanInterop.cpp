@@ -1,6 +1,7 @@
 #define VK_NO_PROTOTYPES
 #define VK_USE_PLATFORM_WIN32_KHR
 #include "VulkanInterop.h"
+#include "VulkanVideoDecode.h"
 #include "IUnityGraphicsVulkan.h"
 #include <dxgi1_2.h>
 #include <d3d10.h>
@@ -24,6 +25,8 @@ template<class T> T* Interface(IUnityInterfaces* interfaces) {
     return static_cast<T*>(interfaces->GetInterfaceSplit(id.m_GUIDHigh, id.m_GUIDLow));
 }
 PFN_vkCreateDevice realCreateDevice = nullptr;
+PFN_vkGetInstanceProcAddr originalLoader = nullptr;
+VkInstance loaderInstance = VK_NULL_HANDLE;
 PFN_vkEnumerateDeviceExtensionProperties enumerateExtensions = nullptr;
 IUnityGraphicsVulkanV2* unity = nullptr;
 std::atomic<bool> extensionsEnabled{false};
@@ -38,14 +41,14 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDevice(VkPhysicalDevice physical, const VkD
                                            const VkAllocationCallbacks* allocator, VkDevice* device) {
     auto enumerate = enumerateExtensions;
     extensionsEnabled = false;
-    if (!enumerate) return realCreateDevice(physical, original, allocator, device);
+    if (!enumerate) return FfuVulkanVideoCreateDevice(realCreateDevice, originalLoader, loaderInstance, physical, original, allocator, device);
     uint32_t count = 0;
-    if (enumerate(physical, nullptr, &count, nullptr) != VK_SUCCESS) return realCreateDevice(physical, original, allocator, device);
+    if (enumerate(physical, nullptr, &count, nullptr) != VK_SUCCESS) return FfuVulkanVideoCreateDevice(realCreateDevice, originalLoader, loaderInstance, physical, original, allocator, device);
     std::vector<VkExtensionProperties> available(count);
-    if (enumerate(physical, nullptr, &count, available.data()) != VK_SUCCESS) return realCreateDevice(physical, original, allocator, device);
+    if (enumerate(physical, nullptr, &count, available.data()) != VK_SUCCESS) return FfuVulkanVideoCreateDevice(realCreateDevice, originalLoader, loaderInstance, physical, original, allocator, device);
     for (const char* name : required) {
         if (std::none_of(available.begin(), available.end(), [name](const VkExtensionProperties& e) { return std::strcmp(e.extensionName, name) == 0; }))
-            return realCreateDevice(physical, original, allocator, device);
+            return FfuVulkanVideoCreateDevice(realCreateDevice, originalLoader, loaderInstance, physical, original, allocator, device);
     }
     std::vector<const char*> names;
     if (original->enabledExtensionCount)
@@ -55,18 +58,18 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDevice(VkPhysicalDevice physical, const VkD
     VkDeviceCreateInfo info = *original;
     info.enabledExtensionCount = static_cast<uint32_t>(names.size());
     info.ppEnabledExtensionNames = names.data();
-    const VkResult result = realCreateDevice(physical, &info, allocator, device);
+    const VkResult result = FfuVulkanVideoCreateDevice(realCreateDevice, originalLoader, loaderInstance, physical, &info, allocator, device);
     extensionsEnabled = result == VK_SUCCESS;
     // Device creation must remain functional when a driver rejects a supported
     // extension combination. The player will use its software fallback.
-    if (result != VK_SUCCESS) return realCreateDevice(physical, original, allocator, device);
+    if (result != VK_SUCCESS) return FfuVulkanVideoCreateDevice(realCreateDevice, originalLoader, loaderInstance, physical, original, allocator, device);
     return result;
 }
-PFN_vkGetInstanceProcAddr originalLoader = nullptr;
 VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL GetProc(VkInstance instance, const char* name) {
-    auto function = originalLoader(instance, name);
+    auto function = FfuVulkanVideoInstanceProc(originalLoader, instance, name);
     if (std::strcmp(name, "vkCreateDevice") == 0 && function) {
         realCreateDevice = reinterpret_cast<PFN_vkCreateDevice>(function);
+        loaderInstance = instance;
         enumerateExtensions = reinterpret_cast<PFN_vkEnumerateDeviceExtensionProperties>(originalLoader(instance, "vkEnumerateDeviceExtensionProperties"));
         return reinterpret_cast<PFN_vkVoidFunction>(CreateDevice);
     }

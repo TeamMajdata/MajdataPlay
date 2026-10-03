@@ -10,6 +10,11 @@
 每次构建都会核对 commit、拒绝源码修改，并比较绑定头文件（仅归一化 CRLF；排除构建生成的 `avconfig.h`、`ffversion.h`）。
 **不要用 FFmpeg 8.x，也不要只改原生库文件名**。库主版本为 avcodec 63、avdevice 63、avfilter 12、avformat 63、avutil 61、swresample 7、swscale 10。
 
+`dependencies.lock.json` 另外固定 Vulkan-Headers SDK 1.4.328.1（commit `19725e4d48082fe78e26622b15d3080ccd54112b`）及 LLVM-MinGW 20260922 的各主机官方压缩包 SHA256。
+Windows、Linux、Android 构建会自动获取并校验这些构建依赖，缓存到项目 `.build/toolchains` 或指定构建缓存，不安装系统软件。Vulkan 头文件须包含 Vulkan Video VP9 扩展；旧版 NDK / 系统 Vulkan 头文件不会覆盖此固定版本。
+未设置 `LLVM_MINGW` 时，Windows 目标使用固定的 LLVM-MinGW，它包含 D3D12 Video 解码所需的新头文件；显式设置时使用开发者提供的工具链，仍检查全部请求的硬件解码后端是否编译启用。
+`--probe` 不下载依赖：全新缓存会报告缺少固定头文件，请先执行正常构建。Windows 原生仍需要可工作的 Bash/make；WSL 使用 Linux 主机工具链。
+
 ## 一键命令
 
 先安装本节下方列出的主机工具链，然后在仓库根目录执行：
@@ -60,6 +65,7 @@ Windows 的已有 WSL Linux 也可运行同一个 `build.sh`。使用 WSL 时使
 - `FFMPEG_BUILD_ROOT`：默认 `Tools/FFmpeg/.build`；WSL 建议使用 Linux 文件系统内的专用临时目录以避免 `/mnt/c` 的编译性能损失。PowerShell 的 `-BuildRoot` 会传入对应 Windows/WSL 进程。
 - `FFMPEG_MAKE`：GNU make 命令名，默认 `make`。不要使用 MSVC `nmake`。
 - `LLVM_MINGW`：便携 llvm-mingw 根目录。也自动发现 `.build/toolchains/llvm-mingw-*`。
+- `FFMPEG_D3D12_HEADERS`：可选的最小 D3D12 头文件覆盖目录，包含固定 LLVM-MinGW 20260922 压缩包中的 `include/d3d12.h` 和 `include/d3d12video.h`。脚本逐文件核对 lock 中的 SHA256，再交给已有 MinGW GCC 和桥接使用；设置此项会跳过完整 LLVM 工具链下载。不要放入 C 运行库头文件，GCC 仍使用其原配 CRT 与链接库。
 - `ANDROID_NDK_HOME` / `ANDROID_NDK_ROOT`：NDK 根目录；Windows 额外自动查找 Unity Hub 编辑器内置 NDK。
 - `ANDROID_API`：默认 23；ARMv7 使用 softfp/NEON，ARM64 使用 AArch64。链接时指定 16 KiB 最大页大小。
 - `LINUX_X64_CROSS_PREFIX` 与 `LINUX_X64_SYSROOT`：跨主机构建 Linux glibc x64 时一起设置。
@@ -92,7 +98,9 @@ NDK 使用 [Google 官方下载](https://developer.android.com/ndk/downloads)。
 构建所有内置解码器、解复用器、解析器、网络协议、swscale、swresample，以及七个绑定库。
 关闭编码器、封装器、采集设备、滤镜实现、命令行程序、文档、调试符号和依赖自动探测。
 不启用 GPL/nonfree/外部编解码库；AV1 等仅依赖外部库的解码器不自动加入。
-Windows 显式启用 D3D11VA/DXVA2 和 Schannel；Apple 启用 VideoToolbox/AudioToolbox/SecureTransport；Android 启用 JNI/MediaCodec；Linux 启用 VAAPI/libdrm。
+Windows 显式启用 D3D11VA/D3D12VA/DXVA2、Vulkan Video 和 Schannel；Apple 启用 VideoToolbox/AudioToolbox/SecureTransport；Android 启用 JNI/MediaCodec 和 Vulkan Video；Linux 启用 VAAPI/libdrm 和 Vulkan Video。
+每个 Windows/Linux/Android 目标在编译前检查 H.264、HEVC、AV1、VP9 Vulkan 硬件后端；Windows 同时检查四种格式的 D3D12VA 后端，任何后端被配置阶段禁用都会失败，不能输出成功状态。实际能力仍取决于 GPU 和驱动，编译启用不代表设备一定支持解码。
+这些 Vulkan Video 后端不需要外部 shader compiler，也不链接额外的 Vulkan loader 二进制；运行时动态加载系统 Vulkan loader。APV、DPX、FFV1、ProRes 的 shader 型 Vulkan 加速路径显式禁用，软件解码器保持可用。
 Linux/Android 默认没有外部 TLS 后端，支持本地文件和 HTTP；HTTPS 如有需求须将可审计的 TLS 库纳入构建配置和部署依赖。
 图形 API 互操作由 `Native/` 的 Unity 原生桥接实现，启用硬件解码选项本身不代表纹理零拷贝已实现或经过设备验证。
 
@@ -100,14 +108,14 @@ Linux/Android 默认没有外部 TLS 后端，支持本地文件和 HTTP；HTTPS
 
 | 目标 | Unity 插件目录 |
 | --- | --- |
-| Windows x86/x64 | `Assets/Plugins/FFmpeg/Native/Windows/x86`、`x86_64` |
-| Linux x64 | `Assets/Plugins/FFmpeg/Native/Linux/x86_64` |
-| Android ARMv7/ARM64 | `Assets/Plugins/FFmpeg/Native/Android/armeabi-v7a`、`arm64-v8a` |
-| macOS x64/ARM64 | `Assets/Plugins/FFmpeg/Native/macOS/x86_64`、`arm64` |
-| iOS device | `Assets/Plugins/FFmpeg/Native/iOS` |
+| Windows x86/x64 | `Assets/Plugins/MajdataPlay/FFmpeg/Native/Windows/x86`、`x86_64` |
+| Linux x64 | `Assets/Plugins/MajdataPlay/FFmpeg/Native/Linux/x86_64` |
+| Android ARMv7/ARM64 | `Assets/Plugins/MajdataPlay/FFmpeg/Native/Android/armeabi-v7a`、`arm64-v8a` |
+| macOS x64/ARM64 | `Assets/Plugins/MajdataPlay/FFmpeg/Native/macOS/x86_64`、`arm64` |
+| iOS device | `Assets/Plugins/MajdataPlay/FFmpeg/Native/iOS` |
 | iOS simulator | `.build/artifacts/ios-simulator-*`（不与 device 同时导入） |
 
-每个库有确定性 `.meta`，关闭 Any Platform，选择具体平台/CPU；只有对应桌面架构可在 Editor 使用。
+每个库有确定性 `.meta`，已有 `.meta` 的 GUID 会保留，关闭 Any Platform，选择具体平台/CPU；只有对应桌面架构可在 Editor 使用。
 每个目标同时输出 `build-manifest.json`（commit、命令、主机、UTC 时间、文件 SHA256）、`configure.txt` 和 LGPL 许可。
 完整日志和供原生桥接使用的头文件/import libs 在 `.build/<target>/` 与 `.build/install/<target>/`。
 不要对构建目录执行不经确认的通配符清理；增量重建会保留现有缓存。
@@ -115,7 +123,7 @@ Linux/Android 默认没有外部 TLS 后端，支持本地文件和 HTTP；HTTPS
 ## GPU 桥接
 
 默认同时构建各目标的原生桥接；`Native/Unity` 已附带对应版本的官方 PluginAPI 头文件。
-Windows 桥接 ABI 2 实现 D3D11、D3D12、OpenGL Core、Vulkan 的 GPU 互操作，Apple ABI 2 实现 VideoToolbox/CoreVideo→Metal。Linux/Android ABI 3 实现 VAAPI/DRM PRIME 与 MediaCodec/AHardwareBuffer 到 Vulkan 的互操作。所需 Vulkan 头文件与许可随源码附带，不依赖另装 Vulkan SDK。Windows、Linux、Android 桥接的 `.meta` 默认开启 Preload，以便在 Vulkan 设备创建前追加已探测支持的共享扩展；替换已加载的桥接后需重启 Unity。硬件路径仍要求驱动、设备和解码格式共同支持，实际验证范围见构建记录与播放器测试记录。
+Windows、Linux、Android 桥接 ABI 4 加入原生 Vulkan Video 解码设备封装，Windows 另外加入原生 D3D12VA 解码帧呈现，并保留 D3D11/VAAPI/MediaCodec 等既有 GPU 互操作路径。Apple ABI 2 保留 VideoToolbox/CoreVideo→Metal。构建脚本获取并校验固定的 Vulkan-Headers，向 CMake 传入 `FFU_VULKAN_HEADERS`，不依赖另装 Vulkan SDK；新的 FFmpeg 产物目录包含 Khronos 署名与 Apache-2.0 许可及其 SHA256。Windows、Linux、Android 桥接的 `.meta` 默认开启 Preload，以便在 Vulkan 设备创建前追加已探测支持的扩展；替换已加载的桥接后需重启 Unity。硬件路径仍要求驱动、设备和解码格式共同支持，实际验证范围见构建记录与播放器测试记录。
 可用 `--unity-plugin-api <Editor/Data/PluginAPI>` / `-UnityPluginApi <path>` 显式选择 SDK。
 桥接在 Windows、Apple、Linux 和 Android 目标上由同一脚本构建并按目标 stage。CMake 与目标编译器/SDK也必须就绪。Android 使用同一 NDK 的 `android.toolchain.cmake`，同步 ABI/API 设置并静态链接 C++ 运行库；Linux 复用选中的宿主或交叉 C/C++ 编译器与 sysroot。各平台可用的 GPU 路径以运行时能力检测和该平台测试结果为准。
 Windows 桥接复用 FFmpeg 选中的目标 C/C++ 编译器、archiver、windres 及 PATH：选择 llvm-mingw 时桥接使用相同的 `<triple>-clang/clang++`，选择 MinGW GCC 时使用相同的 `<triple>-gcc/g++`。这在 Windows、Linux 和 macOS 主机上一致；一键脚本不假设已安装 MSVC。

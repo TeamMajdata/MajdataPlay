@@ -1,5 +1,6 @@
 #include "Bridge.h"
 #include "VulkanPortable.h"
+#include "VulkanVideoDecode.h"
 #if defined(__ANDROID__)
 #include "AndroidMediaCodec.h"
 #else
@@ -10,11 +11,16 @@ namespace { std::atomic<int> capability{0}; }
 void FfuPlatformInitialize(IUnityInterfaces* interfaces, UnityGfxRenderer renderer) {
     capability = 0;
     if (renderer != kUnityGfxRendererVulkan || !FfuVkInitialize(interfaces)) return;
+    if (FfuVulkanVideoAvailable()) capability = 256;
+    if (!FfuVkExternalImportsAvailable()) {
+        if (!capability) FfuVkSetStatus(FfuVulkanVideoStatus());
+        return;
+    }
 #if defined(__ANDROID__)
-    if (FfuAndroidAvailable()) capability = 64;
+    if (FfuAndroidAvailable()) capability = capability.load() | 64;
     else FfuVkSetStatus(300);
 #else
-    if (FfuLinuxInitialize()) capability = 32;
+    if (FfuLinuxInitialize()) capability = capability.load() | 32;
 #endif
 }
 void FfuPlatformShutdown() { capability = 0; FfuVkShutdown(); }

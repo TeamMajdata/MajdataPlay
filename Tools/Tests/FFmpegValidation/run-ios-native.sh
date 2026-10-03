@@ -4,7 +4,7 @@ repo="$(cd "$(dirname "$0")/../../.." && pwd)"
 target="${1:-ios-simulator-arm64}"
 media="${2:-$repo/Assets/StreamingAssets/MaiCharts/Original/Zunda Overdance/bg.mp4}"
 case "$target" in
-  ios-arm64) sdk=iphoneos; triple=arm64-apple-ios15.0; libraries="$repo/Assets/Plugins/FFmpeg/Native/iOS";;
+  ios-arm64) sdk=iphoneos; triple=arm64-apple-ios15.0; libraries="$repo/Assets/Plugins/MajdataPlay/FFmpeg/Native/iOS";;
   ios-simulator-arm64) sdk=iphonesimulator; triple=arm64-apple-ios15.0-simulator; libraries="$repo/Tools/FFmpeg/.build/artifacts/$target";;
   ios-simulator-x64) sdk=iphonesimulator; triple=x86_64-apple-ios15.0-simulator; libraries="$repo/Tools/FFmpeg/.build/artifacts/$target";;
   *) echo "Unsupported iOS target: $target" >&2; exit 2;;

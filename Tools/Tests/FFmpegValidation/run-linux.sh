@@ -2,7 +2,7 @@
 set -euo pipefail
 here="$(cd "$(dirname "$0")" && pwd)"
 repo="$(cd "$here/../../.." && pwd)"
-libraries="$(realpath "${1:-$repo/Assets/Plugins/FFmpeg/Native/Linux/x86_64}")"
+libraries="$(realpath "${1:-$repo/Assets/Plugins/MajdataPlay/FFmpeg/Native/Linux/x86_64}")"
 media="${2:-$repo/Assets/StreamingAssets/MaiCharts/Original/Zunda Overdance/bg.mp4}"
 output="${TMPDIR:-/tmp}/majdata-linux-native-smoke-${UID}"
 mkdir -p "$here/.work"

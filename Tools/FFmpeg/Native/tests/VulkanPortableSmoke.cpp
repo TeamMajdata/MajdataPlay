@@ -70,17 +70,24 @@ static void Barrier(VkCommandBuffer command,VkImage image,VkImageLayout from,VkI
     vkCmdPipelineBarrier(command,VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,0,0,nullptr,0,nullptr,1,&b);
 }
 int main() {
-    VkApplicationInfo app{}; app.sType=VK_STRUCTURE_TYPE_APPLICATION_INFO; app.apiVersion=VK_API_VERSION_1_1;
+    VkApplicationInfo app{}; app.sType=VK_STRUCTURE_TYPE_APPLICATION_INFO; app.apiVersion=VK_API_VERSION_1_2;
     VkInstanceCreateInfo create{}; create.sType=VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO; create.pApplicationInfo=&app;
     CHECK(vkCreateInstance(&create,nullptr,&instance.instance)); uint32_t count=0; CHECK(vkEnumeratePhysicalDevices(instance.instance,&count,nullptr));
     std::vector<VkPhysicalDevice> devices(count); CHECK(vkEnumeratePhysicalDevices(instance.instance,&count,devices.data())); if(!count)return 77;
     instance.physicalDevice=devices[0]; VkPhysicalDeviceProperties properties{}; vkGetPhysicalDeviceProperties(devices[0],&properties);
     std::printf("Vulkan compute device: %s\n",properties.deviceName);
+    VkPhysicalDeviceTimelineSemaphoreFeatures timelineFeature{};timelineFeature.sType=VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TIMELINE_SEMAPHORE_FEATURES;
+    VkPhysicalDeviceFeatures2 featureQuery{};featureQuery.sType=VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;featureQuery.pNext=&timelineFeature;
+    vkGetPhysicalDeviceFeatures2(devices[0],&featureQuery);if(!timelineFeature.timelineSemaphore)return 77;
     vkGetPhysicalDeviceQueueFamilyProperties(devices[0],&count,nullptr); std::vector<VkQueueFamilyProperties> queues(count); vkGetPhysicalDeviceQueueFamilyProperties(devices[0],&count,queues.data());
     for(uint32_t i=0;i<count;++i) if((queues[i].queueFlags&(VK_QUEUE_GRAPHICS_BIT|VK_QUEUE_COMPUTE_BIT))==(VK_QUEUE_GRAPHICS_BIT|VK_QUEUE_COMPUTE_BIT)){instance.queueFamilyIndex=i;break;}
     float priority=1; VkDeviceQueueCreateInfo q{};q.sType=VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;q.queueFamilyIndex=instance.queueFamilyIndex;q.queueCount=1;q.pQueuePriorities=&priority;
-    VkDeviceCreateInfo dc{};dc.sType=VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;dc.queueCreateInfoCount=1;dc.pQueueCreateInfos=&q;
+    VkDeviceCreateInfo dc{};dc.sType=VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;dc.pNext=&timelineFeature;dc.queueCreateInfoCount=1;dc.pQueueCreateInfos=&q;
     CHECK(vkCreateDevice(devices[0],&dc,nullptr,&instance.device));vkGetDeviceQueue(instance.device,instance.queueFamilyIndex,0,&instance.graphicsQueue);instance.getInstanceProcAddr=vkGetInstanceProcAddr;
+    VkSemaphoreTypeCreateInfo timelineType{};timelineType.sType=VK_STRUCTURE_TYPE_SEMAPHORE_TYPE_CREATE_INFO;timelineType.semaphoreType=VK_SEMAPHORE_TYPE_TIMELINE;
+    VkSemaphoreCreateInfo semaphoreInfo{};semaphoreInfo.sType=VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;semaphoreInfo.pNext=&timelineType;
+    VkSemaphore timelineSemaphore;CHECK(vkCreateSemaphore(instance.device,&semaphoreInfo,nullptr,&timelineSemaphore));
+    uint64_t timelineValue=0;int locks=0,unlocks=0;
     VkCommandPoolCreateInfo pc{};pc.sType=VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;pc.queueFamilyIndex=instance.queueFamilyIndex;CHECK(vkCreateCommandPool(instance.device,&pc,nullptr,&pool));
     unity.Instance=Instance;unity.ConfigureEvent=Configure;unity.AccessTexture=Access;unity.AccessQueue=Queue;
     IUnityInterfaces interfaces{};interfaces.GetInterfaceSplit=Lookup;
@@ -96,6 +103,10 @@ int main() {
     for(int iteration=0;iteration<8;++iteration){
         bool nv12=(iteration%2)==0;auto owner=std::make_shared<Images>();FfuVkSample sample{};sample.width=32;sample.height=16;sample.planeCount=nv12?2:1;
         sample.context=FfuVkCurrent();sample.foreignQueue=VK_QUEUE_FAMILY_IGNORED;sample.owner=owner;
+        if(!nv12) {
+            sample.lock=[&](FfuVkSample& current){++locks;current.timeline=true;current.acquireSemaphore=timelineSemaphore;current.waitValue=timelineValue;current.signalValue=timelineValue+1;return true;};
+            sample.unlock=[&](bool submitted){++unlocks;if(submitted)++timelineValue;};
+        }
         VkSamplerCreateInfo si{};si.sType=VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;si.magFilter=si.minFilter=VK_FILTER_NEAREST;si.addressModeU=si.addressModeV=si.addressModeW=VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
         CHECK(vkCreateSampler(instance.device,&si,nullptr,&owner->sampler));
         command=Begin();
@@ -123,6 +134,8 @@ int main() {
         if(!packet || released!=iteration)return 1;
         FfuVkSubmit(packet);if(!deferred || released!=iteration)return 1;
         auto callback=deferred;deferred=nullptr;callback(251,deferredData);FfuVkPoll(true);
+        uint64_t actualTimeline=0;CHECK(vkGetSemaphoreCounterValue(instance.device,timelineSemaphore,&actualTimeline));
+        if(actualTimeline!=timelineValue || locks!=unlocks || locks!=(iteration+1)/2) { std::puts("FAIL frame lock/timeline protocol");return 1; }
         if(released!=iteration+1 || FfuVkPresenterError(presenter)){std::printf("FAIL lifetime/error %d %d\n",released,FfuVkPresenterError(presenter));return 1;}
         command=Begin();Barrier(command,output,VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
         VkBufferImageCopy copy{};copy.imageSubresource={VK_IMAGE_ASPECT_COLOR_BIT,0,0,1};copy.imageExtent={32,16,1};
@@ -131,7 +144,7 @@ int main() {
         for(size_t i=0;i<bytes;i+=4)for(int ch=0;ch<4;++ch){int expected=ch==3?255:nv12?64:(ch+1)*51;if(std::abs(int(mapped[i+ch])-expected)>1){std::printf("FAIL pixel %zu %d actual=%d expected=%d\n",i,ch,mapped[i+ch],expected);return 1;}}
         vkUnmapMemory(instance.device,readMemory);
     }
-    FfuVkPresenterRelease(presenter);FfuVkShutdown();vkDestroyBuffer(instance.device,readback,nullptr);vkFreeMemory(instance.device,readMemory,nullptr);
+    FfuVkPresenterRelease(presenter);FfuVkShutdown();vkDestroySemaphore(instance.device,timelineSemaphore,nullptr);vkDestroyBuffer(instance.device,readback,nullptr);vkFreeMemory(instance.device,readMemory,nullptr);
     vkDestroyImage(instance.device,output,nullptr);vkFreeMemory(instance.device,outputMemory,nullptr);vkDestroyCommandPool(instance.device,pool,nullptr);vkDestroyDevice(instance.device,nullptr);vkDestroyInstance(instance.instance,nullptr);
-    std::printf("PASS: shared Vulkan compute NV12/RGB, %d deferred submissions, %zu pixel bytes, GPU-fence owner retirement, cancellation, 24-packet cap, stale-device rejection\n",submitted,bytes*8);
+    std::printf("PASS: shared Vulkan compute NV12/RGB, %d deferred submissions, %zu pixel bytes, %d locked timeline submissions, GPU-fence owner retirement, cancellation, 24-packet cap, stale-device rejection\n",submitted,bytes*8,locks);
 }

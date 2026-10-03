@@ -5,7 +5,7 @@ using MajdataPlay.FFmpeg.Internal;
 
 namespace MajdataPlay.FFmpeg.Interop
 {
-    /// <summary>Linux DMA-BUF and Android AHardwareBuffer transport. No CPU image mapping.</summary>
+    /// <summary>Vulkan Video, Linux DMA-BUF, and Android AHardwareBuffer transport without CPU image mapping.</summary>
     internal static class VulkanVideoInterop
     {
 #if UNITY_ANDROID && !UNITY_EDITOR
@@ -32,10 +32,48 @@ namespace MajdataPlay.FFmpeg.Interop
                 case 2004: detail = "FFmpeg could not initialize the MediaCodec hardware device."; break;
                 case 2006: detail = "MediaCodec did not return the requested hardware image before the deadline."; break;
                 case 2010: detail = "This hardware image uses an unsupported color space or HDR transfer function."; break;
+                case 400: detail = "Vulkan Video was not negotiated before Unity device creation; enable plugin Preload and restart Unity."; break;
+                case 401: detail = "Vulkan Video requires Vulkan 1.3 on both the instance and physical device."; break;
+                case 402: detail = "The Vulkan driver could not report video decoding capabilities."; break;
+                case 403: detail = "The Vulkan driver does not expose video queue and video decode queue extensions."; break;
+                case 404: detail = "Vulkan Video requires timeline semaphores, synchronization2, and sampler YCbCr conversion."; break;
+                case 405: detail = "Unity's Vulkan feature chain could not be safely extended for video decoding."; break;
+                case 406: detail = "No independent graphics/compute queue is available for FFmpeg Vulkan operations."; break;
+                case 407: detail = "No compatible Vulkan video decode queue or codec extension is available."; break;
+                case 408: detail = "The driver rejected Vulkan Video device creation; Unity retained its original device configuration."; break;
+                case 409: detail = "The loaded FFmpeg library cannot allocate a Vulkan device context."; break;
+                case 410: detail = "The Vulkan video frame could not be retained."; break;
+                case 411: detail = "The decoded Vulkan image belongs to a different device than Unity."; break;
+                case 412: detail = "The decoded Vulkan frame has an unsupported image layout, layer count, or pixel format."; break;
+                case 413: detail = "A required Vulkan Video device function is unavailable."; break;
+                case 414: detail = "The Vulkan driver cannot sample the decoded format with YCbCr conversion."; break;
+                case 415: detail = "The Vulkan decoded frame has invalid dimensions."; break;
+                case 416: detail = "The Vulkan decoded frame has unsupported queue ownership or synchronization state."; break;
                 default: detail = "The native hardware image operation failed."; break;
             }
             return detail + " (native code " + error + ")";
         }
+        internal static IntPtr AcquireVideoDevice()
+        {
+#if UNITY_STANDALONE_WIN || UNITY_EDITOR_WIN || UNITY_STANDALONE_LINUX || UNITY_EDITOR_LINUX || (UNITY_ANDROID && !UNITY_EDITOR)
+            var device = Native.ffu_vulkan_video_acquire_device();
+            if (device == IntPtr.Zero)
+                throw new NotSupportedException("Vulkan Video device acquisition failed (native code " + Native.ffu_vulkan_video_status() + ").");
+            return device;
+#else
+            throw new PlatformNotSupportedException();
+#endif
+        }
+
+        internal static int VideoStatus()
+        {
+#if UNITY_STANDALONE_WIN || UNITY_EDITOR_WIN || UNITY_STANDALONE_LINUX || UNITY_EDITOR_LINUX || (UNITY_ANDROID && !UNITY_EDITOR)
+            return Native.ffu_vulkan_video_status();
+#else
+            return -1;
+#endif
+        }
+
         internal static IntPtr AcquireLinuxDevice()
         {
 #if UNITY_STANDALONE_LINUX || UNITY_EDITOR_LINUX
@@ -94,7 +132,7 @@ namespace MajdataPlay.FFmpeg.Interop
 
         internal static IntPtr Create()
         {
-#if UNITY_STANDALONE_LINUX || UNITY_EDITOR_LINUX || (UNITY_ANDROID && !UNITY_EDITOR)
+#if UNITY_STANDALONE_WIN || UNITY_EDITOR_WIN || UNITY_STANDALONE_LINUX || UNITY_EDITOR_LINUX || (UNITY_ANDROID && !UNITY_EDITOR)
             return Native.ffu_vulkan_create();
 #else
             return IntPtr.Zero;
@@ -102,7 +140,7 @@ namespace MajdataPlay.FFmpeg.Interop
         }
         internal static int Error(IntPtr presenter)
         {
-#if UNITY_STANDALONE_LINUX || UNITY_EDITOR_LINUX || (UNITY_ANDROID && !UNITY_EDITOR)
+#if UNITY_STANDALONE_WIN || UNITY_EDITOR_WIN || UNITY_STANDALONE_LINUX || UNITY_EDITOR_LINUX || (UNITY_ANDROID && !UNITY_EDITOR)
             return Native.ffu_vulkan_error(presenter);
 #else
             return -1;
@@ -110,6 +148,10 @@ namespace MajdataPlay.FFmpeg.Interop
         }
         internal static IntPtr Prepare(IntPtr presenter, DecodedVideoFrame frame, IntPtr target)
         {
+#if UNITY_STANDALONE_WIN || UNITY_EDITOR_WIN || UNITY_STANDALONE_LINUX || UNITY_EDITOR_LINUX || (UNITY_ANDROID && !UNITY_EDITOR)
+            if (frame.PixelFormat == global::FFmpeg.AutoGen.AVPixelFormat.AV_PIX_FMT_VULKAN)
+                return Native.ffu_vulkan_video_prepare(presenter, frame.NativeFrame, target);
+#endif
 #if UNITY_ANDROID && !UNITY_EDITOR
             return Native.ffu_android_prepare(presenter, frame.NativeImage, target);
 #elif UNITY_STANDALONE_LINUX || UNITY_EDITOR_LINUX
@@ -120,19 +162,19 @@ namespace MajdataPlay.FFmpeg.Interop
         }
         internal static void Cancel(IntPtr packet)
         {
-#if UNITY_STANDALONE_LINUX || UNITY_EDITOR_LINUX || (UNITY_ANDROID && !UNITY_EDITOR)
+#if UNITY_STANDALONE_WIN || UNITY_EDITOR_WIN || UNITY_STANDALONE_LINUX || UNITY_EDITOR_LINUX || (UNITY_ANDROID && !UNITY_EDITOR)
             Native.ffu_vulkan_cancel(packet);
 #endif
         }
         internal static void Release(IntPtr presenter)
         {
-#if UNITY_STANDALONE_LINUX || UNITY_EDITOR_LINUX || (UNITY_ANDROID && !UNITY_EDITOR)
+#if UNITY_STANDALONE_WIN || UNITY_EDITOR_WIN || UNITY_STANDALONE_LINUX || UNITY_EDITOR_LINUX || (UNITY_ANDROID && !UNITY_EDITOR)
             Native.ffu_vulkan_release(presenter);
 #endif
         }
         internal static int PollRetiredFrames()
         {
-#if UNITY_STANDALONE_LINUX || UNITY_EDITOR_LINUX || (UNITY_ANDROID && !UNITY_EDITOR)
+#if UNITY_STANDALONE_WIN || UNITY_EDITOR_WIN || UNITY_STANDALONE_LINUX || UNITY_EDITOR_LINUX || (UNITY_ANDROID && !UNITY_EDITOR)
             return Native.ffu_vulkan_poll();
 #else
             return 0;
@@ -177,7 +219,10 @@ namespace MajdataPlay.FFmpeg.Interop
         static class Native
         {
             const string Library = "FFmpegUnityBridge";
-#if UNITY_STANDALONE_LINUX || UNITY_EDITOR_LINUX || (UNITY_ANDROID && !UNITY_EDITOR)
+#if UNITY_STANDALONE_WIN || UNITY_EDITOR_WIN || UNITY_STANDALONE_LINUX || UNITY_EDITOR_LINUX || (UNITY_ANDROID && !UNITY_EDITOR)
+            [DllImport(Library, CallingConvention = CallingConvention.Cdecl)] internal static extern IntPtr ffu_vulkan_video_acquire_device();
+            [DllImport(Library, CallingConvention = CallingConvention.Cdecl)] internal static extern int ffu_vulkan_video_status();
+            [DllImport(Library, CallingConvention = CallingConvention.Cdecl)] internal static extern IntPtr ffu_vulkan_video_prepare(IntPtr presenter, IntPtr frame, IntPtr target);
             [DllImport(Library, CallingConvention = CallingConvention.Cdecl)] internal static extern IntPtr ffu_vulkan_create();
             [DllImport(Library, CallingConvention = CallingConvention.Cdecl)] internal static extern int ffu_vulkan_error(IntPtr presenter);
             [DllImport(Library, CallingConvention = CallingConvention.Cdecl)] internal static extern void ffu_vulkan_release(IntPtr presenter);

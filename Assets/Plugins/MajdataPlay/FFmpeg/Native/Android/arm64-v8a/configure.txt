@@ -1,5 +1,5 @@
-install prefix            /tmp/majdata-ffmpeg-build/install/android-arm64
-source path               /tmp/majdata-ffmpeg-build/source
+install prefix            /tmp/majdata-ffmpeg-native-video/install/android-arm64
+source path               /tmp/majdata-ffmpeg-native-video/source
 C compiler                clang --target=aarch64-linux-android23
 C library                 bionic
 host C compiler           gcc
@@ -38,6 +38,7 @@ External libraries:
 jni                     mediacodec
 
 External libraries providing hardware acceleration:
+vulkan
 
 Libraries:
 avcodec                 avformat                swscale
@@ -214,6 +215,8 @@ escape130               pcm_u32le
 Enabled encoders:
 
 Enabled hwaccels:
+av1_vulkan              hevc_vulkan
+h264_vulkan             vp9_vulkan
 
 Enabled parsers:
 aac                     evc                     mpegvideo
@@ -404,4 +407,4 @@ Enabled outdevs:
 
 License: LGPL version 2.1 or later
 
-WARNING: pkg-config not found, library detection may fail.
+WARNING: spirv-headers not found, swscale SPIR-V backend unavailable

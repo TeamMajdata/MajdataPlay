@@ -8,6 +8,7 @@
 #include "IUnityGraphics.h"
 #include "IUnityGraphicsVulkan.h"
 #include <atomic>
+#include <functional>
 #include <memory>
 #include <mutex>
 
@@ -36,6 +37,12 @@ struct FfuVkSample {
     VkImageLayout initialLayout = VK_IMAGE_LAYOUT_GENERAL;
     uint32_t foreignQueue = VK_QUEUE_FAMILY_FOREIGN_EXT;
     VkSemaphore acquireSemaphore = VK_NULL_HANDLE;
+    // FFmpeg frames use a timeline semaphore. lock is called immediately before
+    // recording/submission so layout and semaphore values cannot become stale.
+    bool timeline = false;
+    uint64_t waitValue = 0, signalValue = 0;
+    std::function<bool(FfuVkSample&)> lock;
+    std::function<void(bool)> unlock;
     float uvScaleOffset[4]{1, 1, 0, 0};
     std::shared_ptr<void> owner;
 };
@@ -45,6 +52,7 @@ bool FfuVkInitialize(IUnityInterfaces* interfaces);
 void FfuVkShutdown();
 std::shared_ptr<FfuVkContext> FfuVkCurrent();
 int FfuVkStatus();
+bool FfuVkExternalImportsAvailable();
 void FfuVkSetStatus(int status);
 void* FfuVkPresenterCreate();
 void FfuVkPresenterRelease(void* presenter);

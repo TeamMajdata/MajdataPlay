@@ -5,6 +5,8 @@
 #include "D3D12.h"
 #include "WglInterop.h"
 #include "VulkanInterop.h"
+#include "VulkanPortable.h"
+#include "VulkanVideoDecode.h"
 #include <mutex>
 #include <vector>
 #include <new>
@@ -90,8 +92,11 @@ void FfuPlatformInitialize(IUnityInterfaces* interfaces, UnityGfxRenderer render
         return;
     }
     if (renderer == kUnityGfxRendererVulkan) {
+        // Native Vulkan Video uses Unity's device independently of D3D11 and
+        // the external-memory extensions required by the legacy interop path.
+        FfuVkInitialize(interfaces);
         unityDevice = FfuVulkanInitialize(interfaces);
-        initializationStatus = unityDevice ? 0 : FfuVulkanError(nullptr);
+        initializationStatus = unityDevice || FfuVulkanVideoAvailable() ? 0 : FfuVulkanError(nullptr);
         return;
     }
     if (renderer == kUnityGfxRendererOpenGLCore) {
@@ -137,17 +142,18 @@ void FfuPlatformShutdown() {
     Retire(true);
     FfuD3D12Shutdown();
     FfuVulkanShutdown();
+    FfuVkShutdown();
     std::lock_guard<std::mutex> guard(deviceMutex);
     Release(unityDevice);
 }
 int FfuPlatformCapabilities() {
     std::lock_guard<std::mutex> guard(deviceMutex);
-    if (!unityDevice) return 0;
     switch (activeRenderer) {
-        case kUnityGfxRendererD3D11: return FfuD3D11GpuConversion;
-        case kUnityGfxRendererD3D12: return FfuD3D12GpuCopy;
-        case kUnityGfxRendererOpenGLCore: return FfuWglGpuInterop;
-        case kUnityGfxRendererVulkan: return FfuVulkanGpuCopy;
+        case kUnityGfxRendererD3D11: return unityDevice ? FfuD3D11GpuConversion : 0;
+        case kUnityGfxRendererD3D12: return FfuD3D12Capabilities();
+        case kUnityGfxRendererOpenGLCore: return unityDevice ? FfuWglGpuInterop : 0;
+        case kUnityGfxRendererVulkan: return (unityDevice ? FfuVulkanGpuCopy : 0) |
+            (FfuVulkanVideoAvailable() ? FfuVulkanVideoDecode : 0);
         default: return 0;
     }
 }
@@ -320,7 +326,9 @@ FFU_EXPORT int FFU_CALL ffu_wgl_retirement_poll(void* value) {
     return 1;
 }
 void FfuPlatformRender(int event, void* data) {
-    if (event == FfuPrepareD3D12 || event == FfuSubmitD3D12) { FfuD3D12Render(event, data); return; }
+    if (event == FfuPrepareD3D12 || event == FfuSubmitD3D12 ||
+        event == FfuPrepareNativeD3D12 || event == FfuSubmitNativeD3D12) { FfuD3D12Render(event, data); return; }
+    if (event == FfuSubmitPortableVulkan && data) { FfuVkSubmit(data); return; }
     if (event == FfuSubmitD3D11) { FfuD3D11Submit(data); return; }
     if (event == FfuSubmitWgl && data) {
         auto* packet = static_cast<Packet*>(data);
@@ -347,6 +355,7 @@ void FfuPlatformRender(int event, void* data) {
     if (event == FfuDrain) {
         if (activeRenderer == kUnityGfxRendererD3D12) FfuD3D12Poll(true);
         if (activeRenderer == kUnityGfxRendererVulkan) FfuVulkanPoll(true);
+        if (activeRenderer == kUnityGfxRendererVulkan) FfuVkPoll(true);
         for (auto it = retiringWgl.begin(); it != retiringWgl.end();) {
             if (FfuWglDestroy((*it)->surface)) { (*it)->complete = true; it = retiringWgl.erase(it); }
             else ++it;

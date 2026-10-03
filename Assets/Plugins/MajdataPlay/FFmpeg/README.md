@@ -2,12 +2,12 @@
 
 将 **FFmpeg Video Player** 挂在 GameObject 上，填写 Source，在 Play Mode Inspector 中可以预载、播放、暂停、停止和拖动时间轴。组件只播放视频；音轨由 MajdataPlay 现有音频系统处理。
 
-运行时程序集为 `MajdataPlay.Video`，引用项目已接入的 `FFmpeg.AutoGen` 和 `MajdataPlay.Diagnostics`。本项目绑定的原生 ABI 是 FFmpeg **9.0.1**；请使用 [Tools/FFmpeg](../../../Tools/FFmpeg) 的构建脚本，不能混用其他主版本的库。Mono / IL2CPP 使用同一套直接 P/Invoke 和带 `MonoPInvokeCallback` 的静态回调。
+运行时程序集为 `MajdataPlay.FFmpeg`，引用项目已接入的 `FFmpeg.AutoGen` 和 `MajdataPlay.Diagnostics`。本项目绑定的原生 ABI 是 FFmpeg **9.0.1**；请使用 [Tools/FFmpeg](../../../../Tools/FFmpeg) 的构建脚本，不能混用其他主版本的库。Mono / IL2CPP 使用同一套直接 P/Invoke 和带 `MonoPInvokeCallback` 的静态回调。
 
 ## 使用
 
 ```csharp
-using MajdataPlay.Video;
+using MajdataPlay.FFmpeg;
 using UnityEngine;
 using UnityEngine.UI;
 
@@ -76,22 +76,26 @@ public sealed class VideoExample : MonoBehaviour
 | 后端 | 通用播放 | 可选原生路径 |
 | --- | --- | --- |
 | D3D11 | RGBA 上传 | 同 Unity device 的 D3D11VA 解码，视频处理器在 GPU 上转为 RGBA，无 CPU 回读；有 GPU 转换，不是严格零拷贝 |
-| D3D12 | RGBA 上传 | Windows：同适配器 D3D11VA 解码，经共享 RGBA 资源、双向 GPU fence、GPU copy 进入 Unity；无 CPU 回读 |
+| D3D12 | RGBA 上传 | Windows：优先在 Unity 的 D3D12 device 上进行 D3D12VA 解码，视频处理队列转为 RGBA，再由 Unity 队列复制至显示纹理；不支持时尝试同适配器 D3D11VA 共享路径；均无 CPU 回读 |
 | OpenGL / OpenGL ES | RGBA 上传 | Windows OpenGL Core：WGL_NV_DX_interop2 共享 D3D11VA 转换后的 RGBA 纹理；Linux/Android 可使用 VAAPI/MediaCodec 硬件解码后 CPU 上传 |
-| Vulkan | RGBA 上传 | Windows：D3D11VA 共享 RGBA 导入；Linux：VAAPI → DRM_PRIME/DMA-BUF 平面导入；Android：MediaCodec Surface → AImageReader/AHardwareBuffer 导入。三者均在 GPU 上转换/复制至 Unity RenderTexture，无 CPU 像素回读 |
+| Vulkan | RGBA 上传 | Windows/Linux/Android：优先 Vulkan Video，在 Unity 的 VkDevice 上解码，直接采样 AVVkFrame 的 YUV 图像并在 GPU 上转换至显示纹理。不支持时依次尝试平台共享路径：Windows D3D11VA、Linux VAAPI DMA-BUF、Android MediaCodec AHardwareBuffer；均无 CPU 像素回读 |
 | Metal | RGBA 上传 | VideoToolbox 的 NV12 CVPixelBuffer 通过 CVMetalTextureCache 零拷贝映射平面；着色器再在 GPU 转为 RGBA |
 
 Metal 的平面映射和 Windows OpenGL 的纹理映射不复制像素，但最终 RGBA 显示包含 GPU 转换。Windows 四条硬件路径都避免 CPU 像素回读/上传；D3D12、Vulkan 仍有 GPU copy，不能将其称为严格的端到端零拷贝。外部纹理必须保留帧引用直到 GPU 完成；原生桥接承担此生命周期，不应自行释放返回的 Texture。
 
 非严格模式下，共享不可用时仍先保留硬件解码：D3D11VA/VAAPI/VideoToolbox 在工作线程下载原始硬件帧并转为 RGBA；Android 重开无 Surface 的 MediaCodec 硬件 ByteBuffer 输出。Unity 主线程只上传已准备的 RGBA。该路径报告 `Hardware decode + CPU RGBA upload`，确实包含 CPU 像素传输；它失败后才改用 `Software RGBA upload`。恢复会保留播放/暂停状态与可 seek 输入的时间位置，输入打开及 I/O 仍在工作线程执行。
 
-Windows/Linux/Android 的 Vulkan 桥接必须保持 PluginImporter 的 **Preload** 开启，以便在 Unity 创建设备前启用共享扩展；Apple 桥接使用显式注册。替换原生库或更改该设置后重启 Editor。Windows/Apple 桥接 ABI 为 2，Linux/Android 为 3。D3D12 需要 Unity D3D12 V8 插件接口和支持共享 fence 的驱动；OpenGL 需要 WGL_NV_DX_interop2；Windows Vulkan 需要 Win32 外部内存与 keyed mutex。Inspector 显示失败原因，RequireHardwareDecoding 决定报错还是回退。
+Windows/Linux/Android 的 Vulkan 桥接必须保持 PluginImporter 的 **Preload** 开启，以便在 Unity 创建设备前协商视频队列、扩展和功能；Apple 桥接使用显式注册。替换原生库或更改该设置后重启 Editor。Windows/Linux/Android 桥接 ABI 为 **4**，Apple 保持 **2**。D3D12 需要 Unity D3D12 V8 插件接口，原生解码要求设备支持相应视频解码与视频处理格式；OpenGL 需要 WGL_NV_DX_interop2；Windows Vulkan 的 D3D11VA 共享回退需要 Win32 外部内存与 keyed mutex。
+
+Vulkan Video 路径要求 Vulkan 1.3、timeline semaphore、synchronization2、YCbCr 采样、对应编码的 video decode 扩展，以及可供 FFmpeg 独立使用的队列。插件保留 Unity 原有功能链，为 FFmpeg 分配独立队列，并用解码帧的 timeline semaphore 同步显示与帧复用。若驱动不接受扩展后的设备创建请求，会恢复 Unity 原本的设备请求，日志报告原因并尝试平台后端。当前原生 GPU 转换支持单图像 NV12/P010/P016 SDR 帧；不支持的布局、格式或 HDR 会触发明确的回退/错误。
+
+原生解码器与图形 API 分开检测。只有 FFmpeg 编译支持、编码配置、GPU 与驱动同时满足条件才会使用 D3D12VA 或 Vulkan Video，不能由 Unity 使用 D3D12/Vulkan 推断硬解一定可用。原生后端初始化或播放中失败时先尝试上述平台硬解路径；非严格模式再允许硬解加 CPU 上传、最后软件解码。`RequireHardwareDecoding` 允许在无 CPU 像素传输的硬件后端之间回退。`DecoderDevice`、`TransferMode` 和日志会报告实际选中的路径；新路径分别报告 `D3D12VA native decode + GPU conversion (no CPU readback)` 和 `Vulkan Video native decode + GPU conversion (no CPU readback)`。VP8 等没有对应 FFmpeg 硬件配置的编码仍会按既定策略回退。
 
 Linux 路径按 Vulkan 物理设备的 DRM render node 创建 VAAPI 解码设备，使用 `AV_HWFRAME_MAP_READ | AV_HWFRAME_MAP_DIRECT` 导出 DMA-BUF；解码完成同步在工作线程等待，不映射视频像素。需要系统提供对应显卡的 VAAPI 驱动、DRM render node 访问权限，以及 Vulkan DMA-BUF、DRM modifier、foreign queue 扩展。播放器随库打包 libva/libdrm，不打包显卡驱动。目前硬件转换支持 8-bit NV12 SDR BT.601/709；不支持的 P010/HDR 等格式明确失败，严格模式下不回读。
 
 Android GPU 路径需要 API 26+、Vulkan 1.1 与 AHardwareBuffer/外部同步/YCbCr 采样能力。通过 JNI MediaCodec 的硬件 codec 选择器输出到 PRIVATE AImageReader，导入 AHardwareBuffer 和 acquire fence；帧被 GPU 使用完后才归还 reader。API 23–25 仍可加载 FFmpeg，并可尝试 MediaCodec ByteBuffer 加 CPU 上传，但不能开启 AHardwareBuffer 共享。首版 GPU 转换支持 SDR BT.601/709，HDR 不做隐式错误转换。APK 内输入文件需先提取；这只复制编码后的文件，不是解码像素回读。
 
-原生互操作代码在 [Tools/FFmpeg/Native](../../../Tools/FFmpeg/Native)，附有 Unity `PluginAPI` 和 Vulkan 头文件及许可。平台编译与实际设备验证范围见下方测试结果；尤其 Android/Linux Vulkan 的设备兼容性不能由交叉编译结果代替。另见 [Unity 外部纹理文档](https://docs.unity3d.com/6000.3/Documentation/ScriptReference/Texture2D.CreateExternalTexture.html) 和 [FFmpeg 硬件帧接口](https://ffmpeg.org/doxygen/trunk/hwcontext_8h.html)。
+原生互操作代码在 [Tools/FFmpeg/Native](../../../../Tools/FFmpeg/Native)，附有 Unity `PluginAPI` 和 Vulkan 头文件及许可。平台编译与实际设备验证范围见下方测试结果；尤其 Android/Linux Vulkan 的设备兼容性不能由交叉编译结果代替。另见 [Unity 外部纹理文档](https://docs.unity3d.com/6000.3/Documentation/ScriptReference/Texture2D.CreateExternalTexture.html) 和 [FFmpeg 硬件帧接口](https://ffmpeg.org/doxygen/trunk/hwcontext_8h.html)。
 
 ## 平台与输入边界
 
@@ -103,4 +107,4 @@ Android GPU 路径需要 API 26+、Vulkan 1.1 与 AHardwareBuffer/外部同步/Y
 
 ## 验证
 
-[Tools/Tests/FFmpegValidation](../../../Tools/Tests/FFmpegValidation) 包含真实 FFmpeg 解码/seek/EOF/取消/有界队列测试，以及隔离 Unity Player 验证脚本。构建成功、Player 启动成功、纹理互操作通过是不同验收项；实际结果见 [RESULTS.md](../../../Tools/Tests/FFmpegValidation/RESULTS.md)。其他 OS 和移动设备的图形/驱动行为需要在目标设备复验。
+[Tools/Tests/FFmpegValidation](../../../../Tools/Tests/FFmpegValidation) 包含真实 FFmpeg 解码/seek/EOF/取消/有界队列测试，以及隔离 Unity Player 验证脚本。构建成功、Player 启动成功、纹理互操作通过是不同验收项；实际结果见 [RESULTS.md](../../../../Tools/Tests/FFmpegValidation/RESULTS.md)。其他 OS 和移动设备的图形/驱动行为需要在目标设备复验。

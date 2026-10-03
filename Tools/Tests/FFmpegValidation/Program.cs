@@ -3,7 +3,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Threading;
-using MajdataPlay.Video.Internal;
+using MajdataPlay.FFmpeg.Internal;
 using FFmpeg.AutoGen;
 
 static class Program
@@ -28,6 +28,7 @@ static class Program
             TestHardwareRequirement(Path.GetFullPath(args[1]));
             TestHardwareCpuUpload(Path.GetFullPath(args[1]));
             TestHardwareMappingFailure(Path.GetFullPath(args[1]));
+            TestHardwareBackendFallback(Path.GetFullPath(args[1]));
             TestConversion();
             TestDecoder(Path.GetFullPath(args[1]));
             TestSession(Path.GetFullPath(args[1]));
@@ -209,6 +210,60 @@ static class Program
             }
         }
     }
+    static unsafe void TestHardwareBackendFallback(string media)
+    {
+        foreach (var backend in new[] { AVHWDeviceType.AV_HWDEVICE_TYPE_D3D12VA, AVHWDeviceType.AV_HWDEVICE_TYPE_VULKAN })
+        {
+            var codec = ffmpeg.avcodec_find_decoder(AVCodecID.AV_CODEC_ID_H264);
+            bool advertised = false;
+            for (int index = 0; ; index++)
+            {
+                var config = ffmpeg.avcodec_get_hw_config(codec, index);
+                if (config == null) break;
+                advertised |= config->device_type == backend && (config->methods & 1) != 0;
+            }
+            Check(advertised, "staged H.264 decoder advertises " + backend);
+            foreach (bool strict in new[] { false, true })
+            {
+                int attempts = 0;
+                var options = new DecoderOptions {
+                    HardwareDeviceType = backend, KeepNativeFrames = true,
+                    RequireHardwareDecoding = strict, AllowHardwareCpuUpload = false,
+                    AcquireHardwareDevice = () => { attempts++; throw new NotSupportedException("injected native API device failure"); },
+                    FallbackHardwareOptions = new DecoderOptions {
+                        HardwareDeviceType = AVHWDeviceType.AV_HWDEVICE_TYPE_D3D11VA,
+                        KeepNativeFrames = strict, RequireHardwareDecoding = strict, AllowHardwareCpuUpload = !strict,
+                        AcquireHardwareDevice = () => {
+                            AVBufferRef* device = null;
+                            FFmpegVideoDecoder.Check(ffmpeg.av_hwdevice_ctx_create(&device,
+                                AVHWDeviceType.AV_HWDEVICE_TYPE_D3D11VA, null, null, 0), "create native backend fallback device");
+                            return (IntPtr)device;
+                        }
+                    }
+                };
+                using (var decoder = new FFmpegVideoDecoder(options))
+                {
+                    decoder.Open(media, CancellationToken.None);
+                    Check(attempts == 1, "preferred API is attempted once before platform fallback");
+                    Check(decoder.ActiveHardwareDeviceType == AVHWDeviceType.AV_HWDEVICE_TYPE_D3D11VA,
+                        "failed native API selects the platform hardware decoder");
+                    Check(decoder.HardwareFallbackReason.Contains("injected native API device failure"), "native API failure remains diagnosable");
+                    using (var frame = decoder.ReadFrame())
+                    {
+                        Check(frame != null && frame.HardwareDecoded, "platform fallback actually decodes a hardware frame");
+                        Check(strict ? frame.IsHardwareFrame && frame.Data == IntPtr.Zero : !frame.IsHardwareFrame && frame.Data != IntPtr.Zero,
+                            "platform fallback preserves the CPU transport policy");
+                    }
+                    double position = Math.Min(1, decoder.Duration / 2);
+                    decoder.Seek(position);
+                    using (var frame = decoder.ReadFrame())
+                        Check(frame != null && frame.HardwareDecoded && frame.PresentationTime + frame.Duration >= position - 0.05,
+                            "platform backend remains seekable after native API failure");
+                }
+            }
+        }
+    }
+
     static unsafe void TestConversion()
     {
         var source = ffmpeg.av_frame_alloc();

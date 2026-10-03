@@ -1,7 +1,7 @@
 using System;
 using System.Runtime.InteropServices;
 using FFmpeg.AutoGen;
-using MajdataPlay.Video.Internal;
+using MajdataPlay.FFmpeg.Internal;
 
 // Real libswscale output tests. No Unity graphics device is required.
 static unsafe class ConverterChecks

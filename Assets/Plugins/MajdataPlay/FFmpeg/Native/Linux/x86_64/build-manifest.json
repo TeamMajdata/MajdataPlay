@@ -17,9 +17,9 @@
     "note": "All upstream public headers present in the binding header snapshot are compared after CRLF normalization before building. Generated avconfig.h and ffversion.h are excluded."
   },
   "host": "Linux-6.18.40.1-microsoft-standard-WSL2-x86_64-with-glibc2.39",
-  "builtUtc": "2026-10-03T13:37:46.397591+00:00",
+  "builtUtc": "2026-10-03T17:19:24.930984+00:00",
   "configure": [
-    "--prefix=/tmp/majdata-ffmpeg-vulkan/install/linux-x64",
+    "--prefix=/tmp/majdata-ffmpeg-native-video/install/linux-x64",
     "--disable-doc",
     "--disable-programs",
     "--disable-debug",
@@ -38,44 +38,88 @@
     "--cc=cc",
     "--enable-vaapi",
     "--enable-libdrm",
-    "--pkg-config=/mnt/c/Users/LeZi/source/repos/LingFeng-bbben/MajdataPlay/Tools/FFmpeg/.build/toolchains/vaapi-packages/root/usr/bin/pkg-config"
+    "--pkg-config=/mnt/c/Users/LeZi/source/repos/LingFeng-bbben/MajdataPlay/Tools/FFmpeg/.build/toolchains/vaapi-packages/root/usr/bin/pkg-config",
+    "--enable-vulkan",
+    "--disable-vulkan-static",
+    "--extra-cflags=-I/mnt/c/Users/LeZi/source/repos/LingFeng-bbben/MajdataPlay/Tools/FFmpeg/.build/toolchains/Vulkan-Headers-vulkan-sdk-1.4.328.1/include",
+    "--disable-hwaccel=apv_vulkan,dpx_vulkan,ffv1_vulkan,prores_raw_vulkan,prores_vulkan"
   ],
   "files": [
     {
       "file": "libavcodec.so.63",
-      "bytes": 16056297,
-      "sha256": "84e1e281ab6a74203dab012421c6c30c33428f9d15355f01d3a24d9981c84bb3"
+      "bytes": 16179225,
+      "sha256": "90d4311bf79a67b52ca04515c58a3ed222e715bb33bc4969f643a133eed9d310"
     },
     {
       "file": "libavdevice.so.63",
       "bytes": 17993,
-      "sha256": "2501cae989d327ef5d0a46f46d76b973f7cbc17b9e63196ec30e21ee193fea1d"
+      "sha256": "960fe154167718b587a3bdeae896fc8d43d793b0811b85055d166f3368fc4e49"
     },
     {
       "file": "libavfilter.so.12",
       "bytes": 152713,
-      "sha256": "f2938c09a0ebcba8e560ff6776d07032d29340ad96304cff6004371e4c318ba9"
+      "sha256": "6dad9bc7338aa6a321e8279b4f79ca6a0485f9484777c244075d5abdfe471d56"
     },
     {
       "file": "libavformat.so.63",
       "bytes": 2019785,
-      "sha256": "8aa3a7113b36c16ca7092f8665b959f46af6cb5443f8e9c16cfa1deb19b7520b"
+      "sha256": "4c842b4e73a2b79141bcc6228e012fba6245a7375aa44a7c0d6e859acac2b9fa"
     },
     {
       "file": "libavutil.so.61",
-      "bytes": 1060553,
-      "sha256": "c10bca21479a628636c74e73680db688f5239d498a6b367268d5d5e8cdf4d0d8"
+      "bytes": 1175369,
+      "sha256": "d3d881e0bd609960df6d7f9890fb45d8215cbaf8e06c0521f5682a092de96d48"
     },
     {
       "file": "libswresample.so.7",
-      "bytes": 141417,
-      "sha256": "8dde1e5eeb17d14939cbbeb9fb50eabb82bd4df386b74b102a2e921467d6615f"
+      "bytes": 145513,
+      "sha256": "bdf035192cc508b01e4bd3c3cb331084037dbb65ece1a45ea9348d2f1caea66d"
     },
     {
       "file": "libswscale.so.10",
-      "bytes": 2100737,
-      "sha256": "e0805280f717fec246fe25bc2e5a2340b0ab6b2e77a6fc73a4130bb9c0b835f4"
+      "bytes": 2154177,
+      "sha256": "10f42c4cbce34185c9ffb92249b7c070e434a6b698cd2128072631da88298c4a"
     }
   ],
-  "postProcessing": "patchelf --set-rpath $ORIGIN (verified by --print-rpath)"
+  "buildDependencies": {
+    "vulkanHeaders": {
+      "repository": "https://github.com/KhronosGroup/Vulkan-Headers.git",
+      "tag": "vulkan-sdk-1.4.328.1",
+      "commit": "19725e4d48082fe78e26622b15d3080ccd54112b",
+      "minimumHeaderVersion": 317
+    },
+    "llvmMingw": {
+      "version": "20260922",
+      "repository": "https://github.com/mstorsjo/llvm-mingw",
+      "archives": {
+        "Linux-x86_64": {
+          "file": "llvm-mingw-20260922-ucrt-ubuntu-22.04-x86_64.tar.xz",
+          "sha256": "bb7bb7654b33d5aa8712acb837c963b2e0c56352560c76105270a3268c665c21"
+        },
+        "Darwin-universal": {
+          "file": "llvm-mingw-20260922-ucrt-macos-universal.tar.xz",
+          "sha256": "52e5f5a7b131021d0c39a37a38fa380a1da7885cd04bd61afd0cd4ecfb8bc1f3"
+        },
+        "Windows-x86_64": {
+          "file": "llvm-mingw-20260922-ucrt-x86_64.zip",
+          "sha256": "e3ad77d117a4bea19a7a3b333341824d79a5a371004a10e25b8504e7b3047666"
+        }
+      }
+    }
+  },
+  "verifiedHardwareBackends": [
+    "VULKAN",
+    "H264_VULKAN_HWACCEL",
+    "HEVC_VULKAN_HWACCEL",
+    "AV1_VULKAN_HWACCEL",
+    "VP9_VULKAN_HWACCEL"
+  ],
+  "postProcessing": "patchelf --set-rpath $ORIGIN (verified by --print-rpath)",
+  "buildDependencyLicenses": [
+    {
+      "file": "Vulkan-Headers.LICENSE.txt",
+      "sha256": "dd5e3849fb892384ba4b7e88b73e87600d3164f1ec3216b44b06a6458fff483a",
+      "license": "Apache-2.0"
+    }
+  ]
 }

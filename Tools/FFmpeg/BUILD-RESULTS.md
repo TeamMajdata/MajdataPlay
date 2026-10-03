@@ -1,4 +1,24 @@
-# 构建记录（2026-10-03）
+# FFmpeg 构建记录
+
+## 2026-10-04：原生 D3D12VA / Vulkan Video
+
+重新编译并交付了 Windows x64/x86、Linux x64、Android ARM64/ARMv7 的全部 35 个 FFmpeg 库，输出目录已跟随项目移动到 `Assets/Plugins/MajdataPlay/FFmpeg/Native`，已有插件 GUID 保留。Apple 的 35 个 device/macOS/simulator 库保持此前产物。
+
+| 目标 | 本次实际工具链 | 新增且核验的后端 |
+| --- | --- | --- |
+| Windows x64、x86 | WSL Ubuntu 24.04 MinGW-w64 GCC 13-win32、NASM；固定 LLVM-MinGW 20260922 中的最小 D3D12 头文件覆盖 | H.264 / HEVC / AV1 / VP9 的 D3D12VA 与 Vulkan Video |
+| Linux x64 | WSL GCC、NASM，原有隔离 libva/libdrm 开发依赖 | H.264 / HEVC / AV1 / VP9 的 Vulkan Video；保留 VAAPI |
+| Android ARM64、ARMv7 | NDK r27c、API 23、16 KiB ELF LOAD 对齐 | H.264 / HEVC / AV1 / VP9 的 Vulkan Video；保留 MediaCodec |
+
+Vulkan-Headers 固定 SDK 1.4.328.1 / commit `19725e4d48082fe78e26622b15d3080ccd54112b`。Windows 使用的 `d3d12.h` 和 `d3d12video.h` 均按 `dependencies.lock.json` 的 SHA256 校验；未覆盖 GCC 原配的 CRT 头文件与链接库。完整 LLVM-MinGW 的 Windows/Linux/macOS 官方压缩包也已锁定 SHA256，正常构建可自动下载，已有工具链可显式提供。
+
+FFmpeg 编译前逐项确认请求的硬件后端未被 configure 静默禁用。Windows x64 和 Linux x64 另外实际加载新库，通过 `avcodec_get_hw_config()` 确认四种编码格式的对应原生硬件配置已经导出。完整产物验证通过 70 个 FFmpeg 库的哈希、架构和元数据检查，包括新的 Android 16 KiB 对齐以及 Linux 原生 ABI 与随附依赖许可检查。五个新增 Vulkan 构建目录携带 Khronos 署名、Apache-2.0 全文和许可 SHA256。
+
+本机 MSYS2 的简单命令可执行，但 FFmpeg configure 的子进程树仍遇到 `child_copy / dofork` 错误，因此 Windows 库最终由 WSL GCC 编译；没有修改系统安全设置。x64 初次从 WSL stage 时遇到目标文件占用，随后用 Windows 进程复制保留的完整 prefix 成功。WSL 临时缓存自动消失后，x64 清单从新库的 `avutil_configuration()` 恢复准确参数，并再次实际查询硬件配置；清单中的 `stagingRecovery` 明确记录该过程。新脚本会在 stage 前将构建证据保存在安装 prefix，并原子写入清单，避免临时文件映射造成元数据写入失败。
+
+这些结果证明原生后端编译和部署完整，不能据此认定所有 GPU 都能硬解。本机 RX 580 的 D3D12 Video Decode Tier 1 不满足当前固定 FFmpeg D3D12VA 实现的 Tier 2 要求；实际播放器回退、GPU 帧呈现与设备限制的验证另见 `Tools/Tests/FFmpegValidation/RESULTS.md`。本机 WSL 仍没有真实 DRM 渲染设备，Android 的 Vulkan Video 能力也由真机驱动决定。
+
+## 2026-10-03：首次全平台构建
 
 ## 已生成产物
 
@@ -56,7 +76,7 @@ Windows 的 WSL 一键入口（Apple 目标会明确显示 SKIP；Linux 需系�
 
 最终 Linux FFmpeg 在 `/tmp/majdata-ffmpeg-vulkan` 重新构建，清单包含 `--enable-vaapi --enable-libdrm`。依赖下载后解包到项目 `.build/toolchains/vaapi-packages/root`，通过其 `pkg-config` 包装器、`PKG_CONFIG_PATH`、`PKG_CONFIG_SYSROOT_DIR` 和构建进程内的 `LD_LIBRARY_PATH` 提供；桥接随后从最终库独立构建并 stage。完整隔离环境命令见 [README.md](README.md#工具链矩阵)。2026-10-03 已用该环境重新执行 `--targets linux-x64 --probe --require-all`，输出 libva pkg-config API 版本 `1.20.0`、libdrm `2.4.125` 和 `READY linux-x64`，未重新编译或覆盖最终二进制。
 
-首次构建或缓存被清理后会重新获取已锁定的 FFmpeg 源码；不会静默改用新的版本。依赖缓存不由脚本自动下载，必须按 README 准备。
+首次构建或缓存被清理后会重新获取已锁定的 FFmpeg 源码；不会静默改用新的版本。当时的依赖缓存需手工准备；2026-10-04 的脚本已增加固定 Vulkan-Headers / LLVM-MinGW 自动下载，其余 SDK 与 VAAPI 依赖仍按 README 准备。
 Linux 成品在 stage 阶段用 `patchelf --set-rpath '$ORIGIN'` 处理并逐库读回验证，文件 hash 在处理后计算。构建脚本默认同时构建支持平台的原生桥接；iOS 不允许省略它。
 
 完整 Unity 画面、时间轴、速率、预载、生命周期与图形 API 结果由本次主测试记录提供；此文件仅陈述原生库构建和二进制复验事实。播放器按项目需求不输出音轨。

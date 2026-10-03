@@ -1,0 +1,33 @@
+{
+  "vulkanHeaders": {
+    "repository": "https://github.com/KhronosGroup/Vulkan-Headers.git",
+    "tag": "vulkan-sdk-1.4.328.1",
+    "commit": "19725e4d48082fe78e26622b15d3080ccd54112b",
+    "minimumHeaderVersion": 317
+  },
+  "d3d12HeaderOverlay": {
+    "source": "llvm-mingw-20260922-ucrt-x86_64.zip",
+    "files": {
+      "d3d12.h": "23935395fe8939ac0ca71c5b34cd7b21a689ff5e9641846563613f24bc0dd85e",
+      "d3d12video.h": "23216f1bcb62c8c0c9e09d66cf12d639eb1abcad9a1ba31e0d517a428cd56aee"
+    }
+  },
+  "llvmMingw": {
+    "version": "20260922",
+    "repository": "https://github.com/mstorsjo/llvm-mingw",
+    "archives": {
+      "Linux-x86_64": {
+        "file": "llvm-mingw-20260922-ucrt-ubuntu-22.04-x86_64.tar.xz",
+        "sha256": "bb7bb7654b33d5aa8712acb837c963b2e0c56352560c76105270a3268c665c21"
+      },
+      "Darwin-universal": {
+        "file": "llvm-mingw-20260922-ucrt-macos-universal.tar.xz",
+        "sha256": "52e5f5a7b131021d0c39a37a38fa380a1da7885cd04bd61afd0cd4ecfb8bc1f3"
+      },
+      "Windows-x86_64": {
+        "file": "llvm-mingw-20260922-ucrt-x86_64.zip",
+        "sha256": "e3ad77d117a4bea19a7a3b333341824d79a5a371004a10e25b8504e7b3047666"
+      }
+    }
+  }
+}

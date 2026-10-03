@@ -4,7 +4,7 @@ using System.IO;
 using System.Reflection;
 using System.Threading.Tasks;
 using MajdataPlay.Diagnostics;
-using MajdataPlay.Video;
+using MajdataPlay.FFmpeg;
 using UnityEngine;
 
 public sealed class FFmpegPlayerSmoke : MonoBehaviour
@@ -205,8 +205,19 @@ public sealed class FFmpegPlayerSmoke : MonoBehaviour
         _player.Play();
         var recover = typeof(FFmpegVideoPlayer).GetMethod("RecoverHardwarePlayback", BindingFlags.Instance | BindingFlags.NonPublic);
         Check(recover != null, "native presentation recovery entry point exists");
+        bool nativeDecoder = _player.DecoderDevice.Contains("D3D12VA") || _player.DecoderDevice.Contains("Vulkan Video");
         recover.Invoke(_player, new object[] { new NotSupportedException("Injected native texture import failure for hardware CPU fallback") });
         waitStart = UnityEngine.Time.realtimeSinceStartup;
+        if (nativeDecoder)
+        {
+            while (!_player.IsPrepared || _player.TransferMode.StartsWith("Reopening", StringComparison.Ordinal)) { CheckTimeout(waitStart); yield return null; }
+            Check(_player.DecoderType == VideoDecoderType.Hardware && _player.TransferMode != "Hardware decode + CPU RGBA upload",
+                "native API failure first recovers through the platform GPU backend");
+            Check(!_player.DecoderDevice.Contains("D3D12VA") && !_player.DecoderDevice.Contains("Vulkan Video"),
+                "recovery selects a different hardware API");
+            recover.Invoke(_player, new object[] { new NotSupportedException("Injected platform texture import failure for hardware CPU fallback") });
+            waitStart = UnityEngine.Time.realtimeSinceStartup;
+        }
         while (!_player.IsPrepared || _player.TransferMode != "Hardware decode + CPU RGBA upload") { CheckTimeout(waitStart); yield return null; }
         Check(_player.DecoderType == VideoDecoderType.Hardware, "native presentation failure retains hardware decoding through CPU transport");
         Check(_player.IsPlaying && !string.IsNullOrEmpty(_player.HardwareFallbackReason), "recovery retains play intent and reports the failed native path");
@@ -383,11 +394,21 @@ public sealed class FFmpegPlayerSmoke : MonoBehaviour
     void CheckHardwarePath()
     {
         if (Argument("-videoRequireHardware") == "true")
-            Check(!_player.TransferMode.StartsWith("Software", StringComparison.Ordinal) && string.IsNullOrEmpty(_player.HardwareFallbackReason),
+            Check(_player.DecoderType == VideoDecoderType.Hardware && !_player.TransferMode.StartsWith("Software", StringComparison.Ordinal) &&
+                _player.TransferMode != "Hardware decode + CPU RGBA upload",
                 "hardware presentation required; actual=" + _player.TransferMode + "; fallback=" + _player.HardwareFallbackReason);
     }
     void CheckDecoderIdentity()
     {
+        var native = Argument("-videoNativeDecoder");
+        if (native == "d3d12" || native == "vulkan")
+        {
+            string expected = native == "d3d12" ? "D3D12VA" : "Vulkan Video";
+            Check(_player.DecoderType == VideoDecoderType.Hardware && _player.DecoderDevice.Contains(expected),
+                "required native decoder is active: " + expected + "; actual=" + _player.DecoderDevice);
+            Check(_player.TransferMode.StartsWith(expected + " native decode", StringComparison.Ordinal),
+                "native decoder frames reach Unity without CPU upload: " + _player.TransferMode);
+        }
         if (Argument("-videoHardwareCpuUpload") == "true")
         {
             Check(_player.DecoderType == VideoDecoderType.Hardware, "CPU upload still uses an actual hardware decoder: " + _player.DecoderName);

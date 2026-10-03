@@ -5,10 +5,12 @@ import argparse
 import ctypes
 import datetime
 import hashlib
+import importlib.util
 import json
 import os
 from pathlib import Path
 import platform
+import re
 import shlex
 import shutil
 import subprocess
@@ -19,11 +21,25 @@ HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[1]
 CACHE = Path(os.environ.get('FFMPEG_BUILD_ROOT', str(HERE / '.build'))).resolve()
 SOURCE = CACHE / 'source'
-OUTPUT = ROOT / 'Assets/Plugins/FFmpeg/Native'
+OUTPUT = ROOT / 'Assets/Plugins/MajdataPlay/FFmpeg/Native'
 LOCK = json.loads((HERE / 'ffmpeg.lock.json').read_text())
+sys.dont_write_bytecode = True
+_dependency_spec = importlib.util.spec_from_file_location('ffmpeg_build_dependencies', HERE / 'build-dependencies.py')
+DEPENDENCIES = importlib.util.module_from_spec(_dependency_spec)
+_dependency_spec.loader.exec_module(DEPENDENCIES)
 TARGETS = ['win-x86', 'win-x64', 'linux-x64', 'android-armv7', 'android-arm64',
            'macos-x64', 'macos-arm64', 'ios-arm64', 'ios-simulator-arm64', 'ios-simulator-x64']
 HOST = platform.system()
+
+def write_text_atomic(path, contents):
+    """Replace metadata without truncating a file concurrently mapped by Windows or Unity."""
+    path = Path(path)
+    temporary = path.with_name(path.name + '.' + uuid.uuid4().hex + '.tmp')
+    try:
+        temporary.write_text(contents, encoding='utf-8')
+        os.replace(temporary, path)
+    finally:
+        temporary.unlink(missing_ok=True)
 
 def destination_for(target):
     locations = {'win-x86':'Windows/x86', 'win-x64':'Windows/x86_64', 'linux-x64':'Linux/x86_64',
@@ -60,6 +76,7 @@ def host_tool(name):
 def find_bash():
     candidates = [os.environ.get('FFMPEG_BASH'),
                   str(CACHE / 'toolchains/msys64/usr/bin/bash.exe'),
+                  str(HERE / '.build/toolchains/msys64/usr/bin/bash.exe'),
                   'C:/msys64/usr/bin/bash.exe', 'C:/Program Files/Git/usr/bin/bash.exe'] if HOST == 'Windows' else ['bash']
     return next((shutil.which(c) for c in candidates if c and shutil.which(c)), None)
 
@@ -67,11 +84,16 @@ def find_ndk():
     candidates = [Path(p) for p in [os.environ.get('ANDROID_NDK_HOME'), os.environ.get('ANDROID_NDK_ROOT')] if p]
     for root in [CACHE, HERE / '.build']:
         candidates += sorted((root / 'toolchains').glob('android-ndk-*'), reverse=True)
-    sdk = Path(os.environ.get('ANDROID_SDK_ROOT', str(Path.home() / 'AppData/Local/Android/Sdk')))
+    sdk_default = {'Windows': 'AppData/Local/Android/Sdk', 'Linux': 'Android/Sdk', 'Darwin': 'Library/Android/sdk'}[HOST]
+    sdk = Path(os.environ.get('ANDROID_SDK_ROOT', os.environ.get('ANDROID_HOME', str(Path.home() / sdk_default))))
     candidates += sorted((sdk / 'ndk').glob('*'), reverse=True)
     if HOST == 'Windows':
         for base in ['C:/Program Files/Unity Editors', 'C:/Program Files/Unity/Hub/Editor']:
             candidates += sorted(Path(base).glob('*/Editor/Data/PlaybackEngines/AndroidPlayer/NDK'), reverse=True)
+    elif HOST == 'Darwin':
+        candidates += sorted(Path('/Applications/Unity/Hub/Editor').glob('*/Unity.app/Contents/PlaybackEngines/AndroidPlayer/NDK'), reverse=True)
+    else:
+        candidates += sorted((Path.home() / 'Unity/Hub/Editor').glob('*/Editor/Data/PlaybackEngines/AndroidPlayer/NDK'), reverse=True)
     host_tag = {'Windows':'windows-x86_64','Linux':'linux-x86_64','Darwin':'darwin-x86_64'}[HOST]
     compiler = 'clang.exe' if HOST == 'Windows' else 'clang'
     return next((p for p in candidates if (p / 'source.properties').exists()
@@ -83,7 +105,11 @@ def toolchain(target):
     if target.startswith('win-'):
         arch, triple = ('x86_64', 'x86_64-w64-mingw32') if target == 'win-x64' else ('x86', 'i686-w64-mingw32')
         candidates = [Path(os.environ['LLVM_MINGW'])] if os.environ.get('LLVM_MINGW') else []
-        candidates += sorted((CACHE / 'toolchains').glob('llvm-mingw-*'), reverse=True)
+        pinned = DEPENDENCIES.llvm_root(CACHE)
+        if pinned:
+            candidates.append(pinned)
+        for root in [CACHE, HERE / '.build']:
+            candidates += sorted((root / 'toolchains').glob('llvm-mingw-*'), reverse=True)
         compiler = next((p / 'bin' / (triple + '-clang' + ('.exe' if HOST == 'Windows' else '')) for p in candidates
                          if (p / 'bin' / (triple + '-clang' + ('.exe' if HOST == 'Windows' else ''))).exists()), None)
         if compiler:
@@ -96,7 +122,10 @@ def toolchain(target):
         else:
             return None, f'Missing {triple} GCC or LLVM_MINGW (portable llvm-mingw root)'
         args += ['--target-os=mingw32', '--arch=' + arch, '--enable-cross-compile', '--enable-w32threads',
-                 '--enable-d3d11va', '--enable-dxva2', '--enable-schannel']
+                 '--enable-d3d11va', '--enable-d3d12va', '--enable-dxva2', '--enable-schannel']
+        overlay = DEPENDENCIES.verify_d3d12_overlay()
+        if overlay:
+            args += ['--extra-cflags=-I' + shlex.quote(posix(overlay))]
     elif target == 'linux-x64':
         if not host_tool('patchelf'):
             return None, 'patchelf is required to verify and set relative ELF runtime paths'
@@ -147,6 +176,11 @@ def toolchain(target):
                  '--extra-ldflags=-target ' + triple, '--enable-videotoolbox', '--enable-audiotoolbox', '--enable-securetransport']
         if not ios:
             args += ['--install-name-dir=@loader_path']
+    if target.startswith(('win-', 'linux-', 'android-')):
+        DEPENDENCIES.verify_vulkan_headers()
+        args += ['--enable-vulkan', '--disable-vulkan-static',
+                 '--extra-cflags=-I' + shlex.quote(posix(DEPENDENCIES.vulkan_headers())),
+                 '--disable-hwaccel=apv_vulkan,dpx_vulkan,ffv1_vulkan,prores_raw_vulkan,prores_vulkan']
     return (args, paths), None
 
 def verify_source():
@@ -176,6 +210,11 @@ def shell(bash, text, cwd, log):
 def write_meta(file, target):
     meta = Path(str(file) + '.meta')
     guid = uuid.uuid5(uuid.NAMESPACE_URL, 'majdata-ffmpeg/' + file.relative_to(OUTPUT).as_posix()).hex
+    if meta.is_file():
+        existing_guid = re.search(r'^guid:\s*([0-9a-fA-F]{32})\s*$', meta.read_text(encoding='utf-8'), re.MULTILINE)
+        if not existing_guid:
+            raise RuntimeError('Existing Unity importer has no valid GUID: ' + str(meta))
+        guid = existing_guid.group(1)
     if target.startswith('win-'):
         platform_name, cpu, editor_os = ('Win64', 'x86_64', 'Windows') if target == 'win-x64' else ('Win', 'x86', '')
     elif target == 'linux-x64':
@@ -187,7 +226,7 @@ def write_meta(file, target):
     else:
         platform_name, cpu, editor_os = 'iOS', 'AnyCPU', ''
     prefix = {'Android':'Android', 'iOS':'iPhone'}.get(platform_name, 'Standalone')
-    meta.write_text(f'''fileFormatVersion: 2
+    write_text_atomic(meta, f'''fileFormatVersion: 2
 guid: {guid}
 PluginImporter:
   externalObjects: {{}}
@@ -221,7 +260,7 @@ PluginImporter:
   userData:
   assetBundleName:
   assetBundleVariant:
-''', encoding='utf-8')
+''')
 
 def stage_linux_dependencies(destination):
     """Bundle redistributable loader dependencies, never vendor-specific GPU drivers."""
@@ -270,7 +309,7 @@ def stage_linux_dependencies(destination):
                         'licenseSha256': hashlib.sha256((destination / license_name).read_bytes()).hexdigest()})
     report = {'target': 'linux-x64', 'files': records, 'postProcessing': 'patchelf --set-rpath $ORIGIN',
               'note': 'GPU-specific VAAPI/Vulkan driver implementations are supplied by the host system.'}
-    (destination / 'dependency-manifest.json').write_text(json.dumps(report, indent=2) + '\n', encoding='utf-8')
+    write_text_atomic(destination / 'dependency-manifest.json', json.dumps(report, indent=2) + '\n')
     return report
 
 
@@ -307,12 +346,50 @@ def stage(target, prefix, config, logs):
         shutil.copy2(SOURCE / name, destination / name)
     report = {'target': target, 'source': LOCK, 'host': platform.platform(), 'builtUtc': datetime.datetime.now(datetime.timezone.utc).isoformat(),
               'configure': config, 'files': produced}
+    if target.startswith(('win-', 'linux-', 'android-')):
+        report['buildDependencies'] = DEPENDENCIES.LOCK
+        report['verifiedHardwareBackends'] = verify_hardware_configuration(target, logs)
+        report['buildDependencyLicenses'] = stage_build_dependency_licenses(destination)
+        if target.startswith('win-') and os.environ.get('FFMPEG_D3D12_HEADERS'):
+            report['d3d12HeaderOverlay'] = {'directory': str(DEPENDENCIES.verify_d3d12_overlay()),
+                                          'files': DEPENDENCIES.LOCK['d3d12HeaderOverlay']['files']}
     if target == 'linux-x64':
         report['postProcessing'] = 'patchelf --set-rpath $ORIGIN (verified by --print-rpath)'
         stage_linux_dependencies(destination)
-    (destination / 'build-manifest.json').write_text(json.dumps(report, indent=2) + '\n', encoding='utf-8')
-    shutil.copy2(logs / 'configure.log', destination / 'configure.txt')
+    write_text_atomic(destination / 'build-manifest.json', json.dumps(report, indent=2) + '\n')
+    write_text_atomic(destination / 'configure.txt', (logs / 'configure.log').read_text(encoding='utf-8', errors='replace'))
     return report
+
+
+def stage_build_dependency_licenses(destination):
+    """Carry the pinned Vulkan header attribution and selected Apache license with built libraries."""
+    headers = DEPENDENCIES.vulkan_headers().parent
+    file = destination / 'Vulkan-Headers.LICENSE.txt'
+    contents = 'Vulkan-Headers ' + DEPENDENCIES.LOCK['vulkanHeaders']['tag'] + '\n'
+    contents += 'Copyright 2015-2025 The Khronos Group Inc.\n'
+    contents += DEPENDENCIES.LOCK['vulkanHeaders']['repository'] + '\n'
+    contents += 'Commit: ' + DEPENDENCIES.LOCK['vulkanHeaders']['commit'] + '\n\n'
+    contents += (headers / 'LICENSE.md').read_text(encoding='utf-8') + '\n\n'
+    contents += (headers / 'LICENSES/Apache-2.0.txt').read_text(encoding='utf-8')
+    write_text_atomic(file, contents)
+    meta = Path(str(file) + '.meta')
+    if not meta.exists():
+        guid = uuid.uuid5(uuid.NAMESPACE_URL, 'majdata-ffmpeg/' + file.relative_to(OUTPUT).as_posix()).hex
+        write_text_atomic(meta, 'fileFormatVersion: 2\nguid: ' + guid + '\nTextScriptImporter:\n'
+                         '  externalObjects: {}\n  userData:\n  assetBundleName:\n  assetBundleVariant:\n')
+    return [{'file': file.name, 'sha256': hashlib.sha256(file.read_bytes()).hexdigest(), 'license': 'Apache-2.0'}]
+
+
+def verify_hardware_configuration(target, work):
+    """Reject successful configure runs that silently omitted requested video decoders."""
+    required = ['VULKAN', 'H264_VULKAN_HWACCEL', 'HEVC_VULKAN_HWACCEL', 'AV1_VULKAN_HWACCEL', 'VP9_VULKAN_HWACCEL']
+    if target.startswith('win-'):
+        required += ['D3D12VA', 'H264_D3D12VA_HWACCEL', 'HEVC_D3D12VA_HWACCEL', 'AV1_D3D12VA_HWACCEL', 'VP9_D3D12VA_HWACCEL']
+    configuration = '\n'.join((work / name).read_text() for name in ['config.h', 'config_components.h'])
+    missing = [name for name in required if not re.search(r'^#define CONFIG_' + name + r' 1$', configuration, re.MULTILINE)]
+    if missing:
+        raise RuntimeError('Requested native hardware backend was disabled: ' + ', '.join(missing))
+    return required
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
@@ -330,7 +407,9 @@ def main():
     bash = find_bash()
     if not bash:
         parser.error('Bash required: set FFMPEG_BASH to a working MSYS2 bash.exe on Windows')
-    CACHE.mkdir(parents=True, exist_ok=True)
+    if not options.probe:
+        CACHE.mkdir(parents=True, exist_ok=True)
+        DEPENDENCIES.prepare(targets, CACHE)
     results = []
     available = []
     for target in targets:
@@ -383,10 +462,20 @@ def main():
             if (work / 'ffbuild/config.mak').exists() and (not settings_file.exists() or settings_file.read_text() != settings):
                 shell(bash, setup + shlex.quote(make) + ' clean', work, work / 'clean.log')
             shell(bash, setup + 'bash ' + shlex.quote(posix(SOURCE / 'configure')) + ' ' + shlex.join(config), work, work / 'configure.log')
+            if target.startswith(('win-', 'linux-', 'android-')):
+                verify_hardware_configuration(target, work)
             shell(bash, setup + shlex.quote(make) + f' -j{max(1, options.jobs)}', work, work / 'build.log')
             shell(bash, setup + shlex.quote(make) + ' install', work, work / 'install.log')
+            write_text_atomic(settings_file, settings)
+            provenance = {'target': target, 'source': LOCK, 'host': platform.platform(),
+                          'builtUtc': datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                          'configure': config, 'buildDependencies': DEPENDENCIES.LOCK}
+            if target.startswith(('win-', 'linux-', 'android-')):
+                provenance['verifiedHardwareBackends'] = verify_hardware_configuration(target, work)
+            # Keep the build evidence beside the usable prefix even when a loaded Unity DLL prevents staging.
+            write_text_atomic(prefix / 'build-provenance.json', json.dumps(provenance, indent=2) + '\n')
+            shutil.copy2(work / 'configure.log', prefix / 'build-configure.txt')
             report = stage(target, prefix, config, work)
-            settings_file.write_text(settings)
             if options.with_bridge:
                 build_bridge(target, prefix, options, (specific, paths))
             results.append({'target': target, 'status': 'built', 'files': report['files']})
@@ -394,7 +483,7 @@ def main():
         except (OSError, subprocess.CalledProcessError, RuntimeError) as error:
             print(f'FAILED {target}: {error}; see {work}', file=sys.stderr, flush=True)
             results.append({'target': target, 'status': 'failed', 'reason': str(error)})
-    (CACHE / 'build-summary.json').write_text(json.dumps(results, indent=2) + '\n')
+    write_text_atomic(CACHE / 'build-summary.json', json.dumps(results, indent=2) + '\n')
     print(json.dumps(results, indent=2), flush=True)
     return 1 if not available or any(r['status'] == 'failed' or (options.require_all and r['status'] == 'unavailable') for r in results) else 0
 
@@ -471,10 +560,17 @@ def bridge_plan(target, prefix, options, selected=None):
         raise RuntimeError('Use Ninja or MinGW Makefiles for a native Windows bridge build')
     settings += ['-G', generator, '-DCMAKE_MAKE_PROGRAM=' + executable(build_tools[generator])]
     # CMake cannot safely switch compiler/generator in an existing build tree.
-    identity = hashlib.sha256(json.dumps(settings).encode()).hexdigest()[:12]
+    identity = hashlib.sha256(json.dumps({'settings': settings, 'ffmpegRoot': str(prefix.resolve()),
+        'vulkanHeaders': str(DEPENDENCIES.vulkan_headers()) if target.startswith(('win-', 'linux-', 'android-')) else None,
+        'd3d12Headers': os.environ.get('FFMPEG_D3D12_HEADERS') if target.startswith('win-') else None},
+        sort_keys=True).encode()).hexdigest()[:12]
     build = CACHE / ('bridge-' + target + '-' + identity)
     args = [cmake, '-S', str(HERE / 'Native'), '-B', str(build),
             '-DCMAKE_BUILD_TYPE=Release', '-DFFMPEG_ROOT=' + str(prefix)]
+    if target.startswith(('win-', 'linux-', 'android-')):
+        args += ['-DFFU_VULKAN_HEADERS=' + str(DEPENDENCIES.vulkan_headers())]
+    if target.startswith('win-') and os.environ.get('FFMPEG_D3D12_HEADERS'):
+        args += ['-DFFU_D3D12_HEADERS=' + str(DEPENDENCIES.verify_d3d12_overlay())]
     args += settings
     if options.unity_plugin_api:
         args += ['-DUNITY_PLUGIN_API=' + options.unity_plugin_api]
@@ -511,7 +607,8 @@ def build_bridge(target, prefix, options, selected=None):
         raise RuntimeError('CMake produced no FFmpegUnityBridge library for ' + target)
     sources = {str(source.relative_to(HERE / 'Native')).replace('\\', '/'):hashlib.sha256(source.read_bytes()).hexdigest()
                for source in (HERE / 'Native').rglob('*') if source.is_file() and source.suffix in ('.cpp', '.h', '.mm', '.txt')}
-    (destination / 'bridge-manifest.json').write_text(json.dumps({'target':target, 'host':platform.platform(),
+    write_text_atomic(destination / 'bridge-manifest.json', json.dumps({'target':target,
+        'bridgeAbi': 2 if target.startswith(('macos-', 'ios-')) else 4, 'host':platform.platform(),
         'builtUtc':datetime.datetime.now(datetime.timezone.utc).isoformat(), 'cmake':args, 'files':files,
         'sourceSha256':sources}, indent=2) + '\n')
 

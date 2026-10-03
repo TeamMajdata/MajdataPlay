@@ -4,7 +4,7 @@ repo="$(cd "$(dirname "$0")/../../.." && pwd)"
 arch="${1:-$(uname -m)}"
 media="${2:-$repo/Assets/StreamingAssets/MaiCharts/Original/Zunda Overdance/bg.mp4}"
 case "$arch" in arm64|x86_64) ;; *) echo "Unsupported macOS architecture: $arch" >&2; exit 2;; esac
-libraries="$repo/Assets/Plugins/FFmpeg/Native/macOS/$arch"
+libraries="$repo/Assets/Plugins/MajdataPlay/FFmpeg/Native/macOS/$arch"
 work="$repo/Tools/Tests/FFmpegValidation/.work/Apple-$arch"
 mkdir -p "$work"
 # FFmpeg's relocatable install IDs intentionally use @loader_path. A linked test

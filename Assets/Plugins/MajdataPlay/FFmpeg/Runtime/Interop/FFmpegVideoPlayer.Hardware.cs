@@ -4,6 +4,7 @@ using MajdataPlay.Diagnostics;
 using MajdataPlay.FFmpeg.Internal;
 using MajdataPlay.FFmpeg.Interop;
 using UnityEngine;
+using UnityEngine.Rendering;
 
 namespace MajdataPlay.FFmpeg
 {
@@ -12,6 +13,33 @@ namespace MajdataPlay.FFmpeg
         HardwareVideoPresenter _hardwarePresenter;
         partial void CheckHardwareErrors() => _hardwarePresenter?.CheckErrors();
         partial void ConfigureHardware(DecoderOptions options, bool preferNative)
+        {
+            var graphics = SystemInfo.graphicsDeviceType;
+            bool d3d12 = !_platformBackendOnly && graphics == GraphicsDeviceType.Direct3D12 && HardwareVideoPresenter.SupportsD3D12Video;
+            bool vulkan = !_platformBackendOnly && graphics == GraphicsDeviceType.Vulkan && HardwareVideoPresenter.SupportsVulkanVideoDecoding;
+            ConfigurePlatformHardware(options, preferNative, !d3d12 && !vulkan);
+            if (!d3d12 && !vulkan)
+            {
+                if (!_platformBackendOnly && (graphics == GraphicsDeviceType.Direct3D12 || graphics == GraphicsDeviceType.Vulkan))
+                    MajDebug.LogInfo("FFmpeg", "[Interop] Native video backend unavailable: " + HardwareVideoPresenter.DescribeNativeBackendStatus(graphics) +
+                        "; using " + options.HardwareDeviceType + ".");
+                return;
+            }
+
+            options.FallbackHardwareOptions = options.Copy();
+            options.HardwareDeviceType = d3d12 ? AVHWDeviceType.AV_HWDEVICE_TYPE_D3D12VA : AVHWDeviceType.AV_HWDEVICE_TYPE_VULKAN;
+            options.AcquireHardwareDevice = d3d12 ? HardwareVideoPresenter.AcquireD3D12Device : VulkanVideoInterop.AcquireVideoDevice;
+            options.AcquireD3D11Device = null;
+            options.MapHardwareFrame = null;
+            options.CreateHardwareSession = null;
+            options.KeepNativeFrames = preferNative;
+            options.HardwareDeviceDescription = (d3d12 ? "D3D12VA" : "Vulkan Video") + " device shared with Unity renderer: " +
+                SystemInfo.graphicsDeviceName + "; driver=" + SystemInfo.graphicsDeviceVersion;
+            MajDebug.LogInfo("FFmpeg", "[Interop] Preferred native decoder=" + options.HardwareDeviceType +
+                "; fallback=" + options.FallbackHardwareOptions.HardwareDeviceType + "; native textures=" + preferNative + ".");
+        }
+
+        void ConfigurePlatformHardware(DecoderOptions options, bool preferNative, bool report)
         {
             var platform = Application.platform;
             bool windows = platform == RuntimePlatform.WindowsPlayer || platform == RuntimePlatform.WindowsEditor;
@@ -29,11 +57,11 @@ namespace MajdataPlay.FFmpeg
             if (platform == RuntimePlatform.Android)
             {
                 try { VulkanVideoInterop.InitializeAndroid(); }
-                catch (Exception error) when (!options.RequireHardwareDecoding)
+                catch (Exception error) when (!options.RequireHardwareDecoding || !report)
                 {
-                    HardwareFallbackReason = error.Message;
+                    if (report) HardwareFallbackReason = error.Message;
                     options.HardwareDeviceType = AVHWDeviceType.AV_HWDEVICE_TYPE_NONE;
-                    MajDebug.LogWarning("FFmpeg", "[Interop] MediaCodec initialization failed; using software decoding. " + error.Message);
+                    if (report) MajDebug.LogWarning("FFmpeg", "[Interop] MediaCodec initialization failed; using software decoding. " + error.Message);
                     return;
                 }
             }
@@ -61,12 +89,12 @@ namespace MajdataPlay.FFmpeg
                 }
                 else
                 {
-                    HardwareFallbackReason = HardwareVideoPresenter.AvailabilityReason ?? "Native texture transport is unavailable.";
-                    if (!options.RequireHardwareDecoding)
+                    if (report) HardwareFallbackReason = HardwareVideoPresenter.AvailabilityReason ?? "Native texture transport is unavailable.";
+                    if (report && !options.RequireHardwareDecoding)
                         MajDebug.LogWarning("FFmpeg", "[Interop] GPU texture sharing unavailable; attempting hardware decoding with CPU upload. " + HardwareFallbackReason);
                 }
             }
-            MajDebug.LogInfo("FFmpeg", "[Interop] Requested hardware API=" + options.HardwareDeviceType +
+            if (report) MajDebug.LogInfo("FFmpeg", "[Interop] Requested hardware API=" + options.HardwareDeviceType +
                 "; native textures=" + options.KeepNativeFrames + "; " + options.HardwareDeviceDescription + ".");
         }
 

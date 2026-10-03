@@ -12,9 +12,9 @@
 
 | 目标 | 本仓库输出 | 构建与验证 |
 | --- | --- | --- |
-| macOS ARM64 | `Assets/Plugins/FFmpeg/Native/macOS/arm64` | 7 dylib + Metal 桥接；实际 ARM64 运行通过 |
-| macOS x64 | `Assets/Plugins/FFmpeg/Native/macOS/x86_64` | 7 dylib + Metal 桥接；架构/平台/哈希通过，主机无 Rosetta，未运行 |
-| iOS ARM64 | `Assets/Plugins/FFmpeg/Native/iOS` | 7 静态库 + Metal 桥接；全部链接通过，未在实体设备运行 |
+| macOS ARM64 | `Assets/Plugins/MajdataPlay/FFmpeg/Native/macOS/arm64` | 7 dylib + Metal 桥接；实际 ARM64 运行通过 |
+| macOS x64 | `Assets/Plugins/MajdataPlay/FFmpeg/Native/macOS/x86_64` | 7 dylib + Metal 桥接；架构/平台/哈希通过，主机无 Rosetta，未运行 |
+| iOS ARM64 | `Assets/Plugins/MajdataPlay/FFmpeg/Native/iOS` | 7 静态库 + Metal 桥接；全部链接通过，未在实体设备运行 |
 | iOS 模拟器 ARM64 | `Tools/FFmpeg/.build/artifacts/ios-simulator-arm64` | 7 静态库 + Metal 桥接；全部链接与模拟器运行通过 |
 | iOS 模拟器 x64 | `Tools/FFmpeg/.build/artifacts/ios-simulator-x64` | 7 静态库 + Metal 桥接；全部链接通过，未运行 |
 

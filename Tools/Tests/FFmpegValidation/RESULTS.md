@@ -1,6 +1,23 @@
 # 本机验证结果
 
-最近验证日期：2026-10-04；此前跨平台矩阵执行于 2026-10-03。Windows / Unity 6000.3.17f1 / AMD Radeon RX 580 2048SP；Linux 使用本机 WSL Ubuntu 24.04；Android 真机为 Mi MIX 2S / Android 15 API 35 / Adreno 630 / Vulkan 1.1.128；Apple 构建测试使用用户提供的 Mac mini M4。FFmpeg 库均为本次从锁定源码编译的产物。Windows/Apple 图形桥接 ABI 为 **2**，Linux/Android 为 **3**。
+最近验证日期：2026-10-04；此前跨平台矩阵执行于 2026-10-03。Windows / Unity 6000.3.17f1 / AMD Radeon RX 580 2048SP；Linux 使用本机 WSL Ubuntu 24.04；Android 真机为 Mi MIX 2S / Android 15 API 35 / Adreno 630 / Vulkan 1.1.128；Apple 构建测试使用用户提供的 Mac mini M4。当前 Windows/Linux/Android 图形桥接 ABI 为 **4**，Apple 保持 **2**；下方 ABI2/3 的记录为此前版本实测。
+
+## D3D12VA 与 Vulkan Video 接入验证
+
+2026-10-04 更新：Windows x86/x64 的 FFmpeg 启用 D3D12VA 与 Vulkan，Linux x64 和 Android ARM64/ARMv7 启用 Vulkan。实际库的 H.264/HEVC/AV1/VP9 硬件配置已检查；FFmpeg 仍锁定 n9.0.1，Vulkan-Headers 与 Windows D3D12 头文件依赖记录版本和哈希。Apple 原生产物保持原版本。
+
+- 托管真实 FFmpeg 测试 **361 assertions PASS**，新增原生设备创建失败后切换 D3D11VA 的严格/非严格模式测试，检查实际硬件类型、帧存储与 seek。13 组平台、IL2CPP、Editor/Profiler 宏编译全部通过；严格英文 XML 文档检查通过，共 **128 个条目**。
+- Windows x64 **Mono / IL2CPP × D3D12 / Vulkan** 严格 GPU 播放各 **20 assertions PASS**。D3D12 实际先尝试 D3D12VA，受下述限制后重新打开 D3D11VA；Vulkan 报告缺少 video queue/decode queue 扩展（状态 403），走 D3D11VA 共享路径。两者均无 CPU 像素回读，不算原生新后端解码成功。
+- Windows x64 Mono / D3D12：硬件 CPU 上传 **24 assertions PASS**，软件/硬件偏好及 GPU→CPU 恢复 **37 assertions PASS**，回调重入故障恢复 **52 assertions PASS**。
+- Windows x86 Mono 的 D3D12 / Vulkan 严格 GPU 播放各 **20 assertions PASS**；x64 IL2CPP / D3D12 偏好与硬件 CPU 恢复 **37 assertions PASS**。x86/x64 原生 D3D12 人工帧、D3D11 回归及 Vulkan 协商测试均通过。
+- Android ARM64 / ARMv7 IL2CPP 最终 APK 真机均 **54 assertions PASS、341 帧**，包括持续播放、10 次连续 seek、偏好切换、MediaCodec ByteBuffer CPU 上传与 GPU 恢复。新后端报告 Vulkan 1.3 要求不满足（状态 401），实际显示路径为 MediaCodec AHardwareBuffer，保持无 CPU 像素回读。ARMv7 的 Windows Ninja 路径长度问题已通过缩短隔离工程目录解决。
+- D3D12 新转换器的实际 GPU 测试：**100 帧、四次像素参考比较通过**，覆盖 NV12 limited/full range、尺寸变化、取消、AVFrame/帧池引用与 drain；启用 D3D12 debug layer 后没有警告或错误。测试使用人工填充的 D3D12 硬件帧，其上传和读回仅在测试中执行，不能代替视频码流硬件解码验证。
+- Vulkan 协商测试通过，覆盖功能链保留、独立队列映射、实际 FFmpeg AVBuffer 引用计数与延迟销毁 VkDevice/VkInstance。llvmpipe 上的实际 Vulkan compute 测试通过，覆盖 8 次 GPU 提交、16384 字节像素、4 次 timeline semaphore 锁定/等待/信号、资源退休、取消、有界队列与旧设备拒绝。
+- 最终五个桥接库的二进制及全部源码哈希与各自 manifest 一致；Linux ABI4 桥接在清空 `LD_LIBRARY_PATH` 后加载、依赖定位及缺失设备的安全拒绝检查通过。Windows / WSL 产物验证均通过：70 个 FFmpeg 库、10 个桥接产物；本轮重建其中 35 个 FFmpeg 库及 5 个桥接库，其余 Apple 产物未变。
+
+**硬件限制：** RX 580 报告的 D3D12 视频解码 Tier 1 尚未由锁定 FFmpeg 版本实现，实际 H.264 原生 D3D12VA 测试返回 **SKIP 77**，不是通过。本机 Windows 驱动未暴露 Vulkan Video 扩展，Android Adreno 630 仅 Vulkan 1.1，WSL 没有支持视频解码的物理 Vulkan GPU。因此新 D3D12VA/Vulkan Video 的完整码流→显示正向测试仍需支持的设备；不把编译、人工帧或旧后端回退作为该项验收通过。可在支持的 Windows 设备运行 `run-unity.ps1 -Graphics d3d12|vulkan -RequireNativeDecoder`，它会拒绝将旧后端回退判为成功。
+
+托管证据：`.work/native-video-decoder-tests.log`、`.work/NativeVideoManagedReview/`、`.work/NativeVideoApiReview/`；Unity 证据：`.work/x64-Mono/`、`.work/x64-IL2CPP/`、`.work/x86-Mono/`、`.work/Android-arm64-IL2CPP/`、`.work/Android-armv7-IL2CPP/` 内本轮报告及 diagnostics 日志。旧章节保留历史测试范围，不表示本次重新运行完整跨平台矩阵。
 
 ## 删除兼容解码偏好属性
 
@@ -112,4 +129,4 @@ Apple 详情见 [APPLE-RESULTS.md](../../FFmpeg/APPLE-RESULTS.md)。官方 Unity
 - `linux-native.txt`：Linux 库加载、依赖与真实解码结果。
 - `gcc-bridge-review/`：一键脚本实际选择的 WSL GCC x86/x64 桥接构建日志。
 
-原生 DLL 的确切二进制与源码 SHA256、工具链、原生检查结果保存在各 Windows 目录的 `bridge-manifest.json`。构建缓存和测试输出不是发布依赖；运行产物及导入设置在 `Assets/Plugins/FFmpeg/Native/`。
+原生 DLL 的确切二进制与源码 SHA256、工具链、原生检查结果保存在各 Windows 目录的 `bridge-manifest.json`。构建缓存和测试输出不是发布依赖；运行产物及导入设置在 `Assets/Plugins/MajdataPlay/FFmpeg/Native/`。

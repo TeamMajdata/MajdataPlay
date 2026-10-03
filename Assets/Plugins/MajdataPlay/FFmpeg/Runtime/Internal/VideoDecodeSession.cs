@@ -11,6 +11,7 @@ namespace MajdataPlay.FFmpeg.Internal
         public readonly double Duration, FrameRate;
         public readonly bool CanSeek, HasAudio, HardwareDecoding;
         public readonly string Codec, HardwareFallbackReason, DecoderName, DecoderDevice, TransferMode;
+        public readonly global::FFmpeg.AutoGen.AVHWDeviceType HardwareDeviceType;
         public VideoInfo(FFmpegVideoDecoder decoder)
         {
             Width = decoder.Width; Height = decoder.Height;
@@ -19,6 +20,7 @@ namespace MajdataPlay.FFmpeg.Internal
             HardwareFallbackReason = decoder.HardwareFallbackReason;
             DecoderName = decoder.DecoderName; DecoderDevice = decoder.DecoderDevice;
             HardwareDecoding = decoder.HardwareDecoding; TransferMode = decoder.TransferMode;
+            HardwareDeviceType = decoder.ActiveHardwareDeviceType;
         }
     }
 

@@ -1,4 +1,5 @@
 #include "VulkanPortable.h"
+#include "VulkanVideoDecode.h"
 #include "VideoConvertSpirv.h"
 #include <algorithm>
 #include <chrono>
@@ -13,6 +14,7 @@ constexpr int SubmitEvent = 11;
 std::atomic<int> status{100}, inFlight{0};
 std::atomic<bool> extensions{false};
 PFN_vkGetInstanceProcAddr loader = nullptr;
+VkInstance loaderInstance = VK_NULL_HANDLE;
 PFN_vkCreateDevice originalCreateDevice = nullptr;
 PFN_vkEnumerateDeviceExtensionProperties enumerateExtensions = nullptr;
 PFN_vkGetPhysicalDeviceFeatures2 getFeatures = nullptr;
@@ -36,10 +38,10 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDevice(VkPhysicalDevice physical, const VkD
     extensions = false;
     uint32_t count = 0;
     if (!enumerateExtensions || enumerateExtensions(physical, nullptr, &count, nullptr) != VK_SUCCESS)
-        return originalCreateDevice(physical, original, allocation, device);
+        return FfuVulkanVideoCreateDevice(originalCreateDevice, loader, loaderInstance, physical, original, allocation, device);
     std::vector<VkExtensionProperties> available(count);
     if (enumerateExtensions(physical, nullptr, &count, available.data()) != VK_SUCCESS)
-        return originalCreateDevice(physical, original, allocation, device);
+        return FfuVulkanVideoCreateDevice(originalCreateDevice, loader, loaderInstance, physical, original, allocation, device);
     VkPhysicalDeviceProperties properties{};
     if (getProperties) getProperties(physical, &properties);
     auto availableName = [&available](const char* name) {
@@ -54,9 +56,14 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDevice(VkPhysicalDevice physical, const VkD
         for (const char* core : core11) if (!std::strcmp(name, core)) return true;
         return false;
     };
+#ifdef _WIN32
+    // Windows' D3D11 importer negotiates its own external-memory extensions.
+    // This shared compute renderer needs no Linux/Android import extensions.
+    return FfuVulkanVideoCreateDevice(originalCreateDevice, loader, loaderInstance, physical, original, allocation, device);
+#endif
     for (const char* name : required)
         if (!availableName(name) && !promoted(name))
-            return originalCreateDevice(physical, original, allocation, device);
+            return FfuVulkanVideoCreateDevice(originalCreateDevice, loader, loaderInstance, physical, original, allocation, device);
     std::vector<const char*> names;
     if (original->enabledExtensionCount) names.assign(original->ppEnabledExtensionNames, original->ppEnabledExtensionNames + original->enabledExtensionCount);
     for (const char* name : required)
@@ -67,34 +74,35 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDevice(VkPhysicalDevice physical, const VkD
     VkPhysicalDeviceSamplerYcbcrConversionFeatures ycbcr{};
     ycbcr.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SAMPLER_YCBCR_CONVERSION_FEATURES;
     VkPhysicalDeviceFeatures2 features{}; features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2; features.pNext = &ycbcr;
-    if (!getFeatures) return originalCreateDevice(physical, original, allocation, device);
+    if (!getFeatures) return FfuVulkanVideoCreateDevice(originalCreateDevice, loader, loaderInstance, physical, original, allocation, device);
     getFeatures(physical, &features);
-    if (!ycbcr.samplerYcbcrConversion) return originalCreateDevice(physical, original, allocation, device);
+    if (!ycbcr.samplerYcbcrConversion) return FfuVulkanVideoCreateDevice(originalCreateDevice, loader, loaderInstance, physical, original, allocation, device);
     bool alreadyPresent = false;
     for (auto* next = static_cast<const VkBaseInStructure*>(original->pNext); next; next = next->pNext) {
         if (next->sType == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SAMPLER_YCBCR_CONVERSION_FEATURES) {
             alreadyPresent = true;
             if (!reinterpret_cast<const VkPhysicalDeviceSamplerYcbcrConversionFeatures*>(next)->samplerYcbcrConversion)
-                return originalCreateDevice(physical, original, allocation, device);
+                return FfuVulkanVideoCreateDevice(originalCreateDevice, loader, loaderInstance, physical, original, allocation, device);
         }
         if (next->sType == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES) {
             alreadyPresent = true;
             if (!reinterpret_cast<const VkPhysicalDeviceVulkan11Features*>(next)->samplerYcbcrConversion)
-                return originalCreateDevice(physical, original, allocation, device);
+                return FfuVulkanVideoCreateDevice(originalCreateDevice, loader, loaderInstance, physical, original, allocation, device);
         }
     }
     // Do not mutate Unity's feature chain or add a duplicate promoted feature.
     if (!alreadyPresent) { ycbcr.pNext = const_cast<void*>(info.pNext); info.pNext = &ycbcr; }
 #endif
-    VkResult result = originalCreateDevice(physical, &info, allocation, device);
+    VkResult result = FfuVulkanVideoCreateDevice(originalCreateDevice, loader, loaderInstance, physical, &info, allocation, device);
     extensions = result == VK_SUCCESS;
-    if (result != VK_SUCCESS) return originalCreateDevice(physical, original, allocation, device);
+    if (result != VK_SUCCESS) return FfuVulkanVideoCreateDevice(originalCreateDevice, loader, loaderInstance, physical, original, allocation, device);
     return result;
 }
 VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL GetProc(VkInstance instance, const char* name) {
-    auto function = loader(instance, name);
+    auto function = FfuVulkanVideoInstanceProc(loader, instance, name);
     if (!std::strcmp(name, "vkCreateDevice") && function) {
         originalCreateDevice = reinterpret_cast<PFN_vkCreateDevice>(function);
+        loaderInstance = instance;
         enumerateExtensions = reinterpret_cast<PFN_vkEnumerateDeviceExtensionProperties>(loader(instance, "vkEnumerateDeviceExtensionProperties"));
         getProperties = reinterpret_cast<PFN_vkGetPhysicalDeviceProperties>(loader(instance, "vkGetPhysicalDeviceProperties"));
         getFeatures = reinterpret_cast<PFN_vkGetPhysicalDeviceFeatures2>(loader(instance, "vkGetPhysicalDeviceFeatures2"));
@@ -286,14 +294,22 @@ void UNITY_INTERFACE_API OnQueue(int, void* pointer) {
     std::lock_guard<std::mutex> lock(jobsMutex);
     std::lock_guard<std::recursive_mutex> resources(c.resources);
     if (!c.active) { job->presenter->error = 104; delete job; return; }
+    if (job->sample.lock && !job->sample.lock(job->sample)) { job->presenter->error = 416; delete job; return; }
     VkCommandBuffer command = VK_NULL_HANDLE;
     VkResult result = Build(*job, command);
     if (result == VK_SUCCESS) {
         VkSubmitInfo submit{}; submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO; submit.commandBufferCount = 1; submit.pCommandBuffers = &command;
         const VkPipelineStageFlags stage = VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT;
         if (job->sample.acquireSemaphore) { submit.waitSemaphoreCount = 1; submit.pWaitSemaphores = &job->sample.acquireSemaphore; submit.pWaitDstStageMask = &stage; }
+        VkTimelineSemaphoreSubmitInfo timeline{VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO};
+        if (job->sample.timeline) {
+            timeline.waitSemaphoreValueCount = timeline.signalSemaphoreValueCount = 1;
+            timeline.pWaitSemaphoreValues = &job->sample.waitValue; timeline.pSignalSemaphoreValues = &job->sample.signalValue;
+            submit.pNext = &timeline; submit.signalSemaphoreCount = 1; submit.pSignalSemaphores = &job->sample.acquireSemaphore;
+        }
         result = c.QueueSubmit(c.instance.graphicsQueue, 1, &submit, job->fence);
     }
+    if (job->sample.unlock) job->sample.unlock(result == VK_SUCCESS);
     if (result != VK_SUCCESS) { job->presenter->error = result; delete job; return; }
     job->submitted = true; jobs.push_back(job);
 }
@@ -313,9 +329,6 @@ bool FfuVkInitialize(IUnityInterfaces* interfaces) {
     auto* unity = Interface<IUnityGraphicsVulkanV2>(interfaces);
     status = 100;
     if (!unity) return false;
-#ifndef FFU_VULKAN_TESTING
-    if (!extensions.load()) return false;
-#endif
     auto c = std::make_shared<Context>(); c->unity = unity; c->instance = unity->Instance();
     if (!c->instance.device || !c->instance.graphicsQueue || !c->instance.getInstanceProcAddr || !c->Load()) { status = 101; return false; }
     UnityVulkanPluginEventConfig config{};
@@ -327,6 +340,7 @@ bool FfuVkInitialize(IUnityInterfaces* interfaces) {
 }
 std::shared_ptr<FfuVkContext> FfuVkCurrent() { std::lock_guard<std::mutex> guard(contextMutex); return current; }
 int FfuVkStatus() { return status.load(); }
+bool FfuVkExternalImportsAvailable() { return extensions.load(); }
 void FfuVkSetStatus(int value) { status = value; }
 void* FfuVkPresenterCreate() { return FfuVkCurrent() ? new (std::nothrow) Presenter() : nullptr; }
 void FfuVkPresenterRelease(void* presenter) { if (presenter) static_cast<Presenter*>(presenter)->Drop(); }

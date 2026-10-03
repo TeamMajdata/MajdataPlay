@@ -37,7 +37,7 @@ do {
         [IO.File]::WriteAllText($destination, $result)
         $diagnostics = Invoke-Adb @('shell','cat',"$report.diagnostics.log")
         [IO.File]::WriteAllLines("$destination.diagnostics.log", [string[]]$diagnostics)
-        if ($result -notmatch '^PASS:.*Vulkan.*AHardwareBuffer') { throw 'Android hardware playback failed.' }
+        if ($result -notmatch '^PASS:.*Vulkan.*(AHardwareBuffer|Vulkan Video native decode)') { throw 'Android hardware playback failed.' }
         exit 0
     }
 } while ([DateTime]::UtcNow -lt $deadline)

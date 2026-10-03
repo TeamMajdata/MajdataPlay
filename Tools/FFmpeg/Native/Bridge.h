@@ -24,9 +24,13 @@ enum FfuEvent {
     FfuSubmitD3D11 = 1, FfuCompleteMetal = 2, FfuDrain = 3,
     FfuPrepareD3D12 = 4, FfuSubmitD3D12 = 5,
     FfuSubmitWgl = 6, FfuCompleteWgl = 7, FfuDestroyWgl = 8,
-    FfuSubmitVulkan = 9, FfuReleaseVulkan = 10, FfuSubmitPortableVulkan = 11
+    FfuSubmitVulkan = 9, FfuReleaseVulkan = 10, FfuSubmitPortableVulkan = 11,
+    FfuPrepareNativeD3D12 = 12, FfuSubmitNativeD3D12 = 13
 };
-enum FfuCapability { FfuD3D11GpuConversion = 1, FfuMetalPlaneZeroCopy = 2, FfuD3D12GpuCopy = 4, FfuWglGpuInterop = 8, FfuVulkanGpuCopy = 16 };
+enum FfuCapability {
+    FfuD3D11GpuConversion = 1, FfuMetalPlaneZeroCopy = 2, FfuD3D12GpuCopy = 4,
+    FfuWglGpuInterop = 8, FfuVulkanGpuCopy = 16, FfuD3D12NativeDecode = 128, FfuVulkanVideoDecode = 256
+};
 // UnityInterfaceGUID has a non-trivial C++ copy constructor. Its by-value ABI
 // differs between 32-bit MinGW and Unity's MSVC build. Always use the C-compatible
 // split GUID entry point instead of IUnityInterfaces::Get<T>() across the DLL.

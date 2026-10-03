@@ -1,62 +1,70 @@
 {
   "schema": 1,
   "artifact": "FFmpegUnityBridge.dll",
-  "bridgeAbi": 2,
+  "bridgeAbi": 4,
   "platform": "Windows",
   "architecture": "x86_64",
   "compiler": "LLVM-MinGW 20260922 ucrt, clang 23.1.2",
   "ffmpegAbi": {
     "avutil": 61
   },
-  "sha256": "2a7aef282d3e7a5b26cd96f831513970fd6a4daa76e4887277846cd6d62c64a8",
+  "sha256": "b6b0c736f139028fd87f1842658d04e685eb2ba938ca7899bf5cc84f3e0d2387",
   "sources": [
     {
       "path": "Tools/FFmpeg/Native/Bridge.cpp",
-      "sha256": "04e0c267d3d11859491f8205c298a126a6305276525efcd761d8a4ea998691b2"
+      "sha256": "f78a629154048576ea619d87778d07b62bd14904833d3d7be94e2cc7c83132ea"
     },
     {
       "path": "Tools/FFmpeg/Native/Bridge.h",
-      "sha256": "2af18ab67e888fa0b9f977d620ff335126f8acdf530cb44df91675a11d63e37c"
-    },
-    {
-      "path": "Tools/FFmpeg/Native/D3D11.cpp",
-      "sha256": "03f7ce3cd24f7cebdb15f5990b76c3637cce3f2b3755ee7146ff5b0a1f427bfe"
-    },
-    {
-      "path": "Tools/FFmpeg/Native/D3D12.cpp",
-      "sha256": "1111dab071131d93d62802a469971efc25e61e3fdfcd1633cbfaede817bc39c1"
-    },
-    {
-      "path": "Tools/FFmpeg/Native/D3D12.h",
-      "sha256": "4fa5e13899a793545712b9caf2c8ffeebd3e7edba4ff2a1ba6dbd38df133f4d5"
-    },
-    {
-      "path": "Tools/FFmpeg/Native/WglInterop.cpp",
-      "sha256": "142f395a2f50d827d1f0cbcdf44c45fc7072a39bf32e05d5bc32e83ab0136534"
-    },
-    {
-      "path": "Tools/FFmpeg/Native/WglInterop.h",
-      "sha256": "7f044ebca6b389eae55a9d697303b86ca998b516ac4b52194efce9aa715ea8bd"
-    },
-    {
-      "path": "Tools/FFmpeg/Native/VulkanInterop.cpp",
-      "sha256": "22ddb09fb37b5f11f765fcae4d41378f8cb339d3f0bd073c0fd56fdedacddb61"
-    },
-    {
-      "path": "Tools/FFmpeg/Native/VulkanInterop.h",
-      "sha256": "a5425c2c48c3fefc8091a42f97e3bac44ba040aecf715a471a87cff8f208c959"
+      "sha256": "5857915b21cc6a9838ccb536ed159ddd1a4643a8c637cec55437acdb4bbbab9c"
     },
     {
       "path": "Tools/FFmpeg/Native/CMakeLists.txt",
-      "sha256": "adcfb0a44bbc5923d718e7055e5a706c674089d6463eb51c683d60a931edb439"
+      "sha256": "f704c3220593c64d03bb17f257a1193c624aefa096a3c6b86c2f6c036287d5b6"
+    },
+    {
+      "path": "Tools/FFmpeg/Native/D3D11.cpp",
+      "sha256": "cefa4c8a20ac5ef9a4a09adea49f7ff256f597268b70e87056f35ac689dfa12e"
+    },
+    {
+      "path": "Tools/FFmpeg/Native/D3D12.cpp",
+      "sha256": "eb46e634f080ee33468a57873f18707a7bd8ce654d7bec895ef9736574b9c18b"
+    },
+    {
+      "path": "Tools/FFmpeg/Native/D3D12.h",
+      "sha256": "c8d04c14bb3bf26ed7ea3a2c315f3adaff27a59ae7cceaac2b2f6e64580bc0a4"
     },
     {
       "path": "Tools/FFmpeg/Native/ExportsWin32MinGW.def",
       "sha256": "5c7b2c2167e666d495ceba0181f4df9a7f4e2d80a91ce41e947d3042e6386bbe"
     },
     {
-      "path": "Tools/FFmpeg/Native/Unity/IUnityInterface.h",
-      "sha256": "e23e267b57c049b438307542d62c30fbcd3fa77b6dac3b08842eae0df10b8239"
+      "path": "Tools/FFmpeg/Native/tests/D3D11Smoke.cpp",
+      "sha256": "57da5c1185626d5bcc519b2f65fc42dc419ff0c4dc6c20efb8b2c8902a3f52dd"
+    },
+    {
+      "path": "Tools/FFmpeg/Native/tests/D3D12InteropProbe.cpp",
+      "sha256": "bad358e49b10775b471a83a98c43b05a4420f8f9a30f17290fea7e1b0dd8bf61"
+    },
+    {
+      "path": "Tools/FFmpeg/Native/tests/D3D12Smoke.cpp",
+      "sha256": "4167bbc7f5e4fa7e0926384fa3a8fbb12c5ecc7f3a0e94631b108587ef246b78"
+    },
+    {
+      "path": "Tools/FFmpeg/Native/tests/D3D12VideoSmoke.cpp",
+      "sha256": "aab78958e2607d8cc81777a729f7bd7d60f503364a11329df000128b183dd390"
+    },
+    {
+      "path": "Tools/FFmpeg/Native/tests/VulkanInteropSmoke.cpp",
+      "sha256": "45e0b6d9aa3f517fd343b3e516a7dee9f1f0ad53bc749804e1eae7c7591af56d"
+    },
+    {
+      "path": "Tools/FFmpeg/Native/tests/VulkanVideoNegotiation.cpp",
+      "sha256": "32857c9be01c01e8dcf2016a271132c1a7ed22dc11dba2b21594f287aedbab8f"
+    },
+    {
+      "path": "Tools/FFmpeg/Native/tests/WglInteropSmoke.cpp",
+      "sha256": "804c7378a5c64258477207924eb524d6da6a6fb3142b3889fc296b2cbfdd6b89"
     },
     {
       "path": "Tools/FFmpeg/Native/Unity/IUnityGraphics.h",
@@ -75,31 +83,55 @@
       "sha256": "de4c4c2a712ad996371ca9bbf513eff1ae31e68b5bc9548c7af68798a1ff72ea"
     },
     {
-      "path": "Tools/FFmpeg/Native/tests/D3D11Smoke.cpp",
-      "sha256": "57da5c1185626d5bcc519b2f65fc42dc419ff0c4dc6c20efb8b2c8902a3f52dd"
+      "path": "Tools/FFmpeg/Native/Unity/IUnityInterface.h",
+      "sha256": "e23e267b57c049b438307542d62c30fbcd3fa77b6dac3b08842eae0df10b8239"
     },
     {
-      "path": "Tools/FFmpeg/Native/tests/D3D12InteropProbe.cpp",
-      "sha256": "bad358e49b10775b471a83a98c43b05a4420f8f9a30f17290fea7e1b0dd8bf61"
+      "path": "Tools/FFmpeg/Native/VideoConvertSpirv.h",
+      "sha256": "5c71ba5acae9869c3b331c3cf9adacc028ba3d9b4d43343875a0e7a01cbb1f73"
     },
     {
-      "path": "Tools/FFmpeg/Native/tests/WglInteropSmoke.cpp",
-      "sha256": "804c7378a5c64258477207924eb524d6da6a6fb3142b3889fc296b2cbfdd6b89"
+      "path": "Tools/FFmpeg/Native/VulkanInterop.cpp",
+      "sha256": "3dd90b4d234a972bd45d045d8ef3c7c76d265142208d516b6914b7e8fcdcf5d0"
     },
     {
-      "path": "Tools/FFmpeg/Native/tests/VulkanInteropSmoke.cpp",
-      "sha256": "45e0b6d9aa3f517fd343b3e516a7dee9f1f0ad53bc749804e1eae7c7591af56d"
+      "path": "Tools/FFmpeg/Native/VulkanInterop.h",
+      "sha256": "a5425c2c48c3fefc8091a42f97e3bac44ba040aecf715a471a87cff8f208c959"
     },
     {
-      "sha256": "4167bbc7f5e4fa7e0926384fa3a8fbb12c5ecc7f3a0e94631b108587ef246b78",
-      "path": "Tools/FFmpeg/Native/tests/D3D12Smoke.cpp"
+      "path": "Tools/FFmpeg/Native/VulkanPortable.cpp",
+      "sha256": "05b163b9695ae0252cc6b220f8ffa2ef60b3f2532c1bfe73cc035fcdc4a103df"
+    },
+    {
+      "path": "Tools/FFmpeg/Native/VulkanPortable.h",
+      "sha256": "0420d96f9a4234a491d9f380f8cbcfe7e98ba2c2fd988f4f6e6594fa59f310dc"
+    },
+    {
+      "path": "Tools/FFmpeg/Native/VulkanVideoDecode.cpp",
+      "sha256": "8d2630d86c100807b6b0175163aec824aa42fd245aec66b48864ba5a8b55ceea"
+    },
+    {
+      "path": "Tools/FFmpeg/Native/VulkanVideoDecode.h",
+      "sha256": "768faf2863673e88ce7a33024fa2790601cead7d7170682d8bebcda0ed008060"
+    },
+    {
+      "path": "Tools/FFmpeg/Native/WglInterop.cpp",
+      "sha256": "142f395a2f50d827d1f0cbcdf44c45fc7072a39bf32e05d5bc32e83ab0136534"
+    },
+    {
+      "path": "Tools/FFmpeg/Native/WglInterop.h",
+      "sha256": "7f044ebca6b389eae55a9d697303b86ca998b516ac4b52194efce9aa715ea8bd"
     }
   ],
-  "command": "cmake --build Tools/FFmpeg/.build/bridge-win-x64-5e0d2d1fd70d --config Release --parallel 8",
+  "command": "cmake --build Tools/FFmpeg/.build/native-video-bridge-win-x64 --parallel 8",
   "verification": {
-    "date": "2026-10-03",
-    "build": "PASS: CMake current sources; Windows remains ABI 2",
-    "unityHardwarePlayback": "PASS: Mono and IL2CPP, D3D11/D3D12/OpenGL Core/Vulkan; each 18 assertions with hardware required and empty fallback. See Tools/Tests/FFmpegValidation/RESULTS.md."
+    "date": "2026-10-04",
+    "build": "PASS: LLVM-MinGW/CMake, ABI 4, native D3D12VA and Vulkan Video exports",
+    "nativeD3D12Presentation": "PASS: 100 synthetic GPU frames; NV12 limited/full range; 64x64 to 128x64; cancellation and AVFrame lifetime; 4 pixel checks mean error 0..1; D3D12 debug layer enabled with zero warning/error messages. Fixture CPU upload and reference readback exist only in the test.",
+    "nativeD3D12Codec": "SKIP (exit 77): AMD Radeon RX 580 2048SP exposes D3D12 decode Tier 1, which pinned FFmpeg does not implement. This is not a positive D3D12 codec decode test.",
+    "nativeD3D11Regression": "PASS: actual NV12 array slice GPU conversion/range/lifetime, white 255 and black 0",
+    "vulkanNegotiation": "PASS: feature preservation, private queue remapping, implicit graphics/compute transfer-capability normalization, fallback and deferred device/instance destruction through actual FFmpeg references; does not assert physical Vulkan Video decode support",
+    "unityHardwarePlayback": "See Tools/Tests/FFmpegValidation/RESULTS.md for managed player validation and device limitations."
   },
   "previousNativeVerification": {
     "date": "2026-10-03",
@@ -111,5 +143,8 @@
     "dependencies": "avutil-61.dll and Windows system/UCRT libraries; no external C++ runtime DLL",
     "exports": "Cdecl ffu exports; plain and decorated x86 Unity lifecycle aliases",
     "nativeD3D12LinkedSmoke": "PASS: actual linked bridge, 4 completed packets + 1 cancellation, AVFrame retirement, white255/black0"
-  }
+  },
+  "builtUtc": "2026-10-03T17:55:44.0876211Z",
+  "ffmpegPrefix": "Tools/FFmpeg/.build/native-video-windows-prefix/win-x64",
+  "vulkanHeaders": "Vulkan-Headers vulkan-sdk-1.4.328.1"
 }

@@ -6,16 +6,18 @@ Native companion to `FFmpegVideoPlayer`. It links the same **libavutil 61** ABI 
 | --- | --- | --- |
 | D3D11 / Windows | FFmpeg D3D11VA using Unity's own device, NV12 texture-array slice input to `ID3D11VideoProcessor` | GPU conversion to RGBA, then Unity shader orientation; **no CPU readback, not strict zero-copy** |
 | Metal / macOS and iOS | VideoToolbox CVPixelBuffer → CVMetalTextureCache → Unity R8/RG8 external textures | NV12 planes are shared without pixel copies; RGB output requires a GPU conversion draw |
-| D3D12 / Windows | Same-adapter D3D11VA → shared RGBA → Unity D3D12 render target | Video conversion and an explicit GPU copy, shared producer fence and separate completion fence; no CPU pixel transfer |
-| Vulkan / Windows | Same-adapter D3D11VA → NT-handle shared RGBA → Unity VkImage | Video conversion and GPU copy, keyed-mutex ownership, Unity resource-state/queue APIs; no CPU pixel transfer |
+| D3D12 / Windows | FFmpeg D3D12VA using Unity's D3D12 device → D3D12 video processing → Unity D3D12 render target | Native D3D12 decoding and GPU RGBA conversion/copy, decode/process/render fence ordering; no CPU pixel transfer |
+| D3D12 / Windows fallback | Same-adapter D3D11VA → shared RGBA → Unity D3D12 render target | Video conversion and an explicit GPU copy, shared producer fence and separate completion fence; no CPU pixel transfer |
+| Vulkan / Windows, Linux and Android | FFmpeg Vulkan Video → Unity-device VkImage → immutable YCbCr sampling and GPU RGBA conversion | Native Vulkan decoding, timeline semaphore synchronization, independent decode queues and Unity queue access; no CPU pixel transfer |
+| Vulkan / Windows fallback | Same-adapter D3D11VA → NT-handle shared RGBA → Unity VkImage | Video conversion and GPU copy, keyed-mutex ownership, Unity resource-state/queue APIs; no CPU pixel transfer |
 | OpenGL Core / Windows | D3D11VA → RGBA registered with WGL_NV_DX_interop2 | Converted RGBA allocation shared with Unity GL texture; render-context lock/unlock; no CPU pixel transfer |
-| Vulkan / Linux | VAAPI → DRM PRIME separate R8/RG8 layers → modifier-aware DMA-BUF import | GPU NV12 conversion and copy into Unity RGBA8; no CPU pixel mapping/readback |
-| Vulkan / Android API 26+ | Hardware MediaCodec → PRIVATE AImage/AHardwareBuffer → Vulkan external image and YCbCr sampler | GPU color conversion and copy into Unity RGBA8; acquire sync-fd semaphore and foreign queue ownership; no CPU pixel mapping/readback |
+| Vulkan / Linux fallback | VAAPI → DRM PRIME separate R8/RG8 layers → modifier-aware DMA-BUF import | GPU NV12 conversion and copy into Unity RGBA8; no CPU pixel mapping/readback |
+| Vulkan / Android API 26+ fallback | Hardware MediaCodec → PRIVATE AImage/AHardwareBuffer → Vulkan external image and YCbCr sampler | GPU color conversion and copy into Unity RGBA8; acquire sync-fd semaphore and foreign queue ownership; no CPU pixel mapping/readback |
 | OpenGL on Linux / OpenGL ES on Android | VAAPI hardware-frame download / MediaCodec ByteBuffer output, when the decoder supports it | CPU RGBA conversion and texture upload; software decoding is the final fallback. Native EGLImage/dma-buf texture sharing is not implemented |
 
 This table describes the implemented bridge, not the full capabilities of those graphics APIs. Cross-API import uses explicit OS sharing handles on the same adapter; raw texture pointers are never reinterpreted as another API's objects.
 
-The native GPU paths support 8-bit NV12 and BT.601 / BT.709 full or limited range. P010/HDR, BT.2020 and incompatible surface sizes are rejected by native texture sharing. Windows, Metal and Linux GPU paths also reject left/top crop offsets; Android applies the AImage crop rectangle while sampling. These restrictions do not by themselves prevent hardware decoding followed by CPU conversion. The final shader applies the appropriate gamma conversion for Unity Gamma and Linear project settings. Clockwise 90/180/270 degree display rotations are applied before publication.
+The legacy GPU paths support 8-bit NV12 and BT.601 / BT.709 full or limited range. Vulkan Video additionally samples single-image NV12, P010 and P016 through Vulkan's YCbCr conversion, including their native sample precision. HDR transfer functions, BT.2020, left/top crop offsets, unsupported multi-image/layered video surfaces and incompatible surface sizes are rejected by this presentation path; HDR tone mapping is not implemented. Android's MediaCodec importer applies the AImage crop rectangle while sampling. These restrictions do not by themselves prevent hardware decoding followed by CPU conversion. The final shader applies the appropriate gamma conversion for Unity Gamma and Linear project settings. Clockwise 90/180/270 degree display rotations are applied before publication.
 
 `PreferNativeTextures = false` requests CPU upload while retaining the preferred hardware decoder; strict GPU mode overrides this preference. `DecoderType`/`DecoderName` describe decoding; `TransferMode` separately reports native GPU transport, hardware decode plus CPU RGBA upload, or software RGBA upload. A CPU-backed frame is not evidence of software decoding. D3D11VA, VAAPI and VideoToolbox download through `av_hwframe_transfer_data` on the decode worker. Android instead opens MediaCodec without a Surface and receives owned CPU buffers; it does not map an existing PRIVATE AHardwareBuffer. FFmpeg JNI initialization calls `libavcodec` directly, so this Android path does not depend on the optional graphics bridge. Generic decode devices may differ from Unity's graphics device; diagnostic descriptions distinguish a matched device from FFmpeg's default selection.
 
@@ -27,9 +29,21 @@ D3D11 frame retirement checks a GPU event query after video processing. Query fa
 
 The Windows output texture is native typed RGBA UNORM, since video-processor output views may reject Unity's typeless/sRGB render targets. The final shader applies gamma decoding in Linear projects. D3D12 and Vulkan use a Unity-owned explicit RGBA8 UNORM intermediate. Metal luma/chroma textures are always sampled as linear data.
 
-D3D12 uses Unity V8 plug-in events: a render-thread event requests COPY_DEST state, then a flushed submission-thread event waits for the D3D11 producer and submits the copy. An independent completion fence retains the command allocator, shared source and Unity target. D3D11 and D3D12 never signal the same fence from competing queues. Vulkan enables external-memory/keyed-mutex device extensions through the preload hook, matches the device LUID, acquires producer key 0, releases key 1 and performs a GPU copy through Unity's synchronized queue callback. It releases key 0 only after the copy. WGL registers, locks, unlocks and unregisters on the owning GL context. A retirement ticket keeps the Unity GL texture alive until unregister succeeds; a failed driver cleanup retains storage instead of deleting a registered GL name.
+D3D12 uses Unity V8 plug-in events: a render-thread event requests COPY_DEST state, followed by a flushed submission-thread event. The native D3D12VA route wraps Unity's device in an owned FFmpeg device reference, waits for the decoded frame's fence, converts NV12 to RGBA using D3D12 video processing, and submits the copy after the processing fence. The D3D11VA fallback instead waits for the shared D3D11 producer. Independent completion fences retain the frame, processing resources and Unity target. D3D11 and D3D12 never signal the same fence from competing queues. The legacy Windows Vulkan importer enables external-memory/keyed-mutex device extensions through the preload hook, matches the device LUID, acquires producer key 0, releases key 1 and performs a GPU copy through Unity's synchronized queue callback. It releases key 0 only after the copy. WGL registers, locks, unlocks and unregisters on the owning GL context. A retirement ticket keeps the Unity GL texture alive until unregister succeeds; a failed driver cleanup retains storage instead of deleting a registered GL name.
 
-Vulkan plug-ins must have **Preload enabled** for extension interception before device creation. Capability and asynchronous submission failures produce a diagnostic. The player's strict GPU mode rejects unsupported configurations and never uploads CPU pixels, including pixels from a hardware decoder; ordinary hardware-preferred mode can recover through hardware download before attempting software decoding. Restart the Editor when updating the bridge. Windows/Apple retain ABI 2; Linux/Android use ABI 3 and additional platform-specific entry points. A GPU color conversion or copy is explicitly reported as such, never as strict decoded-plane zero-copy.
+Vulkan plug-ins must have **Preload enabled** for extension interception before device creation. Capability and asynchronous submission failures produce a diagnostic. The player's strict GPU mode rejects unsupported configurations and never uploads CPU pixels, including pixels from a hardware decoder; ordinary hardware-preferred mode can recover through hardware download before attempting software decoding. Restart the Editor when updating the bridge. Windows, Linux and Android use ABI 4; Apple retains ABI 2. A GPU color conversion or copy is explicitly reported as such, never as strict decoded-plane zero-copy.
+
+## Native Vulkan Video
+
+`VulkanVideoDecode.cpp` augments the existing platform preload hook, rather than replacing it with a second interceptor. It requests Vulkan 1.3 only when the loader supports it, and requires a Vulkan 1.3 physical device, video/decode extensions, an enabled codec extension, timeline semaphores, synchronization2 and YCbCr conversion. Supported H.264, HEVC, AV1 and VP9 extensions are enabled independently. Codec profile, bit depth, resolution and session capabilities are subsequently checked by FFmpeg and the driver. Vulkan Video does not imply VP8 support.
+
+Device creation reserves a separate FFmpeg queue in Unity's graphics/compute family and a video-decode queue. FFmpeg's loader remaps its queue index zero to these reserved queues; it never submits from its worker to Unity's graphics queue. All players share the private queues' mutex. If a spare graphics/compute queue is unavailable, or Unity's feature chain contains an unrecognized structure that cannot be copied safely, negotiation leaves Unity's configuration intact and declines this backend. A driver rejection retries Unity's original configuration. The existing D3D11VA, VAAPI and MediaCodec import routes remain independently available.
+
+The exported device is an owned FFmpeg `AVBufferRef` around Unity's device. `AVVkFrame` images are sampled directly on that same device. The render submission locks the FFmpeg frame, reads its current layout and timeline value, waits for that value, restores the layout after sampling, signals the next value, updates the frame state and unlocks immediately after queue submission. Later decoder DPB reads therefore observe the same timeline protocol. The frame reference, image view, sampler and conversion are retained until the GPU fence completes. No video image is mapped or downloaded by this path.
+
+Unity's device and parent instance destruction requests are intercepted and deferred while exported FFmpeg device references remain. This keeps background decoder/pool cleanup valid across graphics shutdown; the last FFmpeg reference triggers deferred destruction. Initialization failures release their device ownership through the same callback. Normal frame retirement frees resources even after the Unity context is inactive, using the retained Vulkan device lifetime.
+
+`ffu_vulkan_video_status()` reports `0` after successful negotiation. Codes `400`–`408` identify missing preload, Vulkan version/query/extension/feature support, an unsupported Unity feature chain, unavailable private queues, absent video codec queues, or rejected augmented device creation. `409` identifies an unavailable FFmpeg Vulkan device implementation. Presentation codes `410`–`416` identify allocation, device mismatch, unsupported format/color/crop, missing functions, unsupported sampling, invalid extent, or frame synchronization/ownership failures. Negative values retain their FFmpeg or Vulkan error code.
 
 ## Linux and Android Vulkan ownership
 
@@ -49,24 +63,30 @@ The parent FFmpeg build scripts can invoke this CMake project after installing F
 
 ```sh
 cmake -S Tools/FFmpeg/Native -B Tools/FFmpeg/.build/bridge \
-  -DFFMPEG_ROOT=/absolute/path/to/ffmpeg/install -DFFU_BUILD_TESTS=ON
+  -DFFMPEG_ROOT=/absolute/path/to/ffmpeg/install \
+  -DFFU_VULKAN_HEADERS=/path/to/pinned/Vulkan-Headers/include \
+  -DFFU_BUILD_TESTS=ON
 cmake --build Tools/FFmpeg/.build/bridge --config Release
 ```
 
-Windows produces `FFmpegUnityBridge.dll`; Linux and Android produce `libFFmpegUnityBridge.so`; macOS produces `libFFmpegUnityBridge.dylib`; iOS produces `libFFmpegUnityBridge.a`. Cross builds need matching CMake compiler/toolchain settings. CMake does not download FFmpeg.
+Windows produces `FFmpegUnityBridge.dll`; Linux and Android produce `libFFmpegUnityBridge.so`; macOS produces `libFFmpegUnityBridge.dylib`; iOS produces `libFFmpegUnityBridge.a`. Cross builds need matching CMake compiler/toolchain settings. CMake does not download FFmpeg or updated Vulkan headers: use the parent build script's pinned header cache for Windows/Linux/Android; the older bundled headers do not cover the new Vulkan Video codecs. Apple builds do not need Vulkan headers.
 
 `FFmpegUnityBridgeSmoke.exe` uses the actual Windows D3D11 adapter without launching Unity. It checks NV12 array slice 1 → RGBA pixels, limited-range black/white levels, and delayed AVFrame recycling. Exit 77 means the host lacks the necessary device/driver support; it is **not** a passing test. Keep `avutil-61.dll` and any toolchain runtime dependencies available beside the test or on `PATH`. The smoke test does not validate Unity's shader, Metal, or the actual hardware video codec; those require platform playback tests.
 
-The shared Vulkan compute test needs a Vulkan loader/ICD, but no FFmpeg, VAAPI device or Android SDK. `FFU_VULKAN_TESTING` bypasses only the platform import-extension gate in this **test executable**; production bridge builds never define it. It still runs real compute, copies, deferred queue callbacks and GPU fences:
+With `FFU_BUILD_TESTS=ON`, `FFmpegD3D12VideoSmoke.exe --frames` exercises 100 synthetic FFmpeg D3D12 hardware frames, full/limited-range GPU conversion, output resizing, cancellation and frame retirement. Pixel upload and readback belong only to this test fixture. A passing synthetic test establishes presentation correctness, not bitstream decoding support. `FFmpegD3D12VideoSmoke.exe path/to/video.mp4` instead requests real FFmpeg D3D12VA decoding, GPU pixel comparisons and seeking. A device/codec rejection returns **SKIP (77)**, not PASS. Keep the matching FFmpeg DLL directory on `PATH`. The local RX 580 supports the synthetic presentation test but its reported decoding tier is rejected by FFmpeg's native D3D12VA path.
+
+The Vulkan tests use the matching FFmpeg development prefix. The negotiation test uses modeled driver capabilities and real FFmpeg buffer references; it verifies feature preservation, private queue remapping, fallback and deferred device/instance destruction. The compute test requires a Vulkan 1.2 loader/ICD with timeline semaphore support and runs actual compute, copies, deferred queue callbacks and GPU fences. It does not claim hardware video decode coverage:
 
 ```sh
-g++ -std=c++17 -O2 -Wall -Wextra -Werror -DFFU_VULKAN_TESTING \
-  -ITools/FFmpeg/Native/Unity -ITools/FFmpeg/Native/ThirdParty/Vulkan-Headers/include \
-  Tools/FFmpeg/Native/VulkanPortable.cpp Tools/FFmpeg/Native/tests/VulkanPortableSmoke.cpp \
-  -l:libvulkan.so.1 -pthread -o vulkan-portable-smoke
-./vulkan-portable-smoke
+cmake -S Tools/FFmpeg/Native -B Tools/FFmpeg/.build/vulkan-tests \
+  -DFFMPEG_ROOT=/path/to/matching/ffmpeg/prefix \
+  -DFFU_VULKAN_HEADERS=/path/to/pinned/Vulkan-Headers/include \
+  -DFFU_BUILD_VULKAN_TESTS=ON
+cmake --build Tools/FFmpeg/.build/vulkan-tests --parallel
+Tools/FFmpeg/.build/vulkan-tests/FFmpegUnityVulkanNegotiation
+Tools/FFmpeg/.build/vulkan-tests/FFmpegUnityVulkanCompute
 env -u LD_LIBRARY_PATH python3 Tools/FFmpeg/Native/tests/LoadLinuxBridge.py \
-  Assets/Plugins/FFmpeg/Native/Linux/x86_64/libFFmpegUnityBridge.so
+  Assets/Plugins/MajdataPlay/FFmpeg/Native/Linux/x86_64/libFFmpegUnityBridge.so
 ```
 
 ### Local validation, 2026-10-03

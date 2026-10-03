@@ -1,5 +1,5 @@
-install prefix            /tmp/majdata-ffmpeg-build/install/win-x86
-source path               ./src
+install prefix            /tmp/majdata-ffmpeg-native-video/install/win-x86
+source path               /tmp/majdata-ffmpeg-native-video/source
 C compiler                i686-w64-mingw32-gcc
 C library                 mingw64
 host C compiler           gcc
@@ -49,6 +49,7 @@ schannel
 
 External libraries providing hardware acceleration:
 d3d11va                 dxva2
+d3d12va                 vulkan
 
 Libraries:
 avcodec                 avformat                swscale
@@ -222,12 +223,16 @@ Enabled encoders:
 
 Enabled hwaccels:
 av1_d3d11va             hevc_d3d11va2           vc1_dxva2
-av1_d3d11va2            hevc_dxva2              vp9_d3d11va
-av1_dxva2               mpeg2_d3d11va           vp9_d3d11va2
-h264_d3d11va            mpeg2_d3d11va2          vp9_dxva2
-h264_d3d11va2           mpeg2_dxva2             wmv3_d3d11va
-h264_dxva2              vc1_d3d11va             wmv3_d3d11va2
-hevc_d3d11va            vc1_d3d11va2            wmv3_dxva2
+av1_d3d11va2            hevc_d3d12va            vp9_d3d11va
+av1_d3d12va             hevc_dxva2              vp9_d3d11va2
+av1_dxva2               hevc_vulkan             vp9_d3d12va
+av1_vulkan              mpeg2_d3d11va           vp9_dxva2
+h264_d3d11va            mpeg2_d3d11va2          vp9_vulkan
+h264_d3d11va2           mpeg2_d3d12va           wmv3_d3d11va
+h264_d3d12va            mpeg2_dxva2             wmv3_d3d11va2
+h264_dxva2              vc1_d3d11va             wmv3_d3d12va
+h264_vulkan             vc1_d3d11va2            wmv3_dxva2
+hevc_d3d11va            vc1_d3d12va
 
 Enabled parsers:
 aac                     evc                     mpegvideo
@@ -420,15 +425,4 @@ Enabled outdevs:
 License: LGPL version 2.1 or later
 
 WARNING: i686-w64-mingw32-pkg-config not found, library detection may fail.
-config_components.h is unchanged
-checkasm_config_generated.h is unchanged
-libavutil/avconfig.h is unchanged
-libavfilter/filter_list.c is unchanged
-libavcodec/codec_list.c is unchanged
-libavcodec/parser_list.c is unchanged
-libavcodec/bsf_list.c is unchanged
-libavformat/demuxer_list.c is unchanged
-libavformat/muxer_list.c is unchanged
-libavdevice/indev_list.c is unchanged
-libavdevice/outdev_list.c is unchanged
-libavformat/protocol_list.c is unchanged
+WARNING: spirv-headers not found, swscale SPIR-V backend unavailable

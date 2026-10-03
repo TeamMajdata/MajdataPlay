@@ -1,5 +1,5 @@
-install prefix            /tmp/majdata-ffmpeg-vulkan/install/linux-x64
-source path               /tmp/majdata-ffmpeg-vulkan/source
+install prefix            /tmp/majdata-ffmpeg-native-video/install/linux-x64
+source path               /tmp/majdata-ffmpeg-native-video/source
 C compiler                cc
 C library                 glibc
 ARCH                      x86 (generic)
@@ -45,7 +45,7 @@ External libraries:
 iconv
 
 External libraries providing hardware acceleration:
-libdrm                  vaapi
+libdrm                  vaapi                   vulkan
 
 Libraries:
 avcodec                 avformat                swscale
@@ -218,10 +218,11 @@ escape130               pcm_u8                  zero12v
 Enabled encoders:
 
 Enabled hwaccels:
-av1_vaapi               mjpeg_vaapi             vp8_vaapi
-h263_vaapi              mpeg2_vaapi             vp9_vaapi
-h264_vaapi              mpeg4_vaapi             wmv3_vaapi
-hevc_vaapi              vc1_vaapi
+av1_vaapi               hevc_vaapi              vc1_vaapi
+av1_vulkan              hevc_vulkan             vp8_vaapi
+h263_vaapi              mjpeg_vaapi             vp9_vaapi
+h264_vaapi              mpeg2_vaapi             vp9_vulkan
+h264_vulkan             mpeg4_vaapi             wmv3_vaapi
 
 Enabled parsers:
 aac                     evc                     mpegvideo
@@ -410,3 +411,5 @@ Enabled indevs:
 Enabled outdevs:
 
 License: LGPL version 2.1 or later
+
+WARNING: spirv-headers not found, swscale SPIR-V backend unavailable

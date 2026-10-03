@@ -50,6 +50,10 @@ namespace MajdataPlay.FFmpeg.Internal
         /// <summary>Gets or sets a worker callback that creates a native surface decoding session for the requested width and height, in pixels.</summary>
         /// <remarks>The decoder owns and disposes the returned session. A null result indicates that native surface decoding is unavailable.</remarks>
         public Func<int, int, IHardwareDecodeSession> CreateHardwareSession { get; set; }
+
+        // A player-owned alternative for codecs or devices that cannot use the preferred native API.
+        internal DecoderOptions FallbackHardwareOptions { get; set; }
+        internal DecoderOptions Copy() => (DecoderOptions)MemberwiseClone();
     }
 
     /// <summary>Owns a hardware decoding session that transports native images without mapping pixels into CPU memory.</summary>

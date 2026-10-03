@@ -17,9 +17,10 @@
     "note": "All upstream public headers present in the binding header snapshot are compared after CRLF normalization before building. Generated avconfig.h and ffversion.h are excluded."
   },
   "host": "Linux-6.18.40.1-microsoft-standard-WSL2-x86_64-with-glibc2.39",
-  "builtUtc": "2026-10-03T10:14:59.041012+00:00",
+  "builtUtc": "2026-10-03T17:36:11+00:00",
+  "stagedUtc": "2026-10-03T17:45:55.615581+00:00",
   "configure": [
-    "--prefix=/tmp/majdata-ffmpeg-build/install/win-x64",
+    "--prefix=/tmp/majdata-ffmpeg-native-video/install/win-x64",
     "--disable-doc",
     "--disable-programs",
     "--disable-debug",
@@ -40,44 +41,110 @@
     "--enable-cross-compile",
     "--enable-w32threads",
     "--enable-d3d11va",
+    "--enable-d3d12va",
     "--enable-dxva2",
-    "--enable-schannel"
+    "--enable-schannel",
+    "--extra-cflags=-I/mnt/c/Users/LeZi/source/repos/LingFeng-bbben/MajdataPlay/Tools/FFmpeg/.build/toolchains/d3d12-header-overlay",
+    "--enable-vulkan",
+    "--disable-vulkan-static",
+    "--extra-cflags=-I/mnt/c/Users/LeZi/source/repos/LingFeng-bbben/MajdataPlay/Tools/FFmpeg/.build/toolchains/Vulkan-Headers-vulkan-sdk-1.4.328.1/include",
+    "--disable-hwaccel=apv_vulkan,dpx_vulkan,ffv1_vulkan,prores_raw_vulkan,prores_vulkan"
   ],
   "files": [
     {
       "file": "avcodec-63.dll",
-      "bytes": 16051200,
-      "sha256": "a0b1091f2e3afd410d6efc4a81e22fd032771e77e76e2b3cd5b689d153beb3f3"
+      "bytes": 16186880,
+      "sha256": "7c0459f8237d9b651988586db9411fd977ba1d2f3ff6cb919d66c818b8c063aa"
     },
     {
       "file": "avdevice-63.dll",
       "bytes": 17408,
-      "sha256": "c3688081f6c4baaf2f6f7a221d701daf6fc2e5a241d8faf7789bb2a1a59502e8"
+      "sha256": "05a03a23e8efbae25c00e4a054154ee4bf4bd567490ef9b4b0b201819d00e32f"
     },
     {
       "file": "avfilter-12.dll",
       "bytes": 157184,
-      "sha256": "8dae179174186f74d97e8a442fa59024ddfc283d62bc5b66f257875a4c8aa5b5"
+      "sha256": "4ed2d42b03a3ba04e554b55841df0ef439119b5cf5a43e2b386a798bf08df80c"
     },
     {
       "file": "avformat-63.dll",
-      "bytes": 1896448,
-      "sha256": "efabe1f15bd113e15e5556a67098ab2dd9220a6ac8604bc61b37ff0b1c743928"
+      "bytes": 1896960,
+      "sha256": "d8b8c471b14547eaac5e3c224c4805d4a75943dd3ca15453405a52ad15f0ffae"
     },
     {
       "file": "avutil-61.dll",
-      "bytes": 1046528,
-      "sha256": "e6f2aad31066f9804748938efa47d6a78d92e2d698f1f432afb66326680d9958"
+      "bytes": 1156096,
+      "sha256": "40bbfa6614bc554400fbaf446c9c540f301c00f030d411631b5419c59e81f6fa"
     },
     {
       "file": "swresample-7.dll",
-      "bytes": 139264,
-      "sha256": "3819155763ed181875d690906eaf070dd1bed20fdd0ba79750a41b50fc829537"
+      "bytes": 139776,
+      "sha256": "90ab9ac559be5ccad81cf90dd992facbbd65261849cb9348cabefc80b2fdba33"
     },
     {
       "file": "swscale-10.dll",
-      "bytes": 2139648,
-      "sha256": "ba1eb00ef5441c5396c9198cd92a388ec34147a71a1863f0868bd3f941b3277e"
+      "bytes": 2211328,
+      "sha256": "9a67778a78eef2b601078aabfef618c82faeadab2946125b32f4fe0d8c9be0cc"
+    }
+  ],
+  "buildDependencies": {
+    "vulkanHeaders": {
+      "repository": "https://github.com/KhronosGroup/Vulkan-Headers.git",
+      "tag": "vulkan-sdk-1.4.328.1",
+      "commit": "19725e4d48082fe78e26622b15d3080ccd54112b",
+      "minimumHeaderVersion": 317
+    },
+    "d3d12HeaderOverlay": {
+      "source": "llvm-mingw-20260922-ucrt-x86_64.zip",
+      "files": {
+        "d3d12.h": "23935395fe8939ac0ca71c5b34cd7b21a689ff5e9641846563613f24bc0dd85e",
+        "d3d12video.h": "23216f1bcb62c8c0c9e09d66cf12d639eb1abcad9a1ba31e0d517a428cd56aee"
+      }
+    },
+    "llvmMingw": {
+      "version": "20260922",
+      "repository": "https://github.com/mstorsjo/llvm-mingw",
+      "archives": {
+        "Linux-x86_64": {
+          "file": "llvm-mingw-20260922-ucrt-ubuntu-22.04-x86_64.tar.xz",
+          "sha256": "bb7bb7654b33d5aa8712acb837c963b2e0c56352560c76105270a3268c665c21"
+        },
+        "Darwin-universal": {
+          "file": "llvm-mingw-20260922-ucrt-macos-universal.tar.xz",
+          "sha256": "52e5f5a7b131021d0c39a37a38fa380a1da7885cd04bd61afd0cd4ecfb8bc1f3"
+        },
+        "Windows-x86_64": {
+          "file": "llvm-mingw-20260922-ucrt-x86_64.zip",
+          "sha256": "e3ad77d117a4bea19a7a3b333341824d79a5a371004a10e25b8504e7b3047666"
+        }
+      }
+    }
+  },
+  "verifiedHardwareBackends": [
+    "VULKAN",
+    "H264_VULKAN_HWACCEL",
+    "HEVC_VULKAN_HWACCEL",
+    "AV1_VULKAN_HWACCEL",
+    "VP9_VULKAN_HWACCEL",
+    "D3D12VA",
+    "H264_D3D12VA_HWACCEL",
+    "HEVC_D3D12VA_HWACCEL",
+    "AV1_D3D12VA_HWACCEL",
+    "VP9_D3D12VA_HWACCEL"
+  ],
+  "d3d12HeaderOverlay": {
+    "directory": "/mnt/c/Users/LeZi/source/repos/LingFeng-bbben/MajdataPlay/Tools/FFmpeg/.build/toolchains/d3d12-header-overlay",
+    "files": {
+      "d3d12.h": "23935395fe8939ac0ca71c5b34cd7b21a689ff5e9641846563613f24bc0dd85e",
+      "d3d12video.h": "23216f1bcb62c8c0c9e09d66cf12d639eb1abcad9a1ba31e0d517a428cd56aee"
+    }
+  },
+  "stagingRecovery": "Compilation succeeded in WSL. A transient destination file lock prevented staging; Windows copied the preserved prefix after the WSL temporary build cache was cleared. Configuration recovered from avutil_configuration(); H264/HEVC/AV1/VP9 Vulkan and D3D12VA configurations verified with avcodec_get_hw_config().",
+  "buildDependencyLicenses": [
+    {
+      "file": "Vulkan-Headers.LICENSE.txt",
+      "sha256": "dd5e3849fb892384ba4b7e88b73e87600d3164f1ec3216b44b06a6458fff483a",
+      "license": "Apache-2.0"
     }
   ]
 }
