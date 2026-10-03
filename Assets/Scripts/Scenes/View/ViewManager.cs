@@ -114,7 +114,7 @@ namespace MajdataPlay.Scenes.View
             //PlayerSettings.resizableWindow = true;
             //Screen.SetResolution(1920, 1080, false);
         }
-        void Start()
+        async void Start()
         {
             _bgManager = Majdata<BGManager>.Instance!;
             //_httpServer = Majdata<WsServer>.Instance!;
@@ -127,7 +127,19 @@ namespace MajdataPlay.Scenes.View
 
             if (!string.IsNullOrEmpty(_videoPath))
             {
-                _bgManager.SetMovieAsync(_videoPath, _bgCover).AsTask().Wait();
+                var previousState = _state;
+                _state = ViewStatus.Busy;
+                try
+                {
+                    await _bgManager.SetMovieAsync(_videoPath, _bgCover);
+                }
+                finally
+                {
+                    if (this != null && _state == ViewStatus.Busy && previousState != ViewStatus.Busy)
+                    {
+                        _state = previousState;
+                    }
+                }
             }
             else if (_bgCover is not null)
             {

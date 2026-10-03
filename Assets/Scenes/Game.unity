@@ -9050,9 +9050,6 @@ MonoBehaviour:
   _coverRenderer: {fileID: 1655371718}
   _videoRenderer: {fileID: 1679474004}
   _defaultSprite: {fileID: 0}
-  _renderTexture: {fileID: 0}
-  _flipTextureX: 1
-  _flipTextureY: 1
 --- !u!224 &878179203
 RectTransform:
   m_ObjectHideFlags: 0
@@ -9074,42 +9071,30 @@ RectTransform:
   m_AnchoredPosition: {x: 0, y: 0}
   m_SizeDelta: {x: 100, y: 100}
   m_Pivot: {x: 0.5, y: 0.5}
---- !u!328 &878179204
-VideoPlayer:
+--- !u!114 &878179204
+MonoBehaviour:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 878179199}
   m_Enabled: 1
-  m_VideoClip: {fileID: 0}
-  m_TargetCameraAlpha: 1
-  m_TargetCamera3DLayout: 0
-  m_TargetCamera: {fileID: 0}
-  m_TargetTexture: {fileID: 8400000, guid: c496f229ade6e694eb5b76ebda742f8a, type: 2}
-  m_TimeReference: 0
-  m_TargetMaterialRenderer: {fileID: 0}
-  m_TargetMaterialProperty: <noninit>
-  m_RenderMode: 2
-  m_AspectRatio: 2
-  m_DataSource: 0
-  m_TimeUpdateMode: 2
-  m_PlaybackSpeed: 1
-  m_AudioOutputMode: 0
-  m_TargetAudioSources:
-  - {fileID: 0}
-  m_DirectAudioVolumes:
-  - 1
-  m_Url: 
-  m_EnabledAudioTracks: 01
-  m_DirectAudioMutes: 00
-  m_ControlledAudioTrackCount: 1
-  m_PlayOnAwake: 0
-  m_SkipOnDrop: 1
-  m_Looping: 0
-  m_WaitForFirstFrame: 0
-  m_FrameReadyEventEnabled: 0
-  m_VideoShaders: []
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: caa7b6dbf6805825bc91b808e026b85c, type: 3}
+  m_Name:
+  m_EditorClassIdentifier: MajdataPlay.FFmpeg::MajdataPlay.FFmpeg.FFmpegVideoPlayer
+  _source:
+  _playOnAwake: 0
+  _loop: 0
+  _playbackRate: 1
+  _bufferedFrameLimit: 3
+  _ioTimeoutSeconds: 15
+  _preferHardwareDecoding: 1
+  _preferNativeTextures: 1
+  _requireHardwareDecoding: 0
+  _targetRenderer: {fileID: 0}
+  _textureProperty: _MainTex
+  _targetTexture: {fileID: 0}
 --- !u!223 &878179205
 Canvas:
   m_ObjectHideFlags: 0

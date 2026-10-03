@@ -1,22 +1,31 @@
 using Cysharp.Threading.Tasks;
 using MajdataPlay.Diagnostics;
+using MajdataPlay.FFmpeg;
 using System.Collections;
 using System.Collections.Generic;
 using System.IO;
 using UnityEngine;
-using UnityEngine.Video;
+using UnityEngine.Serialization;
 
 namespace MajdataPlay.Scenes.Title
 {
     public class LoadVideoFromSA : MonoBehaviour
     {
-        public VideoPlayer player;
-        public string videopath;
-        public bool LoadOnly;
+        [FormerlySerializedAs("videoPlayer")]
+        [SerializeField]
+        private FFmpegVideoPlayer _ffmpegPlayer;
+
+        [FormerlySerializedAs("videopath")]
+        [SerializeField]
+        private string _videoPath;
+
+        [FormerlySerializedAs("LoadOnly")]
+        [SerializeField]
+        private bool _loadOnly;
 
         void Awake()
         {
-            player = GetComponent<VideoPlayer>();
+            _ffmpegPlayer = GetComponent<FFmpegVideoPlayer>();
         }
         void Start()
         {
@@ -28,7 +37,7 @@ namespace MajdataPlay.Scenes.Title
             {
                 await UniTask.Yield();
             }
-            var videoPath = videopath;
+            var videoPath = _videoPath;
             if (string.IsNullOrEmpty(videoPath) || videoPath.Length == 1)
             {
                 MajDebug.LogWarning($"[{nameof(LoadVideoFromSA)}]Invalid video path: {videoPath}");
@@ -56,15 +65,14 @@ namespace MajdataPlay.Scenes.Title
                 return;
             }
             MajDebug.LogInfo($"[{nameof(LoadVideoFromSA)}]Load video from {path}");
-            player.url = path;
-            player.audioOutputMode = VideoAudioOutputMode.None;
-            if (LoadOnly)
+            _ffmpegPlayer.Url = path;
+            if (_loadOnly)
             {
-                player.Prepare();
+                _ffmpegPlayer.Prepare();
             }
             else
             {
-                player.Play();
+                _ffmpegPlayer.Play();
             }
         }
     }

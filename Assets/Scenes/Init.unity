@@ -557,7 +557,7 @@ GameObject:
   m_Component:
   - component: {fileID: 130509342}
   - component: {fileID: 130509345}
-  - component: {fileID: 130509344}
+  - component: {fileID: 130509347}
   - component: {fileID: 130509343}
   - component: {fileID: 130509346}
   m_Layer: 5
@@ -598,45 +598,10 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 067a7c58d784bcd4dac4bc1227584d30, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  player: {fileID: 130509344}
+  player: {fileID: 0}
+  _ffmpegPlayer: {fileID: 130509347}
   videopath: /MovieBG/title
   LoadOnly: 0
---- !u!328 &130509344
-VideoPlayer:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 130509341}
-  m_Enabled: 1
-  m_VideoClip: {fileID: 0}
-  m_TargetCameraAlpha: 1
-  m_TargetCamera3DLayout: 0
-  m_TargetCamera: {fileID: 0}
-  m_TargetTexture: {fileID: 0}
-  m_TimeReference: 0
-  m_TargetMaterialRenderer: {fileID: 0}
-  m_TargetMaterialProperty: <noninit>
-  m_RenderMode: 3
-  m_AspectRatio: 2
-  m_DataSource: 0
-  m_TimeUpdateMode: 2
-  m_PlaybackSpeed: 1
-  m_AudioOutputMode: 0
-  m_TargetAudioSources:
-  - {fileID: 0}
-  m_DirectAudioVolumes:
-  - 1
-  m_Url: 
-  m_EnabledAudioTracks: 01
-  m_DirectAudioMutes: 00
-  m_ControlledAudioTrackCount: 1
-  m_PlayOnAwake: 1
-  m_SkipOnDrop: 0
-  m_Looping: 1
-  m_WaitForFirstFrame: 1
-  m_FrameReadyEventEnabled: 0
-  m_VideoShaders: []
 --- !u!212 &130509345
 SpriteRenderer:
   serializedVersion: 2
@@ -713,6 +678,30 @@ MonoBehaviour:
   GroupSortingOrder: 0
   SortingOrder: 0
   _targetArtMesh: {fileID: 0}
+--- !u!114 &130509347
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 130509341}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: caa7b6dbf6805825bc91b808e026b85c, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: MajdataPlay.FFmpeg::MajdataPlay.FFmpeg.FFmpegVideoPlayer
+  _source: 
+  _playOnAwake: 1
+  _loop: 1
+  _playbackRate: 1
+  _bufferedFrameLimit: 3
+  _ioTimeoutSeconds: 15
+  _preferHardwareDecoding: 1
+  _preferNativeTextures: 1
+  _requireHardwareDecoding: 0
+  _targetRenderer: {fileID: 130509345}
+  _textureProperty: _MainTex
+  _targetTexture: {fileID: 0}
 --- !u!1 &189282376
 GameObject:
   m_ObjectHideFlags: 0
@@ -3518,7 +3507,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::MajdataPlay.BackgroundVideoController
   <RuntimeDatabase>k__BackingField: {fileID: 0}
-  _videoPlayer: {fileID: 130509344}
+  _videoPlayer: {fileID: 130509347}
   _videoRenderer: {fileID: 130509345}
   _renderingInterrupter: {fileID: 130509346}
 --- !u!1 &969494141

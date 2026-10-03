@@ -103,7 +103,7 @@ Android GPU 路径需要 API 26+、Vulkan 1.1 与 AHardwareBuffer/外部同步/Y
 - Android APK/JAR 中的 StreamingAssets 不是普通文件：先通过 UnityWebRequest 复制到 `persistentDataPath` 再打开。普通本地路径、`file://` 和 FFmpeg 构建启用的 URL 协议可以使用；HTTPS 能力取决于构建的 TLS 后端。
 - 默认 I/O 超时 15 秒，探测大小、分析时长和图像大小均有上限。销毁对象通过 AVIO interrupt 中断阻塞 I/O；第三方协议若不检查该回调，工作线程仍需等它返回。
 - 软件路径处理 BT.601 / BT.709 / BT.2020 矩阵和 full/limited range，输出 RGBA8；支持常见 90° 倍数旋转。没有 HDR 色调映射、字幕、DRM 或音轨输出。
-- 这是独立组件，不会自动替换 `BGManager` 或修改既有场景。现有背景播放器可按上述 API 接入；保留原有音频同步方式。
+- `BGManager` 使用此组件预载和播放谱面背景视频，通过 `TextureChanged` 更新 UI 纹理；保留原有音频同步方式。
 
 ## 验证
 

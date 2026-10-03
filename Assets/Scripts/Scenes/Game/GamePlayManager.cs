@@ -1202,13 +1202,9 @@ namespace MajdataPlay.Scenes.Game
                 GameControlLateUpdate();
                 _noteEffectPool.OnLateUpdate();
                 _recorderStateDisplayer.OnLateUpdate();
-                if (_bgManager.CurrentSec > _bgManager.MediaLength.TotalSeconds)
+                if (_bgManager.IsVideoEnded)
                 {
                     _bgManager.SetBrightness(0f);
-                }
-                else
-                {
-                    _bgManager.OnLateUpdate();
                 }
             }
         }

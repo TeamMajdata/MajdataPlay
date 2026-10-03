@@ -1,5 +1,6 @@
 using Live2D.Cubism.Rendering.URP.RenderingInterceptor;
 using MajdataPlay.Diagnostics;
+using MajdataPlay.FFmpeg;
 using System;
 using System.Linq;
 using System.Reflection;
@@ -12,7 +13,7 @@ namespace MajdataPlay
     public sealed class BackgroundVideoController : MajComponent
     {
         [SerializeField]
-        VideoPlayer _videoPlayer = null!;
+        FFmpegVideoPlayer _videoPlayer = null!;
         [SerializeField]
         SpriteRenderer _videoRenderer = null!;
 
