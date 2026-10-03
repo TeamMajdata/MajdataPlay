@@ -243,7 +243,7 @@ public sealed class FFmpegPlayerSmoke : MonoBehaviour
         _player.Play();
         start = UnityEngine.Time.realtimeSinceStartup;
         while (_frames - before < 300) { CheckTimeout(start); yield return null; }
-        Check(_player.IsPlaying && _player.time >= 8, "300 presented frames advance the playback clock");
+        Check(_player.IsPlaying && _player.TimeSeconds >= 8, "300 presented frames advance the playback clock");
         Check(_player.BufferedFrames <= 8, "sustained decoder queue stays bounded");
         for (int index = 0; index < 10; index++)
         {
@@ -252,7 +252,7 @@ public sealed class FFmpegPlayerSmoke : MonoBehaviour
             start = UnityEngine.Time.realtimeSinceStartup;
             while (!seek.IsCompleted) { CheckTimeout(start); yield return null; }
             seek.GetAwaiter().GetResult();
-            Check(_player.IsPlaying && Math.Abs(_player.time - target) < 0.25,
+            Check(_player.IsPlaying && Math.Abs(_player.TimeSeconds - target) < 0.25,
                 "repeated hardware seek preserves playback and rejects stale frames");
         }
         CheckHardwarePath();
@@ -332,7 +332,7 @@ public sealed class FFmpegPlayerSmoke : MonoBehaviour
                     _player.Play();
                 }
                 else
-                    Check(seek != null && seek.Status == TaskStatus.RanToCompletion && _player.IsPlaying && Math.Abs(_player.time - seekTarget) < 0.2,
+                    Check(seek != null && seek.Status == TaskStatus.RanToCompletion && _player.IsPlaying && Math.Abs(_player.TimeSeconds - seekTarget) < 0.2,
                         "SeekAsync callback completes at requested position and retains play intent");
                 before = _frames;
                 start = UnityEngine.Time.realtimeSinceStartup;

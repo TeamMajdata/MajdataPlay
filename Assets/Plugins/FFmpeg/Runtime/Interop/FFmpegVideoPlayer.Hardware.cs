@@ -73,9 +73,7 @@ namespace MajdataPlay.Video
         partial void PresentHardware(DecodedVideoFrame frame, ref Texture output)
         {
             if (!frame.IsHardwareFrame) return;
-#if ENABLE_PROFILER && (UNITY_EDITOR || DEBUG)
             using var profile = UnityProfiler.Create("FFmpeg.Interop.PresentHardware");
-#endif
             _hardwarePresenter ??= new HardwareVideoPresenter();
             if (!_hardwarePresenter.TryPresent(frame, out output))
                 throw new NotSupportedException("The decoded surface cannot be shared safely with the active Unity graphics device.");

@@ -15,17 +15,20 @@ namespace MajdataPlay.Video.Internal
         private readonly byte*[] _destination = new byte*[4];
         private readonly int[] _destinationStride = new int[4];
 
+        /// <summary>Converts a borrowed decoded frame to an independently owned RGBA32 presentation frame.</summary>
+        /// <param name="source">The source frame, which may be downloaded and have its CPU cropping metadata applied.</param>
+        /// <param name="pts">The presentation timestamp, in seconds relative to the media's timeline origin.</param>
+        /// <param name="duration">The frame's presentation duration, in seconds.</param>
+        /// <param name="rotation">The clockwise display rotation, in degrees, rounded to the nearest quarter turn.</param>
+        /// <param name="maximumPixels">The maximum permitted number of pixels in the source frame.</param>
+        /// <returns>A frame owned by the caller, with rotation and Unity's vertical flip applied to its CPU pixels.</returns>
         public DecodedVideoFrame Convert(AVFrame* source, double pts, double duration, double rotation, int maximumPixels)
         {
-#if (UNITY_EDITOR || DEBUG) && ENABLE_PROFILER
             using var profile = UnityProfiler.Create("FFmpeg.Decoder.ConvertRGBA");
-#endif
             var hardware = source->hw_frames_ctx != null;
             if (source->hw_frames_ctx != null)
             {
-#if (UNITY_EDITOR || DEBUG) && ENABLE_PROFILER
                 using var downloadProfile = UnityProfiler.Create("FFmpeg.Decoder.DownloadHardwareFrame");
-#endif
                 if (_download == null)
                     _download = ffmpeg.av_frame_alloc();
                 if (_download == null)
@@ -160,6 +163,7 @@ namespace MajdataPlay.Video.Internal
             }
         }
 
+        /// <summary>Releases cached conversion contexts and staging frames.</summary>
         public void Dispose()
         {
             if (_scale != null) { ffmpeg.sws_freeContext(_scale); _scale = null; }

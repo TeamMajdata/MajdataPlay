@@ -10,10 +10,13 @@ using MajdataPlay.Diagnostics;
 namespace MajdataPlay.Video.Internal
 {
     /// <summary>
-    /// Single-worker, synchronous decoder. Open, ReadFrame, Seek and Dispose must execute on
-    /// the same worker, never Unity's main thread. Cancellation may be signalled from any thread.
-    /// Returned frames own their buffers and can outlive the decoder. Audio packets are skipped.
+    /// Decodes video synchronously on a single worker and skips audio packets.
     /// </summary>
+    /// <remarks>
+    /// Call <see cref="Open"/>, <see cref="ReadFrame"/>, <see cref="Seek"/>, and <see cref="Dispose"/>
+    /// on the same worker, never Unity's main thread. Cancellation may be requested from any thread.
+    /// Returned frames own their resources and can outlive the decoder.
+    /// </remarks>
     public sealed unsafe class FFmpegVideoDecoder : IDisposable
     {
         private static readonly AVIOInterruptCB_callback InterruptCallback = Interrupt;
@@ -48,22 +51,38 @@ namespace MajdataPlay.Video.Internal
         private double _seekTarget = double.NegativeInfinity;
         private double _seekCandidateTime, _seekCandidateDuration;
 
+        /// <summary>Gets the display width, in pixels, after applying the video's rotation.</summary>
         public int Width { get; private set; }
+        /// <summary>Gets the display height, in pixels, after applying the video's rotation.</summary>
         public int Height { get; private set; }
-        /// <summary>Seconds, or zero when the demuxer cannot report a duration.</summary>
+        /// <summary>Gets the media duration, in seconds, or zero when the demuxer cannot report it.</summary>
         public double Duration { get; private set; }
+        /// <summary>Gets the estimated video frame rate, in frames per second, using 30 when the source provides no valid rate.</summary>
         public double FrameRate { get; private set; }
-        /// <summary>Clockwise display rotation. Software output has already applied it.</summary>
+        /// <summary>Gets the clockwise stream display rotation, in degrees.</summary>
+        /// <remarks>CPU output already has its display rotation applied. Individual frames can override the stream rotation.</remarks>
         public double RotationDegrees { get; private set; }
+        /// <summary>Gets whether the input contains an audio stream, which this decoder does not play.</summary>
         public bool HasAudio { get; private set; }
+        /// <summary>Gets whether the opened input supports seeking.</summary>
         public bool CanSeek { get; private set; }
+        /// <summary>Gets the name of the video's encoded format, such as <c>h264</c>.</summary>
         public string CodecName { get; private set; }
+        /// <summary>Gets the name of the FFmpeg decoder selected for the video stream.</summary>
         public string DecoderName { get; private set; }
+        /// <summary>Gets a diagnostic description of the active decoding device or software backend.</summary>
         public string DecoderDevice { get; private set; } = "Software";
+        /// <summary>Gets a diagnostic description of the current native GPU or CPU pixel transfer path.</summary>
         public string TransferMode { get; private set; } = "Software RGBA upload";
+        /// <summary>Gets whether the active decoder uses hardware, including when its output is uploaded through CPU pixels.</summary>
+        /// <remarks>The value is updated when frames reveal whether the requested hardware pixel format was accepted.</remarks>
         public bool HardwareDecoding { get; private set; }
+        /// <summary>Gets the most recent explanation for a hardware device or native frame transport fallback, or null when none has occurred.</summary>
         public string HardwareFallbackReason { get; private set; }
 
+        /// <summary>Initializes a decoder with the specified resource limits and hardware configuration.</summary>
+        /// <param name="options">The options to use without subsequent modification, or null to use the defaults.</param>
+        /// <exception cref="ArgumentOutOfRangeException">The input timeout is not positive or the pixel limit cannot fit an RGBA allocation.</exception>
         public FFmpegVideoDecoder(DecoderOptions options = null)
         {
             _options = options ?? new DecoderOptions();
@@ -73,11 +92,19 @@ namespace MajdataPlay.Video.Internal
                 throw new ArgumentOutOfRangeException(nameof(options), "Pixel limit must fit one RGBA allocation.");
         }
 
+        /// <summary>Opens the input, reads its video metadata, and initializes the selected decoder on the owning worker.</summary>
+        /// <param name="path">A local media path or URL supported by the installed FFmpeg libraries.</param>
+        /// <param name="cancellationToken">The token used to cancel opening and all subsequent reads and seeks.</param>
+        /// <remarks>Failures after argument and cancellation validation dispose this decoder; create a new instance before retrying.</remarks>
+        /// <exception cref="ArgumentException"><paramref name="path"/> is null, empty, or whitespace.</exception>
+        /// <exception cref="InvalidOperationException">The decoder is already open, or FFmpeg cannot open or configure the video stream.</exception>
+        /// <exception cref="ObjectDisposedException">This decoder has been disposed.</exception>
+        /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled.</exception>
+        /// <exception cref="TimeoutException">An input operation exceeded the configured timeout.</exception>
+        /// <exception cref="NotSupportedException">The loaded libraries, video format, dimensions, or required hardware configuration are unsupported.</exception>
         public void Open(string path, CancellationToken cancellationToken)
         {
-#if (UNITY_EDITOR || DEBUG) && ENABLE_PROFILER
             using var profile = UnityProfiler.Create("FFmpeg.Decoder.Open");
-#endif
             if (_disposed) throw new ObjectDisposedException(nameof(FFmpegVideoDecoder));
             if (_format != null) throw new InvalidOperationException("Decoder is already open.");
             if (string.IsNullOrWhiteSpace(path)) throw new ArgumentException("A media path or URL is required.", nameof(path));
@@ -242,12 +269,17 @@ namespace MajdataPlay.Video.Internal
             }
         }
 
-        /// <summary>Returns null only after every delayed frame has been drained at end of input.</summary>
+        /// <summary>Reads and decodes the next video frame on the owning worker.</summary>
+        /// <returns>A frame owned by the caller, or null after all delayed frames have been drained at the end of input.</returns>
+        /// <remarks>The caller must dispose each returned frame after presentation has finished.</remarks>
+        /// <exception cref="InvalidOperationException">The input is not open, the caller is not the owning worker, or FFmpeg fails to read or decode a frame.</exception>
+        /// <exception cref="ObjectDisposedException">This decoder has been disposed.</exception>
+        /// <exception cref="OperationCanceledException">The token supplied to <see cref="Open"/> was canceled.</exception>
+        /// <exception cref="TimeoutException">An input operation exceeded the configured timeout.</exception>
+        /// <exception cref="NotSupportedException">The decoded frame cannot satisfy the configured dimensions or hardware transport requirements.</exception>
         public DecodedVideoFrame ReadFrame()
         {
-#if (UNITY_EDITOR || DEBUG) && ENABLE_PROFILER
             using var profile = UnityProfiler.Create("FFmpeg.Decoder.ReadFrame");
-#endif
             EnsureOwner();
             if (_codec == null) throw new InvalidOperationException("Open the media before reading.");
             if (_ended) return null;
@@ -334,11 +366,18 @@ namespace MajdataPlay.Video.Internal
             }
         }
 
+        /// <summary>Seeks the input and flushes queued decoder frames on the owning worker.</summary>
+        /// <param name="seconds">The target timestamp, in seconds relative to the media's timeline origin.</param>
+        /// <remarks>The target is clamped to zero and, when known, the media duration. Subsequent reads decode the required preroll.</remarks>
+        /// <exception cref="ArgumentOutOfRangeException"><paramref name="seconds"/> is not finite.</exception>
+        /// <exception cref="InvalidOperationException">The input is not open, the caller is not the owning worker, or FFmpeg fails to seek.</exception>
+        /// <exception cref="ObjectDisposedException">This decoder has been disposed.</exception>
+        /// <exception cref="NotSupportedException">The opened input does not support seeking.</exception>
+        /// <exception cref="OperationCanceledException">The token supplied to <see cref="Open"/> was canceled.</exception>
+        /// <exception cref="TimeoutException">Seeking exceeded the configured input timeout.</exception>
         public void Seek(double seconds)
         {
-#if (UNITY_EDITOR || DEBUG) && ENABLE_PROFILER
             using var profile = UnityProfiler.Create("FFmpeg.Decoder.Seek");
-#endif
             MajDebug.LogDebug("FFmpeg", "[Decoder] Seeking to " + seconds.ToString("F3", CultureInfo.InvariantCulture) + " seconds.");
             EnsureOwner();
             if (_format == null) throw new InvalidOperationException("Open the media before seeking.");
@@ -369,9 +408,7 @@ namespace MajdataPlay.Video.Internal
 
         private DecodedVideoFrame CreatePresentationFrame(AVFrame* frame, double seconds, double duration)
         {
-#if (UNITY_EDITOR || DEBUG) && ENABLE_PROFILER
             using var profile = UnityProfiler.Create("FFmpeg.Decoder.PreparePresentationFrame");
-#endif
             var rotation = ReadFrameRotation(frame, RotationDegrees);
             UpdateDimensions(frame->width, frame->height, rotation);
             var hardware = frame->hw_frames_ctx != null ||
@@ -709,11 +746,12 @@ namespace MajdataPlay.Video.Internal
                 throw new InvalidOperationException("FFmpeg decoder operations must remain on their owning worker thread.");
         }
 
+        /// <summary>Releases the decoder, input, and conversion resources on the owning worker.</summary>
+        /// <remarks>Previously returned frames remain owned by their callers. Repeated calls have no effect.</remarks>
+        /// <exception cref="InvalidOperationException">The decoder is open and the caller is not its owning worker.</exception>
         public void Dispose()
         {
-#if (UNITY_EDITOR || DEBUG) && ENABLE_PROFILER
             using var profile = UnityProfiler.Create("FFmpeg.Decoder.Dispose");
-#endif
             if (_disposed) return;
             EnsureOwner();
             _disposed = true;

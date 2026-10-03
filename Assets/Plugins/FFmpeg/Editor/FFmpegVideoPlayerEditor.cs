@@ -49,8 +49,8 @@ namespace MajdataPlay.Video.Editor
             using (new EditorGUI.DisabledScope(!player.IsSeekable || player.LengthSeconds <= 0))
             {
                 EditorGUI.BeginChangeCheck();
-                var seconds = EditorGUILayout.Slider("Time (seconds)", (float)player.time, 0, (float)player.LengthSeconds);
-                if (EditorGUI.EndChangeCheck()) player.time = seconds;
+                var seconds = EditorGUILayout.Slider("Time (seconds)", (float)player.TimeSeconds, 0, (float)player.LengthSeconds);
+                if (EditorGUI.EndChangeCheck()) player.TimeSeconds = seconds;
             }
             EditorGUI.BeginChangeCheck();
             var rate = EditorGUILayout.Slider("Playback rate", player.Rate, 0.0625f, 16);

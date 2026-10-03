@@ -8,13 +8,47 @@ using UnityEngine;
 
 namespace MajdataPlay.Video
 {
-    public enum VideoPlaybackState { Idle, Preparing, Prepared, Playing, Paused, Seeking, Stopped, Ended, Error }
-    public enum VideoDecoderType { Software, Hardware }
+    /// <summary>Describes the current state of a video player.</summary>
+    public enum VideoPlaybackState
+    {
+        /// <summary>No media is open.</summary>
+        Idle,
+        /// <summary>The player is opening media and preparing its first frame.</summary>
+        Preparing,
+        /// <summary>The first frame is displayed and playback has not started.</summary>
+        Prepared,
+        /// <summary>Playback is active, including temporary buffering.</summary>
+        Playing,
+        /// <summary>Playback is paused.</summary>
+        Paused,
+        /// <summary>The player is decoding toward a requested position.</summary>
+        Seeking,
+        /// <summary>Playback has stopped.</summary>
+        Stopped,
+        /// <summary>Playback has reached the end of the video.</summary>
+        Ended,
+        /// <summary>Opening or playing the video failed.</summary>
+        Error
+    }
+
+    /// <summary>Identifies the preferred or active video decoder backend.</summary>
+    public enum VideoDecoderType
+    {
+        /// <summary>Uses an FFmpeg software decoder.</summary>
+        Software,
+        /// <summary>Uses a platform hardware decoding backend.</summary>
+        /// <remarks>The platform may select a software implementation for some codecs.</remarks>
+        Hardware
+    }
 
     /// <summary>
-    /// Silent video player. All public methods/events run on the Unity main thread.
-    /// Decode and input run on a bounded background worker. Time is milliseconds; time is seconds.
+    /// Plays video without audio using FFmpeg and a bounded background decoding worker.
     /// </summary>
+    /// <remarks>
+    /// Call component APIs on the Unity main thread; events are also raised on that thread.
+    /// Keep the component enabled while preparing, seeking, or playing so that Unity can present frames.
+    /// <see cref="Time"/> uses milliseconds; <see cref="TimeSeconds"/> uses seconds.
+    /// </remarks>
     [DisallowMultipleComponent, AddComponentMenu("Video/FFmpeg Video Player")]
     public sealed partial class FFmpegVideoPlayer : MonoBehaviour
     {
@@ -52,49 +86,91 @@ namespace MajdataPlay.Video
         long _frameNumber, _lastReportedTime = -1, _controlRevision;
         int _mainThread;
 
+        /// <summary>Occurs when the first frame is presented; the argument is this player.</summary>
         public event Action<FFmpegVideoPlayer> Prepared;
+        /// <summary>Occurs when playback starts or resumes through <see cref="Play()"/>; the argument is this player.</summary>
         public event Action<FFmpegVideoPlayer> Started;
+        /// <summary>Occurs when prepared playback is paused; the argument is this player.</summary>
         public event Action<FFmpegVideoPlayer> Paused;
+        /// <summary>Occurs when stopping is requested; the argument is this player.</summary>
+        /// <remarks>A seek back to the beginning may still be pending when the event is raised.</remarks>
         public event Action<FFmpegVideoPlayer> Stopped;
+        /// <summary>Occurs at the end of playback, before a possible loop restart; the argument is this player.</summary>
         public event Action<FFmpegVideoPlayer> EndReached;
+        /// <summary>Occurs when the latest seek finishes; the argument is this player.</summary>
         public event Action<FFmpegVideoPlayer> SeekCompleted;
+        /// <summary>Occurs when playback fails; arguments are this player and the error message.</summary>
         public event Action<FFmpegVideoPlayer, string> ErrorReceived;
+        /// <summary>Occurs when the output texture changes; arguments are this player and the new texture, or <see langword="null"/>.</summary>
+        /// <remarks>The texture belongs to the player or the caller that supplied <see cref="TargetTexture"/>; listeners must not destroy it.</remarks>
         public event Action<FFmpegVideoPlayer, Texture> TextureChanged;
+        /// <summary>Occurs after presenting a frame; arguments are this player and a one-based presentation counter.</summary>
+        /// <remarks>The counter resets on <see cref="Close"/> and is not the source video's frame index.</remarks>
         public event Action<FFmpegVideoPlayer, long> FrameReady;
+        /// <summary>Occurs when the reported position changes; arguments are this player and the position in milliseconds.</summary>
         public event Action<FFmpegVideoPlayer, long> TimeChanged;
 
+        /// <summary>Gets the current playback state.</summary>
         public VideoPlaybackState State { get; private set; }
+        /// <summary>Gets the last playback error message, or <see langword="null"/> if none has been reported since preparation began.</summary>
         public string LastError { get; private set; }
+        /// <summary>Gets or sets the local path or FFmpeg-supported URL to open.</summary>
+        /// <remarks>Changing the value closes the current media. A null value clears the source.</remarks>
         public string Url { get => _source; set { CheckThread(); if (_source != value) { Close(); _source = value ?? ""; } } }
+        /// <summary>Gets the current output texture, or <see langword="null"/> when no frame is available.</summary>
+        /// <remarks>Do not destroy this texture. Subscribe to <see cref="TextureChanged"/> to track replacements.</remarks>
         public Texture Texture => _texture;
-        public Texture texture => Texture;
+        /// <summary>Gets whether media has been prepared and remains open.</summary>
         public bool IsPrepared => _prepared;
-        public bool isPrepared => IsPrepared;
+        /// <summary>Gets whether playback is active, including temporary buffering.</summary>
         public bool IsPlaying => State == VideoPlaybackState.Playing;
-        public bool isPlaying => IsPlaying;
+        /// <summary>Gets whether the prepared input supports seeking.</summary>
         public bool IsSeekable => _prepared && _info != null && _info.CanSeek;
+        /// <summary>Gets whether the player is preparing, seeking, or waiting for a decoded frame.</summary>
         public bool IsBuffering => State == VideoPlaybackState.Preparing || State == VideoPlaybackState.Seeking || _waitingForFrame;
+        /// <summary>Gets the number of decoded frames queued for presentation.</summary>
         public int BufferedFrames => _session?.BufferedFrames ?? 0;
+        /// <summary>Gets the output texture width in pixels, or the source width before a texture is available; zero if unknown.</summary>
         public uint Width => (uint)(_texture != null ? _texture.width : _info?.Width ?? 0);
+        /// <summary>Gets the output texture height in pixels, or the source height before a texture is available; zero if unknown.</summary>
         public uint Height => (uint)(_texture != null ? _texture.height : _info?.Height ?? 0);
+        /// <summary>Gets the estimated source frame rate in frames per second, or zero if unavailable.</summary>
         public double FrameRate => _info?.FrameRate ?? 0;
+        /// <summary>Gets the video encoding name, such as h264, or an empty string if unavailable.</summary>
         public string CodecName => _info?.Codec ?? "";
+        /// <summary>Gets the selected FFmpeg decoder name, or an empty string if unavailable.</summary>
         public string DecoderName => _info?.DecoderName ?? "";
+        /// <summary>Gets the decoder device description, or an empty string if unavailable.</summary>
         public string DecoderDevice => _info?.DecoderDevice ?? "";
+        /// <summary>Gets the active decoder backend type; read this value after preparation.</summary>
+        /// <remarks>Returns <see cref="VideoDecoderType.Software"/> when decoder information is unavailable.</remarks>
         public VideoDecoderType DecoderType => _info?.HardwareDecoding == true ? VideoDecoderType.Hardware : VideoDecoderType.Software;
+        /// <summary>Gets the video duration in seconds, or zero if unknown.</summary>
         public double LengthSeconds => _info?.Duration ?? 0;
+        /// <summary>Gets the video duration in whole milliseconds, or zero if unknown.</summary>
         public long Length => (long)(LengthSeconds * 1000);
-        public long Time { get => (long)(time * 1000); set => SeekTo(TimeSpan.FromMilliseconds(value)); }
-        public double time
+        /// <summary>Gets or seeks to the playback position in whole milliseconds.</summary>
+        /// <remarks>Setting the position requires prepared, seekable media and completes asynchronously.</remarks>
+        public long Time { get => (long)(TimeSeconds * 1000); set => SeekTo(TimeSpan.FromMilliseconds(value)); }
+        /// <summary>Gets or seeks to the playback position in seconds.</summary>
+        /// <remarks>Setting the position clamps it to the known timeline and completes asynchronously.</remarks>
+        /// <exception cref="InvalidOperationException">The input is not prepared or seekable.</exception>
+        /// <exception cref="ArgumentOutOfRangeException">The value is not finite.</exception>
+        public double TimeSeconds
         {
             get => ClampTime(_clock.Position);
             set => BeginSeek(value, ContinueState());
         }
+        /// <summary>Gets or seeks to the normalized playback position between zero and one.</summary>
+        /// <remarks>The getter returns zero when duration is unknown. The setter clamps finite values to the valid range.</remarks>
+        /// <exception cref="InvalidOperationException">Duration is unknown, or the input is not prepared or seekable.</exception>
         public float Position
         {
-            get => LengthSeconds > 0 ? (float)(time / LengthSeconds) : 0;
-            set { if (LengthSeconds <= 0) throw new InvalidOperationException("This input has no known duration."); time = Mathf.Clamp01(value) * LengthSeconds; }
+            get => LengthSeconds > 0 ? (float)(TimeSeconds / LengthSeconds) : 0;
+            set { if (LengthSeconds <= 0) throw new InvalidOperationException("This input has no known duration."); TimeSeconds = Mathf.Clamp01(value) * LengthSeconds; }
         }
+        /// <summary>Gets or sets the playback speed multiplier without changing the current position.</summary>
+        /// <exception cref="ArgumentOutOfRangeException">The value is not finite or is outside the inclusive range 0.0625 to 16.</exception>
         public float Rate
         {
             get => _playbackRate;
@@ -105,10 +181,14 @@ namespace MajdataPlay.Video
                 _playbackRate = value;
             }
         }
-        public float playbackSpeed { get => Rate; set => Rate = value; }
+        /// <summary>Gets or sets whether seekable media restarts when playback reaches its end.</summary>
         public bool Loop { get => _loop; set => _loop = value; }
+        /// <summary>Gets or sets whether the next media open prefers hardware decoding.</summary>
+        /// <remarks>Maps to <see cref="PreferredDecoderType"/> for compatibility with existing callers.</remarks>
         public bool PreferHardwareDecoding { get => _preferHardwareDecoding; set => _preferHardwareDecoding = value; }
-        /// <summary>Applies to the next media open. Existing PreferHardwareDecoding is an alias.</summary>
+        /// <summary>Gets or sets the preferred decoder backend for the next media open.</summary>
+        /// <remarks>Hardware preference permits CPU upload or software fallback unless <see cref="RequireHardwareDecoding"/> is enabled.</remarks>
+        /// <exception cref="ArgumentOutOfRangeException">The value is not a defined decoder type.</exception>
         public VideoDecoderType PreferredDecoderType
         {
             get => _preferHardwareDecoding ? VideoDecoderType.Hardware : VideoDecoderType.Software;
@@ -119,12 +199,19 @@ namespace MajdataPlay.Video
                 _preferHardwareDecoding = value == VideoDecoderType.Hardware;
             }
         }
-        /// <summary>False requests hardware decode with CPU upload; strict GPU mode overrides this.</summary>
+        /// <summary>Gets or sets whether hardware decoding should prefer native GPU texture sharing on the next media open.</summary>
+        /// <remarks>False requests CPU upload when hardware decoding is selected; <see cref="RequireHardwareDecoding"/> overrides this setting.</remarks>
         public bool PreferNativeTextures { get => _preferNativeTextures; set => _preferNativeTextures = value; }
-        /// <summary>Overrides PreferHardwareDecoding; takes effect the next time media opens.</summary>
+        /// <summary>Gets or sets whether the next media open requires hardware decoding with a native GPU presentation path.</summary>
+        /// <remarks>Overrides decoder and texture preferences. CPU upload and software fallback are prohibited; unsupported paths report an error.</remarks>
         public bool RequireHardwareDecoding { get => _requireHardwareDecoding; set => _requireHardwareDecoding = value; }
+        /// <summary>Gets or sets an optional caller-owned render texture to receive presented frames.</summary>
+        /// <remarks>Changes take effect on the next presented frame. The player does not destroy this texture.</remarks>
         public RenderTexture TargetTexture { get => _targetTexture; set => _targetTexture = value; }
+        /// <summary>Gets the current frame transfer description or a pending recovery description.</summary>
+        /// <remarks>The last description remains available after closing media; read it after preparation to identify the active path.</remarks>
         public string TransferMode { get; private set; } = "Software RGBA upload";
+        /// <summary>Gets the reason hardware decoding or native texture sharing fell back, or <see langword="null"/> if none was reported.</summary>
         public string HardwareFallbackReason { get; private set; }
 
         void Awake()
@@ -138,7 +225,12 @@ namespace MajdataPlay.Video
         void OnDisable() { if (IsPlaying) Pause(); }
         void OnDestroy() { Close(); }
 
-        /// <summary>Returns after the first frame has been decoded and presented; does not start playback.</summary>
+        /// <summary>Opens the configured source and presents its first frame without starting playback.</summary>
+        /// <param name="cancellationToken">Cancels preparation and closes the pending session.</param>
+        /// <returns>A task that completes when the first frame is presented; repeated calls share a pending preparation.</returns>
+        /// <exception cref="InvalidOperationException">No source is configured, or the caller is not on the Unity main thread.</exception>
+        /// <exception cref="OperationCanceledException">The token is already canceled.</exception>
+        /// <remarks>Closing or replacing the media cancels the task. Playback failures fault it and raise <see cref="ErrorReceived"/>.</remarks>
         public Task PrepareAsync(CancellationToken cancellationToken = default)
         {
             CheckThread();
@@ -172,14 +264,28 @@ namespace MajdataPlay.Video
             catch (Exception error) { Fail(error); }
             return task;
         }
+        /// <summary>Sets the source and prepares its first frame without starting playback.</summary>
+        /// <param name="path">A local path or FFmpeg-supported URL.</param>
+        /// <param name="cancellationToken">Cancels preparation and closes the pending session.</param>
+        /// <returns>A task that completes when the first frame is presented.</returns>
+        /// <remarks>Uses the same completion and error behavior as <see cref="PrepareAsync"/>.</remarks>
         public Task PreloadAsync(string path, CancellationToken cancellationToken = default)
         {
             Url = path;
             return PrepareAsync(cancellationToken);
         }
+        /// <summary>Begins preparing the configured source without starting playback.</summary>
+        /// <remarks>Use <see cref="Prepared"/> and <see cref="ErrorReceived"/> to observe asynchronous results.</remarks>
         public void Prepare() { Observe(PrepareAsync()); }
+        /// <summary>Sets the source and begins preparing it without starting playback.</summary>
+        /// <param name="path">A local path or FFmpeg-supported URL.</param>
+        /// <remarks>Use <see cref="Prepared"/> and <see cref="ErrorReceived"/> to observe asynchronous results.</remarks>
         public void Preload(string path) { Observe(PreloadAsync(path)); }
+        /// <summary>Sets the source and starts playback after preparation.</summary>
+        /// <param name="path">A local path or FFmpeg-supported URL.</param>
         public void Play(string path) { Url = path; Play(); }
+        /// <summary>Starts or resumes playback, preparing the configured source first if necessary.</summary>
+        /// <remarks>During a seek, playback starts when the seek finishes. Ended media is first rewound.</remarks>
         public void Play()
         {
             CheckThread();
@@ -195,9 +301,10 @@ namespace MajdataPlay.Video
             if (IsPlaying) return;
             State = VideoPlaybackState.Playing;
             _clock.Start();
-            MajDebug.LogDebug("FFmpeg", "[Player] Play at " + time.ToString("F3") + " s.");
+            MajDebug.LogDebug("FFmpeg", "[Player] Play at " + TimeSeconds.ToString("F3") + " s.");
             Started?.Invoke(this);
         }
+        /// <summary>Pauses playback or prevents a pending preparation or seek from starting playback.</summary>
         public void Pause()
         {
             CheckThread(); _controlRevision++; _playWhenReady = false;
@@ -205,13 +312,21 @@ namespace MajdataPlay.Video
             if (!IsPrepared) return;
             _clock.Pause(); _waitingForFrame = false;
             State = VideoPlaybackState.Paused;
-            MajDebug.LogDebug("FFmpeg", "[Player] Pause at " + time.ToString("F3") + " s.");
+            MajDebug.LogDebug("FFmpeg", "[Player] Pause at " + TimeSeconds.ToString("F3") + " s.");
             Paused?.Invoke(this);
         }
+        /// <summary>Pauses or resumes playback.</summary>
+        /// <param name="pause">True to pause; false to start or resume playback.</param>
         public void SetPause(bool pause) { if (pause) Pause(); else Play(); }
-        /// <summary>Pause and present one decoded frame on the next Update.</summary>
+        /// <summary>Pauses and requests presentation of the next decoded frame during a subsequent Unity update.</summary>
+        /// <remarks>Has no effect before preparation. If no frames remain, playback stays paused and no new frame is presented.</remarks>
         public void NextFrame() { CheckThread(); if (!IsPrepared) return; Pause(); _stepRequested = true; }
+        /// <summary>Attempts to change the playback speed multiplier.</summary>
+        /// <param name="rate">A finite multiplier in the inclusive range 0.0625 to 16.</param>
+        /// <returns>True if the speed was applied; false if the value is invalid.</returns>
         public bool SetRate(float rate) { if (float.IsNaN(rate) || float.IsInfinity(rate) || rate < 0.0625f || rate > 16) return false; Rate = rate; return true; }
+        /// <summary>Stops playback and asynchronously seeks to the beginning while retaining prepared media.</summary>
+        /// <remarks>Closes unprepared or nonseekable media. <see cref="Stopped"/> is raised before a pending rewind finishes.</remarks>
         public void Stop()
         {
             CheckThread(); _playWhenReady = false;
@@ -226,12 +341,23 @@ namespace MajdataPlay.Video
             else BeginSeek(0, VideoPlaybackState.Stopped);
             Stopped?.Invoke(this);
         }
+        /// <summary>Begins seeking to a position while preserving whether playback should resume.</summary>
+        /// <param name="position">The requested position, clamped to the known timeline.</param>
+        /// <exception cref="InvalidOperationException">The input is not prepared or seekable.</exception>
         public void SeekTo(TimeSpan position) { BeginSeek(position.TotalSeconds, ContinueState()); }
+        /// <summary>Seeks to a position while preserving whether playback should resume.</summary>
+        /// <param name="seconds">The requested position in seconds, clamped to the known timeline.</param>
+        /// <returns>A task that completes when the target frame is presented or decoding reaches the end of the input.</returns>
+        /// <exception cref="InvalidOperationException">The input is not prepared or seekable.</exception>
+        /// <exception cref="ArgumentOutOfRangeException">The position is not finite.</exception>
+        /// <remarks>A newer seek, source change, or close cancels the task. Playback failures fault it.</remarks>
         public Task SeekAsync(double seconds)
         {
             BeginSeek(seconds, ContinueState());
             return _seekCompletion.Task;
         }
+        /// <summary>Cancels pending operations, closes the media, releases presentation resources, and returns to the idle state.</summary>
+        /// <remarks>Does not wait for blocking input on the decoding worker. The configured source and caller-owned target texture are retained.</remarks>
         public void Close()
         {
             CheckThread();
@@ -271,9 +397,7 @@ namespace MajdataPlay.Video
         void Update()
         {
             if (_session == null) return;
-#if ENABLE_PROFILER && (UNITY_EDITOR || DEBUG)
             using var profile = UnityProfiler.Create("FFmpeg.Player.Update");
-#endif
             var session = _session;
             var revision = _controlRevision;
             try
@@ -384,9 +508,7 @@ namespace MajdataPlay.Video
         }
         bool Present(DecodedVideoFrame frame)
         {
-#if ENABLE_PROFILER && (UNITY_EDITOR || DEBUG)
             using var profile = UnityProfiler.Create("FFmpeg.Player.Present");
-#endif
             var session = _session;
             var revision = _controlRevision;
             Texture output = null;
@@ -400,9 +522,7 @@ namespace MajdataPlay.Video
                     _uploadTexture = new Texture2D(frame.Width, frame.Height, TextureFormat.RGBA32, false, false)
                     { name = "FFmpeg video", wrapMode = TextureWrapMode.Clamp, filterMode = FilterMode.Bilinear };
                 }
-#if ENABLE_PROFILER && (UNITY_EDITOR || DEBUG)
                 using (UnityProfiler.Create("FFmpeg.Player.CpuUpload"))
-#endif
                 {
                     _uploadTexture.LoadRawTextureData(frame.Data, frame.DataSize);
                     _uploadTexture.Apply(false, false);
@@ -474,7 +594,7 @@ namespace MajdataPlay.Video
         {
             _hardwareActive = hardwareCpuUpload;
             var resume = State == VideoPlaybackState.Seeking ? _afterSeek : State;
-            double position = time;
+            double position = TimeSeconds;
             _clock.Pause();
             _waitingForFrame = false;
             try

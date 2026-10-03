@@ -73,9 +73,7 @@ namespace MajdataPlay.Video.Interop
         internal static IntPtr MapLinuxFrame(IntPtr frame)
         {
 #if UNITY_STANDALONE_LINUX || UNITY_EDITOR_LINUX
-#if ENABLE_PROFILER && (UNITY_EDITOR || DEBUG)
             using var profile = UnityProfiler.Create("FFmpeg.Interop.MapVaapiToDrm");
-#endif
             int result = Native.ffu_vulkan_map_frame(frame, out var mapped);
             if (result < 0 || mapped == IntPtr.Zero)
                 throw new NotSupportedException(DescribeError(result));
@@ -155,9 +153,7 @@ namespace MajdataPlay.Video.Interop
             public IntPtr AcquireDevice() => Native.ffu_android_device(_session);
             public IntPtr CaptureFrame(IntPtr frame)
             {
-#if ENABLE_PROFILER && (UNITY_EDITOR || DEBUG)
                 using var profile = UnityProfiler.Create("FFmpeg.Interop.CaptureAndroidImage");
-#endif
                 // Rendering a MediaCodec buffer consumes it exactly once. A timeout
                 // fails this session; retrying the same AVFrame could reorder images.
                 IntPtr image = Native.ffu_android_capture(_session, frame, 500);

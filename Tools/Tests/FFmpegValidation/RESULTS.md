@@ -1,6 +1,17 @@
 # 本机验证结果
 
-执行日期：2026-10-03。Windows / Unity 6000.3.17f1 / AMD Radeon RX 580 2048SP；Linux 使用本机 WSL Ubuntu 24.04；Android 真机为 Mi MIX 2S / Android 15 API 35 / Adreno 630 / Vulkan 1.1.128；Apple 构建测试使用用户提供的 Mac mini M4。FFmpeg 库均为本次从锁定源码编译的产物。Windows/Apple 图形桥接 ABI 为 **2**，Linux/Android 为 **3**。
+最近验证日期：2026-10-04；此前跨平台矩阵执行于 2026-10-03。Windows / Unity 6000.3.17f1 / AMD Radeon RX 580 2048SP；Linux 使用本机 WSL Ubuntu 24.04；Android 真机为 Mi MIX 2S / Android 15 API 35 / Adreno 630 / Vulkan 1.1.128；Apple 构建测试使用用户提供的 Mac mini M4。FFmpeg 库均为本次从锁定源码编译的产物。Windows/Apple 图形桥接 ABI 为 **2**，Linux/Android 为 **3**。
+
+## API 命名、XML 文档与 Profiler 调整验证
+
+2026-10-04 更新：秒单位时间属性改为 `TimeSeconds`，测试调用已同步更新；移除旧小写别名，公共 API 使用 PascalCase 并补充英文 XML 文档。调用处不再使用额外的 Profiler 条件编译包装。本轮未修改原生代码，也未重新执行此前全部设备矩阵。
+
+- 独立编译实际 FFmpeg Runtime 程序集，引用隔离 Unity 工程生成的真实 `FFmpeg.AutoGen`、`MajdataPlay.Diagnostics` 依赖。开启 XML 文档输出并将 `CS1591`、XML 格式、参数与引用相关警告设为错误：**PASS，129 个 XML 条目，无缺失公共成员文档或 XML 警告**；仍有两个既有的 Unity 序列化字段 `CS0649` 提示。
+- 九组平台/IL2CPP 与四组 Editor/Debug/Profiler 宏组合共 **13 组编译 PASS**，包含未定义 `ENABLE_PROFILER` 和启用它的组合，以及实际 Inspector/iOS 后处理源码。
+- 无 `ENABLE_PROFILER` 的 .NET 验证进程运行真实 FFmpeg，**335 assertions PASS**，移除外层条件编译后未出现 Unity 原生 Profiler 调用异常。
+- Windows x64 Mono / D3D12 重新构建并运行首选解码器与硬件 CPU 回退测试，**41 assertions PASS**；Windows x64 IL2CPP / Vulkan 重新构建并运行故障恢复测试，**52 assertions PASS**。后者实际经过使用 `TimeSeconds` 的恢复后跳转检查。两组最终均恢复原生 GPU 显示路径，`fallback=` 为空。
+
+文档检查与汇总在 `.work/ApiDocumentationReview/`；宏编译证据在 `.work/DecoderTransportManagedReview/`；真实解码日志为 `.work/api-rename-native-tests.log`；Unity 报告为 `.work/x64-Mono/d3d12-decoder-preference.txt` 和 `.work/x64-IL2CPP/vulkan-recovery.txt`。本轮没有录制或人工检查 Profiler 窗口，启用 Profiler 的编译通过不等同于界面采样验证。
 
 ## 本次日志、解码偏好与 CPU 上传回退验证
 

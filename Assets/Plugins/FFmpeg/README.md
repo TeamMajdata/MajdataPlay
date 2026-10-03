@@ -13,20 +13,20 @@ using UnityEngine.UI;
 
 public sealed class VideoExample : MonoBehaviour
 {
-    public FFmpegVideoPlayer player;
-    public RawImage image;
+    [SerializeField] FFmpegVideoPlayer _player;
+    [SerializeField] RawImage _image;
 
     async void Start()
     {
         // 分辨率变化和硬件回退时纹理可能更换，所以应持续监听。
-        player.TextureChanged += (_, texture) => image.texture = texture;
+        _player.TextureChanged += (_, texture) => _image.texture = texture;
         // 播放器已通过 MajDebug 记录错误；ErrorReceived 可用于更新自己的 UI。
-        player.PreferredDecoderType = VideoDecoderType.Hardware;
-        player.PreferNativeTextures = true;
-        await player.PreloadAsync(System.IO.Path.Combine(Application.persistentDataPath, "movie.mp4"));
-        player.SetRate(1.25f);
-        await player.SeekAsync(3.5); // seconds，精确解码到目标所在帧
-        player.Play();
+        _player.PreferredDecoderType = VideoDecoderType.Hardware;
+        _player.PreferNativeTextures = true;
+        await _player.PreloadAsync(System.IO.Path.Combine(Application.persistentDataPath, "movie.mp4"));
+        _player.SetRate(1.25f);
+        await _player.SeekAsync(3.5); // seconds，精确解码到目标所在帧
+        _player.Play();
     }
 }
 ```
@@ -41,9 +41,9 @@ public sealed class VideoExample : MonoBehaviour
 | `Stop()` | 暂停并异步回到开头，保留已准备资源；不可 seek 的输入则关闭 |
 | `Close()` | 取消工作、关闭媒体和释放显示资源；主线程不等待阻塞 I/O |
 | `Time`, `Length` | 与 VLC 一致，毫秒；Time 可写 |
-| `time`, `LengthSeconds`, `SeekAsync(double)` | 秒；SeekAsync 完成意味着目标帧已显示 |
+| `TimeSeconds`, `LengthSeconds`, `SeekAsync(double)` | 秒；SeekAsync 完成意味着目标帧已显示或到达输入结尾 |
 | `SeekTo(TimeSpan)`, `Position` | 时间跳转；Position 是 0–1 的归一化位置 |
-| `SetRate(float)`, `Rate`, `playbackSpeed` | 1/16–16 倍速；不支持倒放；倍速变化保持时间连续 |
+| `SetRate(float)`, `Rate` | 1/16–16 倍速；不支持倒放；倍速变化保持时间连续 |
 | `Loop`, `NextFrame()` | 循环；暂停并向前显示一帧 |
 | `State`, `IsPrepared`, `IsPlaying`, `IsBuffering`, `IsSeekable` | 状态；准备或缓冲期间时间不推进 |
 | `Texture`, `Width`, `Height`, `FrameRate`, `CodecName` | 当前输出与媒体信息；CodecName 是视频编码，如 h264 |
@@ -58,6 +58,8 @@ public sealed class VideoExample : MonoBehaviour
 
 所有组件 API 在 Unity 主线程调用。控制时间使用单调时钟，不受 `Time.timeScale` 影响。连续 seek 只保留最后一次请求，旧 `SeekAsync` 被取消。更换 Url / Close / 销毁对象会取消尚未完成的任务；后台线程退出后关闭 FFmpeg。音轨数据包被跳过。预载不是将整个文件读入内存，帧队列默认仅 3 帧，Inspector 可调整到 1–8 帧。
 
+公开 API 遵循 [Microsoft .NET 命名约定](https://learn.microsoft.com/en-us/dotnet/standard/design-guidelines/capitalization-conventions)：类型和成员使用 PascalCase，参数使用 camelCase。播放器、解码器、选项、帧对象及硬件会话接口均提供英文 XML 文档。旧的小驼峰成员已移除：`time` 改为 `TimeSeconds`，`texture`、`isPrepared`、`isPlaying`、`playbackSpeed` 分别使用 `Texture`、`IsPrepared`、`IsPlaying`、`Rate`。此调整需要更新调用代码，不影响已有场景的序列化字段。
+
 解码与纹理偏好在下一次打开媒体时应用，修改设置不会重标记或中断当前会话。Inspector 的 Preferred Decoder Type 提供 Software/Hardware 选择，旧场景序列化的硬件偏好保持兼容。
 
 ## 日志与性能记录
@@ -66,7 +68,7 @@ public sealed class VideoExample : MonoBehaviour
 
 设备描述区分 Unity 渲染 GPU 和解码设备：共享路径会注明是否匹配 Unity，独立硬件解码设备标为 FFmpeg/系统默认设备，不能将渲染 GPU 型号当成已查询到的独立解码设备型号。Android 的 `h264_mediacodec` 等名称是 FFmpeg 包装器名称；厂商 OMX/C2 组件名未通过其公共 API 暴露。`DecoderType=Hardware` 表示正在使用平台硬件解码后端；VideoToolbox 对 HEVC/ProRes 等编码允许系统内部选择实现，不能仅据后端类型断言所有编码都在物理硬件上执行。
 
-Editor/Debug 且启用 Unity Profiler 时，`UnityProfiler` 记录 `FFmpeg.Player.Update`、`Present`、`CpuUpload`，以及解码打开、读帧、seek、硬件帧下载、RGBA 转换和原生图像导入等作用域。工作线程按 [Unity 的线程采样接口](https://docs.unity3d.com/6000.3/Documentation/ScriptReference/Profiling.Profiler.BeginThreadProfiling.html) 注册为 `FFmpeg / Decoder`，并在退出时注销；其记录可在 Profiler Timeline 查看。这些计时覆盖 CPU 调用，不代表 GPU 命令执行时长。
+启用 Unity Profiler 时，`UnityProfiler` 记录 `FFmpeg.Player.Update`、`Present`、`CpuUpload`，以及解码打开、读帧、seek、硬件帧下载、RGBA 转换和原生图像导入等作用域。调用处不再添加外围宏，由 `UnityProfiler` 与 Unity Profiler API 自身的 `Conditional` 控制采样调用。工作线程按 [Unity 的线程采样接口](https://docs.unity3d.com/6000.3/Documentation/ScriptReference/Profiling.Profiler.BeginThreadProfiling.html) 注册为 `FFmpeg / Decoder`，并在退出时注销；其记录可在 Profiler Timeline 查看。这些计时覆盖 CPU 调用，不代表 GPU 命令执行时长。
 
 ## 图形后端与纹理传输
 

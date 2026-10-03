@@ -71,9 +71,7 @@ namespace MajdataPlay.Video.Internal
         }
         void Run()
         {
-#if (UNITY_EDITOR || DEBUG) && ENABLE_PROFILER
             UnityEngine.Profiling.Profiler.BeginThreadProfiling("FFmpeg", "Decoder");
-#endif
             MajDebug.LogDebug("FFmpeg", "[Session] Decode worker started; queue capacity=" + _capacity + ".");
             try
             {
@@ -100,9 +98,7 @@ namespace MajdataPlay.Video.Internal
                             decoder.Seek(seek);
                             decodedRevision = revision;
                         }
-#if (UNITY_EDITOR || DEBUG) && ENABLE_PROFILER
                         using var profile = UnityProfiler.Create("FFmpeg.Session.DecodeAndQueue");
-#endif
                         var frame = decoder.ReadFrame();
                         lock (_gate)
                         {
@@ -138,9 +134,7 @@ namespace MajdataPlay.Video.Internal
                     _cancel.Dispose();
                 }
                 MajDebug.LogDebug("FFmpeg", "[Session] Decode worker exited.");
-#if (UNITY_EDITOR || DEBUG) && ENABLE_PROFILER
                 UnityEngine.Profiling.Profiler.EndThreadProfiling();
-#endif
             }
         }
         void ClearFrames() { while (_frames.Count != 0) _frames.Dequeue().Dispose(); }
