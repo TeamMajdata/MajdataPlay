@@ -98,7 +98,7 @@ namespace MajdataPlay.IO
                     LedDeviceSerialConnInfo = new()
                     {
 #if UNITY_STANDALONE_WIN
-                        PortName = "COM" + (ledDeviceSettings.SerialPortOptions.Port ?? (playerIndex == 1 ? 3 : 4)),
+                        PortName = "COM" + (ledDeviceSettings.SerialPortOptions.Port ?? (playerIndex == 1 ? 21 : 22)),
 #else
                         PortName = ledDeviceSettings.SerialPortOptions.Port ?? WinSerialPortToLinuxPortName((playerIndex == 1 ? 21 : 22)),
 #endif
@@ -134,7 +134,7 @@ namespace MajdataPlay.IO
                             LedDeviceSerialConnInfo = new()
                             {
 #if UNITY_STANDALONE_WIN
-                                PortName = "COM" + (ledDeviceSettings.SerialPortOptions.Port ?? (playerIndex == 1 ? 3 : 4)),
+                                PortName = "COM" + (ledDeviceSettings.SerialPortOptions.Port ?? (playerIndex == 1 ? 21 : 22)),
 #else
                                 PortName = ledDeviceSettings.SerialPortOptions.Port ?? WinSerialPortToLinuxPortName((playerIndex == 1 ? 21 : 22)),
 #endif
@@ -163,7 +163,7 @@ namespace MajdataPlay.IO
                             LedDeviceSerialConnInfo = new()
                             {
 #if UNITY_STANDALONE_WIN
-                                PortName = "COM" + (ledDeviceSettings.SerialPortOptions.Port ?? (playerIndex == 1 ? 3 : 4)),
+                                PortName = "COM" + (ledDeviceSettings.SerialPortOptions.Port ?? (playerIndex == 1 ? 21 : 22)),
 #else
                                 PortName = ledDeviceSettings.SerialPortOptions.Port ?? WinSerialPortToLinuxPortName((playerIndex == 1 ? 21 : 22)),
 #endif
@@ -203,7 +203,7 @@ namespace MajdataPlay.IO
                             LedDeviceSerialConnInfo = new()
                             {
 #if UNITY_STANDALONE_WIN
-                                PortName = "COM" + (ledDeviceSettings.SerialPortOptions.Port ?? (playerIndex == 1 ? 3 : 4)),
+                                PortName = "COM" + (ledDeviceSettings.SerialPortOptions.Port ?? (playerIndex == 1 ? 21 : 22)),
 #else
                                 PortName = ledDeviceSettings.SerialPortOptions.Port ?? WinSerialPortToLinuxPortName((playerIndex == 1 ? 21 : 22)),
 #endif
