@@ -2,6 +2,8 @@
 
 这些脚本从 FFmpeg 源码构建当前项目的 Unity 原生插件，不下载现成 FFmpeg 二进制来冒充本机编译。
 
+当前交付库的软件编码格式完整清单、各平台硬件解码矩阵和播放器限制见 [当前 FFmpeg 解码格式支持](CODEC-SUPPORT.md)。
+
 ## 固定版本和 ABI
 
 `ffmpeg.lock.json` 固定官方 `n9.0.1` 的 commit

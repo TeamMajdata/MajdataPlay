@@ -4,6 +4,8 @@
 
 运行时程序集为 `MajdataPlay.FFmpeg`，引用项目已接入的 `FFmpeg.AutoGen` 和 `MajdataPlay.Diagnostics`。本项目绑定的原生 ABI 是 FFmpeg **9.0.1**；请使用 [Tools/FFmpeg](../../../../Tools/FFmpeg) 的构建脚本，不能混用其他主版本的库。Mono / IL2CPP 使用同一套直接 P/Invoke 和带 `MonoPInvokeCallback` 的静态回调。
 
+支持的全部软件编码格式、平台硬件解码矩阵及实际 Player 限制见 [当前 FFmpeg 解码格式支持](../../../../Tools/FFmpeg/CODEC-SUPPORT.md)。
+
 ## 使用
 
 ```csharp
