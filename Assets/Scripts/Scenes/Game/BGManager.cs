@@ -55,7 +55,9 @@ namespace MajdataPlay.Scenes.Game
             _videoPlayer.Loop = false;
             _videoPlayer.TextureChanged += OnVideoTextureChanged;
             _videoPlayer.ErrorReceived += OnVideoError;
-            _backgroundMaterial = _coverRenderer.material;
+            _backgroundMaterial = new Material(_coverRenderer.material);
+            _coverRenderer.material = _backgroundMaterial;
+            _videoRenderer.material = _backgroundMaterial;
             _defaultScale = _coverRenderer.transform.localScale;
             DisableVideo();
         }
