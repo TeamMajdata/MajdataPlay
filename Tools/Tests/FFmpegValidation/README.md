@@ -10,11 +10,25 @@ dotnet run --project Tools/Tests/FFmpegValidation/FFmpegValidation.csproj -- `
   "Assets/StreamingAssets/MaiCharts/Original/Zunda Overdance/bg.mp4"
 ```
 
-需要 .NET 9 SDK，默认 Unity Editor 路径为 `C:/Program Files/Unity Editors/6000.3.17f1/Editor`；其他安装路径可用 `-p:UnityEditor=...`。此命令在 Windows x64 进程中运行，新增硬件下载检查需要支持 H.264 D3D11VA 的实际 GPU；不带两个参数只运行不依赖 native 的时钟和码率统计测试。.NET 工程编译真实 Diagnostics/ZString 并引用项目 PolySharp 分析器，不定义 `ENABLE_PROFILER`，因而不调用 Unity 原生 profiler；日志保留在真实 MajDebug 队列，未调用 Unity 初始化或连接未初始化的 Unity logger。
+需要 .NET 9 SDK，默认 Unity Editor 路径为 `C:/Program Files/Unity Editors/6000.3.17f1/Editor`；其他安装路径可用 `-p:UnityEditor=...`。此命令在 Windows x64 进程中运行，新增硬件下载检查需要支持 H.264 D3D11VA 的实际 GPU；不带两个参数只运行不依赖 native 的时钟、码率统计与帧池生命周期/分配测试。.NET 工程编译真实 Diagnostics/ZString 并引用项目 PolySharp 分析器，不定义 `ENABLE_PROFILER`，因而不调用 Unity 原生 profiler；日志保留在真实 MajDebug 队列，未调用 Unity 初始化或连接未初始化的 Unity logger。
 
 覆盖：真实视频元数据、RGBA 解码、PTS、前后 seek、EOF 延迟帧排空、预取消、有界预载、连续 seek、快速关闭，以及人工 AVFrame 的像素级上下方向、四方向旋转、非方形尺寸、YUV limited/full range、动态像素格式、裁剪与超限拒绝。硬件测试创建独立 D3D11VA 设备，在没有 Unity 纹理互操作回调的情况下解码、下载 RGBA、跳转并检查真实像素，断言 `HardwareDecoded` 与 CPU 像素存储同时成立。
 
 原生后端回退测试检查 H.264 的 D3D12VA/Vulkan 硬件配置，并注入首选设备获取失败，验证严格 GPU 模式和允许 CPU 上传模式均可尝试下一硬件后端、得到正确的实际设备身份并继续 seek。此测试验证回退链，不代表已在对应原生后端完成视频解码。
+
+### 每帧托管分配与帧所有权
+
+```powershell
+dotnet run --project Tools/Tests/FFmpegValidation/FFmpegValidation.csproj -- `
+  Assets/Plugins/MajdataPlay/FFmpeg/Native/Windows/x86_64 `
+  "Assets/StreamingAssets/MaiCharts/Original/Zunda Overdance/bg.mp4" --allocations
+```
+
+`--allocations` 用真实 FFmpeg 库分别验证人工 RGBA/YUV 帧转换、软件解码、D3D11VA 下载并转换为 RGBA，以及 D3D11VA 原生帧。先正向校验 `GC.GetAllocatedBytesForCurrentThread()` 能观测已知数组分配，再对每条路径预热并断言一批帧的托管分配总量为 **0 B**；转换测量 512 帧，解码测量最多 120 帧。素材需可 seek、至少含 64 帧且长于 2 秒，以覆盖会话压力检查。没有支持该素材的 D3D11VA GPU 时，可改用 `--allocations-software` 只运行转换和软件解码；该模式也可使用 AV1 素材。
+
+不带参数的默认测试检查预分配帧池的固定容量、同时持有的帧互不别名、重复 Dispose、释放回调抛异常后归还、跨线程归还、元数据重置与 4096 次租用/归还的 0 B 分配。真实解码测试额外检查解码器关闭后尚未归还的 CPU/原生帧仍可释放、归还后池容量完整，以及公开解码器返回的独立帧不会复用旧对象，因此迟到的重复 Dispose 不会影响后续帧。容量 1/8 的实际会话还覆盖持有显示帧时持续取帧、连续 seek、关闭与释放。播放器内部池化帧遵循独占租用约定：Dispose 后不可继续使用旧引用。
+
+测量只覆盖调用线程的稳态托管分配，不包含初始化、seek 调用、错误诊断、native 缓冲区分配或 Unity 渲染线程。此 .NET 9 结果不能替代 Unity Mono/IL2CPP 的 Profiler 与目标平台验证；启用 Profiler 后应继续检查 `ReadFrame`、`PreparePresentationFrame` 和实际呈现路径的 `GC.Alloc`。
 
 ### AV1 软件解码与硬件不可用回退
 

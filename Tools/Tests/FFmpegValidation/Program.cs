@@ -16,9 +16,12 @@ static class Program
         {
             TestClock();
             _checks += VideoBitRateChecks.Run();
+            _checks += AllocationChecks.RunManaged();
             bool av1 = args.Length == 3 && args[2] == "--av1";
             bool av1Unavailable = args.Length == 3 && args[2] == "--av1-unavailable";
-            if (args.Length != 2 && !av1 && !av1Unavailable) { Console.WriteLine("PASS: clock and bitrate; use <native-directory> <media> [--av1|--av1-unavailable] for native decode tests."); return 0; }
+            bool allocations = args.Length == 3 && args[2] == "--allocations";
+            bool softwareAllocations = args.Length == 3 && args[2] == "--allocations-software";
+            if (args.Length != 2 && !av1 && !av1Unavailable && !allocations && !softwareAllocations) { Console.WriteLine("PASS: clock, bitrate and frame pool; use <native-directory> <media> [--av1|--av1-unavailable|--allocations|--allocations-software] for native decode tests."); return 0; }
             string native = Path.GetFullPath(args[0]);
             NativeLibrary.SetDllImportResolver(typeof(FFmpeg.AutoGen.ffmpeg).Assembly, (name, assembly, paths) =>
             {
@@ -27,6 +30,12 @@ static class Program
             });
             // Dependencies are resolved by the OS; limit this change to the test process.
             if (!SetDllDirectory(native)) throw new Exception("SetDllDirectory failed.");
+            if (allocations || softwareAllocations)
+            {
+                _checks += AllocationChecks.RunNative(Path.GetFullPath(args[1]), allocations);
+                Console.WriteLine("PASS: " + _checks + " assertions; zero managed allocation after warmup and frame ownership.");
+                return 0;
+            }
             if (av1Unavailable)
             {
                 TestAv1SoftwareUnavailable(Path.GetFullPath(args[1]));

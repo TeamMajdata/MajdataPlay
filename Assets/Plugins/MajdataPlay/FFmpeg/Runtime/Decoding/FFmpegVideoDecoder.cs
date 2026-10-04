@@ -22,7 +22,8 @@ namespace MajdataPlay.FFmpeg.Internal
         private static readonly AVIOInterruptCB_callback InterruptCallback = Interrupt;
         private static readonly AVCodecContext_get_format FormatCallback = SelectPixelFormat;
         private DecoderOptions _options;
-        private readonly VideoFrameConverter _converter = new VideoFrameConverter();
+        private readonly VideoFrameConverter _converter;
+        private readonly DecodedVideoFramePool _framePool;
         private readonly VideoBitRateTracker _bitRateTracker = new VideoBitRateTracker();
         private AVFormatContext* _format;
         private AVCodecContext* _codec;
@@ -37,6 +38,7 @@ namespace MajdataPlay.FFmpeg.Internal
         private AVRational _timeBase;
         private AVPixelFormat _hardwarePixelFormat = AVPixelFormat.AV_PIX_FMT_NONE;
         private IHardwareDecodeSession _hardwareSession;
+        private Action<IntPtr> _releaseHardwareImage;
         private bool _cpuTransport;
         private bool _mediaCodecHardware;
         private string _lastReportedTransport;
@@ -89,13 +91,19 @@ namespace MajdataPlay.FFmpeg.Internal
         /// <summary>Initializes a decoder with the specified resource limits and hardware configuration.</summary>
         /// <param name="options">The options to use without subsequent modification, or null to use the defaults.</param>
         /// <exception cref="ArgumentOutOfRangeException">The input timeout is not positive or the pixel limit cannot fit an RGBA allocation.</exception>
-        public FFmpegVideoDecoder(DecoderOptions options = null)
+        public FFmpegVideoDecoder(DecoderOptions options = null) : this(options, null)
+        {
+        }
+
+        internal FFmpegVideoDecoder(DecoderOptions options, DecodedVideoFramePool framePool)
         {
             _options = options ?? new DecoderOptions();
             if (_options.IOTimeoutMilliseconds <= 0)
                 throw new ArgumentOutOfRangeException(nameof(options), "I/O timeout must be positive.");
             if (_options.MaximumPixelCount <= 0 || _options.MaximumPixelCount > int.MaxValue / 4)
                 throw new ArgumentOutOfRangeException(nameof(options), "Pixel limit must fit one RGBA allocation.");
+            _framePool = framePool;
+            _converter = new VideoFrameConverter(framePool);
         }
 
         /// <summary>Opens the input, reads its video metadata, and initializes the selected decoder on the owning worker.</summary>
@@ -317,7 +325,9 @@ namespace MajdataPlay.FFmpeg.Internal
             EnsureOwner();
             if (_codec == null) throw new InvalidOperationException("Open the media before reading.");
             if (_ended) return null;
-            var again = ffmpeg.AVERROR(ffmpeg.EAGAIN);
+            // AVERROR<T> boxes through Convert.ToInt32(object). Preserve the
+            // binding's platform-specific errno without invoking the generic macro.
+            var again = -ffmpeg.EAGAIN;
             while (true)
             {
                 _cancellation.ThrowIfCancellationRequested();
@@ -489,7 +499,16 @@ namespace MajdataPlay.FFmpeg.Internal
                 {
                     var image = _hardwareSession.CaptureFrame((IntPtr)frame);
                     if (image == IntPtr.Zero) throw new NotSupportedException("MediaCodec did not return a shareable Android hardware image.");
-                    result = new DecodedVideoFrame(image, _hardwareSession.ReleaseImage);
+                    try
+                    {
+                        result = _framePool?.Rent() ?? new DecodedVideoFrame(IntPtr.Zero, IntPtr.Zero);
+                        result.SetNativeImage(image, _releaseHardwareImage);
+                    }
+                    catch
+                    {
+                        _releaseHardwareImage(image);
+                        throw;
+                    }
                 }
                 else
                 {
@@ -513,7 +532,16 @@ namespace MajdataPlay.FFmpeg.Internal
                         return ConvertForCpu(frame, seconds, duration, rotation);
                     }
                     if (clone == null) throw new OutOfMemoryException("Cannot reference hardware video frame.");
-                    result = new DecodedVideoFrame(IntPtr.Zero, (IntPtr)clone);
+                    try
+                    {
+                        result = _framePool?.Rent() ?? new DecodedVideoFrame(IntPtr.Zero, IntPtr.Zero);
+                        result.SetNativeFrame((IntPtr)clone);
+                    }
+                    catch
+                    {
+                        ffmpeg.av_frame_free(&clone);
+                        throw;
+                    }
                 }
                 result.Width = frame->width;
                 result.Height = frame->height;
@@ -604,6 +632,7 @@ namespace MajdataPlay.FFmpeg.Internal
                     {
                         suppliedDevice = true;
                         _hardwareSession = _options.CreateHardwareSession(_codec->width, _codec->height);
+                        _releaseHardwareImage = _hardwareSession == null ? null : _hardwareSession.ReleaseImage;
                         device = _hardwareSession == null ? null : (AVBufferRef*)_hardwareSession.AcquireDevice();
                         if (device != null) result = 0;
                         else HardwareFallbackReason = "The native hardware decoder surface is unavailable.";
@@ -715,6 +744,7 @@ namespace MajdataPlay.FFmpeg.Internal
             if (codec != null) ffmpeg.avcodec_free_context(&codec);
             _hardwareSession?.Dispose();
             _hardwareSession = null;
+            _releaseHardwareImage = null;
         }
 
         [MonoPInvokeCallback(typeof(AVCodecContext_get_format))]

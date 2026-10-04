@@ -10,10 +10,16 @@ namespace MajdataPlay.FFmpeg.Internal
         private SwsContext* _scale;
         private AVFrame* _download;
         private AVFrame* _rgba;
+        private readonly DecodedVideoFramePool _framePool;
         private readonly byte*[] _source = new byte*[8];
         private readonly int[] _sourceStride = new int[8];
         private readonly byte*[] _destination = new byte*[4];
         private readonly int[] _destinationStride = new int[4];
+
+        internal VideoFrameConverter(DecodedVideoFramePool framePool = null)
+        {
+            _framePool = framePool;
+        }
 
         /// <summary>Converts a borrowed decoded frame to an independently owned RGBA32 presentation frame.</summary>
         /// <param name="source">The source frame, which may be downloaded and have its CPU cropping metadata applied.</param>
@@ -105,18 +111,17 @@ namespace MajdataPlay.FFmpeg.Internal
 
                 var sar = source->sample_aspect_ratio;
                 var aspect = sar.num > 0 && sar.den > 0 ? ffmpeg.av_q2d(sar) : 1.0;
-                var output = new DecodedVideoFrame((IntPtr)result, IntPtr.Zero)
-                {
-                    Width = outputWidth,
-                    Height = outputHeight,
-                    PixelFormat = AVPixelFormat.AV_PIX_FMT_RGBA,
-                    PresentationTime = pts,
-                    Duration = duration,
-                    RotationDegrees = 0,
-                    HardwareDecoded = hardware,
-                    TransferMode = hardware ? "Hardware decode + CPU RGBA upload" : "Software RGBA upload",
-                    PixelAspectRatio = (quarterTurns & 1) == 0 ? aspect : 1.0 / aspect
-                };
+                var output = _framePool?.Rent() ?? new DecodedVideoFrame(IntPtr.Zero, IntPtr.Zero);
+                output.SetPixels((IntPtr)result);
+                output.Width = outputWidth;
+                output.Height = outputHeight;
+                output.PixelFormat = AVPixelFormat.AV_PIX_FMT_RGBA;
+                output.PresentationTime = pts;
+                output.Duration = duration;
+                output.RotationDegrees = 0;
+                output.HardwareDecoded = hardware;
+                output.TransferMode = hardware ? "Hardware decode + CPU RGBA upload" : "Software RGBA upload";
+                output.PixelAspectRatio = (quarterTurns & 1) == 0 ? aspect : 1.0 / aspect;
                 result = null;
                 return output;
             }

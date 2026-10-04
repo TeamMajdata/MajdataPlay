@@ -2,6 +2,26 @@
 
 最近验证日期：2026-10-05；此前跨平台矩阵执行于 2026-10-03。Windows / Unity 6000.3.17f1 / AMD Radeon RX 580 2048SP；Linux 使用本机 WSL Ubuntu 24.04；Android 真机为 Mi MIX 2S / Android 15 API 35 / Adreno 630 / Vulkan 1.1.128；Apple 构建测试使用用户提供的 Mac mini M4。当前 Windows/Linux/Android 图形桥接 ABI 为 **4**，Apple 保持 **2**；下方 ABI2/3 的记录为此前版本实测。
 
+## 2026-10-05：播放会话逐帧 GC 分配
+
+`ReadFrame` 的 EAGAIN 检查改用平台 errno 的负值，避开 AutoGen 泛型宏装箱。播放器内部按队列容量加 2 预分配帧容器，硬件图像释放委托按会话缓存。公开 decoder 和 `CopyToSoftware()` 仍返回独立对象；本次零 GC 结论限于播放器内部复用路径，不表示 FFmpeg 原生内存也不分配。
+
+| 验证 | 结果 |
+| --- | --- |
+| .NET 9 / Windows x64，`--allocations` | **379 assertions PASS**；分配计数器正向校准、帧所有权、异常释放、容量 1/8 会话播放/连续 seek/关闭 |
+| 帧池租用/归还 | 4096 次 **0 B** 托管分配 |
+| RGBA / YUV 转换（含四方向旋转） | 各 512 帧 **0 B** 托管分配 |
+| 软件解码 / D3D11VA CPU 上传 / D3D11VA 原生帧 | 各 120 帧 **0 B** 托管分配 |
+| Unity Editor Mono x64 原生 Profiler | 正向校准捕获 1 次数组 `GC.Alloc`；上述帧池、转换、三种解码路径在相同批次内均 **0 次 GC.Alloc**，140 项断言及校准通过 |
+| 原有真实 FFmpeg 回归 | **412 assertions PASS**；解码、seek/EOF、取消、有界队列及像素转换 |
+| Unity 6000.3.17f1 x64 Mono / D3D11 Player | 软件 **27**、严格 GPU **31**、硬解 CPU 上传 **31 assertions PASS**，含实际纹理和播放控制 |
+
+托管测试命令见 README 的“每帧托管分配与帧所有权”，日志为 `.work/gc-free/managed-allocations.log`。Unity Player 使用 `run-unity.ps1 -Backend Mono -Architecture x64 -Graphics d3d11 -WorkDirectory Tools/Tests/FFmpegValidation/.work/gc-free` 构建；同一 Player 以 `-SkipBuild -RequireHardware` 和 `-SkipBuild -HardwareCpuUpload` 分别验证另两条路径。报告位于 `.work/gc-free/x64-Mono/d3d11-{software,hardware,hardware-cpu}.txt`。
+
+相邻热路径静态检查包括播放器 Update/Present、呈现器命令缓冲区、Vulkan 互操作、码率窗口、时钟、UnityProfiler 和 AutoGen 矩阵/数组传参，未发现其他稳定逐帧托管分配。首次初始化、非阻塞 I/O 的首次 WaitHandle、日志、错误/回退、纹理重建和调用方事件处理器不属于该结论。本轮未验证主项目场景、IL2CPP、Android、Apple、Linux 或其他图形后端；未更改原生库、子模块及资产 GUID。
+
+Unity Mono 的 `GC.GetAllocatedBytesForCurrentThread()` 连已知数组分配也返回 0，未通过正向校准，其零值结果不作证据。改用启用的 `ProfilerRecorder(ProfilerCategory.Memory, "GC.Alloc", 65536, StartImmediately | CollectOnlyOnCurrentThread)`，不启用逐帧合计，通过采样数量差核验同步测量循环；检查有效性、运行状态及缓冲区未溢出。该 marker 的单位为耗时，不能将采样值解释为分配字节。隔离工程的测试副本只将分配读数换为 recorder 事件数并省略会话压力检查，后者由 .NET 测试和 Player 覆盖。使用 `-batchmode -nographics -quit -executeMethod FFmpegAllocationProbe.Run` 执行；测试副本、probe、报告与日志分别保存在 `.work/gc-free/Project-x64-native-video/Assets/Plugins/FFmpeg/Runtime/`、`.work/gc-free/mono-profiler-allocations.txt` 及 `mono-profiler-allocations-editor.log`，未修改正式程序集。
+
 ## 2026-10-05：AV1 软件解码与硬件失败恢复
 
 旧原生库仅包含依赖硬件的 `av1` 解码器。使用 128×96 / 30 fps / 3 秒的 AV1 样本，软件模式首帧准确复现 `Send video packet: Function not implemented (-40)`。修复后软件模式明确选择 `libdav1d`（兼容 `libaom-av1`），硬件模式保留原生 `av1` / MediaCodec 候选；Windows x64 原生库加入静态 dav1d 1.5.3，FFmpeg 保持固定 9.0.1 ABI。

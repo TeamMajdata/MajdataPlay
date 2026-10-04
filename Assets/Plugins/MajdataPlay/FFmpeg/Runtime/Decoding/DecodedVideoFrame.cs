@@ -16,7 +16,9 @@ namespace MajdataPlay.FFmpeg.Internal
         private IntPtr _data;
         private IntPtr _nativeFrame;
         private IntPtr _nativeImage;
-        private readonly Action<IntPtr> _releaseImage;
+        private Action<IntPtr> _releaseImage;
+        private readonly DecodedVideoFramePool _pool;
+        private int _disposed;
 
         /// <summary>Gets the stored frame width, in pixels, before any remaining <see cref="RotationDegrees"/> is applied.</summary>
         public int Width { get; internal set; }
@@ -66,6 +68,32 @@ namespace MajdataPlay.FFmpeg.Internal
             _releaseImage = releaseImage ?? throw new ArgumentNullException(nameof(releaseImage));
         }
 
+        internal DecodedVideoFrame(DecodedVideoFramePool pool)
+        {
+            _pool = pool;
+            _disposed = 1;
+        }
+
+        internal void Reuse()
+        {
+            Width = Height = 0;
+            PixelFormat = AVPixelFormat.AV_PIX_FMT_NONE;
+            PresentationTime = Duration = RotationDegrees = 0;
+            CurrentBitRate = 0;
+            PixelAspectRatio = 1;
+            HardwareDecoded = false;
+            TransferMode = null;
+            _disposed = 0;
+        }
+
+        internal void SetPixels(IntPtr pixels) => _data = pixels;
+        internal void SetNativeFrame(IntPtr frame) => _nativeFrame = frame;
+        internal void SetNativeImage(IntPtr image, Action<IntPtr> releaseImage)
+        {
+            _releaseImage = releaseImage;
+            _nativeImage = image;
+        }
+
         /// <summary>
         /// Downloads an owned native hardware frame and converts it to a separate RGBA32 CPU frame.
         /// </summary>
@@ -91,14 +119,59 @@ namespace MajdataPlay.FFmpeg.Internal
         /// <remarks>Call only after all consumers have finished using the frame. Repeated calls have no effect.</remarks>
         public void Dispose()
         {
+            if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
             var image = Interlocked.Exchange(ref _nativeImage, IntPtr.Zero);
-            if (image != IntPtr.Zero) _releaseImage(image);
-            var pixels = Interlocked.Exchange(ref _data, IntPtr.Zero);
-            if (pixels != IntPtr.Zero)
-                ffmpeg.av_free((void*)pixels);
-            var frame = (AVFrame*)Interlocked.Exchange(ref _nativeFrame, IntPtr.Zero);
-            if (frame != null)
-                ffmpeg.av_frame_free(&frame);
+            var releaseImage = _releaseImage;
+            _releaseImage = null;
+            try
+            {
+                if (image != IntPtr.Zero) releaseImage(image);
+            }
+            finally
+            {
+                var pixels = Interlocked.Exchange(ref _data, IntPtr.Zero);
+                if (pixels != IntPtr.Zero)
+                    ffmpeg.av_free((void*)pixels);
+                var frame = (AVFrame*)Interlocked.Exchange(ref _nativeFrame, IntPtr.Zero);
+                if (frame != null)
+                    ffmpeg.av_frame_free(&frame);
+                _pool?.Return(this);
+            }
+        }
+    }
+
+    // Only VideoDecodeSession's private frames may be reused. Public decoder/copy
+    // results remain independent objects so a stale Dispose cannot release a new frame.
+    // Returning a frame ends its internal lease: no caller may access it afterwards.
+    internal sealed class DecodedVideoFramePool
+    {
+        private readonly object _gate = new object();
+        private readonly DecodedVideoFrame[] _frames;
+        private int _count;
+
+        internal DecodedVideoFramePool(int capacity)
+        {
+            if (capacity <= 0) throw new ArgumentOutOfRangeException(nameof(capacity));
+            _frames = new DecodedVideoFrame[capacity];
+            for (var i = 0; i < capacity; i++) _frames[i] = new DecodedVideoFrame(this);
+            _count = capacity;
+        }
+
+        internal DecodedVideoFrame Rent()
+        {
+            lock (_gate)
+            {
+                if (_count == 0) throw new InvalidOperationException("The presentation frame pool is exhausted.");
+                var frame = _frames[--_count];
+                _frames[_count] = null;
+                frame.Reuse();
+                return frame;
+            }
+        }
+
+        internal void Return(DecodedVideoFrame frame)
+        {
+            lock (_gate) _frames[_count++] = frame;
         }
     }
 }

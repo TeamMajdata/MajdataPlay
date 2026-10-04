@@ -30,7 +30,8 @@ namespace MajdataPlay.FFmpeg.Internal
     internal sealed class VideoDecodeSession : IDisposable
     {
         readonly object _gate = new object();
-        readonly Queue<DecodedVideoFrame> _frames = new Queue<DecodedVideoFrame>();
+        private readonly Queue<DecodedVideoFrame> _frames;
+        private readonly DecodedVideoFramePool _framePool;
         readonly CancellationTokenSource _cancel = new CancellationTokenSource();
         readonly string _path;
         readonly DecoderOptions _options;
@@ -44,6 +45,9 @@ namespace MajdataPlay.FFmpeg.Internal
         public VideoDecodeSession(string path, DecoderOptions options, int capacity)
         {
             _path = path; _options = options; _capacity = Math.Max(1, Math.Min(8, capacity));
+            _frames = new Queue<DecodedVideoFrame>(_capacity);
+            // The worker and presenter can each hold one frame outside the queue.
+            _framePool = new DecodedVideoFramePool(_capacity + 2);
             new Thread(Run) { IsBackground = true, Name = "FFmpeg video decoder" }.Start();
         }
         public VideoInfo Info { get { lock (_gate) return _info; } }
@@ -79,7 +83,7 @@ namespace MajdataPlay.FFmpeg.Internal
             MajDebug.LogDebug("FFmpeg", "[Session] Decode worker started; queue capacity=" + _capacity + ".");
             try
             {
-                using (var decoder = new FFmpegVideoDecoder(_options))
+                using (var decoder = new FFmpegVideoDecoder(_options, _framePool))
                 {
                     decoder.Open(_path, _cancel.Token);
                     lock (_gate) _info = new VideoInfo(decoder);

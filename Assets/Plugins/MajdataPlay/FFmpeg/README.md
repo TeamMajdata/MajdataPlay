@@ -76,6 +76,10 @@ AV1 软件解码使用构建时静态链接的 `libdav1d`（也兼容包含 `lib
 
 启用 Unity Profiler 时，`UnityProfiler` 记录 `FFmpeg.Player.Update`、`Present`、`CpuUpload`，以及解码打开、读帧、seek、硬件帧下载、RGBA 转换和原生图像导入等作用域。调用处不再添加外围宏，由 `UnityProfiler` 与 Unity Profiler API 自身的 `Conditional` 控制采样调用。工作线程按 [Unity 的线程采样接口](https://docs.unity3d.com/6000.3/Documentation/ScriptReference/Profiling.Profiler.BeginThreadProfiling.html) 注册为 `FFmpeg / Decoder`，并在退出时注销；其记录可在 Profiler Timeline 查看。这些计时覆盖 CPU 调用，不代表 GPU 命令执行时长。
 
+播放器会话按队列容量加 2 预分配呈现帧容器，供工作线程、队列和主线程流转；帧释放原生资源后归还本会话。稳定解码、RGBA 转换和呈现使用复用容器，`EAGAIN` 比较不装箱，Android 图像释放委托只在建立硬件会话时创建。这里的无分配指预热后的托管 GC 分配；FFmpeg 原生帧引用、像素缓冲区及驱动内部仍按各自生命周期分配和释放。
+
+公开 `FFmpegVideoDecoder` 构造器与 `DecodedVideoFrame.CopyToSoftware()` 保留独立帧对象的所有权语义，返回对象仍会分配。内部复用帧不通过播放器事件暴露，避免已释放的外部旧引用影响后来租用的帧。打开、seek 日志、回退、纹理重建及调用方事件处理器不在稳定逐帧零 GC 范围内。
+
 ## 图形后端与纹理传输
 
 五种请求的图形后端均有 Unity 纹理上传通用路径。硬件路径在运行时探测；`TransferMode` 反映实际路径。需要保证显示帧不经过 CPU 像素回读/上传时，请在 Preload/Prepare 前设置 `player.RequireHardwareDecoding = true`：这时驱动、格式或插件不满足条件会直接报错，不会自动上传 CPU 像素。FFmpeg 打开输入时仍可能为获取元数据执行软件探测解码，这些探测帧不用于显示。
