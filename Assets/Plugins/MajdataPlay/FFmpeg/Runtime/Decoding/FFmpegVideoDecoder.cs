@@ -180,10 +180,20 @@ namespace MajdataPlay.FFmpeg.Internal
                 CanSeek = _format->pb == null || (_format->pb->seekable & ffmpeg.AVIO_SEEKABLE_NORMAL) != 0;
                 RotationDegrees = ReadStreamRotation(stream);
                 UpdateDimensions(stream->codecpar->width, stream->codecpar->height, RotationDegrees);
-                var softwareCodec = codec;
+                var defaultCodec = codec;
                 while (true)
                 {
-                    codec = softwareCodec;
+                    // AV1's default decoder may be libdav1d, which has no hardware
+                    // configurations. FFmpeg's native av1 decoder provides hwaccels
+                    // but cannot decode in software, so select the two independently.
+                    codec = _options.HardwareDeviceType == AVHWDeviceType.AV_HWDEVICE_TYPE_NONE
+                        ? FindSoftwareDecoder(defaultCodec) : defaultCodec;
+                    if (stream->codecpar->codec_id == AVCodecID.AV_CODEC_ID_AV1 &&
+                        _options.HardwareDeviceType != AVHWDeviceType.AV_HWDEVICE_TYPE_NONE)
+                    {
+                        var hardwareCodec = ffmpeg.avcodec_find_decoder_by_name("av1");
+                        if (hardwareCodec != null) codec = hardwareCodec;
+                    }
                     bool mediaCodec = _options.HardwareDeviceType == AVHWDeviceType.AV_HWDEVICE_TYPE_MEDIACODEC;
                     if (mediaCodec)
                     {
@@ -213,11 +223,17 @@ namespace MajdataPlay.FFmpeg.Internal
                     bool mediaCodecCpu = selectedMediaCodec && _codec->hw_device_ctx == null &&
                         _options.AllowHardwareCpuUpload && !_options.RequireHardwareDecoding;
                     if (mediaCodecCpu) _cpuTransport = true;
-                    if (mediaCodec && _codec->hw_device_ctx == null && !mediaCodecCpu)
+                    if (_codec->hw_device_ctx == null && !mediaCodecCpu)
                     {
-                        ReleaseCodec();
-                        codec = softwareCodec;
-                        AllocateCodec(codec, stream);
+                        var softwareCodec = FindSoftwareDecoder(defaultCodec);
+                        if (codec != softwareCodec)
+                        {
+                            ReleaseCodec();
+                            codec = softwareCodec;
+                            AllocateCodec(codec, stream);
+                        }
+                        selectedMediaCodec = false;
+                        HardwareDecoding = false;
                     }
                     AVDictionary* codecOptions = null;
                     int codecResult;
@@ -254,7 +270,7 @@ namespace MajdataPlay.FFmpeg.Internal
                         HardwareFallbackReason = "Hardware decoder open failed: " + ErrorText(codecResult);
                         MajDebug.LogWarning("FFmpeg", "[Decoder] " + HardwareFallbackReason + "; opening software decoder.");
                         ReleaseCodec();
-                        codec = softwareCodec;
+                        codec = FindSoftwareDecoder(defaultCodec);
                         AllocateCodec(codec, stream);
                         HardwareDecoding = false;
                         selectedMediaCodec = false;
@@ -653,6 +669,16 @@ namespace MajdataPlay.FFmpeg.Internal
                     DescribeHardwareDevice(genericDevice ? kind + " (FFmpeg default hardware device)" : kind);
             }
             finally { if (device != null) ffmpeg.av_buffer_unref(&device); }
+        }
+
+        private static AVCodec* FindSoftwareDecoder(AVCodec* defaultCodec)
+        {
+            if (defaultCodec->id != AVCodecID.AV_CODEC_ID_AV1) return defaultCodec;
+            var codec = ffmpeg.avcodec_find_decoder_by_name("libdav1d");
+            if (codec == null) codec = ffmpeg.avcodec_find_decoder_by_name("libaom-av1");
+            if (codec == null)
+                throw new NotSupportedException("This FFmpeg build has no AV1 software decoder. Rebuild the native libraries with libdav1d (or libaom-av1); the native av1 decoder requires hardware acceleration.");
+            return codec;
         }
 
         private void AllocateCodec(AVCodec* codec, AVStream* stream)

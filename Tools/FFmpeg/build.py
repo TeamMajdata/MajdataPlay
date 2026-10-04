@@ -207,6 +207,102 @@ def shell(bash, text, cwd, log):
     with log.open('w', encoding='utf-8') as output:
         subprocess.run([bash, '-c', text], cwd=cwd, stdout=output, stderr=subprocess.STDOUT, check=True)
 
+
+def dav1d_tools(paths):
+    environment = os.environ.copy()
+    environment['PATH'] = os.pathsep.join([str(p) for p in paths] + [environment.get('PATH', '')])
+    for tool in ['ninja', os.environ.get('PKG_CONFIG', 'pkg-config')]:
+        if not shutil.which(tool, path=environment['PATH']):
+            raise RuntimeError('AV1 software decoding requires build tool ' + tool)
+    DEPENDENCIES.meson_command()
+    return environment
+
+
+def build_dav1d(target, specific, paths, jobs):
+    """Build a PIC static decoder with the same target compiler, ABI and SDK as FFmpeg."""
+    environment = dav1d_tools(paths)
+    flags = dict(arg[2:].split('=', 1) for arg in specific if arg.startswith('--') and '=' in arg)
+    cross = flags.get('cross-prefix', '')
+    compiler = flags.get('cc', cross + 'gcc')
+    cc = [compiler] if Path(compiler).is_file() else shlex.split(compiler)
+    ar = flags.get('ar', cross + 'ar')
+    c_args, link_args = [], []
+    for arg in specific:
+        if arg.startswith('--extra-cflags='):
+            c_args += shlex.split(arg.split('=', 1)[1])
+        elif arg.startswith('--extra-ldflags='):
+            link_args += shlex.split(arg.split('=', 1)[1])
+    if flags.get('sysroot'):
+        c_args += ['--sysroot=' + flags['sysroot']]
+        link_args += ['--sysroot=' + flags['sysroot']]
+    # Meson runs as a native host tool, while FFmpeg configure runs in Bash.
+    # Resolve POSIX drive paths back to native paths for Windows SDK/compiler arguments.
+    def native(value):
+        return re.sub(r'(^|=|-I|-L)/([a-zA-Z])/', lambda match: match.group(1) + match.group(2) + ':/', value) if HOST == 'Windows' else value
+    cc = [native(value) for value in cc]
+    c_args = [native(value) for value in c_args]
+    link_args = [native(value) for value in link_args]
+    if not shutil.which(cc[0], path=environment['PATH']):
+        raise RuntimeError('Missing dav1d target compiler: ' + cc[0])
+    system = 'windows' if target.startswith('win-') else ('android' if target.startswith('android-') else
+             'ios' if target.startswith('ios-') else 'darwin' if target.startswith('macos-') else 'linux')
+    family = 'x86' if target == 'win-x86' else 'arm' if target == 'android-armv7' else 'x86_64' if target.endswith('-x64') else 'aarch64'
+    nasm = shutil.which('nasm', path=environment['PATH'])
+    asm = not family.startswith('x86') or bool(nasm)
+    if not asm:
+        print('NOTICE ' + target + ': nasm unavailable; dav1d x86 assembly disabled.', flush=True)
+    # repr strings use Meson's single-quoted machine-file syntax, not shell interpolation.
+    machine = '[binaries]\nc = ' + repr(cc) + '\nar = ' + repr(ar) + '\n'
+    if system == 'windows':
+        machine += 'windres = ' + repr(flags.get('windres', cross + 'windres')) + '\n'
+    machine += '[host_machine]\nsystem = ' + repr(system) + '\ncpu_family = ' + repr(family) + '\n'
+    machine += 'cpu = ' + repr('armv7' if family == 'arm' else family) + "\nendian = 'little'\n"
+    machine += '[properties]\nneeds_exe_wrapper = true\n'
+    machine += '[built-in options]\nc_args = ' + repr(c_args) + '\nc_link_args = ' + repr(link_args) + '\n'
+    identity = hashlib.sha256((machine + str(asm) + json.dumps(DEPENDENCIES.LOCK['dav1d']) +
+                              json.dumps(DEPENDENCIES.LOCK['meson'])).encode()).hexdigest()[:12]
+    work = CACHE / ('dav1d-' + target + '-' + identity)
+    prefix = work / 'install'
+    work.mkdir(parents=True, exist_ok=True)
+    cross_file = work / 'cross.ini'
+    write_text_atomic(cross_file, machine)
+    meson = DEPENDENCIES.meson_command()
+    build = work / 'build'
+    setup = meson + ['setup', str(build), str(DEPENDENCIES.dav1d_source()), '--cross-file', str(cross_file),
+                     '--prefix', str(prefix), '--libdir', 'lib', '--buildtype', 'release', '--default-library', 'static',
+                     '-Db_staticpic=true', '-Dbitdepths=8,16', '-Denable_tools=false', '-Denable_tests=false',
+                     '-Denable_examples=false', '-Denable_asm=' + str(asm).lower()]
+    if (build / 'meson-private/coredata.dat').is_file():
+        setup += ['--reconfigure']
+    for command_line, log_name in [(setup, 'configure.log'),
+        (meson + ['compile', '-C', str(build), '-j', str(max(1, jobs))], 'build.log'),
+        (meson + ['install', '-C', str(build), '--no-rebuild'], 'install.log')]:
+        with (work / log_name).open('w', encoding='utf-8') as output:
+            subprocess.run(command_line, env=environment, stdout=output, stderr=subprocess.STDOUT, check=True)
+    if not (prefix / 'lib/libdav1d.a').is_file():
+        raise RuntimeError('Missing static dav1d archive: ' + str(prefix))
+    # dav1d's 16-bit implementation decodes high-bit-depth AV1, including 10-bit.
+    configuration = (build / 'config.h').read_text(encoding='utf-8')
+    for depth in (8, 16):
+        if not re.search(r'^#define CONFIG_' + str(depth) + r'BPC 1$', configuration, re.MULTILINE):
+            raise RuntimeError('dav1d was built without the ' + str(depth) + '-bit implementation')
+    # Only dav1d lives outside a caller's optional Linux dependency sysroot.
+    # Keep libva/libdrm searches unchanged when forwarding their pkg-config calls.
+    pkg_config = flags.get('pkg-config', os.environ.get('PKG_CONFIG', 'pkg-config'))
+    wrapper = work / 'pkg-config.sh'
+    write_text_atomic(wrapper, '#!/bin/sh\ncase " $* " in\n  *" dav1d "*)\n'
+        '    unset PKG_CONFIG_SYSROOT_DIR PKG_CONFIG_LIBDIR\n'
+        '    export PKG_CONFIG_PATH=' + shlex.quote(posix(prefix / 'lib/pkgconfig')) + '\n'
+        '    set -- --static "$@"\n    ;;\nesac\n'
+        'exec ' + shlex.quote(pkg_config) + ' "$@"\n')
+    return prefix, ['--enable-libdav1d', '--pkg-config=' + shlex.join(['sh', posix(wrapper)])]
+
+
+def verify_software_configuration(work):
+    configuration = '\n'.join((work / name).read_text() for name in ['config.h', 'config_components.h'])
+    if not re.search(r'^#define CONFIG_LIBDAV1D_DECODER 1$', configuration, re.MULTILINE):
+        raise RuntimeError('AV1 software decoder libdav1d was disabled during FFmpeg configuration')
+
 def write_meta(file, target):
     meta = Path(str(file) + '.meta')
     guid = uuid.uuid5(uuid.NAMESPACE_URL, 'majdata-ffmpeg/' + file.relative_to(OUTPUT).as_posix()).hex
@@ -313,7 +409,7 @@ def stage_linux_dependencies(destination):
     return report
 
 
-def stage(target, prefix, config, logs):
+def stage(target, prefix, config, logs, dav1d_prefix):
     # Simulator archives remain outside Assets: device and simulator cannot both be linked by Unity.
     destination = destination_for(target)
     destination.mkdir(parents=True, exist_ok=True)
@@ -333,7 +429,13 @@ def stage(target, prefix, config, logs):
         if not source_file.exists():
             raise RuntimeError(f'Missing expected library {source_file}')
         file = destination / name
-        shutil.copy2(source_file, file, follow_symlinks=True)
+        if target.startswith('ios-') and library == 'avcodec':
+            # Unity links seven FFmpeg archives. Carry dav1d inside avcodec rather than
+            # introducing an eighth plugin or relying on transitive static linkage.
+            subprocess.run(['xcrun', 'libtool', '-static', '-o', str(file), str(source_file),
+                            str(dav1d_prefix / 'lib/libdav1d.a')], check=True)
+        else:
+            shutil.copy2(source_file, file, follow_symlinks=True)
         if target == 'linux-x64':
             patcher = host_tool('patchelf')
             subprocess.run([patcher, '--set-rpath', '$ORIGIN', str(file)], check=True)
@@ -345,11 +447,12 @@ def stage(target, prefix, config, logs):
     for name in ['COPYING.LGPLv2.1', 'LICENSE.md']:
         shutil.copy2(SOURCE / name, destination / name)
     report = {'target': target, 'source': LOCK, 'host': platform.platform(), 'builtUtc': datetime.datetime.now(datetime.timezone.utc).isoformat(),
-              'configure': config, 'files': produced}
+              'configure': config, 'files': produced, 'softwareDecoders': ['libdav1d'],
+              'buildDependencies': DEPENDENCIES.LOCK,
+              'buildDependencyLicenses': stage_dav1d_license(destination)}
     if target.startswith(('win-', 'linux-', 'android-')):
-        report['buildDependencies'] = DEPENDENCIES.LOCK
         report['verifiedHardwareBackends'] = verify_hardware_configuration(target, logs)
-        report['buildDependencyLicenses'] = stage_build_dependency_licenses(destination)
+        report['buildDependencyLicenses'] += stage_build_dependency_licenses(destination)
         if target.startswith('win-') and os.environ.get('FFMPEG_D3D12_HEADERS'):
             report['d3d12HeaderOverlay'] = {'directory': str(DEPENDENCIES.verify_d3d12_overlay()),
                                           'files': DEPENDENCIES.LOCK['d3d12HeaderOverlay']['files']}
@@ -359,6 +462,20 @@ def stage(target, prefix, config, logs):
     write_text_atomic(destination / 'build-manifest.json', json.dumps(report, indent=2) + '\n')
     write_text_atomic(destination / 'configure.txt', (logs / 'configure.log').read_text(encoding='utf-8', errors='replace'))
     return report
+
+
+def stage_dav1d_license(destination):
+    file = destination / 'dav1d.LICENSE.txt'
+    spec = DEPENDENCIES.LOCK['dav1d']
+    write_text_atomic(file, 'dav1d ' + spec['version'] + '\n' + spec['url'] + '\nSHA256: ' + spec['sha256'] + '\n\n' +
+                      (DEPENDENCIES.dav1d_source() / 'COPYING').read_text(encoding='utf-8'))
+    if OUTPUT in file.parents:
+        meta = Path(str(file) + '.meta')
+        if not meta.exists():
+            guid = uuid.uuid5(uuid.NAMESPACE_URL, 'majdata-ffmpeg/' + file.relative_to(OUTPUT).as_posix()).hex
+            write_text_atomic(meta, 'fileFormatVersion: 2\nguid: ' + guid + '\nTextScriptImporter:\n'
+                             '  externalObjects: {}\n  userData:\n  assetBundleName:\n  assetBundleVariant:\n')
+    return [{'file': file.name, 'sha256': hashlib.sha256(file.read_bytes()).hexdigest(), 'license': 'BSD-2-Clause'}]
 
 
 def stage_build_dependency_licenses(destination):
@@ -415,6 +532,8 @@ def main():
     for target in targets:
         try:
             config, reason = toolchain(target)
+            if not reason:
+                dav1d_tools(config[1])
             if not reason and options.with_bridge:
                 bridge_plan(target, CACHE / 'install' / target, options, config)
         except (OSError, subprocess.CalledProcessError, RuntimeError) as error:
@@ -456,12 +575,16 @@ def main():
         make = os.environ.get('FFMPEG_MAKE', 'make')
         try:
             print(f'BUILD {target}; logs: {work}', flush=True)
+            dav1d_prefix, dav1d_config = build_dav1d(target, specific, paths, options.jobs)
+            config += dav1d_config
             settings_file = work / 'build-settings.json'
             settings = json.dumps({'commit':LOCK['commit'], 'configure':config,
-                                   'toolPaths':[str(p) for p in paths], 'runtimePathFix':1}, sort_keys=True)
+                                   'toolPaths':[str(p) for p in paths], 'runtimePathFix':1,
+                                   'dav1d': DEPENDENCIES.LOCK['dav1d']}, sort_keys=True)
             if (work / 'ffbuild/config.mak').exists() and (not settings_file.exists() or settings_file.read_text() != settings):
                 shell(bash, setup + shlex.quote(make) + ' clean', work, work / 'clean.log')
             shell(bash, setup + 'bash ' + shlex.quote(posix(SOURCE / 'configure')) + ' ' + shlex.join(config), work, work / 'configure.log')
+            verify_software_configuration(work)
             if target.startswith(('win-', 'linux-', 'android-')):
                 verify_hardware_configuration(target, work)
             shell(bash, setup + shlex.quote(make) + f' -j{max(1, options.jobs)}', work, work / 'build.log')
@@ -469,13 +592,13 @@ def main():
             write_text_atomic(settings_file, settings)
             provenance = {'target': target, 'source': LOCK, 'host': platform.platform(),
                           'builtUtc': datetime.datetime.now(datetime.timezone.utc).isoformat(),
-                          'configure': config, 'buildDependencies': DEPENDENCIES.LOCK}
+                          'configure': config, 'buildDependencies': DEPENDENCIES.LOCK, 'softwareDecoders': ['libdav1d']}
             if target.startswith(('win-', 'linux-', 'android-')):
                 provenance['verifiedHardwareBackends'] = verify_hardware_configuration(target, work)
             # Keep the build evidence beside the usable prefix even when a loaded Unity DLL prevents staging.
             write_text_atomic(prefix / 'build-provenance.json', json.dumps(provenance, indent=2) + '\n')
             shutil.copy2(work / 'configure.log', prefix / 'build-configure.txt')
-            report = stage(target, prefix, config, work)
+            report = stage(target, prefix, config, work, dav1d_prefix)
             if options.with_bridge:
                 build_bridge(target, prefix, options, (specific, paths))
             results.append({'target': target, 'status': 'built', 'files': report['files']})

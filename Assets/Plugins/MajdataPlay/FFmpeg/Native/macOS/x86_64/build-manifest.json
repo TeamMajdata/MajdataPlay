@@ -17,9 +17,9 @@
     "note": "All upstream public headers present in the binding header snapshot are compared after CRLF normalization before building. Generated avconfig.h and ffversion.h are excluded."
   },
   "host": "macOS-27.0.1-arm64-arm-64bit-Mach-O",
-  "builtUtc": "2026-10-03T13:30:31.260367+00:00",
+  "builtUtc": "2026-10-04T17:22:14.583496+00:00",
   "configure": [
-    "--prefix=/Users/codex/codex-work/majdata-ffmpeg-20261003/Tools/FFmpeg/.build/install/macos-x64",
+    "--prefix=/Users/codex/codex-work/majdata-av1-20261005/Tools/FFmpeg/.build/install/macos-x64",
     "--disable-doc",
     "--disable-programs",
     "--disable-debug",
@@ -43,43 +43,98 @@
     "--enable-videotoolbox",
     "--enable-audiotoolbox",
     "--enable-securetransport",
-    "--install-name-dir=@loader_path"
+    "--install-name-dir=@loader_path",
+    "--enable-libdav1d",
+    "--pkg-config=sh /Users/codex/codex-work/majdata-av1-20261005/Tools/FFmpeg/.build/dav1d-macos-x64-5f25028999bc/pkg-config.sh"
   ],
   "files": [
     {
       "file": "libavcodec.63.dylib",
-      "bytes": 14008176,
-      "sha256": "90c7476eac7a3cafeddd5c2d9a857264bc3dc9fb92d47c8abc6a644ddd9874ae"
+      "bytes": 15668536,
+      "sha256": "2f0a4e9a040d97d006f07143bd1c359a916b549d9350e34b860601a58f990b58"
     },
     {
       "file": "libavdevice.63.dylib",
       "bytes": 18904,
-      "sha256": "cf6ba318cb8ef572f41111ed5a5173cc94c64bbed5613bf5e4dec366547efd2c"
+      "sha256": "c116d8578198a575694b890b8c062def05e7ca83cd572db946bc3566362a640a"
     },
     {
       "file": "libavfilter.12.dylib",
       "bytes": 145416,
-      "sha256": "cc5e32dec58f2511094d66ac962b178af53cec5ec8ad9251af5dec181f2f8b49"
+      "sha256": "850b9ea719f055a0f00804eaa15767880ebf2de0d8bb76565566b6e09f8d51d9"
     },
     {
       "file": "libavformat.63.dylib",
       "bytes": 1715928,
-      "sha256": "54b0dad4e7902ae3d04d032f794a0baa9e871300d370b67a6f7e60fb2bf91a2a"
+      "sha256": "92208b050c562eb4df4c99a69207402eb0c21532fa80112050386a52d1019a15"
     },
     {
       "file": "libavutil.61.dylib",
       "bytes": 829856,
-      "sha256": "6c54cef739c61cc9a32da868919d965123a5416afc0430e6aa5b59160f686d77"
+      "sha256": "70c65039f0864ff70b4dc98bfd5a9b87d9d7eda346bdfb4c42f44656a63bea91"
     },
     {
       "file": "libswresample.7.dylib",
       "bytes": 140328,
-      "sha256": "4c69daf0e4015a723db0bfc3126fa5f494ce817643c70ce0dae033e099a376bb"
+      "sha256": "444d825027e29635c02245eba8568ccbf7dfacdf3e954b87c3b022f1e3ec64a9"
     },
     {
       "file": "libswscale.10.dylib",
       "bytes": 1625664,
-      "sha256": "db8a9651a01a232190b176ef5eae15524a26ea455ca267ef0c3592b9695b445d"
+      "sha256": "54a2e19d5e8c389712d464a96d013cf55a255f48633a44d03afd17d01b056a5e"
+    }
+  ],
+  "softwareDecoders": [
+    "libdav1d"
+  ],
+  "buildDependencies": {
+    "dav1d": {
+      "version": "1.5.3",
+      "url": "https://downloads.videolan.org/pub/videolan/dav1d/1.5.3/dav1d-1.5.3.tar.xz",
+      "sha256": "732010aa5ef461fa93355ed2c6c5fedb48ddc4b74e697eaabe8907eaeb943011"
+    },
+    "meson": {
+      "version": "1.9.1",
+      "url": "https://files.pythonhosted.org/packages/9c/07/b48592d325cb86682829f05216e4efb2dc881762b8f1bafb48b57442307a/meson-1.9.1-py3-none-any.whl",
+      "sha256": "f824ab770c041a202f532f69e114c971918ed2daff7ea56583d80642564598d0"
+    },
+    "vulkanHeaders": {
+      "repository": "https://github.com/KhronosGroup/Vulkan-Headers.git",
+      "tag": "vulkan-sdk-1.4.328.1",
+      "commit": "19725e4d48082fe78e26622b15d3080ccd54112b",
+      "minimumHeaderVersion": 317
+    },
+    "d3d12HeaderOverlay": {
+      "source": "llvm-mingw-20260922-ucrt-x86_64.zip",
+      "files": {
+        "d3d12.h": "23935395fe8939ac0ca71c5b34cd7b21a689ff5e9641846563613f24bc0dd85e",
+        "d3d12video.h": "23216f1bcb62c8c0c9e09d66cf12d639eb1abcad9a1ba31e0d517a428cd56aee"
+      }
+    },
+    "llvmMingw": {
+      "version": "20260922",
+      "repository": "https://github.com/mstorsjo/llvm-mingw",
+      "archives": {
+        "Linux-x86_64": {
+          "file": "llvm-mingw-20260922-ucrt-ubuntu-22.04-x86_64.tar.xz",
+          "sha256": "bb7bb7654b33d5aa8712acb837c963b2e0c56352560c76105270a3268c665c21"
+        },
+        "Darwin-universal": {
+          "file": "llvm-mingw-20260922-ucrt-macos-universal.tar.xz",
+          "sha256": "52e5f5a7b131021d0c39a37a38fa380a1da7885cd04bd61afd0cd4ecfb8bc1f3"
+        },
+        "Windows-x86_64": {
+          "file": "llvm-mingw-20260922-ucrt-x86_64.zip",
+          "sha256": "e3ad77d117a4bea19a7a3b333341824d79a5a371004a10e25b8504e7b3047666"
+        }
+      }
+    }
+  },
+  "buildDependencyLicenses": [
+    {
+      "file": "dav1d.LICENSE.txt",
+      "sha256": "b7fc54472d14c149d9a7dff4b2696243c018a4a1127e31f0f3cdf7c60c10ccc1",
+      "license": "BSD-2-Clause"
     }
   ]
 }

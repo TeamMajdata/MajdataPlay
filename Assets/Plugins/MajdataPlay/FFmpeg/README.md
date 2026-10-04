@@ -62,6 +62,10 @@ public sealed class VideoExample : MonoBehaviour
 
 解码与纹理偏好在下一次打开媒体时应用，修改设置不会重标记或中断当前会话。Inspector 的 Preferred Decoder Type 提供 Software/Hardware 选择，旧场景序列化的硬件偏好保持兼容。
 
+AV1 软件解码使用构建时静态链接的 `libdav1d`（也兼容包含 `libaom-av1` 的同 ABI 构建）；硬件路径单独选择 FFmpeg 的 `av1` 或 Android 的 `av1_mediacodec`。FFmpeg 内置 `av1` 本身不能执行软件解码，不能把成功打开它视为软件回退成功。旧原生库未包含这些软件解码器时，会明确提示重建；仅更新 C# 代码无法补齐 AV1 解码能力。按 `Tools/FFmpeg` 重建对应平台库后，重启已加载旧库的 Unity Editor / Player。
+
+项目原生库的 AV1 8-bit / 10-bit 软件路径覆盖 Windows x86/x64、Linux x64、Android ARMv7/ARM64、macOS x64/ARM64 和 iOS ARM64；构建脚本也支持 iOS 模拟器 ARM64/x64。10-bit 解码后仍通过现有 RGBA32 软件上传路径显示，不代表 HDR 输出或完整保留 10-bit 显示精度。各目标的实际运行范围见 [验证记录](../../../../Tools/Tests/FFmpegValidation/RESULTS.md)。
+
 ## 日志与性能记录
 
 日志统一通过 `MajDebug` 输出，tag 固定为 `FFmpeg`，message 以 `[Player]`、`[Decoder]`、`[Session]` 或 `[Interop]` 标识组件。Debug 记录控制、seek 与资源生命周期；Info 记录视频编码、实际解码器、硬件 API/设备描述及纹理传输路径；Warning 记录回退及原因；Error 记录打开或播放失败。不会为每帧输出日志。日志落盘与过滤沿用项目的 `MajDebug.SetLogWriter` / `MinLogLevel` 配置。

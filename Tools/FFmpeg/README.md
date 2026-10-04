@@ -11,9 +11,10 @@
 **不要用 FFmpeg 8.x，也不要只改原生库文件名**。库主版本为 avcodec 63、avdevice 63、avfilter 12、avformat 63、avutil 61、swresample 7、swscale 10。
 
 `dependencies.lock.json` 另外固定 Vulkan-Headers SDK 1.4.328.1（commit `19725e4d48082fe78e26622b15d3080ccd54112b`）及 LLVM-MinGW 20260922 的各主机官方压缩包 SHA256。
+同时固定 VideoLAN dav1d 1.5.3 源码和 Meson 1.9.1 wheel 的官方下载地址与 SHA256。正常构建自动下载到忽略缓存，校验解包后的源码，并为每个目标使用 FFmpeg 相同的编译器、SDK、架构和 ABI 构建 PIC 静态 dav1d；不安装全局 Python 包。
 Windows、Linux、Android 构建会自动获取并校验这些构建依赖，缓存到项目 `.build/toolchains` 或指定构建缓存，不安装系统软件。Vulkan 头文件须包含 Vulkan Video VP9 扩展；旧版 NDK / 系统 Vulkan 头文件不会覆盖此固定版本。
 未设置 `LLVM_MINGW` 时，Windows 目标使用固定的 LLVM-MinGW，它包含 D3D12 Video 解码所需的新头文件；显式设置时使用开发者提供的工具链，仍检查全部请求的硬件解码后端是否编译启用。
-`--probe` 不下载依赖：全新缓存会报告缺少固定头文件，请先执行正常构建。Windows 原生仍需要可工作的 Bash/make；WSL 使用 Linux 主机工具链。
+`--probe` 不下载依赖：全新缓存会报告缺少固定头文件或 Meson，请先执行正常构建。Windows 原生仍需要可工作的 Bash/make；WSL 使用 Linux 主机工具链。
 
 ## 一键命令
 
@@ -48,7 +49,7 @@ Windows 的已有 WSL Linux 也可运行同一个 `build.sh`。使用 WSL 时使
 
 ## 工具链矩阵
 
-所有主机都需要 Python 3.9+、Git、Bash、GNU make、C/C++ 编译器。Linux 目标另需 `patchelf`、`pkg-config`、libva 与 libdrm 开发文件（Ubuntu/Debian 包名为 `libva-dev`、`libdrm-dev`）；脚本预检 `libva` / `libdrm` 模块并显式启用 VAAPI 和 DRM PRIME 导出。隔离工具链可通过 `PKG_CONFIG_PATH` / `PKG_CONFIG_SYSROOT_DIR` 提供依赖，运行时也需要对应的 libva/libdrm 与 GPU 驱动。stage 直接写入并读回 `$ORIGIN`，避免 configure/make 多重解析破坏相对库搜索路径。x86/x64 的汇编加速需要 NASM；缺少时脚本明确报告并禁用 x86 汇编，仍可编译。
+所有主机都需要 Python 3.9+、Git、Bash、GNU make、Ninja、pkg-config、C/C++ 编译器。Linux 目标另需 `patchelf`、libva 与 libdrm 开发文件（Ubuntu/Debian 包名为 `libva-dev`、`libdrm-dev`）；脚本预检 `libva` / `libdrm` 模块并显式启用 VAAPI 和 DRM PRIME 导出。隔离工具链可通过 `PKG_CONFIG_PATH` / `PKG_CONFIG_SYSROOT_DIR` 提供依赖，运行时也需要对应的 libva/libdrm 与 GPU 驱动。dav1d 的 pkg-config 查询单独使用目标静态库前缀，不受外部 sysroot 影响；其他库仍使用调用者原有配置。stage 直接写入并读回 `$ORIGIN`，避免 configure/make 多重解析破坏相对库搜索路径。x86/x64 的汇编加速需要 NASM；缺少时脚本明确报告并禁用 FFmpeg 和 dav1d 的 x86 汇编，仍可编译。
 脚本不会安装系统软件，也不会覆盖既有 ThirdParty 绑定。缓存/源码/中间产物位于忽略的 `.build/`。
 
 | 目标 | Windows | Linux | macOS | 必需工具链 |
@@ -97,7 +98,8 @@ NDK 使用 [Google 官方下载](https://developer.android.com/ndk/downloads)。
 
 构建所有内置解码器、解复用器、解析器、网络协议、swscale、swresample，以及七个绑定库。
 关闭编码器、封装器、采集设备、滤镜实现、命令行程序、文档、调试符号和依赖自动探测。
-不启用 GPL/nonfree/外部编解码库；AV1 等仅依赖外部库的解码器不自动加入。
+不启用 GPL/nonfree；唯一额外编解码库为 BSD-2-Clause 许可的 dav1d，所有目标显式启用 `--enable-libdav1d` 并检查 `CONFIG_LIBDAV1D_DECODER`。dav1d 使用 `-Dbitdepths=8,16`，构建后要求 `CONFIG_8BPC`、`CONFIG_16BPC` 同时启用，以支持 8-bit 和 10-bit AV1（10-bit 使用高位深实现）。FFmpeg 内置名为 `av1` 的解码器依赖硬件加速，无法在不支持 AV1 的 GPU 上充当软件回退；`libdav1d` 提供真正的 AV1 软件解码。其他外部编解码库不自动加入。
+桌面和 Android 的 dav1d 静态链接进 avcodec，不增加运行时动态库；iOS stage 使用 Apple libtool 将 dav1d 对象合并进 `libavcodec.a`，保持现有七个 FFmpeg 插件与 Unity 链接配置。各目标同时携带 `dav1d.LICENSE.txt` 和其哈希、源码版本/校验信息；这些上游许可证固定 LF，避免 Windows Git 换行转换破坏清单的字节哈希。
 Windows 显式启用 D3D11VA/D3D12VA/DXVA2、Vulkan Video 和 Schannel；Apple 启用 VideoToolbox/AudioToolbox/SecureTransport；Android 启用 JNI/MediaCodec 和 Vulkan Video；Linux 启用 VAAPI/libdrm 和 Vulkan Video。
 每个 Windows/Linux/Android 目标在编译前检查 H.264、HEVC、AV1、VP9 Vulkan 硬件后端；Windows 同时检查四种格式的 D3D12VA 后端，任何后端被配置阶段禁用都会失败，不能输出成功状态。实际能力仍取决于 GPU 和驱动，编译启用不代表设备一定支持解码。
 这些 Vulkan Video 后端不需要外部 shader compiler，也不链接额外的 Vulkan loader 二进制；运行时动态加载系统 Vulkan loader。APV、DPX、FFV1、ProRes 的 shader 型 Vulkan 加速路径显式禁用，软件解码器保持可用。
@@ -136,7 +138,7 @@ CMake 默认优先 Ninja；没有 Ninja 时 Windows 使用 `mingw32-make` / `Min
 
 本机实际构建结果见 `BUILD-RESULTS.md`，不要把脚本覆盖的平台矩阵当作全部平台已经真机验证。
 使用项目的 native smoke/decode 测试以及 Unity 的 Mono/IL2CPP Player 验证版本、打开、解码、seek 和退出。
-`python Tools/FFmpeg/verify-artifacts.py` 可复查所有已 stage 库的 SHA256、PE/ELF/Mach-O 目标架构、Apple device/simulator 平台标记、Android 16 KiB LOAD 对齐、Linux 运行时依赖及许可哈希，以及当前主机的 FFmpeg ABI 加载。
+`python Tools/FFmpeg/verify-artifacts.py` 可复查所有已 stage 库的 SHA256、PE/ELF/Mach-O 目标架构、Apple device/simulator 平台标记、Android 16 KiB LOAD 对齐、Linux 运行时依赖及许可哈希，以及当前主机的 FFmpeg ABI 加载。新构建的 manifest 记录 `softwareDecoders`；主机可加载的产物另检查 `avcodec_find_decoder_by_name("libdav1d")`，避免缺失 AV1 软件回退的构建误报成功。导出符号检查不等同于实际视频解码验证。
 Linux stage 会附带 `libva.so.2`、`libva-drm.so.2`、`libdrm.so.2` 和对应许可，避免软件播放也因缺少这些直接依赖而无法加载 FFmpeg。厂商 GPU 驱动仍由目标系统提供。使用自定义 sysroot 时，开发文件和运行时库应属于同一套版本；许可默认从 sysroot 的发行版文档查找，也可通过 `FFMPEG_LINUX_RUNTIME_LICENSE_DIR` 提供 `libva.copyright`、`libva-drm.copyright`、`libdrm.copyright`。
 Apple 五个目标的实际构建、原生 Metal/VideoToolbox 测试及当前限制见 [APPLE-RESULTS.md](APPLE-RESULTS.md)。
 macOS 发布需要应用签名/公证；iOS 静态链接需遵守 LGPL 的重链接要求。

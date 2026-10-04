@@ -1,3 +1,5 @@
 # Auto detect text files and perform LF normalization
 * text=auto
 ffmpeg.exe filter=lfs diff=lfs merge=lfs -text
+# Build manifests hash these upstream license files byte-for-byte.
+Assets/Plugins/MajdataPlay/FFmpeg/Native/**/*.LICENSE.txt text eol=lf

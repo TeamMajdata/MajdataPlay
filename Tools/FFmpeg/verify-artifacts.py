@@ -120,6 +120,21 @@ def verify_hardware_backends(directory, manifest):
     print(f'PASS {target}: H264/HEVC/AV1/VP9 native Vulkan' + (' and D3D12VA' if target.startswith('win-') else '') + ' decoder configurations exported')
 
 
+def verify_software_decoders(directory, manifest):
+    decoders = manifest.get('softwareDecoders', [])
+    if not decoders:
+        return
+    target, major = manifest['target'], manifest['source']['abi']['avcodec']
+    name = f'avcodec-{major}.dll' if target.startswith('win-') else (
+        f'libavcodec.{major}.dylib' if target.startswith('macos-') else f'libavcodec.so.{major}')
+    library = ctypes.CDLL(str(directory / name))
+    library.avcodec_find_decoder_by_name.argtypes = [ctypes.c_char_p]
+    library.avcodec_find_decoder_by_name.restype = ctypes.c_void_p
+    for decoder in decoders:
+        assert library.avcodec_find_decoder_by_name(decoder.encode()), (target, decoder, 'software decoder missing')
+    print(f'PASS {target}: software decoders exported: ' + ', '.join(decoders))
+
+
 def main():
     count = 0
     manifests = list(NATIVE.rglob('build-manifest.json'))
@@ -152,6 +167,7 @@ def main():
                 count += 1
             if host:
                 verify_hardware_backends(directory, manifest)
+                verify_software_decoders(directory, manifest)
         finally:
             if handle:
                 handle.close()

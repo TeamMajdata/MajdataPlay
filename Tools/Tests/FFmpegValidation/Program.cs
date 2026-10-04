@@ -16,7 +16,9 @@ static class Program
         {
             TestClock();
             _checks += VideoBitRateChecks.Run();
-            if (args.Length != 2) { Console.WriteLine("PASS: clock and bitrate; use <native-directory> <media> for native decode tests."); return 0; }
+            bool av1 = args.Length == 3 && args[2] == "--av1";
+            bool av1Unavailable = args.Length == 3 && args[2] == "--av1-unavailable";
+            if (args.Length != 2 && !av1 && !av1Unavailable) { Console.WriteLine("PASS: clock and bitrate; use <native-directory> <media> [--av1|--av1-unavailable] for native decode tests."); return 0; }
             string native = Path.GetFullPath(args[0]);
             NativeLibrary.SetDllImportResolver(typeof(FFmpeg.AutoGen.ffmpeg).Assembly, (name, assembly, paths) =>
             {
@@ -25,6 +27,21 @@ static class Program
             });
             // Dependencies are resolved by the OS; limit this change to the test process.
             if (!SetDllDirectory(native)) throw new Exception("SetDllDirectory failed.");
+            if (av1Unavailable)
+            {
+                TestAv1SoftwareUnavailable(Path.GetFullPath(args[1]));
+                Console.WriteLine("PASS: " + _checks + " assertions; missing AV1 software decoder is rejected before packet submission.");
+                return 0;
+            }
+            if (av1)
+            {
+                string media = Path.GetFullPath(args[1]);
+                TestDecoder(media);
+                TestSession(media);
+                TestAv1SoftwareFallback(media);
+                Console.WriteLine("PASS: " + _checks + " assertions; AV1 software pixels, seek, session and hardware selection/fallback policy.");
+                return 0;
+            }
             _checks += ConverterChecks.Run();
             TestHardwareRequirement(Path.GetFullPath(args[1]));
             TestHardwareCpuUpload(Path.GetFullPath(args[1]));
@@ -179,6 +196,125 @@ static class Program
                 Check(high - low > 15, "real hardware-decoded pixels survive CPU conversion");
             }
             Console.WriteLine("Hardware CPU transport: " + decoder.DecoderName + "; " + decoder.DecoderDevice);
+        }
+    }
+    private static void TestAv1SoftwareUnavailable(string media)
+    {
+        foreach (bool requestHardware in new[] { false, true })
+        {
+            int attempts = 0;
+            var options = requestHardware ? new DecoderOptions
+            {
+                HardwareDeviceType = AVHWDeviceType.AV_HWDEVICE_TYPE_D3D11VA,
+                KeepNativeFrames = true,
+                AllowHardwareCpuUpload = false,
+                AcquireHardwareDevice = () => { attempts++; throw new NotSupportedException("injected AV1 device initialization failure"); }
+            } : new DecoderOptions();
+            using (var decoder = new FFmpegVideoDecoder(options))
+            {
+                bool rejected = false;
+                try { decoder.Open(media, CancellationToken.None); }
+                catch (NotSupportedException error)
+                {
+                    rejected = error.Message.Contains("libdav1d") && error.Message.Contains("libaom-av1");
+                }
+                Check(rejected, "missing AV1 software support is identified during open");
+                Check(attempts == (requestHardware ? 1 : 0), "missing software support preserves the initial AV1 hardware attempt");
+            }
+        }
+    }
+
+    private static unsafe void TestAv1SoftwareFallback(string media)
+    {
+        var hardwareCodec = ffmpeg.avcodec_find_decoder_by_name("av1");
+        Check(hardwareCodec != null && hardwareCodec->id == AVCodecID.AV_CODEC_ID_AV1,
+            "native AV1 hardware decoder remains available beside external software decoders");
+        foreach (var backend in new[] { AVHWDeviceType.AV_HWDEVICE_TYPE_D3D11VA,
+            AVHWDeviceType.AV_HWDEVICE_TYPE_D3D12VA, AVHWDeviceType.AV_HWDEVICE_TYPE_VULKAN })
+        {
+            bool advertised = false;
+            for (int index = 0; ; index++)
+            {
+                var configuration = ffmpeg.avcodec_get_hw_config(hardwareCodec, index);
+                if (configuration == null) break;
+                advertised |= configuration->device_type == backend && (configuration->methods & 1) != 0;
+            }
+            Check(advertised, "native AV1 decoder retains " + backend + " support");
+        }
+
+        using (var decoder = new FFmpegVideoDecoder())
+        {
+            decoder.Open(media, CancellationToken.None);
+            CheckAv1SoftwareIdentity(decoder);
+            CheckAv1Pixels(decoder, 0);
+            Console.WriteLine("AV1 software decoder: " + decoder.DecoderName + "; " + decoder.TransferMode);
+        }
+        const string failure = "injected AV1 device initialization failure";
+        foreach (bool strict in new[] { false, true })
+        {
+            int attempts = 0;
+            using (var decoder = new FFmpegVideoDecoder(new DecoderOptions
+            {
+                HardwareDeviceType = AVHWDeviceType.AV_HWDEVICE_TYPE_D3D11VA,
+                KeepNativeFrames = true,
+                // Prevent creation of an independent hardware device after the injected failure.
+                AllowHardwareCpuUpload = false,
+                RequireHardwareDecoding = strict,
+                AcquireHardwareDevice = () => { attempts++; throw new NotSupportedException(failure); }
+            }))
+            {
+                if (strict)
+                {
+                    bool rejected = false;
+                    try { decoder.Open(media, CancellationToken.None); }
+                    catch (NotSupportedException error) { rejected = error.Message.Contains(failure); }
+                    Check(rejected, "strict AV1 mode rejects failed hardware instead of using software");
+                }
+                else
+                {
+                    decoder.Open(media, CancellationToken.None);
+                    CheckAv1SoftwareIdentity(decoder);
+                    Check(decoder.HardwareFallbackReason.Contains(failure), "AV1 fallback retains device failure diagnostics");
+                    CheckAv1Pixels(decoder, 0);
+                    double target = Math.Min(1, decoder.Duration / 2);
+                    decoder.Seek(target);
+                    CheckAv1Pixels(decoder, target);
+                    decoder.Seek(0);
+                    CheckAv1Pixels(decoder, 0);
+                }
+                Check(attempts == 1, "AV1 hardware preference selects the native decoder before software fallback");
+            }
+        }
+    }
+
+    private static void CheckAv1SoftwareIdentity(FFmpegVideoDecoder decoder)
+    {
+        Check(decoder.CodecName == "av1", "AV1 mode requires a real AV1 fixture");
+        Check(decoder.DecoderName == "libdav1d" || decoder.DecoderName == "libaom-av1",
+            "software AV1 uses an external decoder instead of the hardware-only native AV1 decoder");
+        Check(!decoder.HardwareDecoding && decoder.DecoderDevice == "Software" &&
+            decoder.TransferMode == "Software RGBA upload", "AV1 software fallback reports actual decoder and transport");
+    }
+
+    private static void CheckAv1Pixels(FFmpegVideoDecoder decoder, double position)
+    {
+        using (var frame = decoder.ReadFrame())
+        {
+            Check(frame != null && !frame.HardwareDecoded && !frame.IsHardwareFrame,
+                "AV1 software decoder returns a CPU frame");
+            Check(frame.Data != IntPtr.Zero && frame.DataSize == frame.Width * frame.Height * 4,
+                "AV1 software output contains packed RGBA pixels");
+            Check(frame.PresentationTime + frame.Duration >= position - 0.05 && frame.PresentationTime < position + 0.2,
+                "AV1 software frame preserves seek position");
+            var pixels = new byte[frame.DataSize];
+            Marshal.Copy(frame.Data, pixels, 0, pixels.Length);
+            int low = 765, high = 0;
+            for (int offset = 0; offset < pixels.Length; offset += 4)
+            {
+                int brightness = pixels[offset] + pixels[offset + 1] + pixels[offset + 2];
+                low = Math.Min(low, brightness); high = Math.Max(high, brightness);
+            }
+            Check(high - low > 15, "AV1 decoded pixels are nonuniform");
         }
     }
     static unsafe void TestHardwareMappingFailure(string media)

@@ -12,7 +12,8 @@ param(
     [switch] $TestDecoderPreference,
     [switch] $SkipBuild,
     [string] $NativeDirectory = '',
-    [string] $Media = ''
+    [string] $Media = '',
+    [string] $WorkDirectory = ''
 )
 $ErrorActionPreference = 'Stop'
 if ($RequireNativeDecoder) {
@@ -30,7 +31,9 @@ if ($Platform -eq 'Android' -and $Architecture -eq 'arm64' -and $Backend -eq 'Mo
 if ($Platform -eq 'Linux' -and $Backend -ne 'Mono') { throw 'This Windows-hosted Linux Player validation supports Mono; build Linux IL2CPP on a supported native toolchain separately' }
 if ($Platform -eq 'Linux' -and $Graphics -notin @('glcore','vulkan')) { throw 'Linux Player validation requires -Graphics glcore or vulkan' }
 $repo = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '../../..')).Path
-$work = Join-Path $PSScriptRoot '.work'
+$work = if (-not $WorkDirectory) { Join-Path $PSScriptRoot '.work' }
+    elseif ([IO.Path]::IsPathRooted($WorkDirectory)) { [IO.Path]::GetFullPath($WorkDirectory) }
+    else { [IO.Path]::GetFullPath((Join-Path $repo $WorkDirectory)) }
 $platformPrefix = if ($Platform -eq 'Windows') { '' } else { "$Platform-" }
 # Android's Gradle Prefab paths can exceed Ninja's Windows path limit, especially
 # for armeabi-v7a. Keep the isolated checkout name short.

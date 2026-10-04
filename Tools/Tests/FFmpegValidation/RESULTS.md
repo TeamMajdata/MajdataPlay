@@ -1,6 +1,60 @@
 # 本机验证结果
 
-最近验证日期：2026-10-04；此前跨平台矩阵执行于 2026-10-03。Windows / Unity 6000.3.17f1 / AMD Radeon RX 580 2048SP；Linux 使用本机 WSL Ubuntu 24.04；Android 真机为 Mi MIX 2S / Android 15 API 35 / Adreno 630 / Vulkan 1.1.128；Apple 构建测试使用用户提供的 Mac mini M4。当前 Windows/Linux/Android 图形桥接 ABI 为 **4**，Apple 保持 **2**；下方 ABI2/3 的记录为此前版本实测。
+最近验证日期：2026-10-05；此前跨平台矩阵执行于 2026-10-03。Windows / Unity 6000.3.17f1 / AMD Radeon RX 580 2048SP；Linux 使用本机 WSL Ubuntu 24.04；Android 真机为 Mi MIX 2S / Android 15 API 35 / Adreno 630 / Vulkan 1.1.128；Apple 构建测试使用用户提供的 Mac mini M4。当前 Windows/Linux/Android 图形桥接 ABI 为 **4**，Apple 保持 **2**；下方 ABI2/3 的记录为此前版本实测。
+
+## 2026-10-05：AV1 软件解码与硬件失败恢复
+
+旧原生库仅包含依赖硬件的 `av1` 解码器。使用 128×96 / 30 fps / 3 秒的 AV1 样本，软件模式首帧准确复现 `Send video packet: Function not implemented (-40)`。修复后软件模式明确选择 `libdav1d`（兼容 `libaom-av1`），硬件模式保留原生 `av1` / MediaCodec 候选；Windows x64 原生库加入静态 dav1d 1.5.3，FFmpeg 保持固定 9.0.1 ABI。
+
+| 验证 | 结果 |
+| --- | --- |
+| 新代码 + 旧库，`--av1-unavailable` | **41 assertions PASS**；打开阶段明确报告缺少 AV1 软件解码器 |
+| 新库，8-bit / 10-bit AV1，`--av1` | 各 **134 assertions PASS**；真实软件像素、seek/EOF、会话、硬件候选和严格模式 |
+| 新库，原 H.264 托管/真实解码回归 | **412 assertions PASS**；D3D11VA 硬解和 CPU 下载仍通过 |
+| Unity x64 Mono / Vulkan，8-bit / 10-bit AV1，硬件偏好 | 各 **25 assertions PASS**；硬件失败后回退 `libdav1d / Software RGBA upload`，包含实际纹理和完整播放控制 |
+| Unity x64 Mono / D3D11，8-bit AV1，软件偏好 | **27 assertions PASS** |
+| Unity x64 Mono / Vulkan，原 H.264 回归（更新原生库前） | **29 assertions PASS**；保持 GPU 纹理路径 |
+
+托管命令与素材生成方法见 README 的 AV1 专节。证据为 `.work/av1/{baseline-old-libraries,missing-software,av1-8bit-dav1d,av1-10bit-dav1d,h264-dav1d-regression}.log`。
+
+Unity 6000.3.17f1 使用 `run-unity.ps1 -Backend Mono -Architecture x64 -Graphics vulkan -Hardware -WorkDirectory Tools/Tests/FFmpegValidation/.work/av1/unity-h264` 编译本次源码并完成 H.264 验证。随后复制该 Player 至独立 `.work/av1/unity/x64-Mono`，替换已校验的新 DLL 和 AV1 素材，以 `-SkipBuild -Media <AV1素材> -WorkDirectory Tools/Tests/FFmpegValidation/.work/av1/unity` 运行；托管程序集 SHA256 与本次编译产物一致。8-bit 报告保存在该 Player 的 `8bit-evidence/`，10-bit 报告为 `vulkan-hardware.txt` 及对应日志。软件偏好使用 `-Graphics d3d11` 且不带 `-Hardware`。
+
+Vulkan 日志仍可看到 RX 580 两次拒绝 AV1 硬件格式的工作线程错误，随后成功重开 `decoder=libdav1d, device=Software`，没有终止播放错误。这证明完整软件恢复，**不代表 AV1 硬解通过**。以上是 Windows x64 首轮修复验证，其他目标的后续结果如下；未验证用户原始 1080p 视频，也未对主项目做完整导入/场景测试。主项目用户资产未被测试脚本修改。
+
+## 2026-10-05：跨平台 AV1 8-bit / 10-bit 软件解码
+
+同一固定 FFmpeg 9.0.1 ABI 加入静态 dav1d 1.5.3。构建脚本显式选择低位深和高位深实现，并检查 `CONFIG_8BPC` / `CONFIG_16BPC`；10-bit 使用后者。原生验证程序为 `Av1SoftwareSmoke.c`，两段 128×96 / 30 fps / 3 秒测试图分别为 8-bit 和 10-bit AV1；各素材完整解码 90 帧，每个位深各 **3570 checks**，覆盖实际组件位深、软件 context、RGBA 像素变化、PTS、EOF 排空和前后 seek 的帧数/像素复现。
+
+| 目标 | 原生 AV1 8-bit / 10-bit | Unity Player AV1 8-bit / 10-bit |
+| --- | --- | --- |
+| Windows x64 | 各 3570 checks PASS；真实 64 位进程 | 前述 Mono / Vulkan 硬件回退，各 25 assertions PASS |
+| Windows x86 | 各 3570 checks PASS；真实 32 位进程 | IL2CPP / D3D11 软件上传，各 27 assertions PASS |
+| Linux x64 | 各 3570 checks PASS；WSL Ubuntu 24.04 | Mono / OpenGL Core 软件上传，各 27 assertions PASS |
+| Android ARM64 | 各 3570 checks PASS；Mi MIX 2S 真实 64 位进程 | IL2CPP / Vulkan 软件上传，各 29 assertions PASS |
+| Android ARMv7 | 各 3570 checks PASS；同一真机真实 32 位进程 | IL2CPP / Vulkan 软件上传，各 29 assertions PASS |
+| macOS ARM64 | 各 3570 checks PASS；Mac mini M4 | 未验证 |
+| macOS x64 | 构建、AV1 测试链接、架构检查 PASS；无 Rosetta，未运行 | 未验证 |
+| iOS ARM64 | 构建、AV1 测试静态链接、SDK 平台检查 PASS；无实体设备，未运行 | 未验证 |
+| iOS 模拟器 ARM64 | 各 3570 checks PASS；iOS 27 模拟器 | 未验证 |
+| iOS 模拟器 x64 | 构建、AV1 测试静态链接、SDK 平台检查 PASS；未运行 | 未验证 |
+
+所有原生验证以 `-std=c11 -Wall -Wextra -Werror` 编译。iOS 测试只链接 stage 后的七个 FFmpeg 静态库及现有系统依赖，没有单独输入 `libdav1d.a`，验证它已合并进 `libavcodec.a`。正式插件保留原有桥接库和已有 `.meta`。Apple 的额外 H.264 / Metal 原生回归及独立桥接产物测试范围见 [APPLE-RESULTS.md](../../FFmpeg/APPLE-RESULTS.md)。
+
+最终正式库及两个模拟器包共 **10 个目标 / 70 个 FFmpeg 库**，均在构建清单中包含 `libdav1d`。Windows 与 WSL（清除 `LD_LIBRARY_PATH`）分别执行 `python Tools/FFmpeg/verify-artifacts.py` / `python3 Tools/FFmpeg/verify-artifacts.py` 全部 PASS，包含 SHA256、架构、Apple SDK 平台、Android 16 KiB 对齐、运行依赖/许可和本机 ABI / 解码器导出。全部 **129 个已有 `.meta`** 与更新前逐字节相同；新增 dav1d 许可和 `.meta` 成对交付，许可固定 LF，避免 Git 换行转换影响清单哈希。
+
+Unity 使用固定 **6000.3.17f1** 和 High managed stripping。Win32 IL2CPP 继续使用现有 Debug C++ 设置；Linux 在 WSLg 的 llvmpipe 上显示真实纹理并检查播放控制，不能外推为物理 GPU 测试。10-bit 软件帧转换到现有 RGBA32 上传路径，这些结果不表示 HDR 或 10-bit 显示输出已支持。
+
+Windows x86、Linux 使用以下隔离验证命令构建并运行 8-bit；保存证据后，将 Player 内 `StreamingAssets/test.mp4` 换成 10-bit 样本，复用同一 Player（Windows 加 `-SkipBuild`）运行第二遍：
+
+```powershell
+./Tools/Tests/FFmpegValidation/run-unity.ps1 -Backend IL2CPP -Architecture x86 -Graphics d3d11 -Media Tools/Tests/FFmpegValidation/.work/av1/test-av1.mp4 -WorkDirectory Tools/Tests/FFmpegValidation/.work/av1-all/unity
+./Tools/Tests/FFmpegValidation/run-unity.ps1 -Platform Linux -Backend Mono -Architecture x64 -Graphics glcore -Media Tools/Tests/FFmpegValidation/.work/av1/test-av1.mp4 -WorkDirectory Tools/Tests/FFmpegValidation/.work/av1-all/unity
+wsl -d Ubuntu-24.04 -- bash Tools/Tests/FFmpegValidation/run-linux-player.sh glcore Tools/Tests/FFmpegValidation/.work/av1-all/unity/Linux-x64-Mono
+```
+
+Android 每种 ABI 编译一个 APK，以 `run-android-player.ps1 -Av1Software -Media <素材>` 在测试应用目录上传素材并用 Intent 选择 AV1 软件检查；第二个位深加 `-SkipInstall` 复用同一个 APK。测试明确要求 `CodecName=av1`、`DecoderName=libdav1d`、`DecoderType=Software` 和 `Software RGBA upload`，并保留实际纹理 PNG。默认硬件压力测试入口保持原行为；软件模式允许 GLES3，记录的本机实测使用 Vulkan。
+
+证据：`.work/av1-all/{win32,win64}/native-av1.log`、`.work/av1-all/unity/{x86-IL2CPP,Linux-x64-Mono}/`（`8bit-evidence/` 保留第一轮）、`.work/av1-all/android-*-native/{native-av1.log,unity-8bit.txt,unity-10bit.txt}` 及旁边的诊断/纹理图、`Tools/FFmpeg/.build/av1-all-evidence/`、`Tools/FFmpeg/.build/av1-all-ready/Apple/evidence/`。未对主项目场景、用户原始视频、Apple Unity Player 或全部编码参数组合进行验证。
 
 ## 实时视频码率
 

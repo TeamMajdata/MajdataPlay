@@ -16,6 +16,38 @@ dotnet run --project Tools/Tests/FFmpegValidation/FFmpegValidation.csproj -- `
 
 原生后端回退测试检查 H.264 的 D3D12VA/Vulkan 硬件配置，并注入首选设备获取失败，验证严格 GPU 模式和允许 CPU 上传模式均可尝试下一硬件后端、得到正确的实际设备身份并继续 seek。此测试验证回退链，不代表已在对应原生后端完成视频解码。
 
+### AV1 软件解码与硬件不可用回退
+
+使用独立 FFmpeg 命令行生成 3 秒的 AV1 测试素材，再用项目的真实原生库运行专用验证；素材和日志留在忽略的 `.work/`：
+
+```powershell
+New-Item -ItemType Directory -Path Tools/Tests/FFmpegValidation/.work/av1 -Force | Out-Null
+ffmpeg -hide_banner -y -f lavfi -i 'testsrc2=size=128x96:rate=30:duration=3' `
+  -an -c:v libaom-av1 -cpu-used 8 -crf 40 -g 30 -pix_fmt yuv420p `
+  Tools/Tests/FFmpegValidation/.work/av1/test-av1.mp4
+dotnet run --project Tools/Tests/FFmpegValidation/FFmpegValidation.csproj -- `
+  Assets/Plugins/MajdataPlay/FFmpeg/Native/Windows/x86_64 `
+  Tools/Tests/FFmpegValidation/.work/av1/test-av1.mp4 --av1
+```
+
+生成素材的命令行工具需要 `libaom-av1` 编码器；验证加载的项目 DLL 需要 `libdav1d` 或 `libaom-av1` 软件解码器。仅有名为 `av1` 的原生解码器不能提供 CPU 软件解码。也可替换为大于 2 秒、可 seek 且画面非均匀的 AV1 素材。
+
+验证高位深解码时，将生成命令的 `-pix_fmt` 改为 `yuv420p10le`，输出另存为 `test-av1-10bit.mp4`，再对该文件运行相同 `--av1` 命令；8-bit 和 10-bit 均需通过。
+
+`--av1` 跳过要求真实 H.264 硬解的测试，覆盖实际 AV1 软件解码器身份、非均匀 RGBA 像素、PTS、前后及末尾 seek、EOF、取消、有界会话和快速关闭。另注入 D3D11VA 设备获取失败，检查允许回退时重新选择软件解码器并继续解码/seek，严格 GPU 模式则拒绝软件回退。测试检查原生 `av1` 候选仍暴露 D3D11VA/D3D12VA/Vulkan 配置，并检查设备获取回调确实被调用，防止默认解码器改为 `libdav1d` 后丢失硬件候选。
+
+此专用模式不需要支持 AV1 的 GPU；通过不代表真实 AV1 硬件解码或 Unity 纹理显示已验证。Unity 显示可继续用 `run-unity.ps1 -Media <AV1素材>` 验证软件模式，以及 `-Hardware` 验证播放器的实际硬件尝试/软件回退；必须检查报告中的实际解码器和传输方式。
+
+可用独立工作目录避免与其他隔离 Unity 验证占用同一工程；`-WorkDirectory` 接受绝对路径或相对仓库根目录的路径，省略时仍使用原 `.work/`：
+
+```powershell
+./Tools/Tests/FFmpegValidation/run-unity.ps1 -Backend Mono -Architecture x64 -Graphics vulkan `
+  -Hardware -Media Tools/Tests/FFmpegValidation/.work/av1/test-av1.mp4 `
+  -WorkDirectory Tools/Tests/FFmpegValidation/.work/av1/unity
+```
+
+保留旧版未含 AV1 软件库的 DLL 时，可将第三个参数换成 `--av1-unavailable`，检查直接软件模式及硬件设备初始化失败后，都在 `Open` 阶段以包含 `libdav1d`/`libaom-av1` 的明确错误拒绝。此模式只验缺失能力时的诊断，不代表 AV1 播放通过；正常 `--av1` 模式始终要求真实解码成功。
+
 ## Inspector 码率
 
 `Bitrate (current)` / `CurrentBitRate` 根据最近约 1 秒媒体时间内的视频压缩包字节数估算，单位为 bit/s（界面自动换算 bps/kbps/Mbps）。数据随实际显示帧更新，后台预读不提前改变读数，倍速不乘码率，暂停保留当前值，seek/关闭清零。`Bitrate (average)` / `BitRate` 保留 FFmpeg 报告的视频流平均码率；未知值显示 `Unknown`。
@@ -78,6 +110,19 @@ Android 分支构建 APK，并检查七个 FFmpeg `.so` 和 GPU 桥接的存在�
 
 测试 APK 自动提取编码后的 StreamingAssets 文件，先开启严格硬件模式，播放至少 300 帧并连续 seek 10 次；随后关闭严格模式，验证软件/硬件偏好、MediaCodec ByteBuffer 的 CPU 上传、共享失败恢复与日志，最后重新打开原生 GPU 路径。素材应长于 12 秒。测试期间请保持应用未被冻结、屏幕解锁且在前台。`-SkipInstall` 可直接复用已安装的同一 APK。脚本仅安装/更新专用包 `net.majdata.ffmpegplayer.validation`，结果保存在 APK 旁的 `vulkan-hardware-device.txt`。测试中的 `ReadPixels` 仅验证输出；播放器的 GPU 共享路径不调用它。
 
+Android AV1 软件验证可用同一 APK 先后运行 8-bit 和 10-bit 素材，无需为换素材重建；每种 ABI 仍需分别构建/安装。以下可选入口通过 Intent extras 关闭硬件和长时间压力模式，复用普通播放/暂停/seek/循环/纹理像素检查，并额外断言 `av1`、`libdav1d`、软件解码与 RGBA 上传。默认硬件验证流程保持不变。
+
+```powershell
+./Tools/Tests/FFmpegValidation/run-unity.ps1 -Platform Android -Backend IL2CPP -Architecture arm64 -Graphics vulkan
+./Tools/Tests/FFmpegValidation/run-android-player.ps1 -Apk Tools/Tests/FFmpegValidation/.work/Android-arm64-IL2CPP/VideoSmoke.apk `
+  -Av1Software -Media Tools/Tests/FFmpegValidation/.work/av1/test-av1.mp4
+# 保存上一轮证据后复用同一安装：仅更换测试应用自身 files 目录里的素材。
+./Tools/Tests/FFmpegValidation/run-android-player.ps1 -Apk Tools/Tests/FFmpegValidation/.work/Android-arm64-IL2CPP/VideoSmoke.apk `
+  -SkipInstall -Av1Software -Media Tools/Tests/FFmpegValidation/.work/av1/test-av1-10bit.mp4
+```
+
+将 `arm64` 改为 `armv7` 可验证另一个 ABI。报告、真实 Diagnostics 日志及纹理读回图保存在 APK 旁的 `av1-software-device.txt`、`.diagnostics.log`、`.png`；下一次运行会覆盖，需按位深另存证据。报告记录实际图形 API，软件模式允许 Vulkan 或 OpenGLES3，不能把 OpenGLES3 成功记为 Vulkan 验证。原生 `Av1SoftwareSmoke.c` 检查实际像素格式位深，此 Unity 检查额外覆盖 IL2CPP 绑定、生命周期与真实纹理内容；两层结果应分别记录。
+
 Linux 分支从 Windows Editor 构建独立 Linux x64 Mono Player，需要安装 Linux Build Support。随后在 Linux 桌面或 WSLg 中运行：
 
 ```bash
@@ -92,7 +137,31 @@ Win32 IL2CPP 使用 Debug C++ 配置，原因是项目已有 FFmpeg.AutoGen 验�
 
 本机执行结果另见 [RESULTS.md](RESULTS.md)。未执行的目标必须保留“未验证”，不能从托管编译或原生库构建成功推断设备播放成功。
 
-## Linux 原生库加载与真实解码
+## 原生库加载与真实解码
+
+### 跨平台 AV1 8-bit / 10-bit 软件解码
+
+[Av1SoftwareSmoke.c](Av1SoftwareSmoke.c) 是不依赖 Unity 或 GPU 的 C11 验证程序，可用各目标编译器链接固定 FFmpeg 9.0.1 的头文件与库。它一次接收两个素材，依次要求实际解码为 8-bit 和 10-bit；可复用上方生成的 `test-av1.mp4`、`test-av1-10bit.mp4`。素材需可 seek、长于 2 秒且每帧画面非均匀。
+
+```bash
+# Linux 示例：prefix 必须来自当前 Tools/FFmpeg 构建，不能使用系统 FFmpeg。
+ffmpeg_prefix=/absolute/path/to/pinned/ffmpeg/prefix
+cc -std=c11 -Wall -Wextra -Werror \
+  -I"$ffmpeg_prefix/include" Tools/Tests/FFmpegValidation/Av1SoftwareSmoke.c \
+  -L"$ffmpeg_prefix/lib" -Wl,-rpath,"$ffmpeg_prefix/lib" \
+  -lavformat -lavcodec -lswscale -lavutil -lm -o /tmp/av1-software-smoke
+/tmp/av1-software-smoke \
+  Tools/Tests/FFmpegValidation/.work/av1/test-av1.mp4 \
+  Tools/Tests/FFmpegValidation/.work/av1/test-av1-10bit.mp4
+```
+
+程序显式打开 `libdav1d`，检查编译头文件与加载库的版本一致、真实 AV1 帧的像素格式组件位深、无硬件 context、RGBA 像素变化和单调 PTS。它读完整视频并排空延迟帧、确认 EOF 稳定，向前 seek 到视频中点，再回零解码，要求完整帧数、PTS 范围和 RGBA 校验和重现。每个位深独立打印 `PASS`、帧数、实际 seek 时间、像素范围、校验和及检查数；任一素材失败退出码为 1，参数错误为 2。
+
+Windows 使用对应 x86/x64 MinGW 编译器和 import libraries，运行时选择同架构 DLL 目录；macOS 使用对应架构 clang 和 dylib。iOS Simulator 可将程序链接到对应 simulator 的静态库后通过 `simctl spawn` 运行，`libavcodec.a` 须为 stage 后已合并 dav1d 的归档，并附加 FFmpeg 所需的 Apple frameworks/system libraries。iOS 设备需要签名的可运行测试载体，不能把 simulator 成功记作设备成功。
+
+Android 使用对应 ARMv7/ARM64 NDK 编译器，保持与原生库相同 API/ABI；将测试程序、两个素材及同架构 `.so` 推到独立 `/data/local/tmp/` 测试目录，通过该目录的 `LD_LIBRARY_PATH` 运行，无需安装或替换正式应用。该检查验证原生库的软件解码与像素转换，不验证 Unity 生命周期、托管 ABI、纹理显示或硬件解码；动态库搜索路径的独立验证仍使用下面的 Linux 测试。
+
+### Linux 加载路径检查
 
 ```bash
 bash Tools/Tests/FFmpegValidation/run-linux.sh

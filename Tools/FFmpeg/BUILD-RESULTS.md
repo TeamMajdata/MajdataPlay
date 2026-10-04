@@ -1,5 +1,32 @@
 # FFmpeg 构建记录
 
+## 2026-10-05：Windows x86、Linux 和 Android 的 AV1 8/10-bit 软件解码
+
+在已交付的 Windows x64 基础上，使用 WSL Ubuntu 24.04 完成另外四个非 Apple 目标的 28 个 FFmpeg 库。仍使用固定 FFmpeg `n9.0.1` commit `bf1b838f2ab88b4f8fd83443325c782ea0e0f7fa`，构建前核对 143 个绑定公开头文件；没有更换绑定 ABI、GPU 桥接或既有硬件后端。Apple 本次补全结果见 [APPLE-RESULTS.md](APPLE-RESULTS.md)。
+
+| 目标 | 实际工具链与架构 | 本次构建与二进制检查 |
+| --- | --- | --- |
+| Windows x86 | MinGW-w64 GCC 13-win32、NASM，固定 D3D12/Vulkan 头文件 | 7 DLL：PE i386、SHA256；D3D12VA / Vulkan 的 H.264、HEVC、AV1、VP9 配置门禁通过 |
+| Linux x64 | GCC、NASM，隔离 libva/libdrm 开发依赖 | 7 SO：ELF64 x86-64、SHA256、`$ORIGIN`；实际加载全部 ABI、`libdav1d` 与四种 Vulkan 解码配置；保留 VAAPI |
+| Android ARM64 | NDK r27c / Clang、API 23、AArch64 | 7 SO：ELF64 AArch64、SHA256、全部 PT_LOAD 至少 16 KiB；保留 MediaCodec / Vulkan |
+| Android ARMv7 | 同一 NDK，armv7-a / softfp / NEON、API 23 | 7 SO：ELF32 ARM、EABI5 soft-float 调用约定、SHA256、全部 PT_LOAD 至少 16 KiB；保留 MediaCodec / Vulkan |
+
+四个目标均从已校验 SHA256 的 dav1d 1.5.3 源码构建 PIC 静态库，并链接进 avcodec。逐一保存并检查 dav1d 的实际 `config.h`：`CONFIG_8BPC=1` 和 `CONFIG_16BPC=1`，后者包含 10-bit 路径；FFmpeg 的 `CONFIG_LIBDAV1D_DECODER=1` 也通过检查。x86/x64 保留 NASM，Android 保留 ARM 汇编优化。逐库对比原有 PE imports / ELF NEEDED，**28 个库均没有新增动态依赖**，不需要另行部署 dav1d 动态库。Linux 的三个随附运行时及其许可证仍由原有隔离依赖缓存提供。
+
+实际构建使用 `build.py --targets win-x86,linux-x64,android-arm64,android-armv7 --jobs 16 --without-bridge --require-all` 的隔离包装器，保留既有 ABI 4 桥接。FFmpeg 源码在 WSL 本地 `/tmp/majdata-av1-all/source` 检出同一固定 commit，避免 NTFS 上的源码状态差异；构建中间文件也置于该 Linux 缓存。每个目标完成后立即将产物写入 `.build/av1-all-ready`，并将安装前缀、配置、dav1d 宏、完整日志及 provenance 持久保存到 `.build/av1-all-evidence`。最终 `build-summary.json` 四项均为 `built`，进程退出码 0。常规重建仍按 [README.md](README.md) 设置 WSL 的隔离 VAAPI 环境及 NDK，再运行同样的目标参数。
+
+四个目标均已使用 `Av1SoftwareSmoke.c` 严格警告编译并运行：Windows x86、WSL Linux x64，以及 Mi MIX 2S 真机的 Android ARM64 / ARMv7，AV1 8-bit 和 10-bit 各通过 3570 项检查、90 帧，包含明确选择 `libdav1d`、实际解码位深、无硬件上下文、RGBA 像素转换、PTS、前后 seek 后像素复现及完整 EOF。Linux 在不设置 `LD_LIBRARY_PATH` 的条件下直接加载本次库并通过。Unity Mono/IL2CPP Player 的独立运行结果见 [播放器验证记录](../Tests/FFmpegValidation/RESULTS.md)，不能仅由编译与二进制校验推断其运行结果。原始 1080p 视频、其他设备和 GPU 驱动能力不由这些短测试样本覆盖。
+
+## 2026-10-05：AV1 软件解码首轮（Windows x64）
+
+Windows x64 使用 WSL Ubuntu 24.04、MinGW-w64 GCC 13-win32、NASM 及既有固定 D3D12/Vulkan 头文件重新编译七个 FFmpeg 库。dav1d 1.5.3 官方源码归档和 Meson 1.9.1 wheel 均经过 `dependencies.lock.json` 的 SHA256 校验；dav1d 以 PIC 静态库构建，FFmpeg 配置显式启用 `--enable-libdav1d`。FFmpeg commit、143 个绑定头文件和七个库的 ABI 保持原版本。
+
+隔离产物先输出到忽略的 `.build/av1-ready/Windows/x86_64`，未在构建期间覆盖 Unity 正在使用的插件。Windows 直接加载验证通过全部七个库的版本函数、PE x64/哈希/importer 检查，以及 `avcodec_find_decoder_by_name("libdav1d")`。H.264 / HEVC / AV1 / VP9 的 D3D12VA 和 Vulkan Video 硬件配置仍全部存在。逐库 PE import 与旧库一致，没有新增 dav1d、libgcc 或 libwinpthread 动态依赖；原样复制的既有桥接加载后仍为 ABI 4。新 `avcodec-63.dll` SHA256 为 `a352ab150df09971835e10192aae80959d994a61ded9610dd9c12818fd1f7c2d`。
+
+本节记录的是当日首轮 Windows x64 修复，当时实际原生构建和加载验证仅覆盖 Windows x64，其他目标尚未运行。这一历史范围已由上方后续四目标记录及 APPLE-RESULTS.md 中的 Apple 补全记录扩展；实体 iOS 设备播放仍未验证。Unity/Player 播放、seek、循环和回退结果另见 `Tools/Tests/FFmpegValidation/RESULTS.md`，不能由本节的 ABI/导出检查推断通过。
+
+通过真实解码与隔离 Unity Player 验证后，七个 DLL、清单及许可证已应用到正式 Windows x64 插件目录；已有 `.meta`/GUID 和 GPU 桥接保持不变，新增 dav1d 许可证与 `.meta` 成对交付。旧文件备份在忽略的 `.build/av1-backup-20261004-170403`。应用后执行 `python Tools/FFmpeg/verify-artifacts.py`，全部 70 个既有/更新 FFmpeg 库、许可证和桥接检查通过，其中 Windows x64 实际加载并确认 `libdav1d`；其他平台的通过仅指原有产物完整性，不表示已加入或验证 AV1 软件解码。
+
 ## 2026-10-04：原生 D3D12VA / Vulkan Video
 
 重新编译并交付了 Windows x64/x86、Linux x64、Android ARM64/ARMv7 的全部 35 个 FFmpeg 库，输出目录已跟随项目移动到 `Assets/Plugins/MajdataPlay/FFmpeg/Native`，已有插件 GUID 保留。Apple 的 35 个 device/macOS/simulator 库保持此前产物。

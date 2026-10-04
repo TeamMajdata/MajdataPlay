@@ -55,20 +55,24 @@ public sealed class FFmpegPlayerSmoke : MonoBehaviour
         _player.PreferNativeTextures = Argument("-videoHardwareCpuUpload") != "true";
         _player.FrameReady += (_, __) => _frames++;
         _player.ErrorReceived += (_, error) => _failure = new Exception(error);
-        var path = Path.Combine(Application.streamingAssetsPath, "test.mp4");
+        var externalMedia = Argument("-videoMedia");
+        var path = string.IsNullOrEmpty(externalMedia) ? Path.Combine(Application.streamingAssetsPath, "test.mp4") : externalMedia;
 #if UNITY_ANDROID && !UNITY_EDITOR
         // FFmpeg cannot open an APK's jar: URL. Extract the encoded fixture once;
         // this is input I/O, not a decoded video-pixel readback or GPU upload.
-        string extracted = Path.Combine(Application.temporaryCachePath, "ffmpeg-smoke.mp4");
-        using (var request = UnityEngine.Networking.UnityWebRequest.Get(path))
+        if (string.IsNullOrEmpty(externalMedia))
         {
-            request.downloadHandler = new UnityEngine.Networking.DownloadHandlerFile(extracted);
-            request.timeout = 30;
-            yield return request.SendWebRequest();
-            if (request.result != UnityEngine.Networking.UnityWebRequest.Result.Success)
-                throw new IOException("Cannot extract the Android video fixture: " + request.error);
+            string extracted = Path.Combine(Application.temporaryCachePath, "ffmpeg-smoke.mp4");
+            using (var request = UnityEngine.Networking.UnityWebRequest.Get(path))
+            {
+                request.downloadHandler = new UnityEngine.Networking.DownloadHandlerFile(extracted);
+                request.timeout = 30;
+                yield return request.SendWebRequest();
+                if (request.result != UnityEngine.Networking.UnityWebRequest.Result.Success)
+                    throw new IOException("Cannot extract the Android video fixture: " + request.error);
+            }
+            path = extracted;
         }
-        path = extracted;
 #endif
         var prepare = _player.PreloadAsync(path);
         var start = UnityEngine.Time.realtimeSinceStartup;
@@ -418,6 +422,10 @@ public sealed class FFmpegPlayerSmoke : MonoBehaviour
     }
     void CheckDecoderIdentity()
     {
+        if (Argument("-videoAv1Software") == "true")
+            Check(_player.CodecName == "av1" && _player.DecoderName == "libdav1d" &&
+                _player.DecoderType == VideoDecoderType.Software && _player.TransferMode == "Software RGBA upload",
+                "AV1 fixture uses libdav1d software decoding and CPU texture upload");
         var native = Argument("-videoNativeDecoder");
         if (native == "d3d12" || native == "vulkan")
         {
@@ -484,6 +492,15 @@ public sealed class FFmpegPlayerSmoke : MonoBehaviour
         var args = Environment.GetCommandLineArgs();
         for (int i = 0; i + 1 < args.Length; i++) if (args[i] == name) return args[i + 1];
 #if UNITY_ANDROID && !UNITY_EDITOR
+        // The test runner can select software validation and swap fixtures without
+        // rebuilding the APK. Missing extras preserve the original hardware stress test.
+        using var unity = new AndroidJavaClass("com.unity3d.player.UnityPlayer");
+        using var activity = unity.GetStatic<AndroidJavaObject>("currentActivity");
+        using var intent = activity.Call<AndroidJavaObject>("getIntent");
+        var extra = intent.Call<string>("getStringExtra", name.TrimStart('-'));
+        if (extra != null) return extra;
+        if (intent.Call<string>("getStringExtra", "videoAv1Software") == "true" &&
+            (name == "-videoHardware" || name == "-videoRequireHardware" || name == "-videoStress" || name == "-videoTestDecoderPreference")) return "false";
         if (name == "-videoHardware" || name == "-videoRequireHardware" || name == "-videoStress" || name == "-videoTestDecoderPreference") return "true";
 #endif
         return null;

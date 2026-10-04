@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fetch pinned build-only GPU headers and cross compilers without system installation."""
+"""Fetch pinned native dependencies and build tools without system installation."""
 from __future__ import annotations
 import hashlib
 import json
@@ -8,6 +8,7 @@ from pathlib import Path
 import platform
 import shutil
 import subprocess
+import sys
 import tarfile
 import urllib.request
 import zipfile
@@ -15,6 +16,74 @@ import zipfile
 HERE = Path(__file__).resolve().parent
 LOCK = json.loads((HERE / 'dependencies.lock.json').read_text())
 SHARED = HERE / '.build' / 'toolchains'
+
+
+def download_verified(spec):
+    downloads = HERE / '.build' / 'downloads'
+    downloads.mkdir(parents=True, exist_ok=True)
+    archive = downloads / spec['url'].rsplit('/', 1)[-1]
+    if not archive.is_file():
+        temporary = archive.with_suffix(archive.suffix + '.download')
+        print('DOWNLOAD ' + spec['url'], flush=True)
+        with urllib.request.urlopen(spec['url'], timeout=60) as response, temporary.open('wb') as output:
+            shutil.copyfileobj(response, output)
+        if hashlib.sha256(temporary.read_bytes()).hexdigest() != spec['sha256']:
+            raise RuntimeError('Downloaded dependency SHA256 mismatch: ' + str(temporary))
+        temporary.replace(archive)
+    if hashlib.sha256(archive.read_bytes()).hexdigest() != spec['sha256']:
+        raise RuntimeError('Dependency archive SHA256 mismatch: ' + str(archive))
+    return archive
+
+
+def dav1d_source():
+    return SHARED / ('dav1d-' + LOCK['dav1d']['version'])
+
+
+def meson_command():
+    launcher = SHARED / ('meson-' + LOCK['meson']['version']) / 'meson.py'
+    if not launcher.is_file():
+        raise RuntimeError('Pinned Meson is missing; run a non-probe build to download it')
+    return [sys.executable, str(launcher)]
+
+
+def ensure_dav1d():
+    archive = download_verified(LOCK['dav1d'])
+    root = dav1d_source()
+    SHARED.mkdir(parents=True, exist_ok=True)
+    with tarfile.open(archive) as package:
+        members = package.getmembers()
+        for item in members:
+            path = (SHARED / item.name).resolve()
+            if (path != root.resolve() and root.resolve() not in path.parents) or not (item.isdir() or item.isfile()):
+                raise RuntimeError('Unexpected dav1d archive member: ' + item.name)
+        if not root.exists():
+            package.extractall(SHARED)
+        # Recheck extracted source against the authenticated archive; never silently build edits.
+        for item in members:
+            if item.isfile():
+                path = SHARED / item.name
+                if not path.is_file() or path.read_bytes() != package.extractfile(item).read():
+                    raise RuntimeError('Pinned dav1d source was modified: ' + str(path))
+
+
+def ensure_meson():
+    archive = download_verified(LOCK['meson'])
+    root = SHARED / ('meson-' + LOCK['meson']['version'])
+    root.mkdir(parents=True, exist_ok=True)
+    with zipfile.ZipFile(archive) as package:
+        for item in package.infolist():
+            path = (root / item.filename).resolve()
+            if root.resolve() not in path.parents:
+                raise RuntimeError('Unexpected Meson archive member: ' + item.filename)
+            if not item.is_dir():
+                contents = package.read(item)
+                if path.is_file() and path.read_bytes() != contents:
+                    raise RuntimeError('Pinned Meson source was modified: ' + str(path))
+                if not path.exists():
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    path.write_bytes(contents)
+    (root / 'meson.py').write_text('from mesonbuild.mesonmain import main\n'
+                                 'if __name__ == "__main__":\n    raise SystemExit(main())\n')
 
 
 def vulkan_headers():
@@ -111,6 +180,8 @@ def ensure_llvm(cache):
 
 
 def prepare(targets, cache):
+    ensure_dav1d()
+    ensure_meson()
     if any(target.startswith(('win-', 'linux-', 'android-')) for target in targets):
         ensure_vulkan_headers()
     if any(target.startswith('win-') for target in targets):
