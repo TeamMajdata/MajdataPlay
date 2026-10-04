@@ -3,9 +3,6 @@ using Cysharp.Threading.Tasks;
 using HidSharp.Platform.Windows;
 using HidSharp.Platform.MacOS;
 #endif
-#if UNITY_STANDALONE_WIN
-using LibVLCSharp;
-#endif
 using MajdataPlay.Buffers;
 using MajdataPlay.Collections;
 using MajdataPlay.Extensions;
@@ -87,9 +84,7 @@ namespace MajdataPlay
 #else
         public static bool IsEditor { get; } = false;
 #endif
-#if UNITY_STANDALONE_WIN
-        public static LibVLC VLCLibrary { get; private set; }
-#endif
+
 #if UNITY_ANDROID // Android Only (Sdk Version Declare)
         public static int AndroidSdkVersion
         {
@@ -692,15 +687,7 @@ namespace MajdataPlay
         }
         static void InitOthers()
         {            
-#if UNITY_STANDALONE_WIN
-            MajDebug.LogInfo("[VLC] init");
-            if (VLCLibrary != null)
-            {
-                VLCLibrary.Dispose();
-            }
-            Core.Initialize(Path.Combine(Application.dataPath, "Plugins")); //Load VLC dlls
-            VLCLibrary = new LibVLC(enableDebugLogs: true, "--no-audio"); // we dont need it to produce sound here
-#endif
+
         }
 #endregion
 
@@ -728,17 +715,12 @@ namespace MajdataPlay
             GameManager.OnSave -= OnSave;
             SharedHttpClient.CancelPendingRequests();
             SharedHttpClient.Dispose();
-#if UNITY_STANDALONE_WIN
-            if( VLCLibrary != null )
-            {
-                VLCLibrary.Dispose();
-            }
-#endif
+
             _globalCTS.Cancel();
 #if UNITY_STANDALONE_WIN
-                WinHidManager.QuitThisBs();
+            WinHidManager.QuitThisBs();
 #elif UNITY_STANDALONE_OSX
-                MacHidManager.QuitThisBs();
+            MacHidManager.QuitThisBs();
 #endif
         }
         static void OnSave(object? sender, EventArgs? e)
