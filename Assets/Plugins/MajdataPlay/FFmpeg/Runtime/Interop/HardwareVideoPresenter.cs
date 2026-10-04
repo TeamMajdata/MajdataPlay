@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Runtime.InteropServices;
+using MajdataPlay.Diagnostics;
 using MajdataPlay.FFmpeg.Internal;
 using UnityEngine;
 using UnityEngine.Rendering;
@@ -30,6 +31,8 @@ namespace MajdataPlay.FFmpeg.Interop
         readonly int _backend;
         readonly int _capabilities;
         IntPtr _nativeD3D12;
+        IntPtr _copyTargetNative;
+        readonly int _eventBase;
         RenderTexture _output, _copyTarget;
         Texture2D _nativeOutput;
         Texture2D _luma, _chroma;
@@ -146,10 +149,18 @@ namespace MajdataPlay.FFmpeg.Interop
                 throw new NotSupportedException("The FFmpeg video conversion shader is unavailable.");
             _material = new Material(shader) { hideFlags = HideFlags.HideAndDontSave };
             _callback = Native.ffu_render_callback();
+            // The bridge reserves one contiguous event range for its lifetime.
+            _eventBase = Native.ffu_event_id(0);
             _commands = new CommandBuffer { name = "FFmpeg video surface conversion" };
         }
 
-        void Event(int id, IntPtr data) => _commands.IssuePluginEventAndData(_callback, Native.ffu_event_id(id), data);
+        void Event(int id, IntPtr data) => _commands.IssuePluginEventAndData(_callback, _eventBase + id, data);
+
+        void SubmitCommands()
+        {
+            using var profile = UnityProfiler.Create("FFmpeg.Interop.SubmitCommands");
+            Graphics.ExecuteCommandBuffer(_commands);
+        }
 
         public void CheckErrors()
         {
@@ -186,6 +197,7 @@ namespace MajdataPlay.FFmpeg.Interop
 
         public bool TryPresent(DecodedVideoFrame frame, out Texture texture)
         {
+            using var profile = UnityProfiler.Create("FFmpeg.Interop.TryPresent");
             texture = null;
             if (_disposed || !frame.IsHardwareFrame) return false;
             int rotation = ((int)Math.Round(frame.RotationDegrees / 90.0) % 4 + 4) % 4;
@@ -203,14 +215,19 @@ namespace MajdataPlay.FFmpeg.Interop
                 if (_nativeD3D12 == IntPtr.Zero) return false;
                 CheckErrors();
                 EnsureCopyTarget(frame.Width, frame.Height);
-                IntPtr packet = Native.ffu_d3d12va_prepare(_nativeD3D12, frame.NativeFrame, _copyTarget.GetNativeTexturePtr());
+                IntPtr packet;
+                using (UnityProfiler.Create("FFmpeg.Interop.PrepareD3D12VA"))
+                    packet = Native.ffu_d3d12va_prepare(_nativeD3D12, frame.NativeFrame, _copyTargetNative);
                 if (packet == IntPtr.Zero) { CheckErrors(); return false; }
                 try
                 {
-                    Event(PrepareNativeD3D12, packet);
-                    Event(SubmitNativeD3D12, packet);
-                    _commands.Blit(_copyTarget, _output, _material, 1);
-                    Graphics.ExecuteCommandBuffer(_commands);
+                    using (UnityProfiler.Create("FFmpeg.Interop.RecordCommands"))
+                    {
+                        Event(PrepareNativeD3D12, packet);
+                        Event(SubmitNativeD3D12, packet);
+                        _commands.Blit(_copyTarget, _output, _material, 1);
+                    }
+                    SubmitCommands();
                     packet = IntPtr.Zero;
                 }
                 finally { if (packet != IntPtr.Zero) Native.ffu_d3d12va_cancel(packet); }
@@ -224,21 +241,25 @@ namespace MajdataPlay.FFmpeg.Interop
                 CheckErrors();
                 bool d3d12 = _backend == D3D12Capability;
                 if (!EnsureWindowsOutput(frame.Width, frame.Height)) return false;
-                IntPtr packet = d3d12
-                    ? Native.ffu_d3d12_prepare(_d3d11, frame.NativeFrame, _copyTarget.GetNativeTexturePtr())
-                    : _backend == D3D11Capability
-                        ? Native.ffu_d3d11_prepare(_d3d11, frame.NativeFrame, _d3d11Output)
-                        : Native.ffu_shared_prepare(_d3d11, frame.NativeFrame, _d3d11Output, _sharedSurface,
-                            _copyTarget == null ? IntPtr.Zero : _copyTarget.GetNativeTexturePtr());
+                IntPtr packet;
+                using (UnityProfiler.Create("FFmpeg.Interop.PrepareD3D11"))
+                    packet = d3d12
+                        ? Native.ffu_d3d12_prepare(_d3d11, frame.NativeFrame, _copyTargetNative)
+                        : _backend == D3D11Capability
+                            ? Native.ffu_d3d11_prepare(_d3d11, frame.NativeFrame, _d3d11Output)
+                            : Native.ffu_shared_prepare(_d3d11, frame.NativeFrame, _d3d11Output, _sharedSurface, _copyTargetNative);
                 if (packet == IntPtr.Zero) return false;
                 try
                 {
-                    if (d3d12) Event(PrepareD3D12, packet);
-                    Event(d3d12 ? SubmitD3D12 : _backend == WglCapability ? SubmitWgl :
-                        _backend == WindowsVulkanCapability ? SubmitVulkan : SubmitD3D11, packet);
-                    _commands.Blit(_copyTarget != null ? (Texture)_copyTarget : _nativeOutput, _output, _material, 1);
-                    if (_backend == WglCapability) Event(CompleteWgl, _sharedSurface);
-                    Graphics.ExecuteCommandBuffer(_commands);
+                    using (UnityProfiler.Create("FFmpeg.Interop.RecordCommands"))
+                    {
+                        if (d3d12) Event(PrepareD3D12, packet);
+                        Event(d3d12 ? SubmitD3D12 : _backend == WglCapability ? SubmitWgl :
+                            _backend == WindowsVulkanCapability ? SubmitVulkan : SubmitD3D11, packet);
+                        _commands.Blit(_copyTarget != null ? (Texture)_copyTarget : _nativeOutput, _output, _material, 1);
+                        if (_backend == WglCapability) Event(CompleteWgl, _sharedSurface);
+                    }
+                    SubmitCommands();
                     // The render callback now owns the packet and the AVFrame clone.
                     packet = IntPtr.Zero;
                 }
@@ -262,13 +283,18 @@ namespace MajdataPlay.FFmpeg.Interop
                 if (_vulkan == IntPtr.Zero) return false;
                 CheckErrors();
                 EnsureCopyTarget(frame.Width, frame.Height);
-                IntPtr packet = VulkanVideoInterop.Prepare(_vulkan, frame, _copyTarget.GetNativeTexturePtr());
+                IntPtr packet;
+                using (UnityProfiler.Create("FFmpeg.Interop.PrepareVulkan"))
+                    packet = VulkanVideoInterop.Prepare(_vulkan, frame, _copyTargetNative);
                 if (packet == IntPtr.Zero) { CheckErrors(); return false; }
                 try
                 {
-                    Event(SubmitNativeVulkan, packet);
-                    _commands.Blit(_copyTarget, _output, _material, 1);
-                    Graphics.ExecuteCommandBuffer(_commands);
+                    using (UnityProfiler.Create("FFmpeg.Interop.RecordCommands"))
+                    {
+                        Event(SubmitNativeVulkan, packet);
+                        _commands.Blit(_copyTarget, _output, _material, 1);
+                    }
+                    SubmitCommands();
                     packet = IntPtr.Zero;
                 }
                 finally { if (packet != IntPtr.Zero) VulkanVideoInterop.Cancel(packet); }
@@ -280,19 +306,24 @@ namespace MajdataPlay.FFmpeg.Interop
             }
             else
             {
-                if (Native.ffu_metal_prepare(frame.NativeFrame, out var planes) == 0) return false;
+                MetalPlanes planes;
+                using (UnityProfiler.Create("FFmpeg.Interop.PrepareMetal"))
+                    if (Native.ffu_metal_prepare(frame.NativeFrame, out planes) == 0) return false;
                 IntPtr packet = planes.Packet;
                 try
                 {
-                    UpdateExternal(ref _luma, planes.Width, planes.Height, TextureFormat.R8, planes.Luma, "FFmpeg Metal luma");
-                    UpdateExternal(ref _chroma, planes.ChromaWidth, planes.ChromaHeight, TextureFormat.RG16, planes.Chroma, "FFmpeg Metal chroma");
-                    _commands.SetGlobalTexture(ChromaId, _chroma);
-                    _commands.SetGlobalVector(ColorId, new Vector4(planes.FullRange, planes.Matrix709, 0, 0));
-                    _commands.Blit(_luma, _output, _material, 0);
-                    // Must follow the blit in the SAME command buffer. The native
-                    // packet is retired only when this Metal command buffer finishes.
-                    Event(CompleteMetal, packet);
-                    Graphics.ExecuteCommandBuffer(_commands);
+                    using (UnityProfiler.Create("FFmpeg.Interop.RecordCommands"))
+                    {
+                        UpdateExternal(ref _luma, planes.Width, planes.Height, TextureFormat.R8, planes.Luma, "FFmpeg Metal luma");
+                        UpdateExternal(ref _chroma, planes.ChromaWidth, planes.ChromaHeight, TextureFormat.RG16, planes.Chroma, "FFmpeg Metal chroma");
+                        _commands.SetGlobalTexture(ChromaId, _chroma);
+                        _commands.SetGlobalVector(ColorId, new Vector4(planes.FullRange, planes.Matrix709, 0, 0));
+                        _commands.Blit(_luma, _output, _material, 0);
+                        // Must follow the blit in the SAME command buffer. The native
+                        // packet is retired only when this Metal command buffer finishes.
+                        Event(CompleteMetal, packet);
+                    }
+                    SubmitCommands();
                     packet = IntPtr.Zero;
                 }
                 finally { if (packet != IntPtr.Zero) Native.ffu_packet_cancel(packet); }
@@ -313,7 +344,11 @@ namespace MajdataPlay.FFmpeg.Interop
                 throw new NotSupportedException("The graphics driver has not released prior OpenGL video surfaces.");
             if (_nativeOutput != null && _nativeOutput.width == width && _nativeOutput.height == height) return true;
             if (_backend == WindowsVulkanCapability && _copyTarget != null && _copyTarget.width == width &&
-                _copyTarget.height == height && _sharedSurface != IntPtr.Zero) return true;
+                _copyTarget.height == height && _sharedSurface != IntPtr.Zero)
+            {
+                EnsureCopyTarget(width, height);
+                return true;
+            }
             IntPtr native = Native.ffu_d3d11_create_output(_d3d11, width, height);
             if (native == IntPtr.Zero) return false;
             ReleaseWindowsOutput();
@@ -345,7 +380,10 @@ namespace MajdataPlay.FFmpeg.Interop
 
         void EnsureCopyTarget(int width, int height)
         {
-            if (_copyTarget != null && _copyTarget.width == width && _copyTarget.height == height && _copyTarget.IsCreated()) return;
+            if (_copyTarget != null && _copyTarget.width == width && _copyTarget.height == height &&
+                _copyTarget.IsCreated() && _copyTargetNative != IntPtr.Zero) return;
+            using var profile = UnityProfiler.Create("FFmpeg.Interop.CreateCopyTarget");
+            _copyTargetNative = IntPtr.Zero;
             if (_copyTarget != null) UnityEngine.Object.Destroy(_copyTarget);
             var descriptor = new RenderTextureDescriptor(width, height)
             {
@@ -356,6 +394,10 @@ namespace MajdataPlay.FFmpeg.Interop
             _copyTarget = new RenderTexture(descriptor) { name = "FFmpeg GPU copy target",
                 hideFlags = HideFlags.HideAndDontSave, filterMode = FilterMode.Bilinear, wrapMode = TextureWrapMode.Clamp };
             if (!_copyTarget.Create()) throw new NotSupportedException("Could not allocate the FFmpeg GPU copy target.");
+            // GetNativeTexturePtr synchronizes with the render thread. Resolve it
+            // only on creation, including after size changes or render-target loss.
+            _copyTargetNative = _copyTarget.GetNativeTexturePtr();
+            if (_copyTargetNative == IntPtr.Zero) throw new NotSupportedException("The FFmpeg GPU copy target has no native texture.");
         }
 
         void ReleaseWindowsOutput()
@@ -375,7 +417,7 @@ namespace MajdataPlay.FFmpeg.Interop
                 // Runs after all queued sampling and before Unity retires the texture.
                 using (var cleanup = new CommandBuffer { name = "FFmpeg shared surface release" })
                 {
-                    cleanup.IssuePluginEventAndData(_callback, Native.ffu_event_id(_backend == WglCapability ? DestroyWgl : ReleaseVulkan), releaseData);
+                    cleanup.IssuePluginEventAndData(_callback, _eventBase + (_backend == WglCapability ? DestroyWgl : ReleaseVulkan), releaseData);
                     Graphics.ExecuteCommandBuffer(cleanup);
                 }
                 _sharedSurface = IntPtr.Zero;
@@ -404,12 +446,14 @@ namespace MajdataPlay.FFmpeg.Interop
                 texture = null;
             }
             if (texture == null)
+            {
                 texture = Texture2D.CreateExternalTexture(width, height, format, false, true, native);
+                texture.name = name;
+                texture.hideFlags = HideFlags.HideAndDontSave;
+                texture.filterMode = FilterMode.Bilinear;
+                texture.wrapMode = TextureWrapMode.Clamp;
+            }
             else texture.UpdateExternalTexture(native);
-            texture.name = name;
-            texture.hideFlags = HideFlags.HideAndDontSave;
-            texture.filterMode = FilterMode.Bilinear;
-            texture.wrapMode = TextureWrapMode.Clamp;
         }
 
         public void Dispose()
@@ -438,6 +482,7 @@ namespace MajdataPlay.FFmpeg.Interop
             if (_luma != null) UnityEngine.Object.Destroy(_luma);
             if (_chroma != null) UnityEngine.Object.Destroy(_chroma);
             if (_copyTarget != null) UnityEngine.Object.Destroy(_copyTarget);
+            _copyTargetNative = IntPtr.Zero;
             if (_output != null) UnityEngine.Object.Destroy(_output);
             if (_material != null) UnityEngine.Object.Destroy(_material);
         }

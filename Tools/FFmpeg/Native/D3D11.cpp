@@ -27,9 +27,59 @@ struct Presenter {
     ID3D11DeviceContext* immediate = nullptr;
     ID3D11VideoDevice* videoDevice = nullptr;
     ID3D11VideoContext* videoContext = nullptr;
+    std::mutex prepareMutex;
+    ID3D11VideoProcessorEnumerator* enumerator = nullptr;
+    ID3D11VideoProcessor* processor = nullptr;
+    ID3D11VideoProcessorOutputView* output = nullptr;
+    ID3D11Texture2D* outputTarget = nullptr;
+    UINT width = 0, height = 0;
+    DXGI_FORMAT inputFormat = DXGI_FORMAT_UNKNOWN, outputFormat = DXGI_FORMAT_UNKNOWN;
     void Retain() { ++references; }
     void Drop() { if (--references == 0) delete this; }
-    ~Presenter() { Release(videoContext); Release(videoDevice); Release(immediate); Release(device); }
+    ~Presenter() {
+        Release(output); Release(outputTarget); Release(processor); Release(enumerator);
+        Release(videoContext); Release(videoDevice); Release(immediate); Release(device);
+    }
+
+    // Called under prepareMutex. Packets retain their own references, so a resize
+    // can replace the cache while earlier submissions are still using it.
+    HRESULT EnsureProcessor(UINT nextWidth, UINT nextHeight, DXGI_FORMAT nextInput, DXGI_FORMAT nextOutput) {
+        if (enumerator && width == nextWidth && height == nextHeight &&
+            inputFormat == nextInput && outputFormat == nextOutput) return S_OK;
+        D3D11_VIDEO_PROCESSOR_CONTENT_DESC desc{};
+        desc.InputFrameFormat = D3D11_VIDEO_FRAME_FORMAT_PROGRESSIVE;
+        desc.InputWidth = desc.OutputWidth = nextWidth;
+        desc.InputHeight = desc.OutputHeight = nextHeight;
+        desc.InputFrameRate = desc.OutputFrameRate = {30, 1};
+        desc.Usage = D3D11_VIDEO_USAGE_PLAYBACK_NORMAL;
+        ID3D11VideoProcessorEnumerator* nextEnumerator = nullptr;
+        ID3D11VideoProcessor* nextProcessor = nullptr;
+        HRESULT result = videoDevice->CreateVideoProcessorEnumerator(&desc, &nextEnumerator);
+        UINT inputSupport = 0, outputSupport = 0;
+        if (SUCCEEDED(result)) result = nextEnumerator->CheckVideoProcessorFormat(nextInput, &inputSupport);
+        if (SUCCEEDED(result)) result = nextEnumerator->CheckVideoProcessorFormat(nextOutput, &outputSupport);
+        if (SUCCEEDED(result) && (!(inputSupport & D3D11_VIDEO_PROCESSOR_FORMAT_SUPPORT_INPUT) ||
+                                  !(outputSupport & D3D11_VIDEO_PROCESSOR_FORMAT_SUPPORT_OUTPUT))) result = E_NOTIMPL;
+        if (SUCCEEDED(result)) result = videoDevice->CreateVideoProcessor(nextEnumerator, 0, &nextProcessor);
+        if (FAILED(result)) { Release(nextProcessor); Release(nextEnumerator); return result; }
+        Release(output); Release(outputTarget);
+        Release(processor); Release(enumerator);
+        enumerator = nextEnumerator; processor = nextProcessor;
+        width = nextWidth; height = nextHeight; inputFormat = nextInput; outputFormat = nextOutput;
+        return S_OK;
+    }
+
+    HRESULT EnsureOutput(ID3D11Texture2D* target) {
+        if (output && outputTarget == target) return S_OK;
+        D3D11_VIDEO_PROCESSOR_OUTPUT_VIEW_DESC desc{};
+        desc.ViewDimension = D3D11_VPOV_DIMENSION_TEXTURE2D;
+        ID3D11VideoProcessorOutputView* nextOutput = nullptr;
+        HRESULT result = videoDevice->CreateVideoProcessorOutputView(target, enumerator, &desc, &nextOutput);
+        if (FAILED(result)) { Release(nextOutput); return result; }
+        Release(output); Release(outputTarget);
+        output = nextOutput; outputTarget = target; target->AddRef();
+        return S_OK;
+    }
 };
 
 struct Packet {
@@ -234,29 +284,21 @@ FFU_EXPORT void* FFU_CALL ffu_d3d11_prepare(void* value, const AVFrame* frame, v
     presenter->Retain();
     packet->target = target;
     target->AddRef();
-    D3D11_VIDEO_PROCESSOR_CONTENT_DESC desc{};
-    desc.InputFrameFormat = D3D11_VIDEO_FRAME_FORMAT_PROGRESSIVE;
-    desc.InputWidth = frame->width;
-    desc.InputHeight = frame->height;
-    desc.OutputWidth = targetDesc.Width;
-    desc.OutputHeight = targetDesc.Height;
-    desc.InputFrameRate = {30, 1};
-    desc.OutputFrameRate = {30, 1};
-    desc.Usage = D3D11_VIDEO_USAGE_PLAYBACK_NORMAL;
-    HRESULT result = presenter->videoDevice->CreateVideoProcessorEnumerator(&desc, &packet->enumerator);
-    UINT inputSupport = 0, outputSupport = 0;
-    if (SUCCEEDED(result)) result = packet->enumerator->CheckVideoProcessorFormat(sourceDesc.Format, &inputSupport);
-    if (SUCCEEDED(result)) result = packet->enumerator->CheckVideoProcessorFormat(targetDesc.Format, &outputSupport);
-    if (SUCCEEDED(result) && (!(inputSupport & D3D11_VIDEO_PROCESSOR_FORMAT_SUPPORT_INPUT) ||
-                              !(outputSupport & D3D11_VIDEO_PROCESSOR_FORMAT_SUPPORT_OUTPUT))) result = E_NOTIMPL;
-    if (SUCCEEDED(result)) result = presenter->videoDevice->CreateVideoProcessor(packet->enumerator, 0, &packet->processor);
+    HRESULT result;
+    {
+        std::lock_guard<std::mutex> guard(presenter->prepareMutex);
+        result = presenter->EnsureProcessor(targetDesc.Width, targetDesc.Height, sourceDesc.Format, targetDesc.Format);
+        if (SUCCEEDED(result)) result = presenter->EnsureOutput(target);
+        if (SUCCEEDED(result)) {
+            packet->enumerator = presenter->enumerator; packet->enumerator->AddRef();
+            packet->processor = presenter->processor; packet->processor->AddRef();
+            packet->output = presenter->output; packet->output->AddRef();
+        }
+    }
     D3D11_VIDEO_PROCESSOR_INPUT_VIEW_DESC input{};
     input.ViewDimension = D3D11_VPIV_DIMENSION_TEXTURE2D;
     input.Texture2D.ArraySlice = static_cast<UINT>(slice);
     if (SUCCEEDED(result)) result = presenter->videoDevice->CreateVideoProcessorInputView(source, packet->enumerator, &input, &packet->input);
-    D3D11_VIDEO_PROCESSOR_OUTPUT_VIEW_DESC output{};
-    output.ViewDimension = D3D11_VPOV_DIMENSION_TEXTURE2D;
-    if (SUCCEEDED(result)) result = presenter->videoDevice->CreateVideoProcessorOutputView(target, packet->enumerator, &output, &packet->output);
     D3D11_QUERY_DESC query{};
     query.Query = D3D11_QUERY_EVENT;
     if (SUCCEEDED(result)) result = presenter->device->CreateQuery(&query, &packet->complete);
@@ -270,6 +312,8 @@ void FfuD3D11Submit(void* data) {
     auto* packet = static_cast<Packet*>(data);
     auto* presenter = packet->owner;
     auto* context = presenter->videoContext;
+    // Cached processors are shared by packets. All processor state and blits
+    // remain serialized here on Unity's render thread, including color changes.
     const RECT rect{0, 0, packet->frame->width, packet->frame->height};
     context->VideoProcessorSetStreamFrameFormat(packet->processor, 0, D3D11_VIDEO_FRAME_FORMAT_PROGRESSIVE);
     context->VideoProcessorSetStreamAutoProcessingMode(packet->processor, 0, FALSE);

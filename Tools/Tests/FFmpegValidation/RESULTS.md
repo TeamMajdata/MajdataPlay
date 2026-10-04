@@ -2,6 +2,17 @@
 
 最近验证日期：2026-10-04；此前跨平台矩阵执行于 2026-10-03。Windows / Unity 6000.3.17f1 / AMD Radeon RX 580 2048SP；Linux 使用本机 WSL Ubuntu 24.04；Android 真机为 Mi MIX 2S / Android 15 API 35 / Adreno 630 / Vulkan 1.1.128；Apple 构建测试使用用户提供的 Mac mini M4。当前 Windows/Linux/Android 图形桥接 ABI 为 **4**，Apple 保持 **2**；下方 ABI2/3 的记录为此前版本实测。
 
+## TryPresent 缓存与解码 Profiler
+
+2026-10-04：D3D11 复用相同尺寸/格式的视频处理器、枚举器和当前输出视图，每个提交仍独立持有 COM/AVFrame 引用和完成查询。托管层缓存 GPU copy target 的原生指针，在尺寸变化或纹理丢失后重建；软/硬解送包、取帧、排空及呈现阶段增加独立 CPU 标记。
+
+- 同机、相同 O3 编译的原生 smoke，优化前后交替运行五轮，每轮预热后对 32×32 NV12 帧执行 256 次 `prepare/cancel`，取每轮平均值的中位数：x64 **262.179 → 4.559 µs**，x86 **478.918 → 5.780 µs**。这仅测量原生准备/取消的 CPU 时间，未包含 Unity 命令录制、提交、真实视频解码或 GPU 执行，不能直接当作整个 `TryPresent` 的新耗时。
+- x64/x86 原生 GPU smoke 均通过，覆盖 NV12 array slice、limited/full range 像素、同尺寸输出替换、取消、32→64×48→32 尺寸切换、多个待提交帧及 presenter 先释放后的安全回收。
+- 最新源码与新 x64 bridge 的隔离 Unity Mono Player：软件 D3D11 **20 assertions PASS**；严格硬件 D3D11 / OpenGL 各 **24 assertions PASS**，D3D12 / Vulkan 各 **25 assertions PASS**。新增输出/copy target 主动释放后步进并验证实际像素；D3D12 / Vulkan 实际使用 D3D11VA 共享路径，无 CPU 像素回读，未验证原生 D3D12VA / Vulkan Video 解码。
+- 真实 FFmpeg 解码测试 **361 assertions PASS**；启用 `ENABLE_PROFILER` 编译 **0 errors**。未录制 Unity Profiler Timeline；此次未重跑 IL2CPP、Apple、Android 或 Linux 设备矩阵。
+
+证据：`Tools/FFmpeg/.build/native-video-bridge-win-{x64,x86}/D3D11-cache-comparison.log`、`.work/decode-profiler-enabled-build.log` 与 `.work/x64-Mono/` 下本轮软件/硬件报告。Profiler 标记的阅读方式见 README 的 CPU Profiler 章节。
+
 ## D3D12VA 与 Vulkan Video 接入验证
 
 2026-10-04 更新：Windows x86/x64 的 FFmpeg 启用 D3D12VA 与 Vulkan，Linux x64 和 Android ARM64/ARMv7 启用 Vulkan。实际库的 H.264/HEVC/AV1/VP9 硬件配置已检查；FFmpeg 仍锁定 n9.0.1，Vulkan-Headers 与 Windows D3D12 头文件依赖记录版本和哈希。Apple 原生产物保持原版本。

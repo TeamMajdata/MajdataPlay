@@ -16,6 +16,19 @@ dotnet run --project Tools/Tests/FFmpegValidation/FFmpegValidation.csproj -- `
 
 原生后端回退测试检查 H.264 的 D3D12VA/Vulkan 硬件配置，并注入首选设备获取失败，验证严格 GPU 模式和允许 CPU 上传模式均可尝试下一硬件后端、得到正确的实际设备身份并继续 seek。此测试验证回退链，不代表已在对应原生后端完成视频解码。
 
+## CPU Profiler
+
+在开启 Profiler 的 Editor 或 Development Player 中，CPU Timeline 的 `FFmpeg / Decoder` 工作线程包含：
+
+- `FFmpeg.Decoder.Software.SendPacket` / `ReceiveFrame` / `Drain`：软件解码调用。
+- `FFmpeg.Decoder.Hardware.SendPacket` / `ReceiveFrame` / `Drain`：硬件解码调用；硬解加 CPU 上传也归入此组。
+- `FFmpeg.Decoder.ReadPacket`：解封装和输入读取；`DownloadHardwareFrame`：硬件帧下载。
+- `FFmpeg.Decoder.ScaleRGBA` / `CopyRGBA`：颜色转换，以及翻转/旋转和像素拷贝。
+
+解码工作可能发生在送包和取帧两处。硬解标记包含提交及等待的 CPU 耗时，不代表 GPU 异步解码时长；一次调用也不一定产出一帧。`ReadFrame` 保留作为读取到可呈现帧的总耗时。
+
+主线程的 `FFmpeg.Interop.TryPresent` 下可分别查看 `PrepareD3D11` / `PrepareD3D12VA` / `PrepareVulkan` / `PrepareMetal`、`RecordCommands` 和 `SubmitCommands`。`PrepareD3D11` 包含 D3D11 解码经其他图形后端共享的路径。比较稳定播放时的样本，单独看首帧或纹理重建时的 `CreateCopyTarget`，避免将初始化成本算入每帧成本。
+
 ## Unity Player
 
 ```powershell
@@ -38,6 +51,8 @@ dotnet run --project Tools/Tests/FFmpegValidation/FFmpegValidation.csproj -- `
 ```
 
 隔离项目、构建输出、日志、结果、32×32 纹理读回图均保存在忽略的 `.work/`。脚本不修改主项目场景或 Player Settings。测试包括首帧预载、实际纹理像素、播放、倍速、暂停、seek、步进、停止回零、连续 seek、循环、关闭/取消。图形测试会启动隐藏的 Player，GPU 后端仍需本机驱动支持；不能加 `-nographics`。`-Hardware` 是尝试硬件路径，必须检查报告中的 `TransferMode` 与 fallback，软件回退成功不代表硬件互操作成功。`-RequireHardware` 隐含 `-Hardware` 并增加硬件路径断言，发生软件回退即失败；首次使用该选项需要重新构建包含新断言的测试 Player。
+
+硬件呈现测试还会在完成像素读回后主动释放输出纹理及存在的 GPU copy target，再步进一帧并检查恢复后的实际像素，以覆盖原生纹理指针缓存失效后的重建。
 
 `-Media` 可替换素材，需使用可 seek、时长大于 2 秒、首秒处有非均匀画面的文件。默认使用项目的 H.264 背景视频。`-SkipBuild` 只用于相同后端、架构和最新源码已完成构建的情况。
 

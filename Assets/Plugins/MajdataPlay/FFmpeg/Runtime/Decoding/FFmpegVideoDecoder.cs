@@ -298,7 +298,13 @@ namespace MajdataPlay.FFmpeg.Internal
             while (true)
             {
                 _cancellation.ThrowIfCancellationRequested();
-                var result = ffmpeg.avcodec_receive_frame(_codec, _frame);
+                // Both send and receive can perform decoding. Measure their CPU calls
+                // separately from demux/conversion; hardware samples also include waits,
+                // but cannot measure asynchronous GPU execution time.
+                int result;
+                using (UnityProfiler.Create(HardwareDecoding
+                    ? "FFmpeg.Decoder.Hardware.ReceiveFrame" : "FFmpeg.Decoder.Software.ReceiveFrame"))
+                    result = ffmpeg.avcodec_receive_frame(_codec, _frame);
                 if (result == 0)
                 {
                     try
@@ -336,7 +342,9 @@ namespace MajdataPlay.FFmpeg.Internal
 
                 if (_packetPending)
                 {
-                    result = ffmpeg.avcodec_send_packet(_codec, _packet);
+                    using (UnityProfiler.Create(HardwareDecoding
+                        ? "FFmpeg.Decoder.Hardware.SendPacket" : "FFmpeg.Decoder.Software.SendPacket"))
+                        result = ffmpeg.avcodec_send_packet(_codec, _packet);
                     if (result == again)
                         throw new InvalidOperationException("Video decoder returned EAGAIN from both send and receive.");
                     Check(result, "Send video packet");
@@ -346,7 +354,9 @@ namespace MajdataPlay.FFmpeg.Internal
                 }
                 if (_inputEnded)
                 {
-                    result = ffmpeg.avcodec_send_packet(_codec, null);
+                    using (UnityProfiler.Create(HardwareDecoding
+                        ? "FFmpeg.Decoder.Hardware.Drain" : "FFmpeg.Decoder.Software.Drain"))
+                        result = ffmpeg.avcodec_send_packet(_codec, null);
                     if (result == ffmpeg.AVERROR_EOF) return FinishInput();
                     Check(result, "Drain video decoder");
                     _draining = true;
@@ -356,7 +366,8 @@ namespace MajdataPlay.FFmpeg.Internal
                 // Preserve the deadline across nonblocking EAGAIN returns so a stalled
                 // source cannot reset its own timeout forever without producing a packet.
                 if (Interlocked.Read(ref _ioDeadline) == 0) BeginIO();
-                result = ffmpeg.av_read_frame(_format, _packet);
+                using (UnityProfiler.Create("FFmpeg.Decoder.ReadPacket"))
+                    result = ffmpeg.av_read_frame(_format, _packet);
                 if (result == ffmpeg.AVERROR_EOF)
                 {
                     Interlocked.Exchange(ref _ioDeadline, 0);

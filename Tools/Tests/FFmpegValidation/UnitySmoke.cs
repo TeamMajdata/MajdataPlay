@@ -100,11 +100,19 @@ public sealed class FFmpegPlayerSmoke : MonoBehaviour
         // contains a non-uniform image at this timestamp; use equivalent media if overriding it.
         yield return null;
         CheckTextureContents();
+        bool releasedTargets = ReleaseHardwareTargets();
         var frameCount = _frames;
         _player.NextFrame();
         start = UnityEngine.Time.realtimeSinceStartup;
         while (_frames == frameCount) { CheckTimeout(start); yield return null; }
         Check(!_player.IsPlaying, "single frame step");
+        if (releasedTargets)
+        {
+            yield return null;
+            CheckHardwarePath();
+            Check(_player.Texture is RenderTexture restored && restored.IsCreated(), "hardware output recovers after render-target loss");
+            CheckTextureContents();
+        }
         _player.Stop();
         start = UnityEngine.Time.realtimeSinceStartup;
         while (_player.State == VideoPlaybackState.Seeking) { CheckTimeout(start); yield return null; }
@@ -417,6 +425,25 @@ public sealed class FFmpegPlayerSmoke : MonoBehaviour
         }
         else if (Argument("-videoHardware") != "true")
             Check(_player.DecoderType == VideoDecoderType.Software, "software preference uses a software decoder");
+    }
+    bool ReleaseHardwareTargets()
+    {
+        if (!(_player.Texture is RenderTexture output)) return false;
+        // The preceding pixel readback has completed earlier GPU submissions.
+        // Exercise target recreation so cached native handles cannot stay stale.
+        var field = typeof(FFmpegVideoPlayer).GetField("_hardwarePresenter", BindingFlags.Instance | BindingFlags.NonPublic);
+        var presenter = field?.GetValue(_player);
+        if (presenter == null) return false;
+        var copyField = presenter.GetType().GetField("_copyTarget", BindingFlags.Instance | BindingFlags.NonPublic);
+        var copy = copyField?.GetValue(presenter) as RenderTexture;
+        if (copy != null)
+        {
+            copy.Release();
+            Check(!copy.IsCreated(), "hardware copy target released before next frame");
+        }
+        output.Release();
+        Check(!output.IsCreated(), "hardware output released before next frame");
+        return true;
     }
     void CheckTextureContents()
     {

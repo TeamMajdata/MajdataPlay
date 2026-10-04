@@ -84,19 +84,24 @@ namespace MajdataPlay.FFmpeg.Internal
                 EnsureRgbaStaging(width, height);
                 _destination[0] = _rgba->data[0];
                 _destinationStride[0] = _rgba->linesize[0];
-                var rows = ffmpeg.sws_scale(_scale, _source, _sourceStride, 0, height, _destination, _destinationStride);
+                int rows;
+                using (UnityProfiler.Create("FFmpeg.Decoder.ScaleRGBA"))
+                    rows = ffmpeg.sws_scale(_scale, _source, _sourceStride, 0, height, _destination, _destinationStride);
                 FFmpegVideoDecoder.Check(rows, "Convert video frame");
                 if (rows != height)
                     throw new InvalidOperationException("FFmpeg produced an incomplete RGBA frame.");
-                if (quarterTurns == 0)
+                using (UnityProfiler.Create("FFmpeg.Decoder.CopyRGBA"))
                 {
-                    int rowBytes = checked(width * 4);
-                    for (int y = 0; y < height; y++)
-                        Buffer.MemoryCopy(_rgba->data[0] + y * _rgba->linesize[0],
-                            result + (height - 1 - y) * rowBytes, rowBytes, rowBytes);
+                    if (quarterTurns == 0)
+                    {
+                        int rowBytes = checked(width * 4);
+                        for (int y = 0; y < height; y++)
+                            Buffer.MemoryCopy(_rgba->data[0] + y * _rgba->linesize[0],
+                                result + (height - 1 - y) * rowBytes, rowBytes, rowBytes);
+                    }
+                    else
+                        Rotate(_rgba->data[0], _rgba->linesize[0], (uint*)result, width, height, quarterTurns);
                 }
-                else
-                    Rotate(_rgba->data[0], _rgba->linesize[0], (uint*)result, width, height, quarterTurns);
 
                 var sar = source->sample_aspect_ratio;
                 var aspect = sar.num > 0 && sar.den > 0 ? ffmpeg.av_q2d(sar) : 1.0;

@@ -8,7 +8,7 @@
   "ffmpegAbi": {
     "avutil": 61
   },
-  "sha256": "910d6c32cd9fb2e55e652842af10dad939b2950dceb37ce4a2c6cfd637ff1a30",
+  "sha256": "160c3d72eea0f8814238a449b2946ae93642111efd2b8941938c73c20ef6ed66",
   "sources": [
     {
       "path": "Tools/FFmpeg/Native/Bridge.cpp",
@@ -24,7 +24,7 @@
     },
     {
       "path": "Tools/FFmpeg/Native/D3D11.cpp",
-      "sha256": "cefa4c8a20ac5ef9a4a09adea49f7ff256f597268b70e87056f35ac689dfa12e"
+      "sha256": "fba3061e9a672324a86f611d8506601bc1fd3ef584f4842ecdd3cdb9c5ed4eb7"
     },
     {
       "path": "Tools/FFmpeg/Native/D3D12.cpp",
@@ -40,7 +40,7 @@
     },
     {
       "path": "Tools/FFmpeg/Native/tests/D3D11Smoke.cpp",
-      "sha256": "57da5c1185626d5bcc519b2f65fc42dc419ff0c4dc6c20efb8b2c8902a3f52dd"
+      "sha256": "513ac145d470476e36df83a5fdc83b97b13aa6f5812a8c0a8767564d9f4dcd27"
     },
     {
       "path": "Tools/FFmpeg/Native/tests/D3D12InteropProbe.cpp",
@@ -123,15 +123,13 @@
       "sha256": "7f044ebca6b389eae55a9d697303b86ca998b516ac4b52194efce9aa715ea8bd"
     }
   ],
-  "command": "cmake --build Tools/FFmpeg/.build/native-video-bridge-win-x86 --parallel 8",
+  "command": "cmake --build Tools/FFmpeg/.build/native-video-bridge-win-x86 --target FFmpegUnityBridgeSmoke FFmpegUnityBridge -j 4",
   "verification": {
     "date": "2026-10-04",
-    "build": "PASS: LLVM-MinGW/CMake, ABI 4, native D3D12VA and Vulkan Video exports",
-    "nativeD3D12Presentation": "PASS: 100 synthetic GPU frames; NV12 limited/full range; 64x64 to 128x64; cancellation and AVFrame lifetime; 4 pixel checks mean error 0..1; D3D12 debug layer enabled with zero warning/error messages. Fixture CPU upload and reference readback exist only in the test.",
-    "nativeD3D12Codec": "SKIP (exit 77): AMD Radeon RX 580 2048SP exposes D3D12 decode Tier 1, which pinned FFmpeg does not implement. This is not a positive D3D12 codec decode test.",
-    "nativeD3D11Regression": "PASS: actual NV12 array slice GPU conversion/range/lifetime, white 255 and black 0",
-    "vulkanNegotiation": "PASS: feature preservation, private queue remapping, implicit graphics/compute transfer-capability normalization, fallback and deferred device/instance destruction through actual FFmpeg references; does not assert physical Vulkan Video decode support",
-    "unityHardwarePlayback": "See Tools/Tests/FFmpegValidation/RESULTS.md for managed player validation and device limitations."
+    "build": "PASS: LLVM-MinGW/CMake Release bridge and extended D3D11 smoke rebuilt after the D3D11 resource cache change.",
+    "nativeD3D11Regression": "PASS: actual NV12 array slice GPU conversion/range/lifetime; cached processor/output views; repeated cancellation; same-size target replacement; 32x32 to 64x48 to 32x32 with pending packets; presenter released before submit/drain; white255/black0 and per-target pixels 0,17,255,0",
+    "nativeD3D11PrepareBenchmark": "Warm native prepare/cancel only: 5 alternating runs x 256 iterations, HEAD source baseline median 478.918 us, cached source median 5.780 us. Same test and O3 toolchain, local RX 580 GPU. Not whole TryPresent or decode/GPU duration.",
+    "unityHardwarePlayback": "Not rerun for x86 after this change; current verification is native x86 GPU smoke only. The x64 Unity Player results do not establish x86 Unity playback."
   },
   "previousNativeVerification": {
     "date": "2026-10-03",
@@ -144,7 +142,16 @@
     "exports": "Cdecl ffu exports; plain and decorated x86 Unity lifecycle aliases",
     "nativeD3D12LinkedSmoke": "PASS: actual linked bridge, 4 completed packets + 1 cancellation, AVFrame retirement, white255/black0"
   },
-  "builtUtc": "2026-10-03T17:55:44.1487638Z",
+  "builtUtc": "2026-10-04T06:45:51.206661+00:00",
   "ffmpegPrefix": "Tools/FFmpeg/.build/native-video-windows-prefix/win-x86",
-  "vulkanHeaders": "Vulkan-Headers vulkan-sdk-1.4.328.1"
+  "vulkanHeaders": "Vulkan-Headers vulkan-sdk-1.4.328.1",
+  "preOptimizationVerification": {
+    "date": "2026-10-04",
+    "build": "PASS: LLVM-MinGW/CMake, ABI 4, native D3D12VA and Vulkan Video exports",
+    "nativeD3D12Presentation": "PASS: 100 synthetic GPU frames; NV12 limited/full range; 64x64 to 128x64; cancellation and AVFrame lifetime; 4 pixel checks mean error 0..1; D3D12 debug layer enabled with zero warning/error messages. Fixture CPU upload and reference readback exist only in the test.",
+    "nativeD3D12Codec": "SKIP (exit 77): AMD Radeon RX 580 2048SP exposes D3D12 decode Tier 1, which pinned FFmpeg does not implement. This is not a positive D3D12 codec decode test.",
+    "nativeD3D11Regression": "PASS: actual NV12 array slice GPU conversion/range/lifetime, white 255 and black 0",
+    "vulkanNegotiation": "PASS: feature preservation, private queue remapping, implicit graphics/compute transfer-capability normalization, fallback and deferred device/instance destruction through actual FFmpeg references; does not assert physical Vulkan Video decode support",
+    "unityHardwarePlayback": "See Tools/Tests/FFmpegValidation/RESULTS.md for managed player validation and device limitations."
+  }
 }
