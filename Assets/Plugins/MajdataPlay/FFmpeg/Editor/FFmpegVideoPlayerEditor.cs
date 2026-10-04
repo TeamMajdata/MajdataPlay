@@ -35,6 +35,8 @@ namespace MajdataPlay.FFmpeg.Editor
             EditorGUILayout.LabelField("Decode device", player.DecoderDevice);
             EditorGUILayout.LabelField("Texture transfer", player.TransferMode);
             EditorGUILayout.LabelField("Video", $"{player.Width} x {player.Height}, {player.FrameRate:F3} fps");
+            EditorGUILayout.LabelField("Bitrate (current)", FormatBitRate(player.CurrentBitRate));
+            EditorGUILayout.LabelField("Bitrate (average)", FormatBitRate(player.BitRate));
             EditorGUILayout.LabelField("Buffered frames", player.BufferedFrames.ToString());
             if (!string.IsNullOrEmpty(player.HardwareFallbackReason)) EditorGUILayout.HelpBox(player.HardwareFallbackReason, MessageType.Info);
             if (!string.IsNullOrEmpty(player.LastError)) EditorGUILayout.HelpBox(player.LastError, MessageType.Error);
@@ -57,5 +59,13 @@ namespace MajdataPlay.FFmpeg.Editor
             if (EditorGUI.EndChangeCheck()) player.Rate = rate;
         }
         public override bool RequiresConstantRepaint() => Application.isPlaying;
+
+        private static string FormatBitRate(long bitRate)
+        {
+            if (bitRate <= 0) return "Unknown";
+            if (bitRate >= 1_000_000) return $"{bitRate / 1_000_000d:F2} Mbps";
+            if (bitRate >= 1_000) return $"{bitRate / 1_000d:F2} kbps";
+            return $"{bitRate} bps";
+        }
     }
 }

@@ -40,6 +40,8 @@ namespace MajdataPlay.FFmpeg.Internal
         public double PresentationTime { get; internal set; }
         /// <summary>Gets the frame's presentation duration, in seconds.</summary>
         public double Duration { get; internal set; }
+        /// <summary>Gets the estimated video bit rate over up to one second ending at this frame, in bits per second; zero if unavailable.</summary>
+        public long CurrentBitRate { get; internal set; }
         /// <summary>Gets the clockwise display rotation, in degrees, still required when presenting a native frame.</summary>
         /// <remarks>CPU frames already have rotation applied and report zero.</remarks>
         public double RotationDegrees { get; internal set; }
@@ -79,6 +81,7 @@ namespace MajdataPlay.FFmpeg.Internal
             {
                 var result = converter.Convert((AVFrame*)_nativeFrame, PresentationTime, Duration, RotationDegrees, int.MaxValue / 4);
                 result.HardwareDecoded = true;
+                result.CurrentBitRate = CurrentBitRate;
                 result.TransferMode = "Hardware decode + CPU RGBA upload";
                 return result;
             }

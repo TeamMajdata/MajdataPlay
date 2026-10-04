@@ -2,6 +2,16 @@
 
 最近验证日期：2026-10-04；此前跨平台矩阵执行于 2026-10-03。Windows / Unity 6000.3.17f1 / AMD Radeon RX 580 2048SP；Linux 使用本机 WSL Ubuntu 24.04；Android 真机为 Mi MIX 2S / Android 15 API 35 / Adreno 630 / Vulkan 1.1.128；Apple 构建测试使用用户提供的 Mac mini M4。当前 Windows/Linux/Android 图形桥接 ABI 为 **4**，Apple 保持 **2**；下方 ABI2/3 的记录为此前版本实测。
 
+## 实时视频码率
+
+2026-10-04：Inspector 同时显示 `Bitrate (current)` 和 `Bitrate (average)`。实时码率按当前显示帧之前约 1 秒的媒体时间估算视频包字节量，随帧传递；预读和倍速不放大数值，暂停保留读数，跳转、关闭和硬解恢复清空旧值。
+
+- 托管与真实 FFmpeg 验证 **412 assertions PASS**，包含 31 项码率窗口边界测试，以及软件/硬解帧、前后 seek 和 EOF 末帧快照；证据 `.work/current-bitrate-decoder.log`。
+- Runtime 与 Editor 开启 `ENABLE_PROFILER` 编译通过，**0 errors**；证据 `.work/current-bitrate-editor-build.log`。
+- Unity 6000.3.17f1 Windows x64 Mono / D3D11：软件播放 **27 assertions PASS**，原生 GPU 硬解播放 **31 assertions PASS**，硬解故障恢复及回调重入 **66 assertions PASS**。覆盖预载、暂停、倍速、seek、关闭与恢复期间的码率状态；证据 `.work/x64-Mono/d3d11-{software,hardware,recovery}.txt`。
+
+本次没有改动原生库，也未重跑其他图形 API、IL2CPP 或移动/Apple/Linux 平台。当前码率是压缩视频负载的局部估计，不包含音频、容器及网络传输开销。
+
 ## TryPresent 缓存与解码 Profiler
 
 2026-10-04：D3D11 复用相同尺寸/格式的视频处理器、枚举器和当前输出视图，每个提交仍独立持有 COM/AVFrame 引用和完成查询。托管层缓存 GPU copy target 的原生指针，在尺寸变化或纹理丢失后重建；软/硬解送包、取帧、排空及呈现阶段增加独立 CPU 标记。

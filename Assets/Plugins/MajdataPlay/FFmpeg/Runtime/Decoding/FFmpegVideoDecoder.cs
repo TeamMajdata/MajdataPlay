@@ -23,6 +23,7 @@ namespace MajdataPlay.FFmpeg.Internal
         private static readonly AVCodecContext_get_format FormatCallback = SelectPixelFormat;
         private DecoderOptions _options;
         private readonly VideoFrameConverter _converter = new VideoFrameConverter();
+        private readonly VideoBitRateTracker _bitRateTracker = new VideoBitRateTracker();
         private AVFormatContext* _format;
         private AVCodecContext* _codec;
         private AVPacket* _packet;
@@ -50,6 +51,8 @@ namespace MajdataPlay.FFmpeg.Internal
         private double _nextTimestamp;
         private double _seekTarget = double.NegativeInfinity;
         private double _seekCandidateTime, _seekCandidateDuration;
+        private double _nextPacketTimestamp;
+        private long _seekCandidateBitRate;
 
         /// <summary>Gets the display width, in pixels, after applying the video's rotation.</summary>
         public int Width { get; private set; }
@@ -59,6 +62,8 @@ namespace MajdataPlay.FFmpeg.Internal
         public double Duration { get; private set; }
         /// <summary>Gets the estimated video frame rate, in frames per second, using 30 when the source provides no valid rate.</summary>
         public double FrameRate { get; private set; }
+        /// <summary>Gets the average video stream bit rate in bits per second, or zero if unavailable.</summary>
+        public long BitRate { get; private set; }
         /// <summary>Gets the clockwise stream display rotation, in degrees.</summary>
         /// <remarks>CPU output already has its display rotation applied. Individual frames can override the stream rotation.</remarks>
         public double RotationDegrees { get; private set; }
@@ -148,6 +153,7 @@ namespace MajdataPlay.FFmpeg.Internal
                 if (codec == null) throw new NotSupportedException("This FFmpeg build has no decoder for the video codec.");
                 var stream = _format->streams[_videoStreamIndex];
                 CodecName = ffmpeg.avcodec_get_name(stream->codecpar->codec_id);
+                BitRate = Math.Max(0L, stream->codecpar->bit_rate);
                 _timeBase = stream->time_base;
                 if (_timeBase.num <= 0 || _timeBase.den <= 0)
                     throw new InvalidOperationException("The video stream has an invalid time base.");
@@ -170,6 +176,7 @@ namespace MajdataPlay.FFmpeg.Internal
                     _origin = (double)_format->start_time / ffmpeg.AV_TIME_BASE;
                     _originKnown = true;
                 }
+                _nextPacketTimestamp = _origin;
                 CanSeek = _format->pb == null || (_format->pb->seekable & ffmpeg.AVIO_SEEKABLE_NORMAL) != 0;
                 RotationDegrees = ReadStreamRotation(stream);
                 UpdateDimensions(stream->codecpar->width, stream->codecpar->height, RotationDegrees);
@@ -315,6 +322,9 @@ namespace MajdataPlay.FFmpeg.Internal
                         if (!_originKnown && timestamp != ffmpeg.AV_NOPTS_VALUE) { _origin = seconds; _originKnown = true; }
                         if (timestamp != ffmpeg.AV_NOPTS_VALUE) seconds -= _origin;
                         _nextTimestamp = seconds + duration;
+                        // Keep the estimate with this displayed frame, not the worker's
+                        // latest read-ahead position. Packet timestamps use stream time.
+                        var currentBitRate = _bitRateTracker.Measure(seconds + _origin + duration);
                         // Decode preroll after backward seeking, including inter-frame references.
                         if (seconds + duration <= _seekTarget + 0.000001)
                         {
@@ -327,11 +337,14 @@ namespace MajdataPlay.FFmpeg.Internal
                             ffmpeg.av_frame_move_ref(_seekCandidate, _frame);
                             _seekCandidateTime = seconds;
                             _seekCandidateDuration = duration;
+                            _seekCandidateBitRate = currentBitRate;
                             continue;
                         }
                         _seekTarget = double.NegativeInfinity;
                         ReleaseSeekCandidate();
-                        return CreatePresentationFrame(_frame, seconds, duration);
+                        var decoded = CreatePresentationFrame(_frame, seconds, duration);
+                        decoded.CurrentBitRate = currentBitRate;
+                        return decoded;
                     }
                     finally { ffmpeg.av_frame_unref(_frame); }
                 }
@@ -348,6 +361,7 @@ namespace MajdataPlay.FFmpeg.Internal
                     if (result == again)
                         throw new InvalidOperationException("Video decoder returned EAGAIN from both send and receive.");
                     Check(result, "Send video packet");
+                    RecordPacketBitRate();
                     ffmpeg.av_packet_unref(_packet);
                     _packetPending = false;
                     continue;
@@ -388,6 +402,16 @@ namespace MajdataPlay.FFmpeg.Internal
             }
         }
 
+        private void RecordPacketBitRate()
+        {
+            double timeBase = _timeBase.num / (double)_timeBase.den;
+            var timestamp = _packet->pts != ffmpeg.AV_NOPTS_VALUE ? _packet->pts : _packet->dts;
+            double seconds = timestamp == ffmpeg.AV_NOPTS_VALUE ? _nextPacketTimestamp : timestamp * timeBase;
+            double duration = _packet->duration > 0 ? _packet->duration * timeBase : 1.0 / FrameRate;
+            _bitRateTracker.Add(seconds, duration, _packet->size);
+            _nextPacketTimestamp = seconds + duration;
+        }
+
         /// <summary>Seeks the input and flushes queued decoder frames on the owning worker.</summary>
         /// <param name="seconds">The target timestamp, in seconds relative to the media's timeline origin.</param>
         /// <remarks>The target is clamped to zero and, when known, the media duration. Subsequent reads decode the required preroll.</remarks>
@@ -425,6 +449,8 @@ namespace MajdataPlay.FFmpeg.Internal
             _draining = false;
             _ended = false;
             _nextTimestamp = seconds;
+            _bitRateTracker.Reset();
+            _nextPacketTimestamp = seconds + _origin;
             _seekTarget = seconds;
         }
 
@@ -517,7 +543,12 @@ namespace MajdataPlay.FFmpeg.Internal
             _ended = true;
             _seekTarget = double.NegativeInfinity;
             if (_seekCandidate == null) return null;
-            try { return CreatePresentationFrame(_seekCandidate, _seekCandidateTime, _seekCandidateDuration); }
+            try
+            {
+                var decoded = CreatePresentationFrame(_seekCandidate, _seekCandidateTime, _seekCandidateDuration);
+                decoded.CurrentBitRate = _seekCandidateBitRate;
+                return decoded;
+            }
             finally { ReleaseSeekCandidate(); }
         }
 

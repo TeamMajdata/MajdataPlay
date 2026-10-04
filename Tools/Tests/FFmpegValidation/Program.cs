@@ -15,7 +15,8 @@ static class Program
         try
         {
             TestClock();
-            if (args.Length != 2) { Console.WriteLine("PASS: clock; use <native-directory> <media> for native decode tests."); return 0; }
+            _checks += VideoBitRateChecks.Run();
+            if (args.Length != 2) { Console.WriteLine("PASS: clock and bitrate; use <native-directory> <media> for native decode tests."); return 0; }
             string native = Path.GetFullPath(args[0]);
             NativeLibrary.SetDllImportResolver(typeof(FFmpeg.AutoGen.ffmpeg).Assembly, (name, assembly, paths) =>
             {
@@ -79,12 +80,15 @@ static class Program
             Check(decoder.Width > 0 && decoder.Height > 0 && decoder.Duration > 0, "metadata");
             Console.WriteLine($"{decoder.CodecName}: {decoder.Width}x{decoder.Height}, {decoder.Duration:F3}s, {decoder.FrameRate:F3}fps");
             double previous = -1;
+            long firstBitRate = 0;
             for (int i = 0; i < 12; i++)
                 using (var frame = decoder.ReadFrame())
                 {
                     Check(frame != null, "first 12 frames exist");
                     Check(frame.PresentationTime >= previous, "presentation order");
                     Check(frame.Data != IntPtr.Zero && frame.DataSize == frame.Width * frame.Height * 4, "packed RGBA");
+                    Check(frame.CurrentBitRate > 0, "software frame carries its compressed-video bitrate");
+                    if (i == 0) firstBitRate = frame.CurrentBitRate;
                     previous = frame.PresentationTime;
                 }
             double target = Math.Min(decoder.Duration / 2, 2);
@@ -95,7 +99,11 @@ static class Program
                 Check(frame.PresentationTime < target + 0.2, "seek not excessive");
             }
             decoder.Seek(0);
-            using (var frame = decoder.ReadFrame()) Check(frame != null && frame.PresentationTime < 0.2, "backward seek flushes codec");
+            using (var frame = decoder.ReadFrame())
+            {
+                Check(frame != null && frame.PresentationTime < 0.2, "backward seek flushes codec");
+                Check(frame.CurrentBitRate == firstBitRate, "backward seek clears bitrate history and reproduces first-frame estimate");
+            }
             decoder.Seek(Math.Max(0, decoder.Duration - 0.3));
             int drained = 0;
             double finalTimestamp = -1;
@@ -117,6 +125,7 @@ static class Program
                 Check(last != null, "100% seek presents a frame instead of stale first frame");
                 Check(Math.Abs(last.PresentationTime - finalTimestamp) < 0.000001, "100% seek selects actual final frame");
                 Check(Marshal.ReadInt32(last.Data) == finalPixel, "100% seek retains final frame pixels");
+                Check(last.CurrentBitRate > 0, "endpoint seek retains final frame bitrate");
             }
             Check(decoder.ReadFrame() == null, "100% seek emits final frame once then EOF");
             decoder.Seek(0);
@@ -150,6 +159,7 @@ static class Program
                     Check(!frame.IsHardwareFrame && frame.Data != IntPtr.Zero && frame.DataSize == frame.Width * frame.Height * 4,
                         "hardware download delivers packed CPU RGBA, not a native texture handle");
                     Check(frame.PresentationTime >= previous, "hardware CPU frames stay ordered");
+                    Check(frame.CurrentBitRate > 0, "hardware frame carries its compressed-video bitrate");
                     previous = frame.PresentationTime;
                 }
             double target = Math.Min(1, decoder.Duration / 2);

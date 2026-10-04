@@ -137,6 +137,11 @@ namespace MajdataPlay.FFmpeg
         public uint Height => (uint)(_texture != null ? _texture.height : _info?.Height ?? 0);
         /// <summary>Gets the estimated source frame rate in frames per second, or zero if unavailable.</summary>
         public double FrameRate => _info?.FrameRate ?? 0;
+        /// <summary>Gets the average video stream bit rate in bits per second, or zero if unavailable.</summary>
+        public long BitRate => _info?.BitRate ?? 0;
+        /// <summary>Gets the estimated video bit rate near the currently displayed frame, in bits per second; zero if unavailable.</summary>
+        /// <remarks>Uses compressed video packets over up to one second of media time. Pausing retains the value; seeking and closing clear it.</remarks>
+        public long CurrentBitRate { get; private set; }
         /// <summary>Gets the video encoding name, such as h264, or an empty string if unavailable.</summary>
         public string CodecName => _info?.Codec ?? "";
         /// <summary>Gets the selected FFmpeg decoder name, or an empty string if unavailable.</summary>
@@ -368,6 +373,7 @@ namespace MajdataPlay.FFmpeg
             _seekCompletion?.TrySetCanceled(); _seekCompletion = null;
             _info = null; _prepared = false; _playWhenReady = false; _waitingForFrame = false; _stepRequested = false; _hardwareActive = false;
             _clock.Pause(); _clock.Set(0); _lastFrameEnd = 0; _lastReportedTime = -1; _frameNumber = 0;
+            CurrentBitRate = 0;
             State = VideoPlaybackState.Idle;
             ReleasePresentation();
             if (_uploadTexture != null) Destroy(_uploadTexture);
@@ -390,6 +396,7 @@ namespace MajdataPlay.FFmpeg
             _clock.Pause(); _clock.Set(_seekTarget);
             _afterSeek = afterSeek; _waitingForFrame = false; _stepRequested = false;
             State = VideoPlaybackState.Seeking;
+            CurrentBitRate = 0;
             _session.Seek(_seekTarget);
         }
 
@@ -535,6 +542,7 @@ namespace MajdataPlay.FFmpeg
                 MajDebug.LogInfo("FFmpeg", "[Player] Texture transfer=" + TransferMode + ".");
             }
             if (_targetTexture != null) { Graphics.Blit(output, _targetTexture); output = _targetTexture; }
+            CurrentBitRate = frame.CurrentBitRate;
             SetTexture(output);
             if (!IsPresentationCurrent(session, revision)) return false;
             _lastFrameEnd = frame.PresentationTime + Math.Max(0.001, frame.Duration);
@@ -636,6 +644,7 @@ namespace MajdataPlay.FFmpeg
                 // Publish only after controls can safely operate on the replacement.
                 // A TextureChanged listener may Pause, Seek, Close or open another URL;
                 // no recovery work after this callback may override that decision.
+                CurrentBitRate = 0;
                 SetTexture(null);
             }
             catch (Exception recoveryError)

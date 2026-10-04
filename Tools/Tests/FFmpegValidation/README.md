@@ -10,11 +10,17 @@ dotnet run --project Tools/Tests/FFmpegValidation/FFmpegValidation.csproj -- `
   "Assets/StreamingAssets/MaiCharts/Original/Zunda Overdance/bg.mp4"
 ```
 
-需要 .NET 9 SDK，默认 Unity Editor 路径为 `C:/Program Files/Unity Editors/6000.3.17f1/Editor`；其他安装路径可用 `-p:UnityEditor=...`。此命令在 Windows x64 进程中运行，新增硬件下载检查需要支持 H.264 D3D11VA 的实际 GPU；不带两个参数只运行不依赖 native 的时钟测试。.NET 工程编译真实 Diagnostics/ZString 并引用项目 PolySharp 分析器，不定义 `ENABLE_PROFILER`，因而不调用 Unity 原生 profiler；日志保留在真实 MajDebug 队列，未调用 Unity 初始化或连接未初始化的 Unity logger。
+需要 .NET 9 SDK，默认 Unity Editor 路径为 `C:/Program Files/Unity Editors/6000.3.17f1/Editor`；其他安装路径可用 `-p:UnityEditor=...`。此命令在 Windows x64 进程中运行，新增硬件下载检查需要支持 H.264 D3D11VA 的实际 GPU；不带两个参数只运行不依赖 native 的时钟和码率统计测试。.NET 工程编译真实 Diagnostics/ZString 并引用项目 PolySharp 分析器，不定义 `ENABLE_PROFILER`，因而不调用 Unity 原生 profiler；日志保留在真实 MajDebug 队列，未调用 Unity 初始化或连接未初始化的 Unity logger。
 
 覆盖：真实视频元数据、RGBA 解码、PTS、前后 seek、EOF 延迟帧排空、预取消、有界预载、连续 seek、快速关闭，以及人工 AVFrame 的像素级上下方向、四方向旋转、非方形尺寸、YUV limited/full range、动态像素格式、裁剪与超限拒绝。硬件测试创建独立 D3D11VA 设备，在没有 Unity 纹理互操作回调的情况下解码、下载 RGBA、跳转并检查真实像素，断言 `HardwareDecoded` 与 CPU 像素存储同时成立。
 
 原生后端回退测试检查 H.264 的 D3D12VA/Vulkan 硬件配置，并注入首选设备获取失败，验证严格 GPU 模式和允许 CPU 上传模式均可尝试下一硬件后端、得到正确的实际设备身份并继续 seek。此测试验证回退链，不代表已在对应原生后端完成视频解码。
+
+## Inspector 码率
+
+`Bitrate (current)` / `CurrentBitRate` 根据最近约 1 秒媒体时间内的视频压缩包字节数估算，单位为 bit/s（界面自动换算 bps/kbps/Mbps）。数据随实际显示帧更新，后台预读不提前改变读数，倍速不乘码率，暂停保留当前值，seek/关闭清零。`Bitrate (average)` / `BitRate` 保留 FFmpeg 报告的视频流平均码率；未知值显示 `Unknown`。
+
+统计不包含音频、容器或网络协议开销。窗口不足 1 秒时使用已有媒体跨度；窗口边缘按数据包持续时间比例分摊字节。缺少 PTS 时使用 DTS，两者均缺少或包时长未知时按帧率估算时间，因此实时值是局部估计。固定容量统计覆盖乱序 PTS、预读到的未来帧、VFR 和 seek；极端输入超过容量时暂报未知，待不完整窗口移出后恢复。测试检查这些计算边界，以及真实软件/硬件帧携带码率、跳转后历史重置与末帧保留。
 
 ## CPU Profiler
 

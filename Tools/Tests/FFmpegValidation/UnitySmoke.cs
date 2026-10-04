@@ -80,22 +80,30 @@ public sealed class FFmpegPlayerSmoke : MonoBehaviour
         Check(_player.Texture != null && _player.Width > 0 && _player.Height > 0, "preload presents first texture");
         Check(_player.Length > 0 && _player.IsSeekable, "timeline metadata");
         var first = _player.Time;
+        long firstBitRate = _player.CurrentBitRate;
+        Check(firstBitRate > 0, "first displayed frame reports its video bitrate");
         yield return new WaitForSecondsRealtime(0.12f);
         Check(_player.Time == first, "preload clock frozen");
+        Check(_player.CurrentBitRate == firstBitRate, "decode read-ahead does not change displayed bitrate while preloaded");
         Check(_player.SetRate(2), "rate accepted");
+        Check(_player.CurrentBitRate == firstBitRate, "playback rate does not scale the media bitrate");
         Check(!_player.SetRate(-1), "reverse rate rejected");
         _player.Play();
         yield return new WaitForSecondsRealtime(0.35f);
         Check(_player.Time > first + 150 && _frames > 1, "play advances time and frames");
         _player.Pause();
         var paused = _player.Time;
+        long pausedBitRate = _player.CurrentBitRate;
         yield return new WaitForSecondsRealtime(0.12f);
         Check(Math.Abs(_player.Time - paused) < 2, "pause freezes clock");
+        Check(_player.CurrentBitRate == pausedBitRate, "pause retains bitrate of the displayed frame");
         var seek = _player.SeekAsync(Math.Min(1, _player.LengthSeconds / 2));
+        Check(_player.CurrentBitRate == 0, "seek clears stale bitrate before replacement frame");
         start = UnityEngine.Time.realtimeSinceStartup;
         while (!seek.IsCompleted) { CheckTimeout(start); yield return null; }
         seek.GetAwaiter().GetResult();
         Check(!_player.IsPlaying && _player.State == VideoPlaybackState.Paused, "seek retains pause");
+        Check(_player.CurrentBitRate > 0, "seek updates bitrate from the replacement frame");
         // Exercise actual GPU contents, not just frame notifications. The selected fixture
         // contains a non-uniform image at this timestamp; use equivalent media if overriding it.
         yield return null;
@@ -136,6 +144,7 @@ public sealed class FFmpegPlayerSmoke : MonoBehaviour
         CheckDecoderIdentity();
         _player.Close();
         Check(!_player.IsPrepared && _player.Texture == null, "close releases texture and session");
+        Check(_player.CurrentBitRate == 0, "close clears bitrate");
         var interrupted = _player.PreloadAsync(path);
         _player.Close();
         Check(interrupted.IsCanceled, "close cancels preparation");
@@ -302,6 +311,7 @@ public sealed class FFmpegPlayerSmoke : MonoBehaviour
             callback = (player, texture) =>
             {
                 if (texture != null) return;
+                Check(player.CurrentBitRate == 0, control + ": recovery clears bitrate before the texture callback");
                 player.TextureChanged -= callback;
                 callbacks++;
                 if (control == "Pause") player.Pause();

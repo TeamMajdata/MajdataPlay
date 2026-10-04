@@ -14,6 +14,7 @@
   <ItemGroup>
     <Compile Include="Program.cs" />
     <Compile Include="ConverterChecks.cs" />
+    <Compile Include="VideoBitRateChecks.cs" />
     <Compile Include="../../../Assets/Plugins/MajdataPlay/FFmpeg/Runtime/**/*.cs" />
     <Compile Include="../../../Assets/Plugins/MajdataPlay/Diagnostics/**/*.cs" />
     <Compile Include="../../../Assets/Plugins/ZString/**/*.cs" />
