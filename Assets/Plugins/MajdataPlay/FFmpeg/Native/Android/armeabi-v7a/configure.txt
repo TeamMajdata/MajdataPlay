@@ -1,10 +1,11 @@
-install prefix            /tmp/majdata-av1-all/install/android-armv7
-source path               /tmp/majdata-av1-all/source
+install prefix            /home/lezi/.cache/majdata-ffmpeg-android-recording/install/android-armv7
+source path               /home/lezi/.cache/majdata-ffmpeg-android-recording/source
 C compiler                clang --target=armv7a-linux-androideabi23
 C library                 bionic
 host C compiler           gcc
 host C library            glibc
 ARCH                      arm (armv7-a)
+version string suffix     MajdataPlay-AMF-RC-v1-c0604b924b6a
 big-endian                no
 runtime cpu detection     yes
 ARMv5TE enabled           yes
@@ -209,6 +210,7 @@ escape124               pcm_u24le               yuv4
 escape130               pcm_u32be               zero12v
 
 Enabled encoders:
+h263                    mpeg4
 
 Enabled hwaccels:
 av1_vulkan              hevc_vulkan
@@ -362,6 +364,8 @@ iamf                    pcm_f64le               yuv4mpegpipe
 ico                     pcm_mulaw
 
 Enabled muxers:
+avi                     mov                     webm
+matroska                mp4
 
 Enabled protocols:
 android_content         gopher                  rtp

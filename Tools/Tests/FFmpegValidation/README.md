@@ -22,7 +22,7 @@ dotnet run --project Tools/Tests/FFmpegValidation/FFmpegValidation.csproj -- `
 
 ```powershell
 dotnet run --project Tools/Tests/FFmpegValidation/FFmpegValidation.csproj -- `
-  <包含编码器的Windows-x64原生库目录> `
+  Assets/Plugins/MajdataPlay/FFmpeg/Native/Windows/x86_64 `
   Tools/Tests/FFmpegValidation/.work/encoding --encode
 ```
 
@@ -42,11 +42,11 @@ dotnet run --project Tools/Tests/FFmpegValidation/FFmpegValidation.csproj -- `
 
 真实编码模式也覆盖后台录制会话：GPU 等待读回与已完成队列共享固定容量，失败读回归还原缓冲区；后完成的早期帧不得被晚期帧超越；Stop 等待未完成读回并排空，取消则在 GPU 回调未到达时完成关闭，迟到回调不会重新启动会话。生成的视频还会检查缺帧间隔和完整封装尾部。
 
-旧的播放专用构建没有任何编码器；可用以下命令验证缺失能力的错误路径：
+当前正式原生库已包含录制能力。缺失能力模式须使用保留的历史播放专用库；它们没有任何编码器，不能将以下目录替换为当前正式插件目录：
 
 ```powershell
 dotnet run --project Tools/Tests/FFmpegValidation/FFmpegValidation.csproj -- `
-  Assets/Plugins/MajdataPlay/FFmpeg/Native/Windows/x86_64 `
+  <历史播放专用Windows-x64原生库目录> `
   Tools/Tests/FFmpegValidation/.work/encoding-unavailable --encode-unavailable
 ```
 
@@ -213,6 +213,27 @@ Windows 使用对应 x86/x64 MinGW 编译器和 import libraries，运行时选�
 
 Android 使用对应 ARMv7/ARM64 NDK 编译器，保持与原生库相同 API/ABI；将测试程序、两个素材及同架构 `.so` 推到独立 `/data/local/tmp/` 测试目录，通过该目录的 `LD_LIBRARY_PATH` 运行，无需安装或替换正式应用。该检查验证原生库的软件解码与像素转换，不验证 Unity 生命周期、托管 ABI、纹理显示或硬件解码；动态库搜索路径的独立验证仍使用下面的 Linux 测试。
 
+### 跨平台原生录制检查
+
+[EncoderNativeSmoke.c](EncoderNativeSmoke.c) 是不依赖 Unity 的 C11 录制检查。使用同架构的固定 FFmpeg 头文件和库编译，输出目录需提前创建且不含已有同名录制文件：
+
+```bash
+cc -std=c11 -Wall -Wextra -Werror -I"$ffmpeg_prefix/include" \
+  Tools/Tests/FFmpegValidation/EncoderNativeSmoke.c \
+  -L"$ffmpeg_prefix/lib" -Wl,-rpath,"$ffmpeg_prefix/lib" \
+  -lavformat -lavcodec -lswscale -lavutil -lm -o /tmp/encoder-native-smoke
+mkdir -p /tmp/encoder-recording-output
+/tmp/encoder-native-smoke /tmp/encoder-recording-output
+# 对支持 H.264 VideoToolbox 的 macOS 设备单独检查硬件实现：
+/tmp/encoder-native-smoke /tmp/encoder-recording-output h264_videotoolbox
+```
+
+默认使用 `mpeg4`，CBR/VBR 各录制与解码 60 帧，检查实际 encoder、软件线程上限、target/min/max/VBV、RGBA 上下方向、保留时间间隔的 PTS、帧数、排空、EOF 和独占创建后的输出字节保留。MPEG4 CBR 会额外要求平坦画面最后一秒的填充码率接近目标。可选 `h264_videotoolbox` 仅用于 macOS，明确禁止软件回退，检查 constant-bit-rate 模式选项并打印实际码率；固定 iPhoneOS 包装器没有应用相同的 RequireHardware 标记，因此该可选硬件测试在 iOS 明确拒绝，默认 MPEG4 检查不受影响。此硬件测试保留最大码率检查，但没有验证恒定目标填充。初次 Apple 实测的 CBR payload 为 11,072 bit/s，目标为 200,000 bit/s，未通过最初的目标 ±20% 填充断言；接受配置与可解码不等于证明目标填充成立。具体设备、NV12 复测与限制由 Apple 验证结果记录。
+
+Linux 交付目录只保留版本化 `.so`，直接链接交付目录时使用 `-l:libavformat.so.63 -l:libavcodec.so.63 -l:libswscale.so.10 -l:libavutil.so.61`，或用原始 prefix 的无版本链接并指向交付库运行。Windows 需要同架构 import libraries 和 DLL；Android 使用同 ABI NDK 编译器，把程序、同架构 `.so` 推到独立 `/data/local/tmp/` 目录并设置该目录的 `LD_LIBRARY_PATH`；iOS Simulator 链接静态库时还需 Apple frameworks。该检查不代表 Unity Camera、GPU 读回、托管绑定或其他硬件编码器已验证。
+
+[AndroidNativeSmoke.c](AndroidNativeSmoke.c) 单独检查真实 Android 设备上的七个 FFmpeg 库与 ABI 4 桥接加载、固定版本及补丁标记、MPEG4/muxer/libdav1d/MediaCodec/Vulkan Video 构建入口，以及 AImage/AHardwareBuffer 动态符号和物理 GPU 的 AHB/SYNC_FD/FOREIGN/YCbCr 前置能力。使用对应 NDK 编译器的 `-std=gnu11 -Wall -Wextra -Werror`、固定 FFmpeg/Vulkan include 目录和 `-ldl` 编译，刻意不链接 FFmpeg；运行参数为交付库的绝对目录，并将同目录加入 `LD_LIBRARY_PATH`。该程序没有 Java VM 或 Unity 图形设备，不能证明实际 MediaCodec/Vulkan Video 解码或 GPU 图像导入已经通过。
+
 ### Linux 加载路径检查
 
 ```bash
@@ -225,14 +246,14 @@ bash Tools/Tests/FFmpegValidation/run-linux.sh
 
 ## Camera 录制 Player
 
-同 ABI 的原生库需要先按 `Tools/FFmpeg/README.md` 重建，确保包含录制 encoder/muxer。旧播放专用库只验证明确的缺少能力诊断。使用独立的忽略目录，不修改主工程场景、Player Settings 或已打包原生库：
+当前正式原生插件已包含录制 encoder/muxer，以下命令直接使用这些插件。测试使用独立的忽略目录，不修改主工程场景、Player Settings；历史播放专用库仅用于缺少能力诊断：
 
 ```powershell
 ./Tools/Tests/FFmpegValidation/run-unity.ps1 -Backend Mono -Architecture x64 -Graphics d3d11 `
-  -TestCameraCapture -NativeDirectory Tools/FFmpeg/.build/recording-ready/Windows/x86_64 `
+  -TestCameraCapture `
   -WorkDirectory Tools/Tests/FFmpegValidation/.work/camera-builtin
 ./Tools/Tests/FFmpegValidation/run-unity.ps1 -Backend Mono -Architecture x64 -Graphics d3d11 `
-  -CaptureUrp -NativeDirectory Tools/FFmpeg/.build/recording-ready/Windows/x86_64 `
+  -CaptureUrp `
   -WorkDirectory Tools/Tests/FFmpegValidation/.work/camera-urp
 ```
 

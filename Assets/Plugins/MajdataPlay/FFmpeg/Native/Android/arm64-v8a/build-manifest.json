@@ -17,9 +17,9 @@
     "note": "All upstream public headers present in the binding header snapshot are compared after CRLF normalization before building. Generated avconfig.h and ffversion.h are excluded."
   },
   "host": "Linux-6.18.40.1-microsoft-standard-WSL2-x86_64-with-glibc2.39",
-  "builtUtc": "2026-10-04T17:32:11.512568+00:00",
+  "builtUtc": "2026-10-05T09:04:48.097935+00:00",
   "configure": [
-    "--prefix=/tmp/majdata-av1-all/install/android-arm64",
+    "--prefix=/home/lezi/.cache/majdata-ffmpeg-android-recording/install/android-arm64",
     "--disable-doc",
     "--disable-programs",
     "--disable-debug",
@@ -31,6 +31,9 @@
     "--enable-pic",
     "--disable-gpl",
     "--disable-nonfree",
+    "--extra-version=MajdataPlay-AMF-RC-v1-c0604b924b6a",
+    "--enable-encoder=mpeg4",
+    "--enable-muxer=mov,mp4,matroska,webm,avi",
     "--enable-shared",
     "--disable-static",
     "--target-os=android",
@@ -51,48 +54,60 @@
     "--extra-cflags=-I/mnt/c/Users/LeZi/source/repos/LingFeng-bbben/MajdataPlay/Tools/FFmpeg/.build/toolchains/Vulkan-Headers-vulkan-sdk-1.4.328.1/include",
     "--disable-hwaccel=apv_vulkan,dpx_vulkan,ffv1_vulkan,prores_raw_vulkan,prores_vulkan",
     "--enable-libdav1d",
-    "--pkg-config=sh /tmp/majdata-av1-all/dav1d-android-arm64-c60f6643c76d/pkg-config.sh"
+    "--pkg-config=sh /home/lezi/.cache/majdata-ffmpeg-android-recording/dav1d-android-arm64-c60f6643c76d/pkg-config.sh"
   ],
   "files": [
     {
       "file": "libavcodec.so",
-      "bytes": 11945040,
-      "sha256": "e1adb7f10685a688ac4749e79171b9db0f6a02e31b85001ea7d7b3162d4b34a6"
+      "bytes": 12172416,
+      "sha256": "eb6343428c8cce83ee36b310f9d5939bab6c4b6178cea17a64123b18d50780f6"
     },
     {
       "file": "libavdevice.so",
-      "bytes": 9104,
-      "sha256": "f2046d529e5254721af1ca8d3f18d7c61b30ded29f76567f11398e601767d22d"
+      "bytes": 9328,
+      "sha256": "695a8090dc415995e2bf9055bdfee483b3a81fa312b1c7a779a2e8c5866022cd"
     },
     {
       "file": "libavfilter.so",
-      "bytes": 138200,
-      "sha256": "a9e51e2f682105ff6a8270597e2bbbb6368c39d1516dd4c32f7b78f444ebd07b"
+      "bytes": 138408,
+      "sha256": "58e8a3080f8d1fa7107ef01928c223fae7a013024d1d020d48e3ed146efb8e9c"
     },
     {
       "file": "libavformat.so",
-      "bytes": 1841272,
-      "sha256": "ac0f42b3d75a172c01ca03867973343956941198a09bff711969afafc21a02e3"
+      "bytes": 2175120,
+      "sha256": "edde9c1320b78e72be2192043f5e169d6fdb9107e12a8f54762a49394fed95f7"
     },
     {
       "file": "libavutil.so",
-      "bytes": 821464,
-      "sha256": "e61592586386eb09638cab24befb0dae21241c085f1f7dfc96ed827da29c36bd"
+      "bytes": 821736,
+      "sha256": "17265bbacc1ce771b310dfb3484e1316df88d1c907289ee684cb7bcd9ba71cc3"
     },
     {
       "file": "libswresample.so",
-      "bytes": 97752,
-      "sha256": "6e03e3b3c337f2054c9006d82e31d617ca10ce63ff7296a81f9ffe8fadd74e52"
+      "bytes": 97960,
+      "sha256": "a1ff2266bb9197bb92e85f36c0b6d246ddac840236e3d2b7091bbaf7a6b8a785"
     },
     {
       "file": "libswscale.so",
-      "bytes": 1280056,
-      "sha256": "a80779764332b6ad7fd8c516cd388be3f04701b840bd623618b54bb61d97bd8c"
+      "bytes": 1280232,
+      "sha256": "14c02e846a2a75cc140d75ac31e281dcc563ae12e1bc6f79593020984daaa8aa"
     }
   ],
   "softwareDecoders": [
     "libdav1d"
   ],
+  "recordingProfile": {
+    "encoders": [
+      "mpeg4"
+    ],
+    "muxers": [
+      "mov",
+      "mp4",
+      "matroska",
+      "webm",
+      "avi"
+    ]
+  },
   "buildDependencies": {
     "dav1d": {
       "version": "1.5.3",
@@ -109,6 +124,18 @@
       "tag": "vulkan-sdk-1.4.328.1",
       "commit": "19725e4d48082fe78e26622b15d3080ccd54112b",
       "minimumHeaderVersion": 317
+    },
+    "nvCodecHeaders": {
+      "repository": "https://github.com/FFmpeg/nv-codec-headers.git",
+      "tag": "n12.1.14.1",
+      "commit": "7c8e7fc751f803c672b42c37d9199c8a4f98b327",
+      "minimumWindowsDriver": "531.61",
+      "minimumLinuxDriver": "530.41.03"
+    },
+    "amfHeaders": {
+      "repository": "https://github.com/GPUOpen-LibrariesAndSDKs/AMF.git",
+      "tag": "v1.5.2",
+      "commit": "eadd00804d5f7e5cd8c85d540073198312870776"
     },
     "d3d12HeaderOverlay": {
       "source": "llvm-mingw-20260922-ucrt-x86_64.zip",
@@ -136,6 +163,14 @@
       }
     }
   },
+  "sourcePatches": [
+    {
+      "file": "patches/amf-rate-control.patch",
+      "sha256": "c0604b924b6ae1ee718c045d34f1448ebb78652ccacadfdb54799810c69e17f7",
+      "versionMarker": "MajdataPlay-AMF-RC-v1-c0604b924b6a",
+      "stagedFile": "amf-rate-control.patch"
+    }
+  ],
   "buildDependencyLicenses": [
     {
       "file": "dav1d.LICENSE.txt",

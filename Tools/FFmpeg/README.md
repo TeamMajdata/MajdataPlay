@@ -123,7 +123,7 @@ Android 当前使用 MPEG-4 软件路径。此配置没有加入 x264/x265/libvp
 
 上游 AMF 包装器会忽略若干驱动属性设置错误。录制补丁检查码率模式、VBV 缓冲、目标/峰值码率、HRD 与 CBR filler 的设置和回读，并在驱动拒绝请求时让编码器打开失败。构建用 `--extra-version=MajdataPlay-AMF-RC-v1-<补丁 SHA256 前12位>` 标记此能力；C# 录制器只接受与当前补丁匹配的 AMF 原生库，旧 AMF 库会被拒绝并按同格式回退。修改补丁时须同步 C# 中的能力标记。`sourcePatches` 在两份构建清单中记录完整 SHA256，交付目录附带原始补丁，方便按固定源码重建。
 
-构建时逐个检查录制 encoder/muxer 的配置符号，缺少任一项就失败。`build-provenance.json` 和交付 `build-manifest.json` 的 `recordingProfile` 保存显式列表；Windows/Linux 产物附带 `nv-codec-headers.LICENSE.txt`，Windows 另外携带 `AMF.LICENSE.txt`。历史交付库使用 `--disable-encoders --disable-muxers`，仅添加 C# 组件不会补齐录制能力；必须按本脚本重建所需目标，并在更新已加载 DLL 后重启 Editor/Player。本次代码修改不替换仓库中的原生二进制。
+构建时逐个检查录制 encoder/muxer 的配置符号，缺少任一项就失败。`build-provenance.json` 和交付 `build-manifest.json` 的 `recordingProfile` 保存显式列表；Windows/Linux 产物附带 `nv-codec-headers.LICENSE.txt`，Windows 另外携带 `AMF.LICENSE.txt`。2026-10-05 已按此配置重建并更新全部八个正式 Unity 平台/架构插件，以及两个独立 iOS 模拟器包；具体构建与实测边界见 [BUILD-RESULTS.md](BUILD-RESULTS.md) 和 [APPLE-RESULTS.md](APPLE-RESULTS.md)。历史播放专用库使用 `--disable-encoders --disable-muxers`，仍需重建才能录制；更新原生库后须重启已加载旧库的 Editor/Player。
 
 输出位置：
 

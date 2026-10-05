@@ -4,7 +4,7 @@
 
 运行时程序集为 `MajdataPlay.FFmpeg`，引用项目已接入的 `FFmpeg.AutoGen`、`MajdataPlay.Diagnostics` 和 `Unity.RenderPipelines.Core.Runtime`。本项目绑定的原生 ABI 是 FFmpeg **9.0.1**；请使用 [Tools/FFmpeg](../../../../Tools/FFmpeg) 的构建脚本，不能混用其他主版本的库。Mono / IL2CPP 使用同一套直接 P/Invoke 和带 `MonoPInvokeCallback` 的静态回调。
 
-支持的全部软件编码格式、平台硬件解码矩阵及实际 Player 限制见 [当前 FFmpeg 解码格式支持](../../../../Tools/FFmpeg/CODEC-SUPPORT.md)。
+支持的全部软件解码格式、平台硬件解码矩阵及实际 Player 限制见 [当前 FFmpeg 解码格式支持](../../../../Tools/FFmpeg/CODEC-SUPPORT.md)。
 
 ## 使用
 
@@ -161,7 +161,7 @@ await capturer.StopRecordingAsync();
 
 CBR 设置目标码率以及相同的 min/max；VBR 使用独立目标和最大码率，后端通过约 1 秒 VBV 缓冲限制，单帧和短时窗口仍会波动。软件线程数限制 FFmpeg codec worker，不包含应用采集线程和驱动的辅助线程。硬件偏好仅回退到**同格式**的软件实现，不会偷偷改换编码格式；不支持请求的模式/码率约束时明确失败。
 
-原生库必须包含录制 encoder 和 muxer，构建配置及 NVENC/AMF/VAAPI/VideoToolbox 条件见 [Tools/FFmpeg](../../../../Tools/FFmpeg/README.md)。全部平台的默认软件路径是 MPEG-4 Part 2（支持 CBR/VBR）；H.264/HEVC/VP9/AV1 的可用性取决于原生构建与设备。当前窄构建没有加入 x264/x265/libvpx/libaom 软件编码库，选择这些格式的软件模式会明确报缺少实现。历史播放专用库关闭了所有 encoder/muxer，需要重建相应平台并重启已加载旧库的 Editor/Player。AMF 还必须包含构建脚本应用的码率检查补丁：检查驱动设置返回值和初始化后的关键参数，原生配置中的能力标记必须匹配当前补丁；旧未检查的 AMF 实现会明确拒绝。
+当前交付的各平台原生库已包含录制 encoder 和 muxer，构建配置及 NVENC/AMF/VAAPI/VideoToolbox 条件见 [Tools/FFmpeg](../../../../Tools/FFmpeg/README.md)。全部平台的默认软件路径是 MPEG-4 Part 2（支持 CBR/VBR）；H.264/HEVC/VP9/AV1 的可用性取决于原生构建与设备。当前窄构建没有加入 x264/x265/libvpx/libaom 软件编码库，选择这些格式的软件模式会明确报缺少实现。历史播放专用库关闭了所有 encoder/muxer，需要重建相应平台并重启已加载旧库的 Editor/Player。AMF 还必须包含构建脚本应用的码率检查补丁：检查驱动设置返回值和初始化后的关键参数，原生配置中的能力标记必须匹配当前补丁；旧未检查的 AMF 实现会明确拒绝。
 
 取消 token 作用于整个录制会话；取消或 I/O 错误可能留下未完成文件。正常停止、禁用和销毁会停止新捕获，并保留已提交 GPU 请求所需纹理直到回读结束，再释放后台资源。旧 GPU 请求尚未释放时会拒绝重启，以免连续取消累积多份缓冲池；先等待 `StopRecordingAsync()`，取消时也需等待该 Task 结束并处理取消异常。需要确保文件可播放时显式等待正常的 `StopRecordingAsync()`，不要在主线程同步等待 Task。硬件编码也经 CPU RGBA 回读/转换/上传，不能把 Hardware 状态解释为 GPU 零拷贝录制。
 

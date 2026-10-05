@@ -1,3 +1,75 @@
+# Apple 录制原生库重建与验证（2026-10-05）
+
+本轮按现有录制 profile 实际重建全部五个 Apple 目标：macOS ARM64/x64、iOS ARM64、iOS 模拟器 ARM64/x64。每个目标均重新编译七个 FFmpeg 库与 Metal 桥接，显式包含 `mpeg4`、`h264_videotoolbox` 编码器和 `mov/mp4/matroska/webm/avi` muxer，保留 dav1d 1.5.3 的 AV1 8/10-bit 软件解码。正式 macOS 两套及 iOS device 插件已更新；两套模拟器归档仅放在忽略的 `Tools/FFmpeg/.build/artifacts`。已有 44 个 Apple `.meta` GUID 均保留。
+
+构建固定 FFmpeg `n9.0.1`、commit `bf1b838f2ab88b4f8fd83443325c782ea0e0f7fa`，逐一比较 143 个现有公开绑定头文件，再应用已审查的 AMF 检查补丁。补丁 SHA256 为 `c0604b924b6ae1ee718c045d34f1448ebb78652ccacadfdb54799810c69e17f7`，版本标识为 `MajdataPlay-AMF-RC-v1-c0604b924b6a`；Apple 不编入 AMF，但仍记录相同源码 provenance。公开头文件、FFmpeg 主版本和 Apple 桥接 ABI 2 未改变。
+
+远端使用独立目录 `/Users/codex/codex-work/majdata-recording-apple-20261005`。以 APFS clone 复制此前干净缓存，再同步当前构建工具、绑定头文件与验证源码，未覆盖远端既有工作区或修改子模块。环境为 Apple M4、macOS 27.0.1、Xcode 27.0（27A266a）、macOS/iPhoneOS/iPhoneSimulator 27 SDK、AppleClang 21.0.0、Python 3.14.5、CMake 4.4.2、Ninja 1.13.2、任务缓存 NASM 2.16.01/pkgconf 2.5.1、固定 Meson 1.9.1。复用现有依赖缓存，未安装系统软件。
+
+| 目标 | 构建与链接 | 本轮实际运行 |
+| --- | --- | --- |
+| macOS ARM64 | 七个 dylib、Metal 桥接及编码检查链接 PASS | 全库加载/软件 H.264 144 checks；真实 VideoToolbox 解码与 Metal 231 checks；AV1 两种位深各 3570 checks；MPEG4 CBR/VBR 2021 checks；PASS。H.264 VT 编码见下述限制 |
+| macOS x64 | 七个 dylib、Metal 桥接及编码检查链接 PASS | 未验证：无 Rosetta，执行返回 `Bad CPU type in executable`（errno 86） |
+| iOS ARM64 | 七个静态库、Metal 桥接、Unity 注册入口、AV1 与编码检查链接 PASS | 未验证：没有实体 iOS 设备 |
+| iOS 模拟器 ARM64 | 七个静态库、Metal 桥接、Unity 注册入口、AV1 与编码检查链接 PASS | iOS 27 模拟器 Metal/软件回退 116 checks；AV1 两种位深各 3570 checks；MPEG4 CBR/VBR 2021 checks；PASS。VideoToolbox 解码明确 SKIP，硬件编码未验证 |
+| iOS 模拟器 x64 | 七个静态库、Metal 桥接、Unity 注册入口、AV1 与编码检查链接 PASS | 未验证：没有 x64 运行支持 |
+
+`verify-artifacts.py` 对 35 个 FFmpeg 库和 5 个桥接执行 SHA256、CPU、Apple SDK 平台与清单检查，全部 PASS；在 macOS ARM64 另外实际加载七个 FFmpeg ABI、桥接 ABI 2、`libdav1d` 与录制入口。加载测试清除 `DYLD_LIBRARY_PATH`，先加载 avformat，验证 `@loader_path` 真正解析同目录依赖。dav1d 静态并入 `libavcodec`；iOS 测试只链接交付的七个归档及桥接，没有额外链接 dav1d。iOS x64 链接仍报告 159 个 NASM 对象缺少 `LC_BUILD_VERSION` 的平台标签提示；CPU 为 x86_64，其余对象平台检查及最终链接通过。
+
+## 实际录制与 VideoToolbox CBR 限制
+
+共享 [EncoderNativeSmoke.c](../Tests/FFmpegValidation/EncoderNativeSmoke.c) 以 C11 `-Wall -Wextra -Werror` 编译，分别录制 60 帧 128×64/30 fps 的 CBR/VBR 视频，验证实际编码器、软件线程上限 2、解码帧数、像素与方向、包含间隔的 PTS、flush/drain、尾部索引及独占输出不覆盖。macOS ARM64 与 iOS ARM64 模拟器实际 MPEG4 结果均为：VBR 最后一秒 3616 bit/s，CBR 199976 bit/s（目标 200000 bit/s），两种模式各 60 帧，2021 checks PASS。MPEG4 的平坦场景 CBR 目标填充断言也通过。
+
+macOS M4 的 `h264_videotoolbox` 显式设置 `allow_sw=0`、`require_sw=0`，NV12 输入，实际硬件编码 60 帧后解码、PTS、像素、drain 与独占输出 2022 checks PASS。VBR 最后一秒 11744 bit/s（目标 200000、最大 400000）；CBR 最后一秒仅 **11072 bit/s**（目标和最大均 200000）。`constant_bit_rate=1` 与 DataRateLimits 参数被接受，但原始 CBR 目标 ±20% 填充检查 **FAIL**。后来的 2022 checks 仅确认配置接受、测得负载与 roundtrip，不能证明目标填充效果通过。
+
+Apple [live streaming 官方示例](https://developer.apple.com/documentation/VideoToolbox/encoding-video-for-live-streaming) 将 ConstantBitRate 单独用于目标填充，而 AverageBitRate 与 DataRateLimits 配对。固定 FFmpeg 的 `videotoolboxenc.c` 在 CBR 设置 ConstantBitRate 后，仍根据 `rc_max_rate` 设置 DataRateLimits。独立、忽略目录中的诊断程序得到：
+
+| 诊断差异 | CBR 最后一秒负载 | 结论 |
+| --- | --- | --- |
+| 当前正式参数组合 | 11072 bit/s | 接受 CBR 配置，目标填充未通过 |
+| 仅设置 `realtime=1` | 11072 bit/s | 该提示未改善填充 |
+| 启用 `AV_CODEC_FLAG_LOW_DELAY` | 编码器 open 失败 | M4 低延迟模式明确不支持 ConstantBitRate |
+| 仅 CBR 设置 `rc_max_rate=0`，不设置 DataRateLimits | 204680 bit/s | 接近 200000 目标，支持参数冲突判断；该路径移除了独立最大码率限制，属于诊断，**不是当前组件或正式配置验证** |
+
+本轮只重建现有原生 profile，没有为通过测试而修改生产编码器参数。后续修复须明确 CBR 与最大码率的约束关系或属性顺序，并独立验证；上述平坦场景上限检查不能替代高复杂度视频的最大码率验证。
+
+`allow_sw=0` 对应的 RequireHardware 选择仅在 FFmpeg 的 `!TARGET_OS_IPHONE` 分支设置，因此 macOS 的本轮证据不能外推为 iOS 硬件编码选择通过。最终共享 C 检查在 iOS optional VT 请求时明确返回 2；ARM64 模拟器实测此保护分支通过，默认 MPEG4 测试不受影响。iOS H.264 VT 硬件编码仍需实体设备验证。
+
+## 命令和证据
+
+```bash
+# 在上述独立远端目录执行；使用已存在的任务工具链和缓存
+export PATH="/opt/homebrew/bin:$PWD/Tools/FFmpeg/.build/toolchains/pkgconf/bin:/Users/codex/codex-work/majdata-ffmpeg-20261003/Tools/FFmpeg/.build/toolchains/nasm/bin:$PATH"
+/opt/homebrew/bin/python3 -u Tools/FFmpeg/build.py \
+  --targets macos-arm64,macos-x64,ios-arm64,ios-simulator-arm64,ios-simulator-x64 \
+  --jobs 8 --require-all
+/opt/homebrew/bin/python3 Tools/FFmpeg/verify-artifacts.py
+bash Tools/Tests/FFmpegValidation/run-apple-native.sh arm64 "$PWD/bg.mp4"
+bash Tools/Tests/FFmpegValidation/run-ios-native.sh ios-arm64 "$PWD/bg.mp4"
+bash Tools/Tests/FFmpegValidation/run-ios-native.sh ios-simulator-x64 "$PWD/bg.mp4"
+FFMPEG_SIMULATOR_UDID=31D01781-B001-4DCA-8888-B5E7A8549DAC \
+  bash Tools/Tests/FFmpegValidation/run-ios-native.sh ios-simulator-arm64 "$PWD/bg.mp4"
+
+# 编码检查用同架构 install/include 和交付目录的实际版本化 dylib
+native="$PWD/Assets/Plugins/MajdataPlay/FFmpeg/Native/macOS/arm64"
+xcrun clang -arch arm64 -std=c11 -Wall -Wextra -Werror \
+  -I"$PWD/Tools/FFmpeg/.build/install/macos-arm64/include" \
+  Tools/Tests/FFmpegValidation/EncoderNativeSmoke.c \
+  "$native/libavformat.63.dylib" "$native/libavcodec.63.dylib" \
+  "$native/libswscale.10.dylib" "$native/libavutil.61.dylib" \
+  -Wl,-rpath,"$native" -lm -o /absolute/ignored/path/EncoderNativeSmoke
+/absolute/ignored/path/EncoderNativeSmoke /absolute/empty/output-directory
+/absolute/ignored/path/EncoderNativeSmoke /absolute/another-empty/output-directory h264_videotoolbox
+# AV1/iOS 编译、frameworks 与 simulator 签名/运行步骤见验证 README。
+```
+
+回传产物位于 `Tools/FFmpeg/.build/apple-recording-ready-20261005`，完整构建/链接/运行日志与诊断源码位于其中 `evidence`（66 个文件）。本轮实际运行的共享 C 源 SHA256 为 `e7f1025265e429e92fd7c26de83b662e14931c32116d7e8e930d65ea84b646b1`；当前 `bdfbb9c889f9c17d716db3a98f2f64af679a2d6aa41a7a990782ebb76ff7f895` 仅收窄 PASS 摘要措辞并增加 MPEG4 填充结果说明，测试逻辑未改变。保留原严格填充失败 `apple-recording-encode-h264_videotoolbox.log`、原始数值 probe `apple-recording-vt-cbr-probe.log`、最终 NV12 配置检查 `apple-recording-encode-vt-nv12-final.log` 与三个参数诊断日志。压缩包远端/本地 SHA256 均一致：
+
+- 产物 `apple-recording-artifacts-20261005.tar.gz`：`00e3dcd3a323aaf38e3d1c9392b2a5216107571dedd832739918788ce1f30fb7`。
+- 证据 `apple-recording-evidence-20261005.tar.gz`：`8c224c6804e31fe6f466698c8d212e03e23980704d9d20e441b917bfafdf6c5e`。
+
+Apple Unity 6000.3.17f1 Editor/Player、Mono/IL2CPP 的相机录制集成尚未验证：远端没有对应 Unity Editor。实体 iOS、x64 实际运行以及当前 VT CBR 参数的目标填充仍未验证或未通过，如上分别记录。以下保留本轮之前的 AV1 与历史构建结果。
+
 # Apple AV1 软件解码构建与验证（2026-10-05）
 
 在用户授权的 `mac-mini` 上重新构建全部五个 Apple 目标，固定 FFmpeg `n9.0.1` / `bf1b838f2ab88b4f8fd83443325c782ea0e0f7fa`，新增静态 dav1d 1.5.3（BSD-2-Clause）。每个目标显式设置 Meson `-Dbitdepths=8,16` 并检查 `CONFIG_8BPC` / `CONFIG_16BPC`；FFmpeg 配置检查 `CONFIG_LIBDAV1D_DECODER`。16BPC 路径包含 AV1 10-bit 解码。

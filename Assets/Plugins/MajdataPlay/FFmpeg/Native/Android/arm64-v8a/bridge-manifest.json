@@ -1,23 +1,24 @@
 {
   "target": "android-arm64",
+  "bridgeAbi": 4,
   "host": "Linux-6.18.40.1-microsoft-standard-WSL2-x86_64-with-glibc2.39",
-  "builtUtc": "2026-10-04T02:01:44.17249+08:00",
+  "builtUtc": "2026-10-05T09:05:11.573676+00:00",
   "cmake": [
     "/usr/bin/cmake",
     "-S",
     "/mnt/c/Users/LeZi/source/repos/LingFeng-bbben/MajdataPlay/Tools/FFmpeg/Native",
     "-B",
-    "/mnt/c/Users/LeZi/source/repos/LingFeng-bbben/MajdataPlay/Tools/FFmpeg/.build/native-video-portable/bridge-android-arm64-7fb1fa03ea87",
+    "/home/lezi/.cache/majdata-ffmpeg-android-recording/bridge-android-arm64-62982991e8ba",
     "-DCMAKE_BUILD_TYPE=Release",
-    "-DFFMPEG_ROOT=/mnt/c/Users/LeZi/source/repos/LingFeng-bbben/MajdataPlay/Tools/FFmpeg/.build/native-video-portable/install/android-arm64",
+    "-DFFMPEG_ROOT=/home/lezi/.cache/majdata-ffmpeg-android-recording/install/android-arm64",
     "-DFFU_VULKAN_HEADERS=/mnt/c/Users/LeZi/source/repos/LingFeng-bbben/MajdataPlay/Tools/FFmpeg/.build/toolchains/Vulkan-Headers-vulkan-sdk-1.4.328.1/include",
     "-DCMAKE_TOOLCHAIN_FILE=/mnt/c/Users/LeZi/source/repos/LingFeng-bbben/MajdataPlay/Tools/FFmpeg/.build/toolchains/android-ndk-r27c/build/cmake/android.toolchain.cmake",
     "-DANDROID_ABI=arm64-v8a",
     "-DANDROID_PLATFORM=android-23",
     "-DANDROID_STL=c++_static",
-    "-DAVUTIL_INCLUDE_DIR=/mnt/c/Users/LeZi/source/repos/LingFeng-bbben/MajdataPlay/Tools/FFmpeg/.build/native-video-portable/install/android-arm64/include",
-    "-DAVUTIL_LIBRARY=/mnt/c/Users/LeZi/source/repos/LingFeng-bbben/MajdataPlay/Tools/FFmpeg/.build/native-video-portable/install/android-arm64/lib/libavutil.so",
-    "-DAVCODEC_LIBRARY=/mnt/c/Users/LeZi/source/repos/LingFeng-bbben/MajdataPlay/Tools/FFmpeg/.build/native-video-portable/install/android-arm64/lib/libavcodec.so",
+    "-DAVUTIL_INCLUDE_DIR=/home/lezi/.cache/majdata-ffmpeg-android-recording/install/android-arm64/include",
+    "-DAVUTIL_LIBRARY=/home/lezi/.cache/majdata-ffmpeg-android-recording/install/android-arm64/lib/libavutil.so",
+    "-DAVCODEC_LIBRARY=/home/lezi/.cache/majdata-ffmpeg-android-recording/install/android-arm64/lib/libavcodec.so",
     "-G",
     "Ninja",
     "-DCMAKE_MAKE_PROGRAM=/usr/bin/ninja"
@@ -25,8 +26,8 @@
   "files": [
     {
       "file": "libFFmpegUnityBridge.so",
-      "sha256": "4a99d3ba8262985a20bcba283ec77e634f20f88aa80398ea5f5bd4895f702de7",
-      "bytes": 2412128
+      "sha256": "adc045854ba67fa8f12c4bcf90f6634670ecfc86f85a61f8202e35f89b698a69",
+      "bytes": 2388768
     }
   ],
   "sourceSha256": {
@@ -35,7 +36,7 @@
     "Bridge.cpp": "f78a629154048576ea619d87778d07b62bd14904833d3d7be94e2cc7c83132ea",
     "Bridge.h": "5857915b21cc6a9838ccb536ed159ddd1a4643a8c637cec55437acdb4bbbab9c",
     "CMakeLists.txt": "f704c3220593c64d03bb17f257a1193c624aefa096a3c6b86c2f6c036287d5b6",
-    "D3D11.cpp": "cefa4c8a20ac5ef9a4a09adea49f7ff256f597268b70e87056f35ac689dfa12e",
+    "D3D11.cpp": "fba3061e9a672324a86f611d8506601bc1fd3ef584f4842ecdd3cdb9c5ed4eb7",
     "D3D12.cpp": "eb46e634f080ee33468a57873f18707a7bd8ce654d7bec895ef9736574b9c18b",
     "D3D12.h": "c8d04c14bb3bf26ed7ea3a2c315f3adaff27a59ae7cceaac2b2f6e64580bc0a4",
     "LinuxVaapi.cpp": "48c3afafa17bc592bdc10c3a18bec36449a7bb2ca65896c3084751999dc9488b",
@@ -52,7 +53,7 @@
     "WglInterop.cpp": "142f395a2f50d827d1f0cbcdf44c45fc7072a39bf32e05d5bc32e83ab0136534",
     "WglInterop.h": "7f044ebca6b389eae55a9d697303b86ca998b516ac4b52194efce9aa715ea8bd",
     "tests/AndroidCapabilitySmoke.cpp": "9a0d62ad67f1ac1505005ea2305056d9aed68187739e1f27f99492aca845fe33",
-    "tests/D3D11Smoke.cpp": "57da5c1185626d5bcc519b2f65fc42dc419ff0c4dc6c20efb8b2c8902a3f52dd",
+    "tests/D3D11Smoke.cpp": "513ac145d470476e36df83a5fdc83b97b13aa6f5812a8c0a8767564d9f4dcd27",
     "tests/D3D12InteropProbe.cpp": "bad358e49b10775b471a83a98c43b05a4420f8f9a30f17290fea7e1b0dd8bf61",
     "tests/D3D12Smoke.cpp": "4167bbc7f5e4fa7e0926384fa3a8fbb12c5ecc7f3a0e94631b108587ef246b78",
     "tests/D3D12VideoSmoke.cpp": "aab78958e2607d8cc81777a729f7bd7d60f503364a11329df000128b183dd390",
@@ -79,6 +80,5 @@
     "ThirdParty/Vulkan-Headers/include/vulkan/vulkan_android.h": "f815593b7d20f291850b8d85e21e3d47fb123932805ba3606df631bdff4cb1e7",
     "ThirdParty/Vulkan-Headers/include/vulkan/vulkan_core.h": "3dba3ef8adaff8f24e9080e74d365fc64b5fe53ec8bda607c29c103e15888fcf",
     "ThirdParty/Vulkan-Headers/include/vulkan/vulkan_win32.h": "fa3a9263d1764b82b634180ec5d3010adc216108bae11c02b157f733073f87f8"
-  },
-  "bridgeAbi": 4
+  }
 }

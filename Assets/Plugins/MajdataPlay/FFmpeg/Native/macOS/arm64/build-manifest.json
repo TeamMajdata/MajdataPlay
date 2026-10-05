@@ -17,9 +17,9 @@
     "note": "All upstream public headers present in the binding header snapshot are compared after CRLF normalization before building. Generated avconfig.h and ffversion.h are excluded."
   },
   "host": "macOS-27.0.1-arm64-arm-64bit-Mach-O",
-  "builtUtc": "2026-10-04T17:19:40.354387+00:00",
+  "builtUtc": "2026-10-05T08:41:32.545581+00:00",
   "configure": [
-    "--prefix=/Users/codex/codex-work/majdata-av1-20261005/Tools/FFmpeg/.build/install/macos-arm64",
+    "--prefix=/Users/codex/codex-work/majdata-recording-apple-20261005/Tools/FFmpeg/.build/install/macos-arm64",
     "--disable-doc",
     "--disable-programs",
     "--disable-debug",
@@ -31,6 +31,9 @@
     "--enable-pic",
     "--disable-gpl",
     "--disable-nonfree",
+    "--extra-version=MajdataPlay-AMF-RC-v1-c0604b924b6a",
+    "--enable-encoder=mpeg4,h264_videotoolbox",
+    "--enable-muxer=mov,mp4,matroska,webm,avi",
     "--enable-shared",
     "--disable-static",
     "--target-os=darwin",
@@ -45,48 +48,61 @@
     "--enable-securetransport",
     "--install-name-dir=@loader_path",
     "--enable-libdav1d",
-    "--pkg-config=sh /Users/codex/codex-work/majdata-av1-20261005/Tools/FFmpeg/.build/dav1d-macos-arm64-27500137f4b8/pkg-config.sh"
+    "--pkg-config=sh /Users/codex/codex-work/majdata-recording-apple-20261005/Tools/FFmpeg/.build/dav1d-macos-arm64-27500137f4b8/pkg-config.sh"
   ],
   "files": [
     {
       "file": "libavcodec.63.dylib",
-      "bytes": 12182104,
-      "sha256": "0813145387dc91b6a01caf09a19e6990fbaf43500296b080b74d083130e5522a"
+      "bytes": 12471880,
+      "sha256": "4997c5e76daf7940af8153c48f407430ff4bb76152ed497bad9abfc7c98a1e5f"
     },
     {
       "file": "libavdevice.63.dylib",
       "bytes": 52232,
-      "sha256": "fa1cbf55c812091e9e77fca002e5d0dc8d71a8ab6cd2fd0e007012701723ae06"
+      "sha256": "5bc7889672cf62c9cd93fcca983cc10933df312df22e525e193c0bc5ad975293"
     },
     {
       "file": "libavfilter.12.dylib",
       "bytes": 183864,
-      "sha256": "30821ac3f4045f4f5b86dc024f578996cf522c0d1c4d355b2a4487e6affdcfb3"
+      "sha256": "3fd17b9ef352d8ae4de543ad3eaeceecf340a4ee941e29bc9fca2f5af436e3cf"
     },
     {
       "file": "libavformat.63.dylib",
-      "bytes": 1802856,
-      "sha256": "3fe892c40057f4160689c27597d01a9ebde0d85d4efd72e9c6772ff313aa3bd7"
+      "bytes": 2137576,
+      "sha256": "710d1f0d50eac99be60345fe79fb7da3b5c6cab97b761aa0bf6f8b1124184fde"
     },
     {
       "file": "libavutil.61.dylib",
       "bytes": 744840,
-      "sha256": "3e33b900dc47c641633ee1334adbabee785d9613684400c8f4f96727a31bc24e"
+      "sha256": "b49be53c0e69e45db512022caa3c121c7761c537dcc923f0ede64ae86f29436a"
     },
     {
       "file": "libswresample.7.dylib",
       "bytes": 120312,
-      "sha256": "c0f7032935e564db2f13c3fb32e1903aec034b670c3a4ed1307c9b1be96b0df1"
+      "sha256": "f40225bfd4b0755fc30a7ea14d896be0706ca43656c267253e33a6cbe7ec3596"
     },
     {
       "file": "libswscale.10.dylib",
       "bytes": 1218376,
-      "sha256": "597b3899cdc4cb6c69419855a0e461d63f49a2d3d3795ff9252e2682f960c2eb"
+      "sha256": "a36760b21621c95e56e87c4beb9b6a90be3653d6c3ed183703d33218e1fa5194"
     }
   ],
   "softwareDecoders": [
     "libdav1d"
   ],
+  "recordingProfile": {
+    "encoders": [
+      "mpeg4",
+      "h264_videotoolbox"
+    ],
+    "muxers": [
+      "mov",
+      "mp4",
+      "matroska",
+      "webm",
+      "avi"
+    ]
+  },
   "buildDependencies": {
     "dav1d": {
       "version": "1.5.3",
@@ -103,6 +119,18 @@
       "tag": "vulkan-sdk-1.4.328.1",
       "commit": "19725e4d48082fe78e26622b15d3080ccd54112b",
       "minimumHeaderVersion": 317
+    },
+    "nvCodecHeaders": {
+      "repository": "https://github.com/FFmpeg/nv-codec-headers.git",
+      "tag": "n12.1.14.1",
+      "commit": "7c8e7fc751f803c672b42c37d9199c8a4f98b327",
+      "minimumWindowsDriver": "531.61",
+      "minimumLinuxDriver": "530.41.03"
+    },
+    "amfHeaders": {
+      "repository": "https://github.com/GPUOpen-LibrariesAndSDKs/AMF.git",
+      "tag": "v1.5.2",
+      "commit": "eadd00804d5f7e5cd8c85d540073198312870776"
     },
     "d3d12HeaderOverlay": {
       "source": "llvm-mingw-20260922-ucrt-x86_64.zip",
@@ -130,6 +158,14 @@
       }
     }
   },
+  "sourcePatches": [
+    {
+      "file": "patches/amf-rate-control.patch",
+      "sha256": "c0604b924b6ae1ee718c045d34f1448ebb78652ccacadfdb54799810c69e17f7",
+      "versionMarker": "MajdataPlay-AMF-RC-v1-c0604b924b6a",
+      "stagedFile": "amf-rate-control.patch"
+    }
+  ],
   "buildDependencyLicenses": [
     {
       "file": "dav1d.LICENSE.txt",

@@ -1,10 +1,11 @@
-install prefix            /tmp/majdata-av1-all/install/win-x86
-source path               /tmp/majdata-av1-all/source
+install prefix            /tmp/majdata-recording-windows/install/win-x86
+source path               /tmp/majdata-recording-windows/source
 C compiler                i686-w64-mingw32-gcc
 C library                 mingw64
 host C compiler           gcc
 host C library            glibc
 ARCH                      x86 (generic)
+version string suffix     MajdataPlay-AMF-RC-v1-c0604b924b6a
 big-endian                no
 runtime cpu detection     yes
 standalone assembly       yes
@@ -48,8 +49,9 @@ External libraries:
 libdav1d                schannel
 
 External libraries providing hardware acceleration:
-d3d11va                 dxva2
-d3d12va                 vulkan
+amf                     d3d12va                 nvenc
+cuda                    dxva2                   vulkan
+d3d11va                 ffnvcodec
 
 Libraries:
 avcodec                 avformat                swscale
@@ -221,6 +223,9 @@ escape130               pcm_u8
 evrc                    pcm_vidc
 
 Enabled encoders:
+av1_amf                 h264_amf                hevc_nvenc
+av1_nvenc               h264_nvenc              mpeg4
+h263                    hevc_amf
 
 Enabled hwaccels:
 av1_d3d11va             hevc_d3d11va2           vc1_dxva2
@@ -383,6 +388,8 @@ iamf                    pcm_f64le               yuv4mpegpipe
 ico                     pcm_mulaw
 
 Enabled muxers:
+avi                     mov                     webm
+matroska                mp4
 
 Enabled protocols:
 async                   gophers                 rtmp

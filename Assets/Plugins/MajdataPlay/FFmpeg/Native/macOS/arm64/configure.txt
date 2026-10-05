@@ -1,10 +1,11 @@
-install prefix            /Users/codex/codex-work/majdata-av1-20261005/Tools/FFmpeg/.build/install/macos-arm64
-source path               /Users/codex/codex-work/majdata-ffmpeg-20261003/Tools/FFmpeg/.build/source
+install prefix            /Users/codex/codex-work/majdata-recording-apple-20261005/Tools/FFmpeg/.build/install/macos-arm64
+source path               ./src
 C compiler                /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang
 C library                 
 host C compiler           gcc
 host C library            
 ARCH                      aarch64 (generic)
+version string suffix     MajdataPlay-AMF-RC-v1-c0604b924b6a
 big-endian                no
 runtime cpu detection     yes
 NEON enabled              yes
@@ -215,6 +216,7 @@ escape124               pcm_u24le
 escape130               pcm_u32be
 
 Enabled encoders:
+h263                    h264_videotoolbox       mpeg4
 
 Enabled hwaccels:
 av1_videotoolbox        mpeg1_videotoolbox      prores_videotoolbox
@@ -370,6 +372,8 @@ iamf                    pcm_f64le               yuv4mpegpipe
 ico                     pcm_mulaw
 
 Enabled muxers:
+avi                     mov                     webm
+matroska                mp4
 
 Enabled protocols:
 async                   httpproxy               rtmpts
@@ -412,3 +416,13 @@ Enabled indevs:
 Enabled outdevs:
 
 License: LGPL version 2.1 or later
+checkasm_config_generated.h is unchanged
+checkasm_header_config_generated.h is unchanged
+libavutil/avconfig.h is unchanged
+libavfilter/filter_list.c is unchanged
+libavcodec/parser_list.c is unchanged
+libavcodec/bsf_list.c is unchanged
+libavformat/demuxer_list.c is unchanged
+libavdevice/indev_list.c is unchanged
+libavdevice/outdev_list.c is unchanged
+libavformat/protocol_list.c is unchanged

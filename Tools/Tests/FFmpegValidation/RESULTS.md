@@ -2,6 +2,48 @@
 
 最近验证日期：2026-10-05；此前跨平台矩阵执行于 2026-10-03。Windows / Unity 6000.3.17f1 / AMD Radeon RX 580 2048SP；Linux 使用本机 WSL Ubuntu 24.04；Android 真机为 Mi MIX 2S / Android 15 API 35 / Adreno 630 / Vulkan 1.1.128；Apple 构建测试使用用户提供的 Mac mini M4。当前 Windows/Linux/Android 图形桥接 ABI 为 **4**，Apple 保持 **2**；下方 ABI2/3 的记录为此前版本实测。
 
+## 2026-10-05：各平台正式原生插件更新后的复验
+
+本轮重建现有十个 FFmpeg 目标，八套正式插件已更新，两个 iOS 模拟器包独立保存。FFmpeg n9.0.1 ABI、公开绑定头文件和 136 个既有 `.meta` 保持不变；完整工具链、录制入口、许可证及平台结果见 [构建记录](../../FFmpeg/BUILD-RESULTS.md) 与 [Apple 记录](../../FFmpeg/APPLE-RESULTS.md)。下方较早的隔离录制构建与播放专用库记录是历史结果。
+
+| 检查 | 当前新库结果 |
+| --- | --- |
+| `python Tools/FFmpeg/verify-artifacts.py` | 十目标 70 库、10 桥接，架构/SDK/哈希/importer/许可证/补丁全部 PASS；Windows x64 实际加载 ABI |
+| 正式 Windows x64 `.NET --encode-hardware` | **838 assertions PASS**；MPEG4 软件 CBR/VBR 与 H.264 AMF 硬件 CBR/VBR、回退/模式身份、排空、取消及文件所有权 |
+| 正式 Windows x64 `.NET` H.264 播放 | **446 assertions PASS**；真实解码/seek、硬件 CPU transport、有界队列与取消 |
+| Windows x86 `EncoderNativeSmoke.c` | **2021 checks PASS**；实际 MPEG4 CBR/VBR 各 60 帧，worker 上限 2、像素/PTS、排空与独占输出 |
+| Unity x86 Mono Camera / D3D11 | Built-in 软件与实际 H.264 AMF 硬件各 **197 checks PASS** |
+| Unity x64 IL2CPP Camera / D3D11 | URP Camera Stack + 实际 H.264 AMF 硬件 **246 checks PASS** |
+| Unity x86/x64 Mono 严格 GPU 播放 | 各 **31 assertions PASS**；D3D11VA 解码与 GPU 纹理转换，无 CPU 视频回读 |
+| Linux 原生 | 加载/解码 **144 checks PASS**；桥接 ABI 4/无效参数保护 PASS；MPEG4 编码 **2021 checks PASS**，不依赖外部 `LD_LIBRARY_PATH` |
+| Android 真机 ARM64/ARMv7 | 每 ABI MPEG4 编码 **2021 checks PASS**；八库/ABI 4/编码入口/设备前置 **54 checks PASS**；AV1 8/10-bit 各 **3570 checks PASS** |
+| Mac M4 / iOS ARM64 模拟器 | MPEG4 各 **2021 checks PASS**；H.264/Metal、AV1 8/10-bit 回归见 Apple 记录 |
+
+Windows 使用 Unity **6000.3.17f1**。x64 Camera 先使用已校验 ready 目录；Windows 正式库替换完成后字节与 ready 完全一致，正式目录另复跑 .NET 录制及播放。x86 Camera 与两架构 GPU 播放直接从正式 Native 复制插件。没有构建或修改主工程场景/Player Settings，也没有用根目录生成的 `.csproj` 做 .NET 构建。
+
+```powershell
+python Tools/FFmpeg/verify-artifacts.py
+dotnet run --project Tools/Tests/FFmpegValidation/FFmpegValidation.csproj --no-build -- `
+  Assets/Plugins/MajdataPlay/FFmpeg/Native/Windows/x86_64 `
+  Tools/Tests/FFmpegValidation/.work/encoding-deployed --encode-hardware
+dotnet run --project Tools/Tests/FFmpegValidation/FFmpegValidation.csproj --no-build -- `
+  Assets/Plugins/MajdataPlay/FFmpeg/Native/Windows/x86_64 `
+  "Assets/StreamingAssets/MaiCharts/Original/Zunda Overdance/bg.mp4"
+./Tools/Tests/FFmpegValidation/run-unity.ps1 -Backend IL2CPP -Architecture x64 -Graphics d3d11 `
+  -CaptureUrp -CaptureHardware -NativeDirectory Tools/FFmpeg/.build/recording-all-ready/Windows/x86_64 `
+  -WorkDirectory Tools/Tests/FFmpegValidation/.work/camera-urp-il2cpp
+./Tools/Tests/FFmpegValidation/run-unity.ps1 -Backend Mono -Architecture x86 -Graphics d3d11 `
+  -TestCameraCapture -WorkDirectory Tools/Tests/FFmpegValidation/.work/camera-rebuilt-x86
+./Tools/Tests/FFmpegValidation/run-unity.ps1 -Backend Mono -Architecture x86 -Graphics d3d11 `
+  -CaptureHardware -SkipBuild -WorkDirectory Tools/Tests/FFmpegValidation/.work/camera-rebuilt-x86
+# 对 x86 和 x64 各运行一次，用当前正式插件验证图形桥接：
+./Tools/Tests/FFmpegValidation/run-unity.ps1 -Backend Mono -Architecture x64 -Graphics d3d11 -RequireHardware
+```
+
+Windows 原始日志为 `.work/encoding-deployed.log`、`.work/decoding-deployed.log`、`.work/encoding-native-win-x86.log`、`.work/camera-rebuilt-{x86,x86-hardware,x64-il2cpp}.log` 与 `.work/playback-rebuilt-{x86,x64}.log`。Linux 为 `.work/linux-native.txt`、`.work/linux-encoder-recording.log`；Android 构建及运行证据归档在 `Tools/FFmpeg/.build/android-recording-evidence`，Apple 在 `.build/apple-recording-ready-20261005/evidence`。Windows DLL 占用解除后已完整替换；早期默认沙箱阻止 Unity UPM IPC 的构建尝试，在允许本地 IPC 后重跑通过。原 ZString nullable/ref-safety 与播放器未赋值字段编译警告仍存在，没有新增 C# 实现改动。
+
+当前 macOS H.264 VT 的配置与 60 帧 roundtrip 通过，但 CBR + DataRateLimits 组合的 200,000 目标填充未通过，实际仅 11,072 bit/s。移除该独立最大率设置的诊断结果不能当作正式参数组合通过。Linux 无 `/dev/dri`、Android Vulkan 仅 1.1.128，故本轮没有验证 Linux 硬件录制或 Android Vulkan Video 1.3/Unity/MediaCodec GPU 帧。实体 iOS、Apple x64 运行、Apple Unity Player 及其他硬件编码格式仍未验证；不由原生编译、加载或低复杂度 fixture 结果推断通过。
+
 ## 2026-10-05：Camera 录制的托管配置与真实 FFmpeg 编码
 
 使用固定 FFmpeg 9.0.1 ABI 的隔离 Windows x64 录制构建；本机实际 GPU 为 AMD Radeon RX 580 2048SP，驱动 31.0.21910.5。没有覆盖 `Assets/Plugins/MajdataPlay/FFmpeg/Native` 中原有播放专用 DLL，也没有修改 FFmpeg.AutoGen 子模块。测试产物与日志保存在忽略的 `.work/` 中。

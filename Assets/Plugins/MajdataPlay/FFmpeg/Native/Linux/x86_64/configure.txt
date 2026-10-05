@@ -1,8 +1,9 @@
-install prefix            /tmp/majdata-av1-all/install/linux-x64
-source path               /tmp/majdata-av1-all/source
+install prefix            /tmp/majdata-native-linux-recording/install/linux-x64
+source path               /tmp/majdata-native-linux-recording/source
 C compiler                cc
 C library                 glibc
 ARCH                      x86 (generic)
+version string suffix     MajdataPlay-AMF-RC-v1-c0604b924b6a
 big-endian                no
 runtime cpu detection     yes
 standalone assembly       yes
@@ -45,7 +46,8 @@ External libraries:
 iconv                   libdav1d
 
 External libraries providing hardware acceleration:
-libdrm                  vaapi                   vulkan
+cuda                    libdrm                  vaapi
+ffnvcodec               nvenc                   vulkan
 
 Libraries:
 avcodec                 avformat                swscale
@@ -217,6 +219,9 @@ escape130               pcm_u8
 evrc                    pcm_vidc
 
 Enabled encoders:
+av1_nvenc               h264_nvenc              hevc_vaapi
+av1_vaapi               h264_vaapi              mpeg4
+h263                    hevc_nvenc              vp9_vaapi
 
 Enabled hwaccels:
 av1_vaapi               hevc_vaapi              vc1_vaapi
@@ -373,6 +378,8 @@ iamf                    pcm_f64le               yuv4mpegpipe
 ico                     pcm_mulaw
 
 Enabled muxers:
+avi                     mov                     webm
+matroska                mp4
 
 Enabled protocols:
 async                   gopher                  rtmpt

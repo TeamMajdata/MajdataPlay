@@ -1,5 +1,44 @@
 # FFmpeg 构建记录
 
+## 2026-10-05：全部平台/架构的录制原生库重建
+
+按现有录制 profile 重建全部十个目标，共 **70 个 FFmpeg 库和 10 个图形桥接**。八套正式 Unity 插件已更新到 `Assets/Plugins/MajdataPlay/FFmpeg/Native`，两个 iOS 模拟器包保留在忽略的 `.build/artifacts/ios-simulator-*`，不与 device 插件同时导入。固定 FFmpeg `n9.0.1` / `bf1b838f2ab88b4f8fd83443325c782ea0e0f7fa`、143 个 AutoGen 公开头文件及七库 ABI 不变；Windows/Linux/Android 桥接保持 ABI 4，Apple 保持 ABI 2。
+
+| 目标 | 构建环境与产物 |
+| --- | --- |
+| Windows x86/x64 | WSL Ubuntu 24.04、MinGW-w64 GCC 13-win32、NASM；每架构七 DLL + 桥接 |
+| Linux x64 | WSL GCC 13.3.0、NASM、隔离 libva/libdrm；七 SO + 桥接，依赖按 `$ORIGIN` 从同目录解析 |
+| Android ARMv7/ARM64 | WSL NDK r27c / Clang、API 23；每 ABI 七 SO + 桥接，全部 PT_LOAD 至少 16 KiB |
+| macOS x64/ARM64 | SSH `mac-mini`、Apple M4、Xcode 27 / macOS 27 SDK；每架构七 dylib + Metal 桥接 |
+| iOS device ARM64 | 同一 Mac 的 iPhoneOS 27 SDK；七静态库 + Metal 桥接，静态注册入口实际链接 |
+| iOS simulator ARM64/x64 | iPhoneSimulator 27 SDK；每架构七静态库 + Metal 桥接，链接与 SDK 平台标记检查 |
+
+全部目标包含 MPEG4 软件 CBR/VBR 和 MOV/MP4/MKV/WebM/AVI muxer；Windows 另包含 NVENC/AMF H.264/HEVC/AV1，Linux 另包含 NVENC H.264/HEVC/AV1 与 VAAPI H.264/HEVC/VP9/AV1，Apple 另包含 H.264 VideoToolbox。保持 dav1d 1.5.3 静态 AV1 8/10-bit 解码；没有增加 x264/x265/libvpx/libaom 软件编码器。各目标 decoder/hwaccel 名称集合与重建前完全相同，新增编码入口没有扩大解码矩阵。
+
+Windows 七个 FFmpeg DLL 的 PE imports 与旧库完全相同；桥接由原 LLVM-MinGW UCRT 改用与本轮 FFmpeg 相同的 GCC 13-win32，CRT imports 改为系统 `msvcrt.dll`，没有新增需随包部署的动态依赖。两种架构均通过真实 Unity GPU 播放与 Camera 录制验证。
+
+各清单记录实际编译命令、时间、二进制 SHA256、录制 profile、依赖许可证和检查补丁。AMF 补丁 SHA256 为 `c0604b924b6ae1ee718c045d34f1448ebb78652ccacadfdb54799810c69e17f7`，能力标记为 `--extra-version=MajdataPlay-AMF-RC-v1-c0604b924b6a`；交付原始补丁与 `.meta`。Windows 附带 AMF/NVIDIA 头文件许可证，Linux 附带 NVIDIA 头文件许可证。**136 个原有 `.meta` 的字节和 GUID 全部保持不变**，新增资产与 `.meta` 配对。
+
+| 实际运行验证 | 结果与范围 |
+| --- | --- |
+| Windows x64，正式 DLL 的 .NET 9 录制/播放 | **838 / 446 assertions PASS**；MPEG4 CBR/VBR、实际 H.264 AMF CBR/VBR、完整封装/解码/取消/文件所有权；原有 H.264 解码、seek、队列与回退回归 |
+| Windows x86 原生录制 | **2021 checks PASS**；MPEG4 CBR/VBR 各 60 帧、线程上限 2、像素、跳帧 PTS、排空、禁止覆盖 |
+| Unity 6000.3.17f1 Camera | x86 Mono Built-in 软件与 AMF 硬件各 **197 checks PASS**；x64 IL2CPP URP + Camera Stack + AMF 硬件 **246 checks PASS** |
+| Unity Windows 原生桥接 | x86/x64 Mono D3D11VA 严格 GPU 播放各 **31 assertions PASS**，实际 GPU 纹理转换，无 CPU 视频回读 |
+| Linux x64 原生 | 加载/解码 **144 checks PASS**、桥接 ABI/保护分支通过；MPEG4 录制 **2021 checks PASS**，清除 `LD_LIBRARY_PATH` 后仍从交付目录加载 |
+| Android ARM64/ARMv7 真机 | 每 ABI MPEG4 录制 **2021 checks PASS**、全部原生库/ABI 4/录制入口检查 **54 checks PASS**；AV1 8-bit/10-bit 各 **3570 checks / 90 帧 PASS** |
+| macOS ARM64 / iOS simulator ARM64 | MPEG4 录制各 **2021 checks PASS**；各自 AV1 8/10-bit、H.264/Metal 回归通过，详细数据见 [Apple 记录](APPLE-RESULTS.md) |
+
+跨平台原生录制使用新增 [EncoderNativeSmoke.c](../Tests/FFmpegValidation/EncoderNativeSmoke.c)，按各自 C 编译器以 `-std=c11 -Wall -Wextra -Werror` 构建（Android 使用 `-std=gnu11`）；Android 另使用 [AndroidNativeSmoke.c](../Tests/FFmpegValidation/AndroidNativeSmoke.c) 直接加载全部八个插件与检查设备前置条件。共同 MPEG4 CBR 最后一秒为 **199,976 bit/s**，目标 200,000；同一平坦 fixture 的 VBR 为 3,616 bit/s。Windows AMF 正式库原生录制 VBR 为 12,448、CBR 为 200,000 bit/s。本机 RX 580 没有 NVIDIA 编码器；NVENC 入口导出不等于设备运行通过。
+
+Apple H.264 VideoToolbox 已实际禁止 macOS 软件回退并完成两模式逐帧解码，但当前 FFmpeg 同设 ConstantBitRate 与 DataRateLimits 时 CBR 为 **11,072 bit/s**，未通过原始目标填充断言。移除最大码率设置的独立诊断得到 204,680 bit/s；它不代表当前组件参数组合通过，也未应用到正式代码。具体限制、官方依据与诊断证据见 [APPLE-RESULTS.md](APPLE-RESULTS.md)。
+
+本次仍未验证 Linux VAAPI/NVENC 硬件录制（WSL 无 `/dev/dri`）、Android Unity/MediaCodec GPU 帧、Apple Unity Player、实体 iOS、Apple x64 运行及其他硬件编码格式。Android Mi MIX 2S / API 35 / Adreno 630 仅提供 Vulkan 1.1.128，不能将其前置检查外推为 Vulkan Video 1.3 运行通过。没有进行完整多平台发布构建。
+
+实际构建分别使用当前 `build.py` 的 `--targets win-x64,win-x86 --jobs 8 --with-bridge --require-all`、`--targets linux-x64 --jobs 4 --require-all`、`--targets android-arm64,android-armv7 --jobs 4 --require-all`，以及 Mac 上的 `--targets macos-arm64,macos-x64,ios-arm64,ios-simulator-arm64,ios-simulator-x64 --jobs 8 --require-all`。WSL 各任务使用独立源码/构建缓存并设置已有 VAAPI/NDK/头文件环境；Android 改为持久缓存以避免短 WSL 会话清空 `/tmp`。Windows 先校验独立 ready 目录，Unity 占用解除后完整替换正式插件并复验。
+
+最终执行 `python Tools/FFmpeg/verify-artifacts.py`，十目标 **70 库 + 10 桥接** 的 SHA256、CPU/SDK、许可证、补丁及 importer 全部通过，Windows x64 实际加载七库与 ABI 4 桥接；Linux、Android、Mac/模拟器的运行证据单独列于上表。`git diff --check` 通过。运行命令及原始日志位置见 [FFmpeg 验证结果](../Tests/FFmpegValidation/RESULTS.md)；以下保留此前播放专用构建的历史记录。
+
 ## 2026-10-05：Windows x86、Linux 和 Android 的 AV1 8/10-bit 软件解码
 
 在已交付的 Windows x64 基础上，使用 WSL Ubuntu 24.04 完成另外四个非 Apple 目标的 28 个 FFmpeg 库。仍使用固定 FFmpeg `n9.0.1` commit `bf1b838f2ab88b4f8fd83443325c782ea0e0f7fa`，构建前核对 143 个绑定公开头文件；没有更换绑定 ABI、GPU 桥接或既有硬件后端。Apple 本次补全结果见 [APPLE-RESULTS.md](APPLE-RESULTS.md)。

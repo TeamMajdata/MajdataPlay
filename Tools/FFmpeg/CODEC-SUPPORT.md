@@ -6,9 +6,9 @@
 
 ## Camera 录制与编码能力
 
-本文后续统计均为 **解码**，不能当作编码能力清单。历史交付原生库禁用了全部 encoder/muxer，`FFmpegCameraCapturer` 需要按 [构建说明](README.md#配置与输出) 重建对应平台的同 ABI 原生库；本次源码修改没有替换历史交付二进制。
+本文后续统计均为 **解码**，不能当作编码能力清单。2026-10-05 已更新全部平台/架构的正式原生插件及两个独立 iOS 模拟器包，包含下述录制 encoder/muxer，可供 `FFmpegCameraCapturer` 使用；构建和实测范围见 [构建记录](BUILD-RESULTS.md) 与 [Apple 记录](APPLE-RESULTS.md)。历史播放专用库禁用了全部 encoder/muxer，仍需按 [构建说明](README.md#配置与输出) 重建才能录制。
 
-新的窄录制构建配置提供全部平台的 `mpeg4` 软件 CBR/VBR 编码和 MOV/MP4/MKV/WebM/AVI 封装；Windows x86/x64 提供 NVENC/AMF H.264/HEVC/AV1，Linux x64 提供 NVENC H.264/HEVC/AV1 与 VAAPI H.264/HEVC/VP9/AV1，Apple 提供 H.264 VideoToolbox。编码格式与容器必须兼容；WebM 可封装 VP9/AV1，不能封装 MPEG-4/H.264。编译入口不等于相应设备支持。
+当前交付的窄录制配置提供全部平台的 `mpeg4` 软件 CBR/VBR 编码和 MOV/MP4/MKV/WebM/AVI 封装；Windows x86/x64 提供 NVENC/AMF H.264/HEVC/AV1，Linux x64 提供 NVENC H.264/HEVC/AV1 与 VAAPI H.264/HEVC/VP9/AV1，Apple 提供 H.264 VideoToolbox。编码格式与容器必须兼容；WebM 可封装 VP9/AV1，不能封装 MPEG-4/H.264。编译入口不等于相应设备支持。
 
 该配置没有加入 x264/x265/libvpx/libaom；只有 `mpeg4` 可作为全部目标共有的软件 encoder，现有 H.264/HEVC/VP9/AV1 decoder 无法用于软件编码。硬件偏好只允许同格式的软件回退，缺少相应软件入口时报告失败。Android MediaCodec、Windows MediaFoundation、HEVC VideoToolbox 暂不由组件选取，因为固定 FFmpeg 包装器对所请求最大码率或模式的配置缺少完整的可检查结果。
 

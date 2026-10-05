@@ -17,9 +17,9 @@
     "note": "All upstream public headers present in the binding header snapshot are compared after CRLF normalization before building. Generated avconfig.h and ffversion.h are excluded."
   },
   "host": "Linux-6.18.40.1-microsoft-standard-WSL2-x86_64-with-glibc2.39",
-  "builtUtc": "2026-10-04T17:24:13.959081+00:00",
+  "builtUtc": "2026-10-05T08:43:11.414978+00:00",
   "configure": [
-    "--prefix=/tmp/majdata-av1-all/install/linux-x64",
+    "--prefix=/tmp/majdata-native-linux-recording/install/linux-x64",
     "--disable-doc",
     "--disable-programs",
     "--disable-debug",
@@ -31,6 +31,9 @@
     "--enable-pic",
     "--disable-gpl",
     "--disable-nonfree",
+    "--extra-version=MajdataPlay-AMF-RC-v1-c0604b924b6a",
+    "--enable-encoder=mpeg4,h264_nvenc,hevc_nvenc,av1_nvenc,h264_vaapi,hevc_vaapi,vp9_vaapi,av1_vaapi",
+    "--enable-muxer=mov,mp4,matroska,webm,avi",
     "--enable-shared",
     "--disable-static",
     "--target-os=linux",
@@ -38,54 +41,77 @@
     "--cc=cc",
     "--enable-vaapi",
     "--enable-libdrm",
-    "--pkg-config=/mnt/c/Users/LeZi/source/repos/LingFeng-bbben/MajdataPlay/Tools/FFmpeg/.build/toolchains/vaapi-packages/root/usr/bin/pkg-config",
+    "--pkg-config=/tmp/majdata-native-linux-recording/toolchains/vaapi-packages/root/usr/bin/pkg-config",
     "--enable-vulkan",
     "--disable-vulkan-static",
-    "--extra-cflags=-I/mnt/c/Users/LeZi/source/repos/LingFeng-bbben/MajdataPlay/Tools/FFmpeg/.build/toolchains/Vulkan-Headers-vulkan-sdk-1.4.328.1/include",
+    "--extra-cflags=-I/tmp/majdata-native-linux-recording/toolchains/Vulkan-Headers-vulkan-sdk-1.4.328.1/include",
     "--disable-hwaccel=apv_vulkan,dpx_vulkan,ffv1_vulkan,prores_raw_vulkan,prores_vulkan",
+    "--enable-ffnvcodec",
+    "--enable-nvenc",
+    "--disable-nvdec",
+    "--disable-cuvid",
     "--enable-libdav1d",
-    "--pkg-config=sh /tmp/majdata-av1-all/dav1d-linux-x64-cfee5d6ad05c/pkg-config.sh"
+    "--pkg-config=sh /tmp/majdata-native-linux-recording/dav1d-linux-x64-d4e53c58aeb5/pkg-config.sh"
   ],
   "files": [
     {
       "file": "libavcodec.so.63",
-      "bytes": 18174177,
-      "sha256": "c574d1598c19c7a37254cf076c7d75519199e81d6d7d473d84b552c6ef9e47d3"
+      "bytes": 18661833,
+      "sha256": "98937dd868e02852aa6db2d0660591fccef0287cb34570524bb9d130cea07103"
     },
     {
       "file": "libavdevice.so.63",
       "bytes": 17993,
-      "sha256": "74aac2ea9e19a2b37a8d532c557e4079190d6158fb3b78f9139377c50bbef1d6"
+      "sha256": "7b139264eb7faf7b0bf99e92139926314b8064913a3867569e44c01f8db8ef95"
     },
     {
       "file": "libavfilter.so.12",
       "bytes": 152713,
-      "sha256": "4cca492f1020f28347093261c1f5ca7b45832db5a03182d8c0bab6e70bcd6236"
+      "sha256": "febaf00c1d0de513bd3693ae50337a304507647c88540eae7d26097053d89ab8"
     },
     {
       "file": "libavformat.so.63",
-      "bytes": 2019785,
-      "sha256": "bb4c4ac2581320d4b12f8ecab79e926b279f6deb500d5cb7ea43784e9fd4d5df"
+      "bytes": 2384929,
+      "sha256": "aab74b0fbe0d4eed78f036b3cb1218168fa04024a0719c02add8760c43746600"
     },
     {
       "file": "libavutil.so.61",
-      "bytes": 1175369,
-      "sha256": "2ff1fed298516ef2869d3b67cdb9071f5f031a94d90a3e5cdb052f994dc19aa4"
+      "bytes": 1208137,
+      "sha256": "54d418ec6f35119967ab4210c5e3d396aa1061e4001b136bbb18aefb115ae04d"
     },
     {
       "file": "libswresample.so.7",
       "bytes": 145513,
-      "sha256": "8a3d126dccd1f96725b80bf43ee3fdd9323e549bcef33dc4827e3e706545b59b"
+      "sha256": "89dec66278e5fb56b164402520c89f432f3b566c8b19e65c01b2dc8db103d42c"
     },
     {
       "file": "libswscale.so.10",
       "bytes": 2154177,
-      "sha256": "e85b4bf4acdd2e41c1d2ff5cba6cad8d9e14ec6279187eefd4335457da8915fe"
+      "sha256": "111c1d774691ce2e7787c9acf70e952ae2e0de26ddf76e96f1c4e890f234a867"
     }
   ],
   "softwareDecoders": [
     "libdav1d"
   ],
+  "recordingProfile": {
+    "encoders": [
+      "mpeg4",
+      "h264_nvenc",
+      "hevc_nvenc",
+      "av1_nvenc",
+      "h264_vaapi",
+      "hevc_vaapi",
+      "vp9_vaapi",
+      "av1_vaapi"
+    ],
+    "muxers": [
+      "mov",
+      "mp4",
+      "matroska",
+      "webm",
+      "avi"
+    ]
+  },
   "buildDependencies": {
     "dav1d": {
       "version": "1.5.3",
@@ -102,6 +128,18 @@
       "tag": "vulkan-sdk-1.4.328.1",
       "commit": "19725e4d48082fe78e26622b15d3080ccd54112b",
       "minimumHeaderVersion": 317
+    },
+    "nvCodecHeaders": {
+      "repository": "https://github.com/FFmpeg/nv-codec-headers.git",
+      "tag": "n12.1.14.1",
+      "commit": "7c8e7fc751f803c672b42c37d9199c8a4f98b327",
+      "minimumWindowsDriver": "531.61",
+      "minimumLinuxDriver": "530.41.03"
+    },
+    "amfHeaders": {
+      "repository": "https://github.com/GPUOpen-LibrariesAndSDKs/AMF.git",
+      "tag": "v1.5.2",
+      "commit": "eadd00804d5f7e5cd8c85d540073198312870776"
     },
     "d3d12HeaderOverlay": {
       "source": "llvm-mingw-20260922-ucrt-x86_64.zip",
@@ -129,6 +167,14 @@
       }
     }
   },
+  "sourcePatches": [
+    {
+      "file": "patches/amf-rate-control.patch",
+      "sha256": "c0604b924b6ae1ee718c045d34f1448ebb78652ccacadfdb54799810c69e17f7",
+      "versionMarker": "MajdataPlay-AMF-RC-v1-c0604b924b6a",
+      "stagedFile": "amf-rate-control.patch"
+    }
+  ],
   "buildDependencyLicenses": [
     {
       "file": "dav1d.LICENSE.txt",
@@ -139,6 +185,11 @@
       "file": "Vulkan-Headers.LICENSE.txt",
       "sha256": "8bfec46a1b5d1b95e730ea0bb60d76838c7cf443a36b0ed21b8c9f6da6c9a8d5",
       "license": "Apache-2.0"
+    },
+    {
+      "file": "nv-codec-headers.LICENSE.txt",
+      "sha256": "de9b99e658d138562dc069235eb55858cb0188fe6373e6ca5b860503aada5c03",
+      "license": "MIT"
     }
   ],
   "verifiedHardwareBackends": [
