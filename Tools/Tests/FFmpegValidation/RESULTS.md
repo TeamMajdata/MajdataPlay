@@ -2,6 +2,96 @@
 
 最近验证日期：2026-10-05；此前跨平台矩阵执行于 2026-10-03。Windows / Unity 6000.3.17f1 / AMD Radeon RX 580 2048SP；Linux 使用本机 WSL Ubuntu 24.04；Android 真机为 Mi MIX 2S / Android 15 API 35 / Adreno 630 / Vulkan 1.1.128；Apple 构建测试使用用户提供的 Mac mini M4。当前 Windows/Linux/Android 图形桥接 ABI 为 **4**，Apple 保持 **2**；下方 ABI2/3 的记录为此前版本实测。
 
+## 2026-10-05：Camera 录制的托管配置与真实 FFmpeg 编码
+
+使用固定 FFmpeg 9.0.1 ABI 的隔离 Windows x64 录制构建；本机实际 GPU 为 AMD Radeon RX 580 2048SP，驱动 31.0.21910.5。没有覆盖 `Assets/Plugins/MajdataPlay/FFmpeg/Native` 中原有播放专用 DLL，也没有修改 FFmpeg.AutoGen 子模块。测试产物与日志保存在忽略的 `.work/` 中。
+
+| 验证 | 结果 |
+| --- | --- |
+| 默认 .NET 9 托管测试 | **71 assertions PASS**；原时钟、码率和帧池，加上编码选项边界与快照验证 |
+| 原播放专用 DLL，`--encode-unavailable` | **78 assertions PASS**；实际编码器清单为空，打开 MP4 明确报告缺少输出封装器并要求重建录制库 |
+| 隔离 MPEG4/NVENC 构建，`--encode` | **468 assertions PASS**；真实软件 VBR/CBR 编码、封装、RGBA 解码、PTS/帧数、延迟排空、取消和文件所有权 |
+| AMF 检查补丁前的隔离构建，`--encode-hardware` | **838 assertions PASS**；全部软件检查，加上实际 `h264_amf / Hardware` 的 VBR 与 CBR 各 60 帧录制及逐帧像素/PTS/帧数验证 |
+| 旧 AMF 构建，`--encode-unchecked-amf` | **85 assertions PASS**；CBR/VBR 均明确要求检查补丁的版本标记，拒绝未检查驱动属性的实现、不替换 H.264 格式、不创建或覆盖输出 |
+| 当前带 AMF 检查补丁的构建，`--encode-hardware` | **838 assertions PASS**；驱动参数设置与初始化后回读通过，实际软件/硬件 CBR/VBR 编码、解码及所有原生/后台会话回归通过 |
+
+软件 VBR 64×48 的正常/翻转录制与 78×48 的未对齐行宽检查均通过；`SoftwareThreadCount=1`，设置变更不会改变当前会话，跳过的 frame index 保留实际时间间隔。MPEG4 软件 CBR 的最后一秒为 **199,976 bit/s**，目标为 **200,000 bit/s**；恒定平坦画面仍产生目标附近的原生填充数据，60 帧均可正确解码。实际 AMD H.264 VBR 为 **12,448 bit/s**，CBR 为 **200,000 bit/s**，同样使用 200,000 的目标与 400,000 的配置上限；CBR 的有效上限收紧至目标。
+
+AMF 构建的编码器清单为 `h263, mpeg4, av1_nvenc, av1_amf, h264_amf, h264_nvenc, hevc_amf, hevc_nvenc`。本机 NVENC 候选因 `Cannot load nvcuda.dll` 被拒绝，随后成功打开 AMD AMF；因此上述硬件结果只代表 H.264 AMF，不代表 NVIDIA、HEVC 或 AV1 的硬件编码已通过。录制库没有 `libx264`；其软件 H.264 CBR 请求被明确拒绝，没有以 MPEG4 代替请求的编码格式。
+
+后台会话检查固定容量内的 GPU 读回、完成队列、缓冲区归还与有序编码；较晚帧的读回先完成时，仍须等待较早帧。Stop 等待未完成 GPU reservation 并排空，取消则无需等 GPU callback 即可释放 FFmpeg 文件句柄，迟到 callback 不会重开会话。预取消不创建文件，失败的打开不覆盖已有字节，正常/取消结束后可独占打开输出文件。
+
+以下是 AMF 检查补丁前执行的原始命令；第二条原 DLL 测试不依赖任何编码器。AMF 库从隔离构建复制七个 FFmpeg DLL 和清单到专用 fixture 后运行，避免后续构建替换已加载的文件。新版编码器会拒绝这些旧 AMF fixture，硬件正例需要重建含检查补丁的库：
+
+```powershell
+dotnet run --project Tools/Tests/FFmpegValidation/FFmpegValidation.csproj --no-build
+dotnet run --project Tools/Tests/FFmpegValidation/FFmpegValidation.csproj --no-build -- `
+  Assets/Plugins/MajdataPlay/FFmpeg/Native/Windows/x86_64 `
+  Tools/Tests/FFmpegValidation/.work/encoding-unavailable --encode-unavailable
+dotnet run --project Tools/Tests/FFmpegValidation/FFmpegValidation.csproj --no-build -- `
+  Tools/FFmpeg/.build/recording-ready/Windows/x86_64 `
+  Tools/Tests/FFmpegValidation/.work/encoding --encode
+dotnet run --project Tools/Tests/FFmpegValidation/FFmpegValidation.csproj --no-restore -v:q -- `
+  Tools/Tests/FFmpegValidation/.work/recording-amf-native `
+  Tools/Tests/FFmpegValidation/.work/encoding-hardware --encode-hardware
+dotnet run --project Tools/Tests/FFmpegValidation/FFmpegValidation.csproj --no-build -- `
+  Tools/Tests/FFmpegValidation/.work/recording-final-native `
+  Tools/Tests/FFmpegValidation/.work/encoding-final-hardware --encode-hardware
+```
+
+证据为 `.work/encoding-{managed,unavailable,native,hardware}.log`，视频各自保存于 `.work/encoding*/<随机子目录>/`。第四条还编译当前 Camera、后台会话和编码器全部生产 C#，0 errors；既有 ZString nullable/ref-safety 与播放器未赋值字段警告仍存在。此 .NET 9 结果不代表 Unity Camera 最终渲染、GPU 读回、Mono/IL2CPP 或其他目标平台已验证；Unity Camera Player 结果另行记录。
+
+检查补丁前的最终原生构建额外禁用了 AMF 解码包装器，以维持已有解码范围；复制至 `.work/recording-final-native` 后再次执行上述最后一条硬件模式，仍为 **838 assertions PASS**，实际编码器与各码率一致。此轮只针对解码范围变化进行确认，日志为 `.work/encoding-final-hardware.log`；不代表 AMF 驱动属性的 Set/Get 检查已经通过。
+
+随后使用当前编码器与该旧 fixture 检查拒绝路径，**85 assertions PASS**，日志为 `.work/encoding-unchecked-amf.log`。诊断包含 `--extra-version=MajdataPlay-AMF-RC-v1-c0604b924b6a`，对应补丁 SHA256 `c0604b924b6ae1ee718c045d34f1448ebb78652ccacadfdb54799810c69e17f7`。两种码率模式均没有生成输出，重复打开已有文件仍保留原字节；请求格式保持 H.264。实际命令：
+
+```powershell
+dotnet run --project Tools/Tests/FFmpegValidation/FFmpegValidation.csproj --no-restore -v:q -- `
+  Tools/Tests/FFmpegValidation/.work/recording-final-native `
+  Tools/Tests/FFmpegValidation/.work/encoding-unchecked-amf --encode-unchecked-amf
+```
+
+最终 Windows x64 构建保存到 `.work/recording-checked-native`，七个 DLL 的 SHA256、架构、ABI、原有解码器、录制 encoder/muxer、许可与 patch/marker 均通过验证，仍禁用 AMF 解码包装器。原生配置包含上述精确能力标记，补丁字节与完整 SHA256 一致。实际 H.264 AMF VBR 仍为 **12,448 bit/s**，CBR 为 **200,000 bit/s**，MPEG4 CBR 为 **199,976 bit/s**；本轮日志为 `.work/encoding-checked-hardware.log`，使用当前生产 C# 与已检查的驱动包装器执行：
+
+```powershell
+dotnet run --project Tools/Tests/FFmpegValidation/FFmpegValidation.csproj --no-restore -v:q -- `
+  Tools/Tests/FFmpegValidation/.work/recording-checked-native `
+  Tools/Tests/FFmpegValidation/.work/encoding-checked-hardware --encode-hardware
+```
+
+## 2026-10-05：Unity Camera 真实录制
+
+Unity **6000.3.17f1** 的隔离 Windows x64 Player 使用当前带 AMF 检查补丁的 `.work/recording-checked-native`。测试通过真实 Camera.Render 或 URP 17.3 Standard RenderRequest 渲染 caller-owned RenderTexture，录制后逐帧重新解码 MP4；没有修改主工程场景或 Player Settings。
+
+| Player / 管线 / 图形 API | 实际编码器 | 结果 |
+| --- | --- | --- |
+| Mono / Built-in / D3D11 | `mpeg4 / Software / VBR` | **197 checks PASS** |
+| Mono / Built-in / OpenGL Core | `mpeg4 / Software / VBR` | **197 checks PASS** |
+| Mono / Built-in / D3D11 | `h264_amf / Hardware / CBR` | **197 checks PASS** |
+| Mono / URP Camera Stack / D3D11 | `h264_amf / Hardware / CBR` | **226 checks PASS** |
+| Mono / URP Camera Stack / OpenGL Core | `mpeg4 / Software / VBR` | **222 checks PASS** |
+| IL2CPP Release / URP Camera Stack / D3D11 | `h264_amf / Hardware / CBR` | **254 checks PASS** |
+
+覆盖真实红/蓝像素与上下方向、帧数及单调 PTS、编码器身份与实际模式、实时码率、有效 CBR 上限、软件 worker 上限、设置快照、重复开始/停止、尾部排空、禁用后 GPU 资源释放、原 Camera 输出保留和预取消。另在同一 Unity 帧等待旧打开失败的 worker 结束、立即开启新会话，确认旧 continuation 不会停止或污染新录制；在 GPU 回读尚未完成时取消，确认重启被拒绝、文件未创建，等待 GPU 释放后的新录制正常完成。URP Base Camera 排除标记层，Overlay Camera 独立绘制绿色标记，逐帧像素检查确认录制包含完整叠加；显式目标的捕获在 end-context 后执行。断言数随实际捕获帧数变化。
+
+复现最终 URP 检查的命令：
+
+```powershell
+./Tools/Tests/FFmpegValidation/run-unity.ps1 -Backend Mono -Architecture x64 -Graphics d3d11 `
+  -CaptureUrp -CaptureHardware -NativeDirectory Tools/Tests/FFmpegValidation/.work/recording-checked-native `
+  -WorkDirectory Tools/Tests/FFmpegValidation/.work/camera-urp
+./Tools/Tests/FFmpegValidation/run-unity.ps1 -Backend Mono -Architecture x64 -Graphics glcore `
+  -CaptureUrp -SkipBuild -NativeDirectory Tools/Tests/FFmpegValidation/.work/recording-checked-native `
+  -WorkDirectory Tools/Tests/FFmpegValidation/.work/camera-urp
+./Tools/Tests/FFmpegValidation/run-unity.ps1 -Backend IL2CPP -Architecture x64 -Graphics d3d11 `
+  -CaptureUrp -CaptureHardware -NativeDirectory Tools/Tests/FFmpegValidation/.work/recording-checked-native `
+  -WorkDirectory Tools/Tests/FFmpegValidation/.work/camera-urp-il2cpp
+```
+
+Built-in 使用 `-TestCameraCapture`，硬件模式再加 `-CaptureHardware`，工作目录为 `.work/camera-builtin`。报告和编码器元数据位于这些目录的 `x64-Mono/` 或 `x64-IL2CPP/` 下，文件名为 `*-camera-*.txt` / `.txt.metadata.txt`；实际 Diagnostics 日志、原生输出和 Player 日志均保存在忽略目录内。
+
+Windows 隐藏 Player 会抑制普通显示 Camera 的自动渲染，因此使用显式离屏请求作为可复现的 GPU 验证。这些结果不等价于主工程显示输出的 CameraCaptureBridge、UI、HDR、XR 或自定义 SRP 已验证。主工程 Play Mode、Windows x86、D3D12/Vulkan、Linux、macOS、Android/iOS 的相机录制，以及 NVENC/VAAPI/VideoToolbox、HEVC/VP9/AV1 编码均**未验证**；此前的播放/解码矩阵不能用于推断录制成功。
+
 ## 2026-10-05：播放会话逐帧 GC 分配
 
 `ReadFrame` 的 EAGAIN 检查改用平台 errno 的负值，避开 AutoGen 泛型宏装箱。播放器内部按队列容量加 2 预分配帧容器，硬件图像释放委托按会话缓存。公开 decoder 和 `CopyToSoftware()` 仍返回独立对象；本次零 GC 结论限于播放器内部复用路径，不表示 FFmpeg 原生内存也不分配。

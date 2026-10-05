@@ -10,12 +10,18 @@ param(
     [switch] $TestRecovery,
     [switch] $HardwareCpuUpload,
     [switch] $TestDecoderPreference,
+    [switch] $TestCameraCapture,
+    [switch] $CaptureUrp,
+    [switch] $CaptureHardware,
     [switch] $SkipBuild,
+    [switch] $BuildOnly,
     [string] $NativeDirectory = '',
     [string] $Media = '',
     [string] $WorkDirectory = ''
 )
 $ErrorActionPreference = 'Stop'
+if ($CaptureUrp -or $CaptureHardware) { $TestCameraCapture = $true }
+if ($TestCameraCapture -and $Platform -ne 'Windows') { throw 'Camera recording validation currently requires a Windows Player' }
 if ($RequireNativeDecoder) {
     if ($Platform -ne 'Windows' -or $Graphics -notin @('d3d12', 'vulkan')) { throw 'Native decoder validation requires Windows D3D12 or Vulkan' }
     $RequireHardware = $true
@@ -79,8 +85,12 @@ if (-not $SkipBuild) {
         $destination = Join-Path $project "Assets/Plugins/FFmpeg/Native/Windows/$pluginArchitecture"
         # Retain the real PluginImporter metadata while testing newly built DLLs
         # independently of libraries currently loaded in the user's Editor.
-        foreach ($library in @('avcodec-63.dll', 'avdevice-63.dll', 'avfilter-12.dll', 'avformat-63.dll', 'avutil-61.dll', 'swresample-7.dll', 'swscale-10.dll', 'FFmpegUnityBridge.dll')) {
+        foreach ($library in @('avcodec-63.dll', 'avdevice-63.dll', 'avfilter-12.dll', 'avformat-63.dll', 'avutil-61.dll', 'swresample-7.dll', 'swscale-10.dll')) {
             Copy-Item -LiteralPath (Join-Path $override $library) -Destination (Join-Path $destination $library) -Force
+        }
+        $overrideBridge = Join-Path $override 'FFmpegUnityBridge.dll'
+        if (Test-Path -LiteralPath $overrideBridge) {
+            Copy-Item -LiteralPath $overrideBridge -Destination (Join-Path $destination 'FFmpegUnityBridge.dll') -Force
         }
     }
     if ($Platform -eq 'Android') {
@@ -88,20 +98,27 @@ if (-not $SkipBuild) {
     }
     Copy-Item -LiteralPath $Media -Destination (Join-Path $project 'Assets/StreamingAssets/test.mp4') -Force
     Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'UnitySmoke.cs') -Destination (Join-Path $project 'Assets/Smoke/UnitySmoke.cs') -Force
+    Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'UnityCameraSmoke.cs') -Destination (Join-Path $project 'Assets/Smoke/UnityCameraSmoke.cs') -Force
     Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'UnitySmokeBuild.cs') -Destination (Join-Path $project 'Assets/Editor/UnitySmokeBuild.cs') -Force
     $package = (Join-Path $repo 'ThirdParty/FFmpeg.AutoGen/Unity') -replace '\\', '/'
-    Write-Json (Join-Path $project 'Packages/manifest.json') @{ dependencies = @{ 'net.majdata.ffmpeg-autogen' = "file:$package"; 'com.unity.ugui' = '2.0.0'; 'com.unity.modules.ui' = '1.0.0'; 'com.unity.modules.imageconversion' = '1.0.0'; 'com.unity.modules.androidjni' = '1.0.0'; 'com.unity.modules.unitywebrequest' = '1.0.0' } }
-    Write-Json (Join-Path $project 'Assets/Smoke/FFmpeg.Player.Smoke.asmdef') @{ name = 'FFmpeg.Player.Smoke'; references = @('MajdataPlay.FFmpeg', 'MajdataPlay.Diagnostics') }
-    Write-Json (Join-Path $project 'Assets/Editor/FFmpeg.Player.Smoke.Editor.asmdef') @{ name = 'FFmpeg.Player.Smoke.Editor'; references = @('FFmpeg.Player.Smoke'); includePlatforms = @('Editor') }
+    Write-Json (Join-Path $project 'Packages/manifest.json') @{ dependencies = @{ 'net.majdata.ffmpeg-autogen' = "file:$package"; 'com.unity.render-pipelines.universal' = '17.3.0'; 'com.unity.ugui' = '2.0.0'; 'com.unity.modules.ui' = '1.0.0'; 'com.unity.modules.imageconversion' = '1.0.0'; 'com.unity.modules.androidjni' = '1.0.0'; 'com.unity.modules.unitywebrequest' = '1.0.0' } }
+    Write-Json (Join-Path $project 'Assets/Smoke/FFmpeg.Player.Smoke.asmdef') @{ name = 'FFmpeg.Player.Smoke'; references = @('MajdataPlay.FFmpeg', 'MajdataPlay.Diagnostics', 'Unity.RenderPipelines.Core.Runtime', 'Unity.RenderPipelines.Universal.Runtime') }
+    Write-Json (Join-Path $project 'Assets/Editor/FFmpeg.Player.Smoke.Editor.asmdef') @{ name = 'FFmpeg.Player.Smoke.Editor'; references = @('FFmpeg.Player.Smoke', 'Unity.RenderPipelines.Core.Runtime', 'Unity.RenderPipelines.Universal.Runtime'); includePlatforms = @('Editor') }
     [IO.File]::WriteAllText((Join-Path $project 'ProjectSettings/ProjectVersion.txt'), "m_EditorVersion: 6000.3.17f1`n", $utf8)
     $target = if ($Platform -eq 'Android') { 'Android' } elseif ($Platform -eq 'Linux') { 'Linux64' } elseif ($Architecture -eq 'x86') { 'Win' } else { 'Win64' }
     $buildLog = Join-Path $result 'editor.log'
     $buildArgs = @('-batchmode', '-nographics', '-quit', '-projectPath', ('"' + $project + '"'), '-buildTarget', $target,
         '-logFile', ('"' + $buildLog + '"'), '-executeMethod', 'FFmpegPlayerSmokeBuild.Run', '-videoBackend', $Backend,
         '-videoArchitecture', $Architecture, '-videoPlatform', $Platform, '-videoOutput', ('"' + $result + '"'))
+    $buildArgs += @('-cameraCapture', $(if ($TestCameraCapture) { 'true' } else { 'false' }), '-captureUrp', $(if ($CaptureUrp) { 'true' } else { 'false' }))
     $process = Start-Process -FilePath $UnityEditor -ArgumentList $buildArgs -WindowStyle Hidden -PassThru
     $process.WaitForExit()
     if ($process.ExitCode -ne 0) { Get-Content -LiteralPath $buildLog -Tail 70; throw "Unity build failed: $buildLog" }
+}
+if ($BuildOnly) {
+    Get-Content -LiteralPath (Join-Path $result 'build.txt')
+    Write-Output "Isolated Player built at: $result; runtime validation was not requested."
+    return
 }
 if ($Platform -eq 'Android') {
     Add-Type -AssemblyName System.IO.Compression.FileSystem
@@ -133,7 +150,7 @@ if ($Platform -eq 'Linux') {
     Write-Output 'Run playback validation on Linux/WSLg with Tools/Tests/FFmpegValidation/run-linux-player.sh.'
     return
 }
-$suffix = if ($RequireNativeDecoder) { '-native-decoder' } elseif ($TestRecovery) { '-recovery' } elseif ($TestDecoderPreference) { '-decoder-preference' } elseif ($HardwareCpuUpload) { '-hardware-cpu' } elseif ($Hardware) { '-hardware' } else { '-software' }
+$suffix = if ($TestCameraCapture) { '-camera' + $(if ($CaptureUrp) { '-urp' } else { '-builtin' }) + $(if ($CaptureHardware) { '-hardware' } else { '-software' }) } elseif ($RequireNativeDecoder) { '-native-decoder' } elseif ($TestRecovery) { '-recovery' } elseif ($TestDecoderPreference) { '-decoder-preference' } elseif ($HardwareCpuUpload) { '-hardware-cpu' } elseif ($Hardware) { '-hardware' } else { '-software' }
 $report = Join-Path $result "$Graphics$suffix.txt"
 $log = Join-Path $result "$Graphics$suffix.log"
 if (Test-Path -LiteralPath $report) { Remove-Item -LiteralPath $report }
@@ -145,6 +162,11 @@ $decoderPreferenceValue = if ($TestDecoderPreference) { 'true' } else { 'false' 
 $nativeDecoderValue = if ($RequireNativeDecoder) { $Graphics } else { 'none' }
 $playerArgs = @('-batchmode', "-force-$Graphics", '-logFile', ('"' + $log + '"'), '-videoHardware', $hardwareValue, '-videoRequireHardware', $requireHardwareValue, '-videoTestRecovery', $testRecoveryValue, '-videoHardwareCpuUpload', $hardwareCpuValue, '-videoTestDecoderPreference', $decoderPreferenceValue, '-videoReport', ('"' + $report + '"'))
 $playerArgs += @('-videoNativeDecoder', $nativeDecoderValue)
+if ($TestCameraCapture) {
+    # A camera rendering to the display needs the regular Player render loop.
+    $playerArgs = @($playerArgs | Where-Object { $_ -ne '-batchmode' })
+}
+$playerArgs += @('-cameraCapture', $(if ($TestCameraCapture) { 'true' } else { 'false' }), '-captureHardware', $(if ($CaptureHardware) { 'true' } else { 'false' }))
 $process = Start-Process -FilePath (Join-Path $result 'VideoSmoke.exe') -ArgumentList $playerArgs -WindowStyle Hidden -PassThru
 if (-not $process.WaitForExit(120000)) { $process.Kill(); throw "Player timed out: $log" }
 if (-not (Test-Path -LiteralPath $report)) { Get-Content -LiteralPath $log -Tail 60; throw "Player produced no result: $log" }

@@ -3,7 +3,8 @@
     "rootNamespace": "MajdataPlay.FFmpeg",
     "references": [
         "FFmpeg.AutoGen",
-        "MajdataPlay.Diagnostics"
+        "MajdataPlay.Diagnostics",
+        "Unity.RenderPipelines.Core.Runtime"
     ],
     "includePlatforms": [
         "Android",

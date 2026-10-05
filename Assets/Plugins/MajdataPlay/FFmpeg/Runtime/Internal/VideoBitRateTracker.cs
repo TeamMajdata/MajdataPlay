@@ -5,7 +5,7 @@ namespace MajdataPlay.FFmpeg.Internal
 {
     /// <summary>Estimates compressed video bit rate over one second of the media timeline.</summary>
     /// <remarks>
-    /// Used only by the decoder worker. Packet timestamps may arrive out of presentation order.
+    /// Used only by the owning decoder or encoder worker. Packet timestamps may arrive out of presentation order.
     /// Bytes are distributed uniformly over a packet's duration when it crosses a window boundary.
     /// </remarks>
     internal sealed class VideoBitRateTracker

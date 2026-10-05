@@ -14,7 +14,7 @@ public sealed class FFmpegPlayerSmoke : MonoBehaviour
     string _report;
     Exception _failure;
     [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
-    static void Boot() { new GameObject("FFmpeg Player validation").AddComponent<FFmpegPlayerSmoke>(); }
+    static void Boot() { if (Argument("-cameraCapture") != "true") new GameObject("FFmpeg Player validation").AddComponent<FFmpegPlayerSmoke>(); }
     void Start()
     {
         _report = Argument("-videoReport");

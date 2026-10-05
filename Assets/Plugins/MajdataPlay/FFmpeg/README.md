@@ -2,7 +2,7 @@
 
 将 **FFmpeg Video Player** 挂在 GameObject 上，填写 Source，在 Play Mode Inspector 中可以预载、播放、暂停、停止和拖动时间轴。组件只播放视频；音轨由 MajdataPlay 现有音频系统处理。
 
-运行时程序集为 `MajdataPlay.FFmpeg`，引用项目已接入的 `FFmpeg.AutoGen` 和 `MajdataPlay.Diagnostics`。本项目绑定的原生 ABI 是 FFmpeg **9.0.1**；请使用 [Tools/FFmpeg](../../../../Tools/FFmpeg) 的构建脚本，不能混用其他主版本的库。Mono / IL2CPP 使用同一套直接 P/Invoke 和带 `MonoPInvokeCallback` 的静态回调。
+运行时程序集为 `MajdataPlay.FFmpeg`，引用项目已接入的 `FFmpeg.AutoGen`、`MajdataPlay.Diagnostics` 和 `Unity.RenderPipelines.Core.Runtime`。本项目绑定的原生 ABI 是 FFmpeg **9.0.1**；请使用 [Tools/FFmpeg](../../../../Tools/FFmpeg) 的构建脚本，不能混用其他主版本的库。Mono / IL2CPP 使用同一套直接 P/Invoke 和带 `MonoPInvokeCallback` 的静态回调。
 
 支持的全部软件编码格式、平台硬件解码矩阵及实际 Player 限制见 [当前 FFmpeg 解码格式支持](../../../../Tools/FFmpeg/CODEC-SUPPORT.md)。
 
@@ -115,6 +115,59 @@ Android GPU 路径需要 API 26+、Vulkan 1.1 与 AHardwareBuffer/外部同步/Y
 - 默认 I/O 超时 15 秒，探测大小、分析时长和图像大小均有上限。销毁对象通过 AVIO interrupt 中断阻塞 I/O；第三方协议若不检查该回调，工作线程仍需等它返回。
 - 软件路径处理 BT.601 / BT.709 / BT.2020 矩阵和 full/limited range，输出 RGBA8；支持常见 90° 倍数旋转。没有 HDR 色调映射、字幕、DRM 或音轨输出。
 - `BGManager` 使用此组件预载和播放谱面背景视频，通过 `TextureChanged` 更新 UI 纹理；保留原有音频同步方式。
+
+## Camera 录制
+
+`FFmpegCameraCapturer` 录制指定 Camera 的视频画面，无音频。它在 URP 显示输出中使用 `CameraCaptureBridge`，显式 RenderTexture 输出在整个 SRP rendering context 结束后复制，在 Built-in Render Pipeline 中使用 Camera 的 post-render 回调，不改变 Camera 的 `targetTexture` 或 `rect`。其他 SRP 的显示输出需要执行 `CameraCaptureBridge` 的捕获动作；显式 RenderTexture 输出需要触发 SRP end-camera 和 end-context 回调；URP Camera Stack 捕获 Base Camera 对应的最终合成画面。Screen Space Overlay Canvas 不属于 Camera 输出；需要录入 UI 时使用 Screen Space Camera 或 World Space Canvas。
+
+```csharp
+using MajdataPlay.FFmpeg;
+
+var capturer = camera.gameObject.AddComponent<FFmpegCameraCapturer>();
+capturer.TargetCamera = camera;
+capturer.Options = new EncoderOptions
+{
+    Width = 1920,
+    Height = 1080,
+    FrameRate = 60,
+    PreferredEncoderType = VideoEncoderType.Software,
+    MaximumSoftwareThreads = 4,
+    Format = VideoEncodingFormat.MPEG4,
+    BitRate = 8_000_000,
+    MaximumBitRate = 16_000_000,
+    RateControlMode = VideoRateControlMode.VBR
+};
+await capturer.StartRecordingAsync(outputPath, cancellationToken);
+// Later, await finalization before reading or moving the file.
+await capturer.StopRecordingAsync();
+```
+
+所有组件控制 API 在 Unity 主线程调用。编码与封装在一个后台线程执行，GPU 回读和编码共用 1–8 个固定槽位，默认 3 个；容量包含正在回读、排队和正在编码的帧。编码过慢时丢帧，`DroppedFrames` 记录省略的帧率间隔，PTS 保留实际单调时钟间隔，不压缩录制时间；不通过重复帧补齐 CFR。录制尺寸固定且必须为偶数，支持缩放 Camera 输出。需要异步 GPU 回读支持；捕获是 SDR sRGB RGBA8，转换为 limited-range YUV，矩阵/原色为 BT.709，transfer metadata 为 sRGB，没有 HDR tone mapping。
+
+`Options` 在开始时复制。修改选项、Camera、缓冲容量或 `ReadbackOrientation` 在下次录制应用；当前编码器身份与模式不会随偏好变化。`ReadbackOrientation.Automatic` 按 Unity Blit 捕获纹理的 bottom-first 行序解释；自定义渲染管线输出方向不同时可以明确选择 `TopFirst` / `BottomFirst`。
+
+| API | 语义 |
+| --- | --- |
+| `StartRecordingAsync(path, token)` | 创建新的本地文件，扩展名选择容器；已有文件不覆盖；完成时已打开编码器并开始捕获 |
+| `StopRecording()` | 停止接收新帧，异步排空，不阻塞 Unity 主线程 |
+| `StopRecordingAsync()` | 等待 GPU 请求、编码延迟包、文件尾和资源释放；编码/写入失败会抛出异常 |
+| `State`, `IsRecording`, `OutputPath`, `LastError` | 生命周期和诊断 |
+| `EncoderName`, `EncoderType`, `RateControlMode` | 实际 AVCodec、实际软件/硬件后端、实际 CBR/VBR；初始化前为 null |
+| `EncodingFormat`, `Width`, `Height`, `FrameRate` | 当前或最近会话的固定录制格式/尺寸/时间基准 |
+| `BitRate`, `MaximumBitRate`, `SoftwareThreadCount` | 会话目标、有效最大码率（bit/s）、实际 FFmpeg 软件 codec worker 数；硬件为 0 |
+| `CurrentBitRate`, `BytesWritten`, `EncodedFrames` | 最近约 1 秒媒体时间的视频压缩码率、压缩字节数、成功提交帧数；不包含容器开销 |
+| `HardwareFallbackReason`, `DroppedFrames`, `TimeSeconds` | 硬件偏好回退原因、丢帧计数、捕获持续时间 |
+| `Started`, `Stopped`, `ErrorReceived` | 主线程事件；Stopped 表示资源关闭，错误状态需同时检查 LastError |
+
+CBR 设置目标码率以及相同的 min/max；VBR 使用独立目标和最大码率，后端通过约 1 秒 VBV 缓冲限制，单帧和短时窗口仍会波动。软件线程数限制 FFmpeg codec worker，不包含应用采集线程和驱动的辅助线程。硬件偏好仅回退到**同格式**的软件实现，不会偷偷改换编码格式；不支持请求的模式/码率约束时明确失败。
+
+原生库必须包含录制 encoder 和 muxer，构建配置及 NVENC/AMF/VAAPI/VideoToolbox 条件见 [Tools/FFmpeg](../../../../Tools/FFmpeg/README.md)。全部平台的默认软件路径是 MPEG-4 Part 2（支持 CBR/VBR）；H.264/HEVC/VP9/AV1 的可用性取决于原生构建与设备。当前窄构建没有加入 x264/x265/libvpx/libaom 软件编码库，选择这些格式的软件模式会明确报缺少实现。历史播放专用库关闭了所有 encoder/muxer，需要重建相应平台并重启已加载旧库的 Editor/Player。AMF 还必须包含构建脚本应用的码率检查补丁：检查驱动设置返回值和初始化后的关键参数，原生配置中的能力标记必须匹配当前补丁；旧未检查的 AMF 实现会明确拒绝。
+
+取消 token 作用于整个录制会话；取消或 I/O 错误可能留下未完成文件。正常停止、禁用和销毁会停止新捕获，并保留已提交 GPU 请求所需纹理直到回读结束，再释放后台资源。旧 GPU 请求尚未释放时会拒绝重启，以免连续取消累积多份缓冲池；先等待 `StopRecordingAsync()`，取消时也需等待该 Task 结束并处理取消异常。需要确保文件可播放时显式等待正常的 `StopRecordingAsync()`，不要在主线程同步等待 Task。硬件编码也经 CPU RGBA 回读/转换/上传，不能把 Hardware 状态解释为 GPU 零拷贝录制。
+
+可独立使用 `FFmpegVideoEncoder` 编码 sRGB RGBA8 缓冲，但其 `Open` / `Encode` / `Complete` / `Dispose` 必须在同一个 owner 线程运行，调用 `Complete()` 后才有完整的输出文件。Mono/IL2CPP 均通过静态 AOT 回调写入 seekable 本地 FileStream，避免 Unicode 路径和覆盖已有文件的问题。
+
+运行时程序集新增对已在项目内使用的 `Unity.RenderPipelines.Core.Runtime` 的引用，用于 URP 正确的最终 Camera 颜色捕获通道；没有新增或升级 Package Manager 包。
 
 ## 验证
 

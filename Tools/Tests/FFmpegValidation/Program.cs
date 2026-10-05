@@ -4,6 +4,7 @@ using System.IO;
 using System.Runtime.InteropServices;
 using System.Threading;
 using MajdataPlay.FFmpeg.Internal;
+using MajdataPlay.FFmpeg.Validation;
 using FFmpeg.AutoGen;
 
 static class Program
@@ -17,11 +18,16 @@ static class Program
             TestClock();
             _checks += VideoBitRateChecks.Run();
             _checks += AllocationChecks.RunManaged();
+            _checks += EncodingChecks.RunManaged();
             bool av1 = args.Length == 3 && args[2] == "--av1";
             bool av1Unavailable = args.Length == 3 && args[2] == "--av1-unavailable";
             bool allocations = args.Length == 3 && args[2] == "--allocations";
             bool softwareAllocations = args.Length == 3 && args[2] == "--allocations-software";
-            if (args.Length != 2 && !av1 && !av1Unavailable && !allocations && !softwareAllocations) { Console.WriteLine("PASS: clock, bitrate and frame pool; use <native-directory> <media> [--av1|--av1-unavailable|--allocations|--allocations-software] for native decode tests."); return 0; }
+            bool encoding = args.Length == 3 && args[2] == "--encode";
+            bool encodingUnavailable = args.Length == 3 && args[2] == "--encode-unavailable";
+            bool encodingHardware = args.Length == 3 && args[2] == "--encode-hardware";
+            bool uncheckedAmf = args.Length == 3 && args[2] == "--encode-unchecked-amf";
+            if (args.Length != 2 && !av1 && !av1Unavailable && !allocations && !softwareAllocations && !encoding && !encodingUnavailable && !encodingHardware && !uncheckedAmf) { Console.WriteLine("PASS: " + _checks + " assertions; clock, bitrate, frame pool and encoder options; use <native-directory> <media> [--av1|--av1-unavailable|--allocations|--allocations-software], or <native-directory> <output-directory> --encode[|-unavailable|-hardware|-unchecked-amf]."); return 0; }
             string native = Path.GetFullPath(args[0]);
             NativeLibrary.SetDllImportResolver(typeof(FFmpeg.AutoGen.ffmpeg).Assembly, (name, assembly, paths) =>
             {
@@ -30,6 +36,18 @@ static class Program
             });
             // Dependencies are resolved by the OS; limit this change to the test process.
             if (!SetDllDirectory(native)) throw new Exception("SetDllDirectory failed.");
+            if (uncheckedAmf)
+            {
+                _checks += EncodingChecks.RunUncheckedAmf(args[1]);
+                Console.WriteLine("PASS: " + _checks + " assertions; unchecked AMF rejected with native patch diagnostics and preserved output.");
+                return 0;
+            }
+            if (encoding || encodingUnavailable || encodingHardware)
+            {
+                _checks += EncodingChecks.RunNative(args[1], encodingUnavailable, encodingHardware);
+                Console.WriteLine("PASS: " + _checks + " assertions; encoder options, native encoder selection, output and cleanup.");
+                return 0;
+            }
             if (allocations || softwareAllocations)
             {
                 _checks += AllocationChecks.RunNative(Path.GetFullPath(args[1]), allocations);

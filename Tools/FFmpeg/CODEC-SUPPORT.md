@@ -4,6 +4,19 @@
 
 完整软件格式清单在本文后半部分，按视频及图像、音频、字幕分别列出。先阅读平台汇总和限制，可避免把容器、解码器实现、硬件 API 与实际设备能力混为一谈。
 
+## Camera 录制与编码能力
+
+本文后续统计均为 **解码**，不能当作编码能力清单。历史交付原生库禁用了全部 encoder/muxer，`FFmpegCameraCapturer` 需要按 [构建说明](README.md#配置与输出) 重建对应平台的同 ABI 原生库；本次源码修改没有替换历史交付二进制。
+
+新的窄录制构建配置提供全部平台的 `mpeg4` 软件 CBR/VBR 编码和 MOV/MP4/MKV/WebM/AVI 封装；Windows x86/x64 提供 NVENC/AMF H.264/HEVC/AV1，Linux x64 提供 NVENC H.264/HEVC/AV1 与 VAAPI H.264/HEVC/VP9/AV1，Apple 提供 H.264 VideoToolbox。编码格式与容器必须兼容；WebM 可封装 VP9/AV1，不能封装 MPEG-4/H.264。编译入口不等于相应设备支持。
+
+该配置没有加入 x264/x265/libvpx/libaom；只有 `mpeg4` 可作为全部目标共有的软件 encoder，现有 H.264/HEVC/VP9/AV1 decoder 无法用于软件编码。硬件偏好只允许同格式的软件回退，缺少相应软件入口时报告失败。Android MediaCodec、Windows MediaFoundation、HEVC VideoToolbox 暂不由组件选取，因为固定 FFmpeg 包装器对所请求最大码率或模式的配置缺少完整的可检查结果。
+
+NVENC 使用固定 NVIDIA Codec SDK 12.1 头文件，不安装 CUDA SDK；需要支持对应编码格式的 NVIDIA GPU 与 Windows 531.61 / Linux 530.41.03 或更新驱动。它与既有 D3D11VA/D3D12VA/Vulkan **解码**后端是独立能力。本次构建保持 NVDEC/CUVID 禁用，不能据新增 NVENC 声称扩展了本页硬解矩阵。
+Windows AMF 使用固定 v1.5.2 头文件，动态加载由已有 AMD 显卡驱动提供的 AMF runtime；初始化成功与否取决于 runtime 版本、GPU、格式和模式。录制器要求包含 [码率属性检查补丁](patches/amf-rate-control.patch) 且能力标记匹配的原生构建；旧 AMF 库即使能打开，也会因无法确认驱动接受所需配置而被拒绝。构建维持 AMF decoder 禁用，新增 AMF encoder 也不代表本页硬解矩阵变化。
+
+实际编码器、软件/硬件类型、实际采用的 CBR/VBR、视频包约一秒滑动窗口码率由录制会话公开。CBR 是编码器的码率控制模式；单帧、短窗口和容器总码率会波动。采集目前经 GPU 回读到 CPU RGBA，再转换/上传到硬件 encoder，不属于端到端 GPU 零拷贝。
+
 ## 支持范围和统计口径
 
 - **软件解码支持**：当前构建编入相应 CPU 解码实现，不需要对应的视频硬解单元；仍受具体 profile、压缩变体、位深、尺寸和有效码流限制。

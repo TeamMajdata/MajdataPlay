@@ -51,6 +51,7 @@ MajdataPlay 是一个跨平台 Simai 谱面播放器，也是一个 Unity 项目
 ## C# 与 Unity 代码约定
 
 - `.editorconfig` 是格式与命名规则的权威来源，应严格遵守`.editorconfig`的格式和命名规则。C# 使用 4 空格缩进、CRLF、花括号、块级命名空间以及命名空间外的 `using`。
+- 所有C#代码不要使用单行语句样式。
 - 所有C#代码都应当启用Nullable（包括Unity object），并在源码中添加`#nullable enable`
 - 为统一代码风格，局部参数尽可能地使用`var`。
 - 从`MonoBehaviour`派生的类中，所有由Unity进行序列化和反序列化序列化的字段都应当为`private`，并且使用`SerializeField`和`FormerlySerializedAs`特性，`FormerlySerializedAs`特性中的命名应当为PascalCase；如果该字段有公开访问的需求，可以使用自动属性，并对属性添加`[field: SerializeField]`和`[field: FormerlySerializedAs]`特性；成员声明应当避免和特性处于同一行。

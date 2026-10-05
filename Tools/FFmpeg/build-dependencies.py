@@ -127,6 +127,75 @@ def ensure_vulkan_headers():
                         spec['repository'], str(root)], check=True)
     verify_vulkan_headers()
 
+def nvcodec_headers():
+    return SHARED / ('nv-codec-headers-' + LOCK['nvCodecHeaders']['tag'])
+
+
+def verify_nvcodec_headers():
+    root = nvcodec_headers()
+    if not (root / '.git').is_dir():
+        raise RuntimeError('Pinned NVENC headers are missing; run a non-probe build to download them')
+    commit = subprocess.check_output(['git', '-C', str(root), 'rev-parse', 'HEAD'], text=True).strip()
+    if commit != LOCK['nvCodecHeaders']['commit']:
+        raise RuntimeError('Pinned NVENC headers commit mismatch: ' + commit)
+    dirty = subprocess.check_output(['git', '--no-optional-locks', '-c', 'core.autocrlf=false', '-c', 'core.filemode=false',
+                                    '-C', str(root), 'status', '--porcelain', '--untracked-files=no'], text=True).strip()
+    if dirty:
+        raise RuntimeError('Pinned NVENC headers contain tracked modifications')
+
+
+def ensure_nvcodec_headers():
+    spec = LOCK['nvCodecHeaders']
+    root = nvcodec_headers()
+    if not root.exists():
+        SHARED.mkdir(parents=True, exist_ok=True)
+        subprocess.run(['git', '-c', 'core.autocrlf=false', 'clone', '--depth', '1', '--branch', spec['tag'],
+                        spec['repository'], str(root)], check=True)
+    verify_nvcodec_headers()
+
+def amf_source():
+    return SHARED / ('AMF-' + LOCK['amfHeaders']['tag'])
+
+
+def amf_headers():
+    return SHARED / ('AMF-' + LOCK['amfHeaders']['tag'] + '-include')
+
+
+def verify_amf_headers():
+    root = amf_source()
+    if not (root / '.git').is_dir():
+        raise RuntimeError('Pinned AMF headers are missing; run a non-probe build to download them')
+    commit = subprocess.check_output(['git', '-C', str(root), 'rev-parse', 'HEAD'], text=True).strip()
+    if commit != LOCK['amfHeaders']['commit']:
+        raise RuntimeError('Pinned AMF headers commit mismatch: ' + commit)
+    # Compare contents: a sparse checkout can retain stat-only changes after Windows CRLF conversion.
+    comparison = subprocess.run(['git', '--no-optional-locks', '-c', 'core.autocrlf=false', '-c', 'core.filemode=false',
+                                 '-C', str(root), 'diff', '--quiet', 'HEAD', '--'], check=False)
+    if comparison.returncode:
+        raise RuntimeError('Pinned AMF headers contain tracked modifications')
+    original = root / 'amf/public/include'
+    if not (original / 'core/Version.h').is_file():
+        raise RuntimeError('Pinned AMF header checkout is incomplete')
+    for file in original.rglob('*'):
+        if file.is_file():
+            installed = amf_headers() / 'AMF' / file.relative_to(original)
+            if not installed.is_file() or installed.read_bytes() != file.read_bytes():
+                raise RuntimeError('AMF include cache differs from pinned sources; repair the generated include cache before retrying: ' + str(installed))
+
+
+def ensure_amf_headers():
+    spec = LOCK['amfHeaders']
+    root = amf_source()
+    if not root.exists():
+        SHARED.mkdir(parents=True, exist_ok=True)
+        subprocess.run(['git', '-c', 'core.autocrlf=false', 'clone', '--depth', '1', '--filter=blob:none', '--sparse',
+                        '--branch', spec['tag'], spec['repository'], str(root)], check=True)
+        subprocess.run(['git', '-c', 'core.autocrlf=false', '-C', str(root), 'sparse-checkout', 'set', 'amf/public/include'], check=True)
+    destination = amf_headers() / 'AMF'
+    if not destination.exists():
+        shutil.copytree(root / 'amf/public/include', destination)
+    verify_amf_headers()
+
 
 def ensure_llvm(cache):
     if os.environ.get('LLVM_MINGW') or os.environ.get('FFMPEG_D3D12_HEADERS'):
@@ -184,7 +253,10 @@ def prepare(targets, cache):
     ensure_meson()
     if any(target.startswith(('win-', 'linux-', 'android-')) for target in targets):
         ensure_vulkan_headers()
+    if any(target.startswith(('win-', 'linux-')) for target in targets):
+        ensure_nvcodec_headers()
     if any(target.startswith('win-') for target in targets):
+        ensure_amf_headers()
         ensure_llvm(cache)
 
 

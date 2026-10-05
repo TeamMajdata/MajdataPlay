@@ -135,6 +135,37 @@ def verify_software_decoders(directory, manifest):
     print(f'PASS {target}: software decoders exported: ' + ', '.join(decoders))
 
 
+def verify_recording_profile(directory, manifest):
+    """Check encoder/muxer registration without claiming device or recording support."""
+    profile = manifest.get('recordingProfile')
+    if not profile:
+        return
+    target = manifest['target']
+    def filename(name):
+        major = manifest['source']['abi'][name]
+        return f'{name}-{major}.dll' if target.startswith('win-') else (
+            f'lib{name}.{major}.dylib' if target.startswith('macos-') else f'lib{name}.so.{major}')
+    codec = ctypes.CDLL(str(directory / filename('avcodec')))
+    if any(encoder.endswith('_amf') for encoder in profile['encoders']):
+        patches = manifest.get('sourcePatches', [])
+        assert len(patches) == 1, (target, 'checked AMF source patch provenance missing')
+        marker = patches[0]['versionMarker']
+        assert '--extra-version=' + marker in manifest['configure'], (target, 'checked AMF build marker missing')
+        codec.avcodec_configuration.restype = ctypes.c_char_p
+        configuration = codec.avcodec_configuration().decode('utf-8')
+        assert '--extra-version=' + marker in configuration, (target, 'native AMF build marker mismatch')
+    codec.avcodec_find_encoder_by_name.argtypes = [ctypes.c_char_p]
+    codec.avcodec_find_encoder_by_name.restype = ctypes.c_void_p
+    format_library = ctypes.CDLL(str(directory / filename('avformat')))
+    format_library.av_guess_format.argtypes = [ctypes.c_char_p, ctypes.c_char_p, ctypes.c_char_p]
+    format_library.av_guess_format.restype = ctypes.c_void_p
+    for encoder in profile['encoders']:
+        assert codec.avcodec_find_encoder_by_name(encoder.encode()), (target, encoder, 'recording encoder missing')
+    for muxer in profile['muxers']:
+        assert format_library.av_guess_format(muxer.encode(), None, None), (target, muxer, 'recording muxer missing')
+    print(f'PASS {target}: recording encoders and muxers exported (device encoding unverified)')
+
+
 def main():
     count = 0
     manifests = list(NATIVE.rglob('build-manifest.json'))
@@ -148,6 +179,15 @@ def main():
         host = target == HOST_TARGET
         handle = os.add_dll_directory(str(directory)) if host and os.name == 'nt' else None
         try:
+            for patch in manifest.get('sourcePatches', []):
+                assert patch['file'] == 'patches/amf-rate-control.patch', (target, 'unknown source patch')
+                source_patch = ROOT / 'Tools/FFmpeg' / patch['file']
+                staged_patch = directory / patch['stagedFile']
+                assert hashlib.sha256(source_patch.read_bytes()).hexdigest() == patch['sha256'], source_patch
+                assert hashlib.sha256(staged_patch.read_bytes()).hexdigest() == patch['sha256'], staged_patch
+                assert patch['versionMarker'] == 'MajdataPlay-AMF-RC-v1-' + patch['sha256'][:12], (target, 'source patch marker mismatch')
+                if 'simulator' not in target:
+                    assert Path(str(staged_patch) + '.meta').is_file(), staged_patch
             for item in manifest.get('buildDependencyLicenses', []):
                 license_file = directory / item['file']
                 assert hashlib.sha256(license_file.read_bytes()).hexdigest() == item['sha256'], license_file
@@ -168,6 +208,7 @@ def main():
             if host:
                 verify_hardware_backends(directory, manifest)
                 verify_software_decoders(directory, manifest)
+                verify_recording_profile(directory, manifest)
         finally:
             if handle:
                 handle.close()

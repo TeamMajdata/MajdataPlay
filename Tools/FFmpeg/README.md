@@ -2,18 +2,20 @@
 
 这些脚本从 FFmpeg 源码构建当前项目的 Unity 原生插件，不下载现成 FFmpeg 二进制来冒充本机编译。
 
-当前交付库的软件编码格式完整清单、各平台硬件解码矩阵和播放器限制见 [当前 FFmpeg 解码格式支持](CODEC-SUPPORT.md)。
+当前交付库的软件解码格式完整清单、各平台硬件解码矩阵和播放器限制见 [当前 FFmpeg 解码格式支持](CODEC-SUPPORT.md)。
 
 ## 固定版本和 ABI
 
 `ffmpeg.lock.json` 固定官方 `n9.0.1` 的 commit
 `bf1b838f2ab88b4f8fd83443325c782ea0e0f7fa`。它与项目
 `ThirdParty/FFmpeg.AutoGen/FFmpeg/include` 中的公开头文件逐文件匹配。
-每次构建都会核对 commit、拒绝源码修改，并比较绑定头文件（仅归一化 CRLF；排除构建生成的 `avconfig.h`、`ffversion.h`）。
+每次构建都会核对 commit、比较绑定头文件（仅归一化 CRLF；排除构建生成的 `avconfig.h`、`ffversion.h`），再应用仓库中的 [AMF 码率控制检查补丁](patches/amf-rate-control.patch)。仅接受该补丁的完整源码差异，拒绝其他 tracked 修改；重复构建会校验已应用补丁而不再次修改。补丁不改变公开绑定头文件或 ABI。
 **不要用 FFmpeg 8.x，也不要只改原生库文件名**。库主版本为 avcodec 63、avdevice 63、avfilter 12、avformat 63、avutil 61、swresample 7、swscale 10。
 
 `dependencies.lock.json` 另外固定 Vulkan-Headers SDK 1.4.328.1（commit `19725e4d48082fe78e26622b15d3080ccd54112b`）及 LLVM-MinGW 20260922 的各主机官方压缩包 SHA256。
 同时固定 VideoLAN dav1d 1.5.3 源码和 Meson 1.9.1 wheel 的官方下载地址与 SHA256。正常构建自动下载到忽略缓存，校验解包后的源码，并为每个目标使用 FFmpeg 相同的编译器、SDK、架构和 ABI 构建 PIC 静态 dav1d；不安装全局 Python 包。
+Windows/Linux 录制同时固定官方 `nv-codec-headers` 的 `n12.1.14.1`、commit `7c8e7fc751f803c672b42c37d9199c8a4f98b327`，核对源码 commit 和工作区后使用其 NVENC 头文件，不安装 CUDA Toolkit，也不打包 NVIDIA 驱动。该 SDK 的最低驱动要求为 Windows 531.61、Linux 530.41.03；对应 GPU 仍须支持请求的编码格式。
+Windows 还使用官方 AMF `v1.5.2`、commit `eadd00804d5f7e5cd8c85d540073198312870776` 的头文件；稀疏下载 header 源码并校验 commit 与内容，仅在忽略缓存中生成 `AMF/` include 目录。AMF 动态库由现有 AMD 显卡驱动提供，脚本不安装或打包驱动。固定 FFmpeg 要求此版本头文件；实际 AMF runtime、GPU 与目标格式须在初始化时验证。
 Windows、Linux、Android 构建会自动获取并校验这些构建依赖，缓存到项目 `.build/toolchains` 或指定构建缓存，不安装系统软件。Vulkan 头文件须包含 Vulkan Video VP9 扩展；旧版 NDK / 系统 Vulkan 头文件不会覆盖此固定版本。
 未设置 `LLVM_MINGW` 时，Windows 目标使用固定的 LLVM-MinGW，它包含 D3D12 Video 解码所需的新头文件；显式设置时使用开发者提供的工具链，仍检查全部请求的硬件解码后端是否编译启用。
 `--probe` 不下载依赖：全新缓存会报告缺少固定头文件或 Meson，请先执行正常构建。Windows 原生仍需要可工作的 Bash/make；WSL 使用 Linux 主机工具链。
@@ -99,7 +101,7 @@ NDK 使用 [Google 官方下载](https://developer.android.com/ndk/downloads)。
 ## 配置与输出
 
 构建所有内置解码器、解复用器、解析器、网络协议、swscale、swresample，以及七个绑定库。
-关闭编码器、封装器、采集设备、滤镜实现、命令行程序、文档、调试符号和依赖自动探测。
+关闭默认编码器和封装器，再显式启用下表的窄录制配置；采集设备、滤镜实现、命令行程序、文档、调试符号和依赖自动探测仍关闭。
 不启用 GPL/nonfree；唯一额外编解码库为 BSD-2-Clause 许可的 dav1d，所有目标显式启用 `--enable-libdav1d` 并检查 `CONFIG_LIBDAV1D_DECODER`。dav1d 使用 `-Dbitdepths=8,16`，构建后要求 `CONFIG_8BPC`、`CONFIG_16BPC` 同时启用，以支持 8-bit 和 10-bit AV1（10-bit 使用高位深实现）。FFmpeg 内置名为 `av1` 的解码器依赖硬件加速，无法在不支持 AV1 的 GPU 上充当软件回退；`libdav1d` 提供真正的 AV1 软件解码。其他外部编解码库不自动加入。
 桌面和 Android 的 dav1d 静态链接进 avcodec，不增加运行时动态库；iOS stage 使用 Apple libtool 将 dav1d 对象合并进 `libavcodec.a`，保持现有七个 FFmpeg 插件与 Unity 链接配置。各目标同时携带 `dav1d.LICENSE.txt` 和其哈希、源码版本/校验信息；这些上游许可证固定 LF，避免 Windows Git 换行转换破坏清单的字节哈希。
 Windows 显式启用 D3D11VA/D3D12VA/DXVA2、Vulkan Video 和 Schannel；Apple 启用 VideoToolbox/AudioToolbox/SecureTransport；Android 启用 JNI/MediaCodec 和 Vulkan Video；Linux 启用 VAAPI/libdrm 和 Vulkan Video。
@@ -107,6 +109,21 @@ Windows 显式启用 D3D11VA/D3D12VA/DXVA2、Vulkan Video 和 Schannel；Apple �
 这些 Vulkan Video 后端不需要外部 shader compiler，也不链接额外的 Vulkan loader 二进制；运行时动态加载系统 Vulkan loader。APV、DPX、FFV1、ProRes 的 shader 型 Vulkan 加速路径显式禁用，软件解码器保持可用。
 Linux/Android 默认没有外部 TLS 后端，支持本地文件和 HTTP；HTTPS 如有需求须将可审计的 TLS 库纳入构建配置和部署依赖。
 图形 API 互操作由 `Native/` 的 Unity 原生桥接实现，启用硬件解码选项本身不代表纹理零拷贝已实现或经过设备验证。
+
+| 录制目标 | 显式启用的 encoder | 显式启用的 muxer |
+| --- | --- | --- |
+| 全部平台 | `mpeg4` 软件编码（CBR/VBR）；其构建依赖会额外启用 `h263` | `mov`、`mp4`、`matroska`、`webm`、`avi` |
+| Windows x86/x64 | `h264_nvenc`、`hevc_nvenc`、`av1_nvenc`；`h264_amf`、`hevc_amf`、`av1_amf` | 同上 |
+| Linux x64 | 上述 NVENC，以及 `h264_vaapi`、`hevc_vaapi`、`vp9_vaapi`、`av1_vaapi` | 同上 |
+| macOS / iOS | `h264_videotoolbox` | 同上 |
+
+Android 当前使用 MPEG-4 软件路径。此配置没有加入 x264/x265/libvpx/libaom，因此跨平台软件 H.264、HEVC、VP9、AV1 不可由现有解码器替代；选择这些格式的软件编码会明确失败。编码器选择失败可以在同一格式内回退，不能悄悄把请求的 H.264 改为 MPEG-4。容器也必须支持选择的编码，比如 WebM 不接受 MPEG-4/H.264。
+
+上述硬件条目是构建入口。硬件不存在、驱动过旧、不支持请求格式或码率模式时仍会失败/回退；新 `FFmpegCameraCapturer` 的实际 encoder/type/rate-control 信息以成功打开的会话为准。它不选择 MediaFoundation、MediaCodec 和 HEVC VideoToolbox：固定 FFmpeg 源码中的这些包装器未对请求的最大码率/码率模式提供充分的可检查配置结果，不能将请求值冒充已生效值。用户自建的同 ABI 库可提供 NVENC/AMF、x264/x265/libvpx/libaom 等组件实际支持的入口，仍须按该构建的许可证与运行时依赖分发。
+
+上游 AMF 包装器会忽略若干驱动属性设置错误。录制补丁检查码率模式、VBV 缓冲、目标/峰值码率、HRD 与 CBR filler 的设置和回读，并在驱动拒绝请求时让编码器打开失败。构建用 `--extra-version=MajdataPlay-AMF-RC-v1-<补丁 SHA256 前12位>` 标记此能力；C# 录制器只接受与当前补丁匹配的 AMF 原生库，旧 AMF 库会被拒绝并按同格式回退。修改补丁时须同步 C# 中的能力标记。`sourcePatches` 在两份构建清单中记录完整 SHA256，交付目录附带原始补丁，方便按固定源码重建。
+
+构建时逐个检查录制 encoder/muxer 的配置符号，缺少任一项就失败。`build-provenance.json` 和交付 `build-manifest.json` 的 `recordingProfile` 保存显式列表；Windows/Linux 产物附带 `nv-codec-headers.LICENSE.txt`，Windows 另外携带 `AMF.LICENSE.txt`。历史交付库使用 `--disable-encoders --disable-muxers`，仅添加 C# 组件不会补齐录制能力；必须按本脚本重建所需目标，并在更新已加载 DLL 后重启 Editor/Player。本次代码修改不替换仓库中的原生二进制。
 
 输出位置：
 
@@ -141,6 +158,8 @@ CMake 默认优先 Ninja；没有 Ninja 时 Windows 使用 `mingw32-make` / `Min
 本机实际构建结果见 `BUILD-RESULTS.md`，不要把脚本覆盖的平台矩阵当作全部平台已经真机验证。
 使用项目的 native smoke/decode 测试以及 Unity 的 Mono/IL2CPP Player 验证版本、打开、解码、seek 和退出。
 `python Tools/FFmpeg/verify-artifacts.py` 可复查所有已 stage 库的 SHA256、PE/ELF/Mach-O 目标架构、Apple device/simulator 平台标记、Android 16 KiB LOAD 对齐、Linux 运行时依赖及许可哈希，以及当前主机的 FFmpeg ABI 加载。新构建的 manifest 记录 `softwareDecoders`；主机可加载的产物另检查 `avcodec_find_decoder_by_name("libdav1d")`，避免缺失 AV1 软件回退的构建误报成功。导出符号检查不等同于实际视频解码验证。
+包含 `recordingProfile` 的主机产物还检查 `avcodec_find_encoder_by_name()` 和 `av_guess_format()`，防止缺少编码器或封装器；该检查不打开实际设备，也不证明某 GPU 的 CBR/VBR、最大码率或录制集成通过。
+2026-10-05 的隔离 Windows x64 录制构建已通过。独立验证以真实编码文件重新解码，验证 MPEG-4 软件 CBR/VBR、帧顺序/方向，以及 Radeon RX 580 2048SP 的 H.264 AMF CBR/VBR；200,000 bit/s CBR 目标分别测得软件 MPEG-4 199,976 bit/s、AMF H.264 200,000 bit/s。该记录属于原生编码/解码与托管会话验证；Unity Camera、其他平台和其他硬件后端的结果应分别参考 [录制验证记录](../Tests/FFmpegValidation/RESULTS.md)，不能由此推断通过。
 Linux stage 会附带 `libva.so.2`、`libva-drm.so.2`、`libdrm.so.2` 和对应许可，避免软件播放也因缺少这些直接依赖而无法加载 FFmpeg。厂商 GPU 驱动仍由目标系统提供。使用自定义 sysroot 时，开发文件和运行时库应属于同一套版本；许可默认从 sysroot 的发行版文档查找，也可通过 `FFMPEG_LINUX_RUNTIME_LICENSE_DIR` 提供 `libva.copyright`、`libva-drm.copyright`、`libdrm.copyright`。
 Apple 五个目标的实际构建、原生 Metal/VideoToolbox 测试及当前限制见 [APPLE-RESULTS.md](APPLE-RESULTS.md)。
 macOS 发布需要应用签名/公证；iOS 静态链接需遵守 LGPL 的重链接要求。

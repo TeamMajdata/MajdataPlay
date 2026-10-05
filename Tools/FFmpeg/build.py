@@ -15,6 +15,7 @@ import shlex
 import shutil
 import subprocess
 import sys
+import tempfile
 import uuid
 
 HERE = Path(__file__).resolve().parent
@@ -30,13 +31,16 @@ _dependency_spec.loader.exec_module(DEPENDENCIES)
 TARGETS = ['win-x86', 'win-x64', 'linux-x64', 'android-armv7', 'android-arm64',
            'macos-x64', 'macos-arm64', 'ios-arm64', 'ios-simulator-arm64', 'ios-simulator-x64']
 HOST = platform.system()
+AMF_RATE_CONTROL_PATCH = HERE / 'patches/amf-rate-control.patch'
 
 def write_text_atomic(path, contents):
     """Replace metadata without truncating a file concurrently mapped by Windows or Unity."""
     path = Path(path)
     temporary = path.with_name(path.name + '.' + uuid.uuid4().hex + '.tmp')
     try:
-        temporary.write_text(contents, encoding='utf-8')
+        # Shell scripts and license manifests must retain identical LF bytes on every host.
+        with temporary.open('w', encoding='utf-8', newline='\n') as stream:
+            stream.write(contents)
         os.replace(temporary, path)
     finally:
         temporary.unlink(missing_ok=True)
@@ -126,6 +130,9 @@ def toolchain(target):
         overlay = DEPENDENCIES.verify_d3d12_overlay()
         if overlay:
             args += ['--extra-cflags=-I' + shlex.quote(posix(overlay))]
+        DEPENDENCIES.verify_amf_headers()
+        args += ['--enable-amf', '--disable-decoder=h264_amf,hevc_amf,av1_amf,vp9_amf',
+                 '--extra-cflags=-I' + shlex.quote(posix(DEPENDENCIES.amf_headers()))]
     elif target == 'linux-x64':
         if not host_tool('patchelf'):
             return None, 'patchelf is required to verify and set relative ELF runtime paths'
@@ -181,7 +188,54 @@ def toolchain(target):
         args += ['--enable-vulkan', '--disable-vulkan-static',
                  '--extra-cflags=-I' + shlex.quote(posix(DEPENDENCIES.vulkan_headers())),
                  '--disable-hwaccel=apv_vulkan,dpx_vulkan,ffv1_vulkan,prores_raw_vulkan,prores_vulkan']
+    if target.startswith(('win-', 'linux-')):
+        DEPENDENCIES.verify_nvcodec_headers()
+        args += ['--enable-ffnvcodec', '--enable-nvenc', '--disable-nvdec', '--disable-cuvid']
     return (args, paths), None
+
+def amf_rate_control_patch():
+    """Identify the reviewed source fix and its runtime-visible build marker."""
+    digest = hashlib.sha256(AMF_RATE_CONTROL_PATCH.read_bytes()).hexdigest()
+    return {'file': AMF_RATE_CONTROL_PATCH.relative_to(HERE).as_posix(), 'sha256': digest,
+            'versionMarker': 'MajdataPlay-AMF-RC-v1-' + digest[:12]}
+
+def source_git(*args, environment=None, quiet=False):
+    """Run Git against the cache without shell interpolation or changing its real index."""
+    # Older Windows caches may have CRLF checkouts. Normalize them when comparing
+    # Git blobs and applying LF patches; newly cloned source remains strictly LF.
+    result = subprocess.run(['git', '-c', 'core.autocrlf=input', '-c', 'core.safecrlf=false', '-c', 'core.filemode=false',
+                             '-C', str(SOURCE), *[str(arg) for arg in args]], env=environment,
+                            stdout=subprocess.DEVNULL if quiet else None, check=False)
+    if result.returncode not in (0, 1):
+        raise subprocess.CalledProcessError(result.returncode, result.args)
+    return result.returncode == 0
+
+def apply_verified_source_patch():
+    """Accept exactly the pinned tree or the reviewed patch, rejecting other tracked edits."""
+    patch = amf_rate_control_patch()
+    if not source_git('diff', '--cached', '--quiet', '--no-ext-diff', 'HEAD', '--', quiet=True):
+        raise RuntimeError('FFmpeg source index contains tracked modifications; refusing an unrecorded build')
+    # A temporary index describes the exact reviewed tree. Comparing every tracked
+    # working-tree file to it also catches edits outside the patch and partial patches.
+    with tempfile.TemporaryDirectory(prefix='ffmpeg-patch-index-', dir=CACHE) as directory:
+        environment = os.environ.copy()
+        environment['GIT_INDEX_FILE'] = str(Path(directory) / 'index')
+        if not source_git('read-tree', 'HEAD', environment=environment):
+            raise RuntimeError('Cannot prepare the pinned FFmpeg patch verification index')
+        if not source_git('apply', '--cached', '--whitespace=error-all', AMF_RATE_CONTROL_PATCH,
+                          environment=environment):
+            raise RuntimeError('The reviewed AMF patch does not apply to the pinned FFmpeg commit')
+        if not source_git('diff', '--quiet', '--no-ext-diff', '--', environment=environment, quiet=True):
+            if not source_git('diff', '--quiet', '--no-ext-diff', 'HEAD', '--', quiet=True):
+                raise RuntimeError('FFmpeg source contains tracked edits other than the reviewed AMF patch')
+            if not source_git('apply', '--check', '--whitespace=error-all', AMF_RATE_CONTROL_PATCH):
+                raise RuntimeError('Cannot apply the reviewed AMF patch to the pinned FFmpeg tree')
+            if not source_git('apply', '--whitespace=error-all', AMF_RATE_CONTROL_PATCH):
+                raise RuntimeError('Applying the reviewed AMF patch failed')
+            if not source_git('diff', '--quiet', '--no-ext-diff', '--', environment=environment, quiet=True):
+                raise RuntimeError('FFmpeg source differs from the reviewed patched tree')
+    print('Verified AMF source patch SHA256 ' + patch['sha256'] + '.', flush=True)
+    return patch
 
 def verify_source():
     if not (SOURCE / '.git').exists():
@@ -190,8 +244,6 @@ def verify_source():
     actual = command(['git', '-C', SOURCE, 'rev-parse', 'HEAD'])
     if actual != LOCK['commit']:
         raise RuntimeError(f'FFmpeg source commit mismatch: {actual}; expected {LOCK["commit"]}')
-    if command(['git', '-c', 'core.autocrlf=false', '-c', 'core.filemode=false', '-C', SOURCE, 'status', '--porcelain', '--untracked-files=no']):
-        raise RuntimeError('FFmpeg source contains tracked modifications; refusing an unrecorded build')
     headers = ROOT / LOCK['bindingHeaders']
     checked = 0
     for file in headers.rglob('*.h'):
@@ -202,6 +254,7 @@ def verify_source():
             raise RuntimeError(f'Binding header mismatch: {file.relative_to(headers)}; regenerate bindings against pinned source')
         checked += 1
     print(f'Verified source commit and {checked} matching public binding headers.', flush=True)
+    return apply_verified_source_patch()
 
 def shell(bash, text, cwd, log):
     with log.open('w', encoding='utf-8') as output:
@@ -286,14 +339,23 @@ def build_dav1d(target, specific, paths, jobs):
     for depth in (8, 16):
         if not re.search(r'^#define CONFIG_' + str(depth) + r'BPC 1$', configuration, re.MULTILINE):
             raise RuntimeError('dav1d was built without the ' + str(depth) + '-bit implementation')
-    # Only dav1d lives outside a caller's optional Linux dependency sysroot.
+    # dav1d and the header-only NVENC SDK live outside an optional Linux dependency sysroot.
     # Keep libva/libdrm searches unchanged when forwarding their pkg-config calls.
     pkg_config = flags.get('pkg-config', os.environ.get('PKG_CONFIG', 'pkg-config'))
     wrapper = work / 'pkg-config.sh'
+    nvcodec_case = ''
+    if target.startswith(('win-', 'linux-')):
+        nvcodec_root = DEPENDENCIES.nvcodec_headers()
+        nvcodec_pkgconfig = work / 'nvcodec-pkgconfig'
+        nvcodec_pkgconfig.mkdir(parents=True, exist_ok=True)
+        entry = (nvcodec_root / 'ffnvcodec.pc.in').read_text().replace('@@PREFIX@@', posix(nvcodec_root))
+        write_text_atomic(nvcodec_pkgconfig / 'ffnvcodec.pc', entry)
+        nvcodec_case = '  *" ffnvcodec "*)\n    unset PKG_CONFIG_SYSROOT_DIR PKG_CONFIG_LIBDIR\n' \
+            + '    export PKG_CONFIG_PATH=' + shlex.quote(posix(nvcodec_pkgconfig)) + '\n    ;;\n'
     write_text_atomic(wrapper, '#!/bin/sh\ncase " $* " in\n  *" dav1d "*)\n'
         '    unset PKG_CONFIG_SYSROOT_DIR PKG_CONFIG_LIBDIR\n'
         '    export PKG_CONFIG_PATH=' + shlex.quote(posix(prefix / 'lib/pkgconfig')) + '\n'
-        '    set -- --static "$@"\n    ;;\nesac\n'
+        '    set -- --static "$@"\n    ;;\n' + nvcodec_case + 'esac\n'
         'exec ' + shlex.quote(pkg_config) + ' "$@"\n')
     return prefix, ['--enable-libdav1d', '--pkg-config=' + shlex.join(['sh', posix(wrapper)])]
 
@@ -409,7 +471,21 @@ def stage_linux_dependencies(destination):
     return report
 
 
-def stage(target, prefix, config, logs, dav1d_prefix):
+def stage_source_patch(destination, patch):
+    """Ship the exact source correction needed to reproduce the native binaries."""
+    if hashlib.sha256(AMF_RATE_CONTROL_PATCH.read_bytes()).hexdigest() != patch['sha256']:
+        raise RuntimeError('The reviewed AMF source patch changed during the build')
+    file = destination / AMF_RATE_CONTROL_PATCH.name
+    shutil.copy2(AMF_RATE_CONTROL_PATCH, file)
+    if OUTPUT in file.parents:
+        meta = Path(str(file) + '.meta')
+        if not meta.exists():
+            guid = uuid.uuid5(uuid.NAMESPACE_URL, 'majdata-ffmpeg/' + file.relative_to(OUTPUT).as_posix()).hex
+            write_text_atomic(meta, 'fileFormatVersion: 2\nguid: ' + guid + '\nDefaultImporter:\n'
+                             '  externalObjects: {}\n  userData:\n  assetBundleName:\n  assetBundleVariant:\n')
+    return dict(patch, stagedFile=file.name)
+
+def stage(target, prefix, config, logs, dav1d_prefix, source_patch):
     # Simulator archives remain outside Assets: device and simulator cannot both be linked by Unity.
     destination = destination_for(target)
     destination.mkdir(parents=True, exist_ok=True)
@@ -448,11 +524,17 @@ def stage(target, prefix, config, logs, dav1d_prefix):
         shutil.copy2(SOURCE / name, destination / name)
     report = {'target': target, 'source': LOCK, 'host': platform.platform(), 'builtUtc': datetime.datetime.now(datetime.timezone.utc).isoformat(),
               'configure': config, 'files': produced, 'softwareDecoders': ['libdav1d'],
+              'recordingProfile': verify_recording_configuration(target, logs),
               'buildDependencies': DEPENDENCIES.LOCK,
+              'sourcePatches': [stage_source_patch(destination, source_patch)],
               'buildDependencyLicenses': stage_dav1d_license(destination)}
     if target.startswith(('win-', 'linux-', 'android-')):
         report['verifiedHardwareBackends'] = verify_hardware_configuration(target, logs)
         report['buildDependencyLicenses'] += stage_build_dependency_licenses(destination)
+        if target.startswith(('win-', 'linux-')):
+            report['buildDependencyLicenses'] += stage_nvcodec_license(destination)
+        if target.startswith('win-'):
+            report['buildDependencyLicenses'] += stage_amf_license(destination)
         if target.startswith('win-') and os.environ.get('FFMPEG_D3D12_HEADERS'):
             report['d3d12HeaderOverlay'] = {'directory': str(DEPENDENCIES.verify_d3d12_overlay()),
                                           'files': DEPENDENCIES.LOCK['d3d12HeaderOverlay']['files']}
@@ -508,6 +590,67 @@ def verify_hardware_configuration(target, work):
         raise RuntimeError('Requested native hardware backend was disabled: ' + ', '.join(missing))
     return required
 
+def stage_nvcodec_license(destination):
+    """Carry all NVIDIA header notices with NVENC-enabled binaries."""
+    DEPENDENCIES.verify_nvcodec_headers()
+    notices = []
+    for header in sorted((DEPENDENCIES.nvcodec_headers() / 'include/ffnvcodec').glob('*.h')):
+        text = header.read_text(encoding='utf-8')
+        notice = re.match(r'\s*(/\*.*?\*/)', text, re.DOTALL)
+        if not notice:
+            raise RuntimeError('Missing NVIDIA header copyright notice: ' + str(header))
+        notices.append(header.name + '\n' + notice.group(1) + '\n')
+    file = destination / 'nv-codec-headers.LICENSE.txt'
+    write_text_atomic(file, '\n'.join(notices))
+    meta = Path(str(file) + '.meta')
+    if not meta.exists():
+        guid = uuid.uuid5(uuid.NAMESPACE_URL, 'majdata-ffmpeg/' + file.relative_to(OUTPUT).as_posix()).hex
+        write_text_atomic(meta, 'fileFormatVersion: 2\nguid: ' + guid + '\nTextScriptImporter:\n'
+                         '  externalObjects: {}\n  userData:\n  assetBundleName:\n  assetBundleVariant:\n')
+    return [{'file': file.name, 'sha256': hashlib.sha256(file.read_bytes()).hexdigest(), 'license': 'MIT'}]
+
+def stage_amf_license(destination):
+    """Carry the pinned AMD AMF header license with Windows encoder binaries."""
+    DEPENDENCIES.verify_amf_headers()
+    file = destination / 'AMF.LICENSE.txt'
+    source = DEPENDENCIES.amf_source()
+    copyrights = set()
+    for header in (source / 'amf/public/include').rglob('*.h'):
+        copyrights.update(re.findall(r'^\s*//\s*(Copyright[^\r\n]+)', header.read_text(encoding='utf-8'), re.MULTILINE))
+    contents = (source / 'LICENSE.txt').read_text(encoding='utf-8').rstrip() + '\n\nHeader copyright notices:\n'
+    write_text_atomic(file, contents + '\n'.join(sorted(copyrights)) + '\n')
+    meta = Path(str(file) + '.meta')
+    if not meta.exists():
+        guid = uuid.uuid5(uuid.NAMESPACE_URL, 'majdata-ffmpeg/' + file.relative_to(OUTPUT).as_posix()).hex
+        write_text_atomic(meta, 'fileFormatVersion: 2\nguid: ' + guid + '\nTextScriptImporter:\n'
+                         '  externalObjects: {}\n  userData:\n  assetBundleName:\n  assetBundleVariant:\n')
+    return [{'file': file.name, 'sha256': hashlib.sha256(file.read_bytes()).hexdigest(), 'license': 'MIT'}]
+
+def recording_configuration(target):
+    """Enable a small recording profile without new external codec dependencies."""
+    encoders = ['mpeg4']
+    if target.startswith(('win-', 'linux-')):
+        encoders += ['h264_nvenc', 'hevc_nvenc', 'av1_nvenc']
+    if target.startswith('win-'):
+        encoders += ['h264_amf', 'hevc_amf', 'av1_amf']
+    if target == 'linux-x64':
+        encoders += ['h264_vaapi', 'hevc_vaapi', 'vp9_vaapi', 'av1_vaapi']
+    elif target.startswith(('macos-', 'ios-')):
+        encoders += ['h264_videotoolbox']
+    muxers = ['mov', 'mp4', 'matroska', 'webm', 'avi']
+    return encoders, muxers
+
+def verify_recording_configuration(target, work):
+    """Reject builds that silently omit an encoder or container in the recording profile."""
+    encoders, muxers = recording_configuration(target)
+    configuration = (work / 'config_components.h').read_text()
+    required = [name.upper() + '_ENCODER' for name in encoders]
+    required += [name.upper() + '_MUXER' for name in muxers]
+    missing = [name for name in required if not re.search(r'^#define CONFIG_' + name + r' 1$', configuration, re.MULTILINE)]
+    if missing:
+        raise RuntimeError('Requested recording component was disabled: ' + ', '.join(missing))
+    return {'encoders': encoders, 'muxers': muxers}
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--targets', default='all', help='comma separated targets, or all')
@@ -549,7 +692,7 @@ def main():
     if options.probe:
         return 1 if options.require_all and results else 0
     if available:
-        verify_source()
+        source_patch = verify_source()
     for target, (specific, paths) in available:
         work = CACHE / target
         prefix = CACHE / 'install' / target
@@ -557,7 +700,9 @@ def main():
         prefix.mkdir(parents=True, exist_ok=True)
         config = ['--prefix=' + posix(prefix), '--disable-doc', '--disable-programs', '--disable-debug', '--disable-autodetect',
                   '--disable-encoders', '--disable-muxers', '--disable-filters', '--disable-devices', '--enable-pic',
-                  '--disable-gpl', '--disable-nonfree']
+                  '--disable-gpl', '--disable-nonfree', '--extra-version=' + source_patch['versionMarker']]
+        encoders, muxers = recording_configuration(target)
+        config += ['--enable-encoder=' + ','.join(encoders), '--enable-muxer=' + ','.join(muxers)]
         config += ['--disable-shared', '--enable-static'] if target.startswith('ios-') else ['--enable-shared', '--disable-static']
         config += specific
         if target.startswith('win-') or target.endswith('-x64'):
@@ -580,11 +725,13 @@ def main():
             settings_file = work / 'build-settings.json'
             settings = json.dumps({'commit':LOCK['commit'], 'configure':config,
                                    'toolPaths':[str(p) for p in paths], 'runtimePathFix':1,
+                                   'sourcePatches': [source_patch],
                                    'dav1d': DEPENDENCIES.LOCK['dav1d']}, sort_keys=True)
             if (work / 'ffbuild/config.mak').exists() and (not settings_file.exists() or settings_file.read_text() != settings):
                 shell(bash, setup + shlex.quote(make) + ' clean', work, work / 'clean.log')
             shell(bash, setup + 'bash ' + shlex.quote(posix(SOURCE / 'configure')) + ' ' + shlex.join(config), work, work / 'configure.log')
             verify_software_configuration(work)
+            recording_profile = verify_recording_configuration(target, work)
             if target.startswith(('win-', 'linux-', 'android-')):
                 verify_hardware_configuration(target, work)
             shell(bash, setup + shlex.quote(make) + f' -j{max(1, options.jobs)}', work, work / 'build.log')
@@ -592,13 +739,15 @@ def main():
             write_text_atomic(settings_file, settings)
             provenance = {'target': target, 'source': LOCK, 'host': platform.platform(),
                           'builtUtc': datetime.datetime.now(datetime.timezone.utc).isoformat(),
-                          'configure': config, 'buildDependencies': DEPENDENCIES.LOCK, 'softwareDecoders': ['libdav1d']}
+                          'configure': config, 'buildDependencies': DEPENDENCIES.LOCK, 'softwareDecoders': ['libdav1d'],
+                          'sourcePatches': [source_patch],
+                          'recordingProfile': recording_profile}
             if target.startswith(('win-', 'linux-', 'android-')):
                 provenance['verifiedHardwareBackends'] = verify_hardware_configuration(target, work)
             # Keep the build evidence beside the usable prefix even when a loaded Unity DLL prevents staging.
             write_text_atomic(prefix / 'build-provenance.json', json.dumps(provenance, indent=2) + '\n')
             shutil.copy2(work / 'configure.log', prefix / 'build-configure.txt')
-            report = stage(target, prefix, config, work, dav1d_prefix)
+            report = stage(target, prefix, config, work, dav1d_prefix, source_patch)
             if options.with_bridge:
                 build_bridge(target, prefix, options, (specific, paths))
             results.append({'target': target, 'status': 'built', 'files': report['files']})

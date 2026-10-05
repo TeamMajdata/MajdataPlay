@@ -15,6 +15,18 @@
     "commit": "19725e4d48082fe78e26622b15d3080ccd54112b",
     "minimumHeaderVersion": 317
   },
+  "nvCodecHeaders": {
+    "repository": "https://github.com/FFmpeg/nv-codec-headers.git",
+    "tag": "n12.1.14.1",
+    "commit": "7c8e7fc751f803c672b42c37d9199c8a4f98b327",
+    "minimumWindowsDriver": "531.61",
+    "minimumLinuxDriver": "530.41.03"
+  },
+  "amfHeaders": {
+    "repository": "https://github.com/GPUOpen-LibrariesAndSDKs/AMF.git",
+    "tag": "v1.5.2",
+    "commit": "eadd00804d5f7e5cd8c85d540073198312870776"
+  },
   "d3d12HeaderOverlay": {
     "source": "llvm-mingw-20260922-ucrt-x86_64.zip",
     "files": {
