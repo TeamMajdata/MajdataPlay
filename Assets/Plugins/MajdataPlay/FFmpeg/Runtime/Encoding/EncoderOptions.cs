@@ -60,7 +60,7 @@ namespace MajdataPlay.FFmpeg
         public int MaximumSoftwareThreads { get; set; } = Math.Min(Environment.ProcessorCount, 8);
         /// <summary>Gets or sets the requested compressed video format.</summary>
         [field: SerializeField]
-        public VideoEncodingFormat Format { get; set; } = VideoEncodingFormat.MPEG4;
+        public VideoEncodingFormat Format { get; set; } = VideoEncodingFormat.H264;
         /// <summary>Gets or sets the target video bitrate in bits per second, at least 1000.</summary>
         /// <remarks>In CBR mode this is the constant-rate target and the effective maximum rate.</remarks>
         [field: SerializeField]
