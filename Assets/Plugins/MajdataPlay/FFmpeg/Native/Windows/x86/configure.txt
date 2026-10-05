@@ -1,11 +1,11 @@
-install prefix            /tmp/majdata-recording-windows/install/win-x86
-source path               /tmp/majdata-recording-windows/source
+install prefix            /home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005/install/win-x86
+source path               ./src
 C compiler                i686-w64-mingw32-gcc
 C library                 mingw64
 host C compiler           gcc
 host C library            glibc
 ARCH                      x86 (generic)
-version string suffix     MajdataPlay-AMF-RC-v1-c0604b924b6a
+version string suffix     MajdataPlay-AMF-RC-v1-c0604b924b6a_MajdataPlay-X265-Params-v1-5b457330f94a
 big-endian                no
 runtime cpu detection     yes
 standalone assembly       yes
@@ -46,7 +46,8 @@ experimental features     yes
 xmllint enabled           no
 
 External libraries:
-libdav1d                schannel
+libaom                  libvpx                  libx265
+libdav1d                libx264                 schannel
 
 External libraries providing hardware acceleration:
 amf                     d3d12va                 nvenc
@@ -223,9 +224,10 @@ escape130               pcm_u8
 evrc                    pcm_vidc
 
 Enabled encoders:
-av1_amf                 h264_amf                hevc_nvenc
-av1_nvenc               h264_nvenc              mpeg4
-h263                    hevc_amf
+av1_amf                 h264_nvenc              libvpx_vp9
+av1_nvenc               hevc_amf                libx264
+h263                    hevc_nvenc              libx265
+h264_amf                libaom_av1              mpeg4
 
 Enabled hwaccels:
 av1_d3d11va             hevc_d3d11va2           vc1_dxva2
@@ -430,6 +432,22 @@ Enabled indevs:
 
 Enabled outdevs:
 
-License: LGPL version 2.1 or later
+License: GPL version 3 or later
 
 WARNING: spirv-headers not found, swscale SPIR-V backend unavailable
+config.asm is unchanged
+config_components.h is unchanged
+config_components.asm is unchanged
+checkasm_config_generated.h is unchanged
+checkasm_header_config_generated.h is unchanged
+checkasm_config_generated.asm is unchanged
+libavutil/avconfig.h is unchanged
+libavfilter/filter_list.c is unchanged
+libavcodec/codec_list.c is unchanged
+libavcodec/parser_list.c is unchanged
+libavcodec/bsf_list.c is unchanged
+libavformat/demuxer_list.c is unchanged
+libavformat/muxer_list.c is unchanged
+libavdevice/indev_list.c is unchanged
+libavdevice/outdev_list.c is unchanged
+libavformat/protocol_list.c is unchanged

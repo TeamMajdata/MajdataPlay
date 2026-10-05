@@ -1,11 +1,11 @@
-install prefix            /Users/codex/codex-work/majdata-recording-apple-20261005/Tools/FFmpeg/.build/install/macos-arm64
+install prefix            /Users/codex/codex-work/majdata-full-encoding-apple-20261005/Tools/FFmpeg/.build/install/macos-arm64
 source path               ./src
 C compiler                /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang
 C library                 
 host C compiler           gcc
 host C library            
 ARCH                      aarch64 (generic)
-version string suffix     MajdataPlay-AMF-RC-v1-c0604b924b6a
+version string suffix     MajdataPlay-AMF-RC-v1-c0604b924b6a_MajdataPlay-X265-Params-v1-5b457330f94a
 big-endian                no
 runtime cpu detection     yes
 NEON enabled              yes
@@ -36,7 +36,8 @@ experimental features     yes
 xmllint enabled           yes
 
 External libraries:
-libdav1d                securetransport
+libaom                  libvpx                  libx265
+libdav1d                libx264                 securetransport
 
 External libraries providing hardware acceleration:
 audiotoolbox            videotoolbox
@@ -216,7 +217,9 @@ escape124               pcm_u24le
 escape130               pcm_u32be
 
 Enabled encoders:
-h263                    h264_videotoolbox       mpeg4
+h263                    libvpx_vp9              mpeg4
+h264_videotoolbox       libx264
+libaom_av1              libx265
 
 Enabled hwaccels:
 av1_videotoolbox        mpeg1_videotoolbox      prores_videotoolbox
@@ -415,14 +418,17 @@ Enabled indevs:
 
 Enabled outdevs:
 
-License: LGPL version 2.1 or later
+License: GPL version 3 or later
+config_components.h is unchanged
 checkasm_config_generated.h is unchanged
 checkasm_header_config_generated.h is unchanged
 libavutil/avconfig.h is unchanged
 libavfilter/filter_list.c is unchanged
+libavcodec/codec_list.c is unchanged
 libavcodec/parser_list.c is unchanged
 libavcodec/bsf_list.c is unchanged
 libavformat/demuxer_list.c is unchanged
+libavformat/muxer_list.c is unchanged
 libavdevice/indev_list.c is unchanged
 libavdevice/outdev_list.c is unchanged
 libavformat/protocol_list.c is unchanged

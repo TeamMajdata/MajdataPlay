@@ -51,5 +51,58 @@
         "sha256": "e3ad77d117a4bea19a7a3b333341824d79a5a371004a10e25b8504e7b3047666"
       }
     }
+  },
+  "softwareEncoders": {
+    "x264": {
+      "version": "0.165-stable",
+      "repository": "https://code.videolan.org/videolan/x264.git",
+      "commit": "b35605ace3ddf7c1a5d67a2eb553f034aef41d55",
+      "apiBuild": 165,
+      "license": "GPL-2.0-or-later",
+      "licenseFiles": [
+        "COPYING",
+        "AUTHORS"
+      ]
+    },
+    "x265": {
+      "version": "4.1",
+      "repository": "https://github.com/Multicorewareinc/x265.git",
+      "tag": "4.1",
+      "commit": "1d117bed4747758b51bd2c124d738527e30392cb",
+      "apiBuild": 215,
+      "license": "GPL-2.0-or-later",
+      "licenseFiles": [
+        "COPYING"
+      ]
+    },
+    "libvpx": {
+      "version": "1.17.0",
+      "repository": "https://chromium.googlesource.com/webm/libvpx",
+      "tag": "v1.17.0",
+      "commit": "6df3ec34557879fff673706f4a1d9fbd0f3a6f0e",
+      "license": "BSD-3-Clause",
+      "licenseFiles": [
+        "LICENSE",
+        "PATENTS",
+        "AUTHORS",
+        "third_party/x86inc/LICENSE"
+      ]
+    },
+    "libaom": {
+      "version": "3.13.3",
+      "repository": "https://aomedia.googlesource.com/aom",
+      "tag": "v3.13.3",
+      "commit": "92d4c37fbdd08944a0e721bbaeb13318f10aebb0",
+      "license": "BSD-2-Clause and AOM Patent License 1.0",
+      "licenseFiles": [
+        "LICENSE",
+        "PATENTS",
+        "AUTHORS",
+        "third_party/x86inc/LICENSE",
+        "third_party/vector/LICENSE",
+        "third_party/fastfeat/LICENSE",
+        "third_party/highway/LICENSE-BSD3"
+      ]
+    }
   }
 }

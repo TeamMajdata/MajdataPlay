@@ -104,6 +104,17 @@ namespace MajdataPlay.FFmpeg.Internal
         public Task Completion => _completion.Task;
         /// <summary>Gets whether all native encoder resources have been released.</summary>
         public bool Finished { get { lock (_gate) { return _finished; } } }
+        /// <summary>Gets whether the live session accepts frames and has not been stopped, failed, or canceled.</summary>
+        public bool CanAcceptFrames
+        {
+            get
+            {
+                lock (_gate)
+                {
+                    return _accepting && !_finished && _error == null && !_cancel.IsCancellationRequested;
+                }
+            }
+        }
         /// <summary>Gets the recording failure, including cancellation, or null.</summary>
         public Exception? Error { get { lock (_gate) { return _error; } } }
         /// <summary>Gets the initialized FFmpeg encoder name, or null before initialization.</summary>

@@ -66,7 +66,7 @@ namespace MajdataPlay.FFmpeg
         [field: SerializeField]
         public long BitRate { get; set; } = 8000000;
         /// <summary>Gets or sets the upper encoder rate in bits per second, at least the target bitrate and no greater than Int32.MaxValue.</summary>
-        /// <remarks>The backend applies this through rate control and a one-second buffer; individual packets or shorter bursts may exceed it.</remarks>
+        /// <remarks>VBV encoders apply a buffered limit; libvpx/libaom use budgets that can overshoot in either mode. Individual packets are not bounded.</remarks>
         [field: SerializeField]
         public long MaximumBitRate { get; set; } = 16000000;
         /// <summary>Gets or sets the requested rate control mode; unsupported combinations fail explicitly.</summary>

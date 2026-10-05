@@ -1,5 +1,27 @@
 # Apple 录制原生库重建与验证（2026-10-05）
 
+## 四种软件视频编码器补全
+
+本轮再次重建全部五个 Apple 目标，静态并入 x264 `0.165-stable`、x265 `4.1`、libvpx `1.17.0` 和 libaom `3.13.3`，统一提供 H.264/H.265/VP9/AV1 软件 CBR/VBR 编码。保留 MPEG4、H.264 VideoToolbox、全部既有解码器、dav1d 与 Metal 桥接。组合库为 GPL version 3 or later，随包保存四个依赖的版权、专利及适用第三方声明；系统 libc++ 不随包复制。
+
+构建目录为 `/Users/codex/codex-work/majdata-full-encoding-apple-20261005`，未覆盖此前目录。环境为 Apple M4、macOS 27.0.1、Xcode 27.0（27A266a）、SDK 27、AppleClang 21.0.0、Python 3.14.5、Ninja 1.13.2。系统 CMake 4.4.2 继续用于图形桥接；固定 x265 4.1 使用官方 CMake 3.31.10 macOS universal2 wheel 中的专用工具，wheel SHA256 `ad697643a00d9ba85179590a383c4f7401169b55ebf4b8b2938daf28c6bdeb6d`，无系统软件安装。
+
+两份检查补丁、固定 FFmpeg/依赖 commit 和 SHA256 见 [本轮构建记录](BUILD-RESULTS.md)。143 个 AutoGen 公开头文件逐一核对，七库主版本与桥接 ABI 2 不变。x264 ARM 汇编显式使用目标 SDK/平台的编译器汇编器；iOS x64 的 libaom 使用 Darwin Mach-O 汇编对象与明确 iPhoneSimulator SDK，避免混入 ELF 或 macOS device 对象。
+
+| 目标 | 编译/链接 | 本轮实际运行 |
+| --- | --- | --- |
+| macOS ARM64 | 七 dylib + Metal 桥接 PASS | 四软件格式 × CBR/VBR × 简单/复杂场景：**31,820 checks PASS**；七库加载 **142**；真实 VT/Metal **231**；AV1 8/10-bit 各 **3570 PASS** |
+| macOS x64 | 七 dylib、桥接及三种 C/C++ fixture 链接 PASS | 未验证：无 Rosetta，执行 errno 86 |
+| iOS device ARM64 | 七静态归档、桥接及三种 fixture 完整链接 PASS | 未验证：没有实体设备 |
+| iOS simulator ARM64 | 七静态归档、桥接及三种 fixture 完整链接 PASS | 四软件格式同一矩阵 **31,820 PASS**；AV1 8/10-bit 各 **3570 PASS**；Metal/软件回退 **116 PASS**，VT 硬解明确 SKIP |
+| iOS simulator x64 | 七静态归档、桥接及三种 fixture 完整链接 PASS | 未验证：没有 x64 运行支持 |
+
+全五目标 **35 库 + 5 桥接** 的哈希、CPU、SDK 平台、补丁、GPL profile 和许可证检查通过。macOS 两架构的动态依赖没有额外 x264/x265/vpx/aom dylib，仅使用交付 FFmpeg、系统框架及系统 libc++；iOS 链接测试只链接交付的七个归档和桥接，无需独立编码器归档。所有 ARM64 实际编码文件均逐帧解码核对像素/PTS/排空/worker 上限，未知及无效 x265 参数各实际返回 `EINVAL`。
+
+本轮未运行 Apple Unity Player、实体 iOS 或 Apple x64 程序，也未新增 VideoToolbox 硬件编码实测。其 CBR 组合限制沿用下方历史结果。四种软件编码器的最大码率预算、CBR 填充差异及 ARM 性能限制见 [构建记录](BUILD-RESULTS.md)；短测试不能代表高分辨率实时性能。
+
+## 较早的 MPEG4-only 录制构建
+
 本轮按现有录制 profile 实际重建全部五个 Apple 目标：macOS ARM64/x64、iOS ARM64、iOS 模拟器 ARM64/x64。每个目标均重新编译七个 FFmpeg 库与 Metal 桥接，显式包含 `mpeg4`、`h264_videotoolbox` 编码器和 `mov/mp4/matroska/webm/avi` muxer，保留 dav1d 1.5.3 的 AV1 8/10-bit 软件解码。正式 macOS 两套及 iOS device 插件已更新；两套模拟器归档仅放在忽略的 `Tools/FFmpeg/.build/artifacts`。已有 44 个 Apple `.meta` GUID 均保留。
 
 构建固定 FFmpeg `n9.0.1`、commit `bf1b838f2ab88b4f8fd83443325c782ea0e0f7fa`，逐一比较 143 个现有公开绑定头文件，再应用已审查的 AMF 检查补丁。补丁 SHA256 为 `c0604b924b6ae1ee718c045d34f1448ebb78652ccacadfdb54799810c69e17f7`，版本标识为 `MajdataPlay-AMF-RC-v1-c0604b924b6a`；Apple 不编入 AMF，但仍记录相同源码 provenance。公开头文件、FFmpeg 主版本和 Apple 桥接 ABI 2 未改变。

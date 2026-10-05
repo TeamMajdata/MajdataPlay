@@ -17,9 +17,9 @@
     "note": "All upstream public headers present in the binding header snapshot are compared after CRLF normalization before building. Generated avconfig.h and ffversion.h are excluded."
   },
   "host": "Linux-6.18.40.1-microsoft-standard-WSL2-x86_64-with-glibc2.39",
-  "builtUtc": "2026-10-05T08:48:23.961440+00:00",
+  "builtUtc": "2026-10-05T12:43:25.064553+00:00",
   "configure": [
-    "--prefix=/tmp/majdata-recording-windows/install/win-x86",
+    "--prefix=/home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005/install/win-x86",
     "--disable-doc",
     "--disable-programs",
     "--disable-debug",
@@ -29,10 +29,14 @@
     "--disable-filters",
     "--disable-devices",
     "--enable-pic",
-    "--disable-gpl",
+    "--enable-gpl",
+    "--enable-version3",
     "--disable-nonfree",
-    "--extra-version=MajdataPlay-AMF-RC-v1-c0604b924b6a",
-    "--enable-encoder=mpeg4,h264_nvenc,hevc_nvenc,av1_nvenc,h264_amf,hevc_amf,av1_amf",
+    "--extra-version=MajdataPlay-AMF-RC-v1-c0604b924b6a_MajdataPlay-X265-Params-v1-5b457330f94a",
+    "--disable-decoder=adpcm_circus,adpcm_ima_escape,adpcm_ima_hvqm2,adpcm_ima_hvqm4,adpcm_ima_magix,adpcm_ima_pda,adpcm_n64,adpcm_psxc,ahx",
+    "--disable-parser=ahx",
+    "--disable-bsf=ahx_to_mp2",
+    "--enable-encoder=mpeg4,libx264,libx265,libvpx_vp9,libaom_av1,h264_nvenc,hevc_nvenc,av1_nvenc,h264_amf,hevc_amf,av1_amf",
     "--enable-muxer=mov,mp4,matroska,webm,avi",
     "--enable-shared",
     "--disable-static",
@@ -46,56 +50,64 @@
     "--enable-d3d12va",
     "--enable-dxva2",
     "--enable-schannel",
-    "--extra-cflags=-I/tmp/majdata-recording-windows/toolchains/d3d12-header-overlay",
+    "--extra-cflags=-I/home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005/toolchains/d3d12-header-overlay",
     "--enable-amf",
     "--disable-decoder=h264_amf,hevc_amf,av1_amf,vp9_amf",
-    "--extra-cflags=-I/tmp/majdata-recording-windows/toolchains/AMF-v1.5.2-include",
+    "--extra-cflags=-I/home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005/toolchains/AMF-v1.5.2-include",
     "--enable-vulkan",
     "--disable-vulkan-static",
-    "--extra-cflags=-I/tmp/majdata-recording-windows/toolchains/Vulkan-Headers-vulkan-sdk-1.4.328.1/include",
+    "--extra-cflags=-I/home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005/toolchains/Vulkan-Headers-vulkan-sdk-1.4.328.1/include",
     "--disable-hwaccel=apv_vulkan,dpx_vulkan,ffv1_vulkan,prores_raw_vulkan,prores_vulkan",
     "--enable-ffnvcodec",
     "--enable-nvenc",
     "--disable-nvdec",
     "--disable-cuvid",
     "--enable-libdav1d",
-    "--pkg-config=sh /tmp/majdata-recording-windows/dav1d-win-x86-d3e92698925d/pkg-config.sh"
+    "--pkg-config=sh /home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005/dav1d-win-x86-9d4457dbea6e/pkg-config.sh",
+    "--enable-libx264",
+    "--enable-libx265",
+    "--enable-libvpx",
+    "--enable-libaom",
+    "--disable-decoder=libvpx_vp8,libvpx_vp9,libaom_av1",
+    "--pkg-config=sh /home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005/software-win-x86-b9f4a51e3af2/pkg-config.sh",
+    "--extra-ldflags=-Wl,--exclude-libs,ALL",
+    "--extra-ldflags=-static-libstdc++"
   ],
   "files": [
     {
       "file": "avcodec-63.dll",
-      "bytes": 14721550,
-      "sha256": "e3d13195817b9a8b508c9fd97f4b01d365eeee5a30741b6aa734eea33129aa0a"
+      "bytes": 28595726,
+      "sha256": "1291eff420d0eba2b724e8b2c08244fc567250ba8326f42fe60dba80292191a0"
     },
     {
       "file": "avdevice-63.dll",
-      "bytes": 18958,
-      "sha256": "c87b0ef52dc633ffb6a6682d76142d675f373b04d6d3af845b55aac13571afb5"
+      "bytes": 19982,
+      "sha256": "fb4c697691629460ec35387b0ec4c6a9bbecec2f92c06611dc843dc3baaafe06"
     },
     {
       "file": "avfilter-12.dll",
-      "bytes": 168974,
-      "sha256": "a031616ea55336b42935b418a8cb1ea0a8e7591ca404df4d01a44369894e9d25"
+      "bytes": 169998,
+      "sha256": "53a313bba2748a6b83afdf4472b3bbb2e9c675293a172c20b095d664be86e746"
     },
     {
       "file": "avformat-63.dll",
-      "bytes": 2535438,
-      "sha256": "583743152241470a42d4df0431f943bd3f1ffeede180821d148825e9efaea554"
+      "bytes": 2536462,
+      "sha256": "20463ab6f1abd1de60e8547c58df532dd42f31f9ef07fbab731defd070de1a12"
     },
     {
       "file": "avutil-61.dll",
-      "bytes": 1136142,
-      "sha256": "d7d497625d7817ef137f6dd2b4728b3b05b4305c331476eddcb9b998f3c048c6"
+      "bytes": 1137166,
+      "sha256": "91a324492da7703727e79837cd777f23cec65dc43acd0bedb5ace3d154ac3696"
     },
     {
       "file": "swresample-7.dll",
-      "bytes": 129038,
-      "sha256": "601083fd037d0f1858c82fd501737ad9e604c517ab7317f22fa0c23262d7f7aa"
+      "bytes": 130062,
+      "sha256": "1980c59337fb8c05a87f6e7c1003647b3edddc0da5d2c59413145569db7a1fc5"
     },
     {
       "file": "swscale-10.dll",
-      "bytes": 1016846,
-      "sha256": "025cea009a35ca53780a355b909b5624e09365e32cef00c80b9dc9982ec22b2a"
+      "bytes": 1017870,
+      "sha256": "fd6f354e92261a556a063ce1cbfb657d88d6aa917dc9f87c4c8709efe1d60114"
     }
   ],
   "softwareDecoders": [
@@ -104,6 +116,10 @@
   "recordingProfile": {
     "encoders": [
       "mpeg4",
+      "libx264",
+      "libx265",
+      "libvpx-vp9",
+      "libaom-av1",
       "h264_nvenc",
       "hevc_nvenc",
       "av1_nvenc",
@@ -172,6 +188,271 @@
           "sha256": "e3ad77d117a4bea19a7a3b333341824d79a5a371004a10e25b8504e7b3047666"
         }
       }
+    },
+    "softwareEncoders": {
+      "x264": {
+        "version": "0.165-stable",
+        "repository": "https://code.videolan.org/videolan/x264.git",
+        "commit": "b35605ace3ddf7c1a5d67a2eb553f034aef41d55",
+        "apiBuild": 165,
+        "license": "GPL-2.0-or-later",
+        "licenseFiles": [
+          "COPYING",
+          "AUTHORS"
+        ]
+      },
+      "x265": {
+        "version": "4.1",
+        "repository": "https://github.com/Multicorewareinc/x265.git",
+        "tag": "4.1",
+        "commit": "1d117bed4747758b51bd2c124d738527e30392cb",
+        "apiBuild": 215,
+        "license": "GPL-2.0-or-later",
+        "licenseFiles": [
+          "COPYING"
+        ]
+      },
+      "libvpx": {
+        "version": "1.17.0",
+        "repository": "https://chromium.googlesource.com/webm/libvpx",
+        "tag": "v1.17.0",
+        "commit": "6df3ec34557879fff673706f4a1d9fbd0f3a6f0e",
+        "license": "BSD-3-Clause",
+        "licenseFiles": [
+          "LICENSE",
+          "PATENTS",
+          "AUTHORS",
+          "third_party/x86inc/LICENSE"
+        ]
+      },
+      "libaom": {
+        "version": "3.13.3",
+        "repository": "https://aomedia.googlesource.com/aom",
+        "tag": "v3.13.3",
+        "commit": "92d4c37fbdd08944a0e721bbaeb13318f10aebb0",
+        "license": "BSD-2-Clause and AOM Patent License 1.0",
+        "licenseFiles": [
+          "LICENSE",
+          "PATENTS",
+          "AUTHORS",
+          "third_party/x86inc/LICENSE",
+          "third_party/vector/LICENSE",
+          "third_party/fastfeat/LICENSE",
+          "third_party/highway/LICENSE-BSD3"
+        ]
+      }
+    }
+  },
+  "license": "GPL-3.0-or-later",
+  "softwareEncoderBuilds": {
+    "x264": {
+      "source": {
+        "version": "0.165-stable",
+        "repository": "https://code.videolan.org/videolan/x264.git",
+        "commit": "b35605ace3ddf7c1a5d67a2eb553f034aef41d55",
+        "apiBuild": 165,
+        "license": "GPL-2.0-or-later",
+        "licenseFiles": [
+          "COPYING",
+          "AUTHORS"
+        ]
+      },
+      "configure": [
+        "--prefix=/home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005/software-win-x86-b9f4a51e3af2/x264/install",
+        "--host=i686-w64-mingw32",
+        "--enable-static",
+        "--enable-pic",
+        "--disable-cli",
+        "--disable-opencl",
+        "--disable-lavf",
+        "--disable-swscale",
+        "--disable-ffms",
+        "--disable-gpac",
+        "--disable-lsmash",
+        "--bit-depth=8",
+        "--chroma-format=420"
+      ],
+      "archive": "libx264.a",
+      "bytes": 1380718,
+      "sha256": "f8c6a92138d6e1d920cc32404e0c2de97d47f346f3363f9c6786ab820beae147",
+      "static": true,
+      "pic": true
+    },
+    "x265": {
+      "source": {
+        "version": "4.1",
+        "repository": "https://github.com/Multicorewareinc/x265.git",
+        "tag": "4.1",
+        "commit": "1d117bed4747758b51bd2c124d738527e30392cb",
+        "apiBuild": 215,
+        "license": "GPL-2.0-or-later",
+        "licenseFiles": [
+          "COPYING"
+        ]
+      },
+      "configure": [
+        "/usr/bin/cmake",
+        "-S",
+        "/home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005/toolchains/x265-1d117bed4747/source",
+        "-B",
+        "/home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005/software-win-x86-b9f4a51e3af2/x265/build",
+        "-G",
+        "Ninja",
+        "-DCMAKE_MAKE_PROGRAM=/usr/bin/ninja",
+        "-DCMAKE_BUILD_TYPE=Release",
+        "-DCMAKE_POLICY_VERSION_MINIMUM=3.5",
+        "-DCMAKE_POSITION_INDEPENDENT_CODE=ON",
+        "-DCMAKE_INSTALL_LIBDIR=lib",
+        "-DCMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY",
+        "-DCMAKE_SYSTEM_PROCESSOR=x86",
+        "-DCMAKE_SYSTEM_NAME=Windows",
+        "-DCMAKE_C_COMPILER=/usr/bin/i686-w64-mingw32-gcc-win32",
+        "-DCMAKE_CXX_COMPILER=/usr/bin/i686-w64-mingw32-g++-win32",
+        "-DCMAKE_AR=/usr/bin/i686-w64-mingw32-ar",
+        "-DCMAKE_RANLIB=/usr/bin/i686-w64-mingw32-ranlib",
+        "-DCMAKE_RC_COMPILER=i686-w64-mingw32-windres",
+        "-DCMAKE_C_FLAGS=-I/home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005/toolchains/d3d12-header-overlay -I/home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005/toolchains/AMF-v1.5.2-include -I/home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005/toolchains/Vulkan-Headers-vulkan-sdk-1.4.328.1/include",
+        "-DCMAKE_CXX_FLAGS=-I/home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005/toolchains/d3d12-header-overlay -I/home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005/toolchains/AMF-v1.5.2-include -I/home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005/toolchains/Vulkan-Headers-vulkan-sdk-1.4.328.1/include",
+        "-DCMAKE_EXE_LINKER_FLAGS=-static-libgcc",
+        "-DCMAKE_SHARED_LINKER_FLAGS=-static-libgcc",
+        "-DCMAKE_INSTALL_PREFIX=/home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005/software-win-x86-b9f4a51e3af2/x265/install",
+        "-DENABLE_SHARED=OFF",
+        "-DENABLE_CLI=OFF",
+        "-DENABLE_PIC=ON",
+        "-DENABLE_LIBNUMA=OFF",
+        "-DENABLE_TESTS=OFF",
+        "-DENABLE_HDR10_PLUS=OFF",
+        "-DENABLE_LIBVMAF=OFF",
+        "-DENABLE_SVT_HEVC=OFF",
+        "-DENABLE_ALPHA=OFF",
+        "-DHIGH_BIT_DEPTH=OFF",
+        "-DNATIVE_BUILD=OFF",
+        "-DENABLE_ASSEMBLY=ON",
+        "-DENABLE_NEON=OFF",
+        "-DENABLE_NEON_DOTPROD=OFF",
+        "-DENABLE_NEON_I8MM=OFF",
+        "-DENABLE_SVE=OFF",
+        "-DENABLE_SVE2=OFF",
+        "-DNASM_EXECUTABLE=/home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005/toolchains/linux-packages/usr/bin/nasm"
+      ],
+      "archive": "libx265.a",
+      "bytes": 4969910,
+      "sha256": "a158e0e3acbc7f35ce9cec01a85a829975d868ef8fe62b50b79bb1df51dd29e9",
+      "static": true,
+      "pic": true,
+      "cmakeVersion": "cmake version 3.28.3",
+      "cxxRuntimeLink": [
+        "-L/usr/lib/gcc/i686-w64-mingw32/13-win32",
+        "-l:libstdc++.a",
+        "-L/usr/i686-w64-mingw32/lib",
+        "-l:libwinpthread.a",
+        "-lm"
+      ]
+    },
+    "libvpx": {
+      "source": {
+        "version": "1.17.0",
+        "repository": "https://chromium.googlesource.com/webm/libvpx",
+        "tag": "v1.17.0",
+        "commit": "6df3ec34557879fff673706f4a1d9fbd0f3a6f0e",
+        "license": "BSD-3-Clause",
+        "licenseFiles": [
+          "LICENSE",
+          "PATENTS",
+          "AUTHORS",
+          "third_party/x86inc/LICENSE"
+        ]
+      },
+      "configure": [
+        "--prefix=/home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005/software-win-x86-b9f4a51e3af2/libvpx/install",
+        "--target=x86-win32-gcc",
+        "--enable-pic",
+        "--enable-static",
+        "--disable-shared",
+        "--disable-examples",
+        "--disable-tools",
+        "--disable-docs",
+        "--disable-unit-tests",
+        "--disable-install-bins",
+        "--disable-vp8",
+        "--enable-vp9",
+        "--enable-vp9-encoder",
+        "--disable-vp9-decoder",
+        "--as=nasm"
+      ],
+      "archive": "libvpx.a",
+      "bytes": 2197942,
+      "sha256": "754ce7c7bc7f4ba918d6b76ddb29ba17f14e9e22dc765cb654bfc1700d9aa78b",
+      "static": true,
+      "pic": true
+    },
+    "libaom": {
+      "source": {
+        "version": "3.13.3",
+        "repository": "https://aomedia.googlesource.com/aom",
+        "tag": "v3.13.3",
+        "commit": "92d4c37fbdd08944a0e721bbaeb13318f10aebb0",
+        "license": "BSD-2-Clause and AOM Patent License 1.0",
+        "licenseFiles": [
+          "LICENSE",
+          "PATENTS",
+          "AUTHORS",
+          "third_party/x86inc/LICENSE",
+          "third_party/vector/LICENSE",
+          "third_party/fastfeat/LICENSE",
+          "third_party/highway/LICENSE-BSD3"
+        ]
+      },
+      "configure": [
+        "/usr/bin/cmake",
+        "-S",
+        "/home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005/toolchains/libaom-92d4c37fbdd0",
+        "-B",
+        "/home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005/software-win-x86-b9f4a51e3af2/libaom/build",
+        "-G",
+        "Ninja",
+        "-DCMAKE_MAKE_PROGRAM=/usr/bin/ninja",
+        "-DCMAKE_BUILD_TYPE=Release",
+        "-DCMAKE_POLICY_VERSION_MINIMUM=3.5",
+        "-DCMAKE_POSITION_INDEPENDENT_CODE=ON",
+        "-DCMAKE_INSTALL_LIBDIR=lib",
+        "-DCMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY",
+        "-DCMAKE_SYSTEM_PROCESSOR=x86",
+        "-DCMAKE_SYSTEM_NAME=Windows",
+        "-DCMAKE_C_COMPILER=/usr/bin/i686-w64-mingw32-gcc-win32",
+        "-DCMAKE_CXX_COMPILER=/usr/bin/i686-w64-mingw32-g++-win32",
+        "-DCMAKE_AR=/usr/bin/i686-w64-mingw32-ar",
+        "-DCMAKE_RANLIB=/usr/bin/i686-w64-mingw32-ranlib",
+        "-DCMAKE_RC_COMPILER=i686-w64-mingw32-windres",
+        "-DCMAKE_C_FLAGS=-I/home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005/toolchains/d3d12-header-overlay -I/home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005/toolchains/AMF-v1.5.2-include -I/home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005/toolchains/Vulkan-Headers-vulkan-sdk-1.4.328.1/include",
+        "-DCMAKE_CXX_FLAGS=-I/home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005/toolchains/d3d12-header-overlay -I/home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005/toolchains/AMF-v1.5.2-include -I/home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005/toolchains/Vulkan-Headers-vulkan-sdk-1.4.328.1/include",
+        "-DCMAKE_EXE_LINKER_FLAGS=-static-libgcc",
+        "-DCMAKE_SHARED_LINKER_FLAGS=-static-libgcc",
+        "-DCMAKE_INSTALL_PREFIX=/home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005/software-win-x86-b9f4a51e3af2/libaom/install",
+        "-DBUILD_SHARED_LIBS=OFF",
+        "-DCONFIG_PIC=1",
+        "-DCONFIG_AV1_ENCODER=1",
+        "-DCONFIG_AV1_DECODER=0",
+        "-DCONFIG_AV1_HIGHBITDEPTH=1",
+        "-DENABLE_EXAMPLES=OFF",
+        "-DENABLE_TESTS=OFF",
+        "-DENABLE_TOOLS=OFF",
+        "-DENABLE_DOCS=OFF",
+        "-DAOM_TARGET_CPU=x86",
+        "-DCMAKE_HAVE_LIBC_PTHREAD=0",
+        "-DCMAKE_HAVE_PTHREADS_CREATE=0",
+        "-DCMAKE_HAVE_PTHREAD_CREATE=0",
+        "-DTHREADS_HAVE_PTHREAD_ARG=0",
+        "-DCMAKE_USE_PTHREADS_INIT=0",
+        "-DCMAKE_THREAD_LIBS_INIT=",
+        "-DCMAKE_USE_WIN32_THREADS_INIT=1"
+      ],
+      "archive": "libaom.a",
+      "bytes": 8839834,
+      "sha256": "a4028516c8346576cff93b31c3424c53b5a44a12d1d6797fbe78cef5f7178382",
+      "static": true,
+      "pic": true,
+      "cmakeVersion": "cmake version 3.28.3"
     }
   },
   "sourcePatches": [
@@ -180,6 +461,12 @@
       "sha256": "c0604b924b6ae1ee718c045d34f1448ebb78652ccacadfdb54799810c69e17f7",
       "versionMarker": "MajdataPlay-AMF-RC-v1-c0604b924b6a",
       "stagedFile": "amf-rate-control.patch"
+    },
+    {
+      "file": "patches/x265-parameter-check.patch",
+      "sha256": "5b457330f94aa63e539798ae28b3ffcd05388a58a29ba49546da79b944e0f0de",
+      "versionMarker": "MajdataPlay-X265-Params-v1-5b457330f94a",
+      "stagedFile": "x265-parameter-check.patch"
     }
   ],
   "buildDependencyLicenses": [
@@ -187,6 +474,30 @@
       "file": "dav1d.LICENSE.txt",
       "sha256": "b7fc54472d14c149d9a7dff4b2696243c018a4a1127e31f0f3cdf7c60c10ccc1",
       "license": "BSD-2-Clause"
+    },
+    {
+      "file": "x264.LICENSE.txt",
+      "sha256": "39141703b08632500ed83abea8bea8b3e9bc01edae0ec844f8fd019b46e8a028",
+      "license": "GPL-2.0-or-later",
+      "sourceCommit": "b35605ace3ddf7c1a5d67a2eb553f034aef41d55"
+    },
+    {
+      "file": "x265.LICENSE.txt",
+      "sha256": "60649933e4f5a09c0896651455535e767cf04739e2b5ae275bd377d97d7e8c9f",
+      "license": "GPL-2.0-or-later",
+      "sourceCommit": "1d117bed4747758b51bd2c124d738527e30392cb"
+    },
+    {
+      "file": "libvpx.LICENSE.txt",
+      "sha256": "306ba4f4fd6f5bf9be5e68929498d10bf053bd99db48c9fa03b627f282e764c1",
+      "license": "BSD-3-Clause",
+      "sourceCommit": "6df3ec34557879fff673706f4a1d9fbd0f3a6f0e"
+    },
+    {
+      "file": "libaom.LICENSE.txt",
+      "sha256": "935b57edbc3c5f966c06a306c3bd9a933e843ebfd6580047918b960f68fb0d03",
+      "license": "BSD-2-Clause and AOM Patent License 1.0",
+      "sourceCommit": "92d4c37fbdd08944a0e721bbaeb13318f10aebb0"
     },
     {
       "file": "Vulkan-Headers.LICENSE.txt",
@@ -202,6 +513,33 @@
       "file": "AMF.LICENSE.txt",
       "sha256": "2439b49e51726eff0c51f5774f33d8eb48d69ef3ec81eef5a29e8797778401c6",
       "license": "MIT"
+    },
+    {
+      "file": "compiler-runtime.LICENSE.txt",
+      "sha256": "c12c39f1685081f32cda2eb6e9300ac03c381d58e1bf77bd0c857f1acfa91cb7",
+      "license": "GPL-3.0-or-later WITH GCC-exception-3.1 and mingw-w64 runtime notices",
+      "runtimeArchives": [
+        {
+          "file": "libstdc++.a",
+          "bytes": 5657884,
+          "sha256": "f43573a2df3c1f0e8d99a77541537a8415ac469cb18b8bace9afea253a274bea"
+        },
+        {
+          "file": "libwinpthread.a",
+          "bytes": 256944,
+          "sha256": "9473331bceb62a8394c5d0387654797fac6c2477e9f3c1e2d96c772c368e3d96"
+        }
+      ],
+      "sourceNotices": [
+        {
+          "file": "/usr/share/doc/gcc-mingw-w64-base/copyright",
+          "sha256": "a481f772f7a53335f13b32c6c54eb1c8577ce97704edd3757ab7ed4287a8e96a"
+        },
+        {
+          "file": "/usr/share/doc/mingw-w64-common/copyright",
+          "sha256": "af23297b7d17e8e31817a5d58088de6fdafe34705bb5a7d1d330f08711b31314"
+        }
+      ]
     }
   ],
   "verifiedHardwareBackends": [
@@ -217,7 +555,7 @@
     "VP9_D3D12VA_HWACCEL"
   ],
   "d3d12HeaderOverlay": {
-    "directory": "/tmp/majdata-recording-windows/toolchains/d3d12-header-overlay",
+    "directory": "/home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005/toolchains/d3d12-header-overlay",
     "files": {
       "d3d12.h": "23935395fe8939ac0ca71c5b34cd7b21a689ff5e9641846563613f24bc0dd85e",
       "d3d12video.h": "23216f1bcb62c8c0c9e09d66cf12d639eb1abcad9a1ba31e0d517a428cd56aee"

@@ -15,11 +15,12 @@ import zipfile
 
 HERE = Path(__file__).resolve().parent
 LOCK = json.loads((HERE / 'dependencies.lock.json').read_text())
-SHARED = HERE / '.build' / 'toolchains'
+BUILD_ROOT = Path(os.environ.get('FFMPEG_BUILD_ROOT', str(HERE / '.build'))).resolve()
+SHARED = BUILD_ROOT / 'toolchains'
 
 
 def download_verified(spec):
-    downloads = HERE / '.build' / 'downloads'
+    downloads = BUILD_ROOT / 'downloads'
     downloads.mkdir(parents=True, exist_ok=True)
     archive = downloads / spec['url'].rsplit('/', 1)[-1]
     if not archive.is_file():
@@ -37,6 +38,64 @@ def download_verified(spec):
 
 def dav1d_source():
     return SHARED / ('dav1d-' + LOCK['dav1d']['version'])
+
+
+def encoder_source(name):
+    """Locate a dependency by its immutable official Git object identity."""
+    return SHARED / (name + '-' + LOCK['softwareEncoders'][name]['commit'][:12])
+
+
+def verify_encoder_source(name):
+    """Reject changed commits, tracked edits, or additional source files."""
+    spec = LOCK['softwareEncoders'][name]
+    root = encoder_source(name)
+    if not (root / '.git').is_dir():
+        raise RuntimeError('Pinned ' + name + ' source is missing; run a non-probe build')
+    git = ['git', '--no-optional-locks', '-c', 'core.autocrlf=false', '-c', 'core.filemode=false', '-C', str(root)]
+    commit = subprocess.check_output(git + ['rev-parse', 'HEAD'], text=True).strip()
+    if commit != spec['commit']:
+        raise RuntimeError('Pinned ' + name + ' commit mismatch: ' + commit)
+    if name == 'x265':
+        # The upstream resource/version generator uses git describe, even for
+        # static Windows builds. Authenticate its release label to the same commit.
+        tag_commit = subprocess.check_output(git + ['rev-parse', 'refs/tags/' + spec['tag'] + '^{commit}'], text=True).strip()
+        if tag_commit != spec['commit']:
+            raise RuntimeError('Pinned x265 release tag does not identify the locked commit')
+    if subprocess.run(git + ['diff', '--quiet', 'HEAD', '--'], check=False).returncode:
+        raise RuntimeError('Pinned ' + name + ' contains tracked source modifications')
+    # All builds are out of tree. Ignored additions are also rejected because generated
+    # headers or globbed source files can otherwise override authenticated Git contents.
+    for arguments in [['ls-files', '--others', '--exclude-standard'],
+                      ['ls-files', '--others', '--ignored', '--exclude-standard']]:
+        if subprocess.check_output(git + arguments, text=True).strip():
+            raise RuntimeError('Pinned ' + name + ' contains additional source files')
+    for filename in spec['licenseFiles']:
+        if not (root / filename).is_file():
+            raise RuntimeError('Pinned ' + name + ' license file is missing: ' + filename)
+
+
+def ensure_encoder_source(name):
+    """Fetch only the pinned official commit into a private, verified source cache."""
+    spec = LOCK['softwareEncoders'][name]
+    root = encoder_source(name)
+    if not root.exists():
+        SHARED.mkdir(parents=True, exist_ok=True)
+        subprocess.run(['git', '-c', 'core.autocrlf=false', 'init', str(root)], check=True)
+        subprocess.run(['git', '-C', str(root), 'remote', 'add', 'origin', spec['repository']], check=True)
+    if not (root / '.git').is_dir():
+        raise RuntimeError('The ' + name + ' source cache is not a Git checkout: ' + str(root))
+    has_commit = subprocess.run(['git', '-C', str(root), 'rev-parse', '--verify', 'HEAD'],
+                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False).returncode == 0
+    if not has_commit:
+        subprocess.run(['git', '-C', str(root), 'fetch', '--depth', '1', 'origin', spec['commit']], check=True)
+        subprocess.run(['git', '-c', 'core.autocrlf=false', '-C', str(root), 'checkout', '--detach', 'FETCH_HEAD'], check=True)
+    if name == 'x265':
+        tag = 'refs/tags/' + spec['tag']
+        has_tag = subprocess.run(['git', '-C', str(root), 'rev-parse', '--verify', tag],
+                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False).returncode == 0
+        if not has_tag:
+            subprocess.run(['git', '-C', str(root), 'fetch', '--depth', '1', 'origin', tag + ':' + tag], check=True)
+    verify_encoder_source(name)
 
 
 def meson_command():
@@ -207,7 +266,7 @@ def ensure_llvm(cache):
     marker = root / '.majdata-archive-sha256'
     if marker.is_file() and marker.read_text().strip() == spec['sha256']:
         return
-    downloads = HERE / '.build' / 'downloads'
+    downloads = BUILD_ROOT / 'downloads'
     downloads.mkdir(parents=True, exist_ok=True)
     archive = downloads / spec['file']
     legacy = HERE / '.build/llvm-mingw.zip'
@@ -251,6 +310,8 @@ def ensure_llvm(cache):
 def prepare(targets, cache):
     ensure_dav1d()
     ensure_meson()
+    for name in LOCK['softwareEncoders']:
+        ensure_encoder_source(name)
     if any(target.startswith(('win-', 'linux-', 'android-')) for target in targets):
         ensure_vulkan_headers()
     if any(target.startswith(('win-', 'linux-')) for target in targets):

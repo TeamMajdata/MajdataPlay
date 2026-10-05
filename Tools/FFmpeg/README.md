@@ -9,7 +9,7 @@
 `ffmpeg.lock.json` 固定官方 `n9.0.1` 的 commit
 `bf1b838f2ab88b4f8fd83443325c782ea0e0f7fa`。它与项目
 `ThirdParty/FFmpeg.AutoGen/FFmpeg/include` 中的公开头文件逐文件匹配。
-每次构建都会核对 commit、比较绑定头文件（仅归一化 CRLF；排除构建生成的 `avconfig.h`、`ffversion.h`），再应用仓库中的 [AMF 码率控制检查补丁](patches/amf-rate-control.patch)。仅接受该补丁的完整源码差异，拒绝其他 tracked 修改；重复构建会校验已应用补丁而不再次修改。补丁不改变公开绑定头文件或 ABI。
+每次构建都会核对 commit、比较绑定头文件（仅归一化 CRLF；排除构建生成的 `avconfig.h`、`ffversion.h`），再应用仓库中的 [AMF 码率控制检查补丁](patches/amf-rate-control.patch) 和 [x265 参数检查补丁](patches/x265-parameter-check.patch)。仅接受这两份补丁的完整源码差异，拒绝其他 tracked 修改；重复构建会校验已应用补丁而不再次修改。补丁不改变公开绑定头文件或 ABI。
 **不要用 FFmpeg 8.x，也不要只改原生库文件名**。库主版本为 avcodec 63、avdevice 63、avfilter 12、avformat 63、avutil 61、swresample 7、swscale 10。
 
 `dependencies.lock.json` 另外固定 Vulkan-Headers SDK 1.4.328.1（commit `19725e4d48082fe78e26622b15d3080ccd54112b`）及 LLVM-MinGW 20260922 的各主机官方压缩包 SHA256。
@@ -54,6 +54,7 @@ Windows 的已有 WSL Linux 也可运行同一个 `build.sh`。使用 WSL 时使
 ## 工具链矩阵
 
 所有主机都需要 Python 3.9+、Git、Bash、GNU make、Ninja、pkg-config、C/C++ 编译器。Linux 目标另需 `patchelf`、libva 与 libdrm 开发文件（Ubuntu/Debian 包名为 `libva-dev`、`libdrm-dev`）；脚本预检 `libva` / `libdrm` 模块并显式启用 VAAPI 和 DRM PRIME 导出。隔离工具链可通过 `PKG_CONFIG_PATH` / `PKG_CONFIG_SYSROOT_DIR` 提供依赖，运行时也需要对应的 libva/libdrm 与 GPU 驱动。dav1d 的 pkg-config 查询单独使用目标静态库前缀，不受外部 sysroot 影响；其他库仍使用调用者原有配置。stage 直接写入并读回 `$ORIGIN`，避免 configure/make 多重解析破坏相对库搜索路径。x86/x64 的汇编加速需要 NASM；缺少时脚本明确报告并禁用 FFmpeg 和 dav1d 的 x86 汇编，仍可编译。
+固定 x265 4.1 的旧 CMake policy 要求编码依赖使用 CMake 3.x；CMake 4 会明确拒绝。系统采用 CMake 4 时，可将官方便携 CMake 3 放入专用缓存，并用 `FFMPEG_ENCODER_CMAKE` 指定其可执行文件；图形桥接仍使用原来的 CMake。
 脚本不会安装系统软件，也不会覆盖既有 ThirdParty 绑定。缓存/源码/中间产物位于忽略的 `.build/`。
 
 | 目标 | Windows | Linux | macOS | 必需工具链 |
@@ -69,6 +70,8 @@ Windows 的已有 WSL Linux 也可运行同一个 `build.sh`。使用 WSL 时使
 - `FFMPEG_BASH`：Windows 上 MSYS2 `usr/bin/bash.exe` 的路径。也会检测项目 `.build/toolchains/msys64`、`C:/msys64`、Git Bash。某些 Windows 安全策略下 Git Bash/MSYS2 反复出现 `child_copy / fork` 错误，应使用已有 WSL；脚本不会修改系统安全策略。
 - `FFMPEG_BUILD_ROOT`：默认 `Tools/FFmpeg/.build`；WSL 建议使用 Linux 文件系统内的专用临时目录以避免 `/mnt/c` 的编译性能损失。PowerShell 的 `-BuildRoot` 会传入对应 Windows/WSL 进程。
 - `FFMPEG_MAKE`：GNU make 命令名，默认 `make`。不要使用 MSVC `nmake`。
+- `FFMPEG_ENCODER_CMAKE`：编码依赖使用的 CMake 3.x 可执行文件，默认从 PATH 查找 `cmake`；实际路径和版本纳入缓存身份及构建证据。
+- `FFMPEG_COMPILER_RUNTIME_LICENSE_DIR`：可选的编译器运行库声明目录；非 Debian 的 GNU 工具链主机可提供 `GNU-runtime.copyright`（包含 GCC Runtime Library Exception），Windows 目标另提供 `mingw-runtime.copyright`。默认从实际主机包或 LLVM/NDK 工具链读取声明，缺少时明确拒绝交付。
 - `LLVM_MINGW`：便携 llvm-mingw 根目录。也自动发现 `.build/toolchains/llvm-mingw-*`。
 - `FFMPEG_D3D12_HEADERS`：可选的最小 D3D12 头文件覆盖目录，包含固定 LLVM-MinGW 20260922 压缩包中的 `include/d3d12.h` 和 `include/d3d12video.h`。脚本逐文件核对 lock 中的 SHA256，再交给已有 MinGW GCC 和桥接使用；设置此项会跳过完整 LLVM 工具链下载。不要放入 C 运行库头文件，GCC 仍使用其原配 CRT 与链接库。
 - `ANDROID_NDK_HOME` / `ANDROID_NDK_ROOT`：NDK 根目录；Windows 额外自动查找 Unity Hub 编辑器内置 NDK。
@@ -102,7 +105,9 @@ NDK 使用 [Google 官方下载](https://developer.android.com/ndk/downloads)。
 
 构建所有内置解码器、解复用器、解析器、网络协议、swscale、swresample，以及七个绑定库。
 关闭默认编码器和封装器，再显式启用下表的窄录制配置；采集设备、滤镜实现、命令行程序、文档、调试符号和依赖自动探测仍关闭。
-不启用 GPL/nonfree；唯一额外编解码库为 BSD-2-Clause 许可的 dav1d，所有目标显式启用 `--enable-libdav1d` 并检查 `CONFIG_LIBDAV1D_DECODER`。dav1d 使用 `-Dbitdepths=8,16`，构建后要求 `CONFIG_8BPC`、`CONFIG_16BPC` 同时启用，以支持 8-bit 和 10-bit AV1（10-bit 使用高位深实现）。FFmpeg 内置名为 `av1` 的解码器依赖硬件加速，无法在不支持 AV1 的 GPU 上充当软件回退；`libdav1d` 提供真正的 AV1 软件解码。其他外部编解码库不自动加入。
+所有目标从固定官方源码构建 PIC 静态 x264、x265、libvpx 和 libaom，显式启用 H.264、HEVC、VP9、AV1 软件编码。构建启用 `--enable-gpl --enable-version3`，保持 `--disable-nonfree`，产物按 GPLv3 或后续版本分发；许可证、专利许可和源码 commit 随清单交付。Windows 静态链接编译器运行库，Android 使用静态 libc++，Apple 使用系统 libc++；iOS 将这些编码库并入 `libavcodec.a`。
+
+软件解码仍使用 BSD-2-Clause 许可的 dav1d，所有目标显式启用 `--enable-libdav1d` 并检查 `CONFIG_LIBDAV1D_DECODER`。dav1d 使用 `-Dbitdepths=8,16`，构建后要求 `CONFIG_8BPC`、`CONFIG_16BPC` 同时启用，以支持 8-bit 和 10-bit AV1（10-bit 使用高位深实现）。FFmpeg 内置名为 `av1` 的解码器依赖硬件加速，无法在不支持 AV1 的 GPU 上充当软件回退；`libdav1d` 提供真正的 AV1 软件解码。新增编码依赖不启用其 FFmpeg 外部解码器，保留原有解码矩阵。
 桌面和 Android 的 dav1d 静态链接进 avcodec，不增加运行时动态库；iOS stage 使用 Apple libtool 将 dav1d 对象合并进 `libavcodec.a`，保持现有七个 FFmpeg 插件与 Unity 链接配置。各目标同时携带 `dav1d.LICENSE.txt` 和其哈希、源码版本/校验信息；这些上游许可证固定 LF，避免 Windows Git 换行转换破坏清单的字节哈希。
 Windows 显式启用 D3D11VA/D3D12VA/DXVA2、Vulkan Video 和 Schannel；Apple 启用 VideoToolbox/AudioToolbox/SecureTransport；Android 启用 JNI/MediaCodec 和 Vulkan Video；Linux 启用 VAAPI/libdrm 和 Vulkan Video。
 每个 Windows/Linux/Android 目标在编译前检查 H.264、HEVC、AV1、VP9 Vulkan 硬件后端；Windows 同时检查四种格式的 D3D12VA 后端，任何后端被配置阶段禁用都会失败，不能输出成功状态。实际能力仍取决于 GPU 和驱动，编译启用不代表设备一定支持解码。
@@ -112,12 +117,17 @@ Linux/Android 默认没有外部 TLS 后端，支持本地文件和 HTTP；HTTPS
 
 | 录制目标 | 显式启用的 encoder | 显式启用的 muxer |
 | --- | --- | --- |
-| 全部平台 | `mpeg4` 软件编码（CBR/VBR）；其构建依赖会额外启用 `h263` | `mov`、`mp4`、`matroska`、`webm`、`avi` |
+| 全部平台 | `libx264`（H.264）、`libx265`（HEVC/H.265）、`libvpx-vp9`（VP9）、`libaom-av1`（AV1）、`mpeg4` 软件编码（CBR/VBR）；MPEG4 构建依赖会额外启用 `h263` | `mov`、`mp4`、`matroska`、`webm`、`avi` |
 | Windows x86/x64 | `h264_nvenc`、`hevc_nvenc`、`av1_nvenc`；`h264_amf`、`hevc_amf`、`av1_amf` | 同上 |
 | Linux x64 | 上述 NVENC，以及 `h264_vaapi`、`hevc_vaapi`、`vp9_vaapi`、`av1_vaapi` | 同上 |
 | macOS / iOS | `h264_videotoolbox` | 同上 |
 
-Android 当前使用 MPEG-4 软件路径。此配置没有加入 x264/x265/libvpx/libaom，因此跨平台软件 H.264、HEVC、VP9、AV1 不可由现有解码器替代；选择这些格式的软件编码会明确失败。编码器选择失败可以在同一格式内回退，不能悄悄把请求的 H.264 改为 MPEG-4。容器也必须支持选择的编码，比如 WebM 不接受 MPEG-4/H.264。
+Android 同样提供这四种软件编码器。编码器选择失败可以在同一格式内回退，不能悄悄把请求的 H.264 改为 MPEG-4。容器也必须支持选择的编码，比如 WebM 不接受 MPEG-4/H.264。
+
+固定依赖为 x264 API 165（stable commit `b35605ace3ddf7c1a5d67a2eb553f034aef41d55`）、x265 4.1、libvpx 1.17.0、libaom 3.13.3；精确 commit、官方仓库与许可证文件见 `dependencies.lock.json`。构建不生成依赖的命令行工具或测试程序，不安装系统软件。源码版本或本地 tracked 内容不匹配时拒绝复用缓存。
+当前 ARM 配置中，libvpx/libaom 使用通用 C 后端，x265 关闭 ARM 汇编扩展，x264 保留 ARM 汇编；这保证兼容性，录制分辨率下的实时吞吐仍需在目标设备测量。
+
+H.264 CBR 使用等目标/最大 VBV、filler 和 MP4 兼容的 VBR HRD 信令；x265 使用严格 CBR 参数，并通过上述补丁使未知参数或非法值在打开时返回错误。VP9/AV1 使用原生 CBR 或单遍 VBR；两种模式的最大码率均为原生码率预算，复杂场景可能超出预算，不能视为每帧或瞬时负载硬上限；这两种编码器也不保证平坦画面使用 filler 填满目标码率。
 
 上述硬件条目是构建入口。硬件不存在、驱动过旧、不支持请求格式或码率模式时仍会失败/回退；新 `FFmpegCameraCapturer` 的实际 encoder/type/rate-control 信息以成功打开的会话为准。它不选择 MediaFoundation、MediaCodec 和 HEVC VideoToolbox：固定 FFmpeg 源码中的这些包装器未对请求的最大码率/码率模式提供充分的可检查配置结果，不能将请求值冒充已生效值。用户自建的同 ABI 库可提供 NVENC/AMF、x264/x265/libvpx/libaom 等组件实际支持的入口，仍须按该构建的许可证与运行时依赖分发。
 
@@ -137,7 +147,7 @@ Android 当前使用 MPEG-4 软件路径。此配置没有加入 x264/x265/libvp
 | iOS simulator | `.build/artifacts/ios-simulator-*`（不与 device 同时导入） |
 
 每个库有确定性 `.meta`，已有 `.meta` 的 GUID 会保留，关闭 Any Platform，选择具体平台/CPU；只有对应桌面架构可在 Editor 使用。
-每个目标同时输出 `build-manifest.json`（commit、命令、主机、UTC 时间、文件 SHA256）、`configure.txt` 和 LGPL 许可。
+每个目标同时输出 `build-manifest.json`（commit、命令、主机、UTC 时间、文件 SHA256）、`configure.txt`、FFmpeg GPL 许可及各依赖许可证。
 完整日志和供原生桥接使用的头文件/import libs 在 `.build/<target>/` 与 `.build/install/<target>/`。
 不要对构建目录执行不经确认的通配符清理；增量重建会保留现有缓存。
 
@@ -162,5 +172,5 @@ CMake 默认优先 Ninja；没有 Ninja 时 Windows 使用 `mingw32-make` / `Min
 2026-10-05 的隔离 Windows x64 录制构建已通过。独立验证以真实编码文件重新解码，验证 MPEG-4 软件 CBR/VBR、帧顺序/方向，以及 Radeon RX 580 2048SP 的 H.264 AMF CBR/VBR；200,000 bit/s CBR 目标分别测得软件 MPEG-4 199,976 bit/s、AMF H.264 200,000 bit/s。该记录属于原生编码/解码与托管会话验证；Unity Camera、其他平台和其他硬件后端的结果应分别参考 [录制验证记录](../Tests/FFmpegValidation/RESULTS.md)，不能由此推断通过。
 Linux stage 会附带 `libva.so.2`、`libva-drm.so.2`、`libdrm.so.2` 和对应许可，避免软件播放也因缺少这些直接依赖而无法加载 FFmpeg。厂商 GPU 驱动仍由目标系统提供。使用自定义 sysroot 时，开发文件和运行时库应属于同一套版本；许可默认从 sysroot 的发行版文档查找，也可通过 `FFMPEG_LINUX_RUNTIME_LICENSE_DIR` 提供 `libva.copyright`、`libva-drm.copyright`、`libdrm.copyright`。
 Apple 五个目标的实际构建、原生 Metal/VideoToolbox 测试及当前限制见 [APPLE-RESULTS.md](APPLE-RESULTS.md)。
-macOS 发布需要应用签名/公证；iOS 静态链接需遵守 LGPL 的重链接要求。
+macOS 发布需要应用签名/公证；包含上述 GPL 编码器的库以及静态链接程序应按其 GPL 许可要求分发。
 FFmpeg 源码固定在上述官方 commit，许可和构建配置随产物提供；正式分发须同时履行 [FFmpeg 官方许可要求](https://ffmpeg.org/legal.html)。

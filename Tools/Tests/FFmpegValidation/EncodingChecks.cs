@@ -2,6 +2,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Threading;
 using System.Threading.Tasks;
@@ -60,6 +61,212 @@ namespace MajdataPlay.FFmpeg.Validation
                 TestHardwareRoundTrip(directory, VideoRateControlMode.CBR);
             }
             return s_checks;
+        }
+
+        /// <summary>Requires all four external software encoders and checks both recording rate-control modes.</summary>
+        /// <param name="workDirectory">The isolated parent directory for generated recordings.</param>
+        /// <returns>The number of software configuration, ownership, and native roundtrip assertions.</returns>
+        /// <exception cref="Exception">An encoder is missing or an actual recording fails validation.</exception>
+        public static int RunSoftware(string workDirectory)
+        {
+            s_checks = 0;
+            var names = new[] { "libx264", "libx265", "libaom-av1", "libvpx-vp9" };
+            var formats = new[] { VideoEncodingFormat.H264, VideoEncodingFormat.HEVC, VideoEncodingFormat.AV1, VideoEncodingFormat.VP9 };
+            var available = GetVideoEncoders();
+            Console.WriteLine("Native video encoders: " + string.Join(", ", available));
+            var directory = Path.Combine(Path.GetFullPath(workDirectory), Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(directory);
+            for (var codec = 0; codec < names.Length; codec++)
+            {
+                Check(available.Contains(names[codec]), "full software profile requires " + names[codec]);
+                foreach (var mode in new[] { VideoRateControlMode.CBR, VideoRateControlMode.VBR })
+                {
+                    TestSoftwareRoundTrip(directory, formats[codec], names[codec], mode, false);
+                    TestSoftwareRoundTrip(directory, formats[codec], names[codec], mode, true);
+                }
+            }
+            return s_checks;
+        }
+
+        /// <summary>Checks the actual software configuration, cross-thread guards, statistics, and decoded media.</summary>
+        /// <param name="directory">The isolated directory for one unique output file.</param>
+        /// <param name="format">The requested compressed video format.</param>
+        /// <param name="name">The required software implementation name.</param>
+        /// <param name="mode">The requested native rate-control algorithm.</param>
+        /// <param name="complex">Whether the source includes a noise burst, flat recovery, and sustained motion.</param>
+        /// <exception cref="Exception">Configuration, encoding, output ownership, or decoding is incorrect.</exception>
+        private static unsafe void TestSoftwareRoundTrip(string directory, VideoEncodingFormat format, string name,
+            VideoRateControlMode mode, bool complex)
+        {
+            var path = Path.Combine(directory, name + "-" + mode + "-" + (complex ? "complex" : "flat")
+                + (format == VideoEncodingFormat.VP9 ? ".webm" : ".mp4"));
+            var options = CreateOptions();
+            options.Width = 128;
+            options.Height = 64;
+            options.MaximumSoftwareThreads = 2;
+            options.Format = format;
+            options.RateControlMode = mode;
+            var pixels = CreatePixels(options.Width, options.Height);
+            long bytes;
+            long rate;
+            using (var encoder = new FFmpegVideoEncoder(options))
+            {
+                options.Width = 256;
+                options.MaximumSoftwareThreads = 8;
+                options.Format = VideoEncodingFormat.MPEG4;
+                options.RateControlMode = mode == VideoRateControlMode.CBR ? VideoRateControlMode.VBR : VideoRateControlMode.CBR;
+                options.BitRate = 900_000;
+                options.MaximumBitRate = 1_000_000;
+                encoder.Open(path, CancellationToken.None);
+                Check(encoder.EncoderName == name && encoder.EncoderType == VideoEncoderType.Software,
+                    "software request selects the exact implementation without format substitution");
+                Check(encoder.EncodingFormat == format && encoder.RateControlMode == mode && encoder.Width == 128 && encoder.Height == 64,
+                    "later options edits preserve actual format, dimensions, and mode");
+                var maximum = mode == VideoRateControlMode.CBR ? 200_000 : 400_000;
+                Check(encoder.BitRate == 200_000 && encoder.MaximumBitRate == maximum,
+                    "software diagnostics preserve the snapshotted target and effective maximum");
+                Check(encoder.SoftwareThreadCount > 0 && encoder.SoftwareThreadCount <= 2,
+                    "software codec workers respect the construction-time maximum");
+                var context = (AVCodecContext*)Pointer.Unbox(typeof(FFmpegVideoEncoder)
+                    .GetField("_codec", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(encoder)!);
+                Check(context->bit_rate == 200_000 && context->rc_max_rate == maximum && context->rc_buffer_size == maximum
+                    && context->rc_min_rate == (mode == VideoRateControlMode.CBR ? 200_000 : 0),
+                    "opened native codec retains the requested rate-control inputs");
+                Check((context->flags & (ffmpeg.AV_CODEC_FLAG_PASS1 | ffmpeg.AV_CODEC_FLAG_PASS2)) == 0,
+                    "live software recording does not require a two-pass input");
+                var rejected = Task.Run(() => Expect<InvalidOperationException>(() => encoder.Encode(pixels, 0, false),
+                    "native encoder access from a different thread is rejected"));
+                rejected.GetAwaiter().GetResult();
+                using var cancelReader = new CancellationTokenSource();
+                using var readerStarted = new ManualResetEventSlim();
+                var reader = Task.Run(() =>
+                {
+                    long previousFrames = 0;
+                    long previousBytes = 0;
+                    var observations = 0;
+                    while (!cancelReader.IsCancellationRequested)
+                    {
+                        var frames = encoder.EncodedFrames;
+                        var written = encoder.BytesWritten;
+                        if (frames < previousFrames || written < previousBytes || encoder.CurrentBitRate < 0
+                            || encoder.EncoderName != name || encoder.EncoderType != VideoEncoderType.Software
+                            || encoder.RateControlMode != mode || encoder.EncodingFormat != format)
+                        {
+                            throw new Exception("Concurrent encoder diagnostics changed identity or regressed.");
+                        }
+                        previousFrames = frames;
+                        previousBytes = written;
+                        observations++;
+                        readerStarted.Set();
+                        Thread.Sleep(1);
+                    }
+                    return observations;
+                });
+                try
+                {
+                    Check(readerStarted.Wait(TimeSpan.FromSeconds(5)), "concurrent diagnostics reader starts before encoding");
+                    for (var index = 0; index < 60; index++)
+                    {
+                        if (complex)
+                        {
+                            AddComplexPattern(pixels, index);
+                        }
+                        encoder.Encode(pixels, index + (index >= 30 ? 1 : 0), false);
+                    }
+                    encoder.Complete();
+                    encoder.Complete();
+                }
+                finally
+                {
+                    cancelReader.Cancel();
+                }
+                Check(reader.GetAwaiter().GetResult() > 0, "statistics remain readable concurrently with real native encoding");
+                Check(encoder.EncodedFrames == 60 && encoder.BytesWritten > 0 && encoder.CurrentBitRate > 0,
+                    "software flush retains all accepted frames and publishes real payload statistics");
+                bytes = encoder.BytesWritten;
+                rate = encoder.CurrentBitRate;
+                if (name == "libx264" && mode == VideoRateControlMode.CBR && !complex)
+                {
+                    Check(Math.Abs(rate - 200_000) <= 40_000, "MP4 H264 CBR uses actual flat-scene filler");
+                }
+                if (!complex || (format != VideoEncodingFormat.VP9 && format != VideoEncodingFormat.AV1))
+                {
+                    Check(rate <= maximum + context->rc_buffer_size + 8192,
+                        "fixture payload fits the rate plus configured VBV burst capacity and header allowance");
+                }
+                else
+                {
+                    Console.WriteLine("NOTE: " + name + " complex payload is measured against a native rate budget; a hard payload boundary is not asserted.");
+                }
+                Expect<InvalidOperationException>(() => encoder.Encode(pixels, 62, false), "completed software output refuses further input");
+            }
+            using (var decoder = new FFmpegVideoDecoder())
+            {
+                decoder.Open(path, CancellationToken.None);
+                var expectedName = format == VideoEncodingFormat.H264 ? "h264" : format == VideoEncodingFormat.HEVC ? "hevc"
+                    : format == VideoEncodingFormat.AV1 ? "av1" : "vp9";
+                Check(decoder.CodecName == expectedName && decoder.Width == 128 && decoder.Height == 64,
+                    "completed container identifies the actual requested software format");
+                var count = 0;
+                while (true)
+                {
+                    using var frame = decoder.ReadFrame();
+                    if (frame == null)
+                    {
+                        break;
+                    }
+                    Check(count < 60, "software decoder does not emit extra delayed frames");
+                    Check(Math.Abs(frame.PresentationTime - (count + (count >= 30 ? 1 : 0)) / 30.0) < 0.001,
+                        "software PTS retains the deliberate source-frame gap");
+                    CheckColor(frame, 8, false, "software decoded blue bottom");
+                    CheckColor(frame, 56, true, "software decoded red top");
+                    count++;
+                }
+                Check(count == 60 && decoder.ReadFrame() == null, "software decoder drains exactly sixty frames and stable EOF");
+            }
+            var original = File.ReadAllBytes(path);
+            var originalOptions = CreateOptions();
+            originalOptions.Format = format;
+            originalOptions.RateControlMode = mode;
+            originalOptions.Width = 128;
+            originalOptions.Height = 64;
+            using (var repeated = new FFmpegVideoEncoder(originalOptions))
+            {
+                Expect<IOException>(() => repeated.Open(path, CancellationToken.None), "software recording refuses an existing output file");
+            }
+            Check(File.ReadAllBytes(path).AsSpan().SequenceEqual(original), "failed software overwrite preserves every output byte");
+            using var exclusive = File.Open(path, FileMode.Open, FileAccess.ReadWrite, FileShare.None);
+            Check(exclusive.Length > 0, "software native encoder and decoder release output handles");
+            Console.WriteLine("Encoded " + name + " " + mode + " " + (complex ? "complex" : "flat")
+                + ": frames=60; payload=" + bytes + "; lastWindow=" + rate + " bit/s; path=" + path);
+        }
+
+        /// <summary>Adds a noise burst, quiet recovery, and sustained motion while preserving orientation markers.</summary>
+        /// <param name="pixels">The 128 by 64 packed RGBA source buffer.</param>
+        /// <param name="index">The source frame number used as the deterministic seed.</param>
+        private static void AddComplexPattern(byte[] pixels, int index)
+        {
+            var state = 0xA17F542Du ^ (uint)index;
+            for (var y = 0; y < 64; y++)
+            {
+                for (var x = 64; x < 128; x++)
+                {
+                    var offset = (y * 128 + x) * 4;
+                    if (index >= 15 && index < 30)
+                    {
+                        pixels[offset] = y < 32 ? (byte)255 : (byte)0;
+                        pixels[offset + 1] = 0;
+                        pixels[offset + 2] = y < 32 ? (byte)0 : (byte)255;
+                    }
+                    else
+                    {
+                        state = unchecked(state * 1664525u + 1013904223u);
+                        pixels[offset] = (byte)(state >> 24);
+                        pixels[offset + 1] = (byte)(state >> 16);
+                        pixels[offset + 2] = (byte)(state >> 8);
+                    }
+                }
+            }
         }
 
         /// <summary>Checks that an older AMF wrapper cannot advertise unchecked rate-control properties.</summary>

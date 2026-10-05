@@ -26,7 +26,9 @@ namespace MajdataPlay.FFmpeg
         /// <summary>The worker has released its output resources.</summary>
         Stopped,
         /// <summary>Capture, encoding, or output failed.</summary>
-        Error
+        Error,
+        /// <summary>Capture and its clock are paused while the encoding session remains open.</summary>
+        Paused
     }
 
     /// <summary>Specifies the native row order of GPU readback pixels.</summary>
@@ -124,6 +126,18 @@ namespace MajdataPlay.FFmpeg
         public CameraCaptureState State { get; private set; }
         /// <summary>Gets whether new rendered camera frames are being captured.</summary>
         public bool IsRecording => State == CameraCaptureState.Recording;
+        /// <summary>Gets whether capture is paused while retaining the current output and encoder.</summary>
+        public bool IsPaused
+        {
+            get => State == CameraCaptureState.Paused;
+        }
+        /// <summary>Gets whether the enabled component has finished releasing its previous recording resources.</summary>
+        /// <remarks>Read on the Unity main thread. This does not validate the camera, output path, or encoder settings.</remarks>
+        public bool CanStartRecording
+        {
+            get => isActiveAndEnabled && (_session == null || _session.Finished)
+                && (_resources == null || _resources.Released.IsCompleted);
+        }
         /// <summary>Gets the active or last recording path, or null before recording starts.</summary>
         public string? OutputPath { get; private set; }
         /// <summary>Gets the last capture or encoding failure, or null after a successful start.</summary>
@@ -137,6 +151,7 @@ namespace MajdataPlay.FFmpeg
         /// <summary>Gets the hardware fallback diagnostic, or null when no fallback occurred.</summary>
         public string? HardwareFallbackReason => _session?.HardwareFallbackReason;
         /// <summary>Gets the recent compressed-video bit rate in bits per second, excluding container overhead.</summary>
+        /// <remarks>Uses about one second of media time. Pausing retains the value while accepted frames may still finish encoding.</remarks>
         public long CurrentBitRate => _session?.CurrentBitRate ?? 0;
         /// <summary>Gets the configured maximum bit rate of the active or last recording, or zero before starting.</summary>
         public long MaximumBitRate => _activeOptions == null ? 0 : _activeOptions.RateControlMode == VideoRateControlMode.CBR
@@ -155,11 +170,12 @@ namespace MajdataPlay.FFmpeg
         public int Width => _activeOptions?.Width ?? 0;
         /// <summary>Gets the fixed recording height in pixels, or zero before recording starts.</summary>
         public int Height => _activeOptions?.Height ?? 0;
-        /// <summary>Gets the recording time base in frames per second, or zero before recording starts.</summary>
+        /// <summary>Gets the capture limit and timestamp time base in frames per second, or zero before recording starts.</summary>
+        /// <remarks>Actual submissions can be fewer when camera rendering or encoding cannot keep pace. Frames are not duplicated.</remarks>
         public int FrameRate => _activeOptions?.FrameRate ?? 0;
         /// <summary>Gets the number of frame-rate intervals omitted during capture.</summary>
         public long DroppedFrames => _droppedFrames;
-        /// <summary>Gets elapsed recording time in seconds, excluding encoder initialization and finalization.</summary>
+        /// <summary>Gets elapsed recording time in seconds, excluding initialization, recording pauses, and finalization.</summary>
         public double TimeSeconds => _clock.Elapsed.TotalSeconds;
 
         /// <summary>Opens a local output and begins capturing after encoder initialization.</summary>
@@ -254,6 +270,42 @@ namespace MajdataPlay.FFmpeg
             }
         }
 
+        /// <summary>Pauses new captures and the recording clock while retaining the output and encoder.</summary>
+        /// <remarks>Already accepted GPU readbacks and frames may finish encoding. Calls outside Recording do nothing.</remarks>
+        /// <exception cref="InvalidOperationException">Called off the Unity main thread.</exception>
+        public void PauseRecording()
+        {
+            CheckThread();
+            if (!IsRecording)
+            {
+                return;
+            }
+            _clock.Stop();
+            _pendingSrpTexture = null;
+            SetCaptureBridge(false);
+            State = CameraCaptureState.Paused;
+        }
+
+        /// <summary>Resumes the same recording without adding the paused interval to video timestamps.</summary>
+        /// <remarks>Calls outside Paused do nothing. An invalid camera or ended session is stopped instead of resumed.</remarks>
+        /// <exception cref="InvalidOperationException">Called off the Unity main thread.</exception>
+        public void ResumeRecording()
+        {
+            CheckThread();
+            if (!IsPaused)
+            {
+                return;
+            }
+            if (!isActiveAndEnabled || _activeCamera == null || _session == null || !_session.CanAcceptFrames)
+            {
+                StopRecording();
+                return;
+            }
+            SetCaptureBridge(GraphicsSettings.currentRenderPipeline != null && _activeCamera.targetTexture == null);
+            _clock.Start();
+            State = CameraCaptureState.Recording;
+        }
+
         /// <summary>Stops new captures without waiting on the Unity main thread.</summary>
         /// <remarks>Use StopRecordingAsync to wait until the output trailer is written. Pending GPU readbacks remain alive.</remarks>
         /// <exception cref="InvalidOperationException">Called off the Unity main thread.</exception>
@@ -293,9 +345,18 @@ namespace MajdataPlay.FFmpeg
         private void OnDestroy() => StopRecording();
         private void Update()
         {
-            if (_session == null) { return; }
-            if (_activeCamera == null && IsRecording) { StopRecording(); }
-            if (_session.Finished) { ReportCompletion(); }
+            if (_session == null)
+            {
+                return;
+            }
+            if (_activeCamera == null && (IsRecording || IsPaused))
+            {
+                StopRecording();
+            }
+            if (_session.Finished)
+            {
+                ReportCompletion();
+            }
         }
 
         /// <summary>Captures the active Built-in camera while its final output is available.</summary>

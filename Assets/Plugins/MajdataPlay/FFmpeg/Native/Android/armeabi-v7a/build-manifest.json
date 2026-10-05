@@ -17,9 +17,9 @@
     "note": "All upstream public headers present in the binding header snapshot are compared after CRLF normalization before building. Generated avconfig.h and ffversion.h are excluded."
   },
   "host": "Linux-6.18.40.1-microsoft-standard-WSL2-x86_64-with-glibc2.39",
-  "builtUtc": "2026-10-05T09:15:28.326620+00:00",
+  "builtUtc": "2026-10-05T12:46:35.611322+00:00",
   "configure": [
-    "--prefix=/home/lezi/.cache/majdata-ffmpeg-android-recording/install/android-armv7",
+    "--prefix=/home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005/install/android-armv7",
     "--disable-doc",
     "--disable-programs",
     "--disable-debug",
@@ -29,10 +29,14 @@
     "--disable-filters",
     "--disable-devices",
     "--enable-pic",
-    "--disable-gpl",
+    "--enable-gpl",
+    "--enable-version3",
     "--disable-nonfree",
-    "--extra-version=MajdataPlay-AMF-RC-v1-c0604b924b6a",
-    "--enable-encoder=mpeg4",
+    "--extra-version=MajdataPlay-AMF-RC-v1-c0604b924b6a_MajdataPlay-X265-Params-v1-5b457330f94a",
+    "--disable-decoder=adpcm_circus,adpcm_ima_escape,adpcm_ima_hvqm2,adpcm_ima_hvqm4,adpcm_ima_magix,adpcm_ima_pda,adpcm_n64,adpcm_psxc,ahx",
+    "--disable-parser=ahx",
+    "--disable-bsf=ahx_to_mp2",
+    "--enable-encoder=mpeg4,libx264,libx265,libvpx_vp9,libaom_av1",
     "--enable-muxer=mov,mp4,matroska,webm,avi",
     "--enable-shared",
     "--disable-static",
@@ -53,46 +57,53 @@
     "--extra-cflags=-march=armv7-a -mfloat-abi=softfp -mfpu=neon",
     "--enable-vulkan",
     "--disable-vulkan-static",
-    "--extra-cflags=-I/mnt/c/Users/LeZi/source/repos/LingFeng-bbben/MajdataPlay/Tools/FFmpeg/.build/toolchains/Vulkan-Headers-vulkan-sdk-1.4.328.1/include",
+    "--extra-cflags=-I/home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005/toolchains/Vulkan-Headers-vulkan-sdk-1.4.328.1/include",
     "--disable-hwaccel=apv_vulkan,dpx_vulkan,ffv1_vulkan,prores_raw_vulkan,prores_vulkan",
     "--enable-libdav1d",
-    "--pkg-config=sh /home/lezi/.cache/majdata-ffmpeg-android-recording/dav1d-android-armv7-02b86cb7b2cd/pkg-config.sh"
+    "--pkg-config=sh /home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005/dav1d-android-armv7-3d120d64da77/pkg-config.sh",
+    "--enable-libx264",
+    "--enable-libx265",
+    "--enable-libvpx",
+    "--enable-libaom",
+    "--disable-decoder=libvpx_vp8,libvpx_vp9,libaom_av1",
+    "--pkg-config=sh /home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005/software-android-armv7-d70796b4c633/pkg-config.sh",
+    "--extra-ldflags=-Wl,--exclude-libs,ALL"
   ],
   "files": [
     {
       "file": "libavcodec.so",
-      "bytes": 11543652,
-      "sha256": "eb46c57b9f0bc024bf57aec7e0eb7db326944d5046a0ac58b34c7687c2d0bf95"
+      "bytes": 18944868,
+      "sha256": "5f8745c5266ccd7ae746f991e51d13ffa28c502e663014b8579b1430cf25f997"
     },
     {
       "file": "libavdevice.so",
-      "bytes": 7204,
-      "sha256": "816dd6a42b67dfef3f8d0b7ff748583fabe6fa6ecc572def7ac0518ff7303d13"
+      "bytes": 7796,
+      "sha256": "45e203dadf19b84c0a3a3e36bcdfd80ca8c7c72ae2b7eecd8b8b4f9177607925"
     },
     {
       "file": "libavfilter.so",
-      "bytes": 119404,
-      "sha256": "289e7faba69e59fa283a8791178167b17b53a0e645683ab0148c976a66fef82a"
+      "bytes": 120012,
+      "sha256": "8fe545abd9f8772ff28143d8cbb86edfd948239b79b62b8aea03b2de6a83508f"
     },
     {
       "file": "libavformat.so",
-      "bytes": 2053128,
-      "sha256": "bf215116f60744eea3851830ceafad4a44960545ae1911e795bd3b39a6eafc4d"
+      "bytes": 2053848,
+      "sha256": "f6322d49cddfbdff0a0333369d0cf4646deca63e22cb3099119cc73d4428fa47"
     },
     {
       "file": "libavutil.so",
-      "bytes": 732524,
-      "sha256": "1ba11b4eb5caaf8399681755f0cfe2dcc5133fd710e2acd123e5399e2c144054"
+      "bytes": 733180,
+      "sha256": "9a9a87b540c81845564048dcdf71176af2f955d2de91f6c1f1d212f9625aba27"
     },
     {
       "file": "libswresample.so",
-      "bytes": 89164,
-      "sha256": "93e6a91223eaae584578d77fa6c71d85e21e558bc93829f55e4cc2d12043d82d"
+      "bytes": 89772,
+      "sha256": "4f7056e4aee3eb68a3d371138a2654c5becdf750b54b3f38f5f51d9ee8cc52cd"
     },
     {
       "file": "libswscale.so",
-      "bytes": 847192,
-      "sha256": "5971149d50601088cfbe53700ab1fb6db72bc7532bc10fafead7a858f9d2ec17"
+      "bytes": 847768,
+      "sha256": "765fa73bc56fb8037b2c5b90bb377983a1ad618c8a781ba40d44a34b9e452e9b"
     }
   ],
   "softwareDecoders": [
@@ -100,7 +111,11 @@
   ],
   "recordingProfile": {
     "encoders": [
-      "mpeg4"
+      "mpeg4",
+      "libx264",
+      "libx265",
+      "libvpx-vp9",
+      "libaom-av1"
     ],
     "muxers": [
       "mov",
@@ -163,6 +178,266 @@
           "sha256": "e3ad77d117a4bea19a7a3b333341824d79a5a371004a10e25b8504e7b3047666"
         }
       }
+    },
+    "softwareEncoders": {
+      "x264": {
+        "version": "0.165-stable",
+        "repository": "https://code.videolan.org/videolan/x264.git",
+        "commit": "b35605ace3ddf7c1a5d67a2eb553f034aef41d55",
+        "apiBuild": 165,
+        "license": "GPL-2.0-or-later",
+        "licenseFiles": [
+          "COPYING",
+          "AUTHORS"
+        ]
+      },
+      "x265": {
+        "version": "4.1",
+        "repository": "https://github.com/Multicorewareinc/x265.git",
+        "tag": "4.1",
+        "commit": "1d117bed4747758b51bd2c124d738527e30392cb",
+        "apiBuild": 215,
+        "license": "GPL-2.0-or-later",
+        "licenseFiles": [
+          "COPYING"
+        ]
+      },
+      "libvpx": {
+        "version": "1.17.0",
+        "repository": "https://chromium.googlesource.com/webm/libvpx",
+        "tag": "v1.17.0",
+        "commit": "6df3ec34557879fff673706f4a1d9fbd0f3a6f0e",
+        "license": "BSD-3-Clause",
+        "licenseFiles": [
+          "LICENSE",
+          "PATENTS",
+          "AUTHORS",
+          "third_party/x86inc/LICENSE"
+        ]
+      },
+      "libaom": {
+        "version": "3.13.3",
+        "repository": "https://aomedia.googlesource.com/aom",
+        "tag": "v3.13.3",
+        "commit": "92d4c37fbdd08944a0e721bbaeb13318f10aebb0",
+        "license": "BSD-2-Clause and AOM Patent License 1.0",
+        "licenseFiles": [
+          "LICENSE",
+          "PATENTS",
+          "AUTHORS",
+          "third_party/x86inc/LICENSE",
+          "third_party/vector/LICENSE",
+          "third_party/fastfeat/LICENSE",
+          "third_party/highway/LICENSE-BSD3"
+        ]
+      }
+    }
+  },
+  "license": "GPL-3.0-or-later",
+  "softwareEncoderBuilds": {
+    "x264": {
+      "source": {
+        "version": "0.165-stable",
+        "repository": "https://code.videolan.org/videolan/x264.git",
+        "commit": "b35605ace3ddf7c1a5d67a2eb553f034aef41d55",
+        "apiBuild": 165,
+        "license": "GPL-2.0-or-later",
+        "licenseFiles": [
+          "COPYING",
+          "AUTHORS"
+        ]
+      },
+      "configure": [
+        "--prefix=/home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005/software-android-armv7-d70796b4c633/x264/install",
+        "--host=arm-linux-androideabi",
+        "--enable-static",
+        "--enable-pic",
+        "--disable-cli",
+        "--disable-opencl",
+        "--disable-lavf",
+        "--disable-swscale",
+        "--disable-ffms",
+        "--disable-gpac",
+        "--disable-lsmash",
+        "--bit-depth=8",
+        "--chroma-format=420"
+      ],
+      "archive": "libx264.a",
+      "bytes": 894126,
+      "sha256": "a888178e2441be54801eb7a3e43f6989b98049bb4044290df57dee2ce3839fd4",
+      "static": true,
+      "pic": true
+    },
+    "x265": {
+      "source": {
+        "version": "4.1",
+        "repository": "https://github.com/Multicorewareinc/x265.git",
+        "tag": "4.1",
+        "commit": "1d117bed4747758b51bd2c124d738527e30392cb",
+        "apiBuild": 215,
+        "license": "GPL-2.0-or-later",
+        "licenseFiles": [
+          "COPYING"
+        ]
+      },
+      "configure": [
+        "/usr/bin/cmake",
+        "-S",
+        "/home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005/toolchains/x265-1d117bed4747/source",
+        "-B",
+        "/home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005/software-android-armv7-d70796b4c633/x265/build",
+        "-G",
+        "Ninja",
+        "-DCMAKE_MAKE_PROGRAM=/usr/bin/ninja",
+        "-DCMAKE_BUILD_TYPE=Release",
+        "-DCMAKE_POLICY_VERSION_MINIMUM=3.5",
+        "-DCMAKE_POSITION_INDEPENDENT_CODE=ON",
+        "-DCMAKE_INSTALL_LIBDIR=lib",
+        "-DCMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY",
+        "-DCMAKE_SYSTEM_PROCESSOR=armv7l",
+        "-DCMAKE_TOOLCHAIN_FILE=/home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005/toolchains/android-ndk-r27c/build/cmake/android.toolchain.cmake",
+        "-DANDROID_ABI=armeabi-v7a",
+        "-DANDROID_PLATFORM=android-23",
+        "-DANDROID_STL=c++_static",
+        "-DCMAKE_C_FLAGS=--target=armv7a-linux-androideabi23 -march=armv7-a -mfloat-abi=softfp -mfpu=neon -I/home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005/toolchains/Vulkan-Headers-vulkan-sdk-1.4.328.1/include --sysroot=/mnt/c/Users/LeZi/source/repos/LingFeng-bbben/MajdataPlay/Tools/FFmpeg/.build/toolchains/android-ndk-r27c/toolchains/llvm/prebuilt/linux-x86_64/sysroot",
+        "-DCMAKE_CXX_FLAGS=--target=armv7a-linux-androideabi23 -march=armv7-a -mfloat-abi=softfp -mfpu=neon -I/home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005/toolchains/Vulkan-Headers-vulkan-sdk-1.4.328.1/include --sysroot=/mnt/c/Users/LeZi/source/repos/LingFeng-bbben/MajdataPlay/Tools/FFmpeg/.build/toolchains/android-ndk-r27c/toolchains/llvm/prebuilt/linux-x86_64/sysroot",
+        "-DCMAKE_EXE_LINKER_FLAGS=-Wl,-z,max-page-size=16384 --sysroot=/mnt/c/Users/LeZi/source/repos/LingFeng-bbben/MajdataPlay/Tools/FFmpeg/.build/toolchains/android-ndk-r27c/toolchains/llvm/prebuilt/linux-x86_64/sysroot",
+        "-DCMAKE_SHARED_LINKER_FLAGS=-Wl,-z,max-page-size=16384 --sysroot=/mnt/c/Users/LeZi/source/repos/LingFeng-bbben/MajdataPlay/Tools/FFmpeg/.build/toolchains/android-ndk-r27c/toolchains/llvm/prebuilt/linux-x86_64/sysroot",
+        "-DCMAKE_INSTALL_PREFIX=/home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005/software-android-armv7-d70796b4c633/x265/install",
+        "-DENABLE_SHARED=OFF",
+        "-DENABLE_CLI=OFF",
+        "-DENABLE_PIC=ON",
+        "-DENABLE_LIBNUMA=OFF",
+        "-DENABLE_TESTS=OFF",
+        "-DENABLE_HDR10_PLUS=OFF",
+        "-DENABLE_LIBVMAF=OFF",
+        "-DENABLE_SVT_HEVC=OFF",
+        "-DENABLE_ALPHA=OFF",
+        "-DHIGH_BIT_DEPTH=OFF",
+        "-DNATIVE_BUILD=OFF",
+        "-DENABLE_ASSEMBLY=OFF",
+        "-DENABLE_NEON=OFF",
+        "-DENABLE_NEON_DOTPROD=OFF",
+        "-DENABLE_NEON_I8MM=OFF",
+        "-DENABLE_SVE=OFF",
+        "-DENABLE_SVE2=OFF",
+        "-DCROSS_COMPILE_ARM=ON"
+      ],
+      "archive": "libx265.a",
+      "bytes": 9144744,
+      "sha256": "248e87eae017acaf5018ad022b83e32222250f9968f56a4ca366a2019fe826e2",
+      "static": true,
+      "pic": true,
+      "cmakeVersion": "cmake version 3.28.3",
+      "cxxRuntimeLink": [
+        "/mnt/c/Users/LeZi/source/repos/LingFeng-bbben/MajdataPlay/Tools/FFmpeg/.build/toolchains/android-ndk-r27c/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/lib/arm-linux-androideabi/libc++_static.a",
+        "/mnt/c/Users/LeZi/source/repos/LingFeng-bbben/MajdataPlay/Tools/FFmpeg/.build/toolchains/android-ndk-r27c/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/lib/arm-linux-androideabi/libc++abi.a",
+        "/mnt/c/Users/LeZi/source/repos/LingFeng-bbben/MajdataPlay/Tools/FFmpeg/.build/toolchains/android-ndk-r27c/toolchains/llvm/prebuilt/linux-x86_64/lib/clang/18/lib/linux/arm/libunwind.a",
+        "-ldl",
+        "-lm"
+      ]
+    },
+    "libvpx": {
+      "source": {
+        "version": "1.17.0",
+        "repository": "https://chromium.googlesource.com/webm/libvpx",
+        "tag": "v1.17.0",
+        "commit": "6df3ec34557879fff673706f4a1d9fbd0f3a6f0e",
+        "license": "BSD-3-Clause",
+        "licenseFiles": [
+          "LICENSE",
+          "PATENTS",
+          "AUTHORS",
+          "third_party/x86inc/LICENSE"
+        ]
+      },
+      "configure": [
+        "--prefix=/home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005/software-android-armv7-d70796b4c633/libvpx/install",
+        "--target=generic-gnu",
+        "--enable-pic",
+        "--enable-static",
+        "--disable-shared",
+        "--disable-examples",
+        "--disable-tools",
+        "--disable-docs",
+        "--disable-unit-tests",
+        "--disable-install-bins",
+        "--disable-vp8",
+        "--enable-vp9",
+        "--enable-vp9-encoder",
+        "--disable-vp9-decoder",
+        "--disable-runtime-cpu-detect"
+      ],
+      "archive": "libvpx.a",
+      "bytes": 1344632,
+      "sha256": "b52a23d4050df788d11f96a0f9e100b2a7500b92532fc7fba3b1d06662599c88",
+      "static": true,
+      "pic": true
+    },
+    "libaom": {
+      "source": {
+        "version": "3.13.3",
+        "repository": "https://aomedia.googlesource.com/aom",
+        "tag": "v3.13.3",
+        "commit": "92d4c37fbdd08944a0e721bbaeb13318f10aebb0",
+        "license": "BSD-2-Clause and AOM Patent License 1.0",
+        "licenseFiles": [
+          "LICENSE",
+          "PATENTS",
+          "AUTHORS",
+          "third_party/x86inc/LICENSE",
+          "third_party/vector/LICENSE",
+          "third_party/fastfeat/LICENSE",
+          "third_party/highway/LICENSE-BSD3"
+        ]
+      },
+      "configure": [
+        "/usr/bin/cmake",
+        "-S",
+        "/home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005/toolchains/libaom-92d4c37fbdd0",
+        "-B",
+        "/home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005/software-android-armv7-d70796b4c633/libaom/build",
+        "-G",
+        "Ninja",
+        "-DCMAKE_MAKE_PROGRAM=/usr/bin/ninja",
+        "-DCMAKE_BUILD_TYPE=Release",
+        "-DCMAKE_POLICY_VERSION_MINIMUM=3.5",
+        "-DCMAKE_POSITION_INDEPENDENT_CODE=ON",
+        "-DCMAKE_INSTALL_LIBDIR=lib",
+        "-DCMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY",
+        "-DCMAKE_SYSTEM_PROCESSOR=armv7l",
+        "-DCMAKE_TOOLCHAIN_FILE=/home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005/toolchains/android-ndk-r27c/build/cmake/android.toolchain.cmake",
+        "-DANDROID_ABI=armeabi-v7a",
+        "-DANDROID_PLATFORM=android-23",
+        "-DANDROID_STL=c++_static",
+        "-DCMAKE_C_FLAGS=--target=armv7a-linux-androideabi23 -march=armv7-a -mfloat-abi=softfp -mfpu=neon -I/home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005/toolchains/Vulkan-Headers-vulkan-sdk-1.4.328.1/include --sysroot=/mnt/c/Users/LeZi/source/repos/LingFeng-bbben/MajdataPlay/Tools/FFmpeg/.build/toolchains/android-ndk-r27c/toolchains/llvm/prebuilt/linux-x86_64/sysroot",
+        "-DCMAKE_CXX_FLAGS=--target=armv7a-linux-androideabi23 -march=armv7-a -mfloat-abi=softfp -mfpu=neon -I/home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005/toolchains/Vulkan-Headers-vulkan-sdk-1.4.328.1/include --sysroot=/mnt/c/Users/LeZi/source/repos/LingFeng-bbben/MajdataPlay/Tools/FFmpeg/.build/toolchains/android-ndk-r27c/toolchains/llvm/prebuilt/linux-x86_64/sysroot",
+        "-DCMAKE_EXE_LINKER_FLAGS=-Wl,-z,max-page-size=16384 --sysroot=/mnt/c/Users/LeZi/source/repos/LingFeng-bbben/MajdataPlay/Tools/FFmpeg/.build/toolchains/android-ndk-r27c/toolchains/llvm/prebuilt/linux-x86_64/sysroot",
+        "-DCMAKE_SHARED_LINKER_FLAGS=-Wl,-z,max-page-size=16384 --sysroot=/mnt/c/Users/LeZi/source/repos/LingFeng-bbben/MajdataPlay/Tools/FFmpeg/.build/toolchains/android-ndk-r27c/toolchains/llvm/prebuilt/linux-x86_64/sysroot",
+        "-DCMAKE_INSTALL_PREFIX=/home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005/software-android-armv7-d70796b4c633/libaom/install",
+        "-DBUILD_SHARED_LIBS=OFF",
+        "-DCONFIG_PIC=1",
+        "-DCONFIG_AV1_ENCODER=1",
+        "-DCONFIG_AV1_DECODER=0",
+        "-DCONFIG_AV1_HIGHBITDEPTH=1",
+        "-DENABLE_EXAMPLES=OFF",
+        "-DENABLE_TESTS=OFF",
+        "-DENABLE_TOOLS=OFF",
+        "-DENABLE_DOCS=OFF",
+        "-DAOM_TARGET_CPU=generic",
+        "-DCMAKE_HAVE_LIBC_PTHREAD=1",
+        "-DCMAKE_HAVE_PTHREADS_CREATE=0",
+        "-DCMAKE_HAVE_PTHREAD_CREATE=0",
+        "-DTHREADS_HAVE_PTHREAD_ARG=0",
+        "-DCMAKE_USE_PTHREADS_INIT=1",
+        "-DCMAKE_THREAD_LIBS_INIT="
+      ],
+      "archive": "libaom.a",
+      "bytes": 27381882,
+      "sha256": "1ae6e46f56a0a7a6b945368cbdf10ca9b44217c682b43a2a65caac277d8ee5c6",
+      "static": true,
+      "pic": true,
+      "cmakeVersion": "cmake version 3.28.3"
     }
   },
   "sourcePatches": [
@@ -171,6 +446,12 @@
       "sha256": "c0604b924b6ae1ee718c045d34f1448ebb78652ccacadfdb54799810c69e17f7",
       "versionMarker": "MajdataPlay-AMF-RC-v1-c0604b924b6a",
       "stagedFile": "amf-rate-control.patch"
+    },
+    {
+      "file": "patches/x265-parameter-check.patch",
+      "sha256": "5b457330f94aa63e539798ae28b3ffcd05388a58a29ba49546da79b944e0f0de",
+      "versionMarker": "MajdataPlay-X265-Params-v1-5b457330f94a",
+      "stagedFile": "x265-parameter-check.patch"
     }
   ],
   "buildDependencyLicenses": [
@@ -180,9 +461,65 @@
       "license": "BSD-2-Clause"
     },
     {
+      "file": "x264.LICENSE.txt",
+      "sha256": "39141703b08632500ed83abea8bea8b3e9bc01edae0ec844f8fd019b46e8a028",
+      "license": "GPL-2.0-or-later",
+      "sourceCommit": "b35605ace3ddf7c1a5d67a2eb553f034aef41d55"
+    },
+    {
+      "file": "x265.LICENSE.txt",
+      "sha256": "60649933e4f5a09c0896651455535e767cf04739e2b5ae275bd377d97d7e8c9f",
+      "license": "GPL-2.0-or-later",
+      "sourceCommit": "1d117bed4747758b51bd2c124d738527e30392cb"
+    },
+    {
+      "file": "libvpx.LICENSE.txt",
+      "sha256": "306ba4f4fd6f5bf9be5e68929498d10bf053bd99db48c9fa03b627f282e764c1",
+      "license": "BSD-3-Clause",
+      "sourceCommit": "6df3ec34557879fff673706f4a1d9fbd0f3a6f0e"
+    },
+    {
+      "file": "libaom.LICENSE.txt",
+      "sha256": "935b57edbc3c5f966c06a306c3bd9a933e843ebfd6580047918b960f68fb0d03",
+      "license": "BSD-2-Clause and AOM Patent License 1.0",
+      "sourceCommit": "92d4c37fbdd08944a0e721bbaeb13318f10aebb0"
+    },
+    {
       "file": "Vulkan-Headers.LICENSE.txt",
       "sha256": "8bfec46a1b5d1b95e730ea0bb60d76838c7cf443a36b0ed21b8c9f6da6c9a8d5",
       "license": "Apache-2.0"
+    },
+    {
+      "file": "compiler-runtime.LICENSE.txt",
+      "sha256": "e6d008eb6025494d8f1e68bd5d40e55e4dd7716811f1852b2fc2dd678a765fc6",
+      "license": "Apache-2.0 WITH LLVM-exception and Android NDK runtime notices",
+      "runtimeArchives": [
+        {
+          "file": "libc++_static.a",
+          "bytes": 2094154,
+          "sha256": "0314d8d5490390be36dda90e4b320edfb7c54d0e6271442309d14ccbfa805136"
+        },
+        {
+          "file": "libc++abi.a",
+          "bytes": 649914,
+          "sha256": "1762f98b4a4e5140630d3057419ee36962cc1ee907f739f03c84cd9c1bd0dc2a"
+        },
+        {
+          "file": "libunwind.a",
+          "bytes": 57324,
+          "sha256": "9be332a645582e469f9a028b90bd8187107bb0d8c25a6a97f3429e45e7692bbc"
+        }
+      ],
+      "sourceNotices": [
+        {
+          "file": "/home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005/toolchains/android-ndk-r27c/toolchains/llvm/prebuilt/linux-x86_64/NOTICE",
+          "sha256": "f96f763beb66a7ba7a667647fc64c0226ace875e590c831fdd9579ec1c1d91e1"
+        },
+        {
+          "file": "/home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005/toolchains/android-ndk-r27c/toolchains/llvm/prebuilt/linux-x86_64/sysroot/NOTICE",
+          "sha256": "d5f5557f82bc42ce657d0513ba9a7d0c55e64eb99d4998994d92f2b5c2b1fb3c"
+        }
+      ]
     }
   ],
   "verifiedHardwareBackends": [

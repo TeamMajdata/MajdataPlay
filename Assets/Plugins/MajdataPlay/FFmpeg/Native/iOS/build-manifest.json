@@ -17,9 +17,9 @@
     "note": "All upstream public headers present in the binding header snapshot are compared after CRLF normalization before building. Generated avconfig.h and ffversion.h are excluded."
   },
   "host": "macOS-27.0.1-arm64-arm-64bit-Mach-O",
-  "builtUtc": "2026-10-05T08:43:18.178204+00:00",
+  "builtUtc": "2026-10-05T12:30:25.062580+00:00",
   "configure": [
-    "--prefix=/Users/codex/codex-work/majdata-recording-apple-20261005/Tools/FFmpeg/.build/install/ios-arm64",
+    "--prefix=/Users/codex/codex-work/majdata-full-encoding-apple-20261005/Tools/FFmpeg/.build/install/ios-arm64",
     "--disable-doc",
     "--disable-programs",
     "--disable-debug",
@@ -29,10 +29,14 @@
     "--disable-filters",
     "--disable-devices",
     "--enable-pic",
-    "--disable-gpl",
+    "--enable-gpl",
+    "--enable-version3",
     "--disable-nonfree",
-    "--extra-version=MajdataPlay-AMF-RC-v1-c0604b924b6a",
-    "--enable-encoder=mpeg4,h264_videotoolbox",
+    "--extra-version=MajdataPlay-AMF-RC-v1-c0604b924b6a_MajdataPlay-X265-Params-v1-5b457330f94a",
+    "--disable-decoder=adpcm_circus,adpcm_ima_escape,adpcm_ima_hvqm2,adpcm_ima_hvqm4,adpcm_ima_magix,adpcm_ima_pda,adpcm_n64,adpcm_psxc,ahx",
+    "--disable-parser=ahx",
+    "--disable-bsf=ahx_to_mp2",
+    "--enable-encoder=mpeg4,libx264,libx265,libvpx_vp9,libaom_av1,h264_videotoolbox",
     "--enable-muxer=mov,mp4,matroska,webm,avi",
     "--disable-shared",
     "--enable-static",
@@ -47,43 +51,49 @@
     "--enable-audiotoolbox",
     "--enable-securetransport",
     "--enable-libdav1d",
-    "--pkg-config=sh /Users/codex/codex-work/majdata-recording-apple-20261005/Tools/FFmpeg/.build/dav1d-ios-arm64-b894f2830402/pkg-config.sh"
+    "--pkg-config=sh /Users/codex/codex-work/majdata-full-encoding-apple-20261005/Tools/FFmpeg/.build/dav1d-ios-arm64-b894f2830402/pkg-config.sh",
+    "--enable-libx264",
+    "--enable-libx265",
+    "--enable-libvpx",
+    "--enable-libaom",
+    "--disable-decoder=libvpx_vp8,libvpx_vp9,libaom_av1",
+    "--pkg-config=sh /Users/codex/codex-work/majdata-full-encoding-apple-20261005/Tools/FFmpeg/.build/software-ios-arm64-5d5e41c298a3/pkg-config.sh"
   ],
   "files": [
     {
       "file": "libavcodec.a",
-      "bytes": 16377840,
-      "sha256": "65fc5a38b24a6270c412aed19a160f74068a89fcfd940878215a57dea580cd54"
+      "bytes": 25991488,
+      "sha256": "146357db0d195fee3924fb3e497de95eba4aad541af0b6d4560ccedb7f8852bb"
     },
     {
       "file": "libavdevice.a",
-      "bytes": 9784,
-      "sha256": "060842307aca6fbfc86b81c605569693331608b905f2653dc8a37a4cedffd882"
+      "bytes": 10368,
+      "sha256": "fc02332b7dd7dfcf60b363b26573e99232b41646279a01d5bb8ee8937561eb1e"
     },
     {
       "file": "libavfilter.a",
-      "bytes": 213880,
-      "sha256": "dadc17eca9dffef51dbb0b387f7094cfc6980abac2f841968c1738212085d5d3"
+      "bytes": 214464,
+      "sha256": "4e281a94e6fe004067407e36ec2eb59d520d050f99854cbbc6d543c04a4803d1"
     },
     {
       "file": "libavformat.a",
-      "bytes": 3684872,
-      "sha256": "9dd3f0dfdfa48cfe4dd5382f9ba9ad6ab9bca22b0092400444149f301e00317e"
+      "bytes": 3685456,
+      "sha256": "8aea7e12eb8687a636b45c3081831f486ec358e9d750223802b415c3cf933917"
     },
     {
       "file": "libavutil.a",
-      "bytes": 1037104,
-      "sha256": "01888e8d88b3c4447e210f336ccb35a6811f19a650d2b5f9f7b58979f845f4fe"
+      "bytes": 1037728,
+      "sha256": "8d5799951fc83de5608e60189bf11cf2ed002d22227c69ac6c850665d20d3683"
     },
     {
       "file": "libswresample.a",
-      "bytes": 131984,
-      "sha256": "97e4a4f23397073a51d338a91764944de9457d29329c656483b1bae217f920f2"
+      "bytes": 132568,
+      "sha256": "013a82c0540214ab3845349eb431288f9c9c4bf570dbc9cfa0e7d3dfb5043df5"
     },
     {
       "file": "libswscale.a",
-      "bytes": 1612072,
-      "sha256": "09a16be4a157357c2e6077e9456f933d386ce3b113857bb964a2a6ecc8ff556f"
+      "bytes": 1612624,
+      "sha256": "4f8bdb048bf2429c9b4dbdaa9e62927c16f13987ae1c4b481bdf20998cee59e6"
     }
   ],
   "softwareDecoders": [
@@ -92,6 +102,10 @@
   "recordingProfile": {
     "encoders": [
       "mpeg4",
+      "libx264",
+      "libx265",
+      "libvpx-vp9",
+      "libaom-av1",
       "h264_videotoolbox"
     ],
     "muxers": [
@@ -155,6 +169,264 @@
           "sha256": "e3ad77d117a4bea19a7a3b333341824d79a5a371004a10e25b8504e7b3047666"
         }
       }
+    },
+    "softwareEncoders": {
+      "x264": {
+        "version": "0.165-stable",
+        "repository": "https://code.videolan.org/videolan/x264.git",
+        "commit": "b35605ace3ddf7c1a5d67a2eb553f034aef41d55",
+        "apiBuild": 165,
+        "license": "GPL-2.0-or-later",
+        "licenseFiles": [
+          "COPYING",
+          "AUTHORS"
+        ]
+      },
+      "x265": {
+        "version": "4.1",
+        "repository": "https://github.com/Multicorewareinc/x265.git",
+        "tag": "4.1",
+        "commit": "1d117bed4747758b51bd2c124d738527e30392cb",
+        "apiBuild": 215,
+        "license": "GPL-2.0-or-later",
+        "licenseFiles": [
+          "COPYING"
+        ]
+      },
+      "libvpx": {
+        "version": "1.17.0",
+        "repository": "https://chromium.googlesource.com/webm/libvpx",
+        "tag": "v1.17.0",
+        "commit": "6df3ec34557879fff673706f4a1d9fbd0f3a6f0e",
+        "license": "BSD-3-Clause",
+        "licenseFiles": [
+          "LICENSE",
+          "PATENTS",
+          "AUTHORS",
+          "third_party/x86inc/LICENSE"
+        ]
+      },
+      "libaom": {
+        "version": "3.13.3",
+        "repository": "https://aomedia.googlesource.com/aom",
+        "tag": "v3.13.3",
+        "commit": "92d4c37fbdd08944a0e721bbaeb13318f10aebb0",
+        "license": "BSD-2-Clause and AOM Patent License 1.0",
+        "licenseFiles": [
+          "LICENSE",
+          "PATENTS",
+          "AUTHORS",
+          "third_party/x86inc/LICENSE",
+          "third_party/vector/LICENSE",
+          "third_party/fastfeat/LICENSE",
+          "third_party/highway/LICENSE-BSD3"
+        ]
+      }
+    }
+  },
+  "license": "GPL-3.0-or-later",
+  "softwareEncoderBuilds": {
+    "x264": {
+      "source": {
+        "version": "0.165-stable",
+        "repository": "https://code.videolan.org/videolan/x264.git",
+        "commit": "b35605ace3ddf7c1a5d67a2eb553f034aef41d55",
+        "apiBuild": 165,
+        "license": "GPL-2.0-or-later",
+        "licenseFiles": [
+          "COPYING",
+          "AUTHORS"
+        ]
+      },
+      "configure": [
+        "--prefix=/Users/codex/codex-work/majdata-full-encoding-apple-20261005/Tools/FFmpeg/.build/software-ios-arm64-5d5e41c298a3/x264/install",
+        "--host=aarch64-apple-darwin",
+        "--enable-static",
+        "--enable-pic",
+        "--disable-cli",
+        "--disable-opencl",
+        "--disable-lavf",
+        "--disable-swscale",
+        "--disable-ffms",
+        "--disable-gpac",
+        "--disable-lsmash",
+        "--bit-depth=8",
+        "--chroma-format=420"
+      ],
+      "archive": "libx264.a",
+      "bytes": 901552,
+      "sha256": "7872a2c0c4a028d9e0c264d5f9fd73cf3226ba929036ffa6579ee39bcba7a8fc",
+      "static": true,
+      "pic": true
+    },
+    "x265": {
+      "source": {
+        "version": "4.1",
+        "repository": "https://github.com/Multicorewareinc/x265.git",
+        "tag": "4.1",
+        "commit": "1d117bed4747758b51bd2c124d738527e30392cb",
+        "apiBuild": 215,
+        "license": "GPL-2.0-or-later",
+        "licenseFiles": [
+          "COPYING"
+        ]
+      },
+      "configure": [
+        "/Users/codex/codex-work/majdata-full-encoding-apple-20261005/Tools/FFmpeg/.build/toolchains/cmake-3.31.10-wheel/cmake/data/bin/cmake",
+        "-S",
+        "/Users/codex/codex-work/majdata-full-encoding-apple-20261005/Tools/FFmpeg/.build/toolchains/x265-1d117bed4747/source",
+        "-B",
+        "/Users/codex/codex-work/majdata-full-encoding-apple-20261005/Tools/FFmpeg/.build/software-ios-arm64-5d5e41c298a3/x265/build",
+        "-G",
+        "Ninja",
+        "-DCMAKE_MAKE_PROGRAM=/opt/homebrew/Cellar/ninja/1.13.2/bin/ninja",
+        "-DCMAKE_BUILD_TYPE=Release",
+        "-DCMAKE_POLICY_VERSION_MINIMUM=3.5",
+        "-DCMAKE_POSITION_INDEPENDENT_CODE=ON",
+        "-DCMAKE_INSTALL_LIBDIR=lib",
+        "-DCMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY",
+        "-DCMAKE_SYSTEM_PROCESSOR=arm64",
+        "-DCMAKE_SYSTEM_NAME=iOS",
+        "-DCMAKE_C_COMPILER=/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang",
+        "-DCMAKE_CXX_COMPILER=/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang",
+        "-DCMAKE_AR=/usr/bin/ar",
+        "-DCMAKE_RANLIB=/usr/bin/ranlib",
+        "-DCMAKE_OSX_SYSROOT=/Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS27.0.sdk",
+        "-DCMAKE_OSX_ARCHITECTURES=arm64",
+        "-DCMAKE_OSX_DEPLOYMENT_TARGET=15.0",
+        "-DCMAKE_C_FLAGS=-target arm64-apple-ios15.0 --sysroot=/Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS27.0.sdk",
+        "-DCMAKE_CXX_FLAGS=-target arm64-apple-ios15.0 --sysroot=/Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS27.0.sdk",
+        "-DCMAKE_EXE_LINKER_FLAGS=-target arm64-apple-ios15.0 --sysroot=/Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS27.0.sdk",
+        "-DCMAKE_SHARED_LINKER_FLAGS=-target arm64-apple-ios15.0 --sysroot=/Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS27.0.sdk",
+        "-DCMAKE_INSTALL_PREFIX=/Users/codex/codex-work/majdata-full-encoding-apple-20261005/Tools/FFmpeg/.build/software-ios-arm64-5d5e41c298a3/x265/install",
+        "-DENABLE_SHARED=OFF",
+        "-DENABLE_CLI=OFF",
+        "-DENABLE_PIC=ON",
+        "-DENABLE_LIBNUMA=OFF",
+        "-DENABLE_TESTS=OFF",
+        "-DENABLE_HDR10_PLUS=OFF",
+        "-DENABLE_LIBVMAF=OFF",
+        "-DENABLE_SVT_HEVC=OFF",
+        "-DENABLE_ALPHA=OFF",
+        "-DHIGH_BIT_DEPTH=OFF",
+        "-DNATIVE_BUILD=OFF",
+        "-DENABLE_ASSEMBLY=OFF",
+        "-DENABLE_NEON=OFF",
+        "-DENABLE_NEON_DOTPROD=OFF",
+        "-DENABLE_NEON_I8MM=OFF",
+        "-DENABLE_SVE=OFF",
+        "-DENABLE_SVE2=OFF"
+      ],
+      "archive": "libx265.a",
+      "bytes": 2273272,
+      "sha256": "7b5065dec081769a0b95b062e037b8ee01890eddabda14d408433d508671efb6",
+      "static": true,
+      "pic": true,
+      "cmakeVersion": "cmake version 3.31.10",
+      "cxxRuntimeLink": [
+        "-lc++",
+        "-lm"
+      ]
+    },
+    "libvpx": {
+      "source": {
+        "version": "1.17.0",
+        "repository": "https://chromium.googlesource.com/webm/libvpx",
+        "tag": "v1.17.0",
+        "commit": "6df3ec34557879fff673706f4a1d9fbd0f3a6f0e",
+        "license": "BSD-3-Clause",
+        "licenseFiles": [
+          "LICENSE",
+          "PATENTS",
+          "AUTHORS",
+          "third_party/x86inc/LICENSE"
+        ]
+      },
+      "configure": [
+        "--prefix=/Users/codex/codex-work/majdata-full-encoding-apple-20261005/Tools/FFmpeg/.build/software-ios-arm64-5d5e41c298a3/libvpx/install",
+        "--target=generic-gnu",
+        "--enable-pic",
+        "--enable-static",
+        "--disable-shared",
+        "--disable-examples",
+        "--disable-tools",
+        "--disable-docs",
+        "--disable-unit-tests",
+        "--disable-install-bins",
+        "--disable-vp8",
+        "--enable-vp9",
+        "--enable-vp9-encoder",
+        "--disable-vp9-decoder",
+        "--disable-runtime-cpu-detect"
+      ],
+      "archive": "libvpx.a",
+      "bytes": 1192280,
+      "sha256": "026dd2bddc1f0a9773f03c4cafaaff2dc6e946cc4aafa49e1f33681549c9ba6e",
+      "static": true,
+      "pic": true
+    },
+    "libaom": {
+      "source": {
+        "version": "3.13.3",
+        "repository": "https://aomedia.googlesource.com/aom",
+        "tag": "v3.13.3",
+        "commit": "92d4c37fbdd08944a0e721bbaeb13318f10aebb0",
+        "license": "BSD-2-Clause and AOM Patent License 1.0",
+        "licenseFiles": [
+          "LICENSE",
+          "PATENTS",
+          "AUTHORS",
+          "third_party/x86inc/LICENSE",
+          "third_party/vector/LICENSE",
+          "third_party/fastfeat/LICENSE",
+          "third_party/highway/LICENSE-BSD3"
+        ]
+      },
+      "configure": [
+        "/Users/codex/codex-work/majdata-full-encoding-apple-20261005/Tools/FFmpeg/.build/toolchains/cmake-3.31.10-wheel/cmake/data/bin/cmake",
+        "-S",
+        "/Users/codex/codex-work/majdata-full-encoding-apple-20261005/Tools/FFmpeg/.build/toolchains/libaom-92d4c37fbdd0",
+        "-B",
+        "/Users/codex/codex-work/majdata-full-encoding-apple-20261005/Tools/FFmpeg/.build/software-ios-arm64-5d5e41c298a3/libaom/build",
+        "-G",
+        "Ninja",
+        "-DCMAKE_MAKE_PROGRAM=/opt/homebrew/Cellar/ninja/1.13.2/bin/ninja",
+        "-DCMAKE_BUILD_TYPE=Release",
+        "-DCMAKE_POLICY_VERSION_MINIMUM=3.5",
+        "-DCMAKE_POSITION_INDEPENDENT_CODE=ON",
+        "-DCMAKE_INSTALL_LIBDIR=lib",
+        "-DCMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY",
+        "-DCMAKE_SYSTEM_PROCESSOR=arm64",
+        "-DCMAKE_SYSTEM_NAME=iOS",
+        "-DCMAKE_C_COMPILER=/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang",
+        "-DCMAKE_CXX_COMPILER=/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang",
+        "-DCMAKE_AR=/usr/bin/ar",
+        "-DCMAKE_RANLIB=/usr/bin/ranlib",
+        "-DCMAKE_OSX_SYSROOT=/Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS27.0.sdk",
+        "-DCMAKE_OSX_ARCHITECTURES=arm64",
+        "-DCMAKE_OSX_DEPLOYMENT_TARGET=15.0",
+        "-DCMAKE_C_FLAGS=-target arm64-apple-ios15.0 --sysroot=/Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS27.0.sdk",
+        "-DCMAKE_CXX_FLAGS=-target arm64-apple-ios15.0 --sysroot=/Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS27.0.sdk",
+        "-DCMAKE_EXE_LINKER_FLAGS=-target arm64-apple-ios15.0 --sysroot=/Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS27.0.sdk",
+        "-DCMAKE_SHARED_LINKER_FLAGS=-target arm64-apple-ios15.0 --sysroot=/Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS27.0.sdk",
+        "-DCMAKE_INSTALL_PREFIX=/Users/codex/codex-work/majdata-full-encoding-apple-20261005/Tools/FFmpeg/.build/software-ios-arm64-5d5e41c298a3/libaom/install",
+        "-DBUILD_SHARED_LIBS=OFF",
+        "-DCONFIG_PIC=1",
+        "-DCONFIG_AV1_ENCODER=1",
+        "-DCONFIG_AV1_DECODER=0",
+        "-DCONFIG_AV1_HIGHBITDEPTH=1",
+        "-DENABLE_EXAMPLES=OFF",
+        "-DENABLE_TESTS=OFF",
+        "-DENABLE_TOOLS=OFF",
+        "-DENABLE_DOCS=OFF",
+        "-DAOM_TARGET_CPU=generic"
+      ],
+      "archive": "libaom.a",
+      "bytes": 5092352,
+      "sha256": "96ae8076dd285bb19c9cac48adac2ef8ee9c34d6d1578af6066df5eaea754ae9",
+      "static": true,
+      "pic": true,
+      "cmakeVersion": "cmake version 3.31.10"
     }
   },
   "sourcePatches": [
@@ -163,6 +435,12 @@
       "sha256": "c0604b924b6ae1ee718c045d34f1448ebb78652ccacadfdb54799810c69e17f7",
       "versionMarker": "MajdataPlay-AMF-RC-v1-c0604b924b6a",
       "stagedFile": "amf-rate-control.patch"
+    },
+    {
+      "file": "patches/x265-parameter-check.patch",
+      "sha256": "5b457330f94aa63e539798ae28b3ffcd05388a58a29ba49546da79b944e0f0de",
+      "versionMarker": "MajdataPlay-X265-Params-v1-5b457330f94a",
+      "stagedFile": "x265-parameter-check.patch"
     }
   ],
   "buildDependencyLicenses": [
@@ -170,6 +448,30 @@
       "file": "dav1d.LICENSE.txt",
       "sha256": "b7fc54472d14c149d9a7dff4b2696243c018a4a1127e31f0f3cdf7c60c10ccc1",
       "license": "BSD-2-Clause"
+    },
+    {
+      "file": "x264.LICENSE.txt",
+      "sha256": "39141703b08632500ed83abea8bea8b3e9bc01edae0ec844f8fd019b46e8a028",
+      "license": "GPL-2.0-or-later",
+      "sourceCommit": "b35605ace3ddf7c1a5d67a2eb553f034aef41d55"
+    },
+    {
+      "file": "x265.LICENSE.txt",
+      "sha256": "60649933e4f5a09c0896651455535e767cf04739e2b5ae275bd377d97d7e8c9f",
+      "license": "GPL-2.0-or-later",
+      "sourceCommit": "1d117bed4747758b51bd2c124d738527e30392cb"
+    },
+    {
+      "file": "libvpx.LICENSE.txt",
+      "sha256": "306ba4f4fd6f5bf9be5e68929498d10bf053bd99db48c9fa03b627f282e764c1",
+      "license": "BSD-3-Clause",
+      "sourceCommit": "6df3ec34557879fff673706f4a1d9fbd0f3a6f0e"
+    },
+    {
+      "file": "libaom.LICENSE.txt",
+      "sha256": "935b57edbc3c5f966c06a306c3bd9a933e843ebfd6580047918b960f68fb0d03",
+      "license": "BSD-2-Clause and AOM Patent License 1.0",
+      "sourceCommit": "92d4c37fbdd08944a0e721bbaeb13318f10aebb0"
     }
   ]
 }

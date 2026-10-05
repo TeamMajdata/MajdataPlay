@@ -13,6 +13,8 @@ param(
     [switch] $TestCameraCapture,
     [switch] $CaptureUrp,
     [switch] $CaptureHardware,
+    [ValidateSet('MPEG4', 'H264', 'HEVC', 'AV1', 'VP9')][string] $CaptureFormat = 'MPEG4',
+    [ValidateSet('CBR', 'VBR')][string] $CaptureRateControl = 'VBR',
     [switch] $SkipBuild,
     [switch] $BuildOnly,
     [string] $NativeDirectory = '',
@@ -71,6 +73,7 @@ if (-not $SkipBuild) {
     Copy-Item -LiteralPath (Join-Path $repo 'Assets/Packages/System.Runtime.CompilerServices.Unsafe.6.1.2') -Destination (Join-Path $project 'Assets/Packages') -Recurse -Force
     Copy-Item -LiteralPath (Join-Path $repo 'Assets/csc.rsp') -Destination (Join-Path $project 'Assets/csc.rsp') -Force
     Copy-Item -LiteralPath (Join-Path $repo 'Assets/Plugins/MajdataPlay/FFmpeg/Runtime') -Destination (Join-Path $project 'Assets/Plugins/FFmpeg') -Recurse -Force
+    Copy-Item -LiteralPath (Join-Path $repo 'Assets/Plugins/MajdataPlay/FFmpeg/Editor') -Destination (Join-Path $project 'Assets/Plugins/FFmpeg') -Recurse -Force
     if (Test-Path -LiteralPath (Join-Path $repo 'Assets/Plugins/MajdataPlay/FFmpeg/Shaders')) {
         Copy-Item -LiteralPath (Join-Path $repo 'Assets/Plugins/MajdataPlay/FFmpeg/Shaders') -Destination (Join-Path $project 'Assets/Plugins/FFmpeg') -Recurse -Force
     }
@@ -100,10 +103,11 @@ if (-not $SkipBuild) {
     Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'UnitySmoke.cs') -Destination (Join-Path $project 'Assets/Smoke/UnitySmoke.cs') -Force
     Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'UnityCameraSmoke.cs') -Destination (Join-Path $project 'Assets/Smoke/UnityCameraSmoke.cs') -Force
     Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'UnitySmokeBuild.cs') -Destination (Join-Path $project 'Assets/Editor/UnitySmokeBuild.cs') -Force
+    Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'UnityCameraEditorSmoke.cs') -Destination (Join-Path $project 'Assets/Editor/UnityCameraEditorSmoke.cs') -Force
     $package = (Join-Path $repo 'ThirdParty/FFmpeg.AutoGen/Unity') -replace '\\', '/'
     Write-Json (Join-Path $project 'Packages/manifest.json') @{ dependencies = @{ 'net.majdata.ffmpeg-autogen' = "file:$package"; 'com.unity.render-pipelines.universal' = '17.3.0'; 'com.unity.ugui' = '2.0.0'; 'com.unity.modules.ui' = '1.0.0'; 'com.unity.modules.imageconversion' = '1.0.0'; 'com.unity.modules.androidjni' = '1.0.0'; 'com.unity.modules.unitywebrequest' = '1.0.0' } }
     Write-Json (Join-Path $project 'Assets/Smoke/FFmpeg.Player.Smoke.asmdef') @{ name = 'FFmpeg.Player.Smoke'; references = @('MajdataPlay.FFmpeg', 'MajdataPlay.Diagnostics', 'Unity.RenderPipelines.Core.Runtime', 'Unity.RenderPipelines.Universal.Runtime') }
-    Write-Json (Join-Path $project 'Assets/Editor/FFmpeg.Player.Smoke.Editor.asmdef') @{ name = 'FFmpeg.Player.Smoke.Editor'; references = @('FFmpeg.Player.Smoke', 'Unity.RenderPipelines.Core.Runtime', 'Unity.RenderPipelines.Universal.Runtime'); includePlatforms = @('Editor') }
+    Write-Json (Join-Path $project 'Assets/Editor/FFmpeg.Player.Smoke.Editor.asmdef') @{ name = 'FFmpeg.Player.Smoke.Editor'; references = @('FFmpeg.Player.Smoke', 'MajdataPlay.FFmpeg', 'Unity.RenderPipelines.Core.Runtime', 'Unity.RenderPipelines.Universal.Runtime'); includePlatforms = @('Editor') }
     [IO.File]::WriteAllText((Join-Path $project 'ProjectSettings/ProjectVersion.txt'), "m_EditorVersion: 6000.3.17f1`n", $utf8)
     $target = if ($Platform -eq 'Android') { 'Android' } elseif ($Platform -eq 'Linux') { 'Linux64' } elseif ($Architecture -eq 'x86') { 'Win' } else { 'Win64' }
     $buildLog = Join-Path $result 'editor.log'
@@ -151,6 +155,7 @@ if ($Platform -eq 'Linux') {
     return
 }
 $suffix = if ($TestCameraCapture) { '-camera' + $(if ($CaptureUrp) { '-urp' } else { '-builtin' }) + $(if ($CaptureHardware) { '-hardware' } else { '-software' }) } elseif ($RequireNativeDecoder) { '-native-decoder' } elseif ($TestRecovery) { '-recovery' } elseif ($TestDecoderPreference) { '-decoder-preference' } elseif ($HardwareCpuUpload) { '-hardware-cpu' } elseif ($Hardware) { '-hardware' } else { '-software' }
+if ($TestCameraCapture -and -not $CaptureHardware) { $suffix += "-$CaptureFormat-$CaptureRateControl" }
 $report = Join-Path $result "$Graphics$suffix.txt"
 $log = Join-Path $result "$Graphics$suffix.log"
 if (Test-Path -LiteralPath $report) { Remove-Item -LiteralPath $report }
@@ -167,6 +172,7 @@ if ($TestCameraCapture) {
     $playerArgs = @($playerArgs | Where-Object { $_ -ne '-batchmode' })
 }
 $playerArgs += @('-cameraCapture', $(if ($TestCameraCapture) { 'true' } else { 'false' }), '-captureHardware', $(if ($CaptureHardware) { 'true' } else { 'false' }))
+$playerArgs += @('-captureFormat', $CaptureFormat, '-captureRateControl', $CaptureRateControl)
 $process = Start-Process -FilePath (Join-Path $result 'VideoSmoke.exe') -ArgumentList $playerArgs -WindowStyle Hidden -PassThru
 if (-not $process.WaitForExit(120000)) { $process.Kill(); throw "Player timed out: $log" }
 if (-not (Test-Path -LiteralPath $report)) { Get-Content -LiteralPath $log -Tail 60; throw "Player produced no result: $log" }

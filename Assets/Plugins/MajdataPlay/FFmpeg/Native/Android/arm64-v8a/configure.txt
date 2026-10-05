@@ -1,11 +1,11 @@
-install prefix            /home/lezi/.cache/majdata-ffmpeg-android-recording/install/android-arm64
-source path               /home/lezi/.cache/majdata-ffmpeg-android-recording/source
+install prefix            /home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005/install/android-arm64
+source path               ./src
 C compiler                clang --target=aarch64-linux-android23
 C library                 bionic
 host C compiler           gcc
 host C library            glibc
 ARCH                      aarch64 (generic)
-version string suffix     MajdataPlay-AMF-RC-v1-c0604b924b6a
+version string suffix     MajdataPlay-AMF-RC-v1-c0604b924b6a_MajdataPlay-X265-Params-v1-5b457330f94a
 big-endian                no
 runtime cpu detection     yes
 NEON enabled              yes
@@ -36,7 +36,9 @@ experimental features     yes
 xmllint enabled           no
 
 External libraries:
-jni                     libdav1d                mediacodec
+jni                     libvpx                  mediacodec
+libaom                  libx264
+libdav1d                libx265
 
 External libraries providing hardware acceleration:
 vulkan
@@ -214,7 +216,8 @@ escape124               pcm_u24le               yuv4
 escape130               pcm_u32be               zero12v
 
 Enabled encoders:
-h263                    mpeg4
+h263                    libvpx_vp9              libx265
+libaom_av1              libx264                 mpeg4
 
 Enabled hwaccels:
 av1_vulkan              hevc_vulkan
@@ -409,6 +412,6 @@ Enabled indevs:
 
 Enabled outdevs:
 
-License: LGPL version 2.1 or later
+License: GPL version 3 or later
 
 WARNING: spirv-headers not found, swscale SPIR-V backend unavailable

@@ -1,0 +1,23 @@
+diff --git a/libavcodec/libx265.c b/libavcodec/libx265.c
+--- a/libavcodec/libx265.c
++++ b/libavcodec/libx265.c
+@@ -536,13 +536,13 @@
+             parse_ret = ctx->api->param_parse(ctx->params, en->key, en->value);
+             switch (parse_ret) {
+             case X265_PARAM_BAD_NAME:
+-                av_log(avctx, AV_LOG_WARNING,
+-                      "Unknown option: %s.\n", en->key);
+-                break;
++                av_log(avctx, AV_LOG_ERROR,
++                       "Unknown option: %s.\n", en->key);
++                return AVERROR(EINVAL);
+             case X265_PARAM_BAD_VALUE:
+-                av_log(avctx, AV_LOG_WARNING,
+-                      "Invalid value for %s: %s.\n", en->key, en->value);
+-                break;
++                av_log(avctx, AV_LOG_ERROR,
++                       "Invalid value for %s: %s.\n", en->key, en->value);
++                return AVERROR(EINVAL);
+             default:
+                 break;
+             }

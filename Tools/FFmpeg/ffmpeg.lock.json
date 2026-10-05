@@ -2,6 +2,10 @@
   "repository": "https://github.com/FFmpeg/FFmpeg.git",
   "tag": "n9.0.1",
   "commit": "bf1b838f2ab88b4f8fd83443325c782ea0e0f7fa",
+  "licenseSha256": {
+    "COPYING.GPLv2": "8177f97513213526df2cf6184d8ff986c675afb514d4e68a404010521b880643",
+    "COPYING.GPLv3": "8ceb4b9ee5adedde47b31e975c1d90c73ad27b6b165a1dcd80c7c545eb65b903"
+  },
   "abi": {"avcodec":63,"avdevice":63,"avfilter":12,"avformat":63,"avutil":61,"swresample":7,"swscale":10},
   "bindingHeaders": "ThirdParty/FFmpeg.AutoGen/FFmpeg/include",
   "note": "All upstream public headers present in the binding header snapshot are compared after CRLF normalization before building. Generated avconfig.h and ffversion.h are excluded."

@@ -18,6 +18,8 @@ namespace MajdataPlay.FFmpeg
     {
         /// <summary>Identifies the reviewed AMF property checks by the checked-in source patch's SHA256 prefix.</summary>
         private const string CheckedAmfConfigurationOption = "--extra-version=MajdataPlay-AMF-RC-v1-c0604b924b6a";
+        /// <summary>Identifies the native wrapper that rejects ignored x265 parameters.</summary>
+        private const string CheckedX265ConfigurationMarker = "MajdataPlay-X265-Params-v1-5b457330f94a";
         /// <summary>Roots the managed local-file write callback for IL2CPP and Mono.</summary>
         private static readonly avio_alloc_context_write_packet s_writeCallback = WriteOutput;
         /// <summary>Roots the managed local-file seek callback for IL2CPP and Mono.</summary>
@@ -94,7 +96,7 @@ namespace MajdataPlay.FFmpeg
         /// <summary>Gets the configured target bitrate in bits per second.</summary>
         public long BitRate => _options.BitRate;
         /// <summary>Gets the effective encoder maximum bitrate in bits per second; CBR uses its constant target.</summary>
-        /// <remarks>This is the encoder's buffered rate limit, not a bound on the size of each packet or instantaneous bursts.</remarks>
+        /// <remarks>VBV encoders use a buffered limit; libvpx/libaom use rate-control budgets that can overshoot in either mode. Neither limits individual packet sizes.</remarks>
         public long MaximumBitRate => RateControlMode == VideoRateControlMode.CBR ? _options.BitRate : _options.MaximumBitRate;
         /// <summary>Gets the reason hardware preference fell back to software, or null when no fallback occurred.</summary>
         public string? HardwareFallbackReason { get; private set; }
@@ -312,7 +314,7 @@ namespace MajdataPlay.FFmpeg
                         return;
                     }
                     failures.Append("MediaFoundation cannot verify that its driver accepted rate control and maximum bitrate; ");
-#elif UNITY_EDITOR_OSX || UNITY_STANDALONE_OSX || UNITY_IOS
+#elif UNITY_EDITOR_OSX || UNITY_STANDALONE_OSX
                     if (_options.Format == VideoEncodingFormat.H264 && TryEncoder("h264_videotoolbox", true, failures))
                     {
                         return;
@@ -321,6 +323,8 @@ namespace MajdataPlay.FFmpeg
                     {
                         failures.Append("VideoToolbox does not expose a checked maximum-rate setting for this format; ");
                     }
+#elif UNITY_IOS && !UNITY_EDITOR
+                    failures.Append("VideoToolbox cannot verify hardware-only encoding through this iOS FFmpeg wrapper; ");
 #elif UNITY_EDITOR_LINUX || UNITY_STANDALONE_LINUX
                     if (TryEncoder(prefix + "_nvenc", true, failures) || TryEncoder(prefix + "_vaapi", true, failures))
                     {
@@ -386,7 +390,14 @@ namespace MajdataPlay.FFmpeg
                 _codec->sample_aspect_ratio = new AVRational { num = 1, den = 1 };
                 _codec->gop_size = FrameRate * 2;
                 _codec->max_b_frames = 0;
-                _codec->thread_count = hardware ? 1 : _options.MaximumSoftwareThreads;
+                var maximumCodecThreads = name switch
+                {
+                    "libx265" => 16,
+                    "libvpx-vp9" => 64,
+                    "libaom-av1" => 64,
+                    _ => 128
+                };
+                _codec->thread_count = hardware ? 1 : Math.Min(_options.MaximumSoftwareThreads, maximumCodecThreads);
                 _codec->bit_rate = _options.BitRate;
                 _codec->rc_max_rate = MaximumBitRate;
                 _codec->rc_min_rate = _options.RateControlMode == VideoRateControlMode.CBR ? _options.BitRate : 0;
@@ -476,34 +487,46 @@ namespace MajdataPlay.FFmpeg
             }
             else if (name == "libx264")
             {
-                var muxer = ffmpeg.PtrToStringUTF8(_format->oformat->name);
-                if (cbr && (muxer == "mp4" || muxer == "mov"))
-                {
-                    throw new NotSupportedException("libx264 CBR HRD requires a compatible container such as Matroska (.mkv).");
-                }
-
                 SetOption("preset", "veryfast");
-                SetOption("nal-hrd", cbr ? "cbr" : "vbr");
+                // VBR HRD signaling is compatible with MP4. Equal VBV target/maximum
+                // and independent filler still select x264's actual CBR rate control.
+                SetOption("nal-hrd", "vbr");
+                // Unlike x264-params, this parser returns an error for rejected keys.
+                SetOption("x264opts", "sync-lookahead=0:rc-lookahead=0:lookahead-threads=1:filler=" + (cbr ? "1" : "0"));
             }
             else if (name == "libx265")
             {
-                if (cbr)
+                if (ffmpeg.avcodec_configuration().IndexOf(CheckedX265ConfigurationMarker, StringComparison.Ordinal) < 0)
                 {
-                    throw new NotSupportedException("This wrapper cannot verify acceptance of the x265 strict-cbr parameter; only checked VBR configuration is supported.");
+                    throw new NotSupportedException("This x265 wrapper does not reject ignored encoder parameters. Rebuild native libraries with "
+                        + CheckedX265ConfigurationMarker + ".");
                 }
 
                 SetOption("preset", "veryfast");
-                SetOption("x265-params", "pools=none:frame-threads=" + _options.MaximumSoftwareThreads.ToString(CultureInfo.InvariantCulture)
-                    + ":wpp=0");
+                SetOption("x265-params", "pools=none:frame-threads=" + _codec->thread_count.ToString(CultureInfo.InvariantCulture)
+                    + ":wpp=0:strict-cbr=" + (cbr ? "1" : "0"));
             }
             else if (name == "libvpx-vp9" || name == "libaom-av1")
             {
-                if (!cbr)
-                {
-                    throw new NotSupportedException("This wrapper applies maximum VBR rate to two-pass sections and cannot enforce the requested limit during one-pass recording.");
-                }
-
+                // With CRF unset, equal min/max/target selects CBR; otherwise the
+                // good-quality defaults select one-pass VBR. The rate limit is a
+                // native budget, rather than a hard bound on compressed payload.
+                SetOption("crf", "-1");
                 SetOption("cpu-used", "6");
+                SetOption("lag-in-frames", "0");
+                SetOption("drop-threshold", "0");
+                SetOption("undershoot-pct", "0");
+                SetOption("overshoot-pct", "0");
+                if (name == "libvpx-vp9")
+                {
+                    SetOption("deadline", "good");
+                }
+                else
+                {
+                    SetOption("usage", "good");
+                    var percentage = (MaximumBitRate * 100 / _options.BitRate).ToString(CultureInfo.InvariantCulture);
+                    SetOption("aom-params", "max-intra-rate=" + percentage + ":max-inter-rate=" + percentage);
+                }
             }
             else
             {

@@ -2,6 +2,85 @@
 
 最近验证日期：2026-10-05；此前跨平台矩阵执行于 2026-10-03。Windows / Unity 6000.3.17f1 / AMD Radeon RX 580 2048SP；Linux 使用本机 WSL Ubuntu 24.04；Android 真机为 Mi MIX 2S / Android 15 API 35 / Adreno 630 / Vulkan 1.1.128；Apple 构建测试使用用户提供的 Mac mini M4。当前 Windows/Linux/Android 图形桥接 ABI 为 **4**，Apple 保持 **2**；下方 ABI2/3 的记录为此前版本实测。
 
+## 2026-10-05：四种软件编码器的最终原生库
+
+全部十目标重新构建并交付 H.264/libx264、H.265/libx265、AV1/libaom-av1、VP9/libvpx-vp9，保留 MPEG4、已有硬件编码/解码和桥接 ABI。八套正式 Native 与两个独立 simulator 包已替换；**149 个既有 `.meta` 字节未变化**。固定版本、静态依赖与许可证见 [构建记录](../../FFmpeg/BUILD-RESULTS.md)，Apple SDK/链接与运行证据见 [Apple 记录](../../FFmpeg/APPLE-RESULTS.md)。
+
+| 验证层 | 本轮最终产物结果 |
+| --- | --- |
+| `python Tools/FFmpeg/verify-artifacts.py` | **70 库 + 10 桥接 PASS**；各目标四个静态 PIC 编码器、GPL profile、双补丁、源码/许可证哈希、CPU/SDK/importer；实际 Windows x64 安全加载 ABI，Android 16 KiB 对齐 |
+| `.NET 9` 独立托管检查 | **71 assertions PASS**；实际四软件格式完整编码 **4184 PASS**；MPEG4/真实 AMF 录制和后台会话 **839 PASS**；真实 H.264 播放/seek/回退 **446 PASS** |
+| Windows x86、x64 | 每架构四格式 × CBR/VBR × 简单/复杂画面，16 文件、**31,820 checks PASS**；PATH 仅交付库与系统目录，未由开发工具链 DLL 提供依赖 |
+| Linux x64 / WSL | 同一矩阵 **31,820 PASS**；清除 `LD_LIBRARY_PATH`，最终库无动态 libstdc++/libc++ 依赖，保留原有 libgcc_s/VAAPI 依赖 |
+| Android ARM64、ARMv7 / 真机 | 每 ABI 同一矩阵 **31,820 PASS**，各 16 个结果文件回传；八库严格 ELF 依赖闭包通过，无 libc++_shared 或额外编译器 runtime SO |
+| macOS ARM64、iOS simulator ARM64 | 每目标同一矩阵 **31,820 PASS**；AV1 8/10-bit 各 3570 PASS；Mac 真实 VT/Metal 231、simulator Metal/软件回退 116 PASS |
+| Unity 6000.3.17f1 x64 Mono / Built-in / D3D11 | **416 Camera checks PASS**；实际 `libx264` 软件 H.264 CBR、GPU 回读/编码、暂停/恢复/停止/销毁和 PTS |
+| 同一 Unity，x64 IL2CPP / Built-in / D3D11 | **416 Camera checks PASS**；同一 H.264 CBR 场景与真实原生回调，隔离工程编译和运行通过 |
+| 主 Unity 工程导入/脚本编译 | Unity **6000.3.17f1** batchmode，退出码 **0**，无 C# 编译错误；没有修改正式场景或 Player Settings |
+| `UNITY_IOS` 条件分支托管编译 | 独立验证项目 **0 errors**；仅编译证据，未作为 iOS Player/实体设备运行结果 |
+
+最终 C fixture 以 C11 `-Wall -Wextra -Werror` 编译（Android GNU11），16 个文件分别逐帧解码验证 60 帧、像素/方向、跳帧 PTS、排空、线程上限与独占输出；还验证 x265 未知参数和无效值实际返回 `EINVAL`。x264/x265 使用完整 VBV 缓冲预算检查所有连续包窗口，x264 MP4 简单场景另外验证 CBR filler。libvpx/libaom 的 CBR/VBR 均使用原生码率预算，允许复杂画面超出目标，不以测试误称硬上限。详见 [NativeSoftwareEncoderSmoke.c](NativeSoftwareEncoderSmoke.c)。
+
+本轮 FFmpeg 软件输出与以前 MPEG4-only 记录不同，托管包装器同时调整：H.264 CBR 可用于 MP4；checked x265 支持 strict-cbr；VP9/AV1 支持明确单次 VBR/CBR；worker 设置限制在 codec 可接受范围。两个原生补丁不改变公开 ABI。五个 WSL 与五个 Apple 目标的 decoder/hwaccel 名称集合与旧库逐项一致。
+
+最终检查还修复 iOS 硬件身份边界：固定 VideoToolbox 包装器无法检查硬件独占选择，iOS Player 现在明确公开回退原因并使用同格式软件 encoder。macOS/EditorOSX 与其他平台选择顺序保留。使用独立测试项目 `-p:DefineConstants=UNITY_IOS` 编译该分支，未声称在实体设备运行过；日志为 `ios-managed-compile.log`。
+
+```powershell
+python Tools/FFmpeg/verify-artifacts.py
+dotnet run --project Tools/Tests/FFmpegValidation/FFmpegValidation.csproj --no-restore -v:q -- `
+  Assets/Plugins/MajdataPlay/FFmpeg/Native/Windows/x86_64 `
+  Tools/Tests/FFmpegValidation/.work/full-software-validation --encode-software
+./Tools/Tests/FFmpegValidation/run-unity.ps1 -Backend Mono -Architecture x64 -Graphics d3d11 `
+  -TestCameraCapture -CaptureFormat H264 -CaptureRateControl CBR `
+  -NativeDirectory Tools/FFmpeg/.build/full-encoding-ready/Windows/x86_64 `
+  -WorkDirectory Tools/Tests/FFmpegValidation/.work/full-encoding-camera-final
+./Tools/Tests/FFmpegValidation/run-unity.ps1 -Backend IL2CPP -Architecture x64 -Graphics d3d11 `
+  -TestCameraCapture -CaptureFormat H264 -CaptureRateControl CBR `
+  -NativeDirectory Tools/FFmpeg/.build/full-encoding-ready/Windows/x86_64 `
+  -WorkDirectory Tools/Tests/FFmpegValidation/.work/full-encoding-camera-final
+```
+
+实际 Windows 托管运行使用已校验 ready 路径；正式替换后所有原生字节与 ready 相同，并在正式目录运行全矩阵 artifact verifier。原生矩阵的构建和运行命令保留于忽略的 `.build/compile-full-software-smokes.py`、`.build/full-encoding-20261005/run-windows-software-final.ps1`、`run-android-software.ps1`，Apple 命令随交付 evidence 保存。最终原始日志位于 `Tools/FFmpeg/.build/full-encoding-20261005/*-final.log`、`*-profile-verify.log`、`full-five-artifact-verify.log`、`formal-artifact-verify.log`；Apple 为 `.build/apple-full-encoding-ready-20261005/evidence`。Unity 报告位于 `.work/full-encoding-camera-final/x64-{Mono,IL2CPP}/d3d11-camera-builtin-software-H264-CBR.txt` 及对应录制/时序文件。
+
+macOS x64、实体 iOS ARM64、iOS x64 simulator 仅编译/完整链接验证，运行**未验证**。本轮未验证 Android/Apple Unity Camera、Linux 硬件录制、NVIDIA GPU、其他分辨率的实时性能或完整发布包；不能从跨平台原生短 fixture 推断这些层已通过。
+
+主工程 batch import 自动清空十处动态 TMP 字体缓存；这些文件在本轮开始和 import 前均干净、没有暂存改动，已保留清空版本备份并仅恢复这十处任务生成变化。用户原有 `FFmpegTest.unity` 改动保留；全局 `git diff --check` 仍报告该原有场景第 218 行空白，本轮范围的 diff-check 通过。
+
+## 2026-10-05（较早）：Camera 暂停、帧率差异与自定义 Inspector
+
+本轮修改 Camera 组件的暂停/恢复生命周期，添加 `FFmpegCameraCapturerEditor`；使用现有正式 Windows x64 原生库，没有修改原生 ABI、插件、子模块指针、主工程场景或 Player Settings。Unity 使用 **6000.3.17f1**，图形 API 为 D3D11，实际硬件编码器为 RX 580 的 `h264_amf`。
+
+| 验证 | 结果 |
+| --- | --- |
+| `.NET 9 --encode-hardware` | **838 assertions PASS**；编译更新后的 Runtime，真实 MPEG4 软件 CBR/VBR、H.264 AMF 硬件 CBR/VBR 与后台会话回归 |
+| Windows x64 Mono / Built-in / MPEG4 VBR | **415 checks PASS**；真实 Camera 渲染、GPU 回读、暂停/恢复、停止/取消/源销毁及解码 PTS |
+| Windows x64 Mono / URP Stack / MPEG4 VBR | **540 checks PASS**；同上，加最终 Overlay 像素与暂停期间显示输出切换到显式 RenderTexture、渲染错误日志检查 |
+| Windows x64 Mono / URP Stack / H.264 AMF CBR | **544 checks PASS**；同一已构建 Player 实际硬件编码，包含暂停与高/低配置帧率的 PTS 检查，禁止软件回退 |
+| 隔离 Editor Play Mode / 生产 CustomEditor | **14 checks PASS**；真实 **215 Layout / 215 Repaint**，单对象录制/暂停/停止状态、Pause/Resume handler、多选与 FPS 采样；提交约 **31.13 FPS**，游戏约 **52.53 FPS**，短窗口提交速率可受队列追赶影响 |
+
+三种 Player 录制的暂停恢复有效时长均约 **0.80 秒**，解码 PTS 为 **0..0.8**，最大相邻间隔为 **1/30 秒**，较长暂停未写入视频时间。控制源渲染时，配置 120 FPS 得到 Built-in **22 renders / 22 frames**、URP 软件和硬件各 **20 / 20**，首末 PTS 跨度约 **1.47 秒**；配置 5 FPS 时分别从 **38 / 34 / 35** 次源渲染得到 **8** 帧，PTS 为 **0..1.4**。结果验证录制帧率作为采样上限/时间基准，没有重复补帧，也没有把慢源画面压缩成短视频。
+
+暂停测试等待真实 GPU/队列/编码 reservation 全部释放后再检查不新增帧，不假设固定 GPU 延迟；还验证立即重复暂停/恢复保持 PTS 单调，暂停时停止正常收尾，暂停后取消不能立即恢复，源 Camera 销毁会关闭会话。CBR 身份和 PTS 通过不表示所有缺帧场景都达到目标码率；本轮短窗口未增加恒定填充断言。
+
+```powershell
+dotnet run --project Tools/Tests/FFmpegValidation/FFmpegValidation.csproj --no-restore -v:q -- `
+  Assets/Plugins/MajdataPlay/FFmpeg/Native/Windows/x86_64 `
+  Tools/Tests/FFmpegValidation/.work/encoding-capturer-editor --encode-hardware
+./Tools/Tests/FFmpegValidation/run-unity.ps1 -Backend Mono -Architecture x64 -Graphics d3d11 `
+  -TestCameraCapture -WorkDirectory Tools/Tests/FFmpegValidation/.work/camera-builtin
+./Tools/Tests/FFmpegValidation/run-unity.ps1 -Backend Mono -Architecture x64 -Graphics d3d11 `
+  -CaptureUrp -WorkDirectory Tools/Tests/FFmpegValidation/.work/camera-urp
+./Tools/Tests/FFmpegValidation/run-unity.ps1 -Backend Mono -Architecture x64 -Graphics d3d11 `
+  -CaptureUrp -CaptureHardware -SkipBuild -WorkDirectory Tools/Tests/FFmpegValidation/.work/camera-urp
+./Tools/Tests/FFmpegValidation/run-camera-editor.ps1
+```
+
+Player 报告、完整日志、实际编码信息和 `.timing.txt` 分别位于 `.work/camera-builtin/x64-Mono/d3d11-camera-builtin-software.*`、`.work/camera-urp/x64-Mono/d3d11-camera-urp-{software,hardware}.*`。Inspector 最终报告和日志位于 `.work/camera-builtin/inspector/camera-inspector.{txt,log}`。初始化失败尝试也保留：首次为 Unity Search 索引启动异常；后续为测试窗口恢复把 nullable error 字段变为空串造成的误判，已在 fixture 初始化时重置字段。日志监听限定实际 GUI/Camera 渲染及产品/fixture 调用栈，没有把 Unity 全局后台服务状态当成录制验收。
+
+Inspector 开始/停止通过 runtime API，文件选择窗口与鼠标按钮点击未自动化；异步观察器和选择切换生命周期由源码审查覆盖。主工程场景/手动交互、此次暂停行为在 x86、IL2CPP、Linux、Android、macOS、iOS 和其他 GPU/API 上**未验证**；不能把此前原生库矩阵或本轮编译结果外推为这些运行验证通过。
+
+结束时工作区另出现十处 TMP 字体资产改动，本轮未编辑或回退这些无关文件。
+
 ## 2026-10-05：各平台正式原生插件更新后的复验
 
 本轮重建现有十个 FFmpeg 目标，八套正式插件已更新，两个 iOS 模拟器包独立保存。FFmpeg n9.0.1 ABI、公开绑定头文件和 136 个既有 `.meta` 保持不变；完整工具链、录制入口、许可证及平台结果见 [构建记录](../../FFmpeg/BUILD-RESULTS.md) 与 [Apple 记录](../../FFmpeg/APPLE-RESULTS.md)。下方较早的隔离录制构建与播放专用库记录是历史结果。

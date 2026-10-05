@@ -8,9 +8,9 @@
 
 本文后续统计均为 **解码**，不能当作编码能力清单。2026-10-05 已更新全部平台/架构的正式原生插件及两个独立 iOS 模拟器包，包含下述录制 encoder/muxer，可供 `FFmpegCameraCapturer` 使用；构建和实测范围见 [构建记录](BUILD-RESULTS.md) 与 [Apple 记录](APPLE-RESULTS.md)。历史播放专用库禁用了全部 encoder/muxer，仍需按 [构建说明](README.md#配置与输出) 重建才能录制。
 
-当前交付的窄录制配置提供全部平台的 `mpeg4` 软件 CBR/VBR 编码和 MOV/MP4/MKV/WebM/AVI 封装；Windows x86/x64 提供 NVENC/AMF H.264/HEVC/AV1，Linux x64 提供 NVENC H.264/HEVC/AV1 与 VAAPI H.264/HEVC/VP9/AV1，Apple 提供 H.264 VideoToolbox。编码格式与容器必须兼容；WebM 可封装 VP9/AV1，不能封装 MPEG-4/H.264。编译入口不等于相应设备支持。
+录制构建配置提供全部平台的 `libx264`（H.264）、`libx265`（HEVC/H.265）、`libvpx-vp9`（VP9）、`libaom-av1`（AV1）、`mpeg4` 软件 CBR/VBR 编码和 MOV/MP4/MKV/WebM/AVI 封装；Windows x86/x64 提供 NVENC/AMF H.264/HEVC/AV1，Linux x64 提供 NVENC H.264/HEVC/AV1 与 VAAPI H.264/HEVC/VP9/AV1，Apple 提供 H.264 VideoToolbox。编码格式与容器必须兼容；WebM 可封装 VP9/AV1，不能封装 MPEG-4/H.264。编译入口不等于相应设备支持。
 
-该配置没有加入 x264/x265/libvpx/libaom；只有 `mpeg4` 可作为全部目标共有的软件 encoder，现有 H.264/HEVC/VP9/AV1 decoder 无法用于软件编码。硬件偏好只允许同格式的软件回退，缺少相应软件入口时报告失败。Android MediaCodec、Windows MediaFoundation、HEVC VideoToolbox 暂不由组件选取，因为固定 FFmpeg 包装器对所请求最大码率或模式的配置缺少完整的可检查结果。
+四个软件编码依赖静态链接进 avcodec；iOS 同样包含其静态对象。为保持已有解码矩阵，没有启用 libvpx/libaom 的 FFmpeg 外部 decoder。硬件偏好只允许同格式的软件回退。Android MediaCodec、Windows MediaFoundation、HEVC VideoToolbox 暂不由组件选取，因为固定 FFmpeg 包装器对所请求最大码率或模式的配置缺少完整的可检查结果。iOS Player 的 VideoToolbox 包装器无法验证硬件独占选择，组件明确回退到同格式软件编码并公开原因，避免误报为硬件；macOS 的 H.264 VideoToolbox 选择仍可强制硬件。
 
 NVENC 使用固定 NVIDIA Codec SDK 12.1 头文件，不安装 CUDA SDK；需要支持对应编码格式的 NVIDIA GPU 与 Windows 531.61 / Linux 530.41.03 或更新驱动。它与既有 D3D11VA/D3D12VA/Vulkan **解码**后端是独立能力。本次构建保持 NVDEC/CUVID 禁用，不能据新增 NVENC 声称扩展了本页硬解矩阵。
 Windows AMF 使用固定 v1.5.2 头文件，动态加载由已有 AMD 显卡驱动提供的 AMF runtime；初始化成功与否取决于 runtime 版本、GPU、格式和模式。录制器要求包含 [码率属性检查补丁](patches/amf-rate-control.patch) 且能力标记匹配的原生构建；旧 AMF 库即使能打开，也会因无法确认驱动接受所需配置而被拒绝。构建维持 AMF decoder 禁用，新增 AMF encoder 也不代表本页硬解矩阵变化。
@@ -74,7 +74,7 @@ Windows AMF 使用固定 v1.5.2 头文件，动态加载由已有 AMD 显卡驱�
 | FFV1、HuffYUV、Ut Video | `ffv1`、`huffyuv`、`utvideo` | 无 |
 | Theora、AVS1-P2 | `theora`、`cavs` | 无 |
 
-AV1 原生 `av1` 和软件 `libdav1d` 不能互换解释。播放器在软件模式显式选择 `libdav1d`；硬件模式单独选择 `av1` 或 `av1_mediacodec`。代码兼容 `libaom-av1` 作为替代软件实现，但**当前交付库没有编入 `libaom-av1`**。
+AV1 原生 `av1` 和软件 `libdav1d` 不能互换解释。播放器在软件模式显式选择 `libdav1d`；硬件模式单独选择 `av1` 或 `av1_mediacodec`。代码兼容 `libaom-av1` 作为替代软件 decoder，但**当前构建只启用 libaom 编码器，不启用其 FFmpeg decoder**。
 
 ## 视频硬件解码完整矩阵
 
@@ -166,7 +166,7 @@ Vulkan Video 还要求本项目所需的 Vulkan 版本、逐编码 video decode 
 | --- | --- |
 | PNG、APNG、OpenEXR、ZMBV、TechSmith TSCC、ZLIB 视频 | 没有注册相应 decoder；`tscc2` 是另一项已存在的解码器 |
 | JPEG XL、JPEG XS、AVS2、AVS3、EVC、LC3 | 没有相应 decoder；即使有 parser 或 demuxer，也不能据此解码 |
-| `libaom-av1`、`libvpx`、`libjxl` 等外部实现 | 当前唯一外部编解码库是 dav1d；原生 VP8/VP9 等软件实现仍存在 |
+| `libaom-av1`、`libvpx`、`libjxl` 等外部解码实现 | 当前外部软件 decoder 是 dav1d；libaom/libvpx 只用于编码，原生 VP8/VP9 等软件解码仍存在 |
 | CamStudio，公开名称 `camstudio`，配置名称 `cscd` | LZO 路径存在；本构建无 zlib，zlib 压缩变体不可用 |
 | TIFF | decoder 存在；本构建无 zlib/LZMA，Deflate/LZMA 压缩变体不可用 |
 | Sorenson SVQ3 | decoder 存在；需要 zlib 解压的压缩水印变体不可用 |

@@ -2,17 +2,17 @@
   "target": "win-x64",
   "bridgeAbi": 4,
   "host": "Linux-6.18.40.1-microsoft-standard-WSL2-x86_64-with-glibc2.39",
-  "builtUtc": "2026-10-05T08:44:25.566537+00:00",
+  "builtUtc": "2026-10-05T12:41:14.687692+00:00",
   "cmake": [
     "/usr/bin/cmake",
     "-S",
     "/mnt/c/Users/LeZi/source/repos/LingFeng-bbben/MajdataPlay/Tools/FFmpeg/Native",
     "-B",
-    "/tmp/majdata-recording-windows/bridge-win-x64-763698519f23",
+    "/home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005/bridge-win-x64-0b1426241fe9",
     "-DCMAKE_BUILD_TYPE=Release",
-    "-DFFMPEG_ROOT=/tmp/majdata-recording-windows/install/win-x64",
-    "-DFFU_VULKAN_HEADERS=/tmp/majdata-recording-windows/toolchains/Vulkan-Headers-vulkan-sdk-1.4.328.1/include",
-    "-DFFU_D3D12_HEADERS=/tmp/majdata-recording-windows/toolchains/d3d12-header-overlay",
+    "-DFFMPEG_ROOT=/home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005/install/win-x64",
+    "-DFFU_VULKAN_HEADERS=/home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005/toolchains/Vulkan-Headers-vulkan-sdk-1.4.328.1/include",
+    "-DFFU_D3D12_HEADERS=/home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005/toolchains/d3d12-header-overlay",
     "-DCMAKE_SYSTEM_NAME=Windows",
     "-DCMAKE_C_COMPILER=/usr/bin/x86_64-w64-mingw32-gcc-win32",
     "-DCMAKE_CXX_COMPILER=/usr/bin/x86_64-w64-mingw32-g++-win32",
@@ -26,7 +26,7 @@
   "files": [
     {
       "file": "FFmpegUnityBridge.dll",
-      "sha256": "b7190f59d61cf69a94113066da37bb0f87e2ff4a6481f01e44e643aa684cdba1",
+      "sha256": "2c1f8753f5ee1c5ac78604d51a11f39982327933ea7a52153689e122b4c37da5",
       "bytes": 721131
     }
   ],

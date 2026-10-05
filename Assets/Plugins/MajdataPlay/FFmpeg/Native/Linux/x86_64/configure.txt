@@ -1,9 +1,9 @@
-install prefix            /tmp/majdata-native-linux-recording/install/linux-x64
-source path               /tmp/majdata-native-linux-recording/source
+install prefix            /home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005/install/linux-x64
+source path               ./src
 C compiler                cc
 C library                 glibc
 ARCH                      x86 (generic)
-version string suffix     MajdataPlay-AMF-RC-v1-c0604b924b6a
+version string suffix     MajdataPlay-AMF-RC-v1-c0604b924b6a_MajdataPlay-X265-Params-v1-5b457330f94a
 big-endian                no
 runtime cpu detection     yes
 standalone assembly       yes
@@ -43,7 +43,8 @@ experimental features     yes
 xmllint enabled           no
 
 External libraries:
-iconv                   libdav1d
+iconv                   libdav1d                libx264
+libaom                  libvpx                  libx265
 
 External libraries providing hardware acceleration:
 cuda                    libdrm                  vaapi
@@ -219,9 +220,11 @@ escape130               pcm_u8
 evrc                    pcm_vidc
 
 Enabled encoders:
-av1_nvenc               h264_nvenc              hevc_vaapi
-av1_vaapi               h264_vaapi              mpeg4
-h263                    hevc_nvenc              vp9_vaapi
+av1_nvenc               hevc_nvenc              libx265
+av1_vaapi               hevc_vaapi              mpeg4
+h263                    libaom_av1              vp9_vaapi
+h264_nvenc              libvpx_vp9
+h264_vaapi              libx264
 
 Enabled hwaccels:
 av1_vaapi               hevc_vaapi              vc1_vaapi
@@ -418,6 +421,22 @@ Enabled indevs:
 
 Enabled outdevs:
 
-License: LGPL version 2.1 or later
+License: GPL version 3 or later
 
 WARNING: spirv-headers not found, swscale SPIR-V backend unavailable
+config.asm is unchanged
+config_components.h is unchanged
+config_components.asm is unchanged
+checkasm_config_generated.h is unchanged
+checkasm_header_config_generated.h is unchanged
+checkasm_config_generated.asm is unchanged
+libavutil/avconfig.h is unchanged
+libavfilter/filter_list.c is unchanged
+libavcodec/codec_list.c is unchanged
+libavcodec/parser_list.c is unchanged
+libavcodec/bsf_list.c is unchanged
+libavformat/demuxer_list.c is unchanged
+libavformat/muxer_list.c is unchanged
+libavdevice/indev_list.c is unchanged
+libavdevice/outdev_list.c is unchanged
+libavformat/protocol_list.c is unchanged

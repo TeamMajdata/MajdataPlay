@@ -2,15 +2,15 @@
   "target": "ios-arm64",
   "bridgeAbi": 2,
   "host": "macOS-27.0.1-arm64-arm-64bit-Mach-O",
-  "builtUtc": "2026-10-05T08:43:19.141489+00:00",
+  "builtUtc": "2026-10-05T12:30:26.136544+00:00",
   "cmake": [
     "/opt/homebrew/Cellar/cmake/4.4.2/bin/cmake",
     "-S",
-    "/Users/codex/codex-work/majdata-recording-apple-20261005/Tools/FFmpeg/Native",
+    "/Users/codex/codex-work/majdata-full-encoding-apple-20261005/Tools/FFmpeg/Native",
     "-B",
-    "/Users/codex/codex-work/majdata-recording-apple-20261005/Tools/FFmpeg/.build/bridge-ios-arm64-aac5d136b689",
+    "/Users/codex/codex-work/majdata-full-encoding-apple-20261005/Tools/FFmpeg/.build/bridge-ios-arm64-a6ba6412635f",
     "-DCMAKE_BUILD_TYPE=Release",
-    "-DFFMPEG_ROOT=/Users/codex/codex-work/majdata-recording-apple-20261005/Tools/FFmpeg/.build/install/ios-arm64",
+    "-DFFMPEG_ROOT=/Users/codex/codex-work/majdata-full-encoding-apple-20261005/Tools/FFmpeg/.build/install/ios-arm64",
     "-G",
     "Ninja",
     "-DCMAKE_MAKE_PROGRAM=/opt/homebrew/Cellar/ninja/1.13.2/bin/ninja",
@@ -18,13 +18,13 @@
     "-DCMAKE_OSX_ARCHITECTURES=arm64",
     "-DCMAKE_OSX_SYSROOT=iphoneos",
     "-DCMAKE_OSX_DEPLOYMENT_TARGET=15.0",
-    "-DAVUTIL_INCLUDE_DIR=/Users/codex/codex-work/majdata-recording-apple-20261005/Tools/FFmpeg/.build/install/ios-arm64/include",
-    "-DAVUTIL_LIBRARY=/Users/codex/codex-work/majdata-recording-apple-20261005/Tools/FFmpeg/.build/install/ios-arm64/lib/libavutil.a"
+    "-DAVUTIL_INCLUDE_DIR=/Users/codex/codex-work/majdata-full-encoding-apple-20261005/Tools/FFmpeg/.build/install/ios-arm64/include",
+    "-DAVUTIL_LIBRARY=/Users/codex/codex-work/majdata-full-encoding-apple-20261005/Tools/FFmpeg/.build/install/ios-arm64/lib/libavutil.a"
   ],
   "files": [
     {
       "file": "libFFmpegUnityBridge.a",
-      "sha256": "320ac3a95e45a13d56da79cabc1b75c98817b434b040dff49deb9571b9b26a12",
+      "sha256": "e97fdff921275d5f8d82053a7e20889ba692eda2262f17313df4d9f0c27f1504",
       "bytes": 18264
     }
   ],

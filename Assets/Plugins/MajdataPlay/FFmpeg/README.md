@@ -138,30 +138,42 @@ capturer.Options = new EncoderOptions
     RateControlMode = VideoRateControlMode.VBR
 };
 await capturer.StartRecordingAsync(outputPath, cancellationToken);
+// Pause keeps the encoder open and excludes the paused interval from the video.
+capturer.PauseRecording();
+capturer.ResumeRecording();
 // Later, await finalization before reading or moving the file.
 await capturer.StopRecordingAsync();
 ```
 
 所有组件控制 API 在 Unity 主线程调用。编码与封装在一个后台线程执行，GPU 回读和编码共用 1–8 个固定槽位，默认 3 个；容量包含正在回读、排队和正在编码的帧。编码过慢时丢帧，`DroppedFrames` 记录省略的帧率间隔，PTS 保留实际单调时钟间隔，不压缩录制时间；不通过重复帧补齐 CFR。录制尺寸固定且必须为偶数，支持缩放 Camera 输出。需要异步 GPU 回读支持；捕获是 SDR sRGB RGBA8，转换为 limited-range YUV，矩阵/原色为 BT.709，transfer metadata 为 sRGB，没有 HDR tone mapping。
 
+`FrameRate` 是采样上限和时间戳的时间基准。游戏 120 FPS、录制 30 FPS 时，约每四次 Camera 渲染采一帧；游戏 30 FPS、录制 60 FPS 时，只能获得约 30 个真实画面/秒，相邻 PTS 跨两个目标时间槽，视频保持实际经过时间。低帧率、渲染卡顿或缓冲池满会降低流畅度；CBR/VBR 是编码器采用的控制模式，缺帧和画面复杂度仍可能使实际码率偏离目标，应观察 `CurrentBitRate`。
+
+`PauseRecording()` 停止新采集并冻结录制时钟，保留同一个输出文件、编码器和已提交缓冲区。暂停前的 GPU 回读与编码仍可排空，因此刚暂停时统计可能继续变化；恢复不把暂停时长计入视频 PTS 或丢帧计数。录制时钟不受 `Time.timeScale` 影响。Unity Editor 工具栏的 Pause 不会自动调用录制暂停，会留下真实时间间隔；需要排除这段时间时先使用 capturer Inspector 的 Pause。
+
+`FFmpegCameraCapturerEditor` 在单选场景组件的 Play Mode Inspector 中提供 Start Recording、Pause/Resume 和 Stop Recording。开始时选择新文件路径，停止时异步等待排空和文件尾写入。面板显示实际编码器、软件/硬件、格式、CBR/VBR、当前/目标/最大码率、软件线程数、尺寸、提交帧数、丢帧、时长、输出路径及错误/回退原因；配置修改在下次录制生效。帧率分别显示下一次配置、当前会话时间基准、成功提交帧率和游戏帧率，后两者使用约 0.5 秒窗口估算；队列追赶时提交速率可能短暂高于目标。当前码率按最近约 1 秒媒体时间计算，暂停保留读数，不表示暂停期间仍持续产生该墙钟吞吐量。多选仅编辑配置，Prefab 资产不提供录制控制。
+
 `Options` 在开始时复制。修改选项、Camera、缓冲容量或 `ReadbackOrientation` 在下次录制应用；当前编码器身份与模式不会随偏好变化。`ReadbackOrientation.Automatic` 按 Unity Blit 捕获纹理的 bottom-first 行序解释；自定义渲染管线输出方向不同时可以明确选择 `TopFirst` / `BottomFirst`。
 
 | API | 语义 |
 | --- | --- |
 | `StartRecordingAsync(path, token)` | 创建新的本地文件，扩展名选择容器；已有文件不覆盖；完成时已打开编码器并开始捕获 |
+| `PauseRecording()`, `ResumeRecording()` | 暂停/恢复当前会话；暂停时长不进入视频；不在对应状态时不做操作，失效或取消的会话不会恢复 |
 | `StopRecording()` | 停止接收新帧，异步排空，不阻塞 Unity 主线程 |
 | `StopRecordingAsync()` | 等待 GPU 请求、编码延迟包、文件尾和资源释放；编码/写入失败会抛出异常 |
-| `State`, `IsRecording`, `OutputPath`, `LastError` | 生命周期和诊断 |
+| `State`, `IsRecording`, `IsPaused`, `CanStartRecording`, `OutputPath`, `LastError` | 生命周期和诊断；CanStartRecording 表示组件启用且旧会话/GPU 资源已关闭，不验证设置和路径 |
 | `EncoderName`, `EncoderType`, `RateControlMode` | 实际 AVCodec、实际软件/硬件后端、实际 CBR/VBR；初始化前为 null |
 | `EncodingFormat`, `Width`, `Height`, `FrameRate` | 当前或最近会话的固定录制格式/尺寸/时间基准 |
 | `BitRate`, `MaximumBitRate`, `SoftwareThreadCount` | 会话目标、有效最大码率（bit/s）、实际 FFmpeg 软件 codec worker 数；硬件为 0 |
 | `CurrentBitRate`, `BytesWritten`, `EncodedFrames` | 最近约 1 秒媒体时间的视频压缩码率、压缩字节数、成功提交帧数；不包含容器开销 |
-| `HardwareFallbackReason`, `DroppedFrames`, `TimeSeconds` | 硬件偏好回退原因、丢帧计数、捕获持续时间 |
+| `HardwareFallbackReason`, `DroppedFrames`, `TimeSeconds` | 硬件偏好回退原因、丢帧计数、捕获持续时间（排除初始化、录制暂停和停止排空） |
 | `Started`, `Stopped`, `ErrorReceived` | 主线程事件；Stopped 表示资源关闭，错误状态需同时检查 LastError |
 
-CBR 设置目标码率以及相同的 min/max；VBR 使用独立目标和最大码率，后端通过约 1 秒 VBV 缓冲限制，单帧和短时窗口仍会波动。软件线程数限制 FFmpeg codec worker，不包含应用采集线程和驱动的辅助线程。硬件偏好仅回退到**同格式**的软件实现，不会偷偷改换编码格式；不支持请求的模式/码率约束时明确失败。
+CBR 设置目标码率以及相同的 min/max；VBR 使用独立目标和最大码率。VBV 后端通过约 1 秒缓冲限制，单帧和短时窗口仍会波动；libvpx/libaom 的 CBR 和单遍 VBR 均使用原生码率预算，复杂画面可能超出预算，也不保证低复杂度画面填满目标码率，`MaximumBitRate` 不表示每帧或瞬时负载硬上限。软件线程数限制 FFmpeg codec worker，不包含应用采集线程和驱动的辅助线程。硬件偏好仅回退到**同格式**的软件实现，不会偷偷改换编码格式；不支持请求的模式/码率约束时明确失败。
 
-当前交付的各平台原生库已包含录制 encoder 和 muxer，构建配置及 NVENC/AMF/VAAPI/VideoToolbox 条件见 [Tools/FFmpeg](../../../../Tools/FFmpeg/README.md)。全部平台的默认软件路径是 MPEG-4 Part 2（支持 CBR/VBR）；H.264/HEVC/VP9/AV1 的可用性取决于原生构建与设备。当前窄构建没有加入 x264/x265/libvpx/libaom 软件编码库，选择这些格式的软件模式会明确报缺少实现。历史播放专用库关闭了所有 encoder/muxer，需要重建相应平台并重启已加载旧库的 Editor/Player。AMF 还必须包含构建脚本应用的码率检查补丁：检查驱动设置返回值和初始化后的关键参数，原生配置中的能力标记必须匹配当前补丁；旧未检查的 AMF 实现会明确拒绝。
+各平台构建配置包含 `libx264`（H.264）、`libx265`（HEVC/H.265）、`libvpx-vp9`（VP9）、`libaom-av1`（AV1）和 MPEG-4 Part 2 软件编码，以及录制 muxer；均支持选择 CBR/VBR。H.264 CBR 可以写入 MP4，x265 打开时检查参数是否被接受。构建配置、依赖许可及 NVENC/AMF/VAAPI/VideoToolbox 条件见 [Tools/FFmpeg](../../../../Tools/FFmpeg/README.md)。启用 x264/x265 后，FFmpeg 产物使用 GPLv3 或后续版本许可。历史播放专用或仅 MPEG4 的原生库仍需要替换，并重启已加载旧库的 Editor/Player。AMF 必须包含构建脚本应用的码率检查补丁，x265 必须包含参数检查补丁：原生配置中的能力标记必须匹配当前补丁；旧未检查的实现会明确拒绝。
+
+iOS Player 的固定 VideoToolbox 包装器不能检查硬件独占选择，硬件偏好会明确回退到同格式软件编码并设置 `HardwareFallbackReason`，避免把系统选择结果误报为硬件。macOS 的 H.264 VideoToolbox 仍可强制硬件。
 
 取消 token 作用于整个录制会话；取消或 I/O 错误可能留下未完成文件。正常停止、禁用和销毁会停止新捕获，并保留已提交 GPU 请求所需纹理直到回读结束，再释放后台资源。旧 GPU 请求尚未释放时会拒绝重启，以免连续取消累积多份缓冲池；先等待 `StopRecordingAsync()`，取消时也需等待该 Task 结束并处理取消异常。需要确保文件可播放时显式等待正常的 `StopRecordingAsync()`，不要在主线程同步等待 Task。硬件编码也经 CPU RGBA 回读/转换/上传，不能把 Hardware 状态解释为 GPU 零拷贝录制。
 
