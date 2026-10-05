@@ -1,10 +1,13 @@
+#nullable enable
 using System;
 using System.IO;
+using System.Diagnostics.CodeAnalysis;
 using System.Threading;
 using System.Threading.Tasks;
 using MajdataPlay.FFmpeg.Internal;
 using MajdataPlay.Diagnostics;
 using UnityEngine;
+using UnityEngine.Serialization;
 
 namespace MajdataPlay.FFmpeg
 {
@@ -52,75 +55,121 @@ namespace MajdataPlay.FFmpeg
     [DisallowMultipleComponent, AddComponentMenu("Video/FFmpeg Video Player")]
     public sealed partial class FFmpegVideoPlayer : MonoBehaviour
     {
-        [SerializeField, Tooltip("Local path or FFmpeg-supported URL. Android packaged StreamingAssets must first be extracted.")]
-        string _source = "";
-        [SerializeField] bool _playOnAwake;
-        [SerializeField] bool _loop;
-        [SerializeField, Range(0.0625f, 16)] float _playbackRate = 1;
-        [SerializeField, Range(1, 8)] int _bufferedFrameLimit = 3;
-        [SerializeField, Min(1)] int _ioTimeoutSeconds = 15;
+        /// <summary>Stores the path or URL of the video to open.</summary>
+        [SerializeField, FormerlySerializedAs("Source"), Tooltip("Local path or FFmpeg-supported URL. Android packaged StreamingAssets must first be extracted.")]
+        private string _source = "";
+        /// <summary>Controls whether playback begins when the component awakens.</summary>
+        [SerializeField, FormerlySerializedAs("PlayOnAwake")]
+        private bool _playOnAwake;
+        /// <summary>Controls whether playback repeats after reaching the end.</summary>
+        [SerializeField, FormerlySerializedAs("Loop")]
+        private bool _loop;
+        /// <summary>Stores the requested playback rate.</summary>
+        [SerializeField, FormerlySerializedAs("PlaybackRate"), Range(0.0625f, 16)]
+        private float _playbackRate = 1;
+        /// <summary>Limits the number of decoded frames buffered for presentation.</summary>
+        [SerializeField, FormerlySerializedAs("BufferedFrameLimit"), Range(1, 8)]
+        private int _bufferedFrameLimit = 3;
+        /// <summary>Sets the timeout for blocking input operations in seconds.</summary>
+        [SerializeField, FormerlySerializedAs("IOTimeoutSeconds"), Min(1)]
+        private int _ioTimeoutSeconds = 15;
         // Retain the serialized bool so existing scenes keep their decoder preference.
-        [SerializeField, HideInInspector]
-        bool _preferHardwareDecoding = true;
-        [SerializeField, Tooltip("Prefer native GPU texture sharing. If unavailable, retain hardware decoding with CPU upload when supported. Applies when opening media.")]
-        bool _preferNativeTextures = true;
-        [SerializeField, Tooltip("Require native GPU frames. Unsupported codecs/devices report an error instead of uploading CPU pixels. Applies when opening media.")]
-        bool _requireHardwareDecoding;
-        [SerializeField] Renderer _targetRenderer;
-        [SerializeField] string _textureProperty = "_MainTex";
-        [SerializeField, Tooltip("Optional output; otherwise use Texture or TextureChanged.")]
-        RenderTexture _targetTexture;
-
-        readonly PlaybackClock _clock = new PlaybackClock();
-        VideoDecodeSession _session;
-        VideoInfo _info;
-        Texture2D _uploadTexture;
-        Texture _texture;
-        MaterialPropertyBlock _materialProperties;
-        TaskCompletionSource<bool> _prepareCompletion, _seekCompletion;
-        CancellationToken _prepareCancellation;
-        bool _playWhenReady, _waitingForFrame, _prepared, _hardwareActive, _hardwareRequired, _hardwareCpuUploadAttempted, _stepRequested;
-        bool _platformBackendOnly;
-        string _reportedTransferMode;
-        VideoPlaybackState _afterSeek;
-        double _seekTarget, _lastFrameEnd;
-        long _frameNumber, _lastReportedTime = -1, _controlRevision;
-        int _mainThread;
-
+        /// <summary>Stores the preferred hardware decoding setting for existing scenes.</summary>
+        [SerializeField, FormerlySerializedAs("PreferHardwareDecoding"), HideInInspector]
+        private bool _preferHardwareDecoding = true;
+        /// <summary>Controls whether native GPU texture sharing is preferred.</summary>
+        [SerializeField, FormerlySerializedAs("PreferNativeTextures"), Tooltip("Prefer native GPU texture sharing. If unavailable, retain hardware decoding with CPU upload when supported. Applies when opening media.")]
+        private bool _preferNativeTextures = true;
+        /// <summary>Requires hardware frames that remain on the GPU.</summary>
+        [SerializeField, FormerlySerializedAs("RequireHardwareDecoding"), Tooltip("Require native GPU frames. Unsupported codecs/devices report an error instead of uploading CPU pixels. Applies when opening media.")]
+        private bool _requireHardwareDecoding;
+        /// <summary>Stores the renderer that receives the video texture.</summary>
+        [SerializeField, FormerlySerializedAs("TargetRenderer")]
+        private Renderer? _targetRenderer;
+        /// <summary>Stores the target material's texture property name.</summary>
+        [SerializeField, FormerlySerializedAs("TextureProperty")]
+        private string _textureProperty = "_MainTex";
+        /// <summary>Stores the optional destination render texture.</summary>
+        [SerializeField, FormerlySerializedAs("TargetTexture"), Tooltip("Optional output; otherwise use Texture or TextureChanged.")]
+        private RenderTexture? _targetTexture;
+        /// <summary>Tracks playback position using a monotonic time source.</summary>
+        private readonly PlaybackClock _clock = new PlaybackClock();
+        /// <summary>Owns the current background decoder, or null while closed.</summary>
+        private VideoDecodeSession? _session;
+        /// <summary>Caches the latest immutable media information snapshot.</summary>
+        private VideoInfo? _info;
+        /// <summary>Owns the reusable texture for CPU RGBA uploads.</summary>
+        private Texture2D? _uploadTexture;
+        /// <summary>References the current output texture, or null before presentation.</summary>
+        private Texture? _texture;
+        /// <summary>Reuses renderer property storage when assigning video textures.</summary>
+        private MaterialPropertyBlock? _materialProperties;
+        /// <summary>Complete the pending preparation and seek operations, respectively.</summary>
+        private TaskCompletionSource<bool>? _prepareCompletion, _seekCompletion;
+        /// <summary>Carries cancellation for the pending preparation operation.</summary>
+        private CancellationToken _prepareCancellation;
+        /// <summary>Track deferred playback, buffering, preparation, hardware selection, GPU requirements, attempted CPU fallback, and pending frame stepping, respectively.</summary>
+        private bool _playWhenReady, _waitingForFrame, _prepared, _hardwareActive, _hardwareRequired, _hardwareCpuUploadAttempted, _stepRequested;
+        /// <summary>Prevents retrying the preferred native backend after falling back to the platform backend.</summary>
+        private bool _platformBackendOnly;
+        /// <summary>Caches the last logged transfer mode to avoid per-frame log messages.</summary>
+        private string? _reportedTransferMode;
+        /// <summary>Stores the playback state to restore after seeking.</summary>
+        private VideoPlaybackState _afterSeek;
+        /// <summary>Store the requested seek position and the end of the last presented frame, in seconds.</summary>
+        private double _seekTarget, _lastFrameEnd;
+        /// <summary>Track the presentation counter, last reported millisecond position, and control revision used to reject stale callbacks.</summary>
+        private long _frameNumber, _lastReportedTime = -1, _controlRevision;
+        /// <summary>Identifies the Unity thread allowed to control this player.</summary>
+        private int _mainThread;
         /// <summary>Occurs when the first frame is presented; the argument is this player.</summary>
-        public event Action<FFmpegVideoPlayer> Prepared;
+        public event Action<FFmpegVideoPlayer>? Prepared;
         /// <summary>Occurs when playback starts or resumes through <see cref="Play()"/>; the argument is this player.</summary>
-        public event Action<FFmpegVideoPlayer> Started;
+        public event Action<FFmpegVideoPlayer>? Started;
         /// <summary>Occurs when prepared playback is paused; the argument is this player.</summary>
-        public event Action<FFmpegVideoPlayer> Paused;
+        public event Action<FFmpegVideoPlayer>? Paused;
         /// <summary>Occurs when stopping is requested; the argument is this player.</summary>
         /// <remarks>A seek back to the beginning may still be pending when the event is raised.</remarks>
-        public event Action<FFmpegVideoPlayer> Stopped;
+        public event Action<FFmpegVideoPlayer>? Stopped;
         /// <summary>Occurs at the end of playback, before a possible loop restart; the argument is this player.</summary>
-        public event Action<FFmpegVideoPlayer> EndReached;
+        public event Action<FFmpegVideoPlayer>? EndReached;
         /// <summary>Occurs when the latest seek finishes; the argument is this player.</summary>
-        public event Action<FFmpegVideoPlayer> SeekCompleted;
+        public event Action<FFmpegVideoPlayer>? SeekCompleted;
         /// <summary>Occurs when playback fails; arguments are this player and the error message.</summary>
-        public event Action<FFmpegVideoPlayer, string> ErrorReceived;
+        public event Action<FFmpegVideoPlayer, string>? ErrorReceived;
         /// <summary>Occurs when the output texture changes; arguments are this player and the new texture, or <see langword="null"/>.</summary>
         /// <remarks>The texture belongs to the player or the caller that supplied <see cref="TargetTexture"/>; listeners must not destroy it.</remarks>
-        public event Action<FFmpegVideoPlayer, Texture> TextureChanged;
+        public event Action<FFmpegVideoPlayer, Texture?>? TextureChanged;
         /// <summary>Occurs after presenting a frame; arguments are this player and a one-based presentation counter.</summary>
         /// <remarks>The counter resets on <see cref="Close"/> and is not the source video's frame index.</remarks>
-        public event Action<FFmpegVideoPlayer, long> FrameReady;
+        public event Action<FFmpegVideoPlayer, long>? FrameReady;
         /// <summary>Occurs when the reported position changes; arguments are this player and the position in milliseconds.</summary>
-        public event Action<FFmpegVideoPlayer, long> TimeChanged;
-
+        public event Action<FFmpegVideoPlayer, long>? TimeChanged;
         /// <summary>Gets the current playback state.</summary>
         public VideoPlaybackState State { get; private set; }
         /// <summary>Gets the last playback error message, or <see langword="null"/> if none has been reported since preparation began.</summary>
-        public string LastError { get; private set; }
+        public string? LastError { get; private set; }
+
         /// <summary>Gets or sets the local path or FFmpeg-supported URL to open.</summary>
         /// <remarks>Changing the value closes the current media. A null value clears the source.</remarks>
-        public string Url { get => _source; set { CheckThread(); if (_source != value) { Close(); _source = value ?? ""; } } }
+        [AllowNull]
+        public string Url
+        {
+            get => _source;
+            set
+            {
+                CheckThread();
+                if (_source != value)
+                {
+                    Close();
+                    _source = value ?? "";
+                }
+            }
+        }
+
         /// <summary>Gets the current output texture, or <see langword="null"/> when no frame is available.</summary>
         /// <remarks>Do not destroy this texture. Subscribe to <see cref="TextureChanged"/> to track replacements.</remarks>
-        public Texture Texture => _texture;
+        public Texture? Texture => _texture;
         /// <summary>Gets whether media has been prepared and remains open.</summary>
         public bool IsPrepared => _prepared;
         /// <summary>Gets whether playback is active, including temporary buffering.</summary>
@@ -162,19 +211,25 @@ namespace MajdataPlay.FFmpeg
         /// <remarks>Setting the position clamps it to the known timeline and completes asynchronously.</remarks>
         /// <exception cref="InvalidOperationException">The input is not prepared or seekable.</exception>
         /// <exception cref="ArgumentOutOfRangeException">The value is not finite.</exception>
-        public double TimeSeconds
-        {
-            get => ClampTime(_clock.Position);
-            set => BeginSeek(value, ContinueState());
-        }
+        public double TimeSeconds { get => ClampTime(_clock.Position); set => BeginSeek(value, ContinueState()); }
+
         /// <summary>Gets or seeks to the normalized playback position between zero and one.</summary>
         /// <remarks>The getter returns zero when duration is unknown. The setter clamps finite values to the valid range.</remarks>
         /// <exception cref="InvalidOperationException">Duration is unknown, or the input is not prepared or seekable.</exception>
         public float Position
         {
             get => LengthSeconds > 0 ? (float)(TimeSeconds / LengthSeconds) : 0;
-            set { if (LengthSeconds <= 0) throw new InvalidOperationException("This input has no known duration."); TimeSeconds = Mathf.Clamp01(value) * LengthSeconds; }
+            set
+            {
+                if (LengthSeconds <= 0)
+                {
+                    throw new InvalidOperationException("This input has no known duration.");
+                }
+
+                TimeSeconds = Mathf.Clamp01(value) * LengthSeconds;
+            }
         }
+
         /// <summary>Gets or sets the playback speed multiplier without changing the current position.</summary>
         /// <exception cref="ArgumentOutOfRangeException">The value is not finite or is outside the inclusive range 0.0625 to 16.</exception>
         public float Rate
@@ -182,13 +237,20 @@ namespace MajdataPlay.FFmpeg
             get => _playbackRate;
             set
             {
-                CheckThread(); _clock.Rate = value;
-                if (_playbackRate != value) MajDebug.LogDebug("FFmpeg", "[Player] Playback rate=" + value + ".");
+                CheckThread();
+                _clock.Rate = value;
+                if (_playbackRate != value)
+                {
+                    MajDebug.LogDebug("FFmpeg", "[Player] Playback rate=" + value + ".");
+                }
+
                 _playbackRate = value;
             }
         }
+
         /// <summary>Gets or sets whether seekable media restarts when playback reaches its end.</summary>
         public bool Loop { get => _loop; set => _loop = value; }
+
         /// <summary>Gets or sets the preferred decoder backend for the next media open.</summary>
         /// <remarks>Hardware preference permits CPU upload or software fallback unless <see cref="RequireHardwareDecoding"/> is enabled.</remarks>
         /// <exception cref="ArgumentOutOfRangeException">The value is not a defined decoder type.</exception>
@@ -198,10 +260,14 @@ namespace MajdataPlay.FFmpeg
             set
             {
                 if (value != VideoDecoderType.Hardware && value != VideoDecoderType.Software)
+                {
                     throw new ArgumentOutOfRangeException(nameof(value));
+                }
+
                 _preferHardwareDecoding = value == VideoDecoderType.Hardware;
             }
         }
+
         /// <summary>Gets or sets whether hardware decoding should prefer native GPU texture sharing on the next media open.</summary>
         /// <remarks>False requests CPU upload when hardware decoding is selected; <see cref="RequireHardwareDecoding"/> overrides this setting.</remarks>
         public bool PreferNativeTextures { get => _preferNativeTextures; set => _preferNativeTextures = value; }
@@ -210,23 +276,40 @@ namespace MajdataPlay.FFmpeg
         public bool RequireHardwareDecoding { get => _requireHardwareDecoding; set => _requireHardwareDecoding = value; }
         /// <summary>Gets or sets an optional caller-owned render texture to receive presented frames.</summary>
         /// <remarks>Changes take effect on the next presented frame. The player does not destroy this texture.</remarks>
-        public RenderTexture TargetTexture { get => _targetTexture; set => _targetTexture = value; }
+        public RenderTexture? TargetTexture { get => _targetTexture; set => _targetTexture = value; }
         /// <summary>Gets the current frame transfer description or a pending recovery description.</summary>
         /// <remarks>The last description remains available after closing media; read it after preparation to identify the active path.</remarks>
         public string TransferMode { get; private set; } = "Software RGBA upload";
         /// <summary>Gets the reason hardware decoding or native texture sharing fell back, or <see langword="null"/> if none was reported.</summary>
-        public string HardwareFallbackReason { get; private set; }
+        public string? HardwareFallbackReason { get; private set; }
 
-        void Awake()
+        private void Awake()
         {
             _mainThread = Thread.CurrentThread.ManagedThreadId;
-            _playbackRate = float.IsNaN(_playbackRate) || float.IsInfinity(_playbackRate)
-                ? 1 : Math.Max(0.0625f, Math.Min(16, _playbackRate));
+            _playbackRate = float.IsNaN(_playbackRate) || float.IsInfinity(_playbackRate) ? 1 : Math.Max(0.0625f, Math.Min(16, _playbackRate));
             _clock.Rate = _playbackRate;
         }
-        void Start() { if (_playOnAwake && !string.IsNullOrWhiteSpace(_source) && _session == null) Play(); }
-        void OnDisable() { if (IsPlaying) Pause(); }
-        void OnDestroy() { Close(); }
+
+        private void Start()
+        {
+            if (_playOnAwake && !string.IsNullOrWhiteSpace(_source) && _session == null)
+            {
+                Play();
+            }
+        }
+
+        private void OnDisable()
+        {
+            if (IsPlaying)
+            {
+                Pause();
+            }
+        }
+
+        private void OnDestroy()
+        {
+            Close();
+        }
 
         /// <summary>Opens the configured source and presents its first frame without starting playback.</summary>
         /// <param name="cancellationToken">Cancels preparation and closes the pending session.</param>
@@ -234,12 +317,25 @@ namespace MajdataPlay.FFmpeg
         /// <exception cref="InvalidOperationException">No source is configured, or the caller is not on the Unity main thread.</exception>
         /// <exception cref="OperationCanceledException">The token is already canceled.</exception>
         /// <remarks>Closing or replacing the media cancels the task. Playback failures fault it and raise <see cref="ErrorReceived"/>.</remarks>
+        /// <exception cref="NotSupportedException">The requested dimensions, codec, platform, or native transport cannot be supported.</exception>
         public Task PrepareAsync(CancellationToken cancellationToken = default)
         {
             CheckThread();
-            if (_prepareCompletion != null) return _prepareCompletion.Task;
-            if (IsPrepared) return Task.CompletedTask;
-            if (string.IsNullOrWhiteSpace(_source)) throw new InvalidOperationException("Set Url before preparing video.");
+            if (_prepareCompletion != null)
+            {
+                return _prepareCompletion.Task;
+            }
+
+            if (IsPrepared)
+            {
+                return Task.CompletedTask;
+            }
+
+            if (string.IsNullOrWhiteSpace(_source))
+            {
+                throw new InvalidOperationException("Set Url before preparing video.");
+            }
+
             cancellationToken.ThrowIfCancellationRequested();
             Close();
             _prepareCancellation = cancellationToken;
@@ -253,21 +349,37 @@ namespace MajdataPlay.FFmpeg
             {
                 _hardwareRequired = _requireHardwareDecoding;
                 _platformBackendOnly = false;
-                var options = new DecoderOptions { IOTimeoutMilliseconds = Math.Max(1, _ioTimeoutSeconds) * 1000,
-                    RequireHardwareDecoding = _hardwareRequired, AllowHardwareCpuUpload = !_hardwareRequired };
-                MajDebug.LogInfo("FFmpeg", "[Player] Preparing video; preferred decoder=" + PreferredDecoderType +
-                    ", prefer native textures=" + _preferNativeTextures + ", require GPU-only=" + _hardwareRequired + ".");
+                var options = new DecoderOptions
+                {
+                    IOTimeoutMilliseconds = Math.Max(1, _ioTimeoutSeconds) * 1000,
+                    RequireHardwareDecoding = _hardwareRequired,
+                    AllowHardwareCpuUpload = !_hardwareRequired
+                };
+                MajDebug.LogInfo("FFmpeg", "[Player] Preparing video; preferred decoder="
+                    + PreferredDecoderType + ", prefer native textures=" + _preferNativeTextures + ", require GPU-only="
+                    + _hardwareRequired + ".");
                 if (_preferHardwareDecoding || _hardwareRequired)
+                {
                     ConfigureHardware(options, _preferNativeTextures || _hardwareRequired);
+                }
+
                 if (_hardwareRequired && !options.KeepNativeFrames)
+                {
                     throw new NotSupportedException(HardwareFallbackReason ?? "Native GPU video playback is unavailable.");
+                }
+
                 _hardwareActive = options.HardwareDeviceType != global::FFmpeg.AutoGen.AVHWDeviceType.AV_HWDEVICE_TYPE_NONE;
                 _hardwareCpuUploadAttempted = !options.KeepNativeFrames;
                 _session = new VideoDecodeSession(NormalizeSource(_source), options, _bufferedFrameLimit);
             }
-            catch (Exception error) { Fail(error); }
+            catch (Exception error)
+            {
+                Fail(error);
+            }
+
             return task;
         }
+
         /// <summary>Sets the source and prepares its first frame without starting playback.</summary>
         /// <param name="path">A local path or FFmpeg-supported URL.</param>
         /// <param name="cancellationToken">Cancels preparation and closes the pending session.</param>
@@ -278,16 +390,30 @@ namespace MajdataPlay.FFmpeg
             Url = path;
             return PrepareAsync(cancellationToken);
         }
+
         /// <summary>Begins preparing the configured source without starting playback.</summary>
         /// <remarks>Use <see cref="Prepared"/> and <see cref="ErrorReceived"/> to observe asynchronous results.</remarks>
-        public void Prepare() { Observe(PrepareAsync()); }
+        public void Prepare()
+        {
+            Observe(PrepareAsync());
+        }
+
         /// <summary>Sets the source and begins preparing it without starting playback.</summary>
         /// <param name="path">A local path or FFmpeg-supported URL.</param>
         /// <remarks>Use <see cref="Prepared"/> and <see cref="ErrorReceived"/> to observe asynchronous results.</remarks>
-        public void Preload(string path) { Observe(PreloadAsync(path)); }
+        public void Preload(string path)
+        {
+            Observe(PreloadAsync(path));
+        }
+
         /// <summary>Sets the source and starts playback after preparation.</summary>
         /// <param name="path">A local path or FFmpeg-supported URL.</param>
-        public void Play(string path) { Url = path; Play(); }
+        public void Play(string path)
+        {
+            Url = path;
+            Play();
+        }
+
         /// <summary>Starts or resumes playback, preparing the configured source first if necessary.</summary>
         /// <remarks>During a seek, playback starts when the seek finishes. Ended media is first rewound.</remarks>
         public void Play()
@@ -300,55 +426,130 @@ namespace MajdataPlay.FFmpeg
                 _playWhenReady = true;
                 return;
             }
-            if (State == VideoPlaybackState.Seeking) { _afterSeek = VideoPlaybackState.Playing; return; }
-            if (State == VideoPlaybackState.Ended) { BeginSeek(0, VideoPlaybackState.Playing); return; }
-            if (IsPlaying) return;
+
+            if (State == VideoPlaybackState.Seeking)
+            {
+                _afterSeek = VideoPlaybackState.Playing;
+                return;
+            }
+
+            if (State == VideoPlaybackState.Ended)
+            {
+                BeginSeek(0, VideoPlaybackState.Playing);
+                return;
+            }
+
+            if (IsPlaying)
+            {
+                return;
+            }
+
             State = VideoPlaybackState.Playing;
             _clock.Start();
             MajDebug.LogDebug("FFmpeg", "[Player] Play at " + TimeSeconds.ToString("F3") + " s.");
             Started?.Invoke(this);
         }
+
         /// <summary>Pauses playback or prevents a pending preparation or seek from starting playback.</summary>
         public void Pause()
         {
-            CheckThread(); _controlRevision++; _playWhenReady = false;
-            if (State == VideoPlaybackState.Seeking) { _afterSeek = VideoPlaybackState.Paused; return; }
-            if (!IsPrepared) return;
-            _clock.Pause(); _waitingForFrame = false;
+            CheckThread();
+            _controlRevision++;
+            _playWhenReady = false;
+            if (State == VideoPlaybackState.Seeking)
+            {
+                _afterSeek = VideoPlaybackState.Paused;
+                return;
+            }
+
+            if (!IsPrepared)
+            {
+                return;
+            }
+
+            _clock.Pause();
+            _waitingForFrame = false;
             State = VideoPlaybackState.Paused;
             MajDebug.LogDebug("FFmpeg", "[Player] Pause at " + TimeSeconds.ToString("F3") + " s.");
             Paused?.Invoke(this);
         }
+
         /// <summary>Pauses or resumes playback.</summary>
         /// <param name="pause">True to pause; false to start or resume playback.</param>
-        public void SetPause(bool pause) { if (pause) Pause(); else Play(); }
+        public void SetPause(bool pause)
+        {
+            if (pause)
+            {
+                Pause();
+            }
+            else
+            {
+                Play();
+            }
+        }
+
         /// <summary>Pauses and requests presentation of the next decoded frame during a subsequent Unity update.</summary>
         /// <remarks>Has no effect before preparation. If no frames remain, playback stays paused and no new frame is presented.</remarks>
-        public void NextFrame() { CheckThread(); if (!IsPrepared) return; Pause(); _stepRequested = true; }
+        public void NextFrame()
+        {
+            CheckThread();
+            if (!IsPrepared)
+            {
+                return;
+            }
+
+            Pause();
+            _stepRequested = true;
+        }
+
         /// <summary>Attempts to change the playback speed multiplier.</summary>
         /// <param name="rate">A finite multiplier in the inclusive range 0.0625 to 16.</param>
         /// <returns>True if the speed was applied; false if the value is invalid.</returns>
-        public bool SetRate(float rate) { if (float.IsNaN(rate) || float.IsInfinity(rate) || rate < 0.0625f || rate > 16) return false; Rate = rate; return true; }
+        public bool SetRate(float rate)
+        {
+            if (float.IsNaN(rate) || float.IsInfinity(rate) || rate < 0.0625f || rate > 16)
+            {
+                return false;
+            }
+
+            Rate = rate;
+            return true;
+        }
+
         /// <summary>Stops playback and asynchronously seeks to the beginning while retaining prepared media.</summary>
         /// <remarks>Closes unprepared or nonseekable media. <see cref="Stopped"/> is raised before a pending rewind finishes.</remarks>
         public void Stop()
         {
-            CheckThread(); _playWhenReady = false;
+            CheckThread();
+            _playWhenReady = false;
             MajDebug.LogDebug("FFmpeg", "[Player] Stop requested.");
             if (!IsPrepared || !IsSeekable)
             {
                 var closeRevision = _controlRevision + 1;
                 Close();
-                if (_controlRevision != closeRevision) return;
+                if (_controlRevision != closeRevision)
+                {
+                    return;
+                }
+
                 State = VideoPlaybackState.Stopped;
             }
-            else BeginSeek(0, VideoPlaybackState.Stopped);
+            else
+            {
+                BeginSeek(0, VideoPlaybackState.Stopped);
+            }
+
             Stopped?.Invoke(this);
         }
+
         /// <summary>Begins seeking to a position while preserving whether playback should resume.</summary>
         /// <param name="position">The requested position, clamped to the known timeline.</param>
         /// <exception cref="InvalidOperationException">The input is not prepared or seekable.</exception>
-        public void SeekTo(TimeSpan position) { BeginSeek(position.TotalSeconds, ContinueState()); }
+        public void SeekTo(TimeSpan position)
+        {
+            BeginSeek(position.TotalSeconds, ContinueState());
+        }
+
         /// <summary>Seeks to a position while preserving whether playback should resume.</summary>
         /// <param name="seconds">The requested position in seconds, clamped to the known timeline.</param>
         /// <returns>A task that completes when the target frame is presented or decoding reaches the end of the input.</returns>
@@ -358,34 +559,69 @@ namespace MajdataPlay.FFmpeg
         public Task SeekAsync(double seconds)
         {
             BeginSeek(seconds, ContinueState());
-            return _seekCompletion.Task;
+            // BeginSeek always installs the completion source before returning.
+            return _seekCompletion!.Task;
         }
+
         /// <summary>Cancels pending operations, closes the media, releases presentation resources, and returns to the idle state.</summary>
         /// <remarks>Does not wait for blocking input on the decoding worker. The configured source and caller-owned target texture are retained.</remarks>
         public void Close()
         {
             CheckThread();
-            if (_session != null) MajDebug.LogDebug("FFmpeg", "[Player] Closing decoder session.");
+            if (_session != null)
+            {
+                MajDebug.LogDebug("FFmpeg", "[Player] Closing decoder session.");
+            }
+
             _controlRevision++;
-            _session?.Dispose(); _session = null;
-            _prepareCompletion?.TrySetCanceled(); _prepareCompletion = null;
+            _session?.Dispose();
+            _session = null;
+            _prepareCompletion?.TrySetCanceled();
+            _prepareCompletion = null;
             _prepareCancellation = default;
-            _seekCompletion?.TrySetCanceled(); _seekCompletion = null;
-            _info = null; _prepared = false; _playWhenReady = false; _waitingForFrame = false; _stepRequested = false; _hardwareActive = false;
-            _clock.Pause(); _clock.Set(0); _lastFrameEnd = 0; _lastReportedTime = -1; _frameNumber = 0;
+            _seekCompletion?.TrySetCanceled();
+            _seekCompletion = null;
+            _info = null;
+            _prepared = false;
+            _playWhenReady = false;
+            _waitingForFrame = false;
+            _stepRequested = false;
+            _hardwareActive = false;
+            _clock.Pause();
+            _clock.Set(0);
+            _lastFrameEnd = 0;
+            _lastReportedTime = -1;
+            _frameNumber = 0;
             CurrentBitRate = 0;
             State = VideoPlaybackState.Idle;
             ReleasePresentation();
-            if (_uploadTexture != null) Destroy(_uploadTexture);
+            if (_uploadTexture != null)
+            {
+                Destroy(_uploadTexture);
+            }
+
             _uploadTexture = null;
             SetTexture(null);
         }
 
-        void BeginSeek(double seconds, VideoPlaybackState afterSeek)
+        /// <summary>Cancels the previous seek and schedules decoding toward a new playback position.</summary>
+        /// <param name="seconds">The media timeline position in seconds.</param>
+        /// <param name="afterSeek">The playback state to restore after the target frame is available.</param>
+        /// <exception cref="ArgumentOutOfRangeException">The requested position is NaN or infinity.</exception>
+        /// <exception cref="InvalidOperationException">The caller is not on the Unity main thread, or media is not prepared and seekable.</exception>
+        private void BeginSeek(double seconds, VideoPlaybackState afterSeek)
         {
             CheckThread();
-            if (double.IsNaN(seconds) || double.IsInfinity(seconds)) throw new ArgumentOutOfRangeException(nameof(seconds));
-            if (!IsSeekable) throw new InvalidOperationException("The input is not prepared or seekable.");
+            if (double.IsNaN(seconds) || double.IsInfinity(seconds))
+            {
+                throw new ArgumentOutOfRangeException(nameof(seconds));
+            }
+
+            if (!IsSeekable)
+            {
+                throw new InvalidOperationException("The input is not prepared or seekable.");
+            }
+
             _controlRevision++;
             _seekCompletion?.TrySetCanceled();
             _seekCompletion = NewCompletion();
@@ -393,200 +629,378 @@ namespace MajdataPlay.FFmpeg
             Observe(_seekCompletion.Task);
             _seekTarget = ClampTime(seconds);
             MajDebug.LogDebug("FFmpeg", "[Player] Seek to " + _seekTarget.ToString("F3") + " s; resume=" + afterSeek + ".");
-            _clock.Pause(); _clock.Set(_seekTarget);
-            _afterSeek = afterSeek; _waitingForFrame = false; _stepRequested = false;
+            _clock.Pause();
+            _clock.Set(_seekTarget);
+            _afterSeek = afterSeek;
+            _waitingForFrame = false;
+            _stepRequested = false;
             State = VideoPlaybackState.Seeking;
             CurrentBitRate = 0;
-            _session.Seek(_seekTarget);
+            // IsSeekable above requires an active prepared session.
+            _session!.Seek(_seekTarget);
         }
 
-        void Update()
+        /// <summary>Presents queued frames, completes pending controls, and reports playback state on the main thread.</summary>
+        private void Update()
         {
-            if (_session == null) return;
+            if (_session == null)
+            {
+                return;
+            }
+
             using var profile = UnityProfiler.Create("FFmpeg.Player.Update");
             var session = _session;
             var revision = _controlRevision;
             try
             {
                 CheckHardwareErrors();
-                if (State == VideoPlaybackState.Preparing && _prepareCancellation.IsCancellationRequested) { Close(); return; }
-                if (_session.Error != null)
+                if (State == VideoPlaybackState.Preparing && _prepareCancellation.IsCancellationRequested)
                 {
-                    if (_hardwareActive && _session.Info?.HardwareDecoding != false) RecoverHardwarePlayback(_session.Error);
-                    else Fail(_session.Error);
+                    Close();
                     return;
                 }
+
+                if (_session.Error != null)
+                {
+                    if (_hardwareActive && _session.Info?.HardwareDecoding != false)
+                    {
+                        RecoverHardwarePlayback(_session.Error);
+                    }
+                    else
+                    {
+                        Fail(_session.Error);
+                    }
+
+                    return;
+                }
+
                 _info = _session.Info ?? _info;
-                if (!string.IsNullOrEmpty(_info?.HardwareFallbackReason) && string.IsNullOrEmpty(HardwareFallbackReason))
+                if (_info != null && !string.IsNullOrEmpty(_info.HardwareFallbackReason) && string.IsNullOrEmpty(HardwareFallbackReason))
+                {
                     HardwareFallbackReason = _info.HardwareFallbackReason;
+                }
+
                 if (State == VideoPlaybackState.Preparing || State == VideoPlaybackState.Seeking)
                 {
                     var frame = _session.TakeFrame();
                     if (frame != null)
                     {
-                        using (frame) { if (!Present(frame)) return; }
+                        using (frame)
+                        {
+                            if (!Present(frame))
+                            {
+                                return;
+                            }
+                        }
+
                         if (State == VideoPlaybackState.Preparing)
                         {
                             // A first-texture/frame listener may Pause or Play the same
                             // preparing session. Its frame still completes preparation;
                             // only a replacement session invalidates it.
                             revision = _controlRevision;
-                            _clock.Set(0); _prepared = true; State = VideoPlaybackState.Prepared;
-                            MajDebug.LogInfo("FFmpeg", "[Player] Prepared; encoding=" + CodecName + ", decoder=" + DecoderName +
-                                ", type=" + DecoderType + ", device=" + DecoderDevice + ".");
-                            var completion = _prepareCompletion; _prepareCompletion = null;
+                            _clock.Set(0);
+                            _prepared = true;
+                            State = VideoPlaybackState.Prepared;
+                            MajDebug.LogInfo("FFmpeg", "[Player] Prepared; encoding=" + CodecName
+                                + ", decoder=" + DecoderName + ", type=" + DecoderType + ", device=" + DecoderDevice + ".");
+                            var completion = _prepareCompletion;
+                            _prepareCompletion = null;
                             _prepareCancellation = default;
                             completion?.TrySetResult(true);
                             Prepared?.Invoke(this);
-                            if (!IsCurrent(session, revision)) return;
-                            if (_playWhenReady && _session != null) Play();
+                            if (!IsCurrent(session, revision))
+                            {
+                                return;
+                            }
+
+                            if (_playWhenReady && _session != null)
+                            {
+                                Play();
+                            }
                         }
-                        else FinishSeek();
+                        else
+                        {
+                            FinishSeek();
+                        }
                     }
                     else if (_session.EndOfStream)
                     {
-                        if (State == VideoPlaybackState.Preparing) throw new InvalidDataException("The input contains no decodable video frames.");
+                        if (State == VideoPlaybackState.Preparing)
+                        {
+                            throw new InvalidDataException("The input contains no decodable video frames.");
+                        }
+
                         FinishSeek();
                     }
                 }
-                if (!IsCurrent(session, revision)) return;
-                if (_session != null && IsPlaying) AdvancePlayback();
-                if (!IsCurrent(session, revision)) return;
+
+                if (!IsCurrent(session, revision))
+                {
+                    return;
+                }
+
+                if (_session != null && IsPlaying)
+                {
+                    AdvancePlayback();
+                }
+
+                if (!IsCurrent(session, revision))
+                {
+                    return;
+                }
+
                 if (_session != null && _stepRequested && State == VideoPlaybackState.Paused)
                 {
                     var frame = _session.TakeFrame();
                     if (frame != null)
                     {
-                        using (frame) { if (!Present(frame)) return; _clock.Set(frame.PresentationTime); }
+                        using (frame)
+                        {
+                            if (!Present(frame))
+                            {
+                                return;
+                            }
+
+                            _clock.Set(frame.PresentationTime);
+                        }
+
                         _stepRequested = false;
                     }
-                    else if (_session.EndOfStream) _stepRequested = false;
+                    else if (_session.EndOfStream)
+                    {
+                        _stepRequested = false;
+                    }
                 }
+
                 var position = Time;
-                if (position != _lastReportedTime) { _lastReportedTime = position; TimeChanged?.Invoke(this, position); }
+                if (position != _lastReportedTime)
+                {
+                    _lastReportedTime = position;
+                    TimeChanged?.Invoke(this, position);
+                }
             }
-            catch (NotSupportedException error) when (_hardwareActive) { RecoverHardwarePlayback(error); }
-            catch (Exception error) { Fail(error); }
+            catch (NotSupportedException error) when (_hardwareActive)
+            {
+                RecoverHardwarePlayback(error);
+            }
+            catch (Exception error)
+            {
+                Fail(error);
+            }
         }
-        void FinishSeek()
+
+        /// <summary>Restores the requested playback state and completes the current seek operation.</summary>
+        private void FinishSeek()
         {
-            _clock.Set(_seekTarget); State = _afterSeek;
-            if (IsPlaying) _clock.Start();
-            var completion = _seekCompletion; _seekCompletion = null;
+            _clock.Set(_seekTarget);
+            State = _afterSeek;
+            if (IsPlaying)
+            {
+                _clock.Start();
+            }
+
+            var completion = _seekCompletion;
+            _seekCompletion = null;
             completion?.TrySetResult(true);
             MajDebug.LogDebug("FFmpeg", "[Player] Seek completed at " + _seekTarget.ToString("F3") + " s.");
             SeekCompleted?.Invoke(this);
         }
-        void AdvancePlayback()
+
+        /// <summary>Consumes a bounded number of due frames and handles buffering, end-of-input, and looping.</summary>
+        private void AdvancePlayback()
         {
             // Skip stale frames at high speed without holding more than the configured queue capacity.
-            DecodedVideoFrame newest = null;
+            DecodedVideoFrame? newest = null;
+            // Update calls this only for an active session; Present rejects session replacement.
+            var session = _session!;
             var now = _clock.Position;
             // A fast worker can refill while this loop consumes frames. Bound work per
             // Update independently of queue capacity to keep high-rate playback responsive.
             var budget = Math.Max(1, Math.Min(8, _bufferedFrameLimit));
-            while (budget-- > 0 && _session.NextPresentationTime <= now + 0.001)
+            while (budget-- > 0 && session.NextPresentationTime <= now + 0.001)
             {
                 newest?.Dispose();
-                newest = _session.TakeFrame();
+                newest = session.TakeFrame();
             }
+
             if (newest != null)
             {
-                using (newest) { if (!Present(newest)) return; }
-                if (_waitingForFrame) { _waitingForFrame = false; _clock.Start(); }
+                using (newest)
+                {
+                    if (!Present(newest))
+                    {
+                        return;
+                    }
+                }
+
+                if (_waitingForFrame)
+                {
+                    _waitingForFrame = false;
+                    _clock.Start();
+                }
             }
-            if (_session.EndOfStream && _clock.Position >= _lastFrameEnd)
+
+            if (session.EndOfStream && _clock.Position >= _lastFrameEnd)
             {
-                _clock.Pause(); _clock.Set(LengthSeconds > 0 ? LengthSeconds : _lastFrameEnd);
-                _waitingForFrame = false; State = VideoPlaybackState.Ended;
+                _clock.Pause();
+                _clock.Set(LengthSeconds > 0 ? LengthSeconds : _lastFrameEnd);
+                _waitingForFrame = false;
+                State = VideoPlaybackState.Ended;
                 MajDebug.LogDebug("FFmpeg", "[Player] End reached; loop=" + _loop + ".");
                 EndReached?.Invoke(this);
-                if (_loop && IsSeekable && State == VideoPlaybackState.Ended) BeginSeek(0, VideoPlaybackState.Playing);
+                if (_loop && IsSeekable && State == VideoPlaybackState.Ended)
+                {
+                    BeginSeek(0, VideoPlaybackState.Playing);
+                }
             }
-            else if (_session.BufferedFrames == 0 && !_session.EndOfStream && now > _lastFrameEnd)
+            else if (session.BufferedFrames == 0 && !session.EndOfStream && now > _lastFrameEnd)
             {
-                _clock.Pause(); _waitingForFrame = true;
+                _clock.Pause();
+                _waitingForFrame = true;
             }
-            else if (_waitingForFrame && _session.BufferedFrames > 0)
+            else if (_waitingForFrame && session.BufferedFrames > 0)
             {
-                _waitingForFrame = false; _clock.Start();
+                _waitingForFrame = false;
+                _clock.Start();
             }
         }
-        bool Present(DecodedVideoFrame frame)
+
+        /// <summary>Uploads or shares a frame and publishes its texture while guarding against reentrant controls.</summary>
+        /// <param name="frame">The borrowed decoded frame to process without consuming its ownership.</param>
+        /// <returns>True if presentation remains current after listeners run; otherwise false.</returns>
+        /// <exception cref="NotSupportedException">The requested dimensions, codec, platform, or native transport cannot be supported.</exception>
+        private bool Present(DecodedVideoFrame frame)
         {
             using var profile = UnityProfiler.Create("FFmpeg.Player.Present");
             var session = _session;
             var revision = _controlRevision;
-            Texture output = null;
+            Texture? output = null;
             PresentHardware(frame, ref output);
             if (output == null)
             {
-                if (frame.Data == IntPtr.Zero) throw new NotSupportedException("The graphics bridge could not present this hardware frame.");
+                if (frame.Data == IntPtr.Zero)
+                {
+                    throw new NotSupportedException("The graphics bridge could not present this hardware frame.");
+                }
+
                 if (_uploadTexture == null || _uploadTexture.width != frame.Width || _uploadTexture.height != frame.Height)
                 {
-                    if (_uploadTexture != null) Destroy(_uploadTexture);
+                    if (_uploadTexture != null)
+                    {
+                        Destroy(_uploadTexture);
+                    }
+
                     _uploadTexture = new Texture2D(frame.Width, frame.Height, TextureFormat.RGBA32, false, false)
-                    { name = "FFmpeg video", wrapMode = TextureWrapMode.Clamp, filterMode = FilterMode.Bilinear };
+                    {
+                        name = "FFmpeg video",
+                        wrapMode = TextureWrapMode.Clamp,
+                        filterMode = FilterMode.Bilinear
+                    };
                 }
+
                 using (UnityProfiler.Create("FFmpeg.Player.CpuUpload"))
                 {
                     _uploadTexture.LoadRawTextureData(frame.Data, frame.DataSize);
                     _uploadTexture.Apply(false, false);
                 }
+
                 output = _uploadTexture;
                 TransferMode = frame.HardwareDecoded ? "Hardware decode + CPU RGBA upload" : "Software RGBA upload";
             }
+
             if (_reportedTransferMode != TransferMode)
             {
                 _reportedTransferMode = TransferMode;
                 MajDebug.LogInfo("FFmpeg", "[Player] Texture transfer=" + TransferMode + ".");
             }
-            if (_targetTexture != null) { Graphics.Blit(output, _targetTexture); output = _targetTexture; }
+
+            if (_targetTexture != null)
+            {
+                Graphics.Blit(output, _targetTexture);
+                output = _targetTexture;
+            }
+
             CurrentBitRate = frame.CurrentBitRate;
             SetTexture(output);
-            if (!IsPresentationCurrent(session, revision)) return false;
+            if (!IsPresentationCurrent(session, revision))
+            {
+                return false;
+            }
+
             _lastFrameEnd = frame.PresentationTime + Math.Max(0.001, frame.Duration);
             FrameReady?.Invoke(this, ++_frameNumber);
             return IsPresentationCurrent(session, revision);
         }
-        bool IsPresentationCurrent(VideoDecodeSession session, long revision) =>
-            IsCurrent(session, revision) || (_session == session && State == VideoPlaybackState.Preparing);
-        bool IsCurrent(VideoDecodeSession session, long revision) => _session == session && _controlRevision == revision;
-        void SetTexture(Texture value)
+
+        /// <summary>Checks whether presentation still belongs to the active session after a listener runs.</summary>
+        /// <param name="session">The captured decoding session used to detect replacement by an event listener.</param>
+        /// <param name="revision">The captured control revision used to detect reentrant playback changes.</param>
+        /// <returns>True if the same session still owns this presentation.</returns>
+        private bool IsPresentationCurrent(VideoDecodeSession? session, long revision) => IsCurrent(session,
+            revision) || (_session == session && State == VideoPlaybackState.Preparing);
+        /// <summary>Checks whether a captured session and control revision still identify the current operation.</summary>
+        /// <param name="session">The captured decoding session used to detect replacement by an event listener.</param>
+        /// <param name="revision">The captured control revision used to detect reentrant playback changes.</param>
+        /// <returns>True if both the session and control revision still match.</returns>
+        private bool IsCurrent(VideoDecodeSession? session, long revision) => _session == session && _controlRevision == revision;
+        /// <summary>Updates renderer output and notifies listeners when the displayed texture changes.</summary>
+        /// <param name="value">The value to validate or assign.</param>
+        private void SetTexture(Texture? value)
         {
-            if (_texture == value) return;
+            if (_texture == value)
+            {
+                return;
+            }
+
             _texture = value;
             if (_targetRenderer != null)
             {
-                if (_materialProperties == null) _materialProperties = new MaterialPropertyBlock();
+                if (_materialProperties == null)
+                {
+                    _materialProperties = new MaterialPropertyBlock();
+                }
+
                 _targetRenderer.GetPropertyBlock(_materialProperties);
                 _materialProperties.SetTexture(_textureProperty, value);
                 _targetRenderer.SetPropertyBlock(_materialProperties);
             }
+
             TextureChanged?.Invoke(this, value);
         }
-        void Fail(Exception error)
+
+        /// <summary>Closes failed playback, faults pending tasks, and reports the error to listeners.</summary>
+        /// <param name="error">The playback exception to publish and use to fault pending operations.</param>
+        private void Fail(Exception error)
         {
-            var prepare = _prepareCompletion; var seek = _seekCompletion;
-            _prepareCompletion = null; _seekCompletion = null;
+            var prepare = _prepareCompletion;
+            var seek = _seekCompletion;
+            _prepareCompletion = null;
+            _seekCompletion = null;
             var closeRevision = _controlRevision + 1;
             Close();
-            prepare?.TrySetException(error); seek?.TrySetException(error);
+            prepare?.TrySetException(error);
+            seek?.TrySetException(error);
             // TextureChanged(null) may have already started a replacement media.
             // Complete the failed operation without overwriting that new session.
             if (_controlRevision == closeRevision)
             {
-                State = VideoPlaybackState.Error; LastError = error.Message;
+                State = VideoPlaybackState.Error;
+                LastError = error.Message;
                 ErrorReceived?.Invoke(this, LastError);
             }
+
             MajDebug.LogError("FFmpeg", "[Player] Playback failed: " + error);
         }
-        void RecoverHardwarePlayback(Exception reason)
+
+        /// <summary>Selects the next permitted hardware or software transport after a presentation failure.</summary>
+        /// <param name="reason">The failure that triggered transport recovery or backend fallback.</param>
+        private void RecoverHardwarePlayback(Exception reason)
         {
             HardwareFallbackReason = reason.Message;
             var device = (_session?.Info ?? _info)?.HardwareDeviceType;
-            if (!_platformBackendOnly && (device == global::FFmpeg.AutoGen.AVHWDeviceType.AV_HWDEVICE_TYPE_D3D12VA ||
-                device == global::FFmpeg.AutoGen.AVHWDeviceType.AV_HWDEVICE_TYPE_VULKAN))
+            if (!_platformBackendOnly && (device == global::FFmpeg.AutoGen.AVHWDeviceType.AV_HWDEVICE_TYPE_D3D12VA
+                || device == global::FFmpeg.AutoGen.AVHWDeviceType.AV_HWDEVICE_TYPE_VULKAN))
             {
                 _platformBackendOnly = true;
                 MajDebug.LogWarning("FFmpeg", "[Player] Native video decoder failed; retrying the platform hardware backend. " + reason.Message);
@@ -594,20 +1008,44 @@ namespace MajdataPlay.FFmpeg
                 RecoverPlayback(reason, !native, native);
                 return;
             }
-            if (_hardwareRequired) { Fail(reason); return; }
-            if (_hardwareCpuUploadAttempted) { RecoverInSoftware(reason); return; }
+
+            if (_hardwareRequired)
+            {
+                Fail(reason);
+                return;
+            }
+
+            if (_hardwareCpuUploadAttempted)
+            {
+                RecoverInSoftware(reason);
+                return;
+            }
+
             _hardwareCpuUploadAttempted = true;
             MajDebug.LogWarning("FFmpeg", "[Player] Hardware playback path failed; retrying hardware decoding with CPU upload. " + reason.Message);
             RecoverPlayback(reason, true);
         }
-        void RecoverInSoftware(Exception reason)
+
+        /// <summary>Reopens playback with software decoding after a recoverable hardware failure.</summary>
+        /// <param name="reason">The failure that triggered transport recovery or backend fallback.</param>
+        private void RecoverInSoftware(Exception reason)
         {
             HardwareFallbackReason = reason.Message;
-            if (_hardwareRequired) { Fail(reason); return; }
+            if (_hardwareRequired)
+            {
+                Fail(reason);
+                return;
+            }
+
             MajDebug.LogWarning("FFmpeg", "[Player] Hardware playback unavailable; retrying software decoding with CPU upload. " + reason.Message);
             RecoverPlayback(reason, false);
         }
-        void RecoverPlayback(Exception reason, bool hardwareCpuUpload, bool platformNative = false)
+
+        /// <summary>Reopens media with a fallback transport while preserving the playback position and requested state.</summary>
+        /// <param name="reason">The failure that triggered transport recovery or backend fallback.</param>
+        /// <param name="hardwareCpuUpload">Whether recovery should retain hardware decoding with CPU pixel upload.</param>
+        /// <param name="platformNative">Whether recovery should retry the platform native backend before CPU fallback.</param>
+        private void RecoverPlayback(Exception reason, bool hardwareCpuUpload, bool platformNative = false)
         {
             _hardwareActive = hardwareCpuUpload || platformNative;
             var resume = State == VideoPlaybackState.Seeking ? _afterSeek : State;
@@ -619,16 +1057,25 @@ namespace MajdataPlay.FFmpeg
                 _session?.Dispose();
                 _session = null;
                 ReleasePresentation();
-                TransferMode = platformNative ? "Reopening platform hardware decoder" :
-                    hardwareCpuUpload ? "Reopening hardware decoder for CPU upload" : "Reopening software decoder";
+                TransferMode = platformNative ? "Reopening platform hardware decoder" : hardwareCpuUpload
+                    ? "Reopening hardware decoder for CPU upload" : "Reopening software decoder";
                 _reportedTransferMode = null;
-                var options = new DecoderOptions { IOTimeoutMilliseconds = Math.Max(1, _ioTimeoutSeconds) * 1000,
-                    RequireHardwareDecoding = _hardwareRequired, AllowHardwareCpuUpload = !_hardwareRequired };
-                if (hardwareCpuUpload || platformNative) ConfigureHardware(options, platformNative);
+                var options = new DecoderOptions
+                {
+                    IOTimeoutMilliseconds = Math.Max(1, _ioTimeoutSeconds) * 1000,
+                    RequireHardwareDecoding = _hardwareRequired,
+                    AllowHardwareCpuUpload = !_hardwareRequired
+                };
+                if (hardwareCpuUpload || platformNative)
+                {
+                    ConfigureHardware(options, platformNative);
+                }
+
                 _session = new VideoDecodeSession(NormalizeSource(_source), options, _bufferedFrameLimit);
                 if (_prepared && _info != null && _info.CanSeek)
                 {
-                    _seekTarget = position; _afterSeek = resume;
+                    _seekTarget = position;
+                    _afterSeek = resume;
                     State = VideoPlaybackState.Seeking;
                     _session.Seek(position);
                 }
@@ -641,6 +1088,7 @@ namespace MajdataPlay.FFmpeg
                     _info = null;
                     State = VideoPlaybackState.Preparing;
                 }
+
                 // Publish only after controls can safely operate on the replacement.
                 // A TextureChanged listener may Pause, Seek, Close or open another URL;
                 // no recovery work after this callback may override that decision.
@@ -655,29 +1103,72 @@ namespace MajdataPlay.FFmpeg
                     MajDebug.LogWarning("FFmpeg", "[Player] Platform GPU transport failed; retrying hardware decoding with CPU upload. " + recoveryError.Message);
                     RecoverPlayback(recoveryError, true);
                 }
-                else if (hardwareCpuUpload) RecoverInSoftware(recoveryError);
-                else Fail(recoveryError);
+                else if (hardwareCpuUpload)
+                {
+                    RecoverInSoftware(recoveryError);
+                }
+                else
+                {
+                    Fail(recoveryError);
+                }
             }
             // The original preload completion remains pending while the replacement opens.
         }
-        double ClampTime(double seconds) => Math.Max(0, LengthSeconds > 0 ? Math.Min(seconds, LengthSeconds) : seconds);
-        VideoPlaybackState ContinueState() => IsPlaying || (State == VideoPlaybackState.Seeking && _afterSeek == VideoPlaybackState.Playing)
-            ? VideoPlaybackState.Playing : VideoPlaybackState.Paused;
-        void CheckThread()
+
+        /// <summary>Clamps a position to zero and the known media duration.</summary>
+        /// <param name="seconds">The media timeline position in seconds.</param>
+        /// <returns>The position restricted to the known media timeline.</returns>
+        private double ClampTime(double seconds) => Math.Max(0, LengthSeconds > 0 ? Math.Min(seconds, LengthSeconds) : seconds);
+        /// <summary>Determines whether a seek should resume playback or remain paused.</summary>
+        /// <returns>Playing when playback should resume; otherwise Paused.</returns>
+        private VideoPlaybackState ContinueState() => IsPlaying || (State == VideoPlaybackState.Seeking
+            && _afterSeek == VideoPlaybackState.Playing) ? VideoPlaybackState.Playing : VideoPlaybackState.Paused;
+        /// <summary>Rejects component access from a thread other than Unity's main thread.</summary>
+        /// <exception cref="InvalidOperationException">The caller is not on the Unity main thread.</exception>
+        private void CheckThread()
         {
             if (_mainThread != 0 && Thread.CurrentThread.ManagedThreadId != _mainThread)
+            {
                 throw new InvalidOperationException("FFmpegVideoPlayer must be controlled on Unity's main thread.");
+            }
         }
-        static TaskCompletionSource<bool> NewCompletion() => new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
-        static async void Observe(Task task) { try { await task; } catch { /* Update reports errors through ErrorReceived. */ } }
-        static string NormalizeSource(string path)
+
+        /// <summary>Creates a completion source whose continuations cannot run inline during player callbacks.</summary>
+        /// <returns>A completion source with asynchronous continuations.</returns>
+        private static TaskCompletionSource<bool> NewCompletion() => new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        /// <summary>Observes a task's failure for synchronous control APIs whose errors are reported by the player.</summary>
+        /// <param name="task">The operation whose failure is already surfaced through player error reporting.</param>
+        private static async void Observe(Task task)
+        {
+            try
+            {
+                await task;
+            }
+            catch
+            { /* Update reports errors through ErrorReceived. */
+            }
+        }
+
+        /// <summary>Converts local file URIs to paths while preserving other FFmpeg input URLs.</summary>
+        /// <param name="path">The media input path or FFmpeg-supported URL.</param>
+        /// <returns>A local filesystem path for file URIs, or the original input string.</returns>
+        private static string NormalizeSource(string path)
         {
             path = path.Trim().Trim('"');
             return Uri.TryCreate(path, UriKind.Absolute, out var uri) && uri.IsFile ? uri.LocalPath : path;
         }
-        partial void ConfigureHardware(DecoderOptions options, bool preferNative);
-        partial void PresentHardware(DecodedVideoFrame frame, ref Texture output);
-        partial void CheckHardwareErrors();
-        partial void ReleasePresentation();
+
+        /// <summary>Configures the preferred native decoding backend and its platform fallback.</summary>
+        /// <param name="options">The resource limits and hardware configuration to use.</param>
+        /// <param name="preferNative">Whether to request native GPU frame sharing instead of CPU pixel upload.</param>
+        private partial void ConfigureHardware(DecoderOptions options, bool preferNative);
+        /// <summary>Presents a native frame and updates the reported GPU transfer mode.</summary>
+        /// <param name="frame">The borrowed decoded frame to process without consuming its ownership.</param>
+        /// <param name="output">Receives the presented texture when the frame uses native GPU resources.</param>
+        private partial void PresentHardware(DecodedVideoFrame frame, ref Texture? output);
+        /// <summary>Checks the active presenter for asynchronous graphics failures.</summary>
+        private partial void CheckHardwareErrors();
+        /// <summary>Disposes the hardware presenter and clears its reference.</summary>
+        private partial void ReleasePresentation();
     }
 }

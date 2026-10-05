@@ -1,3 +1,4 @@
+#nullable enable
 using System;
 using FFmpeg.AutoGen;
 
@@ -22,37 +23,37 @@ namespace MajdataPlay.FFmpeg.Internal
         public bool AllowHardwareCpuUpload { get; set; } = true;
         /// <summary>Gets or sets a diagnostic description of the supplied hardware device.</summary>
         /// <remarks>The description is used for reporting and does not select a device.</remarks>
-        public string HardwareDeviceDescription { get; set; }
+        public string? HardwareDeviceDescription { get; set; }
         /// <summary>Gets or sets whether decoding must produce native hardware frames without CPU pixel transfer.</summary>
         /// <remarks>When enabled, software decoding and hardware decoding with CPU upload fail instead of being used as fallbacks.</remarks>
         public bool RequireHardwareDecoding { get; set; }
         /// <summary>Gets or sets the requested FFmpeg hardware backend, or <see cref="AVHWDeviceType.AV_HWDEVICE_TYPE_NONE"/> for software decoding.</summary>
         public AVHWDeviceType HardwareDeviceType { get; set; } = AVHWDeviceType.AV_HWDEVICE_TYPE_NONE;
-
         /// <summary>Gets or sets a worker callback that acquires Unity's D3D11 device for native D3D11VA transport.</summary>
         /// <remarks>
         /// The callback returns an <c>ID3D11Device</c> pointer with an added reference, or <see cref="IntPtr.Zero"/> if unavailable.
         /// Ownership of a returned reference transfers to FFmpeg, including when device initialization fails.
         /// If omitted, hardware decoding may create an independent device when CPU upload is permitted.
         /// </remarks>
-        public Func<IntPtr> AcquireD3D11Device { get; set; }
-
+        public Func<IntPtr>? AcquireD3D11Device { get; set; }
         /// <summary>Gets or sets a worker callback that acquires a hardware decoding device compatible with Unity's GPU.</summary>
         /// <remarks>The callback transfers ownership of a new FFmpeg <c>AVBufferRef</c> to the decoder, or returns <see cref="IntPtr.Zero"/> if unavailable.</remarks>
-        public Func<IntPtr> AcquireHardwareDevice { get; set; }
+        public Func<IntPtr>? AcquireHardwareDevice { get; set; }
         /// <summary>Gets or sets a worker callback that maps a borrowed hardware <c>AVFrame</c> to a native presentation frame.</summary>
         /// <remarks>
         /// The callback must not download pixels or consume the input frame. It transfers ownership of a new
         /// <c>AVFrame</c> to the caller; returning <see cref="IntPtr.Zero"/> indicates that mapping failed.
         /// </remarks>
-        public Func<IntPtr, IntPtr> MapHardwareFrame { get; set; }
-
+        public Func<IntPtr, IntPtr>? MapHardwareFrame { get; set; }
         /// <summary>Gets or sets a worker callback that creates a native surface decoding session for the requested width and height, in pixels.</summary>
         /// <remarks>The decoder owns and disposes the returned session. A null result indicates that native surface decoding is unavailable.</remarks>
-        public Func<int, int, IHardwareDecodeSession> CreateHardwareSession { get; set; }
-
+        public Func<int, int, IHardwareDecodeSession?>? CreateHardwareSession { get; set; }
         // A player-owned alternative for codecs or devices that cannot use the preferred native API.
-        internal DecoderOptions FallbackHardwareOptions { get; set; }
+        /// <summary>Gets or sets the player-owned alternative for codecs or devices that cannot use the preferred native API.</summary>
+        internal DecoderOptions? FallbackHardwareOptions { get; set; }
+
+        /// <summary>Creates a shallow options copy, retaining callback and fallback references.</summary>
+        /// <returns>A shallow copy with the same option values and callback references.</returns>
         internal DecoderOptions Copy() => (DecoderOptions)MemberwiseClone();
     }
 

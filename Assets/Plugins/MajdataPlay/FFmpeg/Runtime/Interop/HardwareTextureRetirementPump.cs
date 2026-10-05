@@ -1,3 +1,4 @@
+#nullable enable
 using UnityEngine;
 
 namespace MajdataPlay.FFmpeg.Interop
@@ -6,30 +7,61 @@ namespace MajdataPlay.FFmpeg.Interop
     // its GL texture or finishes a Vulkan fence. This collector outlives that player only
     // while native retirements remain. Driver failures retain, never prematurely
     // delete, registered GL storage.
+    /// <summary>Keeps native retirement polling alive until outstanding GL registrations and Vulkan fences complete.</summary>
     internal sealed class HardwareTextureRetirementPump : MonoBehaviour
     {
-        static HardwareTextureRetirementPump _instance;
-        static bool _quitting;
-
+        /// <summary>References the temporary collector that outlives players with pending native retirements.</summary>
+        private static HardwareTextureRetirementPump? s_instance;
+        /// <summary>Prevents creation of retirement objects while Unity is shutting down.</summary>
+        private static bool s_quitting;
+        /// <summary>Resets shutdown state when Unity initializes a new play session.</summary>
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
-        static void ResetQuitting() { _quitting = false; }
-
-        internal static void Ensure()
+        private static void ResetQuitting()
         {
-            if (_instance != null || _quitting) return;
-            var host = new GameObject("FFmpeg texture retirement") { hideFlags = HideFlags.HideAndDontSave };
-            DontDestroyOnLoad(host);
-            _instance = host.AddComponent<HardwareTextureRetirementPump>();
+            s_quitting = false;
         }
 
-        void Update()
+        /// <summary>Creates a hidden persistent collector if native texture retirements still need polling.</summary>
+        internal static void Ensure()
         {
-            if (!HardwareVideoPresenter.CollectRetiredTextures()) return;
-            _instance = null;
+            if (s_instance != null || s_quitting)
+            {
+                return;
+            }
+
+            var host = new GameObject("FFmpeg texture retirement")
+            {
+                hideFlags = HideFlags.HideAndDontSave
+            };
+            DontDestroyOnLoad(host);
+            s_instance = host.AddComponent<HardwareTextureRetirementPump>();
+        }
+
+        /// <summary>Polls native retirements and destroys the collector once all resources can be released safely.</summary>
+        private void Update()
+        {
+            if (!HardwareVideoPresenter.CollectRetiredTextures())
+            {
+                return;
+            }
+
+            s_instance = null;
             Destroy(gameObject);
         }
 
-        void OnApplicationQuit() { _quitting = true; }
-        void OnDestroy() { if (_instance == this) _instance = null; }
+        /// <summary>Stops new retirement collectors from being created during shutdown.</summary>
+        private void OnApplicationQuit()
+        {
+            s_quitting = true;
+        }
+
+        /// <summary>Clears the singleton reference if Unity destroys the active collector.</summary>
+        private void OnDestroy()
+        {
+            if (s_instance == this)
+            {
+                s_instance = null;
+            }
+        }
     }
 }
