@@ -49,8 +49,8 @@ MajdataPlay 是一个跨平台 Simai 谱面播放器，也是一个 Unity 项目
 
 ## C# 与 Unity 代码约定
 
-- `.editorconfig` 是格式与命名规则的权威来源。C# 使用 4 空格缩进、CRLF、花括号、块级命名空间以及命名空间外的 `using`。
-- 所有C#代码都应当启用Nullable，并在源码中添加`#nullable enable`
+- `.editorconfig` 是格式与命名规则的权威来源，应严格遵守`.editorconfig`的格式和命名规则。C# 使用 4 空格缩进、CRLF、花括号、块级命名空间以及命名空间外的 `using`。
+- 所有C#代码都应当启用Nullable（包括Unity object），并在源码中添加`#nullable enable`
 - 从`MonoBehaviour`派生的类中，所有由Unity进行序列化和反序列化序列化的字段都应当为`private`，并且使用`SerializeField`和`FormerlySerializedAs`特性，`FormerlySerializedAs`特性中的命名应当为PascalCase；如果该字段有公开访问的需求，可以使用自动属性，并对属性添加`[field: SerializeField]`和`[field: FormerlySerializedAs]`特性；成员声明应当避免和特性处于同一行。
 - 命名空间应与目录和程序集职责一致，通常位于 `MajdataPlay.*` 下。
 - 遵循相邻代码的语言特性和可见性；不要为风格偏好大范围改写已有文件。
@@ -60,7 +60,7 @@ MajdataPlay 是一个跨平台 Simai 谱面播放器，也是一个 Unity 项目
 - 游戏循环、输入、渲染、谱面解析和视频路径对分配敏感。避免每帧 LINQ、临时集合、字符串拼接和无界队列；优先复用现有池、缓冲区和缓存。
 - 修改 `unsafe`、P/Invoke 或原生结构布局时，显式核对各目标 ABI 的指针宽度、C `long`、对齐、调用约定、所有权和线程约束。
 - 平台实现应留在相应 Platform 目录或平台受限 `.asmdef` 中，并保留 Editor 可编译性。不要用单一平台的成功掩盖其他平台分支的编译问题。
-- 所有成员均需添加英文XML文档（非必要的Unity message方法可以不添加），文档应说明成员的用途；如果方法有参数，应当说明各个参数的用途；如果方法有返回值，应当说明方法会返回什么；如果方法有可能抛出异常，文档也应当列出可能的异常类型。
+- 所有成员均需添加英文XML文档（Unity message方法非必要可以不添加），文档应说明成员的用途；如果方法有参数，应当说明各个参数的用途；如果方法有返回值，应当说明方法会返回什么；如果方法有可能抛出异常，文档也应当列出可能的异常类型。
 
 ## Unity 资产与序列化
 
