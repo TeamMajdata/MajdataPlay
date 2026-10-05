@@ -47,6 +47,8 @@ namespace MajdataPlay.FFmpeg.Internal
     /// <summary>One owner thread per demuxer. Cancellation never joins the Unity thread.</summary>
     internal sealed class VideoDecodeSession : IDisposable
     {
+        /// <summary>The wall-clock lag, in seconds, after which the worker skips to a later keyframe instead of decoding the gap.</summary>
+        private const double CatchUpLagSeconds = 0.25;
         /// <summary>Protects the playback timeline, queued frames, control revisions, and worker status across threads.</summary>
         private readonly object _gate = new object();
         /// <summary>Queues owned frames awaiting main-thread presentation.</summary>
@@ -67,6 +69,12 @@ namespace MajdataPlay.FFmpeg.Internal
         private bool _disposed, _finished, _eof;
         /// <summary>Identifies the latest seek request so stale decoded frames can be discarded.</summary>
         private long _revision;
+        /// <summary>Identifies the seek revision the worker is currently decoding for, accessed under the session lock.</summary>
+        private long _decodingRevision;
+        /// <summary>Counts decoded frames released before conversion because the playback clock had passed them.</summary>
+        private long _discardedFrames;
+        /// <summary>Counts forward keyframe seeks performed to catch up with the playback clock.</summary>
+        private long _catchUpSeeks;
         /// <summary>Stores the latest requested seek position in seconds.</summary>
         private double _seek;
         /// <summary>Publishes the latest immutable decoder information under the lock.</summary>
@@ -151,6 +159,30 @@ namespace MajdataPlay.FFmpeg.Internal
                 lock (_gate)
                 {
                     return _frames.Count == 0 ? double.NaN : _frames.Peek().PresentationTime;
+                }
+            }
+        }
+
+        /// <summary>Gets the number of decoded frames discarded before conversion because they had already expired.</summary>
+        public long DiscardedFrames
+        {
+            get
+            {
+                lock (_gate)
+                {
+                    return _discardedFrames;
+                }
+            }
+        }
+
+        /// <summary>Gets the number of forward keyframe seeks performed to catch up with the playback clock.</summary>
+        public long CatchUpSeeks
+        {
+            get
+            {
+                lock (_gate)
+                {
+                    return _catchUpSeeks;
                 }
             }
         }
@@ -275,6 +307,7 @@ namespace MajdataPlay.FFmpeg.Internal
             {
                 using (var decoder = new FFmpegVideoDecoder(_options, _framePool))
                 {
+                    decoder.FrameDeadlineProvider = ReadFrameDeadline;
                     decoder.Open(_path, _cancel.Token);
                     lock (_gate)
                     {
@@ -308,6 +341,7 @@ namespace MajdataPlay.FFmpeg.Internal
                             }
 
                             revision = _revision;
+                            _decodingRevision = revision;
                             seek = _seek;
                         }
 
@@ -326,6 +360,8 @@ namespace MajdataPlay.FFmpeg.Internal
                         {
                             lock (_gate)
                             {
+                                _discardedFrames = decoder.DiscardedFrames;
+                                _catchUpSeeks = decoder.CatchUpSeeks;
                                 if (_info.Width != decoder.Width || _info.Height != decoder.Height
                                     || _info.HardwareFallbackReason != decoder.HardwareFallbackReason || _info.HardwareDecoding != decoder.HardwareDecoding
                                     || _info.DecoderName != decoder.DecoderName || _info.DecoderDevice != decoder.DecoderDevice
@@ -405,6 +441,25 @@ namespace MajdataPlay.FFmpeg.Internal
 
                 MajDebug.LogDebug("FFmpeg", "[Session] Decode worker exited.");
                 UnityEngine.Profiling.Profiler.EndThreadProfiling();
+            }
+        }
+
+        /// <summary>Snapshots the playback deadlines used by the decoder to discard expired frames before conversion.</summary>
+        /// <returns>The current deadlines, or <see cref="FrameDeadline.None"/> while playback is frozen or a seek is pending.</returns>
+        /// <remarks>Runs on the decoding worker for each decoded frame. One expired frame is still delivered whenever the
+        /// queue is empty, so the presenter always has the newest available picture while decoding falls behind.</remarks>
+        private FrameDeadline ReadFrameDeadline()
+        {
+            lock (_gate)
+            {
+                if (_disposed || _decodingRevision != _revision || !_playbackClock.Running)
+                {
+                    return FrameDeadline.None;
+                }
+
+                var position = _playbackClock.Position;
+                var discardBefore = _frames.Count == 0 ? double.NegativeInfinity : position;
+                return new FrameDeadline(position, discardBefore, position - CatchUpLagSeconds * _playbackClock.Rate);
             }
         }
 

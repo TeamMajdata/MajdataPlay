@@ -92,6 +92,17 @@ namespace MajdataPlay.FFmpeg.Internal
         private double _nextPacketTimestamp;
         /// <summary>Retains the bit-rate estimate belonging to the last preroll frame.</summary>
         private long _seekCandidateBitRate;
+        /// <summary>Stores the last keyframe catch-up target in seconds; a new catch-up waits until decoding passes it.</summary>
+        private double _catchUpTarget = double.NegativeInfinity;
+        /// <summary>Tracks whether the codec currently skips non-reference frames to recover decode throughput.</summary>
+        private bool _skippingNonReferenceFrames;
+        /// <summary>Supplies the playback deadlines used to discard expired frames, or null to present every decoded frame.</summary>
+        /// <remarks>The provider is invoked on the owning worker once per decoded frame and must not allocate.</remarks>
+        internal Func<FrameDeadline>? FrameDeadlineProvider { get; set; }
+        /// <summary>Gets the number of decoded frames discarded before conversion because they had already expired.</summary>
+        internal long DiscardedFrames { get; private set; }
+        /// <summary>Gets the number of forward keyframe seeks performed to catch up with the playback clock.</summary>
+        internal long CatchUpSeeks { get; private set; }
         /// <summary>Gets the display width, in pixels, after applying the video's rotation.</summary>
         public int Width { get; private set; }
         /// <summary>Gets the display height, in pixels, after applying the video's rotation.</summary>
@@ -543,6 +554,13 @@ namespace MajdataPlay.FFmpeg.Internal
 
                         _seekTarget = double.NegativeInfinity;
                         ReleaseSeekCandidate();
+                        // Expired frames are released before hardware download, RGBA
+                        // conversion, or native retention so the worker can catch up.
+                        if (TryDiscardExpiredFrame(seconds + duration))
+                        {
+                            continue;
+                        }
+
                         var decoded = CreatePresentationFrame(_frame, seconds, duration);
                         decoded.CurrentBitRate = currentBitRate;
                         return decoded;
@@ -702,12 +720,19 @@ namespace MajdataPlay.FFmpeg.Internal
 
             BeginIO();
             CheckIO(ffmpeg.avformat_seek_file(_format, _videoStreamIndex, long.MinValue, timestamp, timestamp, 0), "Seek media");
+            _catchUpTarget = double.NegativeInfinity;
+            ResetAfterSeek(seconds);
+        }
+
+        /// <summary>Flushes decoder state after the demuxer has been repositioned and starts preroll at the target.</summary>
+        /// <param name="seconds">The media timeline position in seconds before which decoded frames are preroll.</param>
+        private void ResetAfterSeek(double seconds)
+        {
             ReleaseSeekCandidate();
             ffmpeg.avcodec_flush_buffers(_codec);
             _hardwareSession?.Flush();
             ffmpeg.av_packet_unref(_packet);
             ffmpeg.av_frame_unref(_frame);
-            ReleaseSeekCandidate();
             _packetPending = false;
             _inputEnded = false;
             _draining = false;
@@ -716,6 +741,93 @@ namespace MajdataPlay.FFmpeg.Internal
             _bitRateTracker.Reset();
             _nextPacketTimestamp = seconds + _origin;
             _seekTarget = seconds;
+            SetSkipNonReferenceFrames(false);
+        }
+
+        /// <summary>Discards a decoded frame whose display interval has expired and adjusts decoding to catch up.</summary>
+        /// <param name="frameEnd">The decoded frame's end time on the media timeline, in seconds.</param>
+        /// <returns>True if the current frame was discarded and must not be presented; otherwise false.</returns>
+        /// <exception cref="OperationCanceledException">The token supplied to <see cref="Open"/> was canceled during a catch-up seek.</exception>
+        /// <exception cref="TimeoutException">A catch-up seek exceeded the configured input timeout.</exception>
+        private bool TryDiscardExpiredFrame(double frameEnd)
+        {
+            var provider = FrameDeadlineProvider;
+            if (provider == null)
+            {
+                return false;
+            }
+
+            var deadline = provider();
+            var late = frameEnd <= deadline.Position;
+            // B-frames are rarely referenced, so skipping them while late reduces
+            // decode work without corrupting later frames. Restore once on time.
+            SetSkipNonReferenceFrames(late);
+            if (frameEnd <= deadline.CatchUpBefore && frameEnd > _catchUpTarget && TrySkipToKeyFrame(deadline.Position))
+            {
+                DiscardedFrames++;
+                return true;
+            }
+
+            if (frameEnd <= deadline.DiscardBefore)
+            {
+                DiscardedFrames++;
+                return true;
+            }
+
+            return false;
+        }
+
+        /// <summary>Repositions the input to the first keyframe at or after the playback clock without decoding the gap.</summary>
+        /// <param name="seconds">The current playback position on the media timeline, in seconds.</param>
+        /// <returns>True if the input was repositioned; false if no later keyframe can be reached.</returns>
+        /// <remarks>A failed attempt disables catch-up seeking until the next explicit <see cref="Seek"/>.</remarks>
+        /// <exception cref="OperationCanceledException">The token supplied to <see cref="Open"/> was canceled.</exception>
+        /// <exception cref="TimeoutException">Seeking exceeded the configured input timeout.</exception>
+        private bool TrySkipToKeyFrame(double seconds)
+        {
+            // Sequential decoding remains correct when the input cannot be repositioned.
+            _catchUpTarget = double.PositiveInfinity;
+            if (!CanSeek || (Duration > 0 && seconds >= Duration))
+            {
+                return false;
+            }
+
+            using var profile = UnityProfiler.Create("FFmpeg.Decoder.CatchUpSeek");
+            var timestamp = checked((long)Math.Round((seconds + _origin) / ffmpeg.av_q2d(_timeBase)));
+            BeginIO();
+            // A minimum timestamp equal to the target selects a later keyframe, never an earlier one.
+            var result = ffmpeg.avformat_seek_file(_format, _videoStreamIndex, timestamp, timestamp, long.MaxValue, 0);
+            var deadline = Interlocked.Exchange(ref _ioDeadline, 0);
+            _cancellation.ThrowIfCancellationRequested();
+            if (result < 0)
+            {
+                if (deadline != 0 && Stopwatch.GetTimestamp() >= deadline)
+                {
+                    throw new TimeoutException("Catch-up seek exceeded " + _options.IOTimeoutMilliseconds + " ms.");
+                }
+
+                MajDebug.LogDebug("FFmpeg", "[Decoder] No keyframe after " + seconds.ToString("F3", CultureInfo.InvariantCulture)
+                    + " seconds; decoding sequentially. " + ErrorText(result));
+                return false;
+            }
+
+            ResetAfterSeek(seconds);
+            _catchUpTarget = seconds;
+            CatchUpSeeks++;
+            return true;
+        }
+
+        /// <summary>Enables or disables decoding of non-reference frames when the state changes.</summary>
+        /// <param name="skip">True to discard non-reference frames inside the codec; false to decode every frame.</param>
+        private void SetSkipNonReferenceFrames(bool skip)
+        {
+            if (_codec == null || skip == _skippingNonReferenceFrames)
+            {
+                return;
+            }
+
+            _codec->skip_frame = skip ? AVDiscard.AVDISCARD_NONREF : AVDiscard.AVDISCARD_DEFAULT;
+            _skippingNonReferenceFrames = skip;
         }
 
         /// <summary>Retains a native frame or converts it into owned CPU pixels according to the active transport policy.</summary>
@@ -1094,6 +1206,7 @@ namespace MajdataPlay.FFmpeg.Internal
             _codec->thread_count = Math.Max(1, Math.Min(_options.ThreadCount, 16));
             _codec->max_pixels = _options.MaximumPixelCount;
             _codec->opaque = (void*)GCHandle.ToIntPtr(_selfHandle);
+            _skippingNonReferenceFrames = false;
         }
 
         /// <summary>Releases the current codec and activates the configured fallback hardware options if available.</summary>
@@ -1399,6 +1512,30 @@ namespace MajdataPlay.FFmpeg.Internal
             }
 
             MajDebug.LogDebug("FFmpeg", "[Decoder] Decoder and input resources released.");
+        }
+    }
+
+    /// <summary>Describes, on the media timeline, when decoded frames are too late to present.</summary>
+    internal readonly struct FrameDeadline
+    {
+        /// <summary>A deadline that never discards frames, used while playback is frozen or another frame is unavailable.</summary>
+        public static readonly FrameDeadline None = new FrameDeadline(double.NegativeInfinity, double.NegativeInfinity, double.NegativeInfinity);
+        /// <summary>Gets the current playback position in seconds, or negative infinity while the clock is stopped.</summary>
+        public readonly double Position;
+        /// <summary>Gets the time in seconds at or before which a frame's end is discarded instead of presented.</summary>
+        public readonly double DiscardBefore;
+        /// <summary>Gets the time in seconds at or before which a frame's end triggers a forward keyframe seek.</summary>
+        public readonly double CatchUpBefore;
+
+        /// <summary>Initializes a frame deadline snapshot.</summary>
+        /// <param name="position">The current playback position in seconds.</param>
+        /// <param name="discardBefore">The latest frame end time in seconds that is discarded without presentation.</param>
+        /// <param name="catchUpBefore">The latest frame end time in seconds that triggers a keyframe catch-up seek.</param>
+        public FrameDeadline(double position, double discardBefore, double catchUpBefore)
+        {
+            Position = position;
+            DiscardBefore = discardBefore;
+            CatchUpBefore = catchUpBefore;
         }
     }
 }

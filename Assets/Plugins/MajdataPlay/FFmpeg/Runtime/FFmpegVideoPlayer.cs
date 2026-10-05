@@ -1,6 +1,7 @@
 #nullable enable
 using System;
 using System.IO;
+using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Threading;
 using System.Threading.Tasks;
@@ -118,6 +119,8 @@ namespace MajdataPlay.FFmpeg
         private double _seekTarget, _lastFrameEnd;
         /// <summary>Track the presentation counter, last reported millisecond position, and control revision used to reject stale callbacks.</summary>
         private long _frameNumber, _lastReportedTime = -1, _controlRevision;
+        /// <summary>Stores the monotonic Stopwatch timestamp of the last frame presented during playback.</summary>
+        private long _lastPlaybackPresentTimestamp;
         /// <summary>Identifies the Unity thread allowed to control this player.</summary>
         private int _mainThread;
         /// <summary>Occurs when the first frame is presented; the argument is this player.</summary>
@@ -788,7 +791,8 @@ namespace MajdataPlay.FFmpeg
             var now = session.PlaybackPosition;
             // Select under one lock so worker-side replacement cannot race the due
             // check or temporarily require a second presenter-owned frame container.
-            var newest = session.TakeLatestFrame(now + 0.001);
+            // While throttled, due frames stay queued and the worker replaces them.
+            var newest = IsPresentationThrottled() ? null : session.TakeLatestFrame(now + 0.001);
 
             if (newest != null)
             {
@@ -799,6 +803,8 @@ namespace MajdataPlay.FFmpeg
                         return;
                     }
                 }
+
+                _lastPlaybackPresentTimestamp = Stopwatch.GetTimestamp();
 
                 if (_waitingForFrame)
                 {
@@ -831,6 +837,26 @@ namespace MajdataPlay.FFmpeg
                 _waitingForFrame = false;
                 session.SetPlayback(playing: true);
             }
+        }
+
+        /// <summary>Checks whether presenting another frame now would exceed the video's nominal frame rate in real time.</summary>
+        /// <returns>True if the next due frame should wait for a later update; otherwise false.</returns>
+        /// <remarks>
+        /// Above 1x speed, or after a stall, many frames can become due between updates. Each presentation costs a texture
+        /// upload or GPU conversion on Unity's render thread, so the rate is bounded to what 1x playback needs; frames
+        /// skipped by the bound are superseded on the decoding worker. The slack keeps 1x playback jitter unaffected.
+        /// </remarks>
+        private bool IsPresentationThrottled()
+        {
+            if (_waitingForFrame)
+            {
+                return false;
+            }
+
+            var frameRate = _info?.FrameRate ?? 0;
+            var nominalFrameRate = double.IsNaN(frameRate) || frameRate <= 0 ? 60 : Math.Max(24, Math.Min(120, frameRate));
+            var elapsed = (Stopwatch.GetTimestamp() - _lastPlaybackPresentTimestamp) / (double)Stopwatch.Frequency;
+            return elapsed < 0.75 / nominalFrameRate;
         }
 
         /// <summary>Uploads or shares a frame and publishes its texture while guarding against reentrant controls.</summary>

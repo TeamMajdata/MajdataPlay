@@ -31,7 +31,92 @@ namespace MajdataPlay.FFmpeg.Validation
             }
 
             TestEndOfStream(media);
+            TestExpiredFrameDiscard(media);
+            TestKeyFrameCatchUp(media);
             return s_checks - before;
+        }
+
+        /// <summary>Checks that expired frames are discarded before conversion while presentation follows a fast clock.</summary>
+        /// <param name="media">The seekable native video fixture played at 1x and 16x.</param>
+        /// <exception cref="InvalidOperationException">Frames are discarded at 1x, kept at 16x, or presentation falls behind.</exception>
+        /// <exception cref="TimeoutException">The native worker does not preload within the finite timeout.</exception>
+        private static void TestExpiredFrameDiscard(string media)
+        {
+            using var session = new VideoDecodeSession(media, new DecoderOptions(), 3);
+            WaitFor(session, () => session.BufferedFrames == 3, "discard fixture preload");
+            var info = session.Info!;
+            session.SetPlayback(0, 1, true);
+            PresentFor(session, 500, 8, out _, out _);
+            Check(session.DiscardedFrames == 0, "Real-time playback with a prompt presenter discards no decoded frames.");
+
+            // A presenter at roughly 60 Hz consumes far fewer frames than 16x playback makes due.
+            session.SetPlayback(rate: 16);
+            PresentFor(session, Math.Min(1500, (int)(info.Duration / 16 * 1000 * 0.6)), 16, out var presented, out var maximumLag);
+            Check(session.DiscardedFrames > presented,
+                "At 16x, expired frames are discarded on the worker instead of converted for presentation.");
+            Check(maximumLag <= 0.25 * 16 + 2,
+                "Presented frames stay within the catch-up window of the 16x playback clock (lag " + maximumLag.ToString("F2") + " s).");
+            Check(session.Error == null, "Discarding expired frames does not fault the worker.");
+            Console.WriteLine("Expired frame discard: " + session.DiscardedFrames + " discarded, " + presented
+                + " presented, " + session.CatchUpSeeks + " catch-up seeks, max lag " + maximumLag.ToString("F2") + " s.");
+        }
+
+        /// <summary>Checks that a decoder far behind a running clock skips to a later keyframe instead of decoding the gap.</summary>
+        /// <param name="media">The seekable native video fixture, long enough to contain a keyframe after its midpoint.</param>
+        /// <exception cref="InvalidOperationException">No catch-up seek occurs or the queue does not reach the clock.</exception>
+        /// <exception cref="TimeoutException">The worker does not catch up within the finite timeout.</exception>
+        private static void TestKeyFrameCatchUp(string media)
+        {
+            using var session = new VideoDecodeSession(media, new DecoderOptions(), 3);
+            WaitFor(session, () => session.BufferedFrames == 3, "catch-up fixture preload");
+            var info = session.Info!;
+            var target = info.Duration * 0.5;
+            // Moving a running clock without Seek models a decoder that fell far behind.
+            session.SetPlayback(target, 1, true);
+            WaitFor(session, () => session.NextPresentationTime >= target - (2 / info.FrameRate), "keyframe catch-up");
+            Check(session.CatchUpSeeks >= 1, "A decoder far behind the running clock repositions to a later keyframe.");
+            Check(session.Error == null, "Keyframe catch-up does not fault the worker.");
+            using (var frame = session.TakeLatestFrame(double.PositiveInfinity))
+            {
+                Check(frame != null && frame.Data != IntPtr.Zero && frame.PresentationTime >= target - (2 / info.FrameRate),
+                    "Frames after keyframe catch-up carry pixels at or after the playback clock.");
+            }
+        }
+
+        /// <summary>Consumes due frames at a fixed interval as the player would, measuring how far behind the clock they are.</summary>
+        /// <param name="session">The playing session whose due frames are taken.</param>
+        /// <param name="milliseconds">The total wall-clock duration of the simulated presenter.</param>
+        /// <param name="intervalMilliseconds">The wall-clock interval between simulated presentation attempts.</param>
+        /// <param name="presented">Receives the number of frames taken for presentation.</param>
+        /// <param name="maximumLag">Receives the largest clock position minus presented frame end, in media seconds.</param>
+        /// <exception cref="InvalidOperationException">The worker fails or presented timestamps move backward.</exception>
+        private static void PresentFor(VideoDecodeSession session, int milliseconds, int intervalMilliseconds, out int presented, out double maximumLag)
+        {
+            presented = 0;
+            maximumLag = 0;
+            var previous = double.NegativeInfinity;
+            var watch = Stopwatch.StartNew();
+            while (watch.ElapsedMilliseconds < milliseconds)
+            {
+                if (session.Error != null)
+                {
+                    throw new InvalidOperationException("Frame discard worker failed.", session.Error);
+                }
+
+                var position = session.PlaybackPosition;
+                using (var frame = session.TakeLatestFrame(position + 0.001))
+                {
+                    if (frame != null)
+                    {
+                        Check(frame.PresentationTime >= previous, "Presented timestamps never move backward while catching up.");
+                        previous = frame.PresentationTime;
+                        maximumLag = Math.Max(maximumLag, position - (frame.PresentationTime + frame.Duration));
+                        presented++;
+                    }
+                }
+
+                Thread.Sleep(intervalMilliseconds);
+            }
         }
 
         /// <summary>Checks that autonomous EOF draining preserves the final frame and permits a later backward seek.</summary>
