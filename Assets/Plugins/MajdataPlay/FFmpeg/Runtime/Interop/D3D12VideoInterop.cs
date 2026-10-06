@@ -1,9 +1,9 @@
 #nullable enable
 using System;
-using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Threading;
 using MajdataPlay.Diagnostics;
+using MajdataPlay.FFmpeg.Internal;
 
 namespace MajdataPlay.FFmpeg.Interop
 {
@@ -22,7 +22,7 @@ namespace MajdataPlay.FFmpeg.Interop
         {
 #if UNITY_STANDALONE_WIN || UNITY_EDITOR_WIN
             using var profile = UnityProfiler.Create("FFmpeg.Decoder.WaitForD3D12Frame");
-            var deadline = Stopwatch.GetTimestamp() + (long)(timeoutMilliseconds * (double)Stopwatch.Frequency / 1000);
+            var wait = new GpuCompletionWait(timeoutMilliseconds);
             try
             {
                 while (true)
@@ -39,15 +39,7 @@ namespace MajdataPlay.FFmpeg.Interop
                         throw new NotSupportedException("D3D12VA GPU completion query failed (native code " + result + ").");
                     }
 
-                    if (Stopwatch.GetTimestamp() >= deadline)
-                    {
-                        throw new TimeoutException("Timed out waiting for D3D12VA GPU video decoding on the background worker.");
-                    }
-
-                    if (cancellationToken.WaitHandle.WaitOne(1))
-                    {
-                        cancellationToken.ThrowIfCancellationRequested();
-                    }
+                    wait.WaitForNextPoll(cancellationToken);
                 }
             }
             catch (EntryPointNotFoundException error)

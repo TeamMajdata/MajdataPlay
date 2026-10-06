@@ -82,8 +82,31 @@ namespace MajdataPlay.FFmpeg.Validation
                 previous = frame.PresentationTime;
             }
 
-            Check(audit.Synchronization!.WaitCount > 24,
-                "The worker observes GPU completion for codec calls even when they do not return a presentation frame.");
+            Check(audit.Synchronization!.WaitCount >= 24 && audit.Synchronization.WaitCount <= 32,
+                "Hardware outputs complete without redundant markers on every empty receive and packet send.");
+            // No playback deadline is installed here: every output frame is decoded,
+            // unlike a 60 FPS presenter that intentionally supersedes older due frames.
+            var decodeWatch = Stopwatch.StartNew();
+            var decodedFrames = 0;
+            for (var index = 0; index < 240; index++)
+            {
+                using var frame = decoder.ReadFrame();
+                if (frame == null)
+                {
+                    break;
+                }
+
+                Check(frame.IsHardwareFrame && frame.PresentationTime >= previous,
+                    "Unthrottled decode retains native hardware output and monotonic timestamps.");
+                previous = frame.PresentationTime;
+                decodedFrames++;
+            }
+
+            decodeWatch.Stop();
+            Check(decodedFrames > 0, "The fixture contains hardware outputs after query warmup.");
+            Console.WriteLine("D3D11VA unthrottled decode: " + decodedFrames + " frames / "
+                + decodeWatch.Elapsed.TotalSeconds.ToString("F3") + " s = "
+                + (decodedFrames / decodeWatch.Elapsed.TotalSeconds).ToString("F1") + " FPS; source=" + decoder.FrameRate + " FPS.");
             var target = Math.Min(1.25, decoder.Duration / 2);
             decoder.Seek(target);
             using (var frame = decoder.ReadFrame())
@@ -126,7 +149,7 @@ namespace MajdataPlay.FFmpeg.Validation
             Check(audit.DeviceReferenceCount == 1,
                 "Only the test audit retains the hardware device after decoder, query, and native frames are released.");
             Console.WriteLine("D3D11VA decode synchronization: " + audit.Synchronization.WaitCount
-                + " completed codec calls; native pixels, seeks, cancellation and ownership passed.");
+                + " completed GPU markers; native pixels, seeks, cancellation and ownership passed.");
         }
 
         /// <summary>Closes the real synchronized worker during high-rate playback and audits its final ownership state.</summary>
@@ -261,7 +284,7 @@ namespace MajdataPlay.FFmpeg.Validation
         {
             /// <summary>Owns the production synchronizer and its retained native query/device resources.</summary>
             private readonly IHardwareDecodeSynchronization _inner;
-            /// <summary>Counts completed codec-call GPU waits on the owning worker.</summary>
+            /// <summary>Counts completed worker-side GPU completion markers.</summary>
             private int _waitCount;
             /// <summary>Counts decoder-owned disposal calls on the owning worker.</summary>
             private int _disposeCount;

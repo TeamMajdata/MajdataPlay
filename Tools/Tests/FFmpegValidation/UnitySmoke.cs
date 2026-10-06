@@ -104,6 +104,14 @@ public sealed class FFmpegPlayerSmoke : MonoBehaviour
         }
 
         Check(rejectedReverse && _player.PlaybackRate == 2, "reverse rate rejected");
+        if (Argument("-videoTestPlaybackThroughput") == "true")
+        {
+            var throughput = TestPlaybackThroughput();
+            while (throughput.MoveNext())
+            {
+                yield return throughput.Current;
+            }
+        }
         var doubleRatePlayback = TestDoubleRatePlayback();
         while (doubleRatePlayback.MoveNext())
         {
@@ -243,6 +251,114 @@ public sealed class FFmpegPlayerSmoke : MonoBehaviour
         finally
         {
             _player.Pause();
+            QualitySettings.vSyncCount = previousVSync;
+            Application.targetFrameRate = previousFrameRate;
+        }
+    }
+    /// <summary>Measures actual video progress and presentation cadence at 1x, 2x, and 3x, not just Unity update FPS.</summary>
+    /// <returns>The coroutine that tests each speed and restores the paused playback settings.</returns>
+    /// <exception cref="Exception">The fixture is too short or hardware playback cannot sustain the requested speed.</exception>
+    /// <exception cref="MissingFieldException">The displayed frame timestamp is unavailable.</exception>
+    private IEnumerator TestPlaybackThroughput()
+    {
+        Check(_player.LengthSeconds >= 8, "throughput fixture contains at least eight seconds of video");
+        var previousVSync = QualitySettings.vSyncCount;
+        var previousFrameRate = Application.targetFrameRate;
+        var previousRate = _player.PlaybackRate;
+        var rates = new[] { 1f, 2f, 3f };
+        var clockRates = new double[rates.Length];
+        var videoRates = new double[rates.Length];
+        var presentationRates = new double[rates.Length];
+        var maximumGaps = new double[rates.Length];
+        var displayedEnd = typeof(FFmpegVideoPlayer).GetField("_lastFrameEnd", BindingFlags.Instance | BindingFlags.NonPublic)
+            ?? throw new MissingFieldException(typeof(FFmpegVideoPlayer).FullName, "_lastFrameEnd");
+        var latestPresentation = 0d;
+        // FrameReady carries a sequence number, not a presentation timestamp.
+        Action<FFmpegVideoPlayer, long> onFrame = (player, _) =>
+        {
+            latestPresentation = (double)displayedEnd.GetValue(player)!;
+        };
+        _player.FrameReady += onFrame;
+        QualitySettings.vSyncCount = 0;
+        Application.targetFrameRate = 60;
+        try
+        {
+            for (var index = 0; index < rates.Length; index++)
+            {
+                _player.Pause();
+                _player.PlaybackRate = rates[index];
+                var seek = _player.SeekAsync(0);
+                var start = UnityEngine.Time.realtimeSinceStartup;
+                while (!seek.IsCompleted)
+                {
+                    CheckTimeout(start);
+                    yield return null;
+                }
+
+                seek.GetAwaiter().GetResult();
+                _player.Play();
+                yield return new WaitForSecondsRealtime(0.25f);
+                var initialTime = _player.TimeSeconds;
+                var initialPresentation = latestPresentation;
+                var initialFrames = _frames;
+                var observedFrames = _frames;
+                var initialUpdates = UnityEngine.Time.frameCount;
+                var bufferingUpdates = 0;
+                var maximumLag = 0d;
+                var lastPresentation = 0d;
+                var maximumGap = 0d;
+                var wallClock = System.Diagnostics.Stopwatch.StartNew();
+                while (wallClock.Elapsed.TotalSeconds < 2)
+                {
+                    yield return null;
+                    var elapsed = wallClock.Elapsed.TotalSeconds;
+                    maximumGap = Math.Max(maximumGap, elapsed - lastPresentation);
+                    if (_frames != observedFrames)
+                    {
+                        lastPresentation = elapsed;
+                        observedFrames = _frames;
+                    }
+
+                    if (_player.IsBuffering)
+                    {
+                        bufferingUpdates++;
+                    }
+
+                    maximumLag = Math.Max(maximumLag, (_player.TimeSeconds - latestPresentation) / rates[index]);
+                }
+
+                _player.Pause();
+                wallClock.Stop();
+                var seconds = wallClock.Elapsed.TotalSeconds;
+                clockRates[index] = (_player.TimeSeconds - initialTime) / seconds;
+                videoRates[index] = (latestPresentation - initialPresentation) / seconds;
+                presentationRates[index] = (_frames - initialFrames) / seconds;
+                maximumGaps[index] = maximumGap;
+                Debug.Log("Playback throughput: requested=" + rates[index] + "x; clock=" + clockRates[index].ToString("F3")
+                    + "x; video=" + videoRates[index].ToString("F3") + "x; presentations=" + presentationRates[index].ToString("F1")
+                    + " FPS; Unity updates=" + ((UnityEngine.Time.frameCount - initialUpdates) / seconds).ToString("F1")
+                    + " FPS; maximum presentation gap=" + maximumGap.ToString("F3") + " s; maximum wall-clock lag="
+                    + maximumLag.ToString("F3") + " s; buffering updates=" + bufferingUpdates + "; decoder=" + _player.DecoderDevice
+                    + "; transport=" + _player.TransferMode + "; video=" + _player.Width + "x" + _player.Height
+                    + "@" + _player.FrameRate + "; GPU=" + SystemInfo.graphicsDeviceName);
+            }
+
+            for (var index = 0; index < rates.Length; index++)
+            {
+                Check(Math.Abs(clockRates[index] - rates[index]) <= rates[index] * 0.02,
+                    "playback clock sustains " + rates[index] + "x within 2%: " + clockRates[index]);
+                Check(Math.Abs(videoRates[index] - rates[index]) <= rates[index] * 0.1,
+                    "displayed video sustains " + rates[index] + "x within 10%: " + videoRates[index]);
+                Check(presentationRates[index] >= Math.Min(60, _player.FrameRate * rates[index]) * 0.8,
+                    "presentation cadence sustains at least 80% of the expected FPS at " + rates[index] + "x: " + presentationRates[index]);
+                Check(maximumGaps[index] < 0.1, "no 100ms presentation freeze at " + rates[index] + "x: " + maximumGaps[index]);
+            }
+        }
+        finally
+        {
+            _player.Pause();
+            _player.PlaybackRate = previousRate;
+            _player.FrameReady -= onFrame;
             QualitySettings.vSyncCount = previousVSync;
             Application.targetFrameRate = previousFrameRate;
         }

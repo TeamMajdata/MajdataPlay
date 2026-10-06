@@ -18,6 +18,7 @@
     <Compile Include="AllocationChecks.cs" />
     <Compile Include="EncodingChecks.cs" />
     <Compile Include="FrameEvictionChecks.cs" />
+    <Compile Include="GpuWaitChecks.cs" />
     <Compile Include="../../../Assets/Plugins/MajdataPlay/FFmpeg/Runtime/**/*.cs" />
     <Compile Include="../../../Assets/Plugins/MajdataPlay/Diagnostics/**/*.cs" />
     <Compile Include="../../../Assets/Plugins/ZString/**/*.cs" />

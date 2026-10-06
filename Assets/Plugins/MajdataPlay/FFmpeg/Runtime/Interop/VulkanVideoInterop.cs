@@ -1,6 +1,5 @@
 #nullable enable
 using System;
-using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Threading;
 using MajdataPlay.Diagnostics;
@@ -160,7 +159,7 @@ namespace MajdataPlay.FFmpeg.Interop
         {
 #if UNITY_STANDALONE_WIN || UNITY_EDITOR_WIN || UNITY_STANDALONE_LINUX || UNITY_EDITOR_LINUX || (UNITY_ANDROID && !UNITY_EDITOR)
             using var profile = UnityProfiler.Create("FFmpeg.Decoder.WaitForVulkanFrame");
-            var deadline = Stopwatch.GetTimestamp() + (long)(timeoutMilliseconds * (double)Stopwatch.Frequency / 1000);
+            var wait = new GpuCompletionWait(timeoutMilliseconds);
             try
             {
                 while (true)
@@ -177,7 +176,7 @@ namespace MajdataPlay.FFmpeg.Interop
                         throw new NotSupportedException(DescribeError(result));
                     }
 
-                    WaitForGpuPoll(cancellationToken, deadline);
+                    wait.WaitForNextPoll(cancellationToken);
                 }
             }
             catch (EntryPointNotFoundException error)
@@ -187,24 +186,6 @@ namespace MajdataPlay.FFmpeg.Interop
 #else
             throw new PlatformNotSupportedException();
 #endif
-        }
-
-        /// <summary>Delays a GPU completion poll without holding any native frame, context, or Unity lock.</summary>
-        /// <param name="cancellationToken">Cancels the delay when the decoding session closes.</param>
-        /// <param name="deadline">The monotonic timestamp after which GPU completion times out.</param>
-        /// <exception cref="OperationCanceledException">The decoding session was canceled.</exception>
-        /// <exception cref="TimeoutException">GPU completion exceeded the deadline.</exception>
-        private static void WaitForGpuPoll(CancellationToken cancellationToken, long deadline)
-        {
-            if (Stopwatch.GetTimestamp() >= deadline)
-            {
-                throw new TimeoutException("Timed out waiting for GPU video decoding on the background worker.");
-            }
-
-            if (cancellationToken.WaitHandle.WaitOne(1))
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-            }
         }
 
         /// <summary>Creates reusable admission control for the Windows D3D11VA fallback used by Vulkan.</summary>
@@ -247,7 +228,7 @@ namespace MajdataPlay.FFmpeg.Interop
                 }
             }
 
-            /// <summary>Waits for the last codec call's GPU work before admitting another decode submission.</summary>
+            /// <summary>Completes preceding codec GPU work before publishing an output or admitting another bounded packet batch.</summary>
             /// <param name="cancellationToken">Cancels the worker wait when the session closes.</param>
             /// <param name="timeoutMilliseconds">The maximum GPU wait time in milliseconds.</param>
             /// <exception cref="OperationCanceledException">The decoding session was canceled.</exception>
@@ -263,7 +244,7 @@ namespace MajdataPlay.FFmpeg.Interop
                     throw new NotSupportedException("D3D11VA GPU completion submission failed (native code " + result + ").");
                 }
 
-                var deadline = Stopwatch.GetTimestamp() + (long)(timeoutMilliseconds * (double)Stopwatch.Frequency / 1000);
+                var wait = new GpuCompletionWait(timeoutMilliseconds);
                 while (true)
                 {
                     cancellationToken.ThrowIfCancellationRequested();
@@ -278,7 +259,7 @@ namespace MajdataPlay.FFmpeg.Interop
                         throw new NotSupportedException("D3D11VA GPU completion query failed (native code " + result + ").");
                     }
 
-                    WaitForGpuPoll(cancellationToken, deadline);
+                    wait.WaitForNextPoll(cancellationToken);
                 }
             }
 

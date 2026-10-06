@@ -56,6 +56,8 @@ namespace MajdataPlay.FFmpeg
     [DisallowMultipleComponent, AddComponentMenu("Video/FFmpeg Video Player")]
     public sealed partial class FFmpegVideoPlayer : MonoBehaviour
     {
+        /// <summary>Allows short worker scheduling gaps without freezing the playback timeline, in wall-clock seconds.</summary>
+        private const double PlaybackBufferingGraceSeconds = 0.1;
         /// <summary>Stores the path or URL of the video to open.</summary>
         [SerializeField, FormerlySerializedAs("Source"), Tooltip("Local path or FFmpeg-supported URL. Android packaged StreamingAssets must first be extracted.")]
         private string _source = "";
@@ -825,9 +827,10 @@ namespace MajdataPlay.FFmpeg
                     BeginSeek(0, VideoPlaybackState.Playing);
                 }
             }
-            // A just-drained queue is refilled asynchronously; do not pause the
-            // clock until an update actually fails to obtain a due frame.
-            else if (newest == null && session.BufferedFrames == 0 && !session.EndOfStream && now > _lastFrameEnd)
+            // A short worker/GPU scheduling gap is not an input stall. Keep the
+            // clock and discard deadlines advancing so high-rate decoding can catch up.
+            else if (newest == null && session.BufferedFrames == 0 && !session.EndOfStream
+                && HasPlaybackUnderflow(now, _lastFrameEnd, _playbackRate))
             {
                 session.SetPlayback(playing: false);
                 _waitingForFrame = true;
@@ -837,6 +840,16 @@ namespace MajdataPlay.FFmpeg
                 _waitingForFrame = false;
                 session.SetPlayback(playing: true);
             }
+        }
+
+        /// <summary>Distinguishes a sustained queue underflow from a short asynchronous decode gap.</summary>
+        /// <param name="position">The current media timeline position in seconds.</param>
+        /// <param name="frameEnd">The last displayed frame's end position in media seconds.</param>
+        /// <param name="rate">The positive playback multiplier used to convert the gap into wall-clock time.</param>
+        /// <returns>True when missing output exceeds the wall-clock grace period and buffering should freeze the clock.</returns>
+        internal static bool HasPlaybackUnderflow(double position, double frameEnd, double rate)
+        {
+            return position - frameEnd > PlaybackBufferingGraceSeconds * rate;
         }
 
         /// <summary>Checks whether presenting another frame now would exceed the video's nominal frame rate in real time.</summary>

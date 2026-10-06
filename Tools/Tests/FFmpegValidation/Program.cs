@@ -22,6 +22,7 @@ static class Program
         try
         {
             TestClock();
+            _checks += GpuWaitChecks.RunManaged();
             _checks += VideoBitRateChecks.Run();
             _checks += AllocationChecks.RunManaged();
             _checks += EncodingChecks.RunManaged();

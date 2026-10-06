@@ -67,7 +67,7 @@ namespace MajdataPlay.FFmpeg.Internal
     /// <summary>Bounds hardware decode submissions without making Unity's render thread wait for the GPU.</summary>
     internal interface IHardwareDecodeSynchronization : IDisposable
     {
-        /// <summary>Waits for work submitted by the last codec call before admitting another call.</summary>
+        /// <summary>Completes preceding codec work before publishing a frame or admitting another bounded packet batch.</summary>
         /// <param name="cancellationToken">Cancels the worker wait when the decode session closes.</param>
         /// <param name="timeoutMilliseconds">The maximum GPU wait time in milliseconds.</param>
         /// <exception cref="OperationCanceledException">The session was canceled.</exception>

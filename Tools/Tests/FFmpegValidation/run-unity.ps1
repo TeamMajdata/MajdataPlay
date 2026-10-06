@@ -11,6 +11,8 @@ param(
     [switch] $HardwareCpuUpload,
     [switch] $TestDecoderPreference,
     [switch] $TestDecodeOverload,
+    [switch] $TestPlaybackThroughput,
+    [switch] $DisableBurst,
     [switch] $TestCameraCapture,
     [switch] $CaptureUrp,
     [switch] $CaptureHardware,
@@ -116,6 +118,7 @@ if (-not $SkipBuild) {
         '-logFile', ('"' + $buildLog + '"'), '-executeMethod', 'FFmpegPlayerSmokeBuild.Run', '-videoBackend', $Backend,
         '-videoArchitecture', $Architecture, '-videoPlatform', $Platform, '-videoOutput', ('"' + $result + '"'))
     $buildArgs += @('-cameraCapture', $(if ($TestCameraCapture) { 'true' } else { 'false' }), '-captureUrp', $(if ($CaptureUrp) { 'true' } else { 'false' }))
+    if ($DisableBurst) { $buildArgs += '--burst-disable-compilation' }
     $process = Start-Process -FilePath $UnityEditor -ArgumentList $buildArgs -WindowStyle Hidden -PassThru
     $process.WaitForExit()
     if ($process.ExitCode -ne 0) { Get-Content -LiteralPath $buildLog -Tail 70; throw "Unity build failed: $buildLog" }
@@ -171,7 +174,10 @@ $playerArgs += @('-videoNativeDecoder', $nativeDecoderValue)
 if ($TestDecodeOverload) {
     $playerArgs += @('-videoTestDecodeOverload', 'true')
 }
-if ($TestCameraCapture -or $TestDecodeOverload) {
+if ($TestPlaybackThroughput) {
+    $playerArgs += @('-videoTestPlaybackThroughput', 'true')
+}
+if ($TestCameraCapture -or $TestDecodeOverload -or $TestPlaybackThroughput) {
     # Capture and render-thread throughput checks need the regular Player render loop.
     $playerArgs = @($playerArgs | Where-Object { $_ -ne '-batchmode' })
 }

@@ -20,6 +20,8 @@ namespace MajdataPlay.FFmpeg.Internal
     /// </remarks>
     public sealed unsafe class FFmpegVideoDecoder : IDisposable
     {
+        /// <summary>Bounds packet submissions that do not yet produce a hardware output frame.</summary>
+        private const int MaximumPendingHardwarePackets = 4;
         /// <summary>Roots the native I/O interrupt delegate for the lifetime of the process.</summary>
         private static readonly AVIOInterruptCB_callback s_interruptCallback = Interrupt;
         /// <summary>Roots the native pixel-format selection delegate for the lifetime of the process.</summary>
@@ -60,6 +62,8 @@ namespace MajdataPlay.FFmpeg.Internal
         private IHardwareDecodeSession? _hardwareSession;
         /// <summary>Owns optional GPU admission control, accessed only by the decoding worker.</summary>
         private IHardwareDecodeSynchronization? _hardwareSynchronization;
+        /// <summary>Counts packet submissions since the last worker-side GPU completion marker.</summary>
+        private int _pendingHardwarePackets;
         /// <summary>Caches the active surface session's image release callback without per-frame allocations.</summary>
         private Action<IntPtr>? _releaseHardwareImage;
         /// <summary>Indicates that decoded pixels must use CPU upload instead of native sharing.</summary>
@@ -508,11 +512,11 @@ namespace MajdataPlay.FFmpeg.Internal
                     result = ffmpeg.avcodec_receive_frame(_codec, _frame);
                 }
 
-                _hardwareSynchronization?.Wait(_cancellation, _options.IOTimeoutMilliseconds);
                 if (result == 0)
                 {
                     try
                     {
+                        SynchronizeHardwareDecoding(true);
                         if (!_cpuTransport && _frame->hw_frames_ctx != null)
                         {
                             // A hardware AVFrame may precede GPU completion. Pace all
@@ -603,13 +607,13 @@ namespace MajdataPlay.FFmpeg.Internal
                         result = ffmpeg.avcodec_send_packet(_codec, _packet);
                     }
 
-                    _hardwareSynchronization?.Wait(_cancellation, _options.IOTimeoutMilliseconds);
                     if (result == again)
                     {
                         throw new InvalidOperationException("Video decoder returned EAGAIN from both send and receive.");
                     }
 
                     Check(result, "Send video packet");
+                    SynchronizeHardwareDecoding(false);
                     RecordPacketBitRate();
                     ffmpeg.av_packet_unref(_packet);
                     _packetPending = false;
@@ -623,7 +627,7 @@ namespace MajdataPlay.FFmpeg.Internal
                         result = ffmpeg.avcodec_send_packet(_codec, null);
                     }
 
-                    _hardwareSynchronization?.Wait(_cancellation, _options.IOTimeoutMilliseconds);
+                    SynchronizeHardwareDecoding(true);
                     if (result == ffmpeg.AVERROR_EOF)
                     {
                         return FinishInput();
@@ -736,10 +740,35 @@ namespace MajdataPlay.FFmpeg.Internal
             ResetAfterSeek(seconds);
         }
 
+        /// <summary>Completes hardware outputs and bounds submissions during codec reorder or no-output runs.</summary>
+        /// <param name="force">True completes all preceding GPU work; false admits one packet up to the fixed bound.</param>
+        /// <exception cref="OperationCanceledException">The decode session was canceled.</exception>
+        /// <exception cref="TimeoutException">The GPU operation exceeded its timeout.</exception>
+        /// <exception cref="NotSupportedException">The hardware completion query failed.</exception>
+        private void SynchronizeHardwareDecoding(bool force)
+        {
+            if (_hardwareSynchronization == null)
+            {
+                return;
+            }
+
+            if (!force && ++_pendingHardwarePackets < MaximumPendingHardwarePackets)
+            {
+                return;
+            }
+
+            // send_packet can decode immediately; receive_frame can also decode.
+            // One marker after a successful receive covers both. Do not flush/wait
+            // again for the subsequent empty receive, but keep no-output runs bounded.
+            _hardwareSynchronization.Wait(_cancellation, _options.IOTimeoutMilliseconds);
+            _pendingHardwarePackets = 0;
+        }
+
         /// <summary>Flushes decoder state after the demuxer has been repositioned and starts preroll at the target.</summary>
         /// <param name="seconds">The media timeline position in seconds before which decoded frames are preroll.</param>
         private void ResetAfterSeek(double seconds)
         {
+            SynchronizeHardwareDecoding(true);
             ReleaseSeekCandidate();
             ffmpeg.avcodec_flush_buffers(_codec);
             _hardwareSession?.Flush();
@@ -1283,6 +1312,7 @@ namespace MajdataPlay.FFmpeg.Internal
             _releaseHardwareImage = null;
             _hardwareSynchronization?.Dispose();
             _hardwareSynchronization = null;
+            _pendingHardwarePackets = 0;
         }
 
         /// <summary>Selects the requested hardware pixel format or a permitted software fallback without propagating exceptions into native code.</summary>

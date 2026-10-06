@@ -38,6 +38,27 @@ Unity 的 `-TestDecodeOverload` 使用正常 Player 渲染循环，关闭 VSync 
 
 日志记录更新 FPS、最大更新间隔、呈现命令数、视频尺寸/帧率、实际解码器与传输路径。素材和 GPU 不同会影响测量；检查日志中的实际解码器，D3D11VA 回退不能算作原生 D3D12VA/Vulkan Video 验证。原生 GPU 未就绪帧的提交前复查还需通过对应桥接测试验证。正常 Pixel 检查与这些同步回归共同验证画面和资源生命周期，不能仅以 `FrameReady` 计数断言每个 packet 都更新了像素。
 
+### Windows 高帧率视频与实际倍速
+
+`-TestPlaybackThroughput` 在正常 60 FPS Player 渲染循环中依次测量 1x、2x、3x。需要可 seek、至少 8 秒、GPU 可解码的素材；120 FPS 素材用于覆盖高帧率回归。素材必须在当前机器及负载下有至少 3x 的真实解码余量；应先用不丢帧的解码吞吐测量确认，不能仅凭 GPU 型号推断。每档预热后观测 2 秒，检查播放时钟（允许 2% 偏差）与实际呈现 PTS（允许 10% 偏差）的推进倍速、呈现频率（至少达到预期值的 80%）和最大呈现间隔（不得达到 100ms）。日志同时记录 Unity 更新 FPS、画面滞后、buffering 更新数及实际解码设备；仅有 Unity FPS 正常不再视为视频流畅。
+
+`FrameReady` 的第二个参数是帧序号，不是 PTS；测试读取已呈现帧的时间戳。正常 smoke 的 GPU 像素、seek 与生命周期检查仍会继续执行。此模式在 60 FPS 渲染循环中呈现最新应显示画面，不能据此声称 360 个画面/秒均被提交或显示。
+
+可生成非均匀的本地 H.264 120 FPS 素材后运行（所有生成物保留在忽略的 `.work/`）：
+
+```powershell
+ffmpeg -f lavfi -i "testsrc2=size=1280x720:rate=120" -t 24 -an `
+  -c:v libx264 -preset ultrafast -crf 23 -g 120 -bf 2 -pix_fmt yuv420p `
+  Tools/Tests/FFmpegValidation/.work/test-720p120.mp4
+
+./Tools/Tests/FFmpegValidation/run-unity.ps1 -Backend Mono -Architecture x64 `
+  -Graphics d3d11 -RequireHardware -TestPlaybackThroughput `
+  -WorkDirectory Tools/Tests/FFmpegValidation/.work/high-frame-rate `
+  -Media Tools/Tests/FFmpegValidation/.work/test-720p120.mp4
+```
+
+分别改用 `-Graphics d3d12` / `vulkan` 验证对应渲染路径；RX 580 上实际解码器可能仍是 D3D11VA，不应记作原生 D3D12VA / Vulkan Video 验证。如隔离工程遇到无关 Burst AOT 的 ShaderLibrary 解析失败，可追加 `-DisableBurst` 仅在该次隔离构建的命令行禁用 Burst，不修改主工程或全局设置；验证结果应记录该条件。
+
 ### Windows Vulkan Player 启动与窗口变化
 
 `ValidateVulkanPlayerStartup.ps1` 验证已构建的主游戏 Player，而不是空场景 smoke。先把 `MajdataPlay.exe`、`UnityPlayer.dll`、`WinPixEventRuntime.dll`、`MonoBleedingEdge/`、`MajdataPlay_Data/` 及测试用 `settings.json` 副本放入忽略的 `Tools/Tests/FFmpegValidation/.work/player-crash/`；桥接 DLL 应已更新为待验收构建。Player 会在隔离目录生成运行数据；不要直接使用日常游戏目录。

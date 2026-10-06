@@ -47,7 +47,7 @@ public sealed class VideoExample : MonoBehaviour
 | `SeekTo(TimeSpan)`, `Position` | 时间跳转；Position 是 0–1 的归一化位置 |
 | `PlaybackRate` | 1/16–16 倍速；不支持倒放；倍速变化保持时间连续 |
 | `Loop`, `NextFrame()` | 循环；暂停并向前显示一帧 |
-| `State`, `IsPrepared`, `IsPlaying`, `IsBuffering`, `IsSeekable` | 状态；准备或缓冲期间时间不推进 |
+| `State`, `IsPrepared`, `IsPlaying`, `IsBuffering`, `IsSeekable` | 状态；准备或持续缓冲期间时间不推进，100ms 以内的短时解码空档不会冻结播放时钟 |
 | `Texture`, `Width`, `Height`, `FrameRate`, `CodecName` | 当前输出与媒体信息；CodecName 是视频编码，如 h264 |
 | `CurrentBitRate`, `BitRate` | 当前画面附近约 1 秒的视频压缩码率估计、视频流平均码率，均为 bit/s；未知为 0，Inspector 自动换算单位 |
 | `DecoderType`, `DecoderName`, `DecoderDevice` | 当前会话的实际解码后端类型、AVCodec 名称与设备描述；需在准备后读取 |
