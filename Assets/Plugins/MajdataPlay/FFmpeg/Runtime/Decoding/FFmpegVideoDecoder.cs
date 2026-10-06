@@ -1158,6 +1158,13 @@ namespace MajdataPlay.FFmpeg.Internal
                 }
 
                 _hardwarePixelFormat = configuration->pix_fmt;
+                if (!_cpuTransport && _options.WaitForHardwareFrame != null)
+                {
+                    // Internal frame workers could submit more GPU work while the
+                    // owning worker waits for the last output to complete.
+                    _codec->thread_count = 1;
+                }
+
                 if (!_cpuTransport && _options.CreateHardwareSynchronization != null)
                 {
                     try

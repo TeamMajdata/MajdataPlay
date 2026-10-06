@@ -2,6 +2,20 @@
 
 最近验证日期：2026-10-06；此前跨平台矩阵执行于 2026-10-03。Windows / Unity 6000.3.17f1 / AMD Radeon RX 580 2048SP；Linux 使用本机 WSL Ubuntu 24.04；Android 真机为 Mi MIX 2S / Android 15 API 35 / Adreno 630 / Vulkan 1.1.128；Apple 构建测试使用用户提供的 Mac mini M4。当前 Windows/Linux/Android 图形桥接 ABI 为 **4**，Apple 保持 **2**；下方 ABI2/3 的记录为此前版本实测。
 
+## 2026-10-06：Windows D3D11/D3D12 高倍速解码超载
+
+Unity **6000.3.17f1 / Windows x64 Mono / RX 580 2048SP** 隔离 Player 使用 4K30 H.264、24 秒素材，VSync 关闭且目标 60 FPS；分别测量 1x 与 16x。最终 x64 桥接 SHA256 为 `3061e8ab20919e66d514c1e9f2f1d340fa49ef2f16ff93bfe224b168291ad14a`，已与 Player 内 DLL 核对。修复前 D3D12 回退路径为 58.7→44.4 FPS、最大更新间隔 0.025→0.045 秒。
+
+| 图形后端 | 1x / 16x Unity FPS | 最大更新间隔 1x / 16x | 结果与实际路径 |
+| --- | --- | --- | --- |
+| D3D11 | 59.4 / 59.4 | 0.018 / 0.017 秒 | 38 assertions PASS；D3D11VA + D3D11 GPU 转换 |
+| D3D12 | 59.5 / 59.2 | 0.026 / 0.026 秒 | 39 assertions PASS；D3D11VA 回退 + D3D12 GPU 共享复制 |
+| Vulkan | 59.4 / 59.5 | 0.017 / 0.018 秒 | 39 assertions PASS；D3D11VA 回退 + Vulkan GPU 共享复制 |
+
+Windows x64/x86 原生 D3D12 合成帧烟测均通过：每架构 100 帧、4 次像素比较、25 个未完成帧 packet 被跳过、0 条 D3D12 验证层错误。最终 x86 桥接 SHA256 为 `efa4eb9ac3005082a05c6c525a92eed441d3094855a81ce2a247062276dae908`。使用最终 x64 桥接的 `.NET 9 --decode-sync` 为 **259 assertions PASS**，含三次真实 D3D11VA 会话、各 270 次完成等待、像素、seek、取消和设备引用归还。
+
+日志和 Player 位于忽略的 `.work/video-overload/unity-d3d-fix/`；托管测试原生库位于 `.work/video-overload/native-x64/`。本机 RX 580 的 D3D12 视频解码 Tier 被 FFmpeg 拒绝，因此原生 D3D12VA 真实码流播放未验证；合成帧烟测及 D3D11VA 回退不能代替该验证。主游戏场景和其他平台/架构 Player 本轮未运行，正常 GPU 色彩转换与共享复制仍有同步成本。
+
 ## 2026-10-06：Windows Vulkan Player 偶发启动崩溃兼容
 
 用户提供的 Unity **6000.3.17f1 / Windows x64 Mono / RX 580 2048SP** 主游戏 Player 在第一次交换链取帧时崩溃。匹配 DLL/PDB 的转储显示：`UnityGfxDeviceWorker` 发生 `0xc0000005`，读地址 `0x8`；`RSI=0x3b9acdeb`（`VK_SUBOPTIMAL_KHR`），取得的 image index 为 2，`R8=0`，故障指令为 UnityPlayer RVA `0x11f33df` 的 `mov r8,[r8+8]`。该分支调用交换链 `UpdateConfiguration`，经过返回 3/4 的路径后仍使用取得的 index 查找图像。此时仅有桥接与 avutil 被加载，avcodec 尚未加载。

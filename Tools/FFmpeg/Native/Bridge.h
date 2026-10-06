@@ -20,6 +20,7 @@ extern "C" {
 
 // The C ABI is deliberately cdecl, independently of Unity's render callback ABI.
 // All opaque packets transfer ownership to the render callback when submitted.
+// Frame readiness queries borrow their AVFrame and never wait for GPU completion.
 enum FfuEvent {
     FfuSubmitD3D11 = 1, FfuCompleteMetal = 2, FfuDrain = 3,
     FfuPrepareD3D12 = 4, FfuSubmitD3D12 = 5,

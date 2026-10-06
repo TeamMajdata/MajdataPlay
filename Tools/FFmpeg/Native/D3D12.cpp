@@ -313,6 +313,21 @@ FFU_EXPORT void* FFU_CALL ffu_d3d12va_acquire_device() {
     return buffer;
 }
 
+static int FrameReady(const AVFrame* frame, UINT64* fenceValue) {
+    if (!frame || frame->format != AV_PIX_FMT_D3D12 || !frame->data[0]) return E_INVALIDARG;
+    const auto* input = reinterpret_cast<const AVD3D12VAFrame*>(frame->data[0]);
+    if (!input->texture || !input->sync_ctx.fence) return E_INVALIDARG;
+    const UINT64 requested = input->sync_ctx.fence_value;
+    const UINT64 completed = input->sync_ctx.fence->GetCompletedValue();
+    if (completed == UINT64_MAX) return DXGI_ERROR_DEVICE_REMOVED;
+    if (fenceValue) *fenceValue = requested;
+    return completed >= requested ? 1 : 0;
+}
+
+FFU_EXPORT int FFU_CALL ffu_d3d12va_frame_ready(const AVFrame* frame) {
+    return FrameReady(frame, nullptr);
+}
+
 static D3D12_RESOURCE_BARRIER Transition(ID3D12Resource* texture, D3D12_RESOURCE_STATES before,
                                         D3D12_RESOURCE_STATES after, UINT subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES) {
     D3D12_RESOURCE_BARRIER barrier{};
@@ -464,7 +479,13 @@ static void RenderNative(int event, void* data) {
     auto* queue = unity12->GetCommandQueue();
     if (!queue) { owner->error = E_FAIL; delete packet; return; }
     auto* frame = reinterpret_cast<AVD3D12VAFrame*>(packet->frame->data[0]);
-    HRESULT result = processQueue->Wait(frame->sync_ctx.fence, frame->sync_ctx.fence_value);
+    // Guard against a pending frame at submission and snapshot its decode fence.
+    // Never queue an incomplete decode wait on Unity's command queue.
+    UINT64 decodeValue = 0;
+    const int ready = FrameReady(packet->frame, &decodeValue);
+    if (ready == 0) { delete packet; return; }
+    if (ready < 0) { owner->error = ready; delete packet; return; }
+    HRESULT result = processQueue->Wait(frame->sync_ctx.fence, decodeValue);
     if (FAILED(result)) { owner->error = result; delete packet; return; }
     ID3D12CommandList* conversion[] = {packet->processCommand};
     processQueue->ExecuteCommandLists(1, conversion);

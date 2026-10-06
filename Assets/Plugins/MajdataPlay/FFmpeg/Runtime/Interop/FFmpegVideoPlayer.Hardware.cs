@@ -44,7 +44,18 @@ namespace MajdataPlay.FFmpeg
             options.MapHardwareFrame = null;
             options.CreateHardwareSession = null;
             options.CreateHardwareSynchronization = null;
-            options.WaitForHardwareFrame = vulkan && preferNative ? VulkanVideoInterop.WaitForVideoFrame : null;
+            options.WaitForHardwareFrame = null;
+            if (preferNative)
+            {
+                if (d3d12)
+                {
+                    options.WaitForHardwareFrame = D3D12VideoInterop.WaitForVideoFrame;
+                }
+                else
+                {
+                    options.WaitForHardwareFrame = VulkanVideoInterop.WaitForVideoFrame;
+                }
+            }
             options.KeepNativeFrames = preferNative;
             options.HardwareDeviceDescription = (d3d12 ? "D3D12VA" : "Vulkan Video") + " device shared with Unity renderer: "
                 + SystemInfo.graphicsDeviceName + "; driver=" + SystemInfo.graphicsDeviceVersion;
@@ -100,10 +111,7 @@ namespace MajdataPlay.FFmpeg
                 {
                     options.AcquireD3D11Device = HardwareVideoPresenter.AcquireD3D11Device;
                     options.KeepNativeFrames = true;
-                    if (SystemInfo.graphicsDeviceType == GraphicsDeviceType.Vulkan)
-                    {
-                        options.CreateHardwareSynchronization = VulkanVideoInterop.CreateD3D11Synchronization;
-                    }
+                    options.CreateHardwareSynchronization = VulkanVideoInterop.CreateD3D11Synchronization;
                     options.HardwareDeviceDescription = "D3D11VA device matched to Unity renderer: " + graphics;
                 }
                 else if (apple && HardwareVideoPresenter.SupportsMetal)

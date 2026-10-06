@@ -8,6 +8,7 @@
 #include "../D3D12.h"
 #include "IUnityGraphicsD3D12.h"
 #include <cstdio>
+#include <chrono>
 #include <vector>
 #include <cmath>
 #include <cstring>
@@ -15,6 +16,7 @@ extern "C" {
 #include <libavcodec/avcodec.h>
 #include <libavformat/avformat.h>
 #include <libavutil/hwcontext.h>
+#include <libavutil/hwcontext_d3d12va.h>
 #include <libswscale/swscale.h>
 }
 static ID3D12Device* dev = nullptr;
@@ -138,6 +140,30 @@ static unsigned ValidationMessages() {
     }
     return errors;
 }
+static bool VerifyPendingFrameSkip(void* presenter, AVFrame* frame, ID3D12Resource* target) {
+    if (ffu_d3d12va_frame_ready(nullptr) >= 0) return false;
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+    int ready;
+    while ((ready = ffu_d3d12va_frame_ready(frame)) == 0 && std::chrono::steady_clock::now() < deadline) Sleep(1);
+    if (ready != 1) return false;
+    auto* input = reinterpret_cast<AVD3D12VAFrame*>(frame->data[0]);
+    const UINT64 original = input->sync_ctx.fence_value;
+    const UINT64 completed = input->sync_ctx.fence->GetCompletedValue();
+    if (completed == UINT64_MAX || completed == UINT64_MAX - 1) return false;
+    input->sync_ctx.fence_value = completed + 1;
+    bool skipped = ffu_d3d12va_frame_ready(frame) == 0;
+    for (int i = 0; skipped && i < 25; ++i) {
+        void* packet = ffu_d3d12va_prepare(presenter, frame, target);
+        if (!packet) { skipped = false; break; }
+        FfuD3D12Render(FfuPrepareNativeD3D12, packet);
+        FfuD3D12Render(FfuSubmitNativeD3D12, packet);
+        skipped = ffu_d3d12va_error(presenter) == 0;
+    }
+    input->sync_ctx.fence_value = original;
+    if (!skipped || ffu_d3d12va_frame_ready(frame) != 1) return false;
+    std::puts("PASS: D3D12VA frame fence readiness and 25 pending packets skipped without queue waits or presenter errors");
+    return true;
+}
 static int TestFrames(AVBufferRef* hardware) {
     std::puts("SYNTHETIC GPU PRESENTATION: fixture CPU upload is test-only; no codec decode asserted.");
     AVBufferRef* frames = nullptr;
@@ -174,6 +200,11 @@ static int TestFrames(AVBufferRef* hardware) {
             !Check(av_hwframe_transfer_data(frame, pixels, 0), "test-only fixture upload")) return 1;
         av_frame_free(&pixels);
         frame->colorspace = AVCOL_SPC_BT709; frame->color_range = fullRange ? AVCOL_RANGE_JPEG : AVCOL_RANGE_MPEG;
+        if (count == 5 && !VerifyPendingFrameSkip(presenter, frame, target)) {
+            std::puts("FAIL: D3D12VA pending-frame skip");
+            ValidationMessages();
+            return 1;
+        }
         void* render = ffu_d3d12va_prepare(presenter, frame, target);
         if (!render) { std::printf("FAIL synthetic prepare %08x\n", ffu_d3d12va_error(presenter)); ValidationMessages(); return 1; }
         if (count == 5) {

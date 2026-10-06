@@ -14,9 +14,9 @@ dotnet run --project Tools/Tests/FFmpegValidation/FFmpegValidation.csproj -- `
 
 覆盖：真实视频元数据、RGBA 解码、PTS、前后 seek、EOF 延迟帧排空、预取消、有界预载、连续 seek、快速关闭，以及人工 AVFrame 的像素级上下方向、四方向旋转、非方形尺寸、YUV limited/full range、动态像素格式、裁剪与超限拒绝。硬件测试创建独立 D3D11VA 设备，在没有 Unity 纹理互操作回调的情况下解码、下载 RGBA、跳转并检查真实像素，断言 `HardwareDecoded` 与 CPU 像素存储同时成立。
 
-### Vulkan 解码超载与工作线程同步
+### Windows 解码超载与工作线程同步
 
-先按 [原生桥接说明](../../FFmpeg/Native/README.md) 重建包含 GPU 完成查询的同 ABI 桥接，将新桥接和七个匹配的 FFmpeg DLL 放入独立测试目录；不要覆盖正在运行的 Editor 已加载的库。Windows Vulkan 的 D3D11VA 回退可运行专用托管检查：
+先按 [原生桥接说明](../../FFmpeg/Native/README.md) 重建包含 GPU 完成查询的同 ABI 桥接，将新桥接和七个匹配的 FFmpeg DLL 放入独立测试目录；不要覆盖正在运行的 Editor 已加载的库。Windows D3D11VA 原生纹理路径可运行专用托管检查：
 
 ```powershell
 dotnet run --project Tools/Tests/FFmpegValidation/FFmpegValidation.csproj -- `
@@ -26,17 +26,17 @@ dotnet run --project Tools/Tests/FFmpegValidation/FFmpegValidation.csproj -- `
 
 此模式要求实际 D3D11VA GPU，禁止软件或 CPU 上传回退；检查生产 completion query 的复用、单线程 codec、真实硬件帧及下载像素、seek/preroll、取消、16x 有界后台会话与设备引用归还。它不会初始化 Unity 渲染设备，也不验证游戏 FPS。
 
-Unity 的 `-TestDecodeOverload` 使用正常 Player 渲染循环，关闭 VSync 并限制 60 FPS，对同一素材分别测量 1x 和 16x 的更新帧率，要求 16x 至少保留基线的 80%。素材必须可 seek、至少 20 秒；原生 Vulkan Video 需支持该后端的 GPU，`-RequireHardware` 允许使用 Windows D3D11VA 共享回退但禁止 CPU 像素上传。可用 4K 素材让 16x 的请求明显超过解码吞吐：
+Unity 的 `-TestDecodeOverload` 使用正常 Player 渲染循环，关闭 VSync 并限制 60 FPS，对同一素材分别测量 1x 和 16x 的更新帧率，要求 16x 至少保留基线的 80%。素材必须可 seek、至少 20 秒；`-RequireHardware` 允许 D3D12/Vulkan 回退到 Windows D3D11VA 共享路径，但禁止 CPU 像素上传。可用 4K 素材让 16x 的请求明显超过解码吞吐，并分别将 `-Graphics` 设置为 `d3d11`、`d3d12`、`vulkan`：
 
 ```powershell
 ./Tools/Tests/FFmpegValidation/run-unity.ps1 -Backend Mono -Architecture x64 `
-  -Graphics vulkan -RequireHardware -TestDecodeOverload `
+  -Graphics d3d12 -RequireHardware -TestDecodeOverload `
   -NativeDirectory Tools/Tests/FFmpegValidation/.work/video-overload/native-x64 `
   -WorkDirectory Tools/Tests/FFmpegValidation/.work/video-overload/unity `
   -Media Tools/Tests/FFmpegValidation/.work/video-overload/test-4k30.mp4
 ```
 
-日志记录更新 FPS、最大更新间隔、呈现命令数、视频尺寸/帧率、实际解码器与传输路径。素材和 GPU 不同会影响测量；原生 `VulkanPortableSmoke` 的未完成 timeline / 提交前再次变忙测试则确定性验证未就绪帧不会进入 Unity 队列等待。正常 Pixel 检查与这些同步回归共同验证画面和资源生命周期，不能仅以 `FrameReady` 计数断言每个 packet 都更新了像素。
+日志记录更新 FPS、最大更新间隔、呈现命令数、视频尺寸/帧率、实际解码器与传输路径。素材和 GPU 不同会影响测量；检查日志中的实际解码器，D3D11VA 回退不能算作原生 D3D12VA/Vulkan Video 验证。原生 GPU 未就绪帧的提交前复查还需通过对应桥接测试验证。正常 Pixel 检查与这些同步回归共同验证画面和资源生命周期，不能仅以 `FrameReady` 计数断言每个 packet 都更新了像素。
 
 ### Windows Vulkan Player 启动与窗口变化
 
