@@ -265,12 +265,12 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: caa7b6dbf6805825bc91b808e026b85c, type: 3}
   m_Name: 
   m_EditorClassIdentifier: MajdataPlay.FFmpeg::MajdataPlay.FFmpeg.FFmpegVideoPlayer
-  _source: D:\Documents\maimai\FFmpeg test\pv_transcoded\H264@2160p\pv.mp4
-  _playOnAwake: 1
-  _loop: 1
+  _source: D:\Documents\maimai\FFmpeg test\pv_transcoded\H264@1080p\pv.mp4
+  <PlayOnAwake>k__BackingField: 0
+  <Loop>k__BackingField: 0
   _playbackRate: 1
-  _bufferedFrameLimit: 3
-  _ioTimeoutSeconds: 15
+  <BufferedFrameLimit>k__BackingField: 3
+  <IOTimeoutSeconds>k__BackingField: 15
   _preferHardwareDecoding: 1
   _preferNativeTextures: 1
   _requireHardwareDecoding: 0
