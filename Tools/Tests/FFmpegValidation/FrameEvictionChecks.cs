@@ -6,8 +6,10 @@ using System.Diagnostics;
 using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Threading;
+using FFmpeg.AutoGen;
 using MajdataPlay.FFmpeg;
 using MajdataPlay.FFmpeg.Internal;
+using MajdataPlay.FFmpeg.Interop;
 
 namespace MajdataPlay.FFmpeg.Validation
 {
@@ -34,6 +36,277 @@ namespace MajdataPlay.FFmpeg.Validation
             TestExpiredFrameDiscard(media);
             TestKeyFrameCatchUp(media);
             return s_checks - before;
+        }
+
+        /// <summary>Checks the real worker synchronization used by Windows Vulkan's D3D11VA fallback.</summary>
+        /// <param name="media">A seekable D3D11VA-compatible fixture with nonuniform pixels after its first second.</param>
+        /// <returns>The number of assertions completed during this invocation.</returns>
+        /// <exception cref="InvalidOperationException">Synchronization, frame pixels, or native ownership is invalid.</exception>
+        /// <exception cref="NotSupportedException">The GPU or bridge lacks D3D11VA synchronization support.</exception>
+        public static int RunDecodeSynchronization(string media)
+        {
+            var before = s_checks;
+            for (var iteration = 0; iteration < 3; iteration++)
+            {
+                TestDecodeSynchronization(media);
+            }
+
+            TestSynchronizedWorkerClose(media);
+            return s_checks - before;
+        }
+
+        /// <summary>Decodes real native frames, reuses the query across seeks, and audits device references after disposal.</summary>
+        /// <param name="media">The real native fixture decoded without Unity graphics initialization.</param>
+        /// <exception cref="InvalidOperationException">A decoded frame, codec configuration, or native reference is invalid.</exception>
+        private static unsafe void TestDecodeSynchronization(string media)
+        {
+            using var audit = new DecodeSynchronizationAudit();
+            using var cancellation = new CancellationTokenSource();
+            using var decoder = new FFmpegVideoDecoder(audit.CreateOptions());
+            decoder.Open(media, cancellation.Token);
+            Check(decoder.HardwareDecoding, "Admission synchronization preserves actual D3D11VA hardware decoding.");
+            Check(audit.Synchronization != null, "The native transport installs production D3D11VA admission synchronization.");
+            var codec = (AVCodecContext*)Pointer.Unbox(ReadField<object>(decoder, "_codec"));
+            Check(codec->thread_count == 1,
+                "Synchronized hardware decoding disables asynchronous codec workers that could bypass completion markers.");
+            Check(decoder.CanSeek && decoder.Duration > 2, "The synchronization fixture supports forward and backward seeking.");
+            var previous = double.NegativeInfinity;
+            for (var index = 0; index < 24; index++)
+            {
+                using var frame = decoder.ReadFrame();
+                Check(frame != null && frame.IsHardwareFrame && frame.HardwareDecoded
+                    && frame.NativeFrame != IntPtr.Zero && frame.Data == IntPtr.Zero,
+                    "Completed hardware frames retain native D3D11VA resources without CPU transport.");
+                Check(frame!.PixelFormat == AVPixelFormat.AV_PIX_FMT_D3D11 && frame.PresentationTime >= previous,
+                    "Synchronized native frames have D3D11VA format and monotonic presentation timestamps.");
+                previous = frame.PresentationTime;
+            }
+
+            Check(audit.Synchronization!.WaitCount > 24,
+                "The worker observes GPU completion for codec calls even when they do not return a presentation frame.");
+            var target = Math.Min(1.25, decoder.Duration / 2);
+            decoder.Seek(target);
+            using (var frame = decoder.ReadFrame())
+            {
+                Check(frame != null && frame.PresentationTime + frame.Duration >= target - 0.05
+                    && frame.PresentationTime < target + 0.2,
+                    "GPU admission remains reusable while forward seek decodes preroll frames.");
+                AssertHardwarePixels(frame!);
+            }
+
+            decoder.Seek(0);
+            using var held = decoder.ReadFrame();
+            Check(held != null && held.IsHardwareFrame && held.PresentationTime < 0.2,
+                "Backward seek resets the codec while preserving reusable worker synchronization.");
+            cancellation.Cancel();
+            var canceled = false;
+            var watch = Stopwatch.StartNew();
+            try
+            {
+                using var ignored = decoder.ReadFrame();
+            }
+            catch (OperationCanceledException)
+            {
+                canceled = true;
+            }
+
+            Check(canceled && watch.Elapsed.TotalSeconds < 1,
+                "Canceling synchronized decoding is observed before another codec submission.");
+            decoder.Dispose();
+            decoder.Dispose();
+            Check(audit.Synchronization.DisposeCount == 1,
+                "Closing the decoder disposes its production completion query exactly once.");
+            using (var copied = held!.CopyToSoftware())
+            {
+                Check(copied.Data != IntPtr.Zero && copied.HardwareDecoded,
+                    "A presenter-owned native frame remains downloadable after the decoder and query close.");
+            }
+
+            held.Dispose();
+            Check(audit.DeviceReferenceCount == 1,
+                "Only the test audit retains the hardware device after decoder, query, and native frames are released.");
+            Console.WriteLine("D3D11VA decode synchronization: " + audit.Synchronization.WaitCount
+                + " completed codec calls; native pixels, seeks, cancellation and ownership passed.");
+        }
+
+        /// <summary>Closes the real synchronized worker during high-rate playback and audits its final ownership state.</summary>
+        /// <param name="media">The seekable fixture decoded on the production session worker.</param>
+        /// <exception cref="InvalidOperationException">The worker faults, exceeds its queue, or retains a device after close.</exception>
+        /// <exception cref="TimeoutException">The worker does not preload or close within the finite timeout.</exception>
+        private static void TestSynchronizedWorkerClose(string media)
+        {
+            using var audit = new DecodeSynchronizationAudit();
+            using var session = new VideoDecodeSession(media, audit.CreateOptions(), 3);
+            WaitFor(session, () => session.BufferedFrames == 3, "synchronized hardware preload");
+            using var held = session.TakeFrame();
+            Check(held != null && held.IsHardwareFrame && held.HardwareDecoded,
+                "The production worker preloads native D3D11VA frames with admission control.");
+            session.SetPlayback(0, 16, true);
+            Thread.Sleep(100);
+            Check(session.Error == null && session.BufferedFrames <= 3,
+                "A 16x playback clock keeps synchronized hardware frames within the fixed queue capacity.");
+            var watch = Stopwatch.StartNew();
+            session.Dispose();
+            Check(watch.Elapsed.TotalSeconds < 0.5, "Closing high-rate hardware playback does not join its GPU worker.");
+            WaitFor(session, () => WorkerFinished(session), "synchronized hardware cancellation and cleanup");
+            Check(audit.Synchronization != null && audit.Synchronization.DisposeCount == 1,
+                "Worker cancellation releases its production D3D11VA completion query.");
+            held!.Dispose();
+            Check(audit.DeviceReferenceCount == 1,
+                "Closing a high-rate session releases all device references after the presenter returns its frame.");
+        }
+
+        /// <summary>Downloads actual native hardware pixels and checks that RGBA conversion preserves image variation.</summary>
+        /// <param name="frame">The borrowed native frame whose owned source remains alive during download.</param>
+        /// <exception cref="InvalidOperationException">The hardware download is empty, changes ownership, or contains no image variation.</exception>
+        private static unsafe void AssertHardwarePixels(DecodedVideoFrame frame)
+        {
+            var native = frame.NativeFrame;
+            using var copied = frame.CopyToSoftware();
+            Check(copied.HardwareDecoded && !copied.IsHardwareFrame && copied.Data != IntPtr.Zero
+                && copied.DataSize == copied.Width * copied.Height * 4,
+                "A completed native frame downloads to independently owned packed RGBA pixels.");
+            var pixels = (byte*)copied.Data;
+            var minimum = 765;
+            var maximum = 0;
+            for (var offset = 0; offset < copied.DataSize; offset += 4)
+            {
+                var brightness = pixels[offset] + pixels[offset + 1] + pixels[offset + 2];
+                minimum = Math.Min(minimum, brightness);
+                maximum = Math.Max(maximum, brightness);
+            }
+
+            Check(maximum - minimum > 15 && frame.NativeFrame == native && frame.Data == IntPtr.Zero,
+                "Real hardware pixels survive completion synchronization without consuming their native source.");
+        }
+
+        /// <summary>Retains one audit reference to the real device and records the production synchronizer's lifecycle.</summary>
+        private sealed unsafe class DecodeSynchronizationAudit : IDisposable
+        {
+            /// <summary>Owns one independent device reference used only to check release after session cleanup.</summary>
+            private IntPtr _device;
+            /// <summary>Gets the wrapper around the real native synchronizer created on the decoding worker.</summary>
+            internal TrackedDecodeSynchronization? Synchronization { get; private set; }
+            /// <summary>Gets the remaining FFmpeg device references while the audit reference keeps the device alive.</summary>
+            internal int DeviceReferenceCount
+            {
+                get
+                {
+                    return ffmpeg.av_buffer_get_ref_count((AVBufferRef*)_device);
+                }
+            }
+
+            /// <summary>Creates strict native D3D11VA options using the real production admission callback.</summary>
+            /// <returns>The options to pass to one decoder or one worker session.</returns>
+            internal DecoderOptions CreateOptions()
+            {
+                return new DecoderOptions
+                {
+                    HardwareDeviceType = AVHWDeviceType.AV_HWDEVICE_TYPE_D3D11VA,
+                    KeepNativeFrames = true,
+                    RequireHardwareDecoding = true,
+                    AllowHardwareCpuUpload = false,
+                    ThreadCount = 16,
+                    AcquireHardwareDevice = AcquireDevice,
+                    CreateHardwareSynchronization = CreateSynchronization
+                };
+            }
+
+            /// <summary>Creates a real independent D3D11VA device and retains a separate reference for cleanup assertions.</summary>
+            /// <returns>An owned FFmpeg device reference transferred to the decoder.</returns>
+            /// <exception cref="InvalidOperationException">A device was already created or FFmpeg cannot create D3D11VA.</exception>
+            /// <exception cref="OutOfMemoryException">FFmpeg cannot allocate the audit reference.</exception>
+            private IntPtr AcquireDevice()
+            {
+                if (_device != IntPtr.Zero)
+                {
+                    throw new InvalidOperationException("The synchronization audit expects one hardware device per session.");
+                }
+
+                AVBufferRef* device = null;
+                FFmpegVideoDecoder.Check(ffmpeg.av_hwdevice_ctx_create(&device,
+                    AVHWDeviceType.AV_HWDEVICE_TYPE_D3D11VA, null, null, 0), "Create synchronized hardware test device");
+                var retained = ffmpeg.av_buffer_ref(device);
+                if (retained == null)
+                {
+                    ffmpeg.av_buffer_unref(&device);
+                    throw new OutOfMemoryException("Cannot retain the synchronization audit device.");
+                }
+
+                _device = (IntPtr)retained;
+                return (IntPtr)device;
+            }
+
+            /// <summary>Wraps the production admission synchronizer without replacing any native completion behavior.</summary>
+            /// <param name="device">The borrowed FFmpeg D3D11VA device supplied to the native bridge.</param>
+            /// <returns>A worker-owned synchronizer with lifecycle counters for assertions.</returns>
+            /// <exception cref="NotSupportedException">The bridge cannot create the real completion query.</exception>
+            private IHardwareDecodeSynchronization CreateSynchronization(IntPtr device)
+            {
+                Synchronization = new TrackedDecodeSynchronization(VulkanVideoInterop.CreateD3D11Synchronization(device));
+                return Synchronization;
+            }
+
+            /// <summary>Releases the audit's final FFmpeg device reference after all ownership assertions finish.</summary>
+            public void Dispose()
+            {
+                var device = (AVBufferRef*)_device;
+                _device = IntPtr.Zero;
+                ffmpeg.av_buffer_unref(&device);
+            }
+        }
+
+        /// <summary>Observes calls and disposal while forwarding every operation to the production synchronizer.</summary>
+        private sealed class TrackedDecodeSynchronization : IHardwareDecodeSynchronization
+        {
+            /// <summary>Owns the production synchronizer and its retained native query/device resources.</summary>
+            private readonly IHardwareDecodeSynchronization _inner;
+            /// <summary>Counts completed codec-call GPU waits on the owning worker.</summary>
+            private int _waitCount;
+            /// <summary>Counts decoder-owned disposal calls on the owning worker.</summary>
+            private int _disposeCount;
+            /// <summary>Gets the number of waits that reached actual GPU completion.</summary>
+            internal int WaitCount
+            {
+                get
+                {
+                    return Volatile.Read(ref _waitCount);
+                }
+            }
+            /// <summary>Gets the number of disposal calls forwarded to the native synchronizer.</summary>
+            internal int DisposeCount
+            {
+                get
+                {
+                    return Volatile.Read(ref _disposeCount);
+                }
+            }
+
+            /// <summary>Transfers ownership of the production synchronizer into the observing wrapper.</summary>
+            /// <param name="inner">The production synchronizer whose native behavior is exercised.</param>
+            internal TrackedDecodeSynchronization(IHardwareDecodeSynchronization inner)
+            {
+                _inner = inner;
+            }
+
+            /// <summary>Waits using the real query and records successful completion.</summary>
+            /// <param name="cancellationToken">Cancels the production GPU wait.</param>
+            /// <param name="timeoutMilliseconds">Bounds the production GPU wait in milliseconds.</param>
+            /// <exception cref="OperationCanceledException">The session was canceled.</exception>
+            /// <exception cref="TimeoutException">GPU completion exceeded the configured timeout.</exception>
+            /// <exception cref="NotSupportedException">The native completion query failed.</exception>
+            public void Wait(CancellationToken cancellationToken, int timeoutMilliseconds)
+            {
+                _inner.Wait(cancellationToken, timeoutMilliseconds);
+                Interlocked.Increment(ref _waitCount);
+            }
+
+            /// <summary>Releases the actual native query and records its decoder-owned disposal.</summary>
+            public void Dispose()
+            {
+                _inner.Dispose();
+                Interlocked.Increment(ref _disposeCount);
+            }
         }
 
         /// <summary>Checks that expired frames are discarded before conversion while presentation follows a fast clock.</summary>

@@ -1,5 +1,6 @@
 #nullable enable
 using System;
+using System.Threading;
 using FFmpeg.AutoGen;
 
 namespace MajdataPlay.FFmpeg.Internal
@@ -51,10 +52,28 @@ namespace MajdataPlay.FFmpeg.Internal
         // A player-owned alternative for codecs or devices that cannot use the preferred native API.
         /// <summary>Gets or sets the player-owned alternative for codecs or devices that cannot use the preferred native API.</summary>
         internal DecoderOptions? FallbackHardwareOptions { get; set; }
+        /// <summary>Creates worker-owned GPU admission control for a borrowed FFmpeg hardware device reference.</summary>
+        /// <remarks>The callback must retain any native resources it needs; the decoder disposes the returned synchronizer.</remarks>
+        internal Func<IntPtr, IHardwareDecodeSynchronization>? CreateHardwareSynchronization { get; set; }
+        /// <summary>Waits on the decoding worker until a borrowed native frame is safe to publish.</summary>
+        /// <remarks>The callback receives the frame, session cancellation token, and timeout in milliseconds. It must not call Unity APIs.</remarks>
+        internal Action<IntPtr, CancellationToken, int>? WaitForHardwareFrame { get; set; }
 
         /// <summary>Creates a shallow options copy, retaining callback and fallback references.</summary>
         /// <returns>A shallow copy with the same option values and callback references.</returns>
         internal DecoderOptions Copy() => (DecoderOptions)MemberwiseClone();
+    }
+
+    /// <summary>Bounds hardware decode submissions without making Unity's render thread wait for the GPU.</summary>
+    internal interface IHardwareDecodeSynchronization : IDisposable
+    {
+        /// <summary>Waits for work submitted by the last codec call before admitting another call.</summary>
+        /// <param name="cancellationToken">Cancels the worker wait when the decode session closes.</param>
+        /// <param name="timeoutMilliseconds">The maximum GPU wait time in milliseconds.</param>
+        /// <exception cref="OperationCanceledException">The session was canceled.</exception>
+        /// <exception cref="TimeoutException">GPU completion exceeded the timeout.</exception>
+        /// <exception cref="NotSupportedException">The device cannot provide safe synchronization.</exception>
+        void Wait(CancellationToken cancellationToken, int timeoutMilliseconds);
     }
 
     /// <summary>Owns a hardware decoding session that transports native images without mapping pixels into CPU memory.</summary>

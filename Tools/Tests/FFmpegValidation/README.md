@@ -14,6 +14,44 @@ dotnet run --project Tools/Tests/FFmpegValidation/FFmpegValidation.csproj -- `
 
 覆盖：真实视频元数据、RGBA 解码、PTS、前后 seek、EOF 延迟帧排空、预取消、有界预载、连续 seek、快速关闭，以及人工 AVFrame 的像素级上下方向、四方向旋转、非方形尺寸、YUV limited/full range、动态像素格式、裁剪与超限拒绝。硬件测试创建独立 D3D11VA 设备，在没有 Unity 纹理互操作回调的情况下解码、下载 RGBA、跳转并检查真实像素，断言 `HardwareDecoded` 与 CPU 像素存储同时成立。
 
+### Vulkan 解码超载与工作线程同步
+
+先按 [原生桥接说明](../../FFmpeg/Native/README.md) 重建包含 GPU 完成查询的同 ABI 桥接，将新桥接和七个匹配的 FFmpeg DLL 放入独立测试目录；不要覆盖正在运行的 Editor 已加载的库。Windows Vulkan 的 D3D11VA 回退可运行专用托管检查：
+
+```powershell
+dotnet run --project Tools/Tests/FFmpegValidation/FFmpegValidation.csproj -- `
+  Tools/Tests/FFmpegValidation/.work/video-overload/native-x64 `
+  "Assets/StreamingAssets/MaiCharts/Original/Zunda Overdance/bg.mp4" --decode-sync
+```
+
+此模式要求实际 D3D11VA GPU，禁止软件或 CPU 上传回退；检查生产 completion query 的复用、单线程 codec、真实硬件帧及下载像素、seek/preroll、取消、16x 有界后台会话与设备引用归还。它不会初始化 Unity 渲染设备，也不验证游戏 FPS。
+
+Unity 的 `-TestDecodeOverload` 使用正常 Player 渲染循环，关闭 VSync 并限制 60 FPS，对同一素材分别测量 1x 和 16x 的更新帧率，要求 16x 至少保留基线的 80%。素材必须可 seek、至少 20 秒；原生 Vulkan Video 需支持该后端的 GPU，`-RequireHardware` 允许使用 Windows D3D11VA 共享回退但禁止 CPU 像素上传。可用 4K 素材让 16x 的请求明显超过解码吞吐：
+
+```powershell
+./Tools/Tests/FFmpegValidation/run-unity.ps1 -Backend Mono -Architecture x64 `
+  -Graphics vulkan -RequireHardware -TestDecodeOverload `
+  -NativeDirectory Tools/Tests/FFmpegValidation/.work/video-overload/native-x64 `
+  -WorkDirectory Tools/Tests/FFmpegValidation/.work/video-overload/unity `
+  -Media Tools/Tests/FFmpegValidation/.work/video-overload/test-4k30.mp4
+```
+
+日志记录更新 FPS、最大更新间隔、呈现命令数、视频尺寸/帧率、实际解码器与传输路径。素材和 GPU 不同会影响测量；原生 `VulkanPortableSmoke` 的未完成 timeline / 提交前再次变忙测试则确定性验证未就绪帧不会进入 Unity 队列等待。正常 Pixel 检查与这些同步回归共同验证画面和资源生命周期，不能仅以 `FrameReady` 计数断言每个 packet 都更新了像素。
+
+### Windows Vulkan Player 启动与窗口变化
+
+`ValidateVulkanPlayerStartup.ps1` 验证已构建的主游戏 Player，而不是空场景 smoke。先把 `MajdataPlay.exe`、`UnityPlayer.dll`、`WinPixEventRuntime.dll`、`MonoBleedingEdge/`、`MajdataPlay_Data/` 及测试用 `settings.json` 副本放入忽略的 `Tools/Tests/FFmpegValidation/.work/player-crash/`；桥接 DLL 应已更新为待验收构建。Player 会在隔离目录生成运行数据；不要直接使用日常游戏目录。
+
+```powershell
+./Tools/Tests/FFmpegValidation/ValidateVulkanPlayerStartup.ps1 `
+  -PlayerDirectory Tools/Tests/FFmpegValidation/.work/player-crash `
+  -Attempts 10 -SecondsPerAttempt 8 -MinimizeRestore -Label acquire-fix
+```
+
+脚本限制输入目录位于上述 `.work/` 下，仅控制和终止自己启动的进程；每次窗口操作前核对 HWND 所属 PID。每轮使用 Vulkan 正常渲染循环，并异步请求窗口尺寸变化和两次最小化/恢复。日志、桥接 SHA256、启动存活情况、Title 加载情况、请求次数和设置文件前后哈希保存在 `.work/vulkan-startup/<label-guid>/`，崩溃、请求失败或设置文件变化使脚本返回非零。请求计数不等于 Unity 实际重建交换链的次数，有限次数通过也不能证明偶发崩溃已经消除。
+
+原生 `FFmpegUnityVulkanNegotiation` 的 Windows 测试另行确定性检查 Unity 的实例/设备查询路径：仅把已取得图像的 `VK_SUBOPTIMAL_KHR` 当作成功，保持索引与同步参数、其他返回码、呈现、FFmpeg 原始 loader 及设备销毁链。该兼容处理针对 Unity 6000.3.17f1 在 acquisition 内更新交换链后解引用空图像的已观察路径；不将其他图像表损坏或驱动错误视为修复成功。
+
 ### 解码线程过期帧淘汰
 
 ```powershell

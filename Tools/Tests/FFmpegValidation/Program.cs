@@ -26,6 +26,7 @@ static class Program
             _checks += AllocationChecks.RunManaged();
             _checks += EncodingChecks.RunManaged();
             var eviction = args.Length == 3 && args[2] == "--eviction";
+            var decodeSynchronization = args.Length == 3 && args[2] == "--decode-sync";
             bool av1 = args.Length == 3 && args[2] == "--av1";
             bool av1Unavailable = args.Length == 3 && args[2] == "--av1-unavailable";
             bool allocations = args.Length == 3 && args[2] == "--allocations";
@@ -36,9 +37,10 @@ static class Program
             bool uncheckedAmf = args.Length == 3 && args[2] == "--encode-unchecked-amf";
             var encodingSoftware = args.Length == 3 && args[2] == "--encode-software";
             if (args.Length != 2 && !av1 && !av1Unavailable && !allocations && !softwareAllocations
-                && !encoding && !encodingUnavailable && !encodingHardware && !uncheckedAmf && !encodingSoftware && !eviction)
+                && !encoding && !encodingUnavailable && !encodingHardware && !uncheckedAmf && !encodingSoftware
+                && !eviction && !decodeSynchronization)
             {
-                Console.WriteLine("PASS: " + _checks + " assertions; clock, bitrate, frame pool and encoder options; use <native-directory> <media> [--av1|--av1-unavailable|--allocations|--allocations-software|--eviction], or <native-directory> <output-directory> --encode[|-unavailable|-hardware|-unchecked-amf|-software].");
+                Console.WriteLine("PASS: " + _checks + " assertions; clock, bitrate, frame pool and encoder options; use <native-directory> <media> [--av1|--av1-unavailable|--allocations|--allocations-software|--eviction|--decode-sync], or <native-directory> <output-directory> --encode[|-unavailable|-hardware|-unchecked-amf|-software].");
                 return 0;
             }
             string native = Path.GetFullPath(args[0]);
@@ -83,6 +85,12 @@ static class Program
             {
                 _checks += FrameEvictionChecks.RunNative(Path.GetFullPath(args[1]));
                 Console.WriteLine("PASS: " + _checks + " assertions; worker frame eviction, bounded queues, playback controls and frame ownership.");
+                return 0;
+            }
+            if (decodeSynchronization)
+            {
+                _checks += FrameEvictionChecks.RunDecodeSynchronization(Path.GetFullPath(args[1]));
+                Console.WriteLine("PASS: " + _checks + " assertions; D3D11VA worker admission, native frame pixels, seek, cancellation and device ownership.");
                 return 0;
             }
             if (av1)

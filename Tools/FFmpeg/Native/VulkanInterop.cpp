@@ -26,6 +26,9 @@ template<class T> T* Interface(IUnityInterfaces* interfaces) {
 }
 PFN_vkCreateDevice realCreateDevice = nullptr;
 PFN_vkGetInstanceProcAddr originalLoader = nullptr;
+std::atomic<PFN_vkGetDeviceProcAddr> unityDeviceLoader{nullptr};
+std::atomic<PFN_vkAcquireNextImageKHR> acquireNextImage{nullptr};
+std::atomic<PFN_vkAcquireNextImage2KHR> acquireNextImage2{nullptr};
 VkInstance loaderInstance = VK_NULL_HANDLE;
 PFN_vkEnumerateDeviceExtensionProperties enumerateExtensions = nullptr;
 IUnityGraphicsVulkanV2* unity = nullptr;
@@ -36,6 +39,39 @@ constexpr const char* required[] = {
     VK_KHR_GET_MEMORY_REQUIREMENTS_2_EXTENSION_NAME, VK_KHR_DEDICATED_ALLOCATION_EXTENSION_NAME,
     VK_KHR_WIN32_KEYED_MUTEX_EXTENSION_NAME
 };
+
+// Unity 6000.3.17f1 can recreate its Windows swapchain while handling a
+// SUBOPTIMAL acquisition, then use the acquired index against the new images.
+// Both SUCCESS and SUBOPTIMAL mean an image was acquired successfully. Keep
+// that image and its synchronization intact for this frame; presentation and
+// OUT_OF_DATE still notify Unity when it needs to rebuild the swapchain.
+VKAPI_ATTR VkResult VKAPI_CALL AcquireNextImage(VkDevice device, VkSwapchainKHR swapchain, uint64_t timeout,
+    VkSemaphore semaphore, VkFence fence, uint32_t* index) {
+    const auto acquire = acquireNextImage.load(std::memory_order_relaxed);
+    const VkResult result = acquire(device, swapchain, timeout, semaphore, fence, index);
+    return result == VK_SUBOPTIMAL_KHR ? VK_SUCCESS : result;
+}
+VKAPI_ATTR VkResult VKAPI_CALL AcquireNextImage2(VkDevice device, const VkAcquireNextImageInfoKHR* info, uint32_t* index) {
+    const auto acquire = acquireNextImage2.load(std::memory_order_relaxed);
+    const VkResult result = acquire(device, info, index);
+    return result == VK_SUBOPTIMAL_KHR ? VK_SUCCESS : result;
+}
+PFN_vkVoidFunction WrapAcquisition(PFN_vkVoidFunction function, const char* name) {
+    if (!function) return nullptr;
+    if (!std::strcmp(name, "vkAcquireNextImageKHR")) {
+        acquireNextImage = reinterpret_cast<PFN_vkAcquireNextImageKHR>(function);
+        return reinterpret_cast<PFN_vkVoidFunction>(AcquireNextImage);
+    }
+    if (!std::strcmp(name, "vkAcquireNextImage2KHR")) {
+        acquireNextImage2 = reinterpret_cast<PFN_vkAcquireNextImage2KHR>(function);
+        return reinterpret_cast<PFN_vkVoidFunction>(AcquireNextImage2);
+    }
+    return function;
+}
+VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL GetDeviceProc(VkDevice device, const char* name) {
+    const auto loader = unityDeviceLoader.load();
+    return loader ? WrapAcquisition(loader(device, name), name) : nullptr;
+}
 
 VKAPI_ATTR VkResult VKAPI_CALL CreateDevice(VkPhysicalDevice physical, const VkDeviceCreateInfo* original,
                                            const VkAllocationCallbacks* allocator, VkDevice* device) {
@@ -67,13 +103,17 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDevice(VkPhysicalDevice physical, const VkD
 }
 VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL GetProc(VkInstance instance, const char* name) {
     auto function = FfuVulkanVideoInstanceProc(originalLoader, instance, name);
+    if (!std::strcmp(name, "vkGetDeviceProcAddr") && function) {
+        unityDeviceLoader = reinterpret_cast<PFN_vkGetDeviceProcAddr>(function);
+        return reinterpret_cast<PFN_vkVoidFunction>(GetDeviceProc);
+    }
     if (std::strcmp(name, "vkCreateDevice") == 0 && function) {
         realCreateDevice = reinterpret_cast<PFN_vkCreateDevice>(function);
         loaderInstance = instance;
         enumerateExtensions = reinterpret_cast<PFN_vkEnumerateDeviceExtensionProperties>(originalLoader(instance, "vkEnumerateDeviceExtensionProperties"));
         return reinterpret_cast<PFN_vkVoidFunction>(CreateDevice);
     }
-    return function;
+    return WrapAcquisition(function, name);
 }
 PFN_vkGetInstanceProcAddr UNITY_INTERFACE_API InitializeLoader(PFN_vkGetInstanceProcAddr value, void*) {
     originalLoader = value;
@@ -330,7 +370,10 @@ bool FfuVulkanBeginWrite(void* pointer) {
     FfuVulkanPoll(false);
     auto* surface = static_cast<Surface*>(pointer);
     if (!surface || !surface->context->active || surface->writing || surface->error) return false;
-    const HRESULT result = surface->keyed->AcquireSync(0, 5);
+    // A previous Unity copy may still own this surface. Preserve its completed
+    // output instead of waiting for the GPU on Unity's render thread.
+    const HRESULT result = surface->keyed->AcquireSync(0, 0);
+    if (result == WAIT_TIMEOUT) return false;
     if (result != S_OK) { surface->error = result; return false; }
     surface->writing = true;
     return true;

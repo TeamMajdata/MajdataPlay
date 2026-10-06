@@ -40,6 +40,9 @@ struct FfuVkSample {
     // FFmpeg frames use a timeline semaphore. lock is called immediately before
     // recording/submission so layout and semaphore values cannot become stale.
     bool timeline = false;
+    // A lock callback may decline a still-decoding frame without failing the
+    // presenter. The last completed Unity texture remains available instead.
+    bool pending = false;
     uint64_t waitValue = 0, signalValue = 0;
     std::function<bool(FfuVkSample&)> lock;
     std::function<void(bool)> unlock;

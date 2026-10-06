@@ -294,7 +294,10 @@ void UNITY_INTERFACE_API OnQueue(int, void* pointer) {
     std::lock_guard<std::mutex> lock(jobsMutex);
     std::lock_guard<std::recursive_mutex> resources(c.resources);
     if (!c.active) { job->presenter->error = 104; delete job; return; }
-    if (job->sample.lock && !job->sample.lock(job->sample)) { job->presenter->error = 416; delete job; return; }
+    if (job->sample.lock && !job->sample.lock(job->sample)) {
+        if (!job->sample.pending) job->presenter->error = 416;
+        delete job; return;
+    }
     VkCommandBuffer command = VK_NULL_HANDLE;
     VkResult result = Build(*job, command);
     if (result == VK_SUCCESS) {

@@ -90,13 +90,32 @@ public sealed class FFmpegPlayerSmoke : MonoBehaviour
         yield return new WaitForSecondsRealtime(0.12f);
         Check(_player.Time == first, "preload clock frozen");
         Check(_player.CurrentBitRate == firstBitRate, "decode read-ahead does not change displayed bitrate while preloaded");
-        Check(_player.SetRate(2), "rate accepted");
+        _player.PlaybackRate = 2;
+        Check(_player.PlaybackRate == 2, "rate accepted");
         Check(_player.CurrentBitRate == firstBitRate, "playback rate does not scale the media bitrate");
-        Check(!_player.SetRate(-1), "reverse rate rejected");
+        var rejectedReverse = false;
+        try
+        {
+            _player.PlaybackRate = -1;
+        }
+        catch (ArgumentOutOfRangeException)
+        {
+            rejectedReverse = true;
+        }
+
+        Check(rejectedReverse && _player.PlaybackRate == 2, "reverse rate rejected");
         var doubleRatePlayback = TestDoubleRatePlayback();
         while (doubleRatePlayback.MoveNext())
         {
             yield return doubleRatePlayback.Current;
+        }
+        if (Argument("-videoTestDecodeOverload") == "true")
+        {
+            var overload = TestDecodeOverload();
+            while (overload.MoveNext())
+            {
+                yield return overload.Current;
+            }
         }
         var paused = _player.Time;
         long pausedBitRate = _player.CurrentBitRate;
@@ -228,6 +247,78 @@ public sealed class FFmpegPlayerSmoke : MonoBehaviour
             Application.targetFrameRate = previousFrameRate;
         }
     }
+    /// <summary>Compares Unity update throughput at normal and maximum video playback speed on the same GPU.</summary>
+    /// <returns>The coroutine that measures both rates and restores paused playback and rendering settings.</returns>
+    /// <exception cref="Exception">The fixture is too short, playback fails, or overload stalls Unity updates.</exception>
+    IEnumerator TestDecodeOverload()
+    {
+        Check(_player.LengthSeconds >= 20, "decode overload fixture contains at least 20 seconds of video");
+        var previousVSync = QualitySettings.vSyncCount;
+        var previousFrameRate = Application.targetFrameRate;
+        var previousRate = _player.PlaybackRate;
+        QualitySettings.vSyncCount = 0;
+        Application.targetFrameRate = 60;
+        try
+        {
+            var baselineUpdates = 0d;
+            foreach (var rate in new[] { 1f, 16f })
+            {
+                _player.Pause();
+                _player.PlaybackRate = rate;
+                var seek = _player.SeekAsync(0);
+                var start = UnityEngine.Time.realtimeSinceStartup;
+                while (!seek.IsCompleted)
+                {
+                    CheckTimeout(start);
+                    yield return null;
+                }
+
+                seek.GetAwaiter().GetResult();
+                _player.Play();
+                yield return new WaitForSecondsRealtime(0.15f);
+                var initialFrames = _frames;
+                var initialUpdates = UnityEngine.Time.frameCount;
+                var initialTime = _player.TimeSeconds;
+                var wallClock = System.Diagnostics.Stopwatch.StartNew();
+                var lastUpdate = 0d;
+                var maximumUpdateGap = 0d;
+                while (wallClock.Elapsed.TotalSeconds < 0.8)
+                {
+                    yield return null;
+                    var elapsed = wallClock.Elapsed.TotalSeconds;
+                    maximumUpdateGap = Math.Max(maximumUpdateGap, elapsed - lastUpdate);
+                    lastUpdate = elapsed;
+                }
+
+                _player.Pause();
+                wallClock.Stop();
+                var updateRate = (UnityEngine.Time.frameCount - initialUpdates) / wallClock.Elapsed.TotalSeconds;
+                Debug.Log("Decode overload: playback=" + rate + "x; Unity updates=" + updateRate.ToString("F1")
+                    + " FPS; maximum update gap=" + maximumUpdateGap.ToString("F3")
+                    + " s; presented frames=" + (_frames - initialFrames) + "; decoder=" + _player.DecoderName
+                    + "; transport=" + _player.TransferMode + "; video=" + _player.Width + "x" + _player.Height
+                    + "@" + _player.FrameRate + "; GPU=" + SystemInfo.graphicsDeviceName);
+                Check(_frames > initialFrames && _player.TimeSeconds > initialTime, "playback and presentation advance at " + rate + "x");
+                if (rate == 1)
+                {
+                    baselineUpdates = updateRate;
+                    Check(baselineUpdates >= 30, "normal playback provides a usable Unity update baseline: " + baselineUpdates);
+                }
+                else
+                {
+                    Check(updateRate >= baselineUpdates * 0.8, "16x playback retains at least 80% of baseline Unity updates: " + updateRate);
+                }
+            }
+        }
+        finally
+        {
+            _player.Pause();
+            _player.PlaybackRate = previousRate;
+            QualitySettings.vSyncCount = previousVSync;
+            Application.targetFrameRate = previousFrameRate;
+        }
+    }
+
     IEnumerator TestDecoderPreference(string path)
     {
         _player.Loop = false;

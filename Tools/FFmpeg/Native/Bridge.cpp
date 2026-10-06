@@ -75,6 +75,10 @@ FFU_EXPORT void FFU_CALL ffu_packet_cancel(void*) {}
 #if !defined(_WIN32)
 // Preserve __Internal linkability on iOS even if IL2CPP retains an unused Windows
 // P/Invoke wrapper. Unsupported platforms never advertise these capabilities.
+FFU_EXPORT void* FFU_CALL ffu_d3d11_decode_sync_create(void*) { return nullptr; }
+FFU_EXPORT int FFU_CALL ffu_d3d11_decode_sync_begin(void*) { return -1; }
+FFU_EXPORT int FFU_CALL ffu_d3d11_decode_sync_poll(void*) { return -1; }
+FFU_EXPORT void FFU_CALL ffu_d3d11_decode_sync_release(void*) {}
 FFU_EXPORT void* FFU_CALL ffu_d3d12_prepare(void*, const AVFrame*, void*) { return nullptr; }
 FFU_EXPORT void FFU_CALL ffu_d3d12_cancel(void*) {}
 FFU_EXPORT void* FFU_CALL ffu_d3d12va_acquire_device() { return nullptr; }
@@ -89,4 +93,8 @@ FFU_EXPORT void* FFU_CALL ffu_shared_prepare(void*, const AVFrame*, void*, void*
 FFU_EXPORT int FFU_CALL ffu_shared_error(void*) { return -1; }
 FFU_EXPORT void* FFU_CALL ffu_wgl_retirement_create(void*) { return nullptr; }
 FFU_EXPORT int FFU_CALL ffu_wgl_retirement_poll(void*) { return 0; }
+#endif
+
+#if !defined(_WIN32) && !defined(__linux__) && !defined(__ANDROID__)
+FFU_EXPORT int FFU_CALL ffu_vulkan_video_frame_ready(const AVFrame*) { return -1; }
 #endif

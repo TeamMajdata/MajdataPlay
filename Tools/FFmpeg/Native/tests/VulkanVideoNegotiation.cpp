@@ -3,6 +3,9 @@
 #include "../VulkanVideoDecode.cpp"
 #include <cstdio>
 #include <cstdlib>
+#ifdef _WIN32
+#include "../VulkanInterop.h"
+#endif
 
 int FfuEventId(int event) { return event; }
 #define REQUIRE(value) do { if (!(value)) { std::printf("FAIL line %d: %s\n", __LINE__, #value); std::exit(1); } } while (0)
@@ -80,6 +83,129 @@ VKAPI_ATTR VkResult VKAPI_CALL TestCreateDevice(VkPhysicalDevice, const VkDevice
 }
 }
 
+#ifdef _WIN32
+namespace {
+UnityVulkanInitCallback startupInterceptor = nullptr;
+IUnityGraphicsVulkanV2 startupGraphics{};
+VkResult acquireResult = VK_SUCCESS;
+bool acquisitionAvailable = true;
+int acquireCalls = 0;
+int reloadedAcquireCalls = 0;
+const VkSwapchainKHR testSwapchain = (VkSwapchainKHR)(uintptr_t(5));
+const VkSemaphore testSemaphore = (VkSemaphore)(uintptr_t(6));
+const VkFence testFence = (VkFence)(uintptr_t(7));
+const VkAcquireNextImageInfoKHR* expectedAcquireInfo = nullptr;
+VKAPI_ATTR VkResult VKAPI_CALL TestAcquire(VkDevice device, VkSwapchainKHR swapchain, uint64_t timeout,
+    VkSemaphore semaphore, VkFence fence, uint32_t* index) {
+    REQUIRE(device == testDevice && swapchain == testSwapchain && timeout == UINT64_MAX);
+    REQUIRE(semaphore == testSemaphore && fence == testFence);
+    ++acquireCalls;
+    if (acquireResult == VK_SUCCESS || acquireResult == VK_SUBOPTIMAL_KHR) *index = 2;
+    return acquireResult;
+}
+VKAPI_ATTR VkResult VKAPI_CALL TestAcquire2(VkDevice device, const VkAcquireNextImageInfoKHR* info, uint32_t* index) {
+    REQUIRE(info == expectedAcquireInfo && info->sType == VK_STRUCTURE_TYPE_ACQUIRE_NEXT_IMAGE_INFO_KHR);
+    REQUIRE(info->pNext == nullptr && info->deviceMask == 5);
+    return TestAcquire(device, info->swapchain, info->timeout, info->semaphore, info->fence, index);
+}
+VKAPI_ATTR VkResult VKAPI_CALL TestPresent(VkQueue, const VkPresentInfoKHR*) { return VK_SUBOPTIMAL_KHR; }
+VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL StartupDeviceProc(VkDevice device, const char* name) {
+    REQUIRE(device == testDevice);
+    if (!std::strcmp(name, "vkAcquireNextImageKHR")) return acquisitionAvailable ? reinterpret_cast<PFN_vkVoidFunction>(TestAcquire) : nullptr;
+    if (!std::strcmp(name, "vkAcquireNextImage2KHR")) return acquisitionAvailable ? reinterpret_cast<PFN_vkVoidFunction>(TestAcquire2) : nullptr;
+    if (!std::strcmp(name, "vkQueuePresentKHR")) return reinterpret_cast<PFN_vkVoidFunction>(TestPresent);
+    return TestDeviceProc(device, name);
+}
+VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL StartupLoader(VkInstance, const char* name) {
+    if (!std::strcmp(name, "vkGetDeviceProcAddr")) return reinterpret_cast<PFN_vkVoidFunction>(StartupDeviceProc);
+    if (!std::strcmp(name, "vkAcquireNextImageKHR")) return acquisitionAvailable ? reinterpret_cast<PFN_vkVoidFunction>(TestAcquire) : nullptr;
+    if (!std::strcmp(name, "vkAcquireNextImage2KHR")) return acquisitionAvailable ? reinterpret_cast<PFN_vkVoidFunction>(TestAcquire2) : nullptr;
+    if (!std::strcmp(name, "vkQueuePresentKHR")) return reinterpret_cast<PFN_vkVoidFunction>(TestPresent);
+    return TestLoader(testInstance, name);
+}
+VKAPI_ATTR VkResult VKAPI_CALL ReloadedAcquire(VkDevice device, VkSwapchainKHR swapchain, uint64_t timeout,
+    VkSemaphore semaphore, VkFence fence, uint32_t* index) {
+    ++reloadedAcquireCalls;
+    return TestAcquire(device, swapchain, timeout, semaphore, fence, index);
+}
+VKAPI_ATTR VkResult VKAPI_CALL ReloadedAcquire2(VkDevice device, const VkAcquireNextImageInfoKHR* info, uint32_t* index) {
+    ++reloadedAcquireCalls;
+    return TestAcquire2(device, info, index);
+}
+VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL ReloadedDeviceProc(VkDevice device, const char* name) {
+    if (!std::strcmp(name, "vkAcquireNextImageKHR")) return reinterpret_cast<PFN_vkVoidFunction>(ReloadedAcquire);
+    if (!std::strcmp(name, "vkAcquireNextImage2KHR")) return reinterpret_cast<PFN_vkVoidFunction>(ReloadedAcquire2);
+    return StartupDeviceProc(device, name);
+}
+VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL ReloadedLoader(VkInstance instance, const char* name) {
+    if (!std::strcmp(name, "vkGetDeviceProcAddr")) return reinterpret_cast<PFN_vkVoidFunction>(ReloadedDeviceProc);
+    if (!std::strcmp(name, "vkAcquireNextImageKHR")) return reinterpret_cast<PFN_vkVoidFunction>(ReloadedAcquire);
+    if (!std::strcmp(name, "vkAcquireNextImage2KHR")) return reinterpret_cast<PFN_vkVoidFunction>(ReloadedAcquire2);
+    return StartupLoader(instance, name);
+}
+bool UNITY_INTERFACE_API InterceptStartup(UnityVulkanInitCallback callback, void*) { startupInterceptor = callback; return true; }
+IUnityInterface* UNITY_INTERFACE_API StartupInterface(unsigned long long high, unsigned long long low) {
+    const auto id = GetUnityInterfaceGUID<IUnityGraphicsVulkanV2>();
+    return high == id.m_GUIDHigh && low == id.m_GUIDLow ? &startupGraphics : nullptr;
+}
+void VerifyStartupAcquisition() {
+    startupGraphics.InterceptInitialization = InterceptStartup;
+    IUnityInterfaces interfaces{}; interfaces.GetInterfaceSplit = StartupInterface;
+    FfuVulkanPreload(&interfaces); REQUIRE(startupInterceptor);
+    const auto loader = startupInterceptor(StartupLoader, nullptr); REQUIRE(loader);
+    const auto deviceProc = reinterpret_cast<PFN_vkGetDeviceProcAddr>(loader(testInstance, "vkGetDeviceProcAddr")); REQUIRE(deviceProc);
+    const VkResult results[] = {VK_SUBOPTIMAL_KHR, VK_SUCCESS, VK_TIMEOUT, VK_NOT_READY,
+        VK_ERROR_OUT_OF_DATE_KHR, VK_ERROR_DEVICE_LOST, VK_ERROR_SURFACE_LOST_KHR,
+        VK_ERROR_OUT_OF_HOST_MEMORY, VK_ERROR_OUT_OF_DEVICE_MEMORY};
+    VkAcquireNextImageInfoKHR info{VK_STRUCTURE_TYPE_ACQUIRE_NEXT_IMAGE_INFO_KHR};
+    info.swapchain = testSwapchain; info.timeout = UINT64_MAX;
+    info.semaphore = testSemaphore; info.fence = testFence; info.deviceMask = 5;
+    expectedAcquireInfo = &info;
+    for (int lookup = 0; lookup < 2; ++lookup) {
+        auto get = [&](const char* name) { return lookup == 0 ? loader(testInstance, name) : deviceProc(testDevice, name); };
+        auto acquire = reinterpret_cast<PFN_vkAcquireNextImageKHR>(get("vkAcquireNextImageKHR")); REQUIRE(acquire);
+        auto acquire2 = reinterpret_cast<PFN_vkAcquireNextImage2KHR>(get("vkAcquireNextImage2KHR")); REQUIRE(acquire2);
+        REQUIRE(get("vkQueuePresentKHR") == reinterpret_cast<PFN_vkVoidFunction>(TestPresent));
+        REQUIRE(!get("vkMissingTestFunction"));
+        for (const VkResult result : results) {
+            acquireResult = result;
+            const VkResult expected = result == VK_SUBOPTIMAL_KHR ? VK_SUCCESS : result;
+            const uint32_t expectedIndex = result == VK_SUCCESS || result == VK_SUBOPTIMAL_KHR ? 2 : UINT32_MAX;
+            uint32_t index = UINT32_MAX; const int calls = acquireCalls;
+            REQUIRE(acquire(testDevice, testSwapchain, UINT64_MAX, testSemaphore, testFence, &index) == expected);
+            REQUIRE(index == expectedIndex && acquireCalls == calls + 1);
+            index = UINT32_MAX;
+            REQUIRE(acquire2(testDevice, &info, &index) == expected);
+            REQUIRE(index == expectedIndex && acquireCalls == calls + 2);
+        }
+        acquisitionAvailable = false;
+        REQUIRE(!get("vkAcquireNextImageKHR") && !get("vkAcquireNextImage2KHR"));
+        acquisitionAvailable = true;
+    }
+    REQUIRE(DecodeProc(testInstance, "vkAcquireNextImageKHR") == reinterpret_cast<PFN_vkVoidFunction>(TestAcquire));
+    REQUIRE(DecodeProc(testInstance, "vkAcquireNextImage2KHR") == reinterpret_cast<PFN_vkVoidFunction>(TestAcquire2));
+    REQUIRE(loader(testInstance, "vkDestroyInstance") == reinterpret_cast<PFN_vkVoidFunction>(DestroyInstance));
+    REQUIRE(deviceProc(testDevice, "vkDestroyDevice") == reinterpret_cast<PFN_vkVoidFunction>(DestroyDevice));
+    // A fresh Unity Vulkan initialization must refresh both lookup routes;
+    // cached interception wrappers must call the new loader's entry points.
+    const auto reloaded = startupInterceptor(ReloadedLoader, nullptr);
+    const auto reloadedDevice = reinterpret_cast<PFN_vkGetDeviceProcAddr>(reloaded(testInstance, "vkGetDeviceProcAddr")); REQUIRE(reloadedDevice);
+    acquireResult = VK_SUBOPTIMAL_KHR;
+    for (int lookup = 0; lookup < 2; ++lookup) {
+        auto get = [&](const char* name) { return lookup == 0 ? reloaded(testInstance, name) : reloadedDevice(testDevice, name); };
+        auto acquire = reinterpret_cast<PFN_vkAcquireNextImageKHR>(get("vkAcquireNextImageKHR")); REQUIRE(acquire);
+        auto acquire2 = reinterpret_cast<PFN_vkAcquireNextImage2KHR>(get("vkAcquireNextImage2KHR")); REQUIRE(acquire2);
+        uint32_t index = UINT32_MAX;
+        REQUIRE(acquire(testDevice, testSwapchain, UINT64_MAX, testSemaphore, testFence, &index) == VK_SUCCESS && index == 2);
+        index = UINT32_MAX;
+        REQUIRE(acquire2(testDevice, &info, &index) == VK_SUCCESS && index == 2);
+    }
+    REQUIRE(reloadedAcquireCalls == 4);
+    std::puts("PASS: Windows Unity instance/device acquisition defers SUBOPTIMAL rebuild, preserves images/synchronization/errors/presentation, FFmpeg bypass and destruction interception");
+}
+}
+#endif
+
 int main() {
     instanceLoader = TestLoader;
     instances[testInstance].destroy = TestDestroyInstance;
@@ -118,5 +244,8 @@ int main() {
     av_buffer_unref(&deviceReference); REQUIRE(deviceDestroys == 0 && instanceDestroys == 0);
     av_buffer_unref(&heldFrameDeviceReference);
     REQUIRE(deviceDestroys == 1 && instanceDestroys == 1 && devices.empty() && instances.empty());
+#ifdef _WIN32
+    VerifyStartupAcquisition();
+#endif
     std::puts("PASS: Vulkan negotiation fallback, feature preservation, private queue remapping, deferred device and instance destruction through real FFmpeg buffer references");
 }

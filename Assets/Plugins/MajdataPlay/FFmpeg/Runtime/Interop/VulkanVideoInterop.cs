@@ -1,6 +1,8 @@
 #nullable enable
 using System;
+using System.Diagnostics;
 using System.Runtime.InteropServices;
+using System.Threading;
 using MajdataPlay.Diagnostics;
 using MajdataPlay.FFmpeg.Internal;
 
@@ -145,6 +147,152 @@ namespace MajdataPlay.FFmpeg.Interop
             throw new PlatformNotSupportedException();
 #endif
         }
+
+        /// <summary>Waits for a Vulkan Video frame on the decoding worker before it enters the presentation queue.</summary>
+        /// <param name="frame">The borrowed FFmpeg Vulkan frame, retained by the caller throughout the wait.</param>
+        /// <param name="cancellationToken">Cancels the wait when the decoding session closes.</param>
+        /// <param name="timeoutMilliseconds">The maximum GPU wait time in milliseconds.</param>
+        /// <exception cref="OperationCanceledException">The decoding session was canceled.</exception>
+        /// <exception cref="TimeoutException">The GPU did not complete before the timeout.</exception>
+        /// <exception cref="NotSupportedException">The bridge or hardware frame cannot provide completion status.</exception>
+        /// <exception cref="PlatformNotSupportedException">Vulkan Video interop is unavailable on this platform.</exception>
+        internal static void WaitForVideoFrame(IntPtr frame, CancellationToken cancellationToken, int timeoutMilliseconds)
+        {
+#if UNITY_STANDALONE_WIN || UNITY_EDITOR_WIN || UNITY_STANDALONE_LINUX || UNITY_EDITOR_LINUX || (UNITY_ANDROID && !UNITY_EDITOR)
+            using var profile = UnityProfiler.Create("FFmpeg.Decoder.WaitForVulkanFrame");
+            var deadline = Stopwatch.GetTimestamp() + (long)(timeoutMilliseconds * (double)Stopwatch.Frequency / 1000);
+            try
+            {
+                while (true)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    var result = Native.FfuVulkanVideoFrameReady(frame);
+                    if (result > 0)
+                    {
+                        return;
+                    }
+
+                    if (result < 0)
+                    {
+                        throw new NotSupportedException(DescribeError(result));
+                    }
+
+                    WaitForGpuPoll(cancellationToken, deadline);
+                }
+            }
+            catch (EntryPointNotFoundException error)
+            {
+                throw new NotSupportedException("Rebuild FFmpegUnityBridge and restart Unity to enable worker-side GPU decode synchronization.", error);
+            }
+#else
+            throw new PlatformNotSupportedException();
+#endif
+        }
+
+        /// <summary>Delays a GPU completion poll without holding any native frame, context, or Unity lock.</summary>
+        /// <param name="cancellationToken">Cancels the delay when the decoding session closes.</param>
+        /// <param name="deadline">The monotonic timestamp after which GPU completion times out.</param>
+        /// <exception cref="OperationCanceledException">The decoding session was canceled.</exception>
+        /// <exception cref="TimeoutException">GPU completion exceeded the deadline.</exception>
+        private static void WaitForGpuPoll(CancellationToken cancellationToken, long deadline)
+        {
+            if (Stopwatch.GetTimestamp() >= deadline)
+            {
+                throw new TimeoutException("Timed out waiting for GPU video decoding on the background worker.");
+            }
+
+            if (cancellationToken.WaitHandle.WaitOne(1))
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+            }
+        }
+
+        /// <summary>Creates reusable admission control for the Windows D3D11VA fallback used by Vulkan.</summary>
+        /// <param name="device">The borrowed FFmpeg AVBufferRef containing the initialized D3D11VA device.</param>
+        /// <returns>A worker-owned synchronizer that retains its device and must be disposed with the decoder.</returns>
+        /// <exception cref="NotSupportedException">The bridge cannot create a GPU completion query.</exception>
+        /// <exception cref="PlatformNotSupportedException">D3D11VA synchronization is unavailable on this platform.</exception>
+        internal static IHardwareDecodeSynchronization CreateD3D11Synchronization(IntPtr device)
+        {
+#if UNITY_STANDALONE_WIN || UNITY_EDITOR_WIN
+            return new D3D11Synchronization(device);
+#else
+            throw new PlatformNotSupportedException();
+#endif
+        }
+
+#if UNITY_STANDALONE_WIN || UNITY_EDITOR_WIN
+        /// <summary>Paces D3D11VA codec calls on their owning worker using a reusable GPU event query.</summary>
+        private sealed class D3D11Synchronization : IHardwareDecodeSynchronization
+        {
+            /// <summary>Owns the native query and retained hardware device, or zero after disposal.</summary>
+            private IntPtr _synchronization;
+            /// <summary>Retains a hardware device and creates one query for its decode session.</summary>
+            /// <param name="device">The borrowed FFmpeg AVBufferRef containing a D3D11VA device.</param>
+            /// <exception cref="NotSupportedException">The native completion API or query is unavailable.</exception>
+            internal D3D11Synchronization(IntPtr device)
+            {
+                try
+                {
+                    _synchronization = Native.FfuD3D11DecodeSyncCreate(device);
+                }
+                catch (EntryPointNotFoundException error)
+                {
+                    throw new NotSupportedException("Rebuild FFmpegUnityBridge and restart Unity to enable worker-side GPU decode synchronization.", error);
+                }
+
+                if (_synchronization == IntPtr.Zero)
+                {
+                    throw new NotSupportedException("The D3D11VA device cannot create a GPU decode completion query.");
+                }
+            }
+
+            /// <summary>Waits for the last codec call's GPU work before admitting another decode submission.</summary>
+            /// <param name="cancellationToken">Cancels the worker wait when the session closes.</param>
+            /// <param name="timeoutMilliseconds">The maximum GPU wait time in milliseconds.</param>
+            /// <exception cref="OperationCanceledException">The decoding session was canceled.</exception>
+            /// <exception cref="TimeoutException">The GPU did not complete before the timeout.</exception>
+            /// <exception cref="NotSupportedException">The completion query or device failed.</exception>
+            public void Wait(CancellationToken cancellationToken, int timeoutMilliseconds)
+            {
+                using var profile = UnityProfiler.Create("FFmpeg.Decoder.WaitForD3D11Decode");
+                cancellationToken.ThrowIfCancellationRequested();
+                var result = Native.FfuD3D11DecodeSyncBegin(_synchronization);
+                if (result < 0)
+                {
+                    throw new NotSupportedException("D3D11VA GPU completion submission failed (native code " + result + ").");
+                }
+
+                var deadline = Stopwatch.GetTimestamp() + (long)(timeoutMilliseconds * (double)Stopwatch.Frequency / 1000);
+                while (true)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    result = Native.FfuD3D11DecodeSyncPoll(_synchronization);
+                    if (result > 0)
+                    {
+                        return;
+                    }
+
+                    if (result < 0)
+                    {
+                        throw new NotSupportedException("D3D11VA GPU completion query failed (native code " + result + ").");
+                    }
+
+                    WaitForGpuPoll(cancellationToken, deadline);
+                }
+            }
+
+            /// <summary>Releases the query and hardware device on their owning worker.</summary>
+            public void Dispose()
+            {
+                if (_synchronization != IntPtr.Zero)
+                {
+                    Native.FfuD3D11DecodeSyncRelease(_synchronization);
+                    _synchronization = IntPtr.Zero;
+                }
+            }
+        }
+#endif
 
         /// <summary>Reports the native Vulkan Video initialization status.</summary>
         /// <returns>The native Vulkan Video status, or -1 on unsupported platforms.</returns>
@@ -388,7 +536,33 @@ namespace MajdataPlay.FFmpeg.Interop
         {
             /// <summary>Names the shared native FFmpeg graphics bridge.</summary>
             private const string Library = "FFmpegUnityBridge";
+#if UNITY_STANDALONE_WIN || UNITY_EDITOR_WIN
+            /// <summary>Creates a reusable completion query retaining the supplied hardware device.</summary>
+            /// <param name="device">The borrowed FFmpeg D3D11VA AVBufferRef.</param>
+            /// <returns>An owned synchronizer, or zero if allocation or device validation failed.</returns>
+            [DllImport(Library, CallingConvention = CallingConvention.Cdecl, EntryPoint = "ffu_d3d11_decode_sync_create")]
+            internal static extern IntPtr FfuD3D11DecodeSyncCreate(IntPtr device);
+            /// <summary>Records and flushes a completion marker after a worker codec call.</summary>
+            /// <param name="synchronization">The owned native synchronizer.</param>
+            /// <returns>Zero on success, or a negative native error.</returns>
+            [DllImport(Library, CallingConvention = CallingConvention.Cdecl, EntryPoint = "ffu_d3d11_decode_sync_begin")]
+            internal static extern int FfuD3D11DecodeSyncBegin(IntPtr synchronization);
+            /// <summary>Queries completion without waiting for the GPU or flushing the context.</summary>
+            /// <param name="synchronization">The owned native synchronizer.</param>
+            /// <returns>One when complete, zero while pending, or a negative native error.</returns>
+            [DllImport(Library, CallingConvention = CallingConvention.Cdecl, EntryPoint = "ffu_d3d11_decode_sync_poll")]
+            internal static extern int FfuD3D11DecodeSyncPoll(IntPtr synchronization);
+            /// <summary>Releases the query and its retained hardware device reference.</summary>
+            /// <param name="synchronization">The owned native synchronizer to release.</param>
+            [DllImport(Library, CallingConvention = CallingConvention.Cdecl, EntryPoint = "ffu_d3d11_decode_sync_release")]
+            internal static extern void FfuD3D11DecodeSyncRelease(IntPtr synchronization);
+#endif
 #if UNITY_STANDALONE_WIN || UNITY_EDITOR_WIN || UNITY_STANDALONE_LINUX || UNITY_EDITOR_LINUX || (UNITY_ANDROID && !UNITY_EDITOR)
+            /// <summary>Queries the current completion state of a borrowed Vulkan Video frame on the worker.</summary>
+            /// <param name="frame">The borrowed FFmpeg Vulkan AVFrame retained by the caller.</param>
+            /// <returns>One when complete, zero while pending, or a negative native error.</returns>
+            [DllImport(Library, CallingConvention = CallingConvention.Cdecl, EntryPoint = "ffu_vulkan_video_frame_ready")]
+            internal static extern int FfuVulkanVideoFrameReady(IntPtr frame);
             /// <summary>Acquires an owned FFmpeg Vulkan device reference sharing Unity's negotiated video queues.</summary>
             /// <returns>An owned FFmpeg AVBufferRef to release with av_buffer_unref, or zero when unavailable.</returns>
             [DllImport(Library, CallingConvention = CallingConvention.Cdecl, EntryPoint = "ffu_vulkan_video_acquire_device")]

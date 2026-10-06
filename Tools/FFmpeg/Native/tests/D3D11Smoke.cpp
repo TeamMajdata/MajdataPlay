@@ -8,10 +8,51 @@
 #include <vector>
 extern "C" {
 #include <libavutil/buffer.h>
+#include <libavutil/hwcontext.h>
+#include <libavutil/hwcontext_d3d11va.h>
 }
 
 static ID3D11Device* device = nullptr;
 static int released = 0;
+static int synchronizedDevicesReleased = 0;
+static void FreeSynchronizedDevice(AVHWDeviceContext*) { ++synchronizedDevicesReleased; }
+
+static bool VerifyDecodeSynchronization(ID3D11DeviceContext* context) {
+    AVBufferRef* reference = av_hwdevice_ctx_alloc(AV_HWDEVICE_TYPE_D3D11VA);
+    if (!reference) return false;
+    auto* hardware = reinterpret_cast<AVHWDeviceContext*>(reference->data);
+    hardware->free = FreeSynchronizedDevice;
+    auto* d3d11 = static_cast<AVD3D11VADeviceContext*>(hardware->hwctx);
+    d3d11->device = device; device->AddRef();
+    if (av_hwdevice_ctx_init(reference) < 0) { av_buffer_unref(&reference); return false; }
+    void* sync = ffu_d3d11_decode_sync_create(reference);
+    if (!sync || av_buffer_get_ref_count(reference) != 2 || ffu_d3d11_decode_sync_poll(sync) >= 0) return false;
+    av_buffer_unref(&reference);
+    if (synchronizedDevicesReleased != 0) return false;
+    D3D11_TEXTURE2D_DESC desc{};
+    desc.Width = desc.Height = 32; desc.MipLevels = desc.ArraySize = 1;
+    desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM; desc.SampleDesc.Count = 1;
+    desc.BindFlags = D3D11_BIND_RENDER_TARGET;
+    ID3D11Texture2D* texture = nullptr; ID3D11RenderTargetView* target = nullptr;
+    if (FAILED(device->CreateTexture2D(&desc, nullptr, &texture)) ||
+        FAILED(device->CreateRenderTargetView(texture, nullptr, &target))) return false;
+    for (int i = 0; i < 32; ++i) {
+        const float color[]{float(i) / 32, 0, 0, 1};
+        context->ClearRenderTargetView(target, color);
+        if (ffu_d3d11_decode_sync_begin(sync) != 0) return false;
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+        int ready;
+        while ((ready = ffu_d3d11_decode_sync_poll(sync)) == 0 && std::chrono::steady_clock::now() < deadline) Sleep(1);
+        if (ready != 1) return false;
+    }
+    target->Release(); texture->Release();
+    ffu_d3d11_decode_sync_release(sync);
+    if (synchronizedDevicesReleased != 1 || ffu_d3d11_decode_sync_create(nullptr) ||
+        ffu_d3d11_decode_sync_begin(nullptr) >= 0 || ffu_d3d11_decode_sync_poll(nullptr) >= 0) return false;
+    ffu_d3d11_decode_sync_release(nullptr);
+    std::puts("PASS: reusable D3D11 worker completion query, 32 GPU submissions, device retention and invalid arguments");
+    return true;
+}
 static UnityGfxRenderer UNITY_INTERFACE_API Renderer() { return kUnityGfxRendererD3D11; }
 static ID3D11Device* UNITY_INTERFACE_API Device() { return device; }
 static void UNITY_INTERFACE_API Register(IUnityGraphicsDeviceEventCallback) {}
@@ -81,6 +122,7 @@ int main() {
     UnityPluginLoad(&interfaces);
     void* presenter = ffu_d3d11_create();
     if (!presenter) { std::puts("SKIP: driver has no video processor"); UnityPluginUnload(); context->Release(); device->Release(); return 77; }
+    if (!VerifyDecodeSynchronization(context)) { std::puts("FAIL: worker decode synchronization"); return 1; }
 
     // Use slice 1 of an array, like FFmpeg's actual D3D11VA decoder pool.
     constexpr int width = 32, height = 32;

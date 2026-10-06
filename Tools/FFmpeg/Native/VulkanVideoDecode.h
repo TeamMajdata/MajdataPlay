@@ -1,4 +1,5 @@
 #pragma once
+#include "Bridge.h"
 #include "VulkanPortable.h"
 
 // Called by the existing platform loader hooks; never install a second Unity
@@ -8,3 +9,6 @@ VkResult FfuVulkanVideoCreateDevice(PFN_vkCreateDevice create, PFN_vkGetInstance
     VkPhysicalDevice physical, const VkDeviceCreateInfo* original, const VkAllocationCallbacks* allocation, VkDevice* device);
 bool FfuVulkanVideoAvailable();
 int FfuVulkanVideoStatus();
+// Polls a borrowed hardware frame on the decode worker. Returns 1 when its
+// current timeline is complete, 0 while pending, or a negative error code.
+FFU_EXPORT int FFU_CALL ffu_vulkan_video_frame_ready(const AVFrame* frame);

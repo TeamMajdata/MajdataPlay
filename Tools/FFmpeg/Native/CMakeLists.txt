@@ -85,6 +85,8 @@ if(FFU_BUILD_VULKAN_TESTS AND (WIN32 OR (CMAKE_SYSTEM_NAME STREQUAL "Linux" AND 
   target_include_directories(FFmpegUnityVulkanNegotiation PRIVATE "${UNITY_PLUGIN_API}" "${AVUTIL_INCLUDE_DIR}" "${FFU_VULKAN_HEADERS}")
   target_link_libraries(FFmpegUnityVulkanNegotiation PRIVATE "${AVUTIL_LIBRARY}")
   if(WIN32)
+    target_sources(FFmpegUnityVulkanNegotiation PRIVATE VulkanInterop.cpp)
+    target_link_libraries(FFmpegUnityVulkanNegotiation PRIVATE d3d11 dxgi dxguid)
     target_compile_definitions(FFmpegUnityVulkanNegotiation PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
     set_target_properties(FFmpegUnityVulkanNegotiation PROPERTIES MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
   endif()

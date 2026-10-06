@@ -58,6 +58,8 @@ namespace MajdataPlay.FFmpeg.Internal
         private AVPixelFormat _hardwarePixelFormat = AVPixelFormat.AV_PIX_FMT_NONE;
         /// <summary>Owns an optional surface decoding session.</summary>
         private IHardwareDecodeSession? _hardwareSession;
+        /// <summary>Owns optional GPU admission control, accessed only by the decoding worker.</summary>
+        private IHardwareDecodeSynchronization? _hardwareSynchronization;
         /// <summary>Caches the active surface session's image release callback without per-frame allocations.</summary>
         private Action<IntPtr>? _releaseHardwareImage;
         /// <summary>Indicates that decoded pixels must use CPU upload instead of native sharing.</summary>
@@ -506,10 +508,18 @@ namespace MajdataPlay.FFmpeg.Internal
                     result = ffmpeg.avcodec_receive_frame(_codec, _frame);
                 }
 
+                _hardwareSynchronization?.Wait(_cancellation, _options.IOTimeoutMilliseconds);
                 if (result == 0)
                 {
                     try
                     {
+                        if (!_cpuTransport && _frame->hw_frames_ctx != null)
+                        {
+                            // A hardware AVFrame may precede GPU completion. Pace all
+                            // output, including preroll and discarded frames, on this worker.
+                            _options.WaitForHardwareFrame?.Invoke((IntPtr)_frame, _cancellation, _options.IOTimeoutMilliseconds);
+                        }
+
                         var duration = _frame->duration > 0 ? _frame->duration * ffmpeg.av_q2d(_timeBase) : 1.0 / FrameRate;
                         var timestamp = _frame->best_effort_timestamp != ffmpeg.AV_NOPTS_VALUE ? _frame->best_effort_timestamp : _frame->pts;
                         var seconds = timestamp == ffmpeg.AV_NOPTS_VALUE ? _nextTimestamp : timestamp * ffmpeg.av_q2d(_timeBase);
@@ -593,6 +603,7 @@ namespace MajdataPlay.FFmpeg.Internal
                         result = ffmpeg.avcodec_send_packet(_codec, _packet);
                     }
 
+                    _hardwareSynchronization?.Wait(_cancellation, _options.IOTimeoutMilliseconds);
                     if (result == again)
                     {
                         throw new InvalidOperationException("Video decoder returned EAGAIN from both send and receive.");
@@ -612,6 +623,7 @@ namespace MajdataPlay.FFmpeg.Internal
                         result = ffmpeg.avcodec_send_packet(_codec, null);
                     }
 
+                    _hardwareSynchronization?.Wait(_cancellation, _options.IOTimeoutMilliseconds);
                     if (result == ffmpeg.AVERROR_EOF)
                     {
                         return FinishInput();
@@ -1146,6 +1158,23 @@ namespace MajdataPlay.FFmpeg.Internal
                 }
 
                 _hardwarePixelFormat = configuration->pix_fmt;
+                if (!_cpuTransport && _options.CreateHardwareSynchronization != null)
+                {
+                    try
+                    {
+                        _hardwareSynchronization = _options.CreateHardwareSynchronization((IntPtr)device);
+                        // A completion marker must follow every codec submission. Internal
+                        // frame workers could otherwise submit after the marker was recorded.
+                        _codec->thread_count = 1;
+                    }
+                    catch (NotSupportedException error) when (_options.AllowHardwareCpuUpload && !_options.RequireHardwareDecoding)
+                    {
+                        _cpuTransport = true;
+                        HardwareFallbackReason = "GPU decode synchronization unavailable: " + error.Message;
+                        MajDebug.LogWarning("FFmpeg", "[Decoder] " + HardwareFallbackReason + "; keeping hardware decode with CPU upload.");
+                    }
+                }
+
                 _codec->hw_device_ctx = device;
                 device = null;
                 _codec->get_format = s_formatCallback;
@@ -1245,6 +1274,8 @@ namespace MajdataPlay.FFmpeg.Internal
             _hardwareSession?.Dispose();
             _hardwareSession = null;
             _releaseHardwareImage = null;
+            _hardwareSynchronization?.Dispose();
+            _hardwareSynchronization = null;
         }
 
         /// <summary>Selects the requested hardware pixel format or a permitted software fallback without propagating exceptions into native code.</summary>

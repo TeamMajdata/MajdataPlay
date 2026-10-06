@@ -3,18 +3,37 @@
 // Does not claim VAAPI/AHardwareBuffer hardware support on a software ICD.
 #include <vulkan/vulkan.h>
 #include "../VulkanPortable.h"
+#include "../VulkanVideoDecode.h"
+#include <chrono>
 #include <cstdio>
 #include <cstdlib>
 #include <vector>
 #include <cstring>
+extern "C" {
+#include <libavutil/hwcontext.h>
+#include <libavutil/hwcontext_vulkan.h>
+}
 #define CHECK(call) do { VkResult r=(call); if(r!=VK_SUCCESS){ std::printf("FAIL %d Vulkan=%d\n",__LINE__,r); std::exit(1); } } while(0)
 int FfuEventId(int event) { return event+240; }
 static UnityVulkanInstance instance{};
 static IUnityGraphicsVulkanV2 unity{};
 static VkImage output;
 static int released=0, submitted=0;
+static int gpuSubmitted=0, frameLocks=0, frameUnlocks=0;
 static UnityRenderingEventAndData deferred=nullptr;
 static void* deferredData=nullptr;
+static VkResult VKAPI_CALL Submit(VkQueue queue, uint32_t count, const VkSubmitInfo* commands, VkFence fence) {
+    ++gpuSubmitted;
+    return vkQueueSubmit(queue, count, commands, fence);
+}
+static PFN_vkVoidFunction VKAPI_CALL DeviceProc(VkDevice device, const char* name) {
+    if (std::strcmp(name, "vkQueueSubmit") == 0) return reinterpret_cast<PFN_vkVoidFunction>(Submit);
+    return vkGetDeviceProcAddr(device, name);
+}
+static PFN_vkVoidFunction VKAPI_CALL InstanceProc(VkInstance handle, const char* name) {
+    if (std::strcmp(name, "vkGetDeviceProcAddr") == 0) return reinterpret_cast<PFN_vkVoidFunction>(DeviceProc);
+    return vkGetInstanceProcAddr(handle, name);
+}
 static UnityVulkanInstance UNITY_INTERFACE_API Instance() { return instance; }
 static void UNITY_INTERFACE_API Configure(int id,const UnityVulkanPluginEventConfig* config) {
     if(id!=251 || config->renderPassPrecondition!=kUnityVulkanRenderPass_EnsureOutside) std::exit(1);
@@ -69,6 +88,69 @@ static void Barrier(VkCommandBuffer command,VkImage image,VkImageLayout from,VkI
     b.dstAccessMask=VK_ACCESS_MEMORY_READ_BIT|VK_ACCESS_MEMORY_WRITE_BIT;
     vkCmdPipelineBarrier(command,VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,0,0,nullptr,0,nullptr,1,&b);
 }
+static void KeepStackBuffer(void*, uint8_t*) {}
+static void LockFrame(AVHWFramesContext*, AVVkFrame*) { ++frameLocks; }
+static void UnlockFrame(AVHWFramesContext*, AVVkFrame*) { ++frameUnlocks; }
+// Model a decoder frame whose real Vulkan timeline has not completed. No codec
+// or Vulkan Video capability is needed to exercise the production polling API.
+static bool TestDecodeReadiness() {
+    VkSemaphoreTypeCreateInfo type{};
+    type.sType = VK_STRUCTURE_TYPE_SEMAPHORE_TYPE_CREATE_INFO;
+    type.semaphoreType = VK_SEMAPHORE_TYPE_TIMELINE;
+    VkSemaphoreCreateInfo create{};
+    create.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+    create.pNext = &type;
+    VkSemaphore semaphore = VK_NULL_HANDLE;
+    CHECK(vkCreateSemaphore(instance.device, &create, nullptr, &semaphore));
+    AVVulkanDeviceContext vulkanDevice{};
+    vulkanDevice.act_dev = instance.device;
+    AVHWDeviceContext device{};
+    device.type = AV_HWDEVICE_TYPE_VULKAN;
+    device.hwctx = &vulkanDevice;
+    AVVulkanFramesContext pool{};
+    pool.lock_frame = LockFrame;
+    pool.unlock_frame = UnlockFrame;
+    AVHWFramesContext frames{};
+    frames.hwctx = &pool;
+    frames.device_ref = av_buffer_create(reinterpret_cast<uint8_t*>(&device), sizeof(device), KeepStackBuffer, nullptr, 0);
+    AVVkFrame image{};
+    image.sem[0] = semaphore;
+    image.sem_value[0] = 1;
+    AVFrame* frame = av_frame_alloc();
+    if (!frames.device_ref || !frame) return false;
+    frame->format = AV_PIX_FMT_VULKAN;
+    frame->data[0] = reinterpret_cast<uint8_t*>(&image);
+    frame->hw_frames_ctx = av_buffer_create(reinterpret_cast<uint8_t*>(&frames), sizeof(frames), KeepStackBuffer, nullptr, 0);
+    if (!frame->hw_frames_ctx) return false;
+    constexpr int iterations = 256;
+    const auto start = std::chrono::steady_clock::now();
+    for (int i = 0; i < iterations; ++i) {
+        if (ffu_vulkan_video_frame_ready(frame) != 0) {
+            std::puts("FAIL: unfinished decode timeline reported ready or errored");
+            return false;
+        }
+    }
+    const double milliseconds = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
+    if (milliseconds > 500 || frameLocks != iterations || frameUnlocks != frameLocks || submitted || gpuSubmitted) {
+        std::printf("FAIL: decode polling blocked or submitted Unity GPU work (%.3f ms, locks=%d/%d, queues=%d/%d)\n",
+            milliseconds, frameLocks, frameUnlocks, submitted, gpuSubmitted);
+        return false;
+    }
+    VkSemaphoreSignalInfo signal{};
+    signal.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SIGNAL_INFO;
+    signal.semaphore = semaphore;
+    signal.value = 1;
+    CHECK(vkSignalSemaphore(instance.device, &signal));
+    if (ffu_vulkan_video_frame_ready(frame) != 1 || frameLocks != iterations + 1 || frameUnlocks != frameLocks) {
+        std::puts("FAIL: completed decode timeline did not become ready with balanced frame locking");
+        return false;
+    }
+    av_frame_free(&frame);
+    av_buffer_unref(&frames.device_ref);
+    vkDestroySemaphore(instance.device, semaphore, nullptr);
+    std::printf("PASS: pending decode readiness, %d nonblocking polls in %.3f ms, completed timeline readiness\n", iterations, milliseconds);
+    return true;
+}
 int main() {
     VkApplicationInfo app{}; app.sType=VK_STRUCTURE_TYPE_APPLICATION_INFO; app.apiVersion=VK_API_VERSION_1_2;
     VkInstanceCreateInfo create{}; create.sType=VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO; create.pApplicationInfo=&app;
@@ -83,7 +165,7 @@ int main() {
     for(uint32_t i=0;i<count;++i) if((queues[i].queueFlags&(VK_QUEUE_GRAPHICS_BIT|VK_QUEUE_COMPUTE_BIT))==(VK_QUEUE_GRAPHICS_BIT|VK_QUEUE_COMPUTE_BIT)){instance.queueFamilyIndex=i;break;}
     float priority=1; VkDeviceQueueCreateInfo q{};q.sType=VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;q.queueFamilyIndex=instance.queueFamilyIndex;q.queueCount=1;q.pQueuePriorities=&priority;
     VkDeviceCreateInfo dc{};dc.sType=VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;dc.pNext=&timelineFeature;dc.queueCreateInfoCount=1;dc.pQueueCreateInfos=&q;
-    CHECK(vkCreateDevice(devices[0],&dc,nullptr,&instance.device));vkGetDeviceQueue(instance.device,instance.queueFamilyIndex,0,&instance.graphicsQueue);instance.getInstanceProcAddr=vkGetInstanceProcAddr;
+    CHECK(vkCreateDevice(devices[0],&dc,nullptr,&instance.device));vkGetDeviceQueue(instance.device,instance.queueFamilyIndex,0,&instance.graphicsQueue);instance.getInstanceProcAddr=InstanceProc;
     VkSemaphoreTypeCreateInfo timelineType{};timelineType.sType=VK_STRUCTURE_TYPE_SEMAPHORE_TYPE_CREATE_INFO;timelineType.semaphoreType=VK_SEMAPHORE_TYPE_TIMELINE;
     VkSemaphoreCreateInfo semaphoreInfo{};semaphoreInfo.sType=VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;semaphoreInfo.pNext=&timelineType;
     VkSemaphore timelineSemaphore;CHECK(vkCreateSemaphore(instance.device,&semaphoreInfo,nullptr,&timelineSemaphore));
@@ -92,6 +174,7 @@ int main() {
     unity.Instance=Instance;unity.ConfigureEvent=Configure;unity.AccessTexture=Access;unity.AccessQueue=Queue;
     IUnityInterfaces interfaces{};interfaces.GetInterfaceSplit=Lookup;
     if(!FfuVkInitialize(&interfaces)){std::printf("FAIL init %d\n",FfuVkStatus());return 1;}
+    if (!TestDecodeReadiness()) return 1;
     void* presenter=FfuVkPresenterCreate();VkDeviceMemory outputMemory;
     MakeImage(VK_FORMAT_R8G8B8A8_UNORM,32,16,VK_IMAGE_USAGE_TRANSFER_DST_BIT|VK_IMAGE_USAGE_TRANSFER_SRC_BIT,output,outputMemory);
     auto command=Begin();Barrier(command,output,VK_IMAGE_LAYOUT_UNDEFINED,VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);End(command);
@@ -118,6 +201,31 @@ int main() {
             vkCmdClearColorImage(command,owner->images[i],VK_IMAGE_LAYOUT_GENERAL,&color,1,&vi.subresourceRange);
             sample.image[i]=owner->images[i];sample.view[i]=owner->views[i];sample.sampler[i]=owner->sampler;}
         End(command);
+        if (iteration == 0) {
+            auto pending = sample;
+            int pendingReleased = 0, rejected = 0, unlocked = 0;
+            pending.owner = std::shared_ptr<void>(new int(0), [&](void* value) {
+                delete static_cast<int*>(value);
+                ++pendingReleased;
+            });
+            pending.lock = [&](FfuVkSample& current) { ++rejected; current.pending = true; return false; };
+            pending.unlock = [&](bool) { ++unlocked; };
+            void* pendingPacket = FfuVkPrepare(presenter, pending, &output, true, true);
+            if (!pendingPacket) return 1;
+            pending.owner.reset();
+            const int beforeGpu = gpuSubmitted;
+            FfuVkSubmit(pendingPacket);
+            if (!deferred || pendingReleased) return 1;
+            auto callback = deferred;
+            deferred = nullptr;
+            callback(251, deferredData);
+            if (gpuSubmitted != beforeGpu || pendingReleased != 1 || rejected != 1 || unlocked ||
+                FfuVkPresenterError(presenter) || FfuVkPendingCount()) {
+                std::puts("FAIL: busy decode frame queued GPU work, leaked ownership or faulted the presenter");
+                return 1;
+            }
+            std::puts("PASS: late decode timeline advance drops the pending packet without Unity GPU submission");
+        }
         auto actualContext=sample.context; sample.context=std::make_shared<FfuVkContext>();
         if(FfuVkPrepare(presenter,sample,&output,true,true)) { std::puts("FAIL stale device generation accepted"); return 1; }
         sample.context=actualContext;
@@ -146,5 +254,6 @@ int main() {
     }
     FfuVkPresenterRelease(presenter);FfuVkShutdown();vkDestroySemaphore(instance.device,timelineSemaphore,nullptr);vkDestroyBuffer(instance.device,readback,nullptr);vkFreeMemory(instance.device,readMemory,nullptr);
     vkDestroyImage(instance.device,output,nullptr);vkFreeMemory(instance.device,outputMemory,nullptr);vkDestroyCommandPool(instance.device,pool,nullptr);vkDestroyDevice(instance.device,nullptr);vkDestroyInstance(instance.instance,nullptr);
-    std::printf("PASS: shared Vulkan compute NV12/RGB, %d deferred submissions, %zu pixel bytes, %d locked timeline submissions, GPU-fence owner retirement, cancellation, 24-packet cap, stale-device rejection\n",submitted,bytes*8,locks);
+    if (gpuSubmitted != 8 || submitted != gpuSubmitted + 1) return 1;
+    std::printf("PASS: shared Vulkan compute NV12/RGB, %d GPU submissions, %zu pixel bytes, %d locked timeline submissions, GPU-fence owner retirement, cancellation, 24-packet cap, stale-device rejection\n",gpuSubmitted,bytes*8,locks);
 }

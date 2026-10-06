@@ -7,6 +7,7 @@
 #include <cstdio>
 #include <cstring>
 #include <vector>
+#include <chrono>
 #define CHECK(x) do { if (!(x)) { std::printf("FAIL line %d: %s\n", __LINE__, #x); return 1; } } while (0)
 static UnityVulkanInitCallback interceptor = nullptr;
 static UnityVulkanInstance instance{};
@@ -136,6 +137,13 @@ int main() {
         deferQueue = iteration == 63;
         CHECK(FfuVulkanEndWrite(surface, &target));
         if (deferQueue) {
+            // Key 1 belongs to the deferred Vulkan consumer. Repeated producer
+            // admission must skip immediately without failing future playback.
+            const auto busyStart = std::chrono::steady_clock::now();
+            for (int probe = 0; probe < 64; ++probe) CHECK(!FfuVulkanBeginWrite(surface));
+            const double milliseconds = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - busyStart).count();
+            CHECK(milliseconds < 100 && FfuVulkanError(surface) == 0);
+            std::printf("PASS: 64 busy shared-surface admissions skipped in %.3f ms without a presenter error\n", milliseconds);
             // Simulate Unity's asynchronous submission thread after managed
             // code releases its output: the queued job must own the surface.
             FfuVulkanRelease(surface); surface = nullptr;

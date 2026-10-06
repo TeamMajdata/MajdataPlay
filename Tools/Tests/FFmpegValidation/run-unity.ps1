@@ -10,6 +10,7 @@ param(
     [switch] $TestRecovery,
     [switch] $HardwareCpuUpload,
     [switch] $TestDecoderPreference,
+    [switch] $TestDecodeOverload,
     [switch] $TestCameraCapture,
     [switch] $CaptureUrp,
     [switch] $CaptureHardware,
@@ -167,8 +168,11 @@ $decoderPreferenceValue = if ($TestDecoderPreference) { 'true' } else { 'false' 
 $nativeDecoderValue = if ($RequireNativeDecoder) { $Graphics } else { 'none' }
 $playerArgs = @('-batchmode', "-force-$Graphics", '-logFile', ('"' + $log + '"'), '-videoHardware', $hardwareValue, '-videoRequireHardware', $requireHardwareValue, '-videoTestRecovery', $testRecoveryValue, '-videoHardwareCpuUpload', $hardwareCpuValue, '-videoTestDecoderPreference', $decoderPreferenceValue, '-videoReport', ('"' + $report + '"'))
 $playerArgs += @('-videoNativeDecoder', $nativeDecoderValue)
-if ($TestCameraCapture) {
-    # A camera rendering to the display needs the regular Player render loop.
+if ($TestDecodeOverload) {
+    $playerArgs += @('-videoTestDecodeOverload', 'true')
+}
+if ($TestCameraCapture -or $TestDecodeOverload) {
+    # Capture and render-thread throughput checks need the regular Player render loop.
     $playerArgs = @($playerArgs | Where-Object { $_ -ne '-batchmode' })
 }
 $playerArgs += @('-cameraCapture', $(if ($TestCameraCapture) { 'true' } else { 'false' }), '-captureHardware', $(if ($CaptureHardware) { 'true' } else { 'false' }))

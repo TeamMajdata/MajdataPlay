@@ -3,6 +3,7 @@
 extern "C" {
 #include <libavutil/hwcontext.h>
 #include <libavutil/hwcontext_vulkan.h>
+#include <libavutil/error.h>
 }
 #include <algorithm>
 #include <cstring>
@@ -461,6 +462,19 @@ FFU_EXPORT void* FFU_CALL ffu_vulkan_video_acquire_device() {
 }
 
 namespace {
+// Readiness is a host query, never a wait submitted onto Unity's graphics queue.
+// The caller holds both the context resource lock and the FFmpeg frame lock.
+int TimelineReady(const std::shared_ptr<FfuVkContext>& context, const AVVkFrame* image) {
+    if (!image->sem[0] || image->sem_value[0] == UINT64_MAX) return AVERROR(EINVAL);
+    auto counter = reinterpret_cast<PFN_vkGetSemaphoreCounterValue>(context->Proc("vkGetSemaphoreCounterValue"));
+    if (!counter) counter = reinterpret_cast<PFN_vkGetSemaphoreCounterValue>(context->Proc("vkGetSemaphoreCounterValueKHR"));
+    if (!counter) return AVERROR(ENOSYS);
+    uint64_t completed = 0;
+    const VkResult result = counter(context->instance.device, image->sem[0], &completed);
+    if (result != VK_SUCCESS) return static_cast<int>(result);
+    return completed >= image->sem_value[0] ? 1 : 0;
+}
+
 struct FrameOwner {
     std::shared_ptr<FfuVkContext> context;
     std::shared_ptr<Device> device;
@@ -495,6 +509,13 @@ struct FrameOwner {
             image->queue_family[0] != context->instance.queueFamilyIndex)) {
             pool->unlock_frame(frames, image); locked = false; return false;
         }
+        // Decoder DPB reads can advance the timeline after the worker published
+        // this frame. Skip a busy image instead of stalling Unity behind it.
+        const int ready = TimelineReady(context, image);
+        if (ready != 1) {
+            sample.pending = ready == 0;
+            pool->unlock_frame(frames, image); locked = false; return false;
+        }
         sample.initialLayout = image->layout[0]; sample.foreignQueue = VK_QUEUE_FAMILY_IGNORED;
         sample.acquireSemaphore = image->sem[0]; sample.timeline = true;
         sample.waitValue = image->sem_value[0]; sample.signalValue = signalValue = sample.waitValue + 1;
@@ -512,6 +533,26 @@ struct FrameOwner {
         pool->unlock_frame(frames, image); locked = false;
     }
 };
+}
+
+FFU_EXPORT int FFU_CALL ffu_vulkan_video_frame_ready(const AVFrame* frame) {
+    if (!frame || frame->format != AV_PIX_FMT_VULKAN || !frame->hw_frames_ctx || !frame->data[0]) return AVERROR(EINVAL);
+    auto context = FfuVkCurrent();
+    if (!context) return AVERROR(ENODEV);
+    std::lock_guard<std::recursive_mutex> resources(context->resources);
+    if (!context->active) return AVERROR(ENODEV);
+    auto* frames = reinterpret_cast<AVHWFramesContext*>(frame->hw_frames_ctx->data);
+    if (!frames || !frames->hwctx || !frames->device_ref) return AVERROR(EINVAL);
+    auto* device = reinterpret_cast<AVHWDeviceContext*>(frames->device_ref->data);
+    if (!device || device->type != AV_HWDEVICE_TYPE_VULKAN || !device->hwctx ||
+        static_cast<AVVulkanDeviceContext*>(device->hwctx)->act_dev != context->instance.device) return AVERROR(EINVAL);
+    auto* pool = static_cast<AVVulkanFramesContext*>(frames->hwctx);
+    auto* image = reinterpret_cast<AVVkFrame*>(frame->data[0]);
+    if (!pool->lock_frame || !pool->unlock_frame || image->img[1] || pool->nb_layers > 1) return AVERROR(ENOSYS);
+    pool->lock_frame(frames, image);
+    const int result = TimelineReady(context, image);
+    pool->unlock_frame(frames, image);
+    return result;
 }
 
 FFU_EXPORT void* FFU_CALL ffu_vulkan_video_prepare(void* presenter, const AVFrame* frame, void* target) {

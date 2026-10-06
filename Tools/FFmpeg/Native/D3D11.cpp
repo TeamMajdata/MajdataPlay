@@ -12,6 +12,10 @@
 #include <new>
 #include <thread>
 #include <chrono>
+extern "C" {
+#include <libavutil/hwcontext.h>
+#include <libavutil/hwcontext_d3d11va.h>
+}
 
 template<class T> static void Release(T*& value) { if (value) { value->Release(); value = nullptr; } }
 static std::mutex deviceMutex;
@@ -228,6 +232,56 @@ FFU_EXPORT void* FFU_CALL ffu_d3d11_create() {
 }
 FFU_EXPORT void FFU_CALL ffu_d3d11_release(void* value) { if (value) static_cast<Presenter*>(value)->Drop(); }
 FFU_EXPORT int FFU_CALL ffu_d3d11_error(void* value) { return value ? static_cast<Presenter*>(value)->error.load() : -1; }
+
+// FFmpeg submits asynchronously and may block inside DecoderBeginFrame or
+// GetDecoderBuffer if the worker outruns the GPU. Pace codec calls on the worker
+// with an explicit completion query, before those driver waits can reach Unity's
+// render-thread conversion or shared immediate-context submissions.
+struct DecodeSynchronization {
+    AVBufferRef* deviceReference = nullptr;
+    AVD3D11VADeviceContext* device = nullptr;
+    ID3D11Query* complete = nullptr;
+    bool started = false;
+    ~DecodeSynchronization() { Release(complete); av_buffer_unref(&deviceReference); }
+};
+FFU_EXPORT void* FFU_CALL ffu_d3d11_decode_sync_create(void* hardwareDevice) {
+    auto* reference = static_cast<AVBufferRef*>(hardwareDevice);
+    if (!reference || !reference->data) return nullptr;
+    auto* context = reinterpret_cast<AVHWDeviceContext*>(reference->data);
+    if (context->type != AV_HWDEVICE_TYPE_D3D11VA || !context->hwctx) return nullptr;
+    auto* device = static_cast<AVD3D11VADeviceContext*>(context->hwctx);
+    if (!device->device || !device->device_context) return nullptr;
+    auto* sync = new (std::nothrow) DecodeSynchronization();
+    if (!sync) return nullptr;
+    sync->deviceReference = av_buffer_ref(reference);
+    sync->device = device;
+    D3D11_QUERY_DESC query{}; query.Query = D3D11_QUERY_EVENT;
+    if (!sync->deviceReference || FAILED(device->device->CreateQuery(&query, &sync->complete))) {
+        delete sync; return nullptr;
+    }
+    return sync;
+}
+FFU_EXPORT int FFU_CALL ffu_d3d11_decode_sync_begin(void* value) {
+    auto* sync = static_cast<DecodeSynchronization*>(value);
+    if (!sync) return E_INVALIDARG;
+    if (sync->device->lock) sync->device->lock(sync->device->lock_ctx);
+    sync->device->device_context->End(sync->complete);
+    sync->device->device_context->Flush();
+    if (sync->device->unlock) sync->device->unlock(sync->device->lock_ctx);
+    sync->started = true;
+    return sync->device->device->GetDeviceRemovedReason();
+}
+FFU_EXPORT int FFU_CALL ffu_d3d11_decode_sync_poll(void* value) {
+    auto* sync = static_cast<DecodeSynchronization*>(value);
+    if (!sync || !sync->started) return E_INVALIDARG;
+    const HRESULT removed = sync->device->device->GetDeviceRemovedReason();
+    if (FAILED(removed)) return removed;
+    const HRESULT result = sync->device->device_context->GetData(sync->complete, nullptr, 0, D3D11_ASYNC_GETDATA_DONOTFLUSH);
+    if (FAILED(result)) return result;
+    return result == S_OK ? 1 : 0;
+}
+FFU_EXPORT void FFU_CALL ffu_d3d11_decode_sync_release(void* value) { delete static_cast<DecodeSynchronization*>(value); }
+
 void FfuD3D11RetainPresenter(void* value) { if (value) static_cast<Presenter*>(value)->Retain(); }
 void FfuD3D11SetError(void* value, int error) { if (value) static_cast<Presenter*>(value)->error.store(error); }
 
@@ -390,7 +444,11 @@ void FfuPlatformRender(int event, void* data) {
     }
     if (event == FfuSubmitVulkan && data) {
         auto* packet = static_cast<Packet*>(data);
-        if (!FfuVulkanBeginWrite(packet->interopSurface)) { packet->owner->error = E_FAIL; delete packet; return; }
+        if (!FfuVulkanBeginWrite(packet->interopSurface)) {
+            const int error = FfuVulkanError(packet->interopSurface);
+            if (error) packet->owner->error = error;
+            delete packet; return;
+        }
         FfuD3D11Submit(packet);
         if (!FfuVulkanEndWrite(packet->interopSurface, packet->unityTarget)) packet->owner->error = E_FAIL;
         return;

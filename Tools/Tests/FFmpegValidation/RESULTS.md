@@ -2,6 +2,71 @@
 
 最近验证日期：2026-10-06；此前跨平台矩阵执行于 2026-10-03。Windows / Unity 6000.3.17f1 / AMD Radeon RX 580 2048SP；Linux 使用本机 WSL Ubuntu 24.04；Android 真机为 Mi MIX 2S / Android 15 API 35 / Adreno 630 / Vulkan 1.1.128；Apple 构建测试使用用户提供的 Mac mini M4。当前 Windows/Linux/Android 图形桥接 ABI 为 **4**，Apple 保持 **2**；下方 ABI2/3 的记录为此前版本实测。
 
+## 2026-10-06：Windows Vulkan Player 偶发启动崩溃兼容
+
+用户提供的 Unity **6000.3.17f1 / Windows x64 Mono / RX 580 2048SP** 主游戏 Player 在第一次交换链取帧时崩溃。匹配 DLL/PDB 的转储显示：`UnityGfxDeviceWorker` 发生 `0xc0000005`，读地址 `0x8`；`RSI=0x3b9acdeb`（`VK_SUBOPTIMAL_KHR`），取得的 image index 为 2，`R8=0`，故障指令为 UnityPlayer RVA `0x11f33df` 的 `mov r8,[r8+8]`。该分支调用交换链 `UpdateConfiguration`，经过返回 3/4 的路径后仍使用取得的 index 查找图像。此时仅有桥接与 avutil 被加载，avcodec 尚未加载。
+
+修复只在 Windows Unity loader 的实例/设备查询路径包装 `vkAcquireNextImageKHR/2KHR`，将已成功获取可用图像的 `VK_SUBOPTIMAL_KHR` 当作 `VK_SUCCESS`。真实 acquire 只调用一次，索引和 semaphore/fence 不变；呈现、窗口变化、`VK_ERROR_OUT_OF_DATE_KHR`、超时和其他错误继续按原语义处理，FFmpeg 原始 loader 与其他平台不变。该策略符合 [Khronos WSI acquisition 约定](https://docs.vulkan.org/spec/latest/chapters/VK_KHR_surface/wsi.html#vkAcquireNextImageKHR)。
+
+| 验证 | 结果 |
+| --- | --- |
+| 最终 x64 原生桥接，CMake 严格编译 | PASS；`-Wall -Wextra -Werror`，D3D11 真实 GPU 烟测通过 |
+| `FFmpegUnityVulkanNegotiation.exe` | PASS；9 种返回码、两种 acquire、实例/设备 lookup、参数/索引、单次调用、缺失入口、呈现透传、FFmpeg bypass、销毁链和重新初始化 |
+| 修复代码的初版主 Player 压力测试 | 10/10 存活并完成 Title；958 次异步尺寸请求、20 次最小化及 20 次恢复请求，0 crash，设置副本未变 |
+| 最终 DLL 的主 Player 验证 | 4/4 存活并完成 Title；380 次异步尺寸请求、8 次最小化及 8 次恢复请求，0 crash，设置副本未变；其中 2 轮运行新增 tracked 验证脚本并返回 0 |
+| 最终 DLL / Unity Vulkan / H.264 4K30 / 1x 与 16x | **39 assertions PASS**；更新帧率 **59.6 / 59.8 FPS**，最大更新间隔 **0.018 / 0.017 秒**；实际为 D3D11VA→Vulkan GPU 共享回退 |
+| `git diff --check` | PASS |
+
+最终 DLL 在 `Tools/FFmpeg/.build/player-crash-cmake-win-x64/FFmpegUnityBridge.dll`，SHA256 为 `8773C8B01A8EE00026679F32FF30DBFC6399EB96EC88F5195899AAE4413FC125`，已同步到项目的 Windows x64 插件与用户测试 Player 的同名插件。原 DLL 备份保存在 `.work/player-crash/FFmpegUnityBridge-project-before-repair.dll` 和 `FFmpegUnityBridge-player-before-repair.dll`。初版与最终版的生产代码逻辑相同，重新编译仅规范化源码换行并补充测试。
+
+复现与验证命令（主游戏 Player 副本预先放在忽略的 `.work/player-crash/`）：
+
+```powershell
+./Tools/FFmpeg/.build/player-crash-cmake-win-x64/FFmpegUnityVulkanNegotiation.exe
+./Tools/Tests/FFmpegValidation/ValidateVulkanPlayerStartup.ps1 `
+  -Attempts 2 -MinimizeRestore -Label final-tracked
+./Tools/Tests/FFmpegValidation/run-unity.ps1 -Backend Mono -Architecture x64 `
+  -Graphics vulkan -RequireHardware -TestDecodeOverload -SkipBuild `
+  -WorkDirectory Tools/Tests/FFmpegValidation/.work/video-overload/unity
+```
+
+转储诊断脚本与去用户路径的寄存器/PDB/反汇编证据保存在 `.work/crash-read/`；最终主 Player 汇总在 `.work/player-crash/resize-final-bridge-20261006-053000/summary.json` 和 `.work/vulkan-startup/final-tracked-1fedfbccd7214b47a78760e59bb703f0/summary.json`；4K 证据在 `.work/video-overload/unity/x64-Mono/vulkan-hardware.*`。
+
+**边界：** 旧桥接的隔离基线同样 10/10 启动成功，原偶发问题未稳定复现；有限实机压力测试不能证明完全消除崩溃。Win32 请求次数不等于 Unity 实际交换链重建次数。dump 不含相关堆数据，不能确定空图像来源、实际重建结果或 OBS 是否参与触发；此修复只避开已观察的 SUBOPTIMAL 更新分支，不覆盖其他图像表损坏。未验证 IL2CPP、Windows x86、其他 GPU 或长期全屏/多显示器切换；其他平台未应用此次兼容处理。
+
+## 2026-10-06：Vulkan 高倍速解码超载同步
+
+解码工作线程等待 Vulkan Video 输出完成，渲染提交在 FFmpeg 帧锁内重新检查 timeline，遇到新的 pending DPB 工作就跳过该 packet。Windows Vulkan 的 D3D11VA 回退复用 GPU event query，在每次 codec 调用后由工作线程等待；共享输出忙碌时零超时跳过。桥接保持 ABI 4，新增完成查询入口需要重建并重新加载。
+
+本轮使用 Unity **6000.3.17f1** / Windows x64 Mono / AMD Radeon RX 580 2048SP。该 GPU 缺少 Vulkan Video 扩展，Unity 播放实际使用 **D3D11VA + Vulkan GPU conversion/shared-resource copy，无 CPU 像素回读**。正常 Player 渲染模式为 `kGfxThreadingModeSplitJobs`，测量阶段 VSync=0、目标 60 FPS。
+
+| 验证 | 结果 |
+| --- | --- |
+| CMake x64 原生桥接，`-Wall -Wextra -Werror` | PASS；D3D11 query 与 Vulkan 协商回归通过 |
+| 真实 RX 580 Vulkan compute / 人工解码 timeline | PASS；256 次未完成帧轮询约 0.141 ms，无提交；signal 后 ready；提交前再次 pending 时立即释放 packet；原有 8 次转换与 16384 字节像素比较通过 |
+| 真实 RX 580 D3D11VA→Vulkan 互操作 | PASS；64 次复制及 786432 字节像素；64 次忙表面检查约 0.124 ms，无等待或错误 |
+| `.NET 9 --decode-sync` | **259 assertions PASS**；三次真实 D3D11VA 会话各 261 次 GPU 完成等待，seek、像素、取消与设备引用归还通过 |
+| Unity Vulkan / 原始 1080p29.97 素材 / 1x 与 16x | **39 assertions PASS**；更新帧率分别 **59.6 / 59.5 FPS**；最大更新间隔均约 0.018 秒 |
+| Unity Vulkan / H.264 3840×2160 30 FPS / 1x 与 16x | **39 assertions PASS**；更新帧率均 **59.7 FPS**；最大更新间隔均约 0.017 秒；16x 阶段提交 21 次呈现命令 |
+
+原生 CMake 输出在忽略的 `.build/video-overload-cmake-win-x64/`，测试 DLL fixture 在 `.work/video-overload/native-x64/`。Unity 原始素材证据保存在 `.work/video-overload/evidence-1080p/`，4K 最终报告与日志在 `.work/video-overload/unity/x64-Mono/vulkan-hardware.*`。4K fixture 由独立 FFmpeg 命令行生成，项目解码仍使用固定 FFmpeg 9.0.1：
+
+```powershell
+ffmpeg -n -f lavfi -i 'testsrc2=size=3840x2160:rate=30' -t 24 `
+  -c:v libx264 -preset ultrafast -crf 28 -g 60 -bf 2 -threads 4 `
+  -pix_fmt yuv420p -an Tools/Tests/FFmpegValidation/.work/video-overload/test-4k30.mp4
+dotnet run --project Tools/Tests/FFmpegValidation/FFmpegValidation.csproj -- `
+  Tools/Tests/FFmpegValidation/.work/video-overload/native-x64 `
+  "Assets/StreamingAssets/MaiCharts/Original/Zunda Overdance/bg.mp4" --decode-sync
+./Tools/Tests/FFmpegValidation/run-unity.ps1 -Backend Mono -Architecture x64 `
+  -Graphics vulkan -RequireHardware -TestDecodeOverload `
+  -NativeDirectory Tools/Tests/FFmpegValidation/.work/video-overload/native-x64 `
+  -WorkDirectory Tools/Tests/FFmpegValidation/.work/video-overload/unity `
+  -Media Tools/Tests/FFmpegValidation/.work/video-overload/test-4k30.mp4
+```
+
+**未验证与既有失败：** 本轮未运行主游戏场景、IL2CPP、Windows x86、Linux/Android/Apple 实机，也未正向验证真实 Vulkan Video 码流解码（本机只能验证其人工 timeline 与实际 GPU 同步协议）。正常 D3D11 转换和 Vulkan 复制仍有 GPU 同步成本。隔离 Player 的 batchmode 非线程渲染模式在本机发生 Unity 引擎崩溃；本轮性能验收使用正常渲染循环。现有 `--eviction` 和默认原生全套检查在 `TestEndOfStream` 的“仅保留末帧”断言失败；用 HEAD 解码器在独立 `.work/gpu-decode-baseline-*` 工程对原始视频与 120 FPS fixture 复现相同失败，本轮未改变该 EOF 策略。
+
 ## 2026-10-06：解码线程过期帧淘汰与共享时钟
 
 Player 与解码线程使用解码会话持有的唯一 PlaybackClock，通过会话锁读取时间与更新控制，不再每帧复制时钟位置。播放时淘汰已被较新到期帧替代的旧帧；保留未来帧和可呈现的最新到期帧。队列保持 1–8 的原容量，额外候选帧使用已有 `capacity + 2` 帧池，暂停、seek、关闭和 EOF 按各自生命周期处理。主线程原子选择最新到期帧，避免后台替换和帧池租用竞态。

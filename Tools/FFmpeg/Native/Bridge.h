@@ -71,6 +71,13 @@ FFU_EXPORT void FFU_CALL ffu_d3d11_release_output(void* texture);
 FFU_EXPORT void FFU_CALL ffu_d3d11_release(void* presenter);
 FFU_EXPORT void* FFU_CALL ffu_d3d11_prepare(void* presenter, const AVFrame* frame, void* target);
 FFU_EXPORT int FFU_CALL ffu_d3d11_error(void* presenter);
+// Reusable decode-worker completion query. The supplied AVBufferRef is borrowed;
+// the synchronizer retains it until release. Begin returns 0 or a negative error;
+// poll returns 1 when ready, 0 while pending, or a negative error.
+FFU_EXPORT void* FFU_CALL ffu_d3d11_decode_sync_create(void* hardwareDevice);
+FFU_EXPORT int FFU_CALL ffu_d3d11_decode_sync_begin(void* sync);
+FFU_EXPORT int FFU_CALL ffu_d3d11_decode_sync_poll(void* sync);
+FFU_EXPORT void FFU_CALL ffu_d3d11_decode_sync_release(void* sync);
 FFU_EXPORT void* FFU_CALL ffu_shared_surface_create(void* presenter, void* texture, unsigned int glName);
 FFU_EXPORT void* FFU_CALL ffu_shared_prepare(void* presenter, const AVFrame* frame, void* texture, void* surface, void* unityTarget);
 FFU_EXPORT int FFU_CALL ffu_shared_error(void* surface);
