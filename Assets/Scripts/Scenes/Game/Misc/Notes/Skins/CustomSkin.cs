@@ -1304,13 +1304,24 @@ namespace MajdataPlay.Scenes.Game.Notes.Skins
 
 
 
+        /// <summary>
+        /// Packs and assigns sprites on the main thread within the active graphics device's texture limit.
+        /// </summary>
+        /// <param name="textures">Readable source textures, released after packing.</param>
+        /// <param name="validTasks">Assignment tasks corresponding to the source textures.</param>
+        /// <returns>The packed atlas, or null when there are no source textures.</returns>
         private Texture2D? ExecutePack(PooledList<Texture2D> textures, PooledList<SpriteTask> validTasks)
         {
             _sprites.Clear();
-            if (textures.Count == 0) return null;
+            if (textures.Count == 0)
+            {
+                return null;
+            }
 
-            var atlas = new Texture2D(8192, 8192);
-            Rect[] rects = atlas.PackTextures(textures.ToArray(), 2, 8192);
+            var maximumAtlasSize = Math.Min(8192, SystemInfo.maxTextureSize);
+            // PackTextures resizes the atlas; avoid allocating the maximum size before packing.
+            var atlas = new Texture2D(2, 2);
+            var rects = atlas.PackTextures(textures.ToArray(), 2, maximumAtlasSize);
 
             // Keep the atlas readable until all Tight sprites and custom meshes exist.
 
