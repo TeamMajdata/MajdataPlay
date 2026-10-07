@@ -5,6 +5,7 @@
 #include "IUnityGraphicsD3D11.h"
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <chrono>
 #include <vector>
 extern "C" {
@@ -14,6 +15,23 @@ extern "C" {
 }
 
 bool FfuD3D11Benchmark(const char* path, int stride, bool yieldOnly);
+bool FfuD3D11TestStagingRetirement();
+int FfuD3D11TestStagingReadiness(HRESULT acquire, bool* conversionComplete, bool* readerAcquired);
+
+// No adapter or driver calls: force slot destruction at lease publication and
+// exercise exactly the readiness result/state transition used by stage_ready.
+static bool VerifyStagingErrorAndRetirement() {
+    if (!FfuD3D11TestStagingRetirement()) return false;
+    for (HRESULT acquire : {HRESULT(S_OK), HRESULT(WAIT_TIMEOUT), HRESULT(WAIT_ABANDONED), HRESULT(E_FAIL)}) {
+        bool conversionComplete = false, readerAcquired = false;
+        const int result = FfuD3D11TestStagingReadiness(acquire, &conversionComplete, &readerAcquired);
+        const int expected = acquire == S_OK ? 1 : acquire == WAIT_TIMEOUT ? 0 :
+            FAILED(acquire) ? acquire : HRESULT_FROM_WIN32(static_cast<DWORD>(acquire));
+        if (result != expected || conversionComplete != (acquire == S_OK) || readerAcquired != (acquire == S_OK)) return false;
+    }
+    std::puts("PASS: no-GPU staging lease retirement/resize interleaving; abandoned mutex never publishes readiness");
+    return true;
+}
 static ID3D11Device* device = nullptr;
 static int released = 0;
 static int synchronizedDevicesReleased = 0;
@@ -181,6 +199,11 @@ static bool VerifyIsolatedStaging(ID3D11DeviceContext* context) {
     return valid;
 }
 int main(int argc, char** argv) {
+    if (!VerifyStagingErrorAndRetirement()) {
+        std::puts("FAIL: staging error or lease-retirement regression");
+        return 1;
+    }
+    if (argc > 1 && std::strcmp(argv[1], "--staging-lifetime") == 0) return 0;
     ID3D11DeviceContext* context = nullptr;
     D3D_FEATURE_LEVEL level{};
     HRESULT hr = D3D11CreateDevice(nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr,

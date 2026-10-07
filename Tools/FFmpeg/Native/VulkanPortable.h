@@ -16,6 +16,7 @@ struct FfuVkContext {
     UnityVulkanInstance instance{};
     IUnityGraphicsVulkanV2* unity = nullptr;
     std::atomic<bool> active{true};
+    std::atomic<int> inFlight{0};
     std::recursive_mutex resources;
     PFN_vkGetDeviceProcAddr getDeviceProcAddr = nullptr;
     VkPhysicalDeviceMemoryProperties memory{};

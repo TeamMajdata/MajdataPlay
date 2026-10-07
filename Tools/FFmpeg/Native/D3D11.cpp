@@ -43,6 +43,12 @@ static std::atomic<int> inFlight{0};
 static std::atomic<int> initializationStatus{3};
 static bool StagedFrameReady(const AVFrame* frame);
 
+// AcquireSync returns Win32 wait statuses, not just HRESULT failures. Never let
+// WAIT_ABANDONED (a positive value) masquerade as completed staging to callers.
+static HRESULT KeyedMutexFailure(HRESULT result) {
+    return FAILED(result) ? result : HRESULT_FROM_WIN32(static_cast<DWORD>(result));
+}
+
 struct Presenter {
     std::atomic<int> references{1};
     std::atomic<int> error{0};
@@ -516,10 +522,10 @@ struct StagingPool {
         if (!surface->readerAcquired) {
             const HRESULT acquire = surface->readerKey->AcquireSync(1, 0);
             if (acquire == WAIT_TIMEOUT) return false;
-            if (acquire != S_OK) { error = acquire; return false; }
+            if (acquire != S_OK) { error = KeyedMutexFailure(acquire); return false; }
         }
         const HRESULT release = surface->readerKey->ReleaseSync(0);
-        if (release != S_OK) { error = release; return false; }
+        if (release != S_OK) { error = KeyedMutexFailure(release); return false; }
         surface->readerAcquired = false; surface->begun = false; surface->conversionComplete = false;
         surface->ReleaseConversionViews();
         av_frame_free(&surface->input);
@@ -581,11 +587,21 @@ static void ScheduleStagingCleanup(StagingPool* pool) {
     if (thread) CloseHandle(thread);
     else { FreeLibrary(cleanup->module); delete cleanup; }
 }
+#ifdef FFU_STAGE_BENCHMARK
+// Test-only interleaving: the real worker may delete a retired slot on resize.
+static void (*stagingReleaseTestHook)(StagingSurface*) = nullptr;
+#endif
 static void ReleaseStagedFrame(void* opaque, uint8_t*) {
     auto* surface = static_cast<StagingSurface*>(opaque);
+    auto* owner = surface->owner;
     if (surface->conversionComplete) av_frame_free(&surface->input);
+    // The worker can reuse or delete this surface immediately after publication.
+    // Only the independently retained pool may be accessed from here onward.
     surface->leased.store(false, std::memory_order_release);
-    surface->owner->Drop();
+#ifdef FFU_STAGE_BENCHMARK
+    if (stagingReleaseTestHook) stagingReleaseTestHook(surface);
+#endif
+    owner->Drop();
 }
 FFU_EXPORT void* FFU_CALL ffu_d3d11_stage_create(void* hardwareDevice) {
     auto* reference = static_cast<AVBufferRef*>(hardwareDevice);
@@ -642,7 +658,7 @@ FFU_EXPORT AVFrame* FFU_CALL ffu_d3d11_stage_frame(void* value, const AVFrame* f
     if (!surface) return nullptr;
     HRESULT result = surface->producerKey->AcquireSync(0, 0);
     if (result == WAIT_TIMEOUT) return nullptr;
-    if (result != S_OK) { pool->error = result; return nullptr; }
+    if (result != S_OK) { pool->error = KeyedMutexFailure(result); return nullptr; }
     AVFrame* output = av_frame_alloc();
     surface->input = av_frame_clone(frame);
     if (!output || !surface->input) {
@@ -671,16 +687,20 @@ FFU_EXPORT AVFrame* FFU_CALL ffu_d3d11_stage_frame(void* value, const AVFrame* f
 #endif
     converter->immediate->End(surface->complete);
     surface->begun = true;
-    const HRESULT released = surface->producerKey->ReleaseSync(1);
-#ifdef FFU_STAGE_BENCHMARK
-    stageReleaseMs += std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - phaseBegin).count();
-    phaseBegin = std::chrono::steady_clock::now();
-#endif
+    // The producer texture is shared with another D3D11 device and, on the
+    // Vulkan backend, is handed to a foreign queue after the keyed-mutex
+    // release. Submit the conversion before publishing key 1; otherwise the
+    // consumer can acquire the key while the copy is still only client-side.
     converter->immediate->Flush();
 #ifdef FFU_STAGE_BENCHMARK
     stageFlushMs += std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - phaseBegin).count();
+    phaseBegin = std::chrono::steady_clock::now();
 #endif
-    if (SUCCEEDED(result)) result = released;
+    const HRESULT released = surface->producerKey->ReleaseSync(1);
+#ifdef FFU_STAGE_BENCHMARK
+    stageReleaseMs += std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - phaseBegin).count();
+#endif
+    if (SUCCEEDED(result)) result = released == S_OK ? S_OK : KeyedMutexFailure(released);
     if (FAILED(result)) { pool->error = result; av_frame_free(&output); return nullptr; }
     const int copied = av_frame_copy_props(output, frame);
     if (copied < 0) { pool->error = copied; av_frame_free(&output); return nullptr; }
@@ -696,6 +716,45 @@ FFU_EXPORT AVFrame* FFU_CALL ffu_d3d11_stage_frame(void* value, const AVFrame* f
     pool->current = surface;
     return output;
 }
+// Publish readiness only after successful reader ownership; Win32 wait errors
+// must follow the negative-error convention of the managed staging poll.
+static int CompleteStagingReadiness(StagingSurface* surface, HRESULT acquire) {
+    if (acquire == WAIT_TIMEOUT) return 0;
+    if (acquire != S_OK) return KeyedMutexFailure(acquire);
+    surface->readerAcquired = true;
+    surface->conversionComplete = true;
+    surface->ReleaseConversionViews();
+    return 1;
+}
+#ifdef FFU_STAGE_BENCHMARK
+// Deterministic no-GPU regressions linked only by the existing smoke target.
+bool FfuD3D11TestStagingRetirement() {
+    auto* pool = new StagingPool();
+    auto* surface = new StagingSurface();
+    surface->owner = pool;
+    surface->leased = true;
+    pool->surfaces.push_back(surface);
+    pool->Retain();
+    stagingReleaseTestHook = [](StagingSurface* retired) {
+        auto* owner = retired->owner;
+        if (retired->leased.load(std::memory_order_acquire)) return;
+        owner->surfaces.clear();
+        delete retired;
+    };
+    ReleaseStagedFrame(surface, nullptr);
+    stagingReleaseTestHook = nullptr;
+    const bool valid = pool->references == 1 && pool->surfaces.empty();
+    pool->Drop();
+    return valid;
+}
+int FfuD3D11TestStagingReadiness(HRESULT acquire, bool* conversionComplete, bool* readerAcquired) {
+    StagingSurface surface;
+    const int result = CompleteStagingReadiness(&surface, acquire);
+    *conversionComplete = surface.conversionComplete;
+    *readerAcquired = surface.readerAcquired;
+    return result;
+}
+#endif
 FFU_EXPORT int FFU_CALL ffu_d3d11_stage_ready(void* value) {
 #ifdef FFU_STAGE_BENCHMARK
     StagePollTrace trace;
@@ -708,15 +767,8 @@ FFU_EXPORT int FFU_CALL ffu_d3d11_stage_ready(void* value) {
     const HRESULT done = pool->converter->immediate->GetData(surface->complete, nullptr, 0, D3D11_ASYNC_GETDATA_DONOTFLUSH);
     if (done == S_FALSE) return 0;
     if (FAILED(done)) return done;
-    if (!surface->readerAcquired) {
-        const HRESULT acquire = surface->readerKey->AcquireSync(1, 0);
-        if (acquire == WAIT_TIMEOUT) return 0;
-        if (acquire != S_OK) return acquire;
-        surface->readerAcquired = true;
-    }
-    surface->conversionComplete = true;
-    surface->ReleaseConversionViews();
-    return 1;
+    const HRESULT acquire = surface->readerAcquired ? S_OK : surface->readerKey->AcquireSync(1, 0);
+    return CompleteStagingReadiness(surface, acquire);
 }
 FFU_EXPORT int FFU_CALL ffu_d3d11_stage_error(void* value) {
     return value ? static_cast<StagingPool*>(value)->error.load() : E_INVALIDARG;

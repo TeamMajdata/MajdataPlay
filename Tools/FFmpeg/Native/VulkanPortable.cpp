@@ -11,7 +11,7 @@
 int FfuEventId(int event);
 namespace {
 constexpr int SubmitEvent = 11;
-std::atomic<int> status{100}, inFlight{0};
+std::atomic<int> status{100};
 std::atomic<bool> extensions{false};
 PFN_vkGetInstanceProcAddr loader = nullptr;
 VkInstance loaderInstance = VK_NULL_HANDLE;
@@ -191,7 +191,7 @@ struct PortableJob {
         }
         sample.owner.reset();
         if (presenter) presenter->Drop();
-        --inFlight;
+        --context->inFlight;
     }
 };
 std::mutex jobsMutex;
@@ -365,11 +365,19 @@ void FfuVkPresenterSetError(void* presenter, int error) { if (presenter) static_
 void* FfuVkPrepare(void* presenter, const FfuVkSample& sample, void* target, bool full, bool matrix709) {
     std::shared_ptr<Context> c;
     { std::lock_guard<std::mutex> guard(contextMutex); c = current; }
-    if (!c || !c->active || c.get() != sample.context.get() || !presenter || !target || !sample.owner || !sample.width || !sample.height ||
+    if (!c || c.get() != sample.context.get() || !presenter || !target || !sample.owner || !sample.width || !sample.height ||
         sample.planeCount < 1 || sample.planeCount > 2 || !sample.image[0] || !sample.view[0] || !sample.sampler[0]) return nullptr;
-    if (inFlight.fetch_add(1) >= 24) { --inFlight; FfuVkPresenterSetError(presenter, 102); return nullptr; }
+    {
+        // Admission and shutdown use the same generation resource gate. Do not
+        // create a packet after shutdown has detached this context.
+        std::lock_guard<std::recursive_mutex> resources(c->resources);
+        if (!c->active) return nullptr;
+        if (c->inFlight.fetch_add(1) >= 24) {
+            --c->inFlight; FfuVkPresenterSetError(presenter, 102); return nullptr;
+        }
+    }
     auto* job = new (std::nothrow) PortableJob();
-    if (!job) { --inFlight; return nullptr; }
+    if (!job) { --c->inFlight; return nullptr; }
     job->context = c; job->presenter = static_cast<Presenter*>(presenter); job->presenter->Retain();
     job->sample = sample; job->unityTexture = target;
     std::copy(sample.uvScaleOffset, sample.uvScaleOffset + 4, job->parameters.uv);
@@ -395,7 +403,12 @@ void FfuVkPoll(bool drain) {
     for (auto it = jobs.begin(); it != jobs.end();) {
         auto* job = *it; const auto context = job->context; auto& c = *context;
         std::lock_guard<std::recursive_mutex> resources(c.resources);
-        VkResult result = c.active ? c.GetFenceStatus(c.instance.device, job->fence) : VK_ERROR_DEVICE_LOST;
+        // Shutdown may abandon a timed-out GPU submission. An inactive Unity
+        // context is not a device-lost result, and its device may still be using
+        // the imported/decoder image. Keep that owner and all job resources;
+        // querying this generation after Unity destroys its device is unsafe.
+        if (!c.active) { ++it; continue; }
+        VkResult result = c.GetFenceStatus(c.instance.device, job->fence);
         while (drain && result == VK_NOT_READY && std::chrono::steady_clock::now() < deadline) {
             std::this_thread::sleep_for(std::chrono::milliseconds(1)); result = c.GetFenceStatus(c.instance.device, job->fence);
         }
@@ -403,15 +416,26 @@ void FfuVkPoll(bool drain) {
         else { if (result != VK_NOT_READY) job->presenter->error = result; ++it; }
     }
 }
-int FfuVkPendingCount() { return inFlight.load(); }
+int FfuVkPendingCount() {
+    std::shared_ptr<Context> c;
+    { std::lock_guard<std::mutex> guard(contextMutex); c = current; }
+    return c && c->active ? c->inFlight.load() : 0;
+}
 void FfuVkShutdown() {
     FfuVkPoll(true);
-    std::lock_guard<std::mutex> guard(contextMutex);
-    if (current) {
-        std::lock_guard<std::recursive_mutex> lock(current->resources);
-        if (current->shader) current->DestroyShaderModule(current->instance.device, current->shader, nullptr);
-        if (current->pipelineCache) current->DestroyPipelineCache(current->instance.device, current->pipelineCache, nullptr);
-        current->shader = VK_NULL_HANDLE; current->active = false;
+    std::shared_ptr<Context> c;
+    {
+        std::lock_guard<std::mutex> guard(contextMutex);
+        // Mark the generation inactive before detaching it. A prepare call may
+        // already have captured this shared context; the admission check under
+        // resources must reject it once shutdown has begun.
+        c = std::move(current); status = 100;
+        if (c) c->active = false;
     }
-    current.reset(); status = 100;
+    if (c) {
+        std::lock_guard<std::recursive_mutex> lock(c->resources);
+        if (c->shader) c->DestroyShaderModule(c->instance.device, c->shader, nullptr);
+        if (c->pipelineCache) c->DestroyPipelineCache(c->instance.device, c->pipelineCache, nullptr);
+        c->shader = VK_NULL_HANDLE;
+    }
 }

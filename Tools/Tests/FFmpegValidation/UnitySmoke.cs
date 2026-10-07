@@ -10,10 +10,16 @@ using UnityEngine;
 
 public sealed class FFmpegPlayerSmoke : MonoBehaviour
 {
-    FFmpegVideoPlayer _player;
-    int _checks, _frames;
-    string _report;
-    Exception _failure;
+    /// <summary>Owns the production player used by the isolated validation scene.</summary>
+    private FFmpegVideoPlayer _player = null!;
+    /// <summary>Counts completed assertions.</summary>
+    private int _checks;
+    /// <summary>Counts frames actually presented through the production FrameReady event.</summary>
+    private int _frames;
+    /// <summary>Stores the optional result and evidence file prefix.</summary>
+    private string? _report;
+    /// <summary>Stores the first observed validation or playback failure.</summary>
+    private Exception? _failure;
     [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
     static void Boot() { if (Argument("-cameraCapture") != "true") new GameObject("FFmpeg Player validation").AddComponent<FFmpegPlayerSmoke>(); }
     void Start()
@@ -32,7 +38,7 @@ public sealed class FFmpegPlayerSmoke : MonoBehaviour
         var test = Run();
         while (true)
         {
-            object current = null;
+            object? current = null;
             bool next = false;
             try { next = test.MoveNext(); if (next) current = test.Current; }
             catch (Exception error) { _failure = error; }
@@ -54,10 +60,15 @@ public sealed class FFmpegPlayerSmoke : MonoBehaviour
         _player.PreferredDecoderType = Argument("-videoHardware") == "true" ? VideoDecoderType.Hardware : VideoDecoderType.Software;
         _player.RequireHardwareDecoding = Argument("-videoRequireHardware") == "true" && Argument("-videoTestRecovery") != "true";
         _player.PreferNativeTextures = Argument("-videoHardwareCpuUpload") != "true";
+        if (Argument("-videoGraphics") == "vulkan")
+        {
+            Check(SystemInfo.graphicsDeviceType == UnityEngine.Rendering.GraphicsDeviceType.Vulkan,
+                "the Vulkan regression uses an actual Vulkan renderer");
+        }
         _player.FrameReady += (_, __) => _frames++;
         _player.ErrorReceived += (_, error) => _failure = new Exception(error);
         var externalMedia = Argument("-videoMedia");
-        var path = string.IsNullOrEmpty(externalMedia) ? Path.Combine(Application.streamingAssetsPath, "test.mp4") : externalMedia;
+        var path = string.IsNullOrEmpty(externalMedia) ? Path.Combine(Application.streamingAssetsPath, "test.mp4") : externalMedia!;
 #if UNITY_ANDROID && !UNITY_EDITOR
         // FFmpeg cannot open an APK's jar: URL. Extract the encoded fixture once;
         // this is input I/O, not a decoded video-pixel readback or GPU upload.
@@ -81,7 +92,9 @@ public sealed class FFmpegPlayerSmoke : MonoBehaviour
         prepare.GetAwaiter().GetResult();
         Check(_player.IsPrepared && !_player.IsPlaying, "preload is paused");
         CheckHardwarePath();
+
         CheckDecoderIdentity();
+        var extendedRegression = int.TryParse(Argument("-videoDoubleRateSeconds"), out var requestedSeconds) && requestedSeconds > 3;
         Check(_player.Texture != null && _player.Width > 0 && _player.Height > 0, "preload presents first texture");
         Check(_player.Length > 0 && _player.IsSeekable, "timeline metadata");
         var first = _player.Time;
@@ -160,25 +173,126 @@ public sealed class FFmpegPlayerSmoke : MonoBehaviour
         while (_player.State == VideoPlaybackState.Seeking) { CheckTimeout(start); yield return null; }
         Check(_player.Time == 0 && _player.State == VideoPlaybackState.Stopped, "stop rewinds");
         _player.Play();
-        var older = _player.SeekAsync(0.2);
-        var newer = _player.SeekAsync(0.4);
-        start = UnityEngine.Time.realtimeSinceStartup;
-        while (!newer.IsCompleted) { CheckTimeout(start); yield return null; }
-        newer.GetAwaiter().GetResult();
-        Check(older.IsCanceled && _player.IsPlaying, "new seek supersedes old seek while keeping play intent");
+        var displayedEnd = typeof(FFmpegVideoPlayer).GetField("_lastFrameEnd", BindingFlags.Instance | BindingFlags.NonPublic)
+            ?? throw new MissingFieldException(typeof(FFmpegVideoPlayer).FullName, "_lastFrameEnd");
+        var seekAttempts = extendedRegression ? 8 : 1;
+        for (var index = 0; index < seekAttempts; index++)
+        {
+            var target = Math.Min(0.4 + (index % 4) * 0.5, _player.LengthSeconds / 2);
+            var older = _player.SeekAsync(Math.Min(0.2 + (index % 2) * 0.5, _player.LengthSeconds / 2));
+            var newer = _player.SeekAsync(target);
+            start = UnityEngine.Time.realtimeSinceStartup;
+            while (!newer.IsCompleted)
+            {
+                CheckTimeout(start);
+                yield return null;
+            }
+
+            newer.GetAwaiter().GetResult();
+            Check(older.IsCanceled && _player.IsPlaying && _player.PlaybackRate == 2,
+                "seek supersedes the older request while preserving 2x play intent: " + index);
+            if (extendedRegression)
+            {
+                var seekFrames = _frames;
+                start = UnityEngine.Time.realtimeSinceStartup;
+                while (_frames == seekFrames)
+                {
+                    CheckTimeout(start);
+                    yield return null;
+                }
+
+                var presentedEnd = (double)displayedEnd.GetValue(_player)!;
+                Check(_player.IsPlaying && presentedEnd >= target && Math.Abs(presentedEnd - _player.TimeSeconds) <= 0.3,
+                    "repeated seek continues presenting current 2x frames rather than stale pre-seek frames: " + index);
+            }
+        }
+
+        if (extendedRegression)
+        {
+            var resumed = CheckDoubleRateResumption("final repeated seek");
+            while (resumed.MoveNext())
+            {
+                yield return resumed.Current;
+            }
+
+            CheckTextureContents();
+        }
+
         int ended = 0;
         _player.EndReached += _ => ended++;
         _player.Loop = true;
         seek = _player.SeekAsync(Math.Max(0, _player.LengthSeconds - 0.15));
         start = UnityEngine.Time.realtimeSinceStartup;
-        while (ended == 0) { CheckTimeout(start); yield return null; }
-        while (!_player.IsPlaying) { CheckTimeout(start); yield return null; }
-        Check(_player.Time < 1000, "loop returns to beginning");
+        while (!seek.IsCompleted)
+        {
+            CheckTimeout(start);
+            yield return null;
+        }
+
+        seek.GetAwaiter().GetResult();
+        while (ended == 0)
+        {
+            CheckTimeout(start);
+            yield return null;
+        }
+
+        while (!_player.IsPlaying)
+        {
+            CheckTimeout(start);
+            yield return null;
+        }
+
+        Check(_player.Time < 1000 && _player.PlaybackRate == 2, "loop returns to the beginning at 2x");
+        if (extendedRegression)
+        {
+            var resumed = CheckDoubleRateResumption("loop");
+            while (resumed.MoveNext())
+            {
+                yield return resumed.Current;
+            }
+        }
+
         CheckHardwarePath();
         CheckDecoderIdentity();
         _player.Close();
         Check(!_player.IsPrepared && _player.Texture == null, "close releases texture and session");
         Check(_player.CurrentBitRate == 0, "close clears bitrate");
+        if (extendedRegression)
+        {
+            var closedFrames = _frames;
+            yield return new WaitForSecondsRealtime(0.15f);
+            Check(_frames == closedFrames && _player.BufferedFrames == 0 && _player.Texture == null && _player.State == VideoPlaybackState.Idle,
+                "close during 2x playback rejects late frames and keeps the player closed");
+            var reopened = _player.PreloadAsync(path);
+            start = UnityEngine.Time.realtimeSinceStartup;
+            while (!reopened.IsCompleted)
+            {
+                CheckTimeout(start);
+                yield return null;
+            }
+
+            reopened.GetAwaiter().GetResult();
+
+            CheckDecoderIdentity();
+            _player.Play();
+            var reopenedFrames = _frames;
+            start = UnityEngine.Time.realtimeSinceStartup;
+            while (_frames == reopenedFrames)
+            {
+                CheckTimeout(start);
+                yield return null;
+            }
+
+            Check(_player.IsPlaying && _player.PlaybackRate == 2, "reopening continues actual 2x presentation after close");
+            var interruptedSeek = _player.SeekAsync(Math.Min(1, _player.LengthSeconds / 2));
+            _player.Close();
+            Check(interruptedSeek.IsCanceled, "close cancels an in-flight seek during 2x playback");
+            closedFrames = _frames;
+            yield return new WaitForSecondsRealtime(0.15f);
+            Check(_frames == closedFrames && !_player.IsPrepared && _player.Texture == null && _player.BufferedFrames == 0,
+                "a cancelled 2x seek cannot revive or present through the closed session");
+        }
+
         var interrupted = _player.PreloadAsync(path);
         _player.Close();
         Check(interrupted.IsCanceled, "close cancels preparation");
@@ -209,45 +323,206 @@ public sealed class FFmpegPlayerSmoke : MonoBehaviour
             Check(diagnostics.Contains("transport="), "real MajDebug log records frame transport selection");
         }
     }
-    /// <summary>
-    /// Verifies that double-speed playback presents current frames while Unity updates at 60 FPS.
-    /// </summary>
-    /// <returns>The coroutine that measures playback rate and presentation lag.</returns>
-    /// <exception cref="Exception">Thrown when playback or presentation fails a validation assertion.</exception>
-    /// <exception cref="MissingFieldException">Thrown when the displayed frame timestamp is unavailable.</exception>
-    IEnumerator TestDoubleRatePlayback()
+    /// <summary>Checks one second of stable double-speed presentation after a seek or a loop.</summary>
+    /// <param name="phase">The control transition to identify in assertion failures and logs.</param>
+    /// <returns>The coroutine that observes continuous video and clock progress without changing playback controls.</returns>
+    /// <exception cref="MissingFieldException">The displayed frame timestamp is unavailable.</exception>
+    /// <exception cref="Exception">Playback stops, timestamps regress, a frame stalls, or progress does not remain near 2x.</exception>
+    private IEnumerator CheckDoubleRateResumption(string phase)
     {
         var displayedEnd = typeof(FFmpegVideoPlayer).GetField("_lastFrameEnd", BindingFlags.Instance | BindingFlags.NonPublic)
             ?? throw new MissingFieldException(typeof(FFmpegVideoPlayer).FullName, "_lastFrameEnd");
+        yield return new WaitForSecondsRealtime(0.2f);
+        var initialTime = _player.TimeSeconds;
+        var initialVideo = (double)displayedEnd.GetValue(_player)!;
+        var initialFrames = _frames;
+        var observedFrames = _frames;
+        var lastTime = initialTime;
+        var lastVideo = initialVideo;
+        var lastPresentation = 0d;
+        var maximumGap = 0d;
+        var maximumError = 0d;
+        var wentBackwards = false;
+        var wallClock = System.Diagnostics.Stopwatch.StartNew();
+        while (wallClock.Elapsed.TotalSeconds < 1)
+        {
+            yield return null;
+            var elapsed = wallClock.Elapsed.TotalSeconds;
+            var time = _player.TimeSeconds;
+            var video = (double)displayedEnd.GetValue(_player)!;
+            wentBackwards |= time < lastTime - 0.000001 || video < lastVideo - 0.000001;
+            lastTime = time;
+            lastVideo = video;
+            maximumGap = Math.Max(maximumGap, elapsed - lastPresentation);
+            maximumError = Math.Max(maximumError, Math.Abs(time - video) / 2);
+            if (_frames != observedFrames)
+            {
+                observedFrames = _frames;
+                lastPresentation = elapsed;
+            }
+        }
+
+        wallClock.Stop();
+        var seconds = wallClock.Elapsed.TotalSeconds;
+        var clockRate = (lastTime - initialTime) / seconds;
+        var videoRate = (lastVideo - initialVideo) / seconds;
+        Debug.Log("2x resumption: " + phase + "; clock=" + clockRate.ToString("F3") + "x; video="
+            + videoRate.ToString("F3") + "x; frames=" + (_frames - initialFrames) + "; maximum gap="
+            + maximumGap.ToString("F3") + " s; maximum wall error=" + maximumError.ToString("F3") + " s");
+        Check(_player.IsPlaying && _player.PlaybackRate == 2 && !wentBackwards && _frames > initialFrames,
+            phase + ": 2x playback and presentation continue without timestamp regression");
+        Check(Math.Abs(clockRate - 2) <= 0.2 && Math.Abs(videoRate - 2) <= 0.3,
+            phase + ": clock and presented PTS sustain 2x instead of freezing after a single frame");
+        Check(maximumGap < 0.1 && maximumError <= 0.15,
+            phase + ": no 100ms presentation freeze or 150ms wall-clock error after resuming");
+        CheckDecoderIdentity();
+    }
+
+    /// <summary>Measures continuous double-speed presentation, including frame skipping when the source exceeds the render cadence.</summary>
+    /// <returns>The coroutine that measures actual video progress and restores paused playback and rendering settings.</returns>
+    /// <exception cref="Exception">The fixture is too short, the requested duration is invalid, or presentation stalls or regresses.</exception>
+    /// <exception cref="MissingFieldException">The displayed frame timestamp is unavailable.</exception>
+    /// <exception cref="TimeoutException">The initial seek does not complete within the smoke timeout.</exception>
+    /// <exception cref="IOException">The timing evidence cannot be written.</exception>
+    /// <exception cref="TargetInvocationException">The decoder diagnostics fail while timing results are read.</exception>
+    private IEnumerator TestDoubleRatePlayback()
+    {
+        var displayedEnd = typeof(FFmpegVideoPlayer).GetField("_lastFrameEnd", BindingFlags.Instance | BindingFlags.NonPublic)
+            ?? throw new MissingFieldException(typeof(FFmpegVideoPlayer).FullName, "_lastFrameEnd");
+        var durationArgument = Argument("-videoDoubleRateSeconds");
+        var requestedSeconds = 3d;
+        if (!string.IsNullOrEmpty(durationArgument))
+        {
+            Check(double.TryParse(durationArgument, System.Globalization.NumberStyles.Float,
+                System.Globalization.CultureInfo.InvariantCulture, out requestedSeconds), "double-speed duration is a valid number");
+        }
+        Check(!double.IsNaN(requestedSeconds) && !double.IsInfinity(requestedSeconds) && requestedSeconds >= 1 && requestedSeconds <= 60,
+            "double-speed duration is between one and 60 wall-clock seconds");
+        var availableSeconds = ((_player.LengthSeconds - 0.25) / 2) - 0.25;
+        // Preserve the short smoke for small fixtures. Extended regressions must
+        // measure the full requested interval, never silently shorten at EOF.
+        var measuredSeconds = requestedSeconds <= 3 ? Math.Min(requestedSeconds, availableSeconds) : requestedSeconds;
+        Check(measuredSeconds >= 0.7 && availableSeconds >= measuredSeconds,
+            "fixture leaves enough media for the complete double-speed measurement: " + measuredSeconds + " wall-clock seconds");
         var previousVSync = QualitySettings.vSyncCount;
         var previousFrameRate = Application.targetFrameRate;
         QualitySettings.vSyncCount = 0;
         Application.targetFrameRate = 60;
         try
         {
+            _player.Pause();
+            _player.PlaybackRate = 2;
+            var seek = _player.SeekAsync(0);
+            var start = UnityEngine.Time.realtimeSinceStartup;
+            while (!seek.IsCompleted)
+            {
+                CheckTimeout(start);
+                yield return null;
+            }
+
+            seek.GetAwaiter().GetResult();
+            _player.Play();
+            yield return new WaitForSecondsRealtime(0.25f);
+            if (Argument("-videoHardware") == "true" && Argument("-videoAv1Software") != "true" && requestedSeconds > 3)
+            {
+                Check(_player.DecoderType == VideoDecoderType.Hardware,
+                    "extended 2x Vulkan regression uses an actual hardware decoder: " + _player.DecoderName
+                        + "; device=" + _player.DecoderDevice + "; fallback=" + _player.HardwareFallbackReason);
+            }
+
             var initialTime = _player.TimeSeconds;
+            var initialVideo = (double)displayedEnd.GetValue(_player)!;
             var initialFrames = _frames;
             var initialUpdates = UnityEngine.Time.frameCount;
+            var observedFrames = _frames;
+            var lastTime = initialTime;
+            var lastVideo = initialVideo;
+            var lastPresentation = 0d;
+            var maximumGap = 0d;
             var maximumLag = 0d;
-            _player.Play();
+            var maximumLead = 0d;
+            var maximumBufferedFrames = 0;
+            var clockWentBackwards = false;
+            var videoWentBackwards = false;
+            var bufferingUpdates = 0;
+            var remainedHardware = _player.DecoderType == VideoDecoderType.Hardware;
             var wallClock = System.Diagnostics.Stopwatch.StartNew();
-            while (wallClock.Elapsed.TotalSeconds < 0.7)
+            while (wallClock.Elapsed.TotalSeconds < measuredSeconds)
             {
                 yield return null;
-                var frameEnd = (double)displayedEnd.GetValue(_player)!;
-                maximumLag = Math.Max(maximumLag, _player.TimeSeconds - frameEnd);
+                var elapsed = wallClock.Elapsed.TotalSeconds;
+                var time = _player.TimeSeconds;
+                var video = (double)displayedEnd.GetValue(_player)!;
+                clockWentBackwards |= time < lastTime - 0.000001;
+                videoWentBackwards |= video < lastVideo - 0.000001;
+                lastTime = time;
+                lastVideo = video;
+                maximumGap = Math.Max(maximumGap, elapsed - lastPresentation);
+                if (_frames != observedFrames)
+                {
+                    lastPresentation = elapsed;
+                    observedFrames = _frames;
+                }
+
+                var wallError = (time - video) / 2;
+                maximumLag = Math.Max(maximumLag, wallError);
+                maximumLead = Math.Max(maximumLead, -wallError);
+                maximumBufferedFrames = Math.Max(maximumBufferedFrames, _player.BufferedFrames);
+                remainedHardware &= _player.DecoderType == VideoDecoderType.Hardware;
+                if (_player.IsBuffering)
+                {
+                    bufferingUpdates++;
+                }
             }
+
+            var finalTime = _player.TimeSeconds;
+            var finalVideo = (double)displayedEnd.GetValue(_player)!;
             _player.Pause();
             wallClock.Stop();
             var seconds = wallClock.Elapsed.TotalSeconds;
-            var effectiveRate = (_player.TimeSeconds - initialTime) / seconds;
+            var clockRate = (finalTime - initialTime) / seconds;
+            var videoRate = (finalVideo - initialVideo) / seconds;
+            var presentedFrames = _frames - initialFrames;
+            var presentationRate = presentedFrames / seconds;
             var updateRate = (UnityEngine.Time.frameCount - initialUpdates) / seconds;
-            Debug.Log("Double-speed playback: rate=" + effectiveRate.ToString("F3") +
-                "x; Unity updates=" + updateRate.ToString("F1") +
-                " FPS; maximum presentation lag=" + maximumLag.ToString("F3") + " s");
-            Check(Math.Abs(effectiveRate - 2) <= 0.2, "double-speed clock advances at 2x within 10%: " + effectiveRate);
-            Check(_frames > initialFrames, "double-speed playback presents frames");
-            Check(maximumLag < 0.2, "displayed frames remain within 0.2 seconds of the double-speed clock: " + maximumLag);
+            var sourceFrames = (finalVideo - initialVideo) * _player.FrameRate;
+            var estimatedSkippedFrames = Math.Max(0, sourceFrames - presentedFrames);
+            var discardedFrames = ReadSessionCounter("DiscardedFrames");
+            var catchUpSeeks = ReadSessionCounter("CatchUpSeeks");
+            Debug.Log("Double-speed playback: wall seconds=" + seconds.ToString("F3")
+                + "; clock=" + clockRate.ToString("F3") + "x; video=" + videoRate.ToString("F3")
+                + "x; presentations=" + presentationRate.ToString("F1") + " FPS; Unity updates=" + updateRate.ToString("F1")
+                + " FPS; maximum gap=" + maximumGap.ToString("F3") + " s; wall lag/lead=" + maximumLag.ToString("F3")
+                + "/" + maximumLead.ToString("F3") + " s; estimated skipped source frames=" + estimatedSkippedFrames.ToString("F1")
+                + "; discarded before conversion=" + discardedFrames + "; catch-up seeks=" + catchUpSeeks
+                + "; buffering updates=" + bufferingUpdates + "; decoder=" + _player.DecoderName + "/" + _player.DecoderDevice
+                + "; transport=" + _player.TransferMode + "; source=" + _player.Width + "x" + _player.Height + "@" + _player.FrameRate
+                + "; graphics=" + SystemInfo.graphicsDeviceType + "; GPU=" + SystemInfo.graphicsDeviceName
+                + "; driver=" + SystemInfo.graphicsDeviceVersion + "; fallback=" + _player.HardwareFallbackReason);
+            if (!string.IsNullOrEmpty(_report))
+            {
+                var header = "wall_seconds\tclock_rate\tvideo_rate\tpresented_frames\tpresentation_fps\tupdate_fps\tpresentation_max_gap_ms\twall_lag_max_ms\twall_lead_max_ms\testimated_skipped_source_frames\tdiscarded_before_conversion\tcatch_up_seeks\tbuffering_updates\tmaximum_buffered_frames\tdecoder\tdevice\ttransport\tgraphics_api\tgpu\tdriver\tfallback";
+                var row = FormattableString.Invariant($"{seconds}\t{clockRate}\t{videoRate}\t{presentedFrames}\t{presentationRate}\t{updateRate}\t{maximumGap * 1000}\t{maximumLag * 1000}\t{maximumLead * 1000}\t{estimatedSkippedFrames}\t{discardedFrames}\t{catchUpSeeks}\t{bufferingUpdates}\t{maximumBufferedFrames}\t{_player.DecoderName}\t{_player.DecoderDevice}\t{_player.TransferMode}\t{SystemInfo.graphicsDeviceType}\t{SystemInfo.graphicsDeviceName}\t{SystemInfo.graphicsDeviceVersion}\t{_player.HardwareFallbackReason}");
+                File.WriteAllText(_report + ".double-rate.tsv", header + Environment.NewLine + row + Environment.NewLine);
+            }
+
+            if (requestedSeconds > 3 && Argument("-videoHardware") == "true" && Argument("-videoAv1Software") != "true")
+            {
+                Check(remainedHardware, "extended 2x playback never substitutes software decoding for the requested hardware regression");
+            }
+
+            CheckDecoderIdentity();
+            Check(seconds >= measuredSeconds, "double-speed playback measures the entire requested wall-clock interval");
+            Check(!clockWentBackwards && Math.Abs(clockRate - 2) <= 0.2, "double-speed clock advances continuously at 2x within 10%: " + clockRate);
+            Check(!videoWentBackwards && presentedFrames > 0 && Math.Abs(videoRate - 2) <= 0.2,
+                "double-speed presented PTS advance continuously at 2x within 10%: " + videoRate);
+            Check(maximumGap < 0.1, "no 100ms presentation freeze during the continuous 2x interval: " + maximumGap);
+            Check(maximumLag <= 0.15 && maximumLead <= 0.15, "displayed 2x frames remain within 150ms of wall-clock time");
+            Check(maximumBufferedFrames <= Math.Max(1, Math.Min(8, _player.BufferedFrameLimit)), "double-speed decoder queue remains bounded");
+            if (_player.FrameRate * 2 > 60 * 1.2)
+            {
+                Check(estimatedSkippedFrames > 0, "high-frame-rate 2x playback skips source frames instead of delaying the video timeline");
+            }
         }
         finally
         {
@@ -704,7 +979,7 @@ public sealed class FFmpegPlayerSmoke : MonoBehaviour
         {
             var failedDevice = _player.DecoderDevice;
             var failedTransport = _player.TransferMode;
-            recover.Invoke(_player, new object[] { new NotSupportedException("Injected GPU texture failure for hardware CPU fallback, attempt " + (attempt + 1)) });
+            recover!.Invoke(_player, new object[] { new NotSupportedException("Injected GPU texture failure for hardware CPU fallback, attempt " + (attempt + 1)) });
             waitStart = UnityEngine.Time.realtimeSinceStartup;
             while (!_player.IsPrepared || _player.TransferMode.StartsWith("Reopening", StringComparison.Ordinal))
             {
@@ -790,9 +1065,9 @@ public sealed class FFmpegPlayerSmoke : MonoBehaviour
             Check(!_player.TransferMode.StartsWith("Software", StringComparison.Ordinal), control + ": fault starts from real hardware playback");
             Check(_player.Texture != null && _player.IsPlaying, control + ": hardware frame is visible before fault");
             int callbacks = 0;
-            Task seek = null;
+            Task? seek = null;
             double seekTarget = Math.Min(0.75, _player.LengthSeconds / 2);
-            Action<FFmpegVideoPlayer, Texture> callback = null;
+            Action<FFmpegVideoPlayer, Texture>? callback = null;
             callback = (player, texture) =>
             {
                 if (texture != null) return;
@@ -808,7 +1083,7 @@ public sealed class FFmpegPlayerSmoke : MonoBehaviour
             {
                 // Reproduce the managed hand-off from a render-thread failure without
                 // corrupting the GPU resource or making a driver-dependent failure.
-                recover.Invoke(_player, new object[] { new NotSupportedException("Injected asynchronous GPU presentation failure: " + control) });
+                recover!.Invoke(_player, new object[] { new NotSupportedException("Injected asynchronous GPU presentation failure: " + control) });
             }
             finally { _player.TextureChanged -= callback; }
             Check(callbacks == 1, control + ": null texture callback fired exactly once");
@@ -865,9 +1140,9 @@ public sealed class FFmpegPlayerSmoke : MonoBehaviour
         while (_frames == initialFrames) { CheckTimeout(waitStart); yield return null; }
         CheckHardwarePath();
         var failedSeek = _player.SeekAsync(0.2);
-        Task restarted = null;
+        Task? restarted = null;
         int restarts = 0;
-        Action<FFmpegVideoPlayer, Texture> restart = null;
+        Action<FFmpegVideoPlayer, Texture>? restart = null;
         restart = (player, texture) =>
         {
             if (texture != null) return;
@@ -877,13 +1152,13 @@ public sealed class FFmpegPlayerSmoke : MonoBehaviour
             restarted = player.PrepareAsync();
         };
         _player.TextureChanged += restart;
-        try { fail.Invoke(_player, new object[] { new InvalidOperationException("Expected recovery test terminal failure") }); }
+        try { fail!.Invoke(_player, new object[] { new InvalidOperationException("Expected recovery test terminal failure") }); }
         finally { _player.TextureChanged -= restart; }
         Check(restarts == 1 && restarted != null, "terminal failure callback starts replacement media once");
         Check(failedSeek.IsFaulted && failedSeek.Exception != null, "terminal failure completes old seek with its error");
         Check(_player.State != VideoPlaybackState.Error, "terminal failure does not overwrite replacement state");
         waitStart = UnityEngine.Time.realtimeSinceStartup;
-        while (!restarted.IsCompleted) { CheckTimeout(waitStart); yield return null; }
+        while (!restarted!.IsCompleted) { CheckTimeout(waitStart); yield return null; }
         restarted.GetAwaiter().GetResult();
         Check(_player.IsPrepared && _player.IsPlaying && _player.Texture != null, "replacement preload completes after terminal failure callback");
         initialFrames = _frames;
@@ -907,6 +1182,14 @@ public sealed class FFmpegPlayerSmoke : MonoBehaviour
             Check(_player.CodecName == "av1" && _player.DecoderName == "libdav1d" &&
                 _player.DecoderType == VideoDecoderType.Software && _player.TransferMode == "Software RGBA upload",
                 "AV1 fixture uses libdav1d software decoding and CPU texture upload");
+        if (int.TryParse(Argument("-videoDoubleRateSeconds"), out var seconds) && seconds > 3
+            && Argument("-videoHardware") == "true" && Argument("-videoAv1Software") != "true")
+        {
+            Check(_player.DecoderType == VideoDecoderType.Hardware,
+                "extended 2x regression keeps an actual hardware decoder; device=" + _player.DecoderDevice
+                    + "; fallback=" + _player.HardwareFallbackReason);
+        }
+
         var native = Argument("-videoNativeDecoder");
         if (native == "d3d12" || native == "vulkan")
         {
@@ -968,7 +1251,10 @@ public sealed class FFmpegPlayerSmoke : MonoBehaviour
         finally { RenderTexture.active = previous; RenderTexture.ReleaseTemporary(target); Destroy(pixels); }
     }
     static void CheckTimeout(float start) { if (UnityEngine.Time.realtimeSinceStartup - start > 30) throw new TimeoutException("Unity video smoke timeout"); }
-    public static string Argument(string name)
+    /// <summary>Reads a smoke argument from the command line or Android activity extras.</summary>
+    /// <param name="name">The argument name, including its leading hyphen.</param>
+    /// <returns>The supplied value or Android smoke default, or null when no value is supplied.</returns>
+    public static string? Argument(string name)
     {
         var args = Environment.GetCommandLineArgs();
         for (int i = 0; i + 1 < args.Length; i++) if (args[i] == name) return args[i + 1];

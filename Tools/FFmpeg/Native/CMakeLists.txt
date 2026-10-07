@@ -78,6 +78,22 @@ install(TARGETS FFmpegUnityBridge RUNTIME DESTINATION bin LIBRARY DESTINATION li
 option(FFU_BUILD_TESTS "Build native D3D11 adapter smoke test" OFF)
 option(FFU_BUILD_VULKAN_TESTS "Build Vulkan negotiation/lifetime and real GPU compute tests" OFF)
 if(FFU_BUILD_VULKAN_TESTS AND (WIN32 OR (CMAKE_SYSTEM_NAME STREQUAL "Linux" AND NOT ANDROID)))
+  # This fixture includes the portable implementation directly so the lifetime
+  # model is tested without a Vulkan loader, Unity runtime, or GPU.
+  add_executable(FFmpegUnityVulkanLifetime tests/VulkanPortableLifetime.cpp)
+  target_compile_features(FFmpegUnityVulkanLifetime PRIVATE cxx_std_17)
+  target_include_directories(FFmpegUnityVulkanLifetime PRIVATE "${UNITY_PLUGIN_API}" "${AVUTIL_INCLUDE_DIR}" "${FFU_VULKAN_HEADERS}")
+  if(WIN32)
+    target_compile_definitions(FFmpegUnityVulkanLifetime PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
+    set_target_properties(FFmpegUnityVulkanLifetime PROPERTIES MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+  endif()
+  if(MINGW)
+    target_link_options(FFmpegUnityVulkanLifetime PRIVATE -static)
+  endif()
+  if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    find_package(Threads REQUIRED)
+    target_link_libraries(FFmpegUnityVulkanLifetime PRIVATE Threads::Threads)
+  endif()
   # This translation unit includes VulkanVideoDecode.cpp to exercise private
   # negotiation/lifetime policy while using real FFmpeg AVBufferRef ownership.
   add_executable(FFmpegUnityVulkanNegotiation tests/VulkanVideoNegotiation.cpp VulkanPortable.cpp)

@@ -85,6 +85,34 @@ ffmpeg -f lavfi -i "testsrc2=size=1280x720:rate=120" -t 24 -an `
 
 分别改用 `-Graphics d3d12` / `vulkan` 验证对应渲染路径；RX 580 上实际解码器可能仍是 D3D11VA，不应记作原生 D3D12VA / Vulkan Video 验证。如隔离工程遇到无关 Burst AOT 的 ShaderLibrary 解析失败，可追加 `-DisableBurst` 仅在该次隔离构建的命令行禁用 Burst，不修改主工程或全局设置；验证结果应记录该条件。
 
+### Vulkan 2x 长时呈现回归
+
+针对 `FFmpegVideoPlayer` 在 Vulkan 下以 2x 播放 H.264 1080p 的隔离回归，现有 `run-unity.ps1` 保留普通 smoke 入口，并增加 `-DoubleRateSeconds`，不创建第二套播放器测试。`-DoubleRateSeconds` 的范围为 1–60 秒，默认 3 秒；大于 3 秒时自动移除 `-batchmode`，使用正常 Player 渲染循环。长测不会因为接近 EOF 而静默缩短：指定 20/30 秒时，素材必须分别至少提供约 41/61 秒可用媒体时间。Player 运行超时为 `max(120, DoubleRateSeconds + 90)` 秒，不包含 Unity 构建时间；30 秒回归的运行 timeout 为 120 秒。
+
+用户报告样例的准确路径为 `MaiCharts/FFmpeg Test/H264@1080p/pv.mp4`。RX 580 2048SP（驱动 31.0.21910.5）没有 Vulkan Video 时，默认 Vulkan 路径应重点观察实际日志中的 D3D11VA 解码器、worker-completed RGBA 传输和 Vulkan 呈现；不要把它记为 Vulkan Video 原生解码。扩展 2x 测试在 `-Hardware` 下还会断言实际 `DecoderType=Hardware`，因此软件回退不能把这次硬解回归伪装成通过。
+
+使用新构建的隔离 Player：
+
+```powershell
+./Tools/Tests/FFmpegValidation/run-unity.ps1 -Backend Mono -Architecture x64 `
+  -Graphics vulkan -Hardware -DoubleRateSeconds 30 `
+  -WorkDirectory Tools/Tests/FFmpegValidation/.work/vulkan-2x-rx580 `
+  -Media "MaiCharts/FFmpeg Test/H264@1080p/pv.mp4"
+```
+
+如果已用完全匹配的源码、原生 DLL、图形 API 和 fixture 构建过 Player，可跳过构建并只运行 2x 回归：
+
+```powershell
+./Tools/Tests/FFmpegValidation/run-unity.ps1 -Backend Mono -Architecture x64 `
+  -Graphics vulkan -Hardware -DoubleRateSeconds 30 -SkipBuild `
+  -WorkDirectory Tools/Tests/FFmpegValidation/.work/vulkan-2x-rx580 `
+  -Media "MaiCharts/FFmpeg Test/H264@1080p/pv.mp4"
+```
+
+长测断言包括：连续墙钟 2x 播放、播放时钟和已呈现 `_lastFrameEnd` 单调推进、100 ms 呈现冻结、150 ms wall-clock lag/lead、有界呈现队列以及高帧率源的过期帧丢弃而非冻结；最后一次重复 seek 还要连续观测约 1 秒，loop 回零后连续观测约 1 秒，close/重开/取消 seek 后禁止 stale frame 继续呈现。报告旁生成 `.double-rate.tsv`，同时保留实际解码器、设备、传输方式、Vulkan API、GPU、驱动、discarded/catch-up 计数和 fallback 原因。扩展回归如果没有该 evidence 文件，会拒绝使用旧版短 smoke 结果冒充长测。
+
+所有隔离工程、Player、日志和 evidence 仍限于忽略的 `.work/`；`-SkipBuild` 只复用相同 `WorkDirectory` 下的已构建 Player，不会重新生成 Player。若 Unity 隔离构建遇到无关 Burst ShaderLibrary 解析问题，可仅在构建命令追加 `-DisableBurst`，并在结果中记录该条件。
+
 ### Windows Vulkan Player 启动与窗口变化
 
 `ValidateVulkanPlayerStartup.ps1` 验证已构建的主游戏 Player，而不是空场景 smoke。先把 `MajdataPlay.exe`、`UnityPlayer.dll`、`WinPixEventRuntime.dll`、`MonoBleedingEdge/`、`MajdataPlay_Data/` 及测试用 `settings.json` 副本放入忽略的 `Tools/Tests/FFmpegValidation/.work/player-crash/`；桥接 DLL 应已更新为待验收构建。Player 会在隔离目录生成运行数据；不要直接使用日常游戏目录。

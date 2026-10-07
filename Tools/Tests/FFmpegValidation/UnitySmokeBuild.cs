@@ -19,6 +19,10 @@ public static class FFmpegPlayerSmokeBuild
         var android = FFmpegPlayerSmoke.Argument("-videoPlatform") == "Android";
         var linux = FFmpegPlayerSmoke.Argument("-videoPlatform") == "Linux";
         var output = FFmpegPlayerSmoke.Argument("-videoOutput");
+        if (string.IsNullOrWhiteSpace(output))
+        {
+            throw new ArgumentException("Specify the isolated Player output directory with -videoOutput.");
+        }
         var target = android ? BuildTarget.Android : linux ? BuildTarget.StandaloneLinux64
             : architecture == "x86" ? BuildTarget.StandaloneWindows : BuildTarget.StandaloneWindows64;
         var namedTarget = android ? NamedBuildTarget.Android : NamedBuildTarget.Standalone;
