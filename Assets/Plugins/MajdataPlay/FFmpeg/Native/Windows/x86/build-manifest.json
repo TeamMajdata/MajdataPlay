@@ -516,8 +516,8 @@
     },
     {
       "file": "compiler-runtime.LICENSE.txt",
-      "sha256": "c12c39f1685081f32cda2eb6e9300ac03c381d58e1bf77bd0c857f1acfa91cb7",
-      "license": "GPL-3.0-or-later WITH GCC-exception-3.1 and mingw-w64 runtime notices",
+      "sha256": "5873c2616ccffbace464faf0d52152b143e97902851e4c42e3ea0ad375bbd024",
+      "license": "GPL-3.0-or-later WITH GCC-exception-3.1 and mingw-w64 runtime notices; Apache-2.0 WITH LLVM-exception (bridge runtime)",
       "runtimeArchives": [
         {
           "file": "libstdc++.a",

@@ -105,6 +105,116 @@ static int ReadPixel(ID3D11DeviceContext* context, ID3D11Texture2D* output) {
     staging->Release();
     return pixel;
 }
+static bool ReportSnapshotFailure(int line) {
+    std::printf("FAIL: snapshot regression at line %d\n", line);
+    return false;
+}
+// Actual cross-device pixels, fixed pool admission, immutable snapshots, matching
+// FFmpeg transfer context, and survival after codec/synchronizer destruction.
+static bool VerifySnapshotPublication(ID3D11DeviceContext* context) {
+    auto* decode = static_cast<ID3D11Device*>(ffu_d3d11_acquire_decode_device());
+    if (!decode || decode == device || (ffu_capabilities() & (FfuD3D11DecodeIsolation | FfuD3D11QueuedSnapshots)) != (FfuD3D11DecodeIsolation | FfuD3D11QueuedSnapshots)) return ReportSnapshotFailure(__LINE__);
+    AVBufferRef* reference = av_hwdevice_ctx_alloc(AV_HWDEVICE_TYPE_D3D11VA);
+    if (!reference) return ReportSnapshotFailure(__LINE__);
+    auto* hardware = reinterpret_cast<AVHWDeviceContext*>(reference->data);
+    auto* d3d11 = static_cast<AVD3D11VADeviceContext*>(hardware->hwctx);
+    d3d11->device = decode; // Transfer the owned device reference.
+    if (av_hwdevice_ctx_init(reference) < 0) return ReportSnapshotFailure(__LINE__);
+    void* sync = ffu_d3d11_decode_sync_create(reference);
+    if (!sync) return ReportSnapshotFailure(__LINE__);
+    if (ffu_d3d11_decode_snapshot_ready(nullptr, nullptr) >= 0 ||
+        ffu_d3d11_decode_snapshot_ready(sync, nullptr) >= 0) return ReportSnapshotFailure(__LINE__);
+    constexpr int width = 32, height = 32;
+    std::vector<uint8_t> black(width * height * 3 / 2, 128), pattern(black);
+    for (int y = 0; y < height; ++y)
+        for (int x = 0; x < width; ++x) { black[y * width + x] = 16; pattern[y * width + x] = y < height / 2 ? 235 : 16; }
+    D3D11_SUBRESOURCE_DATA initial[2]{};
+    initial[0].pSysMem = black.data(); initial[0].SysMemPitch = width;
+    initial[1].pSysMem = pattern.data(); initial[1].SysMemPitch = width;
+    D3D11_TEXTURE2D_DESC desc{};
+    desc.Width = width; desc.Height = height; desc.ArraySize = 2; desc.MipLevels = 1;
+    desc.Format = DXGI_FORMAT_NV12; desc.SampleDesc.Count = 1; desc.BindFlags = D3D11_BIND_DECODER;
+    ID3D11Texture2D* texture = nullptr;
+    if (FAILED(decode->CreateTexture2D(&desc, initial, &texture))) return ReportSnapshotFailure(__LINE__);
+    AVFrame* source = av_frame_alloc();
+    source->width = width; source->height = height; source->format = AV_PIX_FMT_D3D11;
+    source->pts = 1234; source->duration = 17; source->colorspace = AVCOL_SPC_BT709; source->color_range = AVCOL_RANGE_MPEG;
+    source->data[0] = reinterpret_cast<uint8_t*>(texture); source->data[1] = reinterpret_cast<uint8_t*>(1);
+    source->buf[0] = av_buffer_create(reinterpret_cast<uint8_t*>(texture), 1, FreeFrame, nullptr, 0);
+    AVFrame* frames[32]{};
+    for (auto& frame : frames) {
+        const int status = ffu_d3d11_decode_snapshot(sync, source, &frame);
+        if (status != 1) std::printf("snapshot status=%08x\n", status);
+        if (status != 1 || !frame || frame->data[1] || !frame->hw_frames_ctx ||
+            frame->pts != source->pts || frame->duration != source->duration || frame->colorspace != source->colorspace) return ReportSnapshotFailure(__LINE__);
+        auto* descriptor = reinterpret_cast<AVD3D11FrameDescriptor*>(frame->buf[0]->data);
+        if (descriptor->texture != reinterpret_cast<ID3D11Texture2D*>(frame->data[0]) || descriptor->index != 0)
+            return ReportSnapshotFailure(__LINE__);
+        ID3D11Device* reader = nullptr;
+        reinterpret_cast<ID3D11Texture2D*>(frame->data[0])->GetDevice(&reader);
+        const bool same = reader == device;
+        reader->Release();
+        // The source slice is retained even if the driver already completed the
+        // copy; only the worker's individual readiness observation releases it.
+        if (!same || av_buffer_get_ref_count(source->buf[0]) != 2) return ReportSnapshotFailure(__LINE__);
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+        int ready;
+        while ((ready = ffu_d3d11_decode_snapshot_ready(sync, frame)) == 0 && std::chrono::steady_clock::now() < deadline) Sleep(1);
+        if (ready != 1 || av_buffer_get_ref_count(source->buf[0]) != 1 ||
+            ffu_d3d11_decode_snapshot_ready(sync, frame) != 1) return ReportSnapshotFailure(__LINE__);
+    }
+    AVFrame* extra = nullptr;
+    if (ffu_d3d11_decode_snapshot(sync, source, &extra) != 0 || extra) return ReportSnapshotFailure(__LINE__);
+    AVFrame* retained = av_frame_clone(frames[0]);
+    av_frame_free(&frames[0]);
+    if (!retained || ffu_d3d11_decode_snapshot(sync, source, &extra) != 0) return ReportSnapshotFailure(__LINE__);
+    av_frame_free(&retained);
+    if (ffu_d3d11_decode_snapshot(sync, source, &frames[0]) != 1) return ReportSnapshotFailure(__LINE__);
+    if (ffu_d3d11_decode_sync_begin(sync) != 0) return ReportSnapshotFailure(__LINE__);
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    int ready;
+    while ((ready = ffu_d3d11_decode_sync_poll(sync)) == 0 && std::chrono::steady_clock::now() < deadline) Sleep(1);
+    if (ready != 1 || ffu_d3d11_decode_snapshot_ready(sync, frames[0]) != 1 ||
+        av_buffer_get_ref_count(source->buf[0]) != 1) return ReportSnapshotFailure(__LINE__);
+    // Cancel a worker-private copy without querying it. Global completion must
+    // still release its retained source, and its slot must remain reusable.
+    av_frame_free(&frames[1]);
+    AVFrame* canceled = nullptr;
+    if (ffu_d3d11_decode_snapshot(sync, source, &canceled) != 1 ||
+        av_buffer_get_ref_count(source->buf[0]) != 2) return ReportSnapshotFailure(__LINE__);
+    av_frame_free(&canceled);
+    if (ffu_d3d11_decode_sync_begin(sync) != 0) return ReportSnapshotFailure(__LINE__);
+    const auto canceledDeadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while ((ready = ffu_d3d11_decode_sync_poll(sync)) == 0 && std::chrono::steady_clock::now() < canceledDeadline) Sleep(1);
+    if (ready != 1 || av_buffer_get_ref_count(source->buf[0]) != 1 ||
+        ffu_d3d11_decode_snapshot(sync, source, &frames[1]) != 1) return ReportSnapshotFailure(__LINE__);
+    const auto reusedDeadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while ((ready = ffu_d3d11_decode_snapshot_ready(sync, frames[1])) == 0 && std::chrono::steady_clock::now() < reusedDeadline) Sleep(1);
+    if (ready != 1 || av_buffer_get_ref_count(source->buf[0]) != 1) return ReportSnapshotFailure(__LINE__);
+    // Change the codec surface after publication: an already published picture
+    // must not turn into the later DPB content, including through CPU transfer.
+    d3d11->device_context->UpdateSubresource(texture, 1, nullptr, black.data(), width, 0);
+    AVFrame* software = av_frame_alloc();
+    if (!software || av_hwframe_transfer_data(software, frames[0], 0) < 0 ||
+        software->data[0][8 * software->linesize[0] + 8] < 230 || software->data[0][24 * software->linesize[0] + 8] > 20) return ReportSnapshotFailure(__LINE__);
+    av_frame_free(&software);
+    void* presenter = ffu_d3d11_create();
+    auto* output = static_cast<ID3D11Texture2D*>(ffu_d3d11_create_output(presenter, width, height));
+    void* packet = ffu_d3d11_prepare(presenter, frames[0], output);
+    if (!packet) { std::printf("snapshot presentation status=%08x\n", ffu_d3d11_error(presenter)); return ReportSnapshotFailure(__LINE__); }
+    for (auto& frame : frames) av_frame_free(&frame);
+    av_frame_free(&source);
+    ffu_d3d11_decode_sync_release(sync);
+    av_buffer_unref(&reference);
+    ffu_render_callback()(ffu_event_id(FfuSubmitD3D11), packet);
+    ffu_render_callback()(ffu_event_id(FfuDrain), nullptr);
+    const int white = ReadPixel(context, output);
+    const int error = ffu_d3d11_error(presenter);
+    ffu_d3d11_release(presenter); ffu_d3d11_release_output(output);
+    if (white < 240 || error != 0) return ReportSnapshotFailure(__LINE__);
+    std::puts("PASS: private D3D11VA device, immutable cross-device NV12 array snapshots, 32-slot admission, individual completion/source retention, canceled copies, clone leases, CPU transfer and post-decoder GPU retirement");
+    return true;
+}
 int main() {
     ID3D11DeviceContext* context = nullptr;
     D3D_FEATURE_LEVEL level{};
@@ -218,6 +328,7 @@ int main() {
     }
     ffu_d3d11_release_output(other); ffu_d3d11_release_output(large); ffu_d3d11_release_output(restored);
     ffu_d3d11_release_output(output);
+    if (!VerifySnapshotPublication(context)) { std::puts("FAIL: isolated snapshot publication"); return 1; }
     UnityPluginUnload();
     context->Release(); device->Release();
     std::printf("PASS: D3D11 NV12 array slice conversion, range and GPU surface lifetime (white=%d dark=%d)\n", white, dark);

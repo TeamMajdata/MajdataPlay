@@ -123,6 +123,28 @@ if (-not $SkipBuild) {
     $process.WaitForExit()
     if ($process.ExitCode -ne 0) { Get-Content -LiteralPath $buildLog -Tail 70; throw "Unity build failed: $buildLog" }
 }
+# NativeDirectory is an explicit runtime override, including with SkipBuild.
+# Unity's incremental native-plugin copy can reuse an older artifact even after
+# the isolated asset changes. Always stage and verify the requested runtime DLLs.
+if ($NativeDirectory) {
+    if ($Platform -ne 'Windows') { throw 'NativeDirectory override currently requires Windows' }
+    $override = (Resolve-Path -LiteralPath $NativeDirectory).Path
+    $pluginArchitecture = if ($Architecture -eq 'x64') { 'x86_64' } else { 'x86' }
+    $runtimePlugins = Join-Path $result "VideoSmoke_Data/Plugins/$pluginArchitecture"
+    if (-not (Test-Path -LiteralPath $runtimePlugins)) { throw "Player plug-in directory is missing: $runtimePlugins" }
+    $libraries = @('avcodec-63.dll', 'avdevice-63.dll', 'avfilter-12.dll', 'avformat-63.dll', 'avutil-61.dll', 'swresample-7.dll', 'swscale-10.dll')
+    if (Test-Path -LiteralPath (Join-Path $override 'FFmpegUnityBridge.dll')) {
+        $libraries += 'FFmpegUnityBridge.dll'
+    }
+    foreach ($library in $libraries) {
+        $source = Join-Path $override $library
+        $destination = Join-Path $runtimePlugins $library
+        Copy-Item -LiteralPath $source -Destination $destination -Force
+        if ((Get-FileHash -LiteralPath $source).Hash -ne (Get-FileHash -LiteralPath $destination).Hash) {
+            throw "Player runtime override SHA256 mismatch: $library"
+        }
+    }
+}
 if ($BuildOnly) {
     Get-Content -LiteralPath (Join-Path $result 'build.txt')
     Write-Output "Isolated Player built at: $result; runtime validation was not requested."

@@ -35,6 +35,8 @@ namespace MajdataPlay.FFmpeg.Validation
             TestEndOfStream(media);
             TestExpiredFrameDiscard(media);
             TestKeyFrameCatchUp(media);
+            TestCatchUpPreservesDueFrames(media);
+            TestConsumerCadence(media);
             return s_checks - before;
         }
 
@@ -52,6 +54,8 @@ namespace MajdataPlay.FFmpeg.Validation
             }
 
             TestSynchronizedWorkerClose(media);
+            TestQueuedPublication(media, false);
+            TestQueuedPublication(media, true);
             return s_checks - before;
         }
 
@@ -179,6 +183,62 @@ namespace MajdataPlay.FFmpeg.Validation
                 "Closing a high-rate session releases all device references after the presenter returns its frame.");
         }
 
+        /// <summary>Checks delayed publication, deferred raw pictures, missing timestamps, pause order, and queued EOF ownership.</summary>
+        /// <param name="media">The real seekable D3D11VA fixture.</param>
+        /// <param name="missingTimestamps">Whether to remove native timestamps and exercise the decoder's sequential fallback.</param>
+        /// <exception cref="InvalidOperationException">Frame order, timestamp preservation, admission, or ownership is invalid.</exception>
+        private static unsafe void TestQueuedPublication(string media, bool missingTimestamps)
+        {
+            using var audit = new DecodeSynchronizationAudit();
+            var options = audit.CreateQueuedOptions();
+            if (missingTimestamps)
+            {
+                options.WaitForHardwareFrame = (frame, _, _) =>
+                {
+                    var native = (AVFrame*)frame;
+                    native->pts = ffmpeg.AV_NOPTS_VALUE;
+                    native->best_effort_timestamp = ffmpeg.AV_NOPTS_VALUE;
+                };
+            }
+            using var decoder = new FFmpegVideoDecoder(options);
+            decoder.Open(media, CancellationToken.None);
+            decoder.FrameDeadlineProvider = () => new FrameDeadline(0, double.NegativeInfinity, double.NegativeInfinity);
+            var previous = double.NegativeInfinity;
+            for (var index = 0; index < 24; index++)
+            {
+                if (index == 8)
+                {
+                    decoder.FrameDeadlineProvider = () => FrameDeadline.None;
+                }
+                else if (index == 9)
+                {
+                    decoder.FrameDeadlineProvider = () => new FrameDeadline(0, double.NegativeInfinity, double.NegativeInfinity);
+                }
+                using var frame = decoder.ReadFrame();
+                Check(frame != null && frame.IsHardwareFrame && frame.Data == IntPtr.Zero,
+                    "Delayed snapshots remain native hardware frames, including pause transitions.");
+                Check(frame!.PresentationTime > previous && (index == 0 ||
+                    Math.Abs(frame.PresentationTime - previous - 1 / decoder.FrameRate) < 0.000001),
+                    "A selected raw picture survives a pending copy without losing or shifting its original timeline.");
+                Check(ReadField<int>(decoder, "_pendingHardwarePackets") <= 4,
+                    "Publishing a copy does not admit an unbounded later packet window.");
+                previous = frame.PresentationTime;
+            }
+            options.WaitForHardwareFrame = null;
+            decoder.Seek(decoder.Duration - 0.001);
+            decoder.FrameDeadlineProvider = () => new FrameDeadline(decoder.Duration + 1,
+                double.NegativeInfinity, double.NegativeInfinity);
+            using (var final = decoder.ReadFrame())
+            {
+                Check(final != null && final.PresentationTime >= decoder.Duration - 2 / decoder.FrameRate,
+                    "EOF publishes the final queued copy even when no later discarded candidate exists.");
+            }
+            Check(decoder.ReadFrame() == null, "Queued EOF publication drains exactly once.");
+            decoder.Dispose();
+            Check(audit.Synchronization!.DisposeCount == 1 && audit.DeviceReferenceCount == 1,
+                "Delayed snapshots, deferred raw pictures, and their native device references are released.");
+        }
+
         /// <summary>Downloads actual native hardware pixels and checks that RGBA conversion preserves image variation.</summary>
         /// <param name="frame">The borrowed native frame whose owned source remains alive during download.</param>
         /// <exception cref="InvalidOperationException">The hardware download is empty, changes ownership, or contains no image variation.</exception>
@@ -233,6 +293,15 @@ namespace MajdataPlay.FFmpeg.Validation
                     AcquireHardwareDevice = AcquireDevice,
                     CreateHardwareSynchronization = CreateSynchronization
                 };
+            }
+
+            /// <summary>Creates options with deterministic delayed readiness over completed, retained real GPU frames.</summary>
+            /// <returns>The strict hardware options for testing the queued publication state machine, not native texture copying.</returns>
+            internal DecoderOptions CreateQueuedOptions()
+            {
+                var options = CreateOptions();
+                options.CreateHardwareSynchronization = device => new DelayedQueuedPublisher(CreateSynchronization(device));
+                return options;
             }
 
             /// <summary>Creates a real independent D3D11VA device and retains a separate reference for cleanup assertions.</summary>
@@ -332,6 +401,94 @@ namespace MajdataPlay.FFmpeg.Validation
             }
         }
 
+        /// <summary>Models delayed snapshot readiness using retained, completed real hardware sources without simulating texture-copy correctness.</summary>
+        private sealed unsafe class DelayedQueuedPublisher : IHardwareDecodeSynchronization, IQueuedHardwareFramePublisher
+        {
+            /// <summary>Owns the actual worker GPU completion protocol.</summary>
+            private readonly IHardwareDecodeSynchronization _inner;
+            /// <summary>Delays individual readiness observations until the worker exercises its pending-picture path.</summary>
+            private int _pendingPolls;
+            /// <summary>Gets whether deterministic queued publication is enabled for this test wrapper.</summary>
+            public bool CanQueueFrames
+            {
+                get
+                {
+                    return true;
+                }
+            }
+            /// <summary>Takes ownership of the real hardware synchronizer.</summary>
+            /// <param name="inner">The worker-owned production completion protocol.</param>
+            internal DelayedQueuedPublisher(IHardwareDecodeSynchronization inner)
+            {
+                _inner = inner;
+            }
+            /// <summary>Completes all preceding real GPU work and the simulated pending copy.</summary>
+            /// <param name="cancellationToken">Cancels the actual worker wait.</param>
+            /// <param name="timeoutMilliseconds">Bounds the actual wait in milliseconds.</param>
+            /// <exception cref="OperationCanceledException">The real wait was canceled.</exception>
+            /// <exception cref="TimeoutException">The real wait exceeded its timeout.</exception>
+            /// <exception cref="NotSupportedException">The real completion protocol failed.</exception>
+            public void Wait(CancellationToken cancellationToken, int timeoutMilliseconds)
+            {
+                _inner.Wait(cancellationToken, timeoutMilliseconds);
+                _pendingPolls = 0;
+            }
+            /// <summary>Retains an actually completed source while delaying publication observations.</summary>
+            /// <param name="frame">The borrowed real D3D11VA picture.</param>
+            /// <param name="cancellationToken">Cancels real source completion.</param>
+            /// <param name="timeoutMilliseconds">Bounds real source completion.</param>
+            /// <returns>An owned native frame whose publication readiness is delayed.</returns>
+            /// <exception cref="OutOfMemoryException">The source cannot be retained.</exception>
+            /// <exception cref="OperationCanceledException">The real source wait was canceled.</exception>
+            /// <exception cref="TimeoutException">The real source wait exceeded its timeout.</exception>
+            /// <exception cref="NotSupportedException">The real completion protocol failed.</exception>
+            public IntPtr QueueFrame(IntPtr frame, CancellationToken cancellationToken, int timeoutMilliseconds)
+            {
+                _inner.Wait(cancellationToken, timeoutMilliseconds);
+                _pendingPolls = 2;
+                return Clone(frame);
+            }
+            /// <summary>Delays two observations to exercise deferred raw-frame ownership.</summary>
+            /// <param name="frame">The borrowed pending native frame.</param>
+            /// <returns>True after the deterministic delay or a full completion marker.</returns>
+            public bool IsFrameReady(IntPtr frame)
+            {
+                return _pendingPolls-- <= 0;
+            }
+            /// <summary>Retains a completed sequential picture for frozen timelines.</summary>
+            /// <param name="frame">The borrowed real hardware source.</param>
+            /// <param name="cancellationToken">Cancels source completion.</param>
+            /// <param name="timeoutMilliseconds">Bounds source completion.</param>
+            /// <returns>An owned completed native frame.</returns>
+            /// <exception cref="OutOfMemoryException">The source cannot be retained.</exception>
+            /// <exception cref="OperationCanceledException">The real source wait was canceled.</exception>
+            /// <exception cref="TimeoutException">The real source wait exceeded its timeout.</exception>
+            /// <exception cref="NotSupportedException">The real completion protocol failed.</exception>
+            public IntPtr PublishFrame(IntPtr frame, CancellationToken cancellationToken, int timeoutMilliseconds)
+            {
+                Wait(cancellationToken, timeoutMilliseconds);
+                return Clone(frame);
+            }
+            /// <summary>Retains real FFmpeg frame ownership without copying pixels.</summary>
+            /// <param name="frame">The borrowed native source.</param>
+            /// <returns>An owned native frame clone.</returns>
+            /// <exception cref="OutOfMemoryException">FFmpeg cannot retain the source.</exception>
+            private static IntPtr Clone(IntPtr frame)
+            {
+                var clone = ffmpeg.av_frame_clone((AVFrame*)frame);
+                if (clone == null)
+                {
+                    throw new OutOfMemoryException("Cannot retain the queued publication test source.");
+                }
+                return (IntPtr)clone;
+            }
+            /// <summary>Releases the production completion protocol.</summary>
+            public void Dispose()
+            {
+                _inner.Dispose();
+            }
+        }
+
         /// <summary>Checks that expired frames are discarded before conversion while presentation follows a fast clock.</summary>
         /// <param name="media">The seekable native video fixture played at 1x and 16x.</param>
         /// <exception cref="InvalidOperationException">Frames are discarded at 1x, kept at 16x, or presentation falls behind.</exception>
@@ -349,7 +506,8 @@ namespace MajdataPlay.FFmpeg.Validation
             session.SetPlayback(rate: 16);
             PresentFor(session, Math.Min(1500, (int)(info.Duration / 16 * 1000 * 0.6)), 16, out var presented, out var maximumLag);
             Check(session.DiscardedFrames > presented,
-                "At 16x, expired frames are discarded on the worker instead of converted for presentation.");
+                "At 16x, expired frames are discarded on the worker instead of converted for presentation ("
+                + session.DiscardedFrames + " discarded, " + presented + " presented, " + session.CatchUpSeeks + " catch-up seeks).");
             Check(maximumLag <= 0.25 * 16 + 2,
                 "Presented frames stay within the catch-up window of the 16x playback clock (lag " + maximumLag.ToString("F2") + " s).");
             Check(session.Error == null, "Discarding expired frames does not fault the worker.");
@@ -370,7 +528,7 @@ namespace MajdataPlay.FFmpeg.Validation
             // Moving a running clock without Seek models a decoder that fell far behind.
             session.SetPlayback(target, 1, true);
             WaitFor(session, () => session.NextPresentationTime >= target - (2 / info.FrameRate), "keyframe catch-up");
-            Check(session.CatchUpSeeks >= 1, "A decoder far behind the running clock repositions to a later keyframe.");
+            Check(session.CatchUpSeeks >= 1, "A decoder far behind the running clock advances to an already-due keyframe.");
             Check(session.Error == null, "Keyframe catch-up does not fault the worker.");
             using (var frame = session.TakeLatestFrame(double.PositiveInfinity))
             {
@@ -379,10 +537,65 @@ namespace MajdataPlay.FFmpeg.Validation
             }
         }
 
+        /// <summary>Checks that overload never jumps to a future GOP or rewinds references already decoded.</summary>
+        /// <param name="media">The seekable fixture with an indexed GOP longer than the catch-up threshold.</param>
+        /// <exception cref="InvalidOperationException">Catch-up publishes a future frame or moves the demuxer unnecessarily.</exception>
+        private static unsafe void TestCatchUpPreservesDueFrames(string media)
+        {
+            using var decoder = new FFmpegVideoDecoder(new DecoderOptions());
+            decoder.Open(media, CancellationToken.None);
+            using var first = decoder.ReadFrame();
+            Check(first != null, "The catch-up fixture supplies an initial picture.");
+            var format = (AVFormatContext*)Pointer.Unbox(ReadField<object>(decoder, "_format"));
+            var stream = format->streams[ReadField<int>(decoder, "_videoStreamIndex")];
+            var origin = ReadField<double>(decoder, "_origin");
+            var timeBase = ffmpeg.av_q2d(stream->time_base);
+            var nextTimestamp = checked((long)Math.Ceiling((origin + first!.PresentationTime + first.Duration) / timeBase));
+            var nextKey = ffmpeg.avformat_index_get_entry_from_timestamp(stream, nextTimestamp, 0);
+            Check(nextKey != null,
+                "The seekable fixture provides its next indexed random-access point.");
+            var nextKeyTime = nextKey->timestamp * timeBase - origin;
+            var position = (first.PresentationTime + nextKeyTime) * 0.5;
+            Check(position > first.PresentationTime + first.Duration,
+                "The next GOP leaves room to model a late decoder before that keyframe is due.");
+            decoder.FrameDeadlineProvider = () => new FrameDeadline(position, double.NegativeInfinity, position);
+            using var due = decoder.ReadFrame();
+            Check(due != null && due.PresentationTime <= position && due.PresentationTime > first.PresentationTime,
+                "Overload preserves the newest due picture instead of waiting for a future keyframe.");
+            Check(decoder.CatchUpSeeks == 0,
+                "Catch-up does not rewind the current GOP when its only due keyframe is already decoded.");
+        }
+
+        /// <summary>Checks that excess future pictures skip conversion without changing PTS or paused frame stepping.</summary>
+        /// <param name="media">The real seekable fixture with at least four consecutive video pictures.</param>
+        /// <exception cref="InvalidOperationException">Cadence selection changes timestamps, seeks, or paused frame order.</exception>
+        private static void TestConsumerCadence(string media)
+        {
+            using var decoder = new FFmpegVideoDecoder(new DecoderOptions());
+            decoder.Open(media, CancellationToken.None);
+            using var first = decoder.ReadFrame();
+            Check(first != null, "The cadence fixture supplies an initial picture.");
+            var interval = 1 / decoder.FrameRate;
+            var minimumEnd = first!.PresentationTime + first.Duration + 3 * interval;
+            decoder.FrameDeadlineProvider = () => new FrameDeadline(first.PresentationTime,
+                double.NegativeInfinity, double.NegativeInfinity, minimumEnd);
+            using var selected = decoder.ReadFrame();
+            Check(selected != null && selected.PresentationTime + selected.Duration + 0.000001 >= minimumEnd
+                && selected.PresentationTime + selected.Duration <= minimumEnd + 2 * interval,
+                "Only the next useful future picture crosses the conversion boundary, with its original PTS.");
+            Check(decoder.DiscardedFrames >= 2 && decoder.CatchUpSeeks == 0,
+                "Cadence thinning discards excess future pictures without skipping codec references or seeking.");
+            decoder.FrameDeadlineProvider = () => FrameDeadline.None;
+            using var next = decoder.ReadFrame();
+            Check(next != null && next.PresentationTime > selected!.PresentationTime
+                && next.PresentationTime - selected.PresentationTime <= 2 * interval,
+                "A frozen timeline disables cadence thinning and resumes consecutive frame stepping.");
+        }
+
         /// <summary>Consumes due frames at a fixed interval as the player would, measuring how far behind the clock they are.</summary>
         /// <param name="session">The playing session whose due frames are taken.</param>
         /// <param name="milliseconds">The total wall-clock duration of the simulated presenter.</param>
-        /// <param name="intervalMilliseconds">The wall-clock interval between simulated presentation attempts.</param>
+        /// <param name="intervalMilliseconds">The wall-clock interval between simulated presentation attempts, also used as the consumer frame-rate budget.</param>
         /// <param name="presented">Receives the number of frames taken for presentation.</param>
         /// <param name="maximumLag">Receives the largest clock position minus presented frame end, in media seconds.</param>
         /// <exception cref="InvalidOperationException">The worker fails or presented timestamps move backward.</exception>
@@ -392,6 +605,7 @@ namespace MajdataPlay.FFmpeg.Validation
             maximumLag = 0;
             var previous = double.NegativeInfinity;
             var watch = Stopwatch.StartNew();
+            var maximumFrameRate = 1000.0 / intervalMilliseconds;
             while (watch.ElapsedMilliseconds < milliseconds)
             {
                 if (session.Error != null)
@@ -400,7 +614,7 @@ namespace MajdataPlay.FFmpeg.Validation
                 }
 
                 var position = session.PlaybackPosition;
-                using (var frame = session.TakeLatestFrame(position + 0.001))
+                using (var frame = session.TakeLatestFrame(position + 0.001, maximumFrameRate))
                 {
                     if (frame != null)
                     {

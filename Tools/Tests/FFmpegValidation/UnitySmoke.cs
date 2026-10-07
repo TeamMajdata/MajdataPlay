@@ -3,7 +3,9 @@ using System;
 using System.Collections;
 using System.IO;
 using System.Reflection;
+using System.Threading;
 using System.Threading.Tasks;
+using MajdataPlay.FFmpeg.Internal;
 using MajdataPlay.Diagnostics;
 using MajdataPlay.FFmpeg;
 using UnityEngine;
@@ -119,6 +121,12 @@ public sealed class FFmpegPlayerSmoke : MonoBehaviour
         }
         if (Argument("-videoTestDecodeOverload") == "true")
         {
+            var stalledClock = TestClockDuringDecodeStall();
+            while (stalledClock.MoveNext())
+            {
+                yield return stalledClock.Current;
+            }
+
             var overload = TestDecodeOverload();
             while (overload.MoveNext())
             {
@@ -265,6 +273,7 @@ public sealed class FFmpegPlayerSmoke : MonoBehaviour
         var previousVSync = QualitySettings.vSyncCount;
         var previousFrameRate = Application.targetFrameRate;
         var previousRate = _player.PlaybackRate;
+        var previousPosition = _player.TimeSeconds;
         var rates = new[] { 1f, 2f, 3f };
         var clockRates = new double[rates.Length];
         var videoRates = new double[rates.Length];
@@ -362,7 +371,102 @@ public sealed class FFmpegPlayerSmoke : MonoBehaviour
             QualitySettings.vSyncCount = previousVSync;
             Application.targetFrameRate = previousFrameRate;
         }
+        // Restore a fresh picture as well as the clock/rate. Otherwise the next
+        // independent double-speed test inherits the final 3x picture's lag.
+        var restore = _player.SeekAsync(previousPosition);
+        var restoreStart = UnityEngine.Time.realtimeSinceStartup;
+        while (!restore.IsCompleted)
+        {
+            CheckTimeout(restoreStart);
+            yield return null;
+        }
+        restore.GetAwaiter().GetResult();
     }
+    /// <summary>Blocks native completion on its worker to prove that missing frames do not pause Unity or its media clock.</summary>
+    /// <returns>The coroutine that injects a finite decode stall, checks clock continuity and restores the callback.</returns>
+    /// <exception cref="Exception">A hardware stall blocks Unity, freezes the playback clock, or prevents explicit pause.</exception>
+    /// <exception cref="MissingFieldException">A production session field required for fault injection is unavailable.</exception>
+    /// <exception cref="MissingMemberException">The worker completion callback is unavailable.</exception>
+    private IEnumerator TestClockDuringDecodeStall()
+    {
+        _player.Pause();
+        var previousRate = _player.PlaybackRate;
+        _player.PlaybackRate = 3;
+        var seek = _player.SeekAsync(0);
+        var start = UnityEngine.Time.realtimeSinceStartup;
+        while (!seek.IsCompleted)
+        {
+            CheckTimeout(start);
+            yield return null;
+        }
+
+        seek.GetAwaiter().GetResult();
+        var session = typeof(FFmpegVideoPlayer).GetField("_session", BindingFlags.Instance | BindingFlags.NonPublic)?.GetValue(_player)
+            ?? throw new MissingFieldException("FFmpegVideoPlayer._session");
+        var options = session.GetType().GetField("_options", BindingFlags.Instance | BindingFlags.NonPublic)?.GetValue(session)
+            ?? throw new MissingFieldException("VideoDecodeSession._options");
+        var completion = typeof(DecoderOptions).GetProperty("WaitForHardwareFrame", BindingFlags.Instance | BindingFlags.NonPublic)
+            ?? throw new MissingMemberException("DecoderOptions.WaitForHardwareFrame");
+        var original = (Action<IntPtr, CancellationToken, int>?)completion.GetValue(options);
+        var entered = 0;
+        var resume = 0;
+        Action<IntPtr, CancellationToken, int> blocked = (frame, cancellation, timeout) =>
+        {
+            Volatile.Write(ref entered, 1);
+            var wait = System.Diagnostics.Stopwatch.StartNew();
+            while (Volatile.Read(ref resume) == 0)
+            {
+                cancellation.ThrowIfCancellationRequested();
+                if (wait.ElapsedMilliseconds >= timeout)
+                {
+                    throw new TimeoutException("Injected hardware completion stall was not released.");
+                }
+
+                Thread.Sleep(1);
+            }
+
+            original?.Invoke(frame, cancellation, timeout);
+        };
+        completion.SetValue(options, blocked);
+        try
+        {
+            _player.Play();
+            start = UnityEngine.Time.realtimeSinceStartup;
+            while (Volatile.Read(ref entered) == 0)
+            {
+                CheckTimeout(start);
+                yield return null;
+            }
+
+            var position = _player.TimeSeconds;
+            var updates = UnityEngine.Time.frameCount;
+            var watch = System.Diagnostics.Stopwatch.StartNew();
+            while (watch.Elapsed.TotalSeconds < 0.25)
+            {
+                yield return null;
+            }
+
+            var rate = (_player.TimeSeconds - position) / watch.Elapsed.TotalSeconds;
+            Debug.Log("Injected GPU stall: clock=" + rate.ToString("F3") + "x; Unity updates="
+                + (UnityEngine.Time.frameCount - updates) + "; buffering=" + _player.IsBuffering);
+            Check(Math.Abs(rate - 3) < 0.06, "A stalled hardware worker does not freeze the 3x media clock.");
+            Check(UnityEngine.Time.frameCount - updates >= 8, "Hardware completion is never awaited by Unity's update/render loop.");
+            Check(_player.State == VideoPlaybackState.Playing && _player.IsBuffering,
+                "A decode stall reports buffering without changing playback state or pausing its timeline.");
+            _player.Pause();
+            position = _player.TimeSeconds;
+            yield return new WaitForSecondsRealtime(0.05f);
+            Check(_player.TimeSeconds == position, "Explicit pause still freezes the media clock while decoding is stalled.");
+        }
+        finally
+        {
+            Volatile.Write(ref resume, 1);
+            completion.SetValue(options, original);
+            _player.Pause();
+            _player.PlaybackRate = previousRate;
+        }
+    }
+
     /// <summary>Compares Unity update throughput at normal and maximum video playback speed on the same GPU.</summary>
     /// <returns>The coroutine that measures both rates and restores paused playback and rendering settings.</returns>
     /// <exception cref="Exception">The fixture is too short, playback fails, or overload stalls Unity updates.</exception>
@@ -377,6 +481,9 @@ public sealed class FFmpegPlayerSmoke : MonoBehaviour
         try
         {
             var baselineUpdates = 0d;
+            var decoderName = _player.DecoderName;
+            var decoderDevice = _player.DecoderDevice;
+            var decoderType = _player.DecoderType;
             foreach (var rate in new[] { 1f, 16f })
             {
                 _player.Pause();
@@ -409,12 +516,17 @@ public sealed class FFmpegPlayerSmoke : MonoBehaviour
                 _player.Pause();
                 wallClock.Stop();
                 var updateRate = (UnityEngine.Time.frameCount - initialUpdates) / wallClock.Elapsed.TotalSeconds;
-                Debug.Log("Decode overload: playback=" + rate + "x; Unity updates=" + updateRate.ToString("F1")
+                var clockRate = (_player.TimeSeconds - initialTime) / wallClock.Elapsed.TotalSeconds;
+                Check(Math.Abs(clockRate - rate) <= rate * 0.02,
+                    "GPU overload preserves the requested media clock rate: " + clockRate);
+                Debug.Log("Decode overload: playback=" + rate + "x; clock=" + clockRate.ToString("F3") + "x; Unity updates=" + updateRate.ToString("F1")
                     + " FPS; maximum update gap=" + maximumUpdateGap.ToString("F3")
                     + " s; presented frames=" + (_frames - initialFrames) + "; decoder=" + _player.DecoderName
                     + "; transport=" + _player.TransferMode + "; video=" + _player.Width + "x" + _player.Height
                     + "@" + _player.FrameRate + "; GPU=" + SystemInfo.graphicsDeviceName);
                 Check(_frames > initialFrames && _player.TimeSeconds > initialTime, "playback and presentation advance at " + rate + "x");
+                Check(_player.DecoderName == decoderName && _player.DecoderDevice == decoderDevice && _player.DecoderType == decoderType,
+                    "decode overload retains the selected decoder and hardware backend at " + rate + "x");
                 if (rate == 1)
                 {
                     baselineUpdates = updateRate;
@@ -672,9 +784,27 @@ public sealed class FFmpegPlayerSmoke : MonoBehaviour
     void CheckHardwarePath()
     {
         if (Argument("-videoRequireHardware") == "true")
+        {
             Check(_player.DecoderType == VideoDecoderType.Hardware && !_player.TransferMode.StartsWith("Software", StringComparison.Ordinal) &&
                 _player.TransferMode != "Hardware decode + CPU RGBA upload",
                 "hardware presentation required; actual=" + _player.TransferMode + "; fallback=" + _player.HardwareFallbackReason);
+            if (_player.DecoderDevice.StartsWith("D3D11VA", StringComparison.Ordinal))
+            {
+                var expected = SystemInfo.graphicsDeviceType == UnityEngine.Rendering.GraphicsDeviceType.Direct3D12
+                    ? "D3D12 GPU conversion" : SystemInfo.graphicsDeviceType == UnityEngine.Rendering.GraphicsDeviceType.Vulkan
+                    ? "Vulkan GPU conversion" : SystemInfo.graphicsDeviceType == UnityEngine.Rendering.GraphicsDeviceType.OpenGLCore
+                    ? "OpenGL shared RGBA" : "D3D11 GPU conversion";
+                Check(_player.TransferMode.StartsWith(expected, StringComparison.Ordinal),
+                    "synchronization capability bits preserve the renderer's native transport: " + _player.TransferMode);
+                if (Argument("-videoTestDecodeOverload") == "true" || Argument("-videoTestPlaybackThroughput") == "true")
+                {
+                    var presenter = typeof(FFmpegVideoPlayer).Assembly.GetType("MajdataPlay.FFmpeg.Interop.HardwareVideoPresenter", true)!;
+                    var capabilities = presenter.GetProperty("Capabilities", BindingFlags.Static | BindingFlags.NonPublic)!;
+                    Check(((int)capabilities.GetValue(null)! & (512 | 1024)) == (512 | 1024),
+                        "overload regression uses the isolated, individually completed GPU snapshot bridge");
+                }
+            }
+        }
     }
     void CheckDecoderIdentity()
     {

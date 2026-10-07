@@ -30,11 +30,13 @@ namespace MajdataPlay.FFmpeg.Internal
         public bool RequireHardwareDecoding { get; set; }
         /// <summary>Gets or sets the requested FFmpeg hardware backend, or <see cref="AVHWDeviceType.AV_HWDEVICE_TYPE_NONE"/> for software decoding.</summary>
         public AVHWDeviceType HardwareDeviceType { get; set; } = AVHWDeviceType.AV_HWDEVICE_TYPE_NONE;
-        /// <summary>Gets or sets a worker callback that acquires Unity's D3D11 device for native D3D11VA transport.</summary>
+        /// <summary>Gets or sets a worker callback that acquires a renderer-compatible D3D11VA decoding device.</summary>
         /// <remarks>
         /// The callback returns an <c>ID3D11Device</c> pointer with an added reference, or <see cref="IntPtr.Zero"/> if unavailable.
         /// Ownership of a returned reference transfers to FFmpeg, including when device initialization fails.
-        /// If omitted, hardware decoding may create an independent device when CPU upload is permitted.
+        /// Private same-adapter devices require worker-side frame publication or <see cref="MapHardwareFrame"/>
+        /// to produce resources on the presentation device. If omitted, hardware decoding may create an independent
+        /// device when CPU upload is permitted.
         /// </remarks>
         public Func<IntPtr>? AcquireD3D11Device { get; set; }
         /// <summary>Gets or sets a worker callback that acquires a hardware decoding device compatible with Unity's GPU.</summary>
@@ -74,6 +76,42 @@ namespace MajdataPlay.FFmpeg.Internal
         /// <exception cref="TimeoutException">GPU completion exceeded the timeout.</exception>
         /// <exception cref="NotSupportedException">The device cannot provide safe synchronization.</exception>
         void Wait(CancellationToken cancellationToken, int timeoutMilliseconds);
+    }
+
+    /// <summary>Publishes worker-completed frames independent of live codec reference surfaces.</summary>
+    internal interface IHardwareFramePublisher
+    {
+        /// <summary>Copies a borrowed decoded frame to an immutable GPU surface and completes it on the worker.</summary>
+        /// <param name="frame">The borrowed FFmpeg hardware frame whose pixels and metadata are preserved.</param>
+        /// <param name="cancellationToken">Cancels pool admission and GPU completion when the session closes.</param>
+        /// <param name="timeoutMilliseconds">The maximum worker wait duration in milliseconds.</param>
+        /// <returns>A newly owned FFmpeg frame safe to publish without render-thread decode waits.</returns>
+        /// <exception cref="OperationCanceledException">The session was canceled.</exception>
+        /// <exception cref="TimeoutException">Pool admission or GPU completion exceeded the timeout.</exception>
+        /// <exception cref="NotSupportedException">The GPU snapshot cannot be created or completed.</exception>
+        /// <exception cref="OutOfMemoryException">The hardware frame cannot be retained.</exception>
+        IntPtr PublishFrame(IntPtr frame, CancellationToken cancellationToken, int timeoutMilliseconds);
+    }
+
+    /// <summary>Queues one immutable GPU copy while its owner continues bounded codec submission.</summary>
+    internal interface IQueuedHardwareFramePublisher : IHardwareFramePublisher
+    {
+        /// <summary>Gets whether the loaded bridge can query individual immutable snapshots without waiting for later decode work.</summary>
+        bool CanQueueFrames { get; }
+        /// <summary>Submits a snapshot copy without waiting for its GPU completion.</summary>
+        /// <param name="frame">The borrowed codec frame; the native copy retains its source until completion.</param>
+        /// <param name="cancellationToken">Cancels admission into the fixed GPU snapshot pool.</param>
+        /// <param name="timeoutMilliseconds">Bounds pool admission in milliseconds.</param>
+        /// <returns>An owned FFmpeg frame that must remain worker-private until <see cref="IsFrameReady"/> succeeds.</returns>
+        /// <exception cref="OperationCanceledException">The session was canceled.</exception>
+        /// <exception cref="TimeoutException">Snapshot admission exceeded the timeout.</exception>
+        /// <exception cref="NotSupportedException">Snapshot submission is unavailable or failed.</exception>
+        IntPtr QueueFrame(IntPtr frame, CancellationToken cancellationToken, int timeoutMilliseconds);
+        /// <summary>Queries one queued snapshot without waiting for subsequent codec or DPB operations.</summary>
+        /// <param name="frame">The borrowed queued snapshot whose GPU copy is being observed.</param>
+        /// <returns>True only when the snapshot and its source ownership have completed on the GPU.</returns>
+        /// <exception cref="NotSupportedException">The GPU completion query failed.</exception>
+        bool IsFrameReady(IntPtr frame);
     }
 
     /// <summary>Owns a hardware decoding session that transports native images without mapping pixels into CPU memory.</summary>

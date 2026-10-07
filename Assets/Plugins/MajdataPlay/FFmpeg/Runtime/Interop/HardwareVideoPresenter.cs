@@ -20,6 +20,10 @@ namespace MajdataPlay.FFmpeg.Interop
     {
         /// <summary>Define native capability bits for D3D11, Metal, D3D12 sharing, WGL sharing, and Windows Vulkan sharing, respectively.</summary>
         private const int D3D11Capability = 1, MetalCapability = 2, D3D12Capability = 4, WglCapability = 8, WindowsVulkanCapability = 16;
+        /// <summary>Identifies bridges supporting private D3D11VA contexts and worker-completed GPU snapshots.</summary>
+        internal const int D3D11IsolationCapability = 512;
+        /// <summary>Identifies bridges supporting nonblocking completion of individually queued D3D11VA snapshots.</summary>
+        internal const int D3D11QueuedSnapshotCapability = 1024;
         /// <summary>Define capability bits for Linux DMA-BUF and Android AHardwareBuffer Vulkan transport.</summary>
         private const int LinuxVulkanCapability = 32, AndroidVulkanCapability = 64;
         /// <summary>Define capability bits for native D3D12VA and Vulkan Video decoding.</summary>
@@ -72,6 +76,8 @@ namespace MajdataPlay.FFmpeg.Interop
         public static string? AvailabilityReason { get; private set; }
         /// <summary>Gets whether the bridge can present D3D11 decoded frames on Unity's current graphics backend.</summary>
         public static bool SupportsD3D11 => (Capabilities & D3DDecodeCapabilities) != 0;
+        /// <summary>Gets whether the loaded bridge can isolate codec submissions from Unity's presentation context.</summary>
+        internal static bool SupportsD3D11Isolation => (Capabilities & D3D11IsolationCapability) != 0;
         /// <summary>Gets whether the bridge can share VideoToolbox planes with Metal.</summary>
         public static bool SupportsMetal => (Capabilities & MetalCapability) != 0;
         /// <summary>Gets whether the bridge supports VAAPI DMA-BUF import into Vulkan.</summary>
@@ -184,9 +190,17 @@ namespace MajdataPlay.FFmpeg.Interop
 
         // Does not call SystemInfo: this is passed directly to the decoder worker.
         // The returned COM reference belongs to libavutil's D3D11VA device context.
-        /// <summary>Acquires Unity's D3D11 device for the decoder worker without accessing Unity APIs.</summary>
+        /// <summary>Acquires a same-adapter private D3D11VA device when supported, without accessing Unity APIs.</summary>
         /// <returns>An added COM device reference owned by the caller, or zero when unavailable.</returns>
-        public static IntPtr AcquireD3D11Device() => Native.FfuD3D11AcquireDevice();
+        public static IntPtr AcquireD3D11Device()
+        {
+#if UNITY_STANDALONE_WIN || UNITY_EDITOR_WIN
+            return (Native.FfuCapabilities() & D3D11IsolationCapability) != 0
+                ? Native.FfuD3D11AcquireDecodeDevice() : Native.FfuD3D11AcquireDevice();
+#else
+            return Native.FfuD3D11AcquireDevice();
+#endif
+        }
         /// <summary>Acquires an FFmpeg D3D12VA device sharing Unity's graphics device.</summary>
         /// <returns>A newly owned FFmpeg AVBufferRef for the shared D3D12VA device.</returns>
         /// <exception cref="NotSupportedException">The native bridge cannot acquire a D3D12VA device.</exception>
@@ -236,7 +250,8 @@ namespace MajdataPlay.FFmpeg.Interop
         {
             CollectRetiredWglTextures();
             _capabilities = Capabilities;
-            _backend = _capabilities & ~(D3D12VideoCapability | VulkanVideoDecodeCapability);
+            // Decoder/synchronization feature bits must never change transport selection.
+            _backend = _capabilities & (D3DDecodeCapabilities | MetalCapability | LinuxVulkanCapability | AndroidVulkanCapability);
             if (_capabilities == 0)
             {
                 throw new NotSupportedException(AvailabilityReason);
@@ -908,6 +923,12 @@ namespace MajdataPlay.FFmpeg.Interop
             /// <returns>An added COM reference to Unity's D3D11 device, or zero when unavailable; ownership transfers to the caller.</returns>
             [DllImport(Library, CallingConvention = CallingConvention.Cdecl, EntryPoint = "ffu_d3d11_acquire_device")]
             internal static extern IntPtr FfuD3D11AcquireDevice();
+#if UNITY_STANDALONE_WIN || UNITY_EDITOR_WIN
+            /// <summary>Creates a private D3D11VA codec device on the presentation adapter.</summary>
+            /// <returns>An owned COM device reference, or zero if the device cannot be created.</returns>
+            [DllImport(Library, CallingConvention = CallingConvention.Cdecl, EntryPoint = "ffu_d3d11_acquire_decode_device")]
+            internal static extern IntPtr FfuD3D11AcquireDecodeDevice();
+#endif
             /// <summary>Creates an owned D3D11 video presenter.</summary>
             /// <returns>An owned presenter handle to release with FfuD3D11Release, or zero on failure.</returns>
             [DllImport(Library, CallingConvention = CallingConvention.Cdecl, EntryPoint = "ffu_d3d11_create")]

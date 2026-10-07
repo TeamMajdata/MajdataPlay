@@ -20,8 +20,10 @@ namespace MajdataPlay.FFmpeg.Internal
     /// </remarks>
     public sealed unsafe class FFmpegVideoDecoder : IDisposable
     {
-        /// <summary>Bounds packet submissions that do not yet produce a hardware output frame.</summary>
+        /// <summary>Bounds codec submissions whose GPU completion has not yet been observed on the worker.</summary>
         private const int MaximumPendingHardwarePackets = 4;
+        /// <summary>Allows a bounded two-picture publication lead to absorb decode and GPU completion jitter.</summary>
+        private const double PublicationIntervalSlack = 0.5;
         /// <summary>Roots the native I/O interrupt delegate for the lifetime of the process.</summary>
         private static readonly AVIOInterruptCB_callback s_interruptCallback = Interrupt;
         /// <summary>Roots the native pixel-format selection delegate for the lifetime of the process.</summary>
@@ -42,8 +44,20 @@ namespace MajdataPlay.FFmpeg.Internal
         private AVPacket* _packet;
         /// <summary>Owns reusable decoded frame storage.</summary>
         private AVFrame* _frame;
-        /// <summary>Retains the last preroll frame for seeks at or beyond the input endpoint.</summary>
-        private AVFrame* _seekCandidate;
+        /// <summary>Retains one selected pending picture or the latest discarded raw picture for endpoint presentation.</summary>
+        private AVFrame* _discardedCandidate;
+        /// <summary>Retains a selected raw picture in order while an earlier queued snapshot completes.</summary>
+        private bool _presentationCandidate;
+        /// <summary>Owns at most one immutable snapshot awaiting its own GPU copy completion on the worker.</summary>
+        private AVFrame* _pendingSnapshot;
+        /// <summary>Store the queued snapshot's original presentation time and duration, in seconds.</summary>
+        private double _pendingSnapshotTime, _pendingSnapshotDuration;
+        /// <summary>Stores the bit-rate estimate measured for the queued picture.</summary>
+        private long _pendingSnapshotBitRate;
+        /// <summary>Bounds how long the worker may retain an incomplete snapshot.</summary>
+        private long _pendingSnapshotDeadline;
+        /// <summary>Records picture selection before producer completion or conversion, for wall-clock overload cadence.</summary>
+        private long _lastFrameSelectionTimestamp;
         /// <summary>Keeps this decoder reachable by native interrupt and pixel-format callbacks.</summary>
         private GCHandle _selfHandle;
         /// <summary>Carries cancellation for input and decoding operations.</summary>
@@ -92,12 +106,12 @@ namespace MajdataPlay.FFmpeg.Internal
         private double _nextTimestamp;
         /// <summary>Stores the preroll cutoff in seconds, or negative infinity when no seek is pending.</summary>
         private double _seekTarget = double.NegativeInfinity;
-        /// <summary>Store the retained preroll frame's presentation timestamp and duration, in seconds.</summary>
-        private double _seekCandidateTime, _seekCandidateDuration;
+        /// <summary>Store the retained discarded frame's presentation timestamp and duration, in seconds.</summary>
+        private double _discardedCandidateTime, _discardedCandidateDuration;
         /// <summary>Predicts the next packet timestamp for bit-rate estimation when timestamps are missing.</summary>
         private double _nextPacketTimestamp;
-        /// <summary>Retains the bit-rate estimate belonging to the last preroll frame.</summary>
-        private long _seekCandidateBitRate;
+        /// <summary>Retains the bit-rate estimate belonging to the latest discarded frame.</summary>
+        private long _discardedCandidateBitRate;
         /// <summary>Stores the last keyframe catch-up target in seconds; a new catch-up waits until decoding passes it.</summary>
         private double _catchUpTarget = double.NegativeInfinity;
         /// <summary>Tracks whether the codec currently skips non-reference frames to recover decode throughput.</summary>
@@ -105,7 +119,7 @@ namespace MajdataPlay.FFmpeg.Internal
         /// <summary>Supplies the playback deadlines used to discard expired frames, or null to present every decoded frame.</summary>
         /// <remarks>The provider is invoked on the owning worker once per decoded frame and must not allocate.</remarks>
         internal Func<FrameDeadline>? FrameDeadlineProvider { get; set; }
-        /// <summary>Gets the number of decoded frames discarded before conversion because they had already expired.</summary>
+        /// <summary>Gets the number of decoded pictures discarded before conversion due to lateness or consumer cadence.</summary>
         internal long DiscardedFrames { get; private set; }
         /// <summary>Gets the number of forward keyframe seeks performed to catch up with the playback clock.</summary>
         internal long CatchUpSeeks { get; private set; }
@@ -503,37 +517,64 @@ namespace MajdataPlay.FFmpeg.Internal
             while (true)
             {
                 _cancellation.ThrowIfCancellationRequested();
+                var completedSnapshot = TakeCompletedSnapshot();
+                if (completedSnapshot != null)
+                {
+                    return completedSnapshot;
+                }
+
+                // A frozen timeline retains sequential preload/step behavior. Only
+                // active playback pipelines reference decoding behind a pending copy.
+                if (_pendingSnapshot != null && (FrameDeadlineProvider?.Invoke().Position ?? double.NegativeInfinity) == double.NegativeInfinity)
+                {
+                    SynchronizeHardwareDecoding(true);
+                    continue;
+                }
+
                 // Both send and receive can perform decoding. Measure their CPU calls
                 // separately from demux/conversion; hardware samples also include waits,
                 // but cannot measure asynchronous GPU execution time.
                 int result;
-                using (UnityProfiler.Create(HardwareDecoding ? "FFmpeg.Decoder.Hardware.ReceiveFrame" : "FFmpeg.Decoder.Software.ReceiveFrame"))
+                var retainedPresentationCandidate = _presentationCandidate && _discardedCandidate != null;
+                if (retainedPresentationCandidate)
                 {
-                    result = ffmpeg.avcodec_receive_frame(_codec, _frame);
+                    // A useful future picture cannot be discarded merely because
+                    // the preceding snapshot had not completed when it was decoded.
+                    ffmpeg.av_frame_move_ref(_frame, _discardedCandidate);
+                    _presentationCandidate = false;
+                    result = 0;
+                }
+                else
+                {
+                    using (UnityProfiler.Create(HardwareDecoding ? "FFmpeg.Decoder.Hardware.ReceiveFrame" : "FFmpeg.Decoder.Software.ReceiveFrame"))
+                    {
+                        result = ffmpeg.avcodec_receive_frame(_codec, _frame);
+                    }
                 }
 
                 if (result == 0)
                 {
                     try
                     {
-                        SynchronizeHardwareDecoding(true);
-                        if (!_cpuTransport && _frame->hw_frames_ctx != null)
+                        if (!retainedPresentationCandidate && !_cpuTransport && _frame->hw_frames_ctx != null)
                         {
                             // A hardware AVFrame may precede GPU completion. Pace all
                             // output, including preroll and discarded frames, on this worker.
                             _options.WaitForHardwareFrame?.Invoke((IntPtr)_frame, _cancellation, _options.IOTimeoutMilliseconds);
                         }
 
-                        var duration = _frame->duration > 0 ? _frame->duration * ffmpeg.av_q2d(_timeBase) : 1.0 / FrameRate;
+                        var duration = retainedPresentationCandidate ? _discardedCandidateDuration
+                            : _frame->duration > 0 ? _frame->duration * ffmpeg.av_q2d(_timeBase) : 1.0 / FrameRate;
                         var timestamp = _frame->best_effort_timestamp != ffmpeg.AV_NOPTS_VALUE ? _frame->best_effort_timestamp : _frame->pts;
-                        var seconds = timestamp == ffmpeg.AV_NOPTS_VALUE ? _nextTimestamp : timestamp * ffmpeg.av_q2d(_timeBase);
-                        if (!_originKnown && timestamp != ffmpeg.AV_NOPTS_VALUE)
+                        var seconds = retainedPresentationCandidate ? _discardedCandidateTime
+                            : timestamp == ffmpeg.AV_NOPTS_VALUE ? _nextTimestamp : timestamp * ffmpeg.av_q2d(_timeBase);
+                        if (!retainedPresentationCandidate && !_originKnown && timestamp != ffmpeg.AV_NOPTS_VALUE)
                         {
                             _origin = seconds;
                             _originKnown = true;
                         }
 
-                        if (timestamp != ffmpeg.AV_NOPTS_VALUE)
+                        if (!retainedPresentationCandidate && timestamp != ffmpeg.AV_NOPTS_VALUE)
                         {
                             seconds -= _origin;
                         }
@@ -541,40 +582,78 @@ namespace MajdataPlay.FFmpeg.Internal
                         _nextTimestamp = seconds + duration;
                         // Keep the estimate with this displayed frame, not the worker's
                         // latest read-ahead position. Packet timestamps use stream time.
-                        var currentBitRate = _bitRateTracker.Measure(seconds + _origin + duration);
+                        var currentBitRate = retainedPresentationCandidate ? _discardedCandidateBitRate
+                            : _bitRateTracker.Measure(seconds + _origin + duration);
                         // Decode preroll after backward seeking, including inter-frame references.
                         if (seconds + duration <= _seekTarget + 0.000001)
                         {
                             // Keep exactly one reference while decoding preroll. A seek to
                             // 100% (or a slightly overreported duration) must display the
                             // closest final frame instead of leaving the previous texture.
-                            if (_seekCandidate == null)
-                            {
-                                _seekCandidate = ffmpeg.av_frame_alloc();
-                            }
-
-                            if (_seekCandidate == null)
-                            {
-                                throw new OutOfMemoryException("Cannot retain seek preroll frame.");
-                            }
-
-                            ffmpeg.av_frame_unref(_seekCandidate);
-                            ffmpeg.av_frame_move_ref(_seekCandidate, _frame);
-                            _seekCandidateTime = seconds;
-                            _seekCandidateDuration = duration;
-                            _seekCandidateBitRate = currentBitRate;
+                            RetainDiscardedFrame(seconds, duration, currentBitRate);
                             continue;
                         }
 
                         _seekTarget = double.NegativeInfinity;
-                        ReleaseSeekCandidate();
-                        // Expired frames are released before hardware download, RGBA
-                        // conversion, or native retention so the worker can catch up.
-                        if (TryDiscardExpiredFrame(seconds + duration))
+                        // Select pictures before hardware download, RGBA conversion,
+                        // or GPU snapshot creation; retain only one raw EOF fallback.
+                        if (TryDiscardPresentationFrame(seconds + duration))
                         {
+                            // Retain one native reference, not converted pixels. EOF must
+                            // still deliver the final picture even when the clock is ahead.
+                            RetainDiscardedFrame(seconds, duration, currentBitRate);
                             continue;
                         }
 
+                        if (!_cpuTransport && _frame->hw_frames_ctx != null
+                            && _hardwareSynchronization is IQueuedHardwareFramePublisher queued && queued.CanQueueFrames
+                            && (_pendingSnapshot != null || (FrameDeadlineProvider?.Invoke().Position ?? double.NegativeInfinity) != double.NegativeInfinity))
+                        {
+                            if (_pendingSnapshot == null)
+                            {
+                                ReleaseDiscardedCandidate();
+                                // Include producer completion in the cadence budget, rather
+                                // than adding another interval after the GPU wait finishes.
+                                _lastFrameSelectionTimestamp = Stopwatch.GetTimestamp();
+                                // Complete codec writes before crossing the video/graphics
+                                // engine boundary; later references remain independently bounded.
+                                SynchronizeHardwareDecoding(true);
+                                _pendingSnapshot = (AVFrame*)queued.QueueFrame((IntPtr)_frame, _cancellation, _options.IOTimeoutMilliseconds);
+                                if (_pendingSnapshot == null)
+                                {
+                                    throw new OutOfMemoryException("Cannot retain a queued GPU snapshot.");
+                                }
+
+                                _pendingSnapshotTime = seconds;
+                                _pendingSnapshotDuration = duration;
+                                _pendingSnapshotBitRate = currentBitRate;
+                                _pendingSnapshotDeadline = Stopwatch.GetTimestamp()
+                                    + (long)(_options.IOTimeoutMilliseconds * (double)Stopwatch.Frequency / 1000);
+                            }
+                            else
+                            {
+                                // Preserve this selected picture in order. Reference pictures
+                                // rejected by the deadline can still decode behind the copy,
+                                // but a useful next output must not be lost just because GPU
+                                // completion has not been observed yet.
+                                RetainDiscardedFrame(seconds, duration, currentBitRate);
+                                _presentationCandidate = true;
+                                return WaitForPendingSnapshot();
+                            }
+                            continue;
+                        }
+
+                        ReleaseDiscardedCandidate();
+
+                        // Discarded reference frames still decode in order, but do not need
+                        // a per-picture GPU round trip. Packet admission bounds that work;
+                        // only a frame crossing into presentation must be completed here.
+                        if (_hardwareSynchronization is not IHardwareFramePublisher)
+                        {
+                            SynchronizeHardwareDecoding(true);
+                        }
+
+                        _lastFrameSelectionTimestamp = Stopwatch.GetTimestamp();
                         var decoded = CreatePresentationFrame(_frame, seconds, duration);
                         decoded.CurrentBitRate = currentBitRate;
                         return decoded;
@@ -602,6 +681,20 @@ namespace MajdataPlay.FFmpeg.Internal
 
                 if (_packetPending)
                 {
+                    // Wait before a fifth packet, not immediately after the fourth.
+                    // A selected final admitted output can combine decode and snapshot completion
+                    // in one marker, without increasing the fixed admission bound.
+                    if (_pendingHardwarePackets >= MaximumPendingHardwarePackets)
+                    {
+                        if (_pendingSnapshot != null)
+                        {
+                            // Publish the completed prefix before waiting on unrelated
+                            // later reference pictures. No fifth packet is submitted here.
+                            return WaitForPendingSnapshot();
+                        }
+                        SynchronizeHardwareDecoding(true);
+                    }
+
                     using (UnityProfiler.Create(HardwareDecoding ? "FFmpeg.Decoder.Hardware.SendPacket" : "FFmpeg.Decoder.Software.SendPacket"))
                     {
                         result = ffmpeg.avcodec_send_packet(_codec, _packet);
@@ -752,8 +845,9 @@ namespace MajdataPlay.FFmpeg.Internal
                 return;
             }
 
-            if (!force && ++_pendingHardwarePackets < MaximumPendingHardwarePackets)
+            if (!force)
             {
+                _pendingHardwarePackets++;
                 return;
             }
 
@@ -769,7 +863,8 @@ namespace MajdataPlay.FFmpeg.Internal
         private void ResetAfterSeek(double seconds)
         {
             SynchronizeHardwareDecoding(true);
-            ReleaseSeekCandidate();
+            ReleasePendingSnapshot();
+            ReleaseDiscardedCandidate();
             ffmpeg.avcodec_flush_buffers(_codec);
             _hardwareSession?.Flush();
             ffmpeg.av_packet_unref(_packet);
@@ -782,15 +877,16 @@ namespace MajdataPlay.FFmpeg.Internal
             _bitRateTracker.Reset();
             _nextPacketTimestamp = seconds + _origin;
             _seekTarget = seconds;
+            _lastFrameSelectionTimestamp = 0;
             SetSkipNonReferenceFrames(false);
         }
 
-        /// <summary>Discards a decoded frame whose display interval has expired and adjusts decoding to catch up.</summary>
+        /// <summary>Discards obsolete or excess-cadence pictures before conversion and adjusts decoding to catch up.</summary>
         /// <param name="frameEnd">The decoded frame's end time on the media timeline, in seconds.</param>
         /// <returns>True if the current frame was discarded and must not be presented; otherwise false.</returns>
         /// <exception cref="OperationCanceledException">The token supplied to <see cref="Open"/> was canceled during a catch-up seek.</exception>
         /// <exception cref="TimeoutException">A catch-up seek exceeded the configured input timeout.</exception>
-        private bool TryDiscardExpiredFrame(double frameEnd)
+        private bool TryDiscardPresentationFrame(double frameEnd)
         {
             var provider = FrameDeadlineProvider;
             if (provider == null)
@@ -803,13 +899,19 @@ namespace MajdataPlay.FFmpeg.Internal
             // B-frames are rarely referenced, so skipping them while late reduces
             // decode work without corrupting later frames. Restore once on time.
             SetSkipNonReferenceFrames(late);
-            if (frameEnd <= deadline.CatchUpBefore && frameEnd > _catchUpTarget && TrySkipToKeyFrame(deadline.Position))
+            if (frameEnd <= deadline.CatchUpBefore && frameEnd > _catchUpTarget && TrySkipToKeyFrame(deadline.Position, frameEnd))
             {
                 DiscardedFrames++;
                 return true;
             }
 
-            if (frameEnd <= deadline.DiscardBefore)
+            // When hardware falls behind, media-time cadence would require the
+            // unavailable source throughput and turn every late picture into a gap.
+            // Refresh the freshest decoded picture at the consumer's wall cadence
+            // instead, without relabeling its PTS or submitting every reference.
+            var cadenceLimited = frameEnd <= deadline.Position && !double.IsPositiveInfinity(deadline.MaximumFrameRate)
+                && Stopwatch.GetTimestamp() - _lastFrameSelectionTimestamp < Stopwatch.Frequency * PublicationIntervalSlack / deadline.MaximumFrameRate;
+            if (frameEnd <= deadline.DiscardBefore || frameEnd + 0.000001 < deadline.MinimumFrameEnd || cadenceLimited)
             {
                 DiscardedFrames++;
                 return true;
@@ -818,42 +920,67 @@ namespace MajdataPlay.FFmpeg.Internal
             return false;
         }
 
-        /// <summary>Repositions the input to the first keyframe at or after the playback clock without decoding the gap.</summary>
+        /// <summary>Skips undecoded references only when an indexed, already-due keyframe advances the decoder.</summary>
         /// <param name="seconds">The current playback position on the media timeline, in seconds.</param>
-        /// <returns>True if the input was repositioned; false if no later keyframe can be reached.</returns>
-        /// <remarks>A failed attempt disables catch-up seeking until the next explicit <see cref="Seek"/>.</remarks>
+        /// <param name="frameEnd">The current decoded frame's end time in seconds, which a catch-up seek must advance.</param>
+        /// <returns>True if the input advanced to a due keyframe; false if sequential decoding is still required.</returns>
+        /// <remarks>Never seeks into the future or rewinds within the current GOP. Missing indexes and failed seeks
+        /// disable catch-up seeking until the next explicit <see cref="Seek"/>; reference frames remain decoded normally.</remarks>
         /// <exception cref="OperationCanceledException">The token supplied to <see cref="Open"/> was canceled.</exception>
         /// <exception cref="TimeoutException">Seeking exceeded the configured input timeout.</exception>
-        private bool TrySkipToKeyFrame(double seconds)
+        private bool TrySkipToKeyFrame(double seconds, double frameEnd)
         {
-            // Sequential decoding remains correct when the input cannot be repositioned.
-            _catchUpTarget = double.PositiveInfinity;
             if (!CanSeek || (Duration > 0 && seconds >= Duration))
             {
+                _catchUpTarget = double.PositiveInfinity;
+                return false;
+            }
+
+            var timeBase = ffmpeg.av_q2d(_timeBase);
+            var timestamp = checked((long)Math.Floor((seconds + _origin) / timeBase));
+            var stream = _format->streams[_videoStreamIndex];
+            // Without AVSEEK_FLAG_ANY the API selects keyframes only. Do not read
+            // AVIndexEntry's C bitfields through the managed binding's opaque storage.
+            var entry = ffmpeg.avformat_index_get_entry_from_timestamp(stream, timestamp, ffmpeg.AVSEEK_FLAG_BACKWARD);
+            if (entry == null)
+            {
+                // Without a known random-access point, seeking could either rewind
+                // the current GOP or freeze presentation while waiting for a future GOP.
+                _catchUpTarget = double.PositiveInfinity;
+                return false;
+            }
+
+            var keyTimestamp = entry->timestamp;
+            var keyTime = keyTimestamp * timeBase - _origin;
+            if (keyTimestamp > timestamp || keyTime < frameEnd + 0.000001)
+            {
+                // The clock may pass the next keyframe later. Keep decoding and
+                // recheck the inexpensive index; do not disable future catch-up.
                 return false;
             }
 
             using var profile = UnityProfiler.Create("FFmpeg.Decoder.CatchUpSeek");
-            var timestamp = checked((long)Math.Round((seconds + _origin) / ffmpeg.av_q2d(_timeBase)));
             BeginIO();
-            // A minimum timestamp equal to the target selects a later keyframe, never an earlier one.
-            var result = ffmpeg.avformat_seek_file(_format, _videoStreamIndex, timestamp, timestamp, long.MaxValue, 0);
+            var result = ffmpeg.avformat_seek_file(_format, _videoStreamIndex, keyTimestamp, keyTimestamp, timestamp, ffmpeg.AVSEEK_FLAG_BACKWARD);
             var deadline = Interlocked.Exchange(ref _ioDeadline, 0);
             _cancellation.ThrowIfCancellationRequested();
             if (result < 0)
             {
+                _catchUpTarget = double.PositiveInfinity;
                 if (deadline != 0 && Stopwatch.GetTimestamp() >= deadline)
                 {
                     throw new TimeoutException("Catch-up seek exceeded " + _options.IOTimeoutMilliseconds + " ms.");
                 }
 
-                MajDebug.LogDebug("FFmpeg", "[Decoder] No keyframe after " + seconds.ToString("F3", CultureInfo.InvariantCulture)
+                MajDebug.LogDebug("FFmpeg", "[Decoder] Cannot advance to due keyframe at " + keyTime.ToString("F3", CultureInfo.InvariantCulture)
                     + " seconds; decoding sequentially. " + ErrorText(result));
                 return false;
             }
 
-            ResetAfterSeek(seconds);
-            _catchUpTarget = seconds;
+            // Publish the first available due picture, rather than discarding a
+            // whole GOP of seek preroll while the independent clock keeps moving.
+            ResetAfterSeek(keyTime);
+            _catchUpTarget = keyTime;
             CatchUpSeeks++;
             return true;
         }
@@ -879,7 +1006,8 @@ namespace MajdataPlay.FFmpeg.Internal
         /// <exception cref="NotSupportedException">The native image, dimensions, or transport cannot satisfy the active decoding options.</exception>
         /// <exception cref="OutOfMemoryException">The hardware frame cannot be retained or converted.</exception>
         /// <exception cref="InvalidOperationException">Frame conversion fails or the private frame pool is exhausted.</exception>
-        private DecodedVideoFrame CreatePresentationFrame(AVFrame* frame, double seconds, double duration)
+        /// <param name="completedSnapshot">True when the borrowed frame is already an immutable GPU-completed snapshot.</param>
+        private DecodedVideoFrame CreatePresentationFrame(AVFrame* frame, double seconds, double duration, bool completedSnapshot = false)
         {
             using var profile = UnityProfiler.Create("FFmpeg.Decoder.PreparePresentationFrame");
             var rotation = ReadFrameRotation(frame, RotationDegrees);
@@ -921,7 +1049,19 @@ namespace MajdataPlay.FFmpeg.Internal
                     AVFrame* clone;
                     try
                     {
-                        clone = _options.MapHardwareFrame != null ? (AVFrame*)_options.MapHardwareFrame((IntPtr)frame) : ffmpeg.av_frame_clone(frame);
+                        if (completedSnapshot)
+                        {
+                            clone = ffmpeg.av_frame_clone(frame);
+                        }
+                        else if (_hardwareSynchronization is IHardwareFramePublisher publisher)
+                        {
+                            clone = (AVFrame*)publisher.PublishFrame((IntPtr)frame, _cancellation, _options.IOTimeoutMilliseconds);
+                            _pendingHardwarePackets = 0;
+                        }
+                        else
+                        {
+                            clone = _options.MapHardwareFrame != null ? (AVFrame*)_options.MapHardwareFrame((IntPtr)frame) : ffmpeg.av_frame_clone(frame);
+                        }
                         if (clone == null && _options.MapHardwareFrame != null)
                         {
                             throw new NotSupportedException("The native graphics mapper returned no imported frame.");
@@ -1018,34 +1158,142 @@ namespace MajdataPlay.FFmpeg.Internal
         /// <returns>The backend name with the configured device description when available.</returns>
         private string DescribeHardwareDevice(string kind) => string.IsNullOrWhiteSpace(_options.HardwareDeviceDescription)
             ? kind : kind + "; " + _options.HardwareDeviceDescription;
-        /// <summary>Marks decoding complete and returns the retained endpoint frame when seeking past available frames.</summary>
-        /// <returns>The owned final seek frame, or null if no preroll frame was retained.</returns>
-        private DecodedVideoFrame? FinishInput()
+        /// <summary>Publishes only a completed queued copy while leaving later codec work independently bounded.</summary>
+        /// <returns>The owned completed picture, or null if no copy is ready yet.</returns>
+        /// <exception cref="TimeoutException">A pending GPU copy exceeded the configured timeout.</exception>
+        /// <exception cref="NotSupportedException">GPU completion or snapshot wrapping failed.</exception>
+        /// <exception cref="OutOfMemoryException">The completed frame could not be retained.</exception>
+        private DecodedVideoFrame? TakeCompletedSnapshot()
         {
-            _ended = true;
-            _seekTarget = double.NegativeInfinity;
-            if (_seekCandidate == null)
+            if (_pendingSnapshot == null)
             {
+                return null;
+            }
+
+            var publisher = (IQueuedHardwareFramePublisher)_hardwareSynchronization!;
+            if (!publisher.IsFrameReady((IntPtr)_pendingSnapshot))
+            {
+                if (Stopwatch.GetTimestamp() >= _pendingSnapshotDeadline)
+                {
+                    throw new TimeoutException("Timed out completing a queued D3D11VA GPU snapshot on the worker.");
+                }
                 return null;
             }
 
             try
             {
-                var decoded = CreatePresentationFrame(_seekCandidate, _seekCandidateTime, _seekCandidateDuration);
-                decoded.CurrentBitRate = _seekCandidateBitRate;
+                var frame = CreatePresentationFrame(_pendingSnapshot, _pendingSnapshotTime, _pendingSnapshotDuration, true);
+                frame.CurrentBitRate = _pendingSnapshotBitRate;
+                // Source writes completed before queuing this copy. Its query
+                // does not cover later references; leave their admission count intact.
+                return frame;
+            }
+            finally
+            {
+                ReleasePendingSnapshot();
+            }
+        }
+
+        /// <summary>Completes only the pending immutable copy, without serializing presentation behind later codec work.</summary>
+        /// <returns>The owned completed picture; later codec submissions remain independently bounded.</returns>
+        /// <exception cref="OperationCanceledException">The decode session was canceled.</exception>
+        /// <exception cref="TimeoutException">The queued GPU copy exceeded its deadline.</exception>
+        /// <exception cref="NotSupportedException">GPU completion or snapshot wrapping failed.</exception>
+        /// <exception cref="OutOfMemoryException">The completed picture could not be retained.</exception>
+        private DecodedVideoFrame WaitForPendingSnapshot()
+        {
+            var wait = new GpuCompletionWait(_options.IOTimeoutMilliseconds);
+            while (true)
+            {
+                _cancellation.ThrowIfCancellationRequested();
+                var completed = TakeCompletedSnapshot();
+                if (completed != null)
+                {
+                    return completed;
+                }
+                wait.WaitForNextPoll(_cancellation);
+            }
+        }
+
+        /// <summary>Releases the worker-private queued frame on publication, seek, drain, or disposal.</summary>
+        private void ReleasePendingSnapshot()
+        {
+            var frame = _pendingSnapshot;
+            _pendingSnapshot = null;
+            if (frame != null)
+            {
+                ffmpeg.av_frame_free(&frame);
+            }
+        }
+
+        /// <summary>Retains only the latest discarded native frame for endpoint presentation without converting it.</summary>
+        /// <param name="seconds">The discarded picture's original media presentation time in seconds.</param>
+        /// <param name="duration">The picture's display duration in seconds.</param>
+        /// <param name="bitRate">The bit-rate estimate measured for this picture.</param>
+        /// <exception cref="OutOfMemoryException">FFmpeg could not allocate the retained native frame.</exception>
+        private void RetainDiscardedFrame(double seconds, double duration, long bitRate)
+        {
+            // A successful catch-up seek already unreferenced the old source.
+            if (_frame->buf[0] == null)
+            {
+                return;
+            }
+
+            if (_discardedCandidate == null)
+            {
+                _discardedCandidate = ffmpeg.av_frame_alloc();
+            }
+
+            if (_discardedCandidate == null)
+            {
+                throw new OutOfMemoryException("Cannot retain the final discarded video frame.");
+            }
+
+            _presentationCandidate = false;
+            ffmpeg.av_frame_unref(_discardedCandidate);
+            ffmpeg.av_frame_move_ref(_discardedCandidate, _frame);
+            _discardedCandidateTime = seconds;
+            _discardedCandidateDuration = duration;
+            _discardedCandidateBitRate = bitRate;
+        }
+        /// <summary>Completes decoding and returns the final frame discarded by seek preroll or an advancing playback clock.</summary>
+        /// <returns>The owned final discarded frame, or null if the final picture was already published.</returns>
+        /// <exception cref="OperationCanceledException">The decode session was canceled during final GPU completion.</exception>
+        /// <exception cref="TimeoutException">Final GPU completion exceeded the configured timeout.</exception>
+        /// <exception cref="NotSupportedException">Final GPU completion or frame publication failed.</exception>
+        /// <exception cref="OutOfMemoryException">The endpoint frame cannot be retained for presentation.</exception>
+        private DecodedVideoFrame? FinishInput()
+        {
+            SynchronizeHardwareDecoding(true);
+            // A final queued copy may be the endpoint itself. Do not lose it if
+            // receive reaches EOF before the nonblocking readiness poll succeeds.
+            var completed = _discardedCandidate == null ? TakeCompletedSnapshot() : null;
+            ReleasePendingSnapshot();
+            _ended = true;
+            _seekTarget = double.NegativeInfinity;
+            if (_discardedCandidate == null)
+            {
+                return completed;
+            }
+
+            try
+            {
+                var decoded = CreatePresentationFrame(_discardedCandidate, _discardedCandidateTime, _discardedCandidateDuration);
+                decoded.CurrentBitRate = _discardedCandidateBitRate;
                 return decoded;
             }
             finally
             {
-                ReleaseSeekCandidate();
+                ReleaseDiscardedCandidate();
             }
         }
 
-        /// <summary>Releases the retained seek preroll frame and clears its pointer.</summary>
-        private void ReleaseSeekCandidate()
+        /// <summary>Releases the retained preroll or expired frame and clears its pointer.</summary>
+        private void ReleaseDiscardedCandidate()
         {
-            var candidate = _seekCandidate;
-            _seekCandidate = null;
+            var candidate = _discardedCandidate;
+            _discardedCandidate = null;
+            _presentationCandidate = false;
             if (candidate != null)
             {
                 ffmpeg.av_frame_free(&candidate);
@@ -1202,6 +1450,12 @@ namespace MajdataPlay.FFmpeg.Internal
                         // A completion marker must follow every codec submission. Internal
                         // frame workers could otherwise submit after the marker was recorded.
                         _codec->thread_count = 1;
+                        if (_hardwareSynchronization is IQueuedHardwareFramePublisher queued && queued.CanQueueFrames)
+                        {
+                            // One pending copy and one raw EOF candidate can retain codec
+                            // surfaces independently of its DPB. Keep that extra use bounded.
+                            _codec->extra_hw_frames = Math.Max(_codec->extra_hw_frames, 2);
+                        }
                     }
                     catch (NotSupportedException error) when (_options.AllowHardwareCpuUpload && !_options.RequireHardwareDecoding)
                     {
@@ -1565,7 +1819,8 @@ namespace MajdataPlay.FFmpeg.Internal
             }
 
             _frame = null;
-            ReleaseSeekCandidate();
+            ReleasePendingSnapshot();
+            ReleaseDiscardedCandidate();
             ReleaseCodec();
             var format = _format;
             if (format != null)
@@ -1583,7 +1838,7 @@ namespace MajdataPlay.FFmpeg.Internal
         }
     }
 
-    /// <summary>Describes, on the media timeline, when decoded frames are too late to present.</summary>
+    /// <summary>Describes media-time lateness, keyframe catch-up, and the consumer's next useful picture.</summary>
     internal readonly struct FrameDeadline
     {
         /// <summary>A deadline that never discards frames, used while playback is frozen or another frame is unavailable.</summary>
@@ -1594,16 +1849,25 @@ namespace MajdataPlay.FFmpeg.Internal
         public readonly double DiscardBefore;
         /// <summary>Gets the time in seconds at or before which a frame's end triggers a forward keyframe seek.</summary>
         public readonly double CatchUpBefore;
+        /// <summary>Gets the earliest frame end needed by the consumer cadence, or negative infinity to retain every future picture.</summary>
+        public readonly double MinimumFrameEnd;
+        /// <summary>Gets the maximum useful publications per wall-clock second, or positive infinity for an unthrottled consumer.</summary>
+        public readonly double MaximumFrameRate;
 
         /// <summary>Initializes a frame deadline snapshot.</summary>
         /// <param name="position">The current playback position in seconds.</param>
         /// <param name="discardBefore">The latest frame end time in seconds that is discarded without presentation.</param>
         /// <param name="catchUpBefore">The latest frame end time in seconds that triggers a keyframe catch-up seek.</param>
-        public FrameDeadline(double position, double discardBefore, double catchUpBefore)
+        /// <param name="minimumFrameEnd">The earliest useful frame end in seconds, or negative infinity to disable cadence thinning.</param>
+        /// <param name="maximumFrameRate">The consumer cadence in wall-clock frames per second, or positive infinity when unbounded.</param>
+        public FrameDeadline(double position, double discardBefore, double catchUpBefore, double minimumFrameEnd = double.NegativeInfinity,
+            double maximumFrameRate = double.PositiveInfinity)
         {
             Position = position;
             DiscardBefore = discardBefore;
             CatchUpBefore = catchUpBefore;
+            MinimumFrameEnd = minimumFrameEnd;
+            MaximumFrameRate = maximumFrameRate;
         }
     }
 }

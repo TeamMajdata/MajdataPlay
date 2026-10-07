@@ -1,39 +1,42 @@
 {
   "target": "win-x64",
   "bridgeAbi": 4,
-  "host": "Linux-6.18.40.1-microsoft-standard-WSL2-x86_64-with-glibc2.39",
-  "builtUtc": "2026-10-06T07:04:55.6597925Z",
+  "host": "Windows-10.0.19044-x64",
+  "builtUtc": "2026-10-06T19:44:30.310Z",
   "cmake": [
-    "/usr/bin/cmake",
+    "C:/Strawberry/c/bin/cmake.exe",
     "-S",
-    "/mnt/c/Users/LeZi/source/repos/LingFeng-bbben/MajdataPlay/Tools/FFmpeg/Native",
+    "C:/Users/LeZi/source/repos/LingFeng-bbben/MajdataPlay/Tools/FFmpeg/Native",
     "-B",
-    "/mnt/c/Users/LeZi/source/repos/LingFeng-bbben/MajdataPlay/Tools/FFmpeg/.build/d3d12-frame-ready-wsl-x64",
+    "C:/Users/LeZi/source/repos/LingFeng-bbben/MajdataPlay/Tools/FFmpeg/.build/video-overload-cmake-win-x64",
     "-G",
     "Ninja",
     "-DCMAKE_BUILD_TYPE=Release",
     "-DCMAKE_SYSTEM_NAME=Windows",
-    "-DCMAKE_C_COMPILER=/usr/bin/x86_64-w64-mingw32-gcc-win32",
-    "-DCMAKE_CXX_COMPILER=/usr/bin/x86_64-w64-mingw32-g++-win32",
-    "-DFFMPEG_ROOT=/home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005/install/win-x64",
-    "-DFFU_D3D12_HEADERS=/home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005/toolchains/d3d12-header-overlay",
-    "-DFFU_VULKAN_HEADERS=/home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005/toolchains/Vulkan-Headers-vulkan-sdk-1.4.328.1/include",
-    "-DFFU_BUILD_TESTS=ON"
+    "-DCMAKE_C_COMPILER=C:/Users/LeZi/source/repos/LingFeng-bbben/MajdataPlay/Tools/FFmpeg/.build/toolchains/llvm-mingw-20260922-ucrt-x86_64/bin/x86_64-w64-mingw32-clang.exe",
+    "-DCMAKE_CXX_COMPILER=C:/Users/LeZi/source/repos/LingFeng-bbben/MajdataPlay/Tools/FFmpeg/.build/toolchains/llvm-mingw-20260922-ucrt-x86_64/bin/x86_64-w64-mingw32-clang++.exe",
+    "-DCMAKE_MAKE_PROGRAM=C:/Strawberry/c/bin/ninja.exe",
+    "-DFFMPEG_ROOT=C:/Users/LeZi/source/repos/LingFeng-bbben/MajdataPlay/Tools/FFmpeg/.build/native-video-windows-prefix/win-x64",
+    "-DUNITY_PLUGIN_API=C:/Users/LeZi/source/repos/LingFeng-bbben/MajdataPlay/Tools/FFmpeg/Native/Unity",
+    "-DFFU_VULKAN_HEADERS=C:/Users/LeZi/source/repos/LingFeng-bbben/MajdataPlay/Tools/FFmpeg/.build/toolchains/Vulkan-Headers-vulkan-sdk-1.4.328.1/include",
+    "-DFFU_BUILD_TESTS=ON",
+    "-DFFU_BUILD_VULKAN_TESTS=ON",
+    "-DCMAKE_CXX_FLAGS=-Wall -Wextra -Werror -Wno-deprecated-declarations -Wno-missing-field-initializers"
   ],
   "files": [
     {
       "file": "FFmpegUnityBridge.dll",
-      "sha256": "3061e8ab20919e66d514c1e9f2f1d340fa49ef2f16ff93bfe224b168291ad14a",
-      "bytes": 725186
+      "sha256": "299b1c48fff01321fa10a4dfe08039b70be3bb49fd202c20debfd39b13d1773a",
+      "bytes": 888320
     }
   ],
   "sourceSha256": {
     "AndroidMediaCodec.cpp": "a587f4e026454eb45ddd99dc0c541a8422b8f8bdcfe38fb9ff8acd701e2d58ee",
     "AndroidMediaCodec.h": "426307534d1bb4cd9d0895afa7e2e2c1569c9dd045b8145c062426b276e30517",
     "Bridge.cpp": "414d7a31970ed349fd71855a5027590ed4c710ad683ed56916ba6df54b3328a5",
-    "Bridge.h": "444c90cb77bfd4d78122def6cb87ff217a2495674ce2638a9b7d3e4999b8bc66",
+    "Bridge.h": "1b08a062bc3ecf5e2ee4b9d131de10ad2b14a83a2944a48ef7f3bfcf174039a8",
     "CMakeLists.txt": "f4228d885d65bdadb2035d8368d6fc36b5e26945f1a48cc78e4e19dec2ebeb62",
-    "D3D11.cpp": "20abe76c4c331839efe806e7846ad1799de1ac12fa79cbe26463a40a18415f9d",
+    "D3D11.cpp": "b430f386952b513861aeae66fdcdac78b218edc6b4e2f4d41d5fe2f914a3fa96",
     "D3D12.cpp": "38b03f914348c89486e93c6d883b56853552985a6354601406272dd489593f34",
     "D3D12.h": "b3849cb610cd474000c82b54245a94814888acb4e17b3748ea6fba27926322db",
     "LinuxVaapi.cpp": "48c3afafa17bc592bdc10c3a18bec36449a7bb2ca65896c3084751999dc9488b",
@@ -50,7 +53,7 @@
     "WglInterop.cpp": "142f395a2f50d827d1f0cbcdf44c45fc7072a39bf32e05d5bc32e83ab0136534",
     "WglInterop.h": "7f044ebca6b389eae55a9d697303b86ca998b516ac4b52194efce9aa715ea8bd",
     "tests/AndroidCapabilitySmoke.cpp": "9a0d62ad67f1ac1505005ea2305056d9aed68187739e1f27f99492aca845fe33",
-    "tests/D3D11Smoke.cpp": "337091db0ae7ee066d9d46b76a206a47969954fe934df130780435cfb98fcaba",
+    "tests/D3D11Smoke.cpp": "4ef925242ec80f5ba4b7d446813c327e31a1cb9f0e9471e0b0ec7cf0413cb80a",
     "tests/D3D12InteropProbe.cpp": "bad358e49b10775b471a83a98c43b05a4420f8f9a30f17290fea7e1b0dd8bf61",
     "tests/D3D12Smoke.cpp": "4167bbc7f5e4fa7e0926384fa3a8fbb12c5ecc7f3a0e94631b108587ef246b78",
     "tests/D3D12VideoSmoke.cpp": "284d25854748e0d94e930a2d81fdd9e4e59e1c581322766754af716947df63e8",
@@ -77,5 +80,11 @@
     "ThirdParty/Vulkan-Headers/include/vulkan/vulkan_android.h": "f815593b7d20f291850b8d85e21e3d47fb123932805ba3606df631bdff4cb1e7",
     "ThirdParty/Vulkan-Headers/include/vulkan/vulkan_core.h": "3dba3ef8adaff8f24e9080e74d365fc64b5fe53ec8bda607c29c103e15888fcf",
     "ThirdParty/Vulkan-Headers/include/vulkan/vulkan_win32.h": "fa3a9263d1764b82b634180ec5d3010adc216108bae11c02b157f733073f87f8"
+  },
+  "compilerRuntimeLicense": {
+    "toolchain": "llvm-mingw-20260922-ucrt-x86_64",
+    "file": "compiler-runtime.LICENSE.txt",
+    "sha256": "6932646ad5e298be4c13951b4f0fe283074a66436035544f7ceba26b88d872d8",
+    "toolchainLicenseSha256": "8d85c1057d742e597985c7d4e6320b015a9139385cff4cbae06ffc0ebe89afee"
   }
 }

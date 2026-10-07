@@ -9,7 +9,10 @@ namespace MajdataPlay.FFmpeg.Internal
     internal struct GpuCompletionWait
     {
         /// <summary>Bounds yielding polls before backing off for a slow or unresponsive GPU.</summary>
-        private const int FastPollMilliseconds = 4;
+        // A bounded decode submission can cover several reference pictures plus
+        // a snapshot copy. Avoid a coarse OS timer before one 60 Hz interval;
+        // genuinely slow or hung work still backs off cancellably afterward.
+        private const int FastPollMilliseconds = 16;
         /// <summary>Stores the monotonic deadline for the complete GPU operation.</summary>
         private readonly long _deadline;
         /// <summary>Stores the monotonic deadline for short spin/yield polling.</summary>

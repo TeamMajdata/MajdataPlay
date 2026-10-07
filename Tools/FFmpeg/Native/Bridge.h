@@ -30,7 +30,7 @@ enum FfuEvent {
 };
 enum FfuCapability {
     FfuD3D11GpuConversion = 1, FfuMetalPlaneZeroCopy = 2, FfuD3D12GpuCopy = 4,
-    FfuWglGpuInterop = 8, FfuVulkanGpuCopy = 16, FfuD3D12NativeDecode = 128, FfuVulkanVideoDecode = 256
+    FfuWglGpuInterop = 8, FfuVulkanGpuCopy = 16, FfuD3D12NativeDecode = 128, FfuVulkanVideoDecode = 256, FfuD3D11DecodeIsolation = 512, FfuD3D11QueuedSnapshots = 1024
 };
 // UnityInterfaceGUID has a non-trivial C++ copy constructor. Its by-value ABI
 // differs between 32-bit MinGW and Unity's MSVC build. Always use the C-compatible
@@ -66,6 +66,8 @@ FFU_EXPORT int FFU_CALL ffu_initialization_status();
 FFU_EXPORT int FFU_CALL ffu_event_id(int event);
 FFU_EXPORT UnityRenderingEventAndData FFU_CALL ffu_render_callback();
 FFU_EXPORT void* FFU_CALL ffu_d3d11_acquire_device();
+// Same-adapter private codec device; ownership transfers to the FFmpeg context.
+FFU_EXPORT void* FFU_CALL ffu_d3d11_acquire_decode_device();
 FFU_EXPORT void* FFU_CALL ffu_d3d11_create();
 FFU_EXPORT void* FFU_CALL ffu_d3d11_create_output(void* presenter, int width, int height);
 FFU_EXPORT void FFU_CALL ffu_d3d11_release_output(void* texture);
@@ -79,6 +81,11 @@ FFU_EXPORT void* FFU_CALL ffu_d3d11_decode_sync_create(void* hardwareDevice);
 FFU_EXPORT int FFU_CALL ffu_d3d11_decode_sync_begin(void* sync);
 FFU_EXPORT int FFU_CALL ffu_d3d11_decode_sync_poll(void* sync);
 FFU_EXPORT void FFU_CALL ffu_d3d11_decode_sync_release(void* sync);
+// Submits an immutable shared snapshot; complete the worker query before publication.
+// Returns 1 with an owned AVFrame, 0 for pool backpressure, or a negative error.
+FFU_EXPORT int FFU_CALL ffu_d3d11_decode_snapshot(void* sync, const AVFrame* frame, AVFrame** output);
+// Nonblocking worker query for one queued snapshot: 1 ready, 0 pending, negative error.
+FFU_EXPORT int FFU_CALL ffu_d3d11_decode_snapshot_ready(void* sync, const AVFrame* frame);
 FFU_EXPORT void* FFU_CALL ffu_shared_surface_create(void* presenter, void* texture, unsigned int glName);
 FFU_EXPORT void* FFU_CALL ffu_shared_prepare(void* presenter, const AVFrame* frame, void* texture, void* surface, void* unityTarget);
 FFU_EXPORT int FFU_CALL ffu_shared_error(void* surface);

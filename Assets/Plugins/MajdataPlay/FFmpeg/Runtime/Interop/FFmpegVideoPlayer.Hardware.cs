@@ -112,7 +112,13 @@ namespace MajdataPlay.FFmpeg
                     options.AcquireD3D11Device = HardwareVideoPresenter.AcquireD3D11Device;
                     options.KeepNativeFrames = true;
                     options.CreateHardwareSynchronization = VulkanVideoInterop.CreateD3D11Synchronization;
-                    options.HardwareDeviceDescription = "D3D11VA device matched to Unity renderer: " + graphics;
+                    var isolated = HardwareVideoPresenter.SupportsD3D11Isolation;
+                    options.HardwareDeviceDescription = (isolated ? "Private D3D11VA decode context; GPU snapshots matched to Unity renderer: "
+                        : "D3D11VA device matched to Unity renderer: ") + graphics;
+                    if (!isolated)
+                    {
+                        MajDebug.LogWarning("FFmpeg", "[Interop] The loaded bridge lacks isolated D3D11VA frame publication; rebuild the bridge and restart Unity.");
+                    }
                 }
                 else if (apple && HardwareVideoPresenter.SupportsMetal)
                 {

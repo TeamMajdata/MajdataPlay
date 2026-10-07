@@ -2,6 +2,7 @@
 using System;
 using System.Runtime.InteropServices;
 using System.Threading;
+using FFmpeg.AutoGen;
 using MajdataPlay.Diagnostics;
 using MajdataPlay.FFmpeg.Internal;
 
@@ -204,10 +205,14 @@ namespace MajdataPlay.FFmpeg.Interop
 
 #if UNITY_STANDALONE_WIN || UNITY_EDITOR_WIN
         /// <summary>Paces D3D11VA codec calls on their owning worker using a reusable GPU event query.</summary>
-        private sealed class D3D11Synchronization : IHardwareDecodeSynchronization
+        private sealed class D3D11Synchronization : IHardwareDecodeSynchronization, IQueuedHardwareFramePublisher
         {
             /// <summary>Owns the native query and retained hardware device, or zero after disposal.</summary>
             private IntPtr _synchronization;
+            /// <summary>Enables snapshot publication only when the loaded bridge advertises its entry point.</summary>
+            private readonly bool _snapshotSupported;
+            /// <summary>Gets whether immutable snapshots can complete independently of later codec work.</summary>
+            public bool CanQueueFrames { get; }
             /// <summary>Retains a hardware device and creates one query for its decode session.</summary>
             /// <param name="device">The borrowed FFmpeg AVBufferRef containing a D3D11VA device.</param>
             /// <exception cref="NotSupportedException">The native completion API or query is unavailable.</exception>
@@ -215,6 +220,9 @@ namespace MajdataPlay.FFmpeg.Interop
             {
                 try
                 {
+                    var capabilities = Native.FfuCapabilities();
+                    _snapshotSupported = (capabilities & HardwareVideoPresenter.D3D11IsolationCapability) != 0;
+                    CanQueueFrames = (capabilities & HardwareVideoPresenter.D3D11QueuedSnapshotCapability) != 0;
                     _synchronization = Native.FfuD3D11DecodeSyncCreate(device);
                 }
                 catch (EntryPointNotFoundException error)
@@ -260,6 +268,115 @@ namespace MajdataPlay.FFmpeg.Interop
                     }
 
                     wait.WaitForNextPoll(cancellationToken);
+                }
+            }
+
+            /// <summary>Queues one immutable GPU snapshot without serializing the codec behind its completion.</summary>
+            /// <param name="frame">The borrowed FFmpeg D3D11VA codec picture to copy.</param>
+            /// <param name="cancellationToken">Cancels admission into the fixed snapshot pool.</param>
+            /// <param name="timeoutMilliseconds">Bounds pool admission in milliseconds.</param>
+            /// <returns>An owned worker-private snapshot requiring a successful readiness query before publication.</returns>
+            /// <exception cref="OperationCanceledException">The session was canceled.</exception>
+            /// <exception cref="TimeoutException">Pool admission exceeded the timeout.</exception>
+            /// <exception cref="NotSupportedException">The native queued-snapshot API is unavailable or failed.</exception>
+            public IntPtr QueueFrame(IntPtr frame, CancellationToken cancellationToken, int timeoutMilliseconds)
+            {
+                if (!CanQueueFrames)
+                {
+                    throw new NotSupportedException("The loaded D3D11VA bridge cannot queue GPU snapshots.");
+                }
+
+                var wait = new GpuCompletionWait(timeoutMilliseconds);
+                while (true)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    var status = Native.FfuD3D11DecodeSnapshot(_synchronization, frame, out var output);
+                    if (status < 0)
+                    {
+                        throw new NotSupportedException("Queued D3D11VA GPU snapshot failed (native code " + status + ").");
+                    }
+
+                    if (status > 0)
+                    {
+                        return output;
+                    }
+
+                    wait.WaitForNextPoll(cancellationToken);
+                }
+            }
+
+            /// <summary>Observes the queued copy's own GPU marker, not a marker after later reference-picture work.</summary>
+            /// <param name="frame">The borrowed queued snapshot still owned by the decoder worker.</param>
+            /// <returns>True if the GPU copy completed; false while it remains pending.</returns>
+            /// <exception cref="NotSupportedException">The native readiness query failed.</exception>
+            public bool IsFrameReady(IntPtr frame)
+            {
+                var status = Native.FfuD3D11DecodeSnapshotReady(_synchronization, frame);
+                if (status < 0)
+                {
+                    throw new NotSupportedException("Queued D3D11VA snapshot completion failed (native code " + status + ").");
+                }
+
+                return status > 0;
+            }
+
+            /// <summary>Completes an immutable GPU snapshot before publishing it to Unity.</summary>
+            /// <param name="frame">The borrowed FFmpeg D3D11VA frame to copy without consuming it.</param>
+            /// <param name="cancellationToken">Cancels pool admission and GPU completion.</param>
+            /// <param name="timeoutMilliseconds">The maximum worker wait duration in milliseconds.</param>
+            /// <returns>An owned, completed FFmpeg hardware frame.</returns>
+            /// <exception cref="OperationCanceledException">The session was canceled.</exception>
+            /// <exception cref="TimeoutException">Snapshot admission or completion exceeded the timeout.</exception>
+            /// <exception cref="NotSupportedException">The native snapshot or completion query failed.</exception>
+            /// <exception cref="OutOfMemoryException">The source frame could not be retained.</exception>
+            public unsafe IntPtr PublishFrame(IntPtr frame, CancellationToken cancellationToken, int timeoutMilliseconds)
+            {
+                using var profile = UnityProfiler.Create("FFmpeg.Decoder.PublishD3D11Snapshot");
+                AVFrame* snapshot = null;
+                try
+                {
+                    if (_snapshotSupported)
+                    {
+                        // Frozen/legacy publication observes the same source-write
+                        // boundary as the queued playback path. Complete the copy below.
+                        Wait(cancellationToken, timeoutMilliseconds);
+                        var wait = new GpuCompletionWait(timeoutMilliseconds);
+                        while (true)
+                        {
+                            cancellationToken.ThrowIfCancellationRequested();
+                            var status = Native.FfuD3D11DecodeSnapshot(_synchronization, frame, out var output);
+                            if (status < 0)
+                            {
+                                throw new NotSupportedException("D3D11VA GPU snapshot failed (native code " + status + ").");
+                            }
+
+                            if (status > 0)
+                            {
+                                snapshot = (AVFrame*)output;
+                                break;
+                            }
+
+                            wait.WaitForNextPoll(cancellationToken);
+                        }
+                    }
+                    else
+                    {
+                        snapshot = ffmpeg.av_frame_clone((AVFrame*)frame);
+                    }
+
+                    if (snapshot == null)
+                    {
+                        throw new OutOfMemoryException("Cannot retain D3D11VA presentation frame.");
+                    }
+
+                    Wait(cancellationToken, timeoutMilliseconds);
+                    var result = (IntPtr)snapshot;
+                    snapshot = null;
+                    return result;
+                }
+                finally
+                {
+                    ffmpeg.av_frame_free(&snapshot);
                 }
             }
 
@@ -518,6 +635,23 @@ namespace MajdataPlay.FFmpeg.Interop
             /// <summary>Names the shared native FFmpeg graphics bridge.</summary>
             private const string Library = "FFmpegUnityBridge";
 #if UNITY_STANDALONE_WIN || UNITY_EDITOR_WIN
+            /// <summary>Reads bridge capabilities without accessing Unity APIs on the decoder worker.</summary>
+            /// <returns>The native GPU interoperability capability bits.</returns>
+            [DllImport(Library, CallingConvention = CallingConvention.Cdecl, EntryPoint = "ffu_capabilities")]
+            internal static extern int FfuCapabilities();
+            /// <summary>Submits a completed-source snapshot copy on the private decoder context.</summary>
+            /// <param name="synchronization">The worker-owned native synchronization and snapshot pool.</param>
+            /// <param name="frame">The borrowed FFmpeg D3D11VA frame to copy.</param>
+            /// <param name="output">Receives an owned frame when submission succeeds.</param>
+            /// <returns>One on submission, zero for pool backpressure, or a negative native error.</returns>
+            [DllImport(Library, CallingConvention = CallingConvention.Cdecl, EntryPoint = "ffu_d3d11_decode_snapshot")]
+            internal static extern int FfuD3D11DecodeSnapshot(IntPtr synchronization, IntPtr frame, out IntPtr output);
+            /// <summary>Queries one immutable queued snapshot on the codec worker without blocking Unity.</summary>
+            /// <param name="synchronization">The owning worker's retained decode synchronization object.</param>
+            /// <param name="frame">The borrowed worker-private snapshot frame.</param>
+            /// <returns>One when ready, zero while pending, or a negative native error.</returns>
+            [DllImport(Library, CallingConvention = CallingConvention.Cdecl, EntryPoint = "ffu_d3d11_decode_snapshot_ready")]
+            internal static extern int FfuD3D11DecodeSnapshotReady(IntPtr synchronization, IntPtr frame);
             /// <summary>Creates a reusable completion query retaining the supplied hardware device.</summary>
             /// <param name="device">The borrowed FFmpeg D3D11VA AVBufferRef.</param>
             /// <returns>An owned synchronizer, or zero if allocation or device validation failed.</returns>

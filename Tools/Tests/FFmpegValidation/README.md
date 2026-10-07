@@ -26,7 +26,9 @@ dotnet run --project Tools/Tests/FFmpegValidation/FFmpegValidation.csproj -- `
 
 此模式要求实际 D3D11VA GPU，禁止软件或 CPU 上传回退；检查生产 completion query 的复用、单线程 codec、真实硬件帧及下载像素、seek/preroll、取消、16x 有界后台会话与设备引用归还。它不会初始化 Unity 渲染设备，也不验证游戏 FPS。
 
-Unity 的 `-TestDecodeOverload` 使用正常 Player 渲染循环，关闭 VSync 并限制 60 FPS，对同一素材分别测量 1x 和 16x 的更新帧率，要求 16x 至少保留基线的 80%。素材必须可 seek、至少 20 秒；`-RequireHardware` 允许 D3D12/Vulkan 回退到 Windows D3D11VA 共享路径，但禁止 CPU 像素上传。可用 4K 素材让 16x 的请求明显超过解码吞吐，并分别将 `-Graphics` 设置为 `d3d11`、`d3d12`、`vulkan`：
+`--decode-sync` 还用真实 D3D11VA 源帧和确定性延迟发布替身验证排队状态机：候选帧顺序、暂停切换、无 PTS 顺序时间、四包上界、异步末帧与设备引用释放。替身不验证 GPU 纹理复制；真实跨设备像素、独立 query、源帧保活/取消与 32 槽租约另由 `Tools/FFmpeg/Native/tests/D3D11Smoke.cpp` 覆盖，Unity Player 再验证实际三个图形 API。
+
+Unity 的 `-TestDecodeOverload` 先通过可取消的 worker-only 回调阻塞解码 250ms，验证 3x 媒体时钟、持续 Unity Update、缓冲报告和显式 Pause；还断言 1x/16x 超载前后实际 decoder/type/device 不变。随后使用正常 Player 渲染循环，关闭 VSync 并限制 60 FPS，对同一素材分别测量 1x 和 16x 的更新帧率，要求 16x 至少保留基线的 80%。素材必须可 seek、至少 20 秒；`-RequireHardware` 允许 D3D12/Vulkan 回退到 Windows D3D11VA 共享路径，但禁止 CPU 像素上传。可用 4K 素材让 16x 的请求明显超过解码吞吐，并分别将 `-Graphics` 设置为 `d3d11`、`d3d12`、`vulkan`：
 
 ```powershell
 ./Tools/Tests/FFmpegValidation/run-unity.ps1 -Backend Mono -Architecture x64 `
@@ -40,7 +42,9 @@ Unity 的 `-TestDecodeOverload` 使用正常 Player 渲染循环，关闭 VSync 
 
 ### Windows 高帧率视频与实际倍速
 
-`-TestPlaybackThroughput` 在正常 60 FPS Player 渲染循环中依次测量 1x、2x、3x。需要可 seek、至少 8 秒、GPU 可解码的素材；120 FPS 素材用于覆盖高帧率回归。素材必须在当前机器及负载下有至少 3x 的真实解码余量；应先用不丢帧的解码吞吐测量确认，不能仅凭 GPU 型号推断。每档预热后观测 2 秒，检查播放时钟（允许 2% 偏差）与实际呈现 PTS（允许 10% 偏差）的推进倍速、呈现频率（至少达到预期值的 80%）和最大呈现间隔（不得达到 100ms）。日志同时记录 Unity 更新 FPS、画面滞后、buffering 更新数及实际解码设备；仅有 Unity FPS 正常不再视为视频流畅。
+`-TestPlaybackThroughput` 在正常 60 FPS Player 渲染循环中依次测量 1x、2x、3x。需要可 seek、至少 8 秒、GPU 可解码的素材；120 FPS 素材用于覆盖高帧率回归。该用例也覆盖请求吞吐超过硬件能力时的降载呈现：不要求解码每张参考画面都满足 3x，但必须保持时钟、有效 PTS 推进和消费帧率。应同时记录无丢帧解码吞吐与实际设备；片头 240 帧不能代表全片余量。每档预热后观测 2 秒，检查播放时钟（允许 2% 偏差）与实际呈现 PTS（允许 10% 偏差）的推进倍速、呈现频率（至少达到预期值的 80%）和最大呈现间隔（不得达到 100ms）。日志同时记录 Unity 更新 FPS、画面滞后、buffering 更新数及实际解码设备；仅有 Unity FPS 正常不再视为视频流畅。测试结束会 seek 恢复原媒体位置，以免后续独立用例继承 3x 的画面滞后；原吞吐断言未放宽。D3D11VA 路径还要求运行时桥接具备 512/1024 能力，避免测试到旧 DLL。
+
+使用 `-NativeDirectory` 时，即使 `-SkipBuild` 也把指定 DLL 显式放入隔离 Player 的运行时 Plugins 并核对 SHA256，避免 Unity 增量构建复用旧插件；不改动主项目 Player。
 
 `FrameReady` 的第二个参数是帧序号，不是 PTS；测试读取已呈现帧的时间戳。正常 smoke 的 GPU 像素、seek 与生命周期检查仍会继续执行。此模式在 60 FPS 渲染循环中呈现最新应显示画面，不能据此声称 360 个画面/秒均被提交或显示。
 
@@ -58,6 +62,14 @@ ffmpeg -f lavfi -i "testsrc2=size=1280x720:rate=120" -t 24 -an `
 ```
 
 分别改用 `-Graphics d3d12` / `vulkan` 验证对应渲染路径；RX 580 上实际解码器可能仍是 D3D11VA，不应记作原生 D3D12VA / Vulkan Video 验证。如隔离工程遇到无关 Burst AOT 的 ShaderLibrary 解析失败，可追加 `-DisableBurst` 仅在该次隔离构建的命令行禁用 Burst，不修改主工程或全局设置；验证结果应记录该条件。
+
+提供的高帧率回归素材实际目录为 `MaiCharts/FFmpeg Test/H264@1080p/pv.mp4`（1920×1080、120 FPS）。对三个图形 API 分别运行以下命令，将 `vulkan` 替换为 `d3d11`、`d3d12`；只有最新源码和原生桥接都已构建时才使用 `-SkipBuild`：
+
+```powershell
+./Tools/Tests/FFmpegValidation/run-unity.ps1 -Backend Mono -Architecture x64 -Graphics vulkan -RequireHardware -TestPlaybackThroughput -TestDecodeOverload -Media 'MaiCharts/FFmpeg Test/H264@1080p/pv.mp4'
+```
+
+`-TestPlaybackThroughput` 检查 1x/2x/3x 的真实时钟、呈现 PTS 进度、呈现通知频率与最大间隔；通知频率不等于 GPU 像素完成数，完整测试中的纹理读回另行验证实际像素。原生 `FFmpegUnityBridgeSmoke` 还检查私有设备、NV12 数组切片的跨设备实际像素、32 槽回压、克隆租约、匹配读取设备的 CPU transfer、codec/synchronizer 退出后的 GPU 引用归还。`--eviction` 增加长 GOP 内不跳未来、不重解当前 GOP 的检查。RX 580 上 D3D12/Vulkan 使用 D3D11VA 共享路径，通过结果不代表原生 D3D12VA/Vulkan Video 硬解已验证。
 
 ### Windows Vulkan Player 启动与窗口变化
 

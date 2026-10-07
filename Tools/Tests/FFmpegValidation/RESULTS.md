@@ -1,6 +1,68 @@
 # 本机验证结果
 
-最近验证日期：2026-10-06；此前跨平台矩阵执行于 2026-10-03。Windows / Unity 6000.3.17f1 / AMD Radeon RX 580 2048SP；Linux 使用本机 WSL Ubuntu 24.04；Android 真机为 Mi MIX 2S / Android 15 API 35 / Adreno 630 / Vulkan 1.1.128；Apple 构建测试使用用户提供的 Mac mini M4。当前 Windows/Linux/Android 图形桥接 ABI 为 **4**，Apple 保持 **2**；下方 ABI2/3 的记录为此前版本实测。
+最近验证日期：2026-10-07；此前跨平台矩阵执行于 2026-10-03。Windows / Unity 6000.3.17f1 / AMD Radeon RX 580 2048SP；Linux 使用本机 WSL Ubuntu 24.04；Android 真机为 Mi MIX 2S / Android 15 API 35 / Adreno 630 / Vulkan 1.1.128；Apple 构建测试使用用户提供的 Mac mini M4。当前 Windows/Linux/Android 图形桥接 ABI 为 **4**，Apple 保持 **2**；下方 ABI2/3 的记录为此前版本实测。
+
+## 2026-10-07：1080p120 倍速播放与渲染线程隔离
+
+本轮使用用户提供的 `MaiCharts/FFmpeg Test/H264@1080p/pv.mp4`（实际目录名包含 `@`），H.264、1920×1080、120 FPS、约 79 秒、约 2.083 秒 GOP。环境为 Unity **6000.3.17f1** / Windows x64 Mono / AMD Radeon RX 580 2048SP。三个图形 API 都保持原有 **h264 / D3D11VA / 同一物理 GPU**，超载前后身份断言通过；没有以切换 codec、软件解码或 CPU 像素上传作为解法。D3D12/Vulkan 的既有 D3D11VA 共享路线不等于原生 D3D12VA/Vulkan Video 码流解码验证。
+
+修复内容：Playing 缺帧仅报告 buffering，不冻结会话单调媒体时钟；同适配器私有 codec device/context 与 Unity immediate context 隔离；worker 先完成 codec 源写入，再提交不可变 NV12/P010 GPU 快照，只在该快照自身 query 完成后发布，避免等待后来全部 DPB 工作。固定 32 槽须同时满足 GPU 完成和所有 AVFrame/GPU 退休租约归还才能复用；worker 至多保留一张 pending snapshot、一张原始/末帧候选，预留两个额外硬件 surface。第五个未完成 packet 前回压，GPU 快速轮询至多 16ms，随后可取消退避。所有解码完成等待留在工作线程。
+
+消费者 cadence 在转换/复制前筛选，已到期画面按墙钟 cadence 刷新以避免“所有迟到帧一直丢”的饥饿；选择时间在 producer GPU wait **之前**记录，包含等待的预算允许有界双帧余量。追赶只跳到索引中已经到期且推进解码位置的关键帧，不跳未来 GOP、不倒退当前 GOP。保留原 PTS、无 PTS 的顺序时间、duration、码率以及 EOF 最后画面。显式 Pause/Seek/Stop/逐帧/循环语义保持。
+
+### 正常 Player 的真实吞吐
+
+VSync=0、目标 60 FPS，1x/2x/3x 每档预热后观测 2 秒。保持原断言：时钟倍率误差 ≤2%，呈现 PTS 推进误差 ≤10%，呈现通知频率 ≥预期的 80%，最大呈现间隔 <100ms；通知频率不代表逐帧 GPU 像素完成计数，完整 smoke 另外检查实际纹理像素。以下是最终 DLL 对应日志；Vulkan 列为最后一次重复运行：
+
+| Unity API | 1x 呈现 FPS | 2x 呈现 FPS | 3x 呈现 FPS | 3x 时钟 / 呈现 PTS 倍率 | 3x Unity updates | 3x 最大呈现间隔 | 3x 最大画面墙钟滞后 | 完整 smoke |
+| --- | ---: | ---: | ---: | --- | ---: | ---: | ---: | --- |
+| D3D11 | 59.4 | 59.5 | 52.5 | 3.000 / 2.939 | 59.5 FPS | 51ms | 255ms | **65 assertions PASS** |
+| D3D12 | 59.0 | 59.3 | 48.8 | 3.000 / 3.001 | 59.3 FPS | 52ms | 241ms | **66 assertions PASS** |
+| Vulkan | 58.8 | 59.4 | 51.0 | 3.000 / 2.958 | 59.5 FPS | 51ms | 229ms | **66 assertions PASS** |
+
+D3D11 为 GPU conversion，D3D12/Vulkan 为 GPU conversion + shared-resource copy，正常播放均无 CPU 像素回读。最终 Vulkan 另串行重复两次，均 **66 assertions PASS**，3x 呈现分别 **53.8 / 51.0 FPS**，最大画面墙钟滞后 **168 / 229ms**。更早优化版本曾以 47.864 FPS 未达到吞吐断言，不能作为通过证据；修正 cadence 预算后完整运行及两次重复均通过，未降低阈值。
+
+16x 超载检查：
+
+| Unity API | 媒体时钟倍率 | Unity updates | 最大 Update 间隔 |
+| --- | ---: | ---: | ---: |
+| D3D11 | 15.999x | 59.1 FPS | 17ms |
+| D3D12 | 16.000x | 59.6 FPS | 21ms |
+| Vulkan | 16.000x | 59.3 FPS | 18ms |
+
+还通过 250ms 可取消 worker stall 注入后的连续 3x 时钟/Unity Update、显式暂停，以及像素、seek、步进、停止、EOF/循环、关闭/取消和 decoder 身份检查。多倍率用例结束 seek 恢复原位置，避免独立 2x 用例继承之前 3x 的画面滞后。隔离测试脚本在指定 `-NativeDirectory` 时对实际 Player runtime Plugins 显式复制并核对 SHA256（包括 `-SkipBuild`），避免 Unity 增量构建偷偷复用旧 DLL。
+
+### 独立与原生回归
+
+| 验证层 | 最终结果与范围 |
+| --- | --- |
+| .NET 9 `--managed` | **81 assertions PASS**；4096 GPU wait / 4096 frame-pool 迭代各 0 managed bytes，含取消/超时 |
+| .NET 9 `--eviction` / 同一真实素材 | **316 assertions PASS**；容量 1/3/8、自主时钟、暂停/seek/归还、到期关键帧、EOF；16x 为 714 discarded / 80 presented / 11 catch-up seeks，最大媒体滞后 2.10s；模拟 presenter 传入与实际消费间隔一致的 cadence，未放宽断言 |
+| .NET 9 `--decode-sync` / 真实 D3D11VA | **1142 assertions PASS**；完成查询复用、真实下载像素、seek/preroll、取消、四包回压、设备归还；确定性延迟发布替身在真实已完成源帧上验证候选顺序、正常/无 PTS、暂停转换与异步 EOF，不冒充真实 GPU copy |
+| Windows x64 / x86 native `FFmpegUnityBridgeSmoke` | **均 PASS**；32 槽回压、克隆租约、独立 readiness、源 AVFrame 保活及取消、跨设备实际像素、CPU transfer、decoder 退出后 GPU 退休、目标替换/resize/lifetime；x86 需要将匹配的正式 FFmpeg DLL 目录放入 PATH |
+| 正式 Native 验证 | `python Tools/FFmpeg/verify-artifacts.py` **70 FFmpeg 库 + 10 桥接 PASS**；hash、架构、ABI、importer、许可证检查通过 |
+
+无丢帧片头解码的本轮三次测量为 **272.0 / 284.9 / 283.1 FPS**（240 帧，约 2 秒 source 内容），只作为该片段的硬件能力观测，不能外推为全片吞吐，更不能声称可完整解码/呈现 3×120=360 张参考画面/秒。
+
+Windows x64/x86 正式 bridge 已安装，既有 `.meta`、七个 FFmpeg DLL 与它们的原始 provenance 未改变；ABI 仍 **4**，新增能力 **512/1024**。源码/二进制/许可证 manifest 已匹配。最终 bridge SHA256：
+
+- x64：`299b1c48fff01321fa10a4dfe08039b70be3bb49fd202c20debfd39b13d1773a`
+- x86：`db11f0784038dbddf2c9666beea490ebf1216a69fed754d01fe158ecd16121db`
+
+复验命令（GPU 用例串行）：
+
+```powershell
+dotnet run --project Tools/Tests/FFmpegValidation/FFmpegValidation.csproj -- --managed
+dotnet run --no-build --project Tools/Tests/FFmpegValidation/FFmpegValidation.csproj -- Assets/Plugins/MajdataPlay/FFmpeg/Native/Windows/x86_64 'MaiCharts/FFmpeg Test/H264@1080p/pv.mp4' --eviction
+dotnet run --no-build --project Tools/Tests/FFmpegValidation/FFmpegValidation.csproj -- Assets/Plugins/MajdataPlay/FFmpeg/Native/Windows/x86_64 'MaiCharts/FFmpeg Test/H264@1080p/pv.mp4' --decode-sync
+./Tools/Tests/FFmpegValidation/run-unity.ps1 -Backend Mono -Architecture x64 -Graphics d3d11 -RequireHardware -TestDecodeOverload -TestPlaybackThroughput -NativeDirectory Assets/Plugins/MajdataPlay/FFmpeg/Native/Windows/x86_64 -WorkDirectory Tools/Tests/FFmpegValidation/.work/high-rate-bounded -Media 'MaiCharts/FFmpeg Test/H264@1080p/pv.mp4'
+# 同一最终 Player 串行改用 -Graphics d3d12 / vulkan 并加 -SkipBuild。
+python Tools/FFmpeg/verify-artifacts.py
+```
+
+日志位于忽略的 `.work/high-rate-bounded/x64-Mono/*-hardware.log`、`.work/vulkan-cadence-final-{1,2}.log`、`.work/{managed,eviction,decode-sync}-snapshot-final.log`、`.work/native-snapshot-final-x{64,86}.log`、`.work/artifacts-snapshot-final.log`。
+
+**限制：** 在这张 GPU 上，3x 仍有约 0.17–0.26 秒画面墙钟滞后及少量 buffering；长 GOP 和硬件吞吐会影响追赶，降载不可能凭空增加解码能力。当前证据来自隔离 x64 Mono Player 与 Windows native/独立测试，未用主工程 Editor 或主游戏场景本轮运行代替验收；**未验证本轮 IL2CPP/x86 Unity Player、原生 D3D12VA/Vulkan Video 码流解码、其他 GPU/OS、Android/iOS 或长期全片压力**，旧跨平台记录不能代替这些项。更新后须重启已加载旧 DLL 的 Editor/Player。
 
 ## 2026-10-06：Windows D3D11/D3D12 高倍速解码超载
 

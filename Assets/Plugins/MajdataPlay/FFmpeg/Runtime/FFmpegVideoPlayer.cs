@@ -794,7 +794,7 @@ namespace MajdataPlay.FFmpeg
             // Select under one lock so worker-side replacement cannot race the due
             // check or temporarily require a second presenter-owned frame container.
             // While throttled, due frames stay queued and the worker replaces them.
-            var newest = IsPresentationThrottled() ? null : session.TakeLatestFrame(now + 0.001);
+            var newest = IsPresentationThrottled() ? null : session.TakeLatestFrame(now + 0.001, MaximumPresentationFrameRate());
 
             if (newest != null)
             {
@@ -808,11 +808,7 @@ namespace MajdataPlay.FFmpeg
 
                 _lastPlaybackPresentTimestamp = Stopwatch.GetTimestamp();
 
-                if (_waitingForFrame)
-                {
-                    _waitingForFrame = false;
-                    session.SetPlayback(playing: true);
-                }
+                _waitingForFrame = false;
             }
 
             if (session.EndOfStream && session.PlaybackPosition >= _lastFrameEnd)
@@ -827,18 +823,17 @@ namespace MajdataPlay.FFmpeg
                     BeginSeek(0, VideoPlaybackState.Playing);
                 }
             }
-            // A short worker/GPU scheduling gap is not an input stall. Keep the
-            // clock and discard deadlines advancing so high-rate decoding can catch up.
+            // Buffering describes missing pictures, not a pause in the media clock.
+            // Freezing here also freezes the worker's catch-up deadlines, making a
+            // decoder that cannot sustain the requested rate run permanently slow.
             else if (newest == null && session.BufferedFrames == 0 && !session.EndOfStream
                 && HasPlaybackUnderflow(now, _lastFrameEnd, _playbackRate))
             {
-                session.SetPlayback(playing: false);
                 _waitingForFrame = true;
             }
             else if (_waitingForFrame && session.BufferedFrames > 0)
             {
                 _waitingForFrame = false;
-                session.SetPlayback(playing: true);
             }
         }
 
@@ -846,10 +841,33 @@ namespace MajdataPlay.FFmpeg
         /// <param name="position">The current media timeline position in seconds.</param>
         /// <param name="frameEnd">The last displayed frame's end position in media seconds.</param>
         /// <param name="rate">The positive playback multiplier used to convert the gap into wall-clock time.</param>
-        /// <returns>True when missing output exceeds the wall-clock grace period and buffering should freeze the clock.</returns>
+        /// <returns>True when missing output exceeds the wall-clock grace period and buffering should be reported without freezing the clock.</returns>
         internal static bool HasPlaybackUnderflow(double position, double frameEnd, double rate)
         {
             return position - frameEnd > PlaybackBufferingGraceSeconds * rate;
+        }
+
+        /// <summary>Gets the useful worker publication limit from Unity's configured frame rate and the existing video limit.</summary>
+        /// <returns>The positive maximum number of useful presentation frames per wall-clock second.</returns>
+        /// <remarks>Reads Unity settings only on the main thread; no Unity API is accessed by the decoder worker.</remarks>
+        private double MaximumPresentationFrameRate()
+        {
+            var frameRate = _info?.FrameRate ?? 0;
+            var nominalFrameRate = double.IsNaN(frameRate) || frameRate <= 0 ? 60 : Math.Max(24, Math.Min(120, frameRate));
+            var targetFrameRate = Application.targetFrameRate;
+            var maximumFrameRate = targetFrameRate > 0 ? targetFrameRate : double.PositiveInfinity;
+#if UNITY_STANDALONE || UNITY_EDITOR
+            var vSyncCount = QualitySettings.vSyncCount;
+            if (vSyncCount > 0)
+            {
+                var refreshRate = Screen.currentResolution.refreshRateRatio.value;
+                if (refreshRate > 0 && !double.IsNaN(refreshRate) && !double.IsInfinity(refreshRate))
+                {
+                    maximumFrameRate = refreshRate / vSyncCount;
+                }
+            }
+#endif
+            return Math.Min(maximumFrameRate, nominalFrameRate / 0.75);
         }
 
         /// <summary>Checks whether presenting another frame now would exceed the video's nominal frame rate in real time.</summary>

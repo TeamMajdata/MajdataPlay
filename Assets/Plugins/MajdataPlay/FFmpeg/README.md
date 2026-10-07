@@ -47,7 +47,7 @@ public sealed class VideoExample : MonoBehaviour
 | `SeekTo(TimeSpan)`, `Position` | 时间跳转；Position 是 0–1 的归一化位置 |
 | `PlaybackRate` | 1/16–16 倍速；不支持倒放；倍速变化保持时间连续 |
 | `Loop`, `NextFrame()` | 循环；暂停并向前显示一帧 |
-| `State`, `IsPrepared`, `IsPlaying`, `IsBuffering`, `IsSeekable` | 状态；准备或持续缓冲期间时间不推进，100ms 以内的短时解码空档不会冻结播放时钟 |
+| `State`, `IsPrepared`, `IsPlaying`, `IsBuffering`, `IsSeekable` | 状态；准备、暂停和 seek 时冻结时钟；Playing 时缺帧仅报告缓冲，不降低媒体时间轴速度 |
 | `Texture`, `Width`, `Height`, `FrameRate`, `CodecName` | 当前输出与媒体信息；CodecName 是视频编码，如 h264 |
 | `CurrentBitRate`, `BitRate` | 当前画面附近约 1 秒的视频压缩码率估计、视频流平均码率，均为 bit/s；未知为 0，Inspector 自动换算单位 |
 | `DecoderType`, `DecoderName`, `DecoderDevice` | 当前会话的实际解码后端类型、AVCodec 名称与设备描述；需在准备后读取 |
@@ -60,9 +60,13 @@ public sealed class VideoExample : MonoBehaviour
 
 所有组件 API 在 Unity 主线程调用。控制时间使用单调时钟，不受 `Time.timeScale` 影响。连续 seek 只保留最后一次请求，旧 `SeekAsync` 被取消。更换 Url / Close / 销毁对象会取消尚未完成的任务；后台线程退出后关闭 FFmpeg。音轨数据包被跳过。预载不是将整个文件读入内存，帧队列默认仅 3 帧，Inspector 可调整到 1–8 帧。
 
-Player 和解码线程共用解码会话持有的唯一单调播放时钟，时间读取、倍速和播放状态修改都在会话锁内完成，无需每帧同步两套时钟。播放期间，解码线程在新帧已经到期时淘汰它替代的旧帧，保留最新到期帧和未来帧。满队列时最多额外持有一张待入队候选帧，并按候选帧到期时间等待；不需要增大缓存才能跳过已过期画面。暂停、缓冲和 seek 时停止淘汰，准备首帧与逐帧播放仍按顺序取帧。主线程在同一队列锁内选择最新到期帧，避免与后台替换竞态。
+Player 和解码线程共用解码会话持有的唯一单调播放时钟，时间读取、倍速和播放状态修改都在会话锁内完成，无需每帧同步两套时钟。播放期间，解码线程在新帧已经到期时淘汰它替代的旧帧，保留最新到期帧和未来帧。满队列时最多额外持有一张待入队候选帧，并按候选帧到期时间等待；不需要增大缓存才能跳过已过期画面。暂停和 seek 时停止淘汰；Playing 时即使缺帧也继续追赶时钟，准备首帧与逐帧播放仍按顺序取帧。主线程在同一队列锁内选择最新到期帧，避免与后台替换竞态。
 
-倍速超过解码吞吐时，解码线程主动追赶播放时钟：显示区间已结束的帧在硬件下载、RGBA 转换或原生帧保留之前直接丢弃，只在队列为空时保留一张过期帧，保证画面继续前进；落后期间 codec 跳过非参考帧（`AVDISCARD_NONREF`），按时后恢复；落后超过约 0.25 秒实际时间时，对可 seek 输入向前跳到播放时钟之后的第一个关键帧，不解码中间区间，找不到后续关键帧时在下次显式 seek 前回到顺序解码。主线程播放期间的呈现频率不超过视频标称帧率（限制在 24–120 FPS 之间，含 25% 余量），因此高倍速下 CPU 上传 `LoadRawTextureData`/`Apply` 和 GPU 转换提交给 render thread 的工作量与 1 倍速相同，被限流跳过的到期帧由解码线程替换或丢弃。代价是高倍速时视频跳帧、卡顿，而不是拖慢游戏帧率。暂停、缓冲、seek、准备首帧与逐帧播放不丢帧。Vulkan Video 与原生 D3D12VA 的解码帧完成等待在工作线程执行，带取消和超时；所有输出帧（包括随后丢弃的过期帧和 seek preroll）都经过此等待，以限制积压。渲染提交防御性地再次查询该帧的完成值，仍未就绪时跳过并保留上一张纹理，避免向 Unity 图形队列提交尚未完成的解码等待。Windows D3D11VA 原生纹理路径（包括 D3D12/Vulkan 回退）使用复用 GPU event query，在每次 codec send/receive/drain 之后由工作线程等待完成，避免解码提交淹没驱动；Vulkan 共享纹理忙碌时以零超时跳过呈现。正常 GPU 色彩转换、共享纹理复制仍有同步成本。此修复需要重新构建并加载 FFmpegUnityBridge，更新后重启 Unity；旧桥接缺少完成查询入口时会报告原因并按既定策略回退。
+倍速超过解码吞吐时，媒体时钟仍按请求倍率连续推进，缺帧只改变 `IsBuffering`，不会隐式暂停或因倍率切换解码器。未来画面按 Unity 消费节奏在硬件下载、RGBA 转换或 GPU 快照创建之前筛选；当队列里的画面也已过期时，后台按有界墙钟节奏发布最新解码画面，保留双帧时序余量以吸收 GPU 完成抖动，不会因全部画面落后而一直丢帧至呈现饥饿。非参考帧可由 codec 跳过（`AVDISCARD_NONREF`），参考帧仍正常解码。落后超过约 0.1 秒实际时间时，只跳到索引中**已经到期且推进解码位置**的关键帧，不等待未来 GOP，也不倒退重解当前 GOP；无可用索引或 seek 失败时顺序解码。真实 PTS（包括无 PTS 时的顺序时间）与帧码率不会被改写。极端倍率仍会丢帧，GOP 长度和实际吞吐会影响画面滞后，不能保证完整呈现超出硬件吞吐的所有画面。
+
+Windows D3D11VA 的 D3D11/D3D12/Vulkan GPU 路径使用同适配器的私有解码 device/context，保持所选 codec 和硬件后端不变。worker 先完成源帧的 codec 写入，再复制到独立 NV12/P010 共享快照；最多一张未完成快照，只观察它自身的 GPU query，不因后续 DPB 工作推迟发布。未完成画面不会传给 Unity；有用的下一张原始画面按顺序保留，暂停、逐帧和 EOF 不会丢掉它。两张额外硬件表面覆盖待完成复制及原始/末帧候选。32 个快照槽同时满足 GPU 复制完成、所有 AVFrame 与呈现包归还后才复用，正常播放无 CPU 像素传输。快照的读取设备 `hw_frames_ctx` 支持显式 `CopyToSoftware`。最多四个未完成 packet，在第五个提交前等待；过期参考帧和 preroll 不逐帧等待 GPU，输出、drain/seek 均保证完成。短轮询最多 16ms 后退避为可取消等待，所有这些等待都在 worker，Unity 不再读取活跃 DPB 或争用 codec immediate context。桥接 ABI 保持 4，能力 512/1024 分别协商隔离和排队快照；安装匹配的 Windows x64/x86 桥接与托管代码后需重启已加载旧 DLL 的 Editor/Player。
+
+Vulkan Video 与原生 D3D12VA 的既有工作线程帧完成查询和渲染提交防御检查保留。GPU 色彩转换、跨 API 复制仍有各自的同步成本。新 Windows 桥接通过能力位 512 协商私有 D3D11VA 发布；不支持该能力的旧桥接会记录明确诊断，不能据此声称隔离路径已经生效。更新桥接和托管代码后需重启已加载旧库的 Unity。
 
 公开 API 遵循 [Microsoft .NET 命名约定](https://learn.microsoft.com/en-us/dotnet/standard/design-guidelines/capitalization-conventions)：类型和成员使用 PascalCase，参数使用 camelCase。播放器、解码器、选项、帧对象及硬件会话接口均提供英文 XML 文档。旧的小驼峰成员已移除：`time` 改为 `TimeSeconds`，`texture`、`isPrepared`、`isPlaying`、`playbackSpeed` 分别使用 `Texture`、`IsPrepared`、`IsPlaying`、`PlaybackRate`。此调整需要更新调用代码，不影响已有场景的序列化字段。
 

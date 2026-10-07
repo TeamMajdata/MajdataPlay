@@ -1,4 +1,5 @@
 #include <d3d11.h>
+#include <d3d11_1.h>
 #include <d3d10.h>
 #include "Bridge.h"
 #include "IUnityGraphicsD3D11.h"
@@ -8,6 +9,8 @@
 #include "VulkanPortable.h"
 #include "VulkanVideoDecode.h"
 #include <mutex>
+#include <array>
+#include <memory>
 #include <vector>
 #include <new>
 #include <thread>
@@ -203,10 +206,10 @@ void FfuPlatformShutdown() {
 int FfuPlatformCapabilities() {
     std::lock_guard<std::mutex> guard(deviceMutex);
     switch (activeRenderer) {
-        case kUnityGfxRendererD3D11: return unityDevice ? FfuD3D11GpuConversion : 0;
-        case kUnityGfxRendererD3D12: return FfuD3D12Capabilities();
+        case kUnityGfxRendererD3D11: return unityDevice ? FfuD3D11GpuConversion | (FfuD3D11DecodeIsolation | FfuD3D11QueuedSnapshots) : 0;
+        case kUnityGfxRendererD3D12: return FfuD3D12Capabilities() | (unityDevice ? (FfuD3D11DecodeIsolation | FfuD3D11QueuedSnapshots) : 0);
         case kUnityGfxRendererOpenGLCore: return unityDevice ? FfuWglGpuInterop : 0;
-        case kUnityGfxRendererVulkan: return (unityDevice ? FfuVulkanGpuCopy : 0) |
+        case kUnityGfxRendererVulkan: return (unityDevice ? FfuVulkanGpuCopy | (FfuD3D11DecodeIsolation | FfuD3D11QueuedSnapshots) : 0) |
             (FfuVulkanVideoAvailable() ? FfuVulkanVideoDecode : 0);
         default: return 0;
     }
@@ -216,6 +219,26 @@ FFU_EXPORT void* FFU_CALL ffu_d3d11_acquire_device() {
     std::lock_guard<std::mutex> guard(deviceMutex);
     if (unityDevice) unityDevice->AddRef();
     return unityDevice;
+}
+// Keep the codec's immediate context out of Unity and the cross-API presenter.
+// The adapter stays unchanged; this is still the same D3D11VA decoder backend.
+FFU_EXPORT void* FFU_CALL ffu_d3d11_acquire_decode_device() {
+    auto* presentation = static_cast<ID3D11Device*>(ffu_d3d11_acquire_device());
+    if (!presentation) return nullptr;
+    IDXGIDevice* dxgi = nullptr;
+    IDXGIAdapter* adapter = nullptr;
+    ID3D11Device* device = nullptr;
+    ID3D11DeviceContext* immediate = nullptr;
+    ID3D10Multithread* threading = nullptr;
+    HRESULT result = presentation->QueryInterface(IID_PPV_ARGS(&dxgi));
+    if (SUCCEEDED(result)) result = dxgi->GetAdapter(&adapter);
+    if (SUCCEEDED(result)) result = D3D11CreateDevice(adapter, D3D_DRIVER_TYPE_UNKNOWN, nullptr,
+        D3D11_CREATE_DEVICE_VIDEO_SUPPORT, nullptr, 0, D3D11_SDK_VERSION, &device, nullptr, &immediate);
+    if (SUCCEEDED(result)) result = immediate->QueryInterface(IID_PPV_ARGS(&threading));
+    if (SUCCEEDED(result)) threading->SetMultithreadProtected(TRUE);
+    Release(threading); Release(immediate); Release(adapter); Release(dxgi); Release(presentation);
+    if (FAILED(result)) Release(device);
+    return device;
 }
 FFU_EXPORT void* FFU_CALL ffu_d3d11_create() {
     auto* presenter = new (std::nothrow) Presenter();
@@ -237,12 +260,42 @@ FFU_EXPORT int FFU_CALL ffu_d3d11_error(void* value) { return value ? static_cas
 // GetDecoderBuffer if the worker outruns the GPU. Pace codec calls on the worker
 // with an explicit completion query, before those driver waits can reach Unity's
 // render-thread conversion or shared immediate-context submissions.
+// An immutable, completed snapshot replaces the live codec/DPB surface at the
+// worker/presenter boundary. Reuse waits for every AVFrame clone, including GPU
+// retirement packets, to return its lease. There is no CPU pixel transfer.
+struct PresentationSnapshot {
+    ID3D11Texture2D* writer = nullptr;
+    ID3D11Texture2D* reader = nullptr;
+    ID3D11Query* complete = nullptr;
+    AVFrame* source = nullptr;
+    bool ready = true;
+    std::atomic<bool> borrowed{false};
+    UINT width = 0, height = 0;
+    DXGI_FORMAT format = DXGI_FORMAT_UNKNOWN;
+    ~PresentationSnapshot() { av_frame_free(&source); Release(complete); Release(reader); Release(writer); }
+    void Complete() { av_frame_free(&source); ready = true; }
+};
+struct SnapshotLease {
+    std::shared_ptr<PresentationSnapshot> slot;
+    AVD3D11FrameDescriptor descriptor{};
+};
+static void ReturnSnapshot(void* opaque, uint8_t*) {
+    auto* lease = static_cast<SnapshotLease*>(opaque);
+    lease->slot->borrowed.store(false, std::memory_order_release);
+    delete lease;
+}
 struct DecodeSynchronization {
     AVBufferRef* deviceReference = nullptr;
     AVD3D11VADeviceContext* device = nullptr;
     ID3D11Query* complete = nullptr;
+    ID3D11Device1* presentation = nullptr;
+    AVBufferRef* presentationFrames = nullptr;
+    std::array<std::shared_ptr<PresentationSnapshot>, 32> snapshots{};
     bool started = false;
-    ~DecodeSynchronization() { Release(complete); av_buffer_unref(&deviceReference); }
+    ~DecodeSynchronization() {
+        av_buffer_unref(&presentationFrames); Release(presentation);
+        Release(complete); av_buffer_unref(&deviceReference);
+    }
 };
 FFU_EXPORT void* FFU_CALL ffu_d3d11_decode_sync_create(void* hardwareDevice) {
     auto* reference = static_cast<AVBufferRef*>(hardwareDevice);
@@ -261,6 +314,143 @@ FFU_EXPORT void* FFU_CALL ffu_d3d11_decode_sync_create(void* hardwareDevice) {
     }
     return sync;
 }
+// Returns 1 with an owned frame after submitting its snapshot copy, 0 for bounded
+// pool backpressure, or a negative error. The worker MUST complete its query
+// before publishing the frame; render callbacks never wait for decoding.
+FFU_EXPORT int FFU_CALL ffu_d3d11_decode_snapshot(void* value, const AVFrame* source, AVFrame** output) {
+    auto* sync = static_cast<DecodeSynchronization*>(value);
+    if (output) *output = nullptr;
+    if (!sync || !source || !output || source->format != AV_PIX_FMT_D3D11 || !source->data[0]) return E_INVALIDARG;
+    auto* presentation = static_cast<ID3D11Device*>(ffu_d3d11_acquire_device());
+    if (!presentation && sync->presentation) return DXGI_ERROR_DEVICE_REMOVED;
+    if (sync->presentation && static_cast<ID3D11Device*>(sync->presentation) != presentation) {
+        Release(presentation); return DXGI_ERROR_DEVICE_REMOVED;
+    }
+    // Standalone decoder clients with no Unity device continue to own raw frames.
+    const bool needsCopy = presentation && presentation != sync->device->device;
+    if (!needsCopy) {
+        Release(presentation);
+        *output = av_frame_clone(source);
+        return *output ? 1 : E_OUTOFMEMORY;
+    }
+    HRESULT result = S_OK;
+    if (!sync->presentation) result = presentation->QueryInterface(IID_PPV_ARGS(&sync->presentation));
+    Release(presentation);
+    if (FAILED(result)) return result;
+    auto* texture = reinterpret_cast<ID3D11Texture2D*>(source->data[0]);
+    ID3D11Device* sourceDevice = nullptr;
+    texture->GetDevice(&sourceDevice);
+    const bool sameDevice = sourceDevice == sync->device->device;
+    Release(sourceDevice);
+    if (!sameDevice) return E_INVALIDARG;
+    D3D11_TEXTURE2D_DESC desc{};
+    texture->GetDesc(&desc);
+    const auto slice = reinterpret_cast<uintptr_t>(source->data[1]);
+    if (slice >= desc.ArraySize || desc.MipLevels != 1 || desc.SampleDesc.Count != 1 ||
+        (desc.Format != DXGI_FORMAT_NV12 && desc.Format != DXGI_FORMAT_P010)) return E_INVALIDARG;
+    // A READER-device FFmpeg context is essential: reusing the codec's context
+    // for a foreign texture would make av_hwframe_transfer_data unsafe.
+    auto* frames = sync->presentationFrames ? reinterpret_cast<AVHWFramesContext*>(sync->presentationFrames->data) : nullptr;
+    const auto swFormat = desc.Format == DXGI_FORMAT_NV12 ? AV_PIX_FMT_NV12 : AV_PIX_FMT_P010;
+    if (!frames || frames->width != static_cast<int>(desc.Width) || frames->height != static_cast<int>(desc.Height) || frames->sw_format != swFormat) {
+        AVBufferRef* deviceReference = av_hwdevice_ctx_alloc(AV_HWDEVICE_TYPE_D3D11VA);
+        if (!deviceReference) return E_OUTOFMEMORY;
+        auto* hardware = reinterpret_cast<AVHWDeviceContext*>(deviceReference->data);
+        auto* d3d11 = static_cast<AVD3D11VADeviceContext*>(hardware->hwctx);
+        d3d11->device = sync->presentation; d3d11->device->AddRef();
+        int status = av_hwdevice_ctx_init(deviceReference);
+        AVBufferRef* next = status >= 0 ? av_hwframe_ctx_alloc(deviceReference) : nullptr;
+        av_buffer_unref(&deviceReference);
+        if (!next) return status < 0 ? status : E_OUTOFMEMORY;
+        auto* nextFrames = reinterpret_cast<AVHWFramesContext*>(next->data);
+        nextFrames->format = AV_PIX_FMT_D3D11; nextFrames->sw_format = swFormat;
+        nextFrames->width = desc.Width; nextFrames->height = desc.Height;
+        status = av_hwframe_ctx_init(next);
+        if (status < 0) { av_buffer_unref(&next); return status; }
+        av_buffer_unref(&sync->presentationFrames);
+        sync->presentationFrames = next;
+    }
+    std::shared_ptr<PresentationSnapshot> slot;
+    for (auto& cached : sync->snapshots) {
+        if (cached && cached->borrowed.load(std::memory_order_acquire)) continue;
+        if (cached && !cached->ready) {
+            const HRESULT status = sync->device->device_context->GetData(cached->complete, nullptr, 0, D3D11_ASYNC_GETDATA_DONOTFLUSH);
+            if (FAILED(status)) return status;
+            if (status != S_OK) continue;
+            cached->Complete();
+        }
+        if (!cached || cached->width != desc.Width || cached->height != desc.Height || cached->format != desc.Format) {
+            std::shared_ptr<PresentationSnapshot> next;
+            try { next = std::make_shared<PresentationSnapshot>(); }
+            catch (const std::bad_alloc&) { return E_OUTOFMEMORY; }
+            D3D11_TEXTURE2D_DESC shared = desc;
+            shared.ArraySize = shared.MipLevels = 1;
+            shared.Usage = D3D11_USAGE_DEFAULT; shared.CPUAccessFlags = 0;
+            shared.BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
+            shared.MiscFlags = D3D11_RESOURCE_MISC_SHARED;
+            result = sync->device->device->CreateTexture2D(&shared, nullptr, &next->writer);
+            IDXGIResource* resource = nullptr;
+            HANDLE handle = nullptr;
+            if (SUCCEEDED(result)) result = next->writer->QueryInterface(IID_PPV_ARGS(&resource));
+            if (SUCCEEDED(result)) result = resource->GetSharedHandle(&handle);
+            if (SUCCEEDED(result)) result = sync->presentation->OpenSharedResource(handle, IID_PPV_ARGS(&next->reader));
+            // GetSharedHandle returns a DXGI handle, not an owned NT handle.
+            Release(resource);
+            D3D11_QUERY_DESC query{}; query.Query = D3D11_QUERY_EVENT;
+            if (SUCCEEDED(result)) result = sync->device->device->CreateQuery(&query, &next->complete);
+            if (FAILED(result)) return result;
+            next->width = desc.Width; next->height = desc.Height; next->format = desc.Format;
+            cached = std::move(next);
+        }
+        slot = cached;
+        break;
+    }
+    if (!slot) return 0;
+    AVFrame* frame = av_frame_alloc();
+    auto* lease = new (std::nothrow) SnapshotLease{slot};
+    if (!frame || !lease) { av_frame_free(&frame); delete lease; return E_OUTOFMEMORY; }
+    lease->descriptor.texture = slot->reader;
+    lease->descriptor.index = 0;
+    frame->buf[0] = av_buffer_create(reinterpret_cast<uint8_t*>(&lease->descriptor), sizeof(lease->descriptor), ReturnSnapshot, lease, AV_BUFFER_FLAG_READONLY);
+    if (!frame->buf[0]) { delete lease; av_frame_free(&frame); return E_OUTOFMEMORY; }
+    slot->borrowed.store(true, std::memory_order_release);
+    frame->hw_frames_ctx = av_buffer_ref(sync->presentationFrames);
+    const int status = av_frame_copy_props(frame, source);
+    if (!frame->hw_frames_ctx || status < 0) { av_frame_free(&frame); return status < 0 ? status : E_OUTOFMEMORY; }
+    frame->format = source->format; frame->width = source->width; frame->height = source->height;
+    frame->data[0] = reinterpret_cast<uint8_t*>(slot->reader);
+    frame->data[1] = nullptr; // A snapshot has one slice, not the codec's array index.
+    // The copy can remain pending while the same worker feeds bounded later
+    // codec packets. Retain its exact source slice until actual GPU completion.
+    slot->source = av_frame_clone(source);
+    if (!slot->source) { av_frame_free(&frame); return E_OUTOFMEMORY; }
+    slot->ready = false;
+    if (sync->device->lock) sync->device->lock(sync->device->lock_ctx);
+    sync->device->device_context->CopySubresourceRegion(slot->writer, 0, 0, 0, 0, texture, static_cast<UINT>(slice), nullptr);
+    sync->device->device_context->End(slot->complete);
+    sync->device->device_context->Flush();
+    if (sync->device->unlock) sync->device->unlock(sync->device->lock_ctx);
+    *output = frame;
+    return 1;
+}
+// Worker-only, nonblocking completion check. A packet must not reach Unity
+// until this returns 1; unrelated later codec/DPB work is not waited here.
+FFU_EXPORT int FFU_CALL ffu_d3d11_decode_snapshot_ready(void* value, const AVFrame* frame) {
+    auto* sync = static_cast<DecodeSynchronization*>(value);
+    if (!sync || !frame || frame->format != AV_PIX_FMT_D3D11 || !frame->data[0] || frame->data[1]) return E_INVALIDARG;
+    const HRESULT removed = sync->device->device->GetDeviceRemovedReason();
+    if (FAILED(removed)) return removed;
+    for (auto& slot : sync->snapshots) {
+        if (!slot || reinterpret_cast<uint8_t*>(slot->reader) != frame->data[0] || !slot->borrowed.load(std::memory_order_acquire)) continue;
+        if (slot->ready) return 1;
+        const HRESULT result = sync->device->device_context->GetData(slot->complete, nullptr, 0, D3D11_ASYNC_GETDATA_DONOTFLUSH);
+        if (FAILED(result)) return result;
+        if (result != S_OK) return 0;
+        slot->Complete();
+        return 1;
+    }
+    return E_INVALIDARG;
+}
 FFU_EXPORT int FFU_CALL ffu_d3d11_decode_sync_begin(void* value) {
     auto* sync = static_cast<DecodeSynchronization*>(value);
     if (!sync) return E_INVALIDARG;
@@ -278,6 +468,11 @@ FFU_EXPORT int FFU_CALL ffu_d3d11_decode_sync_poll(void* value) {
     if (FAILED(removed)) return removed;
     const HRESULT result = sync->device->device_context->GetData(sync->complete, nullptr, 0, D3D11_ASYNC_GETDATA_DONOTFLUSH);
     if (FAILED(result)) return result;
+    if (result == S_OK) {
+        // This marker was submitted after every outstanding snapshot on the
+        // owning worker. Legacy synchronous clients can release their sources too.
+        for (auto& slot : sync->snapshots) if (slot && !slot->ready) slot->Complete();
+    }
     return result == S_OK ? 1 : 0;
 }
 FFU_EXPORT void FFU_CALL ffu_d3d11_decode_sync_release(void* value) { delete static_cast<DecodeSynchronization*>(value); }

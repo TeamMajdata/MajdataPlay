@@ -1,6 +1,7 @@
 #nullable enable
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Threading;
 using MajdataPlay.Diagnostics;
 
@@ -47,8 +48,8 @@ namespace MajdataPlay.FFmpeg.Internal
     /// <summary>One owner thread per demuxer. Cancellation never joins the Unity thread.</summary>
     internal sealed class VideoDecodeSession : IDisposable
     {
-        /// <summary>The wall-clock lag, in seconds, after which the worker skips to a later keyframe instead of decoding the gap.</summary>
-        private const double CatchUpLagSeconds = 0.25;
+        /// <summary>The wall-clock lag, in seconds, after which the worker may skip to an already-due keyframe.</summary>
+        private const double CatchUpLagSeconds = 0.1;
         /// <summary>Protects the playback timeline, queued frames, control revisions, and worker status across threads.</summary>
         private readonly object _gate = new object();
         /// <summary>Queues owned frames awaiting main-thread presentation.</summary>
@@ -71,10 +72,14 @@ namespace MajdataPlay.FFmpeg.Internal
         private long _revision;
         /// <summary>Identifies the seek revision the worker is currently decoding for, accessed under the session lock.</summary>
         private long _decodingRevision;
-        /// <summary>Counts decoded frames released before conversion because the playback clock had passed them.</summary>
+        /// <summary>Counts decoded pictures discarded before conversion due to lateness or consumer cadence.</summary>
         private long _discardedFrames;
         /// <summary>Counts forward keyframe seeks performed to catch up with the playback clock.</summary>
         private long _catchUpSeeks;
+        /// <summary>Stores the last queued picture's original end time for consumer-cadence selection.</summary>
+        private double _lastQueuedFrameEnd;
+        /// <summary>Limits useful worker publications to the consumer's configured maximum updates per second.</summary>
+        private double _maximumPresentationFrameRate = double.PositiveInfinity;
         /// <summary>Stores the latest requested seek position in seconds.</summary>
         private double _seek;
         /// <summary>Publishes the latest immutable decoder information under the lock.</summary>
@@ -163,7 +168,7 @@ namespace MajdataPlay.FFmpeg.Internal
             }
         }
 
-        /// <summary>Gets the number of decoded frames discarded before conversion because they had already expired.</summary>
+        /// <summary>Gets the number of decoded pictures discarded before conversion due to lateness or consumer cadence.</summary>
         public long DiscardedFrames
         {
             get
@@ -258,10 +263,18 @@ namespace MajdataPlay.FFmpeg.Internal
         /// <param name="maximumPresentationTime">The latest eligible timestamp in seconds.</param>
         /// <returns>The newest eligible owned frame, or null; the caller must dispose the returned frame.</returns>
         /// <remarks>The bounded queue cannot refill during selection, and only one frame leaves its ownership.</remarks>
-        public DecodedVideoFrame? TakeLatestFrame(double maximumPresentationTime)
+        /// <param name="maximumFrameRate">The consumer's maximum useful frame rate, or positive infinity to retain every future picture.</param>
+        /// <exception cref="ArgumentOutOfRangeException">The consumer frame rate is NaN or not positive.</exception>
+        public DecodedVideoFrame? TakeLatestFrame(double maximumPresentationTime, double maximumFrameRate = double.PositiveInfinity)
         {
+            if (double.IsNaN(maximumFrameRate) || maximumFrameRate <= 0)
+            {
+                throw new ArgumentOutOfRangeException(nameof(maximumFrameRate));
+            }
+
             lock (_gate)
             {
+                _maximumPresentationFrameRate = maximumFrameRate;
                 DecodedVideoFrame? newest = null;
                 while (_frames.Count != 0 && _frames.Peek().PresentationTime <= maximumPresentationTime)
                 {
@@ -385,6 +398,7 @@ namespace MajdataPlay.FFmpeg.Internal
                                             if (_frames.Count < _capacity)
                                             {
                                                 _frames.Enqueue(frame);
+                                                _lastQueuedFrameEnd = frame.PresentationTime + frame.Duration;
                                                 frame = null;
                                                 break;
                                             }
@@ -447,7 +461,8 @@ namespace MajdataPlay.FFmpeg.Internal
         /// <summary>Snapshots the playback deadlines used by the decoder to discard expired frames before conversion.</summary>
         /// <returns>The current deadlines, or <see cref="FrameDeadline.None"/> while playback is frozen or a seek is pending.</returns>
         /// <remarks>Runs on the decoding worker for each decoded frame. One expired frame is still delivered whenever the
-        /// queue is empty, so the presenter always has the newest available picture while decoding falls behind.</remarks>
+        /// queue is empty or its newest retained picture is due. The decoder bounds late-picture publication by
+        /// wall cadence instead of requiring source throughput that the hardware can no longer sustain.</remarks>
         private FrameDeadline ReadFrameDeadline()
         {
             lock (_gate)
@@ -458,8 +473,12 @@ namespace MajdataPlay.FFmpeg.Internal
                 }
 
                 var position = _playbackClock.Position;
-                var discardBefore = _frames.Count == 0 ? double.NegativeInfinity : position;
-                return new FrameDeadline(position, discardBefore, position - CatchUpLagSeconds * _playbackClock.Rate);
+                var refreshExpiredFrame = _frames.Count == 0 || _lastQueuedFrameEnd <= position;
+                var discardBefore = refreshExpiredFrame ? double.NegativeInfinity : position;
+                var minimumFrameEnd = refreshExpiredFrame ? double.NegativeInfinity
+                    : _lastQueuedFrameEnd + _playbackClock.Rate / _maximumPresentationFrameRate;
+                return new FrameDeadline(position, discardBefore, position - CatchUpLagSeconds * _playbackClock.Rate, minimumFrameEnd,
+                    _maximumPresentationFrameRate);
             }
         }
 
