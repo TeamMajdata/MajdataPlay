@@ -26,7 +26,33 @@ dotnet run --project Tools/Tests/FFmpegValidation/FFmpegValidation.csproj -- `
 
 此模式要求实际 D3D11VA GPU，禁止软件或 CPU 上传回退；检查生产 completion query 的复用、单线程 codec、真实硬件帧及下载像素、seek/preroll、取消、16x 有界后台会话与设备引用归还。它不会初始化 Unity 渲染设备，也不验证游戏 FPS。
 
-Unity 的 `-TestDecodeOverload` 使用正常 Player 渲染循环，关闭 VSync 并限制 60 FPS，对同一素材分别测量 1x 和 16x 的更新帧率，要求 16x 至少保留基线的 80%。素材必须可 seek、至少 20 秒；`-RequireHardware` 允许 D3D12/Vulkan 回退到 Windows D3D11VA 共享路径，但禁止 CPU 像素上传。可用 4K 素材让 16x 的请求明显超过解码吞吐，并分别将 `-Graphics` 设置为 `d3d11`、`d3d12`、`vulkan`：
+Unity 的 `-TestDecodeOverload` 使用正常 Player 渲染循环，关闭 VSync 并限制 60 FPS，依次测量 **1x、2x、3x、16x**。每档先测暂停视频时的同场景基线，再播放相同素材；各阶段预热 0.4 秒，测量最长 3 秒，并按素材长度缩短以避免 EOF。素材必须可 seek、至少 20 秒；`-RequireHardware` 允许 D3D12/Vulkan 回退到 Windows D3D11VA 共享路径，但禁止 CPU 像素上传。
+
+检查播放阶段至少保留暂停基线的 **95% FPS**，更新间隔 p95/p99 分别不得超过基线 2/4 ms，最大间隔不得超过 50 ms 或基线加 5 ms 的较大值。FrameTimingManager 在有数据时检查渲染线程 p99 不超过半个目标帧预算（60 FPS 时为 8.333 ms）或暂停基线加 4 ms 的较大值；缺失的 CPU/GPU 计时明确记录为 `unavailable`，不将零当成通过。播放时钟不得倒退，推进倍速误差不超过 2%；实际呈现 PTS 推进误差不超过 10%，相对播放时钟的墙钟滞后或超前均不得超过 150 ms，呈现间隔不得达到 100 ms。低吞吐时允许丢弃过期视频帧，但不允许通过冻结时钟或改写 PTS 掩盖落后。
+
+日志记录完整指标与实际硬件后端，报告旁的 `.timing.tsv` 保存各阶段 FPS 与相对暂停基线的百分比变化、p95/p99/max 更新间隔、CPU 主/渲染线程及 GPU 计时和各自样本数、播放时钟/呈现 PTS 推进、呈现频率/最大间隔、墙钟滞后/超前、buffering 更新数及 catch-up seek/过期帧丢弃计数。Frame Timing Stats 与诊断反射所需的 session 元数据保留只在隔离工程启用。可追加 `-PlaybackTargetFrameRate 240` 在较高游戏帧率下检查吞吐，报告另存为 `*-240fps.*`；暂停基线须达到请求值的 90%，同样检查播放时至少保留基线 95% FPS。此测试量化视频增加的帧时间变化，不能证明任意场景、驱动及外部系统负载下绝对零抖动。
+
+用户的高吞吐回归样例实际位于 `MaiCharts/FFmpeg Test/H264@1080p/pv.mp4`（H.264、1920×1080、120 FPS、约 79 秒），可对同一已构建 Player 顺序运行三种图形 API：
+
+```powershell
+./Tools/Tests/FFmpegValidation/run-unity.ps1 -Backend Mono -Architecture x64 `
+  -Graphics d3d11 -RequireHardware -TestDecodeOverload -DisableBurst `
+  -WorkDirectory Tools/Tests/FFmpegValidation/.work/render-isolation `
+  -Media "MaiCharts/FFmpeg Test/H264@1080p/pv.mp4"
+# 仅在生产源码、测试源码、原生 DLL 与素材均未变化时复用构建：
+./Tools/Tests/FFmpegValidation/run-unity.ps1 -Backend Mono -Architecture x64 `
+  -Graphics d3d12 -RequireHardware -TestDecodeOverload -SkipBuild `
+  -WorkDirectory Tools/Tests/FFmpegValidation/.work/render-isolation `
+  -Media "MaiCharts/FFmpeg Test/H264@1080p/pv.mp4"
+./Tools/Tests/FFmpegValidation/run-unity.ps1 -Backend Mono -Architecture x64 `
+  -Graphics vulkan -RequireHardware -TestDecodeOverload -SkipBuild `
+  -WorkDirectory Tools/Tests/FFmpegValidation/.work/render-isolation `
+  -Media "MaiCharts/FFmpeg Test/H264@1080p/pv.mp4"
+```
+
+普通 seek、step、loop 与 GPU 像素烟测可追加 `-RegularPlayer`，使用与性能检查相同的正常渲染循环；该选项本身不启用倍速性能阶段。未加此选项的普通烟测沿用 batchmode。
+
+也可用 4K 素材让 16x 的请求明显超过解码吞吐：
 
 ```powershell
 ./Tools/Tests/FFmpegValidation/run-unity.ps1 -Backend Mono -Architecture x64 `
@@ -36,7 +62,7 @@ Unity 的 `-TestDecodeOverload` 使用正常 Player 渲染循环，关闭 VSync 
   -Media Tools/Tests/FFmpegValidation/.work/video-overload/test-4k30.mp4
 ```
 
-日志记录更新 FPS、最大更新间隔、呈现命令数、视频尺寸/帧率、实际解码器与传输路径。素材和 GPU 不同会影响测量；检查日志中的实际解码器，D3D11VA 回退不能算作原生 D3D12VA/Vulkan Video 验证。原生 GPU 未就绪帧的提交前复查还需通过对应桥接测试验证。正常 Pixel 检查与这些同步回归共同验证画面和资源生命周期，不能仅以 `FrameReady` 计数断言每个 packet 都更新了像素。
+素材和 GPU 不同会影响测量；检查日志中的实际解码器，D3D11VA 回退不能算作原生 D3D12VA/Vulkan Video 验证。原生 GPU 未就绪帧的提交前复查还需通过对应桥接测试验证。正常 Pixel 检查与这些同步回归共同验证画面和资源生命周期，不能仅以 `FrameReady` 计数断言每个 packet 都更新了像素。
 
 ### Windows 高帧率视频与实际倍速
 

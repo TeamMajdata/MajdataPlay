@@ -104,6 +104,15 @@ public sealed class FFmpegPlayerSmoke : MonoBehaviour
         }
 
         Check(rejectedReverse && _player.PlaybackRate == 2, "reverse rate rejected");
+        if (Argument("-videoTestDecodeOverload") == "true")
+        {
+            var overload = TestDecodeOverload();
+            while (overload.MoveNext())
+            {
+                yield return overload.Current;
+            }
+        }
+
         if (Argument("-videoTestPlaybackThroughput") == "true")
         {
             var throughput = TestPlaybackThroughput();
@@ -116,14 +125,6 @@ public sealed class FFmpegPlayerSmoke : MonoBehaviour
         while (doubleRatePlayback.MoveNext())
         {
             yield return doubleRatePlayback.Current;
-        }
-        if (Argument("-videoTestDecodeOverload") == "true")
-        {
-            var overload = TestDecodeOverload();
-            while (overload.MoveNext())
-            {
-                yield return overload.Current;
-            }
         }
         var paused = _player.Time;
         long pausedBitRate = _player.CurrentBitRate;
@@ -363,25 +364,38 @@ public sealed class FFmpegPlayerSmoke : MonoBehaviour
             Application.targetFrameRate = previousFrameRate;
         }
     }
-    /// <summary>Compares Unity update throughput at normal and maximum video playback speed on the same GPU.</summary>
-    /// <returns>The coroutine that measures both rates and restores paused playback and rendering settings.</returns>
-    /// <exception cref="Exception">The fixture is too short, playback fails, or overload stalls Unity updates.</exception>
-    IEnumerator TestDecodeOverload()
+    /// <summary>Compares frame timing and timeline progress at 1x, 2x, 3x, and 16x against paired paused baselines.</summary>
+    /// <returns>The coroutine that measures each rate and restores paused playback and rendering settings.</returns>
+    /// <exception cref="Exception">The fixture is too short, playback stalls, or frame timing exceeds the baseline tolerances.</exception>
+    /// <exception cref="MissingFieldException">The displayed frame timestamp is unavailable.</exception>
+    /// <exception cref="IOException">The timing evidence cannot be written.</exception>
+    /// <exception cref="TargetInvocationException">The decoder diagnostics fail while timing results are read.</exception>
+    private IEnumerator TestDecodeOverload()
     {
         Check(_player.LengthSeconds >= 20, "decode overload fixture contains at least 20 seconds of video");
         var previousVSync = QualitySettings.vSyncCount;
         var previousFrameRate = Application.targetFrameRate;
         var previousRate = _player.PlaybackRate;
+        var displayedEnd = typeof(FFmpegVideoPlayer).GetField("_lastFrameEnd", BindingFlags.Instance | BindingFlags.NonPublic)
+            ?? throw new MissingFieldException(typeof(FFmpegVideoPlayer).FullName, "_lastFrameEnd");
+        var targetFrameRate = int.TryParse(Argument("-videoTargetFps"), out var requestedFrameRate) ? requestedFrameRate : 60;
+        Check(targetFrameRate >= 30 && targetFrameRate <= 1000, "decode overload target FPS is between 30 and 1000");
+        var timings = new FrameTiming[1];
+        var evidence = new System.Text.StringBuilder();
+        var failures = new System.Collections.Generic.List<string>();
+        evidence.AppendLine("phase\trate\ttarget_fps\tupdates_fps\tfps_vs_paused_percent\tupdate_p95_ms\tupdate_p99_ms\tupdate_max_ms\tmain_p99_ms\trender_p99_ms\trender_max_ms\tgpu_p99_ms\tmain_timing_samples\trender_timing_samples\tgpu_timing_samples\tclock_rate\tvideo_rate\tpresentations_fps\tpresentation_max_gap_ms\twall_lag_max_ms\twall_lead_max_ms\tbuffering_updates\tcatch_up_seeks\tdiscarded_frames");
         QualitySettings.vSyncCount = 0;
-        Application.targetFrameRate = 60;
+        Application.targetFrameRate = targetFrameRate;
         try
         {
-            var baselineUpdates = 0d;
-            foreach (var rate in new[] { 1f, 16f })
+            foreach (var rate in new[] { 1f, 2f, 3f, 16f })
             {
                 _player.Pause();
                 _player.PlaybackRate = rate;
-                var seek = _player.SeekAsync(0);
+                var seekSeconds = Math.Min(5, _player.LengthSeconds * 0.1);
+                var measuredSeconds = Math.Min(3, ((_player.LengthSeconds - seekSeconds - 2) / rate) - 0.4);
+                Check(measuredSeconds >= 0.5, "fixture leaves at least half a second for the " + rate + "x measurement before EOF");
+                var seek = _player.SeekAsync(seekSeconds);
                 var start = UnityEngine.Time.realtimeSinceStartup;
                 while (!seek.IsCompleted)
                 {
@@ -390,41 +404,156 @@ public sealed class FFmpegPlayerSmoke : MonoBehaviour
                 }
 
                 seek.GetAwaiter().GetResult();
-                _player.Play();
-                yield return new WaitForSecondsRealtime(0.15f);
-                var initialFrames = _frames;
-                var initialUpdates = UnityEngine.Time.frameCount;
-                var initialTime = _player.TimeSeconds;
-                var wallClock = System.Diagnostics.Stopwatch.StartNew();
-                var lastUpdate = 0d;
-                var maximumUpdateGap = 0d;
-                while (wallClock.Elapsed.TotalSeconds < 0.8)
+                var baselineFps = 0d;
+                var baselineP95 = 0d;
+                var baselineP99 = 0d;
+                var baselineMaximum = 0d;
+                var baselineRenderP99 = 0d;
+                for (var phase = 0; phase < 2; phase++)
                 {
-                    yield return null;
-                    var elapsed = wallClock.Elapsed.TotalSeconds;
-                    maximumUpdateGap = Math.Max(maximumUpdateGap, elapsed - lastUpdate);
-                    lastUpdate = elapsed;
-                }
+                    if (phase == 1)
+                    {
+                        _player.Play();
+                    }
 
-                _player.Pause();
-                wallClock.Stop();
-                var updateRate = (UnityEngine.Time.frameCount - initialUpdates) / wallClock.Elapsed.TotalSeconds;
-                Debug.Log("Decode overload: playback=" + rate + "x; Unity updates=" + updateRate.ToString("F1")
-                    + " FPS; maximum update gap=" + maximumUpdateGap.ToString("F3")
-                    + " s; presented frames=" + (_frames - initialFrames) + "; decoder=" + _player.DecoderName
-                    + "; transport=" + _player.TransferMode + "; video=" + _player.Width + "x" + _player.Height
-                    + "@" + _player.FrameRate + "; GPU=" + SystemInfo.graphicsDeviceName);
-                Check(_frames > initialFrames && _player.TimeSeconds > initialTime, "playback and presentation advance at " + rate + "x");
-                if (rate == 1)
-                {
-                    baselineUpdates = updateRate;
-                    Check(baselineUpdates >= 30, "normal playback provides a usable Unity update baseline: " + baselineUpdates);
-                }
-                else
-                {
-                    Check(updateRate >= baselineUpdates * 0.8, "16x playback retains at least 80% of baseline Unity updates: " + updateRate);
+                    yield return new WaitForSecondsRealtime(0.4f);
+                    var updates = new FrameTimeDistribution();
+                    var mainThread = new FrameTimeDistribution();
+                    var renderThread = new FrameTimeDistribution();
+                    var gpu = new FrameTimeDistribution();
+                    var initialFrames = _frames;
+                    var observedFrames = _frames;
+                    var initialUpdates = UnityEngine.Time.frameCount;
+                    var initialTime = _player.TimeSeconds;
+                    var initialVideo = (double)displayedEnd.GetValue(_player)!;
+                    var lastTime = initialTime;
+                    var lastUpdate = 0d;
+                    var lastPresentation = 0d;
+                    var maximumPresentationGap = 0d;
+                    var maximumLag = 0d;
+                    var maximumLead = 0d;
+                    var lagPeakElapsed = 0d;
+                    var lagPeakClock = 0d;
+                    var lagPeakFrameEnd = 0d;
+                    var lagPeakBufferedFrames = 0;
+                    var bufferingUpdates = 0;
+                    var clockWentBackwards = false;
+                    var lastFrameStart = 0UL;
+                    var wallClock = System.Diagnostics.Stopwatch.StartNew();
+                    while (wallClock.Elapsed.TotalSeconds < measuredSeconds)
+                    {
+                        FrameTimingManager.CaptureFrameTimings();
+                        yield return null;
+                        var elapsed = wallClock.Elapsed.TotalSeconds;
+                        updates.Record((elapsed - lastUpdate) * 1000);
+                        lastUpdate = elapsed;
+                        if (FrameTimingManager.GetLatestTimings(1, timings) != 0 && timings[0].frameStartTimestamp != lastFrameStart)
+                        {
+                            lastFrameStart = timings[0].frameStartTimestamp;
+                            mainThread.Record(timings[0].cpuMainThreadFrameTime);
+                            renderThread.Record(timings[0].cpuRenderThreadFrameTime);
+                            gpu.Record(timings[0].gpuFrameTime);
+                        }
+
+                        if (phase == 1)
+                        {
+                            var time = _player.TimeSeconds;
+                            clockWentBackwards |= time < lastTime - 0.000001;
+                            lastTime = time;
+                            maximumPresentationGap = Math.Max(maximumPresentationGap, elapsed - lastPresentation);
+                            if (_frames != observedFrames)
+                            {
+                                lastPresentation = elapsed;
+                                observedFrames = _frames;
+                            }
+
+                            var frameEnd = (double)displayedEnd.GetValue(_player)!;
+                            var presentationError = (time - frameEnd) / rate;
+                            if (presentationError > maximumLag)
+                            {
+                                maximumLag = presentationError;
+                                lagPeakElapsed = elapsed;
+                                lagPeakClock = time;
+                                lagPeakFrameEnd = frameEnd;
+                                lagPeakBufferedFrames = _player.BufferedFrames;
+                            }
+
+                            maximumLead = Math.Max(maximumLead, -presentationError);
+                            if (_player.IsBuffering)
+                            {
+                                bufferingUpdates++;
+                            }
+                        }
+                    }
+
+                    var finalTime = _player.TimeSeconds;
+                    var finalVideo = (double)displayedEnd.GetValue(_player)!;
+                    wallClock.Stop();
+                    _player.Pause();
+                    var seconds = wallClock.Elapsed.TotalSeconds;
+                    var updateRate = (UnityEngine.Time.frameCount - initialUpdates) / seconds;
+                    var clockRate = (finalTime - initialTime) / seconds;
+                    var videoRate = (finalVideo - initialVideo) / seconds;
+                    var presentationRate = (_frames - initialFrames) / seconds;
+                    var phaseName = phase == 0 ? "paused" : "playing";
+                    var fpsChange = phase == 0 ? 0 : ((updateRate / baselineFps) - 1) * 100;
+                    var catchUpSeeks = ReadSessionCounter("CatchUpSeeks");
+                    var discardedFrames = ReadSessionCounter("DiscardedFrames");
+                    Debug.Log("Decode overload: phase=" + phaseName + "; playback=" + rate + "x; Unity updates=" + updateRate.ToString("F1")
+                        + " FPS; change from paused=" + fpsChange.ToString("F3") + "%; target=" + targetFrameRate + " FPS; update=" + updates.Describe() + "; main=" + mainThread.Describe() + "; render=" + renderThread.Describe()
+                        + "; GPU timing=" + gpu.Describe() + "; frame timing enabled=" + FrameTimingManager.IsFeatureEnabled()
+                        + "; clock=" + clockRate.ToString("F3") + "x; video=" + videoRate.ToString("F3")
+                        + "x; presentations=" + presentationRate.ToString("F1") + " FPS; maximum presentation gap="
+                        + (maximumPresentationGap * 1000).ToString("F1") + " ms; maximum wall-clock lag=" + (maximumLag * 1000).ToString("F1")
+                        + " ms; maximum wall-clock lead=" + (maximumLead * 1000).ToString("F1") + " ms; buffering updates=" + bufferingUpdates
+                        + "; catch-up seeks=" + catchUpSeeks + "; discarded frames=" + discardedFrames + "; decoder=" + _player.DecoderName + "/" + _player.DecoderDevice
+                        + "; transport=" + _player.TransferMode + "; video=" + _player.Width + "x" + _player.Height
+                        + "@" + _player.FrameRate + "; GPU=" + SystemInfo.graphicsDeviceName);
+                    if (maximumLag > 0)
+                    {
+                        Debug.Log("Presentation lag peak: rate=" + rate + "x; measured wall time=" + lagPeakElapsed.ToString("F6")
+                            + " s; clock=" + lagPeakClock.ToString("F6") + " s; displayed frame end=" + lagPeakFrameEnd.ToString("F6")
+                            + " s; wall lag=" + maximumLag.ToString("F6") + " s; buffered frames=" + lagPeakBufferedFrames);
+                    }
+                    evidence.AppendLine(string.Join("\t", phaseName, rate, targetFrameRate, updateRate, fpsChange, updates.Percentile(0.95), updates.Percentile(0.99),
+                        updates.Percentile(1), mainThread.Percentile(0.99), renderThread.Percentile(0.99), renderThread.Percentile(1),
+                        gpu.Percentile(0.99), mainThread.Count, renderThread.Count, gpu.Count, clockRate, videoRate, presentationRate,
+                        maximumPresentationGap * 1000, maximumLag * 1000, maximumLead * 1000, bufferingUpdates, catchUpSeeks, discardedFrames));
+                    if (!string.IsNullOrEmpty(_report))
+                    {
+                        File.WriteAllText(_report + ".timing.tsv", evidence.ToString());
+                    }
+
+                    if (phase == 0)
+                    {
+                        baselineFps = updateRate;
+                        baselineP95 = updates.Percentile(0.95);
+                        baselineP99 = updates.Percentile(0.99);
+                        baselineMaximum = updates.Percentile(1);
+                        baselineRenderP99 = renderThread.Percentile(0.99);
+                        Check(baselineFps >= targetFrameRate * 0.9, "paused render baseline reaches at least 90% of the requested " + targetFrameRate + " FPS: " + baselineFps);
+                        continue;
+                    }
+
+                    CheckPlaybackTiming(failures, updateRate >= baselineFps * 0.95, rate + "x retains at least 95% of paired paused Unity FPS: " + updateRate + " / " + baselineFps);
+                    CheckPlaybackTiming(failures, updates.Percentile(0.95) <= baselineP95 + 2, rate + "x update p95 stays within 2ms of the paused baseline: " + updates.Percentile(0.95));
+                    CheckPlaybackTiming(failures, updates.Percentile(0.99) <= baselineP99 + 4, rate + "x update p99 stays within 4ms of the paused baseline: " + updates.Percentile(0.99));
+                    CheckPlaybackTiming(failures, updates.Percentile(1) <= Math.Max(50, baselineMaximum + 5), rate + "x introduces no update spike above the baseline or 50ms: " + updates.Percentile(1));
+                    if (renderThread.Count > 0)
+                    {
+                        CheckPlaybackTiming(failures, renderThread.Percentile(0.99) <= Math.Max(500d / targetFrameRate, baselineRenderP99 + 4),
+                            rate + "x render thread p99 stays within the half-frame budget or paused baseline plus 4ms: " + renderThread.Percentile(0.99));
+                    }
+
+                    CheckPlaybackTiming(failures, !clockWentBackwards && Math.Abs(clockRate - rate) <= rate * 0.02, rate + "x clock remains continuous and advances within 2%: " + clockRate);
+                    CheckPlaybackTiming(failures, _frames > initialFrames && Math.Abs(videoRate - rate) <= rate * 0.1, rate + "x displayed timeline advances within 10%: " + videoRate);
+                    CheckPlaybackTiming(failures, maximumLag <= 0.15, rate + "x displayed timeline remains within 150ms of wall-clock time: " + maximumLag);
+                    CheckPlaybackTiming(failures, maximumLead <= 0.15, rate + "x displayed timeline leads wall-clock time by at most 150ms: " + maximumLead);
+                    CheckPlaybackTiming(failures, maximumPresentationGap < 0.1, rate + "x introduces no 100ms presentation freeze: " + maximumPresentationGap);
                 }
             }
+
+            Check(failures.Count == 0, string.Join(Environment.NewLine, failures));
         }
         finally
         {
@@ -435,6 +564,95 @@ public sealed class FFmpegPlayerSmoke : MonoBehaviour
         }
     }
 
+    /// <summary>Reads a worker-published diagnostic counter after the timing measurement has ended.</summary>
+    /// <param name="name">The name of the internal decode session's counter property.</param>
+    /// <returns>The published counter value, or minus one when the session or diagnostic property is unavailable.</returns>
+    /// <exception cref="TargetInvocationException">The counter getter fails while the diagnostic is read.</exception>
+    private long ReadSessionCounter(string name)
+    {
+        var sessionField = typeof(FFmpegVideoPlayer).GetField("_session", BindingFlags.Instance | BindingFlags.NonPublic);
+        var session = sessionField?.GetValue(_player);
+        var value = session?.GetType().GetProperty(name)?.GetValue(session);
+        return value is long count ? count : -1;
+    }
+
+    /// <summary>Records a timing assertion without preventing measurement of the remaining playback rates.</summary>
+    /// <param name="failures">The collection that receives failed timing assertions.</param>
+    /// <param name="value">Whether the observed timing satisfies the assertion.</param>
+    /// <param name="message">The diagnostic evidence to report when the assertion fails.</param>
+    private void CheckPlaybackTiming(System.Collections.Generic.List<string> failures, bool value, string message)
+    {
+        _checks++;
+        if (!value)
+        {
+            failures.Add(message);
+        }
+    }
+
+    /// <summary>Collects finite positive frame times without allocating inside the measurement loop.</summary>
+    private sealed class FrameTimeDistribution
+    {
+        /// <summary>Stores one three-second phase at the maximum supported target of 1000 FPS.</summary>
+        private readonly double[] _samples = new double[4096];
+
+        /// <summary>Records whether the active samples have been ordered for percentile queries.</summary>
+        private bool _sorted;
+
+        /// <summary>Gets the number of available timing samples; zero means the timing source is unavailable.</summary>
+        public int Count { get; private set; }
+
+        /// <summary>Adds a finite positive frame time when capacity remains.</summary>
+        /// <param name="milliseconds">The elapsed frame time, measured in milliseconds.</param>
+        public void Record(double milliseconds)
+        {
+            if (milliseconds <= 0 || double.IsNaN(milliseconds) || double.IsInfinity(milliseconds) || Count == _samples.Length)
+            {
+                return;
+            }
+
+            _samples[Count++] = milliseconds;
+            _sorted = false;
+        }
+
+        /// <summary>Returns a nearest-rank percentile from the collected samples.</summary>
+        /// <param name="fraction">The percentile fraction between zero and one.</param>
+        /// <returns>The selected frame time in milliseconds, or zero when no measurements are available.</returns>
+        public double Percentile(double fraction)
+        {
+            if (Count == 0)
+            {
+                return 0;
+            }
+
+            if (!_sorted)
+            {
+                Array.Sort(_samples, 0, Count);
+                _sorted = true;
+            }
+
+            var index = Math.Max(0, Math.Min(Count - 1, (int)Math.Ceiling(fraction * Count) - 1));
+            return _samples[index];
+        }
+
+        /// <summary>Formats percentile timing evidence after the measurement phase has finished.</summary>
+        /// <returns>The sample count and p95, p99, and maximum timing, or an explicit unavailable marker.</returns>
+        public string Describe()
+        {
+            if (Count == 0)
+            {
+                return "unavailable";
+            }
+
+            return "p95/p99/max=" + Percentile(0.95).ToString("F3") + "/" + Percentile(0.99).ToString("F3")
+                + "/" + Percentile(1).ToString("F3") + " ms (n=" + Count + ")";
+        }
+    }
+
+    /// <summary>Checks decoder identity, CPU transport, and bounded recovery through available hardware backends.</summary>
+    /// <param name="path">The seekable encoded video fixture.</param>
+    /// <returns>The coroutine that exercises decoder preference and restores a closed player.</returns>
+    /// <exception cref="Exception">Decoder identity, pixels, or hardware recovery do not match the requested behavior.</exception>
+    /// <exception cref="TargetInvocationException">The recovery fault-injection entry point fails.</exception>
     IEnumerator TestDecoderPreference(string path)
     {
         _player.Loop = false;
@@ -482,20 +700,27 @@ public sealed class FFmpegPlayerSmoke : MonoBehaviour
         _player.Play();
         var recover = typeof(FFmpegVideoPlayer).GetMethod("RecoverHardwarePlayback", BindingFlags.Instance | BindingFlags.NonPublic);
         Check(recover != null, "native presentation recovery entry point exists");
-        bool nativeDecoder = _player.DecoderDevice.Contains("D3D12VA") || _player.DecoderDevice.Contains("Vulkan Video");
-        recover.Invoke(_player, new object[] { new NotSupportedException("Injected native texture import failure for hardware CPU fallback") });
-        waitStart = UnityEngine.Time.realtimeSinceStartup;
-        if (nativeDecoder)
+        for (var attempt = 0; attempt < 3 && _player.TransferMode != "Hardware decode + CPU RGBA upload"; attempt++)
         {
-            while (!_player.IsPrepared || _player.TransferMode.StartsWith("Reopening", StringComparison.Ordinal)) { CheckTimeout(waitStart); yield return null; }
-            Check(_player.DecoderType == VideoDecoderType.Hardware && _player.TransferMode != "Hardware decode + CPU RGBA upload",
-                "native API failure first recovers through the platform GPU backend");
-            Check(!_player.DecoderDevice.Contains("D3D12VA") && !_player.DecoderDevice.Contains("Vulkan Video"),
-                "recovery selects a different hardware API");
-            recover.Invoke(_player, new object[] { new NotSupportedException("Injected platform texture import failure for hardware CPU fallback") });
+            var failedDevice = _player.DecoderDevice;
+            var failedTransport = _player.TransferMode;
+            recover.Invoke(_player, new object[] { new NotSupportedException("Injected GPU texture failure for hardware CPU fallback, attempt " + (attempt + 1)) });
             waitStart = UnityEngine.Time.realtimeSinceStartup;
+            while (!_player.IsPrepared || _player.TransferMode.StartsWith("Reopening", StringComparison.Ordinal))
+            {
+                CheckTimeout(waitStart);
+                yield return null;
+            }
+
+            Check(_player.DecoderType == VideoDecoderType.Hardware, "GPU transport recovery retains hardware decoding on attempt " + (attempt + 1));
+            Debug.Log("Hardware recovery: " + failedDevice + "/" + failedTransport + " -> " + _player.DecoderDevice + "/" + _player.TransferMode);
+            if (_player.TransferMode != "Hardware decode + CPU RGBA upload")
+            {
+                Check(_player.DecoderDevice != failedDevice, "GPU failure tries a different hardware API before CPU transport");
+            }
         }
-        while (!_player.IsPrepared || _player.TransferMode != "Hardware decode + CPU RGBA upload") { CheckTimeout(waitStart); yield return null; }
+        Check(_player.IsPrepared && _player.TransferMode == "Hardware decode + CPU RGBA upload",
+            "GPU presentation failures reach hardware CPU transport within three attempts");
         Check(_player.DecoderType == VideoDecoderType.Hardware, "native presentation failure retains hardware decoding through CPU transport");
         Check(_player.IsPlaying && !string.IsNullOrEmpty(_player.HardwareFallbackReason), "recovery retains play intent and reports the failed native path");
         var recoveredSeek = _player.SeekAsync(Math.Min(1, _player.LengthSeconds / 2));

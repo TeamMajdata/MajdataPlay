@@ -11,6 +11,8 @@
 #include <chrono>
 extern "C" {
 #include <libavutil/buffer.h>
+#include <libavutil/hwcontext.h>
+#include <libavutil/hwcontext_d3d11va.h>
 }
 #define CHECK(call) do { HRESULT h = (call); if (FAILED(h)) { std::printf("FAIL line %d HRESULT %08lx\n", __LINE__, static_cast<unsigned long>(h)); return 1; } } while (0)
 static ID3D12Device* device12;
@@ -33,6 +35,19 @@ static IUnityInterface* UNITY_INTERFACE_API InterfaceSplit(unsigned long long hi
     return nullptr;
 }
 static void FreeFrame(void*, uint8_t* texture) { reinterpret_cast<ID3D11Texture2D*>(texture)->Release(); ++released; }
+static bool VerifyIdlePoolAdmission(const AVFrame* frame, ID3D12Resource* output) {
+    std::vector<void*> presenters;
+    for (int i = 0; i < 26; ++i) {
+        void* presenter = ffu_d3d11_create();
+        void* packet = presenter ? ffu_d3d12_prepare(presenter, frame, output) : nullptr;
+        if (!packet) return false;
+        ffu_d3d12_cancel(packet);
+        presenters.push_back(presenter);
+    }
+    for (void* presenter : presenters) ffu_d3d11_release(presenter);
+    std::puts("PASS: 26 independent D3D12 idle presenter caches do not consume the active packet limit");
+    return true;
+}
 int main() {
     CHECK(D3D12CreateDevice(nullptr, D3D_FEATURE_LEVEL_11_0, IID_PPV_ARGS(&device12)));
     D3D12_COMMAND_QUEUE_DESC queueDesc{}; queueDesc.Type = D3D12_COMMAND_LIST_TYPE_DIRECT;
@@ -42,12 +57,20 @@ int main() {
     api12.GetDevice = Device; api12.GetCommandQueue = Queue; api12.ConfigureEvent = Configure; api12.RequestResourceState = Request;
     IUnityInterfaces interfaces{}; interfaces.GetInterfaceSplit = InterfaceSplit;
     UnityPluginLoad(&interfaces);
-    if (ffu_abi_version() != 2 || ffu_capabilities() != FfuD3D12GpuCopy || configured != 3) {
+    if (ffu_abi_version() != 4 || !(ffu_capabilities() & FfuD3D12GpuCopy) || configured != 6) {
         std::printf("FAIL initialization status=%d configured=%d\n", ffu_initialization_status(), configured); return 1;
     }
     auto* device11 = static_cast<ID3D11Device*>(ffu_d3d11_acquire_device());
     void* presenter = ffu_d3d11_create();
     if (!device11 || !presenter) return 1;
+    AVBufferRef* hardwareReference = av_hwdevice_ctx_alloc(AV_HWDEVICE_TYPE_D3D11VA);
+    if (!hardwareReference) return 1;
+    auto* hardware = reinterpret_cast<AVHWDeviceContext*>(hardwareReference->data);
+    auto* d3d11 = static_cast<AVD3D11VADeviceContext*>(hardware->hwctx);
+    d3d11->device = device11; device11->AddRef();
+    if (av_hwdevice_ctx_init(hardwareReference) < 0) return 1;
+    void* stage = ffu_d3d11_stage_create(hardwareReference);
+    if (!stage) return 1;
     D3D12_RESOURCE_DESC desc{};
     desc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D; desc.Width = desc.Height = 32;
     desc.DepthOrArraySize = desc.MipLevels = 1; desc.SampleDesc.Count = 1;
@@ -69,7 +92,16 @@ int main() {
         frame->format = AV_PIX_FMT_D3D11; frame->color_range = AVCOL_RANGE_MPEG; frame->colorspace = AVCOL_SPC_BT709;
         frame->data[0] = reinterpret_cast<uint8_t*>(input);
         frame->buf[0] = av_buffer_create(frame->data[0], 1, FreeFrame, nullptr, 0);
-        void* packet = ffu_d3d12_prepare(presenter, frame, output);
+        AVFrame* staged = ffu_d3d11_stage_frame(stage, frame);
+        if (!staged) return 1;
+        const auto stagedDeadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+        int ready = 0;
+        while ((ready = ffu_d3d11_stage_ready(stage)) == 0 && std::chrono::steady_clock::now() < stagedDeadline)
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        if (ready != 1) return 1;
+        if (iteration == 0 && !VerifyIdlePoolAdmission(staged, output)) return 1;
+        void* packet = ffu_d3d12_prepare(presenter, staged, output);
+        av_frame_free(&staged);
         av_frame_free(&frame);
         if (!packet || released != iteration) { std::puts("FAIL: prepare/early release"); return 1; }
         if (iteration == 4) ffu_d3d12_cancel(packet);
@@ -110,6 +142,7 @@ int main() {
     const int white = mapped[8 * footprint.Footprint.RowPitch + 32], black = mapped[24 * footprint.Footprint.RowPitch + 32];
     D3D12_RANGE written{}; readback->Unmap(0, &written);
     done->Release(); list->Release(); allocator->Release(); readback->Release(); output->Release();
+    ffu_d3d11_stage_release(stage); av_buffer_unref(&hardwareReference);
     ffu_d3d11_release(presenter); device11->Release(); UnityPluginUnload(); queue12->Release(); device12->Release();
     if (white < 240 || black > 15) return 1;
     std::printf("PASS: linked D3D12 bridge GPU copy, 4 completed packets + cancellation, AVFrame retirement, white=%d black=%d\n", white, black);

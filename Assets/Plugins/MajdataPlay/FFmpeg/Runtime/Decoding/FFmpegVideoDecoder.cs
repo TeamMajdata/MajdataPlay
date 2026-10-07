@@ -20,8 +20,10 @@ namespace MajdataPlay.FFmpeg.Internal
     /// </remarks>
     public sealed unsafe class FFmpegVideoDecoder : IDisposable
     {
-        /// <summary>Bounds packet submissions that do not yet produce a hardware output frame.</summary>
+        /// <summary>Bounds packet submissions between worker-side hardware completion markers.</summary>
         private const int MaximumPendingHardwarePackets = 4;
+        /// <summary>Bounds isolated-device decode batches whose completed presentation mapper also supplies a GPU marker.</summary>
+        private const int MaximumPendingStagedHardwarePackets = 16;
         /// <summary>Roots the native I/O interrupt delegate for the lifetime of the process.</summary>
         private static readonly AVIOInterruptCB_callback s_interruptCallback = Interrupt;
         /// <summary>Roots the native pixel-format selection delegate for the lifetime of the process.</summary>
@@ -42,7 +44,7 @@ namespace MajdataPlay.FFmpeg.Internal
         private AVPacket* _packet;
         /// <summary>Owns reusable decoded frame storage.</summary>
         private AVFrame* _frame;
-        /// <summary>Retains the last preroll frame for seeks at or beyond the input endpoint.</summary>
+        /// <summary>Retains the last preroll or expired frame so reaching the endpoint still returns the final picture.</summary>
         private AVFrame* _seekCandidate;
         /// <summary>Keeps this decoder reachable by native interrupt and pixel-format callbacks.</summary>
         private GCHandle _selfHandle;
@@ -62,6 +64,8 @@ namespace MajdataPlay.FFmpeg.Internal
         private IHardwareDecodeSession? _hardwareSession;
         /// <summary>Owns optional GPU admission control, accessed only by the decoding worker.</summary>
         private IHardwareDecodeSynchronization? _hardwareSynchronization;
+        /// <summary>Owns worker-side conversion into completed GPU surfaces that no longer enter the decoder context during presentation.</summary>
+        private IHardwareFrameMapper? _hardwareFrameMapper;
         /// <summary>Counts packet submissions since the last worker-side GPU completion marker.</summary>
         private int _pendingHardwarePackets;
         /// <summary>Caches the active surface session's image release callback without per-frame allocations.</summary>
@@ -92,16 +96,18 @@ namespace MajdataPlay.FFmpeg.Internal
         private double _nextTimestamp;
         /// <summary>Stores the preroll cutoff in seconds, or negative infinity when no seek is pending.</summary>
         private double _seekTarget = double.NegativeInfinity;
-        /// <summary>Store the retained preroll frame's presentation timestamp and duration, in seconds.</summary>
+        /// <summary>Stores the retained endpoint candidate's presentation timestamp and duration, in seconds.</summary>
         private double _seekCandidateTime, _seekCandidateDuration;
         /// <summary>Predicts the next packet timestamp for bit-rate estimation when timestamps are missing.</summary>
         private double _nextPacketTimestamp;
-        /// <summary>Retains the bit-rate estimate belonging to the last preroll frame.</summary>
+        /// <summary>Retains the bit-rate estimate belonging to the latest endpoint candidate.</summary>
         private long _seekCandidateBitRate;
-        /// <summary>Stores the last keyframe catch-up target in seconds; a new catch-up waits until decoding passes it.</summary>
+        /// <summary>Stores the latest keyframe catch-up position in seconds; index retries require decoding to advance past it.</summary>
         private double _catchUpTarget = double.NegativeInfinity;
         /// <summary>Tracks whether the codec currently skips non-reference frames to recover decode throughput.</summary>
         private bool _skippingNonReferenceFrames;
+        /// <summary>Stores the monotonic start time of the most recent expired high-speed frame conversion.</summary>
+        private long _lastPresentationTimestamp;
         /// <summary>Supplies the playback deadlines used to discard expired frames, or null to present every decoded frame.</summary>
         /// <remarks>The provider is invoked on the owning worker once per decoded frame and must not allocate.</remarks>
         internal Func<FrameDeadline>? FrameDeadlineProvider { get; set; }
@@ -480,7 +486,7 @@ namespace MajdataPlay.FFmpeg.Internal
         /// <exception cref="InvalidOperationException">The input is not open, the caller is not the owning worker, or FFmpeg fails to read or decode a frame.</exception>
         /// <exception cref="ObjectDisposedException">This decoder has been disposed.</exception>
         /// <exception cref="OperationCanceledException">The token supplied to <see cref="Open"/> was canceled.</exception>
-        /// <exception cref="TimeoutException">An input operation exceeded the configured timeout.</exception>
+        /// <exception cref="TimeoutException">An input operation or worker-side GPU completion exceeded the configured timeout.</exception>
         /// <exception cref="NotSupportedException">The decoded frame cannot satisfy the configured dimensions or hardware transport requirements.</exception>
         /// <exception cref="OutOfMemoryException">FFmpeg cannot retain or convert a decoded frame.</exception>
         public DecodedVideoFrame? ReadFrame()
@@ -516,7 +522,11 @@ namespace MajdataPlay.FFmpeg.Internal
                 {
                     try
                     {
-                        SynchronizeHardwareDecoding(true);
+                        if (_hardwareFrameMapper == null || _cpuTransport)
+                        {
+                            SynchronizeHardwareDecoding(true);
+                        }
+
                         if (!_cpuTransport && _frame->hw_frames_ctx != null)
                         {
                             // A hardware AVFrame may precede GPU completion. Pace all
@@ -548,33 +558,27 @@ namespace MajdataPlay.FFmpeg.Internal
                             // Keep exactly one reference while decoding preroll. A seek to
                             // 100% (or a slightly overreported duration) must display the
                             // closest final frame instead of leaving the previous texture.
-                            if (_seekCandidate == null)
-                            {
-                                _seekCandidate = ffmpeg.av_frame_alloc();
-                            }
-
-                            if (_seekCandidate == null)
-                            {
-                                throw new OutOfMemoryException("Cannot retain seek preroll frame.");
-                            }
-
-                            ffmpeg.av_frame_unref(_seekCandidate);
-                            ffmpeg.av_frame_move_ref(_seekCandidate, _frame);
-                            _seekCandidateTime = seconds;
-                            _seekCandidateDuration = duration;
-                            _seekCandidateBitRate = currentBitRate;
+                            RetainEndpointFrame(seconds, duration, currentBitRate);
                             continue;
                         }
 
                         _seekTarget = double.NegativeInfinity;
-                        ReleaseSeekCandidate();
-                        // Expired frames are released before hardware download, RGBA
-                        // conversion, or native retention so the worker can catch up.
+                        // Expired frames avoid hardware download, RGBA conversion,
+                        // and native mapping so the worker can catch up.
                         if (TryDiscardExpiredFrame(seconds + duration))
                         {
+                            // A catch-up seek clears the current frame. Other discards
+                            // retain exactly one source reference so EOF can
+                            // replace stale queued pictures with the actual endpoint.
+                            if (_frame->width > 0 && _frame->height > 0)
+                            {
+                                RetainEndpointFrame(seconds, duration, currentBitRate);
+                            }
+
                             continue;
                         }
 
+                        ReleaseSeekCandidate();
                         var decoded = CreatePresentationFrame(_frame, seconds, duration);
                         decoded.CurrentBitRate = currentBitRate;
                         return decoded;
@@ -752,7 +756,9 @@ namespace MajdataPlay.FFmpeg.Internal
                 return;
             }
 
-            if (!force && ++_pendingHardwarePackets < MaximumPendingHardwarePackets)
+            var maximumPendingPackets = _hardwareFrameMapper != null && !_cpuTransport
+                ? MaximumPendingStagedHardwarePackets : MaximumPendingHardwarePackets;
+            if (!force && ++_pendingHardwarePackets < maximumPendingPackets)
             {
                 return;
             }
@@ -782,6 +788,7 @@ namespace MajdataPlay.FFmpeg.Internal
             _bitRateTracker.Reset();
             _nextPacketTimestamp = seconds + _origin;
             _seekTarget = seconds;
+            _lastPresentationTimestamp = 0;
             SetSkipNonReferenceFrames(false);
         }
 
@@ -799,11 +806,21 @@ namespace MajdataPlay.FFmpeg.Internal
             }
 
             var deadline = provider();
+            if (double.IsNegativeInfinity(deadline.Position))
+            {
+                _lastPresentationTimestamp = 0;
+                SetSkipNonReferenceFrames(false);
+                return false;
+            }
+
             var late = frameEnd <= deadline.Position;
             // B-frames are rarely referenced, so skipping them while late reduces
             // decode work without corrupting later frames. Restore once on time.
-            SetSkipNonReferenceFrames(late);
-            if (frameEnd <= deadline.CatchUpBefore && frameEnd > _catchUpTarget && TrySkipToKeyFrame(deadline.Position))
+            // Reordering can submit several frames before their output appears.
+            // Decode the final window completely so EOF retains the true last frame.
+            var nearEnd = Duration > 0 && frameEnd >= Duration - Math.Max(0.25, 16 / FrameRate);
+            SetSkipNonReferenceFrames(late && !nearEnd);
+            if (frameEnd <= deadline.CatchUpBefore && frameEnd > _catchUpTarget && TrySkipToKeyFrame(deadline.Position, frameEnd))
             {
                 DiscardedFrames++;
                 return true;
@@ -815,29 +832,80 @@ namespace MajdataPlay.FFmpeg.Internal
                 return true;
             }
 
+            if (late && deadline.Rate > 1)
+            {
+                // The presenter consumes a bounded number of pictures each wall
+                // second. Decode references between them without converting every
+                // expired output at the much faster media playback rate.
+                var presentationRate = Math.Max(1, Math.Min(60, FrameRate));
+                var presentationInterval = Math.Max(1, (long)Math.Ceiling(Stopwatch.Frequency / presentationRate));
+                var now = Stopwatch.GetTimestamp();
+                if (_lastPresentationTimestamp != 0 && now - _lastPresentationTimestamp < presentationInterval)
+                {
+                    DiscardedFrames++;
+                    return true;
+                }
+
+                _lastPresentationTimestamp = now;
+            }
+
             return false;
         }
 
-        /// <summary>Repositions the input to the first keyframe at or after the playback clock without decoding the gap.</summary>
+        /// <summary>Repositions to a keyframe near the playback clock without decoding the gap, requiring forward progress at the endpoint.</summary>
         /// <param name="seconds">The current playback position on the media timeline, in seconds.</param>
-        /// <returns>True if the input was repositioned; false if no later keyframe can be reached.</returns>
-        /// <remarks>A failed attempt disables catch-up seeking until the next explicit <see cref="Seek"/>.</remarks>
+        /// <param name="frameEnd">The end of the last decoded frame, used to require forward progress when no later keyframe exists.</param>
+        /// <returns>True if the input was repositioned; false if no newer keyframe can be reached.</returns>
+        /// <remarks>Indexed inputs retry when no newer due keyframe is available. A failed input seek disables catch-up until the next explicit seek.</remarks>
         /// <exception cref="OperationCanceledException">The token supplied to <see cref="Open"/> was canceled.</exception>
         /// <exception cref="TimeoutException">Seeking exceeded the configured input timeout.</exception>
-        private bool TrySkipToKeyFrame(double seconds)
+        private bool TrySkipToKeyFrame(double seconds, double frameEnd)
         {
             // Sequential decoding remains correct when the input cannot be repositioned.
             _catchUpTarget = double.PositiveInfinity;
-            if (!CanSeek || (Duration > 0 && seconds >= Duration))
+            if (!CanSeek)
             {
                 return false;
             }
 
+            seconds = Math.Max(0, Duration > 0 ? Math.Min(seconds, Duration) : seconds);
+            var timeBase = ffmpeg.av_q2d(_timeBase);
+            var timestamp = checked((long)Math.Floor((seconds + _origin) / timeBase));
+            if (Duration > 0 && seconds >= Duration)
+            {
+                timestamp = Math.Max(checked((long)Math.Round(_origin / timeBase)), timestamp - 1);
+            }
+
+            // A future keyframe can be an entire GOP ahead of the clock, causing
+            // a visible freeze while the bounded queue waits for it to become due.
+            // Only jump over an interval that already ended on the playback clock.
+            var minimumTimestamp = checked((long)Math.Floor((frameEnd + _origin) / timeBase) + 1);
+            var seekTimestamp = timestamp;
+            var indexed = ffmpeg.avformat_index_get_entries_count(_format->streams[_videoStreamIndex]) > 0;
+            if (indexed)
+            {
+                var entry = ffmpeg.avformat_index_get_entry_from_timestamp(_format->streams[_videoStreamIndex], timestamp,
+                    ffmpeg.AVSEEK_FLAG_BACKWARD);
+                if (entry == null || entry->timestamp < minimumTimestamp || entry->timestamp > timestamp)
+                {
+                    // No due keyframe can advance this decoder yet. Querying the
+                    // existing index again is cheap once another output advances.
+                    _catchUpTarget = frameEnd;
+                    return false;
+                }
+
+                seekTimestamp = entry->timestamp;
+            }
+
+            if (minimumTimestamp > timestamp)
+            {
+                _catchUpTarget = frameEnd;
+                return false;
+            }
+
             using var profile = UnityProfiler.Create("FFmpeg.Decoder.CatchUpSeek");
-            var timestamp = checked((long)Math.Round((seconds + _origin) / ffmpeg.av_q2d(_timeBase)));
             BeginIO();
-            // A minimum timestamp equal to the target selects a later keyframe, never an earlier one.
-            var result = ffmpeg.avformat_seek_file(_format, _videoStreamIndex, timestamp, timestamp, long.MaxValue, 0);
+            var result = ffmpeg.avformat_seek_file(_format, _videoStreamIndex, minimumTimestamp, seekTimestamp, timestamp, 0);
             var deadline = Interlocked.Exchange(ref _ioDeadline, 0);
             _cancellation.ThrowIfCancellationRequested();
             if (result < 0)
@@ -847,13 +915,15 @@ namespace MajdataPlay.FFmpeg.Internal
                     throw new TimeoutException("Catch-up seek exceeded " + _options.IOTimeoutMilliseconds + " ms.");
                 }
 
-                MajDebug.LogDebug("FFmpeg", "[Decoder] No keyframe after " + seconds.ToString("F3", CultureInfo.InvariantCulture)
+                MajDebug.LogDebug("FFmpeg", "[Decoder] No newer due keyframe near " + seconds.ToString("F3", CultureInfo.InvariantCulture)
                     + " seconds; decoding sequentially. " + ErrorText(result));
                 return false;
             }
 
-            ResetAfterSeek(seconds);
-            _catchUpTarget = seconds;
+            // This is an opportunistic playback skip, not an exact seek. Deliver
+            // the newer due keyframe immediately and continue decoding from it.
+            ResetAfterSeek(frameEnd);
+            _catchUpTarget = indexed ? (seekTimestamp * timeBase) - _origin : frameEnd;
             CatchUpSeeks++;
             return true;
         }
@@ -921,14 +991,30 @@ namespace MajdataPlay.FFmpeg.Internal
                     AVFrame* clone;
                     try
                     {
-                        clone = _options.MapHardwareFrame != null ? (AVFrame*)_options.MapHardwareFrame((IntPtr)frame) : ffmpeg.av_frame_clone(frame);
-                        if (clone == null && _options.MapHardwareFrame != null)
+                        if (_hardwareFrameMapper != null)
+                        {
+                            clone = (AVFrame*)_hardwareFrameMapper.Map((IntPtr)frame, _cancellation, _options.IOTimeoutMilliseconds);
+                            if (clone != null)
+                            {
+                                // The mapper's marker follows conversion on the
+                                // same isolated immediate context as decoding, so
+                                // it also completes the preceding packet batch.
+                                _pendingHardwarePackets = 0;
+                            }
+                        }
+                        else
+                        {
+                            clone = _options.MapHardwareFrame != null ? (AVFrame*)_options.MapHardwareFrame((IntPtr)frame) : ffmpeg.av_frame_clone(frame);
+                        }
+
+                        if (clone == null && (_hardwareFrameMapper != null || _options.MapHardwareFrame != null))
                         {
                             throw new NotSupportedException("The native graphics mapper returned no imported frame.");
                         }
                     }
                     catch (Exception error) when (_options.AllowHardwareCpuUpload && !_options.RequireHardwareDecoding
-                        && frame->hw_frames_ctx != null && error is not OperationCanceledException && error is not OutOfMemoryException)
+                        && _options.FallbackHardwareOptions == null && frame->hw_frames_ctx != null
+                        && error is not OperationCanceledException && error is not OutOfMemoryException)
                     {
                         // Download the original VAAPI/D3D11/VideoToolbox frame, never a
                         // mapped DRM_PRIME frame whose transfer implementation may differ.
@@ -1018,8 +1104,8 @@ namespace MajdataPlay.FFmpeg.Internal
         /// <returns>The backend name with the configured device description when available.</returns>
         private string DescribeHardwareDevice(string kind) => string.IsNullOrWhiteSpace(_options.HardwareDeviceDescription)
             ? kind : kind + "; " + _options.HardwareDeviceDescription;
-        /// <summary>Marks decoding complete and returns the retained endpoint frame when seeking past available frames.</summary>
-        /// <returns>The owned final seek frame, or null if no preroll frame was retained.</returns>
+        /// <summary>Marks decoding complete and returns the retained endpoint frame after seek preroll or expired-frame discard.</summary>
+        /// <returns>The owned final frame, or null if no skipped endpoint candidate was retained.</returns>
         private DecodedVideoFrame? FinishInput()
         {
             _ended = true;
@@ -1041,7 +1127,31 @@ namespace MajdataPlay.FFmpeg.Internal
             }
         }
 
-        /// <summary>Releases the retained seek preroll frame and clears its pointer.</summary>
+        /// <summary>Retains the latest skipped frame without converting it until an endpoint picture is needed.</summary>
+        /// <param name="seconds">The retained frame's presentation time on the media timeline, in seconds.</param>
+        /// <param name="duration">The retained frame's display duration, in seconds.</param>
+        /// <param name="bitRate">The compressed bit-rate estimate belonging to the retained frame.</param>
+        /// <exception cref="OutOfMemoryException">FFmpeg cannot allocate the reusable endpoint frame container.</exception>
+        private void RetainEndpointFrame(double seconds, double duration, long bitRate)
+        {
+            if (_seekCandidate == null)
+            {
+                _seekCandidate = ffmpeg.av_frame_alloc();
+            }
+
+            if (_seekCandidate == null)
+            {
+                throw new OutOfMemoryException("Cannot retain video endpoint frame.");
+            }
+
+            ffmpeg.av_frame_unref(_seekCandidate);
+            ffmpeg.av_frame_move_ref(_seekCandidate, _frame);
+            _seekCandidateTime = seconds;
+            _seekCandidateDuration = duration;
+            _seekCandidateBitRate = bitRate;
+        }
+
+        /// <summary>Releases the retained seek preroll or expired endpoint frame and clears its pointer.</summary>
         private void ReleaseSeekCandidate()
         {
             var candidate = _seekCandidate;
@@ -1139,12 +1249,13 @@ namespace MajdataPlay.FFmpeg.Internal
                         }
                         else
                         {
-                            HardwareFallbackReason = "The Unity D3D11 device is unavailable.";
+                            HardwareFallbackReason = "A compatible D3D11 decode device is unavailable.";
                         }
                     }
                 }
                 catch (Exception error) when (_options.AllowHardwareCpuUpload && !_options.RequireHardwareDecoding
-                    && error is not OperationCanceledException && error is not OutOfMemoryException)
+                    && _options.FallbackHardwareOptions == null && error is not OperationCanceledException
+                    && error is not OutOfMemoryException)
                 {
                     HardwareFallbackReason = "Unity-compatible hardware device unavailable: " + error.Message;
                 }
@@ -1157,6 +1268,13 @@ namespace MajdataPlay.FFmpeg.Internal
                     }
 
                     bool canCreateNativeDevice = !suppliedDevice && _options.HardwareDeviceType == AVHWDeviceType.AV_HWDEVICE_TYPE_VIDEOTOOLBOX;
+                    if (_options.FallbackHardwareOptions != null && !canCreateNativeDevice)
+                    {
+                        HardwareFallbackReason ??= "The preferred hardware device could not be initialized: " + ErrorText(result);
+                        MajDebug.LogWarning("FFmpeg", "[Decoder] " + HardwareFallbackReason);
+                        return;
+                    }
+
                     if (!canCreateNativeDevice && (_options.RequireHardwareDecoding || !_options.AllowHardwareCpuUpload
                         || _options.HardwareDeviceType == AVHWDeviceType.AV_HWDEVICE_TYPE_MEDIACODEC))
                     {
@@ -1203,10 +1321,32 @@ namespace MajdataPlay.FFmpeg.Internal
                         // frame workers could otherwise submit after the marker was recorded.
                         _codec->thread_count = 1;
                     }
-                    catch (NotSupportedException error) when (_options.AllowHardwareCpuUpload && !_options.RequireHardwareDecoding)
+                    catch (NotSupportedException error) when (_options.AllowHardwareCpuUpload && !_options.RequireHardwareDecoding
+                        && _options.FallbackHardwareOptions == null)
                     {
                         _cpuTransport = true;
                         HardwareFallbackReason = "GPU decode synchronization unavailable: " + error.Message;
+                        MajDebug.LogWarning("FFmpeg", "[Decoder] " + HardwareFallbackReason + "; keeping hardware decode with CPU upload.");
+                    }
+                }
+
+                if (!_cpuTransport && _options.CreateHardwareFrameMapper != null)
+                {
+                    try
+                    {
+                        _hardwareFrameMapper = _options.CreateHardwareFrameMapper((IntPtr)device);
+                        // The mapper completes a marker on this worker's decode
+                        // context; internal codec workers must not submit after it.
+                        _codec->thread_count = 1;
+                        // Leave room beyond H.264's default DPB allocation for the
+                        // bounded presentation queue and its replacement candidate.
+                        _codec->extra_hw_frames = Math.Max(_codec->extra_hw_frames, 12);
+                    }
+                    catch (NotSupportedException error) when (_options.AllowHardwareCpuUpload && !_options.RequireHardwareDecoding
+                        && _options.FallbackHardwareOptions == null)
+                    {
+                        _cpuTransport = true;
+                        HardwareFallbackReason = "Worker GPU frame conversion unavailable: " + error.Message;
                         MajDebug.LogWarning("FFmpeg", "[Decoder] " + HardwareFallbackReason + "; keeping hardware decode with CPU upload.");
                     }
                 }
@@ -1312,6 +1452,8 @@ namespace MajdataPlay.FFmpeg.Internal
             _releaseHardwareImage = null;
             _hardwareSynchronization?.Dispose();
             _hardwareSynchronization = null;
+            _hardwareFrameMapper?.Dispose();
+            _hardwareFrameMapper = null;
             _pendingHardwarePackets = 0;
         }
 
@@ -1329,6 +1471,11 @@ namespace MajdataPlay.FFmpeg.Internal
                 {
                     if (*cursor == self._hardwarePixelFormat)
                     {
+                        if (self._options.ConfigureHardwareFrames != null && !self.TryConfigureHardwareFrames(context, *cursor))
+                        {
+                            return AVPixelFormat.AV_PIX_FMT_NONE;
+                        }
+
                         return *cursor;
                     }
                 }
@@ -1355,6 +1502,53 @@ namespace MajdataPlay.FFmpeg.Internal
             }
 
             return AVPixelFormat.AV_PIX_FMT_NONE;
+        }
+
+        /// <summary>Initializes a fresh hardware frame pool with public synchronization callbacks before publishing it to the codec.</summary>
+        /// <param name="context">The borrowed codec context that will own the initialized hardware frame reference.</param>
+        /// <param name="format">The selected hardware pixel format used to derive pool parameters.</param>
+        /// <returns>True when the configured pool transferred to the codec; otherwise false with a recorded fallback reason.</returns>
+        private bool TryConfigureHardwareFrames(AVCodecContext* context, AVPixelFormat format)
+        {
+            AVBufferRef* frames = null;
+            try
+            {
+                var result = ffmpeg.avcodec_get_hw_frames_parameters(context, context->hw_device_ctx, format, &frames);
+                if (result >= 0 && frames != null)
+                {
+                    result = _options.ConfigureHardwareFrames!((IntPtr)frames);
+                    if (result >= 0)
+                    {
+                        result = ffmpeg.av_hwframe_ctx_init(frames);
+                    }
+                }
+
+                if (result < 0 || frames == null)
+                {
+                    HardwareDecoding = false;
+                    HardwareFallbackReason = "Hardware frame pool configuration failed: "
+                        + (result < 0 ? ErrorText(result) : "FFmpeg returned no frame-pool parameters.");
+                    MajDebug.LogWarning("FFmpeg", "[Decoder] " + HardwareFallbackReason);
+                    return false;
+                }
+
+                var previous = context->hw_frames_ctx;
+                context->hw_frames_ctx = frames;
+                frames = null;
+                ffmpeg.av_buffer_unref(&previous);
+                return true;
+            }
+            catch (Exception error)
+            {
+                HardwareDecoding = false;
+                HardwareFallbackReason = "Hardware frame pool configuration failed: " + error.Message;
+                MajDebug.LogWarning("FFmpeg", "[Decoder] " + HardwareFallbackReason);
+                return false;
+            }
+            finally
+            {
+                ffmpeg.av_buffer_unref(&frames);
+            }
         }
 
         /// <summary>Checks cancellation and starts the configured monotonic input deadline.</summary>
@@ -1594,16 +1788,20 @@ namespace MajdataPlay.FFmpeg.Internal
         public readonly double DiscardBefore;
         /// <summary>Gets the time in seconds at or before which a frame's end triggers a forward keyframe seek.</summary>
         public readonly double CatchUpBefore;
+        /// <summary>Gets the playback rate used to cap expired-frame conversion independently of accelerated media time.</summary>
+        public readonly double Rate;
 
         /// <summary>Initializes a frame deadline snapshot.</summary>
         /// <param name="position">The current playback position in seconds.</param>
         /// <param name="discardBefore">The latest frame end time in seconds that is discarded without presentation.</param>
         /// <param name="catchUpBefore">The latest frame end time in seconds that triggers a keyframe catch-up seek.</param>
-        public FrameDeadline(double position, double discardBefore, double catchUpBefore)
+        /// <param name="rate">The current playback rate, or one when no playback clock is running.</param>
+        public FrameDeadline(double position, double discardBefore, double catchUpBefore, double rate = 1)
         {
             Position = position;
             DiscardBefore = discardBefore;
             CatchUpBefore = catchUpBefore;
+            Rate = rate;
         }
     }
 }

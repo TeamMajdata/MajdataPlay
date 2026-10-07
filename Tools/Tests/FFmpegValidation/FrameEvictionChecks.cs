@@ -35,10 +35,14 @@ namespace MajdataPlay.FFmpeg.Validation
             TestEndOfStream(media);
             TestExpiredFrameDiscard(media);
             TestKeyFrameCatchUp(media);
+            TestDueKeyFrameCatchUp(media);
+            TestFrozenDeadline(media);
+            TestPresentationCadence(media);
+            TestFinalKeyFrameCatchUp(media);
             return s_checks - before;
         }
 
-        /// <summary>Checks the real worker synchronization used by Windows Vulkan's D3D11VA fallback.</summary>
+        /// <summary>Checks real D3D11VA worker synchronization, conversion cadence, and hardware frame-pool rejection cleanup.</summary>
         /// <param name="media">A seekable D3D11VA-compatible fixture with nonuniform pixels after its first second.</param>
         /// <returns>The number of assertions completed during this invocation.</returns>
         /// <exception cref="InvalidOperationException">Synchronization, frame pixels, or native ownership is invalid.</exception>
@@ -52,7 +56,255 @@ namespace MajdataPlay.FFmpeg.Validation
             }
 
             TestSynchronizedWorkerClose(media);
+            TestHardwareFrameConfigurationFailure(media);
+            TestPreferredHardwareFallbacks(media);
+            TestWorkerFactoryFailurePolicy(media);
+            TestMappingFailurePolicy(media);
             return s_checks - before;
+        }
+
+        /// <summary>Checks CPU download and strict rejection when a worker factory fails without another GPU configuration.</summary>
+        /// <param name="media">The real H.264 fixture used to verify native decoder selection and CPU output.</param>
+        /// <exception cref="InvalidOperationException">Factory failure silently bypasses strict mode or abandons hardware CPU fallback.</exception>
+        private static void TestWorkerFactoryFailurePolicy(string media)
+        {
+            foreach (var mapper in new[] { false, true })
+            {
+                foreach (var strict in new[] { false, true })
+                {
+                    using var audit = new DecodeSynchronizationAudit();
+                    var options = audit.CreateOptions();
+                    options.RequireHardwareDecoding = strict;
+                    options.AllowHardwareCpuUpload = true;
+                    if (mapper)
+                    {
+                        options.CreateHardwareFrameMapper = _ =>
+                        {
+                            throw new NotSupportedException("Injected worker mapper failure");
+                        };
+                    }
+                    else
+                    {
+                        options.CreateHardwareSynchronization = _ =>
+                        {
+                            throw new NotSupportedException("Injected worker synchronization failure");
+                        };
+                    }
+
+                    using var decoder = new FFmpegVideoDecoder(options);
+                    var rejected = false;
+                    try
+                    {
+                        decoder.Open(media, CancellationToken.None);
+                        using var frame = decoder.ReadFrame();
+                        Check(!strict && frame != null && frame.HardwareDecoded && !frame.IsHardwareFrame && frame.Data != IntPtr.Zero,
+                            "Without a GPU alternative, failed worker initialization retains hardware decoding with CPU pixels.");
+                    }
+                    catch (NotSupportedException error)
+                    {
+                        rejected = error.Message.Contains("Injected worker", StringComparison.Ordinal);
+                    }
+
+                    Check(rejected == strict, "Worker factory failure respects strict native-only policy.");
+                    decoder.Dispose();
+                    Check(audit.DeviceReferenceCount == 1,
+                        "Failed worker initialization releases all codec, query and device references.");
+                }
+            }
+        }
+
+        /// <summary>Checks that failed device and worker factories select a configured GPU transport before CPU upload.</summary>
+        /// <param name="media">The real H.264 fixture decoded by the successfully selected D3D11VA device.</param>
+        /// <exception cref="InvalidOperationException">A preferred device is retried, CPU transport is selected, or device references leak.</exception>
+        private static unsafe void TestPreferredHardwareFallbacks(string media)
+        {
+            foreach (var failure in new[] { "device exception", "device unavailable", "D3D11 exception", "D3D11 unavailable",
+                "D3D12 device", "Vulkan device", "synchronizer", "mapper" })
+            {
+                using var preferred = new DecodeSynchronizationAudit();
+                using var fallback = new DecodeSynchronizationAudit();
+                var options = preferred.CreateOptions();
+                options.RequireHardwareDecoding = false;
+                options.AllowHardwareCpuUpload = true;
+                options.FallbackHardwareOptions = fallback.CreateOptions();
+                options.FallbackHardwareOptions.RequireHardwareDecoding = false;
+                options.FallbackHardwareOptions.AllowHardwareCpuUpload = true;
+                options.FallbackHardwareOptions.HardwareDeviceDescription = "Configured fallback GPU transport";
+                var attempts = 0;
+                if (failure == "D3D12 device" || failure == "Vulkan device")
+                {
+                    options.HardwareDeviceType = failure == "D3D12 device"
+                        ? AVHWDeviceType.AV_HWDEVICE_TYPE_D3D12VA : AVHWDeviceType.AV_HWDEVICE_TYPE_VULKAN;
+                    options.AcquireHardwareDevice = () =>
+                    {
+                        attempts++;
+                        return IntPtr.Zero;
+                    };
+                }
+                else if (failure.StartsWith("device", StringComparison.Ordinal))
+                {
+                    options.AcquireHardwareDevice = () =>
+                    {
+                        attempts++;
+                        if (failure == "device exception")
+                        {
+                            throw new NotSupportedException("Injected preferred device failure");
+                        }
+
+                        return IntPtr.Zero;
+                    };
+                }
+                else if (failure.StartsWith("D3D11", StringComparison.Ordinal))
+                {
+                    options.AcquireHardwareDevice = null;
+                    options.AcquireD3D11Device = () =>
+                    {
+                        attempts++;
+                        if (failure == "D3D11 exception")
+                        {
+                            throw new NotSupportedException("Injected preferred D3D11 device failure");
+                        }
+
+                        return IntPtr.Zero;
+                    };
+                }
+                else if (failure == "synchronizer")
+                {
+                    options.CreateHardwareSynchronization = _ =>
+                    {
+                        attempts++;
+                        throw new NotSupportedException("Injected preferred synchronization failure");
+                    };
+                }
+                else
+                {
+                    options.CreateHardwareFrameMapper = _ =>
+                    {
+                        attempts++;
+                        throw new NotSupportedException("Injected preferred mapper initialization failure");
+                    };
+                }
+
+                using var decoder = new FFmpegVideoDecoder(options);
+                decoder.Open(media, CancellationToken.None);
+                Check(attempts == 1 && fallback.Synchronization != null,
+                    "A failed preferred " + failure + " selects the configured GPU device once before CPU fallback.");
+                using (var frame = decoder.ReadFrame())
+                {
+                    Check(frame != null && frame.IsHardwareFrame && frame.HardwareDecoded && frame.Data == IntPtr.Zero,
+                        "Configured GPU fallback retains actual native D3D11VA output after " + failure + ".");
+                }
+
+                Check(decoder.ActiveHardwareDeviceType == AVHWDeviceType.AV_HWDEVICE_TYPE_D3D11VA
+                    && decoder.DecoderDevice.Contains("Configured fallback GPU transport", StringComparison.Ordinal),
+                    "Preferred initialization failure publishes the selected fallback device.");
+                decoder.Dispose();
+                Check(preferred.DeviceReferenceCount <= 1 && fallback.DeviceReferenceCount == 1,
+                    "Preferred and fallback devices return all decoder and query references after " + failure + ".");
+            }
+        }
+
+        /// <summary>Checks runtime mapper failure propagation, CPU fallback without an alternate GPU, and strict rejection.</summary>
+        /// <param name="media">The real native fixture used to verify hardware output and CPU download.</param>
+        /// <exception cref="InvalidOperationException">Runtime failure skips the configured recovery path or violates native-only policy.</exception>
+        private static void TestMappingFailurePolicy(string media)
+        {
+            foreach (var policy in new[] { "GPU fallback", "CPU allowed", "GPU required" })
+            {
+                using var audit = new DecodeSynchronizationAudit();
+                var options = audit.CreateOptions();
+                options.RequireHardwareDecoding = policy == "GPU required";
+                options.AllowHardwareCpuUpload = true;
+                options.FallbackHardwareOptions = policy == "GPU fallback" ? new DecoderOptions
+                {
+                    HardwareDeviceType = AVHWDeviceType.AV_HWDEVICE_TYPE_D3D11VA,
+                    KeepNativeFrames = true
+                } : null;
+                var mappings = 0;
+                options.MapHardwareFrame = _ =>
+                {
+                    mappings++;
+                    throw new NotSupportedException("Injected runtime mapper failure");
+                };
+                using var decoder = new FFmpegVideoDecoder(options);
+                decoder.Open(media, CancellationToken.None);
+                var rejected = false;
+                try
+                {
+                    using var frame = decoder.ReadFrame();
+                    Check(policy == "CPU allowed" && frame != null && frame.HardwareDecoded && !frame.IsHardwareFrame
+                        && frame.Data != IntPtr.Zero && frame.DataSize == frame.Width * frame.Height * 4,
+                        "Without an alternate GPU, a mapping failure downloads the original hardware frame into CPU RGBA.");
+                    using var following = decoder.ReadFrame();
+                    Check(following != null && following.HardwareDecoded && following.Data != IntPtr.Zero,
+                        "CPU recovery keeps hardware decoding and does not repeatedly retry the failed mapper.");
+                }
+                catch (NotSupportedException error)
+                {
+                    rejected = error.Message.Contains("Injected runtime mapper failure", StringComparison.Ordinal);
+                }
+
+                Check(rejected == (policy != "CPU allowed") && mappings == 1,
+                    "Mapping failure propagates to configured GPU recovery or strict rejection, while standalone CPU fallback runs once.");
+                decoder.Dispose();
+                Check(audit.DeviceReferenceCount == 1,
+                    "Runtime mapping failure releases the native device and synchronization resources.");
+            }
+        }
+
+        /// <summary>Checks that rejected public frame-pool configuration releases its uninitialized native context.</summary>
+        /// <param name="media">The real H.264 fixture whose first packet requests hardware frame-pool parameters.</param>
+        /// <exception cref="InvalidOperationException">A rejected pool leaks a reference or proceeds to hardware output.</exception>
+        private static unsafe void TestHardwareFrameConfigurationFailure(string media)
+        {
+            using var audit = new DecodeSynchronizationAudit();
+            var options = audit.CreateOptions();
+            var configured = false;
+            var retainedFrames = IntPtr.Zero;
+            options.ConfigureHardwareFrames = frames =>
+            {
+                var reference = (AVBufferRef*)frames;
+                var context = (AVHWFramesContext*)reference->data;
+                Check(context->format == AVPixelFormat.AV_PIX_FMT_D3D11 && context->pool == null,
+                    "The hardware frame callback receives codec-derived parameters before pool initialization.");
+                var previous = (AVBufferRef*)retainedFrames;
+                ffmpeg.av_buffer_unref(&previous);
+                retainedFrames = (IntPtr)ffmpeg.av_buffer_ref(reference);
+                configured = true;
+                return -ffmpeg.EINVAL;
+            };
+            try
+            {
+                using var decoder = new FFmpegVideoDecoder(options);
+                var rejected = false;
+                try
+                {
+                    decoder.Open(media, CancellationToken.None);
+                    using var ignored = decoder.ReadFrame();
+                }
+                catch (InvalidOperationException)
+                {
+                    rejected = true;
+                }
+                catch (NotSupportedException)
+                {
+                    rejected = true;
+                }
+
+                Check(rejected && configured && retainedFrames != IntPtr.Zero,
+                    "A rejected hardware frame-pool callback prevents native output instead of publishing an incomplete pool.");
+                decoder.Dispose();
+                Check(ffmpeg.av_buffer_get_ref_count((AVBufferRef*)retainedFrames) == 1,
+                    "Configuration failure releases the decoder's uninitialized pool reference exactly once.");
+            }
+            finally
+            {
+                var reference = (AVBufferRef*)retainedFrames;
+                ffmpeg.av_buffer_unref(&reference);
+            }
+
+            Check(audit.DeviceReferenceCount == 1,
+                "A rejected frame-pool configuration returns the hardware device after final pool-reference release.");
         }
 
         /// <summary>Decodes real native frames, reuses the query across seeks, and audits device references after disposal.</summary>
@@ -215,7 +467,7 @@ namespace MajdataPlay.FFmpeg.Validation
             {
                 get
                 {
-                    return ffmpeg.av_buffer_get_ref_count((AVBufferRef*)_device);
+                    return _device == IntPtr.Zero ? 0 : ffmpeg.av_buffer_get_ref_count((AVBufferRef*)_device);
                 }
             }
 
@@ -377,6 +629,130 @@ namespace MajdataPlay.FFmpeg.Validation
                 Check(frame != null && frame.Data != IntPtr.Zero && frame.PresentationTime >= target - (2 / info.FrameRate),
                     "Frames after keyframe catch-up carry pixels at or after the playback clock.");
             }
+        }
+
+        /// <summary>Checks that pausing deadline-based catch-up restores complete decoding for explicit seek and frame stepping.</summary>
+        /// <param name="media">The real seekable fixture decoded with the production codec context.</param>
+        /// <exception cref="InvalidOperationException">Frozen playback retains codec skipping or seek/step loses an output frame.</exception>
+        private static unsafe void TestFrozenDeadline(string media)
+        {
+            using var decoder = new FFmpegVideoDecoder();
+            decoder.Open(media, CancellationToken.None);
+            var deadline = new FrameDeadline(decoder.Duration + 1, double.NegativeInfinity, double.NegativeInfinity, 16);
+            decoder.FrameDeadlineProvider = () => deadline;
+            using (var frame = decoder.ReadFrame())
+            {
+                Check(frame != null, "Running high-speed playback retains an expired frame when no newer picture is available.");
+            }
+
+            var codec = (AVCodecContext*)Pointer.Unbox(ReadField<object>(decoder, "_codec"));
+            Check(codec->skip_frame == AVDiscard.AVDISCARD_NONREF,
+                "Late high-speed playback skips non-reference codec work.");
+            deadline = FrameDeadline.None;
+            using (var frame = decoder.ReadFrame())
+            {
+                Check(frame != null && codec->skip_frame == AVDiscard.AVDISCARD_DEFAULT,
+                    "Freezing the playback deadline restores complete decoding without requiring a seek.");
+            }
+
+            var target = Math.Min(1, decoder.Duration / 2);
+            decoder.Seek(target);
+            using var sought = decoder.ReadFrame();
+            Check(sought != null && sought.PresentationTime <= target + 0.000001
+                && sought.PresentationTime + sought.Duration > target - 0.000001,
+                "Explicit seek still returns the interval containing its exact target after high-speed playback.");
+            using var stepped = decoder.ReadFrame();
+            Check(stepped != null && Math.Abs(stepped.PresentationTime - sought!.PresentationTime - sought.Duration) < 0.002,
+                "Paused frame stepping returns the immediately following frame after exact seek.");
+        }
+
+        /// <summary>Checks that an overloaded reader skips stale outputs between presentations instead of converting every decoded frame.</summary>
+        /// <param name="media">The real seekable fixture used for deadline-driven output admission.</param>
+        /// <exception cref="InvalidOperationException">Stale output is not sampled, its interval is too short, or freezing loses the next frame.</exception>
+        private static void TestPresentationCadence(string media)
+        {
+            using var decoder = new FFmpegVideoDecoder();
+            decoder.Open(media, CancellationToken.None);
+            var deadline = new FrameDeadline(decoder.Duration + 1, double.NegativeInfinity, double.NegativeInfinity, 3);
+            decoder.FrameDeadlineProvider = () => deadline;
+            var watch = Stopwatch.StartNew();
+            using var first = decoder.ReadFrame();
+            using var second = decoder.ReadFrame();
+            Check(first != null && second != null && second.PresentationTime > first.PresentationTime
+                && decoder.DiscardedFrames > 0,
+                "An overloaded reader presents advancing samples while discarding intervening expired outputs.");
+            var ended = second!.PresentationTime + second.Duration >= decoder.Duration - (2 / decoder.FrameRate);
+            Check(watch.Elapsed.TotalSeconds >= 0.01 || ended,
+                "Stale high-speed output leaves a decode interval between expensive conversions, with an endpoint bypass.");
+            deadline = FrameDeadline.None;
+            decoder.Seek(0);
+            using var resumed = decoder.ReadFrame();
+            Check(resumed != null && resumed.PresentationTime < 1 / decoder.FrameRate,
+                "A frozen deadline and explicit seek immediately restore the original first frame after overload sampling.");
+        }
+
+        /// <summary>Checks that catch-up at every playback rate selects an already due keyframe without a future GOP wait.</summary>
+        /// <param name="media">The real indexed fixture with a reachable keyframe near its midpoint.</param>
+        /// <exception cref="InvalidOperationException">Catch-up fails, moves backwards, or returns a keyframe ahead of the fixed clock.</exception>
+        private static void TestDueKeyFrameCatchUp(string media)
+        {
+            foreach (var rate in new[] { 1d, 2d, 3d, 16d })
+            {
+                using var decoder = new FFmpegVideoDecoder();
+                decoder.Open(media, CancellationToken.None);
+                using var first = decoder.ReadFrame();
+                Check(first != null, "Due-keyframe catch-up starts with a real early frame.");
+                var firstEnd = first!.PresentationTime + first.Duration;
+                var target = decoder.Duration / 2;
+                decoder.FrameDeadlineProvider = () => new FrameDeadline(target, double.NegativeInfinity, target - (0.1 * rate), rate);
+                using var caughtUp = decoder.ReadFrame();
+                Check(caughtUp != null && decoder.CatchUpSeeks == 1 && caughtUp.PresentationTime > firstEnd
+                    && caughtUp.PresentationTime <= target,
+                    "Catch-up at " + rate + "x presents a strictly newer keyframe already due on the playback clock.");
+                var previous = caughtUp!.PresentationTime;
+                using var following = decoder.ReadFrame();
+                Check(following != null && following.PresentationTime > previous
+                    && decoder.CatchUpSeeks == 1,
+                    "A fixed clock continues sequentially instead of seeking back into the same due GOP at " + rate + "x.");
+            }
+        }
+
+        /// <summary>Checks that a late decoder can reach the final GOP even when no keyframe exists after the playback clock.</summary>
+        /// <param name="media">The seekable fixture with a later keyframe, also required by the normal catch-up test.</param>
+        /// <exception cref="InvalidOperationException">End-of-input catch-up fails, repeats a seek, or returns timestamps in reverse order.</exception>
+        private static void TestFinalKeyFrameCatchUp(string media)
+        {
+            using var decoder = new FFmpegVideoDecoder();
+            decoder.Open(media, CancellationToken.None);
+            using var first = decoder.ReadFrame();
+            Check(first != null && decoder.CanSeek && decoder.Duration > 2,
+                "Final-GOP catch-up starts with a real early frame from a seekable fixture.");
+            var firstEnd = first!.PresentationTime + first.Duration;
+            var deadline = new FrameDeadline(decoder.Duration, double.NegativeInfinity, decoder.Duration - 0.25, 1);
+            decoder.FrameDeadlineProvider = () => deadline;
+            using var caughtUp = decoder.ReadFrame();
+            Check(caughtUp != null && decoder.CatchUpSeeks == 1 && caughtUp.PresentationTime > firstEnd
+                && caughtUp.PresentationTime <= deadline.Position,
+                "A clock at the endpoint jumps to a strictly newer preceding keyframe when no forward keyframe exists.");
+            var previous = caughtUp!.PresentationTime;
+            var maximumFrames = checked((int)Math.Ceiling(decoder.Duration * decoder.FrameRate) + 1);
+            var ended = false;
+            for (var index = 0; index < maximumFrames; index++)
+            {
+                using var frame = decoder.ReadFrame();
+                if (frame == null)
+                {
+                    ended = true;
+                    break;
+                }
+
+                Check(frame.PresentationTime > previous,
+                    "Final-GOP recovery advances monotonically without revisiting a decoded frame.");
+                previous = frame.PresentationTime;
+            }
+
+            Check(ended && decoder.CatchUpSeeks == 1,
+                "Final-GOP recovery drains the input without repeatedly seeking into the same GOP.");
         }
 
         /// <summary>Consumes due frames at a fixed interval as the player would, measuring how far behind the clock they are.</summary>

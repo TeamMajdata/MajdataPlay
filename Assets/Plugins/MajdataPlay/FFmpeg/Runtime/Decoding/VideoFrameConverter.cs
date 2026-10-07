@@ -1,6 +1,7 @@
 #nullable enable
 using FFmpeg.AutoGen;
 using MajdataPlay.Diagnostics;
+using MajdataPlay.FFmpeg.Interop;
 using System;
 
 namespace MajdataPlay.FFmpeg.Internal
@@ -44,6 +45,19 @@ namespace MajdataPlay.FFmpeg.Internal
         public DecodedVideoFrame Convert(AVFrame* source, double pts, double duration, double rotation, int maximumPixels)
         {
             using var profile = UnityProfiler.Create("FFmpeg.Decoder.ConvertRGBA");
+            if (source->hw_frames_ctx == null && (AVPixelFormat)source->format == AVPixelFormat.AV_PIX_FMT_D3D11)
+            {
+                // Staged RGBA surfaces retain their original decodable NV12 frame.
+                // FFmpeg's D3D11 transfer API does not accept the shared RGBA format.
+                var original = VulkanVideoInterop.GetD3D11StageSource((IntPtr)source);
+                if (original == IntPtr.Zero)
+                {
+                    throw new NotSupportedException("The staged D3D11 frame has no downloadable decoder surface.");
+                }
+
+                source = (AVFrame*)original;
+            }
+
             var hardware = source->hw_frames_ctx != null;
             if (source->hw_frames_ctx != null)
             {

@@ -8,8 +8,13 @@ namespace MajdataPlay.FFmpeg.Internal
     /// <summary>Polls short GPU operations without imposing a millisecond timer delay on every decoded frame.</summary>
     internal struct GpuCompletionWait
     {
+#if UNITY_STANDALONE_WIN || UNITY_EDITOR_WIN
+        /// <summary>Bounds Windows yielding polls so short staging queries avoid coarse kernel timer waits.</summary>
+        private const int FastPollMilliseconds = 16;
+#else
         /// <summary>Bounds yielding polls before backing off for a slow or unresponsive GPU.</summary>
         private const int FastPollMilliseconds = 4;
+#endif
         /// <summary>Stores the monotonic deadline for the complete GPU operation.</summary>
         private readonly long _deadline;
         /// <summary>Stores the monotonic deadline for short spin/yield polling.</summary>

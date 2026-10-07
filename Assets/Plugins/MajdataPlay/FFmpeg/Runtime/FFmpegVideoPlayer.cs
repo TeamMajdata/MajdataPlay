@@ -56,7 +56,7 @@ namespace MajdataPlay.FFmpeg
     [DisallowMultipleComponent, AddComponentMenu("Video/FFmpeg Video Player")]
     public sealed partial class FFmpegVideoPlayer : MonoBehaviour
     {
-        /// <summary>Allows short worker scheduling gaps without freezing the playback timeline, in wall-clock seconds.</summary>
+        /// <summary>Allows short worker scheduling gaps before reporting buffering, in wall-clock seconds.</summary>
         private const double PlaybackBufferingGraceSeconds = 0.1;
         /// <summary>Stores the path or URL of the video to open.</summary>
         [SerializeField, FormerlySerializedAs("Source"), Tooltip("Local path or FFmpeg-supported URL. Android packaged StreamingAssets must first be extracted.")]
@@ -113,6 +113,8 @@ namespace MajdataPlay.FFmpeg
         private bool _playWhenReady, _waitingForFrame, _prepared, _hardwareActive, _hardwareRequired, _hardwareCpuUploadAttempted, _stepRequested;
         /// <summary>Prevents retrying the preferred native backend after falling back to the platform backend.</summary>
         private bool _platformBackendOnly;
+        /// <summary>Retries an available renderer-native decoder after independent Windows GPU transport fails.</summary>
+        private bool _rendererBackendOnly;
         /// <summary>Caches the last logged transfer mode to avoid per-frame log messages.</summary>
         private string? _reportedTransferMode;
         /// <summary>Stores the playback state to restore after seeking.</summary>
@@ -350,6 +352,7 @@ namespace MajdataPlay.FFmpeg
             {
                 _hardwareRequired = _requireHardwareDecoding;
                 _platformBackendOnly = false;
+                _rendererBackendOnly = false;
                 var options = new DecoderOptions
                 {
                     IOTimeoutMilliseconds = Math.Max(1, IOTimeoutSeconds) * 1000,
@@ -811,7 +814,6 @@ namespace MajdataPlay.FFmpeg
                 if (_waitingForFrame)
                 {
                     _waitingForFrame = false;
-                    session.SetPlayback(playing: true);
                 }
             }
 
@@ -827,18 +829,16 @@ namespace MajdataPlay.FFmpeg
                     BeginSeek(0, VideoPlaybackState.Playing);
                 }
             }
-            // A short worker/GPU scheduling gap is not an input stall. Keep the
-            // clock and discard deadlines advancing so high-rate decoding can catch up.
+            // Missing output is diagnostic only during playback. The media clock
+            // must keep advancing so the worker can discard late frames and catch up.
             else if (newest == null && session.BufferedFrames == 0 && !session.EndOfStream
                 && HasPlaybackUnderflow(now, _lastFrameEnd, _playbackRate))
             {
-                session.SetPlayback(playing: false);
                 _waitingForFrame = true;
             }
             else if (_waitingForFrame && session.BufferedFrames > 0)
             {
                 _waitingForFrame = false;
-                session.SetPlayback(playing: true);
             }
         }
 
@@ -846,7 +846,7 @@ namespace MajdataPlay.FFmpeg
         /// <param name="position">The current media timeline position in seconds.</param>
         /// <param name="frameEnd">The last displayed frame's end position in media seconds.</param>
         /// <param name="rate">The positive playback multiplier used to convert the gap into wall-clock time.</param>
-        /// <returns>True when missing output exceeds the wall-clock grace period and buffering should freeze the clock.</returns>
+        /// <returns>True when missing output exceeds the wall-clock grace period and buffering should be reported.</returns>
         internal static bool HasPlaybackUnderflow(double position, double frameEnd, double rate)
         {
             return position - frameEnd > PlaybackBufferingGraceSeconds * rate;
@@ -857,19 +857,14 @@ namespace MajdataPlay.FFmpeg
         /// <remarks>
         /// Above 1x speed, or after a stall, many frames can become due between updates. Each presentation costs a texture
         /// upload or GPU conversion on Unity's render thread, so the rate is bounded to what 1x playback needs; frames
-        /// skipped by the bound are superseded on the decoding worker. The slack keeps 1x playback jitter unaffected.
+        /// skipped by the bound are superseded on the decoding worker.
         /// </remarks>
         private bool IsPresentationThrottled()
         {
-            if (_waitingForFrame)
-            {
-                return false;
-            }
-
             var frameRate = _info?.FrameRate ?? 0;
             var nominalFrameRate = double.IsNaN(frameRate) || frameRate <= 0 ? 60 : Math.Max(24, Math.Min(120, frameRate));
             var elapsed = (Stopwatch.GetTimestamp() - _lastPlaybackPresentTimestamp) / (double)Stopwatch.Frequency;
-            return elapsed < 0.75 / nominalFrameRate;
+            return elapsed < 1 / nominalFrameRate;
         }
 
         /// <summary>Uploads or shares a frame and publishes its texture while guarding against reentrant controls.</summary>
@@ -1005,14 +1000,30 @@ namespace MajdataPlay.FFmpeg
         {
             HardwareFallbackReason = reason.Message;
             var device = (_session?.Info ?? _info)?.HardwareDeviceType;
-            if (!_platformBackendOnly && (device == global::FFmpeg.AutoGen.AVHWDeviceType.AV_HWDEVICE_TYPE_D3D12VA
+            if (!_platformBackendOnly && !_rendererBackendOnly && !_hardwareCpuUploadAttempted
+                && device == global::FFmpeg.AutoGen.AVHWDeviceType.AV_HWDEVICE_TYPE_D3D11VA
+                && CanUseRendererNativeBackend())
+            {
+                _rendererBackendOnly = true;
+                MajDebug.LogWarning("FFmpeg", "[Player] Independent GPU transport failed; retrying the renderer-native hardware backend. " + reason.Message);
+                RecoverPlayback(reason, false, true);
+                return;
+            }
+
+            if (!_platformBackendOnly && (_rendererBackendOnly
+                || device == global::FFmpeg.AutoGen.AVHWDeviceType.AV_HWDEVICE_TYPE_D3D12VA
                 || device == global::FFmpeg.AutoGen.AVHWDeviceType.AV_HWDEVICE_TYPE_VULKAN))
             {
+                var retryPlatform = !_rendererBackendOnly;
+                _rendererBackendOnly = false;
                 _platformBackendOnly = true;
-                MajDebug.LogWarning("FFmpeg", "[Player] Native video decoder failed; retrying the platform hardware backend. " + reason.Message);
-                bool native = _preferNativeTextures || _hardwareRequired;
-                RecoverPlayback(reason, !native, native);
-                return;
+                if (retryPlatform)
+                {
+                    MajDebug.LogWarning("FFmpeg", "[Player] Native video decoder failed; retrying the platform hardware backend. " + reason.Message);
+                    bool native = _preferNativeTextures || _hardwareRequired;
+                    RecoverPlayback(reason, !native, native);
+                    return;
+                }
             }
 
             if (_hardwareRequired)
@@ -1050,10 +1061,10 @@ namespace MajdataPlay.FFmpeg
         /// <summary>Reopens media with a fallback transport while preserving the playback position and requested state.</summary>
         /// <param name="reason">The failure that triggered transport recovery or backend fallback.</param>
         /// <param name="hardwareCpuUpload">Whether recovery should retain hardware decoding with CPU pixel upload.</param>
-        /// <param name="platformNative">Whether recovery should retry the platform native backend before CPU fallback.</param>
-        private void RecoverPlayback(Exception reason, bool hardwareCpuUpload, bool platformNative = false)
+        /// <param name="nativeTransport">Whether recovery should retry GPU transport before CPU fallback.</param>
+        private void RecoverPlayback(Exception reason, bool hardwareCpuUpload, bool nativeTransport = false)
         {
-            _hardwareActive = hardwareCpuUpload || platformNative;
+            _hardwareActive = hardwareCpuUpload || nativeTransport;
             var resume = State == VideoPlaybackState.Seeking ? _afterSeek : State;
             double position = TimeSeconds;
             _session?.SetPlayback(playing: false);
@@ -1063,7 +1074,7 @@ namespace MajdataPlay.FFmpeg
                 _session?.Dispose();
                 _session = null;
                 ReleasePresentation();
-                TransferMode = platformNative ? "Reopening platform hardware decoder" : hardwareCpuUpload
+                TransferMode = nativeTransport ? "Reopening GPU hardware decoder" : hardwareCpuUpload
                     ? "Reopening hardware decoder for CPU upload" : "Reopening software decoder";
                 _reportedTransferMode = null;
                 var options = new DecoderOptions
@@ -1072,9 +1083,9 @@ namespace MajdataPlay.FFmpeg
                     RequireHardwareDecoding = _hardwareRequired,
                     AllowHardwareCpuUpload = !_hardwareRequired
                 };
-                if (hardwareCpuUpload || platformNative)
+                if (hardwareCpuUpload || nativeTransport)
                 {
-                    ConfigureHardware(options, platformNative);
+                    ConfigureHardware(options, nativeTransport);
                 }
 
                 _session = new VideoDecodeSession(NormalizeSource(_source), options, BufferedFrameLimit, _playbackRate);
@@ -1103,10 +1114,10 @@ namespace MajdataPlay.FFmpeg
             }
             catch (Exception recoveryError)
             {
-                if (platformNative && !_hardwareRequired)
+                if (nativeTransport && !_hardwareRequired)
                 {
                     _hardwareCpuUploadAttempted = true;
-                    MajDebug.LogWarning("FFmpeg", "[Player] Platform GPU transport failed; retrying hardware decoding with CPU upload. " + recoveryError.Message);
+                    MajDebug.LogWarning("FFmpeg", "[Player] GPU transport failed; retrying hardware decoding with CPU upload. " + recoveryError.Message);
                     RecoverPlayback(recoveryError, true);
                 }
                 else if (hardwareCpuUpload)

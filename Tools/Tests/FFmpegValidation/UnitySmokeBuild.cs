@@ -1,3 +1,5 @@
+#nullable enable
+
 using System;
 using System.IO;
 using UnityEditor;
@@ -44,6 +46,7 @@ public static class FFmpegPlayerSmokeBuild
         PlayerSettings.defaultScreenWidth = 320; PlayerSettings.defaultScreenHeight = 240;
         PlayerSettings.runInBackground = true;
         PlayerSettings.allowUnsafeCode = true;
+        PlayerSettings.enableFrameTimingStats = true;
         var scene = EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
         var camera = new GameObject("Camera").AddComponent<Camera>();
         camera.clearFlags = CameraClearFlags.SolidColor;

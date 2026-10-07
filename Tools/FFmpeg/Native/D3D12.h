@@ -7,6 +7,7 @@ int FfuD3D12Status();
 int FfuD3D12Capabilities();
 void FfuD3D12Render(int event, void* data);
 void FfuD3D12Poll(bool drain);
+void FfuD3D12ForgetPresenter(void* presenter);
 FFU_EXPORT void* FFU_CALL ffu_d3d12_prepare(void* presenter, const AVFrame* frame, void* unityTexture);
 FFU_EXPORT void FFU_CALL ffu_d3d12_cancel(void* packet);
 // Acquires an owned FFmpeg AVBufferRef wrapping Unity's D3D12 device.

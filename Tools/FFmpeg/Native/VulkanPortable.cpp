@@ -169,6 +169,7 @@ struct PortableJob {
     VkDescriptorPool descriptorPool = VK_NULL_HANDLE;
     VkPipelineLayout layout = VK_NULL_HANDLE;
     VkPipeline pipeline = VK_NULL_HANDLE;
+    VkDescriptorSet descriptor = VK_NULL_HANDLE;
     VkCommandPool commandPool = VK_NULL_HANDLE;
     VkFence fence = VK_NULL_HANDLE;
     bool submitted = false;
@@ -195,7 +196,7 @@ struct PortableJob {
 };
 std::mutex jobsMutex;
 std::vector<PortableJob*> jobs;
-VkResult Build(PortableJob& job, VkCommandBuffer& command) {
+VkResult Allocate(PortableJob& job, VkCommandBuffer& command) {
     auto& c = *job.context; auto device = c.instance.device;
 #define TRY(expression) do { const VkResult r = (expression); if (r != VK_SUCCESS) return r; } while (0)
     VkImageCreateInfo image{}; image.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
@@ -236,13 +237,13 @@ VkResult Build(PortableJob& job, VkCommandBuffer& command) {
     TRY(c.CreateDescriptorPool(device, &pool, nullptr, &job.descriptorPool));
     VkDescriptorSetAllocateInfo allocate{}; allocate.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
     allocate.descriptorPool = job.descriptorPool; allocate.descriptorSetCount = 1; allocate.pSetLayouts = &job.descriptors;
-    VkDescriptorSet descriptor = VK_NULL_HANDLE; TRY(c.AllocateDescriptorSets(device, &allocate, &descriptor));
+    TRY(c.AllocateDescriptorSets(device, &allocate, &job.descriptor));
     VkDescriptorImageInfo images[3]{{job.sample.sampler[0], job.sample.view[0], VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
         {job.sample.sampler[second], job.sample.view[second], VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
         {VK_NULL_HANDLE, job.rgbaView, VK_IMAGE_LAYOUT_GENERAL}};
     VkWriteDescriptorSet writes[3]{};
     for (int i = 0; i < 3; ++i) {
-        writes[i].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET; writes[i].dstSet = descriptor;
+        writes[i].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET; writes[i].dstSet = job.descriptor;
         writes[i].dstBinding = i; writes[i].descriptorCount = 1; writes[i].descriptorType = bindings[i].descriptorType; writes[i].pImageInfo = &images[i];
     }
     c.UpdateDescriptorSets(device, 3, writes, 0, nullptr);
@@ -252,6 +253,17 @@ VkResult Build(PortableJob& job, VkCommandBuffer& command) {
     VkCommandBufferAllocateInfo cb{}; cb.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
     cb.commandPool = job.commandPool; cb.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY; cb.commandBufferCount = 1;
     TRY(c.AllocateCommandBuffers(device, &cb, &command));
+    VkFenceCreateInfo fence{}; fence.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+    TRY(c.CreateFence(device, &fence, nullptr, &job.fence));
+    return VK_SUCCESS;
+#undef TRY
+}
+// Only recording and submission need the decoder's frame-state gate. Driver
+// allocations and pipeline construction above cannot delay the decode worker
+// while Unity owns that gate.
+VkResult Record(PortableJob& job, VkCommandBuffer command) {
+    auto& c = *job.context;
+#define TRY(expression) do { const VkResult r = (expression); if (r != VK_SUCCESS) return r; } while (0)
     VkCommandBufferBeginInfo begin{}; begin.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO; begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
     TRY(c.BeginCommandBuffer(command, &begin));
     VkImageMemoryBarrier barriers[3]{};
@@ -268,13 +280,14 @@ VkResult Build(PortableJob& job, VkCommandBuffer& command) {
     output.image = job.rgba; output.dstAccessMask = VK_ACCESS_SHADER_WRITE_BIT; output.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
     c.CmdPipelineBarrier(command, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 0, nullptr, 0, nullptr, job.sample.planeCount + 1, barriers);
     c.CmdBindPipeline(command, VK_PIPELINE_BIND_POINT_COMPUTE, job.pipeline);
-    c.CmdBindDescriptorSets(command, VK_PIPELINE_BIND_POINT_COMPUTE, job.layout, 0, 1, &descriptor, 0, nullptr);
+    c.CmdBindDescriptorSets(command, VK_PIPELINE_BIND_POINT_COMPUTE, job.layout, 0, 1, &job.descriptor, 0, nullptr);
     c.CmdPushConstants(command, job.layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(job.parameters), &job.parameters);
     c.CmdDispatch(command, (job.sample.width + 7) / 8, (job.sample.height + 7) / 8, 1);
     output.oldLayout = VK_IMAGE_LAYOUT_GENERAL; output.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
     output.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT; output.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
     c.CmdPipelineBarrier(command, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 1, &output);
-    VkImageCopy copy{}; copy.srcSubresource = copy.dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1}; copy.extent = image.extent;
+    VkImageCopy copy{}; copy.srcSubresource = copy.dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+    copy.extent = {job.sample.width, job.sample.height, 1};
     c.CmdCopyImage(command, job.rgba, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, job.target.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copy);
     for (uint32_t i = 0; i < job.sample.planeCount; ++i) {
         auto& b = barriers[i]; b.oldLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL; b.newLayout = job.sample.initialLayout;
@@ -282,8 +295,6 @@ VkResult Build(PortableJob& job, VkCommandBuffer& command) {
     }
     c.CmdPipelineBarrier(command, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0, 0, nullptr, 0, nullptr, job.sample.planeCount, barriers);
     TRY(c.EndCommandBuffer(command));
-    VkFenceCreateInfo fence{}; fence.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
-    TRY(c.CreateFence(device, &fence, nullptr, &job.fence));
     return VK_SUCCESS;
 #undef TRY
 }
@@ -294,12 +305,14 @@ void UNITY_INTERFACE_API OnQueue(int, void* pointer) {
     std::lock_guard<std::mutex> lock(jobsMutex);
     std::lock_guard<std::recursive_mutex> resources(c.resources);
     if (!c.active) { job->presenter->error = 104; delete job; return; }
+    VkCommandBuffer command = VK_NULL_HANDLE;
+    VkResult result = Allocate(*job, command);
+    if (result != VK_SUCCESS) { job->presenter->error = result; delete job; return; }
     if (job->sample.lock && !job->sample.lock(job->sample)) {
         if (!job->sample.pending) job->presenter->error = 416;
         delete job; return;
     }
-    VkCommandBuffer command = VK_NULL_HANDLE;
-    VkResult result = Build(*job, command);
+    result = Record(*job, command);
     if (result == VK_SUCCESS) {
         VkSubmitInfo submit{}; submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO; submit.commandBufferCount = 1; submit.pCommandBuffers = &command;
         const VkPipelineStageFlags stage = VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT;

@@ -19,7 +19,7 @@ static UnityVulkanInstance instance{};
 static IUnityGraphicsVulkanV2 unity{};
 static VkImage output;
 static int released=0, submitted=0;
-static int gpuSubmitted=0, frameLocks=0, frameUnlocks=0;
+static int gpuSubmitted=0;
 static UnityRenderingEventAndData deferred=nullptr;
 static void* deferredData=nullptr;
 static VkResult VKAPI_CALL Submit(VkQueue queue, uint32_t count, const VkSubmitInfo* commands, VkFence fence) {
@@ -89,8 +89,6 @@ static void Barrier(VkCommandBuffer command,VkImage image,VkImageLayout from,VkI
     vkCmdPipelineBarrier(command,VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,0,0,nullptr,0,nullptr,1,&b);
 }
 static void KeepStackBuffer(void*, uint8_t*) {}
-static void LockFrame(AVHWFramesContext*, AVVkFrame*) { ++frameLocks; }
-static void UnlockFrame(AVHWFramesContext*, AVVkFrame*) { ++frameUnlocks; }
 // Model a decoder frame whose real Vulkan timeline has not completed. No codec
 // or Vulkan Video capability is needed to exercise the production polling API.
 static bool TestDecodeReadiness() {
@@ -108,10 +106,9 @@ static bool TestDecodeReadiness() {
     device.type = AV_HWDEVICE_TYPE_VULKAN;
     device.hwctx = &vulkanDevice;
     AVVulkanFramesContext pool{};
-    pool.lock_frame = LockFrame;
-    pool.unlock_frame = UnlockFrame;
     AVHWFramesContext frames{};
     frames.hwctx = &pool;
+    frames.device_ctx = &device;
     frames.device_ref = av_buffer_create(reinterpret_cast<uint8_t*>(&device), sizeof(device), KeepStackBuffer, nullptr, 0);
     AVVkFrame image{};
     image.sem[0] = semaphore;
@@ -122,6 +119,7 @@ static bool TestDecodeReadiness() {
     frame->data[0] = reinterpret_cast<uint8_t*>(&image);
     frame->hw_frames_ctx = av_buffer_create(reinterpret_cast<uint8_t*>(&frames), sizeof(frames), KeepStackBuffer, nullptr, 0);
     if (!frame->hw_frames_ctx) return false;
+    if (ffu_vulkan_video_configure_frames(frame->hw_frames_ctx) != 0) return false;
     constexpr int iterations = 256;
     const auto start = std::chrono::steady_clock::now();
     for (int i = 0; i < iterations; ++i) {
@@ -131,9 +129,9 @@ static bool TestDecodeReadiness() {
         }
     }
     const double milliseconds = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
-    if (milliseconds > 500 || frameLocks != iterations || frameUnlocks != frameLocks || submitted || gpuSubmitted) {
-        std::printf("FAIL: decode polling blocked or submitted Unity GPU work (%.3f ms, locks=%d/%d, queues=%d/%d)\n",
-            milliseconds, frameLocks, frameUnlocks, submitted, gpuSubmitted);
+    if (milliseconds > 500 || submitted || gpuSubmitted) {
+        std::printf("FAIL: decode polling blocked or submitted Unity GPU work (%.3f ms, queues=%d/%d)\n",
+            milliseconds, submitted, gpuSubmitted);
         return false;
     }
     VkSemaphoreSignalInfo signal{};
@@ -141,11 +139,12 @@ static bool TestDecodeReadiness() {
     signal.semaphore = semaphore;
     signal.value = 1;
     CHECK(vkSignalSemaphore(instance.device, &signal));
-    if (ffu_vulkan_video_frame_ready(frame) != 1 || frameLocks != iterations + 1 || frameUnlocks != frameLocks) {
-        std::puts("FAIL: completed decode timeline did not become ready with balanced frame locking");
+    if (ffu_vulkan_video_frame_ready(frame) != 1) {
+        std::puts("FAIL: completed decode timeline did not become ready");
         return false;
     }
     av_frame_free(&frame);
+    frames.free(&frames);
     av_buffer_unref(&frames.device_ref);
     vkDestroySemaphore(instance.device, semaphore, nullptr);
     std::printf("PASS: pending decode readiness, %d nonblocking polls in %.3f ms, completed timeline readiness\n", iterations, milliseconds);

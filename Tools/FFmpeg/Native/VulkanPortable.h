@@ -37,8 +37,9 @@ struct FfuVkSample {
     VkImageLayout initialLayout = VK_IMAGE_LAYOUT_GENERAL;
     uint32_t foreignQueue = VK_QUEUE_FAMILY_FOREIGN_EXT;
     VkSemaphore acquireSemaphore = VK_NULL_HANDLE;
-    // FFmpeg frames use a timeline semaphore. lock is called immediately before
-    // recording/submission so layout and semaphore values cannot become stale.
+    // FFmpeg frames use a timeline semaphore. A nonblocking lock is called
+    // after allocation, immediately before recording/submission, so layout and
+    // semaphore values cannot become stale. A decoder-owned gate declines it.
     bool timeline = false;
     // A lock callback may decline a still-decoding frame without failing the
     // presenter. The last completed Unity texture remains available instead.

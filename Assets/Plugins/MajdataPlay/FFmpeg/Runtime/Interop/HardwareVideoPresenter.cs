@@ -1,6 +1,7 @@
 #nullable enable
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Runtime.InteropServices;
 using MajdataPlay.Diagnostics;
 using MajdataPlay.FFmpeg.Internal;
@@ -29,7 +30,7 @@ namespace MajdataPlay.FFmpeg.Interop
         /// <summary>Define bridge event offsets for frame submission, preparation, completion, and resource retirement on the render thread.</summary>
         private const int SubmitD3D11 = 1, CompleteMetal = 2, Drain = 3, PrepareD3D12 = 4,
             SubmitD3D12 = 5, SubmitWgl = 6, CompleteWgl = 7, DestroyWgl = 8, SubmitVulkan = 9, ReleaseVulkan = 10,
-            SubmitNativeVulkan = 11, PrepareNativeD3D12 = 12, SubmitNativeD3D12 = 13;
+            SubmitNativeVulkan = 11, PrepareNativeD3D12 = 12, SubmitNativeD3D12 = 13, Poll = 14;
         /// <summary>Caches the shader property identifier for the chroma plane.</summary>
         private static readonly int s_chromaId = Shader.PropertyToID("_FFUChroma");
         /// <summary>Caches the shader property identifier for frame rotation and UV transformation.</summary>
@@ -66,6 +67,8 @@ namespace MajdataPlay.FFmpeg.Interop
         private static bool s_vulkanRetirementPending;
         /// <summary>Prevents submission after native presentation resources have been released.</summary>
         private bool _disposed;
+        /// <summary>Tracks the last render submission so completed packets are polled when video submissions stop.</summary>
+        private long _lastSubmissionTimestamp;
         /// <summary>Gets the last successful transfer description, or null before the first presentation.</summary>
         public string? TransferMode { get; private set; }
         /// <summary>Gets the reason the native graphics bridge is unavailable, or null when available.</summary>
@@ -184,7 +187,7 @@ namespace MajdataPlay.FFmpeg.Interop
 
         // Does not call SystemInfo: this is passed directly to the decoder worker.
         // The returned COM reference belongs to libavutil's D3D11VA device context.
-        /// <summary>Acquires Unity's D3D11 device for the decoder worker without accessing Unity APIs.</summary>
+        /// <summary>Acquires an independent D3D11 decoding device on Unity's adapter without accessing Unity APIs.</summary>
         /// <returns>An added COM device reference owned by the caller, or zero when unavailable.</returns>
         public static IntPtr AcquireD3D11Device() => Native.FfuD3D11AcquireDevice();
         /// <summary>Acquires an FFmpeg D3D12VA device sharing Unity's graphics device.</summary>
@@ -270,6 +273,7 @@ namespace MajdataPlay.FFmpeg.Interop
         {
             using var profile = UnityProfiler.Create("FFmpeg.Interop.SubmitCommands");
             Graphics.ExecuteCommandBuffer(_commands!);
+            _lastSubmissionTimestamp = Stopwatch.GetTimestamp();
         }
 
         /// <summary>Collects completed retirements and reports asynchronous GPU presentation failures.</summary>
@@ -277,6 +281,17 @@ namespace MajdataPlay.FFmpeg.Interop
         public void CheckErrors()
         {
             CollectRetiredWglTextures();
+            if (!_disposed && (_d3d11 != IntPtr.Zero || _nativeD3D12 != IntPtr.Zero)
+                && (Stopwatch.GetTimestamp() - _lastSubmissionTimestamp) / (double)Stopwatch.Frequency >= 0.02)
+            {
+                // A full staging pool can stop new frame submissions. Poll completed
+                // render packets independently so their surface leases can be reused.
+                // This event never waits for an unfinished GPU fence or flushes decode.
+                _commands!.Clear();
+                Event(Poll, IntPtr.Zero);
+                SubmitCommands();
+            }
+
             if (_nativeD3D12 != IntPtr.Zero && Native.FfuD3D12VAError(_nativeD3D12) != 0)
             {
                 throw new NotSupportedException("D3D12VA GPU presentation failed (native 0x" + Native.FfuD3D12VAError(_nativeD3D12).ToString("X8") + ").");
@@ -904,8 +919,8 @@ namespace MajdataPlay.FFmpeg.Interop
             /// <returns>The borrowed Unity render-event callback pointer; callers must not release it.</returns>
             [DllImport(Library, CallingConvention = CallingConvention.Cdecl, EntryPoint = "ffu_render_callback")]
             internal static extern IntPtr FfuRenderCallback();
-            /// <summary>Acquires an added COM reference to Unity's D3D11 device.</summary>
-            /// <returns>An added COM reference to Unity's D3D11 device, or zero when unavailable; ownership transfers to the caller.</returns>
+            /// <summary>Acquires an independent D3D11 decoding device on Unity's adapter.</summary>
+            /// <returns>An added COM device reference, or zero when unavailable; ownership transfers to the caller.</returns>
             [DllImport(Library, CallingConvention = CallingConvention.Cdecl, EntryPoint = "ffu_d3d11_acquire_device")]
             internal static extern IntPtr FfuD3D11AcquireDevice();
             /// <summary>Creates an owned D3D11 video presenter.</summary>

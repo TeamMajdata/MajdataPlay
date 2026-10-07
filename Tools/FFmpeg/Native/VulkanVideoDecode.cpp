@@ -462,6 +462,43 @@ FFU_EXPORT void* FFU_CALL ffu_vulkan_video_acquire_device() {
 }
 
 namespace {
+// FFmpeg can lock several DPB frames from one pool in the same submission. A
+// recursive pool gate preserves that protocol and exposes a public try-lock to
+// the renderer without relying on AVVkFrame's private internal mutex layout.
+struct FrameGate {
+    std::recursive_mutex mutex;
+    void (*originalFree)(AVHWFramesContext*) = nullptr;
+};
+std::mutex frameGatesMutex;
+std::map<AVHWFramesContext*, std::unique_ptr<FrameGate>> frameGates;
+FrameGate* FindFrameGate(AVHWFramesContext* frames) {
+    std::lock_guard<std::mutex> lock(frameGatesMutex);
+    const auto it = frameGates.find(frames);
+    return it == frameGates.end() ? nullptr : it->second.get();
+}
+void LockFrames(AVHWFramesContext* frames, AVVkFrame*) {
+    FindFrameGate(frames)->mutex.lock();
+}
+void UnlockFrames(AVHWFramesContext* frames, AVVkFrame*) {
+    FindFrameGate(frames)->mutex.unlock();
+}
+void FreeFrameGate(AVHWFramesContext* frames) {
+    std::unique_ptr<FrameGate> gate;
+    {
+        std::lock_guard<std::mutex> lock(frameGatesMutex);
+        const auto it = frameGates.find(frames);
+        if (it == frameGates.end()) return;
+        gate = std::move(it->second); frameGates.erase(it);
+    }
+    // Vulkan Video frame_params owns a profile through free/user_opaque. Keep
+    // that opaque pointer intact and chain its original public free callback.
+    frames->free = gate->originalFree;
+    if (frames->free) frames->free(frames);
+}
+FrameGate* GetFrameGate(AVHWFramesContext* frames, AVVulkanFramesContext* pool) {
+    return pool->lock_frame == LockFrames && pool->unlock_frame == UnlockFrames && frames->free == FreeFrameGate
+        ? FindFrameGate(frames) : nullptr;
+}
 // Readiness is a host query, never a wait submitted onto Unity's graphics queue.
 // The caller holds both the context resource lock and the FFmpeg frame lock.
 int TimelineReady(const std::shared_ptr<FfuVkContext>& context, const AVVkFrame* image) {
@@ -485,13 +522,14 @@ struct FrameOwner {
     VkImageView view = VK_NULL_HANDLE;
     VkSampler sampler = VK_NULL_HANDLE;
     VkSamplerYcbcrConversion conversion = VK_NULL_HANDLE;
+    FrameGate* gate = nullptr;
     bool locked = false;
     uint64_t signalValue = 0;
     PFN_vkDestroyImageView destroyView = nullptr;
     PFN_vkDestroySampler destroySampler = nullptr;
     PFN_vkDestroySamplerYcbcrConversion destroyConversion = nullptr;
     ~FrameOwner() {
-        if (locked) pool->unlock_frame(frames, image);
+        if (locked) gate->mutex.unlock();
         std::lock_guard<std::recursive_mutex> resources(context->resources);
         if (!device || !device->destroyed) {
             if (view) destroyView(context->instance.device, view, nullptr);
@@ -503,18 +541,22 @@ struct FrameOwner {
         // destruction remains deferred until this FFmpeg pool teardown finishes.
     }
     bool Lock(FfuVkSample& sample) {
-        pool->lock_frame(frames, image); locked = true;
+        if (!gate || !gate->mutex.try_lock()) {
+            sample.pending = true;
+            return false;
+        }
+        locked = true;
         if (!image->sem[0] || image->sem_value[0] == UINT64_MAX || image->layout[0] == VK_IMAGE_LAYOUT_UNDEFINED ||
             image->layout[0] == VK_IMAGE_LAYOUT_PREINITIALIZED || (image->queue_family[0] != VK_QUEUE_FAMILY_IGNORED &&
             image->queue_family[0] != context->instance.queueFamilyIndex)) {
-            pool->unlock_frame(frames, image); locked = false; return false;
+            gate->mutex.unlock(); locked = false; return false;
         }
         // Decoder DPB reads can advance the timeline after the worker published
         // this frame. Skip a busy image instead of stalling Unity behind it.
         const int ready = TimelineReady(context, image);
         if (ready != 1) {
             sample.pending = ready == 0;
-            pool->unlock_frame(frames, image); locked = false; return false;
+            gate->mutex.unlock(); locked = false; return false;
         }
         sample.initialLayout = image->layout[0]; sample.foreignQueue = VK_QUEUE_FAMILY_IGNORED;
         sample.acquireSemaphore = image->sem[0]; sample.timeline = true;
@@ -530,9 +572,31 @@ struct FrameOwner {
             // must wait on before decoding into or referencing this image.
             image->access[0] = 0;
         }
-        pool->unlock_frame(frames, image); locked = false;
+        gate->mutex.unlock(); locked = false;
     }
 };
+}
+
+FFU_EXPORT int FFU_CALL ffu_vulkan_video_configure_frames(void* framesReference) {
+    auto* reference = static_cast<AVBufferRef*>(framesReference);
+    if (!reference || !reference->data) return AVERROR(EINVAL);
+    auto* frames = reinterpret_cast<AVHWFramesContext*>(reference->data);
+    if (!frames->device_ctx || frames->device_ctx->type != AV_HWDEVICE_TYPE_VULKAN || !frames->hwctx) return AVERROR(EINVAL);
+    auto* pool = static_cast<AVVulkanFramesContext*>(frames->hwctx);
+    // FFmpeg installs its defaults during initialization. Requiring unset
+    // callbacks also prevents replacing an initialized or foreign frame pool.
+    if (pool->lock_frame || pool->unlock_frame) return AVERROR(EINVAL);
+    std::unique_ptr<FrameGate> gate(new (std::nothrow) FrameGate());
+    if (!gate) return AVERROR(ENOMEM);
+    gate->originalFree = frames->free;
+    {
+        std::lock_guard<std::mutex> lock(frameGatesMutex);
+        if (frameGates.count(frames)) return AVERROR(EINVAL);
+        frameGates.emplace(frames, std::move(gate));
+    }
+    frames->free = FreeFrameGate;
+    pool->lock_frame = LockFrames; pool->unlock_frame = UnlockFrames;
+    return 0;
 }
 
 FFU_EXPORT int FFU_CALL ffu_vulkan_video_frame_ready(const AVFrame* frame) {
@@ -549,9 +613,11 @@ FFU_EXPORT int FFU_CALL ffu_vulkan_video_frame_ready(const AVFrame* frame) {
     auto* pool = static_cast<AVVulkanFramesContext*>(frames->hwctx);
     auto* image = reinterpret_cast<AVVkFrame*>(frame->data[0]);
     if (!pool->lock_frame || !pool->unlock_frame || image->img[1] || pool->nb_layers > 1) return AVERROR(ENOSYS);
-    pool->lock_frame(frames, image);
+    auto* gate = GetFrameGate(frames, pool);
+    if (!gate) return AVERROR(ENOSYS);
+    if (!gate->mutex.try_lock()) return 0;
     const int result = TimelineReady(context, image);
-    pool->unlock_frame(frames, image);
+    gate->mutex.unlock();
     return result;
 }
 
@@ -573,6 +639,7 @@ FFU_EXPORT void* FFU_CALL ffu_vulkan_video_prepare(void* presenter, const AVFram
     auto* device = reinterpret_cast<AVHWDeviceContext*>(owner->frames->device_ref->data);
     if (device->type != AV_HWDEVICE_TYPE_VULKAN || static_cast<AVVulkanDeviceContext*>(device->hwctx)->act_dev != context->instance.device) return fail(411);
     owner->pool = static_cast<AVVulkanFramesContext*>(owner->frames->hwctx);
+    owner->gate = GetFrameGate(owner->frames, owner->pool);
     owner->image = reinterpret_cast<AVVkFrame*>(owner->frame->data[0]);
     if (!owner->pool->lock_frame || !owner->pool->unlock_frame || !owner->image->img[0] || owner->image->img[1] || owner->pool->nb_layers > 1) return fail(412);
     const VkFormat format = owner->pool->format[0];
