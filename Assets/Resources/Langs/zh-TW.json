@@ -43,6 +43,7 @@
     "MAJTEXT_LIST_EMPTY_COLLECTION": "此分類為空，或沒有符合篩選條件的譜面",
     "MAJTEXT_LIST_NO_PLAY_RECORD": "暫無遊玩記錄",
     "MAJTEXT_LOADING_CHART": "正在吃您的BK...",
+    "MAJTEXT_COMPILING_SHADERS": "正在編譯著色器",
     "MAJSETTING_CATEGORY_Audio": "音訊設定",
     "MAJSETTING_CATEGORY_ChartSetting": "譜面設定",
     "MAJSETTING_CATEGORY_Debug": "除錯",

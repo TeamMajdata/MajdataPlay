@@ -218,6 +218,15 @@ namespace MajdataPlay
         }
         async UniTask SwitchSceneCoreAsync(string sceneName, bool autoFadeOut)
         {
+            if (sceneName == nameof(MajScenes.Game))
+            {
+                SetLoadingText("MAJTEXT_COMPILING_SHADERS".i18n());
+                // Render the loading message before shader warmup blocks the main thread.
+                await UniTask.WaitForEndOfFrame();
+                Shader.WarmupAllShaders();
+                SetLoadingText(string.Empty);
+            }
+
             //await SceneManager.UnloadSceneAsync(SceneManager.GetActiveScene());
             //await Resources.UnloadUnusedAssets();
             await SceneManager.LoadSceneAsync(sceneName);

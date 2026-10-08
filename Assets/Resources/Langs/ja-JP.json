@@ -315,6 +315,7 @@
     "MAJTEXT_LIST_EMPTY_COLLECTION": "このコレクションは空か、条件に一致する譜面がありません",
     "MAJTEXT_LIST_NO_PLAY_RECORD": "プレイ記録がありません",
     "MAJTEXT_LOADING_CHART": "譜面を読み込み中…",
+    "MAJTEXT_COMPILING_SHADERS": "シェーダーをコンパイル中",
     "MAJTEXT_WAITING_FOR_BACKGROUND_TASKS_SUSPEND": "バックグラウンド処理の完了を待っています",
     "MAJTEXT_LOGGING_OUT": "ログアウト中……",
     "MAJTEXT_LOADING_SCORE_STORAGE": "データベースを読み取り中……",

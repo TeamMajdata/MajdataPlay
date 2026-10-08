@@ -315,6 +315,7 @@
     "MAJTEXT_LIST_EMPTY_COLLECTION": "该分类为空，或没有符合筛选条件的谱面",
     "MAJTEXT_LIST_NO_PLAY_RECORD": "暂无游玩记录",
     "MAJTEXT_LOADING_CHART": "正在吃绝赞",
+    "MAJTEXT_COMPILING_SHADERS": "正在编译着色器",
     "MAJTEXT_WAITING_FOR_BACKGROUND_TASKS_SUSPEND": "正在等待所有后台任务完成",
     "MAJTEXT_LOGGING_OUT": "登出中...",
     "MAJTEXT_LOADING_SCORE_STORAGE": "正在读取数据库",

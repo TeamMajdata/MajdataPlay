@@ -43,6 +43,7 @@
     "MAJTEXT_LIST_EMPTY_COLLECTION": "Oops... This collection is empty or contains no matching charts",
     "MAJTEXT_LIST_NO_PLAY_RECORD": "No play records",
     "MAJTEXT_LOADING_CHART": "Loading chart",
+    "MAJTEXT_COMPILING_SHADERS": "Compiling shaders",
     "MAJSETTING_CATEGORY_Audio": "Audio Settings",
     "MAJSETTING_CATEGORY_ChartSetting": "Chart Settings",
     "MAJSETTING_CATEGORY_Debug": "Debug",
