@@ -1,6 +1,7 @@
 using Live2D.Cubism.Rendering.URP.RenderingInterceptor;
 using MajdataPlay.Diagnostics;
 using MajdataPlay.FFmpeg;
+using MajdataPlay.Runtime;
 using System;
 using System.Linq;
 using System.Reflection;
@@ -67,15 +68,18 @@ namespace MajdataPlay
             Play();
         }
 
-        void OnSceneChanged(object? sender, (MajScenes NewScene, MajScenes OldScene) args)
+        private void OnSceneChanged(object? sender, (MajScenes NewScene, MajScenes OldScene) args)
         {
             if (_renderingInterrupter is null)
             {
                 return;
             }
-            var isContainsCubismComponent = Array.IndexOf(_containsCubismComponentScenes, args.NewScene) != -1;
-            _renderingInterrupter.enabled = isContainsCubismComponent;
-            _videoRenderer.enabled = !isContainsCubismComponent;
+            if (!(PlatformInfo.IsAndroid && PlatformInfo.IsArmV7Processor))
+            {
+                var isContainsCubismComponent = Array.IndexOf(_containsCubismComponentScenes, args.NewScene) != -1;
+                _renderingInterrupter.enabled = isContainsCubismComponent;
+                _videoRenderer.enabled = !isContainsCubismComponent;
+            }
         }
     }
 }
