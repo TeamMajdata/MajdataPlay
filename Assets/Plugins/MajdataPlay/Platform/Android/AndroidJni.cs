@@ -187,7 +187,7 @@ namespace MajdataPlay.Platform.Android
         /// <returns>An owning wrapper, or null when Java returned null.</returns>
         /// <exception cref="ArgumentNullException">The factory is null.</exception>
         public static TWrapper? Wrap<TWrapper>(AndroidJavaObject? value, Func<AndroidJavaObject, TWrapper> factory)
-            where TWrapper : JavaObject
+            where TWrapper : AndroidObject
         {
             if (factory is null)
             {
@@ -398,7 +398,7 @@ namespace MajdataPlay.Platform.Android
                 return IntPtr.Zero;
             }
 
-            if (value is JavaObject wrapper)
+            if (value is AndroidObject wrapper)
             {
                 return wrapper.JavaObject.GetRawObject();
             }
