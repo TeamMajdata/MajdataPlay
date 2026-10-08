@@ -70,11 +70,17 @@ namespace MajdataPlay.IO
             var ledDeviceSettings = ioSettings.OutputDevice.Led;
             var userManufacturer = ioSettings.Manufacturer;
             var userButtonRingType = buttonRingSettings.Type;
+#if UNITY_STANDALONE_WIN
+            var hasNProUsbDevice = NproDeviceHost.IsDevicePresent(playerIndex);
+#else
+            var hasNProUsbDevice = false;
+#endif
 
             var manufacturer = DeviceManufacturerOption.General;
             var buttonRingType = userButtonRingType ?? ButtonRingDeviceOption.Keyboard;
 
             MajDebug.LogInfo($"Nov USB device present: {hasNovUsbDevice}");
+            MajDebug.LogInfo($"NPro USB device present: {hasNProUsbDevice}");
             MajDebug.LogInfo($"All available HID devices:\n{string.Join('\n', hidDevices)}");
             MajDebug.LogInfo($"All available serial ports:\n{string.Join('\n', serialPorts)}");
 
@@ -210,6 +216,11 @@ namespace MajdataPlay.IO
                                 BaudRate = ledDeviceSettings.SerialPortOptions.BaudRate ?? 115200,
                             };
                             break;
+#if UNITY_STANDALONE_WIN
+                        case DeviceManufacturerOption.NPro:
+                            buttonRingType = ButtonRingDeviceOption.HID;
+                            break;
+#endif
                         case DeviceManufacturerOption.Pipe:
                             buttonRingType = ButtonRingDeviceOption.Pipe;
                             break;
@@ -251,9 +262,15 @@ namespace MajdataPlay.IO
 
                         return result;
                     });
-                    if (filteredHidDevices.Count() != 0 || hasNovUsbDevice)
+                    if (filteredHidDevices.Count() != 0 || hasNovUsbDevice || hasNProUsbDevice)
                     {
-                        if (hidDevices.Any(x => x.ProductID == yuanDefaultHidPID && x.VendorID == yuanDefaultHidVID))
+                        if (hasNProUsbDevice)
+                        {
+                            MajDebug.LogInfo("Manufacturer detect result: NPro");
+                            manufacturer = DeviceManufacturerOption.NPro;
+                            buttonRingType = ButtonRingDeviceOption.HID;
+                        }
+                        else if (hidDevices.Any(x => x.ProductID == yuanDefaultHidPID && x.VendorID == yuanDefaultHidVID))
                         {
                             MajDebug.LogInfo("Manufacturer detect result: Yuan");
                             manufacturer = DeviceManufacturerOption.Yuan;

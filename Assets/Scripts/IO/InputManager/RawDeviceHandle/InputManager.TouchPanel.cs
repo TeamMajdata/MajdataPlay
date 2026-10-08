@@ -83,6 +83,9 @@ namespace MajdataPlay.IO
                     case DeviceManufacturerOption.Nov:
                         _touchPanelUpdateLoop = Task.Factory.StartNew(PdxUpdateLoop, TaskCreationOptions.LongRunning);
                         break;
+                    case DeviceManufacturerOption.NPro:
+                        _touchPanelUpdateLoop = Task.Factory.StartNew(NProUpdateLoop, TaskCreationOptions.LongRunning);
+                        break;
 #endif
                     case DeviceManufacturerOption.Pipe:
                         _touchPanelUpdateLoop = Task.Factory.StartNew(PipeUpdateLoop, TaskCreationOptions.LongRunning);
@@ -590,6 +593,96 @@ namespace MajdataPlay.IO
                 {
                     ExclusiveTouchHost.Stop();
                     IsConnected = false;
+                }
+            }
+            static void NProUpdateLoop()
+            {
+                ref var @lock = ref _syncLock;
+                var token = MajEnv.GlobalCT;
+                var pollingRate = _sensorPollingRateMs;
+                var stopwatch = new Stopwatch();
+                var t1 = stopwatch.Elapsed;
+                var currentThread = Thread.CurrentThread;
+
+                currentThread.Name = DAEMON_THREAD_NAME;
+                currentThread.IsBackground = true;
+                currentThread.Priority = MajEnv.THREAD_PRIORITY_IO;
+
+                MajDebug.LogInfo(nameof(TouchPanel), $"Managed thread id: {currentThread.ManagedThreadId}");
+                MajDebug.LogInfo(nameof(TouchPanel), $"OS thread id: {PlatformInfo.GetCurrentOSThreadId()}");
+
+                stopwatch.Start();
+                try
+                {
+                    while (!token.IsCancellationRequested)
+                    {
+                        var touchMask = 0UL;
+                        var connected = NproDeviceHost.EnsureConnected();
+                        if (connected)
+                        {
+                            NproDeviceHost.GetInput(out touchMask, out _, out _);
+                        }
+                        IsConnected = connected;
+
+                        var isLocked = false;
+                        try
+                        {
+                            @lock.Enter(ref isLocked);
+                            var sensorRealTimeStates = _sensorRealTimeStates.AsSpan();
+                            var isSensorHadOnInternal = _isSensorHadOnInternal.AsSpan();
+                            var isSensorHadOffInternal = _isSensorHadOffInternal.AsSpan();
+
+                            for (var i = 0; i < 34; i++)
+                            {
+                                var state = connected && (touchMask & (1UL << i)) != 0;
+                                sensorRealTimeStates[i] = state;
+                                isSensorHadOnInternal[i] |= state;
+                                isSensorHadOffInternal[i] |= !state;
+                            }
+                            sensorRealTimeStates[34] = false;
+                        }
+                        finally
+                        {
+                            if (isLocked)
+                            {
+                                @lock.Exit();
+                            }
+                        }
+
+                        if (pollingRate.TotalMilliseconds > 0)
+                        {
+                            var t2 = stopwatch.Elapsed;
+                            var elapsed = t2 - t1;
+                            t1 = t2;
+                            if (elapsed < pollingRate)
+                            {
+                                Thread.Sleep(pollingRate - elapsed);
+                            }
+                        }
+                        else
+                        {
+                            Thread.Sleep(1);
+                        }
+                    }
+                }
+                finally
+                {
+                    IsConnected = false;
+                    var isLocked = false;
+                    try
+                    {
+                        @lock.Enter(ref isLocked);
+                        _sensorRealTimeStates.AsSpan().Clear();
+                        _isSensorHadOffInternal.AsSpan().Fill(true);
+                    }
+                    finally
+                    {
+                        if (isLocked)
+                        {
+                            @lock.Exit();
+                        }
+                    }
+                    MajDebug.LogWarning(nameof(TouchPanel), "Thread has exited");
                 }
             }
 #endif
