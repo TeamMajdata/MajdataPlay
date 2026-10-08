@@ -14,8 +14,8 @@
 
 `dependencies.lock.json` 另外固定 Vulkan-Headers SDK 1.4.328.1（commit `19725e4d48082fe78e26622b15d3080ccd54112b`）及 LLVM-MinGW 20260922 的各主机官方压缩包 SHA256。
 同时固定 VideoLAN dav1d 1.5.3 源码和 Meson 1.9.1 wheel 的官方下载地址与 SHA256。正常构建自动下载到忽略缓存，校验解包后的源码，并为每个目标使用 FFmpeg 相同的编译器、SDK、架构和 ABI 构建 PIC 静态 dav1d；不安装全局 Python 包。
-Windows/Linux 录制同时固定官方 `nv-codec-headers` 的 `n12.1.14.1`、commit `7c8e7fc751f803c672b42c37d9199c8a4f98b327`，核对源码 commit 和工作区后使用其 NVENC 头文件，不安装 CUDA Toolkit，也不打包 NVIDIA 驱动。该 SDK 的最低驱动要求为 Windows 531.61、Linux 530.41.03；对应 GPU 仍须支持请求的编码格式。
-Windows 还使用官方 AMF `v1.5.2`、commit `eadd00804d5f7e5cd8c85d540073198312870776` 的头文件；稀疏下载 header 源码并校验 commit 与内容，仅在忽略缓存中生成 `AMF/` include 目录。AMF 动态库由现有 AMD 显卡驱动提供，脚本不安装或打包驱动。固定 FFmpeg 要求此版本头文件；实际 AMF runtime、GPU 与目标格式须在初始化时验证。
+Windows x86/x64 与 Linux 录制同时固定官方 `nv-codec-headers` 的 `n12.1.14.1`、commit `7c8e7fc751f803c672b42c37d9199c8a4f98b327`，核对源码 commit 和工作区后使用其 NVENC 头文件，不安装 CUDA Toolkit，也不打包 NVIDIA 驱动。该 SDK 的最低驱动要求为 Windows 531.61、Linux 530.41.03；对应 GPU 仍须支持请求的编码格式。
+Windows x86/x64 还使用官方 AMF `v1.5.2`、commit `eadd00804d5f7e5cd8c85d540073198312870776` 的头文件；稀疏下载 header 源码并校验 commit 与内容，仅在忽略缓存中生成 `AMF/` include 目录。AMF 动态库由现有 AMD 显卡驱动提供，脚本不安装或打包驱动。固定 FFmpeg 要求此版本头文件；实际 AMF runtime、GPU 与目标格式须在初始化时验证。
 Windows、Linux、Android 构建会自动获取并校验这些构建依赖，缓存到项目 `.build/toolchains` 或指定构建缓存，不安装系统软件。Vulkan 头文件须包含 Vulkan Video VP9 扩展；旧版 NDK / 系统 Vulkan 头文件不会覆盖此固定版本。
 未设置 `LLVM_MINGW` 时，Windows 目标使用固定的 LLVM-MinGW，它包含 D3D12 Video 解码所需的新头文件；显式设置时使用开发者提供的工具链，仍检查全部请求的硬件解码后端是否编译启用。
 `--probe` 不下载依赖：全新缓存会报告缺少固定头文件或 Meson，请先执行正常构建。Windows 原生仍需要可工作的 Bash/make；WSL 使用 Linux 主机工具链。
@@ -32,7 +32,7 @@ Windows、Linux、Android 构建会自动获取并校验这些构建依赖，缓
 # 只检查环境，不下载或编译
 .\Tools\FFmpeg\build.ps1 -Probe
 # 指定目标
-.\Tools\FFmpeg\build.ps1 -Targets win-x64,win-x86,android-arm64,android-armv7 -Jobs 12
+.\Tools\FFmpeg\build.ps1 -Targets win-x64,win-x86,win-arm64,android-arm64,android-armv7 -Jobs 12
 # WSL 入口；Linux 目标另需下方列出的 pkg-config / VAAPI / DRM 开发依赖
 .\Tools\FFmpeg\build.ps1 -UseWsl -WslDistribution Ubuntu-24.04 -BuildRoot /tmp/majdata-ffmpeg-build
 ```
@@ -60,6 +60,7 @@ Windows 的已有 WSL Linux 也可运行同一个 `build.sh`。使用 WSL 时使
 | 目标 | Windows | Linux | macOS | 必需工具链 |
 | --- | --- | --- | --- | --- |
 | win-x86、win-x64 | 支持 | 支持 | 支持 | MinGW-w64 或对应主机版 llvm-mingw |
+| win-arm64 | 支持 | 支持 | 支持 | `aarch64-w64-mingw32` 编译器；固定 llvm-mingw 同时含 ARM64 C/C++、windres 与静态运行库 |
 | linux-x64 | WSL 或交叉工具链 | 本机构建 | 交叉工具链 | glibc x64 sysroot + GCC/Clang |
 | android-armv7、android-arm64 | 支持 | 支持 | 支持 | 对应主机版 Android NDK r27+ |
 | macos-x64、macos-arm64 | 不支持 | 不支持 | 支持 | Xcode macOS SDK |
@@ -69,7 +70,7 @@ Windows 的已有 WSL Linux 也可运行同一个 `build.sh`。使用 WSL 时使
 
 - `FFMPEG_BASH`：Windows 上 MSYS2 `usr/bin/bash.exe` 的路径。也会检测项目 `.build/toolchains/msys64`、`C:/msys64`、Git Bash。某些 Windows 安全策略下 Git Bash/MSYS2 反复出现 `child_copy / fork` 错误，应使用已有 WSL；脚本不会修改系统安全策略。
 - `FFMPEG_BUILD_ROOT`：默认 `Tools/FFmpeg/.build`；WSL 建议使用 Linux 文件系统内的专用临时目录以避免 `/mnt/c` 的编译性能损失。PowerShell 的 `-BuildRoot` 会传入对应 Windows/WSL 进程。
-- `FFMPEG_MAKE`：GNU make 命令名，默认 `make`。不要使用 MSVC `nmake`。
+- `FFMPEG_MAKE`：GNU make 命令名，默认 `make`。不要使用 MSVC `nmake`。Windows ARM 汇编构建需要正确处理 POSIX vpath 的 GNU make；不要用原生 `mingw32-make` 的不完整输出替代。
 - `FFMPEG_ENCODER_CMAKE`：编码依赖使用的 CMake 3.x 可执行文件，默认从 PATH 查找 `cmake`；实际路径和版本纳入缓存身份及构建证据。
 - `FFMPEG_COMPILER_RUNTIME_LICENSE_DIR`：可选的编译器运行库声明目录；非 Debian 的 GNU 工具链主机可提供 `GNU-runtime.copyright`（包含 GCC Runtime Library Exception），Windows 目标另提供 `mingw-runtime.copyright`。默认从实际主机包或 LLVM/NDK 工具链读取声明，缺少时明确拒绝交付。
 - `LLVM_MINGW`：便携 llvm-mingw 根目录。也自动发现 `.build/toolchains/llvm-mingw-*`。
@@ -119,6 +120,7 @@ Linux/Android 默认没有外部 TLS 后端，支持本地文件和 HTTP；HTTPS
 | --- | --- | --- |
 | 全部平台 | `libx264`（H.264）、`libx265`（HEVC/H.265）、`libvpx-vp9`（VP9）、`libaom-av1`（AV1）、`mpeg4` 软件编码（CBR/VBR）；MPEG4 构建依赖会额外启用 `h263` | `mov`、`mp4`、`matroska`、`webm`、`avi` |
 | Windows x86/x64 | `h264_nvenc`、`hevc_nvenc`、`av1_nvenc`；`h264_amf`、`hevc_amf`、`av1_amf` | 同上 |
+| Windows ARM64 | 仅上述五种软件 encoder；显式禁用 AMF、ffnvcodec/NVENC、NVDEC/CUVID | 同上 |
 | Linux x64 | 上述 NVENC，以及 `h264_vaapi`、`hevc_vaapi`、`vp9_vaapi`、`av1_vaapi` | 同上 |
 | macOS / iOS | `h264_videotoolbox` | 同上 |
 
@@ -151,6 +153,29 @@ H.264 CBR 使用等目标/最大 VBV、filler 和 MP4 兼容的 VBR HRD 信令�
 完整日志和供原生桥接使用的头文件/import libs 在 `.build/<target>/` 与 `.build/install/<target>/`。
 不要对构建目录执行不经确认的通配符清理；增量重建会保留现有缓存。
 
+## Windows ARM64 与并行构建
+
+`win-arm64` 输出到 `Assets/Plugins/MajdataPlay/FFmpeg/Native/Windows/arm64`，包含七个 FFmpeg DLL 和 `FFmpegUnityBridge.dll`。FFmpeg、dav1d、x264、x265、libvpx、libaom 与桥接使用相同 AArch64 Windows 编译器/ABI；私有 codec 与 C++/线程运行库静态链接，不另部署 codec 或 LLVM runtime DLL。dav1d 使用 Windows AArch64 汇编/线程实现；x264 保留 ARM 汇编，x265/libvpx/libaom 使用本节所述的兼容 ARM 配方。
+
+Windows LLVM 配方显式设置目标 `cross-prefix`，让 FFmpeg 使用同架构的 `dlltool` 生成安装所需的导入库；编码依赖继承目标 `STRIP`。Windows 使用 PE 链接器支持的 `--exclude-all-symbols` 并保留 FFmpeg 的 `.def` 公共导出，Linux/Android 继续使用 `--exclude-libs,ALL` 隐藏私有静态库符号。
+
+ARM64 保留 Direct3D 11/12、DXVA2 与 Vulkan Video 解码，以及 Schannel。固定 NVENC/AMF SDK 不提供此目标的受支持驱动 runtime，ARM64-only 构建不下载其头文件；因此显式禁用这两种编码后端及 CUDA 解码路径，不将 x86/x64 后端表当作 ARM64 硬件能力。编译启用 Direct3D/Vulkan 仍不等于目标 GPU/驱动支持，更不等于经过 Windows ARM64 实机验证。
+
+Unity Windows ARM64 Player importer 使用 `Standalone: Win64` 与 `CPU: ARM64`；Editor 禁用并设置 `DefaultValueInitialized: true`，防止 Unity 首次导入时覆盖兼容选项，桥接保留 Preload。新资产/目录的 `.meta` 成对提供；替换已有 x86/x64 资产保留 GUID。桥接清单同时记录原始 `sourceSha256` 与只归一 CRLF 的 `sourceSha256Lf`，包含 x86 `.def` 链接输入，便于跨主机复核。
+
+多 agent 共享 checkout 时为每个目标设置独占 `FFMPEG_BUILD_ROOT`；FFmpeg 源码和 `toolchains`、`downloads` 也位于该私有根目录，不并发修改同一源码 Git 仓库或解包同一工具链缓存。已验证的工具链可以通过 `LLVM_MINGW` 只读复用，但构建前仍应核对它来自锁定压缩包。
+
+```powershell
+# Windows 原生：为该目标选择独占缓存
+.\Tools\FFmpeg\build.ps1 -Targets win-arm64 -BuildRoot Tools/FFmpeg/.build/windows-arm64 -RequireAll
+# MSYS fork/DLL 初始化受本机环境影响时：使用已有 WSL 与 Linux 主机版工具链
+.\Tools\FFmpeg\build.ps1 -UseWsl -WslDistribution Ubuntu-24.04 -Targets win-arm64 -BuildRoot /tmp/majdata-ffmpeg-windows-arm64 -RequireAll -Jobs 8
+# 离线配方回归；不代表 ARM64 DLL 已实际运行
+python -B Tools/Tests/FFmpegBuildValidation/test_windows_arm64.py
+# 产物源码/架构/导出/导入器验证；无 ARM64 主机时不尝试加载其 DLL
+python Tools/FFmpeg/verify-artifacts.py --targets win-x86,win-x64,win-arm64 --skip-host-load
+```
+
 ## GPU 桥接
 
 默认同时构建各目标的原生桥接；`Native/Unity` 已附带对应版本的官方 PluginAPI 头文件。
@@ -158,7 +183,7 @@ Windows、Linux、Android 桥接 ABI 4 加入原生 Vulkan Video 解码设备封
 可用 `--unity-plugin-api <Editor/Data/PluginAPI>` / `-UnityPluginApi <path>` 显式选择 SDK。
 桥接在 Windows、Apple、Linux 和 Android 目标上由同一脚本构建并按目标 stage。CMake 与目标编译器/SDK也必须就绪。Android 使用同一 NDK 的 `android.toolchain.cmake`，同步 ABI/API 设置并静态链接 C++ 运行库；Linux 复用选中的宿主或交叉 C/C++ 编译器与 sysroot。各平台可用的 GPU 路径以运行时能力检测和该平台测试结果为准。
 Windows 桥接复用 FFmpeg 选中的目标 C/C++ 编译器、archiver、windres 及 PATH：选择 llvm-mingw 时桥接使用相同的 `<triple>-clang/clang++`，选择 MinGW GCC 时使用相同的 `<triple>-gcc/g++`。这在 Windows、Linux 和 macOS 主机上一致；一键脚本不假设已安装 MSVC。
-CMake 默认优先 Ninja；没有 Ninja 时 Windows 使用 `mingw32-make` / `MinGW Makefiles`，Linux/macOS 使用 GNU make / `Unix Makefiles`。可以用 `FFMPEG_BRIDGE_GENERATOR` 显式选择这三种之一。缺少对应生成器工具或 C++ 编译器会在 `--probe` / `-Probe` 阶段给出明确原因。编译器/生成器配置不同会使用独立缓存，避免与旧 MSVC 缓存混用。
+CMake 默认优先 Ninja；没有 Ninja 时 Windows 使用 `mingw32-make` / `MinGW Makefiles`，Linux/macOS 使用 GNU make / `Unix Makefiles`。可以用 `FFMPEG_BRIDGE_GENERATOR` 显式选择这三种之一。缺少对应生成器工具或 C++ 编译器会在 `--probe` / `-Probe` 阶段给出明确原因。编译器/生成器配置不同会使用独立缓存，避免与旧 MSVC 缓存混用。LLVM-MinGW 的 target-driver 与 ranlib 别名必须保留：不能把 POSIX symlink 解析成宿主 `clang`，也不能用 NTFS 8.3 名替换其可执行文件名。
 如果需要手动使用 MSVC，请按 `Native/` 的独立 CMake 流程构建；一键流程始终跟随 FFmpeg 的 MinGW/LLVM 工具链。
 `--without-bridge` / `-WithoutBridge` 可仅构建桌面 FFmpeg 库；iOS 的 `__Internal` 符号要求桥接静态库，因此 iOS 不允许省略桥接。
 也可使用 `Native/` 的独立 CMake 指令；硬件零拷贝限制和退回软件上传的行为见该目录文档。

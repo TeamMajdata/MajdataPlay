@@ -63,13 +63,20 @@ int main(int argc, char** argv) {
           && !strncmp(resolved.dli_fname, directory, strlen(directory)), "avcodec is loaded from the staged directory");
     CHECK(strstr(p_av_version_info(), "MajdataPlay-AMF-RC-v1-c0604b924b6a") != NULL,
           "loaded source includes the fixed checked patch marker");
-    CHECK(strstr(p_avcodec_configuration(), "--disable-gpl") != NULL
-          && strstr(p_avcodec_configuration(), "--disable-nonfree") != NULL, "native profile keeps LGPL configuration");
+    CHECK(strstr(p_avcodec_configuration(), "--enable-gpl") != NULL
+          && strstr(p_avcodec_configuration(), "--enable-version3") != NULL
+          && strstr(p_avcodec_configuration(), "--disable-nonfree") != NULL, "native profile keeps GPLv3 recording configuration");
     const AVCodec* software = p_avcodec_find_decoder_by_name("libdav1d");
     CHECK(software && !(software->capabilities & AV_CODEC_CAP_HARDWARE), "libdav1d supplies actual software AV1 decoding");
     const AVCodec* encoder = p_avcodec_find_encoder_by_name("mpeg4");
     CHECK(encoder && encoder->id == AV_CODEC_ID_MPEG4 && !(encoder->capabilities & AV_CODEC_CAP_HARDWARE),
           "recording profile supplies the built-in MPEG4 software encoder");
+    const char* software_encoders[] = {"libx264", "libx265", "libaom-av1", "libvpx-vp9"};
+    for (unsigned int index = 0; index < sizeof(software_encoders) / sizeof(software_encoders[0]); ++index) {
+        const AVCodec* requested_encoder = p_avcodec_find_encoder_by_name(software_encoders[index]);
+        CHECK(requested_encoder && !(requested_encoder->capabilities & AV_CODEC_CAP_HARDWARE),
+              "every requested software encoder is compiled into the staged native profile");
+    }
     const char* containers[] = {"mov", "mp4", "matroska", "webm", "avi"};
     for (int index = 0; index < 5; ++index) CHECK(p_av_guess_format(containers[index], NULL, NULL) != NULL,
                                                "all requested recording muxers are present");

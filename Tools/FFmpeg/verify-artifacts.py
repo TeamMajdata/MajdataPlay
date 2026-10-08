@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Verify staged FFmpeg SHA256, target machine, Android load alignment and host ABI."""
+"""Verify FFmpeg provenance, importers, bridge sources, target machines and host ABI."""
+import argparse
 import ctypes
 import hashlib
 import json
@@ -8,17 +9,177 @@ from pathlib import Path
 import platform
 import re
 import struct
+import sysconfig
 
 ROOT = Path(__file__).resolve().parents[2]
 NATIVE = ROOT / 'Assets/Plugins/MajdataPlay/FFmpeg/Native'
-HOST_TARGET = {'Windows':'win-x64', 'Linux':'linux-x64'}.get(platform.system()) if struct.calcsize('P') == 8 else None
+TARGET_IMPORTERS = {
+    'win-x86': ('Standalone: Win', 'x86', None),
+    'win-x64': ('Standalone: Win64', 'x86_64', 'Windows'),
+    'win-arm64': ('Standalone: Win64', 'ARM64', None),
+    'linux-x64': ('Standalone: Linux64', 'x86_64', 'Linux'),
+    'android-arm64': ('Android: Android', 'ARM64', None),
+    'android-armv7': ('Android: Android', 'ARMv7', None),
+    'macos-x64': ('Standalone: OSXUniversal', 'x86_64', 'OSX'),
+    'macos-arm64': ('Standalone: OSXUniversal', 'ARM64', 'OSX'),
+    'ios-arm64': ('iPhone: iOS', 'AnyCPU', None),
+    'ios-simulator-arm64': None,
+    'ios-simulator-x64': None,
+}
 PATCH_MARKERS = {
     'patches/amf-rate-control.patch': 'MajdataPlay-AMF-RC-v1-',
     'patches/x265-parameter-check.patch': 'MajdataPlay-X265-Params-v1-',
 }
 SOFTWARE_ENCODERS = {'x264': 'libx264', 'x265': 'libx265', 'libvpx': 'libvpx-vp9', 'libaom': 'libaom-av1'}
-if platform.system() == 'Darwin':
-    HOST_TARGET = 'macos-arm64' if platform.machine() == 'arm64' else 'macos-x64'
+
+def host_target(system, machine, pointer_bytes, python_platform):
+    """Choose the Python process ABI, not the OS ABI of an emulated Windows process."""
+    if system == 'Windows':
+        return {'win32': 'win-x86', 'win-amd64': 'win-x64', 'win-arm64': 'win-arm64'}.get(python_platform)
+    if pointer_bytes != 8:
+        return None
+    if system == 'Linux' and machine in ('x86_64', 'AMD64'):
+        return 'linux-x64'
+    if system == 'Darwin':
+        return {'arm64': 'macos-arm64', 'x86_64': 'macos-x64'}.get(machine)
+    return None
+
+
+HOST_TARGET = host_target(platform.system(), platform.machine(), struct.calcsize('P'), sysconfig.get_platform())
+
+
+def verify_source_lock(manifest):
+    """Reject self-consistent manifests for a different FFmpeg revision or ABI."""
+    lock = json.loads((ROOT / 'Tools/FFmpeg/ffmpeg.lock.json').read_text(encoding='utf-8'))
+    target = manifest['target']
+    assert target in TARGET_IMPORTERS, (target, 'unknown FFmpeg target')
+    for field in ('repository', 'tag', 'commit', 'abi'):
+        assert manifest['source'].get(field) == lock[field], (target, field, 'FFmpeg source lock mismatch')
+    expected = set()
+    for name, major in lock['abi'].items():
+        if target.startswith('win-'):
+            filename = f'{name}-{major}.dll'
+        elif target.startswith('android-'):
+            filename = f'lib{name}.so'
+        elif target.startswith('linux-'):
+            filename = f'lib{name}.so.{major}'
+        elif target.startswith('macos-'):
+            filename = f'lib{name}.{major}.dylib'
+        else:
+            filename = f'lib{name}.a'
+        expected.add(filename)
+    files = [item['file'] for item in manifest['files']]
+    assert len(files) == len(expected) and set(files) == expected, (target, 'incomplete or duplicate FFmpeg library inventory')
+
+
+def verify_importer(file, target):
+    """Check the staged binary's actual Unity platform/CPU selection, not just its .meta existence."""
+    expected = TARGET_IMPORTERS[target]
+    if expected is None:
+        return
+    meta = Path(str(file) + '.meta')
+    text = meta.read_text(encoding='utf-8')
+    assert re.search(r'^guid: [0-9a-fA-F]{32}$', text, re.MULTILINE), (meta, 'invalid Unity GUID')
+    assert 'PluginImporter:' in text, (meta, 'missing native PluginImporter')
+    if file.name in ('FFmpegUnityBridge.dll', 'libFFmpegUnityBridge.so'):
+        assert re.search(r'^  isPreloaded: 1$', text, re.MULTILINE), (meta, 'bridge must preload before graphics-device creation')
+    blocks = re.findall(r'^  - first:\n(.*?)^    second:\n(.*?)(?=^  - first:|^  userData:)', text, re.MULTILINE | re.DOTALL)
+    settings = {}
+    for first, second in blocks:
+        key = first.strip()
+        assert key not in settings, (meta, 'duplicate platform entry', key)
+        values = dict(re.findall(r'^ +([A-Za-z]+): *([^\n]*)$', second, re.MULTILINE))
+        settings[key] = values
+    platform_key, cpu, editor_os = expected
+    assert settings.get('Any:', {}).get('enabled') == '0', (meta, 'Any platform must be disabled')
+    player = settings.get(platform_key, {})
+    assert player.get('enabled') == '1' and player.get('CPU') == cpu, (meta, 'wrong Player platform/CPU', platform_key, cpu)
+    editor = settings.get('Editor: Editor', {})
+    assert editor.get('enabled') == ('1' if editor_os else '0'), (meta, 'wrong Editor enablement')
+    if target == 'win-arm64':
+        # Prevent Unity from inferring Editor compatibility on the first ARM64 import.
+        assert editor.get('DefaultValueInitialized') == 'true', (meta, 'ARM64 Editor defaults must be initialized')
+    if editor_os:
+        assert editor.get('CPU') == cpu and editor.get('OS') == editor_os, (meta, 'wrong Editor CPU/OS')
+    for key, values in settings.items():
+        if key not in ('Any:', 'Editor: Editor', platform_key):
+            assert values.get('enabled') == '0', (meta, 'enabled unrelated platform', key)
+
+
+def verify_asset_pairs(directory, target):
+    """Require paired, valid asset metadata for every installed target file and folder."""
+    if TARGET_IMPORTERS[target] is None:
+        return
+    folder_meta = Path(str(directory) + '.meta')
+    text = folder_meta.read_text(encoding='utf-8')
+    assert 'folderAsset: yes' in text, (folder_meta, 'missing folder importer')
+    assert re.search(r'^guid: [0-9a-fA-F]{32}$', text, re.MULTILINE), (folder_meta, 'invalid Unity GUID')
+    guids = {re.search(r'^guid: ([0-9a-fA-F]{32})$', text, re.MULTILINE).group(1).lower()}
+    for file in sorted(directory.iterdir()):
+        if not file.is_file():
+            continue
+        if file.name.endswith('.meta'):
+            assert Path(str(file)[:-5]).exists(), (file, 'orphan Unity metadata')
+            continue
+        meta = Path(str(file) + '.meta')
+        assert meta.is_file(), (file, 'missing paired Unity metadata')
+        match = re.search(r'^guid: ([0-9a-fA-F]{32})$', meta.read_text(encoding='utf-8'), re.MULTILINE)
+        assert match, (meta, 'invalid Unity GUID')
+        guid = match.group(1).lower()
+        assert guid not in guids, (meta, 'duplicate Unity GUID in target')
+        guids.add(guid)
+
+
+def bridge_source_inputs(target):
+    """Return production inputs for the selected CMake platform; exclude tests and documentation."""
+    files = {'CMakeLists.txt', 'Bridge.cpp', 'Bridge.h', 'Unity/IUnityInterface.h', 'Unity/IUnityGraphics.h'}
+    if target.startswith('win-'):
+        files.update(('D3D11.cpp', 'D3D12.cpp', 'D3D12.h', 'WglInterop.cpp', 'WglInterop.h',
+                      'VulkanInterop.cpp', 'VulkanInterop.h', 'Unity/IUnityGraphicsD3D11.h', 'Unity/IUnityGraphicsD3D12.h'))
+        if target == 'win-x86':
+            files.add('ExportsWin32MinGW.def')
+    if target.startswith(('win-', 'linux-', 'android-')):
+        files.update(('VulkanPortable.cpp', 'VulkanPortable.h', 'VulkanVideoDecode.cpp', 'VulkanVideoDecode.h',
+                      'VideoConvertSpirv.h', 'Unity/IUnityGraphicsVulkan.h'))
+        header_root = ROOT / 'Tools/FFmpeg/Native'
+        files.update(path.relative_to(header_root).as_posix()
+                     for path in (header_root / 'ThirdParty/Vulkan-Headers/include').rglob('*.h'))
+    if target.startswith(('linux-', 'android-')):
+        files.add('VulkanPlatform.cpp')
+        if target.startswith('android-'):
+            files.update(('AndroidMediaCodec.cpp', 'AndroidMediaCodec.h'))
+        else:
+            files.add('LinuxVaapi.cpp')
+    if target.startswith(('macos-', 'ios-')):
+        files.update(('Metal.mm', 'Unity/IUnityGraphicsMetal.h'))
+        if target.startswith('ios-'):
+            files.add('RegisterPlugin.mm')
+    return files
+
+
+def verify_bridge_sources(manifest, target):
+    """Reject stale platform inputs while accepting older raw LF/CRLF provenance hashes."""
+    recorded = manifest.get('sourceSha256', {})
+    normalized = manifest.get('sourceSha256Lf', {})
+    source_root = ROOT / 'Tools/FFmpeg/Native'
+    for name in sorted(bridge_source_inputs(target)):
+        path = source_root / name
+        data = path.read_bytes()
+        lf = data.replace(b'\r\n', b'\n')
+        hashes = {hashlib.sha256(content).hexdigest() for content in (data, lf, lf.replace(b'\n', b'\r\n'))}
+        assert recorded.get(name) in hashes, (target, name, 'bridge source differs from current production input; rebuild bridge')
+        if normalized:
+            assert normalized.get(name) == hashlib.sha256(lf).hexdigest(), (target, name, 'normalized bridge source mismatch')
+
+
+def binding_version(name):
+    """Read the exact public-header library version used by the managed binding snapshot."""
+    lock = json.loads((ROOT / 'Tools/FFmpeg/ffmpeg.lock.json').read_text(encoding='utf-8'))
+    header_root = ROOT / lock['bindingHeaders'] / ('lib' + name)
+    text = '\n'.join(path.read_text(encoding='utf-8') for path in header_root.glob('version*.h'))
+    values = [int(re.search(r'^#define LIB' + name.upper() + r'_VERSION_' + suffix + r' +([0-9]+)', text, re.MULTILINE).group(1))
+              for suffix in ('MAJOR', 'MINOR', 'MICRO')]
+    return (values[0] << 16) | (values[1] << 8) | values[2]
 
 
 def verify_macho(data, target, path, require_platform=True):
@@ -49,7 +210,9 @@ def verify_binary(path, target):
         pe_offset = struct.unpack_from('<I', data, 0x3c)[0]
         assert data[pe_offset:pe_offset+4] == b'PE\0\0', path
         machine = struct.unpack_from('<H', data, pe_offset+4)[0]
-        assert machine == (0x8664 if target == 'win-x64' else 0x14c), (path,machine)
+        assert machine == {'win-x86': 0x14c, 'win-x64': 0x8664, 'win-arm64': 0xaa64}[target], (path, 'wrong PE machine', hex(machine))
+        magic = struct.unpack_from('<H', data, pe_offset + 24)[0]
+        assert magic == (0x10b if target == 'win-x86' else 0x20b), (path, 'wrong PE pointer width')
         # Compiler DLLs can be accidentally satisfied by a developer's PATH.
         # The build recipe statically links the C++/pthread compiler runtime.
         imports = pe_import_names(data, path)
@@ -81,7 +244,11 @@ def verify_binary(path, target):
             for index in range(phnum):
                 header = phoff + index * phsize
                 if struct.unpack_from('<I',data,header)[0] == 1: # PT_LOAD
-                    assert struct.unpack_from(align_format,data,header+align_offset)[0] >= 16384, path
+                    alignment = struct.unpack_from(align_format, data, header + align_offset)[0]
+                    segment_offset = struct.unpack_from('<Q' if data[4] == 2 else '<I', data, header + (8 if data[4] == 2 else 4))[0]
+                    segment_address = struct.unpack_from('<Q' if data[4] == 2 else '<I', data, header + (16 if data[4] == 2 else 8))[0]
+                    assert alignment >= 16384 and alignment & (alignment - 1) == 0, (path, 'invalid Android PT_LOAD alignment')
+                    assert segment_offset % alignment == segment_address % alignment, (path, 'Android PT_LOAD offset/address mismatch')
     elif target.startswith(('macos-', 'ios-')):
         if data.startswith(b'!<arch>\n'):
             offset, objects, platform_objects = 8, 0, 0
@@ -361,7 +528,15 @@ def verify_recording_profile(directory, manifest):
 
 
 def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--targets', default='all', help='comma-separated target filter, or all')
+    parser.add_argument('--skip-host-load', action='store_true', help='static checks only; do not load host libraries')
+    options = parser.parse_args()
+    selected = set(TARGET_IMPORTERS) if options.targets == 'all' else set(options.targets.split(','))
+    if selected - set(TARGET_IMPORTERS):
+        parser.error('Unknown targets: ' + ', '.join(sorted(selected - set(TARGET_IMPORTERS))))
     count = 0
+    seen = set()
     manifests = list(NATIVE.rglob('build-manifest.json'))
     simulator_root = Path(os.environ.get('FFMPEG_BUILD_ROOT', str(ROOT / 'Tools/FFmpeg/.build'))) / 'artifacts'
     if simulator_root.exists():
@@ -369,10 +544,15 @@ def main():
     for manifest_file in sorted(manifests):
         manifest = json.loads(manifest_file.read_text(encoding='utf-8'))
         target = manifest['target']
+        if target not in selected:
+            continue
+        seen.add(target)
         directory = manifest_file.parent
-        host = target == HOST_TARGET
+        host = target == HOST_TARGET and not options.skip_host_load
         handle = os.add_dll_directory(str(directory)) if host and os.name == 'nt' else None
         try:
+            verify_source_lock(manifest)
+            verify_asset_pairs(directory, target)
             verify_source_patches(directory, manifest)
             verify_software_encoder_provenance(directory, manifest)
             for item in manifest.get('buildDependencyLicenses', []):
@@ -382,15 +562,14 @@ def main():
                 file = directory / item['file']
                 assert hashlib.sha256(file.read_bytes()).hexdigest() == item['sha256'], file
                 assert file.stat().st_size == item['bytes'], file
-                if 'simulator' not in target:
-                    assert Path(str(file)+'.meta').is_file(), file
+                verify_importer(file, target)
                 verify_binary(file,target)
                 if host:
                     library = ctypes.CDLL(str(file))
                     name = next(name for name in manifest['source']['abi'] if name in file.name)
                     version_function = getattr(library,name+'_version')
                     version_function.restype = ctypes.c_uint
-                    assert version_function() >> 16 == manifest['source']['abi'][name], file
+                    assert version_function() == binding_version(name), (file, 'native library version differs from binding headers')
                 count += 1
             if host:
                 verify_hardware_backends(directory, manifest)
@@ -401,13 +580,17 @@ def main():
                 handle.close()
         print(f'PASS {target}: {len(manifest["files"])} SHA256/machine/importer checks' + ('; native ABI loaded' if host else ''))
     assert count, 'No staged FFmpeg libraries found'
+    required = {target for target in selected if 'simulator' not in target} if options.targets == 'all' else selected
+    assert required <= seen, ('missing requested FFmpeg target', sorted(required - seen))
     for manifest_file in sorted(NATIVE.rglob('dependency-manifest.json')):
         manifest = json.loads(manifest_file.read_text(encoding='utf-8'))
+        if manifest['target'] not in selected:
+            continue
         for item in manifest['files']:
             file = manifest_file.parent / item['file']
             assert hashlib.sha256(file.read_bytes()).hexdigest() == item['sha256'], file
             assert file.stat().st_size == item['bytes'], file
-            assert Path(str(file) + '.meta').is_file(), file
+            verify_importer(file, manifest['target'])
             verify_binary(file, manifest['target'])
             license_file = manifest_file.parent / item['license']
             assert hashlib.sha256(license_file.read_bytes()).hexdigest() == item['licenseSha256'], license_file
@@ -415,18 +598,26 @@ def main():
     bridges = list(NATIVE.rglob('bridge-manifest.json'))
     if simulator_root.exists():
         bridges += list(simulator_root.rglob('bridge-manifest.json'))
+    seen_bridges = set()
     for manifest_file in sorted(bridges):
         manifest = json.loads(manifest_file.read_text(encoding='utf-8'))
         target = manifest.get('target')
         if not target and manifest.get('platform') == 'Windows':
-            target = 'win-x64' if manifest['architecture'] == 'x86_64' else 'win-x86'
+            target = {'x86_64': 'win-x64', 'x86': 'win-x86', 'ARM64': 'win-arm64', 'arm64': 'win-arm64'}.get(manifest['architecture'])
         assert target, (manifest_file, 'missing bridge target')
+        if target not in selected:
+            continue
+        seen_bridges.add(target)
+        verify_bridge_sources(manifest, target)
         expected_abi = 2 if target.startswith(('macos-', 'ios-')) else 4
-        if 'bridgeAbi' in manifest:
-            assert manifest['bridgeAbi'] == expected_abi, (manifest_file, 'unexpected bridge ABI')
+        assert manifest.get('bridgeAbi') == expected_abi, (manifest_file, 'missing or unexpected bridge ABI')
         items = manifest.get('files') or [{'file': manifest['artifact'], 'sha256': manifest['sha256']}]
+        bridge_file = ('FFmpegUnityBridge.dll' if target.startswith('win-') else
+                       'libFFmpegUnityBridge.a' if target.startswith('ios-') else
+                       'libFFmpegUnityBridge.dylib' if target.startswith('macos-') else 'libFFmpegUnityBridge.so')
+        assert len(items) == 1 and items[0]['file'] == bridge_file, (manifest_file, 'invalid Unity bridge inventory')
         directory = manifest_file.parent
-        handle = os.add_dll_directory(str(directory)) if target == HOST_TARGET and os.name == 'nt' else None
+        handle = os.add_dll_directory(str(directory)) if target == HOST_TARGET and os.name == 'nt' and not options.skip_host_load else None
         try:
             for item in items:
                 file = directory / item['file']
@@ -434,14 +625,16 @@ def main():
                 if 'bytes' in item:
                     assert file.stat().st_size == item['bytes'], file
                 verify_binary(file, target)
-                if target == HOST_TARGET:
+                verify_importer(file, target)
+                if target == HOST_TARGET and not options.skip_host_load:
                     library = ctypes.CDLL(str(file))
                     library.ffu_abi_version.restype = ctypes.c_int
                     assert library.ffu_abi_version() == expected_abi, (file, 'loaded bridge ABI mismatch')
         finally:
             if handle:
                 handle.close()
-        print(f'PASS {target}: bridge SHA256/machine' + (f'; native ABI {expected_abi} loaded' if target == HOST_TARGET else ''))
+        print(f'PASS {target}: bridge SHA256/machine' + (f'; native ABI {expected_abi} loaded' if target == HOST_TARGET and not options.skip_host_load else ''))
+    assert seen <= seen_bridges, ('missing matching Unity bridge', sorted(seen - seen_bridges))
     print(f'PASS {count} FFmpeg libraries; PE/ELF/Mach-O machine and Apple SDK platform verified; Android PT_LOAD alignment >=16 KiB verified.')
 
 if __name__ == '__main__':

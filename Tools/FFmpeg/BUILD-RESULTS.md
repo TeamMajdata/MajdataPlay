@@ -1,5 +1,44 @@
 # FFmpeg 构建记录
 
+## 2026-10-08：Windows ARM64 原生库构建
+
+完成 `win-arm64` 交叉编译并交付到 `Assets/Plugins/MajdataPlay/FFmpeg/Native/Windows/arm64`：七个 FFmpeg DLL（avcodec 63、avdevice 63、avfilter 12、avformat 63、avutil 61、swresample 7、swscale 10）及 **ABI 4 `FFmpegUnityBridge.dll`**。二进制、构建清单、配置、许可证和检查补丁均有配对 `.meta`。
+
+使用 WSL Ubuntu 24.04、固定 **LLVM-MinGW 20260922 UCRT Linux x86_64 工具链 / Clang 23.1.2**，目标编译器为 `aarch64-w64-mingw32-clang`。FFmpeg 仍固定 `n9.0.1` / `bf1b838f2ab88b4f8fd83443325c782ea0e0f7fa`，构建前核对 143 个绑定公开头文件与两项已审核补丁。源码和中间文件使用独立持久缓存 `/var/tmp/majdata-ffmpeg-windows-arm64-20261008`；从 NTFS 转移的源码按 Git 索引恢复可执行位，保留固定源码内容。
+
+保留 MPEG4、x264、x265、libvpx VP9、libaom AV1 编码及 dav1d 解码，私有 codec 和 C++/线程运行库静态链接，无需额外部署对应 DLL。启用 GPL/version3、禁用 nonfree；ARM64 配置包含 D3D11VA、D3D12VA、DXVA2 与 Vulkan，关闭 AMF/NVENC/NVDEC/CUVID。清单保存实际配置、工具链、源码与产物哈希。
+
+本轮修复 Windows 构建配方：编码依赖使用目标 `STRIP`，避免主机工具无法识别 ARM64 COFF；PE 使用 `--exclude-all-symbols` 配合 FFmpeg 的 `.def`，ELF 保留 `--exclude-libs,ALL`；LLVM 配方显式设置目标 `cross-prefix`，使 FFmpeg 调用 ARM64 `dlltool` 生成安装所需的导入库。最终 FFmpeg、依赖及桥接构建退出码为 0，摘要为 `win-arm64: built`。
+
+| 实际验证 | 结果与范围 |
+| --- | --- |
+| Windows 构建配方回归 | **25 tests PASS**；目标工具、缓存键、PE/ELF 导出控制与导入库工具选择 |
+| artifact 验证回归 | **47 tests PASS**；清单、二进制、平台与 importer 校验 |
+| Windows 三架构静态产物校验 | **21 个 FFmpeg DLL + 3 个桥接 PASS**；SHA256、固定源码、许可证与 `.meta` |
+| Windows 三架构 PE 审计 | **24 个 DLL PASS**；机器类型、公开入口、依赖闭包，无动态 codec/C++/pthread 运行库依赖；ARM64 为 `0xAA64` |
+| ARM64 FFmpeg 完整导出集合 | 七库全部匹配构建生成的 `.def`，无 x264/x265/vpx/aom/dav1d 私有导出 |
+| ARM64 PE 链接与导入库 fixture | 实际链接 DLL，公共入口保留、私有静态符号隐藏；`dlltool` 生成 ARM64 导入库并链接 ARM64 客户端，未执行 |
+| Unity 6000.3.17f1 隔离 importer | **24 个 importer PASS**；首次导入与再次导入均检查真实 Player/CPU/Editor API，ARM64 和 x86 对 x64 Editor 禁用 |
+| `NativeLoadSmoke-arm64.exe` | 以 `-std=c11 -Wall -Wextra -Werror` 交叉编译通过，PE ARM64；未执行 |
+
+复验命令（构建前置条件见 [README](README.md)，构建默认包含桥接）：
+
+```powershell
+.\Tools\FFmpeg\build.ps1 -UseWsl -WslDistribution Ubuntu-24.04 -Targets win-arm64 -BuildRoot /var/tmp/majdata-ffmpeg-windows-arm64-20261008 -RequireAll -Jobs 8
+python -B Tools/Tests/FFmpegBuildValidation/test_windows_arm64.py
+python -B -m unittest discover -s Tools/Tests/FFmpegArtifactValidation -v
+python -B Tools/FFmpeg/verify-artifacts.py --targets win-x86,win-x64,win-arm64 --skip-host-load
+python -B Tools/Tests/FFmpegBuildValidation/verify_windows_dlls.py --targets win-x86,win-x64,win-arm64 --output Tools/FFmpeg/.build/windows-arm64-20261008/pe-audit.json
+./Tools/Tests/FFmpegArtifactValidation/run-unity-importers.ps1
+git diff --check
+```
+
+Unity 初次导入发现缺少 `Editor.settings.DefaultValueInitialized` 时会覆盖 ARM64 的 Editor 禁用值；隔离工程用真实 API 写回后确认所需标记。生成器和八个 ARM64 DLL 的 `.meta` 已补齐 `DefaultValueInitialized: true`，GUID 保留，再次真实导入通过。
+
+实际构建由忽略目录的 `run-wsl.py` 设置隔离源码、缓存与 Linux pkg-config，再调用 `python3 -B Tools/FFmpeg/build.py --targets win-arm64 --jobs 8 --require-all`。原始证据保留于 `Tools/FFmpeg/.build/windows-arm64-20261008`：`final-build.log`、`wsl-build-summary.json`、`wsl-evidence/`（配置、日志、`.def` 与 provenance）、`pe-audit.json`、`final-export-audit.json` 和 `linker-fixture-exclude-all/`。Unity 原始日志位于 `Tools/Tests/FFmpegArtifactValidation/.work/unity-importers`，诊断写回日志为 `unity-importer-probe-authorized.log`，全新隔离工程的首次导入证据为 `unity-importers-fresh.log` / `.txt`。
+
+**未验证**：本机为 Windows x64，未在 Windows ARM64 设备执行原生加载、实际编码/解码、GPU 桥接或 Unity ARM64 Player。静态审计与交叉编译不能替代上述运行验证；本轮未生成完整多平台发布包。`git diff --check` 通过，最终状态检查未发现本轮新增的生成物或无关改动。
+
 ## 2026-10-05：补齐四种软件视频编码器
 
 重新构建全部十个目标，统一包含 **H.264 `libx264`、H.265/HEVC `libx265`、AV1 `libaom-av1`、VP9 `libvpx-vp9`**。四个依赖以 PIC 静态库并入 avcodec；iOS 静态归档也包含其对象，无需额外部署四个编码器的动态库。MPEG4、各平台已有硬件 encoder、muxer、dav1d 和解码后端保留。下方 MPEG4-only 记录为同日较早构建的历史结果。

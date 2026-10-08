@@ -1,4 +1,87 @@
-# Apple 录制原生库重建与验证（2026-10-05）
+# Apple 原生库审计与 bridge 更新（2026-10-08）
+
+## 本轮结论与修改范围
+
+本轮核对 macOS ARM64/x86_64、iOS device ARM64、iOS simulator ARM64/x86_64 五个目标。**35 个 FFmpeg 库全部匹配现有 manifest、锁文件与交付 SHA256，没有重新编译或替换 FFmpeg 七库。** 去除 raw/LF/CRLF 换行差异、仅比较 Apple 实际生产输入后，旧 bridge 的 `Bridge.cpp`、`Bridge.h`、`CMakeLists.txt` 存在真实差异；`Metal.mm`、iOS 的 `RegisterPlugin.mm` 与 Unity PluginAPI 头文件匹配。
+
+已使用固定的当前 `build.py` 副本重建五个 Apple bridge，Apple bridge ABI 仍为 **2**。正式替换仅为 macOS 两架构与 iOS device 的 `libFFmpegUnityBridge.*`、对应 `bridge-manifest.json`；两套 simulator 的 bridge/manifest 仅更新忽略的 `Tools/FFmpeg/.build/artifacts/`。没有新增 Unity 资产，没有复制或修改 `.meta`；三个正式目标目录内原有 **66 个文件 `.meta` 逐字节保持不变**，现有 GUID 和平台导入设置保留。
+
+本轮没有修改公共构建脚本、verifier、Native 源码、其他平台目录或子模块。构建采用旧版兼容的 `sourceSha256` manifest；平台 verifier 接受 raw/LF/CRLF 哈希，不要求缺省的 `sourceSha256Lf`，但真实生产输入差异仍会失败。不要把 manifest 中非 Apple 平台源码或 tests/README 的换行差异误判为 Apple bridge 过期。
+
+## 锁、头文件、架构与依赖
+
+- 固定 FFmpeg `n9.0.1`、commit `bf1b838f2ab88b4f8fd83443325c782ea0e0f7fa`，143 个 AutoGen 公开绑定头文件与固定源码逐一比较通过；仅忽略构建生成的 `avconfig.h`、`ffversion.h`。
+- 两份已审查补丁的源码差异验证通过：AMF `c0604b924b6ae1ee718c045d34f1448ebb78652ccacadfdb54799810c69e17f7`；x265 `5b457330f94aa63e539798ae28b3ffcd05388a58a29ba49546da79b944e0f0de`。未修改公开头或 ABI。
+- 全五目标的 35 个 FFmpeg 库和 5 个 bridge 均通过 SHA256、Mach-O CPU、Apple SDK device/simulator 平台标记、平台生产输入 fingerprint 检查。三个正式目标的 PluginImporter CPU/OS/平台选择通过；simulator 归档不作为正式 Unity 资产导入。
+- 固定 dav1d 1.5.3 与四个静态 PIC 软件编码依赖、GPLv3/版权/专利通知、补丁和配置 provenance 检查通过。此项为静态来源检查，不是本轮重新执行四格式编码矩阵。
+- macOS 两个 bridge 的非系统动态依赖仅为 sibling `@loader_path/libavutil.61.dylib`，其余为系统 Apple frameworks、libc++、libSystem/libobjc；没有引入历史缓存中的绝对 dylib 依赖路径。
+
+macOS ARM64 与 ARM64 simulator **实际运行**的七库版本均与绑定头精确一致，而不只是主版本相同：
+
+| 库 | 编译头 / 实际加载版本 |
+| --- | --- |
+| avcodec / avdevice / avformat | 63.1.101 |
+| avfilter | 12.1.101 |
+| avutil | 61.1.101 |
+| swresample | 7.1.101 |
+| swscale | 10.1.101 |
+
+## 远端隔离与构建记录
+
+SSH 配置中的真实别名为 `mac-mini`。只读探测后使用唯一目录 `/tmp/majdata-ffmpeg-audit-20261008-J8LDi2`（实际解析为 `/private/tmp/majdata-ffmpeg-audit-20261008-J8LDi2`）。安全缓存来自 `/Users/codex/codex-work/majdata-full-encoding-apple-20261005/ready/native`、`ready/artifacts` 及对应 install prefix。该历史缓存**根目录的旧交付库并不匹配当前正式插件**；先发现并拒绝了它，随后确认 `ready/` 的 35 库与 5 个旧 bridge 精确匹配后才复用。旧缓存、既有项目和子模块未被覆盖。
+
+在隔离目录以 APFS clone 复制缓存的源码、install prefix 和匹配的最终交付物。固定源码 commit、公开头与两份补丁全部再次核对后，直接调用未修改的仓库 `build_bridge()`，使用相同 Apple SDK/目标架构，只构建 bridge；没有执行 FFmpeg/编码依赖重建或安装系统软件。
+
+环境：Apple M4、macOS 27.0.1（26A434）、Xcode 27.0（27A266a）、macOS/iPhoneOS/iPhoneSimulator SDK 27.0、AppleClang 21.0.0.21000334、Python 3.14.5、CMake 4.4.2、Ninja 1.13.2。macOS deployment minimum 11.0，iOS minimum 15.0。
+
+固定脚本 SHA256：`df739e024edde6b4e17a068a9d6ba09ebae5dcee7e647972e0635d2c24bb058e`。同步的主 agent 平台 verifier SHA256：`f5dcc8032608470aa9e4abfd4bf63b365088ac0c72c8481d7cf4c7fc835a8042`。验证 shell 脚本只在忽略的隔离快照内转为 LF，正式源脚本未修改。
+
+| 目标 | 新 bridge SHA256 | 大小（bytes） |
+| --- | --- | ---: |
+| macOS ARM64 | `6fca6aced53b5af5766e9406079e1b09a0286ee9e46cab3e111748aabea2bbd6` | 73848 |
+| macOS x86_64 | `f11bbf28c8952b100d596326bf136f2d6822203f8e579c91332dec52d6152563` | 36376 |
+| iOS device ARM64 | `0fe5f2171f4a97b3feee2592f224fc6db5a0c159935e9233b188e987eb0e3364` | 19784 |
+| iOS simulator ARM64 | `69f16954fc4331adb3c3f85f28e95d5478cc7a503846a8345d5b3fb9341400fd` | 19768 |
+| iOS simulator x86_64 | `416fce5e5db75badb880dfc583fe63d3dca75555412b8d7b8ab9dec34ed8ac05` | 18640 |
+
+## 本轮 native smoke / link 结果
+
+| 目标 | 编译、链接与静态检查 | 2026-10-08 实际运行 |
+| --- | --- | --- |
+| macOS ARM64 | bridge 重建、七库 ABI fixture、Metal fixture PASS | 七库精确版本与 bridge ABI 2 PASS；真实 H.264 加载/解码 **144 checks PASS**；Apple M4 的 Metal NV12 采样/帧生命周期/VideoToolbox 解码 **231 checks PASS** |
+| macOS x86_64 | bridge、七库 ABI/loader/Metal fixtures 编译链接 PASS | **未验证**：`arch -x86_64 /usr/bin/true` 返回 Bad CPU type；未安装 Rosetta |
+| iOS device ARM64 | bridge、全部七个静态归档的 Metal fixture 及七库 ABI fixture 链接 PASS | **未验证**：没有实体设备或可运行的设备测试载体 |
+| iOS simulator ARM64 | bridge、七个静态归档、Metal/七库 ABI fixtures 链接 PASS | 已启动的 FFmpeg-Validation simulator（UDID `31D01781-B001-4DCA-8888-B5E7A8549DAC`）实际运行：七库精确版本与 bridge ABI 2 PASS；Metal/软件 H.264 回退 **116 checks PASS**；VideoToolbox 硬解明确 SKIP |
+| iOS simulator x86_64 | bridge、七个静态归档、Metal/七库 ABI fixtures 链接 PASS | **未验证**：M4 主机无 x64 运行支持，不能把链接成功当 simulator 运行通过 |
+
+Intel simulator 的 Metal 链接保留 **207 条**已有 NASM Mach-O 对象无 platform load command 的 warning。对应对象 CPU 检查通过，带平台标记的对象全部为 iOS simulator，链接成功；verifier 已明确允许无平台指令的 NASM 对象。没有混入已标记为 macOS/device 的对象，也未为消除这些历史 warning 无故重编 FFmpeg。
+
+执行入口（在远端隔离根目录；`apple-audit.py` 和 ABI/link fixtures 仅为忽略目录中的证据，不是新增仓库构建入口）：
+
+```bash
+python3 apple-audit.py prepare
+python3 apple-audit.py rebuild
+python3 Tools/FFmpeg/verify-artifacts.py \
+  --targets macos-arm64,macos-x64,ios-arm64,ios-simulator-arm64,ios-simulator-x64
+bash Tools/Tests/FFmpegValidation/run-apple-native.sh arm64 /absolute/cache/bg.mp4
+bash Tools/Tests/FFmpegValidation/run-ios-native.sh ios-arm64 /absolute/cache/bg.mp4
+bash Tools/Tests/FFmpegValidation/run-ios-native.sh ios-simulator-x64 /absolute/cache/bg.mp4
+FFMPEG_SIMULATOR_UDID=31D01781-B001-4DCA-8888-B5E7A8549DAC \
+  bash Tools/Tests/FFmpegValidation/run-ios-native.sh ios-simulator-arm64 /absolute/cache/bg.mp4
+bash link-apple-audit.sh
+```
+
+测试媒体实际来自 `/Users/codex/codex-work/majdata-recording-apple-20261005/bg.mp4`，SHA256 见本轮 `media-sha256.txt`。`AppleAbiSmoke.c` 对七库逐一比较 `*_version()` 与公开头的完整 `*_VERSION_INT`，并实际检查 `ffu_abi_version() == 2`；macOS 无 `DYLD_LIBRARY_PATH`，simulator 使用静态链接。临时 macOS ABI fixture 首次缺少 `@rpath` 后已按 sibling 插件部署布局修正并通过；未修改 bridge 的依赖来迁就测试载体。
+
+## 证据与未验证边界
+
+本机证据在忽略目录 `Tools/FFmpeg/.build/apple-audit-20261008-apple/returned/evidence/`：`final-apple-audit.json`、`cache-validation.json`、`prepare.log`、`rebuild.log`、`verify-artifacts-final.log`、各目标 `*native.log` / `*link.log` / `*abi.log`、`bridge-dependencies.txt`、固定脚本及临时 fixture。初始 raw 与归一化审计、部署清单、66 个 `.meta` 前后哈希在同一个 audit 根目录。远端证据同时保留在隔离根的 `Tools/FFmpeg/.build/audit-evidence/` 与 `Tools/Tests/FFmpegValidation/.work/`，未写回正式场景或 Player Settings。
+
+**本轮未验证** Unity 6000.3.17f1 Editor/Player、Unity 生命周期与托管 ABI 集成、实体 iOS、macOS x64 运行、x64 simulator 运行、VideoToolbox 硬件编码及新一轮四种软件格式录制矩阵。ARM64 simulator 的软件回退不能外推为 iOS device 的 VideoToolbox 或 Unity 图形验证通过。以下 2026-10-05 结果属于历史实测，不能记作 2026-10-08 重新执行。
+
+---
+
+## 2026-10-05 历史构建与验证
 
 ## 四种软件视频编码器补全
 
