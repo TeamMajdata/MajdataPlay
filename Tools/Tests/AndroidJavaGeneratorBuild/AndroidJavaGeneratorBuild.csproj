@@ -1,0 +1,27 @@
+<Project>
+  <PropertyGroup>
+    <BaseIntermediateOutputPath>../../../Temp/AndroidJavaGeneratorBuild/obj/</BaseIntermediateOutputPath>
+    <OutputPath>../../../Temp/AndroidJavaGeneratorBuild/bin/</OutputPath>
+  </PropertyGroup>
+  <Import Project="Sdk.props" Sdk="Microsoft.NET.Sdk" />
+  <PropertyGroup>
+    <TargetFramework>netstandard2.0</TargetFramework>
+    <AssemblyName>MajdataPlay.SourceGenerators.AndroidJava</AssemblyName>
+    <RootNamespace>MajdataPlay.SourceGenerators.AndroidJava</RootNamespace>
+    <LangVersion>9.0</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <IsRoslynComponent>true</IsRoslynComponent>
+    <EnforceExtendedAnalyzerRules>true</EnforceExtendedAnalyzerRules>
+    <Deterministic>true</Deterministic>
+    <NuGetAudit>false</NuGetAudit>
+    <RestoreSources>$(MSBuildThisFileDirectory)</RestoreSources>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="4.3.1" PrivateAssets="all" />
+    <Compile Include="../../AndroidJavaGenerator/Source/**/*.cs" Link="Source/%(RecursiveDir)%(Filename)%(Extension)" />
+  </ItemGroup>
+  <Import Project="Sdk.targets" Sdk="Microsoft.NET.Sdk" />
+</Project>

@@ -41,3 +41,20 @@ Simple meshes and uses the shared cache for Sliced/Tiled, still ignoring flips.
 
 See [Translation editor validation](TranslationEditorValidation.md) for the static
 key-analysis regression tests, isolated Unity editor checks, and editor workflow.
+
+## Android Java source generator
+
+See `AndroidJavaGeneratorValidation/README.md` for .NET 9 regression tests using
+real Unity reference assemblies and the bundled Android SDK/JDK. See
+`../AndroidJavaGenerator/README.md` for wrapper usage, toolchain configuration,
+documentation provenance, and runtime ownership.
+
+```powershell
+dotnet run --project Tools/Tests/AndroidJavaGeneratorValidation/AndroidJavaGeneratorValidation.csproj
+./Tools/Tests/ValidateAndroidJavaGeneratorUnity.ps1
+```
+
+The second command creates an ignored, isolated Unity 6000.3.17f1 project; it
+verifies real analyzer loading, generated SDK classes/interfaces, readonly
+properties, overload preservation, editor-companion compilation, and the
+non-Android JNI guard. Neither check validates an Android Player or hardware.

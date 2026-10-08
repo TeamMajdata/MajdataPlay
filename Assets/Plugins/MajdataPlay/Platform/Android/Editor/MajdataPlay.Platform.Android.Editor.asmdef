@@ -1,0 +1,9 @@
+{
+    "name": "MajdataPlay.Platform.Android.Editor",
+    "rootNamespace": "MajdataPlay.Platform.Android.Editor",
+    "references": [
+        "GUID:cb8b427481f0ca9478583714751f76f5"
+    ],
+    "includePlatforms": ["Editor"],
+    "autoReferenced": true
+}
