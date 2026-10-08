@@ -4,6 +4,8 @@
 #include "../Bridge.h"
 #include "IUnityGraphicsD3D11.h"
 #include <cstdio>
+#include <cstdlib>
+#include <cstring>
 #include <chrono>
 #include <vector>
 extern "C" {
@@ -12,6 +14,24 @@ extern "C" {
 #include <libavutil/hwcontext_d3d11va.h>
 }
 
+bool FfuD3D11Benchmark(const char* path, int stride, bool yieldOnly);
+bool FfuD3D11TestStagingRetirement();
+int FfuD3D11TestStagingReadiness(HRESULT acquire, bool* conversionComplete, bool* readerAcquired);
+
+// No adapter or driver calls: force slot destruction at lease publication and
+// exercise exactly the readiness result/state transition used by stage_ready.
+static bool VerifyStagingErrorAndRetirement() {
+    if (!FfuD3D11TestStagingRetirement()) return false;
+    for (HRESULT acquire : {HRESULT(S_OK), HRESULT(WAIT_TIMEOUT), HRESULT(WAIT_ABANDONED), HRESULT(E_FAIL)}) {
+        bool conversionComplete = false, readerAcquired = false;
+        const int result = FfuD3D11TestStagingReadiness(acquire, &conversionComplete, &readerAcquired);
+        const int expected = acquire == S_OK ? 1 : acquire == WAIT_TIMEOUT ? 0 :
+            FAILED(acquire) ? acquire : HRESULT_FROM_WIN32(static_cast<DWORD>(acquire));
+        if (result != expected || conversionComplete != (acquire == S_OK) || readerAcquired != (acquire == S_OK)) return false;
+    }
+    std::puts("PASS: no-GPU staging lease retirement/resize interleaving; abandoned mutex never publishes readiness");
+    return true;
+}
 static ID3D11Device* device = nullptr;
 static int released = 0;
 static int synchronizedDevicesReleased = 0;
@@ -72,7 +92,7 @@ static void FreeFrame(void*, uint8_t* value) {
     reinterpret_cast<ID3D11Texture2D*>(value)->Release();
     ++released;
 }
-static AVFrame* CreateFrame(int width, int height, uint8_t luma, AVColorRange range) {
+static AVFrame* CreateFrame(int width, int height, uint8_t luma, AVColorRange range, ID3D11Device* frameDevice = device) {
     std::vector<uint8_t> pixels(width * height * 3 / 2, 128);
     for (int i = 0; i < width * height; ++i) pixels[i] = luma;
     D3D11_SUBRESOURCE_DATA initial{};
@@ -81,7 +101,7 @@ static AVFrame* CreateFrame(int width, int height, uint8_t luma, AVColorRange ra
     desc.Width = width; desc.Height = height; desc.ArraySize = desc.MipLevels = 1;
     desc.Format = DXGI_FORMAT_NV12; desc.SampleDesc.Count = 1; desc.BindFlags = D3D11_BIND_DECODER;
     ID3D11Texture2D* texture = nullptr;
-    if (FAILED(device->CreateTexture2D(&desc, &initial, &texture))) return nullptr;
+    if (FAILED(frameDevice->CreateTexture2D(&desc, &initial, &texture))) return nullptr;
     AVFrame* frame = av_frame_alloc();
     if (!frame) { texture->Release(); return nullptr; }
     frame->width = width; frame->height = height; frame->format = AV_PIX_FMT_D3D11;
@@ -105,7 +125,85 @@ static int ReadPixel(ID3D11DeviceContext* context, ID3D11Texture2D* output) {
     staging->Release();
     return pixel;
 }
-int main() {
+static bool WaitStaging(void* stage) {
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    int ready = 0;
+    while ((ready = ffu_d3d11_stage_ready(stage)) == 0 && std::chrono::steady_clock::now() < deadline) Sleep(1);
+    return ready == 1;
+}
+static bool VerifyIsolatedStaging(ID3D11DeviceContext* context) {
+    auto* isolated = static_cast<ID3D11Device*>(ffu_d3d11_acquire_device());
+    if (!isolated || isolated == device) { std::puts("FAIL: decoder shares Unity's D3D11 device"); return false; }
+    AVBufferRef* reference = av_hwdevice_ctx_alloc(AV_HWDEVICE_TYPE_D3D11VA);
+    if (!reference) return false;
+    auto* hardware = reinterpret_cast<AVHWDeviceContext*>(reference->data);
+    auto* d3d11 = static_cast<AVD3D11VADeviceContext*>(hardware->hwctx);
+    d3d11->device = isolated;
+    if (av_hwdevice_ctx_init(reference) < 0) { av_buffer_unref(&reference); return false; }
+    void* stage = ffu_d3d11_stage_create(reference);
+    void* presenter = ffu_d3d11_create();
+    AVFrame* input = CreateFrame(32, 32, 235, AVCOL_RANGE_MPEG, isolated);
+    auto* target = static_cast<ID3D11Texture2D*>(ffu_d3d11_create_output(presenter, 32, 32));
+    if (!stage || !presenter || !input || !target) return false;
+    input->pts = 12345;
+    std::vector<AVFrame*> held;
+    for (int i = 0; i < 24; ++i) {
+        AVFrame* output = ffu_d3d11_stage_frame(stage, input);
+        if (!output || !WaitStaging(stage) || output->pts != input->pts || output->hw_frames_ctx) return false;
+        const AVFrame* original = ffu_d3d11_stage_source_frame(output);
+        if (!original || original->data[0] != input->data[0]) return false;
+        ID3D11Device* reader = nullptr;
+        reinterpret_cast<ID3D11Texture2D*>(output->data[0])->GetDevice(&reader);
+        const bool sameDevice = reader == device;
+        reader->Release();
+        if (!sameDevice) return false;
+        held.push_back(output);
+    }
+    if (ffu_d3d11_stage_frame(stage, input) || ffu_d3d11_stage_error(stage) != 0 ||
+        ffu_d3d11_stage_source_frame(input) || ffu_d3d11_stage_source_frame(nullptr)) return false;
+    auto* recycledTexture = held[0]->data[0];
+    av_frame_free(&held[0]);
+    AVFrame* recycled = ffu_d3d11_stage_frame(stage, input);
+    if (!recycled || !WaitStaging(stage) || recycled->data[0] != recycledTexture) return false;
+    for (int i = 0; i < 32; ++i) {
+        void* packet = ffu_d3d11_prepare(presenter, recycled, target);
+        if (!packet) return false;
+        av_frame_free(&recycled);
+        ffu_render_callback()(ffu_event_id(FfuSubmitD3D11), packet);
+        context->Flush();
+        // All slots are leased until this packet retires. Poll independently of
+        // presentation: a producer with no free slot cannot issue a new submit.
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+        while (!recycled && std::chrono::steady_clock::now() < deadline) {
+            ffu_render_callback()(ffu_event_id(FfuPoll), nullptr);
+            recycled = ffu_d3d11_stage_frame(stage, input);
+            if (!recycled && ffu_d3d11_stage_error(stage)) return false;
+            if (!recycled) Sleep(1);
+        }
+        if (!recycled || !WaitStaging(stage) || recycled->data[0] != recycledTexture || ReadPixel(context, target) < 240) return false;
+    }
+    // The renderer packet keeps the shared slot and its original NV12 surface
+    // alive after the worker mapper is disposed.
+    void* packet = ffu_d3d11_prepare(presenter, recycled, target);
+    if (!packet) return false;
+    ffu_d3d11_stage_release(stage);
+    av_frame_free(&recycled);
+    for (auto*& frame : held) av_frame_free(&frame);
+    av_frame_free(&input);
+    av_buffer_unref(&reference);
+    ffu_render_callback()(ffu_event_id(FfuSubmitD3D11), packet);
+    ffu_render_callback()(ffu_event_id(FfuDrain), nullptr);
+    const bool valid = ffu_d3d11_error(presenter) == 0 && ReadPixel(context, target) >= 240;
+    ffu_d3d11_release_output(target); ffu_d3d11_release(presenter);
+    std::puts("PASS: isolated D3D11 worker conversion, 24-slot bound/reuse, 33 GPU copies, source accessor and mapper retirement");
+    return valid;
+}
+int main(int argc, char** argv) {
+    if (!VerifyStagingErrorAndRetirement()) {
+        std::puts("FAIL: staging error or lease-retirement regression");
+        return 1;
+    }
+    if (argc > 1 && std::strcmp(argv[1], "--staging-lifetime") == 0) return 0;
     ID3D11DeviceContext* context = nullptr;
     D3D_FEATURE_LEVEL level{};
     HRESULT hr = D3D11CreateDevice(nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr,
@@ -120,6 +218,11 @@ int main() {
     interfaces.GetInterface = Interface;
     interfaces.GetInterfaceSplit = InterfaceSplit;
     UnityPluginLoad(&interfaces);
+    if (argc > 1) {
+        const bool valid = FfuD3D11Benchmark(argv[1], argc > 2 ? std::atoi(argv[2]) : -1, argc > 3 && std::atoi(argv[3]) != 0);
+        UnityPluginUnload(); context->Release(); device->Release();
+        return valid ? 0 : 1;
+    }
     void* presenter = ffu_d3d11_create();
     if (!presenter) { std::puts("SKIP: driver has no video processor"); UnityPluginUnload(); context->Release(); device->Release(); return 77; }
     if (!VerifyDecodeSynchronization(context)) { std::puts("FAIL: worker decode synchronization"); return 1; }
@@ -218,6 +321,7 @@ int main() {
     }
     ffu_d3d11_release_output(other); ffu_d3d11_release_output(large); ffu_d3d11_release_output(restored);
     ffu_d3d11_release_output(output);
+    if (!VerifyIsolatedStaging(context)) { std::puts("FAIL: isolated worker staging"); return 1; }
     UnityPluginUnload();
     context->Release(); device->Release();
     std::printf("PASS: D3D11 NV12 array slice conversion, range and GPU surface lifetime (white=%d dark=%d)\n", white, dark);

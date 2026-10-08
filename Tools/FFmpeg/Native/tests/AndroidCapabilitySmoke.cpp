@@ -12,8 +12,8 @@ int main() {
     if (!bridge) { std::fprintf(stderr, "FAIL bridge load: %s\n", dlerror()); return 1; }
     auto available = reinterpret_cast<int (*)()>(dlsym(bridge, "ffu_android_is_available"));
     auto abi = reinterpret_cast<int (*)()>(dlsym(bridge, "ffu_abi_version"));
-    if (!available || available() != 1 || !abi || abi() != 3) {
-        std::fprintf(stderr, "FAIL API26 image functions or bridge ABI3\n"); return 2;
+    if (!available || available() != 1 || !abi || abi() != 4) {
+        std::fprintf(stderr, "FAIL API26 image functions or bridge ABI4\n"); return 2;
     }
     void* codec = dlopen("libavcodec.so", RTLD_NOW | RTLD_LOCAL);
     auto find = codec ? reinterpret_cast<void* (*)(const char*)>(dlsym(codec, "avcodec_find_decoder_by_name")) : nullptr;
@@ -55,7 +55,7 @@ int main() {
         VkPhysicalDeviceFeatures2 feature{}; feature.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2; feature.pNext = &ycbcr;
         features(device, &feature);
         if (supported && ycbcr.samplerYcbcrConversion) {
-            std::printf("PASS Android native %zu-bit: ABI3, API26 dynamic symbols, 4 MediaCodec decoders; GPU %s, AHB+SYNC_FD+FOREIGN+YCbCr\n", sizeof(void*) * 8, props.deviceName);
+            std::printf("PASS Android native %zu-bit: ABI4, API26 dynamic symbols, 4 MediaCodec decoders; GPU %s, AHB+SYNC_FD+FOREIGN+YCbCr\n", sizeof(void*) * 8, props.deviceName);
             destroy(instance, nullptr);
             return 0;
         }

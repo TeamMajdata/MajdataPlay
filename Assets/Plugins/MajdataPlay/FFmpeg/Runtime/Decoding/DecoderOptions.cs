@@ -30,10 +30,11 @@ namespace MajdataPlay.FFmpeg.Internal
         public bool RequireHardwareDecoding { get; set; }
         /// <summary>Gets or sets the requested FFmpeg hardware backend, or <see cref="AVHWDeviceType.AV_HWDEVICE_TYPE_NONE"/> for software decoding.</summary>
         public AVHWDeviceType HardwareDeviceType { get; set; } = AVHWDeviceType.AV_HWDEVICE_TYPE_NONE;
-        /// <summary>Gets or sets a worker callback that acquires Unity's D3D11 device for native D3D11VA transport.</summary>
+        /// <summary>Gets or sets a worker callback that acquires a D3D11 decoding device compatible with the presentation adapter.</summary>
         /// <remarks>
         /// The callback returns an <c>ID3D11Device</c> pointer with an added reference, or <see cref="IntPtr.Zero"/> if unavailable.
         /// Ownership of a returned reference transfers to FFmpeg, including when device initialization fails.
+        /// The player supplies an independent decoding device on Unity's adapter to isolate its immediate context.
         /// If omitted, hardware decoding may create an independent device when CPU upload is permitted.
         /// </remarks>
         public Func<IntPtr>? AcquireD3D11Device { get; set; }
@@ -55,6 +56,12 @@ namespace MajdataPlay.FFmpeg.Internal
         /// <summary>Creates worker-owned GPU admission control for a borrowed FFmpeg hardware device reference.</summary>
         /// <remarks>The callback must retain any native resources it needs; the decoder disposes the returned synchronizer.</remarks>
         internal Func<IntPtr, IHardwareDecodeSynchronization>? CreateHardwareSynchronization { get; set; }
+        /// <summary>Creates worker-owned conversion of decoded surfaces into completed, independently retained GPU presentation frames.</summary>
+        /// <remarks>The factory receives a borrowed hardware device reference. Its result is disposed on the decoder worker.</remarks>
+        internal Func<IntPtr, IHardwareFrameMapper>? CreateHardwareFrameMapper { get; set; }
+        /// <summary>Configures public hardware frame callbacks before a codec-owned frame pool is initialized.</summary>
+        /// <remarks>The callback borrows an uninitialized FFmpeg AVBufferRef and returns zero on success or a negative FFmpeg error.</remarks>
+        internal Func<IntPtr, int>? ConfigureHardwareFrames { get; set; }
         /// <summary>Waits on the decoding worker until a borrowed native frame is safe to publish.</summary>
         /// <remarks>The callback receives the frame, session cancellation token, and timeout in milliseconds. It must not call Unity APIs.</remarks>
         internal Action<IntPtr, CancellationToken, int>? WaitForHardwareFrame { get; set; }
@@ -62,6 +69,20 @@ namespace MajdataPlay.FFmpeg.Internal
         /// <summary>Creates a shallow options copy, retaining callback and fallback references.</summary>
         /// <returns>A shallow copy with the same option values and callback references.</returns>
         internal DecoderOptions Copy() => (DecoderOptions)MemberwiseClone();
+    }
+
+    /// <summary>Converts hardware frames on their owning worker so presentation does not enter the decoder context.</summary>
+    internal interface IHardwareFrameMapper : IDisposable
+    {
+        /// <summary>Produces a completed GPU frame without downloading pixels or consuming the source.</summary>
+        /// <param name="frame">The borrowed decoded AVFrame, retained throughout conversion.</param>
+        /// <param name="cancellationToken">Cancels conversion or waits when the decode session closes.</param>
+        /// <param name="timeoutMilliseconds">The positive maximum time allowed for GPU completion.</param>
+        /// <returns>An owned AVFrame reference that the caller must free.</returns>
+        /// <exception cref="OperationCanceledException">The session was canceled.</exception>
+        /// <exception cref="TimeoutException">GPU completion exceeded the timeout.</exception>
+        /// <exception cref="NotSupportedException">The frame cannot be safely converted or shared.</exception>
+        IntPtr Map(IntPtr frame, CancellationToken cancellationToken, int timeoutMilliseconds);
     }
 
     /// <summary>Bounds hardware decode submissions without making Unity's render thread wait for the GPU.</summary>

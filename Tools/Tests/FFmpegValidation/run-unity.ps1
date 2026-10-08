@@ -12,6 +12,9 @@ param(
     [switch] $TestDecoderPreference,
     [switch] $TestDecodeOverload,
     [switch] $TestPlaybackThroughput,
+    [switch] $RegularPlayer,
+    [ValidateRange(1, 60)][int] $DoubleRateSeconds = 3,
+    [ValidateRange(30, 1000)][int] $PlaybackTargetFrameRate = 60,
     [switch] $DisableBurst,
     [switch] $TestCameraCapture,
     [switch] $CaptureUrp,
@@ -25,6 +28,7 @@ param(
     [string] $WorkDirectory = ''
 )
 $ErrorActionPreference = 'Stop'
+if ($DoubleRateSeconds -gt 3) { $RegularPlayer = $true }
 if ($CaptureUrp -or $CaptureHardware) { $TestCameraCapture = $true }
 if ($TestCameraCapture -and $Platform -ne 'Windows') { throw 'Camera recording validation currently requires a Windows Player' }
 if ($RequireNativeDecoder) {
@@ -53,7 +57,9 @@ $project = Join-Path $work $projectName
 $result = Join-Path $work "$platformPrefix$Architecture-$Backend"
 $utf8 = New-Object Text.UTF8Encoding($false)
 if (-not $Media) { $Media = Join-Path $repo 'Assets/StreamingAssets/MaiCharts/Original/Zunda Overdance/bg.mp4' }
-if (-not (Test-Path -LiteralPath $Media)) { throw "Missing media: $Media" }
+if (-not [IO.Path]::IsPathRooted($Media)) { $Media = Join-Path $repo $Media }
+if (-not (Test-Path -LiteralPath $Media -PathType Leaf)) { throw "Missing media: $Media" }
+$Media = (Resolve-Path -LiteralPath $Media).Path
 function Write-Json([string] $Path, $Value) { [IO.File]::WriteAllText($Path, ($Value | ConvertTo-Json -Depth 8), $utf8) }
 foreach ($folder in @('Assets/Editor', 'Assets/Smoke', 'Assets/Plugins/FFmpeg', 'Assets/StreamingAssets', 'Packages', 'ProjectSettings')) {
     New-Item -ItemType Directory -Path (Join-Path $project $folder) -Force | Out-Null
@@ -107,6 +113,9 @@ if (-not $SkipBuild) {
     Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'UnityCameraSmoke.cs') -Destination (Join-Path $project 'Assets/Smoke/UnityCameraSmoke.cs') -Force
     Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'UnitySmokeBuild.cs') -Destination (Join-Path $project 'Assets/Editor/UnitySmokeBuild.cs') -Force
     Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'UnityCameraEditorSmoke.cs') -Destination (Join-Path $project 'Assets/Editor/UnityCameraEditorSmoke.cs') -Force
+    # End-of-phase worker diagnostics are accessed by reflection in the isolated
+    # performance harness. Preserve their metadata with High managed stripping.
+    [IO.File]::WriteAllText((Join-Path $project 'Assets/Smoke/link.xml'), '<linker><assembly fullname="MajdataPlay.FFmpeg"><type fullname="MajdataPlay.FFmpeg.Internal.VideoDecodeSession" preserve="all" /><type fullname="MajdataPlay.FFmpeg.FFmpegVideoPlayer" preserve="all" /></assembly></linker>', $utf8)
     $package = (Join-Path $repo 'ThirdParty/FFmpeg.AutoGen/Unity') -replace '\\', '/'
     Write-Json (Join-Path $project 'Packages/manifest.json') @{ dependencies = @{ 'net.majdata.ffmpeg-autogen' = "file:$package"; 'com.unity.render-pipelines.universal' = '17.3.0'; 'com.unity.ugui' = '2.0.0'; 'com.unity.modules.ui' = '1.0.0'; 'com.unity.modules.imageconversion' = '1.0.0'; 'com.unity.modules.androidjni' = '1.0.0'; 'com.unity.modules.unitywebrequest' = '1.0.0' } }
     Write-Json (Join-Path $project 'Assets/Smoke/FFmpeg.Player.Smoke.asmdef') @{ name = 'FFmpeg.Player.Smoke'; references = @('MajdataPlay.FFmpeg', 'MajdataPlay.Diagnostics', 'Unity.RenderPipelines.Core.Runtime', 'Unity.RenderPipelines.Universal.Runtime') }
@@ -160,9 +169,14 @@ if ($Platform -eq 'Linux') {
 }
 $suffix = if ($TestCameraCapture) { '-camera' + $(if ($CaptureUrp) { '-urp' } else { '-builtin' }) + $(if ($CaptureHardware) { '-hardware' } else { '-software' }) } elseif ($RequireNativeDecoder) { '-native-decoder' } elseif ($TestRecovery) { '-recovery' } elseif ($TestDecoderPreference) { '-decoder-preference' } elseif ($HardwareCpuUpload) { '-hardware-cpu' } elseif ($Hardware) { '-hardware' } else { '-software' }
 if ($TestCameraCapture -and -not $CaptureHardware) { $suffix += "-$CaptureFormat-$CaptureRateControl" }
+if ($DoubleRateSeconds -ne 3) { $suffix += "-2x-$($DoubleRateSeconds)s" }
+if ($TestDecodeOverload -and $PlaybackTargetFrameRate -ne 60) { $suffix += "-$($PlaybackTargetFrameRate)fps" }
+if ($RegularPlayer -and -not ($TestCameraCapture -or $TestDecodeOverload -or $TestPlaybackThroughput)) { $suffix += '-regular' }
 $report = Join-Path $result "$Graphics$suffix.txt"
 $log = Join-Path $result "$Graphics$suffix.log"
-if (Test-Path -LiteralPath $report) { Remove-Item -LiteralPath $report }
+foreach ($evidence in @($report, ($report + '.double-rate.tsv'))) {
+    if (Test-Path -LiteralPath $evidence) { Remove-Item -LiteralPath $evidence }
+}
 $hardwareValue = if ($Hardware) { 'true' } else { 'false' }
 $requireHardwareValue = if ($RequireHardware) { 'true' } else { 'false' }
 $testRecoveryValue = if ($TestRecovery) { 'true' } else { 'false' }
@@ -170,22 +184,34 @@ $hardwareCpuValue = if ($HardwareCpuUpload) { 'true' } else { 'false' }
 $decoderPreferenceValue = if ($TestDecoderPreference) { 'true' } else { 'false' }
 $nativeDecoderValue = if ($RequireNativeDecoder) { $Graphics } else { 'none' }
 $playerArgs = @('-batchmode', "-force-$Graphics", '-logFile', ('"' + $log + '"'), '-videoHardware', $hardwareValue, '-videoRequireHardware', $requireHardwareValue, '-videoTestRecovery', $testRecoveryValue, '-videoHardwareCpuUpload', $hardwareCpuValue, '-videoTestDecoderPreference', $decoderPreferenceValue, '-videoReport', ('"' + $report + '"'))
-$playerArgs += @('-videoNativeDecoder', $nativeDecoderValue)
+$playerArgs += @('-videoNativeDecoder', $nativeDecoderValue, '-videoGraphics', $Graphics, '-videoDoubleRateSeconds', $DoubleRateSeconds, '-videoMedia', ('"' + $Media + '"'))
+# Keep the source identity even when an existing Player reads external media.
+Write-Json ($report + '.run.json') @{ graphics = $Graphics; backend = $Backend; architecture = $Architecture; media = $Media; hardware = [bool]$Hardware; requireNativePresentation = [bool]$RequireHardware; doubleRateSeconds = $DoubleRateSeconds; skipBuild = [bool]$SkipBuild }
 if ($TestDecodeOverload) {
-    $playerArgs += @('-videoTestDecodeOverload', 'true')
+    $playerArgs += @('-videoTestDecodeOverload', 'true', '-videoTargetFps', $PlaybackTargetFrameRate)
 }
 if ($TestPlaybackThroughput) {
     $playerArgs += @('-videoTestPlaybackThroughput', 'true')
 }
-if ($TestCameraCapture -or $TestDecodeOverload -or $TestPlaybackThroughput) {
+if ($RegularPlayer -or $TestCameraCapture -or $TestDecodeOverload -or $TestPlaybackThroughput) {
     # Capture and render-thread throughput checks need the regular Player render loop.
     $playerArgs = @($playerArgs | Where-Object { $_ -ne '-batchmode' })
 }
 $playerArgs += @('-cameraCapture', $(if ($TestCameraCapture) { 'true' } else { 'false' }), '-captureHardware', $(if ($CaptureHardware) { 'true' } else { 'false' }))
 $playerArgs += @('-captureFormat', $CaptureFormat, '-captureRateControl', $CaptureRateControl)
 $process = Start-Process -FilePath (Join-Path $result 'VideoSmoke.exe') -ArgumentList $playerArgs -WindowStyle Hidden -PassThru
-if (-not $process.WaitForExit(120000)) { $process.Kill(); throw "Player timed out: $log" }
+$timeoutMilliseconds = [Math]::Max(120000, ($DoubleRateSeconds + 90) * 1000)
+if (-not $process.WaitForExit($timeoutMilliseconds)) { $process.Kill(); throw "Player timed out after $($timeoutMilliseconds / 1000) seconds: $log" }
 if (-not (Test-Path -LiteralPath $report)) { Get-Content -LiteralPath $log -Tail 60; throw "Player produced no result: $log" }
 $text = Get-Content -LiteralPath $report -Raw
 Write-Output $text
 if ($process.ExitCode -ne 0 -or -not $text.StartsWith('PASS:')) { throw "Player failed: $log" }
+if (-not $TestCameraCapture -and $DoubleRateSeconds -gt 3) {
+    $doubleRateEvidence = $report + '.double-rate.tsv'
+    if (-not (Test-Path -LiteralPath $doubleRateEvidence -PathType Leaf)) { throw "The built Player did not produce the new 2x evidence. Rebuild the isolated Player: $log" }
+    $measurement = @(Import-Csv -LiteralPath $doubleRateEvidence -Delimiter "`t")
+    if ($measurement.Count -ne 1) { throw "Invalid continuous 2x evidence: $doubleRateEvidence" }
+    $wallSeconds = [double]::Parse($measurement[0].wall_seconds, [Globalization.CultureInfo]::InvariantCulture)
+    if ([double]::IsNaN($wallSeconds) -or [double]::IsInfinity($wallSeconds)) { throw "Non-finite continuous 2x wall-clock evidence: $doubleRateEvidence" }
+    if ($DoubleRateSeconds -gt 3 -and $wallSeconds -lt $DoubleRateSeconds) { throw "Player did not measure the full requested $DoubleRateSeconds seconds at 2x: $doubleRateEvidence" }
+}

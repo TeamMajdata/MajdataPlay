@@ -3,6 +3,9 @@
 #include "../VulkanVideoDecode.cpp"
 #include <cstdio>
 #include <cstdlib>
+#include <chrono>
+#include <future>
+#include <thread>
 #ifdef _WIN32
 #include "../VulkanInterop.h"
 #endif
@@ -10,6 +13,44 @@
 int FfuEventId(int event) { return event; }
 #define REQUIRE(value) do { if (!(value)) { std::printf("FAIL line %d: %s\n", __LINE__, #value); std::exit(1); } } while (0)
 namespace {
+void FreeProfile(AVHWFramesContext* frames) {
+    REQUIRE(frames->free == FreeProfile);
+    auto* count = static_cast<int*>(frames->user_opaque); ++*count;
+}
+void VerifyFrameGate() {
+    AVHWDeviceContext device{}; device.type = AV_HWDEVICE_TYPE_VULKAN;
+    AVVulkanFramesContext pool{};
+    AVHWFramesContext frames{}; frames.device_ctx = &device; frames.hwctx = &pool;
+    int profileFreed = 0; frames.user_opaque = &profileFreed; frames.free = FreeProfile;
+    AVBufferRef reference{}; reference.data = reinterpret_cast<uint8_t*>(&frames);
+    REQUIRE(ffu_vulkan_video_configure_frames(nullptr) < 0);
+    REQUIRE(ffu_vulkan_video_configure_frames(&reference) == 0);
+    REQUIRE(frames.user_opaque == &profileFreed);
+    REQUIRE(ffu_vulkan_video_configure_frames(&reference) < 0); // never replace a live gate
+    auto* gate = GetFrameGate(&frames, &pool); REQUIRE(gate);
+    std::promise<void> entered, release;
+    auto enteredFuture = entered.get_future(); auto releaseFuture = release.get_future();
+    std::thread decoder([&] {
+        pool.lock_frame(&frames, nullptr); pool.lock_frame(&frames, nullptr);
+        entered.set_value(); releaseFuture.wait();
+        pool.unlock_frame(&frames, nullptr); pool.unlock_frame(&frames, nullptr);
+    });
+    REQUIRE(enteredFuture.wait_for(std::chrono::seconds(1)) == std::future_status::ready);
+    {
+        FrameOwner owner; owner.context = std::make_shared<FfuVkContext>(); owner.gate = gate;
+        FfuVkSample sample;
+        const auto start = std::chrono::steady_clock::now();
+        for (int i = 0; i < 1000; ++i) REQUIRE(!owner.Lock(sample) && sample.pending && !owner.locked);
+        REQUIRE(std::chrono::steady_clock::now() - start < std::chrono::milliseconds(100));
+        owner.gate = nullptr; sample.pending = false;
+        REQUIRE(!owner.Lock(sample) && sample.pending); // foreign pool never calls its blocking callback
+    }
+    release.set_value(); decoder.join();
+    REQUIRE(gate->mutex.try_lock()); gate->mutex.unlock();
+    frames.free(&frames);
+    REQUIRE(profileFreed == 1 && frames.user_opaque == &profileFreed && frames.free == FreeProfile && frameGates.empty());
+    std::puts("PASS: public Vulkan frame gate, recursive DPB locks, 1000 renderer contention skips without GPU submission, foreign-pool rejection");
+}
 int deviceCreates = 0, deviceDestroys = 0, instanceDestroys = 0;
 bool videoExtensions = true, privateQueue = true, rejectVideo = false;
 uint32_t obtainedQueueIndex = UINT32_MAX, obtainedQueueFamily = UINT32_MAX;
@@ -207,6 +248,7 @@ void VerifyStartupAcquisition() {
 #endif
 
 int main() {
+    VerifyFrameGate();
     instanceLoader = TestLoader;
     instances[testInstance].destroy = TestDestroyInstance;
     instanceVersions[testInstance] = VK_API_VERSION_1_2;

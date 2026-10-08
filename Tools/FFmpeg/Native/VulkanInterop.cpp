@@ -139,6 +139,7 @@ struct Context {
     PFN_vkGetPhysicalDeviceMemoryProperties GetMemoryProperties = nullptr;
     PFN_vkGetPhysicalDeviceImageFormatProperties2 GetImageFormatProperties = nullptr;
     VkPhysicalDeviceMemoryProperties memory{};
+    std::atomic<int> inFlight{0};
     bool Load() {
         GetDeviceProcAddr = reinterpret_cast<PFN_vkGetDeviceProcAddr>(instance.getInstanceProcAddr(instance.instance, "vkGetDeviceProcAddr"));
         if (!GetDeviceProcAddr) return false;
@@ -177,7 +178,6 @@ struct Surface {
         Drop(keyed); Drop(producer); Drop(texture);
     }
 };
-std::atomic<int> inFlight{0};
 struct Job {
     Surface* surface = nullptr;
     UnityVulkanImage target{};
@@ -193,7 +193,7 @@ struct Job {
             if (pool) c.DestroyCommandPool(c.instance.device, pool, nullptr);
         }
         surface->Release();
-        --inFlight;
+        --context->inFlight;
     }
 };
 // AccessQueue may execute on Unity's submission worker, so all jobs are protected.
@@ -382,13 +382,28 @@ bool FfuVulkanEndWrite(void* pointer, void* unityTexture) {
     auto* surface = static_cast<Surface*>(pointer);
     if (!surface || !surface->writing) return false;
     surface->writing = false;
-    const HRESULT hr = surface->keyed->ReleaseSync(1);
+    // The producer context may still hold the D3D11 copy in its client-side
+    // command buffer. Submit it before publishing key 1 to Vulkan; otherwise
+    // the consumer can acquire the keyed mutex before the shared image write
+    // has reached the GPU.
     surface->producer->Flush();
+    const HRESULT hr = surface->keyed->ReleaseSync(1);
     if (hr != S_OK) { surface->error = hr; return false; }
-    if (!surface->context->active || !unity || !unityTexture) { ResetProducerKey(surface); return false; }
-    if (inFlight.fetch_add(1) >= 32) { --inFlight; surface->error = -1001; ResetProducerKey(surface); return false; }
+    if (!unity || !unityTexture) { ResetProducerKey(surface); return false; }
+    const auto context = surface->context;
+    {
+        // Shutdown updates the current generation while holding stateMutex and
+        // the same resource gate. Keep admission in that lock order so a
+        // prepare that captured an old context cannot enqueue new work.
+        std::lock_guard<std::mutex> stateLock(stateMutex);
+        std::lock_guard<std::recursive_mutex> resourceLock(context->resources);
+        if (!context->active || current.get() != context.get()) { ResetProducerKey(surface); return false; }
+        if (context->inFlight.fetch_add(1) >= 32) {
+            --context->inFlight; surface->error = -1001; ResetProducerKey(surface); return false;
+        }
+    }
     auto* job = new (std::nothrow) Job();
-    if (!job) { --inFlight; ResetProducerKey(surface); return false; }
+    if (!job) { --context->inFlight; ResetProducerKey(surface); return false; }
     job->surface = surface; surface->Retain();
     if (!unity->AccessTexture(unityTexture, UnityVulkanWholeImage, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
         VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_WRITE_BIT, kUnityVulkanResourceAccess_PipelineBarrier, &job->target) ||
@@ -408,7 +423,19 @@ void FfuVulkanPoll(bool drain) {
         const auto context = job->surface->context;
         auto& c = *context;
         std::lock_guard<std::recursive_mutex> resourceLock(c.resources);
-        VkResult result = c.active ? c.GetFenceStatus(c.instance.device, job->fence) : VK_ERROR_DEVICE_LOST;
+        // An inactive Unity generation may still have GPU work in flight. Do
+        // not query its device after Unity may have destroyed it. The keyed
+        // mutex is the remaining cross-API completion signal: key 0 means the
+        // Vulkan queue released the imported image back to its D3D11 owner.
+        if (!c.active) {
+            const HRESULT acquire = job->surface->keyed->AcquireSync(0, 0);
+            if (acquire == S_OK) {
+                job->surface->keyed->ReleaseSync(0);
+                delete job; it = jobs.erase(it); continue;
+            }
+            ++it; continue;
+        }
+        VkResult result = c.GetFenceStatus(c.instance.device, job->fence);
         if (drain && result == VK_NOT_READY) {
             const auto remaining = std::chrono::duration_cast<std::chrono::nanoseconds>(deadline - std::chrono::steady_clock::now()).count();
             if (remaining > 0) result = c.WaitForFences(c.instance.device, 1, &job->fence, VK_TRUE, static_cast<uint64_t>(remaining));

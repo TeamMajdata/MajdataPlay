@@ -36,3 +36,8 @@ geometry, preventing unbounded mesh allocation for very large tiled sizes.
 Identical settings share immutable meshes. Changing Size can allocate a new mesh;
 continuous size animation is not allocation-free. NoteRenderer keeps its preloaded
 Simple meshes and uses the shared cache for Sliced/Tiled, still ignoring flips.
+
+## Translation Editor
+
+See [Translation editor validation](TranslationEditorValidation.md) for the static
+key-analysis regression tests, isolated Unity editor checks, and editor workflow.

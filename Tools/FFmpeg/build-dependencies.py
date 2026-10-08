@@ -314,10 +314,11 @@ def prepare(targets, cache):
         ensure_encoder_source(name)
     if any(target.startswith(('win-', 'linux-', 'android-')) for target in targets):
         ensure_vulkan_headers()
-    if any(target.startswith(('win-', 'linux-')) for target in targets):
+    if any(target.startswith(('win-', 'linux-')) and target != 'win-arm64' for target in targets):
         ensure_nvcodec_headers()
-    if any(target.startswith('win-') for target in targets):
+    if any(target in ('win-x86', 'win-x64') for target in targets):
         ensure_amf_headers()
+    if any(target.startswith('win-') for target in targets):
         ensure_llvm(cache)
 
 

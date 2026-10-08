@@ -48,7 +48,7 @@ namespace MajdataPlay.FFmpeg.Internal
     internal sealed class VideoDecodeSession : IDisposable
     {
         /// <summary>The wall-clock lag, in seconds, after which the worker skips to a later keyframe instead of decoding the gap.</summary>
-        private const double CatchUpLagSeconds = 0.25;
+        private const double CatchUpLagSeconds = 0.1;
         /// <summary>Protects the playback timeline, queued frames, control revisions, and worker status across threads.</summary>
         private readonly object _gate = new object();
         /// <summary>Queues owned frames awaiting main-thread presentation.</summary>
@@ -459,7 +459,7 @@ namespace MajdataPlay.FFmpeg.Internal
 
                 var position = _playbackClock.Position;
                 var discardBefore = _frames.Count == 0 ? double.NegativeInfinity : position;
-                return new FrameDeadline(position, discardBefore, position - CatchUpLagSeconds * _playbackClock.Rate);
+                return new FrameDeadline(position, discardBefore, position - CatchUpLagSeconds * _playbackClock.Rate, _playbackClock.Rate);
             }
         }
 

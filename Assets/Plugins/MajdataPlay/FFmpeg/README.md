@@ -47,7 +47,7 @@ public sealed class VideoExample : MonoBehaviour
 | `SeekTo(TimeSpan)`, `Position` | 时间跳转；Position 是 0–1 的归一化位置 |
 | `PlaybackRate` | 1/16–16 倍速；不支持倒放；倍速变化保持时间连续 |
 | `Loop`, `NextFrame()` | 循环；暂停并向前显示一帧 |
-| `State`, `IsPrepared`, `IsPlaying`, `IsBuffering`, `IsSeekable` | 状态；准备或持续缓冲期间时间不推进，100ms 以内的短时解码空档不会冻结播放时钟 |
+| `State`, `IsPrepared`, `IsPlaying`, `IsBuffering`, `IsSeekable` | 状态；准备、暂停和显式 seek 期间时间不推进，播放缺帧仅报告缓冲，时钟继续推进供解码器追赶 |
 | `Texture`, `Width`, `Height`, `FrameRate`, `CodecName` | 当前输出与媒体信息；CodecName 是视频编码，如 h264 |
 | `CurrentBitRate`, `BitRate` | 当前画面附近约 1 秒的视频压缩码率估计、视频流平均码率，均为 bit/s；未知为 0，Inspector 自动换算单位 |
 | `DecoderType`, `DecoderName`, `DecoderDevice` | 当前会话的实际解码后端类型、AVCodec 名称与设备描述；需在准备后读取 |
@@ -60,9 +60,15 @@ public sealed class VideoExample : MonoBehaviour
 
 所有组件 API 在 Unity 主线程调用。控制时间使用单调时钟，不受 `Time.timeScale` 影响。连续 seek 只保留最后一次请求，旧 `SeekAsync` 被取消。更换 Url / Close / 销毁对象会取消尚未完成的任务；后台线程退出后关闭 FFmpeg。音轨数据包被跳过。预载不是将整个文件读入内存，帧队列默认仅 3 帧，Inspector 可调整到 1–8 帧。
 
-Player 和解码线程共用解码会话持有的唯一单调播放时钟，时间读取、倍速和播放状态修改都在会话锁内完成，无需每帧同步两套时钟。播放期间，解码线程在新帧已经到期时淘汰它替代的旧帧，保留最新到期帧和未来帧。满队列时最多额外持有一张待入队候选帧，并按候选帧到期时间等待；不需要增大缓存才能跳过已过期画面。暂停、缓冲和 seek 时停止淘汰，准备首帧与逐帧播放仍按顺序取帧。主线程在同一队列锁内选择最新到期帧，避免与后台替换竞态。
+Player 和解码线程共用解码会话持有的唯一单调播放时钟，时间读取、倍速和播放状态修改都在会话锁内完成，无需每帧同步两套时钟。播放期间，解码线程在新帧已经到期时淘汰它替代的旧帧，保留最新到期帧和未来帧。满队列时最多额外持有一张待入队候选帧，并按候选帧到期时间等待；不需要增大缓存才能跳过已过期画面。暂停和显式 seek 时停止淘汰，准备首帧与逐帧播放仍按顺序取帧。主线程在同一队列锁内选择最新到期帧，避免与后台替换竞态。
 
-倍速超过解码吞吐时，解码线程主动追赶播放时钟：显示区间已结束的帧在硬件下载、RGBA 转换或原生帧保留之前直接丢弃，只在队列为空时保留一张过期帧，保证画面继续前进；落后期间 codec 跳过非参考帧（`AVDISCARD_NONREF`），按时后恢复；落后超过约 0.25 秒实际时间时，对可 seek 输入向前跳到播放时钟之后的第一个关键帧，不解码中间区间，找不到后续关键帧时在下次显式 seek 前回到顺序解码。主线程播放期间的呈现频率不超过视频标称帧率（限制在 24–120 FPS 之间，含 25% 余量），因此高倍速下 CPU 上传 `LoadRawTextureData`/`Apply` 和 GPU 转换提交给 render thread 的工作量与 1 倍速相同，被限流跳过的到期帧由解码线程替换或丢弃。代价是高倍速时视频跳帧、卡顿，而不是拖慢游戏帧率。暂停、缓冲、seek、准备首帧与逐帧播放不丢帧。Vulkan Video 与原生 D3D12VA 的解码帧完成等待在工作线程执行，带取消和超时；所有输出帧（包括随后丢弃的过期帧和 seek preroll）都经过此等待，以限制积压。渲染提交防御性地再次查询该帧的完成值，仍未就绪时跳过并保留上一张纹理，避免向 Unity 图形队列提交尚未完成的解码等待。Windows D3D11VA 原生纹理路径（包括 D3D12/Vulkan 回退）使用复用 GPU event query，在每次 codec send/receive/drain 之后由工作线程等待完成，避免解码提交淹没驱动；Vulkan 共享纹理忙碌时以零超时跳过呈现。正常 GPU 色彩转换、共享纹理复制仍有同步成本。此修复需要重新构建并加载 FFmpegUnityBridge，更新后重启 Unity；旧桥接缺少完成查询入口时会报告原因并按既定策略回退。
+倍速超过解码吞吐时，解码线程在硬件下载、RGBA 转换或原生映射之前丢弃过期输出，落后期间跳过非参考帧（`AVDISCARD_NONREF`），恢复按时解码后再启用完整输出。落后超过约 0.1 秒实际时间时，可 seek 输入跳到已到期、且严格晚于解码位置的最近关键帧；没有新的到期关键帧就继续顺序解码。避免跳到尚未到期的整段 GOP 后等待。最后一张未转换源帧保留到 EOF，以便显示真正的终点画面。暂停、显式 seek、准备首帧与逐帧播放仍保持精确帧语义。
+
+主线程呈现频率不超过视频标称帧率（限制在 24–120 FPS），不会随倍速线性增长。解码线程对高倍速过期输出限制转换频率，将吞吐留给参考帧解码；保持真实 PTS，由有界队列保留最新到期帧。播放缺帧仅通过 `IsBuffering` 报告，播放时钟继续推进。长 GOP、参考帧密集的输入仍可能低于请求的画面采样率，高倍速通过跳帧追赶时间轴，不要求每个源帧都被呈现。
+
+Windows 三种渲染 API 优先使用与 Unity 同适配器的独立 D3D11VA 设备。工作线程完成 NV12 到 RGBA 的 GPU 转换及完成等待，再发布呈现设备上的共享纹理。24 槽有界池保留纹理直到最后一个 AVFrame 引用和 GPU 呈现包释放；没有新视频输出时也提交非阻塞回收事件，避免池满后停止回收。Unity render thread 仅复制已完成的 RGBA 表面，不进入解码器 immediate context。工作线程的完成标记同时覆盖前序 decode 工作，staged 路径最多每 16 个 packet 同步一次，旧路径保持 4；drain/seek 强制同步。D3D12 共享复制复用纹理、句柄和命令资源，避免逐帧创建。
+
+独立 D3D11VA 不支持该编码或共享资源时，D3D12/Vulkan 可尝试原生视频后端。原生帧完成等待由解码线程执行，带取消与超时；提交时再次查询，仍未完成就跳过。Vulkan 原生帧池在初始化前安装公共同步回调，呈现使用非阻塞锁；解码器持有帧池时保留上一张纹理。此修复需要更新 FFmpegUnityBridge 并重启已加载旧库的 Unity/Player。正常 GPU 复制仍有成本，实际游戏帧时间须以目标 GPU、渲染 API 和场景的 Player 测试为准。
 
 公开 API 遵循 [Microsoft .NET 命名约定](https://learn.microsoft.com/en-us/dotnet/standard/design-guidelines/capitalization-conventions)：类型和成员使用 PascalCase，参数使用 camelCase。播放器、解码器、选项、帧对象及硬件会话接口均提供英文 XML 文档。旧的小驼峰成员已移除：`time` 改为 `TimeSeconds`，`texture`、`isPrepared`、`isPlaying`、`playbackSpeed` 分别使用 `Texture`、`IsPrepared`、`IsPlaying`、`PlaybackRate`。此调整需要更新调用代码，不影响已有场景的序列化字段。
 
@@ -90,10 +96,10 @@ AV1 软件解码使用构建时静态链接的 `libdav1d`（也兼容包含 `lib
 
 | 后端 | 通用播放 | 可选原生路径 |
 | --- | --- | --- |
-| D3D11 | RGBA 上传 | 同 Unity device 的 D3D11VA 解码，视频处理器在 GPU 上转为 RGBA，无 CPU 回读；有 GPU 转换，不是严格零拷贝 |
-| D3D12 | RGBA 上传 | Windows：优先在 Unity 的 D3D12 device 上进行 D3D12VA 解码，视频处理队列转为 RGBA，再由 Unity 队列复制至显示纹理；不支持时尝试同适配器 D3D11VA 共享路径；均无 CPU 回读 |
+| D3D11 | RGBA 上传 | 同适配器独立 D3D11VA 解码，工作线程在 GPU 上转为已完成 RGBA，渲染线程只复制；无 CPU 回读 |
+| D3D12 | RGBA 上传 | Windows：优先独立 D3D11VA 工作线程转换与共享复制；不支持时尝试 Unity D3D12 device 上的 D3D12VA；均无 CPU 回读 |
 | OpenGL / OpenGL ES | RGBA 上传 | Windows OpenGL Core：WGL_NV_DX_interop2 共享 D3D11VA 转换后的 RGBA 纹理；Linux/Android 可使用 VAAPI/MediaCodec 硬件解码后 CPU 上传 |
-| Vulkan | RGBA 上传 | Windows/Linux/Android：优先 Vulkan Video，在 Unity 的 VkDevice 上解码，直接采样 AVVkFrame 的 YUV 图像并在 GPU 上转换至显示纹理。不支持时依次尝试平台共享路径：Windows D3D11VA、Linux VAAPI DMA-BUF、Android MediaCodec AHardwareBuffer；均无 CPU 像素回读 |
+| Vulkan | RGBA 上传 | Windows：优先独立 D3D11VA 工作线程转换与共享复制，再尝试 Vulkan Video。Linux/Android：优先 Vulkan Video，再尝试 VAAPI DMA-BUF/MediaCodec AHardwareBuffer；均无 CPU 像素回读 |
 | Metal | RGBA 上传 | VideoToolbox 的 NV12 CVPixelBuffer 通过 CVMetalTextureCache 零拷贝映射平面；着色器再在 GPU 转为 RGBA |
 
 Metal 的平面映射和 Windows OpenGL 的纹理映射不复制像素，但最终 RGBA 显示包含 GPU 转换。Windows 四条硬件路径都避免 CPU 像素回读/上传；D3D12、Vulkan 仍有 GPU copy，不能将其称为严格的端到端零拷贝。外部纹理必须保留帧引用直到 GPU 完成；原生桥接承担此生命周期，不应自行释放返回的 Texture。
@@ -104,7 +110,7 @@ Windows/Linux/Android 的 Vulkan 桥接必须保持 PluginImporter 的 **Preload
 
 Vulkan Video 路径要求 Vulkan 1.3、timeline semaphore、synchronization2、YCbCr 采样、对应编码的 video decode 扩展，以及可供 FFmpeg 独立使用的队列。插件保留 Unity 原有功能链，为 FFmpeg 分配独立队列，并用解码帧的 timeline semaphore 同步显示与帧复用。若驱动不接受扩展后的设备创建请求，会恢复 Unity 原本的设备请求，日志报告原因并尝试平台后端。当前原生 GPU 转换支持单图像 NV12/P010/P016 SDR 帧；不支持的布局、格式或 HDR 会触发明确的回退/错误。
 
-原生解码器与图形 API 分开检测。只有 FFmpeg 编译支持、编码配置、GPU 与驱动同时满足条件才会使用 D3D12VA 或 Vulkan Video，不能由 Unity 使用 D3D12/Vulkan 推断硬解一定可用。原生后端初始化或播放中失败时先尝试上述平台硬解路径；非严格模式再允许硬解加 CPU 上传、最后软件解码。`RequireHardwareDecoding` 允许在无 CPU 像素传输的硬件后端之间回退。`DecoderDevice`、`TransferMode` 和日志会报告实际选中的路径；新路径分别报告 `D3D12VA native decode + GPU conversion (no CPU readback)` 和 `Vulkan Video native decode + GPU conversion (no CPU readback)`。VP8 等没有对应 FFmpeg 硬件配置的编码仍会按既定策略回退。
+原生解码器与图形 API 分开检测。只有 FFmpeg 编译支持、编码配置、GPU 与驱动同时满足条件才会使用 D3D12VA 或 Vulkan Video，不能由 Unity 使用 D3D12/Vulkan 推断硬解一定可用。根据平台选择独立或原生后端，初始化失败时尝试兼容后端；非严格模式再允许硬解加 CPU 上传、最后软件解码。`RequireHardwareDecoding` 允许在无 CPU 像素传输的硬件后端之间回退。`DecoderDevice`、`TransferMode` 和日志会报告实际选中的路径；新路径分别报告 `D3D12VA native decode + GPU conversion (no CPU readback)` 和 `Vulkan Video native decode + GPU conversion (no CPU readback)`。VP8 等没有对应 FFmpeg 硬件配置的编码仍会按既定策略回退。
 
 Linux 路径按 Vulkan 物理设备的 DRM render node 创建 VAAPI 解码设备，使用 `AV_HWFRAME_MAP_READ | AV_HWFRAME_MAP_DIRECT` 导出 DMA-BUF；解码完成同步在工作线程等待，不映射视频像素。需要系统提供对应显卡的 VAAPI 驱动、DRM render node 访问权限，以及 Vulkan DMA-BUF、DRM modifier、foreign queue 扩展。播放器随库打包 libva/libdrm，不打包显卡驱动。目前硬件转换支持 8-bit NV12 SDR BT.601/709；不支持的 P010/HDR 等格式明确失败，严格模式下不回读。
 

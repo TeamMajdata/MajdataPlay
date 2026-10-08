@@ -6,6 +6,7 @@
 #include "IUnityGraphicsD3D12.h"
 #include <mutex>
 #include <vector>
+#include <unordered_map>
 #include <new>
 #include <thread>
 #include <chrono>
@@ -32,7 +33,10 @@ static UINT64 sequence = 0; // submission thread only; each fence has a single p
 static void PollNative(bool drain);
 static void RenderNative(int event, void* data);
 
+struct D3D12Pool;
 struct D3D12Packet {
+    bool counted = false;
+    D3D12Pool* pool = nullptr;
     void* presenter = nullptr;
     void* conversion = nullptr;
     ID3D12Resource* shared12 = nullptr;
@@ -43,13 +47,68 @@ struct D3D12Packet {
     ID3D12Fence* complete = nullptr;
     UINT64 value = 0;
     bool statePrepared = false;
-    ~D3D12Packet() {
-        if (conversion) ffu_packet_cancel(conversion);
-        Drop(command); Drop(allocator); Drop(target); Drop(shared11); Drop(shared12); Drop(complete);
-        if (presenter) ffu_d3d11_release(presenter);
-        --inFlight;
-    }
+    ~D3D12Packet();
 };
+struct D3D12Pool {
+    std::atomic<int> references{1};
+    std::mutex mutex;
+    bool active = true;
+    ID3D12Resource* target = nullptr; // borrowed from the retained packet slots
+    std::vector<D3D12Packet*> available;
+    void Retain() { ++references; }
+    void Drop() { if (--references == 0) delete this; }
+};
+static std::mutex poolsMutex;
+static std::unordered_map<void*, D3D12Pool*> pools;
+D3D12Packet::~D3D12Packet() {
+    if (conversion) ffu_packet_cancel(conversion);
+    Drop(command); Drop(allocator); Drop(target); Drop(shared11); Drop(shared12); Drop(complete);
+    if (presenter) FfuD3D11DropPresenter(presenter);
+    if (pool) pool->Drop();
+    if (counted) --inFlight;
+}
+static D3D12Pool* PoolFor(void* presenter) {
+    std::lock_guard<std::mutex> guard(poolsMutex);
+    auto found = pools.find(presenter);
+    if (found != pools.end()) return found->second;
+    auto* pool = new (std::nothrow) D3D12Pool();
+    if (pool) pools.emplace(presenter, pool);
+    return pool;
+}
+static void ClosePool(D3D12Pool* pool) {
+    std::vector<D3D12Packet*> available;
+    {
+        std::lock_guard<std::mutex> guard(pool->mutex);
+        pool->active = false; available.swap(pool->available);
+    }
+    for (auto* packet : available) delete packet;
+    pool->Drop();
+}
+void FfuD3D12ForgetPresenter(void* presenter) {
+    D3D12Pool* pool = nullptr;
+    {
+        std::lock_guard<std::mutex> guard(poolsMutex);
+        auto found = pools.find(presenter);
+        if (found == pools.end()) return;
+        pool = found->second; pools.erase(found);
+    }
+    ClosePool(pool);
+}
+static void RecyclePacket(D3D12Packet* packet) {
+    if (packet->conversion) { ffu_packet_cancel(packet->conversion); packet->conversion = nullptr; }
+    if (packet->counted) { packet->counted = false; --inFlight; }
+    auto* pool = packet->pool;
+    bool reusable = false;
+    if (pool) {
+        std::lock_guard<std::mutex> guard(pool->mutex);
+        reusable = pool->active && pool->target == packet->target && pool->available.size() < 4;
+        if (reusable) {
+            packet->value = 0; packet->statePrepared = false;
+            pool->available.push_back(packet);
+        }
+    }
+    if (!reusable) delete packet;
+}
 static std::vector<D3D12Packet*> pending; // only submission-thread events access this list
 
 void FfuD3D12Poll(bool drain) {
@@ -62,12 +121,20 @@ void FfuD3D12Poll(bool drain) {
             std::this_thread::sleep_for(std::chrono::milliseconds(1));
             done = packet->complete->GetCompletedValue();
         }
-        if (done >= packet->value && packet->value != 0) { delete packet; it = pending.erase(it); }
+        if (done == UINT64_MAX) { it = pending.erase(it); delete packet; }
+        else if (done >= packet->value && packet->value != 0) { it = pending.erase(it); RecyclePacket(packet); }
         else ++it; // bounded retention rather than reusing GPU resources after a driver timeout
     }
 }
 void FfuD3D12Shutdown() {
     FfuD3D12Poll(true);
+    std::vector<D3D12Pool*> retiredPools;
+    {
+        std::lock_guard<std::mutex> guard(poolsMutex);
+        for (auto& entry : pools) retiredPools.push_back(entry.second);
+        pools.clear();
+    }
+    for (auto* pool : retiredPools) ClosePool(pool);
     std::unique_lock<std::mutex> lock(stateMutex);
     unity12 = nullptr;
     Drop(processed12); Drop(processQueue); Drop(video12);
@@ -93,6 +160,11 @@ ID3D11Device* FfuD3D12Initialize(IUnityInterfaces* interfaces) {
     record.graphicsQueueAccess = kUnityD3D12GraphicsQueueAccess_DontCare;
     unity12->ConfigureEvent(FfuEventId(FfuPrepareD3D12), &record);
     unity12->ConfigureEvent(FfuEventId(FfuPrepareNativeD3D12), &record);
+    // Poll and submit touch the same pending lists. Allow routes both callbacks
+    // to Unity's submission thread; no flush or worker synchronization is needed.
+    UnityD3D12PluginEventConfig poll{};
+    poll.graphicsQueueAccess = kUnityD3D12GraphicsQueueAccess_Allow;
+    unity12->ConfigureEvent(FfuEventId(FfuPoll), &poll);
     UnityD3D12PluginEventConfig submit{};
     submit.graphicsQueueAccess = kUnityD3D12GraphicsQueueAccess_Allow;
     submit.flags = kUnityD3D12EventConfigFlag_FlushCommandBuffers | kUnityD3D12EventConfigFlag_SyncWorkerThreads;
@@ -135,12 +207,28 @@ int FfuD3D12Capabilities() {
 }
 
 FFU_EXPORT void* FFU_CALL ffu_d3d12_prepare(void* presenter, const AVFrame* frame, void* unityTexture) {
-    if (!presenter || !frame || !unityTexture || inFlight.fetch_add(1) >= 24) {
-        if (presenter && frame && unityTexture) --inFlight;
-        return nullptr;
+    if (!presenter || !frame || !unityTexture) return nullptr;
+    if (inFlight.fetch_add(1) >= 24) { --inFlight; return nullptr; }
+    auto* pool = PoolFor(presenter);
+    if (!pool) { --inFlight; FfuD3D11SetError(presenter, E_OUTOFMEMORY); return nullptr; }
+    D3D12Packet* packet = nullptr;
+    std::vector<D3D12Packet*> obsolete;
+    {
+        std::lock_guard<std::mutex> guard(pool->mutex);
+        if (pool->target != unityTexture) { pool->target = static_cast<ID3D12Resource*>(unityTexture); obsolete.swap(pool->available); }
+        if (!pool->available.empty()) { packet = pool->available.back(); pool->available.pop_back(); }
     }
-    auto* packet = new (std::nothrow) D3D12Packet();
+    for (auto* old : obsolete) delete old;
+    if (packet) {
+        packet->counted = true;
+        packet->conversion = ffu_d3d11_prepare(presenter, frame, packet->shared11);
+        if (!packet->conversion) { RecyclePacket(packet); return nullptr; }
+        return packet;
+    }
+    packet = new (std::nothrow) D3D12Packet();
     if (!packet) { --inFlight; return nullptr; }
+    packet->counted = true;
+    packet->pool = pool; pool->Retain();
     packet->presenter = presenter;
     FfuD3D11RetainPresenter(presenter);
     packet->target = static_cast<ID3D12Resource*>(unityTexture);
@@ -185,6 +273,11 @@ FFU_EXPORT void* FFU_CALL ffu_d3d12_prepare(void* presenter, const AVFrame* fram
     D3D12_TEXTURE_COPY_LOCATION source{}; source.pResource = packet->shared12; source.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
     D3D12_TEXTURE_COPY_LOCATION target{}; target.pResource = packet->target; target.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
     packet->command->CopyTextureRegion(&target, 0, 0, 0, &source, nullptr);
+    // The same shared storage is written by D3D11 on its next lease. Restore
+    // COMMON before signaling completion so its immutable copy list is reusable.
+    barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_COPY_SOURCE;
+    barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_COMMON;
+    packet->command->ResourceBarrier(1, &barrier);
     result = packet->command->Close();
     if (FAILED(result)) { FfuD3D11SetError(presenter, result); delete packet; return nullptr; }
     return packet;
@@ -224,7 +317,9 @@ void FfuD3D12Render(int event, void* data) {
     // allocator, shared texture and target alive until GPU work actually finishes.
     pending.push_back(packet);
 }
-FFU_EXPORT void FFU_CALL ffu_d3d12_cancel(void* packet) { delete static_cast<D3D12Packet*>(packet); }
+FFU_EXPORT void FFU_CALL ffu_d3d12_cancel(void* packet) {
+    if (packet) RecyclePacket(static_cast<D3D12Packet*>(packet));
+}
 
 // Native D3D12VA: VIDEO_PROCESS conversion followed by a Unity-queue GPU copy.
 // No D3D11 resource, shared handle, staging buffer or CPU pixel map is involved.

@@ -28,9 +28,15 @@ sys.dont_write_bytecode = True
 _dependency_spec = importlib.util.spec_from_file_location('ffmpeg_build_dependencies', HERE / 'build-dependencies.py')
 DEPENDENCIES = importlib.util.module_from_spec(_dependency_spec)
 _dependency_spec.loader.exec_module(DEPENDENCIES)
-TARGETS = ['win-x86', 'win-x64', 'linux-x64', 'android-armv7', 'android-arm64',
+TARGETS = ['win-x86', 'win-x64', 'win-arm64', 'linux-x64', 'android-armv7', 'android-arm64',
            'macos-x64', 'macos-arm64', 'ios-arm64', 'ios-simulator-arm64', 'ios-simulator-x64']
 HOST = platform.system()
+# FFmpeg architecture, compiler triple, Unity platform, importer CPU, editor OS.
+WINDOWS_TARGETS = {
+    'win-x86': ('x86', 'i686-w64-mingw32', 'Win', 'x86', ''),
+    'win-x64': ('x86_64', 'x86_64-w64-mingw32', 'Win64', 'x86_64', 'Windows'),
+    'win-arm64': ('aarch64', 'aarch64-w64-mingw32', 'Win64', 'ARM64', ''),
+}
 AMF_RATE_CONTROL_PATCH = HERE / 'patches/amf-rate-control.patch'
 X265_PARAMETER_CHECK_PATCH = HERE / 'patches/x265-parameter-check.patch'
 
@@ -47,17 +53,22 @@ def write_text_atomic(path, contents):
         temporary.unlink(missing_ok=True)
 
 def destination_for(target):
-    locations = {'win-x86':'Windows/x86', 'win-x64':'Windows/x86_64', 'linux-x64':'Linux/x86_64',
+    locations = {'win-x86':'Windows/x86', 'win-x64':'Windows/x86_64', 'win-arm64':'Windows/arm64', 'linux-x64':'Linux/x86_64',
                  'android-armv7':'Android/armeabi-v7a', 'android-arm64':'Android/arm64-v8a',
                  'macos-x64':'macOS/x86_64', 'macos-arm64':'macOS/arm64', 'ios-arm64':'iOS'}
     return OUTPUT / locations[target] if target in locations else CACHE / 'artifacts' / target
 
 def short_path(path):
-    value = str(Path(path).resolve())
+    value = str(Path(path).absolute())
     if HOST == 'Windows' and Path(value).exists():
+        # LLVM target/ranlib driver names are semantic, even on NTFS. Shorten
+        # only their parent directory; an 8.3 executable alias loses the ABI.
+        executable = Path(value).suffix.lower() in ('.exe', '.cmd', '.bat')
+        original = Path(value)
+        candidate = str(original.parent) if executable else value
         buffer = ctypes.create_unicode_buffer(32768)
-        if ctypes.windll.kernel32.GetShortPathNameW(value, buffer, len(buffer)):
-            value = buffer.value
+        if ctypes.windll.kernel32.GetShortPathNameW(candidate, buffer, len(buffer)):
+            value = str(Path(buffer.value) / original.name) if executable else buffer.value
     return value.replace('\\', '/')
 
 def posix(path):
@@ -108,7 +119,7 @@ def toolchain(target):
     """Return configure options + POSIX PATH additions, or a concrete skip reason."""
     args, paths = [], []
     if target.startswith('win-'):
-        arch, triple = ('x86_64', 'x86_64-w64-mingw32') if target == 'win-x64' else ('x86', 'i686-w64-mingw32')
+        arch, triple = WINDOWS_TARGETS[target][:2]
         candidates = [Path(os.environ['LLVM_MINGW'])] if os.environ.get('LLVM_MINGW') else []
         pinned = DEPENDENCIES.llvm_root(CACHE)
         if pinned:
@@ -119,7 +130,8 @@ def toolchain(target):
                          if (p / 'bin' / (triple + '-clang' + ('.exe' if HOST == 'Windows' else ''))).exists()), None)
         if compiler:
             paths.append(compiler.parent)
-            args += ['--cc=' + triple + '-clang', '--cxx=' + triple + '-clang++',
+            # FFmpeg derives DLLTOOL from cross-prefix even with explicit LLVM tools.
+            args += ['--cross-prefix=' + triple + '-', '--cc=' + triple + '-clang', '--cxx=' + triple + '-clang++',
                      '--ar=llvm-ar', '--ranlib=llvm-ranlib', '--nm=llvm-nm', '--strip=llvm-strip',
                      '--windres=' + triple + '-windres', '--extra-ldflags=-static-libgcc']
         elif shutil.which(triple + '-gcc'):
@@ -131,9 +143,14 @@ def toolchain(target):
         overlay = DEPENDENCIES.verify_d3d12_overlay()
         if overlay:
             args += ['--extra-cflags=-I' + shlex.quote(posix(overlay))]
-        DEPENDENCIES.verify_amf_headers()
-        args += ['--enable-amf', '--disable-decoder=h264_amf,hevc_amf,av1_amf,vp9_amf',
-                 '--extra-cflags=-I' + shlex.quote(posix(DEPENDENCIES.amf_headers()))]
+        if target == 'win-arm64':
+            # The pinned NVIDIA/AMD SDKs do not provide Windows ARM64 runtimes.
+            # Retain architecture-independent Direct3D/Vulkan decoding instead.
+            args += ['--disable-amf', '--disable-ffnvcodec', '--disable-nvenc', '--disable-nvdec', '--disable-cuvid']
+        else:
+            DEPENDENCIES.verify_amf_headers()
+            args += ['--enable-amf', '--disable-decoder=h264_amf,hevc_amf,av1_amf,vp9_amf',
+                     '--extra-cflags=-I' + shlex.quote(posix(DEPENDENCIES.amf_headers()))]
     elif target == 'linux-x64':
         if not host_tool('patchelf'):
             return None, 'patchelf is required to verify and set relative ELF runtime paths'
@@ -189,7 +206,7 @@ def toolchain(target):
         args += ['--enable-vulkan', '--disable-vulkan-static',
                  '--extra-cflags=-I' + shlex.quote(posix(DEPENDENCIES.vulkan_headers())),
                  '--disable-hwaccel=apv_vulkan,dpx_vulkan,ffv1_vulkan,prores_raw_vulkan,prores_vulkan']
-    if target.startswith(('win-', 'linux-')):
+    if target.startswith(('win-', 'linux-')) and target != 'win-arm64':
         DEPENDENCIES.verify_nvcodec_headers()
         args += ['--enable-ffnvcodec', '--enable-nvenc', '--disable-nvdec', '--disable-cuvid']
     return (args, paths), None
@@ -359,7 +376,7 @@ def build_dav1d(target, specific, paths, jobs):
     pkg_config = flags.get('pkg-config', os.environ.get('PKG_CONFIG', 'pkg-config'))
     wrapper = work / 'pkg-config.sh'
     nvcodec_case = ''
-    if target.startswith(('win-', 'linux-')):
+    if target.startswith(('win-', 'linux-')) and target != 'win-arm64':
         nvcodec_root = DEPENDENCIES.nvcodec_headers()
         nvcodec_pkgconfig = work / 'nvcodec-pkgconfig'
         nvcodec_pkgconfig.mkdir(parents=True, exist_ok=True)
@@ -422,6 +439,7 @@ def encoder_toolchain(target, specific, paths):
     cc[0], cxx[0] = executable(cc[0]), executable(cxx[0])
     ar = executable(flags.get('ar', cross + 'ar'))
     ranlib = executable(flags.get('ranlib', cross + 'ranlib'))
+    strip = executable(flags.get('strip', cross + 'strip'))
     cflags, ldflags = [], []
     for arg in specific:
         if arg.startswith('--extra-cflags='):
@@ -441,7 +459,7 @@ def encoder_toolchain(target, specific, paths):
     cmake_version = command([cmake, '--version']).splitlines()[0]
     if not re.search(r'^cmake version 3\.', cmake_version):
         raise RuntimeError('Pinned x265 4.1 requires CMake 3.x; select a portable CMake 3 executable with FFMPEG_ENCODER_CMAKE')
-    return {'environment': environment, 'flags': flags, 'cc': cc, 'cxx': cxx, 'ar': ar, 'ranlib': ranlib,
+    return {'environment': environment, 'flags': flags, 'cc': cc, 'cxx': cxx, 'ar': ar, 'ranlib': ranlib, 'strip': strip,
             'cflags': cflags, 'ldflags': ldflags, 'family': family, 'nasm': nasm,
             'cmake': cmake, 'cmakeVersion': cmake_version, 'ninja': executable('ninja')}
 
@@ -509,7 +527,7 @@ def build_software_encoders(target, specific, paths, jobs, bash, dav1d_config):
     """Build authenticated static PIC encoders and return usable prefixes and provenance."""
     tools = encoder_toolchain(target, specific, paths)
     identity_settings = {'recipe': 1, 'target': target, 'specific': specific,
-        'cc': tools['cc'], 'cxx': tools['cxx'], 'ar': tools['ar'], 'nasm': tools['nasm'],
+        'cc': tools['cc'], 'cxx': tools['cxx'], 'ar': tools['ar'], 'strip': tools['strip'], 'nasm': tools['nasm'],
         'cmake': tools['cmake'], 'cmakeVersion': tools['cmakeVersion'],
         'sources': DEPENDENCIES.LOCK['softwareEncoders']}
     if not tools['family'].startswith('x86'):
@@ -524,9 +542,12 @@ def build_software_encoders(target, specific, paths, jobs, bash, dav1d_config):
     cflags = tools['cc'][1:] + tools['cflags']
     ldflags = tools['cc'][1:] + tools['ldflags']
     def shell_flags(values):
-        return shlex.join([posix(value) if Path(value).is_file() else value for value in values])
+        values = [posix(value) if Path(value).is_file() else value for value in values]
+        # x264/libvpx expand $CC/$CFLAGS without eval. Windows short paths have
+        # no spaces, but shlex.quote adds literal quotes around their '~' bytes.
+        return ' '.join(values) if HOST == 'Windows' else shlex.join(values)
     exports = {'CC': shell_flags(tools['cc']), 'CXX': shell_flags(tools['cxx']),
-               'AR': posix(tools['ar']), 'RANLIB': posix(tools['ranlib']),
+               'AR': posix(tools['ar']), 'RANLIB': posix(tools['ranlib']), 'STRIP': posix(tools['strip']),
                'CFLAGS': shell_flags(cflags), 'CXXFLAGS': shell_flags(tools['cxx'][1:] + tools['cflags']),
                'LDFLAGS': shell_flags(ldflags)}
     if tools['nasm'] and tools['family'].startswith('x86'):
@@ -549,7 +570,7 @@ def build_software_encoders(target, specific, paths, jobs, bash, dav1d_config):
         print('BUILD ' + target + ' software encoder ' + name + '; logs: ' + str(work), flush=True)
         if name in ('x264', 'libvpx'):
             if name == 'x264':
-                host = 'i686-w64-mingw32' if target == 'win-x86' else 'x86_64-w64-mingw32' if target == 'win-x64' else \
+                host = WINDOWS_TARGETS[target][1] if target.startswith('win-') else \
                     'arm-linux-androideabi' if target == 'android-armv7' else 'aarch64-linux-android' if target == 'android-arm64' else \
                     ('x86_64' if target.endswith('x64') else 'aarch64') + ('-apple-darwin' if target.startswith(('macos-', 'ios-')) else '-linux-gnu')
                 options = ['--prefix=' + posix(prefix), '--host=' + host, '--enable-static', '--enable-pic',
@@ -673,7 +694,10 @@ def build_software_encoders(target, specific, paths, jobs, bash, dav1d_config):
     configure = ['--enable-libx264', '--enable-libx265', '--enable-libvpx', '--enable-libaom',
                  '--disable-decoder=libvpx_vp8,libvpx_vp9,libaom_av1',
                  '--pkg-config=' + shlex.join(['sh', posix(wrapper)])]
-    if target.startswith(('win-', 'linux-', 'android-')):
+    if target.startswith('win-'):
+        # FFmpeg's generated .def explicitly selects its public PE exports.
+        configure += ['--extra-ldflags=-Wl,--exclude-all-symbols']
+    elif target.startswith(('linux-', 'android-')):
         configure += ['--extra-ldflags=-Wl,--exclude-libs,ALL']
     if target.startswith(('win-', 'linux-')):
         configure += ['--extra-ldflags=-static-libstdc++']
@@ -688,7 +712,7 @@ def write_meta(file, target):
             raise RuntimeError('Existing Unity importer has no valid GUID: ' + str(meta))
         guid = existing_guid.group(1)
     if target.startswith('win-'):
-        platform_name, cpu, editor_os = ('Win64', 'x86_64', 'Windows') if target == 'win-x64' else ('Win', 'x86', '')
+        platform_name, cpu, editor_os = WINDOWS_TARGETS[target][2:]
     elif target == 'linux-x64':
         platform_name, cpu, editor_os = 'Linux64', 'x86_64', 'Linux'
     elif target.startswith('android-'):
@@ -698,6 +722,7 @@ def write_meta(file, target):
     else:
         platform_name, cpu, editor_os = 'iOS', 'AnyCPU', ''
     prefix = {'Android':'Android', 'iOS':'iPhone'}.get(platform_name, 'Standalone')
+    # Without DefaultValueInitialized, Unity can replace Editor enablement on import.
     write_text_atomic(meta, f'''fileFormatVersion: 2
 guid: {guid}
 PluginImporter:
@@ -722,6 +747,7 @@ PluginImporter:
       enabled: {1 if editor_os else 0}
       settings:
         CPU: {cpu if editor_os else 'AnyCPU'}
+        DefaultValueInitialized: true
         OS: {editor_os or 'AnyOS'}
   - first:
       {prefix}: {platform_name}
@@ -852,9 +878,9 @@ def stage(target, prefix, config, logs, dav1d_prefix, source_patches, software_b
     if target.startswith(('win-', 'linux-', 'android-')):
         report['verifiedHardwareBackends'] = verify_hardware_configuration(target, logs)
         report['buildDependencyLicenses'] += stage_build_dependency_licenses(destination)
-        if target.startswith(('win-', 'linux-')):
+        if target.startswith(('win-', 'linux-')) and target != 'win-arm64':
             report['buildDependencyLicenses'] += stage_nvcodec_license(destination)
-        if target.startswith('win-'):
+        if target.startswith('win-') and target != 'win-arm64':
             report['buildDependencyLicenses'] += stage_amf_license(destination)
         if target.startswith('win-') and os.environ.get('FFMPEG_D3D12_HEADERS'):
             report['d3d12HeaderOverlay'] = {'directory': str(DEPENDENCIES.verify_d3d12_overlay()),
@@ -864,6 +890,7 @@ def stage(target, prefix, config, logs, dav1d_prefix, source_patches, software_b
         stage_linux_dependencies(destination)
     write_text_atomic(destination / 'build-manifest.json', json.dumps(report, indent=2) + '\n')
     write_text_atomic(destination / 'configure.txt', (logs / 'configure.log').read_text(encoding='utf-8', errors='replace'))
+    write_stage_metadata(destination)
     return report
 
 
@@ -876,6 +903,25 @@ def write_license_meta(file, importer='TextScriptImporter'):
         guid = uuid.uuid5(uuid.NAMESPACE_URL, 'majdata-ffmpeg/' + file.relative_to(OUTPUT).as_posix()).hex
         write_text_atomic(meta, 'fileFormatVersion: 2\nguid: ' + guid + '\n' + importer + ':\n'
                          '  externalObjects: {}\n  userData:\n  assetBundleName:\n  assetBundleVariant:\n')
+
+
+def write_stage_metadata(destination):
+    """Pair new stage directories and build records without touching existing GUIDs/bytes."""
+    if OUTPUT not in destination.parents:
+        return
+    directory = destination
+    while directory != OUTPUT:
+        meta = Path(str(directory) + '.meta')
+        if not meta.exists():
+            guid = uuid.uuid5(uuid.NAMESPACE_URL, 'majdata-ffmpeg/' + directory.relative_to(OUTPUT).as_posix()).hex
+            write_text_atomic(meta, 'fileFormatVersion: 2\nguid: ' + guid + '\nfolderAsset: yes\nDefaultImporter:\n'
+                             '  externalObjects: {}\n  userData:\n  assetBundleName:\n  assetBundleVariant:\n')
+        directory = directory.parent
+    for name, importer in [('build-manifest.json', 'DefaultImporter'), ('bridge-manifest.json', 'DefaultImporter'),
+                           ('configure.txt', 'TextScriptImporter')]:
+        file = destination / name
+        if file.is_file():
+            write_license_meta(file, importer=importer)
 
 
 def stage_software_encoder_licenses(destination):
@@ -981,7 +1027,7 @@ def stage_compiler_runtime_licenses(destination, target, software_build):
         root = Path(compiler).resolve().parent.parent
         notices.append(root / 'LICENSE.TXT')
         # llvm-mingw carries the Winpthreads permission text in the public header.
-        triple = 'i686-w64-mingw32' if target == 'win-x86' else 'x86_64-w64-mingw32'
+        triple = WINDOWS_TARGETS[target][1] if target.startswith('win-') else 'x86_64-w64-mingw32'
         candidates = [root / 'include/pthread.h', root / triple / 'include/pthread.h']
         notices.append(next((file for file in candidates if file.is_file()), candidates[0]))
         license_name = 'Apache-2.0 WITH LLVM-exception and mingw-w64 runtime notices'
@@ -1038,7 +1084,14 @@ def verify_hardware_configuration(target, work):
     required = ['VULKAN', 'H264_VULKAN_HWACCEL', 'HEVC_VULKAN_HWACCEL', 'AV1_VULKAN_HWACCEL', 'VP9_VULKAN_HWACCEL']
     if target.startswith('win-'):
         required += ['D3D12VA', 'H264_D3D12VA_HWACCEL', 'HEVC_D3D12VA_HWACCEL', 'AV1_D3D12VA_HWACCEL', 'VP9_D3D12VA_HWACCEL']
+    if target == 'win-arm64':
+        required += ['D3D11VA', 'DXVA2', 'SCHANNEL']
     configuration = '\n'.join((work / name).read_text() for name in ['config.h', 'config_components.h'])
+    if target == 'win-arm64':
+        unsupported = [name for name in ['AMF', 'FFNVCODEC', 'NVENC', 'NVDEC', 'CUVID']
+                       if re.search(r'^#define CONFIG_' + name + r' 1$', configuration, re.MULTILINE)]
+        if unsupported:
+            raise RuntimeError('Unsupported Windows ARM64 vendor backend was enabled: ' + ', '.join(unsupported))
     missing = [name for name in required if not re.search(r'^#define CONFIG_' + name + r' 1$', configuration, re.MULTILINE)]
     if missing:
         raise RuntimeError('Requested native hardware backend was disabled: ' + ', '.join(missing))
@@ -1083,9 +1136,9 @@ def stage_amf_license(destination):
 def recording_configuration(target):
     """Enable all mandatory software formats alongside existing hardware candidates."""
     encoders = ['mpeg4', 'libx264', 'libx265', 'libvpx_vp9', 'libaom_av1']
-    if target.startswith(('win-', 'linux-')):
+    if target.startswith(('win-', 'linux-')) and target != 'win-arm64':
         encoders += ['h264_nvenc', 'hevc_nvenc', 'av1_nvenc']
-    if target.startswith('win-'):
+    if target.startswith('win-') and target != 'win-arm64':
         encoders += ['h264_amf', 'hevc_amf', 'av1_amf']
     if target == 'linux-x64':
         encoders += ['h264_vaapi', 'hevc_vaapi', 'vp9_vaapi', 'av1_vaapi']
@@ -1166,7 +1219,7 @@ def main():
         config += ['--enable-encoder=' + ','.join(encoders), '--enable-muxer=' + ','.join(muxers)]
         config += ['--disable-shared', '--enable-static'] if target.startswith('ios-') else ['--enable-shared', '--disable-static']
         config += specific
-        if target.startswith('win-') or target.endswith('-x64'):
+        if target == 'win-x86' or target.endswith('-x64'):
             nasm = host_tool('nasm')
             portable_nasm = CACHE / 'toolchains/nasm-package/usr/bin/nasm'
             if not nasm and portable_nasm.is_file():
@@ -1240,7 +1293,10 @@ def bridge_plan(target, prefix, options, selected=None):
         result = shutil.which(name, path=environment['PATH'])
         if not result:
             raise RuntimeError(f'Bridge requires executable {name} for {target}; check the selected FFmpeg toolchain PATH')
-        return str(Path(result).resolve()).replace('\\', '/')
+        # LLVM-MinGW target drivers select their ABI from argv[0]; resolving a
+        # Linux/macOS symlink to clang would silently select the host target.
+        path = Path(result).absolute() if target.startswith('win-') else Path(result).resolve()
+        return str(path).replace('\\', '/')
 
     cmake = executable('cmake')
     settings = []
@@ -1249,7 +1305,8 @@ def bridge_plan(target, prefix, options, selected=None):
         cross = flags.get('cross-prefix', '')
         cc = executable(flags.get('cc', cross + 'gcc'))
         cxx = executable(flags.get('cxx', cross + 'g++'))
-        settings += ['-DCMAKE_SYSTEM_NAME=Windows', '-DCMAKE_C_COMPILER=' + cc, '-DCMAKE_CXX_COMPILER=' + cxx,
+        settings += ['-DCMAKE_SYSTEM_NAME=Windows', '-DCMAKE_SYSTEM_PROCESSOR=' + WINDOWS_TARGETS[target][0],
+                     '-DCMAKE_C_COMPILER=' + cc, '-DCMAKE_CXX_COMPILER=' + cxx,
                      '-DCMAKE_AR=' + executable(flags.get('ar', cross + 'ar')),
                      '-DCMAKE_RANLIB=' + executable(flags.get('ranlib', cross + 'ranlib')),
                      '-DCMAKE_RC_COMPILER=' + executable(flags.get('windres', cross + 'windres'))]
@@ -1342,12 +1399,18 @@ def build_bridge(target, prefix, options, selected=None):
             files.append({'file':binary.name, 'sha256':hashlib.sha256(binary.read_bytes()).hexdigest(), 'bytes':binary.stat().st_size})
     if not files:
         raise RuntimeError('CMake produced no FFmpegUnityBridge library for ' + target)
-    sources = {str(source.relative_to(HERE / 'Native')).replace('\\', '/'):hashlib.sha256(source.read_bytes()).hexdigest()
-               for source in (HERE / 'Native').rglob('*') if source.is_file() and source.suffix in ('.cpp', '.h', '.mm', '.txt')}
+    source_files = [source for source in (HERE / 'Native').rglob('*')
+                    if source.is_file() and source.suffix in ('.cpp', '.h', '.mm', '.txt', '.def')]
+    sources = {source.relative_to(HERE / 'Native').as_posix(): hashlib.sha256(source.read_bytes()).hexdigest()
+               for source in source_files}
+    sources_lf = {source.relative_to(HERE / 'Native').as_posix():
+                  hashlib.sha256(source.read_bytes().replace(b'\r\n', b'\n')).hexdigest()
+                  for source in source_files}
     write_text_atomic(destination / 'bridge-manifest.json', json.dumps({'target':target,
         'bridgeAbi': 2 if target.startswith(('macos-', 'ios-')) else 4, 'host':platform.platform(),
         'builtUtc':datetime.datetime.now(datetime.timezone.utc).isoformat(), 'cmake':args, 'files':files,
-        'sourceSha256':sources}, indent=2) + '\n')
+        'sourceSha256':sources, 'sourceSha256Lf':sources_lf}, indent=2) + '\n')
+    write_stage_metadata(destination)
 
 if __name__ == '__main__':
     sys.exit(main())

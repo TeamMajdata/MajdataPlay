@@ -24,6 +24,15 @@ namespace MajdataPlay.FFmpeg
             var graphics = SystemInfo.graphicsDeviceType;
             bool d3d12 = !_platformBackendOnly && graphics == GraphicsDeviceType.Direct3D12 && HardwareVideoPresenter.SupportsD3D12Video;
             bool vulkan = !_platformBackendOnly && graphics == GraphicsDeviceType.Vulkan && HardwareVideoPresenter.SupportsVulkanVideoDecoding;
+            if (_rendererBackendOnly && (d3d12 || vulkan))
+            {
+                ConfigurePlatformHardware(options, false, false);
+                var cpuFallback = options.RequireHardwareDecoding ? null : options.Copy();
+                ConfigureNativeHardware(options, preferNative, d3d12);
+                options.FallbackHardwareOptions = cpuFallback;
+                return;
+            }
+
             ConfigurePlatformHardware(options, preferNative, !d3d12 && !vulkan);
             if (!d3d12 && !vulkan)
             {
@@ -37,13 +46,49 @@ namespace MajdataPlay.FFmpeg
                 return;
             }
 
-            options.FallbackHardwareOptions = options.Copy();
+            if (preferNative && options.CreateHardwareFrameMapper != null)
+            {
+                // Windows renderers consume independent, worker-completed RGBA
+                // surfaces. Prefer this isolation even when a renderer-native
+                // decoder is available, so video throughput cannot stall Unity.
+                var fallback = options.Copy();
+                ConfigureNativeHardware(fallback, preferNative, d3d12);
+                options.FallbackHardwareOptions = fallback;
+            }
+            else
+            {
+                options.FallbackHardwareOptions = options.Copy();
+                ConfigureNativeHardware(options, preferNative, d3d12);
+            }
+
+            MajDebug.LogInfo("FFmpeg", "[Interop] Preferred GPU decoder=" + options.HardwareDeviceType
+                + "; fallback=" + options.FallbackHardwareOptions.HardwareDeviceType + "; native textures="
+                + preferNative + ".");
+        }
+
+        /// <summary>Checks whether the current renderer can provide an alternative native video decoder.</summary>
+        /// <returns>True when D3D12VA or Vulkan Video was negotiated for the active renderer.</returns>
+        private bool CanUseRendererNativeBackend()
+        {
+            var graphics = SystemInfo.graphicsDeviceType;
+            return (graphics == GraphicsDeviceType.Direct3D12 && HardwareVideoPresenter.SupportsD3D12Video)
+                || (graphics == GraphicsDeviceType.Vulkan && HardwareVideoPresenter.SupportsVulkanVideoDecoding);
+        }
+
+        /// <summary>Configures a renderer-native decoder as the requested backend or an isolated decoder's fallback.</summary>
+        /// <param name="options">The hardware configuration whose callbacks will be replaced.</param>
+        /// <param name="preferNative">Whether to retain GPU frames instead of downloading pixels on the worker.</param>
+        /// <param name="d3d12">True selects D3D12VA; false selects Vulkan Video.</param>
+        private void ConfigureNativeHardware(DecoderOptions options, bool preferNative, bool d3d12)
+        {
             options.HardwareDeviceType = d3d12 ? AVHWDeviceType.AV_HWDEVICE_TYPE_D3D12VA : AVHWDeviceType.AV_HWDEVICE_TYPE_VULKAN;
             options.AcquireHardwareDevice = d3d12 ? HardwareVideoPresenter.AcquireD3D12Device : VulkanVideoInterop.AcquireVideoDevice;
             options.AcquireD3D11Device = null;
             options.MapHardwareFrame = null;
             options.CreateHardwareSession = null;
             options.CreateHardwareSynchronization = null;
+            options.CreateHardwareFrameMapper = null;
+            options.ConfigureHardwareFrames = null;
             options.WaitForHardwareFrame = null;
             if (preferNative)
             {
@@ -53,15 +98,13 @@ namespace MajdataPlay.FFmpeg
                 }
                 else
                 {
+                    options.ConfigureHardwareFrames = VulkanVideoInterop.ConfigureVideoFrames;
                     options.WaitForHardwareFrame = VulkanVideoInterop.WaitForVideoFrame;
                 }
             }
             options.KeepNativeFrames = preferNative;
             options.HardwareDeviceDescription = (d3d12 ? "D3D12VA" : "Vulkan Video") + " device shared with Unity renderer: "
                 + SystemInfo.graphicsDeviceName + "; driver=" + SystemInfo.graphicsDeviceVersion;
-            MajDebug.LogInfo("FFmpeg", "[Interop] Preferred native decoder=" + options.HardwareDeviceType
-                + "; fallback=" + options.FallbackHardwareOptions.HardwareDeviceType + "; native textures="
-                + preferNative + ".");
         }
 
         /// <summary>Configures platform decoding and optional sharing with Unity's graphics device.</summary>
@@ -112,7 +155,8 @@ namespace MajdataPlay.FFmpeg
                     options.AcquireD3D11Device = HardwareVideoPresenter.AcquireD3D11Device;
                     options.KeepNativeFrames = true;
                     options.CreateHardwareSynchronization = VulkanVideoInterop.CreateD3D11Synchronization;
-                    options.HardwareDeviceDescription = "D3D11VA device matched to Unity renderer: " + graphics;
+                    options.CreateHardwareFrameMapper = VulkanVideoInterop.CreateD3D11FrameMapper;
+                    options.HardwareDeviceDescription = "Independent D3D11VA device on Unity renderer adapter: " + graphics;
                 }
                 else if (apple && HardwareVideoPresenter.SupportsMetal)
                 {

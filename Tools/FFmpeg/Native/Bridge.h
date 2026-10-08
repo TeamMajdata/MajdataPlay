@@ -26,7 +26,7 @@ enum FfuEvent {
     FfuPrepareD3D12 = 4, FfuSubmitD3D12 = 5,
     FfuSubmitWgl = 6, FfuCompleteWgl = 7, FfuDestroyWgl = 8,
     FfuSubmitVulkan = 9, FfuReleaseVulkan = 10, FfuSubmitPortableVulkan = 11,
-    FfuPrepareNativeD3D12 = 12, FfuSubmitNativeD3D12 = 13
+    FfuPrepareNativeD3D12 = 12, FfuSubmitNativeD3D12 = 13, FfuPoll = 14
 };
 enum FfuCapability {
     FfuD3D11GpuConversion = 1, FfuMetalPlaneZeroCopy = 2, FfuD3D12GpuCopy = 4,
@@ -58,6 +58,7 @@ int FfuPlatformStatus();
 void FfuPlatformRender(int event, void* data);
 int FfuEventId(int event);
 void FfuD3D11RetainPresenter(void* presenter);
+void FfuD3D11DropPresenter(void* presenter);
 void FfuD3D11SetError(void* presenter, int error);
 void FfuD3D11Submit(void* packet);
 FFU_EXPORT int FFU_CALL ffu_abi_version();
@@ -79,6 +80,17 @@ FFU_EXPORT void* FFU_CALL ffu_d3d11_decode_sync_create(void* hardwareDevice);
 FFU_EXPORT int FFU_CALL ffu_d3d11_decode_sync_begin(void* sync);
 FFU_EXPORT int FFU_CALL ffu_d3d11_decode_sync_poll(void* sync);
 FFU_EXPORT void FFU_CALL ffu_d3d11_decode_sync_release(void* sync);
+// Worker-only bounded NV12-to-RGBA staging. Frames own a pool lease and may be
+// published only after stage_ready returns 1. A null frame with error 0 means
+// all 24 slots remain leased; the worker retries with its cancellation token.
+FFU_EXPORT void* FFU_CALL ffu_d3d11_stage_create(void* hardwareDevice);
+FFU_EXPORT AVFrame* FFU_CALL ffu_d3d11_stage_frame(void* stage, const AVFrame* frame);
+FFU_EXPORT int FFU_CALL ffu_d3d11_stage_ready(void* stage);
+FFU_EXPORT int FFU_CALL ffu_d3d11_stage_error(void* stage);
+FFU_EXPORT void FFU_CALL ffu_d3d11_stage_release(void* stage);
+// Borrows the original NV12 frame from a validated staging lease for software
+// transfer. Returns null for foreign frames. The caller must retain the lease.
+FFU_EXPORT const AVFrame* FFU_CALL ffu_d3d11_stage_source_frame(const AVFrame* frame);
 FFU_EXPORT void* FFU_CALL ffu_shared_surface_create(void* presenter, void* texture, unsigned int glName);
 FFU_EXPORT void* FFU_CALL ffu_shared_prepare(void* presenter, const AVFrame* frame, void* texture, void* surface, void* unityTarget);
 FFU_EXPORT int FFU_CALL ffu_shared_error(void* surface);

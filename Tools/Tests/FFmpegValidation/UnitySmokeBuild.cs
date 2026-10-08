@@ -1,3 +1,5 @@
+#nullable enable
+
 using System;
 using System.IO;
 using UnityEditor;
@@ -17,6 +19,10 @@ public static class FFmpegPlayerSmokeBuild
         var android = FFmpegPlayerSmoke.Argument("-videoPlatform") == "Android";
         var linux = FFmpegPlayerSmoke.Argument("-videoPlatform") == "Linux";
         var output = FFmpegPlayerSmoke.Argument("-videoOutput");
+        if (string.IsNullOrWhiteSpace(output))
+        {
+            throw new ArgumentException("Specify the isolated Player output directory with -videoOutput.");
+        }
         var target = android ? BuildTarget.Android : linux ? BuildTarget.StandaloneLinux64
             : architecture == "x86" ? BuildTarget.StandaloneWindows : BuildTarget.StandaloneWindows64;
         var namedTarget = android ? NamedBuildTarget.Android : NamedBuildTarget.Standalone;
@@ -44,6 +50,7 @@ public static class FFmpegPlayerSmokeBuild
         PlayerSettings.defaultScreenWidth = 320; PlayerSettings.defaultScreenHeight = 240;
         PlayerSettings.runInBackground = true;
         PlayerSettings.allowUnsafeCode = true;
+        PlayerSettings.enableFrameTimingStats = true;
         var scene = EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
         var camera = new GameObject("Camera").AddComponent<Camera>();
         camera.clearFlags = CameraClearFlags.SolidColor;

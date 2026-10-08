@@ -56,6 +56,7 @@ static IUnityInterface* UNITY_INTERFACE_API InterfaceSplit(unsigned long long hi
 }
 int FfuEventId(int value) { return value; }
 void FfuD3D11RetainPresenter(void*) {}
+void FfuD3D11DropPresenter(void*) {}
 void FfuD3D11SetError(void*, int) {}
 void FfuD3D11Submit(void*) {}
 void FFU_CALL ffu_d3d11_release(void*) {}

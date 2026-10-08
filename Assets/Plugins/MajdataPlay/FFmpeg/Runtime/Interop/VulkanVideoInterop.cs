@@ -147,6 +147,27 @@ namespace MajdataPlay.FFmpeg.Interop
 #endif
         }
 
+        /// <summary>Installs nonblocking presentation synchronization before a Vulkan decoding frame pool is initialized.</summary>
+        /// <param name="frames">The borrowed, uninitialized FFmpeg AVHWFramesContext buffer reference.</param>
+        /// <returns>Zero on success, or a negative native error when the frame pool cannot be configured.</returns>
+        /// <exception cref="NotSupportedException">The bridge lacks the frame pool synchronization entry point.</exception>
+        /// <exception cref="PlatformNotSupportedException">Native Vulkan Video is unavailable on this platform.</exception>
+        internal static int ConfigureVideoFrames(IntPtr frames)
+        {
+#if UNITY_STANDALONE_WIN || UNITY_EDITOR_WIN || UNITY_STANDALONE_LINUX || UNITY_EDITOR_LINUX || (UNITY_ANDROID && !UNITY_EDITOR)
+            try
+            {
+                return Native.FfuVulkanVideoConfigureFrames(frames);
+            }
+            catch (EntryPointNotFoundException error)
+            {
+                throw new NotSupportedException("Rebuild FFmpegUnityBridge and restart Unity to enable nonblocking Vulkan Video presentation.", error);
+            }
+#else
+            throw new PlatformNotSupportedException();
+#endif
+        }
+
         /// <summary>Waits for a Vulkan Video frame on the decoding worker before it enters the presentation queue.</summary>
         /// <param name="frame">The borrowed FFmpeg Vulkan frame, retained by the caller throughout the wait.</param>
         /// <param name="cancellationToken">Cancels the wait when the decoding session closes.</param>
@@ -202,7 +223,137 @@ namespace MajdataPlay.FFmpeg.Interop
 #endif
         }
 
+        /// <summary>Creates worker conversion on an independent D3D11 device into pooled GPU presentation surfaces.</summary>
+        /// <param name="device">The borrowed initialized D3D11VA hardware device reference.</param>
+        /// <returns>A worker-owned mapper that must be disposed with the decoder.</returns>
+        /// <exception cref="NotSupportedException">The bridge cannot stage independent completed surfaces.</exception>
+        /// <exception cref="PlatformNotSupportedException">D3D11 staging is unavailable on this platform.</exception>
+        internal static IHardwareFrameMapper CreateD3D11FrameMapper(IntPtr device)
+        {
 #if UNITY_STANDALONE_WIN || UNITY_EDITOR_WIN
+            return new D3D11FrameMapper(device);
+#else
+            throw new PlatformNotSupportedException();
+#endif
+        }
+
+        /// <summary>Gets the retained decoder surface underlying a staged RGBA frame for explicit CPU fallback.</summary>
+        /// <param name="frame">The borrowed staged AVFrame, which must remain alive while using the result.</param>
+        /// <returns>The borrowed original decoder AVFrame, or zero if this is not a staged frame.</returns>
+        internal static IntPtr GetD3D11StageSource(IntPtr frame)
+        {
+#if UNITY_STANDALONE_WIN || UNITY_EDITOR_WIN
+            return Native.FfuD3D11StageSourceFrame(frame);
+#else
+            return IntPtr.Zero;
+#endif
+        }
+
+#if UNITY_STANDALONE_WIN || UNITY_EDITOR_WIN
+        /// <summary>Completes decode-device color conversion before exposing a pooled, presentation-device RGBA surface.</summary>
+        private sealed unsafe class D3D11FrameMapper : IHardwareFrameMapper
+        {
+            /// <summary>Owns the native staging pool, or zero after disposal.</summary>
+            private IntPtr _stage;
+
+            /// <summary>Creates staging resources without entering Unity's graphics context.</summary>
+            /// <param name="device">The borrowed FFmpeg D3D11VA hardware device reference.</param>
+            /// <exception cref="NotSupportedException">The bridge or independent GPU staging is unavailable.</exception>
+            internal D3D11FrameMapper(IntPtr device)
+            {
+                try
+                {
+                    _stage = Native.FfuD3D11StageCreate(device);
+                }
+                catch (EntryPointNotFoundException error)
+                {
+                    throw new NotSupportedException("Rebuild FFmpegUnityBridge and restart Unity to enable worker-side video conversion.", error);
+                }
+
+                if (_stage == IntPtr.Zero)
+                {
+                    throw new NotSupportedException("The D3D11VA device cannot create independent GPU presentation surfaces.");
+                }
+            }
+
+            /// <summary>Converts a borrowed decoder frame and waits only on the worker until its shared pixels are complete.</summary>
+            /// <param name="frame">The borrowed AVFrame retained throughout conversion.</param>
+            /// <param name="cancellationToken">Cancels a busy pool or GPU completion wait.</param>
+            /// <param name="timeoutMilliseconds">The positive GPU completion timeout in milliseconds.</param>
+            /// <returns>An owned completed RGBA D3D11 AVFrame, without CPU pixel transfer.</returns>
+            /// <exception cref="OperationCanceledException">The decoder session was canceled.</exception>
+            /// <exception cref="TimeoutException">Conversion or the pool exceeded the timeout.</exception>
+            /// <exception cref="NotSupportedException">Native conversion or sharing failed.</exception>
+            public IntPtr Map(IntPtr frame, CancellationToken cancellationToken, int timeoutMilliseconds)
+            {
+                using var profile = UnityProfiler.Create("FFmpeg.Decoder.StageD3D11Frame");
+                var wait = new GpuCompletionWait(timeoutMilliseconds);
+                var mapped = IntPtr.Zero;
+                try
+                {
+                    while (mapped == IntPtr.Zero)
+                    {
+                        cancellationToken.ThrowIfCancellationRequested();
+                        mapped = Native.FfuD3D11StageFrame(_stage, frame);
+                        CheckStageError();
+                        if (mapped == IntPtr.Zero)
+                        {
+                            wait.WaitForNextPoll(cancellationToken);
+                        }
+                    }
+
+                    while (true)
+                    {
+                        cancellationToken.ThrowIfCancellationRequested();
+                        var result = Native.FfuD3D11StageReady(_stage);
+                        CheckStageError();
+                        if (result > 0)
+                        {
+                            var completed = mapped;
+                            mapped = IntPtr.Zero;
+                            return completed;
+                        }
+
+                        if (result < 0)
+                        {
+                            throw new NotSupportedException("D3D11 GPU presentation staging failed (native code " + result + ").");
+                        }
+
+                        wait.WaitForNextPoll(cancellationToken);
+                    }
+                }
+                finally
+                {
+                    if (mapped != IntPtr.Zero)
+                    {
+                        var owned = (global::FFmpeg.AutoGen.AVFrame*)mapped;
+                        global::FFmpeg.AutoGen.ffmpeg.av_frame_free(&owned);
+                    }
+                }
+            }
+
+            /// <summary>Reports staging errors while distinguishing pool backpressure from failure.</summary>
+            /// <exception cref="NotSupportedException">The native conversion or resource sharing failed.</exception>
+            private void CheckStageError()
+            {
+                var error = Native.FfuD3D11StageError(_stage);
+                if (error != 0)
+                {
+                    throw new NotSupportedException("D3D11 GPU presentation staging failed (native code " + error + ").");
+                }
+            }
+
+            /// <summary>Releases worker ownership while already published frames retain their leased surfaces.</summary>
+            public void Dispose()
+            {
+                if (_stage != IntPtr.Zero)
+                {
+                    Native.FfuD3D11StageRelease(_stage);
+                    _stage = IntPtr.Zero;
+                }
+            }
+        }
+
         /// <summary>Paces D3D11VA codec calls on their owning worker using a reusable GPU event query.</summary>
         private sealed class D3D11Synchronization : IHardwareDecodeSynchronization
         {
@@ -537,8 +688,43 @@ namespace MajdataPlay.FFmpeg.Interop
             /// <param name="synchronization">The owned native synchronizer to release.</param>
             [DllImport(Library, CallingConvention = CallingConvention.Cdecl, EntryPoint = "ffu_d3d11_decode_sync_release")]
             internal static extern void FfuD3D11DecodeSyncRelease(IntPtr synchronization);
+            /// <summary>Creates a worker-owned pool of shared RGBA presentation surfaces.</summary>
+            /// <param name="device">The borrowed FFmpeg D3D11VA hardware device reference.</param>
+            /// <returns>An owned pool handle, or zero when staging is unavailable.</returns>
+            [DllImport(Library, CallingConvention = CallingConvention.Cdecl, EntryPoint = "ffu_d3d11_stage_create")]
+            internal static extern IntPtr FfuD3D11StageCreate(IntPtr device);
+            /// <summary>Starts conversion into an exclusively leased presentation surface.</summary>
+            /// <param name="stage">The worker-owned staging pool.</param>
+            /// <param name="frame">The borrowed decoded source frame.</param>
+            /// <returns>An owned AVFrame, or zero when the pool is busy or conversion fails.</returns>
+            [DllImport(Library, CallingConvention = CallingConvention.Cdecl, EntryPoint = "ffu_d3d11_stage_frame")]
+            internal static extern IntPtr FfuD3D11StageFrame(IntPtr stage, IntPtr frame);
+            /// <summary>Queries conversion completion without blocking a graphics thread.</summary>
+            /// <param name="stage">The worker-owned staging pool with one pending conversion.</param>
+            /// <returns>One when complete, zero while pending, or a negative native error.</returns>
+            [DllImport(Library, CallingConvention = CallingConvention.Cdecl, EntryPoint = "ffu_d3d11_stage_ready")]
+            internal static extern int FfuD3D11StageReady(IntPtr stage);
+            /// <summary>Reads staging failures separately from bounded pool backpressure.</summary>
+            /// <param name="stage">The worker-owned staging pool.</param>
+            /// <returns>Zero when no failure occurred; otherwise a native error code.</returns>
+            [DllImport(Library, CallingConvention = CallingConvention.Cdecl, EntryPoint = "ffu_d3d11_stage_error")]
+            internal static extern int FfuD3D11StageError(IntPtr stage);
+            /// <summary>Releases worker ownership while outstanding frames retain their surfaces.</summary>
+            /// <param name="stage">The owned staging pool to release.</param>
+            [DllImport(Library, CallingConvention = CallingConvention.Cdecl, EntryPoint = "ffu_d3d11_stage_release")]
+            internal static extern void FfuD3D11StageRelease(IntPtr stage);
+            /// <summary>Reads the retained original hardware surface from a staged presentation frame.</summary>
+            /// <param name="frame">The borrowed staged AVFrame.</param>
+            /// <returns>A borrowed decoder AVFrame valid for the lifetime of the staging lease, or zero.</returns>
+            [DllImport(Library, CallingConvention = CallingConvention.Cdecl, EntryPoint = "ffu_d3d11_stage_source_frame")]
+            internal static extern IntPtr FfuD3D11StageSourceFrame(IntPtr frame);
 #endif
 #if UNITY_STANDALONE_WIN || UNITY_EDITOR_WIN || UNITY_STANDALONE_LINUX || UNITY_EDITOR_LINUX || (UNITY_ANDROID && !UNITY_EDITOR)
+            /// <summary>Configures a Vulkan frame pool before FFmpeg initializes it.</summary>
+            /// <param name="frames">The borrowed uninitialized AVHWFramesContext buffer reference.</param>
+            /// <returns>Zero on success, or a negative native error.</returns>
+            [DllImport(Library, CallingConvention = CallingConvention.Cdecl, EntryPoint = "ffu_vulkan_video_configure_frames")]
+            internal static extern int FfuVulkanVideoConfigureFrames(IntPtr frames);
             /// <summary>Queries the current completion state of a borrowed Vulkan Video frame on the worker.</summary>
             /// <param name="frame">The borrowed FFmpeg Vulkan AVFrame retained by the caller.</param>
             /// <returns>One when complete, zero while pending, or a negative native error.</returns>
