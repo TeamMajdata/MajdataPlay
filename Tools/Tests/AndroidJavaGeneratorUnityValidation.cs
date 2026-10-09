@@ -21,8 +21,8 @@ namespace MajdataPlay.Tests
         {
             try
             {
-                Require(typeof(AndroidObject).IsAssignableFrom(typeof(BuildVersion)), "SDK wrapper must derive from AndroidObject.");
-                Require(typeof(AndroidObject).IsAssignableFrom(typeof(Runnable)), "Java interface wrapper must derive from AndroidObject.");
+                Require(typeof(JavaObject).IsAssignableFrom(typeof(BuildVersion)), "SDK wrapper must derive from JavaObject.");
+                Require(typeof(JavaObject).IsAssignableFrom(typeof(Runnable)), "Java interface wrapper must derive from JavaObject.");
                 var sdkInt = typeof(BuildVersion).GetProperty("SdkInt", BindingFlags.Public | BindingFlags.Static);
                 Require(sdkInt is not null && sdkInt.PropertyType == typeof(int) && sdkInt.SetMethod is null, "SDK_INT must be a static getter-only int property.");
                 Require(typeof(Runnable).GetMethod("Run", Type.EmptyTypes) is not null, "Java interface method must be generated.");

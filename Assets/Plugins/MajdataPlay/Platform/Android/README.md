@@ -1,7 +1,7 @@
 # Android Java wrappers
 
 The `JavaClassAttribute` and `JavaApiConfigurationAttribute` request generated
-`AndroidObject`-derived wrappers for Java classes and interfaces. The generator
+`JavaObject`-derived wrappers for Java classes and interfaces. The generator
 is authored outside Assets and installed as an analyzer, not as a runtime plugin.
 
 See `Tools/AndroidJavaGenerator/README.md` at the repository root for installation,

@@ -20,7 +20,7 @@ substitute Unity or JNI stubs.
   - Tools/AndroidJavaGenerator/Java/JavaApiExtractor.java
   - Assets/Plugins/MajdataPlay/Platform/Android/JavaClassAttribute.cs
   - Assets/Plugins/MajdataPlay/Platform/Android/JavaApiConfigurationAttribute.cs
-  - Assets/Plugins/MajdataPlay/Platform/Android/AndroidObject.cs
+  - Assets/Plugins/MajdataPlay/Platform/Android/JavaObject.cs
   - Assets/Plugins/MajdataPlay/Platform/Android/AndroidJni.cs
   - Assets/Plugins/MajdataPlay/Platform/Android/JavaInvocationException.cs
 

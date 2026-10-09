@@ -58,7 +58,7 @@ namespace MajdataPlay.SourceGenerators.AndroidJava
             _userMembers = wrapper.Symbol.GetMembers().Where(member => !member.IsImplicitlyDeclared)
                 .GroupBy(member => member.Name, StringComparer.Ordinal)
                 .ToDictionary(group => group.Key, group => group.ToArray(), StringComparer.Ordinal);
-            foreach (var name in new[] { wrapper.Symbol.Name, "JavaObject", "Dispose", "Equals", "GetHashCode", "GetType", "ToString", "ReferenceEquals", "MemberwiseClone", "Finalize" })
+            foreach (var name in new[] { wrapper.Symbol.Name, "JavaReference", "Dispose", "Equals", "GetHashCode", "GetType", "ToString", "ReferenceEquals", "MemberwiseClone", "Finalize" })
             {
                 _allocatedNames.Add(name);
             }
@@ -114,7 +114,7 @@ namespace MajdataPlay.SourceGenerators.AndroidJava
                 "Java inheritance is flattened; this wrapper does not implement Java callback interfaces.");
             Deprecated(_type);
             _source.Line((_wrapper.Symbol.DeclaredAccessibility == Accessibility.Public ? "public" : "internal") +
-                " partial class " + JavaNames.Escape(_wrapper.Symbol.Name) + " : global::MajdataPlay.Platform.Android.AndroidObject");
+                " partial class " + JavaNames.Escape(_wrapper.Symbol.Name) + " : global::MajdataPlay.Platform.Android.JavaObject");
             _source.Open();
             var classNameMember = AllocateName("JavaClassName", "JavaField", false);
             _source.Documentation("summary", "Gets the exact Java binary class name used by this wrapper.");
@@ -265,7 +265,7 @@ namespace MajdataPlay.SourceGenerators.AndroidJava
                 _source.Line("get");
                 _source.Open();
                 var invocation = JavaTypeMapping.JniType + ".GetField<" + JavaTypeMapping.GetTypeName(type, _mappings, true) + ">(" +
-                    (field.IsStatic ? "null" : "JavaObject") + ", " + JavaLiterals.String(field.DeclaringType) + ", " +
+                    (field.IsStatic ? "null" : "JavaReference") + ", " + JavaLiterals.String(field.DeclaringType) + ", " +
                     JavaLiterals.String(field.Name) + ", " + JavaLiterals.String(field.Descriptor) + ")";
                 _source.Line("return " + JavaTypeMapping.WrapResult(type, invocation, _mappings) + ";");
                 _source.Close();
@@ -340,7 +340,7 @@ namespace MajdataPlay.SourceGenerators.AndroidJava
                 _source.Open();
                 var isVoid = signature.ReturnType.Code == 'V';
                 var generic = isVoid ? string.Empty : "<" + JavaTypeMapping.GetTypeName(signature.ReturnType, _mappings, true) + ">";
-                var invocation = JavaTypeMapping.JniType + ".Call" + generic + "(" + (metadata.IsStatic ? "null" : "JavaObject") + ", " +
+                var invocation = JavaTypeMapping.JniType + ".Call" + generic + "(" + (metadata.IsStatic ? "null" : "JavaReference") + ", " +
                     JavaLiterals.String(metadata.DeclaringType) + ", " + JavaLiterals.String(metadata.Name) + ", " + JavaLiterals.String(metadata.Descriptor) + ", " + arguments + ")";
                 _source.Line(isVoid ? invocation + ";" : "return " + JavaTypeMapping.WrapResult(signature.ReturnType, invocation, _mappings) + ";");
                 _source.Close();

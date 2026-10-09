@@ -19,7 +19,7 @@ namespace MajdataPlay.Tests.AndroidJavaGeneratorValidation
         /// </summary>
         public static readonly string[] Names =
         {
-            "source-api", "class-api", "jar-api", "inner-descriptor-parity", "assembly-configuration", "configuration-precedence",
+            "source-api", "explicit-java-object-base", "class-api", "jar-api", "inner-descriptor-parity", "assembly-configuration", "configuration-precedence",
             "classpath-only", "documentation-path-array", "no-inherited", "determinism", "source-refresh", "android-symbol-compilation",
             "invalid-nonpartial", "invalid-static", "invalid-nested", "invalid-generic", "duplicate-mapping",
             "missing-java-type", "missing-dependency", "missing-source", "missing-classpath", "missing-documentation",
@@ -51,6 +51,12 @@ namespace MajdataPlay.Tests.AndroidJavaGeneratorValidation
             {
                 case "source-api":
                     RunApi(runner, workspace.SourceFiles(), workspace, name);
+                    break;
+                case "explicit-java-object-base":
+                    var explicitBaseSource = runner.RootDeclarations(workspace.SourceFiles(), workspace.DocumentationPaths);
+                    explicitBaseSource = explicitBaseSource.Replace("public partial class WidgetWrapper", "public partial class WidgetWrapper : global::MajdataPlay.Platform.Android.JavaObject");
+                    var explicitBaseRun = runner.Run(runner.CreateCompilation(explicitBaseSource, name), name);
+                    ApiAssertions.AssertRootApi(explicitBaseRun);
                     break;
                 case "class-api":
                     RunApi(runner, workspace.ClassFiles(), workspace, name);
@@ -442,7 +448,7 @@ namespace MajdataPlay.Tests.AndroidJavaGeneratorValidation
         /// <summary>
         /// Supplies a type parameter for pure managed null-wrapper tests, never a fake Unity reference.
         /// </summary>
-        private sealed class ManagedOnlyWrapper : AndroidObject
+        private sealed class ManagedOnlyWrapper : JavaObject
         {
             /// <summary>
             /// Invokes the real production wrapping constructor without native reference creation.

@@ -14,7 +14,7 @@ namespace MajdataPlay.Platform.Android
     /// Borrowed wrappers do not extend the lifetime of an externally disposed reference. Generated
     /// wrappers represent Java interfaces as well as classes; they do not implement Java callbacks.
     /// </remarks>
-    public abstract class AndroidObject : IDisposable
+    public abstract class JavaObject : IDisposable
     {
         /// <summary>
         /// Stores the Java reference, or null after this wrapper has been disposed.
@@ -30,7 +30,7 @@ namespace MajdataPlay.Platform.Android
         /// Gets the live Unity Java reference used for JNI calls and argument marshaling.
         /// </summary>
         /// <exception cref="ObjectDisposedException">This wrapper has been disposed.</exception>
-        public AndroidJavaObject JavaObject
+        public AndroidJavaObject JavaReference
         {
             get
             {
@@ -45,7 +45,7 @@ namespace MajdataPlay.Platform.Android
         /// <param name="javaObject">The non-null Java reference to wrap.</param>
         /// <param name="ownsReference">Whether to adopt and dispose the reference, rather than borrow it.</param>
         /// <exception cref="ArgumentNullException">The Java reference is null.</exception>
-        protected AndroidObject(AndroidJavaObject javaObject, bool ownsReference = true)
+        protected JavaObject(AndroidJavaObject javaObject, bool ownsReference = true)
         {
             _javaObject = javaObject ?? throw new ArgumentNullException(nameof(javaObject));
             _ownsReference = ownsReference;
@@ -62,7 +62,7 @@ namespace MajdataPlay.Platform.Android
         /// <exception cref="AndroidJavaException">Java class or constructor resolution fails.</exception>
         /// <exception cref="JavaInvocationException">Java raises an exception during construction.</exception>
         /// <exception cref="InvalidOperationException">JNI cannot create a local frame or returns a null instance without an exception.</exception>
-        protected AndroidObject(string className, string constructorSignature, params object?[] arguments)
+        protected JavaObject(string className, string constructorSignature, params object?[] arguments)
         {
             _javaObject = AndroidJni.Construct(className, constructorSignature, arguments);
             _ownsReference = true;
@@ -72,7 +72,7 @@ namespace MajdataPlay.Platform.Android
         /// Releases an owned reference once, or stops borrowing an externally owned reference.
         /// </summary>
         /// <remarks>
-        /// Other code must not dispose an adopted <see cref="JavaObject"/> independently, and callers
+        /// Other code must not dispose an adopted <see cref="JavaReference"/> independently, and callers
         /// must not race JNI operations against disposal. A borrowed reference remains caller-owned.
         /// </remarks>
         public void Dispose()

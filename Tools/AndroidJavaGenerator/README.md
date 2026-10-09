@@ -2,7 +2,7 @@
 
 本工具为 `MajdataPlay.Platform.Android` 提供 `[JavaClass("binary.ClassName")]`。
 生成代码留在 Roslyn compilation 内，不把 `.g.cs` 写回 `Assets`，不改 Unity
-生成的解决方案或项目文件。每个 wrapper 都派生自 `AndroidObject`。
+生成的解决方案或项目文件。每个 wrapper 都派生自 `JavaObject`。
 
 ## 安装与最小使用方式
 
@@ -138,12 +138,12 @@ Roslyn 若复用完全不变的 compilation 和已缓存 driver，会跳过 gene
 - Java enum 的常量 → static getter，`values` / `valueOf` → 方法。
 - public inherited members 默认展开到 wrapper；可用
   `IncludeInheritedMembers = false` 仅生成声明成员。Java 继承并不自动生成
-  C# 继承层次，所有 wrapper 以 `AndroidObject` 为直接基类。
+  C# 继承层次，所有 wrapper 以 `JavaObject` 为直接基类。
 - Java `byte` → C# `sbyte`；`char` → UTF-16 `char`；其余 primitive 精确对应。
 - `String` → `string?`。被同一 compilation `[JavaClass]` 标记的引用类型 →
   对应 wrapper；其他 Java 引用 → `AndroidJavaObject?`，不虚构 C# 类型。
   Java 的子类/接口关系不会自动成为 C# 转换；需要不同的 typed view 时，可用
-  `new InterfaceWrapper(instance.JavaObject, ownsReference: false)` 显式借用。
+  `new InterfaceWrapper(instance.JavaReference, ownsReference: false)` 显式借用。
 - Java 数组 → nullable C# jagged arrays，支持 null 数组、null 元素和嵌套数组。
 - Java generics 使用真实 JVM erasure；JNI descriptor 保留声明类型，不由
   C# 参数值推断。null、Java 接口参数、Java 子类参数及构造函数重载均使用

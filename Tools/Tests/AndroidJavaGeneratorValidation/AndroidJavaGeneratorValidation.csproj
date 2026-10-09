@@ -30,7 +30,7 @@
     <Compile Include="../../AndroidJavaGenerator/Source/**/*.cs" Link="Generator/%(RecursiveDir)%(Filename)%(Extension)" />
     <Compile Include="../../../Assets/Plugins/MajdataPlay/Platform/Android/JavaClassAttribute.cs" Link="Runtime/JavaClassAttribute.cs" />
     <Compile Include="../../../Assets/Plugins/MajdataPlay/Platform/Android/JavaApiConfigurationAttribute.cs" Link="Runtime/JavaApiConfigurationAttribute.cs" />
-    <Compile Include="../../../Assets/Plugins/MajdataPlay/Platform/Android/AndroidObject.cs" Link="Runtime/AndroidObject.cs" />
+    <Compile Include="../../../Assets/Plugins/MajdataPlay/Platform/Android/JavaObject.cs" Link="Runtime/JavaObject.cs" />
     <Compile Include="../../../Assets/Plugins/MajdataPlay/Platform/Android/AndroidJni.cs" Link="Runtime/AndroidJni.cs" />
     <Compile Include="../../../Assets/Plugins/MajdataPlay/Platform/Android/JavaInvocationException.cs" Link="Runtime/JavaInvocationException.cs" />
     <AssemblyMetadata Include="UnityEditorData" Value="$(UnityEditorData)" />
@@ -38,7 +38,7 @@
   </ItemGroup>
   <Target Name="ValidateHarnessInputs" BeforeTargets="PrepareForBuild">
     <Error Condition="!Exists('$(UnityEditorData)/Managed/UnityEngine/UnityEngine.CoreModule.dll') Or !Exists('$(UnityEditorData)/Managed/UnityEngine/UnityEngine.AndroidJNIModule.dll')" Text="Install Unity 6000.3.17f1 or set -p:UnityEditorData to its Editor/Data directory. Real Unity CoreModule and AndroidJNIModule references are required." />
-    <Error Condition="!Exists('$(RepositoryRoot)/Assets/Plugins/MajdataPlay/Platform/Android/AndroidJni.cs') Or !Exists('$(RepositoryRoot)/Assets/Plugins/MajdataPlay/Platform/Android/JavaClassAttribute.cs') Or !Exists('$(RepositoryRoot)/Assets/Plugins/MajdataPlay/Platform/Android/JavaApiConfigurationAttribute.cs') Or !Exists('$(RepositoryRoot)/Assets/Plugins/MajdataPlay/Platform/Android/AndroidObject.cs') Or !Exists('$(RepositoryRoot)/Assets/Plugins/MajdataPlay/Platform/Android/JavaInvocationException.cs')" Text="The production Android runtime sources must exist before building this harness." />
+    <Error Condition="!Exists('$(RepositoryRoot)/Assets/Plugins/MajdataPlay/Platform/Android/AndroidJni.cs') Or !Exists('$(RepositoryRoot)/Assets/Plugins/MajdataPlay/Platform/Android/JavaClassAttribute.cs') Or !Exists('$(RepositoryRoot)/Assets/Plugins/MajdataPlay/Platform/Android/JavaApiConfigurationAttribute.cs') Or !Exists('$(RepositoryRoot)/Assets/Plugins/MajdataPlay/Platform/Android/JavaObject.cs') Or !Exists('$(RepositoryRoot)/Assets/Plugins/MajdataPlay/Platform/Android/JavaInvocationException.cs')" Text="The production Android runtime sources must exist before building this harness." />
     <Error Condition="!Exists('$(RepositoryRoot)/Tools/AndroidJavaGenerator/Source/AndroidJavaGenerator.cs')" Text="The production AndroidJavaGenerator source must exist before building this harness." />
   </Target>
   <Import Project="Sdk.targets" Sdk="Microsoft.NET.Sdk" />

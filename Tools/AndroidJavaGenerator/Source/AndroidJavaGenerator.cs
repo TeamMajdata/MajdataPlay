@@ -24,7 +24,7 @@ namespace MajdataPlay.SourceGenerators.AndroidJava
         internal const string ConfigurationAttributeName = "MajdataPlay.Platform.Android.JavaApiConfigurationAttribute";
 
         /// <summary>Identifies the runtime base class required by every generated wrapper.</summary>
-        internal const string AndroidObjectName = "MajdataPlay.Platform.Android.JavaObject";
+        internal const string JavaObjectName = "MajdataPlay.Platform.Android.JavaObject";
 
         /// <summary>Registers compilation-local syntax discovery for attributed type declarations.</summary>
         /// <param name="context">The generator initialization context.</param>
@@ -226,9 +226,9 @@ namespace MajdataPlay.SourceGenerators.AndroidJava
                     return "Every declaration of Java wrapper '" + symbol.ToDisplayString() + "' must be partial.";
                 }
             }
-            if (symbol.BaseType != null && symbol.BaseType.SpecialType != SpecialType.System_Object && symbol.BaseType.ToDisplayString() != AndroidObjectName)
+            if (symbol.BaseType != null && symbol.BaseType.SpecialType != SpecialType.System_Object && symbol.BaseType.ToDisplayString() != JavaObjectName)
             {
-                return "Java wrapper '" + symbol.ToDisplayString() + "' must derive directly from " + AndroidObjectName +
+                return "Java wrapper '" + symbol.ToDisplayString() + "' must derive directly from " + JavaObjectName +
                     " (or omit its base). Java inheritance is flattened, not represented as C# wrapper inheritance.";
             }
             if (symbol.IsAbstract)
