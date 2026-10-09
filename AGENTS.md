@@ -4,15 +4,15 @@
 
 ## 项目概览
 
-MajdataPlay 是一个跨平台 Simai 谱面播放器，也是一个 Unity 项目。
+MajdataPlay 是一个跨平台 Simai 谱面播放器，也是一个 Unity 项目，采用GPLv3开源许可。
 
-当前固定使用 **Unity 6000.3.17f1**（准确版本见 `ProjectSettings/ProjectVersion.txt`），目标平台包括 Windows（x86/64）、Linux、macOS、Android（ARMv7和ARM64） 和 iOS，使用mono和il2cpp后端。
+当前固定使用 **Unity 6000.3.17f1**（准确版本见 `ProjectSettings/ProjectVersion.txt`），目标平台包括 Windows（x86/x64/ARM64）、Linux、macOS、Android（ARMv7和ARM64） 和 iOS，使用mono和il2cpp后端。
 
 ## 必须遵守的规则
 
 - 使用仓库指定的 Unity Editor 版本打开、导入、编译和构建主项目。
 - 根目录的 `.sln`、`.slnx` 和 `.csproj` 是 Unity/IDE 生成物，不得手工维护，也不得用 `dotnet build`、Visual Studio 或普通 MSBuild 将它们当成标准 .NET 项目构建。
-- `Tools/Tests/**` 下明确提供的独立 `.csproj` 是例外；它们按各自 README 使用 .NET 9 运行。
+- `Tools/CSharp/**` 和 `Tools/Tests/**` 下明确提供的独立 `.csproj` 是例外；它们按各自 README 使用指定的dotnet版本运行。
 - 克隆后先执行 `git submodule update --init --recursive`。不要在未初始化的子模块上判断缺失类型或自行复制依赖。
 - 开始修改前运行 `git status --short`。工作区中的既有修改属于用户；不得覆盖、回退、格式化或清理与任务无关的改动。
 - 不要编辑或提交 Unity/IDE 生成目录和本地数据：`Library/`、`Temp/`、`obj/`、`Build/`、`Logs/`、`UserSettings/`、`.vs/`、`.idea/`、`Cache/`、`RecordOutputs/`，以及根目录生成的解决方案和项目文件。
@@ -64,6 +64,16 @@ MajdataPlay 是一个跨平台 Simai 谱面播放器，也是一个 Unity 项目
 - 修改 `unsafe`、P/Invoke 或原生结构布局时，显式核对各目标 ABI 的指针宽度、C `long`、对齐、调用约定、所有权和线程约束。
 - 平台实现应留在相应 Platform 目录或平台受限 `.asmdef` 中，并保留 Editor 可编译性。不要用单一平台的成功掩盖其他平台分支的编译问题。
 - 所有成员均需添加英文XML文档（Unity message方法非必要可以不添加），文档应说明成员的用途；如果方法有参数，应当说明各个参数的用途；如果方法有返回值，应当说明方法会返回什么；如果方法有可能抛出异常，文档也应当列出可能的异常类型。
+- Android开发时，如果需要编写Java C# wrapper，请使用项目内的AndroidJavaGenerator源生成器生成wrapper；wrapper应根据java包名存放在`MajdataPlay.Platform.Android.Runtime`下，如果包名是`android.**`则对应`MajdataPlay.Platform.Android.Runtime.**`，如果包名是`java.**`则对应`MajdataPlay.Platform.Android.Runtime.Java.**`。
+
+## C#工具集代码约定
+
+- C#工具集是指`Tools/CSharp`下采用C#开发的用于辅助开发的工具，包括但不限于资源管理（如i18n GUI编辑器）、源生成器以及其他类库，但是不包括测试集。
+- 使用C#开发的工具必须放在`Tools/CSharp/`下，应当为正确的C#项目结构（包含`.csproj`项目文件）
+- 工具项目的结构应当符合以下示例：源代码存放在`MyProject/src/`下，项目文件存放在`MyProject/MyProject.csproj`
+- 工具集的代码风格和命名风格与主项目一致
+- 工具项目需要添加英文`README.md`
+- gitignore应当忽略dotnet产生的`obj`和`bin`等编译产物
 
 ## Unity 资产与序列化
 
