@@ -138,7 +138,9 @@ are not accepted as successful negative-test results.
 - Nullable annotated-wrapper references, nullable unknown AndroidJavaObject
   references, interface/concrete overloads, generic and bounded-generic erasure.
 - Public inherited methods, inherited static methods, covariant override
-  selection, field hiding, and IncludeInheritedMembers=false.
+  selection, field hiding, and IncludeInheritedMembers=false. Inherited
+  `EqualsJavaMethod`, `HashCode`, and `ToStringJavaMethod` aliases remain separate
+  from the CLR overrides inherited from `JavaObject`.
 - Public constructor overloads, implicit public defaults, parameterized-only
   constructors, and exclusion of private/protected/package constructors across
   source/class/JAR inputs. SDK-only API-36 bindings verify Intent constructor
@@ -173,6 +175,11 @@ are not accepted as successful negative-test results.
 - Pure managed MapArray/Wrap null behavior, null elements/rows, signed bytes,
   empty arrays, converter errors, and non-Android PlatformNotSupportedException
   guards. No fake AndroidJavaObject handles are created.
+- `JavaObject` CLR override signatures and nullable equality/inequality
+  operators; null, unrelated CLR values, managed identity, and disposal guards.
+  `RuntimeHelpers.GetUninitializedObject` creates only disposed-state wrappers
+  with a null reference field; it creates no Unity reference or JNI handle.
+  These checks do not validate live Java `equals`, `hashCode`, or `toString` dispatch.
 - UNITY_ANDROID runtime **managed compilation** using the actual Unity modules;
   this case does not execute JNI or simulate a Player.
 

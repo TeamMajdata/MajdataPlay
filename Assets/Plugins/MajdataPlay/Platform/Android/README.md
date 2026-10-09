@@ -13,6 +13,13 @@ Classes without public constructors, Java interfaces, and abstract classes expos
 only the reference-wrapping constructor; the generator does not add a parameterless
 constructor that creates a plain `java.lang.Object` for these wrappers.
 
+`JavaObject.Equals`, `GetHashCode`, and `ToString` invoke the wrapped Java object's
+virtual `equals`, `hashCode`, and `toString` methods. The `==` and `!=` operators
+use the same equality semantics. Managed reference identity and null/non-wrapper
+comparisons do not invoke JNI, including after disposal. Comparing distinct
+wrappers, hashing, and formatting require live references on a JVM-attached thread;
+accessing a disposed wrapper's reference throws `ObjectDisposedException`.
+
 See `Tools/AndroidJavaGenerator/README.md` at the repository root for installation,
 SDK/JDK configuration, Java inputs, member mapping, documentation provenance,
 ownership, threading, diagnostics, and managed/Unity/device validation limits.

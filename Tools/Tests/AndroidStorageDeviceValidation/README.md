@@ -11,6 +11,10 @@ ARMv7 IL2CPP processes. See `RESULTS.md` for the dated evidence and exact scope.
 A successful script compilation alone is not a runtime pass. Keep separate
 evidence for each actually executed ABI.
 
+The added `JavaObject` equality/hash/string regression checks need a fresh APK
+build and a new device run for each ABI. The earlier `RESULTS.md` evidence does
+not cover these checks; they have not yet been executed on a device.
+
 ## Integration contract
 
 Use Unity **6000.3.17f1**. The isolated builder stages a separate project at
@@ -194,11 +198,21 @@ Before opening the picker:
 7. An intentional Java `IllegalStateException` becomes
    `JavaInvocationException`, retains the sentinel/Java stack, leaves no JNI
    exception pending, and permits a subsequent generated call.
-8. Repeat JNI checks on a genuine background thread with
+8. Real, separately constructed `java.lang.String` objects compare by Java
+   value through `Equals`, `==`, and `!=`; `"polygenelubricants"` returns the
+   signed Java hash **-2,147,483,648** and its original text from `ToString`.
+   `Dictionary<JavaObject, string>` lookup and `HashSet<JavaObject>`
+   deduplication use the same equality/hash contract. Distinct `java.lang.Object`
+   instances retain Java identity semantics; borrowed aliases, including a
+   base wrapper around generated KeyEvent, remain equal with matching hashes.
+   Disposed wrappers retain managed identity/null comparison fast paths and
+   reject methods or comparisons requiring their Java reference, while the
+   borrowed reference's owner remains live.
+9. Repeat JNI checks on a genuine background thread with
    `AndroidJNI.InvokeAttached`. Managed exceptions are caught **inside** the
    attachment callback using `ExceptionDispatchInfo` and rethrown **outside**.
    Owned wrappers are disposed before leaving the attachment scope.
-9. Schedule a managed UI callback through production `Activity.RunOnUiThread`
+10. Schedule a managed UI callback through production `Activity.RunOnUiThread`
    and its generated Runnable + Unity proxy adapter; await it with a ten-second
    timeout. The callback captures failures rather than throwing through native
    reverse JNI.

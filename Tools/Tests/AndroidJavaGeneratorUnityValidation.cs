@@ -26,6 +26,7 @@ namespace MajdataPlay.Tests
                 Require(typeof(JavaObject).IsAssignableFrom(typeof(BuildVersion)), "SDK wrapper must derive from JavaObject.");
                 Require(typeof(JavaObject).IsAssignableFrom(typeof(Runnable)), "Java interface wrapper must derive from JavaObject.");
                 Require(!typeof(JavaObject).IsAbstract, "JavaObject must be a non-abstract, directly constructible class.");
+                RequireObjectOverrides();
                 var sdkInt = typeof(BuildVersion).GetProperty("SdkInt", BindingFlags.Public | BindingFlags.Static);
                 Require(sdkInt is not null && sdkInt.PropertyType == typeof(int) && sdkInt.SetMethod is null, "SDK_INT must be a static getter-only int property.");
                 Require(typeof(Runnable).GetMethod("Run", Type.EmptyTypes) is not null, "Java interface method must be generated.");
@@ -55,6 +56,26 @@ namespace MajdataPlay.Tests
                 Debug.LogError("ANDROID_JAVA_GENERATOR_UNITY_FAILED: " + exception);
                 EditorApplication.Exit(1);
             }
+        }
+
+        /// <summary>
+        /// Verifies Object overrides and managed null equality without creating a JNI reference.
+        /// </summary>
+        /// <exception cref="InvalidOperationException">An override or nullable comparison is incorrect.</exception>
+        private static void RequireObjectOverrides()
+        {
+            foreach (var name in new[] { nameof(object.Equals), nameof(object.GetHashCode), nameof(object.ToString) })
+            {
+                var parameters = name == nameof(object.Equals) ? new[] { typeof(object) } : Type.EmptyTypes;
+                var method = typeof(JavaObject).GetMethod(name, parameters);
+                Require(method is not null && method.DeclaringType == typeof(JavaObject)
+                    && method.GetBaseDefinition().DeclaringType == typeof(object), name + " must override the managed Object method.");
+            }
+
+            JavaObject? left = null;
+            JavaObject? right = null;
+            Require(left == right, "Two null JavaObject wrappers must compare equal without JNI.");
+            Require(!(left != right), "Two null JavaObject wrappers must not compare unequal.");
         }
 
         /// <summary>

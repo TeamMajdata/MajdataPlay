@@ -208,6 +208,11 @@ using var intent = new IntentWrapper();
   `new JavaObject()` 等价于 Java 的 `new Object()`，
   `new JavaObject(className, constructorSignature, args)` 用精确 descriptor
   构造任意 Java 类，`new JavaObject(javaObject, ownsReference)` 包装已有引用。
+- `JavaObject.Equals`、`GetHashCode`、`ToString` 调用 Java 对象对应的虚方法，
+  `==` / `!=` 与 `Equals` 使用相同的 Java 相等语义。同一 wrapper、null 和
+  非 wrapper 比较不调用 JNI；不同 wrapper 比较、哈希与字符串转换要求引用
+  未释放，并在 JVM-attached 线程运行。需要访问已释放引用时抛出
+  `ObjectDisposedException`，不会把已释放对象视作 null。
 - 不可同时从外部 Dispose 已被 wrapper 采用的 reference，不可把 Dispose
   与同一 reference 上的 JNI 调用并发执行。
 - 对象/对象数组结果会提升为独立 global references，单次调用的 JNI locals

@@ -3,6 +3,8 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Reflection;
+using System.Runtime.CompilerServices;
 using System.Text;
 using MajdataPlay.Platform.Android;
 using MajdataPlay.Platform.Android.Runtime.Java.Lang;
@@ -26,7 +28,7 @@ namespace MajdataPlay.Tests.AndroidJavaGeneratorValidation
             "invalid-nonpartial", "invalid-static", "invalid-nested", "invalid-generic", "duplicate-mapping",
             "missing-java-type", "missing-dependency", "missing-source", "missing-classpath", "missing-documentation",
             "missing-sdk", "missing-platform", "missing-jdk", "missing-extractor", "negative-api",
-            "member-collisions", "user-member-collision", "runtime-map-array", "runtime-platform-guard"
+            "member-collisions", "user-member-collision", "runtime-map-array", "runtime-platform-guard", "runtime-object-semantics"
         };
 
         /// <summary>
@@ -46,6 +48,13 @@ namespace MajdataPlay.Tests.AndroidJavaGeneratorValidation
             if (name == "runtime-platform-guard")
             {
                 AssertPlatformGuard();
+                return;
+            }
+            if (name == "runtime-object-semantics")
+            {
+                AssertJavaObjectApi();
+                AssertJavaObjectManagedComparisons();
+                AssertJavaObjectOperatorShortcuts();
                 return;
             }
             if (name.StartsWith("unity-data-", StringComparison.Ordinal))
@@ -210,6 +219,40 @@ namespace MajdataPlay.Tests.AndroidJavaGeneratorValidation
             var source = runner.RootDeclarations(sources, workspace.DocumentationPaths, includeInherited, assemblyConfiguration);
             var run = runner.Run(runner.CreateCompilation(source, name), name);
             ApiAssertions.AssertRootApi(run, includeInherited);
+            AssertObjectMemberAliases(run, includeInherited);
+        }
+
+        /// <summary>
+        /// Requires inherited Java Object aliases to coexist with the JavaObject CLR overrides.
+        /// </summary>
+        /// <param name="run">The completed fixture wrapper generation.</param>
+        /// <param name="includeInherited">Whether inherited Java members were requested.</param>
+        /// <exception cref="InvalidOperationException">An alias replaces a CLR override or ignores inherited-member configuration.</exception>
+        private static void AssertObjectMemberAliases(GeneratorRun run, bool includeInherited)
+        {
+            var widget = ApiAssertions.Type(run, "WidgetWrapper");
+            foreach (var name in new[] { "Equals", "GetHashCode", "ToString" })
+            {
+                Check.Equal(0, widget.GetMembers(name).Length, "Generated wrappers must inherit JavaObject." + name + ".");
+                var member = widget.BaseType!.GetMembers(name).OfType<IMethodSymbol>().Single();
+                Check.True(member.IsOverride && member.OverriddenMethod?.ContainingType.SpecialType == SpecialType.System_Object,
+                    "JavaObject." + name + " must override the CLR Object member.");
+            }
+            foreach (var name in new[] { "EqualsJavaMethod", "HashCode", "ToStringJavaMethod" })
+            {
+                Check.Equal(includeInherited ? 1 : 0, widget.GetMembers(name).Length, "Inherited Java Object alias " + name);
+            }
+            if (includeInherited)
+            {
+                var equals = ApiAssertions.Method(widget, "EqualsJavaMethod");
+                Check.True(!equals.IsOverride && equals.ReturnType.SpecialType == SpecialType.System_Boolean,
+                    "The Java equals alias must retain its generated Boolean signature.");
+                Check.Equal("AndroidJavaObject", equals.Parameters.Single().Type.Name, "Java equals alias erased Object parameter");
+                Check.Equal(SpecialType.System_Int32, ApiAssertions.Method(widget, "HashCode").ReturnType.SpecialType,
+                    "Java hashCode alias return type");
+                Check.Equal(SpecialType.System_String, ApiAssertions.Method(widget, "ToStringJavaMethod").ReturnType.SpecialType,
+                    "Java toString alias return type");
+            }
         }
 
         /// <summary>
@@ -529,6 +572,163 @@ namespace MajdataPlay.Tests.AndroidJavaGeneratorValidation
             Check.Throws<PlatformNotSupportedException>(() => AndroidJni.GetField<int>(null, "fixtures.Widget", "mutableCount", "I"), "GetField outside Android");
             Check.Throws<PlatformNotSupportedException>(() => new JavaObject(), "parameterless JavaObject construction outside Android");
             Check.Throws<ArgumentNullException>(() => new ManagedOnlyWrapper(null!), "null borrowed Java reference");
+        }
+
+        /// <summary>
+        /// Requires the CLR overrides and nullable wrapper operators to be public members of JavaObject.
+        /// </summary>
+        /// <exception cref="InvalidOperationException">A required override, operator, or nullable annotation is absent.</exception>
+        private static void AssertJavaObjectApi()
+        {
+            var nullable = new NullabilityInfoContext();
+            var equals = AssertJavaObjectOverride("Equals", typeof(bool), new[] { typeof(object) });
+            Check.Equal(NullabilityState.Nullable, nullable.Create(equals.GetParameters().Single()).ReadState,
+                "JavaObject.Equals nullable Object parameter");
+            AssertJavaObjectOverride("GetHashCode", typeof(int), Type.EmptyTypes);
+            var toString = AssertJavaObjectOverride("ToString", typeof(string), Type.EmptyTypes);
+            Check.Equal(NullabilityState.Nullable, nullable.Create(toString.ReturnParameter).ReadState,
+                "JavaObject.ToString nullable Java string result");
+            foreach (var name in new[] { "op_Equality", "op_Inequality" })
+            {
+                var method = Check.NotNull(typeof(JavaObject).GetMethod(name,
+                    BindingFlags.Public | BindingFlags.Static | BindingFlags.DeclaredOnly), "JavaObject " + name);
+                Check.True(method.IsSpecialName && method.ReturnType == typeof(bool), name + " must be a Boolean operator.");
+                var parameters = method.GetParameters();
+                Check.Equal(2, parameters.Length, name + " wrapper parameter count");
+                foreach (var parameter in parameters)
+                {
+                    Check.Equal(typeof(JavaObject), parameter.ParameterType, name + " wrapper parameter type");
+                    Check.Equal(NullabilityState.Nullable, nullable.Create(parameter).ReadState,
+                        name + " nullable wrapper parameter");
+                }
+            }
+        }
+
+        /// <summary>
+        /// Finds a declared JavaObject member and requires it to override the corresponding CLR Object method.
+        /// </summary>
+        /// <param name="name">The CLR Object method name.</param>
+        /// <param name="returnType">The expected CLR return type.</param>
+        /// <param name="parameterTypes">The expected CLR parameter types.</param>
+        /// <returns>The verified JavaObject override.</returns>
+        /// <exception cref="InvalidOperationException">The method is missing or does not override the expected CLR member.</exception>
+        private static MethodInfo AssertJavaObjectOverride(string name, Type returnType, Type[] parameterTypes)
+        {
+            var method = Check.NotNull(typeof(JavaObject).GetMethod(name,
+                BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly, binder: null,
+                types: parameterTypes, modifiers: null), "JavaObject." + name);
+            Check.True(method.IsVirtual && method.GetBaseDefinition().DeclaringType == typeof(object),
+                "JavaObject." + name + " must override CLR Object.");
+            Check.Equal(returnType, method.ReturnType, "JavaObject." + name + " return type");
+            return method;
+        }
+
+        /// <summary>
+        /// Checks null, managed identity, and disposal comparisons without constructing a Unity Java reference.
+        /// </summary>
+        /// <remarks>
+        /// Uninitialized wrappers contain no AndroidJavaObject or JNI handle. Their null reference field
+        /// models only the disposed state; they must never be used to claim live JNI dispatch coverage.
+        /// </remarks>
+        /// <exception cref="InvalidOperationException">A comparison or disposal guard violates its managed contract.</exception>
+        private static void AssertJavaObjectManagedComparisons()
+        {
+            using var first = (JavaObject)RuntimeHelpers.GetUninitializedObject(typeof(JavaObject));
+            using var second = (JavaObject)RuntimeHelpers.GetUninitializedObject(typeof(JavaObject));
+            var alias = first;
+            JavaObject? absent = null;
+            var absentAlias = absent;
+            Check.True(absent == absentAlias && !(absent != absentAlias), "Two null wrappers must compare equal.");
+            Check.True(first == alias && !(first != alias), "Managed aliases must compare equal without JNI.");
+            Check.True(first != absent && absent != first && !(first == absent) && !(absent == first),
+                "A disposed wrapper and null must compare unequal in both operand orders without JNI.");
+            Check.True(first.Equals(first) && ((object)first).Equals(alias),
+                "Both direct and CLR Object equality must preserve disposed managed identity.");
+            Check.True(!first.Equals(null) && !first.Equals(new object()) && !first.Equals(string.Empty) && !first.Equals(0),
+                "Null and unrelated CLR objects must compare unequal without JNI.");
+            var disposedFirst = Check.NotNull(first, "disposed wrapper after nullable comparisons");
+            Check.Throws<ObjectDisposedException>(() => disposedFirst.Equals(second), "Distinct disposed wrapper Equals");
+            Check.Throws<ObjectDisposedException>(() => second.Equals(disposedFirst), "Reversed disposed wrapper Equals");
+            Check.Throws<ObjectDisposedException>(() =>
+            {
+                _ = disposedFirst == second;
+            }, "Distinct disposed wrapper equality operator");
+            Check.Throws<ObjectDisposedException>(() =>
+            {
+                _ = second == disposedFirst;
+            }, "Reversed disposed wrapper equality operator");
+            Check.Throws<ObjectDisposedException>(() =>
+            {
+                _ = disposedFirst != second;
+            }, "Distinct disposed wrapper inequality operator");
+            Check.Throws<ObjectDisposedException>(() => disposedFirst.GetHashCode(), "Disposed wrapper Java hashCode");
+            Check.Throws<ObjectDisposedException>(() => disposedFirst.ToString(), "Disposed wrapper Java toString");
+            disposedFirst.Dispose();
+            disposedFirst.Dispose();
+            Check.True(disposedFirst.Equals(alias) && disposedFirst == alias && disposedFirst != absent,
+                "Repeated disposal must preserve managed identity and null comparisons.");
+        }
+
+        /// <summary>
+        /// Requires identity and either null operand to bypass a derived CLR equality override.
+        /// </summary>
+        /// <remarks>Uninitialized trap wrappers contain no Unity Java reference and exercise managed dispatch only.</remarks>
+        /// <exception cref="InvalidOperationException">An operator invokes the override for an identity or null comparison.</exception>
+        private static void AssertJavaObjectOperatorShortcuts()
+        {
+            using var first = (ManagedEqualityTrap)RuntimeHelpers.GetUninitializedObject(typeof(ManagedEqualityTrap));
+            using var second = (ManagedEqualityTrap)RuntimeHelpers.GetUninitializedObject(typeof(ManagedEqualityTrap));
+            var alias = first;
+            JavaObject? absent = null;
+            Check.True(first == alias && !(first != alias), "Managed identity must bypass a derived Equals override.");
+            Check.True(!(first == absent) && first != absent, "A null right operand must bypass a derived Equals override.");
+            Check.True(!(absent == first) && absent != first, "A null left operand must bypass a derived Equals override.");
+            Check.Throws<InvalidOperationException>(() =>
+            {
+                _ = first == second;
+            }, "Distinct non-null operands must dispatch the derived Equals override");
+            Check.Throws<InvalidOperationException>(() =>
+            {
+                _ = first != second;
+            }, "Distinct non-null inequality must dispatch the derived Equals override");
+        }
+
+        /// <summary>
+        /// Detects unwanted virtual equality dispatch without creating a Unity Java reference.
+        /// </summary>
+        /// <remarks>Tests instantiate only the uninitialized disposed state and never invoke this type's constructor.</remarks>
+        private sealed class ManagedEqualityTrap : JavaObject
+        {
+            /// <summary>
+            /// Provides the ordinary borrowed-reference constructor required for a JavaObject-derived wrapper.
+            /// </summary>
+            /// <param name="value">The non-null Unity Java reference to borrow; tests do not invoke this constructor.</param>
+            /// <exception cref="ArgumentNullException">The supplied reference is null.</exception>
+            public ManagedEqualityTrap(UnityEngine.AndroidJavaObject value)
+                : base(value, ownsReference: false)
+            {
+            }
+
+            /// <summary>
+            /// Throws to expose any virtual equality dispatch performed by an operator.
+            /// </summary>
+            /// <param name="obj">The comparison operand forwarded by the operator.</param>
+            /// <returns>This trap never returns a comparison result.</returns>
+            /// <exception cref="InvalidOperationException">Always thrown when virtual equality is invoked.</exception>
+            public override bool Equals(object? obj)
+            {
+                throw new InvalidOperationException("Managed equality override was invoked.");
+            }
+
+            /// <summary>
+            /// Rejects hash computation for this equality-dispatch-only fixture.
+            /// </summary>
+            /// <returns>This trap never returns a hash code.</returns>
+            /// <exception cref="InvalidOperationException">Always thrown when hash computation is invoked.</exception>
+            public override int GetHashCode()
+            {
+                throw new InvalidOperationException("Managed equality fixture has no hash code.");
+            }
         }
 
         /// <summary>

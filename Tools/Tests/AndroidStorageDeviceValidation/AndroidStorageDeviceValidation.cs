@@ -1,11 +1,14 @@
 #nullable enable
 using System;
+using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.Runtime.ExceptionServices;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using MajdataPlay.IO.Storage;
+using MajdataPlay.Platform.Android.Runtime.Java.Lang;
 using MajdataPlay.Platform.Android.Storage;
 using UnityEngine;
 using Activity = MajdataPlay.Platform.Android.Runtime.App.Activity;
@@ -294,6 +297,73 @@ namespace MajdataPlay.Platform.Android.Runtime.Validation
                 throw new InvalidOperationException("Generated dispatch left a Java exception pending.");
             }
             Require(DeviceJniProbe.EchoString("after-exception") == "after-exception", "JNI did not recover after the Java exception.");
+            CheckJavaObjectEquality(key);
+        }
+
+        /// <summary>Checks Java virtual object methods, wrapper equality, and managed collection lookup on a real JVM.</summary>
+        /// <param name="key">A live generated KeyEvent wrapper whose reference can be borrowed.</param>
+        /// <exception cref="InvalidOperationException">An object method or lifecycle check violates its expected contract.</exception>
+        /// <exception cref="AndroidJavaException">Java class or method resolution fails.</exception>
+        /// <exception cref="JavaInvocationException">An unexpected Java exception occurs.</exception>
+        private static void CheckJavaObjectEquality(KeyEvent key)
+        {
+            const string Text = "polygenelubricants";
+            using var first = new JavaObject("java.lang.String", "(Ljava/lang/String;)V", Text);
+            using var equal = new JavaObject("java.lang.String", "(Ljava/lang/String;)V", Text);
+            using var different = new JavaObject("java.lang.String", "(Ljava/lang/String;)V", "different");
+            Require(!AndroidJNI.IsSameObject(first.JavaReference.GetRawObject(), equal.JavaReference.GetRawObject()),
+                "The String equality probes must be distinct Java objects.");
+            Require(first.Equals(equal) && equal.Equals(first) && first == equal && !(first != equal),
+                "String value equality did not dispatch to Java.");
+            Require(!first.Equals(different) && first != different && !(first == different),
+                "Different Java String values compared equal.");
+            Require(first.GetHashCode() == int.MinValue && equal.GetHashCode() == int.MinValue,
+                "String.hashCode did not preserve its signed 32-bit Java result.");
+            Require(first.ToString() == Text, "String.toString did not dispatch to Java.");
+            JavaObject? missing = null;
+            var firstAlias = first;
+            Require(first == firstAlias && missing == null && !(missing != null) &&
+                first != missing && missing != first && !firstAlias.Equals(missing) && !firstAlias.Equals(Text),
+                "Wrapper identity, null, or non-wrapper equality failed.");
+
+            var dictionary = new Dictionary<JavaObject, string> { { firstAlias, "found" } };
+            Require(dictionary.TryGetValue(equal, out var value) && value == "found" && !dictionary.ContainsKey(different),
+                "Dictionary lookup did not use Java equality and hash codes.");
+            var set = new HashSet<JavaObject> { firstAlias };
+            Require(!set.Add(equal) && set.Contains(equal) && !set.Contains(different) && set.Count == 1,
+                "HashSet did not deduplicate Java-equal wrappers.");
+
+            using var identity = new JavaObject();
+            using var otherIdentity = new JavaObject();
+            using var borrowedIdentity = new JavaObject(identity.JavaReference, ownsReference: false);
+            Require(identity == borrowedIdentity && borrowedIdentity == identity && identity != otherIdentity,
+                "Object identity equality did not use the underlying Java object.");
+            Require(identity.GetHashCode() == borrowedIdentity.GetHashCode() &&
+                identity.ToString() == "java.lang.Object@" + identity.GetHashCode().ToString("x", CultureInfo.InvariantCulture),
+                "Object hashCode or toString did not dispatch to Java.");
+            using var borrowedKey = new JavaObject(key.JavaReference, ownsReference: false);
+            Require(key.Equals(borrowedKey) && borrowedKey.Equals(key) && key == borrowedKey && borrowedKey == key &&
+                key.GetHashCode() == borrowedKey.GetHashCode(),
+                "Generated and base wrappers around the same Java object compared differently.");
+
+            borrowedKey.Dispose();
+            var disposedAlias = borrowedKey;
+            Require(borrowedKey.Equals(disposedAlias) && borrowedKey == disposedAlias && !(borrowedKey != disposedAlias) &&
+                borrowedKey != missing && missing != borrowedKey && !disposedAlias.Equals(missing) && !disposedAlias.Equals(Text),
+                "Disposed wrapper identity, null, or non-wrapper comparisons failed.");
+            Expect<ObjectDisposedException>(() => disposedAlias.GetHashCode());
+            Expect<ObjectDisposedException>(() => disposedAlias.ToString());
+            Expect<ObjectDisposedException>(() => disposedAlias.Equals(key));
+            Expect<ObjectDisposedException>(() => key.Equals(borrowedKey));
+            Expect<ObjectDisposedException>(() =>
+            {
+                _ = borrowedKey == key;
+            });
+            Expect<ObjectDisposedException>(() =>
+            {
+                _ = key != borrowedKey;
+            });
+            Require(key.GetAction() == KeyEvent.ActionDown, "Object equality checks disposed a borrowed reference's owner.");
         }
 
         /// <summary>Schedules a managed Runnable using the production adapter and generated Activity dispatch.</summary>
