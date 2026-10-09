@@ -10,7 +10,7 @@ namespace MajdataPlay.IO.Storage
     /// Recursive deletion removes symbolic links and reparse points rather than their targets.
     /// Operations are not transactional and cannot protect against concurrent replacement of path components.
     /// </remarks>
-    public sealed class LocalFileSystem : IFileSystem
+    internal sealed class LocalFileSystem : IFileSystem
     {
         /// <summary>The bounded buffer size used by local file streams.</summary>
         private const int BufferSize = 65536;

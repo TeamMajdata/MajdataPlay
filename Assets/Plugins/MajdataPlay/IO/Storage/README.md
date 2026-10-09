@@ -25,9 +25,13 @@ var renamed = file.Rename("renamed.txt");
 var copy = await renamed.CopyToAsync(library, "backup.txt", cancellationToken: cancellationToken);
 ```
 
-`FileSystem.OpenFile(location)` and `OpenDirectory(location)` resolve native paths,
-`file://` URIs, and registered `content://` URIs. Creating a handle does not create an
-entry. `OpenWrite`, `WriteAllBytes`, and `WriteAllText` require an existing file;
+`FileSystem.OpenFile(location)` and `OpenDirectory(location)` automatically select
+the backend for native paths, `file://` URIs, and registered `content://` URIs.
+`LocalFileSystem` is internal; `FileSystem` does not expose a local backend property.
+Callers pass a location to the facade rather than constructing or selecting the
+local implementation. Handles expose their backend only through `IFileSystem`.
+
+Creating a handle does not create an entry. `OpenWrite`, `WriteAllBytes`, and `WriteAllText` require an existing file;
 use `StorageDirectory.CreateFile` first. Creating a file never overwrites a sibling;
 creating a directory returns the existing directory if it already exists.
 Child APIs accept one name, not paths: empty names, `.`, `..`, separators, and NUL

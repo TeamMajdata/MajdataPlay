@@ -30,6 +30,9 @@ failure in one case does not prevent the other cases from running.
 
 ## Coverage
 
+- Local backend encapsulation (internal type, no public `FileSystem.Local`),
+  automatic native-path/file-URI selection through the public facade, and shared
+  local backend ownership.
 - Local path and facade dispatch, nested local directory creation, idempotent
   directory creation, UTF/non-ASCII names, and percent-encoded `file://` URIs.
 - Existing-only reads/writes, complete binary round trips, append, truncation,

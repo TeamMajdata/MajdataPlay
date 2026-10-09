@@ -5,14 +5,14 @@ using System.Threading;
 
 namespace MajdataPlay.IO.Storage
 {
-    /// <summary>Resolves local paths and supported storage URIs into typed storage handles.</summary>
+    /// <summary>Automatically selects a storage backend for local paths and supported URIs without exposing the local implementation.</summary>
     public static class FileSystem
     {
         /// <summary>The optional provider for opaque content URIs.</summary>
         private static IFileSystem? s_contentProvider;
 
-        /// <summary>Gets the portable local filesystem backend.</summary>
-        public static LocalFileSystem Local { get; } = new LocalFileSystem();
+        /// <summary>Owns the shared local backend selected internally for native paths and file URIs.</summary>
+        private static readonly LocalFileSystem s_local = new LocalFileSystem();
 
         /// <summary>Registers or replaces the provider used for subsequent content URI resolutions.</summary>
         /// <param name="provider">The backend responsible for content URI locations.</param>
@@ -62,7 +62,7 @@ namespace MajdataPlay.IO.Storage
         {
             var normalizedPath = NormalizeLocalPath(path);
             Directory.CreateDirectory(normalizedPath);
-            return new StorageDirectory(Local, normalizedPath);
+            return new StorageDirectory(s_local, normalizedPath);
         }
 
         /// <summary>Converts a local path or file URI into a normalized absolute path without trailing separators.</summary>
@@ -110,7 +110,7 @@ namespace MajdataPlay.IO.Storage
             var uri = GetLocationUri(location);
             if (uri is null || uri.IsFile)
             {
-                return Local;
+                return s_local;
             }
             if (!string.Equals(uri.Scheme, "content", StringComparison.OrdinalIgnoreCase))
             {

@@ -36,6 +36,7 @@ namespace MajdataPlay.Tests.FileSystemValidation
             {
                 ("facade: unregistered provider and unsupported schemes", TestFacadeErrors),
                 ("entry metadata contracts", TestMetadata),
+                ("facade: hidden local backend and automatic selection", TestFacadeEncapsulation),
                 ("local: facade, creation, encoded file URIs", TestLocalLocations),
                 ("local: bytes, existing-only writes, append and truncate", TestLocalByteIO),
                 ("local: non-ASCII text, BOM and explicit encodings", TestLocalTextIO),
@@ -169,6 +170,27 @@ namespace MajdataPlay.Tests.FileSystemValidation
             return Task.CompletedTask;
         }
 
+        /// <summary>Verifies local implementation encapsulation and automatic path/file-URI backend selection.</summary>
+        /// <returns>A completed task after checking the public facade and inferred local handles.</returns>
+        /// <exception cref="InvalidOperationException">A visibility or backend-selection assertion fails.</exception>
+        private static Task TestFacadeEncapsulation()
+        {
+            using var workspace = new TemporaryWorkspace();
+            var path = workspace.GetPath("automatic", "file #名称.txt");
+            var file = StorageFacade.OpenFile(path);
+            var directory = StorageFacade.OpenDirectory(Path.GetDirectoryName(path)!);
+            var uriFile = StorageFacade.OpenFile(new Uri(path).AbsoluteUri);
+            var backendType = file.FileSystem.GetType();
+            Check(backendType.IsNotPublic && !backendType.IsVisible, "local backend is internal and not externally visible");
+            Check(!typeof(StorageFacade).Assembly.GetExportedTypes().Contains(backendType), "local backend is not exported from its assembly");
+            Check(typeof(StorageFacade).GetMember("Local").Length == 0, "facade exposes no public Local backend entry point");
+            Check(ReferenceEquals(file.FileSystem, directory.FileSystem), "native file and directory paths automatically select the same backend");
+            Check(ReferenceEquals(file.FileSystem, uriFile.FileSystem), "encoded file URIs automatically select the same backend as native paths");
+            Check(file.Location == path && uriFile.Location == path, "automatic selection preserves normalized native locations");
+            Check(!file.Exists && !directory.Exists, "automatic selection does not create missing entries");
+            return Task.CompletedTask;
+        }
+
         /// <summary>Checks native paths and escaped file URI dispatch with portable special characters.</summary>
         /// <returns>A completed task after verifying creation and location round trips.</returns>
         /// <exception cref="InvalidOperationException">A regression assertion fails.</exception>
@@ -178,15 +200,15 @@ namespace MajdataPlay.Tests.FileSystemValidation
             var path = workspace.GetPath("parent", "谱面 #50% café");
             var directory = StorageFacade.CreateLocalDirectory(path);
             Check(directory.Exists && NativeDirectory.Exists(path), "facade creates nested native directories");
-            Check(ReferenceEquals(directory.FileSystem, StorageFacade.Local), "created directory uses the shared local backend");
-            Check(ReferenceEquals(StorageFacade.Local, StorageFacade.Local), "local backend is stable");
+            Check(ReferenceEquals(directory.FileSystem, StorageFacade.OpenDirectory(path).FileSystem), "created directory uses the automatically selected local backend");
+            Check(ReferenceEquals(directory.FileSystem, StorageFacade.OpenFile(Path.Combine(path, "missing.bin")).FileSystem), "file and directory resolutions share a stable backend");
             Check(Entry(directory).IsDirectory, "local directory metadata has the correct type");
             var file = directory.CreateFile("音符 #50% café.txt");
             file.WriteAllText("内容: café 🎵");
             var uri = new Uri(file.Location).AbsoluteUri;
             Check(uri.Contains("%23", StringComparison.Ordinal) && uri.Contains("%25", StringComparison.Ordinal), "test exercises escaped URI characters");
             var reopened = StorageFacade.OpenFile(uri);
-            Check(ReferenceEquals(reopened.FileSystem, StorageFacade.Local), "file URI dispatch stays local");
+            Check(ReferenceEquals(reopened.FileSystem, directory.FileSystem), "file URI dispatch stays local");
             Check(reopened.ReadAllText() == "内容: café 🎵", "encoded file URI addresses the same bytes");
             Check(Path.GetFullPath(Entry(reopened).Location) == Path.GetFullPath(file.Location), "URI decoding preserves the native location");
             var directoryUri = new Uri(directory.Location + Path.DirectorySeparatorChar).AbsoluteUri;
@@ -249,7 +271,7 @@ namespace MajdataPlay.Tests.FileSystemValidation
             var directory = workspace.CreateLocalDirectory();
             var file = directory.CreateFile("occupied");
             file.WriteAllText("keep");
-            var missing = new StorageFile(StorageFacade.Local, workspace.GetPath("local", "missing.bin"));
+            var missing = StorageFacade.OpenFile(workspace.GetPath("local", "missing.bin"));
             VerifyMissingFile(missing);
             Throws<IOException>(() =>
             {
@@ -270,14 +292,14 @@ namespace MajdataPlay.Tests.FileSystemValidation
             }, "file creation cannot replace a directory");
             ThrowsIo(() =>
             {
-                using var stream = new StorageFile(StorageFacade.Local, child.Location).OpenRead();
+                using var stream = StorageFacade.OpenFile(child.Location).OpenRead();
             }, "a directory cannot be opened as a file");
             ThrowsIo(() =>
             {
-                new StorageFile(StorageFacade.Local, child.Location).Delete();
+                StorageFacade.OpenFile(child.Location).Delete();
             }, "file deletion cannot remove a directory");
             Check(child.Exists && file.ReadAllText() == "keep", "type errors preserve existing entries");
-            var absentDirectory = new StorageDirectory(StorageFacade.Local, workspace.GetPath("absent"));
+            var absentDirectory = StorageFacade.OpenDirectory(workspace.GetPath("absent"));
             Check(!absentDirectory.Exists, "a missing directory reports absence");
             Throws<DirectoryNotFoundException>(() =>
             {
@@ -340,7 +362,7 @@ namespace MajdataPlay.Tests.FileSystemValidation
                 {
                     source.CopyTo(directory, "source.bin", overwrite);
                 }, "self-copy is rejected before truncation");
-                var alias = new StorageFile(StorageFacade.Local, Path.Combine(directory.Location, ".", "source.bin"));
+                var alias = StorageFacade.OpenFile(Path.Combine(directory.Location, ".", "source.bin"));
                 Throws<IOException>(() =>
                 {
                     alias.CopyTo(directory, "source.bin", overwrite);
@@ -409,7 +431,7 @@ namespace MajdataPlay.Tests.FileSystemValidation
             Check(Entry(link).IsSymbolicLink, "directory link metadata marks the reparse point");
             Check(directory.EnumerateEntries().Count() == 1, "enumeration does not recurse into a link target");
             link.Delete(recursive: true);
-            Check(StorageFacade.Local.GetEntry(linkPath) is null, "direct deletion removes the directory link itself");
+            Check(StorageFacade.OpenDirectory(linkPath).Entry is null, "direct deletion removes the directory link itself");
             Check(NativeFile.ReadAllText(sentinel) == "outside directory survives", "direct link deletion keeps its target intact");
             TryCreateLink(() =>
             {
@@ -450,7 +472,7 @@ namespace MajdataPlay.Tests.FileSystemValidation
                 Check(NativeFile.ReadAllText(outside) == "outside file survives", "rejected link overwrite does not truncate the outside target");
             }
             link.Delete();
-            Check(StorageFacade.Local.GetEntry(linkPath) is null, "direct deletion removes the file link itself");
+            Check(StorageFacade.OpenFile(linkPath).Entry is null, "direct deletion removes the file link itself");
             Check(NativeFile.ReadAllText(outside) == "outside file survives", "direct file-link deletion preserves the outside file");
             TryCreateLink(() =>
             {
@@ -753,7 +775,7 @@ namespace MajdataPlay.Tests.FileSystemValidation
                 Check(ReferenceEquals(remoteCopy.FileSystem, provider), "local-to-content copy retains its destination provider");
                 EqualBytes(payload, remoteCopy.ReadAllBytes(), "local-to-content copy works without seeking");
                 var localCopy = await Copy(remoteCopy, local, $"returned #名称-{suffix}.bin", asynchronous);
-                Check(ReferenceEquals(localCopy.FileSystem, StorageFacade.Local), "content-to-local copy retains its destination provider");
+                Check(ReferenceEquals(localCopy.FileSystem, local.FileSystem), "content-to-local copy retains its destination provider");
                 EqualBytes(payload, localCopy.ReadAllBytes(), "content-to-local copy works with unknown source size");
                 await ThrowsAsync<IOException>(() =>
                 {

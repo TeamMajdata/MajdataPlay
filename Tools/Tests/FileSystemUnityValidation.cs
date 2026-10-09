@@ -71,6 +71,8 @@ namespace MajdataPlay.Tests
             var directory = FileSystem.CreateLocalDirectory(path);
             try
             {
+                Require(!directory.FileSystem.GetType().IsVisible, "The local backend must not be visible outside the IO assembly.");
+                Require(typeof(FileSystem).GetMember("Local").Length == 0, "The facade must not expose its local backend.");
                 var file = directory.CreateFile("storage-中文.txt", "text/plain");
                 file.WriteAllText("portable storage 中文");
                 Require(file.ReadAllText() == "portable storage 中文", "UTF-8 round-trip failed.");
