@@ -31,9 +31,10 @@ Copy-Item -LiteralPath (Join-Path $root 'ProjectSettings/ProjectVersion.txt') -D
     name = 'MajdataPlay.Platform.Android'
     includePlatforms = @('Android', 'Editor')
 } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $runtime 'MajdataPlay.Platform.Android.asmdef')
-foreach ($name in @('JavaObject', 'AndroidJni', 'JavaClassAttribute', 'JavaApiConfigurationAttribute', 'JavaInvocationException')) {
+foreach ($name in @('AndroidJni', 'JavaClassAttribute', 'JavaApiConfigurationAttribute', 'JavaInvocationException')) {
     Copy-Item -LiteralPath (Join-Path $root "Assets/Plugins/MajdataPlay/Platform/Android/$name.cs") -Destination $runtime
 }
+Copy-Item -LiteralPath (Join-Path $root 'Assets/Plugins/MajdataPlay/Platform/Android/Runtime/Java/Lang/JavaObject.cs') -Destination $runtime
 Copy-Item -LiteralPath $dll -Destination $runtime
 Copy-Item -LiteralPath (Join-Path $root 'Tools/AndroidJavaGenerator/MajdataPlay.SourceGenerators.AndroidJava.dll.meta') -Destination $runtime
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'AndroidJavaGeneratorUnityValidation.cs') -Destination $editor

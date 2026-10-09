@@ -5,6 +5,7 @@ using System.IO;
 using System.Linq;
 using System.Text;
 using MajdataPlay.Platform.Android;
+using MajdataPlay.Platform.Android.Runtime.Java.Lang;
 using Microsoft.CodeAnalysis;
 
 namespace MajdataPlay.Tests.AndroidJavaGeneratorValidation
@@ -60,7 +61,7 @@ namespace MajdataPlay.Tests.AndroidJavaGeneratorValidation
                     break;
                 case "explicit-java-object-base":
                     var explicitBaseSource = runner.RootDeclarations(workspace.SourceFiles(), workspace.DocumentationPaths);
-                    explicitBaseSource = explicitBaseSource.Replace("public partial class WidgetWrapper", "public partial class WidgetWrapper : global::MajdataPlay.Platform.Android.JavaObject");
+                    explicitBaseSource = explicitBaseSource.Replace("public partial class WidgetWrapper", "public partial class WidgetWrapper : global::MajdataPlay.Platform.Android.Runtime.Java.Lang.JavaObject");
                     var explicitBaseRun = runner.Run(runner.CreateCompilation(explicitBaseSource, name), name);
                     ApiAssertions.AssertRootApi(explicitBaseRun);
                     break;

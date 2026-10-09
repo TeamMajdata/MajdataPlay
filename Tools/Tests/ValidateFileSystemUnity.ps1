@@ -35,7 +35,7 @@ $analyzerMeta = Join-Path $androidSource "$analyzerName.meta"
 if (!(Select-String -LiteralPath $analyzerMeta -Pattern '^\s*-\s+RoslynAnalyzer\s*$' -Quiet)) {
     throw 'The installed Android Java generator must have the RoslynAnalyzer label.'
 }
-foreach ($name in @('MajdataPlay.Platform.Android.asmdef', 'AndroidRuntime.cs', 'AndroidJni.cs', 'JavaObject.cs', 'JavaInvocationException.cs', 'JavaClassAttribute.cs', 'JavaApiConfigurationAttribute.cs', $analyzerName)) {
+foreach ($name in @('MajdataPlay.Platform.Android.asmdef', 'AndroidRuntime.cs', 'AndroidJni.cs', 'JavaInvocationException.cs', 'JavaClassAttribute.cs', 'JavaApiConfigurationAttribute.cs', $analyzerName)) {
     $source = Join-Path $androidSource $name
     Copy-Item -LiteralPath $source -Destination $android -Force
     Copy-Item -LiteralPath "$source.meta" -Destination $android -Force

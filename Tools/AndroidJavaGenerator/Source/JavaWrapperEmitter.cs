@@ -114,7 +114,7 @@ namespace MajdataPlay.SourceGenerators.AndroidJava
                 "Java inheritance is flattened; this wrapper does not implement Java callback interfaces.");
             Deprecated(_type);
             _source.Line((_wrapper.Symbol.DeclaredAccessibility == Accessibility.Public ? "public" : "internal") +
-                " partial class " + JavaNames.Escape(_wrapper.Symbol.Name) + " : global::MajdataPlay.Platform.Android.JavaObject");
+                " partial class " + JavaNames.Escape(_wrapper.Symbol.Name) + " : global::MajdataPlay.Platform.Android.Runtime.Java.Lang.JavaObject");
             _source.Open();
             var classNameMember = AllocateName("JavaClassName", "JavaField", false);
             _source.Documentation("summary", "Gets the exact Java binary class name used by this wrapper.");

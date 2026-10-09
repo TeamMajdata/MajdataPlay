@@ -23,7 +23,7 @@ namespace MajdataPlay.Tests.AndroidJavaGeneratorValidation
         {
             "JavaClassAttribute.cs",
             "JavaApiConfigurationAttribute.cs",
-            "JavaObject.cs",
+            Path.Combine("Runtime", "Java", "Lang", "JavaObject.cs"),
             "AndroidJni.cs",
             "JavaInvocationException.cs"
         };

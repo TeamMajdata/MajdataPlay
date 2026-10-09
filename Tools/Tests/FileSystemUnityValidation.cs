@@ -6,6 +6,7 @@ using AndroidKeyCode = MajdataPlay.Platform.Android.IO.KeyCode;
 using AndroidKeyEvent = MajdataPlay.Platform.Android.Runtime.View.KeyEvent;
 using JavaRunnable = MajdataPlay.Platform.Android.Runtime.Java.Lang.Runnable;
 using MajdataPlay.Platform.Android;
+using MajdataPlay.Platform.Android.Runtime.Java.Lang;
 using MajdataPlay.Platform.Android.Runtime.Storage;
 using MajdataPlay.Platform.Android.Storage;
 using System;

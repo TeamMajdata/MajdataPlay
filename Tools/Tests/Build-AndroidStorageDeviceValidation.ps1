@@ -41,7 +41,7 @@ foreach ($name in @('MajdataPlay.IO.asmdef', 'MajdataPlay.IO.asmdef.meta')) {
     Copy-Item -LiteralPath (Join-Path $ioSource $name) -Destination $io -Force
 }
 Get-ChildItem -LiteralPath (Join-Path $ioSource 'Storage') -Filter '*.cs' -File | Copy-Item -Destination $io -Force
-foreach ($name in @('MajdataPlay.Platform.Android.asmdef', 'AndroidRuntime.cs', 'AndroidJni.cs', 'JavaObject.cs', 'JavaInvocationException.cs', 'JavaClassAttribute.cs', 'JavaApiConfigurationAttribute.cs', 'MajdataPlay.SourceGenerators.AndroidJava.dll')) {
+foreach ($name in @('MajdataPlay.Platform.Android.asmdef', 'AndroidRuntime.cs', 'AndroidJni.cs', 'JavaInvocationException.cs', 'JavaClassAttribute.cs', 'JavaApiConfigurationAttribute.cs', 'MajdataPlay.SourceGenerators.AndroidJava.dll')) {
     $source = Join-Path $androidSource $name
     Copy-Item -LiteralPath $source -Destination $android -Force
     Copy-Item -LiteralPath "$source.meta" -Destination $android -Force

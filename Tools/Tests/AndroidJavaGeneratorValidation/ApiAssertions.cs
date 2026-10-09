@@ -35,7 +35,7 @@ namespace MajdataPlay.Tests.AndroidJavaGeneratorValidation
             var inner = Type(run, "InnerWrapper");
             foreach (var type in new[] { widget, contract, mode, nested, inner })
             {
-                Check.Equal("MajdataPlay.Platform.Android.JavaObject", type.BaseType?.ToDisplayString(), type.Name + " base type");
+                Check.Equal("MajdataPlay.Platform.Android.Runtime.Java.Lang.JavaObject", type.BaseType?.ToDisplayString(), type.Name + " base type");
                 AssertWrappingConstructor(type);
             }
             AssertConstructors(widget);

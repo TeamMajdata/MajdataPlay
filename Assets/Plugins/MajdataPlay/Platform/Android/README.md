@@ -37,6 +37,11 @@ GUIDs or keeping duplicate compatibility types:
 | `Runtime/Intent.cs` | `Runtime/Content/Intent.cs` | `05788a69f2044d34a9c8c943d4efdfa2` |
 | `Runtime/KeyEvent.cs` | `Runtime/View/KeyEvent.cs` | `f0f486f2d88203040b05d82998a231b3` |
 
+The shared `JavaObject` base class was relocated from the assembly root into
+`Runtime/Java/Lang/JavaObject.cs` with its original metadata GUID
+`1b30d938cc2149f39e859cfcaf866fa7` preserved. The generator emits that fully
+qualified base name, so reinstall the analyzer after changing it.
+
 The unused, newly created Activity / Intent metadata GUIDs were retired; only
 the new View directory receives a new GUID. Repeated isolated validation removes
 only the six obsolete root-level script / metadata files before copying Runtime,

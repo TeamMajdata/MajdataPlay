@@ -24,7 +24,7 @@ namespace MajdataPlay.SourceGenerators.AndroidJava
         internal const string ConfigurationAttributeName = "MajdataPlay.Platform.Android.JavaApiConfigurationAttribute";
 
         /// <summary>Identifies the runtime base class required by every generated wrapper.</summary>
-        internal const string JavaObjectName = "MajdataPlay.Platform.Android.JavaObject";
+        internal const string JavaObjectName = "MajdataPlay.Platform.Android.Runtime.Java.Lang.JavaObject";
 
         /// <summary>Registers compilation-local syntax discovery for attributed type declarations.</summary>
         /// <param name="context">The generator initialization context.</param>

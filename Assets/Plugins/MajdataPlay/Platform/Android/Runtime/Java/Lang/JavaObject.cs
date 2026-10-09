@@ -4,7 +4,7 @@ using UnityEngine;
 
 #nullable enable
 
-namespace MajdataPlay.Platform.Android
+namespace MajdataPlay.Platform.Android.Runtime.Java.Lang
 {
     /// <summary>
     /// Owns or borrows a Unity Java-object reference used by generated JNI wrappers.

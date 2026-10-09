@@ -1,4 +1,5 @@
 using MajdataPlay.Platform.Android;
+using MajdataPlay.Platform.Android.Runtime.Java.Lang;
 using MajdataPlay.Tests.Bindings;
 using System;
 using System.Reflection;
