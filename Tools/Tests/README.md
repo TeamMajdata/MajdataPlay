@@ -58,3 +58,18 @@ The second command creates an ignored, isolated Unity 6000.3.17f1 project; it
 verifies real analyzer loading, generated SDK classes/interfaces, readonly
 properties, overload preservation, editor-companion compilation, and the
 non-Android JNI guard. Neither check validates an Android Player or hardware.
+
+## Portable file and directory storage
+
+See `FileSystemValidation/README.md` and
+`../../Assets/Plugins/MajdataPlay/IO/Storage/README.md` for the portable local/opaque-URI
+regressions, Android SAF API, and target/hardware validation limitations.
+
+```powershell
+dotnet run --project Tools/Tests/FileSystemValidation/FileSystemValidation.csproj
+./Tools/Tests/ValidateFileSystemUnity.ps1
+```
+
+The second command stages an ignored isolated Unity 6000.3.17f1 project, checks
+Editor smoke/Android guards, compiles Windows64 and Android player scripts, and
+compiles Android Java sources. It does not exercise SAF on a device or build a player.

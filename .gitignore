@@ -109,3 +109,6 @@ out.log
 !/Tools/Tests/AndroidJavaGeneratorBuild/AndroidJavaGeneratorBuild.csproj
 !/Tools/Tests/AndroidJavaGeneratorValidation/AndroidJavaGeneratorValidation.csproj
 /Assets/Plugins/MajdataPlay/Platform/Android/MajdataPlay.SourceGenerators.AndroidJava.dll.meta
+
+# Independent storage validation harness (not a Unity-generated project).
+!/Tools/Tests/FileSystemValidation/FileSystemValidation.csproj

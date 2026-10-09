@@ -2,7 +2,8 @@
     "name": "MajdataPlay.Platform.Android",
     "rootNamespace": "",
     "references": [
-        "GUID:8545470905e4bf241a27188012585d36"
+        "GUID:8545470905e4bf241a27188012585d36",
+        "GUID:364879641db269c44871a87fd5126342"
     ],
     "includePlatforms": [
         "Android",

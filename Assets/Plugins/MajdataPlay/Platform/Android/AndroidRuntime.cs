@@ -75,6 +75,11 @@ namespace MajdataPlay.Platform.Android
         {
             public OnActivityResultCallbackProxy() : base("net.majdata.majdataplay.CSharpOnActivityResultCallback") { }
 
+            /// <summary>Forwards Java activity results to managed subscribers, including SAF picker requests.</summary>
+            /// <param name="requestCode">The request identifier supplied when launching the activity.</param>
+            /// <param name="resultCode">Android's activity result status.</param>
+            /// <param name="intent">The nullable result intent borrowed for the callback duration.</param>
+            [UnityEngine.Scripting.Preserve]
             public void OnActivityResult(int requestCode, int resultCode, AndroidJavaObject? intent)
             {
                 Android_OnActivityResult(requestCode, resultCode, intent);
