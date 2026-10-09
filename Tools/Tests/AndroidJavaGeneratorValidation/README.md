@@ -67,6 +67,7 @@ Useful bounded subsets and help:
 dotnet run --project Tools/Tests/AndroidJavaGeneratorValidation/AndroidJavaGeneratorValidation.csproj -- --list
 dotnet run --project Tools/Tests/AndroidJavaGeneratorValidation/AndroidJavaGeneratorValidation.csproj -- --filter source-api
 dotnet run --project Tools/Tests/AndroidJavaGeneratorValidation/AndroidJavaGeneratorValidation.csproj -- --filter runtime
+dotnet run --project Tools/Tests/AndroidJavaGeneratorValidation/AndroidJavaGeneratorValidation.csproj -- --filter unity-data-player
 dotnet run --project Tools/Tests/AndroidJavaGeneratorValidation/AndroidJavaGeneratorValidation.csproj -- --help
 ~~~
 
@@ -124,6 +125,13 @@ are not accepted as successful negative-test results.
 
 ## Coverage
 
+- `unity-data-player-references` uses genuine installed Android IL2CPP Player
+  CoreModule metadata from nested `Variations/il2cpp/(Release/)Managed` layouts,
+  never Editor metadata or synthetic assembly paths. It clears all editor/SDK/JDK
+  environment hints, leaves SDK/JDK options unset, and requires inference of the
+  bundled API-36 SDK, JDK, and explicitly requested `{UnityData}` Unity jar without
+  auto-injected classpath entries. This is managed configuration validation only,
+  not Unity Player compilation, packaging, or JNI/device execution.
 - All Java primitives, including signed byte -> sbyte and char -> char, exact
   method/constructor/field JNI descriptors forwarded to AndroidJni.Call/GetField,
   and getter-only fields even when Java fields are mutable.

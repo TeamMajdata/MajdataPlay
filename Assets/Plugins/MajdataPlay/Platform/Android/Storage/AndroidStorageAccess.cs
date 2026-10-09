@@ -7,6 +7,12 @@ using System.Runtime.ExceptionServices;
 using System.Threading;
 using System.Threading.Tasks;
 using UnityEngine;
+using Activity = MajdataPlay.Platform.Android.Runtime.App.Activity;
+using DocumentsContract = MajdataPlay.Platform.Android.Runtime.Provider.DocumentsContract;
+using Intent = MajdataPlay.Platform.Android.Runtime.Content.Intent;
+using JavaUri = MajdataPlay.Platform.Android.Runtime.Net.Uri;
+using UnityPlayer = MajdataPlay.Platform.Android.Runtime.Unity.UnityPlayer;
+using UriPermission = MajdataPlay.Platform.Android.Runtime.Content.UriPermission;
 
 namespace MajdataPlay.Platform.Android.Storage
 {
@@ -34,16 +40,16 @@ namespace MajdataPlay.Platform.Android.Storage
 #endif
 
         /// <summary>Requests read access to a URI.</summary>
-        private const int GrantRead = 1;
+        private const int GrantRead = Intent.FlagGrantReadUriPermission;
 
         /// <summary>Requests write access to a URI.</summary>
-        private const int GrantWrite = 2;
+        private const int GrantWrite = Intent.FlagGrantWriteUriPermission;
 
         /// <summary>Requests a grant persistable across process restarts.</summary>
-        private const int GrantPersistable = 64;
+        private const int GrantPersistable = Intent.FlagGrantPersistableUriPermission;
 
         /// <summary>Requests access to descendants of a selected tree.</summary>
-        private const int GrantPrefix = 128;
+        private const int GrantPrefix = Intent.FlagGrantPrefixUriPermission;
 
         /// <summary>Lets the user choose a document tree.</summary>
         /// <param name="writable">Whether read and write access are required.</param>
@@ -59,7 +65,7 @@ namespace MajdataPlay.Platform.Android.Storage
         public static async Task<StorageDirectory?> PickDirectoryAsync(bool writable = true,
             bool persistPermission = true, CancellationToken cancellationToken = default)
         {
-            var location = await StartPicker("android.intent.action.OPEN_DOCUMENT_TREE", null, null,
+            var location = await StartPicker(Intent.ActionOpenDocumentTree, null, null,
                 writable, persistPermission, true, cancellationToken).ConfigureAwait(false);
             if (location is null)
             {
@@ -85,7 +91,7 @@ namespace MajdataPlay.Platform.Android.Storage
             bool persistPermission = true, CancellationToken cancellationToken = default)
         {
             ValidateMimeType(mimeType);
-            var location = await StartPicker("android.intent.action.OPEN_DOCUMENT", mimeType, null,
+            var location = await StartPicker(Intent.ActionOpenDocument, mimeType, null,
                 writable, persistPermission, false, cancellationToken).ConfigureAwait(false);
             if (location is null)
             {
@@ -113,7 +119,7 @@ namespace MajdataPlay.Platform.Android.Storage
         {
             StorageName.Validate(name);
             ValidateMimeType(mimeType);
-            var location = await StartPicker("android.intent.action.CREATE_DOCUMENT", mimeType, name,
+            var location = await StartPicker(Intent.ActionCreateDocument, mimeType, name,
                 true, persistPermission, false, cancellationToken).ConfigureAwait(false);
             if (location is null)
             {
@@ -133,17 +139,23 @@ namespace MajdataPlay.Platform.Android.Storage
             return InvokeJava(() =>
             {
                 using var activity = GetActivity();
-                using var resolver = activity.Call<AndroidJavaObject>("getContentResolver");
-                using var permissions = resolver.Call<AndroidJavaObject>("getPersistedUriPermissions");
-                var count = permissions.Call<int>("size");
+                using var resolver = activity.GetContentResolver()
+                    ?? throw new IOException("Android returned no content resolver.");
+                using var permissions = resolver.GetPersistedUriPermissions()
+                    ?? throw new IOException("Android returned no persisted URI permission list.");
+                var count = permissions.Size();
                 var result = new AndroidStoragePermission[count];
                 for (var i = 0; i < count; i++)
                 {
-                    using var permission = permissions.Call<AndroidJavaObject>("get", i);
-                    using var uri = permission.Call<AndroidJavaObject>("getUri");
-                    result[i] = new AndroidStoragePermission(uri.Call<string>("toString"),
-                        permission.Call<bool>("isReadPermission"), permission.Call<bool>("isWritePermission"),
-                        DateTimeOffset.FromUnixTimeMilliseconds(permission.Call<long>("getPersistedTime")).UtcDateTime);
+                    using var permission = new UriPermission(permissions.Get(i)
+                        ?? throw new IOException("Android returned no persisted URI permission."));
+                    using var uri = permission.GetUri()
+                        ?? throw new IOException("Android returned a persisted grant without a URI.");
+                    var location = uri.ToStringJavaMethod()
+                        ?? throw new IOException("Android returned a persisted grant without a URI string.");
+                    result[i] = new AndroidStoragePermission(location,
+                        permission.IsReadPermission(), permission.IsWritePermission(),
+                        DateTimeOffset.FromUnixTimeMilliseconds(permission.GetPersistedTime()).UtcDateTime);
                 }
                 return (IReadOnlyList<AndroidStoragePermission>)result;
             });
@@ -184,10 +196,11 @@ namespace MajdataPlay.Platform.Android.Storage
             InvokeJava(() =>
             {
                 using var activity = GetActivity();
-                using var resolver = activity.Call<AndroidJavaObject>("getContentResolver");
-                using var uriClass = new AndroidJavaClass("android.net.Uri");
-                using var uri = uriClass.CallStatic<AndroidJavaObject>("parse", location);
-                resolver.Call("releasePersistableUriPermission", uri, flags);
+                using var resolver = activity.GetContentResolver()
+                    ?? throw new IOException("Android returned no content resolver.");
+                using var uri = JavaUri.Parse(location)
+                    ?? throw new IOException("Android could not parse the granted content URI.");
+                resolver.ReleasePersistableUriPermission(uri, flags);
                 return true;
             });
         }
@@ -267,7 +280,7 @@ namespace MajdataPlay.Platform.Android.Storage
                 InvokeJava(() =>
                 {
                     using var activity = GetActivity();
-                    activity.Call("runOnUiThread", new AndroidJavaRunnable(() => LaunchPicker(pending, action, mimeType, name)));
+                    activity.RunOnUiThread(new AndroidJavaRunnable(() => LaunchPicker(pending, action, mimeType, name)));
                     return true;
                 });
             }
@@ -303,7 +316,7 @@ namespace MajdataPlay.Platform.Android.Storage
                 var launched = InvokeJava(() =>
                 {
                     using var activity = GetActivity();
-                    using var intent = new AndroidJavaObject("android.content.Intent", action);
+                    using var intent = new Intent(action);
                     var flags = GrantRead | (pending.Writable ? GrantWrite : 0);
                     if (pending.PersistPermission)
                     {
@@ -313,19 +326,23 @@ namespace MajdataPlay.Platform.Android.Storage
                     {
                         flags |= GrantPrefix;
                     }
-                    intent.Call<AndroidJavaObject>("addFlags", flags).Dispose();
+                    using var flaggedIntent = intent.AddFlags(flags)
+                        ?? throw new IOException("Android returned no intent after adding picker flags.");
                     if (mimeType is not null)
                     {
-                        intent.Call<AndroidJavaObject>("setType", mimeType).Dispose();
-                        intent.Call<AndroidJavaObject>("addCategory", "android.intent.category.OPENABLE").Dispose();
+                        using var typedIntent = intent.SetType(mimeType)
+                            ?? throw new IOException("Android returned no intent after setting the picker MIME type.");
+                        using var categorizedIntent = intent.AddCategory(Intent.CategoryOpenable)
+                            ?? throw new IOException("Android returned no intent after adding the picker category.");
                     }
                     if (name is not null)
                     {
-                        intent.Call<AndroidJavaObject>("putExtra", "android.intent.extra.TITLE", name).Dispose();
+                        using var titledIntent = intent.PutExtra(Intent.ExtraTitle, name)
+                            ?? throw new IOException("Android returned no intent after setting the document title.");
                     }
                     return TryLaunch(pending, () =>
                     {
-                        activity.Call("startActivityForResult", intent, pending.RequestCode);
+                        activity.StartActivityForResult(intent, pending.RequestCode);
                     });
                 });
                 if (!launched)
@@ -375,11 +392,11 @@ namespace MajdataPlay.Platform.Android.Storage
             }
             CommitResult(pending, () =>
             {
-                if (resultCode == 0)
+                if (resultCode == Activity.ResultCanceled)
                 {
                     return null;
                 }
-                if (resultCode != -1 || intent is null)
+                if (resultCode != Activity.ResultOk || intent is null)
                 {
                     throw new IOException("Android returned an invalid document picker result.");
                 }
@@ -438,22 +455,23 @@ namespace MajdataPlay.Platform.Android.Storage
         /// <exception cref="NotSupportedException">The provider did not offer persistable access.</exception>
         private static string ReadPickerResult(PickerRequest pending, AndroidJavaObject intent)
         {
-            using var uri = intent.Call<AndroidJavaObject>("getData");
+            using var resultIntent = new Intent(intent, ownsReference: false);
+            using var uri = resultIntent.GetData();
             if (uri is null)
             {
                 throw new IOException("The document picker returned no URI.");
             }
-            var location = uri.Call<string>("toString");
+            var location = uri.ToStringJavaMethod()
+                ?? throw new IOException("The document picker returned no URI string.");
             ValidateContentUri(location);
             if (pending.Tree)
             {
-                using var documents = new AndroidJavaClass("android.provider.DocumentsContract");
-                if (!documents.CallStatic<bool>("isTreeUri", uri))
+                if (!DocumentsContract.IsTreeUri(uri))
                 {
                     throw new IOException("The document picker did not return a document tree.");
                 }
             }
-            var resultFlags = intent.Call<int>("getFlags");
+            var resultFlags = resultIntent.GetFlags();
             var grants = resultFlags & (GrantRead | GrantWrite);
             var requiredGrants = GrantRead | (pending.Writable ? GrantWrite : 0);
             if ((grants & requiredGrants) != requiredGrants)
@@ -467,8 +485,9 @@ namespace MajdataPlay.Platform.Android.Storage
                     throw new NotSupportedException("This document provider did not offer persistable access.");
                 }
                 using var activity = GetActivity();
-                using var resolver = activity.Call<AndroidJavaObject>("getContentResolver");
-                resolver.Call("takePersistableUriPermission", uri, grants);
+                using var resolver = activity.GetContentResolver()
+                    ?? throw new IOException("Android returned no content resolver.");
+                resolver.TakePersistableUriPermission(uri, grants);
             }
             return location;
         }
@@ -499,10 +518,9 @@ namespace MajdataPlay.Platform.Android.Storage
         /// <summary>Gets an owned activity reference without depending on AndroidRuntime initialization order.</summary>
         /// <returns>The current Unity Android activity.</returns>
         /// <exception cref="InvalidOperationException">The activity is unavailable.</exception>
-        private static AndroidJavaObject GetActivity()
+        private static Activity GetActivity()
         {
-            using var unityPlayer = new AndroidJavaClass("com.unity3d.player.UnityPlayer");
-            return unityPlayer.GetStatic<AndroidJavaObject>("currentActivity")
+            return UnityPlayer.CurrentActivity
                 ?? throw new InvalidOperationException("The Unity Android activity is unavailable.");
         }
 
@@ -525,7 +543,7 @@ namespace MajdataPlay.Platform.Android.Storage
                 {
                     result = operation();
                 }
-                catch (AndroidJavaException exception)
+                catch (Exception exception) when (exception is AndroidJavaException || exception is JavaInvocationException)
                 {
                     Exception translated;
                     if (exception.Message.IndexOf("SecurityException", StringComparison.Ordinal) >= 0)

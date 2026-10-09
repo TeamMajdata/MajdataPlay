@@ -1,7 +1,7 @@
 #nullable enable
 using System;
 using System.IO;
-using UnityEngine;
+using MajdataPlay.Platform.Android.Runtime.Storage;
 
 namespace MajdataPlay.Platform.Android.Storage
 {
@@ -23,14 +23,14 @@ namespace MajdataPlay.Platform.Android.Storage
         private readonly sbyte[]? _writeBuffer;
 
         /// <summary>Owns one global Java stream handle until deterministic disposal.</summary>
-        private AndroidJavaObject? _handle;
+        private DocumentStream? _handle;
 
         /// <summary>Adopts an already-open Java stream; no native descriptor is detached or borrowed.</summary>
         /// <param name="handle">The caller-owned Java stream handle whose ownership is transferred on success.</param>
         /// <param name="readable">Whether the handle is read-only rather than write-only.</param>
         /// <exception cref="PlatformNotSupportedException">Execution is outside an Android player.</exception>
         /// <exception cref="ArgumentNullException">The handle is null.</exception>
-        internal AndroidDocumentStream(AndroidJavaObject handle, bool readable)
+        internal AndroidDocumentStream(DocumentStream handle, bool readable)
         {
             AndroidDocumentBridge.EnsureAndroid();
             if (handle is null)
@@ -129,9 +129,9 @@ namespace MajdataPlay.Platform.Android.Storage
                 var requested = Math.Min(count, AndroidDocumentBridge.MaxTransferSize);
                 return AndroidDocumentBridge.Invoke(() =>
                 {
-                    using var result = AndroidDocumentBridge.Call(handle, "read", "I", requested);
+                    using var result = AndroidDocumentBridge.RequireResult(handle.Read(requested));
                     AndroidDocumentBridge.CheckResult(result);
-                    var read = AndroidDocumentBridge.Field<int>(result, AndroidDocumentBridge.ResultClass, "count", "I");
+                    var read = result.Count;
                     if (read == -1)
                     {
                         return 0;
@@ -140,7 +140,7 @@ namespace MajdataPlay.Platform.Android.Storage
                     {
                         throw new IOException("The SAF provider returned an invalid read count.");
                     }
-                    var bytes = AndroidDocumentBridge.Field<sbyte[]?>(result, AndroidDocumentBridge.ResultClass, "data", "[B");
+                    var bytes = result.Data;
                     if (bytes is null || bytes.Length != read)
                     {
                         throw new IOException("The SAF bridge returned inconsistent signed byte data.");
@@ -186,7 +186,7 @@ namespace MajdataPlay.Platform.Android.Storage
                     {
                         var chunk = Math.Min(remaining, bytes.Length);
                         Buffer.BlockCopy(buffer, sourceOffset, bytes, 0, chunk);
-                        using var result = AndroidDocumentBridge.Call(handle, "write", "[BI", bytes, chunk);
+                        using var result = AndroidDocumentBridge.RequireResult(handle.Write(bytes, chunk));
                         AndroidDocumentBridge.CheckResult(result);
                         sourceOffset += chunk;
                         remaining -= chunk;
@@ -207,7 +207,7 @@ namespace MajdataPlay.Platform.Android.Storage
                 var handle = RequireHandle();
                 AndroidDocumentBridge.Invoke(() =>
                 {
-                    using var result = AndroidDocumentBridge.Call(handle, "flush", "");
+                    using var result = AndroidDocumentBridge.RequireResult(handle.Flush());
                     AndroidDocumentBridge.CheckResult(result);
                     return true;
                 });
@@ -262,7 +262,7 @@ namespace MajdataPlay.Platform.Android.Storage
         /// <summary>Gets the live owned handle while the caller holds the operation lock.</summary>
         /// <returns>The Java stream handle, without transferring ownership.</returns>
         /// <exception cref="ObjectDisposedException">The stream has been disposed.</exception>
-        private AndroidJavaObject RequireHandle()
+        private DocumentStream RequireHandle()
         {
             return _handle ?? throw new ObjectDisposedException(nameof(AndroidDocumentStream));
         }

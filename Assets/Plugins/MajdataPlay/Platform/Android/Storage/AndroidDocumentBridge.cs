@@ -3,35 +3,18 @@ using System;
 using System.IO;
 using System.Runtime.ExceptionServices;
 using MajdataPlay.IO.Storage;
+using MajdataPlay.Platform.Android.Runtime.Storage;
 using UnityEngine;
 
 namespace MajdataPlay.Platform.Android.Storage
 {
     /// <summary>
-    /// Marshals the independent SAF bridge's exact JNI protocol on scoped JVM-attached threads.
+    /// Converts generated SAF wrapper results on scoped JVM-attached threads.
     /// </summary>
     internal static class AndroidDocumentBridge
     {
-        /// <summary>Names the Java class without depending on AndroidRuntime initialization.</summary>
-        internal const string ClassName = "net.majdata.majdataplay.StorageAccess";
-
-        /// <summary>Names the typed Java result envelope.</summary>
-        internal const string ResultClass = ClassName + "$Result";
-
-        /// <summary>Names the immutable Java metadata record.</summary>
-        internal const string EntryClass = ClassName + "$Entry";
-
-        /// <summary>Names the caller-owned Java cursor handle.</summary>
-        internal const string CursorClass = ClassName + "$CursorHandle";
-
-        /// <summary>Names the caller-owned Java stream handle.</summary>
-        internal const string StreamClass = ClassName + "$StreamHandle";
-
-        /// <summary>Specifies the exact JVM result descriptor used by all bridge operations.</summary>
-        internal const string ResultDescriptor = "Lnet/majdata/majdataplay/StorageAccess$Result;";
-
-        /// <summary>Bounds managed and Java byte transfers to the same 32 KiB chunk size.</summary>
-        internal const int MaxTransferSize = 32768;
+        /// <summary>Bounds managed transfers to the Java bridge's generated chunk-size constant.</summary>
+        internal const int MaxTransferSize = StorageAccess.MaxTransferSize;
 
         /// <summary>Rejects execution outside Android players without initializing Java.</summary>
         /// <exception cref="PlatformNotSupportedException">Execution is in the Editor or on another platform.</exception>
@@ -80,46 +63,13 @@ namespace MajdataPlay.Platform.Android.Storage
 #endif
         }
 
-        /// <summary>Calls a bridge method using an exact return and argument descriptor.</summary>
-        /// <param name="instance">The cursor or stream handle, or null for a static operation.</param>
-        /// <param name="method">The case-sensitive Java method name.</param>
-        /// <param name="parameters">The JVM parameter descriptors without parentheses.</param>
-        /// <param name="arguments">The arguments in declaration order; Java byte arrays must be sbyte arrays.</param>
-        /// <returns>A caller-owned result envelope, to be disposed while attached.</returns>
-        /// <exception cref="IOException">Java unexpectedly returns a null result.</exception>
-        /// <exception cref="PlatformNotSupportedException">Execution is outside Android players.</exception>
-        /// <exception cref="AndroidJavaException">The bridge method cannot be resolved.</exception>
-        /// <exception cref="JavaInvocationException">JNI raises a Java exception outside the error protocol.</exception>
-        internal static AndroidJavaObject Call(AndroidJavaObject? instance, string method, string parameters, params object?[] arguments)
+        /// <summary>Rejects a missing envelope without changing typed provider-error handling.</summary>
+        /// <param name="result">The caller-owned envelope returned by a generated bridge method.</param>
+        /// <returns>The same non-null envelope, retaining ownership with the caller.</returns>
+        /// <exception cref="IOException">Java unexpectedly returned a null result.</exception>
+        internal static StorageResult RequireResult(StorageResult? result)
         {
-            return AndroidJni.Call<AndroidJavaObject?>(instance, ClassName, method,
-                "(" + parameters + ")" + ResultDescriptor, arguments)
-                ?? throw new IOException("The SAF bridge returned no result envelope.");
-        }
-
-        /// <summary>Reads a protocol field without inferring an object or array's JVM type.</summary>
-        /// <typeparam name="T">The corresponding managed primitive, string, signed array, or Java reference type.</typeparam>
-        /// <param name="instance">The Java record containing the field.</param>
-        /// <param name="declaringClass">The exact binary name of the declaring Java class.</param>
-        /// <param name="name">The case-sensitive field name.</param>
-        /// <param name="descriptor">The exact JVM field descriptor.</param>
-        /// <returns>The field value, preserving null object references.</returns>
-        /// <exception cref="PlatformNotSupportedException">Execution is outside Android players.</exception>
-        /// <exception cref="AndroidJavaException">JNI cannot resolve the field.</exception>
-        /// <exception cref="JavaInvocationException">JNI raises a Java exception.</exception>
-        internal static T Field<T>(AndroidJavaObject instance, string declaringClass, string name, string descriptor)
-        {
-            return AndroidJni.GetField<T>(instance, declaringClass, name, descriptor);
-        }
-
-        /// <summary>Reads a stable error code without parsing provider-dependent Java exception messages.</summary>
-        /// <param name="result">The non-null result envelope.</param>
-        /// <returns>Zero for success, or one of the bridge's documented storage failure codes.</returns>
-        /// <exception cref="AndroidJavaException">JNI cannot resolve the error field.</exception>
-        /// <exception cref="JavaInvocationException">JNI raises a Java exception.</exception>
-        internal static int ErrorCode(AndroidJavaObject result)
-        {
-            return Field<int>(result, ResultClass, "errorCode", "I");
+            return result ?? throw new IOException("The SAF bridge returned no result envelope.");
         }
 
         /// <summary>Translates typed Java errors into the corresponding .NET storage exceptions.</summary>
@@ -132,30 +82,30 @@ namespace MajdataPlay.Platform.Android.Storage
         /// <exception cref="UnauthorizedAccessException">Permission was denied or revoked.</exception>
         /// <exception cref="NotSupportedException">A provider capability or stream mode is unavailable.</exception>
         /// <exception cref="IOException">The provider failed or returned an unknown error code.</exception>
-        internal static void CheckResult(AndroidJavaObject result, string? location = null, bool directoryOperation = false)
+        internal static void CheckResult(StorageResult result, string? location = null, bool directoryOperation = false)
         {
-            var code = ErrorCode(result);
-            if (code == 0)
+            var code = result.ErrorCode;
+            if (code == StorageAccess.Success)
             {
                 return;
             }
-            var message = Field<string?>(result, ResultClass, "errorMessage", "Ljava/lang/String;")
+            var message = result.ErrorMessage
                 ?? "The SAF provider failed.";
             switch (code)
             {
-                case 1:
+                case StorageAccess.InvalidArgument:
                     throw new ArgumentException(message);
-                case 2:
+                case StorageAccess.NotFound:
                     if (directoryOperation)
                     {
                         throw new DirectoryNotFoundException(message);
                     }
                     throw new FileNotFoundException(message, location);
-                case 3:
+                case StorageAccess.DirectoryNotFound:
                     throw new DirectoryNotFoundException(message);
-                case 4:
+                case StorageAccess.AccessDenied:
                     throw new UnauthorizedAccessException(message);
-                case 5:
+                case StorageAccess.Unsupported:
                     throw new NotSupportedException(message);
                 default:
                     throw new IOException(message);
@@ -168,26 +118,25 @@ namespace MajdataPlay.Platform.Android.Storage
         /// <exception cref="IOException">Required metadata is absent or a timestamp is out of range.</exception>
         /// <exception cref="AndroidJavaException">JNI cannot resolve metadata fields.</exception>
         /// <exception cref="JavaInvocationException">JNI raises a Java exception.</exception>
-        internal static FileSystemEntry? ReadEntry(AndroidJavaObject result)
+        internal static FileSystemEntry? ReadEntry(StorageResult result)
         {
-            using var entry = Field<AndroidJavaObject?>(result, ResultClass, "entry",
-                "Lnet/majdata/majdataplay/StorageAccess$Entry;");
+            using var entry = result.Entry;
             if (entry is null)
             {
                 return null;
             }
-            var uri = Field<string?>(entry, EntryClass, "uri", "Ljava/lang/String;");
-            var name = Field<string?>(entry, EntryClass, "name", "Ljava/lang/String;");
-            var resourceId = Field<string?>(entry, EntryClass, "resourceId", "Ljava/lang/String;");
+            var uri = entry.Uri;
+            var name = entry.Name;
+            var resourceId = entry.ResourceId;
             if (string.IsNullOrEmpty(uri) || string.IsNullOrEmpty(resourceId) || name is null)
             {
                 throw new IOException("The SAF provider omitted a document URI, resource identity, or display name.");
             }
-            var directory = Field<bool>(entry, EntryClass, "directory", "Z");
+            var directory = entry.Directory;
             long? length = null;
-            if (!directory && Field<bool>(entry, EntryClass, "hasSize", "Z"))
+            if (!directory && entry.HasSize)
             {
-                var size = Field<long>(entry, EntryClass, "size", "J");
+                var size = entry.Size;
                 if (size < 0)
                 {
                     throw new IOException("The SAF provider returned a negative file size.");
@@ -195,9 +144,9 @@ namespace MajdataPlay.Platform.Android.Storage
                 length = size;
             }
             DateTime? modified = null;
-            if (Field<bool>(entry, EntryClass, "hasModified", "Z"))
+            if (entry.HasModified)
             {
-                var milliseconds = Field<long>(entry, EntryClass, "modified", "J");
+                var milliseconds = entry.Modified;
                 try
                 {
                     modified = DateTimeOffset.FromUnixTimeMilliseconds(milliseconds).UtcDateTime;
@@ -214,23 +163,44 @@ namespace MajdataPlay.Platform.Android.Storage
         /// <param name="result">The successful result envelope.</param>
         /// <returns>The authoritative managed metadata.</returns>
         /// <exception cref="IOException">The result omitted an entry or contains invalid metadata.</exception>
-        internal static FileSystemEntry ReadRequiredEntry(AndroidJavaObject result)
+        internal static FileSystemEntry ReadRequiredEntry(StorageResult result)
         {
             return ReadEntry(result) ?? throw new IOException("The SAF operation returned no document metadata.");
         }
 
-        /// <summary>Closes a cursor or stream and always releases its managed global Java reference.</summary>
-        /// <param name="handle">The caller-owned handle to close exactly once.</param>
+        /// <summary>Closes a provider cursor and always releases its owned Java reference.</summary>
+        /// <param name="handle">The caller-owned cursor to close exactly once.</param>
         /// <exception cref="PlatformNotSupportedException">Execution is outside an Android player.</exception>
         /// <exception cref="UnauthorizedAccessException">The provider denied the close operation.</exception>
-        /// <exception cref="IOException">Closing or flushing the provider resource failed.</exception>
-        internal static void CloseHandle(AndroidJavaObject handle)
+        /// <exception cref="IOException">Closing the provider cursor failed.</exception>
+        internal static void CloseHandle(DocumentCursor handle)
+        {
+            CloseHandle(handle, handle.Close);
+        }
+
+        /// <summary>Closes a provider stream and always releases its owned Java reference.</summary>
+        /// <param name="handle">The caller-owned stream to close exactly once.</param>
+        /// <exception cref="PlatformNotSupportedException">Execution is outside an Android player.</exception>
+        /// <exception cref="UnauthorizedAccessException">The provider denied the close operation.</exception>
+        /// <exception cref="IOException">Closing or flushing the provider stream failed.</exception>
+        internal static void CloseHandle(DocumentStream handle)
+        {
+            CloseHandle(handle, handle.Close);
+        }
+
+        /// <summary>Checks a typed close result and releases the wrapper even when closing fails.</summary>
+        /// <param name="handle">The wrapper owning the Java resource reference.</param>
+        /// <param name="close">The generated Java operation that closes the provider resource.</param>
+        /// <exception cref="PlatformNotSupportedException">Execution is outside an Android player.</exception>
+        /// <exception cref="UnauthorizedAccessException">The provider denied closing the resource.</exception>
+        /// <exception cref="IOException">Closing the provider resource or invoking JNI failed.</exception>
+        private static void CloseHandle(JavaObject handle, Func<StorageResult?> close)
         {
             Invoke(() =>
             {
                 try
                 {
-                    using var result = Call(handle, "close", "");
+                    using var result = RequireResult(close());
                     CheckResult(result);
                 }
                 finally

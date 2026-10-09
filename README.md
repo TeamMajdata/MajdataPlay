@@ -50,7 +50,9 @@ Simai is a maimai chart discription language developed by [Celeca](https://twitt
 
 ### Requirements
 
-- Unity Editor (version specified in ProjectSettings/ProjectVersion.txt)
+- Unity Editor (version specified in ProjectSettings/ProjectVersion.txt), with Android Build Support (SDK API 36 and OpenJDK) for Java-wrapper generation, including desktop Editor imports
+
+- .NET 9 SDK for the independent Android Java source-generator build tool (not for building the Unity project)
 
 - git
 
@@ -95,6 +97,23 @@ m_EditorVersion: 6000.3.17f1
 ```
 
 Install this version using Unity Hub.
+
+### Install the Android Java Source Generator
+
+The storage backend uses generated C# wrappers during Unity script compilation.
+Build and install the ignored Roslyn analyzer before the first Unity import:
+
+```powershell
+./Tools/AndroidJavaGenerator/build.ps1 -Install
+```
+
+The script builds only the explicitly provided independent tool under
+`Tools/Tests/AndroidJavaGeneratorBuild/`, not a Unity-generated project.
+Pass `-UnityPath` for a non-default Editor installation. See
+`Tools/AndroidJavaGenerator/README.md` for SDK/JDK discovery, restore prerequisites,
+and other-host setup. Fresh checkouts and CI need the same analyzer and Java
+extraction prerequisites; generated wrappers and analyzer binaries are not
+checked into the repository.
 
 ### Open the Project in Unity Hub
 

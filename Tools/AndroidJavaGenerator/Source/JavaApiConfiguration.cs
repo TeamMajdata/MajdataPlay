@@ -199,6 +199,9 @@ namespace MajdataPlay.SourceGenerators.AndroidJava
             cancellationToken.ThrowIfCancellationRequested();
             var root = FindProjectRoot(tree.FilePath);
             var unityData = FindUnityData(compilation, root, cancellationToken);
+            var sourcePaths = options.Sources.Select(entry => ResolvePath(entry, root, unityData)).ToArray();
+            var classPathEntries = options.ClassPath.Select(entry => ResolvePath(entry, root, unityData)).ToArray();
+            var documentationPaths = options.DocumentationPaths.Select(entry => ResolvePath(entry, root, unityData)).ToArray();
             var sdk = SelectToolRoot(options.AndroidSdkPath, root,
                 new[] { "UNITY_ANDROID_SDK", "ANDROID_SDK_ROOT", "ANDROID_HOME" }, unityData, "SDK");
             var jdk = SelectToolRoot(options.JavaHome, root,
@@ -218,10 +221,9 @@ namespace MajdataPlay.SourceGenerators.AndroidJava
             }
             var sources = new HashSet<string>(PathComparer());
             var classPath = new List<string>();
-            foreach (var entry in options.Sources)
+            foreach (var path in sourcePaths)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                var path = ResolvePath(entry, root);
                 if (Directory.Exists(path))
                 {
                     AddJavaSources(path, sources, cancellationToken);
@@ -235,16 +237,15 @@ namespace MajdataPlay.SourceGenerators.AndroidJava
                     AddClassPath(path, classPath, cancellationToken, "Sources");
                 }
             }
-            foreach (var entry in options.ClassPath)
+            foreach (var path in classPathEntries)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                AddClassPath(ResolvePath(entry, root), classPath, cancellationToken, "ClassPath");
+                AddClassPath(path, classPath, cancellationToken, "ClassPath");
             }
             var documentation = new List<string>();
-            foreach (var entry in options.DocumentationPaths)
+            foreach (var path in documentationPaths)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                var path = ResolvePath(entry, root);
                 if (!File.Exists(path) && !Directory.Exists(path))
                 {
                     throw Invalid("Documentation path does not exist: '" + path + "'.");
@@ -287,12 +288,13 @@ namespace MajdataPlay.SourceGenerators.AndroidJava
             return Path.GetFullPath(Directory.GetCurrentDirectory());
         }
 
-        /// <summary>Expands environment variables and anchors a configured path to the project root.</summary>
+        /// <summary>Expands environment variables and Unity path tokens, then anchors relative paths to the project root.</summary>
         /// <param name="configuredPath">The attribute or environment path.</param>
         /// <param name="root">The project root for relative paths.</param>
+        /// <param name="unityData">The discovered Unity Data directory, or null when Unity is unavailable.</param>
         /// <returns>The normalized absolute path.</returns>
-        /// <exception cref="GeneratorException">The path is empty, invalid, or contains an unresolved variable.</exception>
-        internal static string ResolvePath(string configuredPath, string root)
+        /// <exception cref="GeneratorException">The path is empty, invalid, or requires an unresolved variable or Unity directory.</exception>
+        internal static string ResolvePath(string configuredPath, string root, string? unityData = null)
         {
             if (string.IsNullOrWhiteSpace(configuredPath))
             {
@@ -313,6 +315,15 @@ namespace MajdataPlay.SourceGenerators.AndroidJava
             if (Regex.IsMatch(expanded, @"%[A-Za-z_][A-Za-z0-9_]*%"))
             {
                 throw Invalid("An environment variable in path '" + configuredPath + "' is not defined.");
+            }
+            if (expanded.IndexOf("{UnityData}", StringComparison.Ordinal) >= 0)
+            {
+                if (unityData == null)
+                {
+                    throw Invalid("Path '" + configuredPath + "' requires {UnityData}, but the Unity editor Data directory could not be located. " +
+                        "Reference Unity managed assemblies or configure UNITY_EDITOR_PATH.");
+                }
+                expanded = expanded.Replace("{UnityData}", unityData);
             }
             try
             {
@@ -371,13 +382,11 @@ namespace MajdataPlay.SourceGenerators.AndroidJava
                 while (directory != null)
                 {
                     cancellationToken.ThrowIfCancellationRequested();
-                    if (string.Equals(directory.Name, "Managed", StringComparison.OrdinalIgnoreCase))
+                    // Player references live below PlaybackEngines/.../Managed, not directly below Data.
+                    // Shared compiler processes may not inherit the launching Editor's environment.
+                    if (Directory.Exists(Path.Combine(directory.FullName, "PlaybackEngines", "AndroidPlayer")))
                     {
-                        var data = directory.Parent;
-                        if (data != null && Directory.Exists(Path.Combine(data.FullName, "PlaybackEngines", "AndroidPlayer")))
-                        {
-                            return data.FullName;
-                        }
+                        return directory.FullName;
                     }
                     directory = directory.Parent;
                 }

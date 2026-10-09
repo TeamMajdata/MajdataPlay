@@ -94,11 +94,26 @@ namespace MajdataPlay.Platform.Android.Bindings
   和接口引用的依赖必须可以解析；缺少依赖会产生错误诊断，不输出猜测类型。
 - 相对路径以 Unity 工程根目录为基准，支持绝对路径和环境变量展开。
   不建议把开发机绝对路径提交到 C# 配置中。
+- `Sources`、`ClassPath` 和 `DocumentationPaths` 支持区分大小写的 `{UnityData}` 路径 token。
+  它复用从 compilation 的 Unity managed references 或 `UNITY_EDITOR_PATH` 已发现的
+  Editor/Data 目录（macOS 为 Unity.app/Contents），通常无需额外环境变量或开发机硬编码路径。
+  如果路径需要该 token 但未发现 Unity，报告包含原始路径与发现方式的 `AJG003` 配置错误。
+  环境变量仍按原有规则展开，Java 嵌套类型文件名中的 `$` 保持字面值。
 - assembly 配置只作用于声明它的程序集。类上的输入数组追加到全局数组，
   显式设置的 scalar 值覆盖 assembly 配置。
 - 如果 wrapper 放入另外的 `.asmdef`，该程序集必须引用 Android runtime，
   同时确保 Unity 的 analyzer 作用域包含它；必要时为该程序集安装同一个
   analyzer，勿扩展到不需要 Android 绑定的平台程序集。
+
+生产 `StorageAccess` 的 Java 源可以显式使用 Unity 的 Android `classes.jar`：
+
+```csharp
+[JavaClass("net.majdata.majdataplay.StorageAccess",
+    Sources = new[] { "Assets/Plugins/Android/src/java/net/majdata/majdataplay/StorageAccess.java" },
+    ClassPath = new[] { "{UnityData}/PlaybackEngines/AndroidPlayer/Variations/mono/Release/Classes/classes.jar" })]
+```
+
+该 token 只解析配置的路径；生成器不会自动添加其他 Unity JAR。
 
 **代码生成不等于打包**：`Sources` 和 `ClassPath` 只供分析。
 自定义 Java 代码仍应通过 Unity Android 插件/Gradle 正常进入 APK/AAB，

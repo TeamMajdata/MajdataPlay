@@ -20,6 +20,7 @@ namespace MajdataPlay.Tests.AndroidJavaGeneratorValidation
         public static readonly string[] Names =
         {
             "source-api", "explicit-java-object-base", "class-api", "jar-api", "inner-descriptor-parity", "assembly-configuration", "configuration-precedence",
+            "unity-data-paths", "unity-data-managed-references", "unity-data-player-references", "unity-data-editor-paths", "unity-data-missing",
             "classpath-only", "documentation-path-array", "no-inherited", "determinism", "source-refresh", "android-symbol-compilation",
             "invalid-nonpartial", "invalid-static", "invalid-nested", "invalid-generic", "duplicate-mapping",
             "missing-java-type", "missing-dependency", "missing-source", "missing-classpath", "missing-documentation",
@@ -44,6 +45,11 @@ namespace MajdataPlay.Tests.AndroidJavaGeneratorValidation
             if (name == "runtime-platform-guard")
             {
                 AssertPlatformGuard();
+                return;
+            }
+            if (name.StartsWith("unity-data-", StringComparison.Ordinal))
+            {
+                ConfigurationPathCases.Run(name, workspace);
                 return;
             }
             var runner = new GeneratorRunner(workspace);

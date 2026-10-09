@@ -154,12 +154,22 @@ dotnet run --project Tools/Tests/FileSystemValidation/FileSystemValidation.cspro
 ```
 
 The standalone suite links production storage sources and a nonseekable, opaque-URI
-provider double. The isolated Unity script stages only this layer and the real
-`AndroidRuntime` event bridge, with narrow logging/keyboard initialization doubles;
-it verifies Editor local smoke/Android guards, no-JNI picker cancellation/late-result
-and deterministic commit/launch concurrency regressions, and requested player script compilation.
+provider double. The isolated Unity script first builds/installs the production
+Java analyzer, then stages the real `AndroidRuntime` event bridge, attributes,
+all production `Runtime/` wrapper categories, analyzer metadata, Java extractor,
+and custom `StorageAccess.java` at their project-relative paths. Only unrelated
+logging/keyboard initialization uses narrow doubles; generated C# remains inside
+compilation and is not committed as assets. The selected Editor's Android SDK
+API 36 and OpenJDK are required even for Editor/desktop-only checks.
+
+It verifies Editor local smoke/Android guards, generated storage signatures and
+signed-byte/typed-result mappings, managed-only borrowing/disposal regressions,
+null-envelope rejection, no-JNI picker cancellation/late-result and deterministic
+commit/launch concurrency regressions, and requested Player script compilation.
 It also compiles the Java sources against the bundled Android SDK and Unity classes.
-It does not build an APK, run JNI, exercise IL2CPP, or validate a real document provider.
+See `Tools/Tests/FileSystemValidation/README.md` for staging, coverage and log markers.
+It does not build an APK, run JNI, verify native reference lifetimes/provider
+resource closure, exercise IL2CPP, or validate a real document provider.
 For all five installed targets, run:
 
 ```powershell
@@ -167,7 +177,8 @@ For all five installed targets, run:
 ```
 
 Pass `-PlayerTargets` to select installed Unity target modules, or
-`-SkipJavaCompilation` when intentionally testing only C# compilation.
+`-SkipJavaCompilation` to skip the separate Java bytecode check; analyzer
+installation and Java metadata extraction still require the SDK/JDK.
 
 Before release, test a real Android device with local and cloud providers: selection,
 user dismissal, owner cancellation/late results, concurrent request rejection,

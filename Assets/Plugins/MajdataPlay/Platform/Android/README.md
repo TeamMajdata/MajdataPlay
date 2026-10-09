@@ -13,7 +13,90 @@ ownership, threading, diagnostics, and managed/Unity/device validation limits.
 ```
 
 Only JNI invocation is Android-player-specific; the attributes and generated
-wrapper declarations remain available in the Editor. Existing manually maintained
-`Runtime/Activity.cs`, `Intent.cs`, and `KeyEvent.cs` constants are not rewritten
-or silently migrated by installation. Declare new partial wrapper types with
-unique C# names instead.
+wrapper declarations remain available in the Editor. Each Java class has one
+categorized partial declaration: `Runtime/App/Activity.cs`,
+`Runtime/Content/Intent.cs`, and `Runtime/View/KeyEvent.cs`. The old root-level
+constant classes have been removed; use the generated PascalCase constants
+(for example, `Activity.ResultOk`, `Intent.ActionOpenDocument`, and
+`KeyEvent.KeycodeA`). `IO/KeyCode.cs` keeps all 338 existing enum names and
+numeric values while referencing generated constants. The Activity declaration
+retains its managed `AndroidJavaRunnable` adapter alongside the generated
+`Java/Lang/Runnable` overload; interface wrappers are not callback proxies.
+
+### Asset identity during consolidation
+
+A pre-migration search of Assets, Packages, ProjectSettings, and Tools found no
+references to either the original script GUIDs or the newly declared Activity /
+Intent GUIDs outside their own metadata. The categorized declarations retain
+the **original tracked** metadata unchanged, rather than regenerating script
+GUIDs or keeping duplicate compatibility types:
+
+| Original script | Categorized declaration | Preserved GUID |
+| --- | --- | --- |
+| `Runtime/Activity.cs` | `Runtime/App/Activity.cs` | `39aab5cf0d5f33a4191672095f28c364` |
+| `Runtime/Intent.cs` | `Runtime/Content/Intent.cs` | `05788a69f2044d34a9c8c943d4efdfa2` |
+| `Runtime/KeyEvent.cs` | `Runtime/View/KeyEvent.cs` | `f0f486f2d88203040b05d82998a231b3` |
+
+The unused, newly created Activity / Intent metadata GUIDs were retired; only
+the new View directory receives a new GUID. Repeated isolated validation removes
+only the six obsolete root-level script / metadata files before copying Runtime,
+so directory merging cannot resurrect the legacy types.
+
+## Storage runtime bindings
+
+The SAF backend consumes generated wrappers declared in categorized subdirectories
+of `Runtime/`:
+
+| Category | Generated wrappers |
+| --- | --- |
+| `App` | `Activity` |
+| `Content` | `Intent`, `ContentResolver`, `UriPermission` |
+| `Net` | `Uri` |
+| `Provider` | `DocumentsContract` |
+| `Java/Lang` | `Runnable` |
+| `Java/Util` | `List` |
+| `Unity` | `UnityPlayer` |
+| `View` | `KeyEvent` |
+| `Storage` | `StorageAccess`, `StorageResult`, `DocumentEntry`, `DocumentCursor`, `DocumentStream` |
+
+The declarations pin Android API 36; they do not change the Player minimum SDK.
+The project bridge and its nested result/entry/cursor/stream classes are in `Runtime/Storage/`. Their `Sources` refer to the production
+`Assets/Plugins/Android/src/java/net/majdata/majdataplay/StorageAccess.java`, not
+to duplicated Java stubs. Unity's Java dependency is located with the
+`{UnityData}` configuration token and the bundled `classes.jar`, so no
+developer-specific absolute editor path is committed.
+
+Install the analyzer before importing a fresh checkout. Only the annotated
+partial declarations and their Unity metadata are checked in; generated members
+remain in the compiler. After changing the generator itself, reinstall it with
+the command above. Changes to Java inputs require a script recompilation as
+described in the generator README.
+
+Java reference results are owned wrappers and must be disposed deterministically
+on a JVM-attached thread. Wrapping an existing callback reference with
+`ownsReference: false` borrows rather than disposes it. Disposing a cursor or
+stream wrapper only releases the JNI reference: the Storage backend explicitly
+calls the generated `Close()` first, even on exceptional paths. SAF results
+retain their typed error protocol, signed-byte arrays, and bounded transfers;
+locations remain grant-preserving opaque URIs rather than local paths.
+
+Run `Tools/Tests/ValidateFileSystemUnity.ps1` to install and stage the production
+wrappers and the real KeyCode enum in an isolated Unity project, verify generated
+API shapes, unique categorized mappings, all 338 pre-migration enum values, and
+Editor JNI guards, and compile selected Player targets. Compilation does not validate
+JNI dispatch, URI grants, providers, or IL2CPP behavior on an Android device.
+
+## Real Android runtime validation
+
+`Tools/Tests/Build-AndroidStorageDeviceValidation.ps1` stages a separate project
+and builds a development IL2CPP APK with High stripping. The corresponding
+`Run-AndroidStorageDeviceValidation.ps1` runner selects an actual installed ABI,
+opens the real SAF picker, restarts the dedicated application to check persisted
+grants, and validates process/backend/bitness against its durable result. It
+never clears the main game's data or deletes the selected parent directory.
+
+See `Tools/Tests/AndroidStorageDeviceValidation/README.md` for the full / replay /
+release protocol, and `RESULTS.md` in that directory for the 2026-10-09 physical
+Mi MIX 2S API-35 ARM64 and ARMv7 passes. Coverage is limited to the isolated app
+and the local external-storage document provider; other providers, devices,
+Mono, and the full game's Player remain separate validation work.

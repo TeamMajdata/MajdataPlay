@@ -89,6 +89,87 @@ links, aliases through linked ancestor directories, concurrent path replacement,
 or provider aliases which report neither matching locations nor a matching
 non-null resource identity. Direct symbolic-link destination rejection is a
 specific copy safety rule, not general sandboxing of arbitrary input paths.
+
+## Isolated Unity and production generated-wrapper validation
+
+Use the repository's **Unity 6000.3.17f1**, Android Build Support with SDK API 36
+and its bundled OpenJDK, a .NET 9 SDK, and the Unity modules for every requested
+Player target. Android SDK/JDK are required even for Editor or desktop-only
+checks because the production wrappers are generated from Java metadata.
+See `Tools/AndroidJavaGenerator/README.md` for analyzer build/restore prerequisites.
+
+From the repository root:
+
+```powershell
+./Tools/Tests/ValidateFileSystemUnity.ps1
+./Tools/Tests/ValidateFileSystemUnity.ps1 -PlayerTargets StandaloneWindows64,StandaloneLinux64,StandaloneOSX,iOS,Android
+```
+
+The script calls `Tools/AndroidJavaGenerator/build.ps1 -Install` with the selected
+Editor path **before staging**, then creates the ignored isolated project under
+`Temp/FileSystemUnityValidation/`. It copies production storage and Android core
+sources, `JavaClassAttribute` / `JavaApiConfigurationAttribute`, the entire production
+`Runtime/` tree recursively (including App/Content/Net/Provider/Unity/Java/Storage
+categories and metadata), and the installed analyzer DLL with its
+`RoslynAnalyzer`-labelled `.meta`. The only game-service doubles are the existing
+logging and keyboard initialization stubs; wrappers and picker logic are real
+production code, not validation-only replacements.
+
+The Java extractor is staged at
+`Tools/AndroidJavaGenerator/Java/JavaApiExtractor.java` and the custom bridge at
+`Assets/Plugins/Android/src/java/net/majdata/majdataplay/StorageAccess.java`, retaining
+their project-relative paths. Extraction uses the selected Editor's SDK/JDK,
+the staged extractor, and production `{UnityData}` source/classpath inputs; process
+environment overrides are restored afterward. Generated C# remains in Roslyn's
+compilation, is not materialized as `.g.cs` assets, and must not be committed.
+The analyzer installation is ignored build output, not a runtime plugin or an
+assembly reference. No Unity-generated root solution/project files are built.
+
+Coverage adds to, rather than replaces, the existing Editor local-storage smoke,
+Android API guards, reflection-based picker cancellation/dismissal/late-result
+checks, and deterministic commit/cancellation and launch/shutdown concurrency:
+
+- The five public production `MajdataPlay.Platform.Android.Runtime.Storage` wrappers
+  map the exact `StorageAccess` and nested Java binary names at API 36, with
+  `IncludeInheritedMembers = false`, no Java-private construction APIs, and real
+  generated `JavaObject` bases, constants, and reference constructors.
+- Storage methods return typed `StorageResult` envelopes; getter-only result fields
+  map to `DocumentEntry` / `DocumentCursor` / `DocumentStream`. Java byte arrays use
+  `sbyte[]` for result `Data` and stream writes; metadata integers, booleans,
+  strings, and 64-bit values retain their exact types.
+- Borrowed wrappers retain the supplied reference without disposing it; other
+  borrowers remain intact. Default adopting ownership disposes exactly once,
+  repeated disposal is harmless, disposed wrappers reject reference access,
+  and null references are rejected. These use an inert managed disposal probe
+  allocated without Java-object construction or JNI handles, not a live JVM.
+- All storage entry points, generated instance field getters and cursor/stream
+  operations throw the Editor platform guard before JNI. SDK/Unity picker
+  signatures retain typed activity/intent/URI/resolver/list/runnable mappings;
+  non-storage wrappers are located by Java binary names, not category namespaces.
+- The real internal `RequireResult(StorageResult?)` rejects a null envelope with
+  `IOException` and preserves a nonnull caller-owned envelope unchanged. The
+  bridge error translator and managed stream constructor accept typed wrappers.
+- Unity compiles actual production assemblies for requested Player targets
+  (Windows64 and Android by default), preserving the Android conditional branch.
+  Separately, `javac` compiles production Java sources against the bundled API-36
+  SDK and Unity classes, unless explicitly skipped.
+
+New log markers are `FILE_SYSTEM_GENERATED_STORAGE_PASSED`,
+`FILE_SYSTEM_GENERATED_PICKER_PASSED`, and `FILE_SYSTEM_GENERATED_BRIDGE_PASSED`.
+The aggregate success marker remains `FILE_SYSTEM_UNITY_PASSED`; the script rejects
+nonzero exit codes or missing success markers and retains
+`Temp/FileSystemUnityValidation/validation.log` for inspection.
+`-SkipJavaCompilation` skips only the separate Java bytecode compilation check:
+it does **not** skip analyzer installation, Java metadata extraction, or SDK/JDK
+requirements.
+
+This checks Editor behavior, analyzer loading and Player **script compilation**,
+not APK/AAB packaging, a running Player, JNI marshaling, real JVM reference
+ownership, provider-resource closure, persisted grants, IL2CPP/AOT, ARMv7/ARM64
+runtime behavior, or a real local/cloud document provider. Device/platform
+smoke tests remain necessary; passing the managed-only probe must not be reported
+as native-reference or provider validation.
+
 ## Temporary data and cleanup
 
 Runtime fixtures use unique `MajdataPlay.FileSystemValidation-<guid>` directories
@@ -100,7 +181,7 @@ owned root that has been replaced by a link. An interrupted process can leave
 its uniquely named OS-temp fixtures; it does not scan or delete other runs'
 fixtures. Build output remains in the ignored repository `Temp/` directory.
 
-## Validation boundary
+## Managed-suite validation boundary
 
 Passing this suite demonstrates managed behavior on the **host OS and .NET 9**
 only. Run it independently on Windows, Linux and macOS to validate those hosts.

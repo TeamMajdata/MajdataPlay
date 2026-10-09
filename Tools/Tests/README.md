@@ -73,3 +73,22 @@ dotnet run --project Tools/Tests/FileSystemValidation/FileSystemValidation.cspro
 The second command stages an ignored isolated Unity 6000.3.17f1 project, checks
 Editor smoke/Android guards, compiles Windows64 and Android player scripts, and
 compiles Android Java sources. It does not exercise SAF on a device or build a player.
+
+## Android storage / JNI / IL2CPP device validation
+
+See `AndroidStorageDeviceValidation/README.md` for the isolated test APK and
+`AndroidStorageDeviceValidation/RESULTS.md` for actual ARM64/ARMv7 physical-device
+evidence and the local-provider validation boundary. The main game project is
+not rebuilt or changed by these tools. Unlock the selected authorized device
+and use the system picker to choose only a disposable scratch directory.
+
+```powershell
+./Tools/Tests/Build-AndroidStorageDeviceValidation.ps1 -Architecture Both
+./Tools/Tests/Run-AndroidStorageDeviceValidation.ps1 -Serial '<device-serial>' -Install -Abi arm64-v8a -Mode full
+./Tools/Tests/Run-AndroidStorageDeviceValidation.ps1 -Serial '<device-serial>' -Abi arm64-v8a -Mode replay
+./Tools/Tests/Run-AndroidStorageDeviceValidation.ps1 -Serial '<device-serial>' -Abi arm64-v8a -Mode release
+```
+
+Repeat full/replay/release with `-Install -Abi armeabi-v7a` to verify an actual
+32-bit process. Release only grants newly acquired by the dedicated test app;
+never clear another application's data or delete the selected parent directory.

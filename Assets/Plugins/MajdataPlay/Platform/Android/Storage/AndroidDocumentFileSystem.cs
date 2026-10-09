@@ -3,6 +3,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using MajdataPlay.IO.Storage;
+using MajdataPlay.Platform.Android.Runtime.Storage;
 using UnityEngine;
 
 namespace MajdataPlay.Platform.Android.Storage
@@ -42,8 +43,8 @@ namespace MajdataPlay.Platform.Android.Storage
         {
             return AndroidDocumentBridge.Invoke(() =>
             {
-                using var result = AndroidDocumentBridge.Call(null, "getEntry", "Ljava/lang/String;", location);
-                if (AndroidDocumentBridge.ErrorCode(result) == 2)
+                using var result = AndroidDocumentBridge.RequireResult(StorageAccess.GetEntry(location));
+                if (result.ErrorCode == StorageAccess.NotFound)
                 {
                     return null;
                 }
@@ -68,8 +69,7 @@ namespace MajdataPlay.Platform.Android.Storage
             StorageName.Validate(name);
             return AndroidDocumentBridge.Invoke(() =>
             {
-                using var result = AndroidDocumentBridge.Call(null, "getChildEntry", "Ljava/lang/String;Ljava/lang/String;",
-                    directoryLocation, name);
+                using var result = AndroidDocumentBridge.RequireResult(StorageAccess.GetChildEntry(directoryLocation, name));
                 AndroidDocumentBridge.CheckResult(result, directoryLocation, true);
                 return AndroidDocumentBridge.ReadEntry(result);
             });
@@ -103,10 +103,9 @@ namespace MajdataPlay.Platform.Android.Storage
         {
             var cursor = AndroidDocumentBridge.Invoke(() =>
             {
-                using var result = AndroidDocumentBridge.Call(null, "enumerateEntries", "Ljava/lang/String;", location);
+                using var result = AndroidDocumentBridge.RequireResult(StorageAccess.EnumerateEntries(location));
                 AndroidDocumentBridge.CheckResult(result, location, true);
-                return AndroidDocumentBridge.Field<AndroidJavaObject?>(result, AndroidDocumentBridge.ResultClass, "cursor",
-                    "Lnet/majdata/majdataplay/StorageAccess$CursorHandle;")
+                return result.Cursor
                     ?? throw new IOException("The SAF bridge returned no cursor handle.");
             });
             try
@@ -115,7 +114,7 @@ namespace MajdataPlay.Platform.Android.Storage
                 {
                     var entry = AndroidDocumentBridge.Invoke(() =>
                     {
-                        using var result = AndroidDocumentBridge.Call(cursor, "next", "");
+                        using var result = AndroidDocumentBridge.RequireResult(cursor.Next());
                         AndroidDocumentBridge.CheckResult(result, location, true);
                         return AndroidDocumentBridge.ReadEntry(result);
                     });
@@ -176,12 +175,11 @@ namespace MajdataPlay.Platform.Android.Storage
         {
             return AndroidDocumentBridge.Invoke<Stream>(() =>
             {
-                using var result = readable
-                    ? AndroidDocumentBridge.Call(null, "openRead", "Ljava/lang/String;", location)
-                    : AndroidDocumentBridge.Call(null, "openWrite", "Ljava/lang/String;Z", location, append);
+                using var result = AndroidDocumentBridge.RequireResult(readable
+                    ? StorageAccess.OpenRead(location)
+                    : StorageAccess.OpenWrite(location, append));
                 AndroidDocumentBridge.CheckResult(result, location);
-                var stream = AndroidDocumentBridge.Field<AndroidJavaObject?>(result, AndroidDocumentBridge.ResultClass, "stream",
-                    "Lnet/majdata/majdataplay/StorageAccess$StreamHandle;")
+                var stream = result.Stream
                     ?? throw new IOException("The SAF bridge returned no stream handle.");
                 try
                 {
@@ -217,8 +215,7 @@ namespace MajdataPlay.Platform.Android.Storage
             }
             return AndroidDocumentBridge.Invoke(() =>
             {
-                using var result = AndroidDocumentBridge.Call(null, "createFile",
-                    "Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;", directoryLocation, name, mimeType);
+                using var result = AndroidDocumentBridge.RequireResult(StorageAccess.CreateFile(directoryLocation, name, mimeType));
                 AndroidDocumentBridge.CheckResult(result, directoryLocation, true);
                 return AndroidDocumentBridge.ReadRequiredEntry(result);
             });
@@ -240,8 +237,7 @@ namespace MajdataPlay.Platform.Android.Storage
             StorageName.Validate(name);
             return AndroidDocumentBridge.Invoke(() =>
             {
-                using var result = AndroidDocumentBridge.Call(null, "createDirectory", "Ljava/lang/String;Ljava/lang/String;",
-                    directoryLocation, name);
+                using var result = AndroidDocumentBridge.RequireResult(StorageAccess.CreateDirectory(directoryLocation, name));
                 AndroidDocumentBridge.CheckResult(result, directoryLocation, true);
                 return AndroidDocumentBridge.ReadRequiredEntry(result);
             });
@@ -263,7 +259,7 @@ namespace MajdataPlay.Platform.Android.Storage
             StorageName.Validate(name);
             return AndroidDocumentBridge.Invoke(() =>
             {
-                using var result = AndroidDocumentBridge.Call(null, "rename", "Ljava/lang/String;Ljava/lang/String;", location, name);
+                using var result = AndroidDocumentBridge.RequireResult(StorageAccess.Rename(location, name));
                 AndroidDocumentBridge.CheckResult(result, location);
                 return AndroidDocumentBridge.ReadRequiredEntry(result);
             });
@@ -280,8 +276,8 @@ namespace MajdataPlay.Platform.Android.Storage
         {
             AndroidDocumentBridge.Invoke(() =>
             {
-                using var result = AndroidDocumentBridge.Call(null, "deleteFile", "Ljava/lang/String;", location);
-                if (AndroidDocumentBridge.ErrorCode(result) != 2)
+                using var result = AndroidDocumentBridge.RequireResult(StorageAccess.DeleteFile(location));
+                if (result.ErrorCode != StorageAccess.NotFound)
                 {
                     AndroidDocumentBridge.CheckResult(result, location);
                 }
@@ -303,7 +299,7 @@ namespace MajdataPlay.Platform.Android.Storage
         {
             AndroidDocumentBridge.Invoke(() =>
             {
-                using var result = AndroidDocumentBridge.Call(null, "deleteDirectory", "Ljava/lang/String;Z", location, recursive);
+                using var result = AndroidDocumentBridge.RequireResult(StorageAccess.DeleteDirectory(location, recursive));
                 AndroidDocumentBridge.CheckResult(result, location, true);
                 return true;
             });
