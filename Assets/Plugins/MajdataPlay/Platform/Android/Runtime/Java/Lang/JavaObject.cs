@@ -13,9 +13,16 @@ namespace MajdataPlay.Platform.Android.Runtime.Java.Lang
     /// Dispose owned wrappers deterministically on the Unity main thread or a JVM-attached thread.
     /// Borrowed wrappers do not extend the lifetime of an externally disposed reference. Generated
     /// wrappers represent Java interfaces as well as classes; they do not implement Java callbacks.
+    /// This type mirrors <c>java.lang.Object</c>: it is directly constructible, and its parameterless
+    /// constructor creates a new <c>java.lang.Object</c> instance.
     /// </remarks>
-    public abstract class JavaObject : IDisposable
+    public class JavaObject : IDisposable
     {
+        /// <summary>
+        /// Identifies the Java class created by the parameterless constructor.
+        /// </summary>
+        private const string ObjectClassName = "java.lang.Object";
+
         /// <summary>
         /// Stores the Java reference, or null after this wrapper has been disposed.
         /// </summary>
@@ -40,12 +47,30 @@ namespace MajdataPlay.Platform.Android.Runtime.Java.Lang
         }
 
         /// <summary>
+        /// Creates a wrapper around a new Java <c>java.lang.Object</c> instance.
+        /// </summary>
+        /// <remarks>
+        /// Equivalent to Java's <c>new Object()</c>, and to
+        /// <see cref="JavaObject(string, string, object?[])"/> with the class name <c>java.lang.Object</c>
+        /// and the constructor signature <c>()V</c>. Use it only when a plain Java object is required;
+        /// a wrapper created this way is not an instance of any more specific Java type.
+        /// </remarks>
+        /// <exception cref="PlatformNotSupportedException">Execution is not in an Android player.</exception>
+        /// <exception cref="AndroidJavaException">Java class or constructor resolution fails.</exception>
+        /// <exception cref="JavaInvocationException">Java raises an exception during construction.</exception>
+        /// <exception cref="InvalidOperationException">JNI cannot create a local frame or returns a null instance without an exception.</exception>
+        public JavaObject()
+            : this(ObjectClassName, "()V")
+        {
+        }
+
+        /// <summary>
         /// Initializes a wrapper around an existing Unity Java reference.
         /// </summary>
         /// <param name="javaObject">The non-null Java reference to wrap.</param>
         /// <param name="ownsReference">Whether to adopt and dispose the reference, rather than borrow it.</param>
         /// <exception cref="ArgumentNullException">The Java reference is null.</exception>
-        protected JavaObject(AndroidJavaObject javaObject, bool ownsReference = true)
+        public JavaObject(AndroidJavaObject javaObject, bool ownsReference = true)
         {
             _javaObject = javaObject ?? throw new ArgumentNullException(nameof(javaObject));
             _ownsReference = ownsReference;
@@ -62,7 +87,7 @@ namespace MajdataPlay.Platform.Android.Runtime.Java.Lang
         /// <exception cref="AndroidJavaException">Java class or constructor resolution fails.</exception>
         /// <exception cref="JavaInvocationException">Java raises an exception during construction.</exception>
         /// <exception cref="InvalidOperationException">JNI cannot create a local frame or returns a null instance without an exception.</exception>
-        protected JavaObject(string className, string constructorSignature, params object?[] arguments)
+        public JavaObject(string className, string constructorSignature, params object?[] arguments)
         {
             _javaObject = AndroidJni.Construct(className, constructorSignature, arguments);
             _ownsReference = true;

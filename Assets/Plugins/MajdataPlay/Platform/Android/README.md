@@ -4,6 +4,15 @@ The `JavaClassAttribute` and `JavaApiConfigurationAttribute` request generated
 `JavaObject`-derived wrappers for Java classes and interfaces. The generator
 is authored outside Assets and installed as an analyzer, not as a runtime plugin.
 
+`JavaObject` is a concrete base class rather than an abstract one: `new JavaObject()`
+creates a Java `java.lang.Object` (Java's `new Object()`), and the descriptor and
+reference constructors construct or adopt arbitrary Java objects directly. Concrete
+Java classes map each declared public constructor from the selected SDK to a C#
+constructor with the exact JNI descriptor. Non-public constructors are ignored.
+Classes without public constructors, Java interfaces, and abstract classes expose
+only the reference-wrapping constructor; the generator does not add a parameterless
+constructor that creates a plain `java.lang.Object` for these wrappers.
+
 See `Tools/AndroidJavaGenerator/README.md` at the repository root for installation,
 SDK/JDK configuration, Java inputs, member mapping, documentation provenance,
 ownership, threading, diagnostics, and managed/Unity/device validation limits.

@@ -57,8 +57,12 @@ namespace MajdataPlay.Platform.Android.Bindings
 生成 `BuildVersion.SdkInt` 等只有 getter 的属性；`Runnable.Run()` 在已有 Java
 实例上调用接口方法。每个 wrapper 有
 `Wrapper(AndroidJavaObject javaObject, bool ownsReference = true)`。
-Java 接口及抽象类不生成实例创建构造函数。嵌套 Java 类型使用 `$` 二进制名，
-例如 `android.os.Build$VERSION`，而不是点分隔的源码名。
+具体类按所选 SDK 中自己声明的 public 构造器逐个生成 C# 构造器，保留参数与
+精确 JNI descriptor；public 默认构造器也会生成。private、protected 和包级
+构造器均忽略，构造器不会继承。没有 public 构造器的类型、Java 接口与抽象类
+只生成已有引用的包装构造器，不补充无参构造器或创建普通 `java.lang.Object`。
+嵌套 Java 类型使用 `$` 二进制名，例如 `android.os.Build$VERSION`，
+而不是点分隔的源码名。
 
 ## 自定义 `.java`、`.class` 与 `.jar`
 
@@ -200,6 +204,10 @@ using var intent = new IntentWrapper();
   幂等释放持有的 Unity reference。传入已有 reference 时默认采用所有权；
   使用 `ownsReference: false` 借用 `AndroidRuntime.CurrentActivity` 等外部管理
   的 reference，借用 wrapper 不延长外部 reference 生命周期。
+- 所有 wrapper 派生自 `JavaObject`，而 `JavaObject` 本身是可直接构造的具体类：
+  `new JavaObject()` 等价于 Java 的 `new Object()`，
+  `new JavaObject(className, constructorSignature, args)` 用精确 descriptor
+  构造任意 Java 类，`new JavaObject(javaObject, ownsReference)` 包装已有引用。
 - 不可同时从外部 Dispose 已被 wrapper 采用的 reference，不可把 Dispose
   与同一 reference 上的 JNI 调用并发执行。
 - 对象/对象数组结果会提升为独立 global references，单次调用的 JNI locals
@@ -238,7 +246,8 @@ dotnet run --project Tools/Tests/AndroidJavaGeneratorValidation/AndroidJavaGener
 托管验证链接生产 runtime/generator，并使用真实 Unity assemblies 和 Unity
 Android SDK；source/class/JAR fixtures 位于 ignored Temp 中。
 第二条命令只启动固定版本的**隔离** Unity 工程，验证真实 Unity Roslyn
-analyzer loading、SDK wrappers 编译、接口和 getter-only 属性、Editor JNI guard。
+analyzer loading、SDK wrappers 编译、public 构造器重载、接口和 getter-only
+属性、无 public 构造器/接口/抽象类只包装已有引用，以及 Editor JNI guard。
 它们均不代表 Android Player、Mono/IL2CPP、ARMv7/ARM64 或真实设备 JNI
 运行成功。发版前必须分别验证构造/静态与实例调用、nullable 和 jagged arrays、
 接口参数、引用释放、Java exception 传播，以及低版本设备的 API guards。

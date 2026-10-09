@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 using System.Xml.Linq;
 using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 
 namespace MajdataPlay.Tests.AndroidJavaGeneratorValidation
@@ -159,6 +160,89 @@ namespace MajdataPlay.Tests.AndroidJavaGeneratorValidation
             Check.Equal(Accessibility.Public, constructor.DeclaredAccessibility, type.Name + " wrapping accessibility");
             Check.True(constructor.Parameters[1].HasExplicitDefaultValue, type.Name + " wrapping ownership argument must be optional.");
             Check.Equal((object)true, constructor.Parameters[1].ExplicitDefaultValue, type.Name + " ownership default");
+        }
+
+        /// <summary>
+        /// Requires a Java type without instantiable public constructors to expose only reference wrapping.
+        /// </summary>
+        /// <param name="type">The generated wrapper for a Java type that cannot be constructed.</param>
+        /// <exception cref="InvalidOperationException">The wrapper exposes Java instantiation or an invalid wrapping constructor.</exception>
+        public static void AssertReferenceOnlyConstruction(INamedTypeSymbol type)
+        {
+            Check.Equal(1, type.InstanceConstructors.Length,
+                type.Name + " must expose only the reference-wrapping constructor");
+            AssertWrappingConstructor(type);
+            Check.True(!type.GetMembers().OfType<IMethodSymbol>().SelectMany(method => method.DeclaringSyntaxReferences)
+                .SelectMany(reference => reference.GetSyntax().DescendantNodes().OfType<InvocationExpressionSyntax>())
+                .Any(invocation => invocation.Expression.ToString().Contains("AndroidJni.Construct", StringComparison.Ordinal)),
+                type.Name + " must not expose a Java constructor factory.");
+        }
+
+        /// <summary>
+        /// Verifies constructor visibility and default-constructor behavior across Java input representations.
+        /// </summary>
+        /// <param name="run">The completed constructor-fixture generation.</param>
+        /// <exception cref="InvalidOperationException">Generation fails or the constructor surface differs from the public Java API.</exception>
+        public static void AssertConstructorVisibility(GeneratorRun run)
+        {
+            run.AssertCompiles();
+            var mixed = Type(run, "MixedWrapper");
+            AssertInstantiationConstructors(mixed, "(I)V", "(Ljava/lang/String;)V");
+            var text = mixed.InstanceConstructors.Single(constructor => constructor.Parameters.Length == 1
+                && constructor.Parameters[0].Type.SpecialType == SpecialType.System_String);
+            AssertNullable(text.Parameters[0].Type, "nullable public constructor string argument");
+            AssertInstantiationConstructors(Type(run, "ParameterizedWrapper"), "(C)V");
+            AssertInstantiationConstructors(Type(run, "DefaultWrapper"), "()V");
+            foreach (var name in new[] { "NoPublicWrapper", "PublicAbstractWrapper", "ProtectedAbstractWrapper", "InterfaceWrapper", "EnumWrapper" })
+            {
+                AssertReferenceOnlyConstruction(Type(run, name));
+            }
+        }
+
+        /// <summary>
+        /// Requires actual SDK public constructor overloads while rejecting nonconstructible SDK types.
+        /// </summary>
+        /// <param name="run">The completed SDK-only generation.</param>
+        /// <exception cref="InvalidOperationException">Generation fails or the SDK constructor contract is not preserved.</exception>
+        public static void AssertSdkConstructors(GeneratorRun run)
+        {
+            run.AssertCompiles();
+            var intent = Type(run, "IntentWrapper");
+            AssertInstantiationConstructors(intent, "()V", "(Landroid/content/Context;Ljava/lang/Class;)V",
+                "(Landroid/content/Intent;)V", "(Ljava/lang/String;)V", "(Ljava/lang/String;Landroid/net/Uri;)V",
+                "(Ljava/lang/String;Landroid/net/Uri;Landroid/content/Context;Ljava/lang/Class;)V");
+            var copy = intent.InstanceConstructors.Single(constructor => constructor.Parameters.Length == 1
+                && constructor.Parameters[0].Type.Name == "IntentWrapper");
+            AssertNullable(copy.Parameters[0].Type, "nullable typed SDK copy-constructor argument");
+            var text = intent.InstanceConstructors.Single(constructor => constructor.Parameters.Length == 1
+                && constructor.Parameters[0].Type.SpecialType == SpecialType.System_String);
+            AssertNullable(text.Parameters[0].Type, "nullable SDK constructor string argument");
+            foreach (var name in new[] { "LooperWrapper", "RunnableWrapper", "InputStreamWrapper" })
+            {
+                AssertReferenceOnlyConstruction(Type(run, name));
+            }
+        }
+
+        /// <summary>
+        /// Requires exactly the listed Java instantiation descriptors plus the reference-wrapping constructor.
+        /// </summary>
+        /// <param name="type">The generated concrete wrapper.</param>
+        /// <param name="descriptors">The complete expected set of public Java constructor descriptors.</param>
+        /// <exception cref="InvalidOperationException">The generated constructors do not exactly match the expected descriptors.</exception>
+        private static void AssertInstantiationConstructors(INamedTypeSymbol type, params string[] descriptors)
+        {
+            AssertWrappingConstructor(type);
+            Check.Equal(descriptors.Length + 1, type.InstanceConstructors.Length, type.Name + " constructor count");
+            foreach (var descriptor in descriptors)
+            {
+                var constructors = type.InstanceConstructors.Where(constructor => constructor.DeclaringSyntaxReferences
+                    .Select(reference => reference.GetSyntax()).OfType<ConstructorDeclarationSyntax>()
+                    .Any(syntax => syntax.Initializer is not null && syntax.Initializer.ArgumentList.Arguments.Any(argument =>
+                        argument.Expression is LiteralExpressionSyntax literal && literal.Token.ValueText == descriptor))).ToArray();
+                Check.Equal(1, constructors.Length, type.Name + " public constructor " + descriptor);
+                Check.Equal(Accessibility.Public, constructors[0].DeclaredAccessibility, type.Name + " constructor accessibility");
+                AssertConstructorDescriptor(constructors[0], descriptor);
+            }
         }
 
         /// <summary>
@@ -344,7 +428,7 @@ namespace MajdataPlay.Tests.AndroidJavaGeneratorValidation
         /// <param name="contract">The interface's generated C# reference wrapper.</param>
         private static void AssertInterface(INamedTypeSymbol contract)
         {
-            Check.Equal(1, contract.InstanceConstructors.Length, "interface must only have its Java-object wrapping constructor");
+            AssertReferenceOnlyConstruction(contract);
             AssertConstant(contract, "Answer", 42, SpecialType.System_Int32);
             AssertForwarding(Method(contract, "Describe"), "Call", "describe", "()Ljava/lang/String;");
             AssertForwarding(Method(contract, "DefaultValue"), "Call", "defaultValue", "(I)I");
@@ -359,7 +443,7 @@ namespace MajdataPlay.Tests.AndroidJavaGeneratorValidation
         /// <param name="mode">The enum's generated reference wrapper.</param>
         private static void AssertEnum(INamedTypeSymbol mode)
         {
-            Check.Equal(1, mode.InstanceConstructors.Length, "enum must not expose a Java instantiation constructor");
+            AssertReferenceOnlyConstruction(mode);
             var values = Method(mode, "Values");
             Check.True(values.IsStatic, "Enum values must be static.");
             Check.Equal("ModeWrapper", Array(values.ReturnType, 1, "enum values").Name, "enum values element type");
@@ -569,17 +653,38 @@ namespace MajdataPlay.Tests.AndroidJavaGeneratorValidation
         }
 
         /// <summary>
-        /// Requires an exact JVM constructor descriptor in the JavaObject base initializer.
+        /// Requires the exact Java class, JVM descriptor, and ordered parameter forwarding in the JavaObject base initializer.
         /// </summary>
         /// <param name="constructor">The generated Java instantiation constructor.</param>
         /// <param name="descriptor">The exact descriptor, including its void return.</param>
+        /// <exception cref="InvalidOperationException">The constructor forwards an incorrect class, descriptor, or parameter array.</exception>
         private static void AssertConstructorDescriptor(IMethodSymbol constructor, string descriptor)
         {
-            var found = constructor.DeclaringSyntaxReferences.Select(reference => reference.GetSyntax())
-                .OfType<ConstructorDeclarationSyntax>()
-                .Any(syntax => syntax.Initializer is not null && syntax.Initializer.ArgumentList.Arguments.Any(argument =>
-                    argument.Expression is LiteralExpressionSyntax literal && literal.Token.ValueText == descriptor));
-            Check.True(found, constructor.ContainingType.Name + " must forward constructor descriptor " + descriptor + " to JavaObject.");
+            var context = constructor.ContainingType.Name + " constructor " + descriptor;
+            var mapping = constructor.ContainingType.GetAttributes().Single(attribute =>
+                attribute.AttributeClass?.ToDisplayString() == "MajdataPlay.Platform.Android.JavaClassAttribute");
+            var expectedClassName = Check.NotNull(mapping.ConstructorArguments[0].Value as string, context + " Java class mapping");
+            var syntax = constructor.DeclaringSyntaxReferences.Select(reference => reference.GetSyntax())
+                .OfType<ConstructorDeclarationSyntax>().Single();
+            var initializer = Check.NotNull(syntax.Initializer, context + " base initializer");
+            Check.True(initializer.IsKind(SyntaxKind.BaseConstructorInitializer), context + " must invoke JavaObject through base.");
+            Check.Equal(3, initializer.ArgumentList.Arguments.Count, context + " base argument count");
+            var className = Check.NotNull(initializer.ArgumentList.Arguments[0].Expression as LiteralExpressionSyntax,
+                context + " forwarded Java class literal");
+            Check.Equal(expectedClassName, className.Token.ValueText, context + " forwarded Java class");
+            var signature = Check.NotNull(initializer.ArgumentList.Arguments[1].Expression as LiteralExpressionSyntax,
+                context + " forwarded descriptor literal");
+            Check.Equal(descriptor, signature.Token.ValueText, context + " forwarded JVM descriptor");
+            var array = Check.NotNull(initializer.ArgumentList.Arguments[2].Expression as ArrayCreationExpressionSyntax,
+                context + " forwarded parameter array");
+            var values = Check.NotNull(array.Initializer, context + " parameter array initializer").Expressions;
+            Check.Equal(constructor.Parameters.Length, values.Count, context + " forwarded parameter count");
+            for (var index = 0; index < values.Count; index++)
+            {
+                var argument = Check.NotNull(values[index] as IdentifierNameSyntax, context + " parameter at position " + index);
+                Check.Equal(constructor.Parameters[index].Name, argument.Identifier.ValueText,
+                    context + " forwarded parameter at position " + index);
+            }
         }
     }
 }

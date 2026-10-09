@@ -142,7 +142,7 @@ namespace MajdataPlay.SourceGenerators.AndroidJava
             return _hasErrors ? null : _source.ToString();
         }
 
-        /// <summary>Emits the reference-wrapping constructor while validating handwritten constructors.</summary>
+        /// <summary>Emits reference wrapping and prevents implicit C# construction when Java has no public constructor.</summary>
         private void EmitWrappingConstructor()
         {
             var parameters = new[] { JavaTypeMapping.JavaObjectType, "bool" };

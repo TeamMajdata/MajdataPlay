@@ -139,15 +139,21 @@ are not accepted as successful negative-test results.
   references, interface/concrete overloads, generic and bounded-generic erasure.
 - Public inherited methods, inherited static methods, covariant override
   selection, field hiding, and IncludeInheritedMembers=false.
+- Public constructor overloads, implicit public defaults, parameterized-only
+  constructors, and exclusion of private/protected/package constructors across
+  source/class/JAR inputs. SDK-only API-36 bindings verify Intent constructor
+  descriptors and reference wrapping without instantiation constructors for
+  Looper, Runnable, and InputStream.
 - Static final primitive/string **compile-time const** values: finite values,
   NaN, infinities, Unicode, escaped punctuation, newlines, tabs, embedded NUL, and
   unpaired UTF-16 surrogates. String constants must round-trip exactly through
   the helper's base64-utf16be XML representation.
   The NUL fixture intentionally remains strict to catch broken XML transports.
-- Interface default/static methods and constants, no interface instantiation
-  constructors, enum values/valueOf, and public static/non-static nested Java
-  binary names with $. Non-static Widget$Inner constructors must prepend the
-  exact Lfixtures/Widget; JVM parameter and expose typed enclosingInstance in
+- Interface default/static methods and constants, reference-only construction for
+  interfaces and abstract classes (including an abstract class with a public
+  constructor), enum values/valueOf, and public static/non-static
+  nested Java binary names with $. Non-static Widget$Inner constructors must prepend
+  the exact Lfixtures/Widget; JVM parameter and expose typed enclosingInstance in
   C#. The parity case compares these source/class/jar constructor contracts.
 - Primitive, string, typed-wrapper, and unknown-object arrays; varargs; jagged
   arrays; nullable array dimensions and nullable object leaves.

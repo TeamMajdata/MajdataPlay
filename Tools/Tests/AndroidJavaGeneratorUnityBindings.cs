@@ -27,4 +27,28 @@ namespace MajdataPlay.Tests.Bindings
     public partial class JavaStringBuilder
     {
     }
+
+    /// <summary>
+    /// Exercises all public Android SDK constructor overloads, including a typed copy constructor.
+    /// </summary>
+    [JavaClass("android.content.Intent", ApiLevel = 36, IncludeInheritedMembers = false)]
+    public partial class Intent
+    {
+    }
+
+    /// <summary>
+    /// Exercises a concrete SDK class without any public Java constructor.
+    /// </summary>
+    [JavaClass("android.os.Looper", ApiLevel = 36, IncludeInheritedMembers = false)]
+    public partial class Looper
+    {
+    }
+
+    /// <summary>
+    /// Exercises an abstract SDK class whose public constructor cannot instantiate the Java type.
+    /// </summary>
+    [JavaClass("java.io.InputStream", ApiLevel = 36, IncludeInheritedMembers = false)]
+    public partial class InputStream
+    {
+    }
 }

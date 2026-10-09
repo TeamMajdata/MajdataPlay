@@ -20,7 +20,7 @@ namespace MajdataPlay.Tests.AndroidJavaGeneratorValidation
         /// </summary>
         public static readonly string[] Names =
         {
-            "source-api", "explicit-java-object-base", "class-api", "jar-api", "inner-descriptor-parity", "assembly-configuration", "configuration-precedence",
+            "source-api", "explicit-java-object-base", "constructor-visibility", "sdk-constructors", "class-api", "jar-api", "inner-descriptor-parity", "assembly-configuration", "configuration-precedence",
             "unity-data-paths", "unity-data-managed-references", "unity-data-player-references", "unity-data-editor-paths", "unity-data-missing",
             "classpath-only", "documentation-path-array", "no-inherited", "determinism", "source-refresh", "android-symbol-compilation",
             "invalid-nonpartial", "invalid-static", "invalid-nested", "invalid-generic", "duplicate-mapping",
@@ -64,6 +64,12 @@ namespace MajdataPlay.Tests.AndroidJavaGeneratorValidation
                     explicitBaseSource = explicitBaseSource.Replace("public partial class WidgetWrapper", "public partial class WidgetWrapper : global::MajdataPlay.Platform.Android.Runtime.Java.Lang.JavaObject");
                     var explicitBaseRun = runner.Run(runner.CreateCompilation(explicitBaseSource, name), name);
                     ApiAssertions.AssertRootApi(explicitBaseRun);
+                    break;
+                case "constructor-visibility":
+                    AssertConstructorVisibility(runner, workspace, name);
+                    break;
+                case "sdk-constructors":
+                    AssertSdkConstructors(runner, workspace, name);
                     break;
                 case "class-api":
                     RunApi(runner, workspace.ClassFiles(), workspace, name);
@@ -204,6 +210,78 @@ namespace MajdataPlay.Tests.AndroidJavaGeneratorValidation
             var source = runner.RootDeclarations(sources, workspace.DocumentationPaths, includeInherited, assemblyConfiguration);
             var run = runner.Run(runner.CreateCompilation(source, name), name);
             ApiAssertions.AssertRootApi(run, includeInherited);
+        }
+
+        /// <summary>
+        /// Checks constructor visibility and implicit defaults in source, class-file, and jar inputs.
+        /// </summary>
+        /// <param name="runner">The real generator driver factory.</param>
+        /// <param name="workspace">The prepared Java fixtures and toolchain.</param>
+        /// <param name="name">The isolated case name.</param>
+        /// <exception cref="InvalidOperationException">Generation fails or a constructor visibility assertion fails.</exception>
+        private static void AssertConstructorVisibility(GeneratorRunner runner, FixtureWorkspace workspace, string name)
+        {
+            var types = new[]
+            {
+                new KeyValuePair<string, string>("fixtures.ConstructorVisibility$Mixed", "MixedWrapper"),
+                new KeyValuePair<string, string>("fixtures.ConstructorVisibility$NoPublic", "NoPublicWrapper"),
+                new KeyValuePair<string, string>("fixtures.ConstructorVisibility$Parameterized", "ParameterizedWrapper"),
+                new KeyValuePair<string, string>("fixtures.ConstructorVisibility$Default", "DefaultWrapper"),
+                new KeyValuePair<string, string>("fixtures.ConstructorVisibility$Abstract", "PublicAbstractWrapper"),
+                new KeyValuePair<string, string>("fixtures.AbstractWidget", "ProtectedAbstractWrapper"),
+                new KeyValuePair<string, string>("fixtures.Contract", "InterfaceWrapper"),
+                new KeyValuePair<string, string>("fixtures.Mode", "EnumWrapper")
+            };
+            var representations = new[] { workspace.SourceFiles(), workspace.ClassFiles(), new[] { workspace.JarPath } };
+            for (var index = 0; index < representations.Length; index++)
+            {
+                var mode = name + "-" + index;
+                var declaration = ConstructorDeclarations(workspace, representations[index], types);
+                var run = runner.Run(runner.CreateCompilation(declaration, mode), mode);
+                ApiAssertions.AssertConstructorVisibility(run);
+            }
+        }
+
+        /// <summary>
+        /// Checks constructor generation directly against the selected Android SDK without custom Java inputs.
+        /// </summary>
+        /// <param name="runner">The real generator driver factory.</param>
+        /// <param name="workspace">The prepared SDK and JDK configuration.</param>
+        /// <param name="name">The isolated case name.</param>
+        /// <exception cref="InvalidOperationException">Generation fails or an SDK constructor assertion fails.</exception>
+        private static void AssertSdkConstructors(GeneratorRunner runner, FixtureWorkspace workspace, string name)
+        {
+            var types = new[]
+            {
+                new KeyValuePair<string, string>("android.content.Intent", "IntentWrapper"),
+                new KeyValuePair<string, string>("android.os.Looper", "LooperWrapper"),
+                new KeyValuePair<string, string>("java.lang.Runnable", "RunnableWrapper"),
+                new KeyValuePair<string, string>("java.io.InputStream", "InputStreamWrapper")
+            };
+            var declaration = ConstructorDeclarations(workspace, Array.Empty<string>(), types);
+            var run = runner.Run(runner.CreateCompilation(declaration, name), name);
+            ApiAssertions.AssertSdkConstructors(run);
+        }
+
+        /// <summary>
+        /// Creates shared-configuration wrapper declarations for a bounded constructor regression.
+        /// </summary>
+        /// <param name="workspace">The selected SDK API and fixture configuration.</param>
+        /// <param name="sources">The custom Java inputs, or an empty array for SDK-only requests.</param>
+        /// <param name="types">The Java binary names and corresponding C# wrapper names.</param>
+        /// <returns>The nullable-enabled wrapper declarations without inherited Java members.</returns>
+        private static string ConstructorDeclarations(FixtureWorkspace workspace, string[] sources, IEnumerable<KeyValuePair<string, string>> types)
+        {
+            var builder = new StringBuilder("#nullable enable\r\nusing MajdataPlay.Platform.Android;\r\n");
+            builder.Append("[assembly: JavaApiConfiguration(Sources = ").Append(GeneratorRunner.StringArray(sources))
+                .Append(", ApiLevel = ").Append(workspace.Options.ApiLevel).Append(", IncludeInheritedMembers = false)]\r\n")
+                .Append("namespace Fixtures.Wrappers\r\n{\r\n");
+            foreach (var type in types)
+            {
+                builder.Append("    [JavaClass(").Append(GeneratorRunner.Literal(type.Key)).Append(")]\r\n")
+                    .Append("    public partial class ").Append(type.Value).Append("\r\n    {\r\n    }\r\n");
+            }
+            return builder.Append("}\r\n").ToString();
         }
 
         /// <summary>
@@ -449,6 +527,7 @@ namespace MajdataPlay.Tests.AndroidJavaGeneratorValidation
             Check.Throws<PlatformNotSupportedException>(() => AndroidJni.Call<int>(null, "fixtures.Widget", "intValue", "(I)I", 1), "generic Call outside Android");
             Check.Throws<PlatformNotSupportedException>(() => AndroidJni.Call(null, "fixtures.Widget", "consume", "(I)V", 1), "void Call outside Android");
             Check.Throws<PlatformNotSupportedException>(() => AndroidJni.GetField<int>(null, "fixtures.Widget", "mutableCount", "I"), "GetField outside Android");
+            Check.Throws<PlatformNotSupportedException>(() => new JavaObject(), "parameterless JavaObject construction outside Android");
             Check.Throws<ArgumentNullException>(() => new ManagedOnlyWrapper(null!), "null borrowed Java reference");
         }
 
