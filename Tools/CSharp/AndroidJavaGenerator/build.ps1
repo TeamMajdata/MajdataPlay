@@ -5,8 +5,8 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$root = (Resolve-Path (Join-Path $PSScriptRoot '../..')).Path
-$project = Join-Path $root 'Tools/Tests/AndroidJavaGeneratorBuild/AndroidJavaGeneratorBuild.csproj'
+$root = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
+$project = Join-Path $root 'Tools/CSharp/AndroidJavaGenerator/AndroidJavaGenerator.csproj'
 & dotnet build $project --configuration Release
 if ($LASTEXITCODE -ne 0) {
     throw 'The independent Android Java source generator build failed.'

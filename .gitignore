@@ -103,10 +103,10 @@ out.log
 /.idea/*
 /.continue/agents
 
-# The analyzer DLL is installed reproducibly by Tools/AndroidJavaGenerator/build.ps1.
-/Assets/Plugins/MajdataPlay/Platform/Android/MajdataPlay.SourceGenerators.AndroidJava.dll
-# Independent generator build projects are source, unlike Unity-generated projects.
-!/Tools/Tests/AndroidJavaGeneratorBuild/AndroidJavaGeneratorBuild.csproj
+!/Tools/CSharp/AndroidJavaGenerator/AndroidJavaGenerator.csproj
+# .NET build output of the Tools/CSharp tools is always local.
+/Tools/CSharp/**/bin/
+/Tools/CSharp/**/obj/
 !/Tools/Tests/AndroidJavaGeneratorValidation/AndroidJavaGeneratorValidation.csproj
 /Assets/Plugins/MajdataPlay/Platform/Android/MajdataPlay.SourceGenerators.AndroidJava.dll.meta
 

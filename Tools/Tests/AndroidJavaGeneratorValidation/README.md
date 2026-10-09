@@ -16,8 +16,8 @@ substitute Unity or JNI stubs.
   dependencies cached. Restore uses only this directory as a package source;
   there is no implicit network restore or package upgrade.
 - Have the production files from the generator/runtime implementation available:
-  - Tools/AndroidJavaGenerator/Source/**/*.cs
-  - Tools/AndroidJavaGenerator/Java/JavaApiExtractor.java
+  - Tools/CSharp/AndroidJavaGenerator/src/**/*.cs
+  - Tools/CSharp/AndroidJavaGenerator/Java/JavaApiExtractor.java
   - Assets/Plugins/MajdataPlay/Platform/Android/JavaClassAttribute.cs
   - Assets/Plugins/MajdataPlay/Platform/Android/JavaApiConfigurationAttribute.cs
   - Assets/Plugins/MajdataPlay/Platform/Android/Runtime/Java/Lang/JavaObject.cs
@@ -57,7 +57,7 @@ respected; explicit application arguments take precedence:
 ~~~powershell
 $env:UNITY_ANDROID_SDK = 'C:/Program Files/Unity Editors/6000.3.17f1/Editor/Data/PlaybackEngines/AndroidPlayer/SDK'
 $env:UNITY_JAVA_HOME = 'C:/Program Files/Unity Editors/6000.3.17f1/Editor/Data/PlaybackEngines/AndroidPlayer/OpenJDK'
-$env:MAJDATA_JAVA_EXTRACTOR = (Resolve-Path 'Tools/AndroidJavaGenerator/Java/JavaApiExtractor.java').Path
+$env:MAJDATA_JAVA_EXTRACTOR = (Resolve-Path 'Tools/CSharp/AndroidJavaGenerator/Java/JavaApiExtractor.java').Path
 dotnet run --project Tools/Tests/AndroidJavaGeneratorValidation/AndroidJavaGeneratorValidation.csproj -- --api-level 36 --timeout-seconds 180
 ~~~
 

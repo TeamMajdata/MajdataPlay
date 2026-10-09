@@ -8,11 +8,12 @@
 ## 安装与最小使用方式
 
 前置条件：仓库固定版本 **Unity 6000.3.17f1**、其 Android Build Support
-（SDK + OpenJDK 17）、.NET 9 SDK。构建项目位于 `Tools/Tests/`，它是明确提供
-的独立工具项目，而非 Unity 生成的 `.csproj`。
+（SDK + OpenJDK 17）、.NET 9 SDK。本工具是 `Tools/CSharp/AndroidJavaGenerator/`
+下明确提供的独立工具项目（`AndroidJavaGenerator.csproj`，源码在 `src/`），
+而非 Unity 生成的 `.csproj`。
 
 ```powershell
-./Tools/AndroidJavaGenerator/build.ps1 -Install
+./Tools/CSharp/AndroidJavaGenerator/build.ps1 -Install
 ```
 
 只会安装 analyzer DLL 及专用 `.meta`，安装结果被 `.gitignore` 忽略。DLL 的
@@ -23,8 +24,8 @@ analyzer 加入 runtime `.asmdef` references。新克隆的仓库必须执行安
 缓存，可先显式还原：
 
 ```powershell
-dotnet restore Tools/Tests/AndroidJavaGeneratorBuild/AndroidJavaGeneratorBuild.csproj --source https://api.nuget.org/v3/index.json
-./Tools/AndroidJavaGenerator/build.ps1 -Install
+dotnet restore Tools/CSharp/AndroidJavaGenerator/AndroidJavaGenerator.csproj --source https://api.nuget.org/v3/index.json
+./Tools/CSharp/AndroidJavaGenerator/build.ps1 -Install
 ```
 
 在 Android 模块（`Assets/Plugins/MajdataPlay/Platform/Android/`）中声明一个
@@ -172,7 +173,7 @@ Player Settings，也不代表设备上对应 API 必然可用。较新 API 必�
 根据 Android 版本守卫。
 
 Java helper 的默认位置是本工程
-`Tools/AndroidJavaGenerator/Java/JavaApiExtractor.java`；可用
+`Tools/CSharp/AndroidJavaGenerator/Java/JavaApiExtractor.java`；可用
 `MAJDATA_JAVA_EXTRACTOR` 指定外部副本。
 `MAJDATA_JAVA_EXTRACTOR_TIMEOUT_SECONDS` 默认 120，允许 1–3600。
 提取进程有取消和输出大小限制，不运行 shell，也不使用跨 compilation 的静态

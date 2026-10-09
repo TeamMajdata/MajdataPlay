@@ -96,7 +96,7 @@ Use the repository's **Unity 6000.3.17f1**, Android Build Support with SDK API 3
 and its bundled OpenJDK, a .NET 9 SDK, and the Unity modules for every requested
 Player target. Android SDK/JDK are required even for Editor or desktop-only
 checks because the production wrappers are generated from Java metadata.
-See `Tools/AndroidJavaGenerator/README.md` for analyzer build/restore prerequisites.
+See `Tools/CSharp/AndroidJavaGenerator/README.md` for analyzer build/restore prerequisites.
 
 From the repository root:
 
@@ -105,7 +105,7 @@ From the repository root:
 ./Tools/Tests/ValidateFileSystemUnity.ps1 -PlayerTargets StandaloneWindows64,StandaloneLinux64,StandaloneOSX,iOS,Android
 ```
 
-The script calls `Tools/AndroidJavaGenerator/build.ps1 -Install` with the selected
+The script calls `Tools/CSharp/AndroidJavaGenerator/build.ps1 -Install` with the selected
 Editor path **before staging**, then creates the ignored isolated project under
 `Temp/FileSystemUnityValidation/`. It copies production storage and Android core
 sources, `JavaClassAttribute` / `JavaApiConfigurationAttribute`, the entire production
@@ -116,7 +116,7 @@ logging and keyboard initialization stubs; wrappers and picker logic are real
 production code, not validation-only replacements.
 
 The Java extractor is staged at
-`Tools/AndroidJavaGenerator/Java/JavaApiExtractor.java` and the custom bridge at
+`Tools/CSharp/AndroidJavaGenerator/Java/JavaApiExtractor.java` and the custom bridge at
 `Assets/Plugins/Android/src/java/net/majdata/majdataplay/StorageAccess.java`, retaining
 their project-relative paths. Extraction uses the selected Editor's SDK/JDK,
 the staged extractor, and production `{UnityData}` source/classpath inputs; process

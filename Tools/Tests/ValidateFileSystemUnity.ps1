@@ -13,7 +13,7 @@ if ($version -notmatch ('^' + [regex]::Escape($expected) + '(?:_|$)')) {
     throw "Use Unity $expected; the selected executable reports $version."
 }
 # Install the production analyzer before copying it into the isolated compilation.
-& (Join-Path $root 'Tools/AndroidJavaGenerator/build.ps1') -Install -UnityPath $UnityPath
+& (Join-Path $root 'Tools/CSharp/AndroidJavaGenerator/build.ps1') -Install -UnityPath $UnityPath
 $project = Join-Path $root 'Temp/FileSystemUnityValidation'
 $io = Join-Path $project 'Assets/IO'
 $android = Join-Path $project 'Assets/Android'
@@ -78,7 +78,7 @@ foreach ($name in @('Activity.cs', 'Activity.cs.meta', 'Intent.cs', 'Intent.cs.m
 Copy-Item -LiteralPath (Join-Path $androidSource 'Runtime') -Destination $android -Recurse -Force
 Copy-Item -LiteralPath (Join-Path $androidSource 'Runtime.meta') -Destination $android -Force
 # Relative Java inputs must resolve inside this project, not against the main checkout.
-foreach ($relativePath in @('Tools/AndroidJavaGenerator/Java/JavaApiExtractor.java', 'Assets/Plugins/Android/src/java/net/majdata/majdataplay/StorageAccess.java')) {
+foreach ($relativePath in @('Tools/CSharp/AndroidJavaGenerator/Java/JavaApiExtractor.java', 'Assets/Plugins/Android/src/java/net/majdata/majdataplay/StorageAccess.java')) {
     $source = Join-Path $root $relativePath
     $destination = Join-Path $project $relativePath
     New-Item -ItemType Directory -Force -Path (Split-Path -Parent $destination) | Out-Null
@@ -129,7 +129,7 @@ try {
     $env:UNITY_EDITOR_PATH = $UnityPath
     $env:UNITY_ANDROID_SDK = Join-Path $androidPlayer 'SDK'
     $env:UNITY_JAVA_HOME = Join-Path $androidPlayer 'OpenJDK'
-    $env:MAJDATA_JAVA_EXTRACTOR = Join-Path $project 'Tools/AndroidJavaGenerator/Java/JavaApiExtractor.java'
+    $env:MAJDATA_JAVA_EXTRACTOR = Join-Path $project 'Tools/CSharp/AndroidJavaGenerator/Java/JavaApiExtractor.java'
     $log = Join-Path $project 'validation.log'
     $process = Start-Process -FilePath $UnityPath -WindowStyle Hidden -ArgumentList @(
         '-batchmode', '-nographics', '-projectPath', ([char]34 + $project + [char]34), '-executeMethod',

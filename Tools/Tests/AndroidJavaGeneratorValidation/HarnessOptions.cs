@@ -102,7 +102,7 @@ namespace MajdataPlay.Tests.AndroidJavaGeneratorValidation
             JavaHome = Environment.GetEnvironmentVariable("UNITY_JAVA_HOME")
                 ?? Path.Combine(UnityEditorData, "PlaybackEngines", "AndroidPlayer", "OpenJDK");
             ExtractorPath = Environment.GetEnvironmentVariable("MAJDATA_JAVA_EXTRACTOR")
-                ?? Path.Combine(RepositoryRoot, "Tools", "AndroidJavaGenerator", "Java", "JavaApiExtractor.java");
+                ?? Path.Combine(RepositoryRoot, "Tools", "CSharp", "AndroidJavaGenerator", "Java", "JavaApiExtractor.java");
         }
 
         /// <summary>
@@ -187,7 +187,7 @@ namespace MajdataPlay.Tests.AndroidJavaGeneratorValidation
             }
             if (!extractorSpecified)
             {
-                options.ExtractorPath = Path.Combine(options.RepositoryRoot, "Tools", "AndroidJavaGenerator", "Java", "JavaApiExtractor.java");
+                options.ExtractorPath = Path.Combine(options.RepositoryRoot, "Tools", "CSharp", "AndroidJavaGenerator", "Java", "JavaApiExtractor.java");
             }
             return options;
         }

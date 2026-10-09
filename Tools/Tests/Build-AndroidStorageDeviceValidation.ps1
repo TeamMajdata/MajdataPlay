@@ -20,7 +20,7 @@ $version = [Diagnostics.FileVersionInfo]::GetVersionInfo($UnityPath).ProductVers
 if ($version -notmatch ('^' + [regex]::Escape($expected) + '(?:_|$)')) {
     throw "Use Unity $expected; the selected executable reports $version."
 }
-& (Join-Path $root 'Tools/AndroidJavaGenerator/build.ps1') -Install -UnityPath $UnityPath
+& (Join-Path $root 'Tools/CSharp/AndroidJavaGenerator/build.ps1') -Install -UnityPath $UnityPath
 $io = Join-Path $project 'Assets/IO'
 $android = Join-Path $project 'Assets/Android'
 $diagnostics = Join-Path $project 'Assets/Diagnostics'
@@ -88,9 +88,9 @@ Copy-Item -LiteralPath (Join-Path $root 'Assets/Plugins/Android/AndroidManifest.
 $probeJava = Join-Path $project 'Assets/Plugins/Android/src/java/net/majdata/validation'
 New-Item -ItemType Directory -Force -Path $probeJava | Out-Null
 Copy-Item -LiteralPath (Join-Path $toolSource 'DeviceJniProbe.java') -Destination $probeJava -Force
-$extractor = Join-Path $project 'Tools/AndroidJavaGenerator/Java'
+$extractor = Join-Path $project 'Tools/CSharp/AndroidJavaGenerator/Java'
 New-Item -ItemType Directory -Force -Path $extractor | Out-Null
-Copy-Item -LiteralPath (Join-Path $root 'Tools/AndroidJavaGenerator/Java/JavaApiExtractor.java') -Destination $extractor -Force
+Copy-Item -LiteralPath (Join-Path $root 'Tools/CSharp/AndroidJavaGenerator/Java/JavaApiExtractor.java') -Destination $extractor -Force
 $editorData = Join-Path (Split-Path -Parent $UnityPath) 'Data'
 $androidPlayer = Join-Path $editorData 'PlaybackEngines/AndroidPlayer'
 $variables = @('UNITY_EDITOR_PATH', 'UNITY_ANDROID_SDK', 'UNITY_JAVA_HOME', 'MAJDATA_JAVA_EXTRACTOR')

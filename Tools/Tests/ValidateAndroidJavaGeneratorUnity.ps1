@@ -12,7 +12,7 @@ if ($version -notmatch ('^' + [regex]::Escape($expected) + '(?:_|$)')) {
     throw "Use Unity $expected; the selected executable reports $version."
 }
 if (!$SkipAnalyzerBuild) {
-    & (Join-Path $root 'Tools/AndroidJavaGenerator/build.ps1')
+    & (Join-Path $root 'Tools/CSharp/AndroidJavaGenerator/build.ps1')
 }
 $dll = Join-Path $root 'Temp/AndroidJavaGeneratorBuild/bin/netstandard2.0/MajdataPlay.SourceGenerators.AndroidJava.dll'
 if (!(Test-Path -LiteralPath $dll -PathType Leaf)) {
@@ -36,7 +36,7 @@ foreach ($name in @('AndroidJni', 'JavaClassAttribute', 'JavaApiConfigurationAtt
 }
 Copy-Item -LiteralPath (Join-Path $root 'Assets/Plugins/MajdataPlay/Platform/Android/Runtime/Java/Lang/JavaObject.cs') -Destination $runtime
 Copy-Item -LiteralPath $dll -Destination $runtime
-Copy-Item -LiteralPath (Join-Path $root 'Tools/AndroidJavaGenerator/MajdataPlay.SourceGenerators.AndroidJava.dll.meta') -Destination $runtime
+Copy-Item -LiteralPath (Join-Path $root 'Tools/CSharp/AndroidJavaGenerator/MajdataPlay.SourceGenerators.AndroidJava.dll.meta') -Destination $runtime
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'AndroidJavaGeneratorUnityValidation.cs') -Destination $editor
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'AndroidJavaGeneratorUnityBindings.cs') -Destination $runtime
 @{
@@ -54,7 +54,7 @@ foreach ($name in $variables) {
 try {
     $env:UNITY_ANDROID_SDK = Join-Path $editorData 'PlaybackEngines/AndroidPlayer/SDK'
     $env:UNITY_JAVA_HOME = Join-Path $editorData 'PlaybackEngines/AndroidPlayer/OpenJDK'
-    $env:MAJDATA_JAVA_EXTRACTOR = Join-Path $root 'Tools/AndroidJavaGenerator/Java/JavaApiExtractor.java'
+    $env:MAJDATA_JAVA_EXTRACTOR = Join-Path $root 'Tools/CSharp/AndroidJavaGenerator/Java/JavaApiExtractor.java'
     $log = Join-Path $project 'validation.log'
     $process = Start-Process -FilePath $UnityPath -WindowStyle Hidden -ArgumentList @(
         '-batchmode', '-nographics', '-projectPath', "`"$project`"", '-executeMethod',

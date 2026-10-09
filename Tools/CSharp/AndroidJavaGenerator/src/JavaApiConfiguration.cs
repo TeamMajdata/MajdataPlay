@@ -214,7 +214,7 @@ namespace MajdataPlay.SourceGenerators.AndroidJava
             var androidJar = SelectAndroidJar(sdk, options.ApiLevel, cancellationToken);
             var extractorSetting = Environment.GetEnvironmentVariable("MAJDATA_JAVA_EXTRACTOR");
             var extractor = ResolvePath(string.IsNullOrWhiteSpace(extractorSetting)
-                ? "Tools/AndroidJavaGenerator/Java/JavaApiExtractor.java" : extractorSetting!, root);
+                ? "Tools/CSharp/AndroidJavaGenerator/Java/JavaApiExtractor.java" : extractorSetting!, root);
             if (!File.Exists(extractor))
             {
                 throw Invalid("Java API helper does not exist: '" + extractor + "'. Set MAJDATA_JAVA_EXTRACTOR or install the repository helper.");

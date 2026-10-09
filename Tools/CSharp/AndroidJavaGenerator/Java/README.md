@@ -17,7 +17,7 @@ PowerShell, from the repository root:
 ~~~powershell
 $jdk = 'C:/Program Files/Unity Editors/6000.3.17f1/Editor/Data/PlaybackEngines/AndroidPlayer/OpenJDK'
 $android = 'C:/Program Files/Unity Editors/6000.3.17f1/Editor/Data/PlaybackEngines/AndroidPlayer/SDK/platforms/android-35/android.jar'
-& "$jdk/bin/java.exe" Tools/AndroidJavaGenerator/Java/JavaApiExtractor.java `
+& "$jdk/bin/java.exe" Tools/CSharp/AndroidJavaGenerator/Java/JavaApiExtractor.java `
     --android-jar $android `
     --classpath 'C:/dependencies/example.jar' `
     --source 'C:/sources/example/src' `
@@ -62,7 +62,7 @@ For a caller-managed cache, the same single source may be compiled once:
 
 ~~~powershell
 & "$jdk/bin/javac.exe" -proc:none -encoding UTF-8 -d 'C:/sidecar-cache' `
-    Tools/AndroidJavaGenerator/Java/JavaApiExtractor.java
+    Tools/CSharp/AndroidJavaGenerator/Java/JavaApiExtractor.java
 & "$jdk/bin/java.exe" -cp 'C:/sidecar-cache' JavaApiExtractor --android-jar $android `
     --type 'android.os.Build$VERSION_CODES'
 ~~~
@@ -241,7 +241,7 @@ validation proves Unity/IL2CPP integration or Android device behavior.
 Run with PowerShell 7 and an installed Android SDK platform:
 
 ~~~powershell
-& Tools/AndroidJavaGenerator/Java/Validate-JavaApiExtractor.ps1 `
+& Tools/CSharp/AndroidJavaGenerator/Java/Validate-JavaApiExtractor.ps1 `
     -JdkRoot 'C:/Program Files/Unity Editors/6000.3.17f1/Editor/Data/PlaybackEngines/AndroidPlayer/OpenJDK' `
     -AndroidJar 'C:/Program Files/Unity Editors/6000.3.17f1/Editor/Data/PlaybackEngines/AndroidPlayer/SDK/platforms/android-35/android.jar'
 ~~~

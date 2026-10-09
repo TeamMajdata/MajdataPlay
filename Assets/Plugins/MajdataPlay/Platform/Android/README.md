@@ -44,12 +44,12 @@ does not verify that the declared C# base matches the Java ancestry; the
 declaration owns that correspondence. See the generator README for the full
 contract and its limits.
 
-See `Tools/AndroidJavaGenerator/README.md` at the repository root for installation,
+See `Tools/CSharp/AndroidJavaGenerator/README.md` at the repository root for installation,
 SDK/JDK configuration, Java inputs, member mapping, documentation provenance,
 ownership, threading, diagnostics, and managed/Unity/device validation limits.
 
 ```powershell
-./Tools/AndroidJavaGenerator/build.ps1 -Install
+./Tools/CSharp/AndroidJavaGenerator/build.ps1 -Install
 ```
 
 Only JNI invocation is Android-player-specific; the attributes and generated
