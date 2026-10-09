@@ -11,7 +11,7 @@ using Microsoft.CodeAnalysis;
 
 namespace MajdataPlay.SourceGenerators.AndroidJava
 {
-    /// <summary>Emits nullable, descriptor-exact C# 9 wrappers without modeling Java inheritance in C#.</summary>
+    /// <summary>Emits nullable, descriptor-exact C# 9 wrappers, optionally deriving from an annotated base wrapper.</summary>
     internal sealed class JavaWrapperEmitter
     {
         /// <summary>Stores the annotated C# wrapper declaration.</summary>
@@ -32,11 +32,43 @@ namespace MajdataPlay.SourceGenerators.AndroidJava
         /// <summary>Builds indented CRLF generated source.</summary>
         private readonly GeneratedSource _source = new GeneratedSource();
 
-        /// <summary>Tracks generated and runtime-reserved member names.</summary>
+        /// <summary>Tracks generated names and runtime members that a generated name must not hide.</summary>
         private readonly HashSet<string> _allocatedNames = new HashSet<string>(StringComparer.Ordinal);
+
+        /// <summary>Stores the runtime and CLR method signatures a generated method must not duplicate.</summary>
+        private readonly HashSet<string> _reservedMethodSignatures = new HashSet<string>(StringComparer.Ordinal);
+
+        /// <summary>Stores the method signatures already generated for this wrapper.</summary>
+        private readonly HashSet<string> _generatedMethodSignatures = new HashSet<string>(StringComparer.Ordinal);
+
+        /// <summary>Lists the runtime and CLR method signatures inherited by every generated wrapper.</summary>
+        private static readonly string[] s_reservedMethodSignatures =
+        {
+            "Dispose()",
+            "Equals(object)",
+            "Equals(object,object)",
+            "Finalize()",
+            "GetHashCode()",
+            "GetType()",
+            "MemberwiseClone()",
+            "ReferenceEquals(object,object)",
+            "ToString()"
+        };
 
         /// <summary>Stores user-declared members grouped by their exact C# names.</summary>
         private readonly Dictionary<string, ISymbol[]> _userMembers;
+
+        /// <summary>Stores the annotated base wrapper's Java API, or null when the C# base is not a generated wrapper.</summary>
+        private readonly JavaApiType? _baseType;
+
+        /// <summary>Stores the generated field, property, and constant names owned by the annotated base wrapper.</summary>
+        private readonly HashSet<string> _baseFieldNames = new HashSet<string>(StringComparer.Ordinal);
+
+        /// <summary>Stores the instance Java override signatures already implemented by the annotated base wrapper.</summary>
+        private readonly HashSet<string> _baseOverrideSignatures = new HashSet<string>(StringComparer.Ordinal);
+
+        /// <summary>Stores the static Java signatures hidden by the annotated base wrapper.</summary>
+        private readonly HashSet<string> _baseStaticSignatures = new HashSet<string>(StringComparer.Ordinal);
 
         /// <summary>Indicates a user conflict that prevents safely augmenting the class.</summary>
         private bool _hasErrors;
@@ -44,51 +76,177 @@ namespace MajdataPlay.SourceGenerators.AndroidJava
         /// <summary>Creates a compilation-local emitter for one wrapper.</summary>
         /// <param name="wrapper">The annotated C# class.</param>
         /// <param name="type">The extracted Java type.</param>
+        /// <param name="baseType">The annotated base wrapper's Java API, or null when the base is the runtime wrapper.</param>
         /// <param name="mappings">The annotated wrapper mappings.</param>
         /// <param name="report">The diagnostic callback.</param>
         /// <param name="cancellationToken">The compilation cancellation token.</param>
-        private JavaWrapperEmitter(JavaWrapper wrapper, JavaApiType type, IReadOnlyDictionary<string, string> mappings,
-            Action<DiagnosticDescriptor, string> report, CancellationToken cancellationToken)
+        private JavaWrapperEmitter(JavaWrapper wrapper, JavaApiType type, JavaApiType? baseType,
+            IReadOnlyDictionary<string, string> mappings, Action<DiagnosticDescriptor, string> report,
+            CancellationToken cancellationToken)
         {
             _wrapper = wrapper;
             _type = type;
+            _baseType = baseType;
             _mappings = mappings;
             _report = report;
             _cancellationToken = cancellationToken;
             _userMembers = wrapper.Symbol.GetMembers().Where(member => !member.IsImplicitlyDeclared)
                 .GroupBy(member => member.Name, StringComparer.Ordinal)
                 .ToDictionary(group => group.Key, group => group.ToArray(), StringComparer.Ordinal);
-            foreach (var name in new[] { wrapper.Symbol.Name, "JavaReference", "Dispose", "Equals", "GetHashCode", "GetType", "ToString", "ReferenceEquals", "MemberwiseClone", "Finalize" })
+            // Only names shared with a non-method runtime member (and the wrapper type name itself) are
+            // reserved by name; methods are reserved by signature so Java overloads keep their C# name.
+            _allocatedNames.Add(wrapper.Symbol.Name);
+            _allocatedNames.Add("JavaReference");
+            foreach (var signature in s_reservedMethodSignatures)
             {
-                _allocatedNames.Add(name);
+                _reservedMethodSignatures.Add(signature);
             }
-            var baseType = wrapper.Symbol.BaseType;
-            while (baseType != null)
+            var baseSymbol = wrapper.Symbol.BaseType;
+            while (baseSymbol != null)
             {
-                foreach (var member in baseType.GetMembers())
+                foreach (var member in baseSymbol.GetMembers())
                 {
-                    if (member.DeclaredAccessibility != Accessibility.Private && member.Kind != SymbolKind.NamedType && !(member is IMethodSymbol method && method.MethodKind == MethodKind.Constructor))
+                    if (member.DeclaredAccessibility == Accessibility.Private || member.Kind == SymbolKind.NamedType)
                     {
-                        _allocatedNames.Add(member.Name);
+                        continue;
                     }
+                    if (member is IMethodSymbol method)
+                    {
+                        if (method.MethodKind != MethodKind.Constructor && method.MethodKind != MethodKind.StaticConstructor &&
+                            method.MethodKind != MethodKind.Destructor)
+                        {
+                            _reservedMethodSignatures.Add(MethodSignature(method.Name,
+                                method.Parameters.Select(parameter => parameter.Type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat))));
+                        }
+                        continue;
+                    }
+                    _allocatedNames.Add(member.Name);
                 }
-                baseType = baseType.BaseType;
+                baseSymbol = baseSymbol.BaseType;
             }
+            CollectBaseWrapperMembers();
+        }
+
+        /// <summary>Normalizes a C# method signature for overload-collision checking.</summary>
+        /// <param name="name">The generated method name.</param>
+        /// <param name="parameterTypes">The generated or symbol-displayed parameter types.</param>
+        /// <returns>The normalized name and parameter-list key.</returns>
+        private static string MethodSignature(string name, IEnumerable<string> parameterTypes)
+        {
+            return name + "(" + string.Join(",", parameterTypes.Select(JavaNames.SignatureType)) + ")";
+        }
+
+        /// <summary>Indexes the descriptor-exact members an annotated base wrapper already generates.</summary>
+        private void CollectBaseWrapperMembers()
+        {
+            if (_baseType == null)
+            {
+                return;
+            }
+            _baseFieldNames.Add("JavaClassName");
+            foreach (var field in _baseType.Fields)
+            {
+                _baseFieldNames.Add(JavaNames.PascalCase(field.Name));
+            }
+            foreach (var method in _baseType.Methods)
+            {
+                if (method.Name == "<init>" || IsObjectMethod(method))
+                {
+                    continue;
+                }
+                var signature = method.Name + "\0" + ParametersOf(method.Descriptor);
+                if (method.IsStatic)
+                {
+                    _baseStaticSignatures.Add(signature);
+                }
+                else
+                {
+                    _baseOverrideSignatures.Add(signature);
+                }
+            }
+        }
+
+        /// <summary>Extracts the erased parameter list from a JVM method descriptor.</summary>
+        /// <param name="descriptor">The complete JVM method descriptor.</param>
+        /// <returns>The descriptor text up to and including the closing parameter parenthesis.</returns>
+        private static string ParametersOf(string descriptor)
+        {
+            var end = descriptor.IndexOf(')');
+            return end < 0 ? descriptor : descriptor.Substring(0, end + 1);
+        }
+
+        /// <summary>Returns the shadowing modifier for a name the annotated base wrapper also generates.</summary>
+        /// <param name="name">The generated field, property, or constant name.</param>
+        /// <returns>The C# <c>new</c> modifier with a trailing space, or an empty string.</returns>
+        private string ShadowKeyword(string name)
+        {
+            return _baseFieldNames.Contains(name) ? "new " : string.Empty;
+        }
+
+        /// <summary>Returns the shadowing modifier for a static method the annotated base wrapper also declares.</summary>
+        /// <param name="method">The prepared static method.</param>
+        /// <returns>The C# <c>new</c> modifier with a trailing space, or an empty string.</returns>
+        private string StaticShadowKeyword(EmissionMethod method)
+        {
+            return _baseStaticSignatures.Contains(method.Metadata.Name + "\0" + ParametersOf(method.Metadata.Descriptor))
+                ? "new "
+                : string.Empty;
+        }
+
+        /// <summary>Gets the annotated C# base wrapper type of the declaration.</summary>
+        /// <returns>The annotated base wrapper, or null when the wrapper derives from the runtime base.</returns>
+        private INamedTypeSymbol? GetWrapperBaseSymbol()
+        {
+            var baseSymbol = _wrapper.Symbol.BaseType;
+            if (baseSymbol == null || baseSymbol.SpecialType == SpecialType.System_Object ||
+                baseSymbol.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat) == "global::" + AndroidJavaGenerator.JavaObjectName)
+            {
+                return null;
+            }
+            return baseSymbol;
+        }
+
+        /// <summary>Gets the fully qualified C# base type of the generated wrapper declaration.</summary>
+        /// <returns>The annotated base wrapper type, or the runtime JavaObject base type.</returns>
+        private string GetBaseTypeName()
+        {
+            var baseSymbol = GetWrapperBaseSymbol();
+            return baseSymbol == null
+                ? "global::" + AndroidJavaGenerator.JavaObjectName
+                : baseSymbol.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
+        }
+
+        /// <summary>Builds the Java-construction base initializer for a generated constructor.</summary>
+        /// <param name="descriptor">The exact JVM constructor descriptor.</param>
+        /// <param name="arguments">The generated argument-array expression.</param>
+        /// <returns>The base initializer argument text.</returns>
+        private string ConstructorInitializer(string descriptor, string arguments)
+        {
+            if (GetWrapperBaseSymbol() == null)
+            {
+                return JavaLiterals.String(_type.Name) + ", " + JavaLiterals.String(descriptor) + ", " + arguments;
+            }
+            // An annotated base wrapper only exposes reference-wrapping constructors, so the Java
+            // instance is created first and then adopted by the base wrapper.
+            return JavaTypeMapping.JniType + ".Construct(" + JavaLiterals.String(_type.Name) + ", " +
+                JavaLiterals.String(descriptor) + ", " + arguments + "), ownsReference: true";
         }
 
         /// <summary>Emits a complete wrapper or reports why a handwritten member prevents emission.</summary>
         /// <param name="wrapper">The annotated C# declaration.</param>
         /// <param name="type">The extracted public Java API.</param>
+        /// <param name="baseType">The annotated base wrapper's Java API, or null when the base is the runtime wrapper.</param>
         /// <param name="mappings">The Java binary-name to C# wrapper mappings.</param>
         /// <param name="report">The diagnostic callback.</param>
         /// <param name="cancellationToken">The compilation cancellation token.</param>
         /// <returns>The C# source, or null when a user-member conflict prevents safe generation.</returns>
         /// <exception cref="GeneratorException">The metadata cannot be represented accurately.</exception>
         /// <exception cref="OperationCanceledException">Compilation has been canceled.</exception>
-        internal static string? Emit(JavaWrapper wrapper, JavaApiType type, IReadOnlyDictionary<string, string> mappings,
+        internal static string? Emit(JavaWrapper wrapper, JavaApiType type, JavaApiType? baseType,
+            IReadOnlyDictionary<string, string> mappings,
             Action<DiagnosticDescriptor, string> report, CancellationToken cancellationToken)
         {
-            var emitter = new JavaWrapperEmitter(wrapper, type, mappings, report, cancellationToken);
+            var emitter = new JavaWrapperEmitter(wrapper, type, baseType, mappings, report, cancellationToken);
             return emitter.EmitCore();
         }
 
@@ -111,16 +269,21 @@ namespace MajdataPlay.SourceGenerators.AndroidJava
             Documentation(_type, "Wraps the Java " + kind + " '" + _type.Name + "' using exact JVM member descriptors.", _type.Name);
             _source.Documentation("remarks", "Owns or borrows a Unity Java reference. Dispose owned references deterministically. " +
                 "JNI invocation requires an Android player and the Unity main thread or a JVM-attached thread. " +
-                "Java inheritance is flattened; this wrapper does not implement Java callback interfaces.");
+                (_baseType == null
+                    ? "Java inheritance is flattened; this wrapper does not implement Java callback interfaces."
+                    : "This wrapper derives from the annotated wrapper of its Java superclass '" + _baseType.Name +
+                      "', so Java override members declared by that superclass are inherited instead of repeated. " +
+                      "This wrapper does not implement Java callback interfaces."));
             Deprecated(_type);
             var wrapperType = _wrapper.Symbol.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
             _source.Line((_wrapper.Symbol.DeclaredAccessibility == Accessibility.Public ? "public" : "internal") +
-                " partial class " + JavaNames.Escape(_wrapper.Symbol.Name) + " : global::MajdataPlay.Platform.Android.Runtime.Java.Lang.JavaObject" +
+                " partial class " + JavaNames.Escape(_wrapper.Symbol.Name) + " : " + GetBaseTypeName() +
                 (_type.OverridesEquals ? ", global::System.IEquatable<" + wrapperType + ">" : string.Empty));
             _source.Open();
-            var classNameMember = AllocateName("JavaClassName", "JavaField", false);
+            var classNameMember = AllocateName("JavaClassName", "JavaField");
             _source.Documentation("summary", "Gets the exact Java binary class name used by this wrapper.");
-            _source.Line("public const string " + JavaNames.Escape(classNameMember) + " = " + JavaLiterals.String(_type.Name) + ";");
+            _source.Line("public " + ShadowKeyword(classNameMember) + "const string " + JavaNames.Escape(classNameMember) +
+                " = " + JavaLiterals.String(_type.Name) + ";");
             _source.Line();
             EmitWrappingConstructor();
             EmitObjectOverrides(wrapperType);
@@ -167,6 +330,9 @@ namespace MajdataPlay.SourceGenerators.AndroidJava
         {
             if (_type.OverridesEquals)
             {
+                // The typed IEquatable equality below owns this signature; a Java equals(ownType)
+                // overload must be renamed instead of colliding with it.
+                _reservedMethodSignatures.Add(MethodSignature("Equals", new[] { wrapperType }));
                 CheckObjectMethod("Equals", new[] { "object?" });
                 CheckObjectMethod("Equals", new[] { wrapperType + "?" });
                 _source.Documentation("summary", "Compares wrappers using the Java object's virtual equals(Object) method.");
@@ -293,6 +459,13 @@ namespace MajdataPlay.SourceGenerators.AndroidJava
                 {
                     continue;
                 }
+                if (!metadata.IsStatic &&
+                    _baseOverrideSignatures.Contains(metadata.Name + "\0" + ParametersOf(metadata.Descriptor)))
+                {
+                    // The annotated base wrapper already exposes this Java override with the same erased parameters;
+                    // JNI still dispatches virtually to the most derived Java implementation.
+                    continue;
+                }
                 var signature = JavaDescriptors.ParseMethod(metadata.Descriptor);
                 var types = signature.Parameters.Select(type => JavaTypeMapping.GetTypeName(type, _mappings)).ToArray();
                 methods.Add(new EmissionMethod(metadata, signature, types, GetParameterNames(metadata, types.Length)));
@@ -343,13 +516,13 @@ namespace MajdataPlay.SourceGenerators.AndroidJava
                 }
                 if (method.Name.Length != 0)
                 {
-                    method.Name = AllocateName(method.Name, "JavaMethod", true);
+                    method.Name = AllocateMethodName(method.Name, method.ParameterTypes);
                 }
                 else
                 {
                     if (!normalNames.TryGetValue(method.Metadata.Name, out var name))
                     {
-                        name = AllocateName(JavaNames.PascalCase(method.Metadata.Name), "JavaMethod", true);
+                        name = AllocateMethodName(JavaNames.PascalCase(method.Metadata.Name), method.ParameterTypes);
                         normalNames.Add(method.Metadata.Name, name);
                     }
                     method.Name = name;
@@ -364,7 +537,7 @@ namespace MajdataPlay.SourceGenerators.AndroidJava
         private void EmitField(JavaApiField field)
         {
             var type = JavaDescriptors.ParseField(field.Descriptor);
-            var name = AllocateName(JavaNames.PascalCase(field.Name), "JavaField", false);
+            var name = AllocateName(JavaNames.PascalCase(field.Name), "JavaField");
             Documentation(field, "Gets the " + (field.IsStatic ? "static " : string.Empty) + "Java field '" + field.DeclaringType + "." + field.Name + "'.", field.DeclaringType);
             var constant = field.IsStatic && field.IsFinal && field.ConstantValue != null;
             if (!constant)
@@ -375,11 +548,13 @@ namespace MajdataPlay.SourceGenerators.AndroidJava
             if (constant)
             {
                 var constantType = type.Code == 'L' ? "string" : JavaTypeMapping.GetTypeName(type, _mappings);
-                _source.Line("public const " + constantType + " " + JavaNames.Escape(name) + " = " + JavaLiterals.Constant(field, type) + ";");
+                _source.Line("public " + ShadowKeyword(name) + "const " + constantType + " " + JavaNames.Escape(name) +
+                    " = " + JavaLiterals.Constant(field, type) + ";");
             }
             else
             {
-                _source.Line("public " + (field.IsStatic ? "static " : string.Empty) + JavaTypeMapping.GetTypeName(type, _mappings) + " " + JavaNames.Escape(name));
+                _source.Line("public " + ShadowKeyword(name) + (field.IsStatic ? "static " : string.Empty) +
+                    JavaTypeMapping.GetTypeName(type, _mappings) + " " + JavaNames.Escape(name));
                 _source.Open();
                 _source.Line("get");
                 _source.Open();
@@ -439,7 +614,7 @@ namespace MajdataPlay.SourceGenerators.AndroidJava
             if (constructor)
             {
                 _source.Line("public " + JavaNames.Escape(_wrapper.Symbol.Name) + "(" + parameterList + ")");
-                _source.Line("    : base(" + JavaLiterals.String(_type.Name) + ", " + JavaLiterals.String(metadata.Descriptor) + ", " + arguments + ")");
+                _source.Line("    : base(" + ConstructorInitializer(metadata.Descriptor, arguments) + ")");
                 _source.Open();
                 _source.Close();
             }
@@ -454,7 +629,8 @@ namespace MajdataPlay.SourceGenerators.AndroidJava
             }
             else
             {
-                _source.Line("public " + (metadata.IsStatic ? "static " : string.Empty) + JavaTypeMapping.GetTypeName(signature.ReturnType, _mappings) +
+                _source.Line("public " + StaticShadowKeyword(method) + (metadata.IsStatic ? "static " : string.Empty) +
+                    JavaTypeMapping.GetTypeName(signature.ReturnType, _mappings) +
                     " " + JavaNames.Escape(method.Name) + "(" + parameterList + ")");
                 _source.Open();
                 var isVoid = signature.ReturnType.Code == 'V';
@@ -467,20 +643,49 @@ namespace MajdataPlay.SourceGenerators.AndroidJava
             _source.Line();
         }
 
-        /// <summary>Allocates a deterministic suffix when runtime, type, field, or method names conflict.</summary>
+        /// <summary>Allocates a method name, keeping Java overloads that differ only by signature.</summary>
         /// <param name="preferred">The preferred PascalCase name.</param>
-        /// <param name="suffix">The member-kind suffix used on conflict.</param>
-        /// <param name="allowUserOverloads">Whether distinct handwritten methods may share the name.</param>
-        /// <returns>The safe generated identifier.</returns>
-        private string AllocateName(string preferred, string suffix, bool allowUserOverloads)
+        /// <param name="parameterTypes">The generated parameter types of this overload.</param>
+        /// <returns>The safe generated method name for this exact signature.</returns>
+        private string AllocateMethodName(string preferred, IReadOnlyList<string> parameterTypes)
         {
             var name = preferred;
-            if (_userMembers.TryGetValue(name, out var user) && (!allowUserOverloads || user.Any(member => !(member is IMethodSymbol))))
+            var signature = MethodSignature(name, parameterTypes);
+            if (_userMembers.TryGetValue(name, out var user) && user.Any(member => !(member is IMethodSymbol)))
+            {
+                UserConflict("Generated Java method '" + name + "' conflicts with a handwritten member in '" + _wrapper.Symbol.ToDisplayString() + "'.");
+            }
+            var index = 1;
+            while (_allocatedNames.Contains(name) || _reservedMethodSignatures.Contains(signature) ||
+                _generatedMethodSignatures.Contains(signature) ||
+                (_userMembers.TryGetValue(name, out user) && user.Any(member => !(member is IMethodSymbol))))
+            {
+                name = preferred + "JavaMethod" + (index == 1 ? string.Empty : index.ToString(CultureInfo.InvariantCulture));
+                signature = MethodSignature(name, parameterTypes);
+                index++;
+            }
+            _generatedMethodSignatures.Add(signature);
+            if (name != preferred)
+            {
+                _report(GeneratorDiagnostics.RenamedMember, "Generated method '" + preferred + "' on Java type '" + _type.Name +
+                    "' was renamed to '" + name + "' to avoid a reserved runtime, field, or handwritten-member name conflict.");
+            }
+            return name;
+        }
+
+        /// <summary>Allocates a deterministic suffix when runtime, type, or field names conflict.</summary>
+        /// <param name="preferred">The preferred PascalCase name.</param>
+        /// <param name="suffix">The member-kind suffix used on conflict.</param>
+        /// <returns>The safe generated identifier.</returns>
+        private string AllocateName(string preferred, string suffix)
+        {
+            var name = preferred;
+            if (_userMembers.TryGetValue(name, out var user) && user.Any(member => !(member is IMethodSymbol)))
             {
                 UserConflict("Generated Java member '" + name + "' conflicts with a handwritten member in '" + _wrapper.Symbol.ToDisplayString() + "'.");
             }
             var index = 1;
-            while (_allocatedNames.Contains(name) || (_userMembers.TryGetValue(name, out user) && (!allowUserOverloads || user.Any(member => !(member is IMethodSymbol)))))
+            while (_allocatedNames.Contains(name) || (_userMembers.TryGetValue(name, out user) && user.Any(member => !(member is IMethodSymbol))))
             {
                 name = preferred + suffix + (index == 1 ? string.Empty : index.ToString(CultureInfo.InvariantCulture));
                 index++;

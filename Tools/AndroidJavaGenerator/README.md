@@ -2,7 +2,8 @@
 
 本工具为 `MajdataPlay.Platform.Android` 提供 `[JavaClass("binary.ClassName")]`。
 生成代码留在 Roslyn compilation 内，不把 `.g.cs` 写回 `Assets`，不改 Unity
-生成的解决方案或项目文件。每个 wrapper 都派生自 `JavaObject`。
+生成的解决方案或项目文件。每个 wrapper 默认以 `JavaObject` 为基类，也可以
+显式派生自另一个已标注 wrapper。
 
 ## 安装与最小使用方式
 
@@ -123,6 +124,37 @@ namespace MajdataPlay.Platform.Android.Bindings
 自定义 Java 代码仍应通过 Unity Android 插件/Gradle 正常进入 APK/AAB，
 SDK stubs `android.jar` 绝不能作为运行库打包。
 
+## 保留 C# 继承层次
+
+wrapper 声明可以显式派生自另一个 `[JavaClass]` wrapper，从而在 C# 中保留 Java
+的继承层次：
+
+```csharp
+[JavaClass("java.lang.Number", ApiLevel = 36, IncludeInheritedMembers = false)]
+public partial class Number
+{
+}
+
+[JavaClass("java.lang.Integer", ApiLevel = 36, IncludeInheritedMembers = false)]
+public partial class Integer : Number
+{
+}
+```
+
+- 生成代码保留该 C# 基类，因此需要 `Number` 的地方可以直接传入 `Integer` 实例；
+  JNI 参数转换仍然取基类属性 `JavaReference`。
+- 基类 wrapper 已用同一擦除参数生成的 Java override 实例成员不会在派生 wrapper
+  中重复生成；通过基类成员调用时，JNI 仍虚分派到实际 Java 类型的最具体实现。
+- 基类同样生成的 `JavaClassName` 常量、同名字段/属性以及同名静态方法以 `new`
+  遮蔽，因此不产生 `CS0108`/`CS0109`。
+- 派生 wrapper 的 Java 构造器仍生成 `public` C# 构造器。基类只暴露引用包装构造器，
+  所以生成代码先用 `AndroidJni.Construct` 创建 Java 实例，再通过基类构造器采用引用。
+- 只有基类 wrapper 与派生 wrapper 由同一次提取（同一 group、同一 SDK/输入配置）
+  生成时才能完成上述去重；跨程序集或跨输入配置的基类不会去重，此时需自行确认
+  派生 wrapper 没有隐藏基类成员。
+- 生成器不校验声明的 C# 基类是否真的是该 Java 类型的祖先，也不做 Java 侧的
+  祖先查询：声明方负责保证 `[JavaClass]` 之间的派生关系与 Java 层一致。
+
 ## SDK 与 JDK 配置
 
 按以下顺序寻找工具：
@@ -156,17 +188,24 @@ Roslyn 若复用完全不变的 compilation 和已缓存 driver，会跳过 gene
   → `const`。没有编译期值的 final fields 仍从 JNI getter 读取。
 - Java enum 的常量 → static getter，`values` / `valueOf` → 方法。
 - public inherited members 默认展开到 wrapper；可用
-  `IncludeInheritedMembers = false` 仅生成声明成员。Java 继承并不自动生成
-  C# 继承层次，所有 wrapper 以 `JavaObject` 为直接基类。
+  `IncludeInheritedMembers = false` 仅生成声明成员。默认所有 wrapper 以
+  `JavaObject` 为直接基类（Java 继承被扁平化）；若声明中写出另一个已标注
+  wrapper 作为基类，则保留 C# 继承层次，见“保留 C# 继承层次”。
 - Java 类及其父类对 `Object.equals(Object)`、`hashCode()`、`toString()` 的
   实际重写会生成对应的 C# `Equals(object?)`、`GetHashCode()`、`ToString()`
   override，并直接通过精确 JNI descriptor 调用目标 Java 对象的虚方法；这个检查独立于
   `IncludeInheritedMembers`。重写 `equals` 时还实现 `IEquatable<当前wrapper>`
   和 nullable typed `Equals`，并显式生成 `GetHashCode`，即使 Java 沿用父类哈希。
   Java 接口声明、同名重载和 static 方法不视为 Object 重写。三个精确 Object
-  实例签名不再生成 `EqualsJavaMethod`、`HashCode`、`ToStringJavaMethod`；
-  未声明重写的 wrapper 和接口 wrapper 沿用 `JavaObject` 的 JNI 实现。
-  其他同名重载与 static 方法仍正常映射；与手写方法或属性冲突时报 `AJG008`。
+  实例签名不再生成普通方法别名；未声明重写的 wrapper 和接口 wrapper 沿用
+  `JavaObject` 的 JNI 实现。
+- 名字分配按**签名**避让：只有与运行时/CLR 成员同名**且同签名**的 Java 成员
+  才会被改名（例如 Java 的 `dispose()` 对 `JavaObject.Dispose()`、Java 的
+  `getHashCode()` 对 `GetHashCode()`），并在 `AJG007` 中说明。与运行时成员
+  同名但参数不同的 Java 成员保留自然的 C# 名并形成重载：Java 的
+  `toString(int)`、`toString(String)` 生成 `ToString(int)`、`ToString(String)`，
+  与生成的 `ToString()` override 合法共存，不再产生 `ToStringJavaMethod` 之类
+  的别名。与手写方法或属性冲突时报 `AJG008`。
 - Java `byte` → C# `sbyte`；`char` → UTF-16 `char`；其余 primitive 精确对应。
 - `String` → `string?`。被同一 compilation `[JavaClass]` 标记的引用类型 →
   对应 wrapper；其他 Java 引用 → `AndroidJavaObject?`，不虚构 C# 类型。
@@ -262,7 +301,9 @@ Android SDK；source/class/JAR fixtures 位于 ignored Temp 中。
 第二条命令只启动固定版本的**隔离** Unity 工程，验证真实 Unity Roslyn
 analyzer loading、SDK wrappers 编译、public 构造器重载、接口和 getter-only
 属性、无 public 构造器/接口/抽象类只包装已有引用，以及 Editor JNI guard。
-同时验证 SDK Object overrides 和 `IEquatable` 的生成与接口映射。
+同时验证 SDK Object overrides 和 `IEquatable` 的生成与接口映射，以及
+`wrapper-base-inheritance`：wrapper 声明另一个 wrapper 为 C# 基类时的基类名、
+Java override 去重、`new` 遮蔽与派生构造器的实例创建。
 它们均不代表 Android Player、Mono/IL2CPP、ARMv7/ARM64 或真实设备 JNI
 运行成功。发版前必须分别验证构造/静态与实例调用、nullable 和 jagged arrays、
 接口参数、引用释放、Java exception 传播，以及低版本设备的 API guards。

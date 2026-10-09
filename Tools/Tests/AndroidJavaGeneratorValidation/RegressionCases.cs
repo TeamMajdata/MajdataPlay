@@ -22,7 +22,7 @@ namespace MajdataPlay.Tests.AndroidJavaGeneratorValidation
         /// </summary>
         public static readonly string[] Names =
         {
-            "source-api", "explicit-java-object-base", "constructor-visibility", "sdk-constructors", "class-api", "jar-api", "inner-descriptor-parity", "assembly-configuration", "configuration-precedence",
+            "source-api", "explicit-java-object-base", "wrapper-base-inheritance", "constructor-visibility", "sdk-constructors", "class-api", "jar-api", "inner-descriptor-parity", "assembly-configuration", "configuration-precedence",
             "unity-data-paths", "unity-data-managed-references", "unity-data-player-references", "unity-data-editor-paths", "unity-data-missing",
             "classpath-only", "documentation-path-array", "no-inherited", "determinism", "source-refresh", "android-symbol-compilation",
             "invalid-nonpartial", "invalid-static", "invalid-nested", "invalid-generic", "duplicate-mapping",
@@ -83,6 +83,9 @@ namespace MajdataPlay.Tests.AndroidJavaGeneratorValidation
                     break;
                 case "constructor-visibility":
                     AssertConstructorVisibility(runner, workspace, name);
+                    break;
+                case "wrapper-base-inheritance":
+                    AssertWrapperBaseInheritance(runner, name);
                     break;
                 case "sdk-constructors":
                     AssertSdkConstructors(runner, workspace, name);
@@ -299,6 +302,51 @@ namespace MajdataPlay.Tests.AndroidJavaGeneratorValidation
             var declaration = ConstructorDeclarations(workspace, Array.Empty<string>(), types);
             var run = runner.Run(runner.CreateCompilation(declaration, name), name);
             ApiAssertions.AssertSdkConstructors(run);
+        }
+
+        /// <summary>
+        /// Checks that an annotated wrapper may derive from another annotated wrapper and inherits its Java overrides.
+        /// </summary>
+        /// <param name="runner">The real generator driver factory.</param>
+        /// <param name="name">The isolated case name.</param>
+        /// <exception cref="InvalidOperationException">Generation fails or an inheritance assertion fails.</exception>
+        private static void AssertWrapperBaseInheritance(GeneratorRunner runner, string name)
+        {
+            var source = "#nullable enable\r\nusing MajdataPlay.Platform.Android;\r\n"
+                + "[assembly: JavaApiConfiguration(ApiLevel = 36, IncludeInheritedMembers = false)]\r\n"
+                + "namespace Fixtures.Wrappers\r\n{\r\n"
+                + "    [JavaClass(\"java.lang.Number\")]\r\n    public partial class NumberWrapper\r\n    {\r\n    }\r\n"
+                + "    [JavaClass(\"java.lang.Integer\")]\r\n    public partial class IntegerWrapper : NumberWrapper\r\n    {\r\n    }\r\n"
+                + "}\r\n";
+            var run = runner.Run(runner.CreateCompilation(source, name), name);
+            run.AssertCompiles();
+            var number = ApiAssertions.Type(run, "NumberWrapper");
+            var integer = ApiAssertions.Type(run, "IntegerWrapper");
+            Check.True(SymbolEqualityComparer.Default.Equals(integer.BaseType, number),
+                "An annotated wrapper must be usable as the generated C# base class.");
+            Check.Equal("MajdataPlay.Platform.Android.Runtime.Java.Lang.JavaObject", number.BaseType?.ToDisplayString(),
+                "The annotated base wrapper must still derive from the runtime JavaObject.");
+            var numberName = (IFieldSymbol)Check.NotNull(integer.GetMembers("JavaClassName").SingleOrDefault(),
+                "the derived JavaClassName constant");
+            var baseName = (IFieldSymbol)Check.NotNull(number.GetMembers("JavaClassName").SingleOrDefault(),
+                "the base JavaClassName constant");
+            Check.Equal("java.lang.Integer", numberName.ConstantValue as string, "The derived wrapper's Java class name constant");
+            Check.Equal("java.lang.Number", baseName.ConstantValue as string, "The base wrapper's Java class name constant");
+            Check.Equal(0, integer.GetMembers("IntValue").Length,
+                "A Java override already generated on the base wrapper must not be repeated on the derived wrapper.");
+            Check.Equal(1, number.GetMembers("IntValue").Length, "The base wrapper must keep its Java override member.");
+            Check.True(integer.InstanceConstructors.Any(constructor => !constructor.IsImplicitlyDeclared &&
+                    constructor.Parameters.Length == 1 && constructor.Parameters[0].Type.SpecialType == SpecialType.System_Int32),
+                "The derived wrapper must keep the Java constructor that creates its own Java instance.");
+            Check.True(integer.GetMembers("ToString").OfType<IMethodSymbol>().Any(method => method.IsStatic && method.Parameters.Length == 1),
+                "A Java toString overload must keep the natural C# ToString name instead of a renamed alias.");
+            Check.Equal(0, integer.GetMembers("ToStringJavaMethod").Length,
+                "A renamed Object method alias must not be emitted.");
+            Check.True(run.GeneratedSources.Values.Any(generated => generated.Contains("Construct(\"java.lang.Integer\"", StringComparison.Ordinal)),
+                "A derived wrapper constructor must create the Java instance before adopting it through the base wrapper.");
+            Check.True(!run.Output.GetDiagnostics().Any(diagnostic =>
+                    diagnostic.Id == "CS0108" || diagnostic.Id == "CS0109" || diagnostic.Id == "CS0114"),
+                "A derived wrapper must not hide base members without an explicit modifier.\r\n" + run.DescribeDiagnostics());
         }
 
         /// <summary>

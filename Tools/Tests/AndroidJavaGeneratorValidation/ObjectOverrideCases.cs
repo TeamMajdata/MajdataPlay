@@ -85,6 +85,11 @@ namespace MajdataPlay.Tests.AndroidJavaGeneratorValidation
             AssertJavaMethod(run, "OverloadsWrapper", "equals", "(Lfixtures/ObjectOverrides$Overloads;)Z", false);
             AssertJavaMethod(run, "OverloadsWrapper", "hashCode", "(I)I", false);
             AssertJavaMethod(run, "OverloadsWrapper", "toString", "(Ljava/lang/String;)Ljava/lang/String;", false);
+            Check.True(ApiAssertions.Type(run, "OverloadsWrapper").GetMembers("ToString").OfType<IMethodSymbol>()
+                    .Any(method => !method.IsStatic && method.Parameters.Length == 1),
+                "A Java toString overload must keep the natural C# ToString name instead of a renamed alias.");
+            Check.Equal(0, ApiAssertions.Type(run, "StaticLookalikesWrapper").GetMembers("ToStringJavaMethod").Length,
+                "A static Java toString lookalike must not produce a renamed Object alias.");
             AssertJavaMethod(run, "OverloadsWrapper", "getHashCode", "()I", false);
             AssertJavaMethod(run, "StaticLookalikesWrapper", "equals", "(Ljava/lang/String;)Z", true);
             AssertJavaMethod(run, "StaticLookalikesWrapper", "hashCode", "(I)I", true);
@@ -101,6 +106,18 @@ namespace MajdataPlay.Tests.AndroidJavaGeneratorValidation
                 Check.True(run.GeneratedSources.SequenceEqual(reused.GeneratedSources), "Object overrides and IEquatable declarations must remain deterministic on a reused driver.");
                 Check.True(run.GeneratedSources.SequenceEqual(fresh.GeneratedSources), "Object overrides and IEquatable declarations must remain deterministic on a fresh driver.");
             }
+        }
+
+        /// <summary>
+        /// Determines whether a generated method maps a Java member instead of a managed Object override.
+        /// </summary>
+        /// <param name="method">The generated method symbol.</param>
+        /// <returns>Whether the method body forwards to a Java member.</returns>
+        private static bool IsJavaMapped(IMethodSymbol method)
+        {
+            return Declaration(method).DescendantNodes().OfType<InvocationExpressionSyntax>().Any(invocation =>
+                invocation.ArgumentList.Arguments.Count >= 4 &&
+                invocation.ArgumentList.Arguments[2].Expression is LiteralExpressionSyntax);
         }
 
         /// <summary>
@@ -154,7 +171,8 @@ namespace MajdataPlay.Tests.AndroidJavaGeneratorValidation
             AssertOverride(run, type, "GetHashCode", hashCode, SpecialType.System_Int32);
             AssertOverride(run, type, "ToString", toString, SpecialType.System_String);
             var typedMethods = type.GetMembers("Equals").OfType<IMethodSymbol>().Where(method => method.Parameters.Length == 1
-                && SymbolEqualityComparer.Default.Equals(method.Parameters[0].Type, type)).ToArray();
+                && SymbolEqualityComparer.Default.Equals(method.Parameters[0].Type, type)
+                && !IsJavaMapped(method)).ToArray();
             Check.Equal(equals ? 1 : 0, typedMethods.Length, name + " typed Equals count");
             var interfaces = type.AllInterfaces.Where(item => item.OriginalDefinition.MetadataName == "IEquatable`1"
                 && item.ContainingNamespace.ToDisplayString() == "System").ToArray();
