@@ -33,6 +33,15 @@ namespace MajdataPlay.SourceGenerators.AndroidJava
         /// <summary>Gets or sets whether this Java type is final.</summary>
         internal bool IsFinal { get; set; }
 
+        /// <summary>Gets or sets whether the class hierarchy overrides Java Object.equals(Object).</summary>
+        internal bool OverridesEquals { get; set; }
+
+        /// <summary>Gets or sets whether the class hierarchy overrides Java Object.hashCode().</summary>
+        internal bool OverridesHashCode { get; set; }
+
+        /// <summary>Gets or sets whether the class hierarchy overrides Java Object.toString().</summary>
+        internal bool OverridesToString { get; set; }
+
         /// <summary>Gets the exported fields in deterministic metadata order.</summary>
         internal List<JavaApiField> Fields { get; } = new List<JavaApiField>();
 

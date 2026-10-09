@@ -396,6 +396,9 @@ public final class JavaApiExtractor {
             attribute(xml, "interface", isInterface);
             attribute(xml, "abstract", modifiers.contains(Modifier.ABSTRACT));
             attribute(xml, "final", modifiers.contains(Modifier.FINAL));
+            attribute(xml, "overridesEquals", overridesObjectMethod(type, "equals", "(Ljava/lang/Object;)Z"));
+            attribute(xml, "overridesHashCode", overridesObjectMethod(type, "hashCode", "()I"));
+            attribute(xml, "overridesToString", overridesObjectMethod(type, "toString", "()Ljava/lang/String;"));
             attribute(xml, "deprecated", elements.isDeprecated(type));
             attribute(xml, "summary", docs.summary);
             attribute(xml, "documentationUrl", referenceUrl(type));
@@ -454,6 +457,47 @@ public final class JavaApiExtractor {
                 xml.append("/>\n");
             }
             xml.append("  </type>\n");
+        }
+
+        /**
+         * Detects actual class overrides independently of public member flattening.
+         * Abstract declarations count because concrete runtime subtypes provide dispatch.
+         *
+         * @param type the requested Java class
+         * @param name the exact java.lang.Object method name
+         * @param descriptor the complete erased Object method descriptor
+         * @return whether a non-Object class declaration overrides the Object method
+         * @throws ExtractionException if the method signature contains an unresolved dependency
+         */
+        private boolean overridesObjectMethod(TypeElement type, String name, String descriptor) throws ExtractionException {
+            if (type.getKind().isInterface() || binaryName(type).equals("java.lang.Object")) {
+                return false;
+            }
+            var objectType = elements.getTypeElement("java.lang.Object");
+            ExecutableElement objectMethod = null;
+            for (var member : objectType.getEnclosedElements()) {
+                if (member instanceof ExecutableElement method && member.getKind() == ElementKind.METHOD
+                        && method.getSimpleName().contentEquals(name) && methodDescriptor(method).equals(descriptor)) {
+                    objectMethod = method;
+                    break;
+                }
+            }
+            if (objectMethod == null) {
+                return false;
+            }
+            for (var member : elements.getAllMembers(type)) {
+                if (!(member instanceof ExecutableElement method) || member.getKind() != ElementKind.METHOD
+                        || !method.getSimpleName().contentEquals(name) || method.getModifiers().contains(Modifier.STATIC)
+                        || elements.getOrigin(method) == Elements.Origin.SYNTHETIC || elements.isBridge(method)) {
+                    continue;
+                }
+                var owner = declaringType(method);
+                if (!owner.getKind().isInterface() && !binaryName(owner).equals("java.lang.Object")
+                        && methodDescriptor(method).equals(descriptor) && elements.overrides(method, objectMethod, type)) {
+                    return true;
+                }
+            }
+            return false;
         }
 
         /** Rejects missing hierarchy dependencies, including generic bound errors. */

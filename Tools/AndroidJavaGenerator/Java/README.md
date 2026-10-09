@@ -83,6 +83,7 @@ is published. Compiler warnings are collected internally and do not alter stdout
 <?xml version="1.0" encoding="UTF-8"?>
 <java-api version="1">
   <type name="com.example.Example" interface="false" abstract="false" final="false"
+        overridesEquals="false" overridesHashCode="false" overridesToString="false"
         deprecated="false" summary="Example API." documentationUrl="">
     <field name="COUNT" descriptor="I" static="true" final="true" deprecated="false"
            declaringType="com.example.Example" constantKind="int" constantValue="123"
@@ -101,6 +102,14 @@ is published. Compiler warnings are collected internally and do not alter stdout
   internal names, such as Lcom/example/Example$Inner;, not canonical dotted names.
 - interface, abstract, final, static and deprecated are lowercase true/false.
   Type flags reflect compiler modifiers (an interface is also abstract).
+- overridesEquals, overridesHashCode and overridesToString are lowercase true/false
+  type flags for actual overrides of Object.equals(Object):boolean,
+  Object.hashCode():int and Object.toString():String. Compiler override relationships
+  include inherited non-Object class declarations even with --include-inherited false,
+  including abstract declarations and final implementations such as Enum.equals.
+  Object itself and interfaces are false; overloads, static methods and interface
+  redeclarations do not count. These version-one extension attributes are optional
+  to readers and default to false when absent; public method metadata is unchanged.
 - summary, returns and documentationUrl are always present, and empty if unavailable.
   returns is documentation text, **not** a Java type; the return type is in descriptor.
 - Types sort by binary name. Fields sort by name, erased descriptor and declaring

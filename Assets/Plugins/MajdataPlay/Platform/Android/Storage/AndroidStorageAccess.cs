@@ -151,7 +151,7 @@ namespace MajdataPlay.Platform.Android.Storage
                         ?? throw new IOException("Android returned no persisted URI permission."));
                     using var uri = permission.GetUri()
                         ?? throw new IOException("Android returned a persisted grant without a URI.");
-                    var location = uri.ToStringJavaMethod()
+                    var location = uri.ToString()
                         ?? throw new IOException("Android returned a persisted grant without a URI string.");
                     result[i] = new AndroidStoragePermission(location,
                         permission.IsReadPermission(), permission.IsWritePermission(),
@@ -461,7 +461,7 @@ namespace MajdataPlay.Platform.Android.Storage
             {
                 throw new IOException("The document picker returned no URI.");
             }
-            var location = uri.ToStringJavaMethod()
+            var location = uri.ToString()
                 ?? throw new IOException("The document picker returned no URI string.");
             ValidateContentUri(location);
             if (pending.Tree)

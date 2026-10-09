@@ -29,6 +29,30 @@ namespace MajdataPlay.Tests.Bindings
     }
 
     /// <summary>
+    /// Exercises inherited Object overrides and typed equality for an erased Java generic class.
+    /// </summary>
+    [JavaClass("java.util.ArrayList", ApiLevel = 36, IncludeInheritedMembers = false)]
+    public partial class JavaArrayList
+    {
+    }
+
+    /// <summary>
+    /// Exercises interface Object declarations without generating duplicate Java method aliases.
+    /// </summary>
+    [JavaClass("java.util.List", ApiLevel = 36, IncludeInheritedMembers = false)]
+    public partial class JavaList
+    {
+    }
+
+    /// <summary>
+    /// Exercises concrete equality and abstract formatting overrides on an Android SDK class.
+    /// </summary>
+    [JavaClass("android.net.Uri", ApiLevel = 36, IncludeInheritedMembers = false)]
+    public partial class AndroidUri
+    {
+    }
+
+    /// <summary>
     /// Exercises all public Android SDK constructor overloads, including a typed copy constructor.
     /// </summary>
     [JavaClass("android.content.Intent", ApiLevel = 36, IncludeInheritedMembers = false)]

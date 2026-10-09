@@ -95,7 +95,10 @@ namespace MajdataPlay.SourceGenerators.AndroidJava
                     Name = Required(element, "name"),
                     IsInterface = Boolean(element, "interface"),
                     IsAbstract = Boolean(element, "abstract"),
-                    IsFinal = Boolean(element, "final")
+                    IsFinal = Boolean(element, "final"),
+                    OverridesEquals = Boolean(element, "overridesEquals"),
+                    OverridesHashCode = Boolean(element, "overridesHashCode"),
+                    OverridesToString = Boolean(element, "overridesToString")
                 };
                 ValidateBinaryName(type.Name);
                 ReadDocumentation(element, type);

@@ -20,6 +20,18 @@ comparisons do not invoke JNI, including after disposal. Comparing distinct
 wrappers, hashing, and formatting require live references on a JVM-attached thread;
 accessing a disposed wrapper's reference throws `ObjectDisposedException`.
 
+When the target Java class or a superclass overrides these Object methods, the
+generator also emits the corresponding managed overrides. An `equals(Object)`
+override adds `IEquatable<TheWrapper>` and nullable typed `Equals`, plus an explicit
+`GetHashCode` override. Generated Object overrides invoke JNI directly with the
+exact descriptors for `equals(Object):boolean`, `hashCode():int`, and
+`toString():String`. These three instance signatures are excluded from ordinary
+method mapping, so `EqualsJavaMethod`, `HashCode`, and `ToStringJavaMethod` aliases
+are not generated. Same-name overloads retain their ordinary mappings.
+Detection is independent of inherited member flattening; Java interface
+declarations and same-name overloads do not qualify. Interface wrappers inherit
+the Object methods from `JavaObject`.
+
 See `Tools/AndroidJavaGenerator/README.md` at the repository root for installation,
 SDK/JDK configuration, Java inputs, member mapping, documentation provenance,
 ownership, threading, diagnostics, and managed/Unity/device validation limits.

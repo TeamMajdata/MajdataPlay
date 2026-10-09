@@ -28,7 +28,9 @@ namespace MajdataPlay.Tests.AndroidJavaGeneratorValidation
             "invalid-nonpartial", "invalid-static", "invalid-nested", "invalid-generic", "duplicate-mapping",
             "missing-java-type", "missing-dependency", "missing-source", "missing-classpath", "missing-documentation",
             "missing-sdk", "missing-platform", "missing-jdk", "missing-extractor", "negative-api",
-            "member-collisions", "user-member-collision", "runtime-map-array", "runtime-platform-guard", "runtime-object-semantics"
+            "member-collisions", "user-member-collision", "object-overrides-source", "object-overrides-class", "object-overrides-jar",
+            "object-overrides-no-inherited", "object-overrides-sdk", "object-overrides-user-conflicts",
+            "runtime-map-array", "runtime-platform-guard", "runtime-object-semantics"
         };
 
         /// <summary>
@@ -60,6 +62,11 @@ namespace MajdataPlay.Tests.AndroidJavaGeneratorValidation
             if (name.StartsWith("unity-data-", StringComparison.Ordinal))
             {
                 ConfigurationPathCases.Run(name, workspace);
+                return;
+            }
+            if (name.StartsWith("object-overrides-", StringComparison.Ordinal))
+            {
+                ObjectOverrideCases.Run(name, workspace);
                 return;
             }
             var runner = new GeneratorRunner(workspace);
@@ -219,16 +226,15 @@ namespace MajdataPlay.Tests.AndroidJavaGeneratorValidation
             var source = runner.RootDeclarations(sources, workspace.DocumentationPaths, includeInherited, assemblyConfiguration);
             var run = runner.Run(runner.CreateCompilation(source, name), name);
             ApiAssertions.AssertRootApi(run, includeInherited);
-            AssertObjectMemberAliases(run, includeInherited);
+            AssertObjectMembers(run);
         }
 
         /// <summary>
-        /// Requires inherited Java Object aliases to coexist with the JavaObject CLR overrides.
+        /// Requires ordinary Java Object methods to use inherited JavaObject CLR overrides without duplicate aliases.
         /// </summary>
         /// <param name="run">The completed fixture wrapper generation.</param>
-        /// <param name="includeInherited">Whether inherited Java members were requested.</param>
-        /// <exception cref="InvalidOperationException">An alias replaces a CLR override or ignores inherited-member configuration.</exception>
-        private static void AssertObjectMemberAliases(GeneratorRun run, bool includeInherited)
+        /// <exception cref="InvalidOperationException">An alias is emitted or a wrapper replaces an inherited CLR override unexpectedly.</exception>
+        private static void AssertObjectMembers(GeneratorRun run)
         {
             var widget = ApiAssertions.Type(run, "WidgetWrapper");
             foreach (var name in new[] { "Equals", "GetHashCode", "ToString" })
@@ -240,18 +246,7 @@ namespace MajdataPlay.Tests.AndroidJavaGeneratorValidation
             }
             foreach (var name in new[] { "EqualsJavaMethod", "HashCode", "ToStringJavaMethod" })
             {
-                Check.Equal(includeInherited ? 1 : 0, widget.GetMembers(name).Length, "Inherited Java Object alias " + name);
-            }
-            if (includeInherited)
-            {
-                var equals = ApiAssertions.Method(widget, "EqualsJavaMethod");
-                Check.True(!equals.IsOverride && equals.ReturnType.SpecialType == SpecialType.System_Boolean,
-                    "The Java equals alias must retain its generated Boolean signature.");
-                Check.Equal("AndroidJavaObject", equals.Parameters.Single().Type.Name, "Java equals alias erased Object parameter");
-                Check.Equal(SpecialType.System_Int32, ApiAssertions.Method(widget, "HashCode").ReturnType.SpecialType,
-                    "Java hashCode alias return type");
-                Check.Equal(SpecialType.System_String, ApiAssertions.Method(widget, "ToStringJavaMethod").ReturnType.SpecialType,
-                    "Java toString alias return type");
+                Check.Equal(0, widget.GetMembers(name).Length, "Java Object alias must not be emitted: " + name);
             }
         }
 

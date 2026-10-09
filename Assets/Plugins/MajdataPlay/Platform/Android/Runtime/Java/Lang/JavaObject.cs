@@ -94,6 +94,103 @@ namespace MajdataPlay.Platform.Android.Runtime.Java.Lang
         }
 
         /// <summary>
+        /// Compares this wrapper with another wrapper using the Java object's virtual <c>equals</c> method.
+        /// </summary>
+        /// <param name="obj">The object to compare with this wrapper.</param>
+        /// <returns>True for the same managed wrapper, or when Java considers two distinct wrappers equal; otherwise false.</returns>
+        /// <remarks>
+        /// Managed reference identity and null or non-wrapper comparisons do not invoke JNI, even after
+        /// disposal. Comparing distinct wrappers requires both references to remain live on the Unity
+        /// main thread or a JVM-attached thread.
+        /// </remarks>
+        /// <exception cref="ObjectDisposedException">Either distinct wrapper has been disposed.</exception>
+        /// <exception cref="PlatformNotSupportedException">A Java comparison is required outside an Android player.</exception>
+        /// <exception cref="AndroidJavaException">Java method lookup or invocation fails.</exception>
+        /// <exception cref="JavaInvocationException">Java raises an exception during the comparison.</exception>
+        /// <exception cref="InvalidOperationException">JNI cannot create a local frame.</exception>
+        public override bool Equals(object? obj)
+        {
+            if (ReferenceEquals(this, obj))
+            {
+                return true;
+            }
+
+            if (obj is not JavaObject other)
+            {
+                return false;
+            }
+
+            var javaObject = JavaReference;
+            var otherJavaObject = other.JavaReference;
+            return AndroidJni.Call<bool>(javaObject, ObjectClassName, "equals", "(Ljava/lang/Object;)Z", otherJavaObject);
+        }
+
+        /// <summary>
+        /// Gets the hash code returned by the Java object's virtual <c>hashCode</c> method.
+        /// </summary>
+        /// <returns>The wrapped Java object's hash code.</returns>
+        /// <exception cref="ObjectDisposedException">This wrapper has been disposed.</exception>
+        /// <exception cref="PlatformNotSupportedException">Execution is not in an Android player.</exception>
+        /// <exception cref="AndroidJavaException">Java method lookup or invocation fails.</exception>
+        /// <exception cref="JavaInvocationException">Java raises an exception while computing the hash code.</exception>
+        /// <exception cref="InvalidOperationException">JNI cannot create a local frame.</exception>
+        public override int GetHashCode()
+        {
+            return AndroidJni.Call<int>(JavaReference, ObjectClassName, "hashCode", "()I");
+        }
+
+        /// <summary>
+        /// Gets the string returned by the Java object's virtual <c>toString</c> method.
+        /// </summary>
+        /// <returns>The wrapped Java object's string representation, or null if Java returns null.</returns>
+        /// <exception cref="ObjectDisposedException">This wrapper has been disposed.</exception>
+        /// <exception cref="PlatformNotSupportedException">Execution is not in an Android player.</exception>
+        /// <exception cref="AndroidJavaException">Java method lookup or invocation fails.</exception>
+        /// <exception cref="JavaInvocationException">Java raises an exception while creating the string representation.</exception>
+        /// <exception cref="InvalidOperationException">JNI cannot create a local frame.</exception>
+        public override string? ToString()
+        {
+            return AndroidJni.Call<string?>(JavaReference, ObjectClassName, "toString", "()Ljava/lang/String;");
+        }
+
+        /// <summary>
+        /// Compares two nullable wrappers using managed identity, null checks, and virtual Java equality.
+        /// </summary>
+        /// <param name="left">The first wrapper, or null.</param>
+        /// <param name="right">The second wrapper, or null.</param>
+        /// <returns>True when both operands are null, are the same managed wrapper, or compare equal; otherwise false.</returns>
+        /// <exception cref="ObjectDisposedException">Either distinct non-null wrapper has been disposed.</exception>
+        /// <exception cref="PlatformNotSupportedException">A Java comparison is required outside an Android player.</exception>
+        /// <exception cref="AndroidJavaException">Java method lookup or invocation fails.</exception>
+        /// <exception cref="JavaInvocationException">Java raises an exception during the comparison.</exception>
+        /// <exception cref="InvalidOperationException">JNI cannot create a local frame.</exception>
+        public static bool operator ==(JavaObject? left, JavaObject? right)
+        {
+            if (ReferenceEquals(left, right))
+            {
+                return true;
+            }
+
+            return left is not null && right is not null && left.Equals(right);
+        }
+
+        /// <summary>
+        /// Determines whether two nullable wrappers differ according to the equality operator.
+        /// </summary>
+        /// <param name="left">The first wrapper, or null.</param>
+        /// <param name="right">The second wrapper, or null.</param>
+        /// <returns>True when the equality operator returns false; otherwise false.</returns>
+        /// <exception cref="ObjectDisposedException">Either distinct non-null wrapper has been disposed.</exception>
+        /// <exception cref="PlatformNotSupportedException">A Java comparison is required outside an Android player.</exception>
+        /// <exception cref="AndroidJavaException">Java method lookup or invocation fails.</exception>
+        /// <exception cref="JavaInvocationException">Java raises an exception during the comparison.</exception>
+        /// <exception cref="InvalidOperationException">JNI cannot create a local frame.</exception>
+        public static bool operator !=(JavaObject? left, JavaObject? right)
+        {
+            return !(left == right);
+        }
+
+        /// <summary>
         /// Releases an owned reference once, or stops borrowing an externally owned reference.
         /// </summary>
         /// <remarks>

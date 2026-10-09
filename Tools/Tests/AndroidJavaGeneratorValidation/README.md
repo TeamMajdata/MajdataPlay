@@ -138,9 +138,26 @@ are not accepted as successful negative-test results.
 - Nullable annotated-wrapper references, nullable unknown AndroidJavaObject
   references, interface/concrete overloads, generic and bounded-generic erasure.
 - Public inherited methods, inherited static methods, covariant override
-  selection, field hiding, and IncludeInheritedMembers=false. Inherited
-  `EqualsJavaMethod`, `HashCode`, and `ToStringJavaMethod` aliases remain separate
-  from the CLR overrides inherited from `JavaObject`.
+  selection, field hiding, and IncludeInheritedMembers=false. Exact instance
+  `equals(Object)`, `hashCode()`, and `toString()` signatures never produce
+  duplicate ordinary Java aliases, including interface redeclarations and
+  inherited Object members. Genuine overloads and static lookalikes survive.
+- Effective Java `equals(Object)`, `hashCode()`, and `toString()` overrides across
+  source/class/JAR inputs generate the corresponding nullable CLR overrides.
+  Equality additionally generates `IEquatable<Self>` and nullable typed equality,
+  with direct Java `GetHashCode` dispatch even when Java overrides only `equals`. Inherited
+  implementations remain effective with IncludeInheritedMembers=false. Plain
+  Object behavior, overloads, static lookalikes, the `getHashCode` spelling,
+  interface redeclarations, and classes inheriting only Object implementations
+  do not trigger overrides. Generated overrides call `AndroidJni.Call` directly
+  using the target Java class and exact JNI method descriptors. Real SDK
+  ArrayList/StringBuilder/Object/List/Uri requests,
+  deterministic reused/fresh driver output, and handwritten override/typed
+  equality AJG008 conflicts are covered without executing JNI.
+  In-memory emission and uninitialized generated wrappers additionally verify
+  managed identity, null/unrelated CLR shortcuts, typed equality, cross-wrapper
+  disposal guards, and hash/string disposal guards. These instances contain no
+  Java reference or JNI handle and do not validate live Java virtual dispatch.
 - Public constructor overloads, implicit public defaults, parameterized-only
   constructors, and exclusion of private/protected/package constructors across
   source/class/JAR inputs. SDK-only API-36 bindings verify Intent constructor

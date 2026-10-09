@@ -113,14 +113,17 @@ namespace MajdataPlay.SourceGenerators.AndroidJava
                 "JNI invocation requires an Android player and the Unity main thread or a JVM-attached thread. " +
                 "Java inheritance is flattened; this wrapper does not implement Java callback interfaces.");
             Deprecated(_type);
+            var wrapperType = _wrapper.Symbol.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
             _source.Line((_wrapper.Symbol.DeclaredAccessibility == Accessibility.Public ? "public" : "internal") +
-                " partial class " + JavaNames.Escape(_wrapper.Symbol.Name) + " : global::MajdataPlay.Platform.Android.Runtime.Java.Lang.JavaObject");
+                " partial class " + JavaNames.Escape(_wrapper.Symbol.Name) + " : global::MajdataPlay.Platform.Android.Runtime.Java.Lang.JavaObject" +
+                (_type.OverridesEquals ? ", global::System.IEquatable<" + wrapperType + ">" : string.Empty));
             _source.Open();
             var classNameMember = AllocateName("JavaClassName", "JavaField", false);
             _source.Documentation("summary", "Gets the exact Java binary class name used by this wrapper.");
             _source.Line("public const string " + JavaNames.Escape(classNameMember) + " = " + JavaLiterals.String(_type.Name) + ";");
             _source.Line();
             EmitWrappingConstructor();
+            EmitObjectOverrides(wrapperType);
             var methods = PrepareMethods();
             foreach (var field in _type.Fields.OrderBy(field => field.Name, StringComparer.Ordinal)
                 .ThenBy(field => field.DeclaringType, StringComparer.Ordinal).ThenBy(field => field.Descriptor, StringComparer.Ordinal))
@@ -158,6 +161,108 @@ namespace MajdataPlay.SourceGenerators.AndroidJava
             _source.Line();
         }
 
+        /// <summary>Mirrors effective Java Object overrides and provides strongly typed equality.</summary>
+        /// <param name="wrapperType">The fully qualified generated wrapper type.</param>
+        private void EmitObjectOverrides(string wrapperType)
+        {
+            if (_type.OverridesEquals)
+            {
+                CheckObjectMethod("Equals", new[] { "object?" });
+                CheckObjectMethod("Equals", new[] { wrapperType + "?" });
+                _source.Documentation("summary", "Compares wrappers using the Java object's virtual equals(Object) method.");
+                _source.Documentation("param", "The object to compare with this wrapper.", " name=\"obj\"");
+                _source.Documentation("returns", "True for the same wrapper or a Java-equal wrapper; otherwise false.");
+                InvocationExceptions(true);
+                _source.Line("public override bool Equals(object? obj)");
+                _source.Open();
+                _source.Line("if (global::System.Object.ReferenceEquals(this, obj))");
+                _source.Open();
+                _source.Line("return true;");
+                _source.Close();
+                _source.Line();
+                _source.Line("if (obj is not global::MajdataPlay.Platform.Android.Runtime.Java.Lang.JavaObject other)");
+                _source.Open();
+                _source.Line("return false;");
+                _source.Close();
+                _source.Line();
+                _source.Line("var javaObject = JavaReference;");
+                _source.Line("var otherJavaObject = other.JavaReference;");
+                _source.Line("return " + JavaTypeMapping.JniType + ".Call<bool>(javaObject, " + JavaLiterals.String(_type.Name) +
+                    ", \"equals\", \"(Ljava/lang/Object;)Z\", otherJavaObject);");
+                _source.Close();
+                _source.Line();
+
+                _source.Documentation("summary", "Compares another wrapper of this type using the same Java equality semantics.");
+                _source.Documentation("param", "The wrapper to compare with this instance, or null.", " name=\"other\"");
+                _source.Documentation("returns", "True for the same wrapper or a Java-equal wrapper; otherwise false.");
+                InvocationExceptions(true);
+                _source.Line("public bool Equals(" + wrapperType + "? other)");
+                _source.Open();
+                _source.Line("return Equals((object?)other);");
+                _source.Close();
+                _source.Line();
+            }
+            // C# requires an explicit hash override alongside Equals, even when Java inherits its hashCode.
+            if (_type.OverridesHashCode || _type.OverridesEquals)
+            {
+                CheckObjectMethod("GetHashCode", Array.Empty<string>());
+                _source.Documentation("summary", "Returns the Java object's virtual hashCode() result.");
+                _source.Documentation("returns", "The hash code provided by the Java object.");
+                InvocationExceptions(true);
+                _source.Line("public override int GetHashCode()");
+                _source.Open();
+                _source.Line("return " + JavaTypeMapping.JniType + ".Call<int>(JavaReference, " + JavaLiterals.String(_type.Name) + ", \"hashCode\", \"()I\");");
+                _source.Close();
+                _source.Line();
+            }
+            if (_type.OverridesToString)
+            {
+                CheckObjectMethod("ToString", Array.Empty<string>());
+                _source.Documentation("summary", "Returns the Java object's virtual toString() result.");
+                _source.Documentation("returns", "The string provided by the Java object, which may be null.");
+                InvocationExceptions(true);
+                _source.Line("public override string? ToString()");
+                _source.Open();
+                _source.Line("return " + JavaTypeMapping.JniType + ".Call<string?>(JavaReference, " + JavaLiterals.String(_type.Name) + ", \"toString\", \"()Ljava/lang/String;\");");
+                _source.Close();
+                _source.Line();
+            }
+        }
+
+        /// <summary>Rejects handwritten members that conflict with fixed Object override signatures.</summary>
+        /// <param name="name">The managed Object method name.</param>
+        /// <param name="parameterTypes">The generated C# parameter types.</param>
+        private void CheckObjectMethod(string name, IReadOnlyList<string> parameterTypes)
+        {
+            if (_wrapper.Symbol.Name == name)
+            {
+                UserConflict("Wrapper type '" + _wrapper.Symbol.ToDisplayString() + "' has the same name as required generated method '" + name + "'.");
+            }
+            foreach (var method in _wrapper.Symbol.GetMembers().OfType<IMethodSymbol>())
+            {
+                if (SameSignature(method, parameterTypes) && method.ExplicitInterfaceImplementations.Any(implementation =>
+                    implementation.Name == name && implementation.ContainingType.MetadataName == "IEquatable`1" &&
+                    implementation.ContainingNamespace.ToDisplayString() == "System" &&
+                    SymbolEqualityComparer.Default.Equals(implementation.ContainingType.TypeArguments[0], _wrapper.Symbol)))
+                {
+                    UserConflict("Handwritten IEquatable implementation in '" + _wrapper.Symbol.ToDisplayString() +
+                        "' conflicts with generated Java equality.");
+                }
+            }
+            if (!_userMembers.TryGetValue(name, out var members))
+            {
+                return;
+            }
+            foreach (var member in members)
+            {
+                if (!(member is IMethodSymbol method) || (method.Arity == 0 && SameSignature(method, parameterTypes)))
+                {
+                    UserConflict("Handwritten member '" + name + "' in '" + _wrapper.Symbol.ToDisplayString() +
+                        "' conflicts with a generated Java Object override or typed equality method.");
+                }
+            }
+        }
+
         /// <summary>Prepares deterministic signatures, preserving every erased Java overload with aliases.</summary>
         /// <returns>The methods, constructors, and constructor factories to emit.</returns>
         /// <exception cref="GeneratorException">The helper exports an invalid inherited constructor or duplicate descriptor.</exception>
@@ -184,6 +289,10 @@ namespace MajdataPlay.SourceGenerators.AndroidJava
                     throw new GeneratorException(GeneratorDiagnostics.InvalidMetadata,
                         "Java helper exported duplicate member '" + _type.Name + "." + metadata.Name + metadata.Descriptor + "'.");
                 }
+                if (IsObjectMethod(metadata))
+                {
+                    continue;
+                }
                 var signature = JavaDescriptors.ParseMethod(metadata.Descriptor);
                 var types = signature.Parameters.Select(type => JavaTypeMapping.GetTypeName(type, _mappings)).ToArray();
                 methods.Add(new EmissionMethod(metadata, signature, types, GetParameterNames(metadata, types.Length)));
@@ -208,6 +317,16 @@ namespace MajdataPlay.SourceGenerators.AndroidJava
                 }
             }
             return methods;
+        }
+
+        /// <summary>Recognizes exact instance Object signatures served by managed overrides or JavaObject.</summary>
+        /// <param name="method">The extracted Java method.</param>
+        /// <returns>Whether ordinary mapping would duplicate an Object method with a Java alias.</returns>
+        private static bool IsObjectMethod(JavaApiMethod method)
+        {
+            return !method.IsStatic && ((method.Name == "equals" && method.Descriptor == "(Ljava/lang/Object;)Z") ||
+                (method.Name == "hashCode" && method.Descriptor == "()I") ||
+                (method.Name == "toString" && method.Descriptor == "()Ljava/lang/String;"));
         }
 
         /// <summary>Allocates safe method names after fields, sharing a name only among Java overloads.</summary>
@@ -409,7 +528,7 @@ namespace MajdataPlay.SourceGenerators.AndroidJava
             }
         }
 
-        /// <summary>Compares parameter signatures without reference-nullability annotations.</summary>
+        /// <summary>Compares C# parameter signatures, ignoring nullability and treating dynamic as object.</summary>
         /// <param name="method">The handwritten method or constructor.</param>
         /// <param name="types">The generated parameter types.</param>
         /// <returns>Whether C# would treat the signatures as identical.</returns>
@@ -421,7 +540,9 @@ namespace MajdataPlay.SourceGenerators.AndroidJava
             }
             for (var index = 0; index < types.Count; index++)
             {
-                if (method.Parameters[index].RefKind != RefKind.None || JavaNames.SignatureType(method.Parameters[index].Type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat)) !=
+                var parameterType = method.Parameters[index].Type;
+                var typeName = parameterType.TypeKind == TypeKind.Dynamic ? "object" : parameterType.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
+                if (method.Parameters[index].RefKind != RefKind.None || JavaNames.SignatureType(typeName) !=
                     JavaNames.SignatureType(types[index]))
                 {
                     return false;
@@ -474,6 +595,7 @@ namespace MajdataPlay.SourceGenerators.AndroidJava
             _source.Documentation("exception", "Java invocation or field access throws a Java exception.", " cref=\"global::MajdataPlay.Platform.Android.JavaInvocationException\"");
             _source.Documentation("exception", "Unity's Java class or member resolution fails.", " cref=\"global::UnityEngine.AndroidJavaException\"");
             _source.Documentation("exception", "Arguments or references do not match the declared JVM descriptor.", " cref=\"global::System.ArgumentException\"");
+            _source.Documentation("exception", "JNI cannot create a local frame or produce a required reference.", " cref=\"global::System.InvalidOperationException\"");
             if (instance)
             {
                 _source.Documentation("exception", "This wrapper has been disposed.", " cref=\"global::System.ObjectDisposedException\"");

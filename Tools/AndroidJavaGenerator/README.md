@@ -158,6 +158,15 @@ Roslyn 若复用完全不变的 compilation 和已缓存 driver，会跳过 gene
 - public inherited members 默认展开到 wrapper；可用
   `IncludeInheritedMembers = false` 仅生成声明成员。Java 继承并不自动生成
   C# 继承层次，所有 wrapper 以 `JavaObject` 为直接基类。
+- Java 类及其父类对 `Object.equals(Object)`、`hashCode()`、`toString()` 的
+  实际重写会生成对应的 C# `Equals(object?)`、`GetHashCode()`、`ToString()`
+  override，并直接通过精确 JNI descriptor 调用目标 Java 对象的虚方法；这个检查独立于
+  `IncludeInheritedMembers`。重写 `equals` 时还实现 `IEquatable<当前wrapper>`
+  和 nullable typed `Equals`，并显式生成 `GetHashCode`，即使 Java 沿用父类哈希。
+  Java 接口声明、同名重载和 static 方法不视为 Object 重写。三个精确 Object
+  实例签名不再生成 `EqualsJavaMethod`、`HashCode`、`ToStringJavaMethod`；
+  未声明重写的 wrapper 和接口 wrapper 沿用 `JavaObject` 的 JNI 实现。
+  其他同名重载与 static 方法仍正常映射；与手写方法或属性冲突时报 `AJG008`。
 - Java `byte` → C# `sbyte`；`char` → UTF-16 `char`；其余 primitive 精确对应。
 - `String` → `string?`。被同一 compilation `[JavaClass]` 标记的引用类型 →
   对应 wrapper；其他 Java 引用 → `AndroidJavaObject?`，不虚构 C# 类型。
@@ -253,6 +262,7 @@ Android SDK；source/class/JAR fixtures 位于 ignored Temp 中。
 第二条命令只启动固定版本的**隔离** Unity 工程，验证真实 Unity Roslyn
 analyzer loading、SDK wrappers 编译、public 构造器重载、接口和 getter-only
 属性、无 public 构造器/接口/抽象类只包装已有引用，以及 Editor JNI guard。
+同时验证 SDK Object overrides 和 `IEquatable` 的生成与接口映射。
 它们均不代表 Android Player、Mono/IL2CPP、ARMv7/ARM64 或真实设备 JNI
 运行成功。发版前必须分别验证构造/静态与实例调用、nullable 和 jagged arrays、
 接口参数、引用释放、Java exception 传播，以及低版本设备的 API guards。
