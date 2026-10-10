@@ -21,7 +21,7 @@ namespace MajdataPlay
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSceneLoad)]
         private static void InitializeOrUpdate()
         {
-            if (!FileSystem.OpenDirectory(MajEnv.AssetsPath).Exists)
+            if (!FileSystem.Directory.Open(MajEnv.AssetsPath).Exists)
             {
                 if (ExtractAssets())
                 {
@@ -83,7 +83,7 @@ namespace MajdataPlay
                 var isRootManagedAsset = IsRootManagedAsset(relativePath);
                 if (v1Hashes.TryGetValue(relativePath, out var v1Hash))
                 {
-                    if (!FileSystem.OpenFile(destinationPath).Exists)
+                    if (!FileSystem.File.Open(destinationPath).Exists)
                     {
                         if (isRootManagedAsset)
                         {
@@ -102,7 +102,7 @@ namespace MajdataPlay
                         continue;
                     }
                 }
-                else if (FileSystem.OpenFile(destinationPath).Exists)
+                else if (FileSystem.File.Open(destinationPath).Exists)
                 {
                     // This path did not exist in v1. An existing local file is player-owned.
                     MajDebug.LogInfo(
@@ -137,7 +137,7 @@ namespace MajdataPlay
                     var destinationDirectory = Path.GetDirectoryName(destinationPath);
                     if (!string.IsNullOrEmpty(destinationDirectory))
                     {
-                        FileSystem.CreateDirectory(destinationDirectory);
+                        FileSystem.Directory.Create(destinationDirectory);
                     }
 
                     WriteAllBytesAtomically(destinationPath, v2Data);
@@ -170,16 +170,16 @@ namespace MajdataPlay
                                      Path.AltDirectorySeparatorChar) + ".extracting-v2";
             try
             {
-                if (FileSystem.OpenDirectory(extractionRoot).Exists)
+                if (FileSystem.Directory.Open(extractionRoot).Exists)
                 {
-                    FileSystem.OpenDirectory(extractionRoot).Delete(recursive: true);
+                    FileSystem.Directory.Open(extractionRoot).Delete(recursive: true);
                 }
-                else if (FileSystem.OpenFile(extractionRoot).Exists)
+                else if (FileSystem.File.Open(extractionRoot).Exists)
                 {
-                    FileSystem.OpenFile(extractionRoot).Delete();
+                    FileSystem.File.Open(extractionRoot).Delete();
                 }
 
-                FileSystem.CreateDirectory(extractionRoot);
+                FileSystem.Directory.Create(extractionRoot);
             }
             catch (Exception exception)
             {
@@ -206,10 +206,10 @@ namespace MajdataPlay
 
             try
             {
-                FileSystem.CreateFile(
+                FileSystem.File.Create(
                     Path.Combine(extractionRoot, PendingManagedAssetMovesMarkerName))
                     .WriteAllText(string.Empty);
-                FileSystem.MoveDirectory(extractionRoot, MajEnv.AssetsPath);
+                FileSystem.Directory.Move(extractionRoot, MajEnv.AssetsPath);
                 return true;
             }
             catch (Exception exception)
@@ -238,7 +238,7 @@ namespace MajdataPlay
                 var destinationPath = Path.Combine(
                     MajEnv.AssetsPath,
                     relativePath.Replace('/', Path.DirectorySeparatorChar));
-                if (!FileSystem.OpenFile(destinationPath).Exists)
+                if (!FileSystem.File.Open(destinationPath).Exists)
                 {
                     CopyPackagedResource(relativePath, destinationPath, hash, "Sync missing");
                 }
@@ -271,7 +271,7 @@ namespace MajdataPlay
         /// <exception cref="IOException">The extracted source cannot be queried.</exception>
         private static bool MoveExtractedDirectory(string sourcePath, string destinationPath)
         {
-            if (!FileSystem.OpenDirectory(sourcePath).Exists)
+            if (!FileSystem.Directory.Open(sourcePath).Exists)
             {
                 MajDebug.LogError($"Move failed: source not found: {sourcePath}");
                 return false;
@@ -279,16 +279,16 @@ namespace MajdataPlay
 
             try
             {
-                if (FileSystem.OpenDirectory(destinationPath).Exists || FileSystem.OpenFile(destinationPath).Exists)
+                if (FileSystem.Directory.Open(destinationPath).Exists || FileSystem.File.Open(destinationPath).Exists)
                 {
                     // Never replace a pre-existing player-managed directory during extraction.
-                    FileSystem.OpenDirectory(sourcePath).Delete(recursive: true);
+                    FileSystem.Directory.Open(sourcePath).Delete(recursive: true);
                     MajDebug.LogInfo(
                         $"Preserved existing player-managed path during extraction: {destinationPath}");
                     return true;
                 }
 
-                FileSystem.MoveDirectory(sourcePath, destinationPath);
+                FileSystem.Directory.Move(sourcePath, destinationPath);
                 MajDebug.LogInfo($"Moved: {sourcePath} -> {destinationPath}");
                 return false;
             }
@@ -307,19 +307,19 @@ namespace MajdataPlay
             var markerPath = Path.Combine(
                 MajEnv.AssetsPath,
                 PendingManagedAssetMovesMarkerName);
-            if (!FileSystem.OpenFile(markerPath).Exists)
+            if (!FileSystem.File.Open(markerPath).Exists)
             {
                 return;
             }
 
             var chartSourcePath = Path.Combine(MajEnv.AssetsPath, "MaiCharts", "Original");
-            if (FileSystem.OpenDirectory(chartSourcePath).Exists)
+            if (FileSystem.Directory.Open(chartSourcePath).Exists)
             {
                 MoveCharts();
             }
 
             var skinSourcePath = Path.Combine(MajEnv.AssetsPath, "Skins", "default");
-            if (FileSystem.OpenDirectory(skinSourcePath).Exists)
+            if (FileSystem.Directory.Open(skinSourcePath).Exists)
             {
                 MoveSkins();
             }
@@ -334,7 +334,7 @@ namespace MajdataPlay
         {
             var chartSourcePath = Path.Combine(MajEnv.AssetsPath, "MaiCharts", "Original");
             var skinSourcePath = Path.Combine(MajEnv.AssetsPath, "Skins", "default");
-            if (FileSystem.OpenDirectory(chartSourcePath).Exists || FileSystem.OpenDirectory(skinSourcePath).Exists)
+            if (FileSystem.Directory.Open(chartSourcePath).Exists || FileSystem.Directory.Open(skinSourcePath).Exists)
             {
                 return;
             }
@@ -344,9 +344,9 @@ namespace MajdataPlay
                 PendingManagedAssetMovesMarkerName);
             try
             {
-                if (FileSystem.OpenFile(markerPath).Exists)
+                if (FileSystem.File.Open(markerPath).Exists)
                 {
-                    FileSystem.OpenFile(markerPath).Delete();
+                    FileSystem.File.Open(markerPath).Delete();
                 }
             }
             catch (Exception exception)
@@ -384,7 +384,7 @@ namespace MajdataPlay
                 var destinationDirectory = Path.GetDirectoryName(destinationPath);
                 if (!string.IsNullOrEmpty(destinationDirectory))
                 {
-                    FileSystem.CreateDirectory(destinationDirectory);
+                    FileSystem.Directory.Create(destinationDirectory);
                 }
 
                 WriteAllBytesAtomically(destinationPath, data);
@@ -409,23 +409,23 @@ namespace MajdataPlay
             var temporaryPath = $"{destinationPath}.{Guid.NewGuid():N}.tmp";
             try
             {
-                FileSystem.CreateFile(temporaryPath).WriteAllBytes(data);
-                if (FileSystem.OpenFile(destinationPath).Exists)
+                FileSystem.File.Create(temporaryPath).WriteAllBytes(data);
+                if (FileSystem.File.Open(destinationPath).Exists)
                 {
-                    FileSystem.ReplaceFile(temporaryPath, destinationPath);
+                    FileSystem.File.Replace(temporaryPath, destinationPath);
                 }
                 else
                 {
-                    FileSystem.MoveFile(temporaryPath, destinationPath);
+                    FileSystem.File.Move(temporaryPath, destinationPath);
                 }
             }
             finally
             {
-                if (FileSystem.OpenFile(temporaryPath).Exists)
+                if (FileSystem.File.Open(temporaryPath).Exists)
                 {
                     try
                     {
-                        FileSystem.OpenFile(temporaryPath).Delete();
+                        FileSystem.File.Open(temporaryPath).Delete();
                     }
                     catch (Exception exception)
                     {
@@ -468,7 +468,7 @@ namespace MajdataPlay
                 relativePath.Replace('/', Path.DirectorySeparatorChar));
             try
             {
-                data = FileSystem.OpenFile(sourcePath).ReadAllBytes();
+                data = FileSystem.File.Open(sourcePath).ReadAllBytes();
                 return true;
             }
             catch (Exception exception)
@@ -522,7 +522,7 @@ namespace MajdataPlay
         {
             try
             {
-                using var stream = FileSystem.OpenFile(path).OpenRead();
+                using var stream = FileSystem.File.Open(path).OpenRead();
                 using var sha256 = SHA256.Create();
                 hash = ToHexString(sha256.ComputeHash(stream));
                 return true;

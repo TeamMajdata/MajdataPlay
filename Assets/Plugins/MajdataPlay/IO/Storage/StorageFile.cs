@@ -314,6 +314,36 @@ namespace MajdataPlay.IO.Storage
             return new StorageFile(FileSystem, entry.Location);
         }
 
+        /// <summary>Sets this file's native attribute flags, or accepts them unchanged when the backend cannot store flags.</summary>
+        /// <param name="attributes">The complete native attribute flags to apply.</param>
+        /// <remarks>
+        /// The file must already exist. A provider without portable hidden or system flags verifies existence and then
+        /// leaves the entry unchanged, so <see cref="Entry"/> never reports flags a provider did not store.
+        /// </remarks>
+        /// <exception cref="FileNotFoundException">This location does not denote an existing file.</exception>
+        /// <exception cref="UnauthorizedAccessException">Querying or changing attributes was denied.</exception>
+        /// <exception cref="NotSupportedException">The backend cannot store attribute flags.</exception>
+        /// <exception cref="IOException">Querying or changing attributes failed.</exception>
+        public void SetAttributes(FileAttributes attributes)
+        {
+            FileSystem.SetAttributes(Location, attributes);
+        }
+
+        /// <summary>Sets this file's modification time, interpreted according to the timestamp's kind.</summary>
+        /// <param name="lastWriteTime">The modification time, interpreted according to its <see cref="DateTimeKind"/>.</param>
+        /// <remarks>A provider may reject the update or store a provider-owned value, so re-read <see cref="Entry"/> afterwards.</remarks>
+        /// <exception cref="ArgumentException">The timestamp is invalid.</exception>
+        /// <exception cref="ArgumentOutOfRangeException">The timestamp is outside the supported range.</exception>
+        /// <exception cref="FileNotFoundException">This location does not denote an existing file.</exception>
+        /// <exception cref="UnauthorizedAccessException">Changing the timestamp was denied.</exception>
+        /// <exception cref="NotSupportedException">The backend cannot store modification times.</exception>
+        /// <exception cref="IOException">Changing the timestamp failed.</exception>
+        public void SetLastWriteTime(DateTime lastWriteTime)
+        {
+            var lastWriteTimeUtc = lastWriteTime.Kind == DateTimeKind.Utc ? lastWriteTime : lastWriteTime.ToUniversalTime();
+            FileSystem.SetLastWriteTime(Location, lastWriteTimeUtc);
+        }
+
         /// <summary>Copies this file over an existing file location using a bounded stream buffer.</summary>
         /// <param name="destination">The existing destination file, which may belong to another provider.</param>
         /// <param name="overwrite">Whether the existing destination may be truncated and replaced.</param>

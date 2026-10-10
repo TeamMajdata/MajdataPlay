@@ -78,7 +78,7 @@ namespace MajdataPlay
         }
         public SongDetail(string chartFolder, SimaiMetadata metadata)
         {
-            var chartDirectory = FileSystem.OpenDirectory(chartFolder);
+            var chartDirectory = FileSystem.Directory.Open(chartFolder);
             var files = chartDirectory.EnumerateEntries().Where(x => !x.IsDirectory).ToArray();
             var videoBGFilename = new string[3]
             {
@@ -118,7 +118,7 @@ namespace MajdataPlay
         }
         public static async Task<SongDetail> ParseAsync(string chartFolder)
         {
-            var maidataFile = FileSystem.OpenDirectory(chartFolder).FindFile("maidata.txt")
+            var maidataFile = FileSystem.Directory.Open(chartFolder).FindFile("maidata.txt")
                 ?? throw new System.IO.FileNotFoundException("The chart does not contain maidata.txt.");
             using var maidataStream = maidataFile.OpenRead();
             var metadata = await SimaiParser.ParseMetadataAsync(maidataStream);
@@ -241,7 +241,7 @@ namespace MajdataPlay
                 {
                     return _maidata;
                 }
-                using var fileStream = FileSystem.OpenFile(_maidataPath).OpenRead();
+                using var fileStream = FileSystem.File.Open(_maidataPath).OpenRead();
                 progress?.Report(1);
                 var metadata = await SimaiParser.ParseMetadataAsync(fileStream);
                 if (metadata.Hash == _simaiMetadata.Hash)

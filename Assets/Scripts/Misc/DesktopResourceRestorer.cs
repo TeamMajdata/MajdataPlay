@@ -19,8 +19,8 @@ namespace MajdataPlay
         /// <exception cref="IOException">A managed root cannot be enumerated or prepared.</exception>
         public static void RestoreManagedAssetsIfMissing()
         {
-            var chartRootMissing = !FileSystem.OpenDirectory(MajEnv.ChartPath).EnumerateEntries().Any();
-            var skinRootMissing = !FileSystem.OpenDirectory(MajEnv.SkinPath).EnumerateEntries().Any();
+            var chartRootMissing = !FileSystem.Directory.Open(MajEnv.ChartPath).EnumerateEntries().Any();
+            var skinRootMissing = !FileSystem.Directory.Open(MajEnv.SkinPath).EnumerateEntries().Any();
             if (!chartRootMissing && !skinRootMissing)
             {
                 return;
@@ -53,7 +53,7 @@ namespace MajdataPlay
             string destinationRoot,
             IReadOnlyDictionary<string, string> v2Hashes)
         {
-            FileSystem.CreateDirectory(destinationRoot);
+            FileSystem.Directory.Create(destinationRoot);
             foreach (var relativePath in v2Hashes.Keys
                          .Where(path => path.StartsWith(sourcePrefix, StringComparison.OrdinalIgnoreCase))
                          .OrderBy(path => path, StringComparer.Ordinal))
@@ -68,12 +68,12 @@ namespace MajdataPlay
                 var destinationDirectory = Path.GetDirectoryName(destinationPath);
                 if (!string.IsNullOrEmpty(destinationDirectory))
                 {
-                    FileSystem.CreateDirectory(destinationDirectory);
+                    FileSystem.Directory.Create(destinationDirectory);
                 }
 
                 try
                 {
-                    FileSystem.CopyFile(
+                    FileSystem.File.Copy(
                         sourcePath,
                         destinationPath,
                         overwrite: true);

@@ -267,16 +267,16 @@ namespace MajdataPlay
                 if (isGranted)
                 {
                     RootPath = "/sdcard/Documents/MajdataPlay";
-                    if (!FileSystem.OpenDirectory(RootPath).Exists)
+                    if (!FileSystem.Directory.Open(RootPath).Exists)
                     {
-                        FileSystem.CreateDirectory(RootPath);
+                        FileSystem.Directory.Create(RootPath);
                     }
-                    var noMediaFlag = FileSystem.OpenFile(Path.Combine(RootPath, ".nomedia"));
+                    var noMediaFlag = FileSystem.File.Open(Path.Combine(RootPath, ".nomedia"));
                     if (!noMediaFlag.Exists)
                     {
                         try
                         {
-                            FileSystem.CreateFile(noMediaFlag.Location);
+                            FileSystem.File.Create(noMediaFlag.Location);
                             MajDebug.LogDebug("Created .nomedia flag file");
                         }
                         catch (Exception e)
@@ -345,15 +345,15 @@ namespace MajdataPlay
         {
             var oldLogPath = LogPath + ".old";
 
-            if (FileSystem.OpenFile(oldLogPath).Exists)
+            if (FileSystem.File.Open(oldLogPath).Exists)
             {
-                FileSystem.OpenFile(oldLogPath).Delete();
+                FileSystem.File.Open(oldLogPath).Delete();
             }
-            if (FileSystem.OpenFile(LogPath).Exists)
+            if (FileSystem.File.Open(LogPath).Exists)
             {
-                FileSystem.MoveFile(LogPath, oldLogPath);
+                FileSystem.File.Move(LogPath, oldLogPath);
             }
-            var fileWriter = new StreamWriter(FileSystem.OpenWrite(LogPath, append: true), Encoding.UTF8);
+            var fileWriter = new StreamWriter(FileSystem.File.OpenWrite(LogPath, append: true), Encoding.UTF8);
             fileWriter.AutoFlush = true;
 
             MajDebug.SetLogWriter(fileWriter);
@@ -426,9 +426,9 @@ namespace MajdataPlay
         }
         static void InitUserSettings()
         {
-            if (FileSystem.OpenFile(SettingsPath).Exists)
+            if (FileSystem.File.Open(SettingsPath).Exists)
             {
-                var js = FileSystem.OpenFile(SettingsPath).ReadAllText();
+                var js = FileSystem.File.Open(SettingsPath).ReadAllText();
                 GameSetting? setting;
 
 
@@ -437,14 +437,14 @@ namespace MajdataPlay
                     Settings = new();
                     MajDebug.LogError($"Failed to read setting from file\nException: {e}");
                     var bakFileName = $"{SettingsPath}.bak";
-                    while (FileSystem.OpenFile(bakFileName).Exists)
+                    while (FileSystem.File.Open(bakFileName).Exists)
                     {
                         bakFileName = $"{bakFileName}.bak";
                     }
 
                     try
                     {
-                        FileSystem.CopyFile(SettingsPath, bakFileName, overwrite: true);
+                        FileSystem.File.Copy(SettingsPath, bakFileName, overwrite: true);
                     }
                     catch
                     {
@@ -641,9 +641,9 @@ namespace MajdataPlay
         {
             var machineDescriptionPath = Path.Combine(RootPath, "machine_description.json");
 
-            if (FileSystem.OpenFile(machineDescriptionPath).Exists)
+            if (FileSystem.File.Open(machineDescriptionPath).Exists)
             {
-                var js = FileSystem.OpenFile(machineDescriptionPath).ReadAllText();
+                var js = FileSystem.File.Open(machineDescriptionPath).ReadAllText();
                 MachineInfo? machineInfo;
 
                 if (!Serializer.Json.TryDeserialize(js, out machineInfo, out var e, UserJsonReaderOption) || machineInfo is null)
@@ -663,9 +663,9 @@ namespace MajdataPlay
         }
         static void InitRuntimeConfig()
         {
-            if (FileSystem.OpenFile(_runtimeConfigPath).Exists)
+            if (FileSystem.File.Open(_runtimeConfigPath).Exists)
             {
-                var js = FileSystem.OpenFile(_runtimeConfigPath).ReadAllText();
+                var js = FileSystem.File.Open(_runtimeConfigPath).ReadAllText();
                 RuntimeConfig? setting;
 
                 if (!Serializer.Json.TryDeserialize(js, out setting, out var e, UserJsonReaderOption) || setting is null)
@@ -694,14 +694,14 @@ namespace MajdataPlay
 
         static void TryDeleteDirectory(string path)
         {
-            if (!FileSystem.OpenDirectory(path).Exists)
+            if (!FileSystem.Directory.Open(path).Exists)
             {
                 return;
             }
 
             try
             {
-                FileSystem.OpenDirectory(path).Delete(recursive: true);
+                FileSystem.Directory.Open(path).Delete(recursive: true);
             }
             catch (Exception e)
             {
@@ -747,16 +747,16 @@ namespace MajdataPlay
         /// <exception cref="IOException">The configuration could not be opened or written.</exception>
         private static void WriteLocalText(string path, string text)
         {
-            using var stream = FileSystem.OpenWrite(path, overwrite: true);
+            using var stream = FileSystem.File.OpenWrite(path, overwrite: true);
             using var writer = new StreamWriter(stream, new UTF8Encoding(false));
             writer.Write(text);
         }
 
         static void CreateDirectoryIfNotExists(string path)
         {
-            if (!FileSystem.OpenDirectory(path).Exists)
+            if (!FileSystem.Directory.Open(path).Exists)
             {
-                FileSystem.CreateDirectory(path);
+                FileSystem.Directory.Create(path);
             }
         }
     }

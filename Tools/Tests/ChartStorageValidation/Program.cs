@@ -58,7 +58,7 @@ namespace MajdataPlay.Tests.ChartStorageValidation
             var idPath = Path.Combine(markerPath, "id");
             Require(collection.Id != Guid.Empty, "A local collection must receive a nonempty ID.");
             Require(Guid.Parse(NativeFile.ReadAllText(idPath)) == collection.Id, "The created ID file must match the collection ID.");
-            Require(FileSystem.OpenDirectory(markerPath).Entry!.IsHidden, "The newly created marker directory must stay hidden.");
+            Require(FileSystem.Directory.Open(markerPath).Entry!.IsHidden, "The newly created marker directory must stay hidden.");
             Require(SongCollection.Empty(collectionPath, "Collection").Id == collection.Id, "Reloading must preserve the stored ID.");
 
             NativeFile.WriteAllText(idPath, "invalid and longer than a stored GUID................................................................");

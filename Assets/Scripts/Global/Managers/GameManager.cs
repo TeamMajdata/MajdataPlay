@@ -497,7 +497,7 @@ namespace MajdataPlay
                 static void CopyDirectory(string sourceDir, string destDir)
                 {
                     var dirs = new Stack<(StorageDirectory source, StorageDirectory destination)>();
-                    dirs.Push((FileSystem.OpenDirectory(sourceDir), FileSystem.CreateDirectory(destDir)));
+                    dirs.Push((FileSystem.Directory.Open(sourceDir), FileSystem.Directory.Create(destDir)));
 
                     while (dirs.Count > 0)
                     {
@@ -513,7 +513,7 @@ namespace MajdataPlay
                             }
                             else
                             {
-                                FileSystem.CopyFile(
+                                FileSystem.File.Copy(
                                     entry.Location,
                                     Path.Combine(currentDest.Location, entry.Name),
                                     overwrite: true);
@@ -537,12 +537,12 @@ namespace MajdataPlay
                     await MajInstances.SceneSwitcher.SwitchSceneAsync("Empty", false);
                     await UniTask.Delay(300);
                 }
-                FileSystem.CreateDirectory(_importRoot);
+                FileSystem.Directory.Create(_importRoot);
                 while (_pendingImportTasks.TryDequeue(out var tempFilePath))
                 {
                     MajDebug.LogDebug("[ZipImporter] Got file: " + tempFilePath);
 
-                    if (!FileSystem.OpenFile(tempFilePath).Exists)
+                    if (!FileSystem.File.Open(tempFilePath).Exists)
                     {
                         MajDebug.LogError("[ZipImporter] File not found: " + tempFilePath);
                         continue;
@@ -558,8 +558,8 @@ namespace MajdataPlay
                     
                     try
                     {
-                        var outputDirectory = FileSystem.CreateDirectory(tempOutDir);
-                        using var archiveStream = FileSystem.OpenFile(tempFilePath).OpenRead();
+                        var outputDirectory = FileSystem.Directory.Create(tempOutDir);
+                        using var archiveStream = FileSystem.File.Open(tempFilePath).OpenRead();
                         using var archive = new ZipArchive(archiveStream, ZipArchiveMode.Read);
                         var totalSize = archive.Entries.Sum(x => x.Length);
                         var decompressedSize = 0L;
@@ -586,20 +586,20 @@ namespace MajdataPlay
                             var dir = Path.GetDirectoryName(fullPath);
                             if (!string.IsNullOrEmpty(dir))
                             {
-                                FileSystem.CreateDirectory(dir);
+                                FileSystem.Directory.Create(dir);
                             }
 
-                            if (FileSystem.OpenFile(fullPath).Exists)
+                            if (FileSystem.File.Open(fullPath).Exists)
                             {
-                                FileSystem.OpenFile(fullPath).Delete();
+                                FileSystem.File.Open(fullPath).Delete();
                             }
 
                             using (var entryStream = entry.Open())
-                            using (var outputStream = FileSystem.CreateFile(fullPath).OpenWrite())
+                            using (var outputStream = FileSystem.File.Create(fullPath).OpenWrite())
                             {
                                 entryStream.CopyTo(outputStream);
                             }
-                            FileSystem.SetLastWriteTime(fullPath, entry.LastWriteTime.DateTime);
+                            FileSystem.File.Open(fullPath).SetLastWriteTime(entry.LastWriteTime.DateTime);
                             decompressedSize += entry.Length;
                             MajInstances.SceneSwitcher.SetLoadingText($"Extracting...\n{decompressedSize * 100 / (double)totalSize:F2}%");
                             await UniTask.Yield();
@@ -627,7 +627,7 @@ namespace MajdataPlay
                             {
                                 var dirName = dir.Name;
                                 var dstPath = Path.Combine(_importRoot, dirName);
-                                for (var i = 0; FileSystem.OpenDirectory(dstPath).Exists; i++)
+                                for (var i = 0; FileSystem.Directory.Open(dstPath).Exists; i++)
                                 {
                                     dstPath = Path.Combine(_importRoot, $"{dirName} ({i + 1})");
                                 }
@@ -637,7 +637,7 @@ namespace MajdataPlay
                             {
                                 var dirName = dir.Name;
                                 var dstPath = Path.Combine(MajEnv.ChartPath, dirName);
-                                for (var i = 0; FileSystem.OpenDirectory(dstPath).Exists; i++)
+                                for (var i = 0; FileSystem.Directory.Open(dstPath).Exists; i++)
                                 {
                                     dstPath = Path.Combine(MajEnv.ChartPath, $"{dirName} ({i + 1})");
                                 }
@@ -652,7 +652,7 @@ namespace MajdataPlay
 
                         try
                         {
-                            FileSystem.OpenDirectory(tempOutDir).Delete(recursive: true);
+                            FileSystem.Directory.Open(tempOutDir).Delete(recursive: true);
                         }
                         catch
                         {
@@ -663,7 +663,7 @@ namespace MajdataPlay
                     finally
                     {
 #if UNITY_ANDROID
-                        FileSystem.OpenFile(tempFilePath).Delete();
+                        FileSystem.File.Open(tempFilePath).Delete();
 #endif
                     }
                 }

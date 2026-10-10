@@ -174,6 +174,13 @@ namespace MajdataPlay.Tests.FileSystemValidation
         }
 
         /// <inheritdoc />
+        public void SetAttributes(string location, FileAttributes attributes)
+        {
+            // The test provider models a SAF provider, which reports no hidden or system flags.
+            GetDocument(location);
+        }
+
+        /// <inheritdoc />
         public void SetLastWriteTime(string location, DateTime lastWriteTimeUtc)
         {
             if (lastWriteTimeUtc.Kind != DateTimeKind.Utc)

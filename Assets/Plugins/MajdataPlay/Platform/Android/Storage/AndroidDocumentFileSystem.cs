@@ -294,6 +294,24 @@ namespace MajdataPlay.Platform.Android.Storage
             });
         }
 
+        /// <summary>Accepts an attribute request for an existing document, which SAF providers never store.</summary>
+        /// <param name="location">The authorized existing document URI.</param>
+        /// <param name="attributes">The requested attribute flags; no SAF provider persists hidden or system flags.</param>
+        /// <exception cref="PlatformNotSupportedException">Execution is outside an Android player.</exception>
+        /// <exception cref="ArgumentException">The URI is invalid.</exception>
+        /// <exception cref="FileNotFoundException">The document does not exist.</exception>
+        /// <exception cref="UnauthorizedAccessException">Querying the document was denied.</exception>
+        /// <exception cref="IOException">Querying the document failed.</exception>
+        /// <remarks>SAF exposes no portable attribute flags, so this backend only verifies that the document exists.</remarks>
+        public void SetAttributes(string location, FileAttributes attributes)
+        {
+            AndroidDocumentBridge.EnsureAndroid();
+            if (GetEntry(location) is null)
+            {
+                throw new FileNotFoundException("The provider entry does not exist.", location);
+            }
+        }
+
         /// <summary>Writes the document's modification time when the provider accepts the update.</summary>
         /// <param name="location">The authorized existing document URI.</param>
         /// <param name="lastWriteTimeUtc">The new UTC modification time.</param>

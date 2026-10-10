@@ -286,13 +286,13 @@ namespace MajdataPlay.IO
         }
         public static BassAudioSample Create(string path, int globalMixer, bool normalize = true, bool speedChange = false)
         {
-            var buf = FileSystem.OpenFile(path).ReadAllBytes();
+            var buf = FileSystem.File.Open(path).ReadAllBytes();
 
             return Create(buf, globalMixer, normalize, speedChange);
         }
         public static async ValueTask<BassAudioSample> CreateAsync(string path, int globalMixer, bool normalize = true, bool speedChange = false)
         {
-            var buf = await FileSystem.OpenFile(path).ReadAllBytesAsync();
+            var buf = await FileSystem.File.Open(path).ReadAllBytesAsync();
 
             return Create(buf, globalMixer, normalize, speedChange);
         }

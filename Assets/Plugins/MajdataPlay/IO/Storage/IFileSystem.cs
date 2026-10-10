@@ -131,6 +131,20 @@ namespace MajdataPlay.IO.Storage
         /// <exception cref="IOException">The entry is not a directory, is non-empty without recursion, or deletion failed.</exception>
         void DeleteDirectory(string location, bool recursive = false);
 
+        /// <summary>Sets an entry's native attribute flags, or accepts them unchanged when the backend cannot store flags.</summary>
+        /// <param name="location">The existing entry location.</param>
+        /// <param name="attributes">The complete native attribute flags to apply.</param>
+        /// <exception cref="ArgumentException">The location is invalid.</exception>
+        /// <exception cref="FileNotFoundException">The entry does not exist.</exception>
+        /// <exception cref="UnauthorizedAccessException">Querying or changing attributes was denied.</exception>
+        /// <exception cref="NotSupportedException">The backend cannot store attribute flags.</exception>
+        /// <exception cref="IOException">Querying or changing attributes failed.</exception>
+        /// <remarks>
+        /// A backend without portable attribute flags must still verify that the entry exists and then leave it unchanged,
+        /// so callers may request flags on any backend without branching on the selected storage.
+        /// </remarks>
+        void SetAttributes(string location, FileAttributes attributes);
+
         /// <summary>Sets an entry's last modification time to a UTC value.</summary>
         /// <param name="location">The existing entry location.</param>
         /// <param name="lastWriteTimeUtc">The new modification time, which must be UTC.</param>

@@ -116,27 +116,30 @@ specific copy safety rule, not general sandboxing of arbitrary input paths.
 
 ## Unified facade contract
 
-The facade chooses its backend internally. Application callers use
-`CreateDirectory`, `CreateFile`, `OpenRead`, `OpenWrite`, `CopyFile`, `MoveFile`,
-`MoveDirectory`, `ReplaceFile`, `SetAttributes` and `SetLastWriteTime`; there are
-no separate public `*Local*` operations. Existing handle operations keep their
+The facade chooses its backend internally. File operations live on the nested
+`FileSystem.File` (`Open`, `Create`, `OpenRead`, `OpenWrite`, `Copy`, `Move`,
+`Replace`) and directory operations on `FileSystem.Directory` (`Open`, `Create`,
+`Move`); `FileSystem` itself only registers the content provider. Attribute and
+timestamp writes are handle methods: `StorageFile.SetAttributes` /
+`SetLastWriteTime` and their `StorageDirectory` counterparts. There are no
+separate public `*Local*` operations. Existing handle operations keep their
 existing-only write semantics. The facade's output stream defaults to exclusive
 native creation and requires explicit `overwrite: true` or `append: true` for an
 existing content document.
 
 Opaque content URIs do not identify a creatable child path. For a new provider
 document, pass its authorized parent URI and one display name to the
-`CreateFile`, `CreateDirectory` or `CopyFile` child overload. Direct URI copying
-requires an existing content destination. Child overloads return the provider's
-actual name/location, which may differ from the request.
+`FileSystem.File.Create`, `FileSystem.Directory.Create` or `FileSystem.File.Copy`
+child overload. Direct URI copying requires an existing content destination. Child
+overloads return the provider's actual name/location, which may differ from the request.
 
-The `MoveFile`/`MoveDirectory` child overloads move natively inside one backend
-and never copy and delete; the location-based overloads remain native-local
-because a provider URI cannot name a destination that does not exist yet.
-Provider replacement streams into the existing destination and consumes the
-source without atomicity, and a backup path is refused before mutation. Provider
-entries accept attribute requests without effect, and modification-time writes
-are provider-dependent.
+The `FileSystem.File.Move` / `FileSystem.Directory.Move` child overloads move
+natively inside one backend and never copy and delete; the location-based overloads
+remain native-local because a provider URI cannot name a destination that does not
+exist yet. Provider replacement streams into the existing destination and consumes
+the source without atomicity, and a backup path is refused before mutation. Provider
+entries accept attribute requests without effect, and modification-time writes are
+provider-dependent.
 
 ## Isolated Unity and production generated-wrapper validation
 

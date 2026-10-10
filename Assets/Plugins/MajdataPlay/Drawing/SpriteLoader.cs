@@ -57,7 +57,7 @@ namespace MajdataPlay.Drawing
         }
         public static Sprite LoadFromFileWithBorder(string filePath, Vector4 border, bool markNonReadable = true)
         {
-            var file = FileSystem.OpenFile(filePath);
+            var file = FileSystem.File.Open(filePath);
             if (!file.Exists)
             {
                 return EmptySprite;
@@ -121,7 +121,7 @@ namespace MajdataPlay.Drawing
                                                                      bool markNonReadable = true, 
                                                                      CancellationToken token = default)
         {
-            var file = FileSystem.OpenFile(filePath);
+            var file = FileSystem.File.Open(filePath);
             if (!file.Exists)
             {
                 await UniTask.SwitchToMainThread();

@@ -49,7 +49,7 @@ namespace MajdataPlay
             try
             {
                 var dbPath = MajEnv.ScoreDBPath;
-                var isDbExists = FileSystem.OpenFile(dbPath).Exists;
+                var isDbExists = FileSystem.File.Open(dbPath).Exists;
                 _db = new SQLiteAsyncConnection(dbPath, SQLiteOpenFlags.ReadWrite | SQLiteOpenFlags.Create | SQLiteOpenFlags.FullMutex);
                 GameManager.OnAppQuit += OnAppQuit;
                 await _db.CreateTableAsync<MajScoreDB>();
@@ -58,14 +58,14 @@ namespace MajdataPlay
                 {
                     // Migrate from legacy JSON file
                     var legacyPath = MajEnv.LegacyScoreDBPath;
-                    if (FileSystem.OpenFile(legacyPath).Exists)
+                    if (FileSystem.File.Open(legacyPath).Exists)
                     {
                         var migrated = await MigrateFromJsonAsync(legacyPath);
                         if (migrated)
                         {
                             try
                             {
-                                FileSystem.OpenFile(legacyPath).Delete();
+                                FileSystem.File.Open(legacyPath).Delete();
                                 MajDebug.LogInfo("Migrated scores from legacy JSON to SQLite, old file deleted.");
                             }
                             catch (Exception ex)
@@ -293,7 +293,7 @@ namespace MajdataPlay
         {
             try
             {
-                var json = await FileSystem.OpenFile(legacyPath).ReadAllTextAsync();
+                var json = await FileSystem.File.Open(legacyPath).ReadAllTextAsync();
                 // Fix legacy typo: "JudgeDeatil" → "JudgeDetail"
                 json = json.Replace("\"JudgeDeatil\"", "\"JudgeDetail\"");
                 var scores = JsonConvert.DeserializeObject<List<MaiScore>>(json, _jsonReadSettings);

@@ -223,7 +223,7 @@ Full and replay storage checks:
 - Request writable + persistable access with the owner token; confirm the
   exact selected original URI appears in `GetPersistedPermissions` with read
   and write flags.
-- Reopen the selected directory through production `FileSystem.OpenDirectory`
+- Reopen the selected directory through production `FileSystem.Directory.Open`
   during replay, with no new picker grant and a different process ID.
 - Create a unique owned child and an empty binary document. Write/read
   **197,121 bytes**, containing all 256 byte values, using production async

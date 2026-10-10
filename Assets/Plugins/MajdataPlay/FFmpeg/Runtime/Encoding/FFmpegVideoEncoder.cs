@@ -668,7 +668,7 @@ namespace MajdataPlay.FFmpeg
         private void OpenLocalFile(string path)
         {
             _cancellation.ThrowIfCancellationRequested();
-            _output = FileSystem.OpenWrite(path);
+            _output = FileSystem.File.OpenWrite(path);
             _selfHandle = GCHandle.Alloc(this);
             var buffer = (byte*)ffmpeg.av_malloc(65536);
             if (buffer == null)

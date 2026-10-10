@@ -121,7 +121,7 @@ namespace MajdataPlay
         {
             var path = MajEnv.SkinPath;
             var selectedSkinName = MajEnv.Settings.Display.Skin;
-            var directories = FileSystem.OpenDirectory(path).EnumerateDirectories();
+            var directories = FileSystem.Directory.Open(path).EnumerateDirectories();
             foreach (var directory in directories)
             {
                 try

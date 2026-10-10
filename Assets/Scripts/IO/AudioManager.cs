@@ -84,11 +84,11 @@ namespace MajdataPlay.IO
                 VoiceFilePath = Path.Combine(MajEnv.AssetsPath, "Voice/");
 
                 DontDestroyOnLoad(this);
-                SFXFileNames = FileSystem.OpenDirectory(SFXFilePath).EnumerateEntries()
+                SFXFileNames = FileSystem.Directory.Open(SFXFilePath).EnumerateEntries()
                                                              .FindAll(o => !o.IsDirectory && !o.Name.EndsWith(".meta"))
                                                              .Select(x => x.Name)
                                                              .ToArray();
-                VoiceFileNames = FileSystem.OpenDirectory(VoiceFilePath).EnumerateEntries()
+                VoiceFileNames = FileSystem.Directory.Open(VoiceFilePath).EnumerateEntries()
                                                                  .FindAll(o => !o.IsDirectory && !o.Name.EndsWith(".meta"))
                                                                  .Select(x => x.Name)
                                                                  .ToArray();
@@ -344,7 +344,7 @@ namespace MajdataPlay.IO
             foreach (var filePath in fileNameList)
             {
                 var path = Path.Combine(rootPath, filePath);
-                if (!FileSystem.OpenFile(path).Exists)
+                if (!FileSystem.File.Open(path).Exists)
                 {
                     SFXSamples.Add(AudioSampleWrap.Empty);
                     MajDebug.LogWarning(path + " does not exists");
@@ -462,7 +462,7 @@ namespace MajdataPlay.IO
         {
             MajDebug.LogInfo($"Try creating channel from file: {path}");
             var backend = MajEnv.Settings.Audio.Backend;
-            if (FileSystem.OpenFile(path).Exists)
+            if (FileSystem.File.Open(path).Exists)
             {
                 var sample = default(AudioSampleWrap);
                 switch (backend)
@@ -519,7 +519,7 @@ namespace MajdataPlay.IO
             MajDebug.LogInfo($"Try creating channel from file: {path}");
             await UniTask.SwitchToThreadPool();
             var backend = MajEnv.Settings.Audio.Backend;
-            if (FileSystem.OpenFile(path).Exists)
+            if (FileSystem.File.Open(path).Exists)
             {
                 var sample = default(AudioSampleWrap);
                 switch (backend)

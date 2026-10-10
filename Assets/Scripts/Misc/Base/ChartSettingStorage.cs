@@ -36,7 +36,7 @@ namespace MajdataPlay.Settings
                 }
                 await UniTask.SwitchToThreadPool();
                 GameManager.OnSave += OnSave;
-                var storageFile = FileSystem.OpenFile(STORAGE_PATH);
+                var storageFile = FileSystem.File.Open(STORAGE_PATH);
                 if (!storageFile.Exists)
                 {
                     return;
@@ -45,9 +45,9 @@ namespace MajdataPlay.Settings
                 var (isSuccess, data, exception) = await Serializer.Json.TryDeserializeAsync<ChartSetting[]>(fileStream);
                 if (!isSuccess)
                 {
-                    var storageDirectory = FileSystem.OpenDirectory(Path.GetDirectoryName(STORAGE_PATH)!);
+                    var storageDirectory = FileSystem.Directory.Open(Path.GetDirectoryName(STORAGE_PATH)!);
                     var backupPath = Path.Combine(storageDirectory.Location, $"{Path.GetFileName(STORAGE_PATH)}.{DateTime.Now:yyyy-MM-dd-HH-mm-ss}.bak");
-                    FileSystem.CopyFile(storageFile.Location, backupPath);
+                    FileSystem.File.Copy(storageFile.Location, backupPath);
                     MajDebug.LogError($"Failed to load chart settings\nPath: {STORAGE_PATH}\nException: {exception}");
                 }
                 else
@@ -172,7 +172,7 @@ namespace MajdataPlay.Settings
             {
                 @lock.Enter(ref isLocked);
                 var json = Serializer.Json.Serialize(_storage.Values);
-                var storageDirectory = FileSystem.OpenDirectory(Path.GetDirectoryName(STORAGE_PATH)!);
+                var storageDirectory = FileSystem.Directory.Open(Path.GetDirectoryName(STORAGE_PATH)!);
                 var storageFile = storageDirectory.FindFile(Path.GetFileName(STORAGE_PATH))
                     ?? storageDirectory.CreateFile(Path.GetFileName(STORAGE_PATH), "application/json");
                 storageFile.WriteAllText(json);

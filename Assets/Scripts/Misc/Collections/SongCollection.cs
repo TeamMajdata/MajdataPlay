@@ -109,7 +109,7 @@ namespace MajdataPlay.Collections
             }
             else
             {
-                var collectionDirectory = FileSystem.OpenDirectory(dirPath);
+                var collectionDirectory = FileSystem.Directory.Open(dirPath);
                 if (!collectionDirectory.Exists)
                 {
                     throw new ArgumentException($"Directory '{dirPath}' is not exist.");
@@ -120,7 +120,7 @@ namespace MajdataPlay.Collections
                 if (flagDirectory is null)
                 {
                     flagDirectory = collectionDirectory.CreateDirectory(".MajdataPlay");
-                    FileSystem.SetAttributes(flagDirectory.Location, FileAttributes.Directory | FileAttributes.Hidden);
+                    flagDirectory.SetAttributes(FileAttributes.Directory | FileAttributes.Hidden);
                 }
                 var flagFile = flagDirectory.FindFile("id");
                 if (flagFile is not null)

@@ -70,7 +70,7 @@ namespace MajdataPlay.Utils
         {
             MajDebug.LogDebug("[ZipImporter] Got file: " + tempFilePath);
             
-            if (!FileSystem.OpenFile(tempFilePath).Exists)
+            if (!FileSystem.File.Open(tempFilePath).Exists)
             {
                 MajDebug.LogError("[ZipImporter] File not found: " + tempFilePath);
                 return;
@@ -83,11 +83,11 @@ namespace MajdataPlay.Utils
                 return;
             }
             
-            FileSystem.CreateDirectory(ImportRoot);
+            FileSystem.Directory.Create(ImportRoot);
             
             var folderName = Path.GetFileNameWithoutExtension(tempFilePath);
             var outDir = Path.Combine(ImportRoot, folderName);
-            FileSystem.CreateDirectory(outDir);
+            FileSystem.Directory.Create(outDir);
 
             try
             {
@@ -100,7 +100,7 @@ namespace MajdataPlay.Utils
                 {
                     try
                     {
-                        FileSystem.OpenFile(tempFilePath).Delete();
+                        FileSystem.File.Open(tempFilePath).Delete();
                     }
                     catch (Exception e)
                     {
@@ -117,7 +117,7 @@ namespace MajdataPlay.Utils
                 
                 try
                 {
-                    FileSystem.OpenDirectory(outDir).Delete(recursive: true);
+                    FileSystem.Directory.Open(outDir).Delete(recursive: true);
                 }
                 catch
                 {
@@ -172,7 +172,7 @@ namespace MajdataPlay.Utils
                 destRootFull += Path.DirectorySeparatorChar;
             }
 
-            using var archiveStream = FileSystem.OpenFile(zipPath).OpenRead();
+            using var archiveStream = FileSystem.File.Open(zipPath).OpenRead();
             using var archive = new ZipArchive(archiveStream, ZipArchiveMode.Read);
 
             foreach (var entry in archive.Entries)
@@ -194,20 +194,20 @@ namespace MajdataPlay.Utils
                 var dir = Path.GetDirectoryName(fullPath);
                 if (!string.IsNullOrEmpty(dir))
                 {
-                    FileSystem.CreateDirectory(dir);
+                    FileSystem.Directory.Create(dir);
                 }
                 
-                if (FileSystem.OpenFile(fullPath).Exists)
+                if (FileSystem.File.Open(fullPath).Exists)
                 {
-                    FileSystem.OpenFile(fullPath).Delete();
+                    FileSystem.File.Open(fullPath).Delete();
                 }
 
                 using (var entryStream = entry.Open())
-                using (var outputStream = FileSystem.CreateFile(fullPath).OpenWrite())
+                using (var outputStream = FileSystem.File.Create(fullPath).OpenWrite())
                 {
                     entryStream.CopyTo(outputStream);
                 }
-                FileSystem.SetLastWriteTime(fullPath, entry.LastWriteTime.DateTime);
+                FileSystem.File.Open(fullPath).SetLastWriteTime(entry.LastWriteTime.DateTime);
             }
         }
     }

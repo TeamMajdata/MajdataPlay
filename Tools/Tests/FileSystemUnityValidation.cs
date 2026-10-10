@@ -172,7 +172,7 @@ namespace MajdataPlay.Tests
         private static void CheckEditorOperations()
         {
             var path = Path.GetFullPath(Path.Combine("Temp", "StorageEditorSmoke", Guid.NewGuid().ToString("N")));
-            var directory = FileSystem.CreateDirectory(path);
+            var directory = FileSystem.Directory.Create(path);
             try
             {
                 Require(!directory.FileSystem.GetType().IsVisible, "The local backend must not be visible outside the IO assembly.");

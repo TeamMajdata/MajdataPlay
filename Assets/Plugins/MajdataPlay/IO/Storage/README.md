@@ -4,14 +4,22 @@ The `MajdataPlay.IO.Storage` namespace belongs to the existing `MajdataPlay.IO` 
 It uses a small synchronous `IFileSystem` backend contract and typed `StorageFile` /
 `StorageDirectory` handles. The local backend uses `System.IO` on Windows, Linux,
 macOS, iOS, and Android. The Android-only assembly provides a SAF document backend
+And Android. The Android-only assembly provides a SAF document backend
 and cancellable system pickers, without adding an Android dependency to the portable assembly.
+
+File operations live on the nested `FileSystem.File` and directory operations on
+`FileSystem.Directory`; the facade itself only selects the backend and keeps
+`RegisterContentProvider`. Method names dropped the redundant word, so
+`FileSystem.OpenFile` is now `FileSystem.File.Open` and `FileSystem.CreateDirectory`
+is now `FileSystem.Directory.Create`. Attribute and timestamp writes are handle methods
+(`StorageFile.SetAttributes` / `SetLastWriteTime` and their `StorageDirectory` counterparts).
 
 ## Local storage
 
 ```csharp
 using MajdataPlay.IO.Storage;
 
-var library = FileSystem.CreateDirectory(localLibraryPath);
+var library = FileSystem.Directory.Create(localLibraryPath);
 var folder = library.CreateDirectory("Charts");
 var file = folder.CreateFile("notes.txt", "text/plain");
 await file.WriteAllTextAsync("中文 chart", cancellationToken: cancellationToken);
@@ -25,7 +33,7 @@ var renamed = file.Rename("renamed.txt");
 var copy = await renamed.CopyToAsync(library, "backup.txt", cancellationToken: cancellationToken);
 ```
 
-`FileSystem.OpenFile(location)` and `OpenDirectory(location)` automatically select
+`FileSystem.File.Open(location)` and `FileSystem.Directory.Open(location)` automatically select
 the backend for native paths, `file://` URIs, and registered `content://` URIs.
 `LocalFileSystem` is internal; `FileSystem` does not expose a local backend property.
 Callers pass a location to the facade rather than constructing or selecting the
@@ -54,58 +62,59 @@ filenames themselves.
 Facade operations use the same public names for local paths, file URIs and content
 URIs; callers do not choose a backend. `CreateDirectory(location)` creates missing
 local parents or returns an existing content directory. New content entries must
-use `CreateDirectory(parentLocation, name)` or
-`CreateFile(parentLocation, name, mimeType, overwrite: false)` because a document
-URI is opaque and cannot supply a parent location or a new child name. These
-overloads also accept local parent directories and return the actual provider
+use `FileSystem.Directory.Create(parentLocation, name)` or
+`FileSystem.File.Create(parentLocation, name, mimeType, overwrite: false)` because a
+document URI is opaque and cannot supply a parent location or a new child name.
+These overloads also accept local parent directories and return the actual provider
 location/name. They never create missing parents or overwrite a directory.
 
-`CreateFile(location, overwrite: false)` creates an empty local file without
+`FileSystem.File.Create(location, overwrite: false)` creates an empty local file without
 creating parents. For an existing content file, `overwrite: true` truncates it;
-without overwrite the occupied location is rejected. `FileSystem.OpenWrite`
+without overwrite the occupied location is rejected. `FileSystem.File.OpenWrite`
 uses exclusive creation by default, `overwrite: true` truncates, and
 `append: true` appends. Missing local files are created, while content files must
 already exist. Local output streams are seekable and allow concurrent readers;
 provider streams may be nonseekable. Use one output stream when creating and
-writing a local file must share one open. `FileSystem.OpenRead(location)` opens
+writing a local file must share one open. `FileSystem.File.OpenRead(location)` opens
 an existing readable stream through either backend.
 
-`CopyFile(source, destination, overwrite)` uses native copying for local-to-local
-transfers, retaining local metadata. For a content destination URI, the file must
-already exist and overwrite must be enabled. Use
-`CopyFile(source, parentLocation, name, overwrite)` to create a destination in
-either backend. Provider/cross-provider copies reuse the bounded, nonseekable
+`FileSystem.File.Copy(source, destination, overwrite)` uses native copying for
+local-to-local transfers, retaining local metadata. For a content destination URI,
+the file must already exist and overwrite must be enabled. Use
+`FileSystem.File.Copy(source, parentLocation, name, overwrite)` to create a destination
+in either backend. Provider/cross-provider copies reuse the bounded, nonseekable
 stream transfer and alias guards of `StorageFile.CopyTo`; returned handles retain
 provider-adjusted names and URIs. Failed overwrites may leave partial content;
 newly created destinations are deleted best-effort after a failed copy. Copies
 to an existing `StorageFile` handle are also available via `CopyTo(destination)`.
 
-`MoveFile`, `MoveDirectory`, `ReplaceFile`, `SetAttributes` and `SetLastWriteTime`
+`FileSystem.File.Move`, `FileSystem.Directory.Move` and `FileSystem.File.Replace`
 resolve their backends internally, and none of them falls back to copying and
 deleting. A location-based move requires native local operands, because an opaque
 document URI cannot name a destination that does not exist yet. Use
-`MoveFile(source, parentLocation, name)` or `MoveDirectory(source, parentLocation, name)`
+`FileSystem.File.Move(source, parentLocation, name)` or
+`FileSystem.Directory.Move(source, parentLocation, name)`
 to move an entry inside one backend: the local backend renames natively, and the
 content backend performs one provider move. Both overloads return the authoritative
 destination handle and reject a source of the wrong type. Cross-backend moves and
 moves into the source's own subtree are refused before mutation.
 
-`ReplaceFile` keeps native atomic replacement, including a backup, when every
-operand is local. When the source or destination belongs to a provider, the
+`FileSystem.File.Replace` keeps native atomic replacement, including a backup, when
+every operand is local. When the source or destination belongs to a provider, the
 destination must already exist: the source is streamed into it and then deleted,
 so the destination keeps its storage identity while the source is consumed. That
 provider replacement is not atomic, can leave the destination truncated on
 failure, never deletes the source on failure, and rejects a backup path before
-mutating anything. `SetAttributes` applies native flags to local entries and is
-accepted without effect for provider entries, which have no portable hidden or
-system flags; the location must still denote an existing entry.
+mutating anything. `StorageFile.SetAttributes` and `StorageDirectory.SetAttributes`
+apply native flags to local entries and are accepted without effect for provider
+entries, which have no portable hidden or system flags; the entry must exist.
 
-`SetLastWriteTime` writes native local timestamps, or asks a provider to store
-the UTC value. Providers may reject the update, in which case
-`NotSupportedException` is reported, and they may store a rounded or
-provider-owned value, so re-read the metadata instead of assuming the requested
-time was kept. Content renaming within a parent remains available through handle
-`Rename` and does not require an existing destination.
+`StorageFile.SetLastWriteTime` and `StorageDirectory.SetLastWriteTime` write native
+local timestamps, or ask a provider to store the UTC value. Providers may reject the
+update, in which case `NotSupportedException` is reported, and they may store a rounded
+or provider-owned value, so re-read the metadata instead of assuming the requested time
+was kept. Content renaming within a parent remains available through handle `Rename` and
+does not require an existing destination.
 
 Entry snapshots also expose optional UTC creation times and backend-reported
 hidden/system flags. Local enumeration supplies them for chart ordering and
@@ -138,7 +147,7 @@ await file.WriteAllTextAsync("chart data", cancellationToken: cancellationToken)
 // Save this string in application settings; it is a URI, never a native path.
 var savedLocation = library.Location;
 // On a later launch, after runtime initialization:
-var reopened = FileSystem.OpenDirectory(savedLocation);
+var reopened = FileSystem.Directory.Open(savedLocation);
 #endif
 ```
 
@@ -149,7 +158,8 @@ var reopened = FileSystem.OpenDirectory(savedLocation);
   same-parent move reuses the collision-safe rename path. A single-document grant from
   `PickFileAsync` or `CreateFileAsync` cannot be moved or renamed because its parent is not
   discoverable, and cross-provider moves are refused before any mutation.
-- `SetLastWriteTime` writes `COLUMN_LAST_MODIFIED` through the content resolver. A provider
+- `StorageFile.SetLastWriteTime` and `StorageDirectory.SetLastWriteTime` write `COLUMN_LAST_MODIFIED`
+  through the content resolver. A provider
   that rejects the update reports `NotSupportedException`; a provider that accepts it may
   still store a rounded or provider-owned value, so re-read the entry instead of assuming
   the requested time. Attribute flags are not writable through SAF and are a no-op.

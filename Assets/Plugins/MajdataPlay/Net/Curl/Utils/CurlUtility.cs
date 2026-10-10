@@ -28,7 +28,7 @@ namespace MajdataPlay.Net.Curl.Utils
         {
             var returnCode = default(CurlCode?);
 #if UNITY_ANDROID
-            if(FileSystem.OpenFile(_androidCAPath).Exists)
+            if(FileSystem.File.Open(_androidCAPath).Exists)
             {
                 returnCode = LibCurl.Easy.SetOption(curlEasy.Handle, CurlOption.CaInfo, _androidCAPath);
                 if (returnCode is CurlCode code && code != CurlCode.Ok)

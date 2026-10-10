@@ -226,7 +226,7 @@ namespace MajdataPlay
                     var savePath = Path.Combine(_cachePath, "bg.mp4");
                     var cacheFlagPath = Path.Combine(_cachePath, $"bg.mp4.cache");
 
-                    if (FileSystem.OpenFile(cacheFlagPath).Exists && !FileSystem.OpenFile(savePath).Exists)
+                    if (FileSystem.File.Open(cacheFlagPath).Exists && !FileSystem.File.Open(savePath).Exists)
                     {
                         _videoPath = string.Empty;
                         return _videoPath;
@@ -245,7 +245,7 @@ namespace MajdataPlay
                     progress?.Report(1);
                     if (result == DownloadResult.ResourceNotFound)
                     {
-                        var cacheDirectory = FileSystem.OpenDirectory(_cachePath);
+                        var cacheDirectory = FileSystem.Directory.Open(_cachePath);
                         var cacheFlagFile = cacheDirectory.FindFile("bg.mp4.cache")
                             ?? cacheDirectory.CreateFile("bg.mp4.cache");
                         using var cacheFlagStream = cacheFlagFile.OpenWrite();
@@ -297,9 +297,9 @@ namespace MajdataPlay
                     var forceReDl = false;
                     var shouldFetch = false;
 
-                    if (FileSystem.OpenFile(savePath).Exists)
+                    if (FileSystem.File.Open(savePath).Exists)
                     {
-                        using var fileStream = FileSystem.OpenFile(savePath).OpenRead();
+                        using var fileStream = FileSystem.File.Open(savePath).OpenRead();
                         var metadata = await SimaiParser.ParseMetadataAsync(fileStream);
                         if (metadata.Hash != Hash)
                         {
@@ -327,7 +327,7 @@ namespace MajdataPlay
                         await DownloadFile(options, token);
                     }
                     progress?.Report(1);
-                    using var maidataStream = FileSystem.OpenFile(savePath).OpenRead();
+                    using var maidataStream = FileSystem.File.Open(savePath).OpenRead();
                     _maidata = await SimaiParser.ParseAsync(maidataStream);
                     return _maidata;
                 }
@@ -647,7 +647,7 @@ namespace MajdataPlay
         }
         private void EnsureCachePath()
         {
-            FileSystem.CreateDirectory(_cachePath);
+            FileSystem.Directory.Create(_cachePath);
         }
 
         async Task<DownloadResult> DownloadFile(DownloadOption options, CancellationToken token = default)
@@ -657,10 +657,10 @@ namespace MajdataPlay
             var savePath = Path.Combine(options.SaveTo, options.Filename);
             var chunkPath = Path.Combine(options.SaveTo, $"{options.Filename}.chunk");
             var hashPath = Path.Combine(options.SaveTo, $"{options.Filename}.sha256");
-            var storageDirectory = FileSystem.OpenDirectory(options.SaveTo);
-            var saveFile = FileSystem.OpenFile(savePath);
-            var chunkFile = FileSystem.OpenFile(chunkPath);
-            var hashFile = FileSystem.OpenFile(hashPath);
+            var storageDirectory = FileSystem.Directory.Open(options.SaveTo);
+            var saveFile = FileSystem.File.Open(savePath);
+            var chunkFile = FileSystem.File.Open(chunkPath);
+            var hashFile = FileSystem.File.Open(hashPath);
 
             var httpClient = MajEnv.SharedHttpClient;
             var expectedSHA256 = default(string?);
@@ -858,7 +858,7 @@ namespace MajdataPlay
                 return true;
             }
 
-            using var fs = FileSystem.OpenFile(filePath).OpenRead();
+            using var fs = FileSystem.File.Open(filePath).OpenRead();
             return VerifyStreamIntegrity(fs, targetHash);
         }
 
@@ -873,7 +873,7 @@ namespace MajdataPlay
 
         private void DeleteFileIfExists(string path)
         {
-            var file = FileSystem.OpenFile(path);
+            var file = FileSystem.File.Open(path);
             if (file.Exists)
             {
                 file.Delete();

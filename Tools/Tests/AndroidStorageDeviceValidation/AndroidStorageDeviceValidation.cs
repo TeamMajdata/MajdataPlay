@@ -152,7 +152,7 @@ namespace MajdataPlay.Platform.Android.Runtime.Validation
                     Require(state.FullPassed && state.PickProcessId != _result.ProcessId,
                         "Replay requires a completed full run and a different process after force-stop.");
                     Require(string.IsNullOrEmpty(state.ActiveChildLocation), "A previous interrupted run left an owned child; inspect private state first.");
-                    parent = StorageFileSystem.OpenDirectory(state.Location);
+                    parent = StorageFileSystem.Directory.Open(state.Location);
                 }
                 else
                 {
@@ -429,7 +429,7 @@ namespace MajdataPlay.Platform.Android.Runtime.Validation
                 }
                 Mark("BINARY_PASSED", "197121 bytes containing all 256 byte values round-tripped across multiple bounded JNI transfers.");
                 var nested = await Task.Run(() => child.CreateDirectory("moved"), cancellationToken);
-                var moved = await Task.Run(() => StorageFileSystem.MoveFile(file.Location, nested.Location, "moved.bin"), cancellationToken);
+                var moved = await Task.Run(() => StorageFileSystem.File.Move(file.Location, nested.Location, "moved.bin"), cancellationToken);
                 Require(moved.Location != file.Location && moved.Exists, "The SAF move did not return a new authoritative document.");
                 var movedBytes = await moved.ReadAllBytesAsync(cancellationToken);
                 Require(movedBytes.Length == bytes.Length, "The SAF move changed the document length.");
@@ -441,7 +441,7 @@ namespace MajdataPlay.Platform.Android.Runtime.Validation
                 var timestamp = new DateTime(2020, 2, 3, 4, 5, 6, DateTimeKind.Utc);
                 try
                 {
-                    await Task.Run(() => StorageFileSystem.SetLastWriteTime(moved.Location, timestamp), cancellationToken);
+                    await Task.Run(() => moved.SetLastWriteTime(timestamp), cancellationToken);
                     var updated = moved.Entry;
                     Mark("TIMESTAMP_PASSED", updated?.LastWriteTimeUtc is null
                         ? "The provider accepted a modification-time update without reporting a modification time."
@@ -521,7 +521,7 @@ namespace MajdataPlay.Platform.Android.Runtime.Validation
                 var occupied = await Task.Run(() => nested.CreateFile("occupied.bin"), cancellationToken);
                 await occupied.WriteAllTextAsync("occupied", cancellationToken: cancellationToken);
                 Expect<IOException>(() => Task.Run(() =>
-                    StorageFileSystem.MoveFile(renamed.Location, nested.Location, "occupied.bin")).GetAwaiter().GetResult());
+                    StorageFileSystem.File.Move(renamed.Location, nested.Location, "occupied.bin")).GetAwaiter().GetResult());
                 Expect<IOException>(() => Task.Run(() => renamed.Rename("occupied.bin")).GetAwaiter().GetResult());
                 var survivor = await renamed.ReadAllBytesAsync(cancellationToken);
                 Require(survivor.Length == 5 && survivor[4] == 5, "The rejected collision changed the source document.");
@@ -530,7 +530,7 @@ namespace MajdataPlay.Platform.Android.Runtime.Validation
                 Mark("COLLISION_PASSED", "Move and rename onto an occupied name were rejected without changing either document.");
                 Expect<ArgumentException>(() => nested.CreateFile(".."));
                 Expect<ArgumentException>(() => nested.FindFile("parent/child"));
-                Expect<ArgumentException>(() => StorageFileSystem.CreateFile(nested.Location, "a\\b"));
+                Expect<ArgumentException>(() => StorageFileSystem.File.Create(nested.Location, "a\\b"));
                 Mark("NAME_REJECTION_PASSED", "Traversal and separator child names were rejected before touching the provider.");
                 var disposable = await Task.Run(() => nested.CreateFile("delete-me.bin"), cancellationToken);
                 await disposable.WriteAllTextAsync("delete me", cancellationToken: cancellationToken);
@@ -570,12 +570,12 @@ namespace MajdataPlay.Platform.Android.Runtime.Validation
                 Directory.CreateDirectory(localRoot);
                 var localSource = Path.Combine(localRoot, "local-source.bin");
                 File.WriteAllBytes(localSource, new byte[] { 9, 8, 7 });
-                var copied = await Task.Run(() => StorageFileSystem.CopyFile(localSource, nested.Location, "copied.bin"), cancellationToken);
+                var copied = await Task.Run(() => StorageFileSystem.File.Copy(localSource, nested.Location, "copied.bin"), cancellationToken);
                 var copiedBytes = await copied.ReadAllBytesAsync(cancellationToken);
                 Require(copiedBytes.Length == 3 && copiedBytes[0] == 9 && copiedBytes[2] == 7,
                     "The local-to-provider copy produced unexpected bytes.");
                 var localTarget = Path.Combine(localRoot, "provider-to-local.bin");
-                var backCopy = await Task.Run(() => StorageFileSystem.CopyFile(copied.Location, localTarget), cancellationToken);
+                var backCopy = await Task.Run(() => StorageFileSystem.File.Copy(copied.Location, localTarget), cancellationToken);
                 var backBytes = File.ReadAllBytes(localTarget);
                 Require(backCopy.Exists && backBytes.Length == 3 && backBytes[1] == 8,
                     "The provider-to-local copy produced unexpected bytes.");
@@ -583,8 +583,7 @@ namespace MajdataPlay.Platform.Android.Runtime.Validation
                 File.Delete(localTarget);
                 Directory.Delete(localRoot, false);
                 Mark("COPY_PASSED", "Local-to-provider and provider-to-local copies transferred the expected bytes.");
-                await Task.Run(() => StorageFileSystem.SetAttributes(renamed.Location,
-                    FileAttributes.Hidden | FileAttributes.System), cancellationToken);
+                await Task.Run(() => renamed.SetAttributes(FileAttributes.Hidden | FileAttributes.System), cancellationToken);
                 var attributeEntry = await Task.Run(() => renamed.Entry, cancellationToken);
                 Require(attributeEntry is not null && !attributeEntry.IsHidden && !attributeEntry.IsSystem,
                     "The provider reported attribute flags that no SAF provider stores.");

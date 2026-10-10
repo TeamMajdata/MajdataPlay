@@ -311,7 +311,7 @@ namespace MajdataPlay.Scenes.Game.Notes.Skins
         }
 
         public CustomSkin(string skinCollectionPath, bool loadIntoMemory) :
-            this(Path.GetFileName(FileSystem.OpenDirectory(skinCollectionPath).Location), skinCollectionPath, loadIntoMemory)
+            this(Path.GetFileName(FileSystem.Directory.Open(skinCollectionPath).Location), skinCollectionPath, loadIntoMemory)
         { }
         public CustomSkin(string name, string skinCollectionPath, bool loadIntoMemory) : this(name)
         {
@@ -325,7 +325,7 @@ namespace MajdataPlay.Scenes.Game.Notes.Skins
 
         public static CustomSkin Create(string skinCollectionPath)
         {
-            var directory = FileSystem.OpenDirectory(skinCollectionPath);
+            var directory = FileSystem.Directory.Open(skinCollectionPath);
             var entry = directory.Entry;
             if (entry is null || !entry.IsDirectory)
             {
@@ -524,7 +524,7 @@ namespace MajdataPlay.Scenes.Game.Notes.Skins
 
         private async UniTask PerformLoadAsync()
         {
-            IsOutlineAvailable = FileSystem.OpenFile($"{_path}/outline.png").Exists;
+            IsOutlineAvailable = FileSystem.File.Open($"{_path}/outline.png").Exists;
 
             SubDisplay = await LoadSpriteDirectAsync("SubBackgourd.png");
             LoadingSplash = await LoadSpriteDirectAsync("now_loading.png");
@@ -541,7 +541,7 @@ namespace MajdataPlay.Scenes.Game.Notes.Skins
 
         private void PerformLoad()
         {
-            IsOutlineAvailable = FileSystem.OpenFile($"{_path}/outline.png").Exists;
+            IsOutlineAvailable = FileSystem.File.Open($"{_path}/outline.png").Exists;
 
             SubDisplay = LoadSpriteDirectSync("SubBackgourd.png");
             LoadingSplash = LoadSpriteDirectSync("now_loading.png");
@@ -727,7 +727,7 @@ namespace MajdataPlay.Scenes.Game.Notes.Skins
         private async UniTask<Sprite?> LoadSpriteDirectAsync(string subPath)
         {
             var fullPath = Path.Combine(_path, subPath);
-            var file = FileSystem.OpenFile(fullPath);
+            var file = FileSystem.File.Open(fullPath);
             if (!file.Exists)
             {
                 return null;
@@ -746,7 +746,7 @@ namespace MajdataPlay.Scenes.Game.Notes.Skins
         private Sprite? LoadSpriteDirectSync(string subPath)
         {
             var fullPath = Path.Combine(_path, subPath);
-            var file = FileSystem.OpenFile(fullPath);
+            var file = FileSystem.File.Open(fullPath);
             if (!file.Exists)
             {
                 return null;
@@ -865,7 +865,7 @@ namespace MajdataPlay.Scenes.Game.Notes.Skins
 
             foreach (var task in _tasks)
             {
-                var file = FileSystem.OpenFile(task.FullPath);
+                var file = FileSystem.File.Open(task.FullPath);
                 if (!file.Exists)
                 {
                     task.Assigner(null);
@@ -902,7 +902,7 @@ namespace MajdataPlay.Scenes.Game.Notes.Skins
 
             foreach (var task in _tasks)
             {
-                var file = FileSystem.OpenFile(task.FullPath);
+                var file = FileSystem.File.Open(task.FullPath);
                 if (!file.Exists)
                 {
                     task.Assigner(null);

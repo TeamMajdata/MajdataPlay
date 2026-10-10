@@ -101,7 +101,7 @@ namespace MajdataPlay.Scenes.View
         protected override void Awake()
         {
             base.Awake();
-            FileSystem.CreateDirectory(CACHE_PATH);
+            FileSystem.Directory.Create(CACHE_PATH);
             Majdata<ViewManager>.Instance = this;
             Majdata<INoteController>.Instance = this;
             Majdata<INoteTimeProvider>.Instance = this;
@@ -335,7 +335,7 @@ namespace MajdataPlay.Scenes.View
             {
                 if(_audioSample is not null) _audioSample.Dispose();
                 var sample = await MajInstances.AudioManager.LoadMusicAsync(audioPath, true, true);
-                if (FileSystem.OpenFile(bgPath).Exists)
+                if (FileSystem.File.Open(bgPath).Exists)
                 {
                     var cover = await SpriteLoader.LoadFromFileAsync(bgPath);
                     _bgCover = cover;

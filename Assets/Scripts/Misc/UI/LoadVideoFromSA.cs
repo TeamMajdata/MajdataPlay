@@ -56,7 +56,7 @@ namespace MajdataPlay.UI
             {
                 path = Path.Combine(MajEnv.AssetsPath, videoPath + ext);
 
-                if(FileSystem.OpenFile(path).Exists)
+                if(FileSystem.File.Open(path).Exists)
                 {
                     isValid = true;
                     break;

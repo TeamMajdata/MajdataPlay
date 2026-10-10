@@ -214,6 +214,12 @@ namespace MajdataPlay.IO.Storage
         }
 
         /// <inheritdoc />
+        public void SetAttributes(string location, FileAttributes attributes)
+        {
+            File.SetAttributes(FileSystem.NormalizeLocalPath(location), attributes);
+        }
+
+        /// <inheritdoc />
         public void SetLastWriteTime(string location, DateTime lastWriteTimeUtc)
         {
             if (lastWriteTimeUtc.Kind != DateTimeKind.Utc)
