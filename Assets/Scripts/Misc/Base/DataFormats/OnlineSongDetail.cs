@@ -647,7 +647,7 @@ namespace MajdataPlay
         }
         private void EnsureCachePath()
         {
-            FileSystem.CreateLocalDirectory(_cachePath);
+            FileSystem.CreateDirectory(_cachePath);
         }
 
         async Task<DownloadResult> DownloadFile(DownloadOption options, CancellationToken token = default)

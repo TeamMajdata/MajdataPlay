@@ -101,7 +101,7 @@ namespace MajdataPlay.Scenes.View
         protected override void Awake()
         {
             base.Awake();
-            FileSystem.CreateLocalDirectory(CACHE_PATH);
+            FileSystem.CreateDirectory(CACHE_PATH);
             Majdata<ViewManager>.Instance = this;
             Majdata<INoteController>.Instance = this;
             Majdata<INoteTimeProvider>.Instance = this;

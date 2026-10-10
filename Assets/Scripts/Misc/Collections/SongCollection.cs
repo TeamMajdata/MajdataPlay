@@ -120,7 +120,7 @@ namespace MajdataPlay.Collections
                 if (flagDirectory is null)
                 {
                     flagDirectory = collectionDirectory.CreateDirectory(".MajdataPlay");
-                    FileSystem.SetLocalAttributes(flagDirectory.Location, FileAttributes.Directory | FileAttributes.Hidden);
+                    FileSystem.SetAttributes(flagDirectory.Location, FileAttributes.Directory | FileAttributes.Hidden);
                 }
                 var flagFile = flagDirectory.FindFile("id");
                 if (flagFile is not null)

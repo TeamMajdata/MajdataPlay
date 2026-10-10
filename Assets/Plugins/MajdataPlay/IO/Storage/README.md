@@ -11,7 +11,7 @@ and cancellable system pickers, without adding an Android dependency to the port
 ```csharp
 using MajdataPlay.IO.Storage;
 
-var library = FileSystem.CreateLocalDirectory(localLibraryPath);
+var library = FileSystem.CreateDirectory(localLibraryPath);
 var folder = library.CreateDirectory("Charts");
 var file = folder.CreateFile("notes.txt", "text/plain");
 await file.WriteAllTextAsync("中文 chart", cancellationToken: cancellationToken);
@@ -31,7 +31,7 @@ the backend for native paths, `file://` URIs, and registered `content://` URIs.
 Callers pass a location to the facade rather than constructing or selecting the
 local implementation. Handles expose their backend only through `IFileSystem`.
 
-Creating a handle does not create an entry. `OpenWrite`, `WriteAllBytes`, and `WriteAllText` require an existing file;
+Creating a handle does not create an entry. Handle methods `OpenWrite`, `WriteAllBytes`, and `WriteAllText` require an existing file;
 use `StorageDirectory.CreateFile` first. Creating a file never overwrites a sibling;
 creating a directory returns the existing directory if it already exists.
 Child APIs accept one name, not paths: empty names, `.`, `..`, separators, and NUL
@@ -43,7 +43,7 @@ fragments are not filesystem path components. OS permissions and mobile sandbox
 boundaries still apply. The local backend does not provide an iOS Files picker,
 security-scoped bookmarks, or access outside the iOS application sandbox.
 
-## Application local storage
+## Unified application operations
 
 Runtime consumers use storage handles for file queries, enumeration, reads and
 writes. Editor-only tooling retains its existing `System.IO` implementation.
@@ -51,19 +51,43 @@ writes. Editor-only tooling retains its existing `System.IO` implementation.
 writers, hashing and ZIP processing consume storage streams rather than opening
 filenames themselves.
 
-`CreateLocalFile(path, overwrite: false)` creates an empty file without creating
-parents or replacing a sibling. `OpenLocalWrite` opens a seekable, caller-owned
-output stream with concurrent read sharing: creation is exclusive by default,
-`overwrite: true` truncates, and `append: true` creates or appends. Use one output
-stream when creating/replacing and writing a local file must share one open.
+Facade operations use the same public names for local paths, file URIs and content
+URIs; callers do not choose a backend. `CreateDirectory(location)` creates missing
+local parents or returns an existing content directory. New content entries must
+use `CreateDirectory(parentLocation, name)` or
+`CreateFile(parentLocation, name, mimeType, overwrite: false)` because a document
+URI is opaque and cannot supply a parent location or a new child name. These
+overloads also accept local parent directories and return the actual provider
+location/name. They never create missing parents or overwrite a directory.
 
-`CopyLocalFile`, `MoveLocalFile`, `MoveLocalDirectory`, `ReplaceLocalFile`,
-`SetLocalAttributes` and `SetLocalLastWriteTime` preserve the corresponding native
-copy metadata, move, atomic replacement, attribute and ZIP timestamp semantics.
-They accept local paths and file URIs only and reject content URIs; replacement
-and directory moves retain the platform's volume and permission restrictions.
-They do not silently fall back to copy/delete. Portable cross-provider copies
-continue to use `StorageFile.CopyTo` / `CopyToAsync`.
+`CreateFile(location, overwrite: false)` creates an empty local file without
+creating parents. For an existing content file, `overwrite: true` truncates it;
+without overwrite the occupied location is rejected. `FileSystem.OpenWrite`
+uses exclusive creation by default, `overwrite: true` truncates, and
+`append: true` appends. Missing local files are created, while content files must
+already exist. Local output streams are seekable and allow concurrent readers;
+provider streams may be nonseekable. Use one output stream when creating and
+writing a local file must share one open. `FileSystem.OpenRead(location)` opens
+an existing readable stream through either backend.
+
+`CopyFile(source, destination, overwrite)` uses native copying for local-to-local
+transfers, retaining local metadata. For a content destination URI, the file must
+already exist and overwrite must be enabled. Use
+`CopyFile(source, parentLocation, name, overwrite)` to create a destination in
+either backend. Provider/cross-provider copies reuse the bounded, nonseekable
+stream transfer and alias guards of `StorageFile.CopyTo`; returned handles retain
+provider-adjusted names and URIs. Failed overwrites may leave partial content;
+newly created destinations are deleted best-effort after a failed copy. Copies
+to an existing `StorageFile` handle are also available via `CopyTo(destination)`.
+
+`MoveFile`, `MoveDirectory`, `ReplaceFile`, `SetAttributes` and `SetLastWriteTime`
+resolve their backends internally. Local branches preserve native move, atomic
+replacement, attribute and ZIP timestamp semantics, including volume and
+permission restrictions. The current content backend contract does not support
+these native operations: content/cross-provider operands throw
+`NotSupportedException` before any mutation, including a content backup for
+replacement. Moves and replacement never fall back to copy/delete. Content
+renaming within a parent remains available through handle `Rename`.
 
 Entry snapshots also expose optional UTC creation times and backend-reported
 hidden/system flags. Local enumeration supplies them for chart ordering and

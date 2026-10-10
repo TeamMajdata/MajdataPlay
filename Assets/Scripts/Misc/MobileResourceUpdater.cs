@@ -137,7 +137,7 @@ namespace MajdataPlay
                     var destinationDirectory = Path.GetDirectoryName(destinationPath);
                     if (!string.IsNullOrEmpty(destinationDirectory))
                     {
-                        FileSystem.CreateLocalDirectory(destinationDirectory);
+                        FileSystem.CreateDirectory(destinationDirectory);
                     }
 
                     WriteAllBytesAtomically(destinationPath, v2Data);
@@ -179,7 +179,7 @@ namespace MajdataPlay
                     FileSystem.OpenFile(extractionRoot).Delete();
                 }
 
-                FileSystem.CreateLocalDirectory(extractionRoot);
+                FileSystem.CreateDirectory(extractionRoot);
             }
             catch (Exception exception)
             {
@@ -206,10 +206,10 @@ namespace MajdataPlay
 
             try
             {
-                FileSystem.CreateLocalFile(
+                FileSystem.CreateFile(
                     Path.Combine(extractionRoot, PendingManagedAssetMovesMarkerName))
                     .WriteAllText(string.Empty);
-                FileSystem.MoveLocalDirectory(extractionRoot, MajEnv.AssetsPath);
+                FileSystem.MoveDirectory(extractionRoot, MajEnv.AssetsPath);
                 return true;
             }
             catch (Exception exception)
@@ -288,7 +288,7 @@ namespace MajdataPlay
                     return true;
                 }
 
-                FileSystem.MoveLocalDirectory(sourcePath, destinationPath);
+                FileSystem.MoveDirectory(sourcePath, destinationPath);
                 MajDebug.LogInfo($"Moved: {sourcePath} -> {destinationPath}");
                 return false;
             }
@@ -384,7 +384,7 @@ namespace MajdataPlay
                 var destinationDirectory = Path.GetDirectoryName(destinationPath);
                 if (!string.IsNullOrEmpty(destinationDirectory))
                 {
-                    FileSystem.CreateLocalDirectory(destinationDirectory);
+                    FileSystem.CreateDirectory(destinationDirectory);
                 }
 
                 WriteAllBytesAtomically(destinationPath, data);
@@ -409,14 +409,14 @@ namespace MajdataPlay
             var temporaryPath = $"{destinationPath}.{Guid.NewGuid():N}.tmp";
             try
             {
-                FileSystem.CreateLocalFile(temporaryPath).WriteAllBytes(data);
+                FileSystem.CreateFile(temporaryPath).WriteAllBytes(data);
                 if (FileSystem.OpenFile(destinationPath).Exists)
                 {
-                    FileSystem.ReplaceLocalFile(temporaryPath, destinationPath);
+                    FileSystem.ReplaceFile(temporaryPath, destinationPath);
                 }
                 else
                 {
-                    FileSystem.MoveLocalFile(temporaryPath, destinationPath);
+                    FileSystem.MoveFile(temporaryPath, destinationPath);
                 }
             }
             finally

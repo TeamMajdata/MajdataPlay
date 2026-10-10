@@ -314,6 +314,50 @@ namespace MajdataPlay.IO.Storage
             return new StorageFile(FileSystem, entry.Location);
         }
 
+        /// <summary>Copies this file over an existing file location using a bounded stream buffer.</summary>
+        /// <param name="destination">The existing destination file, which may belong to another provider.</param>
+        /// <param name="overwrite">Whether the existing destination may be truncated and replaced.</param>
+        /// <param name="cancellationToken">The token checked before side effects and between stream transfers.</param>
+        /// <returns>A handle using the destination backend's authoritative file location.</returns>
+        /// <remarks>
+        /// New provider documents must be created through the destination-directory overload.
+        /// Copying is not atomic; failures may leave the destination truncated or partially written.
+        /// The existing destination is never deleted as failure cleanup.
+        /// Self-copy checks use reported global resource IDs or normalized local paths, ignoring case on Windows.
+        /// Hard-link and other symbolic-link aliases are not reliably detected; overwriting a symbolic-link destination is rejected.
+        /// </remarks>
+        /// <exception cref="ArgumentNullException">The destination is null.</exception>
+        /// <exception cref="OperationCanceledException">Cancellation was requested.</exception>
+        /// <exception cref="FileNotFoundException">The source or destination file does not exist.</exception>
+        /// <exception cref="UnauthorizedAccessException">A backend denied access.</exception>
+        /// <exception cref="NotSupportedException">A backend does not support a required operation.</exception>
+        /// <exception cref="IOException">The destination conflicts, is the source, or copying failed.</exception>
+        public StorageFile CopyTo(StorageFile destination, bool overwrite = false,
+            CancellationToken cancellationToken = default)
+        {
+            if (destination is null)
+            {
+                throw new ArgumentNullException(nameof(destination));
+            }
+            cancellationToken.ThrowIfCancellationRequested();
+            var sourceEntry = GetCopySource();
+            using var input = OpenRead();
+            cancellationToken.ThrowIfCancellationRequested();
+            var destinationEntry = destination.Entry;
+            if (destinationEntry is null)
+            {
+                throw new FileNotFoundException("The storage destination file does not exist.", destination.Location);
+            }
+            ValidateCopyDestination(destination.FileSystem, destinationEntry, overwrite, sourceEntry);
+            var target = new StorageFile(destination.FileSystem, destinationEntry.Location);
+            cancellationToken.ThrowIfCancellationRequested();
+            using var output = target.OpenWrite();
+            CopyStreams(input, output, cancellationToken);
+            output.Flush();
+            cancellationToken.ThrowIfCancellationRequested();
+            return target;
+        }
+
         /// <summary>Copies this file to an immediate child of another directory using a bounded stream buffer.</summary>
         /// <param name="destination">The destination directory, which may belong to another provider.</param>
         /// <param name="name">One destination child name, not a path or URI.</param>
@@ -459,18 +503,7 @@ namespace MajdataPlay.IO.Storage
             var entry = destination.FileSystem.GetChildEntry(destination.Location, name);
             if (entry is not null)
             {
-                if (entry.IsDirectory || !overwrite)
-                {
-                    throw new IOException("The destination name is already occupied.");
-                }
-                if (entry.IsSymbolicLink)
-                {
-                    throw new IOException("Copying over a symbolic link is not supported safely.");
-                }
-                if (IsCopySource(destination.FileSystem, entry, sourceEntry))
-                {
-                    throw new IOException("A file cannot be copied over itself.");
-                }
+                ValidateCopyDestination(destination.FileSystem, entry, overwrite, sourceEntry);
                 return new StorageFile(destination.FileSystem, entry.Location);
             }
             entry = destination.FileSystem.CreateFile(destination.Location, name);
@@ -482,6 +515,31 @@ namespace MajdataPlay.IO.Storage
             var target = new StorageFile(destination.FileSystem, entry.Location);
             created = true;
             return target;
+        }
+
+        /// <summary>Rejects occupied, symbolic-link, and known source-alias destinations before truncation.</summary>
+        /// <param name="destinationFileSystem">The backend owning the existing destination.</param>
+        /// <param name="destinationEntry">The authoritative destination metadata.</param>
+        /// <param name="overwrite">Whether an existing file may be replaced.</param>
+        /// <param name="sourceEntry">The authoritative source metadata.</param>
+        /// <exception cref="ArgumentException">A local entry contains an invalid location.</exception>
+        /// <exception cref="NotSupportedException">A local entry contains a non-file URI.</exception>
+        /// <exception cref="IOException">The destination conflicts, is symbolic, or aliases the source.</exception>
+        private void ValidateCopyDestination(IFileSystem destinationFileSystem, FileSystemEntry destinationEntry,
+            bool overwrite, FileSystemEntry sourceEntry)
+        {
+            if (destinationEntry.IsDirectory || !overwrite)
+            {
+                throw new IOException("The destination name is already occupied.");
+            }
+            if (destinationEntry.IsSymbolicLink)
+            {
+                throw new IOException("Copying over a symbolic link is not supported safely.");
+            }
+            if (IsCopySource(destinationFileSystem, destinationEntry, sourceEntry))
+            {
+                throw new IOException("A file cannot be copied over itself.");
+            }
         }
 
         /// <summary>Identifies matching global resource IDs, provider locations, and normalized local paths before truncation.</summary>

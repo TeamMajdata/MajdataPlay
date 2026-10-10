@@ -38,7 +38,19 @@ failure in one case does not prevent the other cases from running.
 - Application local output: exclusive creation, explicit overwrite, append,
   seekable streams and concurrent read sharing; native file/directory moves,
   copy timestamps, atomic replacement with a backup, UTC creation times,
-  Windows hidden/system flags, and rejection of content URIs by local-only APIs.
+  Windows hidden/system flags, all through the unified facade operations.
+- Unified `CreateDirectory`, `CreateFile`, `OpenRead`, `OpenWrite` and `CopyFile`
+  dispatch for local paths, file URIs and registered content URIs. Provider
+  child creation/copy retains assigned names and opaque authoritative IDs;
+  existing documents require explicit overwrite or append before writable opens.
+  Both copy directions support non-seekable streams with unknown lengths.
+- Unified facade self-copy rejection for exact document URIs and distinct grant
+  aliases sharing a global `ResourceId`; failed new copies clean up after stream
+  closure, while failed/cancelled existing-location copies retain their target
+  identity. Pre-cancellation and denied queries must precede writable opens.
+- Unsupported content/cross-provider moves, atomic replacement and local
+  metadata changes fail before mutation, including a content backup operand on
+  an otherwise native replacement. Native file/directory operands remain intact.
 - Existing-only reads/writes, complete binary round trips, append, truncation,
   empty writes, refreshed lengths/UTC timestamps, text encodings, UTF-8/UTF-16/
   UTF-32 BOM detection, BOM-only files, and preservation of line endings.
@@ -93,6 +105,26 @@ links, aliases through linked ancestor directories, concurrent path replacement,
 or provider aliases which report neither matching locations nor a matching
 non-null resource identity. Direct symbolic-link destination rejection is a
 specific copy safety rule, not general sandboxing of arbitrary input paths.
+
+## Unified facade contract
+
+The facade chooses its backend internally. Application callers use
+`CreateDirectory`, `CreateFile`, `OpenRead`, `OpenWrite`, `CopyFile`, `MoveFile`,
+`MoveDirectory`, `ReplaceFile`, `SetAttributes` and `SetLastWriteTime`; there are
+no separate public `*Local*` operations. Existing handle operations keep their
+existing-only write semantics. The facade's output stream defaults to exclusive
+native creation and requires explicit `overwrite: true` or `append: true` for an
+existing content document.
+
+Opaque content URIs do not identify a creatable child path. For a new provider
+document, pass its authorized parent URI and one display name to the
+`CreateFile`, `CreateDirectory` or `CopyFile` child overload. Direct URI copying
+requires an existing content destination. Child overloads return the provider's
+actual name/location, which may differ from the request. The existing provider
+contract has no native move, atomic replacement or local attribute/timestamp
+mutation operation; the unified facade reports `NotSupportedException` for such
+operands before it changes data. Same-parent provider renaming remains available
+through the existing handles.
 
 ## Isolated Unity and production generated-wrapper validation
 
@@ -217,6 +249,29 @@ Windows host results for the commands above: storage suite **29 cases / 840
 assertions**, chart storage **3 cases**, and resource storage **9 cases each**
 for its iOS and Android conditional branches, all passed. Local replacement was
 rerun outside the Windows sandbox to exercise the real host operation.
+
+After unifying the facade operations, the expanded storage suite passed **32
+cases / 950 assertions**, with no failures or skips. This rerun used a fresh
+build of the independent validation project with **.NET SDK 9.0.316** selected
+explicitly on this Windows host:
+
+```powershell
+$env:DOTNET_CLI_HOME = Join-Path (Get-Location) 'Temp/FileSystemValidation/DotnetHome'
+dotnet 'C:/Program Files/dotnet/sdk/9.0.316/dotnet.dll' build Tools/Tests/FileSystemValidation/FileSystemValidation.csproj --no-incremental
+dotnet 'C:/Program Files/dotnet/sdk/9.0.316/dotnet.dll' run --project Tools/Tests/FileSystemValidation/FileSystemValidation.csproj --no-build
+```
+
+The build completed without warnings or errors. Native replacement was again
+exercised with normal host permissions. The content cases remain managed
+in-memory provider checks; they do not establish Android device behavior.
+
+The unified facade consumer rerun also passed chart storage **3 cases**, resource
+storage **9 cases each** for iOS and Android, and FFmpeg **81 managed assertions**.
+Each independent project was forcibly rebuilt with SDK 9.0.316 before running.
+The final sources also passed the isolated Unity **6000.3.17f1** consumer script
+compile described below, with exit code 0. Its additional
+`STORAGE_CONSUMER_UNIFIED_FACADE_PASSED` reflection check confirmed that the loaded
+IO assembly exposes the new facade names and no public `Local` operation names.
 
 `dotnet run --project Tools/Tests/FFmpegValidation/FFmpegValidation.csproj`
 also passed its **81 managed assertions** without native media arguments.

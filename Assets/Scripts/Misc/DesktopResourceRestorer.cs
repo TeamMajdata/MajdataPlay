@@ -53,7 +53,7 @@ namespace MajdataPlay
             string destinationRoot,
             IReadOnlyDictionary<string, string> v2Hashes)
         {
-            FileSystem.CreateLocalDirectory(destinationRoot);
+            FileSystem.CreateDirectory(destinationRoot);
             foreach (var relativePath in v2Hashes.Keys
                          .Where(path => path.StartsWith(sourcePrefix, StringComparison.OrdinalIgnoreCase))
                          .OrderBy(path => path, StringComparer.Ordinal))
@@ -68,12 +68,12 @@ namespace MajdataPlay
                 var destinationDirectory = Path.GetDirectoryName(destinationPath);
                 if (!string.IsNullOrEmpty(destinationDirectory))
                 {
-                    FileSystem.CreateLocalDirectory(destinationDirectory);
+                    FileSystem.CreateDirectory(destinationDirectory);
                 }
 
                 try
                 {
-                    FileSystem.CopyLocalFile(
+                    FileSystem.CopyFile(
                         sourcePath,
                         destinationPath,
                         overwrite: true);

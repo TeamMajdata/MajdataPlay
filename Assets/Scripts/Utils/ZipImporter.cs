@@ -83,11 +83,11 @@ namespace MajdataPlay.Utils
                 return;
             }
             
-            FileSystem.CreateLocalDirectory(ImportRoot);
+            FileSystem.CreateDirectory(ImportRoot);
             
             var folderName = Path.GetFileNameWithoutExtension(tempFilePath);
             var outDir = Path.Combine(ImportRoot, folderName);
-            FileSystem.CreateLocalDirectory(outDir);
+            FileSystem.CreateDirectory(outDir);
 
             try
             {
@@ -194,7 +194,7 @@ namespace MajdataPlay.Utils
                 var dir = Path.GetDirectoryName(fullPath);
                 if (!string.IsNullOrEmpty(dir))
                 {
-                    FileSystem.CreateLocalDirectory(dir);
+                    FileSystem.CreateDirectory(dir);
                 }
                 
                 if (FileSystem.OpenFile(fullPath).Exists)
@@ -203,11 +203,11 @@ namespace MajdataPlay.Utils
                 }
 
                 using (var entryStream = entry.Open())
-                using (var outputStream = FileSystem.CreateLocalFile(fullPath).OpenWrite())
+                using (var outputStream = FileSystem.CreateFile(fullPath).OpenWrite())
                 {
                     entryStream.CopyTo(outputStream);
                 }
-                FileSystem.SetLocalLastWriteTime(fullPath, entry.LastWriteTime.DateTime);
+                FileSystem.SetLastWriteTime(fullPath, entry.LastWriteTime.DateTime);
             }
         }
     }

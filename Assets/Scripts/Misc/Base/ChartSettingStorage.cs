@@ -47,7 +47,7 @@ namespace MajdataPlay.Settings
                 {
                     var storageDirectory = FileSystem.OpenDirectory(Path.GetDirectoryName(STORAGE_PATH)!);
                     var backupPath = Path.Combine(storageDirectory.Location, $"{Path.GetFileName(STORAGE_PATH)}.{DateTime.Now:yyyy-MM-dd-HH-mm-ss}.bak");
-                    FileSystem.CopyLocalFile(storageFile.Location, backupPath);
+                    FileSystem.CopyFile(storageFile.Location, backupPath);
                     MajDebug.LogError($"Failed to load chart settings\nPath: {STORAGE_PATH}\nException: {exception}");
                 }
                 else

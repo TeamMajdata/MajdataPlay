@@ -90,7 +90,7 @@ namespace MajdataPlay
                     await RefreshMyFavAsync();
                     if (!FileSystem.OpenDirectory(MajEnv.ChartPath).Exists)
                     {
-                        FileSystem.CreateLocalDirectory(MajEnv.ChartPath).CreateDirectory("default");
+                        FileSystem.CreateDirectory(MajEnv.ChartPath).CreateDirectory("default");
                         return;
                     }
                     var rootPath = MajEnv.ChartPath;
@@ -523,7 +523,7 @@ namespace MajdataPlay
             if (collectionDirectory.FindDirectory(".MajdataPlay") is null)
             {
                 var flagDirectory = collectionDirectory.CreateDirectory(".MajdataPlay");
-                FileSystem.SetLocalAttributes(flagDirectory.Location, FileAttributes.Directory | FileAttributes.Hidden);
+                FileSystem.SetAttributes(flagDirectory.Location, FileAttributes.Directory | FileAttributes.Hidden);
             }
             if (dirs.Count == 0)
             {
@@ -596,7 +596,7 @@ namespace MajdataPlay
         {
             var name = api.Name;
             var cachePath = Path.Combine(MajEnv.CachePath, "Net", name);
-            FileSystem.CreateLocalDirectory(cachePath);
+            FileSystem.CreateDirectory(cachePath);
             var collection = SongCollection.Empty(cachePath, name);
             var apiroot = api.Url;
 
@@ -632,7 +632,7 @@ namespace MajdataPlay
                 MajDebug.LogInfo("Loaded online charts list:" + gameList.Length);
                 Interlocked.Add(ref _totalChartCount, chartList.Length);
                 var cacheFolder = Path.Combine(MajEnv.CachePath, $"Net/{name}");
-                FileSystem.CreateLocalDirectory(cacheFolder);
+                FileSystem.CreateDirectory(cacheFolder);
                 return new OnlineSongCollection(api, cachePath, name, gameList.ToArray());
             }
             catch (OperationCanceledException)
@@ -809,7 +809,7 @@ namespace MajdataPlay
                     {
                         backupName = $"{backupName}.bak";
                     }
-                    FileSystem.CopyLocalFile(exportFile.Location, Path.Combine(exportDirectory.Location, backupName));
+                    FileSystem.CopyFile(exportFile.Location, Path.Combine(exportDirectory.Location, backupName));
                     MajDebug.LogError($"Failed to load favorites\nPath: {MY_FAVORITE_EXPORT_PATH}\nException: {exception}");
                 }
             }

@@ -50,6 +50,9 @@ namespace MajdataPlay.Tests.FileSystemValidation
                 ("local: directory links do not delete outside targets", TestDirectoryLinks),
                 ("local: file links do not delete outside targets", TestFileLinks),
                 ("content: dispatch, opaque IDs and nullable metadata", TestContentDispatch),
+                ("facade: unified content creation and sequential streams", TestUnifiedContentCreation),
+                ("facade: unified local/content copy routing and aliases", TestUnifiedCopies),
+                ("facade: failed copies and unsupported operations preserve identities", TestUnifiedFailures),
                 ("content: sequential non-seekable byte and text I/O", TestContentIO),
                 ("content: authoritative children and changed rename IDs", TestContentChildren),
                 ("content: single-child names remain URI-safe", TestContentNames),
@@ -185,6 +188,8 @@ namespace MajdataPlay.Tests.FileSystemValidation
             Check(backendType.IsNotPublic && !backendType.IsVisible, "local backend is internal and not externally visible");
             Check(!typeof(StorageFacade).Assembly.GetExportedTypes().Contains(backendType), "local backend is not exported from its assembly");
             Check(typeof(StorageFacade).GetMember("Local").Length == 0, "facade exposes no public Local backend entry point");
+            Check(!typeof(StorageFacade).GetMethods().Any(method => method.Name.Contains("Local", StringComparison.Ordinal)),
+                "facade exposes unified operations without public Local-specific method names");
             Check(ReferenceEquals(file.FileSystem, directory.FileSystem), "native file and directory paths automatically select the same backend");
             Check(ReferenceEquals(file.FileSystem, uriFile.FileSystem), "encoded file URIs automatically select the same backend as native paths");
             Check(file.Location == path && uriFile.Location == path, "automatic selection preserves normalized native locations");
@@ -199,7 +204,7 @@ namespace MajdataPlay.Tests.FileSystemValidation
         {
             using var workspace = new TemporaryWorkspace();
             var path = workspace.GetPath("parent", "谱面 #50% café");
-            var directory = StorageFacade.CreateLocalDirectory(path);
+            var directory = StorageFacade.CreateDirectory(path);
             Check(directory.Exists && NativeDirectory.Exists(path), "facade creates nested native directories");
             Check(ReferenceEquals(directory.FileSystem, StorageFacade.OpenDirectory(path).FileSystem), "created directory uses the automatically selected local backend");
             Check(ReferenceEquals(directory.FileSystem, StorageFacade.OpenFile(Path.Combine(path, "missing.bin")).FileSystem), "file and directory resolutions share a stable backend");
@@ -214,7 +219,7 @@ namespace MajdataPlay.Tests.FileSystemValidation
             Check(Path.GetFullPath(Entry(reopened).Location) == Path.GetFullPath(file.Location), "URI decoding preserves the native location");
             var directoryUri = new Uri(directory.Location + Path.DirectorySeparatorChar).AbsoluteUri;
             Check(StorageFacade.OpenDirectory(directoryUri).FindFile(Entry(file).Name) is not null, "encoded directory URI finds its immediate child");
-            Check(StorageFacade.CreateLocalDirectory(path).Exists, "local directory creation is idempotent");
+            Check(StorageFacade.CreateDirectory(path).Exists, "local directory creation is idempotent");
             Check(StorageFacade.OpenDirectory(path).Exists, "plain native directory path dispatch succeeds");
             return Task.CompletedTask;
         }
@@ -227,20 +232,20 @@ namespace MajdataPlay.Tests.FileSystemValidation
             using var workspace = new TemporaryWorkspace();
             var directory = workspace.CreateLocalDirectory();
             var path = Path.Combine(directory.Location, "output.txt");
-            var file = StorageFacade.CreateLocalFile(new Uri(path).AbsoluteUri);
+            var file = StorageFacade.CreateFile(new Uri(path).AbsoluteUri);
             file.WriteAllText("original");
             Throws<IOException>(() =>
             {
-                StorageFacade.CreateLocalFile(path);
+                StorageFacade.CreateFile(path);
             }, "local creation does not overwrite by default");
             Check(file.ReadAllText() == "original", "failed exclusive creation preserves contents");
             using (var existingReader = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
             {
-                using var output = StorageFacade.OpenLocalWrite(path, overwrite: true);
+                using var output = StorageFacade.OpenWrite(path, overwrite: true);
                 output.WriteByte((byte)'x');
             }
             Check(file.ReadAllText() == "x", "single-open overwrite works with existing shared readers");
-            using (var output = StorageFacade.OpenLocalWrite(path, overwrite: true))
+            using (var output = StorageFacade.OpenWrite(path, overwrite: true))
             {
                 Check(output.CanSeek, "native encoder output is seekable");
                 output.WriteByte((byte)'a');
@@ -248,84 +253,84 @@ namespace MajdataPlay.Tests.FileSystemValidation
                 using var reader = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
                 Check(reader.ReadByte() == 'a', "output permits a concurrent reader");
             }
-            using (var append = StorageFacade.OpenLocalWrite(path, append: true))
+            using (var append = StorageFacade.OpenWrite(path, append: true))
             {
                 append.WriteByte((byte)'b');
             }
             Check(file.ReadAllText() == "ab", "local append preserves previous contents");
             var timestamp = new DateTime(2020, 2, 3, 4, 5, 6, DateTimeKind.Utc);
-            StorageFacade.SetLocalLastWriteTime(file.Location, timestamp);
-            var copied = StorageFacade.CopyLocalFile(file.Location, Path.Combine(directory.Location, "copy.txt"));
+            StorageFacade.SetLastWriteTime(file.Location, timestamp);
+            var copied = StorageFacade.CopyFile(file.Location, Path.Combine(directory.Location, "copy.txt"));
             Check(copied.ReadAllText() == "ab" && Entry(copied).LastWriteTimeUtc == timestamp,
                 "native local copies preserve file contents and modification time");
             Throws<IOException>(() =>
             {
-                StorageFacade.CopyLocalFile(file.Location, copied.Location);
+                StorageFacade.CopyFile(file.Location, copied.Location);
             }, "local copies reject destination collisions without overwrite");
             file.WriteAllText("overwritten");
-            StorageFacade.CopyLocalFile(file.Location, copied.Location, overwrite: true);
+            StorageFacade.CopyFile(file.Location, copied.Location, overwrite: true);
             Check(copied.ReadAllText() == "overwritten", "local copy permits explicit overwrite");
-            Check(StorageFacade.CreateLocalFile(path, overwrite: true).ReadAllBytes().Length == 0,
+            Check(StorageFacade.CreateFile(path, overwrite: true).ReadAllBytes().Length == 0,
                 "explicit overwrite truncates existing content");
             var movedDirectory = directory.CreateDirectory("moved");
             var movedPath = Path.Combine(movedDirectory.Location, "output.txt");
-            var moved = StorageFacade.MoveLocalFile(path, new Uri(movedPath).AbsoluteUri);
+            var moved = StorageFacade.MoveFile(path, new Uri(movedPath).AbsoluteUri);
             Check(!file.Exists && moved.Exists && moved.Location == movedPath, "file move returns its authoritative destination");
             moved.WriteAllText("before");
             var replacement = directory.CreateFile("replacement.txt");
             replacement.WriteAllText("after");
             var backupPath = Path.Combine(directory.Location, "backup.txt");
-            var replaced = StorageFacade.ReplaceLocalFile(replacement.Location, moved.Location, backupPath);
+            var replaced = StorageFacade.ReplaceFile(replacement.Location, moved.Location, backupPath);
             Check(replaced.ReadAllText() == "after" && !replacement.Exists, "replacement consumes source and updates destination");
             Check(StorageFacade.OpenFile(backupPath).ReadAllText() == "before", "replacement backup preserves original content");
             var renamedPath = Path.Combine(directory.Location, "renamed");
-            var renamed = StorageFacade.MoveLocalDirectory(movedDirectory.Location, renamedPath);
+            var renamed = StorageFacade.MoveDirectory(movedDirectory.Location, renamedPath);
             Check(!movedDirectory.Exists && renamed.FindFile("output.txt")?.ReadAllText() == "after",
                 "directory move preserves its children");
             Check(Entry(renamed).CreationTimeUtc?.Kind == DateTimeKind.Utc, "local creation timestamps are UTC");
             if (OperatingSystem.IsWindows())
             {
-                StorageFacade.SetLocalAttributes(renamed.Location, FileAttributes.Directory | FileAttributes.Hidden | FileAttributes.System);
+                StorageFacade.SetAttributes(renamed.Location, FileAttributes.Directory | FileAttributes.Hidden | FileAttributes.System);
                 Check(Entry(renamed).IsHidden && Entry(renamed).IsSystem, "hidden and system flags are retained in metadata");
-                StorageFacade.SetLocalAttributes(renamed.Location, FileAttributes.Directory);
+                StorageFacade.SetAttributes(renamed.Location, FileAttributes.Directory);
             }
             Throws<DirectoryNotFoundException>(() =>
             {
-                StorageFacade.CreateLocalFile(Path.Combine(directory.Location, "missing", "file.txt"));
+                StorageFacade.CreateFile(Path.Combine(directory.Location, "missing", "file.txt"));
             }, "local file creation never creates missing parents");
             var content = "content://filesystem.validation/document/opaque%2Fname";
             Throws<NotSupportedException>(() =>
             {
-                StorageFacade.CreateLocalFile(content);
-            }, "local creation rejects content URIs");
+                StorageFacade.CreateFile(content);
+            }, "unregistered content creation is rejected");
             Throws<NotSupportedException>(() =>
             {
-                using var output = StorageFacade.OpenLocalWrite(content);
-            }, "local output rejects content URIs");
+                using var output = StorageFacade.OpenWrite(content);
+            }, "unregistered content output is rejected");
             Throws<NotSupportedException>(() =>
             {
-                StorageFacade.MoveLocalFile(replaced.Location, content);
-            }, "local file moves reject content URIs");
+                StorageFacade.MoveFile(replaced.Location, content);
+            }, "file moves reject unsupported content destinations");
             Throws<NotSupportedException>(() =>
             {
-                StorageFacade.MoveLocalDirectory(renamed.Location, content);
-            }, "local directory moves reject content URIs");
+                StorageFacade.MoveDirectory(renamed.Location, content);
+            }, "directory moves reject unsupported content destinations");
             Throws<NotSupportedException>(() =>
             {
-                StorageFacade.ReplaceLocalFile(content, replaced.Location);
-            }, "local replacement rejects content URIs");
+                StorageFacade.ReplaceFile(content, replaced.Location);
+            }, "replacement rejects unsupported content sources");
             Throws<NotSupportedException>(() =>
             {
-                StorageFacade.SetLocalAttributes(content, FileAttributes.Hidden);
-            }, "local attributes reject content URIs");
+                StorageFacade.SetAttributes(content, FileAttributes.Hidden);
+            }, "content attributes require a supported provider");
             Throws<NotSupportedException>(() =>
             {
-                StorageFacade.SetLocalLastWriteTime(content, timestamp);
-            }, "local timestamps reject content URIs");
+                StorageFacade.SetLastWriteTime(content, timestamp);
+            }, "content timestamps require a supported provider");
             Throws<NotSupportedException>(() =>
             {
-                StorageFacade.CopyLocalFile(content, copied.Location);
-            }, "local copies reject content URIs");
+                StorageFacade.CopyFile(content, copied.Location);
+            }, "unregistered content copy sources are rejected");
             Throws<ArgumentException>(() =>
             {
                 _ = new FileSystemEntry(path, "file", false, creationTimeUtc: DateTime.Now);
@@ -398,7 +403,7 @@ namespace MajdataPlay.Tests.FileSystemValidation
             }, "directory creation cannot replace a file");
             Throws<IOException>(() =>
             {
-                StorageFacade.CreateLocalDirectory(file.Location);
+                StorageFacade.CreateDirectory(file.Location);
             }, "facade directory creation rejects a file collision");
             var child = directory.CreateDirectory("child");
             Throws<IOException>(() =>
@@ -617,10 +622,8 @@ namespace MajdataPlay.Tests.FileSystemValidation
             file.WriteAllText("retained provider");
             var opened = StorageFacade.OpenFile(file.Location);
             Check(ReferenceEquals(opened.FileSystem, provider) && opened.ReadAllText() == "retained provider", "content file dispatch uses the exact provider ID");
-            Throws<NotSupportedException>(() =>
-            {
-                StorageFacade.CreateLocalDirectory(provider.RootLocation);
-            }, "local creation cannot reinterpret a content URI as a path");
+            Check(StorageFacade.CreateDirectory(provider.RootLocation).Location == provider.RootLocation,
+                "unified directory creation opens an existing authoritative content URI");
             Throws<ArgumentNullException>(() =>
             {
                 StorageFacade.RegisterContentProvider(null!);
@@ -628,6 +631,297 @@ namespace MajdataPlay.Tests.FileSystemValidation
             var replacement = RegisterMemoryProvider();
             Check(ReferenceEquals(StorageFacade.OpenDirectory(replacement.RootLocation).FileSystem, replacement), "new registrations affect subsequent facade resolutions");
             Check(ReferenceEquals(opened.FileSystem, provider) && opened.ReadAllText() == "retained provider", "existing handles retain their original provider after replacement");
+            StreamsClosed(provider);
+            return Task.CompletedTask;
+        }
+
+        /// <summary>Checks unified creation and stream APIs retain provider identities and require explicit overwrite.</summary>
+        /// <returns>A completed task after checking content creation and existing-file stream dispatch.</returns>
+        /// <exception cref="InvalidOperationException">Creation invents a path or a rejected write changes existing data.</exception>
+        private static Task TestUnifiedContentCreation()
+        {
+            var provider = RegisterMemoryProvider();
+            var root = StorageFacade.CreateDirectory(provider.RootLocation);
+            var child = StorageFacade.CreateDirectory(root.Location, "directory #名称 literal%2F..");
+            Check(ReferenceEquals(child.FileSystem, provider) && child.Exists, "unified child-directory creation uses the content backend");
+            Check(!child.Location.StartsWith(root.Location, StringComparison.Ordinal), "directory creation retains a provider-issued opaque URI");
+            Check(StorageFacade.CreateDirectory(root.Location, Entry(child).Name).Location == child.Location,
+                "unified child-directory creation opens the existing content directory");
+            provider.NextCreatedFileName = "assigned #名称 literal%2F..%5C.txt";
+            var file = StorageFacade.CreateFile(child.Location, "requested.txt", "text/plain");
+            Check(Entry(file).Name == "assigned #名称 literal%2F..%5C.txt" && provider.LastMimeType == "text/plain",
+                "unified child-file creation returns the actual provider name and forwards its MIME type");
+            Check(!file.Location.StartsWith(child.Location, StringComparison.Ordinal), "unified child-file creation never concatenates URI components");
+            file.WriteAllText("preserved content");
+            var writesBefore = provider.OpenedWriteStreamCount;
+            Throws<IOException>(() =>
+            {
+                StorageFacade.CreateFile(file.Location);
+            }, "direct content creation requires explicit overwrite for an existing file");
+            Throws<IOException>(() =>
+            {
+                StorageFacade.CreateFile(child.Location, Entry(file).Name);
+            }, "content child creation rejects an existing sibling without overwrite");
+            Throws<IOException>(() =>
+            {
+                using var stream = StorageFacade.OpenWrite(file.Location);
+            }, "content output never silently truncates an existing document");
+            Check(provider.OpenedWriteStreamCount == writesBefore && file.ReadAllText() == "preserved content",
+                "rejected content creation/output preserves bytes before any writable open");
+            var truncated = StorageFacade.CreateFile(file.Location, overwrite: true);
+            Check(truncated.Location == file.Location && truncated.ReadAllBytes().Length == 0,
+                "direct content creation truncates only after explicit overwrite and preserves identity");
+            using (var stream = StorageFacade.OpenWrite(file.Location, overwrite: true))
+            {
+                Check(!stream.CanSeek && stream.CanWrite, "unified output supports sequential content streams");
+                stream.WriteByte(1);
+            }
+            using (var stream = StorageFacade.OpenWrite(file.Location, append: true))
+            {
+                Check(!stream.CanSeek, "content append is delegated without seeking");
+                stream.WriteByte(2);
+            }
+            using (var stream = StorageFacade.OpenRead(file.Location))
+            {
+                Check(!stream.CanSeek && stream.ReadByte() == 1 && stream.ReadByte() == 2 && stream.ReadByte() == -1,
+                    "unified read opens the authoritative sequential content document");
+            }
+            var childTruncated = StorageFacade.CreateFile(child.Location, Entry(file).Name, overwrite: true);
+            Check(childTruncated.Location == file.Location && childTruncated.ReadAllBytes().Length == 0,
+                "explicit child overwrite retains the existing URI");
+            Throws<IOException>(() =>
+            {
+                StorageFacade.CreateDirectory(file.Location);
+            }, "direct content directory creation rejects a file collision");
+            Throws<IOException>(() =>
+            {
+                StorageFacade.CreateFile(child.Location, overwrite: true);
+            }, "direct content file creation cannot truncate a directory");
+            Throws<IOException>(() =>
+            {
+                using var stream = StorageFacade.OpenWrite(child.Location, overwrite: true);
+            }, "unified output rejects a content directory");
+            var missing = file.Location + "%2Fmissing";
+            var entriesBefore = child.EnumerateEntries().Count();
+            Throws<NotSupportedException>(() =>
+            {
+                StorageFacade.CreateFile(missing);
+            }, "a missing opaque content URI requires explicit parent/name creation");
+            Throws<NotSupportedException>(() =>
+            {
+                StorageFacade.CreateDirectory(missing);
+            }, "a missing opaque content directory cannot reveal an authorized parent");
+            Throws<FileNotFoundException>(() =>
+            {
+                using var stream = StorageFacade.OpenWrite(missing, overwrite: true);
+            }, "unified content output cannot manufacture a nonexistent document URI");
+            foreach (var name in new[] { "..", "nested/file", "nested\\file", "content://outside.invalid/document/id" })
+            {
+                Throws<ArgumentException>(() =>
+                {
+                    StorageFacade.CreateDirectory(child.Location, name);
+                }, "unified directory child names cannot contain traversal or URI paths");
+                Throws<ArgumentException>(() =>
+                {
+                    StorageFacade.CreateFile(child.Location, name);
+                }, "unified file child names cannot contain traversal or URI paths");
+            }
+            Check(child.Exists && file.Exists && child.EnumerateEntries().Count() == entriesBefore,
+                "invalid or ambiguous creation attempts preserve existing children");
+            StreamsClosed(provider);
+            return Task.CompletedTask;
+        }
+
+        /// <summary>Checks unified copying chooses native or sequential operations without inferring content parents.</summary>
+        /// <returns>A completed task after checking both copy directions, authoritative names and self-alias rejection.</returns>
+        /// <exception cref="InvalidOperationException">A routing or identity assertion fails.</exception>
+        private static Task TestUnifiedCopies()
+        {
+            using var workspace = new TemporaryWorkspace();
+            var local = workspace.CreateLocalDirectory();
+            var source = local.CreateFile("source.bin");
+            var payload = Payload();
+            source.WriteAllBytes(payload);
+            var provider = RegisterMemoryProvider();
+            var content = StorageFacade.CreateDirectory(provider.RootLocation, "copy destinations");
+            provider.NextCreatedFileName = "assigned copy #名称.bin";
+            var copied = StorageFacade.CopyFile(source.Location, content.Location, "requested.bin");
+            Check(Entry(copied).Name == "assigned copy #名称.bin" && ReferenceEquals(copied.FileSystem, provider),
+                "unified copy returns the provider-assigned child and its backend");
+            EqualBytes(payload, copied.ReadAllBytes(), "local-to-content unified copy supports an unknown-size sequential destination");
+            var nativePath = Path.Combine(local.Location, "from content.bin");
+            var nativeCopy = StorageFacade.CopyFile(copied.Location, new Uri(nativePath).AbsoluteUri);
+            Check(nativeCopy.Location == nativePath, "content-to-local unified copy resolves a destination file URI");
+            EqualBytes(payload, nativeCopy.ReadAllBytes(), "content-to-local unified copy supports an unknown-size sequential source");
+            nativeCopy.WriteAllBytes(new byte[] { 42 });
+            Throws<IOException>(() =>
+            {
+                StorageFacade.CopyFile(copied.Location, nativeCopy.Location);
+            }, "unified content-to-local copy requires explicit overwrite");
+            EqualBytes(new byte[] { 42 }, nativeCopy.ReadAllBytes(), "rejected unified copy preserves a local destination");
+            StorageFacade.CopyFile(copied.Location, nativeCopy.Location, overwrite: true);
+            EqualBytes(payload, nativeCopy.ReadAllBytes(), "unified content-to-local overwrite truncates to source length");
+            var existing = content.CreateFile("existing.bin");
+            existing.WriteAllBytes(new byte[] { 99 });
+            var writesBefore = provider.OpenedWriteStreamCount;
+            Throws<IOException>(() =>
+            {
+                StorageFacade.CopyFile(source.Location, existing.Location);
+            }, "direct content destination copy requires explicit overwrite");
+            Check(provider.OpenedWriteStreamCount == writesBefore, "rejected direct content copy never opens a truncating stream");
+            var overwritten = StorageFacade.CopyFile(source.Location, existing.Location, overwrite: true);
+            Check(overwritten.Location == existing.Location, "direct content overwrite preserves the destination's authoritative URI");
+            EqualBytes(payload, overwritten.ReadAllBytes(), "direct content overwrite transfers complete data sequentially");
+            provider.NextCreatedFileName = "assigned second #名称.bin";
+            var second = StorageFacade.CopyFile(copied.Location, content.Location, "second.bin");
+            Check(Entry(second).Name == "assigned second #名称.bin", "content-to-content copy returns the actual child name");
+            EqualBytes(payload, second.ReadAllBytes(), "content-to-content unified copy uses authoritative URIs");
+            var localChild = StorageFacade.CopyFile(second.Location, local.Location, "child copy.bin");
+            EqualBytes(payload, localChild.ReadAllBytes(), "explicit local destination parent/name supports content sources");
+            var nativeChild = StorageFacade.CopyFile(source.Location, local.Location, "native child.bin");
+            Check(Entry(nativeChild).LastWriteTimeUtc == Entry(source).LastWriteTimeUtc,
+                "explicit local child copy retains native copy metadata");
+            foreach (var alias in new[] { copied.Location, second.Location })
+            {
+                if (alias != copied.Location)
+                {
+                    provider.SetResourceId(copied.Location, "content://identity.validation/document/shared%3A42");
+                    provider.SetResourceId(second.Location, "content://identity.validation/document/shared%3A42");
+                }
+                writesBefore = provider.OpenedWriteStreamCount;
+                Throws<IOException>(() =>
+                {
+                    StorageFacade.CopyFile(copied.Location, alias, overwrite: true);
+                }, "unified direct copy rejects exact IDs and distinct grant aliases for one resource");
+                Check(provider.OpenedWriteStreamCount == writesBefore, "unified self-alias rejection precedes any writable target open");
+                EqualBytes(payload, StorageFacade.OpenFile(alias).ReadAllBytes(), "unified self-alias rejection preserves resource bytes");
+            }
+            Throws<FileNotFoundException>(() =>
+            {
+                StorageFacade.CopyFile(source.Location, copied.Location + "%2Fmissing", overwrite: true);
+            }, "direct content copy cannot infer the parent of a nonexistent URI");
+            StreamsClosed(provider);
+            return Task.CompletedTask;
+        }
+
+        /// <summary>Checks failed unified transfers and unsupported moves/replacement never delete existing identities.</summary>
+        /// <returns>A completed task after checking rollback ordering, permission propagation and capability rejection.</returns>
+        /// <exception cref="InvalidOperationException">Failure handling leaks a stream or changes an unsupported operation's data.</exception>
+        private static Task TestUnifiedFailures()
+        {
+            using var workspace = new TemporaryWorkspace();
+            var local = workspace.CreateLocalDirectory();
+            var source = local.CreateFile("source.bin");
+            var target = local.CreateFile("target.bin");
+            var payload = Payload();
+            source.WriteAllBytes(payload);
+            target.WriteAllText("existing local destination");
+            var provider = RegisterMemoryProvider();
+            var root = StorageFacade.OpenDirectory(provider.RootLocation);
+            var existing = root.CreateFile("existing.bin");
+            existing.WriteAllText("existing content destination");
+            provider.NextCreatedFileName = "assigned failed.bin";
+            provider.NewFileWriteFailureAfterBytes = 17;
+            Throws<IOException>(() =>
+            {
+                StorageFacade.CopyFile(source.Location, root.Location, "requested failed.bin");
+            }, "unified child copy reports partial destination-write failure");
+            Check(root.FindFile("assigned failed.bin") is null && root.FindFile("requested failed.bin") is null,
+                "failed unified child copy removes the authoritative newly created document");
+            StreamsClosed(provider);
+            provider.NewFileWriteFailureAfterBytes = null;
+            provider.SetWriteFailure(existing.Location, 17);
+            Throws<IOException>(() =>
+            {
+                StorageFacade.CopyFile(source.Location, existing.Location, overwrite: true);
+            }, "unified direct overwrite reports partial destination-write failure");
+            Check(existing.Exists && root.FindFile("existing.bin")?.Location == existing.Location,
+                "failed direct overwrite retains its pre-existing authoritative destination identity");
+            Check(!provider.DeletedLocations.Contains(existing.Location), "failed direct overwrite never deletes a pre-existing destination");
+            StreamsClosed(provider);
+            provider.SetWriteFailure(existing.Location, null);
+            existing.WriteAllBytes(payload);
+            provider.SetReadBehavior(existing.Location, failAfterBytes: 17);
+            var failedNativePath = Path.Combine(local.Location, "failed from content.bin");
+            Throws<IOException>(() =>
+            {
+                StorageFacade.CopyFile(existing.Location, failedNativePath);
+            }, "unified direct copy reports source-read failure");
+            Check(!NativeFile.Exists(failedNativePath), "failed unified copy removes a newly created native destination");
+            StreamsClosed(provider);
+            provider.SetReadBehavior(existing.Location);
+            var cancellationTarget = root.CreateFile("cancellation target.bin");
+            foreach (var cancelBeforeOpen in new[] { true, false })
+            {
+                cancellationTarget.WriteAllBytes(payload);
+                var cancellationWritesBefore = provider.OpenedWriteStreamCount;
+                using var cancellation = new CancellationTokenSource();
+                if (cancelBeforeOpen)
+                {
+                    cancellation.Cancel();
+                }
+                else
+                {
+                    provider.SetReadBehavior(existing.Location, afterFirstRead: cancellation.Cancel);
+                }
+                Throws<OperationCanceledException>(() =>
+                {
+                    existing.CopyTo(cancellationTarget, overwrite: true, cancellationToken: cancellation.Token);
+                }, "existing-location copy observes pre- and mid-transfer cancellation");
+                Check(cancellation.IsCancellationRequested && cancellationTarget.Exists &&
+                    !provider.DeletedLocations.Contains(cancellationTarget.Location),
+                    "cancelled existing-location copy preserves the pre-existing destination identity");
+                if (cancelBeforeOpen)
+                {
+                    Check(provider.OpenedWriteStreamCount == cancellationWritesBefore,
+                        "pre-cancelled existing-location copy never opens a writable destination");
+                    EqualBytes(payload, cancellationTarget.ReadAllBytes(), "pre-cancelled existing-location copy preserves target bytes");
+                }
+                StreamsClosed(provider);
+                provider.SetReadBehavior(existing.Location);
+            }
+            var writesBefore = provider.OpenedWriteStreamCount;
+            var denied = new UnauthorizedAccessException("revoked content grant");
+            provider.QueryException = denied;
+            ThrowsSame(denied, () =>
+            {
+                StorageFacade.CreateFile(existing.Location, overwrite: true);
+            }, "unified creation propagates revoked access instead of treating it as absence");
+            ThrowsSame(denied, () =>
+            {
+                using var stream = StorageFacade.OpenWrite(existing.Location, overwrite: true);
+            }, "unified output propagates revoked access before truncation");
+            ThrowsSame(denied, () =>
+            {
+                StorageFacade.CopyFile(source.Location, existing.Location, overwrite: true);
+            }, "unified copy propagates revoked access before destination mutation");
+            provider.QueryException = null;
+            Check(provider.OpenedWriteStreamCount == writesBefore, "revoked access rejects unified writes before opening target streams");
+            var contentDirectory = root.CreateDirectory("directory");
+            var nativeDirectory = local.CreateDirectory("directory");
+            var backupPath = Path.Combine(local.Location, "backup.bin");
+            foreach (var operation in new Action[]
+            {
+                () => StorageFacade.MoveFile(source.Location, existing.Location),
+                () => StorageFacade.MoveFile(existing.Location, source.Location),
+                () => StorageFacade.MoveFile(existing.Location, existing.Location + "%2Fnew"),
+                () => StorageFacade.MoveDirectory(nativeDirectory.Location, contentDirectory.Location),
+                () => StorageFacade.MoveDirectory(contentDirectory.Location, nativeDirectory.Location),
+                () => StorageFacade.ReplaceFile(existing.Location, target.Location, backupPath),
+                () => StorageFacade.ReplaceFile(source.Location, existing.Location, backupPath),
+                () => StorageFacade.ReplaceFile(source.Location, target.Location, existing.Location),
+                () => StorageFacade.SetAttributes(existing.Location, FileAttributes.Hidden),
+                () => StorageFacade.SetLastWriteTime(existing.Location, DateTime.UtcNow),
+            })
+            {
+                Throws<NotSupportedException>(operation, "unsupported provider move/replacement/metadata operation is rejected");
+            }
+            EqualBytes(payload, source.ReadAllBytes(), "unsupported operations preserve the native source");
+            EqualBytes(payload, existing.ReadAllBytes(), "unsupported operations preserve existing content bytes");
+            Check(target.ReadAllText() == "existing local destination" && !NativeFile.Exists(backupPath),
+                "content replacement or backup rejection precedes native replacement and backup creation");
+            Check(nativeDirectory.Exists && contentDirectory.Exists && provider.OpenedWriteStreamCount == writesBefore,
+                "unsupported operations preserve directories without writable provider opens");
             StreamsClosed(provider);
             return Task.CompletedTask;
         }
@@ -1619,7 +1913,7 @@ namespace MajdataPlay.Tests.FileSystemValidation
         /// <returns>A production storage handle rooted inside this fixture.</returns>
         public StorageDirectory CreateLocalDirectory()
         {
-            return StorageFacade.CreateLocalDirectory(GetPath("local"));
+            return StorageFacade.CreateDirectory(GetPath("local"));
         }
 
         /// <summary>Removes only the validated unique root, unlinking rather than following reparse points.</summary>

@@ -269,14 +269,14 @@ namespace MajdataPlay
                     RootPath = "/sdcard/Documents/MajdataPlay";
                     if (!FileSystem.OpenDirectory(RootPath).Exists)
                     {
-                        FileSystem.CreateLocalDirectory(RootPath);
+                        FileSystem.CreateDirectory(RootPath);
                     }
                     var noMediaFlag = FileSystem.OpenFile(Path.Combine(RootPath, ".nomedia"));
                     if (!noMediaFlag.Exists)
                     {
                         try
                         {
-                            FileSystem.CreateLocalFile(noMediaFlag.Location);
+                            FileSystem.CreateFile(noMediaFlag.Location);
                             MajDebug.LogDebug("Created .nomedia flag file");
                         }
                         catch (Exception e)
@@ -351,9 +351,9 @@ namespace MajdataPlay
             }
             if (FileSystem.OpenFile(LogPath).Exists)
             {
-                FileSystem.MoveLocalFile(LogPath, oldLogPath);
+                FileSystem.MoveFile(LogPath, oldLogPath);
             }
-            var fileWriter = new StreamWriter(FileSystem.OpenLocalWrite(LogPath, append: true), Encoding.UTF8);
+            var fileWriter = new StreamWriter(FileSystem.OpenWrite(LogPath, append: true), Encoding.UTF8);
             fileWriter.AutoFlush = true;
 
             MajDebug.SetLogWriter(fileWriter);
@@ -444,7 +444,7 @@ namespace MajdataPlay
 
                     try
                     {
-                        FileSystem.CopyLocalFile(SettingsPath, bakFileName, overwrite: true);
+                        FileSystem.CopyFile(SettingsPath, bakFileName, overwrite: true);
                     }
                     catch
                     {
@@ -747,7 +747,7 @@ namespace MajdataPlay
         /// <exception cref="IOException">The configuration could not be opened or written.</exception>
         private static void WriteLocalText(string path, string text)
         {
-            using var stream = FileSystem.OpenLocalWrite(path, overwrite: true);
+            using var stream = FileSystem.OpenWrite(path, overwrite: true);
             using var writer = new StreamWriter(stream, new UTF8Encoding(false));
             writer.Write(text);
         }
@@ -756,7 +756,7 @@ namespace MajdataPlay
         {
             if (!FileSystem.OpenDirectory(path).Exists)
             {
-                FileSystem.CreateLocalDirectory(path);
+                FileSystem.CreateDirectory(path);
             }
         }
     }
