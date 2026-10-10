@@ -38,6 +38,9 @@ namespace MajdataPlay.Tests.FileSystemValidation
         /// <summary>Gets or sets a query error used to model a revoked document grant.</summary>
         public Exception? QueryException { get; set; }
 
+        /// <summary>Gets or sets whether the provider accepts modification time updates instead of reporting them unsupported.</summary>
+        public bool AcceptsTimestamps { get; set; } = true;
+
         /// <summary>Gets the number of caller-owned streams which have not been disposed.</summary>
         public int OpenStreamCount { get; private set; }
 
@@ -154,19 +157,64 @@ namespace MajdataPlay.Tests.FileSystemValidation
             {
                 throw new NotSupportedException("The test provider's root cannot be renamed.");
             }
-            var collision = FindChild(document.ParentLocation, name);
+            return MoveWithin(document, document.ParentLocation, name);
+        }
+
+        /// <inheritdoc />
+        public FileSystemEntry Move(string location, string directoryLocation, string name)
+        {
+            StorageName.Validate(name);
+            var document = GetDocument(location);
+            GetDirectory(directoryLocation);
+            if (document.ParentLocation is null)
+            {
+                throw new NotSupportedException("The test provider's root cannot be moved.");
+            }
+            return MoveWithin(document, directoryLocation, name);
+        }
+
+        /// <inheritdoc />
+        public void SetLastWriteTime(string location, DateTime lastWriteTimeUtc)
+        {
+            if (lastWriteTimeUtc.Kind != DateTimeKind.Utc)
+            {
+                throw new ArgumentException("The modification time must be UTC.", nameof(lastWriteTimeUtc));
+            }
+            var document = GetDocument(location);
+            if (!AcceptsTimestamps)
+            {
+                throw new NotSupportedException("The test provider ignores modification time updates.");
+            }
+            document.LastWriteTimeUtc = lastWriteTimeUtc;
+        }
+
+        /// <summary>Reparents or renames one document and issues a new opaque identity, as a provider may.</summary>
+        /// <param name="document">The existing document to move.</param>
+        /// <param name="directoryLocation">The destination parent's exact ID.</param>
+        /// <param name="name">The requested display name in the destination parent.</param>
+        /// <returns>Metadata for the document at its new identity.</returns>
+        /// <exception cref="IOException">A different sibling already occupies the requested name.</exception>
+        private FileSystemEntry MoveWithin(Document document, string directoryLocation, string name)
+        {
+            var collision = FindChild(directoryLocation, name);
             if (collision is not null && !ReferenceEquals(collision, document))
             {
-                throw new IOException("Renaming cannot replace an existing sibling.");
+                throw new IOException("Moving cannot replace an existing sibling.");
             }
+            if (ReferenceEquals(collision, document))
+            {
+                return GetMetadata(document);
+            }
+            var previousLocation = document.Location;
             var newLocation = NewLocation();
-            _documents.Remove(location);
+            _documents.Remove(previousLocation);
             document.Location = newLocation;
             document.Name = name;
+            document.ParentLocation = directoryLocation;
             _documents.Add(newLocation, document);
             foreach (var child in _documents.Values)
             {
-                if (child.ParentLocation == location)
+                if (child.ParentLocation == previousLocation)
                 {
                     child.ParentLocation = newLocation;
                 }
@@ -252,12 +300,13 @@ namespace MajdataPlay.Tests.FileSystemValidation
         {
             GetDocument(location).ResourceId = resourceId;
         }
-        /// <summary>Returns an entry with unknown file length and modification time.</summary>
+        /// <summary>Returns an entry with unknown file length and only the modification time the caller previously wrote.</summary>
         /// <param name="document">The document whose authoritative metadata is requested.</param>
         /// <returns>Metadata that deliberately does not expose stream length.</returns>
         private static FileSystemEntry GetMetadata(Document document)
         {
-            return new FileSystemEntry(document.Location, document.Name, document.IsDirectory, resourceId: document.ResourceId);
+            return new FileSystemEntry(document.Location, document.Name, document.IsDirectory,
+                lastWriteTimeUtc: document.LastWriteTimeUtc, resourceId: document.ResourceId);
         }
 
         /// <summary>Rejects synthetic child paths or decoded/re-encoded document IDs.</summary>
@@ -414,6 +463,9 @@ namespace MajdataPlay.Tests.FileSystemValidation
 
             /// <summary>Gets or sets the committed byte representation.</summary>
             public byte[] Content { get; set; } = Array.Empty<byte>();
+
+            /// <summary>Gets or sets the provider-owned modification time, or null while the provider reports none.</summary>
+            public DateTime? LastWriteTimeUtc { get; set; }
 
             /// <summary>Gets or sets the source fault threshold.</summary>
             public int? ReadFailureAfterBytes { get; set; }

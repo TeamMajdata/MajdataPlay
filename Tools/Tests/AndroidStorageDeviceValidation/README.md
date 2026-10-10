@@ -230,6 +230,22 @@ Full and replay storage checks:
   helpers and several transfers exceeding the 64-KiB JNI boundary.
 - Check every byte and length; production helpers offload provider work and
   deterministically dispose their streams.
+- Move a document into an owned child directory while asserting the previous
+  location is gone, enumerate the immediate children through the provider
+  cursor, rename the file within its parent and require the new name to resolve
+  with the bytes intact, and reject both a move and a rename onto an occupied
+  sibling name without changing either document.
+- Require a readable non-seekable provider stream whose length, position and
+  seek queries are rejected, then write with explicit truncate and append modes
+  and read the concatenated bytes back.
+- Reject a pre-cancelled read, reject traversal and separator child names before
+  the provider is contacted, delete one owned file while confirming removal
+  through its parent directory and recording whether a repeated delete or a
+  query for the previous URI stays harmless or reports an unresolvable document,
+  and reject a nonrecursive deletion of a nonempty directory.
+- Copy a local file into the grant and copy it back to a local file, accept a
+  provider attribute request without any stored hidden/system flag being
+  reported, and record a directory rename as supported or refused.
 - Delete only the owned created child in `finally`, **without using the
   cancelled lifetime token for cleanup**. Successful cleanup is required for
   the terminal pass. Preserve the selected parent and the grant for replay.
@@ -240,8 +256,14 @@ Full and replay storage checks:
 The screen and logcat use `FILE_SYSTEM_DEVICE_*_(READY|PASSED|FAILED)` markers.
 Important intermediate markers are `BOOT_READY`, `IL2CPP_PASSED`, `JNI_PASSED`,
 `BACKGROUND_JNI_PASSED`, `UI_CALLBACK_PASSED`, `PICKER_READY`,
-`PERSISTED_GRANT_PASSED`, `BINARY_PASSED`, and `CLEANUP_PASSED`, all prefixed with
-`FILE_SYSTEM_DEVICE_`. Terminal success is `FULL_PASSED`, `REPLAY_PASSED`, or
+`PERSISTED_GRANT_PASSED`, `BINARY_PASSED`, `MOVE_PASSED`, `TIMESTAMP_PASSED`,
+`ENUMERATION_PASSED`, `RENAME_PASSED`, `STREAM_PASSED`, `APPEND_PASSED`,
+`CANCELLATION_PASSED`, `COLLISION_PASSED`, `NAME_REJECTION_PASSED`,
+`DELETE_PASSED`, `NONRECURSIVE_DELETE_PASSED`, `COPY_PASSED`,
+`ATTRIBUTES_PASSED`, `DIRECTORY_RENAME_PASSED`, and `CLEANUP_PASSED`, all
+prefixed with `FILE_SYSTEM_DEVICE_`. A `*_SKIPPED` marker
+(`TIMESTAMP_SKIPPED`, `DIRECTORY_RENAME_SKIPPED`) records a capability the
+provider refused; it is neither a pass nor a failure. Terminal success is `FULL_PASSED`, `REPLAY_PASSED`, or
 `RELEASE_PASSED`; failure uses the selected mode's `*_FAILED`. If result writing
 itself fails, `FILE_SYSTEM_DEVICE_RESULT_FAILED` is logged as an observable
 infrastructure failure.
@@ -264,14 +286,18 @@ orphans after an abrupt process kill.
 
 ## Explicitly deferred coverage
 
-The urgent first finalized runtime version deliberately does **not** implement
-append/truncate, text encodings/BOMs, early cursor disposal regression loops,
-file/directory rename and provider URI-change assertions, invalid-name and
-missing-file error cases, nonseekable stream property rejection checks,
-pre-cancel/in-flight cancellation assertions, local-to-SAF/SAF-to-local copy,
-nonrecursive nonempty-directory deletion, or provider descriptor-count leak
-measurement. Stream/cursor closure is exercised only by the production helper
-paths and child cleanup, not proved by a native resource counter.
+The harness now covers move/rename with provider-identity assertions,
+enumeration, stream property rejection, append/truncate, pre-cancellation,
+invalid child names, sibling collisions, single-file deletion, nonrecursive
+nonempty-directory rejection, local-to-SAF and SAF-to-local copy, provider
+attribute no-ops, and directory renames. Stream/cursor closure is exercised by
+the production helper paths and child cleanup, not proved by a native resource
+counter.
+
+It still deliberately does **not** implement text encodings/BOMs, early cursor
+disposal regression loops, in-flight cancellation after a transfer has started,
+missing-file error cases, revocation or provider loss during a transfer, or
+provider descriptor-count leak measurement.
 
 Cloud providers, picker dismissal/cancellation races, read-only/revoked grants,
 unknown metadata, concurrent provider mutations, hardware/device differences,

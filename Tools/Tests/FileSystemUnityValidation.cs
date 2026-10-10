@@ -247,6 +247,8 @@ namespace MajdataPlay.Tests
             RequireGeneratedMethod(typeof(StorageAccess), "CreateFile", typeof(StorageResult), true, typeof(string), typeof(string), typeof(string));
             RequireGeneratedMethod(typeof(StorageAccess), "CreateDirectory", typeof(StorageResult), true, typeof(string), typeof(string));
             RequireGeneratedMethod(typeof(StorageAccess), "Rename", typeof(StorageResult), true, typeof(string), typeof(string));
+            RequireGeneratedMethod(typeof(StorageAccess), "Move", typeof(StorageResult), true, typeof(string), typeof(string), typeof(string));
+            RequireGeneratedMethod(typeof(StorageAccess), "SetLastModified", typeof(StorageResult), true, typeof(string), typeof(long));
             RequireGeneratedMethod(typeof(StorageAccess), "DeleteFile", typeof(StorageResult), true, typeof(string));
             RequireGeneratedMethod(typeof(StorageAccess), "DeleteDirectory", typeof(StorageResult), true, typeof(string), typeof(bool));
             RequireGeneratedMethod(typeof(DocumentCursor), "Next", typeof(StorageResult), false);
@@ -265,6 +267,8 @@ namespace MajdataPlay.Tests
             RequireThrowsPlatform(() => StorageAccess.CreateFile(Location, "file.txt", "text/plain"));
             RequireThrowsPlatform(() => StorageAccess.CreateDirectory(Location, "directory"));
             RequireThrowsPlatform(() => StorageAccess.Rename(Location, "renamed"));
+            RequireThrowsPlatform(() => StorageAccess.Move(Location, Location, "moved"));
+            RequireThrowsPlatform(() => StorageAccess.SetLastModified(Location, 0L));
             RequireThrowsPlatform(() => StorageAccess.DeleteFile(Location));
             RequireThrowsPlatform(() => StorageAccess.DeleteDirectory(Location, true));
             Debug.Log("FILE_SYSTEM_GENERATED_STORAGE_PASSED: production members, typed results, sbyte arrays, borrowing/disposal, Editor guards (no JNI).");

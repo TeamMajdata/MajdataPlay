@@ -48,9 +48,15 @@ failure in one case does not prevent the other cases from running.
   aliases sharing a global `ResourceId`; failed new copies clean up after stream
   closure, while failed/cancelled existing-location copies retain their target
   identity. Pre-cancellation and denied queries must precede writable opens.
-- Unsupported content/cross-provider moves, atomic replacement and local
-  metadata changes fail before mutation, including a content backup operand on
-  an otherwise native replacement. Native file/directory operands remain intact.
+- Unified provider mutations: provider and same-parent moves that return the new
+  authoritative identity, wrong-type source rejection, sibling collisions that
+  preserve both entries, directory moves that carry their children, streamed
+  provider replacement that consumes the source and keeps the destination
+  identity, rejected self-replacement, cross-backend replacement in both
+  directions, attribute requests accepted without a provider mutation, and
+  modification-time writes including local-kind conversion and provider rejection.
+- Location-based moves and provider replacements with a backup operand fail
+  before mutation. Native file/directory operands remain intact.
 - Existing-only reads/writes, complete binary round trips, append, truncation,
   empty writes, refreshed lengths/UTC timestamps, text encodings, UTF-8/UTF-16/
   UTF-32 BOM detection, BOM-only files, and preservation of line endings.
@@ -88,12 +94,14 @@ failure in one case does not prevent the other cases from running.
 SAF implementation. Its document IDs contain percent-encoded reserved
 characters and do not encode parent/child paths. Parent relationships and
 Unicode display names are stored separately. Creation can assign a different
-name, rename issues a different ID, file size and modification time remain
-unknown, and optional resource identities model grant aliases. Every stream
-rejects seek/length/position queries. The provider tracks stream ownership and
-rejects deletion of open documents, allowing the suite to catch
-incorrect cleanup ordering and leaks. Configurable query errors verify that
-permission/I/O failures are propagated instead of being mistaken for absence.
+name, rename and move issue a different ID, file size stays unknown, the
+modification time stays unknown until an accepted update, and optional resource
+identities model grant aliases. Every stream rejects seek/length/position
+queries. The provider tracks stream ownership and rejects deletion of open
+documents, allowing the suite to catch incorrect cleanup ordering and leaks.
+Configurable query errors verify that permission/I/O failures are propagated
+instead of being mistaken for absence, and a configurable timestamp rejection
+models a provider that ignores modification-time updates.
 
 Overwrite is **not asserted to be transactional**: a failed write may leave
 partial/truncated existing content. The required guarantee tested here is that
@@ -120,11 +128,15 @@ Opaque content URIs do not identify a creatable child path. For a new provider
 document, pass its authorized parent URI and one display name to the
 `CreateFile`, `CreateDirectory` or `CopyFile` child overload. Direct URI copying
 requires an existing content destination. Child overloads return the provider's
-actual name/location, which may differ from the request. The existing provider
-contract has no native move, atomic replacement or local attribute/timestamp
-mutation operation; the unified facade reports `NotSupportedException` for such
-operands before it changes data. Same-parent provider renaming remains available
-through the existing handles.
+actual name/location, which may differ from the request.
+
+The `MoveFile`/`MoveDirectory` child overloads move natively inside one backend
+and never copy and delete; the location-based overloads remain native-local
+because a provider URI cannot name a destination that does not exist yet.
+Provider replacement streams into the existing destination and consumes the
+source without atomicity, and a backup path is refused before mutation. Provider
+entries accept attribute requests without effect, and modification-time writes
+are provider-dependent.
 
 ## Isolated Unity and production generated-wrapper validation
 
@@ -264,6 +276,19 @@ dotnet 'C:/Program Files/dotnet/sdk/9.0.316/dotnet.dll' run --project Tools/Test
 The build completed without warnings or errors. Native replacement was again
 exercised with normal host permissions. The content cases remain managed
 in-memory provider checks; they do not establish Android device behavior.
+
+After adding provider move, provider replacement, attribute no-ops and
+modification-time writes to the unified facade, the suite passed **33 cases / 990
+assertions** with no failures or skips on the same Windows host with .NET SDK
+**9.0.316** selected explicitly:
+
+```powershell
+dotnet build Tools/Tests/FileSystemValidation/FileSystemValidation.csproj --no-incremental
+dotnet run --project Tools/Tests/FileSystemValidation/FileSystemValidation.csproj --no-build
+```
+
+That run's recorded result is the suite's own summary marker,
+`FILESYSTEM_VALIDATION_PASSED`.
 
 The unified facade consumer rerun also passed chart storage **3 cases**, resource
 storage **9 cases each** for iOS and Android, and FFmpeg **81 managed assertions**.

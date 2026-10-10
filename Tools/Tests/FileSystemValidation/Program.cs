@@ -53,6 +53,7 @@ namespace MajdataPlay.Tests.FileSystemValidation
                 ("facade: unified content creation and sequential streams", TestUnifiedContentCreation),
                 ("facade: unified local/content copy routing and aliases", TestUnifiedCopies),
                 ("facade: failed copies and unsupported operations preserve identities", TestUnifiedFailures),
+                ("facade: content moves, replacement, attributes and timestamps", TestUnifiedContentMutations),
                 ("content: sequential non-seekable byte and text I/O", TestContentIO),
                 ("content: authoritative children and changed rename IDs", TestContentChildren),
                 ("content: single-child names remain URI-safe", TestContentNames),
@@ -287,6 +288,32 @@ namespace MajdataPlay.Tests.FileSystemValidation
             var renamed = StorageFacade.MoveDirectory(movedDirectory.Location, renamedPath);
             Check(!movedDirectory.Exists && renamed.FindFile("output.txt")?.ReadAllText() == "after",
                 "directory move preserves its children");
+            var nested = directory.CreateDirectory("nested");
+            var movedByName = StorageFacade.MoveFile(Path.Combine(renamed.Location, "output.txt"), nested.Location, "child.txt");
+            Check(movedByName.Location == Path.Combine(nested.Location, "child.txt") && movedByName.ReadAllText() == "after",
+                "directory-and-name file moves use the destination backend");
+            var occupied = nested.CreateFile("occupied.txt");
+            Throws<IOException>(() =>
+            {
+                StorageFacade.MoveFile(movedByName.Location, nested.Location, "occupied.txt");
+            }, "file moves never overwrite an existing sibling");
+            Throws<IOException>(() =>
+            {
+                StorageFacade.MoveFile(movedByName.Location, directory.Location, "nested");
+            }, "file moves never overwrite an existing directory name");
+            Check(movedByName.ReadAllText() == "after" && occupied.Exists, "rejected local moves preserve every entry");
+            Throws<IOException>(() =>
+            {
+                StorageFacade.MoveDirectory(movedByName.Location, nested.Location, "as-directory");
+            }, "directory moves reject a local file source");
+            Throws<IOException>(() =>
+            {
+                StorageFacade.MoveFile(nested.Location, directory.Location, "as-file");
+            }, "file moves reject a local directory source");
+            Throws<DirectoryNotFoundException>(() =>
+            {
+                StorageFacade.MoveFile(movedByName.Location, Path.Combine(directory.Location, "missing"), "child.txt");
+            }, "file moves require an existing destination directory");
             Check(Entry(renamed).CreationTimeUtc?.Kind == DateTimeKind.Utc, "local creation timestamps are UTC");
             if (OperatingSystem.IsWindows())
             {
@@ -310,23 +337,23 @@ namespace MajdataPlay.Tests.FileSystemValidation
             Throws<NotSupportedException>(() =>
             {
                 StorageFacade.MoveFile(replaced.Location, content);
-            }, "file moves reject unsupported content destinations");
+            }, "file moves reject an unregistered content destination");
             Throws<NotSupportedException>(() =>
             {
                 StorageFacade.MoveDirectory(renamed.Location, content);
-            }, "directory moves reject unsupported content destinations");
+            }, "directory moves reject an unregistered content destination");
             Throws<NotSupportedException>(() =>
             {
                 StorageFacade.ReplaceFile(content, replaced.Location);
-            }, "replacement rejects unsupported content sources");
+            }, "replacement rejects an unregistered content source");
             Throws<NotSupportedException>(() =>
             {
                 StorageFacade.SetAttributes(content, FileAttributes.Hidden);
-            }, "content attributes require a supported provider");
+            }, "attributes on an unregistered content location are rejected");
             Throws<NotSupportedException>(() =>
             {
                 StorageFacade.SetLastWriteTime(content, timestamp);
-            }, "content timestamps require a supported provider");
+            }, "timestamps on an unregistered content location are rejected");
             Throws<NotSupportedException>(() =>
             {
                 StorageFacade.CopyFile(content, copied.Location);
@@ -804,7 +831,7 @@ namespace MajdataPlay.Tests.FileSystemValidation
             return Task.CompletedTask;
         }
 
-        /// <summary>Checks failed unified transfers and unsupported moves/replacement never delete existing identities.</summary>
+        /// <summary>Checks failed unified transfers and location-based provider moves never delete existing identities.</summary>
         /// <returns>A completed task after checking rollback ordering, permission propagation and capability rejection.</returns>
         /// <exception cref="InvalidOperationException">Failure handling leaks a stream or changes an unsupported operation's data.</exception>
         private static Task TestUnifiedFailures()
@@ -910,11 +937,9 @@ namespace MajdataPlay.Tests.FileSystemValidation
                 () => StorageFacade.ReplaceFile(existing.Location, target.Location, backupPath),
                 () => StorageFacade.ReplaceFile(source.Location, existing.Location, backupPath),
                 () => StorageFacade.ReplaceFile(source.Location, target.Location, existing.Location),
-                () => StorageFacade.SetAttributes(existing.Location, FileAttributes.Hidden),
-                () => StorageFacade.SetLastWriteTime(existing.Location, DateTime.UtcNow),
             })
             {
-                Throws<NotSupportedException>(operation, "unsupported provider move/replacement/metadata operation is rejected");
+                Throws<NotSupportedException>(operation, "unsupported provider move or backup replacement is rejected");
             }
             EqualBytes(payload, source.ReadAllBytes(), "unsupported operations preserve the native source");
             EqualBytes(payload, existing.ReadAllBytes(), "unsupported operations preserve existing content bytes");
@@ -922,6 +947,114 @@ namespace MajdataPlay.Tests.FileSystemValidation
                 "content replacement or backup rejection precedes native replacement and backup creation");
             Check(nativeDirectory.Exists && contentDirectory.Exists && provider.OpenedWriteStreamCount == writesBefore,
                 "unsupported operations preserve directories without writable provider opens");
+            StreamsClosed(provider);
+            return Task.CompletedTask;
+        }
+
+        /// <summary>Checks provider moves, non-atomic replacement, attribute no-ops and timestamp updates through the facade.</summary>
+        /// <returns>A completed task after checking authoritative provider locations, consumed sources and provider rejections.</returns>
+        /// <exception cref="InvalidOperationException">A provider mutation assertion fails.</exception>
+        private static Task TestUnifiedContentMutations()
+        {
+            using var workspace = new TemporaryWorkspace();
+            var local = workspace.CreateLocalDirectory();
+            var provider = RegisterMemoryProvider();
+            var root = StorageFacade.OpenDirectory(provider.RootLocation);
+            var source = root.CreateFile("source.bin");
+            var payload = Payload();
+            source.WriteAllBytes(payload);
+            var target = root.CreateDirectory("target");
+            var moved = StorageFacade.MoveFile(source.Location, target.Location, "moved.bin");
+            Check(moved.Location != source.Location && moved.Location == target.FindFile("moved.bin")?.Location,
+                "provider moves return the destination authority's new document identity");
+            EqualBytes(payload, moved.ReadAllBytes(), "provider moves preserve the document bytes");
+            Check(provider.GetEntry(source.Location) is null && root.FindFile("source.bin") is null,
+                "provider moves invalidate the original URI and its parent entry");
+            var renamed = StorageFacade.MoveFile(moved.Location, target.Location, "renamed.bin");
+            Check(renamed.Location == target.FindFile("renamed.bin")?.Location && provider.GetEntry(moved.Location) is null,
+                "same-parent provider moves replace the document identity");
+            EqualBytes(payload, renamed.ReadAllBytes(), "same-parent provider moves preserve the document bytes");
+            Throws<IOException>(() =>
+            {
+                StorageFacade.MoveDirectory(renamed.Location, target.Location, "as-directory.bin");
+            }, "directory moves reject a provider file source");
+            Throws<IOException>(() =>
+            {
+                StorageFacade.MoveFile(target.Location, root.Location, "as-file");
+            }, "file moves reject a provider directory source");
+            var occupied = target.CreateFile("occupied.bin");
+            occupied.WriteAllText("occupied");
+            Throws<IOException>(() =>
+            {
+                StorageFacade.MoveFile(renamed.Location, target.Location, "occupied.bin");
+            }, "provider moves never overwrite an existing sibling");
+            EqualBytes(payload, renamed.ReadAllBytes(), "rejected provider moves preserve the source document");
+            EqualBytes(Encoding.UTF8.GetBytes("occupied"), occupied.ReadAllBytes(), "rejected provider moves preserve the occupied sibling");
+            var nested = target.CreateDirectory("nested");
+            nested.CreateFile("child.bin").WriteAllText("child");
+            var destination = root.CreateDirectory("destination");
+            var movedDirectory = StorageFacade.MoveDirectory(target.Location, destination.Location, "moved-dir");
+            Check(!target.Exists && movedDirectory.FindDirectory("nested")?.FindFile("child.bin")?.ReadAllText() == "child",
+                "provider directory moves preserve their children and invalidate the original directory");
+            var destinationFile = destination.CreateFile("replace-me.bin");
+            destinationFile.WriteAllText("old content");
+            var destinationIdentity = destinationFile.Location;
+            var replacementSource = root.CreateFile("replacement.bin");
+            replacementSource.WriteAllText("new content");
+            var replaced = StorageFacade.ReplaceFile(replacementSource.Location, destinationFile.Location);
+            Check(replaced.Location == destinationIdentity && replaced.ReadAllText() == "new content",
+                "provider replacement keeps the destination identity and adopts the source bytes");
+            Check(!replacementSource.Exists && provider.GetEntry(replacementSource.Location) is null &&
+                provider.DeletedLocations.Contains(replacementSource.Location),
+                "provider replacement consumes the source document through its provider");
+            Throws<IOException>(() =>
+            {
+                StorageFacade.ReplaceFile(replaced.Location, replaced.Location);
+            }, "provider replacement rejects replacing a document with itself");
+            EqualBytes(Encoding.UTF8.GetBytes("new content"), replaced.ReadAllBytes(),
+                "rejected provider self-replacement preserves the document bytes");
+            var localTarget = local.CreateFile("local target.bin");
+            localTarget.WriteAllText("local old");
+            var localSource = local.CreateFile("local source.bin");
+            localSource.WriteAllText("local new");
+            var replacedFromLocal = StorageFacade.ReplaceFile(localSource.Location, replaced.Location);
+            Check(replacedFromLocal.ReadAllText() == "local new" && !localSource.Exists,
+                "replacement into a provider document consumes the local source");
+            var replacedFromContent = StorageFacade.ReplaceFile(replaced.Location, localTarget.Location);
+            Check(replacedFromContent.ReadAllText() == "local new" && !replaced.Exists,
+                "replacement into a local file consumes the provider source");
+            StreamsClosed(provider);
+            var metadataFile = destination.CreateFile("metadata.bin");
+            metadataFile.WriteAllText("metadata");
+            var writesBefore = provider.OpenedWriteStreamCount;
+            StorageFacade.SetAttributes(metadataFile.Location, FileAttributes.Hidden | FileAttributes.System);
+            Check(!Entry(metadataFile).IsHidden && !Entry(metadataFile).IsSystem &&
+                provider.OpenedWriteStreamCount == writesBefore,
+                "provider attribute requests are accepted without a provider mutation");
+            Throws<FileNotFoundException>(() =>
+            {
+                StorageFacade.SetAttributes(root.Location + "%2Fmissing", FileAttributes.Normal);
+            }, "provider attribute requests still require an existing entry");
+            Check(Entry(metadataFile).LastWriteTimeUtc is null, "provider metadata starts without a modification time");
+            var timestamp = new DateTime(2021, 7, 8, 9, 10, 11, DateTimeKind.Utc);
+            StorageFacade.SetLastWriteTime(metadataFile.Location, timestamp);
+            Check(Entry(metadataFile).LastWriteTimeUtc == timestamp, "provider timestamps store the requested UTC value");
+            var localKindTimestamp = new DateTime(2022, 1, 2, 3, 4, 5, DateTimeKind.Local);
+            StorageFacade.SetLastWriteTime(metadataFile.Location, localKindTimestamp);
+            Check(Entry(metadataFile).LastWriteTimeUtc == localKindTimestamp.ToUniversalTime(),
+                "provider timestamps convert local values to UTC");
+            provider.AcceptsTimestamps = false;
+            Throws<NotSupportedException>(() =>
+            {
+                StorageFacade.SetLastWriteTime(metadataFile.Location, timestamp);
+            }, "providers which reject timestamp updates report them unsupported");
+            provider.AcceptsTimestamps = true;
+            Check(Entry(metadataFile).LastWriteTimeUtc == localKindTimestamp.ToUniversalTime(),
+                "rejected timestamp updates preserve the stored modification time");
+            Throws<FileNotFoundException>(() =>
+            {
+                StorageFacade.SetLastWriteTime(root.Location + "%2Fmissing", timestamp);
+            }, "provider timestamps require an existing document");
             StreamsClosed(provider);
             return Task.CompletedTask;
         }

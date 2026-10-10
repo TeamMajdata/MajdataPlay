@@ -428,6 +428,178 @@ namespace MajdataPlay.Platform.Android.Runtime.Validation
                     Require(read[i] == bytes[i], "The SAF round-trip changed a byte.");
                 }
                 Mark("BINARY_PASSED", "197121 bytes containing all 256 byte values round-tripped across multiple bounded JNI transfers.");
+                var nested = await Task.Run(() => child.CreateDirectory("moved"), cancellationToken);
+                var moved = await Task.Run(() => StorageFileSystem.MoveFile(file.Location, nested.Location, "moved.bin"), cancellationToken);
+                Require(moved.Location != file.Location && moved.Exists, "The SAF move did not return a new authoritative document.");
+                var movedBytes = await moved.ReadAllBytesAsync(cancellationToken);
+                Require(movedBytes.Length == bytes.Length, "The SAF move changed the document length.");
+                for (var i = 0; i < bytes.Length; i++)
+                {
+                    Require(movedBytes[i] == bytes[i], "The SAF move changed a byte.");
+                }
+                Mark("MOVE_PASSED", "A document moved into a child directory of the same grant kept its bytes under a new URI.");
+                var timestamp = new DateTime(2020, 2, 3, 4, 5, 6, DateTimeKind.Utc);
+                try
+                {
+                    await Task.Run(() => StorageFileSystem.SetLastWriteTime(moved.Location, timestamp), cancellationToken);
+                    var updated = moved.Entry;
+                    Mark("TIMESTAMP_PASSED", updated?.LastWriteTimeUtc is null
+                        ? "The provider accepted a modification-time update without reporting a modification time."
+                        : "The provider reported " + updated.LastWriteTimeUtc.Value.ToString("O", CultureInfo.InvariantCulture) + " after a modification-time update.");
+                }
+                catch (NotSupportedException exception)
+                {
+                    // Providers may reject modification-time updates; record the capability instead of failing the run.
+                    Mark("TIMESTAMP_SKIPPED", exception.Message);
+                }
+                var children = await Task.Run(() =>
+                {
+                    var names = new List<string>();
+                    foreach (var entry in nested.EnumerateEntries())
+                    {
+                        names.Add(entry.Name);
+                    }
+                    return names;
+                }, cancellationToken);
+                Require(children.Count == 1 && children[0] == "moved.bin",
+                    "The provider enumeration did not report exactly the moved child.");
+                Mark("ENUMERATION_PASSED", "Immediate children were enumerated through repeated provider cursor steps.");
+                var renamed = await Task.Run(() => moved.Rename("renamed.bin"), cancellationToken);
+                var previousNameGone = await Task.Run(() => nested.FindFile("moved.bin"), cancellationToken) is null;
+                Require(renamed.Exists && (renamed.Location != moved.Location || previousNameGone),
+                    "The provider rename did not take effect on its new name.");
+                var renamedBytes = await renamed.ReadAllBytesAsync(cancellationToken);
+                Require(renamedBytes.Length == bytes.Length, "The provider rename changed the document length.");
+                for (var i = 0; i < bytes.Length; i++)
+                {
+                    Require(renamedBytes[i] == bytes[i], "The provider rename changed a byte.");
+                }
+                Mark("RENAME_PASSED", "A same-parent rename kept the document bytes under its new name.");
+                using (var stream = await Task.Run(() => renamed.OpenRead(), cancellationToken))
+                {
+                    Require(stream.CanRead && !stream.CanSeek, "The provider read stream reported unexpected capabilities.");
+                    Expect<NotSupportedException>(() =>
+                    {
+                        _ = stream.Length;
+                    });
+                    Expect<NotSupportedException>(() =>
+                    {
+                        _ = stream.Position;
+                    });
+                    Expect<NotSupportedException>(() =>
+                    {
+                        stream.Seek(0, SeekOrigin.Begin);
+                    });
+                }
+                Mark("STREAM_PASSED", "A provider stream stayed readable while rejecting length, position and seek queries.");
+                using (var truncate = await Task.Run(() => renamed.OpenWrite(append: false), cancellationToken))
+                {
+                    await truncate.WriteAsync(new byte[] { 1, 2, 3 }, 0, 3, cancellationToken);
+                }
+                using (var append = await Task.Run(() => renamed.OpenWrite(append: true), cancellationToken))
+                {
+                    await append.WriteAsync(new byte[] { 4, 5 }, 0, 2, cancellationToken);
+                }
+                var appended = await renamed.ReadAllBytesAsync(cancellationToken);
+                Require(appended.Length == 5 && appended[0] == 1 && appended[4] == 5,
+                    "Explicit truncate and append modes produced unexpected bytes.");
+                Mark("APPEND_PASSED", "Explicit truncate produced 3 bytes and append added 2 more without seeking.");
+                using (var canceled = new CancellationTokenSource())
+                {
+                    canceled.Cancel();
+                    try
+                    {
+                        await renamed.ReadAllBytesAsync(canceled.Token);
+                        throw new InvalidOperationException("A pre-cancelled provider read completed instead of cancelling.");
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        // Expected: the pre-cancelled read must not transfer any byte.
+                    }
+                }
+                Mark("CANCELLATION_PASSED", "A pre-cancelled provider read was rejected before transferring bytes.");
+                var occupied = await Task.Run(() => nested.CreateFile("occupied.bin"), cancellationToken);
+                await occupied.WriteAllTextAsync("occupied", cancellationToken: cancellationToken);
+                Expect<IOException>(() => Task.Run(() =>
+                    StorageFileSystem.MoveFile(renamed.Location, nested.Location, "occupied.bin")).GetAwaiter().GetResult());
+                Expect<IOException>(() => Task.Run(() => renamed.Rename("occupied.bin")).GetAwaiter().GetResult());
+                var survivor = await renamed.ReadAllBytesAsync(cancellationToken);
+                Require(survivor.Length == 5 && survivor[4] == 5, "The rejected collision changed the source document.");
+                Require(await occupied.ReadAllTextAsync(cancellationToken: cancellationToken) == "occupied",
+                    "The rejected collision changed the occupied sibling.");
+                Mark("COLLISION_PASSED", "Move and rename onto an occupied name were rejected without changing either document.");
+                Expect<ArgumentException>(() => nested.CreateFile(".."));
+                Expect<ArgumentException>(() => nested.FindFile("parent/child"));
+                Expect<ArgumentException>(() => StorageFileSystem.CreateFile(nested.Location, "a\\b"));
+                Mark("NAME_REJECTION_PASSED", "Traversal and separator child names were rejected before touching the provider.");
+                var disposable = await Task.Run(() => nested.CreateFile("delete-me.bin"), cancellationToken);
+                await disposable.WriteAllTextAsync("delete me", cancellationToken: cancellationToken);
+                await Task.Run(() => disposable.Delete(), cancellationToken);
+                Require(await Task.Run(() => nested.FindFile("delete-me.bin"), cancellationToken) is null,
+                    "The provider still lists the deleted file as an immediate child.");
+                var repeatedDeleteFailed = false;
+                try
+                {
+                    await Task.Run(() => disposable.Delete(), cancellationToken);
+                }
+                catch (IOException)
+                {
+                    // A deleted tree document cannot be resolved again, so a repeated delete can surface a provider query failure.
+                    repeatedDeleteFailed = true;
+                }
+                var staleUriResolved = false;
+                try
+                {
+                    staleUriResolved = disposable.Exists;
+                }
+                catch (IOException)
+                {
+                    // The same provider limitation applies to metadata queries for the previous URI.
+                    staleUriResolved = false;
+                }
+                Require(!staleUriResolved, "The deleted file is still reachable through its previous URI.");
+                var retained = await Task.Run(() => nested.FindFile("occupied.bin"), cancellationToken);
+                Require(retained is not null, "Deleting one file removed an unrelated sibling.");
+                Mark("DELETE_PASSED", repeatedDeleteFailed
+                    ? "An owned file was deleted and its sibling was retained; the provider reported the deleted URI as unresolvable."
+                    : "An owned file was deleted, a repeated delete stayed harmless, and its sibling was retained.");
+                Expect<IOException>(() => Task.Run(() => nested.Delete(recursive: false)).GetAwaiter().GetResult());
+                Require(nested.Exists, "The rejected nonrecursive deletion removed the directory.");
+                Mark("NONRECURSIVE_DELETE_PASSED", "A nonrecursive deletion of a nonempty provider directory was rejected.");
+                var localRoot = Path.Combine(_persistentPath, "storage-validation-local");
+                Directory.CreateDirectory(localRoot);
+                var localSource = Path.Combine(localRoot, "local-source.bin");
+                File.WriteAllBytes(localSource, new byte[] { 9, 8, 7 });
+                var copied = await Task.Run(() => StorageFileSystem.CopyFile(localSource, nested.Location, "copied.bin"), cancellationToken);
+                var copiedBytes = await copied.ReadAllBytesAsync(cancellationToken);
+                Require(copiedBytes.Length == 3 && copiedBytes[0] == 9 && copiedBytes[2] == 7,
+                    "The local-to-provider copy produced unexpected bytes.");
+                var localTarget = Path.Combine(localRoot, "provider-to-local.bin");
+                var backCopy = await Task.Run(() => StorageFileSystem.CopyFile(copied.Location, localTarget), cancellationToken);
+                var backBytes = File.ReadAllBytes(localTarget);
+                Require(backCopy.Exists && backBytes.Length == 3 && backBytes[1] == 8,
+                    "The provider-to-local copy produced unexpected bytes.");
+                File.Delete(localSource);
+                File.Delete(localTarget);
+                Directory.Delete(localRoot, false);
+                Mark("COPY_PASSED", "Local-to-provider and provider-to-local copies transferred the expected bytes.");
+                await Task.Run(() => StorageFileSystem.SetAttributes(renamed.Location,
+                    FileAttributes.Hidden | FileAttributes.System), cancellationToken);
+                var attributeEntry = await Task.Run(() => renamed.Entry, cancellationToken);
+                Require(attributeEntry is not null && !attributeEntry.IsHidden && !attributeEntry.IsSystem,
+                    "The provider reported attribute flags that no SAF provider stores.");
+                Mark("ATTRIBUTES_PASSED", "A provider attribute request was accepted without reporting stored hidden or system flags.");
+                try
+                {
+                    var renamedDirectory = await Task.Run(() => nested.Rename("moved-renamed"), cancellationToken);
+                    Require(renamedDirectory.Exists, "The renamed provider directory is not accessible.");
+                    Mark("DIRECTORY_RENAME_PASSED", "A provider directory rename returned an accessible directory.");
+                }
+                catch (NotSupportedException exception)
+                {
+                    // Providers may refuse directory renames; record the capability instead of failing the run.
+                    Mark("DIRECTORY_RENAME_SKIPPED", exception.Message);
+                }
             }
             finally
             {

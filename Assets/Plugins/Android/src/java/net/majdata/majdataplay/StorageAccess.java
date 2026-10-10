@@ -2,6 +2,7 @@ package net.majdata.majdataplay;
 
 import android.app.Activity;
 import android.content.ContentResolver;
+import android.content.ContentValues;
 import android.content.Context;
 import android.database.Cursor;
 import android.net.Uri;
@@ -862,6 +863,93 @@ public final class StorageAccess
             throw new FileNotFoundException("The document is not a child in the selected tree.");
         }
         return found;
+    }
+
+    /** Moves one document into another directory of the same provider, renaming it when the requested name differs. */
+    public static Result move(String location, String directoryLocation, String name)
+    {
+        return execute(() -> {
+            validateName(name);
+            synchronized (MUTATION_LOCK)
+            {
+                Context context = context();
+                ContentResolver resolver = context.getContentResolver();
+                Uri uri = resolveUri(context, location);
+                Uri targetParent = resolveUri(context, directoryLocation);
+                Entry entry = requireEntry(resolver, uri);
+                requireSameProvider(uri, targetParent);
+                Uri parent = findParent(resolver, uri);
+                if (DocumentsContract.getDocumentId(parent).equals(DocumentsContract.getDocumentId(targetParent)))
+                {
+                    // A same-parent move is a rename: reuse the collision-safe rename path.
+                    return rename(location, name);
+                }
+                requireDirectory(resolver, targetParent);
+                ChildSnapshot sourceSiblings = new ChildSnapshot(resolver, parent);
+                if (!sourceSiblings.ids.contains(entry.id))
+                {
+                    throw new IOException("The document is no longer an immediate child of its reported parent.");
+                }
+                ChildSnapshot targetSiblings = new ChildSnapshot(resolver, targetParent);
+                if (targetSiblings.names.containsKey(name))
+                {
+                    throw new IOException("A sibling already has the requested name.");
+                }
+                requireCapability(entry, DocumentsContract.Document.FLAG_SUPPORTS_MOVE, "moving");
+                Uri movedUri = returnedUri(context, uri,
+                    DocumentsContract.moveDocument(resolver, uri, parent, targetParent));
+                Entry moved = requireEntry(resolver, movedUri);
+                if (moved.directory != entry.directory ||
+                    targetSiblings.names.containsKey(moved.name) ||
+                    (!moved.id.equals(entry.id) && targetSiblings.ids.contains(moved.id)))
+                {
+                    throw new IOException("The moved document has an unexpected type, identity, or conflicting actual name.");
+                }
+                if (!name.equals(moved.name))
+                {
+                    // moveDocument keeps the source display name, so a requested name needs a second provider step.
+                    requireCapability(moved, DocumentsContract.Document.FLAG_SUPPORTS_RENAME, "renaming");
+                    movedUri = returnedUri(context, movedUri, DocumentsContract.renameDocument(resolver, movedUri, name));
+                    moved = requireEntry(resolver, movedUri);
+                    if (moved.directory != entry.directory)
+                    {
+                        throw new IOException("The renamed document has an unexpected type.");
+                    }
+                }
+                verifyNamedChild(resolver, targetParent, moved);
+                return entryResult(moved);
+            }
+        });
+    }
+
+    /** Rejects moves which SAF cannot perform as one provider operation. */
+    private static void requireSameProvider(Uri source, Uri target) throws IOException
+    {
+        if (!source.getAuthority().equals(target.getAuthority()))
+        {
+            throw new StorageFailure(UNSUPPORTED, "Moving between different document providers is not supported.");
+        }
+    }
+
+    /** Writes the provider's modification time; providers which ignore the request report it as unsupported. */
+    public static Result setLastModified(String location, long milliseconds)
+    {
+        return execute(() -> {
+            synchronized (MUTATION_LOCK)
+            {
+                Context context = context();
+                ContentResolver resolver = context.getContentResolver();
+                Uri uri = resolveUri(context, location);
+                requireEntry(resolver, uri);
+                ContentValues values = new ContentValues();
+                values.put(DocumentsContract.Document.COLUMN_LAST_MODIFIED, milliseconds);
+                if (resolver.update(uri, values, null, null) <= 0)
+                {
+                    throw new StorageFailure(UNSUPPORTED, "The provider does not accept a modification time for this document.");
+                }
+                return entryResult(requireEntry(resolver, uri));
+            }
+        });
     }
 
     /** Missing files are a no-op; directories are never accepted by this entry point. */

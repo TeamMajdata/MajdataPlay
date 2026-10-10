@@ -94,6 +94,25 @@ namespace MajdataPlay.IO.Storage
         /// <exception cref="IOException">A sibling exists or renaming failed.</exception>
         FileSystemEntry Rename(string location, string name);
 
+        /// <summary>Moves an entry to a new immediate child name inside another directory of the same backend.</summary>
+        /// <param name="location">The existing source entry location.</param>
+        /// <param name="directoryLocation">The existing destination parent directory location.</param>
+        /// <param name="name">One destination child name, not a relative path.</param>
+        /// <returns>The moved entry; its location is authoritative and may differ from the request.</returns>
+        /// <exception cref="ArgumentException">The location or name is invalid.</exception>
+        /// <exception cref="FileNotFoundException">The entry does not exist.</exception>
+        /// <exception cref="DirectoryNotFoundException">The destination directory does not exist.</exception>
+        /// <exception cref="UnauthorizedAccessException">Moving was denied.</exception>
+        /// <exception cref="NotSupportedException">The backend cannot move into the requested parent.</exception>
+        /// <exception cref="IOException">A sibling exists, the destination is inside the source, or moving failed.</exception>
+        /// <remarks>
+        /// The backend performs a native move and never falls back to copying and deleting.
+        /// The source location may become invalid, and moving an entry into its own subtree must fail.
+        /// A provider may need two provider operations, moving and then renaming, when the requested name differs,
+        /// so a failure can leave the entry moved but not yet renamed; retain the returned entry instead of assuming a name.
+        /// </remarks>
+        FileSystemEntry Move(string location, string directoryLocation, string name);
+
         /// <summary>Deletes a file; a missing file is a no-op, but a directory is never deleted.</summary>
         /// <param name="location">The file location.</param>
         /// <exception cref="ArgumentException">The location is invalid.</exception>
@@ -111,5 +130,17 @@ namespace MajdataPlay.IO.Storage
         /// <exception cref="NotSupportedException">The provider does not support deletion.</exception>
         /// <exception cref="IOException">The entry is not a directory, is non-empty without recursion, or deletion failed.</exception>
         void DeleteDirectory(string location, bool recursive = false);
+
+        /// <summary>Sets an entry's last modification time to a UTC value.</summary>
+        /// <param name="location">The existing entry location.</param>
+        /// <param name="lastWriteTimeUtc">The new modification time, which must be UTC.</param>
+        /// <exception cref="ArgumentException">The location is invalid or the timestamp is not UTC.</exception>
+        /// <exception cref="ArgumentOutOfRangeException">The timestamp is outside the supported range.</exception>
+        /// <exception cref="FileNotFoundException">The entry does not exist.</exception>
+        /// <exception cref="UnauthorizedAccessException">Changing the timestamp was denied.</exception>
+        /// <exception cref="NotSupportedException">The backend cannot store modification times.</exception>
+        /// <exception cref="IOException">Changing the timestamp failed.</exception>
+        /// <remarks>A provider may ignore the request, so callers must re-read metadata instead of assuming the value was stored.</remarks>
+        void SetLastWriteTime(string location, DateTime lastWriteTimeUtc);
     }
 }

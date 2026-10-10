@@ -171,24 +171,15 @@ namespace MajdataPlay.IO.Storage
             {
                 throw new IOException("A filesystem root cannot be renamed.");
             }
-            var targetPath = Path.Combine(parentPath, name);
-            if (string.Equals(entry.Location, targetPath, StringComparison.Ordinal))
-            {
-                return entry;
-            }
-            if (GetEntry(targetPath) is not null && !LocationsEqual(entry.Location, targetPath))
-            {
-                throw new IOException("An entry with the requested name already exists.");
-            }
-            if (entry.IsDirectory)
-            {
-                Directory.Move(entry.Location, targetPath);
-            }
-            else
-            {
-                File.Move(entry.Location, targetPath);
-            }
-            return GetEntry(targetPath) ?? throw new FileNotFoundException("The renamed local entry disappeared.", targetPath);
+            return MoveWithin(entry, parentPath, name);
+        }
+
+        /// <inheritdoc />
+        public FileSystemEntry Move(string location, string directoryLocation, string name)
+        {
+            ValidateName(name);
+            var entry = GetEntry(location) ?? throw new FileNotFoundException("The local entry does not exist.", location);
+            return MoveWithin(entry, RequireDirectory(directoryLocation), name);
         }
 
         /// <inheritdoc />
@@ -220,6 +211,46 @@ namespace MajdataPlay.IO.Storage
         {
             var path = RequireDirectory(location);
             DeleteDirectoryCore(path, recursive);
+        }
+
+        /// <inheritdoc />
+        public void SetLastWriteTime(string location, DateTime lastWriteTimeUtc)
+        {
+            if (lastWriteTimeUtc.Kind != DateTimeKind.Utc)
+            {
+                throw new ArgumentException("The modification time must be UTC.", nameof(lastWriteTimeUtc));
+            }
+            File.SetLastWriteTimeUtc(FileSystem.NormalizeLocalPath(location), lastWriteTimeUtc);
+        }
+
+        /// <summary>Moves an already resolved local entry to a new name inside a validated directory.</summary>
+        /// <param name="entry">The existing source entry metadata.</param>
+        /// <param name="directoryPath">The normalized destination directory path.</param>
+        /// <param name="name">The validated destination child name.</param>
+        /// <returns>The entry at its new authoritative location.</returns>
+        /// <exception cref="IOException">A sibling exists or the native move failed.</exception>
+        /// <exception cref="FileNotFoundException">The moved entry disappeared.</exception>
+        private FileSystemEntry MoveWithin(FileSystemEntry entry, string directoryPath, string name)
+        {
+            var targetPath = Path.Combine(directoryPath, name);
+            if (string.Equals(entry.Location, targetPath, StringComparison.Ordinal))
+            {
+                return entry;
+            }
+            // Checked before the native move: renaming over an existing file silently replaces it on some systems.
+            if (GetEntry(targetPath) is not null && !LocationsEqual(entry.Location, targetPath))
+            {
+                throw new IOException("An entry with the requested name already exists.");
+            }
+            if (entry.IsDirectory)
+            {
+                Directory.Move(entry.Location, targetPath);
+            }
+            else
+            {
+                File.Move(entry.Location, targetPath);
+            }
+            return GetEntry(targetPath) ?? throw new FileNotFoundException("The moved local entry disappeared.", targetPath);
         }
 
         /// <summary>Compares normalized local paths, ignoring case on Windows without resolving filesystem identities.</summary>

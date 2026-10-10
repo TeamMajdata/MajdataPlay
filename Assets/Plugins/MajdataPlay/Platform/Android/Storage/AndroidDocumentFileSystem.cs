@@ -265,6 +265,62 @@ namespace MajdataPlay.Platform.Android.Storage
             });
         }
 
+        /// <summary>Moves an entry to a new child name inside another directory of the same tree grant.</summary>
+        /// <param name="location">The authorized existing source document URI.</param>
+        /// <param name="directoryLocation">The authorized existing destination directory URI.</param>
+        /// <param name="name">One requested destination display name.</param>
+        /// <returns>The moved entry with its authoritative actual name and location.</returns>
+        /// <exception cref="PlatformNotSupportedException">Execution is outside an Android player.</exception>
+        /// <exception cref="ArgumentException">The location or name is invalid.</exception>
+        /// <exception cref="FileNotFoundException">The source document does not exist.</exception>
+        /// <exception cref="DirectoryNotFoundException">The destination directory does not exist.</exception>
+        /// <exception cref="UnauthorizedAccessException">Moving or querying a parent was denied.</exception>
+        /// <exception cref="NotSupportedException">The provider cannot move, or a parent or provider is not safely discoverable.</exception>
+        /// <exception cref="IOException">A sibling exists, names or parents are ambiguous, or moving failed.</exception>
+        /// <remarks>
+        /// A same-parent move reuses the collision-safe rename path, and cross-provider moves are refused before mutation.
+        /// SAF moves keep the source display name, so a differing requested name needs a second provider rename;
+        /// that pair is not atomic, and a failure can leave the document moved under its original name.
+        /// </remarks>
+        public FileSystemEntry Move(string location, string directoryLocation, string name)
+        {
+            AndroidDocumentBridge.EnsureAndroid();
+            StorageName.Validate(name);
+            return AndroidDocumentBridge.Invoke(() =>
+            {
+                using var result = AndroidDocumentBridge.RequireResult(StorageAccess.Move(location, directoryLocation, name));
+                AndroidDocumentBridge.CheckResult(result, location);
+                return AndroidDocumentBridge.ReadRequiredEntry(result);
+            });
+        }
+
+        /// <summary>Writes the document's modification time when the provider accepts the update.</summary>
+        /// <param name="location">The authorized existing document URI.</param>
+        /// <param name="lastWriteTimeUtc">The new UTC modification time.</param>
+        /// <exception cref="PlatformNotSupportedException">Execution is outside an Android player.</exception>
+        /// <exception cref="ArgumentException">The URI is invalid or the timestamp is not UTC.</exception>
+        /// <exception cref="FileNotFoundException">The document does not exist.</exception>
+        /// <exception cref="UnauthorizedAccessException">Updating the document was denied.</exception>
+        /// <exception cref="NotSupportedException">The provider rejected the update as unsupported.</exception>
+        /// <exception cref="IOException">The update failed or the provider returned invalid metadata.</exception>
+        /// <remarks>Providers may store a rounded or provider-owned value; re-read the entry instead of assuming the requested time.</remarks>
+        public void SetLastWriteTime(string location, DateTime lastWriteTimeUtc)
+        {
+            AndroidDocumentBridge.EnsureAndroid();
+            if (lastWriteTimeUtc.Kind != DateTimeKind.Utc)
+            {
+                throw new ArgumentException("The modification time must be UTC.", nameof(lastWriteTimeUtc));
+            }
+            // Every UTC DateTime converts to a Unix millisecond count inside the Int64 range.
+            var milliseconds = new DateTimeOffset(lastWriteTimeUtc).ToUnixTimeMilliseconds();
+            AndroidDocumentBridge.Invoke(() =>
+            {
+                using var result = AndroidDocumentBridge.RequireResult(StorageAccess.SetLastModified(location, milliseconds));
+                AndroidDocumentBridge.CheckResult(result, location);
+                return true;
+            });
+        }
+
         /// <summary>Deletes a file only; an absent file is a no-op and directories are refused.</summary>
         /// <param name="location">The authorized file document URI.</param>
         /// <exception cref="PlatformNotSupportedException">Execution is outside an Android player.</exception>

@@ -81,13 +81,31 @@ newly created destinations are deleted best-effort after a failed copy. Copies
 to an existing `StorageFile` handle are also available via `CopyTo(destination)`.
 
 `MoveFile`, `MoveDirectory`, `ReplaceFile`, `SetAttributes` and `SetLastWriteTime`
-resolve their backends internally. Local branches preserve native move, atomic
-replacement, attribute and ZIP timestamp semantics, including volume and
-permission restrictions. The current content backend contract does not support
-these native operations: content/cross-provider operands throw
-`NotSupportedException` before any mutation, including a content backup for
-replacement. Moves and replacement never fall back to copy/delete. Content
-renaming within a parent remains available through handle `Rename`.
+resolve their backends internally, and none of them falls back to copying and
+deleting. A location-based move requires native local operands, because an opaque
+document URI cannot name a destination that does not exist yet. Use
+`MoveFile(source, parentLocation, name)` or `MoveDirectory(source, parentLocation, name)`
+to move an entry inside one backend: the local backend renames natively, and the
+content backend performs one provider move. Both overloads return the authoritative
+destination handle and reject a source of the wrong type. Cross-backend moves and
+moves into the source's own subtree are refused before mutation.
+
+`ReplaceFile` keeps native atomic replacement, including a backup, when every
+operand is local. When the source or destination belongs to a provider, the
+destination must already exist: the source is streamed into it and then deleted,
+so the destination keeps its storage identity while the source is consumed. That
+provider replacement is not atomic, can leave the destination truncated on
+failure, never deletes the source on failure, and rejects a backup path before
+mutating anything. `SetAttributes` applies native flags to local entries and is
+accepted without effect for provider entries, which have no portable hidden or
+system flags; the location must still denote an existing entry.
+
+`SetLastWriteTime` writes native local timestamps, or asks a provider to store
+the UTC value. Providers may reject the update, in which case
+`NotSupportedException` is reported, and they may store a rounded or
+provider-owned value, so re-read the metadata instead of assuming the requested
+time was kept. Content renaming within a parent remains available through handle
+`Rename` and does not require an existing destination.
 
 Entry snapshots also expose optional UTC creation times and backend-reported
 hidden/system flags. Local enumeration supplies them for chart ordering and
@@ -127,6 +145,18 @@ var reopened = FileSystem.OpenDirectory(savedLocation);
 - `PickDirectoryAsync` uses `ACTION_OPEN_DOCUMENT_TREE`.
 - `PickFileAsync` uses `ACTION_OPEN_DOCUMENT` with an openable MIME filter.
 - `CreateFileAsync` uses `ACTION_CREATE_DOCUMENT`; the system may change the proposed name.
+- Provider moves use `DocumentsContract.moveDocument` inside one provider authority, and a
+  same-parent move reuses the collision-safe rename path. A single-document grant from
+  `PickFileAsync` or `CreateFileAsync` cannot be moved or renamed because its parent is not
+  discoverable, and cross-provider moves are refused before any mutation.
+- `SetLastWriteTime` writes `COLUMN_LAST_MODIFIED` through the content resolver. A provider
+  that rejects the update reports `NotSupportedException`; a provider that accepts it may
+  still store a rounded or provider-owned value, so re-read the entry instead of assuming
+  the requested time. Attribute flags are not writable through SAF and are a no-op.
+- Deleting a tree document makes its URI unresolvable: a later metadata query for that URI
+  can fail with `IOException` instead of reporting absence, on a real `ExternalStorageProvider`
+  because it can no longer decide whether the document belongs to the tree. Confirm removal
+  through the parent directory rather than through the deleted URI.
 - The picker validates the returned read/write grant, and persists only the flags
   Android actually granted when persistence was requested. A provider without
   persistable access fails explicitly rather than silently promising restart access.
@@ -234,7 +264,9 @@ Before release, test a real Android device with local and cloud providers: selec
 user dismissal, owner cancellation/late results, concurrent request rejection,
 read-only grants, revocation, persistence after restart, nested trees and escaped
 IDs, unknown metadata, large transfers, append/truncate, creation name adjustments,
-rename URI changes, deletion, stream failures, and both ARMv7/ARM64 player backends.
+rename URI changes, deletion, stream failures, same-parent and cross-directory moves
+with collision and unsupported-flag handling, modification-time acceptance and
+rejection, and both ARMv7/ARM64 player backends.
 Windows/Linux/macOS/iOS runtime and platform permissions still need their respective
 platform smoke checks. Script compilation alone does not establish runtime correctness.
 

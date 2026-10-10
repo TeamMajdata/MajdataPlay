@@ -6,6 +6,19 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+
+# Unity's JSON readers reject the UTF-8 byte order mark that Windows PowerShell adds for
+# "-Encoding UTF8", so generated JSON is written as UTF-8 without a mark on every PowerShell version.
+function Set-JsonFile {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true, ValueFromPipeline = $true)][string]$Value,
+        [Parameter(Mandatory = $true)][string]$LiteralPath
+    )
+    process {
+        [IO.File]::WriteAllText($LiteralPath, $Value)
+    }
+}
 $root = (Resolve-Path (Join-Path $PSScriptRoot '../..')).Path
 $project = [IO.Path]::GetFullPath((Join-Path $root 'Temp/AndroidStorageDeviceValidation'))
 $workspacePrefix = $root.TrimEnd([IO.Path]::DirectorySeparatorChar) + [IO.Path]::DirectorySeparatorChar
@@ -34,7 +47,7 @@ Copy-Item -LiteralPath (Join-Path $root 'ProjectSettings/ProjectVersion.txt') -D
     'com.unity.modules.androidjni' = '1.0.0'
     'com.unity.modules.imgui' = '1.0.0'
     'com.unity.modules.jsonserialize' = '1.0.0'
-} } | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $project 'Packages/manifest.json') -Encoding UTF8
+} } | ConvertTo-Json -Depth 4 | Set-JsonFile -LiteralPath (Join-Path $project 'Packages/manifest.json')
 $ioSource = Join-Path $root 'Assets/Plugins/MajdataPlay/IO'
 $androidSource = Join-Path $root 'Assets/Plugins/MajdataPlay/Platform/Android'
 foreach ($name in @('MajdataPlay.IO.asmdef', 'MajdataPlay.IO.asmdef.meta')) {
@@ -67,19 +80,19 @@ if (Test-Path -LiteralPath $runtime) {
 }
 Copy-Item -LiteralPath (Join-Path $androidSource 'Runtime') -Destination $android -Recurse -Force
 Copy-Item -LiteralPath (Join-Path $androidSource 'Runtime.meta') -Destination $android -Force
-@{ name = 'MajdataPlay.Diagnostics' } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $diagnostics 'MajdataPlay.Diagnostics.asmdef') -Encoding UTF8
+@{ name = 'MajdataPlay.Diagnostics' } | ConvertTo-Json | Set-JsonFile -LiteralPath (Join-Path $diagnostics 'MajdataPlay.Diagnostics.asmdef')
 Copy-Item -LiteralPath (Join-Path $root 'Assets/Plugins/MajdataPlay/Diagnostics/MajdataPlay.Diagnostics.asmdef.meta') -Destination $diagnostics -Force
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'AndroidStorageDeviceValidation/DeviceValidationStubs.cs') -Destination $diagnostics -Force
 $toolSource = Join-Path $PSScriptRoot 'AndroidStorageDeviceValidation'
 @{
     name = 'MajdataPlay.Storage.DeviceValidation'
     references = @('MajdataPlay.IO', 'MajdataPlay.Platform.Android')
-} | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $validation 'MajdataPlay.Storage.DeviceValidation.asmdef') -Encoding UTF8
+} | ConvertTo-Json | Set-JsonFile -LiteralPath (Join-Path $validation 'MajdataPlay.Storage.DeviceValidation.asmdef')
 Copy-Item -LiteralPath (Join-Path $toolSource 'AndroidStorageDeviceValidation.cs') -Destination $validation -Force
 $probeDirectory = Join-Path $runtime 'Validation'
 New-Item -ItemType Directory -Force -Path $probeDirectory | Out-Null
 Copy-Item -LiteralPath (Join-Path $toolSource 'DeviceJniProbe.cs') -Destination $probeDirectory -Force
-@{ name = 'MajdataPlay.Storage.DeviceBuild.Editor'; includePlatforms = @('Editor') } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $editor 'MajdataPlay.Storage.DeviceBuild.Editor.asmdef') -Encoding UTF8
+@{ name = 'MajdataPlay.Storage.DeviceBuild.Editor'; includePlatforms = @('Editor') } | ConvertTo-Json | Set-JsonFile -LiteralPath (Join-Path $editor 'MajdataPlay.Storage.DeviceBuild.Editor.asmdef')
 Copy-Item -LiteralPath (Join-Path $toolSource 'AndroidStorageDeviceBuild.cs') -Destination $editor -Force
 $javaTarget = Join-Path $project 'Assets/Plugins/Android/src'
 New-Item -ItemType Directory -Force -Path $javaTarget | Out-Null

@@ -246,10 +246,11 @@ namespace MajdataPlay.IO.Storage
             return sourceFile.CopyTo(directory, name, overwrite);
         }
 
-        /// <summary>Moves a file without overwriting the destination when the selected backends support native moves.</summary>
+        /// <summary>Moves a file without overwriting the destination when the selected backend performs native moves.</summary>
         /// <param name="source">The source file path or URI.</param>
         /// <param name="destination">The destination file path or URI.</param>
         /// <returns>A handle for the file at its new location.</returns>
+        /// <remarks>A provider destination cannot name a new document URI; use the directory-and-name overload for provider moves.</remarks>
         /// <exception cref="ArgumentNullException">A location is null.</exception>
         /// <exception cref="ArgumentException">A location is invalid.</exception>
         /// <exception cref="NotSupportedException">A backend cannot provide native moves, including content and cross-provider moves.</exception>
@@ -261,16 +262,39 @@ namespace MajdataPlay.IO.Storage
         {
             var sourceFile = OpenFile(source);
             var destinationFile = OpenFile(destination);
-            RequireNativeOperation(sourceFile.FileSystem, "File moves");
-            RequireNativeOperation(destinationFile.FileSystem, "File moves");
+            RequireNativeMove(sourceFile.FileSystem);
+            RequireNativeMove(destinationFile.FileSystem);
             File.Move(sourceFile.Location, destinationFile.Location);
             return destinationFile;
         }
 
-        /// <summary>Moves a directory without copying or overwriting when the selected backends support native moves.</summary>
+        /// <summary>Moves a file into an immediate child of a directory using one native backend operation.</summary>
+        /// <param name="source">The existing source file path or URI.</param>
+        /// <param name="directoryLocation">The existing destination directory path or URI.</param>
+        /// <param name="name">One destination child name, never a relative path or URI.</param>
+        /// <returns>A handle using the destination backend's authoritative file location.</returns>
+        /// <remarks>
+        /// The source and destination must belong to the same backend; a move is never emulated by copying and deleting.
+        /// Provider moves are one provider operation, so a partially moved entry is never cleaned up by this facade.
+        /// </remarks>
+        /// <exception cref="ArgumentNullException">A location is null.</exception>
+        /// <exception cref="ArgumentException">A location or name is invalid.</exception>
+        /// <exception cref="FileNotFoundException">The source file does not exist.</exception>
+        /// <exception cref="DirectoryNotFoundException">The destination directory does not exist.</exception>
+        /// <exception cref="UnauthorizedAccessException">Querying or moving was denied.</exception>
+        /// <exception cref="NotSupportedException">The operands belong to different backends or the backend cannot move natively.</exception>
+        /// <exception cref="IOException">The source is a directory, a sibling exists, or moving failed.</exception>
+        public static StorageFile MoveFile(string source, string directoryLocation, string name)
+        {
+            var entry = MoveEntry(source, directoryLocation, name, sourceIsDirectory: false);
+            return new StorageFile(ResolveProvider(directoryLocation), entry.Location);
+        }
+
+        /// <summary>Moves a directory without copying or overwriting when the selected backend performs native moves.</summary>
         /// <param name="source">The source directory path or URI.</param>
         /// <param name="destination">The destination directory path or URI; local moves require the same volume.</param>
         /// <returns>A handle for the directory at its new location.</returns>
+        /// <remarks>A provider destination cannot name a new document URI; use the directory-and-name overload for provider moves.</remarks>
         /// <exception cref="ArgumentNullException">A location is null.</exception>
         /// <exception cref="ArgumentException">A location is invalid.</exception>
         /// <exception cref="NotSupportedException">A backend cannot provide native moves, including content and cross-provider moves.</exception>
@@ -281,70 +305,119 @@ namespace MajdataPlay.IO.Storage
         {
             var sourceDirectory = OpenDirectory(source);
             var destinationDirectory = OpenDirectory(destination);
-            RequireNativeOperation(sourceDirectory.FileSystem, "Directory moves");
-            RequireNativeOperation(destinationDirectory.FileSystem, "Directory moves");
+            RequireNativeMove(sourceDirectory.FileSystem);
+            RequireNativeMove(destinationDirectory.FileSystem);
             Directory.Move(sourceDirectory.Location, destinationDirectory.Location);
             return destinationDirectory;
         }
 
-        /// <summary>Atomically replaces a file when all selected backends support native replacement.</summary>
+        /// <summary>Moves a directory into an immediate child of another directory using one native backend operation.</summary>
+        /// <param name="source">The existing source directory path or URI.</param>
+        /// <param name="directoryLocation">The existing destination parent directory path or URI.</param>
+        /// <param name="name">One destination child name, never a relative path or URI.</param>
+        /// <returns>A handle using the destination backend's authoritative directory location.</returns>
+        /// <remarks>
+        /// The source and destination must belong to the same backend; a move is never emulated by copying and deleting.
+        /// Moving a directory inside its own subtree is rejected by the backend rather than by this facade.
+        /// </remarks>
+        /// <exception cref="ArgumentNullException">A location is null.</exception>
+        /// <exception cref="ArgumentException">A location or name is invalid.</exception>
+        /// <exception cref="FileNotFoundException">The source directory does not exist.</exception>
+        /// <exception cref="DirectoryNotFoundException">The destination directory does not exist.</exception>
+        /// <exception cref="UnauthorizedAccessException">Querying or moving was denied.</exception>
+        /// <exception cref="NotSupportedException">The operands belong to different backends or the backend cannot move natively.</exception>
+        /// <exception cref="IOException">The source is a file, a sibling exists, or moving failed.</exception>
+        public static StorageDirectory MoveDirectory(string source, string directoryLocation, string name)
+        {
+            var entry = MoveEntry(source, directoryLocation, name, sourceIsDirectory: true);
+            return new StorageDirectory(ResolveProvider(directoryLocation), entry.Location);
+        }
+
+        /// <summary>Replaces a file's content with a source file and consumes that source.</summary>
         /// <param name="source">The replacement path or URI, consumed on success.</param>
         /// <param name="destination">The existing destination path or URI.</param>
-        /// <param name="backupPath">An optional backup path or URI for the original destination.</param>
+        /// <param name="backupPath">An optional backup path for the original destination; local operands only.</param>
         /// <returns>A handle for the replaced destination.</returns>
+        /// <remarks>
+        /// Local operands use native atomic replacement. A provider operand instead streams the source into the
+        /// existing destination and then deletes the source, preserving the destination's storage identity.
+        /// That provider replacement is not atomic: a failure can leave the destination truncated or partially written,
+        /// the source is never deleted on failure, and a backup path is refused before any mutation.
+        /// </remarks>
         /// <exception cref="ArgumentNullException">A required location is null.</exception>
         /// <exception cref="ArgumentException">A location is invalid.</exception>
-        /// <exception cref="NotSupportedException">A backend cannot provide atomic replacement, including content providers.</exception>
+        /// <exception cref="NotSupportedException">A provider operand was combined with a backup path, or the platform cannot replace files.</exception>
         /// <exception cref="PlatformNotSupportedException">The platform does not support file replacement.</exception>
         /// <exception cref="FileNotFoundException">The source or destination does not exist.</exception>
         /// <exception cref="UnauthorizedAccessException">Replacement was denied.</exception>
-        /// <exception cref="IOException">Replacement failed, including incompatible volumes.</exception>
+        /// <exception cref="IOException">Replacement failed, the operands are the same file, or volumes are incompatible.</exception>
         public static StorageFile ReplaceFile(string source, string destination, string? backupPath = null)
         {
             var sourceFile = OpenFile(source);
             var destinationFile = OpenFile(destination);
             var backupFile = backupPath is null ? null : OpenFile(backupPath);
-            RequireNativeOperation(sourceFile.FileSystem, "Atomic file replacement");
-            RequireNativeOperation(destinationFile.FileSystem, "Atomic file replacement");
+            if (sourceFile.FileSystem is LocalFileSystem && destinationFile.FileSystem is LocalFileSystem &&
+                (backupFile is null || backupFile.FileSystem is LocalFileSystem))
+            {
+                File.Replace(sourceFile.Location, destinationFile.Location, backupFile?.Location);
+                return destinationFile;
+            }
             if (backupFile is not null)
             {
-                RequireNativeOperation(backupFile.FileSystem, "Atomic file replacement");
+                throw new NotSupportedException("Replacing into a provider location does not support a backup path.");
             }
-            File.Replace(sourceFile.Location, destinationFile.Location, backupFile?.Location);
-            return destinationFile;
+            var replaced = sourceFile.CopyTo(destinationFile, overwrite: true);
+            sourceFile.Delete();
+            return replaced;
         }
 
-        /// <summary>Sets filesystem attributes when the selected backend supports native attribute flags.</summary>
+        /// <summary>Sets filesystem attributes for a local entry, or accepts them without effect for a provider entry.</summary>
         /// <param name="location">The entry path or URI.</param>
         /// <param name="attributes">The complete native attribute flags to apply.</param>
+        /// <remarks>
+        /// Providers expose no portable hidden or system flags, so a provider entry is only required to exist;
+        /// the requested flags are neither stored nor reported back by <see cref="FileSystemEntry"/>.
+        /// </remarks>
         /// <exception cref="ArgumentNullException">The location is null.</exception>
         /// <exception cref="ArgumentException">The location or attributes are invalid.</exception>
-        /// <exception cref="NotSupportedException">The backend cannot set native attribute flags, including content providers.</exception>
         /// <exception cref="FileNotFoundException">The entry does not exist.</exception>
-        /// <exception cref="UnauthorizedAccessException">Changing attributes was denied.</exception>
-        /// <exception cref="IOException">Changing attributes failed.</exception>
+        /// <exception cref="UnauthorizedAccessException">Querying or changing attributes was denied.</exception>
+        /// <exception cref="IOException">Querying or changing attributes failed.</exception>
         public static void SetAttributes(string location, FileAttributes attributes)
         {
             var file = OpenFile(location);
-            RequireNativeOperation(file.FileSystem, "Native filesystem attributes");
-            File.SetAttributes(file.Location, attributes);
+            if (file.FileSystem is LocalFileSystem)
+            {
+                File.SetAttributes(file.Location, attributes);
+                return;
+            }
+            if (file.Entry is null)
+            {
+                throw new FileNotFoundException("The provider entry does not exist.", file.Location);
+            }
         }
 
-        /// <summary>Sets the modification time when the selected backend supports native timestamps.</summary>
+        /// <summary>Sets the modification time using native timestamps or a provider update.</summary>
         /// <param name="location">The entry path or URI.</param>
         /// <param name="lastWriteTime">The modification time, interpreted according to its DateTime kind.</param>
+        /// <remarks>A provider may reject the update or store a provider-owned value, so re-read the entry before relying on it.</remarks>
         /// <exception cref="ArgumentNullException">The location is null.</exception>
         /// <exception cref="ArgumentException">The location or timestamp is invalid.</exception>
         /// <exception cref="ArgumentOutOfRangeException">The timestamp is outside the supported range.</exception>
-        /// <exception cref="NotSupportedException">The backend cannot set timestamps, including content providers.</exception>
+        /// <exception cref="NotSupportedException">The backend cannot store modification times.</exception>
         /// <exception cref="FileNotFoundException">The entry does not exist.</exception>
         /// <exception cref="UnauthorizedAccessException">Changing the timestamp was denied.</exception>
         /// <exception cref="IOException">Changing the timestamp failed.</exception>
         public static void SetLastWriteTime(string location, DateTime lastWriteTime)
         {
             var file = OpenFile(location);
-            RequireNativeOperation(file.FileSystem, "Filesystem timestamps");
-            File.SetLastWriteTime(file.Location, lastWriteTime);
+            if (file.FileSystem is LocalFileSystem)
+            {
+                File.SetLastWriteTime(file.Location, lastWriteTime);
+                return;
+            }
+            var lastWriteTimeUtc = lastWriteTime.Kind == DateTimeKind.Utc ? lastWriteTime : lastWriteTime.ToUniversalTime();
+            file.FileSystem.SetLastWriteTime(file.Location, lastWriteTimeUtc);
         }
 
         /// <summary>Opens a resolved file without reselecting its backend during the operation.</summary>
@@ -377,15 +450,48 @@ namespace MajdataPlay.IO.Storage
             return file.FileSystem.OpenWrite(entry.Location, append);
         }
 
-        /// <summary>Rejects operations which the current provider contract cannot perform with native semantics.</summary>
+        /// <summary>Moves one entry into an immediate child of a destination directory without any copy fallback.</summary>
+        /// <param name="source">The existing source path or URI.</param>
+        /// <param name="directoryLocation">The existing destination directory path or URI.</param>
+        /// <param name="name">One destination child name, never a relative path or URI.</param>
+        /// <param name="sourceIsDirectory">Whether the source must be a directory instead of a file.</param>
+        /// <returns>The moved entry with its authoritative backend location.</returns>
+        /// <exception cref="ArgumentNullException">A location is null.</exception>
+        /// <exception cref="ArgumentException">A location or name is invalid.</exception>
+        /// <exception cref="FileNotFoundException">The source entry does not exist.</exception>
+        /// <exception cref="DirectoryNotFoundException">The destination directory does not exist.</exception>
+        /// <exception cref="UnauthorizedAccessException">Querying or moving was denied.</exception>
+        /// <exception cref="NotSupportedException">The operands belong to different backends.</exception>
+        /// <exception cref="IOException">The source has the wrong type, a sibling exists, or moving failed.</exception>
+        private static FileSystemEntry MoveEntry(string source, string directoryLocation, string name, bool sourceIsDirectory)
+        {
+            StorageName.Validate(name);
+            var sourceProvider = ResolveProvider(source);
+            var entry = sourceProvider.GetEntry(source)
+                ?? throw new FileNotFoundException("The source entry does not exist.", source);
+            if (entry.IsDirectory != sourceIsDirectory)
+            {
+                throw new IOException(sourceIsDirectory
+                    ? "The source entry is a file, not a directory."
+                    : "The source entry is a directory, not a file.");
+            }
+            var directoryProvider = ResolveProvider(directoryLocation);
+            if (!ReferenceEquals(sourceProvider, directoryProvider))
+            {
+                throw new NotSupportedException("Moving between different storage backends is not supported.");
+            }
+            return sourceProvider.Move(entry.Location, directoryLocation, name);
+        }
+
+        /// <summary>Rejects a location-based move whose operand cannot name a new provider child.</summary>
         /// <param name="provider">The backend selected for an operand.</param>
-        /// <param name="operation">The operation description included in the failure.</param>
-        /// <exception cref="NotSupportedException">The backend cannot perform the native operation.</exception>
-        private static void RequireNativeOperation(IFileSystem provider, string operation)
+        /// <exception cref="NotSupportedException">The backend is not the local filesystem.</exception>
+        private static void RequireNativeMove(IFileSystem provider)
         {
             if (provider is not LocalFileSystem)
             {
-                throw new NotSupportedException("The selected storage backend does not support " + operation + ".");
+                throw new NotSupportedException(
+                    "A provider location cannot name a new move destination; pass the destination directory and a child name instead.");
             }
         }
 
