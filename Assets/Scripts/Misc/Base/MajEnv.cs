@@ -4,6 +4,7 @@ using HidSharp.Platform.Windows;
 using HidSharp.Platform.MacOS;
 #endif
 using MajdataPlay.Buffers;
+using MajdataPlay.IO.Storage;
 using MajdataPlay.Collections;
 using MajdataPlay.Extensions;
 using MajdataPlay.Net;
@@ -266,16 +267,16 @@ namespace MajdataPlay
                 if (isGranted)
                 {
                     RootPath = "/sdcard/Documents/MajdataPlay";
-                    if (!Directory.Exists(RootPath))
+                    if (!FileSystem.OpenDirectory(RootPath).Exists)
                     {
-                        Directory.CreateDirectory(RootPath);
+                        FileSystem.CreateLocalDirectory(RootPath);
                     }
-                    var noMediaFlag = new FileInfo(Path.Combine(RootPath, ".nomedia"));
+                    var noMediaFlag = FileSystem.OpenFile(Path.Combine(RootPath, ".nomedia"));
                     if (!noMediaFlag.Exists)
                     {
                         try
                         {
-                            noMediaFlag.Create().Dispose();
+                            FileSystem.CreateLocalFile(noMediaFlag.Location);
                             MajDebug.LogDebug("Created .nomedia flag file");
                         }
                         catch (Exception e)
@@ -344,15 +345,15 @@ namespace MajdataPlay
         {
             var oldLogPath = LogPath + ".old";
 
-            if (File.Exists(oldLogPath))
+            if (FileSystem.OpenFile(oldLogPath).Exists)
             {
-                File.Delete(oldLogPath);
+                FileSystem.OpenFile(oldLogPath).Delete();
             }
-            if (File.Exists(LogPath))
+            if (FileSystem.OpenFile(LogPath).Exists)
             {
-                File.Move(LogPath, oldLogPath);
+                FileSystem.MoveLocalFile(LogPath, oldLogPath);
             }
-            var fileWriter = new StreamWriter(LogPath, append: true, encoding: Encoding.UTF8);
+            var fileWriter = new StreamWriter(FileSystem.OpenLocalWrite(LogPath, append: true), Encoding.UTF8);
             fileWriter.AutoFlush = true;
 
             MajDebug.SetLogWriter(fileWriter);
@@ -425,9 +426,9 @@ namespace MajdataPlay
         }
         static void InitUserSettings()
         {
-            if (File.Exists(SettingsPath))
+            if (FileSystem.OpenFile(SettingsPath).Exists)
             {
-                var js = File.ReadAllText(SettingsPath);
+                var js = FileSystem.OpenFile(SettingsPath).ReadAllText();
                 GameSetting? setting;
 
 
@@ -436,14 +437,14 @@ namespace MajdataPlay
                     Settings = new();
                     MajDebug.LogError($"Failed to read setting from file\nException: {e}");
                     var bakFileName = $"{SettingsPath}.bak";
-                    while (File.Exists(bakFileName))
+                    while (FileSystem.OpenFile(bakFileName).Exists)
                     {
                         bakFileName = $"{bakFileName}.bak";
                     }
 
                     try
                     {
-                        File.Copy(SettingsPath, bakFileName, true);
+                        FileSystem.CopyLocalFile(SettingsPath, bakFileName, overwrite: true);
                     }
                     catch
                     {
@@ -459,7 +460,7 @@ namespace MajdataPlay
                 Settings = new GameSetting();
 
                 var json = Serializer.Json.Serialize(Settings, UserJsonReaderOption);
-                File.WriteAllText(SettingsPath, json);
+                WriteLocalText(SettingsPath, json);
             }
 
 #if UNITY_STANDALONE
@@ -640,9 +641,9 @@ namespace MajdataPlay
         {
             var machineDescriptionPath = Path.Combine(RootPath, "machine_description.json");
 
-            if (File.Exists(machineDescriptionPath))
+            if (FileSystem.OpenFile(machineDescriptionPath).Exists)
             {
-                var js = File.ReadAllText(machineDescriptionPath);
+                var js = FileSystem.OpenFile(machineDescriptionPath).ReadAllText();
                 MachineInfo? machineInfo;
 
                 if (!Serializer.Json.TryDeserialize(js, out machineInfo, out var e, UserJsonReaderOption) || machineInfo is null)
@@ -657,14 +658,14 @@ namespace MajdataPlay
             else
             {
                 var json = Serializer.Json.Serialize(MachineInfo, UserJsonReaderOption);
-                File.WriteAllText(machineDescriptionPath, json);
+                WriteLocalText(machineDescriptionPath, json);
             }
         }
         static void InitRuntimeConfig()
         {
-            if (File.Exists(_runtimeConfigPath))
+            if (FileSystem.OpenFile(_runtimeConfigPath).Exists)
             {
-                var js = File.ReadAllText(_runtimeConfigPath);
+                var js = FileSystem.OpenFile(_runtimeConfigPath).ReadAllText();
                 RuntimeConfig? setting;
 
                 if (!Serializer.Json.TryDeserialize(js, out setting, out var e, UserJsonReaderOption) || setting is null)
@@ -682,7 +683,7 @@ namespace MajdataPlay
                 RuntimeConfig = new();
 
                 var json = Serializer.Json.Serialize(RuntimeConfig, UserJsonReaderOption);
-                File.WriteAllText(_runtimeConfigPath, json);
+                WriteLocalText(_runtimeConfigPath, json);
             }
         }
         static void InitOthers()
@@ -693,14 +694,14 @@ namespace MajdataPlay
 
         static void TryDeleteDirectory(string path)
         {
-            if (!Directory.Exists(path))
+            if (!FileSystem.OpenDirectory(path).Exists)
             {
                 return;
             }
 
             try
             {
-                Directory.Delete(path, true);
+                FileSystem.OpenDirectory(path).Delete(recursive: true);
             }
             catch (Exception e)
             {
@@ -732,18 +733,30 @@ namespace MajdataPlay
             var json = Serializer.Json.Serialize(Settings, UserJsonReaderOption);
             var json2 = Serializer.Json.Serialize(RuntimeConfig, UserJsonReaderOption);
 
-            File.WriteAllText(SettingsPath, json);
-            File.WriteAllText(_runtimeConfigPath, json2);
+            WriteLocalText(SettingsPath, json);
+            WriteLocalText(_runtimeConfigPath, json2);
 
             MajDebug.FlushLog();
         }
 
 
+        /// <summary>Creates or replaces a local configuration file through one storage output stream.</summary>
+        /// <param name="path">The local configuration path whose parent directory already exists.</param>
+        /// <param name="text">The UTF-8 text to write without a byte order mark.</param>
+        /// <exception cref="UnauthorizedAccessException">Writing the configuration was denied.</exception>
+        /// <exception cref="IOException">The configuration could not be opened or written.</exception>
+        private static void WriteLocalText(string path, string text)
+        {
+            using var stream = FileSystem.OpenLocalWrite(path, overwrite: true);
+            using var writer = new StreamWriter(stream, new UTF8Encoding(false));
+            writer.Write(text);
+        }
+
         static void CreateDirectoryIfNotExists(string path)
         {
-            if (!Directory.Exists(path))
+            if (!FileSystem.OpenDirectory(path).Exists)
             {
-                Directory.CreateDirectory(path);
+                FileSystem.CreateLocalDirectory(path);
             }
         }
     }

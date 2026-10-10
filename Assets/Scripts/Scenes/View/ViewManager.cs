@@ -4,6 +4,7 @@ using MajdataPlay.Scenes.Game;
 using MajdataPlay.Scenes.Game.Notes;
 using MajdataPlay.Scenes.Game.Notes.Controllers;
 using MajdataPlay.IO;
+using MajdataPlay.IO.Storage;
 using MajdataPlay.Numerics;
 using MajdataPlay.Timer;
 using MajdataPlay.Utils;
@@ -100,10 +101,7 @@ namespace MajdataPlay.Scenes.View
         protected override void Awake()
         {
             base.Awake();
-            if(!Directory.Exists(CACHE_PATH))
-            {
-                Directory.CreateDirectory(CACHE_PATH);
-            }
+            FileSystem.CreateLocalDirectory(CACHE_PATH);
             Majdata<ViewManager>.Instance = this;
             Majdata<INoteController>.Instance = this;
             Majdata<INoteTimeProvider>.Instance = this;
@@ -337,7 +335,7 @@ namespace MajdataPlay.Scenes.View
             {
                 if(_audioSample is not null) _audioSample.Dispose();
                 var sample = await MajInstances.AudioManager.LoadMusicAsync(audioPath, true, true);
-                if (File.Exists(bgPath))
+                if (FileSystem.OpenFile(bgPath).Exists)
                 {
                     var cover = await SpriteLoader.LoadFromFileAsync(bgPath);
                     _bgCover = cover;

@@ -2,13 +2,13 @@ using Cysharp.Threading.Tasks;
 using MajdataPlay.Databases;
 using MajdataPlay.Drawing;
 using MajdataPlay.IO;
+using MajdataPlay.IO.Storage;
 using MajdataPlay.Net;
 using MajdataPlay.Settings;
 using MajdataPlay.Utils;
 using MajSimai;
 using Nito.AsyncEx;
 using System;
-using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
 using System.Threading;
@@ -78,7 +78,8 @@ namespace MajdataPlay
         }
         public SongDetail(string chartFolder, SimaiMetadata metadata)
         {
-            var files = new DirectoryInfo(chartFolder).GetFiles();
+            var chartDirectory = FileSystem.OpenDirectory(chartFolder);
+            var files = chartDirectory.EnumerateEntries().Where(x => !x.IsDirectory).ToArray();
             var videoBGFilename = new string[3]
             {
                 "bg",
@@ -86,8 +87,8 @@ namespace MajdataPlay
                 "mv"
             };
 
-            _maidataPath = Path.Combine(chartFolder, "maidata.txt");
-            _trackPath = files.FirstOrDefault(o => o.Name.ToLower() is "track.opus" or "track.mp3" or "track.ogg" or "track.aac" or "track.wav").FullName;
+            _maidataPath = chartDirectory.FindFile("maidata.txt")!.Location;
+            _trackPath = files.FirstOrDefault(o => o.Name.ToLower() is "track.opus" or "track.mp3" or "track.ogg" or "track.aac" or "track.wav")!.Location;
             _videoPath = files.FirstOrDefault(o =>
             {
                 var thisFilename = o.Name.ToLower();
@@ -102,8 +103,8 @@ namespace MajdataPlay
                     }
                 }
                 return false;
-            })?.FullName ?? string.Empty;
-            _coverPath = files.FirstOrDefault(o => o.Name.ToLower() is "bg.png" or "bg.jpg")?.FullName ?? string.Empty;
+            })?.Location ?? string.Empty;
+            _coverPath = files.FirstOrDefault(o => o.Name.ToLower() is "bg.png" or "bg.jpg")?.Location ?? string.Empty;
             _maidata = null;
 
             if (string.IsNullOrEmpty(_coverPath))
@@ -113,12 +114,14 @@ namespace MajdataPlay
             _simaiMetadata = metadata;
             Title = metadata.Title;
             Artist = metadata.Artist;
-            Timestamp = files.FirstOrDefault(x => x.Name is "maidata.txt")?.LastWriteTime ?? DateTime.UnixEpoch;
+            Timestamp = files.FirstOrDefault(x => x.Name is "maidata.txt")?.LastWriteTimeUtc?.ToLocalTime() ?? DateTime.UnixEpoch;
         }
         public static async Task<SongDetail> ParseAsync(string chartFolder)
         {
-            var maidataPath = Path.Combine(chartFolder, "maidata.txt");
-            var metadata = await SimaiParser.ParseMetadataAsync(File.OpenRead(maidataPath));
+            var maidataFile = FileSystem.OpenDirectory(chartFolder).FindFile("maidata.txt")
+                ?? throw new System.IO.FileNotFoundException("The chart does not contain maidata.txt.");
+            using var maidataStream = maidataFile.OpenRead();
+            var metadata = await SimaiParser.ParseMetadataAsync(maidataStream);
 
             return new SongDetail(chartFolder, metadata);
         }
@@ -238,7 +241,7 @@ namespace MajdataPlay
                 {
                     return _maidata;
                 }
-                using var fileStream = File.OpenRead(_maidataPath);
+                using var fileStream = FileSystem.OpenFile(_maidataPath).OpenRead();
                 progress?.Report(1);
                 var metadata = await SimaiParser.ParseMetadataAsync(fileStream);
                 if (metadata.Hash == _simaiMetadata.Hash)

@@ -1,6 +1,7 @@
 using Cysharp.Threading.Tasks;
 using MajdataPlay.Collections;
 using MajdataPlay.Diagnostics;
+using MajdataPlay.IO.Storage;
 using MajdataPlay.Json;
 using MajdataPlay.Scenes.Game;
 using MajdataPlay.Scenes.Game.Notes;
@@ -9,7 +10,6 @@ using Newtonsoft.Json;
 using SQLite;
 using System;
 using System.Collections.Generic;
-using System.IO;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -49,7 +49,7 @@ namespace MajdataPlay
             try
             {
                 var dbPath = MajEnv.ScoreDBPath;
-                var isDbExists = File.Exists(dbPath);
+                var isDbExists = FileSystem.OpenFile(dbPath).Exists;
                 _db = new SQLiteAsyncConnection(dbPath, SQLiteOpenFlags.ReadWrite | SQLiteOpenFlags.Create | SQLiteOpenFlags.FullMutex);
                 GameManager.OnAppQuit += OnAppQuit;
                 await _db.CreateTableAsync<MajScoreDB>();
@@ -58,14 +58,14 @@ namespace MajdataPlay
                 {
                     // Migrate from legacy JSON file
                     var legacyPath = MajEnv.LegacyScoreDBPath;
-                    if (File.Exists(legacyPath))
+                    if (FileSystem.OpenFile(legacyPath).Exists)
                     {
                         var migrated = await MigrateFromJsonAsync(legacyPath);
                         if (migrated)
                         {
                             try
                             {
-                                File.Delete(legacyPath);
+                                FileSystem.OpenFile(legacyPath).Delete();
                                 MajDebug.LogInfo("Migrated scores from legacy JSON to SQLite, old file deleted.");
                             }
                             catch (Exception ex)
@@ -293,7 +293,7 @@ namespace MajdataPlay
         {
             try
             {
-                var json = await File.ReadAllTextAsync(legacyPath);
+                var json = await FileSystem.OpenFile(legacyPath).ReadAllTextAsync();
                 // Fix legacy typo: "JudgeDeatil" → "JudgeDetail"
                 json = json.Replace("\"JudgeDeatil\"", "\"JudgeDetail\"");
                 var scores = JsonConvert.DeserializeObject<List<MaiScore>>(json, _jsonReadSettings);

@@ -65,6 +65,148 @@ namespace MajdataPlay.IO.Storage
             return new StorageDirectory(s_local, normalizedPath);
         }
 
+        /// <summary>Creates an empty local file without creating parent directories.</summary>
+        /// <param name="path">A local path or file URI, never a content URI.</param>
+        /// <param name="overwrite">Whether an existing file may be truncated.</param>
+        /// <returns>A handle for the newly created or truncated local file.</returns>
+        /// <exception cref="ArgumentNullException">The path is null.</exception>
+        /// <exception cref="ArgumentException">The path is invalid.</exception>
+        /// <exception cref="NotSupportedException">The path uses a non-file URI scheme.</exception>
+        /// <exception cref="DirectoryNotFoundException">The parent directory does not exist.</exception>
+        /// <exception cref="UnauthorizedAccessException">File creation was denied.</exception>
+        /// <exception cref="IOException">The file exists without overwrite or creation failed.</exception>
+        public static StorageFile CreateLocalFile(string path, bool overwrite = false)
+        {
+            var normalizedPath = NormalizeLocalPath(path);
+            using var stream = OpenLocalWrite(normalizedPath, overwrite: overwrite);
+            return new StorageFile(s_local, normalizedPath);
+        }
+
+        /// <summary>Opens a seekable local output stream, allowing concurrent readers.</summary>
+        /// <param name="path">A local path or file URI, never a content URI.</param>
+        /// <param name="append">Whether to append to an existing file or create it if missing.</param>
+        /// <param name="overwrite">Whether a non-append open may truncate an existing file.</param>
+        /// <returns>A writable local stream owned by the caller.</returns>
+        /// <exception cref="ArgumentNullException">The path is null.</exception>
+        /// <exception cref="ArgumentException">The path is invalid.</exception>
+        /// <exception cref="NotSupportedException">The path uses a non-file URI scheme.</exception>
+        /// <exception cref="DirectoryNotFoundException">The parent directory does not exist.</exception>
+        /// <exception cref="UnauthorizedAccessException">Writing was denied.</exception>
+        /// <exception cref="IOException">The file exists without append/overwrite or opening failed.</exception>
+        public static Stream OpenLocalWrite(string path, bool append = false, bool overwrite = false)
+        {
+            var normalizedPath = NormalizeLocalPath(path);
+            var mode = append ? FileMode.Append : overwrite ? FileMode.Create : FileMode.CreateNew;
+            return new FileStream(normalizedPath, mode, FileAccess.Write, FileShare.Read, 65536);
+        }
+
+        /// <summary>Copies a local file using the platform copy operation, retaining local file metadata.</summary>
+        /// <param name="source">The local source path or file URI.</param>
+        /// <param name="destination">The local destination path or file URI.</param>
+        /// <param name="overwrite">Whether an existing destination file may be replaced.</param>
+        /// <returns>A handle for the destination file.</returns>
+        /// <exception cref="ArgumentNullException">A location is null.</exception>
+        /// <exception cref="ArgumentException">A location is invalid.</exception>
+        /// <exception cref="NotSupportedException">A location uses a non-file URI scheme.</exception>
+        /// <exception cref="FileNotFoundException">The source does not exist.</exception>
+        /// <exception cref="DirectoryNotFoundException">A parent directory does not exist.</exception>
+        /// <exception cref="UnauthorizedAccessException">Copying was denied.</exception>
+        /// <exception cref="IOException">The destination exists without overwrite or copying failed.</exception>
+        public static StorageFile CopyLocalFile(string source, string destination, bool overwrite = false)
+        {
+            var sourcePath = NormalizeLocalPath(source);
+            var destinationPath = NormalizeLocalPath(destination);
+            File.Copy(sourcePath, destinationPath, overwrite);
+            return new StorageFile(s_local, destinationPath);
+        }
+
+        /// <summary>Moves a local file without overwriting the destination.</summary>
+        /// <param name="source">The local source path or file URI.</param>
+        /// <param name="destination">The local destination path or file URI.</param>
+        /// <returns>A handle for the file at its new location.</returns>
+        /// <exception cref="ArgumentNullException">A location is null.</exception>
+        /// <exception cref="ArgumentException">A location is invalid.</exception>
+        /// <exception cref="NotSupportedException">A location uses a non-file URI scheme.</exception>
+        /// <exception cref="FileNotFoundException">The source does not exist.</exception>
+        /// <exception cref="DirectoryNotFoundException">A parent directory does not exist.</exception>
+        /// <exception cref="UnauthorizedAccessException">Moving was denied.</exception>
+        /// <exception cref="IOException">The destination exists or moving failed.</exception>
+        public static StorageFile MoveLocalFile(string source, string destination)
+        {
+            var sourcePath = NormalizeLocalPath(source);
+            var destinationPath = NormalizeLocalPath(destination);
+            File.Move(sourcePath, destinationPath);
+            return new StorageFile(s_local, destinationPath);
+        }
+
+        /// <summary>Moves a local directory without copying or overwriting the destination.</summary>
+        /// <param name="source">The local source path or file URI.</param>
+        /// <param name="destination">The local destination path or file URI on the same volume.</param>
+        /// <returns>A handle for the directory at its new location.</returns>
+        /// <exception cref="ArgumentNullException">A location is null.</exception>
+        /// <exception cref="ArgumentException">A location is invalid.</exception>
+        /// <exception cref="NotSupportedException">A location uses a non-file URI scheme.</exception>
+        /// <exception cref="DirectoryNotFoundException">The source or destination parent does not exist.</exception>
+        /// <exception cref="UnauthorizedAccessException">Moving was denied.</exception>
+        /// <exception cref="IOException">The destination exists, volumes differ, or moving failed.</exception>
+        public static StorageDirectory MoveLocalDirectory(string source, string destination)
+        {
+            var sourcePath = NormalizeLocalPath(source);
+            var destinationPath = NormalizeLocalPath(destination);
+            Directory.Move(sourcePath, destinationPath);
+            return new StorageDirectory(s_local, destinationPath);
+        }
+
+        /// <summary>Atomically replaces an existing local file using the platform's file replacement operation.</summary>
+        /// <param name="source">The local replacement path or file URI, consumed on success.</param>
+        /// <param name="destination">The existing local destination path or file URI.</param>
+        /// <param name="backupPath">An optional local backup path or file URI for the original destination.</param>
+        /// <returns>A handle for the replaced destination.</returns>
+        /// <exception cref="ArgumentNullException">A required location is null.</exception>
+        /// <exception cref="ArgumentException">A location is invalid.</exception>
+        /// <exception cref="NotSupportedException">A location uses a non-file URI scheme.</exception>
+        /// <exception cref="PlatformNotSupportedException">The platform does not support file replacement.</exception>
+        /// <exception cref="FileNotFoundException">The source or destination does not exist.</exception>
+        /// <exception cref="UnauthorizedAccessException">Replacement was denied.</exception>
+        /// <exception cref="IOException">Replacement failed, including incompatible volumes.</exception>
+        public static StorageFile ReplaceLocalFile(string source, string destination, string? backupPath = null)
+        {
+            var sourcePath = NormalizeLocalPath(source);
+            var destinationPath = NormalizeLocalPath(destination);
+            var normalizedBackup = backupPath is null ? null : NormalizeLocalPath(backupPath);
+            File.Replace(sourcePath, destinationPath, normalizedBackup);
+            return new StorageFile(s_local, destinationPath);
+        }
+
+        /// <summary>Sets local filesystem attributes without applying native path semantics to provider URIs.</summary>
+        /// <param name="location">The local entry path or file URI.</param>
+        /// <param name="attributes">The complete local attribute flags to apply.</param>
+        /// <exception cref="ArgumentNullException">The location is null.</exception>
+        /// <exception cref="ArgumentException">The location or attributes are invalid.</exception>
+        /// <exception cref="NotSupportedException">The location uses a non-file URI scheme.</exception>
+        /// <exception cref="FileNotFoundException">The entry does not exist.</exception>
+        /// <exception cref="UnauthorizedAccessException">Changing attributes was denied.</exception>
+        /// <exception cref="IOException">Changing attributes failed.</exception>
+        public static void SetLocalAttributes(string location, FileAttributes attributes)
+        {
+            File.SetAttributes(NormalizeLocalPath(location), attributes);
+        }
+
+        /// <summary>Sets the local modification time, including timestamps restored from ZIP entries.</summary>
+        /// <param name="location">The local entry path or file URI.</param>
+        /// <param name="lastWriteTime">The modification time, interpreted according to its DateTime kind.</param>
+        /// <exception cref="ArgumentNullException">The location is null.</exception>
+        /// <exception cref="ArgumentException">The location or timestamp is invalid.</exception>
+        /// <exception cref="ArgumentOutOfRangeException">The timestamp is outside the supported range.</exception>
+        /// <exception cref="NotSupportedException">The location uses a non-file URI scheme.</exception>
+        /// <exception cref="FileNotFoundException">The entry does not exist.</exception>
+        /// <exception cref="UnauthorizedAccessException">Changing the timestamp was denied.</exception>
+        /// <exception cref="IOException">Changing the timestamp failed.</exception>
+        public static void SetLocalLastWriteTime(string location, DateTime lastWriteTime)
+        {
+            File.SetLastWriteTime(NormalizeLocalPath(location), lastWriteTime);
+        }
+
         /// <summary>Converts a local path or file URI into a normalized absolute path without trailing separators.</summary>
         /// <param name="location">The local path or file URI to normalize.</param>
         /// <returns>The absolute path, retaining separators only when required by its filesystem root.</returns>

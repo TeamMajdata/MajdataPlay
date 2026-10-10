@@ -5,20 +5,23 @@ using System.IO;
 using System.Linq;
 using System.Security.Cryptography;
 using MajdataPlay.Diagnostics;
+using MajdataPlay.IO.Storage;
 using UnityEngine;
 using UnityEngine.Networking;
 
 #nullable enable
 namespace MajdataPlay
 {
+    /// <summary>Extracts mobile packaged resources while preserving player-managed files and customizations.</summary>
     internal static class MobileResourceUpdater
     {
+        /// <summary>Identifies extraction commits whose chart and skin directory moves must be resumed.</summary>
         private const string PendingManagedAssetMovesMarkerName = ".pending-managed-asset-moves";
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSceneLoad)]
         private static void InitializeOrUpdate()
         {
-            if (!Directory.Exists(MajEnv.AssetsPath))
+            if (!FileSystem.OpenDirectory(MajEnv.AssetsPath).Exists)
             {
                 if (ExtractAssets())
                 {
@@ -60,6 +63,12 @@ namespace MajdataPlay
             SyncMissingAssets(v2Hashes, diffPaths);
         }
 
+        /// <summary>Replaces eligible official v1 files with verified packaged v2 bytes.</summary>
+        /// <param name="v1Hashes">The previous official hashes used to protect customizations.</param>
+        /// <param name="v2Hashes">The current hashes used to verify packaged replacements.</param>
+        /// <param name="diffPaths">The official paths changed by this resource update.</param>
+        /// <exception cref="UnauthorizedAccessException">A local destination cannot be queried.</exception>
+        /// <exception cref="IOException">A local destination cannot be queried.</exception>
         private static void ApplyV2Diff(
             IReadOnlyDictionary<string, string> v1Hashes,
             IReadOnlyDictionary<string, string> v2Hashes,
@@ -74,7 +83,7 @@ namespace MajdataPlay
                 var isRootManagedAsset = IsRootManagedAsset(relativePath);
                 if (v1Hashes.TryGetValue(relativePath, out var v1Hash))
                 {
-                    if (!File.Exists(destinationPath))
+                    if (!FileSystem.OpenFile(destinationPath).Exists)
                     {
                         if (isRootManagedAsset)
                         {
@@ -93,7 +102,7 @@ namespace MajdataPlay
                         continue;
                     }
                 }
-                else if (File.Exists(destinationPath))
+                else if (FileSystem.OpenFile(destinationPath).Exists)
                 {
                     // This path did not exist in v1. An existing local file is player-owned.
                     MajDebug.LogInfo(
@@ -128,7 +137,7 @@ namespace MajdataPlay
                     var destinationDirectory = Path.GetDirectoryName(destinationPath);
                     if (!string.IsNullOrEmpty(destinationDirectory))
                     {
-                        Directory.CreateDirectory(destinationDirectory);
+                        FileSystem.CreateLocalDirectory(destinationDirectory);
                     }
 
                     WriteAllBytesAtomically(destinationPath, v2Data);
@@ -147,6 +156,8 @@ namespace MajdataPlay
                 $"{preservedCount} customized or missing file(s) preserved.");
         }
 
+        /// <summary>Stages and verifies every packaged resource before committing the extracted resource root.</summary>
+        /// <returns>Whether all resources were verified and their staged directory was committed.</returns>
         private static bool ExtractAssets()
         {
             if (!ResourceManifestLoader.TryGetV2Hashes(out var v2Hashes))
@@ -159,16 +170,16 @@ namespace MajdataPlay
                                      Path.AltDirectorySeparatorChar) + ".extracting-v2";
             try
             {
-                if (Directory.Exists(extractionRoot))
+                if (FileSystem.OpenDirectory(extractionRoot).Exists)
                 {
-                    Directory.Delete(extractionRoot, recursive: true);
+                    FileSystem.OpenDirectory(extractionRoot).Delete(recursive: true);
                 }
-                else if (File.Exists(extractionRoot))
+                else if (FileSystem.OpenFile(extractionRoot).Exists)
                 {
-                    File.Delete(extractionRoot);
+                    FileSystem.OpenFile(extractionRoot).Delete();
                 }
 
-                Directory.CreateDirectory(extractionRoot);
+                FileSystem.CreateLocalDirectory(extractionRoot);
             }
             catch (Exception exception)
             {
@@ -195,10 +206,10 @@ namespace MajdataPlay
 
             try
             {
-                File.WriteAllText(
-                    Path.Combine(extractionRoot, PendingManagedAssetMovesMarkerName),
-                    string.Empty);
-                Directory.Move(extractionRoot, MajEnv.AssetsPath);
+                FileSystem.CreateLocalFile(
+                    Path.Combine(extractionRoot, PendingManagedAssetMovesMarkerName))
+                    .WriteAllText(string.Empty);
+                FileSystem.MoveLocalDirectory(extractionRoot, MajEnv.AssetsPath);
                 return true;
             }
             catch (Exception exception)
@@ -208,6 +219,11 @@ namespace MajdataPlay
             }
         }
 
+        /// <summary>Copies missing unmanaged resources that are outside the explicit update diff.</summary>
+        /// <param name="v2Hashes">The validated current packaged resource hashes.</param>
+        /// <param name="diffPaths">The changed paths governed by the official v1 update gate.</param>
+        /// <exception cref="UnauthorizedAccessException">A local destination cannot be queried.</exception>
+        /// <exception cref="IOException">A local destination cannot be queried.</exception>
         private static void SyncMissingAssets(
             IReadOnlyDictionary<string, string> v2Hashes,
             IReadOnlyCollection<string> diffPaths)
@@ -222,13 +238,15 @@ namespace MajdataPlay
                 var destinationPath = Path.Combine(
                     MajEnv.AssetsPath,
                     relativePath.Replace('/', Path.DirectorySeparatorChar));
-                if (!File.Exists(destinationPath))
+                if (!FileSystem.OpenFile(destinationPath).Exists)
                 {
                     CopyPackagedResource(relativePath, destinationPath, hash, "Sync missing");
                 }
             }
         }
 
+        /// <summary>Moves bundled charts from extraction into the player-managed chart root.</summary>
+        /// <returns>Whether an existing player-managed destination was preserved.</returns>
         private static bool MoveCharts()
         {
             return MoveExtractedDirectory(
@@ -236,6 +254,8 @@ namespace MajdataPlay
                 Path.Combine(MajEnv.ChartPath, "Original"));
         }
 
+        /// <summary>Moves the bundled skin from extraction into the player-managed skin root.</summary>
+        /// <returns>Whether an existing player-managed destination was preserved.</returns>
         private static bool MoveSkins()
         {
             return MoveExtractedDirectory(
@@ -243,9 +263,15 @@ namespace MajdataPlay
                 Path.Combine(MajEnv.SkinPath, "default"));
         }
 
+        /// <summary>Moves one extracted managed directory without replacing an existing player-owned destination.</summary>
+        /// <param name="sourcePath">The local extracted directory to move.</param>
+        /// <param name="destinationPath">The intended local player-managed destination.</param>
+        /// <returns>Whether an existing destination was preserved and the extracted duplicate removed.</returns>
+        /// <exception cref="UnauthorizedAccessException">The extracted source cannot be queried.</exception>
+        /// <exception cref="IOException">The extracted source cannot be queried.</exception>
         private static bool MoveExtractedDirectory(string sourcePath, string destinationPath)
         {
-            if (!Directory.Exists(sourcePath))
+            if (!FileSystem.OpenDirectory(sourcePath).Exists)
             {
                 MajDebug.LogError($"Move failed: source not found: {sourcePath}");
                 return false;
@@ -253,16 +279,16 @@ namespace MajdataPlay
 
             try
             {
-                if (Directory.Exists(destinationPath) || File.Exists(destinationPath))
+                if (FileSystem.OpenDirectory(destinationPath).Exists || FileSystem.OpenFile(destinationPath).Exists)
                 {
                     // Never replace a pre-existing player-managed directory during extraction.
-                    Directory.Delete(sourcePath, recursive: true);
+                    FileSystem.OpenDirectory(sourcePath).Delete(recursive: true);
                     MajDebug.LogInfo(
                         $"Preserved existing player-managed path during extraction: {destinationPath}");
                     return true;
                 }
 
-                Directory.Move(sourcePath, destinationPath);
+                FileSystem.MoveLocalDirectory(sourcePath, destinationPath);
                 MajDebug.LogInfo($"Moved: {sourcePath} -> {destinationPath}");
                 return false;
             }
@@ -273,24 +299,27 @@ namespace MajdataPlay
             }
         }
 
+        /// <summary>Resumes pending chart and skin moves recorded by an earlier extraction commit.</summary>
+        /// <exception cref="UnauthorizedAccessException">The marker or extracted sources cannot be queried.</exception>
+        /// <exception cref="IOException">The marker or extracted sources cannot be queried.</exception>
         private static void CompletePendingManagedAssetMoves()
         {
             var markerPath = Path.Combine(
                 MajEnv.AssetsPath,
                 PendingManagedAssetMovesMarkerName);
-            if (!File.Exists(markerPath))
+            if (!FileSystem.OpenFile(markerPath).Exists)
             {
                 return;
             }
 
             var chartSourcePath = Path.Combine(MajEnv.AssetsPath, "MaiCharts", "Original");
-            if (Directory.Exists(chartSourcePath))
+            if (FileSystem.OpenDirectory(chartSourcePath).Exists)
             {
                 MoveCharts();
             }
 
             var skinSourcePath = Path.Combine(MajEnv.AssetsPath, "Skins", "default");
-            if (Directory.Exists(skinSourcePath))
+            if (FileSystem.OpenDirectory(skinSourcePath).Exists)
             {
                 MoveSkins();
             }
@@ -298,11 +327,14 @@ namespace MajdataPlay
             ClearPendingManagedAssetMovesMarkerIfCompleted();
         }
 
+        /// <summary>Removes the pending marker after both extracted managed source directories are gone.</summary>
+        /// <exception cref="UnauthorizedAccessException">An extracted source cannot be queried.</exception>
+        /// <exception cref="IOException">An extracted source cannot be queried.</exception>
         private static void ClearPendingManagedAssetMovesMarkerIfCompleted()
         {
             var chartSourcePath = Path.Combine(MajEnv.AssetsPath, "MaiCharts", "Original");
             var skinSourcePath = Path.Combine(MajEnv.AssetsPath, "Skins", "default");
-            if (Directory.Exists(chartSourcePath) || Directory.Exists(skinSourcePath))
+            if (FileSystem.OpenDirectory(chartSourcePath).Exists || FileSystem.OpenDirectory(skinSourcePath).Exists)
             {
                 return;
             }
@@ -312,9 +344,9 @@ namespace MajdataPlay
                 PendingManagedAssetMovesMarkerName);
             try
             {
-                if (File.Exists(markerPath))
+                if (FileSystem.OpenFile(markerPath).Exists)
                 {
-                    File.Delete(markerPath);
+                    FileSystem.OpenFile(markerPath).Delete();
                 }
             }
             catch (Exception exception)
@@ -324,6 +356,12 @@ namespace MajdataPlay
             }
         }
 
+        /// <summary>Verifies packaged bytes and commits one extracted or missing local resource atomically.</summary>
+        /// <param name="relativePath">The portable path inside packaged resources.</param>
+        /// <param name="destinationPath">The local resource file receiving the verified bytes.</param>
+        /// <param name="expectedHash">The official SHA-256 hash expected for the packaged bytes.</param>
+        /// <param name="operation">The operation label used in resource logs.</param>
+        /// <returns>Whether the packaged bytes were verified and committed.</returns>
         private static bool CopyPackagedResource(
             string relativePath,
             string destinationPath,
@@ -346,7 +384,7 @@ namespace MajdataPlay
                 var destinationDirectory = Path.GetDirectoryName(destinationPath);
                 if (!string.IsNullOrEmpty(destinationDirectory))
                 {
-                    Directory.CreateDirectory(destinationDirectory);
+                    FileSystem.CreateLocalDirectory(destinationDirectory);
                 }
 
                 WriteAllBytesAtomically(destinationPath, data);
@@ -360,28 +398,34 @@ namespace MajdataPlay
             }
         }
 
+        /// <summary>Stages resource bytes beside the destination before a local move or atomic replacement.</summary>
+        /// <param name="destinationPath">The local resource destination.</param>
+        /// <param name="data">The complete verified bytes to commit.</param>
+        /// <exception cref="UnauthorizedAccessException">Creating, writing, or committing the local file was denied.</exception>
+        /// <exception cref="IOException">Staging or committing the local file failed.</exception>
+        /// <exception cref="NotSupportedException">The platform does not support atomic replacement.</exception>
         private static void WriteAllBytesAtomically(string destinationPath, byte[] data)
         {
             var temporaryPath = $"{destinationPath}.{Guid.NewGuid():N}.tmp";
             try
             {
-                File.WriteAllBytes(temporaryPath, data);
-                if (File.Exists(destinationPath))
+                FileSystem.CreateLocalFile(temporaryPath).WriteAllBytes(data);
+                if (FileSystem.OpenFile(destinationPath).Exists)
                 {
-                    File.Replace(temporaryPath, destinationPath, null);
+                    FileSystem.ReplaceLocalFile(temporaryPath, destinationPath);
                 }
                 else
                 {
-                    File.Move(temporaryPath, destinationPath);
+                    FileSystem.MoveLocalFile(temporaryPath, destinationPath);
                 }
             }
             finally
             {
-                if (File.Exists(temporaryPath))
+                if (FileSystem.OpenFile(temporaryPath).Exists)
                 {
                     try
                     {
-                        File.Delete(temporaryPath);
+                        FileSystem.OpenFile(temporaryPath).Delete();
                     }
                     catch (Exception exception)
                     {
@@ -392,12 +436,18 @@ namespace MajdataPlay
             }
         }
 
+        /// <summary>Identifies chart and skin paths owned by the player-managed root.</summary>
+        /// <param name="path">The portable manifest-relative path.</param>
+        /// <returns>Whether the path belongs to a chart or skin tree.</returns>
         private static bool IsRootManagedAsset(string path)
         {
             return path.StartsWith("MaiCharts/", StringComparison.OrdinalIgnoreCase) ||
                    path.StartsWith("Skins/", StringComparison.OrdinalIgnoreCase);
         }
 
+        /// <summary>Maps a portable manifest path to its appropriate local resource or player-managed root.</summary>
+        /// <param name="relativePath">The validated portable manifest path.</param>
+        /// <returns>The intended local resource destination.</returns>
         private static string ResolveDestinationPath(string relativePath)
         {
             var platformPath = relativePath.Replace('/', Path.DirectorySeparatorChar);
@@ -406,6 +456,10 @@ namespace MajdataPlay
                 : Path.Combine(MajEnv.AssetsPath, platformPath);
         }
 
+        /// <summary>Reads packaged bytes through local iOS storage or the Android streaming asset request.</summary>
+        /// <param name="relativePath">The portable packaged resource path.</param>
+        /// <param name="data">Receives the packaged bytes, or an empty array after failure.</param>
+        /// <returns>Whether the packaged bytes were read successfully.</returns>
         private static bool TryReadPackagedResource(string relativePath, out byte[] data)
         {
 #if UNITY_IOS
@@ -414,7 +468,7 @@ namespace MajdataPlay
                 relativePath.Replace('/', Path.DirectorySeparatorChar));
             try
             {
-                data = File.ReadAllBytes(sourcePath);
+                data = FileSystem.OpenFile(sourcePath).ReadAllBytes();
                 return true;
             }
             catch (Exception exception)
@@ -460,11 +514,15 @@ namespace MajdataPlay
 #endif
         }
 
+        /// <summary>Hashes a local resource through its storage stream without buffering the whole file.</summary>
+        /// <param name="path">The local resource file to hash.</param>
+        /// <param name="hash">Receives the lowercase SHA-256 hash, or an empty string after failure.</param>
+        /// <returns>Whether the resource was successfully opened and hashed.</returns>
         private static bool TryComputeFileSha256(string path, out string hash)
         {
             try
             {
-                using var stream = File.OpenRead(path);
+                using var stream = FileSystem.OpenFile(path).OpenRead();
                 using var sha256 = SHA256.Create();
                 hash = ToHexString(sha256.ComputeHash(stream));
                 return true;
@@ -477,12 +535,18 @@ namespace MajdataPlay
             }
         }
 
+        /// <summary>Hashes already buffered packaged resource bytes.</summary>
+        /// <param name="data">The bytes to hash.</param>
+        /// <returns>The lowercase SHA-256 hash.</returns>
         private static string ComputeSha256(byte[] data)
         {
             using var sha256 = SHA256.Create();
             return ToHexString(sha256.ComputeHash(data));
         }
 
+        /// <summary>Formats hash bytes for comparison with validated resource manifest entries.</summary>
+        /// <param name="hash">The hash bytes to format.</param>
+        /// <returns>The lowercase hexadecimal hash without separators.</returns>
         private static string ToHexString(byte[] hash)
         {
             return BitConverter.ToString(hash).Replace("-", string.Empty).ToLowerInvariant();

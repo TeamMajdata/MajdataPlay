@@ -1,4 +1,6 @@
-﻿using MajdataPlay.Diagnostics;
+#nullable enable
+using MajdataPlay.IO.Storage;
+using MajdataPlay.Diagnostics;
 using MajdataPlay.Utils;
 using System;
 using System.IO;
@@ -167,7 +169,7 @@ namespace MajdataPlay.Recording
                                 MajDebug.LogInfo("[OBS] Moving video to game dir");
                                 var timestamp = $"{DateTime.Now:yyyy-MM-dd_HH_mm_ss}";
                                 var outputPath = Path.Combine(MajEnv.RecordOutputsPath, $"{_name}_{timestamp}.mp4");
-                                File.Move(_obsOutPath, outputPath);
+                                FileSystem.MoveLocalFile(_obsOutPath, outputPath);
                             }
 
                             break;

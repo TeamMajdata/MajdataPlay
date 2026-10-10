@@ -3,6 +3,7 @@ using MajdataPlay.Buffers;
 
 using MajdataPlay.Diagnostics;
 using MajdataPlay.Drawing;
+using MajdataPlay.IO.Storage;
 using MajdataPlay.Rendering;
 using System;
 using System.Collections.Generic;
@@ -310,7 +311,7 @@ namespace MajdataPlay.Scenes.Game.Notes.Skins
         }
 
         public CustomSkin(string skinCollectionPath, bool loadIntoMemory) :
-            this(new DirectoryInfo(skinCollectionPath).Name, skinCollectionPath, loadIntoMemory)
+            this(Path.GetFileName(FileSystem.OpenDirectory(skinCollectionPath).Location), skinCollectionPath, loadIntoMemory)
         { }
         public CustomSkin(string name, string skinCollectionPath, bool loadIntoMemory) : this(name)
         {
@@ -324,13 +325,14 @@ namespace MajdataPlay.Scenes.Game.Notes.Skins
 
         public static CustomSkin Create(string skinCollectionPath)
         {
-            var dirInfo = new DirectoryInfo(skinCollectionPath);
-            if (!dirInfo.Exists)
+            var directory = FileSystem.OpenDirectory(skinCollectionPath);
+            var entry = directory.Entry;
+            if (entry is null || !entry.IsDirectory)
             {
                 throw new DirectoryNotFoundException($"The skin collection path '{skinCollectionPath}' does not exist.");
             }
 
-            return new CustomSkin(dirInfo.Name, skinCollectionPath, false);
+            return new CustomSkin(entry.Name, directory.Location, false);
         }
 
         public async UniTask LoadAsync(CancellationToken token = default)
@@ -522,7 +524,7 @@ namespace MajdataPlay.Scenes.Game.Notes.Skins
 
         private async UniTask PerformLoadAsync()
         {
-            IsOutlineAvailable = File.Exists($"{_path}/outline.png");
+            IsOutlineAvailable = FileSystem.OpenFile($"{_path}/outline.png").Exists;
 
             SubDisplay = await LoadSpriteDirectAsync("SubBackgourd.png");
             LoadingSplash = await LoadSpriteDirectAsync("now_loading.png");
@@ -539,7 +541,7 @@ namespace MajdataPlay.Scenes.Game.Notes.Skins
 
         private void PerformLoad()
         {
-            IsOutlineAvailable = File.Exists($"{_path}/outline.png");
+            IsOutlineAvailable = FileSystem.OpenFile($"{_path}/outline.png").Exists;
 
             SubDisplay = LoadSpriteDirectSync("SubBackgourd.png");
             LoadingSplash = LoadSpriteDirectSync("now_loading.png");
@@ -725,9 +727,13 @@ namespace MajdataPlay.Scenes.Game.Notes.Skins
         private async UniTask<Sprite?> LoadSpriteDirectAsync(string subPath)
         {
             var fullPath = Path.Combine(_path, subPath);
-            if (!File.Exists(fullPath)) return null;
+            var file = FileSystem.OpenFile(fullPath);
+            if (!file.Exists)
+            {
+                return null;
+            }
 
-            byte[] data = await File.ReadAllBytesAsync(fullPath);
+            var data = await file.ReadAllBytesAsync();
 
             // Keep pixels readable until the custom outline has been generated.
             var tex = await TextureLoader.LoadFromMemoryAsync(data, false);
@@ -740,9 +746,13 @@ namespace MajdataPlay.Scenes.Game.Notes.Skins
         private Sprite? LoadSpriteDirectSync(string subPath)
         {
             var fullPath = Path.Combine(_path, subPath);
-            if (!File.Exists(fullPath)) return null;
+            var file = FileSystem.OpenFile(fullPath);
+            if (!file.Exists)
+            {
+                return null;
+            }
 
-            byte[] data = File.ReadAllBytes(fullPath);
+            var data = file.ReadAllBytes();
             var tex = TextureLoader.LoadFromMemory(data, false);
             if (tex == null) return null;
 
@@ -855,13 +865,14 @@ namespace MajdataPlay.Scenes.Game.Notes.Skins
 
             foreach (var task in _tasks)
             {
-                if (!File.Exists(task.FullPath))
+                var file = FileSystem.OpenFile(task.FullPath);
+                if (!file.Exists)
                 {
                     task.Assigner(null);
                     continue;
                 }
 
-                byte[] data = await File.ReadAllBytesAsync(task.FullPath);
+                var data = await file.ReadAllBytesAsync();
                 // 必须为 false：PackTextures 需要读取图片的 CPU 像素数据
                 Texture2D? tex = await TextureLoader.LoadFromMemoryAsync(data, false);
 
@@ -891,13 +902,14 @@ namespace MajdataPlay.Scenes.Game.Notes.Skins
 
             foreach (var task in _tasks)
             {
-                if (!File.Exists(task.FullPath))
+                var file = FileSystem.OpenFile(task.FullPath);
+                if (!file.Exists)
                 {
                     task.Assigner(null);
                     continue;
                 }
 
-                byte[] data = File.ReadAllBytes(task.FullPath);
+                var data = file.ReadAllBytes();
                 Texture2D? tex = TextureLoader.LoadFromMemory(data, false);
 
                 if (tex != null)

@@ -1,4 +1,5 @@
-﻿using MajdataPlay.Diagnostics;
+using MajdataPlay.IO.Storage;
+using MajdataPlay.Diagnostics;
 using MajdataPlay.Net.Curl.Core;
 using MajdataPlay.Net.Curl.Core.PInvoke;
 using System;
@@ -27,7 +28,7 @@ namespace MajdataPlay.Net.Curl.Utils
         {
             var returnCode = default(CurlCode?);
 #if UNITY_ANDROID
-            if(File.Exists(_androidCAPath))
+            if(FileSystem.OpenFile(_androidCAPath).Exists)
             {
                 returnCode = LibCurl.Easy.SetOption(curlEasy.Handle, CurlOption.CaInfo, _androidCAPath);
                 if (returnCode is CurlCode code && code != CurlCode.Ok)

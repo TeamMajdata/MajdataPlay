@@ -1,5 +1,6 @@
 using MajdataPlay.Diagnostics;
 using MajdataPlay.Extensions;
+using MajdataPlay.IO.Storage;
 using MajdataPlay.Numerics;
 using MajdataPlay.Utils;
 using ManagedBass;
@@ -8,7 +9,6 @@ using ManagedBass.Fx;
 using ManagedBass.Mix;
 using ManagedBass.Opus;
 using System;
-using System.IO;
 using System.Runtime.InteropServices;
 using System.Threading;
 using System.Threading.Tasks;
@@ -286,13 +286,13 @@ namespace MajdataPlay.IO
         }
         public static BassAudioSample Create(string path, int globalMixer, bool normalize = true, bool speedChange = false)
         {
-            var buf = File.ReadAllBytes(path);
+            var buf = FileSystem.OpenFile(path).ReadAllBytes();
 
             return Create(buf, globalMixer, normalize, speedChange);
         }
         public static async ValueTask<BassAudioSample> CreateAsync(string path, int globalMixer, bool normalize = true, bool speedChange = false)
         {
-            var buf = await File.ReadAllBytesAsync(path);
+            var buf = await FileSystem.OpenFile(path).ReadAllBytesAsync();
 
             return Create(buf, globalMixer, normalize, speedChange);
         }

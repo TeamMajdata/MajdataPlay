@@ -5,6 +5,7 @@ using MajdataPlay.Buffers;
 using MajdataPlay.Collections;
 using MajdataPlay.Diagnostics;
 using MajdataPlay.Extensions;
+using MajdataPlay.IO.Storage;
 using MajdataPlay.Net;
 using MajdataPlay.Numerics;
 using MajdataPlay.Utils;
@@ -87,10 +88,9 @@ namespace MajdataPlay
                 await Task.Run(async () =>
                 {
                     await RefreshMyFavAsync();
-                    if (!Directory.Exists(MajEnv.ChartPath))
+                    if (!FileSystem.OpenDirectory(MajEnv.ChartPath).Exists)
                     {
-                        Directory.CreateDirectory(MajEnv.ChartPath);
-                        Directory.CreateDirectory(Path.Combine(MajEnv.ChartPath, "default"));
+                        FileSystem.CreateLocalDirectory(MajEnv.ChartPath).CreateDirectory("default");
                         return;
                     }
                     var rootPath = MajEnv.ChartPath;
@@ -373,7 +373,7 @@ namespace MajdataPlay
         //scan the local chart folders
         static async Task<List<SongCollection>> GetLocalCollections(string rootPath, IProgress<string>? progressReporter)
         {
-            var dirs = new DirectoryInfo(rootPath).GetDirectories();
+            var dirs = FileSystem.OpenDirectory(rootPath).EnumerateDirectories().ToArray();
             var tasks = new List<Task<SongCollection>>(dirs.Length);
             var collections = new List<SongCollection>(dirs.Length);
 
@@ -381,7 +381,7 @@ namespace MajdataPlay
             Parallel.For(0, dirs.Length, i =>
             {
                 var dir = dirs[i];
-                var path = dir.FullName;
+                var path = dir.Location;
 
                 tasks.Add(GetCollection(path));
             });
@@ -450,7 +450,11 @@ namespace MajdataPlay
             collections.Add(_myFavorite);
 
             MajDebug.LogInfo("Load Dans");
-            var danFiles = new DirectoryInfo(rootPath).GetFiles("*.json");
+            var rootDirectory = FileSystem.OpenDirectory(rootPath);
+            var fileNameComparison = Path.DirectorySeparatorChar == '\\' ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+            var danFiles = rootDirectory.EnumerateEntries()
+                .Where(x => !x.IsDirectory && x.Name.EndsWith(".json", fileNameComparison))
+                .ToArray();
             var loadDanTasks = new Task<SongCollection?>[danFiles.Length];
             for (var i = 0; i < loadDanTasks.Length; i++)
             {
@@ -465,9 +469,13 @@ namespace MajdataPlay
                     loadDanTasks[i] = Task.FromResult<SongCollection?>(null);
                     continue;
                 }
-                var jsonStream = File.OpenRead(file.FullName);
-                var id = GetGuidFromStream(jsonStream);
-                jsonStream.Position = 0;
+                var storageFile = new StorageFile(rootDirectory.FileSystem, file.Location);
+                Guid id;
+                using (var idStream = storageFile.OpenRead())
+                {
+                    id = GetGuidFromStream(idStream);
+                }
+                using var jsonStream = storageFile.OpenRead();
                 var (result, dan, e) = await Serializer.Json.TryDeserializeAsync<DanInfo>(jsonStream);
 
                 if (result && dan is not null)
@@ -476,7 +484,7 @@ namespace MajdataPlay
                 }
                 if (e is not null)
                 {
-                    MajDebug.LogError($"Failed to load dan from {file.FullName}\nException: {e}");
+                    MajDebug.LogError($"Failed to load dan from {file.Location}\nException: {e}");
                 }
             }
             if (loadDanTasks.Length != 0)
@@ -505,16 +513,17 @@ namespace MajdataPlay
         private static async Task<SongCollection> GetCollection(string rootPath)
         {
             await UniTask.SwitchToThreadPool();
-            var thisDir = new DirectoryInfo(rootPath);
-            var dirs = thisDir.GetDirectories()
-                              .OrderBy(o => o.CreationTime)
+            var collectionDirectory = FileSystem.OpenDirectory(rootPath);
+            var thisDir = collectionDirectory.Entry!;
+            var dirs = collectionDirectory.EnumerateEntries()
+                              .Where(x => x.IsDirectory)
+                              .OrderBy(o => o.CreationTimeUtc)
                               .ToList();
-            var flagDirPath = Path.Combine(rootPath, ".MajdataPlay");
             MajDebug.LogDebug($"[MaiChart Scanner]Enter folder: {rootPath}");
-            if (!Directory.Exists(flagDirPath))
+            if (collectionDirectory.FindDirectory(".MajdataPlay") is null)
             {
-                var info = Directory.CreateDirectory(flagDirPath);
-                info.Attributes |= FileAttributes.Hidden;
+                var flagDirectory = collectionDirectory.CreateDirectory(".MajdataPlay");
+                FileSystem.SetLocalAttributes(flagDirectory.Location, FileAttributes.Directory | FileAttributes.Hidden);
             }
             if (dirs.Count == 0)
             {
@@ -526,12 +535,13 @@ namespace MajdataPlay
             
             foreach (var songDir in dirs)
             {
-                if((songDir.Attributes & FileAttributes.Hidden) != 0)
+                if (songDir.IsHidden)
                 {
                     continue;
                 }
                 MajDebug.LogDebug($"[MaiChart Scanner][{thisDir.Name}]Enter folder: {songDir.Name}");
-                var files = songDir.GetFiles();
+                var files = new StorageDirectory(collectionDirectory.FileSystem, songDir.Location)
+                    .EnumerateEntries().Where(x => !x.IsDirectory).ToArray();
                 var maidataFile = files.FirstOrDefault(o => o.Name.ToLower() is "maidata.txt");
                 var trackFile = files.FirstOrDefault(o => o.Name.ToLower() is "track.opus" or "track.mp3" or "track.ogg" or "track.aac" or "track.wav");
 
@@ -546,7 +556,7 @@ namespace MajdataPlay
                     try
                     {
                         MajDebug.LogDebug($"[MaiChart Scanner][{thisDir.Name}/{songDir.Name}]Parsing");
-                        var chart = await SongDetail.ParseAsync(songDir.FullName);
+                        var chart = await SongDetail.ParseAsync(songDir.Location);
                         Interlocked.Increment(ref _parsedChartCount);
                         MajDebug.LogDebug($"[MaiChart Scanner][{thisDir.Name}/{songDir.Name}]Successfully parsed");
                         return chart;
@@ -586,10 +596,7 @@ namespace MajdataPlay
         {
             var name = api.Name;
             var cachePath = Path.Combine(MajEnv.CachePath, "Net", name);
-            if(!Directory.Exists(cachePath))
-            {
-                Directory.CreateDirectory(cachePath);
-            }
+            FileSystem.CreateLocalDirectory(cachePath);
             var collection = SongCollection.Empty(cachePath, name);
             var apiroot = api.Url;
 
@@ -625,15 +632,12 @@ namespace MajdataPlay
                 MajDebug.LogInfo("Loaded online charts list:" + gameList.Length);
                 Interlocked.Add(ref _totalChartCount, chartList.Length);
                 var cacheFolder = Path.Combine(MajEnv.CachePath, $"Net/{name}");
-                if (!Directory.Exists(cacheFolder))
-                {
-                    Directory.CreateDirectory(cacheFolder);
-                }
+                FileSystem.CreateLocalDirectory(cacheFolder);
                 return new OnlineSongCollection(api, cachePath, name, gameList.ToArray());
             }
             catch (OperationCanceledException)
             {
-                if (!Directory.Exists(cachePath))
+                if (!FileSystem.OpenDirectory(cachePath).Exists)
                 {
                     return collection;
                 }
@@ -713,7 +717,10 @@ namespace MajdataPlay
                     return;
                 }
                 var hashSet = _myFavorite.ExportHashSet();
-                File.WriteAllText(MY_FAVORITE_EXPORT_PATH,
+                var exportDirectory = FileSystem.OpenDirectory(MajEnv.ChartPath);
+                var exportFile = exportDirectory.FindFile(MY_FAVORITE_FILENAME)
+                    ?? exportDirectory.CreateFile(MY_FAVORITE_FILENAME, "application/json");
+                exportFile.WriteAllText(
                                   Serializer.Json.Serialize(new DanInfo()
                                   {
                                       Name = "My Favorites",
@@ -776,30 +783,33 @@ namespace MajdataPlay
             if (_favDb is null)
             {
                 var dbPath = MajEnv.FavoriteDBPath;
-                var isDbExists = File.Exists(dbPath);
+                var isDbExists = FileSystem.OpenFile(dbPath).Exists;
                 _favDb = new SQLiteAsyncConnection(dbPath, SQLiteOpenFlags.ReadWrite | SQLiteOpenFlags.Create | SQLiteOpenFlags.FullMutex);
                 GameManager.OnAppQuit += OnAppQuit;
                 await _favDb.CreateTableAsync<FavoriteHashDB>();
-                if (!isDbExists && File.Exists(MY_FAVORITE_STORAGE_PATH))
+                if (!isDbExists && FileSystem.OpenFile(MY_FAVORITE_STORAGE_PATH).Exists)
                 {
                     await MigrateFavFromJsonAsync();
                 }
             }
 
             // Load export JSON (user-facing, stays as JSON for portability)
-            if (File.Exists(MY_FAVORITE_EXPORT_PATH))
+            var exportFile = FileSystem.OpenFile(MY_FAVORITE_EXPORT_PATH);
+            if (exportFile.Exists)
             {
                 bool result;
                 Exception? exception;
-                (result, _userFavorites, exception) = await Serializer.Json.TryDeserializeAsync<DanInfo>(File.OpenRead(MY_FAVORITE_EXPORT_PATH));
+                using var exportStream = exportFile.OpenRead();
+                (result, _userFavorites, exception) = await Serializer.Json.TryDeserializeAsync<DanInfo>(exportStream);
                 if (!result)
                 {
-                    var bakPath = $"{MY_FAVORITE_EXPORT_PATH}.bak";
-                    while (File.Exists(bakPath))
+                    var exportDirectory = FileSystem.OpenDirectory(MajEnv.ChartPath);
+                    var backupName = $"{MY_FAVORITE_FILENAME}.bak";
+                    while (exportDirectory.FindFile(backupName) is not null)
                     {
-                        bakPath = $"{bakPath}.bak";
+                        backupName = $"{backupName}.bak";
                     }
-                    File.Copy(MY_FAVORITE_EXPORT_PATH, bakPath);
+                    FileSystem.CopyLocalFile(exportFile.Location, Path.Combine(exportDirectory.Location, backupName));
                     MajDebug.LogError($"Failed to load favorites\nPath: {MY_FAVORITE_EXPORT_PATH}\nException: {exception}");
                 }
             }
@@ -819,7 +829,9 @@ namespace MajdataPlay
         {
             try
             {
-                var (result, storageFav, exception) = await Serializer.Json.TryDeserializeAsync<HashSet<string>>(File.OpenRead(MY_FAVORITE_STORAGE_PATH));
+                var storageFile = FileSystem.OpenFile(MY_FAVORITE_STORAGE_PATH);
+                using var storageStream = storageFile.OpenRead();
+                var (result, storageFav, exception) = await Serializer.Json.TryDeserializeAsync<HashSet<string>>(storageStream);
                 if (result && storageFav is not null)
                 {
                     await _favDb!.RunInTransactionAsync(conn =>
@@ -831,12 +843,12 @@ namespace MajdataPlay
                         }
                     });
                 }
-                var bakPath = MY_FAVORITE_STORAGE_PATH + ".bak";
                 try
                 {
-                    if (File.Exists(bakPath))
-                        File.Delete(bakPath);
-                    File.Move(MY_FAVORITE_STORAGE_PATH, bakPath);
+                    var storageDirectory = FileSystem.OpenDirectory(Path.GetDirectoryName(MY_FAVORITE_STORAGE_PATH)!);
+                    var backupName = Path.GetFileName(MY_FAVORITE_STORAGE_PATH) + ".bak";
+                    storageDirectory.FindFile(backupName)?.Delete();
+                    storageFile.Rename(backupName);
                     MajDebug.LogInfo("Migrated favorites from legacy JSON to SQLite, old file backed up.");
                 }
                 catch (Exception ex)

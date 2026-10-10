@@ -1,11 +1,14 @@
 using Cysharp.Threading.Tasks;
 using MajdataPlay.Diagnostics;
 using MajdataPlay.FFmpeg;
+using MajdataPlay.IO.Storage;
 using System.Collections;
 using System.Collections.Generic;
 using System.IO;
 using UnityEngine;
 using UnityEngine.Serialization;
+
+#nullable enable
 
 namespace MajdataPlay.UI
 {
@@ -53,7 +56,7 @@ namespace MajdataPlay.UI
             {
                 path = Path.Combine(MajEnv.AssetsPath, videoPath + ext);
 
-                if(File.Exists(path))
+                if(FileSystem.OpenFile(path).Exists)
                 {
                     isValid = true;
                     break;

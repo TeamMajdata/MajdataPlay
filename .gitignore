@@ -112,3 +112,5 @@ out.log
 
 # Independent storage validation harness (not a Unity-generated project).
 !/Tools/Tests/FileSystemValidation/FileSystemValidation.csproj
+!/Tools/Tests/ChartStorageValidation/ChartStorageValidation.csproj
+!/Tools/Tests/ResourceStorageValidation/ResourceStorageValidation.csproj

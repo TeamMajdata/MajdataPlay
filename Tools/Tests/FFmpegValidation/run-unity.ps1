@@ -77,6 +77,12 @@ if (-not $SkipBuild) {
     New-Item -ItemType Directory -Path (Join-Path $project 'Assets/Plugins/MajdataPlay') -Force | Out-Null
     New-Item -ItemType Directory -Path (Join-Path $project 'Assets/Packages') -Force | Out-Null
     Copy-Item -LiteralPath (Join-Path $repo 'Assets/Plugins/MajdataPlay/Diagnostics') -Destination (Join-Path $project 'Assets/Plugins/MajdataPlay') -Recurse -Force
+    # Stage only the portable storage assembly required by FFmpeg local output.
+    $storageDestination = Join-Path $project 'Assets/Plugins/MajdataPlay/IO'
+    New-Item -ItemType Directory -Path $storageDestination -Force | Out-Null
+    foreach ($storageName in @('MajdataPlay.IO.asmdef', 'MajdataPlay.IO.asmdef.meta', 'Storage', 'Storage.meta')) {
+        Copy-Item -LiteralPath (Join-Path $repo "Assets/Plugins/MajdataPlay/IO/$storageName") -Destination $storageDestination -Recurse -Force
+    }
     Copy-Item -LiteralPath (Join-Path $repo 'Assets/Plugins/ZString') -Destination (Join-Path $project 'Assets/Plugins') -Recurse -Force
     Copy-Item -LiteralPath (Join-Path $repo 'Assets/Packages/PolySharp.1.15.0') -Destination (Join-Path $project 'Assets/Packages') -Recurse -Force
     Copy-Item -LiteralPath (Join-Path $repo 'Assets/Packages/System.Runtime.CompilerServices.Unsafe.6.1.2') -Destination (Join-Path $project 'Assets/Packages') -Recurse -Force

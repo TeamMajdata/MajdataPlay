@@ -18,6 +18,12 @@ if (-not (Test-Path -LiteralPath $version) -or (Get-Content -LiteralPath $versio
 }
 Copy-Item -LiteralPath (Join-Path $repo 'Assets/Plugins/MajdataPlay/FFmpeg/Runtime') -Destination (Join-Path $project 'Assets/Plugins/FFmpeg') -Recurse -Force
 Copy-Item -LiteralPath (Join-Path $repo 'Assets/Plugins/MajdataPlay/FFmpeg/Editor') -Destination (Join-Path $project 'Assets/Plugins/FFmpeg') -Recurse -Force
+# Stage only the portable storage assembly required by FFmpeg local output.
+$storageDestination = Join-Path $project 'Assets/Plugins/MajdataPlay/IO'
+New-Item -ItemType Directory -Path $storageDestination -Force | Out-Null
+foreach ($storageName in @('MajdataPlay.IO.asmdef', 'MajdataPlay.IO.asmdef.meta', 'Storage', 'Storage.meta')) {
+    Copy-Item -LiteralPath (Join-Path $repo "Assets/Plugins/MajdataPlay/IO/$storageName") -Destination $storageDestination -Recurse -Force
+}
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'UnityCameraEditorSmoke.cs') -Destination (Join-Path $project 'Assets/Editor/UnityCameraEditorSmoke.cs') -Force
 $utf8 = New-Object Text.UTF8Encoding($false)
 $definition = Join-Path $project 'Assets/Editor/FFmpeg.Player.Smoke.Editor.asmdef'

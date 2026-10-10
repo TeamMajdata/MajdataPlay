@@ -1,6 +1,7 @@
 using Cysharp.Threading.Tasks;
 using MajdataPlay.Buffers;
 using MajdataPlay.Drawing;
+using MajdataPlay.IO.Storage;
 using SkiaSharp;
 using SkiaSharp.Unity;
 using System;
@@ -56,16 +57,29 @@ namespace MajdataPlay.Drawing
         }
         public static Sprite LoadFromFileWithBorder(string filePath, Vector4 border, bool markNonReadable = true)
         {
-            var fileInfo = new FileInfo(filePath);
-            if (!fileInfo.Exists)
+            var file = FileSystem.OpenFile(filePath);
+            if (!file.Exists)
             {
                 return EmptySprite;
             }
             try
             {
-                using var buffer = new NativeArray<byte>((int)fileInfo.Length, Allocator.Temp);
-                using var fileStream = fileInfo.OpenRead();
-                fileStream.Read(buffer.AsSpan());
+                if (file.Entry?.Length is not long length)
+                {
+                    return LoadFromMemoryWithBorder(file.ReadAllBytes(), border, markNonReadable);
+                }
+                using var buffer = new NativeArray<byte>(checked((int)length), Allocator.Temp);
+                using var fileStream = file.OpenRead();
+                var remaining = buffer.AsSpan();
+                while (!remaining.IsEmpty)
+                {
+                    var read = fileStream.Read(remaining);
+                    if (read == 0)
+                    {
+                        throw new EndOfStreamException("The sprite file ended before its reported length.");
+                    }
+                    remaining = remaining.Slice(read);
+                }
 
                 return LoadFromMemoryWithBorder(buffer.AsReadOnlySpan(), border, markNonReadable);
             }
@@ -107,8 +121,8 @@ namespace MajdataPlay.Drawing
                                                                      bool markNonReadable = true, 
                                                                      CancellationToken token = default)
         {
-            var fileInfo = new FileInfo(filePath);
-            if (!fileInfo.Exists)
+            var file = FileSystem.OpenFile(filePath);
+            if (!file.Exists)
             {
                 await UniTask.SwitchToMainThread();
                 return EmptySprite;
@@ -116,12 +130,25 @@ namespace MajdataPlay.Drawing
             try
             {
                 
-                var length = (int)fileInfo.Length;
-                using var buffer = new NativeArray<byte>(length, Allocator.Persistent);
+                if (file.Entry?.Length is not long length)
+                {
+                    var bytes = await file.ReadAllBytesAsync(token);
+                    return await LoadFromMemoryWithBorderAsync(bytes, border, markNonReadable, token);
+                }
+                using var buffer = new NativeArray<byte>(checked((int)length), Allocator.Persistent);
                 var bufferMemory = buffer.AsMemory();
-                using var fileStream = fileInfo.OpenRead();
+                using var fileStream = file.OpenRead();
 
-                await fileStream.ReadAsync(bufferMemory, token);
+                var remaining = bufferMemory;
+                while (!remaining.IsEmpty)
+                {
+                    var read = await fileStream.ReadAsync(remaining, token);
+                    if (read == 0)
+                    {
+                        throw new EndOfStreamException("The sprite file ended before its reported length.");
+                    }
+                    remaining = remaining.Slice(read);
+                }
 
                 return await LoadFromMemoryWithBorderAsync(bufferMemory, border, markNonReadable, token);
             }

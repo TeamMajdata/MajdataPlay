@@ -3,6 +3,7 @@ using AOT;
 using FFmpeg.AutoGen;
 using MajdataPlay.Diagnostics;
 using MajdataPlay.FFmpeg.Internal;
+using MajdataPlay.IO.Storage;
 using System;
 using System.Globalization;
 using System.IO;
@@ -59,7 +60,7 @@ namespace MajdataPlay.FFmpeg
         /// <summary>Owns the custom seekable local-file AVIO context.</summary>
         private AVIOContext* _io;
         /// <summary>Owns the output file opened with CreateNew to prevent overwrite races.</summary>
-        private FileStream? _output;
+        private Stream? _output;
         /// <summary>Keeps this instance reachable by native file callbacks.</summary>
         private GCHandle _selfHandle;
         /// <summary>Stores cancellation for encoding and local I/O.</summary>
@@ -667,7 +668,7 @@ namespace MajdataPlay.FFmpeg
         private void OpenLocalFile(string path)
         {
             _cancellation.ThrowIfCancellationRequested();
-            _output = new FileStream(path, FileMode.CreateNew, FileAccess.Write, FileShare.Read, 65536);
+            _output = FileSystem.OpenLocalWrite(path);
             _selfHandle = GCHandle.Alloc(this);
             var buffer = (byte*)ffmpeg.av_malloc(65536);
             if (buffer == null)

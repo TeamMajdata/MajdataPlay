@@ -1,4 +1,5 @@
 using MajdataPlay.Extensions;
+using MajdataPlay.IO.Storage;
 using MajdataPlay.Numerics;
 using System;
 using System.Buffers;
@@ -108,23 +109,23 @@ namespace MajdataPlay.Collections
             }
             else
             {
-                if(!Directory.Exists(dirPath))
+                var collectionDirectory = FileSystem.OpenDirectory(dirPath);
+                if (!collectionDirectory.Exists)
                 {
                     throw new ArgumentException($"Directory '{dirPath}' is not exist.");
                 }
                 IsVirtual = false;
                 Path = dirPath!;
-                var flagDirPath = System.IO.Path.Combine(dirPath!, ".MajdataPlay");
-                var flagFilePath = System.IO.Path.Combine(flagDirPath, "id");
-
-                if (!Directory.Exists(flagDirPath))
+                var flagDirectory = collectionDirectory.FindDirectory(".MajdataPlay");
+                if (flagDirectory is null)
                 {
-                    var info = Directory.CreateDirectory(flagDirPath);
-                    info.Attributes |= FileAttributes.Hidden;
+                    flagDirectory = collectionDirectory.CreateDirectory(".MajdataPlay");
+                    FileSystem.SetLocalAttributes(flagDirectory.Location, FileAttributes.Directory | FileAttributes.Hidden);
                 }
-                if (File.Exists(flagFilePath))
+                var flagFile = flagDirectory.FindFile("id");
+                if (flagFile is not null)
                 {
-                    var guidStr = File.ReadAllText(flagFilePath);
+                    var guidStr = flagFile.ReadAllText();
                     if(Guid.TryParse(guidStr, out var guid))
                     {
                         Id = guid;
@@ -132,7 +133,7 @@ namespace MajdataPlay.Collections
                     else
                     {
                         guid = Guid.NewGuid();
-                        File.WriteAllText(flagFilePath, guid.ToString());
+                        flagFile.WriteAllText(guid.ToString());
                         Id = guid;
                     }
                 }
@@ -140,7 +141,7 @@ namespace MajdataPlay.Collections
                 {
                     var guid = Guid.NewGuid();
                     Id = guid;
-                    File.WriteAllText(flagFilePath, guid.ToString());
+                    flagDirectory.CreateFile("id", "text/plain").WriteAllText(guid.ToString());
                 }
             }
             Name = name;

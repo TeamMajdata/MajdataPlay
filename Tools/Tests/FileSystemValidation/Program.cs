@@ -39,6 +39,7 @@ namespace MajdataPlay.Tests.FileSystemValidation
                 ("facade: hidden local backend and automatic selection", TestFacadeEncapsulation),
                 ("local: facade, creation, encoded file URIs", TestLocalLocations),
                 ("local: bytes, existing-only writes, append and truncate", TestLocalByteIO),
+                ("local: application creation, move, replace and metadata", TestLocalMigrationOperations),
                 ("local: non-ASCII text, BOM and explicit encodings", TestLocalTextIO),
                 ("local: missing entries and type collisions", TestLocalErrors),
                 ("local: immediate children, lookup and rename", TestLocalChildren),
@@ -215,6 +216,120 @@ namespace MajdataPlay.Tests.FileSystemValidation
             Check(StorageFacade.OpenDirectory(directoryUri).FindFile(Entry(file).Name) is not null, "encoded directory URI finds its immediate child");
             Check(StorageFacade.CreateLocalDirectory(path).Exists, "local directory creation is idempotent");
             Check(StorageFacade.OpenDirectory(path).Exists, "plain native directory path dispatch succeeds");
+            return Task.CompletedTask;
+        }
+
+        /// <summary>Checks the local operations required by application storage migrations.</summary>
+        /// <returns>A completed task after checking creation, output streams, moves, replacement and metadata.</returns>
+        /// <exception cref="InvalidOperationException">An application storage contract regresses.</exception>
+        private static Task TestLocalMigrationOperations()
+        {
+            using var workspace = new TemporaryWorkspace();
+            var directory = workspace.CreateLocalDirectory();
+            var path = Path.Combine(directory.Location, "output.txt");
+            var file = StorageFacade.CreateLocalFile(new Uri(path).AbsoluteUri);
+            file.WriteAllText("original");
+            Throws<IOException>(() =>
+            {
+                StorageFacade.CreateLocalFile(path);
+            }, "local creation does not overwrite by default");
+            Check(file.ReadAllText() == "original", "failed exclusive creation preserves contents");
+            using (var existingReader = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+            {
+                using var output = StorageFacade.OpenLocalWrite(path, overwrite: true);
+                output.WriteByte((byte)'x');
+            }
+            Check(file.ReadAllText() == "x", "single-open overwrite works with existing shared readers");
+            using (var output = StorageFacade.OpenLocalWrite(path, overwrite: true))
+            {
+                Check(output.CanSeek, "native encoder output is seekable");
+                output.WriteByte((byte)'a');
+                output.Flush();
+                using var reader = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+                Check(reader.ReadByte() == 'a', "output permits a concurrent reader");
+            }
+            using (var append = StorageFacade.OpenLocalWrite(path, append: true))
+            {
+                append.WriteByte((byte)'b');
+            }
+            Check(file.ReadAllText() == "ab", "local append preserves previous contents");
+            var timestamp = new DateTime(2020, 2, 3, 4, 5, 6, DateTimeKind.Utc);
+            StorageFacade.SetLocalLastWriteTime(file.Location, timestamp);
+            var copied = StorageFacade.CopyLocalFile(file.Location, Path.Combine(directory.Location, "copy.txt"));
+            Check(copied.ReadAllText() == "ab" && Entry(copied).LastWriteTimeUtc == timestamp,
+                "native local copies preserve file contents and modification time");
+            Throws<IOException>(() =>
+            {
+                StorageFacade.CopyLocalFile(file.Location, copied.Location);
+            }, "local copies reject destination collisions without overwrite");
+            file.WriteAllText("overwritten");
+            StorageFacade.CopyLocalFile(file.Location, copied.Location, overwrite: true);
+            Check(copied.ReadAllText() == "overwritten", "local copy permits explicit overwrite");
+            Check(StorageFacade.CreateLocalFile(path, overwrite: true).ReadAllBytes().Length == 0,
+                "explicit overwrite truncates existing content");
+            var movedDirectory = directory.CreateDirectory("moved");
+            var movedPath = Path.Combine(movedDirectory.Location, "output.txt");
+            var moved = StorageFacade.MoveLocalFile(path, new Uri(movedPath).AbsoluteUri);
+            Check(!file.Exists && moved.Exists && moved.Location == movedPath, "file move returns its authoritative destination");
+            moved.WriteAllText("before");
+            var replacement = directory.CreateFile("replacement.txt");
+            replacement.WriteAllText("after");
+            var backupPath = Path.Combine(directory.Location, "backup.txt");
+            var replaced = StorageFacade.ReplaceLocalFile(replacement.Location, moved.Location, backupPath);
+            Check(replaced.ReadAllText() == "after" && !replacement.Exists, "replacement consumes source and updates destination");
+            Check(StorageFacade.OpenFile(backupPath).ReadAllText() == "before", "replacement backup preserves original content");
+            var renamedPath = Path.Combine(directory.Location, "renamed");
+            var renamed = StorageFacade.MoveLocalDirectory(movedDirectory.Location, renamedPath);
+            Check(!movedDirectory.Exists && renamed.FindFile("output.txt")?.ReadAllText() == "after",
+                "directory move preserves its children");
+            Check(Entry(renamed).CreationTimeUtc?.Kind == DateTimeKind.Utc, "local creation timestamps are UTC");
+            if (OperatingSystem.IsWindows())
+            {
+                StorageFacade.SetLocalAttributes(renamed.Location, FileAttributes.Directory | FileAttributes.Hidden | FileAttributes.System);
+                Check(Entry(renamed).IsHidden && Entry(renamed).IsSystem, "hidden and system flags are retained in metadata");
+                StorageFacade.SetLocalAttributes(renamed.Location, FileAttributes.Directory);
+            }
+            Throws<DirectoryNotFoundException>(() =>
+            {
+                StorageFacade.CreateLocalFile(Path.Combine(directory.Location, "missing", "file.txt"));
+            }, "local file creation never creates missing parents");
+            var content = "content://filesystem.validation/document/opaque%2Fname";
+            Throws<NotSupportedException>(() =>
+            {
+                StorageFacade.CreateLocalFile(content);
+            }, "local creation rejects content URIs");
+            Throws<NotSupportedException>(() =>
+            {
+                using var output = StorageFacade.OpenLocalWrite(content);
+            }, "local output rejects content URIs");
+            Throws<NotSupportedException>(() =>
+            {
+                StorageFacade.MoveLocalFile(replaced.Location, content);
+            }, "local file moves reject content URIs");
+            Throws<NotSupportedException>(() =>
+            {
+                StorageFacade.MoveLocalDirectory(renamed.Location, content);
+            }, "local directory moves reject content URIs");
+            Throws<NotSupportedException>(() =>
+            {
+                StorageFacade.ReplaceLocalFile(content, replaced.Location);
+            }, "local replacement rejects content URIs");
+            Throws<NotSupportedException>(() =>
+            {
+                StorageFacade.SetLocalAttributes(content, FileAttributes.Hidden);
+            }, "local attributes reject content URIs");
+            Throws<NotSupportedException>(() =>
+            {
+                StorageFacade.SetLocalLastWriteTime(content, timestamp);
+            }, "local timestamps reject content URIs");
+            Throws<NotSupportedException>(() =>
+            {
+                StorageFacade.CopyLocalFile(content, copied.Location);
+            }, "local copies reject content URIs");
+            Throws<ArgumentException>(() =>
+            {
+                _ = new FileSystemEntry(path, "file", false, creationTimeUtc: DateTime.Now);
+            }, "creation timestamps require UTC");
             return Task.CompletedTask;
         }
 

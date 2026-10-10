@@ -30,6 +30,7 @@ namespace MajdataPlay.IO.Storage
                 FileSystemInfo info = isDirectory ? new DirectoryInfo(path) : new FileInfo(path);
                 long? length = null;
                 DateTime? lastWriteTimeUtc = null;
+                DateTime? creationTimeUtc = null;
                 if (!isSymbolicLink)
                 {
                     if (info is FileInfo fileInfo)
@@ -37,8 +38,12 @@ namespace MajdataPlay.IO.Storage
                         length = fileInfo.Length;
                     }
                     lastWriteTimeUtc = info.LastWriteTimeUtc;
+                    creationTimeUtc = info.CreationTimeUtc;
                 }
-                return new FileSystemEntry(path, info.Name, isDirectory, length, lastWriteTimeUtc, isSymbolicLink);
+                return new FileSystemEntry(path, info.Name, isDirectory, length, lastWriteTimeUtc, isSymbolicLink,
+                    creationTimeUtc: creationTimeUtc,
+                    isHidden: (attributes & FileAttributes.Hidden) != 0,
+                    isSystem: (attributes & FileAttributes.System) != 0);
             }
             catch (FileNotFoundException)
             {

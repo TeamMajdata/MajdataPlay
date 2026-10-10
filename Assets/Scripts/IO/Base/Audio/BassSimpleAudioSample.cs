@@ -1,11 +1,11 @@
 using MajdataPlay.Diagnostics;
 using MajdataPlay.Extensions;
+using MajdataPlay.IO.Storage;
 using MajdataPlay.Numerics;
 using MajdataPlay.Utils;
 using ManagedBass;
 using ManagedBass.Fx;
 using System;
-using System.IO;
 using System.Runtime.InteropServices;
 using System.Threading.Tasks;
 #nullable enable
@@ -254,13 +254,13 @@ namespace MajdataPlay.IO
         }
         public static BassSimpleAudioSample Create(string path, bool normalize = true, bool speedChange = false)
         {
-            var buf = File.ReadAllBytes(path);
+            var buf = FileSystem.OpenFile(path).ReadAllBytes();
 
             return Create(buf, normalize, speedChange);
         }
         public static async ValueTask<BassSimpleAudioSample> CreateAsync(string path, bool normalize = true, bool speedChange = false)
         {
-            var buf = await File.ReadAllBytesAsync(path);
+            var buf = await FileSystem.OpenFile(path).ReadAllBytesAsync();
 
             return Create(buf, normalize, speedChange);
         }

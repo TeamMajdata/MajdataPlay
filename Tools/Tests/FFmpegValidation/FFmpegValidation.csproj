@@ -20,6 +20,7 @@
     <Compile Include="FrameEvictionChecks.cs" />
     <Compile Include="GpuWaitChecks.cs" />
     <Compile Include="../../../Assets/Plugins/MajdataPlay/FFmpeg/Runtime/**/*.cs" />
+    <Compile Include="../../../Assets/Plugins/MajdataPlay/IO/Storage/*.cs" />
     <Compile Include="../../../Assets/Plugins/MajdataPlay/Diagnostics/**/*.cs" />
     <Compile Include="../../../Assets/Plugins/ZString/**/*.cs" />
     <Compile Include="../../../ThirdParty/FFmpeg.AutoGen/Unity/Runtime/**/*.cs" />

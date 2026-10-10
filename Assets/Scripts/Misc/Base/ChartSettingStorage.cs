@@ -1,5 +1,6 @@
 ﻿using Cysharp.Threading.Tasks;
 using MajdataPlay.Diagnostics;
+using MajdataPlay.IO.Storage;
 using MajdataPlay.Utils;
 using System;
 using System.Collections.Generic;
@@ -35,16 +36,18 @@ namespace MajdataPlay.Settings
                 }
                 await UniTask.SwitchToThreadPool();
                 GameManager.OnSave += OnSave;
-                if (!File.Exists(STORAGE_PATH))
+                var storageFile = FileSystem.OpenFile(STORAGE_PATH);
+                if (!storageFile.Exists)
                 {
                     return;
                 }
-                using var fileStream = File.OpenRead(STORAGE_PATH);
+                using var fileStream = storageFile.OpenRead();
                 var (isSuccess, data, exception) = await Serializer.Json.TryDeserializeAsync<ChartSetting[]>(fileStream);
                 if (!isSuccess)
                 {
-                    var path = Path.Combine(STORAGE_PATH, $"{DateTime.Now:yyyy-MM-dd-HH-mm-ss}.bak");
-                    File.Copy(STORAGE_PATH, path);
+                    var storageDirectory = FileSystem.OpenDirectory(Path.GetDirectoryName(STORAGE_PATH)!);
+                    var backupPath = Path.Combine(storageDirectory.Location, $"{Path.GetFileName(STORAGE_PATH)}.{DateTime.Now:yyyy-MM-dd-HH-mm-ss}.bak");
+                    FileSystem.CopyLocalFile(storageFile.Location, backupPath);
                     MajDebug.LogError($"Failed to load chart settings\nPath: {STORAGE_PATH}\nException: {exception}");
                 }
                 else
@@ -169,7 +172,10 @@ namespace MajdataPlay.Settings
             {
                 @lock.Enter(ref isLocked);
                 var json = Serializer.Json.Serialize(_storage.Values);
-                File.WriteAllText(STORAGE_PATH, json);                
+                var storageDirectory = FileSystem.OpenDirectory(Path.GetDirectoryName(STORAGE_PATH)!);
+                var storageFile = storageDirectory.FindFile(Path.GetFileName(STORAGE_PATH))
+                    ?? storageDirectory.CreateFile(Path.GetFileName(STORAGE_PATH), "application/json");
+                storageFile.WriteAllText(json);
             }
             catch(Exception e)
             {

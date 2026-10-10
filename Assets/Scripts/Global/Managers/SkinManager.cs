@@ -1,15 +1,17 @@
 ﻿using Cysharp.Threading.Tasks;
 using MajdataPlay.Collections;
 using MajdataPlay.Diagnostics;
+using MajdataPlay.IO.Storage;
 using MajdataPlay.Scenes.Game.Notes.Skins;
 using MajdataPlay.Utils;
 using SkiaSharp;
 using System;
 using System.Collections.Generic;
-using System.IO;
 using System.Runtime.CompilerServices;
 using System.Threading.Tasks;
 using UnityEngine;
+
+#nullable enable
 
 namespace MajdataPlay
 {
@@ -119,16 +121,16 @@ namespace MajdataPlay
         {
             var path = MajEnv.SkinPath;
             var selectedSkinName = MajEnv.Settings.Display.Skin;
-            var dicts = Directory.GetDirectories(path);
-            foreach (var (i, skinPath) in dicts.WithIndex())
+            var directories = FileSystem.OpenDirectory(path).EnumerateDirectories();
+            foreach (var directory in directories)
             {
                 try
                 {
-                    _loadedSkins.Add(CustomSkin.Create(skinPath));
+                    _loadedSkins.Add(CustomSkin.Create(directory.Location));
                 }
                 catch(Exception e)
                 {
-                    MajDebug.LogError($"Failed to load skin from {dicts[i]}");
+                    MajDebug.LogError($"Failed to load skin from {directory.Location}");
                     MajDebug.LogException(e);
                 }
             }

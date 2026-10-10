@@ -3,6 +3,7 @@ using Cysharp.Threading.Tasks;
 using MajdataPlay.Collections;
 using MajdataPlay.i18n;
 using MajdataPlay.IO;
+using MajdataPlay.IO.Storage;
 using MajdataPlay.Scenes.Test;
 using MajdataPlay.Settings;
 using MajdataPlay.Timer;
@@ -488,29 +489,35 @@ namespace MajdataPlay
                 }
                 _importTask = Import();
             }
+            /// <summary>Imports queued local chart archives with traversal protection and storage-backed extraction.</summary>
+            /// <returns>An operation that completes after importing archives and refreshing the chart list.</returns>
             static async ValueTask Import()
             {
+                // Copy local extracted files with their original attributes and modification times.
                 static void CopyDirectory(string sourceDir, string destDir)
                 {
-                    var dirs = new Stack<(string src, string dst)>();
-                    dirs.Push((sourceDir, destDir));
+                    var dirs = new Stack<(StorageDirectory source, StorageDirectory destination)>();
+                    dirs.Push((FileSystem.OpenDirectory(sourceDir), FileSystem.CreateLocalDirectory(destDir)));
 
                     while (dirs.Count > 0)
                     {
                         var (currentSource, currentDest) = dirs.Pop();
 
-                        Directory.CreateDirectory(currentDest);
-
-                        foreach (var file in Directory.GetFiles(currentSource))
+                        foreach (var entry in currentSource.EnumerateEntries())
                         {
-                            var destFile = Path.Combine(currentDest, Path.GetFileName(file));
-                            File.Copy(file, destFile, true);
-                        }
-
-                        foreach (var subDir in Directory.GetDirectories(currentSource))
-                        {
-                            var newDest = Path.Combine(currentDest, Path.GetFileName(subDir));
-                            dirs.Push((subDir, newDest));
+                            if (entry.IsDirectory)
+                            {
+                                dirs.Push((
+                                    new StorageDirectory(currentSource.FileSystem, entry.Location),
+                                    currentDest.CreateDirectory(entry.Name)));
+                            }
+                            else
+                            {
+                                FileSystem.CopyLocalFile(
+                                    entry.Location,
+                                    Path.Combine(currentDest.Location, entry.Name),
+                                    overwrite: true);
+                            }
                         }
                     }
                 }
@@ -530,12 +537,12 @@ namespace MajdataPlay
                     await MajInstances.SceneSwitcher.SwitchSceneAsync("Empty", false);
                     await UniTask.Delay(300);
                 }
-                Directory.CreateDirectory(_importRoot);
+                FileSystem.CreateLocalDirectory(_importRoot);
                 while (_pendingImportTasks.TryDequeue(out var tempFilePath))
                 {
                     MajDebug.LogDebug("[ZipImporter] Got file: " + tempFilePath);
 
-                    if (!File.Exists(tempFilePath))
+                    if (!FileSystem.OpenFile(tempFilePath).Exists)
                     {
                         MajDebug.LogError("[ZipImporter] File not found: " + tempFilePath);
                         continue;
@@ -551,8 +558,9 @@ namespace MajdataPlay
                     
                     try
                     {
-                        var dirInfo = Directory.CreateDirectory(tempOutDir);
-                        using var archive = ZipFile.OpenRead(tempFilePath);
+                        var outputDirectory = FileSystem.CreateLocalDirectory(tempOutDir);
+                        using var archiveStream = FileSystem.OpenFile(tempFilePath).OpenRead();
+                        using var archive = new ZipArchive(archiveStream, ZipArchiveMode.Read);
                         var totalSize = archive.Entries.Sum(x => x.Length);
                         var decompressedSize = 0L;
                         var destRootFull = Path.GetFullPath(tempOutDir);
@@ -578,20 +586,27 @@ namespace MajdataPlay
                             var dir = Path.GetDirectoryName(fullPath);
                             if (!string.IsNullOrEmpty(dir))
                             {
-                                Directory.CreateDirectory(dir);
+                                FileSystem.CreateLocalDirectory(dir);
                             }
 
-                            if (File.Exists(fullPath))
+                            if (FileSystem.OpenFile(fullPath).Exists)
                             {
-                                File.Delete(fullPath);
+                                FileSystem.OpenFile(fullPath).Delete();
                             }
 
-                            entry.ExtractToFile(fullPath);
+                            using (var entryStream = entry.Open())
+                            using (var outputStream = FileSystem.CreateLocalFile(fullPath).OpenWrite())
+                            {
+                                entryStream.CopyTo(outputStream);
+                            }
+                            FileSystem.SetLocalLastWriteTime(fullPath, entry.LastWriteTime.DateTime);
                             decompressedSize += entry.Length;
                             MajInstances.SceneSwitcher.SetLoadingText($"Extracting...\n{decompressedSize * 100 / (double)totalSize:F2}%");
                             await UniTask.Yield();
                         }
-                        var subDirs = dirInfo.GetDirectories();
+                        var subDirs = outputDirectory.EnumerateEntries()
+                                                     .Where(entry => entry.IsDirectory)
+                                                     .ToArray();
                         if (subDirs.Length == 0)
                         {
                             continue;
@@ -599,47 +614,56 @@ namespace MajdataPlay
                         Parallel.For(0, subDirs.Length, j =>
                         {
                             var dir = subDirs[j];
-                            if (dir.Attributes.HasFlag(FileAttributes.Hidden) || dir.Attributes.HasFlag(FileAttributes.System) || dir.Name.StartsWith("."))
+                            if (dir.IsHidden || dir.IsSystem || dir.Name.StartsWith("."))
                             {
                                 return;
                             }
-                            var subDirCount = dir.EnumerateDirectories()
-                                                 .Count(x => !(x.Attributes.HasFlag(FileAttributes.Hidden) || x.Attributes.HasFlag(FileAttributes.System) || x.Name.StartsWith(".")));
+                            var directory = new StorageDirectory(outputDirectory.FileSystem, dir.Location);
+                            var subDirCount = directory.EnumerateEntries()
+                                                      .Count(entry => entry.IsDirectory &&
+                                                          !(entry.IsHidden || entry.IsSystem || entry.Name.StartsWith(".")));
 
                             if (subDirCount == 0)
                             {
                                 var dirName = dir.Name;
                                 var dstPath = Path.Combine(_importRoot, dirName);
-                                for (var i = 0; Directory.Exists(dstPath); i++)
+                                for (var i = 0; FileSystem.OpenDirectory(dstPath).Exists; i++)
                                 {
                                     dstPath = Path.Combine(_importRoot, $"{dirName} ({i + 1})");
                                 }
-                                CopyDirectory(dir.FullName, dstPath);
+                                CopyDirectory(dir.Location, dstPath);
                             }
                             else
                             {
                                 var dirName = dir.Name;
                                 var dstPath = Path.Combine(MajEnv.ChartPath, dirName);
-                                for (var i = 0; Directory.Exists(dstPath); i++)
+                                for (var i = 0; FileSystem.OpenDirectory(dstPath).Exists; i++)
                                 {
                                     dstPath = Path.Combine(MajEnv.ChartPath, $"{dirName} ({i + 1})");
                                 }
-                                CopyDirectory(dir.FullName, dstPath);
+                                CopyDirectory(dir.Location, dstPath);
                             }
-                            Directory.Delete(dir.FullName, true);
+                            directory.Delete(recursive: true);
                         });
                     }
                     catch (Exception e)
                     {
                         MajDebug.LogError("[ZipImporter] Extract FAILED: " + e);
 
-                        try { Directory.Delete(tempOutDir, true); } catch { /* ignore */ }
+                        try
+                        {
+                            FileSystem.OpenDirectory(tempOutDir).Delete(recursive: true);
+                        }
+                        catch
+                        {
+                            // Cleanup must not mask the extraction failure.
+                        }
                         return;
                     }
                     finally
                     {
 #if UNITY_ANDROID
-                        File.Delete(tempFilePath);
+                        FileSystem.OpenFile(tempFilePath).Delete();
 #endif
                     }
                 }

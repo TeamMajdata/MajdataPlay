@@ -52,6 +52,11 @@ New-Item -ItemType Directory -Force -Path $uniTaskTarget | Out-Null
 Get-ChildItem -LiteralPath $uniTask | Where-Object { $_.Name -notin @('External', 'External.meta') } |
     Copy-Item -Destination $uniTaskTarget -Recurse -Force
 
+$storageTarget = Join-Path $assets 'Storage'
+New-Item -ItemType Directory -Force -Path $storageTarget | Out-Null
+Get-ChildItem -LiteralPath (Join-Path $root 'Assets/Plugins/MajdataPlay/IO/Storage') -File -Filter '*.cs' |
+    Copy-Item -Destination $storageTarget -Force
+
 # Alias only the device capability query in the isolated copy. The AtlasBuilder,
 # Texture2D constructor, PackTextures, border scaling and mesh code stay intact.
 if ($Baseline) {

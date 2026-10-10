@@ -2,6 +2,7 @@ using Cysharp.Text;
 using Cysharp.Threading.Tasks;
 using MajdataPlay.Buffers;
 using MajdataPlay.IO;
+using MajdataPlay.IO.Storage;
 using MajdataPlay.Net;
 using MajdataPlay.Numerics;
 using MajdataPlay.Utils;
@@ -225,7 +226,7 @@ namespace MajdataPlay
                     var savePath = Path.Combine(_cachePath, "bg.mp4");
                     var cacheFlagPath = Path.Combine(_cachePath, $"bg.mp4.cache");
 
-                    if (File.Exists(cacheFlagPath) && !File.Exists(savePath))
+                    if (FileSystem.OpenFile(cacheFlagPath).Exists && !FileSystem.OpenFile(savePath).Exists)
                     {
                         _videoPath = string.Empty;
                         return _videoPath;
@@ -244,7 +245,10 @@ namespace MajdataPlay
                     progress?.Report(1);
                     if (result == DownloadResult.ResourceNotFound)
                     {
-                        using var _ = File.Create(cacheFlagPath);
+                        var cacheDirectory = FileSystem.OpenDirectory(_cachePath);
+                        var cacheFlagFile = cacheDirectory.FindFile("bg.mp4.cache")
+                            ?? cacheDirectory.CreateFile("bg.mp4.cache");
+                        using var cacheFlagStream = cacheFlagFile.OpenWrite();
                         _videoPath = string.Empty;
                     }
                     else
@@ -293,9 +297,9 @@ namespace MajdataPlay
                     var forceReDl = false;
                     var shouldFetch = false;
 
-                    if (File.Exists(savePath))
+                    if (FileSystem.OpenFile(savePath).Exists)
                     {
-                        using var fileStream = File.OpenRead(savePath);
+                        using var fileStream = FileSystem.OpenFile(savePath).OpenRead();
                         var metadata = await SimaiParser.ParseMetadataAsync(fileStream);
                         if (metadata.Hash != Hash)
                         {
@@ -323,7 +327,8 @@ namespace MajdataPlay
                         await DownloadFile(options, token);
                     }
                     progress?.Report(1);
-                    _maidata = await SimaiParser.ParseAsync(File.OpenRead(savePath));
+                    using var maidataStream = FileSystem.OpenFile(savePath).OpenRead();
+                    _maidata = await SimaiParser.ParseAsync(maidataStream);
                     return _maidata;
                 }
             }
@@ -642,10 +647,7 @@ namespace MajdataPlay
         }
         private void EnsureCachePath()
         {
-            if (!Directory.Exists(_cachePath))
-            {
-                Directory.CreateDirectory(_cachePath);
-            }
+            FileSystem.CreateLocalDirectory(_cachePath);
         }
 
         async Task<DownloadResult> DownloadFile(DownloadOption options, CancellationToken token = default)
@@ -655,6 +657,10 @@ namespace MajdataPlay
             var savePath = Path.Combine(options.SaveTo, options.Filename);
             var chunkPath = Path.Combine(options.SaveTo, $"{options.Filename}.chunk");
             var hashPath = Path.Combine(options.SaveTo, $"{options.Filename}.sha256");
+            var storageDirectory = FileSystem.OpenDirectory(options.SaveTo);
+            var saveFile = FileSystem.OpenFile(savePath);
+            var chunkFile = FileSystem.OpenFile(chunkPath);
+            var hashFile = FileSystem.OpenFile(hashPath);
 
             var httpClient = MajEnv.SharedHttpClient;
             var expectedSHA256 = default(string?);
@@ -667,12 +673,12 @@ namespace MajdataPlay
             }
             else
             {
-                if (File.Exists(hashPath))
+                if (hashFile.Exists)
                 {
-                    expectedSHA256 = await File.ReadAllTextAsync(hashPath, token);
+                    expectedSHA256 = await hashFile.ReadAllTextAsync(cancellationToken: token);
                 }
 
-                if (File.Exists(savePath))
+                if (saveFile.Exists)
                 {
                     if (VerifyFileIntegrity(savePath, expectedSHA256))
                     {
@@ -684,11 +690,11 @@ namespace MajdataPlay
                     DeleteFileIfExists(hashPath);
                     expectedSHA256 = null;
                 }
-                else if (File.Exists(chunkPath))
+                else if (chunkFile.Exists)
                 {
                     if (VerifyFileIntegrity(chunkPath, expectedSHA256))
                     {
-                        File.Move(chunkPath, savePath);
+                        chunkFile.Rename(options.Filename);
                         return DownloadResult.Success;
                     }
 
@@ -703,7 +709,7 @@ namespace MajdataPlay
             {
                 try
                 {
-                    var existingChunkLength = File.Exists(chunkPath) ? new FileInfo(chunkPath).Length : 0;
+                    var existingChunkLength = chunkFile.Entry?.Length ?? 0;
 
                     using var req = new HttpRequestMessage(HttpMethod.Get, requestUri);
 
@@ -746,7 +752,9 @@ namespace MajdataPlay
                             expectedSHA256 = values.FirstOrDefault(x => !string.IsNullOrEmpty(x));
                             if (!string.IsNullOrEmpty(expectedSHA256))
                             {
-                                await File.WriteAllTextAsync(hashPath, expectedSHA256);
+                                var hashStorageFile = storageDirectory.FindFile($"{options.Filename}.sha256")
+                                    ?? storageDirectory.CreateFile($"{options.Filename}.sha256", "text/plain");
+                                await hashStorageFile.WriteAllTextAsync(expectedSHA256, cancellationToken: token);
                             }
                         }                        
                     }
@@ -759,23 +767,17 @@ namespace MajdataPlay
                     }
 
                     var isIntegrityValid = true;
-                    var fileMode = isPartial ? FileMode.OpenOrCreate : FileMode.Create;
-
-                    using (var chunkFileStream = new FileStream(chunkPath, fileMode, FileAccess.ReadWrite, FileShare.None))
+                    var chunkStorageFile = storageDirectory.FindFile($"{options.Filename}.chunk")
+                        ?? storageDirectory.CreateFile($"{options.Filename}.chunk");
+                    using (var chunkFileStream = chunkStorageFile.OpenWrite(append: isPartial))
                     {
-                        if (isPartial)
-                        {
-                            chunkFileStream.Seek(0, SeekOrigin.End);
-                        }
-
                         using var httpStream = await rsp.Content.ReadAsStreamAsync();
 
                         await DownloadStreamWithProgressAsync(httpStream, chunkFileStream, progress, existingChunkLength, totalFileBytes, token);
-
-                        if (!string.IsNullOrEmpty(expectedSHA256))
-                        {
-                            isIntegrityValid = VerifyStreamIntegrity(chunkFileStream, expectedSHA256);
-                        }
+                    }
+                    if (!string.IsNullOrEmpty(expectedSHA256))
+                    {
+                        isIntegrityValid = VerifyFileIntegrity(chunkStorageFile.Location, expectedSHA256);
                     }
 
                     if (!isIntegrityValid)
@@ -790,7 +792,7 @@ namespace MajdataPlay
                         continue;
                     }
 
-                    File.Move(chunkPath, savePath);
+                    chunkStorageFile.Rename(options.Filename);
 
                     return DownloadResult.Success;
                 }
@@ -856,13 +858,12 @@ namespace MajdataPlay
                 return true;
             }
 
-            using var fs = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.Read);
+            using var fs = FileSystem.OpenFile(filePath).OpenRead();
             return VerifyStreamIntegrity(fs, targetHash);
         }
 
         private bool VerifyStreamIntegrity(Stream stream, string targetHash)
         {
-            stream.Position = 0;
             using var sha256 = SHA256.Create();
             var hashBytes = sha256.ComputeHash(stream);
             var currentHash = Convert.ToBase64String(hashBytes);
@@ -872,9 +873,10 @@ namespace MajdataPlay
 
         private void DeleteFileIfExists(string path)
         {
-            if (File.Exists(path))
+            var file = FileSystem.OpenFile(path);
+            if (file.Exists)
             {
-                File.Delete(path);
+                file.Delete();
             }
         }
 

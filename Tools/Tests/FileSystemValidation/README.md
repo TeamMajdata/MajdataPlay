@@ -35,6 +35,10 @@ failure in one case does not prevent the other cases from running.
   local backend ownership.
 - Local path and facade dispatch, nested local directory creation, idempotent
   directory creation, UTF/non-ASCII names, and percent-encoded `file://` URIs.
+- Application local output: exclusive creation, explicit overwrite, append,
+  seekable streams and concurrent read sharing; native file/directory moves,
+  copy timestamps, atomic replacement with a backup, UTC creation times,
+  Windows hidden/system flags, and rejection of content URIs by local-only APIs.
 - Existing-only reads/writes, complete binary round trips, append, truncation,
   empty writes, refreshed lengths/UTC timestamps, text encodings, UTF-8/UTF-16/
   UTF-32 BOM detection, BOM-only files, and preservation of line endings.
@@ -190,3 +194,53 @@ permissions/persisted grants, Java/JNI wrappers, Android providers, cancellation
 of blocking device I/O, an Android Player, or a real device. Content-provider
 streams here are deterministic in-memory doubles; cross-platform .NET results
 must not be presented as Android SAF device validation.
+
+## Application consumer regressions
+
+The migration also has focused independent consumer checks:
+
+```powershell
+dotnet run --project Tools/Tests/ChartStorageValidation/ChartStorageValidation.csproj
+dotnet run --project Tools/Tests/ResourceStorageValidation/ResourceStorageValidation.csproj
+dotnet run --project Tools/Tests/ResourceStorageValidation/ResourceStorageValidation.csproj -p:MobileStorageTarget=Android
+```
+
+See each project's README for its production source links and narrow substitutes.
+They cover persisted collection IDs, corrupt settings backups, file creation and
+truncation, resource customization/hash rules, copy metadata and local atomic
+replacement. Windows sandbox restrictions can reject native `File.Replace`; run
+the same isolated fixture command with normal host permissions when that occurs.
+
+## Migration verification on 2026-10-10
+
+Windows host results for the commands above: storage suite **29 cases / 840
+assertions**, chart storage **3 cases**, and resource storage **9 cases each**
+for its iOS and Android conditional branches, all passed. Local replacement was
+rerun outside the Windows sandbox to exercise the real host operation.
+
+`dotnet run --project Tools/Tests/FFmpegValidation/FFmpegValidation.csproj`
+also passed its **81 managed assertions** without native media arguments.
+Editor-only implementations retain their original `System.IO` calls and are
+outside the migration scope. `./Tools/Tests/CustomSkinAtlasValidation/run.ps1`
+passed **9 packing cases and empty/missing inputs** with Direct3D11; its first run hit an unstable
+count of existing geometry error logs, and the repeat passed unchanged.
+
+After restoring the Editor-only implementations, Unity **6000.3.17f1** compiled
+the current full `Assets/Scripts` and
+modified IO, Drawing, Net and FFmpeg source assemblies in the ignored
+`Temp/StorageConsumerCompile` project. It used the production .NET 4.8 API profile
+and existing DLLs for unchanged dependencies. Reproduction scripts for this
+local check are `./Temp/StageStorageConsumerCompile.ps1` followed by
+`./Temp/RunStorageConsumerCompile.ps1`; success is marked by
+`STORAGE_CONSUMER_COMPILE_PASSED` in the isolated `validation.log`. This verifies
+Windows Editor script compilation, not a full fresh main-project import or
+Player compilation. Unchanged third-party Editor DLLs reported initialization
+exceptions because the isolated project lacks their complete package resources;
+the success marker and exit code 0 establish script compilation only, not a
+clean main-project Console. Staged production C# source hashes matched the final
+workspace. Production `ProjectSettings`, packages, scenes and assets
+were not rewritten.
+
+Player/device behavior, Android SAF, other host operating systems, full native
+audio/video execution, online HTTP resumption and chart ZIP import scene smoke
+tests remain unverified by these checks.

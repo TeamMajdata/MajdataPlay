@@ -9,7 +9,7 @@ Run the isolated Unity check with the Editor version specified by the repository
 ./Tools/Tests/CustomSkinAtlasValidation/run.ps1 -Baseline
 ```
 
-The script stages the current, complete production `CustomSkin.cs` and real UniTask
+The script stages the current, complete production `CustomSkin.cs`, portable storage sources and real UniTask
 runtime in `Temp/CustomSkinAtlasValidation`. It uses cached Burst, Collections and
 Mathematics packages, plus Unity's built-in Vector Graphics module. No main-project
 scene or Player setting is opened or modified. A graphics device is required:

@@ -4,6 +4,7 @@
     "references": [
         "FFmpeg.AutoGen",
         "MajdataPlay.Diagnostics",
+        "MajdataPlay.IO",
         "Unity.RenderPipelines.Core.Runtime"
     ],
     "includePlatforms": [

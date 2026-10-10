@@ -43,6 +43,32 @@ fragments are not filesystem path components. OS permissions and mobile sandbox
 boundaries still apply. The local backend does not provide an iOS Files picker,
 security-scoped bookmarks, or access outside the iOS application sandbox.
 
+## Application local storage
+
+Runtime consumers use storage handles for file queries, enumeration, reads and
+writes. Editor-only tooling retains its existing `System.IO` implementation.
+`Path` remains available for computing known local paths; text readers,
+writers, hashing and ZIP processing consume storage streams rather than opening
+filenames themselves.
+
+`CreateLocalFile(path, overwrite: false)` creates an empty file without creating
+parents or replacing a sibling. `OpenLocalWrite` opens a seekable, caller-owned
+output stream with concurrent read sharing: creation is exclusive by default,
+`overwrite: true` truncates, and `append: true` creates or appends. Use one output
+stream when creating/replacing and writing a local file must share one open.
+
+`CopyLocalFile`, `MoveLocalFile`, `MoveLocalDirectory`, `ReplaceLocalFile`,
+`SetLocalAttributes` and `SetLocalLastWriteTime` preserve the corresponding native
+copy metadata, move, atomic replacement, attribute and ZIP timestamp semantics.
+They accept local paths and file URIs only and reject content URIs; replacement
+and directory moves retain the platform's volume and permission restrictions.
+They do not silently fall back to copy/delete. Portable cross-provider copies
+continue to use `StorageFile.CopyTo` / `CopyToAsync`.
+
+Entry snapshots also expose optional UTC creation times and backend-reported
+hidden/system flags. Local enumeration supplies them for chart ordering and
+filtering; providers which do not report them retain null/false defaults.
+
 ## Android SAF
 
 Use these APIs only in an Android player, and start a picker on Unity's main
@@ -142,7 +168,7 @@ Player/device validation.
 - Reading all bytes/text intentionally buffers the whole file; use streams for large
   media. Synchronous enumeration/metadata/create/rename/delete can block. Move slow
   storage work away from Unity's game loop; never access Unity objects from that worker.
-- This layer does not migrate existing `System.IO` consumers. APIs such as native
+- APIs such as native
   audio/video decoders that require a real path must first copy a SAF document into
   app-local storage. A content URI is not a replacement native filename.
 
