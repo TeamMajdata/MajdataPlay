@@ -149,8 +149,32 @@ namespace MajdataPlay.Scenes.List
         }
         public void SlideDifficulty(int delta)
         {
-            var pos = _selectedDifficulty + delta;
-            SlideToDifficulty(pos);
+            if (delta == 0)
+            {
+                return;
+            }
+            var song = _coverListManager.SelectedSong;
+            if (song is null)
+            {
+                return;
+            }
+
+            var levels = song.Levels;
+            var direction = Math.Sign(delta);
+            var pos = _selectedDifficulty;
+            // Search at most one full circle, skipping difficulties without a chart.
+            for (var i = 0; i < 7; i++)
+            {
+                pos = WrapIndex(pos + direction, 7);
+                if (pos < levels.Length && !string.IsNullOrEmpty(levels[pos]))
+                {
+                    if (pos != _selectedDifficulty)
+                    {
+                        SlideToDifficulty(pos);
+                    }
+                    return;
+                }
+            }
         }
         void SlideListTo(int pos, bool disableAnimation, bool forceUpdate)
         {
