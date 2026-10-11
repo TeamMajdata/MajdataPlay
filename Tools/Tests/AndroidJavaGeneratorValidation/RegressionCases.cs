@@ -23,6 +23,7 @@ namespace MajdataPlay.Tests.AndroidJavaGeneratorValidation
         public static readonly string[] Names =
         {
             "source-api", "explicit-java-object-base", "wrapper-base-inheritance", "constructor-visibility", "sdk-constructors", "class-api", "jar-api", "inner-descriptor-parity", "assembly-configuration", "configuration-precedence",
+            "static-class-mapping", "static-class-user-conflicts",
             "unity-data-paths", "unity-data-managed-references", "unity-data-player-references", "unity-data-editor-paths", "unity-data-missing",
             "classpath-only", "documentation-path-array", "no-inherited", "determinism", "source-refresh", "android-symbol-compilation",
             "invalid-nonpartial", "invalid-static", "invalid-nested", "invalid-generic", "duplicate-mapping",
@@ -86,6 +87,12 @@ namespace MajdataPlay.Tests.AndroidJavaGeneratorValidation
                     break;
                 case "wrapper-base-inheritance":
                     AssertWrapperBaseInheritance(runner, name);
+                    break;
+                case "static-class-mapping":
+                    AssertClassMapping(runner, workspace, name);
+                    break;
+                case "static-class-user-conflicts":
+                    AssertClassUserConflicts(runner, workspace, name);
                     break;
                 case "sdk-constructors":
                     AssertSdkConstructors(runner, workspace, name);
@@ -326,6 +333,8 @@ namespace MajdataPlay.Tests.AndroidJavaGeneratorValidation
                 "An annotated wrapper must be usable as the generated C# base class.");
             Check.Equal("MajdataPlay.Platform.Android.Runtime.Java.Lang.JavaObject", number.BaseType?.ToDisplayString(),
                 "The annotated base wrapper must still derive from the runtime JavaObject.");
+            ApiAssertions.AssertClassProperty(number);
+            ApiAssertions.AssertClassProperty(integer);
             var numberName = (IFieldSymbol)Check.NotNull(integer.GetMembers("JavaClassName").SingleOrDefault(),
                 "the derived JavaClassName constant");
             var baseName = (IFieldSymbol)Check.NotNull(number.GetMembers("JavaClassName").SingleOrDefault(),
@@ -347,6 +356,71 @@ namespace MajdataPlay.Tests.AndroidJavaGeneratorValidation
             Check.True(!run.Output.GetDiagnostics().Any(diagnostic =>
                     diagnostic.Id == "CS0108" || diagnostic.Id == "CS0109" || diagnostic.Id == "CS0114"),
                 "A derived wrapper must not hide base members without an explicit modifier.\r\n" + run.DescribeDiagnostics());
+
+            var renamedSource = source.Replace("public partial class NumberWrapper",
+                "public partial class Class : ObjectWrapper").Replace("IntegerWrapper : NumberWrapper", "IntegerWrapper : Class");
+            renamedSource = renamedSource.Replace("    [JavaClass(\"java.lang.Number\")]",
+                "    [JavaClass(\"java.lang.Object\")]\r\n    public partial class ObjectWrapper\r\n    {\r\n    }\r\n"
+                + "    [JavaClass(\"java.lang.Number\")]");
+            var renamedRun = runner.Run(runner.CreateCompilation(renamedSource, name + "-class-name"), name + "-class-name");
+            renamedRun.AssertCompiles();
+            ApiAssertions.AssertClassProperty(ApiAssertions.Type(renamedRun, "Class"), propertyName: "ClassJavaProperty");
+            ApiAssertions.AssertClassProperty(ApiAssertions.Type(renamedRun, "IntegerWrapper"));
+            Check.True(!renamedRun.Output.GetDiagnostics().Any(diagnostic =>
+                    diagnostic.Id == "CS0108" || diagnostic.Id == "CS0109" || diagnostic.Id == "CS0114"),
+                "Class must explicitly hide any generated ancestor property, including across a wrapper named Class.\r\n" + renamedRun.DescribeDiagnostics());
+        }
+
+        /// <summary>
+        /// Checks mapped class-literal result types, including a C# wrapper named Class.
+        /// </summary>
+        /// <param name="runner">The production generator driver factory.</param>
+        /// <param name="workspace">The selected Android SDK configuration.</param>
+        /// <param name="name">The isolated regression case name.</param>
+        /// <exception cref="InvalidOperationException">Generation fails or a class-literal property has the wrong type or name.</exception>
+        private static void AssertClassMapping(GeneratorRunner runner, FixtureWorkspace workspace, string name)
+        {
+            foreach (var className in new[] { "ClassWrapper", "Class" })
+            {
+                var types = new[]
+                {
+                    new KeyValuePair<string, string>("java.lang.Class", className),
+                    new KeyValuePair<string, string>("java.lang.Number", "NumberWrapper")
+                };
+                var caseName = name + "-" + className;
+                var source = ConstructorDeclarations(workspace, Array.Empty<string>(), types);
+                var run = runner.Run(runner.CreateCompilation(source, caseName), caseName);
+                run.AssertCompiles();
+                var returnType = "Fixtures.Wrappers." + className;
+                ApiAssertions.AssertClassProperty(ApiAssertions.Type(run, "NumberWrapper"), returnType);
+                ApiAssertions.AssertClassProperty(ApiAssertions.Type(run, className), returnType,
+                    className == "Class" ? "ClassJavaProperty" : "Class");
+                Check.True(run.GeneratedSources.Values.All(generated => generated.Contains("AndroidJni.Wrap<global::" + returnType + ">", StringComparison.Ordinal)),
+                    "Mapped java.lang.Class results must adopt their references through the exception-safe wrapper factory.");
+            }
+        }
+
+        /// <summary>
+        /// Requires handwritten properties, fields, and methods to produce actionable class-property conflicts.
+        /// </summary>
+        /// <param name="runner">The production generator driver factory.</param>
+        /// <param name="workspace">The prepared Java fixture inputs.</param>
+        /// <param name="name">The isolated regression case name.</param>
+        /// <exception cref="InvalidOperationException">A handwritten member is overwritten or a conflict is not diagnosed.</exception>
+        private static void AssertClassUserConflicts(GeneratorRunner runner, FixtureWorkspace workspace, string name)
+        {
+            var members = new[] { "public int Class { get; }", "public int Class;", "public void Class()\r\n        {\r\n        }", "public int ClassJavaProperty { get; }" };
+            for (var index = 0; index < members.Length; index++)
+            {
+                var wrapperName = index == 3 ? "Class" : "InvalidWrapper";
+                var declaration = "public partial class " + wrapperName;
+                var source = SingleDeclaration(workspace, "fixtures.Widget", declaration);
+                source = source.Replace(declaration + "\r\n    {", declaration + "\r\n    {\r\n        " + members[index]);
+                var caseName = name + "-" + index;
+                var run = runner.Run(runner.CreateCompilation(source, caseName), caseName);
+                run.AssertDiagnostic("AJG008");
+                Check.Equal(0, run.GeneratedSources.Count, "A handwritten Class member must suppress generation rather than produce duplicate C# members.");
+            }
         }
 
         /// <summary>
@@ -609,6 +683,7 @@ namespace MajdataPlay.Tests.AndroidJavaGeneratorValidation
         /// </summary>
         private static void AssertPlatformGuard()
         {
+            Check.Throws<PlatformNotSupportedException>(() => AndroidJni.GetClass("fixtures.Widget"), "GetClass outside Android");
             Check.Throws<PlatformNotSupportedException>(() => AndroidJni.Construct("fixtures.Widget", "()V"), "Construct outside Android");
             Check.Throws<PlatformNotSupportedException>(() => AndroidJni.Call<int>(null, "fixtures.Widget", "intValue", "(I)I", 1), "generic Call outside Android");
             Check.Throws<PlatformNotSupportedException>(() => AndroidJni.Call(null, "fixtures.Widget", "consume", "(I)V", 1), "void Call outside Android");

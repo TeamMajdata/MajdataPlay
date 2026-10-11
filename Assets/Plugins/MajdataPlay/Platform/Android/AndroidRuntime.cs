@@ -1,38 +1,33 @@
-﻿using MajdataPlay.Diagnostics;
-using MajdataPlay.Platform.Android.IO;
+﻿using MajdataPlay.Platform.Android.Runtime.App;
+using MajdataPlay.Platform.Android.Runtime.Content;
+using MajdataPlay.Platform.Android.Runtime.Unity;
 using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 using UnityEngine;
 #nullable enable
 namespace MajdataPlay.Platform.Android
 {
-    public delegate void OnActivityResultCallback(object? sender, int requestCode, int resultCode, AndroidJavaObject? intent);
+    public delegate void OnActivityResultCallback(object? sender, int requestCode, int resultCode, Intent? intent);
     public static class AndroidRuntime
     {
-        public static event EventHandler<AndroidJavaObject?>? OnNewIntent;
+        public static event EventHandler<Intent?>? OnNewIntent;
         public static event OnActivityResultCallback? OnActivityResult;
 
         public static AndroidJavaClass MajdataPlayActivityClass { get; private set; } = null!;
-        public static AndroidJavaObject CurrentActivity { get; private set; } = null!;
+        public static Activity CurrentActivity { get => UnityPlayer.CurrentActivity!; }
 
-        
 
-        readonly static OnNewIntentCallbackProxy _onNewIntentCallbackProxy = new();
-        readonly static OnActivityResultCallbackProxy _onActivityResultCallbackProxy = new();
+
+        private static readonly OnNewIntentCallbackProxy s_onNewIntentCallbackProxy = new();
+        private static readonly OnActivityResultCallbackProxy s_onActivityResultCallbackProxy = new();
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
-        static void Init()
+        private static void Init()
         {
 #if UNITY_ANDROID && !UNITY_EDITOR
             MajDebug.LogInfo($"[{nameof(AndroidRuntime)}] Init");
             try
             {
                 MajdataPlayActivityClass = new AndroidJavaClass("net.majdata.majdataplay.MajdataPlayActivity");
-                MajDebug.LogInfo($"[{nameof(AndroidRuntime)}] Get current activity");
-                CurrentActivity = MajdataPlayActivityClass.GetStatic<AndroidJavaObject>("currentActivity");
                 MajDebug.LogInfo($"[{nameof(AndroidRuntime)}] Setting onNewIntent callback proxy");
                 MajdataPlayActivityClass.CallStatic("registerOnNewIntentCallback", _onNewIntentCallbackProxy);
                 MajDebug.LogInfo($"[{nameof(AndroidRuntime)}] Setting onActivityResult callback proxy");
@@ -48,21 +43,21 @@ namespace MajdataPlay.Platform.Android
             }
 #endif
         }
-        static void Android_OnNewIntent(AndroidJavaObject intent)
+        private static void Android_OnNewIntent(AndroidJavaObject intent)
         {
             if (OnNewIntent is not null)
             {
-                OnNewIntent(null, intent);
+                OnNewIntent(null, new Intent(intent, false));
             }
         }
-        static void Android_OnActivityResult(int requestCode, int resultCode, AndroidJavaObject? intent)
+        private static void Android_OnActivityResult(int requestCode, int resultCode, AndroidJavaObject? intent)
         {
             if (OnActivityResult is not null)
             {
-                OnActivityResult(null, requestCode, resultCode, intent);
+                OnActivityResult(null, requestCode, resultCode, intent != null ? new Intent(intent, false) : null);
             }
         }
-        class OnNewIntentCallbackProxy : AndroidJavaProxy
+        private class OnNewIntentCallbackProxy : AndroidJavaProxy
         {
             public OnNewIntentCallbackProxy() : base("net.majdata.majdataplay.CSharpOnNewIntentCallback") { }
 
@@ -71,7 +66,7 @@ namespace MajdataPlay.Platform.Android
                 Android_OnNewIntent(intent);
             }
         }
-        class OnActivityResultCallbackProxy : AndroidJavaProxy
+        private class OnActivityResultCallbackProxy : AndroidJavaProxy
         {
             public OnActivityResultCallbackProxy() : base("net.majdata.majdataplay.CSharpOnActivityResultCallback") { }
 

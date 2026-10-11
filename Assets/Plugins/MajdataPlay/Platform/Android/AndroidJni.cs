@@ -24,6 +24,32 @@ namespace MajdataPlay.Platform.Android
         private static readonly ConcurrentDictionary<string, MethodSignature> s_signatures = new();
 
         /// <summary>
+        /// Resolves a Java class object as an ordinary, caller-owned object reference.
+        /// </summary>
+        /// <param name="className">The exact Java binary class name, including dollar signs for nested types.</param>
+        /// <returns>An independently owned, non-null reference to the represented java.lang.Class object.</returns>
+        /// <remarks>
+        /// Does not construct an instance of the represented type. Unity's class lookup may load or initialize
+        /// that type. Dispose the result on the Unity main thread or a JVM-attached thread.
+        /// </remarks>
+        /// <exception cref="PlatformNotSupportedException">Execution is not in an Android player.</exception>
+        /// <exception cref="AndroidJavaException">Java class lookup fails.</exception>
+        /// <exception cref="InvalidOperationException">JNI returns a null class reference without a Java exception.</exception>
+        public static AndroidJavaObject GetClass(string className)
+        {
+            EnsureAndroid();
+            using var javaClass = new AndroidJavaClass(className);
+            var reference = javaClass.GetRawClass();
+            if (reference == IntPtr.Zero)
+            {
+                throw new InvalidOperationException("JNI class lookup returned a null reference without a Java exception.");
+            }
+
+            // AndroidJavaClass has no object handle; copy its class handle into an ordinary Java object reference.
+            return new AndroidJavaObject(reference);
+        }
+
+        /// <summary>
         /// Constructs a Java object with an exact constructor descriptor.
         /// </summary>
         /// <param name="className">The Java binary class name.</param>

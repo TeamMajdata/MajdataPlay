@@ -125,6 +125,12 @@ are not accepted as successful negative-test results.
 
 ## Coverage
 
+Class-object identity and reference lifetime still require Android device checks:
+call `Class.getName`, pass the result to a Java `Class` parameter, cover nested and
+interface types, and verify disposing one property result does not invalidate
+another result or an existing instance. Managed compilation and the Editor guard
+do not validate those JNI behaviors.
+
 - `unity-data-player-references` uses genuine installed Android IL2CPP Player
   CoreModule metadata from nested `Variations/il2cpp/(Release/)Managed` layouts,
   never Editor metadata or synthetic assembly paths. It clears all editor/SDK/JDK
@@ -135,6 +141,12 @@ are not accepted as successful negative-test results.
 - All Java primitives, including signed byte -> sbyte and char -> char, exact
   method/constructor/field JNI descriptors forwarded to AndroidJni.Call/GetField,
   and getter-only fields even when Java fields are mutable.
+- Static getter-only, non-null `Class` properties resolve each wrapper's own Java
+  binary name for source/class/JAR inputs, interfaces, enums, and nested types.
+  Annotated base/derived wrappers hide the property explicitly without C# hiding
+  warnings. Mapped `java.lang.Class` results, a C# wrapper named `Class`, Java
+  field/method aliases, handwritten-member `AJG008` conflicts, ownership XML
+  documentation, and the non-Android JNI guard are covered without a JVM.
 - Nullable annotated-wrapper references, nullable unknown AndroidJavaObject
   references, interface/concrete overloads, generic and bounded-generic erasure.
 - Public inherited methods, inherited static methods, covariant override

@@ -7,7 +7,6 @@ using MajdataPlay.IO.Storage;
 using MajdataPlay.Scenes.Test;
 using MajdataPlay.Settings;
 using MajdataPlay.Timer;
-using ShimSkiaSharp;
 using MajdataPlay.Syscall.Win32;
 #if UNITY_STANDALONE_OSX
 using MajdataPlay.Platform.MacOS;
@@ -25,14 +24,13 @@ using System.IO;
 using System.IO.Compression;
 using System.Linq;
 using System.Threading.Tasks;
-using Unity.VisualScripting;
 using UnityEngine;
 using UnityEngine.SceneManagement;
-using UnityEngine.Scripting;
 using UnityEngine.Rendering;
 using UnityEngine.Rendering.Universal;
 using MajdataPlay.Diagnostics;
-using MajdataPlay.Databases; // DO NOT REMOVE IT !!!
+using MajdataPlay.Databases;
+using MajdataPlay.Import; // DO NOT REMOVE IT !!!
 
 namespace MajdataPlay
 {
@@ -51,13 +49,13 @@ namespace MajdataPlay
             get => MajEnv.Settings;
         }
 
-        [SerializeField] BuiltInTimeProvider _timer = BuiltInTimeProvider.Winapi;
+        [SerializeField] private BuiltInTimeProvider _timer = BuiltInTimeProvider.Winapi;
 
-        [SerializeField] bool _isEnterView = false;
-        [SerializeField] bool _isEnterTest = false;
+        [SerializeField] private bool _isEnterView = false;
+        [SerializeField] private bool _isEnterTest = false;
 
-        readonly static List<IntPtr> _windowHandles = new();
-        readonly static ReadOnlyMemory<ITimeProvider> _builtInTimeProviders = MajTimeline.BuiltInTimeProviders;
+        private static readonly List<IntPtr> _windowHandles = new();
+        private static readonly ReadOnlyMemory<ITimeProvider> _builtInTimeProviders = MajTimeline.BuiltInTimeProviders;
 
         protected override void Awake()
         {
@@ -65,13 +63,13 @@ namespace MajdataPlay
             Majdata<GameManager>.SetAsSingleton(this);
             GameRuntime.Init();
         }
-        void Start()
+        private void Start()
         {
             StartInternal().Forget();
         }
-        async UniTask StartInternal()
+        private async UniTask StartInternal()
         {
-            await UniTask.CompletedTask;            
+            await UniTask.CompletedTask;
 #if UNITY_ANDROID && !UNITY_EDITOR // Android Only (Sdk Version Log)
             MajDebug.LogInfo($"AndroidSdkVersion: {MajEnv.AndroidSdkVersion}");
             MajDebug.LogInfo($"TargetSdkVersion: {MajEnv.TargetSdkVersion}");
@@ -90,11 +88,7 @@ namespace MajdataPlay
             MajDebug.LogInfo($"AndroidVerCode: {androidVersionCode}");
 #endif
 #if !UNITY_EDITOR
-#if UNITY_ANDROID
-            var intent = AndroidRuntime.CurrentActivity.Call<AndroidJavaObject>("getIntent");
-            ChartImporter.Android_OnNewIntent(this, intent);
-            AndroidRuntime.OnNewIntent += ChartImporter.Android_OnNewIntent;
-#elif UNITY_IOS
+#if UNITY_IOS
             await UniTask.DelayFrame(2); // wait UnitySendMessage
 #endif
 #endif
@@ -157,9 +151,9 @@ namespace MajdataPlay
             var availableLangs = Localization.Available;
             if (!availableLangs.IsEmpty())
             {
-                if(string.IsNullOrEmpty(Settings.Display.Language))
+                if (string.IsNullOrEmpty(Settings.Display.Language))
                 {
-                    if(Localization.SetLangByCode(Application.systemLanguage.ToLocale()))
+                    if (Localization.SetLangByCode(Application.systemLanguage.ToLocale()))
                     {
                         Settings.Display.Language = Localization.Current.ToString();
                     }
@@ -174,7 +168,7 @@ namespace MajdataPlay
                     }
 
                     Localization.Current = lang;
-                }  
+                }
             }
 
             ApplyDisplaySettings();
@@ -208,7 +202,7 @@ namespace MajdataPlay
             await MajInstances.SceneSwitcher.FadeOutAsync();
         }
 
-        void DetectHWEncoder()
+        private void DetectHWEncoder()
         {
             var deviceName = SystemInfo.graphicsDeviceName.ToLower();
             HardwareEncoder encoder;
@@ -246,7 +240,7 @@ namespace MajdataPlay
 #endif
 #if UNITY_STANDALONE_WIN
         [MonoPInvokeCallback(typeof(Win32API.EnumWindowsProc))]
-        static bool EnumWindowsCallback(IntPtr hWnd, int lParam)
+        private static bool EnumWindowsCallback(IntPtr hWnd, int lParam)
         {
             _windowHandles.Clear();
             Win32API.GetWindowThreadProcessId(hWnd, out int processId);
@@ -258,7 +252,7 @@ namespace MajdataPlay
             return true;
         }
 #endif
-        void EnterTestMode()
+        private void EnterTestMode()
         {
             IOListener.NextScene = "Title";
 #if UNITY_STANDALONE_WIN && ENABLE_MONO
@@ -267,7 +261,7 @@ namespace MajdataPlay
             SceneManager.LoadScene("Test");
         }
 
-        void EnterTitle()
+        private void EnterTitle()
         {
 #if UNITY_STANDALONE_WIN && ENABLE_MONO
             MajEnv.GameProcess.PriorityClass = ProcessPriorityClass.AboveNormal;
@@ -275,7 +269,7 @@ namespace MajdataPlay
             SceneManager.LoadScene("Title");
         }
 
-        void EnterView()
+        private void EnterView()
         {
 #if UNITY_STANDALONE_WIN && ENABLE_MONO
             MajEnv.GameProcess.PriorityClass = ProcessPriorityClass.BelowNormal;
@@ -350,14 +344,14 @@ namespace MajdataPlay
         }
 #endif
 
-        void Update()
+        private void Update()
         {
             ChangeTimerIfRequested();
             ChartImporter.OnUpdate();
         }
 
         [Conditional("DEBUG")]
-        void ChangeTimerIfRequested()
+        private void ChangeTimerIfRequested()
         {
             var builtInTimeProviders = _builtInTimeProviders.Span;
             var selectedTimer = builtInTimeProviders[(int)_timer];
@@ -403,7 +397,7 @@ namespace MajdataPlay
             }
         }
         #region Events
-        void OnApplicationQuit()
+        private void OnApplicationQuit()
         {
             Screen.sleepTimeout = SleepTimeout.SystemSetting;
             RequestSave(this);
@@ -421,7 +415,7 @@ namespace MajdataPlay
             OnAppQuit = null;
             OnSave = null;
         }
-        void OnApplicationFocus(bool focus)
+        private void OnApplicationFocus(bool focus)
         {
             IsAppOnFocus = focus;
             if (OnAppFocus is not null)
@@ -436,7 +430,7 @@ namespace MajdataPlay
 #endif
         }
 
-        void OnApplicationPause(bool pause)
+        private void OnApplicationPause(bool pause)
         {
             if (OnAppPause is not null)
             {
@@ -457,260 +451,6 @@ namespace MajdataPlay
             ChartImporter.AddImportTask(tempFilePath);
         }
 #endif
-#endregion
-        
-        static class ChartImporter
-        {
-            static string _importRoot = string.Empty;
-            static ValueTask _importTask = UniTask.CompletedTask;
-            static readonly ConcurrentQueue<string> _pendingImportTasks = new ConcurrentQueue<string>();
-            
-            public static ValueTask OnStartAsync()
-            {
-                _importRoot = Path.Combine(MajEnv.ChartPath, "Import");
-                if (_pendingImportTasks.Count != 0)
-                {
-                    _importTask = Import();
-                    return _importTask;
-                }
-                return UniTask.CompletedTask;
-            }
-            public static void AddImportTask(string tempFilePath)
-            {
-                _pendingImportTasks.Enqueue(tempFilePath);
-            }
-            public static void OnUpdate()
-            {
-                if (SceneSwitcher.CurrentScene == MajScenes.Empty || 
-                    _pendingImportTasks.Count == 0 ||
-                    !_importTask.IsCompleted)
-                {
-                    return;
-                }
-                _importTask = Import();
-            }
-            /// <summary>Imports queued local chart archives with traversal protection and storage-backed extraction.</summary>
-            /// <returns>An operation that completes after importing archives and refreshing the chart list.</returns>
-            static async ValueTask Import()
-            {
-                // Copy local extracted files with their original attributes and modification times.
-                static void CopyDirectory(string sourceDir, string destDir)
-                {
-                    var dirs = new Stack<(StorageDirectory source, StorageDirectory destination)>();
-                    dirs.Push((FileSystem.Directory.Open(sourceDir), FileSystem.Directory.Create(destDir)));
-
-                    while (dirs.Count > 0)
-                    {
-                        var (currentSource, currentDest) = dirs.Pop();
-
-                        foreach (var entry in currentSource.EnumerateEntries())
-                        {
-                            if (entry.IsDirectory)
-                            {
-                                dirs.Push((
-                                    new StorageDirectory(currentSource.FileSystem, entry.Location),
-                                    currentDest.CreateDirectory(entry.Name)));
-                            }
-                            else
-                            {
-                                FileSystem.File.Copy(
-                                    entry.Location,
-                                    Path.Combine(currentDest.Location, entry.Name),
-                                    overwrite: true);
-                            }
-                        }
-                    }
-                }
-                var nextScene = (MajScenes?)MajScenes.List;
-                if(SceneSwitcher.CurrentScene == MajScenes.Init)
-                {
-                    await MajInstances.SceneSwitcher.FadeInAsync();
-                    nextScene = null;
-                }
-                else
-                {
-                    while (SceneSwitcher.CurrentScene == MajScenes.Title)
-                    {
-                        nextScene = MajScenes.Login;
-                        await UniTask.Yield();
-                    }
-                    await MajInstances.SceneSwitcher.SwitchSceneAsync("Empty", false);
-                    await UniTask.Delay(300);
-                }
-                FileSystem.Directory.Create(_importRoot);
-                while (_pendingImportTasks.TryDequeue(out var tempFilePath))
-                {
-                    MajDebug.LogDebug("[ZipImporter] Got file: " + tempFilePath);
-
-                    if (!FileSystem.File.Open(tempFilePath).Exists)
-                    {
-                        MajDebug.LogError("[ZipImporter] File not found: " + tempFilePath);
-                        continue;
-                    }
-
-                    var ext = Path.GetExtension(tempFilePath).ToLowerInvariant();
-                    if (ext != ".zip" && ext != ".adx")
-                    {
-                        MajDebug.LogError("[ZipImporter] Unsupported extension: " + ext);
-                        continue;
-                    }
-                    var tempOutDir = Path.Combine(MajEnv.TempPath, Guid.NewGuid().ToString());
-                    
-                    try
-                    {
-                        var outputDirectory = FileSystem.Directory.Create(tempOutDir);
-                        using var archiveStream = FileSystem.File.Open(tempFilePath).OpenRead();
-                        using var archive = new ZipArchive(archiveStream, ZipArchiveMode.Read);
-                        var totalSize = archive.Entries.Sum(x => x.Length);
-                        var decompressedSize = 0L;
-                        var destRootFull = Path.GetFullPath(tempOutDir);
-                        if (!destRootFull.EndsWith(Path.DirectorySeparatorChar.ToString(), StringComparison.Ordinal))
-                        {
-                            destRootFull += Path.DirectorySeparatorChar;
-                        }
-                        foreach (var entry in archive.Entries)
-                        {
-                            if (string.IsNullOrEmpty(entry.Name))
-                            {
-                                continue;
-                            }
-
-                            var combinedPath = Path.Combine(tempOutDir, entry.FullName);
-                            var fullPath = Path.GetFullPath(combinedPath);
-
-                            if (!fullPath.StartsWith(destRootFull, StringComparison.Ordinal))
-                            {
-                                throw new IOException("Zip entry escapes destination: " + entry.FullName);
-                            }
-
-                            var dir = Path.GetDirectoryName(fullPath);
-                            if (!string.IsNullOrEmpty(dir))
-                            {
-                                FileSystem.Directory.Create(dir);
-                            }
-
-                            if (FileSystem.File.Open(fullPath).Exists)
-                            {
-                                FileSystem.File.Open(fullPath).Delete();
-                            }
-
-                            using (var entryStream = entry.Open())
-                            using (var outputStream = FileSystem.File.Create(fullPath).OpenWrite())
-                            {
-                                entryStream.CopyTo(outputStream);
-                            }
-                            FileSystem.File.Open(fullPath).SetLastWriteTime(entry.LastWriteTime.DateTime);
-                            decompressedSize += entry.Length;
-                            MajInstances.SceneSwitcher.SetLoadingText($"Extracting...\n{decompressedSize * 100 / (double)totalSize:F2}%");
-                            await UniTask.Yield();
-                        }
-                        var subDirs = outputDirectory.EnumerateEntries()
-                                                     .Where(entry => entry.IsDirectory)
-                                                     .ToArray();
-                        if (subDirs.Length == 0)
-                        {
-                            continue;
-                        }
-                        Parallel.For(0, subDirs.Length, j =>
-                        {
-                            var dir = subDirs[j];
-                            if (dir.IsHidden || dir.IsSystem || dir.Name.StartsWith("."))
-                            {
-                                return;
-                            }
-                            var directory = new StorageDirectory(outputDirectory.FileSystem, dir.Location);
-                            var subDirCount = directory.EnumerateEntries()
-                                                      .Count(entry => entry.IsDirectory &&
-                                                          !(entry.IsHidden || entry.IsSystem || entry.Name.StartsWith(".")));
-
-                            if (subDirCount == 0)
-                            {
-                                var dirName = dir.Name;
-                                var dstPath = Path.Combine(_importRoot, dirName);
-                                for (var i = 0; FileSystem.Directory.Open(dstPath).Exists; i++)
-                                {
-                                    dstPath = Path.Combine(_importRoot, $"{dirName} ({i + 1})");
-                                }
-                                CopyDirectory(dir.Location, dstPath);
-                            }
-                            else
-                            {
-                                var dirName = dir.Name;
-                                var dstPath = Path.Combine(MajEnv.ChartPath, dirName);
-                                for (var i = 0; FileSystem.Directory.Open(dstPath).Exists; i++)
-                                {
-                                    dstPath = Path.Combine(MajEnv.ChartPath, $"{dirName} ({i + 1})");
-                                }
-                                CopyDirectory(dir.Location, dstPath);
-                            }
-                            directory.Delete(recursive: true);
-                        });
-                    }
-                    catch (Exception e)
-                    {
-                        MajDebug.LogError("[ZipImporter] Extract FAILED: " + e);
-
-                        try
-                        {
-                            FileSystem.Directory.Open(tempOutDir).Delete(recursive: true);
-                        }
-                        catch
-                        {
-                            // Cleanup must not mask the extraction failure.
-                        }
-                        return;
-                    }
-                    finally
-                    {
-#if UNITY_ANDROID
-                        FileSystem.File.Open(tempFilePath).Delete();
-#endif
-                    }
-                }
-                var progress = new Progress<string>();
-                progress.ProgressChanged += (o, e) =>
-                {
-                    MajInstances.SceneSwitcher.SetLoadingText(e);
-                };
-                var task = SongStorage.RefreshLocalAsync(progress);
-                while (!task.IsCompleted)
-                {
-                    await UniTask.Yield();
-                }
-                if (!task.IsCompletedSuccessfully)
-                {
-                    MajInstances.SceneSwitcher.SetLoadingText("MAJTEXT_ERR_SCAN_CHARTS_FAILED".i18n(), Color.red);
-                }
-                else
-                {
-                    MajInstances.SceneSwitcher.SetLoadingText(string.Empty);
-                }
-                await UniTask.Delay(3000);
-                if(nextScene is MajScenes scene)
-                {
-                    await MajInstances.SceneSwitcher.SwitchSceneAsync(scene.ToString());
-                }
-            }
-
-            public static void Android_OnNewIntent(object? sender, AndroidJavaObject? intent)
-            {
-                var intentUri = intent?.Call<AndroidJavaObject>("getData");
-                if (intentUri is null)
-                {
-                    return;
-                }
-                using var fileIOKit = new AndroidJavaClass("net.majdata.majdataplay.FileIOKit");
-                var tempPath = Path.Combine(MajEnv.CachePath, "Runtime", $"{Guid.NewGuid()}.zip");
-                var returnCode = fileIOKit.CallStatic<int>("CopyContentToFile", intentUri, tempPath);
-
-                MajDebug.LogDebug($"[Android][FileIOKit] return {returnCode}");
-                if(returnCode != 0)
-                {
-                    return;
-                }
-
-                AddImportTask(tempPath);
-            }
-        }
+        #endregion
     }
 }

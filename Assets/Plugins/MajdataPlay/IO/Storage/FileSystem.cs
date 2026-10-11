@@ -26,6 +26,16 @@ namespace MajdataPlay.IO.Storage
             Interlocked.Exchange(ref s_contentProvider, provider);
         }
 
+        public static FileSystemEntry? GetEntry(string location)
+        {
+            if (string.IsNullOrEmpty(location))
+            {
+                throw new ArgumentNullException(nameof(location));
+            }
+            var fs = ResolveProvider(location);
+            return fs.GetEntry(location);
+        }
+
         /// <summary>Opens a stream for a resolved file handle without reselecting its backend during the operation.</summary>
         /// <param name="file">The file handle retaining the backend selected for this operation.</param>
         /// <param name="append">Whether to append instead of truncating.</param>

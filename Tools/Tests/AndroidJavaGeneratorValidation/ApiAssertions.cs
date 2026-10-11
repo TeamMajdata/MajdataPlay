@@ -38,6 +38,7 @@ namespace MajdataPlay.Tests.AndroidJavaGeneratorValidation
             {
                 Check.Equal("MajdataPlay.Platform.Android.Runtime.Java.Lang.JavaObject", type.BaseType?.ToDisplayString(), type.Name + " base type");
                 AssertWrappingConstructor(type);
+                AssertClassProperty(type);
             }
             AssertConstructors(widget);
             AssertPrimitiveMethods(widget);
@@ -90,6 +91,9 @@ namespace MajdataPlay.Tests.AndroidJavaGeneratorValidation
             var lower = FindForwardingMethod(type, "Call", "ping", "()V");
             var upper = FindForwardingMethod(type, "Call", "Ping", "()V");
             Check.True(lower.Name != upper.Name, "Java methods differing only after PascalCase conversion must both survive under distinct names.");
+            AssertClassProperty(type);
+            AssertField(type, "ClassJavaField", "CLASS", "I", "Int32");
+            AssertForwarding(Method(type, "ClassJavaMethod"), "Call", "Class", "()V");
             AssertField(type, "Sample", "sample", "I", "Int32");
             var sample = FindForwardingMethod(type, "Call", "Sample", "()I");
             Check.True(sample.Name != "Sample", "A Java method colliding with a field must be renamed, not discarded.");
@@ -124,6 +128,33 @@ namespace MajdataPlay.Tests.AndroidJavaGeneratorValidation
         public static INamedTypeSymbol Type(GeneratorRun run, string name)
         {
             return Check.NotNull(run.Output.GetTypeByMetadataName("Fixtures.Wrappers." + name), "wrapper " + name);
+        }
+
+        /// <summary>
+        /// Requires a non-null, owned class-literal property that resolves the wrapper's own Java binary name.
+        /// </summary>
+        /// <param name="type">The wrapper declaring the class-literal property.</param>
+        /// <param name="returnType">The expected raw Unity reference or mapped java.lang.Class wrapper type.</param>
+        /// <param name="propertyName">The generated property name, including any type-name collision alias.</param>
+        /// <exception cref="InvalidOperationException">The property shape, lookup, or ownership documentation is incorrect.</exception>
+        public static void AssertClassProperty(INamedTypeSymbol type, string returnType = "UnityEngine.AndroidJavaObject", string propertyName = "Class")
+        {
+            var property = Check.NotNull(type.GetMembers(propertyName).OfType<IPropertySymbol>().SingleOrDefault(), type.Name + "." + propertyName);
+            Check.True(property.IsStatic && property.DeclaredAccessibility == Accessibility.Public
+                && property.GetMethod is not null && property.SetMethod is null, propertyName + " must be a public static getter-only property.");
+            Check.Equal(returnType, property.Type.ToDisplayString(), type.Name + " class-literal result type");
+            Check.Equal(NullableAnnotation.NotAnnotated, property.NullableAnnotation, type.Name + " class-literal result must be non-null");
+            var syntax = property.DeclaringSyntaxReferences.Single().GetSyntax();
+            var lookup = syntax.DescendantNodes().OfType<InvocationExpressionSyntax>().Single(invocation =>
+                invocation.Expression.ToString().Contains("AndroidJni.GetClass", StringComparison.Ordinal));
+            var mapping = type.GetAttributes().Single(attribute => attribute.AttributeClass?.Name == "JavaClassAttribute");
+            var binaryName = Check.NotNull(mapping.ConstructorArguments[0].Value as string, type.Name + " Java binary name");
+            var argument = Check.NotNull(lookup.ArgumentList.Arguments.Single().Expression as LiteralExpressionSyntax, "class-literal lookup argument");
+            Check.Equal(binaryName, argument.Token.ValueText, type.Name + " must resolve its own Java class, not the base or runtime instance class");
+            var documentation = XElement.Parse(property.GetDocumentationCommentXml() ?? string.Empty);
+            Check.True(!string.IsNullOrWhiteSpace(documentation.Element("summary")?.Value), "Class must document its purpose.");
+            Check.True(documentation.Element("remarks")?.Value.Contains("Dispose", StringComparison.Ordinal) == true,
+                "Class must document caller ownership and disposal of each returned reference.");
         }
 
         /// <summary>

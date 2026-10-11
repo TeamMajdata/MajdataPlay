@@ -66,6 +66,39 @@ namespace MajdataPlay.Platform.Android.Bindings
 嵌套 Java 类型使用 `$` 二进制名，例如 `android.os.Build$VERSION`，
 而不是点分隔的源码名。
 
+## Static `Class` properties
+
+Every generated wrapper exposes a public static, getter-only, non-null `Class`
+property representing that wrapper's Java class object, including interfaces,
+abstract classes, and nested types. For example, `BuildVersion.Class` represents
+Java's `android.os.Build.VERSION.class`; it does not construct a `BuildVersion`
+instance or require a public Java constructor.
+
+```csharp
+using var javaClass = BuildVersion.Class;
+var binaryName = AndroidJni.Call<string?>(
+    javaClass, "java.lang.Class", "getName", "()Ljava/lang/String;");
+```
+
+Without an annotated `java.lang.Class` mapping, the property returns an ordinary
+`UnityEngine.AndroidJavaObject`, suitable for Java `Class` parameters and instance
+methods such as `getName`. If the same compilation declares a `[JavaClass("java.lang.Class")]`
+wrapper, the property returns that wrapper instead, consistently with other
+mapped method and field results.
+
+Each access creates an independently owned reference: dispose the returned
+reference on the Unity main thread or a JVM-attached thread. References are not
+shared or cached. Access requires an Android player and throws
+`PlatformNotSupportedException` in the Editor. Unlike a Java class literal,
+Unity's class lookup may load or initialize the represented type.
+
+Derived wrappers explicitly hide an inherited `Class` property and resolve their
+own Java type. Conflicting Java fields and methods receive deterministic aliases
+such as `ClassJavaField` and `ClassJavaMethod`. A C# wrapper itself named `Class`
+uses `ClassJavaProperty` because C# forbids members with their enclosing type's
+name; this produces `AJG007`. Handwritten conflicting members produce `AJG008`
+instead of duplicate generated members.
+
 ## 自定义 `.java`、`.class` 与 `.jar`
 
 ```csharp

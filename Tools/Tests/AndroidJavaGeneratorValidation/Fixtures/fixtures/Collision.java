@@ -7,6 +7,11 @@ import java.util.Set;
 public class Collision {
     /** A field that collides with the PascalCase method below. */
     public int sample;
+    /** A field that must not replace the generated class-literal property. */
+    public int CLASS;
+
+    /** A method that must not replace the generated class-literal property. */
+    public void Class() { }
 
     /** First erased constructor. @param values the values */
     public Collision(List<String> values) { }

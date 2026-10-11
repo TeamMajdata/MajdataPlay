@@ -285,6 +285,7 @@ namespace MajdataPlay.SourceGenerators.AndroidJava
             _source.Line("public " + ShadowKeyword(classNameMember) + "const string " + JavaNames.Escape(classNameMember) +
                 " = " + JavaLiterals.String(_type.Name) + ";");
             _source.Line();
+            EmitClassProperty();
             EmitWrappingConstructor();
             EmitObjectOverrides(wrapperType);
             var methods = PrepareMethods();
@@ -306,6 +307,61 @@ namespace MajdataPlay.SourceGenerators.AndroidJava
                 _source.Close();
             }
             return _hasErrors ? null : _source.ToString();
+        }
+
+        /// <summary>Emits an owned Java class-object property using the compilation's java.lang.Class mapping.</summary>
+        private void EmitClassProperty()
+        {
+            var name = _wrapper.Symbol.Name == "Class" ? "ClassJavaProperty" : "Class";
+            if (_userMembers.ContainsKey(name))
+            {
+                UserConflict("Generated Java class property '" + name + "' conflicts with a handwritten member in '" + _wrapper.Symbol.ToDisplayString() + "'.");
+            }
+            _allocatedNames.Add(name);
+            if (name != "Class")
+            {
+                _report(GeneratorDiagnostics.RenamedMember, "Generated Java class property 'Class' on Java type '" + _type.Name +
+                    "' was renamed to '" + name + "' to avoid the C# wrapper type's name.");
+            }
+            var type = JavaDescriptors.ParseField("Ljava/lang/Class;");
+            _source.Documentation("summary", "Gets the Java class object representing '" + _type.Name + "'.");
+            _source.Documentation("value", "A non-null, caller-owned reference to the Java class object.");
+            _source.Documentation("remarks", "Each access creates an independently owned reference without constructing an instance of the represented type. " +
+                "Dispose the returned reference on the Unity main thread or a JVM-attached thread. Unity's class lookup may load or initialize the represented type.");
+            _source.Documentation("exception", "The property is accessed outside an Android player.", " cref=\"global::System.PlatformNotSupportedException\"");
+            _source.Documentation("exception", "Unity's Java class lookup fails.", " cref=\"global::UnityEngine.AndroidJavaException\"");
+            _source.Documentation("exception", "JNI cannot resolve a required class reference.", " cref=\"global::System.InvalidOperationException\"");
+            _source.Line("public " + ClassShadowKeyword(name) + "static " + JavaTypeMapping.GetTypeName(type, _mappings).TrimEnd('?') + " " + JavaNames.Escape(name));
+            _source.Open();
+            _source.Line("get");
+            _source.Open();
+            var invocation = JavaTypeMapping.JniType + ".GetClass(" + JavaLiterals.String(_type.Name) + ")";
+            var result = JavaTypeMapping.WrapResult(type, invocation, _mappings);
+            _source.Line("return " + result + (_mappings.ContainsKey(type.Name) ? "!" : string.Empty) + ";");
+            _source.Close();
+            _source.Close();
+            _source.Line();
+        }
+
+        /// <summary>Finds inherited handwritten or generated members hidden by the class-object property.</summary>
+        /// <param name="name">The reserved class-property name, including its type-name collision alias.</param>
+        /// <returns>The C# <c>new</c> modifier with a trailing space, or an empty string.</returns>
+        private string ClassShadowKeyword(string name)
+        {
+            var baseSymbol = _wrapper.Symbol.BaseType;
+            while (baseSymbol != null)
+            {
+                var annotated = baseSymbol.GetAttributes().Any(attribute =>
+                    attribute.AttributeClass?.ToDisplayString() == AndroidJavaGenerator.JavaClassAttributeName);
+                // Generated base properties are absent from the input symbols, so include their reserved names explicitly.
+                if (baseSymbol.GetMembers(name).Any(member => member.DeclaredAccessibility != Accessibility.Private) ||
+                    (annotated && name == (baseSymbol.Name == "Class" ? "ClassJavaProperty" : "Class")))
+                {
+                    return "new ";
+                }
+                baseSymbol = baseSymbol.BaseType;
+            }
+            return string.Empty;
         }
 
         /// <summary>Emits reference wrapping and prevents implicit C# construction when Java has no public constructor.</summary>

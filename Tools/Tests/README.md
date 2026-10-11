@@ -74,6 +74,19 @@ The second command stages an ignored isolated Unity 6000.3.17f1 project, checks
 Editor smoke/Android guards, compiles Windows64 and Android player scripts, and
 compiles Android Java sources. It does not exercise SAF on a device or build a player.
 
+## Chart import layout
+
+See `ImportValidation/README.md` for the archive and directory import layout
+regressions of the production `ChartImporter`.
+
+```powershell
+dotnet run --project Tools/Tests/ImportValidation/ImportValidation.csproj
+```
+
+The cases link the production importer and storage sources, so they verify layout
+classification and file effects rather than Unity scene switching, Android SAF
+sources or Player integration.
+
 ## Android storage / JNI / IL2CPP device validation
 
 See `AndroidStorageDeviceValidation/README.md` for the isolated test APK and

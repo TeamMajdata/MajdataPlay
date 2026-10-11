@@ -35,6 +35,9 @@ namespace MajdataPlay.Tests
                 RequireReferenceWrappingOnly(typeof(InputStream), "Abstract Java class wrapper");
                 RequireReferenceWrappingOnly(typeof(Looper), "SDK class without public Java constructors");
                 RequireIntentConstructors();
+                RequireClassProperty(typeof(BuildVersion));
+                RequireClassProperty(typeof(Runnable));
+                RequireClassProperty(typeof(InputStream));
                 Require(typeof(JavaStringBuilder).GetConstructor(new[] { typeof(int) }) is not null, "SDK primitive constructor parameters must be preserved.");
                 try
                 {
@@ -49,13 +52,33 @@ namespace MajdataPlay.Tests
                 RequireGuard(() => new Intent(), "SDK parameterless constructors must reject JNI construction outside an Android player.");
                 RequireGuard(() => new Intent("validation"), "SDK parameterized constructors must reject JNI construction outside an Android player.");
 
-                Debug.Log("ANDROID_JAVA_GENERATOR_UNITY_PASSED: SDK public constructors, non-instantiable types, interfaces, readonly fields, overloads, Object overrides, typed equality, and editor JNI guard.");
+                Debug.Log("ANDROID_JAVA_GENERATOR_UNITY_PASSED: SDK public constructors, non-instantiable types, interfaces, static class objects, readonly fields, overloads, Object overrides, typed equality, and editor JNI guard.");
                 EditorApplication.Exit(0);
             }
             catch (Exception exception)
             {
                 Debug.LogError("ANDROID_JAVA_GENERATOR_UNITY_FAILED: " + exception);
                 EditorApplication.Exit(1);
+            }
+        }
+
+        /// <summary>
+        /// Requires an SDK wrapper's owned static class-object property and editor JNI guard.
+        /// </summary>
+        /// <param name="wrapper">The concrete, abstract, or interface Java wrapper to inspect.</param>
+        /// <exception cref="InvalidOperationException">The property shape or editor guard is incorrect.</exception>
+        private static void RequireClassProperty(Type wrapper)
+        {
+            var property = wrapper.GetProperty("Class", BindingFlags.Public | BindingFlags.Static | BindingFlags.DeclaredOnly);
+            Require(property is not null && property.PropertyType == typeof(AndroidJavaObject)
+                && property.GetMethod is not null && property.SetMethod is null, wrapper.Name + ".Class must be a static getter-only Java object property.");
+            try
+            {
+                property!.GetValue(null);
+                throw new InvalidOperationException(wrapper.Name + ".Class must reject JNI access in the Unity Editor.");
+            }
+            catch (TargetInvocationException exception) when (exception.InnerException is PlatformNotSupportedException)
+            {
             }
         }
 
