@@ -23,19 +23,6 @@ namespace MajdataPlay.Import
 {
     internal static class ChartImporter
     {
-        /// <summary>The chart definition file that marks a directory as an importable chart.</summary>
-        private const string ChartFileName = "maidata.txt";
-
-        /// <summary>The track file names that mark a directory as an importable chart together with <see cref="ChartFileName"/>.</summary>
-        private static readonly string[] s_trackFileNames = new string[]
-        {
-            "track.mp3",
-            "track.opus",
-            "track.ogg",
-            "track.aac",
-            "track.wav",
-        };
-
         private static string s_importRoot = string.Empty;
         private static ValueTask s_importTask = UniTask.CompletedTask;
         private static readonly ConcurrentQueue<FileSystemEntry> s_pendingImportTasks = new ConcurrentQueue<FileSystemEntry>();
@@ -298,11 +285,11 @@ namespace MajdataPlay.Import
                     continue;
                 }
                 var fileName = entry.Name.ToLowerInvariant();
-                if (string.Equals(fileName, ChartFileName, StringComparison.Ordinal))
+                if (string.Equals(fileName, SongStorage.ChartFileName, StringComparison.Ordinal))
                 {
                     hasChartFile = true;
                 }
-                else if (Array.IndexOf(s_trackFileNames, fileName) >= 0)
+                else if (Array.IndexOf(SongStorage.SupportedTrackFileNames, fileName) >= 0)
                 {
                     hasTrackFile = true;
                 }

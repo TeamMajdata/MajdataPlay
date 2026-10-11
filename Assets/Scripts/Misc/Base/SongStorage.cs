@@ -22,7 +22,18 @@ namespace MajdataPlay
 {
     public static class SongStorage
     {
-        public static bool IsEmpty => Collections.IsEmpty() || Collections.All(x => x.Count == 0);
+        public const string ChartFileName = "maidata.txt";
+        public static readonly string[] SupportedTrackFileNames = Array.Empty<string>()
+                                                                       .Concat(MajEnv.SupportedAudioFormats.Select(x => $"track.{x}"))
+                                                                       .ToArray();
+        public static readonly string[] SupportedVideoFileNames = Array.Empty<string>()
+                                                                       .Concat(MajEnv.SupportedVideoFormats.Select(x => $"bg.{x}"))
+                                                                       .Concat(MajEnv.SupportedVideoFormats.Select(x => $"pv.{x}"))
+                                                                       .ToArray();
+        public static bool IsEmpty
+        {
+            get => Collections.IsEmpty() || Collections.All(x => x.Count == 0);
+        }
         /// <summary>
         /// Current song collection index
         /// </summary>

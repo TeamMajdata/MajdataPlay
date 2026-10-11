@@ -65,10 +65,20 @@ namespace MajdataPlay
         public static readonly System.Threading.ThreadPriority THREAD_PRIORITY_MAIN =
             System.Threading.ThreadPriority.Normal;
 
-        public static readonly string[] SUPPORTED_VIDEO_FORMAT = new string[2]
+        public static readonly string[] SupportedVideoFormats = new string[]
         {
             ".webm",
-            ".mp4"
+            ".mkv",
+            ".mp4",
+            ".mov"
+        };
+        public static readonly string[] SupportedAudioFormats = new string[]
+        {
+            ".mp3",
+            ".opus",
+            ".ogg",
+            ".aac",
+            ".wav"
         };
 
 #if UNITY_ANDROID // Android Only (User Agent)

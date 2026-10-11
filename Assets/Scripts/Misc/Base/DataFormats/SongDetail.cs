@@ -94,7 +94,7 @@ namespace MajdataPlay
                 var thisFilename = o.Name.ToLower();
                 foreach (var filename in videoBGFilename)
                 {
-                    foreach(var ext in MajEnv.SUPPORTED_VIDEO_FORMAT)
+                    foreach(var ext in MajEnv.SupportedVideoFormats)
                     {
                         if(thisFilename == filename + ext)
                         {
