@@ -17,8 +17,6 @@ using System.Linq;
 using System.Security.Cryptography;
 using System.Threading;
 using System.Threading.Tasks;
-using Unity.VisualScripting.Antlr3.Runtime;
-using UnityEngine.Networking;
 #nullable enable
 namespace MajdataPlay
 {
@@ -51,35 +49,35 @@ namespace MajdataPlay
         /// Loaded song collections
         /// </summary>
         public static SongCollection[] Collections { get; private set; } = Array.Empty<SongCollection>();
-        public static SongOrder OrderBy 
+        public static SongOrder OrderBy
         {
             get => MajEnv.RuntimeConfig.List.OrderBy;
         }
         public static long TotalChartCount
-        { 
+        {
             get
             {
                 return _totalChartCount;
             }
         }
 
-        static int _collectionIndex = 0;
-        static long _totalChartCount = 0;
-        static long _parsedChartCount = 0;
+        private static int _collectionIndex = 0;
+        private static long _totalChartCount = 0;
+        private static long _parsedChartCount = 0;
 
 
-        readonly static List<ISongDetail> _allCharts = new(8192);
-        readonly static HashSet<string> _storageFav = new();
-        static DanInfo? _userFavorites = null;
-        static MyFavoriteSongCollection? _myFavorite;
+        private static readonly List<ISongDetail> _allCharts = new(8192);
+        private static readonly HashSet<string> _storageFav = new();
+        private static DanInfo? _userFavorites = null;
+        private static MyFavoriteSongCollection? _myFavorite;
 
-        static bool _isInited = false;
-        static SQLiteAsyncConnection? _favDb;
+        private static bool _isInited = false;
+        private static SQLiteAsyncConnection? _favDb;
 
-        readonly static SongCollection EMPTY_SONG_COLLECTION = SongCollection.Empty("default");
-        readonly static string MY_FAVORITE_FILENAME = "MyFavorites.json";
-        static string MY_FAVORITE_EXPORT_PATH = string.Empty;
-        static string MY_FAVORITE_STORAGE_PATH = string.Empty;
+        private static readonly SongCollection EMPTY_SONG_COLLECTION = SongCollection.Empty("default");
+        private static readonly string MY_FAVORITE_FILENAME = "MyFavorites.json";
+        private static string MY_FAVORITE_EXPORT_PATH = string.Empty;
+        private static string MY_FAVORITE_STORAGE_PATH = string.Empty;
         //these method are called from the game
         internal static async Task InitAsync(IProgress<string>? progressReporter = null)
         {
@@ -113,7 +111,7 @@ namespace MajdataPlay
         }
         internal static async Task RefreshAsync(IProgress<string>? progressReporter = null)
         {
-            if(!_isInited)
+            if (!_isInited)
             {
                 return;
             }
@@ -151,9 +149,9 @@ namespace MajdataPlay
                     }
                 });
                 var waitAllTask = Task.WhenAll(tasks);
-                await using(UniTask.ReturnToCurrentSynchronizationContext())
+                await using (UniTask.ReturnToCurrentSynchronizationContext())
                 {
-                    while(!waitAllTask.IsCompleted)
+                    while (!waitAllTask.IsCompleted)
                     {
                         await UniTask.Yield();
                     }
@@ -181,7 +179,7 @@ namespace MajdataPlay
                     selectedCollection.Index = selectedIndex;
                 }
             }
-            catch(Exception e)
+            catch (Exception e)
             {
                 _allCharts.Clear();
                 _allCharts.AddRange(chartListBackup);
@@ -286,7 +284,7 @@ namespace MajdataPlay
             for (var i = 0; i < collections.Count; i++)
             {
                 var collection = collections[i];
-                if(collection.IsOnline && collection.Type is ChartStorageType.PlayList)
+                if (collection.IsOnline && collection.Type is ChartStorageType.PlayList)
                 {
                     collections.RemoveAt(i--);
                 }
@@ -339,7 +337,7 @@ namespace MajdataPlay
             return isSuccessful;
         }
         //get local song list and online song list
-        static async Task<SongCollection[]> GetCollections(string rootPath, IProgress<string>? progressReporter)
+        private static async Task<SongCollection[]> GetCollections(string rootPath, IProgress<string>? progressReporter)
         {
             var collections = await GetLocalCollections(rootPath, progressReporter);
             //Online Charts
@@ -371,7 +369,7 @@ namespace MajdataPlay
             return await AddAllFolderAndDans(rootPath, collections);
         }
         //scan the local chart folders
-        static async Task<List<SongCollection>> GetLocalCollections(string rootPath, IProgress<string>? progressReporter)
+        private static async Task<List<SongCollection>> GetLocalCollections(string rootPath, IProgress<string>? progressReporter)
         {
             var dirs = FileSystem.Directory.Open(rootPath).EnumerateDirectories().ToArray();
             var tasks = new List<Task<SongCollection>>(dirs.Length);
@@ -417,7 +415,7 @@ namespace MajdataPlay
             return collections;
         }
         //sort out the ALL folder, Dans and playlists
-        static async Task<SongCollection[]> AddAllFolderAndDans(string rootPath, List<SongCollection> collections)
+        private static async Task<SongCollection[]> AddAllFolderAndDans(string rootPath, List<SongCollection> collections)
         {
             //Add all songs to "All" folder
             foreach (var collection in collections)
@@ -504,7 +502,7 @@ namespace MajdataPlay
                         continue;
                     }
                     collections.Add(collection);
-                    MajDebug.LogInfo("Loaded Dan:" + collection.DanInfo?.Name ?? collection.Name);
+                    MajDebug.LogInfo(("Loaded Dan:" + collection.DanInfo?.Name) ?? collection.Name);
                 }
             }
             return collections.ToArray();
@@ -532,7 +530,7 @@ namespace MajdataPlay
             }
             using var charts = new PooledList<SongDetail>();
             using var tasks = new PooledList<Task<SongDetail?>>();
-            
+
             foreach (var songDir in dirs)
             {
                 if (songDir.IsHidden)
@@ -616,7 +614,7 @@ namespace MajdataPlay
                     progressReporter?.Report(ZString.Format("Failed to fetch list from {0}".i18n(), api.Name));
                     throw new OperationCanceledException();
                 }
-                if(chartList.Length == 0)
+                if (chartList.Length == 0)
                 {
                     return collection;
                 }
@@ -708,7 +706,7 @@ namespace MajdataPlay
             });
         }
         #endregion
-        static void OnSave(object? sender, EventArgs? args)
+        private static void OnSave(object? sender, EventArgs? args)
         {
             try
             {
@@ -734,7 +732,7 @@ namespace MajdataPlay
                 MajDebug.LogException(e);
             }
         }
-        static Guid GetGuidFromStream(Stream stream)
+        private static Guid GetGuidFromStream(Stream stream)
         {
             using var md5 = MD5.Create();
             var hash = md5.ComputeHash(stream);
@@ -749,7 +747,9 @@ namespace MajdataPlay
             _myFavorite.Add(songDetail);
             var hash = songDetail.Hash;
             if (!string.IsNullOrEmpty(hash))
+            {
                 _favDb?.RunInTransactionAsync(conn => conn.InsertOrReplace(new FavoriteHashDB { Hash = hash }));
+            }
         }
         public static bool IsInMyFavorites(ISongDetail songDetail)
         {
@@ -760,15 +760,19 @@ namespace MajdataPlay
             _myFavorite.Remove(songDetail);
             var hash = songDetail.Hash;
             if (!string.IsNullOrEmpty(hash))
+            {
                 _favDb?.RunInTransactionAsync(conn => conn.Delete<FavoriteHashDB>(hash));
+            }
         }
         public static void RemoveFromMyFavorites(string hashBase64Str)
         {
             _myFavorite.Remove(hashBase64Str);
             if (!string.IsNullOrEmpty(hashBase64Str))
+            {
                 _favDb?.RunInTransactionAsync(conn => conn.Delete<FavoriteHashDB>(hashBase64Str));
+            }
         }
-        static async Task RefreshMyFavAsync()
+        private static async Task RefreshMyFavAsync()
         {
             if (string.IsNullOrEmpty(MY_FAVORITE_EXPORT_PATH))
             {
@@ -825,7 +829,7 @@ namespace MajdataPlay
                 }
             }
         }
-        static async Task MigrateFavFromJsonAsync()
+        private static async Task MigrateFavFromJsonAsync()
         {
             try
             {
@@ -839,7 +843,9 @@ namespace MajdataPlay
                         foreach (var hash in storageFav)
                         {
                             if (!string.IsNullOrEmpty(hash))
+                            {
                                 conn.Insert(new FavoriteHashDB { Hash = hash });
+                            }
                         }
                     });
                 }
@@ -862,14 +868,14 @@ namespace MajdataPlay
             }
         }
 
-        static void OnAppQuit(object? sender, EventArgs? args)
+        private static void OnAppQuit(object? sender, EventArgs? args)
         {
             GameManager.OnAppQuit -= OnAppQuit;
             _favDb?.CloseAsync().Wait();
         }
 
         [Table("FavoriteHashes")]
-        class FavoriteHashDB
+        private class FavoriteHashDB
         {
             [PrimaryKey]
             public string Hash { get; set; } = string.Empty;
