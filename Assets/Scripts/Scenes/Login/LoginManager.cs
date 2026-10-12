@@ -3,18 +3,16 @@ using MajdataPlay.Buffers;
 using MajdataPlay.Diagnostics;
 using MajdataPlay.IO;
 using MajdataPlay.Net;
-using MajdataPlay.Utils;
 using QRCoder;
 using System;
 using System.Linq;
 using System.Net;
 using System.Runtime.CompilerServices;
-using System.Security.Cryptography;
-using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using TMPro;
 using UnityEngine;
+using UnityEngine.Serialization;
 using UnityEngine.UI;
 using static QRCoder.QRCodeGenerator;
 #nullable enable
@@ -23,50 +21,54 @@ namespace MajdataPlay.Scenes.Login
     internal class LoginManager : MonoBehaviour
     {
         [SerializeField]
-        TextMeshProUGUI _sceneTitle;
+        private TextMeshProUGUI _sceneTitle;
         [SerializeField]
-        GameObject _usernameComponent;
+        private GameObject _usernameComponent;
         [SerializeField]
-        GameObject _passwordComponent;
+        private GameObject _passwordComponent;
         [SerializeField]
-        GameObject _qrCodeComponent;
+        private GameObject _qrCodeComponent;
         [SerializeField]
-        GameObject _qrCodeLoading;
+        private GameObject _qrCodeLoading;
         [SerializeField]
-        GameObject _qrCodeErrorIcon;
+        private GameObject _qrCodeErrorIcon;
 
         [SerializeField]
-        TMP_InputField _usernameInput;
+        private TMP_InputField _usernameInput;
         [SerializeField]
-        TMP_InputField _passwordInput;
+        private TMP_InputField _passwordInput;
         [SerializeField]
-        GameObject _usernameClearButton;
+        private GameObject _usernameClearButton;
         [SerializeField]
-        GameObject _passwordClearButton;
+        private GameObject _passwordClearButton;
         [SerializeField]
-        GameObject _button4;
+        private GameObject _button4;
 
         [SerializeField]
-        GameObject _loading;
+        private GameObject _loading;
         [SerializeField]
-        GameObject _hintTextObject;
+        private GameObject _hintTextObject;
         [SerializeField]
-        TextMeshProUGUI _hintText;
-        [SerializeField]
-        Color ErrorColor;
-        [SerializeField]
-        Color SucceedColor;
+        private TextMeshProUGUI _hintText;
 
-        RawImage _qrCodeRawImage = null!;
-        ApiEndpoint[] _apiEndpoints = Array.Empty<ApiEndpoint>();
-        ApiEndpoint[] _enabledEndpoints = Array.Empty<ApiEndpoint>();
+        [FormerlySerializedAs("ErrorColor")]
+        [SerializeField]
+        private Color _errorColor;
 
-        bool _isReady = false;
-        bool _isExited = false;
-        readonly static QRCodeGenerator _qrGenerator = new ();
-        readonly static Exception _exception = new();
+        [FormerlySerializedAs("SucceedColor")]
+        [SerializeField]
+        private Color _succeedColor;
 
-        void Awake()
+        private RawImage _qrCodeRawImage = null!;
+        private ApiEndpoint[] _apiEndpoints = Array.Empty<ApiEndpoint>();
+        private ApiEndpoint[] _enabledEndpoints = Array.Empty<ApiEndpoint>();
+
+        private bool _isReady = false;
+        private bool _isExited = false;
+        private static readonly QRCodeGenerator s_qrGenerator = new();
+        private static readonly Exception s_exception = new();
+
+        private void Awake()
         {
             _apiEndpoints = MajEnv.ApiEndpoints;
             _qrCodeRawImage = _qrCodeComponent.GetComponent<RawImage>();
@@ -90,9 +92,9 @@ namespace MajdataPlay.Scenes.Login
             UpdateClearButtons();
             LoginProcessor().Forget();
         }
-        void Update()
+        private void Update()
         {
-            if(!_isReady || _isExited)
+            if (!_isReady || _isExited)
             {
                 return;
             }
@@ -104,11 +106,11 @@ namespace MajdataPlay.Scenes.Login
                                          InputManager.IsSensorPressedInThisFrame(SensorArea.E4);
             var isUsernameClearBtnClicked = InputManager.IsSensorPressedInThisFrame(SensorArea.D3);
             var isPasswordClearBtnClicked = InputManager.IsSensorPressedInThisFrame(SensorArea.A3);
-            if(isUsernameInputClicked)
+            if (isUsernameInputClicked)
             {
                 Focus(_usernameInput);
             }
-            if(isUsernameClearBtnClicked)
+            if (isUsernameClearBtnClicked)
             {
                 Focus(_usernameInput);
                 _usernameInput.text = string.Empty;
@@ -124,20 +126,20 @@ namespace MajdataPlay.Scenes.Login
             }
         }
 
-        void UpdateClearButtons()
+        private void UpdateClearButtons()
         {
             _usernameClearButton.SetActive(!string.IsNullOrEmpty(_usernameInput.text));
             _passwordClearButton.SetActive(!string.IsNullOrEmpty(_passwordInput.text));
         }
 
-        static void Focus(TMP_InputField inputField)
+        private static void Focus(TMP_InputField inputField)
         {
             inputField.Select();
             inputField.ActivateInputField();
             inputField.MoveTextEnd(false);
         }
 
-        async UniTaskVoid LoginProcessor()
+        private async UniTaskVoid LoginProcessor()
         {
             const int AUTH_FLAG_REQUESTING = 0;
             const int AUTH_FLAG_WAIT_FOR_PERMIT = 1;
@@ -150,7 +152,7 @@ namespace MajdataPlay.Scenes.Login
                 _loading.SetActive(false);
                 Hint();
                 var siteName = endpoint.Name;
-                if(string.IsNullOrEmpty(siteName))
+                if (string.IsNullOrEmpty(siteName))
                 {
                     siteName = endpoint.Url.Host;
                 }
@@ -166,14 +168,12 @@ namespace MajdataPlay.Scenes.Login
                 _usernameInput.text = endpoint.RuntimeConfig.AuthUsername ?? string.Empty;
                 _passwordInput.text = endpoint.RuntimeConfig.AuthPassword ?? string.Empty;
                 await sceneSwitcher.FadeOutAsync();
- 
-                var authSessionTask = default(ValueTask<(string, AuthRequestResponse)>);
                 var authCheckTask = default(ValueTask<EndpointResponse>?);
                 var authProcessFlag = AUTH_FLAG_REQUESTING;
                 var cts = new CancellationTokenSource();
                 var authRequestId = string.Empty;
                 var authCheckCooldownSec = 2d;
-                authSessionTask = RegistryAuthSession(endpoint, cts.Token);
+                var authSessionTask = RegistryAuthSession(endpoint, cts.Token);
                 while (true)
                 {
                     _isReady = true;
@@ -186,12 +186,12 @@ namespace MajdataPlay.Scenes.Login
                     {
                         if (authProcessFlag == AUTH_FLAG_REQUESTING)
                         {
-                            if(authSessionTask.IsCompletedSuccessfully)
+                            if (authSessionTask.IsCompletedSuccessfully)
                             {
                                 var (location, authRsp) = authSessionTask.Result;
-                                var qrCodeData = _qrGenerator.CreateQrCode(location, ECCLevel.Q);
+                                var qrCodeData = s_qrGenerator.CreateQrCode(location, ECCLevel.Q);
                                 var qrCode = new PngByteQRCode(qrCodeData);
-                                var pngBytes = qrCode.GetGraphic(20,false);
+                                var pngBytes = qrCode.GetGraphic(20, false);
                                 var texture = new Texture2D(0, 0);
                                 authRequestId = authRsp.RequestId;
 
@@ -204,7 +204,7 @@ namespace MajdataPlay.Scenes.Login
 
                                 authProcessFlag = AUTH_FLAG_WAIT_FOR_PERMIT;
                             }
-                            else if(authSessionTask.IsCompleted)// Faulted or canceled
+                            else if (authSessionTask.IsCompleted)// Faulted or canceled
                             {
                                 authProcessFlag = AUTH_FLAG_ERROR;
                                 _qrCodeErrorIcon.SetActive(true);
@@ -214,14 +214,14 @@ namespace MajdataPlay.Scenes.Login
                         }
                         else if (authProcessFlag == AUTH_FLAG_WAIT_FOR_PERMIT)
                         {
-                            if(authCheckTask is ValueTask<EndpointResponse> task)
+                            if (authCheckTask is ValueTask<EndpointResponse> task)
                             {
                                 if (task.IsCompleted && !task.IsCompletedSuccessfully)
                                 {
                                     MajDebug.LogError("Auth check failed");
                                     MajDebug.LogException(task.AsTask().Exception);
                                 }
-                                else if(task.IsCompletedSuccessfully)
+                                else if (task.IsCompletedSuccessfully)
                                 {
                                     var rsp = task.Result;
                                     if (rsp.StatusCode is HttpStatusCode.OK)
@@ -231,7 +231,7 @@ namespace MajdataPlay.Scenes.Login
                                         _isReady = false;
                                         MajDebug.LogDebug("Checking login status");
                                         var getUserInfoTask = FetchUserDataAsync(endpoint);
-                                        while(!getUserInfoTask.IsCompleted)
+                                        while (!getUserInfoTask.IsCompleted)
                                         {
                                             await UniTask.Yield();
                                         }
@@ -239,7 +239,7 @@ namespace MajdataPlay.Scenes.Login
                                         endpoint.RuntimeConfig.AuthMethod = NetAuthMethodOption.QRCode;
                                         var userInfo = (UserSummary?)null;
                                         var userScores = Array.Empty<MajNetAccountSongScore>();
-                                        if(getUserInfoTask.IsCompletedSuccessfully)
+                                        if (getUserInfoTask.IsCompletedSuccessfully)
                                         {
                                             var userData = getUserInfoTask.Result;
                                             userInfo = userData.Summary;
@@ -255,7 +255,7 @@ namespace MajdataPlay.Scenes.Login
                                         authCheckTask = null;
                                         MajDebug.LogDebug("No user has granted authorization");
                                     }
-                                    else if(rsp.StatusCode is HttpStatusCode.NotFound)
+                                    else if (rsp.StatusCode is HttpStatusCode.NotFound)
                                     {
                                         MajDebug.LogDebug("The authorization session has expired.");
                                         isRefreshQRCodeRequested = true;
@@ -270,7 +270,7 @@ namespace MajdataPlay.Scenes.Login
                             }
                             else
                             {
-                                if(authCheckCooldownSec < 0)
+                                if (authCheckCooldownSec < 0)
                                 {
                                     authCheckTask = Online.AuthCheckAsync(endpoint, authRequestId, cts.Token);
                                     authCheckCooldownSec = 2d;
@@ -279,7 +279,7 @@ namespace MajdataPlay.Scenes.Login
                                 else
                                 {
                                     authCheckCooldownSec -= MajTimeline.UnscaledDeltaTime;
-                                }                                
+                                }
                             }
                         }
 
@@ -378,7 +378,7 @@ namespace MajdataPlay.Scenes.Login
                                 {
                                     await RevokeAuthSession(endpoint, authRequestId);
                                 }
-                                while(!getUserInfoTask.IsCompleted)
+                                while (!getUserInfoTask.IsCompleted)
                                 {
                                     await UniTask.Yield();
                                 }
@@ -410,9 +410,9 @@ namespace MajdataPlay.Scenes.Login
             }
             EnterList();
         }
-        void EnterList()
+        private void EnterList()
         {
-            if(_isExited)
+            if (_isExited)
             {
                 return;
             }
@@ -421,7 +421,7 @@ namespace MajdataPlay.Scenes.Login
         }
         /// <summary>Refreshes the requested online collections and online favorites before returning to the list scene.</summary>
         /// <param name="refreshOnline">Whether to refresh online collections in addition to online favorites.</param>
-        static async void RefreshListBackgroundAsync(bool refreshOnline = false)
+        private static async void RefreshListBackgroundAsync(bool refreshOnline = false)
         {
             var sceneSwitcher = MajInstances.SceneSwitcher;
             await sceneSwitcher.FadeInAsync();
@@ -463,15 +463,15 @@ namespace MajdataPlay.Scenes.Login
                 sceneSwitcher.SetLoadingText(string.Empty);
             }
 
-            
+
             sceneSwitcher.SwitchScene("List", false);
         }
-        async ValueTask<UserData> FetchUserDataAsync(ApiEndpoint endpoint, CancellationToken token = default)
+        private async ValueTask<UserData> FetchUserDataAsync(ApiEndpoint endpoint, CancellationToken token = default)
         {
             var fetchUserInfoRsp = await Online.GetUserInfoAsync(endpoint, token);
             var userScores = await Online.GetUserScoresAsync(endpoint, token);
             var userInfo = default(UserSummary?);
-            if(fetchUserInfoRsp.TryDeserialize(out var userInfoOut, out var e))
+            if (fetchUserInfoRsp.TryDeserialize(out var userInfoOut, out var e))
             {
                 userInfo = userInfoOut;
             }
@@ -487,7 +487,7 @@ namespace MajdataPlay.Scenes.Login
                 Scores = userScores,
             };
         }
-        async UniTask UpdateApiEndpointRuntimeConfigAsync(ApiEndpoint endpoint, UserSummary? userInfo)
+        private async UniTask UpdateApiEndpointRuntimeConfigAsync(ApiEndpoint endpoint, UserSummary? userInfo)
         {
             var runtimeConfig = endpoint.RuntimeConfig;
             if (userInfo is not null)
@@ -513,7 +513,7 @@ namespace MajdataPlay.Scenes.Login
             else
             {
                 runtimeConfig.Avatar = null;
-                if(runtimeConfig.AuthMethod == NetAuthMethodOption.Plain)
+                if (runtimeConfig.AuthMethod == NetAuthMethodOption.Plain)
                 {
                     runtimeConfig.Username = runtimeConfig.Username;
                 }
@@ -523,7 +523,7 @@ namespace MajdataPlay.Scenes.Login
                 }
             }
         }
-        async UniTask RevokeAuthSession(ApiEndpoint endpoint, string authId, CancellationToken token = default)
+        private async UniTask RevokeAuthSession(ApiEndpoint endpoint, string authId, CancellationToken token = default)
         {
             var revokeTask = Online.AuthRevokeAsync(endpoint, authId);
             while (!revokeTask.IsCompleted)
@@ -540,34 +540,34 @@ namespace MajdataPlay.Scenes.Login
                 MajDebug.LogException(revokeTask.AsTask().Exception);
             }
         }
-        async ValueTask<(string, AuthRequestResponse)> RegistryAuthSession(ApiEndpoint endpoint, CancellationToken token = default)
+        private async ValueTask<(string, AuthRequestResponse)> RegistryAuthSession(ApiEndpoint endpoint, CancellationToken token = default)
         {
             await UniTask.SwitchToThreadPool();
-            var rsp = default(EndpointResponse);
+            EndpointResponse rsp;
             if (!Online.IsMachineRegistered(endpoint))
             {
                 try
                 {
-                    
+
                     rsp = await Online.RegisterAsync(endpoint, MajEnv.MachineInfo, token);
                     if (!rsp.IsSuccessfully)
                     {
-                        throw _exception;
+                        throw s_exception;
                     }
                 }
                 catch
                 {
                     MajDebug.LogError("Failed to register QR Code login session");
                     throw;
-                }                
-            }       
-            
+                }
+            }
+
             try
             {
                 rsp = await Online.AuthRequestAsync(endpoint, token);
                 if (!rsp.IsDeserializable || rsp.StatusCode != HttpStatusCode.Created)
                 {
-                    throw _exception;
+                    throw s_exception;
                 }
             }
             catch
@@ -575,7 +575,7 @@ namespace MajdataPlay.Scenes.Login
                 MajDebug.LogError("Attempt to request authorization session failed");
                 throw;
             }
-            
+
             var location = string.Empty;
             if (rsp.Headers.TryGetValue("location", out var headers))
             {
@@ -585,7 +585,7 @@ namespace MajdataPlay.Scenes.Login
             if (string.IsNullOrEmpty(location) || !rsp.TryDeserialize<AuthRequestResponse?>(out var authRsp, out e) || authRsp is null)
             {
                 MajDebug.LogError($"The server returned an invalid response\n{rsp}\nException: {e}");
-                throw _exception;
+                throw s_exception;
             }
             return (location, (AuthRequestResponse)authRsp);
         }
@@ -595,16 +595,16 @@ namespace MajdataPlay.Scenes.Login
         {
             if (!string.IsNullOrEmpty(hintText))
             {
-                _hintText.color = isError ? ErrorColor : SucceedColor;
+                _hintText.color = isError ? _errorColor : _succeedColor;
             }
             _hintText.text = hintText;
         }
 
-        readonly struct AuthRequestResponse
+        private readonly struct AuthRequestResponse
         {
             public string RequestId { get; init; }
         }
-        readonly struct UserData
+        private readonly struct UserData
         {
             public UserSummary? Summary { get; init; }
             public MajNetAccountSongScore[] Scores { get; init; }
