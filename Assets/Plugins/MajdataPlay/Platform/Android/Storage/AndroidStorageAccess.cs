@@ -379,7 +379,7 @@ namespace MajdataPlay.Platform.Android.Storage
         /// <param name="requestCode">The activity request ID.</param>
         /// <param name="resultCode">Android's result status.</param>
         /// <param name="intent">The borrowed intent, owned by AndroidRuntime.</param>
-        private static void OnActivityResult(object? sender, int requestCode, int resultCode, AndroidJavaObject? intent)
+        private static void OnActivityResult(object? sender, int requestCode, int resultCode, Intent? intent)
         {
             PickerRequest? pending;
             lock (s_gate)
@@ -400,7 +400,7 @@ namespace MajdataPlay.Platform.Android.Storage
                 {
                     throw new IOException("Android returned an invalid document picker result.");
                 }
-                return InvokeJava(() => ReadPickerResult(pending, intent));
+                return InvokeJava(() => ReadPickerResult(pending, intent.JavaReference));
             });
         }
 

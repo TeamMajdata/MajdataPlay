@@ -1,4 +1,6 @@
-﻿using MajdataPlay.Platform.Android.Runtime.App;
+﻿using MajdataPlay.Diagnostics;
+using MajdataPlay.Platform.Android.IO;
+using MajdataPlay.Platform.Android.Runtime.App;
 using MajdataPlay.Platform.Android.Runtime.Content;
 using MajdataPlay.Platform.Android.Runtime.Unity;
 using System;
@@ -29,9 +31,9 @@ namespace MajdataPlay.Platform.Android
             {
                 MajdataPlayActivityClass = new AndroidJavaClass("net.majdata.majdataplay.MajdataPlayActivity");
                 MajDebug.LogInfo($"[{nameof(AndroidRuntime)}] Setting onNewIntent callback proxy");
-                MajdataPlayActivityClass.CallStatic("registerOnNewIntentCallback", _onNewIntentCallbackProxy);
+                MajdataPlayActivityClass.CallStatic("registerOnNewIntentCallback", s_onNewIntentCallbackProxy);
                 MajDebug.LogInfo($"[{nameof(AndroidRuntime)}] Setting onActivityResult callback proxy");
-                MajdataPlayActivityClass.CallStatic("registerOnActivityResultCallback", _onActivityResultCallbackProxy);
+                MajdataPlayActivityClass.CallStatic("registerOnActivityResultCallback", s_onActivityResultCallbackProxy);
 
             
                 AndroidKeyboard.Init();

@@ -205,6 +205,30 @@ The existing managed Activity-result proxy callback is marked `Preserve` for
 reflection-based JNI dispatch. These annotations and rules do not replace IL2CPP
 Player/device validation.
 
+## Android stream capabilities
+
+SAF read streams and explicit truncate (`wt`) write streams support `Seek`,
+`Length`, and getting/setting `Position` only when the **opened descriptor** can
+seek and exposes a reliable logical length. Check `CanSeek`; a document metadata
+size or provider flag does not establish these capabilities. An unknown declared
+asset length can still be resolved from the opened regular file's current size.
+Whole-file write lengths are refreshed after writes rather than cached metadata.
+
+Positions start at zero for the document's asset range. A nonzero asset start
+and declared slice length are preserved: reads cannot expose the surrounding
+file, and writes cannot cross a declared asset boundary. Begin/current/end seeks
+and returned positions use signed 64-bit Java/JNI values on both Android ABIs.
+A seek past logical EOF is allowed; subsequent reads return EOF. Negative and
+overflowing positions fail without intentionally moving the descriptor.
+
+Pipes, unknown-length resources which cannot supply complete seek semantics,
+and append (`wa`) streams retain sequential operations. Append does not emulate
+its mode by seeking and cannot become overwrite through `Position`. Unsupported
+seek/length/position operations throw `NotSupportedException`; `SetLength` remains
+unsupported for all SAF streams. No whole-file cache or increased read/write URI
+permission is introduced to manufacture seeking support. Dispose every stream
+deterministically, including after cancellation.
+
 ## Semantics and limits
 
 - Entry metadata is a snapshot. Optional `ResourceId` identifies a resource

@@ -229,6 +229,8 @@ namespace MajdataPlay.Tests
             RequireGeneratedProperty(typeof(StorageResult), "Stream", typeof(DocumentStream));
             RequireGeneratedProperty(typeof(StorageResult), "Data", typeof(sbyte[]));
             RequireGeneratedProperty(typeof(StorageResult), "Count", typeof(int));
+            RequireGeneratedProperty(typeof(StorageResult), "Value", typeof(long));
+            RequireGeneratedProperty(typeof(DocumentStream), "Seekable", typeof(bool));
             RequireGeneratedProperty(typeof(DocumentEntry), "Uri", typeof(string));
             RequireGeneratedProperty(typeof(DocumentEntry), "ResourceId", typeof(string));
             RequireGeneratedProperty(typeof(DocumentEntry), "Name", typeof(string));
@@ -253,6 +255,10 @@ namespace MajdataPlay.Tests
             RequireGeneratedMethod(typeof(StorageAccess), "DeleteDirectory", typeof(StorageResult), true, typeof(string), typeof(bool));
             RequireGeneratedMethod(typeof(DocumentCursor), "Next", typeof(StorageResult), false);
             RequireGeneratedMethod(typeof(DocumentCursor), "Close", typeof(StorageResult), false);
+            RequireGeneratedMethod(typeof(DocumentStream), "GetLength", typeof(StorageResult), false);
+            RequireGeneratedMethod(typeof(DocumentStream), "GetPosition", typeof(StorageResult), false);
+            RequireGeneratedMethod(typeof(DocumentStream), "SetPosition", typeof(StorageResult), false, typeof(long));
+            RequireGeneratedMethod(typeof(DocumentStream), "Seek", typeof(StorageResult), false, typeof(long), typeof(int));
             RequireGeneratedMethod(typeof(DocumentStream), "Read", typeof(StorageResult), false, typeof(int));
             RequireGeneratedMethod(typeof(DocumentStream), "Write", typeof(StorageResult), false, typeof(sbyte[]), typeof(int));
             RequireGeneratedMethod(typeof(DocumentStream), "Flush", typeof(StorageResult), false);
@@ -546,6 +552,14 @@ namespace MajdataPlay.Tests
             }
             if (borrowed is DocumentStream stream)
             {
+                RequireThrowsPlatform(() =>
+                {
+                    _ = stream.Seekable;
+                });
+                RequireThrowsPlatform(() => stream.GetLength());
+                RequireThrowsPlatform(() => stream.GetPosition());
+                RequireThrowsPlatform(() => stream.SetPosition((1L << 32) + 17));
+                RequireThrowsPlatform(() => stream.Seek(-1, 2));
                 RequireThrowsPlatform(() => stream.Read(3));
                 RequireThrowsPlatform(() => stream.Write(new sbyte[] { -128, 0, 127 }, 3));
                 RequireThrowsPlatform(() => stream.Flush());

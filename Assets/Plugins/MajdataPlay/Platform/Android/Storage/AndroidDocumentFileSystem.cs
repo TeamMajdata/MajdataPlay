@@ -133,7 +133,7 @@ namespace MajdataPlay.Platform.Android.Storage
 
         /// <summary>Opens an existing binary file without assuming a seekable descriptor or known length.</summary>
         /// <param name="location">The authorized existing document URI.</param>
-        /// <returns>A caller-owned, nonseekable sequential read stream.</returns>
+        /// <returns>A caller-owned read stream which supports seeking when the opened provider resource permits it.</returns>
         /// <exception cref="PlatformNotSupportedException">Execution is outside an Android player.</exception>
         /// <exception cref="ArgumentException">The URI is invalid.</exception>
         /// <exception cref="FileNotFoundException">The document does not exist.</exception>
@@ -148,7 +148,7 @@ namespace MajdataPlay.Platform.Android.Storage
         /// <summary>Opens an existing binary file with explicit provider truncate or append semantics.</summary>
         /// <param name="location">The authorized existing document URI.</param>
         /// <param name="append">Whether to append using wa instead of truncating using wt.</param>
-        /// <returns>A caller-owned, nonseekable sequential write stream.</returns>
+        /// <returns>A caller-owned write stream with optional seeking; append retains sequential provider semantics.</returns>
         /// <exception cref="PlatformNotSupportedException">Execution is outside an Android player.</exception>
         /// <exception cref="ArgumentException">The URI is invalid.</exception>
         /// <exception cref="FileNotFoundException">The document does not exist.</exception>

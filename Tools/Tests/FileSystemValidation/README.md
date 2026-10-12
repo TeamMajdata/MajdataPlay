@@ -186,8 +186,9 @@ checks, and deterministic commit/cancellation and launch/shutdown concurrency:
   generated `JavaObject` bases, constants, and reference constructors.
 - Storage methods return typed `StorageResult` envelopes; getter-only result fields
   map to `DocumentEntry` / `DocumentCursor` / `DocumentStream`. Java byte arrays use
-  `sbyte[]` for result `Data` and stream writes; metadata integers, booleans,
-  strings, and 64-bit values retain their exact types.
+  `sbyte[]` for result `Data` and stream writes; `long` for stream `Value`,
+  length/position/seek envelopes and offsets, plus the per-open `Seekable` flag.
+  Metadata integers, booleans, strings, and 64-bit values retain their exact types.
 - Borrowed wrappers retain the supplied reference without disposing it; other
   borrowers remain intact. Default adopting ownership disposes exactly once,
   repeated disposal is harmless, disposed wrappers reject reference access,

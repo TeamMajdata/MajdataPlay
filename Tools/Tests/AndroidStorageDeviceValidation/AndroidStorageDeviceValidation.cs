@@ -3,12 +3,14 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
+using System.Reflection;
 using System.Runtime.ExceptionServices;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using MajdataPlay.IO.Storage;
 using MajdataPlay.Platform.Android.Runtime.Java.Lang;
+using MajdataPlay.Platform.Android.Runtime.Storage;
 using MajdataPlay.Platform.Android.Storage;
 using UnityEngine;
 using Activity = MajdataPlay.Platform.Android.Runtime.App.Activity;
@@ -103,7 +105,7 @@ namespace MajdataPlay.Platform.Android.Runtime.Validation
                 Mark("IL2CPP_PASSED", "The runtime was compiled with ENABLE_IL2CPP.");
                 _mode = InvokeAttached(ReadMode);
                 _result.Mode = _mode;
-                Require(_mode == "full" || _mode == "replay" || _mode == "release", "Unknown validationMode.");
+                Require(_mode == "full" || _mode == "replay" || _mode == "release" || _mode == "streams", "Unknown validationMode.");
                 InvokeAttached(() =>
                 {
                     CheckJni();
@@ -121,6 +123,18 @@ namespace MajdataPlay.Platform.Android.Runtime.Validation
                     return true;
                 }), cancellationToken);
                 Mark("BACKGROUND_JNI_PASSED", "JNI work and deterministic wrapper disposal ran on an attached worker.");
+                await Task.Run(() => InvokeAttached(() =>
+                {
+                    Require(DeviceJniProbe.ValidateDocumentStreams(), "Controlled descriptor stream regressions failed.");
+                    CheckDescriptorAdapters();
+                    return true;
+                }), cancellationToken);
+                Mark("DESCRIPTOR_STREAMS_PASSED", "Production Java handles passed real-file, slice, pipe, large-offset, write, append and close regressions.");
+                if (_mode == "streams")
+                {
+                    Mark("STREAMS_PASSED", "Controlled Java descriptors and production managed stream adapters passed; no SAF picker or grants were used.", true);
+                    return;
+                }
                 await CheckUiCallbackAsync(cancellationToken);
                 Mark("UI_CALLBACK_PASSED", "The generated Activity Runnable adapter completed a managed callback.");
 
@@ -232,6 +246,139 @@ namespace MajdataPlay.Platform.Android.Runtime.Validation
             return string.IsNullOrEmpty(mode) || mode == "pick" ? "full" : mode;
         }
 
+        /// <summary>Tests the production managed stream adapter against real controlled Android descriptors.</summary>
+        /// <exception cref="InvalidOperationException">A capability, transfer, position, or lifetime assertion fails.</exception>
+        /// <exception cref="IOException">A controlled descriptor cannot be opened or accessed.</exception>
+        /// <exception cref="JavaInvocationException">The real Android descriptor fixture fails.</exception>
+        private static void CheckDescriptorAdapters()
+        {
+            foreach (var kind in new[] { "read", "slice", "large", "pipe", "bounded-pipe" })
+            {
+                using var stream = OpenDescriptorFixture(kind, true);
+                var seekable = kind != "pipe" && kind != "bounded-pipe";
+                Require(stream.CanRead && !stream.CanWrite && stream.CanSeek == seekable, "The fixture advertised incorrect capabilities.");
+                if (kind == "large")
+                {
+                    var offset = (1L << 32) + 17;
+                    Require(stream.Length == offset + 2 && stream.Position == 0, "The large length lost its 64-bit value.");
+                    stream.Position = offset;
+                    Require(stream.Position == offset && stream.ReadByte() == 23, "The large Position setter lost its 64-bit value.");
+                    Require(stream.Seek(-1, SeekOrigin.End) == offset + 1 && stream.ReadByte() == 24, "Large end-relative seek failed.");
+                }
+                else
+                {
+                    var expected = kind == "slice" ? new byte[] { 128, 255, 0, 127 } : new byte[] { 10, 20, 30, 40 };
+                    if (seekable)
+                    {
+                        Require(stream.Length == 4 && stream.Position == 0, "A fixture has the wrong logical range.");
+                        Require(stream.Seek(1, SeekOrigin.Begin) == 1 && stream.ReadByte() == expected[1], "Begin seek failed.");
+                        Require(stream.Seek(-1, SeekOrigin.Current) == 1, "Current-relative seek failed.");
+                        Require(stream.Seek(-1, SeekOrigin.End) == 3 && stream.ReadByte() == expected[3], "End-relative seek failed.");
+                        Require(stream.ReadByte() == -1, "The fixture exposed bytes outside its logical end.");
+                        stream.Position = 1;
+                        Expect<ArgumentOutOfRangeException>(() => stream.Position = -1);
+                        Expect<ArgumentException>(() => stream.Seek(0, (SeekOrigin)99));
+                        Expect<IOException>(() => stream.Seek(-2, SeekOrigin.Current));
+                        Expect<IOException>(() => stream.Seek(long.MaxValue, SeekOrigin.Current));
+                        Require(stream.Position == 1, "A rejected seek changed the fixture position.");
+                        stream.Position = 0;
+                    }
+                    else
+                    {
+                        Expect<NotSupportedException>(() =>
+                        {
+                            _ = stream.Length;
+                        });
+                        Expect<NotSupportedException>(() =>
+                        {
+                            _ = stream.Position;
+                        });
+                        Expect<NotSupportedException>(() => stream.Position = 0);
+                        Expect<NotSupportedException>(() => stream.Seek(0, SeekOrigin.Begin));
+                    }
+                    using var copy = new MemoryStream();
+                    stream.CopyTo(copy);
+                    var actual = copy.ToArray();
+                    Require(actual.Length == expected.Length, "Default CopyTo returned the wrong logical length.");
+                    for (var i = 0; i < expected.Length; i++)
+                    {
+                        Require(actual[i] == expected[i], "The fixture copied an incorrect signed-byte pattern.");
+                    }
+                    if (seekable)
+                    {
+                        stream.Position = 0;
+                        using var asyncCopy = new MemoryStream();
+                        stream.CopyToAsync(asyncCopy).GetAwaiter().GetResult();
+                        Require(asyncCopy.Length == expected.Length, "Default CopyToAsync failed after rewinding from EOF.");
+                        stream.Position = 8;
+                        Require(stream.ReadByte() == -1, "Seeking past EOF exposed outside bytes.");
+                    }
+                }
+                stream.Dispose();
+                stream.Dispose();
+                Require(!stream.CanRead && !stream.CanWrite && !stream.CanSeek, "A disposed fixture kept its capabilities.");
+                Expect<ObjectDisposedException>(() =>
+                {
+                    _ = stream.Length;
+                });
+                Expect<ObjectDisposedException>(() => stream.Position = 0);
+                Expect<ObjectDisposedException>(() => stream.Seek(0, SeekOrigin.Begin));
+            }
+            using (var stream = OpenDescriptorFixture("write", false))
+            {
+                Require(stream.CanWrite && !stream.CanRead && stream.CanSeek, "Regular output lost its seek capability.");
+                stream.Write(new byte[] { 1, 2, 3 }, 0, 3);
+                Require(stream.Length == 3 && stream.Position == 3, "Writing did not update descriptor length and position.");
+                stream.Position = 1;
+                stream.WriteByte(9);
+                Require(stream.Position == 2 && stream.Length == 3, "Output positioning changed the wrong range.");
+                var offset = (1L << 32) + 17;
+                Require(stream.Seek(offset, SeekOrigin.Begin) == offset, "Large output seek lost its 64-bit value.");
+                stream.WriteByte(7);
+                Require(stream.Length == offset + 1 && stream.Position == offset + 1, "Large output length or position was truncated.");
+                stream.Flush();
+                Expect<NotSupportedException>(() => stream.SetLength(1));
+            }
+            using (var append = OpenDescriptorFixture("append", false))
+            {
+                Require(append.CanWrite && !append.CanSeek, "Append must keep sequential semantics.");
+                Expect<NotSupportedException>(() => append.Position = 0);
+                append.WriteByte(50);
+            }
+        }
+
+        /// <summary>Adopts a controlled real descriptor using the same internal constructor as the production provider opener.</summary>
+        /// <param name="kind">The Java descriptor scenario, without a URI or permission grant.</param>
+        /// <param name="readable">Whether the scenario supplies an input rather than an output descriptor.</param>
+        /// <returns>A caller-owned production managed stream adapter.</returns>
+        /// <exception cref="InvalidOperationException">The fixture or retained production constructor is missing.</exception>
+        /// <exception cref="TargetInvocationException">The production stream constructor fails.</exception>
+        /// <exception cref="JavaInvocationException">The real descriptor fixture fails.</exception>
+        private static AndroidDocumentStream OpenDescriptorFixture(string kind, bool readable)
+        {
+            var handle = DeviceJniProbe.CreateStreamFixture(kind)
+                ?? throw new InvalidOperationException("The controlled Java stream handle is missing.");
+            try
+            {
+                var constructor = typeof(AndroidDocumentStream).GetConstructor(BindingFlags.Instance | BindingFlags.NonPublic,
+                    null, new[] { typeof(DocumentStream), typeof(bool) }, null)
+                    ?? throw new InvalidOperationException("The production stream constructor was stripped.");
+                return (AndroidDocumentStream)constructor.Invoke(new object[] { handle, readable });
+            }
+            catch
+            {
+                try
+                {
+                    using var result = handle.Close();
+                }
+                finally
+                {
+                    handle.Dispose();
+                }
+                throw;
+            }
+        }
+
         /// <summary>Tests generated class dispatch without handwritten JNI class or method dispatch.</summary>
         /// <exception cref="InvalidOperationException">An actual JNI result violates the expected contract.</exception>
         /// <exception cref="JavaInvocationException">An unexpected Java exception occurs.</exception>
@@ -276,6 +423,10 @@ namespace MajdataPlay.Platform.Android.Runtime.Validation
             }
             output![0] = 10;
             Require(input[0] == 0 && DeviceJniProbe.EchoBytes(null) is null, "Byte arrays were aliased or null was lost.");
+            foreach (var value in new[] { 0L, -1L, (1L << 32) + 17, long.MinValue, long.MaxValue })
+            {
+                Require(DeviceJniProbe.EchoLong(value) == value, "A Java long changed its 64-bit value across JNI.");
+            }
             const string Text = "JNI\0\u4E2D\uD83D\uDE00";
             Require(DeviceJniProbe.EchoString(Text) == Text && DeviceJniProbe.EchoString(null) is null, "UTF-16 or embedded NUL conversion failed.");
             var translated = false;
@@ -477,27 +628,78 @@ namespace MajdataPlay.Platform.Android.Runtime.Validation
                 Mark("RENAME_PASSED", "A same-parent rename kept the document bytes under its new name.");
                 using (var stream = await Task.Run(() => renamed.OpenRead(), cancellationToken))
                 {
-                    Require(stream.CanRead && !stream.CanSeek, "The provider read stream reported unexpected capabilities.");
-                    Expect<NotSupportedException>(() =>
+                    Require(stream.CanRead && !stream.CanWrite, "The provider read stream reported unexpected capabilities.");
+                    _result.ProviderReadCanSeek = stream.CanSeek;
+                    if (stream.CanSeek)
+                    {
+                        Require(stream.Length == bytes.Length && stream.Position == 0, "The opened stream has the wrong logical range.");
+                        Require(stream.Seek(17, SeekOrigin.Begin) == 17 && stream.ReadByte() == bytes[17], "Begin seek read the wrong byte.");
+                        Require(stream.Seek(-1, SeekOrigin.Current) == 17 && stream.ReadByte() == bytes[17], "Current seek read the wrong byte.");
+                        Require(stream.Seek(-1, SeekOrigin.End) == bytes.Length - 1 && stream.ReadByte() == bytes[bytes.Length - 1],
+                            "End seek read the wrong byte.");
+                        Require(stream.ReadByte() == -1, "The stream did not reach EOF.");
+                        stream.Position = 0;
+                        using var streamCopy = new MemoryStream();
+                        await stream.CopyToAsync(streamCopy, cancellationToken);
+                        Require(streamCopy.Length == bytes.Length, "Default CopyToAsync failed on the seekable provider stream.");
+                        var streamCopyBytes = streamCopy.ToArray();
+                        for (var i = 0; i < bytes.Length; i++)
+                        {
+                            Require(streamCopyBytes[i] == bytes[i], "Seeking or copying changed a provider byte.");
+                        }
+                        stream.Position = 1;
+                        Expect<ArgumentOutOfRangeException>(() => stream.Position = -1);
+                        Expect<ArgumentException>(() => stream.Seek(0, (SeekOrigin)99));
+                        Expect<IOException>(() => stream.Seek(-2, SeekOrigin.Current));
+                        Expect<IOException>(() => stream.Seek(long.MaxValue, SeekOrigin.Current));
+                        Require(stream.Position == 1, "A rejected seek changed the stream position.");
+                        stream.Position = bytes.Length + 1;
+                        Require(stream.ReadByte() == -1, "Reading past EOF must not expose unrelated bytes.");
+                        Mark("STREAM_SEEK_PASSED", "The actual provider read stream supported logical length, all seek origins and Position changes.");
+                    }
+                    else
+                    {
+                        Expect<NotSupportedException>(() =>
+                        {
+                            _ = stream.Length;
+                        });
+                        Expect<NotSupportedException>(() =>
+                        {
+                            _ = stream.Position;
+                        });
+                        Expect<NotSupportedException>(() => stream.Position = 0);
+                        Expect<NotSupportedException>(() => stream.Seek(0, SeekOrigin.Begin));
+                        Require(stream.ReadByte() == bytes[0], "Capability queries consumed sequential provider data.");
+                        Mark("STREAM_SEQUENTIAL_PASSED", "The actual provider read stream retained sequential fallback without consuming probe data.");
+                    }
+                    stream.Dispose();
+                    stream.Dispose();
+                    Require(!stream.CanRead && !stream.CanWrite && !stream.CanSeek, "A disposed stream retained a live capability.");
+                    Expect<ObjectDisposedException>(() =>
                     {
                         _ = stream.Length;
                     });
-                    Expect<NotSupportedException>(() =>
-                    {
-                        _ = stream.Position;
-                    });
-                    Expect<NotSupportedException>(() =>
-                    {
-                        stream.Seek(0, SeekOrigin.Begin);
-                    });
+                    Expect<ObjectDisposedException>(() => stream.Position = 0);
+                    Expect<ObjectDisposedException>(() => stream.Seek(0, SeekOrigin.Begin));
                 }
-                Mark("STREAM_PASSED", "A provider stream stayed readable while rejecting length, position and seek queries.");
+                Mark("STREAM_PASSED", "Provider streams exposed only actual capabilities and kept correct seek, copy, EOF and disposal semantics.");
                 using (var truncate = await Task.Run(() => renamed.OpenWrite(append: false), cancellationToken))
                 {
                     await truncate.WriteAsync(new byte[] { 1, 2, 3 }, 0, 3, cancellationToken);
+                    _result.ProviderWriteCanSeek = truncate.CanSeek;
+                    if (truncate.CanSeek)
+                    {
+                        Require(truncate.Length == 3 && truncate.Position == 3, "Writing did not update stream length and position.");
+                        truncate.Position = 1;
+                        truncate.WriteByte(2);
+                        Require(truncate.Seek(0, SeekOrigin.End) == 3, "Seeking a write stream used stale length.");
+                        Mark("STREAM_WRITE_SEEK_PASSED", "The actual provider truncate stream supported positioning and live output lengths.");
+                    }
                 }
                 using (var append = await Task.Run(() => renamed.OpenWrite(append: true), cancellationToken))
                 {
+                    Require(!append.CanSeek, "Append must retain the provider's sequential wa semantics.");
+                    Expect<NotSupportedException>(() => append.Position = 0);
                     await append.WriteAsync(new byte[] { 4, 5 }, 0, 2, cancellationToken);
                 }
                 var appended = await renamed.ReadAllBytesAsync(cancellationToken);
@@ -772,6 +974,10 @@ namespace MajdataPlay.Platform.Android.Runtime.Validation
             public int SdkInt;
             /// <summary>Records the current process ID.</summary>
             public int ProcessId;
+            /// <summary>Records whether the actual full/replay provider read stream supported seeking.</summary>
+            public bool ProviderReadCanSeek;
+            /// <summary>Records whether the actual full/replay provider truncate output supported seeking.</summary>
+            public bool ProviderWriteCanSeek;
             /// <summary>Records that the owned child was successfully removed.</summary>
             public bool CleanupSucceeded;
             /// <summary>Records whether the selected grant predates this test.</summary>

@@ -4,12 +4,14 @@ import android.app.Activity;
 import android.content.ContentResolver;
 import android.content.ContentValues;
 import android.content.Context;
+import android.content.res.AssetFileDescriptor;
 import android.database.Cursor;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.provider.DocumentsContract;
 import android.system.ErrnoException;
+import android.system.Os;
 import android.system.OsConstants;
 
 import com.unity3d.player.UnityPlayer;
@@ -63,6 +65,8 @@ public final class StorageAccess
         public StreamHandle stream;
         public byte[] data;
         public int count;
+        // Signed 64-bit stream lengths and logical positions, never native C long values.
+        public long value;
 
         private Result(int code, String message)
         {
@@ -492,14 +496,7 @@ public final class StorageAccess
             ContentResolver resolver = context.getContentResolver();
             Uri uri = resolveUri(context, location);
             requireBinaryFile(requireEntry(resolver, uri));
-            InputStream input = resolver.openInputStream(uri);
-            if (input == null)
-            {
-                throw new IOException("The provider returned no input stream.");
-            }
-            Result result = success();
-            result.stream = new StreamHandle(input, null);
-            return result;
+            return openStream(resolver, uri, true, false);
         });
     }
 
@@ -513,14 +510,7 @@ public final class StorageAccess
             Entry entry = requireEntry(resolver, uri);
             requireBinaryFile(entry);
             requireCapability(entry, DocumentsContract.Document.FLAG_SUPPORTS_WRITE, "writing");
-            OutputStream output = resolver.openOutputStream(uri, append ? "wa" : "wt");
-            if (output == null)
-            {
-                throw new IOException("The provider returned no output stream.");
-            }
-            Result result = success();
-            result.stream = new StreamHandle(null, output);
-            return result;
+            return openStream(resolver, uri, false, append);
         });
     }
 
@@ -536,24 +526,174 @@ public final class StorageAccess
         }
     }
 
-    /** Owns framework streams, not native file descriptors. All transfer buffers are bounded. */
+    /** Adopts exactly one asset descriptor, preserving provider slices and explicit open modes. */
+    private static Result openStream(ContentResolver resolver, Uri uri, boolean readable, boolean append) throws Exception
+    {
+        Result result = success();
+        AssetFileDescriptor asset = resolver.openAssetFileDescriptor(uri, readable ? "r" : append ? "wa" : "wt");
+        if (asset == null)
+        {
+            throw new IOException("The provider returned no asset descriptor.");
+        }
+        try
+        {
+            result.stream = new StreamHandle(asset, readable, append);
+            return result;
+        }
+        catch (Exception | Error exception)
+        {
+            try
+            {
+                asset.close();
+            }
+            catch (IOException closeException)
+            {
+                exception.addSuppressed(closeException);
+            }
+            throw exception;
+        }
+    }
+
+    /** Owns one Java asset descriptor. Seekable transfers bypass framework slice counters. */
     public static final class StreamHandle
     {
+        /** True only when this open supports seeking and a reliable logical length. */
+        public final boolean seekable;
+        private final boolean readable;
+        private final long startOffset;
+        private final long declaredLength;
+        private AssetFileDescriptor asset;
         private InputStream input;
         private OutputStream output;
         private byte[] readBuffer;
         private boolean closed;
 
-        private StreamHandle(InputStream input, OutputStream output)
+        private StreamHandle(AssetFileDescriptor asset, boolean readable, boolean append) throws IOException, ErrnoException
         {
-            this.input = input;
-            this.output = output;
+            this.asset = asset;
+            this.readable = readable;
+            startOffset = asset.getStartOffset();
+            declaredLength = asset.getDeclaredLength();
+            if (startOffset < 0 || declaredLength < AssetFileDescriptor.UNKNOWN_LENGTH)
+            {
+                throw new IOException("The provider returned an invalid asset range.");
+            }
+            if (declaredLength >= 0)
+            {
+                try
+                {
+                    Math.addExact(startOffset, declaredLength);
+                }
+                catch (ArithmeticException exception)
+                {
+                    throw new IOException("The provider's asset range exceeds the signed 64-bit range.", exception);
+                }
+            }
+            boolean canSeek = false;
+            // Append retains the provider's wa stream; seeking must not turn it into overwrite.
+            if (!append && asset.getLength() >= 0)
+            {
+                try
+                {
+                    // A size or regular-file flag alone does not prove that this descriptor can seek.
+                    Os.lseek(asset.getFileDescriptor(), 0, OsConstants.SEEK_CUR);
+                    canSeek = true;
+                }
+                catch (ErrnoException exception)
+                {
+                    if (exception.errno != OsConstants.ESPIPE && exception.errno != OsConstants.EINVAL)
+                    {
+                        throw exception;
+                    }
+                }
+            }
+            seekable = canSeek;
+            if (seekable)
+            {
+                // Do not use AssetFileDescriptor's stream/channel pair: old Android versions keep
+                // independent remaining-byte counters which a channel seek would not reset.
+                Os.lseek(asset.getFileDescriptor(), startOffset, OsConstants.SEEK_SET);
+            }
+            else if (readable)
+            {
+                input = asset.createInputStream();
+            }
+            else
+            {
+                output = asset.createOutputStream();
+            }
         }
 
+        /** @return the logical length of the live opened asset, not document-query metadata. */
+        public synchronized Result getLength()
+        {
+            return execute(() -> {
+                requireSeekable();
+                return valueResult(length());
+            });
+        }
+
+        /** @return the current position relative to the asset start. */
+        public synchronized Result getPosition()
+        {
+            return execute(() -> {
+                requireSeekable();
+                return valueResult(position());
+            });
+        }
+
+        /** @param value nonnegative logical position; @return the resulting logical position. */
+        public synchronized Result setPosition(long value)
+        {
+            return execute(() -> {
+                requireSeekable();
+                if (value < 0)
+                {
+                    throw new StorageFailure(INVALID_ARGUMENT, "The stream position must not be negative.");
+                }
+                return valueResult(moveTo(value));
+            });
+        }
+
+        /** @param offset signed displacement; @param origin 0=begin, 1=current, 2=end; @return the logical position. */
+        public synchronized Result seek(long offset, int origin)
+        {
+            return execute(() -> {
+                requireSeekable();
+                long base;
+                switch (origin)
+                {
+                    case 0:
+                        base = 0;
+                        break;
+                    case 1:
+                        base = position();
+                        break;
+                    case 2:
+                        base = length();
+                        break;
+                    default:
+                        throw new StorageFailure(INVALID_ARGUMENT, "The seek origin is invalid.");
+                }
+                long target;
+                try
+                {
+                    target = Math.addExact(base, offset);
+                }
+                catch (ArithmeticException exception)
+                {
+                    throw new IOException("The seek position exceeds the signed 64-bit range.", exception);
+                }
+                return valueResult(moveTo(target));
+            });
+        }
+
+        /** @param count bounded requested byte count; @return signed bytes and -1 at logical EOF. */
         public synchronized Result read(int count)
         {
             return execute(() -> {
-                if (closed || input == null)
+                requireOpen();
+                if (!readable)
                 {
                     throw new StorageFailure(UNSUPPORTED, "The stream is not readable.");
                 }
@@ -571,8 +711,30 @@ public final class StorageAccess
                 {
                     readBuffer = new byte[MAX_TRANSFER_SIZE];
                 }
-                result.count = input.read(readBuffer, 0, count);
-                if (result.count < -1 || result.count > count)
+                int requested = count;
+                if (seekable)
+                {
+                    if (declaredLength >= 0)
+                    {
+                        long remaining = declaredLength - position();
+                        if (remaining <= 0)
+                        {
+                            result.count = -1;
+                            return result;
+                        }
+                        requested = (int)Math.min(requested, remaining);
+                    }
+                    result.count = Os.read(asset.getFileDescriptor(), readBuffer, 0, requested);
+                    if (result.count == 0)
+                    {
+                        result.count = -1;
+                    }
+                }
+                else
+                {
+                    result.count = input.read(readBuffer, 0, requested);
+                }
+                if (result.count < -1 || result.count > requested)
                 {
                     throw new IOException("The provider returned an invalid read count.");
                 }
@@ -588,10 +750,12 @@ public final class StorageAccess
             });
         }
 
+        /** @param data signed-byte-compatible transfer buffer; @param count bounded bytes to write; @return operation status. */
         public synchronized Result write(byte[] data, int count)
         {
             return execute(() -> {
-                if (closed || output == null)
+                requireOpen();
+                if (readable)
                 {
                     throw new StorageFailure(UNSUPPORTED, "The stream is not writable.");
                 }
@@ -599,18 +763,38 @@ public final class StorageAccess
                 {
                     throw new StorageFailure(INVALID_ARGUMENT, "The write exceeds the bounded transfer size.");
                 }
-                output.write(data, 0, count);
+                if (!seekable)
+                {
+                    output.write(data, 0, count);
+                    return success();
+                }
+                if (count > 0 && declaredLength >= 0)
+                {
+                    long remaining = declaredLength - position();
+                    if (remaining < count)
+                    {
+                        throw new IOException("The write would exceed the provider's asset range.");
+                    }
+                }
+                int written = 0;
+                while (written < count)
+                {
+                    int chunk = Os.write(asset.getFileDescriptor(), data, written, count - written);
+                    if (chunk <= 0 || chunk > count - written)
+                    {
+                        throw new IOException("The provider returned an invalid write count.");
+                    }
+                    written += chunk;
+                }
                 return success();
             });
         }
 
+        /** @return operation status; direct descriptor writes have no Java-side buffer to flush. */
         public synchronized Result flush()
         {
             return execute(() -> {
-                if (closed)
-                {
-                    throw new IOException("The stream is closed.");
-                }
+                requireOpen();
                 if (output != null)
                 {
                     output.flush();
@@ -619,6 +803,7 @@ public final class StorageAccess
             });
         }
 
+        /** @return operation status after closing the sole owner exactly once. */
         public synchronized Result close()
         {
             return execute(() -> {
@@ -627,8 +812,10 @@ public final class StorageAccess
                     return success();
                 }
                 closed = true;
+                AssetFileDescriptor ownedAsset = asset;
                 InputStream ownedInput = input;
                 OutputStream ownedOutput = output;
+                asset = null;
                 input = null;
                 output = null;
                 readBuffer = null;
@@ -636,12 +823,89 @@ public final class StorageAccess
                 {
                     ownedInput.close();
                 }
-                if (ownedOutput != null)
+                else if (ownedOutput != null)
                 {
                     ownedOutput.close();
                 }
+                else
+                {
+                    ownedAsset.close();
+                }
                 return success();
             });
+        }
+
+        /** Rejects all operations after ownership has been released. */
+        private void requireOpen() throws IOException
+        {
+            if (closed)
+            {
+                throw new IOException("The stream is closed.");
+            }
+        }
+
+        /** Rejects sequential-only providers without disguising a closed-stream failure. */
+        private void requireSeekable() throws IOException
+        {
+            requireOpen();
+            if (!seekable)
+            {
+                throw new StorageFailure(UNSUPPORTED, "The provider stream does not support seeking and length queries.");
+            }
+        }
+
+        /** Returns the declared slice length, or the current size of the opened whole file. */
+        private long length() throws IOException
+        {
+            long size = declaredLength >= 0 ? declaredLength : asset.getParcelFileDescriptor().getStatSize();
+            if (size < 0)
+            {
+                throw new IOException("The opened provider stream no longer exposes its length.");
+            }
+            return size;
+        }
+
+        /** Returns the kernel position translated into the asset's logical coordinates. */
+        private long position() throws IOException, ErrnoException
+        {
+            long physical = Os.lseek(asset.getFileDescriptor(), 0, OsConstants.SEEK_CUR);
+            if (physical < startOffset)
+            {
+                throw new IOException("The provider stream position is before the asset start.");
+            }
+            return physical - startOffset;
+        }
+
+        /** Validates both additions before changing the descriptor's position. */
+        private long moveTo(long logical) throws IOException, ErrnoException
+        {
+            if (logical < 0)
+            {
+                throw new IOException("Cannot seek before the beginning of the stream.");
+            }
+            long physical;
+            try
+            {
+                physical = Math.addExact(startOffset, logical);
+            }
+            catch (ArithmeticException exception)
+            {
+                throw new IOException("The physical seek position exceeds the signed 64-bit range.", exception);
+            }
+            long actual = Os.lseek(asset.getFileDescriptor(), physical, OsConstants.SEEK_SET);
+            if (actual != physical)
+            {
+                throw new IOException("The provider did not reach the requested stream position.");
+            }
+            return logical;
+        }
+
+        /** Builds the existing typed JNI envelope with a 64-bit length or position. */
+        private static Result valueResult(long value)
+        {
+            Result result = success();
+            result.value = value;
+            return result;
         }
     }
 

@@ -5,7 +5,7 @@ using MajdataPlay.Platform.Android.Runtime.Storage;
 
 namespace MajdataPlay.Platform.Android.Storage
 {
-    /// <summary>Owns a sequential Java provider stream without exposing a native descriptor or assuming seekability.</summary>
+    /// <summary>Owns a Java provider stream with optional descriptor-backed seeking and length queries.</summary>
     /// <remarks>
     /// Dispose deterministically, including after cancellation. Synchronous operations and disposal are serialized.
     /// Inherited asynchronous Stream methods use these scoped JNI operations; provider calls can still block.
@@ -18,6 +18,9 @@ namespace MajdataPlay.Platform.Android.Storage
 
         /// <summary>Records whether this stream was opened for reading rather than writing.</summary>
         private readonly bool _readable;
+
+        /// <summary>Records whether the opened provider supports complete seek, length, and position semantics.</summary>
+        private readonly bool _seekable;
 
         /// <summary>Reuses a bounded signed-byte write buffer, or null for read-only streams.</summary>
         private readonly sbyte[]? _writeBuffer;
@@ -38,6 +41,7 @@ namespace MajdataPlay.Platform.Android.Storage
                 throw new ArgumentNullException(nameof(handle));
             }
             _readable = readable;
+            _seekable = handle.Seekable;
             _writeBuffer = readable ? null : new sbyte[AndroidDocumentBridge.MaxTransferSize];
             _handle = handle;
         }
@@ -54,12 +58,15 @@ namespace MajdataPlay.Platform.Android.Storage
             }
         }
 
-        /// <summary>Gets false because cloud documents and provider pipes need not support seeking.</summary>
+        /// <summary>Gets whether the live opened resource supports reliable seek, length, and position operations.</summary>
         public override bool CanSeek
         {
             get
             {
-                return false;
+                lock (_gate)
+                {
+                    return _handle is not null && _seekable;
+                }
             }
         }
 
@@ -75,27 +82,50 @@ namespace MajdataPlay.Platform.Android.Storage
             }
         }
 
-        /// <summary>Rejects stream length queries; nullable metadata does not establish a seekable stream length.</summary>
-        /// <exception cref="NotSupportedException">Length queries are unsupported.</exception>
+        /// <summary>Gets the logical length of the opened asset, independently of document-query metadata.</summary>
+        /// <exception cref="ObjectDisposedException">The stream has been disposed.</exception>
+        /// <exception cref="NotSupportedException">The provider or append mode does not expose seekable length semantics.</exception>
+        /// <exception cref="UnauthorizedAccessException">The provider denied access.</exception>
+        /// <exception cref="IOException">The opened resource no longer exposes a reliable length.</exception>
         public override long Length
         {
             get
             {
-                throw new NotSupportedException("SAF streams do not expose a seekable length.");
+                lock (_gate)
+                {
+                    var handle = RequireSeekableHandle();
+                    return InvokeValue(handle.GetLength);
+                }
             }
         }
 
-        /// <summary>Rejects getting or setting a seek position for sequential provider streams.</summary>
-        /// <exception cref="NotSupportedException">Position queries and seeking are unsupported.</exception>
+        /// <summary>Gets or sets the position relative to the opened asset's logical start.</summary>
+        /// <exception cref="ArgumentOutOfRangeException">The requested position is negative.</exception>
+        /// <exception cref="ObjectDisposedException">The stream has been disposed.</exception>
+        /// <exception cref="NotSupportedException">The provider or append mode does not support seeking.</exception>
+        /// <exception cref="UnauthorizedAccessException">The provider denied access.</exception>
+        /// <exception cref="IOException">The provider failed or the physical position would overflow.</exception>
         public override long Position
         {
             get
             {
-                throw new NotSupportedException("SAF streams do not expose a seek position.");
+                lock (_gate)
+                {
+                    var handle = RequireSeekableHandle();
+                    return InvokeValue(handle.GetPosition);
+                }
             }
             set
             {
-                throw new NotSupportedException("SAF streams do not support seeking.");
+                if (value < 0)
+                {
+                    throw new ArgumentOutOfRangeException(nameof(value));
+                }
+                lock (_gate)
+                {
+                    var handle = RequireSeekableHandle();
+                    InvokeValue(() => handle.SetPosition(value));
+                }
             }
         }
 
@@ -214,14 +244,26 @@ namespace MajdataPlay.Platform.Android.Storage
             }
         }
 
-        /// <summary>Rejects seeking, including on providers which happen to use a local file.</summary>
-        /// <param name="offset">The unused requested seek displacement.</param>
-        /// <param name="origin">The unused requested seek origin.</param>
-        /// <returns>No value; this operation always throws.</returns>
-        /// <exception cref="NotSupportedException">SAF streams are sequential.</exception>
+        /// <summary>Moves within the opened asset using a signed 64-bit logical offset.</summary>
+        /// <param name="offset">The displacement from the requested logical origin.</param>
+        /// <param name="origin">The beginning, current position, or logical end of the opened asset.</param>
+        /// <returns>The new position relative to the asset's start.</returns>
+        /// <exception cref="ArgumentException">The seek origin is invalid.</exception>
+        /// <exception cref="ObjectDisposedException">The stream has been disposed.</exception>
+        /// <exception cref="NotSupportedException">The provider or append mode does not support seeking.</exception>
+        /// <exception cref="UnauthorizedAccessException">The provider denied access.</exception>
+        /// <exception cref="IOException">The requested position is negative, overflows, or seeking failed.</exception>
         public override long Seek(long offset, SeekOrigin origin)
         {
-            throw new NotSupportedException("SAF streams do not support seeking.");
+            if (origin != SeekOrigin.Begin && origin != SeekOrigin.Current && origin != SeekOrigin.End)
+            {
+                throw new ArgumentException("The seek origin is invalid.", nameof(origin));
+            }
+            lock (_gate)
+            {
+                var handle = RequireSeekableHandle();
+                return InvokeValue(() => handle.Seek(offset, (int)origin));
+            }
         }
 
         /// <summary>Rejects changing length independently of the explicit mode used when opening.</summary>
@@ -265,6 +307,38 @@ namespace MajdataPlay.Platform.Android.Storage
         private DocumentStream RequireHandle()
         {
             return _handle ?? throw new ObjectDisposedException(nameof(AndroidDocumentStream));
+        }
+
+        /// <summary>Gets the live handle only when all seek-related operations are supported.</summary>
+        /// <returns>The borrowed seekable Java handle while the operation lock is held.</returns>
+        /// <exception cref="ObjectDisposedException">The stream has been disposed.</exception>
+        /// <exception cref="NotSupportedException">The opened provider resource does not support seeking.</exception>
+        private DocumentStream RequireSeekableHandle()
+        {
+            var handle = RequireHandle();
+            if (!_seekable)
+            {
+                throw new NotSupportedException("The SAF stream does not support seeking and length queries.");
+            }
+            return handle;
+        }
+
+        /// <summary>Reads a signed 64-bit value through the existing typed, thread-attached JNI protocol.</summary>
+        /// <param name="operation">The Java operation returning a length or logical position.</param>
+        /// <returns>The checked result value without taking ownership of the stream handle.</returns>
+        /// <exception cref="ArgumentException">The Java operation rejected the requested argument.</exception>
+        /// <exception cref="FileNotFoundException">The provider removed the resource.</exception>
+        /// <exception cref="UnauthorizedAccessException">The provider denied access.</exception>
+        /// <exception cref="NotSupportedException">The operation is unavailable for this resource.</exception>
+        /// <exception cref="IOException">The provider or JNI bridge failed.</exception>
+        private static long InvokeValue(Func<StorageResult?> operation)
+        {
+            return AndroidDocumentBridge.Invoke(() =>
+            {
+                using var result = AndroidDocumentBridge.RequireResult(operation());
+                AndroidDocumentBridge.CheckResult(result);
+                return result.Value;
+            });
         }
 
         /// <summary>Validates array slices without offset-plus-count overflow.</summary>

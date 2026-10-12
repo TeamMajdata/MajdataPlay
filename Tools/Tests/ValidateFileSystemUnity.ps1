@@ -112,6 +112,7 @@ if (!$SkipJavaCompilation) {
     $javaOutput = Join-Path $project 'Temp/JavaClasses'
     New-Item -ItemType Directory -Force -Path $javaOutput | Out-Null
     $javaSources = @(Get-ChildItem -LiteralPath (Join-Path $root 'Assets/Plugins/Android/src/java') -Filter '*.java' -File -Recurse | Select-Object -ExpandProperty FullName)
+    $javaSources += Join-Path $PSScriptRoot 'AndroidStorageDeviceValidation/DeviceJniProbe.java'
     $javaSources += $unityActivity
     & $javac '-J-Duser.language=en' '-J-Duser.country=US' '-encoding' 'UTF-8' '--release' '11' '-Xlint:all' '-classpath' "$androidJar;$unityJar" '-d' $javaOutput @javaSources
     if ($LASTEXITCODE -ne 0) {

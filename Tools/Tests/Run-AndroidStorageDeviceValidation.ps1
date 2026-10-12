@@ -4,7 +4,7 @@ param(
     [string]$UnityPath = 'C:/Program Files/Unity Editors/6000.3.17f1/Editor/Unity.exe',
     [string]$ApkPath,
     [ValidateSet('arm64-v8a', 'armeabi-v7a')][string]$Abi = 'arm64-v8a',
-    [ValidateSet('full', 'replay', 'release')][string]$Mode = 'full',
+    [ValidateSet('full', 'replay', 'release', 'streams')][string]$Mode = 'full',
     [switch]$Install,
     [switch]$StartOnly,
     [switch]$ObserveOnly,

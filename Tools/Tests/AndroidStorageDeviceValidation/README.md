@@ -3,17 +3,17 @@
 This is a **real-device runtime harness**, not a provider double or an Editor
 substitute. It runs production `StorageFile`, `StorageDirectory`,
 `AndroidStorageAccess`, `AndroidDocumentStream`, the production activity-result
-bridge, and generated Android wrappers. Only the small JNI input probe is
-validation-specific. No UniTask or third-party package is required.
+bridge, and generated Android wrappers. Only the JNI inputs and controlled
+descriptor fixtures are validation-specific. No UniTask or third-party package is required.
 
 The harness has been built and executed on a physical device in both ARM64 and
 ARMv7 IL2CPP processes. See `RESULTS.md` for the dated evidence and exact scope.
 A successful script compilation alone is not a runtime pass. Keep separate
 evidence for each actually executed ABI.
 
-The added `JavaObject` equality/hash/string regression checks need a fresh APK
-build and a new device run for each ABI. The earlier `RESULTS.md` evidence does
-not cover these checks; they have not yet been executed on a device.
+The added equality and descriptor-stream regressions need a fresh APK and a new
+device run for each ABI. The latest dated `RESULTS.md` entry records ARM64 results;
+older ARMv7 evidence does not cover the new checks.
 
 ## Integration contract
 
@@ -50,6 +50,37 @@ The builder, deploy runner, and narrow unrelated-init stubs are parent-owned;
 this runtime implementation does not modify existing production scripts,
 assemblies, or generated Unity projects.
 
+## Descriptor stream regressions
+
+All modes run real Android file/pipe fixtures before any picker. The fixtures
+reflectively adopt `AssetFileDescriptor` instances through the production Java
+`StreamHandle` constructor and the production managed `AndroidDocumentStream`
+constructor. They are **not** a replacement for the provider-open path, which
+continues to run in `full`/`replay` mode. Temporary files are unlinked after opening;
+closing their sole descriptor owners reclaims them, including sparse files.
+
+Coverage includes declared asset slices with prefix/suffix sentinels, whole-file
+length discovery, unknown-length and known-length pipes, all seek origins,
+position setters, signed bytes, EOF/rewind, rejected negative/overflowing offsets,
+default `CopyTo`/`CopyToAsync`, dynamic output lengths, sequential append,
+descriptor closure and idempotent close/dispose. Sparse files verify actual reads
+and writes at `(1L << 32) + 17` without allocating or copying multi-gigabyte buffers.
+These cases also check 64-bit Java/JNI result values; compile-only checks do not
+establish runtime or ABI correctness.
+
+Build a fresh isolated APK, then run the picker-free subset on each actual ABI:
+
+```powershell
+./Tools/Tests/Build-AndroidStorageDeviceValidation.ps1 -Architecture Both
+./Tools/Tests/Run-AndroidStorageDeviceValidation.ps1 -Serial <authorized-device> -Mode streams -Abi arm64-v8a -Install
+./Tools/Tests/Run-AndroidStorageDeviceValidation.ps1 -Serial <authorized-device> -Mode streams -Abi armeabi-v7a -Install
+```
+
+The terminal marker is `FILE_SYSTEM_DEVICE_STREAMS_PASSED`. Earlier recorded
+results do not cover newly added seek regressions unless the matching fresh-run
+evidence explicitly says so. A streams-only run does not create a provider child;
+its provider-child `CleanupSucceeded` result field is not applicable.
+
 ## Launch protocol and durable files
 
 Launch extra: **`validationMode`**, a string:
@@ -59,6 +90,9 @@ Launch extra: **`validationMode`**, a string:
 - **`replay`**: never open the picker. Read private saved state, require a
   successful `full` run and a different process ID, verify persisted read/write
   access, reopen the grant, and run a fresh binary check in a new owned child.
+- **`streams`**: run JNI and controlled descriptor/managed-adapter regressions,
+  then exit without opening a picker or acquiring/releasing URI grants. This mode
+  does not cover provider dispatch or persisted SAF permissions.
 - **`release`**: optionally finish grant ownership bookkeeping. Release only a
   grant that did **not** exist in the pre-picker snapshot. A preexisting grant
   is retained, including any additional write access the picker may have added.
@@ -79,7 +113,8 @@ Files live at **`Application.persistentDataPath`**:
 | **`android-storage-device-state.json`** | Private grant URI, complete pre-picker URI snapshot, grant ownership, full-process ID, completion state, and any currently owned child URI |
 
 Result JSON uses PascalCase field names: `Marker`, `Terminal`, `Mode`, `RunId`,
-`EnableIl2Cpp`, `PointerSize`, `SdkInt`, `ProcessId`, `CleanupSucceeded`,
+`EnableIl2Cpp`, `PointerSize`, `SdkInt`, `ProcessId`, `ProviderReadCanSeek`,
+`ProviderWriteCanSeek`, `CleanupSucceeded`,
 `GrantWasPreexisting`, `GrantReleased`, `ErrorType`, `Detail`, and `UpdatedUtc`.
 `Terminal: false` means progress, **not** an overall pass. Only a mode's terminal
 marker with `Terminal: true` is a completed outcome. Do not mistake

@@ -91,3 +91,74 @@ copy/append/truncate coverage, R8 minification, or a production non-development
 APK. Managed/Editor tests cover some of these contracts separately, but those
 must not be presented as device passes. No all-platform runtime conclusion is
 made from the successful script compilations.
+
+## 2026-10-12: optional SAF stream seeking, ARM64 only
+
+This entry records the new seek implementation separately from the older two-ABI
+validation above. **Only ARM64 was executed for this change.** ARMv7 was not run
+and the older results do not establish its new stream behavior.
+
+Environment: Unity **6000.3.17f1**, physical **Mi MIX 2S**, Android **15 / API 35**,
+`arm64-v8a`, IL2CPP development APK with High managed stripping. The final APK was
+built with `-Architecture ARM64`; the runner verified actual pointer size **8**,
+`EnableIl2Cpp: true`, the current process ID and matching durable terminal result.
+
+### Results
+
+| Validation | Result |
+| --- | --- |
+| Portable FileSystem suite | PASS: **33 cases, 990 assertions**, zero failed/skipped |
+| Java bridge plus descriptor probe against API 36 | PASS; existing Unity activity deprecation warnings remain |
+| Isolated Unity Editor/generated wrappers/platform guards | PASS, including `long Value`, `Seekable`, GetLength/GetPosition/SetPosition/Seek |
+| Windows64 and Android Player script compilation | PASS; compile-only evidence |
+| ARM64 controlled descriptors/managed adapters | PASS: `FILE_SYSTEM_DEVICE_DESCRIPTOR_STREAMS_PASSED` and `FILE_SYSTEM_DEVICE_STREAMS_PASSED` |
+| ARM64 actual SAF provider replay | PASS: `FILE_SYSTEM_DEVICE_REPLAY_PASSED`, `CleanupSucceeded: true` |
+
+The real provider run explicitly reported **`ProviderReadCanSeek: true`** and
+**`ProviderWriteCanSeek: true`**, with `FILE_SYSTEM_DEVICE_STREAM_SEEK_PASSED` and
+`FILE_SYSTEM_DEVICE_STREAM_WRITE_SEEK_PASSED`. Thus the seek branches actually ran;
+this was not merely a successful sequential-provider fallback.
+
+Coverage:
+
+- Real `FileSystem`/storage handles reopened the existing persistent grant,
+  round-tripped **197,121 bytes**, checked Begin/Current/End and Position changes,
+  EOF/rewind, default async copying, rejected offsets, updated output length,
+  explicit truncate/append and repeated disposal. Append remained sequential.
+- Controlled real Android file descriptors verified asset slices with surrounding
+  sentinels, known/unknown-length pipes, bit-preserving reads, exact descriptor
+  closure and repeated close without closing another live descriptor.
+- Sparse files verified actual reads/writes and Java/JNI positions/lengths beyond
+  **4 GiB**, at `(1L << 32) + 17`, without whole-file allocation.
+- The selected provider supported seeking. Nonseekable behavior was established
+  by controlled real pipe fixtures, not by a cloud/nonseekable SAF provider.
+- Existing JNI preflight, main/attached-worker execution, managed adapter copying,
+  current equality checks and UI Runnable callback checks passed on ARM64.
+
+The provider replay reused a preexisting grant without opening the picker or
+releasing permissions (`GrantWasPreexisting: true`, `GrantReleased: false`). Only
+its uniquely named owned test child was removed; the parent was retained. The
+private saved child location was empty after cleanup. The dedicated validation
+app was force-stopped after completion and remains installed for reproduction.
+No URI-containing state, raw log, APK or generated analyzer binary was added to
+the repository changes.
+
+### Reproduction and limits
+
+```powershell
+dotnet run --project Tools/Tests/FileSystemValidation/FileSystemValidation.csproj
+./Tools/Tests/ValidateFileSystemUnity.ps1 -PlayerTargets StandaloneWindows64,Android
+./Tools/Tests/Build-AndroidStorageDeviceValidation.ps1 -Architecture ARM64
+./Tools/Tests/Run-AndroidStorageDeviceValidation.ps1 -Serial <authorized-device> -Mode streams -Abi arm64-v8a -ApkPath Temp/AndroidStorageDeviceValidation/Artifacts/storage-validation-ARM64.apk -Install
+./Tools/Tests/Run-AndroidStorageDeviceValidation.ps1 -Serial <authorized-device> -Mode replay -Abi arm64-v8a
+```
+
+Replay requires an existing successful full-mode state and persisted grant. On a
+fresh device, use full mode and manually select a disposable directory first.
+The current JSON/process logs remain in the ignored DeviceResults directory.
+
+These results do not establish ARMv7 runtime behavior, Android Mono, older Android
+versions, other devices/providers, the main game's complete Player/lifecycle,
+R8 minification, permission revocation or immediate cancellation of blocked
+provider operations. No fresh picker/persist/release experiment was performed.
+The provider's timestamp write was capability-skipped, not counted as passing.
