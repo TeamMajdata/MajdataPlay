@@ -172,7 +172,6 @@ namespace MajdataPlay.Scenes.Title
             await Task.Delay(3000, cancellationToken);
             await SongStorage.InitAsync(cancellationToken);
             await SongStorage.RefreshLocal(progress, cancellationToken);
-            await SongStorage.RefreshOnline(progress, cancellationToken);
 
             if (!SongStorage.IsEmpty)
             {

@@ -228,6 +228,7 @@ namespace MajdataPlay
                     Online.ClearResponseCache();
                 }
                 GC.Collect();
+                await Task.Delay(1000);
             }
             catch (Exception e)
             {

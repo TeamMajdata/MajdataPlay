@@ -417,11 +417,11 @@ namespace MajdataPlay.Scenes.Login
                 return;
             }
             _isExited = true;
-            RefreshListBackgroundAsync(refreshOnline: SceneSwitcher.LastScene != MajScenes.Title);
+            RefreshListBackgroundAsync();
         }
         /// <summary>Refreshes the requested online collections and online favorites before returning to the list scene.</summary>
         /// <param name="refreshOnline">Whether to refresh online collections in addition to online favorites.</param>
-        private static async void RefreshListBackgroundAsync(bool refreshOnline = false)
+        private static async void RefreshListBackgroundAsync()
         {
             var sceneSwitcher = MajInstances.SceneSwitcher;
             await sceneSwitcher.FadeInAsync();
@@ -432,22 +432,19 @@ namespace MajdataPlay.Scenes.Login
             {
                 MajInstances.SceneSwitcher.SetLoadingText(e);
             };
-            if (refreshOnline)
+            var task = SongStorage.RefreshOnline(progress);
+            while (!task.IsCompleted)
             {
-                var task = SongStorage.RefreshOnline(progress);
-                while (!task.IsCompleted)
-                {
-                    await UniTask.Yield();
-                }
-                if (!task.IsCompletedSuccessfully)
-                {
-                    sceneSwitcher.SetLoadingText("MAJTEXT_ERR_SCAN_CHARTS_FAILED".i18n(), Color.red);
-                    await UniTask.Delay(3000);
-                }
-                else
-                {
-                    sceneSwitcher.SetLoadingText(string.Empty);
-                }
+                await UniTask.Yield();
+            }
+            if (!task.IsCompletedSuccessfully)
+            {
+                sceneSwitcher.SetLoadingText("MAJTEXT_ERR_SCAN_CHARTS_FAILED".i18n(), Color.red);
+                await UniTask.Delay(3000);
+            }
+            else
+            {
+                sceneSwitcher.SetLoadingText(string.Empty);
             }
             var task2 = SongStorage.RefreshUserOnlineFavAsync(progress);
             while (!task2.IsCompleted)
@@ -463,7 +460,7 @@ namespace MajdataPlay.Scenes.Login
                 sceneSwitcher.SetLoadingText(string.Empty);
             }
 
-
+            await UniTask.Delay(500);
             sceneSwitcher.SwitchScene("List", false);
         }
         private async ValueTask<UserData> FetchUserDataAsync(ApiEndpoint endpoint, CancellationToken token = default)
