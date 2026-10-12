@@ -16,8 +16,8 @@
                 <category android:name="android.intent.category.BROWSABLE"/>
 
                 <data android:scheme="file"/>
-                <data android:scheme="content"/>
-                <data android:mimeType="application/zip"/>
+                <data android:host="*"/>
+                <data android:mimeType="*/*"/>
                 <data android:pathPattern=".*\\.zip"/>
             </intent-filter>
             <intent-filter android:label="Import archive">
@@ -26,9 +26,17 @@
                 <category android:name="android.intent.category.BROWSABLE"/>
 
                 <data android:scheme="file"/>
-                <data android:scheme="content"/>
+                <data android:host="*"/>
                 <data android:mimeType="*/*"/>
                 <data android:pathPattern=".*\\.adx"/>
+            </intent-filter>
+            <intent-filter android:label="Import archive">
+                <action android:name="android.intent.action.VIEW"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <category android:name="android.intent.category.BROWSABLE"/>
+
+                <data android:scheme="content"/>
+                <data android:mimeType="application/zip"/>
             </intent-filter>
             <meta-data android:name="unityplayer.UnityActivity" android:value="true" />
         </activity>
