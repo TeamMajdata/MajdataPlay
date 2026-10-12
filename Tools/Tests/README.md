@@ -74,6 +74,25 @@ The second command stages an ignored isolated Unity 6000.3.17f1 project, checks
 Editor smoke/Android guards, compiles Windows64 and Android player scripts, and
 compiles Android Java sources. It does not exercise SAF on a device or build a player.
 
+## Song storage and collection refresh
+
+See `ChartStorageValidation/README.md` for the package-free .NET 9 regression
+suite linking the production storage, collection and scanning implementations.
+See `SongStorageUnityValidation/README.md` for isolated Unity 6000.3.17f1
+compilation and real MajSimai metadata/chart parsing.
+
+```powershell
+dotnet run --project Tools/Tests/ChartStorageValidation/ChartStorageValidation.csproj
+./Tools/Tests/ValidateSongStorageUnity.ps1 -Repetitions 12
+```
+
+The managed suite repeats 96-collection scans and verifies shared concurrency
+limits, cancellation, failed-scan rollback, refresh ordering/cursors, favorite
+state and retained online views. The Unity harness uses real parser and UniTask
+dependencies with narrow game/media/network/database substitutes in an ignored
+isolated project. Neither suite validates real devices, native media/SQLite,
+online protocols, Player lifecycle or Android SAF permissions.
+
 ## Chart import layout
 
 See `ImportValidation/README.md` for the archive and directory import layout

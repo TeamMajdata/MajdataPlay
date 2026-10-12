@@ -13,9 +13,9 @@ using NativeFile = System.IO.File;
 namespace MajdataPlay.Tests.ChartStorageValidation
 {
     /// <summary>Exercises the production consumers' file creation, replacement and backup behavior.</summary>
-    internal static class Program
+    internal static partial class Program
     {
-        /// <summary>Runs the collection and chart-settings regressions with isolated temporary data.</summary>
+        /// <summary>Runs every managed regression group with test-owned storage fixtures.</summary>
         /// <returns>Zero after all cases pass, or one when any case fails.</returns>
         private static async Task<int> Main()
         {
@@ -24,10 +24,43 @@ namespace MajdataPlay.Tests.ChartStorageValidation
             NativeDirectory.CreateDirectory(rootPath);
             try
             {
-                TestCollectionIdentity(rootPath);
-                TestCollectionMarkerCollision(rootPath);
-                await TestChartSettings(rootPath);
-                Console.WriteLine("CHART_STORAGE_VALIDATION_PASSED (3 cases)");
+                var cases = new (string Name, Func<Task> Run)[]
+                {
+                    ("collection identity", () => RunSynchronousCase(() => TestCollectionIdentity(rootPath))),
+                    ("collection marker collision", () => RunSynchronousCase(() => TestCollectionMarkerCollision(rootPath))),
+                    ("chart settings", () => TestChartSettings(rootPath)),
+                    ("collection refresh", () => TestCollectionRefresh(rootPath)),
+                    ("collection refresh rollback", () => TestCollectionRefreshRollback(rootPath)),
+                    ("virtual and online refresh", () => TestVirtualAndOnlineRefresh(rootPath)),
+                    ("scanner isolation and order", () => TestScannerIsolationAndOrder(rootPath)),
+                    ("supported resource names", () => TestSupportedResourceNames(rootPath)),
+                    ("scanner cancellation", () => TestScannerCancellation(rootPath)),
+                    ("scanner shared budget", () => TestScannerSharedBudget(rootPath)),
+                    ("root collection scheduling", () => TestLocalRootScheduling(rootPath)),
+                    ("storage snapshot commit", () => TestStorageSnapshotCommit(rootPath)),
+                    ("online cache directories", () => TestOnlineCacheDirectories(rootPath)),
+                    ("retained online origins", () => TestRetainedOnlineOrigins(rootPath))
+                };
+                var failedCases = 0;
+                foreach (var testCase in cases)
+                {
+                    try
+                    {
+                        await testCase.Run();
+                    }
+                    catch (Exception exception)
+                    {
+                        failedCases++;
+                        Console.Error.WriteLine("FAILED CASE: " + testCase.Name);
+                        Console.Error.WriteLine(exception);
+                    }
+                }
+                if (failedCases != 0)
+                {
+                    Console.Error.WriteLine("CHART_STORAGE_VALIDATION_FAILED (" + failedCases + " of " + cases.Length + " cases)");
+                    return 1;
+                }
+                Console.WriteLine("CHART_STORAGE_VALIDATION_PASSED (" + cases.Length + " cases)");
                 return 0;
             }
             catch (Exception exception)
@@ -38,6 +71,7 @@ namespace MajdataPlay.Tests.ChartStorageValidation
             }
             finally
             {
+                GameManager.Quit();
                 if (!string.Equals(Path.GetDirectoryName(Path.GetFullPath(rootPath)), workspacePath, StringComparison.OrdinalIgnoreCase)
                     || (NativeFile.GetAttributes(rootPath) & FileAttributes.ReparsePoint) != 0)
                 {
@@ -47,25 +81,34 @@ namespace MajdataPlay.Tests.ChartStorageValidation
             }
         }
 
+        /// <summary>Adapts a synchronous case into the asynchronous case runner without changing its thread.</summary>
+        /// <param name="action">The synchronous assertions to execute.</param>
+        /// <returns>A completed task after the assertions return.</returns>
+        private static Task RunSynchronousCase(Action action)
+        {
+            action();
+            return Task.CompletedTask;
+        }
+
         /// <summary>Checks newly created collection IDs, stable reloads and replacement of invalid ID text.</summary>
         /// <param name="rootPath">The case-owned fixture root.</param>
         private static void TestCollectionIdentity(string rootPath)
         {
             var collectionPath = Path.Combine(rootPath, "Collection");
             NativeDirectory.CreateDirectory(collectionPath);
-            var collection = SongCollection.Empty(collectionPath, "Collection");
+            var collection = SongCollection.Empty(FileSystem.Directory.Open(collectionPath), "Collection");
             var markerPath = Path.Combine(collectionPath, ".MajdataPlay");
             var idPath = Path.Combine(markerPath, "id");
             Require(collection.Id != Guid.Empty, "A local collection must receive a nonempty ID.");
             Require(Guid.Parse(NativeFile.ReadAllText(idPath)) == collection.Id, "The created ID file must match the collection ID.");
             Require(FileSystem.Directory.Open(markerPath).Entry!.IsHidden, "The newly created marker directory must stay hidden.");
-            Require(SongCollection.Empty(collectionPath, "Collection").Id == collection.Id, "Reloading must preserve the stored ID.");
+            Require(SongCollection.Empty(FileSystem.Directory.Open(collectionPath), "Collection").Id == collection.Id, "Reloading must preserve the stored ID.");
 
             NativeFile.WriteAllText(idPath, "invalid and longer than a stored GUID................................................................");
-            var recovered = SongCollection.Empty(collectionPath, "Collection");
+            var recovered = SongCollection.Empty(FileSystem.Directory.Open(collectionPath), "Collection");
             Require(recovered.Id != Guid.Empty, "Malformed ID text must be replaced with a valid ID.");
             Require(Guid.Parse(NativeFile.ReadAllText(idPath)) == recovered.Id, "Replacing malformed ID text must truncate the file.");
-            Require(SongCollection.Empty(collectionPath, "Collection").Id == recovered.Id, "The replacement ID must survive reload.");
+            Require(SongCollection.Empty(FileSystem.Directory.Open(collectionPath), "Collection").Id == recovered.Id, "The replacement ID must survive reload.");
             Console.WriteLine("PASS collection: first creation, reload and malformed ID recovery");
         }
 
@@ -80,7 +123,7 @@ namespace MajdataPlay.Tests.ChartStorageValidation
             var rejected = false;
             try
             {
-                SongCollection.Empty(collectionPath, "Collision");
+                SongCollection.Empty(FileSystem.Directory.Open(collectionPath), "Collision");
             }
             catch (IOException)
             {

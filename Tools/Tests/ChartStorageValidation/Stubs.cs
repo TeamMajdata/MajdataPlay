@@ -2,7 +2,9 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Text.Json;
+using System.Threading;
 using System.Threading.Tasks;
 
 namespace Cysharp.Threading.Tasks
@@ -11,9 +13,11 @@ namespace Cysharp.Threading.Tasks
     internal static class UniTask
     {
         /// <summary>Returns an already completed thread-switch task for these sequential storage cases.</summary>
+        /// <param name="cancellationToken">Cancels the no-op thread-switch boundary.</param>
         /// <returns>A completed task.</returns>
-        public static Task SwitchToThreadPool()
+        public static Task SwitchToThreadPool(CancellationToken cancellationToken = default)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             return Task.CompletedTask;
         }
     }
@@ -26,6 +30,8 @@ namespace MajdataPlay
     {
         /// <summary>Gets the chart identity used by collection lookup.</summary>
         string Hash { get; }
+        /// <summary>Gets whether the chart belongs to an online endpoint.</summary>
+        bool IsOnline { get; }
         /// <summary>Gets the title used by sorting and filtering.</summary>
         string Title { get; }
         /// <summary>Gets the artist used by filtering.</summary>
@@ -43,15 +49,25 @@ namespace MajdataPlay
     /// <summary>Supplies the playlist model referenced by the production collection.</summary>
     public sealed class DanInfo
     {
+        /// <summary>Gets the playlist display name.</summary>
+        public string Name { get; init; } = string.Empty;
+        /// <summary>Gets the playlist description.</summary>
+        public string Description { get; init; } = string.Empty;
+        /// <summary>Gets the playlist chart hashes.</summary>
+        public string[] SongHashs { get; init; } = Array.Empty<string>();
+        /// <summary>Gets whether this model is a playlist rather than a Dan.</summary>
+        public bool IsPlayList { get; init; }
+        /// <summary>Gets whether game-over is mandatory.</summary>
+        public bool IsForceGameover { get; init; }
     }
 
     /// <summary>Supplies the sort/filter settings inspected by the production collection.</summary>
     public sealed class SongOrder
     {
         /// <summary>Gets the filter text.</summary>
-        public string Keyword { get; init; } = string.Empty;
+        public string Keyword { get; set; } = string.Empty;
         /// <summary>Gets the sorting mode.</summary>
-        public SortType SortBy { get; init; }
+        public SortType SortBy { get; set; }
     }
 
     /// <summary>Supplies the root directory and offset unit read by settings storage.</summary>
@@ -59,7 +75,23 @@ namespace MajdataPlay
     {
         /// <summary>Gets or sets the case-owned settings directory.</summary>
         public static string RootPath { get; set; } = string.Empty;
-        /// <summary>Gets the runtime setting tree read by the production unit conversion.</summary>
+        /// <summary>Gets or sets the chart root consumed by production root scans.</summary>
+        public static string ChartPath { get; set; } = string.Empty;
+        /// <summary>Gets or sets the ignored cache root.</summary>
+        public static string CachePath { get; set; } = string.Empty;
+        /// <summary>Gets the unused SQLite stub location.</summary>
+        public static string FavoriteDBPath => Path.Combine(CachePath, "Favorites.db");
+        /// <summary>Gets the supported audio extensions used by the scanner.</summary>
+        public static string[] SupportedAudioFormats { get; } = new[] { ".opus", ".mp3", ".ogg", ".aac", ".wav" };
+        /// <summary>Gets the supported video extensions used by storage initialization.</summary>
+        public static string[] SupportedVideoFormats { get; } = new[] { ".mp4" };
+        /// <summary>Gets the runtime selection configuration.</summary>
+        public static TestRuntimeConfig RuntimeConfig { get; } = new TestRuntimeConfig();
+        /// <summary>Gets or sets the configured offline fixture endpoints.</summary>
+        public static Net.ApiEndpoint[] ApiEndpoints { get; set; } = Array.Empty<Net.ApiEndpoint>();
+        /// <summary>Gets a placeholder for the unused HTTP client boundary.</summary>
+        public static object SharedHttpClient { get; } = new object();
+        /// <summary>Gets the runtime settings tree.</summary>
         public static TestSettings Settings { get; } = new TestSettings();
         /// <summary>Defines the production frame duration required for unit conversion.</summary>
         public const float FRAME_LENGTH_SEC = 1f / 60f;
@@ -68,6 +100,8 @@ namespace MajdataPlay
     /// <summary>Supplies the debug settings container used by storage.</summary>
     internal sealed class TestSettings
     {
+        /// <summary>Gets the offline online-feature configuration.</summary>
+        public TestOnlineSettings Online { get; } = new TestOnlineSettings();
         /// <summary>Gets the debug settings.</summary>
         public TestDebugSettings Debug { get; } = new TestDebugSettings();
     }
@@ -84,6 +118,13 @@ namespace MajdataPlay
     {
         /// <summary>Runs registered storage saves.</summary>
         public static event EventHandler? OnSave;
+        /// <summary>Provides the quit event subscribed to by storage.</summary>
+        public static event EventHandler? OnAppQuit;
+        /// <summary>Closes subscribed storage resources at the end of the harness.</summary>
+        public static void Quit()
+        {
+            OnAppQuit?.Invoke(null, EventArgs.Empty);
+        }
 
         /// <summary>Invokes the save event synchronously for deterministic assertions.</summary>
         public static void Save()
@@ -119,20 +160,20 @@ namespace MajdataPlay.Settings
 namespace MajdataPlay.Diagnostics
 {
     /// <summary>Supplies the production storage's error sink without Unity logging.</summary>
-    internal static class MajDebug
+    internal static partial class MajDebug
     {
         /// <summary>Reports malformed-data load errors to the validation output.</summary>
         /// <param name="message">The diagnostic context.</param>
         public static void LogError(object? message)
         {
-            Console.WriteLine(message);
+            Console.WriteLine("DIAGNOSTIC " + (message?.ToString() ?? string.Empty).Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries).FirstOrDefault());
         }
 
         /// <summary>Reports unexpected save errors to the validation output.</summary>
         /// <param name="exception">The exception reported by storage.</param>
-        public static void LogException(Exception exception)
+        public static void LogException(Exception? exception)
         {
-            Console.WriteLine(exception);
+            Console.WriteLine("EXCEPTION " + exception?.GetType().Name + ": " + exception?.Message);
         }
     }
 }
@@ -210,7 +251,7 @@ namespace MajdataPlay.Numerics
 namespace MajdataPlay.Extensions
 {
     /// <summary>Supplies the collection utilities used by linked production source.</summary>
-    internal static class CollectionExtensions
+    internal static partial class CollectionExtensions
     {
         /// <summary>Checks whether an array contains no entries.</summary>
         /// <typeparam name="T">The element type.</typeparam>

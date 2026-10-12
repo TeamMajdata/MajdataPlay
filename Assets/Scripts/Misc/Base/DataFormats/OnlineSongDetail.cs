@@ -1,32 +1,24 @@
 using Cysharp.Text;
 using Cysharp.Threading.Tasks;
 using MajdataPlay.Buffers;
+using MajdataPlay.Databases;
+using MajdataPlay.Diagnostics;
+using MajdataPlay.Drawing;
 using MajdataPlay.IO;
 using MajdataPlay.IO.Storage;
 using MajdataPlay.Net;
-using MajdataPlay.Numerics;
-using MajdataPlay.Utils;
-using MajdataPlay.Drawing;
 using MajSimai;
+using Nito.AsyncEx;
 using System;
-using System.Buffers;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Net;
 using System.Net.Http;
 using System.Security.Cryptography;
-using System.Security.Policy;
-using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using UnityEngine;
-using UnityEngine.Networking;
-using MajdataPlay.Settings;
-using Nito.AsyncEx;
-using MajdataPlay.Diagnostics;
-using System.Diagnostics.CodeAnalysis;
-using MajdataPlay.Databases;
 
 #nullable enable
 namespace MajdataPlay
@@ -37,8 +29,8 @@ namespace MajdataPlay
         public string Title { get; init; }
         public string Artist { get; init; }
         public string Description { get; init; } = string.Empty;
-        public ReadOnlySpan<string> Designers 
-        { 
+        public ReadOnlySpan<string> Designers
+        {
             get
             {
                 return _designers;
@@ -63,51 +55,73 @@ namespace MajdataPlay
         public bool IsPreviewAudioTrackLoaded { get => _previewAudioTrackRef.TryGetTarget(out _); }
         public bool IsMaidataLoaded { get => _maidata != null; }
 
-        readonly string _hashHexStr = string.Empty;
-        readonly string _cachePath = string.Empty;
-        readonly ApiEndpoint _serverInfo;
+        /// <summary>Retains the caller-owned per-song cache directory and its original storage backend.</summary>
+        private readonly StorageDirectory _cacheDirectory;
+        private readonly ApiEndpoint _serverInfo;
 
-        readonly Uri _maidataUri;
-        readonly Uri _trackUri;
-        readonly Uri _videoUri;
-        readonly Uri _fullSizeCoverUri;
-        readonly Uri _coverUri;
+        private readonly Uri _maidataUri;
+        private readonly Uri _trackUri;
+        private readonly Uri _videoUri;
+        private readonly Uri _fullSizeCoverUri;
+        private readonly Uri _coverUri;
 
-        readonly string[] _designers = new string[7];
-        readonly string[] _levels = new string[7];
+        private readonly string[] _designers = new string[7];
+        private readonly string[] _levels = new string[7];
 
-        bool _isDisposed = false;
-        bool _isPreloaded = false;
+        private bool _isDisposed = false;
+        private bool _isPreloaded = false;
 
-        string? _videoPath = null;
-        WeakReference<AudioSampleWrap> _audioTrackRef = new(null!);
-        WeakReference<AudioSampleWrap> _previewAudioTrackRef = new(null!);
-        WeakReference<Sprite> _coverRef = new(null!);
-        WeakReference<Sprite> _fullSizeCoverRef = new(null!);
-        SimaiFile? _maidata = null;
+        private string? _videoPath = null;
+        private WeakReference<AudioSampleWrap> _audioTrackRef = new(null!);
+        private WeakReference<AudioSampleWrap> _previewAudioTrackRef = new(null!);
+        private WeakReference<Sprite> _coverRef = new(null!);
+        private WeakReference<Sprite> _fullSizeCoverRef = new(null!);
+        private SimaiFile? _maidata = null;
 
-        volatile int _preloadJoinState = 0;
+        private volatile int _preloadJoinState = 0;
 
-        readonly AsyncLock _previewAudioTrackLock = new();
-        readonly AsyncLock _audioTrackLock = new();
-        readonly AsyncLock _videoPathLock = new();
-        readonly AsyncLock _coverLock = new();
-        readonly AsyncLock _fullSizeCoverLock = new();
-        readonly AsyncLock _maidataLock = new();
+        private readonly AsyncLock _previewAudioTrackLock = new();
+        private readonly AsyncLock _audioTrackLock = new();
+        private readonly AsyncLock _videoPathLock = new();
+        private readonly AsyncLock _coverLock = new();
+        private readonly AsyncLock _fullSizeCoverLock = new();
+        private readonly AsyncLock _maidataLock = new();
 
         ~OnlineSongDetail()
         {
             Dispose(false);
         }
-        public OnlineSongDetail(ApiEndpoint serverInfo, MajnetSongDetail songDetail)
+        /// <summary>Creates an online song backed by the caller's existing, song-specific cache directory.</summary>
+        /// <param name="directory">The already-created cache directory whose original backend owns all cached resources.</param>
+        /// <param name="serverInfo">The endpoint used to request missing chart resources.</param>
+        /// <param name="songDetail">The server-provided song metadata.</param>
+        /// <remarks>
+        /// Cache operations retain storage handles rather than resolving their locations through the storage facade.
+        /// Media loaders still receive the provider's actual file location and must support it or require a local copy.
+        /// </remarks>
+        /// <exception cref="ArgumentNullException">The cache directory, endpoint or song metadata is null.</exception>
+        public OnlineSongDetail(StorageDirectory directory, ApiEndpoint serverInfo, MajnetSongDetail songDetail)
         {
+            if (directory is null)
+            {
+                throw new ArgumentNullException(nameof(directory));
+            }
+            if (serverInfo is null)
+            {
+                throw new ArgumentNullException(nameof(serverInfo));
+            }
+            if (songDetail is null)
+            {
+                throw new ArgumentNullException(nameof(songDetail));
+            }
+            _cacheDirectory = directory;
             var apiroot = serverInfo.Url.Combine($"maichart/{songDetail.Id}/");
-            
+
             Title = songDetail.Title;
             Artist = songDetail.Artist;
             for (var i = 0; i < 7; i++)
             {
-                if(i >= songDetail.Levels.Length)
+                if (i >= songDetail.Levels.Length)
                 {
                     break;
                 }
@@ -120,9 +134,7 @@ namespace MajdataPlay
             _coverUri = apiroot.Combine("image");
 
             Hash = songDetail.Hash;
-            _hashHexStr = HashHelper.ToHexString(Convert.FromBase64String(Hash));
             _serverInfo = serverInfo;
-            _cachePath = Path.Combine(MajEnv.CachePath, $"Net/{_serverInfo.Name}/{_hashHexStr}");
             Id = songDetail.Id;
             Timestamp = songDetail.Timestamp;
 
@@ -142,7 +154,7 @@ namespace MajdataPlay
                 for (var i = 0; i < _designers.Length; i++)
                 {
                     _designers[i] = designer;
-                    
+
                 }
                 sb.Clear();
             }
@@ -204,9 +216,21 @@ namespace MajdataPlay
         {
             return GetAudioTrackAsync(true, progress, token);
         }
+        /// <summary>Gets a supported cached video location or downloads the endpoint's default background video.</summary>
+        /// <param name="progress">The optional download progress receiver.</param>
+        /// <param name="token">The token canceling lock admission and resource download.</param>
+        /// <returns>The provider's actual video location, or an empty string when the endpoint has no video.</returns>
+        /// <remarks>The video loader must support the returned location or first obtain an app-local copy.</remarks>
+        /// <exception cref="ObjectDisposedException">This song has been disposed.</exception>
+        /// <exception cref="OperationCanceledException">The operation was canceled.</exception>
+        /// <exception cref="HttpException">The video request failed.</exception>
+        /// <exception cref="IOException">The cache could not be queried or updated.</exception>
+        /// <exception cref="UnauthorizedAccessException">The backend denied cache access.</exception>
+        /// <exception cref="NotSupportedException">The backend cannot perform a required cache operation.</exception>
         public async ValueTask<string> GetVideoPathAsync(INetProgress? progress = null, CancellationToken token = default)
         {
             ThrowIfDisposed();
+            token.ThrowIfCancellationRequested();
             try
             {
                 if (_videoPath is not null)
@@ -223,38 +247,36 @@ namespace MajdataPlay
                     {
                         return _videoPath;
                     }
-                    var savePath = Path.Combine(_cachePath, "bg.mp4");
-                    var cacheFlagPath = Path.Combine(_cachePath, $"bg.mp4.cache");
+                    var videoFile = FindCachedFile(SongStorage.SupportedVideoFileNames);
+                    var cacheFlagFile = _cacheDirectory.FindFile("bg.mp4.cache");
 
-                    if (FileSystem.File.Open(cacheFlagPath).Exists && !FileSystem.File.Open(savePath).Exists)
+                    if (cacheFlagFile is not null && videoFile is null)
                     {
+                        token.ThrowIfCancellationRequested();
                         _videoPath = string.Empty;
                         return _videoPath;
                     }
                     var options = new DownloadOption()
                     {
                         RequestedUri = _videoUri,
-                        SaveTo = _cachePath,
                         Filename = "bg.mp4",
-                        Name = "bg",
-                        Extension = ".mp4",
+                        CachedFile = videoFile,
                         ForceReDownload = false,
                         Progress = progress
                     };
-                    var result = await DownloadFile(options, token);
+                    var download = await DownloadFile(options, token);
+                    token.ThrowIfCancellationRequested();
                     progress?.Report(1);
-                    if (result == DownloadResult.ResourceNotFound)
+                    if (download.Result == DownloadResult.ResourceNotFound)
                     {
-                        var cacheDirectory = FileSystem.Directory.Open(_cachePath);
-                        var cacheFlagFile = cacheDirectory.FindFile("bg.mp4.cache")
-                            ?? cacheDirectory.CreateFile("bg.mp4.cache");
+                        cacheFlagFile ??= _cacheDirectory.CreateFile("bg.mp4.cache");
                         using var cacheFlagStream = cacheFlagFile.OpenWrite();
                         _videoPath = string.Empty;
                     }
                     else
                     {
-                        _videoPath = savePath;
-                    }                        
+                        _videoPath = (download.File ?? throw new FileNotFoundException("The downloaded video is unavailable.")).Location;
+                    }
                     return _videoPath;
                 }
             }
@@ -279,9 +301,20 @@ namespace MajdataPlay
                 return GetFullSizeCoverAsync(true, progress, token);
             }
         }
+        /// <summary>Reads cached chart metadata and downloads the chart when it is missing or belongs to another hash.</summary>
+        /// <param name="ignoreCache">Whether to bypass the already parsed in-memory chart.</param>
+        /// <param name="progress">The optional download progress receiver.</param>
+        /// <param name="token">The token canceling lock admission and download, and checked around parsing.</param>
+        /// <returns>The parsed chart read through its original storage backend.</returns>
+        /// <remarks>Cancellation cannot interrupt synchronous provider calls or the upstream tokenless parser.</remarks>
+        /// <exception cref="ObjectDisposedException">This song has been disposed.</exception>
+        /// <exception cref="OperationCanceledException">The operation was canceled.</exception>
+        /// <exception cref="HttpException">The chart request failed.</exception>
+        /// <exception cref="Exception">The cached chart could not be read or parsed.</exception>
         public async ValueTask<SimaiFile> GetMaidataAsync(bool ignoreCache = false, INetProgress? progress = null, CancellationToken token = default)
         {
             ThrowIfDisposed();
+            token.ThrowIfCancellationRequested();
             if (!ignoreCache && _maidata is not null)
             {
                 return _maidata;
@@ -293,42 +326,36 @@ namespace MajdataPlay
                 using (@lock)
                 {
                     token.ThrowIfCancellationRequested();
-                    var savePath = Path.Combine(_cachePath, "maidata.txt");
-                    var forceReDl = false;
-                    var shouldFetch = false;
-
-                    if (FileSystem.File.Open(savePath).Exists)
+                    var maidataFile = _cacheDirectory.FindFile(SongStorage.ChartFileName);
+                    SimaiMetadata? metadata = null;
+                    if (maidataFile is not null)
                     {
-                        using var fileStream = FileSystem.File.Open(savePath).OpenRead();
-                        var metadata = await SimaiParser.ParseMetadataAsync(fileStream);
-                        if (metadata.Hash != Hash)
-                        {
-                            MajDebug.LogWarning($"Hash mismatch for maidata of {Id}, re-download");
-                            forceReDl = true;
-                            shouldFetch = true;
-                        }
+                        metadata = await ReadMetadataAsync(maidataFile, token).ConfigureAwait(false);
                     }
-                    else
+                    var forceReDownload = metadata.HasValue && metadata.Value.Hash != Hash;
+                    if (forceReDownload)
                     {
-                        shouldFetch = true;
+                        MajDebug.LogWarning($"Hash mismatch for maidata of {Id}, re-download");
                     }
-                    if(shouldFetch)
+                    if (metadata is null || forceReDownload)
                     {
                         var options = new DownloadOption()
                         {
                             RequestedUri = _maidataUri,
-                            SaveTo = _cachePath,
-                            Filename = "maidata.txt",
-                            Name = "maidata",
-                            Extension = ".txt",
-                            ForceReDownload = forceReDl,
+                            Filename = SongStorage.ChartFileName,
+                            CachedFile = maidataFile,
+                            ForceReDownload = forceReDownload,
                             Progress = progress
                         };
-                        await DownloadFile(options, token);
+                        var download = await DownloadFile(options, token).ConfigureAwait(false);
+                        maidataFile = download.File ?? throw new FileNotFoundException("The downloaded chart is unavailable.");
+                        metadata = await ReadMetadataAsync(maidataFile, token).ConfigureAwait(false);
                     }
+                    token.ThrowIfCancellationRequested();
                     progress?.Report(1);
-                    using var maidataStream = FileSystem.File.Open(savePath).OpenRead();
-                    _maidata = await SimaiParser.ParseAsync(maidataStream);
+                    var maidata = await SimaiParser.ParseAsync(metadata.Value).ConfigureAwait(false);
+                    token.ThrowIfCancellationRequested();
+                    _maidata = maidata;
                     return _maidata;
                 }
             }
@@ -337,21 +364,23 @@ namespace MajdataPlay
                 MajDebug.LogException(ex);
                 throw;
             }
+            catch (OperationCanceledException)
+            {
+                _maidata = null;
+                throw;
+            }
             catch (Exception e)
             {
-                if (e is not OperationCanceledException)
-                {
-                    MajDebug.LogException(e);
-                }
+                MajDebug.LogException(e);
                 _maidata = null;
-                throw new Exception("Maidata Load Failed");
+                throw new Exception("Maidata Load Failed", e);
             }
         }
         public void Dispose()
         {
             Dispose(true);
         }
-        void Dispose(bool disposing)
+        private void Dispose(bool disposing)
         {
             if (_isDisposed)
             {
@@ -382,7 +411,7 @@ namespace MajdataPlay
                 }
             });
             _maidata = null;
-            if(disposing)
+            if (disposing)
             {
                 _audioTrackRef.SetTarget(null!);
                 _previewAudioTrackRef.SetTarget(null!);
@@ -464,9 +493,20 @@ namespace MajdataPlay
         //}
         #endregion
 
-        async ValueTask<AudioSampleWrap> GetAudioTrackAsync(bool loadIntoMemory, INetProgress? progress = null, CancellationToken token = default)
+        /// <summary>Gets a supported cached track or downloads and optionally decodes the endpoint's MP3 track.</summary>
+        /// <param name="loadIntoMemory">Whether the completed download should also be decoded as audio.</param>
+        /// <param name="progress">The optional download progress receiver.</param>
+        /// <param name="token">The token canceling lock admission, download and main-thread admission.</param>
+        /// <returns>The decoded track, or an empty audio sample when only downloading.</returns>
+        /// <remarks>Audio decoding still requires a loader-compatible resource location.</remarks>
+        /// <exception cref="ObjectDisposedException">This song has been disposed.</exception>
+        /// <exception cref="OperationCanceledException">The operation was canceled.</exception>
+        /// <exception cref="HttpException">The track request failed.</exception>
+        /// <exception cref="Exception">The cache or audio loader could not provide the requested track.</exception>
+        private async ValueTask<AudioSampleWrap> GetAudioTrackAsync(bool loadIntoMemory, INetProgress? progress = null, CancellationToken token = default)
         {
             ThrowIfDisposed();
+            token.ThrowIfCancellationRequested();
             await using (UniTask.ReturnToCurrentSynchronizationContext())
             {
                 try
@@ -480,28 +520,26 @@ namespace MajdataPlay
                         {
                             return audioTrack;
                         }
-                        var savePath = Path.Combine(_cachePath, "track.mp3");
                         var options = new DownloadOption()
                         {
                             RequestedUri = _trackUri,
-                            SaveTo = _cachePath,
                             Filename = "track.mp3",
-                            Name = "track",
-                            Extension = ".mp3",
+                            CachedFile = FindCachedFile(SongStorage.SupportedTrackFileNames),
                             ForceReDownload = false,
                             Progress = progress
                         };
-
-                        await DownloadFile(options, token);
+                        var download = await DownloadFile(options, token).ConfigureAwait(false);
+                        token.ThrowIfCancellationRequested();
                         progress?.Report(1);
                         if (!loadIntoMemory)
                         {
                             return AudioSampleWrap.Empty;
                         }
-                        var sampleWarp = await MajInstances.AudioManager.LoadMusicAsync(savePath, true, true);
-                        _audioTrackRef.SetTarget(sampleWarp);
-
-                        return sampleWarp;
+                        var trackFile = download.File ?? throw new FileNotFoundException("The downloaded track is unavailable.");
+                        await UniTask.SwitchToMainThread(token);
+                        var sampleWrap = await MajInstances.AudioManager.LoadMusicAsync(trackFile.Location, true, true);
+                        _audioTrackRef.SetTarget(sampleWrap);
+                        return sampleWrap;
                     }
                 }
                 catch (Exception e)
@@ -510,62 +548,97 @@ namespace MajdataPlay
                     if (e is not OperationCanceledException)
                     {
                         MajDebug.LogException(e);
-                        throw e;
                     }
-                    
-                    throw new InvalidAudioTrackException("Music track Load Failed", Path.Combine(_cachePath, "track.mp3"));
+                    throw;
                 }
             }
         }
-        async ValueTask<Sprite> GetCompressedCoverAsync(bool loadIntoMemory, INetProgress? progress = null, CancellationToken token = default)
+        /// <summary>Gets or downloads the compressed cover through the caller's cache backend.</summary>
+        /// <param name="loadIntoMemory">Whether to decode the completed cover download.</param>
+        /// <param name="progress">The optional download progress receiver.</param>
+        /// <param name="token">The token canceling admission, download and cover loading.</param>
+        /// <returns>The compressed cover or the runtime's empty-cover sprite.</returns>
+        /// <exception cref="ObjectDisposedException">This song has been disposed.</exception>
+        /// <exception cref="OperationCanceledException">The operation was canceled.</exception>
+        /// <exception cref="Exception">A cache operation or image loader failed.</exception>
+        private ValueTask<Sprite> GetCompressedCoverAsync(bool loadIntoMemory, INetProgress? progress = null, CancellationToken token = default)
         {
+            return GetCoverResourceAsync(false, loadIntoMemory, progress, token);
+        }
+
+        /// <summary>Gets or downloads the separate, full-resolution cover through the caller's cache backend.</summary>
+        /// <param name="loadIntoMemory">Whether to decode the completed cover download.</param>
+        /// <param name="progress">The optional download progress receiver.</param>
+        /// <param name="token">The token canceling admission, download and cover loading.</param>
+        /// <returns>The full-resolution cover or the runtime's empty-cover sprite.</returns>
+        /// <exception cref="ObjectDisposedException">This song has been disposed.</exception>
+        /// <exception cref="OperationCanceledException">The operation was canceled.</exception>
+        /// <exception cref="Exception">A cache operation or image loader failed.</exception>
+        private ValueTask<Sprite> GetFullSizeCoverAsync(bool loadIntoMemory, INetProgress? progress = null, CancellationToken token = default)
+        {
+            return GetCoverResourceAsync(true, loadIntoMemory, progress, token);
+        }
+
+        /// <summary>Shares backend-preserving cover download logic without mixing full-resolution and compressed caches.</summary>
+        /// <param name="isFullSize">Whether to use the full-resolution endpoint and dedicated cache file.</param>
+        /// <param name="loadIntoMemory">Whether the selected image should be decoded.</param>
+        /// <param name="progress">The optional download progress receiver.</param>
+        /// <param name="token">The token canceling admission, download and image decoding.</param>
+        /// <returns>The selected cover or the runtime's empty-cover sprite.</returns>
+        /// <remarks>Image decoding still requires a loader-compatible file location.</remarks>
+        /// <exception cref="ObjectDisposedException">This song has been disposed.</exception>
+        /// <exception cref="OperationCanceledException">The operation was canceled.</exception>
+        /// <exception cref="Exception">A cache operation or image loader failed.</exception>
+        private async ValueTask<Sprite> GetCoverResourceAsync(bool isFullSize, bool loadIntoMemory, INetProgress? progress, CancellationToken token)
+        {
+            ThrowIfDisposed();
+            token.ThrowIfCancellationRequested();
+            var coverReference = isFullSize ? _fullSizeCoverRef : _coverRef;
+            var coverLock = isFullSize ? _fullSizeCoverLock : _coverLock;
             await using (UniTask.ReturnToCurrentSynchronizationContext())
             {
                 try
                 {
                     await UniTask.SwitchToThreadPool();
-                    var @lock = await _coverLock.LockAsync(token);
+                    var @lock = await coverLock.LockAsync(token);
                     using (@lock)
                     {
                         token.ThrowIfCancellationRequested();
-                        if (_coverRef.TryGetTarget(out var cover) && await cover.IsNativeAliveAsync())
+                        if (coverReference.TryGetTarget(out var cover) && await cover.IsNativeAliveAsync())
                         {
                             return cover;
                         }
-                        var savePath = Path.Combine(_cachePath, "bg.jpg");
-
+                        var filename = isFullSize ? "bg_fullSize.jpg" : "bg.jpg";
+                        StorageFile? coverFile;
                         try
                         {
                             var options = new DownloadOption()
                             {
-                                RequestedUri = _coverUri,
-                                SaveTo = _cachePath,
-                                Filename = "bg.jpg",
-                                Name = "bg",
-                                Extension = ".jpg",
+                                RequestedUri = isFullSize ? _fullSizeCoverUri : _coverUri,
+                                Filename = filename,
+                                CachedFile = isFullSize ? _cacheDirectory.FindFile(filename) : FindCachedFile(SongStorage.SupportedCoverFileNames),
                                 ForceReDownload = false,
                                 Progress = progress
                             };
-                            await DownloadFile(options, token);
-                            if (!loadIntoMemory)
-                            {
-                                return Majdata<GameRuntime>.Instance!.Sprite.EmptySongCover;
-                            }
+                            var download = await DownloadFile(options, token).ConfigureAwait(false);
+                            coverFile = download.File;
                         }
                         catch (HttpException e)
                         {
                             MajDebug.LogException(e);
-                            return Majdata<GameRuntime>.Instance!.Sprite.EmptySongCover;
+                            return await GetEmptyCoverAsync(token);
                         }
                         finally
                         {
                             progress?.Report(1);
                         }
-
                         token.ThrowIfCancellationRequested();
-                        cover = await SpriteLoader.LoadFromFileAsync(savePath, true, token);
-
-                        _coverRef.SetTarget(cover);
+                        if (!loadIntoMemory || coverFile is null)
+                        {
+                            return await GetEmptyCoverAsync(token);
+                        }
+                        cover = await SpriteLoader.LoadFromFileAsync(coverFile.Location, true, token);
+                        coverReference.SetTarget(cover);
                         return cover;
                     }
                 }
@@ -577,125 +650,132 @@ namespace MajdataPlay
                     }
                     throw;
                 }
-            }  
+            }
         }
-        async ValueTask<Sprite> GetFullSizeCoverAsync(bool loadIntoMemory, INetProgress? progress = null, CancellationToken token = default)
-        {
-            try
-            {
-                await UniTask.SwitchToThreadPool();
-                var @lock = await _fullSizeCoverLock.LockAsync(token);
-                using (@lock)
-                {
-                    token.ThrowIfCancellationRequested();
-                    if (_fullSizeCoverRef.TryGetTarget(out var cover) && await cover.IsNativeAliveAsync())
-                    {
-                        return cover;
-                    }
-                    var savePath = Path.Combine(_cachePath, "bg_fullSize.jpg");
-                    
-                    try
-                    {
-                        var options = new DownloadOption()
-                        {
-                            RequestedUri = _fullSizeCoverUri,
-                            SaveTo = _cachePath,
-                            Filename = "bg_fullSize.jpg",
-                            Name = "bg_fullSize",
-                            Extension = ".jpg",
-                            ForceReDownload = false,
-                            Progress = progress
-                        };
-                        await DownloadFile(options, token);
-                        if (!loadIntoMemory)
-                        {
-                            return Majdata<GameRuntime>.Instance!.Sprite.EmptySongCover;
-                        }
-                    }
-                    catch (HttpException e)
-                    {
-                        MajDebug.LogException(e);
-                        return Majdata<GameRuntime>.Instance!.Sprite.EmptySongCover;
-                    }
-                    finally
-                    {
-                        progress?.Report(1);
-                    }
-                    token.ThrowIfCancellationRequested();
-                    cover = await SpriteLoader.LoadFromFileAsync(savePath, true, token);
 
-                    _fullSizeCoverRef.SetTarget(cover);
-                    return cover;
-                }
-            }
-            catch (Exception e)
-            {
-                if (e is not OperationCanceledException)
-                {
-                    MajDebug.LogException(e);
-                }
-                throw;
-            }
+        /// <summary>Reads the runtime's fallback sprite only after switching to Unity's main thread.</summary>
+        /// <param name="token">The token canceling main-thread admission.</param>
+        /// <returns>The empty-song cover owned by the active game runtime.</returns>
+        /// <exception cref="OperationCanceledException">The operation was canceled before accessing the runtime.</exception>
+        private static async ValueTask<Sprite> GetEmptyCoverAsync(CancellationToken token)
+        {
+            await UniTask.SwitchToMainThread(token);
+            token.ThrowIfCancellationRequested();
+            return Majdata<GameRuntime>.Instance!.Sprite.EmptySongCover;
         }
-        
-        void ThrowIfDisposed()
+
+        /// <summary>Rejects resource operations after this song's owned media has been released.</summary>
+        /// <exception cref="ObjectDisposedException">This song has been disposed.</exception>
+        private void ThrowIfDisposed()
         {
             if (_isDisposed)
             {
                 throw new ObjectDisposedException(nameof(OnlineSongDetail));
             }
         }
-        private void EnsureCachePath()
+        /// <summary>Finds a cached file by the centralized, case-insensitive supported-resource names.</summary>
+        /// <param name="supportedFileNames">The shared filename table for the requested resource kind.</param>
+        /// <returns>The original-backend file handle, or null when no supported resource is cached.</returns>
+        /// <exception cref="DirectoryNotFoundException">The cache directory no longer exists.</exception>
+        /// <exception cref="IOException">The cache cannot be enumerated.</exception>
+        /// <exception cref="UnauthorizedAccessException">Cache enumeration was denied.</exception>
+        private StorageFile? FindCachedFile(IEnumerable<string> supportedFileNames)
         {
-            FileSystem.Directory.Create(_cachePath);
+            foreach (var entry in _cacheDirectory.EnumerateEntries())
+            {
+                if (!entry.IsDirectory && supportedFileNames.Contains(entry.Name, StringComparer.OrdinalIgnoreCase))
+                {
+                    return new StorageFile(_cacheDirectory.FileSystem, entry.Location);
+                }
+            }
+            return null;
         }
 
-        async Task<DownloadResult> DownloadFile(DownloadOption options, CancellationToken token = default)
+        /// <summary>Buffers original-backend chart bytes before invoking the parser which requires a seekable stream.</summary>
+        /// <param name="file">The chart file retaining the original cache backend.</param>
+        /// <param name="token">The token canceling reads and checked around the tokenless metadata parser.</param>
+        /// <returns>The parsed Simai metadata, including its computed chart hash.</returns>
+        /// <exception cref="OperationCanceledException">Reading was canceled or cancellation was observed around parsing.</exception>
+        /// <exception cref="IOException">The provider could not read the chart.</exception>
+        /// <exception cref="UnauthorizedAccessException">The provider denied chart access.</exception>
+        /// <exception cref="NotSupportedException">The provider does not support reading.</exception>
+        /// <exception cref="InvalidSimaiMarkupException">The cached chart metadata is malformed.</exception>
+        private static async Task<SimaiMetadata> ReadMetadataAsync(StorageFile file, CancellationToken token)
         {
-            EnsureCachePath();
+            token.ThrowIfCancellationRequested();
+            var bytes = await file.ReadAllBytesAsync(token).ConfigureAwait(false);
+            token.ThrowIfCancellationRequested();
+            using var stream = new MemoryStream(bytes, false);
+            var metadata = await SimaiParser.ParseMetadataAsync(stream).ConfigureAwait(false);
+            token.ThrowIfCancellationRequested();
+            return metadata;
+        }
 
-            var savePath = Path.Combine(options.SaveTo, options.Filename);
-            var chunkPath = Path.Combine(options.SaveTo, $"{options.Filename}.chunk");
-            var hashPath = Path.Combine(options.SaveTo, $"{options.Filename}.sha256");
-            var storageDirectory = FileSystem.Directory.Open(options.SaveTo);
-            var saveFile = FileSystem.File.Open(savePath);
-            var chunkFile = FileSystem.File.Open(chunkPath);
-            var hashFile = FileSystem.File.Open(hashPath);
+        /// <summary>Reuses or downloads one resource and returns its authoritative cache handle after any rename.</summary>
+        /// <param name="options">The resource URI, default filename and optional supported cached-file handle.</param>
+        /// <param name="token">The token canceling provider reads, HTTP requests and stream transfers.</param>
+        /// <returns>The download outcome and completed file handle, or null when no resource was obtained.</returns>
+        /// <remarks>Synchronous provider and hash operations cannot be interrupted while blocked.</remarks>
+        /// <exception cref="ObjectDisposedException">This song has been disposed.</exception>
+        /// <exception cref="OperationCanceledException">The caller canceled the transfer.</exception>
+        /// <exception cref="DirectoryNotFoundException">The caller's cache directory no longer exists.</exception>
+        /// <exception cref="HttpException">The request or integrity validation failed after applicable retries.</exception>
+        /// <exception cref="IOException">Initial cache discovery or cleanup failed.</exception>
+        /// <exception cref="UnauthorizedAccessException">The backend denied initial cache access.</exception>
+        /// <exception cref="NotSupportedException">The backend cannot perform a required initial cache operation.</exception>
+        private async Task<(DownloadResult Result, StorageFile? File)> DownloadFile(DownloadOption options, CancellationToken token = default)
+        {
+            ThrowIfDisposed();
+            token.ThrowIfCancellationRequested();
+            if (!_cacheDirectory.Exists)
+            {
+                throw new DirectoryNotFoundException("The caller's song-cache directory does not exist.");
+            }
+            var storageDirectory = _cacheDirectory;
+            var saveFile = options.CachedFile ?? storageDirectory.FindFile(options.Filename);
+            var cachedName = saveFile?.Entry?.Name ?? options.Filename;
+            var chunkFile = storageDirectory.FindFile($"{options.Filename}.chunk");
+            var hashFile = storageDirectory.FindFile($"{cachedName}.sha256");
 
             var httpClient = MajEnv.SharedHttpClient;
             var expectedSHA256 = default(string?);
 
             if (options.ForceReDownload)
             {
-                DeleteFileIfExists(savePath);
-                DeleteFileIfExists(chunkPath);
-                DeleteFileIfExists(hashPath);
+                DeleteFileIfExists(saveFile);
+                DeleteFileIfExists(chunkFile);
+                chunkFile = null;
+                DeleteFileIfExists(hashFile);
+                hashFile = null;
             }
             else
             {
-                if (hashFile.Exists)
+                if (hashFile is not null)
                 {
                     expectedSHA256 = await hashFile.ReadAllTextAsync(cancellationToken: token);
                 }
 
-                if (saveFile.Exists)
+                if (saveFile is not null && saveFile.Exists)
                 {
-                    if (VerifyFileIntegrity(savePath, expectedSHA256))
+                    if (VerifyFileIntegrity(saveFile, expectedSHA256))
                     {
-                        return DownloadResult.Success;
+                        token.ThrowIfCancellationRequested();
+                        return (DownloadResult.Success, saveFile);
                     }
 
                     MajDebug.LogDebug(nameof(OnlineSongDetail), $"The complete file is corrupted, re-download it: {options.RequestedUri}");
-                    DeleteFileIfExists(savePath);
-                    DeleteFileIfExists(hashPath);
+                    DeleteFileIfExists(saveFile);
+                    DeleteFileIfExists(hashFile);
+                    hashFile = null;
                     expectedSHA256 = null;
                 }
-                else if (chunkFile.Exists)
+                else if (chunkFile is not null && chunkFile.Exists)
                 {
-                    if (VerifyFileIntegrity(chunkPath, expectedSHA256))
+                    // A chunk without a server digest may still be incomplete and must not be promoted.
+                    if (!string.IsNullOrEmpty(expectedSHA256) && VerifyFileIntegrity(chunkFile, expectedSHA256))
                     {
-                        chunkFile.Rename(options.Filename);
-                        return DownloadResult.Success;
+                        token.ThrowIfCancellationRequested();
+                        return (DownloadResult.Success, chunkFile.Rename(options.Filename));
                     }
 
                     MajDebug.LogDebug(nameof(OnlineSongDetail), $"Found incomplete chunk file: {options.RequestedUri}");
@@ -707,9 +787,10 @@ namespace MajdataPlay
 
             for (var i = 0; i <= MajEnv.HTTP_REQUEST_MAX_RETRY; i++)
             {
+                token.ThrowIfCancellationRequested();
                 try
                 {
-                    var existingChunkLength = chunkFile.Entry?.Length ?? 0;
+                    var existingChunkLength = chunkFile?.Entry?.Length ?? 0;
 
                     using var req = new HttpRequestMessage(HttpMethod.Get, requestUri);
 
@@ -723,12 +804,13 @@ namespace MajdataPlay
                     if (rsp.StatusCode == HttpStatusCode.RequestedRangeNotSatisfiable)
                     {
                         MajDebug.LogWarning(nameof(OnlineSongDetail), $"Range {existingChunkLength}- not satisfiable. Resetting chunk.");
-                        DeleteFileIfExists(chunkPath);
+                        DeleteFileIfExists(chunkFile);
+                        chunkFile = null;
                         continue;
                     }
                     else if (rsp.StatusCode == HttpStatusCode.NotFound)
                     {
-                        return DownloadResult.ResourceNotFound;
+                        return (DownloadResult.ResourceNotFound, null);
                     }
                     else if (!rsp.IsSuccessStatusCode)
                     {
@@ -742,12 +824,13 @@ namespace MajdataPlay
                     {
                         MajDebug.LogWarning(nameof(OnlineSongDetail), $"Server does not support partial download. Falling back to full download.");
                         existingChunkLength = 0;
-                        DeleteFileIfExists(chunkPath);
+                        DeleteFileIfExists(chunkFile);
+                        chunkFile = null;
                     }
 
                     if (string.IsNullOrEmpty(expectedSHA256))
                     {
-                        if((rsp.Headers.TryGetValues("hash", out var values) || rsp.Headers.TryGetValues("Hash", out values)))
+                        if (rsp.Headers.TryGetValues("hash", out var values))
                         {
                             expectedSHA256 = values.FirstOrDefault(x => !string.IsNullOrEmpty(x));
                             if (!string.IsNullOrEmpty(expectedSHA256))
@@ -756,7 +839,7 @@ namespace MajdataPlay
                                     ?? storageDirectory.CreateFile($"{options.Filename}.sha256", "text/plain");
                                 await hashStorageFile.WriteAllTextAsync(expectedSHA256, cancellationToken: token);
                             }
-                        }                        
+                        }
                     }
 
                     var totalBytesToReceive = rsp.Content.Headers.ContentLength ?? 0;
@@ -767,23 +850,26 @@ namespace MajdataPlay
                     }
 
                     var isIntegrityValid = true;
-                    var chunkStorageFile = storageDirectory.FindFile($"{options.Filename}.chunk")
+                    var chunkStorageFile = chunkFile ?? storageDirectory.FindFile($"{options.Filename}.chunk")
                         ?? storageDirectory.CreateFile($"{options.Filename}.chunk");
+                    chunkFile = chunkStorageFile;
                     using (var chunkFileStream = chunkStorageFile.OpenWrite(append: isPartial))
                     {
                         using var httpStream = await rsp.Content.ReadAsStreamAsync();
 
                         await DownloadStreamWithProgressAsync(httpStream, chunkFileStream, progress, existingChunkLength, totalFileBytes, token);
                     }
+                    token.ThrowIfCancellationRequested();
                     if (!string.IsNullOrEmpty(expectedSHA256))
                     {
-                        isIntegrityValid = VerifyFileIntegrity(chunkStorageFile.Location, expectedSHA256);
+                        isIntegrityValid = VerifyFileIntegrity(chunkStorageFile, expectedSHA256);
                     }
 
                     if (!isIntegrityValid)
                     {
                         MajDebug.LogWarning(nameof(OnlineSongDetail), $"Hash mismatch for online resource. Origin: {expectedSHA256}");
-                        DeleteFileIfExists(chunkPath);
+                        DeleteFileIfExists(chunkFile);
+                        chunkFile = null;
 
                         if (i == MajEnv.HTTP_REQUEST_MAX_RETRY)
                         {
@@ -792,20 +878,19 @@ namespace MajdataPlay
                         continue;
                     }
 
-                    chunkStorageFile.Rename(options.Filename);
-
-                    return DownloadResult.Success;
+                    token.ThrowIfCancellationRequested();
+                    return (DownloadResult.Success, chunkStorageFile.Rename(options.Filename));
                 }
                 catch (OperationCanceledException) when (token.IsCancellationRequested)
                 {
                     MajDebug.LogWarning(nameof(OnlineSongDetail), $"Request for resource \"{requestUri}\" was canceled");
-                    throw new HttpException(requestUri.OriginalString, HttpErrorCode.Canceled);
+                    throw;
                 }
                 catch (Exception e) when (e is not HttpException || ((HttpException)e).ErrorCode == HttpErrorCode.IntegrityCheckFailed)
                 {
                     if (i == MajEnv.HTTP_REQUEST_MAX_RETRY)
                     {
-                        if (e is HttpException httpEx)
+                        if (e is HttpException)
                         {
                             throw;
                         }
@@ -823,16 +908,26 @@ namespace MajdataPlay
                     }
                 }
             }
-            return DownloadResult.Failed;
+            return (DownloadResult.Failed, null);
         }
 
+        /// <summary>Copies response bytes to the provider stream while reporting bounded download progress.</summary>
+        /// <param name="src">The readable HTTP response stream.</param>
+        /// <param name="dst">The writable original-backend chunk stream.</param>
+        /// <param name="progress">The optional download progress receiver.</param>
+        /// <param name="existingLength">The already cached bytes preceding this response.</param>
+        /// <param name="totalFileBytes">The complete resource length when known, otherwise zero.</param>
+        /// <param name="token">The token canceling stream transfers and the final flush.</param>
+        /// <returns>A task completing after all response bytes have been transferred and flushed.</returns>
+        /// <exception cref="OperationCanceledException">The transfer was canceled.</exception>
+        /// <exception cref="IOException">Reading or writing a stream failed.</exception>
         private async Task DownloadStreamWithProgressAsync(Stream src, Stream dst, INetProgress? progress, long existingLength, long totalFileBytes, CancellationToken token)
         {
             var bufferSize = MajEnv.HTTP_BUFFER_SIZE;
             using (var readBuffer = Pool<byte>.Rent(bufferSize, true))
             {
                 var buffer = readBuffer.AsMemory();
-                int read;
+                var read = 0;
                 var totalRead = existingLength;
 
                 while ((read = await src.ReadAsync(buffer, token)) > 0)
@@ -851,60 +946,72 @@ namespace MajdataPlay
             }
         }
 
-        private bool VerifyFileIntegrity(string filePath, string? targetHash)
+        /// <summary>Verifies a cached file against its optional server-provided digest without rebinding its backend.</summary>
+        /// <param name="file">The original-backend file to verify.</param>
+        /// <param name="targetHash">The expected Base64-encoded SHA-256 digest, or null when the server supplied none.</param>
+        /// <returns>True when no digest is supplied or the file's digest matches; otherwise false.</returns>
+        /// <exception cref="IOException">The backend could not read the cached file.</exception>
+        /// <exception cref="UnauthorizedAccessException">The backend denied file access.</exception>
+        /// <exception cref="NotSupportedException">The backend cannot open the cached file.</exception>
+        private static bool VerifyFileIntegrity(StorageFile file, string? targetHash)
         {
             if (string.IsNullOrEmpty(targetHash))
             {
                 return true;
             }
-
-            using var fs = FileSystem.File.Open(filePath).OpenRead();
-            return VerifyStreamIntegrity(fs, targetHash);
+            using var stream = file.OpenRead();
+            return VerifyStreamIntegrity(stream, targetHash!);
         }
 
-        private bool VerifyStreamIntegrity(Stream stream, string targetHash)
+        /// <summary>Computes and compares the stream's SHA-256 digest with a case-sensitive Base64 digest.</summary>
+        /// <param name="stream">The readable stream positioned at its resource bytes.</param>
+        /// <param name="targetHash">The expected Base64-encoded SHA-256 digest.</param>
+        /// <returns>True when the computed digest matches the expected digest; otherwise false.</returns>
+        /// <exception cref="IOException">Reading the stream failed.</exception>
+        /// <exception cref="CryptographicException">The SHA-256 implementation failed.</exception>
+        private static bool VerifyStreamIntegrity(Stream stream, string targetHash)
         {
             using var sha256 = SHA256.Create();
             var hashBytes = sha256.ComputeHash(stream);
             var currentHash = Convert.ToBase64String(hashBytes);
-
-            return string.Equals(targetHash, currentHash, StringComparison.OrdinalIgnoreCase);
+            return string.Equals(targetHash, currentHash, StringComparison.Ordinal);
         }
 
-        private void DeleteFileIfExists(string path)
+        /// <summary>Deletes an optional original-backend cache handle without reconstructing its location.</summary>
+        /// <param name="file">The file to remove, or null when no file was found.</param>
+        /// <exception cref="IOException">The backend could not delete the file.</exception>
+        /// <exception cref="UnauthorizedAccessException">The backend denied deletion.</exception>
+        /// <exception cref="NotSupportedException">The backend does not support deletion.</exception>
+        private static void DeleteFileIfExists(StorageFile? file)
         {
-            var file = FileSystem.File.Open(path);
-            if (file.Exists)
-            {
-                file.Delete();
-            }
+            file?.Delete();
         }
 
-        readonly struct DownloadOption
+        /// <summary>Describes one endpoint resource and its optional supported cached file.</summary>
+        private readonly struct DownloadOption
         {
+            /// <summary>Gets the endpoint URI used when no valid cached resource is available.</summary>
             public Uri RequestedUri { get; init; }
-            public string SaveTo { get; init; }
-            /// <summary>
-            /// e.g: maidata.txt
-            /// </summary>
+            /// <summary>Gets the single default child name used for a newly downloaded resource.</summary>
             public string Filename { get; init; }
-            /// <summary>
-            /// e.g: maidata
-            /// </summary>
-            public string Name { get; init; }
-            /// <summary>
-            /// e.g: .txt
-            /// </summary>
-            public string Extension { get; init; }
+            /// <summary>Gets an existing supported cache handle retaining the caller's original backend.</summary>
+            public StorageFile? CachedFile { get; init; }
+            /// <summary>Gets whether cached complete, partial and digest files must be discarded.</summary>
             public bool ForceReDownload { get; init; }
+            /// <summary>Gets the optional download progress receiver.</summary>
             public INetProgress? Progress { get; init; }
         }
 
-        enum DownloadResult
+        /// <summary>Identifies whether an endpoint resource was obtained.</summary>
+        private enum DownloadResult
         {
+            /// <summary>No download outcome has been assigned.</summary>
             None,
+            /// <summary>A valid cached or downloaded resource is available.</summary>
             Success,
+            /// <summary>Applicable retries were exhausted without obtaining a resource.</summary>
             Failed,
+            /// <summary>The endpoint reported that the optional resource does not exist.</summary>
             ResourceNotFound
         }
     }

@@ -1,7 +1,4 @@
 using Cysharp.Text;
-using Cysharp.Threading.Tasks;
-using Cysharp.Threading.Tasks.Linq;
-using MajdataPlay.Buffers;
 using MajdataPlay.Collections;
 using MajdataPlay.Diagnostics;
 using MajdataPlay.Extensions;
@@ -14,22 +11,38 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Runtime.CompilerServices;
 using System.Security.Cryptography;
 using System.Threading;
 using System.Threading.Tasks;
 #nullable enable
 namespace MajdataPlay
 {
+    /// <summary>Owns the published song library and coordinates local, online and playlist scans.</summary>
     public static class SongStorage
     {
+        /// <summary>Defines the metadata filename identifying a Simai chart directory.</summary>
         public const string ChartFileName = "maidata.txt";
-        public static readonly string[] SupportedTrackFileNames = Array.Empty<string>()
-                                                                       .Concat(MajEnv.SupportedAudioFormats.Select(x => $"track.{x}"))
-                                                                       .ToArray();
-        public static readonly string[] SupportedVideoFileNames = Array.Empty<string>()
-                                                                       .Concat(MajEnv.SupportedVideoFormats.Select(x => $"bg.{x}"))
-                                                                       .Concat(MajEnv.SupportedVideoFormats.Select(x => $"pv.{x}"))
-                                                                       .ToArray();
+        /// <summary>Lists the track filenames supported by the configured, dot-prefixed audio extensions.</summary>
+        public static readonly string[] SupportedTrackFileNames = MajEnv.SupportedAudioFormats
+            .Select(extension => "track" + extension)
+            .ToArray();
+
+        /// <summary>Lists supported bg, pv and legacy mv video filenames using dot-prefixed video extensions.</summary>
+        public static readonly string[] SupportedVideoFileNames = MajEnv.SupportedVideoFormats
+            .Select(extension => "bg" + extension)
+            .Concat(MajEnv.SupportedVideoFormats.Select(extension => "pv" + extension))
+            .Concat(MajEnv.SupportedVideoFormats.Select(extension => "mv" + extension))
+            .ToArray();
+
+        /// <summary>Lists the supported PNG and JPEG background-cover filenames.</summary>
+        public static readonly string[] SupportedCoverFileNames = new string[]
+        {
+            "bg.png",
+            "bg.jpg"
+        };
+
+        /// <summary>Gets whether the published library has no visible songs.</summary>
         public static bool IsEmpty
         {
             get => Collections.IsEmpty() || Collections.All(x => x.Count == 0);
@@ -39,8 +52,8 @@ namespace MajdataPlay
         /// </summary>
         public static int CollectionIndex
         {
-            get => _collectionIndex;
-            set => _collectionIndex = value.Clamp(0, Collections.Length - 1);
+            get => s_collectionIndex;
+            set => s_collectionIndex = Collections.Length == 0 ? 0 : value.Clamp(0, Collections.Length - 1);
         }
         /// <summary>
         /// Current song collection
@@ -49,610 +62,778 @@ namespace MajdataPlay
         {
             get
             {
-                if (Collections.IsEmpty())
+                var collections = Collections;
+                if (collections.IsEmpty())
                 {
-                    return EMPTY_SONG_COLLECTION;
+                    return s_emptyCollection;
                 }
-                return Collections[_collectionIndex];
+                var index = Volatile.Read(ref s_collectionIndex).Clamp(0, collections.Length - 1);
+                return collections[index];
             }
         }
         /// <summary>
         /// Loaded song collections
         /// </summary>
         public static SongCollection[] Collections { get; private set; } = Array.Empty<SongCollection>();
+        /// <summary>Gets the runtime song sorting and filtering settings.</summary>
         public static SongOrder OrderBy
         {
             get => MajEnv.RuntimeConfig.List.OrderBy;
         }
+        /// <summary>Gets the number of base chart instances in the last successfully published library.</summary>
         public static long TotalChartCount
         {
             get
             {
-                return _totalChartCount;
+                return Interlocked.Read(ref s_totalChartCount);
             }
         }
 
-        private static int _collectionIndex = 0;
-        private static long _totalChartCount = 0;
-        private static long _parsedChartCount = 0;
+        /// <summary>Stores the selected collection index within the published library.</summary>
+        private static int s_collectionIndex = 0;
+        /// <summary>Stores the count of chart instances belonging to the committed library.</summary>
+        private static long s_totalChartCount = 0;
 
 
-        private static readonly List<ISongDetail> _allCharts = new(8192);
-        private static readonly HashSet<string> _storageFav = new();
-        private static DanInfo? _userFavorites = null;
-        private static MyFavoriteSongCollection? _myFavorite;
+        /// <summary>Stores the chart instances owned by the last successfully published library.</summary>
+        private static ISongDetail[] s_allCharts = Array.Empty<ISongDetail>();
 
-        private static bool _isInited = false;
-        private static SQLiteAsyncConnection? _favDb;
+        /// <summary>Serializes library scans and online favorite refreshes.</summary>
+        private static readonly SemaphoreSlim s_scanLock = new(1, 1);
+        /// <summary>Stores the mutable favorites view owned by the committed library.</summary>
+        private static MyFavoriteSongCollection s_myFavorites = new();
 
-        private static readonly SongCollection EMPTY_SONG_COLLECTION = SongCollection.Empty("default");
-        private static readonly string MY_FAVORITE_FILENAME = "MyFavorites.json";
-        private static string MY_FAVORITE_EXPORT_PATH = string.Empty;
-        private static string MY_FAVORITE_STORAGE_PATH = string.Empty;
-        //these method are called from the game
-        internal static async Task InitAsync(IProgress<string>? progressReporter = null)
+        /// <summary>Records whether initialization has successfully published a library.</summary>
+        private static bool s_isInitialized = false;
+        /// <summary>Stores the shared connection to the persistent favorites database.</summary>
+        private static SQLiteAsyncConnection? s_favoritesDatabase;
+
+        /// <summary>Supplies a harmless selection when the library contains no collections.</summary>
+        private static readonly SongCollection s_emptyCollection = SongCollection.Empty("default");
+        /// <summary>Defines the portable favorites export filename.</summary>
+        private const string MyFavoriteFileName = "MyFavorites.json";
+        /// <summary>Stores the chart-root location of the portable favorites export.</summary>
+        private static string s_myFavoritesExportPath = string.Empty;
+        /// <summary>Stores the location of the legacy JSON favorites cache.</summary>
+        private static string s_myFavoritesStoragePath = string.Empty;
+        /// <summary>Initializes the song library once and subscribes to favorite export after a successful scan.</summary>
+        /// <param name="progressReporter">Receives scan status messages.</param>
+        /// <param name="cancellationToken">Cancels waiting or scanning before a new library is published.</param>
+        /// <returns>A task which completes when the initial library is available.</returns>
+        /// <exception cref="OperationCanceledException">Initialization was canceled.</exception>
+        /// <exception cref="IOException">The root directory or favorite storage could not be accessed.</exception>
+        internal static async Task InitAsync(IProgress<string>? progressReporter = null, CancellationToken cancellationToken = default)
         {
+            await s_scanLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+            StorageSnapshot? snapshot = null;
+            var isPublished = false;
             try
             {
-                await Task.Run(async () =>
+                if (s_isInitialized)
                 {
-                    await RefreshMyFavAsync();
-                    if (!FileSystem.Directory.Open(MajEnv.ChartPath).Exists)
+                    return;
+                }
+                snapshot = await Task.Run(async () =>
+                {
+                    var favoriteHashes = await LoadFavoriteHashesAsync().ConfigureAwait(false);
+                    cancellationToken.ThrowIfCancellationRequested();
+                    var rootDirectory = FileSystem.Directory.Open(MajEnv.ChartPath);
+                    if (!rootDirectory.Exists)
                     {
-                        FileSystem.Directory.Create(MajEnv.ChartPath).CreateDirectory("default");
-                        return;
+                        rootDirectory = FileSystem.Directory.Create(MajEnv.ChartPath);
+                        rootDirectory.CreateDirectory("default");
                     }
-                    var rootPath = MajEnv.ChartPath;
-                    var songs = await GetCollections(rootPath, progressReporter);
-
-                    Collections = songs;
-                    MajDebug.LogInfo($"Loaded chart count: {TotalChartCount}");
-                    _isInited = true;
-                });
+                    return await GetCollections(rootDirectory, progressReporter, favoriteHashes, cancellationToken).ConfigureAwait(false);
+                }, cancellationToken).ConfigureAwait(false);
+                cancellationToken.ThrowIfCancellationRequested();
+                PublishSnapshot(snapshot);
+                isPublished = true;
+                s_isInitialized = true;
+                GameManager.OnSave += OnSave;
+                MajDebug.LogInfo($"Loaded chart count: {TotalChartCount}");
             }
             catch (Exception e)
             {
+                if (!isPublished && snapshot is not null)
+                {
+                    var retained = new HashSet<ISongDetail>(s_allCharts, SongReferenceComparer.Instance);
+                    DisposeUnpublishedCharts(snapshot.AllCharts.Where(chart => !retained.Contains(chart)));
+                }
                 MajDebug.LogException(e);
                 throw;
             }
             finally
             {
-                GameManager.OnSave += OnSave;
+                s_scanLock.Release();
             }
         }
-        internal static async Task RefreshAsync(IProgress<string>? progressReporter = null)
+
+        /// <summary>Rescans local and online collections without replacing the current library on failure.</summary>
+        /// <param name="progressReporter">Receives scan and cleanup status messages.</param>
+        /// <param name="cancellationToken">Cancels waiting or scanning before publication; committed cleanup is not canceled.</param>
+        /// <returns>A task which completes after publication and old-chart cleanup.</returns>
+        /// <exception cref="OperationCanceledException">The refresh was canceled before publication.</exception>
+        /// <exception cref="IOException">The root directory or favorite storage could not be accessed.</exception>
+        internal static Task RefreshAsync(IProgress<string>? progressReporter = null, CancellationToken cancellationToken = default)
         {
-            if (!_isInited)
-            {
-                return;
-            }
-            await UniTask.SwitchToThreadPool();
-            using var chartListBackup = new PooledList<ISongDetail>(_allCharts);
+            return RefreshCollectionsAsync(true, progressReporter, cancellationToken);
+        }
+
+        /// <summary>Rescans local collections while retaining enabled online collections and their chart instances.</summary>
+        /// <param name="progressReporter">Receives scan and cleanup status messages.</param>
+        /// <param name="cancellationToken">Cancels waiting or scanning before publication; committed cleanup is not canceled.</param>
+        /// <returns>A task which completes after publication and old-chart cleanup.</returns>
+        /// <exception cref="OperationCanceledException">The refresh was canceled before publication.</exception>
+        /// <exception cref="IOException">The root directory could not be accessed.</exception>
+        internal static Task RefreshLocalAsync(IProgress<string>? progressReporter = null, CancellationToken cancellationToken = default)
+        {
+            return RefreshCollectionsAsync(false, progressReporter, cancellationToken);
+        }
+
+        /// <summary>Builds and publishes a complete replacement library under the shared scan lock.</summary>
+        /// <param name="refreshOnline">Whether to fetch online collections instead of retaining them.</param>
+        /// <param name="progressReporter">Receives scan and cleanup status messages.</param>
+        /// <param name="cancellationToken">Cancels work before the replacement library is committed.</param>
+        /// <returns>A task which completes after the replacement library and cleanup are ready.</returns>
+        /// <exception cref="OperationCanceledException">Waiting or scanning was canceled.</exception>
+        /// <exception cref="IOException">The root directory or favorite storage could not be accessed.</exception>
+        private static async Task RefreshCollectionsAsync(bool refreshOnline, IProgress<string>? progressReporter, CancellationToken cancellationToken)
+        {
+            await s_scanLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+            StorageSnapshot? snapshot = null;
+            var isPublished = false;
             try
             {
-                _allCharts.Clear();
-                _parsedChartCount = 0;
-                _totalChartCount = 0;
-                var listConfig = MajEnv.RuntimeConfig.List;
-                var selectedDiff = listConfig.SelectedDiff;
-                var selectedIndex = listConfig.SelectedSongIndex;
-                var selectedDir = listConfig.SelectedDir;
-
-                await RefreshMyFavAsync();
-                var collections = await GetCollections(MajEnv.ChartPath, progressReporter);
-                await Task.Delay(100);
-                progressReporter?.Report($"{"MAJTEXT_CLEANING_UP".i18n()}");
-                await Task.Delay(100);
-
-                var tasks = new Task[chartListBackup.Count];
-                var tasksI = -1;
-                Parallel.For(0, chartListBackup.Count, i =>
-                {
-                    var songDetail = chartListBackup[i];
-                    switch (songDetail)
-                    {
-                        case OnlineSongDetail online:
-                            tasks[Interlocked.Increment(ref tasksI)] = online.DisposeAsync().AsTask();
-                            break;
-                        case SongDetail local:
-                            tasks[Interlocked.Increment(ref tasksI)] = local.DisposeAsync().AsTask();
-                            break;
-                    }
-                });
-                var waitAllTask = Task.WhenAll(tasks);
-                await using (UniTask.ReturnToCurrentSynchronizationContext())
-                {
-                    while (!waitAllTask.IsCompleted)
-                    {
-                        await UniTask.Yield();
-                    }
-                }
-                tasks = null;
-                waitAllTask = null;
-                Collections = collections;
-                MajDebug.LogInfo($"Loaded chart count: {TotalChartCount}");
-                Online.ClearResponseCache();
-                GC.Collect();
-
-                CollectionIndex = selectedDir;
-                var selectedCollection = WorkingCollection;
-
-                if (selectedCollection.IsEmpty)
+                if (!s_isInitialized)
                 {
                     return;
                 }
-                else if (selectedIndex >= selectedCollection.Count)
+                var listConfig = MajEnv.RuntimeConfig.List;
+                var selectedIndex = listConfig.SelectedSongIndex;
+                var selectedDir = listConfig.SelectedDir;
+                var previousCollection = Collections.Length == 0
+                    ? s_emptyCollection
+                    : Collections[selectedDir.Clamp(0, Collections.Length - 1)];
+                var selectedId = previousCollection.Id;
+                var selectedHash = previousCollection.Count == 0
+                    ? null
+                    : previousCollection[selectedIndex.Clamp(0, previousCollection.Count - 1)].Hash;
+                var oldCharts = s_allCharts;
+                var retainedCollections = !refreshOnline && MajEnv.Settings.Online.Enable
+                    ? Collections.Where(collection => collection.IsOnline && collection.Type == ChartStorageType.List).ToArray()
+                    : Array.Empty<SongCollection>();
+                var retainedPlaylists = !refreshOnline && MajEnv.Settings.Online.Enable
+                    ? Collections.OfType<OnlineSongCollection>()
+                        .Where(collection => collection.Type is ChartStorageType.PlayList or ChartStorageType.Dan)
+                        .ToArray()
+                    : Array.Empty<OnlineSongCollection>();
+                var committedFavoriteHashes = new HashSet<string>(s_myFavorites.ExportHashSet());
+                snapshot = await Task.Run(async () =>
                 {
-                    selectedCollection.Index = 0;
+                    var rootDirectory = FileSystem.Directory.Open(MajEnv.ChartPath);
+                    if (refreshOnline)
+                    {
+                        var favoriteHashes = await LoadFavoriteHashesAsync().ConfigureAwait(false);
+                        return await GetCollections(rootDirectory, progressReporter, favoriteHashes, cancellationToken).ConfigureAwait(false);
+                    }
+                    var collections = await GetLocalCollections(rootDirectory, progressReporter, cancellationToken).ConfigureAwait(false);
+                    var localCharts = collections.SelectMany(collection => collection.GetOriginSnapshot()).ToArray();
+                    var localFavoriteHashes = committedFavoriteHashes;
+                    try
+                    {
+                        collections.AddRange(retainedCollections);
+                        var result = await AddAllFolderAndDans(rootDirectory, collections, localFavoriteHashes, cancellationToken).ConfigureAwait(false);
+                        return await RebindOnlinePlaylistsAsync(result, retainedPlaylists, cancellationToken).ConfigureAwait(false);
+                    }
+                    catch
+                    {
+                        DisposeUnpublishedCharts(localCharts);
+                        throw;
+                    }
+                }, cancellationToken).ConfigureAwait(false);
+                progressReporter?.Report("MAJTEXT_CLEANING_UP".i18n());
+                cancellationToken.ThrowIfCancellationRequested();
+                PublishSnapshot(snapshot);
+                isPublished = true;
+                RestoreSelection(selectedId, selectedHash, selectedDir, selectedIndex);
+                await DisposeReplacedChartsAsync(oldCharts, snapshot.AllCharts).ConfigureAwait(false);
+                MajDebug.LogInfo($"Loaded chart count: {TotalChartCount}");
+                Online.ClearResponseCache();
+                GC.Collect();
+            }
+            catch (Exception e)
+            {
+                if (!isPublished && snapshot is not null)
+                {
+                    var retained = new HashSet<ISongDetail>(s_allCharts, SongReferenceComparer.Instance);
+                    DisposeUnpublishedCharts(snapshot.AllCharts.Where(chart => !retained.Contains(chart)));
                 }
-                else
+                MajDebug.LogException(e);
+                throw;
+            }
+            finally
+            {
+                s_scanLock.Release();
+            }
+        }
+
+        /// <summary>Publishes the chart, favorite, collection and count snapshots after all scan phases succeed.</summary>
+        /// <param name="snapshot">The completed replacement library.</param>
+        private static void PublishSnapshot(StorageSnapshot snapshot)
+        {
+            s_allCharts = snapshot.AllCharts;
+            s_myFavorites = snapshot.Favorites;
+            Interlocked.Exchange(ref s_totalChartCount, snapshot.AllCharts.LongLength);
+            Collections = snapshot.Collections;
+            s_collectionIndex = Collections.Length == 0 ? 0 : s_collectionIndex.Clamp(0, Collections.Length - 1);
+        }
+
+        /// <summary>Restores a selection by stable collection ID and chart hash, falling back to clamped indices.</summary>
+        /// <param name="collectionId">The identity of the previously selected collection.</param>
+        /// <param name="songHash">The identity of the previously selected chart, if any.</param>
+        /// <param name="directoryIndex">The fallback collection index.</param>
+        /// <param name="songIndex">The fallback chart index.</param>
+        private static void RestoreSelection(Guid collectionId, string? songHash, int directoryIndex, int songIndex)
+        {
+            var index = Array.FindIndex(Collections, collection => collection.Id == collectionId);
+            CollectionIndex = index < 0 ? directoryIndex : index;
+            var collection = WorkingCollection;
+            var listConfig = MajEnv.RuntimeConfig.List;
+            listConfig.SelectedDir = CollectionIndex;
+            listConfig.SelectedDirGuid = collection.Id;
+            if (collection.IsEmpty)
+            {
+                listConfig.SelectedSongIndex = 0;
+                listConfig.SelectedSongHash = string.Empty;
+                return;
+            }
+            collection.Index = songIndex;
+            if (songHash is not null && collection.Any(song => song.Hash == songHash))
+            {
+                collection.SetCursor(songHash);
+            }
+            listConfig.SelectedSongIndex = collection.Index;
+            listConfig.SelectedSongHash = collection.Current.Hash;
+        }
+
+        /// <summary>Disposes obsolete chart instances while retaining chart objects reused by a local-only refresh.</summary>
+        /// <param name="oldCharts">The previous library's chart instances.</param>
+        /// <param name="newCharts">The chart instances owned by the committed replacement library.</param>
+        /// <returns>A task which completes when every obsolete chart has finished cleanup.</returns>
+        private static async Task DisposeReplacedChartsAsync(ISongDetail[] oldCharts, ISongDetail[] newCharts)
+        {
+            var retained = new HashSet<ISongDetail>(newCharts, SongReferenceComparer.Instance);
+            var tasks = new Task[oldCharts.Length];
+            for (var i = 0; i < oldCharts.Length; i++)
+            {
+                tasks[i] = retained.Contains(oldCharts[i]) ? Task.CompletedTask : DisposeChartAsync(oldCharts[i]);
+            }
+            await Task.WhenAll(tasks).ConfigureAwait(false);
+        }
+
+        /// <summary>Observes native chart cleanup failures without invalidating an already committed library.</summary>
+        /// <param name="chart">The obsolete chart instance to release.</param>
+        /// <returns>A task which completes after cleanup or logging a cleanup failure.</returns>
+        private static async Task DisposeChartAsync(ISongDetail chart)
+        {
+            try
+            {
+                switch (chart)
                 {
-                    selectedCollection.Index = selectedIndex;
+                    case OnlineSongDetail online:
+                        await online.DisposeAsync().ConfigureAwait(false);
+                        break;
+                    case SongDetail local:
+                        await local.DisposeAsync().ConfigureAwait(false);
+                        break;
                 }
             }
             catch (Exception e)
             {
-                _allCharts.Clear();
-                _allCharts.AddRange(chartListBackup);
                 MajDebug.LogException(e);
-                throw;
             }
         }
-        internal static async Task RefreshLocalAsync(IProgress<string>? progressReporter = null)
+
+        /// <summary>Rebuilds user online playlists without interleaving a library scan or publishing canceled work.</summary>
+        /// <param name="progressReporter">Receives favorite-list fetch status messages.</param>
+        /// <param name="cancellationToken">Cancels waiting or fetching before the playlist list is published.</param>
+        /// <returns>True when every enabled, logged-in endpoint was fetched successfully.</returns>
+        /// <exception cref="OperationCanceledException">Waiting or fetching was canceled.</exception>
+        internal static async Task<bool> RefreshUserOnlineFavAsync(IProgress<string>? progressReporter = null, CancellationToken cancellationToken = default)
         {
-            if (!_isInited)
-            {
-                return;
-            }
-            await UniTask.SwitchToThreadPool();
-            using var chartListBackup = new PooledList<ISongDetail>(_allCharts);
-            var onlineCollections = MajEnv.Settings.Online.Enable
-                ? Collections.Where(x => x.IsOnline).ToArray()
-                : Array.Empty<SongCollection>();
+            await s_scanLock.WaitAsync(cancellationToken).ConfigureAwait(false);
             try
             {
-                _allCharts.Clear();
-                _parsedChartCount = 0;
-                _totalChartCount = 0;
-                var listConfig = MajEnv.RuntimeConfig.List;
-                var selectedDiff = listConfig.SelectedDiff;
-                var selectedIndex = listConfig.SelectedSongIndex;
-                var selectedDir = listConfig.SelectedDir;
-
-                var collections = await GetLocalCollections(MajEnv.ChartPath, progressReporter);
-                if (onlineCollections.Length != 0)
+                if (!MajEnv.Settings.Online.Enable)
                 {
-                    collections.AddRange(onlineCollections);
-                    var onlineCount = onlineCollections.Sum(x => (long)x.Count);
-                    Interlocked.Add(ref _totalChartCount, onlineCount);
+                    return true;
                 }
-                await Task.Delay(100);
-                progressReporter?.Report($"{"MAJTEXT_CLEANING_UP".i18n()}");
-                await Task.Delay(100);
-
-                var localDetails = chartListBackup.Where(x => !x.IsOnline).ToArray();
-                var tasks = new Task[localDetails.Length];
-                Parallel.For(0, localDetails.Length, i =>
+                var isSuccessful = true;
+                var collections = new List<SongCollection>(Collections);
+                foreach (var api in MajEnv.ApiEndpoints.OrderBy(endpoint => endpoint.Name))
                 {
-                    var songDetail = localDetails[i];
-                    switch (songDetail)
+                    cancellationToken.ThrowIfCancellationRequested();
+                    if (api is null || string.IsNullOrEmpty(api.Name) || !api.RuntimeConfig.IsLoggedIn)
                     {
-                        case SongDetail local:
-                            tasks[i] = local.DisposeAsync().AsTask();
-                            break;
-                        default:
-                            tasks[i] = Task.CompletedTask;
-                            break;
+                        continue;
                     }
-                });
-                var waitAllTask = Task.WhenAll(tasks);
-                await using (UniTask.ReturnToCurrentSynchronizationContext())
-                {
-                    while (!waitAllTask.IsCompleted)
+                    try
                     {
-                        await UniTask.Yield();
+                        MajDebug.LogInfo($"[Online]Fetching fav list from {api.Url.OriginalString}");
+                        progressReporter?.Report(ZString.Format("MAJTEXT_SCANNING_FAVORITES_FROM_{0}".i18n(), api.Name));
+                        var danInfos = await Online.GetUserOnlineFavCollection(api, cancellationToken).ConfigureAwait(false);
+                        cancellationToken.ThrowIfCancellationRequested();
+                        if (danInfos is null)
+                        {
+                            isSuccessful = false;
+                            continue;
+                        }
+                        var replacement = new List<SongCollection>(danInfos.Length);
+                        foreach (var dan in danInfos)
+                        {
+                            cancellationToken.ThrowIfCancellationRequested();
+                            var collection = await GetOnlineDanCollectionAsync(s_allCharts, dan, api).ConfigureAwait(false);
+                            if (collection is not null)
+                            {
+                                replacement.Add(collection);
+                            }
+                        }
+                        cancellationToken.ThrowIfCancellationRequested();
+                        collections.RemoveAll(collection => collection is OnlineSongCollection online
+                            && ReferenceEquals(online.Source, api)
+                            && online.Type is ChartStorageType.PlayList or ChartStorageType.Dan);
+                        collections.AddRange(replacement);
+                    }
+                    catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                    {
+                        throw;
+                    }
+                    catch (Exception e)
+                    {
+                        isSuccessful = false;
+                        MajDebug.LogError($"[Online]Fetching fav list from {api.Url.OriginalString} failed because of {e.Message}");
+                        MajDebug.LogException(e);
                     }
                 }
-                tasks = null;
-                waitAllTask = null;
-                Collections = await AddAllFolderAndDans(MajEnv.ChartPath, collections);
-                MajDebug.LogInfo($"Loaded chart count: {TotalChartCount}");
-                Online.ClearResponseCache();
-                GC.Collect();
+                cancellationToken.ThrowIfCancellationRequested();
+                Collections = collections.ToArray();
+                s_collectionIndex = Collections.Length == 0 ? 0 : s_collectionIndex.Clamp(0, Collections.Length - 1);
+                return isSuccessful;
+            }
+            finally
+            {
+                s_scanLock.Release();
+            }
+        }
 
-                CollectionIndex = selectedDir;
-                var selectedCollection = WorkingCollection;
-
-                if (selectedCollection.IsEmpty)
+        /// <summary>Builds local, online, aggregate, favorite and playlist collections without publishing partial results.</summary>
+        /// <param name="rootDirectory">The chart root and its authoritative storage backend.</param>
+        /// <param name="progressReporter">Receives local and online scan status messages.</param>
+        /// <param name="favoriteHashes">The favorite identities loaded or copied for this unpublished scan.</param>
+        /// <param name="cancellationToken">Cancels scanning before publication.</param>
+        /// <returns>A complete, unpublished library snapshot.</returns>
+        /// <exception cref="OperationCanceledException">Scanning was canceled.</exception>
+        /// <exception cref="IOException">The chart root could not be enumerated.</exception>
+        private static async Task<StorageSnapshot> GetCollections(StorageDirectory rootDirectory, IProgress<string>? progressReporter, HashSet<string> favoriteHashes, CancellationToken cancellationToken)
+        {
+            var collections = await GetLocalCollections(rootDirectory, progressReporter, cancellationToken).ConfigureAwait(false);
+            try
+            {
+                if (MajEnv.Settings.Online.Enable)
                 {
-                    return;
-                }
-                else if (selectedIndex >= selectedCollection.Count)
-                {
-                    selectedCollection.Index = 0;
+                    foreach (var api in MajEnv.ApiEndpoints.OrderBy(x => x.Name))
+                    {
+                        cancellationToken.ThrowIfCancellationRequested();
+                        if (api is null || string.IsNullOrEmpty(api.Name))
+                        {
+                            continue;
+                        }
+                        MajDebug.LogInfo($"[MaiChart Scanner]Fetching chart list from {api.Url.OriginalString}");
+                        progressReporter?.Report(ZString.Format("MAJTEXT_SCANNING_CHARTS_FROM_{0}".i18n(), api.Name));
+                        var result = await GetOnlineCollection(api, progressReporter, cancellationToken).ConfigureAwait(false);
+                        if (!result.IsEmpty)
+                        {
+                            collections.Add(result);
+                        }
+                    }
                 }
                 else
                 {
-                    selectedCollection.Index = selectedIndex;
+                    MajDebug.LogInfo("[MaiChart Scanner]Online function was disabled, skipping.");
                 }
+                return await AddAllFolderAndDans(rootDirectory, collections, favoriteHashes, cancellationToken).ConfigureAwait(false);
             }
-            catch (Exception e)
+            catch
             {
-                _allCharts.Clear();
-                _allCharts.AddRange(chartListBackup);
-                MajDebug.LogException(e);
+                DisposeUnpublishedCharts(collections.Where(collection => !collection.IsVirtual)
+                    .SelectMany(collection => collection.GetOriginSnapshot()));
                 throw;
             }
         }
-        internal static async Task<bool> RefreshUserOnlineFavAsync(IProgress<string>? progressReporter = null)
+
+        /// <summary>Scans each local collection exactly once using bounded workers and index-owned result slots.</summary>
+        /// <param name="rootDirectory">The chart root and its authoritative storage backend.</param>
+        /// <param name="progressReporter">Receives chart parsing progress, including failed candidates.</param>
+        /// <param name="cancellationToken">Cancels enumeration or parsing.</param>
+        /// <returns>Every root collection, including empty directories, ordered by name after the entire scan succeeds.</returns>
+        /// <remarks>Collection-level access and identity failures fault the scan rather than publishing a library with missing folders.</remarks>
+        /// <exception cref="OperationCanceledException">Scanning was canceled.</exception>
+        /// <exception cref="IOException">The chart root could not be enumerated.</exception>
+        private static Task<List<SongCollection>> GetLocalCollections(StorageDirectory rootDirectory, IProgress<string>? progressReporter, CancellationToken cancellationToken = default)
         {
-            if (!MajEnv.Settings.Online.Enable)
+            return Task.Run(async () =>
             {
-                return true;
-            }
-            var isSuccessful = true;
-            using var collections = new PooledList<SongCollection>(Collections);
-            for (var i = 0; i < collections.Count; i++)
-            {
-                var collection = collections[i];
-                if (collection.IsOnline && collection.Type is ChartStorageType.PlayList)
+                cancellationToken.ThrowIfCancellationRequested();
+                var directories = rootDirectory.EnumerateEntries()
+                    .Where(entry => entry.IsDirectory)
+                    .ToArray();
+                var results = new SongCollection?[directories.Length];
+                using var scanner = new SongCollectionScanner(cancellationToken);
+                var nextIndex = -1;
+                var workerCount = Math.Min(Math.Max(1, Environment.ProcessorCount), directories.Length);
+                var workers = new Task[workerCount];
+                for (var i = 0; i < workers.Length; i++)
                 {
-                    collections.RemoveAt(i--);
-                }
-            }
-            foreach (var api in MajEnv.ApiEndpoints.OrderBy(x => x.Name))
-            {
-                if (api is null)
-                {
-                    continue;
-                }
-                if (string.IsNullOrEmpty(api.Name))
-                {
-                    continue;
-                }
-                if (!api.RuntimeConfig.IsLoggedIn)
-                {
-                    continue;
+                    workers[i] = Task.CompletedTask;
                 }
                 try
                 {
-                    MajDebug.LogInfo($"[Online]Fetching fav list from {api.Url.OriginalString}");
-                    progressReporter?.Report(ZString.Format("MAJTEXT_SCANNING_FAVORITES_FROM_{0}".i18n(), api.Name));
-                    var daninfos = await Online.GetUserOnlineFavCollection(api);
-                    if (daninfos is null)
+                    try
                     {
-                        isSuccessful = false;
-                    }
-                    else if (daninfos.Length > 0)
-                    {
-                        foreach (var dan in daninfos)
+                        for (var i = 0; i < workers.Length; i++)
                         {
-                            //TODO: make this parallel
-                            var collection = await GetOnlineDanCollectionAsync(_allCharts, dan, api);
-                            if (collection is not null)
+                            workers[i] = Task.Run(async () =>
                             {
-                                collections.Add(collection);
-                            }
+                                while (true)
+                                {
+                                    cancellationToken.ThrowIfCancellationRequested();
+                                    var index = Interlocked.Increment(ref nextIndex);
+                                    if (index >= directories.Length)
+                                    {
+                                        return;
+                                    }
+                                    var entry = directories[index];
+                                    try
+                                    {
+                                        var directory = new StorageDirectory(rootDirectory.FileSystem, entry.Location);
+                                        results[index] = await GetCollection(directory, scanner).ConfigureAwait(false);
+                                    }
+                                    catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                                    {
+                                        throw;
+                                    }
+                                    catch (Exception e)
+                                    {
+                                        MajDebug.LogError($"[MaiChart Scanner][{entry.Name}]Failed to scan collection: {e}");
+                                        throw;
+                                    }
+                                }
+                            }, cancellationToken);
                         }
+                        var allTasks = Task.WhenAll(workers);
+                        while (!allTasks.IsCompleted)
+                        {
+                            var discovered = scanner.DiscoveredChartCount;
+                            var processed = scanner.ProcessedChartCount;
+                            var percent = discovered == 0 ? 0f : Math.Min(99.99f, processed * 100f / discovered);
+                            progressReporter?.Report($"{"MAJTEXT_SCANNING_CHARTS".i18n()}...({percent:F2}%)");
+                            await Task.WhenAny(allTasks, Task.Delay(33)).ConfigureAwait(false);
+                        }
+                    }
+                    finally
+                    {
+                        // Observe all started workers before cleanup, even if scheduling or progress reporting fails.
+                        await Task.WhenAll(workers).ConfigureAwait(false);
+                    }
+                    cancellationToken.ThrowIfCancellationRequested();
+                    progressReporter?.Report($"{"MAJTEXT_SCANNING_CHARTS".i18n()}...(100.00%)");
+                    return results.Where(collection => collection is not null)
+                        .Select(collection => collection!)
+                        .OrderBy(collection => collection.Name)
+                        .ToList();
+                }
+                catch
+                {
+                    DisposeUnpublishedCharts(results.Where(collection => collection is not null)
+                                                    .SelectMany(collection => collection!.GetOriginSnapshot())
+                                                    );
+                    throw;
+                }
+            }, cancellationToken);
+        }
+
+        /// <summary>Builds aggregate, favorite and local playlist collections from a completed base scan.</summary>
+        /// <param name="rootDirectory">The chart root containing local playlist JSON files.</param>
+        /// <param name="collections">The local and enabled online base collections.</param>
+        /// <param name="favoriteHashes">The favorite identities loaded or copied for this unpublished scan.</param>
+        /// <param name="cancellationToken">Cancels playlist loading before publication.</param>
+        /// <returns>A complete, unpublished library snapshot.</returns>
+        /// <exception cref="OperationCanceledException">Playlist loading was canceled.</exception>
+        /// <exception cref="IOException">The chart root could not be enumerated.</exception>
+        private static async Task<StorageSnapshot> AddAllFolderAndDans(StorageDirectory rootDirectory, List<SongCollection> collections, HashSet<string> favoriteHashes, CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var allCharts = collections.SelectMany(collection => collection.GetOriginSnapshot()).ToArray();
+            collections.Add(new SongCollection("All", allCharts));
+            favoriteHashes = new HashSet<string>(favoriteHashes);
+            var favoriteOrder = new Dictionary<string, int>(favoriteHashes.Count);
+            foreach (var hash in favoriteHashes)
+            {
+                favoriteOrder.Add(hash, favoriteOrder.Count);
+            }
+            var favoriteSongs = allCharts.Where(chart => favoriteHashes.Contains(chart.Hash))
+                .GroupBy(chart => chart.Hash)
+                .Select(group => group.First())
+                .OrderBy(chart => favoriteOrder[chart.Hash])
+                .ToList();
+            var favorites = new MyFavoriteSongCollection(favoriteSongs, favoriteHashes);
+            collections.Add(favorites);
+            var fileNameComparison = Path.DirectorySeparatorChar == '\\' ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+            var danFiles = rootDirectory.EnumerateEntries()
+                .Where(entry => !entry.IsDirectory && entry.Name.EndsWith(".json", fileNameComparison) && entry.Name != MyFavoriteFileName)
+                .ToArray();
+            var loadDanTasks = new Task<SongCollection?>[danFiles.Length];
+            for (var i = 0; i < danFiles.Length; i++)
+            {
+                var file = new StorageFile(rootDirectory.FileSystem, danFiles[i].Location);
+                loadDanTasks[i] = LoadDanFileAsync(file, allCharts, cancellationToken);
+            }
+            var danCollections = await Task.WhenAll(loadDanTasks).ConfigureAwait(false);
+            cancellationToken.ThrowIfCancellationRequested();
+            foreach (var collection in danCollections)
+            {
+                if (collection is null)
+                {
+                    continue;
+                }
+                collections.Add(collection);
+                MajDebug.LogInfo($"Loaded Dan: {collection.DanInfo?.Name ?? collection.Name}");
+            }
+            return new StorageSnapshot(collections.ToArray(), allCharts, favorites);
+        }
+
+        /// <summary>Rebinds retained online playlists and courses to the chart instances of a local-only replacement.</summary>
+        /// <param name="snapshot">The replacement base library with local derived collections.</param>
+        /// <param name="playlists">The online derived collections to retain without network requests.</param>
+        /// <param name="cancellationToken">Cancels rebinding before publication.</param>
+        /// <returns>The complete replacement library including rebound online derived collections.</returns>
+        /// <exception cref="OperationCanceledException">Rebinding was canceled.</exception>
+        private static async Task<StorageSnapshot> RebindOnlinePlaylistsAsync(StorageSnapshot snapshot, OnlineSongCollection[] playlists, CancellationToken cancellationToken)
+        {
+            var collections = new List<SongCollection>(snapshot.Collections);
+            foreach (var playlist in playlists)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var info = playlist.Definition ?? playlist.DanInfo ?? new DanInfo
+                {
+                    Name = playlist.Name,
+                    IsPlayList = playlist.Type == ChartStorageType.PlayList,
+                    SongHashs = playlist.GetOriginSnapshot().Select(chart => chart.Hash).ToArray()
+                };
+                var rebound = await GetDanCollectionAsync(snapshot.AllCharts, playlist.Id, info, playlist.Source).ConfigureAwait(false);
+                if (rebound is null)
+                {
+                    // Keep the complete definition even when every requested chart is temporarily unavailable.
+                    rebound = new OnlineSongCollection(playlist.Source, playlist.Name, Array.Empty<ISongDetail>())
+                    {
+                        Id = playlist.Id,
+                        Type = playlist.Type,
+                        DanInfo = playlist.Type == ChartStorageType.Dan ? info : null,
+                        Definition = info
+                    };
+                }
+                collections.Add(rebound);
+            }
+            cancellationToken.ThrowIfCancellationRequested();
+            return new StorageSnapshot(collections.ToArray(), snapshot.AllCharts, snapshot.Favorites);
+        }
+
+        /// <summary>Loads one local playlist while isolating malformed or unreadable files from neighboring playlists.</summary>
+        /// <param name="file">The playlist JSON file and its storage backend.</param>
+        /// <param name="allCharts">The base chart instances used to resolve playlist hashes.</param>
+        /// <param name="cancellationToken">Cancels playlist loading.</param>
+        /// <returns>The resolved playlist, or null when the file is invalid or has no matching charts.</returns>
+        /// <exception cref="OperationCanceledException">Playlist loading was canceled.</exception>
+        private static async Task<SongCollection?> LoadDanFileAsync(StorageFile file, ISongDetail[] allCharts, CancellationToken cancellationToken)
+        {
+            try
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                Guid id;
+                using (var idStream = file.OpenRead())
+                {
+                    id = GetGuidFromStream(idStream);
+                }
+                using var jsonStream = file.OpenRead();
+                var (success, dan, exception) = await Serializer.Json.TryDeserializeAsync<DanInfo>(jsonStream).ConfigureAwait(false);
+                cancellationToken.ThrowIfCancellationRequested();
+                if (!success || dan is null)
+                {
+                    MajDebug.LogError($"Failed to load dan from {file.Location}\nException: {exception}");
+                    return null;
+                }
+                var collection = await GetLocalDanCollectionAsync(allCharts, id, dan).ConfigureAwait(false);
+                cancellationToken.ThrowIfCancellationRequested();
+                return collection;
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception e)
+            {
+                MajDebug.LogError($"Failed to load dan from {file.Location}\nException: {e}");
+                return null;
+            }
+        }
+
+        /// <summary>Builds one directory-backed collection using the scan's shared parsing budget.</summary>
+        /// <param name="directory">The collection directory and its authoritative storage backend.</param>
+        /// <param name="scanner">The scanner shared by all collection workers in this scan.</param>
+        /// <returns>The scanned collection, including an empty collection when no charts are present.</returns>
+        /// <exception cref="DirectoryNotFoundException">The collection directory no longer exists.</exception>
+        /// <exception cref="OperationCanceledException">The scanner's cancellation token was canceled.</exception>
+        /// <exception cref="IOException">The directory or its identity marker could not be accessed.</exception>
+        private static async Task<SongCollection> GetCollection(StorageDirectory directory, SongCollectionScanner scanner)
+        {
+            var entry = directory.Entry;
+            if (entry is null || !entry.IsDirectory)
+            {
+                throw new DirectoryNotFoundException($"Collection directory '{directory.Location}' does not exist.");
+            }
+            var charts = await scanner.ScanAsync(directory).ConfigureAwait(false);
+            try
+            {
+                return new SongCollection(directory, entry.Name, charts);
+            }
+            catch
+            {
+                DisposeUnpublishedCharts(charts);
+                throw;
+            }
+        }
+
+        /// <summary>Releases never-published chart instances without waiting for Unity's main-thread cleanup.</summary>
+        /// <param name="charts">The newly parsed instances which no published view owns.</param>
+        private static void DisposeUnpublishedCharts(IEnumerable<ISongDetail> charts)
+        {
+            foreach (var chart in charts)
+            {
+                try
+                {
+                    if (chart is IDisposable disposable)
+                    {
+                        disposable.Dispose();
                     }
                 }
                 catch (Exception e)
                 {
-                    isSuccessful = false;
-                    MajDebug.LogError($"[Online]Fetching fav list from {api.Url.OriginalString} failed because of {e.Message}");
                     MajDebug.LogException(e);
                 }
             }
-            //Potential bug: user may not return to the dir because this change after refresh.
-            Collections = collections.ToArray();
-            return isSuccessful;
         }
-        //get local song list and online song list
-        private static async Task<SongCollection[]> GetCollections(string rootPath, IProgress<string>? progressReporter)
+
+        /// <summary>Compares chart ownership by object identity rather than a chart implementation's value equality.</summary>
+        private sealed class SongReferenceComparer : IEqualityComparer<ISongDetail>
         {
-            var collections = await GetLocalCollections(rootPath, progressReporter);
-            //Online Charts
-            if (MajEnv.Settings.Online.Enable)
+            /// <summary>Gets the reusable ownership comparer.</summary>
+            public static SongReferenceComparer Instance { get; } = new();
+
+            /// <summary>Checks whether two chart references denote the same owned instance.</summary>
+            /// <param name="left">The first chart instance.</param>
+            /// <param name="right">The second chart instance.</param>
+            /// <returns>True only for identical object references.</returns>
+            public bool Equals(ISongDetail? left, ISongDetail? right)
             {
-                foreach (var api in MajEnv.ApiEndpoints.OrderBy(x => x.Name))
-                {
-                    if (api is null)
-                    {
-                        continue;
-                    }
-                    if (string.IsNullOrEmpty(api.Name))
-                    {
-                        continue;
-                    }
-                    MajDebug.LogInfo($"[MaiChart Scanner]Fetching chart list from {api.Url.OriginalString}");
-                    progressReporter?.Report(ZString.Format("MAJTEXT_SCANNING_CHARTS_FROM_{0}".i18n(), api.Name));
-                    var result = await GetOnlineCollection(api, progressReporter);
-                    if (!result.IsEmpty)
-                    {
-                        collections.Add(result);
-                    }
-                }
+                return ReferenceEquals(left, right);
             }
-            else
+
+            /// <summary>Gets a hash code which is unaffected by a chart implementation's equality overrides.</summary>
+            /// <param name="chart">The chart instance whose ownership identity is hashed.</param>
+            /// <returns>The runtime identity hash code of the chart instance.</returns>
+            public int GetHashCode(ISongDetail chart)
             {
-                MajDebug.LogInfo("[MaiChart Scanner]Online function was disabled, skipping.");
+                return RuntimeHelpers.GetHashCode(chart);
             }
-            return await AddAllFolderAndDans(rootPath, collections);
         }
-        //scan the local chart folders
-        private static async Task<List<SongCollection>> GetLocalCollections(string rootPath, IProgress<string>? progressReporter)
+
+        /// <summary>Owns the collections and chart instances of a complete, unpublished library.</summary>
+        private sealed class StorageSnapshot
         {
-            var dirs = FileSystem.Directory.Open(rootPath).EnumerateDirectories().ToArray();
-            var tasks = new List<Task<SongCollection>>(dirs.Length);
-            var collections = new List<SongCollection>(dirs.Length);
+            /// <summary>Gets all base and derived collections to publish together.</summary>
+            public SongCollection[] Collections { get; }
 
-            //Local Charts
-            Parallel.For(0, dirs.Length, i =>
+            /// <summary>Gets the base chart instances owned by the snapshot.</summary>
+            public ISongDetail[] AllCharts { get; }
+
+            /// <summary>Gets the mutable favorites view belonging to the snapshot.</summary>
+            public MyFavoriteSongCollection Favorites { get; }
+
+            /// <summary>Stores the results of a completed scan without mutating the published library.</summary>
+            /// <param name="collections">All collections in display order.</param>
+            /// <param name="allCharts">All chart instances owned by the base collections.</param>
+            /// <param name="favorites">The favorites view sharing the snapshot's chart instances.</param>
+            public StorageSnapshot(SongCollection[] collections, ISongDetail[] allCharts, MyFavoriteSongCollection favorites)
             {
-                var dir = dirs[i];
-                var path = dir.Location;
-
-                tasks.Add(GetCollection(path));
-            });
-
-            var allTasks = Task.WhenAll(tasks);
-
-            while (!allTasks.IsCompleted)
-            {
-                var percent = 0f;
-                if (_totalChartCount != 0)
-                {
-                    percent = _parsedChartCount / (float)_totalChartCount;
-                }
-                progressReporter?.Report($"{"MAJTEXT_SCANNING_CHARTS".i18n()}...({percent * 100:F2}%)");
-                await Task.Delay(33);
+                Collections = collections;
+                AllCharts = allCharts;
+                Favorites = favorites;
             }
-            progressReporter?.Report($"{"MAJTEXT_SCANNING_CHARTS".i18n()}...(100.00%)");
-
-            foreach (var task in tasks)
-            {
-                if (task.IsFaulted)
-                {
-                    MajDebug.LogException(task.Exception);
-                    continue;
-                }
-                if (task.Result != null)
-                {
-                    collections.Add(task.Result);
-                }
-            }
-            collections = collections.OrderBy(x => x.Name).ToList();
-            await Task.Delay(1000);
-            return collections;
         }
-        //sort out the ALL folder, Dans and playlists
-        private static async Task<SongCollection[]> AddAllFolderAndDans(string rootPath, List<SongCollection> collections)
+
+        /// <summary>Fetches one online collection, falling back to cached local charts after a fetch timeout or unavailable list.</summary>
+        /// <param name="api">The online endpoint whose chart list is requested.</param>
+        /// <param name="progressReporter">Receives fetch failure status messages.</param>
+        /// <param name="cancellationToken">Cancels fetching or cached-chart scanning.</param>
+        /// <returns>The online collection, cached charts, or an empty collection when loading fails.</returns>
+        /// <exception cref="OperationCanceledException">The caller canceled loading.</exception>
+        /// <exception cref="IOException">The endpoint's cache directory could not be created.</exception>
+        private static async Task<SongCollection> GetOnlineCollection(ApiEndpoint api, IProgress<string>? progressReporter, CancellationToken cancellationToken)
         {
-            //Add all songs to "All" folder
-            foreach (var collection in collections)
-            {
-                foreach (var item in collection)
-                {
-                    _allCharts.Add(item);
-                }
-            }
-            collections.Add(new SongCollection("All", _allCharts.ToArray()));
-
-            MajDebug.LogInfo("MyFavorite");
-            if (_userFavorites is not null)
-            {
-                foreach (var hash in _userFavorites.SongHashs)
-                {
-                    _storageFav.Add(hash);
-                }
-            }
-            var hashSet = _storageFav;
-            var favoriteSongs = _allCharts.Where(x => hashSet.Any(y => y == x.Hash))
-                                          .GroupBy(x => x.Hash)
-                                          .Select(x => x.FirstOrDefault())
-                                          .Where(x => x is not null)
-                                          .OrderBy(x => hashSet.ToList().IndexOf(x.Hash))
-                                          .ToList();
-            MajDebug.LogInfo(favoriteSongs.Count);
-            _myFavorite = new(favoriteSongs, new HashSet<string>(_storageFav));
-            //The collections and _myFavorite share a same ref of original List<T>
-            collections.Add(_myFavorite);
-
-            MajDebug.LogInfo("Load Dans");
-            var rootDirectory = FileSystem.Directory.Open(rootPath);
-            var fileNameComparison = Path.DirectorySeparatorChar == '\\' ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
-            var danFiles = rootDirectory.EnumerateEntries()
-                .Where(x => !x.IsDirectory && x.Name.EndsWith(".json", fileNameComparison))
-                .ToArray();
-            var loadDanTasks = new Task<SongCollection?>[danFiles.Length];
-            for (var i = 0; i < loadDanTasks.Length; i++)
-            {
-                if (i >= danFiles.Length)
-                {
-                    loadDanTasks[i] = Task.FromResult<SongCollection?>(null);
-                    continue;
-                }
-                var file = danFiles[i];
-                if (file.Name == MY_FAVORITE_FILENAME)
-                {
-                    loadDanTasks[i] = Task.FromResult<SongCollection?>(null);
-                    continue;
-                }
-                var storageFile = new StorageFile(rootDirectory.FileSystem, file.Location);
-                Guid id;
-                using (var idStream = storageFile.OpenRead())
-                {
-                    id = GetGuidFromStream(idStream);
-                }
-                using var jsonStream = storageFile.OpenRead();
-                var (result, dan, e) = await Serializer.Json.TryDeserializeAsync<DanInfo>(jsonStream);
-
-                if (result && dan is not null)
-                {
-                    loadDanTasks[i] = GetLocalDanCollectionAsync(_allCharts, id, dan);
-                }
-                if (e is not null)
-                {
-                    MajDebug.LogError($"Failed to load dan from {file.Location}\nException: {e}");
-                }
-            }
-            if (loadDanTasks.Length != 0)
-            {
-                await Task.WhenAll(loadDanTasks);
-
-                foreach (var task in loadDanTasks)
-                {
-                    if (task.IsFaulted)
-                    {
-                        MajDebug.LogError(task.Exception);
-                        continue;
-                    }
-                    var collection = task.Result;
-                    if (collection is null)
-                    {
-                        continue;
-                    }
-                    collections.Add(collection);
-                    MajDebug.LogInfo(("Loaded Dan:" + collection.DanInfo?.Name) ?? collection.Name);
-                }
-            }
-            return collections.ToArray();
-        }
-        //scan one folder
-        private static async Task<SongCollection> GetCollection(string rootPath)
-        {
-            await UniTask.SwitchToThreadPool();
-            var collectionDirectory = FileSystem.Directory.Open(rootPath);
-            var thisDir = collectionDirectory.Entry!;
-            var dirs = collectionDirectory.EnumerateEntries()
-                              .Where(x => x.IsDirectory)
-                              .OrderBy(o => o.CreationTimeUtc)
-                              .ToList();
-            MajDebug.LogDebug($"[MaiChart Scanner]Enter folder: {rootPath}");
-            if (collectionDirectory.FindDirectory(".MajdataPlay") is null)
-            {
-                var flagDirectory = collectionDirectory.CreateDirectory(".MajdataPlay");
-                flagDirectory.SetAttributes(FileAttributes.Directory | FileAttributes.Hidden);
-            }
-            if (dirs.Count == 0)
-            {
-                MajDebug.LogDebug($"[MaiChart Scanner][{thisDir.Name}]Empty folder, skipping");
-                return SongCollection.Empty(rootPath, thisDir.Name);
-            }
-            using var charts = new PooledList<SongDetail>();
-            using var tasks = new PooledList<Task<SongDetail?>>();
-
-            foreach (var songDir in dirs)
-            {
-                if (songDir.IsHidden)
-                {
-                    continue;
-                }
-                MajDebug.LogDebug($"[MaiChart Scanner][{thisDir.Name}]Enter folder: {songDir.Name}");
-                var files = new StorageDirectory(collectionDirectory.FileSystem, songDir.Location)
-                    .EnumerateEntries().Where(x => !x.IsDirectory).ToArray();
-                var maidataFile = files.FirstOrDefault(o => o.Name.ToLower() is "maidata.txt");
-                var trackFile = files.FirstOrDefault(o => o.Name.ToLower() is "track.opus" or "track.mp3" or "track.ogg" or "track.aac" or "track.wav");
-
-                if (maidataFile is null || trackFile is null)
-                {
-                    MajDebug.LogDebug($"[MaiChart Scanner][{thisDir.Name}/{songDir.Name}]No maidata or track files found, ignored.");
-                    continue;
-                }
-
-                var parsingTask = Task.Run(async () =>
-                {
-                    try
-                    {
-                        MajDebug.LogDebug($"[MaiChart Scanner][{thisDir.Name}/{songDir.Name}]Parsing");
-                        var chart = await SongDetail.ParseAsync(songDir.Location);
-                        Interlocked.Increment(ref _parsedChartCount);
-                        MajDebug.LogDebug($"[MaiChart Scanner][{thisDir.Name}/{songDir.Name}]Successfully parsed");
-                        return chart;
-                    }
-                    catch (Exception e)
-                    {
-                        MajDebug.LogError($"[MaiChart Scanner][{thisDir.Name}/{songDir.Name}]Failed to parse: {e}");
-                        return null;
-                    }
-                    finally
-                    {
-                        MajDebug.LogDebug($"[MaiChart Scanner][{thisDir.Name}/{songDir.Name}]Exit");
-                    }
-                });
-                Interlocked.Increment(ref _totalChartCount);
-                tasks.Add(parsingTask);
-            }
-            await Task.WhenAll(tasks);
-            var loadedChartCount = 0;
-            foreach (var task in tasks)
-            {
-                var result = task.Result;
-                if (result is null)
-                {
-                    Interlocked.Decrement(ref _totalChartCount);
-                    continue;
-                }
-                loadedChartCount++;
-                charts.Add(result);
-            }
-            MajDebug.LogDebug($"[MaiChart Scanner][{thisDir.Name}]Chart count loaded: {loadedChartCount}");
-            MajDebug.LogDebug($"[MaiChart Scanner][{thisDir.Name}]Exit");
-            return new SongCollection(rootPath, thisDir.Name, charts.ToArray());
-        }
-        //scan one online api
-        private static async Task<SongCollection> GetOnlineCollection(ApiEndpoint api, IProgress<string>? progressReporter)
-        {
+            cancellationToken.ThrowIfCancellationRequested();
             var name = api.Name;
-            var cachePath = Path.Combine(MajEnv.CachePath, "Net", name);
-            FileSystem.Directory.Create(cachePath);
-            var collection = SongCollection.Empty(cachePath, name);
-            var apiroot = api.Url;
-
-            if (apiroot is null)
+            var cacheDirectory = FileSystem.Directory.Create(Path.Combine(MajEnv.CachePath, "Net", name));
+            var collection = new OnlineSongCollection(api, cacheDirectory, name, Array.Empty<ISongDetail>());
+            if (api.Url is null)
             {
                 return collection;
             }
             MajDebug.LogInfo("Loading online charts from:" + api.Url);
-
             try
             {
-                var client = MajEnv.SharedHttpClient;
-                var rspText = string.Empty;
-                var chartList = await Online.GetChartListAsync(api);
+                var chartList = await Online.GetChartListAsync(api, cancellationToken).ConfigureAwait(false);
+                cancellationToken.ThrowIfCancellationRequested();
                 if (chartList is null)
                 {
                     progressReporter?.Report(ZString.Format("Failed to fetch list from {0}".i18n(), api.Name));
-                    throw new OperationCanceledException();
+                    return await GetCachedOnlineCollectionAsync(api, cacheDirectory, cancellationToken).ConfigureAwait(false);
                 }
-                if (chartList.Length == 0)
-                {
-                    return collection;
-                }
-
                 var gameList = new ISongDetail[chartList.Length];
-                Parallel.For(0, chartList.Length, i =>
+                try
                 {
-                    var song = chartList[i];
-                    var songDetail = new OnlineSongDetail(api, song);
-                    gameList[i] = songDetail;
-                });
-
-                MajDebug.LogInfo("Loaded online charts list:" + gameList.Length);
-                Interlocked.Add(ref _totalChartCount, chartList.Length);
-                var cacheFolder = Path.Combine(MajEnv.CachePath, $"Net/{name}");
-                FileSystem.Directory.Create(cacheFolder);
-                return new OnlineSongCollection(api, cachePath, name, gameList.ToArray());
+                    for (var i = 0; i < chartList.Length; i++)
+                    {
+                        cancellationToken.ThrowIfCancellationRequested();
+                        var cacheName = BitConverter.ToString(Convert.FromBase64String(chartList[i].Hash));
+                        var chartDirectory = cacheDirectory.CreateDirectory(cacheName);
+                        gameList[i] = new OnlineSongDetail(chartDirectory, api, chartList[i]);
+                    }
+                    MajDebug.LogInfo("Loaded online charts list:" + gameList.Length);
+                    return new OnlineSongCollection(api, cacheDirectory, name, gameList);
+                }
+                catch
+                {
+                    DisposeUnpublishedCharts(gameList.Where(chart => chart is not null));
+                    throw;
+                }
+            }
+            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+            {
+                return await GetCachedOnlineCollectionAsync(api, cacheDirectory, cancellationToken).ConfigureAwait(false);
             }
             catch (OperationCanceledException)
             {
-                if (!FileSystem.Directory.Open(cachePath).Exists)
-                {
-                    return collection;
-                }
-                var c = await GetCollection(cachePath);
-                MajDebug.LogInfo("Loaded cached online charts list:" + c.Count);
-                return c;
+                throw;
             }
             catch (Exception e)
             {
@@ -660,12 +841,47 @@ namespace MajdataPlay
                 return collection;
             }
         }
+
+        /// <summary>Scans an endpoint's cached charts without losing the online collection identity.</summary>
+        /// <param name="api">The endpoint which owns the cache.</param>
+        /// <param name="cacheDirectory">The existing cache directory and its storage backend.</param>
+        /// <param name="cancellationToken">Cancels cached-chart parsing.</param>
+        /// <returns>An online-tagged collection backed by locally cached chart details.</returns>
+        /// <exception cref="OperationCanceledException">Cached-chart scanning was canceled.</exception>
+        /// <exception cref="IOException">The cache could not be accessed.</exception>
+        private static async Task<SongCollection> GetCachedOnlineCollectionAsync(ApiEndpoint api, StorageDirectory cacheDirectory, CancellationToken cancellationToken)
+        {
+            using var scanner = new SongCollectionScanner(cancellationToken);
+            var charts = await scanner.ScanAsync(cacheDirectory).ConfigureAwait(false);
+            try
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                MajDebug.LogInfo("Loaded cached online charts list:" + charts.Length);
+                return new OnlineSongCollection(api, cacheDirectory, api.Name, charts);
+            }
+            catch
+            {
+                DisposeUnpublishedCharts(charts);
+                throw;
+            }
+        }
+
         //import one dan file
-        #region Dan or Playlist importor
+        #region Course and playlist resolution
+        /// <summary>Resolves a local course or playlist against the scanned base chart instances.</summary>
+        /// <param name="allCharts">The base charts to search.</param>
+        /// <param name="id">The identity derived from the playlist file contents.</param>
+        /// <param name="danInfo">The requested chart hashes and course rules.</param>
+        /// <returns>The resolved collection, or null when no charts match.</returns>
         private static Task<SongCollection?> GetLocalDanCollectionAsync(IEnumerable<ISongDetail> allCharts, Guid id, DanInfo danInfo)
         {
             return GetDanCollectionAsync(allCharts, id, danInfo, null);
         }
+        /// <summary>Converts and resolves an online course or playlist against the scanned chart instances.</summary>
+        /// <param name="allCharts">The base charts to search.</param>
+        /// <param name="onlineDanInfo">The endpoint-provided playlist metadata.</param>
+        /// <param name="source">The endpoint which owns the playlist.</param>
+        /// <returns>The resolved online collection, or null when no charts match.</returns>
         private static Task<SongCollection?> GetOnlineDanCollectionAsync(IEnumerable<ISongDetail> allCharts, MajNetOnlineDanInfo onlineDanInfo, ApiEndpoint source)
         {
             var danInfo = new DanInfo()
@@ -679,6 +895,12 @@ namespace MajdataPlay
             var id = ObjectIdHelper.ToGuid(onlineDanInfo.Id);
             return GetDanCollectionAsync(allCharts, id, danInfo, source);
         }
+        /// <summary>Resolves playlist hashes in their requested order, preferring online charts with matching identities.</summary>
+        /// <param name="allCharts">The base charts to search.</param>
+        /// <param name="id">The stable collection identity.</param>
+        /// <param name="danInfo">The requested chart hashes and course rules.</param>
+        /// <param name="source">The owning endpoint, or null for a local playlist.</param>
+        /// <returns>The resolved collection, or null when no charts match.</returns>
         private static async Task<SongCollection?> GetDanCollectionAsync(IEnumerable<ISongDetail> allCharts, Guid id, DanInfo danInfo, ApiEndpoint? source)
         {
             return await Task.Run(() =>
@@ -687,8 +909,7 @@ namespace MajdataPlay
                 var targetCharts = allCharts.Where(x => songHashs.Any(y => y == x.Hash))
                                             .OrderByDescending(x => x.IsOnline)
                                             .GroupBy(x => x.Hash)
-                                            .Select(x => x.FirstOrDefault())
-                                            .Where(x => x is not null)
+                                            .Select(group => group.First())
                                             .OrderBy(x => songHashs.IndexOf(x.Hash))
                                             .ToArray();
                 if (targetCharts.Length == 0)
@@ -700,6 +921,7 @@ namespace MajdataPlay
                 {
                     return new OnlineSongCollection(source, danInfo.Name, targetCharts)
                     {
+                        Definition = danInfo,
                         Id = id,
                         Type = danInfo.IsPlayList ? ChartStorageType.PlayList : ChartStorageType.Dan,
                         DanInfo = danInfo.IsPlayList ? null : danInfo
@@ -717,18 +939,21 @@ namespace MajdataPlay
             });
         }
         #endregion
+        /// <summary>Exports the committed favorites view when the game saves its state.</summary>
+        /// <param name="sender">The source of the save event.</param>
+        /// <param name="args">The save event arguments.</param>
         private static void OnSave(object? sender, EventArgs? args)
         {
             try
             {
-                if (!_isInited)
+                if (!s_isInitialized)
                 {
                     return;
                 }
-                var hashSet = _myFavorite.ExportHashSet();
+                var hashSet = s_myFavorites.ExportHashSet();
                 var exportDirectory = FileSystem.Directory.Open(MajEnv.ChartPath);
-                var exportFile = exportDirectory.FindFile(MY_FAVORITE_FILENAME)
-                    ?? exportDirectory.CreateFile(MY_FAVORITE_FILENAME, "application/json");
+                var exportFile = exportDirectory.FindFile(MyFavoriteFileName)
+                    ?? exportDirectory.CreateFile(MyFavoriteFileName, "application/json");
                 exportFile.WriteAllText(
                                   Serializer.Json.Serialize(new DanInfo()
                                   {
@@ -743,6 +968,10 @@ namespace MajdataPlay
                 MajDebug.LogException(e);
             }
         }
+        /// <summary>Derives a repeatable collection identity from the complete playlist file contents.</summary>
+        /// <param name="stream">The readable stream containing the playlist file.</param>
+        /// <returns>A GUID containing the MD5 digest of the file contents.</returns>
+        /// <exception cref="IOException">The stream could not be read.</exception>
         private static Guid GetGuidFromStream(Stream stream)
         {
             using var md5 = MD5.Create();
@@ -753,103 +982,134 @@ namespace MajdataPlay
 
             return id;
         }
+        /// <summary>Adds a chart to the committed favorites view and schedules persistence of its hash.</summary>
+        /// <param name="songDetail">The chart to mark as a favorite.</param>
         public static void AddToMyFavorites(ISongDetail songDetail)
         {
-            _myFavorite.Add(songDetail);
+            s_myFavorites.Add(songDetail);
             var hash = songDetail.Hash;
             if (!string.IsNullOrEmpty(hash))
             {
-                _favDb?.RunInTransactionAsync(conn => conn.InsertOrReplace(new FavoriteHashDB { Hash = hash }));
+                s_favoritesDatabase?.RunInTransactionAsync(conn => conn.InsertOrReplace(new FavoriteHashDB { Hash = hash }));
             }
         }
+        /// <summary>Checks whether a chart belongs to the committed favorites view.</summary>
+        /// <param name="songDetail">The chart whose identity is checked.</param>
+        /// <returns>True when a favorite chart has the same hash.</returns>
         public static bool IsInMyFavorites(ISongDetail songDetail)
         {
-            return _myFavorite.Any(o => o.Hash == songDetail.Hash);
+            return s_myFavorites.Any(o => o.Hash == songDetail.Hash);
         }
+        /// <summary>Removes a chart from the committed favorites view and schedules removal of its stored hash.</summary>
+        /// <param name="songDetail">The chart to remove from favorites.</param>
         public static void RemoveFromMyFavorites(ISongDetail songDetail)
         {
-            _myFavorite.Remove(songDetail);
+            s_myFavorites.Remove(songDetail);
             var hash = songDetail.Hash;
             if (!string.IsNullOrEmpty(hash))
             {
-                _favDb?.RunInTransactionAsync(conn => conn.Delete<FavoriteHashDB>(hash));
+                s_favoritesDatabase?.RunInTransactionAsync(conn => conn.Delete<FavoriteHashDB>(hash));
             }
         }
+        /// <summary>Removes a chart identity from the committed favorites view and persistent storage.</summary>
+        /// <param name="hashBase64Str">The chart identity to remove from favorites.</param>
         public static void RemoveFromMyFavorites(string hashBase64Str)
         {
-            _myFavorite.Remove(hashBase64Str);
+            s_myFavorites.Remove(hashBase64Str);
             if (!string.IsNullOrEmpty(hashBase64Str))
             {
-                _favDb?.RunInTransactionAsync(conn => conn.Delete<FavoriteHashDB>(hashBase64Str));
+                s_favoritesDatabase?.RunInTransactionAsync(conn => conn.Delete<FavoriteHashDB>(hashBase64Str));
             }
         }
-        private static async Task RefreshMyFavAsync()
+        /// <summary>Loads favorite hashes from the database and the optional portable JSON export.</summary>
+        /// <returns>The loaded favorite hashes without changing the committed favorites view.</returns>
+        /// <exception cref="IOException">Favorite import or backup storage could not be accessed.</exception>
+        /// <exception cref="SQLiteException">The favorite database could not be opened or queried.</exception>
+        private static async Task<HashSet<string>> LoadFavoriteHashesAsync()
         {
-            if (string.IsNullOrEmpty(MY_FAVORITE_EXPORT_PATH))
+            if (string.IsNullOrEmpty(s_myFavoritesExportPath))
             {
-                MY_FAVORITE_EXPORT_PATH = Path.Combine(MajEnv.ChartPath, MY_FAVORITE_FILENAME);
+                s_myFavoritesExportPath = Path.Combine(MajEnv.ChartPath, MyFavoriteFileName);
             }
-            if (string.IsNullOrEmpty(MY_FAVORITE_STORAGE_PATH))
+            if (string.IsNullOrEmpty(s_myFavoritesStoragePath))
             {
-                MY_FAVORITE_STORAGE_PATH = Path.Combine(MajEnv.CachePath, "Runtime", MY_FAVORITE_FILENAME);
+                s_myFavoritesStoragePath = Path.Combine(MajEnv.CachePath, "Runtime", MyFavoriteFileName);
             }
 
             // Init SQLite DB (once)
-            if (_favDb is null)
+            if (s_favoritesDatabase is null)
             {
                 var dbPath = MajEnv.FavoriteDBPath;
                 var isDbExists = FileSystem.File.Open(dbPath).Exists;
-                _favDb = new SQLiteAsyncConnection(dbPath, SQLiteOpenFlags.ReadWrite | SQLiteOpenFlags.Create | SQLiteOpenFlags.FullMutex);
-                GameManager.OnAppQuit += OnAppQuit;
-                await _favDb.CreateTableAsync<FavoriteHashDB>();
-                if (!isDbExists && FileSystem.File.Open(MY_FAVORITE_STORAGE_PATH).Exists)
+                var database = new SQLiteAsyncConnection(dbPath, SQLiteOpenFlags.ReadWrite | SQLiteOpenFlags.Create | SQLiteOpenFlags.FullMutex);
+                try
                 {
-                    await MigrateFavFromJsonAsync();
+                    await database.CreateTableAsync<FavoriteHashDB>().ConfigureAwait(false);
+                    if (!isDbExists && FileSystem.File.Open(s_myFavoritesStoragePath).Exists)
+                    {
+                        await MigrateFavFromJsonAsync(database).ConfigureAwait(false);
+                    }
                 }
+                catch
+                {
+                    await database.CloseAsync().ConfigureAwait(false);
+                    throw;
+                }
+                s_favoritesDatabase = database;
+                GameManager.OnAppQuit += OnAppQuit;
             }
 
-            // Load export JSON (user-facing, stays as JSON for portability)
-            var exportFile = FileSystem.File.Open(MY_FAVORITE_EXPORT_PATH);
+            // Load export JSON (user-facing, stays as JSON for portability).
+            DanInfo? exportedFavorites = null;
+            var exportFile = FileSystem.File.Open(s_myFavoritesExportPath);
             if (exportFile.Exists)
             {
                 bool result;
                 Exception? exception;
                 using var exportStream = exportFile.OpenRead();
-                (result, _userFavorites, exception) = await Serializer.Json.TryDeserializeAsync<DanInfo>(exportStream);
+                (result, exportedFavorites, exception) = await Serializer.Json.TryDeserializeAsync<DanInfo>(exportStream);
                 if (!result)
                 {
                     var exportDirectory = FileSystem.Directory.Open(MajEnv.ChartPath);
-                    var backupName = $"{MY_FAVORITE_FILENAME}.bak";
+                    var backupName = $"{MyFavoriteFileName}.bak";
                     while (exportDirectory.FindFile(backupName) is not null)
                     {
                         backupName = $"{backupName}.bak";
                     }
-                    FileSystem.File.Copy(exportFile.Location, Path.Combine(exportDirectory.Location, backupName));
-                    MajDebug.LogError($"Failed to load favorites\nPath: {MY_FAVORITE_EXPORT_PATH}\nException: {exception}");
+                    exportFile.CopyTo(exportDirectory, backupName);
+                    MajDebug.LogError($"Failed to load favorites\nPath: {s_myFavoritesExportPath}\nException: {exception}");
                 }
             }
 
             // Load from SQLite
-            _storageFav.Clear();
-            var rows = await _favDb.Table<FavoriteHashDB>().ToListAsync();
+            var favoriteHashes = new HashSet<string>();
+            var rows = await s_favoritesDatabase.Table<FavoriteHashDB>().ToListAsync();
             foreach (var row in rows)
             {
                 if (!string.IsNullOrEmpty(row.Hash))
                 {
-                    _storageFav.Add(row.Hash);
+                    favoriteHashes.Add(row.Hash);
                 }
             }
+            if (exportedFavorites is not null)
+            {
+                favoriteHashes.UnionWith(exportedFavorites.SongHashs);
+            }
+            return favoriteHashes;
         }
-        private static async Task MigrateFavFromJsonAsync()
+        /// <summary>Imports the legacy JSON favorites cache into SQLite and retains a backup.</summary>
+        /// <param name="database">The successfully initialized connection which is not yet globally published.</param>
+        /// <returns>A task which completes after migration or logging a recoverable migration failure.</returns>
+        private static async Task MigrateFavFromJsonAsync(SQLiteAsyncConnection database)
         {
             try
             {
-                var storageFile = FileSystem.File.Open(MY_FAVORITE_STORAGE_PATH);
+                var storageFile = FileSystem.File.Open(s_myFavoritesStoragePath);
                 using var storageStream = storageFile.OpenRead();
                 var (result, storageFav, exception) = await Serializer.Json.TryDeserializeAsync<HashSet<string>>(storageStream);
                 if (result && storageFav is not null)
                 {
-                    await _favDb!.RunInTransactionAsync(conn =>
+                    await database.RunInTransactionAsync(conn =>
                     {
                         foreach (var hash in storageFav)
                         {
@@ -862,8 +1122,8 @@ namespace MajdataPlay
                 }
                 try
                 {
-                    var storageDirectory = FileSystem.Directory.Open(Path.GetDirectoryName(MY_FAVORITE_STORAGE_PATH)!);
-                    var backupName = Path.GetFileName(MY_FAVORITE_STORAGE_PATH) + ".bak";
+                    var storageDirectory = FileSystem.Directory.Open(Path.GetDirectoryName(s_myFavoritesStoragePath)!);
+                    var backupName = Path.GetFileName(s_myFavoritesStoragePath) + ".bak";
                     storageDirectory.FindFile(backupName)?.Delete();
                     storageFile.Rename(backupName);
                     MajDebug.LogInfo("Migrated favorites from legacy JSON to SQLite, old file backed up.");
@@ -879,15 +1139,20 @@ namespace MajdataPlay
             }
         }
 
+        /// <summary>Unsubscribes the shutdown handler and closes the shared favorites connection.</summary>
+        /// <param name="sender">The source of the shutdown event.</param>
+        /// <param name="args">The shutdown event arguments.</param>
         private static void OnAppQuit(object? sender, EventArgs? args)
         {
             GameManager.OnAppQuit -= OnAppQuit;
-            _favDb?.CloseAsync().Wait();
+            s_favoritesDatabase?.CloseAsync().Wait();
         }
 
+        /// <summary>Represents a persistent favorite chart identity.</summary>
         [Table("FavoriteHashes")]
         private class FavoriteHashDB
         {
+            /// <summary>Gets or sets the Base64 chart identity used as the database primary key.</summary>
             [PrimaryKey]
             public string Hash { get; set; } = string.Empty;
         }
