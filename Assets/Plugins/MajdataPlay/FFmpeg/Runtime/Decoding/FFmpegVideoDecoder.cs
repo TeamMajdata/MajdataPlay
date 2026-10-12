@@ -177,15 +177,17 @@ namespace MajdataPlay.FFmpeg.Internal
         }
 
         /// <summary>Opens the input, reads its video metadata, and initializes the selected decoder on the owning worker.</summary>
-        /// <param name="path">A local media path or URL supported by the installed FFmpeg libraries.</param>
+        /// <param name="path">A local media path, authorized content URI, or URL supported by the installed FFmpeg libraries.</param>
         /// <param name="cancellationToken">The token used to cancel opening and all subsequent reads and seeks.</param>
-        /// <remarks>Failures after argument and cancellation validation dispose this decoder; create a new instance before retrying.</remarks>
+        /// <remarks>Failures after argument and cancellation validation dispose this decoder; create a new instance before retrying.
+        /// Content URIs use FFmpeg's native content protocol and require an initialized Android Java VM and application context.
+        /// Blocking provider calls must return before cancellation or an I/O timeout can be observed.</remarks>
         /// <exception cref="ArgumentException"><paramref name="path"/> is null, empty, or whitespace.</exception>
         /// <exception cref="InvalidOperationException">The decoder is already open, or FFmpeg cannot open or configure the video stream.</exception>
         /// <exception cref="ObjectDisposedException">This decoder has been disposed.</exception>
         /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled.</exception>
         /// <exception cref="TimeoutException">An input operation exceeded the configured timeout.</exception>
-        /// <exception cref="NotSupportedException">The loaded libraries, video format, dimensions, or required hardware configuration are unsupported.</exception>
+        /// <exception cref="NotSupportedException">The native input protocol, loaded libraries, video format, dimensions, or required hardware configuration are unsupported.</exception>
         /// <exception cref="OutOfMemoryException">FFmpeg could not allocate the required native resource.</exception>
         public void Open(string path, CancellationToken cancellationToken)
         {
@@ -218,6 +220,14 @@ namespace MajdataPlay.FFmpeg.Internal
                 CheckVersion("avcodec", ffmpeg.avcodec_version());
                 CheckVersion("avformat", ffmpeg.avformat_version());
                 CheckVersion("swscale", ffmpeg.swscale_version());
+                if (path.StartsWith("content:", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (!SupportsInputProtocol("content"))
+                    {
+                        throw new NotSupportedException("The loaded FFmpeg libraries do not support Android's content input protocol.");
+                    }
+                }
+
                 _selfHandle = GCHandle.Alloc(this);
                 _format = ffmpeg.avformat_alloc_context();
                 if (_format == null)
@@ -478,6 +488,31 @@ namespace MajdataPlay.FFmpeg.Internal
                 Dispose();
                 throw;
             }
+        }
+
+        /// <summary>Checks the loaded native demuxer library for an enabled input protocol.</summary>
+        /// <param name="protocol">The exact protocol name, such as content or file.</param>
+        /// <returns>True when FFmpeg can use the named protocol for input; otherwise false.</returns>
+        /// <exception cref="ArgumentException">The protocol name is null, empty, or whitespace.</exception>
+        /// <exception cref="DllNotFoundException">The native demuxer library is unavailable.</exception>
+        /// <exception cref="EntryPointNotFoundException">The library does not export protocol enumeration.</exception>
+        internal static bool SupportsInputProtocol(string protocol)
+        {
+            if (string.IsNullOrWhiteSpace(protocol))
+            {
+                throw new ArgumentException("An input protocol name is required.", nameof(protocol));
+            }
+
+            void* opaque = null;
+            while (ffmpeg.avio_enum_protocols(&opaque, 0) is { } name)
+            {
+                if (string.Equals(name, protocol, StringComparison.Ordinal))
+                {
+                    return true;
+                }
+            }
+
+            return false;
         }
 
         /// <summary>Reads and decodes the next video frame on the owning worker.</summary>

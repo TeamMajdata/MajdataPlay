@@ -5,6 +5,7 @@
         "FFmpeg.AutoGen",
         "MajdataPlay.Diagnostics",
         "MajdataPlay.IO",
+        "MajdataPlay.Platform.Android",
         "Unity.RenderPipelines.Core.Runtime"
     ],
     "includePlatforms": [

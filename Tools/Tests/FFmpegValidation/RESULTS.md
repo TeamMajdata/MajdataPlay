@@ -1,6 +1,68 @@
 # 本机验证结果
 
-最近验证日期：2026-10-07；此前跨平台矩阵执行于 2026-10-03。Windows / Unity 6000.3.17f1 / AMD Radeon RX 580 2048SP；Linux 使用本机 WSL Ubuntu 24.04；Android 真机为 Mi MIX 2S / Android 15 API 35 / Adreno 630 / Vulkan 1.1.128；Apple 构建测试使用用户提供的 Mac mini M4。当前 Windows/Linux/Android 图形桥接 ABI 为 **4**，Apple 保持 **2**；下方 ABI2/3 的记录为此前版本实测。
+最近验证日期：2026-10-12；此前渲染验证执行于 2026-10-07，跨平台矩阵执行于 2026-10-03。Windows / Unity 6000.3.17f1 / AMD Radeon RX 580 2048SP；Linux 使用本机 WSL Ubuntu 24.04；Android 真机为 Mi MIX 2S / Android 15 API 35 / Adreno 630 / Vulkan 1.1.128；Apple 构建测试使用用户提供的 Mac mini M4。当前 Windows/Linux/Android 图形桥接 ABI 为 **4**，Apple 保持 **2**；下方 ABI2/3 的记录为此前版本实测。
+
+## 2026-10-12：Android SAF 原生 content 输入
+
+### 实现与原生能力证据
+
+`FFmpegVideoPlayer` 将已授权的 opaque `content:` URI 原样传给 FFmpeg，不经过主工程的 `MajdataPlay.IO.Storage.FileSystem`、不把媒体完整复制到临时缓存。Android Prepare 与回退重建在启动 worker 前注册 FFmpeg 的 JVM / application context，软件解码不依赖硬件 warm-up；使用现有 AndroidJavaGenerator 生成的 Unity activity/context wrapper，成功注册的 JNI global reference 按 FFmpeg borrowed ownership 保留到进程退出。缺失原生 `content` input protocol 时明确拒绝打开。
+
+两个生产 Android ELF 的静态审查通过协议枚举代码、重定位及 descriptor/table 确認实际 `content` 条目，不只依赖 configure 文本或字符串搜索；两者的完整 protocol table 各有 31 项，其中部分不是 input protocol。两个实机进程的 `avio_enum_protocols(input)` 各枚举 **27 项并包含 content**。没有重编或替换 FFmpeg 原生库、没有修改子模块指针。
+
+| ABI | 生产及 APK 内 libavformat.so SHA256 | 生产及 APK 内 libavcodec.so SHA256 |
+| --- | --- | --- |
+| arm64-v8a | `67BD3A51DC9A9B837223F52E49D88FE5F4E75D0ED1B74E1D22B0460F5AE10F7F` | `09F2AD9447F255720395E6B485D5DFCD264A53C54C709EE2EC09243687B54E2B` |
+| armeabi-v7a | `F6322D49CDDFBDFF0A0333369D0CF4646DECA63E22CB3099119CC73D4428FA47` | `5F8745C5266CCD7AE746F991E51D13FFA28C502E663014B8579B1430CF25F997` |
+
+两 APK 的嵌入库流 SHA256 与上述生产文件逐一相等；两隔离工程的 19 个生产 FFmpeg Runtime C# 文件也分别与工作区逐文件 SHA256 相等。证据清单保存于忽略目录 `.work/ContentDevice-20261012/{arm64,armv7}-runtime-source-manifest.json` 和 `packaged-native-manifest.json`，不是对主工程完整构建的声明。
+
+### 分层验证结果
+
+| 验证层 | 实测结果 | 范围 |
+| --- | --- | --- |
+| .NET 9.0.316 / Windows native content 专用入口 | **109 assertions PASS** | 包含 20 个 opaque URI/legacy normalization/Editor guard checks、8 个真实 Windows 协议枚举及软件 Open 拒绝 content checks；不执行 Android JNI |
+| .NET 9.0.316 / Windows 完整真实媒体回归 | **802 assertions PASS**（上一轮 803） | 软件/D3D11VA CPU transport、真实 H.264 解码、seek、取消、有界队列、时钟；逐帧检查使 assertion 总数可随运行变化 |
+| Unity 6000.3.17f1 / Windows x64 Mono、High stripping、D3D11 | **36 assertions PASS** | 隔离 Editor 导入/脚本编译、Player 构建及软件 RGBA 上传运行 |
+| Unity 6000.3.17f1 / 生产 FFmpeg + generated Android binding subset | **Player script compilation PASS** | Android ARM64/ARMv7、Windows、Linux、macOS、iOS；仅脚本编译，不外推为各平台运行通过 |
+| Android ARM64 IL2CPP、High stripping、Vulkan | **39 assertions PASS** | Mi MIX 2S / Android 15 API 35，`processBits=64` / `IntPtr.Size=8`，真实 SAF / JNI / native content |
+| Android ARMv7 IL2CPP、High stripping、Vulkan | **39 assertions PASS** | 同一真机，`processBits=32` / `IntPtr.Size=4`，不是 ARM64 进程代跑 |
+
+实机媒体是经系统 `ACTION_OPEN_DOCUMENT` 实际选取的 **H.264 / 1920×1080 / 120 FPS / 79 s** 可 seek 视频；文件 URI/文件名不写报告。不要把 runner 推送的默认 Zunda 素材当作本次实际选择：Windows 回归使用的才是 Zunda H.264 1920×1080、29.970 FPS、110.444 s 文件。
+
+两 ABI 均先验证实际 `Software/h264` 的首帧 Texture/FrameReady、元数据、播放帧和时间推进、暂停冻结、opaque URI 不变、前后 SeekAsync、近 EOF EndReached 后 loop 重启、Stop 回零后继续 seek、Close 释放且不再呈现旧帧；再验证实际 `Hardware/h264_mediacodec`、`Hardware decode + CPU RGBA upload` 的准备/播放/暂停/关闭。硬件阶段没有软件回退，不把 CPU 上传记作 GPU 原生纹理共享。软件阶段由生产 Prepare 自行初始化 JNI/context，fixture 不预先注册它们。
+
+首次 picker 被取消的一轮明确记为 FAIL，原报告和日志保留为 `content-arm64-device.txt.picker-canceled*`；重新选取并取得真实 read grant 后通过。随后 ARM64 用 `-SkipInstall` 强制重启进程复测 **39 PASS**，验证 `persistedReadGrant=true` 的复用；ARMv7 使用同包名、同签名 `install -r` 切换到 32 位 APK，复用同一持久化授权后 **39 PASS**。没有清除主游戏数据、删除选中文档或撤销授权。
+
+### 命令与证据位置
+
+.NET 两模式均按相邻 README 运行，实际执行时从 `.work/ContentNative-20261012` 使用该目录的 `global.json` 固定 SDK **9.0.316**。日志为 `native-content.log` 和 `native-full.log`；Windows Player 证据为 `.work/ContentUnity-20261012/x64-Mono/d3d11-software.txt`，跨目标脚本编译日志为同目录根的 `compile-bindings.log`。
+
+```powershell
+./Tools/Tests/FFmpegValidation/run-unity.ps1 -BuildOnly -TestAndroidContent `
+  -Platform Android -Backend IL2CPP -Architecture arm64 -DisableBurst `
+  -WorkDirectory Tools/Tests/FFmpegValidation/.work/ContentDevice-20261012
+./Tools/Tests/FFmpegValidation/run-android-content.ps1 `
+  -Apk Tools/Tests/FFmpegValidation/.work/ContentDevice-20261012/Android-arm64-IL2CPP/VideoSmoke.apk `
+  -Architecture arm64 -Serial a21ee4ee
+# ARM64 重启复测：同命令追加 -SkipInstall。
+```
+
+ARMv7 的首次完整路径构建遇到 Windows/Ninja `manifest 'build.ninja' still dirty after 100 tries`。为避免 Gradle/Prefab 路径过长，将仓库内忽略的 `Tools/Tests/FFmpegValidation/.work` 临时映射为未占用的 `R:` 后，用 `-Architecture armv7 -WorkDirectory R:/ContentDevice-20261012` 重建成功；不是更改原生实现或放宽运行断言。临时盘符只给相同目录提供短别名，不移动/删除工程文件，测试完成后移除本次创建的映射。可在自己机器上使用确认未占用的盘符；不要覆盖已有映射。
+
+```powershell
+./Tools/Tests/FFmpegValidation/run-android-content.ps1 `
+  -Apk Tools/Tests/FFmpegValidation/.work/ContentDevice-20261012/Android-armv7-IL2CPP/VideoSmoke.apk `
+  -Architecture armv7 -Serial a21ee4ee
+```
+
+真机报告与 PID 限定的 logcat 分别位于 `.work/ContentDevice-20261012/Android-{arm64,armv7}-IL2CPP/content-{arm64,armv7}-device.txt[.logcat.txt]`。ARM64 APK SHA256 为 `414977DC987A95C648833F04978EF9D4C8D57389B5DD08B537ED8A700081F4A9`；ARMv7 为 `60F77B825D13F89018912CF1E8F83FA4E7A727F5E4202535F50CD64C18A9789F`。设备仍保留独立测试 app 和随机 Download fixture，产物/设备报告不纳入提交。
+
+### 未验证与既有问题
+
+- **未验证：** 主游戏场景/整包 Android 构建、其他设备及 provider、不可 seek 或云端流、失效/撤销授权、第三方阻塞调用的立即取消、content 上的 native GPU texture transport。此次仅凭 Texture/FrameReady 和控制状态验证真实解码呈现，不声称做了 Android 屏幕像素/视觉比较或性能基准。
+- 完整 Android 平台模块的隔离脚本编译曾在既有 `AndroidRuntime.cs`（缺失 MajDebug/AndroidKeyboard 引用及 `_on*`/`s_on*` 字段命名）和 `AndroidStorageAccess.cs`（OnActivityResult delegate 签名不匹配）报错，保留失败日志 `.work/ContentUnity-20261012/compile-players.log`。未顺带修改这些活动/键盘/SAF 文件系统实现。成功的隔离矩阵与实机 APK 使用生产 generated Runtime wrappers、AndroidJni、attributes、exception 和实际 analyzer，不引入 JNI 替身、不包含上述无关生命周期模块。
+- 两 ABI 都显式 `-DisableBurst`；不把隔离测试规避 Burst 环境问题等同于主工程全部依赖验证。provider 是否可 seek 必须看实际 `IsSeekable`，不能从本次 seekable 输入的成功推导所有 SAF 输入都可回零/循环。
 
 ## 2026-10-07：帧呈现修复的最终实测与未达项
 

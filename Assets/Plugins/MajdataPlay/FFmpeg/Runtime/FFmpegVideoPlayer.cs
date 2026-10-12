@@ -6,6 +6,7 @@ using System.Diagnostics.CodeAnalysis;
 using System.Threading;
 using System.Threading.Tasks;
 using MajdataPlay.FFmpeg.Internal;
+using MajdataPlay.FFmpeg.Interop;
 using MajdataPlay.Diagnostics;
 using UnityEngine;
 using UnityEngine.Serialization;
@@ -58,8 +59,8 @@ namespace MajdataPlay.FFmpeg
     {
         /// <summary>Allows short worker scheduling gaps before reporting buffering, in wall-clock seconds.</summary>
         private const double PlaybackBufferingGraceSeconds = 0.1;
-        /// <summary>Stores the path or URL of the video to open.</summary>
-        [SerializeField, FormerlySerializedAs("Source"), Tooltip("Local path or FFmpeg-supported URL. Android packaged StreamingAssets must first be extracted.")]
+        /// <summary>Stores the path, authorized content URI, or URL of the video to open.</summary>
+        [SerializeField, FormerlySerializedAs("Source"), Tooltip("Local path, authorized Android SAF content URI, or FFmpeg-supported URL. Packaged StreamingAssets must first be extracted.")]
         private string _source = "";
         /// <summary>Controls whether playback begins when the component awakens.</summary>
         [field: SerializeField, FormerlySerializedAs("PlayOnAwake")]
@@ -155,8 +156,9 @@ namespace MajdataPlay.FFmpeg
         /// <summary>Gets the last playback error message, or <see langword="null"/> if none has been reported since preparation began.</summary>
         public string? LastError { get; private set; }
 
-        /// <summary>Gets or sets the local path or FFmpeg-supported URL to open.</summary>
-        /// <remarks>Changing the value closes the current media. A null value clears the source.</remarks>
+        /// <summary>Gets or sets the local path, authorized Android SAF content URI, or FFmpeg-supported URL to open.</summary>
+        /// <remarks>Changing the value closes the current media. A null value clears the source.
+        /// Content URIs are passed directly to FFmpeg's native Android protocol; the caller must already hold read access.</remarks>
         [AllowNull]
         public string Url
         {
@@ -374,7 +376,9 @@ namespace MajdataPlay.FFmpeg
 
                 _hardwareActive = options.HardwareDeviceType != global::FFmpeg.AutoGen.AVHWDeviceType.AV_HWDEVICE_TYPE_NONE;
                 _hardwareCpuUploadAttempted = !options.KeepNativeFrames;
-                _session = new VideoDecodeSession(NormalizeSource(_source), options, BufferedFrameLimit, _playbackRate);
+                var source = NormalizeSource(_source);
+                InitializeContentInput(source);
+                _session = new VideoDecodeSession(source, options, BufferedFrameLimit, _playbackRate);
             }
             catch (Exception error)
             {
@@ -385,7 +389,7 @@ namespace MajdataPlay.FFmpeg
         }
 
         /// <summary>Sets the source and prepares its first frame without starting playback.</summary>
-        /// <param name="path">A local path or FFmpeg-supported URL.</param>
+        /// <param name="path">A local path, authorized Android SAF content URI, or FFmpeg-supported URL.</param>
         /// <param name="cancellationToken">Cancels preparation and closes the pending session.</param>
         /// <returns>A task that completes when the first frame is presented.</returns>
         /// <remarks>Uses the same completion and error behavior as <see cref="PrepareAsync"/>.</remarks>
@@ -403,7 +407,7 @@ namespace MajdataPlay.FFmpeg
         }
 
         /// <summary>Sets the source and begins preparing it without starting playback.</summary>
-        /// <param name="path">A local path or FFmpeg-supported URL.</param>
+        /// <param name="path">A local path, authorized Android SAF content URI, or FFmpeg-supported URL.</param>
         /// <remarks>Use <see cref="Prepared"/> and <see cref="ErrorReceived"/> to observe asynchronous results.</remarks>
         public void Preload(string path)
         {
@@ -411,7 +415,7 @@ namespace MajdataPlay.FFmpeg
         }
 
         /// <summary>Sets the source and starts playback after preparation.</summary>
-        /// <param name="path">A local path or FFmpeg-supported URL.</param>
+        /// <param name="path">A local path, authorized Android SAF content URI, or FFmpeg-supported URL.</param>
         public void Play(string path)
         {
             Url = path;
@@ -1088,7 +1092,9 @@ namespace MajdataPlay.FFmpeg
                     ConfigureHardware(options, nativeTransport);
                 }
 
-                _session = new VideoDecodeSession(NormalizeSource(_source), options, BufferedFrameLimit, _playbackRate);
+                var source = NormalizeSource(_source);
+                InitializeContentInput(source);
+                _session = new VideoDecodeSession(source, options, BufferedFrameLimit, _playbackRate);
                 if (_prepared && _info != null && _info.CanSeek)
                 {
                     _seekTarget = position;
@@ -1166,11 +1172,30 @@ namespace MajdataPlay.FFmpeg
             }
         }
 
+        /// <summary>Registers Android's process application context before a content-input worker starts.</summary>
+        /// <param name="source">The input string, preserving the document provider's opaque URI.</param>
+        /// <remarks>Call only on Unity's main thread. Software decoding needs the same content initialization as hardware decoding.</remarks>
+        /// <exception cref="NotSupportedException">Android's Java VM or application context cannot be registered.</exception>
+        private static void InitializeContentInput(string source)
+        {
+#if UNITY_ANDROID && !UNITY_EDITOR
+            if (source.StartsWith("content:", StringComparison.OrdinalIgnoreCase))
+            {
+                AndroidContentInterop.Initialize();
+            }
+#endif
+        }
+
         /// <summary>Converts local file URIs to paths while preserving other FFmpeg input URLs.</summary>
         /// <param name="path">The media input path or FFmpeg-supported URL.</param>
-        /// <returns>A local filesystem path for file URIs, or the original input string.</returns>
+        /// <returns>A local filesystem path for file URIs, an unchanged opaque content URI, or the trimmed input string.</returns>
         private static string NormalizeSource(string path)
         {
+            if (path.StartsWith("content:", StringComparison.OrdinalIgnoreCase))
+            {
+                return path;
+            }
+
             path = path.Trim().Trim('"');
             return Uri.TryCreate(path, UriKind.Absolute, out var uri) && uri.IsFile ? uri.LocalPath : path;
         }

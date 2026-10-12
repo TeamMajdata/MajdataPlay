@@ -19,6 +19,7 @@
     <Compile Include="EncodingChecks.cs" />
     <Compile Include="FrameEvictionChecks.cs" />
     <Compile Include="GpuWaitChecks.cs" />
+    <Compile Include="NativeContentChecks.cs" />
     <Compile Include="../../../Assets/Plugins/MajdataPlay/FFmpeg/Runtime/**/*.cs" />
     <Compile Include="../../../Assets/Plugins/MajdataPlay/IO/Storage/*.cs" />
     <Compile Include="../../../Assets/Plugins/MajdataPlay/Diagnostics/**/*.cs" />

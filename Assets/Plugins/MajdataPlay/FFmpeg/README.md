@@ -37,7 +37,7 @@ public sealed class VideoExample : MonoBehaviour
 
 | API | 语义 |
 | --- | --- |
-| `Url`, `Preload(path)`, `PreloadAsync(path, token)` | 路径/URL；打开、读取信息并显示首帧，时间不推进 |
+| `Url`, `Preload(path)`, `PreloadAsync(path, token)` | 本地路径、已授权 Android SAF `content://` URI 或受支持 URL；打开、读取信息并显示首帧，时间不推进 |
 | `Prepare()`, `PrepareAsync(token)` | 使用已设置的 Url；异步完成意味着首帧已显示 |
 | `Play()`, `Play(path)`, `Pause()`, `SetPause(bool)` | 基本控制；预载中调用 Play 会在准备后播放 |
 | `Stop()` | 暂停并异步回到开头，保留已准备资源；不可 seek 的输入则关闭 |
@@ -125,6 +125,20 @@ Android GPU 路径需要 API 26+、Vulkan 1.1 与 AHardwareBuffer/外部同步/Y
 - 默认 I/O 超时 15 秒，探测大小、分析时长和图像大小均有上限。销毁对象通过 AVIO interrupt 中断阻塞 I/O；第三方协议若不检查该回调，工作线程仍需等它返回。
 - 软件路径处理 BT.601 / BT.709 / BT.2020 矩阵和 full/limited range，输出 RGBA8；支持常见 90° 倍数旋转。没有 HDR 色调映射、字幕、DRM 或音轨输出。
 - `BGManager` 使用此组件预载和播放谱面背景视频，通过 `TextureChanged` 更新 UI 纹理；保留原有音频同步方式。
+
+### Android SAF 原生 content 输入
+
+已获读取授权的 SAF `content://` URI 可以直接传给 `Url`、`PreloadAsync` 或 `Play(path)`。播放器和解码器把它作为 **opaque 输入** 原样交给 FFmpeg 的原生 `content` 协议：不对 document ID 的 `%2F` / `%3A` 做 unescape，不用 `Uri.LocalPath` 转成文件路径，也不改写 authority 大小写、query 或 URI 自身的引号。请直接使用授权流程返回的 URI，不自行拼接路径或添加命令行包装引号。
+
+此输入路径不经过 `MajdataPlay.IO.Storage.FileSystem` facade，也不完整复制到本地文件缓存。可打开的内容和 seek 能力取决于原生库、provider 及编码容器：provider 可能仅提供不可 seek 的流；需要随机访问的 MP4 探测、精确 seek、回零或循环可能无法完成。不要仅因 URI 以 `content://` 开头就假定 `IsSeekable` 为 true，也不要将不可 seek 输入失败误记为已实现缓存兜底。
+
+Android Player 在主线程的 Prepare 和重新创建回退会话时初始化 native content 所需的 JNI/应用上下文。**软件解码同样必须执行该初始化**，不能依赖之前成功配置 MediaCodec、GPU 共享或其他硬件解码路径。输入协议初始化不代表已选用硬件解码；实际后端仍由解码偏好和运行时能力决定。
+
+调用方负责先取得并保持有效的 SAF 读取授权；播放器不发起 picker、不获取新权限，也不绕过 provider 权限或 DRM。加载的 FFmpeg 必须启用 `android_content`（对应 `CONFIG_ANDROID_CONTENT_PROTOCOL`，运行时协议名为 `content`）；未包含该协议时解码器在打开前明确抛出 `NotSupportedException`。Android 构建的能力不能外推到 Windows 或其他平台。provider/JNI 若阻塞且不检查 AVIO interrupt，取消或 I/O 超时仍需等待原生操作返回，不能保证立即终止第三方调用。
+
+**APK/JAR StreamingAssets 的边界不变**：`jar:file://...!/assets/...` 不是 SAF URI，也不是普通本地路径，仍需先通过 UnityWebRequest 提取编码文件再打开。托管归一化、Editor 初始化 guard 与 Windows 协议检查不调用 Android JNI；Android 两 ABI 的配置/二进制静态证据也不能替代设备验收。
+
+2026-10-12 已在 **Mi MIX 2S / Android 15 API 35 / Unity 6000.3.17f1 / IL2CPP ARM64 / ARMv7** 的隔离 Player 中验证真实 SAF/native content：**两个 ABI 各 39 assertions PASS**，包含未经硬件 warm-up 的软件 `h264`、硬件 `h264_mediacodec` + CPU RGBA 上传、播放/暂停、前后 seek、近 EOF loop、Stop/Close，以及持久化读取授权的进程重启复用。运行时 `avio_enum_protocols(input)` 实测包含 `content`；实际输入可 seek。这项结果不代表主游戏场景、所有 provider、不可 seek/云端输入、授权撤销、阻塞取消或 GPU 原生纹理共享均已通过；完整实机结果与复现命令另记于 `Tools/Tests/FFmpegValidation/RESULTS.md` 和相邻 README。
 
 ## Camera 录制
 

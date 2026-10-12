@@ -10,9 +10,79 @@ dotnet run --project Tools/Tests/FFmpegValidation/FFmpegValidation.csproj -- `
   "Assets/StreamingAssets/MaiCharts/Original/Zunda Overdance/bg.mp4"
 ```
 
-需要 .NET 9 SDK，默认 Unity Editor 路径为 `C:/Program Files/Unity Editors/6000.3.17f1/Editor`；其他安装路径可用 `-p:UnityEditor=...`。此命令在 Windows x64 进程中运行，新增硬件下载检查需要支持 H.264 D3D11VA 的实际 GPU；不带两个参数只运行不依赖 native 的时钟、码率统计与帧池生命周期/分配测试。.NET 工程编译真实 Diagnostics/ZString 并引用项目 PolySharp 分析器，不定义 `ENABLE_PROFILER`，因而不调用 Unity 原生 profiler；日志保留在真实 MajDebug 队列，未调用 Unity 初始化或连接未初始化的 Unity logger。
+需要 .NET 9 SDK，默认 Unity Editor 路径为 `C:/Program Files/Unity Editors/6000.3.17f1/Editor`；其他安装路径可用 `-p:UnityEditor=...`。此命令在 Windows x64 进程中运行，新增硬件下载检查需要支持 H.264 D3D11VA 的实际 GPU；不带参数只运行不依赖 native 的时钟、码率统计、帧池生命周期/分配、编码选项和 opaque content 输入归一化测试。`<native-directory> --native-content` 是不需要媒体或 GPU 的 Windows 原生协议专用模式。.NET 工程编译真实 Diagnostics/ZString 并引用项目 PolySharp 分析器，不定义 `ENABLE_PROFILER`，因而不调用 Unity 原生 profiler；日志保留在真实 MajDebug 队列，未调用 Unity 初始化或连接未初始化的 Unity logger。
 
 覆盖：真实视频元数据、RGBA 解码、PTS、前后 seek、EOF 延迟帧排空、预取消、有界预载、连续 seek、快速关闭，以及人工 AVFrame 的像素级上下方向、四方向旋转、非方形尺寸、YUV limited/full range、动态像素格式、裁剪与超限拒绝。硬件测试创建独立 D3D11VA 设备，在没有 Unity 纹理互操作回调的情况下解码、下载 RGBA、跳转并检查真实像素，断言 `HardwareDecoded` 与 CPU 像素存储同时成立。
+
+### Android SAF native content 输入回归
+
+[NativeContentChecks.cs](NativeContentChecks.cs) 在默认托管入口反射调用 `FFmpegVideoPlayer` 的 private static `NormalizeSource(string)`，不构造 MonoBehaviour、不调用 Unity 原生 API 或 Android JNI。断言以 `content:` 开头的输入（协议识别大小写不敏感）保持原始字符串，包括 escaped document ID 的 `%2F` / `%3A` 和转义大小写、authority 大小写、query、URI 内的引号及尾部字符；本地路径、`file://`、HTTP/HTTPS 仍保持既有 trim / 包装引号处理和 file URI 转本地路径行为。测试 URI 均为合成字符串，不访问真实文档，也不声称所有合成 URI 都能被 Android provider 接受。
+
+另直接调用 `MajdataPlay.FFmpeg.Interop.AndroidContentInterop.Initialize()`，断言本工程的 `UNITY_EDITOR` 分支立即抛出 `PlatformNotSupportedException`；Android 初始化代码由条件编译排除，此检查不加载 native、不触碰 JNI 或 Unity 原生 API。
+
+```powershell
+# 仅托管检查，不加载 FFmpeg native、不调用 Unity/JNI。
+dotnet run --project Tools/Tests/FFmpegValidation/FFmpegValidation.csproj
+# 仅加载 Windows FFmpeg 并检查输入协议，不需要媒体、GPU 或 Unity Player。
+dotnet run --project Tools/Tests/FFmpegValidation/FFmpegValidation.csproj -- `
+  Assets/Plugins/MajdataPlay/FFmpeg/Native/Windows/x86_64 --native-content
+```
+
+所有 Windows native 模式在配置 DLL resolver 后调用 `NativeContentChecks.RunWindows()`：通过生产 `FFmpegVideoDecoder.SupportsInputProtocol` 的 `avio_enum_protocols` input 枚举，交替重复断言 `file` 存在、`content` 不存在，防止枚举游标或上次结果污染后续查询；同时断言默认软件解码器 `Open(content URI)` 在 Windows 提供明确的 `NotSupportedException` / content protocol 诊断，而不是交给未知 native 协议或依赖硬件初始化。专用模式输出中的 `Android JNI/device playback NOT VERIFIED` 仅表示这个 Windows 检查入口不提供设备运行时证据；Windows 通过不能记作 Windows 支持 SAF。
+
+Android 的 `android_content` 构建选项对应 `CONFIG_ANDROID_CONTENT_PROTOCOL`，FFmpeg 运行时的协议条目名是 `content`。`Native/Android/armeabi-v7a` 与 `arm64-v8a` 应分别留存三层证据：`configure.txt` 的 Enabled protocols 中 `android_content`（构建配置）、实际 `libavformat.so` 的 content protocol descriptor / protocol table 条目（ELF 结构静态审查），以及目标进程的 `avio_enum_protocols(input)` 与真实 provider 打开/解码（设备运行时）。实际 ELF descriptor/table 审查比仅看到配置或协议名字符串提供更强的静态证据，但仍不能代替 JNI、授权和设备解码验证。托管/Windows 回归入口不加载 Android ELF，也不重复原生审查；两 ABI 的实际静态审查与设备运行结果另见 [RESULTS.md](RESULTS.md)。
+
+输入实现直接把已授权 `content://` URI 交给 FFmpeg native；不经过 Storage facade、不创建完整文件缓存。provider 可能不能 seek，MP4 探测、seek/回零/loop 不保证可用；原生阻塞 provider 调用若不检查 interrupt，取消/超时只能在它返回后被观察。授权由调用方已有的 SAF 流程提供，播放器不新增权限、不绕过 DRM。软件解码和硬件回退重新打开都必须初始化同一 JNI/应用上下文，不得依赖此前成功的硬件初始化。
+
+APK/JAR StreamingAssets 仍须先提取为本地编码文件；普通 `UnitySmoke` / `run-android-player.ps1` 使用提取后的素材，不提供 SAF URI，因此这些本地媒体 smoke 的通过不能替代 content 路径验收。下面的独立 SAF APK 使用真实 picker 和 native content，不改变普通 StreamingAssets 输入约定。
+
+#### 真机 SAF APK 复现（独立测试应用）
+
+使用 Unity **6000.3.17f1** 及其 Android SDK/NDK/OpenJDK、API 36 wrapper 生成环境和已构建的对应 ABI FFmpeg 原生库；连接已授权 ADB、支持待测 ABI 的 Android 设备，并保持屏幕解锁、测试应用在前台。该隔离场景的测试入口为 `MajdataPlay.FFmpeg.Validation.AndroidContentDeviceSmoke`；普通 `UnitySmoke` 在该场景中跳过运行。以下命令从仓库根目录执行，`-BuildOnly` 只构建，不代表实机播放通过；示例显式使用 `-DisableBurst`，保存结果时也应记录这个构建条件。
+
+```powershell
+# ARM64：只构建独立 content APK，不自动运行普通 Android 媒体 smoke。
+./Tools/Tests/FFmpegValidation/run-unity.ps1 -TestAndroidContent -BuildOnly `
+  -Platform Android -Backend IL2CPP -Architecture arm64 -DisableBurst `
+  -WorkDirectory Tools/Tests/FFmpegValidation/.work/android-content
+
+# 将 YOUR_ADB_SERIAL 替换为 adb devices 列出的设备编号；-Media 可选。
+./Tools/Tests/FFmpegValidation/run-android-content.ps1 `
+  -Apk Tools/Tests/FFmpegValidation/.work/android-content/Android-arm64-IL2CPP/VideoSmoke.apk `
+  -Architecture arm64 -Serial 'YOUR_ADB_SERIAL' `
+  -Media "Assets/StreamingAssets/MaiCharts/Original/Zunda Overdance/bg.mp4"
+
+# ARMv7：为另一 ABI 单独构建，再 install -r 同一个独立测试包。
+./Tools/Tests/FFmpegValidation/run-unity.ps1 -TestAndroidContent -BuildOnly `
+  -Platform Android -Backend IL2CPP -Architecture armv7 -DisableBurst `
+  -WorkDirectory Tools/Tests/FFmpegValidation/.work/android-content
+./Tools/Tests/FFmpegValidation/run-android-content.ps1 `
+  -Apk Tools/Tests/FFmpegValidation/.work/android-content/Android-armv7-IL2CPP/VideoSmoke.apk `
+  -Architecture armv7 -Serial 'YOUR_ADB_SERIAL'
+```
+
+也可以省略 runner 的 `-Media`，在 picker 中选择设备上已有、可读取的测试视频。`-Apk` 必须对应刚构建的 content APK，`-Architecture` 接受 `arm64` / `armv7`，`-Serial` 明确指定目标设备；非默认 Unity 安装可为 runner 传 `-Adb <adb.exe路径>`。初次选取加运行默认限时 300 秒，可用 `-TimeoutSeconds 600` 留出人工操作时间。使用足够长、已知可解码的测试视频；seekable fixture 必须长于 1 秒，loop 会依据实际选中视频的元数据 seek 到 EOF 前约 0.6 秒，不等待整段视频播放完毕。不能根据 `-Media` 上传文件推断用户实际选中的文档、时长或帧率，以本轮报告元数据为准。
+
+Windows Android 构建若遇到长路径导致的 Ninja `manifest dirty`，可对这个独立测试工作目录使用已配置好的短路径映射（例如 `-WorkDirectory R:\`），并相应调整 runner 的 `-Apk` 路径。短路径只是构建规避，不是 SAF 运行时证据；不要改用旧 APK 的报告代替重新构建结果。
+
+**数据与授权边界：** 专用 application ID 是 `net.majdata.ffmpegcontent.validation`，Java Activity 是 `net.majdata.ffmpegplayer.validation.AndroidContentDeviceActivity`。runner 只安装/更新这个独立测试包、force-stop 该包并删除该包上一轮的 `ffmpeg-content-smoke.txt`；不覆盖主游戏应用数据。指定 `-Media` 时推送到随机命名的 `Download/MajdataFFmpegContentValidation-<id>/test.mp4`，不使用用户原文件作为覆盖目标；测试素材保留在设备上，脚本不删除选中的文档，也不撤销其 grant。测试不会申请广泛存储权限、复制完整媒体到播放器缓存或绕过 DRM。
+
+手机首次出现真实 `ACTION_OPEN_DOCUMENT` / `video/*` picker 时，请按 runner 输出的目录选取 `test.mp4`。Activity 保存原始 `Uri.toString()`，仅在结果实际授予 read 和 persistable flags 时尝试持久化 read grant；若持久化被拒绝，同轮仍可使用 transient read grant，并报告 `persistedReadGrant=false`。同包名、同签名的 `install -r`、切换 ABI 或重启可复用测试应用自己的 SharedPreferences 选择，但仅当系统仍列出匹配的 persisted read grant；否则重新弹出 picker。取消 picker 明确记为 FAIL，等待期间报告为 WAITING，不能当作通过。复用 grant 只证明权限仍在，不证明文档没有被移动/删除或 provider 仍可读；软件 Preload 仍会验证实际可打开性。`-Media` 不强制清除旧选择或重新弹 picker，有有效旧 grant 时会继续测试原选中的文档；如需换素材，应先显式清除这个独立测试应用的数据再重新选取，不要清除主游戏数据。
+
+**运行内容与证据：**
+
+- 先枚举当前进程实际加载的 `avio_enum_protocols(input)`，必须存在 `content`；报告记录 `processABI`、`processBits=64/32`、`IntPtr.Size`、Android API、Unity 版本、`backend=IL2CPP` / `ENABLE_IL2CPP` 和实际 graphics backend。
+- **软件先行**：未经硬件 warm-up，调用生产 `FFmpegVideoPlayer.PreloadAsync(content URI)`，断言实际软件解码、元数据、首帧 Texture 与 `FrameReady`；随后检查真实帧/时间推进、Pause 冻结和原始 opaque URI 保持不变。fixture 不手动初始化 native JNI/context，因此覆盖生产软件 Prepare 的初始化入口。
+- **seekable 输入**：严格检查前后 `SeekAsync`、近 EOF 的 `EndReached` 后 loop 回到开始并继续呈现、Stop 的异步回零与继续 seek；Close 后要求 session 释放且不再呈现 stale frame。非 seekable 输入将 seek/rewind/loop 标为 `SKIP_NONSEEKABLE_PROVIDER`，并检查 Stop 会关闭输入；不能把该 SKIP 记作 seek/loop 通过。不能打开或不能解码的 provider 仍是 FAIL，不会借助缓存回退掩盖。
+- **硬件偏好 + CPU 纹理**：软件 session 完成后，以相同 URI 设置 `PreferredDecoderType=Hardware`、`PreferNativeTextures=false` 再次 Preload、播放、暂停和关闭，播放后记录实际 `DecoderType` / `DecoderName` / `TransferMode`、`FrameNumber` 与 `IsSeekable`。实际软件 fallback 明确标为 `SKIP_SOFTWARE_FALLBACK`；只有实际硬件解码才记硬件 PASS。这个 CPU RGBA 上传检查不等于 GPU 零复制或 native texture 共享验证，也不保证平台 codec 的底层物理实现。
+
+应用将进度和最终状态写到 `Application.persistentDataPath/ffmpeg-content-smoke.txt`，终态首行以 `PASS:` 或 `FAIL:` 开头；成功后保留进程，供 ADB 采集 PID 日志及下一轮 force-stop。runner 删除旧报告后再启动，并把终态报告和当前进程 logcat 保存为 APK 旁的 `content-arm64-device.txt` / `content-armv7-device.txt` 及其 `.logcat.txt`；它还要求报告中的目标位数、IL2CPP 与 `contentProtocol=True` 匹配。重新运行会覆盖该 ABI 的报告，请先按设备/ABI/时间保存证据及 runner 输出的 APK SHA256。总体 PASS 可包含明确的硬件或 seek/loop SKIP，必须逐项报告，不能把 SKIP 冒充通过。fixture 自身不输出选择 URI、provider 异常 message 或 stack trace；发布完整 logcat 前仍应检查其他生产/native/system 日志，避免暴露文档 URI。
+
+provider/native 操作若阻塞且不响应 interrupt，测试会请求关闭并观察原任务，但并不提供硬抢占保证；runner 超时也不证明 native 已退出。Java 分析、托管脚本编译、IL2CPP/APK 构建和静态协议证据必须与运行时结论分开记录，不能从任一编译成功推断实机播放通过。
+
+**验证边界：Windows 托管/native 层本身不验证 Android SAF/JNI 或 Android Player 运行时；ARM64 / ARMv7 的真机结果另见 [RESULTS.md](RESULTS.md)。** 本 README 只说明能力、复现入口和限制，不维护设备通过计数或固定实测素材。picker 取消/失败、重启后的 grant 复用、各 ABI 的实际 decoder/transfer/metadata，以及 APK 原生库和 Runtime 源码 snapshot 一致性等证据，应在 RESULTS 中按运行分别记录。
+
+这个 CPU 上传 smoke 不验证 GPU native texture / 零复制；不主动撤销 grant，也不保证所有设备、provider 或文档均可解码、seek 或 loop。非 seekable 输入的 seek/loop SKIP、transient grant 的有限生命周期与 provider 阻塞限制必须保留，不能用一个设备/ABI 的通过外推其他能力。
 
 ### Windows 解码超载与工作线程同步
 

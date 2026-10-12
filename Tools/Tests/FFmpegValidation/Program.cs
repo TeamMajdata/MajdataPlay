@@ -15,7 +15,7 @@ static class Program
     static int _checks;
     static void Check(bool condition, string message) { _checks++; if (!condition) throw new Exception(message); }
     /// <summary>Runs the selected validation mode and reports its observed assertions.</summary>
-    /// <param name="args">The native library directory, media or output directory, and optional validation mode.</param>
+    /// <param name="args">The native library directory with a media/output path and optional mode, or --native-content without media.</param>
     /// <returns>Zero when the selected checks pass; one when validation raises an error.</returns>
     static int Main(string[] args)
     {
@@ -26,6 +26,8 @@ static class Program
             _checks += VideoBitRateChecks.Run();
             _checks += AllocationChecks.RunManaged();
             _checks += EncodingChecks.RunManaged();
+            _checks += NativeContentChecks.RunManaged();
+            var nativeContent = args.Length == 2 && args[1] == "--native-content";
             var eviction = args.Length == 3 && args[2] == "--eviction";
             var decodeSynchronization = args.Length == 3 && args[2] == "--decode-sync";
             bool av1 = args.Length == 3 && args[2] == "--av1";
@@ -41,7 +43,7 @@ static class Program
                 && !encoding && !encodingUnavailable && !encodingHardware && !uncheckedAmf && !encodingSoftware
                 && !eviction && !decodeSynchronization)
             {
-                Console.WriteLine("PASS: " + _checks + " assertions; clock, bitrate, frame pool and encoder options; use <native-directory> <media> [--av1|--av1-unavailable|--allocations|--allocations-software|--eviction|--decode-sync], or <native-directory> <output-directory> --encode[|-unavailable|-hardware|-unchecked-amf|-software].");
+                Console.WriteLine("PASS: " + _checks + " assertions; clock, bitrate, frame pool, encoder options and opaque content normalization; use <native-directory> --native-content for Windows protocol checks, <native-directory> <media> [--av1|--av1-unavailable|--allocations|--allocations-software|--eviction|--decode-sync], or <native-directory> <output-directory> --encode[|-unavailable|-hardware|-unchecked-amf|-software].");
                 return 0;
             }
             string native = Path.GetFullPath(args[0]);
@@ -52,6 +54,12 @@ static class Program
             });
             // Dependencies are resolved by the OS; limit this change to the test process.
             if (!SetDllDirectory(native)) throw new Exception("SetDllDirectory failed.");
+            _checks += NativeContentChecks.RunWindows();
+            if (nativeContent)
+            {
+                Console.WriteLine("PASS: " + _checks + " assertions; opaque input normalization and Windows native protocol checks only; Android JNI/device playback NOT VERIFIED.");
+                return 0;
+            }
             if (encodingSoftware)
             {
                 _checks += EncodingChecks.RunSoftware(args[1]);

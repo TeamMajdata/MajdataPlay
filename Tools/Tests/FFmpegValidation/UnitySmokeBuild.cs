@@ -17,6 +17,7 @@ public static class FFmpegPlayerSmokeBuild
         var backend = FFmpegPlayerSmoke.Argument("-videoBackend") ?? "Mono";
         var architecture = FFmpegPlayerSmoke.Argument("-videoArchitecture") ?? "x64";
         var android = FFmpegPlayerSmoke.Argument("-videoPlatform") == "Android";
+        var androidContent = FFmpegPlayerSmoke.Argument("-androidContent") == "true";
         var linux = FFmpegPlayerSmoke.Argument("-videoPlatform") == "Linux";
         var output = FFmpegPlayerSmoke.Argument("-videoOutput");
         if (string.IsNullOrWhiteSpace(output))
@@ -42,7 +43,12 @@ public static class FFmpegPlayerSmokeBuild
             PlayerSettings.Android.minSdkVersion = AndroidSdkVersions.AndroidApiLevel23;
             PlayerSettings.Android.targetSdkVersion = AndroidSdkVersions.AndroidApiLevelAuto;
             PlayerSettings.Android.useCustomKeystore = false;
-            PlayerSettings.SetApplicationIdentifier(namedTarget, "net.majdata.ffmpegplayer.validation");
+            PlayerSettings.SetApplicationIdentifier(namedTarget, androidContent
+                ? "net.majdata.ffmpegcontent.validation" : "net.majdata.ffmpegplayer.validation");
+            if (androidContent)
+            {
+                PlayerSettings.Android.applicationEntry = AndroidApplicationEntry.Activity;
+            }
             EditorUserBuildSettings.buildAppBundle = false;
             EditorUserBuildSettings.exportAsGoogleAndroidProject = false;
         }
@@ -101,6 +107,11 @@ public static class FFmpegPlayerSmokeBuild
                 marker.GetComponent<Renderer>().sharedMaterial = material;
             }
         }
+        if (androidContent)
+        {
+            new GameObject("FFmpeg Content Device Smoke").AddComponent<MajdataPlay.FFmpeg.Validation.AndroidContentDeviceSmoke>();
+        }
+
         EditorSceneManager.SaveScene(scene, "Assets/Smoke.unity");
         Directory.CreateDirectory(output);
         var report = BuildPipeline.BuildPlayer(new BuildPlayerOptions
