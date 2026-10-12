@@ -2,8 +2,6 @@ using Cysharp.Threading.Tasks;
 using MajdataPlay.Diagnostics;
 using MajdataPlay.FFmpeg;
 using MajdataPlay.IO.Storage;
-using System.Collections;
-using System.Collections.Generic;
 using System.IO;
 using UnityEngine;
 using UnityEngine.Serialization;
@@ -26,17 +24,17 @@ namespace MajdataPlay.UI
         [SerializeField]
         private bool _loadOnly;
 
-        void Awake()
+        private void Awake()
         {
             _ffmpegPlayer = GetComponent<FFmpegVideoPlayer>();
         }
-        void Start()
+        private void Start()
         {
             DelayPlayVideo().Forget();
         }
-        async UniTask DelayPlayVideo()
+        private async UniTask DelayPlayVideo()
         {
-            while(MajEnv.Settings is null)
+            while (MajEnv.Settings is null)
             {
                 await UniTask.Yield();
             }
@@ -52,17 +50,17 @@ namespace MajdataPlay.UI
             }
             var path = string.Empty;
             var isValid = false;
-            foreach(var ext in MajEnv.SupportedVideoFormats)
+            foreach (var ext in MajEnv.SupportedVideoFormats)
             {
                 path = Path.Combine(MajEnv.AssetsPath, videoPath + ext);
 
-                if(FileSystem.File.Open(path).Exists)
+                if (FileSystem.File.Open(path).Exists)
                 {
                     isValid = true;
                     break;
                 }
             }
-            if(!isValid)
+            if (!isValid)
             {
                 MajDebug.LogError($"[{nameof(LoadVideoFromSA)}]Video does not exists: {videoPath}");
                 return;
