@@ -24,8 +24,13 @@ dotnet 'C:/Program Files/dotnet/sdk/9.0.316/dotnet.dll' run --project Tools/Test
 A successful run exits with code zero and prints:
 
 ```text
-CHART_STORAGE_VALIDATION_PASSED (14 cases)
+CHART_STORAGE_VALIDATION_PASSED (16 cases)
 ```
+
+The online-first group starts the same executable in a fresh process with
+`--online-first`, so both initial-source scenarios are checked without resetting
+production private fields or creating another test project. That child also
+prints its own one-case success marker before the parent's 16-case marker.
 
 Failures exit with code one and print the exception and
 `CHART_STORAGE_VALIDATION_FAILED`. Expected injected bad-chart, provider,
@@ -113,35 +118,54 @@ or changed.
   callbacks also drain workers and release unpublished charts. This is distinct
   from the intentionally isolated chart-child failures.
 
-### Full storage snapshots
+### Independent source snapshots
 
-- Missing-root initialization creates the default collection and still becomes
-  refreshable; leading-dot audio/video extension tables produce one period in
-  `track.mp3`, `bg.mp4` and `pv.mp4`.
+- `InitAsync(CancellationToken)` creates a missing chart root/default directory,
+  initializes favorites DB/export hashes and save handling, but leaves the exact
+  `Collections` array, chart count and parser-entry count unchanged. A favorites
+  query failure during initialization publishes nothing and can be retried.
+- A first `RefreshLocal` builds local bases/All/favorites without an online
+  refresh. A fresh-process first `RefreshOnline` builds only online bases and
+  shared views without a local refresh, filesystem access or local parsing. The
+  saved initial collection GUID/chart hash is restored rather than clamped away.
+- Portable favorites are loaded **during initialization**. Both source refreshes
+  use committed runtime hashes, never reread the favorites DB/export, and do not
+  resurrect a removed runtime favorite. Query-failure injection remains enabled
+  while exercising both refresh paths to reject an unexpected database query.
+  There is no production full-refresh/favorites-reload branch anymore.
 - Successful commits publish `Collections`, All, favorites and successful base
-  chart totals together. All/favorite/playlist duplicates do not inflate totals.
-  Invalid/unmatched playlist files leave no unassigned task slots.
-- Canceled scans, canceled queued refreshes, inaccessible roots, collection-ID
-  errors and deterministic failures immediately before publication retain the
-  exact previous collections, aggregate song references, favorites and count.
-  New unpublished details are released; old shared details remain usable.
-- Favorites-query failures and later root-scan failures do not leak half-loaded
-  export hashes into a subsequent local-only refresh. The SQLite substitute
-  injects the query error without performing native database work.
-- Full/local refresh admission is serialized. Successful retries preserve
-  collection identity and selected chart hash after order changes and release
-  only replaced library-owned instances; deletion lowers committed totals.
-- Filtered-empty online base lists retain their unfiltered origins in All and
-  the total. Their retained chart objects are not disposed. Virtual online
-  playlists/courses rebind local details to the new snapshot and keep IDs and
-  course metadata.
-- Full request definitions survive partially or entirely missing chart sets.
-  Reimporting charts restores the original playlist/course hashes; even empty
-  derived collections remain restorable, and public playlist `DanInfo` stays null.
-- Offline endpoint responses verify successful playlist/course replacement
-  without duplicate courses, failure retaining that endpoint's previous
-  collection objects, successful empty responses removing only that endpoint's
-  derived lists and canceled requests retaining the committed array.
+  chart totals together. Derived duplicates do not inflate totals. Invalid JSON,
+  missing `Name` or `SongHashs`, and currently unmatched definitions are isolated
+  without losing healthy neighboring playlists or charts.
+- `RefreshLocal` preserves online base collection/chart references and rebinds
+  retained online playlists/courses, even when online settings were disabled
+  after loading. No chart-list or online-favorites request is entered.
+- `RefreshOnline` preserves local base collection/chart references, never
+  enumerates or parses the local source, and rebinds local playlists from loaded
+  definitions rather than JSON. A rejecting, counted content provider detects
+  even an attempted local query. Modified/deleted JSON does not affect online
+  rebinding; an unmatched remote-only definition retains its GUID and recovers
+  when its chart returns. Disabled-online removal belongs only to this path.
+- Both source paths rebind All, favorites, local and online playlists and restore
+  selection by collection identity/chart hash. Filtered-empty retained online
+  bases contribute their unfiltered origins to the aggregate and count.
+- Canceled scans, inaccessible roots, collection-ID errors, queued cancellation
+  and deterministic failures before publication retain the exact committed
+  array, aggregate references, favorites and count. New unpublished source
+  charts are released; the other source and old shared charts remain usable.
+- Local/online admission is serialized through one shared refresh lock in both
+  directions. A local refresh cannot enumerate while an online request is held;
+  an online refresh cannot request while local parsing is held. Successful
+  retries replace only their owned source instances and retain coherent totals.
+- The test-only `RefreshBothSourcesAsync` explicitly awaits local then online
+  refreshes for migrated legacy cases. The two commits are independent; this
+  helper is not a production full-refresh API or a combined transaction.
+- Complete online playlist/course request definitions survive partially or
+  entirely missing chart sets, preserving IDs, course metadata and null public
+  playlist `DanInfo`. Reimporting charts restores the requested hashes.
+- Offline endpoint favorites responses still verify replacement without
+  duplicate courses, failed-endpoint object retention, successful empty-response
+  removal and cancellation of `RefreshUserOnlineFavAsync`.
 
 ## Substitutes and validation limits
 
@@ -151,9 +175,10 @@ records active/peak parses, backend instances and disposal. It does not link or
 validate the real `SongDetail`/Simai parser, chart hashes, covers, tracks, media
 preloading or native resources.
 
-`OpaqueFileSystem.cs` wraps only test-owned local fixtures with an unregistered,
-opaque URI map. It injects provider order, timestamps, hidden flags and denied
-access without depending on host ACLs. These checks detect losing the original
+`OpaqueFileSystem.cs` wraps only test-owned local fixtures with an opaque URI
+map. Scanner cases keep it unregistered; root-refresh cases explicitly register
+its content URI variant. It injects provider order, timestamps, hidden flags and
+counted/rejected access without depending on host ACLs. These checks detect losing the original
 `IFileSystem` or deriving child paths from URI text; they are **not Android SAF
 or mobile-device integration tests**.
 
@@ -161,6 +186,8 @@ or mobile-device integration tests**.
 logging, UniTask, SQLite and online API boundaries. Serialization uses
 `System.Text.Json`, not production Newtonsoft.Json. Online responses are
 in-process fixture callbacks: no actual HTTP request, login or download occurs.
+The narrow DanInfo doubles leave absent required JSON fields null, matching the
+production DTO, so malformed-definition isolation is not hidden by test defaults.
 The real storage scheduling, collection publication and lifetime decisions are
 still linked production code. Reflection is limited to the root-scan and online-collection loading
 entry points and injecting an online fixture array through `Collections`' setter;

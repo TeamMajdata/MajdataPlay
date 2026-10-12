@@ -1,5 +1,6 @@
 #nullable enable
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
@@ -60,6 +61,9 @@ namespace MajdataPlay
     /// <summary>Compiles unused online chart branches without network or Unity dependencies.</summary>
     internal sealed class OnlineSongDetail : SongDetail
     {
+        /// <summary>Gets constructed remote details so rollback tests can observe unpublished ownership cleanup.</summary>
+        public static ConcurrentQueue<OnlineSongDetail> CreatedDetails { get; } = new ConcurrentQueue<OnlineSongDetail>();
+
         /// <summary>Creates fixture metadata while retaining the caller's authoritative song-cache directory.</summary>
         /// <param name="directory">The already-created per-song cache directory and its backend.</param>
         /// <param name="source">The endpoint supplying the metadata.</param>
@@ -67,6 +71,7 @@ namespace MajdataPlay
         public OnlineSongDetail(StorageDirectory directory, ApiEndpoint source, ChartFixture metadata) : base(metadata, directory)
         {
             IsOnline = true;
+            CreatedDetails.Enqueue(this);
         }
     }
 }

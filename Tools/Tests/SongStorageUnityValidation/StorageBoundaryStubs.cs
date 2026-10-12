@@ -45,6 +45,10 @@ namespace MajdataPlay.Net
         private static ApiEndpoint? s_fixtureSource;
         /// <summary>Stores offline DTOs; production online-song construction still executes unchanged.</summary>
         private static MajnetSongDetail[]? s_fixtureCharts;
+        /// <summary>Counts every chart-list boundary entry, including rejected unexpected requests.</summary>
+        private static int s_chartListRequestCount;
+        /// <summary>Gets the number of chart-list requests attempted by the production caller.</summary>
+        public static int ChartListRequestCount => Volatile.Read(ref s_chartListRequestCount);
 
         /// <summary>Supplies one offline chart-list response for a real SongStorage construction assertion.</summary>
         /// <param name="source">The endpoint allowed to read the fixture DTOs.</param>
@@ -62,6 +66,7 @@ namespace MajdataPlay.Net
         /// <exception cref="NotSupportedException">A network request was attempted.</exception>
         public static Task<MajnetSongDetail[]?> GetChartListAsync(ApiEndpoint source, CancellationToken cancellationToken)
         {
+            Interlocked.Increment(ref s_chartListRequestCount);
             cancellationToken.ThrowIfCancellationRequested();
             if (ReferenceEquals(source, s_fixtureSource))
             {

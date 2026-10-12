@@ -23,11 +23,11 @@ namespace MajdataPlay
     public sealed class DanInfo
     {
         /// <summary>Gets or sets the display name.</summary>
-        public string Name { get; set; } = string.Empty;
+        public string Name { get; set; } = null!;
         /// <summary>Gets or sets the description.</summary>
         public string Description { get; set; } = string.Empty;
         /// <summary>Gets or sets the ordered chart hashes.</summary>
-        public string[] SongHashs { get; set; } = Array.Empty<string>();
+        public string[] SongHashs { get; set; } = null!;
         /// <summary>Gets or sets whether this is a playlist rather than a course.</summary>
         public bool IsPlayList { get; set; }
         /// <summary>Gets or sets the unused gameplay option.</summary>
@@ -57,8 +57,8 @@ namespace MajdataPlay
         public static ValidationSettings Settings { get; } = new ValidationSettings();
         /// <summary>Gets the mutable selection configuration.</summary>
         public static ValidationRuntimeConfig RuntimeConfig { get; } = new ValidationRuntimeConfig();
-        /// <summary>Gets the empty endpoint list.</summary>
-        public static ApiEndpoint[] ApiEndpoints { get; } = Array.Empty<ApiEndpoint>();
+        /// <summary>Gets or sets the explicitly supplied offline endpoint list.</summary>
+        public static ApiEndpoint[] ApiEndpoints { get; set; } = Array.Empty<ApiEndpoint>();
     }
 
     /// <summary>Supplies the online-enable settings boundary.</summary>
@@ -346,7 +346,7 @@ namespace MajdataPlay.Extensions
     }
 }
 
-namespace MajdataPlay.Utils
+namespace MajdataPlay
 {
     /// <summary>Supplies the unused game-runtime reference.</summary>
     /// <typeparam name="T">The game service type.</typeparam>
@@ -376,6 +376,10 @@ namespace MajdataPlay.Utils
         }
     }
 
+}
+
+namespace MajdataPlay.Utils
+{
     /// <summary>Compiles unused online ID conversion without validating endpoint semantics.</summary>
     internal static class ObjectIdHelper
     {

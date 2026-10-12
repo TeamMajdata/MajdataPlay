@@ -140,10 +140,16 @@ namespace MajdataPlay.Tests.ChartStorageValidation
             MajEnv.ChartPath = Path.Combine(storagePath, "Charts");
             MajEnv.CachePath = CreateFixtureDirectory(storagePath, "Cache");
             MajEnv.Settings.Online.Enable = false;
+            var beforeInitialization = SongStorage.Collections;
+            var countBeforeInitialization = SongStorage.TotalChartCount;
+            await SongStorage.InitAsync();
+            Require(NativeDirectory.Exists(Path.Combine(MajEnv.ChartPath, "default")), "First initialization must create a missing root and its default directory.");
+            Require(ReferenceEquals(SongStorage.Collections, beforeInitialization) && SongStorage.Collections.Length == 0
+                && SongStorage.TotalChartCount == countBeforeInitialization && SongDetail.Probe.StartedCount == 0,
+                "Initialization must not publish any collection, aggregate or chart, or invoke the chart parser.");
             var initialProgress = new ProgressRecorder();
-            await SongStorage.InitAsync(initialProgress);
-            Require(NativeDirectory.Exists(Path.Combine(MajEnv.ChartPath, "default")), "First initialization must create a missing root and its default collection.");
-            Require(SongStorage.Collections.Any(collection => collection.Name == "default") && SongStorage.Collections.Any(collection => collection.Name == "All") && SongStorage.TotalChartCount == 0, "First initialization of a missing root must publish a usable empty snapshot instead of returning uninitialized.");
+            await SongStorage.RefreshLocal(initialProgress);
+            Require(SongStorage.Collections.Any(collection => collection.Name == "default") && SongStorage.Collections.Any(collection => collection.Name == "All") && SongStorage.TotalChartCount == 0, "The first explicit local refresh must publish a usable local snapshot without an online refresh.");
             RequireCompletedProgress(initialProgress);
             var defaultId = SongStorage.Collections.Single(collection => collection.Name == "default").Id;
             var collectionPath = CreateFixtureDirectory(MajEnv.ChartPath, "Fresh");
@@ -155,10 +161,10 @@ namespace MajdataPlay.Tests.ChartStorageValidation
             NativeFile.WriteAllText(Path.Combine(MajEnv.ChartPath, "ValidDan.json"), JsonSerializer.Serialize(new DanInfo { Name = "Fixture playlist", SongHashs = new[] { "selected" }, IsPlayList = true }));
             NativeFile.WriteAllText(Path.Combine(MajEnv.ChartPath, "MyFavorites.json"), JsonSerializer.Serialize(new DanInfo { Name = "Exported favorites", SongHashs = new[] { "selected" }, IsPlayList = true }));
             var refreshProgress = new ProgressRecorder();
-            await SongStorage.RefreshAsync(refreshProgress);
+            await RefreshBothSourcesAsync(refreshProgress);
             Require(SongStorage.TotalChartCount == 2 && SongStorage.Collections.Single(collection => collection.Name == "All").Count == 2, "Committed chart totals must count successful base charts only, not aggregate, favorite or playlist duplicates.");
             Require(SongStorage.Collections.Single(collection => collection.Name == "default").Id == defaultId, "Refreshing after first-time root creation must retain the default collection's identity.");
-            Require(SongStorage.Collections.Single(collection => collection.Name == "MyFavorites").Single().Hash == "selected" && SongStorage.Collections.Single(collection => collection.Name == "Fixture playlist").Single().Hash == "selected", "Favorite export and valid playlists must resolve against the committed chart snapshot.");
+            Require(SongStorage.Collections.Single(collection => collection.Name == "MyFavorites").IsEmpty && SongStorage.Collections.Single(collection => collection.Name == "Fixture playlist").Single().Hash == "selected", "Valid playlists must resolve against the committed snapshot; refresh must not reload a favorites export written after initialization.");
             Require(!SongStorage.Collections.Any(collection => collection.Name == "Unmatched"), "An unmatched or malformed playlist must not leave a null task slot or prevent healthy playlists loading.");
             RequireCompletedProgress(refreshProgress);
             var local = SongStorage.Collections.Single(collection => collection.Name == "Fresh");
@@ -181,11 +187,11 @@ namespace MajdataPlay.Tests.ChartStorageValidation
             SongDetail.Probe = parseProbe;
             using var cancellation = new CancellationTokenSource();
             var canceledProgress = new ProgressRecorder();
-            var canceledRefresh = SongStorage.RefreshLocalAsync(canceledProgress, cancellation.Token);
+            var canceledRefresh = SongStorage.RefreshLocal(canceledProgress, cancellation.Token);
             await parseProbe.Started.Task.WaitAsync(TimeSpan.FromSeconds(10));
             RequireUnchangedStorage(previous, previousAll, previousFavorites, previousCount);
             using var queuedCancellation = new CancellationTokenSource();
-            var queuedRefresh = SongStorage.RefreshAsync(cancellationToken: queuedCancellation.Token);
+            var queuedRefresh = RefreshBothSourcesAsync(cancellationToken: queuedCancellation.Token);
             queuedCancellation.Cancel();
             await ExpectExceptionAsync<OperationCanceledException>(() => queuedRefresh);
             RequireUnchangedStorage(previous, previousAll, previousFavorites, previousCount);
@@ -195,48 +201,40 @@ namespace MajdataPlay.Tests.ChartStorageValidation
             RequireUnchangedStorage(previous, previousAll, previousFavorites, previousCount);
             using var alreadyCanceled = new CancellationTokenSource();
             alreadyCanceled.Cancel();
-            await ExpectExceptionAsync<OperationCanceledException>(() => SongStorage.RefreshAsync(cancellationToken: alreadyCanceled.Token));
+            await ExpectExceptionAsync<OperationCanceledException>(() => RefreshBothSourcesAsync(cancellationToken: alreadyCanceled.Token));
             RequireUnchangedStorage(previous, previousAll, previousFavorites, previousCount);
 
             var validRoot = MajEnv.ChartPath;
             var notDirectory = Path.Combine(storagePath, "NotADirectory");
             NativeFile.WriteAllText(notDirectory, "root scan must fail");
             MajEnv.ChartPath = notDirectory;
-            await ExpectExceptionAsync<IOException>(() => SongStorage.RefreshLocalAsync());
+            await ExpectExceptionAsync<IOException>(() => SongStorage.RefreshLocal());
             RequireUnchangedStorage(previous, previousAll, previousFavorites, previousCount);
             MajEnv.ChartPath = validRoot;
             SongDetail.Probe = new ParseProbe();
-            await ExpectExceptionAsync<IOException>(() => SongStorage.RefreshLocalAsync(new ThrowOnCleanupProgress()));
+            await ExpectExceptionAsync<IOException>(() => SongStorage.RefreshLocal(new ThrowOnCleanupProgress()));
             RequireUnchangedStorage(previous, previousAll, previousFavorites, previousCount);
             Require(SongDetail.Probe.CompletedCount == 3, "The pre-commit failure fixture must finish scanning before rejecting publication.");
 
             var favoritesExport = Path.Combine(MajEnv.ChartPath, "MyFavorites.json");
             NativeFile.WriteAllText(favoritesExport, JsonSerializer.Serialize(new DanInfo { Name = "Uncommitted favorites", SongHashs = new[] { "other" }, IsPlayList = true }));
-            SQLite.SQLiteAsyncConnection.QueryException = new IOException("Injected favorites database query failure.");
-            try
-            {
-                await ExpectExceptionAsync<IOException>(() => SongStorage.RefreshAsync());
-                RequireUnchangedStorage(previous, previousAll, previousFavorites, previousCount);
-            }
-            finally
-            {
-                SQLite.SQLiteAsyncConnection.QueryException = null;
-            }
+            await ExpectExceptionAsync<IOException>(() => SongStorage.RefreshLocal(new ThrowOnCleanupProgress()));
+            RequireUnchangedStorage(previous, previousAll, previousFavorites, previousCount);
             var rejectedPath = CreateFixtureDirectory(MajEnv.ChartPath, "RejectedCollection");
             var rejectedMarker = Path.Combine(rejectedPath, ".MajdataPlay");
             NativeFile.WriteAllText(rejectedMarker, "preserve marker collision");
             SongDetail.Probe = new ParseProbe();
-            await ExpectExceptionAsync<IOException>(() => SongStorage.RefreshAsync());
+            await ExpectExceptionAsync<IOException>(() => RefreshBothSourcesAsync());
             RequireUnchangedStorage(previous, previousAll, previousFavorites, previousCount);
             Require(SongDetail.Probe.Active == 0 && SongDetail.Probe.Songs.All(song => song.IsDisposed), "A collection-level refresh failure must drain sibling workers and release every unpublished chart instead of committing a library with a missing folder.");
             NativeFile.Delete(rejectedMarker);
             var goodProgress = new ProgressRecorder();
-            await SongStorage.RefreshLocalAsync(goodProgress);
+            await SongStorage.RefreshLocal(goodProgress);
             Require(SongStorage.TotalChartCount == 3 && SongStorage.Collections.Single(collection => collection.Name == "All").Count == 3, "A successful retry must publish the complete new chart total.");
             Require(SongStorage.WorkingCollection.Id == localId && SongStorage.WorkingCollection.Current.Hash == "selected" && SongStorage.WorkingCollection.Current.Title == "Selected updated", "Storage refresh must restore the selection by collection ID and chart hash after chart reordering.");
             Require(previousAll.Cast<SongDetail>().All(song => song.IsDisposed), "The owning storage snapshot may release obsolete chart instances after successful publication.");
             Require(SongStorage.IsInMyFavorites(SongStorage.WorkingCollection.Current), "Canceled/failed refreshes must not lose favorite membership before the successful retry.");
-            Require(!SongStorage.IsInMyFavorites(SongStorage.Collections.Single(collection => collection.Name == "All").Single(song => song.Hash == "other")), "A failed favorites query or later root scan must not leak newly read export hashes into a local-only refresh.");
+            Require(!SongStorage.IsInMyFavorites(SongStorage.Collections.Single(collection => collection.Name == "All").Single(song => song.Hash == "other")), "A failed refresh or later root scan must not import post-initialization export hashes into a local refresh.");
             NativeFile.WriteAllText(favoritesExport, JsonSerializer.Serialize(new DanInfo { Name = "Exported favorites", SongHashs = new[] { "selected" }, IsPlayList = true }));
             RequireCompletedProgress(goodProgress);
 
@@ -245,25 +243,25 @@ namespace MajdataPlay.Tests.ChartStorageValidation
             var beforeConcurrentFavorites = beforeConcurrent.Single(collection => collection.Name == "MyFavorites");
             var serialProbe = new ParseProbe(block: true);
             SongDetail.Probe = serialProbe;
-            var firstRefresh = SongStorage.RefreshLocalAsync();
+            var firstRefresh = SongStorage.RefreshLocal();
             await serialProbe.Started.Task.WaitAsync(TimeSpan.FromSeconds(10));
             await WaitUntilAsync(() => serialProbe.Active >= Math.Min(Math.Max(1, Environment.ProcessorCount), 4));
             var admitted = serialProbe.StartedCount;
-            var secondRefresh = SongStorage.RefreshAsync();
+            var secondRefresh = RefreshBothSourcesAsync();
             await Task.Delay(100);
             var secondWasWaiting = !secondRefresh.IsCompleted && serialProbe.StartedCount == admitted;
             RequireUnchangedStorage(beforeConcurrent, beforeConcurrentAll, beforeConcurrentFavorites, 3);
             serialProbe.Gate!.TrySetResult();
             await Task.WhenAll(firstRefresh, secondRefresh).WaitAsync(TimeSpan.FromSeconds(20));
-            Require(secondWasWaiting && serialProbe.Active == 0 && serialProbe.CompletedCount == 6, "Full and local refreshes must serialize admission through one scan lock, then both complete.");
+            Require(secondWasWaiting && serialProbe.Active == 0 && serialProbe.CompletedCount == 6, "Explicit source refreshes must serialize admission through the shared refresh lock, then both complete.");
             Require(SongStorage.TotalChartCount == 3 && SongStorage.WorkingCollection.Current.Hash == "selected", "Serialized refresh commits must leave a coherent total and selected chart. Total=" + SongStorage.TotalChartCount + ", selected=" + SongStorage.WorkingCollection.Current.Hash + ", runtimeIndex=" + MajEnv.RuntimeConfig.List.SelectedSongIndex);
             NativeFile.Delete(Path.Combine(addedPath, "maidata.txt"));
             NativeFile.Delete(Path.Combine(movedPath, "maidata.txt"));
             SongDetail.Probe = new ParseProbe();
-            await SongStorage.RefreshAsync();
-            Require(SongStorage.TotalChartCount == 1 && SongStorage.Collections.Single(collection => collection.Name == "All").Single().Hash == "other", "A later full refresh must lower the committed total when charts are deleted.");
+            await RefreshBothSourcesAsync();
+            Require(SongStorage.TotalChartCount == 1 && SongStorage.Collections.Single(collection => collection.Name == "All").Single().Hash == "other", "A later explicit two-source refresh must lower the committed total when charts are deleted.");
             Require(await SongStorage.RefreshUserOnlineFavAsync(), "Disabled online favorites refresh must not invoke the rejected network stub.");
-            Console.WriteLine("PASS storage snapshot: missing-root init, totals/playlists, selection, rollback and serialized retries");
+            Console.WriteLine("PASS storage snapshot: non-scanning init, explicit local creation, totals/playlists, selection, rollback and serialized retries");
         }
 
         /// <summary>Invokes the real private root scheduler using its explicitly agreed signature.</summary>

@@ -32,11 +32,17 @@ namespace MajdataPlay.Tests
         private int _nextId;
         /// <summary>Counts forbidden production mutation attempts.</summary>
         private int _mutationAttemptCount;
+        /// <summary>Counts attempted production metadata, enumeration and stream access.</summary>
+        private int _accessAttemptCount;
 
         /// <summary>Gets the already-created fixture root owned by this exact backend instance.</summary>
         public StorageDirectory Root { get; }
         /// <summary>Gets the number of forbidden production mutations, excluding explicit fixture seeding.</summary>
         public int MutationAttemptCount => Volatile.Read(ref _mutationAttemptCount);
+        /// <summary>Gets the number of attempted provider reads and queries.</summary>
+        public int AccessAttemptCount => Volatile.Read(ref _accessAttemptCount);
+        /// <summary>Gets or sets whether reads must fail to detect unintended local access during an online refresh.</summary>
+        public bool RejectAccess { get; set; }
 
         /// <summary>Creates an opaque fixture root with explicit backend name semantics.</summary>
         /// <param name="ignoreNameCase">Whether FindFile should accept case variants independently of resource tables.</param>
@@ -121,6 +127,7 @@ namespace MajdataPlay.Tests
         /// <returns>The seeded entry, or null when absent.</returns>
         public FileSystemEntry? GetEntry(string location)
         {
+            ObserveAccess();
             return _entries.TryGetValue(location, out var entry) ? entry : null;
         }
 
@@ -155,6 +162,7 @@ namespace MajdataPlay.Tests
         /// <exception cref="FileNotFoundException">The location does not denote a seeded file.</exception>
         public Stream OpenRead(string location)
         {
+            ObserveAccess();
             if (!_contents.TryGetValue(location, out var bytes))
             {
                 throw new FileNotFoundException("No readable fixture exists at this location.", location);
@@ -287,11 +295,23 @@ namespace MajdataPlay.Tests
         /// <exception cref="DirectoryNotFoundException">The location is not a seeded directory.</exception>
         private List<FileSystemEntry> GetChildren(string location)
         {
+            ObserveAccess();
             if (!_children.TryGetValue(location, out var children))
             {
                 throw new DirectoryNotFoundException("The original backend does not own directory " + location);
             }
             return children;
+        }
+
+        /// <summary>Observes provider reads and rejects access while the local source must remain untouched.</summary>
+        /// <exception cref="IOException">An online refresh unexpectedly queried the local provider.</exception>
+        private void ObserveAccess()
+        {
+            Interlocked.Increment(ref _accessAttemptCount);
+            if (RejectAccess)
+            {
+                throw new IOException("The online refresh attempted local provider access.");
+            }
         }
 
         /// <summary>Records a forbidden mutation even if production catches the resulting exception.</summary>

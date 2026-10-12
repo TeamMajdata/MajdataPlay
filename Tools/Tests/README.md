@@ -86,11 +86,15 @@ dotnet run --project Tools/Tests/ChartStorageValidation/ChartStorageValidation.c
 ./Tools/Tests/ValidateSongStorageUnity.ps1 -Repetitions 12
 ```
 
-The managed suite repeats 96-collection scans and verifies shared concurrency
-limits, cancellation, failed-scan rollback, refresh ordering/cursors, favorite
-state and retained online views. The Unity harness uses real parser and UniTask
-dependencies with narrow game/media/network/database substitutes in an ignored
-isolated project. Neither suite validates real devices, native media/SQLite,
+The managed suite repeats 96-collection scans and verifies shared concurrency,
+non-publishing initialization, independent local/online refresh, zero cross-source
+I/O/requests, cached playlist rebinding, cancellation/rollback and retained chart
+references/selection. Portable favorites DB/export hashes are loaded at InitAsync;
+both refreshes use committed hashes and never reload the DB/export. Legacy tests
+explicitly await Local then Online; no production full-refresh API remains.
+The Unity harness uses real parser and UniTask dependencies, also checks
+independent source references and cached definitions, and keeps narrow
+game/media/network/database substitutes in an ignored isolated project. Neither suite validates real devices, native media/SQLite,
 online protocols, Player lifecycle or Android SAF permissions.
 
 ## Chart import layout

@@ -126,6 +126,9 @@ namespace MajdataPlay.Utils
             }
         }
 
+        /// <summary>Refreshes local collections after an import and returns to the list scene.</summary>
+        /// <param name="folderName">The imported folder name displayed in refresh progress.</param>
+        /// <returns>An operation that completes after local collections are refreshed and the list scene is restored.</returns>
         private async static UniTask ReloadList(string folderName)
         {
             await MajInstances.SceneSwitcher.FadeInAsync();
@@ -141,7 +144,7 @@ namespace MajdataPlay.Utils
             {
                 MajInstances.SceneSwitcher.SetLoadingText($"Importing {folderName}...\n"+e);
             };
-            var task = SongStorage.RefreshLocalAsync(progress);
+            var task = SongStorage.RefreshLocal(progress);
             while(!task.IsCompleted)
             {
                 await UniTask.Yield();

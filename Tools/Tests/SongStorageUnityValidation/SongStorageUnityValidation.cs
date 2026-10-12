@@ -117,6 +117,7 @@ namespace MajdataPlay.Tests
                 await ValidateOnlineCacheAsync(fixtures).ConfigureAwait(false);
                 await ValidateCollectionRefreshAsync(fixtures).ConfigureAwait(false);
                 await ValidateStorageAsync(fixtures, repetitions).ConfigureAwait(false);
+                await ValidateIndependentSourcesAsync(fixtures).ConfigureAwait(false);
                 Require(ValidationHttpHandler.RequestCount == 0, "The offline harness attempted an HTTP request.");
             }
             catch (Exception exception)
@@ -250,6 +251,8 @@ namespace MajdataPlay.Tests
                 directories.Add(Storage.Directory.Open(path));
             }
             WriteChart(Path.Combine(rootPath, "Group-000", ".MajdataPlay"), 20000);
+            File.WriteAllText(Path.Combine(rootPath, "MissingHashes.json"), "{\"Name\":\"Invalid missing hashes\"}", new UTF8Encoding(false));
+            File.WriteAllText(Path.Combine(rootPath, "MissingName.json"), "{\"SongHashs\":[\"missing\"]}", new UTF8Encoding(false));
             var expectedChartCount = (CollectionCount - 1) * ChartsPerCollection;
             using (var scanner = new SongCollectionScanner())
             {
@@ -279,7 +282,13 @@ namespace MajdataPlay.Tests
             MajEnv.CachePath = Path.Combine(fixtures, "Cache");
             Directory.CreateDirectory(MajEnv.CachePath);
             MajEnv.Settings.Online.Enable = false;
+            var beforeInitialization = SongStorage.Collections;
+            var countBeforeInitialization = SongStorage.TotalChartCount;
             await SongStorage.InitAsync().ConfigureAwait(false);
+            Require(ReferenceEquals(beforeInitialization, SongStorage.Collections) && SongStorage.Collections.Length == 0
+                && SongStorage.TotalChartCount == countBeforeInitialization,
+                "Initialization published collections or charts before an explicit source refresh.");
+            await SongStorage.RefreshLocal().ConfigureAwait(false);
             AssertLibrary(expectedChartCount);
             var ids = SongStorage.Collections.Where(collection => !collection.IsVirtual && !collection.IsOnline)
                 .ToDictionary(collection => collection.Name, collection => collection.Id);
@@ -290,7 +299,7 @@ namespace MajdataPlay.Tests
             var selectedHash = SongStorage.Collections[selectedDirectory][1].Hash;
             for (var iteration = 0; iteration < repetitions; iteration++)
             {
-                await SongStorage.RefreshLocalAsync().ConfigureAwait(false);
+                await SongStorage.RefreshLocal().ConfigureAwait(false);
                 AssertLibrary(expectedChartCount);
                 foreach (var collection in SongStorage.Collections.Where(collection => !collection.IsVirtual && !collection.IsOnline))
                 {
@@ -302,11 +311,12 @@ namespace MajdataPlay.Tests
             var beforeCancellation = SongStorage.Collections;
             using var cancellation = new CancellationTokenSource();
             cancellation.Cancel();
-            await ExpectCancellationAsync(() => SongStorage.RefreshLocalAsync(cancellationToken: cancellation.Token)).ConfigureAwait(false);
+            await ExpectCancellationAsync(() => SongStorage.RefreshLocal(cancellationToken: cancellation.Token)).ConfigureAwait(false);
             Require(ReferenceEquals(beforeCancellation, SongStorage.Collections), "Canceled storage refresh replaced the library.");
-            await SongStorage.RefreshAsync().ConfigureAwait(false);
+            await SongStorage.RefreshLocal().ConfigureAwait(false);
+            await SongStorage.RefreshOnline().ConfigureAwait(false);
             AssertLibrary(expectedChartCount);
-            Debug.Log("SONG_STORAGE_REPEATED_SCAN_PASSED: " + repetitions + " local refreshes plus init/full refresh; no missing/duplicate folder, exact aggregate count, playlist/favorites and selection retained.");
+            Debug.Log("SONG_STORAGE_REPEATED_SCAN_PASSED: " + repetitions + " local refreshes plus non-scanning init and explicit source refreshes; no missing/duplicate folder, exact aggregate count, playlist/favorites and selection retained.");
         }
 
         /// <summary>Checks the complete published library, including the empty middle folder and derived views.</summary>

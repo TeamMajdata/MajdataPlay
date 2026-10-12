@@ -2,6 +2,7 @@
 using MajdataPlay.Platform.Android.Runtime.Content;
 using System;
 using System.Collections.Generic;
+using System.Threading;
 using System.Threading.Tasks;
 using UnityEngine;
 
@@ -133,17 +134,33 @@ namespace MajdataPlay
         public static SceneSwitcher SceneSwitcher { get; } = new SceneSwitcher();
     }
 
-    /// <summary>Records the chart list refresh requested by the production importer.</summary>
+    /// <summary>Records the local chart list refresh requested by the production importer.</summary>
     internal static class SongStorage
     {
-        /// <summary>Gets the number of completed chart list refreshes.</summary>
+        /// <summary>Defines the chart metadata filename used by the import fixtures.</summary>
+        public const string ChartFileName = "maidata.txt";
+
+        /// <summary>Supplies the supported track filenames inspected by the production importer.</summary>
+        public static readonly string[] SupportedTrackFileNames = new string[]
+        {
+            "track.mp3",
+            "track.opus",
+            "track.ogg",
+            "track.aac",
+            "track.wav"
+        };
+
+        /// <summary>Gets the number of completed local chart list refreshes.</summary>
         public static int RefreshCount { get; private set; }
 
-        /// <summary>Counts a refresh request without scanning any chart.</summary>
+        /// <summary>Counts a local refresh request without scanning any chart.</summary>
         /// <param name="progressReporter">The ignored progress reporter.</param>
+        /// <param name="cancellationToken">The token that cancels the refresh before it is counted.</param>
         /// <returns>A completed awaitable.</returns>
-        public static Task RefreshLocalAsync(IProgress<string>? progressReporter = null)
+        /// <exception cref="OperationCanceledException">The supplied cancellation token has been canceled.</exception>
+        internal static Task RefreshLocal(IProgress<string>? progressReporter = null, CancellationToken cancellationToken = default)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             RefreshCount++;
             return Task.CompletedTask;
         }

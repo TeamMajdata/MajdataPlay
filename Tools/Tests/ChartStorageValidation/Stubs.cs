@@ -50,11 +50,11 @@ namespace MajdataPlay
     public sealed class DanInfo
     {
         /// <summary>Gets the playlist display name.</summary>
-        public string Name { get; init; } = string.Empty;
+        public string Name { get; init; } = null!;
         /// <summary>Gets the playlist description.</summary>
         public string Description { get; init; } = string.Empty;
         /// <summary>Gets the playlist chart hashes.</summary>
-        public string[] SongHashs { get; init; } = Array.Empty<string>();
+        public string[] SongHashs { get; init; } = null!;
         /// <summary>Gets whether this model is a playlist rather than a Dan.</summary>
         public bool IsPlayList { get; init; }
         /// <summary>Gets whether game-over is mandatory.</summary>

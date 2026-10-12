@@ -151,9 +151,21 @@ request/download names and remote downloads are not executed.
 - Directory-backed RefreshAsync and main-thread Refresh, persistent identity and
   backend handle, cursor/filter/origin retention, invalidation and canceled snapshots.
 - Virtual, online-cache and favorites refresh no-ops.
-- Real SongStorage.InitAsync, 12 local refreshes by default, a final full refresh
-  with online disabled, exact per-folder/aggregate counts, ordering, selection,
-  local JSON playlist and portable favorites, plus canceled-publication retention.
+- Real SongStorage.InitAsync leaves collections/count unchanged until explicit
+  RefreshLocal; 12 local refreshes by default and final explicit Local then Online
+  calls retain exact per-folder/aggregate counts, ordering, selection, local JSON
+  playlist and portable favorites, plus canceled-publication retention.
+- Favorites DB/export hashes are initialized once by InitAsync. Both refresh
+  paths rebind committed runtime hashes rather than reload the DB/export; no
+  production full-refresh API or favorites-reload branch remains.
+- Missing local JSON Name/SongHashs are isolated without discarding healthy
+  playlists or charts. An initially unmatched remote-only local definition is
+  cached and resolves after online loading even when its JSON was deleted.
+- Real independent online refresh preserves all local base/chart references and
+  selection with a rejecting/counted local provider. Local refresh keeps the exact
+  online base/chart references without requests even when online is disabled.
+  Only RefreshOnline removes online content on disable; returning online hashes
+  restore cached playlist GUIDs and favorite membership without local access.
 - Real local and online DisposeAsync, including UniTask's main-thread switches,
   while the real Editor update loop continues.
 
@@ -166,15 +178,17 @@ actual exit code zero and no C# errors/broken managed-assembly loading.
 
 - RuntimeStubs: global settings/events, fixture format arrays matching the game's
   dot-prefixed formats, sort/filter primitives, logging, Newtonsoft JSON adapter
-  and rejecting image/audio/preview services.
+  and rejecting image/audio/preview services. Scene-runtime and Unity-object
+  compile helpers live in MajdataPlay, where the staged song sources resolve them;
+  metadata cases still never enter cover/media loaders.
 - StorageBoundaryStubs: endpoint/config shapes, offline DTO-list injection,
   rejecting other network-service calls and in-memory SQLite. OnlineSongDetail is
   **not** a stub; its production source is staged and compiled.
 - OnlineBoundaryStubs: rejecting HTTP handler and unused transfer-buffer compile
   surface. The real download method compiles, but transfer-buffer use is forbidden.
 - ValidationFileSystem/ValidationSequentialReadStream: opaque seeded IFileSystem
-  entries, exact backend name rules, original byte streams and mutation/read
-  counters. They do not contain any chart discovery/matching/parsing algorithm.
+  entries, exact backend name rules, original byte streams, rejected local
+  access and mutation/query/read counters. They do not contain any chart discovery/matching/parsing algorithm.
 
 UnityEngine, UniTask, MajSimai, Nito locks and IO Storage are real. The UI/TMP DLLs
 only satisfy precompiled references; no scene/rendering stack is exercised.
@@ -207,9 +221,9 @@ The script removes only its checked staging tree, refuses junctions/reparse
 points and retains the isolated Unity cache. It never modifies production
 sources/scenes/settings, user charts/cache or the main Editor.
 
-## Recorded expanded-harness validation
+## Recorded expanded-harness validation (historical)
 
-On **2026-10-11**, the current expanded harness completed with process **exit 0**
+On **2026-10-11**, the then-current expanded harness completed with process **exit 0**
 and `SONG_STORAGE_UNITY_PASSED`:
 
 ```powershell
@@ -230,3 +244,20 @@ The sandboxed attempt could not connect to licensing/Package Manager; the
 approved, unsandboxed run of the same isolated command passed. This result does
 not remove the runtime/platform limitations listed above. Rerun after source
 changes rather than treating this record as certification of later source bytes.
+
+## Independent-refresh validation on 2026-10-12
+
+The current independent-refresh harness passed the same Unity 6000.3.17f1 command
+with `-Repetitions 12`, process **exit 0**, `SONG_STORAGE_UNITY_PASSED` and the new
+`SONG_STORAGE_INDEPENDENT_SOURCES_PASSED` marker. The run validated 41 collections /
+120 real local charts, non-publishing initialization, incomplete JSON isolation,
+independent online/local reference retention, cached unmatched-definition
+recovery, selection and zero local-provider access / HTTP sends.
+
+The first attempt exposed the existing scene-runtime/Unity-object helpers in the
+wrong stub namespace. Only the harness boundary namespace was corrected; the
+real production song implementations, parser and refresh algorithms were not
+replaced. The subsequent run passed with production/harness SHA-256 hashes
+matching the current workspace in `Temp/SongStorageUnityValidation/staged-inputs.json`.
+The main Editor remained open. This is isolated Editor evidence, not Play Mode,
+Player, real network, native persistence or hardware certification.

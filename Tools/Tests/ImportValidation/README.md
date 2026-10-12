@@ -23,9 +23,12 @@ queued chart folder imports as one chart, that entries without a chart file and
 track file import nothing, that a failed archive is reported without discarding
 the remaining queue, and that no extraction directory survives an import.
 
-`Stubs.cs` supplies narrow scene, storage-refresh, diagnostic, UniTask and Unity
-attribute substitutes. These tests verify the importer's control flow and file
-effects, not production scene switching, `SongStorage.RefreshLocalAsync`, Unity
-threading, Android SAF sources, the Android temp-file deletion, native archives
-or Player integration. Those require the corresponding Unity and platform smoke
-checks.
+`Stubs.cs` supplies narrow scene, chart-filename, storage-refresh, diagnostic,
+UniTask and Unity attribute substitutes. Its `SongStorage.RefreshLocal` substitute
+matches the production progress/cancellation boundary and records completed local
+refreshes; each import flow must request exactly one local refresh. These tests
+verify the importer's control flow and file effects, not production scene
+switching, the implementation of `SongStorage.RefreshLocal`, production audio
+format configuration, Unity threading, Android SAF sources, the Android temp-file
+deletion, native archives or Player integration. Those require the corresponding
+Unity and platform smoke checks.

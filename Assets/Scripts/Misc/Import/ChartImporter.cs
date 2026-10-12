@@ -76,7 +76,7 @@ namespace MajdataPlay.Import
         /// Both then follow the same layout rules: <c>&lt;chart&gt;/maidata.txt</c> becomes a chart of the <c>Import</c> collection,
         /// while <c>&lt;collection&gt;/&lt;chart&gt;/maidata.txt</c> becomes a chart of the named collection below <see cref="MajEnv.ChartPath"/>.
         /// </remarks>
-        /// <returns>An operation that completes after importing the queued entries and refreshing the chart list.</returns>
+        /// <returns>An operation that completes after importing the queued entries and refreshing the local chart list.</returns>
         private static async ValueTask Import()
         {
             var nextScene = (MajScenes?)MajScenes.List;
@@ -122,7 +122,7 @@ namespace MajdataPlay.Import
             {
                 MajInstances.SceneSwitcher.SetLoadingText(e);
             };
-            var task = SongStorage.RefreshLocalAsync(progress);
+            var task = SongStorage.RefreshLocal(progress);
             while (!task.IsCompleted)
             {
                 await UniTask.Yield();

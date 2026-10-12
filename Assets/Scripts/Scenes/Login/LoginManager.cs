@@ -417,9 +417,11 @@ namespace MajdataPlay.Scenes.Login
                 return;
             }
             _isExited = true;
-            RefreshListBackgroundAsync(refreshWholeList:SceneSwitcher.LastScene != MajScenes.Title);
+            RefreshListBackgroundAsync(refreshOnline: SceneSwitcher.LastScene != MajScenes.Title);
         }
-        static async void RefreshListBackgroundAsync(bool refreshWholeList = false)
+        /// <summary>Refreshes the requested online collections and online favorites before returning to the list scene.</summary>
+        /// <param name="refreshOnline">Whether to refresh online collections in addition to online favorites.</param>
+        static async void RefreshListBackgroundAsync(bool refreshOnline = false)
         {
             var sceneSwitcher = MajInstances.SceneSwitcher;
             await sceneSwitcher.FadeInAsync();
@@ -430,9 +432,9 @@ namespace MajdataPlay.Scenes.Login
             {
                 MajInstances.SceneSwitcher.SetLoadingText(e);
             };
-            if (refreshWholeList)
+            if (refreshOnline)
             {
-                var task = SongStorage.RefreshAsync(progress);
+                var task = SongStorage.RefreshOnline(progress);
                 while (!task.IsCompleted)
                 {
                     await UniTask.Yield();

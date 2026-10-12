@@ -7,6 +7,7 @@ using MajdataPlay.IO;
 using MajdataPlay.Utils;
 using System;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using TMPro;
 using UnityEngine;
@@ -79,45 +80,52 @@ namespace MajdataPlay.Scenes.Title
                 Destroy(GameObject.Find("EventSystem"));
             }
         }
+        /// <summary>Initializes title services and song collections within the component's lifetime.</summary>
+        /// <returns>A player-loop initialization operation.</returns>
         async UniTaskVoid InitAsync()
         {
-            await UniTask.Yield(PlayerLoopTiming.LastPostLateUpdate);
+            var cancellationToken = destroyCancellationToken;
+            await UniTask.Yield(PlayerLoopTiming.LastPostLateUpdate, cancellationToken);
             MajInstances.AudioManager.PlaySFX("MajdataPlay.wav");
             MajInstances.AudioManager.PlaySFX("bgm_title.mp3");
 
             _echoText.text = $"{"MAJTEXT_LOADING_SCORE_STORAGE".i18n()}...";
-            await UniTask.DelayFrame(9);
+            await UniTask.DelayFrame(9, cancellationToken: cancellationToken);
             var task1 = ScoreManager.InitAsync().AsValueTask();
             while (!task1.IsCompleted)
             {
-                await UniTask.Yield();
+                await UniTask.Yield(cancellationToken);
             }
 
             task1 = ChartSettingStorage.InitAsync();
 
             while (!task1.IsCompleted)
             {
-                await UniTask.Yield();
+                await UniTask.Yield(cancellationToken);
             }
-            await UniTask.Delay(2000);
+            await UniTask.Delay(2000, cancellationToken: cancellationToken);
             _echoText.text = $"{"MAJTEXT_LOADING_SKIN".i18n()}...";
             var task2 = MajInstances.SkinManager.InitAsync();
             while (!task2.IsCompleted)
             {
-                await UniTask.Yield();
+                await UniTask.Yield(cancellationToken);
             }
 
             _echoText.text = $"{"MAJTEXT_SCANNING_CHARTS".i18n()}...";
-            var task3 = StartScanningChart();
+            var task3 = InitializeSongStorageAsync(cancellationToken);
             try
             {
                 while (true)
                 {
-                    await UniTask.Yield(PlayerLoopTiming.Update);
+                    await UniTask.Yield(PlayerLoopTiming.Update, cancellationToken);
 
                     if (task3.IsCompleted)
                     {
-                        if (task3.IsFaulted)
+                        if (task3.IsCanceled)
+                        {
+                            return;
+                        }
+                        else if (task3.IsFaulted)
                         {
                             _echoText.text = "MAJTEXT_ERR_SCAN_CHARTS_FAILED".i18n();
                             MajDebug.LogException(task3.Exception);
@@ -142,21 +150,34 @@ namespace MajdataPlay.Scenes.Title
             }
         }
 
-        async Task StartScanningChart()
+        /// <summary>Initializes song storage, refreshes local and online collections, and restores the saved selection.</summary>
+        /// <param name="cancellationToken">Cancels initialization and refreshes when the title component is destroyed.</param>
+        /// <returns>A task that completes after the song library and selection are ready.</returns>
+        /// <exception cref="OperationCanceledException">The title component was destroyed before initialization completed.</exception>
+        async Task InitializeSongStorageAsync(CancellationToken cancellationToken)
         {
+            var listConfig = MajEnv.RuntimeConfig.List;
+            var selectedDir = listConfig.SelectedDir;
+            var dirId = listConfig.SelectedDirGuid;
+            var selectedIndex = listConfig.SelectedSongIndex;
+            var selectedSongHash = listConfig.SelectedSongHash;
             var progress = new Progress<string>();
             progress.ProgressChanged += (o, e) =>
             {
-                _echoText.text = e;
+                if (!cancellationToken.IsCancellationRequested)
+                {
+                    _echoText.text = e;
+                }
             };
-            await Task.Delay(3000);
-            await SongStorage.InitAsync(progress);
+            await Task.Delay(3000, cancellationToken);
+            await SongStorage.InitAsync(cancellationToken);
+            await SongStorage.RefreshLocal(progress, cancellationToken);
+            await SongStorage.RefreshOnline(progress, cancellationToken);
 
             if (!SongStorage.IsEmpty)
             {
-                var listConfig = MajEnv.RuntimeConfig.List;
-                var dirId = listConfig.SelectedDirGuid;
-                var selectedSongHash = listConfig.SelectedSongHash;
+                // Restore saved identities after both sources are available, not from an intermediate refresh cursor.
+                listConfig.SelectedDir = selectedDir;
                 var isDirMatched = false;
 
                 if (dirId != Guid.Empty)
@@ -171,7 +192,6 @@ namespace MajdataPlay.Scenes.Title
                 SongStorage.CollectionIndex = listConfig.SelectedDir;
                 listConfig.SelectedDir = SongStorage.CollectionIndex;
                 var selectedCollection = SongStorage.WorkingCollection;
-                var selectedIndex = listConfig.SelectedSongIndex;
                 listConfig.SelectedDirGuid = selectedCollection.Id;
 
                 if (isDirMatched && !string.IsNullOrEmpty(selectedSongHash))
@@ -186,6 +206,7 @@ namespace MajdataPlay.Scenes.Title
                 if (selectedCollection.IsEmpty)
                 {
                     listConfig.SelectedSongIndex = 0;
+                    listConfig.SelectedSongHash = string.Empty;
                     return;
                 }
                 else if (selectedIndex >= selectedCollection.Count)
@@ -197,6 +218,8 @@ namespace MajdataPlay.Scenes.Title
                 {
                     selectedCollection.Index = selectedIndex;
                 }
+                listConfig.SelectedSongIndex = selectedCollection.Index;
+                listConfig.SelectedSongHash = selectedCollection.Current.Hash;
             }
         }
 

@@ -537,6 +537,7 @@ namespace MajdataPlay.Scenes.List
             _isExited = true;
             RefreshListBackgroundAsync();
         }
+        /// <summary>Refreshes local collections, online collections, and online favorites before returning to the list scene.</summary>
         static async void RefreshListBackgroundAsync()
         {
             var sceneSwitcher = MajInstances.SceneSwitcher;
@@ -555,12 +556,17 @@ namespace MajdataPlay.Scenes.List
             {
                 MajInstances.SceneSwitcher.SetLoadingText(e);
             };
-            var refreshTask = SongStorage.RefreshAsync(progress);
-            while(!refreshTask.IsCompleted)
+            var localRefreshTask = SongStorage.RefreshLocal(progress);
+            while (!localRefreshTask.IsCompleted)
             {
                 await UniTask.Yield();
             }
-            var isListRefreshSuccessful = refreshTask.IsCompletedSuccessfully;
+            var onlineRefreshTask = SongStorage.RefreshOnline(progress);
+            while (!onlineRefreshTask.IsCompleted)
+            {
+                await UniTask.Yield();
+            }
+            var isListRefreshSuccessful = localRefreshTask.IsCompletedSuccessfully && onlineRefreshTask.IsCompletedSuccessfully;
             if (!isListRefreshSuccessful)
             {
                 sceneSwitcher.SetLoadingText("MAJTEXT_ERR_SCAN_CHARTS_FAILED".i18n(), Color.red);

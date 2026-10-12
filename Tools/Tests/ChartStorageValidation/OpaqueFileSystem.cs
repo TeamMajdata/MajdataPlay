@@ -4,6 +4,7 @@ using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Threading;
 using MajdataPlay.IO.Storage;
 
 namespace MajdataPlay.Tests.ChartStorageValidation
@@ -14,6 +15,10 @@ namespace MajdataPlay.Tests.ChartStorageValidation
     {
         /// <summary>Owns the native storage implementation used exclusively behind this backend.</summary>
         private readonly IFileSystem _native;
+        /// <summary>Defines the opaque URI scheme used by this fixture backend.</summary>
+        private readonly string _locationPrefix;
+        /// <summary>Counts every attempted backend operation, including rejected access.</summary>
+        private int _accessCount;
         /// <summary>Maps opaque locations to their fixture-owned native paths.</summary>
         private readonly ConcurrentDictionary<string, string> _locations = new ConcurrentDictionary<string, string>(StringComparer.Ordinal);
         /// <summary>Keeps each native fixture entry's opaque location stable across refreshes.</summary>
@@ -28,13 +33,19 @@ namespace MajdataPlay.Tests.ChartStorageValidation
         public ConcurrentDictionary<string, bool> SymbolicLinks { get; } = new ConcurrentDictionary<string, bool>(StringComparer.Ordinal);
         /// <summary>Gets or sets whether native enumeration order should be reversed.</summary>
         public bool ReverseEnumeration { get; set; }
+        /// <summary>Gets or sets whether every backend operation must fail to detect cross-source I/O.</summary>
+        public bool RejectAccess { get; set; }
+        /// <summary>Gets the total attempted backend operations.</summary>
+        public int AccessCount => Volatile.Read(ref _accessCount);
         /// <summary>Gets the opaque fixture root.</summary>
         public StorageDirectory Root { get; }
 
         /// <summary>Creates an opaque provider over one test-owned local fixture tree.</summary>
         /// <param name="rootPath">The existing ignored fixture directory.</param>
-        public OpaqueFileSystem(string rootPath)
+        /// <param name="useContentUris">Whether to mint content URIs that can be explicitly registered for root-refresh tests.</param>
+        public OpaqueFileSystem(string rootPath, bool useContentUris = false)
         {
+            _locationPrefix = useContentUris ? "content://chart-validation/document/" : "chart-validation://unregistered/document/";
             var root = FileSystem.Directory.Open(rootPath);
             _native = root.FileSystem;
             Root = Open(rootPath);
@@ -176,9 +187,14 @@ namespace MajdataPlay.Tests.ChartStorageValidation
         /// <summary>Resolves only locations minted by this specific backend instance.</summary>
         /// <param name="location">The opaque provider location.</param>
         /// <returns>The native path hidden behind this backend.</returns>
-        /// <exception cref="IOException">The location does not belong to this backend.</exception>
+        /// <exception cref="IOException">Access is rejected or the location does not belong to this backend.</exception>
         private string Resolve(string location)
         {
+            Interlocked.Increment(ref _accessCount);
+            if (RejectAccess)
+            {
+                throw new IOException("The online refresh attempted to access the retained local filesystem.");
+            }
             if (!_locations.TryGetValue(location, out var path))
             {
                 throw new IOException("The scanner used a location not owned by its original opaque backend.");
@@ -193,7 +209,7 @@ namespace MajdataPlay.Tests.ChartStorageValidation
         {
             return _paths.GetOrAdd(path, nativePath =>
             {
-                var location = "chart-validation://unregistered/document/" + Guid.NewGuid().ToString("N") + "%2Fopaque";
+                var location = _locationPrefix + Guid.NewGuid().ToString("N") + "%2Fopaque";
                 _locations[location] = nativePath;
                 return location;
             });

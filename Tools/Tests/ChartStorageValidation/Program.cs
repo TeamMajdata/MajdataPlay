@@ -16,15 +16,18 @@ namespace MajdataPlay.Tests.ChartStorageValidation
     internal static partial class Program
     {
         /// <summary>Runs every managed regression group with test-owned storage fixtures.</summary>
+        /// <param name="arguments">Selects the isolated online-first scenario when requested by the parent runner.</param>
         /// <returns>Zero after all cases pass, or one when any case fails.</returns>
-        private static async Task<int> Main()
+        private static async Task<int> Main(string[] arguments)
         {
             var workspacePath = Path.GetFullPath(Path.Combine(NativeDirectory.GetCurrentDirectory(), "Temp", "ChartStorageValidation", "Workspace"));
             var rootPath = Path.Combine(workspacePath, Guid.NewGuid().ToString("N"));
             NativeDirectory.CreateDirectory(rootPath);
             try
             {
-                var cases = new (string Name, Func<Task> Run)[]
+                var cases = arguments.Contains("--online-first", StringComparer.Ordinal)
+                    ? new (string Name, Func<Task> Run)[] { ("standalone online first refresh", () => TestOnlineFirstRefresh(rootPath)) }
+                    : new (string Name, Func<Task> Run)[]
                 {
                     ("collection identity", () => RunSynchronousCase(() => TestCollectionIdentity(rootPath))),
                     ("collection marker collision", () => RunSynchronousCase(() => TestCollectionMarkerCollision(rootPath))),
@@ -39,7 +42,9 @@ namespace MajdataPlay.Tests.ChartStorageValidation
                     ("root collection scheduling", () => TestLocalRootScheduling(rootPath)),
                     ("storage snapshot commit", () => TestStorageSnapshotCommit(rootPath)),
                     ("online cache directories", () => TestOnlineCacheDirectories(rootPath)),
-                    ("retained online origins", () => TestRetainedOnlineOrigins(rootPath))
+                    ("retained online origins", () => TestRetainedOnlineOrigins(rootPath)),
+                    ("standalone online first refresh", RunOnlineFirstProcessAsync),
+                    ("independent source refreshes", () => TestIndependentSourceRefresh(rootPath))
                 };
                 var failedCases = 0;
                 foreach (var testCase in cases)

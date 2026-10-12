@@ -106,7 +106,7 @@ namespace MajdataPlay.Tests.ChartStorageValidation
             try
             {
                 SongDetail.Probe = new ParseProbe();
-                await SongStorage.RefreshLocalAsync();
+                await SongStorage.RefreshLocal();
                 var all = SongStorage.Collections.Single(collection => collection.Name == "All");
                 var newLocal = all.Single(song => song.Hash == "other");
                 var reboundPlaylist = SongStorage.Collections.OfType<OnlineSongCollection>().Single(collection => collection.Id == playlistId);
@@ -126,13 +126,13 @@ namespace MajdataPlay.Tests.ChartStorageValidation
                 var savedMetadata = metadataFile.ReadAllText();
                 metadataFile.Delete();
                 SongDetail.Probe = new ParseProbe();
-                await SongStorage.RefreshLocalAsync();
+                await SongStorage.RefreshLocal();
                 var partialPlaylist = SongStorage.Collections.OfType<OnlineSongCollection>().Single(collection => collection.Id == playlistId);
                 Require(partialPlaylist.GetOriginSnapshot().Select(song => song.Hash).SequenceEqual(new[] { "remote-visible" })
                     && partialPlaylist.Definition!.SongHashs.SequenceEqual(new[] { "other", "remote-visible" }) && partialPlaylist.DanInfo is null,
                     "Partial missing songs must not shrink the full online playlist definition or expose playlist DanInfo.");
                 localDirectory.CreateFile("maidata.txt", "text/plain").WriteAllText(savedMetadata);
-                await SongStorage.RefreshLocalAsync();
+                await SongStorage.RefreshLocal();
                 var restoredPlaylist = SongStorage.Collections.OfType<OnlineSongCollection>().Single(collection => collection.Id == playlistId);
                 Require(restoredPlaylist.GetOriginSnapshot().Select(song => song.Hash).SequenceEqual(new[] { "other", "remote-visible" }),
                     "Reimporting a previously missing local chart must restore all requested online playlist hashes.");
@@ -140,7 +140,7 @@ namespace MajdataPlay.Tests.ChartStorageValidation
                 localDirectory.FindFile("maidata.txt")!.Delete();
                 var emptyBase = new OnlineSongCollection(endpoint, cache, retained.Name, Array.Empty<ISongDetail>()) { Id = retained.Id };
                 collectionsProperty.SetValue(null, SongStorage.Collections.Select(collection => ReferenceEquals(collection, retained) ? emptyBase : collection).ToArray());
-                await SongStorage.RefreshLocalAsync();
+                await SongStorage.RefreshLocal();
                 var emptyPlaylist = SongStorage.Collections.OfType<OnlineSongCollection>().Single(collection => collection.Id == playlistId);
                 var emptyCourse = SongStorage.Collections.OfType<OnlineSongCollection>().Single(collection => collection.Id == courseId);
                 Require(emptyPlaylist.IsEmpty && emptyPlaylist.Definition!.SongHashs.SequenceEqual(new[] { "other", "remote-visible" }) && emptyPlaylist.DanInfo is null,
@@ -155,7 +155,7 @@ namespace MajdataPlay.Tests.ChartStorageValidation
                 retained = new OnlineSongCollection(endpoint, cache, retained.Name, new ISongDetail[] { remoteVisible, remoteHidden }) { Id = retained.Id };
                 retained.SortAndFilter(new SongOrder { Keyword = "no-match" });
                 collectionsProperty.SetValue(null, SongStorage.Collections.Select(collection => ReferenceEquals(collection, emptyBase) ? retained : collection).ToArray());
-                await SongStorage.RefreshLocalAsync();
+                await SongStorage.RefreshLocal();
                 all = SongStorage.Collections.Single(collection => collection.Name == "All");
                 newLocal = all.Single(song => song.Hash == "other");
                 var fullyRestoredPlaylist = SongStorage.Collections.OfType<OnlineSongCollection>().Single(collection => collection.Id == playlistId);
