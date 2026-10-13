@@ -73,9 +73,9 @@ namespace MajdataPlay
 #if UNITY_ANDROID && !UNITY_EDITOR // Android Only (Sdk Version Log)
             MajDebug.LogInfo($"AndroidSdkVersion: {MajEnv.AndroidSdkVersion}");
             MajDebug.LogInfo($"TargetSdkVersion: {MajEnv.TargetSdkVersion}");
-            using var packageManager = AndroidRuntime.CurrentActivity.Call<AndroidJavaObject>("getPackageManager");
-            var packageName = AndroidRuntime.CurrentActivity.Call<string>("getPackageName");
-            using var packageInfo = packageManager.Call<AndroidJavaObject>("getPackageInfo", packageName, 0);
+            using var packageManager = AndroidRuntime.CurrentActivity.GetPackageManager();
+            var packageName = AndroidRuntime.CurrentActivity.GetPackageName();
+            using var packageInfo = packageManager!.Call<AndroidJavaObject>("getPackageInfo", packageName, 0);
             var androidVersionCode = 0L;
             if(MajEnv.AndroidSdkVersion >= 28)
             {
@@ -370,7 +370,7 @@ namespace MajdataPlay
         {
             GC.Collect();
 #if (UNITY_ANDROID || UNITY_IOS) && !UNITY_EDITOR //Android/iOS Only (GC Enable)
-            GarbageCollector.GCMode = GarbageCollector.Mode.Enabled;
+            UnityEngine.Scripting.GarbageCollector.GCMode = UnityEngine.Scripting.GarbageCollector.Mode.Enabled;
             MajDebug.LogWarning("GC has been enabled");
 #endif
         }
@@ -378,7 +378,7 @@ namespace MajdataPlay
         {
             GC.Collect();
 #if (UNITY_ANDROID || UNITY_IOS) && !UNITY_EDITOR //Android/iOS Only (GC Disable)
-            GarbageCollector.GCMode = GarbageCollector.Mode.Disabled;
+            UnityEngine.Scripting.GarbageCollector.GCMode = UnityEngine.Scripting.GarbageCollector.Mode.Disabled;
             MajDebug.LogWarning("GC has been disabled");
 #endif
         }

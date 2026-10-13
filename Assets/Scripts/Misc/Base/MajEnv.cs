@@ -241,8 +241,8 @@ namespace MajdataPlay
             var versionClass = AndroidJNI.FindClass("android/os/Build$VERSION");
             var fieldID = AndroidJNI.GetStaticFieldID(versionClass, "SDK_INT", "I");
             AndroidSdkVersion = AndroidJNI.GetStaticIntField(versionClass, fieldID);
-            var appInfo = AndroidRuntime.CurrentActivity.Call<AndroidJavaObject>("getApplicationInfo");
-            TargetSdkVersion = appInfo.Get<int>("targetSdkVersion");
+            var appInfo = AndroidRuntime.CurrentActivity.GetApplicationInfo();
+            TargetSdkVersion = appInfo!.Get<int>("targetSdkVersion");
 
             if (AndroidSdkVersion < 30 || TargetSdkVersion < 30) // < Android 11
             {

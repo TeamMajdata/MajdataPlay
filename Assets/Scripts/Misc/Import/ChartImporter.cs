@@ -1,4 +1,7 @@
-﻿using Cysharp.Threading.Tasks;
+﻿#if UNITY_ANDROID && !UNITY_EDITOR
+#define ANDROID_RUNTIME
+#endif
+using Cysharp.Threading.Tasks;
 using MajdataPlay.Diagnostics;
 using MajdataPlay.IO.Storage;
 #if UNITY_ANDROID
@@ -14,10 +17,6 @@ using System.IO;
 using System.IO.Compression;
 using System.Threading.Tasks;
 using UnityEngine;
-
-#if UNITY_ANDROID && !UNITY_EDITOR
-#define ANDROID_RUNTIME
-#endif
 
 #nullable enable
 namespace MajdataPlay.Import
