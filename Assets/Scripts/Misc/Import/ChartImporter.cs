@@ -65,10 +65,10 @@ namespace MajdataPlay.Import
             Folder,
         }
 
-        /// <summary>Matches the archive shortcut action declared in <c>res/xml/shortcuts.xml</c>.</summary>
+        /// <summary>Matches the archive shortcut action declared in the shortcuts Android Library plug-in manifest.</summary>
         private const string ImportArchiveAction = "net.majdata.majdataplay.action.IMPORT_ARCHIVE";
 
-        /// <summary>Matches the folder shortcut action declared in <c>res/xml/shortcuts.xml</c>.</summary>
+        /// <summary>Matches the folder shortcut action declared in the shortcuts Android Library plug-in manifest.</summary>
         private const string ImportFolderAction = "net.majdata.majdataplay.action.IMPORT_FOLDER";
 
         /// <summary>Stores the shortcut import whose picker has not been shown yet.</summary>
