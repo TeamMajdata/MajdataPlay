@@ -35,7 +35,14 @@ namespace MajdataPlay.Tests.AndroidJavaWrapperGeneratorValidation
                 Directory.CreateDirectory(workspace);
                 try
                 {
-                    if (settings.SdkOnly)
+                    VerifyUnityArchives(settings, workspace);
+                    VerifyEditorOutput(workspace);
+                    VerifyEditorRefresh(settings, workspace);
+                    if (settings.EditorInputsOnly)
+                    {
+                        VerifyProjectJavaInputs(settings, workspace);
+                    }
+                    else if (settings.SdkOnly)
                     {
                         VerifyFullSdk(settings, workspace);
                     }

@@ -36,7 +36,7 @@ using MajdataPlay.Platform.Android;
 
 #nullable enable
 
-namespace MajdataPlay.Platform.Android.Bindings
+namespace MajdataPlay.Platform.Android.Runtime.Bindings
 {
     /// <summary>
     /// Provides the installed SDK's Android build-version fields.
@@ -112,7 +112,7 @@ using MajdataPlay.Platform.Android;
     ClassPath = new[] { "ThirdParty/ExampleApi/dependencies.jar" },
     DocumentationPaths = new[] { "ThirdParty/ExampleApi/sources.zip" })]
 
-namespace MajdataPlay.Platform.Android.Bindings
+namespace MajdataPlay.Platform.Android.Runtime.Bindings
 {
     /// <summary>
     /// Calls the Java API packaged independently in the Android player.
@@ -311,17 +311,19 @@ using var intent = new IntentWrapper();
 
 ## 输入刷新
 
-Unity 不会追踪 analyzer 自行读取的外部文件。Android Editor companion 对
-`Assets` 内 `.java` / `.class` / `.jar` 的导入、删除、移动合并触发一次
-带 `CleanBuildCache` 的 C# compilation，防止 Unity/Bee 直接复用未改变 C#
-输入的旧编译产物。外部文件、SDK 或 JDK 改动后使用菜单：
+Unity 不会追踪 analyzer 自行读取的外部文件。现有注解 wrapper 的外部
+Java/SDK/JDK 输入变更需要让该程序集重新执行 C# 编译；可以修改对应
+wrapper 的 C# 声明，或通过 Unity 的 CompilationPipeline 请求带
+`CleanBuildCache` 的编译。复用旧 Roslyn driver 或被 Unity build cache
+跳过的编译请求不能保证读取新的外部输入。
 
-`Tools → MajdataPlay → Android → Regenerate Java wrappers`
-
-也可以修改 wrapper C# source 触发新的编译输入。单纯复用旧 Roslyn driver、
-或触发被 Unity build cache 跳过的普通编译请求，不能保证刷新；使用上述菜单。
-没有实际 C# recompilation 时，不应认为
-外部 Java 输入已经刷新。
+当前 Editor 菜单 `Tools → MajdataPlay → Android → Regenerate Java wrappers`
+已改为调用独立的 `Tools/CSharp/AndroidJavaWrapperGenerator` CLI。它输出
+全量 SDK/BCL、`Assets/Plugins/Android` 及当前 Unity Java 的实体 C# 文件，
+使用独立的 `MajdataPlay.Platform.Android.Runtime.Bindings` 命名空间。Java 插件
+资产变化自动合并触发生成，并复用已有官方文档缓存；该菜单不再只请求旧 analyzer 的
+缓存清理。现有注解 wrapper 仍需独立安装本 analyzer。详见 Android
+运行时 README 和新 CLI README。
 
 ## 验证与明确限制
 

@@ -37,7 +37,8 @@ dotnet publish Tools/CSharp/AndroidJavaWrapperGenerator/AndroidJavaWrapperGenera
 dotnet run --project Tools/CSharp/AndroidJavaWrapperGenerator/AndroidJavaWrapperGenerator.csproj -- --sdk "C:/Program Files/Unity Editors/6000.3.17f1/Editor/Data/PlaybackEngines/AndroidPlayer/SDK" --namespace Example.Bindings --output Temp/AndroidJavaWrappers
 ~~~
 
-The default root namespace is MajdataPlay.Platform.Android.Bindings.
+The CLI default root namespace is MajdataPlay.Platform.Android.Bindings.
+The project Editor integration explicitly uses MajdataPlay.Platform.Android.Runtime.Bindings.
 The default exports every publicly accessible, nonsynthetic type in the chosen
 platform's android.jar, including Android's Java BCL and boxed primitive types.
 It does not merge in desktop-only JDK APIs. Without --sdk, SDK discovery searches
@@ -173,6 +174,43 @@ files are tracked by java-wrappers.manifest.json using content hashes. Re-runnin
 the CLI updates unchanged generated files and removes only unchanged stale files
 owned by its previous manifest. It refuses to overwrite handwritten or modified
 files; choose a fresh destination if you intend to discard such changes.
+
+Android library archives (`.aar`) are also supported as inputs. Pure C# ZIP
+analysis reads `classes.jar` and direct `libs/*.jar` entries, with shared entry
+and byte limits. Resources and native libraries are not treated as Java classes.
+
+## Unity Editor integration
+
+The project menu **Tools > MajdataPlay > Android > Regenerate Java wrappers**
+builds this CLI with .NET 9 and launches its compiled DLL in the background. It
+uses the current Editor's SDK configuration, project Java inputs from
+`Assets/Plugins/Android`, Unity Android player sources, and the selected Unity
+runtime `classes.jar`. Unity GameActivity and available transitive dependencies
+are located in the Gradle module cache (`GRADLE_USER_HOME`, or the user `.gradle`
+directory). Literal project/Editor Gradle template versions take precedence; when
+no matching cached version is available, the newest stable cached version is used
+with a Console notice. Explicit plugin archives take precedence. A missing
+GameActivity dependency keeps every Unity source in the request and gives an
+actionable diagnostic; resolve the Android Gradle dependencies once, or supply the
+official dependency AAR/JARs under `Assets/Plugins/Android`. The CLI continues to
+be independent of the old analyzer.
+
+The menu generates the full SDK/BCL with online official English documentation.
+Java asset changes automatically queue a refresh with official documentation;
+existing cached pages are reused and only missing pages are fetched.
+The cached-documentation menu also permits an explicit offline run. Generation
+runs outside Assets and is published only on success. The destination is
+`Assets/Plugins/MajdataPlay/Platform/Android/Generated`, with the namespace root
+`MajdataPlay.Platform.Android.Runtime.Bindings`. Output ownership is checked again before
+publication, preserving custom files and the GUIDs of retained Unity assets.
+The generated directory and tool `.work` caches and process logs are local and
+ignored by Git. Console display is budgeted per Editor update; complete process
+diagnostics are retained in `.work/editor-logs`.
+
+Cancel from the Android tools menu or the Editor progress indicator. Queued work
+survives script domain reloads. The existing handwritten annotated wrappers
+continue to use the separately installed old analyzer until their consumers are
+migrated; this menu refreshes the independent full binding set.
 
 ## Source analysis boundary
 

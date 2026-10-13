@@ -31,6 +31,17 @@ Compile the complete SDK API with no Java tool requirement:
 dotnet run --project Tools/Tests/AndroidJavaWrapperGeneratorValidation/AndroidJavaWrapperGeneratorValidation.csproj -- --sdk-only
 ~~~
 
+Validate the actual complete SDK together with all project and Unity Java inputs,
+and the Editor command and publication helpers, without launching Java tools:
+
+~~~powershell
+dotnet run --project Tools/Tests/AndroidJavaWrapperGeneratorValidation/AndroidJavaWrapperGeneratorValidation.csproj -- --editor-inputs
+~~~
+
+This mode also requires the Unity GameActivity dependency metadata in the local
+Gradle module cache, or supplied as an Android plugin dependency. It preserves
+both Unity Activity source declarations rather than substituting a stub.
+
 Run all source regressions and complete SDK compilation together:
 
 ~~~powershell
@@ -53,6 +64,29 @@ ordinary validation never needs network access. To also validate downloaded
 real official pages, place android-uri.html and oracle-integer.html in an ignored
 directory and pass --official-samples DIRECTORY. That validation compares the
 HTML with actual SDK metadata and compiles the documented output in both branches.
+
+## Isolated Unity Editor validation
+
+Run the real background CLI refresh with the repository-pinned Unity Editor:
+
+~~~powershell
+./Tools/Tests/ValidateAndroidJavaWrapperRefreshUnity.ps1
+~~~
+
+The PowerShell 7 script creates a new ignored `.work/native-editor-*` project,
+stages the production Editor sources and asmdef boundaries, and copies the
+project Java inputs and independent CLI sources. Use `-UnityPath` for another
+installation of the exact required version. It never opens or builds the main
+game project. The Gradle dependency prerequisites above still apply.
+
+The smoke cancels a directly running CLI, reruns full generation with cached
+documentation, waits for actual Unity asset import and binding assembly loading,
+then repeats the refresh and checks that a generated source keeps its GUID and
+timestamp. Deep staging/package paths exercise the Windows Unity Mono extended
+path support. The script requires the success marker and rejects C# compiler
+errors even if the Editor process exits with zero. Project and logs stay in
+`.work` for inspection. This validates the Editor workflow, without JNI execution
+or an Android Player build.
 
 ## Coverage
 
@@ -78,6 +112,12 @@ HTML with actual SDK metadata and compiles the documented output in both branche
   the actual pinned Unity modules, with and without UNITY_ANDROID.
 - Pure managed MapArray/Wrap contracts and non-Android guards, with no invented
   JNI pointers or fake Java references.
+- Editor request path discovery and argument quoting, real Unity Editor API
+  compilation, import coalescing, online/cache request selection, cancellation,
+  and persisted pending requests using narrow managed lifecycle substitutes.
+- Editor output publication from the CLI manifest, unchanged timestamps, Unity
+  metadata retention, stale asset/metadata cleanup, modified-file conflicts,
+  invalid manifests, and corrupt staged outputs before destination writes.
 - CLI errors, cancellation, malformed class files, output traversal rejection,
   regeneration ownership, stale generated cleanup, and handwritten extensions.
 

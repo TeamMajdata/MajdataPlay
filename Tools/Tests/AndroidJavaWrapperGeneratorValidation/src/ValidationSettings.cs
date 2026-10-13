@@ -26,6 +26,9 @@ namespace MajdataPlay.Tests.AndroidJavaWrapperGeneratorValidation
         /// <summary>Gets or sets whether only full bytecode SDK compilation is requested.</summary>
         internal bool SdkOnly { get; set; }
 
+        /// <summary>Gets or sets whether only real Editor inputs and managed Editor integration are validated.</summary>
+        internal bool EditorInputsOnly { get; set; }
+
         /// <summary>Gets or sets the directory containing downloaded official HTML validation samples.</summary>
         internal string? OfficialSamples { get; set; }
 
@@ -40,6 +43,12 @@ namespace MajdataPlay.Tests.AndroidJavaWrapperGeneratorValidation
             for (var i = 0; i < arguments.Length; i++)
             {
                 var option = arguments[i];
+                if (option == "--editor-inputs")
+                {
+                    settings.EditorInputsOnly = true;
+                    continue;
+                }
+
                 if (option == "--sdk-only")
                 {
                     settings.SdkOnly = true;
@@ -97,7 +106,7 @@ namespace MajdataPlay.Tests.AndroidJavaWrapperGeneratorValidation
                 settings.NetStandardReferences = Path.Combine(dotnetRoot, "packs", "NETStandard.Library.Ref", "2.1.0", "ref", "netstandard2.1");
             }
 
-            foreach (var directory in (settings.SdkOnly ? new[] { settings.UnityData, settings.Sdk, settings.NetStandardReferences } : new[] { settings.UnityData, settings.Sdk, settings.Jdk, settings.NetStandardReferences }))
+            foreach (var directory in (settings.SdkOnly || settings.EditorInputsOnly ? new[] { settings.UnityData, settings.Sdk, settings.NetStandardReferences } : new[] { settings.UnityData, settings.Sdk, settings.Jdk, settings.NetStandardReferences }))
             {
                 if (!Directory.Exists(directory))
                 {

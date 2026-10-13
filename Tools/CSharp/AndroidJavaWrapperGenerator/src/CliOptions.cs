@@ -19,7 +19,7 @@ Usage:
 Options:
   --sdk DIRECTORY          Android SDK root (defaults to Unity/environment discovery).
   --api-level NUMBER       Installed stable API level (defaults to highest installed).
-  --input FILE             Add .java, .class, or .jar input; repeat for multiple inputs.
+  --input FILE             Add .java, .class, .jar, or .aar input; repeat for multiple inputs.
   --namespace NAME         Root namespace (default: MajdataPlay.Platform.Android.Bindings).
   --output DIRECTORY       Destination for C# sources and the ownership manifest.
   --include-package NAME   Export a package and subpackages plus API dependencies; repeat.

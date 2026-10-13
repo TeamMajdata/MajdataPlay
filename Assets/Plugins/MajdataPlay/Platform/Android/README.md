@@ -1,5 +1,59 @@
 # Android Java wrappers
 
+## Editor refresh with the standalone CLI
+
+Use **Tools > MajdataPlay > Android > Regenerate Java wrappers** to build and run
+`Tools/CSharp/AndroidJavaWrapperGenerator` in the background. This command exports
+the complete public Android SDK and Android Java BCL, all supported Java inputs
+under `Assets/Plugins/Android`, and the current Editor's Android player Java
+sources and runtime class archive. The SDK comes from Unity's Android External
+Tools setting, with the bundled SDK as the fallback. The highest installed stable
+API is selected; generation does not change the Player minimum SDK.
+
+Generated sources go to `Assets/Plugins/MajdataPlay/Platform/Android/Generated`,
+with the root namespace `MajdataPlay.Platform.Android.Runtime.Bindings`. For example,
+`android.net.Uri` becomes `MajdataPlay.Platform.Android.Runtime.Bindings.Android.Net.Uri`.
+This complete binding set can coexist with the existing annotated wrappers below.
+The CLI and its generated JNI helpers do not reference the legacy source generator.
+The local output and documentation cache are ignored by Git.
+
+The manual command downloads and caches official English SDK/BCL documentation.
+**Regenerate Java wrappers (cached documentation)** uses that cache without HTTP.
+Imports, deletions, and moves of Java sources, class files, JARs, or AARs under
+`Assets/Plugins/Android` queue the documented refresh automatically. Cached
+pages are reused; only missing documentation is fetched.
+Multiple changes are coalesced, and changes made during a running command queue
+one follow-up. External Unity/SDK changes require the manual command. Use
+**Cancel Java wrapper generation**, or the Editor progress indicator, to stop it.
+
+The Editor builds only the independent .NET 9 tool, then runs its DLL directly.
+It waits for a successful generation outside Assets before publishing and
+refreshing Unity. Changed generated files retain their existing `.meta` GUIDs;
+unchanged files are not rewritten, and stale owned sources are removed together
+with their metadata. Handwritten files and modified generated files are protected
+by the generator ownership manifest. Put custom partial extensions outside the
+local generated directory so that they remain tracked. A script domain reload
+stops the current command and restores its queued request in the next domain.
+
+.NET 9 and Android Build Support are required. No Java compiler or bytecode tool
+is invoked by this refresh command. Unity GameActivity dependency metadata is
+read from `GRADLE_USER_HOME` (or the user `.gradle` module cache); resolve the
+Android Gradle dependencies once or supply the official AAR/JAR dependencies
+under `Assets/Plugins/Android`. AAR runtime JARs are analyzed directly in C#.
+Explicit plugin inputs take precedence, and selected fallback cache versions
+are reported in the Console. Tool-local `.work/editor-logs` retain full CLI
+diagnostics; Console display is budgeted per Editor update. A failed build or
+CLI generation does not replace the imported bindings. See the independent CLI
+README for source-analysis limits, optional inputs, and JNI/runtime limits.
+
+Run `Tools/Tests/ValidateAndroidJavaWrapperRefreshUnity.ps1` for isolated
+validation of the new refresh workflow in the pinned Unity Editor. The smoke
+checks real process cancellation, full generation/import/compilation, repeat
+refresh GUID/timestamp preservation, and deeply nested package paths. It does not
+execute JNI or build the main game.
+
+## Existing annotated wrappers
+
 The `JavaClassAttribute` and `JavaApiConfigurationAttribute` request generated
 `JavaObject`-derived wrappers for Java classes and interfaces. The generator
 is authored outside Assets and installed as an analyzer, not as a runtime plugin.

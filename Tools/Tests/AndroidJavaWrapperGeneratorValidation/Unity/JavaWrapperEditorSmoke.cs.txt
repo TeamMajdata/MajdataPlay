@@ -1,0 +1,135 @@
+using System;
+using System.IO;
+using System.Reflection;
+using UnityEditor;
+using UnityEngine;
+
+#nullable enable
+
+namespace MajdataPlay.Tests.AndroidJavaWrapperGeneratorValidation.Unity
+{
+    /// <summary>Exercises the production background CLI refresh in an isolated pinned Unity Editor project.</summary>
+    internal static class JavaWrapperEditorSmoke
+    {
+        /// <summary>Identifies progress persisted across the generated C# domain reload.</summary>
+        private const string ActiveKey = "JavaWrapperEditorSmoke.Active";
+        /// <summary>Records the UTC timeout boundary persisted across domain reload.</summary>
+        private const string StartedKey = "JavaWrapperEditorSmoke.Started";
+        /// <summary>Starts the real cached-documentation menu action and installs a completion observer.</summary>
+        public static void Run()
+        {
+            SessionState.SetBool(ActiveKey, true);
+            SessionState.SetInt("JavaWrapperEditorSmoke.Phase", 1);
+            SessionState.SetString(StartedKey, DateTime.UtcNow.Ticks.ToString());
+            var refresh = FindRefresh();
+            refresh.GetMethod("CancelGeneration", BindingFlags.NonPublic | BindingFlags.Static)!.Invoke(null, null);
+            refresh.GetMethod("RegenerateOffline", BindingFlags.NonPublic | BindingFlags.Static)!.Invoke(null, null);
+            EditorApplication.update -= Check;
+            EditorApplication.update += Check;
+            Debug.Log("EDITOR_WRAPPER_SMOKE_STARTED");
+        }
+        /// <summary>Restores the smoke observer after generated assets trigger a script reload.</summary>
+        [InitializeOnLoadMethod]
+        private static void Resume()
+        {
+            if (SessionState.GetBool(ActiveKey, false))
+            {
+                EditorApplication.update -= Check;
+                EditorApplication.update += Check;
+            }
+        }
+        /// <summary>Returns the imported production refresh controller type.</summary>
+        /// <returns>The controller type in the isolated project assembly.</returns>
+        private static Type FindRefresh()
+        {
+            foreach (var assembly in AppDomain.CurrentDomain.GetAssemblies())
+            {
+                var type = assembly.GetType("MajdataPlay.Platform.Android.Editor.JavaWrapperRefresh");
+                if (type != null)
+                {
+                    return type;
+                }
+            }
+            throw new InvalidOperationException("Production Editor refresh type was not imported.");
+        }
+        /// <summary>Completes only after generation, publication, importing, and script compilation are idle.</summary>
+        private static void Check()
+        {
+            if (!SessionState.GetBool(ActiveKey, false))
+            {
+                return;
+            }
+            var started = new DateTime(long.Parse(SessionState.GetString(StartedKey, "0")), DateTimeKind.Utc);
+            if (DateTime.UtcNow - started > TimeSpan.FromMinutes(8))
+            {
+                Debug.LogError("EDITOR_WRAPPER_SMOKE_TIMEOUT");
+                EditorApplication.Exit(2);
+                return;
+            }
+            var refresh = FindRefresh();
+            var running = refresh.GetField("s_process", BindingFlags.NonPublic | BindingFlags.Static)!.GetValue(null) != null;
+            var pending = (bool)refresh.GetField("s_refreshPending", BindingFlags.NonPublic | BindingFlags.Static)!.GetValue(null)!;
+            var phase = SessionState.GetInt("JavaWrapperEditorSmoke.Phase", 0);
+            var building = (bool)refresh.GetField("s_building", BindingFlags.NonPublic | BindingFlags.Static)!.GetValue(null)!;
+            if (phase == 1 && running && !building)
+            {
+                refresh.GetMethod("CancelGeneration", BindingFlags.NonPublic | BindingFlags.Static)!.Invoke(null, null);
+                refresh.GetMethod("RegenerateOffline", BindingFlags.NonPublic | BindingFlags.Static)!.Invoke(null, null);
+                SessionState.SetInt("JavaWrapperEditorSmoke.Phase", 2);
+                Debug.Log("EDITOR_WRAPPER_SMOKE_CANCELED_FIRST_CLI");
+                return;
+            }
+            var generated = Path.Combine(Application.dataPath, "Plugins/MajdataPlay/Platform/Android/Generated");
+            if (Environment.OSVersion.Platform == PlatformID.Win32NT)
+            {
+                generated = @"\\?\" + Path.GetFullPath(generated);
+            }
+            if (running || pending || EditorApplication.isCompiling || EditorApplication.isUpdating
+                || !File.Exists(Path.Combine(generated, "java-wrappers.manifest.json")))
+            {
+                return;
+            }
+            var bindingsLoaded = false;
+            foreach (var assembly in AppDomain.CurrentDomain.GetAssemblies())
+            {
+                if (assembly.GetType("MajdataPlay.Platform.Android.Runtime.Bindings.Android.Net.Uri") != null)
+                {
+                    bindingsLoaded = true;
+                    break;
+                }
+            }
+            if (!bindingsLoaded)
+            {
+                return;
+            }
+            var sourceCount = Directory.GetFiles(generated, "*.cs", SearchOption.AllDirectories).Length;
+            if (sourceCount < 6191 || !File.Exists(Path.Combine(generated, "Com/Unity3d/Player/UnityPlayerActivity.g.cs"))
+                || !File.Exists(Path.Combine(generated, "Net/Majdata/Majdataplay/StorageAccess.g.cs")))
+            {
+                Debug.LogError("EDITOR_WRAPPER_SMOKE_INCOMPLETE: " + sourceCount);
+                EditorApplication.Exit(3);
+                return;
+            }
+            var probe = Path.Combine(generated, "Android/Net/Uri.g.cs");
+            if (phase == 2)
+            {
+                SessionState.SetString("JavaWrapperEditorSmoke.ProbeMeta", File.ReadAllText(probe + ".meta"));
+                SessionState.SetString("JavaWrapperEditorSmoke.ProbeTime", File.GetLastWriteTimeUtc(probe).Ticks.ToString());
+                SessionState.SetInt("JavaWrapperEditorSmoke.Phase", 3);
+                refresh.GetMethod("RegenerateOffline", BindingFlags.NonPublic | BindingFlags.Static)!.Invoke(null, null);
+                Debug.Log("EDITOR_WRAPPER_SMOKE_REPEAT_STARTED");
+                return;
+            }
+            if (File.ReadAllText(probe + ".meta") != SessionState.GetString("JavaWrapperEditorSmoke.ProbeMeta", "")
+                || File.GetLastWriteTimeUtc(probe).Ticks.ToString() != SessionState.GetString("JavaWrapperEditorSmoke.ProbeTime", ""))
+            {
+                Debug.LogError("EDITOR_WRAPPER_SMOKE_ASSET_IDENTITY_CHANGED");
+                EditorApplication.Exit(4);
+                return;
+            }
+            SessionState.SetBool(ActiveKey, false);
+            Debug.Log("EDITOR_WRAPPER_SMOKE_PASS: " + sourceCount + " sources imported and compiled.");
+            EditorApplication.Exit(0);
+        }
+    }
+}

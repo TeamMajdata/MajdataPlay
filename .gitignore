@@ -121,3 +121,8 @@ out.log
 /Tools/Tests/AndroidJavaWrapperGeneratorValidation/bin/
 /Tools/Tests/AndroidJavaWrapperGeneratorValidation/obj/
 /Tools/Tests/AndroidJavaWrapperGeneratorValidation/.work/
+
+# Local full Java bindings and Editor CLI scratch/documentation caches.
+/Assets/Plugins/MajdataPlay/Platform/Android/Generated/
+/Assets/Plugins/MajdataPlay/Platform/Android/Generated.meta
+/Tools/CSharp/AndroidJavaWrapperGenerator/.work/

@@ -104,16 +104,25 @@ The storage backend uses generated C# wrappers during Unity script compilation.
 Build and install the ignored Roslyn analyzer before the first Unity import:
 
 ```powershell
-./Tools/AndroidJavaGenerator/build.ps1 -Install
+./Tools/CSharp/AndroidJavaGenerator/build.ps1 -Install
 ```
 
 The script builds only the explicitly provided independent tool under
-`Tools/Tests/AndroidJavaGeneratorBuild/`, not a Unity-generated project.
+`Tools/CSharp/AndroidJavaGenerator/`, not a Unity-generated project.
 Pass `-UnityPath` for a non-default Editor installation. See
-`Tools/AndroidJavaGenerator/README.md` for SDK/JDK discovery, restore prerequisites,
+`Tools/CSharp/AndroidJavaGenerator/README.md` for SDK/JDK discovery, restore prerequisites,
 and other-host setup. Fresh checkouts and CI need the same analyzer and Java
 extraction prerequisites; generated wrappers and analyzer binaries are not
 checked into the repository.
+
+The Editor command **Tools > MajdataPlay > Android > Regenerate Java wrappers**
+uses the independent `Tools/CSharp/AndroidJavaWrapperGenerator` CLI to generate
+the complete SDK/BCL plus Java inputs from `Assets/Plugins/Android` and the current
+Unity Android player. It runs in the background with official documentation and
+imports the successful output under `MajdataPlay.Platform.Android.Runtime.Bindings`.
+Automatic Java asset refreshes reuse cached pages and fetch missing documentation. See
+`Assets/Plugins/MajdataPlay/Platform/Android/README.md` for output ownership,
+cancellation, setup, and the existing annotated wrappers.
 
 ### Open the Project in Unity Hub
 

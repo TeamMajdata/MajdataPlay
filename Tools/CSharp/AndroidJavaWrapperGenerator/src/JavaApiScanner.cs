@@ -46,6 +46,9 @@ namespace MajdataPlay.Tools.AndroidJavaWrapperGenerator
             /// <summary>Bounds the archive entry count, including entries that are not class files.</summary>
             private const int MaxArchiveEntries = 100000;
 
+            /// <summary>Bounds one in-memory nested JAR from an Android library archive.</summary>
+            private const long MaxNestedArchiveBytes = 64L * 1024 * 1024;
+
             /// <summary>Bounds uncompressed class bytes across the complete scan.</summary>
             private const long MaxTotalClassBytes = 512L * 1024 * 1024;
 
@@ -175,7 +178,7 @@ namespace MajdataPlay.Tools.AndroidJavaWrapperGenerator
                         files.Sort(StringComparer.Ordinal);
                         if (files.Count == 0)
                         {
-                            throw new InvalidDataException($"Java input directory '{input}' contains no .java, .class, .jar, or .zip files.");
+                            throw new InvalidDataException($"Java input directory '{input}' contains no .java, .class, .jar, or .aar/.zip files.");
                         }
                         foreach (var file in files)
                         {
@@ -191,7 +194,7 @@ namespace MajdataPlay.Tools.AndroidJavaWrapperGenerator
                     }
                     else if (!IsSupportedInput(input))
                     {
-                        throw new ArgumentException($"Java input '{input}' has an unsupported extension. Supply .java, .class, .jar, .zip, or a directory containing those files.");
+                        throw new ArgumentException($"Java input '{input}' has an unsupported extension. Supply .java, .class, .jar, .aar, .zip, or a directory containing those files.");
                     }
                     else if (seen.Add(input))
                     {
@@ -214,6 +217,7 @@ namespace MajdataPlay.Tools.AndroidJavaWrapperGenerator
                 return extension.Equals(".java", StringComparison.OrdinalIgnoreCase)
                     || extension.Equals(".class", StringComparison.OrdinalIgnoreCase)
                     || extension.Equals(".jar", StringComparison.OrdinalIgnoreCase)
+                    || extension.Equals(".aar", StringComparison.OrdinalIgnoreCase)
                     || extension.Equals(".zip", StringComparison.OrdinalIgnoreCase);
             }
 
@@ -257,54 +261,12 @@ namespace MajdataPlay.Tools.AndroidJavaWrapperGenerator
                 try
                 {
                     using var archive = new ZipArchive(file, ZipArchiveMode.Read, false);
-                    if (archive.Entries.Count > MaxArchiveEntries)
+                    var remainingEntries = MaxArchiveEntries;
+                    if (Path.GetExtension(path).Equals(".aar", StringComparison.OrdinalIgnoreCase))
                     {
-                        throw new InvalidDataException($"Java archive '{path}' exceeds the {MaxArchiveEntries} entry limit.");
+                        ScanAndroidArchive(archive, path, additional, ref remainingEntries);
                     }
-                    var entries = new List<ZipArchiveEntry>();
-                    var versioned = false;
-                    foreach (var entry in archive.Entries)
-                    {
-                        _cancellationToken.ThrowIfCancellationRequested();
-                        if (!entry.FullName.EndsWith(".class", StringComparison.OrdinalIgnoreCase))
-                        {
-                            continue;
-                        }
-                        if (entry.FullName.StartsWith("META-INF/versions/", StringComparison.Ordinal))
-                        {
-                            versioned = true;
-                            continue;
-                        }
-                        entries.Add(entry);
-                    }
-                    entries.Sort(CompareEntries);
-                    var batch = new ClassBatch(additional);
-                    try
-                    {
-                        foreach (var entry in entries)
-                        {
-                            _cancellationToken.ThrowIfCancellationRequested();
-                            var source = path + "!" + entry.FullName;
-                            if (entry.Length > 1024 * 1024 && (entry.CompressedLength == 0
-                                || (entry.Length / entry.CompressedLength) > MaxCompressionRatio))
-                            {
-                                throw new InvalidDataException($"Java archive entry '{source}' exceeds the permitted compression ratio.");
-                            }
-                            using var stream = entry.Open();
-                            BufferClass(batch, stream, entry.Length, source);
-                        }
-                        ProcessClassBatch(batch);
-                    }
-                    catch
-                    {
-                        ProcessClassBatch(batch);
-                        throw;
-                    }
-                    if (versioned)
-                    {
-                        _api.Warnings.Add($"Java archive '{path}' contains META-INF/versions classes; only base declarations are scanned for Android.");
-                    }
-                    if (additional && entries.Count == 0)
+                    else if (ScanClassArchive(archive, path, additional, ref remainingEntries) == 0 && additional)
                     {
                         throw new InvalidDataException($"Java archive '{path}' contains no base .class declarations.");
                     }
@@ -315,6 +277,178 @@ namespace MajdataPlay.Tools.AndroidJavaWrapperGenerator
                 }
             }
 
+            /// <summary>Scans only classes.jar and direct libs/*.jar entries without extracting Android resources.</summary>
+            /// <param name="archive">The already opened Android library archive.</param>
+            /// <param name="path">The library path used in diagnostics.</param>
+            /// <param name="additional">Whether these declarations override SDK metadata.</param>
+            /// <param name="remainingEntries">The shared outer and nested ZIP entry budget.</param>
+            /// <exception cref="InvalidDataException">An archive, nested JAR, or declaration exceeds scan limits or is invalid.</exception>
+            /// <exception cref="IOException">An archive entry cannot be read.</exception>
+            /// <exception cref="OperationCanceledException">The scan has been canceled.</exception>
+            private void ScanAndroidArchive(ZipArchive archive, string path, bool additional, ref int remainingEntries)
+            {
+                ReserveArchiveEntries(archive, path, ref remainingEntries);
+                var jars = new List<ZipArchiveEntry>();
+                var names = new HashSet<string>(StringComparer.Ordinal);
+                foreach (var entry in archive.Entries)
+                {
+                    _cancellationToken.ThrowIfCancellationRequested();
+                    var name = entry.FullName;
+                    if (name != "classes.jar" && !(name.StartsWith("libs/", StringComparison.Ordinal)
+                        && name.EndsWith(".jar", StringComparison.OrdinalIgnoreCase)))
+                    {
+                        continue;
+                    }
+                    if (name.StartsWith("libs/", StringComparison.Ordinal)
+                        && (name.IndexOf('/', "libs/".Length) >= 0 || name.IndexOf('\\') >= 0))
+                    {
+                        throw new InvalidDataException($"Android archive '{path}' contains an invalid nested JAR path '{name}'; use direct libs/*.jar entries.");
+                    }
+                    if (!names.Add(name))
+                    {
+                        throw new InvalidDataException($"Android archive '{path}' repeats nested JAR entry '{name}'.");
+                    }
+                    jars.Add(entry);
+                }
+                jars.Sort(CompareEntries);
+                var classCount = 0;
+                long nestedBytes = 0;
+                foreach (var entry in jars)
+                {
+                    _cancellationToken.ThrowIfCancellationRequested();
+                    var source = path + "!" + entry.FullName;
+                    CheckCompressionRatio(entry, source);
+                    if (entry.Length < 0 || entry.Length > MaxNestedArchiveBytes)
+                    {
+                        throw new InvalidDataException($"Nested Java archive '{source}' exceeds the 64 MiB archive limit.");
+                    }
+                    if (entry.Length > (MaxArchiveBytes - nestedBytes))
+                    {
+                        throw new InvalidDataException($"Android archive '{path}' exceeds the 512 MiB total nested JAR limit.");
+                    }
+                    nestedBytes += entry.Length;
+                    using var input = entry.Open();
+                    var bytes = ReadNestedArchive(input, entry.Length, source);
+                    using var buffer = new MemoryStream(bytes, false);
+                    using var nested = new ZipArchive(buffer, ZipArchiveMode.Read, false);
+                    classCount += ScanClassArchive(nested, source, additional, ref remainingEntries);
+                }
+                if (classCount == 0)
+                {
+                    throw new InvalidDataException($"Android archive '{path}' contains no base .class declarations in classes.jar or libs/*.jar.");
+                }
+            }
+
+            /// <summary>Scans an ordinary or nested JAR using the same ordered class batches and byte limits.</summary>
+            /// <param name="archive">The opened JAR or ZIP containing class declarations.</param>
+            /// <param name="path">The complete outer and nested archive provenance.</param>
+            /// <param name="additional">Whether these declarations override SDK metadata.</param>
+            /// <param name="remainingEntries">The shared outer and nested ZIP entry budget.</param>
+            /// <returns>The number of base class entries considered.</returns>
+            /// <exception cref="InvalidDataException">An archive or class is malformed or exceeds scan limits.</exception>
+            /// <exception cref="IOException">A class entry cannot be read.</exception>
+            /// <exception cref="OperationCanceledException">The scan has been canceled.</exception>
+            private int ScanClassArchive(ZipArchive archive, string path, bool additional, ref int remainingEntries)
+            {
+                ReserveArchiveEntries(archive, path, ref remainingEntries);
+                var entries = new List<ZipArchiveEntry>();
+                var versioned = false;
+                foreach (var entry in archive.Entries)
+                {
+                    _cancellationToken.ThrowIfCancellationRequested();
+                    if (!entry.FullName.EndsWith(".class", StringComparison.OrdinalIgnoreCase))
+                    {
+                        continue;
+                    }
+                    if (entry.FullName.StartsWith("META-INF/versions/", StringComparison.Ordinal))
+                    {
+                        versioned = true;
+                        continue;
+                    }
+                    entries.Add(entry);
+                }
+                entries.Sort(CompareEntries);
+                var batch = new ClassBatch(additional);
+                try
+                {
+                    foreach (var entry in entries)
+                    {
+                        _cancellationToken.ThrowIfCancellationRequested();
+                        var source = path + "!" + entry.FullName;
+                        CheckCompressionRatio(entry, source);
+                        using var stream = entry.Open();
+                        BufferClass(batch, stream, entry.Length, source);
+                    }
+                    ProcessClassBatch(batch);
+                }
+                catch
+                {
+                    ProcessClassBatch(batch);
+                    throw;
+                }
+                if (versioned)
+                {
+                    _api.Warnings.Add($"Java archive '{path}' contains META-INF/versions classes; only base declarations are scanned for Android.");
+                }
+                return entries.Count;
+            }
+
+            /// <summary>Charges outer and nested central-directory entries against one bounded archive budget.</summary>
+            /// <param name="archive">The archive whose central directory has been opened.</param>
+            /// <param name="path">The archive provenance used in diagnostics.</param>
+            /// <param name="remainingEntries">The entry count available for this archive and later nested JARs.</param>
+            /// <exception cref="InvalidDataException">The aggregate ZIP entry count exceeds the archive limit.</exception>
+            private static void ReserveArchiveEntries(ZipArchive archive, string path, ref int remainingEntries)
+            {
+                if (archive.Entries.Count > remainingEntries)
+                {
+                    throw new InvalidDataException($"Java archive '{path}' exceeds the {MaxArchiveEntries} aggregate entry limit.");
+                }
+                remainingEntries -= archive.Entries.Count;
+            }
+
+            /// <summary>Applies the same compression-ratio check to class entries and nested JAR entries.</summary>
+            /// <param name="entry">The entry to decompress.</param>
+            /// <param name="source">The archive and entry provenance used in diagnostics.</param>
+            /// <exception cref="InvalidDataException">The entry has an excessive declared compression ratio.</exception>
+            private static void CheckCompressionRatio(ZipArchiveEntry entry, string source)
+            {
+                if (entry.Length > 1024 * 1024 && (entry.CompressedLength == 0
+                    || (entry.Length / entry.CompressedLength) > MaxCompressionRatio))
+                {
+                    throw new InvalidDataException($"Java archive entry '{source}' exceeds the permitted compression ratio.");
+                }
+            }
+
+            /// <summary>Reads one already bounded nested JAR with exact-length and cancellation checks.</summary>
+            /// <param name="stream">The decompressed Android archive entry stream.</param>
+            /// <param name="length">The validated uncompressed nested JAR length.</param>
+            /// <param name="source">The outer archive and nested JAR provenance.</param>
+            /// <returns>The complete bytes of the nested JAR.</returns>
+            /// <exception cref="InvalidDataException">The entry length is inconsistent.</exception>
+            /// <exception cref="IOException">The nested archive cannot be read.</exception>
+            /// <exception cref="OperationCanceledException">The scan has been canceled.</exception>
+            private byte[] ReadNestedArchive(Stream stream, long length, string source)
+            {
+                var bytes = new byte[(int)length];
+                var offset = 0;
+                while (offset < bytes.Length)
+                {
+                    _cancellationToken.ThrowIfCancellationRequested();
+                    var count = stream.Read(bytes, offset, Math.Min(64 * 1024, bytes.Length - offset));
+                    if (count == 0)
+                    {
+                        throw new InvalidDataException($"Nested Java archive '{source}' is truncated: expected {length} bytes, read {offset}.");
+                    }
+                    offset += count;
+                }
+                _cancellationToken.ThrowIfCancellationRequested();
+                if (stream.ReadByte() != -1)
+                {
+                    throw new InvalidDataException($"Nested Java archive '{source}' is larger than its declared {length} byte length.");
+                }
+                return bytes;
+            }
             /// <summary>Compares archive entry names using JVM-relevant ordinal ordering.</summary>
             /// <param name="left">The first archive entry.</param>
             /// <param name="right">The second archive entry.</param>
