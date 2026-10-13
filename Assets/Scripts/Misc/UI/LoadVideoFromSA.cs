@@ -41,7 +41,7 @@ namespace MajdataPlay.UI
             var videoPath = _videoPath;
             if (string.IsNullOrEmpty(videoPath) || videoPath.Length == 1)
             {
-                MajDebug.LogWarning($"[{nameof(LoadVideoFromSA)}]Invalid video path: {videoPath}");
+                MajDebug.LogWarning(nameof(LoadVideoFromSA), $"Invalid video path: {videoPath}");
                 return;
             }
             else if (videoPath[0] is '/' or '\\')
@@ -62,10 +62,10 @@ namespace MajdataPlay.UI
             }
             if (!isValid)
             {
-                MajDebug.LogError($"[{nameof(LoadVideoFromSA)}]Video does not exists: {videoPath}");
+                MajDebug.LogError(nameof(LoadVideoFromSA), $"Video does not exists: {videoPath}");
                 return;
             }
-            MajDebug.LogInfo($"[{nameof(LoadVideoFromSA)}]Load video from {path}");
+            MajDebug.LogInfo(nameof(LoadVideoFromSA), $"Load video from {path}");
             _ffmpegPlayer.Url = path;
             if (_loadOnly)
             {
