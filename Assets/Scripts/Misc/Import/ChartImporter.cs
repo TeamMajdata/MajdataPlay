@@ -5,6 +5,7 @@ using MajdataPlay.IO.Storage;
 using MajdataPlay.Platform.Android;
 using MajdataPlay.Platform.Android.Runtime.Content;
 using MajdataPlay.Platform.Android.Runtime.Java.Lang;
+using MajdataPlay.Platform.Android.Storage;
 #endif
 using System;
 using System.Collections.Concurrent;
@@ -25,7 +26,57 @@ namespace MajdataPlay.Import
     {
         private static string s_importRoot = string.Empty;
         private static ValueTask s_importTask = UniTask.CompletedTask;
-        private static readonly ConcurrentQueue<FileSystemEntry> s_pendingImportTasks = new ConcurrentQueue<FileSystemEntry>();
+        private static readonly ConcurrentQueue<PendingImport> s_pendingImportTasks = new ConcurrentQueue<PendingImport>();
+
+        /// <summary>Describes one queued import source and whether consuming it may delete the source.</summary>
+        /// <remarks>
+        /// A shared or platform-provided temporary file is deleted after the import, while a document the user picked
+        /// through the storage picker belongs to its provider and must survive the import.
+        /// </remarks>
+        private readonly struct PendingImport
+        {
+            /// <summary>Gets the queued storage entry.</summary>
+            public FileSystemEntry Entry { get; }
+
+            /// <summary>Gets whether the source is a consumed temporary file that is deleted after the import.</summary>
+            public bool DeleteSourceAfterImport { get; }
+
+            /// <summary>Initializes one queued import source.</summary>
+            /// <param name="entry">The storage entry to import.</param>
+            /// <param name="deleteSourceAfterImport">Whether the source is a temporary file consumed by the import.</param>
+            public PendingImport(FileSystemEntry entry, bool deleteSourceAfterImport)
+            {
+                Entry = entry;
+                DeleteSourceAfterImport = deleteSourceAfterImport;
+            }
+        }
+
+#if ANDROID_RUNTIME
+        /// <summary>Identifies the launcher shortcut that requested an import.</summary>
+        private enum ShortcutImportKind
+        {
+            /// <summary>No shortcut import is pending.</summary>
+            None,
+
+            /// <summary>The user asked to import a chart archive.</summary>
+            Archive,
+
+            /// <summary>The user asked to import a chart folder.</summary>
+            Folder,
+        }
+
+        /// <summary>Matches the archive shortcut action declared in <c>res/xml/shortcuts.xml</c>.</summary>
+        private const string ImportArchiveAction = "net.majdata.majdataplay.action.IMPORT_ARCHIVE";
+
+        /// <summary>Matches the folder shortcut action declared in <c>res/xml/shortcuts.xml</c>.</summary>
+        private const string ImportFolderAction = "net.majdata.majdataplay.action.IMPORT_FOLDER";
+
+        /// <summary>Stores the shortcut import whose picker has not been shown yet.</summary>
+        private static ShortcutImportKind s_pendingShortcut = ShortcutImportKind.None;
+
+        /// <summary>Tracks the running shortcut picker so a second picker is never shown concurrently.</summary>
+        private static ValueTask s_pickerTask = UniTask.CompletedTask;
+#endif
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
         private static void Init()
@@ -35,7 +86,7 @@ namespace MajdataPlay.Import
 #endif
         }
 
-        public static ValueTask OnStartAsync()
+        public static async ValueTask OnStartAsync()
         {
             s_importRoot = Path.Combine(MajEnv.ChartPath, "Import");
 #if ANDROID_RUNTIME
@@ -44,24 +95,38 @@ namespace MajdataPlay.Import
             {
                 OnNewIntent(null, intent);
             }
+            if (s_pendingShortcut != ShortcutImportKind.None)
+            {
+                // A launcher shortcut must pick its source before the import can start.
+                s_pickerTask = ShowShortcutPickerAsync();
+                await s_pickerTask;
+            }
 #endif
             if (s_pendingImportTasks.Count != 0)
             {
                 s_importTask = Import();
-                return s_importTask;
+                await s_importTask;
             }
-            return UniTask.CompletedTask;
         }
         public static void AddImportTask(string tempFilePath)
         {
             var entry = FileSystem.GetEntry(tempFilePath);
             if (entry != null)
             {
-                s_pendingImportTasks.Enqueue(entry);
+                // A shared or platform-provided path is a temporary file that the import consumes.
+                s_pendingImportTasks.Enqueue(new PendingImport(entry, deleteSourceAfterImport: true));
             }
         }
         public static void OnUpdate()
         {
+#if ANDROID_RUNTIME
+            if (s_pendingShortcut != ShortcutImportKind.None && s_pickerTask.IsCompleted)
+            {
+                // A shortcut arrived while the player was already running; reuse this instance instead of a new activity.
+                s_pickerTask = ShowShortcutPickerAsync();
+                return;
+            }
+#endif
             if (SceneSwitcher.CurrentScene == MajScenes.Empty ||
                 s_pendingImportTasks.Count == 0 ||
                 !s_importTask.IsCompleted)
@@ -96,8 +161,9 @@ namespace MajdataPlay.Import
                 await UniTask.Delay(300);
             }
             FileSystem.Directory.Create(s_importRoot);
-            while (s_pendingImportTasks.TryDequeue(out var entry))
+            while (s_pendingImportTasks.TryDequeue(out var pending))
             {
+                var entry = pending.Entry;
                 MajDebug.LogDebug("[ChartImporter] Got entry: " + entry.Location);
 
                 try
@@ -108,7 +174,7 @@ namespace MajdataPlay.Import
                     }
                     else
                     {
-                        await ImportArchiveAsync(entry);
+                        await ImportArchiveAsync(entry, pending.DeleteSourceAfterImport);
                     }
                 }
                 catch (Exception e)
@@ -144,9 +210,13 @@ namespace MajdataPlay.Import
 
         /// <summary>Extracts one queued archive into a private temporary directory and imports the chart layout it contains.</summary>
         /// <param name="entry">The queued <c>.zip</c> or <c>.adx</c> archive entry.</param>
+        /// <param name="deleteSourceAfterImport">Whether the source is a consumed temporary file that is deleted afterwards.</param>
         /// <returns>An operation that completes after the archive contents have been imported.</returns>
-        /// <remarks>The temporary extraction directory is always removed, and an Android queue entry is additionally consumed.</remarks>
-        private static async ValueTask ImportArchiveAsync(FileSystemEntry entry)
+        /// <remarks>
+        /// The temporary extraction directory is always removed. The source file is deleted only for a consumed
+        /// temporary file; a document the user picked is left untouched.
+        /// </remarks>
+        private static async ValueTask ImportArchiveAsync(FileSystemEntry entry, bool deleteSourceAfterImport)
         {
             var extension = Path.GetExtension(entry.Name).ToLowerInvariant();
             if (extension != ".zip" && extension != ".adx")
@@ -172,7 +242,11 @@ namespace MajdataPlay.Import
             {
                 TryDeleteDirectory(tempOutDir);
 #if UNITY_ANDROID
-                TryDeleteFile(entry.Location);
+                if (deleteSourceAfterImport)
+                {
+                    // Only a consumed temporary file is deleted; a document the user picked must survive.
+                    TryDeleteFile(entry.Location);
+                }
 #endif
             }
         }
@@ -450,6 +524,17 @@ namespace MajdataPlay.Import
                 return;
             }
             var action = intent.GetAction();
+            if (action == ImportArchiveAction)
+            {
+                // The shortcut only requests the source; the picker itself runs from OnStartAsync/OnUpdate.
+                s_pendingShortcut = ShortcutImportKind.Archive;
+                return;
+            }
+            if (action == ImportFolderAction)
+            {
+                s_pendingShortcut = ShortcutImportKind.Folder;
+                return;
+            }
             if (action == Intent.ActionSendMultiple)
             {
                 var uris = intent.GetParcelableArrayListExtra(Intent.ExtraStream, MajdataPlay.Platform.Android.Runtime.Net.Uri.Class)!;
@@ -466,7 +551,8 @@ namespace MajdataPlay.Import
                         MajDebug.LogError(nameof(ChartImporter), $"GetEntry failed for {uri}");
                         continue;
                     }
-                    s_pendingImportTasks.Enqueue(entry);
+                    // A shared URI is a temporary file provided for this import and is consumed afterwards.
+                    s_pendingImportTasks.Enqueue(new PendingImport(entry, deleteSourceAfterImport: true));
                 }
             }
             else if (action == Intent.ActionSend)
@@ -479,7 +565,56 @@ namespace MajdataPlay.Import
                     return;
                 }
 
-                s_pendingImportTasks.Enqueue(entry);
+                // A shared URI is a temporary file provided for this import and is consumed afterwards.
+                s_pendingImportTasks.Enqueue(new PendingImport(entry, deleteSourceAfterImport: true));
+            }
+        }
+
+        /// <summary>Shows the picker requested by a launcher shortcut and queues the selected entry for import.</summary>
+        /// <remarks>
+        /// At most one picker is shown per shortcut activation. A dismissed picker leaves the queue untouched, and a
+        /// provider failure is logged instead of propagating into the player loop.
+        /// </remarks>
+        private static async ValueTask ShowShortcutPickerAsync()
+        {
+            var kind = s_pendingShortcut;
+            s_pendingShortcut = ShortcutImportKind.None;
+            if (kind == ShortcutImportKind.None)
+            {
+                return;
+            }
+            try
+            {
+                // The picker cannot filter by extension, so the archive picker lists every file and the existing
+                // extension check in ImportArchiveAsync rejects an unsupported selection.
+                string? location;
+                if (kind == ShortcutImportKind.Archive)
+                {
+                    var file = await AndroidStorageAccess.PickFileAsync("*/*", writable: false, persistPermission: false);
+                    location = file?.Location;
+                }
+                else
+                {
+                    var directory = await AndroidStorageAccess.PickDirectoryAsync(writable: false, persistPermission: false);
+                    location = directory?.Location;
+                }
+                if (location is null)
+                {
+                    // The user dismissed the picker; there is nothing to import.
+                    return;
+                }
+                var entry = FileSystem.GetEntry(location);
+                if (entry is null)
+                {
+                    MajDebug.LogError(nameof(ChartImporter), $"GetEntry failed for {location}");
+                    return;
+                }
+                // The picked document belongs to its provider and must survive the import.
+                s_pendingImportTasks.Enqueue(new PendingImport(entry, deleteSourceAfterImport: false));
+            }
+            catch (Exception e)
+            {
+                MajDebug.LogError($"[ChartImporter] Shortcut import failed: {e}");
             }
         }
 #endif

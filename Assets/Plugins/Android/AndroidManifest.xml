@@ -5,6 +5,7 @@
     <application android:requestLegacyExternalStorage="true">
         <activity android:name="net.majdata.majdataplay.MajdataPlayActivity"
                   android:exported="true"
+                  android:launchMode="singleTop"
                   android:theme="@style/UnityThemeSelector">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
@@ -39,6 +40,7 @@
                 <data android:mimeType="application/zip"/>
             </intent-filter>
             <meta-data android:name="unityplayer.UnityActivity" android:value="true" />
+            <meta-data android:name="android.app.shortcuts" android:resource="@xml/shortcuts" />
         </activity>
     </application>
 </manifest>
