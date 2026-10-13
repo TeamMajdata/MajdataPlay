@@ -114,3 +114,10 @@ out.log
 !/Tools/Tests/FileSystemValidation/FileSystemValidation.csproj
 !/Tools/Tests/ChartStorageValidation/ChartStorageValidation.csproj
 !/Tools/Tests/ResourceStorageValidation/ResourceStorageValidation.csproj
+
+# Independent full Java API wrapper CLI and its validation harness.
+!/Tools/CSharp/AndroidJavaWrapperGenerator/AndroidJavaWrapperGenerator.csproj
+!/Tools/Tests/AndroidJavaWrapperGeneratorValidation/AndroidJavaWrapperGeneratorValidation.csproj
+/Tools/Tests/AndroidJavaWrapperGeneratorValidation/bin/
+/Tools/Tests/AndroidJavaWrapperGeneratorValidation/obj/
+/Tools/Tests/AndroidJavaWrapperGeneratorValidation/.work/

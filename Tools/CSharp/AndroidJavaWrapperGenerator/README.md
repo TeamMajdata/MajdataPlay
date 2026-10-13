@@ -1,0 +1,212 @@
+# Android Java wrapper CLI
+
+This independent .NET 9 command-line tool exports public Java APIs as Unity JNI
+bindings. It has no project, assembly, or source reference to the existing
+AndroidJavaGenerator Roslyn analyzer. It does not modify Unity assets or install
+an analyzer.
+
+## Requirements and build
+
+- .NET 9 SDK (the tool directory pins the 9.0 SDK family).
+- An Android SDK with an installed stable platform, normally the SDK bundled with
+  the repository's Unity **6000.3.17f1** Android Build Support.
+- Unity CoreModule and AndroidJNIModule when compiling/using the output.
+
+**The CLI does not require a JDK, javac, javap, or any other external executable.**
+It reads JVM class files in C# and analyzes Java source declarations in C#.
+The separate regression harness uses javac only as an independent reference for
+checking source/class/JAR API parity.
+
+From the repository root:
+
+~~~powershell
+dotnet build Tools/CSharp/AndroidJavaWrapperGenerator/AndroidJavaWrapperGenerator.csproj
+dotnet run --project Tools/CSharp/AndroidJavaWrapperGenerator/AndroidJavaWrapperGenerator.csproj -- --help
+~~~
+
+Only this explicit tool project is built; do not build Unity-generated projects.
+For a packaged CLI:
+
+~~~powershell
+dotnet publish Tools/CSharp/AndroidJavaWrapperGenerator/AndroidJavaWrapperGenerator.csproj -c Release -o Temp/AndroidJavaWrapperGenerator
+~~~
+
+## Generate the full Android and Java API
+
+~~~powershell
+dotnet run --project Tools/CSharp/AndroidJavaWrapperGenerator/AndroidJavaWrapperGenerator.csproj -- --sdk "C:/Program Files/Unity Editors/6000.3.17f1/Editor/Data/PlaybackEngines/AndroidPlayer/SDK" --namespace Example.Bindings --output Temp/AndroidJavaWrappers
+~~~
+
+The default root namespace is MajdataPlay.Platform.Android.Bindings.
+The default exports every publicly accessible, nonsynthetic type in the chosen
+platform's android.jar, including Android's Java BCL and boxed primitive types.
+It does not merge in desktop-only JDK APIs. Without --sdk, SDK discovery searches
+the environment and the fixed Unity installation. Without --api-level, the
+highest installed stable numeric platform is selected. Use --api-level 36 to pin
+an installed platform.
+
+~~~powershell
+dotnet run --project Tools/CSharp/AndroidJavaWrapperGenerator/AndroidJavaWrapperGenerator.csproj -- --sdk "C:/Android/SDK" --api-level 36 --namespace Example.Bindings --output Temp/AndroidJavaWrappers --input "C:/Libraries/Example.java" --input "C:/Libraries/Other.class" --input "C:/Libraries/api.jar"
+~~~
+
+Repeat --input for additional .java, .class, and .jar files. Input directories
+are scanned recursively; .zip archives are accepted as well. A class file's binary
+name comes from its constant pool, so its filename and enclosing directory do
+not have to reproduce its Java package. Archives and SDK inputs are inspected
+without loading classes or executing static initializers. Multi-release archives
+use their base declarations; META-INF/versions entries are skipped with a warning.
+
+Use --no-sdk together with --input to export standalone Java libraries. Unknown
+reference types that are absent from the provided metadata use the generated
+JavaObject reference wrapper. Source names must still resolve unambiguously to
+an exact Java binary name, including fully qualified source names. Supply
+missing dependency archives for source type resolution.
+
+An optional --include-package java.nio limits the initially selected package
+and its subpackages. Public dependencies needed by the selected API are also
+exported; this can include packages outside the filter. Omit this option for
+full generation.
+
+## Official English API documentation
+
+Official-documentation enrichment is enabled by default. Android SDK and BCL
+pages are read from the English Android Developers reference. Missing Java BCL
+members are supplemented from Oracle JDK 17 Javadoc. Both modern and legacy
+Javadoc HTML layouts are supported by the pure C# parser.
+
+Class/interface descriptions, field descriptions, method and constructor
+summaries, parameter descriptions, return values, and Java exception notes are
+translated into English C# XML documentation. Every imported description
+includes its official page/member URL in a seealso element. Java exceptions are
+recorded as Java behavior in remarks; the generated CLR JNI exception contract
+remains explicit. HTML entities and XML-sensitive text are escaped.
+
+Parameter names come from the documented Java signature, matched to the exact
+JVM overload. Primitive and reference types, arrays, varargs, nested types,
+generic erasure, bridge methods, and enclosing-instance constructor prefixes
+are considered. Ambiguous overloads are left unchanged rather than assigned
+another overload's names. The restored names are sanitized only when required
+for legal, unique C# identifiers, and param tags use those final names.
+
+Parsed descriptions are cached in OUTPUT/.documentation-cache; complete HTML
+navigation trees are not stored. Cache keys include the official URL, parser
+version, and exact public JVM member contract. Positive entries normally expire
+after 30 days; missing pages are cached for one day. Offline mode can reuse older
+entries whose contract still matches. Cache files are local runtime data.
+
+~~~powershell
+dotnet run --project Tools/CSharp/AndroidJavaWrapperGenerator/AndroidJavaWrapperGenerator.csproj -- --output Temp/AndroidJavaWrappers --jobs 8 --docs-jobs 4 --docs-cache Temp/AndroidJavaDocumentation
+~~~
+
+- --docs-jobs NUMBER bounds simultaneous official-site requests (default 4,
+  maximum 32), separately from CPU worker count.
+- --docs-cache DIRECTORY selects a shared parsed-documentation cache.
+- --offline-docs reads that cache without HTTP requests.
+- --refresh-docs refreshes online entries; it cannot be combined with offline mode.
+- --no-docs disables enrichment while retaining source/class-file names and
+  binding-purpose XML descriptions.
+
+If a page is missing, unreachable, or has no recognized API layout, its available
+metadata names and binding descriptions remain. The CLI reports coverage and a
+bounded list of missing types; it does not invent a name or pair descriptions
+with a different overload. Repeated host failures stop further requests to that
+host during the run. Generated documentation reflects the selected SDK's member
+set even if the official online page describes a newer platform.
+
+## Parallel analysis and generation
+
+--jobs NUMBER controls CPU worker parallelism; its default is the available CPU
+count. --jobs 1 executes indexed analysis and emission serially on the calling
+thread. SDK/JAR bytes are decompressed in bounded batches, and independent class
+parsing/hashing runs in parallel. ZIP stream access stays serialized. Each batch
+contains at most 128 entries or 32 MiB of raw bytes, except that a permitted
+larger class occupies its own batch. Existing per-class and total scan bounds
+still apply.
+
+Java source files are read and parsed as independent compilation units in
+parallel. Source type resolution and global inheritance/name planning commit in
+stable input order. Wrapper file emission runs in parallel over frozen plans
+and read-only caches, then diagnostics and files merge deterministically. JNI
+descriptors, generated source bytes, and duplicate-definition precedence are
+independent of worker count. Cancellation and original parsing exceptions remain
+observable without AggregateException wrappers.
+
+## Generated API
+
+- Packages map to PascalCase namespace components and corresponding directories:
+  android.net.Uri becomes Example.Bindings.Android.Net.Uri.
+- java.lang.Object is Example.Bindings.Java.Lang.JavaObject.
+- Public nested types retain exact $ binary names in JNI descriptors, with
+  deterministic flattened C# names. Inaccessible enclosing types prevent export.
+- Every generated wrapper is a public partial class. Java abstract classes can
+  wrap existing instances but do not expose Java construction methods.
+- Java interfaces generate nonpartial I-prefixed C# interfaces, plus partial
+  reference wrapper classes for interface-valued JNI results. Java interface
+  inheritance and class/interface implementation relationships are preserved.
+- Classes derive from their closest exported Java superclass. Public members of
+  inaccessible intermediate bases remain available.
+- Public Java fields, including static/final fields, become getter-only
+  properties. Field reads use JNI and the original field descriptor.
+- Public constructors and methods use exact JVM descriptors. Java overloads are
+  preserved; collisions caused by C# naming or erased signatures receive stable
+  disambiguation. Colliding constructor signatures use stable CreateJavaInstance
+  factory methods for the additional overloads. Interface contracts with
+  incompatible C# return types use explicit implementations.
+- Java generics are erased to their JVM bounds rather than invented C# generics.
+  Boxed primitives remain typed reference wrappers. Java byte maps to sbyte.
+- Java strings map to nullable C# strings in member signatures. Reference values
+  and every array dimension preserve nullability. Jagged/reference arrays are
+  marshaled using the declared JVM component descriptor.
+- Each wrapper exposes a getter-only static Class property for its Java class
+  object (ClassJavaProperty when the wrapper itself is named Class). That result
+  is an independently owned Unity AndroidJavaObject.
+
+The output includes Runtime/AndroidJni.cs, Runtime/IJavaObject.cs,
+Runtime/JavaObjectReference.cs, and Runtime/JavaInvocationException.cs. These are
+self-contained and have no MajdataPlay runtime or old-generator dependency.
+All generated sources use nullable analysis, block namespaces, CRLF, and C# 9
+features compatible with **netstandard2.1**. Compile the complete output with
+UnityEngine.CoreModule and UnityEngine.AndroidJNIModule references.
+
+Handwritten extensions belong in separate partial-class source files. Generated
+files are tracked by java-wrappers.manifest.json using content hashes. Re-running
+the CLI updates unchanged generated files and removes only unchanged stale files
+owned by its previous manifest. It refuses to overwrite handwritten or modified
+files; choose a fresh destination if you intend to discard such changes.
+
+## Source analysis boundary
+
+Source input is API analysis rather than a Java compiler. The parser resolves
+package/import/nested-type names and generic erasure against all supplied
+metadata, and skips method bodies and initializers. It does not type-check Java
+expressions, create bytecode, package Java code, or prove that a source compiles.
+Unresolved or ambiguous declarations report a generation error instead of
+silently guessing a JNI descriptor. The parser supports class, interface,
+annotation, enum, and record declarations, nested types, imports, bounded
+generics, Unicode escapes, text blocks, and source array
+declarators. It excludes method-local/anonymous types and synthetic bridges.
+Module declarations are unsupported; provide module libraries as .class/.jar
+inputs. Annotation values, throws declarations, and generic arguments are not
+semantically type-checked. APIs that require compiler-specific synthetic behavior
+should be provided as compiled .class/.jar files.
+
+## JNI ownership and validation
+
+Generated references own their Unity Java reference by default. Dispose owning
+wrappers and Class results on Unity's main thread or a JVM-attached thread.
+The reference constructor accepts ownsReference: false for explicitly borrowed
+references; their original owner must outlive the wrapper. Disposed wrappers
+reject subsequent reference access. Returned wrappers/arrays contain owning
+references and must be disposed by callers.
+
+JNI execution requires an Android Player. Editor/non-Android entry points throw
+PlatformNotSupportedException before invoking Unity native APIs. Interface
+contracts describe existing Java instances; implementing a C# interface alone
+does not create a Java callback object. Java proxies/packaging remain the
+consumer's responsibility.
+
+Run the independent regressions as described in
+../../Tests/AndroidJavaWrapperGeneratorValidation/README.md. These compile
+emitted code against the .NET Standard 2.1 reference pack and real Unity modules,
+with and without UNITY_ANDROID. They do not execute JNI, Unity lifecycle,
+IL2CPP/AOT, or physical Android devices.
