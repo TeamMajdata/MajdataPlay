@@ -114,7 +114,7 @@ namespace MajdataPlay.Import
             if (entry != null)
             {
                 // A shared or platform-provided path is a temporary file that the import consumes.
-                s_pendingImportTasks.Enqueue(new PendingImport(entry, deleteSourceAfterImport: true));
+                s_pendingImportTasks.Enqueue(new PendingImport(entry, deleteSourceAfterImport: false));
             }
         }
         public static void OnUpdate()
