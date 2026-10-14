@@ -137,6 +137,3 @@ out.log
 /Tools/AndroidJavaWrapper/src/**/*.meta
 !/Tools/AndroidJavaWrapper/src/**/*.e.cs.meta
 /Tools/CSharp/AndroidJavaWrapperGenerator/.work/
-/Assets/Plugins/MajdataPlay/Platform/Android/MajdataPlay.Platform.Android.Runtime.dll
-/Assets/Plugins/MajdataPlay/Platform/Android/MajdataPlay.Platform.Android.Runtime.xml
-/Assets/Plugins/MajdataPlay/Platform/Android/MajdataPlay.Platform.Android.Runtime.xml.meta

@@ -11,3 +11,4 @@ Assets/Plugins/MajdataPlay/FFmpeg/Native/**/*.patch text eol=lf
 # Native build and validation entry points must also run from Windows checkouts.
 Tools/FFmpeg/*.sh text eol=lf
 Tools/Tests/FFmpegValidation/*.sh text eol=lf
+Assets/Plugins/MajdataPlay/Platform/Android/MajdataPlay.Platform.Android.Runtime.xml filter=lfs diff=lfs merge=lfs -text
