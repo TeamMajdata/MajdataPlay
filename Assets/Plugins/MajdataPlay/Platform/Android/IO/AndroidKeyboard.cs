@@ -1,4 +1,5 @@
 ﻿using MajdataPlay.Diagnostics;
+using MajdataPlay.Platform.Android.Runtime.Bindings.Net.Majdata.Majdataplay;
 using System;
 using System.Collections.Generic;
 using System.Runtime.CompilerServices;
@@ -25,7 +26,7 @@ namespace MajdataPlay.Platform.Android.IO
             try
             {
                 _onDispatchKeyEventCallbackProxy = new OnDispatchKeyEventCallbackProxy();
-                AndroidRuntime.MajdataPlayActivityClass.CallStatic("registerDispatchKeyEventCallback", _onDispatchKeyEventCallbackProxy);
+                MajdataPlayActivity.Class.CallStatic("registerDispatchKeyEventCallback", _onDispatchKeyEventCallbackProxy);
                 MajDebug.LogInfo($"[{nameof(AndroidKeyboard)}] Init finished");
             }
             catch (Exception ex)
