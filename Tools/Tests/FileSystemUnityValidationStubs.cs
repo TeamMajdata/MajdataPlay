@@ -25,15 +25,3 @@ namespace MajdataPlay.Diagnostics
         }
     }
 }
-
-namespace MajdataPlay.Platform.Android.IO
-{
-    /// <summary>A keyboard initialization double; keyboard hardware is outside storage validation.</summary>
-    public static class AndroidKeyboard
-    {
-        /// <summary>Leaves keyboard callbacks unregistered in the isolated project.</summary>
-        public static void Init()
-        {
-        }
-    }
-}

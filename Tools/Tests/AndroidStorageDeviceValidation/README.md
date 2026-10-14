@@ -16,9 +16,11 @@ ARMv7 IL2CPP processes. See `RESULTS.md` for the dated evidence and exact scope.
 A successful script compilation alone is not a runtime pass. Keep separate
 evidence for each actually executed ABI.
 
-The migration to standalone CLI bindings needs a fresh APK and a new device run
-for each ABI. Existing dated `RESULTS.md` entries describe the earlier binding
-implementation and do not establish runtime correctness for this migration.
+Standalone CLI bindings and startup changes require a fresh APK and a new device
+run for each ABI. Check the exact dated entry in `RESULTS.md`: earlier jar-only
+runs did not assert `AndroidRuntime.Init` success and their logs contain an
+initialization error. Their eight completed resource groups remain valid, but
+do not establish successful production startup or callback registration.
 
 ## Integration contract
 
@@ -35,6 +37,7 @@ launcher. The target device is the connected physical Mi MIX 2S, API 35.
 | Production `Tools/AndroidJavaWrapper/src/Bindings/` extensions | Copy handwritten `.e.cs` partial extensions alongside fresh CLI output |
 | Standalone CLI output | Generate SDK, project, probe and Unity launcher bindings into isolated `Tools/AndroidJavaWrapper/src/`, including `Bindings/Net/Majdata/Validation/DeviceJniProbe.g.cs`; compile its standalone project and install `MajdataPlay.Platform.Android.Runtime.dll` into isolated `Assets/Plugins/MajdataPlay/Platform/Android` |
 | Production Java and activity | Copy and package the real storage bridge, Unity dependencies, and launcher/activity-result implementation |
+| Production `AndroidRuntime.cs`, `IO/AndroidKeyboard.cs`, and `IO/KeyCode.cs` | Stage the actual initialization and keyboard callback implementation in the Android assembly; no keyboard initialization stub |
 
 The probe's Java package is `net.majdata.validation`. The builder uses the .NET 9
 AndroidJavaWrapperGenerator CLI and the installed SDK, all staged project/probe
@@ -52,9 +55,30 @@ The isolated project's modules include `androidjni`, `imgui`, and
 and needs **no manually attached scene component**. Its namespace is
 `MajdataPlay.Platform.Android.Runtime.Validation`.
 
-The builder, deploy runner, and narrow unrelated-init stubs are parent-owned;
-this runtime implementation does not modify existing production scripts,
-assemblies, or generated Unity projects.
+The isolated diagnostics stub forwards `MajDebug` output to Unity's log. Runtime
+and keyboard initialization use production sources and generated bindings.
+
+## Shared production startup regressions
+
+Every mode, including `jar`, requires `AndroidRuntime.IsInitialized` after
+production initialization has registered new-intent, activity-result, and real
+keyboard proxies. SDK level, target SDK **35**, and the positive version code
+must match direct generated package-metadata queries.
+
+The Java probe dispatches through the production activity to check one new
+intent, non-null and null activity results, and A-key down/up events. Managed
+subscribers verify the intent payload/result codes; the key checks read actual
+`AndroidKeyboard` state. Callbacks run on the Android UI thread and must complete
+within ten seconds. These controlled dispatches test the registered bridge;
+they do not replace the real provider picker in `full` mode.
+
+Only after these checks does the harness emit
+`FILE_SYSTEM_DEVICE_RUNTIME_INIT_PASSED`, with `RuntimeInitialized`,
+`RuntimeCallbacksPassed`, and `RuntimeKeyboardPassed` all true. This marker is
+intermediate; each run still requires its selected mode's terminal result.
+The latest dated `RESULTS.md` entry indexes the source/APK/wrapper/run-hash
+evidence bundle and companion isolated Editor/Android script-compilation log;
+Editor checks and Player compilation do not replace per-ABI device execution.
 
 ## Descriptor stream regressions
 
@@ -123,7 +147,8 @@ require a `jar:file:` root, and cover:
   not evidence that the packaged APK fixtures themselves were deflated.
 
 The expected terminal marker is **`FILE_SYSTEM_DEVICE_JAR_PASSED`**. Intermediate
-`JAR_*_PASSED` markers do not establish completion. A successful terminal result
+`RUNTIME_INIT_PASSED` and `JAR_*_PASSED` markers do not establish completion.
+A successful terminal result
 also requires removal of the unique local extraction/ZIP fixture directory and
 `CleanupSucceeded: true`; the installed APK and app data parent are retained.
 
@@ -131,11 +156,13 @@ The runner supplies a unique `validationRunId` launch extra and retains URI-free
 result JSON and private process logs under the ignored
 `Temp/AndroidStorageDeviceValidation/DeviceResults` directory. For normal launched
 runs, it matches the terminal JSON's `RunId`, `Mode`, current `ProcessId`, requested
-ABI's `PointerSize` (**8** for ARM64, **4** for ARMv7), `EnableIl2Cpp: true`, and
-terminal marker. Retain `SdkInt` as the actual device API level, together with the
+ABI's `PointerSize` (**8** for ARM64, **4** for ARMv7), `EnableIl2Cpp: true`, the
+three startup/callback flags, matching runtime metadata, and terminal marker.
+Retain `SdkInt` as the actual device API level, together with the
 APK SHA-256 and build log. A universal APK or successful build alone does not
-establish either ABI's runtime result. `jar` mode does not run the broader JNI,
-descriptor-stream, or provider/persisted-permission suites.
+establish either ABI's runtime result. After the shared production startup and
+callback checks, `jar` mode skips the broader JNI, descriptor-stream, and
+provider/persisted-permission suites.
 
 ## Launch protocol and durable files
 
@@ -151,13 +178,16 @@ Launch extra: **`validationMode`**, a string:
   does not cover provider dispatch or persisted SAF permissions.
 - **`jar`**: test actual APK resources and an app-private compressed ZIP through
   production storage APIs, then remove its unique local scratch directory.
-  Read launch mode, SDK, PID, and bitness through generated wrappers; skip the
-  broader JNI/descriptor/provider suites and leave persisted grants untouched.
+  Require the shared production initialization, metadata, and real callback
+  checks; read launch mode, SDK, PID, and bitness through generated wrappers.
+  Skip the broader JNI/descriptor/provider suites and leave persisted grants
+  untouched.
 - **`release`**: optionally finish grant ownership bookkeeping. Release only a
   grant that did **not** exist in the pre-picker snapshot. A preexisting grant
   is retained, including any additional write access the picker may have added.
 
-All modes except `jar` run the automatic JNI preflight. A new `full` run refuses
+All modes run the shared production startup checks; all modes except `jar` also
+run the broader automatic JNI preflight. A new `full` run refuses
 to overwrite an active grant state: first use `replay` / `release` as appropriate. Do not use
 `pm clear`, uninstall, or revoke the grant between `full` and `replay`; that
 would destroy the persistence experiment. Replace-installing an APK preserves
@@ -179,11 +209,14 @@ Files live at **`Application.persistentDataPath`**:
 
 Result JSON uses PascalCase field names: `Marker`, `Terminal`, `Mode`, `RunId`,
 `EnableIl2Cpp`, `PointerSize`, `SdkInt`, `ProcessId`, `ProviderReadCanSeek`,
+`RuntimeInitialized`, `RuntimeSdkVersion`, `RuntimeTargetSdkVersion`,
+`RuntimeVersionCode`, `RuntimeCallbacksPassed`, `RuntimeKeyboardPassed`,
 `ProviderWriteCanSeek`, `CleanupSucceeded`,
 `GrantWasPreexisting`, `GrantReleased`, `ErrorType`, `Detail`, and `UpdatedUtc`.
 `Terminal: false` means progress, **not** an overall pass. Only a mode's terminal
 marker with `Terminal: true` is a completed outcome. Do not mistake
-`JNI_PASSED`, `BINARY_PASSED`, or `CLEANUP_PASSED` for `FULL_PASSED`.
+`RUNTIME_INIT_PASSED`, `JNI_PASSED`, `BINARY_PASSED`, or `CLEANUP_PASSED` for
+`FULL_PASSED`.
 
 Each local file write uses `FileStream.Flush(true)`. These are ordinary local
 files, not provider streams. The files are not a transaction: process death
@@ -277,7 +310,8 @@ evidence.
 
 ## Minimum implemented checks
 
-Before opening the picker:
+All modes first run the shared production startup regressions described above.
+Modes other than `jar` also run the following checks before opening any picker:
 
 1. A result field and `FILE_SYSTEM_DEVICE_IL2CPP_PASSED` verify the **actual**
    `ENABLE_IL2CPP` compilation flag. Defining an unrelated validation symbol is
@@ -354,7 +388,8 @@ Full and replay storage checks:
 ## Markers, failure handling, and safety limits
 
 The screen and logcat use `FILE_SYSTEM_DEVICE_*_(READY|PASSED|FAILED)` markers.
-Important intermediate markers are `BOOT_READY`, `IL2CPP_PASSED`, `JNI_PASSED`,
+Important intermediate markers are `BOOT_READY`, `IL2CPP_PASSED`,
+`RUNTIME_INIT_PASSED`, `JNI_PASSED`,
 `BACKGROUND_JNI_PASSED`, `UI_CALLBACK_PASSED`, `PICKER_READY`,
 `PERSISTED_GRANT_PASSED`, `BINARY_PASSED`, `MOVE_PASSED`, `TIMESTAMP_PASSED`,
 `ENUMERATION_PASSED`, `RENAME_PASSED`, `STREAM_PASSED`, `APPEND_PASSED`,

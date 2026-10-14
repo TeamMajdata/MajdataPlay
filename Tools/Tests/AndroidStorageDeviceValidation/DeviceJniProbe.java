@@ -1,13 +1,17 @@
 package net.majdata.validation;
 
 import android.content.Intent;
+import android.app.Activity;
+import android.content.pm.PackageInfo;
 import android.content.res.AssetFileDescriptor;
 import android.os.Build;
+import android.os.Looper;
 import android.os.Process;
 import android.os.ParcelFileDescriptor;
 import android.system.Os;
 
 import com.unity3d.player.UnityPlayer;
+import net.majdata.majdataplay.MajdataPlayActivity;
 import net.majdata.majdataplay.StorageAccess;
 
 import java.io.File;
@@ -16,6 +20,7 @@ import java.io.IOException;
 import java.io.RandomAccessFile;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
+import java.lang.reflect.Method;
 import android.view.KeyEvent;
 
 /** Small real-JVM inputs for the generated JNI/IL2CPP device validation, never a storage substitute. */
@@ -72,6 +77,64 @@ public final class DeviceJniProbe
     public static int getSdkInt()
     {
         return Build.VERSION.SDK_INT;
+    }
+
+    /** @return the actual installed validation package's target SDK from Android's package metadata. */
+    public static int getTargetSdkVersion()
+    {
+        return UnityPlayer.currentActivity.getApplicationInfo().targetSdkVersion;
+    }
+
+    /** @return the actual installed validation package's version code; @throws Exception if its metadata is unavailable. */
+    public static long getVersionCode() throws Exception
+    {
+        Activity activity = UnityPlayer.currentActivity;
+        PackageInfo info = activity.getPackageManager().getPackageInfo(activity.getPackageName(), 0);
+        return Build.VERSION.SDK_INT >= 28 ? info.getLongVersionCode() : info.versionCode;
+    }
+
+    /**
+     * Invokes the production activity callbacks without opening a picker or changing any URI grant.
+     * The original launch intent is restored even if a callback fails. Protected callbacks are reached
+     * through reflection so no validation-only hooks are added to the production activity.
+     * @param extraName the inert extra key observed by the managed validation subscriber
+     * @param sentinel the unique value for this invocation
+     * @param requestCode an otherwise unused request code for the non-null result; the null result uses its successor
+     * @throws Exception if this is not the UI thread, the production activity is absent, or a callback fails
+     */
+    public static void dispatchRuntimeCallbacks(String extraName, String sentinel, int requestCode) throws Exception
+    {
+        require(Looper.myLooper() == Looper.getMainLooper(), "Activity callbacks must run on Android's UI thread.");
+        Activity activity = UnityPlayer.currentActivity;
+        require(activity instanceof MajdataPlayActivity, "The validation launcher is not the production activity.");
+        Intent original = activity.getIntent();
+        Method newIntent = MajdataPlayActivity.class.getDeclaredMethod("onNewIntent", Intent.class);
+        Method activityResult = MajdataPlayActivity.class.getDeclaredMethod("onActivityResult", int.class, int.class, Intent.class);
+        newIntent.setAccessible(true);
+        activityResult.setAccessible(true);
+        try
+        {
+            newIntent.invoke(activity, new Intent(original).putExtra(extraName, sentinel));
+            activityResult.invoke(activity, requestCode, Activity.RESULT_OK, new Intent().putExtra(extraName, sentinel));
+            activityResult.invoke(activity, requestCode + 1, Activity.RESULT_CANCELED, null);
+        }
+        finally
+        {
+            activity.setIntent(original);
+        }
+    }
+
+    /**
+     * Posts a real key event through the production activity's registered keyboard callback.
+     * @param action the Android key action, normally ACTION_DOWN or ACTION_UP
+     * @param keyCode the Android key code to deliver
+     * @throws IllegalStateException if the validation launcher is not the production activity
+     */
+    public static void dispatchRuntimeKeyEvent(int action, int keyCode)
+    {
+        Activity activity = UnityPlayer.currentActivity;
+        require(activity instanceof MajdataPlayActivity, "The validation launcher is not the production activity.");
+        activity.runOnUiThread(() -> activity.dispatchKeyEvent(new KeyEvent(action, keyCode)));
     }
 
     /** @return the current Linux process ID used to distinguish replay from the picker process. */

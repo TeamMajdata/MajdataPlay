@@ -19,48 +19,71 @@ namespace MajdataPlay.Platform.Android
         public static event EventHandler<Intent?>? OnNewIntent;
         public static event OnActivityResultCallback? OnActivityResult;
 
-        public static Activity CurrentActivity { get => MajdataPlayActivity.GetCurrentActivity()!; }
+        /// <summary>Gets a fresh owned reference to the current production activity.</summary>
+        /// <remarks>The caller must dispose the returned wrapper after use.</remarks>
+        /// <exception cref="InvalidOperationException">The activity has not been created.</exception>
+        /// <exception cref="PlatformNotSupportedException">Execution is outside an Android player.</exception>
+        public static Activity CurrentActivity
+        {
+            get
+            {
+                return MajdataPlayActivity.GetCurrentActivity()
+                    ?? throw new InvalidOperationException("The Android activity has not been created.");
+            }
+        }
 
+        /// <summary>Gets whether metadata and all production activity callbacks initialized successfully.</summary>
+        public static bool IsInitialized { get; private set; }
+        /// <summary>Gets the installed application's Android version code after initialization.</summary>
         public static long VersionCode { get; private set; }
+        /// <summary>Gets the running Android SDK level after initialization.</summary>
         public static int SdkVersion { get; private set; }
+        /// <summary>Gets the installed application's target SDK level after initialization.</summary>
         public static int TargetSdkVersion { get; private set; }
 
 
-        private static readonly OnNewIntentCallbackProxy s_onNewIntentCallbackProxy = new();
-        private static readonly OnActivityResultCallbackProxy s_onActivityResultCallbackProxy = new();
+        /// <summary>Keeps the registered new-intent proxy alive for the Java activity's lifetime.</summary>
+        private static OnNewIntentCallbackProxy? s_onNewIntentCallbackProxy;
+        /// <summary>Keeps the registered activity-result proxy alive for the Java activity's lifetime.</summary>
+        private static OnActivityResultCallbackProxy? s_onActivityResultCallbackProxy;
 
+        /// <summary>Registers production callbacks and publishes metadata only after initialization succeeds.</summary>
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
         private static void Init()
         {
+            IsInitialized = false;
 #if ANDROID_RUNTIME
+            VersionCode = 0;
+            SdkVersion = 0;
+            TargetSdkVersion = 0;
             MajDebug.LogInfo(nameof(AndroidRuntime), "Init");
             try
             {
-                var activityClass = MajdataPlayActivity.Class!;
                 MajDebug.LogInfo(nameof(AndroidRuntime), "Setting onNewIntent callback proxy");
-                activityClass.CallStatic("registerOnNewIntentCallback", s_onNewIntentCallbackProxy);
+                MajdataPlayActivity.RegisterOnNewIntentCallback(s_onNewIntentCallbackProxy ??= new OnNewIntentCallbackProxy());
                 MajDebug.LogInfo(nameof(AndroidRuntime), "Setting onActivityResult callback proxy");
-                activityClass.CallStatic("registerOnActivityResultCallback", s_onActivityResultCallbackProxy);
-                SdkVersion = Build_Version.SdkInt;
-                var appInfo = CurrentActivity.GetApplicationInfo()!;
-                var packageManager = CurrentActivity.GetPackageManager()!;
-                var packageInfo = packageManager!.GetPackageInfo(CurrentActivity.GetPackageName(), 0)!;
-                TargetSdkVersion = appInfo.TargetSdkVersion;
+                MajdataPlayActivity.RegisterOnActivityResultCallback(s_onActivityResultCallbackProxy ??= new OnActivityResultCallbackProxy());
+                var sdkVersion = Build_Version.SdkInt;
+                using var activity = CurrentActivity;
+                using var appInfo = activity.GetApplicationInfo()
+                    ?? throw new InvalidOperationException("The Android application metadata is unavailable.");
+                using var packageManager = activity.GetPackageManager()
+                    ?? throw new InvalidOperationException("The Android package manager is unavailable.");
+                using var packageInfo = packageManager.GetPackageInfo(activity.GetPackageName(), 0)
+                    ?? throw new InvalidOperationException("The Android package metadata is unavailable.");
+                var targetSdkVersion = appInfo.TargetSdkVersion;
+                var versionCode = sdkVersion >= 28 ? packageInfo.GetLongVersionCode() : packageInfo.VersionCode;
+                AndroidKeyboard.Init();
 
-                if (SdkVersion >= 28)
-                {
-                    VersionCode = packageInfo.GetLongVersionCode();
-                }
-                else
-                {
-                    VersionCode = packageInfo.VersionCode;
-                }
+                SdkVersion = sdkVersion;
+                TargetSdkVersion = targetSdkVersion;
+                VersionCode = versionCode;
+                IsInitialized = true;
 
                 MajDebug.LogInfo(nameof(AndroidRuntime), $"SdkVersion: {SdkVersion}");
                 MajDebug.LogInfo(nameof(AndroidRuntime), $"TargetSdkVersion: {TargetSdkVersion}");
                 MajDebug.LogInfo(nameof(AndroidRuntime), $"VersionCode: {VersionCode}");
 
-                AndroidKeyboard.Init();
                 MajDebug.LogInfo(nameof(AndroidRuntime), "Init finished");
             }
             catch (Exception ex)
@@ -69,6 +92,8 @@ namespace MajdataPlay.Platform.Android
             }
 #endif
         }
+        /// <summary>Forwards the borrowed Java intent to managed subscribers.</summary>
+        /// <param name="intent">The intent borrowed for the callback duration.</param>
         private static void Android_OnNewIntent(AndroidJavaObject intent)
         {
             if (OnNewIntent is not null)
@@ -76,6 +101,10 @@ namespace MajdataPlay.Platform.Android
                 OnNewIntent(null, new Intent(intent, false));
             }
         }
+        /// <summary>Forwards an activity result to managed subscribers.</summary>
+        /// <param name="requestCode">The request identifier supplied when launching the activity.</param>
+        /// <param name="resultCode">The Android activity result status.</param>
+        /// <param name="intent">The optional intent borrowed for the callback duration.</param>
         private static void Android_OnActivityResult(int requestCode, int resultCode, AndroidJavaObject? intent)
         {
             if (OnActivityResult is not null)
@@ -83,18 +112,29 @@ namespace MajdataPlay.Platform.Android
                 OnActivityResult(null, requestCode, resultCode, intent != null ? new Intent(intent, false) : null);
             }
         }
-        private class OnNewIntentCallbackProxy : AndroidJavaProxy
+        /// <summary>Adapts the production new-intent Java callback to the managed event.</summary>
+        private sealed class OnNewIntentCallbackProxy : AndroidJavaProxy
         {
-            public OnNewIntentCallbackProxy() : base("net.majdata.majdataplay.CSharpOnNewIntentCallback") { }
+            /// <summary>Creates a proxy for the production Java callback interface.</summary>
+            public OnNewIntentCallbackProxy() : base("net.majdata.majdataplay.CSharpOnNewIntentCallback")
+            {
+            }
 
+            /// <summary>Receives new intents from Java without losing the method to managed stripping.</summary>
+            /// <param name="intent">The intent borrowed for the callback duration.</param>
+            [UnityEngine.Scripting.Preserve]
             public void OnNewIntent(AndroidJavaObject intent)
             {
                 Android_OnNewIntent(intent);
             }
         }
-        private class OnActivityResultCallbackProxy : AndroidJavaProxy
+        /// <summary>Adapts the production activity-result Java callback to the managed event.</summary>
+        private sealed class OnActivityResultCallbackProxy : AndroidJavaProxy
         {
-            public OnActivityResultCallbackProxy() : base("net.majdata.majdataplay.CSharpOnActivityResultCallback") { }
+            /// <summary>Creates a proxy for the production Java callback interface.</summary>
+            public OnActivityResultCallbackProxy() : base("net.majdata.majdataplay.CSharpOnActivityResultCallback")
+            {
+            }
 
             /// <summary>Forwards Java activity results to managed subscribers, including SAF picker requests.</summary>
             /// <param name="requestCode">The request identifier supplied when launching the activity.</param>

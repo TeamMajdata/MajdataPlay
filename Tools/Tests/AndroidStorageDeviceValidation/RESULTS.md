@@ -1,6 +1,84 @@
 # Android storage / generated JNI / IL2CPP validation results
 
-## Executed 2026-10-14: APK jar resources, ARM64 and ARMv7
+## Executed 2026-10-14: production initialization fix and APK jar resources, ARM64 and ARMv7
+
+A fresh universal APK was built with Unity **6000.3.17f1**, standalone CLI Java
+bindings, **IL2CPP**, **Release** native compilation, and **High managed stripping**.
+It uses the production `AndroidRuntime`, `MajdataPlayActivity`, and
+`AndroidKeyboard`; keyboard registration is no longer replaced by a stub.
+The dedicated package is `net.majdata.storagevalidation`; the main game was
+not rebuilt or replaced.
+
+APK SHA-256:
+`47D19538820296AB417161992334E606C4642442364E8EACBA418D78BDD16C59`.
+The APK is **31,127,918 bytes** and contains ARM64 and ARMv7 native libraries.
+The local APK hash also matched the installed `base.apk` after device execution.
+
+| Installed ABI | Actual process architecture | Pointer size | PID | Completed jar groups | Terminal result |
+| --- | --- | ---: | ---: | ---: | --- |
+| arm64-v8a | Arm64 | 8 bytes | 11041 | 8 | `FILE_SYSTEM_DEVICE_JAR_PASSED` |
+| armeabi-v7a | Arm | 4 bytes | 11656 | 8 | `FILE_SYSTEM_DEVICE_JAR_PASSED` |
+
+Both processes ran on the physical **Xiaomi Mi MIX 2S**, Android **API 35**.
+Each result records `Terminal: true`, `Mode: "jar"`, `EnableIl2Cpp: true`,
+`RuntimeInitialized: true`, `RuntimeCallbacksPassed: true`, and
+`RuntimeKeyboardPassed: true`. Production metadata reports SDK **35**, target
+SDK **35**, and version code **1**, matching direct generated queries.
+
+The new shared startup regression verifies:
+
+- Production initialization completes all three generated callback registrations
+  and publishes metadata matching direct queries.
+- The production activity delivers a new intent with the expected payload and
+  activity results with both non-null and null intents to managed subscribers.
+- Real activity key-down and key-up dispatch updates the production keyboard's
+  A-key state; High stripping preserves all three Java-invoked proxy methods.
+- `FILE_SYSTEM_DEVICE_RUNTIME_INIT_PASSED` precedes the eight jar-resource groups,
+  followed by `FILE_SYSTEM_DEVICE_JAR_PASSED`, with `StreamingAssetsIsJar: true`,
+  `JarDeflateChecked: true`, and `CleanupSucceeded: true`.
+
+For each ABI, the runner matched the fresh launch identifier, current PID, selected mode,
+requested pointer size, IL2CPP flag, all startup/callback flags, metadata, eight
+jar groups, cleanup, and terminal marker. Logs show both Android runtime and
+keyboard initialization finishing, with no `Init failed`, `NoSuchMethodError`,
+or JNI error/warning markers.
+Jar-resource coverage remains the same eight groups detailed in the earlier
+entry below; no UnityWebRequest, picker, or grant changes are involved.
+
+Ignored evidence under `Temp/AndroidStorageDeviceValidation/DeviceResults/`:
+
+- `arm64-v8a-jar-72ab0a236ac34bf78e9a672243ad8d3a.json` and its `.log`.
+- `armeabi-v7a-jar-ac32900420fd4f00ac39aae0d76ae99b.json` and its `.log`.
+- `android-runtime-init-evidence.json`: matching byte hashes for seven production/
+  test sources and their staged copies, result/log hashes for both runs, local
+  and installed APK hashes, and the main/device wrapper DLL hashes.
+
+The same revision also passed isolated Unity **6000.3.17f1 Editor Mono** checks
+with the production runtime, real keyboard, and regenerated main wrapper DLL:
+`FILE_SYSTEM_UNITY_PASSED` covers local/jar smoke, generated wrappers, Editor JNI
+guards, and picker cancellation/concurrency regressions.
+`FILE_SYSTEM_PLAYER_COMPILE_PASSED: Android` confirms Android Player script
+compilation. The log is `Temp/FileSystemUnityValidation/jar-validation.log`;
+these Editor and compilation checks are separate from the IL2CPP device runs.
+
+Reproduce with the build and per-ABI `jar` commands in `README.md`. The APK remains
+at `Temp/AndroidStorageDeviceValidation/Artifacts/storage-validation-Both.apk`;
+the build log is `Temp/AndroidStorageDeviceValidation/build.log`. These paths
+are mutable local outputs, so match the recorded hash and run identifiers.
+
+These fresh `jar` runs cover production initialization and the controlled
+callback bridge in the isolated player. They do not renew the broader JNI,
+descriptor-stream, or full/replay/release SAF suites, or establish full-game
+scene behavior, physical keyboard hardware, other Android versions/devices,
+Android Mono, or non-development/minified players.
+
+## Executed 2026-10-14, before the initialization fix: APK jar resources, ARM64 and ARMv7
+
+These earlier runs completed the eight jar-resource groups below, but did not
+assert successful `AndroidRuntime.Init`. Both retained logs contain an
+initialization `NoSuchMethodError` while registering the new-intent callback;
+keyboard initialization was also stubbed. Their resource results remain valid,
+but must not be cited as successful production startup or callback validation.
 
 A fresh universal APK was built with Unity **6000.3.17f1** and executed on a
 physical **Xiaomi Mi MIX 2S**, Android **API 35**, in both native ABIs. The isolated
@@ -83,9 +161,11 @@ The ignored `Temp/AndroidStorageDeviceValidation/DeviceResults/` contains:
 - `arm64-v8a-jar-820573cbfa3747e7aef54218325aaf91.json` and its `.log`.
 - `armeabi-v7a-jar-9d175244eb564a5186c9d8abdca05e08.json` and its `.log`.
 
-The APK is at
+At the time of these earlier runs, the APK was at
 `Temp/AndroidStorageDeviceValidation/Artifacts/storage-validation-Both.apk`,
-with the build log at `Temp/AndroidStorageDeviceValidation/build.log`. Generated
+with the build log at `Temp/AndroidStorageDeviceValidation/build.log`. The latest
+build replaces those mutable outputs; use the hash in this entry to identify
+the historical APK. Generated
 projects, APKs, raw process logs, and durable result files remain ignored.
 No device serial, private document URI, or grant-state contents are included here.
 

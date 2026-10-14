@@ -55,12 +55,36 @@ the library locally; use `--build-wrapper` above to install it into Unity.
 ## Ownership and validation
 
 Generated helpers, `.g.cs` files, the ownership manifest, local configuration,
-build output, and the installed DLL/XML are ignored by Git. Keep the project,
+and intermediate build output are ignored by Git. The installed DLL/XML are
+tracked Git LFS assets updated by the standalone build. Keep the project,
 handwritten `.e.cs` extensions, and the DLL importer `.meta` tracked. The installer
 preserves the DLL GUID and skips identical output. A failed build retains the
 previous installed DLL. Former manifest-owned Unity wrapper sources and paired
 metadata are retired after successful publication; modified or unowned files are
 preserved or rejected by ownership checks.
+
+Generated `.Class` properties return fresh owned `AndroidJavaObject` references
+to Java `java.lang.Class` objects. Dispose each result after using it for Java
+reflection or a `Class` parameter. These objects are not `AndroidJavaClass`
+receivers for Unity's `CallStatic`; use the generated static methods with their
+exact JNI descriptors.
+
+`src/Bindings/Net/Majdata/Majdataplay/MajdataPlayActivity.e.cs` adapts
+`AndroidJavaProxy` arguments for the generated `RegisterOnNewIntentCallback`,
+`RegisterOnActivityResultCallback`, and `RegisterDispatchKeyEventCallback` methods.
+The overloads create the Java proxy, borrow its reference through the generated
+callback-interface wrapper, and invoke the typed registration method. They
+dispose the temporary wrappers/global references and delete the local reference
+after registration. Callers must keep the managed proxy alive while Java uses
+it; the production runtime and keyboard hold static references for this purpose.
+
+`AndroidRuntime.IsInitialized` reports completion of SDK/application metadata
+and all production registrations, including the real keyboard callback. The
+storage device harness checks this state, metadata, new-intent and nullable
+activity-result dispatch, and key-down/key-up dispatch before emitting the
+intermediate `RUNTIME_INIT_PASSED` marker. A completed device regression also
+requires the selected mode's terminal result with fresh run/ABI evidence; consult
+`../Tests/AndroidStorageDeviceValidation/README.md` and its dated `RESULTS.md`.
 
 See `../Tests/AndroidJavaWrapperGeneratorValidation/README.md` for managed
 regressions and the isolated Unity refresh smoke test. These checks do not establish

@@ -27,15 +27,3 @@ namespace MajdataPlay.Diagnostics
         }
     }
 }
-
-namespace MajdataPlay.Platform.Android.IO
-{
-    /// <summary>Leaves keyboard hardware initialization outside the storage/JNI validation scope.</summary>
-    public static class AndroidKeyboard
-    {
-        /// <summary>Does not register an unrelated physical keyboard callback.</summary>
-        public static void Init()
-        {
-        }
-    }
-}

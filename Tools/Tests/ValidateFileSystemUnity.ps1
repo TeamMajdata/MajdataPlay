@@ -54,8 +54,8 @@ foreach ($name in @('AndroidJni.cs', 'JavaInvocationException.cs', 'JavaClassAtt
     }
 }
 Get-ChildItem -LiteralPath (Join-Path $androidSource 'Storage') -Filter '*.cs' -File | Copy-Item -Destination $android
-# Stage the real enum, but retain the narrow AndroidKeyboard double used by storage validation.
-foreach ($name in @('IO/KeyCode.cs', 'IO/KeyCode.cs.meta')) {
+# Stage the production keyboard callback and enum so startup wiring is not replaced by a double.
+foreach ($name in @('IO/KeyCode.cs', 'IO/KeyCode.cs.meta', 'IO/AndroidKeyboard.cs', 'IO/AndroidKeyboard.cs.meta')) {
     Copy-Item -LiteralPath (Join-Path $androidSource $name) -Destination $android -Force
 }
 # Replace only the verified Runtime staging directory so obsolete bindings cannot survive a prior run.

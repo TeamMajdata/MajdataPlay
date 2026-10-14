@@ -79,6 +79,7 @@ foreach ($name in @('AndroidJni.cs', 'JavaInvocationException.cs', 'JavaClassAtt
 }
 Get-ChildItem -LiteralPath (Join-Path $androidSource 'Storage') -Filter '*.cs' -File | Copy-Item -Destination $android -Force
 Copy-Item -LiteralPath (Join-Path $androidSource 'IO/KeyCode.cs') -Destination $android -Force
+Copy-Item -LiteralPath (Join-Path $androidSource 'IO/AndroidKeyboard.cs') -Destination $android -Force
 # Remove only this generated staging directory, after verifying its absolute boundary.
 $runtime = [IO.Path]::GetFullPath((Join-Path $android 'Runtime'))
 $projectPrefix = $project.TrimEnd([IO.Path]::DirectorySeparatorChar) + [IO.Path]::DirectorySeparatorChar

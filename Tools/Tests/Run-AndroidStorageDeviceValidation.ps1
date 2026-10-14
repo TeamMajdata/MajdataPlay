@@ -86,6 +86,11 @@ do {
                     if (!$ObserveOnly -and $result.RunId -ne $runId) {
                         throw 'The durable result does not match this launch identifier.'
                     }
+                    if (!$result.RuntimeInitialized -or !$result.RuntimeCallbacksPassed -or !$result.RuntimeKeyboardPassed -or
+                        $result.RuntimeSdkVersion -ne $result.SdkInt -or $result.RuntimeTargetSdkVersion -ne 35 -or
+                        $result.RuntimeVersionCode -le 0) {
+                        throw 'The durable result does not confirm production runtime initialization and activity/keyboard callbacks.'
+                    }
                     if ($Mode -eq 'jar' -and (!$result.StreamingAssetsIsJar -or !$result.JarDeflateChecked -or
                         !$result.CleanupSucceeded -or $result.JarCheckGroups -ne 8)) {
                         throw 'The durable result does not confirm all jar groups, deflate reads, or scratch cleanup.'

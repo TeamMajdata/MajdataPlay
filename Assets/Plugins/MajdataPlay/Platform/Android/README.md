@@ -53,8 +53,9 @@ and references the pinned Unity managed modules. The compiled
 `MajdataPlay.Platform.Android.Runtime.dll` is installed directly in this Android
 plugin directory; Unity imports the DLL for Editor and Android.
 
-Generated sources, the ownership manifest, local reference configuration, and
-DLL/XML output stay local and are ignored by Git. Handwritten partial extensions
+Generated sources, the ownership manifest, and local reference configuration
+stay local and are ignored by Git. The installed DLL/XML are tracked Git LFS
+assets and are updated by the standalone build. Handwritten partial extensions
 such as `src/Bindings/Android/App/Activity.e.cs` and the numeric conversions are
 tracked beside `.g.cs` files. The DLL importer `.meta` remains tracked and retains
 its GUID across rebuilds. The legacy generator's runtime fixtures
@@ -101,6 +102,26 @@ existing callback reference. Java interfaces use `I`-prefixed contracts and
 reference wrapper classes; a C# interface implementation does not create a Java
 callback proxy. The tracked Activity extension adapts `AndroidJavaRunnable`.
 
+Each generated `.Class` access returns a fresh owned `AndroidJavaObject`
+representing a Java `java.lang.Class` object. Use it for Java reflection or
+`Class` parameters and dispose it after use. It is not an `AndroidJavaClass`
+receiver for Unity's `CallStatic`; call the generated static methods instead.
+
+The tracked `MajdataPlayActivity.e.cs` extension supplies `AndroidJavaProxy`
+overloads for `RegisterOnNewIntentCallback`, `RegisterOnActivityResultCallback`,
+and `RegisterDispatchKeyEventCallback`. Each overload creates a Java proxy,
+borrows it through the generated callback-interface wrapper, and invokes the
+typed registration method with its exact JNI descriptor. Temporary wrappers,
+global references, and local references are released after registration. The
+production runtime and keyboard keep the managed proxies rooted for the Java
+activity's lifetime; Java retains the registered callbacks.
+
+`AndroidRuntime.IsInitialized` becomes true only after SDK/application metadata
+and all three callback registrations, including the real `AndroidKeyboard`,
+complete successfully. Failed initialization leaves it false and logs the
+exception. The current activity and metadata queries return owned references,
+which initialization disposes after use.
+
 The SAF backend uses typed bindings in `Bindings/Android` and
 `Bindings/Net/Majdata/Majdataplay`. Java nested types are flattened as
 `StorageAccess_Result`, `StorageAccess_Entry`, `StorageAccess_CursorHandle`, and
@@ -122,7 +143,15 @@ platform guards, and selected Player compilation in an isolated project.
 
 The Android storage and FFmpeg device harnesses generate fresh CLI bindings and
 compile an isolated wrapper DLL including their own test Java APIs and extensions.
-Build and run them separately for each required ABI. Historical device results
-predate this wrapper migration; managed compilation and Editor checks do not
-establish JNI, provider, native FFmpeg, IL2CPP, ARMv7/ARM64, or physical-device
-runtime correctness.
+Build and run them separately for each required ABI. Match each dated result
+to its binding implementation, APK, and executed scope; managed compilation
+and Editor checks do not establish JNI, provider, native FFmpeg, IL2CPP,
+ARMv7/ARM64, or physical-device runtime correctness.
+
+The storage device harness now stages the production keyboard and requires
+`AndroidRuntime.IsInitialized`, matching package metadata, new-intent callbacks,
+non-null and null activity results, and key-down/key-up callbacks before emitting
+`RUNTIME_INIT_PASSED`. This is an intermediate regression marker; require the
+selected mode's terminal result and matching run/ABI evidence for a completed
+device run. See `Tools/Tests/AndroidStorageDeviceValidation/README.md` and its
+dated `RESULTS.md` for commands and executed coverage.

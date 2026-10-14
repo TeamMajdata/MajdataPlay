@@ -16,6 +16,8 @@ using MajdataPlay.Platform.Android.Runtime;
 using MajdataPlay.Platform.Android.Storage;
 using UnityEngine;
 using Activity = MajdataPlay.Platform.Android.Runtime.Bindings.Android.App.Activity;
+using AndroidKeyboard = MajdataPlay.Platform.Android.IO.AndroidKeyboard;
+using AndroidKeyCode = MajdataPlay.Platform.Android.IO.KeyCode;
 using DeviceJniProbe = MajdataPlay.Platform.Android.Runtime.Bindings.Net.Majdata.Validation.DeviceJniProbe;
 using DocumentStream = MajdataPlay.Platform.Android.Runtime.Bindings.Net.Majdata.Majdataplay.StorageAccess_StreamHandle;
 using Intent = MajdataPlay.Platform.Android.Runtime.Bindings.Android.Content.Intent;
@@ -119,15 +121,31 @@ namespace MajdataPlay.Platform.Android.Runtime.Validation
                 _mode = InvokeAttached(ReadMode);
                 _result.Mode = _mode;
                 Require(_mode == "full" || _mode == "replay" || _mode == "release" || _mode == "streams" || _mode == "jar", "Unknown validationMode.");
+                InvokeAttached(() =>
+                {
+                    _result.SdkInt = DeviceJniProbe.GetSdkInt();
+                    _result.ProcessId = DeviceJniProbe.GetProcessId();
+                    _result.RuntimeInitialized = AndroidRuntime.IsInitialized;
+                    _result.RuntimeSdkVersion = AndroidRuntime.SdkVersion;
+                    _result.RuntimeTargetSdkVersion = AndroidRuntime.TargetSdkVersion;
+                    _result.RuntimeVersionCode = AndroidRuntime.VersionCode;
+                    Require(DeviceJniProbe.Is64Bit() == (IntPtr.Size == 8), "Java and managed process bitness disagree.");
+                    Require(_result.RuntimeInitialized, "Production AndroidRuntime.Init did not complete successfully.");
+                    Require(_result.RuntimeSdkVersion == _result.SdkInt, "AndroidRuntime SDK version differs from the running device.");
+                    Require(_result.RuntimeTargetSdkVersion == 35 &&
+                        _result.RuntimeTargetSdkVersion == DeviceJniProbe.GetTargetSdkVersion(),
+                        "AndroidRuntime target SDK differs from the installed validation package's target API 35.");
+                    Require(_result.RuntimeVersionCode > 0 && _result.RuntimeVersionCode == DeviceJniProbe.GetVersionCode(),
+                        "AndroidRuntime version code differs from the installed validation package.");
+                    return true;
+                });
+                await CheckRuntimeCallbacksAsync(cancellationToken);
+                _result.RuntimeCallbacksPassed = true;
+                await CheckRuntimeKeyboardAsync(cancellationToken);
+                _result.RuntimeKeyboardPassed = true;
+                Mark("RUNTIME_INIT_PASSED", "Production AndroidRuntime initialization, package metadata, new-intent, nullable activity-result and keyboard down/up callbacks passed.");
                 if (_mode == "jar")
                 {
-                    InvokeAttached(() =>
-                    {
-                        _result.SdkInt = DeviceJniProbe.GetSdkInt();
-                        _result.ProcessId = DeviceJniProbe.GetProcessId();
-                        Require(DeviceJniProbe.Is64Bit() == (IntPtr.Size == 8), "Java and managed process bitness disagree.");
-                        return true;
-                    });
                     await CheckJarStorageAsync(cancellationToken);
                     Mark("JAR_PASSED", _result.JarCheckGroups + " packaged-resource groups passed; owned local extraction and deflate fixtures removed; no picker or grants used.", true);
                     return;
@@ -135,9 +153,6 @@ namespace MajdataPlay.Platform.Android.Runtime.Validation
                 InvokeAttached(() =>
                 {
                     CheckJni();
-                    _result.SdkInt = DeviceJniProbe.GetSdkInt();
-                    _result.ProcessId = DeviceJniProbe.GetProcessId();
-                    Require(DeviceJniProbe.Is64Bit() == (IntPtr.Size == 8), "Java and managed process bitness disagree.");
                     return true;
                 });
                 Mark("JNI_PASSED", "Typed constructors, references, signed bytes, UTF-16 and cleared Java exceptions passed.");
@@ -758,6 +773,150 @@ namespace MajdataPlay.Platform.Android.Runtime.Validation
             Require(key.GetAction() == KeyEvent.ActionDown, "Object equality checks disposed a borrowed reference's owner.");
         }
 
+        /// <summary>Dispatches inert events through the real activity and verifies the production runtime's registered proxies.</summary>
+        /// <param name="cancellationToken">The owner-lifetime token.</param>
+        /// <returns>A task completing after new-intent, non-null result and null-result callbacks reach managed subscribers.</returns>
+        /// <exception cref="TimeoutException">Android does not execute the callbacks within ten seconds.</exception>
+        /// <exception cref="OperationCanceledException">The component is destroyed.</exception>
+        /// <exception cref="InvalidOperationException">The activity or registered runtime callbacks do not produce the expected events.</exception>
+        /// <exception cref="JavaInvocationException">Java rejects activity dispatch or a validation callback fails.</exception>
+        /// <exception cref="AndroidJavaException">Unity cannot create or schedule the UI callback proxy.</exception>
+        private async Task CheckRuntimeCallbacksAsync(CancellationToken cancellationToken)
+        {
+            const string extraName = "runtimeValidationSentinel";
+            const int requestCode = 0x4D4A;
+            var sentinel = "runtime-" + _result.RunId;
+            var newIntentCount = 0;
+            var resultCount = 0;
+            var nullResultCount = 0;
+            var completion = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            EventHandler<Intent?> onNewIntent = (sender, intent) =>
+            {
+                try
+                {
+                    if (intent?.GetStringExtra(extraName) == sentinel)
+                    {
+                        newIntentCount++;
+                    }
+                }
+                catch (Exception exception)
+                {
+                    completion.TrySetException(exception);
+                }
+            };
+            OnActivityResultCallback onActivityResult = (sender, receivedRequestCode, resultCode, intent) =>
+            {
+                if (receivedRequestCode != requestCode && receivedRequestCode != requestCode + 1)
+                {
+                    return;
+                }
+                try
+                {
+                    if (receivedRequestCode == requestCode)
+                    {
+                        Require(resultCode == Activity.ResultOk && intent?.GetStringExtra(extraName) == sentinel,
+                            "The production activity-result callback did not preserve the non-null intent.");
+                        resultCount++;
+                    }
+                    else
+                    {
+                        Require(resultCode == Activity.ResultCanceled && intent is null,
+                            "The production activity-result callback did not preserve the null intent.");
+                        nullResultCount++;
+                    }
+                }
+                catch (Exception exception)
+                {
+                    completion.TrySetException(exception);
+                }
+            };
+            AndroidRuntime.OnNewIntent += onNewIntent;
+            AndroidRuntime.OnActivityResult += onActivityResult;
+            try
+            {
+                using var activity = UnityPlayer.CurrentActivity
+                    ?? throw new InvalidOperationException("Unity has no current activity.");
+                activity.RunOnUiThread(() =>
+                {
+                    try
+                    {
+                        DeviceJniProbe.DispatchRuntimeCallbacks(extraName, sentinel, requestCode);
+                        Require(newIntentCount == 1 && resultCount == 1 && nullResultCount == 1,
+                            "The real activity did not invoke each registered AndroidRuntime callback exactly once.");
+                        completion.TrySetResult(true);
+                    }
+                    catch (Exception exception)
+                    {
+                        // Never allow a managed exception to escape the native reverse-JNI callback.
+                        completion.TrySetException(exception);
+                    }
+                });
+                var winner = await Task.WhenAny(completion.Task, Task.Delay(10000, cancellationToken));
+                cancellationToken.ThrowIfCancellationRequested();
+                if (winner != completion.Task)
+                {
+                    throw new TimeoutException("The production AndroidRuntime callbacks did not complete.");
+                }
+                await completion.Task;
+            }
+            finally
+            {
+                AndroidRuntime.OnNewIntent -= onNewIntent;
+                AndroidRuntime.OnActivityResult -= onActivityResult;
+            }
+        }
+
+        /// <summary>Verifies that the production keyboard proxy changes state for real activity key-down and key-up dispatches.</summary>
+        /// <param name="cancellationToken">The owner-lifetime token.</param>
+        /// <returns>A task completing after the A key transitions from released to pressed and back to released.</returns>
+        /// <exception cref="InvalidOperationException">The test key was already pressed before validation.</exception>
+        /// <exception cref="TimeoutException">The registered keyboard proxy does not produce the expected state within ten seconds.</exception>
+        /// <exception cref="OperationCanceledException">The component is destroyed.</exception>
+        /// <exception cref="JavaInvocationException">Java rejects scheduling the key event.</exception>
+        private static async Task CheckRuntimeKeyboardAsync(CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            Require(!AndroidKeyboard.IsPressed(AndroidKeyCode.A), "The validation key must initially be released.");
+            try
+            {
+                InvokeAttached(() =>
+                {
+                    DeviceJniProbe.DispatchRuntimeKeyEvent(KeyEvent.ActionDown, (int)AndroidKeyCode.A);
+                    return true;
+                });
+                await WaitForRuntimeKeyboardStateAsync(true, cancellationToken);
+            }
+            finally
+            {
+                InvokeAttached(() =>
+                {
+                    DeviceJniProbe.DispatchRuntimeKeyEvent(KeyEvent.ActionUp, (int)AndroidKeyCode.A);
+                    return true;
+                });
+                await WaitForRuntimeKeyboardStateAsync(false, cancellationToken);
+            }
+        }
+
+        /// <summary>Waits for the Android UI callback to update the production A-key state.</summary>
+        /// <param name="expectedPressed">Whether the production key state must become pressed.</param>
+        /// <param name="cancellationToken">The owner-lifetime token.</param>
+        /// <returns>A task completing when the expected state becomes visible.</returns>
+        /// <exception cref="TimeoutException">The expected state is absent after ten seconds.</exception>
+        /// <exception cref="OperationCanceledException">The component is destroyed.</exception>
+        private static async Task WaitForRuntimeKeyboardStateAsync(bool expectedPressed, CancellationToken cancellationToken)
+        {
+            var deadline = DateTime.UtcNow.AddSeconds(10);
+            cancellationToken.ThrowIfCancellationRequested();
+            while (AndroidKeyboard.IsPressed(AndroidKeyCode.A) != expectedPressed)
+            {
+                if (DateTime.UtcNow >= deadline)
+                {
+                    throw new TimeoutException("The production keyboard callback did not update the expected key state.");
+                }
+                await Task.Delay(16, cancellationToken);
+            }
+        }
+
         /// <summary>Schedules a managed Runnable using the production adapter and generated Activity dispatch.</summary>
         /// <param name="cancellationToken">The owner-lifetime token.</param>
         /// <returns>A task completing after the callback or failing after ten seconds.</returns>
@@ -1217,6 +1376,18 @@ namespace MajdataPlay.Platform.Android.Runtime.Validation
             public int SdkInt;
             /// <summary>Records the current process ID.</summary>
             public int ProcessId;
+            /// <summary>Records that production initialization reached its successful terminal state.</summary>
+            public bool RuntimeInitialized;
+            /// <summary>Records the device SDK reported by the initialized production runtime.</summary>
+            public int RuntimeSdkVersion;
+            /// <summary>Records the installed package target SDK reported by the initialized production runtime.</summary>
+            public int RuntimeTargetSdkVersion;
+            /// <summary>Records the installed package version code reported by the initialized production runtime.</summary>
+            public long RuntimeVersionCode;
+            /// <summary>Records successful real-activity dispatch through the production runtime's registered callback proxies.</summary>
+            public bool RuntimeCallbacksPassed;
+            /// <summary>Records real activity key-down and key-up dispatch through the production keyboard's registered callback proxy.</summary>
+            public bool RuntimeKeyboardPassed;
             /// <summary>Records that the captured real Android StreamingAssets root used jar:file.</summary>
             public bool StreamingAssetsIsJar;
             /// <summary>Counts completed jar validation groups independently of intermediate phase markers.</summary>
