@@ -90,19 +90,6 @@ namespace MajdataPlay
         public static bool IsEditor { get; } = false;
 #endif
 
-#if UNITY_ANDROID // Android Only (Sdk Version Declare)
-        public static int AndroidSdkVersion
-        {
-            get;
-            private set;
-        }
-        public static int TargetSdkVersion
-        {
-            get;
-            private set;
-        }
-#endif
-
         /// <summary>Gets the local application data root, initialized before game services start.</summary>
         public static StorageDirectory RootPath { get; private set; } = null!;
         /// <summary>Gets the packaged or extracted streaming assets directory without creating it.</summary>
@@ -229,13 +216,6 @@ namespace MajdataPlay
             AssetsPath = FileSystem.Directory.Open(Application.streamingAssetsPath);
             CachePath = FileSystem.Directory.Open(Path.Combine(RootPath.Location, "Cache"));
 #elif UNITY_ANDROID
-            var versionClass = AndroidJNI.FindClass("android/os/Build$VERSION");
-            var fieldID = AndroidJNI.GetStaticFieldID(versionClass, "SDK_INT", "I");
-            AndroidSdkVersion = AndroidJNI.GetStaticIntField(versionClass, fieldID);
-            using var activity = AndroidRuntime.CurrentActivity;
-            using var appInfo = activity.GetApplicationInfo();
-            TargetSdkVersion = appInfo!.TargetSdkVersion;
-
             if (AndroidSdkVersion < 30 || TargetSdkVersion < 30) // < Android 11
             {
                 var androidStoragePermissions = new string[]

@@ -1,8 +1,13 @@
-﻿using MajdataPlay.Diagnostics;
+﻿#if UNITY_ANDROID && !UNITY_EDITOR
+#define ANDROID_RUNTIME
+#endif
+using MajdataPlay.Diagnostics;
 using MajdataPlay.Platform.Android.IO;
 using MajdataPlay.Platform.Android.Runtime.Bindings.Android.App;
 using MajdataPlay.Platform.Android.Runtime.Bindings.Android.Content;
+using MajdataPlay.Platform.Android.Runtime.Bindings.Android.Os;
 using MajdataPlay.Platform.Android.Runtime.Bindings.Com.Unity3d.Player;
+using MajdataPlay.Platform.Android.Runtime.Bindings.Net.Majdata.Majdataplay;
 using System;
 using UnityEngine;
 #nullable enable
@@ -14,9 +19,11 @@ namespace MajdataPlay.Platform.Android
         public static event EventHandler<Intent?>? OnNewIntent;
         public static event OnActivityResultCallback? OnActivityResult;
 
-        public static AndroidJavaClass MajdataPlayActivityClass { get; private set; } = null!;
-        public static Activity CurrentActivity { get => UnityPlayer.CurrentActivity!; }
+        public static Activity CurrentActivity { get => MajdataPlayActivity.GetCurrentActivity()!; }
 
+        public static long VersionCode { get; private set; }
+        public static int SdkVersion { get; private set; }
+        public static int TargetSdkVersion { get; private set; }
 
 
         private static readonly OnNewIntentCallbackProxy s_onNewIntentCallbackProxy = new();
@@ -25,19 +32,36 @@ namespace MajdataPlay.Platform.Android
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
         private static void Init()
         {
-#if UNITY_ANDROID && !UNITY_EDITOR
-            MajDebug.LogInfo($"[{nameof(AndroidRuntime)}] Init");
+#if !ANDROID_RUNTIME
+            MajDebug.LogInfo(nameof(AndroidRuntime), "Init");
             try
             {
-                MajdataPlayActivityClass = new AndroidJavaClass("net.majdata.majdataplay.MajdataPlayActivity");
-                MajDebug.LogInfo($"[{nameof(AndroidRuntime)}] Setting onNewIntent callback proxy");
-                MajdataPlayActivityClass.CallStatic("registerOnNewIntentCallback", s_onNewIntentCallbackProxy);
-                MajDebug.LogInfo($"[{nameof(AndroidRuntime)}] Setting onActivityResult callback proxy");
-                MajdataPlayActivityClass.CallStatic("registerOnActivityResultCallback", s_onActivityResultCallbackProxy);
+                var activityClass = MajdataPlayActivity.Class!;
+                MajDebug.LogInfo(nameof(AndroidRuntime), "Setting onNewIntent callback proxy");
+                activityClass.CallStatic("registerOnNewIntentCallback", s_onNewIntentCallbackProxy);
+                MajDebug.LogInfo(nameof(AndroidRuntime), "Setting onActivityResult callback proxy");
+                activityClass.CallStatic("registerOnActivityResultCallback", s_onActivityResultCallbackProxy);
+                SdkVersion = Build_Version.SdkInt;
+                var appInfo = CurrentActivity.GetApplicationInfo()!;
+                var packageManager = CurrentActivity.GetPackageManager()!;
+                var packageInfo = packageManager!.GetPackageInfo(CurrentActivity.GetPackageName(), 0)!;
+                TargetSdkVersion = appInfo.TargetSdkVersion;
 
-            
+                if (SdkVersion >= 28)
+                {
+                    VersionCode = packageInfo.GetLongVersionCode();
+                }
+                else
+                {
+                    VersionCode = packageInfo.VersionCode;
+                }
+
+                MajDebug.LogInfo(nameof(AndroidRuntime), $"SdkVersion: {SdkVersion}");
+                MajDebug.LogInfo(nameof(AndroidRuntime), $"TargetSdkVersion: {TargetSdkVersion}");
+                MajDebug.LogInfo(nameof(AndroidRuntime), $"VersionCode: {VersionCode}");
+
                 AndroidKeyboard.Init();
-                MajDebug.LogInfo($"[{nameof(AndroidRuntime)}] Init finished");
+                MajDebug.LogInfo(nameof(AndroidRuntime), "Init finished");
             }
             catch (Exception ex)
             {

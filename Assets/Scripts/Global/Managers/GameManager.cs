@@ -69,24 +69,6 @@ namespace MajdataPlay
         private async UniTask StartInternal()
         {
             await UniTask.CompletedTask;
-#if UNITY_ANDROID && !UNITY_EDITOR // Android Only (Sdk Version Log)
-            MajDebug.LogInfo($"AndroidSdkVersion: {MajEnv.AndroidSdkVersion}");
-            MajDebug.LogInfo($"TargetSdkVersion: {MajEnv.TargetSdkVersion}");
-            using var activity = AndroidRuntime.CurrentActivity;
-            using var packageManager = activity.GetPackageManager();
-            var packageName = activity.GetPackageName();
-            using var packageInfo = packageManager!.GetPackageInfo(packageName, 0)!;
-            var androidVersionCode = 0L;
-            if(MajEnv.AndroidSdkVersion >= 28)
-            {
-                androidVersionCode = packageInfo.GetLongVersionCode();
-            }
-            else
-            {
-                androidVersionCode = packageInfo.VersionCode;
-            }
-            MajDebug.LogInfo($"AndroidVerCode: {androidVersionCode}");
-#endif
 #if !UNITY_EDITOR
 #if UNITY_IOS
             await UniTask.DelayFrame(2); // wait UnitySendMessage
