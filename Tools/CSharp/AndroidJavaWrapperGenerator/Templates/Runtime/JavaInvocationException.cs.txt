@@ -2,7 +2,7 @@ using System;
 
 #nullable enable
 
-namespace __ROOT_NAMESPACE__.Runtime
+namespace __ROOT_NAMESPACE__
 {
     /// <summary>
     /// Reports a Java throwable after clearing the current thread's pending JVM exception.

@@ -1,10 +1,13 @@
 #nullable enable
 using System;
+using MajdataPlay.Platform.Android.Runtime;
 using System.IO;
 using System.Runtime.ExceptionServices;
 using MajdataPlay.IO.Storage;
-using MajdataPlay.Platform.Android.Runtime.Java.Lang;
-using MajdataPlay.Platform.Android.Runtime.Storage;
+using JavaObject = MajdataPlay.Platform.Android.Runtime.Bindings.Java.Lang.JavaObject;
+using StorageResult = MajdataPlay.Platform.Android.Runtime.Bindings.Net.Majdata.Majdataplay.StorageAccess_Result;
+using DocumentCursor = MajdataPlay.Platform.Android.Runtime.Bindings.Net.Majdata.Majdataplay.StorageAccess_CursorHandle;
+using DocumentStream = MajdataPlay.Platform.Android.Runtime.Bindings.Net.Majdata.Majdataplay.StorageAccess_StreamHandle;
 using UnityEngine;
 
 namespace MajdataPlay.Platform.Android.Storage
@@ -14,8 +17,26 @@ namespace MajdataPlay.Platform.Android.Storage
     /// </summary>
     internal static class AndroidDocumentBridge
     {
-        /// <summary>Bounds managed transfers to the Java bridge's generated chunk-size constant.</summary>
-        internal const int MaxTransferSize = StorageAccess.MaxTransferSize;
+        /// <summary>Matches StorageAccess.java MAX_TRANSFER_SIZE without initializing JNI before platform guards.</summary>
+        internal const int MaxTransferSize = 32768;
+
+        /// <summary>Matches the Java storage protocol status for a missing document.</summary>
+        internal const int NotFound = 2;
+
+        /// <summary>Matches the Java storage protocol status for successful operations.</summary>
+        private const int Success = 0;
+
+        /// <summary>Matches the Java storage protocol status for an invalid argument.</summary>
+        private const int InvalidArgument = 1;
+
+        /// <summary>Matches the Java storage protocol status for a missing parent directory.</summary>
+        private const int DirectoryNotFound = 3;
+
+        /// <summary>Matches the Java storage protocol status for denied access.</summary>
+        private const int AccessDenied = 4;
+
+        /// <summary>Matches the Java storage protocol status for an unsupported operation.</summary>
+        private const int Unsupported = 5;
 
         /// <summary>Rejects execution outside Android players without initializing Java.</summary>
         /// <exception cref="PlatformNotSupportedException">Execution is in the Editor or on another platform.</exception>
@@ -86,7 +107,7 @@ namespace MajdataPlay.Platform.Android.Storage
         internal static void CheckResult(StorageResult result, string? location = null, bool directoryOperation = false)
         {
             var code = result.ErrorCode;
-            if (code == StorageAccess.Success)
+            if (code == Success)
             {
                 return;
             }
@@ -94,19 +115,19 @@ namespace MajdataPlay.Platform.Android.Storage
                 ?? "The SAF provider failed.";
             switch (code)
             {
-                case StorageAccess.InvalidArgument:
+                case InvalidArgument:
                     throw new ArgumentException(message);
-                case StorageAccess.NotFound:
+                case NotFound:
                     if (directoryOperation)
                     {
                         throw new DirectoryNotFoundException(message);
                     }
                     throw new FileNotFoundException(message, location);
-                case StorageAccess.DirectoryNotFound:
+                case DirectoryNotFound:
                     throw new DirectoryNotFoundException(message);
-                case StorageAccess.AccessDenied:
+                case AccessDenied:
                     throw new UnauthorizedAccessException(message);
-                case StorageAccess.Unsupported:
+                case Unsupported:
                     throw new NotSupportedException(message);
                 default:
                     throw new IOException(message);

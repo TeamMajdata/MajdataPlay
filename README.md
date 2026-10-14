@@ -52,7 +52,7 @@ Simai is a maimai chart discription language developed by [Celeca](https://twitt
 
 - Unity Editor (version specified in ProjectSettings/ProjectVersion.txt), with Android Build Support (SDK API 36 and OpenJDK) for Java-wrapper generation, including desktop Editor imports
 
-- .NET 9 SDK for the independent Android Java source-generator build tool (not for building the Unity project)
+- .NET 9 SDK for the independent Android Java wrapper CLI (not for building the Unity project)
 
 - git
 
@@ -98,28 +98,30 @@ m_EditorVersion: 6000.3.17f1
 
 Install this version using Unity Hub.
 
-### Install the Android Java Source Generator
+### Generate the Android Java Bindings
 
-The storage backend uses generated C# wrappers during Unity script compilation.
-Build and install the ignored Roslyn analyzer before the first Unity import:
+The storage backend uses locally generated C# bindings during Unity script compilation.
+Generate them with the independent CLI before the first Unity import:
 
 ```powershell
-./Tools/CSharp/AndroidJavaGenerator/build.ps1 -Install
+dotnet run --project Tools/CSharp/AndroidJavaWrapperGenerator/AndroidJavaWrapperGenerator.csproj -- --project . --unity-data "C:/Program Files/Unity Editors/6000.3.17f1/Editor/Data" --no-docs
 ```
 
-The script builds only the explicitly provided independent tool under
-`Tools/CSharp/AndroidJavaGenerator/`, not a Unity-generated project.
-Pass `-UnityPath` for a non-default Editor installation. See
-`Tools/CSharp/AndroidJavaGenerator/README.md` for SDK/JDK discovery, restore prerequisites,
-and other-host setup. Fresh checkouts and CI need the same analyzer and Java
-extraction prerequisites; generated wrappers and analyzer binaries are not
-checked into the repository.
+This builds only the explicitly provided independent tool under
+`Tools/CSharp/AndroidJavaWrapperGenerator/`, not a Unity-generated project.
+Pass another `--unity-data` directory for a different installation and `--sdk`
+for a separately configured Android SDK. Fresh checkouts and CI need the same
+binding generation step. Generated runtime helpers and bindings remain local,
+while handwritten partial extensions are tracked under `Runtime/Bindings`.
+The project no longer requires the legacy Roslyn analyzer.
 
 The Editor command **Tools > MajdataPlay > Android > Regenerate Java wrappers**
 uses the independent `Tools/CSharp/AndroidJavaWrapperGenerator` CLI to generate
 the complete SDK/BCL plus Java inputs from `Assets/Plugins/Android` and the current
 Unity Android player. It runs in the background with official documentation and
-imports the successful output under `MajdataPlay.Platform.Android.Runtime.Bindings`.
+publishes JNI support into `Platform/Android/Runtime` and Java bindings into
+`Runtime/Bindings`, matching `MajdataPlay.Platform.Android.Runtime` and its
+`Bindings` namespace.
 Automatic Java asset refreshes reuse cached pages and fetch missing documentation. See
 `Assets/Plugins/MajdataPlay/Platform/Android/README.md` for output ownership,
 cancellation, setup, and the existing annotated wrappers.

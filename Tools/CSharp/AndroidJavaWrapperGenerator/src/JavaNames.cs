@@ -36,22 +36,23 @@ namespace MajdataPlay.Tools.AndroidJavaWrapperGenerator
             return separator < 0 ? string.Empty : binaryName.Substring(0, separator);
         }
 
-        /// <summary>Builds a package namespace below the configured root.</summary>
-        /// <param name="rootNamespace">The C# namespace prefix.</param>
+        /// <summary>Builds a package namespace below the configured root's Bindings namespace.</summary>
+        /// <param name="rootNamespace">The C# namespace containing the generated runtime types.</param>
         /// <param name="package">The dot-separated Java package.</param>
         /// <returns>The C# namespace with PascalCase package components.</returns>
         internal static string Namespace(string rootNamespace, string package)
         {
+            var bindingsNamespace = rootNamespace + ".Bindings";
             if (package.Length == 0)
             {
-                return rootNamespace;
+                return bindingsNamespace;
             }
             var components = package.Split('.');
             for (var index = 0; index < components.Length; index++)
             {
                 components[index] = PascalCase(components[index]);
             }
-            return rootNamespace + "." + string.Join(".", components);
+            return bindingsNamespace + "." + string.Join(".", components);
         }
 
         /// <summary>Flattens nested binary names without introducing C# nested types.</summary>

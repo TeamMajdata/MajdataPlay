@@ -2,7 +2,7 @@
 
 This is an **independent .NET 9 executable**, not a build of the Unity project's
 IDE-generated solution or project files. It links the production generator's
-directly maintained source files and production Android runtime sources. It uses
+directly maintained source files and archived legacy Android runtime fixtures. It uses
 **real Unity 6000.3.17f1** CoreModule and AndroidJNIModule assemblies; it does not
 substitute Unity or JNI stubs.
 
@@ -15,14 +15,21 @@ substitute Unity or JNI stubs.
 - Have the NuGet package **Microsoft.CodeAnalysis.CSharp 4.3.1** and its transitive
   dependencies cached. Restore uses only this directory as a package source;
   there is no implicit network restore or package upgrade.
-- Have the production files from the generator/runtime implementation available:
+- Have the generator sources and archived runtime fixtures available:
   - Tools/CSharp/AndroidJavaGenerator/src/**/*.cs
   - Tools/CSharp/AndroidJavaGenerator/Java/JavaApiExtractor.java
-  - Assets/Plugins/MajdataPlay/Platform/Android/JavaClassAttribute.cs
-  - Assets/Plugins/MajdataPlay/Platform/Android/JavaApiConfigurationAttribute.cs
-  - Assets/Plugins/MajdataPlay/Platform/Android/Runtime/Java/Lang/JavaObject.cs
-  - Assets/Plugins/MajdataPlay/Platform/Android/AndroidJni.cs
-  - Assets/Plugins/MajdataPlay/Platform/Android/JavaInvocationException.cs
+  - Fixtures/LegacyRuntime/JavaClassAttribute.cs
+  - Fixtures/LegacyRuntime/JavaApiConfigurationAttribute.cs
+  - Fixtures/LegacyRuntime/Runtime/Java/Lang/JavaObject.cs
+  - Fixtures/LegacyRuntime/AndroidJni.cs
+  - Fixtures/LegacyRuntime/JavaInvocationException.cs
+
+These runtime files are retained under this harness after production switched to
+the standalone AndroidJavaWrapperGenerator bindings. They are compiled only for
+legacy analyzer regressions, without installing them into the main Unity project.
+`Tools/Tests/ValidateAndroidJavaGeneratorUnity.ps1` stages the same archived files
+for isolated analyzer verification. Validate the current binding generator with
+`Tools/Tests/AndroidJavaWrapperGeneratorValidation` instead.
 
 No generated analyzer DLL installation is necessary. The installed analyzer DLL,
 its importer metadata, and the Unity build/install scripts are outside this
@@ -110,7 +117,7 @@ required for normal execution. A filter matching no cases is an error, not a pas
   reports failure, and continues the finite remaining cases. javac/jar have
   their own deadlines. Captured output is capped at one MiB per stream.
 - Workers instantiate the real AndroidJavaGenerator using CSharpGeneratorDriver.
-  CSharpCompilation includes all five production runtime sources, the actual
+  CSharpCompilation includes all five archived runtime sources, the actual
   Unity DLLs, and host trusted BCL assemblies. The harness assembly itself is
   excluded from dynamic compilation references to avoid masking missing types.
 - Positive output is semantically compiled and emitted to an in-memory DLL.

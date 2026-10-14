@@ -12,12 +12,12 @@ using MajdataPlay.SourceGenerators.AndroidJava;
 namespace MajdataPlay.Tests.AndroidJavaGeneratorValidation
 {
     /// <summary>
-    /// Compiles the actual production runtime and drives the actual linked generator in memory.
+    /// Compiles archived legacy runtime sources and drives the actual linked generator in memory.
     /// </summary>
     internal sealed class GeneratorRunner
     {
         /// <summary>
-        /// Lists the exact production runtime sources owned by the parent implementation.
+        /// Lists the archived runtime source paths retained for legacy generator regressions.
         /// </summary>
         private static readonly string[] s_runtimeFileNames =
         {
@@ -56,7 +56,7 @@ namespace MajdataPlay.Tests.AndroidJavaGeneratorValidation
         {
             _workspace = workspace;
             ParseOptions = new CSharpParseOptions(LanguageVersion.Preview, DocumentationMode.Diagnose);
-            var runtimeDirectory = Path.Combine(workspace.Options.RepositoryRoot, "Assets", "Plugins", "MajdataPlay", "Platform", "Android");
+            var runtimeDirectory = workspace.Options.LegacyRuntimeDirectory;
             _runtimeSources = s_runtimeFileNames.Select(name =>
             {
                 var path = Path.Combine(runtimeDirectory, name);
@@ -65,7 +65,7 @@ namespace MajdataPlay.Tests.AndroidJavaGeneratorValidation
             var trustedAssemblies = (string?)AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES")
                 ?? throw new InvalidOperationException("The host did not expose trusted BCL assemblies.");
             var paths = new HashSet<string>(trustedAssemblies.Split(Path.PathSeparator), StringComparer.OrdinalIgnoreCase);
-            // The harness assembly also contains the linked production runtime. Referencing it
+            // The harness assembly also contains the linked legacy runtime. Referencing it
             // would hide unresolved runtime dependencies and create duplicate type definitions.
             paths.Remove(typeof(GeneratorRunner).Assembly.Location);
             paths.RemoveWhere(path => Path.GetFileName(path).StartsWith("UnityEngine.", StringComparison.OrdinalIgnoreCase));

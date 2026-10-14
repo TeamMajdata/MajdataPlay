@@ -12,8 +12,19 @@ $version = [Diagnostics.FileVersionInfo]::GetVersionInfo($UnityPath).ProductVers
 if ($version -notmatch ('^' + [regex]::Escape($expected) + '(?:_|$)')) {
     throw "Use Unity $expected; the selected executable reports $version."
 }
-# Install the production analyzer before copying it into the isolated compilation.
-& (Join-Path $root 'Tools/CSharp/AndroidJavaGenerator/build.ps1') -Install -UnityPath $UnityPath
+# Build only the independent CLI using its pinned .NET SDK.
+$cliDirectory = Join-Path $root 'Tools/CSharp/AndroidJavaWrapperGenerator'
+Push-Location -LiteralPath $cliDirectory
+try {
+    & dotnet build 'AndroidJavaWrapperGenerator.csproj' --configuration Release --nologo
+    if ($LASTEXITCODE -ne 0) {
+        throw 'The independent Android Java wrapper CLI build failed.'
+    }
+}
+finally {
+    Pop-Location
+}
+$cliAssembly = Join-Path $cliDirectory 'bin/Release/net9.0/AndroidJavaWrapperGenerator.dll'
 $project = Join-Path $root 'Temp/FileSystemUnityValidation'
 $io = Join-Path $project 'Assets/IO'
 $android = Join-Path $project 'Assets/Android'
@@ -30,22 +41,24 @@ foreach ($name in @('MajdataPlay.IO.asmdef', 'MajdataPlay.IO.asmdef.meta')) {
     Copy-Item -LiteralPath (Join-Path $ioSource $name) -Destination $io
 }
 Get-ChildItem -LiteralPath (Join-Path $ioSource 'Storage') -Filter '*.cs' -File | Copy-Item -Destination $io
-$analyzerName = 'MajdataPlay.SourceGenerators.AndroidJava.dll'
-$analyzerMeta = Join-Path $androidSource "$analyzerName.meta"
-if (!(Select-String -LiteralPath $analyzerMeta -Pattern '^\s*-\s+RoslynAnalyzer\s*$' -Quiet)) {
-    throw 'The installed Android Java generator must have the RoslynAnalyzer label.'
-}
-foreach ($name in @('MajdataPlay.Platform.Android.asmdef', 'AndroidRuntime.cs', 'AndroidJni.cs', 'JavaInvocationException.cs', 'JavaClassAttribute.cs', 'JavaApiConfigurationAttribute.cs', $analyzerName)) {
+foreach ($name in @('MajdataPlay.Platform.Android.asmdef', 'AndroidRuntime.cs')) {
     $source = Join-Path $androidSource $name
     Copy-Item -LiteralPath $source -Destination $android -Force
     Copy-Item -LiteralPath "$source.meta" -Destination $android -Force
+}
+foreach ($name in @('AndroidJni.cs', 'JavaInvocationException.cs', 'JavaClassAttribute.cs', 'JavaApiConfigurationAttribute.cs', 'MajdataPlay.SourceGenerators.AndroidJava.dll')) {
+    foreach ($obsolete in @((Join-Path $android $name), (Join-Path $android "$name.meta"))) {
+        if (Test-Path -LiteralPath $obsolete -PathType Leaf) {
+            Remove-Item -LiteralPath $obsolete -Force
+        }
+    }
 }
 Get-ChildItem -LiteralPath (Join-Path $androidSource 'Storage') -Filter '*.cs' -File | Copy-Item -Destination $android
 # Stage the real enum, but retain the narrow AndroidKeyboard double used by storage validation.
 foreach ($name in @('IO/KeyCode.cs', 'IO/KeyCode.cs.meta')) {
     Copy-Item -LiteralPath (Join-Path $androidSource $name) -Destination $android -Force
 }
-# Copy-Item merges directories. Remove only obsolete legacy files from an earlier isolated run.
+# Replace only the verified Runtime staging directory so obsolete bindings cannot survive a prior run.
 $projectFullPath = [IO.Path]::GetFullPath($project)
 $projectBoundary = $projectFullPath.TrimEnd([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar) + [IO.Path]::DirectorySeparatorChar
 $stagedRuntime = [IO.Path]::GetFullPath((Join-Path $android 'Runtime'))
@@ -60,31 +73,35 @@ foreach ($directory in @($root, (Join-Path $root 'Temp'), $projectFullPath, (Joi
         }
     }
 }
-foreach ($name in @('Activity.cs', 'Activity.cs.meta', 'Intent.cs', 'Intent.cs.meta', 'KeyEvent.cs', 'KeyEvent.cs.meta')) {
-    $legacyPath = [IO.Path]::GetFullPath((Join-Path $stagedRuntime $name))
-    if (!$legacyPath.StartsWith($projectBoundary, [StringComparison]::OrdinalIgnoreCase) -or
-        ![string]::Equals([IO.Path]::GetDirectoryName($legacyPath), $stagedRuntime, [StringComparison]::OrdinalIgnoreCase)) {
-        throw "Refusing legacy cleanup outside the staged Runtime root: $legacyPath"
+if (Test-Path -LiteralPath $stagedRuntime) {
+    Remove-Item -LiteralPath $stagedRuntime -Recurse -Force
+}
+New-Item -ItemType Directory -Force -Path $stagedRuntime | Out-Null
+$productionRuntime = Join-Path $androidSource 'Runtime'
+foreach ($file in Get-ChildItem -LiteralPath $productionRuntime -Recurse -Filter '*.cs' -File) {
+    if ($file.Name.EndsWith('.g.cs', [StringComparison]::Ordinal) -or $file.Name -in @('AndroidJni.cs', 'IJavaObject.cs', 'JavaInvocationException.cs', 'JavaObjectReference.cs')) {
+        continue
     }
-    if (Test-Path -LiteralPath $legacyPath) {
-        $item = Get-Item -LiteralPath $legacyPath -Force
-        if ($item.PSIsContainer -or ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
-            throw "Refusing legacy cleanup of a directory or reparse point: $legacyPath"
-        }
-        Remove-Item -LiteralPath $legacyPath -Force
+    $destination = Join-Path $stagedRuntime $file.FullName.Substring($productionRuntime.Length + 1)
+    New-Item -ItemType Directory -Force -Path (Split-Path -Parent $destination) | Out-Null
+    Copy-Item -LiteralPath $file.FullName -Destination $destination -Force
+    if (Test-Path -LiteralPath ($file.FullName + '.meta') -PathType Leaf) {
+        Copy-Item -LiteralPath ($file.FullName + '.meta') -Destination ($destination + '.meta') -Force
     }
 }
-# Keep all production categories and their asset metadata; generated code stays in Roslyn.
-Copy-Item -LiteralPath (Join-Path $androidSource 'Runtime') -Destination $android -Recurse -Force
 Copy-Item -LiteralPath (Join-Path $androidSource 'Runtime.meta') -Destination $android -Force
-# Relative Java inputs must resolve inside this project, not against the main checkout.
-foreach ($relativePath in @('Tools/CSharp/AndroidJavaGenerator/Java/JavaApiExtractor.java', 'Assets/Plugins/Android/src/java/net/majdata/majdataplay/StorageAccess.java')) {
-    $source = Join-Path $root $relativePath
-    $destination = Join-Path $project $relativePath
+# Stage production Java sources in the isolated project before CLI analysis.
+$javaSource = Join-Path $root 'Assets/Plugins/Android'
+foreach ($file in Get-ChildItem -LiteralPath $javaSource -Recurse -File) {
+    if ($file.Extension -notin @('.java', '.class', '.jar', '.aar')) {
+        continue
+    }
+    $relative = $file.FullName.Substring($javaSource.Length + 1)
+    $destination = Join-Path (Join-Path $project 'Assets/Plugins/Android') $relative
     New-Item -ItemType Directory -Force -Path (Split-Path -Parent $destination) | Out-Null
-    Copy-Item -LiteralPath $source -Destination $destination -Force
-    if (Test-Path -LiteralPath "$source.meta" -PathType Leaf) {
-        Copy-Item -LiteralPath "$source.meta" -Destination "$destination.meta" -Force
+    Copy-Item -LiteralPath $file.FullName -Destination $destination -Force
+    if (Test-Path -LiteralPath ($file.FullName + '.meta') -PathType Leaf) {
+        Copy-Item -LiteralPath ($file.FullName + '.meta') -Destination ($destination + '.meta') -Force
     }
 }
 @{ name = 'MajdataPlay.Diagnostics' } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $diagnostics 'MajdataPlay.Diagnostics.asmdef')
@@ -99,11 +116,30 @@ Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'FileSystemUnityValidation.cs') 
 
 $editorData = Join-Path (Split-Path -Parent $UnityPath) 'Data'
 $androidPlayer = Join-Path $editorData 'PlaybackEngines/AndroidPlayer'
+$unityJar = Join-Path $androidPlayer 'Variations/mono/Release/Classes/classes.jar'
+if (!(Test-Path -LiteralPath $unityJar -PathType Leaf)) {
+    $unityJar = Join-Path $androidPlayer 'Variations/il2cpp/Release/Classes/classes.jar'
+}
+$unityActivity = Join-Path $androidPlayer 'Source/com/unity3d/player/UnityPlayerActivity.java'
+foreach ($inputFile in @($unityJar, $unityActivity)) {
+    if (!(Test-Path -LiteralPath $inputFile -PathType Leaf)) {
+        throw "Missing Unity launcher metadata: $inputFile"
+    }
+}
+$generatorArguments = @($cliAssembly, '--sdk', (Join-Path $androidPlayer 'SDK'), '--output', $stagedRuntime,
+    '--namespace', 'MajdataPlay.Platform.Android.Runtime', '--no-docs', '--input', $unityJar, '--input', $unityActivity)
+foreach ($file in Get-ChildItem -LiteralPath (Join-Path $project 'Assets/Plugins/Android') -Recurse -File | Sort-Object FullName) {
+    if ($file.Extension -in @('.java', '.class', '.jar', '.aar')) {
+        $generatorArguments += @('--input', $file.FullName)
+    }
+}
+& dotnet @generatorArguments
+if ($LASTEXITCODE -ne 0) {
+    throw 'Fresh CLI binding generation for the isolated storage project failed.'
+}
 if (!$SkipJavaCompilation) {
     $javac = Join-Path $androidPlayer 'OpenJDK/bin/javac.exe'
     $androidJar = Join-Path $androidPlayer 'SDK/platforms/android-36/android.jar'
-    $unityJar = Join-Path $androidPlayer 'Variations/mono/Release/Classes/classes.jar'
-    $unityActivity = Join-Path $androidPlayer 'Source/com/unity3d/player/UnityPlayerActivity.java'
     foreach ($inputFile in @($javac, $androidJar, $unityJar, $unityActivity)) {
         if (!(Test-Path -LiteralPath $inputFile -PathType Leaf)) {
             throw "Missing Android Java validation dependency: $inputFile"
@@ -120,21 +156,21 @@ if (!$SkipJavaCompilation) {
     }
     Write-Output 'FILE_SYSTEM_JAVA_COMPILE_PASSED (API 36 references; no Android runtime validation).'
 }
-$variables = @('UNITY_EDITOR_PATH', 'UNITY_ANDROID_SDK', 'UNITY_JAVA_HOME', 'MAJDATA_JAVA_EXTRACTOR')
+$variables = @('UNITY_EDITOR_PATH', 'UNITY_ANDROID_SDK', 'UNITY_JAVA_HOME')
 $oldValues = @{}
 foreach ($name in $variables) {
     $oldValues[$name] = [Environment]::GetEnvironmentVariable($name, 'Process')
 }
 try {
-    # Resolve {UnityData} and extraction tools from the selected editor, including non-Android targets.
+    # Keep the selected Editor and its Android tools consistent for optional Player script compilation.
     $env:UNITY_EDITOR_PATH = $UnityPath
     $env:UNITY_ANDROID_SDK = Join-Path $androidPlayer 'SDK'
     $env:UNITY_JAVA_HOME = Join-Path $androidPlayer 'OpenJDK'
-    $env:MAJDATA_JAVA_EXTRACTOR = Join-Path $project 'Tools/CSharp/AndroidJavaGenerator/Java/JavaApiExtractor.java'
+    $targetArgument = if ($PlayerTargets.Count -eq 0) { 'none' } else { $PlayerTargets -join ',' }
     $log = Join-Path $project 'validation.log'
     $process = Start-Process -FilePath $UnityPath -WindowStyle Hidden -ArgumentList @(
         '-batchmode', '-nographics', '-projectPath', ([char]34 + $project + [char]34), '-executeMethod',
-        'MajdataPlay.Tests.FileSystemUnityValidation.Run', '-storageValidationTargets', ($PlayerTargets -join ','),
+        'MajdataPlay.Tests.FileSystemUnityValidation.Run', '-storageValidationTargets', $targetArgument,
         '-logFile', ([char]34 + $log + [char]34)
     ) -PassThru
     $null = $process.Handle

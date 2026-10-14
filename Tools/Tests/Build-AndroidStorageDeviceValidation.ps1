@@ -33,7 +33,18 @@ $version = [Diagnostics.FileVersionInfo]::GetVersionInfo($UnityPath).ProductVers
 if ($version -notmatch ('^' + [regex]::Escape($expected) + '(?:_|$)')) {
     throw "Use Unity $expected; the selected executable reports $version."
 }
-& (Join-Path $root 'Tools/CSharp/AndroidJavaGenerator/build.ps1') -Install -UnityPath $UnityPath
+$cliDirectory = Join-Path $root 'Tools/CSharp/AndroidJavaWrapperGenerator'
+Push-Location -LiteralPath $cliDirectory
+try {
+    & dotnet build 'AndroidJavaWrapperGenerator.csproj' --configuration Release --nologo
+    if ($LASTEXITCODE -ne 0) {
+        throw 'The independent Android Java wrapper CLI build failed.'
+    }
+}
+finally {
+    Pop-Location
+}
+$cliAssembly = Join-Path $cliDirectory 'bin/Release/net9.0/AndroidJavaWrapperGenerator.dll'
 $io = Join-Path $project 'Assets/IO'
 $android = Join-Path $project 'Assets/Android'
 $diagnostics = Join-Path $project 'Assets/Diagnostics'
@@ -54,10 +65,17 @@ foreach ($name in @('MajdataPlay.IO.asmdef', 'MajdataPlay.IO.asmdef.meta')) {
     Copy-Item -LiteralPath (Join-Path $ioSource $name) -Destination $io -Force
 }
 Get-ChildItem -LiteralPath (Join-Path $ioSource 'Storage') -Filter '*.cs' -File | Copy-Item -Destination $io -Force
-foreach ($name in @('MajdataPlay.Platform.Android.asmdef', 'AndroidRuntime.cs', 'AndroidJni.cs', 'JavaInvocationException.cs', 'JavaClassAttribute.cs', 'JavaApiConfigurationAttribute.cs', 'MajdataPlay.SourceGenerators.AndroidJava.dll')) {
+foreach ($name in @('MajdataPlay.Platform.Android.asmdef', 'AndroidRuntime.cs')) {
     $source = Join-Path $androidSource $name
     Copy-Item -LiteralPath $source -Destination $android -Force
     Copy-Item -LiteralPath "$source.meta" -Destination $android -Force
+}
+foreach ($name in @('AndroidJni.cs', 'JavaInvocationException.cs', 'JavaClassAttribute.cs', 'JavaApiConfigurationAttribute.cs', 'MajdataPlay.SourceGenerators.AndroidJava.dll')) {
+    foreach ($obsolete in @((Join-Path $android $name), (Join-Path $android "$name.meta"))) {
+        if (Test-Path -LiteralPath $obsolete -PathType Leaf) {
+            Remove-Item -LiteralPath $obsolete -Force
+        }
+    }
 }
 Get-ChildItem -LiteralPath (Join-Path $androidSource 'Storage') -Filter '*.cs' -File | Copy-Item -Destination $android -Force
 Copy-Item -LiteralPath (Join-Path $androidSource 'IO/KeyCode.cs') -Destination $android -Force
@@ -78,7 +96,21 @@ foreach ($ancestor in @($project, (Join-Path $project 'Assets'), $android, $runt
 if (Test-Path -LiteralPath $runtime) {
     Remove-Item -LiteralPath $runtime -Recurse -Force
 }
-Copy-Item -LiteralPath (Join-Path $androidSource 'Runtime') -Destination $android -Recurse -Force
+$productionRuntime = Join-Path $androidSource 'Runtime'
+New-Item -ItemType Directory -Force -Path $runtime | Out-Null
+# Keep handwritten partial extensions; generated bindings are produced freshly below.
+foreach ($file in Get-ChildItem -LiteralPath $productionRuntime -Recurse -Filter '*.cs' -File) {
+    if ($file.Name.EndsWith('.g.cs', [StringComparison]::Ordinal) -or $file.Name -in @('AndroidJni.cs', 'IJavaObject.cs', 'JavaInvocationException.cs', 'JavaObjectReference.cs')) {
+        continue
+    }
+    $relative = $file.FullName.Substring($productionRuntime.Length + 1)
+    $destination = Join-Path $runtime $relative
+    New-Item -ItemType Directory -Force -Path (Split-Path -Parent $destination) | Out-Null
+    Copy-Item -LiteralPath $file.FullName -Destination $destination -Force
+    if (Test-Path -LiteralPath ($file.FullName + '.meta') -PathType Leaf) {
+        Copy-Item -LiteralPath ($file.FullName + '.meta') -Destination ($destination + '.meta') -Force
+    }
+}
 Copy-Item -LiteralPath (Join-Path $androidSource 'Runtime.meta') -Destination $android -Force
 @{ name = 'MajdataPlay.Diagnostics' } | ConvertTo-Json | Set-JsonFile -LiteralPath (Join-Path $diagnostics 'MajdataPlay.Diagnostics.asmdef')
 Copy-Item -LiteralPath (Join-Path $root 'Assets/Plugins/MajdataPlay/Diagnostics/MajdataPlay.Diagnostics.asmdef.meta') -Destination $diagnostics -Force
@@ -89,9 +121,6 @@ $toolSource = Join-Path $PSScriptRoot 'AndroidStorageDeviceValidation'
     references = @('MajdataPlay.IO', 'MajdataPlay.Platform.Android')
 } | ConvertTo-Json | Set-JsonFile -LiteralPath (Join-Path $validation 'MajdataPlay.Storage.DeviceValidation.asmdef')
 Copy-Item -LiteralPath (Join-Path $toolSource 'AndroidStorageDeviceValidation.cs') -Destination $validation -Force
-$probeDirectory = Join-Path $runtime 'Validation'
-New-Item -ItemType Directory -Force -Path $probeDirectory | Out-Null
-Copy-Item -LiteralPath (Join-Path $toolSource 'DeviceJniProbe.cs') -Destination $probeDirectory -Force
 @{ name = 'MajdataPlay.Storage.DeviceBuild.Editor'; includePlatforms = @('Editor') } | ConvertTo-Json | Set-JsonFile -LiteralPath (Join-Path $editor 'MajdataPlay.Storage.DeviceBuild.Editor.asmdef')
 Copy-Item -LiteralPath (Join-Path $toolSource 'AndroidStorageDeviceBuild.cs') -Destination $editor -Force
 $javaTarget = Join-Path $project 'Assets/Plugins/Android/src'
@@ -101,12 +130,30 @@ Copy-Item -LiteralPath (Join-Path $root 'Assets/Plugins/Android/AndroidManifest.
 $probeJava = Join-Path $project 'Assets/Plugins/Android/src/java/net/majdata/validation'
 New-Item -ItemType Directory -Force -Path $probeJava | Out-Null
 Copy-Item -LiteralPath (Join-Path $toolSource 'DeviceJniProbe.java') -Destination $probeJava -Force
-$extractor = Join-Path $project 'Tools/CSharp/AndroidJavaGenerator/Java'
-New-Item -ItemType Directory -Force -Path $extractor | Out-Null
-Copy-Item -LiteralPath (Join-Path $root 'Tools/CSharp/AndroidJavaGenerator/Java/JavaApiExtractor.java') -Destination $extractor -Force
 $editorData = Join-Path (Split-Path -Parent $UnityPath) 'Data'
 $androidPlayer = Join-Path $editorData 'PlaybackEngines/AndroidPlayer'
-$variables = @('UNITY_EDITOR_PATH', 'UNITY_ANDROID_SDK', 'UNITY_JAVA_HOME', 'MAJDATA_JAVA_EXTRACTOR')
+$unityArchive = Join-Path $androidPlayer 'Variations/mono/Release/Classes/classes.jar'
+if (!(Test-Path -LiteralPath $unityArchive -PathType Leaf)) {
+    $unityArchive = Join-Path $androidPlayer 'Variations/il2cpp/Release/Classes/classes.jar'
+}
+$unityActivity = Join-Path $androidPlayer 'Source/com/unity3d/player/UnityPlayerActivity.java'
+foreach ($inputPath in @($unityArchive, $unityActivity)) {
+    if (!(Test-Path -LiteralPath $inputPath -PathType Leaf)) {
+        throw "Required Unity launcher metadata is missing: $inputPath"
+    }
+}
+$generatorArguments = @($cliAssembly, '--sdk', (Join-Path $androidPlayer 'SDK'), '--output', $runtime,
+    '--namespace', 'MajdataPlay.Platform.Android.Runtime', '--no-docs', '--input', $unityArchive, '--input', $unityActivity)
+foreach ($file in Get-ChildItem -LiteralPath (Join-Path $project 'Assets/Plugins/Android') -Recurse -File | Sort-Object FullName) {
+    if ($file.Extension -in @('.java', '.class', '.jar', '.aar')) {
+        $generatorArguments += @('--input', $file.FullName)
+    }
+}
+& dotnet @generatorArguments
+if ($LASTEXITCODE -ne 0) {
+    throw 'Fresh CLI generation for the isolated Android device project failed.'
+}
+$variables = @('UNITY_EDITOR_PATH', 'UNITY_ANDROID_SDK', 'UNITY_JAVA_HOME')
 $oldValues = @{}
 foreach ($name in $variables) {
     $oldValues[$name] = [Environment]::GetEnvironmentVariable($name, 'Process')
@@ -115,7 +162,6 @@ try {
     $env:UNITY_EDITOR_PATH = $UnityPath
     $env:UNITY_ANDROID_SDK = Join-Path $androidPlayer 'SDK'
     $env:UNITY_JAVA_HOME = Join-Path $androidPlayer 'OpenJDK'
-    $env:MAJDATA_JAVA_EXTRACTOR = Join-Path $extractor 'JavaApiExtractor.java'
     $log = Join-Path $project 'build.log'
     $apk = Join-Path $project "Artifacts/storage-validation-$Architecture.apk"
     $process = Start-Process -FilePath $UnityPath -WindowStyle Hidden -ArgumentList @(

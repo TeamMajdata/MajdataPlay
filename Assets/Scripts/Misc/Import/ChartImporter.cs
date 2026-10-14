@@ -6,8 +6,9 @@ using MajdataPlay.Diagnostics;
 using MajdataPlay.IO.Storage;
 #if UNITY_ANDROID
 using MajdataPlay.Platform.Android;
-using MajdataPlay.Platform.Android.Runtime.Content;
-using MajdataPlay.Platform.Android.Runtime.Java.Lang;
+using MajdataPlay.Platform.Android.Runtime.Bindings.Android.Content;
+using JavaClass = MajdataPlay.Platform.Android.Runtime.Bindings.Java.Lang.Class;
+using JavaUri = MajdataPlay.Platform.Android.Runtime.Bindings.Android.Net.Uri;
 using MajdataPlay.Platform.Android.Storage;
 #endif
 using System;
@@ -536,14 +537,22 @@ namespace MajdataPlay.Import
             }
             if (action == Intent.ActionSendMultiple)
             {
-                var uris = intent.GetParcelableArrayListExtra(Intent.ExtraStream, MajdataPlay.Platform.Android.Runtime.Net.Uri.Class)!;
-                for (var i = 0; i < uris.Size(); i++)
+                using var uriClassReference = JavaUri.Class;
+                using var uriClass = new JavaClass(uriClassReference, ownsReference: false);
+                using var uris = intent.GetParcelableArrayListExtra(Intent.ExtraStream, uriClass);
+                if (uris is null)
                 {
-                    var uri = ((JavaObject?)(object?)uris.Get(i)) as MajdataPlay.Platform.Android.Runtime.Net.Uri;
-                    if (uri == null)
+                    return;
+                }
+                var count = uris.Size();
+                for (var i = 0; i < count; i++)
+                {
+                    using var uriReference = uris.Get(i);
+                    if (uriReference is null)
                     {
                         continue;
                     }
+                    using var uri = new JavaUri(uriReference.JavaReference, ownsReference: false);
                     var entry = FileSystem.GetEntry(uri.ToString()!);
                     if (entry is null)
                     {

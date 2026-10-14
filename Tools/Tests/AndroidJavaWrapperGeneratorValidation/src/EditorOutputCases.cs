@@ -18,7 +18,7 @@ namespace MajdataPlay.Tests.AndroidJavaWrapperGeneratorValidation
         private const string EditorManifestName = "java-wrappers.manifest.json";
 
         /// <summary>Identifies the isolated namespace requested by the Editor CLI integration.</summary>
-        private const string EditorBindingsNamespace = "MajdataPlay.Platform.Android.Runtime.Bindings";
+        private const string EditorRootNamespace = "MajdataPlay.Platform.Android.Runtime";
 
         /// <summary>Validates source publication, Unity metadata retention, and failures before any destination changes.</summary>
         /// <param name="workspace">The exclusively owned ignored validation directory.</param>
@@ -26,10 +26,233 @@ namespace MajdataPlay.Tests.AndroidJavaWrapperGeneratorValidation
         /// <exception cref="IOException">Preparing or inspecting an isolated fixture fails.</exception>
         private static void VerifyEditorOutput(string workspace)
         {
+            VerifyProjectModeArguments(workspace);
             VerifyEditorPublicationLifecycle(workspace);
+            VerifyEditorNamespaceMigration(workspace);
+            VerifyEditorMigrationConflicts(workspace);
+            VerifyEditorOutputRootMigration(workspace);
+            VerifyEditorOutputRootMigrationConflicts(workspace);
             VerifyEditorPublicationConflicts(workspace);
             VerifyEditorPublicationCorruption(workspace);
             VerifyEditorPublicationLongPaths(workspace);
+        }
+
+        /// <summary>Checks migration from the former Generated root into Runtime for both supported directory layouts.</summary>
+        /// <param name="workspace">The exclusively owned ignored validation directory.</param>
+        /// <exception cref="InvalidOperationException">Cross-root publication or asset preservation fails.</exception>
+        /// <exception cref="IOException">Preparing, publishing, or inspecting a fixture fails.</exception>
+        private static void VerifyEditorOutputRootMigration(string workspace)
+        {
+            foreach (var layout in new[] { "previous-package", "current-package", "current-namespace" })
+            {
+                var root = Path.Combine(workspace, "editor-root-migration-" + layout);
+                var output = Path.Combine(root, "Runtime");
+                var former = Path.Combine(root, "Generated");
+                var namespaceLayout = layout == "current-namespace";
+                var paths = new Dictionary<string, string>
+                {
+                    { namespaceLayout ? "AndroidJni.cs" : "Runtime/AndroidJni.cs", "AndroidJni.cs" },
+                    { namespaceLayout ? "Bindings/Z/Late.g.cs" : "Z/Late.g.cs", "Bindings/Z/Late.g.cs" },
+                    { namespaceLayout ? "Bindings/Bindings/Z/Late.g.cs" : "Bindings/Z/Late.g.cs", "Bindings/Bindings/Z/Late.g.cs" },
+                    { namespaceLayout ? "Bindings/Bindings/OnlyExisting.g.cs" : "Bindings/OnlyExisting.g.cs", "Bindings/Bindings/OnlyExisting.g.cs" },
+                    { namespaceLayout ? "Bindings/DefaultPackage.g.cs" : "DefaultPackage.g.cs", "Bindings/DefaultPackage.g.cs" },
+                    { namespaceLayout ? "Bindings/Missing.g.cs" : "Missing.g.cs", "Bindings/Missing.g.cs" }
+                };
+                var previousSources = new Dictionary<string, string>();
+                var updatedSources = new Dictionary<string, string>();
+                foreach (var path in paths)
+                {
+                    var source = "// unchanged generated identity for " + path.Value + "\r\n";
+                    previousSources.Add(path.Key, source);
+                    updatedSources.Add(path.Value, source);
+                }
+
+                var stalePath = namespaceLayout ? "Bindings/Stale.g.cs" : "Stale.g.cs";
+                previousSources.Add(stalePath, "// stale generated binding\r\n");
+                updatedSources["AndroidJni.cs"] = "// changed JNI helper under the runtime namespace\r\n";
+                updatedSources.Add("Bindings/OnlyExisting.g.cs", "// new unnamed-package binding with no former source identity\r\n");
+                var previous = new GeneratorOptions
+                {
+                    NoSdk = true,
+                    RootNamespace = layout == "previous-package" ? EditorRootNamespace + ".Bindings" : EditorRootNamespace,
+                    OutputDirectory = former
+                };
+                GeneratedOutput.Write(previous, null, previousSources, CancellationToken.None);
+                foreach (var source in previousSources)
+                {
+                    File.WriteAllText(Path.Combine(former, source.Key) + ".meta", "fileFormatVersion: 2\r\nguid: " + Guid.NewGuid().ToString("N") + "\r\n");
+                }
+
+                File.WriteAllText(Path.Combine(former, EditorManifestName + ".meta"), "manifest asset GUID");
+                File.WriteAllText(Path.Combine(former, "LegacyExtension.cs"), "// unowned extension remains in the former root\r\n");
+                File.WriteAllText(Path.Combine(former, "LegacyExtension.cs.meta"), "unowned former extension GUID");
+                File.WriteAllText(former + ".meta", "former root folder GUID");
+                Directory.CreateDirectory(output);
+                File.WriteAllText(Path.Combine(output, "Handwritten.cs"), "// unowned runtime extension\r\n");
+                File.WriteAllText(Path.Combine(output, "Handwritten.cs.meta"), "unowned runtime extension GUID");
+                File.Delete(Path.Combine(former, namespaceLayout ? "Bindings/Missing.g.cs" : "Missing.g.cs"));
+                SetEditorFixtureTimestamps(root);
+                var before = SnapshotEditorFiles(former);
+                var handwrittenBefore = SnapshotEditorFiles(output);
+                var folderBytes = File.ReadAllBytes(former + ".meta");
+                var folderTimestamp = File.GetLastWriteTimeUtc(former + ".meta");
+                var stage = WriteEditorStaging(root, "stage", updatedSources);
+                Require(JavaWrapperOutput.Publish(stage, output, former) == updatedSources.Count, "Editor moves former output ownership into Runtime for layout " + layout);
+                foreach (var path in paths)
+                {
+                    var source = Path.Combine(output, path.Value);
+                    var oldMetadata = before[(path.Key + ".meta").Replace('/', Path.DirectorySeparatorChar)];
+                    Require(File.ReadAllText(source) == updatedSources[path.Value], "Cross-root migration publishes the generated source: " + path.Value);
+                    Require(File.ReadAllBytes(source + ".meta").SequenceEqual(oldMetadata.Bytes)
+                        && File.GetLastWriteTimeUtc(source + ".meta") == oldMetadata.Modified, "Cross-root migration preserves source metadata identity: " + path.Value);
+                    Require(!File.Exists(Path.Combine(former, path.Key)) && !File.Exists(Path.Combine(former, path.Key + ".meta")), "Cross-root migration removes only the migrated old paths: " + path.Key);
+                    if (path.Value != "AndroidJni.cs" && path.Value != "Bindings/Missing.g.cs")
+                    {
+                        Require(File.GetLastWriteTimeUtc(source) == before[path.Key.Replace('/', Path.DirectorySeparatorChar)].Modified, "Cross-root migration preserves an unchanged source timestamp: " + path.Value);
+                    }
+                }
+
+                Require(!File.Exists(Path.Combine(former, stalePath)) && !File.Exists(Path.Combine(former, stalePath + ".meta")), "Cross-root migration removes stale owned sources and metadata");
+                Require(File.ReadAllText(Path.Combine(output, "Bindings/OnlyExisting.g.cs")) == updatedSources["Bindings/OnlyExisting.g.cs"]
+                    && !File.Exists(Path.Combine(output, "Bindings/OnlyExisting.g.cs.meta")), "A new unnamed-package binding never consumes the old bindings-package source or GUID");
+                Require(!File.Exists(Path.Combine(former, EditorManifestName)) && !File.Exists(Path.Combine(former, EditorManifestName + ".meta")), "Cross-root migration removes the former ownership manifest and metadata paths");
+                Require(File.ReadAllBytes(Path.Combine(output, EditorManifestName)).SequenceEqual(File.ReadAllBytes(Path.Combine(stage, EditorManifestName))), "Cross-root migration publishes the new ownership manifest");
+                Require(File.ReadAllBytes(Path.Combine(output, EditorManifestName + ".meta")).SequenceEqual(before[EditorManifestName + ".meta"].Bytes)
+                    && File.GetLastWriteTimeUtc(Path.Combine(output, EditorManifestName + ".meta")) == before[EditorManifestName + ".meta"].Modified, "Cross-root migration preserves the manifest Unity identity");
+                foreach (var relativePath in new[] { "LegacyExtension.cs", "LegacyExtension.cs.meta" })
+                {
+                    var path = Path.Combine(former, relativePath);
+                    Require(File.ReadAllBytes(path).SequenceEqual(before[relativePath].Bytes)
+                        && File.GetLastWriteTimeUtc(path) == before[relativePath].Modified, "Cross-root migration preserves unowned former assets: " + relativePath);
+                }
+
+                foreach (var file in handwrittenBefore)
+                {
+                    var path = Path.Combine(output, file.Key);
+                    Require(File.ReadAllBytes(path).SequenceEqual(file.Value.Bytes)
+                        && File.GetLastWriteTimeUtc(path) == file.Value.Modified, "Cross-root migration preserves unowned Runtime assets: " + file.Key);
+                }
+
+                Require(Directory.Exists(former) && File.ReadAllBytes(former + ".meta").SequenceEqual(folderBytes)
+                    && File.GetLastWriteTimeUtc(former + ".meta") == folderTimestamp, "Cross-root migration preserves the former root folder and its GUID");
+                var migrated = SnapshotEditorFiles(output);
+                var formerAfter = SnapshotEditorFiles(former);
+                JavaWrapperOutput.Publish(stage, output, former);
+                RequireEditorFilesUnchanged(output, migrated, "Repeated publication after moving the output root");
+                RequireEditorFilesUnchanged(former, formerAfter, "Repeated publication preserves unowned former output assets");
+            }
+        }
+
+        /// <summary>Checks that conflicts and overlapping roots reject output migration before either directory changes.</summary>
+        /// <param name="workspace">The exclusively owned ignored validation directory.</param>
+        /// <exception cref="InvalidOperationException">A cross-root ownership or preflight contract fails.</exception>
+        /// <exception cref="IOException">Preparing or inspecting an isolated fixture fails.</exception>
+        private static void VerifyEditorOutputRootMigrationConflicts(string workspace)
+        {
+            var modes = new[]
+            {
+                "target-source", "target-metadata", "target-manifest-metadata", "modified-source", "both-owned",
+                "readonly-source", "readonly-metadata", "readonly-manifest", "readonly-manifest-metadata", "invalid-former-manifest"
+            };
+            foreach (var mode in modes)
+            {
+                var root = Path.Combine(workspace, "editor-root-migration-conflict-" + mode);
+                var output = Path.Combine(root, "Runtime");
+                var former = WriteEditorStaging(root, "Generated", new Dictionary<string, string>
+                {
+                    { "Runtime/AndroidJni.cs", "// previous JNI helper\r\n" },
+                    { "Z/Late.g.cs", "// previous late binding\r\n" },
+                    { "Stale.g.cs", "// previous stale binding\r\n" }
+                });
+                File.WriteAllText(Path.Combine(former, "Runtime/AndroidJni.cs.meta"), "previous helper GUID");
+                File.WriteAllText(Path.Combine(former, "Z/Late.g.cs.meta"), "previous binding GUID");
+                File.WriteAllText(Path.Combine(former, "Stale.g.cs.meta"), "previous stale GUID");
+                File.WriteAllText(Path.Combine(former, EditorManifestName + ".meta"), "previous manifest GUID");
+                Directory.CreateDirectory(Path.Combine(output, "Bindings", "Z"));
+                File.WriteAllText(Path.Combine(output, "Handwritten.cs"), "// handwritten runtime source\r\n");
+                string? readOnlyPath = null;
+                switch (mode)
+                {
+                    case "target-source":
+                        File.WriteAllText(Path.Combine(output, "Bindings/Z/Late.g.cs"), "// handwritten target source\r\n");
+                        break;
+                    case "target-metadata":
+                        File.WriteAllText(Path.Combine(output, "Bindings/Z/Late.g.cs.meta"), "unowned target source GUID");
+                        break;
+                    case "target-manifest-metadata":
+                        File.WriteAllText(Path.Combine(output, EditorManifestName + ".meta"), "unowned target manifest GUID");
+                        break;
+                    case "modified-source":
+                        File.AppendAllText(Path.Combine(former, "Z/Late.g.cs"), "// user modification");
+                        break;
+                    case "both-owned":
+                        WriteEditorStaging(root, "Runtime", new Dictionary<string, string> { { "AlreadyOwned.cs", "// already owned runtime source\r\n" } });
+                        break;
+                    case "readonly-source":
+                        readOnlyPath = Path.Combine(former, "Z/Late.g.cs");
+                        break;
+                    case "readonly-metadata":
+                        readOnlyPath = Path.Combine(former, "Z/Late.g.cs.meta");
+                        break;
+                    case "readonly-manifest":
+                        readOnlyPath = Path.Combine(former, EditorManifestName);
+                        break;
+                    case "readonly-manifest-metadata":
+                        readOnlyPath = Path.Combine(former, EditorManifestName + ".meta");
+                        break;
+                    case "invalid-former-manifest":
+                        MutateEditorManifest(former, manifest =>
+                        {
+                            manifest.RootNamespace = EditorRootNamespace + ".Unrecognized";
+                        });
+                        break;
+                }
+
+                SetEditorFixtureTimestamps(root);
+                if (readOnlyPath != null)
+                {
+                    File.SetAttributes(readOnlyPath, FileAttributes.ReadOnly);
+                }
+
+                var stage = WriteEditorStaging(root, "stage", new Dictionary<string, string>
+                {
+                    { "AndroidJni.cs", "// changed helper\r\n" },
+                    { "Bindings/Z/Late.g.cs", "// changed binding\r\n" }
+                });
+                var outputBefore = SnapshotEditorFiles(output);
+                var formerBefore = SnapshotEditorFiles(former);
+                var directories = Directory.GetDirectories(root, "*", SearchOption.AllDirectories);
+                try
+                {
+                    Expect<IOException>(() => JavaWrapperOutput.Publish(stage, output, former), "Editor rejects output-root migration conflict: " + mode);
+                    RequireEditorFilesUnchanged(output, outputBefore, "Rejected output-root migration preserves Runtime: " + mode);
+                    RequireEditorFilesUnchanged(former, formerBefore, "Rejected output-root migration preserves Generated: " + mode);
+                    Require(Directory.GetDirectories(root, "*", SearchOption.AllDirectories).SequenceEqual(directories), "Rejected output-root migration preserves the directory tree: " + mode);
+                }
+                finally
+                {
+                    if (readOnlyPath != null)
+                    {
+                        File.SetAttributes(readOnlyPath, FileAttributes.Normal);
+                    }
+                }
+            }
+
+            var overlapRoot = Path.Combine(workspace, "editor-root-migration-overlap");
+            var validStage = WriteEditorStaging(overlapRoot, "stage", new Dictionary<string, string> { { "AndroidJni.cs", "// generated JNI helper\r\n" } });
+            var validOutput = Path.Combine(overlapRoot, "Runtime");
+            Directory.CreateDirectory(validOutput);
+            var stageBefore = SnapshotEditorFiles(validStage);
+            var outputSnapshot = SnapshotEditorFiles(validOutput);
+            foreach (var invalidFormer in new[]
+            {
+                validStage, validOutput, Path.Combine(validStage, "child"), Path.Combine(validOutput, "child"), overlapRoot
+            })
+            {
+                Expect<IOException>(() => JavaWrapperOutput.Publish(validStage, validOutput, invalidFormer), "Editor rejects a former output root overlapping staging or Runtime: " + invalidFormer);
+                RequireEditorFilesUnchanged(validStage, stageBefore, "Rejected former output overlap preserves staging");
+                RequireEditorFilesUnchanged(validOutput, outputSnapshot, "Rejected former output overlap preserves Runtime");
+            }
         }
 
         /// <summary>Checks publication through package paths longer than the Windows legacy MAX_PATH boundary.</summary>
@@ -145,6 +368,239 @@ namespace MajdataPlay.Tests.AndroidJavaWrapperGeneratorValidation
             Require(!File.Exists(Path.Combine(output, "android/os/New.cs.meta")), "Editor does not synthesize a GUID for a newly published source");
         }
 
+        /// <summary>Checks that both previous manifest versions migrate generated paths without losing Unity asset identity.</summary>
+        /// <param name="workspace">The exclusively owned ignored validation directory.</param>
+        /// <exception cref="InvalidOperationException">Namespace migration or GUID preservation fails.</exception>
+        /// <exception cref="IOException">Preparing, publishing, or inspecting a fixture fails.</exception>
+        private static void VerifyEditorNamespaceMigration(string workspace)
+        {
+            foreach (var previousRoot in new[] { EditorRootNamespace, EditorRootNamespace + ".Bindings" })
+            {
+                var root = Path.Combine(workspace, "editor-namespace-migration-" + previousRoot);
+                var output = Path.Combine(root, "assets");
+                var previousSources = new Dictionary<string, string>
+                {
+                    { "Runtime/AndroidJni.cs", "// previous JNI helper\r\n" },
+                    { "Runtime/IJavaObject.cs", "// previous Java object interface\r\n" },
+                    { "Runtime/JavaInvocationException.cs", "// previous JNI exception\r\n" },
+                    { "Runtime/JavaObjectReference.cs", "// previous Java reference\r\n" },
+                    { "Android/Net/Uri.g.cs", "// unchanged Android binding\r\n" },
+                    { "Java/Lang/Object.g.cs", "// previous Java binding\r\n" },
+                    { "DefaultPackage.g.cs", "// unchanged default-package binding\r\n" },
+                    { "Missing.g.cs", "// removed source with retained Unity metadata\r\n" },
+                    { "Android/Stale.g.cs", "// stale owned binding\r\n" }
+                };
+                var previous = new GeneratorOptions
+                {
+                    NoSdk = true,
+                    RootNamespace = previousRoot,
+                    OutputDirectory = output
+                };
+                GeneratedOutput.Write(previous, null, previousSources, CancellationToken.None);
+                foreach (var source in previousSources)
+                {
+                    File.WriteAllText(Path.Combine(output, source.Key) + ".meta", "fileFormatVersion: 2\r\nguid: " + Guid.NewGuid().ToString("N") + "\r\n");
+                }
+
+                var handwritten = Path.Combine(output, "Extensions.cs");
+                File.WriteAllText(handwritten, "// handwritten extension retained during migration\r\n");
+                File.WriteAllText(handwritten + ".meta", "handwritten extension GUID");
+                File.WriteAllText(Path.Combine(output, "Runtime.meta"), "old runtime folder GUID");
+                File.Delete(Path.Combine(output, "Missing.g.cs"));
+                SetEditorFixtureTimestamps(output);
+                var before = SnapshotEditorFiles(output);
+                var updatedSources = new Dictionary<string, string>
+                {
+                    { "AndroidJni.cs", "namespace MajdataPlay.Platform.Android.Runtime { }\r\n" },
+                    { "IJavaObject.cs", "// current Java object interface\r\n" },
+                    { "JavaInvocationException.cs", "// current JNI exception\r\n" },
+                    { "JavaObjectReference.cs", "// current Java reference\r\n" },
+                    { "Bindings/Android/Net/Uri.g.cs", previousSources["Android/Net/Uri.g.cs"] },
+                    { "Bindings/Java/Lang/Object.g.cs", "// current Java binding\r\n" },
+                    { "Bindings/DefaultPackage.g.cs", previousSources["DefaultPackage.g.cs"] },
+                    { "Bindings/Missing.g.cs", previousSources["Missing.g.cs"] }
+                };
+                var paths = new Dictionary<string, string>
+                {
+                    { "Runtime/AndroidJni.cs", "AndroidJni.cs" },
+                    { "Runtime/IJavaObject.cs", "IJavaObject.cs" },
+                    { "Runtime/JavaInvocationException.cs", "JavaInvocationException.cs" },
+                    { "Runtime/JavaObjectReference.cs", "JavaObjectReference.cs" },
+                    { "Android/Net/Uri.g.cs", "Bindings/Android/Net/Uri.g.cs" },
+                    { "Java/Lang/Object.g.cs", "Bindings/Java/Lang/Object.g.cs" },
+                    { "DefaultPackage.g.cs", "Bindings/DefaultPackage.g.cs" },
+                    { "Missing.g.cs", "Bindings/Missing.g.cs" }
+                };
+                var stage = WriteEditorStaging(root, "updated-stage", updatedSources);
+                Require(JavaWrapperOutput.Publish(stage, output) == updatedSources.Count, "Editor migrates generated paths from manifest root " + previousRoot);
+                foreach (var path in paths)
+                {
+                    var previousMetadata = before[(path.Key + ".meta").Replace('/', Path.DirectorySeparatorChar)];
+                    var metadata = Path.Combine(output, path.Value + ".meta");
+                    Require(File.ReadAllText(Path.Combine(output, path.Value)) == updatedSources[path.Value], "Directory migration publishes the new namespace source: " + path.Value);
+                    Require(File.ReadAllBytes(metadata).SequenceEqual(previousMetadata.Bytes)
+                        && File.GetLastWriteTimeUtc(metadata) == previousMetadata.Modified, "Directory migration retains the Unity GUID and metadata timestamp: " + path.Value);
+                    Require(!File.Exists(Path.Combine(output, path.Key)) && !File.Exists(Path.Combine(output, path.Key + ".meta")), "Directory migration removes the previous source and metadata paths: " + path.Key);
+                }
+
+                foreach (var previousPath in new[] { "Android/Net/Uri.g.cs", "DefaultPackage.g.cs" })
+                {
+                    var wrapper = Path.Combine(output, paths[previousPath]);
+                    Require(File.GetLastWriteTimeUtc(wrapper) == before[previousPath.Replace('/', Path.DirectorySeparatorChar)].Modified, "Moving an unchanged binding preserves its source timestamp: " + previousPath);
+                }
+
+                Require(!File.Exists(Path.Combine(output, "Android/Stale.g.cs"))
+                    && !File.Exists(Path.Combine(output, "Android/Stale.g.cs.meta")), "Directory migration still removes stale owned bindings and metadata");
+                foreach (var relativePath in new[] { "Extensions.cs", "Extensions.cs.meta", "Runtime.meta" })
+                {
+                    var path = Path.Combine(output, relativePath);
+                    Require(File.ReadAllBytes(path).SequenceEqual(before[relativePath].Bytes)
+                        && File.GetLastWriteTimeUtc(path) == before[relativePath].Modified, "Directory migration preserves unrelated source and folder assets: " + relativePath);
+                }
+
+                Require(File.ReadAllBytes(Path.Combine(output, EditorManifestName)).SequenceEqual(File.ReadAllBytes(Path.Combine(stage, EditorManifestName))), "Directory migration publishes the current namespace ownership manifest");
+                var migrated = SnapshotEditorFiles(output);
+                JavaWrapperOutput.Publish(stage, output);
+                RequireEditorFilesUnchanged(output, migrated, "Repeated directory migration publication");
+
+                updatedSources.Add("Bindings/Bindings/Android/Net/Uri.g.cs", "// newly added binding whose Java package starts with bindings\r\n");
+                var expanded = WriteEditorStaging(root, "expanded-stage", updatedSources);
+                Require(JavaWrapperOutput.Publish(expanded, output) == updatedSources.Count, "Current directory layout accepts a new Java package named bindings");
+                foreach (var file in migrated)
+                {
+                    if (file.Key == EditorManifestName)
+                    {
+                        continue;
+                    }
+
+                    var path = Path.Combine(output, file.Key);
+                    Require(File.ReadAllBytes(path).SequenceEqual(file.Value.Bytes)
+                        && File.GetLastWriteTimeUtc(path) == file.Value.Modified, "Adding a bindings package preserves all previously migrated identities: " + file.Key);
+                }
+
+                var expandedSnapshot = SnapshotEditorFiles(output);
+                JavaWrapperOutput.Publish(expanded, output);
+                RequireEditorFilesUnchanged(output, expandedSnapshot, "Repeated publication with a bindings package");
+            }
+        }
+
+        /// <summary>Checks that generated path migration rejects conflicts before writing or moving any asset.</summary>
+        /// <param name="workspace">The exclusively owned ignored validation directory.</param>
+        /// <exception cref="InvalidOperationException">A migration ownership or preflight contract fails.</exception>
+        /// <exception cref="IOException">Preparing or inspecting an isolated fixture fails.</exception>
+        private static void VerifyEditorMigrationConflicts(string workspace)
+        {
+            var modes = new[]
+            {
+                "destination-source", "destination-metadata", "modified-helper", "modified-binding",
+                "source-directory", "metadata-directory", "file-ancestor", "readonly-source", "readonly-metadata",
+                "overlapping-bindings", "overlapping-filtered-bindings", "mixed-helper-layout"
+            };
+            foreach (var previousRoot in new[] { EditorRootNamespace, EditorRootNamespace + ".Bindings" })
+            {
+                foreach (var mode in modes)
+                {
+                    var root = Path.Combine(workspace, "editor-migration-conflict-" + previousRoot + "-" + mode);
+                    var output = Path.Combine(root, "assets");
+                    var previous = new GeneratorOptions
+                    {
+                        NoSdk = true,
+                        RootNamespace = previousRoot,
+                        OutputDirectory = output
+                    };
+                    var previousSources = new Dictionary<string, string>
+                    {
+                        { "Runtime/AndroidJni.cs", "// previous helper\r\n" },
+                        { "Stale.g.cs", "// previous stale binding\r\n" },
+                        { "Z/Late.g.cs", "// previous late binding\r\n" }
+                    };
+                    if (mode == "overlapping-bindings" || mode == "overlapping-filtered-bindings")
+                    {
+                        previousSources.Add("Bindings/Z/Late.g.cs", "// old binding whose Java package starts with bindings\r\n");
+                    }
+                    else if (mode == "mixed-helper-layout")
+                    {
+                        previousSources.Add("IJavaObject.cs", "// inconsistently migrated runtime helper\r\n");
+                    }
+
+                    GeneratedOutput.Write(previous, null, previousSources, CancellationToken.None);
+                    File.WriteAllText(Path.Combine(output, "Runtime/AndroidJni.cs.meta"), "runtime helper GUID");
+                    File.WriteAllText(Path.Combine(output, "Z/Late.g.cs.meta"), "late binding GUID");
+                    File.WriteAllText(Path.Combine(output, "Stale.g.cs.meta"), "stale binding GUID");
+                    var source = Path.Combine(output, "Bindings/Z/Late.g.cs");
+                    string? readOnlyPath = null;
+                    if (mode == "file-ancestor")
+                    {
+                        File.WriteAllText(Path.Combine(output, "Bindings"), "handwritten file blocking the binding directory");
+                    }
+                    else
+                    {
+                        Directory.CreateDirectory(Path.GetDirectoryName(source)!);
+                        switch (mode)
+                        {
+                            case "destination-source":
+                                File.WriteAllText(source, "// handwritten source at the new binding path\r\n");
+                                break;
+                            case "destination-metadata":
+                                File.WriteAllText(source + ".meta", "unowned destination GUID");
+                                break;
+                            case "modified-helper":
+                                File.AppendAllText(Path.Combine(output, "Runtime/AndroidJni.cs"), "// user modification");
+                                break;
+                            case "modified-binding":
+                                File.AppendAllText(Path.Combine(output, "Z/Late.g.cs"), "// user modification");
+                                break;
+                            case "source-directory":
+                                Directory.CreateDirectory(source);
+                                break;
+                            case "metadata-directory":
+                                Directory.CreateDirectory(source + ".meta");
+                                break;
+                            case "readonly-source":
+                                readOnlyPath = Path.Combine(output, "Z/Late.g.cs");
+                                break;
+                            case "readonly-metadata":
+                                readOnlyPath = Path.Combine(output, "Z/Late.g.cs.meta");
+                                break;
+                        }
+                    }
+
+                    SetEditorFixtureTimestamps(output);
+                    if (readOnlyPath != null)
+                    {
+                        File.SetAttributes(readOnlyPath, FileAttributes.ReadOnly);
+                    }
+
+                    var updatedSources = new Dictionary<string, string>
+                    {
+                        { "AndroidJni.cs", "// updated helper\r\n" },
+                        { "Bindings/Z/Late.g.cs", "// updated late binding\r\n" }
+                    };
+                    if (mode == "overlapping-bindings")
+                    {
+                        updatedSources.Add("Bindings/Bindings/Z/Late.g.cs", "// current binding whose Java package starts with bindings\r\n");
+                    }
+
+                    var stage = WriteEditorStaging(root, "updated-stage", updatedSources);
+                    var before = SnapshotEditorFiles(output);
+                    var directories = Directory.GetDirectories(output, "*", SearchOption.AllDirectories);
+                    try
+                    {
+                        Expect<IOException>(() => JavaWrapperOutput.Publish(stage, output), "Editor rejects path migration conflict " + mode + " from " + previousRoot);
+                        RequireEditorFilesUnchanged(output, before, "Rejected path migration conflict " + mode);
+                        Require(Directory.GetDirectories(output, "*", SearchOption.AllDirectories).SequenceEqual(directories), "Rejected path migration conflict preserves the directory structure: " + mode);
+                    }
+                    finally
+                    {
+                        if (readOnlyPath != null)
+                        {
+                            File.SetAttributes(readOnlyPath, FileAttributes.Normal);
+                        }
+                    }
+                }
+            }
+        }
+
         /// <summary>Checks that every destination ownership and shape conflict is rejected before any prepared write.</summary>
         /// <param name="workspace">The exclusively owned validation directory.</param>
         /// <exception cref="InvalidOperationException">An ownership or preflight contract fails.</exception>
@@ -229,7 +685,7 @@ namespace MajdataPlay.Tests.AndroidJavaWrapperGeneratorValidation
         {
             var modes = new[]
             {
-                "version", "generator", "namespace", "null-files", "missing-fields", "lowercase-hash", "short-hash", "null-hash",
+                "version", "generator", "namespace", "legacy-staged-namespace", "null-files", "missing-fields", "lowercase-hash", "short-hash", "null-hash",
                 "invalid-json", "trailing-json", "missing-manifest", "modified-source", "missing-source", "duplicate-path",
                 "destination-version", "destination-namespace", "destination-traversal", "destination-non-source"
             };
@@ -265,11 +721,17 @@ namespace MajdataPlay.Tests.AndroidJavaWrapperGeneratorValidation
                             manifest.Generator = "UnrelatedGenerator";
                         });
                         break;
+                    case "legacy-staged-namespace":
+                        MutateEditorManifest(stage, manifest =>
+                        {
+                            manifest.RootNamespace = EditorRootNamespace + ".Bindings";
+                        });
+                        break;
                     case "namespace":
                     case "destination-namespace":
                         MutateEditorManifest(mode.StartsWith("destination-", StringComparison.Ordinal) ? output : stage, manifest =>
                         {
-                            manifest.RootNamespace = "MajdataPlay.Platform.Android.Runtime";
+                            manifest.RootNamespace = "MajdataPlay.Platform.Android.Runtime.Invalid";
                         });
                         break;
                     case "null-files":
@@ -399,7 +861,7 @@ namespace MajdataPlay.Tests.AndroidJavaWrapperGeneratorValidation
             var options = new GeneratorOptions
             {
                 NoSdk = true,
-                RootNamespace = EditorBindingsNamespace,
+                RootNamespace = EditorRootNamespace,
                 OutputDirectory = output
             };
             GeneratedOutput.Write(options, null, sources, CancellationToken.None);

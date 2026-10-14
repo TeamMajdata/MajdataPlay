@@ -1,5 +1,10 @@
 # Android Java → Unity C# JNI source generator
 
+This analyzer is retained for legacy regression validation. The main Unity
+project uses the standalone AndroidJavaWrapperGenerator CLI and Runtime/Bindings.
+Its former runtime support sources are archived under
+Tools/Tests/AndroidJavaGeneratorValidation/Fixtures/LegacyRuntime.
+
 本工具为 `MajdataPlay.Platform.Android` 提供 `[JavaClass("binary.ClassName")]`。
 生成代码留在 Roslyn compilation 内，不把 `.g.cs` 写回 `Assets`，不改 Unity
 生成的解决方案或项目文件。每个 wrapper 默认以 `JavaObject` 为基类，也可以

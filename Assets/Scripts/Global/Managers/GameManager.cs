@@ -14,7 +14,6 @@ using MajdataPlay.Platform.MacOS;
 using MajdataPlay.Platform.iOS;
 #elif UNITY_ANDROID
 using MajdataPlay.Platform.Android;
-using MajdataPlay.Platform.Android.Runtime;
 #endif
 using System;
 using System.Collections.Concurrent;
@@ -73,17 +72,18 @@ namespace MajdataPlay
 #if UNITY_ANDROID && !UNITY_EDITOR // Android Only (Sdk Version Log)
             MajDebug.LogInfo($"AndroidSdkVersion: {MajEnv.AndroidSdkVersion}");
             MajDebug.LogInfo($"TargetSdkVersion: {MajEnv.TargetSdkVersion}");
-            using var packageManager = AndroidRuntime.CurrentActivity.GetPackageManager();
-            var packageName = AndroidRuntime.CurrentActivity.GetPackageName();
-            using var packageInfo = packageManager!.Call<AndroidJavaObject>("getPackageInfo", packageName, 0);
+            using var activity = AndroidRuntime.CurrentActivity;
+            using var packageManager = activity.GetPackageManager();
+            var packageName = activity.GetPackageName();
+            using var packageInfo = packageManager!.GetPackageInfo(packageName, 0)!;
             var androidVersionCode = 0L;
             if(MajEnv.AndroidSdkVersion >= 28)
             {
-                androidVersionCode = packageInfo.Call<long>("getLongVersionCode");
+                androidVersionCode = packageInfo.GetLongVersionCode();
             }
             else
             {
-                androidVersionCode = packageInfo.Get<int>("versionCode");
+                androidVersionCode = packageInfo.VersionCode;
             }
             MajDebug.LogInfo($"AndroidVerCode: {androidVersionCode}");
 #endif

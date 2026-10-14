@@ -79,20 +79,24 @@ namespace MajdataPlay.Tests.AndroidJavaWrapperGeneratorValidation.Unity
                 Debug.Log("EDITOR_WRAPPER_SMOKE_CANCELED_FIRST_CLI");
                 return;
             }
-            var generated = Path.Combine(Application.dataPath, "Plugins/MajdataPlay/Platform/Android/Generated");
+            var runtime = Path.Combine(Application.dataPath, "Plugins/MajdataPlay/Platform/Android/Runtime");
             if (Environment.OSVersion.Platform == PlatformID.Win32NT)
             {
-                generated = @"\\?\" + Path.GetFullPath(generated);
+                runtime = @"\\?\" + Path.GetFullPath(runtime);
             }
             if (running || pending || EditorApplication.isCompiling || EditorApplication.isUpdating
-                || !File.Exists(Path.Combine(generated, "java-wrappers.manifest.json")))
+                || !File.Exists(Path.Combine(runtime, "java-wrappers.manifest.json")))
             {
                 return;
             }
             var bindingsLoaded = false;
             foreach (var assembly in AppDomain.CurrentDomain.GetAssemblies())
             {
-                if (assembly.GetType("MajdataPlay.Platform.Android.Runtime.Bindings.Android.Net.Uri") != null)
+                if (assembly.GetType("MajdataPlay.Platform.Android.Runtime.Bindings.Android.Net.Uri") != null
+                    && assembly.GetType("MajdataPlay.Platform.Android.Runtime.AndroidJni") != null
+                    && assembly.GetType("MajdataPlay.Platform.Android.Runtime.IJavaObject") != null
+                    && assembly.GetType("MajdataPlay.Platform.Android.Runtime.JavaInvocationException") != null
+                    && assembly.GetType("MajdataPlay.Platform.Android.Runtime.JavaObjectReference") != null)
                 {
                     bindingsLoaded = true;
                     break;
@@ -102,15 +106,15 @@ namespace MajdataPlay.Tests.AndroidJavaWrapperGeneratorValidation.Unity
             {
                 return;
             }
-            var sourceCount = Directory.GetFiles(generated, "*.cs", SearchOption.AllDirectories).Length;
-            if (sourceCount < 6191 || !File.Exists(Path.Combine(generated, "Com/Unity3d/Player/UnityPlayerActivity.g.cs"))
-                || !File.Exists(Path.Combine(generated, "Net/Majdata/Majdataplay/StorageAccess.g.cs")))
+            var sourceCount = Directory.GetFiles(runtime, "*.cs", SearchOption.AllDirectories).Length;
+            if (sourceCount < 6191 || !File.Exists(Path.Combine(runtime, "Bindings/Com/Unity3d/Player/UnityPlayerActivity.g.cs"))
+                || !File.Exists(Path.Combine(runtime, "Bindings/Net/Majdata/Majdataplay/StorageAccess.g.cs")))
             {
                 Debug.LogError("EDITOR_WRAPPER_SMOKE_INCOMPLETE: " + sourceCount);
                 EditorApplication.Exit(3);
                 return;
             }
-            var probe = Path.Combine(generated, "Android/Net/Uri.g.cs");
+            var probe = Path.Combine(runtime, "Bindings/Android/Net/Uri.g.cs");
             if (phase == 2)
             {
                 SessionState.SetString("JavaWrapperEditorSmoke.ProbeMeta", File.ReadAllText(probe + ".meta"));

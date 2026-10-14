@@ -38,7 +38,7 @@ namespace MajdataPlay.Tests.AndroidJavaWrapperGeneratorValidation
             Require(oracle.Methods["parseInt(Ljava/lang/String;I)I"].Returns.Contains("numeric result", StringComparison.Ordinal), "Oracle return descriptions are retained");
             Require(oracle.Methods["parseInt(Ljava/lang/String;I)I"].Remarks.Contains("NumberFormatException", StringComparison.Ordinal), "Java exception descriptions are preserved without inventing CLR exceptions");
 
-            var options = new GeneratorOptions { NoSdk = true, OutputDirectory = Path.Combine(workspace, "documented"), RootNamespace = "Documented.Bindings", DocumentationCache = Path.Combine(workspace, "docs-cache"), DocumentationJobs = 2, Jobs = 4 };
+            var options = new GeneratorOptions { NoSdk = true, OutputDirectory = Path.Combine(workspace, "documented"), RootNamespace = "Documented.CustomRoot", DocumentationCache = Path.Combine(workspace, "docs-cache"), DocumentationJobs = 2, Jobs = 4 };
             using var handler = new DocumentationHandler(androidHtml, oracleHtml);
             using var client = new HttpClient(handler);
             var report = OfficialDocumentationProvider.EnrichAsync(api, new[] { sample, integer }, options, CancellationToken.None, client).GetAwaiter().GetResult();

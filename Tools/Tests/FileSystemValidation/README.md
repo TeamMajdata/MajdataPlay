@@ -145,59 +145,68 @@ provider-dependent.
 
 Use the repository's **Unity 6000.3.17f1**, Android Build Support with SDK API 36
 and its bundled OpenJDK, a .NET 9 SDK, and the Unity modules for every requested
-Player target. Android SDK/JDK are required even for Editor or desktop-only
-checks because the production wrappers are generated from Java metadata.
-See `Tools/CSharp/AndroidJavaGenerator/README.md` for analyzer build/restore prerequisites.
+Player target. Android SDK metadata is required even for Editor or desktop-only
+checks. The bundled OpenJDK is needed only for the separate Java compilation
+check, which can be skipped. See `Tools/CSharp/AndroidJavaWrapperGenerator/README.md`
+for the standalone CLI prerequisites.
 
 From the repository root:
 
 ```powershell
 ./Tools/Tests/ValidateFileSystemUnity.ps1
 ./Tools/Tests/ValidateFileSystemUnity.ps1 -PlayerTargets StandaloneWindows64,StandaloneLinux64,StandaloneOSX,iOS,Android
+./Tools/Tests/ValidateFileSystemUnity.ps1 -PlayerTargets @() -SkipJavaCompilation
 ```
 
-The script calls `Tools/CSharp/AndroidJavaGenerator/build.ps1 -Install` with the selected
-Editor path **before staging**, then creates the ignored isolated project under
-`Temp/FileSystemUnityValidation/`. It copies production storage and Android core
-sources, `JavaClassAttribute` / `JavaApiConfigurationAttribute`, the entire production
-`Runtime/` tree recursively (including App/Content/Net/Provider/Unity/Java/Storage
-categories and metadata), and the installed analyzer DLL with its
-`RoslynAnalyzer`-labelled `.meta`. The only game-service doubles are the existing
-logging and keyboard initialization stubs; wrappers and picker logic are real
-production code, not validation-only replacements.
+The script builds the independent .NET 9 AndroidJavaWrapperGenerator CLI, then
+creates the ignored isolated project under `Temp/FileSystemUnityValidation/`.
+It copies production storage, Android core sources, KeyCode, and handwritten
+`Runtime/Bindings/` partial extensions. The known obsolete analyzer/helper files
+and verified isolated `Runtime/` staging directory are removed before each run.
+Fresh JNI support sources are generated directly under `Assets/Android/Runtime`,
+with wrappers under `Assets/Android/Runtime/Bindings/`, using root namespace
+`MajdataPlay.Platform.Android.Runtime`. The only game-service doubles are the
+existing logging and keyboard initialization stubs; picker and storage logic
+use the production CLI bindings.
 
-The Java extractor is staged at
-`Tools/CSharp/AndroidJavaGenerator/Java/JavaApiExtractor.java` and the custom bridge at
-`Assets/Plugins/Android/src/java/net/majdata/majdataplay/StorageAccess.java`, retaining
-their project-relative paths. Extraction uses the selected Editor's SDK/JDK,
-the staged extractor, and production `{UnityData}` source/classpath inputs; process
-environment overrides are restored afterward. Generated C# remains in Roslyn's
-compilation, is not materialized as `.g.cs` assets, and must not be committed.
-The analyzer installation is ignored build output, not a runtime plugin or an
-assembly reference. No Unity-generated root solution/project files are built.
+The CLI reads the selected Editor's installed SDK, Unity classes archive and
+`UnityPlayerActivity.java`, plus all staged production Java/class/JAR/AAR inputs.
+It analyzes metadata directly in C# without a Java extractor or JDK. The generated
+`.g.cs` files and ownership manifest remain in the ignored isolated project.
+No Unity-generated root solution/project files are built. Empty `-PlayerTargets @()`
+runs the Editor checks only; explicit target names additionally compile Player scripts.
 
 Coverage adds to, rather than replaces, the existing Editor local-storage smoke,
 Android API guards, reflection-based picker cancellation/dismissal/late-result
 checks, and deterministic commit/cancellation and launch/shutdown concurrency:
 
-- The five public production `MajdataPlay.Platform.Android.Runtime.Storage` wrappers
-  map the exact `StorageAccess` and nested Java binary names at API 36, with
-  `IncludeInheritedMembers = false`, no Java-private construction APIs, and real
-  generated `JavaObject` bases, constants, and reference constructors.
+- The five production StorageAccess protocol wrappers occupy
+  `MajdataPlay.Platform.Android.Runtime.Bindings.Net.Majdata.Majdataplay`, with
+  nested types such as `StorageAccess_Result` and `StorageAccess_StreamHandle`.
+  Public reference constructors, the `JavaObjectReference` ownership base,
+  getter-only static fields and guarded class lookups are checked. Java-private
+  constructors remain unavailable.
 - Storage methods return typed `StorageResult` envelopes; getter-only result fields
   map to `DocumentEntry` / `DocumentCursor` / `DocumentStream`. Java byte arrays use
   `sbyte[]` for result `Data` and stream writes; `long` for stream `Value`,
   length/position/seek envelopes and offsets, plus the per-open `Seekable` flag.
   Metadata integers, booleans, strings, and 64-bit values retain their exact types.
 - Borrowed wrappers retain the supplied reference without disposing it; other
-  borrowers remain intact. Default adopting ownership disposes exactly once,
-  repeated disposal is harmless, disposed wrappers reject reference access,
-  and null references are rejected. These use an inert managed disposal probe
+  borrowers remain intact. Borrowed disposal is harmless when repeated, disposed
+  wrappers reject reference access, and null references are rejected. Default
+  owning wrappers reject Editor disposal before disposing or detaching their
+  reference; only the test manually cleans up that inert reference probe.
+  Actual owned-reference disposal requires separate Android device validation.
+  These checks use an inert managed disposal probe
   allocated without Java-object construction or JNI handles, not a live JVM.
 - All storage entry points, generated instance field getters and cursor/stream
   operations throw the Editor platform guard before JNI. SDK/Unity picker
-  signatures retain typed activity/intent/URI/resolver/list/runnable mappings;
-  non-storage wrappers are located by Java binary names, not category namespaces.
+  signatures retain typed activity/intent/URI/resolver/list/runnable mappings.
+  Erased `IList.Get` returns the generated JavaObject binding, Parcelable Creator
+  fields return their typed interface, and non-storage wrappers are located by
+  their Java package binding namespace. Static field values require JNI and are
+  not read in the Editor; the separate KeyCode snapshot still checks all 338
+  original names and numeric values independently.
 - The real internal `RequireResult(StorageResult?)` rejects a null envelope with
   `IOException` and preserves a nonnull caller-owned envelope unchanged. The
   bridge error translator and managed stream constructor accept typed wrappers.
@@ -212,10 +221,9 @@ The aggregate success marker remains `FILE_SYSTEM_UNITY_PASSED`; the script reje
 nonzero exit codes or missing success markers and retains
 `Temp/FileSystemUnityValidation/validation.log` for inspection.
 `-SkipJavaCompilation` skips only the separate Java bytecode compilation check:
-it does **not** skip analyzer installation, Java metadata extraction, or SDK/JDK
-requirements.
+it does **not** skip CLI generation or the SDK metadata requirement.
 
-This checks Editor behavior, analyzer loading and Player **script compilation**,
+This checks Editor behavior, CLI binding import and optional Player **script compilation**,
 not APK/AAB packaging, a running Player, JNI marshaling, real JVM reference
 ownership, provider-resource closure, persisted grants, IL2CPP/AOT, ARMv7/ARM64
 runtime behavior, or a real local/cloud document provider. Device/platform

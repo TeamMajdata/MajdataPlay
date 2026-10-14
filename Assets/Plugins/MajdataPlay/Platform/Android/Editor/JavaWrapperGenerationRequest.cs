@@ -47,13 +47,17 @@ namespace MajdataPlay.Platform.Android.Editor
         /// </summary>
         internal string OutputDirectory { get; }
 
+        /// <summary>Gets the former generated asset directory whose ownership may migrate into Runtime.</summary>
+        internal string PreviousOutputDirectory { get; }
+
         /// <summary>
         /// Gets the persistent tool-local cache shared by official documentation requests.
         /// </summary>
         internal string DocumentationCacheDirectory { get; }
 
         /// <summary>
-        /// Gets the root namespace for generated Android, Java, Unity, and project bindings.
+        /// Gets the namespace for generated JNI support. Android, Java, Unity, and project bindings
+        /// use its Bindings child namespace.
         /// </summary>
         internal string RootNamespace { get; }
 
@@ -103,9 +107,10 @@ namespace MajdataPlay.Platform.Android.Editor
             ProjectPath = Path.Combine(toolDirectory, "AndroidJavaWrapperGenerator.csproj");
             AssemblyPath = Path.Combine(toolDirectory, "bin", "Release", "net9.0", "AndroidJavaWrapperGenerator.dll");
             StagingDirectory = Path.Combine(toolDirectory, ".work", "editor-output", Guid.NewGuid().ToString("N"));
-            OutputDirectory = Path.Combine(projectRoot, "Assets", "Plugins", "MajdataPlay", "Platform", "Android", "Generated");
+            OutputDirectory = Path.Combine(projectRoot, "Assets", "Plugins", "MajdataPlay", "Platform", "Android", "Runtime");
+            PreviousOutputDirectory = Path.Combine(projectRoot, "Assets", "Plugins", "MajdataPlay", "Platform", "Android", "Generated");
             DocumentationCacheDirectory = Path.Combine(toolDirectory, ".work", "editor-docs");
-            RootNamespace = "MajdataPlay.Platform.Android.Runtime.Bindings";
+            RootNamespace = "MajdataPlay.Platform.Android.Runtime";
             OfflineDocumentation = offlineDocumentation;
             Inputs = inputs;
             Warnings = warnings;

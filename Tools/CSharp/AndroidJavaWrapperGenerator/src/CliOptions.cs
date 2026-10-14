@@ -15,12 +15,13 @@ namespace MajdataPlay.Tools.AndroidJavaWrapperGenerator
 
 Usage:
   AndroidJavaWrapperGenerator --output DIRECTORY [options]
+  AndroidJavaWrapperGenerator --project DIRECTORY --unity-data DIRECTORY [project options]
 
 Options:
   --sdk DIRECTORY          Android SDK root (defaults to Unity/environment discovery).
   --api-level NUMBER       Installed stable API level (defaults to highest installed).
   --input FILE             Add .java, .class, .jar, or .aar input; repeat for multiple inputs.
-  --namespace NAME         Root namespace (default: MajdataPlay.Platform.Android.Bindings).
+  --namespace NAME         Runtime root namespace (default: MajdataPlay.Platform.Android).
   --output DIRECTORY       Destination for C# sources and the ownership manifest.
   --include-package NAME   Export a package and subpackages plus API dependencies; repeat.
   --no-sdk                 Scan additional inputs only, without android.jar.
@@ -35,7 +36,10 @@ Options:
 SDK, .class, .jar, and .java metadata are analyzed in pure C#; no JDK tools are invoked.
 By default every public type in android.jar is exported, including Android's Java BCL.
 Generated code targets C# 9 / netstandard2.1 and requires Unity's Core/AndroidJNI modules.
-Java packages are PascalCase namespace components: android.net -> ROOT.Android.Net.
+Runtime support types are directly in ROOT; Java wrappers are under ROOT.Bindings.
+Java packages are PascalCase namespace components: android.net -> ROOT.Bindings.Android.Net.
+Project mode discovers project/Unity inputs and publishes into Platform/Android/Runtime.
+Its optional arguments are --sdk, --api-level, --jobs, and the documentation options above.
 ";
 
         /// <summary>Reads arguments and validates independent generation settings.</summary>

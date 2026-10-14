@@ -42,12 +42,22 @@ Simple meshes and uses the shared cache for Sliced/Tiled, still ignoring flips.
 See [Translation editor validation](TranslationEditorValidation.md) for the static
 key-analysis regression tests, isolated Unity editor checks, and editor workflow.
 
-## Android Java source generator
+## Android Java bindings and legacy generator
+
+The Unity runtime uses the standalone CLI and local `Runtime/Bindings` output.
+See `AndroidJavaWrapperGeneratorValidation/README.md` for generation, namespace
+directory migration, project bootstrap, and production consumer compilation.
+
+```powershell
+dotnet run --project Tools/Tests/AndroidJavaWrapperGeneratorValidation/AndroidJavaWrapperGeneratorValidation.csproj -- --editor-inputs
+./Tools/Tests/ValidateAndroidJavaWrapperRefreshUnity.ps1
+```
 
 See `AndroidJavaGeneratorValidation/README.md` for .NET 9 regression tests using
-real Unity reference assemblies and the bundled Android SDK/JDK. See
+real Unity reference assemblies, archived legacy runtime fixtures, and the bundled Android SDK/JDK. See
 `../AndroidJavaGenerator/README.md` for wrapper usage, toolchain configuration,
-documentation provenance, and runtime ownership.
+documentation provenance, and legacy runtime ownership. The analyzer is no longer
+required by the main project's runtime consumers.
 
 ```powershell
 dotnet run --project Tools/Tests/AndroidJavaGeneratorValidation/AndroidJavaGeneratorValidation.csproj

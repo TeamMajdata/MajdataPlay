@@ -9,15 +9,17 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using MajdataPlay.IO.Storage;
-using MajdataPlay.Platform.Android.Runtime.Java.Lang;
-using MajdataPlay.Platform.Android.Runtime.Storage;
+using MajdataPlay.Platform.Android.Runtime;
 using MajdataPlay.Platform.Android.Storage;
 using UnityEngine;
-using Activity = MajdataPlay.Platform.Android.Runtime.App.Activity;
-using Intent = MajdataPlay.Platform.Android.Runtime.Content.Intent;
-using KeyEvent = MajdataPlay.Platform.Android.Runtime.View.KeyEvent;
+using Activity = MajdataPlay.Platform.Android.Runtime.Bindings.Android.App.Activity;
+using DeviceJniProbe = MajdataPlay.Platform.Android.Runtime.Bindings.Net.Majdata.Validation.DeviceJniProbe;
+using DocumentStream = MajdataPlay.Platform.Android.Runtime.Bindings.Net.Majdata.Majdataplay.StorageAccess_StreamHandle;
+using Intent = MajdataPlay.Platform.Android.Runtime.Bindings.Android.Content.Intent;
+using JavaObject = MajdataPlay.Platform.Android.Runtime.Bindings.Java.Lang.JavaObject;
+using KeyEvent = MajdataPlay.Platform.Android.Runtime.Bindings.Android.View.KeyEvent;
 using StorageFileSystem = MajdataPlay.IO.Storage.FileSystem;
-using UnityPlayer = MajdataPlay.Platform.Android.Runtime.Unity.UnityPlayer;
+using UnityPlayer = MajdataPlay.Platform.Android.Runtime.Bindings.Com.Unity3d.Player.UnityPlayer;
 
 namespace MajdataPlay.Platform.Android.Runtime.Validation
 {
@@ -397,8 +399,9 @@ namespace MajdataPlay.Platform.Android.Runtime.Validation
             {
                 Require(echoedKey is not null && echoedKey.GetKeyCode() == KeyEvent.KeycodeA, "Typed KeyEvent return failed.");
             }
-            var raw = DeviceJniProbe.CreateAdoptableKeyEvent()
+            using var adoptable = DeviceJniProbe.CreateAdoptableKeyEvent()
                 ?? throw new InvalidOperationException("The adoption probe returned null.");
+            var raw = new AndroidJavaObject(adoptable.JavaReference.GetRawObject());
             using (var adopted = new KeyEvent(raw, ownsReference: true))
             {
                 Require(adopted.GetKeyCode() == KeyEvent.KeycodeA, "Adopted reference dispatch failed.");
@@ -459,9 +462,9 @@ namespace MajdataPlay.Platform.Android.Runtime.Validation
         private static void CheckJavaObjectEquality(KeyEvent key)
         {
             const string Text = "polygenelubricants";
-            using var first = new JavaObject("java.lang.String", "(Ljava/lang/String;)V", Text);
-            using var equal = new JavaObject("java.lang.String", "(Ljava/lang/String;)V", Text);
-            using var different = new JavaObject("java.lang.String", "(Ljava/lang/String;)V", "different");
+            using var first = new JavaObject(AndroidJni.Construct("java.lang.String", "(Ljava/lang/String;)V", Text));
+            using var equal = new JavaObject(AndroidJni.Construct("java.lang.String", "(Ljava/lang/String;)V", Text));
+            using var different = new JavaObject(AndroidJni.Construct("java.lang.String", "(Ljava/lang/String;)V", "different"));
             Require(!AndroidJNI.IsSameObject(first.JavaReference.GetRawObject(), equal.JavaReference.GetRawObject()),
                 "The String equality probes must be distinct Java objects.");
             Require(first.Equals(equal) && equal.Equals(first) && first == equal && !(first != equal),

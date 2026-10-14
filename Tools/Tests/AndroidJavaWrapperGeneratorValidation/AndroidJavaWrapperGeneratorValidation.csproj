@@ -11,8 +11,6 @@
     <RestoreSources>$(MSBuildThisFileDirectory)</RestoreSources>
   </PropertyGroup>
   <ItemGroup>
-    <Compile Include="../../../Assets/Plugins/MajdataPlay/Platform/Android/Editor/JavaWrapperOutput.cs" Link="Editor/JavaWrapperOutput.cs" />
-    <Compile Include="../../../Assets/Plugins/MajdataPlay/Platform/Android/Editor/JavaWrapperGenerationRequest.cs" Link="Editor/JavaWrapperGenerationRequest.cs" />
     <Content Include="DocumentationFixtures/*.html" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="Fixtures/*.java" CopyToOutputDirectory="PreserveNewest" />
     <ProjectReference Include="../../CSharp/AndroidJavaWrapperGenerator/AndroidJavaWrapperGenerator.csproj" />

@@ -5,6 +5,7 @@ using System.Linq;
 using System.Reflection;
 using System.Runtime.ExceptionServices;
 using System.Runtime.Loader;
+using System.Text.Json;
 using System.Threading;
 using MajdataPlay.Tools.AndroidJavaWrapperGenerator;
 using Microsoft.CodeAnalysis;
@@ -90,7 +91,7 @@ namespace MajdataPlay.Tests.AndroidJavaWrapperGeneratorValidation
             }
 
             var assembly = Assembly.Load(assemblyBytes);
-            var runtime = assembly.GetType("Validation.Bindings.Runtime.AndroidJni", true)!;
+            var runtime = assembly.GetType("Validation.CustomRoot.AndroidJni", true)!;
             var map = runtime.GetMethods().Single(item => item.Name == "MapArray").MakeGenericMethod(typeof(int), typeof(int));
             var converter = new Func<int, int>(value => value + 1);
             Require(Invoke(map, new object?[] { null, converter }) == null, "MapArray preserves null");
@@ -100,8 +101,96 @@ namespace MajdataPlay.Tests.AndroidJavaWrapperGeneratorValidation
             Expect<InvalidOperationException>(() => Invoke(map, new object?[] { new[] { 1 }, failingConverter }), "MapArray propagates converter errors");
             var getClass = runtime.GetMethod("GetClass")!;
             Expect<PlatformNotSupportedException>(() => Invoke(getClass, new object?[] { "java.lang.Object" }), "Non-Android JNI is rejected before any Unity native call");
-            var wrap = runtime.GetMethods().Single(item => item.Name == "Wrap").MakeGenericMethod(assembly.GetType("Validation.Bindings.Java.Lang.JavaObject", true)!);
+            var wrap = runtime.GetMethods().Single(item => item.Name == "Wrap").MakeGenericMethod(assembly.GetType("Validation.CustomRoot.Bindings.Java.Lang.JavaObject", true)!);
             Expect<ArgumentNullException>(() => Invoke(wrap, new object?[] { null, null }), "Wrap rejects a missing reference factory");
+        }
+
+        /// <summary>Checks that generated namespace boundaries are reflected in relative output paths.</summary>
+        /// <param name="sources">The complete generated source set.</param>
+        /// <param name="rootNamespace">The configured namespace that directly contains runtime support.</param>
+        /// <exception cref="InvalidOperationException">A generated declaration uses an unexpected namespace or directory.</exception>
+        private static void VerifyNamespaceLayout(IReadOnlyDictionary<string, string> sources, string rootNamespace)
+        {
+            var runtimePaths = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var name in new[] { "AndroidJni", "IJavaObject", "JavaInvocationException", "JavaObjectReference" })
+            {
+                var path = name + ".cs";
+                runtimePaths.Add(path);
+                var runtimeSource = sources[path];
+                var declaration = CSharpSyntaxTree.ParseText(runtimeSource).GetRoot().DescendantNodes().OfType<NamespaceDeclarationSyntax>().Single();
+                Require(declaration.Name.ToString() == rootNamespace
+                    && declaration.Members.OfType<BaseTypeDeclarationSyntax>().Any(type => type.Identifier.ValueText == name), "Runtime support is declared directly in the configured root and output directory: " + name);
+            }
+
+            var bindings = sources.Where(source => !runtimePaths.Contains(source.Key)).ToArray();
+            var bindingsNamespace = rootNamespace + ".Bindings";
+            Require(bindings.Length > 0 && bindings.All(source =>
+            {
+                var declaration = CSharpSyntaxTree.ParseText(source.Value).GetRoot().DescendantNodes().OfType<NamespaceDeclarationSyntax>().Single();
+                var name = declaration.Name.ToString();
+                return name == bindingsNamespace || name.StartsWith(bindingsNamespace + ".", StringComparison.Ordinal);
+            }), "Every Java wrapper is declared beneath the configured root's Bindings namespace");
+            Require(bindings.All(source =>
+            {
+                var declaration = CSharpSyntaxTree.ParseText(source.Value).GetRoot().DescendantNodes().OfType<NamespaceDeclarationSyntax>().Single();
+                var relativeNamespace = declaration.Name.ToString().Substring(rootNamespace.Length + 1);
+                return source.Key == relativeNamespace.Replace('.', '/') + "/" + Path.GetFileName(source.Key);
+            }), "Every Java wrapper output directory matches its namespace relative to the configured root");
+        }
+
+        /// <summary>Runs the actual CLI entry point to migrate a previous directory layout in place.</summary>
+        /// <param name="workspace">The exclusively owned directory used for inputs and both output layouts.</param>
+        /// <exception cref="IOException">Writing fixtures or reading migrated sources fails.</exception>
+        /// <exception cref="InvalidOperationException">Migration fails to preserve ownership or deterministic source bytes.</exception>
+        private static void VerifyCliLayoutMigration(string workspace)
+        {
+            var directory = Path.Combine(workspace, "cli-layout-migration");
+            Directory.CreateDirectory(directory);
+            var input = Path.Combine(directory, "Widget.java");
+            File.WriteAllText(input, "package directory.layout; public class Widget { public int value; }");
+            var options = new GeneratorOptions
+            {
+                NoSdk = true,
+                RootNamespace = "CliLayout.CustomRoot",
+                OutputDirectory = Path.Combine(directory, "generated")
+            };
+            var previous = new Dictionary<string, string>
+            {
+                { "Runtime/AndroidJni.cs", "// previously generated JNI helper\r\n" },
+                { "Runtime/IJavaObject.cs", "// previously generated reference contract\r\n" },
+                { "Runtime/JavaInvocationException.cs", "// previously generated exception\r\n" },
+                { "Runtime/JavaObjectReference.cs", "// previously generated reference owner\r\n" },
+                { "Directory/Layout/Widget.g.cs", "// previously generated Java binding\r\n" },
+                { "Java/Lang/JavaObject.g.cs", "// previously generated Java base binding\r\n" }
+            };
+            GeneratedOutput.Write(options, null, previous, CancellationToken.None);
+            var handwritten = new Dictionary<string, string>
+            {
+                { "Runtime/Extensions.cs", "// handwritten runtime extension\r\n" },
+                { "Directory/Layout/Widget.Partial.cs", "// handwritten Java partial extension\r\n" }
+            };
+            foreach (var file in handwritten)
+            {
+                File.WriteAllText(Path.Combine(options.OutputDirectory, file.Key), file.Value);
+            }
+
+            var arguments = new[] { "--no-sdk", "--no-docs", "--input", input, "--namespace", options.RootNamespace, "--output", options.OutputDirectory };
+            Require(MajdataPlay.Tools.AndroidJavaWrapperGenerator.Program.Main(arguments).GetAwaiter().GetResult() == 0, "CLI regenerates a previous directory layout in place");
+            Require(previous.Keys.All(path => !File.Exists(Path.Combine(options.OutputDirectory, path))), "CLI removes manifest-owned sources from the previous runtime and package directories");
+            Require(handwritten.All(file => File.ReadAllText(Path.Combine(options.OutputDirectory, file.Key)) == file.Value), "CLI preserves handwritten files inside the previous generated directories");
+            var manifestPath = Path.Combine(options.OutputDirectory, GeneratedOutput.ManifestName);
+            var manifest = JsonSerializer.Deserialize<GeneratedOutput.OutputManifest>(File.ReadAllText(manifestPath))!;
+            Require(manifest.RootNamespace == options.RootNamespace
+                && manifest.Files.ContainsKey("AndroidJni.cs")
+                && manifest.Files.ContainsKey("Bindings/Directory/Layout/Widget.g.cs")
+                && manifest.Files.ContainsKey("Bindings/Java/Lang/JavaObject.g.cs")
+                && previous.Keys.All(path => !manifest.Files.ContainsKey(path)), "CLI manifest records the configured root and only the new namespace-based directory layout");
+            var migrated = manifest.Files.Keys.ToDictionary(path => path, path => File.ReadAllText(Path.Combine(options.OutputDirectory, path)), StringComparer.Ordinal);
+            VerifyNamespaceLayout(migrated, options.RootNamespace);
+            var first = Directory.GetFiles(options.OutputDirectory, "*", SearchOption.AllDirectories).ToDictionary(path => path, File.ReadAllBytes, StringComparer.Ordinal);
+            Require(MajdataPlay.Tools.AndroidJavaWrapperGenerator.Program.Main(arguments).GetAwaiter().GetResult() == 0, "CLI can repeat generation after directory migration");
+            var repeated = Directory.GetFiles(options.OutputDirectory, "*", SearchOption.AllDirectories);
+            Require(first.Count == repeated.Length && repeated.All(path => first.TryGetValue(path, out var bytes) && bytes.SequenceEqual(File.ReadAllBytes(path))), "Repeated CLI generation leaves migrated sources, handwritten files, and the manifest byte-identical");
         }
 
         /// <summary>Invokes a managed helper and restores the original exception type for assertions.</summary>
@@ -152,6 +241,7 @@ namespace MajdataPlay.Tests.AndroidJavaWrapperGeneratorValidation
             Require(JavaNames.PascalCase("CONTENTS_FILE_DESCRIPTOR") == "ContentsFileDescriptor", "Java constants use readable PascalCase properties");
             Require(JavaNames.PascalCase("getURL") == "GetURL", "Existing Java camelCase keeps embedded acronyms");
             Require(CliOptions.Parse(new[] { "--help" }) == null, "Help does not require SDK discovery");
+            Require(CliOptions.Parse(new[] { "--output", "." })!.RootNamespace == "MajdataPlay.Platform.Android", "The CLI default selects the runtime root before the Bindings namespace");
             Expect<ArgumentException>(() => CliOptions.Parse(new[] { "--output", ".", "--namespace", "Invalid.class" }), "C# namespace keywords are rejected");
             Expect<ArgumentException>(() => CliOptions.Parse(new[] { "--no-sdk", "--output", "." }), "SDK-free generation requires inputs");
             Expect<ArgumentException>(() => CliOptions.Parse(new[] { "--output" }), "Missing CLI values are diagnosed");

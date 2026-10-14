@@ -10,7 +10,7 @@ using System.Threading.Tasks;
 using FFmpeg.AutoGen;
 using UnityEngine;
 #if UNITY_ANDROID && !UNITY_EDITOR
-using DeviceActivity = MajdataPlay.Platform.Android.Runtime.Net.Majdata.Ffmpegplayer.Validation.AndroidContentDeviceActivity;
+using DeviceActivity = MajdataPlay.Platform.Android.Runtime.Bindings.Net.Majdata.Ffmpegplayer.Validation.AndroidContentDeviceActivity;
 #endif
 
 namespace MajdataPlay.FFmpeg.Validation

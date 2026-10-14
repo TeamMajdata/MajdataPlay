@@ -4,7 +4,7 @@ using UnityEngine;
 
 #nullable enable
 
-namespace __ROOT_NAMESPACE__.Runtime
+namespace __ROOT_NAMESPACE__
 {
     /// <summary>
     /// Owns or borrows the Unity Java reference used by a generated Java wrapper.

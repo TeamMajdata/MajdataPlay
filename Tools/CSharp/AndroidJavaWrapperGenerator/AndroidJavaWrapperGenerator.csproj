@@ -13,6 +13,8 @@
     <RestoreSources>$(MSBuildThisFileDirectory)</RestoreSources>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="../../../Assets/Plugins/MajdataPlay/Platform/Android/Editor/JavaWrapperGenerationRequest.cs" Link="Project/JavaWrapperGenerationRequest.cs" />
+    <Compile Include="../../../Assets/Plugins/MajdataPlay/Platform/Android/Editor/JavaWrapperOutput.cs" Link="Project/JavaWrapperOutput.cs" />
     <EmbeddedResource Include="Templates/**/*.txt" WithCulture="false" />
     <InternalsVisibleTo Include="AndroidJavaWrapperGeneratorValidation" />
   </ItemGroup>

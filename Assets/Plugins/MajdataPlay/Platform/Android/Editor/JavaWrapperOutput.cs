@@ -20,7 +20,10 @@ namespace MajdataPlay.Platform.Android.Editor
         private const string GeneratorName = "AndroidJavaWrapperGenerator";
 
         /// <summary>Identifies the namespace requested by the Unity Editor integration.</summary>
-        private const string RootNamespace = "MajdataPlay.Platform.Android.Runtime.Bindings";
+        private const string RootNamespace = "MajdataPlay.Platform.Android.Runtime";
+
+        /// <summary>Identifies the previous namespace accepted only when migrating existing owned output.</summary>
+        private const string PreviousRootNamespace = "MajdataPlay.Platform.Android.Runtime.Bindings";
 
         /// <summary>Compares paths using the host filesystem's Windows casing convention.</summary>
         private static readonly StringComparison s_pathComparison = Environment.OSVersion.Platform == PlatformID.Win32NT
@@ -35,14 +38,16 @@ namespace MajdataPlay.Platform.Android.Editor
         /// <summary>Validates a complete publication plan before changing the Unity output directory.</summary>
         /// <param name="stagingDirectory">The separate CLI output directory containing sources and its manifest.</param>
         /// <param name="outputDirectory">The Unity asset directory receiving only manifest-owned C# sources.</param>
+        /// <param name="previousOutputDirectory">An optional separate former output directory whose owned assets migrate when the new directory has no manifest.</param>
         /// <returns>The number of generated C# files listed by the staging manifest, including unchanged files.</returns>
         /// <exception cref="ArgumentException">A directory argument is empty or cannot be resolved.</exception>
         /// <exception cref="IOException">A manifest, source, destination, ownership record, or path is invalid, or publication fails.</exception>
         /// <exception cref="UnauthorizedAccessException">A source or destination is inaccessible.</exception>
-        internal static int Publish(string stagingDirectory, string outputDirectory)
+        internal static int Publish(string stagingDirectory, string outputDirectory, string? previousOutputDirectory = null)
         {
             var stagingRoot = ResolveDirectory(stagingDirectory);
             var outputRoot = ResolveDirectory(outputDirectory);
+            var formerRoot = previousOutputDirectory == null ? null : ResolveDirectory(previousOutputDirectory);
             if (!Directory.Exists(stagingRoot))
             {
                 throw new IOException("The CLI staging directory does not exist: " + stagingRoot);
@@ -55,9 +60,14 @@ namespace MajdataPlay.Platform.Android.Editor
                 throw new IOException("The staging and Unity output directories must be separate.");
             }
 
+            if (formerRoot != null && (DirectoriesOverlap(formerRoot, stagingRoot) || DirectoriesOverlap(formerRoot, outputRoot)))
+            {
+                throw new IOException("The former output directory must be separate from staging and the current Unity output directory.");
+            }
+
             var stagingManifestPath = ResolveFile(stagingRoot, ManifestName);
             var manifestBytes = File.ReadAllBytes(stagingManifestPath);
-            var generatedFiles = ReadManifest(manifestBytes, stagingManifestPath);
+            var generatedFiles = ReadManifest(manifestBytes, stagingManifestPath, false);
             var sources = new Dictionary<string, byte[]>(s_pathComparer);
             foreach (var file in generatedFiles)
             {
@@ -73,13 +83,28 @@ namespace MajdataPlay.Platform.Android.Editor
 
             var outputManifestPath = ResolveFile(outputRoot, ManifestName);
             var previousManifestBytes = File.Exists(outputManifestPath) ? File.ReadAllBytes(outputManifestPath) : null;
-            var ownedFiles = previousManifestBytes == null
+            var formerManifestPath = formerRoot == null ? null : ResolveFile(formerRoot, ManifestName);
+            var formerManifestBytes = formerManifestPath != null && File.Exists(formerManifestPath) ? File.ReadAllBytes(formerManifestPath) : null;
+            var formerOwnedFiles = formerManifestBytes == null
                 ? new Dictionary<string, string>(s_pathComparer)
-                : ReadManifest(previousManifestBytes, outputManifestPath);
+                : ReadManifest(formerManifestBytes, formerManifestPath!, true);
+            if (previousManifestBytes != null && formerOwnedFiles.Count != 0)
+            {
+                throw new IOException("Both the current and former output directories own generated sources; refusing an ambiguous output migration.");
+            }
+
+            var migratingOutputRoot = previousManifestBytes == null && formerManifestBytes != null;
+            var ownershipRoot = migratingOutputRoot ? formerRoot! : outputRoot;
+            var ownedFiles = migratingOutputRoot
+                ? formerOwnedFiles
+                : previousManifestBytes == null
+                    ? new Dictionary<string, string>(s_pathComparer)
+                    : ReadManifest(previousManifestBytes, outputManifestPath, true);
+            var usesNamespaceDirectories = UsesNamespaceDirectories(ownedFiles);
             var existingFiles = new HashSet<string>(s_pathComparer);
             foreach (var file in ownedFiles)
             {
-                var destination = ResolveFile(outputRoot, file.Key);
+                var destination = ResolveFile(ownershipRoot, file.Key);
                 if (!File.Exists(destination))
                 {
                     continue;
@@ -94,14 +119,74 @@ namespace MajdataPlay.Platform.Android.Editor
             }
 
             var writes = new List<KeyValuePair<string, byte[]>>();
+            var moves = new List<KeyValuePair<string, string>>();
             var deletions = new List<string>();
+            var migratedFiles = new HashSet<string>(s_pathComparer);
             foreach (var file in generatedFiles)
             {
                 var destination = ResolveFile(outputRoot, file.Key);
                 var exists = File.Exists(destination);
-                if (exists && !existingFiles.Contains(file.Key))
+                if (exists && (migratingOutputRoot || !existingFiles.Contains(file.Key)))
                 {
                     throw new IOException("Refusing to overwrite a handwritten source: " + destination);
+                }
+
+                var previousPath = GetPreviousGeneratedPath(file.Key);
+                var sourceKey = file.Key;
+                if (!usesNamespaceDirectories && previousPath != null)
+                {
+                    if (!migratingOutputRoot && (ownedFiles.ContainsKey(file.Key)
+                        || (ownedFiles.ContainsKey(previousPath) && generatedFiles.ContainsKey(previousPath))))
+                    {
+                        throw new IOException("Generated source migration has overlapping old and new asset paths; use a separate output directory: " + previousPath + " -> " + file.Key);
+                    }
+
+                    sourceKey = previousPath;
+                }
+
+                if (migratingOutputRoot || sourceKey != file.Key)
+                {
+                    var metadata = ResolveFile(outputRoot, file.Key + ".meta");
+                    if (File.Exists(metadata))
+                    {
+                        throw new IOException("Refusing to overwrite unowned Unity metadata during generated source migration: " + metadata);
+                    }
+
+                    VerifyWritableFile(destination);
+                    if (!ownedFiles.TryGetValue(sourceKey, out var previousHash))
+                    {
+                        writes.Add(new KeyValuePair<string, byte[]>(destination, sources[file.Key]));
+                        continue;
+                    }
+
+                    var previousSource = ResolveFile(ownershipRoot, sourceKey);
+                    var previousMetadata = ResolveFile(ownershipRoot, sourceKey + ".meta");
+                    if (existingFiles.Contains(sourceKey))
+                    {
+                        VerifyWritableFile(previousSource);
+                        if (string.Equals(file.Value, previousHash, StringComparison.Ordinal))
+                        {
+                            moves.Add(new KeyValuePair<string, string>(previousSource, destination));
+                        }
+                        else
+                        {
+                            writes.Add(new KeyValuePair<string, byte[]>(destination, sources[file.Key]));
+                            deletions.Add(previousSource);
+                        }
+                    }
+                    else
+                    {
+                        writes.Add(new KeyValuePair<string, byte[]>(destination, sources[file.Key]));
+                    }
+
+                    if (File.Exists(previousMetadata))
+                    {
+                        VerifyWritableFile(previousMetadata);
+                        moves.Add(new KeyValuePair<string, string>(previousMetadata, metadata));
+                    }
+
+                    migratedFiles.Add(sourceKey);
+                    continue;
                 }
 
                 if (!exists || !string.Equals(file.Value, ownedFiles[file.Key], StringComparison.Ordinal))
@@ -113,13 +198,13 @@ namespace MajdataPlay.Platform.Android.Editor
 
             foreach (var file in ownedFiles)
             {
-                if (generatedFiles.ContainsKey(file.Key))
+                if ((!migratingOutputRoot && generatedFiles.ContainsKey(file.Key)) || migratedFiles.Contains(file.Key))
                 {
                     continue;
                 }
 
-                var destination = ResolveFile(outputRoot, file.Key);
-                var metadata = ResolveFile(outputRoot, file.Key + ".meta");
+                var destination = ResolveFile(ownershipRoot, file.Key);
+                var metadata = ResolveFile(ownershipRoot, file.Key + ".meta");
                 if (existingFiles.Contains(file.Key))
                 {
                     VerifyWritableFile(destination);
@@ -133,13 +218,30 @@ namespace MajdataPlay.Platform.Android.Editor
                 }
             }
 
+            if (migratingOutputRoot)
+            {
+                VerifyWritableFile(formerManifestPath!);
+                var formerMetadata = ResolveFile(ownershipRoot, ManifestName + ".meta");
+                var metadata = ResolveFile(outputRoot, ManifestName + ".meta");
+                if (File.Exists(metadata))
+                {
+                    throw new IOException("Refusing to overwrite unowned Unity manifest metadata during output migration: " + metadata);
+                }
+
+                if (File.Exists(formerMetadata))
+                {
+                    VerifyWritableFile(formerMetadata);
+                    moves.Add(new KeyValuePair<string, string>(formerMetadata, metadata));
+                }
+            }
+
             if (previousManifestBytes == null || !BytesEqual(previousManifestBytes, manifestBytes))
             {
                 VerifyWritableFile(outputManifestPath);
                 writes.Add(new KeyValuePair<string, byte[]>(outputManifestPath, manifestBytes));
             }
 
-            // Manifest publication is last, after every planned source write and stale-file removal.
+            // Manifest publication is last, after every planned source write, asset move, and stale-file removal.
             foreach (var write in writes)
             {
                 if (!string.Equals(write.Key, outputManifestPath, s_pathComparison))
@@ -147,6 +249,12 @@ namespace MajdataPlay.Platform.Android.Editor
                     Directory.CreateDirectory(Path.GetDirectoryName(write.Key)!);
                     WriteAtomically(write.Key, write.Value);
                 }
+            }
+
+            foreach (var move in moves)
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(move.Value)!);
+                File.Move(move.Key, move.Value);
             }
 
             foreach (var deletion in deletions)
@@ -163,15 +271,77 @@ namespace MajdataPlay.Platform.Android.Editor
                 }
             }
 
+            if (migratingOutputRoot)
+            {
+                File.Delete(formerManifestPath!);
+            }
+
             return generatedFiles.Count;
+        }
+
+        /// <summary>Checks whether two normalized roots share any files through equality or directory containment.</summary>
+        /// <param name="left">The first absolute directory root.</param>
+        /// <param name="right">The second absolute directory root.</param>
+        /// <returns>True when the roots are equal or one directory contains the other.</returns>
+        private static bool DirectoriesOverlap(string left, string right)
+        {
+            return string.Equals(left, right, s_pathComparison)
+                || left.StartsWith(DirectoryPrefix(right), s_pathComparison)
+                || right.StartsWith(DirectoryPrefix(left), s_pathComparison);
+        }
+
+        /// <summary>Distinguishes already migrated ownership from the old package-relative layout using runtime helper paths.</summary>
+        /// <param name="ownedFiles">The normalized source paths in the existing ownership manifest.</param>
+        /// <returns>True when runtime helpers are already owned directly in the output root.</returns>
+        /// <exception cref="IOException">The ownership manifest mixes old and current runtime helper locations.</exception>
+        private static bool UsesNamespaceDirectories(IReadOnlyDictionary<string, string> ownedFiles)
+        {
+            var currentHelpers = false;
+            var previousHelpers = false;
+            foreach (var name in new[] { "AndroidJni.cs", "IJavaObject.cs", "JavaInvocationException.cs", "JavaObjectReference.cs" })
+            {
+                currentHelpers |= ownedFiles.ContainsKey(name);
+                previousHelpers |= ownedFiles.ContainsKey("Runtime/" + name);
+            }
+
+            if (currentHelpers && previousHelpers)
+            {
+                throw new IOException("Generated ownership mixes old and current runtime helper locations; use a separate output directory.");
+            }
+
+            return currentHelpers;
+        }
+
+        /// <summary>Finds the old package-relative path for a source now placed under its namespace directory.</summary>
+        /// <param name="relativePath">The normalized source path in the new staging manifest.</param>
+        /// <returns>The previous source path for a runtime helper or binding, or null for other files.</returns>
+        private static string? GetPreviousGeneratedPath(string relativePath)
+        {
+            switch (relativePath)
+            {
+                case "AndroidJni.cs":
+                case "IJavaObject.cs":
+                case "JavaInvocationException.cs":
+                case "JavaObjectReference.cs":
+                    return "Runtime/" + relativePath;
+            }
+
+            if (relativePath.StartsWith("Bindings/", StringComparison.Ordinal)
+                && relativePath.EndsWith(".g.cs", StringComparison.Ordinal))
+            {
+                return relativePath.Substring("Bindings/".Length);
+            }
+
+            return null;
         }
 
         /// <summary>Reads the CLI JSON contract and validates every ownership path and content fingerprint.</summary>
         /// <param name="bytes">The complete manifest bytes read before publication starts.</param>
         /// <param name="path">The manifest path included in diagnostics.</param>
+        /// <param name="allowPreviousRootNamespace">Whether this is an existing ownership manifest that may use the previous root namespace.</param>
         /// <returns>Normalized relative C# paths and uppercase SHA-256 content fingerprints.</returns>
         /// <exception cref="IOException">The JSON, schema, generator, namespace, paths, or hashes are invalid.</exception>
-        private static Dictionary<string, string> ReadManifest(byte[] bytes, string path)
+        private static Dictionary<string, string> ReadManifest(byte[] bytes, string path, bool allowPreviousRootNamespace)
         {
             ValidateManifestEnvelope(bytes, path);
             OutputManifest? manifest;
@@ -190,7 +360,9 @@ namespace MajdataPlay.Platform.Android.Editor
             }
 
             if (manifest == null || manifest.FormatVersion != 1 || manifest.Generator != GeneratorName
-                || manifest.RootNamespace != RootNamespace || manifest.Files == null)
+                || manifest.Files == null
+                || (manifest.RootNamespace != RootNamespace
+                    && (!allowPreviousRootNamespace || manifest.RootNamespace != PreviousRootNamespace)))
             {
                 throw new IOException("Unrecognized output manifest schema, generator, or root namespace: " + path);
             }

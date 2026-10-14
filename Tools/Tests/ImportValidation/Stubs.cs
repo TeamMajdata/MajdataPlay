@@ -1,5 +1,5 @@
 #nullable enable
-using MajdataPlay.Platform.Android.Runtime.Content;
+using MajdataPlay.Platform.Android.Runtime.Bindings.Android.Content;
 using System;
 using System.Collections.Generic;
 using System.Threading;
@@ -259,7 +259,7 @@ namespace MajdataPlay.Diagnostics
     }
 }
 
-namespace MajdataPlay.Platform.Android.Runtime.Content
+namespace MajdataPlay.Platform.Android.Runtime.Bindings.Android.Content
 {
     /// <summary>Supplies the intent surface read by the production importer.</summary>
     internal sealed class Intent

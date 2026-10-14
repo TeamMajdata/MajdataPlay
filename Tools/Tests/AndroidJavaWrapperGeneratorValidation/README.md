@@ -107,7 +107,11 @@ or an Android Player build.
   XML summaries/params/returns/Java throws, provenance, cache, offline mode, and
   actual bounded simultaneous HTTP-fixture requests.
 - Deterministic generation, partial class / nonpartial interface declarations,
-  getter-only Java fields, custom namespaces, and SDK-free archive input.
+  getter-only Java fields, custom root namespaces, and SDK-free archive input.
+- Runtime support directly in the configured root and output directory, Java
+  bindings below its Bindings namespace and directory, unnamed Java packages,
+  directory layout matching custom namespaces, and stable runtime-name collision
+  aliases.
 - Compilation as C# 9 against the complete .NET Standard 2.1 reference pack and
   the actual pinned Unity modules, with and without UNITY_ANDROID.
 - Pure managed MapArray/Wrap contracts and non-Android guards, with no invented
@@ -117,9 +121,19 @@ or an Android Player build.
   and persisted pending requests using narrow managed lifecycle substitutes.
 - Editor output publication from the CLI manifest, unchanged timestamps, Unity
   metadata retention, stale asset/metadata cleanup, modified-file conflicts,
-  invalid manifests, and corrupt staged outputs before destination writes.
+  previous namespace/directory manifest migration, Generated-to-Runtime migration,
+  GUID preservation, invalid manifests, and corrupt staged outputs before writes.
+- Project-mode bootstrap before Unity import, exact installed Editor version
+  checks, complete real SDK/project output parity, repeat publication, and
+  argument/generation failures without publication.
+- Production Android storage, Activity callbacks, numeric partial extensions,
+  KeyCode values, and the device harness compile against actual bindings for
+  Editor, Android Editor, and Android Player conditions. Managed storage
+  protocol constants remain synchronized with the production Java bridge.
 - CLI errors, cancellation, malformed class files, output traversal rejection,
   regeneration ownership, stale generated cleanup, and handwritten extensions.
+  The actual CLI entry point migrates previous runtime/package directories in
+  place and repeats generation with identical source and manifest bytes.
 
 Successful managed compilation is separate from JNI execution. These checks do
 **not** validate Unity Editor import/lifecycle, Player behavior, JVM calls,

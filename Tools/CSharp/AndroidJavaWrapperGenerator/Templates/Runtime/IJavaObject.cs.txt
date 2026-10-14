@@ -3,7 +3,7 @@ using UnityEngine;
 
 #nullable enable
 
-namespace __ROOT_NAMESPACE__.Runtime
+namespace __ROOT_NAMESPACE__
 {
     /// <summary>
     /// Provides the live Unity Java reference shared by generated Java classes and interfaces.

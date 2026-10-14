@@ -3,7 +3,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using MajdataPlay.IO.Storage;
-using MajdataPlay.Platform.Android.Runtime.Storage;
+using MajdataPlay.Platform.Android.Runtime.Bindings.Net.Majdata.Majdataplay;
 using UnityEngine;
 
 namespace MajdataPlay.Platform.Android.Storage
@@ -44,7 +44,7 @@ namespace MajdataPlay.Platform.Android.Storage
             return AndroidDocumentBridge.Invoke(() =>
             {
                 using var result = AndroidDocumentBridge.RequireResult(StorageAccess.GetEntry(location));
-                if (result.ErrorCode == StorageAccess.NotFound)
+                if (result.ErrorCode == AndroidDocumentBridge.NotFound)
                 {
                     return null;
                 }
@@ -351,7 +351,7 @@ namespace MajdataPlay.Platform.Android.Storage
             AndroidDocumentBridge.Invoke(() =>
             {
                 using var result = AndroidDocumentBridge.RequireResult(StorageAccess.DeleteFile(location));
-                if (result.ErrorCode != StorageAccess.NotFound)
+                if (result.ErrorCode != AndroidDocumentBridge.NotFound)
                 {
                     AndroidDocumentBridge.CheckResult(result, location);
                 }

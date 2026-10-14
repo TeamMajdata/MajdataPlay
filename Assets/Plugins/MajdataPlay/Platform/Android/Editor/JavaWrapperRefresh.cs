@@ -229,7 +229,7 @@ namespace MajdataPlay.Platform.Android.Editor
                 AssetDatabase.StartAssetEditing();
                 try
                 {
-                    count = JavaWrapperOutput.Publish(request.StagingDirectory, request.OutputDirectory);
+                    count = JavaWrapperOutput.Publish(request.StagingDirectory, request.OutputDirectory, request.PreviousOutputDirectory);
                 }
                 finally
                 {

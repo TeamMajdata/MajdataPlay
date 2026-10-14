@@ -48,6 +48,11 @@ if ($Platform -eq 'Android' -and $Architecture -eq 'arm64' -and $Backend -eq 'Mo
 if ($Platform -eq 'Linux' -and $Backend -ne 'Mono') { throw 'This Windows-hosted Linux Player validation supports Mono; build Linux IL2CPP on a supported native toolchain separately' }
 if ($Platform -eq 'Linux' -and $Graphics -notin @('glcore','vulkan')) { throw 'Linux Player validation requires -Graphics glcore or vulkan' }
 $repo = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '../../..')).Path
+$expectedUnityVersion = (Select-String -LiteralPath (Join-Path $repo 'ProjectSettings/ProjectVersion.txt') -Pattern '^m_EditorVersion: (.+)$').Matches[0].Groups[1].Value
+$selectedUnityVersion = [Diagnostics.FileVersionInfo]::GetVersionInfo($UnityEditor).ProductVersion
+if ($selectedUnityVersion -notmatch ('^' + [regex]::Escape($expectedUnityVersion) + '(?:_|$)')) {
+    throw "Use Unity $expectedUnityVersion; the selected executable reports $selectedUnityVersion."
+}
 $work = if (-not $WorkDirectory) { Join-Path $PSScriptRoot '.work' }
     elseif ([IO.Path]::IsPathRooted($WorkDirectory)) { [IO.Path]::GetFullPath($WorkDirectory) }
     else { [IO.Path]::GetFullPath((Join-Path $repo $WorkDirectory)) }
@@ -87,25 +92,25 @@ if (-not $SkipBuild) {
     }
     # FFmpeg's native content protocol needs only the generated Java bindings,
     # not the game's activity callbacks, keyboard or SAF filesystem. Stage the
-    # production wrapper subset without JNI doubles or unrelated lifecycle code.
+    # production bindings without JNI doubles or unrelated lifecycle code.
     $androidSource = Join-Path $repo 'Assets/Plugins/MajdataPlay/Platform/Android'
-    $androidAnalyzer = Join-Path $androidSource 'MajdataPlay.SourceGenerators.AndroidJava.dll'
-    if (-not (Test-Path -LiteralPath $androidAnalyzer -PathType Leaf)) {
-        & (Join-Path $repo 'Tools/CSharp/AndroidJavaGenerator/build.ps1') -Install -UnityPath $UnityEditor
-        if ($LASTEXITCODE -ne 0) { throw 'Android Java source-generator installation failed.' }
-    }
     $platformDestination = Join-Path $project 'Assets/Plugins/MajdataPlay/Platform'
     New-Item -ItemType Directory -Path $platformDestination -Force | Out-Null
     $androidDestination = Join-Path $platformDestination 'Android'
     New-Item -ItemType Directory -Path $androidDestination -Force | Out-Null
-    foreach ($bindingName in @('MajdataPlay.Platform.Android.asmdef', 'AndroidJni.cs', 'JavaInvocationException.cs', 'JavaClassAttribute.cs', 'JavaApiConfigurationAttribute.cs', 'MajdataPlay.SourceGenerators.AndroidJava.dll', 'Runtime')) {
+    foreach ($bindingName in @('MajdataPlay.Platform.Android.asmdef')) {
         Copy-Item -LiteralPath (Join-Path $androidSource $bindingName) -Destination $androidDestination -Recurse -Force
         Copy-Item -LiteralPath (Join-Path $androidSource "$bindingName.meta") -Destination $androidDestination -Force
     }
     Copy-Item -LiteralPath "$androidSource.meta" -Destination $platformDestination -Force
-    # Relative Java inputs must resolve inside the isolated project. The
-    # extractor is a build input only, not a Java source packaged into the APK.
-    foreach ($javaInput in @('Tools/CSharp/AndroidJavaGenerator/Java/JavaApiExtractor.java', 'Assets/Plugins/Android/src/java/net/majdata/majdataplay/StorageAccess.java')) {
+    foreach ($bindingName in @('AndroidJni.cs', 'JavaInvocationException.cs', 'JavaClassAttribute.cs', 'JavaApiConfigurationAttribute.cs', 'MajdataPlay.SourceGenerators.AndroidJava.dll')) {
+        foreach ($obsolete in @((Join-Path $androidDestination $bindingName), (Join-Path $androidDestination "$bindingName.meta"))) {
+            if (Test-Path -LiteralPath $obsolete -PathType Leaf) { Remove-Item -LiteralPath $obsolete -Force }
+        }
+    }
+    # Relative Java inputs resolve inside the isolated project and are packaged
+    # as before; the standalone CLI analyzes declarations without a Java tool.
+    foreach ($javaInput in @('Assets/Plugins/Android/src/java/net/majdata/majdataplay/StorageAccess.java')) {
         $javaDestination = Join-Path $project $javaInput
         New-Item -ItemType Directory -Path (Split-Path -Parent $javaDestination) -Force | Out-Null
         Copy-Item -LiteralPath (Join-Path $repo $javaInput) -Destination $javaDestination -Force
@@ -113,6 +118,55 @@ if (-not $SkipBuild) {
             Copy-Item -LiteralPath (Join-Path $repo "$javaInput.meta") -Destination "$javaDestination.meta" -Force
         }
     }
+    $contentJava = Join-Path $project 'Assets/Plugins/Android/src/java/net/majdata/ffmpegplayer/validation/AndroidContentDeviceActivity.java'
+    New-Item -ItemType Directory -Path (Split-Path -Parent $contentJava) -Force | Out-Null
+    Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'AndroidContentDeviceActivity.java') -Destination $contentJava -Force
+    $runtimeDestination = [IO.Path]::GetFullPath((Join-Path $androidDestination 'Runtime'))
+    $isolatedPrefix = [IO.Path]::GetFullPath($project).TrimEnd([IO.Path]::DirectorySeparatorChar) + [IO.Path]::DirectorySeparatorChar
+    if (-not $runtimeDestination.StartsWith($isolatedPrefix, [StringComparison]::OrdinalIgnoreCase)) {
+        throw 'The generated Runtime directory must remain inside the isolated FFmpeg project.'
+    }
+    for ($ancestor = $runtimeDestination; $ancestor -and ($ancestor.StartsWith($isolatedPrefix, [StringComparison]::OrdinalIgnoreCase) -or $ancestor -eq [IO.Path]::GetFullPath($project)); $ancestor = Split-Path -Parent $ancestor) {
+        if (Test-Path -LiteralPath $ancestor) {
+            $item = Get-Item -LiteralPath $ancestor -Force
+            if (-not $item.PSIsContainer -or ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+                throw "Refusing staged Runtime replacement through a file or reparse point: $ancestor"
+            }
+        }
+    }
+    if (Test-Path -LiteralPath $runtimeDestination) { Remove-Item -LiteralPath $runtimeDestination -Recurse -Force }
+    New-Item -ItemType Directory -Path $runtimeDestination -Force | Out-Null
+    Copy-Item -LiteralPath (Join-Path $androidSource 'Runtime.meta') -Destination $androidDestination -Force
+    $productionRuntime = Join-Path $androidSource 'Runtime'
+    foreach ($extension in Get-ChildItem -LiteralPath (Join-Path $productionRuntime 'Bindings') -Recurse -File -Filter '*.cs') {
+        if ($extension.Name.EndsWith('.g.cs', [StringComparison]::Ordinal)) { continue }
+        $relative = $extension.FullName.Substring($productionRuntime.Length + 1)
+        $destination = Join-Path $runtimeDestination $relative
+        New-Item -ItemType Directory -Path (Split-Path -Parent $destination) -Force | Out-Null
+        Copy-Item -LiteralPath $extension.FullName -Destination $destination -Force
+        Copy-Item -LiteralPath ($extension.FullName + '.meta') -Destination ($destination + '.meta') -Force
+    }
+    $cliDirectory = Join-Path $repo 'Tools/CSharp/AndroidJavaWrapperGenerator'
+    Push-Location -LiteralPath $cliDirectory
+    try {
+        & dotnet build 'AndroidJavaWrapperGenerator.csproj' --configuration Release --nologo
+        if ($LASTEXITCODE -ne 0) { throw 'The independent Android Java wrapper CLI build failed.' }
+    } finally {
+        Pop-Location
+    }
+    $androidPlayer = Join-Path (Split-Path -Parent $UnityEditor) 'Data/PlaybackEngines/AndroidPlayer'
+    $unityArchive = Join-Path $androidPlayer 'Variations/mono/Release/Classes/classes.jar'
+    if (-not (Test-Path -LiteralPath $unityArchive -PathType Leaf)) { $unityArchive = Join-Path $androidPlayer 'Variations/il2cpp/Release/Classes/classes.jar' }
+    $unityActivity = Join-Path $androidPlayer 'Source/com/unity3d/player/UnityPlayerActivity.java'
+    foreach ($inputPath in @($unityArchive, $unityActivity)) {
+        if (-not (Test-Path -LiteralPath $inputPath -PathType Leaf)) { throw "Required Unity launcher metadata is missing: $inputPath" }
+    }
+    $generatorArguments = @((Join-Path $cliDirectory 'bin/Release/net9.0/AndroidJavaWrapperGenerator.dll'),
+        '--sdk', (Join-Path $androidPlayer 'SDK'), '--output', $runtimeDestination,
+        '--namespace', 'MajdataPlay.Platform.Android.Runtime', '--no-docs', '--input', $unityArchive, '--input', $unityActivity,
+        '--input', $contentJava, '--input', (Join-Path $project 'Assets/Plugins/Android/src/java/net/majdata/majdataplay/StorageAccess.java'))
+    & dotnet @generatorArguments
+    if ($LASTEXITCODE -ne 0) { throw 'Fresh CLI generation for the isolated FFmpeg project failed.' }
     Copy-Item -LiteralPath (Join-Path $repo 'Assets/Plugins/ZString') -Destination (Join-Path $project 'Assets/Plugins') -Recurse -Force
     Copy-Item -LiteralPath (Join-Path $repo 'Assets/Packages/PolySharp.1.15.0') -Destination (Join-Path $project 'Assets/Packages') -Recurse -Force
     Copy-Item -LiteralPath (Join-Path $repo 'Assets/Packages/System.Runtime.CompilerServices.Unsafe.6.1.2') -Destination (Join-Path $project 'Assets/Packages') -Recurse -Force
@@ -151,12 +205,6 @@ if (-not $SkipBuild) {
     # The Android SAF fixture is a separate app with a real document picker;
     # its Java wrapper is generated in the production binding assembly.
     Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'AndroidContentDeviceSmoke.cs') -Destination (Join-Path $project 'Assets/Smoke/AndroidContentDeviceSmoke.cs') -Force
-    $contentJava = Join-Path $project 'Assets/Plugins/Android/src/java/net/majdata/ffmpegplayer/validation/AndroidContentDeviceActivity.java'
-    New-Item -ItemType Directory -Path (Split-Path -Parent $contentJava) -Force | Out-Null
-    Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'AndroidContentDeviceActivity.java') -Destination $contentJava -Force
-    $contentWrapper = Join-Path $androidDestination 'Runtime/Net/Majdata/Ffmpegplayer/Validation'
-    New-Item -ItemType Directory -Path $contentWrapper -Force | Out-Null
-    Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'AndroidContentDeviceActivity.cs') -Destination $contentWrapper -Force
     if ($TestAndroidContent) {
         $manifest = @'
 <?xml version="1.0" encoding="utf-8"?>
@@ -190,7 +238,7 @@ if (-not $SkipBuild) {
         '-videoArchitecture', $Architecture, '-videoPlatform', $Platform, '-videoOutput', ('"' + $result + '"'))
     $buildArgs += @('-cameraCapture', $(if ($TestCameraCapture) { 'true' } else { 'false' }), '-captureUrp', $(if ($CaptureUrp) { 'true' } else { 'false' }), '-androidContent', $(if ($TestAndroidContent) { 'true' } else { 'false' }))
     if ($DisableBurst) { $buildArgs += '--burst-disable-compilation' }
-    $generatorVariables = @('UNITY_EDITOR_PATH', 'UNITY_ANDROID_SDK', 'UNITY_JAVA_HOME', 'MAJDATA_JAVA_EXTRACTOR')
+    $generatorVariables = @('UNITY_EDITOR_PATH', 'UNITY_ANDROID_SDK', 'UNITY_JAVA_HOME')
     $previousGeneratorEnvironment = @{}
     foreach ($name in $generatorVariables) {
         $previousGeneratorEnvironment[$name] = [Environment]::GetEnvironmentVariable($name, 'Process')
@@ -200,7 +248,6 @@ if (-not $SkipBuild) {
         $env:UNITY_EDITOR_PATH = $UnityEditor
         $env:UNITY_ANDROID_SDK = Join-Path $androidPlayer 'SDK'
         $env:UNITY_JAVA_HOME = Join-Path $androidPlayer 'OpenJDK'
-        $env:MAJDATA_JAVA_EXTRACTOR = Join-Path $project 'Tools/CSharp/AndroidJavaGenerator/Java/JavaApiExtractor.java'
         $process = Start-Process -FilePath $UnityEditor -ArgumentList $buildArgs -WindowStyle Hidden -PassThru
         $process.WaitForExit()
     } finally {

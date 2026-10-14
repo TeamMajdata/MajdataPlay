@@ -138,7 +138,7 @@ namespace MajdataPlay.Tests.AndroidJavaWrapperGeneratorValidation
             var ignored = new[]
             {
                 "Assets/Scripts/Example.cs",
-                "Assets/Plugins/MajdataPlay/Platform/Android/Generated/Android/Net/Uri.cs",
+                "Assets/Plugins/MajdataPlay/Platform/Android/Runtime/Bindings/Android/Net/Uri.g.cs",
                 "Assets/Plugins/Android/Generated.cs",
                 "Assets/Plugins/Android/Library.jar.meta",
                 "Assets/Plugins/Android/README.md",
@@ -430,7 +430,7 @@ namespace MajdataPlay.Tests.AndroidJavaWrapperGeneratorValidation
             var staging = ReadRefreshProperty<string>(offline, "StagingDirectory");
             var stageParent = Path.GetDirectoryName(staging);
             Require(stageParent == Path.Combine(project.ToolDirectory, ".work", "editor-output") && staging != ReadRefreshProperty<string>(online, "StagingDirectory"), "Each request owns a unique direct child of the ignored editor-output directory");
-            Require(ReadRefreshProperty<string>(offline, "OutputDirectory") == Path.Combine(project.ProjectRoot, "Assets", "Plugins", "MajdataPlay", "Platform", "Android", "Generated"), "Only final publication targets the dedicated Generated assets directory");
+            Require(ReadRefreshProperty<string>(offline, "OutputDirectory") == Path.Combine(project.ProjectRoot, "Assets", "Plugins", "MajdataPlay", "Platform", "Android", "Runtime"), "Final publication targets the Runtime assets directory matching the configured root namespace");
             Require(!Directory.Exists(staging) && !Directory.Exists(ReadRefreshProperty<string>(offline, "OutputDirectory")), "Request capture does not generate Unity Assets output");
             foreach (var extension in new[] { ".java", ".class", ".jar", ".aar", ".JAVA", ".CLASS", ".JAR", ".AAR" })
             {

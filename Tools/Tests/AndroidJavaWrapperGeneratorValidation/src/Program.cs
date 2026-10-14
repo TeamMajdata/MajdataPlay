@@ -38,6 +38,8 @@ namespace MajdataPlay.Tests.AndroidJavaWrapperGeneratorValidation
                     VerifyUnityArchives(settings, workspace);
                     VerifyEditorOutput(workspace);
                     VerifyEditorRefresh(settings, workspace);
+                    VerifySourceNamespaces(settings, workspace);
+                    VerifyCliLayoutMigration(workspace);
                     if (settings.EditorInputsOnly)
                     {
                         VerifyProjectJavaInputs(settings, workspace);
@@ -127,6 +129,7 @@ namespace MajdataPlay.Tests.AndroidJavaWrapperGeneratorValidation
             Require(serial.Count == repeated.Count && serial.All(item => repeated[item.Key] == item.Value), "Serial and parallel wrapper generation are byte-identical");
             Require(generated.Keys.SequenceEqual(repeated.Keys) && generated.All(item => repeated[item.Key] == item.Value), "Byte-for-byte deterministic generation");
             VerifyDeclarations(generated);
+            VerifyNamespaceLayout(generated, options.RootNamespace);
             var assembly = CompileGenerated(settings, generated, false, true);
             CompileGenerated(settings, generated, true, false);
             VerifyManagedRuntime(settings, assembly!);
@@ -139,7 +142,7 @@ namespace MajdataPlay.Tests.AndroidJavaWrapperGeneratorValidation
             }
             VerifySourceAnalysis(settings, workspace);
 
-            var standalone = new GeneratorOptions { NoSdk = true, RootNamespace = "Standalone.Bindings", OutputDirectory = Path.Combine(workspace, "standalone") };
+            var standalone = new GeneratorOptions { NoSdk = true, RootNamespace = "Standalone.CustomRoot", OutputDirectory = Path.Combine(workspace, "standalone") };
             standalone.Inputs.Add(jarPath);
             var standaloneApi = JavaApiScanner.Scan(standalone, CancellationToken.None);
             CompileGenerated(settings, Generate(standaloneApi, standalone), false, false);
@@ -175,7 +178,8 @@ namespace MajdataPlay.Tests.AndroidJavaWrapperGeneratorValidation
             Require(ApiFingerprint(serialApi) == ApiFingerprint(fullApi), "Entire SDK metadata is deterministic across worker counts");
             var full = Generate(fullApi, fullOptions);
             Require(serial.Count == full.Count && serial.All(item => full[item.Key] == item.Value), "All SDK source files are byte-identical for one and four workers");
-            Require(full.Keys.Any(item => item.Contains("Android/Net/", StringComparison.Ordinal)), "Package directories use Android/Net");
+            Require(full.Keys.Any(item => item.StartsWith("Bindings/Android/Net/", StringComparison.Ordinal)), "Package directories mirror the Bindings.Android.Net namespace");
+            VerifyNamespaceLayout(full, fullOptions.RootNamespace);
             CompileGenerated(settings, full, false, false);
             CompileGenerated(settings, full, true, false);
             Console.WriteLine("Full SDK compilation passed: " + full.Count + " generated C# files.");
@@ -187,7 +191,7 @@ namespace MajdataPlay.Tests.AndroidJavaWrapperGeneratorValidation
         /// <returns>Options using a distinctive configurable namespace.</returns>
         private static GeneratorOptions CreateOptions(ValidationSettings settings, string output)
         {
-            return new GeneratorOptions { SdkDirectory = settings.Sdk, RootNamespace = "Validation.Bindings", OutputDirectory = output };
+            return new GeneratorOptions { SdkDirectory = settings.Sdk, RootNamespace = "Validation.CustomRoot", OutputDirectory = output };
         }
 
         /// <summary>Combines wrapper and standalone runtime output in deterministic path order.</summary>

@@ -1,13 +1,21 @@
 #nullable enable
 using MajdataPlay.IO.Storage;
-using AndroidActivity = MajdataPlay.Platform.Android.Runtime.App.Activity;
-using AndroidIntent = MajdataPlay.Platform.Android.Runtime.Content.Intent;
+using AndroidActivity = MajdataPlay.Platform.Android.Runtime.Bindings.Android.App.Activity;
+using AndroidIntent = MajdataPlay.Platform.Android.Runtime.Bindings.Android.Content.Intent;
 using AndroidKeyCode = MajdataPlay.Platform.Android.IO.KeyCode;
-using AndroidKeyEvent = MajdataPlay.Platform.Android.Runtime.View.KeyEvent;
-using JavaRunnable = MajdataPlay.Platform.Android.Runtime.Java.Lang.Runnable;
+using AndroidKeyEvent = MajdataPlay.Platform.Android.Runtime.Bindings.Android.View.KeyEvent;
+using JavaObject = MajdataPlay.Platform.Android.Runtime.Bindings.Java.Lang.JavaObject;
+using JavaRunnable = MajdataPlay.Platform.Android.Runtime.Bindings.Java.Lang.Runnable;
+using JavaRunnableContract = MajdataPlay.Platform.Android.Runtime.Bindings.Java.Lang.IRunnable;
+using JavaList = MajdataPlay.Platform.Android.Runtime.Bindings.Java.Util.IList;
+using ParcelableCreator = MajdataPlay.Platform.Android.Runtime.Bindings.Android.Os.IParcelable_Creator;
+using StorageAccess = MajdataPlay.Platform.Android.Runtime.Bindings.Net.Majdata.Majdataplay.StorageAccess;
+using StorageResult = MajdataPlay.Platform.Android.Runtime.Bindings.Net.Majdata.Majdataplay.StorageAccess_Result;
+using DocumentEntry = MajdataPlay.Platform.Android.Runtime.Bindings.Net.Majdata.Majdataplay.StorageAccess_Entry;
+using DocumentCursor = MajdataPlay.Platform.Android.Runtime.Bindings.Net.Majdata.Majdataplay.StorageAccess_CursorHandle;
+using DocumentStream = MajdataPlay.Platform.Android.Runtime.Bindings.Net.Majdata.Majdataplay.StorageAccess_StreamHandle;
 using MajdataPlay.Platform.Android;
-using MajdataPlay.Platform.Android.Runtime.Java.Lang;
-using MajdataPlay.Platform.Android.Runtime.Storage;
+using MajdataPlay.Platform.Android.Runtime;
 using MajdataPlay.Platform.Android.Storage;
 using System;
 using System.Collections.Generic;
@@ -207,21 +215,15 @@ namespace MajdataPlay.Tests
             RequireGeneratedWrapper(typeof(DocumentStream), "net.majdata.majdataplay.StorageAccess$StreamHandle");
             foreach (var wrapperType in new[] { typeof(StorageAccess), typeof(StorageResult), typeof(DocumentEntry), typeof(DocumentCursor), typeof(DocumentStream) })
             {
-                Require(!wrapperType.GetCustomAttribute<JavaClassAttribute>()!.IncludeInheritedMembers,
-                    wrapperType.FullName + " must expose only the declared storage protocol.");
                 Require(wrapperType.GetConstructors().Length == 1,
                     wrapperType.FullName + " must not expose the Java bridge's private constructors.");
                 CheckGeneratedReferenceLifecycle(wrapperType);
             }
 
-            RequireGeneratedConstant(typeof(StorageAccess), "Success", 0);
-            RequireGeneratedConstant(typeof(StorageAccess), "InvalidArgument", 1);
-            RequireGeneratedConstant(typeof(StorageAccess), "NotFound", 2);
-            RequireGeneratedConstant(typeof(StorageAccess), "DirectoryNotFound", 3);
-            RequireGeneratedConstant(typeof(StorageAccess), "AccessDenied", 4);
-            RequireGeneratedConstant(typeof(StorageAccess), "Unsupported", 5);
-            RequireGeneratedConstant(typeof(StorageAccess), "IoError", 6);
-            RequireGeneratedConstant(typeof(StorageAccess), "MaxTransferSize", 32768);
+            foreach (var name in new[] { "Success", "InvalidArgument", "NotFound", "DirectoryNotFound", "AccessDenied", "Unsupported", "IoError", "MaxTransferSize" })
+            {
+                RequireGeneratedStaticField(typeof(StorageAccess), name, typeof(int));
+            }
             RequireGeneratedProperty(typeof(StorageResult), "ErrorCode", typeof(int));
             RequireGeneratedProperty(typeof(StorageResult), "ErrorMessage", typeof(string));
             RequireGeneratedProperty(typeof(StorageResult), "Entry", typeof(DocumentEntry));
@@ -295,13 +297,13 @@ namespace MajdataPlay.Tests
             var runnable = FindGeneratedWrapper("java.lang.Runnable");
             RequireGeneratedMethod(activity, "GetContentResolver", resolver, false);
             RequireGeneratedMethod(activity, "StartActivityForResult", typeof(void), false, intent, typeof(int));
-            RequireGeneratedMethod(activity, "RunOnUiThread", typeof(void), false, runnable);
+            RequireGeneratedMethod(activity, "RunOnUiThread", typeof(void), false, typeof(JavaRunnableContract));
             RequireGeneratedMethod(intent, "AddFlags", intent, false, typeof(int));
             RequireGeneratedMethod(intent, "SetData", intent, false, uri);
             RequireGeneratedMethod(intent, "GetData", uri, false);
             RequireGeneratedMethod(resolver, "TakePersistableUriPermission", typeof(void), false, uri, typeof(int));
             RequireGeneratedMethod(resolver, "ReleasePersistableUriPermission", typeof(void), false, uri, typeof(int));
-            RequireGeneratedMethod(resolver, "GetPersistedUriPermissions", list, false);
+            RequireGeneratedMethod(resolver, "GetPersistedUriPermissions", typeof(JavaList), false);
             RequireGeneratedMethod(permission, "GetUri", uri, false);
             RequireGeneratedMethod(permission, "IsReadPermission", typeof(bool), false);
             RequireGeneratedMethod(permission, "IsWritePermission", typeof(bool), false);
@@ -309,7 +311,8 @@ namespace MajdataPlay.Tests
             RequireGeneratedMethod(documents, "IsTreeUri", typeof(bool), true, uri);
             RequireGeneratedProperty(unityPlayer, "CurrentActivity", activity, true);
             RequireGeneratedMethod(list, "Size", typeof(int), false);
-            RequireGeneratedMethod(list, "Get", typeof(AndroidJavaObject), false, typeof(int));
+            RequireGeneratedMethod(list, "Get", typeof(JavaObject), false, typeof(int));
+            RequireGeneratedMethod(typeof(JavaList), "Get", typeof(JavaObject), false, typeof(int));
             RequireGeneratedMethod(runnable, "Run", typeof(void), false);
             var intentConstructor = intent.GetConstructor(new[] { typeof(string) });
             Require(intentConstructor is not null, "The generated Intent action constructor is missing.");
@@ -330,26 +333,22 @@ namespace MajdataPlay.Tests
             var keyEventType = FindGeneratedWrapper("android.view.KeyEvent");
             Require(activityType == typeof(AndroidActivity) && intentType == typeof(AndroidIntent) &&
                 keyEventType == typeof(AndroidKeyEvent), "Java mappings must use the categorized runtime declarations.");
-            Require(activityType.GetCustomAttribute<JavaClassAttribute>()!.IncludeInheritedMembers &&
-                !intentType.GetCustomAttribute<JavaClassAttribute>()!.IncludeInheritedMembers &&
-                !keyEventType.GetCustomAttribute<JavaClassAttribute>()!.IncludeInheritedMembers,
-                "Activity must retain inherited picker APIs; Intent and KeyEvent must generate declared members only.");
-            foreach (var name in new[] { "Activity", "Intent", "KeyEvent" })
+            foreach (var name in new[] { "Activity", "Intent", "KeyEvent", "App.Activity", "Content.Intent", "View.KeyEvent", "Storage.StorageAccess", "Java.Lang.JavaObject" })
             {
                 Require(typeof(JavaObject).Assembly.GetType("MajdataPlay.Platform.Android.Runtime." + name) is null,
                     "The duplicate legacy Runtime." + name + " type must be removed.");
             }
-            RequireGeneratedConstant(activityType, "ResultCanceled", 0);
-            RequireGeneratedConstant(activityType, "ResultFirstUser", 1);
-            RequireGeneratedConstant(activityType, "ResultOk", -1);
-            RequireGeneratedConstant(intentType, "ActionOpenDocument", "android.intent.action.OPEN_DOCUMENT");
-            RequireGeneratedConstant(intentType, "FlagGrantReadUriPermission", 1);
-            RequireGeneratedConstant(intentType, "FlagGrantWriteUriPermission", 2);
-            RequireGeneratedConstant(keyEventType, "ActionDown", 0);
-            RequireGeneratedConstant(keyEventType, "ActionUp", 1);
-            RequireGeneratedConstant(keyEventType, "Keycode0", 7);
-            RequireGeneratedConstant(keyEventType, "Keycode3dMode", 206);
-            RequireGeneratedConstant(keyEventType, "KeycodeF24", 337);
+            foreach (var name in new[] { "ResultCanceled", "ResultFirstUser", "ResultOk" })
+            {
+                RequireGeneratedStaticField(activityType, name, typeof(int));
+            }
+            RequireGeneratedStaticField(intentType, "ActionOpenDocument", typeof(string));
+            RequireGeneratedStaticField(intentType, "FlagGrantReadUriPermission", typeof(int));
+            RequireGeneratedStaticField(intentType, "FlagGrantWriteUriPermission", typeof(int));
+            foreach (var name in new[] { "ActionDown", "ActionUp", "Keycode0", "Keycode3dMode", "KeycodeF24" })
+            {
+                RequireGeneratedStaticField(keyEventType, name, typeof(int));
+            }
             RequireGeneratedMethod(activityType, "RunOnUiThread", typeof(void), false, typeof(AndroidJavaRunnable));
             RequireGeneratedMethod(keyEventType, "GetAction", typeof(int), false);
             RequireGeneratedMethod(keyEventType, "GetKeyCode", typeof(int), false);
@@ -358,14 +357,14 @@ namespace MajdataPlay.Tests
             RequireGeneratedMethod(keyEventType, "KeyCodeToString", typeof(string), true, typeof(int));
             RequireGeneratedMethod(keyEventType, "KeyCodeFromString", typeof(int), true, typeof(string));
             RequireGeneratedMethod(keyEventType, "ChangeAction", keyEventType, true, keyEventType, typeof(int));
-            RequireGeneratedProperty(keyEventType, "Creator", typeof(AndroidJavaObject), true);
+            RequireGeneratedProperty(keyEventType, "Creator", typeof(ParcelableCreator), true);
 
             RequireThrowsPlatform(() => new AndroidActivity());
             RequireThrowsPlatform(() => new AndroidIntent());
-            RequireThrowsPlatform(() => new AndroidIntent(AndroidIntent.ActionOpenDocument));
-            RequireThrowsPlatform(() => new AndroidKeyEvent(AndroidKeyEvent.ActionDown, AndroidKeyEvent.KeycodeA));
-            RequireThrowsPlatform(() => new AndroidKeyEvent(0L, 0L, AndroidKeyEvent.ActionDown, AndroidKeyEvent.KeycodeA, 0));
-            RequireThrowsPlatform(() => AndroidKeyEvent.KeyCodeToString(AndroidKeyEvent.KeycodeA));
+            RequireThrowsPlatform(() => new AndroidIntent("android.intent.action.OPEN_DOCUMENT"));
+            RequireThrowsPlatform(() => new AndroidKeyEvent(0, 29));
+            RequireThrowsPlatform(() => new AndroidKeyEvent(0L, 0L, 0, 29, 0));
+            RequireThrowsPlatform(() => AndroidKeyEvent.KeyCodeToString(29));
             RequireThrowsPlatform(() => AndroidKeyEvent.KeyCodeFromString("KEYCODE_A"));
             RequireThrowsPlatform(() => AndroidKeyEvent.GetMaxKeyCode());
             RequireThrowsPlatform(() =>
@@ -389,12 +388,12 @@ namespace MajdataPlay.Tests
             RequireThrows<ArgumentNullException>(() => activity.RunOnUiThread((AndroidJavaRunnable)null!),
                 "The retained Runnable adapter must reject a null managed callback before JNI.");
             RequireThrowsPlatform(() => intent.GetAction());
-            RequireThrowsPlatform(() => intent.AddFlags(AndroidIntent.FlagGrantReadUriPermission));
+            RequireThrowsPlatform(() => intent.AddFlags(1));
             RequireThrowsPlatform(() => keyEvent.GetAction());
             RequireThrowsPlatform(() => keyEvent.GetKeyCode());
             RequireThrowsPlatform(() => keyEvent.GetRepeatCount());
             RequireThrowsPlatform(() => keyEvent.IsLongPress());
-            RequireThrowsPlatform(() => AndroidKeyEvent.ChangeAction(keyEvent, AndroidKeyEvent.ActionUp));
+            RequireThrowsPlatform(() => AndroidKeyEvent.ChangeAction(keyEvent, 1));
             Require(reference.DisposeCalls == 0, "Runtime Editor checks must not dispose externally owned Java references.");
             Debug.Log("FILE_SYSTEM_GENERATED_RUNTIME_PASSED: unique categorized wrappers, no legacy types, constructors/methods and Runnable adapter guarded (no JNI).");
         }
@@ -445,18 +444,18 @@ namespace MajdataPlay.Tests
             Debug.Log("FILE_SYSTEM_GENERATED_BRIDGE_PASSED: typed stream/envelope integration and null-envelope IOException (no JNI).");
         }
 
-        /// <summary>Requires a real generated JavaObject wrapper and its adopting reference constructor.</summary>
-        /// <param name="wrapperType">The production C# declaration augmented by the installed analyzer.</param>
+        /// <summary>Requires a public binding with the expected namespace, reference ownership, and guarded class lookup.</summary>
+        /// <param name="wrapperType">The production CLI-generated wrapper declaration.</param>
         /// <param name="binaryName">The exact Java binary name, including dollar-delimited nested classes.</param>
         /// <exception cref="InvalidOperationException">Generated code or its API-36 mapping is missing.</exception>
         private static void RequireGeneratedWrapper(Type wrapperType, string binaryName)
         {
-            var attribute = wrapperType.GetCustomAttribute<JavaClassAttribute>();
-            Require(attribute is not null && attribute.ClassName == binaryName && attribute.ApiLevel == 36,
-                wrapperType.FullName + " must request the expected API-36 Java binary name.");
-            Require(wrapperType.IsPublic && wrapperType.BaseType == typeof(JavaObject),
-                wrapperType.FullName + " must be a public generated JavaObject wrapper.");
-            RequireGeneratedConstant(wrapperType, "JavaClassName", binaryName);
+            Require(wrapperType == typeof(JavaObjectReference).Assembly.GetType(GetBindingTypeName(binaryName)),
+                wrapperType.FullName + " must occupy the expected Java package binding namespace.");
+            Require(wrapperType.IsPublic && typeof(JavaObjectReference).IsAssignableFrom(wrapperType),
+                wrapperType.FullName + " must be a public generated Java reference wrapper.");
+            RequireGeneratedProperty(wrapperType, "Class", typeof(AndroidJavaObject), true);
+            RequireThrowsPlatform(() => wrapperType.GetProperty("Class", BindingFlags.Public | BindingFlags.Static | BindingFlags.DeclaredOnly)!.GetValue(null));
             var constructor = wrapperType.GetConstructor(new[] { typeof(AndroidJavaObject), typeof(bool) });
             Require(constructor is not null, wrapperType.FullName + " is missing the generated reference constructor.");
             var ownership = constructor!.GetParameters()[1];
@@ -464,25 +463,36 @@ namespace MajdataPlay.Tests
                 wrapperType.FullName + " must adopt existing references by default.");
         }
 
-        /// <summary>Finds a unique production wrapper by Java annotation rather than a movable C# namespace.</summary>
+        /// <summary>Finds a production CLI wrapper using its Java package binding namespace.</summary>
         /// <param name="binaryName">The Java class or interface's exact binary name.</param>
-        /// <returns>The production wrapper with that annotation and generated API.</returns>
+        /// <returns>The production wrapper with the matching binding namespace and generated API.</returns>
         /// <exception cref="InvalidOperationException">The mapping is absent, duplicated, or not generated.</exception>
         /// <exception cref="ReflectionTypeLoadException">A production assembly type cannot be loaded for inspection.</exception>
         private static Type FindGeneratedWrapper(string binaryName)
         {
-            Type? match = null;
-            foreach (var candidate in typeof(JavaObject).Assembly.GetTypes())
-            {
-                if (candidate.GetCustomAttribute<JavaClassAttribute>()?.ClassName == binaryName)
-                {
-                    Require(match is null, "Duplicate generated wrapper for " + binaryName + ".");
-                    match = candidate;
-                }
-            }
+            var match = typeof(JavaObjectReference).Assembly.GetType(GetBindingTypeName(binaryName));
             Require(match is not null, "Missing production generated wrapper for " + binaryName + ".");
             RequireGeneratedWrapper(match!, binaryName);
             return match!;
+        }
+
+        /// <summary>Maps the tested Java binary names to namespace-relative PascalCase binding type names.</summary>
+        /// <param name="binaryName">The Java package and dollar-delimited nested class name.</param>
+        /// <returns>The configured runtime Bindings namespace followed by the package and wrapper name.</returns>
+        private static string GetBindingTypeName(string binaryName)
+        {
+            var separator = binaryName.LastIndexOf('.');
+            var packages = binaryName.Substring(0, separator).Split('.');
+            for (var index = 0; index < packages.Length; index++)
+            {
+                packages[index] = char.ToUpperInvariant(packages[index][0]) + packages[index].Substring(1);
+            }
+            var name = binaryName.Substring(separator + 1).Replace('$', '_');
+            if (binaryName == "java.lang.Object")
+            {
+                name = "JavaObject";
+            }
+            return "MajdataPlay.Platform.Android.Runtime.Bindings." + string.Join(".", packages) + "." + name;
         }
 
         /// <summary>Requires exact generated parameter/return mappings and static versus instance dispatch.</summary>
@@ -494,7 +504,7 @@ namespace MajdataPlay.Tests
         /// <exception cref="InvalidOperationException">The generated signature does not match.</exception>
         private static void RequireGeneratedMethod(Type wrapperType, string name, Type returnType, bool isStatic, params Type[] parameters)
         {
-            var method = wrapperType.GetMethod(name, BindingFlags.Public | BindingFlags.DeclaredOnly |
+            var method = wrapperType.GetMethod(name, BindingFlags.Public |
                 (isStatic ? BindingFlags.Static : BindingFlags.Instance), null, parameters, null);
             Require(method is not null && method.ReturnType == returnType && method.IsStatic == isStatic,
                 wrapperType.FullName + "." + name + " has an incorrect generated signature or typed return.");
@@ -515,16 +525,15 @@ namespace MajdataPlay.Tests
                 wrapperType.FullName + "." + name + " must be a getter-only property with the exact generated type.");
         }
 
-        /// <summary>Requires a compile-time Java constant, readable without JNI.</summary>
-        /// <param name="wrapperType">The generated wrapper declaring the constant.</param>
-        /// <param name="name">The generated constant name.</param>
-        /// <param name="expected">The exact expected value and managed type.</param>
-        /// <exception cref="InvalidOperationException">The constant is absent or has an incorrect type/value.</exception>
-        private static void RequireGeneratedConstant(Type wrapperType, string name, object expected)
+        /// <summary>Requires a getter-only static Java field that rejects Editor access before JNI.</summary>
+        /// <param name="wrapperType">The generated wrapper declaring the Java field.</param>
+        /// <param name="name">The generated field property name.</param>
+        /// <param name="propertyType">The expected managed field type.</param>
+        /// <exception cref="InvalidOperationException">The field has an incorrect mapping or lacks the Editor guard.</exception>
+        private static void RequireGeneratedStaticField(Type wrapperType, string name, Type propertyType)
         {
-            var field = wrapperType.GetField(name, BindingFlags.Public | BindingFlags.Static | BindingFlags.DeclaredOnly);
-            Require(field is not null && field.IsLiteral && field.FieldType == expected.GetType() &&
-                Equals(field.GetRawConstantValue(), expected), wrapperType.FullName + "." + name + " must be the expected compile-time constant.");
+            RequireGeneratedProperty(wrapperType, name, propertyType, true);
+            RequireThrowsPlatform(() => wrapperType.GetProperty(name, BindingFlags.Public | BindingFlags.Static | BindingFlags.DeclaredOnly)!.GetValue(null));
         }
 
         /// <summary>Exercises wrapping, borrowing, adopting, disposal, and instance guards with a managed-only reference.</summary>
@@ -538,8 +547,8 @@ namespace MajdataPlay.Tests
             RequireThrows<ArgumentNullException>(() => constructor.Invoke(new object?[] { null, true }),
                 wrapperType.FullName + " must reject a null adopted reference.");
             using var reference = ManagedJavaReference.Create();
-            using var borrowed = (JavaObject)constructor.Invoke(new object[] { reference, false });
-            using var otherBorrower = (JavaObject)constructor.Invoke(new object[] { reference, false });
+            using var borrowed = (JavaObjectReference)constructor.Invoke(new object[] { reference, false });
+            using var otherBorrower = (JavaObjectReference)constructor.Invoke(new object[] { reference, false });
             Require(ReferenceEquals(borrowed.JavaReference, reference), "Wrapping must retain the exact supplied reference.");
             foreach (var property in wrapperType.GetProperties(BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly))
             {
@@ -573,15 +582,21 @@ namespace MajdataPlay.Tests
             {
                 _ = borrowed.JavaReference;
             }, "Disposed borrowed wrappers must not expose the reference.");
-            using var adoptedReference = ManagedJavaReference.Create();
-            using var adopted = (JavaObject)constructor.Invoke(new object[] { adoptedReference, Type.Missing });
-            adopted.Dispose();
-            adopted.Dispose();
-            Require(adoptedReference.DisposeCalls == 1, "Default ownership must dispose the adopted reference exactly once.");
-            RequireThrows<ObjectDisposedException>(() =>
+            var adoptedReference = ManagedJavaReference.Create();
+            try
             {
-                _ = adopted.JavaReference;
-            }, "Disposed adopted wrappers must not expose the reference.");
+                var adopted = (JavaObjectReference)constructor.Invoke(new object[] { adoptedReference, Type.Missing });
+                RequireThrowsPlatform(() => adopted.Dispose());
+                RequireThrowsPlatform(() => adopted.Dispose());
+                Require(adoptedReference.DisposeCalls == 0 && ReferenceEquals(adopted.JavaReference, adoptedReference),
+                    "Owned reference disposal must reject Editor JNI access before disposing or detaching the reference.");
+            }
+            finally
+            {
+                // This probe has no JNI handles, so only its managed disposal callback needs cleanup.
+                adoptedReference.Dispose();
+            }
+            Require(adoptedReference.DisposeCalls == 1, "The inert adopted-reference probe must be cleaned up exactly once by the test.");
         }
 
         /// <summary>Observes managed disposal only; it never constructs a Java object or owns native JNI handles.</summary>
@@ -834,6 +849,10 @@ namespace MajdataPlay.Tests
             {
                 if (arguments[i] == "-storageValidationTargets")
                 {
+                    if (string.Equals(arguments[i + 1], "none", StringComparison.OrdinalIgnoreCase))
+                    {
+                        return Array.Empty<string>();
+                    }
                     return arguments[i + 1].Split(new[] { ',' }, StringSplitOptions.RemoveEmptyEntries);
                 }
             }

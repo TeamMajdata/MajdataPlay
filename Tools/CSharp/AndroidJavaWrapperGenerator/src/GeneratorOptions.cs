@@ -16,8 +16,8 @@ namespace MajdataPlay.Tools.AndroidJavaWrapperGenerator
         /// <summary>Gets or sets whether SDK scanning is disabled for a standalone Java library.</summary>
         internal bool NoSdk { get; set; }
 
-        /// <summary>Gets or sets the namespace prefix for every generated Java package.</summary>
-        internal string RootNamespace { get; set; } = "MajdataPlay.Platform.Android.Bindings";
+        /// <summary>Gets or sets the runtime namespace, whose Bindings child contains every generated Java package.</summary>
+        internal string RootNamespace { get; set; } = "MajdataPlay.Platform.Android";
 
         /// <summary>Gets or sets the destination directory for generated sources and their manifest.</summary>
         internal string OutputDirectory { get; set; } = string.Empty;

@@ -1,18 +1,19 @@
 #nullable enable
 using MajdataPlay.IO.Storage;
 using System;
+using MajdataPlay.Platform.Android.Runtime;
 using System.Collections.Generic;
 using System.IO;
 using System.Runtime.ExceptionServices;
 using System.Threading;
 using System.Threading.Tasks;
 using UnityEngine;
-using Activity = MajdataPlay.Platform.Android.Runtime.App.Activity;
-using DocumentsContract = MajdataPlay.Platform.Android.Runtime.Provider.DocumentsContract;
-using Intent = MajdataPlay.Platform.Android.Runtime.Content.Intent;
-using JavaUri = MajdataPlay.Platform.Android.Runtime.Net.Uri;
-using UnityPlayer = MajdataPlay.Platform.Android.Runtime.Unity.UnityPlayer;
-using UriPermission = MajdataPlay.Platform.Android.Runtime.Content.UriPermission;
+using Activity = MajdataPlay.Platform.Android.Runtime.Bindings.Android.App.Activity;
+using DocumentsContract = MajdataPlay.Platform.Android.Runtime.Bindings.Android.Provider.DocumentsContract;
+using Intent = MajdataPlay.Platform.Android.Runtime.Bindings.Android.Content.Intent;
+using JavaUri = MajdataPlay.Platform.Android.Runtime.Bindings.Android.Net.Uri;
+using UnityPlayer = MajdataPlay.Platform.Android.Runtime.Bindings.Com.Unity3d.Player.UnityPlayer;
+using UriPermission = MajdataPlay.Platform.Android.Runtime.Bindings.Android.Content.UriPermission;
 
 namespace MajdataPlay.Platform.Android.Storage
 {
@@ -39,17 +40,23 @@ namespace MajdataPlay.Platform.Android.Storage
         private static int s_nextRequestCode = 0x4D00;
 #endif
 
-        /// <summary>Requests read access to a URI.</summary>
-        private const int GrantRead = Intent.FlagGrantReadUriPermission;
+        /// <summary>Matches Android FLAG_GRANT_READ_URI_PERMISSION without initializing JNI.</summary>
+        private const int GrantRead = 1;
 
-        /// <summary>Requests write access to a URI.</summary>
-        private const int GrantWrite = Intent.FlagGrantWriteUriPermission;
+        /// <summary>Matches Android FLAG_GRANT_WRITE_URI_PERMISSION without initializing JNI.</summary>
+        private const int GrantWrite = 2;
 
-        /// <summary>Requests a grant persistable across process restarts.</summary>
-        private const int GrantPersistable = Intent.FlagGrantPersistableUriPermission;
+        /// <summary>Matches Android FLAG_GRANT_PERSISTABLE_URI_PERMISSION without initializing JNI.</summary>
+        private const int GrantPersistable = 64;
 
-        /// <summary>Requests access to descendants of a selected tree.</summary>
-        private const int GrantPrefix = Intent.FlagGrantPrefixUriPermission;
+        /// <summary>Matches Android FLAG_GRANT_PREFIX_URI_PERMISSION without initializing JNI.</summary>
+        private const int GrantPrefix = 128;
+
+        /// <summary>Identifies Android Activity.RESULT_CANCELED without requiring JNI during picker completion.</summary>
+        private const int ResultCanceled = 0;
+
+        /// <summary>Identifies Android Activity.RESULT_OK without requiring JNI during picker completion.</summary>
+        private const int ResultOk = -1;
 
         /// <summary>Lets the user choose a document tree.</summary>
         /// <param name="writable">Whether read and write access are required.</param>
@@ -147,8 +154,9 @@ namespace MajdataPlay.Platform.Android.Storage
                 var result = new AndroidStoragePermission[count];
                 for (var i = 0; i < count; i++)
                 {
-                    using var permission = new UriPermission(permissions.Get(i)
-                        ?? throw new IOException("Android returned no persisted URI permission."));
+                    using var permissionReference = permissions.Get(i)
+                        ?? throw new IOException("Android returned no persisted URI permission.");
+                    using var permission = new UriPermission(permissionReference.JavaReference, ownsReference: false);
                     using var uri = permission.GetUri()
                         ?? throw new IOException("Android returned a persisted grant without a URI.");
                     var location = uri.ToString()
@@ -392,11 +400,11 @@ namespace MajdataPlay.Platform.Android.Storage
             }
             CommitResult(pending, () =>
             {
-                if (resultCode == Activity.ResultCanceled)
+                if (resultCode == ResultCanceled)
                 {
                     return null;
                 }
-                if (resultCode != Activity.ResultOk || intent is null)
+                if (resultCode != ResultOk || intent is null)
                 {
                     throw new IOException("Android returned an invalid document picker result.");
                 }

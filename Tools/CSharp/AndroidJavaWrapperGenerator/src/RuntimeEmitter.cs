@@ -25,9 +25,9 @@ namespace MajdataPlay.Tools.AndroidJavaWrapperGenerator
         };
 
         /// <summary>
-        /// Expands embedded runtime templates into standalone sources under Runtime/.
+        /// Expands embedded runtime templates into sources at the output root.
         /// </summary>
-        /// <param name="rootNamespace">The validated root namespace selected for the generated wrappers.</param>
+        /// <param name="rootNamespace">The validated namespace containing generated runtime support types.</param>
         /// <returns>A read-only map from relative output paths to complete CRLF C# source text.</returns>
         /// <exception cref="ArgumentException">The root namespace is null, empty, or whitespace.</exception>
         /// <exception cref="InvalidOperationException">A required embedded runtime template is missing.</exception>
@@ -49,7 +49,7 @@ namespace MajdataPlay.Tools.AndroidJavaWrapperGenerator
                 using var reader = new StreamReader(stream, Encoding.UTF8, true);
                 var source = reader.ReadToEnd().Replace("__ROOT_NAMESPACE__", rootNamespace);
                 source = source.Replace("\r\n", "\n").Replace("\r", "\n").Replace("\n", "\r\n");
-                sources.Add("Runtime/" + name + ".cs", source);
+                sources.Add(name + ".cs", source);
             }
 
             return new ReadOnlyDictionary<string, string>(sources);

@@ -1,8 +1,8 @@
 ﻿using MajdataPlay.Diagnostics;
 using MajdataPlay.Platform.Android.IO;
-using MajdataPlay.Platform.Android.Runtime.App;
-using MajdataPlay.Platform.Android.Runtime.Content;
-using MajdataPlay.Platform.Android.Runtime.Unity;
+using MajdataPlay.Platform.Android.Runtime.Bindings.Android.App;
+using MajdataPlay.Platform.Android.Runtime.Bindings.Android.Content;
+using MajdataPlay.Platform.Android.Runtime.Bindings.Com.Unity3d.Player;
 using System;
 using UnityEngine;
 #nullable enable

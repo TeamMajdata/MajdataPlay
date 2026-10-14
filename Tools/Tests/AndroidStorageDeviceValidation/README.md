@@ -11,9 +11,9 @@ ARMv7 IL2CPP processes. See `RESULTS.md` for the dated evidence and exact scope.
 A successful script compilation alone is not a runtime pass. Keep separate
 evidence for each actually executed ABI.
 
-The added equality and descriptor-stream regressions need a fresh APK and a new
-device run for each ABI. The latest dated `RESULTS.md` entry records ARM64 results;
-older ARMv7 evidence does not cover the new checks.
+The migration to standalone CLI bindings needs a fresh APK and a new device run
+for each ABI. Existing dated `RESULTS.md` entries describe the earlier binding
+implementation and do not establish runtime correctness for this migration.
 
 ## Integration contract
 
@@ -26,18 +26,19 @@ launcher. The target device is the connected physical Mi MIX 2S, API 35.
 | Source | Isolated project destination / responsibility |
 | --- | --- |
 | `AndroidStorageDeviceValidation.cs` | `Assets/Validation/`, in a runtime assembly referencing `MajdataPlay.IO` and `MajdataPlay.Platform.Android` |
-| `DeviceJniProbe.cs` | `Assets/Android/Runtime/Validation/DeviceJniProbe.cs`, **inside the same Android assembly compilation as the production annotated wrappers** |
-| `DeviceJniProbe.java` | **`Assets/Plugins/Android/src/java/net/majdata/validation/DeviceJniProbe.java`**, matching the exact `Sources` attribute |
-| Production `Runtime/` | Copy recursively; includes the annotated `Runtime/View/KeyEvent.cs` |
+| `DeviceJniProbe.java` | `Assets/Plugins/Android/src/java/net/majdata/validation/DeviceJniProbe.java`, supplied to the CLI and packaged into the APK |
+| Production `Runtime/Bindings/` extensions | Copy handwritten partial extensions alongside fresh CLI output |
+| Standalone CLI output | Generate SDK, project, probe and Unity launcher bindings into `Assets/Android/Runtime/`, including `Bindings/Net/Majdata/Validation/DeviceJniProbe.g.cs` |
 | Production Java and activity | Copy and package the real storage bridge, Unity dependencies, and launcher/activity-result implementation |
 
-The probe's Java package is `net.majdata.validation`. Source-generator `Sources`
-only supplies analysis input; the Java source must also be packaged into the
-APK. Do not package SDK `android.jar`. Do not create a second annotated mapping
-for `android.view.KeyEvent`: the probe declaration binds only the probe class.
-Its Intent/KeyEvent results are strongly typed only when those declarations are
-in the **same generator compilation**. Do not work around staging mistakes with
-handwritten `AndroidJavaClass.Call*` dispatch.
+The probe's Java package is `net.majdata.validation`. The builder uses the .NET 9
+AndroidJavaWrapperGenerator CLI and the installed SDK, all staged project/probe
+Java inputs, Unity's runtime classes archive, and `UnityPlayerActivity.java`.
+Bindings use `MajdataPlay.Platform.Android.Runtime.Bindings`, while the JNI
+support files occupy `MajdataPlay.Platform.Android.Runtime`. The harness aliases
+the generated probe directly. Its Intent, KeyEvent and StreamHandle results use
+the same typed SDK/project bindings as production. The Java probe source must
+also be packaged into the APK; SDK `android.jar` is analysis input only.
 
 The isolated project's modules include `androidjni`, `imgui`, and
 `jsonserialize`. The harness's public static

@@ -3,7 +3,7 @@ using System;
 #if UNITY_ANDROID && !UNITY_EDITOR
 using System.Runtime.ExceptionServices;
 using System.Runtime.InteropServices;
-using MajdataPlay.Platform.Android.Runtime.Unity;
+using MajdataPlay.Platform.Android.Runtime.Bindings.Com.Unity3d.Player;
 using UnityEngine;
 #endif
 
@@ -66,7 +66,7 @@ namespace MajdataPlay.FFmpeg.Interop
         /// <remarks>The caller holds the initialization lock and has already registered FFmpeg's Java VM.</remarks>
         /// <exception cref="InvalidOperationException">The activity, application context, or JNI global reference is unavailable.</exception>
         /// <exception cref="AndroidJavaException">Java lookup or JNI reference creation fails.</exception>
-        /// <exception cref="MajdataPlay.Platform.Android.JavaInvocationException">A generated Java wrapper invocation fails.</exception>
+        /// <exception cref="MajdataPlay.Platform.Android.Runtime.JavaInvocationException">A generated Java wrapper invocation fails.</exception>
         /// <exception cref="NotSupportedException">FFmpeg rejects the application-context global reference.</exception>
         /// <exception cref="DllNotFoundException">The native avcodec library is unavailable.</exception>
         /// <exception cref="EntryPointNotFoundException">The native avcodec library lacks the context setter.</exception>
@@ -78,7 +78,7 @@ namespace MajdataPlay.FFmpeg.Interop
             using var applicationContext = activity.GetApplicationContext()
                 ?? throw new InvalidOperationException("The Android application context is unavailable.");
 
-            var globalReference = AndroidJNI.NewGlobalRef(applicationContext.GetRawObject());
+            var globalReference = AndroidJNI.NewGlobalRef(applicationContext.JavaReference.GetRawObject());
             if (globalReference == IntPtr.Zero)
             {
                 throw new InvalidOperationException("Could not retain the Android application context.");

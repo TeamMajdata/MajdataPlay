@@ -12,7 +12,7 @@ namespace MajdataPlay.Tools.AndroidJavaWrapperGenerator
     /// <summary>Emits independent C# 9 wrappers for the effective public Java API.</summary>
     internal static class WrapperEmitter
     {
-        /// <summary>Generates deterministic package-relative source files and their dependency closure.</summary>
+        /// <summary>Generates deterministic namespace-relative source files and their dependency closure.</summary>
         /// <param name="api">The extracted JVM declarations, including nonpublic hierarchy metadata.</param>
         /// <param name="options">The root namespace, optional Java package filters, and worker count.</param>
         /// <param name="ct">The cancellation token for selection, planning, and file emission.</param>
@@ -121,6 +121,9 @@ namespace MajdataPlay.Tools.AndroidJavaWrapperGenerator
             /// <summary>Identifies the independent runtime invocation helper.</summary>
             private readonly string _jni;
 
+            /// <summary>Identifies the namespace containing generated Java package bindings.</summary>
+            private readonly string _bindingsNamespace;
+
             /// <summary>Initializes generation and guarantees a real Object wrapper declaration.</summary>
             /// <param name="api">The extracted JVM metadata and diagnostic collection.</param>
             /// <param name="options">The namespace, package filters, and worker count.</param>
@@ -131,7 +134,8 @@ namespace MajdataPlay.Tools.AndroidJavaWrapperGenerator
                 _options = options;
                 _ct = ct;
                 _types = new Dictionary<string, JavaType>(api.Types, StringComparer.Ordinal);
-                _jni = "global::" + options.RootNamespace + ".Runtime.AndroidJni";
+                _jni = "global::" + options.RootNamespace + ".AndroidJni";
+                _bindingsNamespace = JavaNames.Namespace(options.RootNamespace, string.Empty);
                 if (!_types.ContainsKey(ObjectName))
                 {
                     _types.Add(ObjectName, new JavaType
@@ -165,8 +169,8 @@ namespace MajdataPlay.Tools.AndroidJavaWrapperGenerator
                 {
                     _ct.ThrowIfCancellationRequested();
                     var plan = BuildPlan(name);
-                    var packageNamespace = plan.Namespace.Substring(_options.RootNamespace.Length).TrimStart('.');
-                    var directory = packageNamespace.Replace('.', '/');
+                    var relativeNamespace = plan.Namespace.Substring(_options.RootNamespace.Length).TrimStart('.');
+                    var directory = relativeNamespace.Replace('.', '/');
                     plans[planIndex] = plan;
                     paths[planIndex] = (directory.Length == 0 ? string.Empty : directory + "/") + plan.Name + ".g.cs";
                     planIndex++;
@@ -406,10 +410,15 @@ namespace MajdataPlay.Tools.AndroidJavaWrapperGenerator
                     }
                 }
                 occupied.UnionWith(namespaceNames);
-                occupied.Add(_options.RootNamespace + ".Runtime.AndroidJni");
-                occupied.Add(_options.RootNamespace + ".Runtime.IJavaObject");
-                occupied.Add(_options.RootNamespace + ".Runtime.JavaObjectReference");
-                occupied.Add(_options.RootNamespace + ".Runtime.JavaInvocationException");
+                occupied.Add(_options.RootNamespace + ".AndroidJni");
+                occupied.Add(_options.RootNamespace + ".IJavaObject");
+                occupied.Add(_options.RootNamespace + ".JavaObjectReference");
+                occupied.Add(_options.RootNamespace + ".JavaInvocationException");
+                // Preserve aliases allocated against the previous runtime namespace when bindings move to their new directory.
+                occupied.Add(_bindingsNamespace + ".Runtime.AndroidJni");
+                occupied.Add(_bindingsNamespace + ".Runtime.IJavaObject");
+                occupied.Add(_bindingsNamespace + ".Runtime.JavaObjectReference");
+                occupied.Add(_bindingsNamespace + ".Runtime.JavaInvocationException");
                 foreach (var type in declarations.OrderBy(type => type.Name == ObjectName ? 0 : 1))
                 {
                     _ct.ThrowIfCancellationRequested();
@@ -914,7 +923,7 @@ namespace MajdataPlay.Tools.AndroidJavaWrapperGenerator
                 WrapperDocumentation.WriteDetails(source.Line, plan.Type.Documentation);
                 var bases = new List<string>
                 {
-                    plan.Base?.QualifiedName ?? "global::" + _options.RootNamespace + ".Runtime.JavaObjectReference"
+                    plan.Base?.QualifiedName ?? "global::" + _options.RootNamespace + ".JavaObjectReference"
                 };
                 if (plan.InterfaceQualifiedName is not null)
                 {
@@ -971,7 +980,7 @@ namespace MajdataPlay.Tools.AndroidJavaWrapperGenerator
                     "Represents the Java interface <c>" + JavaNames.Xml(plan.Type.Name) + "</c> and its JNI reference.");
                 WrapperDocumentation.WriteDetails(source.Line, plan.Type.Documentation);
                 var bases = plan.InterfaceParents.Select(parent => parent.InterfaceQualifiedName!)
-                    .Concat(new[] { "global::" + _options.RootNamespace + ".Runtime.IJavaObject" });
+                    .Concat(new[] { "global::" + _options.RootNamespace + ".IJavaObject" });
                 source.Open("public interface " + plan.InterfaceSimpleName + " : " + string.Join(", ", bases));
                 for (var index = 0; index < plan.InterfaceMethods.Count; index++)
                 {
@@ -1180,7 +1189,7 @@ namespace MajdataPlay.Tools.AndroidJavaWrapperGenerator
             {
                 source.Line("/// <exception cref=\"global::System.PlatformNotSupportedException\">The JNI runtime is unavailable on this platform.</exception>");
                 source.Line("/// <exception cref=\"global::UnityEngine.AndroidJavaException\">Java reports an exception during the JNI operation.</exception>");
-                source.Line("/// <exception cref=\"global::" + _options.RootNamespace + ".Runtime.JavaInvocationException\">Java raises an exception during the JNI operation.</exception>");
+                source.Line("/// <exception cref=\"global::" + _options.RootNamespace + ".JavaInvocationException\">Java raises an exception during the JNI operation.</exception>");
                 source.Line("/// <exception cref=\"global::System.InvalidOperationException\">JNI cannot allocate a frame or resolve a required reference.</exception>");
                 if (instance)
                 {

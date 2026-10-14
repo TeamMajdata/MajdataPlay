@@ -51,8 +51,10 @@ namespace MajdataPlay.Tests.AndroidJavaWrapperGeneratorValidation
             Require(api.Types["net.majdata.majdataplay.MajdataPlayActivity"].SuperName == "com.unity3d.player.UnityPlayerActivity", "Project Activity preserves its Unity source superclass");
             Require(api.Types["com.unity3d.player.UnityPlayerGameActivity"].SuperName == "com.google.androidgamesdk.GameActivity", "Unity GameActivity preserves its real dependency superclass");
             var generated = Generate(api, options);
+            VerifyNamespaceLayout(generated, options.RootNamespace);
             CompileGenerated(settings, generated, false, false);
             CompileGenerated(settings, generated, true, false);
+            VerifyMigratedConsumers(settings, projectRoot, api, generated);
             options.Jobs = 1;
             var serialApi = JavaApiScanner.Scan(options, CancellationToken.None);
             var serial = Generate(serialApi, options);
@@ -61,6 +63,7 @@ namespace MajdataPlay.Tests.AndroidJavaWrapperGeneratorValidation
             GeneratedOutput.Write(options, api.PlatformJar, generated, CancellationToken.None);
             var publishDirectory = Path.Combine(workspace, "editor-published");
             Require(JavaWrapperOutput.Publish(options.OutputDirectory, publishDirectory) == generated.Count, "Actual complete CLI output publishes through the Editor ownership bridge");
+            VerifyProjectModeBootstrap(settings, workspace, projectRoot, generated);
             Console.WriteLine("Editor input compilation/publication passed: " + generated.Count + " C# files from " + request.Inputs.Count + " additional inputs.");
         }
     }
