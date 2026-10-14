@@ -32,7 +32,7 @@ namespace MajdataPlay.Platform.Android
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
         private static void Init()
         {
-#if !ANDROID_RUNTIME
+#if ANDROID_RUNTIME
             MajDebug.LogInfo(nameof(AndroidRuntime), "Init");
             try
             {
