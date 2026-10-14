@@ -138,6 +138,12 @@ or an Android Player build.
   metadata retention, stale asset/metadata cleanup, modified-file conflicts,
   previous namespace/directory manifest migration, Generated-to-Runtime migration,
   GUID preservation, invalid manifests, and corrupt staged outputs before writes.
+- Interrupted same-layout publication, including an actual late Windows replace
+  failure after earlier writes, retry with retained source GUIDs/timestamps,
+  new inputs and a second interruption, initial output, completed-record cleanup,
+  malformed/unsafe/stale publication records, and real user edits to both previous
+  and newly generated sources. A brief controlled reader lock also verifies bounded
+  atomic replacement retry through the complete publisher.
 - Project-mode bootstrap before Unity import, exact installed Editor version
   checks, complete real SDK/project source parity in `Tools/AndroidJavaWrapper/src`,
   and an actual independent C# 9 / .NET Standard 2.1 DLL build against the pinned

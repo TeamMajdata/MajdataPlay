@@ -60,6 +60,18 @@ publication, unchanged manifest-owned sources in the former `Runtime` and
 `Generated` Unity directories and their paired metadata are retired. Unowned files
 are preserved; modified owned files stop publication.
 
+Same-layout source publication records its verified previous source hashes and
+intended manifest in an ignored `.java-wrappers.publication.json` before the
+first write. If publication stops after replacing only some sources, the next
+run accepts only bytes matching that record's previous or intended hashes, then
+completes the requested generation and removes the record after committing the
+final manifest. New inputs may supersede the interrupted generation; its newly
+owned stale sources are still retired. Real edits, malformed records, mismatched
+manifest bindings and unsafe paths remain publication errors. Output-root and
+namespace-layout migrations retain their existing strict preflight checks.
+Windows atomic replacement briefly retries sharing, locking and unable-to-remove
+failures; persistent failures report the affected path and native error code.
+
 After editing extensions, use `--build-wrapper PROJECT --unity-data DIRECTORY`
 to compile and install the existing source project without SDK input discovery
 or Java generation. See `../../AndroidJavaWrapper/README.md` for the extension

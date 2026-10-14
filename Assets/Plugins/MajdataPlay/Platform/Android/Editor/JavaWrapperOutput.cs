@@ -4,6 +4,8 @@ using System.IO;
 using System.Runtime.Serialization;
 using System.Runtime.Serialization.Json;
 using System.Security.Cryptography;
+using System.Text;
+using System.Threading;
 using System.Xml;
 
 #nullable enable
@@ -15,6 +17,9 @@ namespace MajdataPlay.Platform.Android.Editor
     {
         /// <summary>Names the CLI ownership manifest copied after a completed publication.</summary>
         private const string ManifestName = "java-wrappers.manifest.json";
+
+        /// <summary>Names the recoverable ownership record written before same-layout source publication.</summary>
+        private const string PendingPublicationName = ".java-wrappers.publication.json";
 
         /// <summary>Identifies the only generator whose ownership records are accepted.</summary>
         private const string GeneratorName = "AndroidJavaWrapperGenerator";
@@ -102,8 +107,49 @@ namespace MajdataPlay.Platform.Android.Editor
                 : previousManifestBytes == null
                     ? new Dictionary<string, string>(s_pathComparer)
                     : ReadManifest(previousManifestBytes, outputManifestPath, true);
+            var pendingPath = ResolveFile(outputRoot, PendingPublicationName);
+            Dictionary<string, string>? pendingFiles = null;
+            if (File.Exists(pendingPath))
+            {
+                if (migratingOutputRoot)
+                {
+                    throw new IOException("An interrupted publication must finish before migrating the output root: " + pendingPath);
+                }
+
+                var pending = ReadPendingPublication(File.ReadAllBytes(pendingPath), pendingPath);
+                var pendingManifestBytes = Encoding.UTF8.GetBytes(pending.NextManifest!);
+                var pendingSources = ReadManifest(pendingManifestBytes, pendingPath, false);
+                var previousSources = ValidateManifestFiles(pending.PreviousFiles!, pendingPath);
+                if (string.Equals(pending.PreviousManifestHash, Hash(previousManifestBytes ?? Array.Empty<byte>()), StringComparison.Ordinal))
+                {
+                    foreach (var file in ownedFiles)
+                    {
+                        if (!previousSources.ContainsKey(file.Key))
+                        {
+                            throw new IOException("The interrupted publication omitted previous ownership: " + file.Key);
+                        }
+                    }
+
+                    ownedFiles = previousSources;
+                    foreach (var file in pendingSources)
+                    {
+                        if (!ownedFiles.ContainsKey(file.Key))
+                        {
+                            ownedFiles.Add(file.Key, file.Value);
+                        }
+                    }
+                    pendingFiles = pendingSources;
+                }
+                else if (previousManifestBytes == null || !BytesEqual(previousManifestBytes, pendingManifestBytes))
+                {
+                    throw new IOException("The interrupted publication does not match the current ownership manifest: " + pendingPath);
+                }
+            }
+            VerifyWritableFile(pendingPath);
+
             var usesNamespaceDirectories = UsesNamespaceDirectories(ownedFiles);
             var existingFiles = new HashSet<string>(s_pathComparer);
+            var verifiedHashes = new Dictionary<string, string>(s_pathComparer);
             foreach (var file in ownedFiles)
             {
                 var destination = ResolveFile(ownershipRoot, file.Key);
@@ -112,12 +158,21 @@ namespace MajdataPlay.Platform.Android.Editor
                     continue;
                 }
 
-                if (!string.Equals(file.Value, Hash(File.ReadAllBytes(destination)), StringComparison.Ordinal))
+                var actualHash = Hash(File.ReadAllBytes(destination));
+                if (!string.Equals(file.Value, actualHash, StringComparison.Ordinal)
+                    && (pendingFiles == null || !pendingFiles.TryGetValue(file.Key, out var pendingHash)
+                        || !string.Equals(pendingHash, actualHash, StringComparison.Ordinal)))
                 {
                     throw new IOException("Refusing to change a modified generated source: " + destination);
                 }
 
+                verifiedHashes.Add(file.Key, actualHash);
                 existingFiles.Add(file.Key);
+            }
+
+            foreach (var file in verifiedHashes)
+            {
+                ownedFiles[file.Key] = file.Value;
             }
 
             var writes = new List<KeyValuePair<string, byte[]>>();
@@ -248,6 +303,24 @@ namespace MajdataPlay.Platform.Android.Editor
                 return generatedFiles.Count;
             }
 
+            if (!migratingOutputRoot && migratedFiles.Count == 0 && (writes.Count != 0 || deletions.Count != 0))
+            {
+                var pending = new PendingPublication
+                {
+                    PreviousManifestHash = Hash(previousManifestBytes ?? Array.Empty<byte>()),
+                    PreviousFiles = ownedFiles,
+                    NextManifest = Encoding.UTF8.GetString(manifestBytes)
+                };
+                var serializer = new DataContractJsonSerializer(typeof(PendingPublication), new DataContractJsonSerializerSettings
+                {
+                    UseSimpleDictionaryFormat = true
+                });
+                using var buffer = new MemoryStream();
+                serializer.WriteObject(buffer, pending);
+                Directory.CreateDirectory(outputRoot);
+                WriteAtomically(pendingPath, buffer.ToArray());
+            }
+
             // Manifest publication is last, after every planned source write, asset move, and stale-file removal.
             foreach (var write in writes)
             {
@@ -283,6 +356,7 @@ namespace MajdataPlay.Platform.Android.Editor
                 File.Delete(formerManifestPath!);
             }
 
+            File.Delete(pendingPath);
             return generatedFiles.Count;
         }
 
@@ -378,8 +452,18 @@ namespace MajdataPlay.Platform.Android.Editor
                 throw new IOException("Unrecognized output manifest schema, generator, or root namespace: " + path);
             }
 
+            return ValidateManifestFiles(manifest.Files, path);
+        }
+
+        /// <summary>Validates and normalizes all source ownership entries, including interrupted publications.</summary>
+        /// <param name="sourceFiles">The manifest-relative paths and their expected source hashes.</param>
+        /// <param name="path">The ownership record path included in diagnostics.</param>
+        /// <returns>Unique safe paths with valid uppercase SHA-256 hashes.</returns>
+        /// <exception cref="IOException">A path, hash, duplicate or directory relationship is invalid.</exception>
+        private static Dictionary<string, string> ValidateManifestFiles(IReadOnlyDictionary<string, string> sourceFiles, string path)
+        {
             var files = new Dictionary<string, string>(s_pathComparer);
-            foreach (var file in manifest.Files)
+            foreach (var file in sourceFiles)
             {
                 var relativePath = ValidateRelativePath(file.Key);
                 if (!relativePath.EndsWith(".cs", StringComparison.Ordinal) || !IsHash(file.Value)
@@ -403,6 +487,37 @@ namespace MajdataPlay.Platform.Android.Editor
             }
 
             return files;
+        }
+
+        /// <summary>Reads the ownership snapshots of a fully preflighted, interrupted same-layout publication.</summary>
+        /// <param name="bytes">The complete UTF-8 publication record.</param>
+        /// <param name="path">The record path included in diagnostics.</param>
+        /// <returns>The previous ownership and intended complete output manifest.</returns>
+        /// <exception cref="IOException">The record is malformed or omits its required ownership snapshots.</exception>
+        private static PendingPublication ReadPendingPublication(byte[] bytes, string path)
+        {
+            ValidateManifestEnvelope(bytes, path);
+            PendingPublication? pending;
+            try
+            {
+                var serializer = new DataContractJsonSerializer(typeof(PendingPublication), new DataContractJsonSerializerSettings
+                {
+                    UseSimpleDictionaryFormat = true
+                });
+                using var reader = JsonReaderWriterFactory.CreateJsonReader(bytes, XmlDictionaryReaderQuotas.Max);
+                pending = serializer.ReadObject(reader) as PendingPublication;
+            }
+            catch (Exception exception) when (exception is SerializationException || exception is XmlException || exception is ArgumentException || exception is FormatException)
+            {
+                throw new IOException("Invalid interrupted publication record: " + path, exception);
+            }
+
+            if (pending == null || !IsHash(pending.PreviousManifestHash)
+                || pending.PreviousFiles == null || string.IsNullOrEmpty(pending.NextManifest))
+            {
+                throw new IOException("Incomplete interrupted publication record: " + path);
+            }
+            return pending;
         }
 
         /// <summary>Rejects truncated JSON and additional roots that the framework JSON reader may otherwise ignore.</summary>
@@ -707,12 +822,28 @@ namespace MajdataPlay.Platform.Android.Editor
 
                 if (File.Exists(path))
                 {
-                    File.Replace(temporary, path, null);
+                    for (var attempt = 0; ; attempt++)
+                    {
+                        try
+                        {
+                            File.Replace(temporary, path, null);
+                            break;
+                        }
+                        catch (IOException exception) when (attempt < 3 && IsRetryableReplacementError(exception))
+                        {
+                            Thread.Sleep((attempt + 1) * 100);
+                        }
+                    }
                 }
                 else
                 {
                     File.Move(temporary, path);
                 }
+            }
+            catch (IOException exception)
+            {
+                throw new IOException("Unable to publish generated file '" + path + "' (I/O code "
+                    + (exception.HResult & 0xFFFF) + "): " + exception.Message, exception);
             }
             finally
             {
@@ -721,6 +852,37 @@ namespace MajdataPlay.Platform.Android.Editor
                     File.Delete(temporary);
                 }
             }
+        }
+
+        /// <summary>Recognizes Windows replace failures that preserve both original filenames and may clear on retry.</summary>
+        /// <param name="exception">The I/O failure raised by the atomic replacement.</param>
+        /// <returns>True for Windows sharing, byte-range locking or unable-to-remove-replaced errors.</returns>
+        private static bool IsRetryableReplacementError(IOException exception)
+        {
+            if (Environment.OSVersion.Platform != PlatformID.Win32NT)
+            {
+                return false;
+            }
+
+            var error = exception.HResult & 0xFFFF;
+            return error == 32 || error == 33 || error == 1175;
+        }
+
+        /// <summary>Retains the accepted pre-write ownership and intended manifest until publication commits.</summary>
+        [DataContract]
+        private sealed class PendingPublication
+        {
+            /// <summary>Gets or sets the hash binding this record to the pre-publication ownership manifest.</summary>
+            [DataMember(IsRequired = true)]
+            public string? PreviousManifestHash { get; set; }
+
+            /// <summary>Gets or sets source hashes validated before the first source is changed.</summary>
+            [DataMember(IsRequired = true)]
+            public Dictionary<string, string>? PreviousFiles { get; set; }
+
+            /// <summary>Gets or sets the complete intended CLI ownership manifest as UTF-8 text.</summary>
+            [DataMember(IsRequired = true)]
+            public string? NextManifest { get; set; }
         }
 
         /// <summary>Deserializes the independent CLI ownership contract without referencing its tool assembly.</summary>

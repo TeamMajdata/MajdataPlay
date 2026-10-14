@@ -134,6 +134,11 @@ out.log
 /Tools/AndroidJavaWrapper/src/JavaInvocationException.cs
 /Tools/AndroidJavaWrapper/src/JavaObjectReference.cs
 /Tools/AndroidJavaWrapper/src/java-wrappers.manifest.json
+/Tools/AndroidJavaWrapper/src/.java-wrappers.publication.json
+/Tools/AndroidJavaWrapper/src/JavaWrapperConverter.cs
+/Tools/AndroidJavaWrapper/src/JavaWrapperConverter.Exceptions.cs
+/Tools/AndroidJavaWrapper/src/AndroidJavaObjectExtensions.cs
+/Tools/AndroidJavaWrapper/src/JavaObjectExtensions.cs
 /Tools/AndroidJavaWrapper/src/**/*.meta
 !/Tools/AndroidJavaWrapper/src/**/*.e.cs.meta
 /Tools/CSharp/AndroidJavaWrapperGenerator/.work/

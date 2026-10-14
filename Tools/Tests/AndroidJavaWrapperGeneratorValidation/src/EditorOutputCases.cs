@@ -29,6 +29,7 @@ namespace MajdataPlay.Tests.AndroidJavaWrapperGeneratorValidation
             VerifyProjectModeArguments(workspace);
             VerifyLegacyLibrarySourceCleanup(workspace);
             VerifyEditorPublicationLifecycle(workspace);
+            VerifyEditorPublicationRecovery(workspace);
             VerifyEditorNamespaceMigration(workspace);
             VerifyEditorMigrationConflicts(workspace);
             VerifyEditorOutputRootMigration(workspace);
