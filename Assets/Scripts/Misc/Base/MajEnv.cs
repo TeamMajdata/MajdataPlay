@@ -5,7 +5,6 @@ using HidSharp.Platform.MacOS;
 #endif
 using MajdataPlay.Buffers;
 using MajdataPlay.IO.Storage;
-using MajdataPlay.Collections;
 using MajdataPlay.Extensions;
 using MajdataPlay.Net;
 using MajdataPlay.Numerics;
@@ -13,14 +12,12 @@ using MajdataPlay.Settings;
 using MajdataPlay.Settings.Runtime;
 using MajdataPlay.Utils;
 #if UNITY_ANDROID
-using MajdataPlay.Platform.Android;
 #elif UNITY_IOS
 using MajdataPlay.Platform.iOS;
 #endif
 using Newtonsoft.Json;
 using Newtonsoft.Json.Converters;
 using System;
-using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
@@ -28,10 +25,7 @@ using System.Net;
 using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Threading;
-using System.Threading.Tasks;
 using UnityEngine;
-using UnityEngine.Android;
-using UnityEngine.Scripting;
 using MajdataPlay.Net.Handlers;
 using Random = System.Random;
 using UnityEngine.Networking;
@@ -99,7 +93,7 @@ namespace MajdataPlay
 #if UNITY_ANDROID // Android Only (Sdk Version Declare)
         public static int AndroidSdkVersion
         {
-            get; 
+            get;
             private set;
         }
         public static int TargetSdkVersion
@@ -147,7 +141,7 @@ namespace MajdataPlay
         {
             get
             {
-                if(s_randomizer is null)
+                if (s_randomizer is null)
                 {
                     s_randomizer = new();
                 }
@@ -157,16 +151,7 @@ namespace MajdataPlay
         public static Thread MainThread { get; } = Thread.CurrentThread;
         public static Process GameProcess { get; } = Process.GetCurrentProcess();
 
-        //readonly static HttpClientHandler _httpClientHandler = new HttpClientHandler()
-        //{
-        //    AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate,
-        //    Proxy = WebRequest.GetSystemWebProxy(),
-        //    UseProxy = true,
-        //    UseCookies = true,
-        //    CookieContainer = new CookieContainer(),
-        //    //MaxConnectionsPerServer = 64,
-        //};
-        readonly static CurlHttpMessageHandler _httpClientHandler = new CurlHttpMessageHandler()
+        private static readonly CurlHttpMessageHandler s_httpClientHandler = new CurlHttpMessageHandler()
         {
             AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate,
             Proxy = WebRequest.GetSystemWebProxy(),
@@ -174,10 +159,7 @@ namespace MajdataPlay
             CookieContainer = new CookieContainer(),
             MaxConnectionsPerServer = 64,
         };
-        readonly static UnityHttpMessageHandler _unityHttpHandler = new UnityHttpMessageHandler();
-
-#if true
-        public static HttpClient SharedHttpClient { get; } = new HttpClient(_httpClientHandler)
+        public static HttpClient SharedHttpClient { get; } = new HttpClient(s_httpClientHandler)
         {
             Timeout = TimeSpan.FromMilliseconds(HTTP_TIMEOUT_MS),
             DefaultRequestHeaders =
@@ -185,24 +167,14 @@ namespace MajdataPlay
                 UserAgent = { new ProductInfoHeaderValue("MajdataPlay", MajInstances.GameVersion.ToString()) },
             }
         };
-#else
-        public static HttpClient SharedHttpClient { get; } = new HttpClient(_unityHttpHandler)
-        {
-            Timeout = TimeSpan.FromMilliseconds(HTTP_TIMEOUT_MS),
-            DefaultRequestHeaders =
-            {
-                UserAgent = { new ProductInfoHeaderValue("MajdataPlay", MajInstances.GameVersion.ToString()) },
-            }
-        };
-#endif
 
-        public static GameSetting Settings { get; private set; }
-        public static RuntimeConfig RuntimeConfig { get; private set; }
-        public static ApiEndpoint[] ApiEndpoints { get; private set; }
+        public static GameSetting Settings { get; private set; } = new();
+        public static RuntimeConfig? RuntimeConfig { get; private set; }
+        public static ApiEndpoint[]? ApiEndpoints { get; private set; }
 
         public static CancellationToken GlobalCT
         {
-            get { return _globalCTS.Token; }
+            get { return s_globalCTS.Token; }
         }
 
         public static JsonSerializerSettings UserJsonReaderOption { get; } = new()
@@ -216,14 +188,14 @@ namespace MajdataPlay
         };
 
         [ThreadStatic]
-        static Random? s_randomizer;
+        private static Random? s_randomizer;
         /// <summary>Stores the runtime configuration file under the local cache directory.</summary>
-        static StorageFile _runtimeConfigPath = null!;
-        readonly static CancellationTokenSource _globalCTS = new();
+        private static StorageFile s_runtimeConfigPath = null!;
+        private static readonly CancellationTokenSource s_globalCTS = new();
 
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
-        static void ChangedSynchronizationContext()
+        private static void ChangedSynchronizationContext()
         {
 #if !UNITY_EDITOR
             SynchronizationContext.SetSynchronizationContext(new UniTaskSynchronizationContext());
@@ -231,7 +203,7 @@ namespace MajdataPlay
         }
         #region Init core
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterAssembliesLoaded)]
-        static void Init()
+        private static void Init()
         {
             InitPath();
             CheckDirectories();
@@ -250,7 +222,7 @@ namespace MajdataPlay
         /// <exception cref="NotImplementedException">The current platform has no application path layout.</exception>
         /// <exception cref="UnauthorizedAccessException">Accessing the legacy Android storage root was denied.</exception>
         /// <exception cref="IOException">Resolving or creating the legacy Android storage root failed.</exception>
-        static void InitPath()
+        private static void InitPath()
         {
 #if UNITY_STANDALONE || UNITY_EDITOR
             RootPath = FileSystem.Directory.Open(Path.Combine(Application.dataPath, "../"));
@@ -341,7 +313,7 @@ namespace MajdataPlay
 #else
             throw new NotImplementedException();
 #endif
-            _runtimeConfigPath = FileSystem.File.Open(Path.Combine(CachePath.Location, "Runtime", "config.json"));
+            s_runtimeConfigPath = FileSystem.File.Open(Path.Combine(CachePath.Location, "Runtime", "config.json"));
             ChartPath = FileSystem.Directory.Open(Path.Combine(RootPath.Location, "MaiCharts"));
             SettingsPath = FileSystem.File.Open(Path.Combine(RootPath.Location, "settings.json"));
             SkinPath = FileSystem.Directory.Open(Path.Combine(RootPath.Location, "Skins"));
@@ -358,7 +330,7 @@ namespace MajdataPlay
         /// <summary>Creates writable local directories while leaving missing streaming assets untouched.</summary>
         /// <exception cref="UnauthorizedAccessException">Creating an application directory was denied.</exception>
         /// <exception cref="IOException">An application directory could not be created.</exception>
-        static void CheckDirectories()
+        private static void CheckDirectories()
         {
             CreateDirectoryIfNotExists(SkinPath);
             CreateDirectoryIfNotExists(CachePath);
@@ -370,7 +342,7 @@ namespace MajdataPlay
             CreateDirectoryIfNotExists(LogsPath);
             RootPath.CreateDirectory("Runtime");
         }
-        static void InitLogger()
+        private static void InitLogger()
         {
             var oldLogPath = LogPath.Location + ".old";
 
@@ -387,7 +359,7 @@ namespace MajdataPlay
 
             MajDebug.SetLogWriter(fileWriter);
         }
-        static void InitSystemSettings()
+        private static void InitSystemSettings()
         {
             SharedHttpClient.Timeout = TimeSpan.FromMilliseconds(HTTP_TIMEOUT_MS);
             MainThread.Priority = THREAD_PRIORITY_MAIN;
@@ -453,7 +425,7 @@ namespace MajdataPlay
             }
 #endif
         }
-        static void InitUserSettings()
+        private static void InitUserSettings()
         {
             if (SettingsPath.Exists)
             {
@@ -507,7 +479,7 @@ namespace MajdataPlay
 
             MajDebug.MinLogLevel = Settings.Debug.DebugLevel;
         }
-        static void ReadiOSNativeSettings()
+        private static void ReadiOSNativeSettings()
         {
 #if UNITY_IOS
             if (IOSNativeSettings.DebugNoCache)
@@ -531,7 +503,7 @@ namespace MajdataPlay
             MajDebug.MinLogLevel = Settings.Debug.DebugLevel;
 #endif
         }
-        static void InitNetwork()
+        private static void InitNetwork()
         {
 #if UNITY_STANDALONE
             if(Settings.Online.UseProxy)
@@ -578,7 +550,7 @@ namespace MajdataPlay
             }
 #endif
         }
-        static void InitOnlineEndpoints()
+        private static void InitOnlineEndpoints()
         {
             UnityWebRequest.ClearCookieCache();
             using (var buffer = new PooledList<ApiEndpoint>())
@@ -666,7 +638,7 @@ namespace MajdataPlay
                                      .ToArray();
             }
         }
-        static void InitOnlineMachineInfo()
+        private static void InitOnlineMachineInfo()
         {
             var machineDescriptionPath = FileSystem.File.Open(Path.Combine(RootPath.Location, "machine_description.json"));
 
@@ -690,11 +662,11 @@ namespace MajdataPlay
                 WriteLocalText(machineDescriptionPath, json);
             }
         }
-        static void InitRuntimeConfig()
+        private static void InitRuntimeConfig()
         {
-            if (_runtimeConfigPath.Exists)
+            if (s_runtimeConfigPath.Exists)
             {
-                var js = _runtimeConfigPath.ReadAllText();
+                var js = s_runtimeConfigPath.ReadAllText();
                 RuntimeConfig? setting;
 
                 if (!Serializer.Json.TryDeserialize(js, out setting, out var e, UserJsonReaderOption) || setting is null)
@@ -712,18 +684,18 @@ namespace MajdataPlay
                 RuntimeConfig = new();
 
                 var json = Serializer.Json.Serialize(RuntimeConfig, UserJsonReaderOption);
-                WriteLocalText(_runtimeConfigPath, json);
+                WriteLocalText(s_runtimeConfigPath, json);
             }
         }
-        static void InitOthers()
-        {            
+        private static void InitOthers()
+        {
 
         }
-#endregion
+        #endregion
 
         /// <summary>Attempts to remove an optional cache directory and logs deletion failures.</summary>
         /// <param name="directory">The cache directory, or null when it is absent.</param>
-        static void TryDeleteDirectory(StorageDirectory? directory)
+        private static void TryDeleteDirectory(StorageDirectory? directory)
         {
             if (directory is null || !directory.Exists)
             {
@@ -741,21 +713,21 @@ namespace MajdataPlay
             }
         }
 
-        static void OnApplicationQuit(object? sender, EventArgs? e)
+        private static void OnApplicationQuit(object? sender, EventArgs? e)
         {
             GameManager.OnAppQuit -= OnApplicationQuit;
             GameManager.OnSave -= OnSave;
             SharedHttpClient.CancelPendingRequests();
             SharedHttpClient.Dispose();
 
-            _globalCTS.Cancel();
+            s_globalCTS.Cancel();
 #if UNITY_STANDALONE_WIN
             WinHidManager.QuitThisBs();
 #elif UNITY_STANDALONE_OSX
             MacHidManager.QuitThisBs();
 #endif
         }
-        static void OnSave(object? sender, EventArgs? e)
+        private static void OnSave(object? sender, EventArgs? e)
         {
             //var listConfig = RuntimeConfig.List;
             //listConfig.SelectedSongIndex = SongStorage.WorkingCollection.Index;
@@ -765,7 +737,7 @@ namespace MajdataPlay
             var json2 = Serializer.Json.Serialize(RuntimeConfig, UserJsonReaderOption);
 
             WriteLocalText(SettingsPath, json);
-            WriteLocalText(_runtimeConfigPath, json2);
+            WriteLocalText(s_runtimeConfigPath, json2);
 
             MajDebug.FlushLog();
         }
@@ -787,7 +759,7 @@ namespace MajdataPlay
         /// <param name="directory">The directory handle initialized from a local application path.</param>
         /// <exception cref="UnauthorizedAccessException">Creating the directory was denied.</exception>
         /// <exception cref="IOException">The directory could not be created.</exception>
-        static void CreateDirectoryIfNotExists(StorageDirectory directory)
+        private static void CreateDirectoryIfNotExists(StorageDirectory directory)
         {
             if (!directory.Exists)
             {
