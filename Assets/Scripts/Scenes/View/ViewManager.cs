@@ -77,7 +77,8 @@ namespace MajdataPlay.Scenes.View
 
         float _playbackSpeed = 1f;
 
-        readonly string CACHE_PATH = Path.Combine(MajEnv.CachePath, "View");
+        /// <summary>Stores the view media cache initialized when the component awakens.</summary>
+        private StorageDirectory _cacheDirectory = null!;
 
         // Assets
         static AudioSampleWrap? _audioSample = null;
@@ -101,7 +102,7 @@ namespace MajdataPlay.Scenes.View
         protected override void Awake()
         {
             base.Awake();
-            FileSystem.Directory.Create(CACHE_PATH);
+            _cacheDirectory = MajEnv.CachePath.CreateDirectory("View");
             Majdata<ViewManager>.Instance = this;
             Majdata<INoteController>.Instance = this;
             Majdata<INoteTimeProvider>.Instance = this;
@@ -363,8 +364,8 @@ namespace MajdataPlay.Scenes.View
             _state = ViewStatus.Busy;
             try
             {
-                var sampleCachePath = Path.Combine(CACHE_PATH, "track.majplay");
-                var videoCachePath = Path.Combine(CACHE_PATH, "video.majplay");
+                var sampleCachePath = Path.Combine(_cacheDirectory.Location, "track.majplay");
+                var videoCachePath = Path.Combine(_cacheDirectory.Location, "video.majplay");
                 await File.WriteAllBytesAsync(sampleCachePath, audio);
 
                 var sample = await MajInstances.AudioManager.LoadMusicAsync(sampleCachePath, true);

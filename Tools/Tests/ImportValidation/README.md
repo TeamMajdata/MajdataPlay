@@ -21,7 +21,11 @@ creates or reuses the named collection, that a colliding chart name is renamed
 instead of overwritten, that a queued directory follows the same rules while a
 queued chart folder imports as one chart, that entries without a chart file and
 track file import nothing, that a failed archive is reported without discarding
-the remaining queue, and that no extraction directory survives an import.
+the remaining queue, and that no extraction directory survives an import. An
+opaque destination case also checks chart and collection creation, directory
+collisions, nested file copies, and preserved modification times without reopening
+the destination through the global filesystem facade. `OpaqueFileSystem.cs`
+supplies that self-contained mapped backend fixture.
 
 `Stubs.cs` supplies narrow scene, chart-filename, storage-refresh, diagnostic,
 UniTask and Unity attribute substitutes. Its `SongStorage.RefreshLocal` substitute

@@ -7,6 +7,7 @@ using System.Security.Cryptography;
 using System.Text;
 using MajdataPlay;
 using MajdataPlay.Diagnostics;
+using MajdataPlay.IO.Storage;
 using UnityEngine;
 
 namespace ResourceStorageValidation
@@ -166,7 +167,7 @@ namespace ResourceStorageValidation
             fixture.AssertMissing("MaiCharts/Original/deleted.txt");
             fixture.AssertMissing("MaiCharts/Original/new.txt");
             fixture.AssertMissing("Skins/default/missing.txt");
-            Assert(!Directory.EnumerateFiles(MajEnv.AssetsPath, "*.tmp", SearchOption.AllDirectories).Any(),
+            Assert(!Directory.EnumerateFiles(MajEnv.AssetsPath.Location, "*.tmp", SearchOption.AllDirectories).Any(),
                 "Successful updates must consume their temporary files.");
             AssertNoErrors();
         }
@@ -217,7 +218,7 @@ namespace ResourceStorageValidation
             }
             Assert(failed, "Committing a staged file over a directory must fail.");
             Assert(Directory.Exists(destination), "Commitment failure must preserve the existing directory.");
-            Assert(!Directory.EnumerateFiles(MajEnv.AssetsPath, "*.tmp").Any(),
+            Assert(!Directory.EnumerateFiles(MajEnv.AssetsPath.Location, "*.tmp").Any(),
                 "Commitment failure must remove the new temporary file.");
             AssertNoErrors();
         }
@@ -284,10 +285,10 @@ namespace ResourceStorageValidation
             {
                 var workRoot = Path.GetFullPath(Path.Combine("Temp", "ResourceStorageValidation", "work"));
                 _root = Path.Combine(workRoot, Guid.NewGuid().ToString("N"));
-                MajEnv.RootPath = Path.Combine(_root, "App");
+                MajEnv.RootPath = FileSystem.Directory.Create(Path.Combine(_root, "App"));
                 Application.streamingAssetsPath = Path.Combine(_root, "Package");
-                Directory.CreateDirectory(MajEnv.ChartPath);
-                Directory.CreateDirectory(MajEnv.SkinPath);
+                Directory.CreateDirectory(MajEnv.ChartPath.Location);
+                Directory.CreateDirectory(MajEnv.SkinPath.Location);
                 Directory.CreateDirectory(Application.streamingAssetsPath);
                 ResourceManifestLoader.V1Hashes.Clear();
                 ResourceManifestLoader.V2Hashes.Clear();
@@ -327,7 +328,7 @@ namespace ResourceStorageValidation
             /// <returns>The absolute local fixture path.</returns>
             public string PathFor(string relativePath)
             {
-                return Path.Combine(MajEnv.RootPath, relativePath);
+                return Path.Combine(MajEnv.RootPath.Location, relativePath);
             }
 
             /// <summary>Checks committed fixture bytes directly through the platform filesystem.</summary>

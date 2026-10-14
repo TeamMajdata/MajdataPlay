@@ -80,8 +80,8 @@ namespace MajdataPlay.IO
             _isInited = true;
             try
             {
-                SFXFilePath = Path.Combine(MajEnv.AssetsPath, "SFX/");
-                VoiceFilePath = Path.Combine(MajEnv.AssetsPath, "Voice/");
+                SFXFilePath = Path.Combine(MajEnv.AssetsPath.Location, "SFX/");
+                VoiceFilePath = Path.Combine(MajEnv.AssetsPath.Location, "Voice/");
 
                 DontDestroyOnLoad(this);
                 SFXFileNames = FileSystem.Directory.Open(SFXFilePath).EnumerateEntries()

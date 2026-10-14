@@ -28,24 +28,35 @@ namespace MajdataPlay.Tests.ChartStorageValidation
             var method = typeof(SongStorage).GetMethod("GetOnlineCollection", BindingFlags.NonPublic | BindingFlags.Static)!;
             try
             {
-                MajEnv.CachePath = path;
-                Online.ChartListHandler = (source, token) =>
+                var opaquePath = CreateFixtureDirectory(path, "Opaque");
+                var backend = new OpaqueFileSystem(opaquePath);
+                foreach (var fixture in new[]
                 {
-                    token.ThrowIfCancellationRequested();
-                    Require(ReferenceEquals(source, endpoint), "Online metadata must be fetched from the requested endpoint.");
-                    return Task.FromResult<ChartFixture[]?>(new[] { metadata });
-                };
-                var collection = await (Task<SongCollection>)method.Invoke(null, new object?[] { endpoint, null, CancellationToken.None })!;
-                Require(collection.Count == 1 && collection.IsOnline, "A valid offline response must construct an online chart.");
-                var detail = (OnlineSongDetail)collection.Single();
-                var cacheName = BitConverter.ToString(hashBytes);
-                var expectedPath = Path.Combine(path, "Net", endpoint.Name, cacheName);
-                Require(detail.Directory is not null && detail.Directory.Exists && detail.Directory.Location == expectedPath, "The constructor must receive an existing per-song directory preserving the legacy uppercase, hyphen-separated hash name.");
-                Require(ReferenceEquals(collection.Directory!.FileSystem, detail.Directory!.FileSystem), "Per-song cache construction must retain the collection cache's backend.");
-                WriteChart(collection.Directory.Location, cacheName, metadata);
-                Online.ChartListHandler = (source, token) => Task.FromResult<ChartFixture[]?>(null);
-                var cached = await (Task<SongCollection>)method.Invoke(null, new object?[] { endpoint, null, CancellationToken.None })!;
-                Require(cached.IsOnline && cached.Count == 1 && cached.Single().Hash == metadata.Hash, "An unavailable remote list must scan the same caller-owned per-song cache directories.");
+                    (Directory: FileSystem.Directory.Open(path), NativePath: path),
+                    (Directory: backend.Root, NativePath: opaquePath)
+                })
+                {
+                    MajEnv.CachePath = fixture.Directory;
+                    Online.ChartListHandler = (source, token) =>
+                    {
+                        token.ThrowIfCancellationRequested();
+                        Require(ReferenceEquals(source, endpoint), "Online metadata must be fetched from the requested endpoint.");
+                        return Task.FromResult<ChartFixture[]?>(new[] { metadata });
+                    };
+                    var collection = await (Task<SongCollection>)method.Invoke(null, new object?[] { endpoint, null, CancellationToken.None })!;
+                    Require(collection.Count == 1 && collection.IsOnline, "A valid offline response must construct an online chart.");
+                    var detail = (OnlineSongDetail)collection.Single();
+                    var cacheName = BitConverter.ToString(hashBytes);
+                    var expectedPath = Path.Combine(fixture.NativePath, "Net", endpoint.Name, cacheName);
+                    var expectedDirectory = fixture.Directory.FindDirectory("Net")!.FindDirectory(endpoint.Name)!.FindDirectory(cacheName)!;
+                    Require(detail.Directory is not null && detail.Directory.Exists && detail.Directory.Location == expectedDirectory.Location, "The constructor must receive an existing per-song directory preserving the legacy uppercase, hyphen-separated hash name.");
+                    Require(ReferenceEquals(fixture.Directory.FileSystem, collection.Directory!.FileSystem)
+                        && ReferenceEquals(collection.Directory.FileSystem, detail.Directory!.FileSystem), "Per-song cache construction must retain the collection cache's backend.");
+                    WriteChart(Path.GetDirectoryName(expectedPath)!, cacheName, metadata);
+                    Online.ChartListHandler = (source, token) => Task.FromResult<ChartFixture[]?>(null);
+                    var cached = await (Task<SongCollection>)method.Invoke(null, new object?[] { endpoint, null, CancellationToken.None })!;
+                    Require(cached.IsOnline && cached.Count == 1 && cached.Single().Hash == metadata.Hash, "An unavailable remote list must scan the same caller-owned per-song cache directories.");
+                }
             }
             finally
             {
@@ -67,7 +78,7 @@ namespace MajdataPlay.Tests.ChartStorageValidation
             var failingEndpoint = new ApiEndpoint { Name = "Failed endpoint" };
             endpoint.RuntimeConfig.IsLoggedIn = true;
             failingEndpoint.RuntimeConfig.IsLoggedIn = true;
-            var cache = FileSystem.Directory.Create(Path.Combine(MajEnv.CachePath, "RetainedEndpoint"));
+            var cache = MajEnv.CachePath.CreateDirectory("RetainedEndpoint");
             var remoteVisible = new OnlineSongDetail(cache.CreateDirectory("Visible"), endpoint, new ChartFixture { Hash = "remote-visible", Title = "Visible remote" });
             var remoteHidden = new OnlineSongDetail(cache.CreateDirectory("Hidden"), endpoint, new ChartFixture { Hash = "remote-hidden", Title = "Hidden remote" });
             var retained = new OnlineSongCollection(endpoint, cache, "Retained endpoint", new ISongDetail[] { remoteVisible, remoteHidden });

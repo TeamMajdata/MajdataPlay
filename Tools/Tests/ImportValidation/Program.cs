@@ -5,6 +5,7 @@ using System.IO.Compression;
 using System.Threading.Tasks;
 using MajdataPlay.Diagnostics;
 using MajdataPlay.Import;
+using MajdataPlay.IO.Storage;
 using NativeDirectory = System.IO.Directory;
 using NativeFile = System.IO.File;
 
@@ -30,7 +31,8 @@ namespace MajdataPlay.Tests.ImportValidation
                 await TestQueuedChartDirectoryAsync(rootPath);
                 await TestIgnoredLayoutsAsync(rootPath);
                 await TestUnreadableArchiveAsync(rootPath);
-                Console.WriteLine("IMPORT_VALIDATION_PASSED (8 cases)");
+                await TestOpaqueChartRootAsync(rootPath);
+                Console.WriteLine("IMPORT_VALIDATION_PASSED (9 cases)");
                 return 0;
             }
             catch (Exception exception)
@@ -64,7 +66,7 @@ namespace MajdataPlay.Tests.ImportValidation
             RequireChart(Path.Combine(chartPath, "Import", "My Chart"));
             Require(NativeFile.Exists(Path.Combine(chartPath, "Import", "My Chart", "bg.png")), "A chart folder must be copied with its extra files.");
             Require(!NativeDirectory.Exists(Path.Combine(chartPath, "My Chart")), "A single chart folder must not become a collection.");
-            Require(NativeDirectory.GetDirectories(MajEnv.TempPath).Length == 0, "The extraction directory must be removed after the import.");
+            Require(NativeDirectory.GetDirectories(MajEnv.TempPath.Location).Length == 0, "The extraction directory must be removed after the import.");
             Require(NativeFile.Exists(archivePath), "A local archive must be kept because consuming it is an Android-only behavior.");
             RequireNoErrors();
             Console.WriteLine("PASS archive: one chart folder imports into the Import collection");
@@ -216,8 +218,39 @@ namespace MajdataPlay.Tests.ImportValidation
             RequireChart(Path.Combine(chartPath, "Import", "Valid Chart"));
             Require(MajDebug.Errors.Count == 1, "An unreadable archive must report exactly one error.");
             Require(MajDebug.Errors[0].Contains(brokenPath, StringComparison.Ordinal), "The reported error must name the unreadable archive.");
-            Require(NativeDirectory.GetDirectories(MajEnv.TempPath).Length == 0, "A failed extraction must not leave its directory behind.");
+            Require(NativeDirectory.GetDirectories(MajEnv.TempPath.Location).Length == 0, "A failed extraction must not leave its directory behind.");
             Console.WriteLine("PASS archive: an unreadable archive is reported and the queue continues");
+        }
+
+        /// <summary>Checks that chart creation, collisions and file copying retain an opaque destination backend.</summary>
+        /// <param name="rootPath">The fixture root shared by the cases.</param>
+        /// <returns>A task that completes after validating imported charts and preserved entries.</returns>
+        private static async Task TestOpaqueChartRootAsync(string rootPath)
+        {
+            var chartPath = PrepareCase(rootPath, "OpaqueChartRoot");
+            var backend = new OpaqueFileSystem(chartPath);
+            MajEnv.ChartPath = backend.Root;
+            var packagePath = Path.Combine(chartPath, "package");
+            var sourceChartPath = Path.Combine(packagePath, "Sub");
+            WriteChart(sourceChartPath);
+            NativeDirectory.CreateDirectory(Path.Combine(sourceChartPath, "extras"));
+            NativeFile.WriteAllText(Path.Combine(sourceChartPath, "extras", "cover.png"), "PNG");
+            var modificationTime = new DateTime(2025, 1, 2, 3, 4, 5, DateTimeKind.Utc);
+            NativeFile.SetLastWriteTimeUtc(Path.Combine(sourceChartPath, "maidata.txt"), modificationTime);
+            WriteChart(Path.Combine(packagePath, "Coll", "Nested"));
+            var importPath = Path.Combine(chartPath, "Import");
+            NativeDirectory.CreateDirectory(Path.Combine(importPath, "Sub"));
+            NativeFile.WriteAllText(Path.Combine(importPath, "Sub", "keep.txt"), "preserved");
+
+            await ImportAsync(packagePath);
+
+            RequireChart(Path.Combine(importPath, "Sub (1)"));
+            RequireChart(Path.Combine(chartPath, "Coll", "Nested"));
+            Require(NativeFile.ReadAllText(Path.Combine(importPath, "Sub", "keep.txt")) == "preserved", "A directory collision must preserve the existing chart.");
+            Require(NativeFile.ReadAllText(Path.Combine(importPath, "Sub (1)", "extras", "cover.png")) == "PNG", "Nested chart files must copy through the retained destination backend.");
+            Require(NativeFile.GetLastWriteTimeUtc(Path.Combine(importPath, "Sub (1)", "maidata.txt")) == modificationTime, "Provider-backed copying must retain each file's modification time.");
+            RequireNoErrors();
+            Console.WriteLine("PASS opaque root: chart and collection creation retain the original destination backend");
         }
 
         /// <summary>Resolves the ignored validation workspace below the repository root.</summary>
@@ -249,8 +282,8 @@ namespace MajdataPlay.Tests.ImportValidation
             var tempPath = Path.Combine(casePath, "Temp");
             NativeDirectory.CreateDirectory(chartPath);
             NativeDirectory.CreateDirectory(tempPath);
-            MajEnv.ChartPath = chartPath;
-            MajEnv.TempPath = tempPath;
+            MajEnv.ChartPath = FileSystem.Directory.Open(chartPath);
+            MajEnv.TempPath = FileSystem.Directory.Open(tempPath);
             MajDebug.Clear();
             return chartPath;
         }

@@ -21,7 +21,7 @@ namespace MajdataPlay
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSceneLoad)]
         private static void InitializeOrUpdate()
         {
-            if (!FileSystem.Directory.Open(MajEnv.AssetsPath).Exists)
+            if (!MajEnv.AssetsPath.Exists)
             {
                 if (ExtractAssets())
                 {
@@ -165,7 +165,7 @@ namespace MajdataPlay
                 return false;
             }
 
-            var extractionRoot = MajEnv.AssetsPath.TrimEnd(
+            var extractionRoot = MajEnv.AssetsPath.Location.TrimEnd(
                                      Path.DirectorySeparatorChar,
                                      Path.AltDirectorySeparatorChar) + ".extracting-v2";
             try
@@ -209,7 +209,7 @@ namespace MajdataPlay
                 FileSystem.File.Create(
                     Path.Combine(extractionRoot, PendingManagedAssetMovesMarkerName))
                     .WriteAllText(string.Empty);
-                FileSystem.Directory.Move(extractionRoot, MajEnv.AssetsPath);
+                FileSystem.Directory.Move(extractionRoot, MajEnv.AssetsPath.Location);
                 return true;
             }
             catch (Exception exception)
@@ -236,7 +236,7 @@ namespace MajdataPlay
                 }
 
                 var destinationPath = Path.Combine(
-                    MajEnv.AssetsPath,
+                    MajEnv.AssetsPath.Location,
                     relativePath.Replace('/', Path.DirectorySeparatorChar));
                 if (!FileSystem.File.Open(destinationPath).Exists)
                 {
@@ -250,8 +250,8 @@ namespace MajdataPlay
         private static bool MoveCharts()
         {
             return MoveExtractedDirectory(
-                Path.Combine(MajEnv.AssetsPath, "MaiCharts", "Original"),
-                Path.Combine(MajEnv.ChartPath, "Original"));
+                Path.Combine(MajEnv.AssetsPath.Location, "MaiCharts", "Original"),
+                Path.Combine(MajEnv.ChartPath.Location, "Original"));
         }
 
         /// <summary>Moves the bundled skin from extraction into the player-managed skin root.</summary>
@@ -259,8 +259,8 @@ namespace MajdataPlay
         private static bool MoveSkins()
         {
             return MoveExtractedDirectory(
-                Path.Combine(MajEnv.AssetsPath, "Skins", "default"),
-                Path.Combine(MajEnv.SkinPath, "default"));
+                Path.Combine(MajEnv.AssetsPath.Location, "Skins", "default"),
+                Path.Combine(MajEnv.SkinPath.Location, "default"));
         }
 
         /// <summary>Moves one extracted managed directory without replacing an existing player-owned destination.</summary>
@@ -305,20 +305,20 @@ namespace MajdataPlay
         private static void CompletePendingManagedAssetMoves()
         {
             var markerPath = Path.Combine(
-                MajEnv.AssetsPath,
+                MajEnv.AssetsPath.Location,
                 PendingManagedAssetMovesMarkerName);
             if (!FileSystem.File.Open(markerPath).Exists)
             {
                 return;
             }
 
-            var chartSourcePath = Path.Combine(MajEnv.AssetsPath, "MaiCharts", "Original");
+            var chartSourcePath = Path.Combine(MajEnv.AssetsPath.Location, "MaiCharts", "Original");
             if (FileSystem.Directory.Open(chartSourcePath).Exists)
             {
                 MoveCharts();
             }
 
-            var skinSourcePath = Path.Combine(MajEnv.AssetsPath, "Skins", "default");
+            var skinSourcePath = Path.Combine(MajEnv.AssetsPath.Location, "Skins", "default");
             if (FileSystem.Directory.Open(skinSourcePath).Exists)
             {
                 MoveSkins();
@@ -332,15 +332,15 @@ namespace MajdataPlay
         /// <exception cref="IOException">An extracted source cannot be queried.</exception>
         private static void ClearPendingManagedAssetMovesMarkerIfCompleted()
         {
-            var chartSourcePath = Path.Combine(MajEnv.AssetsPath, "MaiCharts", "Original");
-            var skinSourcePath = Path.Combine(MajEnv.AssetsPath, "Skins", "default");
+            var chartSourcePath = Path.Combine(MajEnv.AssetsPath.Location, "MaiCharts", "Original");
+            var skinSourcePath = Path.Combine(MajEnv.AssetsPath.Location, "Skins", "default");
             if (FileSystem.Directory.Open(chartSourcePath).Exists || FileSystem.Directory.Open(skinSourcePath).Exists)
             {
                 return;
             }
 
             var markerPath = Path.Combine(
-                MajEnv.AssetsPath,
+                MajEnv.AssetsPath.Location,
                 PendingManagedAssetMovesMarkerName);
             try
             {
@@ -452,8 +452,8 @@ namespace MajdataPlay
         {
             var platformPath = relativePath.Replace('/', Path.DirectorySeparatorChar);
             return IsRootManagedAsset(relativePath)
-                ? Path.Combine(MajEnv.RootPath, platformPath)
-                : Path.Combine(MajEnv.AssetsPath, platformPath);
+                ? Path.Combine(MajEnv.RootPath.Location, platformPath)
+                : Path.Combine(MajEnv.AssetsPath.Location, platformPath);
         }
 
         /// <summary>Reads packaged bytes through local iOS storage or the Android streaming asset request.</summary>

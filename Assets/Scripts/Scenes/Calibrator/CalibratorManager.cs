@@ -45,7 +45,7 @@ namespace MajdataPlay.Scenes.Calibrator
 
         async UniTaskVoid LoadCalibrationAudioAsync()
         {
-            var path = Path.Combine(MajEnv.AssetsPath, "SFX", CALIBRATION_AUDIO_FILE_NAME);
+            var path = Path.Combine(MajEnv.AssetsPath.Location, "SFX", CALIBRATION_AUDIO_FILE_NAME);
             try
             {
                 _calibrationAudio = await MajInstances.AudioManager.LoadMusicAsync(path, normalize: false);

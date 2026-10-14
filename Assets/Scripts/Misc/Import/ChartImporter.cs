@@ -24,7 +24,8 @@ namespace MajdataPlay.Import
 {
     internal static class ChartImporter
     {
-        private static string s_importRoot = string.Empty;
+        /// <summary>Retains the collection handle receiving charts without an explicit collection.</summary>
+        private static StorageDirectory s_importRoot = null!;
         private static ValueTask s_importTask = UniTask.CompletedTask;
         private static readonly ConcurrentQueue<PendingImport> s_pendingImportTasks = new ConcurrentQueue<PendingImport>();
 
@@ -86,9 +87,10 @@ namespace MajdataPlay.Import
 #endif
         }
 
+        /// <summary>Processes queued imports and any pending startup shortcut.</summary>
+        /// <returns>An operation that completes after the startup import flow.</returns>
         public static async ValueTask OnStartAsync()
         {
-            s_importRoot = Path.Combine(MajEnv.ChartPath, "Import");
 #if ANDROID_RUNTIME
             var intent = AndroidRuntime.CurrentActivity.GetIntent();
             if (intent != null)
@@ -160,7 +162,7 @@ namespace MajdataPlay.Import
                 await MajInstances.SceneSwitcher.SwitchSceneAsync("Empty", false);
                 await UniTask.Delay(300);
             }
-            FileSystem.Directory.Create(s_importRoot);
+            s_importRoot = MajEnv.ChartPath.CreateDirectory("Import");
             while (s_pendingImportTasks.TryDequeue(out var pending))
             {
                 var entry = pending.Entry;
@@ -229,7 +231,7 @@ namespace MajdataPlay.Import
                 MajDebug.LogError("[ChartImporter] File not found: " + entry.Location);
                 return;
             }
-            var tempOutDir = Path.Combine(MajEnv.TempPath, Guid.NewGuid().ToString());
+            var tempOutDir = Path.Combine(MajEnv.TempPath.Location, Guid.NewGuid().ToString());
 
             try
             {
@@ -300,24 +302,24 @@ namespace MajdataPlay.Import
                     continue;
                 }
                 // A named collection is reused when it exists, so a package extends it instead of duplicating it.
-                var collectionDirectory = FileSystem.Directory.Create(Path.Combine(MajEnv.ChartPath, childEntry.Name));
+                var collectionDirectory = MajEnv.ChartPath.CreateDirectory(childEntry.Name);
                 foreach (var (chartDirectory, chartName) in charts)
                 {
-                    await ImportChartAsync(chartDirectory, collectionDirectory.Location, chartName);
+                    await ImportChartAsync(chartDirectory, collectionDirectory, chartName);
                 }
             }
         }
 
         /// <summary>Copies one chart directory into a collection directory under a name that is still available.</summary>
         /// <param name="source">The chart directory to copy.</param>
-        /// <param name="destinationRoot">The local collection directory receiving the chart.</param>
+        /// <param name="destinationRoot">The collection directory receiving the chart through its original backend.</param>
         /// <param name="name">The requested chart directory name.</param>
         /// <returns>An operation that completes after the chart has been copied.</returns>
-        private static async ValueTask ImportChartAsync(StorageDirectory source, string destinationRoot, string name)
+        private static async ValueTask ImportChartAsync(StorageDirectory source, StorageDirectory destinationRoot, string name)
         {
-            var destinationPath = GetUniqueDirectoryPath(destinationRoot, name);
+            var destinationDirectory = CreateUniqueDirectory(destinationRoot, name);
             MajInstances.SceneSwitcher.SetLoadingText($"Importing...\n{name}");
-            CopyDirectory(source, FileSystem.Directory.Create(destinationPath));
+            CopyDirectory(source, destinationDirectory);
             await UniTask.Yield();
         }
 
@@ -383,18 +385,23 @@ namespace MajdataPlay.Import
             return entry.IsHidden || entry.IsSystem || entry.Name.StartsWith(".");
         }
 
-        /// <summary>Builds a destination directory path that does not collide with an existing child.</summary>
-        /// <param name="root">The existing parent directory.</param>
+        /// <summary>Creates a destination directory without colliding with an existing directory.</summary>
+        /// <param name="root">The existing parent directory and its owning backend.</param>
         /// <param name="name">The requested child directory name.</param>
-        /// <returns>The requested path, or a <c>name (i)</c> variant when that name is already occupied.</returns>
-        private static string GetUniqueDirectoryPath(string root, string name)
+        /// <returns>The created directory, using a <c>name (i)</c> variant when the requested name is occupied.</returns>
+        /// <exception cref="ArgumentException">The requested child name is invalid.</exception>
+        /// <exception cref="DirectoryNotFoundException">The parent directory no longer exists.</exception>
+        /// <exception cref="UnauthorizedAccessException">Querying or creating the destination was denied.</exception>
+        /// <exception cref="NotSupportedException">The backend cannot create directories.</exception>
+        /// <exception cref="IOException">Querying or creating the destination failed.</exception>
+        private static StorageDirectory CreateUniqueDirectory(StorageDirectory root, string name)
         {
-            var path = Path.Combine(root, name);
-            for (var i = 1; FileSystem.Directory.Open(path).Exists; i++)
+            var candidateName = name;
+            for (var i = 1; root.FindDirectory(candidateName) is not null; i++)
             {
-                path = Path.Combine(root, $"{name} ({i})");
+                candidateName = $"{name} ({i})";
             }
-            return path;
+            return root.CreateDirectory(candidateName);
         }
 
         /// <summary>Extracts one archive into a temporary directory while rejecting entries that escape it.</summary>
@@ -451,7 +458,7 @@ namespace MajdataPlay.Import
 
         /// <summary>Copies a directory tree with each copied file's modification time.</summary>
         /// <param name="sourceDirectory">The existing source directory, which may belong to any storage backend.</param>
-        /// <param name="destinationDirectory">The local destination directory, which may be empty.</param>
+        /// <param name="destinationDirectory">The destination directory and its owning backend, which may be empty.</param>
         /// <exception cref="DirectoryNotFoundException">A source directory disappeared during the copy.</exception>
         /// <exception cref="UnauthorizedAccessException">Reading or writing was denied.</exception>
         /// <exception cref="IOException">Creating or copying an entry failed.</exception>
@@ -473,12 +480,12 @@ namespace MajdataPlay.Import
                             destination.CreateDirectory(entry.Name)));
                         continue;
                     }
-                    var destinationPath = Path.Combine(destination.Location, entry.Name);
-                    FileSystem.File.Copy(entry.Location, destinationPath, overwrite: true);
+                    var sourceFile = new StorageFile(source.FileSystem, entry.Location);
+                    var destinationFile = sourceFile.CopyTo(destination, entry.Name, overwrite: true);
                     if (entry.LastWriteTimeUtc is DateTime lastWriteTimeUtc)
                     {
                         // A provider copy does not carry the source timestamp on its own.
-                        FileSystem.File.Open(destinationPath).SetLastWriteTime(lastWriteTimeUtc);
+                        destinationFile.SetLastWriteTime(lastWriteTimeUtc);
                     }
                 }
             }

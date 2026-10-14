@@ -115,10 +115,6 @@ namespace MajdataPlay
         private static readonly SongCollection s_emptyCollection = SongCollection.Empty("default");
         /// <summary>Defines the portable favorites export filename.</summary>
         private const string MyFavoriteFileName = "MyFavorites.json";
-        /// <summary>Stores the chart-root location of the portable favorites export.</summary>
-        private static string s_myFavoritesExportPath = string.Empty;
-        /// <summary>Stores the location of the legacy JSON favorites cache.</summary>
-        private static string s_myFavoritesStoragePath = string.Empty;
         /// <summary>Initializes favorites storage and save handling without loading or refreshing collections.</summary>
         /// <param name="cancellationToken">Cancels waiting or initialization before save handling is registered.</param>
         /// <returns>A task which completes when storage is ready for explicit collection refreshes.</returns>
@@ -136,10 +132,10 @@ namespace MajdataPlay
                 }
                 var favoriteHashes = await Task.Run(async () =>
                 {
-                    var rootDirectory = FileSystem.Directory.Open(MajEnv.ChartPath);
+                    var rootDirectory = MajEnv.ChartPath;
                     if (!rootDirectory.Exists)
                     {
-                        rootDirectory = FileSystem.Directory.Create(MajEnv.ChartPath);
+                        FileSystem.Directory.Create(rootDirectory.Location);
                         rootDirectory.CreateDirectory("default");
                     }
                     return await LoadFavoriteHashesAsync().ConfigureAwait(false);
@@ -254,7 +250,7 @@ namespace MajdataPlay
         /// <exception cref="IOException">The chart root could not be accessed.</exception>
         private static async Task<StorageSnapshot> CreateLocalSnapshotAsync(IProgress<string>? progressReporter, CancellationToken cancellationToken)
         {
-            var rootDirectory = FileSystem.Directory.Open(MajEnv.ChartPath);
+            var rootDirectory = MajEnv.ChartPath;
             var collections = await GetLocalCollections(rootDirectory, progressReporter, cancellationToken).ConfigureAwait(false);
             var localCharts = collections.SelectMany(collection => collection.GetOriginSnapshot()).ToArray();
             try
@@ -861,7 +857,7 @@ namespace MajdataPlay
         {
             cancellationToken.ThrowIfCancellationRequested();
             var name = api.Name;
-            var cacheDirectory = FileSystem.Directory.Create(Path.Combine(MajEnv.CachePath, "Net", name));
+            var cacheDirectory = MajEnv.CachePath.CreateDirectory("Net").CreateDirectory(name);
             var collection = new OnlineSongCollection(api, cacheDirectory, name, Array.Empty<ISongDetail>());
             if (api.Url is null)
             {
@@ -1020,7 +1016,7 @@ namespace MajdataPlay
                     return;
                 }
                 var hashSet = s_myFavorites.ExportHashSet();
-                var exportDirectory = FileSystem.Directory.Open(MajEnv.ChartPath);
+                var exportDirectory = MajEnv.ChartPath;
                 var exportFile = exportDirectory.FindFile(MyFavoriteFileName)
                     ?? exportDirectory.CreateFile(MyFavoriteFileName, "application/json");
                 exportFile.WriteAllText(
@@ -1096,27 +1092,23 @@ namespace MajdataPlay
         /// <exception cref="SQLiteException">The favorite database could not be opened or queried.</exception>
         private static async Task<HashSet<string>> LoadFavoriteHashesAsync()
         {
-            if (string.IsNullOrEmpty(s_myFavoritesExportPath))
-            {
-                s_myFavoritesExportPath = Path.Combine(MajEnv.ChartPath, MyFavoriteFileName);
-            }
-            if (string.IsNullOrEmpty(s_myFavoritesStoragePath))
-            {
-                s_myFavoritesStoragePath = Path.Combine(MajEnv.CachePath, "Runtime", MyFavoriteFileName);
-            }
-
             // Init SQLite DB (once)
             if (s_favoritesDatabase is null)
             {
-                var dbPath = MajEnv.FavoriteDBPath;
-                var isDbExists = FileSystem.File.Open(dbPath).Exists;
-                var database = new SQLiteAsyncConnection(dbPath, SQLiteOpenFlags.ReadWrite | SQLiteOpenFlags.Create | SQLiteOpenFlags.FullMutex);
+                var databaseFile = MajEnv.FavoriteDBPath;
+                var isDbExists = databaseFile.Exists;
+                var database = new SQLiteAsyncConnection(databaseFile.Location, SQLiteOpenFlags.ReadWrite | SQLiteOpenFlags.Create | SQLiteOpenFlags.FullMutex);
                 try
                 {
                     await database.CreateTableAsync<FavoriteHashDB>().ConfigureAwait(false);
-                    if (!isDbExists && FileSystem.File.Open(s_myFavoritesStoragePath).Exists)
+                    if (!isDbExists)
                     {
-                        await MigrateFavFromJsonAsync(database).ConfigureAwait(false);
+                        var legacyDirectory = MajEnv.CachePath.FindDirectory("Runtime");
+                        var legacyFile = legacyDirectory?.FindFile(MyFavoriteFileName);
+                        if (legacyFile is not null)
+                        {
+                            await MigrateFavFromJsonAsync(database, legacyDirectory!, legacyFile).ConfigureAwait(false);
+                        }
                     }
                 }
                 catch
@@ -1130,8 +1122,8 @@ namespace MajdataPlay
 
             // Load export JSON (user-facing, stays as JSON for portability).
             DanInfo? exportedFavorites = null;
-            var exportFile = FileSystem.File.Open(s_myFavoritesExportPath);
-            if (exportFile.Exists)
+            var exportFile = MajEnv.ChartPath.FindFile(MyFavoriteFileName);
+            if (exportFile is not null)
             {
                 bool result;
                 Exception? exception;
@@ -1139,14 +1131,14 @@ namespace MajdataPlay
                 (result, exportedFavorites, exception) = await Serializer.Json.TryDeserializeAsync<DanInfo>(exportStream);
                 if (!result)
                 {
-                    var exportDirectory = FileSystem.Directory.Open(MajEnv.ChartPath);
+                    var exportDirectory = MajEnv.ChartPath;
                     var backupName = $"{MyFavoriteFileName}.bak";
                     while (exportDirectory.FindFile(backupName) is not null)
                     {
                         backupName = $"{backupName}.bak";
                     }
                     exportFile.CopyTo(exportDirectory, backupName);
-                    MajDebug.LogError($"Failed to load favorites\nPath: {s_myFavoritesExportPath}\nException: {exception}");
+                    MajDebug.LogError($"Failed to load favorites\nPath: {exportFile.Location}\nException: {exception}");
                 }
             }
 
@@ -1168,12 +1160,13 @@ namespace MajdataPlay
         }
         /// <summary>Imports the legacy JSON favorites cache into SQLite and retains a backup.</summary>
         /// <param name="database">The successfully initialized connection which is not yet globally published.</param>
+        /// <param name="storageDirectory">The original backend directory containing the legacy cache and backup.</param>
+        /// <param name="storageFile">The existing legacy favorites file to import.</param>
         /// <returns>A task which completes after migration or logging a recoverable migration failure.</returns>
-        private static async Task MigrateFavFromJsonAsync(SQLiteAsyncConnection database)
+        private static async Task MigrateFavFromJsonAsync(SQLiteAsyncConnection database, StorageDirectory storageDirectory, StorageFile storageFile)
         {
             try
             {
-                var storageFile = FileSystem.File.Open(s_myFavoritesStoragePath);
                 using var storageStream = storageFile.OpenRead();
                 var (result, storageFav, exception) = await Serializer.Json.TryDeserializeAsync<HashSet<string>>(storageStream);
                 if (result && storageFav is not null)
@@ -1191,8 +1184,7 @@ namespace MajdataPlay
                 }
                 try
                 {
-                    var storageDirectory = FileSystem.Directory.Open(Path.GetDirectoryName(s_myFavoritesStoragePath)!);
-                    var backupName = Path.GetFileName(s_myFavoritesStoragePath) + ".bak";
+                    var backupName = MyFavoriteFileName + ".bak";
                     storageDirectory.FindFile(backupName)?.Delete();
                     storageFile.Rename(backupName);
                     MajDebug.LogInfo("Migrated favorites from legacy JSON to SQLite, old file backed up.");

@@ -75,8 +75,9 @@ namespace MajdataPlay.Tests.ChartStorageValidation
                 SongHashs = new[] { selectedHash },
                 IsPlayList = true
             }));
-            MajEnv.ChartPath = nativeChartRoot;
-            MajEnv.CachePath = CreateFixtureDirectory(path, "Cache");
+            var backend = new OpaqueFileSystem(nativeChartRoot);
+            MajEnv.ChartPath = backend.Root;
+            MajEnv.CachePath = FileSystem.Directory.Open(CreateFixtureDirectory(path, "Cache"));
             SongDetail.Probe = new ParseProbe();
             var beforeInitialization = SongStorage.Collections;
             SQLite.SQLiteAsyncConnection.QueryException = new IOException("Injected initialization favorites-query failure.");
@@ -96,13 +97,11 @@ namespace MajdataPlay.Tests.ChartStorageValidation
                 && SongStorage.TotalChartCount == 0 && SongDetail.Probe.StartedCount == 0,
                 "Initialization with existing charts and exported favorites must publish no collections or parsed charts.");
 
-            var backend = new OpaqueFileSystem(nativeChartRoot, useContentUris: true);
-            FileSystem.RegisterContentProvider(backend);
-            MajEnv.ChartPath = backend.Root.Location;
+            var initializationAccessCount = backend.AccessCount;
             backend.RejectAccess = true;
             var endpoint = new ApiEndpoint { Name = "First online endpoint" };
             var identity = Guid.NewGuid();
-            var marker = CreateFixtureDirectory(Path.Combine(MajEnv.CachePath, "Net", endpoint.Name), ".MajdataPlay");
+            var marker = CreateFixtureDirectory(Path.Combine(MajEnv.CachePath.Location, "Net", endpoint.Name), ".MajdataPlay");
             NativeFile.WriteAllText(Path.Combine(marker, "id"), identity.ToString());
             MajEnv.RuntimeConfig.List.SelectedDir = 100;
             MajEnv.RuntimeConfig.List.SelectedSongIndex = 0;
@@ -120,7 +119,7 @@ namespace MajdataPlay.Tests.ChartStorageValidation
                 && SongStorage.Collections.Single(collection => collection.Name == "MyFavorites").Single().Hash == selectedHash,
                 "A first online refresh must construct online base, aggregate and favorites without a local refresh.");
             Require(SongStorage.Collections.All(collection => collection.IsVirtual || collection.IsOnline)
-                && backend.AccessCount == 0 && SongDetail.Probe.StartedCount == 0,
+                && backend.AccessCount == initializationAccessCount && SongDetail.Probe.StartedCount == 0,
                 "A first online refresh must not enumerate the local root, parse a local chart or publish a local base collection.");
             Require(SongStorage.WorkingCollection.Id == identity && SongStorage.WorkingCollection.Current.Hash == selectedHash,
                 "The first source refresh must restore the saved collection GUID and chart hash instead of clamping to an empty-library cursor.");
@@ -138,9 +137,9 @@ namespace MajdataPlay.Tests.ChartStorageValidation
             }
             var published = SongStorage.Collections;
             await SongStorage.InitAsync();
-            Require(ReferenceEquals(SongStorage.Collections, published) && SongStorage.TotalChartCount == 2 && backend.AccessCount == 0,
+            Require(ReferenceEquals(SongStorage.Collections, published) && SongStorage.TotalChartCount == 2 && backend.AccessCount == initializationAccessCount,
                 "Repeated initialization must not refresh or replace a published library.");
-            MajEnv.ChartPath = nativeChartRoot;
+            MajEnv.ChartPath = FileSystem.Directory.Open(nativeChartRoot);
             Console.WriteLine("PASS online first: non-scanning initialization, no local I/O, online-only base/favorites and saved GUID/hash selection");
         }
 
@@ -176,8 +175,8 @@ namespace MajdataPlay.Tests.ChartStorageValidation
                 MajEnv.Settings.Online.Enable = false;
                 await SongStorage.RefreshOnline();
                 FileSystem.RegisterContentProvider(backend);
-                MajEnv.ChartPath = backend.Root.Location;
-                MajEnv.CachePath = CreateFixtureDirectory(path, "Cache");
+                MajEnv.ChartPath = backend.Root;
+                MajEnv.CachePath = FileSystem.Directory.Open(CreateFixtureDirectory(path, "Cache"));
                 MajEnv.ApiEndpoints = new[] { endpoint };
                 MajEnv.Settings.Online.Enable = true;
                 Online.ChartListHandler = (source, token) =>

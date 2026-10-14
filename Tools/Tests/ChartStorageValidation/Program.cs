@@ -144,15 +144,16 @@ namespace MajdataPlay.Tests.ChartStorageValidation
         /// <returns>A task which completes after all load/save assertions.</returns>
         private static async Task TestChartSettings(string rootPath)
         {
-            MajEnv.RootPath = Path.Combine(rootPath, "Settings");
-            NativeDirectory.CreateDirectory(MajEnv.RootPath);
-            var settingsPath = Path.Combine(MajEnv.RootPath, "ChartSetting.db");
+            var settingsDirectory = CreateFixtureDirectory(rootPath, "Settings");
+            var backend = new OpaqueFileSystem(settingsDirectory);
+            MajEnv.RootPath = backend.Root;
+            var settingsPath = Path.Combine(settingsDirectory, "ChartSetting.db");
             const string malformedJson = "{this is not an array or valid JSON}";
             NativeFile.WriteAllText(settingsPath, malformedJson);
             NativeFile.SetLastWriteTimeUtc(settingsPath, new DateTime(2020, 1, 2, 3, 4, 5, DateTimeKind.Utc));
             var originalWriteTime = NativeFile.GetLastWriteTimeUtc(settingsPath);
             await ChartSettingStorage.InitAsync();
-            var backups = NativeDirectory.GetFiles(MajEnv.RootPath, "ChartSetting.db.*.bak");
+            var backups = NativeDirectory.GetFiles(settingsDirectory, "ChartSetting.db.*.bak");
             Require(backups.Length == 1, "Malformed settings must be backed up beside the source file.");
             Require(NativeFile.ReadAllText(backups[0]) == malformedJson, "A malformed-settings backup must preserve the source content.");
             Require(NativeFile.GetLastWriteTimeUtc(backups[0]) == originalWriteTime, "A malformed-settings backup must preserve the source modification time.");
@@ -174,7 +175,7 @@ namespace MajdataPlay.Tests.ChartStorageValidation
             Require(replacementJson.Length < initialJson.Length, "The replacement fixture must exercise a shorter write.");
             Require(replacementSuccess && replacementError is null && replacementSettings is { Length: 1 }, "A shorter write must leave valid JSON without a stale suffix.");
             Require(replacementSettings![0].AudioOffset == 1f, "The replacement save must update the stored value.");
-            Require(NativeDirectory.GetFiles(MajEnv.RootPath, "ChartSetting.db.*.bak").Single() == backups[0], "Saving must preserve the earlier malformed-data backup.");
+            Require(NativeDirectory.GetFiles(settingsDirectory, "ChartSetting.db.*.bak").Single() == backups[0], "Saving must preserve the earlier malformed-data backup.");
             Console.WriteLine("PASS settings: sibling backup, missing-file creation and truncating replacement");
         }
 

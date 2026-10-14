@@ -52,7 +52,7 @@ namespace MajdataPlay.UI
             var isValid = false;
             foreach (var ext in MajEnv.SupportedVideoFormats)
             {
-                path = Path.Combine(MajEnv.AssetsPath, videoPath + ext);
+                path = Path.Combine(MajEnv.AssetsPath.Location, videoPath + ext);
 
                 if (FileSystem.File.Open(path).Exists)
                 {

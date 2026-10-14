@@ -1,6 +1,7 @@
 #nullable enable
 using MajdataPlay.IO;
 using MajdataPlay.Net;
+using MajdataPlay.IO.Storage;
 using System;
 using System.IO;
 using System.Net.Http;
@@ -38,11 +39,11 @@ namespace MajdataPlay
     internal static class MajEnv
     {
         /// <summary>Gets or sets the disposable chart root.</summary>
-        public static string ChartPath { get; set; } = string.Empty;
+        public static StorageDirectory ChartPath { get; set; } = null!;
         /// <summary>Gets or sets the disposable cache root.</summary>
-        public static string CachePath { get; set; } = string.Empty;
+        public static StorageDirectory CachePath { get; set; } = null!;
         /// <summary>Gets the unused native database path.</summary>
-        public static string FavoriteDBPath => Path.Combine(CachePath, "Favorites.db");
+        public static StorageFile FavoriteDBPath => new StorageFile(CachePath.FileSystem, Path.Combine(CachePath.Location, "Favorites.db"));
         /// <summary>Gets the supported track extensions.</summary>
         public static string[] SupportedAudioFormats { get; } = new string[] { ".mp3", ".opus", ".ogg", ".aac", ".wav" };
         /// <summary>Gets the supported video extensions.</summary>

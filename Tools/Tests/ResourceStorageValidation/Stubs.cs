@@ -2,6 +2,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using MajdataPlay.IO.Storage;
 
 namespace MajdataPlay
 {
@@ -9,16 +10,16 @@ namespace MajdataPlay
     internal static class MajEnv
     {
         /// <summary>Gets or sets the fixture's application root.</summary>
-        public static string RootPath { get; set; } = string.Empty;
+        public static StorageDirectory RootPath { get; set; } = FileSystem.Directory.Open(".");
 
         /// <summary>Gets the fixture's extracted resource root.</summary>
-        public static string AssetsPath => Path.Combine(RootPath, "Assets");
+        public static StorageDirectory AssetsPath => FileSystem.Directory.Open(Path.Combine(RootPath.Location, "Assets"));
 
         /// <summary>Gets the fixture's player-managed chart root.</summary>
-        public static string ChartPath => Path.Combine(RootPath, "MaiCharts");
+        public static StorageDirectory ChartPath => FileSystem.Directory.Open(Path.Combine(RootPath.Location, "MaiCharts"));
 
         /// <summary>Gets the fixture's player-managed skin root.</summary>
-        public static string SkinPath => Path.Combine(RootPath, "Skins");
+        public static StorageDirectory SkinPath => FileSystem.Directory.Open(Path.Combine(RootPath.Location, "Skins"));
     }
 
     /// <summary>Provides controlled validated manifests without substituting any storage behavior.</summary>

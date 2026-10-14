@@ -19,8 +19,8 @@ namespace MajdataPlay
         /// <exception cref="IOException">A managed root cannot be enumerated or prepared.</exception>
         public static void RestoreManagedAssetsIfMissing()
         {
-            var chartRootMissing = !FileSystem.Directory.Open(MajEnv.ChartPath).EnumerateEntries().Any();
-            var skinRootMissing = !FileSystem.Directory.Open(MajEnv.SkinPath).EnumerateEntries().Any();
+            var chartRootMissing = !MajEnv.ChartPath.EnumerateEntries().Any();
+            var skinRootMissing = !MajEnv.SkinPath.EnumerateEntries().Any();
             if (!chartRootMissing && !skinRootMissing)
             {
                 return;
@@ -50,10 +50,10 @@ namespace MajdataPlay
         /// <exception cref="IOException">A destination directory cannot be prepared.</exception>
         private static void RestoreGroup(
             string sourcePrefix,
-            string destinationRoot,
+            StorageDirectory destinationRoot,
             IReadOnlyDictionary<string, string> v2Hashes)
         {
-            FileSystem.Directory.Create(destinationRoot);
+            FileSystem.Directory.Create(destinationRoot.Location);
             foreach (var relativePath in v2Hashes.Keys
                          .Where(path => path.StartsWith(sourcePrefix, StringComparison.OrdinalIgnoreCase))
                          .OrderBy(path => path, StringComparer.Ordinal))
@@ -62,7 +62,7 @@ namespace MajdataPlay
                     Application.streamingAssetsPath,
                     relativePath.Replace('/', Path.DirectorySeparatorChar));
                 var destinationPath = Path.Combine(
-                    destinationRoot,
+                    destinationRoot.Location,
                     relativePath.Substring(sourcePrefix.Length)
                                 .Replace('/', Path.DirectorySeparatorChar));
                 var destinationDirectory = Path.GetDirectoryName(destinationPath);

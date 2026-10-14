@@ -1,4 +1,5 @@
 #nullable enable
+using MajdataPlay.IO.Storage;
 using MajdataPlay.Platform.Android.Runtime.Bindings.Android.Content;
 using System;
 using System.Collections.Generic;
@@ -65,10 +66,10 @@ namespace MajdataPlay
     internal static class MajEnv
     {
         /// <summary>Gets or sets the case-owned chart root that plays the role of <c>MaiCharts</c>.</summary>
-        public static string ChartPath { get; set; } = string.Empty;
+        public static StorageDirectory ChartPath { get; set; } = null!;
 
         /// <summary>Gets or sets the case-owned extraction root.</summary>
-        public static string TempPath { get; set; } = string.Empty;
+        public static StorageDirectory TempPath { get; set; } = null!;
     }
 
     /// <summary>Supplies the scene identifiers compared by the production importer.</summary>

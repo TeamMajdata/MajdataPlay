@@ -1,4 +1,5 @@
 #nullable enable
+using MajdataPlay.IO.Storage;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -74,13 +75,13 @@ namespace MajdataPlay
     internal static class MajEnv
     {
         /// <summary>Gets or sets the case-owned settings directory.</summary>
-        public static string RootPath { get; set; } = string.Empty;
+        public static StorageDirectory RootPath { get; set; } = null!;
         /// <summary>Gets or sets the chart root consumed by production root scans.</summary>
-        public static string ChartPath { get; set; } = string.Empty;
+        public static StorageDirectory ChartPath { get; set; } = null!;
         /// <summary>Gets or sets the ignored cache root.</summary>
-        public static string CachePath { get; set; } = string.Empty;
+        public static StorageDirectory CachePath { get; set; } = null!;
         /// <summary>Gets the unused SQLite stub location.</summary>
-        public static string FavoriteDBPath => Path.Combine(CachePath, "Favorites.db");
+        public static StorageFile FavoriteDBPath => new StorageFile(CachePath.FileSystem, Path.Combine(CachePath.Location, "Favorites.db"));
         /// <summary>Gets the supported audio extensions used by the scanner.</summary>
         public static string[] SupportedAudioFormats { get; } = new[] { ".opus", ".mp3", ".ogg", ".aac", ".wav" };
         /// <summary>Gets the supported video extensions used by storage initialization.</summary>

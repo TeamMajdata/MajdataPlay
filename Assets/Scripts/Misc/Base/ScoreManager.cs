@@ -49,8 +49,8 @@ namespace MajdataPlay
             try
             {
                 var dbPath = MajEnv.ScoreDBPath;
-                var isDbExists = FileSystem.File.Open(dbPath).Exists;
-                _db = new SQLiteAsyncConnection(dbPath, SQLiteOpenFlags.ReadWrite | SQLiteOpenFlags.Create | SQLiteOpenFlags.FullMutex);
+                var isDbExists = dbPath.Exists;
+                _db = new SQLiteAsyncConnection(dbPath.Location, SQLiteOpenFlags.ReadWrite | SQLiteOpenFlags.Create | SQLiteOpenFlags.FullMutex);
                 GameManager.OnAppQuit += OnAppQuit;
                 await _db.CreateTableAsync<MajScoreDB>();
                 await _db.CreateTableAsync<JudgeInfoRecordDB>();
@@ -58,14 +58,14 @@ namespace MajdataPlay
                 {
                     // Migrate from legacy JSON file
                     var legacyPath = MajEnv.LegacyScoreDBPath;
-                    if (FileSystem.File.Open(legacyPath).Exists)
+                    if (legacyPath.Exists)
                     {
                         var migrated = await MigrateFromJsonAsync(legacyPath);
                         if (migrated)
                         {
                             try
                             {
-                                FileSystem.File.Open(legacyPath).Delete();
+                                legacyPath.Delete();
                                 MajDebug.LogInfo("Migrated scores from legacy JSON to SQLite, old file deleted.");
                             }
                             catch (Exception ex)
@@ -289,11 +289,14 @@ namespace MajdataPlay
                     PlayCount = 0,
                 };
         }
-        static async Task<bool> MigrateFromJsonAsync(string legacyPath)
+        /// <summary>Imports legacy JSON scores into the SQLite database.</summary>
+        /// <param name="legacyPath">The existing legacy score file to read.</param>
+        /// <returns>Whether every legacy score was imported successfully.</returns>
+        static async Task<bool> MigrateFromJsonAsync(StorageFile legacyPath)
         {
             try
             {
-                var json = await FileSystem.File.Open(legacyPath).ReadAllTextAsync();
+                var json = await legacyPath.ReadAllTextAsync();
                 // Fix legacy typo: "JudgeDeatil" → "JudgeDetail"
                 json = json.Replace("\"JudgeDeatil\"", "\"JudgeDetail\"");
                 var scores = JsonConvert.DeserializeObject<List<MaiScore>>(json, _jsonReadSettings);

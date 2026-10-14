@@ -278,9 +278,8 @@ namespace MajdataPlay.Tests
             }
             Debug.Log("SONG_STORAGE_SHARED_SCANNER_PASSED: 41 concurrent collections, 120 real charts, invalid candidates skipped, exact shared counters.");
 
-            MajEnv.ChartPath = rootPath;
-            MajEnv.CachePath = Path.Combine(fixtures, "Cache");
-            Directory.CreateDirectory(MajEnv.CachePath);
+            MajEnv.ChartPath = FileSystem.Directory.Open(rootPath);
+            MajEnv.CachePath = FileSystem.Directory.Create(Path.Combine(fixtures, "Cache"));
             MajEnv.Settings.Online.Enable = false;
             var beforeInitialization = SongStorage.Collections;
             var countBeforeInitialization = SongStorage.TotalChartCount;

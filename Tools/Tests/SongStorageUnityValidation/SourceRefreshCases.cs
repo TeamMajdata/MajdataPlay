@@ -25,7 +25,7 @@ namespace MajdataPlay.Tests
             var originalEndpoints = MajEnv.ApiEndpoints;
             var endpoint = new ApiEndpoint { Name = "Independent offline endpoint" };
             var metadata = CreateRemoteMetadata(35001);
-            var playlistPath = Path.Combine(nativeChartRoot, "CachedRemotePlaylist.json");
+            var playlistPath = Path.Combine(nativeChartRoot.Location, "CachedRemotePlaylist.json");
             var playlistName = "Cached remote-only local playlist";
             File.WriteAllText(playlistPath, Serializer.Json.Serialize(new DanInfo
             {
@@ -49,7 +49,7 @@ namespace MajdataPlay.Tests
                 var selectedId = selectedLocal.Id;
                 var selectedHash = selectedLocal[1].Hash;
                 File.Delete(playlistPath);
-                MajEnv.ChartPath = inaccessibleRoot.Root.Location;
+                MajEnv.ChartPath = inaccessibleRoot.Root;
                 MajEnv.ApiEndpoints = new[] { endpoint };
                 MajEnv.Settings.Online.Enable = true;
                 Online.SupplyChartList(endpoint, new[] { metadata });
@@ -86,7 +86,7 @@ namespace MajdataPlay.Tests
 
                 localCollections = SongStorage.Collections.Where(collection => !collection.IsVirtual && !collection.IsOnline).ToArray();
                 File.Delete(playlistPath);
-                MajEnv.ChartPath = inaccessibleRoot.Root.Location;
+                MajEnv.ChartPath = inaccessibleRoot.Root;
                 await SongStorage.RefreshOnline().ConfigureAwait(false);
                 Require(SongStorage.Collections.All(collection => !collection.IsOnline) && SongStorage.TotalChartCount == localCount
                     && localCollections.All(collection => ReferenceEquals(SongStorage.Collections.Single(current => current.Id == collection.Id), collection))

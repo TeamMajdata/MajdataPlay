@@ -168,7 +168,7 @@ namespace MajdataPlay.Recording
                             {
                                 MajDebug.LogInfo("[OBS] Moving video to game dir");
                                 var timestamp = $"{DateTime.Now:yyyy-MM-dd_HH_mm_ss}";
-                                var outputPath = Path.Combine(MajEnv.RecordOutputsPath, $"{_name}_{timestamp}.mp4");
+                                var outputPath = Path.Combine(MajEnv.RecordOutputsPath.Location, $"{_name}_{timestamp}.mp4");
                                 FileSystem.File.Move(_obsOutPath, outputPath);
                             }
 
