@@ -16,7 +16,7 @@ namespace MajdataPlay.Platform.Android.Editor
     /// </summary>
     /// <remarks>
     /// Creating a request only discovers files and builds an immutable execution plan. The controller
-    /// builds the CLI and invokes its assembly directly, then publishes this request's staged output.
+    /// builds the CLI and invokes project mode to generate, compile, and publish the runtime library.
     /// Every supported Unity source is included; missing source dependencies must be supplied as real
     /// Java metadata rather than omitting sources or inventing declarations.
     /// </remarks>
@@ -37,18 +37,36 @@ namespace MajdataPlay.Platform.Android.Editor
         /// </summary>
         internal string WorkingDirectory { get; }
 
+        /// <summary>Gets the absolute Unity project root passed to the independent project pipeline.</summary>
+        internal string ProjectRoot { get; }
+
+        /// <summary>Gets the selected Unity Editor Data or macOS Contents directory.</summary>
+        internal string UnityContentsPath { get; }
+
+        /// <summary>Gets the Android SDK selected by the Editor's External Tools settings.</summary>
+        internal string SdkDirectory { get; }
+
         /// <summary>
         /// Gets the unique tool-local output directory owned by this refresh invocation.
         /// </summary>
         internal string StagingDirectory { get; }
 
         /// <summary>
-        /// Gets the Unity asset directory where the controller publishes generated wrappers.
+        /// Gets the independent library's source directory containing generated bindings and handwritten extensions.
         /// </summary>
         internal string OutputDirectory { get; }
 
-        /// <summary>Gets the former generated asset directory whose ownership may migrate into Runtime.</summary>
+        /// <summary>Gets the former generated asset directory whose owned sources must be retired after DLL publication.</summary>
         internal string PreviousOutputDirectory { get; }
+
+        /// <summary>Gets the former Unity runtime source directory retired after successful DLL publication.</summary>
+        internal string PreviousRuntimeDirectory { get; }
+
+        /// <summary>Gets the Unity plugin directory receiving the compiled runtime library.</summary>
+        internal string RuntimeAssemblyDirectory { get; }
+
+        /// <summary>Gets the compiled runtime library published for Android and the Unity Editor.</summary>
+        internal string RuntimeAssemblyPath { get; }
 
         /// <summary>
         /// Gets the persistent tool-local cache shared by official documentation requests.
@@ -96,19 +114,26 @@ namespace MajdataPlay.Platform.Android.Editor
         /// </summary>
         /// <param name="projectRoot">The absolute Unity project root.</param>
         /// <param name="toolDirectory">The independent CLI directory containing its SDK pin.</param>
+        /// <param name="unityContentsPath">The selected Unity Editor's Data or macOS Contents directory.</param>
         /// <param name="sdkDirectory">The Android SDK selected by the Editor's settings.</param>
         /// <param name="inputs">The discovered source and bytecode files.</param>
         /// <param name="warnings">The dependency discovery notices to report before execution.</param>
         /// <param name="offlineDocumentation">Whether to prohibit documentation network requests.</param>
-        private JavaWrapperGenerationRequest(string projectRoot, string toolDirectory, string sdkDirectory,
+        private JavaWrapperGenerationRequest(string projectRoot, string toolDirectory, string unityContentsPath, string sdkDirectory,
             IReadOnlyList<string> inputs, IReadOnlyList<string> warnings, bool offlineDocumentation)
         {
             WorkingDirectory = toolDirectory;
+            ProjectRoot = projectRoot;
+            UnityContentsPath = unityContentsPath;
+            SdkDirectory = sdkDirectory;
             ProjectPath = Path.Combine(toolDirectory, "AndroidJavaWrapperGenerator.csproj");
             AssemblyPath = Path.Combine(toolDirectory, "bin", "Release", "net9.0", "AndroidJavaWrapperGenerator.dll");
             StagingDirectory = Path.Combine(toolDirectory, ".work", "editor-output", Guid.NewGuid().ToString("N"));
-            OutputDirectory = Path.Combine(projectRoot, "Assets", "Plugins", "MajdataPlay", "Platform", "Android", "Runtime");
-            PreviousOutputDirectory = Path.Combine(projectRoot, "Assets", "Plugins", "MajdataPlay", "Platform", "Android", "Generated");
+            OutputDirectory = Path.Combine(projectRoot, "Tools", "AndroidJavaWrapper", "src");
+            RuntimeAssemblyDirectory = Path.Combine(projectRoot, "Assets", "Plugins", "MajdataPlay", "Platform", "Android");
+            RuntimeAssemblyPath = Path.Combine(RuntimeAssemblyDirectory, "MajdataPlay.Platform.Android.Runtime.dll");
+            PreviousOutputDirectory = Path.Combine(RuntimeAssemblyDirectory, "Generated");
+            PreviousRuntimeDirectory = Path.Combine(RuntimeAssemblyDirectory, "Runtime");
             DocumentationCacheDirectory = Path.Combine(toolDirectory, ".work", "editor-docs");
             RootNamespace = "MajdataPlay.Platform.Android.Runtime";
             OfflineDocumentation = offlineDocumentation;
@@ -116,7 +141,7 @@ namespace MajdataPlay.Platform.Android.Editor
             Warnings = warnings;
             BuildArguments = "build " + QuoteArgument(ProjectPath)
                 + " --configuration Release --nologo --disable-build-servers";
-            Arguments = CreateGeneratorArguments(sdkDirectory);
+            Arguments = CreateGeneratorArguments();
         }
 
         /// <summary>
@@ -182,7 +207,7 @@ namespace MajdataPlay.Platform.Android.Editor
             var warnings = new List<string>();
             DiscoverUnityDependencies(root, androidPlayer, inputs, warnings);
             inputs.Sort(StringComparer.Ordinal);
-            return new JavaWrapperGenerationRequest(root, toolDirectory, sdk, inputs.AsReadOnly(), warnings.AsReadOnly(), offlineDocumentation);
+            return new JavaWrapperGenerationRequest(root, toolDirectory, unityContents, sdk, inputs.AsReadOnly(), warnings.AsReadOnly(), offlineDocumentation);
         }
 
         /// <summary>
@@ -781,21 +806,20 @@ namespace MajdataPlay.Platform.Android.Editor
             }
         }
         /// <summary>
-        /// Builds direct CLI assembly arguments with full SDK defaults and bounded parallel work.
+        /// Builds project-mode CLI assembly arguments with full SDK defaults and bounded parallel work.
         /// </summary>
-        /// <param name="sdkDirectory">The validated SDK selected by the Editor.</param>
-        /// <returns>The complete process argument string for generation into this request's stage.</returns>
-        private string CreateGeneratorArguments(string sdkDirectory)
+        /// <returns>The complete process argument string for generation, compilation, and DLL publication.</returns>
+        private string CreateGeneratorArguments()
         {
             var jobs = Math.Min(1024, Math.Max(1, Environment.ProcessorCount));
             var builder = new StringBuilder();
             builder.Append(QuoteArgument(AssemblyPath));
+            builder.Append(" --project ");
+            builder.Append(QuoteArgument(ProjectRoot));
+            builder.Append(" --unity-data ");
+            builder.Append(QuoteArgument(UnityContentsPath));
             builder.Append(" --sdk ");
-            builder.Append(QuoteArgument(sdkDirectory));
-            builder.Append(" --namespace ");
-            builder.Append(QuoteArgument(RootNamespace));
-            builder.Append(" --output ");
-            builder.Append(QuoteArgument(StagingDirectory));
+            builder.Append(QuoteArgument(SdkDirectory));
             builder.Append(" --docs-cache ");
             builder.Append(QuoteArgument(DocumentationCacheDirectory));
             builder.Append(" --jobs ");
@@ -804,12 +828,6 @@ namespace MajdataPlay.Platform.Android.Editor
             if (OfflineDocumentation)
             {
                 builder.Append(" --offline-docs");
-            }
-
-            foreach (var input in Inputs)
-            {
-                builder.Append(" --input ");
-                builder.Append(QuoteArgument(input));
             }
 
             return builder.ToString();

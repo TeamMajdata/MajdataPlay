@@ -39,11 +39,13 @@ namespace MajdataPlay.Platform.Android.Editor
         /// <param name="stagingDirectory">The separate CLI output directory containing sources and its manifest.</param>
         /// <param name="outputDirectory">The Unity asset directory receiving only manifest-owned C# sources.</param>
         /// <param name="previousOutputDirectory">An optional separate former output directory whose owned assets migrate when the new directory has no manifest.</param>
+        /// <param name="validateOnly">Whether to validate the complete publication without changing any output files.</param>
         /// <returns>The number of generated C# files listed by the staging manifest, including unchanged files.</returns>
         /// <exception cref="ArgumentException">A directory argument is empty or cannot be resolved.</exception>
         /// <exception cref="IOException">A manifest, source, destination, ownership record, or path is invalid, or publication fails.</exception>
         /// <exception cref="UnauthorizedAccessException">A source or destination is inaccessible.</exception>
-        internal static int Publish(string stagingDirectory, string outputDirectory, string? previousOutputDirectory = null)
+        internal static int Publish(string stagingDirectory, string outputDirectory, string? previousOutputDirectory = null,
+            bool validateOnly = false)
         {
             var stagingRoot = ResolveDirectory(stagingDirectory);
             var outputRoot = ResolveDirectory(outputDirectory);
@@ -239,6 +241,11 @@ namespace MajdataPlay.Platform.Android.Editor
             {
                 VerifyWritableFile(outputManifestPath);
                 writes.Add(new KeyValuePair<string, byte[]>(outputManifestPath, manifestBytes));
+            }
+
+            if (validateOnly)
+            {
+                return generatedFiles.Count;
             }
 
             // Manifest publication is last, after every planned source write, asset move, and stale-file removal.

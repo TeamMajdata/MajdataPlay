@@ -430,7 +430,8 @@ namespace MajdataPlay.Tests.AndroidJavaWrapperGeneratorValidation
             var staging = ReadRefreshProperty<string>(offline, "StagingDirectory");
             var stageParent = Path.GetDirectoryName(staging);
             Require(stageParent == Path.Combine(project.ToolDirectory, ".work", "editor-output") && staging != ReadRefreshProperty<string>(online, "StagingDirectory"), "Each request owns a unique direct child of the ignored editor-output directory");
-            Require(ReadRefreshProperty<string>(offline, "OutputDirectory") == Path.Combine(project.ProjectRoot, "Assets", "Plugins", "MajdataPlay", "Platform", "Android", "Runtime"), "Final publication targets the Runtime assets directory matching the configured root namespace");
+            Require(ReadRefreshProperty<string>(offline, "OutputDirectory") == Path.Combine(project.ProjectRoot, "Tools", "AndroidJavaWrapper", "src"), "Source output targets the independent Tools wrapper project");
+            Require(ReadRefreshProperty<string>(offline, "RuntimeAssemblyPath") == Path.Combine(project.ProjectRoot, "Assets", "Plugins", "MajdataPlay", "Platform", "Android", "MajdataPlay.Platform.Android.Runtime.dll"), "Runtime publication targets the requested Unity plugin DLL");
             Require(!Directory.Exists(staging) && !Directory.Exists(ReadRefreshProperty<string>(offline, "OutputDirectory")), "Request capture does not generate Unity Assets output");
             foreach (var extension in new[] { ".java", ".class", ".jar", ".aar", ".JAVA", ".CLASS", ".JAR", ".AAR" })
             {
@@ -462,14 +463,18 @@ namespace MajdataPlay.Tests.AndroidJavaWrapperGeneratorValidation
             {
                 var arguments = EchoRefreshArguments(requestType, probePath, ReadRefreshProperty<string>(request, "Arguments"));
                 Require(arguments.Length > 1 && arguments[0] == ReadRefreshProperty<string>(request, "AssemblyPath"), "Generation directly invokes the DLL with correctly parsed whitespace paths");
-                var parsed = MajdataPlay.Tools.AndroidJavaWrapperGenerator.CliOptions.Parse(arguments.Skip(1).ToArray())!;
-                Require(parsed.SdkDirectory == project.SdkRoot && parsed.OutputDirectory == ReadRefreshProperty<string>(request, "StagingDirectory")
-                    && parsed.DocumentationCache == ReadRefreshProperty<string>(request, "DocumentationCacheDirectory"), "Actual CLI parsing preserves SDK, stage, and persistent cache paths");
-                Require(parsed.RootNamespace == ReadRefreshProperty<string>(request, "RootNamespace") && parsed.Inputs.SequenceEqual(actualInputs), "Actual CLI parsing retains the request namespace and every ordered Java input");
-                Require(parsed.Documentation == (ReadRefreshProperty<bool>(request, "OfflineDocumentation")
-                    ? MajdataPlay.Tools.AndroidJavaWrapperGenerator.DocumentationMode.Offline : MajdataPlay.Tools.AndroidJavaWrapperGenerator.DocumentationMode.Online), "CLI documentation mode agrees with the actual Editor request");
-                Require(!parsed.NoSdk && parsed.ApiLevel == null && parsed.IncludePackages.Count == 0
-                    && parsed.Jobs >= 1 && parsed.Jobs <= 1024 && parsed.DocumentationJobs >= 1 && parsed.DocumentationJobs <= 32, "Default requests keep the complete SDK/BCL and bounded worker counts");
+                Require(arguments[1] == "--project" && arguments[2] == project.ProjectRoot
+                    && arguments[Array.IndexOf(arguments, "--unity-data") + 1] == project.UnityData
+                    && arguments[Array.IndexOf(arguments, "--sdk") + 1] == project.SdkRoot
+                    && arguments[Array.IndexOf(arguments, "--docs-cache") + 1] == ReadRefreshProperty<string>(request, "DocumentationCacheDirectory"), "Real project pipeline argument parsing preserves project, pinned Unity, SDK, and persistent cache paths");
+                Require(!arguments.Contains("--output", StringComparer.Ordinal) && !arguments.Contains("--namespace", StringComparer.Ordinal)
+                    && !arguments.Contains("--input", StringComparer.Ordinal), "The Editor invokes the shared project pipeline that owns generation, compilation, and DLL publication");
+                Require(arguments.Contains("--offline-docs", StringComparer.Ordinal) == ReadRefreshProperty<bool>(request, "OfflineDocumentation"), "Project pipeline documentation mode agrees with the captured Editor request");
+                var jobs = int.Parse(arguments[Array.IndexOf(arguments, "--jobs") + 1]);
+                var documentationJobs = int.Parse(arguments[Array.IndexOf(arguments, "--docs-jobs") + 1]);
+                Require(!arguments.Contains("--no-sdk", StringComparer.Ordinal) && !arguments.Contains("--api-level", StringComparer.Ordinal)
+                    && !arguments.Contains("--include-package", StringComparer.Ordinal)
+                    && jobs >= 1 && jobs <= 1024 && documentationJobs >= 1 && documentationJobs <= 32, "Default project requests retain complete SDK/BCL coverage and bounded worker counts");
             }
             Expect<ArgumentNullException>(() =>
             {

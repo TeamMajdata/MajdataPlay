@@ -121,3 +121,22 @@ out.log
 /Tools/Tests/AndroidJavaWrapperGeneratorValidation/bin/
 /Tools/Tests/AndroidJavaWrapperGeneratorValidation/obj/
 /Tools/Tests/AndroidJavaWrapperGeneratorValidation/.work/
+
+# Generated Java bindings compile in an independent project before Unity imports its DLL.
+!/Tools/AndroidJavaWrapper/AndroidJavaWrapper.csproj
+/Tools/AndroidJavaWrapper/bin/
+/Tools/AndroidJavaWrapper/obj/
+/Tools/AndroidJavaWrapper/.work/
+/Tools/AndroidJavaWrapper/AndroidJavaWrapper.local.props
+/Tools/AndroidJavaWrapper/src/**/*.g.cs
+/Tools/AndroidJavaWrapper/src/AndroidJni.cs
+/Tools/AndroidJavaWrapper/src/IJavaObject.cs
+/Tools/AndroidJavaWrapper/src/JavaInvocationException.cs
+/Tools/AndroidJavaWrapper/src/JavaObjectReference.cs
+/Tools/AndroidJavaWrapper/src/java-wrappers.manifest.json
+/Tools/AndroidJavaWrapper/src/**/*.meta
+!/Tools/AndroidJavaWrapper/src/**/*.e.cs.meta
+/Tools/CSharp/AndroidJavaWrapperGenerator/.work/
+/Assets/Plugins/MajdataPlay/Platform/Android/MajdataPlay.Platform.Android.Runtime.dll
+/Assets/Plugins/MajdataPlay/Platform/Android/MajdataPlay.Platform.Android.Runtime.xml
+/Assets/Plugins/MajdataPlay/Platform/Android/MajdataPlay.Platform.Android.Runtime.xml.meta

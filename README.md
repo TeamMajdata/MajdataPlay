@@ -100,31 +100,35 @@ Install this version using Unity Hub.
 
 ### Generate the Android Java Bindings
 
-The storage backend uses locally generated C# bindings during Unity script compilation.
+The storage backend uses a locally compiled Android Java wrapper DLL.
 Generate them with the independent CLI before the first Unity import:
 
 ```powershell
-dotnet run --project Tools/CSharp/AndroidJavaWrapperGenerator/AndroidJavaWrapperGenerator.csproj -- --project . --unity-data "C:/Program Files/Unity Editors/6000.3.17f1/Editor/Data" --no-docs
+Push-Location Tools/CSharp/AndroidJavaWrapperGenerator
+dotnet run --project AndroidJavaWrapperGenerator.csproj -- --project ../../.. --unity-data "C:/Program Files/Unity Editors/6000.3.17f1/Editor/Data" --no-docs
+Pop-Location
 ```
 
-This builds only the explicitly provided independent tool under
-`Tools/CSharp/AndroidJavaWrapperGenerator/`, not a Unity-generated project.
+This builds the independent generator and `Tools/AndroidJavaWrapper` library;
+Unity-generated projects are built only by Unity.
 Pass another `--unity-data` directory for a different installation and `--sdk`
 for a separately configured Android SDK. Fresh checkouts and CI need the same
-binding generation step. Generated runtime helpers and bindings remain local,
-while handwritten partial extensions are tracked under `Runtime/Bindings`.
+binding generation step. Sources are generated into `Tools/AndroidJavaWrapper/src`,
+alongside tracked `.e.cs` partial extensions. The standalone project compiles
+`MajdataPlay.Platform.Android.Runtime.dll` and installs it into
+`Assets/Plugins/MajdataPlay/Platform/Android` only after successful compilation.
 The project no longer requires the legacy Roslyn analyzer.
 
 The Editor command **Tools > MajdataPlay > Android > Regenerate Java wrappers**
 uses the independent `Tools/CSharp/AndroidJavaWrapperGenerator` CLI to generate
 the complete SDK/BCL plus Java inputs from `Assets/Plugins/Android` and the current
 Unity Android player. It runs in the background with official documentation and
-publishes JNI support into `Platform/Android/Runtime` and Java bindings into
-`Runtime/Bindings`, matching `MajdataPlay.Platform.Android.Runtime` and its
-`Bindings` namespace.
+compiles and installs the wrapper DLL. Helpers use
+`MajdataPlay.Platform.Android.Runtime`; bindings use its `Bindings` namespace.
 Automatic Java asset refreshes reuse cached pages and fetch missing documentation. See
 `Assets/Plugins/MajdataPlay/Platform/Android/README.md` for output ownership,
-cancellation, setup, and the existing annotated wrappers.
+cancellation and setup. See `Tools/AndroidJavaWrapper/README.md` for partial
+extensions and rebuilding the DLL without regenerating Java bindings.
 
 ### Open the Project in Unity Hub
 

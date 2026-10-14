@@ -38,6 +38,7 @@ namespace MajdataPlay.Tests.AndroidJavaWrapperGeneratorValidation
                     VerifyUnityArchives(settings, workspace);
                     VerifyEditorOutput(workspace);
                     VerifyEditorRefresh(settings, workspace);
+                    VerifyStandaloneWrapperBuild(settings, workspace);
                     VerifySourceNamespaces(settings, workspace);
                     VerifyCliLayoutMigration(workspace);
                     if (settings.EditorInputsOnly)

@@ -54,7 +54,6 @@ namespace MajdataPlay.Tests.AndroidJavaWrapperGeneratorValidation
             VerifyNamespaceLayout(generated, options.RootNamespace);
             CompileGenerated(settings, generated, false, false);
             CompileGenerated(settings, generated, true, false);
-            VerifyMigratedConsumers(settings, projectRoot, api, generated);
             options.Jobs = 1;
             var serialApi = JavaApiScanner.Scan(options, CancellationToken.None);
             var serial = Generate(serialApi, options);
@@ -63,7 +62,8 @@ namespace MajdataPlay.Tests.AndroidJavaWrapperGeneratorValidation
             GeneratedOutput.Write(options, api.PlatformJar, generated, CancellationToken.None);
             var publishDirectory = Path.Combine(workspace, "editor-published");
             Require(JavaWrapperOutput.Publish(options.OutputDirectory, publishDirectory) == generated.Count, "Actual complete CLI output publishes through the Editor ownership bridge");
-            VerifyProjectModeBootstrap(settings, workspace, projectRoot, generated);
+            var libraryBytes = VerifyProjectModeBootstrap(settings, workspace, projectRoot, generated);
+            VerifyMigratedConsumers(settings, projectRoot, api, libraryBytes);
             Console.WriteLine("Editor input compilation/publication passed: " + generated.Count + " C# files from " + request.Inputs.Count + " additional inputs.");
         }
     }

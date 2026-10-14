@@ -135,16 +135,33 @@ if (-not $SkipBuild) {
         }
     }
     if (Test-Path -LiteralPath $runtimeDestination) { Remove-Item -LiteralPath $runtimeDestination -Recurse -Force }
-    New-Item -ItemType Directory -Path $runtimeDestination -Force | Out-Null
-    Copy-Item -LiteralPath (Join-Path $androidSource 'Runtime.meta') -Destination $androidDestination -Force
-    $productionRuntime = Join-Path $androidSource 'Runtime'
-    foreach ($extension in Get-ChildItem -LiteralPath (Join-Path $productionRuntime 'Bindings') -Recurse -File -Filter '*.cs') {
-        if ($extension.Name.EndsWith('.g.cs', [StringComparison]::Ordinal)) { continue }
-        $relative = $extension.FullName.Substring($productionRuntime.Length + 1)
-        $destination = Join-Path $runtimeDestination $relative
+    if (Test-Path -LiteralPath ($runtimeDestination + '.meta') -PathType Leaf) {
+        Remove-Item -LiteralPath ($runtimeDestination + '.meta') -Force
+    }
+    $wrapperProject = Join-Path $project 'Tools/AndroidJavaWrapper'
+    $wrapperSources = [IO.Path]::GetFullPath((Join-Path $wrapperProject 'src'))
+    if (-not $wrapperSources.StartsWith($isolatedPrefix, [StringComparison]::OrdinalIgnoreCase)) {
+        throw 'The wrapper sources must remain inside the isolated FFmpeg project.'
+    }
+    for ($ancestor = $wrapperSources; $ancestor -and ($ancestor.StartsWith($isolatedPrefix, [StringComparison]::OrdinalIgnoreCase) -or $ancestor -eq [IO.Path]::GetFullPath($project)); $ancestor = Split-Path -Parent $ancestor) {
+        if (Test-Path -LiteralPath $ancestor) {
+            $item = Get-Item -LiteralPath $ancestor -Force
+            if (-not $item.PSIsContainer -or ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+                throw "Refusing wrapper source replacement through a file or reparse point: $ancestor"
+            }
+        }
+    }
+    if (Test-Path -LiteralPath $wrapperSources) { Remove-Item -LiteralPath $wrapperSources -Recurse -Force }
+    New-Item -ItemType Directory -Path $wrapperSources -Force | Out-Null
+    $productionSources = Join-Path $repo 'Tools/AndroidJavaWrapper/src'
+    foreach ($extension in Get-ChildItem -LiteralPath $productionSources -Recurse -File -Filter '*.e.cs') {
+        $relative = $extension.FullName.Substring($productionSources.Length + 1)
+        $destination = Join-Path $wrapperSources $relative
         New-Item -ItemType Directory -Path (Split-Path -Parent $destination) -Force | Out-Null
         Copy-Item -LiteralPath $extension.FullName -Destination $destination -Force
-        Copy-Item -LiteralPath ($extension.FullName + '.meta') -Destination ($destination + '.meta') -Force
+    }
+    foreach ($name in @('AndroidJavaWrapper.csproj', 'global.json')) {
+        Copy-Item -LiteralPath (Join-Path $repo "Tools/AndroidJavaWrapper/$name") -Destination $wrapperProject -Force
     }
     $cliDirectory = Join-Path $repo 'Tools/CSharp/AndroidJavaWrapperGenerator'
     Push-Location -LiteralPath $cliDirectory
@@ -154,7 +171,14 @@ if (-not $SkipBuild) {
     } finally {
         Pop-Location
     }
-    $androidPlayer = Join-Path (Split-Path -Parent $UnityEditor) 'Data/PlaybackEngines/AndroidPlayer'
+    $isolatedCli = Join-Path $project 'Tools/CSharp/AndroidJavaWrapperGenerator'
+    New-Item -ItemType Directory -Path $isolatedCli -Force | Out-Null
+    foreach ($name in @('AndroidJavaWrapperGenerator.csproj', 'global.json')) {
+        Copy-Item -LiteralPath (Join-Path $cliDirectory $name) -Destination $isolatedCli -Force
+    }
+    Copy-Item -LiteralPath (Join-Path $repo 'ProjectSettings/ProjectVersion.txt') -Destination (Join-Path $project 'ProjectSettings/ProjectVersion.txt') -Force
+    $editorData = Join-Path (Split-Path -Parent $UnityEditor) 'Data'
+    $androidPlayer = Join-Path $editorData 'PlaybackEngines/AndroidPlayer'
     $unityArchive = Join-Path $androidPlayer 'Variations/mono/Release/Classes/classes.jar'
     if (-not (Test-Path -LiteralPath $unityArchive -PathType Leaf)) { $unityArchive = Join-Path $androidPlayer 'Variations/il2cpp/Release/Classes/classes.jar' }
     $unityActivity = Join-Path $androidPlayer 'Source/com/unity3d/player/UnityPlayerActivity.java'
@@ -162,11 +186,13 @@ if (-not $SkipBuild) {
         if (-not (Test-Path -LiteralPath $inputPath -PathType Leaf)) { throw "Required Unity launcher metadata is missing: $inputPath" }
     }
     $generatorArguments = @((Join-Path $cliDirectory 'bin/Release/net9.0/AndroidJavaWrapperGenerator.dll'),
-        '--sdk', (Join-Path $androidPlayer 'SDK'), '--output', $runtimeDestination,
+        '--sdk', (Join-Path $androidPlayer 'SDK'), '--output', $wrapperSources,
         '--namespace', 'MajdataPlay.Platform.Android.Runtime', '--no-docs', '--input', $unityArchive, '--input', $unityActivity,
         '--input', $contentJava, '--input', (Join-Path $project 'Assets/Plugins/Android/src/java/net/majdata/majdataplay/StorageAccess.java'))
     & dotnet @generatorArguments
     if ($LASTEXITCODE -ne 0) { throw 'Fresh CLI generation for the isolated FFmpeg project failed.' }
+    & dotnet (Join-Path $cliDirectory 'bin/Release/net9.0/AndroidJavaWrapperGenerator.dll') '--build-wrapper' $project '--unity-data' $editorData
+    if ($LASTEXITCODE -ne 0) { throw 'Standalone wrapper DLL compilation for the isolated FFmpeg project failed.' }
     Copy-Item -LiteralPath (Join-Path $repo 'Assets/Plugins/ZString') -Destination (Join-Path $project 'Assets/Plugins') -Recurse -Force
     Copy-Item -LiteralPath (Join-Path $repo 'Assets/Packages/PolySharp.1.15.0') -Destination (Join-Path $project 'Assets/Packages') -Recurse -Force
     Copy-Item -LiteralPath (Join-Path $repo 'Assets/Packages/System.Runtime.CompilerServices.Unsafe.6.1.2') -Destination (Join-Path $project 'Assets/Packages') -Recurse -Force

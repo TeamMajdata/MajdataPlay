@@ -40,6 +40,8 @@ APK/JAR StreamingAssets 仍须先提取为本地编码文件；普通 `UnitySmok
 
 使用 Unity **6000.3.17f1** 及其 Android SDK/NDK/OpenJDK、API 36 wrapper 生成环境和已构建的对应 ABI FFmpeg 原生库；连接已授权 ADB、支持待测 ABI 的 Android 设备，并保持屏幕解锁、测试应用在前台。该隔离场景的测试入口为 `MajdataPlay.FFmpeg.Validation.AndroidContentDeviceSmoke`；普通 `UnitySmoke` 在该场景中跳过运行。以下命令从仓库根目录执行，`-BuildOnly` 只构建，不代表实机播放通过；示例显式使用 `-DisableBurst`，保存结果时也应记录这个构建条件。
 
+隔离工程会把 Java binding 输出到自己的 `Tools/AndroidJavaWrapper/src`，连同生产 `.e.cs` 扩展一起编译独立 csproj，再把 `MajdataPlay.Platform.Android.Runtime.dll` 安装到隔离工程的 `Assets/Plugins/MajdataPlay/Platform/Android`；Unity 通过 DLL 引用这些 wrapper。
+
 ```powershell
 # ARM64：只构建独立 content APK，不自动运行普通 Android 媒体 smoke。
 ./Tools/Tests/FFmpegValidation/run-unity.ps1 -TestAndroidContent -BuildOnly `

@@ -28,7 +28,7 @@ namespace MajdataPlay.Platform.Android.Runtime.Bindings.Android.App
             {
                 throw new ArgumentNullException(nameof(callback));
             }
-#if UNITY_ANDROID && !UNITY_EDITOR
+            AndroidJni.EnsureAndroid();
             var localReference = AndroidJNIHelper.CreateJavaRunnable(callback);
             try
             {
@@ -44,9 +44,6 @@ namespace MajdataPlay.Platform.Android.Runtime.Bindings.Android.App
             {
                 AndroidJNI.DeleteLocalRef(localReference);
             }
-#else
-            throw new PlatformNotSupportedException("Scheduling Android UI callbacks requires an Android player.");
-#endif
         }
     }
 }

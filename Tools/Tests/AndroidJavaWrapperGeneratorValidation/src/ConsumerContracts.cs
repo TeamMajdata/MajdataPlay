@@ -15,17 +15,17 @@ namespace MajdataPlay.Tests.AndroidJavaWrapperGeneratorValidation
     /// <summary>Checks production consumers against the complete replacement Java binding API.</summary>
     internal static partial class Program
     {
-        /// <summary>Compiles migrated Android consumers and the device validation script against actual generated bindings.</summary>
+        /// <summary>Compiles migrated Android consumers and the device validation script against the independently built wrapper DLL.</summary>
         /// <param name="settings">The pinned Unity modules and standard reference pack.</param>
         /// <param name="projectRoot">The production repository containing the consumers and Java device probe.</param>
         /// <param name="api">The complete SDK, project, and Unity Java metadata.</param>
-        /// <param name="generated">The actual binding sources produced for the Editor request.</param>
+        /// <param name="libraryBytes">The actual compiled wrapper DLL, including handwritten partial extensions.</param>
         /// <exception cref="IOException">A production source or reference assembly cannot be read.</exception>
         /// <exception cref="InvalidOperationException">A consumer no longer compiles against the generated API.</exception>
         private static void VerifyMigratedConsumers(ValidationSettings settings, string projectRoot, JavaApi api,
-            IReadOnlyDictionary<string, string> generated)
+            byte[] libraryBytes)
         {
-            var sources = generated.ToDictionary(source => "Generated/" + source.Key, source => source.Value, StringComparer.Ordinal);
+            var sources = new Dictionary<string, string>(StringComparer.Ordinal);
             var androidDirectory = Path.Combine(projectRoot, "Assets", "Plugins", "MajdataPlay", "Platform", "Android");
             var sourcePaths = new List<string>
             {
@@ -34,8 +34,6 @@ namespace MajdataPlay.Tests.AndroidJavaWrapperGeneratorValidation
                 Path.Combine(projectRoot, "Tools", "Tests", "AndroidStorageDeviceValidation", "AndroidStorageDeviceValidation.cs")
             };
             sourcePaths.AddRange(Directory.GetFiles(Path.Combine(androidDirectory, "Storage"), "*.cs"));
-            sourcePaths.AddRange(Directory.GetFiles(Path.Combine(androidDirectory, "Runtime", "Bindings"), "*.cs", SearchOption.AllDirectories)
-                .Where(path => !path.EndsWith(".g.cs", StringComparison.Ordinal)));
             sourcePaths.AddRange(Directory.GetFiles(Path.Combine(projectRoot, "Assets", "Plugins", "MajdataPlay", "IO", "Storage"), "*.cs"));
             foreach (var path in sourcePaths.OrderBy(path => path, StringComparer.Ordinal))
             {
@@ -64,6 +62,7 @@ namespace MajdataPlay.Tests.AndroidJavaWrapperGeneratorValidation
             sources.Add("Generated/" + probePath, probeSources[probePath]);
 
             var references = GetRefreshStandardReferences(settings);
+            references.Add(MetadataReference.CreateFromImage(libraryBytes));
             foreach (var module in new[] { "CoreModule", "AndroidJNIModule", "IMGUIModule", "JSONSerializeModule" })
             {
                 references.Add(MetadataReference.CreateFromFile(Path.Combine(settings.UnityData, "Managed", "UnityEngine", "UnityEngine." + module + ".dll")));
@@ -79,7 +78,7 @@ namespace MajdataPlay.Tests.AndroidJavaWrapperGeneratorValidation
                     throw new InvalidOperationException("Migrated consumers fail for " + string.Join(", ", symbols) + ":"
                         + Environment.NewLine + string.Join(Environment.NewLine, errors.Take(80).Select(diagnostic => diagnostic.ToString())));
                 }
-                Require(true, "Production Android consumers and device validation compile against actual bindings: " + string.Join(", ", symbols));
+                Require(true, "Production Android consumers and device validation compile against the independent wrapper DLL: " + string.Join(", ", symbols));
             }
             VerifyStorageProtocolConstants(projectRoot, androidDirectory);
         }

@@ -19,23 +19,28 @@ Roslyn assemblies come from the executing .NET SDK, without NuGet packages.
 
 ## Commands
 
-From the repository root:
+Select this harness directory first so its `global.json` selects .NET 9 even
+when newer SDKs are installed:
 
 ~~~powershell
-dotnet run --project Tools/Tests/AndroidJavaWrapperGeneratorValidation/AndroidJavaWrapperGeneratorValidation.csproj
+Set-Location Tools/Tests/AndroidJavaWrapperGeneratorValidation
+~~~
+
+~~~powershell
+dotnet run --project AndroidJavaWrapperGeneratorValidation.csproj
 ~~~
 
 Compile the complete SDK API with no Java tool requirement:
 
 ~~~powershell
-dotnet run --project Tools/Tests/AndroidJavaWrapperGeneratorValidation/AndroidJavaWrapperGeneratorValidation.csproj -- --sdk-only
+dotnet run --project AndroidJavaWrapperGeneratorValidation.csproj -- --sdk-only
 ~~~
 
 Validate the actual complete SDK together with all project and Unity Java inputs,
 and the Editor command and publication helpers, without launching Java tools:
 
 ~~~powershell
-dotnet run --project Tools/Tests/AndroidJavaWrapperGeneratorValidation/AndroidJavaWrapperGeneratorValidation.csproj -- --editor-inputs
+dotnet run --project AndroidJavaWrapperGeneratorValidation.csproj -- --editor-inputs
 ~~~
 
 This mode also requires the Unity GameActivity dependency metadata in the local
@@ -45,7 +50,7 @@ both Unity Activity source declarations rather than substituting a stub.
 Run all source regressions and complete SDK compilation together:
 
 ~~~powershell
-dotnet run --project Tools/Tests/AndroidJavaWrapperGeneratorValidation/AndroidJavaWrapperGeneratorValidation.csproj -- --full-sdk
+dotnet run --project AndroidJavaWrapperGeneratorValidation.csproj -- --full-sdk
 ~~~
 
 The Windows defaults use C:/Program Files/Unity Editors/6000.3.17f1/Editor/Data.
@@ -67,7 +72,8 @@ HTML with actual SDK metadata and compiles the documented output in both branche
 
 ## Isolated Unity Editor validation
 
-Run the real background CLI refresh with the repository-pinned Unity Editor:
+From the repository root, run the real background CLI refresh with the
+repository-pinned Unity Editor:
 
 ~~~powershell
 ./Tools/Tests/ValidateAndroidJavaWrapperRefreshUnity.ps1
@@ -80,9 +86,11 @@ installation of the exact required version. It never opens or builds the main
 game project. The Gradle dependency prerequisites above still apply.
 
 The smoke cancels a directly running CLI, reruns full generation with cached
-documentation, waits for actual Unity asset import and binding assembly loading,
-then repeats the refresh and checks that a generated source keeps its GUID and
-timestamp. Deep staging/package paths exercise the Windows Unity Mono extended
+documentation, compiles the source and production `XXX.e.cs` partial extensions
+in `Tools/AndroidJavaWrapper`, and waits for the actual runtime DLL to be imported
+and loaded by Unity. It checks a handwritten extension and the desktop JNI guard,
+then repeats the refresh and checks DLL importer GUIDs and DLL/source/extension
+timestamps. Deep staging/package paths exercise the Windows Unity Mono extended
 path support. The script requires the success marker and rejects C# compiler
 errors even if the Editor process exits with zero. Project and logs stay in
 `.work` for inspection. This validates the Editor workflow, without JNI execution
@@ -124,10 +132,19 @@ or an Android Player build.
   previous namespace/directory manifest migration, Generated-to-Runtime migration,
   GUID preservation, invalid manifests, and corrupt staged outputs before writes.
 - Project-mode bootstrap before Unity import, exact installed Editor version
-  checks, complete real SDK/project output parity, repeat publication, and
-  argument/generation failures without publication.
+  checks, complete real SDK/project source parity in `Tools/AndroidJavaWrapper/src`,
+  and an actual independent C# 9 / .NET Standard 2.1 DLL build against the pinned
+  Unity modules. Handwritten `XXX.e.cs` extensions and project customizations
+  survive regeneration, partial members appear in the installed DLL, owned former
+  Unity sources/meta are retired, and unowned files remain intact. Repeated DLL
+  publication retains bytes, importer GUIDs, and timestamps; argument, generation,
+  extension compilation, and incomplete artifact failures retain the last library.
+- Fast `--build-wrapper` compilation without SDK or Java input discovery, edited
+  user partial members, deterministic repeated builds in unique intermediate
+  directories, and failure retention of the last working DLL/XML/importer metadata.
 - Production Android storage, Activity callbacks, numeric partial extensions,
-  KeyCode values, and the device harness compile against actual bindings for
+  KeyCode values, and the device harness compile against the actual independent
+  runtime DLL, rather than sharing an assembly with its source, for
   Editor, Android Editor, and Android Player conditions. Managed storage
   protocol constants remain synchronized with the production Java bridge.
 - CLI errors, cancellation, malformed class files, output traversal rejection,

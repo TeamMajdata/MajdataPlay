@@ -3,7 +3,7 @@
 This independent .NET 9 command-line tool exports public Java APIs as Unity JNI
 bindings. It has no project, assembly, or source reference to the existing
 AndroidJavaGenerator Roslyn analyzer. Ordinary output mode writes only its
-selected destination; project mode publishes owned Unity assets without
+selected destination; project mode compiles and installs a wrapper library without
 installing an analyzer.
 
 ## Requirements and build
@@ -18,11 +18,13 @@ It reads JVM class files in C# and analyzes Java source declarations in C#.
 The separate regression harness uses javac only as an independent reference for
 checking source/class/JAR API parity.
 
-From the repository root:
+From the repository root, select the tool's pinned SDK directory:
 
 ~~~powershell
-dotnet build Tools/CSharp/AndroidJavaWrapperGenerator/AndroidJavaWrapperGenerator.csproj
-dotnet run --project Tools/CSharp/AndroidJavaWrapperGenerator/AndroidJavaWrapperGenerator.csproj -- --help
+Push-Location Tools/CSharp/AndroidJavaWrapperGenerator
+dotnet build AndroidJavaWrapperGenerator.csproj
+dotnet run --project AndroidJavaWrapperGenerator.csproj -- --help
+Pop-Location
 ~~~
 
 Only this explicit tool project is built; do not build Unity-generated projects.
@@ -38,17 +40,30 @@ Before importing a fresh checkout, generate the bindings its runtime consumers
 need. From the repository root:
 
 ~~~powershell
-dotnet run --project Tools/CSharp/AndroidJavaWrapperGenerator/AndroidJavaWrapperGenerator.csproj -- --project . --unity-data "C:/Program Files/Unity Editors/6000.3.17f1/Editor/Data" --no-docs
+Push-Location Tools/CSharp/AndroidJavaWrapperGenerator
+dotnet run --project AndroidJavaWrapperGenerator.csproj -- --project ../../.. --unity-data "C:/Program Files/Unity Editors/6000.3.17f1/Editor/Data" --no-docs
+Pop-Location
 ~~~
 
 Project mode reuses the Editor's Java-input discovery and ownership publisher,
 without opening the project in Unity. It writes the four runtime helpers into
-`Assets/Plugins/MajdataPlay/Platform/Android/Runtime` and Java bindings into its
-`Bindings` directory. It accepts `--sdk`, `--api-level`, worker counts, and
+`Tools/AndroidJavaWrapper/src` and Java bindings into its `Bindings` directory.
+It creates missing `AndroidJavaWrapper.csproj` and `global.json`, compiles the
+netstandard2.1 library together with handwritten `.e.cs` extensions, and installs
+`MajdataPlay.Platform.Android.Runtime.dll` and XML documentation into
+`Assets/Plugins/MajdataPlay/Platform/Android`. It accepts `--sdk`, `--api-level`, worker counts, and
 documentation options; the destination and root namespace are project-owned.
 Use `--offline-docs` for cached documentation, or omit documentation flags to
-retrieve official pages. Existing `Generated` output is migrated with its Unity
-metadata. Handwritten partial extensions remain tracked beside generated sources.
+retrieve official pages. Existing project customizations and DLL importer GUIDs
+are preserved. A failed compilation retains the installed DLL. After successful
+publication, unchanged manifest-owned sources in the former `Runtime` and
+`Generated` Unity directories and their paired metadata are retired. Unowned files
+are preserved; modified owned files stop publication.
+
+After editing extensions, use `--build-wrapper PROJECT --unity-data DIRECTORY`
+to compile and install the existing source project without SDK input discovery
+or Java generation. See `../../AndroidJavaWrapper/README.md` for the extension
+workflow and local IDE builds.
 
 ## Generate the full Android and Java API
 
@@ -228,13 +243,15 @@ The menu generates the full SDK/BCL with online official English documentation.
 Java asset changes automatically queue a refresh with official documentation;
 existing cached pages are reused and only missing pages are fetched.
 The cached-documentation menu also permits an explicit offline run. Generation
-runs outside Assets and is published only on success. The destination is
-`Assets/Plugins/MajdataPlay/Platform/Android/Runtime`, with the namespace root
+runs outside Assets in `Tools/AndroidJavaWrapper/src`, with namespace root
 `MajdataPlay.Platform.Android.Runtime`; wrappers are under its `Bindings` child.
-Output ownership is checked again before
-publication, preserving custom files and the GUIDs of retained Unity assets.
-Generated `.g.cs` files, runtime helpers, their metadata, and tool `.work` caches
-and logs are local and ignored by Git; handwritten partial extensions stay tracked.
+The independent project compiles these sources and handwritten extensions before
+publishing its DLL into `Assets/Plugins/MajdataPlay/Platform/Android`. Auto refresh
+is suspended until DLL publication and legacy-source retirement finish, so Unity
+imports the complete result. Output ownership is checked before publication,
+preserving custom source/project files and the DLL importer GUID.
+Generated `.g.cs` files, runtime helpers, DLL/XML output, and tool `.work` caches
+and logs are local and ignored by Git; handwritten `.e.cs` extensions stay tracked.
 Console display is budgeted per Editor update; complete process
 diagnostics are retained in `.work/editor-logs`.
 

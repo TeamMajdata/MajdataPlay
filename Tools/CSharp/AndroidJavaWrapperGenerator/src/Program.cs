@@ -16,7 +16,7 @@ namespace MajdataPlay.Tools.AndroidJavaWrapperGenerator
         /// <returns>Zero on success or help, two for invalid options, one for generation errors, or 130 on cancellation.</returns>
         internal static async Task<int> Main(string[] arguments)
         {
-            if (arguments.Length > 0 && arguments[0] == "--project")
+            if (arguments.Length > 0 && (arguments[0] == "--project" || arguments[0] == "--build-wrapper"))
             {
                 return await ProjectWrapperGeneration.RunAsync(arguments).ConfigureAwait(false);
             }

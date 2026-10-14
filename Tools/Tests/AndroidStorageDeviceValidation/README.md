@@ -27,8 +27,8 @@ launcher. The target device is the connected physical Mi MIX 2S, API 35.
 | --- | --- |
 | `AndroidStorageDeviceValidation.cs` | `Assets/Validation/`, in a runtime assembly referencing `MajdataPlay.IO` and `MajdataPlay.Platform.Android` |
 | `DeviceJniProbe.java` | `Assets/Plugins/Android/src/java/net/majdata/validation/DeviceJniProbe.java`, supplied to the CLI and packaged into the APK |
-| Production `Runtime/Bindings/` extensions | Copy handwritten partial extensions alongside fresh CLI output |
-| Standalone CLI output | Generate SDK, project, probe and Unity launcher bindings into `Assets/Android/Runtime/`, including `Bindings/Net/Majdata/Validation/DeviceJniProbe.g.cs` |
+| Production `Tools/AndroidJavaWrapper/src/Bindings/` extensions | Copy handwritten `.e.cs` partial extensions alongside fresh CLI output |
+| Standalone CLI output | Generate SDK, project, probe and Unity launcher bindings into isolated `Tools/AndroidJavaWrapper/src/`, including `Bindings/Net/Majdata/Validation/DeviceJniProbe.g.cs`; compile its standalone project and install `MajdataPlay.Platform.Android.Runtime.dll` into isolated `Assets/Plugins/MajdataPlay/Platform/Android` |
 | Production Java and activity | Copy and package the real storage bridge, Unity dependencies, and launcher/activity-result implementation |
 
 The probe's Java package is `net.majdata.validation`. The builder uses the .NET 9

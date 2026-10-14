@@ -42,6 +42,9 @@ namespace MajdataPlay.Platform.Android.Editor
         /// <summary>Indicates that the current process is compiling the standalone tool.</summary>
         private static bool s_building;
 
+        /// <summary>Defers DLL importing until the directly owned project pipeline exits.</summary>
+        private static bool s_autoRefreshDisallowed;
+
         /// <summary>Indicates that the user has canceled the running generation.</summary>
         private static bool s_cancelRequested;
 
@@ -146,16 +149,18 @@ namespace MajdataPlay.Platform.Android.Editor
                 }
                 else if (exitCode != 0)
                 {
-                    FailGeneration("The " + (s_building ? "tool build" : "generator") + " exited with code " + exitCode + ". Complete diagnostics: " + logPath);
+                    FailGeneration("The " + (s_building ? "tool build" : "wrapper library pipeline") + " exited with code " + exitCode + ". Complete diagnostics: " + logPath);
                 }
                 else if (s_building)
                 {
                     s_building = false;
-                    StartProcess(s_request!.Arguments, "Scanning Java APIs and enriching documentation...");
+                    AssetDatabase.DisallowAutoRefresh();
+                    s_autoRefreshDisallowed = true;
+                    StartProcess(s_request!.Arguments, "Generating bindings and compiling the Android runtime library...");
                 }
                 else
                 {
-                    PublishGeneration();
+                    CompleteGeneration();
                 }
             }
             catch (Exception exception)
@@ -188,7 +193,8 @@ namespace MajdataPlay.Platform.Android.Editor
                 });
                 s_building = true;
                 Debug.Log("[Android Java wrappers] Refreshing with AndroidJavaWrapperGenerator; " + s_request.Inputs.Count + " additional inputs, "
-                    + (offlineDocumentation ? "cached" : "online") + " official documentation. Output: " + s_request.OutputDirectory);
+                    + (offlineDocumentation ? "cached" : "online") + " official documentation. Sources: " + s_request.OutputDirectory
+                    + ". Runtime library: " + s_request.RuntimeAssemblyPath);
                 StartProcess(s_request.BuildArguments, "Building the independent .NET 9 tool...");
             }
             catch (Exception exception)
@@ -218,60 +224,21 @@ namespace MajdataPlay.Platform.Android.Editor
             Progress.Report(s_progressId, 0f, description);
         }
 
-        /// <summary>Publishes complete generated files while Unity asset importing is suspended.</summary>
-        private static void PublishGeneration()
+        /// <summary>Imports the successfully compiled library after the independent pipeline has completed.</summary>
+        /// <exception cref="FileNotFoundException">The successful pipeline did not publish its runtime DLL.</exception>
+        private static void CompleteGeneration()
         {
             var request = s_request!;
-            var count = 0;
-            AssetDatabase.DisallowAutoRefresh();
-            try
+            if (!File.Exists(request.RuntimeAssemblyPath))
             {
-                AssetDatabase.StartAssetEditing();
-                try
-                {
-                    count = JavaWrapperOutput.Publish(request.StagingDirectory, request.OutputDirectory, request.PreviousOutputDirectory);
-                }
-                finally
-                {
-                    AssetDatabase.StopAssetEditing();
-                }
-            }
-            finally
-            {
-                AssetDatabase.AllowAutoRefresh();
+                throw new FileNotFoundException("The wrapper pipeline completed without publishing its runtime library: "
+                    + request.RuntimeAssemblyPath, request.RuntimeAssemblyPath);
             }
 
-            CleanupStaging(request);
             FinishGeneration(Progress.Status.Succeeded);
-            Debug.Log("[Android Java wrappers] Generated " + count + " C# files in " + request.OutputDirectory + ".");
+            Debug.Log("[Android Java wrappers] Compiled " + request.RuntimeAssemblyPath + ". Extend generated bindings in "
+                + request.OutputDirectory + " with partial XXX.e.cs classes and regenerate to rebuild the library.");
             AssetDatabase.Refresh();
-        }
-
-        /// <summary>Removes a successfully published scratch directory owned by this invocation.</summary>
-        /// <param name="request">The completed generation request.</param>
-        private static void CleanupStaging(JavaWrapperGenerationRequest request)
-        {
-            var scratchRoot = Path.GetFullPath(Path.Combine(request.WorkingDirectory, ".work", "editor-output")) + Path.DirectorySeparatorChar;
-            var staging = Path.GetFullPath(request.StagingDirectory);
-            var stagingIoPath = JavaWrapperOutput.GetFileSystemPath(staging);
-            var comparison = Path.DirectorySeparatorChar == '\\' ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
-            if (!staging.StartsWith(scratchRoot, comparison) || !Directory.Exists(stagingIoPath)
-                || (File.GetAttributes(stagingIoPath) & FileAttributes.ReparsePoint) != 0)
-            {
-                return;
-            }
-            try
-            {
-                Directory.Delete(stagingIoPath, true);
-            }
-            catch (IOException exception)
-            {
-                Debug.LogWarning("[Android Java wrappers] Could not remove completed scratch output: " + exception.Message);
-            }
-            catch (UnauthorizedAccessException exception)
-            {
-                Debug.LogWarning("[Android Java wrappers] Could not remove completed scratch output: " + exception.Message);
-            }
         }
 
         /// <summary>Reports a failed refresh and releases its process and progress resources.</summary>
@@ -291,6 +258,11 @@ namespace MajdataPlay.Platform.Android.Editor
                 s_process.Kill();
                 s_process.Dispose();
                 s_process = null;
+            }
+            if (s_autoRefreshDisallowed)
+            {
+                AssetDatabase.AllowAutoRefresh();
+                s_autoRefreshDisallowed = false;
             }
             if (s_progressId >= 0)
             {
@@ -503,13 +475,29 @@ namespace MajdataPlay.Platform.Android.Editor
                     if (!_process.HasExited)
                     {
                         var killTree = typeof(Process).GetMethod("Kill", new[] { typeof(bool) });
-                        if (killTree == null)
+                        var treeTerminationRequested = false;
+                        if (killTree != null)
                         {
-                            _process.Kill();
+                            try
+                            {
+                                killTree.Invoke(_process, new object[] { true });
+                                treeTerminationRequested = true;
+                            }
+                            catch (TargetInvocationException)
+                            {
+                                // Some Unity Mono versions expose this overload without implementing it.
+                            }
                         }
-                        else
+                        if (!treeTerminationRequested)
                         {
-                            killTree.Invoke(_process, new object[] { true });
+                            if (Environment.OSVersion.Platform == PlatformID.Win32NT)
+                            {
+                                KillWindowsProcessTree();
+                            }
+                            if (!_process.HasExited)
+                            {
+                                _process.Kill();
+                            }
                         }
                         _process.WaitForExit(1000);
                     }
@@ -522,22 +510,41 @@ namespace MajdataPlay.Platform.Android.Editor
                 {
                     // The operating system may already have removed the exiting process.
                 }
-                catch (TargetInvocationException)
+            }
+
+            /// <summary>Stops the CLI and its child compiler on Windows when Unity Mono cannot terminate process trees.</summary>
+            private void KillWindowsProcessTree()
+            {
+                try
                 {
-                    // Some Mono versions expose the overload but do not implement process-tree termination.
-                    try
+                    var info = new ProcessStartInfo(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "taskkill.exe"),
+                        "/PID " + _process.Id.ToString(System.Globalization.CultureInfo.InvariantCulture) + " /T /F")
                     {
-                        _process.Kill();
-                        _process.WaitForExit(1000);
-                    }
-                    catch (InvalidOperationException)
+                        UseShellExecute = false,
+                        CreateNoWindow = true,
+                        WindowStyle = ProcessWindowStyle.Hidden,
+                        RedirectStandardOutput = true,
+                        RedirectStandardError = true
+                    };
+                    using var termination = new Process { StartInfo = info };
+                    if (!termination.Start())
                     {
-                        // The direct process already exited.
+                        return;
                     }
-                    catch (Win32Exception)
+                    termination.BeginOutputReadLine();
+                    termination.BeginErrorReadLine();
+                    if (!termination.WaitForExit(1000))
                     {
-                        // The direct process was already removed by the operating system.
+                        termination.Kill();
                     }
+                }
+                catch (InvalidOperationException)
+                {
+                    // The CLI or bounded taskkill helper may already have exited.
+                }
+                catch (Win32Exception)
+                {
+                    // Fall back to direct termination if the operating system cannot launch taskkill.
                 }
             }
 

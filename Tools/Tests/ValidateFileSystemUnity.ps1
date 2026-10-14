@@ -76,20 +76,41 @@ foreach ($directory in @($root, (Join-Path $root 'Temp'), $projectFullPath, (Joi
 if (Test-Path -LiteralPath $stagedRuntime) {
     Remove-Item -LiteralPath $stagedRuntime -Recurse -Force
 }
-New-Item -ItemType Directory -Force -Path $stagedRuntime | Out-Null
-$productionRuntime = Join-Path $androidSource 'Runtime'
-foreach ($file in Get-ChildItem -LiteralPath $productionRuntime -Recurse -Filter '*.cs' -File) {
-    if ($file.Name.EndsWith('.g.cs', [StringComparison]::Ordinal) -or $file.Name -in @('AndroidJni.cs', 'IJavaObject.cs', 'JavaInvocationException.cs', 'JavaObjectReference.cs')) {
-        continue
-    }
-    $destination = Join-Path $stagedRuntime $file.FullName.Substring($productionRuntime.Length + 1)
-    New-Item -ItemType Directory -Force -Path (Split-Path -Parent $destination) | Out-Null
-    Copy-Item -LiteralPath $file.FullName -Destination $destination -Force
-    if (Test-Path -LiteralPath ($file.FullName + '.meta') -PathType Leaf) {
-        Copy-Item -LiteralPath ($file.FullName + '.meta') -Destination ($destination + '.meta') -Force
+if (Test-Path -LiteralPath ($stagedRuntime + '.meta') -PathType Leaf) {
+    Remove-Item -LiteralPath ($stagedRuntime + '.meta') -Force
+}
+# Compile generated bindings and production partial extensions outside Unity's Assets tree.
+$wrapperProject = Join-Path $project 'Tools/AndroidJavaWrapper'
+$wrapperSources = [IO.Path]::GetFullPath((Join-Path $wrapperProject 'src'))
+if (!$wrapperSources.StartsWith($projectBoundary, [StringComparison]::OrdinalIgnoreCase)) {
+    throw "The wrapper sources must remain inside the isolated project: $wrapperSources"
+}
+for ($ancestor = $wrapperSources; $ancestor -and ($ancestor.StartsWith($projectBoundary, [StringComparison]::OrdinalIgnoreCase) -or $ancestor -eq $projectFullPath); $ancestor = Split-Path -Parent $ancestor) {
+    if (Test-Path -LiteralPath $ancestor) {
+        $item = Get-Item -LiteralPath $ancestor -Force
+        if (!$item.PSIsContainer -or ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+            throw "Refusing wrapper source replacement through a file or reparse point: $ancestor"
+        }
     }
 }
-Copy-Item -LiteralPath (Join-Path $androidSource 'Runtime.meta') -Destination $android -Force
+if (Test-Path -LiteralPath $wrapperSources) {
+    Remove-Item -LiteralPath $wrapperSources -Recurse -Force
+}
+New-Item -ItemType Directory -Force -Path $wrapperSources | Out-Null
+$productionSources = Join-Path $root 'Tools/AndroidJavaWrapper/src'
+foreach ($file in Get-ChildItem -LiteralPath $productionSources -Recurse -Filter '*.e.cs' -File) {
+    $destination = Join-Path $wrapperSources $file.FullName.Substring($productionSources.Length + 1)
+    New-Item -ItemType Directory -Force -Path (Split-Path -Parent $destination) | Out-Null
+    Copy-Item -LiteralPath $file.FullName -Destination $destination -Force
+}
+foreach ($name in @('AndroidJavaWrapper.csproj', 'global.json')) {
+    Copy-Item -LiteralPath (Join-Path $root "Tools/AndroidJavaWrapper/$name") -Destination $wrapperProject -Force
+}
+$isolatedCli = Join-Path $project 'Tools/CSharp/AndroidJavaWrapperGenerator'
+New-Item -ItemType Directory -Force -Path $isolatedCli | Out-Null
+foreach ($name in @('AndroidJavaWrapperGenerator.csproj', 'global.json')) {
+    Copy-Item -LiteralPath (Join-Path $cliDirectory $name) -Destination $isolatedCli -Force
+}
 # Stage production Java sources in the isolated project before CLI analysis.
 $javaSource = Join-Path $root 'Assets/Plugins/Android'
 foreach ($file in Get-ChildItem -LiteralPath $javaSource -Recurse -File) {
@@ -126,7 +147,7 @@ foreach ($inputFile in @($unityJar, $unityActivity)) {
         throw "Missing Unity launcher metadata: $inputFile"
     }
 }
-$generatorArguments = @($cliAssembly, '--sdk', (Join-Path $androidPlayer 'SDK'), '--output', $stagedRuntime,
+$generatorArguments = @($cliAssembly, '--sdk', (Join-Path $androidPlayer 'SDK'), '--output', $wrapperSources,
     '--namespace', 'MajdataPlay.Platform.Android.Runtime', '--no-docs', '--input', $unityJar, '--input', $unityActivity)
 foreach ($file in Get-ChildItem -LiteralPath (Join-Path $project 'Assets/Plugins/Android') -Recurse -File | Sort-Object FullName) {
     if ($file.Extension -in @('.java', '.class', '.jar', '.aar')) {
@@ -136,6 +157,10 @@ foreach ($file in Get-ChildItem -LiteralPath (Join-Path $project 'Assets/Plugins
 & dotnet @generatorArguments
 if ($LASTEXITCODE -ne 0) {
     throw 'Fresh CLI binding generation for the isolated storage project failed.'
+}
+& dotnet $cliAssembly '--build-wrapper' $project '--unity-data' $editorData
+if ($LASTEXITCODE -ne 0) {
+    throw 'Standalone wrapper DLL compilation for the isolated storage project failed.'
 }
 if (!$SkipJavaCompilation) {
     $javac = Join-Path $androidPlayer 'OpenJDK/bin/javac.exe'

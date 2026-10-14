@@ -1,6 +1,9 @@
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
+using System.Security;
 using UnityEngine;
 
 #nullable enable
@@ -330,14 +333,46 @@ namespace __ROOT_NAMESPACE__
         }
 
         /// <summary>
-        /// Rejects JNI access outside Android players before any Unity native call is attempted.
+        /// Rejects JNI access outside Android players, including Editor imports of the compiled runtime library.
         /// </summary>
         /// <exception cref="PlatformNotSupportedException">Execution is not in an Android player.</exception>
         internal static void EnsureAndroid()
         {
 #if !UNITY_ANDROID || UNITY_EDITOR
             throw new PlatformNotSupportedException("Generated Java wrappers require an Android player; JNI is unavailable in the Unity Editor.");
+#else
+            if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows) || RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
+            {
+                throw new PlatformNotSupportedException("Generated Java wrappers require an Android player.");
+            }
+
+            try
+            {
+                // Unity marks the platform getter as thread-safe, including JVM-attached worker threads.
+                if (IsAndroidPlayer())
+                {
+                    return;
+                }
+            }
+            catch (Exception exception) when (exception is MissingMethodException || exception is TypeLoadException || exception is SecurityException)
+            {
+                throw new PlatformNotSupportedException("Generated Java wrappers require a running Android Unity player.", exception);
+            }
+
+            throw new PlatformNotSupportedException("Generated Java wrappers require an Android player; JNI is unavailable in the Unity Editor.");
 #endif
+        }
+
+        /// <summary>Queries Unity's thread-safe platform getter only after portable host checks succeed.</summary>
+        /// <returns>True when the current Unity runtime is an Android Player.</returns>
+        /// <remarks>Inlining is disabled so plain managed hosts do not resolve Unity internal calls before platform rejection.</remarks>
+        /// <exception cref="MissingMethodException">The host cannot resolve Unity's native platform getter.</exception>
+        /// <exception cref="TypeLoadException">The host cannot load Unity's native platform metadata.</exception>
+        /// <exception cref="SecurityException">The managed host cannot execute Unity internal calls.</exception>
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        private static bool IsAndroidPlayer()
+        {
+            return Application.platform == RuntimePlatform.Android;
         }
 
         /// <summary>

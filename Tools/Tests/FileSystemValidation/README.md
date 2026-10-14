@@ -161,11 +161,13 @@ From the repository root:
 The script builds the independent .NET 9 AndroidJavaWrapperGenerator CLI, then
 creates the ignored isolated project under `Temp/FileSystemUnityValidation/`.
 It copies production storage, Android core sources, KeyCode, and handwritten
-`Runtime/Bindings/` partial extensions. The known obsolete analyzer/helper files
+`Tools/AndroidJavaWrapper/src/Bindings/` partial extensions. The known obsolete analyzer/helper files
 and verified isolated `Runtime/` staging directory are removed before each run.
-Fresh JNI support sources are generated directly under `Assets/Android/Runtime`,
-with wrappers under `Assets/Android/Runtime/Bindings/`, using root namespace
-`MajdataPlay.Platform.Android.Runtime`. The only game-service doubles are the
+Fresh sources are generated under the isolated `Tools/AndroidJavaWrapper/src`,
+using root namespace `MajdataPlay.Platform.Android.Runtime`. The standalone project
+compiles them with the extensions into `MajdataPlay.Platform.Android.Runtime.dll`
+and installs that DLL under isolated `Assets/Plugins/MajdataPlay/Platform/Android`.
+The only game-service doubles are the
 existing logging and keyboard initialization stubs; picker and storage logic
 use the production CLI bindings.
 

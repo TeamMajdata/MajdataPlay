@@ -44,12 +44,15 @@ key-analysis regression tests, isolated Unity editor checks, and editor workflow
 
 ## Android Java bindings and legacy generator
 
-The Unity runtime uses the standalone CLI and local `Runtime/Bindings` output.
+The Unity runtime uses the standalone CLI to generate `Tools/AndroidJavaWrapper/src`
+and compile/install `MajdataPlay.Platform.Android.Runtime.dll` as a Unity plugin.
 See `AndroidJavaWrapperGeneratorValidation/README.md` for generation, namespace
 directory migration, project bootstrap, and production consumer compilation.
 
 ```powershell
-dotnet run --project Tools/Tests/AndroidJavaWrapperGeneratorValidation/AndroidJavaWrapperGeneratorValidation.csproj -- --editor-inputs
+Push-Location Tools/Tests/AndroidJavaWrapperGeneratorValidation
+dotnet run --project AndroidJavaWrapperGeneratorValidation.csproj -- --editor-inputs
+Pop-Location
 ./Tools/Tests/ValidateAndroidJavaWrapperRefreshUnity.ps1
 ```
 

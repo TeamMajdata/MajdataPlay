@@ -62,6 +62,16 @@ foreach ($file in Get-ChildItem -LiteralPath $toolDirectory -Recurse -File)
     Copy-Item -LiteralPath $file.FullName -Destination $destination
 }
 
+# Compile the production partial extensions in the same independent wrapper assembly.
+$extensionDirectory = Join-Path $repositoryRoot 'Tools/AndroidJavaWrapper/src'
+foreach ($file in Get-ChildItem -LiteralPath $extensionDirectory -Recurse -Filter '*.e.cs' -File)
+{
+    $relative = $file.FullName.Substring($extensionDirectory.Length + 1)
+    $destination = Join-Path (Join-Path $projectRoot 'Tools/AndroidJavaWrapper/src') $relative
+    [System.IO.Directory]::CreateDirectory((Split-Path -Parent $destination)) | Out-Null
+    Copy-Item -LiteralPath $file.FullName -Destination $destination
+}
+
 # Stage every production Java input, preserving metadata when available.
 $javaDirectory = Join-Path $repositoryRoot 'Assets/Plugins/Android'
 foreach ($file in Get-ChildItem -LiteralPath $javaDirectory -Recurse -File)
@@ -123,7 +133,7 @@ try
         throw "Wrapper refresh validation failed with exit code $($process.ExitCode). See $logPath"
     }
     Write-Host ([regex]::Match($log, 'EDITOR_WRAPPER_SMOKE_PASS:[^\r\n]*').Value)
-    Write-Host 'CLI cancellation, full generation, asset importing, binding compilation, and repeat-refresh GUID/timestamp checks passed.'
+    Write-Host 'CLI cancellation, independent DLL compilation, partial extensions, Editor plugin importing, and repeat-refresh DLL/GUID/timestamp checks passed.'
 }
 finally
 {

@@ -27,6 +27,7 @@ namespace MajdataPlay.Tests.AndroidJavaWrapperGeneratorValidation
         private static void VerifyEditorOutput(string workspace)
         {
             VerifyProjectModeArguments(workspace);
+            VerifyLegacyLibrarySourceCleanup(workspace);
             VerifyEditorPublicationLifecycle(workspace);
             VerifyEditorNamespaceMigration(workspace);
             VerifyEditorMigrationConflicts(workspace);

@@ -1,0 +1,33 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <Import Project="AndroidJavaWrapper.local.props" Condition="Exists('AndroidJavaWrapper.local.props')" />
+  <PropertyGroup>
+    <TargetFramework>netstandard2.1</TargetFramework>
+    <AssemblyName>MajdataPlay.Platform.Android.Runtime</AssemblyName>
+    <RootNamespace>MajdataPlay.Platform.Android.Runtime</RootNamespace>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <LangVersion>9.0</LangVersion>
+    <DefineConstants>$(DefineConstants);UNITY_ANDROID</DefineConstants>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <Deterministic>true</Deterministic>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <NuGetAudit>false</NuGetAudit>
+    <RestoreSources>$(MSBuildThisFileDirectory)</RestoreSources>
+    <UnityData Condition="'$(UnityData)' == ''">$(UNITY_EDITOR_DATA)</UnityData>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="src/**/*.cs" />
+    <Reference Include="UnityEngine.CoreModule">
+      <HintPath>$(UnityData)/Managed/UnityEngine/UnityEngine.CoreModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine.AndroidJNIModule">
+      <HintPath>$(UnityData)/Managed/UnityEngine/UnityEngine.AndroidJNIModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+  <Target Name="ValidateUnityReferences" BeforeTargets="ResolveReferences">
+    <Error Condition="!Exists('$(UnityData)/Managed/UnityEngine/UnityEngine.CoreModule.dll') or !Exists('$(UnityData)/Managed/UnityEngine/UnityEngine.AndroidJNIModule.dll')"
+           Text="Set UnityData or UNITY_EDITOR_DATA to the pinned Unity Editor Data/Contents directory, or regenerate project wrappers to create AndroidJavaWrapper.local.props." />
+  </Target>
+</Project>

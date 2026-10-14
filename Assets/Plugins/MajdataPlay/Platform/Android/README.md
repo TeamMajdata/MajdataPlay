@@ -6,11 +6,13 @@ AndroidJavaGenerator analyzer or a Java compiler.
 
 ## Generate before the first Unity import
 
-The runtime consumers compile against local generated sources. From the
+The runtime consumers compile against the generated wrapper DLL. From the
 repository root, run the independent tool before opening a fresh checkout:
 
 ```powershell
-dotnet run --project Tools/CSharp/AndroidJavaWrapperGenerator/AndroidJavaWrapperGenerator.csproj -- --project . --unity-data "C:/Program Files/Unity Editors/6000.3.17f1/Editor/Data" --no-docs
+Push-Location Tools/CSharp/AndroidJavaWrapperGenerator
+dotnet run --project AndroidJavaWrapperGenerator.csproj -- --project ../../.. --unity-data "C:/Program Files/Unity Editors/6000.3.17f1/Editor/Data" --no-docs
+Pop-Location
 ```
 
 Use the repository-pinned Unity Editor with Android Build Support and .NET 9.
@@ -23,31 +25,39 @@ uses the shared cache without network access.
 
 ## Namespaces and directories
 
-The output root is `Assets/Plugins/MajdataPlay/Platform/Android/Runtime`, with
+The source root is `Tools/AndroidJavaWrapper/src`, with
 namespace `MajdataPlay.Platform.Android.Runtime`:
 
 ```text
-Runtime/
-    AndroidJni.cs
-    IJavaObject.cs
-    JavaInvocationException.cs
-    JavaObjectReference.cs
-    Bindings/
-        Android/Net/Uri.g.cs
-        Com/Unity3d/Player/UnityPlayer.g.cs
-        Java/Lang/JavaObject.g.cs
-        Net/Majdata/Majdataplay/StorageAccess.g.cs
+Tools/AndroidJavaWrapper/
+    AndroidJavaWrapper.csproj
+    src/
+        AndroidJni.cs
+        IJavaObject.cs
+        JavaInvocationException.cs
+        JavaObjectReference.cs
+        Bindings/
+            Android/App/Activity.e.cs
+            Android/Net/Uri.g.cs
+            Com/Unity3d/Player/UnityPlayer.g.cs
+            Java/Lang/JavaObject.g.cs
+            Net/Majdata/Majdataplay/StorageAccess.g.cs
 ```
 
 Generated Java namespaces are below `.Runtime.Bindings`; each relative namespace
 component has a matching directory. The four JNI helpers belong directly to the
 root namespace and directory. Unnamed Java packages use `Bindings/` itself.
 
-Generated sources, their metadata, and the ownership manifest stay local and are
-ignored by Git. Handwritten partial extensions such as `Bindings/Android/App/Activity.cs`
-and the numeric conversion extensions are tracked alongside the `.g.cs` files.
-Their original script and retained directory GUIDs are preserved. The old
-annotated declarations are removed; the legacy generator's runtime fixtures now
+`AndroidJavaWrapper.csproj` targets netstandard2.1/C# 9, includes every `src/**/*.cs`,
+and references the pinned Unity managed modules. The compiled
+`MajdataPlay.Platform.Android.Runtime.dll` is installed directly in this Android
+plugin directory; Unity imports the DLL for Editor and Android.
+
+Generated sources, the ownership manifest, local reference configuration, and
+DLL/XML output stay local and are ignored by Git. Handwritten partial extensions
+such as `src/Bindings/Android/App/Activity.e.cs` and the numeric conversions are
+tracked beside `.g.cs` files. The DLL importer `.meta` remains tracked and retains
+its GUID across rebuilds. The legacy generator's runtime fixtures
 live under `Tools/Tests/AndroidJavaGeneratorValidation/Fixtures/LegacyRuntime`.
 
 ## Editor refresh and migration
@@ -64,11 +74,18 @@ cached pages, and fetch only missing documentation. Requests are coalesced;
 changes during a run queue one follow-up. Cancel from the tools menu or progress
 indicator. A domain reload cancels the process and restores queued work.
 
-Successful publication migrates the former `Generated` directory and former
-package-relative paths into `Runtime/Bindings`. Source and manifest `.meta`
-files move with their GUIDs; unchanged source timestamps are preserved. Modified
-generated sources, handwritten destinations, conflicting metadata, and ambiguous
-ownership are rejected before publication. Unowned files remain intact.
+Successful compilation publishes the DLL and then retires unchanged manifest-owned
+sources and paired metadata from the former `Runtime` and `Generated` directories.
+Modified generated sources, conflicting metadata, and ambiguous ownership are
+rejected before publication. Unowned files remain intact. A failed build retains
+the installed DLL, and identical rebuilt bytes retain its timestamp.
+
+Create `.e.cs` partial extensions in `Tools/AndroidJavaWrapper/src`. Rebuild and
+install them with `--build-wrapper PROJECT --unity-data DIRECTORY`, without
+regenerating Java inputs. Existing custom project files are preserved. See
+`Tools/AndroidJavaWrapper/README.md` for commands. The DLL is compiled with
+`UNITY_ANDROID`; extensions must use `AndroidJni.EnsureAndroid()` for runtime
+platform checks because DLL conditional compilation does not change in the Editor.
 
 Unity GameActivity metadata is read from `GRADLE_USER_HOME` or the user's Gradle
 cache. Resolve Android Gradle dependencies once, or supply the official runtime
@@ -103,7 +120,8 @@ refresh, import, compilation, cancellation, and repeated GUID/timestamp checks.
 `ValidateFileSystemUnity.ps1` checks the generated API, key codes, ownership,
 platform guards, and selected Player compilation in an isolated project.
 
-The Android storage and FFmpeg device harnesses generate fresh CLI bindings.
+The Android storage and FFmpeg device harnesses generate fresh CLI bindings and
+compile an isolated wrapper DLL including their own test Java APIs and extensions.
 Build and run them separately for each required ABI. Historical device results
 predate this wrapper migration; managed compilation and Editor checks do not
 establish JNI, provider, native FFmpeg, IL2CPP, ARMv7/ARM64, or physical-device

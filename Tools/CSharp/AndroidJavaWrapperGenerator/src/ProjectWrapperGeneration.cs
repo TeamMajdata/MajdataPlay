@@ -13,19 +13,20 @@ using MajdataPlay.Platform.Android.Editor;
 
 namespace MajdataPlay.Tools.AndroidJavaWrapperGenerator
 {
-    /// <summary>Bootstraps project bindings before Unity can compile the consumers that require them.</summary>
+    /// <summary>Generates the independent wrapper project and installs its successfully compiled runtime library.</summary>
     internal static class ProjectWrapperGeneration
     {
-        /// <summary>Discovers the project's Java inputs, generates outside Assets, and publishes owned runtime assets.</summary>
+        /// <summary>Generates or rebuilds wrapper sources and publishes their DLL only after successful compilation.</summary>
         /// <param name="arguments">The project root, Unity contents directory, optional SDK, and generation options.</param>
         /// <returns>Zero on success, two for invalid arguments, or the generation failure code.</returns>
         internal static async Task<int> RunAsync(string[] arguments)
         {
             try
             {
+                var buildOnly = arguments[0] == "--build-wrapper";
                 if (arguments.Length < 2 || string.IsNullOrWhiteSpace(arguments[1]) || arguments[1].StartsWith("--", StringComparison.Ordinal))
                 {
-                    throw new ArgumentException("--project requires a Unity project directory.");
+                    throw new ArgumentException(arguments[0] + " requires a Unity project directory.");
                 }
 
                 var projectRoot = Path.GetFullPath(arguments[1]);
@@ -77,6 +78,11 @@ namespace MajdataPlay.Tools.AndroidJavaWrapperGenerator
                 }
 
                 await ValidatePinnedEditorAsync(projectRoot, unityContents).ConfigureAwait(false);
+                if (buildOnly)
+                {
+                    return await BuildAndPublishAsync(projectRoot, unityContents).ConfigureAwait(false);
+                }
+
                 sdk ??= Path.Combine(unityContents, "PlaybackEngines", "AndroidPlayer", "SDK");
                 var request = JavaWrapperGenerationRequest.Create(projectRoot, unityContents, sdk);
                 foreach (var warning in request.Warnings)
@@ -104,9 +110,14 @@ namespace MajdataPlay.Tools.AndroidJavaWrapperGenerator
                     return exitCode;
                 }
 
-                var count = JavaWrapperOutput.Publish(request.StagingDirectory, request.OutputDirectory, request.PreviousOutputDirectory);
-                Console.WriteLine("Published " + count + " runtime sources in " + request.OutputDirectory);
-                return 0;
+                JavaWrapperOutput.Publish(request.StagingDirectory, request.OutputDirectory);
+
+                return await BuildAndPublishAsync(projectRoot, unityContents).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                Console.Error.WriteLine("Wrapper library compilation canceled; the installed DLL was retained.");
+                return 130;
             }
             catch (ArgumentException exception)
             {
@@ -117,6 +128,39 @@ namespace MajdataPlay.Tools.AndroidJavaWrapperGenerator
             {
                 Console.Error.WriteLine("Project generation failed: " + exception.Message);
                 return 1;
+            }
+        }
+
+        /// <summary>Compiles extensions and publishes the runtime library before retiring owned legacy Unity sources.</summary>
+        /// <param name="projectRoot">The Unity repository containing the standalone wrapper project.</param>
+        /// <param name="unityContents">The validated pinned Unity Editor Data or Contents directory.</param>
+        /// <returns>Zero after successful publication.</returns>
+        /// <exception cref="IOException">Compilation, ownership validation, or publication fails.</exception>
+        /// <exception cref="UnauthorizedAccessException">A source or publication destination cannot be accessed.</exception>
+        /// <exception cref="OperationCanceledException">The compiler is canceled by the CLI user.</exception>
+        private static async Task<int> BuildAndPublishAsync(string projectRoot, string unityContents)
+        {
+            using var cancellation = new CancellationTokenSource();
+            ConsoleCancelEventHandler cancelHandler = (sender, args) =>
+            {
+                args.Cancel = true;
+                cancellation.Cancel();
+            };
+            Console.CancelKeyPress += cancelHandler;
+            try
+            {
+                var build = await WrapperLibraryProject.BuildAsync(projectRoot, unityContents, cancellation.Token).ConfigureAwait(false);
+                cancellation.Token.ThrowIfCancellationRequested();
+                using var cleanup = LegacyWrapperSources.Prepare(projectRoot);
+                cancellation.Token.ThrowIfCancellationRequested();
+                WrapperLibraryProject.Publish(projectRoot, build);
+                cleanup.Cleanup();
+                Console.WriteLine("Published runtime library: " + Path.Combine(projectRoot, "Assets", "Plugins", "MajdataPlay", "Platform", "Android", WrapperLibraryProject.AssemblyName + ".dll"));
+                return 0;
+            }
+            finally
+            {
+                Console.CancelKeyPress -= cancelHandler;
             }
         }
 
