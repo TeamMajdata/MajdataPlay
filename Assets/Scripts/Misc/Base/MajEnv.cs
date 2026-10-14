@@ -12,6 +12,7 @@ using MajdataPlay.Settings;
 using MajdataPlay.Settings.Runtime;
 using MajdataPlay.Utils;
 #if UNITY_ANDROID
+using MajdataPlay.Platform.Android;
 #elif UNITY_IOS
 using MajdataPlay.Platform.iOS;
 #endif
@@ -216,12 +217,12 @@ namespace MajdataPlay
             AssetsPath = FileSystem.Directory.Open(Application.streamingAssetsPath);
             CachePath = FileSystem.Directory.Open(Path.Combine(RootPath.Location, "Cache"));
 #elif UNITY_ANDROID
-            if (AndroidSdkVersion < 30 || TargetSdkVersion < 30) // < Android 11
+            if (AndroidRuntime.SdkVersion < 30 || AndroidRuntime.TargetSdkVersion < 30) // < Android 11
             {
                 var androidStoragePermissions = new string[]
                 {
-                    Permission.ExternalStorageRead,
-                    Permission.ExternalStorageWrite,
+                    UnityEngine.Android.Permission.ExternalStorageRead,
+                    UnityEngine.Android.Permission.ExternalStorageWrite,
                 };
                 var isGranted = true;
                 for (var i = 0; i < androidStoragePermissions.Length; i++)
@@ -229,12 +230,12 @@ namespace MajdataPlay
                     var flag = 0;
                     var permission = androidStoragePermissions[i];
                 RECHECK_PERMISSION:
-                    if (!Permission.HasUserAuthorizedPermission(permission))
+                    if (!UnityEngine.Android.Permission.HasUserAuthorizedPermission(permission))
                     {
                         switch (flag)
                         {
                             case 0:
-                                Permission.RequestUserPermission(permission);
+                                UnityEngine.Android.Permission.RequestUserPermission(permission);
                                 flag = 1;
                                 goto RECHECK_PERMISSION;
                             case 1:
@@ -284,7 +285,6 @@ namespace MajdataPlay
                 RootPath = FileSystem.Directory.Open(Application.persistentDataPath);
                 AssetsPath = FileSystem.Directory.Open(Path.Combine(Application.persistentDataPath, "ExtStreamingAssets/"));
             }
-                
             CachePath = FileSystem.Directory.Open(Application.temporaryCachePath);
 #elif UNITY_IOS
             RootPath = FileSystem.Directory.Open(Application.persistentDataPath);

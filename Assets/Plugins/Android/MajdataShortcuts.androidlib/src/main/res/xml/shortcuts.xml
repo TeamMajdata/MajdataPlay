@@ -7,7 +7,7 @@
         android:shortcutShortLabel="@string/shortcut_import_archive_short">
         <intent
             android:action="net.majdata.majdataplay.action.IMPORT_ARCHIVE"
-            android:targetClass="net.majdata.majdataplay.MajdataPlayActivity"
+            android:targetClass="net.majdata.majdataplay.MajdataShortcutActivity"
             android:targetPackage="net.majdata.majdataplay" />
     </shortcut>
     <shortcut
@@ -17,7 +17,7 @@
         android:shortcutShortLabel="@string/shortcut_import_folder_short">
         <intent
             android:action="net.majdata.majdataplay.action.IMPORT_FOLDER"
-            android:targetClass="net.majdata.majdataplay.MajdataPlayActivity"
+            android:targetClass="net.majdata.majdataplay.MajdataShortcutActivity"
             android:targetPackage="net.majdata.majdataplay" />
     </shortcut>
 </shortcuts>
