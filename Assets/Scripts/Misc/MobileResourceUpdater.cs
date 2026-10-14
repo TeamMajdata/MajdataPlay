@@ -7,7 +7,6 @@ using System.Security.Cryptography;
 using MajdataPlay.Diagnostics;
 using MajdataPlay.IO.Storage;
 using UnityEngine;
-using UnityEngine.Networking;
 
 #nullable enable
 namespace MajdataPlay
@@ -456,62 +455,48 @@ namespace MajdataPlay
                 : Path.Combine(MajEnv.AssetsPath.Location, platformPath);
         }
 
-        /// <summary>Reads packaged bytes through local iOS storage or the Android streaming asset request.</summary>
+        /// <summary>Reads packaged bytes through local iOS storage or an Android APK archive entry.</summary>
         /// <param name="relativePath">The portable packaged resource path.</param>
         /// <param name="data">Receives the packaged bytes, or an empty array after failure.</param>
         /// <returns>Whether the packaged bytes were read successfully.</returns>
         private static bool TryReadPackagedResource(string relativePath, out byte[] data)
         {
-#if UNITY_IOS
-            var sourcePath = Path.Combine(
-                Application.streamingAssetsPath,
-                relativePath.Replace('/', Path.DirectorySeparatorChar));
             try
             {
-                data = FileSystem.File.Open(sourcePath).ReadAllBytes();
+                data = FileSystem.File.Open(GetPackagedResourceLocation(relativePath)).ReadAllBytes();
                 return true;
             }
             catch (Exception exception)
             {
                 MajDebug.LogError(
-                    $"Resource update failed while reading packaged iOS resource: " +
+                    $"Resource update failed while reading packaged resource: " +
                     $"{relativePath}\n{exception}");
                 data = Array.Empty<byte>();
                 return false;
             }
-#elif UNITY_ANDROID
-            var sourceUrl = Path.Combine(Application.streamingAssetsPath, relativePath).Replace("\\", "/");
-            try
-            {
-                using var request = UnityWebRequest.Get(sourceUrl);
-                request.downloadHandler = new DownloadHandlerBuffer();
-                var operation = request.SendWebRequest();
-                while (!operation.isDone)
-                {
-                    System.Threading.Thread.Sleep(1);
-                }
+        }
 
-                if (request.result != UnityWebRequest.Result.Success)
-                {
-                    MajDebug.LogError(
-                        $"Resource update failed while reading packaged Android resource: " +
-                        $"{relativePath}\n{request.error}");
-                    data = Array.Empty<byte>();
-                    return false;
-                }
-
-                data = request.downloadHandler.data ?? Array.Empty<byte>();
-                return true;
-            }
-            catch (Exception exception)
+        /// <summary>Resolves one validated manifest path against the platform's packaged resource root.</summary>
+        /// <param name="relativePath">The portable packaged resource path whose segments contain literal file names.</param>
+        /// <returns>A local path or a jar URI with each archive entry segment escaped exactly once.</returns>
+        /// <exception cref="ArgumentException">The local path is invalid.</exception>
+        /// <exception cref="UriFormatException">An archive entry segment cannot be escaped.</exception>
+        private static string GetPackagedResourceLocation(string relativePath)
+        {
+#if UNITY_ANDROID
+            if (Application.streamingAssetsPath.StartsWith("jar:", StringComparison.OrdinalIgnoreCase))
             {
-                MajDebug.LogError(
-                    $"Resource update failed while reading packaged Android resource: " +
-                    $"{relativePath}\n{exception}");
-                data = Array.Empty<byte>();
-                return false;
+                var segments = relativePath.Split('/');
+                for (var i = 0; i < segments.Length; i++)
+                {
+                    segments[i] = Uri.EscapeDataString(segments[i]);
+                }
+                return Application.streamingAssetsPath.TrimEnd('/') + "/" + string.Join("/", segments);
             }
 #endif
+            return Path.Combine(
+                Application.streamingAssetsPath,
+                relativePath.Replace('/', Path.DirectorySeparatorChar));
         }
 
         /// <summary>Hashes a local resource through its storage stream without buffering the whole file.</summary>

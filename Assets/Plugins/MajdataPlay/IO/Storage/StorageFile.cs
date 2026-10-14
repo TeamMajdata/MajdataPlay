@@ -26,7 +26,7 @@ namespace MajdataPlay.IO.Storage
         /// <summary>Gets the backend responsible for this file location.</summary>
         public IFileSystem FileSystem { get; }
 
-        /// <summary>Gets the normalized local path or unchanged opaque provider location.</summary>
+        /// <summary>Gets the normalized local path, canonical jar file URI, or unchanged opaque provider location.</summary>
         public string Location { get; }
 
         /// <summary>Gets current entry metadata, or null when the location does not exist.</summary>
@@ -53,7 +53,7 @@ namespace MajdataPlay.IO.Storage
 
         /// <summary>Creates a file handle without opening or creating the file.</summary>
         /// <param name="fileSystem">The backend owning the location.</param>
-        /// <param name="location">A local path or file URI for a local backend, otherwise an opaque provider location.</param>
+        /// <param name="location">A local path, file URI, jar file URI, or opaque provider location owned by the backend.</param>
         /// <exception cref="ArgumentNullException">The backend or location is null.</exception>
         /// <exception cref="ArgumentException">The location is empty or the local path is invalid.</exception>
         /// <exception cref="NotSupportedException">A local backend was given a non-file URI.</exception>
@@ -73,7 +73,9 @@ namespace MajdataPlay.IO.Storage
                 throw new ArgumentException("A file location is required.", nameof(location));
             }
             FileSystem = fileSystem;
-            Location = fileSystem is LocalFileSystem ? global::MajdataPlay.IO.Storage.FileSystem.NormalizeLocalPath(location) : location;
+            Location = fileSystem is LocalFileSystem
+                ? global::MajdataPlay.IO.Storage.FileSystem.NormalizeLocalPath(location)
+                : fileSystem is JarFileSystem ? JarFileSystem.NormalizeLocation(location) : location;
         }
 
         /// <summary>Opens the existing file for reading without requiring a seekable stream.</summary>

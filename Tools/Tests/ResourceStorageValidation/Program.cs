@@ -1,6 +1,7 @@
 #nullable enable
 using System;
 using System.IO;
+using System.IO.Compression;
 using System.Linq;
 using System.Reflection;
 using System.Security.Cryptography;
@@ -24,6 +25,7 @@ namespace ResourceStorageValidation
                 ("Desktop restores empty chart and skin roots", DesktopRestoresEmptyRoots),
                 ("Desktop preserves nonempty managed roots", DesktopPreservesExistingRoots),
                 ("Mobile initial extraction moves managed assets", MobileInitialExtraction),
+                ("Mobile extraction preserves literal packaged names", MobileExtractsLiteralPackagedNames),
                 ("Mobile extraction preserves existing managed assets", MobilePreservesExistingManagedAssets),
                 ("Mobile incomplete extraction retries safely", MobileRetriesIncompleteExtraction),
                 ("Mobile update respects official hashes and player choices", MobileUpdatePreservesPlayerChoices),
@@ -55,7 +57,7 @@ namespace ResourceStorageValidation
         /// <summary>Checks desktop copying creates nested charts and skins in otherwise empty roots.</summary>
         private static void DesktopRestoresEmptyRoots()
         {
-            using var fixture = new Fixture();
+            using var fixture = new Fixture(usePackagedArchive: false);
             fixture.Package("MaiCharts/Original/song/maidata.txt", "official chart");
             fixture.Package("Skins/default/skin.json", "official skin");
             var packagedChartPath = Path.Combine(Application.streamingAssetsPath, "MaiCharts/Original/song/maidata.txt");
@@ -79,7 +81,7 @@ namespace ResourceStorageValidation
         /// <summary>Checks a populated chart root stays intact while an empty skin root is restored.</summary>
         private static void DesktopPreservesExistingRoots()
         {
-            using var fixture = new Fixture();
+            using var fixture = new Fixture(usePackagedArchive: false);
             fixture.Package("MaiCharts/Original/maidata.txt", "official chart");
             fixture.Package("Skins/default/skin.json", "official skin");
             fixture.Write("MaiCharts/custom/maidata.txt", "player chart");
@@ -106,6 +108,19 @@ namespace ResourceStorageValidation
             fixture.AssertMissing("Assets/Skins/default");
             fixture.AssertMissing("Assets/.pending-managed-asset-moves");
             fixture.AssertMissing("Assets.extracting-v2");
+            AssertNoErrors();
+        }
+
+        /// <summary>Checks literal percent escapes, URI delimiters, spaces, and Unicode survive packaged extraction.</summary>
+        private static void MobileExtractsLiteralPackagedNames()
+        {
+            using var fixture = new Fixture();
+            const string relativePath = "Config/中文 %20 # + !/data %20 # + 中文.txt";
+            fixture.Package(relativePath, "literal packaged names");
+            fixture.Package("MaiCharts/Original/maidata.txt", "official chart");
+            fixture.Package("Skins/default/skin.json", "official skin");
+            InitializeMobile();
+            fixture.AssertText("Assets/" + relativePath, "literal packaged names");
             AssertNoErrors();
         }
 
@@ -280,16 +295,40 @@ namespace ResourceStorageValidation
             /// <summary>Owns the absolute fixture root beneath the ignored validation work directory.</summary>
             private readonly string _root;
 
+            /// <summary>Owns the native package directory used by desktop and iOS fixture operations.</summary>
+            private readonly string _packageRoot;
+
+            /// <summary>Owns the Android APK fixture path, or null for a native packaged-resource root.</summary>
+            private readonly string? _archivePath;
+
             /// <summary>Creates isolated app and package roots with empty player-managed directories.</summary>
-            public Fixture()
+            /// <param name="usePackagedArchive">Whether Android mobile cases read from a real APK-shaped ZIP archive.</param>
+            public Fixture(bool usePackagedArchive = true)
             {
                 var workRoot = Path.GetFullPath(Path.Combine("Temp", "ResourceStorageValidation", "work"));
                 _root = Path.Combine(workRoot, Guid.NewGuid().ToString("N"));
                 MajEnv.RootPath = FileSystem.Directory.Create(Path.Combine(_root, "App"));
-                Application.streamingAssetsPath = Path.Combine(_root, "Package");
+                _packageRoot = Path.Combine(_root, "Package");
+                _archivePath = null;
+                Directory.CreateDirectory(_packageRoot);
+                Application.streamingAssetsPath = _packageRoot;
+#if UNITY_ANDROID
+                if (usePackagedArchive)
+                {
+                    _archivePath = Path.Combine(_root, "Package %20 # 中文.apk");
+                    using var archive = ZipFile.Open(_archivePath, ZipArchiveMode.Create);
+                    var archiveRoot = Path.GetPathRoot(_archivePath)!;
+                    var segments = _archivePath.Substring(archiveRoot.Length).Split(Path.DirectorySeparatorChar);
+                    for (var i = 0; i < segments.Length; i++)
+                    {
+                        segments[i] = Uri.EscapeDataString(segments[i]);
+                    }
+                    Application.streamingAssetsPath = "jar:" + new Uri(archiveRoot).AbsoluteUri +
+                        string.Join("/", segments) + "!/assets";
+                }
+#endif
                 Directory.CreateDirectory(MajEnv.ChartPath.Location);
                 Directory.CreateDirectory(MajEnv.SkinPath.Location);
-                Directory.CreateDirectory(Application.streamingAssetsPath);
                 ResourceManifestLoader.V1Hashes.Clear();
                 ResourceManifestLoader.V2Hashes.Clear();
                 ResourceManifestLoader.DiffPaths.Clear();
@@ -303,7 +342,20 @@ namespace ResourceStorageValidation
             /// <param name="changed">Whether the path appears in the official update diff.</param>
             public void Package(string relativePath, string text, string? previousText = null, bool changed = false)
             {
-                WriteText(Path.Combine(Application.streamingAssetsPath, relativePath), text);
+                if (_archivePath is null)
+                {
+                    WriteText(Path.Combine(_packageRoot, relativePath), text);
+                }
+                else
+                {
+                    using var archive = ZipFile.Open(_archivePath, ZipArchiveMode.Update);
+                    var name = "assets/" + relativePath;
+                    archive.GetEntry(name)?.Delete();
+                    var entry = archive.CreateEntry(name, CompressionLevel.Optimal);
+                    using var stream = entry.Open();
+                    using var writer = new StreamWriter(stream, new UTF8Encoding(false));
+                    writer.Write(text);
+                }
                 ResourceManifestLoader.V2Hashes[relativePath] = Hash(text);
                 if (previousText is not null)
                 {

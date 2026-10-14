@@ -6,12 +6,12 @@ namespace MajdataPlay.IO.Storage
 {
     public static partial class FileSystem
     {
-        /// <summary>Provides directory operations over native paths, file URIs, and registered content URIs.</summary>
+        /// <summary>Provides directory operations over native paths, file URIs, read-only jar file URIs, and registered content URIs.</summary>
         /// <remarks>Locations are opaque and authoritative; never combine them with <see cref="Path"/>.</remarks>
         public static class Directory
         {
             /// <summary>Creates a directory handle without requiring the directory to exist.</summary>
-            /// <param name="location">A local path, file URI, or registered content URI.</param>
+            /// <param name="location">A local path, file URI, jar file URI, or registered content URI.</param>
             /// <returns>A handle retaining the resolved provider and its location.</returns>
             /// <exception cref="ArgumentNullException">The location is null.</exception>
             /// <exception cref="ArgumentException">The location or URI is invalid.</exception>

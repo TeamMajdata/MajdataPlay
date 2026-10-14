@@ -4,7 +4,6 @@ The `MajdataPlay.IO.Storage` namespace belongs to the existing `MajdataPlay.IO` 
 It uses a small synchronous `IFileSystem` backend contract and typed `StorageFile` /
 `StorageDirectory` handles. The local backend uses `System.IO` on Windows, Linux,
 macOS, iOS, and Android. The Android-only assembly provides a SAF document backend
-And Android. The Android-only assembly provides a SAF document backend
 and cancellable system pickers, without adding an Android dependency to the portable assembly.
 
 File operations live on the nested `FileSystem.File` and directory operations on
@@ -34,7 +33,8 @@ var copy = await renamed.CopyToAsync(library, "backup.txt", cancellationToken: c
 ```
 
 `FileSystem.File.Open(location)` and `FileSystem.Directory.Open(location)` automatically select
-the backend for native paths, `file://` URIs, and registered `content://` URIs.
+the backend for native paths, `file://` URIs, read-only `jar:file://...!/` URIs,
+and registered `content://` URIs.
 `LocalFileSystem` is internal; `FileSystem` does not expose a local backend property.
 Callers pass a location to the facade rather than constructing or selecting the
 local implementation. Handles expose their backend only through `IFileSystem`.
@@ -119,6 +119,50 @@ does not require an existing destination.
 Entry snapshots also expose optional UTC creation times and backend-reported
 hidden/system flags. Local enumeration supplies them for chart ordering and
 filtering; providers which do not report them retain null/false defaults.
+
+## Packaged APK/JAR resources
+
+`FileSystem` recognizes Unity Android streaming asset locations such as
+`jar:file:///data/app/example/base.apk!/assets/Config/options.txt`. The portable,
+read-only backend opens the local ZIP/APK with `System.IO.Compression.ZipArchive`;
+it requires neither UnityWebRequest nor JNI or a registered Android provider.
+It also works with local ZIP fixtures in the Editor and on desktop hosts.
+
+```csharp
+var packagedAssets = FileSystem.Directory.Open(Application.streamingAssetsPath);
+var config = packagedAssets.FindDirectory("Config")!.FindFile("options.txt")!;
+var text = await config.ReadAllTextAsync(cancellationToken: cancellationToken);
+var extracted = await config.CopyToAsync(
+    writableDirectory, "options.txt", cancellationToken: cancellationToken);
+// Pass extracted.Location to a native library that requires a local filename.
+```
+
+Reads stream and decompress a single entry; copying through the existing file
+APIs extracts it into local storage or another writable provider. Directory
+lookup and immediate enumeration include implicit ZIP directories. Each open
+stream independently owns its archive and closes it on disposal. Metadata and
+directory queries read the archive afresh; perform substantial packaged I/O off
+the game loop, as with the other synchronous storage backends.
+
+ZIP entry names use ordinal, case-sensitive comparison. URI path segments are
+percent-decoded exactly once: a literal percent sign must be encoded as `%25`.
+Use directory lookup by child name to obtain authoritative escaped locations
+for spaces, Unicode, `#`, `?`, or names that look like encoded separators.
+Do not combine jar locations with `Path`. Nested archives, non-file archive
+URLs, URI queries/fragments, traversal, and encoded path separators are rejected.
+Unsafe archive records are not exposed; ambiguous duplicate names are errors.
+
+Packaged entries cannot be created, written, renamed, moved, deleted, or have
+their attributes/timestamps changed. Copying out is supported; replacement
+rejects archive operands before changing the destination because it consumes
+the source. As with other backends, an idempotent directory create may return
+an already existing directory without changing it.
+
+The isolated Unity validation also executes compressed APK reads and extraction
+in the Editor's Mono runtime, including escaped names, archive stream disposal,
+and replacement refusal. Run `./Tools/Tests/ValidateFileSystemUnity.ps1 -PlayerTargets Android -SkipJavaCompilation`
+to include Android storage assembly script compilation. The jar smoke marker is
+`FILE_SYSTEM_JAR_EDITOR_SMOKE_PASSED`; this does not run an Android player or device.
 
 ## Android SAF
 

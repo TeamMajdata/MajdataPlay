@@ -83,6 +83,17 @@ failure in one case does not prevent the other cases from running.
 - All asynchronous byte/text helpers, successful multi-buffer I/O, existing-only
   behavior, deterministic mid-read cancellation, and pre-cancelled operations
   which must not truncate existing data.
+- Read-only `jar:file:///.../application.apk!/assets/...` routing, compressed and
+  stored ZIP entries, byte/text sync and async reads, BOM detection, implicit and
+  explicit directories, immediate enumeration, case-sensitive lookup, Unicode,
+  and literal percent-encoded-looking archive and entry names.
+- Archive extraction through facade and handle copies into native paths/file
+  URIs and opaque non-seekable provider destinations, explicit overwrite,
+  pre-cancellation, failed-destination cleanup, independent stream lifetimes,
+  and exclusive reopening proving archive handles are released.
+- Archive mutation rejection, replacement preflight preserving native and opaque
+  destinations, malformed/nested/remote/traversal URI rejection, and corrupt or
+  ambiguous ZIP records failing before extraction creates or truncates a target.
 - Both local-to-content and content-to-local copy directions, synchronous and
   asynchronous, including overwrite and non-seekable source/destination streams.
 - Deterministic source-read and destination-write failures, pre-cancellation,
@@ -140,6 +151,41 @@ exist yet. Provider replacement streams into the existing destination and consum
 the source without atomicity, and a backup path is refused before mutation. Provider
 entries accept attribute requests without effect, and modification-time writes are
 provider-dependent.
+
+## Read-only archive locations
+
+The facade also accepts Unity-style local APK/JAR locations such as
+`jar:file:///data/app/example/base.apk!/assets/config.json`. Archive resolution
+uses managed ZIP streams and does not require UnityWebRequest, JNI, or a content
+provider. File and directory handles retain the usual storage API: `OpenRead`,
+byte/text helpers, immediate enumeration and nullable child lookup. Parent
+directories omitted from ZIP records are synthesized from child entry names.
+
+To extract a resource, use `FileSystem.File.Copy(jarUri, nativeDestination)` or
+`packagedFile.CopyTo(destinationDirectory, childName)`. Async handle copying uses
+the same archive backend, supports cancellation, and keeps bounded transfer
+buffers. The destination may be a native directory or a registered content
+provider. Reading does not create an unpacked cache or change the archive.
+
+Only one local archive is supported; nested archives and HTTP/content archive
+sources are rejected. Archive entry paths use forward slashes, retain ZIP's
+case-sensitive comparison, and escape each display-name component exactly once.
+For example, the literal ZIP name `%2F.txt` is addressed as `%252F.txt`, while
+`%2F` as a decoded separator is rejected. Queries, fragments, traversal, empty
+components and malformed escapes are rejected. Unsafe ZIP paths are ignored;
+duplicate records and file/directory collisions fail with `IOException`.
+Corrupt ZIP data propagates `InvalidDataException` and is not reported as absence.
+
+Archive contents are read-only: creating children, writing, renaming, moving,
+deleting and changing metadata fail with `NotSupportedException`. Calling
+`FileSystem.Directory.Create` for an existing archive directory returns its
+existing handle without modification. Replacement refuses an archive operand
+before consuming its source or opening a writable destination stream.
+
+The suite generates APK-shaped ZIP fixtures under its owned OS-temp roots. This
+validates managed host ZIP behavior, including compressed and stored records;
+it does not establish packaging or execution in a real Android APK/AAB,
+Unity/Mono/IL2CPP behavior, or Android device performance.
 
 ## Isolated Unity and production generated-wrapper validation
 

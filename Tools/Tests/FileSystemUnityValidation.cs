@@ -20,8 +20,11 @@ using MajdataPlay.Platform.Android.Storage;
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.IO.Compression;
+using CompressionLevel = System.IO.Compression.CompressionLevel;
 using System.Reflection;
 using System.Runtime.Serialization;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using UnityEditor;
@@ -165,7 +168,7 @@ namespace MajdataPlay.Tests
                     }
                     Debug.Log("FILE_SYSTEM_PLAYER_COMPILE_PASSED: " + targetName + " (compile only, not runtime).");
                 }
-                Debug.Log("FILE_SYSTEM_UNITY_PASSED: Editor local smoke, production generated wrappers, Editor JNI guards, picker regressions, requested player script compilation.");
+                Debug.Log("FILE_SYSTEM_UNITY_PASSED: Editor local and jar smoke, production generated wrappers, Editor JNI guards, picker regressions, requested player script compilation.");
                 EditorApplication.Exit(0);
             }
             catch (Exception exception)
@@ -193,6 +196,7 @@ namespace MajdataPlay.Tests
                 var renamed = copy.Rename("renamed.txt");
                 Require(renamed.Exists && !copy.Exists, "Rename did not return the authoritative new location.");
                 Require(directory.FindFile("renamed.txt") is not null, "Child lookup failed.");
+                CheckArchiveOperations(directory);
                 RequireThrowsPlatform(() => new AndroidDocumentFileSystem().GetEntry("content://test/tree/root"));
                 RequireThrowsPlatform(() => AndroidStorageAccess.GetPersistedPermissions());
                 RequireThrowsPlatform(() => AndroidStorageAccess.PickDirectoryAsync().GetAwaiter().GetResult());
@@ -202,6 +206,77 @@ namespace MajdataPlay.Tests
             {
                 directory.Delete(true);
             }
+        }
+
+        /// <summary>Checks compressed jar reads, implicit directories, stream ownership, copying, and read-only replacement in Mono.</summary>
+        /// <param name="directory">The existing test-owned local directory containing every fixture and copy.</param>
+        /// <exception cref="InvalidOperationException">An archive behavior expectation fails.</exception>
+        private static void CheckArchiveOperations(StorageDirectory directory)
+        {
+            const string text = "Compressed APK resource 中文\r\nSecond line";
+            const string name = "notes %20 # 中文.txt";
+            var bytes = new byte[65553];
+            for (var i = 0; i < bytes.Length; i++)
+            {
+                bytes[i] = (byte)(i % 251);
+            }
+            var archiveFile = directory.CreateFile("package %20 # 中文.apk");
+            using (var output = archiveFile.OpenWrite())
+            using (var archive = new ZipArchive(output, ZipArchiveMode.Create, false))
+            {
+                var textEntry = archive.CreateEntry("assets/implicit/" + name, CompressionLevel.Optimal);
+                using (var entryStream = textEntry.Open())
+                using (var writer = new StreamWriter(entryStream, new UTF8Encoding(false)))
+                {
+                    writer.Write(text);
+                }
+                var binaryEntry = archive.CreateEntry("assets/payload.bin", CompressionLevel.Optimal);
+                using (var entryStream = binaryEntry.Open())
+                {
+                    entryStream.Write(bytes, 0, bytes.Length);
+                }
+            }
+            var archiveRoot = Path.GetPathRoot(archiveFile.Location)!;
+            var segments = archiveFile.Location.Substring(archiveRoot.Length).Split(Path.DirectorySeparatorChar);
+            for (var i = 0; i < segments.Length; i++)
+            {
+                segments[i] = Uri.EscapeDataString(segments[i]);
+            }
+            var jarLocation = "jar:" + new Uri(archiveRoot).AbsoluteUri + string.Join("/", segments) + "!/assets";
+            var assets = FileSystem.Directory.Open(jarLocation);
+            Require(assets.Exists, "An implicit jar asset directory must exist.");
+            var implicitDirectory = assets.FindDirectory("implicit")
+                ?? throw new InvalidOperationException("An implicit jar child directory was not found.");
+            var packagedText = implicitDirectory.FindFile(name)
+                ?? throw new InvalidOperationException("A jar file with literal URI characters was not found.");
+            Require(packagedText.ReadAllText() == text, "Compressed jar text or URI escaping failed.");
+            Require(packagedText.ReadAllTextAsync().GetAwaiter().GetResult() == text, "Asynchronous jar text read failed in Mono.");
+            var packagedBinary = assets.FindFile("payload.bin")
+                ?? throw new InvalidOperationException("The compressed binary jar entry was not found.");
+            var actualBytes = packagedBinary.ReadAllBytes();
+            Require(actualBytes.Length == bytes.Length, "Compressed jar binary length changed.");
+            for (var i = 0; i < bytes.Length; i++)
+            {
+                Require(actualBytes[i] == bytes[i], "Compressed jar binary content changed.");
+            }
+            using (var input = packagedText.OpenRead())
+            using (var reader = new StreamReader(input, Encoding.UTF8))
+            {
+                Require(input.CanRead && !input.CanWrite, "A jar stream must remain readable until disposed.");
+                Require(reader.ReadToEnd() == text, "Direct jar stream reading failed.");
+            }
+            using (var exclusive = new FileStream(archiveFile.Location, FileMode.Open, FileAccess.Read, FileShare.None))
+            {
+                Require(exclusive.Length > 0, "Disposing jar streams must release their archive file handles.");
+            }
+            var copy = packagedText.CopyTo(directory, "jar-copy.txt");
+            Require(copy.ReadAllText() == text, "Copying a jar entry to native storage failed.");
+            var target = directory.CreateFile("jar-replace-target.txt");
+            target.WriteAllText("player-owned content");
+            RequireThrows<NotSupportedException>(() => FileSystem.File.Replace(packagedText.Location, target.Location),
+                "Replacing a destination from a read-only jar source must fail.");
+            Require(target.ReadAllText() == "player-owned content", "Rejected jar replacement must preserve the destination bytes.");
+            Debug.Log("FILE_SYSTEM_JAR_EDITOR_SMOKE_PASSED: compressed reads, implicit directories, escaping, disposal, copy, read-only replacement (Mono).");
         }
 
         /// <summary>Checks the production SAF wrappers, signed bytes, typed envelopes, and no-JNI reference lifecycle.</summary>

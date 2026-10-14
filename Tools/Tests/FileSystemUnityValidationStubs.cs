@@ -11,6 +11,13 @@ namespace MajdataPlay.Diagnostics
         {
         }
 
+        /// <summary>Accepts a tagged informational message without initializing unrelated game services.</summary>
+        /// <param name="tag">The ignored logging context.</param>
+        /// <param name="message">The ignored message.</param>
+        public static void LogInfo(string tag, string message)
+        {
+        }
+
         /// <summary>Accepts an error message without initializing unrelated game services.</summary>
         /// <param name="message">The ignored message.</param>
         public static void LogError(string message)

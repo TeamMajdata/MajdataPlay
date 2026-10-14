@@ -14,7 +14,7 @@ using StorageFacade = MajdataPlay.IO.Storage.FileSystem;
 namespace MajdataPlay.Tests.FileSystemValidation
 {
     /// <summary>Runs package-free regressions against the linked production storage implementations.</summary>
-    internal static class Program
+    internal static partial class Program
     {
         /// <summary>Counts assertions across all independent cases.</summary>
         private static int s_assertions;
@@ -49,6 +49,15 @@ namespace MajdataPlay.Tests.FileSystemValidation
                 ("local: non-recursive and recursive deletion", TestLocalDelete),
                 ("local: directory links do not delete outside targets", TestDirectoryLinks),
                 ("local: file links do not delete outside targets", TestFileLinks),
+                ("jar: automatic routing, metadata and sync/async reads", TestJarReads),
+                ("jar: implicit directories, immediate children and escaped names", TestJarChildren),
+                ("jar: extraction to native and opaque destinations", TestJarExtraction),
+                ("jar: pre-cancellation preserves existing extraction targets", TestJarCancellation),
+                ("jar: read-only mutations preserve archive and destinations", TestJarReadOnly),
+                ("jar: malformed, remote, nested and traversal URIs", TestJarLocations),
+                ("jar: canonical archive URI preserves literal escaped-looking names", TestJarArchiveNames),
+                ("jar: corrupt and ambiguous archives fail before destination writes", TestJarInvalidArchives),
+                ("jar: missing entries, independent streams and archive ownership", TestJarStreamOwnership),
                 ("content: dispatch, opaque IDs and nullable metadata", TestContentDispatch),
                 ("facade: unified content creation and sequential streams", TestUnifiedContentCreation),
                 ("facade: unified local/content copy routing and aliases", TestUnifiedCopies),

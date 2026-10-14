@@ -6,12 +6,12 @@ namespace MajdataPlay.IO.Storage
 {
     public static partial class FileSystem
     {
-        /// <summary>Provides file operations over native paths, file URIs, and registered content URIs.</summary>
+        /// <summary>Provides file operations over native paths, file URIs, read-only jar file URIs, and registered content URIs.</summary>
         /// <remarks>Locations are opaque and authoritative; never combine them with <see cref="Path"/>.</remarks>
         public static class File
         {
             /// <summary>Creates a file handle without requiring the file to exist.</summary>
-            /// <param name="location">A local path, file URI, or registered content URI.</param>
+            /// <param name="location">A local path, file URI, jar file URI, or registered content URI.</param>
             /// <returns>A handle retaining the resolved provider and its location.</returns>
             /// <exception cref="ArgumentNullException">The location is null.</exception>
             /// <exception cref="ArgumentException">The location or URI is invalid.</exception>
@@ -233,7 +233,7 @@ namespace MajdataPlay.IO.Storage
             /// </remarks>
             /// <exception cref="ArgumentNullException">A required location is null.</exception>
             /// <exception cref="ArgumentException">A location is invalid.</exception>
-            /// <exception cref="NotSupportedException">A provider operand was combined with a backup path, or the platform cannot replace files.</exception>
+            /// <exception cref="NotSupportedException">An operand belongs to a read-only archive, a provider operand has a backup path, or replacement is unsupported.</exception>
             /// <exception cref="PlatformNotSupportedException">The platform does not support file replacement.</exception>
             /// <exception cref="FileNotFoundException">The source or destination does not exist.</exception>
             /// <exception cref="UnauthorizedAccessException">Replacement was denied.</exception>
@@ -243,6 +243,11 @@ namespace MajdataPlay.IO.Storage
                 var sourceFile = Open(source);
                 var destinationFile = Open(destination);
                 var backupFile = backupPath is null ? null : Open(backupPath);
+                if (sourceFile.FileSystem is JarFileSystem || destinationFile.FileSystem is JarFileSystem ||
+                    backupFile?.FileSystem is JarFileSystem)
+                {
+                    throw new NotSupportedException("Read-only archive entries cannot participate in file replacement.");
+                }
                 if (sourceFile.FileSystem is LocalFileSystem && destinationFile.FileSystem is LocalFileSystem &&
                     (backupFile is null || backupFile.FileSystem is LocalFileSystem))
                 {

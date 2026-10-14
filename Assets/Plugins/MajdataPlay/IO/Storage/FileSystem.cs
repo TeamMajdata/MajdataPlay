@@ -14,6 +14,9 @@ namespace MajdataPlay.IO.Storage
         /// <summary>Owns the shared local backend selected internally for native paths and file URIs.</summary>
         private static readonly LocalFileSystem s_local = new LocalFileSystem();
 
+        /// <summary>Owns the read-only ZIP/APK backend selected for jar file locations.</summary>
+        private static readonly JarFileSystem s_jar = new JarFileSystem();
+
         /// <summary>Registers or replaces the provider used for subsequent content URI resolutions.</summary>
         /// <param name="provider">The backend responsible for content URI locations.</param>
         /// <exception cref="ArgumentNullException">The provider is null.</exception>
@@ -26,6 +29,14 @@ namespace MajdataPlay.IO.Storage
             Interlocked.Exchange(ref s_contentProvider, provider);
         }
 
+        /// <summary>Queries metadata through the backend selected by a native path or supported storage URI.</summary>
+        /// <param name="location">The native path, file URI, jar file URI, or registered content URI.</param>
+        /// <returns>The current entry metadata, or null when it does not exist.</returns>
+        /// <exception cref="ArgumentNullException">The location is null or empty.</exception>
+        /// <exception cref="ArgumentException">The location or URI is invalid.</exception>
+        /// <exception cref="NotSupportedException">The URI scheme is unsupported or its provider is unavailable.</exception>
+        /// <exception cref="UnauthorizedAccessException">Querying the entry was denied.</exception>
+        /// <exception cref="IOException">Querying the entry failed.</exception>
         public static FileSystemEntry? GetEntry(string location)
         {
             if (string.IsNullOrEmpty(location))
@@ -147,12 +158,20 @@ namespace MajdataPlay.IO.Storage
 
         /// <summary>Selects the backend for a validated local path or supported URI.</summary>
         /// <param name="location">The caller's storage location.</param>
-        /// <returns>The local backend or registered content provider.</returns>
+        /// <returns>The local backend, read-only archive backend, or registered content provider.</returns>
         /// <exception cref="ArgumentNullException">The location is null.</exception>
         /// <exception cref="ArgumentException">The location or content URI is invalid.</exception>
         /// <exception cref="NotSupportedException">The URI scheme is unsupported or a content provider is unavailable.</exception>
         private static IFileSystem ResolveProvider(string location)
         {
+            if (location is null)
+            {
+                throw new ArgumentNullException(nameof(location));
+            }
+            if (location.StartsWith("jar:", StringComparison.OrdinalIgnoreCase))
+            {
+                return s_jar;
+            }
             var uri = GetLocationUri(location);
             if (uri is null || uri.IsFile)
             {
