@@ -38,6 +38,8 @@ namespace MajdataPlay.Tests
                 PlayerSettings.SetIl2CppCompilerConfiguration(NamedBuildTarget.Android, Il2CppCompilerConfiguration.Release);
                 PlayerSettings.Android.applicationEntry = AndroidApplicationEntry.Activity;
                 PlayerSettings.Android.targetArchitectures = architectures;
+                PlayerSettings.Android.buildApkPerCpuArchitecture = false;
+                PlayerSettings.Android.splitApplicationBinary = false;
                 PlayerSettings.Android.minSdkVersion = AndroidSdkVersions.AndroidApiLevel26;
                 PlayerSettings.Android.targetSdkVersion = AndroidSdkVersions.AndroidApiLevel35;
                 PlayerSettings.Android.useCustomKeystore = false;

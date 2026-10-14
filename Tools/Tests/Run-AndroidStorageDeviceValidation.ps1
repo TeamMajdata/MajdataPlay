@@ -4,7 +4,7 @@ param(
     [string]$UnityPath = 'C:/Program Files/Unity Editors/6000.3.17f1/Editor/Unity.exe',
     [string]$ApkPath,
     [ValidateSet('arm64-v8a', 'armeabi-v7a')][string]$Abi = 'arm64-v8a',
-    [ValidateSet('full', 'replay', 'release', 'streams')][string]$Mode = 'full',
+    [ValidateSet('full', 'replay', 'release', 'streams', 'jar')][string]$Mode = 'full',
     [switch]$Install,
     [switch]$StartOnly,
     [switch]$ObserveOnly,
@@ -45,7 +45,7 @@ if (!$ObserveOnly) {
     if ($LASTEXITCODE -ne 0) {
         throw 'Cannot stop the dedicated validation application.'
     }
-    & $adb -s $Serial shell am start -n $activity --es validationMode $Mode
+    & $adb -s $Serial shell am start -n $activity --es validationMode $Mode --es validationRunId $runId
     if ($LASTEXITCODE -ne 0) {
         throw 'Cannot launch the dedicated validation application.'
     }
@@ -82,6 +82,13 @@ do {
                         $result.Marker -ne ('FILE_SYSTEM_DEVICE_' + $Mode.ToUpperInvariant() + '_PASSED') -or
                         $result.ProcessId -ne [int]$devicePid -or $result.PointerSize -ne $expectedPointerSize) {
                         throw 'The durable result does not match this process, mode, requested ABI, or IL2CPP backend.'
+                    }
+                    if (!$ObserveOnly -and $result.RunId -ne $runId) {
+                        throw 'The durable result does not match this launch identifier.'
+                    }
+                    if ($Mode -eq 'jar' -and (!$result.StreamingAssetsIsJar -or !$result.JarDeflateChecked -or
+                        !$result.CleanupSucceeded -or $result.JarCheckGroups -ne 8)) {
+                        throw 'The durable result does not confirm all jar groups, deflate reads, or scratch cleanup.'
                     }
                     $rawResult | Set-Content -LiteralPath (Join-Path $results "$Abi-$Mode-$runId.json") -Encoding UTF8
                     Write-Output "Device validation log: $logPath"

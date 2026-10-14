@@ -141,12 +141,29 @@ $toolSource = Join-Path $PSScriptRoot 'AndroidStorageDeviceValidation'
     references = @('MajdataPlay.IO', 'MajdataPlay.Platform.Android')
 } | ConvertTo-Json | Set-JsonFile -LiteralPath (Join-Path $validation 'MajdataPlay.Storage.DeviceValidation.asmdef')
 Copy-Item -LiteralPath (Join-Path $toolSource 'AndroidStorageDeviceValidation.cs') -Destination $validation -Force
+$jarAssets = Join-Path $project 'Assets/StreamingAssets/JarValidation'
+foreach ($directory in @($jarAssets, (Join-Path $jarAssets 'implicit/nested'), (Join-Path $jarAssets 'names'))) {
+    New-Item -ItemType Directory -Force -Path $directory | Out-Null
+}
+$jarText = "MajdataPlay packaged UTF-8 你好" + [char]10
+[IO.File]::WriteAllText((Join-Path $jarAssets 'plain.txt'), $jarText, [Text.UTF8Encoding]::new($false))
+[IO.File]::WriteAllText((Join-Path $jarAssets 'names/space # 中文 %20.txt'), $jarText, [Text.UTF8Encoding]::new($false))
+$jarPattern = [byte[]]::new(65553)
+for ($index = 0; $index -lt $jarPattern.Length; $index++) {
+    $jarPattern[$index] = [byte]($index % 251)
+}
+[IO.File]::WriteAllBytes((Join-Path $jarAssets 'implicit/nested/pattern.bin'), $jarPattern)
+[IO.File]::WriteAllBytes((Join-Path $jarAssets 'empty.bin'), [byte[]]::new(0))
 @{ name = 'MajdataPlay.Storage.DeviceBuild.Editor'; includePlatforms = @('Editor') } | ConvertTo-Json | Set-JsonFile -LiteralPath (Join-Path $editor 'MajdataPlay.Storage.DeviceBuild.Editor.asmdef')
 Copy-Item -LiteralPath (Join-Path $toolSource 'AndroidStorageDeviceBuild.cs') -Destination $editor -Force
 $javaTarget = Join-Path $project 'Assets/Plugins/Android/src'
 New-Item -ItemType Directory -Force -Path $javaTarget | Out-Null
 Copy-Item -LiteralPath (Join-Path $root 'Assets/Plugins/Android/src/java') -Destination $javaTarget -Recurse -Force
 Copy-Item -LiteralPath (Join-Path $root 'Assets/Plugins/Android/AndroidManifest.xml') -Destination (Join-Path $project 'Assets/Plugins/Android/AndroidManifest.xml') -Force
+foreach ($library in Get-ChildItem -LiteralPath (Join-Path $root 'Assets/Plugins/Android') -Directory -Filter '*.androidlib') {
+    Copy-Item -LiteralPath $library.FullName -Destination (Join-Path $project 'Assets/Plugins/Android') -Recurse -Force
+    Copy-Item -LiteralPath ($library.FullName + '.meta') -Destination (Join-Path $project 'Assets/Plugins/Android') -Force
+}
 $probeJava = Join-Path $project 'Assets/Plugins/Android/src/java/net/majdata/validation'
 New-Item -ItemType Directory -Force -Path $probeJava | Out-Null
 Copy-Item -LiteralPath (Join-Path $toolSource 'DeviceJniProbe.java') -Destination $probeJava -Force

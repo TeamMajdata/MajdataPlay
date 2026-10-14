@@ -1,5 +1,116 @@
 # Android storage / generated JNI / IL2CPP validation results
 
+## Executed 2026-10-14: APK jar resources, ARM64 and ARMv7
+
+A fresh universal APK was built with Unity **6000.3.17f1** and executed on a
+physical **Xiaomi Mi MIX 2S**, Android **API 35**, in both native ABIs. The isolated
+development player uses **IL2CPP**, the **Release** native compiler configuration,
+and **High managed stripping**. Its package is `net.majdata.storagevalidation`;
+the main game was not rebuilt or replaced.
+
+APK SHA-256:
+`6911D8F8D8B78E959C62181798B01065C5DB51FD60BB9CB18D21F1209EAD4367`.
+The inspected APK is **27,690,380 bytes** and contains both
+`lib/arm64-v8a/libil2cpp.so` and `lib/armeabi-v7a/libil2cpp.so`.
+
+| Installed ABI | Actual process architecture | Pointer size | PID | Completed groups | Terminal result |
+| --- | --- | ---: | ---: | ---: | --- |
+| arm64-v8a | Arm64 | 8 bytes | 3521 | 8 | `FILE_SYSTEM_DEVICE_JAR_PASSED` |
+| armeabi-v7a | Arm | 4 bytes | 4241 | 8 | `FILE_SYSTEM_DEVICE_JAR_PASSED` |
+
+Each durable result confirms `Terminal: true`, `Mode: "jar"`,
+`EnableIl2Cpp: true`, `SdkInt: 35`, `StreamingAssetsIsJar: true`,
+`JarDeflateChecked: true`, and `CleanupSucceeded: true`. The runner matched its
+fresh launch `RunId`, the current PID, requested ABI pointer size, terminal marker,
+and all eight completed groups. These were separate actual device executions;
+the presence of both native libraries alone was not counted as a runtime pass.
+
+### Runtime coverage passed in each ABI
+
+The production `FileSystem`, `StorageFile`, `StorageDirectory`, and
+`JarFileSystem` read the installed APK through the actual
+`Application.streamingAssetsPath` jar URI. **No UnityWebRequest was used.**
+
+1. APK resource lookup, lengths, case-sensitive absence, file/directory type
+   distinctions, nested implicit directories, and immediate-child enumeration.
+2. Synchronous and asynchronous UTF-8 reads, all **65,553** deterministic binary
+   bytes, and an empty entry.
+3. Spaces, `#`, Chinese characters, and literal `%20` in a packaged filename,
+   including reopening its authoritative URI without double decoding.
+4. Independent archive read streams, exact EOF, repeated disposal, and reopening
+   after another stream is closed.
+5. Synchronous and asynchronous extraction into a unique app-owned local
+   directory, exact copied content, and pre-cancelled reads/copies without a new
+   destination file.
+6. Rejected archive writes, creation, rename, move, deletion, attributes, and
+   timestamps, with packaged resources retained.
+7. Rejected archive source, destination, and backup operands for replacement,
+   with the local sentinel files retained.
+8. A separately generated app-private compressed ZIP entry, verified to have
+   `CompressedLength < Length`, read synchronously and asynchronously and
+   extracted with every resulting byte checked under IL2CPP.
+
+After these groups, only the invocation's unique local extraction/ZIP fixture
+directory was recursively removed. Both runs recorded successful cleanup before
+the terminal pass. `jar` mode opened no SAF picker and did not acquire, release,
+or alter persisted grants or their saved state.
+
+### Inspected APK packaging
+
+The four fixture entries were **stored**, ZIP compression method **0**, with
+general-purpose flags **0**. Their names use UTF-8 bytes, including the Chinese
+filename, although the APK omits the ZIP EFS flag. There are **no explicit fixture
+directory records**, so the successful nested lookup/enumeration exercised
+implicit directory synthesis.
+
+| APK entry | Uncompressed bytes | Stored bytes |
+| --- | ---: | ---: |
+| `assets/JarValidation/plain.txt` | 34 | 34 |
+| `assets/JarValidation/names/space # 中文 %20.txt` | 34 | 34 |
+| `assets/JarValidation/implicit/nested/pattern.bin` | 65,553 | 65,553 |
+| `assets/JarValidation/empty.bin` | 0 | 0 |
+
+Deflate coverage came from the separate generated app-private ZIP, not from
+these stored APK entries. The APK inspection and device runs establish these
+two compression cases separately.
+
+### Evidence and reproduction
+
+The ignored `Temp/AndroidStorageDeviceValidation/DeviceResults/` contains:
+
+- `jar-apk-evidence.json`: APK hash, size, native architectures, fixture hashes,
+  compression methods/flags, and absence of explicit fixture directories.
+- `arm64-v8a-jar-820573cbfa3747e7aef54218325aaf91.json` and its `.log`.
+- `armeabi-v7a-jar-9d175244eb564a5186c9d8abdca05e08.json` and its `.log`.
+
+The APK is at
+`Temp/AndroidStorageDeviceValidation/Artifacts/storage-validation-Both.apk`,
+with the build log at `Temp/AndroidStorageDeviceValidation/build.log`. Generated
+projects, APKs, raw process logs, and durable result files remain ignored.
+No device serial, private document URI, or grant-state contents are included here.
+
+From the repository root, using an authorized physical device:
+
+```powershell
+./Tools/Tests/Build-AndroidStorageDeviceValidation.ps1 -Architecture Both
+./Tools/Tests/Run-AndroidStorageDeviceValidation.ps1 -Serial '<device-serial>' -Mode jar -Abi arm64-v8a -ApkPath 'Temp/AndroidStorageDeviceValidation/Artifacts/storage-validation-Both.apk' -Install
+./Tools/Tests/Run-AndroidStorageDeviceValidation.ps1 -Serial '<device-serial>' -Mode jar -Abi armeabi-v7a -ApkPath 'Temp/AndroidStorageDeviceValidation/Artifacts/storage-validation-Both.apk' -Install
+```
+
+The runner replace-installs only the dedicated validation package and selects
+the actual ABI. Keep its package data and signing identity; uninstalling or
+clearing data is unnecessary. Keep the device unlocked during execution.
+
+### Scope limits
+
+These results establish jar-resource behavior on this physical API-35 device in
+ARM64 and ARMv7 IL2CPP processes. `jar` mode uses generated wrappers for launch
+extras, SDK, PID, and Java bitness, but skips the broader JNI regression suite,
+descriptor fixtures, and full/replay/release SAF suite. This run does not renew
+their earlier dated evidence. It does not establish the full game's packaging
+or lifecycle, Android Mono, other Android versions/devices, other operating
+systems, or non-development/minified players.
+
 ## Executed 2026-10-09
 
 - Unity: **6000.3.17f1**, isolated project `Temp/AndroidStorageDeviceValidation`.

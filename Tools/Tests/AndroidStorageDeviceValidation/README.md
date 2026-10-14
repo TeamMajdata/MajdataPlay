@@ -1,10 +1,15 @@
-# Android SAF + generated JNI / IL2CPP device validation
+# Android storage + generated JNI / IL2CPP device validation
 
 This is a **real-device runtime harness**, not a provider double or an Editor
 substitute. It runs production `StorageFile`, `StorageDirectory`,
 `AndroidStorageAccess`, `AndroidDocumentStream`, the production activity-result
-bridge, and generated Android wrappers. Only the JNI inputs and controlled
-descriptor fixtures are validation-specific. No UniTask or third-party package is required.
+bridge, and generated Android wrappers. JNI inputs, controlled descriptor
+fixtures, and packaged jar resources are validation-specific. No UniTask or
+third-party package is required.
+
+The picker-free `jar` mode separately exercises production `FileSystem`,
+`StorageFile`, `StorageDirectory`, and `JarFileSystem` against resources in the
+installed APK, without UnityWebRequest. It does not require an existing SAF grant.
 
 The harness has been built and executed on a physical device in both ARM64 and
 ARMv7 IL2CPP processes. See `RESULTS.md` for the dated evidence and exact scope.
@@ -53,7 +58,8 @@ assemblies, or generated Unity projects.
 
 ## Descriptor stream regressions
 
-All modes run real Android file/pipe fixtures before any picker. The fixtures
+The `full`, `replay`, `release`, and `streams` modes run real Android file/pipe
+fixtures before any picker. The fixtures
 reflectively adopt `AssetFileDescriptor` instances through the production Java
 `StreamHandle` constructor and the production managed `AndroidDocumentStream`
 constructor. They are **not** a replacement for the provider-open path, which
@@ -82,6 +88,55 @@ results do not cover newly added seek regressions unless the matching fresh-run
 evidence explicitly says so. A streams-only run does not create a provider child;
 its provider-child `CleanupSucceeded` result field is not applicable.
 
+## APK jar resource regressions
+
+Build a fresh universal APK, then install and execute it once for each ABI:
+
+```powershell
+./Tools/Tests/Build-AndroidStorageDeviceValidation.ps1 -Architecture Both
+./Tools/Tests/Run-AndroidStorageDeviceValidation.ps1 -Serial '<device-serial>' -Mode jar -Abi arm64-v8a -ApkPath 'Temp/AndroidStorageDeviceValidation/Artifacts/storage-validation-Both.apk' -Install
+./Tools/Tests/Run-AndroidStorageDeviceValidation.ps1 -Serial '<device-serial>' -Mode jar -Abi armeabi-v7a -ApkPath 'Temp/AndroidStorageDeviceValidation/Artifacts/storage-validation-Both.apk' -Install
+```
+
+The builder disables per-CPU APK splitting and OBB expansion files. The packaged
+fixtures remain inside the APK. `-Install` replaces only the dedicated validation
+package while preserving its data and grants; do not uninstall or clear its data
+to switch ABI. Keep the device unlocked. This mode opens no SAF picker and does
+not acquire, release, or change persisted grants or their saved state.
+
+The fixture directory is staged at `Assets/StreamingAssets/JarValidation` in the
+isolated project. Checks open the actual `Application.streamingAssetsPath`,
+require a `jar:file:` root, and cover:
+
+- UTF-8 text, an empty entry, nested directory lookup and immediate enumeration,
+  case-sensitive absence, and a deterministic **65,553-byte** binary pattern.
+- Synchronous and asynchronous reads, names containing spaces, `#`, CJK text,
+  and literal `%20`, and reopening authoritative escaped child locations.
+- Independently owned read streams, EOF, repeated disposal, and reopening.
+- `CopyTo` and `CopyToAsync` extraction into a unique app-owned scratch directory,
+  exact copied bytes, and pre-cancelled reads/copies without a new destination.
+- Rejected APK writes, creation, rename, move, deletion, attributes, timestamps,
+  and replacement, with local replacement sentinels retained.
+- A separately generated app-private ZIP containing a verified compressed entry,
+  read and extracted through the same `jar:` backend under IL2CPP. This supplies
+  deflate coverage independently of Unity's APK asset compression policy; it is
+  not evidence that the packaged APK fixtures themselves were deflated.
+
+The expected terminal marker is **`FILE_SYSTEM_DEVICE_JAR_PASSED`**. Intermediate
+`JAR_*_PASSED` markers do not establish completion. A successful terminal result
+also requires removal of the unique local extraction/ZIP fixture directory and
+`CleanupSucceeded: true`; the installed APK and app data parent are retained.
+
+The runner supplies a unique `validationRunId` launch extra and retains URI-free
+result JSON and private process logs under the ignored
+`Temp/AndroidStorageDeviceValidation/DeviceResults` directory. For normal launched
+runs, it matches the terminal JSON's `RunId`, `Mode`, current `ProcessId`, requested
+ABI's `PointerSize` (**8** for ARM64, **4** for ARMv7), `EnableIl2Cpp: true`, and
+terminal marker. Retain `SdkInt` as the actual device API level, together with the
+APK SHA-256 and build log. A universal APK or successful build alone does not
+establish either ABI's runtime result. `jar` mode does not run the broader JNI,
+descriptor-stream, or provider/persisted-permission suites.
+
 ## Launch protocol and durable files
 
 Launch extra: **`validationMode`**, a string:
@@ -94,16 +149,25 @@ Launch extra: **`validationMode`**, a string:
 - **`streams`**: run JNI and controlled descriptor/managed-adapter regressions,
   then exit without opening a picker or acquiring/releasing URI grants. This mode
   does not cover provider dispatch or persisted SAF permissions.
+- **`jar`**: test actual APK resources and an app-private compressed ZIP through
+  production storage APIs, then remove its unique local scratch directory.
+  Read launch mode, SDK, PID, and bitness through generated wrappers; skip the
+  broader JNI/descriptor/provider suites and leave persisted grants untouched.
 - **`release`**: optionally finish grant ownership bookkeeping. Release only a
   grant that did **not** exist in the pre-picker snapshot. A preexisting grant
   is retained, including any additional write access the picker may have added.
 
-All modes run the automatic JNI preflight. A new `full` run refuses to overwrite
-an active grant state: first use `replay` / `release` as appropriate. Do not use
+All modes except `jar` run the automatic JNI preflight. A new `full` run refuses
+to overwrite an active grant state: first use `replay` / `release` as appropriate. Do not use
 `pm clear`, uninstall, or revoke the grant between `full` and `replay`; that
 would destroy the persistence experiment. Replace-installing an APK preserves
 state, but must preserve package identity/signing. Wait for the terminal full
 marker before force-stopping.
+
+The runner also passes the optional string extra **`validationRunId`**. The
+harness uses it as `RunId`; direct manual launches without it generate a fresh
+identifier. `-ObserveOnly` validates the observed process and terminal result,
+but cannot match a launch identifier it did not supply.
 
 Files live at **`Application.persistentDataPath`**:
 
@@ -299,8 +363,9 @@ Important intermediate markers are `BOOT_READY`, `IL2CPP_PASSED`, `JNI_PASSED`,
 `ATTRIBUTES_PASSED`, `DIRECTORY_RENAME_PASSED`, and `CLEANUP_PASSED`, all
 prefixed with `FILE_SYSTEM_DEVICE_`. A `*_SKIPPED` marker
 (`TIMESTAMP_SKIPPED`, `DIRECTORY_RENAME_SKIPPED`) records a capability the
-provider refused; it is neither a pass nor a failure. Terminal success is `FULL_PASSED`, `REPLAY_PASSED`, or
-`RELEASE_PASSED`; failure uses the selected mode's `*_FAILED`. If result writing
+provider refused; it is neither a pass nor a failure. Terminal success is
+`FULL_PASSED`, `REPLAY_PASSED`, `RELEASE_PASSED`, `STREAMS_PASSED`, or
+`JAR_PASSED`; failure uses the selected mode's `*_FAILED`. If result writing
 itself fails, `FILE_SYSTEM_DEVICE_RESULT_FAILED` is logged as an observable
 infrastructure failure.
 
@@ -330,8 +395,9 @@ attribute no-ops, and directory renames. Stream/cursor closure is exercised by
 the production helper paths and child cleanup, not proved by a native resource
 counter.
 
-It still deliberately does **not** implement text encodings/BOMs, early cursor
-disposal regression loops, in-flight cancellation after a transfer has started,
+The SAF provider suite still deliberately does **not** implement text
+encodings/BOMs, early cursor disposal regression loops, in-flight cancellation
+after a transfer has started,
 missing-file error cases, revocation or provider loss during a transfer, or
 provider descriptor-count leak measurement.
 

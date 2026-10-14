@@ -3,8 +3,11 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
+using System.IO.Compression;
+using CompressionLevel = System.IO.Compression.CompressionLevel;
 using System.Reflection;
 using System.Runtime.ExceptionServices;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -23,7 +26,7 @@ using UnityPlayer = MajdataPlay.Platform.Android.Runtime.Bindings.Com.Unity3d.Pl
 
 namespace MajdataPlay.Platform.Android.Runtime.Validation
 {
-    /// <summary>Runs real generated JNI and SAF checks in an isolated development Android player.</summary>
+    /// <summary>Runs packaged-resource, generated JNI, and SAF checks in an isolated development Android player.</summary>
     /// <remarks>Only a newly created unique child is deleted. Saved grant URIs never appear in logs or results.</remarks>
     public sealed class AndroidStorageDeviceValidation : MonoBehaviour
     {
@@ -36,8 +39,11 @@ namespace MajdataPlay.Platform.Android.Runtime.Validation
         /// <summary>Names the durable, URI-free plain-text marker.</summary>
         public const string MarkerFileName = "android-storage-device-result.txt";
 
-        /// <summary>Names the launch extra selecting full, replay, or release.</summary>
+        /// <summary>Names the launch extra selecting full, replay, release, streams, or jar.</summary>
         public const string ModeExtra = "validationMode";
+
+        /// <summary>Names the optional fresh-run identifier supplied by the ADB runner.</summary>
+        public const string RunIdExtra = "validationRunId";
 
         /// <summary>Owns cancellation for this component's lifetime.</summary>
         private CancellationTokenSource? _lifetime;
@@ -47,6 +53,9 @@ namespace MajdataPlay.Platform.Android.Runtime.Validation
 
         /// <summary>Stores the app-private path captured on the Unity main thread.</summary>
         private string _persistentPath = string.Empty;
+
+        /// <summary>Stores the APK resource root captured on the Unity main thread.</summary>
+        private string _streamingAssetsPath = string.Empty;
 
         /// <summary>Stores the current URI-free visible and durable status.</summary>
         private readonly DeviceResult _result = new DeviceResult();
@@ -72,6 +81,7 @@ namespace MajdataPlay.Platform.Android.Runtime.Validation
         private void Start()
         {
             _persistentPath = Application.persistentDataPath;
+            _streamingAssetsPath = Application.streamingAssetsPath;
             _lifetime = new CancellationTokenSource();
             _runTask = RunObservedAsync(_lifetime.Token);
         }
@@ -84,7 +94,7 @@ namespace MajdataPlay.Platform.Android.Runtime.Validation
         private void OnGUI()
         {
             GUI.Label(new Rect(20, 20, Screen.width - 40, Screen.height - 40),
-                "MajdataPlay SAF / generated JNI validation\n" + _result.Marker +
+                "MajdataPlay storage / generated JNI validation\n" + _result.Marker +
                 "\nMode: " + _mode + "  IL2CPP: " + _result.EnableIl2Cpp +
                 "  Pointer bytes: " + _result.PointerSize + "\n" + _result.Detail);
         }
@@ -98,6 +108,7 @@ namespace MajdataPlay.Platform.Android.Runtime.Validation
             {
                 _result.RunId = Guid.NewGuid().ToString("N");
                 _result.PointerSize = IntPtr.Size;
+                _result.ProcessArchitecture = RuntimeInformation.ProcessArchitecture.ToString();
 #if ENABLE_IL2CPP
                 _result.EnableIl2Cpp = true;
 #endif
@@ -107,7 +118,20 @@ namespace MajdataPlay.Platform.Android.Runtime.Validation
                 Mark("IL2CPP_PASSED", "The runtime was compiled with ENABLE_IL2CPP.");
                 _mode = InvokeAttached(ReadMode);
                 _result.Mode = _mode;
-                Require(_mode == "full" || _mode == "replay" || _mode == "release" || _mode == "streams", "Unknown validationMode.");
+                Require(_mode == "full" || _mode == "replay" || _mode == "release" || _mode == "streams" || _mode == "jar", "Unknown validationMode.");
+                if (_mode == "jar")
+                {
+                    InvokeAttached(() =>
+                    {
+                        _result.SdkInt = DeviceJniProbe.GetSdkInt();
+                        _result.ProcessId = DeviceJniProbe.GetProcessId();
+                        Require(DeviceJniProbe.Is64Bit() == (IntPtr.Size == 8), "Java and managed process bitness disagree.");
+                        return true;
+                    });
+                    await CheckJarStorageAsync(cancellationToken);
+                    Mark("JAR_PASSED", _result.JarCheckGroups + " packaged-resource groups passed; owned local extraction and deflate fixtures removed; no picker or grants used.", true);
+                    return;
+                }
                 InvokeAttached(() =>
                 {
                     CheckJni();
@@ -234,16 +258,230 @@ namespace MajdataPlay.Platform.Android.Runtime.Validation
             }
         }
 
+        /// <summary>Validates the installed APK's jar resources and extracts only into a unique app-owned directory.</summary>
+        /// <param name="cancellationToken">The component's lifetime token, checked before reads and transfers.</param>
+        /// <returns>A task completing after every jar check and owned-directory cleanup.</returns>
+        /// <exception cref="InvalidOperationException">A packaged-resource invariant fails.</exception>
+        /// <exception cref="IOException">An APK entry, extraction, fixture, or cleanup cannot be accessed.</exception>
+        /// <exception cref="OperationCanceledException">The component is destroyed during validation.</exception>
+        private async Task CheckJarStorageAsync(CancellationToken cancellationToken)
+        {
+            const string Text = "MajdataPlay packaged UTF-8 你好\n";
+            const string EscapedName = "space # 中文 %20.txt";
+            var localPath = Path.Combine(_persistentPath, "MajdataPlay-jar-validation-" + _result.RunId);
+            StorageDirectory? owned = null;
+            try
+            {
+                Mark("JAR_LOOKUP_READY", "Opening the installed APK's real StreamingAssets jar root.");
+                _result.StreamingAssetsIsJar = _streamingAssetsPath.StartsWith("jar:file:", StringComparison.OrdinalIgnoreCase);
+                Require(_result.StreamingAssetsIsJar, "The real Android StreamingAssets root must use jar:file.");
+                var fixtures = await Task.Run(() =>
+                {
+                    var assets = StorageFileSystem.Directory.Open(_streamingAssetsPath);
+                    Require(assets.Exists, "The actual packaged asset root is missing.");
+                    return assets.FindDirectory("JarValidation")
+                        ?? throw new InvalidOperationException("The packaged JarValidation fixture directory is missing.");
+                }, cancellationToken);
+                var plain = fixtures.FindFile("plain.txt")
+                    ?? throw new InvalidOperationException("The packaged UTF-8 fixture is missing.");
+                var empty = fixtures.FindFile("empty.bin")
+                    ?? throw new InvalidOperationException("The packaged empty fixture is missing.");
+                var implicitDirectory = fixtures.FindDirectory("implicit")
+                    ?? throw new InvalidOperationException("An implicit packaged directory was not indexed.");
+                var nested = implicitDirectory.FindDirectory("nested")
+                    ?? throw new InvalidOperationException("A nested implicit packaged directory was not indexed.");
+                var pattern = nested.FindFile("pattern.bin")
+                    ?? throw new InvalidOperationException("The packaged binary fixture is missing.");
+                var names = fixtures.FindDirectory("names")
+                    ?? throw new InvalidOperationException("The escaped-name fixture directory is missing.");
+                var escaped = names.FindFile(EscapedName)
+                    ?? throw new InvalidOperationException("The escaped-name fixture is missing.");
+                await Task.Run(() =>
+                {
+                    var children = new HashSet<string>(StringComparer.Ordinal);
+                    foreach (var entry in fixtures.EnumerateEntries())
+                    {
+                        Require(children.Add(entry.Name), "Packaged enumeration duplicated an immediate child.");
+                        Require(entry.Name.IndexOf('/') < 0, "Packaged enumeration returned a descendant as an immediate child.");
+                    }
+                    Require(children.SetEquals(new[] { "plain.txt", "empty.bin", "implicit", "names" }), "Packaged immediate enumeration returned unexpected children.");
+                    Require(pattern.Entry?.Length == 65553 && empty.Entry?.Length == 0, "Packaged lengths differ from fixture lengths.");
+                    Require(fixtures.FindFile("PLAIN.TXT") is null && fixtures.FindFile("missing.bin") is null, "Packaged lookup did not preserve case-sensitive absence.");
+                    Require(fixtures.FindDirectory("plain.txt") is null && fixtures.FindFile("implicit") is null, "Packaged lookup confused files and directories.");
+                }, cancellationToken);
+                _result.JarCheckGroups++;
+                Mark("JAR_LOOKUP_PASSED", "Actual APK lookup, lengths, case-sensitive absence and immediate implicit-directory enumeration passed.");
+
+                Require(await Task.Run(() => plain.ReadAllText(), cancellationToken) == Text, "Synchronous APK UTF-8 read differs.");
+                Require(await plain.ReadAllTextAsync(cancellationToken: cancellationToken) == Text, "Asynchronous APK UTF-8 read differs.");
+                CheckJarPattern(await Task.Run(pattern.ReadAllBytes, cancellationToken));
+                CheckJarPattern(await pattern.ReadAllBytesAsync(cancellationToken));
+                Require((await empty.ReadAllBytesAsync(cancellationToken)).Length == 0, "The APK empty entry returned bytes.");
+                _result.JarCheckGroups++;
+                Mark("JAR_READS_PASSED", "Synchronous and asynchronous UTF-8 and 65553-byte pattern reads plus the empty APK entry passed.");
+
+                Require(escaped.Location.IndexOf("%2520", StringComparison.Ordinal) >= 0 &&
+                    escaped.Location.IndexOf("%23", StringComparison.Ordinal) >= 0 &&
+                    escaped.Location.IndexOf("%20", StringComparison.Ordinal) >= 0 &&
+                    escaped.Location.IndexOf("%E4%B8%AD", StringComparison.OrdinalIgnoreCase) >= 0,
+                    "Packaged child names were not escaped exactly once.");
+                Require(await escaped.ReadAllTextAsync(cancellationToken: cancellationToken) == Text, "An escaped APK child returned different text.");
+                Require(await StorageFileSystem.File.Open(escaped.Location).ReadAllTextAsync(cancellationToken: cancellationToken) == Text,
+                    "Reopening an authoritative escaped APK URI decoded its literal percent name incorrectly.");
+                _result.JarCheckGroups++;
+                Mark("JAR_ESCAPING_PASSED", "APK names containing space, hash, CJK and literal percent-20 reopened through authoritative escaped jar locations.");
+
+                await Task.Run(() =>
+                {
+                    using var first = pattern.OpenRead();
+                    using var second = pattern.OpenRead();
+                    Require(first.CanRead && second.CanRead && !first.CanWrite && !second.CanWrite, "APK stream capabilities are incorrect.");
+                    Require(first.ReadByte() == 0 && second.ReadByte() == 0, "Independent APK streams did not start independently.");
+                    first.Dispose();
+                    first.Dispose();
+                    Require(!first.CanRead && !first.CanWrite && !first.CanSeek, "A disposed APK stream retained capabilities.");
+                    Require(second.ReadByte() == 1, "Closing one APK stream invalidated a separately owned archive stream.");
+                    using var remainder = new MemoryStream();
+                    second.CopyTo(remainder);
+                    Require(remainder.Length == 65551 && second.ReadByte() == -1, "An independent APK stream did not reach the exact logical EOF.");
+                    using var reopened = pattern.OpenRead();
+                    Require(reopened.ReadByte() == 0, "The APK entry did not reopen after another stream was disposed.");
+                }, cancellationToken);
+                _result.JarCheckGroups++;
+                Mark("JAR_OWNERSHIP_PASSED", "Independent APK streams, deterministic idempotent disposal, exact EOF and reopening passed.");
+
+                owned = await Task.Run(() =>
+                {
+                    Require(!Directory.Exists(localPath) && !File.Exists(localPath), "The unique local scratch location was already occupied.");
+                    return StorageFileSystem.Directory.Create(localPath);
+                }, cancellationToken);
+                var destination = owned;
+                var copiedText = await Task.Run(() => plain.CopyTo(destination, "sync.txt", cancellationToken: cancellationToken), cancellationToken);
+                var copiedPattern = await pattern.CopyToAsync(destination, "async.bin", cancellationToken: cancellationToken);
+                var copiedEmpty = await empty.CopyToAsync(destination, "empty.bin", cancellationToken: cancellationToken);
+                Require(await copiedText.ReadAllTextAsync(cancellationToken: cancellationToken) == Text, "Synchronous APK extraction changed UTF-8 text.");
+                CheckJarPattern(await copiedPattern.ReadAllBytesAsync(cancellationToken));
+                Require(copiedEmpty.Entry?.Length == 0, "Asynchronous APK extraction changed an empty file.");
+                using (var canceled = new CancellationTokenSource())
+                {
+                    canceled.Cancel();
+                    Expect<OperationCanceledException>(() => pattern.CopyToAsync(destination, "cancelled.bin", cancellationToken: canceled.Token).GetAwaiter().GetResult());
+                    Require(destination.FindFile("cancelled.bin") is null, "Pre-cancelled APK extraction created a destination.");
+                    Expect<OperationCanceledException>(() => pattern.ReadAllBytesAsync(canceled.Token).GetAwaiter().GetResult());
+                }
+                _result.JarCheckGroups++;
+                Mark("JAR_EXTRACTION_PASSED", "CopyTo and CopyToAsync extracted verified local text, binary and empty files; pre-cancellation had no destination side effects.");
+
+                await Task.Run(() =>
+                {
+                    Expect<NotSupportedException>(() => plain.OpenWrite());
+                    Expect<NotSupportedException>(() => plain.WriteAllText("forbidden"));
+                    Expect<NotSupportedException>(() => plain.Rename("forbidden.txt"));
+                    Expect<NotSupportedException>(plain.Delete);
+                    Expect<NotSupportedException>(() => plain.SetAttributes(FileAttributes.Hidden));
+                    Expect<NotSupportedException>(() => plain.SetLastWriteTime(DateTime.UtcNow));
+                    Expect<NotSupportedException>(() => fixtures.CreateFile("forbidden.bin"));
+                    Expect<NotSupportedException>(() => fixtures.CreateDirectory("forbidden"));
+                    Expect<NotSupportedException>(() => fixtures.Rename("forbidden"));
+                    Expect<NotSupportedException>(() => fixtures.Delete(recursive: true));
+                    Expect<NotSupportedException>(() => fixtures.SetAttributes(FileAttributes.Hidden));
+                    Expect<NotSupportedException>(() => fixtures.SetLastWriteTime(DateTime.UtcNow));
+                    Expect<NotSupportedException>(() => StorageFileSystem.File.Move(plain.Location, destination.Location, "forbidden.txt"));
+                    Expect<NotSupportedException>(() => StorageFileSystem.Directory.Move(nested.Location, destination.Location, "forbidden"));
+                    Require(plain.ReadAllText() == Text && pattern.Exists && fixtures.FindFile("forbidden.bin") is null,
+                        "Rejected APK mutations changed the packaged source.");
+                }, cancellationToken);
+                _result.JarCheckGroups++;
+                Mark("JAR_READONLY_PASSED", "APK write, create, rename, move, delete, attributes and timestamps were rejected with packaged resources intact.");
+
+                await Task.Run(() =>
+                {
+                    var sentinel = destination.CreateFile("replace-sentinel.txt");
+                    sentinel.WriteAllText("retained destination");
+                    Expect<NotSupportedException>(() => StorageFileSystem.File.Replace(plain.Location, sentinel.Location));
+                    Require(sentinel.ReadAllText() == "retained destination", "Rejected APK-source replacement changed its local destination.");
+                    Expect<NotSupportedException>(() => StorageFileSystem.File.Replace(sentinel.Location, plain.Location));
+                    Require(sentinel.ReadAllText() == "retained destination", "Rejected APK-destination replacement consumed its local source.");
+                    Expect<NotSupportedException>(() => StorageFileSystem.File.Replace(sentinel.Location, copiedText.Location, plain.Location));
+                    Require(sentinel.ReadAllText() == "retained destination" && copiedText.ReadAllText() == Text && plain.ReadAllText() == Text,
+                        "Rejected APK-backup replacement mutated an operand.");
+                }, cancellationToken);
+                _result.JarCheckGroups++;
+                Mark("JAR_REPLACE_PASSED", "APK source, destination and backup replacement operands were rejected before changing local sentinel files.");
+
+                await Task.Run(() =>
+                {
+                    var archivePath = Path.Combine(localPath, "owned-deflate.zip");
+                    var bytes = new byte[65553];
+                    for (var i = 0; i < bytes.Length; i++)
+                    {
+                        bytes[i] = (byte)(i % 251);
+                    }
+                    using (var output = File.Create(archivePath))
+                    using (var archive = new ZipArchive(output, ZipArchiveMode.Create))
+                    {
+                        var entry = archive.CreateEntry("deflated/pattern.bin", CompressionLevel.Optimal);
+                        using var stream = entry.Open();
+                        stream.Write(bytes, 0, bytes.Length);
+                    }
+                    using (var input = File.OpenRead(archivePath))
+                    using (var archive = new ZipArchive(input, ZipArchiveMode.Read))
+                    {
+                        var entry = archive.GetEntry("deflated/pattern.bin")
+                            ?? throw new InvalidOperationException("The owned deflate fixture is missing.");
+                        Require(entry.CompressedLength < entry.Length, "The owned deflate fixture was not actually compressed.");
+                    }
+                    var compressed = StorageFileSystem.File.Open("jar:" + new Uri(archivePath).AbsoluteUri + "!/deflated/pattern.bin");
+                    CheckJarPattern(compressed.ReadAllBytes());
+                    CheckJarPattern(compressed.ReadAllBytesAsync(cancellationToken).GetAwaiter().GetResult());
+                    var extracted = compressed.CopyTo(destination, "deflated-extracted.bin", cancellationToken: cancellationToken);
+                    CheckJarPattern(extracted.ReadAllBytes());
+                    _result.JarDeflateChecked = true;
+                }, cancellationToken);
+                _result.JarCheckGroups++;
+                Mark("JAR_DEFLATE_PASSED", "A verified compressed app-owned ZIP entry passed real IL2CPP synchronous, asynchronous and extracted-byte checks.");
+            }
+            finally
+            {
+                if (owned is not null)
+                {
+                    // The unique owned directory is the only recursive-delete target; the APK and app parent are never targets.
+                    await Task.Run(() => owned.Delete(recursive: true));
+                    Require(!Directory.Exists(localPath), "The unique jar validation scratch directory survived cleanup.");
+                    _result.CleanupSucceeded = true;
+                    Mark("JAR_CLEANUP_PASSED", "Only this invocation's unique app-local extraction and deflate fixture directory was removed.");
+                }
+            }
+        }
+
+        /// <summary>Checks every byte in the packaged binary fixture, including the transfer-buffer boundary.</summary>
+        /// <param name="bytes">The complete bytes read or extracted through production storage APIs.</param>
+        /// <exception cref="InvalidOperationException">The fixture length or any byte differs.</exception>
+        private static void CheckJarPattern(byte[] bytes)
+        {
+            Require(bytes.Length == 65553, "The jar binary fixture length differs from 65553 bytes.");
+            for (var i = 0; i < bytes.Length; i++)
+            {
+                Require(bytes[i] == (byte)(i % 251), "A jar binary fixture byte differs from its deterministic pattern.");
+            }
+        }
+
         /// <summary>Reads the launch extra through generated Activity and Intent wrappers.</summary>
-        /// <returns>The requested mode, or full when no mode was supplied.</returns>
+        /// <returns>The requested mode, or full when no mode was supplied; also retains a validated runner run identifier.</returns>
         /// <exception cref="InvalidOperationException">Unity has no current activity or launch intent.</exception>
         /// <exception cref="JavaInvocationException">Java rejects an intent query.</exception>
-        private static string ReadMode()
+        private string ReadMode()
         {
             using Activity activity = UnityPlayer.CurrentActivity
                 ?? throw new InvalidOperationException("Unity has no current activity.");
             using var intent = activity.GetIntent()
                 ?? throw new InvalidOperationException("The activity has no launch intent.");
+            var runId = intent.GetStringExtra(RunIdExtra);
+            if (!string.IsNullOrEmpty(runId))
+            {
+                Require(Guid.TryParseExact(runId, "N", out var parsedRunId), "The supplied validation run identifier is not a compact GUID.");
+                _result.RunId = parsedRunId.ToString("N");
+            }
             var mode = intent.GetStringExtra(ModeExtra);
             return string.IsNullOrEmpty(mode) || mode == "pick" ? "full" : mode;
         }
@@ -973,10 +1211,18 @@ namespace MajdataPlay.Platform.Android.Runtime.Validation
             public bool EnableIl2Cpp;
             /// <summary>Records actual managed pointer width in bytes.</summary>
             public int PointerSize;
+            /// <summary>Records the architecture reported by the actual managed process.</summary>
+            public string ProcessArchitecture = string.Empty;
             /// <summary>Records the running device SDK version.</summary>
             public int SdkInt;
             /// <summary>Records the current process ID.</summary>
             public int ProcessId;
+            /// <summary>Records that the captured real Android StreamingAssets root used jar:file.</summary>
+            public bool StreamingAssetsIsJar;
+            /// <summary>Counts completed jar validation groups independently of intermediate phase markers.</summary>
+            public int JarCheckGroups;
+            /// <summary>Records successful reads and extraction from a verified compressed app-owned ZIP entry.</summary>
+            public bool JarDeflateChecked;
             /// <summary>Records whether the actual full/replay provider read stream supported seeking.</summary>
             public bool ProviderReadCanSeek;
             /// <summary>Records whether the actual full/replay provider truncate output supported seeking.</summary>
