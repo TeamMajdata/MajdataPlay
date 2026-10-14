@@ -156,7 +156,8 @@ namespace MajdataPlay.Platform.Android.Storage
                 {
                     using var permissionReference = permissions.Get(i)
                         ?? throw new IOException("Android returned no persisted URI permission.");
-                    using var permission = new UriPermission(permissionReference.JavaReference, ownsReference: false);
+                    using var permission = permissionReference.JavaReference.ToWrapper<UriPermission>(ownsReference: false)
+                        ?? throw new IOException("Android returned no persisted URI permission.");
                     using var uri = permission.GetUri()
                         ?? throw new IOException("Android returned a persisted grant without a URI.");
                     var location = uri.ToString()
@@ -463,7 +464,8 @@ namespace MajdataPlay.Platform.Android.Storage
         /// <exception cref="NotSupportedException">The provider did not offer persistable access.</exception>
         private static string ReadPickerResult(PickerRequest pending, AndroidJavaObject intent)
         {
-            using var resultIntent = new Intent(intent, ownsReference: false);
+            using var resultIntent = intent.ToWrapper<Intent>(ownsReference: false)
+                ?? throw new IOException("Android returned no picker result intent.");
             using var uri = resultIntent.GetData();
             if (uri is null)
             {

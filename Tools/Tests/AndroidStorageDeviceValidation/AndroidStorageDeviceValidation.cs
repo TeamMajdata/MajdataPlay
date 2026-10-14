@@ -19,10 +19,18 @@ using Activity = MajdataPlay.Platform.Android.Runtime.Bindings.Android.App.Activ
 using AndroidKeyboard = MajdataPlay.Platform.Android.IO.AndroidKeyboard;
 using AndroidKeyCode = MajdataPlay.Platform.Android.IO.KeyCode;
 using DeviceJniProbe = MajdataPlay.Platform.Android.Runtime.Bindings.Net.Majdata.Validation.DeviceJniProbe;
-using DocumentStream = MajdataPlay.Platform.Android.Runtime.Bindings.Net.Majdata.Majdataplay.StorageAccess_StreamHandle;
+using DocumentStream = MajdataPlay.Platform.Android.Runtime.Bindings.Net.Majdata.Majdataplay.StorageAccess.StreamHandle;
 using Intent = MajdataPlay.Platform.Android.Runtime.Bindings.Android.Content.Intent;
 using JavaObject = MajdataPlay.Platform.Android.Runtime.Bindings.Java.Lang.JavaObject;
+using JavaIllegalStateException = MajdataPlay.Platform.Android.Runtime.Bindings.Java.Lang.IllegalStateException;
+using JavaExceptionInInitializerError = MajdataPlay.Platform.Android.Runtime.Bindings.Java.Lang.ExceptionInInitializerError;
+using JavaInteger = MajdataPlay.Platform.Android.Runtime.Bindings.Java.Lang.Integer;
+using JavaNoClassDefFoundError = MajdataPlay.Platform.Android.Runtime.Bindings.Java.Lang.NoClassDefFoundError;
+using JavaNumberFormatException = MajdataPlay.Platform.Android.Runtime.Bindings.Java.Lang.NumberFormatException;
+using JavaString = MajdataPlay.Platform.Android.Runtime.Bindings.Java.Lang.String;
+using JavaUri = MajdataPlay.Platform.Android.Runtime.Bindings.Android.Net.Uri;
 using KeyEvent = MajdataPlay.Platform.Android.Runtime.Bindings.Android.View.KeyEvent;
+using WrapperValue = MajdataPlay.Platform.Android.Runtime.Bindings.Net.Majdata.Validation.DeviceJniProbe.WrapperValue;
 using StorageFileSystem = MajdataPlay.IO.Storage.FileSystem;
 using UnityPlayer = MajdataPlay.Platform.Android.Runtime.Bindings.Com.Unity3d.Player.UnityPlayer;
 
@@ -41,7 +49,7 @@ namespace MajdataPlay.Platform.Android.Runtime.Validation
         /// <summary>Names the durable, URI-free plain-text marker.</summary>
         public const string MarkerFileName = "android-storage-device-result.txt";
 
-        /// <summary>Names the launch extra selecting full, replay, release, streams, or jar.</summary>
+        /// <summary>Names the launch extra selecting full, replay, release, streams, jar, or wrappers.</summary>
         public const string ModeExtra = "validationMode";
 
         /// <summary>Names the optional fresh-run identifier supplied by the ADB runner.</summary>
@@ -120,7 +128,7 @@ namespace MajdataPlay.Platform.Android.Runtime.Validation
                 Mark("IL2CPP_PASSED", "The runtime was compiled with ENABLE_IL2CPP.");
                 _mode = InvokeAttached(ReadMode);
                 _result.Mode = _mode;
-                Require(_mode == "full" || _mode == "replay" || _mode == "release" || _mode == "streams" || _mode == "jar", "Unknown validationMode.");
+                Require(_mode == "full" || _mode == "replay" || _mode == "release" || _mode == "streams" || _mode == "jar" || _mode == "wrappers", "Unknown validationMode.");
                 InvokeAttached(() =>
                 {
                     _result.SdkInt = DeviceJniProbe.GetSdkInt();
@@ -144,6 +152,14 @@ namespace MajdataPlay.Platform.Android.Runtime.Validation
                 await CheckRuntimeKeyboardAsync(cancellationToken);
                 _result.RuntimeKeyboardPassed = true;
                 Mark("RUNTIME_INIT_PASSED", "Production AndroidRuntime initialization, package metadata, new-intent, nullable activity-result and keyboard down/up callbacks passed.");
+                InvokeAttached(() =>
+                {
+                    CheckCheckedWrapperConversions();
+                    CheckEnhancedWrapperContracts();
+                    _result.WrapperContractsPassed = true;
+                    return true;
+                });
+                Mark("JNI_WRAPPERS_PASSED", "Nested generic wrappers, typed Class, CLR equality/comparison/enumeration contracts, checked conversions, and typed invocation/class-initialization exceptions passed.");
                 if (_mode == "jar")
                 {
                     await CheckJarStorageAsync(cancellationToken);
@@ -161,9 +177,16 @@ namespace MajdataPlay.Platform.Android.Runtime.Validation
                 {
                     Require(Thread.CurrentThread.ManagedThreadId != mainThreadId, "The JNI worker ran on the main thread.");
                     CheckJni();
+                    CheckEnhancedWrapperContracts();
                     return true;
                 }), cancellationToken);
+                _result.BackgroundWrapperContractsPassed = true;
                 Mark("BACKGROUND_JNI_PASSED", "JNI work and deterministic wrapper disposal ran on an attached worker.");
+                if (_mode == "wrappers")
+                {
+                    Mark("WRAPPERS_PASSED", "Generated JNI and nested generic/CLR wrapper contracts passed on the main thread and an attached worker; no picker or grants used.", true);
+                    return;
+                }
                 await Task.Run(() => InvokeAttached(() =>
                 {
                     Require(DeviceJniProbe.ValidateDocumentStreams(), "Controlled descriptor stream regressions failed.");
@@ -634,6 +657,243 @@ namespace MajdataPlay.Platform.Android.Runtime.Validation
             }
         }
 
+        /// <summary>Checks public wrapper conversions and catchable typed exceptions using real Java objects.</summary>
+        /// <exception cref="InvalidOperationException">Java type, ownership, exception metadata, or pending-exception checks fail.</exception>
+        /// <exception cref="JavaInvocationException">An unexpected Java failure interrupts the checks.</exception>
+        /// <exception cref="AndroidJavaException">Unity cannot create or dispatch the independent Java reference.</exception>
+        private static void CheckCheckedWrapperConversions()
+        {
+            const string Text = "checked-wrapper-conversion";
+            using var reference = new AndroidJavaObject("java.lang.String", Text);
+            using (var borrowed = reference.ToWrapper<JavaString>(ownsReference: false)
+                ?? throw new InvalidOperationException("The non-null Java String was not wrapped."))
+            {
+                Require(borrowed.ToString() == Text, "Checked Java String conversion lost its Java value.");
+            }
+            Require(reference.Call<int>("length") == Text.Length,
+                "Disposing the borrowed wrapper released its externally owned Java reference.");
+            using (var source = reference.ToWrapper<JavaObject>(ownsReference: false)
+                ?? throw new InvalidOperationException("The Java object conversion probe was not wrapped."))
+            {
+                using var converted = source.As<JavaString>();
+                Require(converted.ToString() == Text && !ReferenceEquals(source.JavaReference, converted.JavaReference),
+                    "JavaObject.As did not create an independently owned typed reference.");
+                Expect<InvalidCastException>(() => source.As<JavaUri>());
+                Require(source.ToString() == Text,
+                    "A rejected JavaObject.As conversion invalidated the source wrapper.");
+                source.Dispose();
+                Require(converted.ToString() == Text,
+                    "Disposing the source wrapper invalidated an independently owned As result.");
+            }
+            Require(reference.Call<int>("length") == Text.Length,
+                "Disposing the As result released the original externally owned Java reference.");
+            Expect<InvalidCastException>(() => reference.ToWrapper<JavaUri>(ownsReference: false));
+            Require(reference.Call<string>("toString") == Text,
+                "A rejected Java type conversion released or invalidated its borrowed reference.");
+            using (var copied = JavaWrapperConverter.FromHandle<JavaString>(reference.GetRawObject())
+                ?? throw new InvalidOperationException("The real Java String handle was not wrapped."))
+            {
+                Require(copied.ToString() == Text, "JNI handle conversion returned the wrong Java value.");
+            }
+            Require(reference.Call<string>("toString") == Text,
+                "Disposing an independently owned handle wrapper released the original Java reference.");
+
+            var caught = false;
+            try
+            {
+                JavaInteger.ParseInt("not-an-integer");
+            }
+            catch (JavaNumberFormatException exception)
+            {
+                using (exception)
+                {
+                    Require(exception.JavaReference.GetRawObject() != IntPtr.Zero
+                        && exception.JavaClassName == "java.lang.NumberFormatException"
+                        && exception.JavaStackTrace.Contains("NumberFormatException"),
+                        "The typed Java exception did not retain its throwable reference and diagnostics.");
+                    caught = true;
+                }
+            }
+            Require(caught, "Integer.parseInt did not throw the matching NumberFormatException wrapper.");
+            CheckClassInitializationFailures();
+            var pending = AndroidJNI.ExceptionOccurred();
+            if (pending != IntPtr.Zero)
+            {
+                AndroidJNI.ExceptionClear();
+                AndroidJNI.DeleteLocalRef(pending);
+                throw new InvalidOperationException("Typed Java exception conversion left a pending JVM exception.");
+            }
+            Require(reference.Call<string>("toString") == Text, "JNI dispatch failed after handling the typed Java exception.");
+        }
+
+        /// <summary>Exercises nested generic wrappers and CLR contracts against the actual packaged JVM classes.</summary>
+        /// <exception cref="InvalidOperationException">An observed Java or CLR contract differs from its expected behavior.</exception>
+        /// <exception cref="JavaInvocationException">An unexpected Java failure interrupts the checks.</exception>
+        /// <exception cref="AndroidJavaException">Unity cannot resolve a Java type used by the fixtures.</exception>
+        private static void CheckEnhancedWrapperContracts()
+        {
+            using var value = new WrapperValue(7);
+            using var equal = new WrapperValue(7);
+            using var greater = new WrapperValue(9);
+            object managedValue = value;
+            Require(managedValue.Equals(equal) && !managedValue.Equals(greater)
+                && managedValue.GetHashCode() == 217 && managedValue.ToString() == "WrapperValue:7",
+                "Nested Java equals/hashCode/toString overrides did not dispatch through CLR object methods.");
+            var equatable = (IEquatable<WrapperValue>)value;
+            Require(equatable.Equals(equal) && !equatable.Equals(greater) && !equatable.Equals(null),
+                "The generated IEquatable contract differs from Java equality.");
+            var dictionary = new Dictionary<WrapperValue, string> { { value, "matched" } };
+            Require(dictionary.TryGetValue(equal, out var match) && match == "matched"
+                && !dictionary.ContainsKey(greater), "CLR collections did not use the generated Java value contracts.");
+            Require(((IComparable<WrapperValue>)value).CompareTo(greater) < 0
+                && ((IComparable<WrapperValue>)value).CompareTo(equal) == 0
+                && ((IComparable)value).CompareTo(greater) < 0 && ((IComparable)value).CompareTo(null) == 1,
+                "Typed or untyped CLR comparison differs from Java Comparable.");
+            Expect<ArgumentException>(() => ((IComparable)value).CompareTo(new object()));
+            using var order = new DeviceJniProbe.WrapperOrder();
+            Require(((IComparer<WrapperValue>)order).Compare(value, greater) > 0,
+                "The CLR comparer did not invoke the reverse-order Java Comparator.");
+
+            using var reflectionClass = WrapperValue.Class;
+            Require(reflectionClass.GetName() == "net.majdata.validation.DeviceJniProbe$WrapperValue",
+                "The typed Class wrapper did not retain the Java nested binary name.");
+            using var classCast = reflectionClass.Cast(value);
+            Require(classCast is not null && classCast.Value == 7,
+                "Class<T>.cast did not return its typed nested Java wrapper.");
+            using var box = new DeviceJniProbe.WrapperBox<WrapperValue>(value);
+            using var field = box.Value;
+            using var echoed = box.Echo(greater);
+            Require(field is not null && field.Value == 7 && echoed is not null && echoed.Value == 9,
+                "Generic class-bound fields or methods did not retain the concrete wrapper argument.");
+            using var boxClass = DeviceJniProbe.WrapperBox<WrapperValue>.Class;
+            Require(boxClass.GetName() == "net.majdata.validation.DeviceJniProbe$WrapperBox",
+                "The generic Class wrapper used a CLR name instead of the Java erased binary name.");
+            using var castBox = boxClass.Cast(box);
+            Require(castBox is not null, "Class<T>.cast did not preserve the generic wrapper.");
+            using var castValue = castBox!.Value;
+            Require(castValue is not null && castValue.Value == 7, "The cast generic box lost its typed field.");
+            var array = box.EchoArray(new WrapperValue?[] { value, null, greater });
+            try
+            {
+                Require(array is not null && array.Length == 3 && array[0]?.Value == 7
+                    && array[1] is null && array[2]?.Value == 9,
+                    "Generic arrays lost their concrete wrapper argument or null element.");
+            }
+            finally
+            {
+                if (array is not null)
+                {
+                    foreach (var element in array)
+                    {
+                        element?.Dispose();
+                    }
+                }
+            }
+            using (var iterator = ((IEnumerable<WrapperValue>)box).GetEnumerator())
+            {
+                Require(iterator.MoveNext(), "The CLR generic enumerator did not advance the Java iterator.");
+                using var item = iterator.Current;
+                Require(item is not null && item.Value == 7 && !iterator.MoveNext(),
+                    "The CLR generic enumerator did not preserve the single typed Java value.");
+            }
+            using var inner = new DeviceJniProbe.WrapperBox<WrapperValue>.Inner<WrapperValue>(box, greater);
+            using var innerValue = inner.GetValue();
+            Require(innerValue is not null && innerValue.Value == 9,
+                "The nonstatic nested generic constructor or its transitive outer bound failed.");
+            using var innerClass = DeviceJniProbe.WrapperBox<WrapperValue>.Inner<WrapperValue>.Class;
+            Require(innerClass.GetName() == "net.majdata.validation.DeviceJniProbe$WrapperBox$Inner",
+                "The multilevel generic Class wrapper lost its enclosing Java structure.");
+            using var selfBox = new DeviceJniProbe.SelfBox<WrapperValue>();
+            using var selfValue = selfBox.Echo(value);
+            Require(selfValue is not null && selfValue.Value == 7,
+                "The recursive Comparable constraint did not preserve the concrete Java wrapper.");
+
+            using (var borrowed = value.JavaReference.ToWrapper<WrapperValue>(ownsReference: false))
+            {
+                Require(borrowed is not null && borrowed.Value == 7, "Nested type conversion returned the wrong value.");
+            }
+            using (var copied = JavaWrapperConverter.FromHandle<WrapperValue>(value.JavaReference.GetRawObject()))
+            {
+                Require(copied is not null && copied.Value == 7, "Nested handle conversion returned the wrong value.");
+            }
+            using (var copied = value.As<WrapperValue>())
+            {
+                Require(copied.Value == 7 && !ReferenceEquals(value.JavaReference, copied.JavaReference),
+                    "Nested As conversion did not create an independent reference.");
+            }
+            Expect<InvalidCastException>(() => value.JavaReference.ToWrapper<JavaUri>(ownsReference: false));
+            Expect<InvalidCastException>(() => JavaWrapperConverter.FromHandle<JavaUri>(value.JavaReference.GetRawObject()));
+            Require(value.Value == 7, "A rejected conversion or independently disposed wrapper invalidated its source.");
+            using (var typedBox = box.JavaReference.ToWrapper<DeviceJniProbe.WrapperBox<WrapperValue>>(ownsReference: false))
+            {
+                Require(typedBox is not null, "The closed generic wrapper factory was not initialized under IL2CPP.");
+            }
+            CheckWrapperFailure(DeviceJniProbe.ThrowWrapperFailure,
+                "net.majdata.validation.DeviceJniProbe$WrapperFailure");
+            CheckWrapperFailure(DeviceJniProbe.ThrowPrivateWrapperFailure,
+                "net.majdata.validation.DeviceJniProbe$PrivateWrapperFailure");
+            Require(value.Value == 7, "JNI dispatch did not recover after exported and private Java throwables.");
+        }
+
+        /// <summary>Checks exact exported throwable factories and nearest-exported-ancestor fallback under IL2CPP.</summary>
+        /// <param name="action">The generated JNI call that throws the controlled Java failure.</param>
+        /// <param name="className">The actual Java binary name expected in the retained throwable diagnostics.</param>
+        /// <exception cref="InvalidOperationException">The expected typed failure or its retained Java reference is missing.</exception>
+        /// <exception cref="JavaInvocationException">An unexpected Java throwable propagates.</exception>
+        private static void CheckWrapperFailure(Action action, string className)
+        {
+            var caught = false;
+            try
+            {
+                action();
+            }
+            catch (DeviceJniProbe.WrapperFailure exception)
+            {
+                using (exception)
+                {
+                    caught = exception.JavaClassName == className
+                        && exception.JavaReference.GetRawObject() != IntPtr.Zero
+                        && exception.JavaStackTrace.Contains("WrapperFailure")
+                        && exception.Message.Contains("MAJDATA_VALIDATION_EXPECTED");
+                }
+            }
+            Require(caught, "The controlled Java failure did not become its closest exported exception wrapper.");
+        }
+
+        /// <summary>Checks original throwable types from first and repeated access to an erroneous Java class.</summary>
+        /// <exception cref="InvalidOperationException">A class-initialization failure loses its Java throwable type or diagnostics.</exception>
+        /// <exception cref="JavaInvocationException">An unexpected Java throwable interrupts the checks.</exception>
+        private static void CheckClassInitializationFailures()
+        {
+            var initialized = false;
+            try
+            {
+                _ = DeviceJniProbe.InitializerFailure.Value;
+            }
+            catch (JavaExceptionInInitializerError exception)
+            {
+                using (exception)
+                {
+                    initialized = exception.JavaClassName == "java.lang.ExceptionInInitializerError"
+                        && exception.JavaStackTrace.Contains("MAJDATA_VALIDATION_EXPECTED_INITIALIZER_FAILURE");
+                }
+            }
+            Require(initialized, "First access to an erroneous Java class did not preserve ExceptionInInitializerError.");
+            var repeated = false;
+            try
+            {
+                _ = DeviceJniProbe.InitializerFailure.Value;
+            }
+            catch (JavaNoClassDefFoundError exception)
+            {
+                using (exception)
+                {
+                    repeated = exception.JavaClassName == "java.lang.NoClassDefFoundError";
+                }
+            }
+            Require(repeated, "Repeated access to an erroneous Java class did not preserve NoClassDefFoundError.");
+        }
+
         /// <summary>Tests generated class dispatch without handwritten JNI class or method dispatch.</summary>
         /// <exception cref="InvalidOperationException">An actual JNI result violates the expected contract.</exception>
         /// <exception cref="JavaInvocationException">An unexpected Java exception occurs.</exception>
@@ -641,7 +901,17 @@ namespace MajdataPlay.Platform.Android.Runtime.Validation
         {
             using var key = new KeyEvent(KeyEvent.ActionDown, KeyEvent.KeycodeA);
             Require(key.GetAction() == KeyEvent.ActionDown && key.GetKeyCode() == KeyEvent.KeycodeA, "KeyEvent construction failed.");
-            using (var borrowed = new KeyEvent(key.JavaReference, ownsReference: false))
+            using (var javaClass = KeyEvent.Class)
+            {
+                Require(javaClass.GetName() == "android.view.KeyEvent", "The typed Class wrapper represents the wrong Java class.");
+            }
+            Expect<InvalidCastException>(() => key.JavaReference.ToWrapper<Intent>(ownsReference: false));
+            using (var fromHandle = JavaWrapperConverter.FromHandle<KeyEvent>(key.JavaReference.GetRawObject()))
+            {
+                Require(fromHandle is not null && fromHandle.GetKeyCode() == KeyEvent.KeycodeA,
+                    "Checked JNI handle conversion failed to retain the Java object.");
+            }
+            using (var borrowed = key.JavaReference.ToWrapper<KeyEvent>(ownsReference: false))
             {
                 Require(borrowed.GetKeyCode() == KeyEvent.KeycodeA, "Borrowed reference dispatch failed.");
                 borrowed.Dispose();
@@ -655,7 +925,7 @@ namespace MajdataPlay.Platform.Android.Runtime.Validation
             using var adoptable = DeviceJniProbe.CreateAdoptableKeyEvent()
                 ?? throw new InvalidOperationException("The adoption probe returned null.");
             var raw = new AndroidJavaObject(adoptable.JavaReference.GetRawObject());
-            using (var adopted = new KeyEvent(raw, ownsReference: true))
+            using (var adopted = raw.ToWrapper<KeyEvent>())
             {
                 Require(adopted.GetKeyCode() == KeyEvent.KeycodeA, "Adopted reference dispatch failed.");
                 adopted.Dispose();
@@ -690,10 +960,13 @@ namespace MajdataPlay.Platform.Android.Runtime.Validation
             {
                 DeviceJniProbe.ThrowExpected();
             }
-            catch (JavaInvocationException exception)
+            catch (JavaIllegalStateException exception)
             {
-                translated = exception.Message.Contains("MAJDATA_VALIDATION_EXPECTED_JAVA_EXCEPTION") &&
-                    exception.JavaStackTrace.Contains("IllegalStateException");
+                using (exception)
+                {
+                    translated = exception.Message.Contains("MAJDATA_VALIDATION_EXPECTED_JAVA_EXCEPTION") &&
+                        exception.JavaStackTrace.Contains("IllegalStateException");
+                }
             }
             Require(translated, "The Java exception was not translated with its stack trace.");
             var pending = AndroidJNI.ExceptionOccurred();
@@ -715,9 +988,9 @@ namespace MajdataPlay.Platform.Android.Runtime.Validation
         private static void CheckJavaObjectEquality(KeyEvent key)
         {
             const string Text = "polygenelubricants";
-            using var first = new JavaObject(AndroidJni.Construct("java.lang.String", "(Ljava/lang/String;)V", Text));
-            using var equal = new JavaObject(AndroidJni.Construct("java.lang.String", "(Ljava/lang/String;)V", Text));
-            using var different = new JavaObject(AndroidJni.Construct("java.lang.String", "(Ljava/lang/String;)V", "different"));
+            using var first = AndroidJni.Construct("java.lang.String", "(Ljava/lang/String;)V", Text).ToWrapper<JavaObject>();
+            using var equal = AndroidJni.Construct("java.lang.String", "(Ljava/lang/String;)V", Text).ToWrapper<JavaObject>();
+            using var different = AndroidJni.Construct("java.lang.String", "(Ljava/lang/String;)V", "different").ToWrapper<JavaObject>();
             Require(!AndroidJNI.IsSameObject(first.JavaReference.GetRawObject(), equal.JavaReference.GetRawObject()),
                 "The String equality probes must be distinct Java objects.");
             Require(first.Equals(equal) && equal.Equals(first) && first == equal && !(first != equal),
@@ -742,13 +1015,13 @@ namespace MajdataPlay.Platform.Android.Runtime.Validation
 
             using var identity = new JavaObject();
             using var otherIdentity = new JavaObject();
-            using var borrowedIdentity = new JavaObject(identity.JavaReference, ownsReference: false);
+            using var borrowedIdentity = identity.JavaReference.ToWrapper<JavaObject>(ownsReference: false);
             Require(identity == borrowedIdentity && borrowedIdentity == identity && identity != otherIdentity,
                 "Object identity equality did not use the underlying Java object.");
             Require(identity.GetHashCode() == borrowedIdentity.GetHashCode() &&
                 identity.ToString() == "java.lang.Object@" + identity.GetHashCode().ToString("x", CultureInfo.InvariantCulture),
                 "Object hashCode or toString did not dispatch to Java.");
-            using var borrowedKey = new JavaObject(key.JavaReference, ownsReference: false);
+            using var borrowedKey = key.JavaReference.ToWrapper<JavaObject>(ownsReference: false);
             Require(key.Equals(borrowedKey) && borrowedKey.Equals(key) && key == borrowedKey && borrowedKey == key &&
                 key.GetHashCode() == borrowedKey.GetHashCode(),
                 "Generated and base wrappers around the same Java object compared differently.");
@@ -1388,6 +1661,10 @@ namespace MajdataPlay.Platform.Android.Runtime.Validation
             public bool RuntimeCallbacksPassed;
             /// <summary>Records real activity key-down and key-up dispatch through the production keyboard's registered callback proxy.</summary>
             public bool RuntimeKeyboardPassed;
+            /// <summary>Records nested generic, reflection, CLR contract, conversion and exception checks on the main thread.</summary>
+            public bool WrapperContractsPassed;
+            /// <summary>Records the same generated wrapper contracts on a JVM-attached background thread.</summary>
+            public bool BackgroundWrapperContractsPassed;
             /// <summary>Records that the captured real Android StreamingAssets root used jar:file.</summary>
             public bool StreamingAssetsIsJar;
             /// <summary>Counts completed jar validation groups independently of intermediate phase markers.</summary>

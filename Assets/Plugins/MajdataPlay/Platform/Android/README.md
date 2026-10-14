@@ -36,6 +36,9 @@ Tools/AndroidJavaWrapper/
         IJavaObject.cs
         JavaInvocationException.cs
         JavaObjectReference.cs
+        JavaWrapperConverter.cs
+        AndroidJavaObjectExtensions.cs
+        JavaObjectExtensions.cs
         Bindings/
             Android/App/Activity.e.cs
             Android/Net/Uri.g.cs
@@ -45,7 +48,7 @@ Tools/AndroidJavaWrapper/
 ```
 
 Generated Java namespaces are below `.Runtime.Bindings`; each relative namespace
-component has a matching directory. The four JNI helpers belong directly to the
+component has a matching directory. The JNI helpers belong directly to the
 root namespace and directory. Unnamed Java packages use `Bindings/` itself.
 
 `AndroidJavaWrapper.csproj` targets netstandard2.1/C# 9, includes every `src/**/*.cs`,
@@ -98,14 +101,33 @@ in the tool's ignored `.work/editor-logs` directory.
 
 Returned references are owned wrappers. Dispose them deterministically on the
 Unity main thread or a JVM-attached thread. `ownsReference: false` borrows an
-existing callback reference. Java interfaces use `I`-prefixed contracts and
+existing callback reference through `reference.ToWrapper<T>(ownsReference: false)`.
+Reference constructors are internal; this extension and
+`JavaWrapperConverter.FromHandle<T>(handle)` check Java assignability before
+wrapping. Null references/zero handles return null. Java interfaces use `I`-prefixed contracts and
 reference wrapper classes; a C# interface implementation does not create a Java
 callback proxy. The tracked Activity extension adapts `AndroidJavaRunnable`.
 
-Each generated `.Class` access returns a fresh owned `AndroidJavaObject`
-representing a Java `java.lang.Class` object. Use it for Java reflection or
-`Class` parameters and dispose it after use. It is not an `AndroidJavaClass`
-receiver for Unity's `CallStatic`; call the generated static methods instead.
+The JavaObject extension `T As<T>() where T : JavaObject` in `JavaObjectExtensions`
+checks the Java type and returns an independently owned wrapper reference.
+Dispose the result after use; disposing either wrapper leaves the other valid.
+The AndroidJavaObject extension remains `ToWrapper<T>(ownsReference)`.
+
+Each generated `.Class` access returns a fresh owned `Class<TWrapper>` wrapper
+representing a Java `java.lang.Class` object; throwable wrappers use the
+non-generic `Class` companion. Use it for reflection or `Class` parameters and
+dispose it after use. `JavaReference` exposes the Unity object for JNI APIs.
+Call generated static methods for static Java dispatch.
+
+Java throwable wrappers preserve Java exception inheritance and derive from
+`JavaInvocationException`, so callers can catch the corresponding generated type.
+Dispose caught throwable wrappers after use. They expose `IJavaObject` and
+`JavaStackTrace`; CLR single inheritance prevents an exception wrapper from also
+inheriting `JavaObject`. Borrow a throwable as `JavaObject` with
+`exception.JavaReference.ToWrapper<JavaObject>(ownsReference: false)` when required
+by a Java object parameter. Java generics retain their class/interface bounds, with
+non-generic companions for raw/wildcard Java signatures not expressible as CLR
+type arguments.
 
 The tracked `MajdataPlayActivity.e.cs` extension supplies `AndroidJavaProxy`
 overloads for `RegisterOnNewIntentCallback`, `RegisterOnActivityResultCallback`,
@@ -123,9 +145,9 @@ exception. The current activity and metadata queries return owned references,
 which initialization disposes after use.
 
 The SAF backend uses typed bindings in `Bindings/Android` and
-`Bindings/Net/Majdata/Majdataplay`. Java nested types are flattened as
-`StorageAccess_Result`, `StorageAccess_Entry`, `StorageAccess_CursorHandle`, and
-`StorageAccess_StreamHandle`. The backend closes cursors/streams before disposing
+`Bindings/Net/Majdata/Majdataplay`. Java nested types remain inside their parent as
+`StorageAccess.Result`, `StorageAccess.Entry`, `StorageAccess.CursorHandle`, and
+`StorageAccess.StreamHandle`. The backend closes cursors/streams before disposing
 references, retains opaque grant-preserving URIs, and uses the bridge's typed
 error protocol and bounded signed-byte transfers. Managed protocol constants are
 checked against the production `StorageAccess.java` source. All 338 public

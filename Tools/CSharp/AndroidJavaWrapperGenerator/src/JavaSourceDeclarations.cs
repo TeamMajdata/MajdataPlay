@@ -103,7 +103,7 @@ namespace MajdataPlay.Tools.AndroidJavaWrapperGenerator
         }
     }
 
-    /// <summary>Describes a Java reference after generic arguments have been discarded.</summary>
+    /// <summary>Describes a Java reference while preserving generic arguments and enclosing parameterizations.</summary>
     internal sealed class JavaSourceReference
     {
         /// <summary>Gets the first type token for diagnostics.</summary>
@@ -115,15 +115,35 @@ namespace MajdataPlay.Tools.AndroidJavaWrapperGenerator
         /// <summary>Gets the total array rank, including declarator and varargs dimensions.</summary>
         internal int Dimensions { get; }
 
+        /// <summary>Gets generic arguments attached to the final named class segment.</summary>
+        internal IReadOnlyList<JavaSourceReference> TypeArguments { get; }
+
+        /// <summary>Gets the preceding parameterized enclosing class reference, if present.</summary>
+        internal JavaSourceReference? DeclaringType { get; }
+
+        /// <summary>Gets the wildcard marker (*, +, or -), or null for ordinary references.</summary>
+        internal char? Wildcard { get; }
+
+        /// <summary>Gets the bound of an extends or super wildcard.</summary>
+        internal JavaSourceReference? WildcardBound { get; }
+
         /// <summary>Creates an erased source type reference.</summary>
         /// <param name="token">The diagnostic token.</param>
         /// <param name="name">The name without generic arguments.</param>
         /// <param name="dimensions">The number of array dimensions.</param>
-        internal JavaSourceReference(JavaSourceToken token, string name, int dimensions = 0)
+        /// <param name="typeArguments">The final class segment's generic arguments.</param>
+        /// <param name="declaringType">The preceding parameterized enclosing class segment.</param>
+        /// <param name="wildcard">The optional wildcard variance marker.</param>
+        /// <param name="wildcardBound">The bounded wildcard's reference type.</param>
+        internal JavaSourceReference(JavaSourceToken token, string name, int dimensions = 0, IReadOnlyList<JavaSourceReference>? typeArguments = null, JavaSourceReference? declaringType = null, char? wildcard = null, JavaSourceReference? wildcardBound = null)
         {
             Token = token;
             Name = name;
             Dimensions = dimensions;
+            TypeArguments = typeArguments ?? System.Array.Empty<JavaSourceReference>();
+            DeclaringType = declaringType;
+            Wildcard = wildcard;
+            WildcardBound = wildcardBound;
         }
 
         /// <summary>Returns a reference with additional declarator dimensions.</summary>
@@ -131,7 +151,7 @@ namespace MajdataPlay.Tools.AndroidJavaWrapperGenerator
         /// <returns>The combined array reference.</returns>
         internal JavaSourceReference AddDimensions(int dimensions)
         {
-            return new JavaSourceReference(Token, Name, Dimensions + dimensions);
+            return new JavaSourceReference(Token, Name, Dimensions + dimensions, TypeArguments, DeclaringType, Wildcard, WildcardBound);
         }
     }
 
@@ -196,6 +216,9 @@ namespace MajdataPlay.Tools.AndroidJavaWrapperGenerator
 
         /// <summary>Gets the ordinary source parameters, excluding receiver parameters.</summary>
         internal List<JavaSourceParameter> Parameters { get; } = new List<JavaSourceParameter>();
+
+        /// <summary>Gets the declared exception references, including generic exception variables.</summary>
+        internal List<JavaSourceReference> ThrowsTypes { get; } = new List<JavaSourceReference>();
 
         /// <summary>Creates an unresolved method declaration.</summary>
         /// <param name="token">The source identifier and location.</param>

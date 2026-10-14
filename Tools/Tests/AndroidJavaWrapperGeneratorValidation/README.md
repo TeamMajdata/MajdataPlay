@@ -102,11 +102,13 @@ or an Android Player build.
   method descriptors, and independent SDK discovery.
 - Pure C# .java analysis compared with the corresponding .class and .jar public
   nonsynthetic API. Scanning does not initialize throwing static initializers.
-- Public and inaccessible enclosing types, static and nonstatic nested classes,
+- Public and inaccessible enclosing types, static and nonstatic nested classes
+  inside their parent wrappers, multilevel nesting, underscore-name collisions,
   exact enclosing-instance constructor descriptors, and arbitrary class filenames.
 - Nonpublic intermediate bases, public inherited members, interface inheritance,
   covariant interface returns, defaults/constants/static methods, and enums.
-- Generic erasure and bounds, imports and nested binary names, varargs, field
+- Generic wrappers, class/interface/intersection/self bounds, nested generic type
+  parameters, String-bounded wrapper values/arrays, raw companions, imports and nested binary names, varargs, field
   array declarators, annotations, boxed values, strings, nullable/jagged arrays,
   and names colliding with CLR/generated members.
 - Serial/parallel SDK metadata and byte-for-byte output identity (one/four CPU
@@ -122,8 +124,13 @@ or an Android Player build.
   aliases.
 - Compilation as C# 9 against the complete .NET Standard 2.1 reference pack and
   the actual pinned Unity modules, with and without UNITY_ANDROID.
-- Pure managed MapArray/Wrap contracts and non-Android guards, with no invented
-  JNI pointers or fake Java references.
+- CLR object overrides, typed equality/comparison/comparer/enumeration contracts,
+  typed Class wrappers, catchable Java exception inheritance, and internal
+  reference constructors.
+- JavaObject.As extension metadata, exact JavaObject generic constraint,
+  nonnullable generic return type, and null-wrapper rejection before JNI.
+- Pure managed MapArray/Wrap and checked public conversion null contracts and
+  non-Android guards, with no invented JNI pointers or fake Java references.
 - Editor request path discovery and argument quoting, real Unity Editor API
   compilation, import coalescing, online/cache request selection, cancellation,
   and persisted pending requests using narrow managed lifecycle substitutes.

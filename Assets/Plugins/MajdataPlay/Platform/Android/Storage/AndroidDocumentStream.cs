@@ -1,8 +1,8 @@
 #nullable enable
 using System;
 using System.IO;
-using StorageResult = MajdataPlay.Platform.Android.Runtime.Bindings.Net.Majdata.Majdataplay.StorageAccess_Result;
-using DocumentStream = MajdataPlay.Platform.Android.Runtime.Bindings.Net.Majdata.Majdataplay.StorageAccess_StreamHandle;
+using StorageResult = MajdataPlay.Platform.Android.Runtime.Bindings.Net.Majdata.Majdataplay.StorageAccess.Result;
+using DocumentStream = MajdataPlay.Platform.Android.Runtime.Bindings.Net.Majdata.Majdataplay.StorageAccess.StreamHandle;
 
 namespace MajdataPlay.Platform.Android.Storage
 {

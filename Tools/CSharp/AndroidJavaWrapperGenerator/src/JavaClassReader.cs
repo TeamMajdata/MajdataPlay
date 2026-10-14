@@ -204,6 +204,11 @@ namespace MajdataPlay.Tools.AndroidJavaWrapperGenerator
                     RequireLength(attribute, 0);
                     field.AccessFlags |= 0x1000;
                 }
+                else if (attribute.Name == "Signature")
+                {
+                    field.Signature = ReadSignature(attribute, field.Signature);
+                    JavaGenericSignature.ParseType(field.Signature);
+                }
                 _offset = attribute.End;
             }
             return field;
@@ -251,6 +256,11 @@ namespace MajdataPlay.Tools.AndroidJavaWrapperGenerator
                         method.ParameterNames.Add(nameIndex == 0 ? string.Empty : Text(nameIndex));
                         ReadUInt16();
                     }
+                }
+                else if (attribute.Name == "Signature")
+                {
+                    method.Signature = ReadSignature(attribute, method.Signature);
+                    JavaGenericSignature.ParseMethod(method.Signature);
                 }
                 _offset = attribute.End;
             }
@@ -316,8 +326,28 @@ namespace MajdataPlay.Tools.AndroidJavaWrapperGenerator
                     RequireLength(attribute, 0);
                     result.Type.AccessFlags |= 0x1000;
                 }
+                else if (attribute.Name == "Signature")
+                {
+                    result.Type.Signature = ReadSignature(attribute, result.Type.Signature);
+                    JavaGenericSignature.ParseClass(result.Type.Signature);
+                }
                 _offset = attribute.End;
             }
+        }
+
+        /// <summary>Reads one unique constant-pool-backed generic Signature attribute.</summary>
+        /// <param name="attribute">The checked attribute header.</param>
+        /// <param name="previous">A previously read signature, if present.</param>
+        /// <returns>The exact generic signature text.</returns>
+        /// <exception cref="InvalidDataException">The signature is duplicated or malformed.</exception>
+        private string ReadSignature((string Name, int Length, int End) attribute, string? previous)
+        {
+            RequireLength(attribute, 2);
+            if (previous is not null)
+            {
+                throw Invalid("the Signature attribute is duplicated");
+            }
+            return Text(ReadUInt16());
         }
 
         /// <summary>Checks field or method descriptor syntax without resolving referenced classes.</summary>

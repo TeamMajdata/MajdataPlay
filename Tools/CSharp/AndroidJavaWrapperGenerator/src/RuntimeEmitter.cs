@@ -21,7 +21,9 @@ namespace MajdataPlay.Tools.AndroidJavaWrapperGenerator
             "AndroidJni",
             "JavaInvocationException",
             "IJavaObject",
-            "JavaObjectReference"
+            "JavaObjectReference",
+            "JavaWrapperConverter",
+            "AndroidJavaObjectExtensions"
         };
 
         /// <summary>

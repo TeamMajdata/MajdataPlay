@@ -46,7 +46,7 @@ Pop-Location
 ~~~
 
 Project mode reuses the Editor's Java-input discovery and ownership publisher,
-without opening the project in Unity. It writes the four runtime helpers into
+without opening the project in Unity. It writes the runtime helpers into
 `Tools/AndroidJavaWrapper/src` and Java bindings into its `Bindings` directory.
 It creates missing `AndroidJavaWrapper.csproj` and `global.json`, compiles the
 netstandard2.1 library together with handwritten `.e.cs` extensions, and installs
@@ -174,8 +174,9 @@ observable without AggregateException wrappers.
   matching directories relative to the configured root: android.net.Uri becomes
   Example.Bindings.Android.Net.Uri in Bindings/Android/Net/Uri.g.cs when the root is Example.
 - java.lang.Object is Example.Bindings.Java.Lang.JavaObject.
-- Public nested types retain exact $ binary names in JNI descriptors, with
-  deterministic flattened C# names. Inaccessible enclosing types prevent export.
+- Public nested types remain inside their enclosing partial wrapper classes.
+  Exact $ binary names remain in JNI descriptors. Inaccessible enclosing types
+  prevent export.
 - Every generated wrapper is a public partial class. Java abstract classes can
   wrap existing instances but do not expose Java construction methods.
 - Java interfaces generate nonpartial I-prefixed C# interfaces, plus partial
@@ -190,21 +191,48 @@ observable without AggregateException wrappers.
   disambiguation. Colliding constructor signatures use stable CreateJavaInstance
   factory methods for the additional overloads. Interface contracts with
   incompatible C# return types use explicit implementations.
-- Java generics are erased to their JVM bounds rather than invented C# generics.
-  Boxed primitives remain typed reference wrappers. Java byte maps to sbyte.
+- Generic Java classes also expose generic C# wrappers with their Java class and
+  interface bounds. Type parameters derive from JavaObject, either directly or
+  through their class bound. Non-generic companions preserve raw and wildcard
+  Java APIs where CLR type arguments cannot express the Java signature. Nested
+  generic wrappers preserve their enclosing type parameters. Boxed primitives
+  remain typed reference wrappers. Java byte maps to sbyte.
 - Java strings map to nullable C# strings in member signatures. Reference values
   and every array dimension preserve nullability. Jagged/reference arrays are
   marshaled using the declared JVM component descriptor.
 - Each wrapper exposes a getter-only static Class property for its Java class
   object (ClassJavaProperty when the wrapper itself is named Class). That result
-  is an independently owned Unity AndroidJavaObject.
+  is an independently owned `Class<TWrapper>` wrapper. Throwable classes use the
+  non-generic Class companion because CLR exceptions cannot also inherit JavaObject.
+- Java equals, hashCode, and toString overrides become CLR Equals, GetHashCode,
+  and ToString overrides. An equals override also implements `IEquatable<TWrapper>`.
+  Java Comparable, Comparator, and Iterable expose the corresponding CLR
+  `IComparable`/`IComparable<T>`, `IComparer<T>`, and `IEnumerable`/`IEnumerable<T>` contracts.
+- JNI exceptions become the matching exported Java throwable wrapper, preserving
+  the Java throwable inheritance chain and Java stack trace. Unknown subclasses
+  use their nearest exported throwable ancestor. Throwable derives from the
+  CLR JavaInvocationException base and implements IJavaObject/IDisposable;
+  CLR single inheritance prevents it from also deriving from JavaObject.
+  For a JavaObject parameter, borrow the throwable's reference with
+  `exception.JavaReference.ToWrapper<JavaObject>(ownsReference: false)`.
+- Reference constructors taking AndroidJavaObject are internal. Use
+  `javaReference.ToWrapper<TWrapper>(ownsReference: true)` or
+  `JavaWrapperConverter.FromHandle<TWrapper>(handle)` for checked public conversion.
+  Conversion validates Java assignability before constructing a wrapper;
+  incompatible types throw InvalidCastException. A null reference or zero handle
+  returns null. Dispose an owned wrapper, including a caught throwable wrapper.
+- JavaObjectExtensions provides `T As<T>(this JavaObject) where T : JavaObject`
+  for checked wrapper conversion. The result owns an independent Java reference and is non-null.
+  Dispose it after use; source and result lifetimes are independent.
 
 The output root contains AndroidJni.cs, IJavaObject.cs,
-JavaObjectReference.cs, and JavaInvocationException.cs. These are
+JavaObjectReference.cs, JavaInvocationException.cs, JavaWrapperConverter.cs,
+AndroidJavaObjectExtensions.cs, JavaObjectExtensions.cs, and generated throwable registration. These are
 self-contained, declared directly in the configured root namespace, and have no
 MajdataPlay runtime or old-generator dependency. For --namespace Example, their
 qualified names are Example.AndroidJni, Example.IJavaObject,
-Example.JavaObjectReference, and Example.JavaInvocationException. Types in the
+Example.JavaObjectReference, Example.JavaInvocationException, Example.JavaWrapperConverter,
+Example.AndroidJavaObjectExtensions, and Example.JavaObjectExtensions. Types in the
 unnamed Java package are generated directly in Example.Bindings, with their
 sources under Bindings/. Every source's directory matches its namespace relative
 to the configured root. The Editor publisher migrates previous manifest-owned

@@ -28,9 +28,14 @@ Add `XXX.e.cs` beside the generated `XXX.g.cs`. Use the same namespace and a
 `src/Bindings/Java/Lang/Integer.e.cs` extends
 `MajdataPlay.Platform.Android.Runtime.Bindings.Java.Lang.Integer`.
 
-The helpers `AndroidJni`, `IJavaObject`, `JavaInvocationException`, and
-`JavaObjectReference` belong directly to `MajdataPlay.Platform.Android.Runtime`.
+The helpers `AndroidJni`, `IJavaObject`, `JavaInvocationException`,
+`JavaObjectReference`, `JavaWrapperConverter`, `AndroidJavaObjectExtensions`, and `JavaObjectExtensions`
+belong directly to `MajdataPlay.Platform.Android.Runtime`.
 Generated bindings use its `Bindings` child namespace, with matching directories.
+Java nested types remain inside their parent partial wrapper; extend one by
+reopening the same enclosing partial classes in an `.e.cs` file. Generic wrappers
+preserve Java bounds, alongside non-generic companions for raw/wildcard APIs
+that cannot be represented by CLR generic arguments.
 
 After editing an extension, rebuild and install without scanning Java metadata:
 
@@ -63,11 +68,33 @@ previous installed DLL. Former manifest-owned Unity wrapper sources and paired
 metadata are retired after successful publication; modified or unowned files are
 preserved or rejected by ownership checks.
 
-Generated `.Class` properties return fresh owned `AndroidJavaObject` references
-to Java `java.lang.Class` objects. Dispose each result after using it for Java
-reflection or a `Class` parameter. These objects are not `AndroidJavaClass`
-receivers for Unity's `CallStatic`; use the generated static methods with their
-exact JNI descriptors.
+Generated `.Class` properties return fresh owned `Class<TWrapper>` wrappers for
+Java `java.lang.Class` objects. Throwable wrappers use the non-generic `Class`
+companion. Dispose each result after reflection or a `Class` parameter. Access
+`JavaReference` when a Unity JNI API requires the underlying reference; use
+generated static methods for static Java dispatch.
+
+The `(AndroidJavaObject, bool ownsReference = true)` constructors are internal.
+Use `reference.ToWrapper<TWrapper>(ownsReference: false)` to borrow an existing
+reference with a Java assignability check, or omit `ownsReference` to adopt it.
+`JavaWrapperConverter.FromHandle<TWrapper>(handle)` creates an independently owned
+wrapper from a real JNI handle after checking its Java type. Null references and
+zero handles return null; incompatible types throw `InvalidCastException`.
+The `JavaObjectExtensions` helper supplies `T As<T>() where T : JavaObject` for checked
+conversion to another wrapper. `As<T>()` returns a new, independently owned
+reference; dispose the result after use. Disposing either wrapper does not
+invalidate the other. The `AndroidJavaObject.ToWrapper<T>(ownsReference)`
+extension retains its explicit adoption/borrowing semantics.
+
+Java failures are catchable through the corresponding generated throwable class.
+Dispose caught throwable wrappers after use. They preserve Java inheritance and
+derive from `JavaInvocationException`, which implements `IJavaObject` and
+`IDisposable`. CLR single inheritance prevents them from also deriving from
+`JavaObject`; use `IJavaObject` when an API must accept both object and throwable
+wrappers. For a `JavaObject` parameter, use
+`exception.JavaReference.ToWrapper<JavaObject>(ownsReference: false)` and dispose
+the temporary borrowed wrapper after the call. The original Java stack trace is
+available as `JavaStackTrace`.
 
 `src/Bindings/Net/Majdata/Majdataplay/MajdataPlayActivity.e.cs` adapts
 `AndroidJavaProxy` arguments for the generated `RegisterOnNewIntentCallback`,

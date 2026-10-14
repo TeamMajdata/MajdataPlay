@@ -63,21 +63,31 @@ namespace MajdataPlay.Tests.AndroidJavaWrapperGeneratorValidation
         /// <param name="sources">The complete generated source set.</param>
         private static void VerifyDeclarations(IReadOnlyDictionary<string, string> sources)
         {
-            var trees = sources.Values.Select(source => CSharpSyntaxTree.ParseText(source)).ToArray();
+            var trees = sources.Where(source => source.Key.EndsWith(".g.cs", StringComparison.Ordinal))
+                .Select(source => CSharpSyntaxTree.ParseText(source.Value)).ToArray();
             var classes = trees.SelectMany(tree => tree.GetRoot().DescendantNodes().OfType<ClassDeclarationSyntax>()).Where(type => type.Modifiers.Any(token => token.IsKind(SyntaxKind.PublicKeyword))).ToArray();
             Require(classes.All(type => type.Modifiers.Any(token => token.IsKind(SyntaxKind.PartialKeyword))), "Every public generated class is partial");
             var interfaces = trees.SelectMany(tree => tree.GetRoot().DescendantNodes().OfType<InterfaceDeclarationSyntax>()).ToArray();
             Require(interfaces.Length > 0 && interfaces.All(type => !type.Modifiers.Any(token => token.IsKind(SyntaxKind.PartialKeyword))), "Java interfaces generate nonpartial C# contracts");
             Require(classes.Any(type => type.Identifier.ValueText == "JavaObject"), "java.lang.Object is named JavaObject");
             Require(classes.Any(type => type.Identifier.ValueText == "Integer"), "Boxed Integer has a typed wrapper");
-            var widget = classes.Single(type => type.Identifier.ValueText == "Widget");
+            var widget = classes.Single(type => type.Identifier.ValueText == "Widget"
+                && type.Members.OfType<ConstructorDeclarationSyntax>().Any());
             Require(widget.BaseList != null && widget.BaseList.Types.Any(item => item.ToString().EndsWith(".Base", StringComparison.Ordinal)), "Nonpublic intermediate superclass falls back to the public Java ancestor");
             Require(widget.Members.OfType<PropertyDeclarationSyntax>().All(item => item.AccessorList == null || item.AccessorList.Accessors.All(accessor => accessor.IsKind(SyntaxKind.GetAccessorDeclaration))), "Public Java fields generate getter-only properties");
             Require(!classes.Any(type => type.Identifier.ValueText.Contains("PublicInside", StringComparison.Ordinal)), "Inaccessible nested Java classes are not exported");
             Require(widget.Members.OfType<MethodDeclarationSyntax>().Any(item => item.Identifier.ValueText.Contains("Inherited", StringComparison.Ordinal)), "Public members of package-private Java bases are exposed");
             var abstractWidget = classes.Single(type => type.Identifier.ValueText == "AbstractWidget");
-            Require(abstractWidget.Members.OfType<ConstructorDeclarationSyntax>().All(item => item.ParameterList.Parameters.Count > 0), "Abstract Java types receive reference-only constructors");
+            Require(abstractWidget.Members.OfType<ConstructorDeclarationSyntax>()
+                .Where(item => !item.Modifiers.Any(token => token.IsKind(SyntaxKind.StaticKeyword)))
+                .All(item => item.ParameterList.Parameters.Count > 0), "Abstract Java types receive reference-only constructors");
             Require(sources.Values.All(source => source.Contains("#nullable enable", StringComparison.Ordinal)), "Nullable analysis is enabled in all generated sources");
+            var result = classes.Single(type => type.Identifier.ValueText == "Result"
+                && type.Parent is ClassDeclarationSyntax parent && parent.Identifier.ValueText == "ManagedContracts");
+            Require(result.Members.OfType<PropertyDeclarationSyntax>().Any(property => property.Identifier.ValueText == "Data"
+                && property.Type.ToString() == "sbyte[]?")
+                && !result.Members.OfType<PropertyDeclarationSyntax>().Any(property => property.Identifier.ValueText == "DataJavaField"),
+                "Ordinary nested result fields retain Data without inheriting CLR exception member reservations");
         }
 
         /// <summary>Executes safe managed helpers without constructing any Java handle.</summary>
@@ -91,6 +101,7 @@ namespace MajdataPlay.Tests.AndroidJavaWrapperGeneratorValidation
             }
 
             var assembly = Assembly.Load(assemblyBytes);
+            VerifyEnhancedRuntimeMetadata(assembly);
             var runtime = assembly.GetType("Validation.CustomRoot.AndroidJni", true)!;
             var map = runtime.GetMethods().Single(item => item.Name == "MapArray").MakeGenericMethod(typeof(int), typeof(int));
             var converter = new Func<int, int>(value => value + 1);
@@ -103,6 +114,20 @@ namespace MajdataPlay.Tests.AndroidJavaWrapperGeneratorValidation
             Expect<PlatformNotSupportedException>(() => Invoke(getClass, new object?[] { "java.lang.Object" }), "Non-Android JNI is rejected before any Unity native call");
             var wrap = runtime.GetMethods().Single(item => item.Name == "Wrap").MakeGenericMethod(assembly.GetType("Validation.CustomRoot.Bindings.Java.Lang.JavaObject", true)!);
             Expect<ArgumentNullException>(() => Invoke(wrap, new object?[] { null, null }), "Wrap rejects a missing reference factory");
+            var javaObject = assembly.GetType("Validation.CustomRoot.Bindings.Java.Lang.JavaObject", true)!;
+            var converterType = assembly.GetType("Validation.CustomRoot.JavaWrapperConverter", true)!;
+            var converterMethod = converterType.GetMethods().Single(method => method.Name == "ToWrapper" && method.IsGenericMethodDefinition)
+                .MakeGenericMethod(javaObject);
+            Require(Invoke(converterMethod, new object?[] { null, true }) is null,
+                "Checked public wrapper conversion preserves a null Java reference");
+            var extensionType = assembly.GetType("Validation.CustomRoot.AndroidJavaObjectExtensions", true)!;
+            var extensionMethod = extensionType.GetMethod("ToWrapper")!.MakeGenericMethod(javaObject);
+            Require(Invoke(extensionMethod, new object?[] { null, false }) is null,
+                "AndroidJavaObject wrapper conversion extension preserves a null borrowed reference");
+            var handleMethod = converterType.GetMethods().Single(method => method.Name == "FromHandle" && method.IsGenericMethodDefinition)
+                .MakeGenericMethod(javaObject);
+            Require(Invoke(handleMethod, new object?[] { IntPtr.Zero }) is null,
+                "Checked handle conversion preserves the null JNI handle without native calls");
         }
 
         /// <summary>Checks that generated namespace boundaries are reflected in relative output paths.</summary>
@@ -112,9 +137,10 @@ namespace MajdataPlay.Tests.AndroidJavaWrapperGeneratorValidation
         private static void VerifyNamespaceLayout(IReadOnlyDictionary<string, string> sources, string rootNamespace)
         {
             var runtimePaths = new HashSet<string>(StringComparer.Ordinal);
-            foreach (var name in new[] { "AndroidJni", "IJavaObject", "JavaInvocationException", "JavaObjectReference" })
+            foreach (var runtime in sources.Where(source => !source.Key.Contains('/') && source.Key.EndsWith(".cs", StringComparison.Ordinal)))
             {
-                var path = name + ".cs";
+                var path = runtime.Key;
+                var name = Path.GetFileNameWithoutExtension(path).Split('.')[0];
                 runtimePaths.Add(path);
                 var runtimeSource = sources[path];
                 var declaration = CSharpSyntaxTree.ParseText(runtimeSource).GetRoot().DescendantNodes().OfType<NamespaceDeclarationSyntax>().Single();

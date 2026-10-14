@@ -62,14 +62,18 @@ namespace MajdataPlay.Tests.AndroidJavaWrapperGeneratorValidation
         /// <param name="workspace">The exclusively owned ignored validation directory.</param>
         /// <param name="productionProject">The production project whose Java inputs and Editor version pin are copied.</param>
         /// <param name="expectedSources">Independently generated complete SDK, project, and Unity sources.</param>
+        /// <param name="deviceProbeSource">The validation Java probe compiled into the same independent wrapper library.</param>
         /// <returns>The independently compiled installed wrapper library used to validate production consumers.</returns>
         /// <exception cref="InvalidOperationException">Bootstrap, deterministic output, or asset identity checks fail.</exception>
         /// <exception cref="IOException">Copying prerequisites or inspecting output fails.</exception>
         private static byte[] VerifyProjectModeBootstrap(ValidationSettings settings, string workspace, string productionProject,
-            IReadOnlyDictionary<string, string> expectedSources)
+            IReadOnlyDictionary<string, string> expectedSources, string deviceProbeSource)
         {
             var root = Path.Combine(workspace, "project-mode-bootstrap");
             CreateProjectModeFixture(productionProject, root);
+            var probeDirectory = Path.Combine(root, "Assets", "Plugins", "Android", "src", "java", "net", "majdata", "validation");
+            Directory.CreateDirectory(probeDirectory);
+            File.Copy(deviceProbeSource, Path.Combine(probeDirectory, "DeviceJniProbe.java"));
             var android = Path.Combine(root, "Assets", "Plugins", "MajdataPlay", "Platform", "Android");
             var former = Path.Combine(android, "Runtime");
             var sourceProject = Path.Combine(root, "Tools", "AndroidJavaWrapper");

@@ -3,6 +3,7 @@
 #endif
 using MajdataPlay.Diagnostics;
 using MajdataPlay.Platform.Android.IO;
+using MajdataPlay.Platform.Android.Runtime;
 using MajdataPlay.Platform.Android.Runtime.Bindings.Android.App;
 using MajdataPlay.Platform.Android.Runtime.Bindings.Android.Content;
 using MajdataPlay.Platform.Android.Runtime.Bindings.Android.Os;
@@ -63,7 +64,7 @@ namespace MajdataPlay.Platform.Android
                 MajdataPlayActivity.RegisterOnNewIntentCallback(s_onNewIntentCallbackProxy ??= new OnNewIntentCallbackProxy());
                 MajDebug.LogInfo(nameof(AndroidRuntime), "Setting onActivityResult callback proxy");
                 MajdataPlayActivity.RegisterOnActivityResultCallback(s_onActivityResultCallbackProxy ??= new OnActivityResultCallbackProxy());
-                var sdkVersion = Build_Version.SdkInt;
+                var sdkVersion = Build.Version.SdkInt;
                 using var activity = CurrentActivity;
                 using var appInfo = activity.GetApplicationInfo()
                     ?? throw new InvalidOperationException("The Android application metadata is unavailable.");
@@ -98,7 +99,7 @@ namespace MajdataPlay.Platform.Android
         {
             if (OnNewIntent is not null)
             {
-                OnNewIntent(null, new Intent(intent, false));
+                OnNewIntent(null, intent.ToWrapper<Intent>(ownsReference: false));
             }
         }
         /// <summary>Forwards an activity result to managed subscribers.</summary>
@@ -109,7 +110,7 @@ namespace MajdataPlay.Platform.Android
         {
             if (OnActivityResult is not null)
             {
-                OnActivityResult(null, requestCode, resultCode, intent != null ? new Intent(intent, false) : null);
+                OnActivityResult(null, requestCode, resultCode, intent?.ToWrapper<Intent>(ownsReference: false));
             }
         }
         /// <summary>Adapts the production new-intent Java callback to the managed event.</summary>

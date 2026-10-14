@@ -10,7 +10,7 @@ using System.Threading;
 namespace MajdataPlay.Tools.AndroidJavaWrapperGenerator
 {
     /// <summary>Emits independent C# 9 wrappers for the effective public Java API.</summary>
-    internal static class WrapperEmitter
+    internal static partial class WrapperEmitter
     {
         /// <summary>Generates deterministic namespace-relative source files and their dependency closure.</summary>
         /// <param name="api">The extracted JVM declarations, including nonpublic hierarchy metadata.</param>
@@ -55,10 +55,16 @@ namespace MajdataPlay.Tools.AndroidJavaWrapperGenerator
         }
 
         /// <summary>Stores one generation's names, hierarchy plans, and descriptor caches.</summary>
-        private sealed class Emitter
+        private sealed partial class Emitter
         {
             /// <summary>Identifies the JVM root, including in SDK-free metadata sets.</summary>
             private const string ObjectName = "java.lang.Object";
+
+            /// <summary>Identifies the JVM reflection class used by every Class property.</summary>
+            private const string ClassName = "java.lang.Class";
+
+            /// <summary>Identifies the JVM exception root that must derive from a CLR exception.</summary>
+            private const string ThrowableName = "java.lang.Throwable";
 
             /// <summary>Identifies Unity's owned JNI object handle.</summary>
             private const string UnityObject = "global::UnityEngine.AndroidJavaObject";
@@ -68,6 +74,12 @@ namespace MajdataPlay.Tools.AndroidJavaWrapperGenerator
             {
                 "Class", "ClassJavaProperty", "JavaReference", "Dispose", "Equals", "GetHashCode", "GetType",
                 "ToString", "Finalize", "MemberwiseClone", "ReferenceEquals"
+            };
+
+            /// <summary>Lists CLR exception members reserved only in the Java throwable hierarchy.</summary>
+            private static readonly HashSet<string> s_exceptionReservedNames = new HashSet<string>(StringComparer.Ordinal)
+            {
+                "JavaClassName", "JavaStackTrace", "Message", "StackTrace", "InnerException", "Data", "HelpLink", "HResult", "Source", "TargetSite"
             };
 
             /// <summary>Receives metadata diagnostics without modifying extracted declarations.</summary>
@@ -99,6 +111,9 @@ namespace MajdataPlay.Tools.AndroidJavaWrapperGenerator
 
             /// <summary>Stores simple public interface names after wrapper collision resolution.</summary>
             private readonly Dictionary<string, string> _interfaceNames = new Dictionary<string, string>(StringComparer.Ordinal);
+
+            /// <summary>Caches completed class and interface emission plans.</summary>
+            private readonly Dictionary<string, IReadOnlyList<string>> _nestedNames = new Dictionary<string, IReadOnlyList<string>>(StringComparer.Ordinal);
 
             /// <summary>Caches completed class and interface emission plans.</summary>
             private readonly Dictionary<string, TypePlan> _plans = new Dictionary<string, TypePlan>(StringComparer.Ordinal);
@@ -136,6 +151,8 @@ namespace MajdataPlay.Tools.AndroidJavaWrapperGenerator
                 _types = new Dictionary<string, JavaType>(api.Types, StringComparer.Ordinal);
                 _jni = "global::" + options.RootNamespace + ".AndroidJni";
                 _bindingsNamespace = JavaNames.Namespace(options.RootNamespace, string.Empty);
+                EnsureRuntimeType(ClassName, ObjectName, "<T:Ljava/lang/Object;>Ljava/lang/Object;");
+                EnsureRuntimeType(ThrowableName, ObjectName, null);
                 if (!_types.ContainsKey(ObjectName))
                 {
                     _types.Add(ObjectName, new JavaType
@@ -172,7 +189,7 @@ namespace MajdataPlay.Tools.AndroidJavaWrapperGenerator
                     var relativeNamespace = plan.Namespace.Substring(_options.RootNamespace.Length).TrimStart('.');
                     var directory = relativeNamespace.Replace('.', '/');
                     plans[planIndex] = plan;
-                    paths[planIndex] = (directory.Length == 0 ? string.Empty : directory + "/") + plan.Name + ".g.cs";
+                    paths[planIndex] = (directory.Length == 0 ? string.Empty : directory + "/") + WrapperPath(name) + ".g.cs";
                     planIndex++;
                 }
                 foreach (var plan in plans)
@@ -195,6 +212,8 @@ namespace MajdataPlay.Tools.AndroidJavaWrapperGenerator
                     _ct.ThrowIfCancellationRequested();
                     result.Add(paths[index], files[index]);
                 }
+                result.Add("JavaWrapperConverter.Exceptions.cs", EmitExceptionRegistry());
+                result.Add("JavaObjectExtensions.cs", EmitObjectExtensions());
                 var committedWarnings = new HashSet<string>(_api.Warnings, StringComparer.Ordinal);
                 foreach (var warning in _warnings.Concat(diagnostics.SelectMany(value => value))
                     .Distinct(StringComparer.Ordinal).OrderBy(value => value, StringComparer.Ordinal))
@@ -233,10 +252,17 @@ namespace MajdataPlay.Tools.AndroidJavaWrapperGenerator
                     }
                 }
                 AddSelected(ObjectName, pending);
+                AddSelected(ClassName, pending);
+                AddSelected(ThrowableName, pending);
                 while (pending.Count != 0)
                 {
                     _ct.ThrowIfCancellationRequested();
                     var selected = pending.Dequeue();
+                    if (selected.EnclosingType is not null)
+                    {
+                        AddSelected(selected.EnclosingType, pending);
+                    }
+                    SelectGenericReferences(selected, pending);
                     foreach (var type in Hierarchy(selected, true))
                     {
                         if (IsExportable(type))
@@ -414,6 +440,9 @@ namespace MajdataPlay.Tools.AndroidJavaWrapperGenerator
                 occupied.Add(_options.RootNamespace + ".IJavaObject");
                 occupied.Add(_options.RootNamespace + ".JavaObjectReference");
                 occupied.Add(_options.RootNamespace + ".JavaInvocationException");
+                occupied.Add(_options.RootNamespace + ".JavaWrapperConverter");
+                occupied.Add(_options.RootNamespace + ".AndroidJavaObjectExtensions");
+                occupied.Add(_options.RootNamespace + ".JavaObjectExtensions");
                 // Preserve aliases allocated against the previous runtime namespace when bindings move to their new directory.
                 occupied.Add(_bindingsNamespace + ".Runtime.AndroidJni");
                 occupied.Add(_bindingsNamespace + ".Runtime.IJavaObject");
@@ -422,14 +451,26 @@ namespace MajdataPlay.Tools.AndroidJavaWrapperGenerator
                 foreach (var type in declarations.OrderBy(type => type.Name == ObjectName ? 0 : 1))
                 {
                     _ct.ThrowIfCancellationRequested();
-                    var proposed = JavaNames.TypeName(type.Name);
-                    var name = AllocateTypeName(_namespaces[type.Name], proposed, type.Name, occupied);
+                    var scope = TypeScope(type.Name);
+                    var proposed = type.EnclosingType is null ? JavaNames.TypeName(type.Name)
+                        : JavaNames.PascalCase(type.Name.Substring(type.EnclosingType.Length + 1));
+                    if (s_reservedNames.Contains(proposed) && type.EnclosingType is not null
+                        || type.EnclosingType is not null && proposed == _wrapperNames[type.EnclosingType])
+                    {
+                        proposed += "JavaType";
+                    }
+                    var name = AllocateTypeName(scope, proposed, type.Name, occupied);
                     _wrapperNames.Add(type.Name, name);
                 }
                 foreach (var type in declarations.Where(type => type.IsInterface))
                 {
                     _ct.ThrowIfCancellationRequested();
-                    _interfaceNames.Add(type.Name, AllocateTypeName(_namespaces[type.Name], "I" + _wrapperNames[type.Name], "interface:" + type.Name, occupied));
+                    _interfaceNames.Add(type.Name, AllocateTypeName(TypeScope(type.Name), "I" + _wrapperNames[type.Name], "interface:" + type.Name, occupied));
+                }
+                foreach (var group in declarations.Where(type => type.EnclosingType is not null).GroupBy(type => type.EnclosingType!))
+                {
+                    _nestedNames.Add(group.Key, group.SelectMany(type => type.IsInterface
+                        ? new[] { _wrapperNames[type.Name], _interfaceNames[type.Name] } : new[] { _wrapperNames[type.Name] }).ToArray());
                 }
             }
 
@@ -468,8 +509,8 @@ namespace MajdataPlay.Tools.AndroidJavaWrapperGenerator
                 }
                 var type = _types[name];
                 var plan = new TypePlan(type, _namespaces[name], _wrapperNames[name],
-                    type.IsInterface ? _interfaceNames[name] : null);
-                if (name != ObjectName)
+                    type.IsInterface ? _interfaceNames[name] : null, TypeScope(name));
+                if (name != ObjectName && name != ThrowableName)
                 {
                     var parent = type.IsInterface ? ObjectName : NearestPublicSuperclass(type);
                     plan.Base = BuildPlan(parent);
@@ -637,12 +678,12 @@ namespace MajdataPlay.Tools.AndroidJavaWrapperGenerator
                 var sameFamily = declared.Concat(inherited).FirstOrDefault(method => method.Method.Name == candidate.Method.Name);
                 var proposed = sameJavaMethod?.Name ?? sameFamily?.Name ?? JavaNames.PascalCase(candidate.Method.Name);
                 var nonMethodNames = isInterface ? Enumerable.Empty<string>() : plan.Base?.PublicFields.Select(field => field.Name) ?? Enumerable.Empty<string>();
-                if (s_reservedNames.Contains(proposed) || proposed == plan.Name || proposed == plan.InterfaceSimpleName
+                if (IsReservedMember(plan, proposed) || NestedMemberNames(plan.Type).Contains(proposed) || proposed == plan.Name || proposed == plan.InterfaceSimpleName
                     || nonMethodNames.Contains(proposed, StringComparer.Ordinal))
                 {
                     proposed += "JavaMethod";
                 }
-                while (s_reservedNames.Contains(proposed) || proposed == plan.Name || proposed == plan.InterfaceSimpleName
+                while (IsReservedMember(plan, proposed) || NestedMemberNames(plan.Type).Contains(proposed) || proposed == plan.Name || proposed == plan.InterfaceSimpleName
                     || nonMethodNames.Contains(proposed, StringComparer.Ordinal))
                 {
                     proposed += "JavaMethod";
@@ -786,6 +827,11 @@ namespace MajdataPlay.Tools.AndroidJavaWrapperGenerator
                 }
                 var seen = new HashSet<string>(StringComparer.Ordinal);
                 var allocated = new HashSet<string>(s_reservedNames, StringComparer.Ordinal);
+                if (IsThrowable(plan.Type))
+                {
+                    allocated.UnionWith(s_exceptionReservedNames);
+                }
+                allocated.UnionWith(NestedMemberNames(plan.Type));
                 allocated.Add(plan.Name);
                 allocated.UnionWith(plan.PublicMethods.Select(method => method.Name));
                 foreach (var owner in Hierarchy(plan.Type, true))
@@ -859,7 +905,7 @@ namespace MajdataPlay.Tools.AndroidJavaWrapperGenerator
                         }
                         var reference = ReferenceName(descriptor.BinaryName);
                         var simpleName = _types[reference].IsInterface ? _interfaceNames[reference] : _wrapperNames[reference];
-                        return "global::" + _namespaces[reference] + "." + simpleName + "?";
+                        return "global::" + TypeScope(reference) + "." + simpleName + "?";
                     case '[':
                         return TypeName(descriptor.Element!, raw) + "[]?";
                     default:
@@ -877,9 +923,8 @@ namespace MajdataPlay.Tools.AndroidJavaWrapperGenerator
                 if (descriptor.Code == 'L' && descriptor.BinaryName != "java.lang.String")
                 {
                     var reference = ReferenceName(descriptor.BinaryName);
-                    var wrapper = "global::" + _namespaces[reference] + "." + _wrapperNames[reference];
-                    return _jni + ".Wrap<" + wrapper + ">(" + expression + ", __reference => new "
-                        + wrapper + "(__reference, ownsReference: true))";
+                    var wrapper = QualifiedWrapper(reference);
+                    return ConverterName + ".ToWrapper<" + wrapper + ">(" + expression + ", ownsReference: true)";
                 }
                 if (descriptor.Code == '[' && ContainsWrapper(descriptor.Element!))
                 {
@@ -912,6 +957,17 @@ namespace MajdataPlay.Tools.AndroidJavaWrapperGenerator
                 source.Line("#nullable enable");
                 source.Line();
                 source.Open("namespace " + plan.Namespace);
+                EmitOwnerScopes(source, plan, warnings);
+                source.Close();
+                return source.ToString();
+            }
+
+            /// <summary>Emits one erased wrapper declaration inside its current containing scope.</summary>
+            /// <param name="source">The indented output writer.</param>
+            /// <param name="plan">The completed declaration plan.</param>
+            /// <param name="warnings">The output diagnostics.</param>
+            private void EmitDeclaration(SourceWriter source, TypePlan plan, List<string> warnings)
+            {
                 if (plan.Type.IsInterface)
                 {
                     EmitInterface(source, plan);
@@ -923,17 +979,21 @@ namespace MajdataPlay.Tools.AndroidJavaWrapperGenerator
                 WrapperDocumentation.WriteDetails(source.Line, plan.Type.Documentation);
                 var bases = new List<string>
                 {
-                    plan.Base?.QualifiedName ?? "global::" + _options.RootNamespace + ".JavaObjectReference"
+                    plan.Type.Name == ThrowableName ? "global::" + _options.RootNamespace + ".JavaInvocationException"
+                        : GenericSuperclass(plan) ?? plan.Base?.QualifiedName ?? "global::" + _options.RootNamespace + ".JavaObjectReference"
                 };
                 if (plan.InterfaceQualifiedName is not null)
                 {
-                    bases.Add(plan.InterfaceQualifiedName);
+                    bases.Add(plan.InterfaceSimpleName!);
                 }
                 else
                 {
                     bases.AddRange(plan.Interfaces.Select(value => value.InterfaceQualifiedName!).Distinct(StringComparer.Ordinal).OrderBy(value => value, StringComparer.Ordinal));
                 }
+                AddManagedInterfaces(plan, bases);
+                bases.AddRange(ConcreteGenericInterfaces(plan));
                 source.Open("public partial class " + plan.Name + " : " + string.Join(", ", bases));
+                EmitRegistration(source, plan.Name, plan.Name, plan.Type.Name);
                 EmitReferenceConstructor(source, plan);
                 EmitJavaConstructors(source, plan, warnings);
                 source.Line();
@@ -962,12 +1022,12 @@ namespace MajdataPlay.Tools.AndroidJavaWrapperGenerator
                             continue;
                         }
                         source.Line();
-                        EmitMethod(source, method, contract.InterfaceQualifiedName);
+                        EmitMethod(source, method, ReferenceEquals(contract, plan) ? plan.InterfaceSimpleName : contract.InterfaceQualifiedName);
                     }
                 }
+                EmitManagedContracts(source, plan);
+                EmitConcreteGenericContracts(source, plan);
                 source.Close();
-                source.Close();
-                return source.ToString();
             }
 
             /// <summary>Emits the Java interface contract and its accessible parent interfaces.</summary>
@@ -1007,7 +1067,7 @@ namespace MajdataPlay.Tools.AndroidJavaWrapperGenerator
                 source.Line("/// <param name=\"javaReference\">The non-null Unity JNI reference to wrap.</param>");
                 source.Line("/// <param name=\"ownsReference\">Whether disposing this wrapper also disposes the JNI reference.</param>");
                 source.Line("/// <exception cref=\"global::System.ArgumentNullException\">The Java reference is null.</exception>");
-                source.Line("public " + plan.Name + "(" + UnityObject + " javaReference, bool ownsReference = true)");
+                source.Line("internal " + plan.Name + "(" + UnityObject + " javaReference, bool ownsReference = true)");
                 source.Open("    : base(javaReference, ownsReference)");
                 source.Close();
             }
@@ -1077,9 +1137,9 @@ namespace MajdataPlay.Tools.AndroidJavaWrapperGenerator
                         + JavaNames.StringLiteral(method.Descriptor) + ", " + Arguments(constructor.ParameterNames) + ")";
                     if (constructor.FactoryName is not null)
                     {
-                        source.Open("public static " + plan.QualifiedName + " " + constructor.FactoryName + "("
+                        source.Open("public static " + plan.Name + " " + constructor.FactoryName + "("
                             + ParameterDeclarations(constructor.ParameterTypes, constructor.ParameterNames) + ")");
-                        source.Line("return new " + plan.QualifiedName + "(" + construction + ", ownsReference: true);");
+                        source.Line("return new " + plan.Name + "(" + construction + ", ownsReference: true);");
                         source.Close();
                         warnings.Add("Java constructor '" + plan.Type.Name + method.Descriptor
                             + "' shares a mapped C# signature; emitted factory '" + constructor.FactoryName + "' instead of a duplicate constructor.");
@@ -1102,9 +1162,10 @@ namespace MajdataPlay.Tools.AndroidJavaWrapperGenerator
                 source.Line("/// <returns>The Java Class reference; dispose it when it is no longer needed.</returns>");
                 DocumentJniExceptions(source, false);
                 var hides = plan.Base is not null && plan.Base.ClassPropertyName == plan.ClassPropertyName;
-                source.Open("public static " + (hides ? "new " : string.Empty) + UnityObject + " " + plan.ClassPropertyName);
+                var classWrapper = QualifiedWrapper(ClassName) + (IsThrowable(plan.Type) ? string.Empty : "<" + plan.Name + ">");
+                source.Open("public static " + (hides ? "new " : string.Empty) + classWrapper + " " + plan.ClassPropertyName);
                 source.Open("get");
-                source.Line("return " + _jni + ".GetClass(" + JavaNames.StringLiteral(plan.Type.Name) + ");");
+                source.Line("return " + ConverterName + ".ToWrapper<" + classWrapper + ">(" + _jni + ".GetClass(" + JavaNames.StringLiteral(plan.Type.Name) + "), ownsReference: true)!;");
                 source.Close();
                 source.Close();
             }
@@ -1248,13 +1309,16 @@ namespace MajdataPlay.Tools.AndroidJavaWrapperGenerator
             internal string Name { get; }
 
             /// <summary>Gets the globally qualified wrapper class name.</summary>
-            internal string QualifiedName => "global::" + Namespace + "." + Name;
+            internal string QualifiedName => "global::" + Scope + "." + Name;
+
+            /// <summary>Gets the namespace and containing wrapper path.</summary>
+            internal string Scope { get; }
 
             /// <summary>Gets the simple interface name, or null for a Java class.</summary>
             internal string? InterfaceSimpleName { get; }
 
             /// <summary>Gets the globally qualified interface name, or null for a Java class.</summary>
-            internal string? InterfaceQualifiedName => InterfaceSimpleName is null ? null : "global::" + Namespace + "." + InterfaceSimpleName;
+            internal string? InterfaceQualifiedName => InterfaceSimpleName is null ? null : "global::" + Scope + "." + InterfaceSimpleName;
 
             /// <summary>Gets the static Class property name, including the Class wrapper exception.</summary>
             internal string ClassPropertyName => Name == "Class" ? "ClassJavaProperty" : "Class";
@@ -1294,10 +1358,12 @@ namespace MajdataPlay.Tools.AndroidJavaWrapperGenerator
             /// <param name="namespaceName">The C# package namespace.</param>
             /// <param name="name">The simple wrapper name.</param>
             /// <param name="interfaceName">The simple interface name, if any.</param>
-            internal TypePlan(JavaType type, string namespaceName, string name, string? interfaceName)
+            /// <param name="scope">The namespace and containing wrapper path.</param>
+            internal TypePlan(JavaType type, string namespaceName, string name, string? interfaceName, string scope)
             {
                 Type = type;
                 Namespace = namespaceName;
+                Scope = scope;
                 Name = name;
                 InterfaceSimpleName = interfaceName;
             }

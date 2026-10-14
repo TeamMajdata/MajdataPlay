@@ -46,7 +46,7 @@ namespace __ROOT_NAMESPACE__
             EnsureAndroid();
             ValidateClassName(className);
             using var frame = new LocalFrame(16);
-            using var javaClass = new AndroidJavaClass(className);
+            using var javaClass = new JavaClassReference(className);
             return CopyReference(javaClass.GetRawClass());
         }
 
@@ -75,7 +75,7 @@ namespace __ROOT_NAMESPACE__
 
             ValidateArgumentCount(signature, arguments);
             using var frame = new LocalFrame(Math.Max(32, arguments.Length + 16));
-            using var javaClass = new AndroidJavaClass(className);
+            using var javaClass = new JavaClassReference(className);
             var classReference = javaClass.GetRawClass();
             var constructor = ResolveMethod(classReference, "<init>", descriptor, false);
             var jniArguments = WriteArguments(signature, arguments);
@@ -111,7 +111,7 @@ namespace __ROOT_NAMESPACE__
             ValidateResultType(signature.ReturnType, typeof(T));
             ValidateArgumentCount(signature, arguments);
             using var frame = new LocalFrame(Math.Max(32, arguments.Length + 16));
-            using var javaClass = new AndroidJavaClass(className);
+            using var javaClass = new JavaClassReference(className);
             var classReference = javaClass.GetRawClass();
             var isStatic = instance is null;
             var target = isStatic ? classReference : GetReceiver(instance!, classReference);
@@ -154,7 +154,7 @@ namespace __ROOT_NAMESPACE__
 
             ValidateArgumentCount(signature, arguments);
             using var frame = new LocalFrame(Math.Max(32, arguments.Length + 16));
-            using var javaClass = new AndroidJavaClass(className);
+            using var javaClass = new JavaClassReference(className);
             var classReference = javaClass.GetRawClass();
             var isStatic = instance is null;
             var target = isStatic ? classReference : GetReceiver(instance!, classReference);
@@ -203,7 +203,7 @@ namespace __ROOT_NAMESPACE__
 
             ValidateResultType(descriptor, typeof(T));
             using var frame = new LocalFrame(32);
-            using var javaClass = new AndroidJavaClass(className);
+            using var javaClass = new JavaClassReference(className);
             var classReference = javaClass.GetRawClass();
             var isStatic = instance is null;
             var target = isStatic ? classReference : GetReceiver(instance!, classReference);
@@ -238,6 +238,7 @@ namespace __ROOT_NAMESPACE__
         /// Generated wrappers are reference types; the null result is default(TWrapper) for a value-type implementation.
         /// </remarks>
         /// <exception cref="ArgumentNullException">The factory is null.</exception>
+        /// <exception cref="InvalidCastException">The result is incompatible with the registered Java wrapper type.</exception>
         /// <exception cref="InvalidOperationException">The factory returns null for a non-null Java reference.</exception>
         /// <exception cref="PlatformNotSupportedException">Reference cleanup is required outside Android.</exception>
         /// <exception cref="AggregateException">Wrapper construction and reference cleanup both fail.</exception>
@@ -256,6 +257,7 @@ namespace __ROOT_NAMESPACE__
 
             try
             {
+                JavaWrapperConverter.Validate<TWrapper>(value);
                 var wrapper = factory(value);
                 if (wrapper is null)
                 {
@@ -547,7 +549,7 @@ namespace __ROOT_NAMESPACE__
         /// <exception cref="JavaInvocationException">Java raises an exception while copying the reference.</exception>
         /// <exception cref="InvalidOperationException">The source reference is null.</exception>
         /// <exception cref="AggregateException">Reference creation and cleanup both fail.</exception>
-        private static AndroidJavaObject CopyReference(IntPtr reference)
+        internal static AndroidJavaObject CopyReference(IntPtr reference)
         {
             if (reference == IntPtr.Zero)
             {
@@ -573,6 +575,29 @@ namespace __ROOT_NAMESPACE__
                 }
 
                 throw;
+            }
+        }
+
+        /// <summary>Checks whether a live Unity reference is assignable to a generated Java wrapper type.</summary>
+        /// <param name="javaReference">The live Java reference to check without changing its ownership.</param>
+        /// <param name="className">The generated wrapper's exact Java binary class or interface name.</param>
+        /// <exception cref="PlatformNotSupportedException">Execution is outside an Android player.</exception>
+        /// <exception cref="ArgumentException">The Java binary class name is invalid.</exception>
+        /// <exception cref="ObjectDisposedException">The reference has no live Java object handle.</exception>
+        /// <exception cref="AndroidJavaException">Unity cannot resolve the requested Java class.</exception>
+        /// <exception cref="JavaInvocationException">Java raises an exception during the type check.</exception>
+        /// <exception cref="InvalidCastException">The reference is not assignable to the wrapper's Java type.</exception>
+        internal static void ValidateInstance(AndroidJavaObject javaReference, string className)
+        {
+            EnsureAndroid();
+            ValidateClassName(className);
+            var reference = GetObjectReference(javaReference);
+            using var javaClass = new JavaClassReference(className);
+            var compatible = AndroidJNI.IsInstanceOf(reference, javaClass.GetRawClass());
+            CheckException();
+            if (!compatible)
+            {
+                throw new InvalidCastException("The Java object is not an instance of " + className + ".");
             }
         }
 
@@ -868,7 +893,7 @@ namespace __ROOT_NAMESPACE__
         /// </summary>
         /// <param name="descriptor">An object descriptor or a nested-array descriptor.</param>
         /// <returns>A local JNI class reference preserved in the caller's frame.</returns>
-        /// <remarks>Unity's leaf-class lookup may initialize that class.</remarks>
+        /// <remarks>JNI leaf-class lookup may initialize that class.</remarks>
         /// <exception cref="AndroidJavaException">Unity cannot resolve a declared class.</exception>
         /// <exception cref="JavaInvocationException">Java raises an exception while resolving the array class.</exception>
         /// <exception cref="InvalidOperationException">JNI cannot allocate a frame or returns a null reference or identifier.</exception>
@@ -877,7 +902,7 @@ namespace __ROOT_NAMESPACE__
             using var frame = new LocalFrame(16);
             if (descriptor[0] == 'L')
             {
-                using var javaClass = new AndroidJavaClass(descriptor.Substring(1, descriptor.Length - 2).Replace('/', '.'));
+                using var javaClass = new JavaClassReference(descriptor.Substring(1, descriptor.Length - 2).Replace('/', '.'));
                 var reference = AndroidJNI.NewLocalRef(javaClass.GetRawClass());
                 CheckException();
                 if (reference == IntPtr.Zero)
@@ -889,9 +914,9 @@ namespace __ROOT_NAMESPACE__
             }
 
             var leaf = descriptor.TrimStart('[');
-            using var classClass = new AndroidJavaClass("java.lang.Class");
+            using var classClass = new JavaClassReference("java.lang.Class");
             using var leafClass = leaf[0] == 'L'
-                ? new AndroidJavaClass(leaf.Substring(1, leaf.Length - 2).Replace('/', '.'))
+                ? new JavaClassReference(leaf.Substring(1, leaf.Length - 2).Replace('/', '.'))
                 : null;
             var classLoader = IntPtr.Zero;
             if (leafClass is not null)
@@ -1131,14 +1156,31 @@ namespace __ROOT_NAMESPACE__
             AndroidJNI.ExceptionClear();
             var message = "Java exception during generated JNI invocation.";
             var stack = string.Empty;
+            var classNames = new List<string>();
+            AndroidJavaObject? throwableReference = null;
             var throwableClass = IntPtr.Zero;
             var logClass = IntPtr.Zero;
             try
             {
+                // Keep an independent global reference before the caller's local frame unwinds.
+                var copiedReference = new AndroidJavaObject(exception);
+                try
+                {
+                    CheckDiagnosticException();
+                    GetObjectReference(copiedReference);
+                    throwableReference = copiedReference;
+                }
+                catch
+                {
+                    copiedReference.Dispose();
+                    throw;
+                }
+
                 // Do not use Unity's exception formatter here: an overridden Throwable.toString()
                 // can throw, leaving secondary diagnostic JNI calls with a pending exception.
                 throwableClass = AndroidJNI.GetObjectClass(exception);
                 CheckDiagnosticException();
+                ReadThrowableClassNames(throwableClass, classNames);
                 var toString = AndroidJNI.GetMethodID(throwableClass, "toString", "()Ljava/lang/String;");
                 CheckDiagnosticException();
                 var description = AndroidJNI.CallObjectMethod(exception, toString, Array.Empty<jvalue>());
@@ -1188,7 +1230,70 @@ namespace __ROOT_NAMESPACE__
                 AndroidJNI.DeleteLocalRef(exception);
             }
 
+            if (throwableReference is not null)
+            {
+                throw JavaWrapperConverter.CreateException(throwableReference, classNames, message, stack);
+            }
+
             throw new JavaInvocationException(message, stack);
+        }
+
+        /// <summary>Captures the throwable's exact class and superclass names without loading unrelated classes.</summary>
+        /// <param name="throwableClass">The local Java Class reference representing the original throwable.</param>
+        /// <param name="classNames">The destination receiving actual class first and successive superclasses.</param>
+        /// <exception cref="InvalidOperationException">A diagnostic JNI lookup or call raises a secondary exception.</exception>
+        private static void ReadThrowableClassNames(IntPtr throwableClass, List<string> classNames)
+        {
+            var classClass = IntPtr.Zero;
+            var currentClass = IntPtr.Zero;
+            try
+            {
+                classClass = AndroidJNI.FindClass("java/lang/Class");
+                CheckDiagnosticException();
+                var getName = AndroidJNI.GetMethodID(classClass, "getName", "()Ljava/lang/String;");
+                CheckDiagnosticException();
+                var getSuperclass = AndroidJNI.GetMethodID(classClass, "getSuperclass", "()Ljava/lang/Class;");
+                CheckDiagnosticException();
+                currentClass = AndroidJNI.NewLocalRef(throwableClass);
+                CheckDiagnosticException();
+                while (currentClass != IntPtr.Zero)
+                {
+                    var name = AndroidJNI.CallObjectMethod(currentClass, getName, Array.Empty<jvalue>());
+                    try
+                    {
+                        CheckDiagnosticException();
+                        if (name != IntPtr.Zero)
+                        {
+                            var className = AndroidJNI.GetStringChars(name);
+                            CheckDiagnosticException();
+                            classNames.Add(className);
+                        }
+                    }
+                    finally
+                    {
+                        AndroidJNI.DeleteLocalRef(name);
+                    }
+
+                    var parentClass = AndroidJNI.CallObjectMethod(currentClass, getSuperclass, Array.Empty<jvalue>());
+                    try
+                    {
+                        CheckDiagnosticException();
+                    }
+                    catch
+                    {
+                        AndroidJNI.DeleteLocalRef(parentClass);
+                        throw;
+                    }
+
+                    AndroidJNI.DeleteLocalRef(currentClass);
+                    currentClass = parentClass;
+                }
+            }
+            finally
+            {
+                AndroidJNI.DeleteLocalRef(currentClass);
+                AndroidJNI.DeleteLocalRef(classClass);
+            }
         }
 
         /// <summary>
@@ -1298,6 +1403,75 @@ namespace __ROOT_NAMESPACE__
                 }
 
                 return new MethodSignature(parameters.ToArray(), result);
+            }
+        }
+
+        /// <summary>Owns a JNI class reference while preserving generated Java exception translation.</summary>
+        /// <remarks>
+        /// Class lookup uses the same raw FindClass entry point as Unity's AndroidJavaClass.
+        /// The global reference survives nested local-frame preservation until deterministic disposal.
+        /// </remarks>
+        private sealed class JavaClassReference : IDisposable
+        {
+            /// <summary>Stores the owned global class reference, or zero after disposal.</summary>
+            private IntPtr _reference;
+
+            /// <summary>Resolves a Java class and copies its temporary handle into an owned global reference.</summary>
+            /// <param name="className">The exact Java binary class name.</param>
+            /// <exception cref="JavaInvocationException">Java raises an exception during lookup or reference copying.</exception>
+            /// <exception cref="InvalidOperationException">JNI returns a null class or global reference without an exception.</exception>
+            internal JavaClassReference(string className)
+            {
+                var localReference = AndroidJNI.FindClass(className.Replace('.', '/'));
+                try
+                {
+                    CheckException();
+                    if (localReference == IntPtr.Zero)
+                    {
+                        throw new InvalidOperationException("JNI class lookup returned null without a Java exception.");
+                    }
+
+                    _reference = AndroidJNI.NewGlobalRef(localReference);
+                    try
+                    {
+                        CheckException();
+                        if (_reference == IntPtr.Zero)
+                        {
+                            throw new InvalidOperationException("JNI class-reference copying returned null without a Java exception.");
+                        }
+                    }
+                    catch
+                    {
+                        AndroidJNI.DeleteGlobalRef(_reference);
+                        _reference = IntPtr.Zero;
+                        throw;
+                    }
+                }
+                finally
+                {
+                    AndroidJNI.DeleteLocalRef(localReference);
+                }
+            }
+
+            /// <summary>Gets the live JNI class handle without transferring ownership.</summary>
+            /// <returns>The owned global class reference.</returns>
+            /// <exception cref="ObjectDisposedException">The class reference has already been disposed.</exception>
+            internal IntPtr GetRawClass()
+            {
+                if (_reference == IntPtr.Zero)
+                {
+                    throw new ObjectDisposedException(nameof(JavaClassReference));
+                }
+
+                return _reference;
+            }
+
+            /// <summary>Releases the owned global class reference at most once.</summary>
+            public void Dispose()
+            {
+                var reference = _reference;
+                _reference = IntPtr.Zero;
+                AndroidJNI.DeleteGlobalRef(reference);
             }
         }
 

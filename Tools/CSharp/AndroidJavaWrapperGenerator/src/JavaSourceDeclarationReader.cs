@@ -313,7 +313,7 @@ namespace MajdataPlay.Tools.AndroidJavaWrapperGenerator
                 {
                     method.Parameters.AddRange(ReadParameters(false));
                     ApplyVarargs(method);
-                    ReadThrows();
+                    ReadThrows(method.ThrowsTypes);
                     ReadMethodEnd(false);
                 }
                 type.Methods.Add(method);
@@ -336,7 +336,7 @@ namespace MajdataPlay.Tools.AndroidJavaWrapperGenerator
                         method.AccessFlags |= 0x0400;
                     }
                 }
-                ReadThrows();
+                ReadThrows(method.ThrowsTypes);
                 ReadMethodEnd(type.Kind == "annotation");
                 type.Methods.Add(method);
             }
@@ -405,11 +405,11 @@ namespace MajdataPlay.Tools.AndroidJavaWrapperGenerator
 
         /// <summary>Consumes exception declarations, which do not affect JVM descriptors.</summary>
         /// <exception cref="InvalidDataException">The throws clause is malformed.</exception>
-        private void ReadThrows()
+        /// <param name="exceptions">The destination for the declared exception references.</param>
+        private void ReadThrows(List<JavaSourceReference> exceptions)
         {
             if (Take("throws"))
             {
-                var exceptions = new List<JavaSourceReference>();
                 ReadReferenceList(exceptions);
             }
         }
@@ -503,7 +503,7 @@ namespace MajdataPlay.Tools.AndroidJavaWrapperGenerator
             return parameters;
         }
 
-        /// <summary>Reads primitive or source-qualified references while discarding generic arguments.</summary>
+        /// <summary>Reads primitive or source-qualified references while retaining generic arguments.</summary>
         /// <param name="allowVoid">Whether void is permitted.</param>
         /// <returns>The reference including type-level array dimensions.</returns>
         /// <exception cref="InvalidDataException">The reference is malformed or excessively nested.</exception>
@@ -532,21 +532,20 @@ namespace MajdataPlay.Tools.AndroidJavaWrapperGenerator
                     return new JavaSourceReference(token, token.Text, dimensions);
                 }
                 var name = new StringBuilder(ReadIdentifier().Text);
-                if (Is("<"))
-                {
-                    ReadTypeArguments();
-                }
+                IReadOnlyList<JavaSourceReference> arguments = Is("<") ? ReadTypeArguments() : Array.Empty<JavaSourceReference>();
+                JavaSourceReference? declaringType = null;
                 while (Is(".") && Peek(1).Text != "this" && Peek(1).Text != "class")
                 {
+                    if (arguments.Count != 0 || declaringType is not null)
+                    {
+                        declaringType = new JavaSourceReference(token, name.ToString(), typeArguments: arguments, declaringType: declaringType);
+                    }
                     ReadToken();
                     SkipAnnotations();
                     name.Append('.').Append(ReadIdentifier().Text);
-                    if (Is("<"))
-                    {
-                        ReadTypeArguments();
-                    }
+                    arguments = Is("<") ? ReadTypeArguments() : Array.Empty<JavaSourceReference>();
                 }
-                return new JavaSourceReference(token, name.ToString(), ReadArrayDimensions());
+                return new JavaSourceReference(token, name.ToString(), ReadArrayDimensions(), arguments, declaringType);
             }
             finally
             {
@@ -554,24 +553,35 @@ namespace MajdataPlay.Tools.AndroidJavaWrapperGenerator
             }
         }
 
-        /// <summary>Consumes generic arguments, annotated wildcards, and nested parameterizations.</summary>
+        /// <summary>Reads generic arguments, annotated wildcards, and nested parameterizations.</summary>
+        /// <returns>The ordered type arguments and preserved wildcard bounds.</returns>
         /// <exception cref="InvalidDataException">The argument list is malformed.</exception>
-        private void ReadTypeArguments()
+        private IReadOnlyList<JavaSourceReference> ReadTypeArguments()
         {
             Expect("<");
+            var arguments = new List<JavaSourceReference>();
             while (true)
             {
                 SkipAnnotations();
+                var token = Current;
                 if (Take("?"))
                 {
-                    if (Take("extends") || Take("super"))
+                    if (Take("extends"))
                     {
-                        ReadReference(false);
+                        arguments.Add(new JavaSourceReference(token, "?", wildcard: '+', wildcardBound: ReadReference(false)));
+                    }
+                    else if (Take("super"))
+                    {
+                        arguments.Add(new JavaSourceReference(token, "?", wildcard: '-', wildcardBound: ReadReference(false)));
+                    }
+                    else
+                    {
+                        arguments.Add(new JavaSourceReference(token, "?", wildcard: '*'));
                     }
                 }
                 else
                 {
-                    ReadReference(false);
+                    arguments.Add(ReadReference(false));
                 }
                 if (Take(">"))
                 {
@@ -579,6 +589,7 @@ namespace MajdataPlay.Tools.AndroidJavaWrapperGenerator
                 }
                 Expect(",");
             }
+            return arguments;
         }
 
         /// <summary>Reads type-use annotations and trailing empty array brackets.</summary>

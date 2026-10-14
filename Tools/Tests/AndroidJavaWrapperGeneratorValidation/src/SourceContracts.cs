@@ -28,7 +28,8 @@ namespace MajdataPlay.Tests.AndroidJavaWrapperGeneratorValidation
                 RootNamespace = "NamespaceChecks.Custom.Runtime",
                 OutputDirectory = Path.Combine(directory, "generated")
             };
-            foreach (var name in new[] { "AndroidJni", "IJavaObject", "JavaInvocationException", "JavaObjectReference" })
+            var runtimeNames = RuntimeEmitter.Generate(options.RootNamespace).Keys.Select(Path.GetFileNameWithoutExtension).ToArray();
+            foreach (var name in runtimeNames)
             {
                 var path = Path.Combine(directory, name + ".java");
                 File.WriteAllText(path, "public class " + name + " { public " + name + " echo(" + name + " value) { return value; } }");
@@ -45,7 +46,7 @@ namespace MajdataPlay.Tests.AndroidJavaWrapperGeneratorValidation
             options.Inputs.Add(collisionPath);
             var sources = Generate(JavaApiScanner.Scan(options, CancellationToken.None), options);
             VerifyNamespaceLayout(sources, options.RootNamespace);
-            foreach (var name in new[] { "AndroidJni", "IJavaObject", "JavaInvocationException", "JavaObjectReference" })
+            foreach (var name in runtimeNames)
             {
                 var declaration = CSharpSyntaxTree.ParseText(sources["Bindings/" + name + ".g.cs"]).GetRoot().DescendantNodes().OfType<NamespaceDeclarationSyntax>().Single();
                 Require(declaration.Name.ToString() == options.RootNamespace + ".Bindings"

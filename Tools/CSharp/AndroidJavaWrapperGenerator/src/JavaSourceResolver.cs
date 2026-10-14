@@ -119,6 +119,7 @@ namespace MajdataPlay.Tools.AndroidJavaWrapperGenerator
             {
                 _cancellationToken.ThrowIfCancellationRequested();
                 ValidateBounds(type, null, type.TypeParameters);
+                type.Metadata.Signature = BuildClassSignature(type);
                 var fieldNames = new HashSet<string>(StringComparer.Ordinal);
                 foreach (var field in type.Fields)
                 {
@@ -130,6 +131,7 @@ namespace MajdataPlay.Tools.AndroidJavaWrapperGenerator
                     {
                         Name = field.Token.Text,
                         Descriptor = Descriptor(field.Type, type, null, false),
+                        Signature = HasGenericReference(field.Type, type, null) ? GenericTypeSignature(field.Type, type, null) : null,
                         AccessFlags = field.AccessFlags
                     });
                 }
@@ -244,7 +246,233 @@ namespace MajdataPlay.Tools.AndroidJavaWrapperGenerator
                 descriptor.Append(Descriptor(method.ReturnType, owner, method, true));
             }
             result.Descriptor = descriptor.ToString();
+            result.Signature = BuildMethodSignature(owner, method);
             return result;
+        }
+
+        /// <summary>Builds the optional generic class Signature attribute independently from erased names.</summary>
+        /// <param name="type">The resolved source declaration.</param>
+        /// <returns>The JVM generic signature, or null when all types are raw.</returns>
+        /// <exception cref="InvalidDataException">A generic reference cannot be resolved.</exception>
+        private string? BuildClassSignature(JavaSourceType type)
+        {
+            var signature = new StringBuilder();
+            AppendTypeParameters(signature, type.TypeParameters, type, null);
+            var generic = type.TypeParameters.Count != 0 || type.Kind == "enum";
+            if (type.SuperType is not null)
+            {
+                signature.Append(GenericTypeSignature(type.SuperType, type, null));
+                generic |= HasGenericReference(type.SuperType, type, null);
+            }
+            else if (type.Kind == "enum")
+            {
+                signature.Append("Ljava/lang/Enum<").Append(ObjectDescriptor(type.Metadata.Name)).Append(">;");
+            }
+            else
+            {
+                signature.Append(ObjectDescriptor(type.Metadata.SuperName ?? "java.lang.Object"));
+            }
+            if (type.Kind == "annotation")
+            {
+                signature.Append("Ljava/lang/annotation/Annotation;");
+            }
+            foreach (var implemented in type.Interfaces)
+            {
+                signature.Append(GenericTypeSignature(implemented, type, null));
+                generic |= HasGenericReference(implemented, type, null);
+            }
+            return generic ? signature.ToString() : null;
+        }
+
+        /// <summary>Builds a generic method Signature attribute with source-ordered constructor parameters.</summary>
+        /// <param name="owner">The lexical declaring class.</param>
+        /// <param name="method">The source method or constructor.</param>
+        /// <returns>The optional generic method signature.</returns>
+        /// <exception cref="InvalidDataException">A generic reference cannot be resolved.</exception>
+        private string? BuildMethodSignature(JavaSourceType owner, JavaSourceMethod method)
+        {
+            var signature = new StringBuilder();
+            AppendTypeParameters(signature, method.TypeParameters, owner, method);
+            signature.Append('(');
+            var generic = method.TypeParameters.Count != 0;
+            foreach (var parameter in method.Parameters)
+            {
+                signature.Append(GenericTypeSignature(parameter.Type, owner, method));
+                generic |= HasGenericReference(parameter.Type, owner, method);
+            }
+            signature.Append(')');
+            if (method.IsConstructor)
+            {
+                signature.Append('V');
+            }
+            else if (method.ReturnType is not null)
+            {
+                signature.Append(GenericTypeSignature(method.ReturnType, owner, method));
+                generic |= HasGenericReference(method.ReturnType, owner, method);
+            }
+            var genericThrows = false;
+            foreach (var thrown in method.ThrowsTypes)
+            {
+                genericThrows |= HasGenericReference(thrown, owner, method);
+            }
+            if (genericThrows)
+            {
+                foreach (var thrown in method.ThrowsTypes)
+                {
+                    signature.Append('^').Append(GenericTypeSignature(thrown, owner, method));
+                }
+            }
+            return generic || genericThrows ? signature.ToString() : null;
+        }
+
+        /// <summary>Appends formal generic variables and their class/interface intersection bounds.</summary>
+        /// <param name="signature">The signature builder to update.</param>
+        /// <param name="parameters">The variables in declaration order.</param>
+        /// <param name="owner">The lexical declaring class.</param>
+        /// <param name="method">The lexical declaring method, if any.</param>
+        /// <exception cref="InvalidDataException">A generic bound cannot be resolved.</exception>
+        private void AppendTypeParameters(StringBuilder signature, IReadOnlyList<JavaSourceTypeParameter> parameters, JavaSourceType owner, JavaSourceMethod? method)
+        {
+            if (parameters.Count == 0)
+            {
+                return;
+            }
+            signature.Append('<');
+            foreach (var parameter in parameters)
+            {
+                signature.Append(parameter.Token.Text).Append(':');
+                if (parameter.Bounds.Count == 0)
+                {
+                    signature.Append("Ljava/lang/Object;");
+                    continue;
+                }
+                var first = parameter.Bounds[0];
+                if (!TryFindVariable(first.Name, owner, method, out _, out _, out _))
+                {
+                    var name = ReferenceName(first, owner, method);
+                    if ((_types.TryGetValue(name, out var boundType) && boundType.IsInterface)
+                        || name == "java.lang.Comparable" || name == "java.lang.Runnable" || name == "java.lang.CharSequence"
+                        || name == "java.lang.Cloneable" || name == "java.lang.AutoCloseable" || name == "java.lang.Iterable"
+                        || name == "java.lang.Appendable" || name == "java.lang.Readable")
+                    {
+                        signature.Append(':');
+                    }
+                }
+                for (var index = 0; index < parameter.Bounds.Count; index++)
+                {
+                    if (index != 0)
+                    {
+                        signature.Append(':');
+                    }
+                    signature.Append(GenericTypeSignature(parameter.Bounds[index], owner, method));
+                }
+            }
+            signature.Append('>');
+        }
+
+        /// <summary>Determines whether a reference requires a generic Signature attribute.</summary>
+        /// <param name="reference">The source type reference.</param>
+        /// <param name="owner">The lexical declaring class.</param>
+        /// <param name="method">The lexical declaring method, if any.</param>
+        /// <returns>Whether the reference retains information beyond its erased descriptor.</returns>
+        private bool HasGenericReference(JavaSourceReference reference, JavaSourceType owner, JavaSourceMethod? method)
+        {
+            if (reference.Wildcard is not null || reference.TypeArguments.Count != 0 || reference.DeclaringType is not null
+                || TryFindVariable(reference.Name, owner, method, out _, out _, out _))
+            {
+                return true;
+            }
+            return PrimitiveDescriptor(reference.Name) is null && ImplicitDeclaringReference(ResolveName(reference.Name, owner, reference.Token), owner, reference.Token) is not null;
+        }
+
+        /// <summary>Restores generic enclosing arguments omitted by a lexical member-type reference.</summary>
+        /// <param name="name">The resolved binary name of the referenced member type.</param>
+        /// <param name="owner">The lexical declaring class.</param>
+        /// <param name="token">The original diagnostic token.</param>
+        /// <returns>The lexical parameterized enclosing reference, or null for a raw/static owner.</returns>
+        private JavaSourceReference? ImplicitDeclaringReference(string name, JavaSourceType owner, JavaSourceToken token)
+        {
+            if (!_types.TryGetValue(name, out var type) || type.EnclosingType is null || (type.AccessFlags & 0x0008) != 0)
+            {
+                return null;
+            }
+            for (JavaSourceType? scope = owner; scope is not null; scope = scope.Enclosing)
+            {
+                if (scope.Metadata.Name == type.EnclosingType)
+                {
+                    var arguments = new List<JavaSourceReference>();
+                    foreach (var parameter in scope.TypeParameters)
+                    {
+                        arguments.Add(new JavaSourceReference(parameter.Token, parameter.Token.Text));
+                    }
+                    var declaringType = ImplicitDeclaringReference(scope.Metadata.Name, scope, token);
+                    if (arguments.Count == 0 && declaringType is null)
+                    {
+                        return null;
+                    }
+                    return new JavaSourceReference(token, scope.Metadata.Name, typeArguments: arguments, declaringType: declaringType);
+                }
+                if ((scope.Metadata.AccessFlags & 0x0008) != 0)
+                {
+                    break;
+                }
+            }
+            return null;
+        }
+
+        /// <summary>Resolves a retained source reference to its exact JVM generic type signature.</summary>
+        /// <param name="reference">The source reference, including arrays and wildcard bounds.</param>
+        /// <param name="owner">The lexical declaring class.</param>
+        /// <param name="method">The lexical declaring method, if any.</param>
+        /// <returns>The complete generic type signature.</returns>
+        /// <exception cref="InvalidDataException">A generic reference cannot be resolved.</exception>
+        private string GenericTypeSignature(JavaSourceReference reference, JavaSourceType owner, JavaSourceMethod? method)
+        {
+            _cancellationToken.ThrowIfCancellationRequested();
+            if (reference.Wildcard is char variance)
+            {
+                if (variance == '*')
+                {
+                    return "*";
+                }
+                if (reference.WildcardBound is null)
+                {
+                    throw Invalid(owner, reference.Token, "a bounded wildcard has no bound");
+                }
+                return variance + GenericTypeSignature(reference.WildcardBound, owner, method);
+            }
+            var signature = new StringBuilder(new string('[', reference.Dimensions));
+            var primitive = PrimitiveDescriptor(reference.Name);
+            if (primitive is not null)
+            {
+                return signature.Append(primitive).ToString();
+            }
+            if (TryFindVariable(reference.Name, owner, method, out _, out _, out _))
+            {
+                return signature.Append('T').Append(reference.Name).Append(';').ToString();
+            }
+            var name = ResolveName(reference.Name, owner, reference.Token);
+            var declaringReference = reference.DeclaringType ?? ImplicitDeclaringReference(name, owner, reference.Token);
+            if (declaringReference is not null)
+            {
+                var declaringName = ResolveName(declaringReference.Name, owner, reference.Token);
+                var declaringSignature = GenericTypeSignature(declaringReference, owner, method);
+                signature.Append(declaringSignature, 0, declaringSignature.Length - 1).Append('.').Append(name.Substring(declaringName.Length + 1));
+            }
+            else
+            {
+                signature.Append('L').Append(name.Replace('.', '/'));
+            }
+            if (reference.TypeArguments.Count != 0)
+            {
+                signature.Append('<');
+                foreach (var argument in reference.TypeArguments)
+                {
+                    signature.Append(GenericTypeSignature(argument, owner, method));
+                }
+                signature.Append('>');
+            }
+            return signature.Append(';').ToString();
         }
 
         /// <summary>Prepends JVM-mandated constructor parameters absent from the source parameter list.</summary>
@@ -313,6 +541,8 @@ namespace MajdataPlay.Tools.AndroidJavaWrapperGenerator
         {
             var canonical = new JavaMethod { Name = "<init>", AccessFlags = (ushort)(type.Metadata.AccessFlags & 0x0007) };
             var descriptor = new StringBuilder("(");
+            var signature = new StringBuilder("(");
+            var generic = false;
             var componentNames = new HashSet<string>(StringComparer.Ordinal);
             foreach (var component in type.Components)
             {
@@ -321,7 +551,11 @@ namespace MajdataPlay.Tools.AndroidJavaWrapperGenerator
                     throw Invalid(type, component.Token, $"duplicate record component '{component.Token.Text}'");
                 }
                 var componentDescriptor = Descriptor(component.Type, type, null, false);
+                var componentSignature = GenericTypeSignature(component.Type, type, null);
+                var genericComponent = HasGenericReference(component.Type, type, null);
                 descriptor.Append(componentDescriptor);
+                signature.Append(componentSignature);
+                generic |= genericComponent;
                 canonical.ParameterNames.Add(component.Token.Text);
                 if (component.IsVarargs)
                 {
@@ -334,10 +568,11 @@ namespace MajdataPlay.Tools.AndroidJavaWrapperGenerator
                         throw Invalid(type, component.Token, $"record field conflicts with component '{component.Token.Text}'");
                     }
                 }
-                type.Metadata.Fields.Add(new JavaField { Name = component.Token.Text, Descriptor = componentDescriptor, AccessFlags = 0x0012 });
-                AddGeneratedMethod(type, new JavaMethod { Name = component.Token.Text, Descriptor = "()" + componentDescriptor, AccessFlags = 0x0001 });
+                type.Metadata.Fields.Add(new JavaField { Name = component.Token.Text, Descriptor = componentDescriptor, Signature = genericComponent ? componentSignature : null, AccessFlags = 0x0012 });
+                AddGeneratedMethod(type, new JavaMethod { Name = component.Token.Text, Descriptor = "()" + componentDescriptor, Signature = genericComponent ? "()" + componentSignature : null, AccessFlags = 0x0001 });
             }
             canonical.Descriptor = descriptor.Append(")V").ToString();
+            canonical.Signature = generic ? signature.Append(")V").ToString() : null;
             AddGeneratedMethod(type, canonical);
             var equals = new JavaMethod { Name = "equals", Descriptor = "(Ljava/lang/Object;)Z", AccessFlags = 0x0011 };
             equals.ParameterNames.Add("o");

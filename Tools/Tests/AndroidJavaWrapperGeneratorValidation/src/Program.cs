@@ -93,6 +93,13 @@ namespace MajdataPlay.Tests.AndroidJavaWrapperGeneratorValidation
             Require(sourceApi.Types["fixtures.Widget$Inner"].Methods.Any(item => item.Name == "<init>" && item.Descriptor == "(Lfixtures/Widget;I)V"), "Inner constructors retain the enclosing parameter");
             Require(!sourceApi.Types["fixtures.Widget$Hidden$PublicInside"].IsPublic, "Public nested type with private enclosing class stays inaccessible");
             Require(sourceApi.Types["fixtures.Widget"].Methods.Any(item => item.Name == "boxed" && item.Descriptor == "(Ljava/lang/Integer;)Ljava/lang/Integer;"), "Boxed values retain reference descriptors");
+            Require(sourceApi.Types["fixtures.GenericBox"].Signature?.Contains("Ljava/lang/Comparable<TT;>;", StringComparison.Ordinal) == true,
+                "Generic class signatures retain intersection and self-referential bounds");
+            Require(sourceApi.Types["fixtures.GenericBox$Inner"].Signature?.Contains("<U:TT;>", StringComparison.Ordinal) == true,
+                "Nonstatic nested generic signatures retain their enclosing parameter bound");
+            Require(sourceApi.Types["fixtures.ThrowBox"].Fields.Single(field => field.Name == "type").Signature == "Ljava/lang/Class<TT;>;"
+                && sourceApi.Types["fixtures.ThrowBox"].Methods.Single(method => method.Name == "subtype").Signature == "<E:TT;>()Ljava/lang/Class<TE;>;",
+                "Throwable bounds and dependent method variables retain their exact JVM generic signatures");
 
             var classes = Path.Combine(workspace, "classes");
             Directory.CreateDirectory(classes);
@@ -130,6 +137,7 @@ namespace MajdataPlay.Tests.AndroidJavaWrapperGeneratorValidation
             Require(serial.Count == repeated.Count && serial.All(item => repeated[item.Key] == item.Value), "Serial and parallel wrapper generation are byte-identical");
             Require(generated.Keys.SequenceEqual(repeated.Keys) && generated.All(item => repeated[item.Key] == item.Value), "Byte-for-byte deterministic generation");
             VerifyDeclarations(generated);
+            VerifyEnhancedDeclarations(generated);
             VerifyNamespaceLayout(generated, options.RootNamespace);
             var assembly = CompileGenerated(settings, generated, false, true);
             CompileGenerated(settings, generated, true, false);
@@ -215,7 +223,7 @@ namespace MajdataPlay.Tests.AndroidJavaWrapperGeneratorValidation
         /// <returns>A deterministic complete API representation.</returns>
         private static string ApiFingerprint(JavaApi api)
         {
-            return string.Join("|", api.Types.Values.OrderBy(type => type.Name, StringComparer.Ordinal).Select(type => type.Name + ":" + type.AccessFlags + ":" + type.IsPublic + ":" + type.SuperName + ":" + type.EnclosingType + ":" + string.Join(",", type.Interfaces) + ":" + string.Join(",", type.Fields.Select(field => field.Name + field.Descriptor + field.AccessFlags)) + ":" + string.Join(",", type.Methods.Select(method => method.Name + method.Descriptor + method.AccessFlags + string.Join("/", method.ParameterNames)))));
+            return string.Join("|", api.Types.Values.OrderBy(type => type.Name, StringComparer.Ordinal).Select(type => type.Name + ":" + type.AccessFlags + ":" + type.IsPublic + ":" + type.SuperName + ":" + type.Signature + ":" + type.EnclosingType + ":" + string.Join(",", type.Interfaces) + ":" + string.Join(",", type.Fields.Select(field => field.Name + field.Descriptor + field.Signature + field.AccessFlags)) + ":" + string.Join(",", type.Methods.Select(method => method.Name + method.Descriptor + method.Signature + method.AccessFlags + string.Join("/", method.ParameterNames)))));
         }
 
         /// <summary>Creates a representation-independent digest of the fixture API.</summary>
@@ -223,7 +231,7 @@ namespace MajdataPlay.Tests.AndroidJavaWrapperGeneratorValidation
         /// <returns>The sorted binary type, field, and method contract.</returns>
         private static string FixtureFingerprint(JavaApi api)
         {
-            return string.Join("|", api.Types.Values.Where(item => item.Name.StartsWith("fixtures.", StringComparison.Ordinal) && item.IsPublic && !item.IsSynthetic).OrderBy(item => item.Name, StringComparer.Ordinal).Select(item => item.Name + ":" + item.IsPublic + ":" + item.SuperName + ":" + string.Join(",", item.Fields.Where(field => field.IsPublic).Select(field => field.Name + field.Descriptor).OrderBy(value => value, StringComparer.Ordinal)) + ":" + string.Join(",", item.Methods.Where(method => method.IsPublic && !method.IsSynthetic && !method.IsBridge).Select(method => method.Name + method.Descriptor).OrderBy(value => value, StringComparer.Ordinal))));
+            return string.Join("|", api.Types.Values.Where(item => item.Name.StartsWith("fixtures.", StringComparison.Ordinal) && item.IsPublic && !item.IsSynthetic).OrderBy(item => item.Name, StringComparer.Ordinal).Select(item => item.Name + ":" + item.IsPublic + ":" + item.SuperName + ":" + item.Signature + ":" + string.Join(",", item.Fields.Where(field => field.IsPublic).Select(field => field.Name + field.Descriptor + field.Signature).OrderBy(value => value, StringComparer.Ordinal)) + ":" + string.Join(",", item.Methods.Where(method => method.IsPublic && !method.IsSynthetic && !method.IsBridge).Select(method => method.Name + method.Descriptor + method.Signature).OrderBy(value => value, StringComparer.Ordinal))));
         }
 
         /// <summary>Compiles Java fixtures independently to compare source, class, and archive extraction.</summary>

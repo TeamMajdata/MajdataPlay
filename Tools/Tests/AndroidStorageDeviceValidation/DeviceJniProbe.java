@@ -31,6 +31,174 @@ public final class DeviceJniProbe
     {
     }
 
+    /** A nested value with observable Java equality, hashing, formatting and ordering. */
+    public static class WrapperValue implements Comparable<WrapperValue>
+    {
+        /** Stores the value used by each Java contract. */
+        public final int value;
+
+        /** @param value the value retained by this Java instance. */
+        public WrapperValue(int value)
+        {
+            this.value = value;
+        }
+
+        /** @param other another value; @return true when the numeric Java values match. */
+        @Override
+        public boolean equals(Object other)
+        {
+            return other instanceof WrapperValue && ((WrapperValue)other).value == value;
+        }
+
+        /** @return a stable hash derived from the numeric value. */
+        @Override
+        public int hashCode()
+        {
+            return value * 31;
+        }
+
+        /** @return a deterministic representation distinct from Object.toString. */
+        @Override
+        public String toString()
+        {
+            return "WrapperValue:" + value;
+        }
+
+        /** @param other the value to compare; @return the signed numeric ordering. */
+        @Override
+        public int compareTo(WrapperValue other)
+        {
+            return Integer.compare(value, other.value);
+        }
+    }
+
+    /** Retains a Java class bound and exposes typed fields, calls, arrays and iteration. */
+    public static class WrapperBox<T extends WrapperValue> implements Iterable<T>
+    {
+        /** Stores the constrained Java value. */
+        public final T value;
+
+        /** @param value the value retained for field and iterator checks. */
+        public WrapperBox(T value)
+        {
+            this.value = value;
+        }
+
+        /** @param value the typed input; @return the same Java object through a new JNI result. */
+        public T echo(T value)
+        {
+            return value;
+        }
+
+        /** @param values the typed inputs; @return a cloned array retaining its element references. */
+        public T[] echoArray(T[] values)
+        {
+            return values.clone();
+        }
+
+        /** @return an iterator over the retained typed value. */
+        @Override
+        public java.util.Iterator<T> iterator()
+        {
+            return java.util.Collections.singletonList(value).iterator();
+        }
+
+        /** Retains its generic outer instance and a transitive bound on the inner type argument. */
+        public class Inner<U extends T>
+        {
+            /** Stores the inner instance's value. */
+            public final U value;
+
+            /** @param value the value retained by the nonstatic inner instance. */
+            public Inner(U value)
+            {
+                this.value = value;
+            }
+
+            /** @return the retained value with its inner type argument. */
+            public U getValue()
+            {
+                return value;
+            }
+        }
+    }
+
+    /** Exercises the intersection of the JavaObject and recursive Comparable bounds. */
+    public static class SelfBox<T extends Comparable<T>>
+    {
+        /** Creates the generic Java fixture. */
+        public SelfBox()
+        {
+        }
+
+        /** @param value the self-comparable input; @return the same Java object. */
+        public T echo(T value)
+        {
+            return value;
+        }
+    }
+
+    /** Supplies the Java Comparator behavior adapted to the CLR comparer contract. */
+    public static class WrapperOrder implements java.util.Comparator<WrapperValue>
+    {
+        /** Creates the reverse-order Java comparer. */
+        public WrapperOrder()
+        {
+        }
+
+        /** @param left the first value; @param right the second value; @return the reversed ordering. */
+        @Override
+        public int compare(WrapperValue left, WrapperValue right)
+        {
+            return Integer.compare(right.value, left.value);
+        }
+    }
+
+    /** Exposes a throwable that must survive managed stripping and remain catchable by its wrapper. */
+    public static class WrapperFailure extends IllegalArgumentException
+    {
+        /** @param message the controlled failure description. */
+        public WrapperFailure(String message)
+        {
+            super(message);
+        }
+    }
+
+    /** Has no exported wrapper, requiring fallback to its closest exported throwable ancestor. */
+    private static class PrivateWrapperFailure extends WrapperFailure
+    {
+        /** @param message the controlled failure description. */
+        private PrivateWrapperFailure(String message)
+        {
+            super(message);
+        }
+    }
+
+    /** @throws WrapperFailure the controlled exported Java failure. */
+    public static void throwWrapperFailure()
+    {
+        throw new WrapperFailure("MAJDATA_VALIDATION_EXPECTED_WRAPPER_FAILURE");
+    }
+
+    /** @throws WrapperFailure a private Java subtype whose exported ancestor must be used. */
+    public static void throwPrivateWrapperFailure()
+    {
+        throw new PrivateWrapperFailure("MAJDATA_VALIDATION_EXPECTED_PRIVATE_WRAPPER_FAILURE");
+    }
+
+    /** Fails initialization only when the device harness explicitly reads its static field. */
+    public static final class InitializerFailure
+    {
+        /** Triggers initialization rather than becoming a compile-time Java constant. */
+        public static final int VALUE = failInitialization();
+
+        /** @return never returns; @throws IllegalStateException the expected initializer failure. */
+        private static int failInitialization()
+        {
+            throw new IllegalStateException("MAJDATA_VALIDATION_EXPECTED_INITIALIZER_FAILURE");
+        }
+    }
+
     /** @param value signed bytes, including null; @return an independent copy, or null. */
     public static byte[] echoBytes(byte[] value)
     {

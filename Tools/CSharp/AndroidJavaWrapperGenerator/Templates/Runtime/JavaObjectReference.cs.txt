@@ -11,6 +11,7 @@ namespace __ROOT_NAMESPACE__
     /// </summary>
     /// <remarks>
     /// Generated java.lang.Object wrappers and their subclasses derive from this type.
+    /// Java exception wrappers use the same owner through JavaInvocationException composition.
     /// An owned reference must be disposed deterministically on the Unity main thread or
     /// a JVM-attached thread. Borrowing does not extend the external owner's lifetime.
     /// Do not race calls against disposal or independently dispose an adopted reference.
@@ -51,7 +52,7 @@ namespace __ROOT_NAMESPACE__
         /// <param name="javaObject">The non-null Unity Java reference.</param>
         /// <param name="ownsReference">Whether to adopt and eventually dispose the reference.</param>
         /// <exception cref="ArgumentNullException">The Java reference is null.</exception>
-        protected JavaObjectReference(AndroidJavaObject javaObject, bool ownsReference = true)
+        internal JavaObjectReference(AndroidJavaObject javaObject, bool ownsReference = true)
         {
             _javaObject = javaObject ?? throw new ArgumentNullException(nameof(javaObject));
             _ownsReference = ownsReference;

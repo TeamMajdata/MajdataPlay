@@ -11,4 +11,8 @@ public class GenericBox<T extends Number & Comparable<T>> implements Comparable<
         public Inner(U value) { this.value = value; }
     }
     public static class Nested<V> { public V field; }
+    public class NonGenericInner {
+        public T value;
+        public T echo(T value) { return value; }
+    }
 }

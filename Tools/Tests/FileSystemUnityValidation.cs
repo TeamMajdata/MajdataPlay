@@ -8,12 +8,12 @@ using JavaObject = MajdataPlay.Platform.Android.Runtime.Bindings.Java.Lang.JavaO
 using JavaRunnable = MajdataPlay.Platform.Android.Runtime.Bindings.Java.Lang.Runnable;
 using JavaRunnableContract = MajdataPlay.Platform.Android.Runtime.Bindings.Java.Lang.IRunnable;
 using JavaList = MajdataPlay.Platform.Android.Runtime.Bindings.Java.Util.IList;
-using ParcelableCreator = MajdataPlay.Platform.Android.Runtime.Bindings.Android.Os.IParcelable_Creator;
+using ParcelableCreator = MajdataPlay.Platform.Android.Runtime.Bindings.Android.Os.Parcelable.ICreator;
 using StorageAccess = MajdataPlay.Platform.Android.Runtime.Bindings.Net.Majdata.Majdataplay.StorageAccess;
-using StorageResult = MajdataPlay.Platform.Android.Runtime.Bindings.Net.Majdata.Majdataplay.StorageAccess_Result;
-using DocumentEntry = MajdataPlay.Platform.Android.Runtime.Bindings.Net.Majdata.Majdataplay.StorageAccess_Entry;
-using DocumentCursor = MajdataPlay.Platform.Android.Runtime.Bindings.Net.Majdata.Majdataplay.StorageAccess_CursorHandle;
-using DocumentStream = MajdataPlay.Platform.Android.Runtime.Bindings.Net.Majdata.Majdataplay.StorageAccess_StreamHandle;
+using StorageResult = MajdataPlay.Platform.Android.Runtime.Bindings.Net.Majdata.Majdataplay.StorageAccess.Result;
+using DocumentEntry = MajdataPlay.Platform.Android.Runtime.Bindings.Net.Majdata.Majdataplay.StorageAccess.Entry;
+using DocumentCursor = MajdataPlay.Platform.Android.Runtime.Bindings.Net.Majdata.Majdataplay.StorageAccess.CursorHandle;
+using DocumentStream = MajdataPlay.Platform.Android.Runtime.Bindings.Net.Majdata.Majdataplay.StorageAccess.StreamHandle;
 using MajdataPlay.Platform.Android;
 using MajdataPlay.Platform.Android.Runtime;
 using MajdataPlay.Platform.Android.Storage;
@@ -290,7 +290,7 @@ namespace MajdataPlay.Tests
             RequireGeneratedWrapper(typeof(DocumentStream), "net.majdata.majdataplay.StorageAccess$StreamHandle");
             foreach (var wrapperType in new[] { typeof(StorageAccess), typeof(StorageResult), typeof(DocumentEntry), typeof(DocumentCursor), typeof(DocumentStream) })
             {
-                Require(wrapperType.GetConstructors().Length == 1,
+                Require(wrapperType.GetConstructors().Length == 0,
                     wrapperType.FullName + " must not expose the Java bridge's private constructors.");
                 CheckGeneratedReferenceLifecycle(wrapperType);
             }
@@ -447,10 +447,11 @@ namespace MajdataPlay.Tests
                 _ = AndroidKeyEvent.Creator;
             });
             using var reference = ManagedJavaReference.Create();
-            using var activity = new AndroidActivity(reference, ownsReference: false);
-            using var intent = new AndroidIntent(reference, ownsReference: false);
-            using var keyEvent = new AndroidKeyEvent(reference, ownsReference: false);
-            using var runnable = new JavaRunnable(reference, ownsReference: false);
+            RequireThrowsPlatform(() => reference.ToWrapper<AndroidActivity>(ownsReference: false));
+            using var activity = CreateManagedWrapper<AndroidActivity>(reference);
+            using var intent = CreateManagedWrapper<AndroidIntent>(reference);
+            using var keyEvent = CreateManagedWrapper<AndroidKeyEvent>(reference);
+            using var runnable = CreateManagedWrapper<JavaRunnable>(reference);
             RequireThrowsPlatform(() => new AndroidIntent(intent));
             RequireThrowsPlatform(() => new AndroidKeyEvent(keyEvent));
             RequireThrowsPlatform(() => activity.GetContentResolver());
@@ -504,7 +505,7 @@ namespace MajdataPlay.Tests
             RequireThrows<IOException>(() => requireResult!.Invoke(null, new object?[] { null }),
                 "A null SAF result envelope must throw IOException before accessing JNI.");
             using var reference = ManagedJavaReference.Create();
-            using var envelope = new StorageResult(reference, ownsReference: false);
+            using var envelope = CreateManagedWrapper<StorageResult>(reference);
             Require(ReferenceEquals(requireResult!.Invoke(null, new object[] { envelope }), envelope),
                 "RequireResult must preserve the envelope and its caller-owned reference.");
             var checkResult = bridge!.GetMethod("CheckResult", BindingFlags.NonPublic | BindingFlags.Static,
@@ -513,7 +514,7 @@ namespace MajdataPlay.Tests
             var streamConstructor = typeof(AndroidDocumentStream).GetConstructor(BindingFlags.NonPublic | BindingFlags.Instance,
                 null, new[] { typeof(DocumentStream), typeof(bool) }, null);
             Require(streamConstructor is not null, "AndroidDocumentStream must adopt the generated DocumentStream wrapper.");
-            using var stream = new DocumentStream(reference, ownsReference: false);
+            using var stream = CreateManagedWrapper<DocumentStream>(reference);
             RequireThrowsPlatform(() => streamConstructor!.Invoke(new object[] { stream, true }));
             Require(reference.DisposeCalls == 0, "The bridge contract checks disposed a borrowed reference.");
             Debug.Log("FILE_SYSTEM_GENERATED_BRIDGE_PASSED: typed stream/envelope integration and null-envelope IOException (no JNI).");
@@ -527,12 +528,15 @@ namespace MajdataPlay.Tests
         {
             Require(wrapperType == typeof(JavaObjectReference).Assembly.GetType(GetBindingTypeName(binaryName)),
                 wrapperType.FullName + " must occupy the expected Java package binding namespace.");
-            Require(wrapperType.IsPublic && typeof(JavaObjectReference).IsAssignableFrom(wrapperType),
+            Require((wrapperType.IsPublic || wrapperType.IsNestedPublic) && typeof(JavaObjectReference).IsAssignableFrom(wrapperType),
                 wrapperType.FullName + " must be a public generated Java reference wrapper.");
-            RequireGeneratedProperty(wrapperType, "Class", typeof(AndroidJavaObject), true);
+            var classType = typeof(MajdataPlay.Platform.Android.Runtime.Bindings.Java.Lang.Class<>).MakeGenericType(wrapperType);
+            RequireGeneratedProperty(wrapperType, "Class", classType, true);
             RequireThrowsPlatform(() => wrapperType.GetProperty("Class", BindingFlags.Public | BindingFlags.Static | BindingFlags.DeclaredOnly)!.GetValue(null));
-            var constructor = wrapperType.GetConstructor(new[] { typeof(AndroidJavaObject), typeof(bool) });
-            Require(constructor is not null, wrapperType.FullName + " is missing the generated reference constructor.");
+            var constructor = wrapperType.GetConstructor(BindingFlags.NonPublic | BindingFlags.Instance,
+                null, new[] { typeof(AndroidJavaObject), typeof(bool) }, null);
+            Require(constructor is not null && constructor.IsAssembly,
+                wrapperType.FullName + " must expose its reference constructor only inside the wrapper assembly.");
             var ownership = constructor!.GetParameters()[1];
             Require(ownership.IsOptional && Equals(ownership.DefaultValue, true),
                 wrapperType.FullName + " must adopt existing references by default.");
@@ -562,7 +566,7 @@ namespace MajdataPlay.Tests
             {
                 packages[index] = char.ToUpperInvariant(packages[index][0]) + packages[index].Substring(1);
             }
-            var name = binaryName.Substring(separator + 1).Replace('$', '_');
+            var name = binaryName.Substring(separator + 1).Replace('$', '+');
             if (binaryName == "java.lang.Object")
             {
                 name = "JavaObject";
@@ -616,7 +620,8 @@ namespace MajdataPlay.Tests
         /// <exception cref="InvalidOperationException">Ownership, idempotence, null rejection, or an Editor guard fails.</exception>
         private static void CheckGeneratedReferenceLifecycle(Type wrapperType)
         {
-            var constructor = wrapperType.GetConstructor(new[] { typeof(AndroidJavaObject), typeof(bool) })!;
+            var constructor = wrapperType.GetConstructor(BindingFlags.NonPublic | BindingFlags.Instance,
+                null, new[] { typeof(AndroidJavaObject), typeof(bool) }, null)!;
             RequireThrows<ArgumentNullException>(() => constructor.Invoke(new object?[] { null, false }),
                 wrapperType.FullName + " must reject a null borrowed reference.");
             RequireThrows<ArgumentNullException>(() => constructor.Invoke(new object?[] { null, true }),
@@ -672,6 +677,20 @@ namespace MajdataPlay.Tests
                 adoptedReference.Dispose();
             }
             Require(adoptedReference.DisposeCalls == 1, "The inert adopted-reference probe must be cleaned up exactly once by the test.");
+        }
+
+        /// <summary>Creates an inert wrapper solely for managed lifecycle and Editor-guard checks.</summary>
+        /// <typeparam name="T">The generated wrapper whose internal constructor is under test.</typeparam>
+        /// <param name="reference">A managed probe containing no JNI handles.</param>
+        /// <returns>A borrowed wrapper that bypasses public conversion and Java type checks only for this isolated test.</returns>
+        /// <exception cref="InvalidOperationException">The required internal wrapper constructor is missing.</exception>
+        /// <exception cref="TargetInvocationException">The internal reference constructor rejects the probe.</exception>
+        private static T CreateManagedWrapper<T>(ManagedJavaReference reference) where T : JavaObjectReference
+        {
+            var constructor = typeof(T).GetConstructor(BindingFlags.NonPublic | BindingFlags.Instance,
+                null, new[] { typeof(AndroidJavaObject), typeof(bool) }, null)
+                ?? throw new InvalidOperationException("The generated internal reference constructor is missing.");
+            return (T)constructor.Invoke(new object[] { reference, false });
         }
 
         /// <summary>Observes managed disposal only; it never constructs a Java object or owns native JNI handles.</summary>

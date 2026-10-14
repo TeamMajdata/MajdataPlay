@@ -55,7 +55,7 @@ namespace MajdataPlay.Tools.AndroidJavaWrapperGenerator
             return bindingsNamespace + "." + string.Join(".", components);
         }
 
-        /// <summary>Flattens nested binary names without introducing C# nested types.</summary>
+        /// <summary>Proposes a standalone name; the emitter scopes nested declarations in their parent wrappers.</summary>
         /// <param name="binaryName">The original JVM binary name.</param>
         /// <returns>The proposed wrapper name, including the unique JavaObject root spelling.</returns>
         internal static string TypeName(string binaryName)

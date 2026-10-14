@@ -1,0 +1,230 @@
+using System;
+using System.Collections.Concurrent;
+using System.Collections.Generic;
+using System.Runtime.CompilerServices;
+using UnityEngine;
+
+#nullable enable
+
+namespace __ROOT_NAMESPACE__
+{
+    /// <summary>
+    /// Converts Java references to generated wrappers after checking their Java runtime type.
+    /// </summary>
+    /// <remarks>
+    /// Factories are emitted directly by the generator; conversion never reflects over constructors.
+    /// JNI access requires the Unity main thread or a JVM-attached thread in an Android player.
+    /// </remarks>
+    public static partial class JavaWrapperConverter
+    {
+        /// <summary>Stores the generated factory for each closed managed wrapper type.</summary>
+        private static readonly ConcurrentDictionary<Type, Registration> s_registrations = new ConcurrentDictionary<Type, Registration>();
+
+        /// <summary>Stores exported Java throwable factories by their exact Java binary names.</summary>
+        private static readonly ConcurrentDictionary<string, Registration> s_exceptionRegistrations = new ConcurrentDictionary<string, Registration>(StringComparer.Ordinal);
+
+        /// <summary>Registers exported exceptions before the first Java invocation can fail.</summary>
+        static JavaWrapperConverter()
+        {
+            RegisterGeneratedExceptions();
+        }
+
+        /// <summary>Registers directly referenced exception factories emitted for this library.</summary>
+        static partial void RegisterGeneratedExceptions();
+
+        /// <summary>Registers a generated, AOT-compatible factory for a closed wrapper type.</summary>
+        /// <typeparam name="TWrapper">The concrete generated wrapper type.</typeparam>
+        /// <param name="className">The exact Java binary class or interface name.</param>
+        /// <param name="factory">The generated factory that adopts or borrows its supplied reference.</param>
+        /// <returns>True after the registration has been installed or was already installed.</returns>
+        /// <exception cref="ArgumentException">The Java binary name is invalid.</exception>
+        /// <exception cref="ArgumentNullException">The factory is null.</exception>
+        /// <exception cref="InvalidOperationException">The managed type was registered for another Java type.</exception>
+        internal static bool Register<TWrapper>(string className, Func<AndroidJavaObject, bool, TWrapper> factory)
+            where TWrapper : class, IJavaObject
+        {
+            if (string.IsNullOrWhiteSpace(className) || className.IndexOfAny(new[] { '[', ';', '/' }) >= 0)
+            {
+                throw new ArgumentException("An exact Java binary class name is required.", nameof(className));
+            }
+
+            if (factory is null)
+            {
+                throw new ArgumentNullException(nameof(factory));
+            }
+
+            var registration = s_registrations.GetOrAdd(typeof(TWrapper), _ => new Registration(className, (reference, ownsReference) => factory(reference, ownsReference)));
+            if (!string.Equals(registration.ClassName, className, StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException("The wrapper is already registered for another Java type: " + typeof(TWrapper).FullName);
+            }
+
+            if (typeof(JavaInvocationException).IsAssignableFrom(typeof(TWrapper)))
+            {
+                s_exceptionRegistrations.TryAdd(className, registration);
+            }
+
+            return true;
+        }
+
+        /// <summary>Adopts or borrows a Unity reference after verifying its Java type.</summary>
+        /// <typeparam name="TWrapper">The concrete generated wrapper type.</typeparam>
+        /// <param name="javaReference">A live Java reference, or null.</param>
+        /// <param name="ownsReference">Whether to transfer ownership, including cleanup if conversion fails.</param>
+        /// <returns>The requested wrapper, or null for a null Java reference.</returns>
+        /// <remarks>
+        /// When ownership is transferred, the caller must not independently dispose the reference.
+        /// A borrowed wrapper requires its original reference owner to outlive the wrapper.
+        /// Java subclasses and interface implementations are accepted by the JVM's IsInstanceOf check.
+        /// </remarks>
+        /// <exception cref="InvalidCastException">The Java object is not assignable to the wrapper's Java type.</exception>
+        /// <exception cref="InvalidOperationException">The wrapper has no generated factory or the factory returns null.</exception>
+        /// <exception cref="ObjectDisposedException">The Unity reference has already been disposed.</exception>
+        /// <exception cref="PlatformNotSupportedException">A non-null reference is converted outside Android.</exception>
+        /// <exception cref="AndroidJavaException">Unity cannot resolve the wrapper's Java class.</exception>
+        /// <exception cref="JavaInvocationException">Java raises an exception during the type check.</exception>
+        /// <exception cref="AggregateException">Conversion and owned-reference cleanup both fail.</exception>
+        public static TWrapper? ToWrapper<TWrapper>(AndroidJavaObject? javaReference, bool ownsReference = true)
+            where TWrapper : class, IJavaObject
+        {
+            if (javaReference is null)
+            {
+                return null;
+            }
+
+            try
+            {
+                var registration = GetRegistration(typeof(TWrapper));
+                AndroidJni.ValidateInstance(javaReference, registration.ClassName);
+                return (TWrapper)(registration.Factory(javaReference, ownsReference)
+                    ?? throw new InvalidOperationException("The wrapper factory returned null for a non-null Java reference."));
+            }
+            catch (Exception conversionException)
+            {
+                if (ownsReference)
+                {
+                    try
+                    {
+                        AndroidJni.EnsureAndroid();
+                        javaReference.Dispose();
+                    }
+                    catch (Exception cleanupException)
+                    {
+                        throw new AggregateException("Wrapper conversion and Java-reference cleanup both failed.", conversionException, cleanupException);
+                    }
+                }
+
+                throw;
+            }
+        }
+
+        /// <summary>Copies a borrowed JNI local or global handle into an independently owned wrapper.</summary>
+        /// <typeparam name="TWrapper">The concrete generated wrapper type.</typeparam>
+        /// <param name="javaHandle">A live object handle on the current JVM thread, or zero for null.</param>
+        /// <returns>An owning wrapper, or null for a zero handle.</returns>
+        /// <remarks>
+        /// The input handle remains owned by the caller and is never deleted by this method.
+        /// A local handle must belong to the current thread and remain live throughout conversion.
+        /// </remarks>
+        /// <exception cref="InvalidCastException">The handle does not refer to the requested Java type.</exception>
+        /// <exception cref="InvalidOperationException">The wrapper is unregistered or copying the reference fails.</exception>
+        /// <exception cref="PlatformNotSupportedException">A nonzero handle is converted outside Android.</exception>
+        /// <exception cref="AndroidJavaException">Unity cannot create or resolve a Java reference.</exception>
+        /// <exception cref="JavaInvocationException">Java raises an exception during copying or the type check.</exception>
+        /// <exception cref="AggregateException">Conversion and reference cleanup both fail.</exception>
+        public static TWrapper? FromHandle<TWrapper>(IntPtr javaHandle)
+            where TWrapper : class, IJavaObject
+        {
+            if (javaHandle == IntPtr.Zero)
+            {
+                return null;
+            }
+
+            AndroidJni.EnsureAndroid();
+            return ToWrapper<TWrapper>(AndroidJni.CopyReference(javaHandle), ownsReference: true);
+        }
+
+        /// <summary>Validates an owned result before the legacy factory-based wrapping entry point is used.</summary>
+        /// <typeparam name="TWrapper">The generated wrapper type requested by the factory.</typeparam>
+        /// <param name="javaReference">The live reference about to be adopted.</param>
+        /// <exception cref="InvalidOperationException">The requested wrapper has no generated registration.</exception>
+        /// <exception cref="InvalidCastException">The reference is incompatible with the registered Java type.</exception>
+        /// <exception cref="PlatformNotSupportedException">Execution is outside Android.</exception>
+        /// <exception cref="ObjectDisposedException">The Unity reference is disposed.</exception>
+        /// <exception cref="AndroidJavaException">Unity cannot resolve the requested Java class.</exception>
+        /// <exception cref="JavaInvocationException">Java raises an exception during the type check.</exception>
+        internal static void Validate<TWrapper>(AndroidJavaObject javaReference)
+            where TWrapper : IJavaObject
+        {
+            AndroidJni.ValidateInstance(javaReference, GetRegistration(typeof(TWrapper)).ClassName);
+        }
+
+        /// <summary>Adopts the captured throwable using its closest exported Java exception wrapper.</summary>
+        /// <param name="javaReference">The independently owned throwable reference.</param>
+        /// <param name="classNames">Its actual class and successive Java superclass binary names.</param>
+        /// <param name="message">The recovered throwable description.</param>
+        /// <param name="javaStackTrace">The recovered Java stack trace.</param>
+        /// <returns>A typed throwable wrapper, or an invocation exception retaining the same reference.</returns>
+        internal static JavaInvocationException CreateException(AndroidJavaObject javaReference, IReadOnlyList<string> classNames, string message, string javaStackTrace)
+        {
+            JavaInvocationException? result = null;
+            try
+            {
+                foreach (var className in classNames)
+                {
+                    if (s_exceptionRegistrations.TryGetValue(className, out var registration))
+                    {
+                        AndroidJni.ValidateInstance(javaReference, registration.ClassName);
+                        result = registration.Factory(javaReference, true) as JavaInvocationException;
+                        break;
+                    }
+                }
+            }
+            catch (Exception conversionException)
+            {
+                message += " The Java exception wrapper could not be created: " + conversionException.Message;
+            }
+
+            result ??= new JavaInvocationException(javaReference, ownsReference: true);
+            result.SetJavaDetails(classNames.Count == 0 ? "java.lang.Throwable" : classNames[0], message, javaStackTrace);
+            return result;
+        }
+
+        /// <summary>Initializes a generated closed type and retrieves its AOT-compatible factory.</summary>
+        /// <param name="wrapperType">The concrete managed wrapper type.</param>
+        /// <returns>The generated Java name and construction delegate.</returns>
+        /// <exception cref="InvalidOperationException">The requested type has no generated factory.</exception>
+        private static Registration GetRegistration(Type wrapperType)
+        {
+            if (!s_registrations.TryGetValue(wrapperType, out var registration))
+            {
+                RuntimeHelpers.RunClassConstructor(wrapperType.TypeHandle);
+                if (!s_registrations.TryGetValue(wrapperType, out registration))
+                {
+                    throw new InvalidOperationException("No generated Java wrapper factory is registered for " + wrapperType.FullName + ".");
+                }
+            }
+
+            return registration;
+        }
+
+        /// <summary>Pairs a Java binary name with a directly emitted managed constructor delegate.</summary>
+        private sealed class Registration
+        {
+            /// <summary>Gets the exact Java class or interface accepted by the factory.</summary>
+            internal string ClassName { get; }
+
+            /// <summary>Gets the factory preserving the caller's ownership choice.</summary>
+            internal Func<AndroidJavaObject, bool, IJavaObject> Factory { get; }
+
+            /// <summary>Captures the Java identity and generated wrapper factory.</summary>
+            /// <param name="className">The Java binary class or interface name.</param>
+            /// <param name="factory">The generated reference-construction delegate.</param>
+            internal Registration(string className, Func<AndroidJavaObject, bool, IJavaObject> factory)
+            {
+                ClassName = className;
+                Factory = factory;
+            }
+        }
+    }
+}

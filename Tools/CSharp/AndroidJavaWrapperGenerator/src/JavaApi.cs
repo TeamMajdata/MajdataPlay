@@ -26,6 +26,9 @@ namespace MajdataPlay.Tools.AndroidJavaWrapperGenerator
         /// <summary>Gets or sets the binary name, preserving dollar signs for nested classes.</summary>
         internal string Name { get; set; } = string.Empty;
 
+        /// <summary>Gets or sets the exact JVM generic Signature attribute, when present.</summary>
+        internal string? Signature { get; set; }
+
         /// <summary>Gets or sets the binary superclass name; null denotes the JVM root.</summary>
         internal string? SuperName { get; set; }
 
@@ -60,6 +63,9 @@ namespace MajdataPlay.Tools.AndroidJavaWrapperGenerator
     /// <summary>Describes a JVM field using its exact descriptor.</summary>
     internal sealed class JavaField
     {
+        /// <summary>Gets or sets the exact JVM generic Signature attribute, when present.</summary>
+        internal string? Signature { get; set; }
+
         /// <summary>Gets or sets the official English API description, when available.</summary>
         internal JavaDocumentation? Documentation { get; set; }
 
@@ -82,6 +88,9 @@ namespace MajdataPlay.Tools.AndroidJavaWrapperGenerator
     /// <summary>Describes a JVM method or constructor using its erased descriptor.</summary>
     internal sealed class JavaMethod
     {
+        /// <summary>Gets or sets the exact JVM generic Signature attribute, when present.</summary>
+        internal string? Signature { get; set; }
+
         /// <summary>Gets or sets the official English API description, when available.</summary>
         internal JavaDocumentation? Documentation { get; set; }
 

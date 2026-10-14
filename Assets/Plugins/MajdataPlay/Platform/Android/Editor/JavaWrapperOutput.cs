@@ -305,7 +305,7 @@ namespace MajdataPlay.Platform.Android.Editor
         {
             var currentHelpers = false;
             var previousHelpers = false;
-            foreach (var name in new[] { "AndroidJni.cs", "IJavaObject.cs", "JavaInvocationException.cs", "JavaObjectReference.cs" })
+            foreach (var name in new[] { "AndroidJni.cs", "IJavaObject.cs", "JavaInvocationException.cs", "JavaObjectReference.cs", "JavaWrapperConverter.cs", "AndroidJavaObjectExtensions.cs", "JavaWrapperConverter.Exceptions.cs", "JavaObjectExtensions.cs" })
             {
                 currentHelpers |= ownedFiles.ContainsKey(name);
                 previousHelpers |= ownedFiles.ContainsKey("Runtime/" + name);
@@ -330,6 +330,10 @@ namespace MajdataPlay.Platform.Android.Editor
                 case "IJavaObject.cs":
                 case "JavaInvocationException.cs":
                 case "JavaObjectReference.cs":
+                case "JavaWrapperConverter.cs":
+                case "AndroidJavaObjectExtensions.cs":
+                case "JavaWrapperConverter.Exceptions.cs":
+                case "JavaObjectExtensions.cs":
                     return "Runtime/" + relativePath;
             }
 

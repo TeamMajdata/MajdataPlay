@@ -58,6 +58,47 @@ and needs **no manually attached scene component**. Its namespace is
 The isolated diagnostics stub forwards `MajDebug` output to Unity's log. Runtime
 and keyboard initialization use production sources and generated bindings.
 
+## Generated wrapper contract regressions
+
+The picker-free `wrappers` mode exercises the current CLI output in actual
+IL2CPP processes on both the Unity main thread and a JVM-attached worker. It
+requires all shared production initialization and callback checks, then validates:
+
+- Nested `WrapperValue`, generic `WrapperBox<T>`, and nonstatic multilevel
+  `WrapperBox<T>.Inner<U>` constructors, class bounds, transitive bounds and
+  recursive `Comparable<T>` bounds.
+- Owned `Class<TWrapper>` results with the exact Java nested binary name, and
+  typed `Class<T>.cast` calls for ordinary and generic wrappers.
+- Java `equals`, `hashCode`, and `toString` through CLR object dispatch,
+  `IEquatable<T>`, dictionary lookup, typed/untyped `IComparable`,
+  `IComparer<T>`, and disposing `IEnumerable<T>` iterator adaptation.
+- Typed generic fields, method results and arrays including null elements.
+- Checked `AndroidJavaObject`, live JNI handle and `JavaObject.As<T>`
+  conversion, incompatible-type rejection and independent reference ownership.
+- The exact exported custom throwable wrapper, nearest exported ancestor for a
+  private subtype, retained Java reference/message/stack, class initialization
+  failures and successful JNI calls after exception handling.
+
+Build and run fresh results for each ABI:
+
+```powershell
+./Tools/Tests/Build-AndroidStorageDeviceValidation.ps1 -Architecture Both
+./Tools/Tests/Run-AndroidStorageDeviceValidation.ps1 -Serial '<authorized-device>' -Mode wrappers -Abi arm64-v8a -Install
+./Tools/Tests/Run-AndroidStorageDeviceValidation.ps1 -Serial '<authorized-device>' -Mode wrappers -Abi armeabi-v7a -Install
+```
+
+The terminal result is `FILE_SYSTEM_DEVICE_WRAPPERS_PASSED`. The runner also
+requires `WrapperContractsPassed: true` and
+`BackgroundWrapperContractsPassed: true`, in addition to the fresh run ID,
+current PID, ABI pointer size, IL2CPP and shared production startup flags.
+These tests do not invoke the SAF picker or change persisted grants. All other
+modes also run the enhanced main-thread contracts; modes other than `jar`
+run the enhanced worker-thread contracts before their remaining checks.
+Reference-constructor accessibility and generic constraint metadata are covered
+by the separate managed generator validation. Java assignability
+checks use JVM runtime types; erased Java type arguments are not runtime type
+checks.
+
 ## Shared production startup regressions
 
 Every mode, including `jar`, requires `AndroidRuntime.IsInitialized` after
@@ -79,6 +120,20 @@ intermediate; each run still requires its selected mode's terminal result.
 The latest dated `RESULTS.md` entry indexes the source/APK/wrapper/run-hash
 evidence bundle and companion isolated Editor/Android script-compilation log;
 Editor checks and Player compilation do not replace per-ABI device execution.
+
+Every mode also checks conversion of a real `java.lang.String` through
+`ToWrapper<T>` and `FromHandle<T>`, including borrowed/independent ownership and
+rejection of conversion to `android.net.Uri` without invalidating the input.
+`JavaObject.As<T>()` must also reject incompatible types, return an independent
+owned reference, and keep that result valid after its source wrapper is disposed.
+First and repeated static access to a controlled erroneous Java class must retain
+`ExceptionInInitializerError` and `NoClassDefFoundError`, respectively.
+Invalid `Integer.parseInt` input must throw the generated `NumberFormatException`
+with a live throwable reference, the exact Java class name and its Java stack
+trace. The harness disposes that throwable and checks subsequent JNI dispatch.
+These checks emit the intermediate `FILE_SYSTEM_DEVICE_JNI_WRAPPERS_PASSED`
+marker. They require a fresh APK and per-ABI device run; prior `RESULTS.md`
+entries do not establish coverage of these added cases.
 
 ## Descriptor stream regressions
 

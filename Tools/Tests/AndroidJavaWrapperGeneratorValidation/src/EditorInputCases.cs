@@ -62,8 +62,11 @@ namespace MajdataPlay.Tests.AndroidJavaWrapperGeneratorValidation
             GeneratedOutput.Write(options, api.PlatformJar, generated, CancellationToken.None);
             var publishDirectory = Path.Combine(workspace, "editor-published");
             Require(JavaWrapperOutput.Publish(options.OutputDirectory, publishDirectory) == generated.Count, "Actual complete CLI output publishes through the Editor ownership bridge");
-            var libraryBytes = VerifyProjectModeBootstrap(settings, workspace, projectRoot, generated);
-            VerifyMigratedConsumers(settings, projectRoot, api, libraryBytes);
+            var probeSource = Path.Combine(projectRoot, "Tools", "Tests", "AndroidStorageDeviceValidation", "DeviceJniProbe.java");
+            JavaSourceParser.AddSources(api, new[] { probeSource }, CancellationToken.None);
+            var consumerSources = Generate(api, options);
+            var libraryBytes = VerifyProjectModeBootstrap(settings, workspace, projectRoot, consumerSources, probeSource);
+            VerifyMigratedConsumers(settings, projectRoot, libraryBytes);
             Console.WriteLine("Editor input compilation/publication passed: " + generated.Count + " C# files from " + request.Inputs.Count + " additional inputs.");
         }
     }

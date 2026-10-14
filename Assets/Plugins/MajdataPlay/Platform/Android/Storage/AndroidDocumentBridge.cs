@@ -5,9 +5,9 @@ using System.IO;
 using System.Runtime.ExceptionServices;
 using MajdataPlay.IO.Storage;
 using JavaObject = MajdataPlay.Platform.Android.Runtime.Bindings.Java.Lang.JavaObject;
-using StorageResult = MajdataPlay.Platform.Android.Runtime.Bindings.Net.Majdata.Majdataplay.StorageAccess_Result;
-using DocumentCursor = MajdataPlay.Platform.Android.Runtime.Bindings.Net.Majdata.Majdataplay.StorageAccess_CursorHandle;
-using DocumentStream = MajdataPlay.Platform.Android.Runtime.Bindings.Net.Majdata.Majdataplay.StorageAccess_StreamHandle;
+using StorageResult = MajdataPlay.Platform.Android.Runtime.Bindings.Net.Majdata.Majdataplay.StorageAccess.Result;
+using DocumentCursor = MajdataPlay.Platform.Android.Runtime.Bindings.Net.Majdata.Majdataplay.StorageAccess.CursorHandle;
+using DocumentStream = MajdataPlay.Platform.Android.Runtime.Bindings.Net.Majdata.Majdataplay.StorageAccess.StreamHandle;
 using UnityEngine;
 
 namespace MajdataPlay.Platform.Android.Storage

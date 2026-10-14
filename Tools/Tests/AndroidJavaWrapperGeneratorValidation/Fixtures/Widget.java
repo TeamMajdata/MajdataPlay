@@ -30,7 +30,10 @@ public class Widget extends HiddenBase implements Child, Secondary {
     public int hashCode() { return 7; }
     public String toString() { return "widget"; }
     public static int explode() { throw new RuntimeException("Extraction must not initialize Widget"); }
-    public static class Nested { public int id; }
+    public static class Nested {
+        public int id;
+        public static class Deep { public int depth; }
+    }
     public class Inner { public Inner(int id) {} }
     private static class Hidden { public static class PublicInside {} }
 }

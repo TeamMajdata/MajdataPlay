@@ -6,8 +6,8 @@ using MajdataPlay.Diagnostics;
 using MajdataPlay.IO.Storage;
 #if UNITY_ANDROID
 using MajdataPlay.Platform.Android;
+using MajdataPlay.Platform.Android.Runtime;
 using MajdataPlay.Platform.Android.Runtime.Bindings.Android.Content;
-using JavaClass = MajdataPlay.Platform.Android.Runtime.Bindings.Java.Lang.Class;
 using JavaUri = MajdataPlay.Platform.Android.Runtime.Bindings.Android.Net.Uri;
 using MajdataPlay.Platform.Android.Storage;
 #endif
@@ -544,8 +544,7 @@ namespace MajdataPlay.Import
             }
             if (action == Intent.ActionSendMultiple)
             {
-                using var uriClassReference = JavaUri.Class;
-                using var uriClass = new JavaClass(uriClassReference, ownsReference: false);
+                using var uriClass = JavaUri.Class;
                 using var uris = intent.GetParcelableArrayListExtra(Intent.ExtraStream, uriClass);
                 if (uris is null)
                 {
@@ -559,7 +558,8 @@ namespace MajdataPlay.Import
                     {
                         continue;
                     }
-                    using var uri = new JavaUri(uriReference.JavaReference, ownsReference: false);
+                    using var uri = uriReference.JavaReference.ToWrapper<JavaUri>(ownsReference: false)
+                        ?? throw new InvalidOperationException("The shared item contains no Java URI reference.");
                     var entry = FileSystem.GetEntry(uri.ToString()!);
                     if (entry is null)
                     {

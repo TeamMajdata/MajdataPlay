@@ -4,7 +4,7 @@ param(
     [string]$UnityPath = 'C:/Program Files/Unity Editors/6000.3.17f1/Editor/Unity.exe',
     [string]$ApkPath,
     [ValidateSet('arm64-v8a', 'armeabi-v7a')][string]$Abi = 'arm64-v8a',
-    [ValidateSet('full', 'replay', 'release', 'streams', 'jar')][string]$Mode = 'full',
+    [ValidateSet('full', 'replay', 'release', 'streams', 'jar', 'wrappers')][string]$Mode = 'full',
     [switch]$Install,
     [switch]$StartOnly,
     [switch]$ObserveOnly,
@@ -90,6 +90,10 @@ do {
                         $result.RuntimeSdkVersion -ne $result.SdkInt -or $result.RuntimeTargetSdkVersion -ne 35 -or
                         $result.RuntimeVersionCode -le 0) {
                         throw 'The durable result does not confirm production runtime initialization and activity/keyboard callbacks.'
+                    }
+                    if (!$result.WrapperContractsPassed -or
+                        ($Mode -eq 'wrappers' -and !$result.BackgroundWrapperContractsPassed)) {
+                        throw 'The durable result does not confirm the enhanced generated wrapper contracts on the required threads.'
                     }
                     if ($Mode -eq 'jar' -and (!$result.StreamingAssetsIsJar -or !$result.JarDeflateChecked -or
                         !$result.CleanupSucceeded -or $result.JarCheckGroups -ne 8)) {

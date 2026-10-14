@@ -3,8 +3,6 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text.RegularExpressions;
-using System.Threading;
-using MajdataPlay.Tools.AndroidJavaWrapperGenerator;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 
@@ -18,12 +16,10 @@ namespace MajdataPlay.Tests.AndroidJavaWrapperGeneratorValidation
         /// <summary>Compiles migrated Android consumers and the device validation script against the independently built wrapper DLL.</summary>
         /// <param name="settings">The pinned Unity modules and standard reference pack.</param>
         /// <param name="projectRoot">The production repository containing the consumers and Java device probe.</param>
-        /// <param name="api">The complete SDK, project, and Unity Java metadata.</param>
         /// <param name="libraryBytes">The actual compiled wrapper DLL, including handwritten partial extensions.</param>
         /// <exception cref="IOException">A production source or reference assembly cannot be read.</exception>
         /// <exception cref="InvalidOperationException">A consumer no longer compiles against the generated API.</exception>
-        private static void VerifyMigratedConsumers(ValidationSettings settings, string projectRoot, JavaApi api,
-            byte[] libraryBytes)
+        private static void VerifyMigratedConsumers(ValidationSettings settings, string projectRoot, byte[] libraryBytes)
         {
             var sources = new Dictionary<string, string>(StringComparer.Ordinal);
             var androidDirectory = Path.Combine(projectRoot, "Assets", "Plugins", "MajdataPlay", "Platform", "Android");
@@ -40,26 +36,6 @@ namespace MajdataPlay.Tests.AndroidJavaWrapperGeneratorValidation
                 sources.Add(path, File.ReadAllText(path));
             }
             sources.Add("ConsumerDependencies.cs", ConsumerDependencySource);
-
-            var probeApi = new JavaApi { PlatformJar = api.PlatformJar };
-            foreach (var type in api.Types)
-            {
-                probeApi.Types.Add(type.Key, type.Value);
-            }
-            JavaSourceParser.AddSources(probeApi, new[]
-            {
-                Path.Combine(projectRoot, "Tools", "Tests", "AndroidStorageDeviceValidation", "DeviceJniProbe.java")
-            }, CancellationToken.None);
-            var probeOptions = new GeneratorOptions
-            {
-                NoSdk = true,
-                RootNamespace = EditorRootNamespace,
-                Documentation = MajdataPlay.Tools.AndroidJavaWrapperGenerator.DocumentationMode.None,
-                Jobs = 4
-            };
-            var probeSources = Generate(probeApi, probeOptions);
-            const string probePath = "Bindings/Net/Majdata/Validation/DeviceJniProbe.g.cs";
-            sources.Add("Generated/" + probePath, probeSources[probePath]);
 
             var references = GetRefreshStandardReferences(settings);
             references.Add(MetadataReference.CreateFromImage(libraryBytes));
@@ -123,6 +99,13 @@ namespace MajdataPlay.Diagnostics
         public static void LogInfo(string message)
         {
         }
+        /// <summary>Accepts a tagged diagnostic value.</summary>
+        /// <typeparam name=""T"">The diagnostic value type.</typeparam>
+        /// <param name=""tag"">The component supplying the diagnostic value.</param>
+        /// <param name=""obj"">The diagnostic value.</param>
+        public static void LogInfo<T>(string tag, T obj)
+        {
+        }
         /// <summary>Accepts one failure message.</summary>
         /// <param name=""message"">The diagnostic text.</param>
         public static void LogError(string message)
@@ -138,6 +121,14 @@ namespace MajdataPlay.Platform.Android.IO
         /// <summary>Provides the initialization entry point used by AndroidRuntime.</summary>
         internal static void Init()
         {
+        }
+
+        /// <summary>Provides the production key-state query used by the device harness.</summary>
+        /// <param name=""keyCode"">The Android key whose pressed state is queried.</param>
+        /// <returns>False because this compilation-only substitute receives no device callbacks.</returns>
+        public static bool IsPressed(KeyCode keyCode)
+        {
+            return false;
         }
     }
 }";
