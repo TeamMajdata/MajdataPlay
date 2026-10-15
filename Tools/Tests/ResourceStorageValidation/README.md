@@ -1,7 +1,9 @@
 # Resource storage migration validation
 
 This independent, package-free **.NET 9** executable links the production storage
-implementation, `MobileResourceUpdater`, and `DesktopResourceRestorer`. It does
+implementation, `MobileResourceUpdater`, `DesktopResourceRestorer`, and the shared
+`StorageDirectoryTransfer` helper, plus the in-memory content provider double from
+`FileSystemValidation` for cross-backend cases. It does
 not build Unity's generated solution or project files. Output and fixtures stay
 under the ignored `Temp/ResourceStorageValidation/` directory.
 
@@ -27,8 +29,12 @@ extraction and directory moves; literal URI delimiters, percent sequences, space
 and Unicode in packaged paths; existing player-managed trees; incomplete
 extraction retry; official hash-gated updates; preserved customizations,
 deletions, and new player-owned files; missing unmanaged resources; packaged
-hash rejection; pending move markers; atomic file replacement; and temporary
-file cleanup when destination commitment fails.
+hash rejection; pending move markers; atomic file replacement; temporary
+file cleanup when destination commitment fails; and managed moves whose chart and
+skin roots live on a content provider: the tree crosses backends with its file
+timestamps, an existing provider tree is preserved, and an interrupted transfer
+removes its temporary copy, keeps the extracted source and marker, and completes
+on the next start.
 
 Each case prints `PASS` or `FAIL`, followed by `RESOURCE_STORAGE_VALIDATION_PASSED`
 or `RESOURCE_STORAGE_VALIDATION_FAILED`. Managed results do not establish Unity

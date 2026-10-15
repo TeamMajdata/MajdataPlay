@@ -150,6 +150,44 @@ Entry snapshots also expose optional UTC creation times and backend-reported
 hidden/system flags. Local enumeration supplies them for chart ordering and
 filtering; providers which do not report them retain null/false defaults.
 
+## Native-only data
+
+Native libraries such as SQLite open files by filename only, so the data they own
+must stay on native storage even when the application root is a provider location:
+
+- `MajEnv.PersistentDirectory` is always a native path: it is the root on Windows,
+  Linux and macOS, and the application-private persistent data directory on
+  Android and iOS whatever the root is. The score database `MajScores.db` always
+  lives there, so on a device whose default root is that directory, switching
+  between the default root and a picked SAF tree never changes where scores are
+  stored.
+- When the persistent directory holds no non-empty database and the root is a
+  different directory, a `MajScores.db` found in the root (a SAF tree, or the
+  legacy shared folder on Android 10 and earlier) is streamed once with
+  `StorageFile.CopyToAsync` into a temporary sibling, which then replaces an empty
+  persistent database by rename. The copy in the root stays in place as a backup:
+  it is never read again while a non-empty persistent database exists, and a
+  failed import leaves the live name untouched. The legacy JSON score file is
+  still read from the root through its backend when no database exists anywhere.
+- The favorites database already lives below the always-native cache directory.
+
+## Directory trees across backends
+
+The facade never emulates a directory move by copying. Application code that must
+move a tree between backends uses the internal `StorageDirectoryTransfer` helper
+in the game assembly. `Copy(source, destination)` walks a tree iteratively through
+handles, overwrites files with the same name, and keeps file modification times
+where the destination stores them. `Move(source, parent, name)` performs the
+facade's native move inside one backend; across backends it copies the tree below
+a temporary sibling name, renames it to the requested name, and deletes the source
+only afterwards. An interrupted transfer keeps the source and never leaves a
+partial tree under the final name, and the temporary copy is removed best-effort.
+Bundled chart and skin extraction and chart import both use it, so a chart root
+on an Android SAF tree receives the packaged resources from the native extraction
+directory, and a failed transfer is retried on the next start through the pending
+move marker. `Tools/Tests/ResourceStorageValidation` covers the cross-backend move,
+preservation and retry paths against the in-memory content provider.
+
 ## Packaged APK/JAR resources
 
 `FileSystem` recognizes Unity Android streaming asset locations such as

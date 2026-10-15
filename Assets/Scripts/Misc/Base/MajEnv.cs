@@ -97,6 +97,13 @@ namespace MajdataPlay
         /// <see cref="Path"/>, so the root may later point at an opaque provider location such as an Android SAF tree.
         /// </remarks>
         public static StorageDirectory RootPath { get; private set; } = null!;
+        /// <summary>Gets the persistent application data directory, which is always a native path.</summary>
+        /// <remarks>
+        /// Data which native libraries open by filename, such as the SQLite score database, lives here. On Windows, Linux
+        /// and macOS it is <see cref="RootPath"/>; on Android and iOS it is the application-private persistent data
+        /// directory, which stays native even when <see cref="RootPath"/> points at an Android SAF tree.
+        /// </remarks>
+        public static StorageDirectory PersistentDirectory { get; private set; } = null!;
         /// <summary>Gets the packaged or extracted streaming assets directory without creating it.</summary>
         public static StorageDirectory AssetsPath { get; private set; } = null!;
         /// <summary>Gets the local cache directory.</summary>
@@ -225,7 +232,7 @@ namespace MajdataPlay
             InitOthers();
         }
 
-        /// <summary>Resolves the platform's root, streaming assets, and cache directories, creating the writable roots.</summary>
+        /// <summary>Resolves the platform's root, persistent, streaming assets, and cache directories, creating the writable roots.</summary>
         /// <remarks>
         /// Only Unity application paths are combined with <see cref="Path"/>; every child of a resolved handle is
         /// created or found through that handle so the layout survives a provider-backed root.
@@ -237,9 +244,12 @@ namespace MajdataPlay
         {
 #if UNITY_STANDALONE || UNITY_EDITOR
             RootPath = FileSystem.Directory.Open(Path.Combine(Application.dataPath, ".."));
+            PersistentDirectory = RootPath;
             AssetsPath = FileSystem.Directory.Open(Application.streamingAssetsPath);
             CachePath = RootPath.CreateDirectory("Cache");
 #elif UNITY_ANDROID
+            // The persistent directory stays native whatever the root is, so native libraries always have a filename to open.
+            PersistentDirectory = FileSystem.Directory.Open(Application.persistentDataPath);
             if (AndroidRuntime.SdkVersion < 30 || AndroidRuntime.TargetSdkVersion < 30) // < Android 11
             {
                 var androidStoragePermissions = new string[]
@@ -296,18 +306,19 @@ namespace MajdataPlay
                 }
                 else
                 {
-                    RootPath = FileSystem.Directory.Open(Application.persistentDataPath);
+                    RootPath = PersistentDirectory;
                     AssetsPath = FileSystem.Directory.Open(Path.Combine(Application.persistentDataPath, "ExtStreamingAssets"));
                 }
             }
             else // >= Android 11
             {
-                RootPath = FileSystem.Directory.Open(Application.persistentDataPath);
+                RootPath = PersistentDirectory;
                 AssetsPath = FileSystem.Directory.Open(Path.Combine(Application.persistentDataPath, "ExtStreamingAssets"));
             }
             CachePath = FileSystem.Directory.Create(Application.temporaryCachePath);
 #elif UNITY_IOS
-            RootPath = FileSystem.Directory.Open(Application.persistentDataPath);
+            PersistentDirectory = FileSystem.Directory.Open(Application.persistentDataPath);
+            RootPath = PersistentDirectory;
             AssetsPath = FileSystem.Directory.Open(Path.Combine(Application.persistentDataPath, "ExtStreamingAssets"));
             CachePath = FileSystem.Directory.Create(Application.temporaryCachePath);
 #else

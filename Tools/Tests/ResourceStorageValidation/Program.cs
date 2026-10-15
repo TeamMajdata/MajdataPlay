@@ -9,6 +9,7 @@ using System.Text;
 using MajdataPlay;
 using MajdataPlay.Diagnostics;
 using MajdataPlay.IO.Storage;
+using MajdataPlay.Tests.FileSystemValidation;
 using UnityEngine;
 
 namespace ResourceStorageValidation
@@ -31,7 +32,10 @@ namespace ResourceStorageValidation
                 ("Mobile update respects official hashes and player choices", MobileUpdatePreservesPlayerChoices),
                 ("Mobile rejects packaged hash mismatch", MobileRejectsPackagedHashMismatch),
                 ("Mobile resumes pending managed moves", MobileResumesPendingMoves),
-                ("Mobile atomic commitment failure cleans temporary file", MobileCleansFailedAtomicWrite)
+                ("Mobile atomic commitment failure cleans temporary file", MobileCleansFailedAtomicWrite),
+                ("Mobile moves managed assets into a provider-backed root", MobileMovesManagedAssetsAcrossBackends),
+                ("Mobile preserves existing provider-backed managed assets", MobilePreservesExistingProviderManagedAssets),
+                ("Mobile retries an interrupted cross-backend move", MobileRetriesInterruptedCrossBackendMove)
             };
             var failures = 0;
             foreach (var (name, run) in cases)
@@ -238,6 +242,86 @@ namespace ResourceStorageValidation
             AssertNoErrors();
         }
 
+        /// <summary>Checks bundled managed directories cross from native extraction into a content provider chart and skin root.</summary>
+        private static void MobileMovesManagedAssetsAcrossBackends()
+        {
+            using var fixture = new Fixture();
+            var provider = fixture.UseProviderManagedRoots();
+            fixture.Package("Config/options.txt", "official options");
+            fixture.Package("MaiCharts/Original/song/maidata.txt", "official chart");
+            fixture.Package("MaiCharts/Original/song/track.mp3", "official track");
+            fixture.Package("Skins/default/skin.json", "official skin");
+            InitializeMobile();
+            AssertNoErrors();
+            fixture.AssertText("Assets/Config/options.txt", "official options");
+            AssertProviderText(MajEnv.ChartPath, "Original/song/maidata.txt", "official chart");
+            AssertProviderText(MajEnv.ChartPath, "Original/song/track.mp3", "official track");
+            AssertProviderText(MajEnv.SkinPath, "default/skin.json", "official skin");
+            Assert(MajEnv.ChartPath.FindFileAt("Original/song/maidata.txt")!.Entry!.LastWriteTimeUtc is not null,
+                "A cross-backend move must carry the extracted modification time to the provider.");
+            AssertOnlyChild(MajEnv.ChartPath, "Original");
+            AssertOnlyChild(MajEnv.SkinPath, "default");
+            fixture.AssertMissing("Assets/MaiCharts/Original");
+            fixture.AssertMissing("Assets/Skins/default");
+            fixture.AssertMissing("Assets/.pending-managed-asset-moves");
+            fixture.AssertMissing("Assets.extracting-v2");
+            Assert(provider.OpenStreamCount == 0, "Every provider stream must be disposed after the move.");
+            AssertNoErrors();
+        }
+
+        /// <summary>Checks a customized provider-backed managed tree is never replaced while the extracted duplicate is removed.</summary>
+        private static void MobilePreservesExistingProviderManagedAssets()
+        {
+            using var fixture = new Fixture();
+            fixture.UseProviderManagedRoots();
+            var customization = MajEnv.ChartPath.CreateDirectory("Original").CreateFile("maidata.txt");
+            customization.WriteAllText("player customization");
+            fixture.Package("MaiCharts/Original/maidata.txt", "new official chart", "old official chart", changed: true);
+            fixture.Package("Skins/default/skin.json", "official skin");
+            InitializeMobile();
+            AssertNoErrors();
+            AssertProviderText(MajEnv.ChartPath, "Original/maidata.txt", "player customization");
+            AssertProviderText(MajEnv.SkinPath, "default/skin.json", "official skin");
+            AssertOnlyChild(MajEnv.ChartPath, "Original");
+            fixture.AssertMissing("Assets/MaiCharts/Original");
+            fixture.AssertMissing("Assets/Skins/default");
+            fixture.AssertMissing("Assets/.pending-managed-asset-moves");
+            AssertNoErrors();
+        }
+
+        /// <summary>Checks a provider write failure keeps the extracted source and the pending marker, and the next start completes the move.</summary>
+        private static void MobileRetriesInterruptedCrossBackendMove()
+        {
+            using var fixture = new Fixture();
+            var provider = fixture.UseProviderManagedRoots();
+            fixture.Package("MaiCharts/Original/maidata.txt", "official chart");
+            fixture.Package("Skins/default/skin.json", "official skin");
+            provider.NewFileWriteFailureAfterBytes = 0;
+            InitializeMobile();
+            Assert(MajDebug.Errors.Count == 2 &&
+                MajDebug.Errors.TrueForAll(message => message.Contains("Move failed", StringComparison.Ordinal)),
+                "Both interrupted cross-backend moves must be reported as failed moves.");
+            MajDebug.Errors.Clear();
+            Assert(!MajEnv.ChartPath.EnumerateEntries().Any() && !MajEnv.SkinPath.EnumerateEntries().Any(),
+                "A failed transfer must remove its temporary provider copy.");
+            fixture.AssertText("Assets/MaiCharts/Original/maidata.txt", "official chart");
+            fixture.AssertText("Assets/Skins/default/skin.json", "official skin");
+            Assert(File.Exists(fixture.PathFor("Assets/.pending-managed-asset-moves")),
+                "The pending marker must survive a failed move.");
+            Assert(provider.OpenStreamCount == 0, "Every provider stream must be disposed after a failed move.");
+            provider.NewFileWriteFailureAfterBytes = null;
+            InitializeMobile();
+            AssertNoErrors();
+            AssertProviderText(MajEnv.ChartPath, "Original/maidata.txt", "official chart");
+            AssertProviderText(MajEnv.SkinPath, "default/skin.json", "official skin");
+            AssertOnlyChild(MajEnv.ChartPath, "Original");
+            AssertOnlyChild(MajEnv.SkinPath, "default");
+            fixture.AssertMissing("Assets/MaiCharts/Original");
+            fixture.AssertMissing("Assets/Skins/default");
+            fixture.AssertMissing("Assets/.pending-managed-asset-moves");
+            Assert(provider.OpenStreamCount == 0, "Every provider stream must be disposed after the resumed move.");
+        }
+
         /// <summary>Invokes the production initialization entry without substituting its resource behavior.</summary>
         private static void InitializeMobile()
         {
@@ -268,6 +352,29 @@ namespace ResourceStorageValidation
         private static string Hash(string text)
         {
             return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(text))).ToLowerInvariant();
+        }
+
+        /// <summary>Checks a file committed below a provider-backed root through the root's own backend.</summary>
+        /// <param name="root">The provider-backed managed root.</param>
+        /// <param name="relativePath">The path relative to the root.</param>
+        /// <param name="expectedText">The expected decoded content.</param>
+        /// <exception cref="InvalidOperationException">The file is missing or its content differs.</exception>
+        private static void AssertProviderText(StorageDirectory root, string relativePath, string expectedText)
+        {
+            var file = root.FindFileAt(relativePath);
+            Assert(file is not null, $"Missing provider file at {relativePath}.");
+            Assert(file!.ReadAllText() == expectedText, $"Unexpected provider content at {relativePath}.");
+        }
+
+        /// <summary>Checks a managed root holds exactly one child, so no temporary transfer copy was left behind.</summary>
+        /// <param name="directory">The managed root to inspect.</param>
+        /// <param name="name">The only expected child name.</param>
+        /// <exception cref="InvalidOperationException">The root holds another child or none.</exception>
+        private static void AssertOnlyChild(StorageDirectory directory, string name)
+        {
+            var names = directory.EnumerateEntries().Select(entry => entry.Name).ToArray();
+            Assert(names.Length == 1 && names[0] == name,
+                $"Expected only '{name}' in {directory.Location}, found: {string.Join(", ", names)}.");
         }
 
         /// <summary>Fails when the production workflow logged an unexpected resource error.</summary>
@@ -327,12 +434,27 @@ namespace ResourceStorageValidation
                         string.Join("/", segments) + "!/assets";
                 }
 #endif
+                // A previous case may have placed the managed roots on a provider.
+                MajEnv.ChartPathOverride = null;
+                MajEnv.SkinPathOverride = null;
                 Directory.CreateDirectory(MajEnv.ChartPath.Location);
                 Directory.CreateDirectory(MajEnv.SkinPath.Location);
                 ResourceManifestLoader.V1Hashes.Clear();
                 ResourceManifestLoader.V2Hashes.Clear();
                 ResourceManifestLoader.DiffPaths.Clear();
                 MajDebug.Errors.Clear();
+            }
+
+            /// <summary>Registers a fresh in-memory content provider and places the chart and skin roots on it.</summary>
+            /// <returns>The provider, so a case can inject failures and check stream disposal.</returns>
+            public MemoryFileSystem UseProviderManagedRoots()
+            {
+                var provider = new MemoryFileSystem();
+                FileSystem.RegisterContentProvider(provider);
+                var providerRoot = FileSystem.Directory.Open(provider.RootLocation);
+                MajEnv.ChartPathOverride = providerRoot.CreateDirectory("MaiCharts");
+                MajEnv.SkinPathOverride = providerRoot.CreateDirectory("Skins");
+                return provider;
             }
 
             /// <summary>Writes packaged fixture content and registers its validated manifest entries.</summary>

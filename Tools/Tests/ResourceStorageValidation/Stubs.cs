@@ -15,11 +15,17 @@ namespace MajdataPlay
         /// <summary>Gets the fixture's extracted resource root.</summary>
         public static StorageDirectory AssetsPath => FileSystem.Directory.Open(Path.Combine(RootPath.Location, "Assets"));
 
+        /// <summary>Gets or sets a chart root on another backend, or null for the native directory below the application root.</summary>
+        public static StorageDirectory? ChartPathOverride { get; set; }
+
+        /// <summary>Gets or sets a skin root on another backend, or null for the native directory below the application root.</summary>
+        public static StorageDirectory? SkinPathOverride { get; set; }
+
         /// <summary>Gets the fixture's player-managed chart root.</summary>
-        public static StorageDirectory ChartPath => FileSystem.Directory.Open(Path.Combine(RootPath.Location, "MaiCharts"));
+        public static StorageDirectory ChartPath => ChartPathOverride ?? FileSystem.Directory.Open(Path.Combine(RootPath.Location, "MaiCharts"));
 
         /// <summary>Gets the fixture's player-managed skin root.</summary>
-        public static StorageDirectory SkinPath => FileSystem.Directory.Open(Path.Combine(RootPath.Location, "Skins"));
+        public static StorageDirectory SkinPath => SkinPathOverride ?? FileSystem.Directory.Open(Path.Combine(RootPath.Location, "Skins"));
     }
 
     /// <summary>Provides controlled validated manifests without substituting any storage behavior.</summary>
@@ -70,6 +76,12 @@ namespace MajdataPlay.Diagnostics
         /// <summary>Accepts an informational message without affecting assertions.</summary>
         /// <param name="message">The production workflow's informational message.</param>
         public static void LogInfo(string message)
+        {
+        }
+
+        /// <summary>Accepts a warning without affecting assertions, as a tolerated transfer detail is not a failure.</summary>
+        /// <param name="message">The production workflow's warning message.</param>
+        public static void LogWarning(string message)
         {
         }
 

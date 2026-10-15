@@ -29,8 +29,12 @@ namespace MajdataPlay
 
         static SQLiteAsyncConnection? _db;
 
-        /// <summary>The SQLite score database file name inside <see cref="MajEnv.RootPath"/>.</summary>
+        /// <summary>The SQLite score database file name inside <see cref="MajEnv.PersistentDirectory"/>.</summary>
         const string DatabaseFileName = "MajScores.db";
+        /// <summary>The temporary file name receiving a database streamed from a root other than the persistent directory.</summary>
+        const string ImportingDatabaseFileName = "MajScores.db.importing";
+        /// <summary>The content type requested for a database created in the persistent directory.</summary>
+        const string DatabaseMimeType = "application/vnd.sqlite3";
         /// <summary>The legacy JSON score file name consumed by the one-time migration.</summary>
         const string LegacyDatabaseFileName = "MajDatabase.db.db.db.db.db.db.db.db.db.db.db.db.db.db.db.db.db.db.db.db.db.db.db.db.db.db.db.db";
 
@@ -54,11 +58,23 @@ namespace MajdataPlay
             try
             {
                 var rootDirectory = MajEnv.RootPath;
-                var databaseFile = rootDirectory.FindFile(DatabaseFileName);
+                // SQLite opens the database by filename, so it lives in the persistent directory, which is always a native path.
+                var persistentDirectory = MajEnv.PersistentDirectory;
+                var databaseFile = persistentDirectory.FindFile(DatabaseFileName);
                 // SQLite leaves a database empty until its first table is created, so an empty file is still a new database.
                 var isDbExists = databaseFile is not null && databaseFile.Entry is { Length: > 0 };
-                // SQLite needs a resolvable location, so the file is created through the root before the connection opens it.
-                databaseFile ??= rootDirectory.CreateFile(DatabaseFileName, "application/vnd.sqlite3");
+                if (!isDbExists && !ReferenceEquals(rootDirectory, persistentDirectory))
+                {
+                    // MajEnv shares one handle when the root is the persistent directory; any other root may still hold the database.
+                    var importedFile = await ImportRootDatabaseAsync(rootDirectory, persistentDirectory);
+                    if (importedFile is not null)
+                    {
+                        databaseFile = importedFile;
+                        isDbExists = true;
+                    }
+                }
+                // SQLite needs a resolvable location, so the file is created through the directory before the connection opens it.
+                databaseFile ??= persistentDirectory.CreateFile(DatabaseFileName, DatabaseMimeType);
                 _db = new SQLiteAsyncConnection(databaseFile.Location, SQLiteOpenFlags.ReadWrite | SQLiteOpenFlags.Create | SQLiteOpenFlags.FullMutex);
                 GameManager.OnAppQuit += OnAppQuit;
                 await _db.CreateTableAsync<MajScoreDB>();
@@ -297,6 +313,41 @@ namespace MajdataPlay
                     ChartLevel = level,
                     PlayCount = 0,
                 };
+        }
+        /// <summary>Copies a score database left in a root other than the persistent directory, such as an Android SAF tree or the legacy shared folder, into the persistent directory once.</summary>
+        /// <param name="rootDirectory">The application root which may still hold a database.</param>
+        /// <param name="persistentDirectory">The native directory owning the live database.</param>
+        /// <returns>The imported database file, or null when the root holds no database or the import failed.</returns>
+        /// <remarks>
+        /// The database is streamed into a temporary sibling which then replaces an empty persistent database by rename,
+        /// so a failed import never leaves a partial database under the live name. The copy in the root stays in place as
+        /// a backup and is not read again while a non-empty persistent database exists.
+        /// </remarks>
+        private static async Task<StorageFile?> ImportRootDatabaseAsync(StorageDirectory rootDirectory, StorageDirectory persistentDirectory)
+        {
+            try
+            {
+                var rootFile = rootDirectory.FindFile(DatabaseFileName);
+                // A provider may not report sizes, so only a database known to be empty is skipped.
+                if (rootFile is null || rootFile.Entry is { Length: 0 })
+                {
+                    return null;
+                }
+                var stagingFile = await rootFile.CopyToAsync(
+                    persistentDirectory,
+                    ImportingDatabaseFileName,
+                    overwrite: true,
+                    cancellationToken: MajEnv.GlobalCT);
+                persistentDirectory.FindFile(DatabaseFileName)?.Delete();
+                var importedFile = stagingFile.Rename(DatabaseFileName);
+                MajDebug.LogInfo($"Imported the score database from the root: {rootFile.Location} -> {importedFile.Location}");
+                return importedFile;
+            }
+            catch (Exception ex)
+            {
+                MajDebug.LogError($"Failed to import the score database from the root: {ex}");
+                return null;
+            }
         }
         /// <summary>Imports legacy JSON scores into the SQLite database.</summary>
         /// <param name="legacyPath">The existing legacy score file to read.</param>

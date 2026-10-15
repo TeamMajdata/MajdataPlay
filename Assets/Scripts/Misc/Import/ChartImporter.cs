@@ -4,6 +4,7 @@
 using Cysharp.Threading.Tasks;
 using MajdataPlay.Diagnostics;
 using MajdataPlay.IO.Storage;
+using MajdataPlay.Utils;
 #if UNITY_ANDROID
 using MajdataPlay.Platform.Android;
 using MajdataPlay.Platform.Android.Runtime;
@@ -318,7 +319,7 @@ namespace MajdataPlay.Import
         {
             var destinationDirectory = CreateUniqueDirectory(destinationRoot, name);
             MajInstances.SceneSwitcher.SetLoadingText($"Importing...\n{name}");
-            CopyDirectory(source, destinationDirectory);
+            StorageDirectoryTransfer.Copy(source, destinationDirectory);
             await UniTask.Yield();
         }
 
@@ -453,41 +454,6 @@ namespace MajdataPlay.Import
                 var percentage = totalSize == 0 ? 100d : extractedSize * 100 / (double)totalSize;
                 MajInstances.SceneSwitcher.SetLoadingText($"Extracting...\n{percentage:F2}%");
                 await UniTask.Yield();
-            }
-        }
-
-        /// <summary>Copies a directory tree with each copied file's modification time.</summary>
-        /// <param name="sourceDirectory">The existing source directory, which may belong to any storage backend.</param>
-        /// <param name="destinationDirectory">The destination directory and its owning backend, which may be empty.</param>
-        /// <exception cref="DirectoryNotFoundException">A source directory disappeared during the copy.</exception>
-        /// <exception cref="UnauthorizedAccessException">Reading or writing was denied.</exception>
-        /// <exception cref="IOException">Creating or copying an entry failed.</exception>
-        private static void CopyDirectory(StorageDirectory sourceDirectory, StorageDirectory destinationDirectory)
-        {
-            var directories = new Stack<(StorageDirectory Source, StorageDirectory Destination)>();
-            directories.Push((sourceDirectory, destinationDirectory));
-
-            while (directories.Count > 0)
-            {
-                var (source, destination) = directories.Pop();
-
-                foreach (var entry in source.EnumerateEntries())
-                {
-                    if (entry.IsDirectory)
-                    {
-                        directories.Push((
-                            new StorageDirectory(source.FileSystem, entry.Location),
-                            destination.CreateDirectory(entry.Name)));
-                        continue;
-                    }
-                    var sourceFile = new StorageFile(source.FileSystem, entry.Location);
-                    var destinationFile = sourceFile.CopyTo(destination, entry.Name, overwrite: true);
-                    if (entry.LastWriteTimeUtc is DateTime lastWriteTimeUtc)
-                    {
-                        // A provider copy does not carry the source timestamp on its own.
-                        destinationFile.SetLastWriteTime(lastWriteTimeUtc);
-                    }
-                }
             }
         }
 

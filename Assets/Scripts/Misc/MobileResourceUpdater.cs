@@ -6,6 +6,7 @@ using System.Linq;
 using System.Security.Cryptography;
 using MajdataPlay.Diagnostics;
 using MajdataPlay.IO.Storage;
+using MajdataPlay.Utils;
 using UnityEngine;
 
 #nullable enable
@@ -258,7 +259,11 @@ namespace MajdataPlay
         /// <param name="destinationParent">The existing player-managed root receiving the directory.</param>
         /// <param name="destinationName">The directory name inside the player-managed root.</param>
         /// <returns>Whether an existing destination was preserved and the extracted duplicate removed.</returns>
-        /// <remarks>The move is one backend operation; a player-managed root on another backend than the extracted assets is reported as a failed move.</remarks>
+        /// <remarks>
+        /// The move is one native operation while the extracted assets and the player-managed root share a backend. A root
+        /// on another backend, such as an Android SAF tree, receives a copy of the tree before the extracted source is
+        /// deleted, so a failed transfer keeps the source and the pending marker for the next start.
+        /// </remarks>
         /// <exception cref="UnauthorizedAccessException">The extracted source cannot be queried.</exception>
         /// <exception cref="IOException">The extracted source cannot be queried.</exception>
         private static bool MoveExtractedDirectory(string sourceRelativePath, StorageDirectory destinationParent, string destinationName)
@@ -281,7 +286,7 @@ namespace MajdataPlay
                     return true;
                 }
 
-                var moved = FileSystem.Directory.Move(source.Location, destinationParent.Location, destinationName);
+                var moved = StorageDirectoryTransfer.Move(source, destinationParent, destinationName);
                 MajDebug.LogInfo($"Moved: {source.Location} -> {moved.Location}");
                 return false;
             }
