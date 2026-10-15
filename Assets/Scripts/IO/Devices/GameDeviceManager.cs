@@ -46,6 +46,28 @@ namespace MajdataPlay.IO
                     }
                 }
             }
+#if UNITY_STANDALONE_WIN
+            else if (manufacturer == DeviceManufacturerOption.NPro)
+            {
+                // NPro 的一个 GAME 管道同时提供外键、触摸与灯板，三个能力共用同一个实例。
+                if (input.ButtonRing.Enable || input.TouchPanel.Enable || output.Led.Enable)
+                {
+                    var device = new NproDevice(output.Led.Enable);
+                    if (input.ButtonRing.Enable)
+                    {
+                        ButtonRing = device;
+                    }
+                    if (input.TouchPanel.Enable)
+                    {
+                        TouchPanel = device;
+                    }
+                    if (output.Led.Enable)
+                    {
+                        LedDevice = device;
+                    }
+                }
+            }
+#endif
             else
             {
                 if (input.ButtonRing.Enable)
