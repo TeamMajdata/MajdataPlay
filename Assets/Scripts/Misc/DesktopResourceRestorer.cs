@@ -19,8 +19,8 @@ namespace MajdataPlay
         /// <exception cref="IOException">A managed root cannot be enumerated or prepared.</exception>
         public static void RestoreManagedAssetsIfMissing()
         {
-            var chartRootMissing = !MajEnv.ChartPath.EnumerateEntries().Any();
-            var skinRootMissing = !MajEnv.SkinPath.EnumerateEntries().Any();
+            var chartRootMissing = !MajEnv.ChartDirectory.EnumerateEntries().Any();
+            var skinRootMissing = !MajEnv.SkinDirectory.EnumerateEntries().Any();
             if (!chartRootMissing && !skinRootMissing)
             {
                 return;
@@ -33,12 +33,12 @@ namespace MajdataPlay
 
             if (chartRootMissing)
             {
-                RestoreGroup("MaiCharts/", MajEnv.ChartPath, v2Hashes);
+                RestoreGroup("MaiCharts/", MajEnv.ChartDirectory, v2Hashes);
             }
 
             if (skinRootMissing)
             {
-                RestoreGroup("Skins/", MajEnv.SkinPath, v2Hashes);
+                RestoreGroup("Skins/", MajEnv.SkinDirectory, v2Hashes);
             }
         }
 

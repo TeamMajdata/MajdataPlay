@@ -19,7 +19,7 @@ namespace MajdataPlay.Tests.ChartStorageValidation
         /// <returns>A task completing after construction and cached-list fallback assertions.</returns>
         private static async Task TestOnlineCacheDirectories(string rootPath)
         {
-            var originalCachePath = MajEnv.CachePath;
+            var originalCachePath = MajEnv.CacheDirectory;
             var originalHandler = Online.ChartListHandler;
             var path = CreateFixtureDirectory(rootPath, "OnlineCacheDirectories");
             var endpoint = new ApiEndpoint { Name = "Fixture endpoint" };
@@ -36,7 +36,7 @@ namespace MajdataPlay.Tests.ChartStorageValidation
                     (Directory: backend.Root, NativePath: opaquePath)
                 })
                 {
-                    MajEnv.CachePath = fixture.Directory;
+                    MajEnv.CacheDirectory = fixture.Directory;
                     Online.ChartListHandler = (source, token) =>
                     {
                         token.ThrowIfCancellationRequested();
@@ -61,7 +61,7 @@ namespace MajdataPlay.Tests.ChartStorageValidation
             finally
             {
                 Online.ChartListHandler = originalHandler;
-                MajEnv.CachePath = originalCachePath;
+                MajEnv.CacheDirectory = originalCachePath;
             }
             Console.WriteLine("PASS online cache: directory-based construction, legacy hash names, original backend and cache fallback");
         }
@@ -78,7 +78,7 @@ namespace MajdataPlay.Tests.ChartStorageValidation
             var failingEndpoint = new ApiEndpoint { Name = "Failed endpoint" };
             endpoint.RuntimeConfig.IsLoggedIn = true;
             failingEndpoint.RuntimeConfig.IsLoggedIn = true;
-            var cache = MajEnv.CachePath.CreateDirectory("RetainedEndpoint");
+            var cache = MajEnv.CacheDirectory.CreateDirectory("RetainedEndpoint");
             var remoteVisible = new OnlineSongDetail(cache.CreateDirectory("Visible"), endpoint, new ChartFixture { Hash = "remote-visible", Title = "Visible remote" });
             var remoteHidden = new OnlineSongDetail(cache.CreateDirectory("Hidden"), endpoint, new ChartFixture { Hash = "remote-hidden", Title = "Hidden remote" });
             var retained = new OnlineSongCollection(endpoint, cache, "Retained endpoint", new ISongDetail[] { remoteVisible, remoteHidden });

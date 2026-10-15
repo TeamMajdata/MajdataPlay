@@ -115,7 +115,7 @@ namespace MajdataPlay
         private static readonly SongCollection s_emptyCollection = SongCollection.Empty("default");
         /// <summary>Defines the portable favorites export filename.</summary>
         private const string MyFavoriteFileName = "MyFavorites.json";
-        /// <summary>The SQLite favorites database file name inside <see cref="MajEnv.RuntimeCachePath"/>.</summary>
+        /// <summary>The SQLite favorites database file name inside <see cref="MajEnv.RuntimeCacheDirectory"/>.</summary>
         private const string FavoriteDatabaseFileName = "MajFavorites.db";
         /// <summary>Initializes favorites storage and save handling without loading or refreshing collections.</summary>
         /// <param name="cancellationToken">Cancels waiting or initialization before save handling is registered.</param>
@@ -134,7 +134,7 @@ namespace MajdataPlay
                 }
                 var favoriteHashes = await Task.Run(async () =>
                 {
-                    var rootDirectory = MajEnv.ChartPath;
+                    var rootDirectory = MajEnv.ChartDirectory;
                     if (!rootDirectory.Exists)
                     {
                         FileSystem.Directory.Create(rootDirectory.Location);
@@ -252,7 +252,7 @@ namespace MajdataPlay
         /// <exception cref="IOException">The chart root could not be accessed.</exception>
         private static async Task<StorageSnapshot> CreateLocalSnapshotAsync(IProgress<string>? progressReporter, CancellationToken cancellationToken)
         {
-            var rootDirectory = MajEnv.ChartPath;
+            var rootDirectory = MajEnv.ChartDirectory;
             var collections = await GetLocalCollections(rootDirectory, progressReporter, cancellationToken).ConfigureAwait(false);
             var localCharts = collections.SelectMany(collection => collection.GetOriginSnapshot()).ToArray();
             try
@@ -859,7 +859,7 @@ namespace MajdataPlay
         {
             cancellationToken.ThrowIfCancellationRequested();
             var name = api.Name;
-            var cacheDirectory = MajEnv.CachePath.CreateDirectory("Net").CreateDirectory(name);
+            var cacheDirectory = MajEnv.CacheDirectory.CreateDirectory("Net").CreateDirectory(name);
             var collection = new OnlineSongCollection(api, cacheDirectory, name, Array.Empty<ISongDetail>());
             if (api.Url is null)
             {
@@ -1018,7 +1018,7 @@ namespace MajdataPlay
                     return;
                 }
                 var hashSet = s_myFavorites.ExportHashSet();
-                var exportDirectory = MajEnv.ChartPath;
+                var exportDirectory = MajEnv.ChartDirectory;
                 var exportFile = exportDirectory.FindFile(MyFavoriteFileName)
                     ?? exportDirectory.CreateFile(MyFavoriteFileName, "application/json");
                 exportFile.WriteAllText(
@@ -1097,7 +1097,7 @@ namespace MajdataPlay
             // Init SQLite DB (once)
             if (s_favoritesDatabase is null)
             {
-                var runtimeDirectory = MajEnv.RuntimeCachePath;
+                var runtimeDirectory = MajEnv.RuntimeCacheDirectory;
                 var databaseFile = runtimeDirectory.FindFile(FavoriteDatabaseFileName);
                 // SQLite leaves a database empty until its first table is created, so an empty file is still a new database.
                 var isDbExists = databaseFile is not null && databaseFile.Entry is { Length: > 0 };
@@ -1127,7 +1127,7 @@ namespace MajdataPlay
 
             // Load export JSON (user-facing, stays as JSON for portability).
             DanInfo? exportedFavorites = null;
-            var exportFile = MajEnv.ChartPath.FindFile(MyFavoriteFileName);
+            var exportFile = MajEnv.ChartDirectory.FindFile(MyFavoriteFileName);
             if (exportFile is not null)
             {
                 bool result;
@@ -1136,7 +1136,7 @@ namespace MajdataPlay
                 (result, exportedFavorites, exception) = await Serializer.Json.TryDeserializeAsync<DanInfo>(exportStream);
                 if (!result)
                 {
-                    var exportDirectory = MajEnv.ChartPath;
+                    var exportDirectory = MajEnv.ChartDirectory;
                     var backupName = $"{MyFavoriteFileName}.bak";
                     while (exportDirectory.FindFile(backupName) is not null)
                     {

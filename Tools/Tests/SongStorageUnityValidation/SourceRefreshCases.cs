@@ -21,7 +21,7 @@ namespace MajdataPlay.Tests
         /// <exception cref="InvalidOperationException">An independent-source assertion fails.</exception>
         private static async Task ValidateIndependentSourcesAsync(string fixtures)
         {
-            var nativeChartRoot = MajEnv.ChartPath;
+            var nativeChartRoot = MajEnv.ChartDirectory;
             var originalEndpoints = MajEnv.ApiEndpoints;
             var endpoint = new ApiEndpoint { Name = "Independent offline endpoint" };
             var metadata = CreateRemoteMetadata(35001);
@@ -49,7 +49,7 @@ namespace MajdataPlay.Tests
                 var selectedId = selectedLocal.Id;
                 var selectedHash = selectedLocal[1].Hash;
                 File.Delete(playlistPath);
-                MajEnv.ChartPath = inaccessibleRoot.Root;
+                MajEnv.ChartDirectory = inaccessibleRoot.Root;
                 MajEnv.ApiEndpoints = new[] { endpoint };
                 MajEnv.Settings.Online.Enable = true;
                 Online.SupplyChartList(endpoint, new[] { metadata });
@@ -75,7 +75,7 @@ namespace MajdataPlay.Tests
                     SongHashs = new[] { metadata.Hash },
                     IsPlayList = true
                 }), new UTF8Encoding(false));
-                MajEnv.ChartPath = nativeChartRoot;
+                MajEnv.ChartDirectory = nativeChartRoot;
                 MajEnv.Settings.Online.Enable = false;
                 var requestsBeforeLocal = Online.ChartListRequestCount;
                 await SongStorage.RefreshLocal().ConfigureAwait(false);
@@ -86,7 +86,7 @@ namespace MajdataPlay.Tests
 
                 localCollections = SongStorage.Collections.Where(collection => !collection.IsVirtual && !collection.IsOnline).ToArray();
                 File.Delete(playlistPath);
-                MajEnv.ChartPath = inaccessibleRoot.Root;
+                MajEnv.ChartDirectory = inaccessibleRoot.Root;
                 await SongStorage.RefreshOnline().ConfigureAwait(false);
                 Require(SongStorage.Collections.All(collection => !collection.IsOnline) && SongStorage.TotalChartCount == localCount
                     && localCollections.All(collection => ReferenceEquals(SongStorage.Collections.Single(current => current.Id == collection.Id), collection))
@@ -103,7 +103,7 @@ namespace MajdataPlay.Tests
             }
             finally
             {
-                MajEnv.ChartPath = nativeChartRoot;
+                MajEnv.ChartDirectory = nativeChartRoot;
                 MajEnv.ApiEndpoints = originalEndpoints;
                 MajEnv.Settings.Online.Enable = false;
                 await SongStorage.RefreshOnline().ConfigureAwait(false);

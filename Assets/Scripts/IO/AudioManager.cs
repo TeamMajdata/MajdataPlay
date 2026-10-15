@@ -75,8 +75,8 @@ namespace MajdataPlay.IO
             _isInited = true;
             try
             {
-                var sfxDirectory = MajEnv.AssetsPath.FindDirectory("SFX");
-                var voiceDirectory = MajEnv.AssetsPath.FindDirectory("Voice");
+                var sfxDirectory = MajEnv.AssetsDirectory.FindDirectory("SFX");
+                var voiceDirectory = MajEnv.AssetsDirectory.FindDirectory("Voice");
 
                 DontDestroyOnLoad(this);
 

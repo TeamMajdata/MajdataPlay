@@ -96,44 +96,44 @@ namespace MajdataPlay
         /// Children are resolved through this handle, never by combining <see cref="StorageDirectory.Location"/> with
         /// <see cref="Path"/>, so the root may later point at an opaque provider location such as an Android SAF tree.
         /// </remarks>
-        public static StorageDirectory RootPath { get; private set; } = null!;
+        public static StorageDirectory RootDirectory { get; private set; } = null!;
         /// <summary>Gets the persistent application data directory, which is always a native path.</summary>
         /// <remarks>
         /// Data which native libraries open by filename, such as the SQLite score database, lives here. On Windows, Linux
-        /// and macOS it is <see cref="RootPath"/>; on Android and iOS it is the application-private persistent data
-        /// directory, which stays native even when <see cref="RootPath"/> points at an Android SAF tree.
+        /// and macOS it is <see cref="RootDirectory"/>; on Android and iOS it is the application-private persistent data
+        /// directory, which stays native even when <see cref="RootDirectory"/> points at an Android SAF tree.
         /// </remarks>
         public static StorageDirectory PersistentDirectory { get; private set; } = null!;
         /// <summary>Gets the packaged or extracted streaming assets directory without creating it.</summary>
-        public static StorageDirectory AssetsPath { get; private set; } = null!;
+        public static StorageDirectory AssetsDirectory { get; private set; } = null!;
         /// <summary>Gets the local cache directory.</summary>
-        public static StorageDirectory CachePath { get; private set; } = null!;
+        public static StorageDirectory CacheDirectory { get; private set; } = null!;
         /// <summary>Gets the runtime data directory under the cache root, which holds the runtime configuration and favorites database.</summary>
-        public static StorageDirectory RuntimeCachePath { get; private set; } = null!;
+        public static StorageDirectory RuntimeCacheDirectory { get; private set; } = null!;
         /// <summary>Gets the temporary extraction directory under the cache root.</summary>
-        public static StorageDirectory TempPath { get; private set; } = null!;
+        public static StorageDirectory TempDirectory { get; private set; } = null!;
         /// <summary>Gets the chart collection root.</summary>
-        public static StorageDirectory ChartPath { get; private set; } = null!;
+        public static StorageDirectory ChartDirectory { get; private set; } = null!;
         /// <summary>Gets the user settings file, which is created with default settings on first startup.</summary>
         public static StorageFile SettingsPath { get; private set; } = null!;
         /// <summary>Gets the custom skin directory.</summary>
-        public static StorageDirectory SkinPath { get; private set; } = null!;
+        public static StorageDirectory SkinDirectory { get; private set; } = null!;
         /// <summary>Gets the runtime log directory.</summary>
-        public static StorageDirectory LogsPath { get; private set; } = null!;
+        public static StorageDirectory LogsDirectory { get; private set; } = null!;
         /// <summary>Finds the language resources directory inside the streaming assets, or null while it is absent.</summary>
         /// <exception cref="UnauthorizedAccessException">Querying the streaming assets was denied.</exception>
         /// <exception cref="IOException">Querying the streaming assets failed.</exception>
-        public static StorageDirectory? LangPath
+        public static StorageDirectory? LangDirectory
         {
             get
             {
-                return AssetsPath.Exists ? AssetsPath.FindDirectory("Langs") : null;
+                return AssetsDirectory.Exists ? AssetsDirectory.FindDirectory("Langs") : null;
             }
         }
         /// <summary>Gets the current runtime log file, created when the logger starts.</summary>
         public static StorageFile LogPath { get; private set; } = null!;
         /// <summary>Gets the directory receiving recorded audio and video files.</summary>
-        public static StorageDirectory RecordOutputsPath { get; private set; } = null!;
+        public static StorageDirectory RecordOutputsDirectory { get; private set; } = null!;
         public static bool IsLowMemoryDevice { get; private set; }
         public static MachineInfo MachineInfo { get; private set; } = new()
         {
@@ -190,15 +190,15 @@ namespace MajdataPlay
             }
         };
 
-        /// <summary>The user settings file name inside <see cref="RootPath"/>.</summary>
+        /// <summary>The user settings file name inside <see cref="RootDirectory"/>.</summary>
         private const string SettingsFileName = "settings.json";
-        /// <summary>The runtime configuration file name inside <see cref="RuntimeCachePath"/>.</summary>
+        /// <summary>The runtime configuration file name inside <see cref="RuntimeCacheDirectory"/>.</summary>
         private const string RuntimeConfigFileName = "config.json";
-        /// <summary>The machine description file name inside <see cref="RootPath"/>.</summary>
+        /// <summary>The machine description file name inside <see cref="RootDirectory"/>.</summary>
         private const string MachineDescriptionFileName = "machine_description.json";
-        /// <summary>The current runtime log file name inside <see cref="LogsPath"/>.</summary>
+        /// <summary>The current runtime log file name inside <see cref="LogsDirectory"/>.</summary>
         private const string LogFileName = "MajPlayRuntime.log";
-        /// <summary>The rotated previous runtime log file name inside <see cref="LogsPath"/>.</summary>
+        /// <summary>The rotated previous runtime log file name inside <see cref="LogsDirectory"/>.</summary>
         private const string OldLogFileName = "MajPlayRuntime.log.old";
         /// <summary>The content type requested for JSON files created on a provider.</summary>
         private const string JsonMimeType = "application/json";
@@ -243,10 +243,10 @@ namespace MajdataPlay
         private static void InitPath()
         {
 #if UNITY_STANDALONE || UNITY_EDITOR
-            RootPath = FileSystem.Directory.Open(Path.Combine(Application.dataPath, ".."));
-            PersistentDirectory = RootPath;
-            AssetsPath = FileSystem.Directory.Open(Application.streamingAssetsPath);
-            CachePath = RootPath.CreateDirectory("Cache");
+            RootDirectory = FileSystem.Directory.Open(Path.Combine(Application.dataPath, ".."));
+            PersistentDirectory = RootDirectory;
+            AssetsDirectory = FileSystem.Directory.Open(Application.streamingAssetsPath);
+            CacheDirectory = RootDirectory.CreateDirectory("Cache");
 #elif UNITY_ANDROID
             // The persistent directory stays native whatever the root is, so native libraries always have a filename to open.
             PersistentDirectory = FileSystem.Directory.Open(Application.persistentDataPath);
@@ -284,12 +284,12 @@ namespace MajdataPlay
                 {
                     // The legacy shared root is a known native path, so its streaming assets path is computed from the same constant.
                     const string legacyRootPath = "/sdcard/Documents/MajdataPlay";
-                    RootPath = FileSystem.Directory.Create(legacyRootPath);
-                    if (RootPath.FindFile(".nomedia") is null)
+                    RootDirectory = FileSystem.Directory.Create(legacyRootPath);
+                    if (RootDirectory.FindFile(".nomedia") is null)
                     {
                         try
                         {
-                            RootPath.CreateFile(".nomedia");
+                            RootDirectory.CreateFile(".nomedia");
                             MajDebug.LogDebug("Created .nomedia flag file");
                         }
                         catch (Exception e)
@@ -302,25 +302,25 @@ namespace MajdataPlay
                     {
                         MajDebug.LogDebug(".nomedia flag file exists");
                     }
-                    AssetsPath = FileSystem.Directory.Open(Path.Combine(legacyRootPath, "ExtStreamingAssets"));
+                    AssetsDirectory = FileSystem.Directory.Open(Path.Combine(legacyRootPath, "ExtStreamingAssets"));
                 }
                 else
                 {
-                    RootPath = PersistentDirectory;
-                    AssetsPath = FileSystem.Directory.Open(Path.Combine(Application.persistentDataPath, "ExtStreamingAssets"));
+                    RootDirectory = PersistentDirectory;
+                    AssetsDirectory = FileSystem.Directory.Open(Path.Combine(Application.persistentDataPath, "ExtStreamingAssets"));
                 }
             }
             else // >= Android 11
             {
-                RootPath = PersistentDirectory;
-                AssetsPath = FileSystem.Directory.Open(Path.Combine(Application.persistentDataPath, "ExtStreamingAssets"));
+                RootDirectory = PersistentDirectory;
+                AssetsDirectory = FileSystem.Directory.Open(Path.Combine(Application.persistentDataPath, "ExtStreamingAssets"));
             }
-            CachePath = FileSystem.Directory.Create(Application.temporaryCachePath);
+            CacheDirectory = FileSystem.Directory.Create(Application.temporaryCachePath);
 #elif UNITY_IOS
             PersistentDirectory = FileSystem.Directory.Open(Application.persistentDataPath);
-            RootPath = PersistentDirectory;
-            AssetsPath = FileSystem.Directory.Open(Path.Combine(Application.persistentDataPath, "ExtStreamingAssets"));
-            CachePath = FileSystem.Directory.Create(Application.temporaryCachePath);
+            RootDirectory = PersistentDirectory;
+            AssetsDirectory = FileSystem.Directory.Open(Path.Combine(Application.persistentDataPath, "ExtStreamingAssets"));
+            CacheDirectory = FileSystem.Directory.Create(Application.temporaryCachePath);
 #else
             throw new NotImplementedException();
 #endif
@@ -331,24 +331,24 @@ namespace MajdataPlay
         /// <exception cref="IOException">A file occupies an application directory name or creation failed.</exception>
         private static void InitDirectories()
         {
-            RuntimeCachePath = CachePath.CreateDirectory("Runtime");
-            CachePath.CreateDirectory("Net");
-            TempPath = CachePath.CreateDirectory("Temp");
-            ChartPath = RootPath.CreateDirectory("MaiCharts");
-            SkinPath = RootPath.CreateDirectory("Skins");
-            LogsPath = RootPath.CreateDirectory("Logs");
-            RecordOutputsPath = RootPath.CreateDirectory("RecordOutputs");
-            RootPath.CreateDirectory("Runtime");
+            RuntimeCacheDirectory = CacheDirectory.CreateDirectory("Runtime");
+            CacheDirectory.CreateDirectory("Net");
+            TempDirectory = CacheDirectory.CreateDirectory("Temp");
+            ChartDirectory = RootDirectory.CreateDirectory("MaiCharts");
+            SkinDirectory = RootDirectory.CreateDirectory("Skins");
+            LogsDirectory = RootDirectory.CreateDirectory("Logs");
+            RecordOutputsDirectory = RootDirectory.CreateDirectory("RecordOutputs");
+            RootDirectory.CreateDirectory("Runtime");
         }
-        /// <summary>Rotates the previous runtime log and directs log output to a new log file in <see cref="LogsPath"/>.</summary>
+        /// <summary>Rotates the previous runtime log and directs log output to a new log file in <see cref="LogsDirectory"/>.</summary>
         /// <exception cref="UnauthorizedAccessException">Rotating or creating the log file was denied.</exception>
         /// <exception cref="NotSupportedException">The log directory's backend cannot rename or create files.</exception>
         /// <exception cref="IOException">The log file could not be rotated, created, or opened.</exception>
         private static void InitLogger()
         {
-            LogsPath.FindFile(OldLogFileName)?.Delete();
-            LogsPath.FindFile(LogFileName)?.Rename(OldLogFileName);
-            LogPath = LogsPath.CreateFile(LogFileName, "text/plain");
+            LogsDirectory.FindFile(OldLogFileName)?.Delete();
+            LogsDirectory.FindFile(LogFileName)?.Rename(OldLogFileName);
+            LogPath = LogsDirectory.CreateFile(LogFileName, "text/plain");
             // The facade's append stream keeps the file readable by other processes while the game runs.
             var fileWriter = new StreamWriter(FileSystem.File.OpenWrite(LogPath.Location, append: true), Encoding.UTF8);
             fileWriter.AutoFlush = true;
@@ -421,12 +421,12 @@ namespace MajdataPlay
             }
 #endif
         }
-        /// <summary>Loads the user settings from <see cref="RootPath"/>, backing up an unreadable file or writing defaults on first startup.</summary>
+        /// <summary>Loads the user settings from <see cref="RootDirectory"/>, backing up an unreadable file or writing defaults on first startup.</summary>
         /// <exception cref="UnauthorizedAccessException">Reading or creating the settings file was denied.</exception>
         /// <exception cref="IOException">The settings file could not be read, created, or written.</exception>
         private static void InitUserSettings()
         {
-            var settingsFile = RootPath.FindFile(SettingsFileName);
+            var settingsFile = RootDirectory.FindFile(SettingsFileName);
             if (settingsFile is not null)
             {
                 var js = settingsFile.ReadAllText();
@@ -438,14 +438,14 @@ namespace MajdataPlay
                     Settings = new();
                     MajDebug.LogError($"Failed to read setting from file\nException: {e}");
                     var bakFileName = $"{SettingsFileName}.bak";
-                    while (RootPath.FindFile(bakFileName) is not null)
+                    while (RootDirectory.FindFile(bakFileName) is not null)
                     {
                         bakFileName = $"{bakFileName}.bak";
                     }
 
                     try
                     {
-                        settingsFile.CopyTo(RootPath, bakFileName, overwrite: true);
+                        settingsFile.CopyTo(RootDirectory, bakFileName, overwrite: true);
                     }
                     catch
                     {
@@ -461,7 +461,7 @@ namespace MajdataPlay
                 Settings = new GameSetting();
 
                 var json = Serializer.Json.Serialize(Settings, UserJsonReaderOption);
-                settingsFile = RootPath.CreateFile(SettingsFileName, JsonMimeType);
+                settingsFile = RootDirectory.CreateFile(SettingsFileName, JsonMimeType);
                 WriteText(settingsFile, json);
             }
             SettingsPath = settingsFile;
@@ -486,8 +486,8 @@ namespace MajdataPlay
 #if UNITY_IOS
             if (IOSNativeSettings.DebugNoCache)
             {
-                TryDeleteDirectory(CachePath.FindDirectory("Net"));
-                TryDeleteDirectory(CachePath.FindDirectory("View"));
+                TryDeleteDirectory(CacheDirectory.FindDirectory("Net"));
+                TryDeleteDirectory(CacheDirectory.FindDirectory("View"));
                 MajDebug.LogInfo("[MajEnv][Init]iOS setting 'no_cache' is enabled. Cleared cache folders: Net, View.");
             }
             else
@@ -642,7 +642,7 @@ namespace MajdataPlay
         }
         private static void InitOnlineMachineInfo()
         {
-            var machineDescriptionFile = RootPath.FindFile(MachineDescriptionFileName);
+            var machineDescriptionFile = RootDirectory.FindFile(MachineDescriptionFileName);
 
             if (machineDescriptionFile is not null)
             {
@@ -661,12 +661,12 @@ namespace MajdataPlay
             else
             {
                 var json = Serializer.Json.Serialize(MachineInfo, UserJsonReaderOption);
-                WriteText(RootPath.CreateFile(MachineDescriptionFileName, JsonMimeType), json);
+                WriteText(RootDirectory.CreateFile(MachineDescriptionFileName, JsonMimeType), json);
             }
         }
         private static void InitRuntimeConfig()
         {
-            var runtimeConfigFile = RuntimeCachePath.FindFile(RuntimeConfigFileName);
+            var runtimeConfigFile = RuntimeCacheDirectory.FindFile(RuntimeConfigFileName);
             if (runtimeConfigFile is not null)
             {
                 var js = runtimeConfigFile.ReadAllText();
@@ -687,7 +687,7 @@ namespace MajdataPlay
                 RuntimeConfig = new();
 
                 var json = Serializer.Json.Serialize(RuntimeConfig, UserJsonReaderOption);
-                WriteText(RuntimeCachePath.CreateFile(RuntimeConfigFileName, JsonMimeType), json);
+                WriteText(RuntimeCacheDirectory.CreateFile(RuntimeConfigFileName, JsonMimeType), json);
             }
         }
         private static void InitOthers()
@@ -740,9 +740,9 @@ namespace MajdataPlay
             var json2 = Serializer.Json.Serialize(RuntimeConfig, UserJsonReaderOption);
 
             // Re-resolve the files so a configuration deleted while running is recreated on every backend.
-            SettingsPath = FindOrCreateFile(RootPath, SettingsFileName);
+            SettingsPath = FindOrCreateFile(RootDirectory, SettingsFileName);
             WriteText(SettingsPath, json);
-            WriteText(FindOrCreateFile(RuntimeCachePath, RuntimeConfigFileName), json2);
+            WriteText(FindOrCreateFile(RuntimeCacheDirectory, RuntimeConfigFileName), json2);
 
             MajDebug.FlushLog();
         }

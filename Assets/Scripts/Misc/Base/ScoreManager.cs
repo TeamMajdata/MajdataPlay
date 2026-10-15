@@ -57,7 +57,7 @@ namespace MajdataPlay
             _isInited = true;
             try
             {
-                var rootDirectory = MajEnv.RootPath;
+                var rootDirectory = MajEnv.RootDirectory;
                 // SQLite opens the database by filename, so it lives in the persistent directory, which is always a native path.
                 var persistentDirectory = MajEnv.PersistentDirectory;
                 var databaseFile = persistentDirectory.FindFile(DatabaseFileName);

@@ -39,15 +39,15 @@ namespace MajdataPlay
     internal static class MajEnv
     {
         /// <summary>Gets or sets the disposable chart root.</summary>
-        public static StorageDirectory ChartPath { get; set; } = null!;
+        public static StorageDirectory ChartDirectory { get; set; } = null!;
         /// <summary>Gets or sets the disposable cache root.</summary>
-        public static StorageDirectory CachePath { get; set; } = null!;
+        public static StorageDirectory CacheDirectory { get; set; } = null!;
         /// <summary>Gets the runtime cache directory below the disposable cache root, created on demand like production initialization.</summary>
-        public static StorageDirectory RuntimeCachePath
+        public static StorageDirectory RuntimeCacheDirectory
         {
             get
             {
-                return CachePath.CreateDirectory("Runtime");
+                return CacheDirectory.CreateDirectory("Runtime");
             }
         }
         /// <summary>Gets the supported track extensions.</summary>

@@ -66,7 +66,7 @@ namespace MajdataPlay.Tests.ImportValidation
             RequireChart(Path.Combine(chartPath, "Import", "My Chart"));
             Require(NativeFile.Exists(Path.Combine(chartPath, "Import", "My Chart", "bg.png")), "A chart folder must be copied with its extra files.");
             Require(!NativeDirectory.Exists(Path.Combine(chartPath, "My Chart")), "A single chart folder must not become a collection.");
-            Require(NativeDirectory.GetDirectories(MajEnv.TempPath.Location).Length == 0, "The extraction directory must be removed after the import.");
+            Require(NativeDirectory.GetDirectories(MajEnv.TempDirectory.Location).Length == 0, "The extraction directory must be removed after the import.");
             Require(NativeFile.Exists(archivePath), "A local archive must be kept because consuming it is an Android-only behavior.");
             RequireNoErrors();
             Console.WriteLine("PASS archive: one chart folder imports into the Import collection");
@@ -218,7 +218,7 @@ namespace MajdataPlay.Tests.ImportValidation
             RequireChart(Path.Combine(chartPath, "Import", "Valid Chart"));
             Require(MajDebug.Errors.Count == 1, "An unreadable archive must report exactly one error.");
             Require(MajDebug.Errors[0].Contains(brokenPath, StringComparison.Ordinal), "The reported error must name the unreadable archive.");
-            Require(NativeDirectory.GetDirectories(MajEnv.TempPath.Location).Length == 0, "A failed extraction must not leave its directory behind.");
+            Require(NativeDirectory.GetDirectories(MajEnv.TempDirectory.Location).Length == 0, "A failed extraction must not leave its directory behind.");
             Console.WriteLine("PASS archive: an unreadable archive is reported and the queue continues");
         }
 
@@ -229,7 +229,7 @@ namespace MajdataPlay.Tests.ImportValidation
         {
             var chartPath = PrepareCase(rootPath, "OpaqueChartRoot");
             var backend = new OpaqueFileSystem(chartPath);
-            MajEnv.ChartPath = backend.Root;
+            MajEnv.ChartDirectory = backend.Root;
             var packagePath = Path.Combine(chartPath, "package");
             var sourceChartPath = Path.Combine(packagePath, "Sub");
             WriteChart(sourceChartPath);
@@ -282,8 +282,8 @@ namespace MajdataPlay.Tests.ImportValidation
             var tempPath = Path.Combine(casePath, "Temp");
             NativeDirectory.CreateDirectory(chartPath);
             NativeDirectory.CreateDirectory(tempPath);
-            MajEnv.ChartPath = FileSystem.Directory.Open(chartPath);
-            MajEnv.TempPath = FileSystem.Directory.Open(tempPath);
+            MajEnv.ChartDirectory = FileSystem.Directory.Open(chartPath);
+            MajEnv.TempDirectory = FileSystem.Directory.Open(tempPath);
             MajDebug.Clear();
             return chartPath;
         }

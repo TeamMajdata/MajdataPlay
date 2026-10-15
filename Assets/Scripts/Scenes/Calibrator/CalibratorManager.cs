@@ -46,7 +46,7 @@ namespace MajdataPlay.Scenes.Calibrator
         {
             try
             {
-                var audioFile = MajEnv.AssetsPath.FindFileAt($"SFX/{CALIBRATION_AUDIO_FILE_NAME}");
+                var audioFile = MajEnv.AssetsDirectory.FindFileAt($"SFX/{CALIBRATION_AUDIO_FILE_NAME}");
                 if (audioFile is null)
                 {
                     MajDebug.LogError($"[Audio Calibration] Audio file not found: SFX/{CALIBRATION_AUDIO_FILE_NAME}");

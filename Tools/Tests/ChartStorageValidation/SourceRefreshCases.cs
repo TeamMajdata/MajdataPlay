@@ -76,8 +76,8 @@ namespace MajdataPlay.Tests.ChartStorageValidation
                 IsPlayList = true
             }));
             var backend = new OpaqueFileSystem(nativeChartRoot);
-            MajEnv.ChartPath = backend.Root;
-            MajEnv.CachePath = FileSystem.Directory.Open(CreateFixtureDirectory(path, "Cache"));
+            MajEnv.ChartDirectory = backend.Root;
+            MajEnv.CacheDirectory = FileSystem.Directory.Open(CreateFixtureDirectory(path, "Cache"));
             SongDetail.Probe = new ParseProbe();
             var beforeInitialization = SongStorage.Collections;
             SQLite.SQLiteAsyncConnection.QueryException = new IOException("Injected initialization favorites-query failure.");
@@ -101,7 +101,7 @@ namespace MajdataPlay.Tests.ChartStorageValidation
             backend.RejectAccess = true;
             var endpoint = new ApiEndpoint { Name = "First online endpoint" };
             var identity = Guid.NewGuid();
-            var marker = CreateFixtureDirectory(Path.Combine(MajEnv.CachePath.Location, "Net", endpoint.Name), ".MajdataPlay");
+            var marker = CreateFixtureDirectory(Path.Combine(MajEnv.CacheDirectory.Location, "Net", endpoint.Name), ".MajdataPlay");
             NativeFile.WriteAllText(Path.Combine(marker, "id"), identity.ToString());
             MajEnv.RuntimeConfig.List.SelectedDir = 100;
             MajEnv.RuntimeConfig.List.SelectedSongIndex = 0;
@@ -139,7 +139,7 @@ namespace MajdataPlay.Tests.ChartStorageValidation
             await SongStorage.InitAsync();
             Require(ReferenceEquals(SongStorage.Collections, published) && SongStorage.TotalChartCount == 2 && backend.AccessCount == initializationAccessCount,
                 "Repeated initialization must not refresh or replace a published library.");
-            MajEnv.ChartPath = FileSystem.Directory.Open(nativeChartRoot);
+            MajEnv.ChartDirectory = FileSystem.Directory.Open(nativeChartRoot);
             Console.WriteLine("PASS online first: non-scanning initialization, no local I/O, online-only base/favorites and saved GUID/hash selection");
         }
 
@@ -148,8 +148,8 @@ namespace MajdataPlay.Tests.ChartStorageValidation
         /// <returns>A task completing after independent source refresh assertions.</returns>
         private static async Task TestIndependentSourceRefresh(string rootPath)
         {
-            var originalChartPath = MajEnv.ChartPath;
-            var originalCachePath = MajEnv.CachePath;
+            var originalChartPath = MajEnv.ChartDirectory;
+            var originalCachePath = MajEnv.CacheDirectory;
             var originalEndpoints = MajEnv.ApiEndpoints;
             var originalChartHandler = Online.ChartListHandler;
             var originalFavoritesHandler = Online.FavoritesHandler;
@@ -175,8 +175,8 @@ namespace MajdataPlay.Tests.ChartStorageValidation
                 MajEnv.Settings.Online.Enable = false;
                 await SongStorage.RefreshOnline();
                 FileSystem.RegisterContentProvider(backend);
-                MajEnv.ChartPath = backend.Root;
-                MajEnv.CachePath = FileSystem.Directory.Open(CreateFixtureDirectory(path, "Cache"));
+                MajEnv.ChartDirectory = backend.Root;
+                MajEnv.CacheDirectory = FileSystem.Directory.Open(CreateFixtureDirectory(path, "Cache"));
                 MajEnv.ApiEndpoints = new[] { endpoint };
                 MajEnv.Settings.Online.Enable = true;
                 Online.ChartListHandler = (source, token) =>
@@ -301,8 +301,8 @@ namespace MajdataPlay.Tests.ChartStorageValidation
             finally
             {
                 backend.RejectAccess = false;
-                MajEnv.ChartPath = originalChartPath;
-                MajEnv.CachePath = originalCachePath;
+                MajEnv.ChartDirectory = originalChartPath;
+                MajEnv.CacheDirectory = originalCachePath;
                 MajEnv.ApiEndpoints = originalEndpoints;
                 MajEnv.Settings.Online.Enable = false;
                 Online.ChartListHandler = originalChartHandler;

@@ -21,7 +21,7 @@ namespace MajdataPlay.Tests
         /// <exception cref="InvalidOperationException">Production ignores a supplied backend or attempts networking.</exception>
         private static async Task ValidateOnlineCacheAsync(string fixtures)
         {
-            MajEnv.CachePath = FileSystem.Directory.Create(Path.Combine(fixtures, "OnlineCanonicalCache"));
+            MajEnv.CacheDirectory = FileSystem.Directory.Create(Path.Combine(fixtures, "OnlineCanonicalCache"));
             var endpoint = new ApiEndpoint { Name = "cached-fixture" };
             var localPath = WriteChart(Path.Combine(fixtures, "AlreadyCreatedOnlineCache"), 33000);
             File.WriteAllBytes(Path.Combine(localPath, "bg.mp4"), new byte[] { 0 });
@@ -32,7 +32,7 @@ namespace MajdataPlay.Tests
             Require(ReferenceEquals(GetPrivateField<StorageDirectory>(localSong, "_cacheDirectory"), localDirectory),
                 "OnlineSongDetail replaced the caller-created directory handle.");
             Require(ReferenceEquals(localSong.ServerInfo, endpoint), "OnlineSongDetail replaced its endpoint.");
-            var canonicalSongPath = Path.Combine(MajEnv.CachePath.Location, "Net", endpoint.Name,
+            var canonicalSongPath = Path.Combine(MajEnv.CacheDirectory.Location, "Net", endpoint.Name,
                 BitConverter.ToString(Convert.FromBase64String(localSong.Hash)));
             Require(!Directory.Exists(canonicalSongPath), "Direct online construction created a second canonical cache instead of using the supplied directory.");
             var localChart = await localSong.GetMaidataAsync().ConfigureAwait(false);
@@ -187,7 +187,7 @@ namespace MajdataPlay.Tests
                     "The real storage caller did not pass its created per-song directory and backend.");
                 Require(songDirectory.Entry?.Name == expectedCacheName,
                     "The cache directory must retain uppercase byte pairs separated by hyphens, not contiguous hexadecimal.");
-                Require(songDirectory.Location == Path.Combine(MajEnv.CachePath.Location, "Net", endpoint.Name, expectedCacheName),
+                Require(songDirectory.Location == Path.Combine(MajEnv.CacheDirectory.Location, "Net", endpoint.Name, expectedCacheName),
                     "The real online storage caller created a per-song directory at a different cache location.");
 
                 // Null means an explicitly supplied unavailable list, not a real remote failure.

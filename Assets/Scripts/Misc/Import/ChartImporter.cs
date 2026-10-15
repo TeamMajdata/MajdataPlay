@@ -142,7 +142,7 @@ namespace MajdataPlay.Import
         /// <remarks>
         /// A queued <c>.zip</c> or <c>.adx</c> archive is extracted as a ZIP archive, and a queued directory is walked directly.
         /// Both then follow the same layout rules: <c>&lt;chart&gt;/maidata.txt</c> becomes a chart of the <c>Import</c> collection,
-        /// while <c>&lt;collection&gt;/&lt;chart&gt;/maidata.txt</c> becomes a chart of the named collection below <see cref="MajEnv.ChartPath"/>.
+        /// while <c>&lt;collection&gt;/&lt;chart&gt;/maidata.txt</c> becomes a chart of the named collection below <see cref="MajEnv.ChartDirectory"/>.
         /// </remarks>
         /// <returns>An operation that completes after importing the queued entries and refreshing the local chart list.</returns>
         private static async ValueTask Import()
@@ -163,7 +163,7 @@ namespace MajdataPlay.Import
                 await MajInstances.SceneSwitcher.SwitchSceneAsync("Empty", false);
                 await UniTask.Delay(300);
             }
-            s_importRoot = MajEnv.ChartPath.CreateDirectory("Import");
+            s_importRoot = MajEnv.ChartDirectory.CreateDirectory("Import");
             while (s_pendingImportTasks.TryDequeue(out var pending))
             {
                 var entry = pending.Entry;
@@ -232,7 +232,7 @@ namespace MajdataPlay.Import
                 MajDebug.LogError("[ChartImporter] File not found: " + entry.Location);
                 return;
             }
-            var outputDirectory = MajEnv.TempPath.CreateDirectory(Guid.NewGuid().ToString());
+            var outputDirectory = MajEnv.TempDirectory.CreateDirectory(Guid.NewGuid().ToString());
 
             try
             {
@@ -302,7 +302,7 @@ namespace MajdataPlay.Import
                     continue;
                 }
                 // A named collection is reused when it exists, so a package extends it instead of duplicating it.
-                var collectionDirectory = MajEnv.ChartPath.CreateDirectory(childEntry.Name);
+                var collectionDirectory = MajEnv.ChartDirectory.CreateDirectory(childEntry.Name);
                 foreach (var (chartDirectory, chartName) in charts)
                 {
                     await ImportChartAsync(chartDirectory, collectionDirectory, chartName);

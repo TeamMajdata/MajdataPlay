@@ -146,7 +146,7 @@ namespace MajdataPlay.Tests.ChartStorageValidation
         {
             var settingsDirectory = CreateFixtureDirectory(rootPath, "Settings");
             var backend = new OpaqueFileSystem(settingsDirectory);
-            MajEnv.RootPath = backend.Root;
+            MajEnv.RootDirectory = backend.Root;
             var settingsPath = Path.Combine(settingsDirectory, "ChartSetting.db");
             const string malformedJson = "{this is not an array or valid JSON}";
             NativeFile.WriteAllText(settingsPath, malformedJson);

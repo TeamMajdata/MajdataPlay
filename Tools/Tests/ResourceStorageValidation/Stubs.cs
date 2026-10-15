@@ -10,22 +10,22 @@ namespace MajdataPlay
     internal static class MajEnv
     {
         /// <summary>Gets or sets the fixture's application root.</summary>
-        public static StorageDirectory RootPath { get; set; } = FileSystem.Directory.Open(".");
+        public static StorageDirectory RootDirectory { get; set; } = FileSystem.Directory.Open(".");
 
         /// <summary>Gets the fixture's extracted resource root.</summary>
-        public static StorageDirectory AssetsPath => FileSystem.Directory.Open(Path.Combine(RootPath.Location, "Assets"));
+        public static StorageDirectory AssetsDirectory => FileSystem.Directory.Open(Path.Combine(RootDirectory.Location, "Assets"));
 
         /// <summary>Gets or sets a chart root on another backend, or null for the native directory below the application root.</summary>
-        public static StorageDirectory? ChartPathOverride { get; set; }
+        public static StorageDirectory? ChartDirectoryOverride { get; set; }
 
         /// <summary>Gets or sets a skin root on another backend, or null for the native directory below the application root.</summary>
-        public static StorageDirectory? SkinPathOverride { get; set; }
+        public static StorageDirectory? SkinDirectoryOverride { get; set; }
 
         /// <summary>Gets the fixture's player-managed chart root.</summary>
-        public static StorageDirectory ChartPath => ChartPathOverride ?? FileSystem.Directory.Open(Path.Combine(RootPath.Location, "MaiCharts"));
+        public static StorageDirectory ChartDirectory => ChartDirectoryOverride ?? FileSystem.Directory.Open(Path.Combine(RootDirectory.Location, "MaiCharts"));
 
         /// <summary>Gets the fixture's player-managed skin root.</summary>
-        public static StorageDirectory SkinPath => SkinPathOverride ?? FileSystem.Directory.Open(Path.Combine(RootPath.Location, "Skins"));
+        public static StorageDirectory SkinDirectory => SkinDirectoryOverride ?? FileSystem.Directory.Open(Path.Combine(RootDirectory.Location, "Skins"));
     }
 
     /// <summary>Provides controlled validated manifests without substituting any storage behavior.</summary>

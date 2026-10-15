@@ -75,17 +75,17 @@ namespace MajdataPlay
     internal static class MajEnv
     {
         /// <summary>Gets or sets the case-owned settings directory.</summary>
-        public static StorageDirectory RootPath { get; set; } = null!;
+        public static StorageDirectory RootDirectory { get; set; } = null!;
         /// <summary>Gets or sets the chart root consumed by production root scans.</summary>
-        public static StorageDirectory ChartPath { get; set; } = null!;
+        public static StorageDirectory ChartDirectory { get; set; } = null!;
         /// <summary>Gets or sets the ignored cache root.</summary>
-        public static StorageDirectory CachePath { get; set; } = null!;
+        public static StorageDirectory CacheDirectory { get; set; } = null!;
         /// <summary>Gets the runtime cache directory below the case-owned cache root, created on demand like production initialization.</summary>
-        public static StorageDirectory RuntimeCachePath
+        public static StorageDirectory RuntimeCacheDirectory
         {
             get
             {
-                return CachePath.CreateDirectory("Runtime");
+                return CacheDirectory.CreateDirectory("Runtime");
             }
         }
         /// <summary>Gets the supported audio extensions used by the scanner.</summary>

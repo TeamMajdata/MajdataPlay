@@ -66,10 +66,10 @@ namespace MajdataPlay
     internal static class MajEnv
     {
         /// <summary>Gets or sets the case-owned chart root that plays the role of <c>MaiCharts</c>.</summary>
-        public static StorageDirectory ChartPath { get; set; } = null!;
+        public static StorageDirectory ChartDirectory { get; set; } = null!;
 
         /// <summary>Gets or sets the case-owned extraction root.</summary>
-        public static StorageDirectory TempPath { get; set; } = null!;
+        public static StorageDirectory TempDirectory { get; set; } = null!;
     }
 
     /// <summary>Supplies the scene identifiers compared by the production importer.</summary>

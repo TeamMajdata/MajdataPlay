@@ -27,7 +27,7 @@ namespace MajdataPlay
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSceneLoad)]
         private static void InitializeOrUpdate()
         {
-            if (!MajEnv.AssetsPath.Exists)
+            if (!MajEnv.AssetsDirectory.Exists)
             {
                 if (ExtractAssets())
                 {
@@ -167,7 +167,7 @@ namespace MajdataPlay
             }
 
             // The extracted streaming assets are app-private native storage, so a staging sibling can be renamed into place atomically.
-            var extractionRoot = MajEnv.AssetsPath.Location.TrimEnd(
+            var extractionRoot = MajEnv.AssetsDirectory.Location.TrimEnd(
                                      Path.DirectorySeparatorChar,
                                      Path.AltDirectorySeparatorChar) + ".extracting-v2";
             StorageDirectory stagingDirectory;
@@ -207,7 +207,7 @@ namespace MajdataPlay
             try
             {
                 stagingDirectory.CreateFile(PendingManagedAssetMovesMarkerName);
-                FileSystem.Directory.Move(stagingDirectory.Location, MajEnv.AssetsPath.Location);
+                FileSystem.Directory.Move(stagingDirectory.Location, MajEnv.AssetsDirectory.Location);
                 return true;
             }
             catch (Exception exception)
@@ -233,9 +233,9 @@ namespace MajdataPlay
                     continue;
                 }
 
-                if (MajEnv.AssetsPath.FindFileAt(relativePath) is null)
+                if (MajEnv.AssetsDirectory.FindFileAt(relativePath) is null)
                 {
-                    CopyPackagedResource(relativePath, MajEnv.AssetsPath, hash, "Sync missing");
+                    CopyPackagedResource(relativePath, MajEnv.AssetsDirectory, hash, "Sync missing");
                 }
             }
         }
@@ -244,14 +244,14 @@ namespace MajdataPlay
         /// <returns>Whether an existing player-managed destination was preserved.</returns>
         private static bool MoveCharts()
         {
-            return MoveExtractedDirectory(BundledChartsRelativePath, MajEnv.ChartPath, "Original");
+            return MoveExtractedDirectory(BundledChartsRelativePath, MajEnv.ChartDirectory, "Original");
         }
 
         /// <summary>Moves the bundled skin from extraction into the player-managed skin root.</summary>
         /// <returns>Whether an existing player-managed destination was preserved.</returns>
         private static bool MoveSkins()
         {
-            return MoveExtractedDirectory(BundledSkinRelativePath, MajEnv.SkinPath, "default");
+            return MoveExtractedDirectory(BundledSkinRelativePath, MajEnv.SkinDirectory, "default");
         }
 
         /// <summary>Moves one extracted managed directory without replacing an existing player-owned destination.</summary>
@@ -268,7 +268,7 @@ namespace MajdataPlay
         /// <exception cref="IOException">The extracted source cannot be queried.</exception>
         private static bool MoveExtractedDirectory(string sourceRelativePath, StorageDirectory destinationParent, string destinationName)
         {
-            var source = MajEnv.AssetsPath.FindDirectoryAt(sourceRelativePath);
+            var source = MajEnv.AssetsDirectory.FindDirectoryAt(sourceRelativePath);
             if (source is null)
             {
                 MajDebug.LogError($"Move failed: source not found: {sourceRelativePath}");
@@ -302,17 +302,17 @@ namespace MajdataPlay
         /// <exception cref="IOException">The marker or extracted sources cannot be queried.</exception>
         private static void CompletePendingManagedAssetMoves()
         {
-            if (MajEnv.AssetsPath.FindFile(PendingManagedAssetMovesMarkerName) is null)
+            if (MajEnv.AssetsDirectory.FindFile(PendingManagedAssetMovesMarkerName) is null)
             {
                 return;
             }
 
-            if (MajEnv.AssetsPath.FindDirectoryAt(BundledChartsRelativePath) is not null)
+            if (MajEnv.AssetsDirectory.FindDirectoryAt(BundledChartsRelativePath) is not null)
             {
                 MoveCharts();
             }
 
-            if (MajEnv.AssetsPath.FindDirectoryAt(BundledSkinRelativePath) is not null)
+            if (MajEnv.AssetsDirectory.FindDirectoryAt(BundledSkinRelativePath) is not null)
             {
                 MoveSkins();
             }
@@ -325,15 +325,15 @@ namespace MajdataPlay
         /// <exception cref="IOException">An extracted source cannot be queried.</exception>
         private static void ClearPendingManagedAssetMovesMarkerIfCompleted()
         {
-            if (MajEnv.AssetsPath.FindDirectoryAt(BundledChartsRelativePath) is not null ||
-                MajEnv.AssetsPath.FindDirectoryAt(BundledSkinRelativePath) is not null)
+            if (MajEnv.AssetsDirectory.FindDirectoryAt(BundledChartsRelativePath) is not null ||
+                MajEnv.AssetsDirectory.FindDirectoryAt(BundledSkinRelativePath) is not null)
             {
                 return;
             }
 
             try
             {
-                MajEnv.AssetsPath.FindFile(PendingManagedAssetMovesMarkerName)?.Delete();
+                MajEnv.AssetsDirectory.FindFile(PendingManagedAssetMovesMarkerName)?.Delete();
             }
             catch (Exception exception)
             {
@@ -442,7 +442,7 @@ namespace MajdataPlay
         /// <returns>The root directory whose backend resolves the manifest path.</returns>
         private static StorageDirectory GetDestinationRoot(string relativePath)
         {
-            return IsRootManagedAsset(relativePath) ? MajEnv.RootPath : MajEnv.AssetsPath;
+            return IsRootManagedAsset(relativePath) ? MajEnv.RootDirectory : MajEnv.AssetsDirectory;
         }
 
         /// <summary>Reads packaged bytes through local iOS storage or an Android APK archive entry.</summary>

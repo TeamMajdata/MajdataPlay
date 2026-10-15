@@ -33,7 +33,7 @@ namespace MajdataPlay.Settings
             }
             try
             {
-                var storageDirectory = s_storageDirectory ??= MajEnv.RootPath;
+                var storageDirectory = s_storageDirectory ??= MajEnv.RootDirectory;
                 await UniTask.SwitchToThreadPool();
                 GameManager.OnSave += OnSave;
                 var storageFile = storageDirectory.FindFile(StorageFileName);

@@ -137,13 +137,13 @@ namespace MajdataPlay.Tests.ChartStorageValidation
             Require(SongStorage.SupportedVideoFileNames.Contains("bg.mp4") && SongStorage.SupportedVideoFileNames.Contains("pv.mp4") && SongStorage.SupportedVideoFileNames.Contains("mv.mp4") && !SongStorage.SupportedVideoFileNames.Contains("bg..mp4"), "Supported video filenames must retain exactly one extension separator.");
             SongDetail.Probe = new ParseProbe();
             var storagePath = CreateFixtureDirectory(rootPath, "StorageSnapshot");
-            MajEnv.ChartPath = FileSystem.Directory.Open(Path.Combine(storagePath, "Charts"));
-            MajEnv.CachePath = FileSystem.Directory.Open(CreateFixtureDirectory(storagePath, "Cache"));
+            MajEnv.ChartDirectory = FileSystem.Directory.Open(Path.Combine(storagePath, "Charts"));
+            MajEnv.CacheDirectory = FileSystem.Directory.Open(CreateFixtureDirectory(storagePath, "Cache"));
             MajEnv.Settings.Online.Enable = false;
             var beforeInitialization = SongStorage.Collections;
             var countBeforeInitialization = SongStorage.TotalChartCount;
             await SongStorage.InitAsync();
-            Require(NativeDirectory.Exists(Path.Combine(MajEnv.ChartPath.Location, "default")), "First initialization must create a missing root and its default directory.");
+            Require(NativeDirectory.Exists(Path.Combine(MajEnv.ChartDirectory.Location, "default")), "First initialization must create a missing root and its default directory.");
             Require(ReferenceEquals(SongStorage.Collections, beforeInitialization) && SongStorage.Collections.Length == 0
                 && SongStorage.TotalChartCount == countBeforeInitialization && SongDetail.Probe.StartedCount == 0,
                 "Initialization must not publish any collection, aggregate or chart, or invoke the chart parser.");
@@ -152,14 +152,14 @@ namespace MajdataPlay.Tests.ChartStorageValidation
             Require(SongStorage.Collections.Any(collection => collection.Name == "default") && SongStorage.Collections.Any(collection => collection.Name == "All") && SongStorage.TotalChartCount == 0, "The first explicit local refresh must publish a usable local snapshot without an online refresh.");
             RequireCompletedProgress(initialProgress);
             var defaultId = SongStorage.Collections.Single(collection => collection.Name == "default").Id;
-            var collectionPath = CreateFixtureDirectory(MajEnv.ChartPath.Location, "Fresh");
+            var collectionPath = CreateFixtureDirectory(MajEnv.ChartDirectory.Location, "Fresh");
             var selectedPath = WriteChart(collectionPath, "Beta", new ChartFixture { Hash = "selected", Title = "Selected original" });
             WriteChart(collectionPath, "Other", new ChartFixture { Hash = "other", Title = "Other original" });
             WriteChart(collectionPath, "Bad", new ChartFixture { Hash = "bad", Title = "Rejected", Fail = true });
-            NativeFile.WriteAllText(Path.Combine(MajEnv.ChartPath.Location, "InvalidDan.json"), "{not valid playlist JSON");
-            NativeFile.WriteAllText(Path.Combine(MajEnv.ChartPath.Location, "EmptyDan.json"), JsonSerializer.Serialize(new DanInfo { Name = "Unmatched", SongHashs = new[] { "missing" } }));
-            NativeFile.WriteAllText(Path.Combine(MajEnv.ChartPath.Location, "ValidDan.json"), JsonSerializer.Serialize(new DanInfo { Name = "Fixture playlist", SongHashs = new[] { "selected" }, IsPlayList = true }));
-            NativeFile.WriteAllText(Path.Combine(MajEnv.ChartPath.Location, "MyFavorites.json"), JsonSerializer.Serialize(new DanInfo { Name = "Exported favorites", SongHashs = new[] { "selected" }, IsPlayList = true }));
+            NativeFile.WriteAllText(Path.Combine(MajEnv.ChartDirectory.Location, "InvalidDan.json"), "{not valid playlist JSON");
+            NativeFile.WriteAllText(Path.Combine(MajEnv.ChartDirectory.Location, "EmptyDan.json"), JsonSerializer.Serialize(new DanInfo { Name = "Unmatched", SongHashs = new[] { "missing" } }));
+            NativeFile.WriteAllText(Path.Combine(MajEnv.ChartDirectory.Location, "ValidDan.json"), JsonSerializer.Serialize(new DanInfo { Name = "Fixture playlist", SongHashs = new[] { "selected" }, IsPlayList = true }));
+            NativeFile.WriteAllText(Path.Combine(MajEnv.ChartDirectory.Location, "MyFavorites.json"), JsonSerializer.Serialize(new DanInfo { Name = "Exported favorites", SongHashs = new[] { "selected" }, IsPlayList = true }));
             var refreshProgress = new ProgressRecorder();
             await RefreshBothSourcesAsync(refreshProgress);
             Require(SongStorage.TotalChartCount == 2 && SongStorage.Collections.Single(collection => collection.Name == "All").Count == 2, "Committed chart totals must count successful base charts only, not aggregate, favorite or playlist duplicates.");
@@ -204,23 +204,23 @@ namespace MajdataPlay.Tests.ChartStorageValidation
             await ExpectExceptionAsync<OperationCanceledException>(() => RefreshBothSourcesAsync(cancellationToken: alreadyCanceled.Token));
             RequireUnchangedStorage(previous, previousAll, previousFavorites, previousCount);
 
-            var validRoot = MajEnv.ChartPath;
+            var validRoot = MajEnv.ChartDirectory;
             var notDirectory = Path.Combine(storagePath, "NotADirectory");
             NativeFile.WriteAllText(notDirectory, "root scan must fail");
-            MajEnv.ChartPath = FileSystem.Directory.Open(notDirectory);
+            MajEnv.ChartDirectory = FileSystem.Directory.Open(notDirectory);
             await ExpectExceptionAsync<IOException>(() => SongStorage.RefreshLocal());
             RequireUnchangedStorage(previous, previousAll, previousFavorites, previousCount);
-            MajEnv.ChartPath = validRoot;
+            MajEnv.ChartDirectory = validRoot;
             SongDetail.Probe = new ParseProbe();
             await ExpectExceptionAsync<IOException>(() => SongStorage.RefreshLocal(new ThrowOnCleanupProgress()));
             RequireUnchangedStorage(previous, previousAll, previousFavorites, previousCount);
             Require(SongDetail.Probe.CompletedCount == 3, "The pre-commit failure fixture must finish scanning before rejecting publication.");
 
-            var favoritesExport = Path.Combine(MajEnv.ChartPath.Location, "MyFavorites.json");
+            var favoritesExport = Path.Combine(MajEnv.ChartDirectory.Location, "MyFavorites.json");
             NativeFile.WriteAllText(favoritesExport, JsonSerializer.Serialize(new DanInfo { Name = "Uncommitted favorites", SongHashs = new[] { "other" }, IsPlayList = true }));
             await ExpectExceptionAsync<IOException>(() => SongStorage.RefreshLocal(new ThrowOnCleanupProgress()));
             RequireUnchangedStorage(previous, previousAll, previousFavorites, previousCount);
-            var rejectedPath = CreateFixtureDirectory(MajEnv.ChartPath.Location, "RejectedCollection");
+            var rejectedPath = CreateFixtureDirectory(MajEnv.ChartDirectory.Location, "RejectedCollection");
             var rejectedMarker = Path.Combine(rejectedPath, ".MajdataPlay");
             NativeFile.WriteAllText(rejectedMarker, "preserve marker collision");
             SongDetail.Probe = new ParseProbe();

@@ -186,7 +186,7 @@ namespace ResourceStorageValidation
             fixture.AssertMissing("MaiCharts/Original/deleted.txt");
             fixture.AssertMissing("MaiCharts/Original/new.txt");
             fixture.AssertMissing("Skins/default/missing.txt");
-            Assert(!Directory.EnumerateFiles(MajEnv.AssetsPath.Location, "*.tmp", SearchOption.AllDirectories).Any(),
+            Assert(!Directory.EnumerateFiles(MajEnv.AssetsDirectory.Location, "*.tmp", SearchOption.AllDirectories).Any(),
                 "Successful updates must consume their temporary files.");
             AssertNoErrors();
         }
@@ -229,7 +229,7 @@ namespace ResourceStorageValidation
             var failed = false;
             try
             {
-                InvokeMobile("WriteAllBytesAtomically", MajEnv.AssetsPath, "conflict.bin", Encoding.UTF8.GetBytes("replacement"));
+                InvokeMobile("WriteAllBytesAtomically", MajEnv.AssetsDirectory, "conflict.bin", Encoding.UTF8.GetBytes("replacement"));
             }
             catch (IOException)
             {
@@ -237,7 +237,7 @@ namespace ResourceStorageValidation
             }
             Assert(failed, "Committing a staged file over a directory must fail.");
             Assert(Directory.Exists(destination), "Commitment failure must preserve the existing directory.");
-            Assert(!Directory.EnumerateFiles(MajEnv.AssetsPath.Location, "*.tmp").Any(),
+            Assert(!Directory.EnumerateFiles(MajEnv.AssetsDirectory.Location, "*.tmp").Any(),
                 "Commitment failure must remove the new temporary file.");
             AssertNoErrors();
         }
@@ -254,13 +254,13 @@ namespace ResourceStorageValidation
             InitializeMobile();
             AssertNoErrors();
             fixture.AssertText("Assets/Config/options.txt", "official options");
-            AssertProviderText(MajEnv.ChartPath, "Original/song/maidata.txt", "official chart");
-            AssertProviderText(MajEnv.ChartPath, "Original/song/track.mp3", "official track");
-            AssertProviderText(MajEnv.SkinPath, "default/skin.json", "official skin");
-            Assert(MajEnv.ChartPath.FindFileAt("Original/song/maidata.txt")!.Entry!.LastWriteTimeUtc is not null,
+            AssertProviderText(MajEnv.ChartDirectory, "Original/song/maidata.txt", "official chart");
+            AssertProviderText(MajEnv.ChartDirectory, "Original/song/track.mp3", "official track");
+            AssertProviderText(MajEnv.SkinDirectory, "default/skin.json", "official skin");
+            Assert(MajEnv.ChartDirectory.FindFileAt("Original/song/maidata.txt")!.Entry!.LastWriteTimeUtc is not null,
                 "A cross-backend move must carry the extracted modification time to the provider.");
-            AssertOnlyChild(MajEnv.ChartPath, "Original");
-            AssertOnlyChild(MajEnv.SkinPath, "default");
+            AssertOnlyChild(MajEnv.ChartDirectory, "Original");
+            AssertOnlyChild(MajEnv.SkinDirectory, "default");
             fixture.AssertMissing("Assets/MaiCharts/Original");
             fixture.AssertMissing("Assets/Skins/default");
             fixture.AssertMissing("Assets/.pending-managed-asset-moves");
@@ -274,15 +274,15 @@ namespace ResourceStorageValidation
         {
             using var fixture = new Fixture();
             fixture.UseProviderManagedRoots();
-            var customization = MajEnv.ChartPath.CreateDirectory("Original").CreateFile("maidata.txt");
+            var customization = MajEnv.ChartDirectory.CreateDirectory("Original").CreateFile("maidata.txt");
             customization.WriteAllText("player customization");
             fixture.Package("MaiCharts/Original/maidata.txt", "new official chart", "old official chart", changed: true);
             fixture.Package("Skins/default/skin.json", "official skin");
             InitializeMobile();
             AssertNoErrors();
-            AssertProviderText(MajEnv.ChartPath, "Original/maidata.txt", "player customization");
-            AssertProviderText(MajEnv.SkinPath, "default/skin.json", "official skin");
-            AssertOnlyChild(MajEnv.ChartPath, "Original");
+            AssertProviderText(MajEnv.ChartDirectory, "Original/maidata.txt", "player customization");
+            AssertProviderText(MajEnv.SkinDirectory, "default/skin.json", "official skin");
+            AssertOnlyChild(MajEnv.ChartDirectory, "Original");
             fixture.AssertMissing("Assets/MaiCharts/Original");
             fixture.AssertMissing("Assets/Skins/default");
             fixture.AssertMissing("Assets/.pending-managed-asset-moves");
@@ -302,7 +302,7 @@ namespace ResourceStorageValidation
                 MajDebug.Errors.TrueForAll(message => message.Contains("Move failed", StringComparison.Ordinal)),
                 "Both interrupted cross-backend moves must be reported as failed moves.");
             MajDebug.Errors.Clear();
-            Assert(!MajEnv.ChartPath.EnumerateEntries().Any() && !MajEnv.SkinPath.EnumerateEntries().Any(),
+            Assert(!MajEnv.ChartDirectory.EnumerateEntries().Any() && !MajEnv.SkinDirectory.EnumerateEntries().Any(),
                 "A failed transfer must remove its temporary provider copy.");
             fixture.AssertText("Assets/MaiCharts/Original/maidata.txt", "official chart");
             fixture.AssertText("Assets/Skins/default/skin.json", "official skin");
@@ -312,10 +312,10 @@ namespace ResourceStorageValidation
             provider.NewFileWriteFailureAfterBytes = null;
             InitializeMobile();
             AssertNoErrors();
-            AssertProviderText(MajEnv.ChartPath, "Original/maidata.txt", "official chart");
-            AssertProviderText(MajEnv.SkinPath, "default/skin.json", "official skin");
-            AssertOnlyChild(MajEnv.ChartPath, "Original");
-            AssertOnlyChild(MajEnv.SkinPath, "default");
+            AssertProviderText(MajEnv.ChartDirectory, "Original/maidata.txt", "official chart");
+            AssertProviderText(MajEnv.SkinDirectory, "default/skin.json", "official skin");
+            AssertOnlyChild(MajEnv.ChartDirectory, "Original");
+            AssertOnlyChild(MajEnv.SkinDirectory, "default");
             fixture.AssertMissing("Assets/MaiCharts/Original");
             fixture.AssertMissing("Assets/Skins/default");
             fixture.AssertMissing("Assets/.pending-managed-asset-moves");
@@ -414,7 +414,7 @@ namespace ResourceStorageValidation
             {
                 var workRoot = Path.GetFullPath(Path.Combine("Temp", "ResourceStorageValidation", "work"));
                 _root = Path.Combine(workRoot, Guid.NewGuid().ToString("N"));
-                MajEnv.RootPath = FileSystem.Directory.Create(Path.Combine(_root, "App"));
+                MajEnv.RootDirectory = FileSystem.Directory.Create(Path.Combine(_root, "App"));
                 _packageRoot = Path.Combine(_root, "Package");
                 _archivePath = null;
                 Directory.CreateDirectory(_packageRoot);
@@ -435,10 +435,10 @@ namespace ResourceStorageValidation
                 }
 #endif
                 // A previous case may have placed the managed roots on a provider.
-                MajEnv.ChartPathOverride = null;
-                MajEnv.SkinPathOverride = null;
-                Directory.CreateDirectory(MajEnv.ChartPath.Location);
-                Directory.CreateDirectory(MajEnv.SkinPath.Location);
+                MajEnv.ChartDirectoryOverride = null;
+                MajEnv.SkinDirectoryOverride = null;
+                Directory.CreateDirectory(MajEnv.ChartDirectory.Location);
+                Directory.CreateDirectory(MajEnv.SkinDirectory.Location);
                 ResourceManifestLoader.V1Hashes.Clear();
                 ResourceManifestLoader.V2Hashes.Clear();
                 ResourceManifestLoader.DiffPaths.Clear();
@@ -452,8 +452,8 @@ namespace ResourceStorageValidation
                 var provider = new MemoryFileSystem();
                 FileSystem.RegisterContentProvider(provider);
                 var providerRoot = FileSystem.Directory.Open(provider.RootLocation);
-                MajEnv.ChartPathOverride = providerRoot.CreateDirectory("MaiCharts");
-                MajEnv.SkinPathOverride = providerRoot.CreateDirectory("Skins");
+                MajEnv.ChartDirectoryOverride = providerRoot.CreateDirectory("MaiCharts");
+                MajEnv.SkinDirectoryOverride = providerRoot.CreateDirectory("Skins");
                 return provider;
             }
 
@@ -502,7 +502,7 @@ namespace ResourceStorageValidation
             /// <returns>The absolute local fixture path.</returns>
             public string PathFor(string relativePath)
             {
-                return Path.Combine(MajEnv.RootPath.Location, relativePath);
+                return Path.Combine(MajEnv.RootDirectory.Location, relativePath);
             }
 
             /// <summary>Checks committed fixture bytes directly through the platform filesystem.</summary>

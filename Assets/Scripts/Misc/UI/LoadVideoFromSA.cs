@@ -53,7 +53,7 @@ namespace MajdataPlay.UI
             {
                 foreach (var ext in MajEnv.SupportedVideoFormats)
                 {
-                    videoFile = MajEnv.AssetsPath.FindFileAt(videoPath + ext);
+                    videoFile = MajEnv.AssetsDirectory.FindFileAt(videoPath + ext);
                     if (videoFile is not null)
                     {
                         break;

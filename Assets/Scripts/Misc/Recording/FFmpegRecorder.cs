@@ -29,14 +29,14 @@ namespace MajdataPlay.Recording
         bool _isDisposed = false;
         string _name = "";
         string _timestamp = string.Empty;
-        string _wavPath = Path.Combine(MajEnv.RecordOutputsPath, $"{_defaultTimestamp}out.wav");
-        string _mp4Path = Path.Combine(MajEnv.RecordOutputsPath, $"{_defaultTimestamp}out.mp4");
-        string _outputPath = Path.Combine(MajEnv.RecordOutputsPath, $"{_defaultTimestamp}.mp4");
+        string _wavPath = Path.Combine(MajEnv.RecordOutputsDirectory, $"{_defaultTimestamp}out.wav");
+        string _mp4Path = Path.Combine(MajEnv.RecordOutputsDirectory, $"{_defaultTimestamp}out.mp4");
+        string _outputPath = Path.Combine(MajEnv.RecordOutputsDirectory, $"{_defaultTimestamp}.mp4");
 
         readonly WavRecorder _wavRecorder = new(32);
         readonly ScreenRecorder _screenRecorder = new();
         readonly static string _defaultTimestamp = $"{DateTime.UnixEpoch:yyyy-MM-dd_HH_mm_ss}";
-        readonly static string FFMPEG_PATH = Path.Combine(MajEnv.AssetsPath, "Libraries", "ffmpeg.exe");
+        readonly static string FFMPEG_PATH = Path.Combine(MajEnv.AssetsDirectory, "Libraries", "ffmpeg.exe");
 
 
         public void StartRecord()
@@ -48,9 +48,9 @@ namespace MajdataPlay.Recording
             }
             IsRecording = true;
             _timestamp = $"{DateTime.Now:yyyy-MM-dd_HH_mm_ss}";
-            _wavPath = Path.Combine(MajEnv.RecordOutputsPath, $"{_timestamp}out.wav");
-            _mp4Path = Path.Combine(MajEnv.RecordOutputsPath, $"{_timestamp}out.mp4");
-            _outputPath = Path.Combine(MajEnv.RecordOutputsPath, $"{_name}_{_timestamp}.mp4");
+            _wavPath = Path.Combine(MajEnv.RecordOutputsDirectory, $"{_timestamp}out.wav");
+            _mp4Path = Path.Combine(MajEnv.RecordOutputsDirectory, $"{_timestamp}out.mp4");
+            _outputPath = Path.Combine(MajEnv.RecordOutputsDirectory, $"{_name}_{_timestamp}.mp4");
 
             _screenRecorder.StartRecord(_mp4Path);
             _wavRecorder.Start();
@@ -64,9 +64,9 @@ namespace MajdataPlay.Recording
             }
             IsRecording = true;
             _timestamp = $"{DateTime.Now:yyyy-MM-dd_HH_mm_ss}";
-            _wavPath = Path.Combine(MajEnv.RecordOutputsPath, $"{_timestamp}out.wav");
-            _mp4Path = Path.Combine(MajEnv.RecordOutputsPath, $"{_timestamp}out.mp4");
-            _outputPath = Path.Combine(MajEnv.RecordOutputsPath, $"{_name}_{_timestamp}.mp4");
+            _wavPath = Path.Combine(MajEnv.RecordOutputsDirectory, $"{_timestamp}out.wav");
+            _mp4Path = Path.Combine(MajEnv.RecordOutputsDirectory, $"{_timestamp}out.mp4");
+            _outputPath = Path.Combine(MajEnv.RecordOutputsDirectory, $"{_name}_{_timestamp}.mp4");
 
             await _screenRecorder.StartRecordAsync(_mp4Path);
             _wavRecorder.Start();
@@ -418,7 +418,7 @@ namespace MajdataPlay.Recording
             int _originScreenHeight = 1080;
             int _originFrameRate = 60;
 
-            string _exportPath = Path.Combine(MajEnv.RecordOutputsPath, $"{_defaultTimestamp}out.mp4");
+            string _exportPath = Path.Combine(MajEnv.RecordOutputsDirectory, $"{_defaultTimestamp}out.mp4");
             UniTask _captureScreenTask = UniTask.CompletedTask;
             Process? _ffmpegProcess = null;
             NamedPipeServerStream? _pipeStream = null;

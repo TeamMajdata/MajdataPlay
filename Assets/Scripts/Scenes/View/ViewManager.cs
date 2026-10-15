@@ -102,7 +102,7 @@ namespace MajdataPlay.Scenes.View
         protected override void Awake()
         {
             base.Awake();
-            _cacheDirectory = MajEnv.CachePath.CreateDirectory("View");
+            _cacheDirectory = MajEnv.CacheDirectory.CreateDirectory("View");
             Majdata<ViewManager>.Instance = this;
             Majdata<INoteController>.Instance = this;
             Majdata<INoteTimeProvider>.Instance = this;
