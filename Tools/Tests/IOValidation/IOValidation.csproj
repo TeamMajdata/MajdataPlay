@@ -22,6 +22,8 @@
     <Compile Include="../../../Assets/Scripts/IO/Devices/Rosen/RosenTouchPanelDevice.cs" Link="Production/RosenTouchPanelDevice.cs" />
     <Compile Include="../../../Assets/Scripts/IO/Devices/Rosen/RosenLedDevice.cs" Link="Production/RosenLedDevice.cs" />
     <Compile Include="../../../Assets/Scripts/IO/Devices/Dao/DaoLedOutput.cs" Link="Production/DaoLedOutput.cs" />
+    <Compile Include="../../../Assets/Scripts/IO/Devices/NPro/NproProtocol.cs" Link="Production/NproProtocol.cs" />
+    <Compile Include="../../../Assets/Scripts/IO/Devices/NPro/NproReportFramer.cs" Link="Production/NproReportFramer.cs" />
     <Compile Include="../../../Assets/Scripts/IO/Base/Devices/LedOutputState.cs" Link="Production/LedOutputState.cs" />
     <Compile Include="../../../Assets/Scripts/IO/Devices/Pipe/PipeTouchPanelDevice.cs" Link="Production/PipeTouchPanelDevice.cs" />
     <Compile Include="../../../Assets/Scripts/IO/Devices/Pipe/PipeButtonRingDevice.cs" Link="Production/PipeButtonRingDevice.cs" />

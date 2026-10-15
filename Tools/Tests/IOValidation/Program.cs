@@ -27,6 +27,7 @@ internal static partial class Program
         VerifyPipeFraming();
         VerifySerialLedPackets();
         VerifyDaoLedPackets();
+        VerifyNproProtocol();
         VerifySharedDeviceFactory();
         VerifyPointerDevices();
         VerifySupplementalDeviceFactory();
@@ -563,5 +564,72 @@ internal static partial class Program
         output.WriteTo(stream, device);
         Check(stream.Writes.Count == 3, "Dao reconnect replays unchanged colors");
         Check(stream.Writes[0].Length == device.OutputReportLength, "Dao uses output report size");
+    }
+
+    static void VerifyNproProtocol()
+    {
+        // 6 字节小端触摸掩码：A1、C1、C2 与最后一个有效槽位 33 同时按下。
+        var report = new byte[NproProtocol.InputReportLength];
+        report[0] = 0b0000_0001;
+        report[2] = 0b0000_0011;
+        report[4] = 0b0000_0010;
+        report[6] = 0b1000_0001;
+        report[7] = 0b0000_1101;
+
+        var buttons = new bool[NproProtocol.ButtonCount];
+        var sensors = new bool[NproProtocol.SensorCount];
+        NproProtocol.DecodeInputReport(report, buttons, sensors);
+        Check(buttons[0] && buttons[7] && !buttons[1], "NPro ring buttons decode into zones 0-7");
+        Check(buttons[9] && buttons[8] && buttons[11] && !buttons[10],
+            "NPro extended buttons decode into Test/Select zones");
+        Check(sensors[0] && sensors[16] && sensors[17] && sensors[33], "NPro touch mask decodes sensor slots");
+        Check(!sensors[1] && !sensors[34], "NPro unset and reserved sensor slots stay released");
+        CheckThrows<ArgumentException>(() => NproProtocol.DecodeInputReport(report.AsSpan(0, 7), buttons, sensors),
+            "NPro rejects a short input report");
+
+        report[7] = 0b0000_0010;
+        NproProtocol.DecodeInputReport(report, buttons, sensors);
+        Check(buttons[10] && !buttons[8] && !buttons[9] && !buttons[11], "NPro service button decodes alone");
+
+        // GAME 管道的 bulk 是字节流：半包要缓存，粘包要拆开。
+        var framer = new NproReportFramer();
+        var frame = new byte[NproReportFramer.ReportLength];
+        framer.Append(report.AsSpan(0, 3));
+        Check(!framer.TryReadReport(frame), "NPro framer waits for a complete report");
+        framer.Append(report.AsSpan(3));
+        Check(framer.TryReadReport(frame), "NPro framer reassembles a split report");
+        Check(frame[6] == report[6] && frame[7] == report[7], "NPro framer preserves the report payload");
+        Check(!framer.TryReadReport(frame), "NPro framer consumes each report exactly once");
+        framer.Append(report);
+        framer.Append(report);
+        Check(framer.TryReadReport(frame) && framer.TryReadReport(frame), "NPro framer splits reports delivered in one chunk");
+        Check(!framer.TryReadReport(frame), "NPro framer stops at the last complete report");
+        CheckThrows<ArgumentOutOfRangeException>(() => framer.Append(new byte[NproReportFramer.MaxChunkLength + 1]),
+            "NPro framer rejects oversized chunks");
+        framer.Append(report.AsSpan(0, 4));
+        framer.Clear();
+        Check(!framer.TryReadReport(frame), "NPro framer drops the partial report on disconnect");
+
+        var led = new byte[NproProtocol.MaxLedFrameLength];
+        var colorLength = NproProtocol.BuildLedColorFrame(led, 3, new Color(1f, .5f, 0f), .5f);
+        Check(colorLength == 10, "NPro color frame has no byte to escape");
+        Check(led[0] == 0xE0 && led[1] == 0x11 && led[2] == 0x01 && led[3] == 0x05 && led[4] == 0x31 && led[5] == 3,
+            "NPro color frame header matches the SEGA light board command");
+        Check(led[6] == 127 && led[7] == 63 && led[8] == 0, "NPro color frame applies brightness");
+        byte checksum = 0;
+        for (var i = 1; i < 9; i++) checksum += led[i];
+        Check(led[9] == checksum, "NPro color frame checksum covers dst through payload");
+
+        var updateLength = NproProtocol.BuildLedUpdateFrame(led);
+        Check(updateLength == 6 && led[3] == 0x01 && led[4] == 0x3C && led[5] == 0x4F,
+            "NPro refresh frame matches the light board update command");
+
+        // 负载里出现同步字或转义符时必须转义，否则固件会把负载当成新的帧头。
+        var escapedLength = NproProtocol.BuildLedFrame(led, 0x31, new byte[] { 0xE0, 0xD0, 0xE1, 0xD1 });
+        Check(escapedLength == 12 && led[0] == 0xE0, "NPro escaping keeps the frame header raw");
+        Check(led[5] == 0xD0 && led[6] == 0xDF && led[7] == 0xD0 && led[8] == 0xCF,
+            "NPro escapes the sync word and the escape byte in the payload");
+        Check(led[9] == 0xE1 && led[10] == 0xD1 && led[11] == 0xAA,
+            "NPro leaves non-escaped payload bytes untouched and appends the checksum");
     }
 }

@@ -9,7 +9,8 @@ dotnet run --project Tools/Tests/IOValidation/IOValidation.csproj
 The harness links the production device lifecycle, standalone keyboard device,
 standalone `KeyboardHelper` mappings and sampling, Rosen/Yuan/Dao button parsers, serial and pipe parsers,
 input frame state buffer, screen-touch/mouse samplers and pointer history, device
-factory, and serial/Dao LED encoders. No NuGet packages are required. Transport,
+factory, serial/Dao LED encoders, and the NPro report framer/decoder with its light
+board encoder. No NuGet packages are required. Transport,
 Unity input controls, and game services are small test doubles. A programmable
 position mapper supplies packed sensor/button results; this does not test Unity
 raycast geometry or the Burst mapping cache.
@@ -23,6 +24,10 @@ press/release pulses between frames, repeated reads of shared device
 capabilities, one snapshot per shared device, capability polling intervals,
 disconnect release, all eight LED colors, brightness and checksum encoding,
 change throttling, and output replay after reconnect.
+
+NPro checks cover the packed touch mask and both button bytes, short reports,
+split and coalesced bulk chunks, oversized chunks, partial-report drops on disconnect,
+the SEGA light board frame header, checksum, brightness, and escaping.
 
 Dao factory checks cover all capabilities enabled with different input/output
 connection options, LED-only mode with no input reads, input-only mode with no LED
