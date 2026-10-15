@@ -102,8 +102,17 @@ namespace MajdataPlay.Diagnostics
 
 namespace MajdataPlay.Settings
 {
-    public enum DeviceManufacturerOption { General, Yuan, Dao, Nov, Pipe }
+    public enum DeviceManufacturerOption { General, Yuan, Dao, Nov, NPro, Pipe }
     public enum ButtonRingDeviceOption { Keyboard, HID }
+}
+
+namespace MajdataPlay.Runtime
+{
+    // IODevice 只用它打印原生线程 id，验证里不需要真实值。
+    internal static class PlatformInfo
+    {
+        public static ulong GetCurrentOSThreadId() => 0;
+    }
 }
 
 namespace MajdataPlay.Threading
@@ -121,6 +130,7 @@ namespace MajdataPlay
         public static SettingsStub Settings { get; } = new();
         public static CancellationToken GlobalCT { get; set; } = CancellationToken.None;
         public const int IO_DEVICE_RECONNECT_INTERVAL_MSEC = 20;
+        public const int IO_DEVICE_RECONNECT_MAX_RETRIES = 5;
         public const ThreadPriority THREAD_PRIORITY_IO = ThreadPriority.Normal;
     }
     internal sealed class SettingsStub { public IOSettings IO { get; } = new(); }

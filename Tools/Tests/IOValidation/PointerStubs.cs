@@ -76,6 +76,9 @@ namespace MajdataPlay.IO
             UnityEngine.Camera camera, UnityEngine.Vector3 position, float radius,
             ref ulong positionData, ref bool sensorOnly)
         {
+            // 与生产实现一致：没有相机或映射表未就绪时不给任何结果，交由调用方释放旧触点。
+            if (!IsInitialized || camera == null)
+                return;
             SampleCount++;
             PositionReports.TryGetValue((int)position.x, out var report);
             sensorOnly |= (report & (1UL << 63)) != 0;
