@@ -1,6 +1,6 @@
 using Cysharp.Threading.Tasks;
 using MajdataPlay.IO;
-using MajdataPlay.UI;
+using MajdataPlay.Behaviours.UI;
 using MajdataPlay.Utils;
 using UnityEngine;
 #nullable enable

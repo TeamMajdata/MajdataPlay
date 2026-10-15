@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using System.Text;
 using UnityEngine;
 #nullable enable
-namespace MajdataPlay.UI
+namespace MajdataPlay.Behaviours.UI
 {
     [DontDestroyOnLoad]
     [DefaultExecutionOrder(-1000)]

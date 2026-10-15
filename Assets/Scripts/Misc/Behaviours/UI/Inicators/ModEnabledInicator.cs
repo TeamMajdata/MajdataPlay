@@ -3,7 +3,7 @@ using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 
-namespace MajdataPlay.UI.Inicators
+namespace MajdataPlay.Behaviours.UI.Inicators
 {
     public class ModEnabledInicator : UIInicator
     {

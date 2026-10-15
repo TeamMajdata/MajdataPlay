@@ -5,7 +5,7 @@ using System.Text;
 using System.Threading.Tasks;
 using UnityEngine;
 #nullable enable
-namespace MajdataPlay.UI
+namespace MajdataPlay.Behaviours.UI
 {
     [RequireComponent(typeof(Canvas))]
     [DefaultExecutionOrder(200)]

@@ -7,7 +7,7 @@ using UnityEngine;
 using UnityEngine.Serialization;
 using UnityEngine.UI;
 
-namespace MajdataPlay.UI
+namespace MajdataPlay.Behaviours.UI
 {
     [RequireComponent(typeof(RawImage))]
     [ExecuteAlways]

@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using System.Text;
 using UnityEngine;
 
-namespace MajdataPlay.UI
+namespace MajdataPlay.Behaviours.UI
 {
     [RequireComponent(typeof(Camera))]
     internal class PreviewOnlyCamera : MajComponent

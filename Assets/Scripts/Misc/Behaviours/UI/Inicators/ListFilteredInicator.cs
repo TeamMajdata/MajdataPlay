@@ -5,7 +5,7 @@ using System.Text;
 using System.Threading.Tasks;
 using TMPro;
 
-namespace MajdataPlay.UI.Inicators
+namespace MajdataPlay.Behaviours.UI.Inicators
 {
     public class ListFilteredInicator : UIInicator
     {

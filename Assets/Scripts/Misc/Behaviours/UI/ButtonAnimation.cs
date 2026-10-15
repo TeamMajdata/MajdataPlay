@@ -4,7 +4,7 @@ using LitMotion;
 using LitMotion.Extensions;
 using UnityEngine.UI;
 
-namespace MajdataPlay.UI
+namespace MajdataPlay.Behaviours.UI
 {
     public class ButtonAnimation : MonoBehaviour
     {

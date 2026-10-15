@@ -8,7 +8,7 @@ using UnityEngine.Serialization;
 
 #nullable enable
 
-namespace MajdataPlay.UI
+namespace MajdataPlay.Behaviours.UI
 {
     public class LoadVideoFromSA : MonoBehaviour
     {
