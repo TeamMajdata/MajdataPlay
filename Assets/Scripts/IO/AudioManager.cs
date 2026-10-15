@@ -1,4 +1,3 @@
-using System.IO;
 using System.Collections.Generic;
 using System.Threading.Tasks;
 using System.Runtime.CompilerServices;
@@ -34,10 +33,6 @@ namespace MajdataPlay.IO
     {
         public static float[,] MixingMatrix { get; private set; } = new float[0, 0];
 
-        string SFXFilePath;
-        string VoiceFilePath;
-        string[] SFXFileNames = new string[0];
-        string[] VoiceFileNames = new string[0];
         private List<AudioSampleWrap> SFXSamples = new();
 
 #if UNITY_STANDALONE_WIN
@@ -80,18 +75,10 @@ namespace MajdataPlay.IO
             _isInited = true;
             try
             {
-                SFXFilePath = Path.Combine(MajEnv.AssetsPath.Location, "SFX/");
-                VoiceFilePath = Path.Combine(MajEnv.AssetsPath.Location, "Voice/");
+                var sfxDirectory = MajEnv.AssetsPath.FindDirectory("SFX");
+                var voiceDirectory = MajEnv.AssetsPath.FindDirectory("Voice");
 
                 DontDestroyOnLoad(this);
-                SFXFileNames = FileSystem.Directory.Open(SFXFilePath).EnumerateEntries()
-                                                             .FindAll(o => !o.IsDirectory && !o.Name.EndsWith(".meta"))
-                                                             .Select(x => x.Name)
-                                                             .ToArray();
-                VoiceFileNames = FileSystem.Directory.Open(VoiceFilePath).EnumerateEntries()
-                                                                 .FindAll(o => !o.IsDirectory && !o.Name.EndsWith(".meta"))
-                                                                 .Select(x => x.Name)
-                                                                 .ToArray();
 
                 var backend = MajEnv.Settings.Audio.Backend;
                 var isBassBackend = backend is (SoundBackendOption.BassSimple or SoundBackendOption.Asio or SoundBackendOption.Wasapi);
@@ -294,8 +281,8 @@ namespace MajdataPlay.IO
                     MajDebug.LogInfo($"[Audio][Bass]Current device period: {Bass.GetConfig(Configuration.DevicePeriod)}");
                     MajDebug.LogInfo($"[Audio][Bass]Channel count: {Bass.Info.SpeakerCount}");
                 }
-                InitSFXSample(SFXFileNames, SFXFilePath);
-                InitSFXSample(VoiceFileNames, VoiceFilePath);
+                InitSFXSample(sfxDirectory, isVoice: false);
+                InitSFXSample(voiceDirectory, isVoice: true);
 
                 if (isBassBackend)
                 {
@@ -339,24 +326,36 @@ namespace MajdataPlay.IO
             return bytesRead;
         }
 #endif
-        void InitSFXSample(string[] fileNameList, string rootPath)
+        /// <summary>Loads every file of a streaming assets sound directory through the entries its backend enumerates.</summary>
+        /// <param name="directory">The sound directory, or null when the streaming assets do not provide it.</param>
+        /// <param name="isVoice">Whether the directory holds voice samples instead of sound effects.</param>
+        void InitSFXSample(StorageDirectory? directory, bool isVoice)
         {
-            foreach (var filePath in fileNameList)
+            if (directory is null)
             {
-                var path = Path.Combine(rootPath, filePath);
-                if (!FileSystem.File.Open(path).Exists)
+                MajDebug.LogWarning($"[Audio]{(isVoice ? "Voice" : "SFX")} directory does not exist");
+                return;
+            }
+            foreach (var entry in directory.EnumerateEntries())
+            {
+                if (entry.IsDirectory || entry.Name.EndsWith(".meta"))
                 {
-                    SFXSamples.Add(AudioSampleWrap.Empty);
-                    MajDebug.LogWarning(path + " does not exists");
                     continue;
                 }
-                var sample = LoadMusic(path, false, false);
-                sample.Name = filePath;
+                var fileName = entry.Name;
+                var sample = LoadMusic(entry.Location, false, false);
+                if (sample.IsEmpty)
+                {
+                    // The shared empty sample must keep its own name and type.
+                    SFXSamples.Add(sample);
+                    continue;
+                }
+                sample.Name = fileName;
 
                 //group the samples
-                sample.SampleType = filePath switch
+                sample.SampleType = fileName switch
                 {
-                    var _ when rootPath == VoiceFilePath => SFXSampleType.Voice,
+                    var _ when isVoice => SFXSampleType.Voice,
                     "tap_ex.wav" => SFXSampleType.Ex,
                     "touch_hanabi.wav" => SFXSampleType.Hanabi,
                     var p when p.StartsWith("bgm") => SFXSampleType.BGM,

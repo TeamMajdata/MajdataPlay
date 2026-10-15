@@ -29,6 +29,11 @@ namespace MajdataPlay
 
         static SQLiteAsyncConnection? _db;
 
+        /// <summary>The SQLite score database file name inside <see cref="MajEnv.RootPath"/>.</summary>
+        const string DatabaseFileName = "MajScores.db";
+        /// <summary>The legacy JSON score file name consumed by the one-time migration.</summary>
+        const string LegacyDatabaseFileName = "MajDatabase.db.db.db.db.db.db.db.db.db.db.db.db.db.db.db.db.db.db.db.db.db.db.db.db.db.db.db.db";
+
         readonly static JsonSerializerSettings _jsonReadSettings = new()
         {
             ObjectCreationHandling = ObjectCreationHandling.Replace,
@@ -48,24 +53,28 @@ namespace MajdataPlay
             _isInited = true;
             try
             {
-                var dbPath = MajEnv.ScoreDBPath;
-                var isDbExists = dbPath.Exists;
-                _db = new SQLiteAsyncConnection(dbPath.Location, SQLiteOpenFlags.ReadWrite | SQLiteOpenFlags.Create | SQLiteOpenFlags.FullMutex);
+                var rootDirectory = MajEnv.RootPath;
+                var databaseFile = rootDirectory.FindFile(DatabaseFileName);
+                // SQLite leaves a database empty until its first table is created, so an empty file is still a new database.
+                var isDbExists = databaseFile is not null && databaseFile.Entry is { Length: > 0 };
+                // SQLite needs a resolvable location, so the file is created through the root before the connection opens it.
+                databaseFile ??= rootDirectory.CreateFile(DatabaseFileName, "application/vnd.sqlite3");
+                _db = new SQLiteAsyncConnection(databaseFile.Location, SQLiteOpenFlags.ReadWrite | SQLiteOpenFlags.Create | SQLiteOpenFlags.FullMutex);
                 GameManager.OnAppQuit += OnAppQuit;
                 await _db.CreateTableAsync<MajScoreDB>();
                 await _db.CreateTableAsync<JudgeInfoRecordDB>();
                 if (!isDbExists)
                 {
                     // Migrate from legacy JSON file
-                    var legacyPath = MajEnv.LegacyScoreDBPath;
-                    if (legacyPath.Exists)
+                    var legacyFile = rootDirectory.FindFile(LegacyDatabaseFileName);
+                    if (legacyFile is not null)
                     {
-                        var migrated = await MigrateFromJsonAsync(legacyPath);
+                        var migrated = await MigrateFromJsonAsync(legacyFile);
                         if (migrated)
                         {
                             try
                             {
-                                legacyPath.Delete();
+                                legacyFile.Delete();
                                 MajDebug.LogInfo("Migrated scores from legacy JSON to SQLite, old file deleted.");
                             }
                             catch (Exception ex)

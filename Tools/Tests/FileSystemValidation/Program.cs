@@ -43,6 +43,8 @@ namespace MajdataPlay.Tests.FileSystemValidation
                 ("local: non-ASCII text, BOM and explicit encodings", TestLocalTextIO),
                 ("local: missing entries and type collisions", TestLocalErrors),
                 ("local: immediate children, lookup and rename", TestLocalChildren),
+                ("local: descendants by relative path", TestLocalDescendants),
+                ("relative paths: separator and segment validation", TestRelativePaths),
                 ("local: copy, overwrite and self-copy aliases", TestLocalCopy),
                 ("local: single-child name and traversal validation", TestLocalNames),
                 ("local: asynchronous I/O and pre-cancellation", TestLocalAsync),
@@ -51,6 +53,7 @@ namespace MajdataPlay.Tests.FileSystemValidation
                 ("local: file links do not delete outside targets", TestFileLinks),
                 ("jar: automatic routing, metadata and sync/async reads", TestJarReads),
                 ("jar: implicit directories, immediate children and escaped names", TestJarChildren),
+                ("jar: descendants by relative path", TestJarDescendants),
                 ("jar: extraction to native and opaque destinations", TestJarExtraction),
                 ("jar: pre-cancellation preserves existing extraction targets", TestJarCancellation),
                 ("jar: read-only mutations preserve archive and destinations", TestJarReadOnly),
@@ -65,6 +68,7 @@ namespace MajdataPlay.Tests.FileSystemValidation
                 ("facade: content moves, replacement, attributes and timestamps", TestUnifiedContentMutations),
                 ("content: sequential non-seekable byte and text I/O", TestContentIO),
                 ("content: authoritative children and changed rename IDs", TestContentChildren),
+                ("content: descendants by relative path", TestContentDescendants),
                 ("content: single-child names remain URI-safe", TestContentNames),
                 ("content: collisions and recursive deletion", TestContentDelete),
                 ("content: permission and I/O errors are not absence", TestContentErrors),
@@ -484,6 +488,43 @@ namespace MajdataPlay.Tests.FileSystemValidation
             using var workspace = new TemporaryWorkspace();
             var directory = workspace.CreateLocalDirectory();
             VerifyChildren(directory);
+            return Task.CompletedTask;
+        }
+
+        /// <summary>Checks relative-path descendant lookup and creation resolve through local child names.</summary>
+        /// <returns>A completed task after local descendant validation.</returns>
+        /// <exception cref="InvalidOperationException">A regression assertion fails.</exception>
+        private static Task TestLocalDescendants()
+        {
+            using var workspace = new TemporaryWorkspace();
+            var directory = workspace.CreateLocalDirectory();
+            VerifyDescendants(directory);
+            var nested = NotNull(directory.FindDirectoryAt("level one/level 二"), "created local levels exist");
+            Check(nested.Location == Path.Combine(directory.Location, "level one", "level 二"), "local descendant locations are the backend's native child paths");
+            return Task.CompletedTask;
+        }
+
+        /// <summary>Checks relative paths split into validated names without becoming locations.</summary>
+        /// <returns>A completed task after relative path validation.</returns>
+        /// <exception cref="InvalidOperationException">A regression assertion fails.</exception>
+        private static Task TestRelativePaths()
+        {
+            Check(StorageFacade.Path.Split("a/b c\\.//d.txt").SequenceEqual(new[] { "a", "b c", "d.txt" }), "split keeps order, accepts both separators and drops empty and current-directory segments");
+            Check(StorageFacade.Path.Split(string.Empty).Length == 0, "an empty relative path has no names");
+            Check(StorageFacade.Path.Split("./").Length == 0, "a current-directory path has no names");
+            Check(StorageFacade.Path.Split("trailing/").SequenceEqual(new[] { "trailing" }), "a trailing separator adds no name");
+            Check(StorageFacade.Path.Split("literal%2F..%5C.txt").SequenceEqual(new[] { "literal%2F..%5C.txt" }), "encoded-looking names stay literal single names");
+            Throws<ArgumentNullException>(() =>
+            {
+                StorageFacade.Path.Split(null!);
+            }, "a null relative path is rejected");
+            foreach (var invalid in new[] { "/rooted", "\\rooted", "..", "a/../b", "a/..", "jar:file:///archive.zip!/entry", "content://authority/document/id", "a\0b" })
+            {
+                Throws<ArgumentException>(() =>
+                {
+                    StorageFacade.Path.Split(invalid);
+                }, "rooted paths, URIs, traversal and NUL are rejected: " + invalid);
+            }
             return Task.CompletedTask;
         }
 
@@ -1141,6 +1182,20 @@ namespace MajdataPlay.Tests.FileSystemValidation
             return Task.CompletedTask;
         }
 
+        /// <summary>Checks relative-path descendant lookup and creation resolve through opaque provider children.</summary>
+        /// <returns>A completed task after content descendant validation.</returns>
+        /// <exception cref="InvalidOperationException">A regression assertion fails.</exception>
+        private static Task TestContentDescendants()
+        {
+            var provider = RegisterMemoryProvider();
+            var directory = new StorageDirectory(provider, provider.RootLocation);
+            VerifyDescendants(directory);
+            var nested = NotNull(directory.FindDirectoryAt("level one/level 二"), "created provider levels exist");
+            Check(!nested.Location.Contains("level", StringComparison.Ordinal), "provider descendant locations are opaque IDs rather than joined names");
+            StreamsClosed(provider);
+            return Task.CompletedTask;
+        }
+
         /// <summary>Checks provider child names are validated without URI-decoding literal percent sequences.</summary>
         /// <returns>A task completing after content name validation.</returns>
         /// <exception cref="InvalidOperationException">A regression assertion fails.</exception>
@@ -1622,6 +1677,61 @@ namespace MajdataPlay.Tests.FileSystemValidation
             Check(Entry(renamedFolder).Name == "renamed folder", "directory rename returns its new name");
             Check(NotNull(renamedFolder.FindFile("nested.txt"), "renamed directory retains its child").ReadAllText() == "nested sentinel", "directory rename preserves its descendants");
             Check(directory.FindDirectory("folder") is null, "old directory display name is absent after rename");
+        }
+
+        /// <summary>Checks relative-path descendant resolution and creation through one backend's child names.</summary>
+        /// <param name="directory">An empty existing directory on either backend.</param>
+        /// <exception cref="InvalidOperationException">A descendant API returns the wrong entry or mutates the wrong level.</exception>
+        private static void VerifyDescendants(StorageDirectory directory)
+        {
+            Check(ReferenceEquals(directory.FindDirectoryAt(string.Empty), directory), "an empty relative path denotes the directory itself");
+            Check(ReferenceEquals(directory.CreateDirectoryAt(string.Empty), directory), "empty relative creation returns the directory itself");
+            Check(directory.FindDirectoryAt("missing/deeper") is null, "descendant directory lookup returns null when a level is absent");
+            Check(directory.FindFileAt("missing/file.txt") is null, "descendant file lookup returns null when a directory on the way is absent");
+            Check(directory.FindEntry("missing") is null, "entry lookup returns null for an absent child");
+            var nested = directory.CreateDirectoryAt("level one/level 二/");
+            Check(Entry(nested).Name == "level 二" && Entry(nested).IsDirectory, "relative creation builds every missing level");
+            var intermediate = NotNull(directory.FindDirectoryAt("level one"), "the intermediate level exists");
+            Check(NotNull(intermediate.FindDirectory("level 二"), "the deepest level is a child of the intermediate level").Location == nested.Location, "created levels keep the backend's authoritative locations");
+            Check(directory.CreateDirectoryAt("level one\\level 二").Location == nested.Location, "backslash separators and repeated creation resolve the existing directory");
+            Check(NotNull(directory.FindEntry("level one"), "entry lookup finds a directory child").IsDirectory, "entry lookup reports the directory kind");
+            var file = nested.CreateFile("notes.txt");
+            file.WriteAllText("descendant sentinel");
+            var found = NotNull(directory.FindFileAt("level one/./level 二//notes.txt"), "descendant file lookup tolerates current-directory and empty segments");
+            Check(found.Location == file.Location && found.ReadAllText() == "descendant sentinel", "descendant file lookup returns the existing file");
+            Check(!NotNull(nested.FindEntry("notes.txt"), "entry lookup finds a file child").IsDirectory, "entry lookup reports the file kind");
+            Check(directory.FindFileAt("level one/level 二") is null, "descendant file lookup never returns a directory");
+            Check(directory.FindDirectoryAt("level one/level 二/notes.txt") is null, "descendant directory lookup never returns a file");
+            Check(directory.FindFileAt("level one/level 二/absent.txt") is null, "a missing descendant file returns null");
+            Throws<IOException>(() =>
+            {
+                directory.CreateDirectoryAt("level one/level 二/notes.txt/child");
+            }, "relative creation never replaces a file on the way");
+            Check(found.ReadAllText() == "descendant sentinel", "failed relative creation preserves the occupying file");
+            Throws<ArgumentException>(() =>
+            {
+                directory.FindFileAt(string.Empty);
+            }, "descendant file lookup requires a file name");
+            Throws<ArgumentException>(() =>
+            {
+                directory.FindFileAt("./");
+            }, "descendant file lookup requires a file name after normalization");
+            foreach (var invalid in new[] { "..", "../notes.txt", "level one/../notes.txt", "/level one", "\\level one", "level one/\0", "content://authority/document/id", "file:///notes.txt" })
+            {
+                Throws<ArgumentException>(() =>
+                {
+                    directory.FindFileAt(invalid);
+                }, "descendant file lookup rejects " + invalid);
+                Throws<ArgumentException>(() =>
+                {
+                    directory.FindDirectoryAt(invalid);
+                }, "descendant directory lookup rejects " + invalid);
+                Throws<ArgumentException>(() =>
+                {
+                    directory.CreateDirectoryAt(invalid);
+                }, "relative creation rejects " + invalid);
+            }
+            EqualNames(new[] { "level one" }, directory.EnumerateEntries().Select(entry => entry.Name), "rejected relative paths create nothing");
         }
 
         /// <summary>Checks every single-child API rejects traversal, absolute paths and invalid separators.</summary>

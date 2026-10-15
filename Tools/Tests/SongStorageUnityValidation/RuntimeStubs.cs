@@ -42,8 +42,14 @@ namespace MajdataPlay
         public static StorageDirectory ChartPath { get; set; } = null!;
         /// <summary>Gets or sets the disposable cache root.</summary>
         public static StorageDirectory CachePath { get; set; } = null!;
-        /// <summary>Gets the unused native database path.</summary>
-        public static StorageFile FavoriteDBPath => new StorageFile(CachePath.FileSystem, Path.Combine(CachePath.Location, "Favorites.db"));
+        /// <summary>Gets the runtime cache directory below the disposable cache root, created on demand like production initialization.</summary>
+        public static StorageDirectory RuntimeCachePath
+        {
+            get
+            {
+                return CachePath.CreateDirectory("Runtime");
+            }
+        }
         /// <summary>Gets the supported track extensions.</summary>
         public static string[] SupportedAudioFormats { get; } = new string[] { ".mp3", ".opus", ".ogg", ".aac", ".wav" };
         /// <summary>Gets the supported video extensions.</summary>

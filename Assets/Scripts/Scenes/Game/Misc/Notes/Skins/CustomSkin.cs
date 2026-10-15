@@ -166,7 +166,8 @@ namespace MajdataPlay.Scenes.Game.Notes.Skins
         static readonly Sprite _dummySprite = SpriteLoader.EmptySprite;
 
         bool _canUnload = true;
-        readonly string _path = string.Empty;
+        /// <summary>The skin collection directory, or null for the built-in empty skin.</summary>
+        readonly StorageDirectory? _directory;
         readonly SemaphoreSlim _loadSyncLock = new(1, 1);
         private Texture2D? _atlasTexture;
 
@@ -310,12 +311,34 @@ namespace MajdataPlay.Scenes.Game.Notes.Skins
             Array.Fill(EachLines, _dummySprite);
         }
 
+        /// <summary>Creates a skin named after an existing skin collection directory.</summary>
+        /// <param name="skinCollectionPath">The skin collection directory location on any backend.</param>
+        /// <param name="loadIntoMemory">Whether to load every sprite synchronously now.</param>
+        /// <exception cref="DirectoryNotFoundException">The location does not denote an existing directory.</exception>
         public CustomSkin(string skinCollectionPath, bool loadIntoMemory) :
-            this(Path.GetFileName(FileSystem.Directory.Open(skinCollectionPath).Location), skinCollectionPath, loadIntoMemory)
+            this(FileSystem.Directory.Open(skinCollectionPath), loadIntoMemory)
         { }
-        public CustomSkin(string name, string skinCollectionPath, bool loadIntoMemory) : this(name)
+        /// <summary>Creates a skin with an explicit name from a skin collection directory.</summary>
+        /// <param name="name">The displayed skin name.</param>
+        /// <param name="skinCollectionPath">The skin collection directory location on any backend.</param>
+        /// <param name="loadIntoMemory">Whether to load every sprite synchronously now.</param>
+        public CustomSkin(string name, string skinCollectionPath, bool loadIntoMemory) :
+            this(name, FileSystem.Directory.Open(skinCollectionPath), loadIntoMemory)
+        { }
+        /// <summary>Creates a skin named after an existing skin collection directory handle.</summary>
+        /// <param name="directory">The skin collection directory on any backend.</param>
+        /// <param name="loadIntoMemory">Whether to load every sprite synchronously now.</param>
+        /// <exception cref="DirectoryNotFoundException">The handle does not denote an existing directory.</exception>
+        CustomSkin(StorageDirectory directory, bool loadIntoMemory) :
+            this(RequireName(directory), directory, loadIntoMemory)
+        { }
+        /// <summary>Creates a skin whose sprites are resolved through a skin collection directory handle.</summary>
+        /// <param name="name">The displayed skin name.</param>
+        /// <param name="directory">The skin collection directory on any backend.</param>
+        /// <param name="loadIntoMemory">Whether to load every sprite synchronously now.</param>
+        CustomSkin(string name, StorageDirectory directory, bool loadIntoMemory) : this(name)
         {
-            _path = skinCollectionPath;
+            _directory = directory;
 
             if (loadIntoMemory)
             {
@@ -323,16 +346,35 @@ namespace MajdataPlay.Scenes.Game.Notes.Skins
             }
         }
 
+        /// <summary>Creates an unloaded skin from an existing skin collection directory.</summary>
+        /// <param name="skinCollectionPath">The skin collection directory location on any backend.</param>
+        /// <returns>A skin named after the directory, loaded on demand.</returns>
+        /// <exception cref="DirectoryNotFoundException">The location does not denote an existing directory.</exception>
         public static CustomSkin Create(string skinCollectionPath)
         {
-            var directory = FileSystem.Directory.Open(skinCollectionPath);
+            return new CustomSkin(FileSystem.Directory.Open(skinCollectionPath), false);
+        }
+
+        /// <summary>Reads the backend-reported name of an existing skin collection directory.</summary>
+        /// <param name="directory">The skin collection directory on any backend.</param>
+        /// <returns>The directory's authoritative display name.</returns>
+        /// <exception cref="DirectoryNotFoundException">The handle does not denote an existing directory.</exception>
+        static string RequireName(StorageDirectory directory)
+        {
             var entry = directory.Entry;
             if (entry is null || !entry.IsDirectory)
             {
-                throw new DirectoryNotFoundException($"The skin collection path '{skinCollectionPath}' does not exist.");
+                throw new DirectoryNotFoundException($"The skin collection path '{directory.Location}' does not exist.");
             }
+            return entry.Name;
+        }
 
-            return new CustomSkin(entry.Name, directory.Location, false);
+        /// <summary>Gets the skin collection directory of a loadable skin.</summary>
+        /// <returns>The skin collection directory handle.</returns>
+        /// <exception cref="InvalidOperationException">The built-in empty skin has no skin collection directory.</exception>
+        StorageDirectory RequireDirectory()
+        {
+            return _directory ?? throw new InvalidOperationException("The built-in empty skin has no skin collection directory.");
         }
 
         public async UniTask LoadAsync(CancellationToken token = default)
@@ -524,12 +566,13 @@ namespace MajdataPlay.Scenes.Game.Notes.Skins
 
         private async UniTask PerformLoadAsync()
         {
-            IsOutlineAvailable = FileSystem.File.Open($"{_path}/outline.png").Exists;
+            var directory = RequireDirectory();
+            IsOutlineAvailable = directory.FindFile("outline.png") is not null;
 
             SubDisplay = await LoadSpriteDirectAsync("SubBackgourd.png");
             LoadingSplash = await LoadSpriteDirectAsync("now_loading.png");
 
-            var builder = new AtlasBuilder(_path, SpriteOutlineSnap, SpriteOutlineDetail, SpriteAlphaTolerance);
+            var builder = new AtlasBuilder(directory, SpriteOutlineSnap, SpriteOutlineDetail, SpriteAlphaTolerance);
             QueueAtlasElements(builder);
 
             _atlasTexture = await builder.BuildAndAssignAsync();
@@ -541,12 +584,13 @@ namespace MajdataPlay.Scenes.Game.Notes.Skins
 
         private void PerformLoad()
         {
-            IsOutlineAvailable = FileSystem.File.Open($"{_path}/outline.png").Exists;
+            var directory = RequireDirectory();
+            IsOutlineAvailable = directory.FindFile("outline.png") is not null;
 
             SubDisplay = LoadSpriteDirectSync("SubBackgourd.png");
             LoadingSplash = LoadSpriteDirectSync("now_loading.png");
 
-            var builder = new AtlasBuilder(_path, SpriteOutlineSnap, SpriteOutlineDetail, SpriteAlphaTolerance);
+            var builder = new AtlasBuilder(directory, SpriteOutlineSnap, SpriteOutlineDetail, SpriteAlphaTolerance);
             QueueAtlasElements(builder);
 
             _atlasTexture = builder.BuildAndAssign();
@@ -726,9 +770,8 @@ namespace MajdataPlay.Scenes.Game.Notes.Skins
 
         private async UniTask<Sprite?> LoadSpriteDirectAsync(string subPath)
         {
-            var fullPath = Path.Combine(_path, subPath);
-            var file = FileSystem.File.Open(fullPath);
-            if (!file.Exists)
+            var file = RequireDirectory().FindFileAt(subPath);
+            if (file is null)
             {
                 return null;
             }
@@ -745,9 +788,8 @@ namespace MajdataPlay.Scenes.Game.Notes.Skins
 
         private Sprite? LoadSpriteDirectSync(string subPath)
         {
-            var fullPath = Path.Combine(_path, subPath);
-            var file = FileSystem.File.Open(fullPath);
-            if (!file.Exists)
+            var file = RequireDirectory().FindFileAt(subPath);
+            if (file is null)
             {
                 return null;
             }
@@ -819,7 +861,7 @@ namespace MajdataPlay.Scenes.Game.Notes.Skins
     {
         private struct SpriteTask
         {
-            public string FullPath;
+            public string SubPath;
             public Action<Sprite?> Assigner;
             public Vector4 Border;
         }
@@ -827,7 +869,7 @@ namespace MajdataPlay.Scenes.Game.Notes.Skins
         private readonly List<SpriteTask> _tasks = new();
         private readonly List<Sprite> _sprites = new();
         internal IEnumerable<Sprite> Sprites => _sprites;
-        private readonly string _basePath;
+        private readonly StorageDirectory _directory;
         private readonly float _outlineSnap;
         private readonly float _outlineDetail;
         private readonly byte _alphaTolerance;
@@ -836,9 +878,10 @@ namespace MajdataPlay.Scenes.Game.Notes.Skins
         /// <param name="outlineDetail">Detail in [0, 1]; higher values retain more vertices.
         /// This is a runtime approximation, not Unity Editor's internal outline algorithm.</param>
         /// <param name="alphaTolerance">Pixels with alpha at or below this value are transparent.</param>
-        public AtlasBuilder(string basePath, float outlineSnap = 1f, float outlineDetail = 1f, byte alphaTolerance = 0)
+        /// <param name="directory">The skin collection directory whose relative sprite paths are resolved through its backend.</param>
+        public AtlasBuilder(StorageDirectory directory, float outlineSnap = 1f, float outlineDetail = 1f, byte alphaTolerance = 0)
         {
-            _basePath = basePath;
+            _directory = directory;
             _outlineSnap = Mathf.Max(0f, outlineSnap);
             _outlineDetail = Mathf.Clamp01(outlineDetail);
             _alphaTolerance = alphaTolerance;
@@ -849,7 +892,7 @@ namespace MajdataPlay.Scenes.Game.Notes.Skins
         {
             _tasks.Add(new SpriteTask
             {
-                FullPath = Path.Combine(_basePath, subPath),
+                SubPath = subPath,
                 Assigner = assigner,
                 Border = border
             });
@@ -865,8 +908,8 @@ namespace MajdataPlay.Scenes.Game.Notes.Skins
 
             foreach (var task in _tasks)
             {
-                var file = FileSystem.File.Open(task.FullPath);
-                if (!file.Exists)
+                var file = _directory.FindFileAt(task.SubPath);
+                if (file is null)
                 {
                     task.Assigner(null);
                     continue;
@@ -902,8 +945,8 @@ namespace MajdataPlay.Scenes.Game.Notes.Skins
 
             foreach (var task in _tasks)
             {
-                var file = FileSystem.File.Open(task.FullPath);
-                if (!file.Exists)
+                var file = _directory.FindFileAt(task.SubPath);
+                if (file is null)
                 {
                     task.Assigner(null);
                     continue;
@@ -1354,7 +1397,7 @@ namespace MajdataPlay.Scenes.Game.Notes.Skins
                 var sourceBorder = validTasks[i].Border;
                 var border = new Vector4(sourceBorder.x * scaleX, sourceBorder.y * scaleY,
                     sourceBorder.z * scaleX, sourceBorder.w * scaleY);
-                var sprite = CreateOutlinedSprite(atlas, pixelRect, textures[i], validTasks[i].FullPath,
+                var sprite = CreateOutlinedSprite(atlas, pixelRect, textures[i], validTasks[i].SubPath,
                     border, _outlineSnap, _outlineDetail, _alphaTolerance);
                 validTasks[i].Assigner(sprite);
                 _sprites.Add(sprite);

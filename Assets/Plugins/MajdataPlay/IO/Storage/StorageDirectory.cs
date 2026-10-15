@@ -106,6 +106,19 @@ namespace MajdataPlay.IO.Storage
             }
         }
 
+        /// <summary>Finds an immediate child of either kind by the backend's name comparison rules.</summary>
+        /// <param name="name">One child name, not a path or URI.</param>
+        /// <returns>The child's metadata, or null if no entry has the requested name.</returns>
+        /// <exception cref="ArgumentException">The name is invalid.</exception>
+        /// <exception cref="DirectoryNotFoundException">The parent directory does not exist.</exception>
+        /// <exception cref="UnauthorizedAccessException">Querying the child was denied.</exception>
+        /// <exception cref="IOException">The query failed or found ambiguous names.</exception>
+        public FileSystemEntry? FindEntry(string name)
+        {
+            StorageName.Validate(name);
+            return FileSystem.GetChildEntry(Location, name);
+        }
+
         /// <summary>Finds an immediate file child by the backend's name comparison rules.</summary>
         /// <param name="name">One child name, not a path or URI.</param>
         /// <returns>A file handle, or null if no file has the requested name.</returns>
@@ -140,6 +153,88 @@ namespace MajdataPlay.IO.Storage
                 return null;
             }
             return new StorageDirectory(FileSystem, entry.Location);
+        }
+
+        /// <summary>Finds a descendant file by resolving each name of a relative path through this directory's backend.</summary>
+        /// <param name="relativePath">Child names joined by <c>/</c> or <c>\</c>, ending with the file name; never a location.</param>
+        /// <returns>The file handle, or null if any directory on the way or the file itself is absent.</returns>
+        /// <exception cref="ArgumentException">The path is rooted, is a URI, contains a traversal segment, or names no file.</exception>
+        /// <exception cref="DirectoryNotFoundException">This directory does not exist.</exception>
+        /// <exception cref="UnauthorizedAccessException">Querying a child was denied.</exception>
+        /// <exception cref="IOException">A query failed or found ambiguous names.</exception>
+        public StorageFile? FindFileAt(string relativePath)
+        {
+            var names = global::MajdataPlay.IO.Storage.FileSystem.Path.Split(relativePath);
+            if (names.Length == 0)
+            {
+                throw new ArgumentException("A relative path ending with a file name is required.", nameof(relativePath));
+            }
+            var parent = FindDirectoryAt(names.AsSpan(0, names.Length - 1));
+            return parent?.FindFile(names[names.Length - 1]);
+        }
+
+        /// <summary>Finds a descendant directory by resolving each name of a relative path through this directory's backend.</summary>
+        /// <param name="relativePath">Child names joined by <c>/</c> or <c>\</c>; an empty path denotes this directory.</param>
+        /// <returns>The directory handle, or null if any directory on the way is absent.</returns>
+        /// <exception cref="ArgumentException">The path is rooted, is a URI, or contains a traversal segment.</exception>
+        /// <exception cref="DirectoryNotFoundException">This directory does not exist.</exception>
+        /// <exception cref="UnauthorizedAccessException">Querying a child was denied.</exception>
+        /// <exception cref="IOException">A query failed or found ambiguous names.</exception>
+        public StorageDirectory? FindDirectoryAt(string relativePath)
+        {
+            return FindDirectoryAt(global::MajdataPlay.IO.Storage.FileSystem.Path.Split(relativePath));
+        }
+
+        /// <summary>Finds a descendant directory by resolving already split child names one level at a time.</summary>
+        /// <param name="names">The child names from this directory downwards; an empty span denotes this directory.</param>
+        /// <returns>The directory handle, or null if any directory on the way is absent.</returns>
+        /// <exception cref="ArgumentException">A name is invalid.</exception>
+        /// <exception cref="DirectoryNotFoundException">This directory does not exist.</exception>
+        /// <exception cref="UnauthorizedAccessException">Querying a child was denied.</exception>
+        /// <exception cref="IOException">A query failed or found ambiguous names.</exception>
+        public StorageDirectory? FindDirectoryAt(ReadOnlySpan<string> names)
+        {
+            var current = this;
+            foreach (var name in names)
+            {
+                current = current.FindDirectory(name);
+                if (current is null)
+                {
+                    return null;
+                }
+            }
+            return current;
+        }
+
+        /// <summary>Creates or opens a descendant directory, creating each missing directory of a relative path in turn.</summary>
+        /// <param name="relativePath">Child names joined by <c>/</c> or <c>\</c>; an empty path denotes this directory.</param>
+        /// <returns>The handle using the backend's authoritative location of the deepest directory.</returns>
+        /// <exception cref="ArgumentException">The path is rooted, is a URI, or contains a traversal segment.</exception>
+        /// <exception cref="DirectoryNotFoundException">This directory does not exist.</exception>
+        /// <exception cref="UnauthorizedAccessException">Querying or creating a directory was denied.</exception>
+        /// <exception cref="NotSupportedException">The backend does not support directory creation.</exception>
+        /// <exception cref="IOException">A file occupies a name on the way or creation failed.</exception>
+        public StorageDirectory CreateDirectoryAt(string relativePath)
+        {
+            return CreateDirectoryAt(global::MajdataPlay.IO.Storage.FileSystem.Path.Split(relativePath));
+        }
+
+        /// <summary>Creates or opens a descendant directory from already split child names, creating each missing level in turn.</summary>
+        /// <param name="names">The child names from this directory downwards; an empty span denotes this directory.</param>
+        /// <returns>The handle using the backend's authoritative location of the deepest directory.</returns>
+        /// <exception cref="ArgumentException">A name is invalid.</exception>
+        /// <exception cref="DirectoryNotFoundException">This directory does not exist.</exception>
+        /// <exception cref="UnauthorizedAccessException">Querying or creating a directory was denied.</exception>
+        /// <exception cref="NotSupportedException">The backend does not support directory creation.</exception>
+        /// <exception cref="IOException">A file occupies a name on the way or creation failed.</exception>
+        public StorageDirectory CreateDirectoryAt(ReadOnlySpan<string> names)
+        {
+            var current = this;
+            foreach (var name in names)
+            {
+                current = current.CreateDirectory(name);
+            }
+            return current;
         }
 
         /// <summary>Creates a new empty immediate child file without overwriting a sibling.</summary>

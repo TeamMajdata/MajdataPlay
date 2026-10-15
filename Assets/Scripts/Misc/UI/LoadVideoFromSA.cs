@@ -2,7 +2,7 @@ using Cysharp.Threading.Tasks;
 using MajdataPlay.Diagnostics;
 using MajdataPlay.FFmpeg;
 using MajdataPlay.IO.Storage;
-using System.IO;
+using System;
 using UnityEngine;
 using UnityEngine.Serialization;
 
@@ -48,23 +48,30 @@ namespace MajdataPlay.UI
             {
                 videoPath = videoPath.Substring(1);
             }
-            var path = string.Empty;
-            var isValid = false;
-            foreach (var ext in MajEnv.SupportedVideoFormats)
+            StorageFile? videoFile = null;
+            try
             {
-                path = Path.Combine(MajEnv.AssetsPath.Location, videoPath + ext);
-
-                if (FileSystem.File.Open(path).Exists)
+                foreach (var ext in MajEnv.SupportedVideoFormats)
                 {
-                    isValid = true;
-                    break;
+                    videoFile = MajEnv.AssetsPath.FindFileAt(videoPath + ext);
+                    if (videoFile is not null)
+                    {
+                        break;
+                    }
                 }
             }
-            if (!isValid)
+            catch (Exception e)
+            {
+                MajDebug.LogError(nameof(LoadVideoFromSA), $"Failed to resolve video: {videoPath}");
+                MajDebug.LogException(e);
+                return;
+            }
+            if (videoFile is null)
             {
                 MajDebug.LogError(nameof(LoadVideoFromSA), $"Video does not exists: {videoPath}");
                 return;
             }
+            var path = videoFile.Location;
             MajDebug.LogInfo(nameof(LoadVideoFromSA), $"Load video from {path}");
             _ffmpegPlayer.Url = path;
             if (_loadOnly)

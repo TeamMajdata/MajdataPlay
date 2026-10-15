@@ -139,17 +139,17 @@ namespace MajdataPlay.IO.Storage
                 {
                     throw new NotSupportedException("Only local paths and file URIs belong to the local filesystem.");
                 }
-                if (uri.Query.Length != 0 || uri.Fragment.Length != 0 || !Path.IsPathRooted(uri.LocalPath))
+                if (uri.Query.Length != 0 || uri.Fragment.Length != 0 || !System.IO.Path.IsPathRooted(uri.LocalPath))
                 {
                     throw new ArgumentException("An absolute file URI without a query or fragment is required.", nameof(location));
                 }
                 path = uri.LocalPath;
             }
-            var fullPath = Path.GetFullPath(path);
-            var rootLength = (Path.GetPathRoot(fullPath) ?? string.Empty).Length;
+            var fullPath = System.IO.Path.GetFullPath(path);
+            var rootLength = (System.IO.Path.GetPathRoot(fullPath) ?? string.Empty).Length;
             var length = fullPath.Length;
             while (length > rootLength &&
-                (fullPath[length - 1] == Path.DirectorySeparatorChar || fullPath[length - 1] == Path.AltDirectorySeparatorChar))
+                (fullPath[length - 1] == System.IO.Path.DirectorySeparatorChar || fullPath[length - 1] == System.IO.Path.AltDirectorySeparatorChar))
             {
                 length--;
             }
@@ -204,8 +204,8 @@ namespace MajdataPlay.IO.Storage
             {
                 throw new ArgumentException("A storage location is required.", nameof(location));
             }
-            if (Path.IsPathRooted(location) ||
-                (Path.DirectorySeparatorChar == '\\' && location.Length >= 2 &&
+            if (System.IO.Path.IsPathRooted(location) ||
+                (System.IO.Path.DirectorySeparatorChar == '\\' && location.Length >= 2 &&
                     ((location[0] >= 'A' && location[0] <= 'Z') || (location[0] >= 'a' && location[0] <= 'z')) && location[1] == ':'))
             {
                 return null;

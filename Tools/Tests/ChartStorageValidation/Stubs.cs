@@ -80,8 +80,14 @@ namespace MajdataPlay
         public static StorageDirectory ChartPath { get; set; } = null!;
         /// <summary>Gets or sets the ignored cache root.</summary>
         public static StorageDirectory CachePath { get; set; } = null!;
-        /// <summary>Gets the unused SQLite stub location.</summary>
-        public static StorageFile FavoriteDBPath => new StorageFile(CachePath.FileSystem, Path.Combine(CachePath.Location, "Favorites.db"));
+        /// <summary>Gets the runtime cache directory below the case-owned cache root, created on demand like production initialization.</summary>
+        public static StorageDirectory RuntimeCachePath
+        {
+            get
+            {
+                return CachePath.CreateDirectory("Runtime");
+            }
+        }
         /// <summary>Gets the supported audio extensions used by the scanner.</summary>
         public static string[] SupportedAudioFormats { get; } = new[] { ".opus", ".mp3", ".ogg", ".aac", ".wav" };
         /// <summary>Gets the supported video extensions used by storage initialization.</summary>

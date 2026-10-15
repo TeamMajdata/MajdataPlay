@@ -93,6 +93,29 @@ namespace MajdataPlay.Tests.FileSystemValidation
             return Task.CompletedTask;
         }
 
+        /// <summary>Checks relative-path descendant lookup walks implicit archive directories without creating anything.</summary>
+        /// <returns>A completed task after archive descendant validation.</returns>
+        /// <exception cref="InvalidOperationException">A regression assertion fails.</exception>
+        private static Task TestJarDescendants()
+        {
+            using var workspace = new TemporaryWorkspace();
+            var archivePath = CreateJarArchive(workspace);
+            var root = StorageFacade.Directory.Open(JarLocation(archivePath, string.Empty));
+            var deep = NotNull(root.FindFileAt("assets/nested/deep.bin"), "archive descendant file lookup walks implicit directories");
+            Check(deep.Location == StorageFacade.File.Open(JarLocation(archivePath, "assets/nested/deep.bin")).Location, "archive descendant lookup returns the canonical entry URI");
+            Check(NotNull(root.FindDirectoryAt("assets\\empty directory"), "archive descendant directory lookup accepts backslashes").EnumerateEntries().Count() == 0,
+                "archive descendant directory lookup resolves explicit empty directories");
+            Check(root.FindFileAt("assets/missing/deep.bin") is null && root.FindDirectoryAt("assets/nested/deep.bin") is null, "missing or mistyped archive descendants return null");
+            Check(NotNull(root.FindFileAt("assets/" + JarUnicodeName), "escaped archive display names resolve through relative paths").ReadAllText() == JarUnicodeName,
+                "relative lookup escapes archive entry names exactly once");
+            Throws<NotSupportedException>(() =>
+            {
+                root.CreateDirectoryAt("assets/new directory");
+            }, "relative creation inside a read-only archive is rejected");
+            Check(root.FindDirectoryAt("assets/new directory") is null, "rejected archive creation leaves no entry");
+            return Task.CompletedTask;
+        }
+
         /// <summary>Checks facade and handle extraction into native paths and opaque provider documents.</summary>
         /// <returns>A task completing after both synchronous and asynchronous copy directions.</returns>
         /// <exception cref="InvalidOperationException">An extraction assertion fails.</exception>

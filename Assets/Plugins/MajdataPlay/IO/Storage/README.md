@@ -44,6 +44,36 @@ use `StorageDirectory.CreateFile` first. Creating a file never overwrites a sibl
 creating a directory returns the existing directory if it already exists.
 Child APIs accept one name, not paths: empty names, `.`, `..`, separators, and NUL
 are rejected. The backend applies additional platform name restrictions.
+`FindEntry(name)` locates an immediate child of either kind.
+
+## Relative paths
+
+Application code never derives a child location from `Location` with `Path.Combine`:
+a content URI is opaque, so the combined string names nothing. A child that may
+not exist yet has no portable location at all. Resolve children through the
+parent handle instead, and let the backend supply the authoritative location:
+
+```csharp
+var charts = root.CreateDirectory("MaiCharts");          // idempotent, works on every backend
+var settings = root.FindFile("settings.json")            // null while absent
+    ?? root.CreateFile("settings.json", "application/json");
+var sfx = assets.FindFileAt("SFX/calibrate.ogg");        // descendant lookup, null when any level is missing
+var skins = assets.FindDirectoryAt("Skins/default");
+var nested = root.CreateDirectoryAt("Cache/Runtime");    // creates each missing level in turn
+
+var names = FileSystem.Path.Split(archiveEntry.FullName);    // validated child names, never a location
+var parent = root.CreateDirectoryAt(names.AsSpan(0, names.Length - 1));
+var file = FileSystem.File.Create(parent.Location, names[names.Length - 1], overwrite: true);
+```
+
+`FileSystem.Path.Split` accepts `/` and `\` as separators, drops empty and `.`
+segments, and rejects rooted paths, URIs, `..`, and NUL, so an archive entry or
+manifest path can be walked without a `Path.GetFullPath` prefix check. The
+descendant APIs resolve one level per backend query; keep them off the game
+loop on provider storage, where each level is a provider round trip.
+`Path` remains appropriate for computing a known native path from a Unity
+application path such as `Application.persistentDataPath`, which is then
+opened once through the facade.
 
 Local handles are normalized to absolute paths. Relative paths are resolved when
 the handle is created, not when a later operation runs. File URI queries and
@@ -55,9 +85,9 @@ security-scoped bookmarks, or access outside the iOS application sandbox.
 
 Runtime consumers use storage handles for file queries, enumeration, reads and
 writes. Editor-only tooling retains its existing `System.IO` implementation.
-`Path` remains available for computing known local paths; text readers,
-writers, hashing and ZIP processing consume storage streams rather than opening
-filenames themselves.
+`Path` remains available for computing known local paths from Unity application
+paths, never from a handle's `Location`; text readers, writers, hashing and ZIP
+processing consume storage streams rather than opening filenames themselves.
 
 Facade operations use the same public names for local paths, file URIs and content
 URIs; callers do not choose a backend. `CreateDirectory(location)` creates missing

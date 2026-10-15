@@ -54,30 +54,32 @@ namespace MajdataPlay
             IReadOnlyDictionary<string, string> v2Hashes)
         {
             FileSystem.Directory.Create(destinationRoot.Location);
+            var packagedRoot = FileSystem.Directory.Open(Application.streamingAssetsPath);
             foreach (var relativePath in v2Hashes.Keys
                          .Where(path => path.StartsWith(sourcePrefix, StringComparison.OrdinalIgnoreCase))
                          .OrderBy(path => path, StringComparer.Ordinal))
             {
-                var sourcePath = Path.Combine(
-                    Application.streamingAssetsPath,
-                    relativePath.Replace('/', Path.DirectorySeparatorChar));
-                var destinationPath = Path.Combine(
-                    destinationRoot.Location,
-                    relativePath.Substring(sourcePrefix.Length)
-                                .Replace('/', Path.DirectorySeparatorChar));
-                var destinationDirectory = Path.GetDirectoryName(destinationPath);
-                if (!string.IsNullOrEmpty(destinationDirectory))
-                {
-                    FileSystem.Directory.Create(destinationDirectory);
-                }
-
                 try
                 {
-                    FileSystem.File.Copy(
-                        sourcePath,
-                        destinationPath,
+                    var sourceFile = packagedRoot.FindFileAt(relativePath);
+                    if (sourceFile is null)
+                    {
+                        MajDebug.LogError($"Restore managed asset failed(Windows): packaged resource not found: {relativePath}");
+                        continue;
+                    }
+                    var names = FileSystem.Path.Split(relativePath.Substring(sourcePrefix.Length));
+                    if (names.Length == 0)
+                    {
+                        MajDebug.LogError($"Restore managed asset failed(Windows): manifest path names no file: {relativePath}");
+                        continue;
+                    }
+                    var destinationDirectory = destinationRoot.CreateDirectoryAt(names.AsSpan(0, names.Length - 1));
+                    var restored = FileSystem.File.Copy(
+                        sourceFile.Location,
+                        destinationDirectory.Location,
+                        names[names.Length - 1],
                         overwrite: true);
-                    MajDebug.LogInfo($"Restore managed asset(Windows): {sourcePath} -> {destinationPath}");
+                    MajDebug.LogInfo($"Restore managed asset(Windows): {sourceFile.Location} -> {restored.Location}");
                 }
                 catch (Exception exception)
                 {

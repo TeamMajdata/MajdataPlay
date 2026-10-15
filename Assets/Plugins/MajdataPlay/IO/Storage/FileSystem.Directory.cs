@@ -7,7 +7,7 @@ namespace MajdataPlay.IO.Storage
     public static partial class FileSystem
     {
         /// <summary>Provides directory operations over native paths, file URIs, read-only jar file URIs, and registered content URIs.</summary>
-        /// <remarks>Locations are opaque and authoritative; never combine them with <see cref="Path"/>.</remarks>
+        /// <remarks>Locations are opaque and authoritative; never combine them with <see cref="System.IO.Path"/>.</remarks>
         public static class Directory
         {
             /// <summary>Creates a directory handle without requiring the directory to exist.</summary>

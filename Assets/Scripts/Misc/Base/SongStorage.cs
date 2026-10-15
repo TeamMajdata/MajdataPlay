@@ -115,6 +115,8 @@ namespace MajdataPlay
         private static readonly SongCollection s_emptyCollection = SongCollection.Empty("default");
         /// <summary>Defines the portable favorites export filename.</summary>
         private const string MyFavoriteFileName = "MyFavorites.json";
+        /// <summary>The SQLite favorites database file name inside <see cref="MajEnv.RuntimeCachePath"/>.</summary>
+        private const string FavoriteDatabaseFileName = "MajFavorites.db";
         /// <summary>Initializes favorites storage and save handling without loading or refreshing collections.</summary>
         /// <param name="cancellationToken">Cancels waiting or initialization before save handling is registered.</param>
         /// <returns>A task which completes when storage is ready for explicit collection refreshes.</returns>
@@ -1095,19 +1097,22 @@ namespace MajdataPlay
             // Init SQLite DB (once)
             if (s_favoritesDatabase is null)
             {
-                var databaseFile = MajEnv.FavoriteDBPath;
-                var isDbExists = databaseFile.Exists;
+                var runtimeDirectory = MajEnv.RuntimeCachePath;
+                var databaseFile = runtimeDirectory.FindFile(FavoriteDatabaseFileName);
+                // SQLite leaves a database empty until its first table is created, so an empty file is still a new database.
+                var isDbExists = databaseFile is not null && databaseFile.Entry is { Length: > 0 };
+                // SQLite needs a resolvable location, so the file is created through the directory before the connection opens it.
+                databaseFile ??= runtimeDirectory.CreateFile(FavoriteDatabaseFileName, "application/vnd.sqlite3");
                 var database = new SQLiteAsyncConnection(databaseFile.Location, SQLiteOpenFlags.ReadWrite | SQLiteOpenFlags.Create | SQLiteOpenFlags.FullMutex);
                 try
                 {
                     await database.CreateTableAsync<FavoriteHashDB>().ConfigureAwait(false);
                     if (!isDbExists)
                     {
-                        var legacyDirectory = MajEnv.CachePath.FindDirectory("Runtime");
-                        var legacyFile = legacyDirectory?.FindFile(MyFavoriteFileName);
+                        var legacyFile = runtimeDirectory.FindFile(MyFavoriteFileName);
                         if (legacyFile is not null)
                         {
-                            await MigrateFavFromJsonAsync(database, legacyDirectory!, legacyFile).ConfigureAwait(false);
+                            await MigrateFavFromJsonAsync(database, runtimeDirectory, legacyFile).ConfigureAwait(false);
                         }
                     }
                 }

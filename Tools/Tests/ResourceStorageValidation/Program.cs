@@ -225,7 +225,7 @@ namespace ResourceStorageValidation
             var failed = false;
             try
             {
-                InvokeMobile("WriteAllBytesAtomically", destination, Encoding.UTF8.GetBytes("replacement"));
+                InvokeMobile("WriteAllBytesAtomically", MajEnv.AssetsPath, "conflict.bin", Encoding.UTF8.GetBytes("replacement"));
             }
             catch (IOException)
             {

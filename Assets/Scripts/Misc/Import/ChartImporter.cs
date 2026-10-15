@@ -231,18 +231,17 @@ namespace MajdataPlay.Import
                 MajDebug.LogError("[ChartImporter] File not found: " + entry.Location);
                 return;
             }
-            var tempOutDir = Path.Combine(MajEnv.TempPath.Location, Guid.NewGuid().ToString());
+            var outputDirectory = MajEnv.TempPath.CreateDirectory(Guid.NewGuid().ToString());
 
             try
             {
-                var outputDirectory = FileSystem.Directory.Create(tempOutDir);
-                await ExtractArchiveAsync(entry, outputDirectory.Location);
+                await ExtractArchiveAsync(entry, outputDirectory);
                 // An archive may hold a single chart, or a collection directory that groups several charts.
                 await ImportContainerAsync(outputDirectory, Path.GetFileNameWithoutExtension(entry.Name));
             }
             finally
             {
-                TryDeleteDirectory(tempOutDir);
+                TryDeleteDirectory(outputDirectory);
 #if UNITY_ANDROID
                 if (deleteSourceAfterImport)
                 {
@@ -406,18 +405,13 @@ namespace MajdataPlay.Import
 
         /// <summary>Extracts one archive into a temporary directory while rejecting entries that escape it.</summary>
         /// <param name="entry">The archive entry to read.</param>
-        /// <param name="destinationDirectory">The local temporary directory receiving the extracted entries.</param>
+        /// <param name="destination">The existing temporary directory receiving the extracted entries through its backend.</param>
         /// <returns>An operation that completes after every archive entry has been extracted.</returns>
         /// <exception cref="FileNotFoundException">The archive no longer exists.</exception>
         /// <exception cref="UnauthorizedAccessException">Reading the archive or writing the destination was denied.</exception>
         /// <exception cref="IOException">An archive entry escapes the destination directory, or extraction failed.</exception>
-        private static async ValueTask ExtractArchiveAsync(FileSystemEntry entry, string destinationDirectory)
+        private static async ValueTask ExtractArchiveAsync(FileSystemEntry entry, StorageDirectory destination)
         {
-            var destinationRoot = Path.GetFullPath(destinationDirectory);
-            if (!destinationRoot.EndsWith(Path.DirectorySeparatorChar.ToString(), StringComparison.Ordinal))
-            {
-                destinationRoot += Path.DirectorySeparatorChar;
-            }
             using var archiveStream = FileSystem.File.Open(entry.Location).OpenRead();
             using var archive = new ZipArchive(archiveStream, ZipArchiveMode.Read);
             var archiveEntries = archive.Entries;
@@ -433,22 +427,28 @@ namespace MajdataPlay.Import
                 {
                     continue;
                 }
-                var fullPath = Path.GetFullPath(Path.Combine(destinationDirectory, archiveEntry.FullName));
-                if (!fullPath.StartsWith(destinationRoot, StringComparison.Ordinal))
+                string[] names;
+                try
                 {
-                    throw new IOException("Zip entry escapes destination: " + archiveEntry.FullName);
+                    // Each entry is walked one child name at a time, so a rooted or traversing entry can never leave the destination.
+                    names = FileSystem.Path.Split(archiveEntry.FullName);
                 }
-                var directory = Path.GetDirectoryName(fullPath);
-                if (!string.IsNullOrEmpty(directory))
+                catch (ArgumentException exception)
                 {
-                    FileSystem.Directory.Create(directory);
+                    throw new IOException("Zip entry escapes destination: " + archiveEntry.FullName, exception);
                 }
+                if (names.Length == 0)
+                {
+                    continue;
+                }
+                var parent = destination.CreateDirectoryAt(names.AsSpan(0, names.Length - 1));
+                var file = FileSystem.File.Create(parent.Location, names[names.Length - 1], overwrite: true);
                 using (var entryStream = archiveEntry.Open())
-                using (var outputStream = FileSystem.File.Create(fullPath, overwrite: true).OpenWrite())
+                using (var outputStream = file.OpenWrite())
                 {
                     entryStream.CopyTo(outputStream);
                 }
-                FileSystem.File.Open(fullPath).SetLastWriteTime(archiveEntry.LastWriteTime.DateTime);
+                file.SetLastWriteTime(archiveEntry.LastWriteTime.DateTime);
                 extractedSize += archiveEntry.Length;
                 var percentage = totalSize == 0 ? 100d : extractedSize * 100 / (double)totalSize;
                 MajInstances.SceneSwitcher.SetLoadingText($"Extracting...\n{percentage:F2}%");
@@ -492,12 +492,11 @@ namespace MajdataPlay.Import
         }
 
         /// <summary>Deletes a temporary directory without masking an import failure.</summary>
-        /// <param name="path">The local directory to remove.</param>
-        private static void TryDeleteDirectory(string path)
+        /// <param name="directory">The temporary directory to remove.</param>
+        private static void TryDeleteDirectory(StorageDirectory directory)
         {
             try
             {
-                var directory = FileSystem.Directory.Open(path);
                 if (directory.Exists)
                 {
                     directory.Delete(recursive: true);
@@ -505,7 +504,7 @@ namespace MajdataPlay.Import
             }
             catch (Exception e)
             {
-                MajDebug.LogWarning("[ChartImporter] Failed to clean up " + path + ": " + e.Message);
+                MajDebug.LogWarning("[ChartImporter] Failed to clean up " + directory.Location + ": " + e.Message);
             }
         }
 

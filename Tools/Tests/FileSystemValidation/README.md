@@ -60,6 +60,11 @@ failure in one case does not prevent the other cases from running.
 - Existing-only reads/writes, complete binary round trips, append, truncation,
   empty writes, refreshed lengths/UTC timestamps, text encodings, UTF-8/UTF-16/
   UTF-32 BOM detection, BOM-only files, and preservation of line endings.
+- Relative-path descendants on local, content and jar backends: `FindFileAt`,
+  `FindDirectoryAt`, `CreateDirectoryAt` and `FindEntry` resolve one child name per
+  level, tolerate `.` and empty segments, never return a mistyped entry, reject
+  rooted paths, URIs, traversal and NUL before touching storage, and refuse to
+  replace a file on the way; `FileSystem.Path.Split` keeps names literal and ordered.
 - Immediate enumeration without recursion, file/directory filters, nullable
   typed lookup, exclusive file creation, type collisions, returned renamed
   handles, non-overwriting rename, and descendant preservation.

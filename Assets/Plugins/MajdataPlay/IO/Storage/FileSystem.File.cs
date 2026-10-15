@@ -7,7 +7,7 @@ namespace MajdataPlay.IO.Storage
     public static partial class FileSystem
     {
         /// <summary>Provides file operations over native paths, file URIs, read-only jar file URIs, and registered content URIs.</summary>
-        /// <remarks>Locations are opaque and authoritative; never combine them with <see cref="Path"/>.</remarks>
+        /// <remarks>Locations are opaque and authoritative; never combine them with <see cref="System.IO.Path"/>.</remarks>
         public static class File
         {
             /// <summary>Creates a file handle without requiring the file to exist.</summary>
@@ -72,7 +72,7 @@ namespace MajdataPlay.IO.Storage
                 }
                 if (directory.FileSystem is LocalFileSystem)
                 {
-                    return Create(Path.Combine(directory.Location, name), overwrite);
+                    return Create(System.IO.Path.Combine(directory.Location, name), overwrite);
                 }
                 if (entry is null)
                 {
@@ -138,13 +138,13 @@ namespace MajdataPlay.IO.Storage
                 }
                 if (destinationFile.FileSystem is LocalFileSystem)
                 {
-                    var parent = Path.GetDirectoryName(destinationFile.Location);
+                    var parent = System.IO.Path.GetDirectoryName(destinationFile.Location);
                     if (string.IsNullOrEmpty(parent))
                     {
                         throw new IOException("A filesystem root cannot be a destination file.");
                     }
                     return sourceFile.CopyTo(new StorageDirectory(destinationFile.FileSystem, parent),
-                        Path.GetFileName(destinationFile.Location), overwrite);
+                        System.IO.Path.GetFileName(destinationFile.Location), overwrite);
                 }
                 return sourceFile.CopyTo(destinationFile, overwrite);
             }
@@ -171,7 +171,7 @@ namespace MajdataPlay.IO.Storage
                 {
                     // Query the child first to apply local name validation and require an existing parent.
                     directory.FileSystem.GetChildEntry(directory.Location, name);
-                    return Copy(sourceFile.Location, Path.Combine(directory.Location, name), overwrite);
+                    return Copy(sourceFile.Location, System.IO.Path.Combine(directory.Location, name), overwrite);
                 }
                 return sourceFile.CopyTo(directory, name, overwrite);
             }
