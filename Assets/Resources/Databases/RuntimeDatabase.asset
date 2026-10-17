@@ -18,7 +18,7 @@ MonoBehaviour:
     <TraditionalChinese_zh_TW>k__BackingField: {fileID: 11400000, guid: dbc58334dc23ba04fbfee4bf5298b6a0, type: 2}
     <Default>k__BackingField: {fileID: 11400000, guid: dbc58334dc23ba04fbfee4bf5298b6a0, type: 2}
   <Note>k__BackingField:
-    <DefaultMaterial>k__BackingField: {fileID: 10754, guid: 0000000000000000f000000000000000, type: 0}
+    <DefaultMaterial>k__BackingField: {fileID: 2100000, guid: 71ebe6875761485c9e8d0f069e218c0b, type: 2}
     <BreakMaterial>k__BackingField: {fileID: 2100000, guid: 236ca777eb286d94099e0750c7df85fe, type: 2}
     <HoldShineMaterial>k__BackingField: {fileID: 2100000, guid: 8bc279c763563fc4eae2dae3cdb07c59, type: 2}
     <Prefab>k__BackingField:

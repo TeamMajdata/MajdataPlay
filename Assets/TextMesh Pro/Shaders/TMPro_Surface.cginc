@@ -74,7 +74,7 @@ void PixShader(Input input, inout SurfaceOutput o)
 	n = normalize(n - bump);
 
 	// Cubemap reflection
-	fixed4 reflcol = texCUBE(_Cube, reflect(input.viewDirEnv, mul((float3x3)unity_ObjectToWorld, n)));
+	half4 reflcol = texCUBE(_Cube, reflect(input.viewDirEnv, mul((float3x3)unity_ObjectToWorld, n)));
 	float3 emission = reflcol.rgb * lerp(_ReflectFaceColor.rgb, _ReflectOutlineColor.rgb, saturate(sd + outline * 0.5)) * faceColor.a;
 #else
 	float3 n = float3(0, 0, -1);

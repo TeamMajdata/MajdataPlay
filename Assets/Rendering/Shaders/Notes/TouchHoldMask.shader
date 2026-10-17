@@ -1,4 +1,4 @@
-Shader "Notes/TouchHoldMask"
+Shader "Maj/Notes/TouchHoldMask"
 {
     Properties
     {
@@ -20,11 +20,15 @@ Shader "Notes/TouchHoldMask"
 
         Pass
         {
-            CGPROGRAM
+            Name "TouchHoldMask"
+            HLSLPROGRAM
             #pragma vertex vert
             #pragma fragment frag
             #pragma multi_compile_instancing 
-            #include "UnityCG.cginc"
+            #include "Assets/Rendering/MajRenderPipeline/Library/MajCore.hlsl"
+
+            // 保留原径向遮罩的角度精度与边缘计算。
+            static const float MAJ_MASK_PI = 3.14159265359f;
 
             struct appdata_t
             {
@@ -37,7 +41,7 @@ Shader "Notes/TouchHoldMask"
             struct v2f
             {
                 float4 vertex   : SV_POSITION;
-                fixed4 color    : COLOR;
+                half4 color     : COLOR;
                 float2 texcoord : TEXCOORD0;
                 float2 localPos : TEXCOORD1;
                 UNITY_VERTEX_INPUT_INSTANCE_ID 
@@ -45,17 +49,19 @@ Shader "Notes/TouchHoldMask"
 
             sampler2D _MainTex;
 
+            // 保留 SpriteRenderer 的原生实例颜色 / Flip 数组名称和布局。
+            // _RendererColor.a 驱动遮罩进度；顶点 alpha 不参与进度计算。
             #ifdef UNITY_INSTANCING_ENABLED
 
             UNITY_INSTANCING_BUFFER_START(PerDrawSprite)
 
                 UNITY_DEFINE_INSTANCED_PROP(
-                    fixed4,
+                    half4,
                     unity_SpriteRendererColorArray
                 )
 
                 UNITY_DEFINE_INSTANCED_PROP(
-                    fixed2,
+                    half2,
                     unity_SpriteFlipArray
                 )
 
@@ -74,8 +80,8 @@ Shader "Notes/TouchHoldMask"
 
             #ifndef UNITY_INSTANCING_ENABLED
 
-                fixed4 _RendererColor;
-                fixed2 _Flip;
+                half4 _RendererColor;
+                half2 _Flip;
 
             #endif
 
@@ -87,7 +93,7 @@ Shader "Notes/TouchHoldMask"
                 UNITY_SETUP_INSTANCE_ID(IN);
                 UNITY_TRANSFER_INSTANCE_ID(IN, OUT);
                 
-                OUT.vertex = UnityObjectToClipPos(IN.vertex);
+                OUT.vertex = TransformObjectToHClip(IN.vertex.xyz);
                 OUT.texcoord = IN.texcoord;
                 OUT.localPos = IN.vertex.xy;
 
@@ -95,22 +101,22 @@ Shader "Notes/TouchHoldMask"
                 return OUT;
             }
 
-            fixed4 frag(v2f IN) : SV_Target
+            half4 frag(v2f IN) : SV_Target
             {
                 UNITY_SETUP_INSTANCE_ID(IN);
 
                 float currentProgress = _RendererColor.a;
 
-                fixed4 col = tex2D(_MainTex, IN.texcoord);
-                col *= fixed4(IN.color.rgb, 1.0);
+                half4 col = MAJ_SAMPLE_TEX2D(_MainTex, IN.texcoord);
+                col *= half4(IN.color.rgb, 1.0);
                 float2 dir = IN.localPos;
 
 
                 float angle = atan2(dir.x, dir.y);
                 
-                if (angle < 0) angle += UNITY_PI * 2.0;
+                if (angle < 0) angle += MAJ_MASK_PI * 2.0;
                 
-                float normalizedAngle = angle / (UNITY_PI * 2.0);
+                float normalizedAngle = angle / (MAJ_MASK_PI * 2.0);
                 float safeSoftness = 0.005;
                 float fillEnd = currentProgress * (1.0 + safeSoftness);
                 float mask = 1.0 - smoothstep(fillEnd - safeSoftness, fillEnd, normalizedAngle);
@@ -118,7 +124,7 @@ Shader "Notes/TouchHoldMask"
                 col.a *= mask;
                 return col;
             }
-            ENDCG
+            ENDHLSL
         }
     }
 }

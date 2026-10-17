@@ -48,7 +48,6 @@ Shader "Unlit/BlendMode/CompatibleBlend"
             "RenderType" = "Transparent"
             "PreviewType" = "Plane"
             "CanUseSpriteAtlas" = "True"
-            "RenderPipeline" = "UniversalPipeline"
         }
 
         Cull     [_Cull]
@@ -64,7 +63,7 @@ Shader "Unlit/BlendMode/CompatibleBlend"
             #pragma multi_compile _ CUBISM_INVERT_ON
             #pragma multi_compile _ CUBISM_MASK_ON
 
-            #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
+            #include "../CubismMajCore.cginc"
             #include "../CubismCG.cginc"
 
             struct Attributes
@@ -150,7 +149,7 @@ Shader "Unlit/BlendMode/CompatibleBlend"
             half4 frag (Varyings IN) : SV_Target
             {
                 // Sample the texture
-                half4 textureColor = tex2D(_MainTex, IN.texcoord);
+                half4 textureColor = MAJ_SAMPLE_TEX2D(_MainTex, IN.texcoord);
 
                 // Multiply
                 textureColor.rgb *= cubism_MultiplyColor.rgb;

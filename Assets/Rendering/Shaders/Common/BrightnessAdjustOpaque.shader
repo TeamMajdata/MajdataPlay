@@ -1,4 +1,4 @@
-Shader "Common/BrightnessAdjustOpaque"
+Shader "Maj/Common/BrightnessAdjustOpaque"
 {
     Properties
     {
@@ -35,7 +35,7 @@ Shader "Common/BrightnessAdjustOpaque"
             #pragma target 3.0
             #pragma multi_compile_instancing
 
-            #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
+            #include "Assets/Rendering/MajRenderPipeline/Library/MajCore.hlsl"
 
             TEXTURE2D(_MainTex);
             SAMPLER(sampler_MainTex);
@@ -88,7 +88,8 @@ Shader "Common/BrightnessAdjustOpaque"
                 UNITY_SETUP_INSTANCE_ID(input);
                 UNITY_SETUP_STEREO_EYE_INDEX_POST_VERTEX(input);
 
-                float brightness = UNITY_ACCESS_INSTANCED_PROP(Props, _Brightness);
+                // 保持常量/实例缓冲布局；仅将 [0,1] 亮度的局部运算改用 half。
+                half brightness = (half)UNITY_ACCESS_INSTANCED_PROP(Props, _Brightness);
                 half3 color = SAMPLE_TEXTURE2D(_MainTex, sampler_MainTex, input.uv).rgb;
                 color *= input.color.rgb * brightness;
                 return half4(color, 1.0h);

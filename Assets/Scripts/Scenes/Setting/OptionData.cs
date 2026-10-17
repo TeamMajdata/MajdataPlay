@@ -84,6 +84,9 @@ namespace MajdataPlay.Scenes.Setting
             foreach (var font in optionFonts)
             {
                 warmup.AddText(font, LocalizedName);
+                // 实际尺寸可能在菜单打开后变化；预热所有数字，不能只预热初始的 "--"。
+                if (PropertyInfo.Name is nameof(RenderingOptions.DisplayBufferResolution) or nameof(RenderingOptions.SceneRenderResolution))
+                    warmup.AddText(font, "0123456789 x-");
                 if (_enumerator is OptionEnumeratorBase enumerator)
                 {
                     // Include enum, language and skin labels that are not currently selected.

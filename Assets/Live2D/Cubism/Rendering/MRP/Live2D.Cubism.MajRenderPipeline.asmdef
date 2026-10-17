@@ -1,0 +1,6 @@
+{
+    "name": "Live2D.Cubism.MajRenderPipeline",
+    "rootNamespace": "MajdataPlay.Rendering.Live2D",
+    "references": ["Live2D.Cubism", "MajdataPlay.MajRenderPipe"],
+    "autoReferenced": true
+}

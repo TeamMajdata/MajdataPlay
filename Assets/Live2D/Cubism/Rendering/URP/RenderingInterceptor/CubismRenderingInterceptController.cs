@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Copyright(c) Live2D Inc. All rights reserved.
  *
  * Use of this source code is governed by the Live2D Open Software license
@@ -147,13 +147,11 @@ namespace Live2D.Cubism.Rendering.URP.RenderingInterceptor
                 _renderer = GetComponent<Renderer>();
 
                 _renderer.enabled = false;
-                _material = _renderer.material;
 
 #if UNITY_EDITOR
-                if (!Application.isPlaying)
-                {
-                    _material = _renderer.sharedMaterial;
-                }
+                _material = Application.isPlaying ? _renderer.material : _renderer.sharedMaterial;
+#else
+                _material = _renderer.material;
 #endif
             }
 
@@ -261,12 +259,28 @@ namespace Live2D.Cubism.Rendering.URP.RenderingInterceptor
         }
 
         /// <summary>
+        /// 普通拦截对象保留相机层、层级和 forceRenderingOff 语义。
+        /// 不检查 Renderer.enabled：拦截器本来就禁用它的自动绘制，再显式 DrawRenderer。
+        /// Cubism 模型的每个 drawable 由 CheckSkipRendering 分别检查。
+        /// </summary>
+        public bool CanRenderForCamera(Camera camera, CubismRenderingContext context = null)
+        {
+            if (!camera || !isActiveAndEnabled || !gameObject.activeInHierarchy) return false;
+            if (_renderController)
+                return _renderController.isActiveAndEnabled && _renderController.gameObject.activeInHierarchy;
+            return _renderer && _renderer.gameObject.activeInHierarchy
+                && (camera.cullingMask & (1 << _renderer.gameObject.layer)) != 0
+                && !(context != null ? context.IsForcedOff(_renderer) : _renderer.forceRenderingOff);
+        }
+
+        /// <summary>
         /// Attempts to draw the object based on the interceptor's settings.
         /// </summary>
         /// <param name="args"> Event arguments. </param>
         private void TryDraw(CubismRenderedEventArgs args)
         {
-            var currentCamera = args.PassData.CameraData.camera;
+            var currentCamera = args.PassData.Camera;
+            if (!CanRenderForCamera(currentCamera, args.PassData)) return;
 
             // Find or create camera draw status.
             var statusIndex = -1;
@@ -364,7 +378,8 @@ namespace Live2D.Cubism.Rendering.URP.RenderingInterceptor
                     var targetRenderer = _renderController.SortedRenderers[index];
 
                     // Check whether to skip rendering.
-                    CheckSkipRendering(targetRenderer);
+                    if (!targetRenderer) continue;
+                    CheckSkipRendering(targetRenderer, args.PassData);
 
                     if (targetRenderer.SkipRendering)
                     {
@@ -387,12 +402,13 @@ namespace Live2D.Cubism.Rendering.URP.RenderingInterceptor
         /// Checks whether to skip rendering for the given renderer.
         /// </summary>
         /// <param name="targetRenderer"> The target renderer. </param>
-        private void CheckSkipRendering(CubismRenderer targetRenderer)
+        private void CheckSkipRendering(CubismRenderer targetRenderer, CubismRenderingContext context)
         {
-            targetRenderer.SkipRendering |= !targetRenderer
-                                                    || !targetRenderer.gameObject.activeSelf
+            targetRenderer.SkipRendering |= !targetRenderer.gameObject.activeInHierarchy
                                                     || !targetRenderer.MeshRenderer
-                                                    || !targetRenderer.MeshRenderer.enabled;
+                                                    || !targetRenderer.MeshRenderer.enabled
+                                                    || context.IsForcedOff(targetRenderer.MeshRenderer)
+                                                    || (context.Camera && (context.Camera.cullingMask & (1 << targetRenderer.gameObject.layer)) == 0);
 
             switch (targetRenderer.DrawObjectType)
             {

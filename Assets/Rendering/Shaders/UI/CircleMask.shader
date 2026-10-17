@@ -1,4 +1,4 @@
-Shader "UI/Circle Mask"
+Shader "Maj/UI/Circle Mask"
 {
     Properties
     {
@@ -48,13 +48,17 @@ Shader "UI/Circle Mask"
 
         Pass
         {
+            Name "CircleMask"
             Tags { "LightMode"="SRPDefaultUnlit" }
             HLSLPROGRAM
 
             #pragma vertex vert
             #pragma fragment frag
 
-            #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
+            // UGUI Mask can enable this keyword on runtime stencil-material copies.
+            #pragma multi_compile_local _ UNITY_UI_ALPHACLIP
+
+            #include "Assets/Rendering/MajRenderPipeline/Library/MajCore.hlsl"
 
             sampler2D _MainTex;
             half4 _Color;
@@ -90,8 +94,9 @@ Shader "UI/Circle Mask"
 
             half4 frag(v2f i) : SV_Target
             {
-                half4 col = tex2D(_MainTex, i.uv) * i.color;
+                half4 col = MAJ_SAMPLE_TEX2D(_MainTex, i.uv) * i.color;
 
+                // Keep UV/distance/derivative AA in float so subpixel circle edges do not move.
                 float dist = distance(i.uv, _Center);
 
                 float aa = fwidth(dist);

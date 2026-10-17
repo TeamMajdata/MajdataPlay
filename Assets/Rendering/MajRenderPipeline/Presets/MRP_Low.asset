@@ -1,0 +1,22 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 606ad7eaf1294139a43c10c358b415bf, type: 3}
+  m_Name: MRP_Low
+  m_EditorClassIdentifier: MajdataPlay.MajRenderPipe::MajdataPlay.Rendering.MajRenderPipelineAsset
+  _useDynamicBatching: 0
+  _useGPUInstancing: 1
+  _useSRPBatcher: 1
+  _optimizeAttachments: 1
+  _resolveToScreen: 1
+  _msaaMode: 1
+  _renderScale: 1
+  _finalCopyShader: {fileID: 4800000, guid: aa6605c6822b49778c0cfe0d3330aefe, type: 3}

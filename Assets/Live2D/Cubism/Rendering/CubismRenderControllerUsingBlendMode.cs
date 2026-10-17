@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Copyright(c) Live2D Inc. All rights reserved.
  *
  * Use of this source code is governed by the Live2D Open Software license
@@ -8,7 +8,6 @@
 
 using Live2D.Cubism.Core;
 using Live2D.Cubism.Framework;
-using Live2D.Cubism.Rendering.URP;
 using System;
 using System.Collections.Generic;
 using Live2D.Cubism.Rendering.URP.RenderingInterceptor;
@@ -363,7 +362,7 @@ namespace Live2D.Cubism.Rendering
         /// </summary>
         /// <param name="commandBuffer">Command buffer to record draw commands.</param>
         /// <param name="passData">Pass data containing render controllers and camera data.</param>
-        internal void SubmitDrawOffscreen(CommandBuffer commandBuffer, CubismRenderPassFeature.CubismRenderPass.PassData passData)
+        internal void SubmitDrawOffscreen(CommandBuffer commandBuffer, CubismRenderingContext passData)
         {
             if (!IsInitialized
                 || !Model

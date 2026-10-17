@@ -28,11 +28,16 @@
     <Compile Include="../../../Assets/Scripts/Misc/Settings/OptionEnumerators/AudioVolumeEnumerator.cs" Link="Production/AudioVolumeEnumerator.cs" />
     <Compile Include="../../../Assets/Scripts/Misc/Settings/OptionEnumerators/GameOffsetEnumerator.cs" Link="Production/GameOffsetEnumerator.cs" />
     <Compile Include="../../../Assets/Scripts/Misc/Settings/OptionEnumerators/NoteMaskEnumerator.cs" Link="Production/NoteMaskEnumerator.cs" />
+    <Compile Include="../../../Assets/Scripts/Misc/Settings/OptionEnumerators/Rendering*Enumerator.cs" Link="Production/%(Filename)%(Extension)" />
+    <Compile Include="../../../Assets/Scripts/Misc/Settings/RenderingOptions.cs" Link="Production/RenderingOptions.cs" />
+    <Compile Include="../../../Assets/Scripts/Misc/Settings/Enums/RenderQualityOption.cs" Link="Production/RenderQualityOption.cs" />
+    <Compile Include="../../../Assets/Rendering/MajRenderPipeline/Runtime/MajRenderDiagnostics.cs" Link="Production/MajRenderDiagnostics.cs" />
     <Compile Include="../../../Assets/Scripts/Misc/Settings/Interfaces/IOptionEnumerator.cs" Link="Production/IOptionEnumerator.cs" />
     <Compile Include="../../../Assets/Scripts/Misc/Settings/Attributes/*.cs" Link="Production/%(Filename)%(Extension)" />
     <Compile Include="../../../Assets/Scripts/Misc/Settings/Runtime/SettingReflectionCache.cs" Link="Production/SettingReflectionCache.cs" />
     <Compile Include="../../../Assets/Scripts/Misc/Base/Extensions/TypeExtensions.cs" Link="Production/TypeExtensions.cs" />
     <Compile Include="../../../Assets/Scripts/IO/Base/InputState.cs" Link="Production/InputState.cs" />
+    <Content Include="../../../Assets/Resources/Langs/*.json" Exclude="../../../Assets/Resources/Langs/template.tpl.json" Link="Languages/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
   <Import Project="Sdk.targets" Sdk="Microsoft.NET.Sdk" />
 </Project>

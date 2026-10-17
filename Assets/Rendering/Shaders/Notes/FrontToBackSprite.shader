@@ -9,7 +9,7 @@
 //      camera color 上(under 混合依赖 dst alpha 表示已累积的覆盖率)
 //   2. 绘制顺序必须是从前往后(把 sortingOrder 整体取反)
 //   3. 最后用 Notes/FrontToBackComposite.shader 把 RT 以 premultiplied over 合成回场景
-Shader "MajdataPlay/Notes/FrontToBackSprite"
+Shader "Maj/Notes/FrontToBackSprite"
 {
     Properties
     {
@@ -68,7 +68,7 @@ Shader "MajdataPlay/Notes/FrontToBackSprite"
             #pragma shader_feature_local_fragment _ALPHA_CLIP
             #pragma multi_compile_instancing
 
-            #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
+            #include "Assets/Rendering/MajRenderPipeline/Library/MajCore.hlsl"
 
             TEXTURE2D(_MainTex);
             SAMPLER(sampler_MainTex);

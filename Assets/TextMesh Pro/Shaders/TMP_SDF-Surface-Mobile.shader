@@ -71,7 +71,7 @@ SubShader {
 
 	struct Input
 	{
-		fixed4	color		: COLOR;
+		half4	color		: COLOR;
 		float2	uv_MainTex;
 		float2	uv2_FaceTex;
 		float2  uv2_OutlineTex;
@@ -127,7 +127,7 @@ SubShader {
 
 		float4 frag(v2f i) : COLOR
 		{
-			fixed4 texcol = tex2D(_MainTex, i.uv).a;
+			half4 texcol = tex2D(_MainTex, i.uv).a;
 			clip(texcol.a - i.alphaClip);
 			SHADOW_CASTER_FRAGMENT(i)
 		}

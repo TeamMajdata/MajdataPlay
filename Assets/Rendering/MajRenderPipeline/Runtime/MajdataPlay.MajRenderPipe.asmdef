@@ -1,0 +1,6 @@
+{
+    "name": "MajdataPlay.MajRenderPipe",
+    "rootNamespace": "MajdataPlay.Rendering",
+    "references": [],
+    "autoReferenced": true
+}

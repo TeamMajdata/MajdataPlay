@@ -1,4 +1,4 @@
-Shader "UI/CircleMaskWithOutlineShadow"
+Shader "Maj/UI/CircleMaskWithOutlineShadow"
 {
     Properties
     {
@@ -52,7 +52,8 @@ Shader "UI/CircleMaskWithOutlineShadow"
         Lighting Off
         ZWrite Off
         ZTest [unity_GUIZTestMode]
-        Blend SrcAlpha OneMinusSrcAlpha
+        // 片元返回预乘 Alpha；RGB 与 Alpha 均按 source-over 混合，避免软边再次乘 Alpha。
+        Blend One OneMinusSrcAlpha
         ColorMask [_ColorMask]
 
         Pass
@@ -62,7 +63,7 @@ Shader "UI/CircleMaskWithOutlineShadow"
             HLSLPROGRAM
             #pragma vertex vert
             #pragma fragment frag
-            #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
+            #include "Assets/Rendering/MajRenderPipeline/Library/MajCore.hlsl"
 
             struct appdata
             {
@@ -101,6 +102,7 @@ Shader "UI/CircleMaskWithOutlineShadow"
                 return o;
             }
 
+            // Keep UV/distance/soft-edge math in float; local sampled and blended colors already use half.
             // 计算圆形距离（基于 UV 中心）
             float circleDistance(float2 uv)
             {
@@ -112,59 +114,53 @@ Shader "UI/CircleMaskWithOutlineShadow"
             {
                 float2 uv = i.uv;
 
-                // 主纹理采样
-                half4 col = tex2D(_MainTex, uv) * i.color;
+                // 主体保留原有纹理与 UI Tint；描边、阴影继续使用各自颜色参数。
+                half4 col = MAJ_SAMPLE_TEX2D(_MainTex, uv) * i.color;
 
-                // 圆形距离
                 float dist = circleDistance(uv);
+                // 圆周位于片元内部，不能只依赖 MSAA 的几何覆盖；过渡宽度随实际像素调整。
+                float aa = max(fwidth(dist), 0.00001) * 0.5;
 
                 // ---------- 阴影 ----------
                 // 阴影使用偏移后的 UV
                 float2 shadowUV = uv + _ShadowOffset.xy;
                 float shadowDist = circleDistance(shadowUV);
 
-                // 阴影圆形 mask：在半径附近做软边
-                float shadowEdge = _Radius;
-                float shadowAlpha = 1.0 - smoothstep(shadowEdge, shadowEdge + _ShadowSoftness, shadowDist);
-
-                half4 shadowCol = _ShadowColor;
-                shadowCol.a *= shadowAlpha;
+                // 保留设计的阴影模糊宽度；零 Softness 也至少有一个像素的稳定过渡。
+                float shadowWidth = max(_ShadowSoftness, max(fwidth(shadowDist), 0.00001));
+                float shadowMask = 1.0 - smoothstep(_Radius, _Radius + shadowWidth, shadowDist);
+                half shadowAlpha = saturate(_ShadowColor.a) * shadowMask;
 
                 // ---------- 圆形裁剪 ----------
-                // 主圆形 mask：硬裁剪 + 轻微软边（可用 _OutlineWidth 或固定值）
-                float edgeInner = _Radius - _OutlineWidth * 0.5;
-                float edgeOuter = _Radius + _OutlineWidth * 0.5;
+                float outlineWidth = max(_OutlineWidth, 0.0);
+                float edgeInner = _Radius - outlineWidth * 0.5;
+                float edgeOuter = _Radius + outlineWidth * 0.5;
 
-                // 圆形内部 alpha
-                float insideAlpha = 1.0 - smoothstep(edgeInner, edgeInner + 0.001, dist);
+                float insideCoverage = 1.0 - smoothstep(edgeInner - aa, edgeInner + aa, dist);
+                float outerCoverage = 1.0 - smoothstep(edgeOuter - aa, edgeOuter + aa, dist);
 
                 // ---------- Outline ----------
-                // 在 edgeInner ~ edgeOuter 之间为描边区域
-                float outlineMask = smoothstep(edgeInner, edgeInner + 0.001, dist) *
-                                    (1.0 - smoothstep(edgeOuter, edgeOuter + 0.001, dist));
-
-                half4 outlineCol = _OutlineColor;
-                outlineCol.a *= outlineMask;
+                // 两个嵌套圆的覆盖率差就是描边，与主体互补，内接缝不会漏出背景。
+                // 不能将两个 smoothstep 相乘：宽度为 0 时仍会留下 s*(1-s) 的假描边。
+                float outlineCoverage = outlineWidth > 0.0
+                    ? max(outerCoverage - insideCoverage, 0.0)
+                    : 0.0;
 
                 // ---------- 组合 ----------
-                // 先画阴影，再画主体和描边
-                half4 finalCol = 0;
+                // 主体与描边占据互补区域，先合成一层预乘前景，再覆盖到阴影上。
+                // 对它们各做一次 Over 会让内边缘的两份 0.5 覆盖只得到 0.75，产生透明接缝。
+                half bodyAlpha = saturate(col.a) * insideCoverage;
+                half outlineAlpha = saturate(_OutlineColor.a) * outlineCoverage;
+                half foregroundAlpha = saturate(bodyAlpha + outlineAlpha);
+                half3 foregroundRGB = col.rgb * bodyAlpha + _OutlineColor.rgb * outlineAlpha;
 
-                // 阴影
-                finalCol.rgb += shadowCol.rgb * shadowCol.a;
-                finalCol.a   = max(finalCol.a, shadowCol.a);
+                half shadowBehind = shadowAlpha * (1.0h - foregroundAlpha);
+                half4 finalCol = half4(
+                    foregroundRGB + _ShadowColor.rgb * shadowBehind,
+                    foregroundAlpha + shadowBehind);
 
-                // 主体（圆形内部）
-                col.a *= insideAlpha;
-                finalCol.rgb = lerp(finalCol.rgb, col.rgb, col.a);
-                finalCol.a   = max(finalCol.a, col.a);
-
-                // 描边
-                finalCol.rgb = lerp(finalCol.rgb, outlineCol.rgb, outlineCol.a);
-                finalCol.a   = max(finalCol.a, outlineCol.a);
-
-                // 完全在圆外的像素丢弃（避免 UI 交互区域太大时出现方形）
-                if (dist > edgeOuter && shadowAlpha <= 0.001)
+                // 仅丢弃完全透明的尾部；保留圆周 AA 和有效软阴影，不增加纹理采样或 Pass。
+                if (finalCol.a <= 0.0h)
                     discard;
 
                 return finalCol;

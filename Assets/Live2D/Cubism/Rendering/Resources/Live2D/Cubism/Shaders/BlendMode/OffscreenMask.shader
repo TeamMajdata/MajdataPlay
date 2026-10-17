@@ -27,7 +27,6 @@ Shader "Unlit/BlendMode/OffscreenMask"
             "Queue" = "Transparent"
             "IgnoreProjector" = "True"
             "RenderType" = "Transparent"
-            "RenderPipeline" = "UniversalPipeline"
         }
 
         LOD      100
@@ -42,7 +41,7 @@ Shader "Unlit/BlendMode/OffscreenMask"
             #pragma vertex vert
             #pragma fragment frag
 
-            #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
+            #include "../CubismMajCore.cginc"
 
             struct Attributes
             {

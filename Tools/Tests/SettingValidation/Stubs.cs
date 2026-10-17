@@ -3,8 +3,10 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.IO;
 using System.Reflection;
 using System.Runtime.CompilerServices;
+using System.Text.Json;
 using System.Threading.Tasks;
 
 namespace UnityEngine
@@ -154,16 +156,12 @@ namespace UnityEngine
         public static int Max(int a, int b) => Math.Max(a, b);
         public static int Min(int a, int b) => Math.Min(a, b);
         public static float Abs(float x) => Math.Abs(x);
+        public static int RoundToInt(float x) => (int)Math.Round(x);
     }
     public static class Application { public static int targetFrameRate; }
     public static class QualitySettings
     {
         public static int vSyncCount;
-        public static void SetQualityLevel(int value, bool applyExpensiveChanges)
-        {
-            vSyncCount = value == 0 ? 0 : 1;
-            ((Rendering.Universal.UniversalRenderPipelineAsset)Rendering.GraphicsSettings.currentRenderPipeline).renderScale = value == 0 ? .75f : 1f;
-        }
     }
 }
 namespace UnityEngine.Serialization
@@ -172,8 +170,12 @@ namespace UnityEngine.Serialization
     public sealed class FormerlySerializedAsAttribute : Attribute { public FormerlySerializedAsAttribute(string name) { } }
 }
 namespace UnityEngine.Scripting { public class PreserveAttribute : Attribute { } }
-namespace UnityEngine.Rendering { public static class GraphicsSettings { public static object currentRenderPipeline = new Universal.UniversalRenderPipelineAsset(); } }
-namespace UnityEngine.Rendering.Universal { public class UniversalRenderPipelineAsset { public float renderScale = 1; } }
+namespace Newtonsoft.Json
+{
+    // Attribute presence is checked here; JSON serialization is verified separately with real Newtonsoft.
+    [AttributeUsage(AttributeTargets.Property | AttributeTargets.Field)]
+    public sealed class JsonIgnoreAttribute : Attribute { }
+}
 namespace TMPro
 {
     public enum AtlasPopulationMode { Static, Dynamic }
@@ -295,8 +297,11 @@ namespace MajdataPlay.i18n
     public sealed class Language
     {
         readonly string _name;
-        Language(string name) => _name = name;
-        public static readonly Language English = new("English"), Chinese = new("Chinese");
+        public readonly string Code;
+        Language(string name, string code) { _name = name; Code = code; }
+        public static readonly Language English = new("English", "en-US"), Chinese = new("Chinese", "zh-CN"),
+            TraditionalChinese = new("TraditionalChinese", "zh-TW"), Japanese = new("Japanese", "ja-JP");
+        public static readonly Language[] All = { English, Chinese, TraditionalChinese, Japanese };
         public override string ToString() => _name;
     }
     public static class Localization
@@ -322,18 +327,37 @@ namespace MajdataPlay.Diagnostics { public static class MajDebug { public static
 namespace MajdataPlay.Utils { public static class MajTimeline { public static float DeltaTime = 1f / 60; } }
 namespace MajdataPlay.IO
 {
-    public enum SensorArea { A1, E4, B4, B3, E6, B5, B6 }
-    public enum ButtonZone { A1, A2, A3, A4, A5, A6, A7 }
+    public enum SensorArea { A1, A8, E4, B4, B3, E6, B5, B6 }
+    public enum ButtonZone { A1, A2, A3, A4, A5, A6, A7, A8 }
     public enum SwitchStatus { On }
     public static class InputManager
     {
         public const float UI_CLICK_ANIMATION_DURATION_SEC = .1f;
         public static float TouchButtonRingEdge;
         public static bool PositivePressed, NegativePressed;
-        public static bool CheckSensorStatusInThisFrame(SensorArea area, SwitchStatus status) => area == SensorArea.E4 ? PositivePressed : area == SensorArea.E6 && NegativePressed;
-        public static bool CheckButtonStatusInThisFrame(ButtonZone zone, SwitchStatus status) => false;
-        public static bool IsButtonClickCompletedInThisFrame(ButtonZone zone) => false;
-        public static bool IsSensorClickCompletedInThisFrame(SensorArea area) => false;
+        public static readonly HashSet<ButtonZone> PressedButtons = new();
+        public static readonly HashSet<SensorArea> PressedSensors = new();
+        public static readonly HashSet<ButtonZone> CompletedButtons = new();
+        public static readonly HashSet<SensorArea> CompletedSensors = new();
+        public static readonly HashSet<ButtonZone> PressedThisFrameButtons = new();
+        public static readonly HashSet<SensorArea> PressedThisFrameSensors = new();
+        public static bool CheckSensorStatusInThisFrame(SensorArea area, SwitchStatus status) => PressedSensors.Contains(area) ||
+            (area == SensorArea.E4 ? PositivePressed : area == SensorArea.E6 && NegativePressed);
+        public static bool CheckButtonStatusInThisFrame(ButtonZone zone, SwitchStatus status) => PressedButtons.Contains(zone);
+        public static bool IsButtonClickCompletedInThisFrame(ButtonZone zone) => CompletedButtons.Contains(zone);
+        public static bool IsSensorClickCompletedInThisFrame(SensorArea area) => CompletedSensors.Contains(area);
+        public static bool IsButtonPressedInThisFrame(ButtonZone zone) => PressedThisFrameButtons.Contains(zone);
+        public static bool IsSensorPressedInThisFrame(SensorArea area) => PressedThisFrameSensors.Contains(area);
+        public static void ClearFrame()
+        {
+            PositivePressed = NegativePressed = false;
+            PressedButtons.Clear();
+            PressedSensors.Clear();
+            CompletedButtons.Clear();
+            CompletedSensors.Clear();
+            PressedThisFrameButtons.Clear();
+            PressedThisFrameSensors.Clear();
+        }
     }
     public static class CabinetLed { public static void SetAllLight(UnityEngine.Color color) { } public static void SetButtonLight(UnityEngine.Color color, int index) { } }
     public class AudioManager { public int VolumeReads, Previews; public void ReadVolumeFromSettings() => VolumeReads++; public void PlaySFX(string name) => Previews++; }
@@ -347,14 +371,13 @@ namespace MajdataPlay.Settings.Runtime
 namespace MajdataPlay.Settings
 {
     public enum OffsetUnitOption { Frame, Second }
-    public enum RenderQualityOption { Low, High }
-    public class GameSetting { public GameOptions Game { get; } = new(); public JudgeOptions Judge { get; } = new(); public DebugOptions Debug { get; } = new(); public AudioOptions Audio { get; } = new(); }
+    public class GameSetting { public GameOptions Game { get; } = new(); public JudgeOptions Judge { get; } = new(); public DisplayOptions Display { get; } = new(); public RenderingOptions Rendering { get; } = new(); public AudioOptions Audio { get; } = new(); public DebugOptions Debug { get; } = new(); }
     public class AudioOptions { public SFXVolume Volume { get; } = new(); }
     public class ChartSetting { [ChartDiscoveryProbe] public int ChartSpeed { get; set; } }
     public class GameOptions { public float SlideFadeInOffset { get; set; } }
     public class JudgeOptions { public float AudioOffset { get; set; } public float JudgeOffset { get; set; } public float AnswerOffset { get; set; } public float TouchPanelOffset { get; set; } }
     public class DebugOptions { public OffsetUnitOption OffsetUnit { get; set; } public float DisplayOffset { get; set; } public int MenuOptionIterationSpeed { get; set; } = 45; }
-    public class DisplayOptions { public RenderQualityOption RenderQuality { get; set; } = RenderQualityOption.High; public int RenderScale { get; set; } = 100; public bool VSync { get; set; } = true; }
+    public class DisplayOptions { public string Language { get; set; } = "en-US"; }
     public class SFXVolume { public float Answer { get; set; } public float Tap { get; set; } public float Ex { get; set; } public float Break { get; set; } public float Slide { get; set; } public float Touch { get; set; } public float Hanabi { get; set; } public float Voice { get; set; } }
     public static class ChartSettingStorage { public static object GetSetting(string hash) => new GameOptions(); public static void ConvertUnitToSecond() { } public static void ConvertUnitToFrame() { } }
 }
@@ -373,13 +396,48 @@ namespace MajdataPlay
         public static RunningMode Mode;
     }
     public static class MajInstances { public static IO.AudioManager AudioManager = new(); public static SceneSwitcher SceneSwitcher = new(); }
-    public sealed class SceneSwitcher { public void SwitchScene(string scene, bool value = true) { } public void FadeOut() { } }
-    public static class GameManager { public static int RenderScale; public static void ApplyRenderScale(int value) => RenderScale = value; public static void RequestSave(object value) { } }
+    public sealed class SceneSwitcher
+    {
+        public readonly List<string> SwitchedScenes = new();
+        public void SwitchScene(string scene, bool value = true) => SwitchedScenes.Add(scene);
+        public void FadeOut() { }
+    }
+    public static class GameManager
+    {
+        public static int RenderingApplies;
+        public static int SaveRequests;
+        public static object LastSaveRequester;
+        public static void ApplyRenderingSettings() => RenderingApplies++;
+        public static void RequestSave(object value) { SaveRequests++; LastSaveRequester = value; }
+    }
     public static class Translations
     {
-        public static string i18n(this string value) => $"{(global::MajdataPlay.i18n.Localization.Current)}:{value}";
+        static readonly Dictionary<string, Dictionary<string, string>> _renderingTranslations = new();
+        // Keep old stub behavior for unrelated tests; rendering uses the four actual project tables.
+        public static bool IsRenderingKey(string value) => value == "MAJSETTING_CATEGORY_Rendering" ||
+            new[] { "RenderQuality", "AntiAliasing", "TextureQuality", "RenderScale", "OutputMode", "CompatibilityMode", "SystemResolutionScaling", "FPSLimit", "VSync", "SystemScalingStatus", "DisplayBufferResolution", "SceneRenderResolution", "CurrentOutputPath" }
+                .Any(property => value == "MAJSETTING_PROPERTY_" + property || value.StartsWith("MAJSETTING_PROPERTY_" + property + "_", StringComparison.Ordinal));
+        public static string LookupRendering(string value, global::MajdataPlay.i18n.Language language)
+        {
+            if (!_renderingTranslations.TryGetValue(language.Code, out var table))
+            {
+                using var json = JsonDocument.Parse(File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "Languages", language.Code + ".json")));
+                table = json.RootElement.GetProperty("Translations").EnumerateObject()
+                    .Where(property => IsRenderingKey(property.Name)).ToDictionary(property => property.Name, property => property.Value.GetString());
+                _renderingTranslations.Add(language.Code, table);
+            }
+            return table.TryGetValue(value, out var text) ? text : null;
+        }
+        public static string i18n(this string value) => IsRenderingKey(value)
+            ? LookupRendering(value, global::MajdataPlay.i18n.Localization.Current) ?? value
+            : $"{(global::MajdataPlay.i18n.Localization.Current)}:{value}";
         public static bool Tryi18n(this string value, out string text)
         {
+            if (IsRenderingKey(value))
+            {
+                text = LookupRendering(value, global::MajdataPlay.i18n.Localization.Current);
+                return text != null;
+            }
             // Only bool values are translated so numeric assertions remain culture neutral.
             if (value.EndsWith("_True") || value.EndsWith("_False")) { text = value.i18n(); return true; }
             text = string.Empty;
@@ -387,3 +445,5 @@ namespace MajdataPlay
         }
     }
 }
+
+namespace MajdataPlay.Rendering { public static class MajAndroidDisplayResolution { public static MajSystemScalingStatus Status => MajSystemScalingStatus.Unsupported; } }

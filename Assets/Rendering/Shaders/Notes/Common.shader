@@ -1,4 +1,4 @@
-Shader "Notes/Common"
+Shader "Maj/Notes/Common"
 {
     Properties
     {
@@ -17,6 +17,7 @@ Shader "Notes/Common"
         }
         Pass
         {
+            Name "NoteCommon"
             Tags { "LightMode" = "SRPDefaultUnlit" }
             ZTest Always
             Cull Off
@@ -27,7 +28,7 @@ Shader "Notes/Common"
             #pragma multi_compile_instancing 
             #pragma vertex vert
             #pragma fragment frag
-            #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
+            #include "Assets/Rendering/MajRenderPipeline/Library/MajCore.hlsl"
 
             sampler2D _MainTex;
 
@@ -46,7 +47,8 @@ Shader "Notes/Common"
             struct v2f
             {
                 float4 pos : SV_POSITION;
-                half2  uv : TEXCOORD0;
+                // 大皮肤图集的 UV 保持 float，避免移动端半精度造成块状采样。
+                float2 uv : TEXCOORD0;
                 half4 color : COLOR;
                 UNITY_VERTEX_INPUT_INSTANCE_ID 
             };
@@ -67,7 +69,7 @@ Shader "Notes/Common"
             {
                 UNITY_SETUP_INSTANCE_ID(i);
                 
-                half4 renderTex = tex2D(_MainTex, i.uv) * i.color;
+                half4 renderTex = MAJ_SAMPLE_TEX2D(_MainTex, i.uv) * i.color;
 
                 float shineMode = UNITY_ACCESS_INSTANCED_PROP(Props, _ShineMode);
 
@@ -76,10 +78,11 @@ Shader "Notes/Common"
                     return renderTex;
                 }
 
+                // 时间/相位和 sin 保留 float，避免长时间运行后周期抖动；之后的着色系数有界。
                 float wave = sin(_Time.x * 250.0);
 
-                float brightness;
-                float contrast;
+                half brightness;
+                half contrast;
 
                 if (shineMode < 1.5)
                 {

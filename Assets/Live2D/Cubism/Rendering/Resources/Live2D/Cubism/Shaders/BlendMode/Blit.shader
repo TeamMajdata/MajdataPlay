@@ -22,7 +22,6 @@ Shader "Unlit/BlendMode/Blit"
             "RenderType" = "Transparent"
             "PreviewType" = "Plane"
             "CanUseSpriteAtlas" = "True"
-            "RenderPipeline" = "UniversalPipeline"
         }
 
         Cull Off
@@ -36,7 +35,7 @@ Shader "Unlit/BlendMode/Blit"
             #pragma vertex vert
             #pragma fragment frag
 
-            #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
+            #include "../CubismMajCore.cginc"
 
             struct Attributes
             {

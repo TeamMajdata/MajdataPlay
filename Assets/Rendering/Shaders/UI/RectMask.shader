@@ -1,4 +1,4 @@
-Shader "UI/Rect Mask"
+Shader "Maj/UI/Rect Mask"
 {
     Properties
     {
@@ -38,6 +38,7 @@ Shader "UI/Rect Mask"
 
         Pass
         {
+            Name "RectMask"
             Tags { "LightMode"="SRPDefaultUnlit" }
             HLSLPROGRAM
 
@@ -45,7 +46,7 @@ Shader "UI/Rect Mask"
             #pragma fragment frag
 
 
-            #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
+            #include "Assets/Rendering/MajRenderPipeline/Library/MajCore.hlsl"
 
 
 
@@ -116,6 +117,7 @@ Shader "UI/Rect Mask"
 
 
 
+            // RectTransform coordinates can span thousands of pixels; keep fade boundaries in float.
             float AxisMask(
                 float pos,
                 float size,
@@ -177,7 +179,7 @@ Shader "UI/Rect Mask"
             {
 
                 half4 col =
-                    tex2D(
+                    MAJ_SAMPLE_TEX2D(
                         _MainTex,
                         i.uv
                     )

@@ -7,7 +7,7 @@ float2 UnpackUV(float uv)
 	return output * 0.001953125;
 }
 
-fixed4 GetColor(half d, fixed4 faceColor, fixed4 outlineColor, half outline, half softness)
+half4 GetColor(half d, half4 faceColor, half4 outlineColor, half outline, half softness)
 {
 	half faceAlpha = 1-saturate((d - outline * 0.5 + softness * 0.5) / (1.0 + softness));
 	half outlineAlpha = saturate((d + outline * 0.5)) * sqrt(min(1.0, outline));

@@ -60,6 +60,7 @@ namespace MajdataPlay.Scenes.Setting
         OffsetUnitOption _lastOffsetUnit;
         InputRepeatState _categoryInput;
         InputRepeatState _optionInput;
+        bool _advancedInputHeld;
 
         readonly SettingConfig _settingConfig = MajEnv.RuntimeConfig?.Setting ?? new();
         void Awake()
@@ -204,17 +205,57 @@ namespace MajdataPlay.Scenes.Setting
             {
                 return;
             }
+            var currentMenu = menus[Index];
             var isCalibratorRequested = InputManager.IsButtonClickCompletedInThisFrame(ButtonZone.A1) ||
                                         InputManager.IsSensorClickCompletedInThisFrame(SensorArea.A1);
             if (isCalibratorRequested)
             {
+                currentMenu.ResetRenderingAdvancedInput();
                 MajInstances.AudioManager.ReadVolumeFromSettings();
                 _isExited = true;
                 MajInstances.SceneSwitcher.SwitchScene("Calibrator");
                 return;
             }
+            var advancedPressedThisFrame = InputManager.IsButtonPressedInThisFrame(ButtonZone.A8) ||
+                                           InputManager.IsSensorPressedInThisFrame(SensorArea.A8);
+            var advancedHeld = InputManager.CheckButtonStatusInThisFrame(ButtonZone.A8, SwitchStatus.On) ||
+                               InputManager.CheckSensorStatusInThisFrame(SensorArea.A8, SwitchStatus.On);
+            // ClickCompleted is a delayed animation notification with one pending slot; rapid
+            // presses can be merged there. The hidden gesture counts immediate press edges.
+            // Keep one latch across contexts until both A8 channels release, so a delayed
+            // second channel or a held key while changing rows cannot count the same press twice.
+            var isAdvancedClicked = advancedPressedThisFrame && !_advancedInputHeld;
+            _advancedInputHeld = advancedHeld;
             var isExitRequested = InputManager.IsButtonClickCompletedInThisFrame(ButtonZone.A4) ||
                                   InputManager.IsButtonClickCompletedInThisFrame(ButtonZone.A5);
+            // Calibration / exit retain their delayed completed-click actions, but a held
+            // navigation control must interrupt the consecutive A8 gesture immediately.
+            var sceneNavigationHeld =
+                InputManager.CheckButtonStatusInThisFrame(ButtonZone.A1, SwitchStatus.On) ||
+                InputManager.CheckSensorStatusInThisFrame(SensorArea.A1, SwitchStatus.On) ||
+                InputManager.CheckButtonStatusInThisFrame(ButtonZone.A4, SwitchStatus.On) ||
+                InputManager.CheckButtonStatusInThisFrame(ButtonZone.A5, SwitchStatus.On);
+            var nextCategoryPressed = InputManager.CheckButtonStatusInThisFrame(ButtonZone.A2, SwitchStatus.On);
+            var previousCategoryPressed = InputManager.CheckButtonStatusInThisFrame(ButtonZone.A7, SwitchStatus.On);
+            var nextOptionPressed = InputManager.CheckButtonStatusInThisFrame(ButtonZone.A3, SwitchStatus.On);
+            var previousOptionPressed = InputManager.CheckButtonStatusInThisFrame(ButtonZone.A6, SwitchStatus.On);
+            var optionValuePressed =
+                InputManager.CheckSensorStatusInThisFrame(SensorArea.E4, SwitchStatus.On) ||
+                InputManager.CheckSensorStatusInThisFrame(SensorArea.B4, SwitchStatus.On) ||
+                InputManager.CheckSensorStatusInThisFrame(SensorArea.B3, SwitchStatus.On) ||
+                InputManager.CheckSensorStatusInThisFrame(SensorArea.E6, SwitchStatus.On) ||
+                InputManager.CheckSensorStatusInThisFrame(SensorArea.B5, SwitchStatus.On) ||
+                InputManager.CheckSensorStatusInThisFrame(SensorArea.B6, SwitchStatus.On);
+            var interruptsAdvancedInput = isExitRequested || sceneNavigationHeld || nextCategoryPressed || previousCategoryPressed ||
+                nextOptionPressed || previousOptionPressed || optionValuePressed;
+            if (interruptsAdvancedInput)
+            {
+                currentMenu.ResetRenderingAdvancedInput();
+            }
+            // Navigation / edits discard a simultaneous press rather than postponing it.
+            // Unrelated release events do not reset the counter or unlock the A8 latch.
+            // A1 keeps its original completed-click calibrator behavior in every context.
+            currentMenu.TryHandleRenderingAdvancedInput(isAdvancedClicked && !interruptsAdvancedInput);
             if (isExitRequested)
             {
                 MajInstances.AudioManager.ReadVolumeFromSettings();
@@ -229,14 +270,11 @@ namespace MajdataPlay.Scenes.Setting
                 }
                 return;
             }
-            var currentMenu = menus[Index];
             currentMenu.HandleInput();
             if (UpdateOffsetUnitIfNeeded())
             {
                 currentMenu.RefreshVisibleEnumerators();
             }
-            var nextCategoryPressed = InputManager.CheckButtonStatusInThisFrame(ButtonZone.A2, SwitchStatus.On);
-            var previousCategoryPressed = InputManager.CheckButtonStatusInThisFrame(ButtonZone.A7, SwitchStatus.On);
             if (nextCategoryPressed || previousCategoryPressed)
             {
                 if (_categoryInput.Update(
@@ -254,8 +292,6 @@ namespace MajdataPlay.Scenes.Setting
             }
             _categoryInput.Reset();
 
-            var nextOptionPressed = InputManager.CheckButtonStatusInThisFrame(ButtonZone.A3, SwitchStatus.On);
-            var previousOptionPressed = InputManager.CheckButtonStatusInThisFrame(ButtonZone.A6, SwitchStatus.On);
             if (nextOptionPressed || previousOptionPressed)
             {
                 if (_optionInput.Update(

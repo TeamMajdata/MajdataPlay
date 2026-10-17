@@ -17,6 +17,7 @@ namespace MajdataPlay.Scenes.Setting
     {
         const float OPTION_MOVE_DURATION = 0.18f;
         const int VISIBLE_OPTION_RADIUS = 1;
+        const int RENDERING_ADVANCED_CLICK_COUNT = 10;
         // Three resting views plus one incoming/outgoing view during a slide.
         internal const int OPTION_POOL_CAPACITY = VISIBLE_OPTION_RADIUS * 2 + 2;
         static readonly Vector3 UNSELECTED_OPTION_SCALE = Vector3.one * 0.6f;
@@ -44,6 +45,13 @@ namespace MajdataPlay.Scenes.Setting
 
         PropertyInfo[] _properties = Array.Empty<PropertyInfo>();
         OptionData[] _optionData = Array.Empty<OptionData>();
+        int[] _displayedPropertyIndices = Array.Empty<int>();
+        int _displayedOptionCount;
+        RenderingOptions? _renderingOptions;
+        bool _compatibilityMode;
+        bool _customRendering;
+        RenderingQualityOption _renderingQuality;
+        int _renderingAdvancedClickCount;
         readonly Option?[] _visibleOptions = new Option?[OPTION_POOL_CAPACITY];
         readonly int[] _visibleIndices = { -1, -1, -1, -1 };
 
@@ -70,6 +78,9 @@ namespace MajdataPlay.Scenes.Setting
             {
                 _optionData[i] = new OptionData(_properties[i], Instance);
             }
+            _displayedPropertyIndices = new int[_properties.Length];
+            _renderingOptions = Instance as RenderingOptions;
+            UpdateOptionVisibility(true);
             _manager.InitializeOptionPool(_optionPrefab);
             _isInitialized = true;
         }
@@ -80,6 +91,7 @@ namespace MajdataPlay.Scenes.Setting
         }
         void LateUpdate()
         {
+            UpdateOptionVisibility();
             if (_needsLayout)
             {
                 SnapDisplayerTo(SelectedIndex);
@@ -87,6 +99,7 @@ namespace MajdataPlay.Scenes.Setting
         }
         void OnDisable()
         {
+            ResetRenderingAdvancedInput();
             _needsLayout = false;
             _optionAnim.TryCancel();
             ReleaseVisibleOptions();
@@ -109,13 +122,69 @@ namespace MajdataPlay.Scenes.Setting
         }
         internal void HandleInput()
         {
-            if (!_isInitialized || _properties.Length == 0)
+            if (!_isInitialized || _displayedOptionCount == 0)
             {
                 return;
             }
 
+            if (UpdateOptionVisibility())
+            {
+                SnapDisplayerTo(SelectedIndex);
+            }
             FindVisibleOption(SelectedIndex)?.HandleInput();
+            // The compatibility switch changes the visible list after its input is handled.
+            if (UpdateOptionVisibility())
+            {
+                SnapDisplayerTo(SelectedIndex);
+            }
         }
+        /// <summary>A8 on the rendering quality row belongs to the advanced-settings gesture.</summary>
+        internal bool TryHandleRenderingAdvancedInput(bool clicked)
+        {
+            if (!_isInitialized || _renderingOptions is null || !isActiveAndEnabled)
+            {
+                ResetRenderingAdvancedInput();
+                return false;
+            }
+            if (UpdateOptionVisibility())
+            {
+                SnapDisplayerTo(SelectedIndex);
+            }
+            if (_renderingOptions.CompatibilityMode || _displayedOptionCount == 0 ||
+                GetDisplayedProperty(SelectedIndex).Name != nameof(RenderingOptions.RenderQuality))
+            {
+                ResetRenderingAdvancedInput();
+                return false;
+            }
+
+            // Consume A8 on this row even after unlocking, without repeatedly applying or saving.
+            if (!clicked || _renderingOptions.RenderQuality == RenderingQualityOption.Custom)
+            {
+                return true;
+            }
+            _renderingAdvancedClickCount++;
+            if (_renderingAdvancedClickCount < RENDERING_ADVANCED_CLICK_COUNT)
+            {
+                return true;
+            }
+
+            ResetRenderingAdvancedInput();
+            if (_renderingOptions.EnterCustomMode())
+            {
+                GameManager.ApplyRenderingSettings();
+                GameManager.RequestSave(this);
+                UpdateOptionVisibility();
+                SnapDisplayerTo(SelectedIndex);
+            }
+            return true;
+        }
+
+        // 普通档位只提供常用控制；缩放与诊断统一由自定义入口开放。
+        static bool IsRenderingCommonOption(string name) => name is
+            nameof(RenderingOptions.FPSLimit) or nameof(RenderingOptions.VSync) or
+            nameof(RenderingOptions.CompatibilityMode);
+
+        internal void ResetRenderingAdvancedInput() => _renderingAdvancedClickCount = 0;
         internal void RefreshVisibleEnumerators()
         {
             if (!_isInitialized)
@@ -137,13 +206,14 @@ namespace MajdataPlay.Scenes.Setting
         }
         void MoveOption(int direction)
         {
+            UpdateOptionVisibility();
             var targetIndex = SelectedIndex + direction;
             if (targetIndex < 0)
             {
                 _manager.PreviousMenu();
                 return;
             }
-            if (targetIndex >= _properties.Length)
+            if (targetIndex >= _displayedOptionCount)
             {
                 _manager.NextMenu();
                 return;
@@ -176,14 +246,14 @@ namespace MajdataPlay.Scenes.Setting
         void UpdateDisplayerPosition()
         {
             _needsLayout = false;
-            if (_properties.Length == 0)
+            if (_displayedOptionCount == 0)
             {
                 _manager.SetDescriptionText(string.Empty);
                 return;
             }
 
             var visibleStart = Mathf.Max(0, Mathf.FloorToInt(_listCursorPos) - VISIBLE_OPTION_RADIUS);
-            var visibleEnd = Mathf.Min(_properties.Length - 1, Mathf.CeilToInt(_listCursorPos) + VISIBLE_OPTION_RADIUS);
+            var visibleEnd = Mathf.Min(_displayedOptionCount - 1, Mathf.CeilToInt(_listCursorPos) + VISIBLE_OPTION_RADIUS);
             // Release first, so every incoming view can reuse an outgoing view.
             for (var slot = 0; slot < _visibleOptions.Length; slot++)
             {
@@ -222,36 +292,53 @@ namespace MajdataPlay.Scenes.Setting
 
         internal void ToTail()
         {
-            if (!_isInitialized || _properties.Length == 0)
+            if (!_isInitialized || _displayedOptionCount == 0)
             {
                 return;
             }
-            SelectOption(_properties.Length - 1, false);
+            UpdateOptionVisibility();
+            SelectOption(_displayedOptionCount - 1, false);
         }
         internal void ToHead()
         {
-            if (!_isInitialized || _properties.Length == 0)
+            if (!_isInitialized || _displayedOptionCount == 0)
             {
                 return;
             }
+            UpdateOptionVisibility();
             SelectOption(0, false);
         }
 
         internal void ToOption(string optionName)
         {
-            if (!_isInitialized || _properties.Length == 0)
+            if (!_isInitialized || _displayedOptionCount == 0)
             {
                 return;
             }
-            var index = string.IsNullOrEmpty(optionName)
-                ? 0
-                : Array.FindIndex(_properties, x => x.Name == optionName);
+            UpdateOptionVisibility();
+            var index = 0;
+            if (!string.IsNullOrEmpty(optionName))
+            {
+                for (var i = 0; i < _displayedOptionCount; i++)
+                {
+                    if (GetDisplayedProperty(i).Name == optionName)
+                    {
+                        index = i;
+                        break;
+                    }
+                }
+            }
             SelectOption(index, false);
         }
         void SelectOption(int index, bool useAnimation)
         {
-            SelectedIndex = index.Clamp(0, _properties.Length - 1);
-            _settingConfig.SelectedOption = _properties[SelectedIndex].Name;
+            var nextIndex = index.Clamp(0, _displayedOptionCount - 1);
+            if (SelectedIndex != nextIndex)
+            {
+                ResetRenderingAdvancedInput();
+            }
+            SelectedIndex = nextIndex;
+            _settingConfig.SelectedOption = GetDisplayedProperty(SelectedIndex).Name;
             if (useAnimation)
             {
                 DisplayerMoveTo(SelectedIndex, OPTION_MOVE_DURATION);
@@ -270,7 +357,7 @@ namespace MajdataPlay.Scenes.Setting
             }
 
             var slot = Array.IndexOf(_visibleIndices, -1);
-            var data = _optionData[index];
+            var data = _optionData[_displayedPropertyIndices[index]];
             option = _manager.RentOption(transform);
             _visibleIndices[slot] = index;
             _visibleOptions[slot] = option;
@@ -299,6 +386,68 @@ namespace MajdataPlay.Scenes.Setting
             _optionAnim.TryCancel();
             _listCursorPos = targetPos;
             UpdateDisplayerPosition();
+        }
+
+        PropertyInfo GetDisplayedProperty(int index) => _properties[_displayedPropertyIndices[index]];
+
+        bool UpdateOptionVisibility(bool force = false)
+        {
+            var compatibilityMode = _renderingOptions?.CompatibilityMode ?? false;
+            var quality = _renderingOptions?.RenderQuality ?? RenderingQualityOption.Performance;
+            var customRendering = quality == RenderingQualityOption.Custom;
+            if (_renderingQuality != quality)
+            {
+                ResetRenderingAdvancedInput();
+                _renderingQuality = quality;
+            }
+            if (!force && (_renderingOptions is null ||
+                (_compatibilityMode == compatibilityMode && _customRendering == customRendering)))
+            {
+                return false;
+            }
+
+            var selectedProperty = _displayedOptionCount > 0
+                ? GetDisplayedProperty(SelectedIndex).Name
+                : string.Empty;
+            _compatibilityMode = compatibilityMode;
+            _customRendering = customRendering;
+            ResetRenderingAdvancedInput();
+            _optionAnim.TryCancel();
+            // Models and enumerators stay alive, including hidden labels needed for font warmup.
+            // Rebuild only when preset/custom or compatibility visibility changes.
+            ReleaseVisibleOptions();
+            _displayedOptionCount = 0;
+            for (var i = 0; i < _properties.Length; i++)
+            {
+                if (compatibilityMode && !IsRenderingCommonOption(_properties[i].Name))
+                {
+                    continue;
+                }
+                if (_renderingOptions is not null && !compatibilityMode && !customRendering &&
+                    _properties[i].Name != nameof(RenderingOptions.RenderQuality) &&
+                    !IsRenderingCommonOption(_properties[i].Name))
+                {
+                    continue;
+                }
+                _displayedPropertyIndices[_displayedOptionCount++] = i;
+            }
+
+            SelectedIndex = 0;
+            for (var i = 0; i < _displayedOptionCount; i++)
+            {
+                if (GetDisplayedProperty(i).Name == selectedProperty)
+                {
+                    SelectedIndex = i;
+                    break;
+                }
+            }
+            _listCursorPos = SelectedIndex;
+            _needsLayout = _isInitialized && isActiveAndEnabled;
+            if (_needsLayout && _displayedOptionCount > 0)
+            {
+                _settingConfig.SelectedOption = GetDisplayedProperty(SelectedIndex).Name;
+            }
+            return true;
         }
 
         static Vector3 GetOptionTransformScale(float diff)

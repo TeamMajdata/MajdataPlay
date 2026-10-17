@@ -42,7 +42,6 @@ Shader "Unlit/BlendMode/BlendImage"
             "RenderType" = "Transparent"
             "PreviewType" = "Plane"
             "CanUseSpriteAtlas" = "True"
-            "RenderPipeline" = "UniversalPipeline"
         }
 
         Cull     [_Cull]
@@ -58,7 +57,7 @@ Shader "Unlit/BlendMode/BlendImage"
             #pragma multi_compile _ CUBISM_INVERT_ON
             #pragma multi_compile _ CUBISM_MASK_ON
 
-            #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
+            #include "../CubismMajCore.cginc"
             #include_with_pragmas "CubismVariants.cginc"
             #include "AlphaBlendVariants.cginc"
             #include "ColorBlendVariants.cginc"
@@ -145,7 +144,7 @@ Shader "Unlit/BlendMode/BlendImage"
                 CUBISM_INITIALIZE_VERTEX_OUTPUT(IN, OUT);
 
                 // Compute screen position for sampling _RenderTexture.
-                OUT.texcoord2 = ComputeScreenPos(OUT.vertex);
+                OUT.texcoord2 = CubismComputeScreenPos(OUT.vertex);
 
                 return OUT;
             }
@@ -161,7 +160,7 @@ Shader "Unlit/BlendMode/BlendImage"
                 float Ad = renderTextureColor.a;
 
                 // Cs (Straight)
-                half4 mainTextureColor = tex2D(_MainTex, IN.texcoord);
+                half4 mainTextureColor = MAJ_SAMPLE_TEX2D(_MainTex, IN.texcoord);
                 // Multiply
                 mainTextureColor.rgb *= cubism_MultiplyColor.rgb;
                 // Screen

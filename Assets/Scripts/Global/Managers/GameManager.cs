@@ -3,6 +3,7 @@ using Cysharp.Threading.Tasks;
 using MajdataPlay.Collections;
 using MajdataPlay.i18n;
 using MajdataPlay.IO;
+using MajdataPlay.Rendering;
 using MajdataPlay.Scenes.Test;
 using MajdataPlay.Settings;
 using MajdataPlay.Timer;
@@ -29,7 +30,6 @@ using UnityEngine;
 using UnityEngine.SceneManagement;
 using UnityEngine.Scripting;
 using UnityEngine.Rendering;
-using UnityEngine.Rendering.Universal;
 using MajdataPlay.Diagnostics;
 using MajdataPlay.Databases; // DO NOT REMOVE IT !!!
 
@@ -177,8 +177,8 @@ namespace MajdataPlay
             }
 
             ApplyDisplaySettings();
-#if !(UNITY_ANDROID || UNITY_IOS)
-            QualitySettings.vSyncCount = Settings.Display.VSync ? 1 : 0;
+#if UNITY_EDITOR || !(UNITY_ANDROID || UNITY_IOS)
+            QualitySettings.vSyncCount = Settings.Rendering.VSync ? 1 : 0;
 #endif
             QualitySettings.maxQueuedFrames = Settings.Debug.MaxQueuedFrames;
             DetectHWEncoder();
@@ -283,26 +283,47 @@ namespace MajdataPlay
         }
         private void ApplyDisplaySettings()
         {
-            var displayOptions = MajEnv.Settings.Display;
-            QualitySettings.SetQualityLevel((int)displayOptions.RenderQuality, true);
-#if UNITY_STANDALONE
-            QualitySettings.vSyncCount = displayOptions.VSync ? 1 : 0;
+            var renderingOptions = MajEnv.Settings.Rendering;
+            ApplyRenderingSettings();
+#if UNITY_STANDALONE || UNITY_EDITOR
+            QualitySettings.vSyncCount = renderingOptions.VSync ? 1 : 0;
 #endif
-            Application.targetFrameRate = displayOptions.FPSLimit;
-            ApplyRenderScale(displayOptions.RenderScale);
+            Application.targetFrameRate = renderingOptions.FPSLimit;
         }
 
-        internal static void ApplyRenderScale(int percentage)
+        internal static void ApplyRenderingSettings()
         {
-            if (GraphicsSettings.currentRenderPipeline is UniversalRenderPipelineAsset pipeline)
-            {
-                pipeline.renderScale = Mathf.Clamp(percentage, 50, 100) / 100f;
-            }
+            // Unity Quality 仅保留 Default 引擎基线；菜单预设不再索引多个质量资产。
+            // 不为切换 MSAA / 纹理采样精度反复重建整个管线。
+            const int UnityDefaultQualityLevel = 0;
+            int baseline = Mathf.Min(UnityDefaultQualityLevel, QualitySettings.names.Length - 1);
+            if (baseline >= 0 && QualitySettings.GetQualityLevel() != baseline)
+                QualitySettings.SetQualityLevel(baseline, true);
+            var parameters = MajEnv.Settings.Rendering.GetEffectiveParameters();
+            // 保留完整 mip 链；纹理精度是采样 LOD 的 +0/+1/+2，而不是最高可用 mip 的下限。
+            if (QualitySettings.globalTextureMipmapLimit != 0)
+                QualitySettings.globalTextureMipmapLimit = 0;
+            if (GraphicsSettings.currentRenderPipeline is MajRenderPipelineAsset pipeline)
+                pipeline.ConfigureRuntimeRendering(parameters.RenderScale / 100f,
+                    (MajMSAAMode)parameters.MSAASamples, parameters.ResolveToScreen, parameters.MipmapBias);
+#if UNITY_ANDROID && !UNITY_EDITOR
+            // 两个比例独立相乘；兼容模式暂时恢复原系统缓冲。
+            MajAndroidDisplayResolution.Configure(GraphicsSettings.currentRenderPipeline is MajRenderPipelineAsset
+                && !MajEnv.Settings.Rendering.CompatibilityMode
+                ? MajEnv.Settings.Rendering.SystemResolutionScaling : 100);
+#endif
+#if UNITY_STANDALONE || UNITY_EDITOR
+            // SetQualityLevel 会应用资产的 VSync 值，同步方式继续尊重独立显示选项。
+            QualitySettings.vSyncCount = MajEnv.Settings.Rendering.VSync ? 1 : 0;
+#endif
         }
 
         private void ApplyScreenConfig()
         {
-#if UNITY_STANDALONE_WIN || UNITY_STANDALONE_OSX
+            // Editor 的输出尺寸由 Game View / Device Simulator 决定，不能套用桌面保存的分辨率。
+            // Simulator 会把请求的 9:16 画面铺到所选设备上，导致长屏纵向、宽屏横向拉伸。
+            // 桌面 Player 保留原来的分辨率与全屏设置；MRP RenderScale 和 FPS 仍独立生效。
+#if (UNITY_STANDALONE_WIN || UNITY_STANDALONE_OSX) && !UNITY_EDITOR
             if (MajEnv.Mode != RunningMode.View)
             {
                 var fullScreen = Settings.Debug.FullScreen;
@@ -338,7 +359,7 @@ namespace MajdataPlay
                 }
             }
 #endif
-            Application.targetFrameRate = Settings.Display.FPSLimit;
+            Application.targetFrameRate = Settings.Rendering.FPSLimit;
         }
 
 #if UNITY_STANDALONE_OSX && !UNITY_EDITOR
@@ -351,6 +372,9 @@ namespace MajdataPlay
 
         void Update()
         {
+#if UNITY_ANDROID && !UNITY_EDITOR
+            MajAndroidDisplayResolution.Tick();
+#endif
             ChangeTimerIfRequested();
             ChartImporter.OnUpdate();
         }
@@ -404,6 +428,9 @@ namespace MajdataPlay
         #region Events
         void OnApplicationQuit()
         {
+#if UNITY_ANDROID && !UNITY_EDITOR
+            MajAndroidDisplayResolution.Restore();
+#endif
             Screen.sleepTimeout = SleepTimeout.SystemSetting;
             RequestSave(this);
             try
@@ -437,6 +464,9 @@ namespace MajdataPlay
 
         void OnApplicationPause(bool pause)
         {
+#if UNITY_ANDROID && !UNITY_EDITOR
+            if (!pause) MajAndroidDisplayResolution.RequestRefresh();
+#endif
             if (OnAppPause is not null)
             {
                 OnAppPause(this, pause);

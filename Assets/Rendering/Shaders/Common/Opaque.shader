@@ -1,11 +1,11 @@
-Shader "Common/Opaque"
+Shader "Maj/Common/Opaque"
 {
     Properties
     {
         _ListDepthOffset ("List Depth Offset", Float) = 0
         [MainTexture] _MainTex ("Texture", 2D) = "white" {}
         [MainColor] _Color ("Tint", Color) = (1,1,1,1)
-        _Cutoff ("Alpha Cutoff", Range(0, 1)) = 0.5
+        _Cutoff ("Alpha Cutoff (MSAA Off)", Range(0, 1)) = 0.5
     }
 
     SubShader
@@ -24,6 +24,7 @@ Shader "Common/Opaque"
         ZWrite On
         ZTest LEqual
         Blend Off
+        AlphaToMask On
 
         Pass
         {
@@ -36,10 +37,13 @@ Shader "Common/Opaque"
             #pragma target 3.0
             #pragma multi_compile_instancing
 
-            #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
+            #include "Assets/Rendering/MajRenderPipeline/Library/MajCore.hlsl"
 
             TEXTURE2D(_MainTex);
             SAMPLER(sampler_MainTex);
+
+            // MRP 根据已创建场景附件的实际样本数设置；所有共用材质统一使用，不增加变体。
+            float _MajAlphaToMaskAvailable;
 
             CBUFFER_START(UnityPerMaterial)
                 float _ListDepthOffset;
@@ -83,7 +87,15 @@ Shader "Common/Opaque"
                 UNITY_SETUP_STEREO_EYE_INDEX_POST_VERTEX(input);
                 half4 color = SAMPLE_TEXTURE2D(_MainTex, sampler_MainTex, input.uv) * input.color;
 
-                // Fully transparent pixels remain holes even when the cutoff is zero.
+                if (_MajAlphaToMaskAvailable > 0.5)
+                {
+                    // 标准最小 A2C：直接以原 Alpha 控制样本覆盖，不估算、不重映射 cutoff。
+                    // Alpha=0 的样本不写颜色/深度；Blend Off 与不透明队列保持不变。
+                    return color;
+                }
+
+                // 无 MSAA 时保留原硬裁切并输出 Alpha=1，不让单采样目标处理部分覆盖率。
+                // cutoff=0 时，完全透明像素仍需丢弃，不能挡住后层。
                 clip(color.a - max(_Cutoff, 0.0001));
                 return half4(color.rgb, 1.0h);
             }

@@ -1,4 +1,4 @@
-Shader "UI/MajRadar"
+Shader "Maj/UI/MajRadar"
 {
     Properties
     {
@@ -40,7 +40,7 @@ Shader "UI/MajRadar"
             #pragma vertex vert
             #pragma fragment frag
 
-            #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
+            #include "Assets/Rendering/MajRenderPipeline/Library/MajCore.hlsl"
 
             struct Attributes
             {
@@ -81,6 +81,7 @@ Shader "UI/MajRadar"
                 return OUT;
             }
 
+            // Polygon tests, distances and derivative AA stay float to avoid shifting thin radar edges.
             float2 GetVertex(int idx)
             {
                 float value;

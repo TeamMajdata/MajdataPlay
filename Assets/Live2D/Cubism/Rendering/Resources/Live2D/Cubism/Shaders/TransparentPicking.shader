@@ -21,7 +21,6 @@ Shader "Live2D Cubism/TransparentPicking"
             "Queue" = "Transparent"
             "RenderType" = "Transparent"
             "IgnoreProjector" = "True"
-            "RenderPipeline" = "UniversalPipeline"
         }
 
         Pass
@@ -38,7 +37,7 @@ Shader "Live2D Cubism/TransparentPicking"
             #pragma vertex vert
             #pragma fragment frag
 
-            #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
+            #include "CubismMajCore.cginc"
 
             struct Attributes
             {
@@ -75,7 +74,7 @@ Shader "Live2D Cubism/TransparentPicking"
             #pragma vertex vert
             #pragma fragment frag
 
-            #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
+            #include "CubismMajCore.cginc"
 
             TEXTURE2D(_MainTex);
             SAMPLER(sampler_MainTex);
@@ -126,7 +125,7 @@ Shader "Live2D Cubism/TransparentPicking"
             #pragma vertex vert
             #pragma fragment frag
 
-            #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
+            #include "CubismMajCore.cginc"
 
             TEXTURE2D(_MainTex);
             SAMPLER(sampler_MainTex);

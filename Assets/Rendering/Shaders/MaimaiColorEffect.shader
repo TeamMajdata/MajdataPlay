@@ -1,4 +1,4 @@
-Shader "Unlit/MaimaiColorEffect"
+Shader "Maj/Effects/MaimaiColorEffect"
 {
 	Properties
 	{
@@ -27,6 +27,7 @@ Shader "Unlit/MaimaiColorEffect"
 
 			Pass
 			{
+			    Name "MaimaiColorEffect"
 				Tags { "LightMode" = "SRPDefaultUnlit" }
 				ZWrite Off
 				Blend SrcAlpha OneMinusSrcAlpha
@@ -35,7 +36,7 @@ Shader "Unlit/MaimaiColorEffect"
 				#pragma vertex vert
 				#pragma fragment frag
 
-			#include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
+			#include "Assets/Rendering/MajRenderPipeline/Library/MajCore.hlsl"
 
 			struct appdata
 			{
@@ -61,10 +62,11 @@ Shader "Unlit/MaimaiColorEffect"
 			float _OuterLB;
 			float _OuterUB;
 
-			float3 hsb2rgb(float3 c) {
-				float3 rgb = clamp(abs(fmod(c.x * 6.0 + float3(0.0, 4.0, 2.0), 6) - 3.0) - 1.0, 0, 1);
-				rgb = rgb * rgb * (3.0 - 2.0 * rgb);
-				return c.z * lerp(float3(1, 1, 1), rgb, c.y);
+			// hue 的周期运算继续使用 float；clamp 后 RGB 有界，转 half 做颜色计算。
+			half3 hsb2rgb(float3 c) {
+				half3 rgb = (half3)clamp(abs(fmod(c.x * 6.0 + float3(0.0, 4.0, 2.0), 6) - 3.0) - 1.0, 0, 1);
+				rgb = rgb * rgb * (3.0h - 2.0h * rgb);
+				return (half)c.z * lerp(half3(1.0h, 1.0h, 1.0h), rgb, (half)c.y);
 			}
 
 			float clamp01(float x, float lb, float ub) {
@@ -82,11 +84,12 @@ Shader "Unlit/MaimaiColorEffect"
 			half4 frag(v2f i) : SV_Target
 			{
 				// sample the texture
-				half4 col = tex2D(_MainTex, i.uv);
+				half4 col = MAJ_SAMPLE_TEX2D(_MainTex, i.uv);
 
 				float x = i.uv.x - 0.5;
 				float y = i.uv.y - 0.5;
 
+				// 径向边界可窄至 0.0001，坐标、归一化除法、角度和时间分段保留 float。
 				float radius = clamp((y * y + x * x) * 4, 0, 1) * _Alpha;
 				float alpha = 1.0 * _Alpha * clamp01(radius, _InnerLB, _InnerUB) * clamp01(1 - radius, 1 - _OuterUB, 1 - _OuterLB);
 
@@ -96,7 +99,7 @@ Shader "Unlit/MaimaiColorEffect"
 
 				float hsb_h = ceil(fmod(angle * 3 + ceil(_Time.y * _Speed * 5) * 0.2, 1) * 5) / 5;
 
-				float3 color = hsb2rgb(float3(hsb_h, _Saturation, _Brightness));
+				half3 color = hsb2rgb(float3(hsb_h, _Saturation, _Brightness));
 
 				half3 albedo = col.rgb;
 				half3 diffues = color * albedo;

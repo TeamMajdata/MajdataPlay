@@ -1,4 +1,4 @@
-Shader "Common/OpaqueMask"
+Shader "Maj/Common/OpaqueMask"
 {
     Properties
     {
@@ -35,7 +35,7 @@ Shader "Common/OpaqueMask"
             #pragma target 3.0
             #pragma multi_compile_instancing
 
-            #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
+            #include "Assets/Rendering/MajRenderPipeline/Library/MajCore.hlsl"
 
             TEXTURE2D(_MainTex);
             SAMPLER(sampler_MainTex);

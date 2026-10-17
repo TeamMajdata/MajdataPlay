@@ -1,4 +1,4 @@
-Shader "UI/Rounded Rect"
+Shader "Maj/UI/Rounded Rect"
 {
     Properties
     {
@@ -43,9 +43,10 @@ Shader "UI/Rounded Rect"
             #pragma fragment frag
             #pragma target 3.0
 
-            #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
+            #include "Assets/Rendering/MajRenderPipeline/Library/MajCore.hlsl"
 
-            #pragma shader_feature __ UNITY_UI_ALPHACLIP
+            // Keep the runtime UGUI Mask variant even when saved materials have Alpha Clip off.
+            #pragma multi_compile_local _ UNITY_UI_ALPHACLIP
 
             struct appdata_t
             {
@@ -80,6 +81,7 @@ Shader "UI/Rounded Rect"
 
             half4 frag(v2f IN) : SV_Target
             {
+                // Pixel-sized coordinates and derivative/SDF math need float; color arithmetic below already uses half.
                 float w = length(float2(ddx(IN.localPos.x), ddy(IN.localPos.x))) / (length(float2(ddx(IN.texcoord.x), ddy(IN.texcoord.x))) + 1e-5);
                 float h = length(float2(ddx(IN.localPos.y), ddy(IN.localPos.y))) / (length(float2(ddx(IN.texcoord.y), ddy(IN.texcoord.y))) + 1e-5);
                 float2 size = float2(w, h);
@@ -98,7 +100,7 @@ Shader "UI/Rounded Rect"
                 float aa = max(length(float2(ddx(dist), ddy(dist))), 1e-3);
                 float alpha = smoothstep(aa, -aa, dist);
 
-                half4 color = (tex2D(_MainTex, IN.texcoord) + _TextureSampleAdd) * IN.color;
+                half4 color = (MAJ_SAMPLE_TEX2D(_MainTex, IN.texcoord) + _TextureSampleAdd) * IN.color;
                 color.a *= alpha;
 
                 #ifdef UNITY_UI_ALPHACLIP

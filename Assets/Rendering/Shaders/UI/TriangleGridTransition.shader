@@ -1,4 +1,4 @@
-Shader "UI/Majdata Triangle Grid Transition"
+Shader "Maj/UI/Majdata Triangle Grid Transition"
 {
     Properties
     {
@@ -58,7 +58,7 @@ Shader "UI/Majdata Triangle Grid Transition"
             #pragma target 3.0
             #pragma multi_compile_local _ UNITY_UI_ALPHACLIP
 
-            #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
+            #include "Assets/Rendering/MajRenderPipeline/Library/MajCore.hlsl"
 
             struct appdata_t
             {
@@ -94,6 +94,7 @@ Shader "UI/Majdata Triangle Grid Transition"
             float _Radius;
             float _Feather;
 
+            // Grid cell selection, progress, rotations and derivative AA stay float to preserve moving edges.
             static const float SQRT_THREE = 1.73205080757;
 
             v2f vert(appdata_t input)
@@ -141,7 +142,7 @@ Shader "UI/Majdata Triangle Grid Transition"
                 }
                 if (coverage >= 0.99999)
                 {
-                    half4 fullColor = tex2D(_MainTex, input.texcoord) + _TextureSampleAdd;
+                    half4 fullColor = MAJ_SAMPLE_TEX2D(_MainTex, input.texcoord) + _TextureSampleAdd;
                     fullColor.rgb *= input.color.rgb;
                     fullColor.a *= input.color.a * CircleMaskAlpha(input.texcoord);
 
@@ -261,7 +262,7 @@ Shader "UI/Majdata Triangle Grid Transition"
                                         / (antialiasWidth * 4.5))) * 0.24;
                 tileAlpha *= foldShape;
 
-                half4 color = tex2D(_MainTex, foldedTextureUv) + _TextureSampleAdd;
+                half4 color = MAJ_SAMPLE_TEX2D(_MainTex, foldedTextureUv) + _TextureSampleAdd;
                 color.rgb *= input.color.rgb;
                 color.rgb = lerp(color.rgb, half3(1.0, 1.0, 1.0), foldHighlight);
                 // Circular clipping now lives entirely in this shader (see

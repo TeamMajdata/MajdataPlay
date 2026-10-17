@@ -103,7 +103,7 @@ SubShader {
 		{
 			float4	vertex			: POSITION;
 			float3	normal			: NORMAL;
-			fixed4	color			: COLOR;
+			half4	color			: COLOR;
 			float4	texcoord0		: TEXCOORD0;
 			float2	texcoord1		: TEXCOORD1;
 		};
@@ -111,8 +111,8 @@ SubShader {
 		struct pixel_t
 		{
 			float4	vertex			: SV_POSITION;
-			fixed4	faceColor		: COLOR;
-			fixed4	outlineColor	: COLOR1;
+			half4	faceColor		: COLOR;
+			half4	outlineColor	: COLOR1;
 			float4	texcoord0		: TEXCOORD0;			// Texture UV, Mask UV
 			half4	param			: TEXCOORD1;			// Scale(x), BiasIn(y), BiasOut(z), Bias(w)
 			half4	mask			: TEXCOORD2;			// Position in clip space(xy), Softness(zw)
@@ -125,7 +125,7 @@ SubShader {
 
 		float _MaskWipeControl;
 		float _MaskEdgeSoftness;
-		fixed4 _MaskEdgeColor;
+		half4 _MaskEdgeColor;
 		bool _MaskInverse;
 		float _UIMaskSoftnessX;
         float _UIMaskSoftnessY;
@@ -165,10 +165,10 @@ SubShader {
 					opacity = 1.0;
 					#endif
 
-			fixed4 faceColor = fixed4(input.color.rgb, opacity) * _FaceColor;
+			half4 faceColor = half4(input.color.rgb, opacity) * _FaceColor;
 			faceColor.rgb *= faceColor.a;
 
-			fixed4 outlineColor = _OutlineColor;
+			half4 outlineColor = _OutlineColor;
 			outlineColor.a *= opacity;
 			outlineColor.rgb *= outlineColor.a;
 			outlineColor = lerp(faceColor, outlineColor, sqrt(min(1.0, (outline * 2))));
@@ -207,7 +207,7 @@ SubShader {
 
 
 		// PIXEL SHADER
-		fixed4 PixShader(pixel_t input) : SV_Target
+		half4 PixShader(pixel_t input) : SV_Target
 		{
 			half d = tex2D(_MainTex, input.texcoord0.xy).a * input.param.x;
 			half4 c = input.faceColor * saturate(d - input.param.w);

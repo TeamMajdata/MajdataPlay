@@ -231,7 +231,7 @@ SubShader {
         }
 
 
-        fixed4 PixShader(pixel_t input) : SV_Target
+        half4 PixShader(pixel_t input) : SV_Target
         {
             UNITY_SETUP_INSTANCE_ID(input);
 
@@ -273,7 +273,7 @@ SubShader {
             faceColor.rgb *= 1 - (dot(n, light) * _Diffuse);
             faceColor.rgb *= lerp(_Ambient, 1, n.z * n.z);
 
-            fixed4 reflcol = texCUBE(_Cube, reflect(input.viewDir, -n));
+            half4 reflcol = texCUBE(_Cube, reflect(input.viewDir, -n));
             faceColor.rgb += reflcol.rgb * lerp(_ReflectFaceColor.rgb, _ReflectOutlineColor.rgb, saturate(sd + outline * 0.5)) * faceColor.a;
             #endif
 

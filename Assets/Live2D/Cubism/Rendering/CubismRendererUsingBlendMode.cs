@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Copyright(c) Live2D Inc. All rights reserved.
  *
  * Use of this source code is governed by the Live2D Open Software license
@@ -7,11 +7,10 @@
 
 
 using Live2D.Cubism.Core;
-using Live2D.Cubism.Rendering.URP;
 using Live2D.Cubism.Rendering.Util;
 using UnityEngine;
 using UnityEngine.Rendering;
-using UnityEngine.Rendering.RenderGraphModule;
+
 
 
 namespace Live2D.Cubism.Rendering
@@ -21,6 +20,9 @@ namespace Live2D.Cubism.Rendering
     /// </summary>
     public partial class CubismRenderer
     {
+        /// <summary>SDK 当前缓存的 drawable 渲染不透明度；供独立管线适配程序集只读查询。</summary>
+        public float RenderingOpacity => Opacity;
+
         #region Values
 
         /// <summary>
@@ -274,7 +276,7 @@ namespace Live2D.Cubism.Rendering
         /// Applies common rendering texture for rendering.
         /// </summary>
         /// <param name="passData">Pass data containing render controllers and camera data.</param>
-        private void ApplyBlendedRenderTexture(CubismRenderPassFeature.CubismRenderPass.PassData passData)
+        private void ApplyBlendedRenderTexture(CubismRenderingContext passData)
         {
             if (!RenderController?.CurrentFrameBuffer)
             {
@@ -292,11 +294,22 @@ namespace Live2D.Cubism.Rendering
         }
 
         /// <summary>
-        /// Adds this renderer to the command buffer for rendering.
+        /// 仅用于桥接器已确认 Normal/Over、无遮罩/离屏/拦截器的 drawable。
+        /// 不绑定目标，允许普通模型直接加入 MRP 已开启的原生场景 Pass。
         /// </summary>
-        /// <param name="buffer">Command buffer to record draw commands.</param>
-        /// <param name="passData">Pass data containing render controllers and camera data.</param>
-        public void DrawObject(CommandBuffer buffer, CubismRenderPassFeature.CubismRenderPass.PassData passData)//, RenderTexture frameBuffer)
+        public void DrawSimple(CommandBuffer buffer)
+        {
+            if (!MeshRenderer || DrawObjectType != CubismModelTypes.DrawObjectType.Drawable) return;
+            ApplyMainTexture();
+            ApplyScreenColor();
+            ApplyMultiplyColor();
+            ApplyVertexColors();
+            ApplyTransform();
+            buffer.DrawMesh(Mesh, Matrix4x4.identity, DrawMaterial ?? Material, 0, 0, PropertyBlock);
+        }
+
+        /// <summary>Adds this renderer to the command buffer for full Cubism composition.</summary>
+        public void DrawObject(CommandBuffer buffer, CubismRenderingContext passData)//, RenderTexture frameBuffer)
         {
             if (!MeshRenderer)
             {
@@ -353,7 +366,7 @@ namespace Live2D.Cubism.Rendering
         /// </summary>
         /// <param name="buffer">Command buffer to record draw commands.</param>
         /// <param name="passData">Pass data containing render controllers and camera data.</param>
-        private void SetOffscreen(CommandBuffer buffer, CubismRenderPassFeature.CubismRenderPass.PassData passData)
+        private void SetOffscreen(CommandBuffer buffer, CubismRenderingContext passData)
         {
             var currentOffscreenUnmanagedIndex = RenderController.CurrentOffscreenUnmanagedIndex;
             SubmitDrawToParentOffscreen(ref passData, ref currentOffscreenUnmanagedIndex,
@@ -456,7 +469,7 @@ namespace Live2D.Cubism.Rendering
         /// </summary>
         /// <param name="buffer">Command buffer to record draw commands.</param>
         /// <param name="passData">Pass data containing render controllers and camera data.</param>
-        internal void DrawMasks(CommandBuffer buffer, CubismRenderPassFeature.CubismRenderPass.PassData passData)
+        internal void DrawMasks(CommandBuffer buffer, CubismRenderingContext passData)
         {
             // If the model doesn't have masks, return.
             if (!RenderController.HasMask)
@@ -544,7 +557,7 @@ namespace Live2D.Cubism.Rendering
         /// <param name="currentOffscreenUnmanagedIndex">Current offscreen's unmanaged index.</param>
         /// <param name="buffer">Command buffer to record draw commands.</param>
         /// <param name="targetRenderer">Current target rendering object.</param>
-        private void SubmitDrawToParentOffscreen(ref CubismRenderPassFeature.CubismRenderPass.PassData passData, ref int currentOffscreenUnmanagedIndex,
+        private void SubmitDrawToParentOffscreen(ref CubismRenderingContext passData, ref int currentOffscreenUnmanagedIndex,
             CommandBuffer buffer, CubismRenderer targetRenderer)
         {
             if (passData == null
@@ -682,7 +695,7 @@ namespace Live2D.Cubism.Rendering
         /// </summary>
         /// <param name="buffer">Command buffer to record draw commands.</param>
         /// <param name="passData">Pass data containing render controllers and camera data.</param>
-        private void DrawDrawable(CommandBuffer buffer, CubismRenderPassFeature.CubismRenderPass.PassData passData)
+        private void DrawDrawable(CommandBuffer buffer, CubismRenderingContext passData)
         {
             if (!RenderController)
             {
@@ -718,8 +731,8 @@ namespace Live2D.Cubism.Rendering
                 // If the current frame buffer is different from the common rendering texture, update it.
                 // HACK: Assumes that the size has already been corrected in the `SetOffscreen()` function for cases where drawing occurs to the offscreen.
                 if (!RenderController.CurrentFrameBuffer
-                    || RenderController.CurrentFrameBuffer.width != ((RenderTexture)passData.CameraDepthTextureHandle).width
-                    || RenderController.CurrentFrameBuffer.height != ((RenderTexture)passData.CameraDepthTextureHandle).height)
+                    || RenderController.CurrentFrameBuffer.width != passData.Width
+                    || RenderController.CurrentFrameBuffer.height != passData.Height)
                 {
                     RenderController.CurrentFrameBuffer = passData.CommonRenderingTextureHandle;
                 }
@@ -750,7 +763,7 @@ namespace Live2D.Cubism.Rendering
         /// <param name="previousOffscreen">Previous offscreen render texture.</param>
         /// <param name="currentOffscreenRenderer">Current offscreen renderer.</param>
         /// <param name="passData">Pass data containing render controllers and camera data.</param>
-        internal void DrawOffscreen(CommandBuffer buffer, RenderTexture previousOffscreen, CubismRenderer currentOffscreenRenderer, CubismRenderPassFeature.CubismRenderPass.PassData passData)
+        internal void DrawOffscreen(CommandBuffer buffer, RenderTexture previousOffscreen, CubismRenderer currentOffscreenRenderer, CubismRenderingContext passData)
         {
             if (previousOffscreen == null
                 || currentOffscreenRenderer == null)
@@ -768,7 +781,7 @@ namespace Live2D.Cubism.Rendering
         /// <param name="buffer">Command buffer to record draw commands.</param>
         /// <param name="previousOffscreen">Previous offscreen render texture.</param>
         /// <param name="passData">Pass data containing render controllers and camera data.</param>
-        internal void DrawOffscreenMesh(CommandBuffer buffer, RenderTexture previousOffscreen, CubismRenderPassFeature.CubismRenderPass.PassData passData)
+        internal void DrawOffscreenMesh(CommandBuffer buffer, RenderTexture previousOffscreen, CubismRenderingContext passData)
         {
             // Mask rendering.
             DrawMasks(buffer, passData);
@@ -817,7 +830,7 @@ namespace Live2D.Cubism.Rendering
             property.SetColor(CubismShaderVariables.ScreenColor, ScreenColor);
             property.SetFloat(CubismShaderVariables.OffscreenOpacity, Offscreen.Opacity);
 
-            var reversedZ = SystemInfo.usesReversedZBuffer ? CubismRenderPassFeature.GEqual : CubismRenderPassFeature.LEqual;
+            var reversedZ = SystemInfo.usesReversedZBuffer ? (int)CompareFunction.GreaterEqual : (int)CompareFunction.LessEqual;
             property.SetInt(CubismShaderVariables.ReversedZ, reversedZ);
 
             MeshRenderer.SetPropertyBlock(property);
@@ -827,7 +840,7 @@ namespace Live2D.Cubism.Rendering
         /// Applies mask texture for rendering.
         /// </summary>
         /// <param name="maskTextureHandle">Texture handle for the mask texture.</param>
-        private void ApplyMask(TextureHandle maskTextureHandle)
+        private void ApplyMask(RenderTexture maskTextureHandle)
         {
             MeshRenderer.GetPropertyBlock(PropertyBlock);
 

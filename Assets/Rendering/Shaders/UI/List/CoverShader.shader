@@ -1,4 +1,4 @@
-Shader "UI/List/CoverShader"
+Shader "Maj/UI/List/CoverShader"
 {
     Properties
     {
@@ -45,6 +45,7 @@ Shader "UI/List/CoverShader"
         ZWrite On
         ZTest LEqual
         Blend Off
+        AlphaToMask On
         ColorMask [_ColorMask]
 
         Pass
@@ -58,10 +59,13 @@ Shader "UI/List/CoverShader"
             #pragma target 3.0
             #pragma multi_compile_instancing
 
-            #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
+            #include "Assets/Rendering/MajRenderPipeline/Library/MajCore.hlsl"
 
             TEXTURE2D(_MainTex);
             SAMPLER(sampler_MainTex);
+
+            // Set by MRP from the current camera's actual scene attachment samples.
+            float _MajAlphaToMaskAvailable;
 
             CBUFFER_START(UnityPerMaterial)
                 float _ListDepthOffset;
@@ -120,6 +124,7 @@ Shader "UI/List/CoverShader"
                 UNITY_SETUP_STEREO_EYE_INDEX_POST_VERTEX(input);
 
                 half4 color = SAMPLE_TEXTURE2D(_MainTex, sampler_MainTex, input.uv) * input.color;
+                // UV/SDF/AA and the cutoff comparison stay float; material/instance buffer layouts stay unchanged.
                 float dist = distance(input.uv, _Center.xy);
                 float aa = max(fwidth(dist), 0.00001);
                 float circleAlpha = 1.0 - smoothstep(
@@ -127,11 +132,19 @@ Shader "UI/List/CoverShader"
                     _Radius + aa,
                     dist);
 
-                // Keep fully transparent pixels discarded even when Cutoff is zero.
                 float alpha = color.a * circleAlpha;
-                clip(alpha - max(_Cutoff, 0.00001));
-
                 float brightness = UNITY_ACCESS_INSTANCED_PROP(Props, _Brightness);
+
+                // MSAA uses the existing texture/shape alpha directly as sample coverage.
+                // Keep the shape's original derivative AA; do not remap alpha around Cutoff.
+                if (_MajAlphaToMaskAvailable > 0.5)
+                {
+                    return half4(color.rgb * brightness, alpha);
+                }
+
+                // Cutoff is only used on 1x targets, preserving the original hard cutout.
+                // Fully transparent pixels remain holes even when Cutoff is zero.
+                clip(alpha - max(_Cutoff, 0.00001));
                 return half4(color.rgb * brightness, 1.0h);
             }
             ENDHLSL

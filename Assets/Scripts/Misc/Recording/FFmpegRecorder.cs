@@ -1,4 +1,4 @@
-﻿/*using Cysharp.Threading.Tasks;
+/*using Cysharp.Threading.Tasks;
 using MajdataPlay.IO;
 using MajdataPlay.Types;
 using MajdataPlay.Utils;
@@ -481,7 +481,7 @@ namespace MajdataPlay.Recording
                 _originScreenHeight = Screen.height;
                 _screenWidth = _originScreenWidth;
                 _screenHeight = _originScreenHeight;
-                _originFrameRate = MajEnv.UserSettings.Display.FPSLimit;
+                _originFrameRate = MajEnv.UserSettings.Rendering.FPSLimit;
                 var isForceFullScreen = Screen.fullScreen;
                 if (_screenWidth % 2 != 0)
                     _screenWidth++;
@@ -499,7 +499,7 @@ namespace MajdataPlay.Recording
                 {
                     _targetFrameRate = _originFrameRate;
                 }
-                if(MajEnv.UserSettings.Display.VSync)
+                if(MajEnv.UserSettings.Rendering.VSync)
                 {
                     _targetFrameRate = (int)Screen.currentResolution.refreshRateRatio.value;
                 }

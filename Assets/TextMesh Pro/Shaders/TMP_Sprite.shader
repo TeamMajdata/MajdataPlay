@@ -55,6 +55,7 @@ Shader "TextMeshPro/Sprite"
 
 			#include "UnityCG.cginc"
 			#include "UnityUI.cginc"
+            #include "Assets/Rendering/MajRenderPipeline/Library/MajMipSampling.hlsl"
 
             #pragma multi_compile __ UNITY_UI_CLIP_RECT
             #pragma multi_compile __ UNITY_UI_ALPHACLIP
@@ -70,7 +71,7 @@ Shader "TextMeshPro/Sprite"
 			struct v2f
 			{
 				float4 vertex			: SV_POSITION;
-				fixed4 color			: COLOR;
+				half4 color			: COLOR;
                 float2 texcoord			: TEXCOORD0;
 				float4 worldPosition	: TEXCOORD1;
 				float4 mask				: TEXCOORD2;
@@ -78,8 +79,8 @@ Shader "TextMeshPro/Sprite"
 			};
 
             sampler2D _MainTex;
-			fixed4 _Color;
-			fixed4 _TextureSampleAdd;
+			half4 _Color;
+			half4 _TextureSampleAdd;
 			float4 _ClipRect;
             float4 _MainTex_ST;
 		    float _UIMaskSoftnessX;
@@ -110,9 +111,9 @@ Shader "TextMeshPro/Sprite"
 				return OUT;
 			}
 
-			fixed4 frag(v2f IN) : SV_Target
+			half4 frag(v2f IN) : SV_Target
 			{
-				half4 color = (tex2D(_MainTex, IN.texcoord) + _TextureSampleAdd) * IN.color;
+				half4 color = (MAJ_SAMPLE_TEX2D(_MainTex, IN.texcoord) + _TextureSampleAdd) * IN.color;
 
                 #if UNITY_UI_CLIP_RECT
 				half2 m = saturate((_ClipRect.zw - _ClipRect.xy - abs(IN.mask.xy)) * IN.mask.zw);

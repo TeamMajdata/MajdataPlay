@@ -1,4 +1,4 @@
-Shader "Custom/HoldShineShader"
+Shader "Maj/Effects/HoldShineShader"
 {
 	Properties
 	{
@@ -15,6 +15,7 @@ Shader "Custom/HoldShineShader"
 			}
 			Pass
 				{
+			    Name "HoldShine"
 			Tags { "LightMode" = "SRPDefaultUnlit" }
 			ZTest Always
 			Cull Off
@@ -29,7 +30,7 @@ Shader "Custom/HoldShineShader"
 			//vert和frag函数
 			#pragma vertex vert
 			#pragma fragment frag
-			#include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
+			#include "Assets/Rendering/MajRenderPipeline/Library/MajCore.hlsl"
 
 
 			struct appdata_t
@@ -42,7 +43,8 @@ Shader "Custom/HoldShineShader"
 			struct v2f
 			{
 				float4 pos : SV_POSITION; //顶点位置
-				half2  uv : TEXCOORD0;	  //UV坐标
+				// 大皮肤图集的 UV 保持 float，避免移动端半精度造成块状采样。
+				float2 uv : TEXCOORD0;
 				half4 color : COLOR;
 			};
 
@@ -62,12 +64,13 @@ Shader "Custom/HoldShineShader"
 			half4 frag(v2f i) : COLOR
 			{
 				//从_MainTex中根据uv坐标进行采样
-				half4 renderTex = tex2D(_MainTex, i.uv)*i.color;
+				half4 renderTex = MAJ_SAMPLE_TEX2D(_MainTex, i.uv)*i.color;
+				// 时间与 sin 的输入保留 float，避免长时间运行时相位丢失；颜色系数使用 half。
 				float frames = _Time / 0.0008;
-				float brightness = 0.95 + max(abs(sin(frames * 0.2)) * 0.5, 0);
+				half brightness = (half)(0.95 + max(abs(sin(frames * 0.2)) * 0.5, 0));
 				//float brightness = 1;
-				float contrast = 1;
-				float saturation = 1;
+				half contrast = 1.0h;
+				half saturation = 1.0h;
 				//brigtness亮度直接乘以一个系数，也就是RGB整体缩放，调整亮度
 				half3 finalColor = renderTex * brightness;
 				//saturation饱和度：首先根据公式计算同等亮度情况下饱和度最低的值：

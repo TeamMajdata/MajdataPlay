@@ -1,4 +1,4 @@
-Shader "UI/BlurCircleFade_Gaussian_Fixed"
+Shader "Maj/UI/BlurCircleFade_Gaussian_Fixed"
 {
     Properties
     {
@@ -33,11 +33,12 @@ Shader "UI/BlurCircleFade_Gaussian_Fixed"
 
         Pass
         {
+            Name "BlurCircleFadeGaussian"
             Tags { "LightMode"="SRPDefaultUnlit" }
             HLSLPROGRAM
             #pragma vertex vert
             #pragma fragment frag
-            #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
+            #include "Assets/Rendering/MajRenderPipeline/Library/MajCore.hlsl"
 
             struct appdata
             {
@@ -83,6 +84,7 @@ Shader "UI/BlurCircleFade_Gaussian_Fixed"
 
                 float2 texel = _MainTex_TexelSize.xy * _BlurSize;
 
+                // Keep UV offsets, normalized weights and mask evaluation in float; the color accumulator is already half.
                 // normalized gaussian weights
                 float w00 = 0.05 / 0.72;
                 float w01 = 0.09 / 0.72;
@@ -98,19 +100,19 @@ Shader "UI/BlurCircleFade_Gaussian_Fixed"
 
                 half4 sum = 0;
 
-                sum += tex2D(_MainTex, uv + texel * float2(-1, -1)) * w00;
-                sum += tex2D(_MainTex, uv + texel * float2( 0, -1)) * w01;
-                sum += tex2D(_MainTex, uv + texel * float2( 1, -1)) * w02;
+                sum += MAJ_SAMPLE_TEX2D(_MainTex, uv + texel * float2(-1, -1)) * w00;
+                sum += MAJ_SAMPLE_TEX2D(_MainTex, uv + texel * float2( 0, -1)) * w01;
+                sum += MAJ_SAMPLE_TEX2D(_MainTex, uv + texel * float2( 1, -1)) * w02;
 
-                sum += tex2D(_MainTex, uv + texel * float2(-1,  0)) * w10;
-                sum += tex2D(_MainTex, uv)                         * w11;
-                sum += tex2D(_MainTex, uv + texel * float2( 1,  0)) * w12;
+                sum += MAJ_SAMPLE_TEX2D(_MainTex, uv + texel * float2(-1,  0)) * w10;
+                sum += MAJ_SAMPLE_TEX2D(_MainTex, uv)                         * w11;
+                sum += MAJ_SAMPLE_TEX2D(_MainTex, uv + texel * float2( 1,  0)) * w12;
 
-                sum += tex2D(_MainTex, uv + texel * float2(-1,  1)) * w20;
-                sum += tex2D(_MainTex, uv + texel * float2( 0,  1)) * w21;
-                sum += tex2D(_MainTex, uv + texel * float2( 1,  1)) * w22;
+                sum += MAJ_SAMPLE_TEX2D(_MainTex, uv + texel * float2(-1,  1)) * w20;
+                sum += MAJ_SAMPLE_TEX2D(_MainTex, uv + texel * float2( 0,  1)) * w21;
+                sum += MAJ_SAMPLE_TEX2D(_MainTex, uv + texel * float2( 1,  1)) * w22;
 
-                half4 baseCol = tex2D(_MainTex, uv);
+                half4 baseCol = MAJ_SAMPLE_TEX2D(_MainTex, uv);
                 half4 blurCol = lerp(baseCol, sum, _BlurStrength);
 
                 // circle mask

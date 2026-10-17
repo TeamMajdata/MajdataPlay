@@ -49,7 +49,7 @@ Shader "Live2D Cubism/Mask"
             struct appdata_t
             {
                 float4 vertex   : POSITION;
-                fixed4 color    : COLOR;
+                half4 color    : COLOR;
                 float2 texcoord : TEXCOORD0;
 
             };
@@ -58,7 +58,7 @@ Shader "Live2D Cubism/Mask"
             struct v2f
             {
                 float4 vertex   : SV_POSITION;
-                fixed4 color    : COLOR;
+                half4 color    : COLOR;
                 float2 texcoord : TEXCOORD0;
             };
 
@@ -85,7 +85,7 @@ Shader "Live2D Cubism/Mask"
             sampler2D _MainTex;
 
 
-            fixed4 frag(v2f IN) : SV_Target
+            half4 frag(v2f IN) : SV_Target
             {
                 return CUBISM_MASK_CHANNEL * tex2D(_MainTex, IN.texcoord).a;
 

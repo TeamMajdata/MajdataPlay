@@ -1,21 +1,16 @@
 {
-    "name": "Live2D.Cubism",
-    "rootNamespace": "",
-    "references": [
-        "GUID:df380645f10b7bc4b97d4f5eb6303d95",
-        "GUID:15fc0a57446b3144c949da3e2b9737a9",
-        "GUID:516a5277b8c3b4f4c8cc86b77b1591ff",
-        "GUID:86bc95e6fdb13ff43aa04316542905ae",
-        "GUID:69257879134bba646869b21467b3338d",
-        "Unity.InputSystem"
-    ],
-    "includePlatforms": [],
-    "excludePlatforms": [],
-    "allowUnsafeCode": true,
-    "overrideReferences": false,
-    "precompiledReferences": [],
-    "autoReferenced": true,
-    "defineConstraints": [],
-    "versionDefines": [],
-    "noEngineReferences": false
+  "name": "Live2D.Cubism",
+  "rootNamespace": "",
+  "references": [
+    "Unity.InputSystem"
+  ],
+  "includePlatforms": [],
+  "excludePlatforms": [],
+  "allowUnsafeCode": true,
+  "overrideReferences": false,
+  "precompiledReferences": [],
+  "autoReferenced": true,
+  "defineConstraints": [],
+  "versionDefines": [],
+  "noEngineReferences": false
 }

@@ -76,6 +76,13 @@ namespace MajdataPlay.Scenes.Game
         bool _flipTextureY = true;
 
         bool _usePictureAsBackground = false;
+        bool _destroyed;
+        int _movieRequestVersion;
+#if UNITY_STANDALONE_WIN
+        bool _ownsRenderTexture;
+        uint _textureSourceWidth;
+        uint _textureSourceHeight;
+#endif
 
         long _mediaLengthMs = 0;
 
@@ -101,12 +108,23 @@ namespace MajdataPlay.Scenes.Game
         }
         void OnDestroy()
         {
+            _destroyed = true;
+            _movieRequestVersion++;
 #if UNITY_STANDALONE_WIN
             MajDebug.LogInfo("[VLC] DestroyMediaPlayer");
-            _videoPlayer.Stop();
-            _videoPlayer.Dispose();
-#endif
+            try
+            {
+                try { _videoPlayer?.Stop(); }
+                finally { _videoPlayer?.Dispose(); }
+            }
+            finally
+            {
+                ReleaseVideoTextures();
+                Majdata<BGManager>.Free();
+            }
+#else
             Majdata<BGManager>.Free();
+#endif
         }
         [Conditional("UNITY_STANDALONE_WIN")]
         internal void OnLateUpdate()
@@ -171,6 +189,7 @@ namespace MajdataPlay.Scenes.Game
         public void SetBackgroundPic(Sprite? sprite)
         {
             DisableVideo();
+            _coverRenderer.enabled = true;
             var rectTransform = _coverRenderer.transform.GetComponent<RectTransform>();
             if (sprite is null) 
             { 
@@ -189,6 +208,8 @@ namespace MajdataPlay.Scenes.Game
 
         public void DisableVideo()
         {
+            // A pending prepare must not re-enable video after a picture was selected.
+            _movieRequestVersion++;
             if (_usePictureAsBackground)
             {
                 return;
@@ -198,6 +219,7 @@ namespace MajdataPlay.Scenes.Game
             _videoRenderer.enabled = false;
 #if UNITY_STANDALONE_WIN
             _videoPlayer.Media = null;
+            ReleaseVideoTextures();
 #else
             _videoPlayer.url = null;
             _videoPlayer.Stop();
@@ -210,26 +232,27 @@ namespace MajdataPlay.Scenes.Game
 
         public async UniTask SetMovieAsync(string path, Sprite? fallback)
         {
+            if (_destroyed) return;
+            int requestVersion = ++_movieRequestVersion;
 #if UNITY_STANDALONE_WIN // VLC Unity
             try
             {
 
                 MajDebug.LogInfo("[VLC] LoadMedia");
-                if (_videoPlayer.Media != null)
-                {
-                    _videoPlayer.Media.Dispose();
-                }
+                ReleaseVideoTextures();
 
                 var trimmedPath = path.Trim(new char[] { '"' });//Windows likes to copy paths with quotes but Uri does not like to open them
                 var uri = new Uri(trimmedPath);
                 MajDebug.LogInfo("[VLC] Uri: " + uri.ToString());
-                var media = new Media(uri);
+                // The player retains its own native reference; dispose this request's wrapper deterministically.
+                using var media = new Media(uri);
                 //media.AddOption(":start-paused");
                 _videoPlayer.Media = media;
 
 
                 MajDebug.LogInfo("[VLC] BeginParse");
-                var ret = await _videoPlayer.Media.ParseAsync(MajEnv.VLCLibrary!);
+                var ret = await media.ParseAsync(MajEnv.VLCLibrary!);
+                if (!IsCurrentMovieRequest(requestVersion)) return;
                 if(ret != MediaParsedStatus.Done)
                 {
                     SetBackgroundPic(fallback);
@@ -237,15 +260,18 @@ namespace MajdataPlay.Scenes.Game
                 }
                 MajDebug.LogInfo("[VLC] " + ret);
                 _coverRenderer.enabled = false;
+                _videoRenderer.enabled = true;
                 _usePictureAsBackground = false;
                 _videoPlayer.Play();
                 _mediaLengthMs = media.Duration;
                 await UniTask.Delay(200);
+                if (!IsCurrentMovieRequest(requestVersion)) return;
                 _videoPlayer.Pause();
                 _videoPlayer.SeekTo(TimeSpan.Zero);
             }
             catch(Exception e)
             {
+                if (!IsCurrentMovieRequest(requestVersion)) return;
                 MajDebug.LogException(e);
                 SetBackgroundPic(fallback);
             }
@@ -258,6 +284,7 @@ namespace MajdataPlay.Scenes.Game
             {
                 try
                 {
+                    if (!IsCurrentMovieRequest(requestVersion)) return;
                     var remainingTime = timeout - (MajTimeline.UnscaledTime - startAt);
                     if (remainingTime.TotalSeconds < 0)
                     {
@@ -273,13 +300,18 @@ namespace MajdataPlay.Scenes.Game
                     await UniTask.Yield();
                 }
             }
+            if (!IsCurrentMovieRequest(requestVersion)) return;
             _coverRenderer.enabled = false;
+            _videoRenderer.enabled = true;
+            _usePictureAsBackground = false;
             _videoRenderer.texture = _videoPlayer.texture;
             var scale = (float)_videoPlayer.height / (float)_videoPlayer.width;
             _videoRenderer.gameObject.transform.localScale = new Vector3(1f, scale, 1f);
             _mediaLengthMs = (long)(_videoPlayer.length * 1000);
 #endif
         }
+
+        bool IsCurrentMovieRequest(int requestVersion) => !_destroyed && requestVersion == _movieRequestVersion;
 
 #if UNITY_STANDALONE_WIN
         void VLCLateUpdate()
@@ -305,9 +337,14 @@ namespace MajdataPlay.Scenes.Game
             {
                 return;
             }
+            if (width == 0 || height == 0 || texPtr == IntPtr.Zero)
+                return;
 
-            if (_vlcTexture is null || _vlcTexture.width != width || _vlcTexture.height != height)
+            // Compare the source dimensions, not the rotated wrapper dimensions.
+            // BottomRight swaps width/height and otherwise recreated textures on every video frame.
+            if (_vlcTexture is null || _textureSourceWidth != width || _textureSourceHeight != height)
             {
+                ReleaseVideoTextures();
                 var px = width;
                 var py = height;
                 //If the currently playing video uses the Bottom Right orientation, we have to do this to avoid stretching it.
@@ -322,8 +359,16 @@ namespace MajdataPlay.Scenes.Game
 
                 //Make a texture of the proper size for the video to output to
                 _vlcTexture = Texture2D.CreateExternalTexture((int)px, (int)py, TextureFormat.RGBA32, false, true, texPtr);
+                _vlcTexture.name = "Maj VLC Video Frame";
                 //Make a renderTexture the same size as vlctex
-                _renderTexture = new RenderTexture(_vlcTexture.width, _vlcTexture.height, 0, RenderTextureFormat.ARGB32);
+                _renderTexture = new RenderTexture(_vlcTexture.width, _vlcTexture.height, 0, RenderTextureFormat.ARGB32)
+                {
+                    // 只标注现有视频输出，便于 Frame Debugger 区分它与 MRP 场景颜色。
+                    name = "Maj Video BGA"
+                };
+                _ownsRenderTexture = true;
+                _textureSourceWidth = width;
+                _textureSourceHeight = height;
 
                 _videoRenderer.texture = _renderTexture;
                 _videoRenderer.gameObject.transform.localScale = new Vector3(1f, scale, 1f);
@@ -336,6 +381,31 @@ namespace MajdataPlay.Scenes.Game
             var flip = new Vector2(_flipTextureX ? -1 : 1, _flipTextureY ? -1 : 1);
             //If you wanted to do post processing outside of VLC you could use a shader here.
             Graphics.Blit(_vlcTexture, _renderTexture, flip, Vector2.zero);
+        }
+
+        void ReleaseVideoTextures()
+        {
+            // Only the Windows textures created above are owned here; a serialized RT asset is not.
+            if (_ownsRenderTexture)
+            {
+                if (_videoRenderer != null && _videoRenderer.texture == _renderTexture)
+                    _videoRenderer.texture = null;
+                if (_renderTexture != null)
+                {
+                    _renderTexture.Release();
+                    Destroy(_renderTexture);
+                }
+                _renderTexture = null;
+                _ownsRenderTexture = false;
+            }
+            if (_vlcTexture != null)
+            {
+                // Destroy the Unity wrapper; LibVLC retains ownership of its native texture.
+                Destroy(_vlcTexture);
+                _vlcTexture = null;
+            }
+            _textureSourceWidth = 0;
+            _textureSourceHeight = 0;
         }
 
         public VideoOrientation? GetVideoOrientation()

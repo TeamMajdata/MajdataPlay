@@ -73,7 +73,7 @@ PlayerSettings:
   androidRenderOutsideSafeArea: 1
   androidUseSwappy: 0
   androidDisplayOptions: 1
-  androidBlitType: 0
+  androidBlitType: 2
   androidResizeableActivity: 0
   androidDefaultWindowWidth: 1920
   androidDefaultWindowHeight: 1080
@@ -977,12 +977,7 @@ PlayerSettings:
   cloudProjectId: 
   framebufferDepthMemorylessMode: 0
   qualitySettingsNames:
-  - Very Low
-  - Low
-  - Medium
-  - High
-  - Very High
-  - Ultra
+  - Default
   projectName: 
   organizationId: 
   cloudEnabled: 0

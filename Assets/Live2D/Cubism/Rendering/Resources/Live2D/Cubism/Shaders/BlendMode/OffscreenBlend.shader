@@ -35,7 +35,6 @@ Shader "Unlit/BlendMode/OffscreenBlend"
             "RenderType" = "Transparent"
             "PreviewType" = "Plane"
             "CanUseSpriteAtlas" = "True"
-            "RenderPipeline" = "UniversalPipeline"
         }
         Cull     [_Cull]
         Lighting Off
@@ -52,7 +51,7 @@ Shader "Unlit/BlendMode/OffscreenBlend"
             #pragma multi_compile _ CUBISM_INVERT_ON
             #pragma multi_compile _ CUBISM_MASK_ON
 
-            #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
+            #include "../CubismMajCore.cginc"
             #include "../CubismCG.cginc"
             #include_with_pragmas "CubismVariants.cginc"
             #include "ColorBlendVariants.cginc"

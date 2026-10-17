@@ -1,4 +1,4 @@
-Shader "Common/RadialMask"
+Shader "Maj/Common/RadialMask"
 {
     Properties
     {
@@ -30,11 +30,15 @@ Shader "Common/RadialMask"
 
         Pass
         {
-            CGPROGRAM
+            Name "RadialMask"
+            HLSLPROGRAM
             #pragma vertex vert
             #pragma fragment frag
             #pragma multi_compile_instancing 
-            #include "UnityCG.cginc"
+            #include "Assets/Rendering/MajRenderPipeline/Library/MajCore.hlsl"
+
+            // 与原 UnityCG 的 PI 保持相同精度；角度计算继续用 float，避免细边缘抖动。
+            static const float MAJ_MASK_PI = 3.14159265359f;
 
             struct appdata_t
             {
@@ -47,7 +51,7 @@ Shader "Common/RadialMask"
             struct v2f
             {
                 float4 vertex   : SV_POSITION;
-                fixed4 color    : COLOR;
+                half4 color     : COLOR;
                 float2 texcoord : TEXCOORD0;
                 float2 localPos : TEXCOORD1;
                 UNITY_VERTEX_INPUT_INSTANCE_ID 
@@ -55,14 +59,15 @@ Shader "Common/RadialMask"
 
             sampler2D _MainTex;
 
+            // RawSpriteRenderer 通过 MPB 上传颜色 / 进度，保留整组逐实例属性和顺序。
             UNITY_INSTANCING_BUFFER_START(Props)
                 UNITY_DEFINE_INSTANCED_PROP(float, _Progress)
                 UNITY_DEFINE_INSTANCED_PROP(float, _InvertMask)
                 UNITY_DEFINE_INSTANCED_PROP(float, _CounterClockwise)
-                UNITY_DEFINE_INSTANCED_PROP(fixed4, _Color)
+                UNITY_DEFINE_INSTANCED_PROP(half4, _Color)
                 UNITY_DEFINE_INSTANCED_PROP(float, _Softness)
 
-                UNITY_DEFINE_INSTANCED_PROP(fixed4, _RendererColor)
+                UNITY_DEFINE_INSTANCED_PROP(half4, _RendererColor)
             UNITY_INSTANCING_BUFFER_END(Props)
 
             v2f vert(appdata_t IN)
@@ -71,17 +76,17 @@ Shader "Common/RadialMask"
                 UNITY_SETUP_INSTANCE_ID(IN);
                 UNITY_TRANSFER_INSTANCE_ID(IN, OUT);
                 
-                OUT.vertex = UnityObjectToClipPos(IN.vertex);
+                OUT.vertex = TransformObjectToHClip(IN.vertex.xyz);
                 OUT.texcoord = IN.texcoord;
                 OUT.localPos = IN.vertex.xy;
 
-                fixed4 color = UNITY_ACCESS_INSTANCED_PROP(Props, _Color);
-                fixed4 rendererColor = UNITY_ACCESS_INSTANCED_PROP(Props, _RendererColor);
+                half4 color = UNITY_ACCESS_INSTANCED_PROP(Props, _Color);
+                half4 rendererColor = UNITY_ACCESS_INSTANCED_PROP(Props, _RendererColor);
                 OUT.color = IN.color * color * rendererColor;
                 return OUT;
             }
 
-            fixed4 frag(v2f IN) : SV_Target
+            half4 frag(v2f IN) : SV_Target
             {
                 UNITY_SETUP_INSTANCE_ID(IN);
 
@@ -90,16 +95,16 @@ Shader "Common/RadialMask"
                 float isCCW = UNITY_ACCESS_INSTANCED_PROP(Props, _CounterClockwise);
                 float softness = UNITY_ACCESS_INSTANCED_PROP(Props, _Softness);
 
-                fixed4 col = tex2D(_MainTex, IN.texcoord) * IN.color;
+                half4 col = MAJ_SAMPLE_TEX2D(_MainTex, IN.texcoord) * IN.color;
                 float2 dir = IN.localPos;
 
                 if (isCCW > 0.5) dir.x = -dir.x;
 
                 float angle = atan2(dir.x, dir.y);
                 
-                if (angle < 0) angle += UNITY_PI * 2.0;
+                if (angle < 0) angle += MAJ_MASK_PI * 2.0;
                 
-                float normalizedAngle = angle / (UNITY_PI * 2.0);
+                float normalizedAngle = angle / (MAJ_MASK_PI * 2.0);
                 float safeSoftness = max(softness, 0.0001);
                 float fillEnd = currentProgress * (1.0 + safeSoftness);
                 float mask = 1.0 - smoothstep(fillEnd - safeSoftness, fillEnd, normalizedAngle);
@@ -112,7 +117,7 @@ Shader "Common/RadialMask"
                 col.a *= mask;
                 return col;
             }
-            ENDCG
+            ENDHLSL
         }
     }
 }

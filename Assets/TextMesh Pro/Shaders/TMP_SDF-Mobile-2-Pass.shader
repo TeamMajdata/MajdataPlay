@@ -100,7 +100,7 @@ SubShader {
 			UNITY_VERTEX_INPUT_INSTANCE_ID
 			float4	vertex			: POSITION;
 			float3	normal			: NORMAL;
-			fixed4	color			: COLOR;
+			half4	color			: COLOR;
 			float4	texcoord0		: TEXCOORD0;
 			float2	texcoord1		: TEXCOORD1;
 		};
@@ -109,8 +109,8 @@ SubShader {
 			UNITY_VERTEX_INPUT_INSTANCE_ID
 			UNITY_VERTEX_OUTPUT_STEREO
 			float4	vertex			: SV_POSITION;
-			fixed4	faceColor		: COLOR;
-			fixed4	outlineColor	: COLOR1;
+			half4	faceColor		: COLOR;
+			half4	outlineColor	: COLOR1;
 			float4	texcoord0		: TEXCOORD0;			// Texture UV, Mask UV
 			half4	param			: TEXCOORD1;			// Scale(x), BiasIn(y), BiasOut(z), Bias(w)
 			half4	mask			: TEXCOORD2;			// Position in clip space(xy), Softness(zw)
@@ -160,10 +160,10 @@ SubShader {
 			opacity = 1.0;
 			#endif
 
-			fixed4 faceColor = fixed4(input.color.rgb, opacity) * _FaceColor;
+			half4 faceColor = half4(input.color.rgb, opacity) * _FaceColor;
 			faceColor.rgb *= faceColor.a;
 
-			fixed4 outlineColor = _OutlineColor;
+			half4 outlineColor = _OutlineColor;
 			outlineColor.a *= opacity;
 			outlineColor.rgb *= outlineColor.a;
 			//outlineColor = lerp(faceColor, outlineColor, sqrt(min(1.0, outline * 2)));
@@ -200,7 +200,7 @@ SubShader {
 
 
 		// PIXEL SHADER
-		fixed4 PixShader(pixel_t input) : SV_Target
+		half4 PixShader(pixel_t input) : SV_Target
 		{
 			UNITY_SETUP_INSTANCE_ID(input);
 
@@ -285,7 +285,7 @@ SubShader {
 			UNITY_VERTEX_INPUT_INSTANCE_ID
             float4	vertex			: POSITION;
 			float3	normal			: NORMAL;
-			fixed4	color			: COLOR;
+			half4	color			: COLOR;
 			float4	texcoord0		: TEXCOORD0;
 			float2	texcoord1		: TEXCOORD1;
 		};
@@ -294,7 +294,7 @@ SubShader {
 			UNITY_VERTEX_INPUT_INSTANCE_ID
 			UNITY_VERTEX_OUTPUT_STEREO
             float4	vertex			: SV_POSITION;
-			fixed4	faceColor		: COLOR;
+			half4	faceColor		: COLOR;
 			float4	texcoord0		: TEXCOORD0;			// Texture UV, Mask UV
 			half2	param			: TEXCOORD1;			// Scale(x), BiasIn(y), BiasOut(z), Bias(w)
 			half4	mask			: TEXCOORD2;			// Position in clip space(xy), Softness(zw)
@@ -340,7 +340,7 @@ SubShader {
             }
 			float opacity = input.color.a;
 
-			fixed4 faceColor = fixed4(input.color.rgb, opacity) * _FaceColor;
+			half4 faceColor = half4(input.color.rgb, opacity) * _FaceColor;
 			faceColor.rgb *= faceColor.a;
 
 			// Generate UV for the Masking Texture
@@ -361,7 +361,7 @@ SubShader {
 
 
 		// PIXEL SHADER
-		fixed4 PixShader(pixel_t input) : SV_Target
+		half4 PixShader(pixel_t input) : SV_Target
 		{
 			UNITY_SETUP_INSTANCE_ID(input);
 

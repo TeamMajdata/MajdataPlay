@@ -6,6 +6,7 @@ using Newtonsoft.Json;
 using MajdataPlay.Net;
 using MajdataPlay.Settings.OptionEnumerators;
 using MajdataPlay.Diagnostics;
+using System.Runtime.Serialization;
 #nullable enable
 namespace MajdataPlay.Settings
 {
@@ -17,6 +18,20 @@ namespace MajdataPlay.Settings
         public JudgeOptions Judge { get; init; } = new();
         
         public DisplayOptions Display { get; init; } = new();
+
+        // 属性声明顺序即设置分类顺序：显示 → 渲染 → 音量。
+        private RenderingOptions _rendering = new();
+        private bool _hasRenderingSettings;
+        [JsonProperty(ObjectCreationHandling = ObjectCreationHandling.Replace)]
+        public RenderingOptions Rendering
+        {
+            get => _rendering;
+            init
+            {
+                _rendering = value ?? new();
+                _hasRenderingSettings = value is not null;
+            }
+        }
         
         public SoundOptions Audio { get; init; } = new();
         [JsonIgnore]
@@ -27,6 +42,15 @@ namespace MajdataPlay.Settings
         public OnlineOptions Online { get; init; } = new();
         [HideInSettingUI]
         public IOOptions IO { get; init; } = new();
+
+        [OnDeserialized]
+        private void MigrateRenderingSettings(StreamingContext context)
+        {
+            // 旧版把画质与比例保存在 Display；只在没有新分类时迁移，不能覆盖新配置。
+            if (!_hasRenderingSettings)
+                _rendering = Display.ReadLegacyRenderingSettings();
+            _rendering.MigrateFramePacing(Display.LegacyFPSLimit, Display.LegacyVSync);
+        }
     }
     
     public class GameOptions
@@ -115,17 +139,6 @@ namespace MajdataPlay.Settings
     
     public class DisplayOptions
     {
-#if UNITY_ANDROID || UNITY_IOS
-        private const RenderQualityOption DefaultQuality = RenderQualityOption.Low;
-        private const int DefaultRednerScale = 75;
-        private const bool DefaultVSync = true;
-#else
-        private const RenderQualityOption DefaultQuality = RenderQualityOption.Medium;
-        private const int DefaultRednerScale = 100;
-        private const bool DefaultVSync = true;
-#endif
-
-
         [OptionEnumerator(typeof(LanguageEnumerator))]
         public string Language { get; set; } = "";
         
@@ -213,28 +226,33 @@ namespace MajdataPlay.Settings
         public float SubDisplayScale { get; set; } = 1f;
         public GameplayScreenRotationAngleOption GameplayScreenRotationAngle { get; set; } = GameplayScreenRotationAngleOption.Zero;
 
-        [OptionEnumerator(typeof(EngineEnumSettingEnumerator))]
-        public RenderQualityOption RenderQuality { get; set; } = DefaultQuality;
+        // 仅接收旧 settings.json 的键，不作为现行设置暴露，也不重新保存。
+        // nullable 区分“旧字段确实存在”和“没有渲染设置”，空配置不能套用旧画质默认值。
+        private RenderQualityOption? _legacyRenderQuality;
+        private int? _legacyRenderScale;
 
-        [Step("5")]
-        [Range("50", "100", HasMax = true, HasMin = true)]
-        [OptionEnumerator(typeof(EngineNumberSettingEnumerator))]
-        public int RenderScale { get; set; } = DefaultRednerScale;
+        [Preserve]
+        [JsonProperty("RenderQuality")]
+        private RenderQualityOption? LegacyRenderQuality { set => _legacyRenderQuality = value; }
+
+        [Preserve]
+        [JsonProperty("RenderScale")]
+        private int? LegacyRenderScale { set => _legacyRenderScale = value; }
+
+        internal RenderingOptions ReadLegacyRenderingSettings()
+            => RenderingOptions.FromLegacy(_legacyRenderQuality, _legacyRenderScale);
 #if UNITY_STANDALONE
         [HideInSettingUI]
         public bool Topmost { get; set; } = false;
 #endif
         
-        [Step("1")]
-        [Range("-1", null, HasMax = false, HasMin = true)]
-        [OptionEnumerator(typeof(EngineNumberSettingEnumerator))]
-        public int FPSLimit { get; set; } = 120;
-#if !(UNITY_ANDROID || UNITY_IOS)
-        
-        [OptionEnumerator(typeof(EngineBooleanSettingEnumerator))]
-        public bool VSync { get; set; } = DefaultVSync;
-#endif
-        
+        internal int? LegacyFPSLimit { get; private set; }
+        internal bool? LegacyVSync { get; private set; }
+        [Preserve, JsonProperty("FPSLimit")]
+        private int? ReadLegacyFPSLimit { set => LegacyFPSLimit = value; }
+        [Preserve, JsonProperty("VSync")]
+        private bool? ReadLegacyVSync { set => LegacyVSync = value; }
+
         public bool SkipVideoDownload { get; set; } = false;
     }
     
@@ -390,6 +408,17 @@ namespace MajdataPlay.Settings
     {
         
         public bool DisplaySensor { get; set; } = false;
+
+        private int _sensorOpacity = 20;
+        [Step("10")]
+        [Range("10", "50", HasMax = true, HasMin = true)]
+        public int SensorOpacity
+        {
+            get => _sensorOpacity;
+            // 菜单、外部 JSON 和直接赋值统一为 10/20/30/40/50%，旧配置缺项默认 20%。
+            set => _sensorOpacity = value <= 10 ? 10 : value >= 50 ? 50 : ((value + 5) / 10) * 10;
+        }
+
 #if UNITY_ANDROID
         
         [Step("0.05")]

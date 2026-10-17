@@ -1,4 +1,4 @@
-Shader "Custom/ColorAdjustEffect"
+Shader "Maj/Effects/ColorAdjustEffect"
 {
 	Properties
 	{
@@ -18,6 +18,7 @@ Shader "Custom/ColorAdjustEffect"
 			}
 			Pass
 				{
+			    Name "ColorAdjustEffect"
 			Tags { "LightMode" = "SRPDefaultUnlit" }
 			ZTest Always
 			Cull Off
@@ -32,7 +33,7 @@ Shader "Custom/ColorAdjustEffect"
 			//vert和frag函数
 			#pragma vertex vert
 			#pragma fragment frag
-			#include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
+			#include "Assets/Rendering/MajRenderPipeline/Library/MajCore.hlsl"
 
 
 			struct appdata_t
@@ -45,7 +46,8 @@ Shader "Custom/ColorAdjustEffect"
 			struct v2f
 			{
 				float4 pos : SV_POSITION; //顶点位置
-				half2  uv : TEXCOORD0;	  //UV坐标
+				// 大皮肤图集的 UV 保持 float，避免移动端半精度造成块状采样。
+				float2 uv : TEXCOORD0;
 				half4 color : COLOR;
 			};
 
@@ -65,7 +67,7 @@ Shader "Custom/ColorAdjustEffect"
 			half4 frag(v2f i) : COLOR
 			{
 				//从_MainTex中根据uv坐标进行采样
-				half4 renderTex = tex2D(_MainTex, i.uv)*i.color;
+				half4 renderTex = MAJ_SAMPLE_TEX2D(_MainTex, i.uv)*i.color;
 			//brigtness亮度直接乘以一个系数，也就是RGB整体缩放，调整亮度
 			half3 finalColor = renderTex * _Brightness;
 			//saturation饱和度：首先根据公式计算同等亮度情况下饱和度最低的值：

@@ -1,5 +1,5 @@
 // 把 front-to-back 累积出来的 note RT 以 premultiplied over 合成回 camera color
-Shader "MajdataPlay/Notes/FrontToBackComposite"
+Shader "Maj/Notes/FrontToBackComposite"
 {
     SubShader
     {
@@ -23,8 +23,8 @@ Shader "MajdataPlay/Notes/FrontToBackComposite"
             #pragma vertex Vert
             #pragma fragment Frag
 
-            #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
-            #include "Packages/com.unity.render-pipelines.core/Runtime/Utilities/Blit.hlsl"
+            #include "Assets/Rendering/MajRenderPipeline/Library/MajCore.hlsl"
+            #include "Assets/Rendering/MajRenderPipeline/Library/MajBlit.hlsl"
 
             half4 Frag(Varyings IN) : SV_Target
             {
