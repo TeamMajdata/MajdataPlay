@@ -1,3 +1,4 @@
+#nullable enable
 using UnityEngine.Scripting;
 
 namespace MajdataPlay.Rendering
@@ -27,7 +28,9 @@ namespace MajdataPlay.Rendering
         /// <summary>本帧没有有效主屏结果，或剔除、渲染、清理失败或管线已销毁。</summary>
         Unavailable,
         /// <summary>当前屏幕显示区域要求 FinalCopy；原生场景附件及 memoryless 优化仍可保留。</summary>
-        IntermediateViewport
+        IntermediateViewport,
+        /// <summary>Camera capture requires a sampleable resolved scene color and final presentation copy.</summary>
+        IntermediateCapture
     }
 
     [Preserve]

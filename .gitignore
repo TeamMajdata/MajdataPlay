@@ -118,6 +118,18 @@ out.log
 # Independent libcurl HTTP handler validation harness; builds into Temp/CurlValidation.
 !/Tools/Tests/CurlValidation/CurlValidation.csproj
 
+# Temporary shader warmup crash-probe validation; builds into Temp/ShaderWarmupValidation.
+!/Tools/Tests/ShaderWarmupValidation/ShaderWarmupValidation.csproj
+
+# Independent MRP camera capture bridge validation; builds into Temp/MrpCaptureValidation.
+!/Tools/Tests/MrpCaptureValidation/MrpCaptureValidation.csproj
+
+# Independent background material lifecycle validation; builds into Temp/BackgroundLifecycleValidation.
+!/Tools/Tests/BackgroundLifecycleValidation/BackgroundLifecycleValidation.csproj
+
+# Independent recorder lifecycle validation; builds into Temp/RecorderLifecycleValidation.
+!/Tools/Tests/RecorderLifecycleValidation/RecorderLifecycleValidation.csproj
+
 # Independent BASS HTTP stream validation harness; builds into Temp/BassHttpStreamValidation.
 !/Tools/Tests/BassHttpStreamValidation/BassHttpStreamValidation.csproj
 

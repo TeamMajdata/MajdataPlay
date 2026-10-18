@@ -2,7 +2,7 @@
 
 将 **FFmpeg Video Player** 挂在 GameObject 上，填写 Source，在 Play Mode Inspector 中可以预载、播放、暂停、停止和拖动时间轴。组件只播放视频；音轨由 MajdataPlay 现有音频系统处理。
 
-运行时程序集为 `MajdataPlay.FFmpeg`，引用项目已接入的 `FFmpeg.AutoGen`、`MajdataPlay.Diagnostics` 和 `Unity.RenderPipelines.Core.Runtime`。本项目绑定的原生 ABI 是 FFmpeg **9.0.1**；请使用 [Tools/FFmpeg](../../../../Tools/FFmpeg) 的构建脚本，不能混用其他主版本的库。Mono / IL2CPP 使用同一套直接 P/Invoke 和带 `MonoPInvokeCallback` 的静态回调。
+运行时程序集为 `MajdataPlay.FFmpeg`，引用项目已接入的 `FFmpeg.AutoGen`、`MajdataPlay.Diagnostics`、`Unity.RenderPipelines.Core.Runtime` 和 `MajdataPlay.MajRenderPipe`。录制适配单向依赖 MRP，MRP 本体不依赖 FFmpeg 或 Core RP。本项目绑定的原生 ABI 是 FFmpeg **9.0.1**；请使用 [Tools/FFmpeg](../../../../Tools/FFmpeg) 的构建脚本，不能混用其他主版本的库。Mono / IL2CPP 使用同一套直接 P/Invoke 和带 `MonoPInvokeCallback` 的静态回调。
 
 支持的全部软件解码格式、平台硬件解码矩阵及实际 Player 限制见 [当前 FFmpeg 解码格式支持](../../../../Tools/FFmpeg/CODEC-SUPPORT.md)。
 
@@ -144,7 +144,9 @@ Android Player 在主线程的 Prepare 和重新创建回退会话时初始化 n
 
 ## Camera 录制
 
-`FFmpegCameraCapturer` 录制指定 Camera 的视频画面，无音频。它在 URP 显示输出中使用 `CameraCaptureBridge`，显式 RenderTexture 输出在整个 SRP rendering context 结束后复制，在 Built-in Render Pipeline 中使用 Camera 的 post-render 回调，不改变 Camera 的 `targetTexture` 或 `rect`。其他 SRP 的显示输出需要执行 `CameraCaptureBridge` 的捕获动作；显式 RenderTexture 输出需要触发 SRP end-camera 和 end-context 回调；URP Camera Stack 捕获 Base Camera 对应的最终合成画面。Screen Space Overlay Canvas 不属于 Camera 输出；需要录入 UI 时使用 Screen Space Camera 或 World Space Canvas。
+`FFmpegCameraCapturer` 录制指定 Camera 的视频画面，无音频。MRP 显示输出通过独立的 `MajCameraCaptureBridge` 提供已 Resolve 的相机颜色，URP 等其他 SRP 使用 Core RP 的 `CameraCaptureBridge`，同一相机只注册其中一条路径。显式 RenderTexture 输出在整个 SRP rendering context 结束后复制，Built-in Render Pipeline 使用 Camera 的 post-render 回调；这些路径不改变 Camera 的 `targetTexture` 或 `rect`。切换管线或相机目标时重新选择捕获路径，暂停、停止或销毁相机时解除注册。
+
+MRP 仅在存在录制回调时，将符合条件的独立主屏 Game 相机改为中间颜色 RT 输出，按「场景绘制 → Resolve → 录制回调 → FinalCopy」执行；未录制时保留原有直接输出与省带宽路径。共享颜色、Depth / Nothing 清除、非主屏或立体相机不强行重定向，跳过捕获并告警。录制本身还会使用固定数量的 RGBA8 回读 RT，并进行编码所需的 CPU 像素回读。其他 SRP 的显示输出需要执行 Core RP 捕获动作；显式 RenderTexture 输出需要触发 SRP end-camera 和 end-context 回调。URP Camera Stack 捕获 Base Camera 对应的最终合成画面。Screen Space Overlay Canvas 不属于 Camera 输出；需要录入 UI 时使用 Screen Space Camera 或 World Space Canvas。MRP 不因此新增 Camera Stack 支持，且游戏设置中的录制模式仍只控制 OBS，尚未接入自动 FFmpeg 录制。
 
 ```csharp
 using MajdataPlay.FFmpeg;
@@ -209,7 +211,9 @@ iOS Player 的固定 VideoToolbox 包装器不能检查硬件独占选择，硬�
 
 `FFmpegCameraCapturer` 只录视频。需要音轨时使用 `FFmpegMediaMuxer.Mux(videoPath, pcm, sampleRate, channels, output, container, token)`：它把已完成的视频文件（如 capturer 写出的 `.mkv`）的首个视频流按包复制（不重新编码），并把交错 32-bit float PCM 作为音轨，按时间戳交错写入 `MediaContainerFormat.MP4` 或 `Matroska`。音轨时间原点与视频原点一致；PCM 为空时输出纯视频。输出流由调用方持有，必须可写且可 seek。
 
-音频编码优先使用 FFmpeg 内置 `aac` encoder（码率 96 kbit/s × 声道数）；加载的原生库没有 AAC encoder 时回退为未压缩 `pcm_s16le`，容器不接受 PCM 时抛出 `NotSupportedException`。2026-10-05 的原生库未启用任何音频 encoder，需按 [Tools/FFmpeg](../../../../Tools/FFmpeg/README.md) 的当前配置重建后才有 AAC。游戏内录制入口是 `MajdataPlay.Recording.FFmpegRecorder`，它组合 capturer 与 `AudioManager.CreateAudioRecorder()` 返回的 Bass 最终输出录音器。
+音频编码优先使用 FFmpeg 内置 `aac` encoder（码率 96 kbit/s × 声道数）；加载的原生库没有 AAC encoder 时回退为未压缩 `pcm_s16le`，容器不接受 PCM 时抛出 `NotSupportedException`。2026-10-05 的原生库未启用任何音频 encoder，需按 [Tools/FFmpeg](../../../../Tools/FFmpeg/README.md) 的当前配置重建后才有 AAC。`MajdataPlay.Recording.FFmpegRecorder` 组合 capturer 与 `AudioManager.CreateAudioRecorder()` 返回的 Bass 最终输出录音器；目前游戏设置菜单仍只使用 OBS，尚未自动调用它。
+
+`FFmpegRecorder` 的 PCM drain 使用单层后台任务，读写失败会被观察，并触发音视频一起停止、等待各自收尾。只有成功输出后才删除临时视频和 PCM；混流、转移或收尾失败时，保留尚未成功转移的源文件，并在日志中记录恢复路径。托管收尾回归可运行 `dotnet run --project Tools/Tests/RecorderLifecycleValidation/RecorderLifecycleValidation.csproj -c Release`；这不代替实际音视频录制验证。
 
 运行时程序集新增对已在项目内使用的 `Unity.RenderPipelines.Core.Runtime` 的引用，用于 URP 正确的最终 Camera 颜色捕获通道；没有新增或升级 Package Manager 包。
 

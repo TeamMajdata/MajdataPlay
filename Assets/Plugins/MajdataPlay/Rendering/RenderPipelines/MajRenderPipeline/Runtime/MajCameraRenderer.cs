@@ -58,6 +58,16 @@ namespace MajdataPlay.Rendering
         private int _textureMipmapBias;
         private bool _reportedExtensionCameraFallback;
 
+        /// <summary>Retains the registration-time capture snapshot only while rendering the current camera.</summary>
+        private Action<RenderTargetIdentifier, CommandBuffer>[] _captureActions =
+            Array.Empty<Action<RenderTargetIdentifier, CommandBuffer>>();
+
+        /// <summary>Identifies the camera whose temporary capture requirement last kept scene attachments alive.</summary>
+        private Camera? _captureAttachmentCamera;
+
+        /// <summary>Suppresses repeated unsupported-capture warnings for the same camera.</summary>
+        private Camera? _unsupportedCaptureCamera;
+
         internal MajCameraRenderer(Shader finalCopyShader)
         {
             if (finalCopyShader != null && finalCopyShader.isSupported)
@@ -111,6 +121,7 @@ namespace MajdataPlay.Rendering
                     {
                         _extensionActive = false;
                         _usingSceneAttachments = false;
+                        _captureActions = Array.Empty<Action<RenderTargetIdentifier, CommandBuffer>>();
                     }
                 }
                 // 各 Render 路径正常返回意味着 Submit 已完成；SDK 清理异常也不能发布成功。
@@ -150,6 +161,18 @@ namespace MajdataPlay.Rendering
 
             _context.SetupCameraProperties(_camera);
             bool canUseIntermediate = CanUseIndependentTarget(isSingleCamera);
+            _captureActions = MajCameraCaptureBridge.GetCaptureActions(_camera);
+            var captureRequested = _captureActions.Length != 0;
+            var captureIntermediate = captureRequested && canUseIntermediate;
+            if (captureRequested && !captureIntermediate)
+            {
+                ReportCaptureUnavailable();
+                _captureActions = Array.Empty<Action<RenderTargetIdentifier, CommandBuffer>>();
+            }
+            else if (!captureRequested && _unsupportedCaptureCamera == _camera)
+            {
+                _unsupportedCaptureCamera = null;
+            }
             // pixelWidth/Height 描述相机逻辑 viewport，不能用来推断整张屏幕附件尺寸。
             // Android 显示缓冲实验只影响 GPU 目标域，CPU 的 Camera / Canvas / 触摸不再乘比例。
             int outputWidth = Mathf.Max(1, _camera.targetTexture != null ? _camera.targetTexture.width : _camera.pixelWidth);
@@ -196,15 +219,27 @@ namespace MajdataPlay.Rendering
             // 长屏的 100% / 1x 默认保留直绘；缩放、MSAA 或明确选择兼容输出时使用中间颜色。
             // 关闭原生附件优化也不能顺带关闭预设的 MSAA。
             bool useSceneAttachments = (canUseIntermediate
-                && (nativePass || isScaled || requestedSamples > 1 || forceIntermediateOutput))
+                && (nativePass || isScaled || requestedSamples > 1 || forceIntermediateOutput || captureIntermediate))
                 || extensionIntermediate;
+            if (!ReferenceEquals(_captureAttachmentCamera, null)
+                && MajCameraCaptureBridge.GetCaptureActions(_captureAttachmentCamera!).Length == 0)
+            {
+                // The ordinary compatible 1x path would not call TryPrepare again after recording stops.
+                // Also handle a destroyed/replaced recording camera, but retain a live owner's targets
+                // when another Preview/SceneView camera renders between its recording frames.
+                if (!useSceneAttachments)
+                {
+                    _attachments.ReleaseTargets();
+                }
+                _captureAttachmentCamera = null;
+            }
             var directStatus = MajRenderOutputStatus.Direct;
             if (useSceneAttachments)
             {
                 useSceneAttachments = _attachments.TryPrepare(sceneWidth, sceneHeight, requestedSamples,
-                    _finalCopyMaterial != null, isScaled || !nativePass || forceIntermediateOutput, nativePass,
+                    _finalCopyMaterial != null, isScaled || !nativePass || forceIntermediateOutput || captureIntermediate, nativePass,
                     MajRenderScale.AutoFilter(outputWidth, outputHeight, scale),
-                    resolveToScreen && !forceIntermediateOutput && nativePass && !isScaled
+                    resolveToScreen && !forceIntermediateOutput && !captureIntermediate && nativePass && !isScaled
                         && MajFinalCopyMapping.CanResolveViewportToScreen(_camera.rect) && CanResolveToScreen());
                 if (!useSceneAttachments)
                 {
@@ -214,6 +249,14 @@ namespace MajdataPlay.Rendering
                         Debug.LogWarning("MRP: 设备附件或 FinalCopy Shader 不可用，本相机回退到原分辨率兼容绘制。");
                         _reportedAttachmentFallback = true;
                     }
+                    if (captureRequested)
+                    {
+                        ReportCaptureUnavailable();
+                    }
+                }
+                else if (captureIntermediate)
+                {
+                    _captureAttachmentCamera = _camera;
                 }
             }
 
@@ -233,6 +276,10 @@ namespace MajdataPlay.Rendering
                     else
                         RenderIntermediateCompatible(useDynamicBatching, useGPUInstancing,
                             outputWidth, outputHeight, sceneWidth, sceneHeight);
+                    if (captureIntermediate)
+                    {
+                        return MajRenderOutputStatus.IntermediateCapture;
+                    }
                     // 偏移 MSAA 不再直接 Resolve 到显示缓冲，避免 RT/display viewport Y 约定不同。
                     // 仍保留原生场景的 memoryless / Resolve-only，不误报成硬件不支持 MSAA。
                     if (!isScaled && resolveToScreen && !forceIntermediateOutput
@@ -375,6 +422,7 @@ namespace MajdataPlay.Rendering
                 if (_attachments.UsesIntermediateColor)
                 {
                     // MSAA 在场景末尾已 Resolve；1x 缩放直接采样已 Store 的场景颜色。
+                    RecordCaptureActions();
                     SetFinalCopySource();
                     _attachments.BeginFinalCopy(_buffer, _outputSurfaceWidth, _outputSurfaceHeight,
                         _outputPixelRect, GetBackgroundColor());
@@ -411,6 +459,7 @@ namespace MajdataPlay.Rendering
                 // 深度在普通 Store 路径中仍然有效，Gizmos 结束后再 Resolve/放大。
                 DrawEditorGizmos();
                 _attachments.ResolveCompatible(_buffer);
+                RecordCaptureActions();
                 SetFinalCopySource();
                 SetCameraOutputTarget();
                 RecordFinalCopy();
@@ -423,6 +472,49 @@ namespace MajdataPlay.Rendering
                 ExecuteBuffer();
                 _context.Submit();
             }
+        }
+
+        /// <summary>Records camera capture only after scene color is resolved and outside any native render pass.</summary>
+        /// <remarks>FinalCopy restores the output target and viewport after consumers record their own copies.</remarks>
+        private void RecordCaptureActions()
+        {
+            if (_captureActions.Length == 0)
+            {
+                return;
+            }
+            _unsupportedCaptureCamera = null;
+            var source = new RenderTargetIdentifier(_attachments.ResolvedColor);
+            BeginDebugSample("MRP.CameraCapture");
+            try
+            {
+                foreach (var action in _captureActions)
+                {
+                    try
+                    {
+                        action(source, _buffer);
+                    }
+                    catch (Exception exception)
+                    {
+                        // A recorder failure must not skip presentation, submission, or other registered consumers.
+                        Debug.LogException(exception);
+                    }
+                }
+            }
+            finally
+            {
+                EndDebugSample("MRP.CameraCapture");
+            }
+        }
+
+        /// <summary>Reports a rejected capture without sampling an unresolved or unavailable backbuffer.</summary>
+        private void ReportCaptureUnavailable()
+        {
+            if (_unsupportedCaptureCamera == _camera)
+            {
+                return;
+            }
+            _unsupportedCaptureCamera = _camera;
+            Debug.LogWarning("MRP: camera capture requires an independent main-display Game camera with Color/Skybox clear and a supported intermediate color target. Capture was skipped; camera rendering continues.", _camera);
         }
 
         private void RecordFinalCopy()

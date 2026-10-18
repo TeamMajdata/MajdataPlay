@@ -1,0 +1,22 @@
+<Project>
+  <PropertyGroup>
+    <BaseIntermediateOutputPath>../../../Temp/MrpCaptureValidation/obj/</BaseIntermediateOutputPath>
+    <OutputPath>../../../Temp/MrpCaptureValidation/bin/</OutputPath>
+  </PropertyGroup>
+  <Import Project="Sdk.props" Sdk="Microsoft.NET.Sdk" />
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net9.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <RestoreSources>$(MSBuildThisFileDirectory)</RestoreSources>
+    <NuGetAudit>false</NuGetAudit>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../../../Assets/Plugins/MajdataPlay/Rendering/RenderPipelines/MajRenderPipeline/Runtime/MajCameraCaptureBridge.cs" Link="Production/MajCameraCaptureBridge.cs" />
+  </ItemGroup>
+  <Import Project="Sdk.targets" Sdk="Microsoft.NET.Sdk" />
+</Project>

@@ -4,6 +4,7 @@ param()
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $repositoryRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '../../..')).Path
+$assemblyPath = 'Assets/Plugins/MajdataPlay/Rendering/MajdataPlay.Rendering.asmdef'
 $pipelineRoot = 'Assets/Plugins/MajdataPlay/Rendering/RenderPipelines/MajRenderPipeline'
 $projectRoot = 'Assets/Rendering/RenderPipelines/MajRenderPipeline'
 $obsoleteRoot = 'Assets/Rendering/' + 'MajRenderPipeline'
@@ -88,6 +89,12 @@ try
         }
     }
 
+    # The reusable assembly now owns the parent Rendering directory; its GUID
+    # still binds the pipeline's Editor partial and all project consumers.
+    $assemblyGuid = Get-AssetGuid "$assemblyPath.meta"
+    Assert-Condition (!$movedGuids.ContainsKey($assemblyGuid)) 'Pipeline assembly GUID duplicates a pipeline asset.'
+    $movedGuids[$assemblyGuid] = "$assemblyPath.meta"
+
     foreach ($metaPath in $files | Where-Object { $_ -like 'Assets/*.meta' })
     {
         $content = Get-Content -LiteralPath $metaPath -Raw
@@ -98,11 +105,10 @@ try
         }
     }
 
-    $assemblyPath = "$pipelineRoot/Runtime/MajdataPlay.MajRenderPipe.asmdef"
-    $assemblyGuid = Get-AssetGuid "$assemblyPath.meta"
     Assert-Condition ($assemblyGuid -ceq '4f28209e4fc743e3899c9f026369d7d0') 'Pipeline assembly GUID changed.'
     $assembly = Get-Content -LiteralPath $assemblyPath -Raw | ConvertFrom-Json
     Assert-Condition ($assembly.name -ceq 'MajdataPlay.MajRenderPipe') 'Pipeline assembly identity changed.'
+    Assert-Condition (@($assembly.references).Count -eq 0) 'Pipeline assembly must remain engine-only.'
     $assemblyReference = Get-Content -LiteralPath "$pipelineRoot/Editor/MajdataPlay.MajRenderPipe.asmref" -Raw | ConvertFrom-Json
     Assert-Condition ($assemblyReference.reference -ceq "GUID:$assemblyGuid") 'Editor partial does not reference the runtime assembly.'
     Assert-Condition (@(Get-ChildItem -LiteralPath "$pipelineRoot/Editor" -Filter '*.asmdef' -Recurse).Count -eq 0) 'Editor partial must remain in the runtime assembly.'

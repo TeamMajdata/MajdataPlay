@@ -37,6 +37,7 @@ namespace MajdataPlay.Scenes.Game
         [SerializeField]
         private Sprite _defaultSprite = null!;
 
+        /// <summary>Owns the private background material shared by the cover and video graphics.</summary>
         private Material _backgroundMaterial = null!;
         private FFmpegVideoPlayer _videoPlayer = null!;
         private Sprite? _videoFallback;
@@ -70,15 +71,40 @@ namespace MajdataPlay.Scenes.Game
 
         private void OnDestroy()
         {
+            if (_destroyed)
+            {
+                return;
+            }
             _destroyed = true;
             ++_videoLoadVersion;
-            if (_videoPlayer != null)
+            try
             {
-                _videoPlayer.TextureChanged -= OnVideoTextureChanged;
-                _videoPlayer.ErrorReceived -= OnVideoError;
-                _videoPlayer.Close();
+                if (_videoPlayer != null)
+                {
+                    _videoPlayer.TextureChanged -= OnVideoTextureChanged;
+                    _videoPlayer.ErrorReceived -= OnVideoError;
+                    _videoPlayer.Close();
+                }
             }
-            Majdata<BGManager>.Free();
+            finally
+            {
+                try
+                {
+                    var material = _backgroundMaterial;
+                    _backgroundMaterial = null!;
+                    if (material != null)
+                    {
+                        Destroy(material);
+                    }
+                }
+                finally
+                {
+                    if (ReferenceEquals(Majdata<BGManager>.Instance, this))
+                    {
+                        Majdata<BGManager>.Free();
+                    }
+                }
+            }
         }
 
         public void PauseVideo()

@@ -217,6 +217,7 @@
     "MAJSETTING_PROPERTY_CurrentOutputPath_OPTION_DirectScreenTransition": "Direct Output\n(buffer transition)",
     "MAJSETTING_PROPERTY_CurrentOutputPath_OPTION_Unavailable": "No main-screen frame",
     "MAJSETTING_PROPERTY_CurrentOutputPath_OPTION_IntermediateViewport": "RT+Copy\n(display area compatibility)",
+    "MAJSETTING_PROPERTY_CurrentOutputPath_OPTION_IntermediateCapture": "RT+Copy\n(camera capture)",
     "MAJSETTING_PROPERTY_CompatibilityMode": "Graphics Compatibility Mode",
     "MAJSETTING_PROPERTY_CompatibilityMode_DESC": "Enable this if you experience black screens, stuttering or other issues.",
     "MAJSETTING_PROPERTY_SystemResolutionScaling": "System Resolution Scaling (Experimental)",

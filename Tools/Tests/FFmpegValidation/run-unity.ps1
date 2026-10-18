@@ -84,6 +84,9 @@ if (-not $SkipBuild) {
     New-Item -ItemType Directory -Path (Join-Path $project 'Assets/Plugins/MajdataPlay') -Force | Out-Null
     New-Item -ItemType Directory -Path (Join-Path $project 'Assets/Packages') -Force | Out-Null
     Copy-Item -LiteralPath (Join-Path $repo 'Assets/Plugins/MajdataPlay/Diagnostics') -Destination (Join-Path $project 'Assets/Plugins/MajdataPlay') -Recurse -Force
+    # FFmpeg routes MRP display capture through its independent bridge. Preserve
+    # the implementation and shader include paths without adding Core RP to MRP.
+    Copy-Item -LiteralPath (Join-Path $repo 'Assets/Plugins/MajdataPlay/Rendering') -Destination (Join-Path $project 'Assets/Plugins/MajdataPlay') -Recurse -Force
     # Stage only the portable storage assembly required by FFmpeg local output.
     $storageDestination = Join-Path $project 'Assets/Plugins/MajdataPlay/IO'
     New-Item -ItemType Directory -Path $storageDestination -Force | Out-Null

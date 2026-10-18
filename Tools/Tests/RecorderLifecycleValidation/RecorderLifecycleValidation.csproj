@@ -1,0 +1,22 @@
+<Project>
+  <PropertyGroup>
+    <BaseIntermediateOutputPath>../../../Temp/RecorderLifecycleValidation/obj/</BaseIntermediateOutputPath>
+    <OutputPath>../../../Temp/RecorderLifecycleValidation/bin/</OutputPath>
+  </PropertyGroup>
+  <Import Project="Sdk.props" Sdk="Microsoft.NET.Sdk" />
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net9.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <RestoreSources>$(MSBuildThisFileDirectory)</RestoreSources>
+    <NuGetAudit>false</NuGetAudit>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../../../Assets/Scripts/Misc/Recording/FFmpegRecorder.cs" Link="Production/FFmpegRecorder.cs" />
+    <Compile Include="../../../Assets/Scripts/Misc/Recording/IRecorder.cs" Link="Production/IRecorder.cs" />
+    <Compile Include="../../../Assets/Scripts/IO/Base/Audio/IAudioRecorder.cs" Link="Production/IAudioRecorder.cs" />
+  </ItemGroup>
+  <Import Project="Sdk.targets" Sdk="Microsoft.NET.Sdk" />
+</Project>

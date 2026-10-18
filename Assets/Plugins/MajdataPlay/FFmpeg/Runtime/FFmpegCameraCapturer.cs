@@ -1,5 +1,6 @@
 #nullable enable
 using MajdataPlay.FFmpeg.Internal;
+using MajdataPlay.Rendering;
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -45,7 +46,8 @@ namespace MajdataPlay.FFmpeg
     /// <summary>Records a Camera through bounded GPU readbacks and a background FFmpeg encoder.</summary>
     /// <remarks>
     /// Call component APIs on the Unity main thread. Events are raised on that thread.
-    /// SRP display output uses CameraCaptureBridge; explicit targets are copied after end-context rendering.
+    /// MRP display output uses MajCameraCaptureBridge; other SRPs use CameraCaptureBridge.
+    /// Explicit targets are copied after end-context rendering.
     /// Built-in uses the camera's post-render callback. Custom pipelines must execute bridge actions or
     /// raise end-camera and end-context callbacks for explicit targets. Recording includes camera output,
     /// excluding audio and Screen Space Overlay canvases. Hardware encoding still uses CPU pixel readback.
@@ -93,8 +95,18 @@ namespace MajdataPlay.FFmpeg
         private long _droppedFrames;
         /// <summary>Tracks whether render callbacks are attached.</summary>
         private bool _hooked;
-        /// <summary>Tracks whether the current SRP camera uses the pipeline capture bridge.</summary>
-        private bool _bridgeEnabled;
+        /// <summary>Tracks the single bridge supplying the current SRP display output.</summary>
+        private CaptureBridgeRoute _captureBridge;
+        /// <summary>Identifies the provider of a renderer-owned display color target.</summary>
+        private enum CaptureBridgeRoute
+        {
+            /// <summary>No display callback is registered.</summary>
+            None,
+            /// <summary>The active SRP executes Core RP capture actions.</summary>
+            Core,
+            /// <summary>The active MRP executes its engine-only capture actions.</summary>
+            Maj
+        }
         /// <summary>Prevents duplicate completion events for the same session.</summary>
         private bool _completionReported;
         /// <summary>Occurs after FFmpeg opens the output and camera capture begins.</summary>
@@ -453,6 +465,7 @@ namespace MajdataPlay.FFmpeg
             }
 
             var commands = _resources.Commands;
+            SetCaptureBridge(false);
             commands.Clear();
             Capture(BuiltinRenderTextureType.CameraTarget, commands);
             Graphics.ExecuteCommandBuffer(commands);
@@ -475,7 +488,8 @@ namespace MajdataPlay.FFmpeg
         /// <param name="camera">The camera whose rendering has completed.</param>
         private void OnEndCameraRendering(ScriptableRenderContext context, Camera camera)
         {
-            if (!IsRecording || camera != _activeCamera || camera.targetTexture == null || _resources == null || _bridgeEnabled)
+            if (!IsRecording || camera != _activeCamera || camera.targetTexture == null || _resources == null
+                || _captureBridge != CaptureBridgeRoute.None)
             {
                 return;
             }
@@ -501,25 +515,55 @@ namespace MajdataPlay.FFmpeg
             Graphics.ExecuteCommandBuffer(commands);
         }
 
-        /// <summary>Changes bridge registration only when the camera's render destination changes.</summary>
+        /// <summary>Routes display capture to exactly one bridge as the pipeline or destination changes.</summary>
         /// <param name="enabled">Whether the camera needs the renderer-provided display color target.</param>
         private void SetCaptureBridge(bool enabled)
         {
-            if (_bridgeEnabled == enabled || _activeCamera == null || _captureAction == null)
+            var camera = _activeCamera;
+            var action = _captureAction;
+            var route = CaptureBridgeRoute.None;
+            if (enabled && camera != null && action != null)
+            {
+                var pipeline = GraphicsSettings.currentRenderPipeline;
+                route = pipeline is MajRenderPipelineAsset ? CaptureBridgeRoute.Maj
+                    : pipeline != null ? CaptureBridgeRoute.Core : CaptureBridgeRoute.None;
+            }
+
+            if (_captureBridge == route)
             {
                 return;
             }
 
-            if (enabled)
+            // MRP can unregister a destroyed Unity camera through its retained managed reference.
+            // Core RP's own null guard remains responsible for its existing destroyed-camera behavior.
+            if (!ReferenceEquals(camera, null) && action != null)
             {
-                CameraCaptureBridge.AddCaptureAction(_activeCamera, _captureAction);
-            }
-            else
-            {
-                CameraCaptureBridge.RemoveCaptureAction(_activeCamera, _captureAction);
+                if (_captureBridge == CaptureBridgeRoute.Maj)
+                {
+                    MajCameraCaptureBridge.RemoveCaptureAction(camera, action);
+                }
+                else if (_captureBridge == CaptureBridgeRoute.Core)
+                {
+                    CameraCaptureBridge.RemoveCaptureAction(camera, action);
+                }
             }
 
-            _bridgeEnabled = enabled;
+            _captureBridge = CaptureBridgeRoute.None;
+            if (camera == null || action == null)
+            {
+                return;
+            }
+
+            if (route == CaptureBridgeRoute.Maj)
+            {
+                MajCameraCaptureBridge.AddCaptureAction(camera, action);
+            }
+            else if (route == CaptureBridgeRoute.Core)
+            {
+                CameraCaptureBridge.AddCaptureAction(camera, action);
+            }
+
+            _captureBridge = route;
         }
 
         /// <summary>Records a scaled RGBA copy and asynchronous readback into the renderer's command stream.</summary>
@@ -567,7 +611,7 @@ namespace MajdataPlay.FFmpeg
             RenderPipelineManager.endContextRendering -= OnEndContextRendering;
             _pendingSrpTexture = null;
             SetCaptureBridge(false);
-            _bridgeEnabled = false;
+            _captureBridge = CaptureBridgeRoute.None;
             _hooked = false;
         }
 

@@ -17,6 +17,11 @@ shader include paths with case-sensitive comparisons, and the production source
 link used by SettingValidation. Repository-owned text under `Assets` and `Tools`
 is checked for obsolete pipeline paths.
 
+The reusable assembly lives at
+`Assets/Plugins/MajdataPlay/Rendering/MajdataPlay.Rendering.asmdef`. Its preserved
+name is `MajdataPlay.MajRenderPipe`; the check follows that parent-level asset,
+validates its unique GUID, and rejects non-engine assembly references.
+
 Files are enumerated through Git, including untracked files but excluding ignored
 generated outputs and submodule contents. Shader checks cover the pipeline,
 project shaders, and the Live2D and TMP includes affected by this relocation;

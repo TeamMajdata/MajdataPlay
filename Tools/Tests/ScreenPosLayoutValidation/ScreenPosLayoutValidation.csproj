@@ -5,11 +5,17 @@
     <LangVersion>preview</LangVersion>
     <Nullable>enable</Nullable>
     <ImplicitUsings>disable</ImplicitUsings>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
     <RestoreSources>$(MSBuildThisFileDirectory)</RestoreSources>
     <NuGetAudit>false</NuGetAudit>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="Program.cs" />
+    <Compile Include="UnityStubs.cs" />
+    <Compile Include="CornerUpdaterValidation.cs" />
+    <Compile Include="CornerUpdaterStubs.cs" />
     <Compile Include="../../../Assets/Scripts/Misc/ScreenPos/ScreenPosCanvasLayoutInput.cs" Link="Production/ScreenPosCanvasLayoutInput.cs" />
     <Compile Include="../../../Assets/Scripts/Misc/ScreenPos/ScreenPosCanvasLayout.cs" Link="Production/ScreenPosCanvasLayout.cs" />
+    <Compile Include="../../../Assets/Scripts/Misc/ScreenPos/RectCornerPositionUpdater.cs" Link="Production/RectCornerPositionUpdater.cs" />
   </ItemGroup>
 </Project>

@@ -114,8 +114,8 @@ Shader "Maj/UI/CircleMaskWithOutlineShadow"
             {
                 float2 uv = i.uv;
 
-                // 主体保留原有纹理与 UI Tint；描边、阴影继续使用各自颜色参数。
-                half4 col = MAJ_SAMPLE_TEX2D(_MainTex, uv) * i.color;
+                // UI RGB 只着色主体；整体 Alpha 留到合成后应用，描边和阴影也须一起淡出。
+                half4 col = MAJ_SAMPLE_TEX2D(_MainTex, uv) * float4(i.color.rgb, 1.0);
 
                 float dist = circleDistance(uv);
                 // 圆周位于片元内部，不能只依赖 MSAA 的几何覆盖；过渡宽度随实际像素调整。
@@ -158,6 +158,9 @@ Shader "Maj/UI/CircleMaskWithOutlineShadow"
                 half4 finalCol = half4(
                     foregroundRGB + _ShadowColor.rgb * shadowBehind,
                     foregroundAlpha + shadowBehind);
+
+                // 对整层预乘 RGBA 应用一次 UI Alpha，保持颜色与覆盖率同步，避免主体重复衰减。
+                finalCol *= saturate(i.color.a);
 
                 // 仅丢弃完全透明的尾部；保留圆周 AA 和有效软阴影，不增加纹理采样或 Pass。
                 if (finalCol.a <= 0.0h)

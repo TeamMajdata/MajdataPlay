@@ -205,6 +205,7 @@
     "MAJSETTING_PROPERTY_CurrentOutputPath_OPTION_DirectScreenTransition": "直接輸出\n（緩衝切換中）",
     "MAJSETTING_PROPERTY_CurrentOutputPath_OPTION_Unavailable": "尚無主螢幕渲染",
     "MAJSETTING_PROPERTY_CurrentOutputPath_OPTION_IntermediateViewport": "RT+Copy\n（顯示區域相容）",
+    "MAJSETTING_PROPERTY_CurrentOutputPath_OPTION_IntermediateCapture": "RT+Copy\n（錄影擷取）",
     "MAJSETTING_PROPERTY_CompatibilityMode": "圖形相容模式",
     "MAJSETTING_PROPERTY_CompatibilityMode_DESC": "出現黑畫面、卡頓等問題時可以啟用",
     "MAJSETTING_PROPERTY_SystemResolutionScaling": "系統解析度縮放（實驗）",

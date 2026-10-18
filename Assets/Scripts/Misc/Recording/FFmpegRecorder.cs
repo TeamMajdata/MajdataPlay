@@ -5,6 +5,7 @@ using MajdataPlay.IO;
 using MajdataPlay.IO.Storage;
 using System;
 using System.IO;
+using System.Runtime.ExceptionServices;
 using System.Runtime.InteropServices;
 using System.Threading;
 using System.Threading.Tasks;
@@ -148,9 +149,10 @@ namespace MajdataPlay.Recording
             {
                 return;
             }
-            if (_capturer == null || _capturer.State == CameraCaptureState.Error || _capturer.State == CameraCaptureState.Stopped)
+            if (_capturer == null || _capturer.State == CameraCaptureState.Error || _capturer.State == CameraCaptureState.Stopped
+                || _audioDrainTask.IsFaulted)
             {
-                MajDebug.LogWarning(nameof(FFmpegRecorder), "The capturer stopped unexpectedly; finalizing the recording");
+                MajDebug.LogWarning(nameof(FFmpegRecorder), "A recording source stopped unexpectedly; finalizing the recording");
                 _ = LogFailureAsync(StopCoreAsync(), "finalize");
             }
         }
@@ -171,10 +173,11 @@ namespace MajdataPlay.Recording
         /// <returns>A task completing when capture has begun.</returns>
         private async Task StartCoreAsync()
         {
-            var files = RecordingFiles.Create(_name, _container);
+            RecordingFiles? files = null;
             Stream? audioOutput = null;
             try
             {
+                files = RecordingFiles.Create(_name, _container);
                 audioOutput = FileSystem.File.OpenWrite(files.AudioPath);
                 // Started is raised in the same call that starts the capture clock, giving both streams one origin.
                 _capturer.Started += OnCaptureStarted;
@@ -195,7 +198,8 @@ namespace MajdataPlay.Recording
                 var drainOutput = audioOutput;
                 audioOutput = null;
                 _audioDrainStop = drainStop;
-                _audioDrainTask = Task.Factory.StartNew(() => DrainAudioAsync(drainOutput, drainStop.Token), TaskCreationOptions.LongRunning);
+                _audioDrainTask = Task.Factory.StartNew(() => DrainAudio(drainOutput, drainStop.Token),
+                    CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default);
                 _files = files;
                 _state = RecorderState.Recording;
                 MajDebug.LogInfo(nameof(FFmpegRecorder), $"Recording {_capturer.Width}x{_capturer.Height}@{_capturer.FrameRate} "
@@ -203,14 +207,29 @@ namespace MajdataPlay.Recording
             }
             catch
             {
-                _audioRecorder.Stop();
-                audioOutput?.Dispose();
-                DeleteTemporaryFile(files.AudioPath);
-                if (_capturer.CanStartRecording)
+                try
                 {
-                    DeleteTemporaryFile(files.VideoPath);
+                    try
+                    {
+                        _audioRecorder.Stop();
+                    }
+                    finally
+                    {
+                        audioOutput?.Dispose();
+                        if (files != null)
+                        {
+                            DeleteTemporaryFile(files.AudioPath);
+                            if (_capturer.CanStartRecording)
+                            {
+                                DeleteTemporaryFile(files.VideoPath);
+                            }
+                        }
+                    }
                 }
-                _state = RecorderState.Idle;
+                finally
+                {
+                    _state = RecorderState.Idle;
+                }
                 throw;
             }
         }
@@ -257,18 +276,50 @@ namespace MajdataPlay.Recording
             try
             {
                 // Both sources stop in the same frame so their timelines also end together.
-                _audioRecorder.Stop();
-                var videoCompletion = _capturer.StopRecordingAsync();
+                Exception? stopError = null;
+                try
+                {
+                    _audioRecorder.Stop();
+                }
+                catch (Exception error)
+                {
+                    stopError = error;
+                }
+                var videoCompletion = Task.CompletedTask;
+                try
+                {
+                    videoCompletion = _capturer.StopRecordingAsync();
+                }
+                catch (Exception error)
+                {
+                    stopError ??= error;
+                }
                 drainStop.Cancel();
-                await _audioDrainTask;
-                await videoCompletion;
+                try
+                {
+                    // Observe both tasks even if one source fails before the other has finished.
+                    await Task.WhenAll(_audioDrainTask, videoCompletion);
+                }
+                catch (Exception error)
+                {
+                    stopError ??= error;
+                }
+                if (stopError != null)
+                {
+                    ExceptionDispatchInfo.Capture(stopError).Throw();
+                }
                 await WriteOutputAsync(files);
+                DeleteTemporaryFile(files.AudioPath);
+                DeleteTemporaryFile(files.VideoPath);
+            }
+            catch
+            {
+                MajDebug.LogError(nameof(FFmpegRecorder), $"Recording finalization failed; untransferred recovery sources are retained: video={files.VideoPath}; PCM={files.AudioPath}");
+                throw;
             }
             finally
             {
                 drainStop.Dispose();
-                DeleteTemporaryFile(files.AudioPath);
-                DeleteTemporaryFile(files.VideoPath);
                 _state = RecorderState.Idle;
             }
         }
@@ -314,8 +365,7 @@ namespace MajdataPlay.Recording
         /// <summary>Copies captured audio to the PCM file until asked to stop, then drains the remainder and closes the file.</summary>
         /// <param name="output">The PCM file, owned and closed by this worker.</param>
         /// <param name="stopToken">Signals that the audio recorder has stopped.</param>
-        /// <returns>A task completing after the PCM file is closed.</returns>
-        private async Task DrainAudioAsync(Stream output, CancellationToken stopToken)
+        private void DrainAudio(Stream output, CancellationToken stopToken)
         {
             var samples = new float[Math.Max(1, _audioRecorder.SampleRate / AudioDrainBufferDivisor) * _audioRecorder.Channels];
             using (output)

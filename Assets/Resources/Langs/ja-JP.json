@@ -212,6 +212,7 @@
     "MAJSETTING_PROPERTY_CurrentOutputPath_OPTION_DirectScreenTransition": "直接出力\n（バッファ切替中）",
     "MAJSETTING_PROPERTY_CurrentOutputPath_OPTION_Unavailable": "主画面の描画なし",
     "MAJSETTING_PROPERTY_CurrentOutputPath_OPTION_IntermediateViewport": "RT+Copy\n（表示領域の互換）",
+    "MAJSETTING_PROPERTY_CurrentOutputPath_OPTION_IntermediateCapture": "RT+Copy\n（録画キャプチャ）",
     "MAJSETTING_PROPERTY_CompatibilityMode": "描画互換モード",
     "MAJSETTING_PROPERTY_CompatibilityMode_DESC": "画面が映らない、動作が重いなどの問題がある場合にオンにしてください。",
     "MAJSETTING_PROPERTY_SystemResolutionScaling": "システム解像度スケーリング（実験）",

@@ -34,7 +34,16 @@ namespace MajdataPlay
         int _frameCount = 0;
 
         DisplayOptions? _displayOptions;
-        RectTransform _rectTransform;
+        RectTransform _rectTransform = null!;
+
+        /// <summary>The screen width observed while scheduling the last corner refresh.</summary>
+        private int _lastScreenWidth;
+
+        /// <summary>The screen height observed while scheduling the last corner refresh.</summary>
+        private int _lastScreenHeight;
+
+        /// <summary>The shared layout version observed while scheduling the last corner refresh.</summary>
+        private int _lastLayoutVersion = -1;
 
 
         [SerializeField]
@@ -45,7 +54,7 @@ namespace MajdataPlay
         {
             _rectTransform = GetComponent<RectTransform>();
         }
-        void Update()
+        void LateUpdate()
         {
             if (_frameCount < FRAME_DELAY)
             {
@@ -57,12 +66,14 @@ namespace MajdataPlay
             {
                 return;
             }
-            if (_frameCount == FRAME_DELAY)
+            var screenWidth = Screen.width;
+            var screenHeight = Screen.height;
+            if (screenWidth <= 0 || screenHeight <= 0)
             {
-                _frameCount++;
-                RefreshCornersPosition();
                 return;
             }
+            var provider = Majdata<ScreenPosCanvasLayoutProvider>.Instance;
+            var layoutVersion = provider != null && provider.HasLayout ? provider.Version : -1;
             var transformDisplay = displayOptions.MainScreenTransform;
             var subDisplayOffset = displayOptions.SubDisplayOffset;
             var subDisplayScale = displayOptions.SubDisplayScale;
@@ -70,7 +81,9 @@ namespace MajdataPlay
             var screenScale = displayOptions.MainScreenScale;
             var subChanged = subDisplayOffset != _lastSubDisplayOffset || subDisplayScale != _lastSubDisplayScale;
             var mainChanged = screenOffset != _lastMainDisplayOffset || screenScale != _lastMainDisplayScale;
-            var isAnyUpdated = transformDisplay != _lastTransformDisplay || subChanged || mainChanged;
+            var isAnyUpdated = transformDisplay != _lastTransformDisplay || subChanged || mainChanged ||
+                               screenWidth != _lastScreenWidth || screenHeight != _lastScreenHeight ||
+                               layoutVersion != _lastLayoutVersion;
 
             if(isAnyUpdated)
             {
@@ -79,7 +92,18 @@ namespace MajdataPlay
                 _lastMainDisplayOffset = screenOffset;
                 _lastMainDisplayScale = screenScale;
                 _lastTransformDisplay = transformDisplay;
+                _lastScreenWidth = screenWidth;
+                _lastScreenHeight = screenHeight;
+                _lastLayoutVersion = layoutVersion;
+                // Provider (140), appliers (150), and camera mover (100) run first.
+                // Wait one stable frame so CanvasScaler.Update can consume the new reference resolution.
                 _frameCount = FRAME_DELAY;
+                return;
+            }
+            if (_frameCount == FRAME_DELAY)
+            {
+                _frameCount++;
+                RefreshCornersPosition();
             }
         }
         void RefreshCornersPosition()

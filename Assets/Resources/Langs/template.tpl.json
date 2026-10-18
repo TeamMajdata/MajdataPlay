@@ -209,6 +209,7 @@
     "MAJSETTING_PROPERTY_CurrentOutputPath_OPTION_DirectScreenTransition",
     "MAJSETTING_PROPERTY_CurrentOutputPath_OPTION_Unavailable",
     "MAJSETTING_PROPERTY_CurrentOutputPath_OPTION_IntermediateViewport",
+    "MAJSETTING_PROPERTY_CurrentOutputPath_OPTION_IntermediateCapture",
     "MAJSETTING_PROPERTY_CompatibilityMode",
     "MAJSETTING_PROPERTY_CompatibilityMode_DESC",
     "MAJSETTING_PROPERTY_SystemResolutionScaling",

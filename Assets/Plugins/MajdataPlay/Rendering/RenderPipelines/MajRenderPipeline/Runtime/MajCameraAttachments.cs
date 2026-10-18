@@ -347,6 +347,19 @@ namespace MajdataPlay.Rendering
             return null;
         }
 
+        /// <summary>Releases temporary targets when camera capture stops using the compatible direct path.</summary>
+        /// <remarks>Descriptor arrays remain valid for the next attachment request.</remarks>
+        internal void ReleaseTargets()
+        {
+            ReleaseTextures();
+            _width = 0;
+            _height = 0;
+            _allocationFailed = false;
+            Samples = 1;
+            UsesIntermediateColor = false;
+            ResolvesToScreen = false;
+        }
+
         private void ReleaseTextures()
         {
             ReleaseTexture(ref _depthStencil);

@@ -41,6 +41,7 @@ internal static class Program
         VerifyAnchoredPositionConversion();
         VerifyCoverPivotPosition();
         VerifyInputEquality();
+        s_assertions += CornerUpdaterValidation.Run();
         Console.WriteLine($"SCREEN_POS_LAYOUT_VALIDATION_PASSED ({s_assertions} assertions)");
         return 0;
     }
