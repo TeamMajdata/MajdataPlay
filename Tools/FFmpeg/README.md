@@ -166,7 +166,7 @@ H.264 CBR 使用等目标/最大 VBV、filler 和 MP4 兼容的 VBR HRD 信令�
 | iOS simulator | `.build/artifacts/ios-simulator-*`（不与 device 同时导入） |
 
 每个库有确定性 `.meta`，已有 `.meta` 的 GUID 会保留，关闭 Any Platform，选择具体平台/CPU；只有对应桌面架构可在 Editor 使用。
-macOS x64 库只供 Intel Editor 使用，不进入 macOS Player：Unity 会把各 CPU 的同名 macOS 插件复制到同一 `Contents/PlugIns` 路径而判定冲突，因此 macOS Player 只构建 Apple silicon（ARM64）。
+macOS x64 库只供 Intel Editor 使用，不进入 macOS Player，macOS Player 只构建 Apple silicon（ARM64）。`.meta` 必须是 `serializedVersion: 3`：Unity 会忽略 version 2 里的 `OSXUniversal` 条目（enabled 和 CPU 都不读），两种架构的同名 dylib 会被复制到同一 `Contents/PlugIns` 路径而判定冲突。
 每个目标同时输出 `build-manifest.json`（commit、命令、主机、UTC 时间、文件 SHA256）、`configure.txt`、FFmpeg GPL 许可及各依赖许可证。
 完整日志和供原生桥接使用的头文件/import libs 在 `.build/<target>/` 与 `.build/install/<target>/`。
 不要对构建目录执行不经确认的通配符清理；增量重建会保留现有缓存。
