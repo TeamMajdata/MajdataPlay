@@ -456,8 +456,8 @@ jobs:
           version: ${{ env.BUNDLE_VERSION }}
           buildName: MajdataPlay
           buildsPath: ${{ env.CONFIGURATION }}
-          # The FFmpeg dylibs are per-architecture files with identical names, which a
-          # Universal (Intel + Apple silicon) macOS build rejects as colliding plugins.
+          # The macOS player ships Apple silicon only: the x86_64 FFmpeg/libcurl dylibs are
+          # Editor-only, because Unity treats same-named per-CPU macOS plugins as colliding.
           buildMethod: ${{ env.TARGET_PLATFORM == 'StandaloneOSX' && 'MajdataPlay.Editor.CustomBuild.BuildRelease' || '' }}
           customParameters: ${{ env.TARGET_PLATFORM == 'StandaloneOSX' && '-macOSArchitecture ARM64' || '' }}
 

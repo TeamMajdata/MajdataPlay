@@ -114,8 +114,8 @@ namespace MajdataPlay.Editor
 
         /// <summary>
         /// Sets the CPU architecture of the macOS player.
-        /// The FFmpeg dylibs ship as separate ARM64 and x86_64 files with the same names,
-        /// so a Universal (x64ARM64) build fails Unity's plugin collision check.
+        /// Only the ARM64 native plugins (FFmpeg, libcurl) are enabled for the macOS player;
+        /// their x86_64 copies are Editor-only, so an Intel or Universal player would lack them.
         /// </summary>
         /// <param name="value">A <c>UnityEditor.Build.OSArchitecture</c> name, such as <c>ARM64</c>.</param>
         private static void ApplyMacOSArchitecture(string value)

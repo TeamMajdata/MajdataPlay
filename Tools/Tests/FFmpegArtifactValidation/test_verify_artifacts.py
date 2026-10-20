@@ -22,7 +22,7 @@ DEPENDENCIES = importlib.util.module_from_spec(DEPENDENCY_SPEC)
 DEPENDENCY_SPEC.loader.exec_module(DEPENDENCIES)
 
 
-def importer_text(platform_key, cpu, editor_os=None, extra=''):
+def importer_text(platform_key, cpu, editor_os=None, extra='', player_enabled=True):
     """Create only the importer fields read by the verifier."""
     return f"""fileFormatVersion: 2
  guid: 0123456789abcdef0123456789abcdef
@@ -44,7 +44,7 @@ def importer_text(platform_key, cpu, editor_os=None, extra=''):
    - first:
        {platform_key}
      second:
-       enabled: 1
+       enabled: {1 if player_enabled else 0}
        settings:
          CPU: {cpu}
  {extra}  userData:
@@ -205,7 +205,8 @@ class ImporterTests(unittest.TestCase):
         for target, expected in VERIFY.TARGET_IMPORTERS.items():
             if expected is not None:
                 with self.subTest(target=target):
-                    self.verify(importer_text(*expected), target)
+                    player_enabled = target not in VERIFY.EDITOR_ONLY_TARGETS
+                    self.verify(importer_text(*expected, player_enabled=player_enabled), target)
 
     def test_bridge_requires_preload(self):
         with self.assertRaisesRegex(AssertionError, 'bridge must preload'):
@@ -234,8 +235,18 @@ class ImporterTests(unittest.TestCase):
         for target, expected in VERIFY.TARGET_IMPORTERS.items():
             if target != 'win-arm64' and expected is not None:
                 with self.subTest(target=target):
-                    text = importer_text(*expected).replace('        DefaultValueInitialized: true\n', '')
+                    player_enabled = target not in VERIFY.EDITOR_ONLY_TARGETS
+                    text = importer_text(*expected, player_enabled=player_enabled).replace('        DefaultValueInitialized: true\n', '')
                     self.verify(text, target)
+
+    def test_macos_intel_must_not_ship_in_player(self):
+        with self.assertRaisesRegex(AssertionError, 'wrong Player enablement'):
+            self.verify(importer_text('Standalone: OSXUniversal', 'x86_64', 'OSX'), 'macos-x64', 'libavutil.61.dylib')
+
+    def test_macos_apple_silicon_must_ship_in_player(self):
+        text = importer_text('Standalone: OSXUniversal', 'ARM64', 'OSX', player_enabled=False)
+        with self.assertRaisesRegex(AssertionError, 'wrong Player enablement'):
+            self.verify(text, 'macos-arm64', 'libavutil.61.dylib')
 
     def test_any_platform_enabled(self):
         text = importer_text('Standalone: Win64', 'ARM64').replace('enabled: 0', 'enabled: 1', 1)

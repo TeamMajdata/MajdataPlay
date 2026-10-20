@@ -26,6 +26,9 @@ TARGET_IMPORTERS = {
     'ios-simulator-arm64': None,
     'ios-simulator-x64': None,
 }
+# Unity copies every per-CPU macOS plugin to the same Contents/PlugIns name, so the
+# Intel libraries stay Editor-only and the macOS Player ships Apple silicon only.
+EDITOR_ONLY_TARGETS = {'macos-x64'}
 PATCH_MARKERS = {
     'patches/amf-rate-control.patch': 'MajdataPlay-AMF-RC-v1-',
     'patches/x265-parameter-check.patch': 'MajdataPlay-X265-Params-v1-',
@@ -93,7 +96,9 @@ def verify_importer(file, target):
     platform_key, cpu, editor_os = expected
     assert settings.get('Any:', {}).get('enabled') == '0', (meta, 'Any platform must be disabled')
     player = settings.get(platform_key, {})
-    assert player.get('enabled') == '1' and player.get('CPU') == cpu, (meta, 'wrong Player platform/CPU', platform_key, cpu)
+    assert player.get('CPU') == cpu, (meta, 'wrong Player platform/CPU', platform_key, cpu)
+    player_enabled = '0' if target in EDITOR_ONLY_TARGETS else '1'
+    assert player.get('enabled') == player_enabled, (meta, 'wrong Player enablement', platform_key)
     editor = settings.get('Editor: Editor', {})
     assert editor.get('enabled') == ('1' if editor_os else '0'), (meta, 'wrong Editor enablement')
     if target == 'win-arm64':

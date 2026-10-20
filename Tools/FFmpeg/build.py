@@ -37,6 +37,9 @@ WINDOWS_TARGETS = {
     'win-x64': ('x86_64', 'x86_64-w64-mingw32', 'Win64', 'x86_64', 'Windows'),
     'win-arm64': ('aarch64', 'aarch64-w64-mingw32', 'Win64', 'ARM64', ''),
 }
+# Unity copies every per-CPU macOS plugin to the same Contents/PlugIns name, so the
+# Intel libraries stay Editor-only and the macOS Player ships Apple silicon only.
+EDITOR_ONLY_TARGETS = {'macos-x64'}
 AMF_RATE_CONTROL_PATCH = HERE / 'patches/amf-rate-control.patch'
 X265_PARAMETER_CHECK_PATCH = HERE / 'patches/x265-parameter-check.patch'
 
@@ -849,7 +852,7 @@ PluginImporter:
   - first:
       {prefix}: {platform_name}
     second:
-      enabled: 1
+      enabled: {0 if target in EDITOR_ONLY_TARGETS else 1}
       settings:
         CPU: {cpu}
   userData:
