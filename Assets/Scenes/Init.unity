@@ -2397,6 +2397,9 @@ PrefabInstance:
     - targetCorrespondingSourceObject: {fileID: 3243441165040463401, guid: c56103e2e04c2c44ea96bafac763935a, type: 3}
       insertIndex: -1
       addedObject: {fileID: 1431281323}
+    - targetCorrespondingSourceObject: {fileID: 3243441165040463401, guid: c56103e2e04c2c44ea96bafac763935a, type: 3}
+      insertIndex: -1
+      addedObject: {fileID: 1431281327}
   m_SourcePrefab: {fileID: 100100000, guid: c56103e2e04c2c44ea96bafac763935a, type: 3}
 --- !u!20 &550395852 stripped
 Camera:
@@ -5195,6 +5198,31 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::MajdataPlay.UI.GlobalCamera
   <RuntimeDatabase>k__BackingField: {fileID: 0}
+--- !u!114 &1431281327
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1431281318}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: f01698c5e0e946d5843ff160ac9768e3, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: MajdataPlay.FFmpeg::MajdataPlay.FFmpeg.FFmpegCameraCapturer
+  _targetCamera: {fileID: 550395852}
+  _options:
+    <Width>k__BackingField: 1080
+    <Height>k__BackingField: 1920
+    <FrameRate>k__BackingField: 60
+    <PreferredEncoderType>k__BackingField: 1
+    <MaximumSoftwareThreads>k__BackingField: 8
+    <Format>k__BackingField: 0
+    <BitRate>k__BackingField: 8000000
+    <MaximumBitRate>k__BackingField: 16000000
+    <RateControlMode>k__BackingField: 1
+  _bufferedFrameLimit: 3
+  _readbackOrientation: 0
 --- !u!1 &1517703490
 GameObject:
   m_ObjectHideFlags: 0

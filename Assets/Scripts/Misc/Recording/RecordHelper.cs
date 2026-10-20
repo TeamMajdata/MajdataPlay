@@ -1,10 +1,8 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading;
-using System.Threading.Tasks;
+﻿using MajdataPlay.FFmpeg;
+using MajdataPlay.IO;
 using MajdataPlay.Settings;
+using System;
+using System.Threading.Tasks;
 
 #nullable enable
 namespace MajdataPlay.Recording
@@ -37,15 +35,22 @@ namespace MajdataPlay.Recording
             }
         }
 
-        static IRecorder _recorder;
-        static RecordHelper()
+        private static IRecorder _recorder;
+        private static int s_isInited = 0;
+
+        internal static void Init()
         {
-            _recorder = new OBSRecorder();
+            if (s_isInited == 0)
+            {
+                _recorder = new OBSRecorder();
+                //_recorder = new FFmpegRecorder(SceneSwitcher.MainCamera.GetComponent<FFmpegCameraCapturer>(), MajInstances.AudioManager.CreateAudioRecorder(), MediaContainerFormat.MP4);
+                s_isInited = 1;
+            }
             GameManager.OnAppQuit += OnApplicationQuit;
         }
         public static void StartRecord(string filename)
         {
-            if(!IsEnabled || !_recorder.IsConnected)
+            if (!IsEnabled || !_recorder.IsConnected)
             {
                 return;
             }

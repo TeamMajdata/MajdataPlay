@@ -30,7 +30,8 @@ using UnityEngine.Scripting;
 using UnityEngine.Rendering;
 using MajdataPlay.Diagnostics;
 using MajdataPlay.Databases;
-using MajdataPlay.Import; // DO NOT REMOVE IT !!!
+using MajdataPlay.Import;
+using MajdataPlay.Recording; // DO NOT REMOVE IT !!!
 
 namespace MajdataPlay
 {
@@ -170,6 +171,7 @@ namespace MajdataPlay
             InputManager.Init(Majdata<DummyTouchPanelRenderer>.Instance!.InstanceID2SensorIndexMappingTable);
             OutputManager.Init();
             CabinetLed.Init();
+            RecordHelper.Init();
             if (MajEnv.Mode == RunningMode.Test)
             {
                 EnterTestMode();
