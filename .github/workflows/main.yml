@@ -457,7 +457,7 @@ jobs:
           buildName: MajdataPlay
           buildsPath: ${{ env.CONFIGURATION }}
           # The macOS player ships Apple silicon only: the x86_64 FFmpeg/libcurl dylibs are
-          # Editor-only, because Unity treats same-named per-CPU macOS plugins as colliding.
+          # Editor-only, and Unity drops ARM64-only plugins from a Universal player.
           buildMethod: ${{ env.TARGET_PLATFORM == 'StandaloneOSX' && 'MajdataPlay.Editor.CustomBuild.BuildRelease' || '' }}
           customParameters: ${{ env.TARGET_PLATFORM == 'StandaloneOSX' && '-macOSArchitecture ARM64' || '' }}
 

@@ -14,20 +14,19 @@ import sysconfig
 ROOT = Path(__file__).resolve().parents[2]
 NATIVE = ROOT / 'Assets/Plugins/MajdataPlay/FFmpeg/Native'
 TARGET_IMPORTERS = {
-    'win-x86': ('Standalone: Win', 'x86', None),
-    'win-x64': ('Standalone: Win64', 'x86_64', 'Windows'),
-    'win-arm64': ('Standalone: Win64', 'ARM64', None),
-    'linux-x64': ('Standalone: Linux64', 'x86_64', 'Linux'),
-    'android-arm64': ('Android: Android', 'ARM64', None),
-    'android-armv7': ('Android: Android', 'ARMv7', None),
-    'macos-x64': ('Standalone: OSXUniversal', 'x86_64', 'OSX'),
-    'macos-arm64': ('Standalone: OSXUniversal', 'ARM64', 'OSX'),
-    'ios-arm64': ('iPhone: iOS', 'AnyCPU', None),
+    'win-x86': ('Win', 'x86', None),
+    'win-x64': ('Win64', 'x86_64', 'Windows'),
+    'win-arm64': ('Win64', 'ARM64', None),
+    'linux-x64': ('Linux64', 'x86_64', 'Linux'),
+    'android-arm64': ('Android', 'ARM64', None),
+    'android-armv7': ('Android', 'ARMv7', None),
+    'macos-x64': ('OSXUniversal', 'x86_64', 'OSX'),
+    'macos-arm64': ('OSXUniversal', 'ARM64', 'OSX'),
+    'ios-arm64': ('iOS', 'AnyCPU', None),
     'ios-simulator-arm64': None,
     'ios-simulator-x64': None,
 }
-# Unity copies every per-CPU macOS plugin to the same Contents/PlugIns name, so the
-# Intel libraries stay Editor-only and the macOS Player ships Apple silicon only.
+# The macOS Player ships Apple silicon only, so the Intel libraries stay Editor-only.
 EDITOR_ONLY_TARGETS = {'macos-x64'}
 PATCH_MARKERS = {
     'patches/amf-rate-control.patch': 'MajdataPlay-AMF-RC-v1-',
@@ -86,20 +85,21 @@ def verify_importer(file, target):
     assert 'PluginImporter:' in text, (meta, 'missing native PluginImporter')
     if file.name in ('FFmpegUnityBridge.dll', 'libFFmpegUnityBridge.so'):
         assert re.search(r'^  isPreloaded: 1$', text, re.MULTILINE), (meta, 'bridge must preload before graphics-device creation')
-    blocks = re.findall(r'^  - first:\n(.*?)^    second:\n(.*?)(?=^  - first:|^  userData:)', text, re.MULTILINE | re.DOTALL)
+    # Unity ignores a version 2 OSXUniversal entry (enabled and CPU), so macOS plugins collide.
+    assert re.search(r'^  serializedVersion: 3$', text, re.MULTILINE), (meta, 'importer must be serializedVersion 3')
+    blocks = re.findall(r'^    (\w+):\n(.*?)(?=^    \w+:\n|^  userData:)', text, re.MULTILINE | re.DOTALL)
     settings = {}
-    for first, second in blocks:
-        key = first.strip()
+    for key, body in blocks:
         assert key not in settings, (meta, 'duplicate platform entry', key)
-        values = dict(re.findall(r'^ +([A-Za-z]+): *([^\n]*)$', second, re.MULTILINE))
+        values = dict(re.findall(r'^ +([A-Za-z]+): *([^\n]*)$', body, re.MULTILINE))
         settings[key] = values
     platform_key, cpu, editor_os = expected
-    assert settings.get('Any:', {}).get('enabled') == '0', (meta, 'Any platform must be disabled')
+    assert settings.get('Any', {}).get('enabled') == '0', (meta, 'Any platform must be disabled')
     player = settings.get(platform_key, {})
     assert player.get('CPU') == cpu, (meta, 'wrong Player platform/CPU', platform_key, cpu)
     player_enabled = '0' if target in EDITOR_ONLY_TARGETS else '1'
     assert player.get('enabled') == player_enabled, (meta, 'wrong Player enablement', platform_key)
-    editor = settings.get('Editor: Editor', {})
+    editor = settings.get('Editor', {})
     assert editor.get('enabled') == ('1' if editor_os else '0'), (meta, 'wrong Editor enablement')
     if target == 'win-arm64':
         # Prevent Unity from inferring Editor compatibility on the first ARM64 import.
@@ -107,7 +107,7 @@ def verify_importer(file, target):
     if editor_os:
         assert editor.get('CPU') == cpu and editor.get('OS') == editor_os, (meta, 'wrong Editor CPU/OS')
     for key, values in settings.items():
-        if key not in ('Any:', 'Editor: Editor', platform_key):
+        if key not in ('Any', 'Editor', platform_key):
             assert values.get('enabled') == '0', (meta, 'enabled unrelated platform', key)
 
 

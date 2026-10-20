@@ -27,23 +27,18 @@ def importer_text(platform_key, cpu, editor_os=None, extra='', player_enabled=Tr
     return f"""fileFormatVersion: 2
  guid: 0123456789abcdef0123456789abcdef
  PluginImporter:
+   serializedVersion: 3
    platformData:
-   - first:
-       Any:
-     second:
+     Any:
        enabled: 0
        settings: {{}}
-   - first:
-       Editor: Editor
-     second:
+     Editor:
        enabled: {1 if editor_os else 0}
        settings:
          DefaultValueInitialized: true
          CPU: {cpu if editor_os else 'AnyCPU'}
          OS: {editor_os or 'AnyOS'}
-   - first:
-       {platform_key}
-     second:
+     {platform_key}:
        enabled: {1 if player_enabled else 0}
        settings:
          CPU: {cpu}
@@ -210,24 +205,24 @@ class ImporterTests(unittest.TestCase):
 
     def test_bridge_requires_preload(self):
         with self.assertRaisesRegex(AssertionError, 'bridge must preload'):
-            self.verify(importer_text('Standalone: Win64', 'ARM64'), filename='FFmpegUnityBridge.dll')
+            self.verify(importer_text('Win64', 'ARM64'), filename='FFmpegUnityBridge.dll')
 
     def test_bridge_preload_enabled(self):
-        text = importer_text('Standalone: Win64', 'ARM64').replace('  platformData:', '  isPreloaded: 1\n  platformData:')
+        text = importer_text('Win64', 'ARM64').replace('  platformData:', '  isPreloaded: 1\n  platformData:')
         self.verify(text, filename='FFmpegUnityBridge.dll')
 
     def test_arm64_wrong_cpu(self):
         with self.assertRaisesRegex(AssertionError, 'wrong Player platform/CPU'):
-            self.verify(importer_text('Standalone: Win64', 'x86_64'))
+            self.verify(importer_text('Win64', 'x86_64'))
 
     def test_arm64_must_not_load_in_x64_editor(self):
         with self.assertRaisesRegex(AssertionError, 'wrong Editor enablement'):
-            self.verify(importer_text('Standalone: Win64', 'ARM64', 'Windows'))
+            self.verify(importer_text('Win64', 'ARM64', 'Windows'))
 
     def test_arm64_editor_defaults_must_be_initialized(self):
         for replacement in ('', '        DefaultValueInitialized: false\n'):
             with self.subTest(replacement=replacement):
-                text = importer_text('Standalone: Win64', 'ARM64').replace('        DefaultValueInitialized: true\n', replacement)
+                text = importer_text('Win64', 'ARM64').replace('        DefaultValueInitialized: true\n', replacement)
                 with self.assertRaisesRegex(AssertionError, 'ARM64 Editor defaults must be initialized'):
                     self.verify(text)
 
@@ -241,29 +236,35 @@ class ImporterTests(unittest.TestCase):
 
     def test_macos_intel_must_not_ship_in_player(self):
         with self.assertRaisesRegex(AssertionError, 'wrong Player enablement'):
-            self.verify(importer_text('Standalone: OSXUniversal', 'x86_64', 'OSX'), 'macos-x64', 'libavutil.61.dylib')
+            self.verify(importer_text('OSXUniversal', 'x86_64', 'OSX'), 'macos-x64', 'libavutil.61.dylib')
 
     def test_macos_apple_silicon_must_ship_in_player(self):
-        text = importer_text('Standalone: OSXUniversal', 'ARM64', 'OSX', player_enabled=False)
+        text = importer_text('OSXUniversal', 'ARM64', 'OSX', player_enabled=False)
         with self.assertRaisesRegex(AssertionError, 'wrong Player enablement'):
             self.verify(text, 'macos-arm64', 'libavutil.61.dylib')
 
     def test_any_platform_enabled(self):
-        text = importer_text('Standalone: Win64', 'ARM64').replace('enabled: 0', 'enabled: 1', 1)
+        text = importer_text('Win64', 'ARM64').replace('enabled: 0', 'enabled: 1', 1)
         with self.assertRaisesRegex(AssertionError, 'Any platform must be disabled'):
             self.verify(text)
 
     def test_enabled_unrelated_platform(self):
-        extra = '  - first:\n      Android: Android\n    second:\n      enabled: 1\n      settings:\n        CPU: ARM64\n'
+        extra = '    Android:\n      enabled: 1\n      settings:\n        CPU: ARM64\n'
         # Inject after rendering to preserve the real Unity indentation.
-        text = importer_text('Standalone: Win64', 'ARM64').replace('  userData:', extra + '  userData:')
+        text = importer_text('Win64', 'ARM64').replace('  userData:', extra + '  userData:')
         with self.assertRaisesRegex(AssertionError, 'enabled unrelated platform'):
             self.verify(text)
 
     def test_invalid_guid(self):
-        text = importer_text('Standalone: Win64', 'ARM64').replace('0123456789abcdef0123456789abcdef', 'invalid')
+        text = importer_text('Win64', 'ARM64').replace('0123456789abcdef0123456789abcdef', 'invalid')
         with self.assertRaisesRegex(AssertionError, 'invalid Unity GUID'):
             self.verify(text)
+
+    def test_legacy_importer_version(self):
+        # Unity ignores a version 2 OSXUniversal entry (enabled and CPU), which collides arm64 and x86_64.
+        text = importer_text('OSXUniversal', 'ARM64', 'OSX').replace('serializedVersion: 3', 'serializedVersion: 2')
+        with self.assertRaisesRegex(AssertionError, 'serializedVersion 3'):
+            self.verify(text, 'macos-arm64', 'probe.dylib')
 
 
 class BridgeSourceTests(unittest.TestCase):
