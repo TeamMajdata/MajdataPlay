@@ -456,6 +456,10 @@ jobs:
           version: ${{ env.BUNDLE_VERSION }}
           buildName: MajdataPlay
           buildsPath: ${{ env.CONFIGURATION }}
+          # The FFmpeg dylibs are per-architecture files with identical names, which a
+          # Universal (Intel + Apple silicon) macOS build rejects as colliding plugins.
+          buildMethod: ${{ env.TARGET_PLATFORM == 'StandaloneOSX' && 'MajdataPlay.Editor.CustomBuild.BuildRelease' || '' }}
+          customParameters: ${{ env.TARGET_PLATFORM == 'StandaloneOSX' && '-macOSArchitecture ARM64' || '' }}
 
       - name: Import Apple certificate
         if: ${{ env.TARGET_PLATFORM == 'iOS' }}

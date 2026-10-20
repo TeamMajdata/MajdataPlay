@@ -4,6 +4,7 @@ using HidSharp.Platform.Windows;
 using HidSharp.Platform.MacOS;
 #endif
 using MajdataPlay.Buffers;
+using MajdataPlay.Collections;
 using MajdataPlay.IO.Storage;
 using MajdataPlay.Extensions;
 using MajdataPlay.Net;
@@ -581,7 +582,7 @@ namespace MajdataPlay
 
                     if (isValid)
                     {
-                        var i = apiEndpoints.FindIndex(x => x.Url.OriginalString == IOSNativeSettings.MajnetApi);
+                        var i = apiEndpoints.AsSpan().FindIndex(x => x.Url.OriginalString == IOSNativeSettings.MajnetApi);
                         if(i != -1)
                         {
                             apiEndpoints.RemoveAt(i);
