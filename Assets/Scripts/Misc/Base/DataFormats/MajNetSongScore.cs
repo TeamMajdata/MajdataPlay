@@ -10,7 +10,7 @@ namespace MajdataPlay
     [JsonObject(NamingStrategyType = typeof(CamelCaseNamingStrategy))]
     public struct MajNetSongScore
     {
-        public UserSummary Player { get; init; }
+        public UserProfile Player { get; init; }
         public float Acc { get; init; }
         public ComboState ComboState { get; init; }
         public DateTime Timestamp { get; init; }

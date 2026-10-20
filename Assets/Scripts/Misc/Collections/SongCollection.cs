@@ -168,7 +168,7 @@ namespace MajdataPlay.Collections
         public void SortAndFilter(SongOrder orderBy)
         {
             NormalizeIndex();
-            if(Type == ChartStorageType.Dan || IsEmpty)
+            if(Type is ChartStorageType.Dan or ChartStorageType.Recommend || IsEmpty)
             {
                 return;
             }

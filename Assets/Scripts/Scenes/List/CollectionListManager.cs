@@ -346,6 +346,11 @@ namespace MajdataPlay.Scenes.List
                         _iconDisplayer.enabled = false;
                     }
                     break;
+                case ChartStorageType.Recommend:
+                    _iconDisplayer.enabled = true;
+                    _iconDisplayer.sprite = _onlineCollectionIcon;
+                    _iconDisplayer.color = _onlineCollectionIconColor;
+                    break;
                 case ChartStorageType.Dan:
                     _iconDisplayer.enabled = true;
                     _iconDisplayer.sprite = _danCollectionIcon;
@@ -417,6 +422,18 @@ namespace MajdataPlay.Scenes.List
                 Parallel.For(0, newCollections.Length, i =>
                 {
                     var originCollection = newCollections[i];
+                    if (originCollection.Type == ChartStorageType.Recommend)
+                    {
+                        // Keep the server's ranking, and the endpoint that impressions are reported to
+                        _easySortedCollections[i] = originCollection;
+                        _basicSortedCollections[i] = originCollection;
+                        _advanceSortedCollections[i] = originCollection;
+                        _expertSortedCollections[i] = originCollection;
+                        _masterSortedCollections[i] = originCollection;
+                        _reMasterSortedCollections[i] = originCollection;
+                        _utageSortedCollections[i] = originCollection;
+                        return;
+                    }
                     var songs = originCollection.ToArray();
                     var songAndScores = songs.Select(x => (x, ScoreManager.GetSongScores(x))).ToArray();
                     var sortedEasy = Array.Empty<ISongDetail>();

@@ -237,12 +237,12 @@ namespace MajdataPlay.Scenes.Login
                                         }
                                         MajDebug.LogInfo("Logged in");
                                         endpoint.RuntimeConfig.AuthMethod = NetAuthMethodOption.QRCode;
-                                        var userInfo = (UserSummary?)null;
+                                        var userInfo = (UserProfile?)null;
                                         var userScores = Array.Empty<MajNetAccountSongScore>();
                                         if(getUserInfoTask.IsCompletedSuccessfully)
                                         {
                                             var userData = getUserInfoTask.Result;
-                                            userInfo = userData.Summary;
+                                            userInfo = userData.Profile;
                                             userScores = userData.Scores;
                                         }
                                         ScoreManager.LoadOnlineScores(userScores);
@@ -359,7 +359,8 @@ namespace MajdataPlay.Scenes.Login
                                     {
                                         HttpStatusCode.Unauthorized => "MAJTEXT_ONLINE_USERNAME_OR_PASSWORD_INCORRECT",
                                         HttpStatusCode.MethodNotAllowed => "MAJTEXT_ONLINE_METHOD_NOT_ALLOWED",
-                                        HttpStatusCode.Forbidden => "MAJTEXT_ONLINE_ACCESS_FORBIDDEN",
+                                        // LoginAsync tells pending verification and banned accounts apart
+                                        HttpStatusCode.Forbidden => string.IsNullOrEmpty(rsp.Message) ? "MAJTEXT_ONLINE_ACCESS_FORBIDDEN" : rsp.Message,
                                         _ => "MAJTEXT_LOGIN_UNKNOWN_ERROR"
                                     },
                                     _ => "MAJTEXT_LOGIN_UNKNOWN_ERROR"
@@ -385,11 +386,11 @@ namespace MajdataPlay.Scenes.Login
                                 endpoint.RuntimeConfig.AuthMethod = NetAuthMethodOption.Plain;
                                 endpoint.RuntimeConfig.AuthUsername = username;
                                 endpoint.RuntimeConfig.AuthPassword = password;
-                                var userInfo = (UserSummary?)null;
+                                var userInfo = (UserProfile?)null;
                                 var userScores = Array.Empty<MajNetAccountSongScore>();
                                 if (getUserInfoTask.IsCompletedSuccessfully)
                                 {
-                                    userInfo = getUserInfoTask.Result.Summary;
+                                    userInfo = getUserInfoTask.Result.Profile;
                                     userScores = getUserInfoTask.Result.Scores;
                                 }
                                 ScoreManager.LoadOnlineScores(userScores);
@@ -447,6 +448,12 @@ namespace MajdataPlay.Scenes.Login
                     sceneSwitcher.SetLoadingText(string.Empty);
                 }
             }
+            // Before the favorites, which may leave an error on the loading screen
+            var recommendTask = SongStorage.RefreshRecommendAsync(progress);
+            while (!recommendTask.IsCompleted)
+            {
+                await UniTask.Yield();
+            }
             var task2 = SongStorage.RefreshUserOnlineFavAsync(progress);
             while (!task2.IsCompleted)
             {
@@ -466,35 +473,35 @@ namespace MajdataPlay.Scenes.Login
         }
         async ValueTask<UserData> FetchUserDataAsync(ApiEndpoint endpoint, CancellationToken token = default)
         {
-            var fetchUserInfoRsp = await Online.GetUserInfoAsync(endpoint, token);
+            var fetchProfileRsp = await Online.GetUserProfileAsync(endpoint, token);
             var userScores = await Online.GetUserScoresAsync(endpoint, token);
-            var userInfo = default(UserSummary?);
-            if(fetchUserInfoRsp.TryDeserialize(out var userInfoOut, out var e))
+            var userInfo = default(UserProfile?);
+            if(fetchProfileRsp.TryDeserialize(out var userInfoOut, out var e))
             {
                 userInfo = userInfoOut;
             }
             else
             {
-                MajDebug.LogError("Failed to get user info");
+                MajDebug.LogError("Failed to get user profile");
                 MajDebug.LogException(e);
             }
             token.ThrowIfCancellationRequested();
             return new()
             {
-                Summary = userInfo,
+                Profile = userInfo,
                 Scores = userScores,
             };
         }
-        async UniTask UpdateApiEndpointRuntimeConfigAsync(ApiEndpoint endpoint, UserSummary? userInfo)
+        async UniTask UpdateApiEndpointRuntimeConfigAsync(ApiEndpoint endpoint, UserProfile? userInfo)
         {
             var runtimeConfig = endpoint.RuntimeConfig;
             if (userInfo is not null)
             {
                 MajDebug.LogInfo("Downloading user avatar...");
-                var result = (UserSummary)userInfo;
+                var result = (UserProfile)userInfo;
                 _loading.SetActive(true);
                 Hint("MAJTEXT_LOGIN_DOWNLOADING_AVATAR".i18n(), false);
-                var avatarTask = Online.GetUserIconAsync(endpoint, result.Username, onError: Hint);
+                var avatarTask = Online.GetAvatarAsync(endpoint, result.AvatarId, onError: Hint);
                 while (!avatarTask.IsCompleted)
                 {
                     await UniTask.Yield();
@@ -507,18 +514,21 @@ namespace MajdataPlay.Scenes.Login
                     MajDebug.LogInfo("User avatar has been downloaded");
                 }
                 runtimeConfig.Username = result.Username;
+                runtimeConfig.Nickname = result.DisplayName;
             }
             else
             {
                 runtimeConfig.Avatar = null;
-                if(runtimeConfig.AuthMethod == NetAuthMethodOption.Plain)
+                if(runtimeConfig.AuthMethod == NetAuthMethodOption.Plain && !string.IsNullOrEmpty(runtimeConfig.AuthUsername))
                 {
-                    runtimeConfig.Username = runtimeConfig.Username;
+                    // May be an email address now; the profile would have given the real username
+                    runtimeConfig.Username = runtimeConfig.AuthUsername;
                 }
                 else
                 {
                     runtimeConfig.Username = "???";
                 }
+                runtimeConfig.Nickname = runtimeConfig.Username;
             }
         }
         async UniTask RevokeAuthSession(ApiEndpoint endpoint, string authId, CancellationToken token = default)
@@ -604,7 +614,7 @@ namespace MajdataPlay.Scenes.Login
         }
         readonly struct UserData
         {
-            public UserSummary? Summary { get; init; }
+            public UserProfile? Profile { get; init; }
             public MajNetAccountSongScore[] Scores { get; init; }
         }
     }

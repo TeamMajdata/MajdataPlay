@@ -4,6 +4,7 @@ using MajdataPlay.Collections;
 using MajdataPlay.Diagnostics;
 using MajdataPlay.Editor;
 using MajdataPlay.i18n;
+using MajdataPlay.Net;
 using MajdataPlay.Numerics;
 using MajdataPlay.Scenes.List.Models;
 using MajdataPlay.Settings.Runtime;
@@ -153,10 +154,23 @@ namespace MajdataPlay.Scenes.List
         void OnDestroy()
         {
             _scrollMotion.TryCancel();
+            RecommendImpressions.Blur();
+            RecommendImpressions.FlushAll();
             Localization.OnLanguageChanged -= OnLanguageChanged;
             Majdata<CoverListManager>.Free();
             
             _idleSongCoverDisplayer.Clear();
+        }
+        void OnApplicationPause(bool pause)
+        {
+            if (pause)
+            {
+                RecommendImpressions.Suspend();
+            }
+            else
+            {
+                RecommendImpressions.Resume();
+            }
         }
         void OnLanguageChanged(object? sender, Language language)
         {
@@ -312,6 +326,7 @@ namespace MajdataPlay.Scenes.List
             {
                 if (shouldUpdateDisplayer)
                 {
+                    RecommendImpressions.Blur();
                     _centerCoverDisplayer.SetEmbeddedCoverVisible(false);
                     DisplayerMoveTo(
                         _listDesiredPos,
@@ -325,6 +340,7 @@ namespace MajdataPlay.Scenes.List
         void Clear()
         {
             _scrollMotion.TryCancel();
+            RecommendImpressions.Blur();
             _scrollMotionVersion++;
             SelectedSong = null;
             for (var i = _firstVisibleCoverIndex; i <= _lastVisibleCoverIndex; i++)
@@ -394,6 +410,8 @@ namespace MajdataPlay.Scenes.List
         {
             _centerCoverDisplayer.SetSongDetail(SelectedSong!, loadDelayMS, GetSelectedCoverSpriteSnapshot());
             _centerCoverDisplayer.SetEmbeddedCoverVisible(true);
+            // The scroll has settled; the dwell of a recommended song starts now
+            RecommendImpressions.Focus(_currentCollection, SelectedSong);
         }
         Sprite? GetSelectedCoverSpriteSnapshot()
         {

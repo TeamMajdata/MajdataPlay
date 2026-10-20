@@ -164,8 +164,29 @@ namespace MajdataPlay
                 UserAgent = { new ProductInfoHeaderValue("MajdataPlay", MajInstances.GameVersion.ToString()) },
             }
         };
+        /// <summary>
+        /// Shares the handler (connections and cookies) with <see cref="SharedHttpClient"/>, but requests that
+        /// must outlive the scene starting them (recommendation feed, impression reports) are not cancelled
+        /// when a scene calls CancelPendingRequests on the shared client.
+        /// </summary>
+        public static HttpClient BackgroundHttpClient { get; } = new HttpClient(_httpClientHandler, disposeHandler: false)
+        {
+            Timeout = TimeSpan.FromMilliseconds(HTTP_TIMEOUT_MS),
+            DefaultRequestHeaders =
+            {
+                UserAgent = { new ProductInfoHeaderValue("MajdataPlay", MajInstances.GameVersion.ToString()) },
+            }
+        };
 #else
         public static HttpClient SharedHttpClient { get; } = new HttpClient(_unityHttpHandler)
+        {
+            Timeout = TimeSpan.FromMilliseconds(HTTP_TIMEOUT_MS),
+            DefaultRequestHeaders =
+            {
+                UserAgent = { new ProductInfoHeaderValue("MajdataPlay", MajInstances.GameVersion.ToString()) },
+            }
+        };
+        public static HttpClient BackgroundHttpClient { get; } = new HttpClient(_unityHttpHandler, disposeHandler: false)
         {
             Timeout = TimeSpan.FromMilliseconds(HTTP_TIMEOUT_MS),
             DefaultRequestHeaders =

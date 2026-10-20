@@ -208,7 +208,7 @@ namespace MajdataPlay.Scenes.List
                     }
                     var displayer = _rankerDisplayers[rankerIndex];
                     displayer.Object.SetActive(true);
-                    displayer.UsernameDisplayer.text = playerInfo.Username;
+                    displayer.UsernameDisplayer.text = playerInfo.DisplayName;
                     displayer.RankDisplayer.color = _rankerRankColors[rankerIndex];
                     var combostate = CombostateToStr(scoreInfo.ComboState);
                     displayer.AccurateDisplayer.text = $"{combostate}<pos=30%>{(int)scoreInfo.Acc}.<size=70%>{(int)((scoreInfo.Acc - MathF.Truncate(scoreInfo.Acc)) * 10000):D4}%";

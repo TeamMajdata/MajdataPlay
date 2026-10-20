@@ -47,6 +47,7 @@ namespace MajdataPlay.Scenes.List
         float _enterPracticeTimer = 0f;
         float _logoutTimer = 0f;
         float _refreshTimer = 0f;
+        float _recommendRefreshTimer = 0f;
         float _inactiveTimeSec = 0f;
 
         [SerializeField]
@@ -68,6 +69,9 @@ namespace MajdataPlay.Scenes.List
         const float AUTO_SLIDE_INTERVAL_SEC = 0.15f;
         const float AUTO_SLIDE_TRIGGER_TIME_SEC = 0.4f;
         const float LOGOUT_TRIGGER_TIME_SEC = 1f;
+        // How often the List checks for recommendation feeds to fetch again (SongStorage refetches those older
+        // than 10 minutes), so the server's 30-minute impression window does not lapse while the player browses
+        const float RECOMMEND_REFRESH_CHECK_SEC = 60f;
         const int QUICK_SLIDE_POSITION_INCREASE = 9;
         const float QUICK_SLIDE_DURATION_SEC = 0.5f;
 
@@ -202,6 +206,12 @@ namespace MajdataPlay.Scenes.List
             if (_isExited || !_isInited)
             {
                 return;
+            }
+            _recommendRefreshTimer += MajTimeline.UnscaledDeltaTime;
+            if (_recommendRefreshTimer >= RECOMMEND_REFRESH_CHECK_SEC)
+            {
+                _recommendRefreshTimer = 0f;
+                _ = SongStorage.RefreshStaleRecommendAsync();
             }
             _quickSlideJudge.OnUpdate();
             var isMathed = false;
@@ -494,6 +504,9 @@ namespace MajdataPlay.Scenes.List
             {
                 _coverListManager.SelectedSong
             };
+            // A stale feed is served again first; posted before that, the impression would find no record to mark
+            var recommendRefresh = SongStorage.RefreshStaleRecommendAsync();
+            RecommendImpressions.Commit(_collectionListManager.SelectedCollection, _coverListManager.SelectedSong, recommendRefresh);
             var info = new GameInfo(GameMode.Normal, charts, levels);
             Majdata<GameInfo>.Instance = info;
             _pressTime = 0;
@@ -511,6 +524,9 @@ namespace MajdataPlay.Scenes.List
             {
                 _coverListManager.SelectedSong
             };
+            // A stale feed is served again first; posted before that, the impression would find no record to mark
+            var recommendRefresh = SongStorage.RefreshStaleRecommendAsync();
+            RecommendImpressions.Commit(_collectionListManager.SelectedCollection, _coverListManager.SelectedSong, recommendRefresh);
             var oldinfo = Majdata<GameInfo>.Instance;
             var info = new GameInfo(GameMode.Practice, charts, levels, 114514);
             if (oldinfo is not null && oldinfo.TimeRange is not null)
@@ -570,6 +586,13 @@ namespace MajdataPlay.Scenes.List
                 sceneSwitcher.SetLoadingText(string.Empty);
             }
 
+            // Before the favorites, which may leave an error on the loading screen
+            var recommendTask = SongStorage.RefreshRecommendAsync(progress);
+            while (!recommendTask.IsCompleted)
+            {
+                await UniTask.Yield();
+            }
+
             var onlineFavoritesTask = SongStorage.RefreshUserOnlineFavAsync(progress);
             while (!onlineFavoritesTask.IsCompleted)
             {
@@ -615,6 +638,7 @@ namespace MajdataPlay.Scenes.List
                 DanInfo = danInfo
             };
             Majdata<GameInfo>.Instance = info;
+            _ = SongStorage.RefreshStaleRecommendAsync();
             _collectionListManager.SelectedCollection.Index = 0;
             _isExited = true;
             MajInstances.SceneSwitcher.SwitchScene("Game", false);

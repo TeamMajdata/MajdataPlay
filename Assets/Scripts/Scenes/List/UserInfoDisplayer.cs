@@ -74,7 +74,7 @@ namespace MajdataPlay
                 {
                     _errorIcon.SetActive(true);
                 }
-                _usernameDisplayer.text = runtimeConfig.Username;
+                _usernameDisplayer.text = string.IsNullOrEmpty(runtimeConfig.Nickname) ? runtimeConfig.Username : runtimeConfig.Nickname;
             }
         }
     }

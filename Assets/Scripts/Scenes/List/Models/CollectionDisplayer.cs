@@ -106,6 +106,11 @@ namespace MajdataPlay.Scenes.List.Models
                         _nameRectTransform.anchoredPosition = Vector2.zero;
                     }
                     break;
+                case ChartStorageType.Recommend:
+                    _iconDisplayer.enabled = true;
+                    _iconDisplayer.sprite = _onlineCollectionIcon;
+                    _iconDisplayer.color = _onlineCollectionIconColor;
+                    break;
                 case ChartStorageType.Dan:
                     _iconDisplayer.enabled = true;
                     _iconDisplayer.sprite = _danCollectionIcon;

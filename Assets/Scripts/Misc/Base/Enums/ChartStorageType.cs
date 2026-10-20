@@ -5,6 +5,10 @@
         List,
         Dan,
         PlayList,
-        FavoriteList
+        FavoriteList,
+        /// <summary>
+        /// Personal recommendations from an online endpoint, kept in the order the server ranked them
+        /// </summary>
+        Recommend
     }
 }
