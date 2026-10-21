@@ -5221,7 +5221,7 @@ MonoBehaviour:
     <BitRate>k__BackingField: 8000000
     <MaximumBitRate>k__BackingField: 16000000
     <RateControlMode>k__BackingField: 1
-  _bufferedFrameLimit: 6
+  _bufferedFrameLimit: 8
   _readbackOrientation: 0
 --- !u!1 &1517703490
 GameObject:
