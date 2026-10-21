@@ -144,7 +144,7 @@ namespace MajdataPlay.IO
             /// <inheritdoc/>
             public override double Measure(double blockSeconds)
             {
-                // The capture DSP runs inside the WASAPI output callback, before its block is added to the buffered data.
+                // The capture DSP runs while BASSWASAPI renders the mixer for the device, before its block is added to the buffered data.
                 var buffered = BassWasapi.GetData(IntPtr.Zero, (int)DataFlags.Available);
                 return buffered < 0 ? -1 : buffered / _bytesPerSecond;
             }

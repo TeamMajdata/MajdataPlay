@@ -36,7 +36,6 @@ namespace MajdataPlay.IO
         private List<AudioSampleWrap> SFXSamples = new();
 
 #if UNITY_STANDALONE_WIN
-        readonly static WasapiProcedure _wasapiProcedure;
         readonly static AsioProcedure _asioProcedure;
 #endif
         private static int BassGlobalMixer = -114514;
@@ -53,15 +52,11 @@ namespace MajdataPlay.IO
         {
 #if UNITY_STANDALONE_WIN
 #if ENABLE_IL2CPP
-            _wasapiProcedure = WasapiProcedure;
             _asioProcedure = AsioProcedure;
-            //GCHandle.Alloc(_wasapiProcedure, GCHandleType.Pinned);
             //GCHandle.Alloc(_asioProcedure, GCHandleType.Pinned);
 #else
-            delegate*<IntPtr, int, IntPtr, int> ptr1 = &WasapiProcedure;
             delegate*<bool, int, IntPtr, int, IntPtr, int> ptr2 = &AsioProcedure;
 
-            _wasapiProcedure = Marshal.GetDelegateForFunctionPointer<WasapiProcedure>((IntPtr)ptr1);
             _asioProcedure = Marshal.GetDelegateForFunctionPointer<AsioProcedure>((IntPtr)ptr2);
 #endif
 #endif
@@ -235,7 +230,7 @@ namespace MajdataPlay.IO
                                 }
                                 float buffer = exclusive ? wasapiOptions.BufferSize : 0f;
                                 float period = exclusive ? wasapiOptions.Period : 0f;
-                                wasapiOk = BassWasapi.Init(-1, 0, 0, flags, buffer, period, _wasapiProcedure);
+                                wasapiOk = TryInitWasapiOutput(flags, buffer, period);
                                 MajDebug.LogInfo("Audio", $"[BassWasapi]Init (exclusive={exclusive}, raw={raw}): {wasapiOk}");
                                 Bass.LastError.LogInfo();
                                 if (wasapiOk)
@@ -243,26 +238,24 @@ namespace MajdataPlay.IO
                                     successIdx = i;
                                     break;
                                 }
-                                BassWasapi.Free();
                             }
 
                             if (!wasapiOk)
                             {
                                 MajDebug.LogError("Audio", "[BassWasapi]All WASAPI init combinations failed");
                             }
-                            else if (successIdx != startIdx)
+                            else
                             {
-                                var (exclusive, raw) = combos[successIdx];
-                                MajDebug.LogWarning("Audio", $"[BassWasapi]WASAPI fallback: config requested (exclusive={isExclusiveRequest}, raw={isRawMode}) but succeeded with (exclusive={exclusive}, raw={raw})");
+                                if (successIdx != startIdx)
+                                {
+                                    var (exclusive, raw) = combos[successIdx];
+                                    MajDebug.LogWarning("Audio", $"[BassWasapi]WASAPI fallback: config requested (exclusive={isExclusiveRequest}, raw={isRawMode}) but succeeded with (exclusive={exclusive}, raw={raw})");
+                                }
+                                BassWasapi.GetInfo(out var wasapiInfo);
+                                MajDebug.LogInfo("Audio", $"[BassWasapi]Channel count: {wasapiInfo.Channels}");
+                                GenerateMixingMatrix(wasapiInfo.Channels);
+                                BassWasapi.Start();
                             }
-
-                            BassWasapi.GetInfo(out var wasapiInfo);
-                            BassGlobalMixer = BassMix.CreateMixerStream(wasapiInfo.Frequency, wasapiInfo.Channels, BassFlags.MixerNonStop | BassFlags.Decode | BassFlags.Float);
-                            Bass.ChannelSetAttribute(BassGlobalMixer, ChannelAttribute.Buffer, 0);
-                            Bass.ChannelSetAttribute(BassGlobalMixer, (ChannelAttribute)86017, 8);
-                            MajDebug.LogInfo("Audio", $"[BassWasapi]Channel count: {wasapiInfo.Channels}");
-                            GenerateMixingMatrix(wasapiInfo.Channels);
-                            BassWasapi.Start();
                         }
                         break;
 #endif
@@ -303,17 +296,46 @@ namespace MajdataPlay.IO
             }
         }
 #if UNITY_STANDALONE_WIN
-        [MonoPInvokeCallback(typeof(WasapiProcedure))]
-        static int WasapiProcedure(IntPtr buffer, int length, IntPtr user)
+        /// <summary>Initializes the default WASAPI output in one mode and lets BASSWASAPI pull the global mixer natively.</summary>
+        /// <remarks>
+        /// A managed output callback would register the WASAPI output thread with the managed runtime, whose garbage collections
+        /// suspend every registered thread, so a blocking collection such as the one during a scene load would starve the device.
+        /// Native feeding needs the mixer before initialization and plays it in the mixer's own format, so the format that this mode
+        /// selects is read first with a push-mode initialization that is freed again. Push mode rejects event-driven buffering, which
+        /// does not affect the format, so that flag is left out of the probe.
+        /// </remarks>
+        /// <param name="flags">The WASAPI mode flags.</param>
+        /// <param name="buffer">The device buffer length in seconds, or zero for the default.</param>
+        /// <param name="period">The device update period in seconds, or zero for the default.</param>
+        /// <returns>True when the output is initialized and <see cref="BassGlobalMixer"/> feeds it; false when this mode is unavailable.</returns>
+        static bool TryInitWasapiOutput(WasapiInitFlags flags, float buffer, float period)
         {
-            if (BassGlobalMixer == -114514)
+            var probeFlags = flags & ~WasapiInitFlags.EventDriven;
+            if (!BassWasapi.InitEx(BassWasapi.DefaultDevice, 0, 0, probeFlags, buffer, period, BassWasapi.WasapiProc_Push))
             {
-                return 0;
+                return false;
+            }
+            var hasInfo = BassWasapi.GetInfo(out var info);
+            BassWasapi.Free();
+            if (!hasInfo)
+            {
+                return false;
             }
 
-            var bytesRead = Bass.ChannelGetData(BassGlobalMixer, buffer, length);
-
-            return bytesRead;
+            var mixer = BassMix.CreateMixerStream(info.Frequency, info.Channels, BassFlags.MixerNonStop | BassFlags.Decode | BassFlags.Float);
+            if (mixer == 0)
+            {
+                return false;
+            }
+            Bass.ChannelSetAttribute(mixer, ChannelAttribute.Buffer, 0);
+            Bass.ChannelSetAttribute(mixer, (ChannelAttribute)86017, 8);
+            if (!BassWasapi.InitEx(BassWasapi.DefaultDevice, info.Frequency, info.Channels, flags, buffer, period, BassWasapi.WasapiProc_Bass, (IntPtr)mixer))
+            {
+                Bass.StreamFree(mixer);
+                return false;
+            }
+            BassGlobalMixer = mixer;
+            return true;
         }
         [MonoPInvokeCallback(typeof(AsioProcedure))]
         static int AsioProcedure(bool input, int channel, IntPtr buffer, int length, IntPtr user)

@@ -36,16 +36,19 @@ failure.
   that BASS reports for each burst stream through `ChannelGetPosition`, which is
   also what the game's BassSimple sync loop follows. Every delayed onset must be
   within 5 ms of it.
-- WASAPI shared mirrors `AudioManager`: a no-sound BASS device, a non-stop float
-  decode mixer, and an event-driven output callback that renders the mixer. The
-  callback also measures the buffered latency with a second probe. There is no
+- WASAPI shared mirrors `AudioManager`: a no-sound BASS device, the output
+  format read with a push-mode initialization, a non-stop float decode mixer in
+  that format, and event-driven output that BASSWASAPI feeds natively from the
+  mixer (`WasapiProc_Bass`), with no managed output callback. A harness DSP on
+  the mixer, which runs before the recorder's, measures the buffered latency with
+  a second probe. There is no
   independent playback position, so the checks are that the latency is between 0
   and 200 ms and that every delayed onset follows the moment its burst joined the
   mixer by that latency, within -1 ms to one output block plus 2 ms.
 - The stall cases repeat BassSimple (32 ms / 8 ms) and WASAPI shared while the
   output thread is blocked once for 300 ms before the fifth burst, as a blocking
   garbage collection in Unity suspends it. BassSimple blocks in a harness DSP that
-  runs before the recorder's; WASAPI blocks in the harness output callback. The
+  runs before the recorder's; WASAPI blocks in the harness DSP on the mixer. The
   recorder must report exactly one output gap, insert silence close to the
   audible gap, and keep every later burst within the tolerances above; the table
   also prints where each burst would land without the inserted silence (about
@@ -55,11 +58,11 @@ failure.
   same checks. It takes the device exclusively for a few seconds, so it is
   opt-in.
 
-The WASAPI cases also print the spread between each output callback's wall time
-and the amount of audio rendered so far. A large spread means the output thread
-stalled; the recorder then fills the gap with silence, which the `Timeline` line
-reports. Captured audio is stored in preallocated arrays because the capture DSP
-and the WASAPI callback are managed code that a garbage collection would pause,
+The WASAPI cases also print the spread between each rendered mixer block's wall
+time and the amount of audio rendered so far. A large spread means the output
+thread stalled; the recorder then fills the gap with silence, which the `Timeline`
+line reports. Captured audio is stored in preallocated arrays because the capture
+DSP and the harness DSPs are managed code that a garbage collection would pause,
 which would add unintended gaps.
 
 Passing this harness verifies the latency measurement, first-block timing, and
