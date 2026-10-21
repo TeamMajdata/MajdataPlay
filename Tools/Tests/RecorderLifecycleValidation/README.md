@@ -12,7 +12,8 @@ capturer, audio source, muxer, and in-memory storage. The production recorder
 starts its real background PCM drain task; no Unity, BASS, GPU, or FFmpeg native
 library is loaded.
 
-Cases cover successful output and source cleanup, audio read/write failures,
+Cases cover successful output and source cleanup, passing the audio recorder's
+measured playback delay to the muxer, audio read/write failures,
 waiting for video finalization after another source fails, mux and output move
 failures, recoverable source retention, audio/video stop failures, initial path
 creation and capturer start failures, and asynchronous disposal.

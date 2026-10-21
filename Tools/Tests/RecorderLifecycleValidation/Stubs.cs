@@ -26,6 +26,8 @@ namespace MajdataPlay.Tests.RecorderLifecycleValidation
         internal static Exception? MuxFailure;
         /// <summary>Counts mux attempts.</summary>
         internal static int MuxCalls;
+        /// <summary>Stores the audio delay passed to the latest mux attempt.</summary>
+        internal static TimeSpan MuxAudioDelay;
 
         /// <summary>Clears per-case state only after all previous workers have finished.</summary>
         internal static void Reset()
@@ -36,6 +38,7 @@ namespace MajdataPlay.Tests.RecorderLifecycleValidation
             MoveFailure = null;
             MuxFailure = null;
             MuxCalls = 0;
+            MuxAudioDelay = TimeSpan.Zero;
             MajdataPlay.Diagnostics.MajDebug.Messages.Clear();
         }
 
@@ -127,6 +130,8 @@ namespace MajdataPlay.Tests.RecorderLifecycleValidation
         public bool IsRecording { get; private set; }
         /// <inheritdoc/>
         public long DroppedFrames => 0;
+        /// <inheritdoc/>
+        public TimeSpan PlaybackDelay { get; internal set; }
 
         /// <inheritdoc/>
         public void Start()
@@ -426,10 +431,13 @@ namespace MajdataPlay.FFmpeg
         /// <param name="channels">The audio channel count.</param>
         /// <param name="output">The combined output stream.</param>
         /// <param name="container">The chosen container.</param>
+        /// <param name="audioDelay">The time on the video timeline at which the first PCM frame was played.</param>
         /// <returns>The fixture codec name.</returns>
-        public static string Mux(string videoPath, Stream pcm, int sampleRate, int channels, Stream output, MediaContainerFormat container)
+        public static string Mux(string videoPath, Stream pcm, int sampleRate, int channels, Stream output, MediaContainerFormat container,
+            TimeSpan audioDelay)
         {
             Interlocked.Increment(ref Tests.RecorderLifecycleValidation.TestStorage.MuxCalls);
+            Tests.RecorderLifecycleValidation.TestStorage.MuxAudioDelay = audioDelay;
             if (Tests.RecorderLifecycleValidation.TestStorage.MuxFailure != null)
             {
                 throw Tests.RecorderLifecycleValidation.TestStorage.MuxFailure;

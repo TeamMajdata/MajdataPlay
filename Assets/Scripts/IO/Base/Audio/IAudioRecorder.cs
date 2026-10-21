@@ -18,6 +18,14 @@ namespace MajdataPlay.IO
         bool IsRecording { get; }
         /// <summary>Gets the number of frames discarded since the last start because the buffer was full.</summary>
         long DroppedFrames { get; }
+        /// <summary>Gets how long after the latest <see cref="Start"/> the output device played the first captured frame.</summary>
+        /// <remarks>
+        /// Captured audio is taken from the output mix before the device buffers it, so this includes both the wait for the first
+        /// captured block and the measured output latency. Delaying the samples by this amount places them where they were heard.
+        /// It is zero before the first block of a recording is captured, and covers only that wait when the backend cannot
+        /// report its output latency.
+        /// </remarks>
+        TimeSpan PlaybackDelay { get; }
 
         /// <summary>Discards buffered samples and begins capturing output audio.</summary>
         /// <remarks>Calling this while recording has no effect.</remarks>

@@ -130,6 +130,9 @@ out.log
 # Independent recorder lifecycle validation; builds into Temp/RecorderLifecycleValidation.
 !/Tools/Tests/RecorderLifecycleValidation/RecorderLifecycleValidation.csproj
 
+# Independent audio recorder output latency validation; builds into Temp/AudioRecorderLatencyValidation.
+!/Tools/Tests/AudioRecorderLatencyValidation/AudioRecorderLatencyValidation.csproj
+
 # Independent BASS HTTP stream validation harness; builds into Temp/BassHttpStreamValidation.
 !/Tools/Tests/BassHttpStreamValidation/BassHttpStreamValidation.csproj
 

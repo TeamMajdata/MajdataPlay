@@ -209,9 +209,9 @@ iOS Player 的固定 VideoToolbox 包装器不能检查硬件独占选择，硬�
 
 ### 音视频合成
 
-`FFmpegCameraCapturer` 只录视频。需要音轨时使用 `FFmpegMediaMuxer.Mux(videoPath, pcm, sampleRate, channels, output, container, token)`：它把已完成的视频文件（如 capturer 写出的 `.mkv`）的首个视频流按包复制（不重新编码），并把交错 32-bit float PCM 作为音轨，按时间戳交错写入 `MediaContainerFormat.MP4` 或 `Matroska`。音轨时间原点与视频原点一致；PCM 为空时输出纯视频。输出流由调用方持有，必须可写且可 seek。
+`FFmpegCameraCapturer` 只录视频。需要音轨时使用 `FFmpegMediaMuxer.Mux(videoPath, pcm, sampleRate, channels, output, container, audioDelay, token)`：它把已完成的视频文件（如 capturer 写出的 `.mkv`）的首个视频流按包复制（不重新编码），并把交错 32-bit float PCM 作为音轨，按时间戳交错写入 `MediaContainerFormat.MP4` 或 `Matroska`。音轨时间原点与视频原点一致；`audioDelay`（0 至 60 秒，默认 0）表示 PCM 首帧在视频时间轴上的播放时刻，以音轨开头的静音实现，因此不依赖播放器是否遵守音轨 edit list。PCM 为空时输出纯视频。输出流由调用方持有，必须可写且可 seek。
 
-音频编码优先使用 FFmpeg 内置 `aac` encoder（码率 96 kbit/s × 声道数）；加载的原生库没有 AAC encoder 时回退为未压缩 `pcm_s16le`，容器不接受 PCM 时抛出 `NotSupportedException`。2026-10-05 的原生库未启用任何音频 encoder，需按 [Tools/FFmpeg](../../../../Tools/FFmpeg/README.md) 的当前配置重建后才有 AAC。`MajdataPlay.Recording.FFmpegRecorder` 组合 capturer 与 `AudioManager.CreateAudioRecorder()` 返回的 Bass 最终输出录音器；目前游戏设置菜单仍只使用 OBS，尚未自动调用它。
+音频编码优先使用 FFmpeg 内置 `aac` encoder（码率 96 kbit/s × 声道数）；加载的原生库没有 AAC encoder 时回退为未压缩 `pcm_s16le`，容器不接受 PCM 时抛出 `NotSupportedException`。2026-10-05 的原生库未启用任何音频 encoder，需按 [Tools/FFmpeg](../../../../Tools/FFmpeg/README.md) 的当前配置重建后才有 AAC。`MajdataPlay.Recording.FFmpegRecorder` 组合 capturer 与 `AudioManager.CreateAudioRecorder()` 返回的 Bass 最终输出录音器；目前游戏设置菜单仍只使用 OBS，尚未自动调用它。录音 DSP 在设备播放之前取得混音，因此 `IAudioRecorder.PlaybackDelay` 记录首个采集块相对 `Start` 的等待与实测输出延迟（BassSimple 用同设备的静音无缓冲流比较渲染/播放位置，WASAPI 读取 BASSWASAPI 已缓冲数据，ASIO 使用驱动报告的输出延迟），`FFmpegRecorder` 混流时按该值延后音轨，使录像中的声音与玩家实际听到的时刻一致。
 
 `FFmpegRecorder` 的 PCM drain 使用单层后台任务，读写失败会被观察，并触发音视频一起停止、等待各自收尾。只有成功输出后才删除临时视频和 PCM；混流、转移或收尾失败时，保留尚未成功转移的源文件，并在日志中记录恢复路径。托管收尾回归可运行 `dotnet run --project Tools/Tests/RecorderLifecycleValidation/RecorderLifecycleValidation.csproj -c Release`；这不代替实际音视频录制验证。
 

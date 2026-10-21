@@ -21,6 +21,12 @@ namespace MajdataPlay.FFmpeg.Validation
         private const int VideoFrames = 60;
         /// <summary>Sets the number of fixture audio frames, two seconds at the fixture sample rate.</summary>
         private const int AudioFrames = SampleRate * 2;
+        /// <summary>Sets the audio delay used by the leading-silence checks, in milliseconds.</summary>
+        private const int AudioDelayMilliseconds = 250;
+        /// <summary>Sets the decoded magnitude above which the fixture sine counts as audible.</summary>
+        private const float AudibleThreshold = 0.05f;
+        /// <summary>Sets the allowed onset error, which covers AAC priming and pre-echo of up to one encoder frame.</summary>
+        private const double OnsetToleranceSeconds = 0.025;
         /// <summary>Counts the assertions in the current validation run.</summary>
         private static int s_checks;
 
@@ -66,6 +72,7 @@ namespace MajdataPlay.FFmpeg.Validation
                 TestMp4WithoutAac(videoPath, pcm, mp4);
             }
 
+            TestAudioDelay(videoPath, pcm, directory, hasAac);
             TestVideoOnly(videoPath, Path.Combine(directory, "video-only.mkv"));
             TestPartialTrailingFrame(videoPath, pcm, Path.Combine(directory, "partial.mkv"), hasAac);
             TestFailures(videoPath, pcm, directory);
@@ -100,6 +107,10 @@ namespace MajdataPlay.FFmpeg.Validation
             using var readOnly = new MemoryStream(new byte[1], false);
             Expect<ArgumentException>(() => FFmpegMediaMuxer.Mux("a.mkv", pcm, SampleRate, Channels, readOnly, MediaContainerFormat.MP4),
                 "a non-writable output is rejected");
+            Expect<ArgumentOutOfRangeException>(() => FFmpegMediaMuxer.Mux("a.mkv", pcm, SampleRate, Channels, output, MediaContainerFormat.MP4,
+                TimeSpan.FromTicks(-1)), "a negative audio delay is rejected");
+            Expect<ArgumentOutOfRangeException>(() => FFmpegMediaMuxer.Mux("a.mkv", pcm, SampleRate, Channels, output, MediaContainerFormat.MP4,
+                TimeSpan.FromSeconds(60) + TimeSpan.FromTicks(1)), "an audio delay over one minute is rejected");
         }
 
         /// <summary>Accepts either PCM in MP4 or an explicit request to rebuild with AAC when the libraries lack AAC.</summary>
@@ -120,6 +131,65 @@ namespace MajdataPlay.FFmpeg.Validation
                 Check(error.Message.Contains("aac"), "MP4 rejection names the missing AAC encoder");
                 Console.WriteLine("MP4 without AAC: rejected (" + error.Message + ")");
             }
+        }
+
+        /// <summary>Checks that an audio delay becomes leading silence while both streams keep the video timeline origin.</summary>
+        /// <param name="videoPath">The captured video.</param>
+        /// <param name="pcm">The fixture audio bytes.</param>
+        /// <param name="directory">The isolated output directory.</param>
+        /// <param name="hasAac">Whether audio is encoded as AAC; without it only Matroska is guaranteed to accept the audio.</param>
+        private static void TestAudioDelay(string videoPath, byte[] pcm, string directory, bool hasAac)
+        {
+            var delay = TimeSpan.FromMilliseconds(AudioDelayMilliseconds);
+            var containers = hasAac
+                ? new[] { MediaContainerFormat.Matroska, MediaContainerFormat.MP4 }
+                : new[] { MediaContainerFormat.Matroska };
+            foreach (var container in containers)
+            {
+                var extension = container == MediaContainerFormat.MP4 ? ".mp4" : ".mkv";
+                var undelayedPath = Path.Combine(directory, "delay-0ms" + extension);
+                var delayedPath = Path.Combine(directory, "delay-" + AudioDelayMilliseconds + "ms" + extension);
+                MuxToFile(videoPath, pcm, undelayedPath, container);
+                var codec = MuxToFile(videoPath, pcm, delayedPath, container, delay);
+
+                var probe = Probe(delayedPath);
+                var video = probe.Streams.Find(stream => stream.Type == AVMediaType.AVMEDIA_TYPE_VIDEO)
+                    ?? throw new Exception(delayedPath + " has no video stream");
+                var audio = probe.Streams.Find(stream => stream.Type == AVMediaType.AVMEDIA_TYPE_AUDIO)
+                    ?? throw new Exception(delayedPath + " has no audio stream");
+                Check(Math.Abs(audio.StartSeconds) < 0.05 && Math.Abs(video.StartSeconds) < 0.05,
+                    container + " delayed audio still starts at the video timeline origin");
+                Check(Math.Abs(audio.EndSeconds - (2.0 + delay.TotalSeconds)) < 0.1 && Math.Abs(video.EndSeconds - 2.0) < 0.1,
+                    container + " delayed audio is extended by the delay while video keeps its length");
+                if (codec == "pcm_s16le")
+                {
+                    CheckDelayedPcmPayload(delayedPath, pcm);
+                }
+
+                // Onsets are measured against the video start so that a container-wide timestamp shift cancels out.
+                var undelayedOnset = FindAudioOnsetSeconds(undelayedPath) - video.StartSeconds;
+                var delayedOnset = FindAudioOnsetSeconds(delayedPath) - video.StartSeconds;
+                Console.WriteLine(container + " " + codec + " audio onset: " + (undelayedOnset * 1000).ToString("0.00") + " ms without delay, "
+                    + (delayedOnset * 1000).ToString("0.00") + " ms with " + AudioDelayMilliseconds + " ms delay.");
+                Check(Math.Abs(undelayedOnset) < OnsetToleranceSeconds, container + " undelayed audio is audible at the origin, got " + undelayedOnset);
+                Check(Math.Abs(delayedOnset - delay.TotalSeconds) < OnsetToleranceSeconds,
+                    container + " delayed audio is first audible after the delay, got " + delayedOnset);
+            }
+        }
+
+        /// <summary>Checks that delayed PCM output begins with exact silence followed by the unchanged input samples.</summary>
+        /// <param name="path">The muxed file with uncompressed 16-bit audio.</param>
+        /// <param name="pcm">The fixture audio bytes.</param>
+        private static void CheckDelayedPcmPayload(string path, byte[] pcm)
+        {
+            var silentBytes = SampleRate * AudioDelayMilliseconds / 1000 * Channels * sizeof(short);
+            var payload = ReadAudioPayload(path);
+            Check(payload.Length == silentBytes + (AudioFrames * Channels * sizeof(short)), "delayed PCM adds exactly the silent frames");
+            Check(payload.AsSpan(0, silentBytes).IndexOfAnyExcept((byte)0) < 0, "delayed PCM begins with exact silence");
+            var expected = new short[16];
+            FFmpegMediaMuxer.ConvertToPcm16(MemoryMarshal.Cast<byte, float>(pcm.AsSpan(0, expected.Length * sizeof(float))), expected);
+            Check(payload.AsSpan(silentBytes, expected.Length * sizeof(short)).SequenceEqual(MemoryMarshal.AsBytes(expected.AsSpan())),
+                "delayed PCM continues with the unchanged input samples");
         }
 
         /// <summary>Checks that empty PCM produces a playable video-only file.</summary>
@@ -162,7 +232,7 @@ namespace MajdataPlay.FFmpeg.Validation
                 canceled.Cancel();
                 using var output = new MemoryStream();
                 Expect<OperationCanceledException>(() => FFmpegMediaMuxer.Mux(videoPath, new MemoryStream(pcm), SampleRate, Channels,
-                    output, MediaContainerFormat.Matroska, canceled.Token), "a canceled token stops muxing");
+                    output, MediaContainerFormat.Matroska, cancellationToken: canceled.Token), "a canceled token stops muxing");
             }
             using (var output = new MemoryStream())
             {
@@ -217,12 +287,150 @@ namespace MajdataPlay.FFmpeg.Validation
         /// <param name="pcm">The interleaved float PCM bytes.</param>
         /// <param name="path">The output file.</param>
         /// <param name="container">The output container.</param>
+        /// <param name="audioDelay">The time on the video timeline at which the first PCM frame plays.</param>
         /// <returns>The audio codec name reported by the muxer.</returns>
-        private static string? MuxToFile(string videoPath, byte[] pcm, string path, MediaContainerFormat container)
+        private static string? MuxToFile(string videoPath, byte[] pcm, string path, MediaContainerFormat container, TimeSpan audioDelay = default)
         {
             using var input = new MemoryStream(pcm, false);
             using var output = new FileStream(path, FileMode.CreateNew, FileAccess.ReadWrite);
-            return FFmpegMediaMuxer.Mux(videoPath, input, SampleRate, Channels, output, container);
+            return FFmpegMediaMuxer.Mux(videoPath, input, SampleRate, Channels, output, container, audioDelay);
+        }
+
+        /// <summary>Decodes the audio stream, honoring container edit lists, and finds the first audible sample of the left channel.</summary>
+        /// <param name="path">The muxed file.</param>
+        /// <returns>The presentation time of the first sample whose magnitude exceeds <see cref="AudibleThreshold"/>, in seconds.</returns>
+        private static unsafe double FindAudioOnsetSeconds(string path)
+        {
+            AVFormatContext* input = null;
+            Check(ffmpeg.avformat_open_input(&input, path, null, null) >= 0, "muxed output opens for decoding: " + path);
+            AVCodecContext* decoder = null;
+            var packet = ffmpeg.av_packet_alloc();
+            var frame = ffmpeg.av_frame_alloc();
+            try
+            {
+                Check(ffmpeg.avformat_find_stream_info(input, null) >= 0, "muxed output stream information is readable for decoding");
+                var index = ffmpeg.av_find_best_stream(input, AVMediaType.AVMEDIA_TYPE_AUDIO, -1, -1, null, 0);
+                Check(index >= 0, path + " has a decodable audio stream");
+                var stream = input->streams[index];
+                var codec = ffmpeg.avcodec_find_decoder(stream->codecpar->codec_id);
+                Check(codec != null, "the libraries decode " + ffmpeg.avcodec_get_name(stream->codecpar->codec_id));
+                decoder = ffmpeg.avcodec_alloc_context3(codec);
+                Check(ffmpeg.avcodec_parameters_to_context(decoder, stream->codecpar) >= 0, "audio decoder parameters are accepted");
+                // The packet time base lets the decoder shift timestamps when it discards edit-list priming samples.
+                decoder->pkt_timebase = stream->time_base;
+                Check(ffmpeg.avcodec_open2(decoder, codec, null) >= 0, "the audio decoder opens");
+                var timeBase = ffmpeg.av_q2d(stream->time_base);
+                while (ffmpeg.av_read_frame(input, packet) >= 0)
+                {
+                    try
+                    {
+                        if (packet->stream_index == index)
+                        {
+                            Check(ffmpeg.avcodec_send_packet(decoder, packet) >= 0, "audio packets decode");
+                            if (TryReceiveOnset(decoder, frame, timeBase, out var onset))
+                            {
+                                return onset;
+                            }
+                        }
+                    }
+                    finally
+                    {
+                        ffmpeg.av_packet_unref(packet);
+                    }
+                }
+                Check(ffmpeg.avcodec_send_packet(decoder, null) >= 0, "the audio decoder drains");
+                if (TryReceiveOnset(decoder, frame, timeBase, out var drainedOnset))
+                {
+                    return drainedOnset;
+                }
+                throw new Exception(path + " contains no audible audio");
+            }
+            finally
+            {
+                ffmpeg.av_frame_free(&frame);
+                ffmpeg.av_packet_free(&packet);
+                ffmpeg.avcodec_free_context(&decoder);
+                ffmpeg.avformat_close_input(&input);
+            }
+        }
+
+        /// <summary>Receives every available decoded frame and searches it for the first audible left-channel sample.</summary>
+        /// <param name="decoder">The open audio decoder.</param>
+        /// <param name="frame">The reusable decoded frame.</param>
+        /// <param name="timeBase">The audio stream time base in seconds.</param>
+        /// <param name="onset">Receives the presentation time of the first audible sample, in seconds.</param>
+        /// <returns>True when an audible sample was found.</returns>
+        private static unsafe bool TryReceiveOnset(AVCodecContext* decoder, AVFrame* frame, double timeBase, out double onset)
+        {
+            while (ffmpeg.avcodec_receive_frame(decoder, frame) >= 0)
+            {
+                try
+                {
+                    var timestamp = frame->pts != ffmpeg.AV_NOPTS_VALUE ? frame->pts : frame->best_effort_timestamp;
+                    for (var i = 0; i < frame->nb_samples; i++)
+                    {
+                        if (Math.Abs(ReadLeftSample(frame, i)) > AudibleThreshold)
+                        {
+                            onset = (timestamp * timeBase) + (i / (double)frame->sample_rate);
+                            return true;
+                        }
+                    }
+                }
+                finally
+                {
+                    ffmpeg.av_frame_unref(frame);
+                }
+            }
+            onset = 0;
+            return false;
+        }
+
+        /// <summary>Reads one left-channel sample of a decoded frame as a nominal float.</summary>
+        /// <param name="frame">The decoded audio frame.</param>
+        /// <param name="index">The sample index within the frame.</param>
+        /// <returns>The sample value, where full scale is one.</returns>
+        private static unsafe float ReadLeftSample(AVFrame* frame, int index)
+        {
+            var channels = frame->ch_layout.nb_channels;
+            return (AVSampleFormat)frame->format switch
+            {
+                AVSampleFormat.AV_SAMPLE_FMT_FLTP => ((float*)frame->data[0])[index],
+                AVSampleFormat.AV_SAMPLE_FMT_FLT => ((float*)frame->data[0])[index * channels],
+                AVSampleFormat.AV_SAMPLE_FMT_S16P => ((short*)frame->data[0])[index] / 32768f,
+                AVSampleFormat.AV_SAMPLE_FMT_S16 => ((short*)frame->data[0])[index * channels] / 32768f,
+                _ => throw new Exception("unexpected decoded sample format " + ffmpeg.av_get_sample_fmt_name((AVSampleFormat)frame->format))
+            };
+        }
+
+        /// <summary>Concatenates the payloads of every audio packet in file order.</summary>
+        /// <param name="path">The muxed file.</param>
+        /// <returns>The raw audio payload bytes.</returns>
+        private static unsafe byte[] ReadAudioPayload(string path)
+        {
+            AVFormatContext* input = null;
+            Check(ffmpeg.avformat_open_input(&input, path, null, null) >= 0, "muxed output opens for payload reading: " + path);
+            var packet = ffmpeg.av_packet_alloc();
+            try
+            {
+                Check(ffmpeg.avformat_find_stream_info(input, null) >= 0, "muxed output stream information is readable for payload reading");
+                var index = ffmpeg.av_find_best_stream(input, AVMediaType.AVMEDIA_TYPE_AUDIO, -1, -1, null, 0);
+                Check(index >= 0, path + " has an audio stream");
+                using var payload = new MemoryStream();
+                while (ffmpeg.av_read_frame(input, packet) >= 0)
+                {
+                    if (packet->stream_index == index)
+                    {
+                        payload.Write(new ReadOnlySpan<byte>(packet->data, packet->size));
+                    }
+                    ffmpeg.av_packet_unref(packet);
+                }
+                return payload.ToArray();
+            }
+            finally
+            {
+                ffmpeg.av_packet_free(&packet);
+                ffmpeg.avformat_close_input(&input);
+            }
         }
 
         /// <summary>Encodes a two-second MPEG4 fixture into a Matroska file like the camera capturer's temporary output.</summary>

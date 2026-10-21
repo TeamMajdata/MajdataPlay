@@ -22,13 +22,16 @@ namespace MajdataPlay.FFmpeg
     /// <summary>Combines an encoded video file and interleaved 32-bit float PCM into one MP4 or Matroska output.</summary>
     /// <remarks>
     /// Video packets are copied without re-encoding. Audio uses FFmpeg's AAC encoder when the loaded libraries provide it,
-    /// otherwise uncompressed signed 16-bit PCM when the container accepts it. Audio starts at the video timeline origin.
-    /// All work runs synchronously on the calling thread.
+    /// otherwise uncompressed signed 16-bit PCM when the container accepts it. Audio starts at the video timeline origin,
+    /// preceded by silence when the first PCM frame was played later than that origin. All work runs synchronously on the
+    /// calling thread.
     /// </remarks>
     public sealed unsafe class FFmpegMediaMuxer : IDisposable
     {
         /// <summary>Sets the AAC bit rate per channel in bits per second.</summary>
         private const int AacBitRatePerChannel = 96000;
+        /// <summary>Limits the leading silence that an audio delay can insert.</summary>
+        private const int MaximumAudioDelaySeconds = 60;
         /// <summary>Sets the number of frames per uncompressed PCM packet, and per AAC frame when the encoder accepts any size.</summary>
         private const int AudioPacketFrames = 1024;
         /// <summary>Sets the size of the native output buffer.</summary>
@@ -83,8 +86,12 @@ namespace MajdataPlay.FFmpeg
         private int _inputVideoIndex;
         /// <summary>Stores the number of frames per AAC encoder frame.</summary>
         private int _audioFrameSize;
-        /// <summary>Counts audio frames consumed from the PCM input.</summary>
+        /// <summary>Counts audio frames produced for the audio stream, including leading silence.</summary>
         private long _audioFramesRead;
+        /// <summary>Stores the number of silent frames that delay the first PCM frame.</summary>
+        private readonly long _leadingSilenceFrames;
+        /// <summary>Counts the silent frames still to be produced before the first PCM frame.</summary>
+        private long _remainingSilenceFrames;
         /// <summary>Indicates that the PCM input has ended and the encoder has received its drain marker.</summary>
         private bool _audioInputEnded;
         /// <summary>Prevents access after native resources have been released.</summary>
@@ -97,9 +104,10 @@ namespace MajdataPlay.FFmpeg
         /// <param name="channels">The PCM channel count.</param>
         /// <param name="output">The muxed output destination.</param>
         /// <param name="container">The output container.</param>
+        /// <param name="audioDelay">The time on the video timeline at which the first PCM frame plays.</param>
         /// <param name="cancellationToken">Cancellation for the operation.</param>
         private FFmpegMediaMuxer(string videoPath, Stream pcm, int sampleRate, int channels, Stream output,
-            MediaContainerFormat container, CancellationToken cancellationToken)
+            MediaContainerFormat container, TimeSpan audioDelay, CancellationToken cancellationToken)
         {
             _videoPath = videoPath;
             _pcm = pcm;
@@ -110,6 +118,8 @@ namespace MajdataPlay.FFmpeg
             _cancellation = cancellationToken;
             _audioTimeBase = new AVRational { num = 1, den = sampleRate };
             _pcmBytes = new byte[AudioPacketFrames * channels * sizeof(float)];
+            _leadingSilenceFrames = (long)Math.Round(audioDelay.TotalSeconds * sampleRate);
+            _remainingSilenceFrames = _leadingSilenceFrames;
         }
 
         /// <summary>Copies the first video stream of a file and adds the PCM input as an audio stream in a new container.</summary>
@@ -119,18 +129,22 @@ namespace MajdataPlay.FFmpeg
         /// <param name="channels">The PCM channel count, between one and eight.</param>
         /// <param name="output">A writable, seekable destination that remains owned by the caller.</param>
         /// <param name="container">The output container format.</param>
+        /// <param name="audioDelay">
+        /// The time after the video timeline origin at which the first PCM frame was played, from zero to one minute; the audio
+        /// stream still starts at the origin, with this much leading silence.
+        /// </param>
         /// <param name="cancellationToken">Cancellation for reading, encoding, and writing.</param>
         /// <returns>The written audio codec name, such as <c>aac</c> or <c>pcm_s16le</c>, or null when the PCM input was empty.</returns>
         /// <exception cref="ArgumentNullException">A stream or path is null.</exception>
         /// <exception cref="ArgumentException">The video path is empty, or the output is not writable and seekable.</exception>
-        /// <exception cref="ArgumentOutOfRangeException">The sample rate, channel count, or container is invalid.</exception>
+        /// <exception cref="ArgumentOutOfRangeException">The sample rate, channel count, container, or audio delay is invalid.</exception>
         /// <exception cref="NotSupportedException">The libraries lack the container's muxer, or the container cannot store the video or any available audio codec.</exception>
         /// <exception cref="InvalidOperationException">FFmpeg cannot read, encode, or mux the media.</exception>
         /// <exception cref="IOException">Reading the PCM input or writing the output fails.</exception>
         /// <exception cref="OperationCanceledException">Cancellation was requested.</exception>
         /// <exception cref="OutOfMemoryException">A native allocation fails.</exception>
         public static string? Mux(string videoPath, Stream pcm, int sampleRate, int channels, Stream output,
-            MediaContainerFormat container, CancellationToken cancellationToken = default)
+            MediaContainerFormat container, TimeSpan audioDelay = default, CancellationToken cancellationToken = default)
         {
             if (videoPath is null || pcm is null || output is null)
             {
@@ -156,8 +170,12 @@ namespace MajdataPlay.FFmpeg
             {
                 throw new ArgumentOutOfRangeException(nameof(container));
             }
+            if (audioDelay < TimeSpan.Zero || audioDelay > TimeSpan.FromSeconds(MaximumAudioDelaySeconds))
+            {
+                throw new ArgumentOutOfRangeException(nameof(audioDelay));
+            }
 
-            using (var muxer = new FFmpegMediaMuxer(videoPath, pcm, sampleRate, channels, output, container, cancellationToken))
+            using (var muxer = new FFmpegMediaMuxer(videoPath, pcm, sampleRate, channels, output, container, audioDelay, cancellationToken))
             {
                 return muxer.Run();
             }
@@ -211,7 +229,8 @@ namespace MajdataPlay.FFmpeg
             CheckOutput(_io->error, "Flush muxed output");
             _output.Flush();
             MajDebug.LogInfo("FFmpeg", "[Muxer] Wrote " + _container + " with " + videoPackets + " video packets and "
-                + _audioFramesRead + " audio frames as " + (audioCodecName ?? "no audio") + ".");
+                + _audioFramesRead + " audio frames as " + (audioCodecName ?? "no audio") + ", starting with "
+                + (_leadingSilenceFrames - _remainingSilenceFrames) + " silent frames.");
             return audioCodecName;
         }
 
@@ -575,7 +594,7 @@ namespace MajdataPlay.FFmpeg
             }
         }
 
-        /// <summary>Reads up to the requested number of whole frames from the PCM input.</summary>
+        /// <summary>Reads up to the requested number of whole frames of leading silence followed by the PCM input.</summary>
         /// <param name="maximumFrames">The maximum number of frames to read.</param>
         /// <returns>The interleaved samples read, empty at the end of the input; valid until the next read.</returns>
         /// <exception cref="IOException">Reading the PCM input fails.</exception>
@@ -583,7 +602,11 @@ namespace MajdataPlay.FFmpeg
         {
             var frameBytes = _channels * sizeof(float);
             var requested = maximumFrames * frameBytes;
-            var filled = 0;
+            // Silence and input share one read so that only the final AAC frame can be shorter than the encoder frame size.
+            var silentFrames = (int)Math.Min(maximumFrames, _remainingSilenceFrames);
+            _remainingSilenceFrames -= silentFrames;
+            var filled = silentFrames * frameBytes;
+            _pcmBytes.AsSpan(0, filled).Clear();
             while (filled < requested)
             {
                 var read = _pcm.Read(_pcmBytes, filled, requested - filled);

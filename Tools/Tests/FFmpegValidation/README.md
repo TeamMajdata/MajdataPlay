@@ -303,7 +303,7 @@ dotnet run --project Tools/Tests/FFmpegValidation/FFmpegValidation.csproj -- `
   Tools/Tests/FFmpegValidation/.work/muxing --mux
 ```
 
-检查项：Matroska 输出恰有一条按包复制的视频流（60 包）和一条音频流；库含 AAC encoder 时音频必须为 `aac`，否则为 `pcm_s16le` 并逐字节核对样本值与声道顺序；音视频起点同为 0、时长均约 2 秒、包按时间交错。MP4 在有 AAC 时必须写出 AAC，无 AAC 时接受 mp4 muxer 存 PCM 或明确要求 AAC 的 `NotSupportedException`。另验证空 PCM 输出纯视频、尾部不完整帧被丢弃、预取消、缺失视频与不可 seek 输出的拒绝。不带参数的默认测试包含 float→16-bit 的舍入/限幅/NaN 和参数校验。此模式不覆盖 Bass DSP 采集、Unity Camera 或游戏内 `FFmpegRecorder` 生命周期。
+检查项：Matroska 输出恰有一条按包复制的视频流（60 包）和一条音频流；库含 AAC encoder 时音频必须为 `aac`，否则为 `pcm_s16le` 并逐字节核对样本值与声道顺序；音视频起点同为 0、时长均约 2 秒、包按时间交错。MP4 在有 AAC 时必须写出 AAC，无 AAC 时接受 mp4 muxer 存 PCM 或明确要求 AAC 的 `NotSupportedException`。音频延迟（`audioDelay`，录制时用于把采集到的音频放回实际被听到的时间）以 250 ms 分别写出 Matroska 与（有 AAC 时）MP4：两条流起点仍为 0、音频时长延长 250 ms；用 libavcodec 解码（遵循 MP4 edit list）后，相对视频起点的首个可闻样本无延迟时在 0、有延迟时在 250 ms，容差 ±25 ms（覆盖 AAC priming 与 pre-echo）；PCM 时逐字节核对前导静音与随后的原始样本。另验证空 PCM 输出纯视频、尾部不完整帧被丢弃、预取消、缺失视频与不可 seek 输出的拒绝。不带参数的默认测试包含 float→16-bit 的舍入/限幅/NaN 和参数校验（含负值与超过 1 分钟的音频延迟）。此模式不覆盖 Bass DSP 采集、Unity Camera 或游戏内 `FFmpegRecorder` 生命周期。
 
 原生后端回退测试检查 H.264 的 D3D12VA/Vulkan 硬件配置，并注入首选设备获取失败，验证严格 GPU 模式和允许 CPU 上传模式均可尝试下一硬件后端、得到正确的实际设备身份并继续 seek。此测试验证回退链，不代表已在对应原生后端完成视频解码。
 

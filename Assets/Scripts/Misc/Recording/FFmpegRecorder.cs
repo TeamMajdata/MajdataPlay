@@ -15,11 +15,12 @@ namespace MajdataPlay.Recording
     /// <summary>Records the video of an <see cref="FFmpegCameraCapturer"/> and the audio of an <see cref="IAudioRecorder"/> into one MP4 or Matroska file.</summary>
     /// <remarks>
     /// While recording, the capturer encodes video into a Matroska file in <see cref="MajEnv.TempDirectory"/> and a worker drains the
-    /// audio recorder into a raw float PCM file beside it. Audio starts in the same frame as the capturer's clock, so both timelines
-    /// share their origin. Stopping finalizes the capture and muxes both files on a worker thread, copying the video packets without
-    /// re-encoding, then moves the result into <see cref="MajEnv.RecordOutputsDirectory"/>. If muxing fails, the video-only capture is
-    /// kept in the output directory instead. Control the recorder on the Unity main thread. The recorder owns the audio recorder but
-    /// not the capturer component.
+    /// audio recorder into a raw float PCM file beside it. Audio starts in the same call that starts the capturer's clock, so the
+    /// audio recorder's <see cref="IAudioRecorder.PlaybackDelay"/> is the time on the video timeline at which the first captured
+    /// frame was heard. Stopping finalizes the capture and muxes both files on a worker thread, copying the video packets without
+    /// re-encoding and delaying the audio by that amount, then moves the result into <see cref="MajEnv.RecordOutputsDirectory"/>.
+    /// If muxing fails, the video-only capture is kept in the output directory instead. Control the recorder on the Unity main
+    /// thread. The recorder owns the audio recorder but not the capturer component.
     /// </remarks>
     public sealed class FFmpegRecorder : IRecorder
     {
@@ -331,6 +332,8 @@ namespace MajdataPlay.Recording
         {
             var sampleRate = _audioRecorder.SampleRate;
             var channels = _audioRecorder.Channels;
+            // The capture DSP sees audio before the device plays it; delaying it restores what was heard with each frame.
+            var audioDelay = _audioRecorder.PlaybackDelay;
             var container = _container;
             try
             {
@@ -339,11 +342,12 @@ namespace MajdataPlay.Recording
                     using (var pcm = FileSystem.File.OpenRead(files.AudioPath))
                     using (var output = FileSystem.File.OpenWrite(files.MuxedPath))
                     {
-                        return FFmpegMediaMuxer.Mux(files.VideoPath, pcm, sampleRate, channels, output, container);
+                        return FFmpegMediaMuxer.Mux(files.VideoPath, pcm, sampleRate, channels, output, container, audioDelay);
                     }
                 });
                 MoveToOutputDirectory(files.MuxedPath, files.OutputName);
-                MajDebug.LogInfo(nameof(FFmpegRecorder), $"Saved {files.OutputName} with {audioCodec ?? "no"} audio");
+                MajDebug.LogInfo(nameof(FFmpegRecorder), $"Saved {files.OutputName} with {audioCodec ?? "no"} audio "
+                    + $"delayed by {audioDelay.TotalMilliseconds:F1} ms");
             }
             catch (Exception error) when (!(error is OperationCanceledException))
             {

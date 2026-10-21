@@ -22,6 +22,7 @@ namespace MajdataPlay.Tests.RecorderLifecycleValidation
             var tests = new (string Name, Func<Task> Run)[]
             {
                 ("successful output removes temporary sources", TestSuccessAsync),
+                ("mux delays audio by the measured playback delay", TestPlaybackDelayAsync),
                 ("drain read failure waits for video and retains sources", TestReadFailureAsync),
                 ("drain write failure is observed", TestWriteFailureAsync),
                 ("mux failure preserves video fallback and PCM", TestMuxFallbackAsync),
@@ -67,6 +68,21 @@ namespace MajdataPlay.Tests.RecorderLifecycleValidation
             Assert(fixture.Capturer.StopCalls == 1 && fixture.Audio.StopCalls == 1, "Both sources must stop once.");
             Assert(TestStorage.MuxCalls == 1 && OutputFiles().Length == 1, "One combined output must be written.");
             Assert(TemporaryFiles().Length == 0, "Successful output must remove every temporary source.");
+        }
+
+        /// <summary>Checks that the audio is placed on the video timeline where the audio recorder reports it was played.</summary>
+        private static async Task TestPlaybackDelayAsync()
+        {
+            var fixture = CreateFixture();
+            var playbackDelay = TimeSpan.FromMilliseconds(47.5);
+            await fixture.Recorder.StartRecordAsync();
+            await fixture.Audio.ReadReached.Task;
+            fixture.Audio.PlaybackDelay = playbackDelay;
+            await fixture.Recorder.StopRecordAsync();
+            Assert(TestStorage.MuxCalls == 1, "One combined output must be written.");
+            Assert(TestStorage.MuxAudioDelay == playbackDelay, "The muxer must delay the audio by the playback delay measured after Stop.");
+            Assert(MajDebug.Messages.Any(message => message.Contains("delayed by 47.5 ms", StringComparison.Ordinal)),
+                "The saved output must log the applied audio delay.");
         }
 
         /// <summary>Checks that drain errors propagate and another source's finalization is still awaited.</summary>
