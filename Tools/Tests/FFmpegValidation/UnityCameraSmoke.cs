@@ -1,6 +1,7 @@
 #nullable enable
 using System;
 using System.Collections;
+using System.Collections.Generic;
 using System.IO;
 using System.Reflection;
 using System.Runtime.InteropServices;
@@ -78,6 +79,15 @@ public sealed class FFmpegCameraSmoke : MonoBehaviour
         _capturer = gameObject.AddComponent<FFmpegCameraCapturer>();
         _capturer.TargetCamera = camera;
         var hardware = FFmpegPlayerSmoke.Argument("-captureHardware") == "true";
+        if (FFmpegPlayerSmoke.Argument("-captureThroughput") == "true")
+        {
+            var throughput = CheckThroughput(camera!, hardware);
+            while (throughput.MoveNext())
+            {
+                yield return throughput.Current;
+            }
+            yield break;
+        }
         var format = hardware ? VideoEncodingFormat.H264 : VideoEncodingFormat.MPEG4;
         var mode = hardware ? VideoRateControlMode.CBR : VideoRateControlMode.VBR;
         if (!hardware && Enum.TryParse<VideoEncodingFormat>(FFmpegPlayerSmoke.Argument("-captureFormat"), out var softwareFormat))
@@ -572,6 +582,128 @@ public sealed class FFmpegCameraSmoke : MonoBehaviour
             camera.enabled = enabled;
             QualitySettings.vSyncCount = sync;
             Application.targetFrameRate = targetRate;
+        }
+    }
+
+    /// <summary>Measures what drops frames in long 1080x1920 60 fps recordings at game-like render pacing.</summary>
+    /// <remarks>
+    /// Each phase records 12 seconds with 3 or 6 capture buffers, paced at 60 Hz or uncapped, after 0 to 6 ms of busy script work per
+    /// frame. It reports the split drop counters, the peak of reserved buffers, and how many frames the previous per-render floor
+    /// timestamps would have reported dropped for the same render times.
+    /// </remarks>
+    /// <param name="camera">The fixture camera, rendered into a 1080x1920 target.</param>
+    /// <param name="hardware">Whether a hardware H.264 encoder is preferred.</param>
+    /// <returns>The asynchronous recording sequence.</returns>
+    /// <exception cref="Exception">A recording operation or fixture assertion fails.</exception>
+    private IEnumerator CheckThroughput(Camera camera, bool hardware)
+    {
+        var capturer = _capturer!;
+        var previousTarget = camera.targetTexture;
+        var sync = QualitySettings.vSyncCount;
+        var targetRate = Application.targetFrameRate;
+        var target = new RenderTexture(1080, 1920, 24);
+        target.Create();
+        camera.targetTexture = target;
+        var random = new System.Random(1);
+        var renderSeconds = new List<double>(1024);
+        var field = typeof(FFmpegCameraCapturer).GetField("_session", BindingFlags.Instance | BindingFlags.NonPublic)!;
+        try
+        {
+            foreach (var limit in new[] { 3, 6 })
+            {
+                foreach (var rate in new[] { 60, -1 })
+                {
+                    QualitySettings.vSyncCount = 0;
+                    Application.targetFrameRate = rate;
+                    capturer.BufferedFrameLimit = limit;
+                    capturer.Options = new EncoderOptions
+                    {
+                        Width = 1080, Height = 1920, FrameRate = 60, MaximumSoftwareThreads = 8, Format = VideoEncodingFormat.H264,
+                        PreferredEncoderType = hardware ? VideoEncoderType.Hardware : VideoEncoderType.Software,
+                        RateControlMode = VideoRateControlMode.VBR, BitRate = 8000000, MaximumBitRate = 16000000
+                    };
+                    var pacing = rate < 0 ? "uncapped" : rate + "Hz";
+                    var start = capturer.StartRecordingAsync(NewRecordingPath("throughput-" + limit + "-" + pacing));
+                    var deadline = Time.realtimeSinceStartup + 30;
+                    while (!start.IsCompleted)
+                    {
+                        CheckTimeout(deadline);
+                        yield return null;
+                    }
+                    start.GetAwaiter().GetResult();
+                    renderSeconds.Clear();
+                    var begin = Time.realtimeSinceStartup;
+                    while (Time.realtimeSinceStartup - begin < 12f)
+                    {
+                        // Variable script work before rendering, as in a game frame, jitters the render time within the frame.
+                        var busyUntil = Time.realtimeSinceStartupAsDouble + (random.NextDouble() * 0.006);
+                        while (Time.realtimeSinceStartupAsDouble < busyUntil)
+                        {
+                        }
+                        camera.backgroundColor = Color.HSVToRGB(renderSeconds.Count % 240 / 240f, 0.6f, 0.8f);
+                        RenderFrame(camera);
+                        renderSeconds.Add(capturer.TimeSeconds);
+                        yield return null;
+                    }
+                    var stop = capturer.StopRecordingAsync();
+                    deadline = Time.realtimeSinceStartup + 60;
+                    while (!stop.IsCompleted)
+                    {
+                        CheckTimeout(deadline);
+                        yield return null;
+                    }
+                    stop.GetAwaiter().GetResult();
+                    var session = field.GetValue(capturer)!;
+                    var peak = (int)session.GetType().GetProperty("PeakReservedFrames")!.GetValue(session)!;
+                    CountFloorDrops(renderSeconds, 60, out var floorGaps, out var floorDuplicates);
+                    var line = "limit=" + limit + " pacing=" + pacing + " encoder=" + capturer.EncoderName + " renders=" + renderSeconds.Count
+                        + " encoded=" + capturer.EncodedFrames + " sourceGaps=" + capturer.SourceGapFrames + " bufferOverflow=" + capturer.BufferOverflowFrames
+                        + " peakReserved=" + peak + "/" + limit + " floorRuleDropped=" + floorGaps + " floorRuleDuplicates=" + floorDuplicates
+                        + " active=" + capturer.TimeSeconds.ToString("0.00") + "s";
+                    File.AppendAllText(_report + ".throughput.txt", line + Environment.NewLine);
+                    Debug.Log(line);
+                    Check(capturer.State == CameraCaptureState.Stopped && capturer.EncodedFrames > 0, "throughput recording finalizes: " + line);
+                    Check(capturer.DroppedFrames == capturer.SourceGapFrames + capturer.BufferOverflowFrames, "dropped frames are the sum of their causes");
+                    if (limit == 6)
+                    {
+                        Check(capturer.BufferOverflowFrames * 50 <= capturer.EncodedFrames, "six buffers absorb readback and encoding latency: " + line);
+                    }
+                }
+            }
+        }
+        finally
+        {
+            camera.targetTexture = previousTarget;
+            target.Release();
+            Destroy(target);
+            QualitySettings.vSyncCount = sync;
+            Application.targetFrameRate = targetRate;
+        }
+    }
+
+    /// <summary>Applies the previous per-render floor timestamps to recorded render times.</summary>
+    /// <param name="renderSeconds">The recording clock at each render.</param>
+    /// <param name="frameRate">The recording frame rate.</param>
+    /// <param name="gaps">Receives the frames the previous capturer would have reported dropped.</param>
+    /// <param name="duplicates">Receives the renders it would have discarded as repeats of the previous frame.</param>
+    private static void CountFloorDrops(List<double> renderSeconds, int frameRate, out long gaps, out long duplicates)
+    {
+        gaps = 0;
+        duplicates = 0;
+        var previous = -1L;
+        foreach (var seconds in renderSeconds)
+        {
+            var index = (long)(seconds * frameRate);
+            if (index <= previous)
+            {
+                duplicates++;
+                continue;
+            }
+            if (previous >= 0)
+            {
+                gaps += index - previous - 1;
+            }
+            previous = index;
         }
     }
 

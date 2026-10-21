@@ -1,12 +1,18 @@
 using System;
 using System.Diagnostics;
+using System.IO;
 using System.Runtime.InteropServices;
 using System.Threading;
 using FFmpeg.AutoGen;
+using MajdataPlay.FFmpeg;
 using MajdataPlay.FFmpeg.Internal;
 
 internal static unsafe class AllocationChecks
 {
+    /// <summary>Sets the number of frames encoded before measuring, which covers encoder start-up and buffer growth.</summary>
+    private const int EncodingWarmupFrames = 120;
+    /// <summary>Sets the number of steady-state frames whose encoder-thread allocations are measured.</summary>
+    private const int EncodingMeasuredFrames = 300;
     private static int _checks;
 
     public static int RunManaged()
@@ -312,6 +318,131 @@ internal static unsafe class AllocationChecks
         try { using (pool.Rent()) { } }
         catch (InvalidOperationException) { rejected = true; }
         Check(rejected, "A full pool rejects a new lease without duplicating or expanding its containers.");
+    }
+
+    /// <summary>Requires steady-state camera encoding to allocate no managed memory on its encoder thread.</summary>
+    /// <param name="outputDirectory">An isolated parent directory for the temporary Matroska outputs.</param>
+    /// <returns>The number of assertions that passed.</returns>
+    public static int RunEncoding(string outputDirectory)
+    {
+        var before = _checks;
+        var directory = Path.Combine(Path.GetFullPath(outputDirectory), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        TestEncoderThread(Path.Combine(directory, "encoder.mkv"));
+        TestEncodeSession(Path.Combine(directory, "session.mkv"));
+        return _checks - before;
+    }
+
+    /// <summary>Measures the exact managed allocation of the encoder calls the capture worker makes for each frame.</summary>
+    /// <param name="path">The new Matroska output, the same container as the capturer's temporary video.</param>
+    private static void TestEncoderThread(string path)
+    {
+        var options = CreateCaptureOptions();
+        var pixels = new byte[options.Width * options.Height * 4];
+        using (var encoder = new FFmpegVideoEncoder(options))
+        {
+            encoder.Open(path, CancellationToken.None);
+            var frameIndex = 0L;
+            for (var frame = 0; frame < EncodingWarmupFrames; frame++)
+            {
+                frameIndex = EncodeChangedFrame(encoder, pixels, frameIndex, frame);
+            }
+
+            var bytesWritten = encoder.BytesWritten;
+            var allocated = GC.GetAllocatedBytesForCurrentThread();
+            for (var frame = 0; frame < EncodingMeasuredFrames; frame++)
+            {
+                frameIndex = EncodeChangedFrame(encoder, pixels, frameIndex, frame);
+            }
+            allocated = GC.GetAllocatedBytesForCurrentThread() - allocated;
+            Check(encoder.BytesWritten > bytesWritten, "The measured frames must write packets through the encoder's muxer callbacks.");
+            CheckZeroAllocation(allocated, "Camera encoder " + encoder.EncoderName + " encode and mux", EncodingMeasuredFrames);
+            encoder.Complete();
+        }
+    }
+
+    /// <summary>Drives the production capture session and requires its encoder worker to stay allocation-free.</summary>
+    /// <param name="path">The new Matroska output.</param>
+    /// <remarks>
+    /// The worker thread cannot be measured from outside, so the process-wide counter is used while this thread only reserves and
+    /// completes buffers. A budget of one byte per frame tolerates runtime background work but not a per-frame allocation.
+    /// </remarks>
+    private static void TestEncodeSession(string path)
+    {
+        var session = new VideoEncodeSession(path, CreateCaptureOptions(), 3, CancellationToken.None);
+        Check(session.Ready.Wait(TimeSpan.FromSeconds(30)), "The capture session opens its encoder.");
+        var frameIndex = DriveSession(session, 0, EncodingWarmupFrames);
+        var allocated = GC.GetTotalAllocatedBytes(true);
+        frameIndex = DriveSession(session, frameIndex, EncodingMeasuredFrames);
+        allocated = GC.GetTotalAllocatedBytes(true) - allocated;
+        session.Stop();
+        Check(session.Completion.Wait(TimeSpan.FromSeconds(30)), "The capture session finalizes its output.");
+        Check(session.Error == null && session.EncodedFrames == frameIndex, "The capture session encodes every submitted frame.");
+        Check(allocated < EncodingMeasuredFrames, "Capture session worker allocated " + allocated + " managed bytes for "
+            + EncodingMeasuredFrames + " frames.");
+        Console.WriteLine("Capture session worker: " + allocated + " process-wide managed bytes / " + EncodingMeasuredFrames
+            + " frames (after warmup).");
+    }
+
+    /// <summary>Submits frames like completed GPU readbacks and waits until the worker has encoded all of them.</summary>
+    /// <param name="session">The open capture session.</param>
+    /// <param name="firstFrameIndex">The capture timestamp of the first submitted frame.</param>
+    /// <param name="frames">The number of frames to submit.</param>
+    /// <returns>The timestamp following the last submitted frame.</returns>
+    private static long DriveSession(VideoEncodeSession session, long firstFrameIndex, int frames)
+    {
+        var frameIndex = firstFrameIndex;
+        for (var frame = 0; frame < frames; frame++)
+        {
+            VideoEncodeSession.CaptureFrame reserved;
+            while ((reserved = session.TryReserve(frameIndex, false)) == null)
+            {
+                Thread.Sleep(1);
+            }
+            session.CompleteReadback(reserved, true);
+            frameIndex++;
+        }
+        // A timestamp avoids allocating a Stopwatch inside the measured window.
+        var deadline = Stopwatch.GetTimestamp() + (30 * Stopwatch.Frequency);
+        while (session.EncodedFrames < frameIndex && Stopwatch.GetTimestamp() < deadline)
+        {
+            Thread.Sleep(1);
+        }
+        return frameIndex;
+    }
+
+    /// <summary>Changes a few pixels and encodes them, skipping a timestamp now and then like a dropped capture.</summary>
+    /// <param name="encoder">The open encoder.</param>
+    /// <param name="pixels">The reusable packed RGBA frame.</param>
+    /// <param name="frameIndex">The timestamp of this frame.</param>
+    /// <param name="frame">The loop counter that selects the changed pixels.</param>
+    /// <returns>The timestamp of the next frame.</returns>
+    private static long EncodeChangedFrame(FFmpegVideoEncoder encoder, byte[] pixels, long frameIndex, int frame)
+    {
+        for (var offset = (frame * 4099) % 4096; offset < pixels.Length; offset += 4096)
+        {
+            pixels[offset] ^= 0x5A;
+        }
+        encoder.Encode(pixels, frameIndex, false);
+        return frameIndex + (frame % 7 == 6 ? 2 : 1);
+    }
+
+    /// <summary>Creates small H.264 options that use the capturer's software encoder, container, and rate control.</summary>
+    /// <returns>The encoder options.</returns>
+    private static EncoderOptions CreateCaptureOptions()
+    {
+        return new EncoderOptions
+        {
+            Width = 320,
+            Height = 192,
+            FrameRate = 60,
+            PreferredEncoderType = VideoEncoderType.Software,
+            MaximumSoftwareThreads = 2,
+            Format = VideoEncodingFormat.H264,
+            BitRate = 1_000_000,
+            MaximumBitRate = 2_000_000,
+            RateControlMode = VideoRateControlMode.VBR
+        };
     }
 
     private static void CheckZeroAllocation(long allocated, string label, int frames)

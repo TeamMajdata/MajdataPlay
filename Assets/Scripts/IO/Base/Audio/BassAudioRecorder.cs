@@ -14,8 +14,13 @@ namespace MajdataPlay.IO
     /// The DSP runs on the Bass output thread after every other DSP on the channel and copies the mix into a
     /// bounded buffer under a short lock. At most the front stereo pair of a multichannel device mix is kept,
     /// because <see cref="AudioManager.MixingMatrix"/> routes the stereo game mix to every speaker pair.
-    /// While recording, the DSP also times the first captured block and averages the output latency reported by a
-    /// <see cref="BassOutputLatencyProbe"/>, which together give <see cref="PlaybackDelay"/>.
+    /// <para>
+    /// While recording, the DSP places every block on the playback timeline: a block is heard at its processing time plus
+    /// the output latency reported by a <see cref="BassOutputLatencyProbe"/>. The first block sets <see cref="PlaybackDelay"/>.
+    /// When the output thread stops delivering audio, for example while a blocking garbage collection suspends it, a later
+    /// block is heard later than the frames already captured imply; silence for that gap is inserted before the block so
+    /// that captured frame n is still heard at <see cref="PlaybackDelay"/> plus n divided by <see cref="SampleRate"/>.
+    /// </para>
     /// </remarks>
     internal sealed class BassAudioRecorder : IAudioRecorder
     {
@@ -23,6 +28,27 @@ namespace MajdataPlay.IO
         private const int MaximumRecordedChannels = 2;
         /// <summary>Places this DSP after all other DSP and FX on the channel so it observes the final mix.</summary>
         private const int DspPriority = int.MinValue;
+        /// <summary>Sets how many block durations a block may be heard late before the time is treated as an output gap.</summary>
+        /// <remarks>
+        /// With a measured latency, a late callback that did not starve the device is offset by a smaller buffered amount, so its
+        /// heard time stays put; only a real gap or clock drift moves it. Without per-block latency (ASIO's fixed driver latency or
+        /// a missing measurement) scheduling jitter can still move a block by up to one block, so two blocks leave a full block
+        /// of margin while any stall long enough to empty the device buffer is corrected.
+        /// </remarks>
+        private const int GapThresholdBlocks = 2;
+        /// <summary>Sets the smallest lateness, in seconds, treated as an output gap when blocks are very short.</summary>
+        private const double MinimumGapThresholdSeconds = 0.015;
+        /// <summary>Sets how close, in seconds, the measured latency must return to its value before a gap for the output to count as refilled.</summary>
+        /// <remarks>
+        /// Right after an underrun the device buffer is empty, so the first blocks report a short latency, and they are actually
+        /// played one or two device periods later than it implies (about 20 ms with BassSimple and WASAPI shared). Once the buffer
+        /// has refilled, the latency returns to its steady value within a fraction of a millisecond and the remaining lateness is exact.
+        /// </remarks>
+        private const double SettleLatencyToleranceSeconds = 0.002;
+        /// <summary>Sets how long after a gap, in seconds, the output may take to refill before the remaining lateness is filled anyway.</summary>
+        private const double SettleTimeoutSeconds = 1;
+        /// <summary>Sets the remaining lateness, in seconds, that is filled once a gap has settled; normal deviation stays below 1 ms.</summary>
+        private const double SettleThresholdSeconds = 0.001;
         /// <summary>Roots the native DSP callback for IL2CPP and Mono.</summary>
         private static readonly DSPProcedure s_dspProcedure = OnDsp;
         /// <summary>Synchronizes the Bass output thread with Start, Stop, Read, and Dispose.</summary>
@@ -39,14 +65,34 @@ namespace MajdataPlay.IO
         private readonly BassOutputLatencyProbe _latencyProbe;
         /// <summary>Stores the <see cref="Stopwatch"/> timestamp of the latest <see cref="Start"/>.</summary>
         private long _startTimestamp;
-        /// <summary>Stores the <see cref="Stopwatch"/> timestamp at which the first block of the recording was captured.</summary>
-        private long _firstBlockTimestamp;
         /// <summary>Indicates whether a block has been captured since the latest <see cref="Start"/>.</summary>
         private bool _hasFirstBlock;
+        /// <summary>Stores the time from <see cref="Start"/> until the first block was processed, in seconds.</summary>
+        private double _firstBlockDelaySeconds;
+        /// <summary>Stores the time from <see cref="Start"/> until the first captured frame was heard, in seconds.</summary>
+        private double _firstFrameHeardSeconds;
+        /// <summary>Counts the frames, including inserted silence, stored since the first block.</summary>
+        private long _timelineFrames;
+        /// <summary>Stores the latest valid output latency in seconds, or a negative value before any; kept across recordings.</summary>
+        private double _lastOutputLatencySeconds = -1;
         /// <summary>Sums the output latencies measured since the latest <see cref="Start"/>, in seconds.</summary>
         private double _outputLatencySum;
         /// <summary>Counts the output latencies measured since the latest <see cref="Start"/>.</summary>
         private int _outputLatencyCount;
+        /// <summary>Counts the output gaps filled with silence since the latest <see cref="Start"/>.</summary>
+        private int _outputGapCount;
+        /// <summary>Counts the silent frames inserted for output gaps since the latest <see cref="Start"/>.</summary>
+        private long _insertedSilenceFrames;
+        /// <summary>Stores the largest difference, in seconds, between a block's heard time and its timeline position that was left uncorrected.</summary>
+        private double _largestTimelineDeviationSeconds;
+        /// <summary>Stores the output latency, in seconds, used for the previous block.</summary>
+        private double _previousBlockLatencySeconds;
+        /// <summary>Indicates whether the output is refilling after the latest gap.</summary>
+        private bool _isSettling;
+        /// <summary>Stores the output latency, in seconds, of the last block before the latest gap.</summary>
+        private double _settleReferenceLatencySeconds;
+        /// <summary>Stores the processing time, in seconds after <see cref="Start"/>, after which the latest gap counts as settled.</summary>
+        private double _settleDeadlineSeconds;
         /// <summary>Identifies this instance to the static DSP callback.</summary>
         private GCHandle _selfHandle;
         /// <summary>Stores the DSP handle, or zero after removal.</summary>
@@ -135,7 +181,40 @@ namespace MajdataPlay.IO
             {
                 lock (_gate)
                 {
-                    return GetPlaybackDelay(out _, out _);
+                    return _hasFirstBlock ? ToTimeSpan(_firstFrameHeardSeconds) : TimeSpan.Zero;
+                }
+            }
+        }
+        /// <summary>Gets how many output gaps have been filled with silence since the latest <see cref="Start"/>.</summary>
+        internal int OutputGapCount
+        {
+            get
+            {
+                lock (_gate)
+                {
+                    return _outputGapCount;
+                }
+            }
+        }
+        /// <summary>Gets how much silence has been inserted for output gaps since the latest <see cref="Start"/>.</summary>
+        internal TimeSpan InsertedSilence
+        {
+            get
+            {
+                lock (_gate)
+                {
+                    return ToTimeSpan(_insertedSilenceFrames / (double)SampleRate);
+                }
+            }
+        }
+        /// <summary>Gets the largest difference between a block's heard time and its timeline position that was left uncorrected.</summary>
+        internal TimeSpan LargestTimelineDeviation
+        {
+            get
+            {
+                lock (_gate)
+                {
+                    return ToTimeSpan(_largestTimelineDeviationSeconds);
                 }
             }
         }
@@ -154,8 +233,18 @@ namespace MajdataPlay.IO
                 _captureError = null;
                 _startTimestamp = Stopwatch.GetTimestamp();
                 _hasFirstBlock = false;
+                _firstBlockDelaySeconds = 0;
+                _firstFrameHeardSeconds = 0;
+                _timelineFrames = 0;
                 _outputLatencySum = 0;
                 _outputLatencyCount = 0;
+                _outputGapCount = 0;
+                _insertedSilenceFrames = 0;
+                _largestTimelineDeviationSeconds = 0;
+                _previousBlockLatencySeconds = 0;
+                _isSettling = false;
+                _settleReferenceLatencySeconds = 0;
+                _settleDeadlineSeconds = 0;
                 _isRecording = true;
             }
         }
@@ -165,10 +254,13 @@ namespace MajdataPlay.IO
         {
             Exception? captureError;
             long droppedFrames;
-            TimeSpan playbackDelay;
-            TimeSpan firstBlockDelay;
-            TimeSpan outputLatency;
+            double playbackDelaySeconds;
+            double firstBlockDelaySeconds;
+            double averageLatencySeconds;
             int latencyMeasurements;
+            int outputGaps;
+            double insertedSilenceSeconds;
+            double largestDeviationSeconds;
             lock (_gate)
             {
                 EnsureIsOpen();
@@ -179,8 +271,13 @@ namespace MajdataPlay.IO
                 _isRecording = false;
                 captureError = _captureError;
                 droppedFrames = _buffer.DroppedFrames;
-                playbackDelay = GetPlaybackDelay(out firstBlockDelay, out outputLatency);
+                playbackDelaySeconds = _hasFirstBlock ? _firstFrameHeardSeconds : 0;
+                firstBlockDelaySeconds = _firstBlockDelaySeconds;
+                averageLatencySeconds = _outputLatencyCount == 0 ? 0 : _outputLatencySum / _outputLatencyCount;
                 latencyMeasurements = _outputLatencyCount;
+                outputGaps = _outputGapCount;
+                insertedSilenceSeconds = _insertedSilenceFrames / (double)SampleRate;
+                largestDeviationSeconds = _largestTimelineDeviationSeconds;
             }
             if (captureError is not null)
             {
@@ -190,9 +287,14 @@ namespace MajdataPlay.IO
             {
                 MajDebug.LogWarning(nameof(BassAudioRecorder), $"Dropped {droppedFrames} frames because the consumer fell behind");
             }
-            MajDebug.LogInfo(nameof(BassAudioRecorder), $"The first captured frame was played {playbackDelay.TotalMilliseconds:F1} ms after Start "
-                + $"(first block {firstBlockDelay.TotalMilliseconds:F1} ms, output latency {outputLatency.TotalMilliseconds:F1} ms "
-                + $"from {latencyMeasurements} measurements)");
+            if (outputGaps > 0)
+            {
+                MajDebug.LogWarning(nameof(BassAudioRecorder), $"The output stopped delivering audio {outputGaps} times; inserted "
+                    + $"{insertedSilenceSeconds * 1000:F1} ms of silence to keep the recording on the playback timeline");
+            }
+            MajDebug.LogInfo(nameof(BassAudioRecorder), $"The first captured frame was played {playbackDelaySeconds * 1000:F1} ms after Start "
+                + $"(first block {firstBlockDelaySeconds * 1000:F1} ms, average output latency {averageLatencySeconds * 1000:F1} ms "
+                + $"from {latencyMeasurements} measurements, largest uncorrected timeline deviation {largestDeviationSeconds * 1000:F1} ms)");
         }
 
         /// <inheritdoc/>
@@ -231,26 +333,15 @@ namespace MajdataPlay.IO
             }
         }
 
-        /// <summary>Combines the wait for the first captured block with the average output latency; call while holding the gate.</summary>
-        /// <param name="firstBlockDelay">Receives the time from <see cref="Start"/> to the capture of the first block.</param>
-        /// <param name="outputLatency">Receives the average time from capture to playback, or zero when none was measured.</param>
-        /// <returns>The time from <see cref="Start"/> to the playback of the first captured frame, or zero before a block is captured.</returns>
-        private TimeSpan GetPlaybackDelay(out TimeSpan firstBlockDelay, out TimeSpan outputLatency)
+        /// <summary>Converts seconds to a <see cref="TimeSpan"/> without the millisecond rounding of <see cref="TimeSpan.FromSeconds(double)"/> on older runtimes.</summary>
+        /// <param name="seconds">The duration in seconds.</param>
+        /// <returns>The duration with tick precision.</returns>
+        private static TimeSpan ToTimeSpan(double seconds)
         {
-            if (!_hasFirstBlock)
-            {
-                firstBlockDelay = TimeSpan.Zero;
-                outputLatency = TimeSpan.Zero;
-                return TimeSpan.Zero;
-            }
-            var firstBlockSeconds = (_firstBlockTimestamp - _startTimestamp) / (double)Stopwatch.Frequency;
-            var outputLatencySeconds = _outputLatencyCount == 0 ? 0 : _outputLatencySum / _outputLatencyCount;
-            firstBlockDelay = TimeSpan.FromTicks((long)(firstBlockSeconds * TimeSpan.TicksPerSecond));
-            outputLatency = TimeSpan.FromTicks((long)(outputLatencySeconds * TimeSpan.TicksPerSecond));
-            return firstBlockDelay + outputLatency;
+            return TimeSpan.FromTicks((long)(seconds * TimeSpan.TicksPerSecond));
         }
 
-        /// <summary>Copies one block of the final mix into the buffer while recording.</summary>
+        /// <summary>Places one block of the final mix on the playback timeline and copies it into the buffer while recording.</summary>
         /// <param name="buffer">The borrowed native sample block.</param>
         /// <param name="length">The block length in bytes.</param>
         private unsafe void Capture(IntPtr buffer, int length)
@@ -261,29 +352,96 @@ namespace MajdataPlay.IO
                 {
                     return;
                 }
-                // Sounds started before this block is mixed play from its first frame, so the block marks where captured time begins.
-                if (!_hasFirstBlock)
-                {
-                    _firstBlockTimestamp = Stopwatch.GetTimestamp();
-                    _hasFirstBlock = true;
-                }
+                var processedSeconds = (Stopwatch.GetTimestamp() - _startTimestamp) / (double)Stopwatch.Frequency;
                 var sampleBytes = _isFloatSource ? sizeof(float) : sizeof(short);
                 var blockSeconds = length / sampleBytes / _sourceChannels / (double)SampleRate;
-                var outputLatency = _latencyProbe.Measure(blockSeconds);
-                if (outputLatency >= 0)
+                var measuredLatency = _latencyProbe.Measure(blockSeconds);
+                if (measuredLatency >= 0)
                 {
-                    _outputLatencySum += outputLatency;
+                    _lastOutputLatencySeconds = measuredLatency;
+                    _outputLatencySum += measuredLatency;
                     _outputLatencyCount++;
                 }
-                if (_isFloatSource)
+                // Sounds started before this block is mixed play from its first frame, so the block's first frame is heard after its latency.
+                var outputLatency = Math.Max(_lastOutputLatencySeconds, 0);
+                var heardSeconds = processedSeconds + outputLatency;
+                if (!_hasFirstBlock)
                 {
-                    _buffer.Write(new ReadOnlySpan<float>((void*)buffer, length / sizeof(float)), _sourceChannels);
+                    _hasFirstBlock = true;
+                    _firstBlockDelaySeconds = processedSeconds;
+                    _firstFrameHeardSeconds = heardSeconds;
                 }
                 else
                 {
-                    _buffer.Write(new ReadOnlySpan<short>((void*)buffer, length / sizeof(short)), _sourceChannels);
+                    FillOutputGap(processedSeconds, outputLatency, blockSeconds);
+                }
+                _previousBlockLatencySeconds = outputLatency;
+                int storedFrames;
+                if (_isFloatSource)
+                {
+                    storedFrames = _buffer.Write(new ReadOnlySpan<float>((void*)buffer, length / sizeof(float)), _sourceChannels);
+                }
+                else
+                {
+                    storedFrames = _buffer.Write(new ReadOnlySpan<short>((void*)buffer, length / sizeof(short)), _sourceChannels);
+                }
+                _timelineFrames += storedFrames;
+            }
+        }
+
+        /// <summary>Inserts silence when a block is heard later than the frames already stored imply; call while holding the gate.</summary>
+        /// <param name="processedSeconds">When the block passed the capture DSP, in seconds after <see cref="Start"/>.</param>
+        /// <param name="outputLatency">The output latency of the block in seconds.</param>
+        /// <param name="blockSeconds">The duration of the block.</param>
+        /// <remarks>
+        /// A block late by more than the gap threshold gets the missing time as silence at once. The output then refills its buffer;
+        /// once its latency is back to the value before the gap, the steady lateness left by the short latencies reported during the
+        /// refill is filled as well. Frames lost because the buffer was full leave the timeline short too, so they are repaired the
+        /// same way once space is free. Blocks heard earlier than expected are never shifted, so slow clock drift below the gap
+        /// threshold stays uncorrected.
+        /// </remarks>
+        private void FillOutputGap(double processedSeconds, double outputLatency, double blockSeconds)
+        {
+            var expectedSeconds = _firstFrameHeardSeconds + (_timelineFrames / (double)SampleRate);
+            var latenessSeconds = processedSeconds + outputLatency - expectedSeconds;
+            var thresholdSeconds = Math.Max(GapThresholdBlocks * blockSeconds, MinimumGapThresholdSeconds);
+            if (latenessSeconds > thresholdSeconds)
+            {
+                InsertSilence(latenessSeconds);
+                _outputGapCount++;
+                if (!_isSettling)
+                {
+                    _settleReferenceLatencySeconds = _previousBlockLatencySeconds;
+                }
+                _isSettling = true;
+                _settleDeadlineSeconds = processedSeconds + SettleTimeoutSeconds;
+                return;
+            }
+            if (_isSettling)
+            {
+                var isRefilled = Math.Abs(outputLatency - _settleReferenceLatencySeconds) <= SettleLatencyToleranceSeconds;
+                if (!isRefilled && processedSeconds < _settleDeadlineSeconds)
+                {
+                    return;
+                }
+                _isSettling = false;
+                if (latenessSeconds > SettleThresholdSeconds)
+                {
+                    InsertSilence(latenessSeconds);
+                    return;
                 }
             }
+            _largestTimelineDeviationSeconds = Math.Max(_largestTimelineDeviationSeconds, Math.Abs(latenessSeconds));
+        }
+
+        /// <summary>Appends silence to the buffer and the timeline; call while holding the gate.</summary>
+        /// <param name="seconds">The duration of the silence.</param>
+        private void InsertSilence(double seconds)
+        {
+            var silentFrames = (int)Math.Min(seconds * SampleRate, int.MaxValue);
+            var storedFrames = _buffer.WriteSilence(silentFrames);
+            _timelineFrames += storedFrames;
+            _insertedSilenceFrames += storedFrames;
         }
 
         /// <summary>Records a callback failure for the next Stop without throwing on the Bass thread.</summary>

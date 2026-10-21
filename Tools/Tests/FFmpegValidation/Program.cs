@@ -28,6 +28,7 @@ static class Program
             _checks += EncodingChecks.RunManaged();
             _checks += NativeContentChecks.RunManaged();
             _checks += MuxingChecks.RunManaged();
+            _checks += CaptureTimelineChecks.Run();
             var nativeContent = args.Length == 2 && args[1] == "--native-content";
             var eviction = args.Length == 3 && args[2] == "--eviction";
             var decodeSynchronization = args.Length == 3 && args[2] == "--decode-sync";
@@ -43,11 +44,12 @@ static class Program
             bool uncheckedAmf = args.Length == 3 && args[2] == "--encode-unchecked-amf";
             var encodingSoftware = args.Length == 3 && args[2] == "--encode-software";
             var muxing = args.Length == 3 && args[2] == "--mux";
+            var encodingAllocations = args.Length == 3 && args[2] == "--encode-allocations";
             if (args.Length != 2 && !av1 && !av1Unavailable && !allocations && !softwareAllocations
                 && !encoding && !encodingUnavailable && !encodingHardware && !uncheckedAmf && !encodingSoftware
-                && !eviction && !decodeSynchronization && !hardwareRejected && !conversionThreads && !muxing)
+                && !eviction && !decodeSynchronization && !hardwareRejected && !conversionThreads && !muxing && !encodingAllocations)
             {
-                Console.WriteLine("PASS: " + _checks + " assertions; clock, bitrate, frame pool, encoder options, PCM conversion, muxer arguments and opaque content normalization; use <native-directory> --native-content for Windows protocol checks, <native-directory> <media> [--av1|--av1-unavailable|--allocations|--allocations-software|--eviction|--decode-sync|--hardware-rejected|--conversion-threads], or <native-directory> <output-directory> --encode[|-unavailable|-hardware|-unchecked-amf|-software]|--mux.");
+                Console.WriteLine("PASS: " + _checks + " assertions; clock, bitrate, frame pool, encoder options, PCM conversion, muxer arguments and opaque content normalization; use <native-directory> --native-content for Windows protocol checks, <native-directory> <media> [--av1|--av1-unavailable|--allocations|--allocations-software|--eviction|--decode-sync|--hardware-rejected|--conversion-threads], or <native-directory> <output-directory> --encode[|-unavailable|-hardware|-unchecked-amf|-software|-allocations]|--mux.");
                 return 0;
             }
             string native = Path.GetFullPath(args[0]);
@@ -68,6 +70,12 @@ static class Program
             {
                 _checks += MuxingChecks.RunNative(args[1]);
                 Console.WriteLine("PASS: " + _checks + " assertions; video packet copy with AAC or PCM audio into Matroska/MP4, timeline origin, interleaving, video-only, partial frames, cancellation and output checks.");
+                return 0;
+            }
+            if (encodingAllocations)
+            {
+                _checks += AllocationChecks.RunEncoding(args[1]);
+                Console.WriteLine("PASS: " + _checks + " assertions; zero steady-state managed allocation of camera encoding and muxing on the encoder thread and capture session worker.");
                 return 0;
             }
             if (encodingSoftware)

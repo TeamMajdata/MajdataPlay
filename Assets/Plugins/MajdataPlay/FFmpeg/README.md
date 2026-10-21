@@ -173,7 +173,9 @@ capturer.ResumeRecording();
 await capturer.StopRecordingAsync();
 ```
 
-所有组件控制 API 在 Unity 主线程调用。编码与封装在一个后台线程执行，GPU 回读和编码共用 1–8 个固定槽位，默认 3 个；容量包含正在回读、排队和正在编码的帧。编码过慢时丢帧，`DroppedFrames` 记录省略的帧率间隔，PTS 保留实际单调时钟间隔，不压缩录制时间；不通过重复帧补齐 CFR。录制尺寸固定且必须为偶数，支持缩放 Camera 输出。需要异步 GPU 回读支持；捕获是 SDR sRGB RGBA8，转换为 limited-range YUV，矩阵/原色为 BT.709，transfer metadata 为 sRGB，没有 HDR tone mapping。
+所有组件控制 API 在 Unity 主线程调用。编码与封装在一个后台线程执行，GPU 回读和编码共用 1–8 个固定槽位，默认 6 个；容量包含正在回读、排队和正在编码的帧。GPU 回读通常晚 2–3 帧才完成，3 个槽位在 60 FPS 下容易被占满，场景中序列化的 `BufferedFrameLimit` 应不少于 4（推荐 6）。所有槽位被占用时丢弃该次渲染并计入 `BufferOverflowFrames`；游戏渲染慢于 `FrameRate` 而缺少画面的帧率间隔计入 `SourceGapFrames`；`DroppedFrames` 为两者之和，停止时日志输出这两项与槽位峰值。PTS 保留实际单调时钟间隔，不压缩录制时间；不通过重复帧补齐 CFR。
+
+每次渲染按其所在 Unity 帧开始时（capturer 的 `Update`，执行顺序最先）的录制时钟计时，与游戏计算该帧画面所用时刻一致，也排除了渲染前脚本与剔除耗时的抖动；每个 Unity 帧最多采集一次。时间戳不再逐帧独立向下取整：渲染与下一帧时刻相差不超过 0.75 帧时记为下一帧，晚于此才跳帧并对齐到最近的帧，因此渲染与录制帧率相同时，帧边界附近的计时抖动不会再产生“重复帧被丢弃、下一帧又跳过”的成对丢帧，时间戳与时钟偏差不超过 0.75 帧。渲染快于录制帧率时保留最接近各帧时刻的渲染。录制尺寸固定且必须为偶数，支持缩放 Camera 输出。需要异步 GPU 回读支持；捕获是 SDR sRGB RGBA8，转换为 limited-range YUV，矩阵/原色为 BT.709，transfer metadata 为 sRGB，没有 HDR tone mapping。
 
 `FrameRate` 是采样上限和时间戳的时间基准。游戏 120 FPS、录制 30 FPS 时，约每四次 Camera 渲染采一帧；游戏 30 FPS、录制 60 FPS 时，只能获得约 30 个真实画面/秒，相邻 PTS 跨两个目标时间槽，视频保持实际经过时间。低帧率、渲染卡顿或缓冲池满会降低流畅度；CBR/VBR 是编码器采用的控制模式，缺帧和画面复杂度仍可能使实际码率偏离目标，应观察 `CurrentBitRate`。
 
@@ -195,6 +197,7 @@ await capturer.StopRecordingAsync();
 | `BitRate`, `MaximumBitRate`, `SoftwareThreadCount` | 会话目标、有效最大码率（bit/s）、实际 FFmpeg 软件 codec worker 数；硬件为 0 |
 | `CurrentBitRate`, `BytesWritten`, `EncodedFrames` | 最近约 1 秒媒体时间的视频压缩码率、压缩字节数、成功提交帧数；不包含容器开销 |
 | `HardwareFallbackReason`, `DroppedFrames`, `TimeSeconds` | 硬件偏好回退原因、丢帧计数、捕获持续时间（排除初始化、录制暂停和停止排空） |
+| `SourceGapFrames`, `BufferOverflowFrames` | 丢帧的两种原因：游戏渲染慢于录制帧率而缺少画面的帧率间隔；GPU 回读与编码占满全部槽位而丢弃的渲染（稳定渲染时非零说明槽位过少或编码过慢） |
 | `Started`, `Stopped`, `ErrorReceived` | 主线程事件；Stopped 表示资源关闭，错误状态需同时检查 LastError |
 
 CBR 设置目标码率以及相同的 min/max；VBR 使用独立目标和最大码率。VBV 后端通过约 1 秒缓冲限制，单帧和短时窗口仍会波动；libvpx/libaom 的 CBR 和单遍 VBR 均使用原生码率预算，复杂画面可能超出预算，也不保证低复杂度画面填满目标码率，`MaximumBitRate` 不表示每帧或瞬时负载硬上限。软件线程数限制 FFmpeg codec worker，不包含应用采集线程和驱动的辅助线程。硬件偏好仅回退到**同格式**的软件实现，不会偷偷改换编码格式；不支持请求的模式/码率约束时明确失败。

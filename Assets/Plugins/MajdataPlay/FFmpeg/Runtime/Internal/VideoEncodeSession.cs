@@ -82,6 +82,8 @@ namespace MajdataPlay.FFmpeg.Internal
         private string _softwareThreadingMode = "none";
         /// <summary>Stores the active RGBA color-converter worker count.</summary>
         private int _converterThreadCount;
+        /// <summary>Stores the largest number of buffers reserved at once.</summary>
+        private int _peakReservedFrames;
 
         /// <summary>Starts a worker with bounded capture storage.</summary>
         /// <param name="path">The local output file to create.</param>
@@ -253,6 +255,21 @@ namespace MajdataPlay.FFmpeg.Internal
             }
         }
 
+        /// <summary>Gets the number of capture buffers, which bounds simultaneous GPU, queued, and encoder reservations.</summary>
+        public int Capacity => _frames.Length;
+        /// <summary>Gets the largest number of buffers reserved at once, including the reservation that found the pool full.</summary>
+        /// <remarks>Reaching <see cref="Capacity"/> repeatedly means readback latency and encoding need more buffers.</remarks>
+        public int PeakReservedFrames
+        {
+            get
+            {
+                lock (_gate)
+                {
+                    return _peakReservedFrames;
+                }
+            }
+        }
+
         /// <summary>Reserves one free buffer without waiting for the encoder.</summary>
         /// <param name="frameIndex">The monotonic capture timestamp in frame-rate units.</param>
         /// <param name="flipVertically">Whether the incoming rows are bottom-first.</param>
@@ -265,17 +282,27 @@ namespace MajdataPlay.FFmpeg.Internal
                 {
                     return null;
                 }
+                CaptureFrame? reserved = null;
+                var reservedCount = 1;
                 foreach (var frame in _frames)
                 {
-                    if (frame._state == BufferState.Free)
+                    if (frame._state != BufferState.Free)
                     {
-                        frame.FrameIndex = frameIndex;
-                        frame.FlipVertically = flipVertically;
-                        frame._state = BufferState.Reading;
-                        return frame;
+                        reservedCount++;
+                    }
+                    else if (reserved == null)
+                    {
+                        reserved = frame;
                     }
                 }
-                return null;
+                _peakReservedFrames = Math.Max(_peakReservedFrames, Math.Min(reservedCount, _frames.Length));
+                if (reserved != null)
+                {
+                    reserved.FrameIndex = frameIndex;
+                    reserved.FlipVertically = flipVertically;
+                    reserved._state = BufferState.Reading;
+                }
+                return reserved;
             }
         }
 

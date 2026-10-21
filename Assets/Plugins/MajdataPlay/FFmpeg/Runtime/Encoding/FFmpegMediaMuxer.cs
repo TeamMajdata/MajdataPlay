@@ -715,7 +715,8 @@ namespace MajdataPlay.FFmpeg
                 throw new IOException(operation + " failed while writing the output.", _ioError);
             }
             Check(result, operation);
-            if (_io != null)
+            // Build the I/O message only on failure: this runs for every packet, and concatenating it would allocate each time.
+            if (_io != null && _io->error < 0)
             {
                 Check(_io->error, operation + " I/O");
             }

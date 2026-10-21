@@ -7,6 +7,9 @@ namespace MajdataPlay.IO
     /// <remarks>
     /// Start, Stop, and Read may be called from different threads, but only one consumer thread may call Read.
     /// Samples are buffered in fixed storage; a consumer that falls behind loses the newest samples and increases <see cref="DroppedFrames"/>.
+    /// Captured frames follow the playback timeline: frame n was heard <see cref="PlaybackDelay"/> plus n divided by
+    /// <see cref="SampleRate"/> after <see cref="Start"/>. Time in which the output delivered no audio, such as a stalled output thread,
+    /// is filled with silence instead of being skipped.
     /// </remarks>
     public interface IAudioRecorder : IDisposable
     {
@@ -21,9 +24,9 @@ namespace MajdataPlay.IO
         /// <summary>Gets how long after the latest <see cref="Start"/> the output device played the first captured frame.</summary>
         /// <remarks>
         /// Captured audio is taken from the output mix before the device buffers it, so this includes both the wait for the first
-        /// captured block and the measured output latency. Delaying the samples by this amount places them where they were heard.
-        /// It is zero before the first block of a recording is captured, and covers only that wait when the backend cannot
-        /// report its output latency.
+        /// captured block and its measured output latency. Delaying the samples by this amount places them where they were heard.
+        /// It is zero before the first block of a recording is captured, and covers only that wait when the backend has not
+        /// reported its output latency.
         /// </remarks>
         TimeSpan PlaybackDelay { get; }
 

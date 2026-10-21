@@ -249,7 +249,7 @@ Windows x64 Release 参考结果（16 逻辑处理器，默认 4 线程）：108
 
 ### Camera 录制的托管与真实编码验证
 
-不带参数的默认测试还验证 `EncoderOptions` 的尺寸、帧率、最大软件线程数、目标/最大码率和枚举边界，以及构造时的设置快照。编译 Camera 组件需主项目已用指定 Unity Editor 完成导入，以提供 `Library/ScriptAssemblies` 中的 `Unity.Collections` 与 `Unity.RenderPipelines.Core.Runtime`；测试只引用这些程序集，不调用 Unity 的 Camera 或 GPU API。
+不带参数的默认测试还验证 `EncoderOptions` 的尺寸、帧率、最大软件线程数、目标/最大码率和枚举边界，以及构造时的设置快照。`CaptureTimelineChecks` 用 9000 次带抖动的模拟渲染检查 Camera 帧时间戳分配：60 Hz 渲染在 40 种相位下帧开始计时（±1 ms 抖动）不丢帧、渲染时计时（±3 ms）每次最多因首帧重新对齐丢 1 帧；复现旧版逐帧向下取整在帧边界相位的成对丢帧（同一组渲染下报告约 2200 帧丢失）；59.94/60.06 Hz 只跳过或舍弃真实多出/缺少的帧；144 Hz 每帧取最近渲染、30 Hz 保留全部渲染、200 ms 卡顿后重新对齐，且时间戳与时钟偏差不超过 0.75 帧。编译 Camera 组件需主项目已用指定 Unity Editor 完成导入，以提供 `Library/ScriptAssemblies` 中的 `Unity.Collections` 与 `Unity.RenderPipelines.Core.Runtime`；测试只引用这些程序集，不调用 Unity 的 Camera 或 GPU API。
 
 使用启用了编码器和输出封装器的同 ABI FFmpeg 原生库运行编码专用模式，第二个参数是输出目录，无需提供外部视频：
 
@@ -320,6 +320,16 @@ dotnet run --project Tools/Tests/FFmpegValidation/FFmpegValidation.csproj -- `
 不带参数的默认测试检查预分配帧池的固定容量、同时持有的帧互不别名、重复 Dispose、释放回调抛异常后归还、跨线程归还、元数据重置与 4096 次租用/归还的 0 B 分配。真实解码测试额外检查解码器关闭后尚未归还的 CPU/原生帧仍可释放、归还后池容量完整，以及公开解码器返回的独立帧不会复用旧对象，因此迟到的重复 Dispose 不会影响后续帧。容量 1/8 的实际会话还覆盖持有显示帧时持续取帧、连续 seek、关闭与释放。播放器内部池化帧遵循独占租用约定：Dispose 后不可继续使用旧引用。
 
 测量只覆盖调用线程的稳态托管分配，不包含初始化、seek 调用、错误诊断、native 缓冲区分配或 Unity 渲染线程。此 .NET 9 结果不能替代 Unity Mono/IL2CPP 的 Profiler 与目标平台验证；启用 Profiler 后应继续检查 `ReadFrame`、`PreparePresentationFrame` 和实际呈现路径的 `GC.Alloc`。
+
+相机录制编码线程的稳态分配使用 `--encode-allocations`，输出目录需为本次验证准备的新目录：
+
+```powershell
+dotnet run --project Tools/Tests/FFmpegValidation/FFmpegValidation.csproj -- `
+  Assets/Plugins/MajdataPlay/FFmpeg/Native/Windows/x86_64 `
+  Tools/Tests/FFmpegValidation/.work/encode-allocations --encode-allocations
+```
+
+该模式用 libx264 以 320×192@60 VBR 写入 Matroska（与 capturer 临时文件同一容器），按帧修改像素并间或跳过时间戳模拟丢帧，预热 120 帧后测量 300 帧：在调用线程上用 `GC.GetAllocatedBytesForCurrentThread()` 断言 `FFmpegVideoEncoder.Encode` 连同封装写包的托管分配为 **0 B**，并要求测量期间确有压缩包写出；再驱动生产 `VideoEncodeSession`（`TryReserve`/`CompleteReadback`，由其编码线程执行 `TakeNext`、`Encode` 与 `Publish`），因编码线程无法从外部测量，改用 `GC.GetTotalAllocatedBytes(precise: true)` 统计整个进程，要求 300 帧合计少于 300 B，以容忍运行时后台的一次性分配，但足以发现每帧分配。此前每个写出的视频包都会拼接 `"Mux encoded video packet I/O"` 诊断字符串（Unity Mono 上为 78 B，CoreCLR 上为 80 B），修复后两项均为 0 B。该结果来自 .NET 9，Unity Mono/IL2CPP 仍需在 Profiler 中确认编码线程的 `GC.Alloc`。
 
 ### AV1 软件解码与硬件不可用回退
 
@@ -546,6 +556,8 @@ bash Tools/Tests/FFmpegValidation/run-linux.sh
 
 `NativeDirectory` 是显式可选覆盖；已有正式库具备录制配置时省略。覆盖目录需包含七个 FFmpeg DLL；没有提供 `FFmpegUnityBridge.dll` 时保留项目的同 ABI 桥接。`-CaptureHardware` 额外要求真实 H.264 硬件 CBR，不能用软件回退通过。`-BuildOnly` 只构建，不声称 GPU/编码运行验证通过；`-SkipBuild` 必须使用与当前 fixture/pipeline 相匹配的已构建 Player。
 软件 Camera 测试可以用 `-CaptureFormat MPEG4|H264|HEVC|AV1|VP9` 和 `-CaptureRateControl CBR|VBR` 指定格式和模式；默认仍为 MPEG4/VBR，硬件测试固定 H.264 CBR。
+
+`-TestCaptureThroughput` 只运行丢帧测量（加 `-CaptureHardware` 时首选硬件 H.264，否则 libx264）：按游戏场景配置以 1080×1920@60、H.264 VBR 8/16 Mbps 各录 12 秒，分别使用 3 / 6 个槽位、60 Hz 节拍与不限帧率，每帧渲染前随机执行 0–6 ms 脚本负载以模拟游戏帧内抖动。结果写入报告旁的 `.throughput.txt`：渲染/提交帧数、`SourceGapFrames`、`BufferOverflowFrames`、槽位峰值，以及旧版逐帧向下取整时间戳在同一组渲染时刻上会报告的丢帧和被丢弃的重复渲染。断言 6 个槽位时缓冲区溢出不超过提交帧数的 2%。工作目录路径需较短（例如 `$env:LOCALAPPDATA\Temp\fvc`）：隔离工程中生成的 Android wrapper 路径在 OneDrive 等长目录下会超过 Windows 260 字符限制，导致 PowerShell 无法清理。
 
 Camera fixture 通过真实离屏 Camera.Render / URP Standard RenderRequest 驱动相机，避免 Windows 隐藏窗口对显示渲染的抑制。覆盖颜色上下方向、Caller-owned RenderTexture 保留、实时编码身份/模式/码率、设置快照、停止尾部排空、重复录制、禁用后释放及预取消；还检查旧启动异常不会停止新会话，以及取消后未完成的 GPU 回读会阻止过早重启。输出红色上半、蓝色下半的 MP4，再逐帧真实解码确认；URP 额外使用 Overlay Camera 绘制绿色标记，并检查最终录制包含该标记。该测试不等于主工程显示 Camera、UI、自定义 SRP、所有图形 API 或其他目标平台全部通过。
 

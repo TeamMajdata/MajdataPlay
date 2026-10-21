@@ -20,6 +20,7 @@ param(
     [switch] $TestAndroidContent,
     [switch] $CaptureUrp,
     [switch] $CaptureHardware,
+    [switch] $TestCaptureThroughput,
     [ValidateSet('MPEG4', 'H264', 'HEVC', 'AV1', 'VP9')][string] $CaptureFormat = 'MPEG4',
     [ValidateSet('CBR', 'VBR')][string] $CaptureRateControl = 'VBR',
     [switch] $SkipBuild,
@@ -31,7 +32,7 @@ param(
 $ErrorActionPreference = 'Stop'
 if ($TestAndroidContent -and ($Platform -ne 'Android' -or $Backend -ne 'IL2CPP')) { throw 'Native content device validation requires an Android IL2CPP Player.' }
 if ($DoubleRateSeconds -gt 3) { $RegularPlayer = $true }
-if ($CaptureUrp -or $CaptureHardware) { $TestCameraCapture = $true }
+if ($CaptureUrp -or $CaptureHardware -or $TestCaptureThroughput) { $TestCameraCapture = $true }
 if ($TestCameraCapture -and $Platform -ne 'Windows') { throw 'Camera recording validation currently requires a Windows Player' }
 if ($RequireNativeDecoder) {
     if ($Platform -ne 'Windows' -or $Graphics -notin @('d3d12', 'vulkan')) { throw 'Native decoder validation requires Windows D3D12 or Vulkan' }
@@ -328,7 +329,8 @@ if ($Platform -eq 'Linux') {
     return
 }
 $suffix = if ($TestCameraCapture) { '-camera' + $(if ($CaptureUrp) { '-urp' } else { '-builtin' }) + $(if ($CaptureHardware) { '-hardware' } else { '-software' }) } elseif ($RequireNativeDecoder) { '-native-decoder' } elseif ($TestRecovery) { '-recovery' } elseif ($TestDecoderPreference) { '-decoder-preference' } elseif ($HardwareCpuUpload) { '-hardware-cpu' } elseif ($Hardware) { '-hardware' } else { '-software' }
-if ($TestCameraCapture -and -not $CaptureHardware) { $suffix += "-$CaptureFormat-$CaptureRateControl" }
+if ($TestCameraCapture -and -not $CaptureHardware -and -not $TestCaptureThroughput) { $suffix += "-$CaptureFormat-$CaptureRateControl" }
+if ($TestCaptureThroughput) { $suffix += '-throughput' }
 if ($DoubleRateSeconds -ne 3) { $suffix += "-2x-$($DoubleRateSeconds)s" }
 if ($TestDecodeOverload -and $PlaybackTargetFrameRate -ne 60) { $suffix += "-$($PlaybackTargetFrameRate)fps" }
 if ($RegularPlayer -and -not ($TestCameraCapture -or $TestDecodeOverload -or $TestPlaybackThroughput)) { $suffix += '-regular' }
@@ -359,6 +361,7 @@ if ($RegularPlayer -or $TestCameraCapture -or $TestDecodeOverload -or $TestPlayb
 }
 $playerArgs += @('-cameraCapture', $(if ($TestCameraCapture) { 'true' } else { 'false' }), '-captureHardware', $(if ($CaptureHardware) { 'true' } else { 'false' }))
 $playerArgs += @('-captureFormat', $CaptureFormat, '-captureRateControl', $CaptureRateControl)
+$playerArgs += @('-captureThroughput', $(if ($TestCaptureThroughput) { 'true' } else { 'false' }))
 $process = Start-Process -FilePath (Join-Path $result 'VideoSmoke.exe') -ArgumentList $playerArgs -WindowStyle Hidden -PassThru
 $timeoutMilliseconds = [Math]::Max(120000, ($DoubleRateSeconds + 90) * 1000)
 if (-not $process.WaitForExit($timeoutMilliseconds)) { $process.Kill(); throw "Player timed out after $($timeoutMilliseconds / 1000) seconds: $log" }

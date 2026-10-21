@@ -1,4 +1,5 @@
 #nullable enable
+using MajdataPlay.Diagnostics;
 using MajdataPlay.FFmpeg.Internal;
 using MajdataPlay.Rendering;
 using System;
@@ -54,8 +55,11 @@ namespace MajdataPlay.FFmpeg
     /// </remarks>
     [DisallowMultipleComponent]
     [AddComponentMenu("Video/FFmpeg Camera Capturer")]
+    [DefaultExecutionOrder(FrameStartExecutionOrder)]
     public sealed class FFmpegCameraCapturer : MonoBehaviour
     {
+        /// <summary>Runs <see cref="Update"/> before other scripts so that it samples the recording clock at the start of each frame.</summary>
+        private const int FrameStartExecutionOrder = -32000;
         /// <summary>Stores the camera to record, or null to use this GameObject's camera.</summary>
         [SerializeField]
         [FormerlySerializedAs("TargetCamera")]
@@ -68,7 +72,7 @@ namespace MajdataPlay.FFmpeg
         [SerializeField]
         [FormerlySerializedAs("BufferedFrameLimit")]
         [Range(1, 8)]
-        private int _bufferedFrameLimit = 3;
+        private int _bufferedFrameLimit = 6;
         /// <summary>Controls conversion from native GPU row order to top-first video.</summary>
         [SerializeField]
         [FormerlySerializedAs("ReadbackOrientation")]
@@ -89,10 +93,16 @@ namespace MajdataPlay.FFmpeg
         private Action<RenderTargetIdentifier, CommandBuffer>? _captureAction;
         /// <summary>Identifies the Unity thread allowed to control this component.</summary>
         private int _mainThread;
-        /// <summary>Stores the last attempted capture timestamp to prevent duplicate frames.</summary>
-        private long _lastFrameIndex = -1;
-        /// <summary>Counts frames omitted because rendering or encoding could not keep pace.</summary>
-        private long _droppedFrames;
+        /// <summary>Assigns strictly increasing frame timestamps to renders and counts frame periods without a render.</summary>
+        private readonly CaptureFrameTimeline _timeline = new CaptureFrameTimeline();
+        /// <summary>Stores the recording clock in seconds when <see cref="Update"/> began the current Unity frame.</summary>
+        private double _frameStartSeconds;
+        /// <summary>Stores the Unity frame in which <see cref="_frameStartSeconds"/> was sampled, or -1 before any.</summary>
+        private int _frameStartFrame = -1;
+        /// <summary>Stores the Unity frame of the latest capture attempt so that each frame is recorded at most once.</summary>
+        private int _lastCaptureFrame = -1;
+        /// <summary>Counts rendered frames discarded because every capture buffer was reserved.</summary>
+        private long _bufferOverflowFrames;
         /// <summary>Tracks whether render callbacks are attached.</summary>
         private bool _hooked;
         /// <summary>Tracks the single bridge supplying the current SRP display output.</summary>
@@ -193,7 +203,13 @@ namespace MajdataPlay.FFmpeg
         /// <remarks>Actual submissions can be fewer when camera rendering or encoding cannot keep pace. Frames are not duplicated.</remarks>
         public int FrameRate => _activeOptions?.FrameRate ?? 0;
         /// <summary>Gets the number of frame-rate intervals omitted during capture.</summary>
-        public long DroppedFrames => _droppedFrames;
+        /// <remarks>It is the sum of <see cref="SourceGapFrames"/> and <see cref="BufferOverflowFrames"/>.</remarks>
+        public long DroppedFrames => _timeline.SourceGapFrames + _bufferOverflowFrames;
+        /// <summary>Gets the number of frame-rate intervals in which the camera rendered no frame, because it rendered slower than <see cref="FrameRate"/>.</summary>
+        public long SourceGapFrames => _timeline.SourceGapFrames;
+        /// <summary>Gets the number of rendered frames discarded because GPU readback and encoding held every capture buffer.</summary>
+        /// <remarks>A nonzero value during steady rendering means <see cref="BufferedFrameLimit"/> is too small or the encoder is too slow.</remarks>
+        public long BufferOverflowFrames => _bufferOverflowFrames;
         /// <summary>Gets elapsed recording time in seconds, excluding initialization, recording pauses, and finalization.</summary>
         public double TimeSeconds => _clock.Elapsed.TotalSeconds;
 
@@ -261,8 +277,9 @@ namespace MajdataPlay.FFmpeg
             _activeOptions = options;
             OutputPath = path;
             LastError = null;
-            _droppedFrames = 0;
-            _lastFrameIndex = -1;
+            _timeline.Reset();
+            _lastCaptureFrame = -1;
+            _bufferOverflowFrames = 0;
             _completionReported = false;
             _clock.Reset();
             State = CameraCaptureState.Preparing;
@@ -439,6 +456,8 @@ namespace MajdataPlay.FFmpeg
 
         private void Update()
         {
+            _frameStartSeconds = _clock.Elapsed.TotalSeconds;
+            _frameStartFrame = Time.frameCount;
             if (_session == null)
             {
                 return;
@@ -576,19 +595,31 @@ namespace MajdataPlay.FFmpeg
                 return;
             }
 
-            var frameIndex = (long)(_clock.Elapsed.TotalSeconds * _activeOptions.FrameRate);
-            if (frameIndex <= _lastFrameIndex)
+            var unityFrame = Time.frameCount;
+            if (unityFrame == _lastCaptureFrame)
             {
                 return;
             }
 
-            _droppedFrames += Math.Max(0, frameIndex - _lastFrameIndex - 1);
-            _lastFrameIndex = frameIndex;
+            _lastCaptureFrame = unityFrame;
+            // The render shows the state computed at the start of its frame; timing it there also excludes the varying
+            // script and culling time before rendering, which would otherwise jitter the timestamps. A sample taken before
+            // this recording's clock was reset is newer than the clock and is ignored.
+            var seconds = _clock.Elapsed.TotalSeconds;
+            if (_frameStartFrame == unityFrame && _frameStartSeconds <= seconds)
+            {
+                seconds = _frameStartSeconds;
+            }
+            if (!_timeline.TryAssign(seconds * _activeOptions.FrameRate, out var frameIndex))
+            {
+                return;
+            }
+
             var flip = _resources.FlipVertically;
             var frame = _session.TryReserve(frameIndex, flip);
             if (frame == null)
             {
-                _droppedFrames++;
+                _bufferOverflowFrames++;
                 return;
             }
 
@@ -630,6 +661,9 @@ namespace MajdataPlay.FFmpeg
             }
 
             _completionReported = true;
+            MajDebug.LogInfo("FFmpeg", "[Capturer] Recorded " + EncodedFrames + " frames at " + FrameRate + " fps; " + _timeline.SourceGapFrames
+                + " frame periods had no camera render and " + _bufferOverflowFrames + " renders found all " + _session.Capacity
+                + " capture buffers busy (peak " + _session.PeakReservedFrames + " reserved).");
             var error = _session.Error;
             if (error != null && !(error is OperationCanceledException))
             {

@@ -42,6 +42,14 @@ failure.
   independent playback position, so the checks are that the latency is between 0
   and 200 ms and that every delayed onset follows the moment its burst joined the
   mixer by that latency, within -1 ms to one output block plus 2 ms.
+- The stall cases repeat BassSimple (32 ms / 8 ms) and WASAPI shared while the
+  output thread is blocked once for 300 ms before the fifth burst, as a blocking
+  garbage collection in Unity suspends it. BassSimple blocks in a harness DSP that
+  runs before the recorder's; WASAPI blocks in the harness output callback. The
+  recorder must report exactly one output gap, insert silence close to the
+  audible gap, and keep every later burst within the tolerances above; the table
+  also prints where each burst would land without the inserted silence (about
+  250 to 280 ms early). Cases without a stall must insert no silence.
 - `--exclusive` adds the Windows default exclusive, asynchronous, raw WASAPI
   output (20 ms buffer, 5 ms period), falling back in the game's order, with the
   same checks. It takes the device exclusively for a few seconds, so it is
@@ -49,12 +57,12 @@ failure.
 
 The WASAPI cases also print the spread between each output callback's wall time
 and the amount of audio rendered so far. A large spread means the output thread
-stalled; the recorder assumes the captured audio is continuous, so a stall
-shifts every later onset earlier. Captured audio is stored in preallocated
-arrays because the capture DSP and the WASAPI callback are managed code that a
-garbage collection would pause.
+stalled; the recorder then fills the gap with silence, which the `Timeline` line
+reports. Captured audio is stored in preallocated arrays because the capture DSP
+and the WASAPI callback are managed code that a garbage collection would pause,
+which would add unintended gaps.
 
-Passing this harness verifies the latency measurement and first-block timing on
-this machine's device and drivers only. It does not cover ASIO (which needs an
+Passing this harness verifies the latency measurement, first-block timing, and
+output-gap filling on this machine's device and drivers only. It does not cover ASIO (which needs an
 ASIO driver), other platforms, Bluetooth or other delays the driver does not
 report, display latency, Unity, or the muxed media files.

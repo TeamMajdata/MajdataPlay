@@ -59,8 +59,9 @@ namespace MajdataPlay.IO
         /// <summary>Appends interleaved float frames, keeping the leading channels of each frame.</summary>
         /// <param name="source">The interleaved source samples; a trailing partial frame is ignored.</param>
         /// <param name="sourceChannels">The number of interleaved channels in the source, at least <see cref="Channels"/>.</param>
+        /// <returns>The number of frames stored; frames that do not fit are counted in <see cref="DroppedFrames"/>.</returns>
         /// <exception cref="ArgumentOutOfRangeException">The source has fewer channels than this buffer keeps.</exception>
-        public void Write(ReadOnlySpan<float> source, int sourceChannels)
+        public int Write(ReadOnlySpan<float> source, int sourceChannels)
         {
             var frames = PrepareWrite(source.Length, sourceChannels);
             var writeFrame = (_readFrame + _availableFrames) % CapacityFrames;
@@ -75,13 +76,15 @@ namespace MajdataPlay.IO
                 writeFrame = writeFrame + 1 == CapacityFrames ? 0 : writeFrame + 1;
             }
             _availableFrames += frames;
+            return frames;
         }
 
         /// <summary>Appends interleaved signed 16-bit frames converted to float, keeping the leading channels of each frame.</summary>
         /// <param name="source">The interleaved source samples; a trailing partial frame is ignored.</param>
         /// <param name="sourceChannels">The number of interleaved channels in the source, at least <see cref="Channels"/>.</param>
+        /// <returns>The number of frames stored; frames that do not fit are counted in <see cref="DroppedFrames"/>.</returns>
         /// <exception cref="ArgumentOutOfRangeException">The source has fewer channels than this buffer keeps.</exception>
-        public void Write(ReadOnlySpan<short> source, int sourceChannels)
+        public int Write(ReadOnlySpan<short> source, int sourceChannels)
         {
             var frames = PrepareWrite(source.Length, sourceChannels);
             var writeFrame = (_readFrame + _availableFrames) % CapacityFrames;
@@ -96,6 +99,32 @@ namespace MajdataPlay.IO
                 writeFrame = writeFrame + 1 == CapacityFrames ? 0 : writeFrame + 1;
             }
             _availableFrames += frames;
+            return frames;
+        }
+
+        /// <summary>Appends silent frames, for example to fill time in which the source delivered no audio.</summary>
+        /// <param name="frames">The number of silent frames to append.</param>
+        /// <returns>The number of frames stored; frames that do not fit are counted in <see cref="DroppedFrames"/>.</returns>
+        /// <exception cref="ArgumentOutOfRangeException"><paramref name="frames"/> is negative.</exception>
+        public int WriteSilence(int frames)
+        {
+            if (frames < 0)
+            {
+                throw new ArgumentOutOfRangeException(nameof(frames));
+            }
+            var writable = Math.Min(frames, CapacityFrames - _availableFrames);
+            DroppedFrames += frames - writable;
+            // The free region wraps at most once, so it is cleared as at most two contiguous parts.
+            var writeFrame = (_readFrame + _availableFrames) % CapacityFrames;
+            var firstFrames = Math.Min(writable, CapacityFrames - writeFrame);
+            _samples.AsSpan(writeFrame * Channels, firstFrames * Channels).Clear();
+            var secondFrames = writable - firstFrames;
+            if (secondFrames > 0)
+            {
+                _samples.AsSpan(0, secondFrames * Channels).Clear();
+            }
+            _availableFrames += writable;
+            return writable;
         }
 
         /// <summary>Moves the oldest unread frames into the destination.</summary>
