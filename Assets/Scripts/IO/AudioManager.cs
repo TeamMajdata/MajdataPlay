@@ -1,6 +1,4 @@
 using System.Collections.Generic;
-using System.Threading.Tasks;
-using System.Runtime.CompilerServices;
 using ManagedBass;
 using ManagedBass.Mix;
 #if UNITY_STANDALONE_WIN
@@ -8,20 +6,13 @@ using ManagedBass.Wasapi;
 using ManagedBass.Asio;
 #endif
 using UnityEngine;
-using UnityEngine.Profiling;
 using System;
 using System.Linq;
-using System.Text;
-using System.Runtime.InteropServices;
 using System.Threading;
-using AOT;
 using MajdataPlay.Extensions;
-using MajdataPlay.Utils;
-using MajdataPlay.Collections;
 using MajdataPlay.Settings;
 using MajdataPlay.Numerics;
 using Cysharp.Threading.Tasks;
-using UnityEditor;
 using MajdataPlay.Diagnostics;
 using MajdataPlay.IO.Storage;
 
@@ -35,9 +26,6 @@ namespace MajdataPlay.IO
 
         private List<AudioSampleWrap> SFXSamples = new();
 
-#if UNITY_STANDALONE_WIN
-        readonly static AsioProcedure _asioProcedure;
-#endif
         private static int BassGlobalMixer = -114514;
         /// <summary>Holds the seconds of output audio an audio recorder buffers for a slow consumer.</summary>
         private const int AudioRecorderBufferSeconds = 4;
@@ -46,22 +34,9 @@ namespace MajdataPlay.IO
 
         public bool PlayDebug;
 
-        static bool _isInited = false;
+        private static bool _isInited = false;
 
-        unsafe static AudioManager()
-        {
-#if UNITY_STANDALONE_WIN
-#if ENABLE_IL2CPP
-            _asioProcedure = AsioProcedure;
-            //GCHandle.Alloc(_asioProcedure, GCHandleType.Pinned);
-#else
-            delegate*<bool, int, IntPtr, int, IntPtr, int> ptr2 = &AsioProcedure;
-
-            _asioProcedure = Marshal.GetDelegateForFunctionPointer<AsioProcedure>((IntPtr)ptr2);
-#endif
-#endif
-        }
-        void Awake()
+        private void Awake()
         {
             Majdata<AudioManager>.SetAsSingleton(this);
         }
@@ -84,9 +59,9 @@ namespace MajdataPlay.IO
 #if UNITY_STANDALONE_WIN
                 var wasapiOptions = MajEnv.Settings.Audio.Wasapi;
                 var asioOptions = MajEnv.Settings.Audio.Asio;
-                
+
                 var deviceIndex = asioOptions.DeviceIndex;
-                
+
 #endif
 #if UNITY_ANDROID || UNITY_IOS || !UNITY_STANDALONE_WIN
                 switch (backend)
@@ -215,7 +190,7 @@ namespace MajdataPlay.IO
                                 if (exclusive)
                                 {
                                     flags |= WasapiInitFlags.Exclusive;
-                                    if(isAsyncMode)
+                                    if (isAsyncMode)
                                     {
                                         flags |= WasapiInitFlags.Async;
                                     }
@@ -308,7 +283,7 @@ namespace MajdataPlay.IO
         /// <param name="buffer">The device buffer length in seconds, or zero for the default.</param>
         /// <param name="period">The device update period in seconds, or zero for the default.</param>
         /// <returns>True when the output is initialized and <see cref="BassGlobalMixer"/> feeds it; false when this mode is unavailable.</returns>
-        static bool TryInitWasapiOutput(WasapiInitFlags flags, float buffer, float period)
+        private static bool TryInitWasapiOutput(WasapiInitFlags flags, float buffer, float period)
         {
             var probeFlags = flags & ~WasapiInitFlags.EventDriven;
             if (!BassWasapi.InitEx(BassWasapi.DefaultDevice, 0, 0, probeFlags, buffer, period, BassWasapi.WasapiProc_Push))
@@ -337,22 +312,11 @@ namespace MajdataPlay.IO
             BassGlobalMixer = mixer;
             return true;
         }
-        [MonoPInvokeCallback(typeof(AsioProcedure))]
-        static int AsioProcedure(bool input, int channel, IntPtr buffer, int length, IntPtr user)
-        {
-            if (BassGlobalMixer == -114514)
-            {
-                return 0;
-            }
-            var bytesRead = Bass.ChannelGetData(BassGlobalMixer, buffer, length);
-
-            return bytesRead;
-        }
 #endif
         /// <summary>Loads every file of a streaming assets sound directory through the entries its backend enumerates.</summary>
         /// <param name="directory">The sound directory, or null when the streaming assets do not provide it.</param>
         /// <param name="isVoice">Whether the directory holds voice samples instead of sound effects.</param>
-        void InitSFXSample(StorageDirectory? directory, bool isVoice)
+        private void InitSFXSample(StorageDirectory? directory, bool isVoice)
         {
             if (directory is null)
             {
@@ -392,7 +356,7 @@ namespace MajdataPlay.IO
                 SFXSamples.Add((sample));
             }
         }
-        void OnAnyAreaDown(object sender, InputEventArgs e)
+        private void OnAnyAreaDown(object sender, InputEventArgs e)
         {
             if (e.Status != SwitchStatus.On)
             {
@@ -418,7 +382,9 @@ namespace MajdataPlay.IO
                 foreach (var sample in SFXSamples)
                 {
                     if (sample is not null)
+                    {
                         sample.Dispose();
+                    }
                 }
 
                 Bass.StreamFree(BassGlobalMixer);
@@ -435,7 +401,7 @@ namespace MajdataPlay.IO
             }
         }
 
-        void OnAppPause(object? sender, bool isPaused)
+        private void OnAppPause(object? sender, bool isPaused)
         {
 #if UNITY_ANDROID || UNITY_IOS
             if (isPaused)
@@ -488,7 +454,7 @@ namespace MajdataPlay.IO
             var backend = MajEnv.Settings.Audio.Backend;
             if (FileSystem.File.Open(path).Exists)
             {
-                var sample = default(AudioSampleWrap);
+                AudioSampleWrap? sample;
                 switch (backend)
                 {
                     case SoundBackendOption.Unity:
@@ -518,7 +484,7 @@ namespace MajdataPlay.IO
         {
             MajDebug.LogInfo($"Try creating channel from uri: {uri}");
             var backend = MajEnv.Settings.Audio.Backend;
-            var sample = default(AudioSampleWrap);
+            AudioSampleWrap? sample;
             switch (backend)
             {
                 case SoundBackendOption.Unity:
@@ -545,7 +511,7 @@ namespace MajdataPlay.IO
             var backend = MajEnv.Settings.Audio.Backend;
             if (FileSystem.File.Open(path).Exists)
             {
-                var sample = default(AudioSampleWrap);
+                AudioSampleWrap? sample;
                 switch (backend)
                 {
                     case SoundBackendOption.Unity:
@@ -585,7 +551,7 @@ namespace MajdataPlay.IO
             MajDebug.LogInfo($"Try creating channel from uri: {uri}");
             await UniTask.SwitchToThreadPool();
             var backend = MajEnv.Settings.Audio.Backend;
-            var sample = default(AudioSampleWrap);
+            AudioSampleWrap? sample;
             switch (backend)
             {
                 case SoundBackendOption.Unity:
@@ -660,7 +626,7 @@ namespace MajdataPlay.IO
         public void OpenAsioPannel()
         {
 #if UNITY_STANDALONE_WIN
-            if(MajEnv.Settings.Audio.Backend == SoundBackendOption.Asio)
+            if (MajEnv.Settings.Audio.Backend == SoundBackendOption.Asio)
             {
                 BassAsio.ControlPanel();
             }
@@ -713,7 +679,7 @@ namespace MajdataPlay.IO
         /// <summary>Gets the global mixer feeding the WASAPI or ASIO device.</summary>
         /// <returns>The decoding mixer handle.</returns>
         /// <exception cref="InvalidOperationException">The mixer has not been created.</exception>
-        static int GetBassGlobalMixer()
+        private static int GetBassGlobalMixer()
         {
             if (BassGlobalMixer == -114514 || BassGlobalMixer == 0)
             {
@@ -724,7 +690,7 @@ namespace MajdataPlay.IO
         /// <summary>Gets the stream representing the BassSimple device's final output mix, creating it on first use.</summary>
         /// <returns>The device output stream handle.</returns>
         /// <exception cref="InvalidOperationException">Bass cannot create or start the device output stream.</exception>
-        static int GetBassDeviceOutputStream()
+        private static int GetBassDeviceOutputStream()
         {
             if (s_bassDeviceOutputStream != 0)
             {
@@ -744,7 +710,7 @@ namespace MajdataPlay.IO
             s_bassDeviceOutputStream = stream;
             return stream;
         }
-        static void GenerateMixingMatrix(int chCount)
+        private static void GenerateMixingMatrix(int chCount)
         {
             //        var matrix = new float[8, 2]
             //        {
