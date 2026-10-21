@@ -33,7 +33,7 @@ MajdataPlay 是一个跨平台 Simai 谱面播放器，也是一个 Unity 项目
 - `Packages/`：Unity Package Manager 清单和锁文件。
 - `ProjectSettings/`：共享的 Unity 工程配置。
 - `Tools/FFmpeg/`：FFmpeg 原生库与 Unity 图形桥接的构建工具。
-- `Tools/Tests/`：独立验证程序、隔离 Unity 测试工程脚本及对应说明。
+- `Tools/Tests/`：独立验证程序、隔离 Unity 测试工程脚本及对应说明，模块的测试用例放在`Tools/Tests/Modules`。
 - `ThirdParty/`：第三方源码；优先保持上游结构，避免无关格式化。
 
 在添加跨目录引用前先检查最近的 `.asmdef`。新代码应放入职责最接近的现有程序集，不要仅为绕过引用错误而把代码移回默认 `Assembly-CSharp` 或扩大程序集依赖。
