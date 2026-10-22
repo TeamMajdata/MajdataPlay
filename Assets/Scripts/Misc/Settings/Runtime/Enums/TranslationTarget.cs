@@ -7,9 +7,7 @@ namespace MajdataPlay.Settings.Runtime
     public enum TranslationTarget
     {
         MenuName,
-        MenuDescription,
         OptionName,
-        OptionDescription,
         OptionValue,
     }
 }
