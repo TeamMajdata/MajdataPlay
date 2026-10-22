@@ -8,11 +8,9 @@ Mirrors Assets (including the test assemblies under Assets/Tests), ProjectSettin
 for EditMode and/or PlayMode. The main project and its Library are only read; nothing is written back to
 the repository.
 
-Every test asmdef has the MAJDATAPLAY_TESTS define constraint, so the main project never compiles the
-tests. Only the staged copy defines MAJDATAPLAY_TESTS (in the scripting define symbols of its
-ProjectSettings.asset) and adds generated InternalsVisibleTo files that grant every test assembly access
-to the internals of the production asmdefs (Assets/Scripts, Assets/Plugins/MajdataPlay) and of the
-PlayMode test assemblies. The repository sources are not changed.
+The staged copy is the repository project as it is: the test assemblies are ordinary Unity Test Framework
+assemblies that the main project's Test Runner window also shows. Running them in a copy keeps the batch
+run independent of an Editor that has the main project open.
 
 .PARAMETER UnityPath
 Unity executable. Defaults to the version in ProjectSettings/ProjectVersion.txt under the usual Hub
@@ -68,9 +66,6 @@ Set-StrictMode -Version 3
 
 $CoveragePackage = 'com.unity.testtools.codecoverage'
 $CoveragePackageVersion = '1.2.6'
-$TestsDefine = 'MAJDATAPLAY_TESTS'
-$InternalsFileName = 'MajdataPlay.Tests.Internals.cs'
-$InternalsTargetRoots = @('Assets/Scripts', 'Assets/Plugins/MajdataPlay', 'Assets/Tests/PlayMode')
 $IsWindowsHost = [Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT
 
 $root = (Resolve-Path (Join-Path $PSScriptRoot '../..')).Path
@@ -205,95 +200,16 @@ function Sync-Project {
     foreach ($exclusion in $assetExclusions) {
         $assetFileExclusions += "$exclusion.meta"
     }
-    # Files that exist only in the staged copy are deleted, except the generated internals files, which
-    # are kept so the production assemblies do not recompile on every run. Older versions of this script
-    # staged the tests under Assets/MajdataPlay.Tests; the mirror deletes that folder too.
+    # Files that exist only in the staged copy are deleted. This also removes what older versions of this
+    # script left there: the tests staged under Assets/MajdataPlay.Tests, the generated
+    # MajdataPlay.Tests.Internals.cs files and the MAJDATAPLAY_TESTS define in ProjectSettings.asset.
     Sync-Directory -Source (Join-Path $root 'Assets') -Destination (Join-Path $Project 'Assets') `
-        -ExcludeDirectories $assetExclusions `
-        -ExcludeFiles (@($assetFileExclusions) + @($InternalsFileName, "$InternalsFileName.meta"))
-    $projectSettings = [IO.Path]::GetFullPath((Join-Path $Project 'ProjectSettings/ProjectSettings.asset'))
-    Sync-Directory -Source (Join-Path $root 'ProjectSettings') -Destination (Join-Path $Project 'ProjectSettings') -ExcludeFiles @($projectSettings)
-    $settingsText = [IO.File]::ReadAllText((Join-Path $root 'ProjectSettings/ProjectSettings.asset'))
-    Write-FileIfChanged -Path $projectSettings -Content (Add-TestsDefine -SettingsText $settingsText)
+        -ExcludeDirectories $assetExclusions -ExcludeFiles $assetFileExclusions
+    Sync-Directory -Source (Join-Path $root 'ProjectSettings') -Destination (Join-Path $Project 'ProjectSettings')
     # Local file: packages in the manifest resolve relative to Packages, so ThirdParty keeps its relative location.
     Sync-Directory -Source (Join-Path $root 'ThirdParty') -Destination (Join-Path $Project 'ThirdParty') `
         -ExcludeDirectories @('.git') -ExcludeFiles @('.git')
     Set-StagedManifest -Project $Project
-}
-
-function Write-FileIfChanged {
-    param(
-        [Parameter(Mandatory)][string]$Path,
-        [Parameter(Mandatory)][string]$Content
-    )
-    if ((Test-Path -LiteralPath $Path) -and [IO.File]::ReadAllText($Path) -eq $Content) {
-        return
-    }
-    [IO.File]::WriteAllText($Path, $Content, [Text.UTF8Encoding]::new($false))
-}
-
-function Add-TestsDefine {
-    param([Parameter(Mandatory)][string]$SettingsText)
-    # Appends the tests define to every platform entry of the scriptingDefineSymbols map, which the
-    # test asmdefs require through their defineConstraints.
-    $lines = $SettingsText -split "`n"
-    $inSymbols = $false
-    for ($i = 0; $i -lt $lines.Count; $i++) {
-        $line = $lines[$i].TrimEnd("`r")
-        if ($line -match '^  scriptingDefineSymbols:\s*(\{\})?$') {
-            if ($Matches[1]) {
-                $lines[$i] = $lines[$i].Replace('{}', "`n    Standalone: $TestsDefine")
-                break
-            }
-            $inSymbols = $true
-            continue
-        }
-        if (!$inSymbols) {
-            continue
-        }
-        if ($line -notmatch '^    [^ ].*:') {
-            break
-        }
-        if ($line -match "(^|[:;]\s*)$TestsDefine(;|$)") {
-            continue
-        }
-        $suffix = ";$TestsDefine"
-        if ($line.EndsWith(':')) {
-            $suffix = " $TestsDefine"
-        }
-        $lines[$i] = $line + $suffix + $lines[$i].Substring($line.Length)
-    }
-    return $lines -join "`n"
-}
-
-function Get-InternalsSource {
-    param([Parameter(Mandatory)][string[]]$Friends)
-    $lines = @('// Generated by Tools/Tests/Run-UnityTests.ps1 in the staged test copy only.')
-    foreach ($friend in $Friends) {
-        $lines += "[assembly: System.Runtime.CompilerServices.InternalsVisibleTo(`"$friend`")]"
-    }
-    return ($lines -join "`r`n") + "`r`n"
-}
-
-function Set-InternalsVisibleTo {
-    param([Parameter(Mandatory)][string]$Project)
-    # Every test assembly is a friend of every target, so the production assemblies only recompile when
-    # a test asmdef is added or renamed. PlayMode test assemblies are targets as well because EditMode
-    # tests use their internal test doubles.
-    $friends = @()
-    foreach ($asmdef in Get-ChildItem -LiteralPath (Join-Path $root 'Assets/Tests') -Recurse -Filter '*.asmdef') {
-        $friends += (Get-Content -LiteralPath $asmdef.FullName -Raw | ConvertFrom-Json).name
-    }
-    $source = Get-InternalsSource -Friends @($friends | Sort-Object -Unique)
-    foreach ($targetRoot in $InternalsTargetRoots) {
-        $directory = Join-Path $Project $targetRoot
-        if (!(Test-Path -LiteralPath $directory)) {
-            continue
-        }
-        foreach ($asmdef in Get-ChildItem -LiteralPath $directory -Recurse -Filter '*.asmdef') {
-            Write-FileIfChanged -Path (Join-Path $asmdef.DirectoryName $InternalsFileName) -Content $source
-        }
-    }
 }
 
 function Initialize-Library {
@@ -406,7 +322,6 @@ if (!$SkipProjectSync) {
     Sync-Project -Project $project
 }
 Initialize-Library -Project $project
-Set-InternalsVisibleTo -Project $project
 
 $platforms = @('EditMode', 'PlayMode')
 if ($TestPlatform -ne 'All') {

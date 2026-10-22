@@ -30,7 +30,7 @@ MajdataPlay 是一个跨平台 Simai 谱面播放器，也是一个 Unity 项目
 - `Assets/Scripts/Editor/`：只在 Unity Editor 中运行的构建和编辑器工具。
 - `Assets/Plugins/MajdataPlay/`：拆分为独立 `.asmdef` 的可复用底层库，包括 Buffers、Collections、Diagnostics、Drawing、FFmpeg、IO、Net、Numerics、Platform、Runtime、Syscall、Threading、UnsafeKit 和 Utils。
 - `Assets/Scenes/`：Unity 场景；启用场景以 `ProjectSettings/EditorBuildSettings.asset` 为准。
-- `Assets/Tests/`：主项目与 `Assets/Plugins/MajdataPlay` 的 Unity Test Framework 测试集（EditMode/PlayMode 测试程序集，仅在 `Tools/Tests/Run-UnityTests.ps1` 的隔离副本中编译）。
+- `Assets/Tests/`：主项目与 `Assets/Plugins/MajdataPlay` 的 Unity Test Framework 测试集（EditMode/PlayMode 测试程序集，可在 Unity Test Runner 中运行，也可用 `Tools/Tests/Run-UnityTests.ps1` 在隔离副本中批量运行）。
 - `Packages/`：Unity Package Manager 清单和锁文件。
 - `ProjectSettings/`：共享的 Unity 工程配置。
 - `Tools/FFmpeg/`：FFmpeg 原生库与 Unity 图形桥接的构建工具。
@@ -101,7 +101,7 @@ MajdataPlay 是一个跨平台 Simai 谱面播放器，也是一个 Unity 项目
 - 在 Unity 6000.3.17f1 中等待完整导入和脚本编译，确认 Console 没有新增错误。
 - 场景或交互改动应在相关场景进行 Play Mode 冒烟测试；场景列表以 `ProjectSettings/EditorBuildSettings.asset` 为准。
 - `Tools/Tests/Modules/Editor` 中的测试通过 Unity Test Runner 的 EditMode 运行。
-- 主项目（`Assets/Scripts`）与 `Assets/Plugins/MajdataPlay` 的 Unity Test Framework 测试集位于 `Assets/Tests`（测试 asmdef 带 `MAJDATAPLAY_TESTS` 定义约束，主项目不编译它们；不要为测试向仓库添加 `InternalsVisibleTo`）：运行 `./Tools/Tests/Run-UnityTests.ps1`，它在隔离副本中注入该定义与 `InternalsVisibleTo` 并执行 EditMode 与 PlayMode 测试（`-AssemblyNames`/`-TestFilter` 选择范围，`-Coverage` 生成覆盖率报告），不会修改主项目；目录与编写约定见 `Assets/Tests/README.md`。
+- 主项目（`Assets/Scripts`）与 `Assets/Plugins/MajdataPlay` 的 Unity Test Framework 测试集位于 `Assets/Tests`，是标准的 Unity Test Framework 程序集（仅 `UNITY_INCLUDE_TESTS` 定义约束），可直接在主项目的 Test Runner 窗口运行；被测程序集通过其 asmdef 旁的 `AssemblyInfo.cs` 以 `InternalsVisibleTo` 只向引用它的测试程序集开放 internal 成员，新增或调整测试 asmdef 引用时需同步维护。批量运行使用 `./Tools/Tests/Run-UnityTests.ps1`，它在隔离副本中执行 EditMode 与 PlayMode 测试（`-AssemblyNames`/`-TestFilter` 选择范围，`-Coverage` 生成覆盖率报告），不会修改主项目；目录与编写约定见 `Assets/Tests/README.md`。
 - 发布构建由 `.github/workflows/main.yml` 的 game-ci 配置覆盖。除非任务要求，不要为了普通代码改动在本机生成完整多平台发布包。
 
 ### 独立快速验证（需要 .NET 9）

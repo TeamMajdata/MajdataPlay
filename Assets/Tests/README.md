@@ -5,11 +5,11 @@ Unity Test Framework suite for the main project (`Assets/Scripts`, compiled into
 MonoBehaviour components. Per-module standalone validation programs live in
 [`Tools/Tests/Modules`](../../Tools/Tests/Modules/README.md).
 
-The tests live in the main project but are not compiled by it. Every test assembly has
-`defineConstraints: ["UNITY_INCLUDE_TESTS", "MAJDATAPLAY_TESTS"]`. `MAJDATAPLAY_TESTS` is defined only in
-the isolated copy that [`Tools/Tests/Run-UnityTests.ps1`](../../Tools/Tests/Run-UnityTests.ps1) stages,
-together with the `InternalsVisibleTo` attributes the tests need, so the main project, its Test Runner
-window and its Player builds never see the test assemblies.
+The test assemblies are ordinary Unity Test Framework assemblies of the main project: they appear in
+**Window > General > Test Runner** and run there as well as from
+[`Tools/Tests/Run-UnityTests.ps1`](../../Tools/Tests/Run-UnityTests.ps1). Every test asmdef has
+`defineConstraints: ["UNITY_INCLUDE_TESTS"]` and `autoReferenced: false`, so Player builds never contain
+them and production assemblies cannot reference them.
 
 ## Layout
 
@@ -39,12 +39,15 @@ reachable, that the helpers work, and that PlayMode tests run inside Play Mode.
 
 ### Access to internals
 
-The repository holds no `InternalsVisibleTo` attributes for the tests. In the staged copy only, the runner
-writes a `MajdataPlay.Tests.Internals.cs` file next to every asmdef under `Assets/Scripts`,
-`Assets/Plugins/MajdataPlay` and `Assets/Tests/PlayMode`, granting every test asmdef found under
-`Assets/Tests` access to its internals. Tests therefore reach `internal` members directly, and EditMode
-tests can use the internal test doubles of the PlayMode test assemblies. New test asmdefs are picked up
-automatically.
+Every assembly that a test asmdef references (the production asmdefs under `Assets/Scripts` and
+`Assets/Plugins/MajdataPlay`, and the PlayMode test asmdefs that EditMode tests reference) has an
+`AssemblyInfo.cs` next to its asmdef with one `[assembly: InternalsVisibleTo("...")]` per test assembly
+that references it. Tests therefore reach `internal` members directly, and EditMode tests can use the
+internal test doubles of the PlayMode test assemblies.
+
+When a test asmdef is added, renamed, or gains a reference to another `MajdataPlay.*` assembly, add or
+update the matching `InternalsVisibleTo` line in that assembly's `AssemblyInfo.cs` (create the file and its
+`.meta` when the assembly has none). Grant only test assemblies, and only the ones that reference it.
 
 ### Shared helpers (`MajdataPlay.Tests`)
 
@@ -57,10 +60,21 @@ automatically.
 
 ## Running
 
+### In the Editor
+
+Open the project in Unity 6000.3.17f1, then **Window > General > Test Runner**. The **EditMode** tab lists
+the `MajdataPlay.Tests.<Module>` and `MajdataPlay.Tests.Game` assemblies, the **PlayMode** tab the
+`*.PlayMode` assemblies. Run all, a selection, or a single test, and debug them with an attached IDE.
+PlayMode runs enter Play Mode in a temporary scene and restore the open scenes afterwards; save scene
+changes first.
+
+### Batch mode
+
 [`Tools/Tests/Run-UnityTests.ps1`](../../Tools/Tests/Run-UnityTests.ps1) runs the suite in batch mode in an
 isolated copy of the project, so the main project, its `Library` and its serialized assets are only read
-and the suite can run while the project is open in the Editor. To debug tests interactively, open the
-staged copy (`<WorkRoot>/Project`) in Unity 6000.3.17f1 and use **Window > General > Test Runner** there.
+and the suite can run while the project is open in the Editor. The staged copy is the repository project
+unchanged except for the Code Coverage package, so it compiles and runs the same tests as the Test Runner
+window.
 
 ```powershell
 ./Tools/Tests/Run-UnityTests.ps1
@@ -97,8 +111,7 @@ limit when long paths are not enabled. A full staged copy needs about 5 GB of di
 Staging steps:
 
 1. `Assets` (including `Assets/Tests`), `ProjectSettings` and `ThirdParty` are mirrored with
-   `robocopy /MIR` (`rsync --delete` elsewhere); files that exist only in the staged copy are deleted,
-   except the generated `MajdataPlay.Tests.Internals.cs` files.
+   `robocopy /MIR` (`rsync --delete` elsewhere); files that exist only in the staged copy are deleted.
    `ThirdParty` keeps its relative location because `Packages/manifest.json` references local packages
    with `file:../ThirdParty/...`. Untracked nested Git repositories under `Assets` (for example a stray
    `Assets/Plugins/UniTask` checkout that duplicates the UniTask package) are skipped with a warning.
@@ -106,9 +119,6 @@ Staging steps:
    is copied only when the repository's lock file changes.
 3. A missing staged `Library` is seeded from the main project's `Library` when it exists, skipping the
    full import of the first run.
-4. Test-only changes that exist only in the staged copy: `MAJDATAPLAY_TESTS` is appended to every
-   platform's scripting define symbols in `ProjectSettings.asset`, and the `MajdataPlay.Tests.Internals.cs`
-   files described under [Access to internals](#access-to-internals) are written.
 
 ## Writing tests
 
@@ -122,10 +132,12 @@ Staging steps:
   helpers shared with EditMode tests keep the EditMode namespace). Code under `PlayMode/`
   compiles for every platform and must not use `UnityEditor`.
 - Each module has exactly one EditMode asmdef named `MajdataPlay.Tests.<Module>` and, optionally, one
-  PlayMode asmdef named `MajdataPlay.Tests.<Module>.PlayMode`. A new test asmdef must reference
-  `MajdataPlay.Tests.Shared` when it uses the helpers and keep both the `UNITY_INCLUDE_TESTS` and
-  `MAJDATAPLAY_TESTS` define constraints. Never add `InternalsVisibleTo` attributes for tests to the
-  repository.
+  PlayMode asmdef named `MajdataPlay.Tests.<Module>.PlayMode`. Test asmdefs follow the Unity Test Framework
+  layout: they reference `UnityEngine.TestRunner` (EditMode asmdefs also `UnityEditor.TestRunner` and
+  `includePlatforms: ["Editor"]`), set `overrideReferences: true` with `nunit.framework.dll` in
+  `precompiledReferences`, `autoReferenced: false`, and `defineConstraints: ["UNITY_INCLUDE_TESTS"]`.
+  Reference `MajdataPlay.Tests.Shared` when using the helpers, and grant internals as described under
+  [Access to internals](#access-to-internals). Production asmdefs never reference test assemblies.
 - MonoBehaviour test doubles go in their own file named after the class, under `PlayMode/`. Unity refuses
   to attach behaviours compiled into editor assemblies, so doubles used by EditMode tests live in the
   matching PlayMode assembly (`MajdataPlay.Tests.Game.PlayMode` or `MajdataPlay.Tests.<Module>.PlayMode`),
