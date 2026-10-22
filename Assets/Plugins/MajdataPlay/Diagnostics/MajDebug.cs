@@ -16,34 +16,34 @@ namespace MajdataPlay.Diagnostics
         public static long MaxLogSize { get; set; } = 500L * 1024 * 1024; // 500 MB
         public static LogLevel MinLogLevel { get; set; } = LogLevel.Debug;
 
-        static ILogger _unityLogger = null!;
-        static TextWriter? _logWriter;
-        static readonly CancellationTokenSource _cancellationTokenSource = new();
+        private static ILogger s_unityLogger = null!;
+        private static TextWriter? s_logWriter;
+        private static readonly CancellationTokenSource s_cancellationTokenSource = new();
 
-        readonly static Utf16PreparedFormat<DateTime, LogLevel> LOG_OUTPUT_FORMAT = ZString.PrepareUtf16<DateTime, LogLevel>("[{0:yyyy-MM-dd HH:mm:ss.ffff}][{1}]");
+        private static readonly Utf16PreparedFormat<DateTime, char> s_logOutputFormat = ZString.PrepareUtf16<DateTime, char>("[{0:yyyy-MM-dd HH:mm:ss.ffff}][{1}]");
 
-        readonly static object _lockObject = new();
-        readonly static ConcurrentQueue<GameLog> _logQueue = new();
+        private static readonly object s_lockObject = new();
+        private static readonly ConcurrentQueue<GameLog> s_logQueue = new();
 
 
         public static void SetLogWriter(TextWriter? writer, bool disposeOld = true)
         {
-            lock (_lockObject)
+            lock (s_lockObject)
             {
-                if (disposeOld && _logWriter != null)
+                if (disposeOld && s_logWriter != null)
                 {
-                    _logWriter.Flush();
-                    _logWriter.Dispose();
+                    s_logWriter.Flush();
+                    s_logWriter.Dispose();
                 }
-                _logWriter = writer;
+                s_logWriter = writer;
             }
         }
 
         public static void FlushLog()
         {
-            lock (_lockObject)
+            lock (s_lockObject)
             {
-                if (_logWriter == null)
+                if (s_logWriter == null)
                 {
                     return;
                 }
@@ -51,7 +51,7 @@ namespace MajdataPlay.Diagnostics
                 try
                 {
                     WriteLogIntoStream(ref sb);
-                    _logWriter.Flush();
+                    s_logWriter.Flush();
                 }
                 finally
                 {
@@ -61,9 +61,9 @@ namespace MajdataPlay.Diagnostics
         }
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
-        static void Init()
+        private static void Init()
         {
-            _unityLogger = UnityEngine.Debug.unityLogger;
+            s_unityLogger = UnityEngine.Debug.unityLogger;
 
             TaskScheduler.UnobservedTaskException += (sender, args) =>
             {
@@ -73,7 +73,7 @@ namespace MajdataPlay.Diagnostics
 
             Application.quitting += () =>
             {
-                _cancellationTokenSource.Cancel();
+                s_cancellationTokenSource.Cancel();
                 FlushLog();
             };
 
@@ -91,13 +91,13 @@ namespace MajdataPlay.Diagnostics
                     Level = ToMajdataLogLevel(type),
                     IsFromUnityLogger = true
                 };
-                _logQueue.Enqueue(log);
+                s_logQueue.Enqueue(log);
             };
         }
 
         [HideInCallstack]
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        static void Log<T>(string? tag, T obj, LogLevel level)
+        private static void Log<T>(string? tag, T obj, LogLevel level)
         {
             var sb = ZString.CreateStringBuilder();
             if (!string.IsNullOrEmpty(tag))
@@ -122,7 +122,7 @@ namespace MajdataPlay.Diagnostics
 #endif
                 Level = level
             };
-            _logQueue.Enqueue(log);
+            s_logQueue.Enqueue(log);
         }
 
         [HideInCallstack]
@@ -167,12 +167,12 @@ namespace MajdataPlay.Diagnostics
             => Log(tag, obj, LogLevel.Error);
 
 
-        static string GetStackTrack()
+        private static string GetStackTrack()
         {
             return new StackTrace(3, true).ToString();
         }
 
-        static void StartLogWritebackTask()
+        private static void StartLogWritebackTask()
         {
             Task.Factory.StartNew(() =>
             {
@@ -180,7 +180,7 @@ namespace MajdataPlay.Diagnostics
                 currentThread.Priority = System.Threading.ThreadPriority.Lowest;
                 currentThread.IsBackground = true;
 
-                var token = _cancellationTokenSource.Token;
+                var token = s_cancellationTokenSource.Token;
                 var sb = ZString.CreateStringBuilder();
                 try
                 {
@@ -199,22 +199,22 @@ namespace MajdataPlay.Diagnostics
                 finally
                 {
                     sb.Dispose();
-                    lock (_lockObject)
+                    lock (s_lockObject)
                     {
-                        _logWriter?.Dispose();
-                        _logWriter = null;
+                        s_logWriter?.Dispose();
+                        s_logWriter = null;
                     }
                 }
             }, TaskCreationOptions.LongRunning);
         }
 
-        static void WriteLogIntoStream(ref Utf16ValueStringBuilder sb)
+        private static void WriteLogIntoStream(ref Utf16ValueStringBuilder sb)
         {
-            lock (_lockObject)
+            lock (s_lockObject)
             {
-                if (_logWriter is null)
+                if (s_logWriter is null)
                 {
-                    while (_logQueue.Count > 10000 && _logQueue.TryDequeue(out var staleLog))
+                    while (s_logQueue.Count > 10000 && s_logQueue.TryDequeue(out var staleLog))
                     {
                         staleLog.Condition.Dispose();
                     }
@@ -222,7 +222,7 @@ namespace MajdataPlay.Diagnostics
                 }
 
                 var hasWritten = false;
-                while (_logQueue.TryDequeue(out var log))
+                while (s_logQueue.TryDequeue(out var log))
                 {
                     using var condition = log.Condition;
 
@@ -231,7 +231,7 @@ namespace MajdataPlay.Diagnostics
                         continue;
                     }
 
-                    if (MaxLogSize > 0 && _logWriter is StreamWriter sw && sw.BaseStream.CanSeek)
+                    if (MaxLogSize > 0 && s_logWriter is StreamWriter sw && sw.BaseStream.CanSeek)
                     {
                         if (sw.BaseStream.Position > MaxLogSize)
                         {
@@ -239,7 +239,7 @@ namespace MajdataPlay.Diagnostics
                         }
                     }
 
-                    LOG_OUTPUT_FORMAT.FormatTo(ref sb, log.Date, log.Level);
+                    s_logOutputFormat.FormatTo(ref sb, log.Date, GetLogLevelChar(log.Level));
                     sb.Append(condition.AsSpan());
 
                     if (!string.IsNullOrEmpty(log.StackTrace))
@@ -249,13 +249,13 @@ namespace MajdataPlay.Diagnostics
                         sb.AppendLine();
                     }
 
-                    _logWriter.WriteLine(sb.AsSpan());
+                    s_logWriter.WriteLine(sb.AsSpan());
                     hasWritten = true;
 
 #if UNITY_EDITOR || DEBUG
                     if (!log.IsFromUnityLogger)
                     {
-                        _unityLogger.Log(ToUnityLogLevel(log.Level), sb.ToString());
+                        s_unityLogger.Log(ToUnityLogLevel(log.Level), sb.ToString());
                     }
 #endif
                     sb.Clear();
@@ -263,12 +263,12 @@ namespace MajdataPlay.Diagnostics
 
                 if (hasWritten)
                 {
-                    _logWriter.Flush();
+                    s_logWriter.Flush();
                 }
             }
         }
 
-        static LogType ToUnityLogLevel(LogLevel level)
+        private static LogType ToUnityLogLevel(LogLevel level)
         {
             return level switch
             {
@@ -281,7 +281,7 @@ namespace MajdataPlay.Diagnostics
             };
         }
 
-        static LogLevel ToMajdataLogLevel(LogType level)
+        private static LogLevel ToMajdataLogLevel(LogType level)
         {
             return level switch
             {
@@ -293,7 +293,20 @@ namespace MajdataPlay.Diagnostics
             };
         }
 
-        readonly struct GameLog
+        private static char GetLogLevelChar(LogLevel level)
+        {
+            return level switch
+            {
+                LogLevel.Debug => 'D',
+                LogLevel.Info => 'I',
+                LogLevel.Warning => 'W',
+                LogLevel.Error => 'E',
+                LogLevel.Fatal => 'F',
+                _ => throw new ArgumentOutOfRangeException(nameof(level), level, null)
+            };
+        }
+
+        private readonly struct GameLog
         {
             public DateTime Date { get; init; }
             public Utf16ValueStringBuilder Condition { get; init; }
