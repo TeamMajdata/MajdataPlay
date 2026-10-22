@@ -36,7 +36,7 @@ namespace MajdataPlay.Tests.Game.Scenes.PlayMode.SettingScene
         }
 
         /// <summary>Gets the menus created by the manager.</summary>
-        private Menu[] Menus => PrivateMember.GetField<Menu[]>(_manager, "menus");
+        private Menu[] Menus => PrivateMember.GetField<Menu[]>(_manager, "_menus");
 
         /// <summary>Gets the menu of the selected category.</summary>
         private Menu Current => Menus[_manager.Index];

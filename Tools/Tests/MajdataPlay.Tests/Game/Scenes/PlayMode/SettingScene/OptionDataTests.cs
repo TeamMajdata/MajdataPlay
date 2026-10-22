@@ -54,6 +54,21 @@ namespace MajdataPlay.Tests.Game.Scenes.PlayMode.SettingScene
             Assert.That(data.LocalizedValueText, Is.EqualTo("First"));
         }
 
+        /// <summary>Checks that the translation selection attributes leave the default name, description and value texts.</summary>
+        [Test]
+        public void Constructor_TranslationSelectionAttributesKeepDefaultKeys()
+        {
+            var settings = new AnnotatedSettingFixture();
+            using var data = new OptionData(typeof(AnnotatedSettingFixture).GetProperty(nameof(AnnotatedSettingFixture.Annotated))!, settings);
+
+            Assert.That(data.LocalizedName, Is.EqualTo("MAJSETTING_PROPERTY_Annotated"));
+            Assert.That(data.DescriptionKey, Is.EqualTo("MAJSETTING_PROPERTY_Annotated_DESC"));
+            Assert.That(data.HasDescription, Is.True);
+            Assert.That(data.LocalizedValueText, Is.EqualTo("False"));
+            Assert.That(data.MoveNext(), Is.True);
+            Assert.That(settings.Annotated, Is.True);
+        }
+
         /// <summary>Checks the description and offset flags.</summary>
         [Test]
         public void Constructor_ReadsDescriptionAndOffsetFlags()

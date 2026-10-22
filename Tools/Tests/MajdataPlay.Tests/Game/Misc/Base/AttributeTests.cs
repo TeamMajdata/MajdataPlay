@@ -61,15 +61,5 @@ namespace MajdataPlay.Tests.Game.Misc.Base
             Assert.That(new MajdataPlay.Editor.ReadOnlyFieldAttribute(), Is.InstanceOf<UnityEngine.PropertyAttribute>());
             Assert.That(usage.ValidOn, Is.EqualTo(AttributeTargets.Field));
         }
-
-        /// <summary>Checks that the translation opt-out marker can be created.</summary>
-        [Test]
-        public void NoTranslateAttribute_CanBeCreated()
-        {
-            var usage = typeof(NoTranslateAttribute).GetCustomAttribute<AttributeUsageAttribute>()!;
-
-            Assert.That(new NoTranslateAttribute(), Is.Not.Null);
-            Assert.That(usage.AllowMultiple, Is.False);
-        }
     }
 }

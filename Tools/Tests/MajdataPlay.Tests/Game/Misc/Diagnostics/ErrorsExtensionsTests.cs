@@ -172,13 +172,13 @@ namespace MajdataPlay.Tests.Game.Misc.Diagnostics
         [Test]
         public void ErrorsExtensions_LogAtEachLevel()
         {
-            var savedLogger = PrivateMember.GetStaticField<ILogger?>(typeof(MajDebug), "_unityLogger");
+            var savedLogger = PrivateMember.GetStaticField<ILogger?>(typeof(MajDebug), "s_unityLogger");
             var savedLevel = MajDebug.MinLogLevel;
             var logger = new RecordingLogger();
             using var writer = new StringWriter();
             try
             {
-                PrivateMember.SetStaticField(typeof(MajDebug), "_unityLogger", logger);
+                PrivateMember.SetStaticField(typeof(MajDebug), "s_unityLogger", logger);
                 MajDebug.SetLogWriter(TextWriter.Null, disposeOld: false);
                 MajDebug.MinLogLevel = (LogLevel)int.MaxValue;
                 MajDebug.FlushLog();
@@ -203,7 +203,7 @@ namespace MajdataPlay.Tests.Game.Misc.Diagnostics
             {
                 MajDebug.SetLogWriter(null, disposeOld: false);
                 MajDebug.MinLogLevel = savedLevel;
-                PrivateMember.SetStaticField(typeof(MajDebug), "_unityLogger", savedLogger);
+                PrivateMember.SetStaticField(typeof(MajDebug), "s_unityLogger", savedLogger);
             }
         }
     }

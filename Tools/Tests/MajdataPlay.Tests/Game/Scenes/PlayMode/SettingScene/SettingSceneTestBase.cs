@@ -85,7 +85,7 @@ namespace MajdataPlay.Tests.Game.Scenes.PlayMode.SettingScene
         protected SettingManager CreateManager()
         {
             var manager = AddInactive<SettingManager>("SettingManager", Canvas);
-            manager.menuPrefab = MenuTemplate;
+            PrivateMember.SetField(manager, "_menuPrefab", MenuTemplate);
             PrivateMember.SetField(manager, "_menuTitleDisplayerPrefab", TitleTemplate);
             PrivateMember.SetField(manager, "_menuListRoot", MenuListRoot);
             PrivateMember.SetField(manager, "_menuTitleDisplayerListRoot", TitleListRoot);

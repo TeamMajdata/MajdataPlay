@@ -69,12 +69,12 @@ namespace MajdataPlay.Tests.Plugins.Diagnostics
         [SetUp]
         public void SetUp()
         {
-            _savedLogger = PrivateMember.GetStaticField<ILogger?>(typeof(MajDebug), "_unityLogger");
-            _savedWriter = PrivateMember.GetStaticField<TextWriter?>(typeof(MajDebug), "_logWriter");
+            _savedLogger = PrivateMember.GetStaticField<ILogger?>(typeof(MajDebug), "s_unityLogger");
+            _savedWriter = PrivateMember.GetStaticField<TextWriter?>(typeof(MajDebug), "s_logWriter");
             _savedMinLevel = MajDebug.MinLogLevel;
             _savedMaxSize = MajDebug.MaxLogSize;
             _handler = new RecordingLogHandler();
-            PrivateMember.SetStaticField(typeof(MajDebug), "_unityLogger", new Logger(_handler));
+            PrivateMember.SetStaticField(typeof(MajDebug), "s_unityLogger", new Logger(_handler));
             MajDebug.MinLogLevel = LogLevel.Debug;
             DrainQueue();
             _handler.Entries.Clear();
@@ -86,11 +86,11 @@ namespace MajdataPlay.Tests.Plugins.Diagnostics
         [TearDown]
         public void TearDown()
         {
-            PrivateMember.SetStaticField(typeof(MajDebug), "_unityLogger", new Logger(new RecordingLogHandler()));
+            PrivateMember.SetStaticField(typeof(MajDebug), "s_unityLogger", new Logger(new RecordingLogHandler()));
             MajDebug.MinLogLevel = LogLevel.Debug;
             DrainQueue();
             MajDebug.SetLogWriter(_savedWriter, false);
-            PrivateMember.SetStaticField(typeof(MajDebug), "_unityLogger", _savedLogger);
+            PrivateMember.SetStaticField(typeof(MajDebug), "s_unityLogger", _savedLogger);
             MajDebug.MinLogLevel = _savedMinLevel;
             MajDebug.MaxLogSize = _savedMaxSize;
         }
@@ -106,7 +106,7 @@ namespace MajdataPlay.Tests.Plugins.Diagnostics
         /// <returns>The queue length.</returns>
         private static int QueuedCount()
         {
-            return ((ICollection)PrivateMember.GetStaticField<object>(typeof(MajDebug), "_logQueue")).Count;
+            return ((ICollection)PrivateMember.GetStaticField<object>(typeof(MajDebug), "s_logQueue")).Count;
         }
 
         /// <summary>Checks that a tagged message is written with the timestamp, level and tag prefix and forwarded to Unity.</summary>
@@ -116,10 +116,10 @@ namespace MajdataPlay.Tests.Plugins.Diagnostics
             MajDebug.LogInfo("Net", "hello");
             MajDebug.FlushLog();
 
-            Assert.That(_writer.ToString(), Does.Match("^" + PrefixPattern + @"\[Info\]\[Net\]hello"));
+            Assert.That(_writer.ToString(), Does.Match("^" + PrefixPattern + @"\[I\]\[Net\]hello"));
             Assert.That(_handler.Entries.Count, Is.EqualTo(1));
             Assert.That(_handler.Entries[0].Type, Is.EqualTo(LogType.Log));
-            Assert.That(_handler.Entries[0].Message, Does.Match("^" + PrefixPattern + @"\[Info\]\[Net\]hello"));
+            Assert.That(_handler.Entries[0].Message, Does.Match("^" + PrefixPattern + @"\[I\]\[Net\]hello"));
         }
 
         /// <summary>Checks that every level and overload maps to the expected written level and Unity log type.</summary>
@@ -136,18 +136,39 @@ namespace MajdataPlay.Tests.Plugins.Diagnostics
             MajDebug.FlushLog();
 
             var text = _writer.ToString();
-            Assert.That(text, Does.Match(@"\[Debug\]plain-debug"));
-            Assert.That(text, Does.Match(@"\[Debug\]\[T\]tagged-debug"));
-            Assert.That(text, Does.Match(@"\[Info\]plain-info"));
-            Assert.That(text, Does.Match(@"\[Warning\]plain-warning"));
-            Assert.That(text, Does.Match(@"\[Warning\]\[T\]tagged-warning"));
-            Assert.That(text, Does.Match(@"\[Error\]plain-error"));
-            Assert.That(text, Does.Match(@"\[Error\]\[T\]tagged-error"));
+            Assert.That(text, Does.Match(@"\[D\]plain-debug"));
+            Assert.That(text, Does.Match(@"\[D\]\[T\]tagged-debug"));
+            Assert.That(text, Does.Match(@"\[I\]plain-info"));
+            Assert.That(text, Does.Match(@"\[W\]plain-warning"));
+            Assert.That(text, Does.Match(@"\[W\]\[T\]tagged-warning"));
+            Assert.That(text, Does.Match(@"\[E\]plain-error"));
+            Assert.That(text, Does.Match(@"\[E\]\[T\]tagged-error"));
             var types = _handler.Entries.Select(x => x.Type).ToArray();
             Assert.That(types, Is.EqualTo(new[]
             {
                 LogType.Log, LogType.Log, LogType.Log, LogType.Warning, LogType.Warning, LogType.Error, LogType.Error,
             }));
+        }
+
+        /// <summary>Checks that queued fatal-level logs are written with the F code and forwarded as Unity errors.</summary>
+        [Test]
+        public void WriteLogIntoStream_FatalLog_UsesFatalCode()
+        {
+            var queue = PrivateMember.GetStaticField<object>(typeof(MajDebug), "s_logQueue");
+            var logType = typeof(MajDebug).GetNestedType("GameLog", BindingFlags.NonPublic)!;
+            var log = Activator.CreateInstance(logType)!;
+            var builderType = logType.GetProperty("Condition")!.PropertyType;
+            var builder = builderType.GetConstructor(new[] { typeof(bool) })!.Invoke(new object[] { false });
+            builderType.GetMethod("Append", new[] { typeof(string) })!.Invoke(builder, new object[] { "fatal-message" });
+            PrivateMember.SetProperty(log, "Condition", builder);
+            PrivateMember.SetProperty(log, "Date", DateTime.Now);
+            PrivateMember.SetProperty(log, "Level", LogLevel.Fatal);
+            queue.GetType().GetMethod("Enqueue")!.Invoke(queue, new[] { log });
+
+            MajDebug.FlushLog();
+
+            Assert.That(_writer.ToString(), Does.Match("^" + PrefixPattern + @"\[F\]fatal-message"));
+            Assert.That(_handler.Entries.Single().Type, Is.EqualTo(LogType.Error));
         }
 
         /// <summary>Checks that an empty tag is omitted from the prefix.</summary>
@@ -157,7 +178,7 @@ namespace MajdataPlay.Tests.Plugins.Diagnostics
             MajDebug.LogInfo(string.Empty, "untagged");
             MajDebug.FlushLog();
 
-            Assert.That(_writer.ToString(), Does.Match("^" + PrefixPattern + @"\[Info\]untagged"));
+            Assert.That(_writer.ToString(), Does.Match("^" + PrefixPattern + @"\[I\]untagged"));
         }
 
         /// <summary>Checks that exceptions are written as errors with a trailing line break and no captured stack trace.</summary>
@@ -169,9 +190,9 @@ namespace MajdataPlay.Tests.Plugins.Diagnostics
             MajDebug.FlushLog();
 
             var lines = _writer.ToString().Split(new[] { Environment.NewLine }, StringSplitOptions.None);
-            Assert.That(lines[0], Does.Match("^" + PrefixPattern + @"\[Error\]System\.InvalidOperationException: boom$"));
+            Assert.That(lines[0], Does.Match("^" + PrefixPattern + @"\[E\]System\.InvalidOperationException: boom$"));
             Assert.That(lines[1], Is.Empty);
-            Assert.That(lines[2], Does.Match("^" + PrefixPattern + @"\[Error\]\[IO\]System\.ArgumentException: bad$"));
+            Assert.That(lines[2], Does.Match("^" + PrefixPattern + @"\[E\]\[IO\]System\.ArgumentException: bad$"));
             Assert.That(_handler.Entries.All(x => x.Type == LogType.Error), Is.True);
         }
 
@@ -272,9 +293,9 @@ namespace MajdataPlay.Tests.Plugins.Diagnostics
         [Test]
         public void FlushLog_ForwardsToUnityConsole()
         {
-            PrivateMember.SetStaticField(typeof(MajDebug), "_unityLogger", Debug.unityLogger);
-            LogAssert.Expect(LogType.Error, new Regex(@"\[Error\]\[Tests\]forwarded-error"));
-            LogAssert.Expect(LogType.Warning, new Regex(@"\[Warning\]\[Tests\]forwarded-warning"));
+            PrivateMember.SetStaticField(typeof(MajDebug), "s_unityLogger", Debug.unityLogger);
+            LogAssert.Expect(LogType.Error, new Regex(@"\[E\]\[Tests\]forwarded-error"));
+            LogAssert.Expect(LogType.Warning, new Regex(@"\[W\]\[Tests\]forwarded-warning"));
 
             MajDebug.LogError("Tests", "forwarded-error");
             MajDebug.LogWarning("Tests", "forwarded-warning");
@@ -319,6 +340,28 @@ namespace MajdataPlay.Tests.Plugins.Diagnostics
         public void ToUnityLogLevel_UndefinedLevel_Throws()
         {
             var exception = Assert.Throws<TargetInvocationException>(() => PrivateMember.InvokeStatic(typeof(MajDebug), "ToUnityLogLevel", (LogLevel)42));
+
+            Assert.That(exception!.InnerException, Is.InstanceOf<ArgumentOutOfRangeException>());
+        }
+
+        /// <summary>Checks the single-character level codes written into the line prefix.</summary>
+        /// <param name="level">The MajdataPlay level.</param>
+        /// <param name="expected">The expected level code.</param>
+        [TestCase(LogLevel.Debug, 'D')]
+        [TestCase(LogLevel.Info, 'I')]
+        [TestCase(LogLevel.Warning, 'W')]
+        [TestCase(LogLevel.Error, 'E')]
+        [TestCase(LogLevel.Fatal, 'F')]
+        public void GetLogLevelChar_MapsLevels(LogLevel level, char expected)
+        {
+            Assert.That(PrivateMember.InvokeStatic<char>(typeof(MajDebug), "GetLogLevelChar", level), Is.EqualTo(expected));
+        }
+
+        /// <summary>Checks that an undefined level has no level code.</summary>
+        [Test]
+        public void GetLogLevelChar_UndefinedLevel_Throws()
+        {
+            var exception = Assert.Throws<TargetInvocationException>(() => PrivateMember.InvokeStatic(typeof(MajDebug), "GetLogLevelChar", (LogLevel)42));
 
             Assert.That(exception!.InnerException, Is.InstanceOf<ArgumentOutOfRangeException>());
         }

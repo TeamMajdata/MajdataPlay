@@ -143,6 +143,21 @@ namespace MajdataPlay.Tests.Game.EditorTools
             Assert.That(_keys.Keys, Does.Not.Contain("MAJSETTING_PROPERTY_WriteOnly"));
         }
 
+        /// <summary>
+        /// Checks that the translation selection attributes do not change the collected keys: the analyzer still models
+        /// the default name, description and value keys that the setting UI requests.
+        /// </summary>
+        [Test]
+        public void TranslationSelectionAttributes_KeepDefaultKeys()
+        {
+            Assert.That(_keys.Keys, Does.Contain("MAJSETTING_PROPERTY_Annotated"));
+            Assert.That(_keys.Keys, Does.Contain("MAJSETTING_PROPERTY_Annotated_DESC"));
+            AssertValue("Annotated", "False");
+            AssertValue("Annotated", "True");
+            Assert.That(_keys.Keys, Does.Not.Contain("FX_CUSTOM_NAME"));
+            Assert.That(_diagnostics.Any(diagnostic => diagnostic.Contains("Fx.Annotated")), Is.False);
+        }
+
         /// <summary>Checks the full analysis of the runtime settings: categories, Audio's volume page, chart settings and offset units.</summary>
         [Test]
         public void Collect_RuntimeAssembly_FindsCategoriesAndOptions()

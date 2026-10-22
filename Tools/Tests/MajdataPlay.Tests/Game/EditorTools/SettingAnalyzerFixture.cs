@@ -1,5 +1,6 @@
 using MajdataPlay.Settings;
 using MajdataPlay.Settings.OptionEnumerators;
+using MajdataPlay.Settings.Runtime;
 using MajdataPlay.Tests.Game.Scenes.PlayMode.Support;
 
 #nullable enable
@@ -71,6 +72,12 @@ namespace MajdataPlay.Tests.Game.EditorTools
         /// <summary>Gets or sets an option whose name override is empty.</summary>
         [OptionName("")]
         public bool EmptyName { get; set; }
+
+        /// <summary>Gets or sets an option annotated with the translation selection attributes.</summary>
+        [UseTranslation(TranslationTarget.OptionName, "FX_CUSTOM_NAME")]
+        [UseGeneralTranslation(TranslationTarget.OptionValue)]
+        [NoTranslation(TranslationTarget.MenuName)]
+        public bool Annotated { get; set; }
 
         /// <summary>Gets or sets an option hidden from the UI.</summary>
         [HideInSettingUI]
