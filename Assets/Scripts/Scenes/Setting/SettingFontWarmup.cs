@@ -8,7 +8,7 @@ namespace MajdataPlay.Scenes.Setting
     // This owns requests only; the shared fonts retain their existing feature settings.
     internal sealed class SettingFontWarmup
     {
-        readonly Dictionary<TMP_FontAsset, HashSet<uint>> _requests = new();
+        private readonly Dictionary<TMP_FontAsset, HashSet<uint>> _requests = new();
 
         internal void AddText(TMP_FontAsset font, string text)
         {
@@ -76,7 +76,7 @@ namespace MajdataPlay.Scenes.Setting
             _requests.Clear();
         }
 
-        static void WarmFont(
+        private static void WarmFont(
             TMP_FontAsset? font,
             HashSet<uint> remaining,
             HashSet<TMP_FontAsset> visited,

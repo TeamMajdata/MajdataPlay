@@ -1,16 +1,10 @@
-using MajdataPlay.Diagnostics;
-using MajdataPlay.Extensions;
 using MajdataPlay.i18n;
-using MajdataPlay.IO;
 using MajdataPlay.Settings;
 using MajdataPlay.Settings.OptionEnumerators;
-using MajdataPlay.Utils;
 using System;
 using System.Collections.Generic;
 using System.Reflection;
 using TMPro;
-using UnityEngine;
-using UnityEngine.Serialization;
 #nullable enable
 namespace MajdataPlay.Scenes.Setting
 {
@@ -24,11 +18,11 @@ namespace MajdataPlay.Scenes.Setting
         internal string LocalizedName { get; private set; }
         internal string LocalizedValueText => _enumerator.LocalizedValueText;
 
-        readonly object _menuInstance;
-        readonly string _nameKey;
-        readonly IOptionEnumerator _enumerator;
-        object? _lastValue;
-        Language _language;
+        private readonly object _menuInstance;
+        private readonly string _nameKey;
+        private readonly IOptionEnumerator _enumerator;
+        private object? _lastValue;
+        private Language _language;
 
         internal OptionData(PropertyInfo propertyInfo, object menuInstance)
         {
@@ -86,7 +80,10 @@ namespace MajdataPlay.Scenes.Setting
                 warmup.AddText(font, LocalizedName);
                 // 实际尺寸可能在菜单打开后变化；预热所有数字，不能只预热初始的 "--"。
                 if (PropertyInfo.Name is nameof(RenderingOptions.DisplayBufferResolution) or nameof(RenderingOptions.SceneRenderResolution))
+                {
                     warmup.AddText(font, "0123456789 x-");
+                }
+
                 if (_enumerator is OptionEnumeratorBase enumerator)
                 {
                     // Include enum, language and skin labels that are not currently selected.
@@ -116,7 +113,7 @@ namespace MajdataPlay.Scenes.Setting
             return Move(false);
         }
 
-        bool Move(bool moveNext)
+        private bool Move(bool moveNext)
         {
             var hasChanged = moveNext ? _enumerator.MoveNext() : _enumerator.MovePrevious();
             if (hasChanged)

@@ -1,13 +1,7 @@
-using MajdataPlay.Diagnostics;
-using MajdataPlay.Extensions;
 using MajdataPlay.i18n;
 using MajdataPlay.IO;
 using MajdataPlay.Settings;
-using MajdataPlay.Settings.OptionEnumerators;
-using MajdataPlay.Utils;
-using System;
 using System.Collections.Generic;
-using System.Reflection;
 using TMPro;
 using UnityEngine;
 using UnityEngine.Serialization;
@@ -18,22 +12,22 @@ namespace MajdataPlay.Scenes.Setting
     {
         [SerializeField]
         [FormerlySerializedAs("nameText")]
-        TextMeshProUGUI _nameTextDisplayer = null!;
+        private TextMeshProUGUI _nameTextDisplayer = null!;
 
         [SerializeField]
         [FormerlySerializedAs("valueText")]
-        TextMeshProUGUI _valueTextDisplayer = null!;
+        private TextMeshProUGUI _valueTextDisplayer = null!;
 
-        bool _isSelected;
-        bool _isLocalizationSubscribed;
-        string? _displayedName;
-        string? _displayedValue;
-        SettingTextTint? _nameTextTint;
-        SettingTextTint? _valueTextTint;
-        OptionData? _data;
-        SettingManager _manager = null!;
-        InputRepeatState _inputRepeat;
-        OffsetUnitOption _descriptionOffsetUnit;
+        private bool _isSelected;
+        private bool _isLocalizationSubscribed;
+        private string? _displayedName;
+        private string? _displayedValue;
+        private SettingTextTint? _nameTextTint;
+        private SettingTextTint? _valueTextTint;
+        private OptionData? _data;
+        private SettingManager _manager = null!;
+        private InputRepeatState _inputRepeat;
+        private OffsetUnitOption _descriptionOffsetUnit;
 
         internal void Bind(SettingManager manager, OptionData data)
         {
@@ -133,13 +127,13 @@ namespace MajdataPlay.Scenes.Setting
             RefreshDescriptionUnit();
         }
 
-        void LateUpdate()
+        private void LateUpdate()
         {
             RefreshIfChanged();
             RefreshDescriptionUnit();
         }
 
-        void RefreshIfChanged()
+        private void RefreshIfChanged()
         {
             if (_data is not null && _data.RefreshIfChanged())
             {
@@ -147,7 +141,7 @@ namespace MajdataPlay.Scenes.Setting
             }
         }
 
-        void RefreshDescriptionUnit()
+        private void RefreshDescriptionUnit()
         {
             if (_isSelected && _data is not null && _data.IsOffsetOption &&
                 _descriptionOffsetUnit != MajEnv.Settings.Debug.OffsetUnit)
@@ -156,7 +150,7 @@ namespace MajdataPlay.Scenes.Setting
             }
         }
 
-        void OnLangChanged(object? sender, Language newLanguage)
+        private void OnLangChanged(object? sender, Language newLanguage)
         {
             if (_data is null)
             {
@@ -170,13 +164,13 @@ namespace MajdataPlay.Scenes.Setting
             }
         }
 
-        static float GetRepeatInterval()
+        private static float GetRepeatInterval()
         {
             var iterationSpeed = MajEnv.Settings.Debug.MenuOptionIterationSpeed;
             return 1f / (iterationSpeed is 0 ? 15 : iterationSpeed);
         }
 
-        void SetDescriptionText()
+        private void SetDescriptionText()
         {
             if (_data is null)
             {
@@ -197,7 +191,7 @@ namespace MajdataPlay.Scenes.Setting
             _manager.SetDescriptionText(description);
         }
 
-        void RefreshTexts()
+        private void RefreshTexts()
         {
             if (_data is null)
             {
@@ -217,14 +211,14 @@ namespace MajdataPlay.Scenes.Setting
             }
         }
 
-        void OnDestroy()
+        private void OnDestroy()
         {
             UnsubscribeLocalization();
             _nameTextTint?.Dispose();
             _valueTextTint?.Dispose();
         }
 
-        void OnEnable()
+        private void OnEnable()
         {
             if (_data is null)
             {
@@ -236,13 +230,13 @@ namespace MajdataPlay.Scenes.Setting
             RefreshTexts();
         }
 
-        void OnDisable()
+        private void OnDisable()
         {
             UnsubscribeLocalization();
             _inputRepeat.SuppressUntilRelease();
         }
 
-        void SubscribeLocalization()
+        private void SubscribeLocalization()
         {
             if (_isLocalizationSubscribed || _data is null || !isActiveAndEnabled)
             {
@@ -252,7 +246,7 @@ namespace MajdataPlay.Scenes.Setting
             _isLocalizationSubscribed = true;
         }
 
-        void UnsubscribeLocalization()
+        private void UnsubscribeLocalization()
         {
             if (!_isLocalizationSubscribed)
             {

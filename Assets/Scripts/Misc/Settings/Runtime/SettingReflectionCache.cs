@@ -1,5 +1,4 @@
 using MajdataPlay.Diagnostics;
-using MajdataPlay.Extensions;
 using MajdataPlay.Settings.OptionEnumerators;
 using System;
 using System.Collections.Generic;
@@ -10,20 +9,20 @@ namespace MajdataPlay.Settings
     // Contains type metadata only; setting instances and enumerators belong to the scene.
     internal static class SettingReflectionCache
     {
-        static readonly object _sync = new();
-        static readonly Dictionary<Type, PropertyInfo[]> _properties = new();
-        static readonly Dictionary<Type, PropertyInfo[]> _visibleProperties = new();
-        static readonly Dictionary<MemberInfo, Attribute[]> _attributes = new();
-        static readonly Dictionary<PropertyInfo, SettingOptionMetadata> _options = new();
-        static readonly Dictionary<Type, object[]> _enumValues = new();
-        static readonly Dictionary<Type, Func<IOptionEnumerator>> _enumeratorFactories = new();
+        private static readonly object s_sync = new();
+        private static readonly Dictionary<Type, PropertyInfo[]> s_properties = new();
+        private static readonly Dictionary<Type, PropertyInfo[]> s_visibleProperties = new();
+        private static readonly Dictionary<MemberInfo, Attribute[]> s_attributes = new();
+        private static readonly Dictionary<PropertyInfo, SettingOptionMetadata> s_options = new();
+        private static readonly Dictionary<Type, object[]> s_enumValues = new();
+        private static readonly Dictionary<Type, Func<IOptionEnumerator>> s_enumeratorFactories = new();
 
         // Returned metadata arrays are shared and must not be modified by callers.
         internal static PropertyInfo[] GetVisibleProperties(Type type)
         {
-            lock (_sync)
+            lock (s_sync)
             {
-                if (_visibleProperties.TryGetValue(type, out var visible))
+                if (s_visibleProperties.TryGetValue(type, out var visible))
                 {
                     return visible;
                 }
@@ -51,14 +50,14 @@ namespace MajdataPlay.Settings
                 }
 
                 visible = result.ToArray();
-                _visibleProperties.Add(type, visible);
+                s_visibleProperties.Add(type, visible);
                 return visible;
             }
         }
 
         internal static PropertyInfo GetProperty(Type type, string name)
         {
-            lock (_sync)
+            lock (s_sync)
             {
                 PropertyInfo? result = null;
                 foreach (var property in GetProperties(type))
@@ -79,12 +78,12 @@ namespace MajdataPlay.Settings
 
         internal static SettingOptionMetadata GetOption(PropertyInfo property)
         {
-            lock (_sync)
+            lock (s_sync)
             {
-                if (!_options.TryGetValue(property, out var metadata))
+                if (!s_options.TryGetValue(property, out var metadata))
                 {
                     metadata = new SettingOptionMetadata(property, GetAttributes(property));
-                    _options.Add(property, metadata);
+                    s_options.Add(property, metadata);
                 }
                 return metadata;
             }
@@ -92,12 +91,12 @@ namespace MajdataPlay.Settings
 
         internal static Attribute[] GetAttributes(MemberInfo member)
         {
-            lock (_sync)
+            lock (s_sync)
             {
-                if (!_attributes.TryGetValue(member, out var attributes))
+                if (!s_attributes.TryGetValue(member, out var attributes))
                 {
                     attributes = Attribute.GetCustomAttributes(member, true);
-                    _attributes.Add(member, attributes);
+                    s_attributes.Add(member, attributes);
                 }
                 return attributes;
             }
@@ -105,9 +104,9 @@ namespace MajdataPlay.Settings
 
         internal static object[] GetEnumValues(Type type)
         {
-            lock (_sync)
+            lock (s_sync)
             {
-                if (!_enumValues.TryGetValue(type, out var values))
+                if (!s_enumValues.TryGetValue(type, out var values))
                 {
                     var constants = Enum.GetValues(type);
                     values = new object[constants.Length];
@@ -115,7 +114,7 @@ namespace MajdataPlay.Settings
                     {
                         values[i] = constants.GetValue(i)!;
                     }
-                    _enumValues.Add(type, values);
+                    s_enumValues.Add(type, values);
                 }
                 return values;
             }
@@ -123,9 +122,9 @@ namespace MajdataPlay.Settings
 
         internal static Func<IOptionEnumerator> GetEnumeratorFactory(Type type)
         {
-            lock (_sync)
+            lock (s_sync)
             {
-                if (!_enumeratorFactories.TryGetValue(type, out var factory))
+                if (!s_enumeratorFactories.TryGetValue(type, out var factory))
                 {
                     var constructor = type.GetConstructor(Type.EmptyTypes);
                     if (constructor is not null)
@@ -140,18 +139,18 @@ namespace MajdataPlay.Settings
                     {
                         factory = () => throw new MissingMethodException(type.FullName, ".ctor()");
                     }
-                    _enumeratorFactories.Add(type, factory);
+                    s_enumeratorFactories.Add(type, factory);
                 }
                 return factory;
             }
         }
 
-        static PropertyInfo[] GetProperties(Type type)
+        private static PropertyInfo[] GetProperties(Type type)
         {
-            if (!_properties.TryGetValue(type, out var properties))
+            if (!s_properties.TryGetValue(type, out var properties))
             {
                 properties = type.GetProperties();
-                _properties.Add(type, properties);
+                s_properties.Add(type, properties);
             }
             return properties;
         }
@@ -165,8 +164,8 @@ namespace MajdataPlay.Settings
         internal string NameKey { get; }
         internal string DescriptionKey { get; }
 
-        readonly Func<IOptionEnumerator> _createEnumerator;
-        readonly Type? _customEnumeratorType;
+        private readonly Func<IOptionEnumerator> _createEnumerator;
+        private readonly Type? _customEnumeratorType;
 
         internal SettingOptionMetadata(PropertyInfo property, Attribute[] attributes)
         {
