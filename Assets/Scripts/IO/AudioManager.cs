@@ -29,6 +29,15 @@ namespace MajdataPlay.IO
         private static int BassGlobalMixer = -114514;
         /// <summary>Holds the seconds of output audio an audio recorder buffers for a slow consumer.</summary>
         private const int AudioRecorderBufferSeconds = 4;
+        /// <summary>Holds BASSmix's BASS_ATTRIB_MIXER_THREADS attribute, which ManagedBass does not name.</summary>
+        private const ChannelAttribute MixerThreadsAttribute = (ChannelAttribute)86017;
+        /// <summary>Holds the number of threads that render the global mixer's sources; one renders them on the device's output thread.</summary>
+        /// <remarks>
+        /// With more threads, BASSmix hands sources to its own worker threads and the output thread waits for them. Under the CPU
+        /// load of a scene switch those workers run late and the device underruns: in WASAPI shared mode 8 threads lost 10-164 ms
+        /// of output under load, while one thread lost none, even with 100 sources.
+        /// </remarks>
+        private const int GlobalMixerThreads = 1;
         /// <summary>Holds the BassSimple device output stream that exposes the final device mix, or zero before a recorder needs it.</summary>
         private static int s_bassDeviceOutputStream;
 
@@ -134,7 +143,7 @@ namespace MajdataPlay.IO
                             BassAsio.Rate = asioOptions.SampleRate;
                             BassGlobalMixer = BassMix.CreateMixerStream((int)BassAsio.Rate, asioInfo.Outputs, BassFlags.MixerNonStop | BassFlags.Decode | BassFlags.Float);
                             Bass.ChannelSetAttribute(BassGlobalMixer, ChannelAttribute.Buffer, 0);
-                            Bass.ChannelSetAttribute(BassGlobalMixer, (ChannelAttribute)86017, 8);
+                            Bass.ChannelSetAttribute(BassGlobalMixer, MixerThreadsAttribute, GlobalMixerThreads);
                             //BassAsio.ChannelEnable(false, 0, asioProcedure, IntPtr.Zero);
                             BassAsio.ChannelEnableBass(false, 0, BassGlobalMixer, true);
                             BassAsio.ChannelSetFormat(false, 0, AsioSampleFormat.Float);
@@ -303,7 +312,7 @@ namespace MajdataPlay.IO
                 return false;
             }
             Bass.ChannelSetAttribute(mixer, ChannelAttribute.Buffer, 0);
-            Bass.ChannelSetAttribute(mixer, (ChannelAttribute)86017, 8);
+            Bass.ChannelSetAttribute(mixer, MixerThreadsAttribute, GlobalMixerThreads);
             if (!BassWasapi.InitEx(BassWasapi.DefaultDevice, info.Frequency, info.Channels, flags, buffer, period, BassWasapi.WasapiProc_Bass, (IntPtr)mixer))
             {
                 Bass.StreamFree(mixer);
