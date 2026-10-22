@@ -17,6 +17,9 @@ namespace MajdataPlay.Editor.Windows
         /// <summary>The fallback path when a translation template does not exist yet.</summary>
         private const string TemplatePath = "Assets/Resources/Langs/template.tpl.json";
 
+        /// <summary>The name of the runtime assembly whose localization calls and settings are analyzed.</summary>
+        private const string RuntimeAssemblyName = "MajdataPlay.Core";
+
         /// <summary>The editable template, including manually maintained keys.</summary>
         [SerializeField]
         private List<string> _templateContent = new();
@@ -110,7 +113,7 @@ namespace MajdataPlay.Editor.Windows
         private string _translationFilter = string.Empty;
 
         /// <summary>The last analysis result.</summary>
-        private string _analysisStatus = "Analyze Assembly-CSharp to discover fixed keys.";
+        private string _analysisStatus = $"Analyze {RuntimeAssemblyName} to discover fixed keys.";
 
         private void OnEnable()
         {
@@ -137,7 +140,7 @@ namespace MajdataPlay.Editor.Windows
             toolbar.Add(CreateToolbarButton("Template", () => SwitchTab(0)));
             toolbar.Add(CreateToolbarButton("Translations", () => SwitchTab(1)));
             toolbar.Add(CreateToolbarButton("Analysis", () => SwitchTab(2)));
-            toolbar.Add(CreateToolbarButton("Analyze Assembly-CSharp", AnalyzeAssembly));
+            toolbar.Add(CreateToolbarButton($"Analyze {RuntimeAssemblyName}", AnalyzeAssembly));
             toolbar.Add(CreateToolbarButton("Reload resources", ReloadResources));
             rootVisualElement.Add(toolbar);
             for (var i = 0; i < 3; i++)
@@ -387,7 +390,7 @@ namespace MajdataPlay.Editor.Windows
         /// <param name="rootElement">The tab's root.</param>
         private void CreateAnalysisTab(VisualElement rootElement)
         {
-            rootElement.Add(new HelpBox("Only the currently compiled Assembly-CSharp is analyzed. Inactive platform branches and dynamic runtime data require manual review. Hover over a key to inspect its sources.", HelpBoxMessageType.Info));
+            rootElement.Add(new HelpBox($"Only the currently compiled {RuntimeAssemblyName} is analyzed. Inactive platform branches and dynamic runtime data require manual review. Hover over a key to inspect its sources.", HelpBoxMessageType.Info));
             _analysisSummary = CreateSummaryLabel();
             rootElement.Add(_analysisSummary);
             _analysisList = new ListView(_visibleFixedKeys, 22, () => new Label(), (element, index) =>
@@ -422,10 +425,10 @@ namespace MajdataPlay.Editor.Windows
                 RefreshAnalysisView();
                 return;
             }
-            var assembly = AppDomain.CurrentDomain.GetAssemblies().FirstOrDefault(candidate => candidate.GetName().Name == "Assembly-CSharp");
+            var assembly = AppDomain.CurrentDomain.GetAssemblies().FirstOrDefault(candidate => candidate.GetName().Name == RuntimeAssemblyName);
             if (assembly is null)
             {
-                _analysisStatus = "Assembly-CSharp is not loaded. Resolve script compilation errors first.";
+                _analysisStatus = $"{RuntimeAssemblyName} is not loaded. Resolve script compilation errors first.";
                 RefreshAnalysisView();
                 return;
             }

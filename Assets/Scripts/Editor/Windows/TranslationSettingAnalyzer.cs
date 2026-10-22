@@ -31,7 +31,7 @@ namespace MajdataPlay.Editor.Windows
         /// <summary>
         /// Adds the setting menus, option labels, descriptions and finite localized values to a key inventory.
         /// </summary>
-        /// <param name="assembly">The compiled Assembly-CSharp assembly containing the runtime settings metadata.</param>
+        /// <param name="assembly">The compiled MajdataPlay.Core assembly containing the runtime settings metadata.</param>
         /// <param name="keys">The localization keys mapped to their discovered UI usage locations.</param>
         /// <param name="diagnostics">Receives unsupported metadata and values that require runtime information.</param>
         /// <exception cref="ArgumentNullException">An input argument is null.</exception>
