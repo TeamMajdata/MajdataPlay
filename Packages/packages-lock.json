@@ -1,5 +1,13 @@
 {
   "dependencies": {
+    "com.ammariqais.skiaforunity": {
+      "version": "file:../ThirdParty/SkiaForUnity",
+      "depth": 0,
+      "source": "local",
+      "dependencies": {
+        "com.unity.nuget.newtonsoft-json": "3.2.0"
+      }
+    },
     "com.annulusgames.lit-motion": {
       "version": "https://github.com/annulusgames/LitMotion.git?path=src/LitMotion/Assets/LitMotion",
       "depth": 0,
