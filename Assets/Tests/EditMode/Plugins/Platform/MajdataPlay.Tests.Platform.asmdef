@@ -1,0 +1,37 @@
+{
+    "name": "MajdataPlay.Tests.Platform",
+    "rootNamespace": "MajdataPlay.Tests.Plugins.Platform",
+    "references": [
+        "UnityEngine.TestRunner",
+        "UnityEditor.TestRunner",
+        "MajdataPlay.Tests.Shared",
+        "UniTask",
+        "MajdataPlay.Platform.Win32",
+        "MajdataPlay.Platform.Android",
+        "MajdataPlay.Platform.Android.Editor",
+        "MajdataPlay.Platform.iOS",
+        "MajdataPlay.Platform.MacOS",
+        "MajdataPlay.Platform.Linux",
+        "MajdataPlay.IO",
+        "MajdataPlay.IO.Ports",
+        "MajdataPlay.Syscall",
+        "MajdataPlay.Diagnostics"
+    ],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "excludePlatforms": [],
+    "allowUnsafeCode": true,
+    "overrideReferences": true,
+    "precompiledReferences": [
+        "nunit.framework.dll",
+        "MajdataPlay.Platform.Android.Runtime.dll"
+    ],
+    "autoReferenced": false,
+    "defineConstraints": [
+        "UNITY_INCLUDE_TESTS",
+        "MAJDATAPLAY_TESTS"
+    ],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

@@ -1,0 +1,27 @@
+{
+    "name": "MajdataPlay.Tests.Numerics",
+    "rootNamespace": "MajdataPlay.Tests.Plugins.Numerics",
+    "references": [
+        "UnityEngine.TestRunner",
+        "UnityEditor.TestRunner",
+        "MajdataPlay.Tests.Shared",
+        "UniTask",
+        "MajdataPlay.Numerics"
+    ],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "excludePlatforms": [],
+    "allowUnsafeCode": true,
+    "overrideReferences": true,
+    "precompiledReferences": [
+        "nunit.framework.dll"
+    ],
+    "autoReferenced": false,
+    "defineConstraints": [
+        "UNITY_INCLUDE_TESTS",
+        "MAJDATAPLAY_TESTS"
+    ],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

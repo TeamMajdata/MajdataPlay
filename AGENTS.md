@@ -30,10 +30,11 @@ MajdataPlay 是一个跨平台 Simai 谱面播放器，也是一个 Unity 项目
 - `Assets/Scripts/Editor/`：只在 Unity Editor 中运行的构建和编辑器工具。
 - `Assets/Plugins/MajdataPlay/`：拆分为独立 `.asmdef` 的可复用底层库，包括 Buffers、Collections、Diagnostics、Drawing、FFmpeg、IO、Net、Numerics、Platform、Runtime、Syscall、Threading、UnsafeKit 和 Utils。
 - `Assets/Scenes/`：Unity 场景；启用场景以 `ProjectSettings/EditorBuildSettings.asset` 为准。
+- `Assets/Tests/`：主项目与 `Assets/Plugins/MajdataPlay` 的 Unity Test Framework 测试集（EditMode/PlayMode 测试程序集，仅在 `Tools/Tests/Run-UnityTests.ps1` 的隔离副本中编译）。
 - `Packages/`：Unity Package Manager 清单和锁文件。
 - `ProjectSettings/`：共享的 Unity 工程配置。
 - `Tools/FFmpeg/`：FFmpeg 原生库与 Unity 图形桥接的构建工具。
-- `Tools/Tests/`：独立验证程序、隔离 Unity 测试工程脚本及对应说明，模块的测试用例放在`Tools/Tests/Modules`。
+- `Tools/Tests/`：独立验证程序、隔离 Unity 测试工程脚本（含 `Assets/Tests` 测试集的运行脚本 `Run-UnityTests.ps1`）及对应说明，模块的测试用例放在`Tools/Tests/Modules`。
 - `ThirdParty/`：第三方源码；优先保持上游结构，避免无关格式化。
 
 在添加跨目录引用前先检查最近的 `.asmdef`。新代码应放入职责最接近的现有程序集，不要仅为绕过引用错误而把代码移回默认 `Assembly-CSharp` 或扩大程序集依赖。
@@ -92,7 +93,7 @@ MajdataPlay 是一个跨平台 Simai 谱面播放器，也是一个 Unity 项目
 
 ## 测试集约定与验证
 
-- 测试集是指`Tools/Tests`下采用包括但不限于C#开发的用于对特定模块进行测试的测试用例。
+- 测试集是指`Tools/Tests`和`Assets/Tests`下采用包括但不限于C#开发的用于对特定模块进行测试的测试用例。
 - 验证范围应与改动匹配，而不是机械运行所有耗时测试，除非显式指定。
 
 ### 主项目
@@ -100,7 +101,7 @@ MajdataPlay 是一个跨平台 Simai 谱面播放器，也是一个 Unity 项目
 - 在 Unity 6000.3.17f1 中等待完整导入和脚本编译，确认 Console 没有新增错误。
 - 场景或交互改动应在相关场景进行 Play Mode 冒烟测试；场景列表以 `ProjectSettings/EditorBuildSettings.asset` 为准。
 - `Tools/Tests/Modules/Editor` 中的测试通过 Unity Test Runner 的 EditMode 运行。
-- 主项目（`Assets/Scripts`）与 `Assets/Plugins/MajdataPlay` 的 Unity Test Framework 测试集位于 `Tools/Tests/MajdataPlay.Tests`：运行 `./Tools/Tests/MajdataPlay.Tests/Run-Tests.ps1`，它在隔离副本中执行 EditMode 与 PlayMode 测试（`-Area` 选择范围，`-Coverage` 生成覆盖率报告），不会修改主项目；目录与编写约定见其 `README.md`。
+- 主项目（`Assets/Scripts`）与 `Assets/Plugins/MajdataPlay` 的 Unity Test Framework 测试集位于 `Assets/Tests`（测试 asmdef 带 `MAJDATAPLAY_TESTS` 定义约束，主项目不编译它们；不要为测试向仓库添加 `InternalsVisibleTo`）：运行 `./Tools/Tests/Run-UnityTests.ps1`，它在隔离副本中注入该定义与 `InternalsVisibleTo` 并执行 EditMode 与 PlayMode 测试（`-AssemblyNames`/`-TestFilter` 选择范围，`-Coverage` 生成覆盖率报告），不会修改主项目；目录与编写约定见 `Assets/Tests/README.md`。
 - 发布构建由 `.github/workflows/main.yml` 的 game-ci 配置覆盖。除非任务要求，不要为了普通代码改动在本机生成完整多平台发布包。
 
 ### 独立快速验证（需要 .NET 9）

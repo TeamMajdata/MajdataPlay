@@ -1,0 +1,24 @@
+{
+    "name": "MajdataPlay.Tests.Rendering.PlayMode",
+    "rootNamespace": "MajdataPlay.Tests.Plugins.Rendering",
+    "references": [
+        "UnityEngine.TestRunner",
+        "MajdataPlay.Tests.Shared",
+        "UniTask",
+        "MajdataPlay.MajRenderPipe"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": true,
+    "precompiledReferences": [
+        "nunit.framework.dll"
+    ],
+    "autoReferenced": false,
+    "defineConstraints": [
+        "UNITY_INCLUDE_TESTS",
+        "MAJDATAPLAY_TESTS"
+    ],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

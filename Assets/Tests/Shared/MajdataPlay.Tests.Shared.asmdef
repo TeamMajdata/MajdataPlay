@@ -1,0 +1,22 @@
+{
+    "name": "MajdataPlay.Tests.Shared",
+    "rootNamespace": "MajdataPlay.Tests",
+    "references": [
+        "UnityEngine.TestRunner",
+        "MajdataPlay.IO"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": true,
+    "precompiledReferences": [
+        "nunit.framework.dll"
+    ],
+    "autoReferenced": false,
+    "defineConstraints": [
+        "UNITY_INCLUDE_TESTS",
+        "MAJDATAPLAY_TESTS"
+    ],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

@@ -1,0 +1,29 @@
+{
+    "name": "MajdataPlay.Tests.FFmpeg.PlayMode",
+    "rootNamespace": "MajdataPlay.Tests.Plugins.FFmpeg",
+    "references": [
+        "UnityEngine.TestRunner",
+        "MajdataPlay.Tests.Shared",
+        "UniTask",
+        "MajdataPlay.FFmpeg",
+        "MajdataPlay.MajRenderPipe",
+        "MajdataPlay.IO",
+        "MajdataPlay.Diagnostics",
+        "FFmpeg.AutoGen",
+        "Unity.RenderPipelines.Core.Runtime"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": true,
+    "overrideReferences": true,
+    "precompiledReferences": [
+        "nunit.framework.dll"
+    ],
+    "autoReferenced": false,
+    "defineConstraints": [
+        "UNITY_INCLUDE_TESTS",
+        "MAJDATAPLAY_TESTS"
+    ],
+    "versionDefines": [],
+    "noEngineReferences": false
+}
