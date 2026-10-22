@@ -128,28 +128,35 @@ namespace MajdataPlay.Tests.Game.Misc.Base
         /// <summary>Gets the favorites database opened by the library, or null.</summary>
         private static SQLiteAsyncConnection? FavoritesDatabase => PrivateMember.GetStaticField<SQLiteAsyncConnection?>(typeof(SongStorage), "s_favoritesDatabase");
 
-        /// <summary>
-        /// Waits for the favorite writes the library starts without awaiting, so the database is not closed while a
-        /// transaction is still committing.
-        /// </summary>
+        /// <summary>Waits for the queued favorite writes, so the database is not closed while a transaction is committing.</summary>
         private static void WaitForPendingFavoriteWrites()
         {
-            var database = FavoritesDatabase;
-            if (database is null)
-            {
-                return;
-            }
-            System.Threading.Thread.Sleep(300);
-            database.ExecuteScalarAsync<int>("SELECT COUNT(*) FROM FavoriteHashes").Wait();
+            SongStorage.WaitForFavoriteWritesAsync().Wait();
         }
 
-        /// <summary>Counts the stored rows of one favorite hash after the pending writes have finished.</summary>
+        /// <summary>Counts the stored rows of one favorite hash after the queued writes have finished.</summary>
         /// <param name="hash">The favorite hash.</param>
         /// <returns>The number of stored rows.</returns>
         private static async UniTask<int> CountStoredFavoriteAsync(string hash)
         {
-            await UniTask.Delay(300, DelayType.Realtime);
+            await SongStorage.WaitForFavoriteWritesAsync();
             return await FavoritesDatabase!.ExecuteScalarAsync<int>("SELECT COUNT(*) FROM FavoriteHashes WHERE Hash = ?", hash);
+        }
+
+        /// <summary>Opens the favorites database file with a separate connection and counts its rows.</summary>
+        /// <returns>The number of stored favorite rows.</returns>
+        private static async UniTask<int> CountRowsInDatabaseFileAsync()
+        {
+            var file = MajEnv.RuntimeCacheDirectory.FindFile("MajFavorites.db")!;
+            var connection = new SQLiteAsyncConnection(file.Location, SQLiteOpenFlags.ReadOnly | SQLiteOpenFlags.FullMutex);
+            try
+            {
+                return await connection.ExecuteScalarAsync<int>("SELECT COUNT(*) FROM FavoriteHashes");
+            }
+            finally
+            {
+                await connection.CloseAsync();
+            }
         }
 
         /// <summary>Creates two collections with two charts each.</summary>
@@ -364,6 +371,96 @@ namespace MajdataPlay.Tests.Game.Misc.Base
                 SongStorage.RemoveFromMyFavorites(one.Hash);
                 Assert.That(await CountStoredFavoriteAsync(one.Hash), Is.EqualTo(0));
                 Assert.That(SongStorage.IsInMyFavorites(one), Is.False);
+            });
+        }
+
+        /// <summary>Checks that favorite writes reach the database in call order, so the last toggle of a chart wins.</summary>
+        /// <returns>The test coroutine.</returns>
+        [UnityTest]
+        public IEnumerator Favorites_WritesKeepCallOrder()
+        {
+            return UniTask.ToCoroutine(async () =>
+            {
+                await SongStorage.InitAsync();
+                var kept = new FakeSongDetail("kept-hash");
+                var dropped = new FakeSongDetail("dropped-hash");
+
+                for (var i = 0; i < 20; i++)
+                {
+                    SongStorage.AddToMyFavorites(kept);
+                    SongStorage.RemoveFromMyFavorites(kept);
+                    SongStorage.RemoveFromMyFavorites(dropped);
+                    SongStorage.AddToMyFavorites(dropped);
+                }
+                SongStorage.AddToMyFavorites(kept);
+                SongStorage.RemoveFromMyFavorites(dropped.Hash);
+
+                Assert.That(await CountStoredFavoriteAsync(kept.Hash), Is.EqualTo(1));
+                Assert.That(await CountStoredFavoriteAsync(dropped.Hash), Is.EqualTo(0));
+            });
+        }
+
+        /// <summary>
+        /// Checks that shutdown waits for every queued favorite write before closing the connection, instead of closing it
+        /// while a transaction is still committing.
+        /// </summary>
+        /// <returns>The test coroutine.</returns>
+        [UnityTest]
+        public IEnumerator OnAppQuit_WaitsForQueuedWritesBeforeClosing()
+        {
+            return UniTask.ToCoroutine(async () =>
+            {
+                await SongStorage.InitAsync();
+                for (var i = 0; i < 200; i++)
+                {
+                    SongStorage.AddToMyFavorites(new FakeSongDetail($"quit-hash-{i}"));
+                }
+
+                PrivateMember.InvokeStatic(typeof(SongStorage), "OnAppQuit", null, null);
+
+                Assert.That(FavoritesDatabase, Is.Null);
+                Assert.That(SongStorage.WaitForFavoriteWritesAsync().IsCompleted, Is.True);
+                Assert.That(await CountRowsInDatabaseFileAsync(), Is.EqualTo(200));
+            });
+        }
+
+        /// <summary>Checks that favorite writes after shutdown are ignored instead of using the closed connection.</summary>
+        /// <returns>The test coroutine.</returns>
+        [UnityTest]
+        public IEnumerator Favorites_AfterShutdown_AreNotWritten()
+        {
+            return UniTask.ToCoroutine(async () =>
+            {
+                await SongStorage.InitAsync();
+                PrivateMember.InvokeStatic(typeof(SongStorage), "OnAppQuit", null, null);
+
+                Assert.DoesNotThrow(() => SongStorage.AddToMyFavorites(new FakeSongDetail("late-hash")));
+                await SongStorage.WaitForFavoriteWritesAsync();
+
+                Assert.That(await CountRowsInDatabaseFileAsync(), Is.EqualTo(0));
+            });
+        }
+
+        /// <summary>Checks that a failing favorite write is observed and does not stop the writes queued after it.</summary>
+        /// <returns>The test coroutine.</returns>
+        [UnityTest]
+        public IEnumerator Favorites_FailedWriteDoesNotBlockLaterWrites()
+        {
+            return UniTask.ToCoroutine(async () =>
+            {
+                // The failure is logged through MajDebug, which may forward it to the Unity log asynchronously when its
+                // writer runs (after Play Mode was entered in the same Editor session); that error is expected here.
+                LogAssert.ignoreFailingMessages = true;
+                await SongStorage.InitAsync();
+                Action<SQLiteConnection> failing = _ => throw new InvalidOperationException("write failed");
+
+                PrivateMember.InvokeStatic(typeof(SongStorage), "QueueFavoriteWrite", failing);
+                SongStorage.AddToMyFavorites(new FakeSongDetail("after-failure"));
+                var pending = SongStorage.WaitForFavoriteWritesAsync();
+                await pending;
+
+                Assert.That(pending.IsFaulted, Is.False);
+                Assert.That(await CountStoredFavoriteAsync("after-failure"), Is.EqualTo(1));
             });
         }
 

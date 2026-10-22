@@ -112,6 +112,15 @@ namespace MajdataPlay
         private static bool s_isInitialized = false;
         /// <summary>Stores the shared connection to the persistent favorites database.</summary>
         private static SQLiteAsyncConnection? s_favoritesDatabase;
+        /// <summary>Guards <see cref="s_favoritesDatabase"/> and <see cref="s_pendingFavoriteWrites"/> between writers and shutdown.</summary>
+        private static readonly object s_favoritesWriteLock = new();
+        /// <summary>
+        /// Stores the last queued favorites write. Writes run one after another in call order, and shutdown waits for this
+        /// task before closing the connection, because closing it while a transaction commits crashes SQLite natively.
+        /// </summary>
+        private static Task s_pendingFavoriteWrites = Task.CompletedTask;
+        /// <summary>The longest time, in milliseconds, application shutdown waits for queued favorites writes.</summary>
+        private const int FavoritesShutdownTimeoutMs = 5000;
 
         /// <summary>Supplies a harmless selection when the library contains no collections.</summary>
         private static readonly SongCollection s_emptyCollection = SongCollection.Empty("default");
@@ -1421,7 +1430,7 @@ namespace MajdataPlay
             var hash = songDetail.Hash;
             if (!string.IsNullOrEmpty(hash))
             {
-                s_favoritesDatabase?.RunInTransactionAsync(conn => conn.InsertOrReplace(new FavoriteHashDB { Hash = hash }));
+                QueueFavoriteWrite(conn => conn.InsertOrReplace(new FavoriteHashDB { Hash = hash }));
             }
         }
         /// <summary>Checks whether a chart belongs to the committed favorites view.</summary>
@@ -1439,7 +1448,7 @@ namespace MajdataPlay
             var hash = songDetail.Hash;
             if (!string.IsNullOrEmpty(hash))
             {
-                s_favoritesDatabase?.RunInTransactionAsync(conn => conn.Delete<FavoriteHashDB>(hash));
+                QueueFavoriteWrite(conn => conn.Delete<FavoriteHashDB>(hash));
             }
         }
         /// <summary>Removes a chart identity from the committed favorites view and persistent storage.</summary>
@@ -1449,8 +1458,70 @@ namespace MajdataPlay
             s_myFavorites.Remove(hashBase64Str);
             if (!string.IsNullOrEmpty(hashBase64Str))
             {
-                s_favoritesDatabase?.RunInTransactionAsync(conn => conn.Delete<FavoriteHashDB>(hashBase64Str));
+                QueueFavoriteWrite(conn => conn.Delete<FavoriteHashDB>(hashBase64Str));
             }
+        }
+        /// <summary>Queues a favorites database write after every write queued before it.</summary>
+        /// <param name="write">The write, run inside a transaction on the database's worker thread.</param>
+        /// <remarks>Does nothing when the database is not open, matching the previous behaviour before initialization.</remarks>
+        private static void QueueFavoriteWrite(Action<SQLiteConnection> write)
+        {
+            lock (s_favoritesWriteLock)
+            {
+                var database = s_favoritesDatabase;
+                if (database is null)
+                {
+                    return;
+                }
+                s_pendingFavoriteWrites = RunFavoriteWriteAsync(s_pendingFavoriteWrites, database, write);
+            }
+        }
+        /// <summary>Runs one favorites write after the previous one and logs its failure instead of leaving it unobserved.</summary>
+        /// <param name="previous">The previously queued write, which never faults.</param>
+        /// <param name="database">The connection the write was queued for.</param>
+        /// <param name="write">The write to run inside a transaction.</param>
+        /// <returns>A task that completes, without faulting, when the write has finished or failed.</returns>
+        private static async Task RunFavoriteWriteAsync(Task previous, SQLiteAsyncConnection database, Action<SQLiteConnection> write)
+        {
+            await previous.ConfigureAwait(false);
+            try
+            {
+                await database.RunInTransactionAsync(write).ConfigureAwait(false);
+            }
+            catch (Exception e)
+            {
+                MajDebug.LogException(nameof(SongStorage), e);
+            }
+        }
+        /// <summary>Gets a task that completes when every favorites write queued so far has finished.</summary>
+        /// <returns>The task of the last queued write; it never faults.</returns>
+        internal static Task WaitForFavoriteWritesAsync()
+        {
+            lock (s_favoritesWriteLock)
+            {
+                return s_pendingFavoriteWrites;
+            }
+        }
+        /// <summary>Detaches the favorites connection, waits for its queued writes and then closes it.</summary>
+        /// <returns>A task that completes when the connection is closed, or immediately when none is open.</returns>
+        /// <exception cref="SQLiteException">Closing the connection failed.</exception>
+        private static async Task CloseFavoritesDatabaseAsync()
+        {
+            SQLiteAsyncConnection? database;
+            Task pending;
+            lock (s_favoritesWriteLock)
+            {
+                // Detached first, so no write can be queued for a connection that is about to close.
+                database = s_favoritesDatabase;
+                s_favoritesDatabase = null;
+                pending = s_pendingFavoriteWrites;
+            }
+            if (database is null)
+            {
+                return;
+            }
+            await pending.ConfigureAwait(false);
+            await database.CloseAsync().ConfigureAwait(false);
         }
         /// <summary>Loads favorite hashes from the database and the optional portable JSON export.</summary>
         /// <returns>The loaded favorite hashes without changing the committed favorites view.</returns>
@@ -1485,7 +1556,10 @@ namespace MajdataPlay
                     await database.CloseAsync().ConfigureAwait(false);
                     throw;
                 }
-                s_favoritesDatabase = database;
+                lock (s_favoritesWriteLock)
+                {
+                    s_favoritesDatabase = database;
+                }
                 GameManager.OnAppQuit += OnAppQuit;
             }
 
@@ -1569,13 +1643,30 @@ namespace MajdataPlay
             }
         }
 
-        /// <summary>Unsubscribes the shutdown handler and closes the shared favorites connection.</summary>
+        /// <summary>
+        /// Unsubscribes the shutdown handler, waits for queued favorites writes and closes the shared favorites connection.
+        /// </summary>
         /// <param name="sender">The source of the shutdown event.</param>
         /// <param name="args">The shutdown event arguments.</param>
+        /// <remarks>
+        /// When the writes do not finish within <see cref="FavoritesShutdownTimeoutMs"/>, the connection is left to the process
+        /// exit instead of being closed under a running transaction.
+        /// </remarks>
         private static void OnAppQuit(object? sender, EventArgs? args)
         {
             GameManager.OnAppQuit -= OnAppQuit;
-            s_favoritesDatabase?.CloseAsync().Wait();
+            try
+            {
+                // Every continuation uses ConfigureAwait(false), so blocking the main thread here cannot deadlock.
+                if (!CloseFavoritesDatabaseAsync().Wait(FavoritesShutdownTimeoutMs))
+                {
+                    MajDebug.LogWarning(nameof(SongStorage), "Favorites writes did not finish before shutdown; the database was left open.");
+                }
+            }
+            catch (AggregateException e)
+            {
+                MajDebug.LogException(nameof(SongStorage), e.GetBaseException());
+            }
         }
 
         /// <summary>Represents a persistent favorite chart identity.</summary>
