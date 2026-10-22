@@ -1,21 +1,15 @@
 ﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 
-namespace MajdataPlay.Settings;
-[AttributeUsage(AttributeTargets.Property| AttributeTargets.Field, AllowMultiple = false, Inherited = false)]
-public sealed class StepAttribute : Attribute
+namespace MajdataPlay.Settings
 {
-    public decimal Value
+    [AttributeUsage(AttributeTargets.Property | AttributeTargets.Field, AllowMultiple = false, Inherited = false)]
+    public sealed class StepAttribute : Attribute
     {
-        get => _value;
-    }
+        public decimal Value { get; }
 
-    readonly decimal _value;
-    public StepAttribute(string value)
-    {
-        _value = decimal.Parse(value);
+        public StepAttribute(string value)
+        {
+            Value = decimal.Parse(value);
+        }
     }
 }
