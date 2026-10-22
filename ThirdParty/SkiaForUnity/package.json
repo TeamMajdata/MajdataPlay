@@ -1,7 +1,7 @@
 {
   "name": "com.ammariqais.skiaforunity",
   "displayName": "Skia For Unity",
-  "version": "3.2.3",
+  "version": "4.2.2",
   "unity": "2019.3",
   "description": "Skia For Unity With Harfbuzz texts, Skottie Animations, lottie",
   "author": {

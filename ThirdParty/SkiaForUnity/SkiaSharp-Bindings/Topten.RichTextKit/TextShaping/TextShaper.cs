@@ -471,6 +471,22 @@ namespace Topten.RichTextKit
                 // And some other useful metrics
                 ApplyFontMetrics(ref r, style.FontSize);
 
+                // Adjust metrics for super/subscript so line height accounts for the shift
+                if (style.FontVariant == FontVariant.SuperScript)
+                {
+                    float scale = 0.65f;
+                    float vOff = -style.FontSize * 0.35f;
+                    r.Ascent = r.Ascent * scale + vOff;
+                    r.Descent = r.Descent * scale + vOff;
+                }
+                else if (style.FontVariant == FontVariant.SubScript)
+                {
+                    float scale = 0.65f;
+                    float vOff = style.FontSize * 0.1f;
+                    r.Ascent = r.Ascent * scale + vOff;
+                    r.Descent = r.Descent * scale + vOff;
+                }
+
                 // Done
                 return r;
             }
