@@ -238,7 +238,6 @@ namespace MajdataPlay.Tests.Plugins.IO.Storage
 
         /// <summary>Checks that a local directory timestamp is converted to UTC and stored.</summary>
         [Test]
-        [Ignore("Known issue: LocalFileSystem.SetLastWriteTime uses File.SetLastWriteTimeUtc, which throws UnauthorizedAccessException for directories on Windows.")]
         public void SetLastWriteTime_ConvertsLocalTime()
         {
             var directory = _temp.Directory.CreateDirectory("dir");
@@ -268,7 +267,6 @@ namespace MajdataPlay.Tests.Plugins.IO.Storage
 
         /// <summary>Checks that a UTC directory timestamp is passed through unchanged.</summary>
         [Test]
-        [Ignore("Known issue: LocalFileSystem.SetLastWriteTime uses File.SetLastWriteTimeUtc, which throws UnauthorizedAccessException for directories on Windows.")]
         public void SetLastWriteTime_KeepsUtcTime()
         {
             var directory = _temp.Directory.CreateDirectory("dir");

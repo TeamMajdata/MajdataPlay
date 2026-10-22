@@ -446,7 +446,9 @@ namespace MajdataPlay.Scenes.Game
                         diffSum += binding.DiffMSec;
                     }
                     var sampleCount = Mathf.Min(_judgeTimingGaugeScaleCount, _noteJudgeDiffList.Count);
-                    var diffAvg = diffSum / sampleCount;
+                    // Before the first tap or hold judgement there are no samples; keep the cursor centred
+                    // instead of dividing by zero (0 / 0 is NaN).
+                    var diffAvg = sampleCount > 0 ? diffSum / sampleCount : 0f;
                     var percent = Mathf.Clamp(diffAvg / 150f, -1, 1);
                     var posX = 282.5f * percent;
                     _judgeTimingGaugeCursor.anchoredPosition = new Vector2(posX, -30);
@@ -524,13 +526,15 @@ namespace MajdataPlay.Scenes.Game
                 kv => kv.Key,
                 kv => _dictJudgedHoldCount[kv.Key] + _dictJudgedTouchHoldCount[kv.Key]
             );
+            // JudgeInfo keeps a reference to its dictionary, and the _dictJudged* dictionaries are static and reused,
+            // so each result gets its own copy; otherwise Clear and later records would overwrite earlier results.
             var record = new Dictionary<ScoreNoteType, JudgeInfo>()
             {
-                { ScoreNoteType.Tap, new (_dictJudgedTapCount) },
+                { ScoreNoteType.Tap, new (new Dictionary<JudgeGrade, int>(_dictJudgedTapCount)) },
                 { ScoreNoteType.Hold, new (holdRecord)},
-                { ScoreNoteType.Slide,new (_dictJudgedSlideCount)},
-                { ScoreNoteType.Break, new (_dictJudgedBreakCount)},
-                { ScoreNoteType.Touch, new (_dictJudgedTouchCount) }
+                { ScoreNoteType.Slide,new (new Dictionary<JudgeGrade, int>(_dictJudgedSlideCount))},
+                { ScoreNoteType.Break, new (new Dictionary<JudgeGrade, int>(_dictJudgedBreakCount))},
+                { ScoreNoteType.Touch, new (new Dictionary<JudgeGrade, int>(_dictJudgedTouchCount)) }
             };
             var judgeRecord = new JudgeDetail(record);
 

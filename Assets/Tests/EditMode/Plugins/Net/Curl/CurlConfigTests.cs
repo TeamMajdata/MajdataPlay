@@ -116,7 +116,6 @@ namespace MajdataPlay.Tests.Plugins.Net.Curl
 
         /// <summary>Checks that deflate alone produces a well-formed encoding list.</summary>
         [Test]
-        [Ignore("Known issue: CurlHttpConfig.GetEncodingString returns \",deflate\" (leading comma) when only Deflate is requested.")]
         public void GetEncodingString_DeflateOnlyHasNoLeadingComma()
         {
             Assert.That(Map<string>("GetEncodingString", DecompressionMethods.Deflate), Is.EqualTo("deflate"));
@@ -199,7 +198,6 @@ namespace MajdataPlay.Tests.Plugins.Net.Curl
 
         /// <summary>Checks that the code-only constructor exposes the error code.</summary>
         [Test]
-        [Ignore("Known issue: CurlException(CurlCode) never assigns ErrorCode, so it always reports CurlCode.Ok.")]
         public void CurlException_CodeConstructorKeepsCode()
         {
             var exception = new CurlException(CurlCode.CouldNotConnect);

@@ -64,7 +64,6 @@ namespace MajdataPlay.Tests.Plugins.UnsafeKit
 
         /// <summary>Checks that disposing without the clear flag keeps the variable's value.</summary>
         [Test]
-        [Ignore("Known issue: RefDisposable.Disposable.Dispose ignores SetNullWhenDispose and always clears the variable.")]
         public void Dispose_WithoutClearFlag_KeepsVariable()
         {
             var target = new CountingDisposable();

@@ -90,7 +90,6 @@ namespace MajdataPlay.Tests.Plugins.Threading
 
         /// <summary>Checks that omitting the scene records the active scene, as TaskTracker.Register does.</summary>
         [Test]
-        [Ignore("Known issue: the Register/RegisterAsWorker extensions default sceneName to \"\" instead of null, so the active scene is never recorded.")]
         public void TaskExtensions_DefaultScene_RecordsActiveScene()
         {
             var name = TaskTrackerIsolation.UniqueName("default-scene");

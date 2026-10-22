@@ -439,7 +439,7 @@ namespace MajdataPlay.Platform.Android.Editor
                 using var reader = JsonReaderWriterFactory.CreateJsonReader(bytes, XmlDictionaryReaderQuotas.Max);
                 manifest = serializer.ReadObject(reader) as OutputManifest;
             }
-            catch (Exception exception) when (exception is SerializationException || exception is XmlException || exception is ArgumentException || exception is FormatException)
+            catch (Exception exception) when (exception is SerializationException || exception is XmlException || exception is ArgumentException || exception is FormatException || exception is System.Reflection.TargetInvocationException)
             {
                 throw new IOException("Invalid output manifest: " + path, exception);
             }
@@ -507,7 +507,7 @@ namespace MajdataPlay.Platform.Android.Editor
                 using var reader = JsonReaderWriterFactory.CreateJsonReader(bytes, XmlDictionaryReaderQuotas.Max);
                 pending = serializer.ReadObject(reader) as PendingPublication;
             }
-            catch (Exception exception) when (exception is SerializationException || exception is XmlException || exception is ArgumentException || exception is FormatException)
+            catch (Exception exception) when (exception is SerializationException || exception is XmlException || exception is ArgumentException || exception is FormatException || exception is System.Reflection.TargetInvocationException)
             {
                 throw new IOException("Invalid interrupted publication record: " + path, exception);
             }
@@ -592,7 +592,7 @@ namespace MajdataPlay.Platform.Android.Editor
         /// <exception cref="IOException">The path is rooted, contains traversal, or has an invalid filename component.</exception>
         private static string ValidateRelativePath(string relativePath)
         {
-            if (string.IsNullOrEmpty(relativePath) || Path.IsPathRooted(relativePath))
+            if (string.IsNullOrEmpty(relativePath))
             {
                 throw new IOException("Unsafe generated output path: " + relativePath);
             }
@@ -613,6 +613,12 @@ namespace MajdataPlay.Platform.Android.Editor
                         throw new IOException("Invalid generated output filename: " + relativePath);
                     }
                 }
+            }
+
+            // Checked after the characters: on Mono Path.IsPathRooted throws ArgumentException for characters such as '<'.
+            if (Path.IsPathRooted(relativePath))
+            {
+                throw new IOException("Unsafe generated output path: " + relativePath);
             }
 
             return normalized;

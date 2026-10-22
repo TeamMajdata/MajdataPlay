@@ -42,7 +42,6 @@ namespace MajdataPlay.Tests.Plugins.Collections
 
         /// <summary>Checks that TryGetElement reports negative indices as missing instead of throwing.</summary>
         [Test]
-        [Ignore("Known issue: ListExtensions.TryGetElement only checks the upper bound, so a negative index throws ArgumentOutOfRangeException.")]
         public void TryGetElement_Negative_ReturnsFalse()
         {
             var list = new List<int> { 1 };

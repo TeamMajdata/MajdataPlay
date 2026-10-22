@@ -168,7 +168,6 @@ namespace MajdataPlay.Tests.Game.Notes.PlayMode
         /// <summary>Checks that the star of an extend slide is hidden together with the slide when it ends.</summary>
         /// <returns>The test coroutine.</returns>
         [UnityTest]
-        [Ignore("Known issue: ExtendSlideDrop.Awake never stores the star renderer in StarRenderers, so SetStarActive cannot hide its star.")]
         public IEnumerator End_HidesStar()
         {
             var slide = CreateSlide(ThreeAreas(), SlideOkType.StraightL, conditionalLastArrow: false);

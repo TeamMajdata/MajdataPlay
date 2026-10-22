@@ -98,7 +98,6 @@ namespace MajdataPlay.Tests.Game.Scenes.PlayMode.ResultScene
         /// <summary>Checks that destroying the indicator while uploading stops its looping icon motion.</summary>
         /// <returns>The test coroutine.</returns>
         [UnityTest]
-        [Ignore("Known issue: ScoreUploadIndicator has no OnDestroy, so its infinite uploading motion outlives the indicator and binds to a destroyed SVGImage.")]
         public IEnumerator Destroy_WhileUploading_StopsLoopingMotion()
         {
             _indicator.SetUploading();

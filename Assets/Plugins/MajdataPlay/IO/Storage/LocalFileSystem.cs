@@ -226,7 +226,14 @@ namespace MajdataPlay.IO.Storage
             {
                 throw new ArgumentException("The modification time must be UTC.", nameof(lastWriteTimeUtc));
             }
-            File.SetLastWriteTimeUtc(FileSystem.NormalizeLocalPath(location), lastWriteTimeUtc);
+            var path = FileSystem.NormalizeLocalPath(location);
+            // File.SetLastWriteTimeUtc opens the path as a file, which Windows refuses for directories.
+            if (Directory.Exists(path))
+            {
+                Directory.SetLastWriteTimeUtc(path, lastWriteTimeUtc);
+                return;
+            }
+            File.SetLastWriteTimeUtc(path, lastWriteTimeUtc);
         }
 
         /// <summary>Moves an already resolved local entry to a new name inside a validated directory.</summary>

@@ -98,7 +98,6 @@ namespace MajdataPlay.Tests.Plugins.Collections
 
         /// <summary>Checks that the memory of a disposed owner can no longer be accessed.</summary>
         [Test]
-        [Ignore("Known issue: NativeArrayHandle.Dispose never sets _isDisposed and disposes a defensive copy, so GetSpan still exposes freed memory.")]
         public void Memory_AfterDispose_Throws()
         {
             var native = new NativeArray<int>(2, Allocator.Persistent);
@@ -112,7 +111,6 @@ namespace MajdataPlay.Tests.Plugins.Collections
 
         /// <summary>Checks that disposing the owner twice is harmless.</summary>
         [Test]
-        [Ignore("Known issue: NativeArrayHandle.Dispose never sets _isDisposed, so a second Dispose disposes the native array again.")]
         public void Dispose_Twice_IsHarmless()
         {
             var native = new NativeArray<int>(2, Allocator.Persistent);

@@ -38,6 +38,9 @@ namespace MajdataPlay
 
         private Material _radarMaterial;
         private readonly MotionHandle[] _scoreHandles = new MotionHandle[6];
+        private MotionHandle _fillColorHandle;
+        private MotionHandle _outlineColorHandle;
+        private MotionHandle _estiHandle;
         private float _loadTimer = 0f;
         private float _loadDelayTimer = 0f;
 
@@ -111,7 +114,8 @@ namespace MajdataPlay
             Color startFill = _radarMaterial.GetColor("_FillColor");
             Color targetFill = _radarFillColors[maxIndex];
 
-            LMotion.Create(startFill, targetFill, 0.5f)
+            _fillColorHandle.TryCancel();
+            _fillColorHandle = LMotion.Create(startFill, targetFill, 0.5f)
             .Bind(color =>
             {
                 _radarMaterial.SetColor("_FillColor", color);
@@ -120,7 +124,8 @@ namespace MajdataPlay
             Color startOutline = _radarMaterial.GetColor("_OutlineColor");
             Color targetOutline = _radarOutlineColors[maxIndex];
 
-            LMotion.Create(startOutline, targetOutline, 0.5f)
+            _outlineColorHandle.TryCancel();
+            _outlineColorHandle = LMotion.Create(startOutline, targetOutline, 0.5f)
             .Bind(color =>
             {
                 _radarMaterial.SetColor("_OutlineColor", color);
@@ -133,7 +138,8 @@ namespace MajdataPlay
                 ? oldValue
                 : 0f;
 
-                LMotion.Create(currentEsti, esti, 0.5f)
+                _estiHandle.TryCancel();
+                _estiHandle = LMotion.Create(currentEsti, esti, 0.5f)
                 .WithEase(Ease.OutCubic)
                 .Bind(value =>
                 {
@@ -146,6 +152,17 @@ namespace MajdataPlay
             }
         }
 
+        private void OnDestroy()
+        {
+            // The motions bind to this component's material and text, which are destroyed with it.
+            for (var i = 0; i < _scoreHandles.Length; i++)
+            {
+                _scoreHandles[i].TryCancel();
+            }
+            _fillColorHandle.TryCancel();
+            _outlineColorHandle.TryCancel();
+            _estiHandle.TryCancel();
+        }
         private void LateUpdate()
         {
             if (_currentSongDetail is null)

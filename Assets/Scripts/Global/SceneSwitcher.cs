@@ -509,7 +509,10 @@ namespace MajdataPlay
             {
                 case UniTaskStatus.Canceled:
                 case UniTaskStatus.Faulted:
-                    throw taskToRun.AsTask().Exception;
+                    // Awaiting the completed task rethrows its exception or OperationCanceledException;
+                    // AsTask().Exception is null for a cancelled task.
+                    await taskToRun;
+                    break;
             }            
             CabinetLed.SetAllLight(_loadingLightColor);
             CabinetLed.SetCabinetLight(0.5f);
@@ -587,7 +590,10 @@ namespace MajdataPlay
             {
                 case UniTaskStatus.Canceled:
                 case UniTaskStatus.Faulted:
-                    throw taskToRun.AsTask().Exception;
+                    // Awaiting the completed task rethrows its exception or OperationCanceledException;
+                    // AsTask().Exception is null for a cancelled task.
+                    await taskToRun;
+                    break;
             }
             CabinetLed.SetAllLight(_loadingLightColor);
             CabinetLed.SetCabinetLight(0.5f);

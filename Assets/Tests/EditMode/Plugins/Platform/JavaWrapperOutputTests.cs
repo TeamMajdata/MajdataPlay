@@ -213,7 +213,7 @@ namespace MajdataPlay.Tests.Plugins.Platform
         [TestCase("{\"FormatVersion\":2,\"Generator\":\"AndroidJavaWrapperGenerator\",\"RootNamespace\":\"MajdataPlay.Platform.Android.Runtime\",\"Files\":{}}")]
         [TestCase("{\"FormatVersion\":1,\"Generator\":\"Other\",\"RootNamespace\":\"MajdataPlay.Platform.Android.Runtime\",\"Files\":{}}")]
         [TestCase("{\"FormatVersion\":1,\"Generator\":\"AndroidJavaWrapperGenerator\",\"RootNamespace\":\"MajdataPlay.Platform.Android.Runtime.Bindings\",\"Files\":{}}")]
-        [TestCase("{\"FormatVersion\":\"x\"}", Ignore = "Known issue: on Mono a mistyped manifest field escapes ReadManifest as TargetInvocationException instead of IOException")]
+        [TestCase("{\"FormatVersion\":\"x\"}")]
         [TestCase("{\"Generator\":\"\\\"}\"}")]
         public void Publish_RejectsMalformedManifest(string manifest)
         {
@@ -229,7 +229,7 @@ namespace MajdataPlay.Tests.Plugins.Platform
         [TestCase("../escape.cs", null)]
         [TestCase("a/./b.cs", null)]
         [TestCase("C:/rooted.cs", null)]
-        [TestCase("bad<name.cs", null, Ignore = "Known issue: on Mono Path.IsPathRooted throws ArgumentException for '<' before ValidateRelativePath reports IOException")]
+        [TestCase("bad<name.cs", null)]
         [TestCase("trailing./a.cs", null)]
         [TestCase("notes.txt", null)]
         [TestCase("A.cs", "abc")]

@@ -76,7 +76,6 @@ namespace MajdataPlay.Tests.Game.Notes.PlayMode
         /// <summary>Checks that late update callbacks only run in the late update phase.</summary>
         /// <returns>The test coroutine.</returns>
         [UnityTest]
-        [Ignore("Known issue: PlayerLoopCallbackAttribute.LoopTiming is a [Flags] enum with LateUpdate = 3 = PreUpdate | Update, so [OnLateUpdate] callbacks also run in the pre-update and update phases.")]
         public IEnumerator Phases_RunLateCallbacksOnlyInLateUpdate() => UniTask.ToCoroutine(async () =>
         {
             await _updater.InitAsync();

@@ -144,7 +144,6 @@ namespace MajdataPlay.Tests.Game.GamePlay.Utils
 
         /// <summary>Checks that every pose of a slide that ends at its last explicit node stays finite.</summary>
         [Test]
-        [Ignore("Known issue: SlideCodeParser.NodeToNode adds a zero-length line for 'NodeA n' followed by 'K n', so the final tangent and the slide OK pose become NaN.")]
         public void CreateSlideEntry_RepeatedFinalNodeKeepsFinitePoses()
         {
             var metadata = ExtendSlideHelper.CreateSlideEntry(SlideCodeParser.Parse("1A3K3"));

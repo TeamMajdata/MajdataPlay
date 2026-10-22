@@ -101,7 +101,6 @@ namespace MajdataPlay.Tests.Game.GamePlay.Base
 
         /// <summary>Checks that a result can be recorded for a chart that follows a missing chart.</summary>
         [Test]
-        [Ignore("Known issue: GameInfo sizes Results by the non-null charts but indexes it by the chart queue position, so RecordResult throws after a missing chart was skipped.")]
         public void RecordResult_AfterASkippedChartDoesNotThrow()
         {
             var song = new GamePlayFakeSongDetail();

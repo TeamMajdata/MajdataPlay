@@ -17,7 +17,8 @@ namespace MajdataPlay.Collections
         {
             bool _isDisposed = false;
 
-            readonly NativeArray<T> _nativeArray;
+            // Not readonly: disposing a readonly struct field would dispose a defensive copy and leave this one created.
+            NativeArray<T> _nativeArray;
             readonly void* _pointer;
             readonly int _length;
 
@@ -61,6 +62,7 @@ namespace MajdataPlay.Collections
                 {
                     return;
                 }
+                _isDisposed = true;
                 _nativeArray.Dispose();
             }
 

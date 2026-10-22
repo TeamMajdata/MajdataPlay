@@ -10,7 +10,10 @@ namespace MajdataPlay.Net.Curl
     public class CurlException : Exception
     {
         public CurlCode ErrorCode { get; }
-        public CurlException(CurlCode errorCode) : base($"Curl Error {(int)errorCode}: {errorCode}") { }
+        public CurlException(CurlCode errorCode) : base($"Curl Error {(int)errorCode}: {errorCode}")
+        {
+            ErrorCode = errorCode;
+        }
         public CurlException(CurlCode errorCode, string message) : this(errorCode, message, null) { }
         public CurlException(CurlCode errorCode, string message, Exception innerException) : base(message, innerException)
         {

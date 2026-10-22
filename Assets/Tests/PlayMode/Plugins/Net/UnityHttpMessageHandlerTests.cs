@@ -99,7 +99,6 @@ namespace MajdataPlay.Tests.Plugins.Net.PlayMode
         /// <summary>Checks that content headers of the response, such as its type, are exposed on the content.</summary>
         /// <returns>The test coroutine.</returns>
         [UnityTest]
-        [Ignore("Known issue: UnityHttpMessageHandler adds every response header to HttpResponseMessage.Headers, which rejects content headers such as Content-Type, so they are lost.")]
         public IEnumerator Get_ExposesContentHeaders() => UniTask.ToCoroutine(async () =>
         {
             using var server = LoopbackHttpServer.Respond(200, "{}", "Content-Type: application/json");
@@ -164,7 +163,6 @@ namespace MajdataPlay.Tests.Plugins.Net.PlayMode
         /// <summary>Checks that a request body whose length is not known in advance is uploaded completely.</summary>
         /// <returns>The test coroutine.</returns>
         [UnityTest]
-        [Ignore("Known issue: UnityHttpMessageHandler sizes the upload buffer from Content-Length (0 when unknown), so NativeArray.CopyFrom throws for content of unknown length.")]
         public IEnumerator Post_UploadsContentOfUnknownLength() => UniTask.ToCoroutine(async () =>
         {
             using var server = LoopbackHttpServer.Respond(200, "ok");

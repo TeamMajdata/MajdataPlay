@@ -166,6 +166,7 @@ namespace MajdataPlay.Runtime
                 else
                 {
                     _callbackTaskTail!.Next = task;
+                    _callbackTaskTail = task;
                 }
             }
         }

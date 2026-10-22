@@ -98,7 +98,6 @@ namespace MajdataPlay.Tests.Game.GamePlay.PlayMode
         /// <summary>Checks that a button disabled before the delay ends never binds its sensors.</summary>
         /// <returns>The test coroutine.</returns>
         [UnityTest]
-        [Ignore("Known issue: SkipButton.DelayBind is not cancelled by OnDisable/OnDestroy, so a button disabled within one second still binds its sensors afterwards and stays subscribed.")]
         public IEnumerator OnDisable_BeforeTheDelayPreventsBinding()
         {
             var button = CreateButton();

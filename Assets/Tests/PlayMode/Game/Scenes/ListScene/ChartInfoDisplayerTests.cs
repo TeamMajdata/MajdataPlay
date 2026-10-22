@@ -155,7 +155,6 @@ namespace MajdataPlay.Tests.Game.Scenes.PlayMode.ListScene
         /// <summary>Checks that destroying the radar stops its value animations.</summary>
         /// <returns>The test coroutine.</returns>
         [UnityTest]
-        [Ignore("Known issue: MajRadarDisplayer has no OnDestroy; its score, color and estimate motions keep binding to destroyed objects for up to 0.5 s after the list scene unloads.")]
         public IEnumerator Radar_Destroy_StopsAnimations()
         {
             var displayer = CreateRadarDisplayer(Canvas);

@@ -247,7 +247,6 @@ namespace MajdataPlay.Tests.Game.Global.PlayMode
         /// <summary>Checks that a cancelled UniTask stops the switch with a cancellation error.</summary>
         /// <returns>The test coroutine.</returns>
         [UnityTest]
-        [Ignore("Known issue: SceneSwitcher rethrows taskToRun.AsTask().Exception, which is null for a cancelled UniTask, so a NullReferenceException is thrown.")]
         public IEnumerator SwitchSceneAfterTask_CancelledUniTask_ThrowsCancellation()
         {
             return UniTask.ToCoroutine(async () =>

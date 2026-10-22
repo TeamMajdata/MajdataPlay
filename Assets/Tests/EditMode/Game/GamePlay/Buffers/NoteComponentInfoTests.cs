@@ -142,7 +142,6 @@ namespace MajdataPlay.Tests.Game.GamePlay.Buffers
 
         /// <summary>Checks that a late-update callback only runs in the late-update phase.</summary>
         [Test]
-        [Ignore("Known issue: LoopTiming.LateUpdate is 3 (PreUpdate | Update), so NoteComponentInfo also registers late-update callbacks such as EachLineDrop.OnLateUpdate for pre-update and update.")]
         public void LateUpdateCallback_RunsOnlyInLateUpdate()
         {
             var probe = new LateUpdateOnlyProbe { State = NoteStatus.Running, Active = true };

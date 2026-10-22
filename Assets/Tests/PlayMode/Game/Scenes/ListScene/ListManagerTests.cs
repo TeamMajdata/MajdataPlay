@@ -527,24 +527,25 @@ namespace MajdataPlay.Tests.Game.Scenes.PlayMode.ListScene
         /// <summary>Checks that pruning a large background task list keeps exactly the running tasks.</summary>
         /// <returns>The test coroutine.</returns>
         [UnityTest]
-        [Ignore("Known issue: ListManager.Awake removes completed tasks by stale indices when more than 4096 tasks are tracked, so it removes the wrong tasks or throws.")]
         public IEnumerator Awake_PrunesLargeBackgroundTaskList()
         {
             var running = new TaskCompletionSource<bool>();
+            // A distinct completed task: the scene's own components register tasks while starting, and some of
+            // them complete before the assertion, so only the tasks inserted here are checked.
+            var completed = Task.FromResult(true);
             ListManager.AllBackgroundTasks.Clear();
             for (var i = 0; i < 2100; i++)
             {
                 ListManager.AllBackgroundTasks.Add(running.Task);
-            }
-            for (var i = 0; i < 2100; i++)
-            {
-                ListManager.AllBackgroundTasks.Add(Task.CompletedTask);
+                ListManager.AllBackgroundTasks.Add(completed);
+                ListManager.AllBackgroundTasks.Add(null!);
             }
 
             yield return StartScene();
 
             Assert.That(ListManager.AllBackgroundTasks.Count(task => ReferenceEquals(task, running.Task)), Is.EqualTo(2100));
-            Assert.That(ListManager.AllBackgroundTasks.Any(task => task is null || task.IsCompleted), Is.False);
+            Assert.That(ListManager.AllBackgroundTasks.Any(task => ReferenceEquals(task, completed)), Is.False);
+            Assert.That(ListManager.AllBackgroundTasks.Any(task => task is null), Is.False);
             running.SetResult(true);
         }
     }

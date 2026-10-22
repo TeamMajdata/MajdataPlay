@@ -127,7 +127,6 @@ namespace MajdataPlay.Tests.Plugins.Runtime
 
         /// <summary>Checks that every one of several registered callbacks runs.</summary>
         [Test]
-        [Ignore("Known issue: GCCallbackRegistration.AddToLinkedList never advances the tail, so only the head and the latest registration are kept.")]
         public void ThreeCallbacks_AllRun()
         {
             var calls = new int[3];

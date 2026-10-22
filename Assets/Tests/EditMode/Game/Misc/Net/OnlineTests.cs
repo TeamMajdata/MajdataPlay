@@ -268,7 +268,6 @@ namespace MajdataPlay.Tests.Game.Misc.Net
         /// <summary>Checks that request bodies use the camel case naming configured for the online service.</summary>
         /// <returns>The test coroutine.</returns>
         [UnityTest]
-        [Ignore("Known issue: Online._defaultJsonSerializer is created before _defaultJsonSerializerSettings is initialized (Online.cs:33-42), so request bodies are serialized in PascalCase without the configured camel case settings.")]
         public IEnumerator RegisterAsync_UsesCamelCaseBody()
         {
             return UniTask.ToCoroutine(async () =>

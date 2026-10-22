@@ -32,8 +32,7 @@ namespace MajdataPlay.UnsafeKit
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static T* AddByteOffset<T>(T* ptr, long offset) where T : unmanaged
         {
-            var size = sizeof(T);
-            return ptr + size * offset;
+            return (T*)((byte*)ptr + offset);
         }
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static T* AddOffset<T>(T* ptr, long elementOffset) where T : unmanaged

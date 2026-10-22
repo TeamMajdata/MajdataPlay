@@ -87,7 +87,6 @@ namespace MajdataPlay.Tests.Plugins.Net
         /// <summary>Checks that a full response is accepted when the caller allows it.</summary>
         /// <returns>The test coroutine.</returns>
         [UnityTest]
-        [Ignore("Known issue: HttpClientExtensions ignores allowFullResponse and always rejects HTTP 200 responses.")]
         public IEnumerator GetPartialAsync_AcceptsFullResponseWhenAllowed() => UniTask.ToCoroutine(async () =>
         {
             using var client = new HttpClient(new StubHttpMessageHandler(_ => Response(HttpStatusCode.OK, "whole")));

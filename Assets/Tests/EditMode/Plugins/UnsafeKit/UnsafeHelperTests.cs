@@ -72,7 +72,6 @@ namespace MajdataPlay.Tests.Plugins.UnsafeKit
 
         /// <summary>Checks that AddByteOffset advances a wider pointer by bytes, not by squared element sizes.</summary>
         [Test]
-        [Ignore("Known issue: UnsafeHelper.AddByteOffset multiplies by sizeof(T) on a T* pointer, advancing sizeof(T)^2 bytes per unit.")]
         public unsafe void AddByteOffset_IntPointer_AdvancesBytes()
         {
             var buffer = stackalloc int[8];

@@ -508,7 +508,6 @@ namespace MajdataPlay.Tests.Game.GamePlay.PlayMode
         /// <summary>Checks that the gauge cursor stays at a finite position before the first judgement.</summary>
         /// <returns>The test coroutine.</returns>
         [UnityTest]
-        [Ignore("Known issue: ObjectCounter.OnLateUpdate divides the gauge sum by min(scale count, judged count), which is zero before the first tap or hold judgement, so the cursor position becomes NaN.")]
         public IEnumerator JudgeTimingGauge_CursorIsFiniteBeforeAnyJudgement() => UniTask.ToCoroutine(async () =>
         {
             _settings.Settings.Game.EnableJudgeTimingGauge = true;

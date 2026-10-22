@@ -151,7 +151,6 @@ namespace MajdataPlay.Tests.Plugins.Buffers
 
         /// <summary>Checks that inserting keeps every existing element, including the last one.</summary>
         [Test]
-        [Ignore("Known issue: PooledList.Insert copies one element too few, dropping or overwriting the last element.")]
         public void Insert_KeepsEveryExistingElement()
         {
             using var list = CreateList(new RecordingArrayPool<int>(), 8, 1, 2, 3);
@@ -164,7 +163,6 @@ namespace MajdataPlay.Tests.Plugins.Buffers
 
         /// <summary>Checks that inserting at the end of the list appends, as the IList contract allows.</summary>
         [Test]
-        [Ignore("Known issue: PooledList.Insert rejects index == Count, so it cannot append or insert into an empty list.")]
         public void Insert_AtCount_Appends()
         {
             using var list = CreateList(new RecordingArrayPool<int>(), 8);
@@ -214,7 +212,6 @@ namespace MajdataPlay.Tests.Plugins.Buffers
 
         /// <summary>Checks that Clear releases the references held by the backing array.</summary>
         [Test]
-        [Ignore("Known issue: PooledList.Clear zeroes the size before clearing, so the backing array keeps every old reference.")]
         public void Clear_ReleasesStoredReferences()
         {
             using var list = new PooledList<object>(4, new RecordingArrayPool<object>());
@@ -238,7 +235,6 @@ namespace MajdataPlay.Tests.Plugins.Buffers
 
         /// <summary>Checks that IndexOf ignores the unused capacity beyond Count.</summary>
         [Test]
-        [Ignore("Known issue: PooledList.IndexOf searches the whole backing array, so default values in spare capacity are found.")]
         public void IndexOf_IgnoresSpareCapacity()
         {
             using var list = CreateList(new RecordingArrayPool<int>(), 8, 5, 6, 7);
@@ -259,7 +255,6 @@ namespace MajdataPlay.Tests.Plugins.Buffers
 
         /// <summary>Checks that removing a value only present in the spare capacity reports false.</summary>
         [Test]
-        [Ignore("Known issue: PooledList.Remove uses the unbounded IndexOf and throws for values found only in spare capacity.")]
         public void Remove_ValueOnlyInSpareCapacity_ReturnsFalse()
         {
             using var list = CreateList(new RecordingArrayPool<int>(), 8, 5, 6, 7);

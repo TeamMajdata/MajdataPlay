@@ -192,7 +192,6 @@ namespace MajdataPlay.Tests.Game.IO
 
         /// <summary>Checks that starting a second fade animates again instead of jumping to its end colour.</summary>
         [Test]
-        [Ignore("Known issue: LedLinearUpdateFunction.LinearTo does not reset the elapsed time, so a later fade jumps to its end colour.")]
         public void SecondFade_AnimatesFromItsStart()
         {
             Init(true);
@@ -304,7 +303,6 @@ namespace MajdataPlay.Tests.Game.IO
 
         /// <summary>Checks that exactly eight functions, one per button, are accepted.</summary>
         [Test]
-        [Ignore("Known issue: CabinetLed.SetAllLightUpdateFunc rejects exactly eight functions because it checks Length <= 8.")]
         public void SetAllLightUpdateFunc_AcceptsEightFunctions()
         {
             Init(true);

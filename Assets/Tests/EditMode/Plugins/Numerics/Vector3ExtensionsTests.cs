@@ -53,7 +53,6 @@ namespace MajdataPlay.Tests.Plugins.Numerics
         /// the given distance beyond the source.
         /// </summary>
         [Test]
-        [Ignore("Known issue: Vector3Extensions.GetPoint(origin, distance) returns the scaled offset without adding the origin back.")]
         public void GetPointWithOrigin_ReturnsPointOnLineThroughOrigin()
         {
             var point = new Vector3(4, 5, 0).GetPoint(new Vector3(1, 1, 0), 5);

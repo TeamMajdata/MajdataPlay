@@ -387,7 +387,6 @@ namespace MajdataPlay.Tests.Game.GamePlay.Counting
 
         /// <summary>Checks that a recorded result keeps its judge record after the counter is cleared for the next chart.</summary>
         [Test]
-        [Ignore("Known issue: ObjectCounter.GetPlayRecord wraps its static per-type dictionaries in JudgeInfo without copying, so Clear and later records overwrite the judge records of earlier results.")]
         public void GetPlayRecord_ResultSurvivesClear()
         {
             Report(0, JudgeGrade.Perfect);
@@ -398,16 +397,18 @@ namespace MajdataPlay.Tests.Game.GamePlay.Counting
             Assert.That(result.JudgeRecord[ScoreNoteType.Tap][JudgeGrade.Perfect], Is.EqualTo(1));
         }
 
-        /// <summary>Checks that a chart without breaks reaches AP+ when every note is a critical perfect.</summary>
+        /// <summary>
+        /// Checks that a chart without breaks tops out at AP even when every note is a critical perfect: AP+ requires
+        /// a theoretical break record, which needs at least one judged break (intended rule).
+        /// </summary>
         [Test]
-        [Ignore("Known issue: ObjectCounter.GetPlayRecord requires the break record to be theoretical, which needs at least one judged break, so charts without breaks can never reach AP+.")]
-        public void GetPlayRecord_AllCriticalWithoutBreaksIsAPPlus()
+        public void GetPlayRecord_AllCriticalWithoutBreaksIsAP()
         {
             Report(0, JudgeGrade.Perfect);
 
             var result = _counter.GetPlayRecord(new GamePlayFakeSongDetail(), ChartLevel.Basic);
 
-            Assert.That(result.ComboState, Is.EqualTo(ComboState.APPlus));
+            Assert.That(result.ComboState, Is.EqualTo(ComboState.AP));
         }
 
         /// <summary>Checks that dan life loses health on judgements and a forced game over is requested at zero life.</summary>

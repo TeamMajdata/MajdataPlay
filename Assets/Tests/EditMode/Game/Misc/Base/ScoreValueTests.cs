@@ -36,7 +36,6 @@ namespace MajdataPlay.Tests.Game.Misc.Base
 
         /// <summary>Checks that Update keeps the old classic accuracy when the new record is lower.</summary>
         [Test]
-        [Ignore("Known issue: Accurate.Update compares the new classic accuracy with 0 instead of the old record (Accurate.cs:13), so a lower classic value replaces the best one.")]
         public void AccurateUpdate_KeepsHigherClassic()
         {
             var old = new Accurate { DX = 50, Classic = 100 };

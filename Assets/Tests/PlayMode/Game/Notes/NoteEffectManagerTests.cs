@@ -296,7 +296,6 @@ namespace MajdataPlay.Tests.Game.Notes.PlayMode
         /// <summary>Checks that resetting a pool initialized for only some positions does not fail.</summary>
         /// <returns>The test coroutine.</returns>
         [UnityTest]
-        [Ignore("Known issue: NoteEffectPool.Reset dereferences the effect slots of unused keys and sensors, which are null, so ViewManager's reset throws NullReferenceException.")]
         public IEnumerator EffectPool_ResetWithUnusedPositions()
         {
             var pool = CreatePartialEffectPool();

@@ -246,7 +246,6 @@ namespace MajdataPlay.Tests.Game.Notes.PlayMode
         /// <summary>Checks that the schedule only holds the generated answer points.</summary>
         /// <returns>The test coroutine.</returns>
         [UnityTest]
-        [Ignore("Known issue: NoteAudioManager.GenerateAnswerSFX sizes the schedule with PooledList.Capacity instead of Count, appending default answer points.")]
         public IEnumerator GenerateAnswerSfx_ScheduleHasOnePointPerAnswer() => UniTask.ToCoroutine(async () =>
         {
             var audio = _rig.NoteAudio;

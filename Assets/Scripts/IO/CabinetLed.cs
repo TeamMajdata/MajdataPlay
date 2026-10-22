@@ -207,9 +207,9 @@ namespace MajdataPlay.IO
             {
                 return;
             }
-            if(funcs.Length <= 8)
+            if(funcs.Length < 8)
             {
-                throw new ArgumentException("funcs length must be 8", nameof(funcs));
+                throw new ArgumentException("funcs must contain at least one function per button (8)", nameof(funcs));
             }
             for (var i = 0; i < 8; i++)
             {
@@ -435,6 +435,7 @@ namespace MajdataPlay.IO
                 _from = from;
                 _to = to;
                 _durationMs = (float)duration.TotalMilliseconds;
+                _elapsedMs = 0f;
             }
         }
         class LedSineUpdateFunction : ILedUpdateFunction

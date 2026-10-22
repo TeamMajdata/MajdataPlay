@@ -91,50 +91,15 @@ namespace MajdataPlay.Scenes.List
         {
             Majdata<ListManager>.Instance = this;
             InputManager.TouchButtonRingEdge = 4.8f;
-            if (AllBackgroundTasks.Count > 4096)
+            try
             {
-                using var indexs = Pool<int>.Rent(AllBackgroundTasks.Count, true);
-                try
-                {
-                    var i2 = -1;
-                    var count = 0;
-                    Parallel.For(0, AllBackgroundTasks.Count, i =>
-                    {
-                        var task = AllBackgroundTasks[i];
-                        if (task is null || task.IsCompleted)
-                        {
-                            indexs[Interlocked.Increment(ref i2)] = i;
-                            Interlocked.Increment(ref count);
-                        }
-                    });
-                    for (var i = 0; i < count; i++)
-                    {
-                        AllBackgroundTasks.RemoveAt(indexs[i]);
-                    }
-                }
-                catch (Exception ex)
-                {
-                    MajDebug.LogError("[ListManager] [Awake] " + ex.Message);
-                }
+                // One linear pass. Removing by indices collected out of order shifted every later index and
+                // removed the wrong tasks once the list exceeded the old parallel threshold.
+                AllBackgroundTasks.RemoveAll(task => task is null || task.IsCompleted);
             }
-            else
+            catch (Exception ex)
             {
-                try
-                {
-                    for (var i = 0; i < AllBackgroundTasks.Count; i++)
-                    {
-                        var task = AllBackgroundTasks[i];
-                        if (task is null || task.IsCompleted)
-                        {
-                            AllBackgroundTasks.RemoveAt(i);
-                            i--;
-                        }
-                    }
-                }
-                catch (Exception ex)
-                {
-                    MajDebug.LogError("[ListManager] [Awake] " + ex.Message);
-                }
+                MajDebug.LogError("[ListManager] [Awake] " + ex.Message);
             }
             _isOnlineEnabled = MajEnv.Settings.Online.Enable;
 

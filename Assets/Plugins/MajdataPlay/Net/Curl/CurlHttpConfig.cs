@@ -152,7 +152,10 @@ namespace MajdataPlay.Net.Curl
             }
             if (methods.HasFlag(DecompressionMethods.Deflate))
             {
-                sb.Append(',');
+                if (sb.Length > 0)
+                {
+                    sb.Append(',');
+                }
                 sb.Append("deflate");
             }
             //if (methods.HasFlag(DecompressionMethods.Brotli))

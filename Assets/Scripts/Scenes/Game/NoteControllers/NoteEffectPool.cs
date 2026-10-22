@@ -67,25 +67,41 @@ namespace MajdataPlay.Scenes.Game.Notes.Controllers
         }
         internal void Reset()
         {
+            // Keys and sensors the chart never uses have no effect displayer, so their slots are null.
             foreach (var effect in _tapJudgeEffects)
             {
-                effect.Reset();
+                if (effect != null)
+                {
+                    effect.Reset();
+                }
             }
             foreach (var effect in _touchHoldJudgeEffects)
             {
-                effect.Reset();
+                if (effect != null)
+                {
+                    effect.Reset();
+                }
             }
             foreach (var effect in _touchJudgeEffects)
             {
-                effect.Reset();
+                if (effect != null)
+                {
+                    effect.Reset();
+                }
             }
             foreach (var effect in _holdEffects)
             {
-                effect.Reset();
+                if (effect != null)
+                {
+                    effect.Reset();
+                }
             }
             foreach (var effect in _touchHoldEffects)
             {
-                effect.Reset();
+                if (effect != null)
+                {
+                    effect.Reset();
+                }
             }
         }
 

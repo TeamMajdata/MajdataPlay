@@ -141,7 +141,6 @@ namespace MajdataPlay.Tests.Game.Utils
 
         /// <summary>Checks that the synchronous wrappers can be called on the Unity main thread.</summary>
         [Test]
-        [Ignore("Known issue: HashHelper's synchronous wrappers block on .Result of an async method that resumes on the Unity synchronization context, deadlocking the main thread.")]
         public void ComputeHash_OnMainThread_DoesNotDeadlock()
         {
             Assert.That(HashHelper.ComputeHash(s_abc), Is.EqualTo(s_abcDigest));

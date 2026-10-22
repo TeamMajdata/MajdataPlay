@@ -218,14 +218,15 @@ namespace MajdataPlay.Buffers
         public void Insert(int index, T item)
         {
             ThrowIfDisposed();
-            if ((uint)index >= (uint)_size)
+            // index == _size is valid and appends.
+            if ((uint)index > (uint)_size)
             {
                 throw new ArgumentOutOfRangeException(nameof(index), "Index is out of range.");
             }
             EnsureCapacity(_size + 1);
-            if (index < _size - 1)
+            if (index < _size)
             {
-                Array.Copy(_array, index, _array, index + 1, _size - index - 1);
+                Array.Copy(_array, index, _array, index + 1, _size - index);
             }
             _array[index] = item;
             _size++;
@@ -243,15 +244,15 @@ namespace MajdataPlay.Buffers
             {
                 return; // Nothing to clear
             }
+            Array.Clear(_array, 0, _size);
             _size = 0;
             _version++;
-            Array.Clear(_array, 0, _size);
         }
         public int IndexOf(T item)
         {
             ThrowIfDisposed();
 
-            return Array.IndexOf(_array, item);
+            return Array.IndexOf(_array, item, 0, _size);
         }
         public bool Remove(T item)
         {

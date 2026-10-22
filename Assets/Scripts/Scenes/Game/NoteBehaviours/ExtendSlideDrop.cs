@@ -26,11 +26,14 @@ namespace MajdataPlay.Scenes.Game.Notes.Behaviours
             var star = Instantiate(SlideStarPrefab, NoteManager.transform.GetChild(3));
             var stars = Stars.Span;
             var starTransforms = StarTransforms.Span;
+            var starRenderers = StarRenderers.Span;
 
             star.SetActive(true);
             stars[0] = star;
             starTransforms[0] = star.transform;
             StarRenderer = star.GetComponent<SpriteRenderer>();
+            // SetStarActive hides the star through StarRenderers, as in SlideDrop.
+            starRenderers[0] = StarRenderer;
 
             var slideOK = transform.GetChild(transform.childCount - 1).gameObject; //slideok is the last one
             slideOK.SetActive(true);

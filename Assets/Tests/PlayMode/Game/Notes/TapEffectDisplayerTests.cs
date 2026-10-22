@@ -52,7 +52,7 @@ namespace MajdataPlay.Tests.Game.Notes.PlayMode
             _rig.Dispose();
         }
 
-        /// <summary>Checks that Start lays out the judgment text and fast/late texts below a centred effect.</summary>
+        /// <summary>Checks that Start lays out the judgment text and fast/late texts exactly their distance below a centred effect.</summary>
         /// <returns>The test coroutine.</returns>
         [UnityTest]
         public IEnumerator Start_LaysOutTexts()
@@ -60,9 +60,9 @@ namespace MajdataPlay.Tests.Game.Notes.PlayMode
             var displayer = Create(false);
             yield return null;
 
-            Assert.That(Child(displayer, "JudgeText").localPosition.y, Is.EqualTo(-0.99f).Within(1e-3f));
-            Assert.That(Child(displayer, "FastLateA").localPosition.y, Is.EqualTo(-1.65f).Within(1e-3f));
-            Assert.That(Child(displayer, "FastLateB").localPosition.y, Is.EqualTo(-0.99f).Within(1e-3f));
+            Assert.That(Child(displayer, "JudgeText").localPosition.y, Is.EqualTo(-1f).Within(1e-3f));
+            Assert.That(Child(displayer, "FastLateA").localPosition.y, Is.EqualTo(-1.66f).Within(1e-3f));
+            Assert.That(Child(displayer, "FastLateB").localPosition.y, Is.EqualTo(-1f).Within(1e-3f));
             Assert.That(PrivateMember.GetField<bool>(displayer, "_isEnabled"), Is.True);
         }
 
@@ -82,7 +82,7 @@ namespace MajdataPlay.Tests.Game.Notes.PlayMode
             Assert.That(Child(displayer, "FastLateA").localPosition.y, Is.EqualTo(1.84f).Within(1e-3f));
 
             displayer.LocalPosition = Vector3.zero;
-            Assert.That(Child(displayer, "JudgeText").localPosition.y, Is.EqualTo(-1.49f).Within(1e-3f));
+            Assert.That(Child(displayer, "JudgeText").localPosition.y, Is.EqualTo(-1.5f).Within(1e-3f));
         }
 
         /// <summary>Checks which effect plays for each grade and break flag.</summary>

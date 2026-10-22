@@ -100,8 +100,9 @@ namespace MajdataPlay.Net
             var response = await client.SendAsync(request, completionOption, token);
 
             // Verify if the server actually supports partial content (HTTP 206)
-            if (response.StatusCode == HttpStatusCode.OK)
+            if (response.StatusCode == HttpStatusCode.OK && !allowFullResponse)
             {
+                response.Dispose();
                 throw new NotSupportedException("The server does not support partial downloads (HTTP 206 was not returned).");
             }
 
