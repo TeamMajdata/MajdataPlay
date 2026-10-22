@@ -324,7 +324,7 @@ namespace MajdataPlay.Collections
     }
 }
 namespace MajdataPlay.Diagnostics { public static class MajDebug { public static void LogWarning(string message) { } public static void LogError(string message) { } } }
-namespace MajdataPlay.Utils { public static class MajTimeline { public static float DeltaTime = 1f / 60; } }
+namespace MajdataPlay { public static class MajTimeline { public static float DeltaTime = 1f / 60; } }
 namespace MajdataPlay.IO
 {
     public enum SensorArea { A1, A8, E4, B4, B3, E6, B5, B6 }

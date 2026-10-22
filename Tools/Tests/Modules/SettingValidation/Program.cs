@@ -1110,7 +1110,7 @@ internal static class Program
                 menu.gameObject.SetActive(false);
                 return menu;
             }).ToArray();
-            Set(Manager, "menus", Menus);
+            Set(Manager, "_menus", Menus);
             // Match SettingManager.Start: prepare all models before input/fade.
             foreach (var menu in Menus) menu.Init();
             Menus[0].ToHead();
