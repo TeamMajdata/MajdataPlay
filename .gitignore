@@ -163,3 +163,5 @@ out.log
 /Tools/AndroidJavaWrapper/src/**/*.meta
 !/Tools/AndroidJavaWrapper/src/**/*.e.cs.meta
 /Tools/CSharp/AndroidJavaWrapperGenerator/.work/
+/Tools/Tests/FFmpegValidation/bin
+/Tools/Tests/FFmpegValidation/obj
