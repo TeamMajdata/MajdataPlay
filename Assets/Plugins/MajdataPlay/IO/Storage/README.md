@@ -185,7 +185,7 @@ partial tree under the final name, and the temporary copy is removed best-effort
 Bundled chart and skin extraction and chart import both use it, so a chart root
 on an Android SAF tree receives the packaged resources from the native extraction
 directory, and a failed transfer is retried on the next start through the pending
-move marker. `Tools/Tests/ResourceStorageValidation` covers the cross-backend move,
+move marker. `Tools/Tests/Modules/ResourceStorageValidation` covers the cross-backend move,
 preservation and retry paths against the in-memory content provider.
 
 ## Packaged APK/JAR resources
@@ -228,7 +228,7 @@ an already existing directory without changing it.
 
 The isolated Unity validation also executes compressed APK reads and extraction
 in the Editor's Mono runtime, including escaped names, archive stream disposal,
-and replacement refusal. Run `./Tools/Tests/ValidateFileSystemUnity.ps1 -PlayerTargets Android -SkipJavaCompilation`
+and replacement refusal. Run `./Tools/Tests/Modules/ValidateFileSystemUnity.ps1 -PlayerTargets Android -SkipJavaCompilation`
 to include Android storage assembly script compilation. The jar smoke marker is
 `FILE_SYSTEM_JAR_EDITOR_SMOKE_PASSED`; this does not run an Android player or device.
 
@@ -375,8 +375,8 @@ deterministically, including after cancellation.
 ## Validation
 
 ```powershell
-dotnet run --project Tools/Tests/FileSystemValidation/FileSystemValidation.csproj
-./Tools/Tests/ValidateFileSystemUnity.ps1
+dotnet run --project Tools/Tests/Modules/FileSystemValidation/FileSystemValidation.csproj
+./Tools/Tests/Modules/ValidateFileSystemUnity.ps1
 ```
 
 The standalone suite links production storage sources and a nonseekable, opaque-URI
@@ -393,13 +393,13 @@ signed-byte/typed-result mappings, managed-only borrowing/disposal regressions,
 null-envelope rejection, no-JNI picker cancellation/late-result and deterministic
 commit/launch concurrency regressions, and requested Player script compilation.
 It also compiles the Java sources against the bundled Android SDK and Unity classes.
-See `Tools/Tests/FileSystemValidation/README.md` for staging, coverage and log markers.
+See `Tools/Tests/Modules/FileSystemValidation/README.md` for staging, coverage and log markers.
 It does not build an APK, run JNI, verify native reference lifetimes/provider
 resource closure, exercise IL2CPP, or validate a real document provider.
 For all five installed targets, run:
 
 ```powershell
-./Tools/Tests/ValidateFileSystemUnity.ps1 -PlayerTargets StandaloneWindows64,StandaloneLinux64,StandaloneOSX,iOS,Android
+./Tools/Tests/Modules/ValidateFileSystemUnity.ps1 -PlayerTargets StandaloneWindows64,StandaloneLinux64,StandaloneOSX,iOS,Android
 ```
 
 Pass `-PlayerTargets` to select installed Unity target modules, or

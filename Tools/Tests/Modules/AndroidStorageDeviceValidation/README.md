@@ -1,0 +1,499 @@
+# Android storage + generated JNI / IL2CPP device validation
+
+This is a **real-device runtime harness**, not a provider double or an Editor
+substitute. It runs production `StorageFile`, `StorageDirectory`,
+`AndroidStorageAccess`, `AndroidDocumentStream`, the production activity-result
+bridge, and generated Android wrappers. JNI inputs, controlled descriptor
+fixtures, and packaged jar resources are validation-specific. No UniTask or
+third-party package is required.
+
+The picker-free `jar` mode separately exercises production `FileSystem`,
+`StorageFile`, `StorageDirectory`, and `JarFileSystem` against resources in the
+installed APK, without UnityWebRequest. It does not require an existing SAF grant.
+
+The harness has been built and executed on a physical device in both ARM64 and
+ARMv7 IL2CPP processes. See `RESULTS.md` for the dated evidence and exact scope.
+A successful script compilation alone is not a runtime pass. Keep separate
+evidence for each actually executed ABI.
+
+Standalone CLI bindings and startup changes require a fresh APK and a new device
+run for each ABI. Check the exact dated entry in `RESULTS.md`: earlier jar-only
+runs did not assert `AndroidRuntime.Init` success and their logs contain an
+initialization error. Their eight completed resource groups remain valid, but
+do not establish successful production startup or callback registration.
+
+## Integration contract
+
+Use Unity **6000.3.17f1**. The isolated builder stages a separate project at
+`Temp/AndroidStorageDeviceValidation`, with package ID
+`net.majdata.storagevalidation`, a development IL2CPP player, High managed
+stripping, and the production `net.majdata.majdataplay.MajdataPlayActivity`
+launcher. The target device is the connected physical Mi MIX 2S, API 35.
+
+| Source | Isolated project destination / responsibility |
+| --- | --- |
+| `AndroidStorageDeviceValidation.cs` | `Assets/Validation/`, in a runtime assembly referencing `MajdataPlay.IO` and `MajdataPlay.Platform.Android` |
+| `DeviceJniProbe.java` | `Assets/Plugins/Android/src/java/net/majdata/validation/DeviceJniProbe.java`, supplied to the CLI and packaged into the APK |
+| Production `Tools/AndroidJavaWrapper/src/Bindings/` extensions | Copy handwritten `.e.cs` partial extensions alongside fresh CLI output |
+| Standalone CLI output | Generate SDK, project, probe and Unity launcher bindings into isolated `Tools/AndroidJavaWrapper/src/`, including `Bindings/Net/Majdata/Validation/DeviceJniProbe.g.cs`; compile its standalone project and install `MajdataPlay.Platform.Android.Runtime.dll` into isolated `Assets/Plugins/MajdataPlay/Platform/Android` |
+| Production Java and activity | Copy and package the real storage bridge, Unity dependencies, and launcher/activity-result implementation |
+| Production `AndroidRuntime.cs`, `IO/AndroidKeyboard.cs`, and `IO/KeyCode.cs` | Stage the actual initialization and keyboard callback implementation in the Android assembly; no keyboard initialization stub |
+
+The probe's Java package is `net.majdata.validation`. The builder uses the .NET 9
+AndroidJavaWrapperGenerator CLI and the installed SDK, all staged project/probe
+Java inputs, Unity's runtime classes archive, and `UnityPlayerActivity.java`.
+Bindings use `MajdataPlay.Platform.Android.Runtime.Bindings`, while the JNI
+support files occupy `MajdataPlay.Platform.Android.Runtime`. The harness aliases
+the generated probe directly. Its Intent, KeyEvent and StreamHandle results use
+the same typed SDK/project bindings as production. The Java probe source must
+also be packaged into the APK; SDK `android.jar` is analysis input only.
+
+The isolated project's modules include `androidjni`, `imgui`, and
+`jsonserialize`. The harness's public static
+`AndroidStorageDeviceValidation.Bootstrap()` has
+`RuntimeInitializeOnLoadMethod(AfterSceneLoad)`, creates a persistent component,
+and needs **no manually attached scene component**. Its namespace is
+`MajdataPlay.Platform.Android.Runtime.Validation`.
+
+The isolated diagnostics stub forwards `MajDebug` output to Unity's log. Runtime
+and keyboard initialization use production sources and generated bindings.
+
+## Generated wrapper contract regressions
+
+The picker-free `wrappers` mode exercises the current CLI output in actual
+IL2CPP processes on both the Unity main thread and a JVM-attached worker. It
+requires all shared production initialization and callback checks, then validates:
+
+- Nested `WrapperValue`, generic `WrapperBox<T>`, and nonstatic multilevel
+  `WrapperBox<T>.Inner<U>` constructors, class bounds, transitive bounds and
+  recursive `Comparable<T>` bounds.
+- Owned `Class<TWrapper>` results with the exact Java nested binary name, and
+  typed `Class<T>.cast` calls for ordinary and generic wrappers.
+- Java `equals`, `hashCode`, and `toString` through CLR object dispatch,
+  `IEquatable<T>`, dictionary lookup, typed/untyped `IComparable`,
+  `IComparer<T>`, and disposing `IEnumerable<T>` iterator adaptation.
+- Typed generic fields, method results and arrays including null elements.
+- Checked `AndroidJavaObject`, live JNI handle and `JavaObject.As<T>`
+  conversion, incompatible-type rejection and independent reference ownership.
+- The exact exported custom throwable wrapper, nearest exported ancestor for a
+  private subtype, retained Java reference/message/stack, class initialization
+  failures and successful JNI calls after exception handling.
+
+Build and run fresh results for each ABI:
+
+```powershell
+./Tools/Tests/Modules/Build-AndroidStorageDeviceValidation.ps1 -Architecture Both
+./Tools/Tests/Modules/Run-AndroidStorageDeviceValidation.ps1 -Serial '<authorized-device>' -Mode wrappers -Abi arm64-v8a -Install
+./Tools/Tests/Modules/Run-AndroidStorageDeviceValidation.ps1 -Serial '<authorized-device>' -Mode wrappers -Abi armeabi-v7a -Install
+```
+
+The terminal result is `FILE_SYSTEM_DEVICE_WRAPPERS_PASSED`. The runner also
+requires `WrapperContractsPassed: true` and
+`BackgroundWrapperContractsPassed: true`, in addition to the fresh run ID,
+current PID, ABI pointer size, IL2CPP and shared production startup flags.
+These tests do not invoke the SAF picker or change persisted grants. All other
+modes also run the enhanced main-thread contracts; modes other than `jar`
+run the enhanced worker-thread contracts before their remaining checks.
+Reference-constructor accessibility and generic constraint metadata are covered
+by the separate managed generator validation. Java assignability
+checks use JVM runtime types; erased Java type arguments are not runtime type
+checks.
+
+## Shared production startup regressions
+
+Every mode, including `jar`, requires `AndroidRuntime.IsInitialized` after
+production initialization has registered new-intent, activity-result, and real
+keyboard proxies. SDK level, target SDK **35**, and the positive version code
+must match direct generated package-metadata queries.
+
+The Java probe dispatches through the production activity to check one new
+intent, non-null and null activity results, and A-key down/up events. Managed
+subscribers verify the intent payload/result codes; the key checks read actual
+`AndroidKeyboard` state. Callbacks run on the Android UI thread and must complete
+within ten seconds. These controlled dispatches test the registered bridge;
+they do not replace the real provider picker in `full` mode.
+
+Only after these checks does the harness emit
+`FILE_SYSTEM_DEVICE_RUNTIME_INIT_PASSED`, with `RuntimeInitialized`,
+`RuntimeCallbacksPassed`, and `RuntimeKeyboardPassed` all true. This marker is
+intermediate; each run still requires its selected mode's terminal result.
+The latest dated `RESULTS.md` entry indexes the source/APK/wrapper/run-hash
+evidence bundle and companion isolated Editor/Android script-compilation log;
+Editor checks and Player compilation do not replace per-ABI device execution.
+
+Every mode also checks conversion of a real `java.lang.String` through
+`ToWrapper<T>` and `FromHandle<T>`, including borrowed/independent ownership and
+rejection of conversion to `android.net.Uri` without invalidating the input.
+`JavaObject.As<T>()` must also reject incompatible types, return an independent
+owned reference, and keep that result valid after its source wrapper is disposed.
+First and repeated static access to a controlled erroneous Java class must retain
+`ExceptionInInitializerError` and `NoClassDefFoundError`, respectively.
+Invalid `Integer.parseInt` input must throw the generated `NumberFormatException`
+with a live throwable reference, the exact Java class name and its Java stack
+trace. The harness disposes that throwable and checks subsequent JNI dispatch.
+These checks emit the intermediate `FILE_SYSTEM_DEVICE_JNI_WRAPPERS_PASSED`
+marker. They require a fresh APK and per-ABI device run; prior `RESULTS.md`
+entries do not establish coverage of these added cases.
+
+## Descriptor stream regressions
+
+The `full`, `replay`, `release`, and `streams` modes run real Android file/pipe
+fixtures before any picker. The fixtures
+reflectively adopt `AssetFileDescriptor` instances through the production Java
+`StreamHandle` constructor and the production managed `AndroidDocumentStream`
+constructor. They are **not** a replacement for the provider-open path, which
+continues to run in `full`/`replay` mode. Temporary files are unlinked after opening;
+closing their sole descriptor owners reclaims them, including sparse files.
+
+Coverage includes declared asset slices with prefix/suffix sentinels, whole-file
+length discovery, unknown-length and known-length pipes, all seek origins,
+position setters, signed bytes, EOF/rewind, rejected negative/overflowing offsets,
+default `CopyTo`/`CopyToAsync`, dynamic output lengths, sequential append,
+descriptor closure and idempotent close/dispose. Sparse files verify actual reads
+and writes at `(1L << 32) + 17` without allocating or copying multi-gigabyte buffers.
+These cases also check 64-bit Java/JNI result values; compile-only checks do not
+establish runtime or ABI correctness.
+
+Build a fresh isolated APK, then run the picker-free subset on each actual ABI:
+
+```powershell
+./Tools/Tests/Modules/Build-AndroidStorageDeviceValidation.ps1 -Architecture Both
+./Tools/Tests/Modules/Run-AndroidStorageDeviceValidation.ps1 -Serial <authorized-device> -Mode streams -Abi arm64-v8a -Install
+./Tools/Tests/Modules/Run-AndroidStorageDeviceValidation.ps1 -Serial <authorized-device> -Mode streams -Abi armeabi-v7a -Install
+```
+
+The terminal marker is `FILE_SYSTEM_DEVICE_STREAMS_PASSED`. Earlier recorded
+results do not cover newly added seek regressions unless the matching fresh-run
+evidence explicitly says so. A streams-only run does not create a provider child;
+its provider-child `CleanupSucceeded` result field is not applicable.
+
+## APK jar resource regressions
+
+Build a fresh universal APK, then install and execute it once for each ABI:
+
+```powershell
+./Tools/Tests/Modules/Build-AndroidStorageDeviceValidation.ps1 -Architecture Both
+./Tools/Tests/Modules/Run-AndroidStorageDeviceValidation.ps1 -Serial '<device-serial>' -Mode jar -Abi arm64-v8a -ApkPath 'Temp/AndroidStorageDeviceValidation/Artifacts/storage-validation-Both.apk' -Install
+./Tools/Tests/Modules/Run-AndroidStorageDeviceValidation.ps1 -Serial '<device-serial>' -Mode jar -Abi armeabi-v7a -ApkPath 'Temp/AndroidStorageDeviceValidation/Artifacts/storage-validation-Both.apk' -Install
+```
+
+The builder disables per-CPU APK splitting and OBB expansion files. The packaged
+fixtures remain inside the APK. `-Install` replaces only the dedicated validation
+package while preserving its data and grants; do not uninstall or clear its data
+to switch ABI. Keep the device unlocked. This mode opens no SAF picker and does
+not acquire, release, or change persisted grants or their saved state.
+
+The fixture directory is staged at `Assets/StreamingAssets/JarValidation` in the
+isolated project. Checks open the actual `Application.streamingAssetsPath`,
+require a `jar:file:` root, and cover:
+
+- UTF-8 text, an empty entry, nested directory lookup and immediate enumeration,
+  case-sensitive absence, and a deterministic **65,553-byte** binary pattern.
+- Synchronous and asynchronous reads, names containing spaces, `#`, CJK text,
+  and literal `%20`, and reopening authoritative escaped child locations.
+- Independently owned read streams, EOF, repeated disposal, and reopening.
+- `CopyTo` and `CopyToAsync` extraction into a unique app-owned scratch directory,
+  exact copied bytes, and pre-cancelled reads/copies without a new destination.
+- Rejected APK writes, creation, rename, move, deletion, attributes, timestamps,
+  and replacement, with local replacement sentinels retained.
+- A separately generated app-private ZIP containing a verified compressed entry,
+  read and extracted through the same `jar:` backend under IL2CPP. This supplies
+  deflate coverage independently of Unity's APK asset compression policy; it is
+  not evidence that the packaged APK fixtures themselves were deflated.
+
+The expected terminal marker is **`FILE_SYSTEM_DEVICE_JAR_PASSED`**. Intermediate
+`RUNTIME_INIT_PASSED` and `JAR_*_PASSED` markers do not establish completion.
+A successful terminal result
+also requires removal of the unique local extraction/ZIP fixture directory and
+`CleanupSucceeded: true`; the installed APK and app data parent are retained.
+
+The runner supplies a unique `validationRunId` launch extra and retains URI-free
+result JSON and private process logs under the ignored
+`Temp/AndroidStorageDeviceValidation/DeviceResults` directory. For normal launched
+runs, it matches the terminal JSON's `RunId`, `Mode`, current `ProcessId`, requested
+ABI's `PointerSize` (**8** for ARM64, **4** for ARMv7), `EnableIl2Cpp: true`, the
+three startup/callback flags, matching runtime metadata, and terminal marker.
+Retain `SdkInt` as the actual device API level, together with the
+APK SHA-256 and build log. A universal APK or successful build alone does not
+establish either ABI's runtime result. After the shared production startup and
+callback checks, `jar` mode skips the broader JNI, descriptor-stream, and
+provider/persisted-permission suites.
+
+## Launch protocol and durable files
+
+Launch extra: **`validationMode`**, a string:
+
+- Missing, empty, `full`, or compatibility alias `pick`: run automatic JNI
+  checks, open the real SAF directory picker, and run the binary storage check.
+- **`replay`**: never open the picker. Read private saved state, require a
+  successful `full` run and a different process ID, verify persisted read/write
+  access, reopen the grant, and run a fresh binary check in a new owned child.
+- **`streams`**: run JNI and controlled descriptor/managed-adapter regressions,
+  then exit without opening a picker or acquiring/releasing URI grants. This mode
+  does not cover provider dispatch or persisted SAF permissions.
+- **`jar`**: test actual APK resources and an app-private compressed ZIP through
+  production storage APIs, then remove its unique local scratch directory.
+  Require the shared production initialization, metadata, and real callback
+  checks; read launch mode, SDK, PID, and bitness through generated wrappers.
+  Skip the broader JNI/descriptor/provider suites and leave persisted grants
+  untouched.
+- **`release`**: optionally finish grant ownership bookkeeping. Release only a
+  grant that did **not** exist in the pre-picker snapshot. A preexisting grant
+  is retained, including any additional write access the picker may have added.
+
+All modes run the shared production startup checks; all modes except `jar` also
+run the broader automatic JNI preflight. A new `full` run refuses
+to overwrite an active grant state: first use `replay` / `release` as appropriate. Do not use
+`pm clear`, uninstall, or revoke the grant between `full` and `replay`; that
+would destroy the persistence experiment. Replace-installing an APK preserves
+state, but must preserve package identity/signing. Wait for the terminal full
+marker before force-stopping.
+
+The runner also passes the optional string extra **`validationRunId`**. The
+harness uses it as `RunId`; direct manual launches without it generate a fresh
+identifier. `-ObserveOnly` validates the observed process and terminal result,
+but cannot match a launch identifier it did not supply.
+
+Files live at **`Application.persistentDataPath`**:
+
+| Basename | Contents |
+| --- | --- |
+| **`android-storage-device-result.json`** | URI-free status; overwritten and flushed at each phase |
+| **`android-storage-device-result.txt`** | Latest marker and non-sensitive explanation, also flushed |
+| **`android-storage-device-state.json`** | Private grant URI, complete pre-picker URI snapshot, grant ownership, full-process ID, completion state, and any currently owned child URI |
+
+Result JSON uses PascalCase field names: `Marker`, `Terminal`, `Mode`, `RunId`,
+`EnableIl2Cpp`, `PointerSize`, `SdkInt`, `ProcessId`, `ProviderReadCanSeek`,
+`RuntimeInitialized`, `RuntimeSdkVersion`, `RuntimeTargetSdkVersion`,
+`RuntimeVersionCode`, `RuntimeCallbacksPassed`, `RuntimeKeyboardPassed`,
+`ProviderWriteCanSeek`, `CleanupSucceeded`,
+`GrantWasPreexisting`, `GrantReleased`, `ErrorType`, `Detail`, and `UpdatedUtc`.
+`Terminal: false` means progress, **not** an overall pass. Only a mode's terminal
+marker with `Terminal: true` is a completed outcome. Do not mistake
+`RUNTIME_INIT_PASSED`, `JNI_PASSED`, `BINARY_PASSED`, or `CLEANUP_PASSED` for
+`FULL_PASSED`.
+
+Each local file write uses `FileStream.Flush(true)`. These are ordinary local
+files, not provider streams. The files are not a transaction: process death
+*during* an overwrite can leave an incomplete file. Treat missing, malformed,
+stale, or nonterminal results as incomplete, never as a pass. Compare the
+invocation's `RunId`, `Mode`, and `ProcessId` with the observed launch. A runner
+should poll logcat and then capture the terminal JSON/text as durable evidence.
+
+On Android, persistentDataPath is normally the app-specific external files
+path, for example `/sdcard/Android/data/net.majdata.storagevalidation/files`.
+`run-as net.majdata.storagevalidation cat files/...` refers to the **internal**
+files directory and is not generally the correct location. Verify the actual
+persistentDataPath if this device/configuration differs. The dedicated package
+is debuggable, so `run-as` can read the app's own result files. Keep the **state
+file private**: it intentionally contains the selected grant URI and is not
+suitable for public logs, issue attachments, or commits.
+
+## Concrete physical-device run
+
+The provided scripts can build the isolated universal APK and select one
+ABI during installation. In PowerShell, from the repository root:
+
+```powershell
+./Tools/Tests/Modules/Build-AndroidStorageDeviceValidation.ps1 -Architecture Both
+./Tools/Tests/Modules/Run-AndroidStorageDeviceValidation.ps1 -Serial '<device-serial>' -Install -Abi arm64-v8a -Mode full
+```
+
+Keep the device unlocked and watch for:
+
+```text
+FILE_SYSTEM_DEVICE_PICKER_READY
+```
+
+In **real DocumentsUI**, navigate to a dedicated disposable scratch directory
+and choose "Use this folder" / confirm read/write access. Do not inject a URI,
+fabricate an activity result, or replace the provider with a mock. Prefer the
+local Documents provider for this minimum test. The harness never deletes,
+renames, or writes a file directly in the selected parent: all content goes in
+one `MajdataPlay-validation-<guid>` child that it created, which is removed in
+`finally`.
+
+Wait for `FILE_SYSTEM_DEVICE_FULL_PASSED`. Then:
+
+```powershell
+./Tools/Tests/Modules/Run-AndroidStorageDeviceValidation.ps1 -Serial '<device-serial>' -Abi arm64-v8a -Mode replay
+```
+
+The runner force-stops **only the dedicated validation package** before launch.
+Replay must reach `FILE_SYSTEM_DEVICE_REPLAY_PASSED` without any picker. Run the
+optional `release` mode after recording replay evidence. If a runner version
+has not exposed release yet, use the explicit ADB launch below rather than
+clearing all app data or modifying the private state.
+
+Equivalent explicit ADB protocol (commands shown for the parent/operator;
+this agent does not execute them):
+
+```powershell
+$adb = 'C:/Program Files/Unity Editors/6000.3.17f1/Editor/Data/PlaybackEngines/AndroidPlayer/SDK/platform-tools/adb.exe'
+$serial = '<device-serial>'
+$package = 'net.majdata.storagevalidation'
+$component = "$package/net.majdata.majdataplay.MajdataPlayActivity"
+$apk = 'Temp/AndroidStorageDeviceValidation/Artifacts/storage-validation-Both.apk'
+& $adb -s $serial install --abi arm64-v8a -r $apk
+& $adb -s $serial shell am force-stop $package
+& $adb -s $serial shell am start -n $component --es validationMode full
+# Operate DocumentsUI only after FILE_SYSTEM_DEVICE_PICKER_READY; await FULL_PASSED.
+$deviceFiles = '/sdcard/Android/data/net.majdata.storagevalidation/files'
+& $adb -s $serial shell run-as $package cat "$deviceFiles/android-storage-device-result.json"
+& $adb -s $serial shell run-as $package cat "$deviceFiles/android-storage-device-result.txt"
+& $adb -s $serial shell am force-stop $package
+& $adb -s $serial shell am start -n $component --es validationMode replay
+# Await REPLAY_PASSED and retain its result before the next launch overwrites it.
+& $adb -s $serial shell run-as $package cat "$deviceFiles/android-storage-device-result.json"
+& $adb -s $serial shell am force-stop $package
+& $adb -s $serial shell am start -n $component --es validationMode release
+# Await RELEASE_PASSED; GrantReleased=false means an original grant was retained.
+```
+
+For ARMv7, install with `--abi armeabi-v7a` (or the runner's `-Abi armeabi-v7a`)
+and repeat `full` + `replay` after the previous ownership state is finished.
+A universal APK alone does not prove both ABIs ran. Check real runtime
+`PointerSize` **8** for ARM64 and **4** for ARMv7. The probe also checks
+`android.os.Process.is64Bit()` against managed pointer size. These probe APIs
+are available on API 35; the generator's compile-time API 36 does not force an
+API-36-only runtime call.
+
+The runner can separate launching from observation with `-StartOnly` /
+`-ObserveOnly`, where supported. Logcat should be filtered to the newly started
+validation process; other Unity applications or stale log lines are not valid
+evidence.
+
+## Minimum implemented checks
+
+All modes first run the shared production startup regressions described above.
+Modes other than `jar` also run the following checks before opening any picker:
+
+1. A result field and `FILE_SYSTEM_DEVICE_IL2CPP_PASSED` verify the **actual**
+   `ENABLE_IL2CPP` compilation flag. Defining an unrelated validation symbol is
+   not sufficient.
+2. Generated `UnityPlayer.CurrentActivity` and `Activity.GetIntent()` read the
+   launch mode. There is no assumed `Activity.Current` API.
+3. Generated Intent construction, fluent `AddFlags`, typed probe result,
+   disposal of independently owned returned references, and null-reference
+   propagation.
+4. Generated `View.KeyEvent(ActionDown, KeycodeA)`, `GetAction`, `GetKeyCode`,
+   typed returns, borrowed-reference disposal that leaves the owner live,
+   adoption of an untyped owned Java result, idempotent wrapper disposal, and
+   disposed-wrapper rejection. `KeycodeA` follows the real generator's naming.
+5. An independently owned `sbyte[]` result preserves bit patterns
+   **0, 127, 128, 255**, without aliasing the input; null arrays are preserved.
+6. String UTF-16 round-trip includes embedded NUL, a CJK character, and a
+   supplementary character; null strings are preserved.
+7. An intentional Java `IllegalStateException` becomes
+   `JavaInvocationException`, retains the sentinel/Java stack, leaves no JNI
+   exception pending, and permits a subsequent generated call.
+8. Real, separately constructed `java.lang.String` objects compare by Java
+   value through `Equals`, `==`, and `!=`; `"polygenelubricants"` returns the
+   signed Java hash **-2,147,483,648** and its original text from `ToString`.
+   `Dictionary<JavaObject, string>` lookup and `HashSet<JavaObject>`
+   deduplication use the same equality/hash contract. Distinct `java.lang.Object`
+   instances retain Java identity semantics; borrowed aliases, including a
+   base wrapper around generated KeyEvent, remain equal with matching hashes.
+   Disposed wrappers retain managed identity/null comparison fast paths and
+   reject methods or comparisons requiring their Java reference, while the
+   borrowed reference's owner remains live.
+9. Repeat JNI checks on a genuine background thread with
+   `AndroidJNI.InvokeAttached`. Managed exceptions are caught **inside** the
+   attachment callback using `ExceptionDispatchInfo` and rethrown **outside**.
+   Owned wrappers are disposed before leaving the attachment scope.
+10. Schedule a managed UI callback through production `Activity.RunOnUiThread`
+   and its generated Runnable + Unity proxy adapter; await it with a ten-second
+   timeout. The callback captures failures rather than throwing through native
+   reverse JNI.
+
+Full and replay storage checks:
+
+- Snapshot persisted grant locations **before** the real picker.
+- Request writable + persistable access with the owner token; confirm the
+  exact selected original URI appears in `GetPersistedPermissions` with read
+  and write flags.
+- Reopen the selected directory through production `FileSystem.Directory.Open`
+  during replay, with no new picker grant and a different process ID.
+- Create a unique owned child and an empty binary document. Write/read
+  **197,121 bytes**, containing all 256 byte values, using production async
+  helpers and several transfers exceeding the 64-KiB JNI boundary.
+- Check every byte and length; production helpers offload provider work and
+  deterministically dispose their streams.
+- Move a document into an owned child directory while asserting the previous
+  location is gone, enumerate the immediate children through the provider
+  cursor, rename the file within its parent and require the new name to resolve
+  with the bytes intact, and reject both a move and a rename onto an occupied
+  sibling name without changing either document.
+- Require a readable non-seekable provider stream whose length, position and
+  seek queries are rejected, then write with explicit truncate and append modes
+  and read the concatenated bytes back.
+- Reject a pre-cancelled read, reject traversal and separator child names before
+  the provider is contacted, delete one owned file while confirming removal
+  through its parent directory and recording whether a repeated delete or a
+  query for the previous URI stays harmless or reports an unresolvable document,
+  and reject a nonrecursive deletion of a nonempty directory.
+- Copy a local file into the grant and copy it back to a local file, accept a
+  provider attribute request without any stored hidden/system flag being
+  reported, and record a directory rename as supported or refused.
+- Delete only the owned created child in `finally`, **without using the
+  cancelled lifetime token for cleanup**. Successful cleanup is required for
+  the terminal pass. Preserve the selected parent and the grant for replay.
+- Optional release never intentionally releases a preexisting grant.
+
+## Markers, failure handling, and safety limits
+
+The screen and logcat use `FILE_SYSTEM_DEVICE_*_(READY|PASSED|FAILED)` markers.
+Important intermediate markers are `BOOT_READY`, `IL2CPP_PASSED`,
+`RUNTIME_INIT_PASSED`, `JNI_PASSED`,
+`BACKGROUND_JNI_PASSED`, `UI_CALLBACK_PASSED`, `PICKER_READY`,
+`PERSISTED_GRANT_PASSED`, `BINARY_PASSED`, `MOVE_PASSED`, `TIMESTAMP_PASSED`,
+`ENUMERATION_PASSED`, `RENAME_PASSED`, `STREAM_PASSED`, `APPEND_PASSED`,
+`CANCELLATION_PASSED`, `COLLISION_PASSED`, `NAME_REJECTION_PASSED`,
+`DELETE_PASSED`, `NONRECURSIVE_DELETE_PASSED`, `COPY_PASSED`,
+`ATTRIBUTES_PASSED`, `DIRECTORY_RENAME_PASSED`, and `CLEANUP_PASSED`, all
+prefixed with `FILE_SYSTEM_DEVICE_`. A `*_SKIPPED` marker
+(`TIMESTAMP_SKIPPED`, `DIRECTORY_RENAME_SKIPPED`) records a capability the
+provider refused; it is neither a pass nor a failure. Terminal success is
+`FULL_PASSED`, `REPLAY_PASSED`, `RELEASE_PASSED`, `STREAMS_PASSED`, or
+`JAR_PASSED`; failure uses the selected mode's `*_FAILED`. If result writing
+itself fails, `FILE_SYSTEM_DEVICE_RESULT_FAILED` is logged as an observable
+infrastructure failure.
+
+A tracked ordinary `Task` has a top-level failure boundary. `OnDestroy` cancels
+its owner token; cancellation/provider/cleanup failures produce a terminal
+failure rather than a false pass. Exception **types** and the last phase are
+recorded, but provider exception messages/stacks are suppressed because they
+can contain private document URIs. The deliberate Java sentinel is checked,
+not printed. A dismissed picker is a failure to complete this controlled test.
+
+An Android force-stop, crash, or device power loss cannot execute managed
+`finally`. Do not stop during an active storage phase. An interrupted run can
+leave its test-owned child; `ActiveChildLocation` in **private** state diagnoses
+that case and replay refuses to proceed. Inspect/remove only that specifically
+created child while access remains available; do not release its grant first,
+edit state blindly, recursively clean the selected parent, or treat this case
+as successful cleanup. The minimum harness does not automatically recover
+orphans after an abrupt process kill.
+
+## Explicitly deferred coverage
+
+The harness now covers move/rename with provider-identity assertions,
+enumeration, stream property rejection, append/truncate, pre-cancellation,
+invalid child names, sibling collisions, single-file deletion, nonrecursive
+nonempty-directory rejection, local-to-SAF and SAF-to-local copy, provider
+attribute no-ops, and directory renames. Stream/cursor closure is exercised by
+the production helper paths and child cleanup, not proved by a native resource
+counter.
+
+The SAF provider suite still deliberately does **not** implement text
+encodings/BOMs, early cursor disposal regression loops, in-flight cancellation
+after a transfer has started,
+missing-file error cases, revocation or provider loss during a transfer, or
+provider descriptor-count leak measurement.
+
+Cloud providers, picker dismissal/cancellation races, read-only/revoked grants,
+unknown metadata, concurrent provider mutations, hardware/device differences,
+release-mode runtime behavior, and other platforms remain separate validation
+work. Do not claim these cases passed from this minimum suite. Both ARM64 and
+ARMv7 IL2CPP execution, real DocumentsUI selection, and a force-stop replay
+require parent-run physical-device evidence.

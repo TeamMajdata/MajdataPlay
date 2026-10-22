@@ -90,7 +90,7 @@
 Windows build 命令：
 
 ```powershell
-& Tools/Tests/FFmpegValidation/run-unity.ps1 `
+& Tools/Tests/Modules/FFmpegValidation/run-unity.ps1 `
   -UnityEditor 'C:/Program Files/Unity Editors/6000.3.17f1/Editor/Unity.exe' `
   -Platform Linux -Backend Mono -Architecture x64 -Graphics glcore -BuildOnly `
   -WorkDirectory Tools/FFmpeg/.build/linux-audit-20261008/unity
@@ -103,7 +103,7 @@ Windows build 命令：
 ```bash
 root="$PWD/Tools/FFmpeg/.build/linux-audit-20261008"
 libs="$PWD/Assets/Plugins/MajdataPlay/FFmpeg/Native/Linux/x86_64"
-TMPDIR="$root/tmp" env -u LD_LIBRARY_PATH python3 "$root/run-repo-shell.py"   "$PWD/Tools/Tests/FFmpegValidation/run-linux.sh" "$libs"
+TMPDIR="$root/tmp" env -u LD_LIBRARY_PATH python3 "$root/run-repo-shell.py"   "$PWD/Tools/Tests/Modules/FFmpegValidation/run-linux.sh" "$libs"
 env -u LD_LIBRARY_PATH python3 Tools/FFmpeg/Native/tests/LoadLinuxBridge.py   "$libs/libFFmpegUnityBridge.so"
 env -u LD_LIBRARY_PATH bash "$root/run-linux-player-lf.sh" glcore "$root/unity/Linux-x64-Mono"
 env -u LD_LIBRARY_PATH bash "$root/run-linux-player-lf.sh" vulkan "$root/unity/Linux-x64-Mono"
@@ -118,8 +118,8 @@ C11 录制检查使用 `-std=c11 -Wall -Wextra -Werror`、绑定 include、当�
 | 文件 | bytes 变化 | 实际改动 |
 | --- | --- | --- |
 | `Tools/FFmpeg/build.sh` | 148 → 144 | 去除 4 个 CRLF 中的 CR |
-| `Tools/Tests/FFmpegValidation/run-linux.sh` | 923 → 904 | 去除 19 个 CRLF 中的 CR |
-| `Tools/Tests/FFmpegValidation/run-linux-player.sh` | 1456 → 1421 | 去除 35 个 CRLF 中的 CR |
+| `Tools/Tests/Modules/FFmpegValidation/run-linux.sh` | 923 → 904 | 去除 19 个 CRLF 中的 CR |
+| `Tools/Tests/Modules/FFmpegValidation/run-linux-player.sh` | 1456 → 1421 | 去除 35 个 CRLF 中的 CR |
 
 转换后字节逐一断言等于转换前 `bytes.replace(b'\r\n', b'\n')`，LF-normalized SHA256 完全一致，且没有残留 CR；未改变逻辑、缩进或其他脚本。主 agent 负责 `.gitattributes` 的 shell LF 规则，本 agent 没有编辑 `.gitattributes`、`build.py` 或 README。
 
@@ -127,10 +127,10 @@ WSL 直接对原始路径执行：
 
 ```bash
 bash -n Tools/FFmpeg/build.sh
-bash -n Tools/Tests/FFmpegValidation/run-linux.sh
-bash -n Tools/Tests/FFmpegValidation/run-linux-player.sh
+bash -n Tools/Tests/Modules/FFmpegValidation/run-linux.sh
+bash -n Tools/Tests/Modules/FFmpegValidation/run-linux-player.sh
 TMPDIR="$PWD/Tools/FFmpeg/.build/linux-audit-20261008/tmp" \
-  env -u LD_LIBRARY_PATH bash Tools/Tests/FFmpegValidation/run-linux.sh
+  env -u LD_LIBRARY_PATH bash Tools/Tests/Modules/FFmpegValidation/run-linux.sh
 ```
 
 **三份 `bash -n` 均 PASS。直接原 `run-linux.sh` PASS，退出 0，144 checks**：staged avformat 绝对 dlopen、自身 `$ORIGIN` 依赖解析，H.264 1920×1080 / 30 frames，RGBA 0–177，checksum `ae2450db4c195031`，与先前结果一致。已修正按 README 直接运行的复现障碍；没有重跑 encoder 或 Unity Player 长测试，也没有变更先前结果及平台/硬件限制。
@@ -152,7 +152,7 @@ TMPDIR="$PWD/Tools/FFmpeg/.build/linux-audit-20261008/tmp" \
 - `Assets/Plugins/MajdataPlay/FFmpeg/Native/Linux/x86_64/libva-drm.copyright`
 - `Assets/Plugins/MajdataPlay/FFmpeg/Native/Linux/x86_64/libdrm.copyright`
 - `Tools/FFmpeg/LINUX-AUDIT-20261008.md`（本报告）。
-- 后续仅换行授权：`Tools/FFmpeg/build.sh`、`Tools/Tests/FFmpegValidation/run-linux.sh`、`Tools/Tests/FFmpegValidation/run-linux-player.sh`。
+- 后续仅换行授权：`Tools/FFmpeg/build.sh`、`Tools/Tests/Modules/FFmpegValidation/run-linux.sh`、`Tools/Tests/Modules/FFmpegValidation/run-linux-player.sh`。
 
 三个 copyright 仅恢复原始 LF 字节，内容与 index 一致；预期 tracked 内容 diff 只有 bridge 二进制、bridge manifest 和本报告。所有新增 helper/构建/Player/媒体/日志在忽略缓存；`run-linux.sh` 原有忽略 `.work/linux-native.txt` 由正常测试入口写入。
 

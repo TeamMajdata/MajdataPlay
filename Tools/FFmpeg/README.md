@@ -189,7 +189,7 @@ Unity Windows ARM64 Player importer 使用 `Standalone: Win64` 与 `CPU: ARM64`�
 # MSYS fork/DLL 初始化受本机环境影响时：使用已有 WSL 与 Linux 主机版工具链
 .\Tools\FFmpeg\build.ps1 -UseWsl -WslDistribution Ubuntu-24.04 -Targets win-arm64 -BuildRoot /tmp/majdata-ffmpeg-windows-arm64 -RequireAll -Jobs 8
 # 离线配方回归；不代表 ARM64 DLL 已实际运行
-python -B Tools/Tests/FFmpegBuildValidation/test_windows_arm64.py
+python -B Tools/Tests/Modules/FFmpegBuildValidation/test_windows_arm64.py
 # 产物源码/架构/导出/导入器验证；无 ARM64 主机时不尝试加载其 DLL
 python Tools/FFmpeg/verify-artifacts.py --targets win-x86,win-x64,win-arm64 --skip-host-load
 ```
@@ -212,7 +212,7 @@ CMake 默认优先 Ninja；没有 Ninja 时 Windows 使用 `mingw32-make` / `Min
 使用项目的 native smoke/decode 测试以及 Unity 的 Mono/IL2CPP Player 验证版本、打开、解码、seek 和退出。
 `python Tools/FFmpeg/verify-artifacts.py` 可复查所有已 stage 库的 SHA256、PE/ELF/Mach-O 目标架构、Apple device/simulator 平台标记、Android 16 KiB LOAD 对齐、Linux 运行时依赖及许可哈希，以及当前主机的 FFmpeg ABI 加载。新构建的 manifest 记录 `softwareDecoders`；主机可加载的产物另检查 `avcodec_find_decoder_by_name("libdav1d")`，避免缺失 AV1 软件回退的构建误报成功。导出符号检查不等同于实际视频解码验证。
 包含 `recordingProfile` 的主机产物还检查 `avcodec_find_encoder_by_name()` 和 `av_guess_format()`，防止缺少编码器或封装器；该检查不打开实际设备，也不证明某 GPU 的 CBR/VBR、最大码率或录制集成通过。
-2026-10-05 的隔离 Windows x64 录制构建已通过。独立验证以真实编码文件重新解码，验证 MPEG-4 软件 CBR/VBR、帧顺序/方向，以及 Radeon RX 580 2048SP 的 H.264 AMF CBR/VBR；200,000 bit/s CBR 目标分别测得软件 MPEG-4 199,976 bit/s、AMF H.264 200,000 bit/s。该记录属于原生编码/解码与托管会话验证；Unity Camera、其他平台和其他硬件后端的结果应分别参考 [录制验证记录](../Tests/FFmpegValidation/RESULTS.md)，不能由此推断通过。
+2026-10-05 的隔离 Windows x64 录制构建已通过。独立验证以真实编码文件重新解码，验证 MPEG-4 软件 CBR/VBR、帧顺序/方向，以及 Radeon RX 580 2048SP 的 H.264 AMF CBR/VBR；200,000 bit/s CBR 目标分别测得软件 MPEG-4 199,976 bit/s、AMF H.264 200,000 bit/s。该记录属于原生编码/解码与托管会话验证；Unity Camera、其他平台和其他硬件后端的结果应分别参考 [录制验证记录](../Tests/Modules/FFmpegValidation/RESULTS.md)，不能由此推断通过。
 Linux stage 会附带 `libva.so.2`、`libva-drm.so.2`、`libdrm.so.2` 和对应许可，避免软件播放也因缺少这些直接依赖而无法加载 FFmpeg。厂商 GPU 驱动仍由目标系统提供。使用自定义 sysroot 时，开发文件和运行时库应属于同一套版本；许可默认从 sysroot 的发行版文档查找，也可通过 `FFMPEG_LINUX_RUNTIME_LICENSE_DIR` 提供 `libva.copyright`、`libva-drm.copyright`、`libdrm.copyright`。
 Apple 五个目标的实际构建、原生 Metal/VideoToolbox 测试及当前限制见 [APPLE-RESULTS.md](APPLE-RESULTS.md)。
 macOS 发布需要应用签名/公证；包含上述 GPL 编码器的库以及静态链接程序应按其 GPL 许可要求分发。

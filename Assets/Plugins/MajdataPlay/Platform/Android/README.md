@@ -62,7 +62,7 @@ assets and are updated by the standalone build. Handwritten partial extensions
 such as `src/Bindings/Android/App/Activity.e.cs` and the numeric conversions are
 tracked beside `.g.cs` files. The DLL importer `.meta` remains tracked and retains
 its GUID across rebuilds. The legacy generator's runtime fixtures
-live under `Tools/Tests/AndroidJavaGeneratorValidation/Fixtures/LegacyRuntime`.
+live under `Tools/Tests/Modules/AndroidJavaGeneratorValidation/Fixtures/LegacyRuntime`.
 
 ## Editor refresh and migration
 
@@ -155,10 +155,10 @@ checked against the production `StorageAccess.java` source. All 338 public
 
 ## Validation
 
-Run `Tools/Tests/AndroidJavaWrapperGeneratorValidation` with `--editor-inputs`
+Run `Tools/Tests/Modules/AndroidJavaWrapperGeneratorValidation` with `--editor-inputs`
 for the complete real Java input set and production consumer compilation in
 Editor, Android Editor, and Android Player conditions. Run
-`Tools/Tests/ValidateAndroidJavaWrapperRefreshUnity.ps1` for real isolated Unity
+`Tools/Tests/Modules/ValidateAndroidJavaWrapperRefreshUnity.ps1` for real isolated Unity
 refresh, import, compilation, cancellation, and repeated GUID/timestamp checks.
 `ValidateFileSystemUnity.ps1` checks the generated API, key codes, ownership,
 platform guards, and selected Player compilation in an isolated project.
@@ -175,5 +175,5 @@ The storage device harness now stages the production keyboard and requires
 non-null and null activity results, and key-down/key-up callbacks before emitting
 `RUNTIME_INIT_PASSED`. This is an intermediate regression marker; require the
 selected mode's terminal result and matching run/ABI evidence for a completed
-device run. See `Tools/Tests/AndroidStorageDeviceValidation/README.md` and its
+device run. See `Tools/Tests/Modules/AndroidStorageDeviceValidation/README.md` and its
 dated `RESULTS.md` for commands and executed coverage.

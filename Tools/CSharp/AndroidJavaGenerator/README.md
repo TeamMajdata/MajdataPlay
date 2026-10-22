@@ -3,7 +3,7 @@
 This analyzer is retained for legacy regression validation. The main Unity
 project uses the standalone AndroidJavaWrapperGenerator CLI and Runtime/Bindings.
 Its former runtime support sources are archived under
-Tools/Tests/AndroidJavaGeneratorValidation/Fixtures/LegacyRuntime.
+Tools/Tests/Modules/AndroidJavaGeneratorValidation/Fixtures/LegacyRuntime.
 
 本工具为 `MajdataPlay.Platform.Android` 提供 `[JavaClass("binary.ClassName")]`。
 生成代码留在 Roslyn compilation 内，不把 `.g.cs` 写回 `Assets`，不改 Unity
@@ -333,8 +333,8 @@ wrapper 的 C# 声明，或通过 Unity 的 CompilationPipeline 请求带
 ## 验证与明确限制
 
 ```powershell
-dotnet run --project Tools/Tests/AndroidJavaGeneratorValidation/AndroidJavaGeneratorValidation.csproj
-./Tools/Tests/ValidateAndroidJavaGeneratorUnity.ps1
+dotnet run --project Tools/Tests/Modules/AndroidJavaGeneratorValidation/AndroidJavaGeneratorValidation.csproj
+./Tools/Tests/Modules/ValidateAndroidJavaGeneratorUnity.ps1
 ```
 
 托管验证链接生产 runtime/generator，并使用真实 Unity assemblies 和 Unity

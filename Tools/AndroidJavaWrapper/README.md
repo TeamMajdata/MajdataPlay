@@ -111,8 +111,8 @@ storage device harness checks this state, metadata, new-intent and nullable
 activity-result dispatch, and key-down/key-up dispatch before emitting the
 intermediate `RUNTIME_INIT_PASSED` marker. A completed device regression also
 requires the selected mode's terminal result with fresh run/ABI evidence; consult
-`../Tests/AndroidStorageDeviceValidation/README.md` and its dated `RESULTS.md`.
+`../Tests/Modules/AndroidStorageDeviceValidation/README.md` and its dated `RESULTS.md`.
 
-See `../Tests/AndroidJavaWrapperGeneratorValidation/README.md` for managed
+See `../Tests/Modules/AndroidJavaWrapperGeneratorValidation/README.md` for managed
 regressions and the isolated Unity refresh smoke test. These checks do not establish
 Android JNI, IL2CPP, or device correctness.

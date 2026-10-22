@@ -1,0 +1,380 @@
+param(
+    [string] $UnityEditor = 'C:\Program Files\Unity Editors\6000.3.17f1\Editor\Unity.exe',
+    [ValidateSet('Mono', 'IL2CPP')][string] $Backend = 'Mono',
+    [ValidateSet('x64', 'x86', 'armv7', 'arm64')][string] $Architecture = 'x64',
+    [ValidateSet('Windows', 'Android', 'Linux')][string] $Platform = 'Windows',
+    [ValidateSet('d3d11', 'd3d12', 'glcore', 'vulkan')][string] $Graphics = 'd3d11',
+    [switch] $Hardware,
+    [switch] $RequireHardware,
+    [switch] $RequireNativeDecoder,
+    [switch] $TestRecovery,
+    [switch] $HardwareCpuUpload,
+    [switch] $TestDecoderPreference,
+    [switch] $TestDecodeOverload,
+    [switch] $TestPlaybackThroughput,
+    [switch] $RegularPlayer,
+    [ValidateRange(1, 60)][int] $DoubleRateSeconds = 3,
+    [ValidateRange(30, 1000)][int] $PlaybackTargetFrameRate = 60,
+    [switch] $DisableBurst,
+    [switch] $TestCameraCapture,
+    [switch] $TestAndroidContent,
+    [switch] $CaptureUrp,
+    [switch] $CaptureHardware,
+    [switch] $TestCaptureThroughput,
+    [ValidateSet('MPEG4', 'H264', 'HEVC', 'AV1', 'VP9')][string] $CaptureFormat = 'MPEG4',
+    [ValidateSet('CBR', 'VBR')][string] $CaptureRateControl = 'VBR',
+    [switch] $SkipBuild,
+    [switch] $BuildOnly,
+    [string] $NativeDirectory = '',
+    [string] $Media = '',
+    [string] $WorkDirectory = ''
+)
+$ErrorActionPreference = 'Stop'
+if ($TestAndroidContent -and ($Platform -ne 'Android' -or $Backend -ne 'IL2CPP')) { throw 'Native content device validation requires an Android IL2CPP Player.' }
+if ($DoubleRateSeconds -gt 3) { $RegularPlayer = $true }
+if ($CaptureUrp -or $CaptureHardware -or $TestCaptureThroughput) { $TestCameraCapture = $true }
+if ($TestCameraCapture -and $Platform -ne 'Windows') { throw 'Camera recording validation currently requires a Windows Player' }
+if ($RequireNativeDecoder) {
+    if ($Platform -ne 'Windows' -or $Graphics -notin @('d3d12', 'vulkan')) { throw 'Native decoder validation requires Windows D3D12 or Vulkan' }
+    $RequireHardware = $true
+}
+if (($HardwareCpuUpload -or $TestDecoderPreference) -and ($RequireHardware -or $TestRecovery)) { throw 'CPU transport / preference tests must permit CPU upload; do not combine with RequireHardware or TestRecovery' }
+if ($HardwareCpuUpload -or $TestDecoderPreference) { $Hardware = $true }
+if (($HardwareCpuUpload -or $TestDecoderPreference) -and $Platform -ne 'Windows') { throw 'Decoder preference / CPU transport validation currently requires a Windows Player' }
+if ($TestRecovery) { $RequireHardware = $true }
+if ($RequireHardware) { $Hardware = $true }
+if ($TestRecovery -and $Platform -ne 'Windows') { throw 'Recovery fault injection currently requires a Windows Player' }
+if (($Platform -eq 'Windows' -and $Architecture -notin @('x64','x86')) -or ($Platform -eq 'Android' -and $Architecture -notin @('armv7','arm64')) -or ($Platform -eq 'Linux' -and $Architecture -ne 'x64')) { throw 'Invalid platform / architecture combination' }
+if ($Platform -eq 'Android' -and $Architecture -eq 'arm64' -and $Backend -eq 'Mono') { throw 'Android ARM64 requires IL2CPP' }
+if ($Platform -eq 'Linux' -and $Backend -ne 'Mono') { throw 'This Windows-hosted Linux Player validation supports Mono; build Linux IL2CPP on a supported native toolchain separately' }
+if ($Platform -eq 'Linux' -and $Graphics -notin @('glcore','vulkan')) { throw 'Linux Player validation requires -Graphics glcore or vulkan' }
+$repo = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '../../../..')).Path
+$expectedUnityVersion = (Select-String -LiteralPath (Join-Path $repo 'ProjectSettings/ProjectVersion.txt') -Pattern '^m_EditorVersion: (.+)$').Matches[0].Groups[1].Value
+$selectedUnityVersion = [Diagnostics.FileVersionInfo]::GetVersionInfo($UnityEditor).ProductVersion
+if ($selectedUnityVersion -notmatch ('^' + [regex]::Escape($expectedUnityVersion) + '(?:_|$)')) {
+    throw "Use Unity $expectedUnityVersion; the selected executable reports $selectedUnityVersion."
+}
+$work = if (-not $WorkDirectory) { Join-Path $PSScriptRoot '.work' }
+    elseif ([IO.Path]::IsPathRooted($WorkDirectory)) { [IO.Path]::GetFullPath($WorkDirectory) }
+    else { [IO.Path]::GetFullPath((Join-Path $repo $WorkDirectory)) }
+$platformPrefix = if ($Platform -eq 'Windows') { '' } else { "$Platform-" }
+# Android's Gradle Prefab paths can exceed Ninja's Windows path limit, especially
+# for armeabi-v7a. Keep the isolated checkout name short.
+$projectName = if ($Platform -eq 'Android') { "P-$Architecture-v4" } else { "Project-$platformPrefix$Architecture-native-video" }
+$project = Join-Path $work $projectName
+$result = Join-Path $work "$platformPrefix$Architecture-$Backend"
+$utf8 = New-Object Text.UTF8Encoding($false)
+if (-not $Media) { $Media = Join-Path $repo 'Assets/StreamingAssets/MaiCharts/Original/Zunda Overdance/bg.mp4' }
+if (-not [IO.Path]::IsPathRooted($Media)) { $Media = Join-Path $repo $Media }
+if (-not (Test-Path -LiteralPath $Media -PathType Leaf)) { throw "Missing media: $Media" }
+$Media = (Resolve-Path -LiteralPath $Media).Path
+function Write-Json([string] $Path, $Value) { [IO.File]::WriteAllText($Path, ($Value | ConvertTo-Json -Depth 8), $utf8) }
+foreach ($folder in @('Assets/Editor', 'Assets/Smoke', 'Assets/Plugins/FFmpeg', 'Assets/StreamingAssets', 'Packages', 'ProjectSettings')) {
+    New-Item -ItemType Directory -Path (Join-Path $project $folder) -Force | Out-Null
+}
+New-Item -ItemType Directory -Path $result -Force | Out-Null
+if (-not $SkipBuild) {
+    # An asmdef at Assets/ would scope the PolySharp analyzer to only the smoke
+    # assembly. Keep the harness below Smoke/ so the analyzer applies globally.
+    foreach ($obsolete in @('Assets/FFmpeg.Player.Smoke.asmdef', 'Assets/FFmpeg.Player.Smoke.asmdef.meta', 'Assets/UnitySmoke.cs', 'Assets/UnitySmoke.cs.meta')) {
+        $obsoleteFile = Join-Path $project $obsolete
+        if (Test-Path -LiteralPath $obsoleteFile) { Remove-Item -LiteralPath $obsoleteFile }
+    }
+    # Use the product diagnostics and formatting implementation, including its real
+    # GUID references and C# required/init polyfills. Do not replace logging with stubs.
+    New-Item -ItemType Directory -Path (Join-Path $project 'Assets/Plugins/MajdataPlay') -Force | Out-Null
+    New-Item -ItemType Directory -Path (Join-Path $project 'Assets/Packages') -Force | Out-Null
+    Copy-Item -LiteralPath (Join-Path $repo 'Assets/Plugins/MajdataPlay/Diagnostics') -Destination (Join-Path $project 'Assets/Plugins/MajdataPlay') -Recurse -Force
+    # FFmpeg routes MRP display capture through its independent bridge. Preserve
+    # the implementation and shader include paths without adding Core RP to MRP.
+    Copy-Item -LiteralPath (Join-Path $repo 'Assets/Plugins/MajdataPlay/Rendering') -Destination (Join-Path $project 'Assets/Plugins/MajdataPlay') -Recurse -Force
+    # Stage only the portable storage assembly required by FFmpeg local output.
+    $storageDestination = Join-Path $project 'Assets/Plugins/MajdataPlay/IO'
+    New-Item -ItemType Directory -Path $storageDestination -Force | Out-Null
+    foreach ($storageName in @('MajdataPlay.IO.asmdef', 'MajdataPlay.IO.asmdef.meta', 'Storage', 'Storage.meta')) {
+        Copy-Item -LiteralPath (Join-Path $repo "Assets/Plugins/MajdataPlay/IO/$storageName") -Destination $storageDestination -Recurse -Force
+    }
+    # FFmpeg's native content protocol needs only the generated Java bindings,
+    # not the game's activity callbacks, keyboard or SAF filesystem. Stage the
+    # production bindings without JNI doubles or unrelated lifecycle code.
+    $androidSource = Join-Path $repo 'Assets/Plugins/MajdataPlay/Platform/Android'
+    $platformDestination = Join-Path $project 'Assets/Plugins/MajdataPlay/Platform'
+    New-Item -ItemType Directory -Path $platformDestination -Force | Out-Null
+    $androidDestination = Join-Path $platformDestination 'Android'
+    New-Item -ItemType Directory -Path $androidDestination -Force | Out-Null
+    foreach ($bindingName in @('MajdataPlay.Platform.Android.asmdef')) {
+        Copy-Item -LiteralPath (Join-Path $androidSource $bindingName) -Destination $androidDestination -Recurse -Force
+        Copy-Item -LiteralPath (Join-Path $androidSource "$bindingName.meta") -Destination $androidDestination -Force
+    }
+    Copy-Item -LiteralPath "$androidSource.meta" -Destination $platformDestination -Force
+    foreach ($bindingName in @('AndroidJni.cs', 'JavaInvocationException.cs', 'JavaClassAttribute.cs', 'JavaApiConfigurationAttribute.cs', 'MajdataPlay.SourceGenerators.AndroidJava.dll')) {
+        foreach ($obsolete in @((Join-Path $androidDestination $bindingName), (Join-Path $androidDestination "$bindingName.meta"))) {
+            if (Test-Path -LiteralPath $obsolete -PathType Leaf) { Remove-Item -LiteralPath $obsolete -Force }
+        }
+    }
+    # Relative Java inputs resolve inside the isolated project and are packaged
+    # as before; the standalone CLI analyzes declarations without a Java tool.
+    foreach ($javaInput in @('Assets/Plugins/Android/src/java/net/majdata/majdataplay/StorageAccess.java')) {
+        $javaDestination = Join-Path $project $javaInput
+        New-Item -ItemType Directory -Path (Split-Path -Parent $javaDestination) -Force | Out-Null
+        Copy-Item -LiteralPath (Join-Path $repo $javaInput) -Destination $javaDestination -Force
+        if (Test-Path -LiteralPath (Join-Path $repo "$javaInput.meta")) {
+            Copy-Item -LiteralPath (Join-Path $repo "$javaInput.meta") -Destination "$javaDestination.meta" -Force
+        }
+    }
+    $contentJava = Join-Path $project 'Assets/Plugins/Android/src/java/net/majdata/ffmpegplayer/validation/AndroidContentDeviceActivity.java'
+    New-Item -ItemType Directory -Path (Split-Path -Parent $contentJava) -Force | Out-Null
+    Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'AndroidContentDeviceActivity.java') -Destination $contentJava -Force
+    $runtimeDestination = [IO.Path]::GetFullPath((Join-Path $androidDestination 'Runtime'))
+    $isolatedPrefix = [IO.Path]::GetFullPath($project).TrimEnd([IO.Path]::DirectorySeparatorChar) + [IO.Path]::DirectorySeparatorChar
+    if (-not $runtimeDestination.StartsWith($isolatedPrefix, [StringComparison]::OrdinalIgnoreCase)) {
+        throw 'The generated Runtime directory must remain inside the isolated FFmpeg project.'
+    }
+    for ($ancestor = $runtimeDestination; $ancestor -and ($ancestor.StartsWith($isolatedPrefix, [StringComparison]::OrdinalIgnoreCase) -or $ancestor -eq [IO.Path]::GetFullPath($project)); $ancestor = Split-Path -Parent $ancestor) {
+        if (Test-Path -LiteralPath $ancestor) {
+            $item = Get-Item -LiteralPath $ancestor -Force
+            if (-not $item.PSIsContainer -or ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+                throw "Refusing staged Runtime replacement through a file or reparse point: $ancestor"
+            }
+        }
+    }
+    if (Test-Path -LiteralPath $runtimeDestination) { Remove-Item -LiteralPath $runtimeDestination -Recurse -Force }
+    if (Test-Path -LiteralPath ($runtimeDestination + '.meta') -PathType Leaf) {
+        Remove-Item -LiteralPath ($runtimeDestination + '.meta') -Force
+    }
+    $wrapperProject = Join-Path $project 'Tools/AndroidJavaWrapper'
+    $wrapperSources = [IO.Path]::GetFullPath((Join-Path $wrapperProject 'src'))
+    if (-not $wrapperSources.StartsWith($isolatedPrefix, [StringComparison]::OrdinalIgnoreCase)) {
+        throw 'The wrapper sources must remain inside the isolated FFmpeg project.'
+    }
+    for ($ancestor = $wrapperSources; $ancestor -and ($ancestor.StartsWith($isolatedPrefix, [StringComparison]::OrdinalIgnoreCase) -or $ancestor -eq [IO.Path]::GetFullPath($project)); $ancestor = Split-Path -Parent $ancestor) {
+        if (Test-Path -LiteralPath $ancestor) {
+            $item = Get-Item -LiteralPath $ancestor -Force
+            if (-not $item.PSIsContainer -or ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+                throw "Refusing wrapper source replacement through a file or reparse point: $ancestor"
+            }
+        }
+    }
+    if (Test-Path -LiteralPath $wrapperSources) { Remove-Item -LiteralPath $wrapperSources -Recurse -Force }
+    New-Item -ItemType Directory -Path $wrapperSources -Force | Out-Null
+    $productionSources = Join-Path $repo 'Tools/AndroidJavaWrapper/src'
+    foreach ($extension in Get-ChildItem -LiteralPath $productionSources -Recurse -File -Filter '*.e.cs') {
+        $relative = $extension.FullName.Substring($productionSources.Length + 1)
+        $destination = Join-Path $wrapperSources $relative
+        New-Item -ItemType Directory -Path (Split-Path -Parent $destination) -Force | Out-Null
+        Copy-Item -LiteralPath $extension.FullName -Destination $destination -Force
+    }
+    foreach ($name in @('AndroidJavaWrapper.csproj', 'global.json')) {
+        Copy-Item -LiteralPath (Join-Path $repo "Tools/AndroidJavaWrapper/$name") -Destination $wrapperProject -Force
+    }
+    $cliDirectory = Join-Path $repo 'Tools/CSharp/AndroidJavaWrapperGenerator'
+    Push-Location -LiteralPath $cliDirectory
+    try {
+        & dotnet build 'AndroidJavaWrapperGenerator.csproj' --configuration Release --nologo
+        if ($LASTEXITCODE -ne 0) { throw 'The independent Android Java wrapper CLI build failed.' }
+    } finally {
+        Pop-Location
+    }
+    $isolatedCli = Join-Path $project 'Tools/CSharp/AndroidJavaWrapperGenerator'
+    New-Item -ItemType Directory -Path $isolatedCli -Force | Out-Null
+    foreach ($name in @('AndroidJavaWrapperGenerator.csproj', 'global.json')) {
+        Copy-Item -LiteralPath (Join-Path $cliDirectory $name) -Destination $isolatedCli -Force
+    }
+    Copy-Item -LiteralPath (Join-Path $repo 'ProjectSettings/ProjectVersion.txt') -Destination (Join-Path $project 'ProjectSettings/ProjectVersion.txt') -Force
+    $editorData = Join-Path (Split-Path -Parent $UnityEditor) 'Data'
+    $androidPlayer = Join-Path $editorData 'PlaybackEngines/AndroidPlayer'
+    $unityArchive = Join-Path $androidPlayer 'Variations/mono/Release/Classes/classes.jar'
+    if (-not (Test-Path -LiteralPath $unityArchive -PathType Leaf)) { $unityArchive = Join-Path $androidPlayer 'Variations/il2cpp/Release/Classes/classes.jar' }
+    $unityActivity = Join-Path $androidPlayer 'Source/com/unity3d/player/UnityPlayerActivity.java'
+    foreach ($inputPath in @($unityArchive, $unityActivity)) {
+        if (-not (Test-Path -LiteralPath $inputPath -PathType Leaf)) { throw "Required Unity launcher metadata is missing: $inputPath" }
+    }
+    $generatorArguments = @((Join-Path $cliDirectory 'bin/Release/net9.0/AndroidJavaWrapperGenerator.dll'),
+        '--sdk', (Join-Path $androidPlayer 'SDK'), '--output', $wrapperSources,
+        '--namespace', 'MajdataPlay.Platform.Android.Runtime', '--no-docs', '--input', $unityArchive, '--input', $unityActivity,
+        '--input', $contentJava, '--input', (Join-Path $project 'Assets/Plugins/Android/src/java/net/majdata/majdataplay/StorageAccess.java'))
+    # The production MajdataPlayActivity.e.cs extension is copied above and needs the
+    # activity and callback bindings; read these declarations from the repository so
+    # the isolated Player packages no additional Java.
+    foreach ($activityInput in @('MajdataPlayActivity.java', 'CSharpOnNewIntentCallback.java', 'CSharpOnActivityResultCallback.java', 'CSharpOnDispatchKeyEventCallback.java')) {
+        $generatorArguments += @('--input', (Join-Path $repo "Assets/Plugins/Android/src/java/net/majdata/majdataplay/$activityInput"))
+    }
+    & dotnet @generatorArguments
+    if ($LASTEXITCODE -ne 0) { throw 'Fresh CLI generation for the isolated FFmpeg project failed.' }
+    & dotnet (Join-Path $cliDirectory 'bin/Release/net9.0/AndroidJavaWrapperGenerator.dll') '--build-wrapper' $project '--unity-data' $editorData
+    if ($LASTEXITCODE -ne 0) { throw 'Standalone wrapper DLL compilation for the isolated FFmpeg project failed.' }
+    Copy-Item -LiteralPath (Join-Path $repo 'Assets/Plugins/ZString') -Destination (Join-Path $project 'Assets/Plugins') -Recurse -Force
+    Copy-Item -LiteralPath (Join-Path $repo 'Assets/Packages/PolySharp.1.15.0') -Destination (Join-Path $project 'Assets/Packages') -Recurse -Force
+    Copy-Item -LiteralPath (Join-Path $repo 'Assets/Packages/System.Runtime.CompilerServices.Unsafe.6.1.2') -Destination (Join-Path $project 'Assets/Packages') -Recurse -Force
+    Copy-Item -LiteralPath (Join-Path $repo 'Assets/csc.rsp') -Destination (Join-Path $project 'Assets/csc.rsp') -Force
+    Copy-Item -LiteralPath (Join-Path $repo 'Assets/Plugins/MajdataPlay/FFmpeg/Runtime') -Destination (Join-Path $project 'Assets/Plugins/FFmpeg') -Recurse -Force
+    Copy-Item -LiteralPath (Join-Path $repo 'Assets/Plugins/MajdataPlay/FFmpeg/Editor') -Destination (Join-Path $project 'Assets/Plugins/FFmpeg') -Recurse -Force
+    if (Test-Path -LiteralPath (Join-Path $repo 'Assets/Plugins/MajdataPlay/FFmpeg/Shaders')) {
+        Copy-Item -LiteralPath (Join-Path $repo 'Assets/Plugins/MajdataPlay/FFmpeg/Shaders') -Destination (Join-Path $project 'Assets/Plugins/FFmpeg') -Recurse -Force
+    }
+    $nativeSource = Join-Path $repo $(if ($Platform -eq 'Linux') { 'Assets/Plugins/MajdataPlay/FFmpeg/Native/Linux' } else { 'Assets/Plugins/MajdataPlay/FFmpeg/Native/Windows' })
+    if (-not (Test-Path -LiteralPath $nativeSource)) { throw "Build native libraries first: $nativeSource" }
+    New-Item -ItemType Directory -Path (Join-Path $project 'Assets/Plugins/FFmpeg/Native') -Force | Out-Null
+    Copy-Item -LiteralPath $nativeSource -Destination (Join-Path $project 'Assets/Plugins/FFmpeg/Native') -Recurse -Force
+    if ($NativeDirectory) {
+        if ($Platform -ne 'Windows') { throw 'NativeDirectory override currently requires Windows' }
+        $override = (Resolve-Path -LiteralPath $NativeDirectory).Path
+        $pluginArchitecture = if ($Architecture -eq 'x64') { 'x86_64' } else { 'x86' }
+        $destination = Join-Path $project "Assets/Plugins/FFmpeg/Native/Windows/$pluginArchitecture"
+        # Retain the real PluginImporter metadata while testing newly built DLLs
+        # independently of libraries currently loaded in the user's Editor.
+        foreach ($library in @('avcodec-63.dll', 'avdevice-63.dll', 'avfilter-12.dll', 'avformat-63.dll', 'avutil-61.dll', 'swresample-7.dll', 'swscale-10.dll')) {
+            Copy-Item -LiteralPath (Join-Path $override $library) -Destination (Join-Path $destination $library) -Force
+        }
+        $overrideBridge = Join-Path $override 'FFmpegUnityBridge.dll'
+        if (Test-Path -LiteralPath $overrideBridge) {
+            Copy-Item -LiteralPath $overrideBridge -Destination (Join-Path $destination 'FFmpegUnityBridge.dll') -Force
+        }
+    }
+    if ($Platform -eq 'Android') {
+        Copy-Item -LiteralPath (Join-Path $repo 'Assets/Plugins/MajdataPlay/FFmpeg/Native/Android') -Destination (Join-Path $project 'Assets/Plugins/FFmpeg/Native') -Recurse -Force
+    }
+    Copy-Item -LiteralPath $Media -Destination (Join-Path $project 'Assets/StreamingAssets/test.mp4') -Force
+    Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'UnitySmoke.cs') -Destination (Join-Path $project 'Assets/Smoke/UnitySmoke.cs') -Force
+    Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'UnityCameraSmoke.cs') -Destination (Join-Path $project 'Assets/Smoke/UnityCameraSmoke.cs') -Force
+    Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'UnitySmokeBuild.cs') -Destination (Join-Path $project 'Assets/Editor/UnitySmokeBuild.cs') -Force
+    # The Android SAF fixture is a separate app with a real document picker;
+    # its Java wrapper is generated in the production binding assembly.
+    Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'AndroidContentDeviceSmoke.cs') -Destination (Join-Path $project 'Assets/Smoke/AndroidContentDeviceSmoke.cs') -Force
+    if ($TestAndroidContent) {
+        $manifest = @'
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" xmlns:tools="http://schemas.android.com/tools">
+  <application>
+    <activity android:name="net.majdata.ffmpegplayer.validation.AndroidContentDeviceActivity" android:exported="true" android:theme="@style/UnityThemeSelector" android:configChanges="mcc|mnc|locale|touchscreen|keyboard|keyboardHidden|navigation|orientation|screenLayout|uiMode|screenSize|smallestScreenSize|fontScale|density" android:hardwareAccelerated="true">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN" />
+        <category android:name="android.intent.category.LAUNCHER" />
+      </intent-filter>
+      <meta-data android:name="unityplayer.UnityActivity" android:value="true" />
+    </activity>
+  </application>
+</manifest>
+'@
+        [IO.File]::WriteAllText((Join-Path $project 'Assets/Plugins/Android/AndroidManifest.xml'), $manifest, $utf8)
+    }
+    Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'UnityCameraEditorSmoke.cs') -Destination (Join-Path $project 'Assets/Editor/UnityCameraEditorSmoke.cs') -Force
+    # End-of-phase worker diagnostics are accessed by reflection in the isolated
+    # performance harness. Preserve their metadata with High managed stripping.
+    [IO.File]::WriteAllText((Join-Path $project 'Assets/Smoke/link.xml'), '<linker><assembly fullname="MajdataPlay.FFmpeg"><type fullname="MajdataPlay.FFmpeg.Internal.VideoDecodeSession" preserve="all" /><type fullname="MajdataPlay.FFmpeg.FFmpegVideoPlayer" preserve="all" /></assembly></linker>', $utf8)
+    $package = (Join-Path $repo 'ThirdParty/FFmpeg.AutoGen/Unity') -replace '\\', '/'
+    Write-Json (Join-Path $project 'Packages/manifest.json') @{ dependencies = @{ 'net.majdata.ffmpeg-autogen' = "file:$package"; 'com.unity.render-pipelines.universal' = '17.3.0'; 'com.unity.ugui' = '2.0.0'; 'com.unity.modules.ui' = '1.0.0'; 'com.unity.modules.imageconversion' = '1.0.0'; 'com.unity.modules.androidjni' = '1.0.0'; 'com.unity.modules.unitywebrequest' = '1.0.0' } }
+    Write-Json (Join-Path $project 'Assets/Smoke/FFmpeg.Player.Smoke.asmdef') @{ name = 'FFmpeg.Player.Smoke'; references = @('MajdataPlay.FFmpeg', 'MajdataPlay.Diagnostics', 'MajdataPlay.Platform.Android', 'FFmpeg.AutoGen', 'Unity.RenderPipelines.Core.Runtime', 'Unity.RenderPipelines.Universal.Runtime'); allowUnsafeCode = $true }
+    Write-Json (Join-Path $project 'Assets/Editor/FFmpeg.Player.Smoke.Editor.asmdef') @{ name = 'FFmpeg.Player.Smoke.Editor'; references = @('FFmpeg.Player.Smoke', 'MajdataPlay.FFmpeg', 'Unity.RenderPipelines.Core.Runtime', 'Unity.RenderPipelines.Universal.Runtime'); includePlatforms = @('Editor') }
+    [IO.File]::WriteAllText((Join-Path $project 'ProjectSettings/ProjectVersion.txt'), "m_EditorVersion: 6000.3.17f1`n", $utf8)
+    $target = if ($Platform -eq 'Android') { 'Android' } elseif ($Platform -eq 'Linux') { 'Linux64' } elseif ($Architecture -eq 'x86') { 'Win' } else { 'Win64' }
+    $buildLog = Join-Path $result 'editor.log'
+    $buildArgs = @('-batchmode', '-nographics', '-quit', '-projectPath', ('"' + $project + '"'), '-buildTarget', $target,
+        '-logFile', ('"' + $buildLog + '"'), '-executeMethod', 'FFmpegPlayerSmokeBuild.Run', '-videoBackend', $Backend,
+        '-videoArchitecture', $Architecture, '-videoPlatform', $Platform, '-videoOutput', ('"' + $result + '"'))
+    $buildArgs += @('-cameraCapture', $(if ($TestCameraCapture) { 'true' } else { 'false' }), '-captureUrp', $(if ($CaptureUrp) { 'true' } else { 'false' }), '-androidContent', $(if ($TestAndroidContent) { 'true' } else { 'false' }))
+    if ($DisableBurst) { $buildArgs += '--burst-disable-compilation' }
+    $generatorVariables = @('UNITY_EDITOR_PATH', 'UNITY_ANDROID_SDK', 'UNITY_JAVA_HOME')
+    $previousGeneratorEnvironment = @{}
+    foreach ($name in $generatorVariables) {
+        $previousGeneratorEnvironment[$name] = [Environment]::GetEnvironmentVariable($name, 'Process')
+    }
+    try {
+        $androidPlayer = Join-Path (Split-Path -Parent $UnityEditor) 'Data/PlaybackEngines/AndroidPlayer'
+        $env:UNITY_EDITOR_PATH = $UnityEditor
+        $env:UNITY_ANDROID_SDK = Join-Path $androidPlayer 'SDK'
+        $env:UNITY_JAVA_HOME = Join-Path $androidPlayer 'OpenJDK'
+        $process = Start-Process -FilePath $UnityEditor -ArgumentList $buildArgs -WindowStyle Hidden -PassThru
+        $process.WaitForExit()
+    } finally {
+        foreach ($name in $generatorVariables) {
+            [Environment]::SetEnvironmentVariable($name, $previousGeneratorEnvironment[$name], 'Process')
+        }
+    }
+    if ($process.ExitCode -ne 0) { Get-Content -LiteralPath $buildLog -Tail 70; throw "Unity build failed: $buildLog" }
+}
+if ($BuildOnly) {
+    Get-Content -LiteralPath (Join-Path $result 'build.txt')
+    Write-Output "Isolated Player built at: $result; runtime validation was not requested."
+    return
+}
+if ($Platform -eq 'Android') {
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    $apk = [IO.Compression.ZipFile]::OpenRead((Join-Path $result 'VideoSmoke.apk'))
+    $abi = if ($Architecture -eq 'arm64') { 'arm64-v8a' } else { 'armeabi-v7a' }
+    $elfClass = if ($Architecture -eq 'arm64') { 2 } else { 1 }
+    $machine = if ($Architecture -eq 'arm64') { 183 } else { 40 }
+    try {
+        foreach ($library in @('avcodec','avdevice','avfilter','avformat','avutil','swresample','swscale','FFmpegUnityBridge')) {
+            $name = "lib/$abi/lib$library.so"
+            $entry = $apk.GetEntry($name)
+            if (-not $entry) { throw "APK omitted required FFmpeg plug-in: $name" }
+            $reader = New-Object IO.BinaryReader($entry.Open())
+            try { $header = $reader.ReadBytes(20) } finally { $reader.Dispose() }
+            if ($header.Length -ne 20 -or $header[0] -ne 127 -or $header[4] -ne $elfClass -or [BitConverter]::ToUInt16($header, 18) -ne $machine) {
+                throw "Wrong ELF architecture in APK: $name"
+            }
+        }
+    } finally { $apk.Dispose() }
+    [IO.File]::WriteAllText((Join-Path $result 'packaging.txt'), "PASS: seven FFmpeg libraries and the GPU bridge packaged as $abi ELF class $elfClass machine $machine")
+    Get-Content -LiteralPath (Join-Path $result 'build.txt')
+    Get-Content -LiteralPath (Join-Path $result 'packaging.txt')
+    Write-Output 'APK built; device playback has not been tested.'
+    return
+}
+if ($Platform -eq 'Linux') {
+    Get-Content -LiteralPath (Join-Path $result 'build.txt')
+    Write-Output "Linux Player built at: $result"
+    Write-Output 'Run playback validation on Linux/WSLg with Tools/Tests/Modules/FFmpegValidation/run-linux-player.sh.'
+    return
+}
+$suffix = if ($TestCameraCapture) { '-camera' + $(if ($CaptureUrp) { '-urp' } else { '-builtin' }) + $(if ($CaptureHardware) { '-hardware' } else { '-software' }) } elseif ($RequireNativeDecoder) { '-native-decoder' } elseif ($TestRecovery) { '-recovery' } elseif ($TestDecoderPreference) { '-decoder-preference' } elseif ($HardwareCpuUpload) { '-hardware-cpu' } elseif ($Hardware) { '-hardware' } else { '-software' }
+if ($TestCameraCapture -and -not $CaptureHardware -and -not $TestCaptureThroughput) { $suffix += "-$CaptureFormat-$CaptureRateControl" }
+if ($TestCaptureThroughput) { $suffix += '-throughput' }
+if ($DoubleRateSeconds -ne 3) { $suffix += "-2x-$($DoubleRateSeconds)s" }
+if ($TestDecodeOverload -and $PlaybackTargetFrameRate -ne 60) { $suffix += "-$($PlaybackTargetFrameRate)fps" }
+if ($RegularPlayer -and -not ($TestCameraCapture -or $TestDecodeOverload -or $TestPlaybackThroughput)) { $suffix += '-regular' }
+$report = Join-Path $result "$Graphics$suffix.txt"
+$log = Join-Path $result "$Graphics$suffix.log"
+foreach ($evidence in @($report, ($report + '.double-rate.tsv'))) {
+    if (Test-Path -LiteralPath $evidence) { Remove-Item -LiteralPath $evidence }
+}
+$hardwareValue = if ($Hardware) { 'true' } else { 'false' }
+$requireHardwareValue = if ($RequireHardware) { 'true' } else { 'false' }
+$testRecoveryValue = if ($TestRecovery) { 'true' } else { 'false' }
+$hardwareCpuValue = if ($HardwareCpuUpload) { 'true' } else { 'false' }
+$decoderPreferenceValue = if ($TestDecoderPreference) { 'true' } else { 'false' }
+$nativeDecoderValue = if ($RequireNativeDecoder) { $Graphics } else { 'none' }
+$playerArgs = @('-batchmode', "-force-$Graphics", '-logFile', ('"' + $log + '"'), '-videoHardware', $hardwareValue, '-videoRequireHardware', $requireHardwareValue, '-videoTestRecovery', $testRecoveryValue, '-videoHardwareCpuUpload', $hardwareCpuValue, '-videoTestDecoderPreference', $decoderPreferenceValue, '-videoReport', ('"' + $report + '"'))
+$playerArgs += @('-videoNativeDecoder', $nativeDecoderValue, '-videoGraphics', $Graphics, '-videoDoubleRateSeconds', $DoubleRateSeconds, '-videoMedia', ('"' + $Media + '"'))
+# Keep the source identity even when an existing Player reads external media.
+Write-Json ($report + '.run.json') @{ graphics = $Graphics; backend = $Backend; architecture = $Architecture; media = $Media; hardware = [bool]$Hardware; requireNativePresentation = [bool]$RequireHardware; doubleRateSeconds = $DoubleRateSeconds; skipBuild = [bool]$SkipBuild }
+if ($TestDecodeOverload) {
+    $playerArgs += @('-videoTestDecodeOverload', 'true', '-videoTargetFps', $PlaybackTargetFrameRate)
+}
+if ($TestPlaybackThroughput) {
+    $playerArgs += @('-videoTestPlaybackThroughput', 'true')
+}
+if ($RegularPlayer -or $TestCameraCapture -or $TestDecodeOverload -or $TestPlaybackThroughput) {
+    # Capture and render-thread throughput checks need the regular Player render loop.
+    $playerArgs = @($playerArgs | Where-Object { $_ -ne '-batchmode' })
+}
+$playerArgs += @('-cameraCapture', $(if ($TestCameraCapture) { 'true' } else { 'false' }), '-captureHardware', $(if ($CaptureHardware) { 'true' } else { 'false' }))
+$playerArgs += @('-captureFormat', $CaptureFormat, '-captureRateControl', $CaptureRateControl)
+$playerArgs += @('-captureThroughput', $(if ($TestCaptureThroughput) { 'true' } else { 'false' }))
+$process = Start-Process -FilePath (Join-Path $result 'VideoSmoke.exe') -ArgumentList $playerArgs -WindowStyle Hidden -PassThru
+$timeoutMilliseconds = [Math]::Max(120000, ($DoubleRateSeconds + 90) * 1000)
+if (-not $process.WaitForExit($timeoutMilliseconds)) { $process.Kill(); throw "Player timed out after $($timeoutMilliseconds / 1000) seconds: $log" }
+if (-not (Test-Path -LiteralPath $report)) { Get-Content -LiteralPath $log -Tail 60; throw "Player produced no result: $log" }
+$text = Get-Content -LiteralPath $report -Raw
+Write-Output $text
+if ($process.ExitCode -ne 0 -or -not $text.StartsWith('PASS:')) { throw "Player failed: $log" }
+if (-not $TestCameraCapture -and $DoubleRateSeconds -gt 3) {
+    $doubleRateEvidence = $report + '.double-rate.tsv'
+    if (-not (Test-Path -LiteralPath $doubleRateEvidence -PathType Leaf)) { throw "The built Player did not produce the new 2x evidence. Rebuild the isolated Player: $log" }
+    $measurement = @(Import-Csv -LiteralPath $doubleRateEvidence -Delimiter "`t")
+    if ($measurement.Count -ne 1) { throw "Invalid continuous 2x evidence: $doubleRateEvidence" }
+    $wallSeconds = [double]::Parse($measurement[0].wall_seconds, [Globalization.CultureInfo]::InvariantCulture)
+    if ([double]::IsNaN($wallSeconds) -or [double]::IsInfinity($wallSeconds)) { throw "Non-finite continuous 2x wall-clock evidence: $doubleRateEvidence" }
+    if ($DoubleRateSeconds -gt 3 -and $wallSeconds -lt $DoubleRateSeconds) { throw "Player did not measure the full requested $DoubleRateSeconds seconds at 2x: $doubleRateEvidence" }
+}

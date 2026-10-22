@@ -8,7 +8,7 @@ Only the two `libFFmpegUnityBridge.so` files and their `bridge-manifest.json` fi
 were replaced. This report is the only added tracked file from this task.
 
 Subsequently authorized fixture follow-ups minimally corrected
-`Tools/Tests/FFmpegValidation/AndroidNativeSmoke.c` and the three stale ABI3 lines
+`Tools/Tests/Modules/FFmpegValidation/AndroidNativeSmoke.c` and the three stale ABI3 lines
 in `Tools/FFmpeg/Native/tests/AndroidCapabilitySmoke.cpp`, and updated this report.
 Neither fixture follow-up nor the later bounded device run modified Android
 native libraries, manifests or `.meta` files.
@@ -244,7 +244,7 @@ supports actual Vulkan Video decoding.
 ### Fixture correction after explicit follow-up authorization
 
 The previously reported stale LGPL assertion in
-`Tools/Tests/FFmpegValidation/AndroidNativeSmoke.c` is **now corrected**. The change
+`Tools/Tests/Modules/FFmpegValidation/AndroidNativeSmoke.c` is **now corrected**. The change
 is confined to the existing profile assertion and one small capability loop:
 
 - Require `--enable-gpl`, `--enable-version3` and `--disable-nonfree`, matching both

@@ -181,7 +181,7 @@ Vulkan Video 还要求本项目所需的 Vulkan 版本、逐编码 video decode 
 
 ## 已完成的运行验证
 
-本文列出的是当前构建能力全集，并未逐个格式生成素材进行播放测试。已有实测范围和命令见 [FFmpegValidation 结果](../Tests/FFmpegValidation/RESULTS.md)、[验证说明](../Tests/FFmpegValidation/README.md) 及 [Apple 记录](APPLE-RESULTS.md)。
+本文列出的是当前构建能力全集，并未逐个格式生成素材进行播放测试。已有实测范围和命令见 [FFmpegValidation 结果](../Tests/Modules/FFmpegValidation/RESULTS.md)、[验证说明](../Tests/Modules/FFmpegValidation/README.md) 及 [Apple 记录](APPLE-RESULTS.md)。
 
 - AV1 8-bit / 10-bit：Windows、Linux、Android 两种 ABI、macOS ARM64 和 iOS ARM64 模拟器已实际解码；Windows、Linux 和 Android 另通过对应 Unity Player 验证。
 - H.264：已有 Windows、Android 和 macOS 的平台硬件路径验证，具体图形 API、架构、后端及历史版本范围以结果文档为准。

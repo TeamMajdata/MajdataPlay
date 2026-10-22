@@ -76,7 +76,7 @@ Windows 三种渲染 API 优先使用与 Unity 同适配器的独立 D3D11VA 设
 
 AV1 软件解码使用构建时静态链接的 `libdav1d`（也兼容包含 `libaom-av1` 的同 ABI 构建）；硬件路径单独选择 FFmpeg 的 `av1` 或 Android 的 `av1_mediacodec`。FFmpeg 内置 `av1` 本身不能执行软件解码，不能把成功打开它视为软件回退成功。旧原生库未包含这些软件解码器时，会明确提示重建；仅更新 C# 代码无法补齐 AV1 解码能力。按 `Tools/FFmpeg` 重建对应平台库后，重启已加载旧库的 Unity Editor / Player。
 
-项目原生库的 AV1 8-bit / 10-bit 软件路径覆盖 Windows x86/x64、Linux x64、Android ARMv7/ARM64、macOS x64/ARM64 和 iOS ARM64；构建脚本也支持 iOS 模拟器 ARM64/x64。10-bit 解码后仍通过现有 RGBA32 软件上传路径显示，不代表 HDR 输出或完整保留 10-bit 显示精度。各目标的实际运行范围见 [验证记录](../../../../Tools/Tests/FFmpegValidation/RESULTS.md)。
+项目原生库的 AV1 8-bit / 10-bit 软件路径覆盖 Windows x86/x64、Linux x64、Android ARMv7/ARM64、macOS x64/ARM64 和 iOS ARM64；构建脚本也支持 iOS 模拟器 ARM64/x64。10-bit 解码后仍通过现有 RGBA32 软件上传路径显示，不代表 HDR 输出或完整保留 10-bit 显示精度。各目标的实际运行范围见 [验证记录](../../../../Tools/Tests/Modules/FFmpegValidation/RESULTS.md)。
 
 ## 日志与性能记录
 
@@ -88,7 +88,7 @@ AV1 软件解码使用构建时静态链接的 `libdav1d`（也兼容包含 `lib
 
 播放器会话按队列容量加 2 预分配呈现帧容器，供工作线程、队列和主线程流转；帧释放原生资源后归还本会话。稳定解码、RGBA 转换和呈现使用复用容器，`EAGAIN` 比较不装箱，Android 图像释放委托只在建立硬件会话时创建。这里的无分配指预热后的托管 GC 分配；FFmpeg 原生帧引用、像素缓冲区及驱动内部仍按各自生命周期分配和释放。
 
-CPU RGBA 上传路径按 `DecoderOptions.ConversionThreadCount`（默认在逻辑处理器不超过 4 个时为 1，否则为 `clamp(处理器数 - 2, 1, 4)`）让 libswscale 按 slice 多线程转换，并把垂直翻转或旋转复制分成 16 行对齐的行带交给按需创建的后台线程；这些线程不调用 Unity API，预热后不产生托管分配。验证方法见 [多线程 RGBA 转换](../../../../Tools/Tests/FFmpegValidation/README.md#多线程-rgba-转换)。
+CPU RGBA 上传路径按 `DecoderOptions.ConversionThreadCount`（默认在逻辑处理器不超过 4 个时为 1，否则为 `clamp(处理器数 - 2, 1, 4)`）让 libswscale 按 slice 多线程转换，并把垂直翻转或旋转复制分成 16 行对齐的行带交给按需创建的后台线程；这些线程不调用 Unity API，预热后不产生托管分配。验证方法见 [多线程 RGBA 转换](../../../../Tools/Tests/Modules/FFmpegValidation/README.md#多线程-rgba-转换)。
 
 公开 `FFmpegVideoDecoder` 构造器与 `DecodedVideoFrame.CopyToSoftware()` 保留独立帧对象的所有权语义，返回对象仍会分配。内部复用帧不通过播放器事件暴露，避免已释放的外部旧引用影响后来租用的帧。打开、seek 日志、回退、纹理重建及调用方事件处理器不在稳定逐帧零 GC 范围内。
 
@@ -140,7 +140,7 @@ Android Player 在主线程的 Prepare 和重新创建回退会话时初始化 n
 
 **APK/JAR StreamingAssets 的边界不变**：`jar:file://...!/assets/...` 不是 SAF URI，也不是普通本地路径，仍需先通过 UnityWebRequest 提取编码文件再打开。托管归一化、Editor 初始化 guard 与 Windows 协议检查不调用 Android JNI；Android 两 ABI 的配置/二进制静态证据也不能替代设备验收。
 
-2026-10-12 已在 **Mi MIX 2S / Android 15 API 35 / Unity 6000.3.17f1 / IL2CPP ARM64 / ARMv7** 的隔离 Player 中验证真实 SAF/native content：**两个 ABI 各 39 assertions PASS**，包含未经硬件 warm-up 的软件 `h264`、硬件 `h264_mediacodec` + CPU RGBA 上传、播放/暂停、前后 seek、近 EOF loop、Stop/Close，以及持久化读取授权的进程重启复用。运行时 `avio_enum_protocols(input)` 实测包含 `content`；实际输入可 seek。这项结果不代表主游戏场景、所有 provider、不可 seek/云端输入、授权撤销、阻塞取消或 GPU 原生纹理共享均已通过；完整实机结果与复现命令另记于 `Tools/Tests/FFmpegValidation/RESULTS.md` 和相邻 README。
+2026-10-12 已在 **Mi MIX 2S / Android 15 API 35 / Unity 6000.3.17f1 / IL2CPP ARM64 / ARMv7** 的隔离 Player 中验证真实 SAF/native content：**两个 ABI 各 39 assertions PASS**，包含未经硬件 warm-up 的软件 `h264`、硬件 `h264_mediacodec` + CPU RGBA 上传、播放/暂停、前后 seek、近 EOF loop、Stop/Close，以及持久化读取授权的进程重启复用。运行时 `avio_enum_protocols(input)` 实测包含 `content`；实际输入可 seek。这项结果不代表主游戏场景、所有 provider、不可 seek/云端输入、授权撤销、阻塞取消或 GPU 原生纹理共享均已通过；完整实机结果与复现命令另记于 `Tools/Tests/Modules/FFmpegValidation/RESULTS.md` 和相邻 README。
 
 ## Camera 录制
 
@@ -216,10 +216,10 @@ iOS Player 的固定 VideoToolbox 包装器不能检查硬件独占选择，硬�
 
 音频编码优先使用 FFmpeg 内置 `aac` encoder（码率 96 kbit/s × 声道数）；加载的原生库没有 AAC encoder 时回退为未压缩 `pcm_s16le`，容器不接受 PCM 时抛出 `NotSupportedException`。2026-10-05 的原生库未启用任何音频 encoder，需按 [Tools/FFmpeg](../../../../Tools/FFmpeg/README.md) 的当前配置重建后才有 AAC。`MajdataPlay.Recording.FFmpegRecorder` 组合 capturer 与 `AudioManager.CreateAudioRecorder()` 返回的 Bass 最终输出录音器；目前游戏设置菜单仍只使用 OBS，尚未自动调用它。录音 DSP 在设备播放之前取得混音，因此 `IAudioRecorder.PlaybackDelay` 记录首个采集块相对 `Start` 的等待与实测输出延迟（BassSimple 用同设备的静音无缓冲流比较渲染/播放位置，WASAPI 读取 BASSWASAPI 已缓冲数据，ASIO 使用驱动报告的输出延迟），`FFmpegRecorder` 混流时按该值延后音轨，使录像中的声音与玩家实际听到的时刻一致。
 
-`FFmpegRecorder` 的 PCM drain 使用单层后台任务，读写失败会被观察，并触发音视频一起停止、等待各自收尾。只有成功输出后才删除临时视频和 PCM；混流、转移或收尾失败时，保留尚未成功转移的源文件，并在日志中记录恢复路径。托管收尾回归可运行 `dotnet run --project Tools/Tests/RecorderLifecycleValidation/RecorderLifecycleValidation.csproj -c Release`；这不代替实际音视频录制验证。
+`FFmpegRecorder` 的 PCM drain 使用单层后台任务，读写失败会被观察，并触发音视频一起停止、等待各自收尾。只有成功输出后才删除临时视频和 PCM；混流、转移或收尾失败时，保留尚未成功转移的源文件，并在日志中记录恢复路径。托管收尾回归可运行 `dotnet run --project Tools/Tests/Modules/RecorderLifecycleValidation/RecorderLifecycleValidation.csproj -c Release`；这不代替实际音视频录制验证。
 
 运行时程序集新增对已在项目内使用的 `Unity.RenderPipelines.Core.Runtime` 的引用，用于 URP 正确的最终 Camera 颜色捕获通道；没有新增或升级 Package Manager 包。
 
 ## 验证
 
-[Tools/Tests/FFmpegValidation](../../../../Tools/Tests/FFmpegValidation) 包含真实 FFmpeg 解码/seek/EOF/取消/有界队列测试，以及隔离 Unity Player 验证脚本。构建成功、Player 启动成功、纹理互操作通过是不同验收项；实际结果见 [RESULTS.md](../../../../Tools/Tests/FFmpegValidation/RESULTS.md)。其他 OS 和移动设备的图形/驱动行为需要在目标设备复验。
+[Tools/Tests/Modules/FFmpegValidation](../../../../Tools/Tests/Modules/FFmpegValidation) 包含真实 FFmpeg 解码/seek/EOF/取消/有界队列测试，以及隔离 Unity Player 验证脚本。构建成功、Player 启动成功、纹理互操作通过是不同验收项；实际结果见 [RESULTS.md](../../../../Tools/Tests/Modules/FFmpegValidation/RESULTS.md)。其他 OS 和移动设备的图形/驱动行为需要在目标设备复验。

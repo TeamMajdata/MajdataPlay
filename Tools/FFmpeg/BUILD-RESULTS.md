@@ -25,17 +25,17 @@
 
 ```powershell
 .\Tools\FFmpeg\build.ps1 -UseWsl -WslDistribution Ubuntu-24.04 -Targets win-arm64 -BuildRoot /var/tmp/majdata-ffmpeg-windows-arm64-20261008 -RequireAll -Jobs 8
-python -B Tools/Tests/FFmpegBuildValidation/test_windows_arm64.py
-python -B -m unittest discover -s Tools/Tests/FFmpegArtifactValidation -v
+python -B Tools/Tests/Modules/FFmpegBuildValidation/test_windows_arm64.py
+python -B -m unittest discover -s Tools/Tests/Modules/FFmpegArtifactValidation -v
 python -B Tools/FFmpeg/verify-artifacts.py --targets win-x86,win-x64,win-arm64 --skip-host-load
-python -B Tools/Tests/FFmpegBuildValidation/verify_windows_dlls.py --targets win-x86,win-x64,win-arm64 --output Tools/FFmpeg/.build/windows-arm64-20261008/pe-audit.json
-./Tools/Tests/FFmpegArtifactValidation/run-unity-importers.ps1
+python -B Tools/Tests/Modules/FFmpegBuildValidation/verify_windows_dlls.py --targets win-x86,win-x64,win-arm64 --output Tools/FFmpeg/.build/windows-arm64-20261008/pe-audit.json
+./Tools/Tests/Modules/FFmpegArtifactValidation/run-unity-importers.ps1
 git diff --check
 ```
 
 Unity 初次导入发现缺少 `Editor.settings.DefaultValueInitialized` 时会覆盖 ARM64 的 Editor 禁用值；隔离工程用真实 API 写回后确认所需标记。生成器和八个 ARM64 DLL 的 `.meta` 已补齐 `DefaultValueInitialized: true`，GUID 保留，再次真实导入通过。
 
-实际构建由忽略目录的 `run-wsl.py` 设置隔离源码、缓存与 Linux pkg-config，再调用 `python3 -B Tools/FFmpeg/build.py --targets win-arm64 --jobs 8 --require-all`。原始证据保留于 `Tools/FFmpeg/.build/windows-arm64-20261008`：`final-build.log`、`wsl-build-summary.json`、`wsl-evidence/`（配置、日志、`.def` 与 provenance）、`pe-audit.json`、`final-export-audit.json` 和 `linker-fixture-exclude-all/`。Unity 原始日志位于 `Tools/Tests/FFmpegArtifactValidation/.work/unity-importers`，诊断写回日志为 `unity-importer-probe-authorized.log`，全新隔离工程的首次导入证据为 `unity-importers-fresh.log` / `.txt`。
+实际构建由忽略目录的 `run-wsl.py` 设置隔离源码、缓存与 Linux pkg-config，再调用 `python3 -B Tools/FFmpeg/build.py --targets win-arm64 --jobs 8 --require-all`。原始证据保留于 `Tools/FFmpeg/.build/windows-arm64-20261008`：`final-build.log`、`wsl-build-summary.json`、`wsl-evidence/`（配置、日志、`.def` 与 provenance）、`pe-audit.json`、`final-export-audit.json` 和 `linker-fixture-exclude-all/`。Unity 原始日志位于 `Tools/Tests/Modules/FFmpegArtifactValidation/.work/unity-importers`，诊断写回日志为 `unity-importer-probe-authorized.log`，全新隔离工程的首次导入证据为 `unity-importers-fresh.log` / `.txt`。
 
 **未验证**：本机为 Windows x64，未在 Windows ARM64 设备执行原生加载、实际编码/解码、GPU 桥接或 Unity ARM64 Player。静态审计与交叉编译不能替代上述运行验证；本轮未生成完整多平台发布包。`git diff --check` 通过，最终状态检查未发现本轮新增的生成物或无关改动。
 
@@ -70,13 +70,13 @@ iOS Player 的固定 VideoToolbox 包装器不能验证 hardware-only 选择，�
 | Windows x64 `.NET 9` | 四种软件编码 **4184 assertions PASS**，MPEG4/AMF 硬件与会话回归 **839 PASS**，H.264 播放 **446 PASS**；独立项目编译无错误 |
 | Unity 6000.3.17f1 x64 / D3D11 Camera | Mono 与 IL2CPP 实际 `libx264` H.264 CBR，各 **416 checks PASS**，覆盖 GPU 回读、暂停/恢复、PTS 和原生回调 |
 
-原生矩阵使用 [NativeSoftwareEncoderSmoke.c](../Tests/FFmpegValidation/NativeSoftwareEncoderSmoke.c) 和共享 fixture，以严格 C 警告构建。实际解码验证 60 帧、像素/方向、PTS 间隔、flush、线程设置和独占文件所有权；简单画面与复杂运动突发都覆盖。Windows 运行使用只含交付库及系统目录的 PATH；Linux 清除 `LD_LIBRARY_PATH` 后运行，防止开发工具链掩盖缺失动态依赖。
+原生矩阵使用 [NativeSoftwareEncoderSmoke.c](../Tests/Modules/FFmpegValidation/NativeSoftwareEncoderSmoke.c) 和共享 fixture，以严格 C 警告构建。实际解码验证 60 帧、像素/方向、PTS 间隔、flush、线程设置和独占文件所有权；简单画面与复杂运动突发都覆盖。Windows 运行使用只含交付库及系统目录的 PATH；Linux 清除 `LD_LIBRARY_PATH` 后运行，防止开发工具链掩盖缺失动态依赖。
 
 CBR 表示编码器实际采用的模式，不能将它理解为所有编码器都会填充到精确目标。x264/x265 检查所有连续包窗口满足 `最大码率 × 时长 + VBV 容量 + 1 KiB` 的缓冲预算；x264 简单画面的 filler 也有独立检查。**libvpx/libaom 的两种模式均为码率预算，复杂画面可能超出设定值，简单画面不会强制填充**；测试记录实际负载，不以短样本声称硬上限或所有场景恒定填充。ARM 上 libvpx/libaom 当前采用可移植实现、x265 关闭汇编，x264/dav1d 保留对应可用汇编；高分辨率实时性能未验证。
 
 实际构建使用 WSL Ubuntu 24.04 的独立持久缓存 `/home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005` 和 SSH Mac mini 的独立目录 `/Users/codex/codex-work/majdata-full-encoding-apple-20261005`。Windows/Linux 使用 GCC 13，Android 使用 NDK r27c，Apple 使用 Xcode 27 SDK。x265 固定版本使用 CMake 3.x；Apple 从已校验的官方 CMake 3.31.10 wheel 提取专用工具，不修改系统 CMake 4。
 
-八套正式插件与两套独立 simulator 包完成替换后，`python Tools/FFmpeg/verify-artifacts.py` 对 **70 个 FFmpeg 库、10 个桥接和三个既有 Linux 运行时** 全部通过。全部十目标 decoder/hwaccel 名称集合与旧配置逐项相同，**149 个原有 `.meta` 文件字节和 GUID 保持不变**；新增许可证/补丁资产均有配对 `.meta`。正式替换、最终 verifier、软件矩阵与 Unity 原始日志保留在忽略的 `.build/full-encoding-20261005`；完整命令见 [验证记录](../Tests/FFmpegValidation/RESULTS.md)。
+八套正式插件与两套独立 simulator 包完成替换后，`python Tools/FFmpeg/verify-artifacts.py` 对 **70 个 FFmpeg 库、10 个桥接和三个既有 Linux 运行时** 全部通过。全部十目标 decoder/hwaccel 名称集合与旧配置逐项相同，**149 个原有 `.meta` 文件字节和 GUID 保持不变**；新增许可证/补丁资产均有配对 `.meta`。正式替换、最终 verifier、软件矩阵与 Unity 原始日志保留在忽略的 `.build/full-encoding-20261005`；完整命令见 [验证记录](../Tests/Modules/FFmpegValidation/RESULTS.md)。
 
 主工程随后使用 Unity **6000.3.17f1** 完成 batchmode 导入和脚本编译，退出码 **0**，没有 C# 编译错误；未修改正式场景或 Player Settings。原始日志为 `main-unity-import.log`。
 
@@ -111,7 +111,7 @@ Windows 七个 FFmpeg DLL 的 PE imports 与旧库完全相同；桥接由原 LL
 | Android ARM64/ARMv7 真机 | 每 ABI MPEG4 录制 **2021 checks PASS**、全部原生库/ABI 4/录制入口检查 **54 checks PASS**；AV1 8-bit/10-bit 各 **3570 checks / 90 帧 PASS** |
 | macOS ARM64 / iOS simulator ARM64 | MPEG4 录制各 **2021 checks PASS**；各自 AV1 8/10-bit、H.264/Metal 回归通过，详细数据见 [Apple 记录](APPLE-RESULTS.md) |
 
-跨平台原生录制使用新增 [EncoderNativeSmoke.c](../Tests/FFmpegValidation/EncoderNativeSmoke.c)，按各自 C 编译器以 `-std=c11 -Wall -Wextra -Werror` 构建（Android 使用 `-std=gnu11`）；Android 另使用 [AndroidNativeSmoke.c](../Tests/FFmpegValidation/AndroidNativeSmoke.c) 直接加载全部八个插件与检查设备前置条件。共同 MPEG4 CBR 最后一秒为 **199,976 bit/s**，目标 200,000；同一平坦 fixture 的 VBR 为 3,616 bit/s。Windows AMF 正式库原生录制 VBR 为 12,448、CBR 为 200,000 bit/s。本机 RX 580 没有 NVIDIA 编码器；NVENC 入口导出不等于设备运行通过。
+跨平台原生录制使用新增 [EncoderNativeSmoke.c](../Tests/Modules/FFmpegValidation/EncoderNativeSmoke.c)，按各自 C 编译器以 `-std=c11 -Wall -Wextra -Werror` 构建（Android 使用 `-std=gnu11`）；Android 另使用 [AndroidNativeSmoke.c](../Tests/Modules/FFmpegValidation/AndroidNativeSmoke.c) 直接加载全部八个插件与检查设备前置条件。共同 MPEG4 CBR 最后一秒为 **199,976 bit/s**，目标 200,000；同一平坦 fixture 的 VBR 为 3,616 bit/s。Windows AMF 正式库原生录制 VBR 为 12,448、CBR 为 200,000 bit/s。本机 RX 580 没有 NVIDIA 编码器；NVENC 入口导出不等于设备运行通过。
 
 Apple H.264 VideoToolbox 已实际禁止 macOS 软件回退并完成两模式逐帧解码，但当前 FFmpeg 同设 ConstantBitRate 与 DataRateLimits 时 CBR 为 **11,072 bit/s**，未通过原始目标填充断言。移除最大码率设置的独立诊断得到 204,680 bit/s；它不代表当前组件参数组合通过，也未应用到正式代码。具体限制、官方依据与诊断证据见 [APPLE-RESULTS.md](APPLE-RESULTS.md)。
 
@@ -119,7 +119,7 @@ Apple H.264 VideoToolbox 已实际禁止 macOS 软件回退并完成两模式逐
 
 实际构建分别使用当前 `build.py` 的 `--targets win-x64,win-x86 --jobs 8 --with-bridge --require-all`、`--targets linux-x64 --jobs 4 --require-all`、`--targets android-arm64,android-armv7 --jobs 4 --require-all`，以及 Mac 上的 `--targets macos-arm64,macos-x64,ios-arm64,ios-simulator-arm64,ios-simulator-x64 --jobs 8 --require-all`。WSL 各任务使用独立源码/构建缓存并设置已有 VAAPI/NDK/头文件环境；Android 改为持久缓存以避免短 WSL 会话清空 `/tmp`。Windows 先校验独立 ready 目录，Unity 占用解除后完整替换正式插件并复验。
 
-最终执行 `python Tools/FFmpeg/verify-artifacts.py`，十目标 **70 库 + 10 桥接** 的 SHA256、CPU/SDK、许可证、补丁及 importer 全部通过，Windows x64 实际加载七库与 ABI 4 桥接；Linux、Android、Mac/模拟器的运行证据单独列于上表。`git diff --check` 通过。运行命令及原始日志位置见 [FFmpeg 验证结果](../Tests/FFmpegValidation/RESULTS.md)；以下保留此前播放专用构建的历史记录。
+最终执行 `python Tools/FFmpeg/verify-artifacts.py`，十目标 **70 库 + 10 桥接** 的 SHA256、CPU/SDK、许可证、补丁及 importer 全部通过，Windows x64 实际加载七库与 ABI 4 桥接；Linux、Android、Mac/模拟器的运行证据单独列于上表。`git diff --check` 通过。运行命令及原始日志位置见 [FFmpeg 验证结果](../Tests/Modules/FFmpegValidation/RESULTS.md)；以下保留此前播放专用构建的历史记录。
 
 ## 2026-10-05：Windows x86、Linux 和 Android 的 AV1 8/10-bit 软件解码
 
@@ -136,7 +136,7 @@ Apple H.264 VideoToolbox 已实际禁止 macOS 软件回退并完成两模式逐
 
 实际构建使用 `build.py --targets win-x86,linux-x64,android-arm64,android-armv7 --jobs 16 --without-bridge --require-all` 的隔离包装器，保留既有 ABI 4 桥接。FFmpeg 源码在 WSL 本地 `/tmp/majdata-av1-all/source` 检出同一固定 commit，避免 NTFS 上的源码状态差异；构建中间文件也置于该 Linux 缓存。每个目标完成后立即将产物写入 `.build/av1-all-ready`，并将安装前缀、配置、dav1d 宏、完整日志及 provenance 持久保存到 `.build/av1-all-evidence`。最终 `build-summary.json` 四项均为 `built`，进程退出码 0。常规重建仍按 [README.md](README.md) 设置 WSL 的隔离 VAAPI 环境及 NDK，再运行同样的目标参数。
 
-四个目标均已使用 `Av1SoftwareSmoke.c` 严格警告编译并运行：Windows x86、WSL Linux x64，以及 Mi MIX 2S 真机的 Android ARM64 / ARMv7，AV1 8-bit 和 10-bit 各通过 3570 项检查、90 帧，包含明确选择 `libdav1d`、实际解码位深、无硬件上下文、RGBA 像素转换、PTS、前后 seek 后像素复现及完整 EOF。Linux 在不设置 `LD_LIBRARY_PATH` 的条件下直接加载本次库并通过。Unity Mono/IL2CPP Player 的独立运行结果见 [播放器验证记录](../Tests/FFmpegValidation/RESULTS.md)，不能仅由编译与二进制校验推断其运行结果。原始 1080p 视频、其他设备和 GPU 驱动能力不由这些短测试样本覆盖。
+四个目标均已使用 `Av1SoftwareSmoke.c` 严格警告编译并运行：Windows x86、WSL Linux x64，以及 Mi MIX 2S 真机的 Android ARM64 / ARMv7，AV1 8-bit 和 10-bit 各通过 3570 项检查、90 帧，包含明确选择 `libdav1d`、实际解码位深、无硬件上下文、RGBA 像素转换、PTS、前后 seek 后像素复现及完整 EOF。Linux 在不设置 `LD_LIBRARY_PATH` 的条件下直接加载本次库并通过。Unity Mono/IL2CPP Player 的独立运行结果见 [播放器验证记录](../Tests/Modules/FFmpegValidation/RESULTS.md)，不能仅由编译与二进制校验推断其运行结果。原始 1080p 视频、其他设备和 GPU 驱动能力不由这些短测试样本覆盖。
 
 ## 2026-10-05：AV1 软件解码首轮（Windows x64）
 
@@ -144,7 +144,7 @@ Windows x64 使用 WSL Ubuntu 24.04、MinGW-w64 GCC 13-win32、NASM 及既有固
 
 隔离产物先输出到忽略的 `.build/av1-ready/Windows/x86_64`，未在构建期间覆盖 Unity 正在使用的插件。Windows 直接加载验证通过全部七个库的版本函数、PE x64/哈希/importer 检查，以及 `avcodec_find_decoder_by_name("libdav1d")`。H.264 / HEVC / AV1 / VP9 的 D3D12VA 和 Vulkan Video 硬件配置仍全部存在。逐库 PE import 与旧库一致，没有新增 dav1d、libgcc 或 libwinpthread 动态依赖；原样复制的既有桥接加载后仍为 ABI 4。新 `avcodec-63.dll` SHA256 为 `a352ab150df09971835e10192aae80959d994a61ded9610dd9c12818fd1f7c2d`。
 
-本节记录的是当日首轮 Windows x64 修复，当时实际原生构建和加载验证仅覆盖 Windows x64，其他目标尚未运行。这一历史范围已由上方后续四目标记录及 APPLE-RESULTS.md 中的 Apple 补全记录扩展；实体 iOS 设备播放仍未验证。Unity/Player 播放、seek、循环和回退结果另见 `Tools/Tests/FFmpegValidation/RESULTS.md`，不能由本节的 ABI/导出检查推断通过。
+本节记录的是当日首轮 Windows x64 修复，当时实际原生构建和加载验证仅覆盖 Windows x64，其他目标尚未运行。这一历史范围已由上方后续四目标记录及 APPLE-RESULTS.md 中的 Apple 补全记录扩展；实体 iOS 设备播放仍未验证。Unity/Player 播放、seek、循环和回退结果另见 `Tools/Tests/Modules/FFmpegValidation/RESULTS.md`，不能由本节的 ABI/导出检查推断通过。
 
 通过真实解码与隔离 Unity Player 验证后，七个 DLL、清单及许可证已应用到正式 Windows x64 插件目录；已有 `.meta`/GUID 和 GPU 桥接保持不变，新增 dav1d 许可证与 `.meta` 成对交付。旧文件备份在忽略的 `.build/av1-backup-20261004-170403`。应用后执行 `python Tools/FFmpeg/verify-artifacts.py`，全部 70 个既有/更新 FFmpeg 库、许可证和桥接检查通过，其中 Windows x64 实际加载并确认 `libdav1d`；其他平台的通过仅指原有产物完整性，不表示已加入或验证 AV1 软件解码。
 
@@ -164,7 +164,7 @@ FFmpeg 编译前逐项确认请求的硬件后端未被 configure 静默禁用�
 
 本机 MSYS2 的简单命令可执行，但 FFmpeg configure 的子进程树仍遇到 `child_copy / dofork` 错误，因此 Windows 库最终由 WSL GCC 编译；没有修改系统安全设置。x64 初次从 WSL stage 时遇到目标文件占用，随后用 Windows 进程复制保留的完整 prefix 成功。WSL 临时缓存自动消失后，x64 清单从新库的 `avutil_configuration()` 恢复准确参数，并再次实际查询硬件配置；清单中的 `stagingRecovery` 明确记录该过程。新脚本会在 stage 前将构建证据保存在安装 prefix，并原子写入清单，避免临时文件映射造成元数据写入失败。
 
-这些结果证明原生后端编译和部署完整，不能据此认定所有 GPU 都能硬解。本机 RX 580 的 D3D12 Video Decode Tier 1 不满足当前固定 FFmpeg D3D12VA 实现的 Tier 2 要求；实际播放器回退、GPU 帧呈现与设备限制的验证另见 `Tools/Tests/FFmpegValidation/RESULTS.md`。本机 WSL 仍没有真实 DRM 渲染设备，Android 的 Vulkan Video 能力也由真机驱动决定。
+这些结果证明原生后端编译和部署完整，不能据此认定所有 GPU 都能硬解。本机 RX 580 的 D3D12 Video Decode Tier 1 不满足当前固定 FFmpeg D3D12VA 实现的 Tier 2 要求；实际播放器回退、GPU 帧呈现与设备限制的验证另见 `Tools/Tests/Modules/FFmpegValidation/RESULTS.md`。本机 WSL 仍没有真实 DRM 渲染设备，Android 的 Vulkan Video 能力也由真机驱动决定。
 
 ## 2026-10-03：首次全平台构建
 
@@ -172,8 +172,8 @@ FFmpeg 编译前逐项确认请求的硬件后端未被 configure 静默禁用�
 
 | 目标 | 实际编译工具链 | 产物 | 验证范围 |
 | --- | --- | --- | --- |
-| Windows x64 | 本机 WSL Ubuntu 24.04 的 MinGW-w64 GCC；NASM 2.16.01 | 7 个 DLL，`Native/Windows/x86_64` | PE x64、SHA256、直接加载全部版本函数；真实播放器测试另见 `Tools/Tests/FFmpegValidation` |
-| Windows x86 | 本机 WSL Ubuntu 24.04 的 MinGW-w64 GCC；NASM 2.16.01 | 7 个 DLL，`Native/Windows/x86` | PE x86、SHA256；真实 32 位测试另见 `Tools/Tests/FFmpegValidation` |
+| Windows x64 | 本机 WSL Ubuntu 24.04 的 MinGW-w64 GCC；NASM 2.16.01 | 7 个 DLL，`Native/Windows/x86_64` | PE x64、SHA256、直接加载全部版本函数；真实播放器测试另见 `Tools/Tests/Modules/FFmpegValidation` |
+| Windows x86 | 本机 WSL Ubuntu 24.04 的 MinGW-w64 GCC；NASM 2.16.01 | 7 个 DLL，`Native/Windows/x86` | PE x86、SHA256；真实 32 位测试另见 `Tools/Tests/Modules/FFmpegValidation` |
 | Linux x64 | 本机 WSL Ubuntu 24.04 的 GCC；NASM 2.16.01 | 7 个 `.so.<major>`，`Native/Linux/x86_64` | ELF x64、SHA256、全部版本函数直接加载；7 个 RUNPATH 均为字面值 `$ORIGIN` |
 | Android ARM64 | 本机 WSL + 官方 NDK r27c / Clang，API 23 | 7 个无版本 `.so`，`Native/Android/arm64-v8a` | ELF64/AArch64、SONAME/NEEDED、SHA256、全部 PT_LOAD 对齐至少 16 KiB |
 | Android ARMv7 | 同上，armv7-a / softfp / NEON | 7 个无版本 `.so`，`Native/Android/armeabi-v7a` | ELF32/ARM、SONAME/NEEDED、SHA256、全部 PT_LOAD 对齐至少 16 KiB |

@@ -99,24 +99,24 @@ MajdataPlay 是一个跨平台 Simai 谱面播放器，也是一个 Unity 项目
 
 - 在 Unity 6000.3.17f1 中等待完整导入和脚本编译，确认 Console 没有新增错误。
 - 场景或交互改动应在相关场景进行 Play Mode 冒烟测试；场景列表以 `ProjectSettings/EditorBuildSettings.asset` 为准。
-- `Assets/Plugins/MajdataPlay/Net/Tests/Editor` 中的测试通过 Unity Test Runner 的 EditMode 运行。
+- `Tools/Tests/Modules/Editor` 中的测试通过 Unity Test Runner 的 EditMode 运行。
 - 发布构建由 `.github/workflows/main.yml` 的 game-ci 配置覆盖。除非任务要求，不要为了普通代码改动在本机生成完整多平台发布包。
 
 ### 独立快速验证（需要 .NET 9）
 
 ```powershell
-dotnet run --project Tools/Tests/SettingValidation/SettingValidation.csproj
-dotnet run --project Tools/Tests/IOValidation/IOValidation.csproj
+dotnet run --project Tools/Tests/Modules/SettingValidation/SettingValidation.csproj
+dotnet run --project Tools/Tests/Modules/IOValidation/IOValidation.csproj
 ```
 
 这些项目链接生产源码并使用窄测试替身；它们通过不代表 Unity 生命周期、真实设备或渲染集成已经通过。
 
 ### 渲染、网络与原生模块
 
-- RawSprite 绘制模式：`./Tools/Tests/ValidateRawSpriteDrawModes.ps1`
-- Setting/TMP 集成：按 `Tools/Tests/SettingTextValidation.md` 运行隔离 Unity 验证。
-- Curl ABI：按 `Tools/Tests/CurlAbiValidation/README.md`；Android ARMv7 验证需要 Unity Android 支持、NDK、ADB 和真机/设备。
-- FFmpeg 托管、Unity Player、Android、Linux 和 Apple 验证：严格按 `Tools/Tests/FFmpegValidation/README.md` 选择命令和前置条件。
+- RawSprite 绘制模式：`./Tools/Tests/Modules/ValidateRawSpriteDrawModes.ps1`
+- Setting/TMP 集成：按 `Tools/Tests/Modules/SettingTextValidation.md` 运行隔离 Unity 验证。
+- Curl ABI：按 `Tools/Tests/Modules/CurlAbiValidation/README.md`；Android ARMv7 验证需要 Unity Android 支持、NDK、ADB 和真机/设备。
+- FFmpeg 托管、Unity Player、Android、Linux 和 Apple 验证：严格按 `Tools/Tests/Modules/FFmpegValidation/README.md` 选择命令和前置条件。
 - FFmpeg 原生库构建：先读 `Tools/FFmpeg/README.md` 与 `Tools/FFmpeg/Native/README.md`；可先用 `./Tools/FFmpeg/build.ps1 -Probe` 只检查工具链。
 
 FFmpeg、Curl、串口/HID、GPU 共享、触摸映射和移动平台改动依赖真实原生库、驱动或硬件。报告结果时区分：托管测试、Unity Editor、Player、目标架构和实机验证；不要把其中一层的结果外推到其他层。

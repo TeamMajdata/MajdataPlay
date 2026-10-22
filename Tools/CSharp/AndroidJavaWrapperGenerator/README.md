@@ -331,7 +331,7 @@ does not create a Java callback object. Java proxies/packaging remain the
 consumer's responsibility.
 
 Run the independent regressions as described in
-../../Tests/AndroidJavaWrapperGeneratorValidation/README.md. These compile
+../../Tests/Modules/AndroidJavaWrapperGeneratorValidation/README.md. These compile
 emitted code against the .NET Standard 2.1 reference pack and real Unity modules,
 with and without UNITY_ANDROID. They do not execute JNI, Unity lifecycle,
 IL2CPP/AOT, or physical Android devices.

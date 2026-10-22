@@ -62,9 +62,9 @@ this bridge does not add a game-menu FFmpeg recording mode.
 From the repository root:
 
 ```powershell
-./Tools/Tests/RenderingLayoutValidation/Validate.ps1
-dotnet run --project Tools/Tests/SettingValidation/SettingValidation.csproj
-dotnet run --project Tools/Tests/MrpCaptureValidation/MrpCaptureValidation.csproj -c Release
+./Tools/Tests/Modules/RenderingLayoutValidation/Validate.ps1
+dotnet run --project Tools/Tests/Modules/SettingValidation/SettingValidation.csproj
+dotnet run --project Tools/Tests/Modules/MrpCaptureValidation/MrpCaptureValidation.csproj -c Release
 ```
 
 Use the Unity version in `ProjectSettings/ProjectVersion.txt` for import and

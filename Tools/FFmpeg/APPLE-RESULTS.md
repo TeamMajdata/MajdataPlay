@@ -63,11 +63,11 @@ python3 apple-audit.py prepare
 python3 apple-audit.py rebuild
 python3 Tools/FFmpeg/verify-artifacts.py \
   --targets macos-arm64,macos-x64,ios-arm64,ios-simulator-arm64,ios-simulator-x64
-bash Tools/Tests/FFmpegValidation/run-apple-native.sh arm64 /absolute/cache/bg.mp4
-bash Tools/Tests/FFmpegValidation/run-ios-native.sh ios-arm64 /absolute/cache/bg.mp4
-bash Tools/Tests/FFmpegValidation/run-ios-native.sh ios-simulator-x64 /absolute/cache/bg.mp4
+bash Tools/Tests/Modules/FFmpegValidation/run-apple-native.sh arm64 /absolute/cache/bg.mp4
+bash Tools/Tests/Modules/FFmpegValidation/run-ios-native.sh ios-arm64 /absolute/cache/bg.mp4
+bash Tools/Tests/Modules/FFmpegValidation/run-ios-native.sh ios-simulator-x64 /absolute/cache/bg.mp4
 FFMPEG_SIMULATOR_UDID=31D01781-B001-4DCA-8888-B5E7A8549DAC \
-  bash Tools/Tests/FFmpegValidation/run-ios-native.sh ios-simulator-arm64 /absolute/cache/bg.mp4
+  bash Tools/Tests/Modules/FFmpegValidation/run-ios-native.sh ios-simulator-arm64 /absolute/cache/bg.mp4
 bash link-apple-audit.sh
 ```
 
@@ -75,7 +75,7 @@ bash link-apple-audit.sh
 
 ## 证据与未验证边界
 
-本机证据在忽略目录 `Tools/FFmpeg/.build/apple-audit-20261008-apple/returned/evidence/`：`final-apple-audit.json`、`cache-validation.json`、`prepare.log`、`rebuild.log`、`verify-artifacts-final.log`、各目标 `*native.log` / `*link.log` / `*abi.log`、`bridge-dependencies.txt`、固定脚本及临时 fixture。初始 raw 与归一化审计、部署清单、66 个 `.meta` 前后哈希在同一个 audit 根目录。远端证据同时保留在隔离根的 `Tools/FFmpeg/.build/audit-evidence/` 与 `Tools/Tests/FFmpegValidation/.work/`，未写回正式场景或 Player Settings。
+本机证据在忽略目录 `Tools/FFmpeg/.build/apple-audit-20261008-apple/returned/evidence/`：`final-apple-audit.json`、`cache-validation.json`、`prepare.log`、`rebuild.log`、`verify-artifacts-final.log`、各目标 `*native.log` / `*link.log` / `*abi.log`、`bridge-dependencies.txt`、固定脚本及临时 fixture。初始 raw 与归一化审计、部署清单、66 个 `.meta` 前后哈希在同一个 audit 根目录。远端证据同时保留在隔离根的 `Tools/FFmpeg/.build/audit-evidence/` 与 `Tools/Tests/Modules/FFmpegValidation/.work/`，未写回正式场景或 Player Settings。
 
 **本轮未验证** Unity 6000.3.17f1 Editor/Player、Unity 生命周期与托管 ABI 集成、实体 iOS、macOS x64 运行、x64 simulator 运行、VideoToolbox 硬件编码及新一轮四种软件格式录制矩阵。ARM64 simulator 的软件回退不能外推为 iOS device 的 VideoToolbox 或 Unity 图形验证通过。以下 2026-10-05 结果属于历史实测，不能记作 2026-10-08 重新执行。
 
@@ -123,7 +123,7 @@ bash link-apple-audit.sh
 
 ## 实际录制与 VideoToolbox CBR 限制
 
-共享 [EncoderNativeSmoke.c](../Tests/FFmpegValidation/EncoderNativeSmoke.c) 以 C11 `-Wall -Wextra -Werror` 编译，分别录制 60 帧 128×64/30 fps 的 CBR/VBR 视频，验证实际编码器、软件线程上限 2、解码帧数、像素与方向、包含间隔的 PTS、flush/drain、尾部索引及独占输出不覆盖。macOS ARM64 与 iOS ARM64 模拟器实际 MPEG4 结果均为：VBR 最后一秒 3616 bit/s，CBR 199976 bit/s（目标 200000 bit/s），两种模式各 60 帧，2021 checks PASS。MPEG4 的平坦场景 CBR 目标填充断言也通过。
+共享 [EncoderNativeSmoke.c](../Tests/Modules/FFmpegValidation/EncoderNativeSmoke.c) 以 C11 `-Wall -Wextra -Werror` 编译，分别录制 60 帧 128×64/30 fps 的 CBR/VBR 视频，验证实际编码器、软件线程上限 2、解码帧数、像素与方向、包含间隔的 PTS、flush/drain、尾部索引及独占输出不覆盖。macOS ARM64 与 iOS ARM64 模拟器实际 MPEG4 结果均为：VBR 最后一秒 3616 bit/s，CBR 199976 bit/s（目标 200000 bit/s），两种模式各 60 帧，2021 checks PASS。MPEG4 的平坦场景 CBR 目标填充断言也通过。
 
 macOS M4 的 `h264_videotoolbox` 显式设置 `allow_sw=0`、`require_sw=0`，NV12 输入，实际硬件编码 60 帧后解码、PTS、像素、drain 与独占输出 2022 checks PASS。VBR 最后一秒 11744 bit/s（目标 200000、最大 400000）；CBR 最后一秒仅 **11072 bit/s**（目标和最大均 200000）。`constant_bit_rate=1` 与 DataRateLimits 参数被接受，但原始 CBR 目标 ±20% 填充检查 **FAIL**。后来的 2022 checks 仅确认配置接受、测得负载与 roundtrip，不能证明目标填充效果通过。
 
@@ -149,17 +149,17 @@ export PATH="/opt/homebrew/bin:$PWD/Tools/FFmpeg/.build/toolchains/pkgconf/bin:/
   --targets macos-arm64,macos-x64,ios-arm64,ios-simulator-arm64,ios-simulator-x64 \
   --jobs 8 --require-all
 /opt/homebrew/bin/python3 Tools/FFmpeg/verify-artifacts.py
-bash Tools/Tests/FFmpegValidation/run-apple-native.sh arm64 "$PWD/bg.mp4"
-bash Tools/Tests/FFmpegValidation/run-ios-native.sh ios-arm64 "$PWD/bg.mp4"
-bash Tools/Tests/FFmpegValidation/run-ios-native.sh ios-simulator-x64 "$PWD/bg.mp4"
+bash Tools/Tests/Modules/FFmpegValidation/run-apple-native.sh arm64 "$PWD/bg.mp4"
+bash Tools/Tests/Modules/FFmpegValidation/run-ios-native.sh ios-arm64 "$PWD/bg.mp4"
+bash Tools/Tests/Modules/FFmpegValidation/run-ios-native.sh ios-simulator-x64 "$PWD/bg.mp4"
 FFMPEG_SIMULATOR_UDID=31D01781-B001-4DCA-8888-B5E7A8549DAC \
-  bash Tools/Tests/FFmpegValidation/run-ios-native.sh ios-simulator-arm64 "$PWD/bg.mp4"
+  bash Tools/Tests/Modules/FFmpegValidation/run-ios-native.sh ios-simulator-arm64 "$PWD/bg.mp4"
 
 # 编码检查用同架构 install/include 和交付目录的实际版本化 dylib
 native="$PWD/Assets/Plugins/MajdataPlay/FFmpeg/Native/macOS/arm64"
 xcrun clang -arch arm64 -std=c11 -Wall -Wextra -Werror \
   -I"$PWD/Tools/FFmpeg/.build/install/macos-arm64/include" \
-  Tools/Tests/FFmpegValidation/EncoderNativeSmoke.c \
+  Tools/Tests/Modules/FFmpegValidation/EncoderNativeSmoke.c \
   "$native/libavformat.63.dylib" "$native/libavcodec.63.dylib" \
   "$native/libswscale.10.dylib" "$native/libavutil.61.dylib" \
   -Wl,-rpath,"$native" -lm -o /absolute/ignored/path/EncoderNativeSmoke
@@ -208,16 +208,16 @@ PASS: AV1 10-bit; decoder=libdav1d; 128x96; frames=90; PTS=0.000000..2.966667; s
 # 在独立 Mac 目录中；任务缓存的 pkgconf/NASM、既有 CMake/Ninja 在 PATH
 python3 Tools/FFmpeg/build.py --targets macos-arm64,ios-arm64,ios-simulator-arm64,macos-x64,ios-simulator-x64 --jobs 8 --require-all
 python3 Tools/FFmpeg/verify-artifacts.py
-# 按 Tools/Tests/FFmpegValidation/README.md 编译 Av1SoftwareSmoke.c，链接各自交付库
+# 按 Tools/Tests/Modules/FFmpegValidation/README.md 编译 Av1SoftwareSmoke.c，链接各自交付库
 Av1SoftwareSmoke test-av1.mp4 test-av1-10bit.mp4
 # ARM64 模拟器：对编译好的 iOS simulator executable 临时签名后运行
 codesign --force --sign - Av1SoftwareSmoke
 xcrun simctl spawn 31D01781-B001-4DCA-8888-B5E7A8549DAC /absolute/path/Av1SoftwareSmoke /absolute/path/test-av1.mp4 /absolute/path/test-av1-10bit.mp4
 # 现有 Metal/静态 Unity 注册回归；media 为远端既有 H.264 fixture
-bash Tools/Tests/FFmpegValidation/run-apple-native.sh arm64 "$media"
-bash Tools/Tests/FFmpegValidation/run-ios-native.sh ios-arm64
-bash Tools/Tests/FFmpegValidation/run-ios-native.sh ios-simulator-x64
-FFMPEG_SIMULATOR_UDID=31D01781-B001-4DCA-8888-B5E7A8549DAC bash Tools/Tests/FFmpegValidation/run-ios-native.sh ios-simulator-arm64 "$media"
+bash Tools/Tests/Modules/FFmpegValidation/run-apple-native.sh arm64 "$media"
+bash Tools/Tests/Modules/FFmpegValidation/run-ios-native.sh ios-arm64
+bash Tools/Tests/Modules/FFmpegValidation/run-ios-native.sh ios-simulator-x64
+FFMPEG_SIMULATOR_UDID=31D01781-B001-4DCA-8888-B5E7A8549DAC bash Tools/Tests/Modules/FFmpegValidation/run-ios-native.sh ios-simulator-arm64 "$media"
 ```
 
 回传产物和完整构建/测试证据位于忽略目录 `Tools/FFmpeg/.build/av1-all-ready/Apple`，其中 `artifacts` 包含 macOS/iOS 交付目录及两个模拟器目录，`evidence` 保存日志和配置。远端与本地压缩包 SHA256 已一致校验。集成到正式插件目录时保留已有 `.meta` GUID；模拟器静态库继续存放于 `.build/artifacts`，避免 Unity 同时导入 device 与 simulator 归档。
@@ -279,13 +279,13 @@ PASS: Metal NV12 texture sampling, GPU frame lifetime and real video decode (sim
 ```bash
 bash Tools/FFmpeg/build.sh --targets macos-x64,macos-arm64,ios-arm64,ios-simulator-arm64,ios-simulator-x64
 python3 Tools/FFmpeg/verify-artifacts.py
-bash Tools/Tests/FFmpegValidation/run-apple-native.sh arm64
-bash Tools/Tests/FFmpegValidation/run-ios-native.sh ios-arm64
-bash Tools/Tests/FFmpegValidation/run-ios-native.sh ios-simulator-x64
-FFMPEG_SIMULATOR_UDID=<已启动的专用模拟器UUID> bash Tools/Tests/FFmpegValidation/run-ios-native.sh ios-simulator-arm64
+bash Tools/Tests/Modules/FFmpegValidation/run-apple-native.sh arm64
+bash Tools/Tests/Modules/FFmpegValidation/run-ios-native.sh ios-arm64
+bash Tools/Tests/Modules/FFmpegValidation/run-ios-native.sh ios-simulator-x64
+FFMPEG_SIMULATOR_UDID=<已启动的专用模拟器UUID> bash Tools/Tests/Modules/FFmpegValidation/run-ios-native.sh ios-simulator-arm64
 ```
 
-原生测试源码为 `AppleLoaderSmoke.c` 和 `Native/tests/MetalSmoke.mm`。测试可接收第二个参数覆盖视频路径。运行记录位于 `Tools/Tests/FFmpegValidation/.work/Apple-*`；本次回传的完整日志保存在本地 `.work/AppleRemoteEvidence`。`verify-artifacts.py` 已检查回传的 70 个 FFmpeg 库，包含 Mach-O CPU、静态 archive 对象平台和所有文件哈希。
+原生测试源码为 `AppleLoaderSmoke.c` 和 `Native/tests/MetalSmoke.mm`。测试可接收第二个参数覆盖视频路径。运行记录位于 `Tools/Tests/Modules/FFmpegValidation/.work/Apple-*`；本次回传的完整日志保存在本地 `.work/AppleRemoteEvidence`。`verify-artifacts.py` 已检查回传的 70 个 FFmpeg 库，包含 Mach-O CPU、静态 archive 对象平台和所有文件哈希。
 
 ## 当前未验证范围
 

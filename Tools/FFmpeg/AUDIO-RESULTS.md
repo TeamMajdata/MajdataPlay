@@ -30,7 +30,7 @@ No game installation or user data was changed.
 
 ## What the native smoke verifies
 
-`Tools/Tests/FFmpegValidation/AudioCodecSmoke.c` performs 35 one-second,
+`Tools/Tests/Modules/FFmpegValidation/AudioCodecSmoke.c` performs 35 one-second,
 48 kHz stereo encoder → decoder round trips: AAC; Opus with the built-in and
 libopus decoders; MP3 with fixed-point and floating-point decoders; and 30 PCM
 variants. Left/right channels carry 440/880 Hz respectively. Checks cover codec
@@ -55,12 +55,12 @@ playback or a Camera recording audio track to the managed components.
 From the repository root:
 
 ```powershell
-python -B -m unittest discover -s Tools/Tests/FFmpegBuildValidation -p 'test_*.py'
-python -B -m unittest discover -s Tools/Tests/FFmpegArtifactValidation
+python -B -m unittest discover -s Tools/Tests/Modules/FFmpegBuildValidation -p 'test_*.py'
+python -B -m unittest discover -s Tools/Tests/Modules/FFmpegArtifactValidation
 python -B Tools/FFmpeg/verify-artifacts.py
 python -B Tools/FFmpeg/verify-artifacts.py --targets ios-simulator-arm64,ios-simulator-x64 --skip-host-load
-python -B Tools/Tests/FFmpegBuildValidation/verify_windows_dlls.py --targets win-x86,win-x64,win-arm64
-./Tools/Tests/FFmpegArtifactValidation/run-unity-importers.ps1
+python -B Tools/Tests/Modules/FFmpegBuildValidation/verify_windows_dlls.py --targets win-x86,win-x64,win-arm64
+./Tools/Tests/Modules/FFmpegArtifactValidation/run-unity-importers.ps1
 ```
 
 The offline suites pass **31 + 47 tests**. Windows PE checks cover all 24 DLLs,
@@ -80,7 +80,7 @@ The matching Windows x64 ABI is loaded during the audit; a separate Linux x64
 audit also loads the installed libraries without `LD_LIBRARY_PATH`.
 
 Native smoke compile/link commands and platform deployment details are in
-`Tools/Tests/FFmpegValidation/README.md`. Use the matching build prefix for
+`Tools/Tests/Modules/FFmpegValidation/README.md`. Use the matching build prefix for
 headers/import libraries and execute against the newly staged libraries.
 The Windows x86/x64, Linux, macOS ARM64, Simulator ARM64 and both Android ABI
 runs above each passed all 35 round trips (**245 total**). Test executables, recordings and complete logs are
