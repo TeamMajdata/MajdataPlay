@@ -100,6 +100,7 @@ MajdataPlay 是一个跨平台 Simai 谱面播放器，也是一个 Unity 项目
 - 在 Unity 6000.3.17f1 中等待完整导入和脚本编译，确认 Console 没有新增错误。
 - 场景或交互改动应在相关场景进行 Play Mode 冒烟测试；场景列表以 `ProjectSettings/EditorBuildSettings.asset` 为准。
 - `Tools/Tests/Modules/Editor` 中的测试通过 Unity Test Runner 的 EditMode 运行。
+- 主项目（`Assets/Scripts`）与 `Assets/Plugins/MajdataPlay` 的 Unity Test Framework 测试集位于 `Tools/Tests/MajdataPlay.Tests`：运行 `./Tools/Tests/MajdataPlay.Tests/Run-Tests.ps1`，它在隔离副本中执行 EditMode 与 PlayMode 测试（`-Area` 选择范围，`-Coverage` 生成覆盖率报告），不会修改主项目；目录与编写约定见其 `README.md`。
 - 发布构建由 `.github/workflows/main.yml` 的 game-ci 配置覆盖。除非任务要求，不要为了普通代码改动在本机生成完整多平台发布包。
 
 ### 独立快速验证（需要 .NET 9）
