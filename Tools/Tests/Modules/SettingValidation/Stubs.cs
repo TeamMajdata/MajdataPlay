@@ -376,7 +376,6 @@ namespace MajdataPlay.Settings
     public class ChartSetting { [ChartDiscoveryProbe] public int ChartSpeed { get; set; } }
     public class GameOptions { public float SlideFadeInOffset { get; set; } }
     public class JudgeOptions { public float AudioOffset { get; set; } public float JudgeOffset { get; set; } public float AnswerOffset { get; set; } public float TouchPanelOffset { get; set; } }
-    public class DebugOptions { public OffsetUnitOption OffsetUnit { get; set; } public float DisplayOffset { get; set; } public int MenuOptionIterationSpeed { get; set; } = 45; }
     public class DisplayOptions { public string Language { get; set; } = "en-US"; }
     public class SFXVolume { public float Answer { get; set; } public float Tap { get; set; } public float Ex { get; set; } public float Break { get; set; } public float Slide { get; set; } public float Touch { get; set; } public float Hanabi { get; set; } public float Voice { get; set; } }
     public static class ChartSettingStorage { public static object GetSetting(string hash) => new GameOptions(); public static void ConvertUnitToSecond() { } public static void ConvertUnitToFrame() { } }
@@ -415,7 +414,7 @@ namespace MajdataPlay
         static readonly Dictionary<string, Dictionary<string, string>> _renderingTranslations = new();
         // Keep old stub behavior for unrelated tests; rendering uses the four actual project tables.
         public static bool IsRenderingKey(string value) => value == "MAJSETTING_CATEGORY_Rendering" ||
-            new[] { "RenderQuality", "AntiAliasing", "TextureQuality", "RenderScale", "OutputMode", "CompatibilityMode", "SystemResolutionScaling", "FPSLimit", "VSync", "SystemScalingStatus", "DisplayBufferResolution", "SceneRenderResolution", "CurrentOutputPath" }
+            new[] { "RenderQuality", "AntiAliasing", "TextureQuality", "RenderScale", "OutputMode", "CompatibilityMode", "SystemResolutionScaling", "FPSLimit", "VSync", "SystemScalingStatus", "DisplayBufferResolution", "SceneRenderResolution", "CurrentOutputPath", "SensorPosition", "SensorStyle", "SensorOpacity", "DisplaySensor" }
                 .Any(property => value == "MAJSETTING_PROPERTY_" + property || value.StartsWith("MAJSETTING_PROPERTY_" + property + "_", StringComparison.Ordinal));
         public static string LookupRendering(string value, global::MajdataPlay.i18n.Language language)
         {

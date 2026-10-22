@@ -4,7 +4,23 @@
 
 下文的 `Runtime/`、`Editor/` 和 `Library/` 路径均相对上述插件库目录；`Presets/` 和 `Documentation/` 路径相对本目录。程序集名称、Shader 名称以及迁移资产的 GUID 保持不变。
 
-## 2026-10-18 传感器边框透明度（当前）
+## 2026-10-23 传感器调试位置与经典风格（当前）
+
+「调试位置」保存为 `Debug.SensorPosition`，默认主屏；选择副屏后，读取 `InputManager.SubScreenEdge` 已有世界空间上下边缘，将整个分区图等比缩放到副屏高度并水平居中。位置在相机 / Canvas / 副屏边缘更新后的 LateUpdate 应用。仅 Shader 顶点与对应的 Renderer 剔除 bounds 使用该视觉映射；原 Transform、MeshCollider、输入索引与主屏触摸位置不变。副屏尚未提供有效边缘时暂不绘制，边缘恢复后自动显示。切回主屏恢复原始几何位置与自动 bounds；不增加 RT、Copy 或 Renderer 副本。
+
+「调试风格」现有亮暗、红绿、经典三项，默认仍为红绿。经典使用完整分区，未触发 RGB 为 `#000D69`，触发为 `#5D0D06`，两态均使用 `SensorOpacity / 100`。共用透明度范围扩展为 10%～90%，步长 10%，默认 20%；亮暗继续使用闲置半倍、触发两倍并截断到 1 的 alpha，其余两种风格不改变设置 alpha。新位置、经典风格和扩展透明度已补四语言与模板。
+
+验证：设置回归 1446 项断言、隔离 Unity 真实网格 / MPB / bounds / JSON 检查 17565 项断言通过；另以 Unity 6000.3.17f1 / D3D11 / RTX 3080 Ti 真实渲染生产 Shader，34 项 GPU 检查通过，覆盖镜头外原几何映射到副屏后的实际可见性、像素级上下对齐 / 居中、经典 20% / 90% 混合与主屏复位 / 隐藏。验证入口见 [SensorDebugValidation](../../../../Tools/Tests/Modules/SensorDebugValidation/README.md)。未运行主工程 Play、Player 或移动端真机。以下为同日上一轮记录，新的位置、风格与透明度范围以本节为准。
+
+## 2026-10-23 传感器调试风格（前一轮）
+
+「显示传感器」后新增「调试风格」，保存为 `Debug.SensorStyle`；旧配置缺项默认「红绿」，不改变现有外观。红绿沿用烘焙窄边网格，闲置红 / 触发绿，两态 alpha 均为 `SensorOpacity / 100`。亮暗改用 MeshCollider 已持有的原始完整分区网格，以黑色透明度区分状态；默认 20% 时闲置 alpha 0.1、触发 0.4，恢复旧 Editor 的浅 / 深效果。透明度调整对两态同比例缩放（闲置为设置值 × 0.5，触发为设置值 × 2，上限 1），所有平台一致，修复旧 Player 闲置 alpha 为 0 的不可见差异。
+
+切换风格只替换 `MeshFilter.sharedMesh`，共享现有资源，不生成或复制网格；MeshCollider、Transform、输入索引不改。两种风格共用现有透明材质与简单颜色 Shader。Init 的 34 个分区仅取消 Batching Static 位（29 个场景对象与 FBX 实例中的 5 个 override），保留其他静态标志；否则 Player 静态合批可能冻结网格，导致运行时风格切换无效。显示关闭时禁用全部调试 MeshRenderer，跳过颜色和风格更新，重新开启时读取最新设置及触摸状态；稳定状态不重复提交 MPB。`DebugOptions` 拆为独立同名类型源文件以便测试直接链接生产设置，完整类型名与原 JSON 结构不变。四语言及模板键已补齐。
+
+验证：`SettingValidation` 1265 项断言与 `IOValidation` 300 项断言通过。Unity 6000.3.17f1 隔离 headless 工程导入真实 FBX、5 份边框 Mesh、材质与 Shader，运行生产控制器和 DebugOptions，共 3081 项断言通过：覆盖 34 个输入映射、全部强度 / 风格 / 状态、真实 MPB 颜色、Renderer 开关、共享材质不变和 Newtonsoft 字符串枚举往返。场景检查确认 29＋5 个节点无 BatchingStatic，还原这 34 个标志后场景文本与修改前精确相同。验证入口见 [SensorDebugValidation](../../../../Tools/Tests/Modules/SensorDebugValidation/README.md)。未运行主工程 Play、Player 或真机；headless 测试不证明最终混合画面、触摸或功耗。以下「当前」标记均为当时记录，本节优先。
+
+## 2026-10-18 传感器边框透明度（历史）
 
 保留 5 份静态窄边 Mesh、34 个可视绑定与原碰撞数据；颜色仍为闲置红 / 触发绿。Shader 恢复 Transparent 队列（3000）、标准 Alpha Blend、ZWrite Off、ZTest LEqual，不再使用下一节历史记录中的 Opaque 状态。
 
@@ -12,7 +28,7 @@
 
 本轮 16 项程序集编译通过；四后端 8 个 Shader stage 和静态资源读回共 97 项检查通过，透明队列读回为 3000；实际新编译 Windows / Android DLL 各 25 项默认值、范围、步长和 JSON 保存读取检查通过；实际控制器源码加窄 stub 的 Editor / Player 各 24 项状态 / alpha / 缓存检查通过。未运行主工程 Play、Player 或真机，不宣称已验证最终混合画面或功耗。
 
-## 2026-10-18 静态烘焙传感器边框（当前）
+## 2026-10-18 静态烘焙传感器边框（历史）
 
 边框最终顶点已烘焙到 `Assets/Models/JudgeAreaBorders/A～E.asset`，固定对象空间宽度 0.02。Init 的 29 个独立 MeshFilter 和 FBX 实例中的 5 个 MeshFilter override 均替换为这 5 份共享资源，Renderer 材质也统一为 JudgeAreas。MeshCollider 继续使用原始完整 FBX 分区，Camera / Canvas / Transform / 输入索引未改。
 

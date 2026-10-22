@@ -16,10 +16,20 @@ dotnet run --project Tools/Tests/Modules/SettingValidation/SettingValidation.csp
 
 The project links the production `Menu`, `Option`, `SettingManager`, option
 enumerators, `RenderingOptions`, `MajRenderDiagnostics`, settings attributes, and input repeat
-implementation directly. It uses no NuGet packages. The command above writes all
+implementation directly. It also links the production `DebugOptions`, `SensorDebugStyle`, `SensorDebugPosition`, and their required enums so sensor defaults and menu metadata are not copied into a test stub. It uses no NuGet packages. The command above writes all
 build output outside the Unity project; omitting these properties retains the
 older `Temp/SettingValidation` default. Rendering translations are copied from
 the four actual project language tables into this external output directory.
+
+The sensor regression checks production defaults (Red / Green, main screen, hidden, 20%),
+missing JSON keys, numeric JSON round-trips, invalid numeric style fallback, opacity
+normalization across the 10%–90% range (10% steps, default 20%), old saved opacities,
+external out-of-range values, menu limits in both directions,
+adjacent visibility/position/style/opacity menu order, all three styles and both positions,
+shared reflection-cache stability, four actual language tables, cycling, and external
+value refresh. JSON round-trips here use System.Text.Json; they do not validate the
+application's Newtonsoft converters. This harness also does not render sensor meshes
+or prove Unity lifecycle or device behavior.
 
 The harness checks:
 
