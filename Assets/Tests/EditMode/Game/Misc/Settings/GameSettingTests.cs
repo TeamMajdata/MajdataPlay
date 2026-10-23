@@ -144,7 +144,7 @@ namespace MajdataPlay.Tests.Game.Misc.Settings
             Assert.That(restored.Rendering.FPSLimit, Is.EqualTo(120));
         }
 
-        /// <summary>Checks that the sensor opacity is snapped to the 10% steps between 10% and 50%.</summary>
+        /// <summary>Checks that the sensor opacity is snapped to the 10% steps between 10% and 90%.</summary>
         /// <param name="value">The assigned value.</param>
         /// <param name="expected">The stored value.</param>
         [TestCase(-5, 10)]
@@ -153,7 +153,10 @@ namespace MajdataPlay.Tests.Game.Misc.Settings
         [TestCase(15, 20)]
         [TestCase(26, 30)]
         [TestCase(45, 50)]
-        [TestCase(99, 50)]
+        [TestCase(84, 80)]
+        [TestCase(85, 90)]
+        [TestCase(90, 90)]
+        [TestCase(99, 90)]
         public void SensorOpacity_SnapsToSteps(int value, int expected)
         {
             var debug = new DebugOptions();
