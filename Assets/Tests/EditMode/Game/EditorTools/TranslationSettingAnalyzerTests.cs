@@ -144,18 +144,33 @@ namespace MajdataPlay.Tests.Game.EditorTools
         }
 
         /// <summary>
-        /// Checks that the translation selection attributes do not change the collected keys: the analyzer still models
-        /// the default name, description and value keys that the setting UI requests.
+        /// Checks that the translation selection attributes change the collected name and value keys the same way the
+        /// setting UI resolves them, while descriptions keep their default key.
         /// </summary>
         [Test]
-        public void TranslationSelectionAttributes_KeepDefaultKeys()
+        public void TranslationSelectionAttributes_SelectKeys()
         {
-            Assert.That(_keys.Keys, Does.Contain("MAJSETTING_PROPERTY_Annotated"));
+            Assert.That(_keys["FX_CUSTOM_NAME"], Does.Contain("Fx.Annotated (name)"));
+            Assert.That(_keys.Keys, Does.Not.Contain("MAJSETTING_PROPERTY_Annotated"));
             Assert.That(_keys.Keys, Does.Contain("MAJSETTING_PROPERTY_Annotated_DESC"));
-            AssertValue("Annotated", "False");
-            AssertValue("Annotated", "True");
-            Assert.That(_keys.Keys, Does.Not.Contain("FX_CUSTOM_NAME"));
+            Assert.That(_keys["MAJSETTING_GENERAL_OPTION_True"], Does.Contain("Fx.Annotated (option value)"));
+            Assert.That(_keys.Keys, Does.Not.Contain("MAJSETTING_PROPERTY_Annotated_OPTION_True"));
             Assert.That(_diagnostics.Any(diagnostic => diagnostic.Contains("Fx.Annotated")), Is.False);
+
+            Assert.That(_keys.Keys, Does.Not.Contain("MAJSETTING_PROPERTY_Silent"));
+            Assert.That(_keys.Keys, Does.Contain("MAJSETTING_PROPERTY_Silent_DESC"));
+            Assert.That(_keys.Keys.Any(key => key.StartsWith("MAJSETTING_PROPERTY_Silent_OPTION_", StringComparison.Ordinal)), Is.False);
+            Assert.That(_keys["MAJSETTING_GENERAL_OPTION_False"], Does.Not.Contain("Fx.Silent (option value fallback)"));
+
+            Assert.That(_keys["Alias"], Does.Contain("Fx.Aliased (name)"));
+            Assert.That(_keys.Keys, Does.Contain("FX_Alias_First").And.Contain("FX_Alias_Second").And.Contain("FX_Alias_Third"));
+            Assert.That(_keys.Keys, Does.Not.Contain("MAJSETTING_PROPERTY_Aliased_OPTION_First"));
+            Assert.That(_keys["MAJSETTING_GENERAL_OPTION_First"], Does.Not.Contain("Fx.Aliased (option value fallback)"));
+
+            Assert.That(_keys.Keys, Does.Contain("MAJSETTING_GENERAL_PROPERTY_GeneralName"));
+            Assert.That(_keys.Keys, Does.Not.Contain("MAJSETTING_PROPERTY_GeneralName"));
+            Assert.That(HasDiagnostic("TranslatedCount", "opt into translation"), Is.True);
+            Assert.That(_keys.Keys.Any(key => key.StartsWith("MAJSETTING_PROPERTY_TranslatedCount_OPTION_", StringComparison.Ordinal)), Is.False);
         }
 
         /// <summary>Checks the full analysis of the runtime settings: categories, Audio's volume page, chart settings and offset units.</summary>
@@ -218,6 +233,21 @@ namespace MajdataPlay.Tests.Game.EditorTools
             Assert.That(keys.Keys, Does.Contain("MAJSETTING_CATEGORY_Fixture"));
             Assert.That(keys.Keys, Does.Contain("MAJSETTING_PROPERTY_Flag"));
             Assert.That(diagnostics.Any(diagnostic => diagnostic.Contains("Audio.Volume does not expose a public, non-indexed getter")), Is.True);
+        }
+
+        /// <summary>Checks that the translation attributes of a category select or suppress its title key.</summary>
+        [Test]
+        public void CollectCategories_HonoursMenuNameTranslationAttributes()
+        {
+            var keys = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
+            var diagnostics = new List<string>();
+
+            PrivateMember.InvokeStatic(typeof(TranslationSettingAnalyzer), "CollectCategories", typeof(SettingRootFixture), keys, diagnostics);
+
+            Assert.That(keys["FX_MENU_Titled"], Does.Contain(typeof(SettingRootFixture).FullName + ".Titled (category)"));
+            Assert.That(keys.Keys, Does.Not.Contain("MAJSETTING_CATEGORY_Titled"));
+            Assert.That(keys.Keys, Does.Not.Contain("MAJSETTING_CATEGORY_Untitled"));
+            Assert.That(keys["MAJSETTING_PROPERTY_Flag"], Does.Contain(typeof(SettingRootFixture).FullName + ".Untitled.Flag (name)"));
         }
 
         /// <summary>Checks the numeric text classifier used for custom values.</summary>

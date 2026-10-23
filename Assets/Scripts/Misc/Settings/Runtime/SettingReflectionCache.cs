@@ -1,5 +1,6 @@
 using MajdataPlay.Diagnostics;
 using MajdataPlay.Settings.OptionEnumerators;
+using MajdataPlay.Settings.Runtime;
 using System;
 using System.Collections.Generic;
 using System.Reflection;
@@ -89,6 +90,23 @@ namespace MajdataPlay.Settings
             }
         }
 
+        /// <summary>
+        /// Resolves how the title of a settings menu is localized from the translation attributes of its category property.
+        /// </summary>
+        /// <param name="categoryProperty">The property of the root setting that represents the menu, or null for a menu without one such as the chart settings.</param>
+        /// <param name="menuName">The displayed menu name, used for <c>{0}</c> unless the category selects a template and carries an <see cref="OptionNameAttribute"/>.</param>
+        /// <returns>The title localization rule; without attributes it looks up <c>MAJSETTING_CATEGORY_{menuName}</c>.</returns>
+        /// <exception cref="ArgumentNullException"><paramref name="menuName"/> is null.</exception>
+        internal static SettingTranslation GetMenuTranslation(PropertyInfo? categoryProperty, string menuName)
+        {
+            if (menuName is null)
+            {
+                throw new ArgumentNullException(nameof(menuName));
+            }
+            var attributes = categoryProperty is null ? Array.Empty<Attribute>() : GetAttributes(categoryProperty);
+            return SettingTranslation.Resolve(attributes, TranslationTarget.MenuName, menuName);
+        }
+
         internal static Attribute[] GetAttributes(MemberInfo member)
         {
             lock (s_sync)
@@ -161,6 +179,18 @@ namespace MajdataPlay.Settings
         internal PropertyInfo PropertyInfo { get; }
         internal bool HasDescription { get; }
         internal bool IsOffsetOption { get; }
+        /// <summary>
+        /// Gets the option name substituted for <c>{0}</c> in the name key templates: the <see cref="OptionNameAttribute"/>
+        /// value when a translation attribute selects the template, otherwise the property name.
+        /// </summary>
+        internal string OptionName { get; }
+        /// <summary>
+        /// Gets how the displayed option name is localized.
+        /// </summary>
+        internal SettingTranslation NameTranslation { get; }
+        /// <summary>
+        /// Gets the primary localization key of the option name, or the raw option name when it is not translated.
+        /// </summary>
         internal string NameKey { get; }
         internal string DescriptionKey { get; }
 
@@ -171,8 +201,8 @@ namespace MajdataPlay.Settings
         {
             PropertyInfo = property;
             HasDescription = true;
-            NameKey = $"MAJSETTING_PROPERTY_{property.Name}";
             DescriptionKey = $"MAJSETTING_PROPERTY_{property.Name}_DESC";
+            string? nameKeyOverride = null;
             foreach (var attribute in attributes)
             {
                 switch (attribute)
@@ -181,7 +211,7 @@ namespace MajdataPlay.Settings
                         HasDescription = false;
                         break;
                     case OptionNameAttribute name:
-                        NameKey = name.Name;
+                        nameKeyOverride = name.Name;
                         break;
                     case DescriptionAttribute description:
                         DescriptionKey = description.Text;
@@ -191,6 +221,15 @@ namespace MajdataPlay.Settings
                         break;
                 }
             }
+            var nameTranslation = SettingTranslation.Resolve(attributes, TranslationTarget.OptionName, property.Name);
+            if (!nameTranslation.IsExplicit && nameKeyOverride is not null)
+            {
+                // Without translation attributes an OptionName override is the complete localization key.
+                nameTranslation = SettingTranslation.Literal(TranslationTarget.OptionName, property.Name, nameKeyOverride);
+            }
+            NameTranslation = nameTranslation;
+            OptionName = nameTranslation.OptionName;
+            NameKey = nameTranslation.IsTranslated ? nameTranslation.GetKey(0, OptionName) : OptionName;
             IsOffsetOption = property.Name is
                 "SlideFadeInOffset" or
                 "AudioOffset" or
@@ -224,6 +263,15 @@ namespace MajdataPlay.Settings
             {
                 _createEnumerator = static () => new DefaultReadOnlyEnumerator();
             }
+        }
+
+        /// <summary>
+        /// Localizes the option name for the current language.
+        /// </summary>
+        /// <returns>The translated name, the primary key when no translation exists, or the raw option name when it is not translated.</returns>
+        internal string LocalizeName()
+        {
+            return NameTranslation.Localize(OptionName);
         }
 
         internal IOptionEnumerator CreateEnumerator()

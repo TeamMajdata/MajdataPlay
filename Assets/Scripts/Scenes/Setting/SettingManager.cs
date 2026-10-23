@@ -88,6 +88,7 @@ namespace MajdataPlay.Scenes.Setting
                 _menus[0] = menu;
                 menu.Instance = chartSetting;
                 menu.Name = chartSettingType.Name;
+                menu.TitleTranslation = SettingReflectionCache.GetMenuTranslation(null, chartSettingType.Name);
             }
             else
             {
@@ -102,6 +103,7 @@ namespace MajdataPlay.Scenes.Setting
                 _menus[i + offset] = menu;
                 menu.Instance = category.GetInstance(Setting);
                 menu.Name = category.Name;
+                menu.TitleTranslation = category.TitleTranslation;
             }
             // Build scene-local enumerators before the fade opens and before any navigation.
             // Only immutable reflection metadata is shared with subsequent Setting visits.
@@ -121,7 +123,7 @@ namespace MajdataPlay.Scenes.Setting
             {
                 var menu = _menus[i];
                 var displayer = Instantiate(_menuTitleDisplayerPrefab, menuTitleDisplayerListRoot);
-                displayer.Initialize($"MAJSETTING_CATEGORY_{menu.Name}");
+                displayer.Initialize(menu.GetLocalizedTitle);
                 _menuTitleDisplayers[i] = displayer;
             }
             WarmupTextFonts();
@@ -149,7 +151,7 @@ namespace MajdataPlay.Scenes.Setting
             }
             for (var i = 0; i < _menuTitleDisplayers.Length; i++)
             {
-                warmup.AddText(_menuTitleDisplayers[i].Font, $"MAJSETTING_CATEGORY_{_menus[i].Name}".i18n());
+                warmup.AddText(_menuTitleDisplayers[i].Font, _menus[i].GetLocalizedTitle());
             }
             warmup.AddText(descriptionFont, $"MAJTEXT_SETTING_OFFSETUNIT_{OffsetUnitOption.Second}".i18n());
             warmup.AddText(descriptionFont, $"MAJTEXT_SETTING_OFFSETUNIT_{OffsetUnitOption.Frame}".i18n());
@@ -184,11 +186,14 @@ namespace MajdataPlay.Scenes.Setting
             private readonly PropertyInfo _categoryProperty;
             private readonly PropertyInfo _valueProperty;
             internal string Name => _valueProperty.Name;
+            // The translation attributes live on the root category property; {0} is the displayed menu name.
+            internal SettingTranslation TitleTranslation { get; }
 
             internal MenuMetadata(PropertyInfo categoryProperty, PropertyInfo valueProperty)
             {
                 _categoryProperty = categoryProperty;
                 _valueProperty = valueProperty;
+                TitleTranslation = SettingReflectionCache.GetMenuTranslation(categoryProperty, valueProperty.Name);
             }
 
             internal object GetInstance(GameSetting setting)

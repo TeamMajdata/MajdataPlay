@@ -4,6 +4,7 @@ using System.Reflection;
 using MajdataPlay.i18n;
 using MajdataPlay.Settings;
 using MajdataPlay.Settings.OptionEnumerators;
+using MajdataPlay.Settings.Runtime;
 using MajdataPlay.Tests;
 using NUnit.Framework;
 
@@ -47,6 +48,15 @@ namespace MajdataPlay.Tests.Game.Misc.Settings
 
             /// <summary>A read-only numeric field.</summary>
             public readonly int ReadOnlyField = 3;
+
+            /// <summary>An integer option whose values opt into translation.</summary>
+            [UseTranslation(TranslationTarget.OptionValue)]
+            public int Translated { get; set; } = 3;
+
+            /// <summary>An integer option whose values use a custom key template with an option name override.</summary>
+            [OptionName("Alias")]
+            [UseTranslation(TranslationTarget.OptionValue, "MAJTEXT_FX_{0}_{1}")]
+            public int Templated { get; set; } = 1;
         }
 
         /// <summary>A settings section with boolean, enum and text options.</summary>
@@ -77,6 +87,17 @@ namespace MajdataPlay.Tests.Game.Misc.Settings
 
             /// <summary>An integer option.</summary>
             public int Number { get; set; }
+
+            /// <summary>A boolean option whose values are never translated.</summary>
+            [NoTranslation(TranslationTarget.OptionValue)]
+            public bool Raw { get; set; } = true;
+
+            /// <summary>A boolean option whose values only use the general table.</summary>
+            [UseGeneralTranslation(TranslationTarget.OptionValue)]
+            public bool GeneralOnly { get; set; } = true;
+
+            /// <summary>A read-only nullable number.</summary>
+            public int? NullableNumber { get; }
         }
 
         /// <summary>The language active before the test.</summary>
@@ -242,7 +263,7 @@ namespace MajdataPlay.Tests.Game.Misc.Settings
             Assert.Throws<InvalidOperationException>(() => Create<DefaultNumberEnumerator>(new NumberProbe(), nameof(NumberProbe.Text)));
         }
 
-        /// <summary>Checks that refreshing picks up a value changed elsewhere and that value labels are localized.</summary>
+        /// <summary>Checks that refreshing picks up a value changed elsewhere and that numeric labels stay untranslated by default.</summary>
         [Test]
         public void NumberEnumerator_RefreshAndLocalization()
         {
@@ -250,14 +271,38 @@ namespace MajdataPlay.Tests.Game.Misc.Settings
             var enumerator = Create<DefaultNumberEnumerator>(probe, nameof(NumberProbe.Plain));
             Assert.That(enumerator.LocalizedValueText, Is.EqualTo("3"));
 
-            UseLanguage(("MAJSETTING_PROPERTY_Plain_OPTION_8", "eight"));
+            UseLanguage(("MAJSETTING_PROPERTY_Plain_OPTION_8", "eight"), ("MAJSETTING_GENERAL_OPTION_8", "general eight"));
             probe.Plain = 8;
             enumerator.Refresh();
 
             Assert.That(Convert.ToDecimal(enumerator.Current), Is.EqualTo(8m));
             Assert.That(enumerator.ValueText, Is.EqualTo("8"));
-            Assert.That(enumerator.LocalizedValueText, Is.EqualTo("eight"));
+            Assert.That(enumerator.LocalizedValueText, Is.EqualTo("8"));
+            enumerator.RefreshLocalization();
+            Assert.That(enumerator.LocalizedValueText, Is.EqualTo("8"));
             enumerator.Dispose();
+        }
+
+        /// <summary>Checks that numeric values are translated only when the option opts in, substituting the option name into custom templates.</summary>
+        [Test]
+        public void NumberEnumerator_TranslatesValuesOnlyOnRequest()
+        {
+            UseLanguage(
+                ("MAJSETTING_PROPERTY_Translated_OPTION_3", "drei"),
+                ("MAJTEXT_FX_Alias_1", "eins"),
+                ("MAJSETTING_PROPERTY_Templated_OPTION_1", "wrong template"));
+            var probe = new NumberProbe();
+            var translated = Create<DefaultNumberEnumerator>(probe, nameof(NumberProbe.Translated));
+            var templated = Create<DefaultNumberEnumerator>(probe, nameof(NumberProbe.Templated));
+
+            Assert.That(translated.LocalizedValueText, Is.EqualTo("drei"));
+            Assert.That(templated.LocalizedValueText, Is.EqualTo("eins"));
+
+            probe.Templated = 2;
+            templated.Refresh();
+
+            Assert.That(templated.ValueText, Is.EqualTo("2"));
+            Assert.That(templated.LocalizedValueText, Is.EqualTo("2"));
         }
 
         /// <summary>Checks that a boolean enumerator cycles between false and true.</summary>
@@ -317,6 +362,39 @@ namespace MajdataPlay.Tests.Game.Misc.Settings
         public void BooleanEnumerator_RejectsOtherTypes()
         {
             Assert.Throws<InvalidOperationException>(() => Create<DefaultBooleanEnumerator>(new ValueProbe(), nameof(ValueProbe.Number)));
+        }
+
+        /// <summary>Checks that NoTranslation keeps the raw value text and UseGeneralTranslation skips the option-specific key.</summary>
+        [Test]
+        public void BooleanEnumerator_HonoursTranslationAttributes()
+        {
+            UseLanguage(
+                ("MAJSETTING_GENERAL_OPTION_True", "On"),
+                ("MAJSETTING_PROPERTY_Raw_OPTION_True", "Translated raw"),
+                ("MAJSETTING_PROPERTY_GeneralOnly_OPTION_True", "Specific"));
+            var probe = new ValueProbe();
+            var raw = Create<DefaultBooleanEnumerator>(probe, nameof(ValueProbe.Raw));
+            var general = Create<DefaultBooleanEnumerator>(probe, nameof(ValueProbe.GeneralOnly));
+
+            Assert.That(raw.LocalizedValueText, Is.EqualTo("True"));
+            Assert.That(general.LocalizedValueText, Is.EqualTo("On"));
+
+            raw.RefreshLocalization();
+            general.RefreshLocalization();
+
+            Assert.That(raw.LocalizedValueText, Is.EqualTo("True"));
+            Assert.That(general.LocalizedValueText, Is.EqualTo("On"));
+        }
+
+        /// <summary>Checks that the null placeholder of a numeric option is still translated through the general table.</summary>
+        [Test]
+        public void ReadOnlyEnumerator_TranslatesNullPlaceholderOfNumbers()
+        {
+            UseLanguage(("MAJSETTING_GENERAL_OPTION_NULL", "none"));
+            var enumerator = Create<DefaultReadOnlyEnumerator>(new ValueProbe(), nameof(ValueProbe.NullableNumber));
+
+            Assert.That(enumerator.ValueText, Is.EqualTo("NULL"));
+            Assert.That(enumerator.LocalizedValueText, Is.EqualTo("none"));
         }
 
         /// <summary>Checks that an enum enumerator cycles through every constant without changing the shared cache.</summary>

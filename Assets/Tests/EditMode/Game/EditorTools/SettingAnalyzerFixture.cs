@@ -73,6 +73,24 @@ namespace MajdataPlay.Tests.Game.EditorTools
         [OptionName("")]
         public bool EmptyName { get; set; }
 
+        /// <summary>Gets or sets an option whose name and values are never translated.</summary>
+        [NoTranslation(TranslationTarget.OptionName)]
+        [NoTranslation(TranslationTarget.OptionValue)]
+        public bool Silent { get; set; }
+
+        /// <summary>Gets or sets an enum option whose value keys use a custom template with the option name override.</summary>
+        [OptionName("Alias")]
+        [UseTranslation(TranslationTarget.OptionValue, "FX_{0}_{1}")]
+        public FixtureMode Aliased { get; set; }
+
+        /// <summary>Gets or sets a numeric option whose values opt into translation.</summary>
+        [UseTranslation(TranslationTarget.OptionValue)]
+        public int TranslatedCount { get; set; }
+
+        /// <summary>Gets or sets an option whose name uses the general table.</summary>
+        [UseGeneralTranslation(TranslationTarget.OptionName)]
+        public bool GeneralName { get; set; }
+
         /// <summary>Gets or sets an option annotated with the translation selection attributes.</summary>
         [UseTranslation(TranslationTarget.OptionName, "FX_CUSTOM_NAME")]
         [UseGeneralTranslation(TranslationTarget.OptionValue)]

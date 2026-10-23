@@ -8,7 +8,9 @@ namespace MajdataPlay.Settings
     /// </summary>
     /// <remarks>
     /// Without this attribute the name key is <c>MAJSETTING_PROPERTY_{PropertyName}</c>.
-    /// <see cref="Name"/> is a localization key, not the display text itself.
+    /// <see cref="Name"/> is a localization key, not the display text itself. When the member also carries a
+    /// <see cref="UseTranslationAttribute"/> or <see cref="UseGeneralTranslationAttribute"/>, <see cref="Name"/>
+    /// is instead substituted for <c>{0}</c> in that attribute's key template.
     /// </remarks>
     [AttributeUsage(AttributeTargets.Property | AttributeTargets.Field, AllowMultiple = false, Inherited = false)]
     public class OptionNameAttribute : Attribute

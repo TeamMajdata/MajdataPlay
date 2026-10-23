@@ -5,6 +5,7 @@ using UnityEngine.Scripting;
 using Newtonsoft.Json;
 using MajdataPlay.Net;
 using MajdataPlay.Settings.OptionEnumerators;
+using MajdataPlay.Settings.Runtime;
 using MajdataPlay.Diagnostics;
 using System.Runtime.Serialization;
 #nullable enable
@@ -114,6 +115,7 @@ namespace MajdataPlay.Settings
 #endif
         [Step("1")]
         [Range("1", "5", HasMax = true, HasMin = true)]
+        [UseTranslation(TranslationTarget.OptionValue)]
         public int LeadInTime { get; set; } = 1;
 
         public bool ManualStartGame { get; set; } = false;
@@ -169,6 +171,7 @@ namespace MajdataPlay.Settings
         
         [Step("0.05")]
         [Range("0", "1", HasMax = true, HasMin = true)]
+        [UseTranslation(TranslationTarget.OptionValue)]
         public float OuterJudgeDistance { get; set; } = 1f;
         /// <summary>
         /// Such like Touch and TouchHold
@@ -176,6 +179,7 @@ namespace MajdataPlay.Settings
         
         [Step("0.05")]
         [Range("0", "1", HasMax = true, HasMin = true)]
+        [UseTranslation(TranslationTarget.OptionValue)]
         public float InnerJudgeDistance { get; set; } = 1f;
         
         public bool DisplayHoldHeadJudgeResult { get; set; } = false;

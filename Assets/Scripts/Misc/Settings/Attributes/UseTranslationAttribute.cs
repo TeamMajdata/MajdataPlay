@@ -10,11 +10,16 @@ namespace MajdataPlay.Settings
     /// </summary>
     /// <remarks>
     /// <para>
-    /// Apply the attribute once per <see cref="TranslationTarget"/>. When <see cref="Key"/> is null the
-    /// default key for the target is used: <c>MAJSETTING_CATEGORY_{PropertyName}</c> for menu names,
-    /// <c>MAJSETTING_PROPERTY_{PropertyName}</c> for option names and
-    /// <c>MAJSETTING_PROPERTY_{PropertyName}_OPTION_{ValueText}</c> for option values.
-    /// For <see cref="TranslationTarget.OptionValue"/> a custom key replaces the <c>MAJSETTING_PROPERTY_{PropertyName}</c> prefix.
+    /// Apply the attribute once per <see cref="TranslationTarget"/>. <see cref="Key"/> is a key template such as
+    /// <c>MAJTEXT_XXX_{0}</c>: <c>{0}</c> is replaced by the option name, which is the <see cref="OptionNameAttribute"/>
+    /// value when the member has one and the member name otherwise, and for <see cref="TranslationTarget.OptionValue"/>
+    /// <c>{1}</c> is replaced by the value text. The formatted key is then looked up through i18n.
+    /// </para>
+    /// <para>
+    /// When <see cref="Key"/> is null the default template of the target is used: <c>MAJSETTING_CATEGORY_{0}</c> for
+    /// menu names, <c>MAJSETTING_PROPERTY_{0}</c> for option names and <c>MAJSETTING_PROPERTY_{0}_OPTION_{1}</c> for
+    /// option values. Several templates for the same target are tried in declaration order, followed by any
+    /// <see cref="UseGeneralTranslationAttribute"/> template; <see cref="NoTranslationAttribute"/> disables them all.
     /// </para>
     /// <para>
     /// Numeric option values (options of integer or floating-point types) are not translated by default.

@@ -13,7 +13,10 @@ namespace MajdataPlay.Settings
     /// <para>
     /// Apply the attribute once per <see cref="TranslationTarget"/>. For <see cref="TranslationTarget.OptionValue"/>
     /// the value text is looked up as <c>MAJSETTING_GENERAL_OPTION_{ValueText}</c>, which lets options that share
-    /// the same choices (for example booleans or common enums) reuse one translation.
+    /// the same choices (for example booleans or common enums) reuse one translation. Option names use
+    /// <c>MAJSETTING_GENERAL_PROPERTY_{OptionName}</c> and menu names <c>MAJSETTING_GENERAL_CATEGORY_{MenuName}</c>,
+    /// where the option name is the <see cref="OptionNameAttribute"/> value when present. The general key is tried
+    /// after any <see cref="UseTranslationAttribute"/> key of the same target.
     /// </para>
     /// <para>
     /// Numeric option values (options of integer or floating-point types) are not translated by default.

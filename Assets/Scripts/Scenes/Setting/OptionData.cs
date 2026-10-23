@@ -19,7 +19,7 @@ namespace MajdataPlay.Scenes.Setting
         internal string LocalizedValueText => _enumerator.LocalizedValueText;
 
         private readonly object _menuInstance;
-        private readonly string _nameKey;
+        private readonly SettingOptionMetadata _metadata;
         private readonly IOptionEnumerator _enumerator;
         private object? _lastValue;
         private Language _language;
@@ -29,15 +29,15 @@ namespace MajdataPlay.Scenes.Setting
             var metadata = SettingReflectionCache.GetOption(propertyInfo);
             PropertyInfo = propertyInfo;
             _menuInstance = menuInstance;
+            _metadata = metadata;
             HasDescription = metadata.HasDescription;
-            _nameKey = metadata.NameKey;
             DescriptionKey = metadata.DescriptionKey;
             IsOffsetOption = metadata.IsOffsetOption;
             _enumerator = metadata.CreateEnumerator();
             _enumerator.Init(propertyInfo, menuInstance);
             _lastValue = propertyInfo.GetValue(menuInstance);
             _language = Localization.Current;
-            LocalizedName = _nameKey.i18n();
+            LocalizedName = metadata.LocalizeName();
         }
 
         internal bool RefreshIfChanged()
@@ -68,7 +68,7 @@ namespace MajdataPlay.Scenes.Setting
             }
 
             _enumerator.RefreshLocalization();
-            LocalizedName = _nameKey.i18n();
+            LocalizedName = _metadata.LocalizeName();
             _language = language;
         }
 

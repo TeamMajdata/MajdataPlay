@@ -137,19 +137,23 @@ namespace MajdataPlay.Tests.Game.Misc.Settings
             Assert.That(SettingReflectionCache.GetAttributes(translated), Is.SameAs(translatedAttributes));
         }
 
-        /// <summary>Checks that translation attributes leave the option metadata, visibility and enumerator choice unchanged.</summary>
+        /// <summary>Checks that translation attributes select the name key while leaving visibility, description and enumerator choice unchanged.</summary>
         [Test]
-        public void ReflectionCache_MetadataIgnoresTranslationAttributes()
+        public void ReflectionCache_MetadataAppliesTranslationAttributes()
         {
             var visible = SettingReflectionCache.GetVisibleProperties(typeof(TranslatedProbe)).Select(property => property.Name).ToArray();
             var translated = SettingReflectionCache.GetOption(SettingReflectionCache.GetProperty(typeof(TranslatedProbe), nameof(TranslatedProbe.Translated)));
             var untranslated = SettingReflectionCache.GetOption(SettingReflectionCache.GetProperty(typeof(TranslatedProbe), nameof(TranslatedProbe.Untranslated)));
 
             Assert.That(visible, Is.EquivalentTo(new[] { nameof(TranslatedProbe.Translated), nameof(TranslatedProbe.Untranslated) }));
-            Assert.That(translated.NameKey, Is.EqualTo("MAJSETTING_PROPERTY_Translated"));
+            Assert.That(translated.NameKey, Is.EqualTo("CUSTOM_KEY"));
+            Assert.That(translated.NameTranslation.IsExplicit, Is.True);
             Assert.That(translated.DescriptionKey, Is.EqualTo("MAJSETTING_PROPERTY_Translated_DESC"));
             Assert.That(translated.HasDescription, Is.True);
             Assert.That(translated.CreateEnumerator(), Is.InstanceOf<DefaultEnumEnumerator>());
+            Assert.That(untranslated.NameKey, Is.EqualTo(nameof(TranslatedProbe.Untranslated)));
+            Assert.That(untranslated.NameTranslation.IsTranslated, Is.False);
+            Assert.That(untranslated.LocalizeName(), Is.EqualTo(nameof(TranslatedProbe.Untranslated)));
             Assert.That(untranslated.CreateEnumerator(), Is.InstanceOf<DefaultBooleanEnumerator>());
         }
     }

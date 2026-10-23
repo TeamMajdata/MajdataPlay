@@ -32,6 +32,10 @@ namespace MajdataPlay.Scenes.Setting
         /// Option对象<para>e.g. GameSetting.Game</para>
         /// </summary>
         public object Instance { get; set; } = null!;
+        /// <summary>
+        /// Gets or sets how the menu title is localized. Without one the default <c>MAJSETTING_CATEGORY_{Name}</c> key is used.
+        /// </summary>
+        internal SettingTranslation? TitleTranslation { get; set; }
 
         [SerializeField]
         [FormerlySerializedAs("optionPrefab")]
@@ -202,6 +206,15 @@ namespace MajdataPlay.Scenes.Setting
             {
                 data.CollectWarmupText(warmup, optionFonts, descriptionFont);
             }
+        }
+        /// <summary>
+        /// Localizes the menu title for the current language.
+        /// </summary>
+        /// <returns>The translated title, or its primary key when no translation exists.</returns>
+        internal string GetLocalizedTitle()
+        {
+            TitleTranslation ??= SettingReflectionCache.GetMenuTranslation(null, Name);
+            return TitleTranslation.Localize(Name);
         }
         private void MoveOption(int direction)
         {

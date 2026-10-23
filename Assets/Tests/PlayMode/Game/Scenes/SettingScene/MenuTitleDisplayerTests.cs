@@ -122,6 +122,19 @@ namespace MajdataPlay.Tests.Game.Scenes.PlayMode.SettingScene
             Assert.That(_title.text, Is.EqualTo("Localized"));
         }
 
+        /// <summary>Checks that a computed title is re-evaluated on language changes and that a null provider is rejected.</summary>
+        [Test]
+        public void Initialize_Provider_FollowsLanguageChanges()
+        {
+            _displayer.Initialize(() => Localization.Current.Code == "fx-FX" ? "Computed" : "Raw");
+            Assert.That(_title.text, Is.EqualTo("Raw"));
+
+            Localization.Current = new Language { Code = "fx-FX" };
+
+            Assert.That(_title.text, Is.EqualTo("Computed"));
+            Assert.Throws<System.ArgumentNullException>(() => _displayer.Initialize((System.Func<string>)null!));
+        }
+
         /// <summary>Checks that a hidden title ignores language changes until it is shown again.</summary>
         /// <returns>The test coroutine.</returns>
         [UnityTest]

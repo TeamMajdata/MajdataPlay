@@ -29,6 +29,16 @@ namespace MajdataPlay.Editor.Windows
         private const string EnumeratorNamespace = SettingsNamespace + "OptionEnumerators.";
 
         /// <summary>
+        /// The built-in and general key templates, mirroring the SettingTranslation constants.
+        /// </summary>
+        private const string DefaultMenuNameTemplate = "MAJSETTING_CATEGORY_{0}";
+        private const string DefaultOptionNameTemplate = "MAJSETTING_PROPERTY_{0}";
+        private const string DefaultOptionValueTemplate = "MAJSETTING_PROPERTY_{0}_OPTION_{1}";
+        private const string GeneralMenuNameTemplate = "MAJSETTING_GENERAL_CATEGORY_{0}";
+        private const string GeneralOptionNameTemplate = "MAJSETTING_GENERAL_PROPERTY_{0}";
+        private const string GeneralOptionValueTemplate = "MAJSETTING_GENERAL_OPTION_{1}";
+
+        /// <summary>
         /// Adds the setting menus, option labels, descriptions and finite localized values to a key inventory.
         /// </summary>
         /// <param name="assembly">The compiled MajdataPlay.Core assembly containing the runtime settings metadata.</param>
@@ -123,7 +133,10 @@ namespace MajdataPlay.Editor.Windows
                     }
 
                     // MenuMetadata.Name is the value property's name; MenuNameAttribute is not used by the UI.
-                    AddKey("MAJSETTING_CATEGORY_" + menuProperty.Name, path + " (category)", keys, diagnostics);
+                    // The translation attributes of the root category property select the title key.
+                    var categoryAttributes = category.GetCustomAttributesData();
+                    var titleSelection = SelectTranslation(categoryAttributes, "MenuName", menuProperty.Name, DefaultMenuNameTemplate, GeneralMenuNameTemplate, false);
+                    AddTemplateKeys(titleSelection, menuProperty.Name, path + " (category)", keys, diagnostics);
                     CollectMenu(menuProperty.PropertyType, path, keys, diagnostics);
                 }
                 catch (Exception exception)
@@ -229,16 +242,16 @@ namespace MajdataPlay.Editor.Windows
         private static void CollectOption(PropertyInfo property, string path, IDictionary<string, HashSet<string>> keys, IList<string> diagnostics)
         {
             var attributes = property.GetCustomAttributesData();
-            var nameKey = "MAJSETTING_PROPERTY_" + property.Name;
-            var descriptionKey = nameKey + "_DESC";
+            var descriptionKey = "MAJSETTING_PROPERTY_" + property.Name + "_DESC";
             var hasDescription = true;
+            string? nameKeyOverride = null;
             Type? enumeratorType = null;
             foreach (var attribute in attributes)
             {
                 switch (attribute.AttributeType.FullName)
                 {
                     case SettingsNamespace + "OptionNameAttribute":
-                        nameKey = attribute.ConstructorArguments[0].Value as string ?? string.Empty;
+                        nameKeyOverride = attribute.ConstructorArguments[0].Value as string ?? string.Empty;
                         break;
                     case SettingsNamespace + "DescriptionAttribute":
                         descriptionKey = attribute.ConstructorArguments[0].Value as string ?? string.Empty;
@@ -252,12 +265,22 @@ namespace MajdataPlay.Editor.Windows
                 }
             }
 
-            AddKey(nameKey, path + " (name)", keys, diagnostics);
+            var nameSelection = SelectTranslation(attributes, "OptionName", property.Name, DefaultOptionNameTemplate, GeneralOptionNameTemplate, false);
+            if (!nameSelection.IsExplicit && nameKeyOverride is not null)
+            {
+                // Without translation attributes an OptionName override is the complete localization key.
+                AddKey(nameKeyOverride, path + " (name)", keys, diagnostics);
+            }
+            else
+            {
+                AddTemplateKeys(nameSelection, property.Name, path + " (name)", keys, diagnostics);
+            }
             if (hasDescription)
             {
                 AddKey(descriptionKey, path + " (description)", keys, diagnostics);
             }
-            CollectValues(property, enumeratorType, HasAttribute(attributes, SettingsNamespace + "OptionalAttribute"), path, keys, diagnostics);
+            var valueSelection = SelectTranslation(attributes, "OptionValue", property.Name, DefaultOptionValueTemplate, GeneralOptionValueTemplate, true);
+            CollectValues(property, enumeratorType, HasAttribute(attributes, SettingsNamespace + "OptionalAttribute"), valueSelection, path, keys, diagnostics);
         }
 
         /// <summary>
@@ -266,10 +289,11 @@ namespace MajdataPlay.Editor.Windows
         /// <param name="property">The option property metadata.</param>
         /// <param name="enumeratorType">The explicit enumerator override, or null for the default factory.</param>
         /// <param name="isOptional">Whether the Optional attribute changes null display text to UNSET.</param>
+        /// <param name="source">The value key templates selected by the option's translation attributes.</param>
         /// <param name="path">The UI path identifying this option.</param>
         /// <param name="keys">Receives property-specific and general fallback value keys.</param>
         /// <param name="diagnostics">Receives unsupported enumerators and dynamic value sources.</param>
-        private static void CollectValues(PropertyInfo property, Type? enumeratorType, bool isOptional, string path,
+        private static void CollectValues(PropertyInfo property, Type? enumeratorType, bool isOptional, TranslationSelection source, string path,
             IDictionary<string, HashSet<string>> keys, IList<string> diagnostics)
         {
             var type = property.PropertyType;
@@ -303,12 +327,12 @@ namespace MajdataPlay.Editor.Windows
                         diagnostics.Add($"[Settings] {path}: {enumeratorName} cannot initialize a non-boolean property.");
                         return;
                     }
-                    AddValue(property.Name, bool.FalseString, path, keys, diagnostics);
-                    AddValue(property.Name, bool.TrueString, path, keys, diagnostics);
+                    AddValue(source, bool.FalseString, path, keys, diagnostics);
+                    AddValue(source, bool.TrueString, path, keys, diagnostics);
                     // Nullable<bool> alone does not add null to DefaultBooleanEnumerator.OptionValues.
                     if (isOptional)
                     {
-                        AddValue(property.Name, "UNSET", path, keys, diagnostics);
+                        AddValue(source, "UNSET", path, keys, diagnostics);
                     }
                     return;
                 case EnumeratorNamespace + "DefaultEnumEnumerator":
@@ -318,7 +342,7 @@ namespace MajdataPlay.Editor.Windows
                         diagnostics.Add($"[Settings] {path}: {enumeratorName} cannot initialize a non-enum property.");
                         return;
                     }
-                    CollectEnumValues(type, property.Name, path, keys, diagnostics);
+                    CollectEnumValues(type, source, path, keys, diagnostics);
                     return;
                 case EnumeratorNamespace + "DefaultNumberEnumerator":
                 case EnumeratorNamespace + "EngineNumberSettingEnumerator":
@@ -329,13 +353,18 @@ namespace MajdataPlay.Editor.Windows
                     {
                         diagnostics.Add($"[Settings] {path}: {enumeratorName} cannot initialize this non-numeric property.");
                     }
+                    else if (source.IsExplicit && source.IsTranslated)
+                    {
+                        // Numbers are untranslated by default; an opt-in needs keys for runtime-dependent values.
+                        diagnostics.Add($"[Settings] {path}: numeric option values opt into translation; their keys depend on runtime values and were not collected.");
+                    }
                     return;
                 case EnumeratorNamespace + "DefaultReadOnlyEnumerator":
-                    CollectReadOnlyValues(property, isOptional, path, keys, diagnostics);
+                    CollectReadOnlyValues(property, isOptional, source, path, keys, diagnostics);
                     return;
                 case EnumeratorNamespace + "LanguageEnumerator":
                     // Only the no-language branch has a fixed value; loaded language identifiers are dynamic.
-                    AddValue(property.Name, "Unavailable", path, keys, diagnostics);
+                    AddValue(source, "Unavailable", path, keys, diagnostics);
                     diagnostics.Add($"[Settings] {path}: loaded language names are dynamic; only the fixed Unavailable fallback was collected.");
                     return;
                 case EnumeratorNamespace + "SkinEnumerator":
@@ -356,7 +385,7 @@ namespace MajdataPlay.Editor.Windows
                                 hasNumericValues = true;
                                 continue;
                             }
-                            AddValue(property.Name, value, path, keys, diagnostics);
+                            AddValue(source, value, path, keys, diagnostics);
                         }
                         if (hasNumericValues)
                         {
@@ -376,22 +405,23 @@ namespace MajdataPlay.Editor.Windows
         /// </summary>
         /// <param name="property">The property displayed by DefaultReadOnlyEnumerator.</param>
         /// <param name="isOptional">Whether null is displayed as UNSET instead of NULL.</param>
+        /// <param name="source">The value key templates selected by the option's translation attributes.</param>
         /// <param name="path">The UI path identifying this option.</param>
         /// <param name="keys">Receives statically known non-numeric values and null sentinel keys.</param>
         /// <param name="diagnostics">Receives runtime-dependent values that were intentionally excluded.</param>
-        private static void CollectReadOnlyValues(PropertyInfo property, bool isOptional, string path,
+        private static void CollectReadOnlyValues(PropertyInfo property, bool isOptional, TranslationSelection source, string path,
             IDictionary<string, HashSet<string>> keys, IList<string> diagnostics)
         {
             var nullableType = Nullable.GetUnderlyingType(property.PropertyType);
             var valueType = nullableType ?? property.PropertyType;
             if (valueType.IsEnum)
             {
-                CollectEnumValues(valueType, property.Name, path, keys, diagnostics);
+                CollectEnumValues(valueType, source, path, keys, diagnostics);
             }
             else if (valueType == typeof(bool))
             {
-                AddValue(property.Name, bool.FalseString, path, keys, diagnostics);
-                AddValue(property.Name, bool.TrueString, path, keys, diagnostics);
+                AddValue(source, bool.FalseString, path, keys, diagnostics);
+                AddValue(source, bool.TrueString, path, keys, diagnostics);
             }
             else if (!IsNumber(valueType))
             {
@@ -402,7 +432,7 @@ namespace MajdataPlay.Editor.Windows
             // Optional on a non-nullable enum or number does not manufacture a null option.
             if (nullableType is not null || !property.PropertyType.IsValueType)
             {
-                AddValue(property.Name, isOptional ? "UNSET" : "NULL", path, keys, diagnostics);
+                AddValue(source, isOptional ? "UNSET" : "NULL", path, keys, diagnostics);
             }
         }
 
@@ -410,11 +440,11 @@ namespace MajdataPlay.Editor.Windows
         /// Mirrors the boxed enum constants' ToString conversion, including duplicate aliases and flags formatting.
         /// </summary>
         /// <param name="enumType">The non-nullable enum type to inspect.</param>
-        /// <param name="propertyName">The original property name used in option value templates.</param>
+        /// <param name="source">The value key templates selected by the option's translation attributes.</param>
         /// <param name="path">The UI path identifying this option.</param>
         /// <param name="keys">Receives the enum label localization keys.</param>
         /// <param name="diagnostics">Receives empty localization keys if malformed metadata supplies them.</param>
-        private static void CollectEnumValues(Type enumType, string propertyName, string path,
+        private static void CollectEnumValues(Type enumType, TranslationSelection source, string path,
             IDictionary<string, HashSet<string>> keys, IList<string> diagnostics)
         {
             // Enum.GetNames would invent aliases that runtime ToString never requests; underlying numbers
@@ -424,7 +454,7 @@ namespace MajdataPlay.Editor.Windows
                 var text = value.ToString();
                 if (text is not null)
                 {
-                    AddValue(propertyName, text, path, keys, diagnostics);
+                    AddValue(source, text, path, keys, diagnostics);
                 }
             }
         }
@@ -451,18 +481,178 @@ namespace MajdataPlay.Editor.Windows
             return double.TryParse(value, NumberStyles.Float | NumberStyles.AllowThousands, CultureInfo.InvariantCulture, out _);
         }
         /// <summary>
-        /// Adds both lookup templates used by OptionEnumeratorBase while retaining the runtime's exact casing.
+        /// Adds the value lookup keys selected for an option while retaining the runtime's exact casing.
         /// </summary>
-        /// <param name="propertyName">The original property name, not the OptionName override.</param>
+        /// <param name="source">The value key templates and the option name substituted for <c>{0}</c>.</param>
         /// <param name="value">The fixed text resulting from the option value's ToString conversion.</param>
         /// <param name="path">The UI path identifying this option.</param>
-        /// <param name="keys">Receives property-specific and general fallback keys.</param>
+        /// <param name="keys">Receives the primary key and any fallback keys.</param>
         /// <param name="diagnostics">Receives invalid empty localization keys.</param>
-        private static void AddValue(string propertyName, string value, string path,
+        private static void AddValue(TranslationSelection source, string value, string path,
             IDictionary<string, HashSet<string>> keys, IList<string> diagnostics)
         {
-            AddKey($"MAJSETTING_PROPERTY_{propertyName}_OPTION_{value}", path + " (option value)", keys, diagnostics);
-            AddKey("MAJSETTING_GENERAL_OPTION_" + value, path + " (option value fallback)", keys, diagnostics);
+            for (var i = 0; i < source.Templates.Count; i++)
+            {
+                var usage = i == 0 ? " (option value)" : " (option value fallback)";
+                AddKey(FormatKey(source.Templates[i], source.OptionName, value), path + usage, keys, diagnostics);
+            }
+        }
+
+        /// <summary>
+        /// Adds the keys of a name or title selection, whose templates only substitute the option name.
+        /// </summary>
+        /// <param name="source">The key templates and the option name substituted for <c>{0}</c>.</param>
+        /// <param name="displayedName">The untranslated text, which an untranslated selection shows as-is.</param>
+        /// <param name="usage">The usage location recorded for the keys.</param>
+        /// <param name="keys">Receives the selected keys.</param>
+        /// <param name="diagnostics">Receives invalid empty localization keys.</param>
+        private static void AddTemplateKeys(TranslationSelection source, string displayedName, string usage,
+            IDictionary<string, HashSet<string>> keys, IList<string> diagnostics)
+        {
+            foreach (var template in source.Templates)
+            {
+                AddKey(FormatKey(template, source.OptionName, displayedName), usage, keys, diagnostics);
+            }
+        }
+
+        /// <summary>
+        /// Builds a localization key from a template the same way SettingTranslation does.
+        /// </summary>
+        /// <param name="template">The key template; <c>{0}</c> is the option name and <c>{1}</c> the value text.</param>
+        /// <param name="optionName">The option name.</param>
+        /// <param name="valueText">The value text.</param>
+        /// <returns>The formatted key, or an empty key when the template is malformed.</returns>
+        private static string FormatKey(string template, string optionName, string valueText)
+        {
+            try
+            {
+                return string.Format(template, optionName, valueText);
+            }
+            catch (FormatException)
+            {
+                return string.Empty;
+            }
+        }
+
+        /// <summary>
+        /// Mirrors SettingTranslation.Resolve on custom attribute data: the key templates of one translation target.
+        /// </summary>
+        /// <param name="attributes">The member's custom attribute metadata.</param>
+        /// <param name="target">The TranslationTarget constant name: MenuName, OptionName or OptionValue.</param>
+        /// <param name="memberName">The declared member name, or the displayed menu name.</param>
+        /// <param name="defaultTemplate">The built-in template of the target.</param>
+        /// <param name="generalTemplate">The general table template of the target.</param>
+        /// <param name="generalByDefault">Whether the built-in default also tries the general template.</param>
+        /// <returns>The selection; an untranslated one has no templates.</returns>
+        private static TranslationSelection SelectTranslation(IList<CustomAttributeData> attributes, string target, string memberName,
+            string defaultTemplate, string generalTemplate, bool generalByDefault)
+        {
+            var optionName = memberName;
+            foreach (var attribute in attributes)
+            {
+                if (attribute.AttributeType.FullName == SettingsNamespace + "OptionNameAttribute" &&
+                    attribute.ConstructorArguments[0].Value is string name && name.Length != 0)
+                {
+                    optionName = name;
+                    break;
+                }
+            }
+
+            var isExplicit = false;
+            var specific = new List<string>();
+            var general = new List<string>();
+            foreach (var attribute in attributes)
+            {
+                var attributeName = attribute.AttributeType.FullName;
+                if (attributeName != SettingsNamespace + "NoTranslationAttribute" &&
+                    attributeName != SettingsNamespace + "UseTranslationAttribute" &&
+                    attributeName != SettingsNamespace + "UseGeneralTranslationAttribute")
+                {
+                    continue;
+                }
+                if (attribute.ConstructorArguments.Count == 0 || GetEnumName(attribute.ConstructorArguments[0]) != target)
+                {
+                    continue;
+                }
+                isExplicit = true;
+                switch (attributeName)
+                {
+                    case SettingsNamespace + "NoTranslationAttribute":
+                        return new TranslationSelection(optionName, true, new List<string>());
+                    case SettingsNamespace + "UseTranslationAttribute":
+                        var key = attribute.ConstructorArguments.Count > 1 ? attribute.ConstructorArguments[1].Value as string : null;
+                        specific.Add(string.IsNullOrEmpty(key) ? defaultTemplate : key!);
+                        break;
+                    default:
+                        general.Add(generalTemplate);
+                        break;
+                }
+            }
+
+            if (!isExplicit)
+            {
+                specific.Add(defaultTemplate);
+                if (generalByDefault)
+                {
+                    specific.Add(generalTemplate);
+                }
+                return new TranslationSelection(memberName, false, specific);
+            }
+            specific.AddRange(general);
+            return new TranslationSelection(optionName, true, specific);
+        }
+
+        /// <summary>
+        /// Reads an enum attribute argument by constant name, so the runtime enum type itself is never referenced.
+        /// </summary>
+        /// <param name="argument">The attribute constructor argument.</param>
+        /// <returns>The constant name, or null for a non-enum or unnamed value.</returns>
+        private static string? GetEnumName(CustomAttributeTypedArgument argument)
+        {
+            if (!argument.ArgumentType.IsEnum || argument.Value is null)
+            {
+                return null;
+            }
+            return Enum.GetName(argument.ArgumentType, argument.Value);
+        }
+
+        /// <summary>
+        /// The key templates selected for one translation target, mirroring the runtime SettingTranslation rule.
+        /// </summary>
+        private sealed class TranslationSelection
+        {
+            /// <summary>
+            /// Gets the option name substituted for <c>{0}</c>.
+            /// </summary>
+            internal string OptionName { get; }
+
+            /// <summary>
+            /// Gets whether a translation attribute selected the templates instead of the built-in default.
+            /// </summary>
+            internal bool IsExplicit { get; }
+
+            /// <summary>
+            /// Gets the key templates in lookup order; empty when the target is not translated.
+            /// </summary>
+            internal List<string> Templates { get; }
+
+            /// <summary>
+            /// Gets whether any key is looked up.
+            /// </summary>
+            internal bool IsTranslated => Templates.Count != 0;
+
+            /// <summary>
+            /// Initializes a new instance of the <see cref="TranslationSelection"/> class.
+            /// </summary>
+            /// <param name="optionName">The option name substituted for <c>{0}</c>.</param>
+            /// <param name="isExplicit">Whether a translation attribute selected the templates.</param>
+            /// <param name="templates">The key templates in lookup order.</param>
+            internal TranslationSelection(string optionName, bool isExplicit, List<string> templates)
+            {
+                OptionName = optionName;
+                IsExplicit = isExplicit;
+                Templates = templates;
+            }
         }
 
         /// <summary>

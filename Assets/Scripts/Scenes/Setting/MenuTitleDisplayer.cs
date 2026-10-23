@@ -1,4 +1,5 @@
 using MajdataPlay.i18n;
+using System;
 using TMPro;
 using UnityEngine;
 using UnityEngine.Serialization;
@@ -41,7 +42,7 @@ namespace MajdataPlay.Scenes.Setting
         private Color _unselectedTextColor;
         private float _unselectedFontSizeMax;
         private float _selectedTitleScale = 1f;
-        private string _localizationKey = string.Empty;
+        private Func<string>? _localizedTitleProvider;
         private string? _displayedTitle;
         private SettingTextTint _textTint = null!;
         private bool _isLocalizationSubscribed;
@@ -100,9 +101,28 @@ namespace MajdataPlay.Scenes.Setting
             }
         }
 
+        /// <summary>
+        /// Shows the translation of a fixed localization key and follows language changes.
+        /// </summary>
+        /// <param name="localizationKey">The localization key of the title; an empty key leaves the current text in place.</param>
         internal void Initialize(string localizationKey)
         {
-            _localizationKey = localizationKey;
+            if (string.IsNullOrEmpty(localizationKey))
+            {
+                _localizedTitleProvider = null;
+                return;
+            }
+            Initialize(() => localizationKey.i18n());
+        }
+
+        /// <summary>
+        /// Shows a title computed for the current language and recomputes it on every language change.
+        /// </summary>
+        /// <param name="localizedTitleProvider">Returns the localized title for the current language.</param>
+        /// <exception cref="ArgumentNullException"><paramref name="localizedTitleProvider"/> is null.</exception>
+        internal void Initialize(Func<string> localizedTitleProvider)
+        {
+            _localizedTitleProvider = localizedTitleProvider ?? throw new ArgumentNullException(nameof(localizedTitleProvider));
             UpdateLocalizedText();
         }
 
@@ -142,9 +162,9 @@ namespace MajdataPlay.Scenes.Setting
 
         private void UpdateLocalizedText()
         {
-            if (!string.IsNullOrEmpty(_localizationKey))
+            if (_localizedTitleProvider is not null)
             {
-                var title = _localizationKey.i18n();
+                var title = _localizedTitleProvider();
                 if (_displayedTitle != title)
                 {
                     _titleDisplayer.text = title;
