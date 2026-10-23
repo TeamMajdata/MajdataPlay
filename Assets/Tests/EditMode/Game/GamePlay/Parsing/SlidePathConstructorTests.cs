@@ -96,6 +96,39 @@ namespace MajdataPlay.Tests.Game.GamePlay.Parsing
             AssertClose(full.CurrentEndPoint, new Complex(1, 0));
         }
 
+        /// <summary>
+        /// Checks that a start and an end angle on the two sides of ±π are the same angle, as for 5q8 and 8p5 whose
+        /// tangent points lie exactly to the left of the centre: the arc is skipped on request and otherwise turns a whole
+        /// circle instead of a sliver.
+        /// </summary>
+        /// <param name="isCcw">The travel direction.</param>
+        [TestCase(true)]
+        [TestCase(false)]
+        public void ArcToAngle_TreatsBothSidesOfPiAsTheSameAngle(bool isCcw)
+        {
+            var start = new Complex(-1, 1e-12);
+
+            var skipped = SlidePathConstructor.BeginAt(start).ArcToAngle(Complex.Zero, -Math.PI, isCcw, true);
+            Assert.That(skipped.PathSegments, Is.Empty);
+
+            var full = SlidePathConstructor.BeginAt(start).ArcToAngle(Complex.Zero, -Math.PI, isCcw, false);
+            Assert.That(full.PathSegments, Has.Count.EqualTo(1));
+            Assert.That(full.PathSegments[0].GetSegmentLength(), Is.EqualTo(2 * Math.PI).Within(Tolerance));
+            AssertClose(full.CurrentEndPoint, start);
+        }
+
+        /// <summary>Checks that rotating the 1q4 and 1p6 shapes onto the ±π boundary keeps their full turn.</summary>
+        /// <param name="code">The slide code starting at key 1.</param>
+        /// <param name="rotated">The same shape rotated so that its tangent point lies on the ±π boundary.</param>
+        [TestCase("1Q0K4", "5Q0K8")]
+        [TestCase("1P0K6", "8P0K5")]
+        public void Parse_FullTurnAroundTheCentreSurvivesRotation(string code, string rotated)
+        {
+            var length = SlideCodeParser.Parse(code).GetPathLength();
+
+            Assert.That(SlideCodeParser.Parse(rotated).GetPathLength(), Is.EqualTo(length).Within(1e-6));
+        }
+
         /// <summary>Checks the circle index overloads of the arc and full circle operations.</summary>
         [Test]
         public void CircleIndexOverloads_UseTheCircleCentre()
