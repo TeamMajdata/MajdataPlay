@@ -22,6 +22,7 @@
     <Compile Include="../../../../Assets/Plugins/MajdataPlay/Net/Curl/**/*.cs" Link="Production/Curl/%(RecursiveDir)%(Filename)%(Extension)" />
     <Compile Include="../../../../Assets/Plugins/MajdataPlay/Net/Handlers/CurlHttpMessageHandler.cs" Link="Production/CurlHttpMessageHandler.cs" />
     <Compile Include="../../../../Assets/Plugins/MajdataPlay/Buffers/PooledArray.cs" Link="Production/PooledArray.cs" />
+    <Compile Include="../../../../Assets/Plugins/MajdataPlay/Buffers/PooledDisposable.cs" Link="Production/PooledDisposable.cs" />
     <Compile Include="../../../../Assets/Plugins/MajdataPlay/UnsafeKit/UnsafeHelper.cs" Link="Production/UnsafeHelper.cs" />
   </ItemGroup>
   <ItemGroup>
