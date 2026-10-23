@@ -20,9 +20,11 @@ them and production assemblies cannot reference them.
 | `PlayMode/Game/<Area>/` | `MajdataPlay.Tests.Game.PlayMode` (one asmdef for all areas) | Any (PlayMode) |
 | `EditMode/Plugins/<Module>/` | `MajdataPlay.Tests.<Module>` | Editor (EditMode) |
 | `PlayMode/Plugins/<Module>/` | `MajdataPlay.Tests.<Module>.PlayMode` (optional) | Any (PlayMode) |
+| `PlayMode/ThirdParty/<Library>/` | `MajdataPlay.Tests.ThirdParty.<Library>.PlayMode` | Any (PlayMode) |
 
-`<Area>` mirrors the folder under `Assets/Scripts` that is tested (`GamePlay`, `Misc`, `Scenes`, ...) and
-`<Module>` mirrors the library folder under `Assets/Plugins/MajdataPlay` (`Buffers`, `Net`, ...).
+`<Area>` mirrors the folder under `Assets/Scripts` that is tested (`GamePlay`, `Misc`, `Scenes`, ...),
+`<Module>` mirrors the library folder under `Assets/Plugins/MajdataPlay` (`Buffers`, `Net`, ...) and
+`<Library>` mirrors the folder under `ThirdParty` whose changes in this repository are tested (`UniTask`).
 
 Every test is written with the Unity Test Framework (`[Test]` for synchronous logic, `[UnityTest]`
 coroutines for anything that needs frames, lifecycle messages or async code).
@@ -127,9 +129,12 @@ Staging steps:
   on every member, including test methods.
 - Namespaces follow the tested code: `MajdataPlay.Tests.Game.<Area>` for `EditMode/Game/<Area>`,
   `MajdataPlay.Tests.Game.<Area>.PlayMode` for `PlayMode/Game/<Area>`,
-  `MajdataPlay.Tests.Plugins.<Module>` for `EditMode/Plugins/<Module>` and
+  `MajdataPlay.Tests.Plugins.<Module>` for `EditMode/Plugins/<Module>`,
   `MajdataPlay.Tests.Plugins.<Module>.PlayMode` for `PlayMode/Plugins/<Module>` (some existing PlayMode
-  helpers shared with EditMode tests keep the EditMode namespace). Code under `PlayMode/`
+  helpers shared with EditMode tests keep the EditMode namespace) and
+  `MajdataPlay.Tests.ThirdParty.<RootNamespace>.PlayMode` for `PlayMode/ThirdParty/<Library>`, where
+  `<RootNamespace>` is the library's root namespace (`Cysharp` for UniTask) so that a namespace segment does
+  not hide a type of the same name such as `UniTask`. Code under `PlayMode/`
   compiles for every platform and must not use `UnityEditor`.
 - Each module has exactly one EditMode asmdef named `MajdataPlay.Tests.<Module>` and, optionally, one
   PlayMode asmdef named `MajdataPlay.Tests.<Module>.PlayMode`. Test asmdefs follow the Unity Test Framework
