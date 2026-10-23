@@ -1,46 +1,78 @@
+#nullable enable
 #if UNITY_EDITOR
+using System;
 using UnityEngine;
 using UnityEditor;
-using System.IO;
 using System.Reflection;
+using MajdataPlay.IO.Storage;
 
-namespace SkiaSharp.Unity.HB.Editor {
+namespace SkiaSharp.Unity.HB.Editor
+{
+    /// <summary>Assigns package icons to Skia components without creating project assets.</summary>
     [InitializeOnLoad]
-    static class HBIconAssigner {
-        static readonly string IconFolder = "Assets/SkiaSharp/Editor/Icons";
+    internal static class HBIconAssigner
+    {
+        /// <summary>The physical directory in the local SkiaForUnity package used for generated PNG files.</summary>
+        private const string IconFolder = "ThirdParty/SkiaForUnity/Editor/Icons";
 
-        static readonly (string scriptName, string label, Color bg, Color fg)[] Scripts = {
+        /// <summary>The virtual package directory used by Unity to load and import icons.</summary>
+        private const string IconAssetFolder = "Packages/com.ammariqais.skiaforunity/Editor/Icons";
+
+        /// <summary>The component names, labels, and colors used by generated icons.</summary>
+        private static readonly (string scriptName, string label, Color bg, Color fg)[] s_scripts = {
             ("HB_TEXTBlock", "HB", new Color(0.16f, 0.50f, 0.73f, 1f), Color.white),
             ("HBTextAnimator", "A", new Color(0.20f, 0.60f, 0.36f, 1f), Color.white),
             ("HBInputField", "IF", new Color(0.80f, 0.45f, 0.10f, 1f), Color.white),
             ("SkiaGraphic", "SG", new Color(0.55f, 0.10f, 0.70f, 1f), Color.white),
         };
 
-        static HBIconAssigner() {
+        /// <summary>Schedules icon assignment after the editor finishes importing scripts.</summary>
+        static HBIconAssigner()
+        {
             // Delay to avoid running during import
             EditorApplication.delayCall += AssignIcons;
         }
 
-        static void AssignIcons() {
-            foreach (var (scriptName, label, bg, fg) in Scripts) {
+        /// <summary>Reuses or generates package icons and replaces icons from the obsolete Assets directory.</summary>
+        /// <exception cref="UnauthorizedAccessException">The package icon directory cannot be written.</exception>
+        /// <exception cref="System.IO.IOException">Creating or writing a package icon fails.</exception>
+        private static void AssignIcons()
+        {
+            foreach (var (scriptName, label, bg, fg) in s_scripts)
+            {
                 var script = FindMonoScript(scriptName);
-                if (script == null) continue;
+                if (script == null)
+                {
+                    continue;
+                }
 
                 var existing = EditorGUIUtility.GetIconForObject(script);
-                if (existing != null) continue;
+                if (existing != null && !AssetDatabase.GetAssetPath(existing).StartsWith("Assets/SkiaSharp/", StringComparison.Ordinal))
+                {
+                    continue;
+                }
 
-                string iconPath = $"{IconFolder}/{scriptName} Icon.png";
+                var iconName = $"{scriptName} Icon.png";
+                var iconPath = $"{IconAssetFolder}/{iconName}";
                 var icon = AssetDatabase.LoadAssetAtPath<Texture2D>(iconPath);
-                if (icon == null) {
-                    icon = GenerateIcon(label, bg, fg);
-                    if (!Directory.Exists(IconFolder))
-                        Directory.CreateDirectory(IconFolder);
-                    File.WriteAllBytes(iconPath, icon.EncodeToPNG());
-                    Object.DestroyImmediate(icon);
+                if (icon == null)
+                {
+                    var generatedIcon = GenerateIcon(label, bg, fg);
+                    try
+                    {
+                        var folder = FileSystem.Directory.Create(IconFolder);
+                        var file = FileSystem.File.Create(folder.Location, iconName, overwrite: true);
+                        file.WriteAllBytes(generatedIcon.EncodeToPNG());
+                    }
+                    finally
+                    {
+                        UnityEngine.Object.DestroyImmediate(generatedIcon);
+                    }
                     AssetDatabase.ImportAsset(iconPath, ImportAssetOptions.ForceSynchronousImport);
                     // Set texture import settings for icon
                     var importer = (TextureImporter)AssetImporter.GetAtPath(iconPath);
-                    if (importer != null) {
+                    if (importer != null)
+                    {
                         importer.textureType = TextureImporterType.GUI;
                         importer.npotScale = TextureImporterNPOTScale.None;
                         importer.textureCompression = TextureImporterCompression.Uncompressed;
@@ -50,7 +82,8 @@ namespace SkiaSharp.Unity.HB.Editor {
                     icon = AssetDatabase.LoadAssetAtPath<Texture2D>(iconPath);
                 }
 
-                if (icon != null) {
+                if (icon != null)
+                {
                     EditorGUIUtility.SetIconForObject(script, icon);
                     EditorUtility.SetDirty(script);
                     // Disable the scene-view gizmo icon so it only shows in Inspector/Hierarchy
@@ -59,12 +92,22 @@ namespace SkiaSharp.Unity.HB.Editor {
             }
         }
 
-        static void DisableSceneGizmo(System.Type componentType) {
-            if (componentType == null) return;
-            try {
+        /// <summary>Disables the scene-view gizmo for a component while preserving its editor icon.</summary>
+        /// <param name="componentType">The component type, or null when the script has no loaded class.</param>
+        private static void DisableSceneGizmo(Type? componentType)
+        {
+            if (componentType == null)
+            {
+                return;
+            }
+            try
+            {
                 var asm = typeof(EditorWindow).Assembly;
                 var annotationUtility = asm.GetType("UnityEditor.AnnotationUtility");
-                if (annotationUtility == null) return;
+                if (annotationUtility == null)
+                {
+                    return;
+                }
 
                 var setIconEnabled = annotationUtility.GetMethod(
                     "SetIconEnabled",
@@ -72,25 +115,41 @@ namespace SkiaSharp.Unity.HB.Editor {
                     null,
                     new[] { typeof(int), typeof(string), typeof(int) },
                     null);
-                if (setIconEnabled != null) {
+                if (setIconEnabled != null)
+                {
                     // classID 114 = MonoBehaviour
                     setIconEnabled.Invoke(null, new object[] { 114, componentType.Name, 0 });
                     return;
                 }
-            } catch {
+            }
+            catch
+            {
                 // Silently fail — gizmo will just remain visible
             }
         }
 
-        static MonoScript FindMonoScript(string className) {
-            foreach (var guid in AssetDatabase.FindAssets($"t:MonoScript {className}")) {
+        /// <summary>Finds the imported script whose loaded class matches a component name.</summary>
+        /// <param name="className">The component class name to find.</param>
+        /// <returns>The matching script, or null when no loaded class matches.</returns>
+        private static MonoScript? FindMonoScript(string className)
+        {
+            foreach (var guid in AssetDatabase.FindAssets($"t:MonoScript {className}"))
+            {
                 var path = AssetDatabase.GUIDToAssetPath(guid);
                 var ms = AssetDatabase.LoadAssetAtPath<MonoScript>(path);
-                if (ms != null && ms.GetClass()?.Name == className) return ms;
+                if (ms != null && ms.GetClass()?.Name == className)
+                {
+                    return ms;
+                }
             }
             return null;
         }
 
+        /// <summary>Creates a circular component icon with a bitmap label.</summary>
+        /// <param name="text">The label to draw on the icon.</param>
+        /// <param name="bgColor">The circle background color.</param>
+        /// <param name="fgColor">The label foreground color.</param>
+        /// <returns>A new readable texture that the caller must destroy.</returns>
         static Texture2D GenerateIcon(string text, Color bgColor, Color fgColor) {
             int size = 64;
             var tex = new Texture2D(size, size, TextureFormat.RGBA32, false);
@@ -122,6 +181,11 @@ namespace SkiaSharp.Unity.HB.Editor {
             return tex;
         }
 
+        /// <summary>Draws a centered bitmap label into a square pixel buffer.</summary>
+        /// <param name="pixels">The target pixel buffer.</param>
+        /// <param name="size">The width and height of the buffer.</param>
+        /// <param name="text">The label whose supported glyphs are drawn.</param>
+        /// <param name="color">The glyph color.</param>
         static void DrawTextOnIcon(Color[] pixels, int size, string text, Color color) {
             // Simple 5x7 pixel font glyphs for uppercase + digits
             var glyphs = new System.Collections.Generic.Dictionary<char, byte[]> {
