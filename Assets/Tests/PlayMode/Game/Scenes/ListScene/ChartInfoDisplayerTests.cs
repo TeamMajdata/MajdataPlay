@@ -9,6 +9,7 @@ using NUnit.Framework;
 using TMPro;
 using UnityEngine;
 using UnityEngine.TestTools;
+using UnityEngine.TestTools.Utils;
 using UnityEngine.UI;
 
 #nullable enable
@@ -135,6 +136,7 @@ namespace MajdataPlay.Tests.Game.Scenes.PlayMode.ListScene
             var displayer = CreateRadarDisplayer(Canvas);
             var material = PrivateMember.GetField<Material>(displayer, "_radarMaterial");
             var esti = PrivateMember.GetField<TextMeshProUGUI>(displayer, "_estiText");
+            var colorComparer = new ColorEqualityComparer(1e-4f);
 
             displayer.SetRadar(new List<float> { 0.1f, 0.9f, 0.2f, 0.3f, 0.4f, 0.5f, 0f }, 12.5f);
             var handles = PrivateMember.GetField<MotionHandle[]>(displayer, "_scoreHandles");
@@ -143,13 +145,15 @@ namespace MajdataPlay.Tests.Game.Scenes.PlayMode.ListScene
             {
                 handle.TryComplete();
             }
+            // Color == is approximate, so waiting on it can stop a few microseconds before the color motions end.
+            PrivateMember.GetField<MotionHandle>(displayer, "_fillColorHandle").TryComplete();
+            PrivateMember.GetField<MotionHandle>(displayer, "_outlineColorHandle").TryComplete();
             yield return WaitUntil(() => esti.text == (12.5f).ToString("F2"), 3f);
 
             Assert.That(material.GetFloat("_V1"), Is.EqualTo(0.9f).Within(1e-4f));
             Assert.That(esti.text, Is.EqualTo((12.5f).ToString("F2")));
-            yield return WaitUntil(() => material.GetColor("_FillColor") == Color.green, 3f);
-            Assert.That(material.GetColor("_FillColor"), Is.EqualTo(Color.green));
-            Assert.That(material.GetColor("_OutlineColor"), Is.EqualTo(Color.gray));
+            Assert.That(material.GetColor("_FillColor"), Is.EqualTo(Color.green).Using(colorComparer));
+            Assert.That(material.GetColor("_OutlineColor"), Is.EqualTo(Color.gray).Using(colorComparer));
         }
 
         /// <summary>Checks that destroying the radar stops its value animations.</summary>
