@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Numerics;
 using MajdataPlay.Scenes.Game.Parsing;
 using MajdataPlay.Scenes.Game.Parsing.Slide;
@@ -13,6 +14,9 @@ namespace MajdataPlay.Tests.Game.GamePlay.Parsing
     {
         /// <summary>The tolerance used for floating point geometry.</summary>
         private const double Tolerance = 1e-9;
+
+        /// <summary>The tolerance used when comparing the lengths of whole slide paths.</summary>
+        private const double LengthTolerance = 1e-6;
 
         /// <summary>Checks that building starts at a point or at a sensor node without any segment.</summary>
         [Test]
@@ -97,8 +101,8 @@ namespace MajdataPlay.Tests.Game.GamePlay.Parsing
         }
 
         /// <summary>
-        /// Checks that a start and an end angle on the two sides of ±π are the same angle, as for 5q8 and 8p5 whose
-        /// tangent points lie exactly to the left of the centre: the arc is skipped on request and otherwise turns a whole
+        /// Checks that a start and an end angle on the two sides of ±π are the same angle, as when a turn starts and ends
+        /// straight to the left of its circle's centre (7P7K6): the arc is skipped on request and otherwise turns a whole
         /// circle instead of a sliver.
         /// </summary>
         /// <param name="isCcw">The travel direction.</param>
@@ -117,16 +121,86 @@ namespace MajdataPlay.Tests.Game.GamePlay.Parsing
             AssertClose(full.CurrentEndPoint, start);
         }
 
-        /// <summary>Checks that rotating the 1q4 and 1p6 shapes onto the ±π boundary keeps their full turn.</summary>
-        /// <param name="code">The slide code starting at key 1.</param>
-        /// <param name="rotated">The same shape rotated so that its tangent point lies on the ±π boundary.</param>
-        [TestCase("1Q0K4", "5Q0K8")]
-        [TestCase("1P0K6", "8P0K5")]
-        public void Parse_FullTurnAroundTheCentreSurvivesRotation(string code, string rotated)
+        /// <summary>
+        /// Checks that a turn around side circle 7 that starts and ends at its leftmost point, where the arc angle wraps
+        /// from π to -π, keeps its full turn. Before the angles were compared modulo 2π these codes lost the turn in the
+        /// Windows editor (7P7K6 was about 3.67 long instead of 17.61, 1A6Q7K7 about 12.54 instead of 26.47), while the
+        /// same shapes at other start keys were whole.
+        /// </summary>
+        /// <param name="code">The shape at a start key where its turn stays away from the ±π boundary.</param>
+        /// <param name="rotated">The same shape rotated so that its turn starts and ends on the ±π boundary.</param>
+        [TestCase("1P1K8", "7P7K6")]
+        [TestCase("1Q2K2", "6Q7K7")]
+        [TestCase("1P1P1K8", "7P7P7K6")]
+        [TestCase("2A7Q8K8", "1A6Q7K7")]
+        public void Parse_FullTurnOnTheAngleBoundarySurvivesRotation(string code, string rotated)
         {
             var length = SlideCodeParser.Parse(code).GetPathLength();
 
-            Assert.That(SlideCodeParser.Parse(rotated).GetPathLength(), Is.EqualTo(length).Within(1e-6));
+            Assert.That(SlideCodeParser.Parse(rotated).GetPathLength(), Is.EqualTo(length).Within(LengthTolerance));
+        }
+
+        /// <summary>
+        /// Checks that every valid slide code with one or two commands between its start and end key has the same path
+        /// length at all eight start keys, so that no rotation puts an arc on the ±π boundary where it gains or loses a
+        /// turn.
+        /// </summary>
+        [Test]
+        public void Parse_EveryShortSlideCodeKeepsItsLengthAtEveryStartKey()
+        {
+            var commands = new List<string>();
+            for (var key = 1; key <= 8; key++)
+            {
+                commands.Add($"A{key}");
+                commands.Add($"B{key}");
+            }
+            commands.Add("C");
+            for (var circle = 0; circle <= 9; circle++)
+            {
+                commands.Add($"P{circle}");
+                commands.Add($"Q{circle}");
+            }
+            var middles = new List<string>(commands);
+            foreach (var first in commands)
+            {
+                foreach (var second in commands)
+                {
+                    middles.Add(first + second);
+                }
+            }
+
+            var generatedCount = 0;
+            var validCount = 0;
+            var mismatches = new List<string>();
+            foreach (var middle in middles)
+            {
+                for (var end = 1; end <= 8; end++)
+                {
+                    var code = $"1{middle}K{end}";
+                    generatedCount++;
+                    if (!TryGetPathLength(code, out var length))
+                    {
+                        continue;
+                    }
+                    validCount++;
+                    for (var rotation = 1; rotation < 8; rotation++)
+                    {
+                        var rotated = SlideCodeShape.Rotate(code, rotation);
+                        if (!TryGetPathLength(rotated, out var rotatedLength))
+                        {
+                            mismatches.Add($"{rotated}: rejected, {code}: {length:F4}");
+                        }
+                        // NaN never counts as the same length
+                        else if (!(Math.Abs(rotatedLength - length) <= LengthTolerance))
+                        {
+                            mismatches.Add($"{rotated}: {rotatedLength:F4}, {code}: {length:F4}");
+                        }
+                    }
+                }
+            }
+
+            Assert.That(validCount, Is.GreaterThan(generatedCount / 2), "Most generated command sequences are valid slide code");
+            Assert.That(mismatches, Is.Empty, $"{mismatches.Count} rotated slide codes changed their path length");
         }
 
         /// <summary>Checks the circle index overloads of the arc and full circle operations.</summary>
@@ -186,6 +260,24 @@ namespace MajdataPlay.Tests.Game.GamePlay.Parsing
 
             Assert.That(path.Segments, Has.Length.EqualTo(2));
             Assert.That(path.GetPathLength(), Is.EqualTo(2 * SlideGeo.MainRadius).Within(Tolerance));
+        }
+
+        /// <summary>Parses a slide code and measures its path, skipping command sequences the parser rejects.</summary>
+        /// <param name="code">The slide code.</param>
+        /// <param name="length">Receives the path length when the code is valid, otherwise 0.</param>
+        /// <returns>Whether the parser accepts the code.</returns>
+        private static bool TryGetPathLength(string code, out double length)
+        {
+            try
+            {
+                length = SlideCodeParser.Parse(code).GetPathLength();
+                return true;
+            }
+            catch (ArgumentException)
+            {
+                length = 0;
+                return false;
+            }
         }
 
         /// <summary>Checks that a point lies on a circle.</summary>
