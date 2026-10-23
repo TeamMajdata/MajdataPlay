@@ -3,6 +3,7 @@ using Cysharp.Threading.Tasks;
 using MajdataPlay.Collections;
 using MajdataPlay.Diagnostics;
 using MajdataPlay.IO;
+using MajdataPlay.Rendering;
 using MajdataPlay.Utils;
 using LitMotion;
 using LitMotion.Extensions;
@@ -221,10 +222,26 @@ namespace MajdataPlay
             if (sceneName == nameof(MajScenes.Game))
             {
                 SetLoadingText("MAJTEXT_COMPILING_SHADERS".i18n());
+#if UNITY_ANDROID && !UNITY_EDITOR
+                try
+                {
+                    var cancellationToken = this.GetCancellationTokenOnDestroy();
+                    await UniTask.WaitForEndOfFrame(cancellationToken);
+                    await AndroidGraphicsStateWarmup.WarmUpAsync(cancellationToken);
+                }
+                finally
+                {
+                    if (this != null)
+                    {
+                        SetLoadingText(string.Empty);
+                    }
+                }
+#else
                 // Render the loading message before shader warmup blocks the main thread.
                 await UniTask.WaitForEndOfFrame();
                 Shader.WarmupAllShaders();
                 SetLoadingText(string.Empty);
+#endif
             }
 
             //await SceneManager.UnloadSceneAsync(SceneManager.GetActiveScene());

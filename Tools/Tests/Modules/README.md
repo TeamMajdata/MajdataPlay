@@ -46,6 +46,13 @@ See [Rendering layout validation](RenderingLayoutValidation/README.md) for scope
 and limitations. This read-only check does not replace Unity compilation or
 rendered-output verification.
 
+## Android graphics state warmup
+
+See [Graphics state validation](GraphicsStateValidation/README.md) for the isolated
+Android ARM64 Vulkan tracing, serialization and asynchronous warmup device probe.
+Production scene capture is documented in
+[Rendering](../../../Assets/Scripts/Rendering/README.md).
+
 ## Translation Editor
 
 See [Translation editor validation](TranslationEditorValidation.md) for the static
