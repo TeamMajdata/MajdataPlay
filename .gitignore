@@ -118,9 +118,6 @@ out.log
 # Independent libcurl HTTP handler validation harness; builds into Temp/CurlValidation.
 !/Tools/Tests/Modules/CurlValidation/CurlValidation.csproj
 
-# Temporary shader warmup crash-probe validation; builds into Temp/ShaderWarmupValidation.
-!/Tools/Tests/Modules/ShaderWarmupValidation/ShaderWarmupValidation.csproj
-
 # Independent MRP camera capture bridge validation; builds into Temp/MrpCaptureValidation.
 !/Tools/Tests/Modules/MrpCaptureValidation/MrpCaptureValidation.csproj
 

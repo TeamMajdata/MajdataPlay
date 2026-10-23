@@ -29,6 +29,11 @@
     <Compile Include="../../../../Assets/Scripts/Misc/Settings/OptionEnumerators/GameOffsetEnumerator.cs" Link="Production/GameOffsetEnumerator.cs" />
     <Compile Include="../../../../Assets/Scripts/Misc/Settings/OptionEnumerators/NoteMaskEnumerator.cs" Link="Production/NoteMaskEnumerator.cs" />
     <Compile Include="../../../../Assets/Scripts/Misc/Settings/OptionEnumerators/Rendering*Enumerator.cs" Link="Production/%(Filename)%(Extension)" />
+    <Compile Include="../../../../Assets/Scripts/Misc/Settings/DebugOptions.cs" Link="Production/DebugOptions.cs" />
+    <Compile Include="../../../../Assets/Scripts/Misc/Settings/Enums/SensorDebugStyle.cs" Link="Production/SensorDebugStyle.cs" />
+    <Compile Include="../../../../Assets/Scripts/Misc/Settings/Enums/SensorDebugPosition.cs" Link="Production/SensorDebugPosition.cs" />
+    <Compile Include="../../../../Assets/Scripts/Misc/Settings/Enums/DJAutoPolicyOption.cs" Link="Production/DJAutoPolicyOption.cs" />
+    <Compile Include="../../../../Assets/Plugins/MajdataPlay/Diagnostics/Enums/LogLevel.cs" Link="Production/LogLevel.cs" />
     <Compile Include="../../../../Assets/Scripts/Misc/Settings/RenderingOptions.cs" Link="Production/RenderingOptions.cs" />
     <Compile Include="../../../../Assets/Scripts/Misc/Settings/Enums/RenderQualityOption.cs" Link="Production/RenderQualityOption.cs" />
     <Compile Include="../../../../Assets/Plugins/MajdataPlay/Rendering/RenderPipelines/MajRenderPipeline/Runtime/MajRenderDiagnostics.cs" Link="Production/MajRenderDiagnostics.cs" />

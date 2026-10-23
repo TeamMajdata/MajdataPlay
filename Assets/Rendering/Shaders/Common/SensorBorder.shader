@@ -1,9 +1,10 @@
-// 调试传感器只提交边框几何；无纹理采样、无逐片元边界距离或透明内部。
+// 调试传感器直接绘制所选几何，无纹理采样；视觉位置变换不移动输入Collider。
 Shader "Maj/Debug/SensorBorder"
 {
     Properties
     {
         [MainColor] _BaseColor ("Border Color", Color) = (1,0,0,0.2)
+        [HideInInspector] _SensorDisplayTransform ("Display Scale and Offset", Vector) = (1,1,0,0)
     }
     SubShader
     {
@@ -24,14 +25,16 @@ Shader "Maj/Debug/SensorBorder"
             #include "Assets/Plugins/MajdataPlay/Rendering/RenderPipelines/MajRenderPipeline/Library/MajCore.hlsl"
             CBUFFER_START(UnityPerMaterial)
                 half4 _BaseColor;
+                float4 _SensorDisplayTransform;
             CBUFFER_END
             struct Attributes { float3 positionOS : POSITION; };
             struct Varyings { float4 positionCS : SV_POSITION; };
             Varyings Vert(Attributes input)
             {
                 Varyings output;
-                // 资源已烘焙最终窄边位置，无运行时偏移或纹理采样。
-                output.positionCS = TransformObjectToHClip(input.positionOS);
+                float3 positionWS = TransformObjectToWorld(input.positionOS);
+                positionWS.xy = positionWS.xy * _SensorDisplayTransform.xy + _SensorDisplayTransform.zw;
+                output.positionCS = TransformWorldToHClip(positionWS);
                 return output;
             }
             half4 Frag(Varyings input) : SV_Target { return _BaseColor; }

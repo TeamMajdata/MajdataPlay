@@ -33,6 +33,7 @@ internal static class Program
         Run("custom resolution step boundaries, forced output and exact apply counts", RenderingScaleInput);
         Run("current output path read-only status, dynamic labels and non-persisted metadata", RenderingOutputStatus);
         Run("four real rendering language tables and hidden-option font warmup", RenderingLocalizationWarmup);
+        Run("sensor style and position defaults, JSON compatibility, cached enum input and four-language labels", SensorStyleSettings);
         Console.WriteLine($"SETTING_VALIDATION_PASSED ({_assertions} assertions)");
     }
     static void Run(string name, Action test)
@@ -1006,6 +1007,167 @@ internal static class Program
             "named presets must hide advanced diagnostics");
         Check(UObject.InstantiateCount == 4 && Localization.Subscribers == Visible.Length && GameManager.SaveRequests == 0,
             "status refresh or visibility changes leaked pooled views/subscriptions or caused a save");
+    }
+
+    /// <summary>Validates the production sensor options with the production menu and enum cache.</summary>
+    private static void SensorStyleSettings()
+    {
+        var defaults = new DebugOptions();
+        Check(defaults.SensorStyle == SensorDebugStyle.RedGreen && defaults.SensorOpacity == 20 && !defaults.DisplaySensor &&
+            defaults.SensorPosition == SensorDebugPosition.MainScreen,
+            "older configurations must preserve hidden red/green borders on the main screen at twenty percent");
+        var missing = System.Text.Json.JsonSerializer.Deserialize<DebugOptions>("{}");
+        Check(missing.SensorStyle == SensorDebugStyle.RedGreen && missing.SensorPosition == SensorDebugPosition.MainScreen,
+            "missing JSON options changed the existing appearance or position");
+        foreach (var style in new[] { SensorDebugStyle.Brightness, SensorDebugStyle.RedGreen, SensorDebugStyle.Classic })
+        {
+            foreach (var position in new[] { SensorDebugPosition.MainScreen, SensorDebugPosition.SubScreen })
+            {
+                defaults.SensorStyle = style;
+                defaults.SensorPosition = position;
+                var restored = System.Text.Json.JsonSerializer.Deserialize<DebugOptions>(System.Text.Json.JsonSerializer.Serialize(defaults));
+                Check(restored.SensorStyle == style && restored.SensorPosition == position && restored.SensorOpacity == 20,
+                    "numeric JSON round-trip lost the selected style, position or opacity");
+            }
+        }
+        var legacy = System.Text.Json.JsonSerializer.Deserialize<DebugOptions>("{\"DisplaySensor\":true,\"SensorStyle\":0,\"SensorOpacity\":30}");
+        Check(legacy.DisplaySensor && legacy.SensorStyle == SensorDebugStyle.Brightness && legacy.SensorOpacity == 30 &&
+            legacy.SensorPosition == SensorDebugPosition.MainScreen, "existing brightness configurations must remain on the main screen");
+        defaults.SensorStyle = (SensorDebugStyle)999;
+        Check(defaults.SensorStyle == SensorDebugStyle.RedGreen, "invalid numeric style must select the known safe default");
+        defaults.SensorPosition = (SensorDebugPosition)999;
+        Check(defaults.SensorPosition == SensorDebugPosition.MainScreen, "invalid numeric position must select the main screen");
+        var invalid = System.Text.Json.JsonSerializer.Deserialize<DebugOptions>("{\"SensorStyle\":-1,\"SensorPosition\":-1}");
+        Check(invalid.SensorStyle == SensorDebugStyle.RedGreen && invalid.SensorPosition == SensorDebugPosition.MainScreen,
+            "invalid JSON sensor options must select the existing safe defaults");
+        defaults.SensorOpacity = 1;
+        Check(defaults.SensorOpacity == 10, "opacity minimum was lost when extracting the production settings");
+        defaults.SensorOpacity = 100;
+        Check(defaults.SensorOpacity == 90, "opacity maximum must support ninety percent");
+        defaults.SensorOpacity = int.MaxValue;
+        Check(defaults.SensorOpacity == 90, "external opacity overflow must clamp before rounding");
+        defaults.SensorOpacity = int.MinValue;
+        Check(defaults.SensorOpacity == 10, "external opacity underflow must clamp before rounding");
+        foreach (var percentage in Enumerable.Range(1, 9).Select(index => index * 10))
+        {
+            defaults.SensorOpacity = percentage;
+            var opacityJson = System.Text.Json.JsonSerializer.Serialize(defaults);
+            var opacityRestored = System.Text.Json.JsonSerializer.Deserialize<DebugOptions>(opacityJson);
+            Check(defaults.SensorOpacity == percentage && opacityRestored.SensorOpacity == percentage,
+                "opacity JSON round-trip changed an allowed ten-percent step: " + percentage);
+        }
+        foreach (var percentage in new[] { 10, 20, 30, 40, 50 })
+        {
+            var olderOpacity = System.Text.Json.JsonSerializer.Deserialize<DebugOptions>("{\"SensorOpacity\":" + percentage + "}");
+            Check(olderOpacity.SensorOpacity == percentage, "the expanded range changed an existing saved opacity");
+        }
+        var tooHighOpacity = System.Text.Json.JsonSerializer.Deserialize<DebugOptions>("{\"SensorOpacity\":999}");
+        var tooLowOpacity = System.Text.Json.JsonSerializer.Deserialize<DebugOptions>("{\"SensorOpacity\":-999}");
+        Check(tooHighOpacity.SensorOpacity == 90 && tooLowOpacity.SensorOpacity == 10,
+            "external JSON opacities must clamp to the expanded range");
+        defaults.SensorOpacity = 85;
+        Check(defaults.SensorOpacity == 90, "opacity halfway between steps must round up within the expanded range");
+        defaults.SensorOpacity = 24;
+        Check(defaults.SensorOpacity == 20, "opacity must still normalize external values to ten percent steps");
+
+        var properties = SettingReflectionCache.GetVisibleProperties(typeof(DebugOptions));
+        var names = properties.Select(property => property.Name).ToArray();
+        Check(Array.IndexOf(names, nameof(DebugOptions.SensorPosition)) == Array.IndexOf(names, nameof(DebugOptions.DisplaySensor)) + 1 &&
+            Array.IndexOf(names, nameof(DebugOptions.SensorStyle)) == Array.IndexOf(names, nameof(DebugOptions.SensorPosition)) + 1 &&
+            Array.IndexOf(names, nameof(DebugOptions.SensorOpacity)) == Array.IndexOf(names, nameof(DebugOptions.SensorStyle)) + 1,
+            "sensor visibility, position, style and opacity must remain adjacent in the debug menu");
+        var constants = SettingReflectionCache.GetEnumValues(typeof(SensorDebugStyle));
+        Check(constants.Length == 3 && (SensorDebugStyle)constants[0] == SensorDebugStyle.Brightness &&
+            (SensorDebugStyle)constants[1] == SensorDebugStyle.RedGreen && (SensorDebugStyle)constants[2] == SensorDebugStyle.Classic &&
+            (int)SensorDebugStyle.Brightness == 0 && (int)SensorDebugStyle.RedGreen == 1 && (int)SensorDebugStyle.Classic == 2,
+            "the cached style enum must append classic without renumbering older configurations");
+        var positions = SettingReflectionCache.GetEnumValues(typeof(SensorDebugPosition));
+        Check(positions.Length == 2 && (SensorDebugPosition)positions[0] == SensorDebugPosition.MainScreen &&
+            (SensorDebugPosition)positions[1] == SensorDebugPosition.SubScreen,
+            "the cached position enum must contain the main and secondary display regions");
+
+        using var fixture = new Fixture(defaults);
+        var menu = fixture.Menus[0];
+        menu.ToOption(nameof(DebugOptions.SensorStyle));
+        foreach (var language in Language.All)
+        {
+            Localization.Change(language);
+            Frame();
+            foreach (var key in new[] { "MAJSETTING_PROPERTY_SensorStyle", "MAJSETTING_PROPERTY_SensorStyle_DESC",
+                "MAJSETTING_PROPERTY_SensorStyle_OPTION_Brightness", "MAJSETTING_PROPERTY_SensorStyle_OPTION_RedGreen",
+                "MAJSETTING_PROPERTY_SensorStyle_OPTION_Classic", "MAJSETTING_PROPERTY_SensorPosition", "MAJSETTING_PROPERTY_SensorPosition_DESC",
+                "MAJSETTING_PROPERTY_SensorPosition_OPTION_MainScreen", "MAJSETTING_PROPERTY_SensorPosition_OPTION_SubScreen" })
+            {
+                Check(!string.IsNullOrWhiteSpace(Translations.LookupRendering(key, language)), language.Code + " is missing " + key);
+            }
+            Check(Value(View(nameof(DebugOptions.SensorStyle))) == Translations.LookupRendering(
+                "MAJSETTING_PROPERTY_SensorStyle_OPTION_RedGreen", language), "the selected style did not localize");
+            ClickNext(View(nameof(DebugOptions.SensorStyle)));
+            Check(defaults.SensorStyle == SensorDebugStyle.Classic, "next style input did not select classic");
+            Frame();
+            Check(Value(View(nameof(DebugOptions.SensorStyle))) == Translations.LookupRendering(
+                "MAJSETTING_PROPERTY_SensorStyle_OPTION_Classic", language), "classic did not display its localized label");
+            ClickNext(View(nameof(DebugOptions.SensorStyle)));
+            Check(defaults.SensorStyle == SensorDebugStyle.Brightness, "next style input did not select brightness");
+            Frame();
+            Check(Value(View(nameof(DebugOptions.SensorStyle))) == Translations.LookupRendering(
+                "MAJSETTING_PROPERTY_SensorStyle_OPTION_Brightness", language), "brightness did not display its localized label");
+            ClickNext(View(nameof(DebugOptions.SensorStyle)));
+            Check(defaults.SensorStyle == SensorDebugStyle.RedGreen, "next style input did not wrap to red/green");
+            Frame();
+            menu.ToOption(nameof(DebugOptions.SensorPosition));
+            Check(Value(View(nameof(DebugOptions.SensorPosition))) == Translations.LookupRendering(
+                "MAJSETTING_PROPERTY_SensorPosition_OPTION_MainScreen", language), "main screen did not display its localized label");
+            ClickNext(View(nameof(DebugOptions.SensorPosition)));
+            Check(defaults.SensorPosition == SensorDebugPosition.SubScreen, "next position input did not select the secondary screen");
+            Frame();
+            Check(Value(View(nameof(DebugOptions.SensorPosition))) == Translations.LookupRendering(
+                "MAJSETTING_PROPERTY_SensorPosition_OPTION_SubScreen", language), "secondary screen did not display its localized label");
+            ClickNext(View(nameof(DebugOptions.SensorPosition)));
+            Check(defaults.SensorPosition == SensorDebugPosition.MainScreen, "next position input did not wrap to the main screen");
+            menu.ToOption(nameof(DebugOptions.SensorOpacity));
+            defaults.SensorOpacity = 10;
+            Frame();
+            var opacityData = Get<OptionData>(View(nameof(DebugOptions.SensorOpacity)), "_data");
+            Check(!opacityData.MovePrevious() && defaults.SensorOpacity == 10, "opacity must stop at the ten-percent lower boundary");
+            for (var percentage = 10; percentage <= 90; percentage += 10)
+            {
+                Check(Value(View(nameof(DebugOptions.SensorOpacity))) == percentage + "%",
+                    language.Code + " is missing the localized opacity percentage " + percentage);
+                if (percentage < 90)
+                {
+                    ClickNext(View(nameof(DebugOptions.SensorOpacity)));
+                    Check(defaults.SensorOpacity == percentage + 10, "opacity menu input did not use a ten-percent step");
+                    Frame();
+                }
+            }
+            ClickNext(View(nameof(DebugOptions.SensorOpacity)));
+            Check(defaults.SensorOpacity == 90 && !opacityData.MoveNext(), "opacity must stop at the ninety-percent upper boundary");
+            for (var percentage = 80; percentage >= 10; percentage -= 10)
+            {
+                Check(opacityData.MovePrevious() && defaults.SensorOpacity == percentage,
+                    "opacity decrement did not preserve the ten-percent step");
+                Frame();
+            }
+            defaults.SensorOpacity = 20;
+            menu.ToOption(nameof(DebugOptions.SensorStyle));
+            Frame();
+        }
+        defaults.SensorStyle = SensorDebugStyle.Brightness;
+        Frame();
+        Check(Value(View(nameof(DebugOptions.SensorStyle))) == Translations.LookupRendering(
+            "MAJSETTING_PROPERTY_SensorStyle_OPTION_Brightness", Localization.Current),
+            "external style change did not refresh the cached option");
+        Check(ReferenceEquals(constants, SettingReflectionCache.GetEnumValues(typeof(SensorDebugStyle))),
+            "menu interaction replaced the shared style enum metadata");
+        menu.ToOption(nameof(DebugOptions.SensorPosition));
+        defaults.SensorPosition = SensorDebugPosition.SubScreen;
+        Frame();
+        Check(Value(View(nameof(DebugOptions.SensorPosition))) == Translations.LookupRendering(
+            "MAJSETTING_PROPERTY_SensorPosition_OPTION_SubScreen", Localization.Current),
+            "external position change did not refresh the cached option");
+        Check(ReferenceEquals(positions, SettingReflectionCache.GetEnumValues(typeof(SensorDebugPosition))),
+            "menu interaction replaced the shared position enum metadata");
     }
 
     static void ManagerFrame(SettingManager manager)

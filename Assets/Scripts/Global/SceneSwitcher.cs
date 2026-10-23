@@ -223,7 +223,7 @@ namespace MajdataPlay
                 SetLoadingText("MAJTEXT_COMPILING_SHADERS".i18n());
                 // Render the loading message before shader warmup blocks the main thread.
                 await UniTask.WaitForEndOfFrame();
-                MajdataPlay.Rendering.ShaderWarmupDiagnostics.Run();
+                Shader.WarmupAllShaders();
                 SetLoadingText(string.Empty);
             }
 

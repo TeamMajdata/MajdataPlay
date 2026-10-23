@@ -12,6 +12,20 @@
 
 # MRP 渲染架构与优化审计
 
+## 2026-10-23 当前更新
+
+传感器显示增补：可独立选择主屏 / 副屏，默认主屏。副屏按已有 SubScreenEdge 的上下边界等比缩放并居中；只映射 Shader 世界 XY 顶点和 CPU 剔除 bounds，原 Collider、Transform 和输入保持主屏布局，不增加 RT / Copy。返回主屏清除 bounds 覆盖；副屏边缘未就绪则隐藏，等待有效布局。经典风格使用完整分区，颜色为未触发 `#000D69` / 触发 `#5D0D06`；与红绿一样遵循共用透明度，范围现为 10%～90%（步长 10%，默认 20%）。以下同日旧测试数字与两风格说明是前一轮记录；最新验证见 README 与 SensorDebugValidation。
+
+该增补验证：设置回归 1446 项、隔离 Unity 17565 项断言通过；实际 D3D11 GPU 像素 / 剔除检查 34 项通过（Unity 6000.3.17f1，RTX 3080 Ti）。这是隔离测试，尚未验证主场景或移动端实屏。
+
+已移除临时 Shader Warmup 多模式诊断、JSON 配置读取、逐 Shader 日志与专用诊断测试；`SceneSwitcher` 恢复进入 Game 前直接调用 `Shader.WarmupAllShaders()`。设备上旧配置文件不再读取，历史日志不主动删除。此前平板的全量预热测试没有复现崩溃；本次清理不代表旧原生崩溃已经定位或修复。
+
+传感器调试增加「亮暗 / 红绿」风格，默认保持红绿窄边；亮暗复用 Collider 引用的完整分区网格，以浅黑 / 深黑显示状态。默认显示强度 20% 对应亮暗 alpha 0.1 / 0.4，红绿均为 0.2；Collider 与输入映射保持原样，关闭显示时禁用全部 MeshRenderer。34 个分区节点仅取消静态合批标记，使 Player 的运行时网格切换有效；不新增网格、材质或 RT。验证方法见 [传感器验证](../../../../../Tools/Tests/Modules/SensorDebugValidation/README.md)。
+
+[Graphics State Collection 审计](GraphicsStateCollection-Audit.md)说明了后续替换预热的可能性和边界；目前没有接入 GSC 运行时代码、采集资源或改变渲染路径。下文标注旧日期的记录保留为历史，不代表本次验证。
+
+本轮验证：设置 1265 项、输入 300 项断言通过；Unity 6000.3.17f1 隔离 headless 工程的真实网格 / MPB / Renderer / Newtonsoft 设置验证 3081 项断言通过。Init 的 34 个静态位变更可精确还原修改前场景，其余序列化内容不变。未进行主工程 Play、Player 或真机视觉 / 功耗验证。
+
 初次审计：2026-10-16；未提交代码全面复审：2026-10-17。适用版本：Unity 6000.3.17f1；代码基线为当前工作区（Git HEAD `99694753` 加未提交修改），不能只用该提交还原本文实现。
 
 MRP（MajRenderPipeline）是为 MajdataPlay 当前 2D 内容定制的无光照渲染管线。它使用 Unity 的 SRP、相机剔除和 RendererList，集中控制绘制顺序、场景分辨率及颜色 / 深度附件的生命周期。优化重点是减少无用离屏合成、全屏读写和附件保存，在相同画质与帧率下降低移动端负担。
