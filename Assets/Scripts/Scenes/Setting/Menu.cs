@@ -36,6 +36,10 @@ namespace MajdataPlay.Scenes.Setting
         /// Gets or sets how the menu title is localized. Without one the default <c>MAJSETTING_CATEGORY_{Name}</c> key is used.
         /// </summary>
         internal SettingTranslation? TitleTranslation { get; set; }
+        /// <summary>
+        /// Gets or sets when the menu itself is listed; <see cref="SettingManager"/> evaluates it against the setting root.
+        /// </summary>
+        internal SettingVisibility Visibility { get; set; } = SettingVisibility.Always;
 
         [SerializeField]
         [FormerlySerializedAs("optionPrefab")]
@@ -48,6 +52,9 @@ namespace MajdataPlay.Scenes.Setting
 
         private PropertyInfo[] _properties = Array.Empty<PropertyInfo>();
         private OptionData[] _optionData = Array.Empty<OptionData>();
+        private SettingVisibility[] _optionVisibilities = Array.Empty<SettingVisibility>();
+        // The ShowInSettingUIWhen result of each property, as of the last evaluation.
+        private bool[] _optionConditionsMet = Array.Empty<bool>();
         private int[] _displayedPropertyIndices = Array.Empty<int>();
         private int _displayedOptionCount;
         private RenderingOptions? _renderingOptions;
@@ -76,13 +83,17 @@ namespace MajdataPlay.Scenes.Setting
 
             _properties = SettingReflectionCache.GetVisibleProperties(Instance.GetType());
             _optionData = new OptionData[_properties.Length];
+            _optionVisibilities = new SettingVisibility[_properties.Length];
+            _optionConditionsMet = new bool[_properties.Length];
             // Prepare every model while entering Setting, never inside a scrolling callback.
             for (var i = 0; i < _properties.Length; i++)
             {
                 _optionData[i] = new OptionData(_properties[i], Instance);
+                _optionVisibilities[i] = SettingReflectionCache.GetVisibility(_properties[i]);
             }
             _displayedPropertyIndices = new int[_properties.Length];
             _renderingOptions = Instance as RenderingOptions;
+            UpdateOptionConditions();
             UpdateOptionVisibility(true);
             _manager.InitializeOptionPool(_optionPrefab);
             _isInitialized = true;
@@ -94,7 +105,9 @@ namespace MajdataPlay.Scenes.Setting
         }
         private void LateUpdate()
         {
-            UpdateOptionVisibility();
+            // Options edited during Update show or hide their dependent options before this frame renders.
+            var conditionsChanged = UpdateOptionConditions();
+            UpdateOptionVisibility(conditionsChanged);
             if (_needsLayout)
             {
                 SnapDisplayerTo(SelectedIndex);
@@ -426,11 +439,15 @@ namespace MajdataPlay.Scenes.Setting
             ResetRenderingAdvancedInput();
             _optionAnim.TryCancel();
             // Models and enumerators stay alive, including hidden labels needed for font warmup.
-            // Rebuild only when preset/custom or compatibility visibility changes.
+            // Rebuild only when preset/custom, compatibility or ShowInSettingUIWhen visibility changes.
             ReleaseVisibleOptions();
             _displayedOptionCount = 0;
             for (var i = 0; i < _properties.Length; i++)
             {
+                if (!_optionConditionsMet[i])
+                {
+                    continue;
+                }
                 if (compatibilityMode && !IsRenderingCommonOption(_properties[i].Name))
                 {
                     continue;
@@ -460,6 +477,26 @@ namespace MajdataPlay.Scenes.Setting
                 _settingConfig.SelectedOption = GetDisplayedProperty(SelectedIndex).Name;
             }
             return true;
+        }
+
+        /// <summary>
+        /// Re-evaluates the <see cref="ShowInSettingUIWhenAttribute"/> conditions of every option against the menu instance.
+        /// </summary>
+        /// <remarks>Options without conditions are not read, so only conditional options cost a property read per call.</remarks>
+        /// <returns>True when any option became shown or hidden since the last evaluation.</returns>
+        private bool UpdateOptionConditions()
+        {
+            var hasChanged = false;
+            for (var i = 0; i < _optionVisibilities.Length; i++)
+            {
+                var isMet = _optionVisibilities[i].IsVisible(Instance);
+                if (_optionConditionsMet[i] != isMet)
+                {
+                    _optionConditionsMet[i] = isMet;
+                    hasChanged = true;
+                }
+            }
+            return hasChanged;
         }
 
         private static Vector3 GetOptionTransformScale(float diff)

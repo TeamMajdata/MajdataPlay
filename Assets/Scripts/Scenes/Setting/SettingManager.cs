@@ -45,6 +45,8 @@ namespace MajdataPlay.Scenes.Setting
         private TextMeshProUGUI _descriptionTextDisplayer;
 
         private Menu[] _menus = Array.Empty<Menu>();
+        // Whether each menu is listed; its title cursor counts listed menus only.
+        private bool[] _isMenuDisplayed = Array.Empty<bool>();
         private MenuTitleDisplayer[] _menuTitleDisplayers = Array.Empty<MenuTitleDisplayer>();
 
         private float _listCursorPos = 0;
@@ -104,7 +106,9 @@ namespace MajdataPlay.Scenes.Setting
                 menu.Instance = category.GetInstance(Setting);
                 menu.Name = category.Name;
                 menu.TitleTranslation = category.TitleTranslation;
+                menu.Visibility = category.Visibility;
             }
+            _isMenuDisplayed = new bool[_menus.Length];
             // Build scene-local enumerators before the fade opens and before any navigation.
             // Only immutable reflection metadata is shared with subsequent Setting visits.
             foreach (var menu in _menus)
@@ -188,12 +192,15 @@ namespace MajdataPlay.Scenes.Setting
             internal string Name => _valueProperty.Name;
             // The translation attributes live on the root category property; {0} is the displayed menu name.
             internal SettingTranslation TitleTranslation { get; }
+            // Like the translation attributes, the visibility conditions live on the root category property.
+            internal SettingVisibility Visibility { get; }
 
             internal MenuMetadata(PropertyInfo categoryProperty, PropertyInfo valueProperty)
             {
                 _categoryProperty = categoryProperty;
                 _valueProperty = valueProperty;
                 TitleTranslation = SettingReflectionCache.GetMenuTranslation(categoryProperty, valueProperty.Name);
+                Visibility = SettingReflectionCache.GetVisibility(categoryProperty);
             }
 
             internal object GetInstance(GameSetting setting)
@@ -280,6 +287,12 @@ namespace MajdataPlay.Scenes.Setting
             {
                 currentMenu.RefreshVisibleEnumerators();
             }
+            // An edited option can list or unlist other menus; update the list before navigating it.
+            if (UpdateMenuVisibility())
+            {
+                _menuTitleDisplayerAnim.TryCancel();
+                NormalizeMenuTitleCursor();
+            }
             if (nextCategoryPressed || previousCategoryPressed)
             {
                 if (_categoryInput.Update(
@@ -355,15 +368,17 @@ namespace MajdataPlay.Scenes.Setting
         private void RestoreSelectedMenu()
         {
             var index = Array.FindIndex(_menus, x => x.Name == _settingConfig.SelectedMenu);
-            if (index == -1)
+            if (index == -1 || !_menus[index].Visibility.IsVisible(Setting))
             {
                 index = Array.FindIndex(_menus, x => x.Name == nameof(GameSetting.Game));
                 _settingConfig.SelectedOption = string.Empty;
             }
 
             Index = index;
-            _listCursorPos = index;
-            _listCursorTarget = index;
+            UpdateMenuVisibility();
+            var position = GetDisplayedMenuPosition(index);
+            _listCursorPos = position;
+            _listCursorTarget = position;
         }
 
         internal void PreviousMenu()
@@ -381,19 +396,35 @@ namespace MajdataPlay.Scenes.Setting
                 return;
             }
 
-            var targetIndex = Index + direction;
-            var crossesBoundary = targetIndex < 0 || targetIndex >= _menus.Length;
-            targetIndex = targetIndex switch
+            // Skip unlisted menus; a full cycle ends back on the current menu, which is always listed.
+            var targetIndex = Index;
+            var crossesBoundary = false;
+            for (var step = 0; step < _menus.Length; step++)
             {
-                < 0 => _menus.Length - 1,
-                _ when targetIndex >= _menus.Length => 0,
-                _ => targetIndex
-            };
+                targetIndex += direction;
+                if (targetIndex < 0)
+                {
+                    targetIndex = _menus.Length - 1;
+                    crossesBoundary = true;
+                }
+                else if (targetIndex >= _menus.Length)
+                {
+                    targetIndex = 0;
+                    crossesBoundary = true;
+                }
+                if (_isMenuDisplayed[targetIndex])
+                {
+                    break;
+                }
+            }
 
             Index = targetIndex;
-            _listCursorTarget = targetIndex;
             _settingConfig.SelectedMenu = _menus[Index].Name;
-            UpdateMenu(direction, !crossesBoundary);
+            // The previous menu leaves the list here when only being selected kept it listed;
+            // the title positions then shift, so they snap instead of animating.
+            var isListChanged = UpdateMenuVisibility();
+            _listCursorTarget = GetDisplayedMenuPosition(Index);
+            UpdateMenu(direction, !crossesBoundary && !isListChanged);
         }
         public void SetDescriptionText(string text)
         {
@@ -462,8 +493,7 @@ namespace MajdataPlay.Scenes.Setting
             _menuTitleDisplayerAnim.TryCancel();
             if (!animateTitle)
             {
-                _listCursorPos = Index;
-                UpdateMenuTitleDisplayerPosition();
+                NormalizeMenuTitleCursor();
                 return;
             }
             _menuTitleDisplayerAnim = LMotion.Create(_listCursorPos, _listCursorTarget, 0.25f)
@@ -477,10 +507,17 @@ namespace MajdataPlay.Scenes.Setting
         }
         private void UpdateMenuTitleDisplayerPosition()
         {
+            var position = 0;
             for (var i = 0; i < _menuTitleDisplayers.Length; i++)
             {
                 var displayer = _menuTitleDisplayers[i];
-                var distance = i - _listCursorPos;
+                if (!_isMenuDisplayed[i])
+                {
+                    displayer.SetVisible(false);
+                    continue;
+                }
+                var distance = position - _listCursorPos;
+                position++;
                 var isVisible = Mathf.Abs(distance) <= MenuTitleVisibleDistance;
                 displayer.SetVisible(isVisible);
                 if (isVisible)
@@ -491,9 +528,49 @@ namespace MajdataPlay.Scenes.Setting
         }
         private void NormalizeMenuTitleCursor()
         {
-            _listCursorPos = Index;
-            _listCursorTarget = Index;
+            var position = GetDisplayedMenuPosition(Index);
+            _listCursorPos = position;
+            _listCursorTarget = position;
             UpdateMenuTitleDisplayerPosition();
+        }
+        /// <summary>
+        /// Re-evaluates which menus the category list shows from their <see cref="ShowInSettingUIWhenAttribute"/> conditions.
+        /// </summary>
+        /// <remarks>
+        /// The selected menu is always listed, so a menu never vanishes while it is being edited and the list is never empty.
+        /// Menus without conditions are not read, so the check is free until a menu declares one.
+        /// </remarks>
+        /// <returns>True when a menu was listed or unlisted since the last evaluation.</returns>
+        private bool UpdateMenuVisibility()
+        {
+            var hasChanged = false;
+            for (var i = 0; i < _menus.Length; i++)
+            {
+                var isDisplayed = i == Index || _menus[i].Visibility.IsVisible(Setting);
+                if (_isMenuDisplayed[i] != isDisplayed)
+                {
+                    _isMenuDisplayed[i] = isDisplayed;
+                    hasChanged = true;
+                }
+            }
+            return hasChanged;
+        }
+        /// <summary>
+        /// Gets the position of a menu in the category list, which counts listed menus only.
+        /// </summary>
+        /// <param name="menuIndex">The index of the menu in the full menu array.</param>
+        /// <returns>The number of listed menus before the menu.</returns>
+        private int GetDisplayedMenuPosition(int menuIndex)
+        {
+            var position = 0;
+            for (var i = 0; i < menuIndex; i++)
+            {
+                if (_isMenuDisplayed[i])
+                {
+                    position++;
+                }
+            }
+            return position;
         }
         private bool UpdateOffsetUnitIfNeeded()
         {

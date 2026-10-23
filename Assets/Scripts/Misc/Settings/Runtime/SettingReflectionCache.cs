@@ -15,6 +15,7 @@ namespace MajdataPlay.Settings
         private static readonly Dictionary<Type, PropertyInfo[]> s_visibleProperties = new();
         private static readonly Dictionary<MemberInfo, Attribute[]> s_attributes = new();
         private static readonly Dictionary<PropertyInfo, SettingOptionMetadata> s_options = new();
+        private static readonly Dictionary<PropertyInfo, SettingVisibility> s_visibilities = new();
         private static readonly Dictionary<Type, object[]> s_enumValues = new();
         private static readonly Dictionary<Type, Func<IOptionEnumerator>> s_enumeratorFactories = new();
 
@@ -43,9 +44,10 @@ namespace MajdataPlay.Settings
                     }
                     if (!hidden)
                     {
-                        // Warm attributes, enum constants, and factory lookup without
-                        // constructing an enumerator or retaining a setting instance.
+                        // Warm attributes, enum constants, factory lookup and visibility conditions
+                        // without constructing an enumerator or retaining a setting instance.
                         GetOption(property);
+                        GetVisibility(property);
                         result.Add(property);
                     }
                 }
@@ -105,6 +107,42 @@ namespace MajdataPlay.Settings
             }
             var attributes = categoryProperty is null ? Array.Empty<Attribute>() : GetAttributes(categoryProperty);
             return SettingTranslation.Resolve(attributes, TranslationTarget.MenuName, menuName);
+        }
+
+        /// <summary>
+        /// Gets when a setting option or a setting menu is shown, as declared by its <see cref="ShowInSettingUIWhenAttribute"/> attributes.
+        /// </summary>
+        /// <remarks>
+        /// Member paths start at the type the property was obtained from. Conditions that cannot be resolved are logged
+        /// as an error and the entry is always shown, so a mistake never removes an option or breaks the setting scene.
+        /// </remarks>
+        /// <param name="property">The option property, or for a menu its category property on the setting root.</param>
+        /// <returns>The cached visibility; <see cref="SettingVisibility.Always"/> without conditions.</returns>
+        /// <exception cref="ArgumentNullException"><paramref name="property"/> is null.</exception>
+        internal static SettingVisibility GetVisibility(PropertyInfo property)
+        {
+            if (property is null)
+            {
+                throw new ArgumentNullException(nameof(property));
+            }
+            lock (s_sync)
+            {
+                if (!s_visibilities.TryGetValue(property, out var visibility))
+                {
+                    var ownerType = property.ReflectedType ?? property.DeclaringType!;
+                    try
+                    {
+                        visibility = SettingVisibility.Resolve(ownerType, property.Name, GetAttributes(property));
+                    }
+                    catch (Exception e)
+                    {
+                        MajDebug.LogError(nameof(SettingReflectionCache), $"[Visibility] Ignored the visibility conditions of {ownerType.Name}.{property.Name}, which stays visible: {e.Message}");
+                        visibility = SettingVisibility.Always;
+                    }
+                    s_visibilities.Add(property, visibility);
+                }
+                return visibility;
+            }
         }
 
         internal static Attribute[] GetAttributes(MemberInfo member)

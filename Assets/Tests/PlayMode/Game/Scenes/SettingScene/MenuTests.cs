@@ -324,6 +324,58 @@ namespace MajdataPlay.Tests.Game.Scenes.PlayMode.SettingScene
             Assert.That(menu.TryHandleRenderingAdvancedInput(true), Is.False);
         }
 
+        /// <summary>Checks that options whose conditions do not hold are left out of the displayed list.</summary>
+        [Test]
+        public void ConditionalOptions_HiddenWhileConditionFails()
+        {
+            var menu = CreateMenu(_manager, new ConditionalSettingFixture());
+
+            menu.ToTail();
+
+            Assert.That(DisplayedCount(menu), Is.EqualTo(2));
+            Assert.That(MajEnv.RuntimeConfig!.Setting.SelectedOption, Is.EqualTo(nameof(ConditionalSettingFixture.Mode)));
+        }
+
+        /// <summary>Checks that editing the controlling option shows the dependent option in the same frame and keeps the selection.</summary>
+        /// <returns>The test coroutine.</returns>
+        [UnityTest]
+        public IEnumerator ConditionalOptions_AppearWhenControllingOptionIsEdited()
+        {
+            var settings = new ConditionalSettingFixture();
+            var menu = CreateMenu(_manager, settings);
+            menu.ToOption(nameof(ConditionalSettingFixture.Advanced));
+            menu.HandleInput();
+
+            InputSimulator.SetSensor(SensorArea.E4, true);
+            InputSimulator.Step();
+            menu.HandleInput();
+            yield return null;
+
+            Assert.That(settings.Advanced, Is.True);
+            Assert.That(DisplayedCount(menu), Is.EqualTo(3));
+            Assert.That(menu.SelectedIndex, Is.EqualTo(0));
+            Assert.That(NameOf(VisibleOption(menu, 1)!), Is.EqualTo("MAJSETTING_PROPERTY_Detail"));
+        }
+
+        /// <summary>Checks that hiding the selected option selects the first displayed option.</summary>
+        /// <returns>The test coroutine.</returns>
+        [UnityTest]
+        public IEnumerator ConditionalOptions_HidingSelectedOptionSelectsFirst()
+        {
+            var settings = new ConditionalSettingFixture { Mode = FixtureMode.Second };
+            var menu = CreateMenu(_manager, settings);
+            menu.ToOption(nameof(ConditionalSettingFixture.SecondOnly));
+            Assert.That(menu.SelectedIndex, Is.EqualTo(2));
+
+            settings.Mode = FixtureMode.Third;
+            yield return null;
+
+            Assert.That(DisplayedCount(menu), Is.EqualTo(2));
+            Assert.That(menu.SelectedIndex, Is.EqualTo(0));
+            Assert.That(MajEnv.RuntimeConfig!.Setting.SelectedOption, Is.EqualTo(nameof(ConditionalSettingFixture.Advanced)));
+            Assert.That(NameOf(VisibleOption(menu, 0)!), Is.EqualTo("MAJSETTING_PROPERTY_Advanced"));
+        }
+
         /// <summary>Checks the static layout helpers used for option views.</summary>
         [Test]
         public void LayoutHelpers_InterpolateByDistance()

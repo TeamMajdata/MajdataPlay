@@ -53,6 +53,31 @@ namespace MajdataPlay.Tests.Game.Scenes.PlayMode.SettingScene
             yield return null;
         }
 
+        /// <summary>Gets the category titles created by the manager, in menu order.</summary>
+        private MenuTitleDisplayer[] Titles => PrivateMember.GetField<MenuTitleDisplayer[]>(_manager, "_menuTitleDisplayers");
+
+        /// <summary>Gets the position of the title cursor, which counts listed menus only.</summary>
+        private float CursorPosition => PrivateMember.GetField<float>(_manager, "_listCursorPos");
+
+        /// <summary>Finds a menu by name.</summary>
+        /// <param name="name">The menu name.</param>
+        /// <returns>The index of the menu.</returns>
+        private int MenuIndex(string name)
+        {
+            return Array.FindIndex(Menus, menu => menu.Name == name);
+        }
+
+        /// <summary>Makes a menu listed only while sensor display is enabled, as <see cref="ShowInSettingUIWhenAttribute"/> on its category would.</summary>
+        /// <param name="name">The menu name.</param>
+        /// <returns>The index of the menu.</returns>
+        private int ListOnlyWithSensorDisplay(string name)
+        {
+            var index = MenuIndex(name);
+            var attributes = new Attribute[] { new ShowInSettingUIWhenAttribute("Debug.DisplaySensor", true) };
+            Menus[index].Visibility = SettingVisibility.Resolve(typeof(GameSetting), name, attributes);
+            return index;
+        }
+
         /// <summary>Holds a button for one frame of manager updates, then releases it for another frame.</summary>
         /// <param name="zone">The button.</param>
         /// <returns>The coroutine.</returns>
@@ -174,6 +199,82 @@ namespace MajdataPlay.Tests.Game.Scenes.PlayMode.SettingScene
             Assert.That(_manager.Index, Is.EqualTo(Menus.Length - 1));
             Assert.That(PrivateMember.GetField<float>(_manager, "_listCursorPos"), Is.EqualTo(Menus.Length - 1));
             Assert.That(Current.SelectedIndex, Is.EqualTo(PrivateMember.GetField<int>(Current, "_displayedOptionCount") - 1));
+        }
+
+        /// <summary>Checks that an unlisted menu is skipped with its title hidden, and listed again once its condition holds.</summary>
+        /// <returns>The test coroutine.</returns>
+        [UnityTest]
+        public IEnumerator ConditionalMenu_SkippedUntilConditionHolds()
+        {
+            MajEnv.RuntimeConfig!.Setting.SelectedMenu = nameof(GameSetting.Game);
+            yield return StartManager();
+            var game = MenuIndex(nameof(GameSetting.Game));
+            var judge = ListOnlyWithSensorDisplay(nameof(GameSetting.Judge));
+            var display = MenuIndex(nameof(GameSetting.Display));
+            yield return null;
+
+            Assert.That(Titles[judge].gameObject.activeSelf, Is.False);
+
+            yield return PressButton(ButtonZone.A2);
+            PrivateMember.GetField<MotionHandle>(_manager, "_menuTitleDisplayerAnim").TryComplete();
+
+            Assert.That((game, judge, display), Is.EqualTo((0, 1, 2)));
+            Assert.That(_manager.Index, Is.EqualTo(display));
+            Assert.That(CursorPosition, Is.EqualTo(1f));
+
+            MajEnv.Settings.Debug.DisplaySensor = true;
+            yield return null;
+
+            Assert.That(Titles[judge].gameObject.activeSelf, Is.True);
+            Assert.That(CursorPosition, Is.EqualTo(2f));
+
+            yield return PressButton(ButtonZone.A7);
+            Assert.That(_manager.Index, Is.EqualTo(judge));
+        }
+
+        /// <summary>Checks that the selected menu stays listed while its condition fails and leaves the list once another menu is selected.</summary>
+        /// <returns>The test coroutine.</returns>
+        [UnityTest]
+        public IEnumerator ConditionalMenu_SelectedMenuStaysListedUntilLeft()
+        {
+            MajEnv.RuntimeConfig!.Setting.SelectedMenu = nameof(GameSetting.Judge);
+            yield return StartManager();
+            var game = MenuIndex(nameof(GameSetting.Game));
+            var judge = ListOnlyWithSensorDisplay(nameof(GameSetting.Judge));
+            var display = MenuIndex(nameof(GameSetting.Display));
+            yield return null;
+
+            Assert.That((game, judge, display), Is.EqualTo((0, 1, 2)));
+            Assert.That(_manager.Index, Is.EqualTo(judge));
+            Assert.That(Titles[judge].gameObject.activeSelf, Is.True);
+
+            yield return PressButton(ButtonZone.A2);
+
+            // Judge left the list, so Display moved into its position without a title animation.
+            Assert.That(_manager.Index, Is.EqualTo(display));
+            Assert.That(Titles[judge].gameObject.activeSelf, Is.False);
+            Assert.That(CursorPosition, Is.EqualTo(1f));
+            Assert.That(PrivateMember.GetField<MotionHandle>(_manager, "_menuTitleDisplayerAnim").IsActive(), Is.False);
+
+            yield return PressButton(ButtonZone.A7);
+            Assert.That(_manager.Index, Is.EqualTo(game));
+        }
+
+        /// <summary>Checks that a remembered menu that is not listed falls back to Game and forgets the option.</summary>
+        /// <returns>The test coroutine.</returns>
+        [UnityTest]
+        public IEnumerator ConditionalMenu_UnlistedRememberedMenuFallsBackToGame()
+        {
+            yield return StartManager();
+            ListOnlyWithSensorDisplay(nameof(GameSetting.Judge));
+            MajEnv.RuntimeConfig!.Setting.SelectedMenu = nameof(GameSetting.Judge);
+            MajEnv.RuntimeConfig.Setting.SelectedOption = "JudgeOffset";
+
+            PrivateMember.Invoke(_manager, "RestoreSelectedMenu");
+
+            Assert.That(Current.Name, Is.EqualTo(nameof(GameSetting.Game)));
+            Assert.That(MajEnv.RuntimeConfig.Setting.SelectedOption, Is.Empty);
+            Assert.That(CursorPosition, Is.EqualTo(0f));
         }
 
         /// <summary>Checks that the option buttons move the selection within the current menu.</summary>
