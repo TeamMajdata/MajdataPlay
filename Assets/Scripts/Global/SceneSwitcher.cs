@@ -239,7 +239,7 @@ namespace MajdataPlay
 #else
                 // Render the loading message before shader warmup blocks the main thread.
                 await UniTask.WaitForEndOfFrame();
-                Shader.WarmupAllShaders();
+                //Shader.WarmupAllShaders();
                 SetLoadingText(string.Empty);
 #endif
             }
