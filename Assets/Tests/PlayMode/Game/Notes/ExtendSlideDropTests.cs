@@ -1,5 +1,6 @@
 using System;
 using System.Collections;
+using System.Linq;
 using MajdataPlay.IO;
 using MajdataPlay.Scenes.Game.Notes;
 using MajdataPlay.Scenes.Game.Notes.Behaviours;
@@ -191,6 +192,69 @@ namespace MajdataPlay.Tests.Game.Notes.PlayMode
             yield return null;
 
             Assert.Throws<ObjectDisposedException>(() => _ = table.JudgeQueue);
+        }
+
+        /// <summary>
+        /// Checks the state captured for the slide inspector while the slide is played: the generated table, the passed
+        /// areas, the pressed sensors of the current area, the hidden arrows and the judgment.
+        /// </summary>
+        /// <returns>The test coroutine.</returns>
+        [UnityTest]
+        public IEnumerator CaptureDebugInfo_TracksPassedAreasAndPressedSensors()
+        {
+            var slide = CreateSlide(ThreeAreas(), SlideOkType.StraightL, conditionalLastArrow: false);
+            _rig.RegisterSlides((slide, 0.3f));
+            yield return null;
+
+            var before = slide.CaptureDebugInfo();
+            Assert.That(before.TableName, Is.Empty, "A generated table has no name");
+            Assert.That(before.TableConst, Is.EqualTo(SlideConst));
+            Assert.That(before.Queues, Has.Length.EqualTo(1));
+            Assert.That(before.Queues[0].Name, Is.EqualTo("Judge queue"));
+            Assert.That(before.Queues[0].Areas, Has.Length.EqualTo(3));
+            Assert.That(before.Queues[0].PassedCount, Is.EqualTo(0));
+            Assert.That(before.Queues[0].Areas[1].Sensors, Is.EqualTo(new[] { SensorArea.A2, SensorArea.B2 }));
+            Assert.That(before.Queues[0].Areas[1].ArrowProgressWhenOn, Is.EqualTo(2));
+            Assert.That(before.Queues[0].Areas[1].ArrowProgressWhenFinished, Is.EqualTo(3));
+            Assert.That(before.ArrowPositions, Has.Length.EqualTo(4));
+            Assert.That(before.HiddenArrowCount, Is.EqualTo(0));
+            Assert.That(before.IsJudged, Is.False);
+
+            Press(1f, SensorArea.A1);
+            Press(1.3f, SensorArea.B2);
+            var during = slide.CaptureDebugInfo();
+            Assert.That(during.Queues[0].PassedCount, Is.EqualTo(1));
+            Assert.That(during.Queues[0].Areas[1].IsOn, Is.True);
+            Assert.That(during.Queues[0].Areas[1].SensorStatuses, Is.EqualTo(new[] { SwitchStatus.Off, SwitchStatus.On }));
+            Assert.That(during.HiddenArrowCount, Is.EqualTo(2));
+            Assert.That(during.IsCheckable, Is.True);
+
+            Press(1.6f, SensorArea.A3);
+            for (var frame = 1; frame <= 3; frame++)
+            {
+                _rig.Step(1.6f + (frame / 60f));
+            }
+            var after = slide.CaptureDebugInfo();
+            Assert.That(after.Queues[0].PassedCount, Is.EqualTo(3));
+            Assert.That(after.IsJudged, Is.True);
+            Assert.That(after.JudgeDiffMSec, Is.LessThan(0f), "Finishing before the judge timing is fast");
+        }
+
+        /// <summary>Checks that the captured state names the predefined table and its constants.</summary>
+        /// <returns>The test coroutine.</returns>
+        [UnityTest]
+        public IEnumerator CaptureDebugInfo_ReportsThePredefinedTable()
+        {
+            var table = SlideTables.FindTableBySlideCode("1K4")!;
+            var slide = CreateSlide(ThreeAreas(), SlideOkType.StraightL, conditionalLastArrow: false, predefinedTable: table);
+            yield return null;
+
+            var info = slide.CaptureDebugInfo();
+
+            Assert.That(info.TableName, Is.EqualTo("line4"));
+            Assert.That(info.TableConst, Is.EqualTo(0.19f));
+            Assert.That(info.TableClassicConst, Is.EqualTo(0.2106f));
+            Assert.That(info.Queues[0].Areas.Select(x => x.Sensors[0]), Is.EqualTo(new[] { SensorArea.A1, SensorArea.B2, SensorArea.B3, SensorArea.A4 }));
         }
 
         /// <summary>Checks the slide result shape and facing for every result type.</summary>

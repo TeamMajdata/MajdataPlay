@@ -27,6 +27,39 @@ namespace MajdataPlay.Scenes.Game.Notes.Behaviours
 
         WifiTable _wifiTable = SlideTables.GetWifiTable(1);
 
+        /// <summary>Gets a lane of the wifi table, before the player passed any of its areas.</summary>
+        /// <param name="index">The lane: 0 left, 1 centre, 2 right.</param>
+        /// <returns>The whole lane.</returns>
+        private protected override Memory<SlideArea> GetInitialJudgeQueue(int index)
+        {
+            return index switch
+            {
+                0 => _wifiTable.Left,
+                1 => _wifiTable.Center,
+                2 => _wifiTable.Right,
+                _ => base.GetInitialJudgeQueue(index)
+            };
+        }
+        /// <summary>Gets the name the slide inspector shows for a lane.</summary>
+        /// <param name="index">The lane: 0 left, 1 centre, 2 right.</param>
+        /// <returns>The lane name.</returns>
+        private protected override string GetJudgeQueueName(int index)
+        {
+            return index switch
+            {
+                0 => "Left",
+                1 => "Center",
+                2 => "Right",
+                _ => base.GetJudgeQueueName(index)
+            };
+        }
+        /// <summary>Gets the name and the judgment constant of the wifi table, which has one constant for both modes.</summary>
+        /// <returns>The table name and its constant twice.</returns>
+        private protected override (string Name, float Const, float ClassicConst) GetJudgeTableInfo()
+        {
+            return (_wifiTable.Name ?? string.Empty, _wifiTable.Const, _wifiTable.Const);
+        }
+
         protected override void Awake()
         {
             base.Awake();

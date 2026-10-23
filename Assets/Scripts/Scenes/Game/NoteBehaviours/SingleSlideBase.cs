@@ -236,6 +236,27 @@ namespace MajdataPlay.Scenes.Game.Notes.Behaviours
             }
             return result;
         }
+        /// <summary>Gets the judge queue of the table, before the player passed any of its areas.</summary>
+        /// <param name="index">The index of the queue; a single slide only uses queue 0.</param>
+        /// <returns>The whole queue of the table, or the base result before the table exists.</returns>
+        private protected override Memory<SlideArea> GetInitialJudgeQueue(int index)
+        {
+            if (index != 0 || Table is null)
+            {
+                return base.GetInitialJudgeQueue(index);
+            }
+            return Table.JudgeQueue;
+        }
+        /// <summary>Gets the name and the judgment constants of the table.</summary>
+        /// <returns>The table name, empty for a generated table, and the modern and classic constants.</returns>
+        private protected override (string Name, float Const, float ClassicConst) GetJudgeTableInfo()
+        {
+            if (Table is null)
+            {
+                return base.GetJudgeTableInfo();
+            }
+            return (Table.Name ?? string.Empty, Table.Const, Table.ClassicConst);
+        }
         protected void AutoplayUpdate()
         {
             if (!IsAutoplay || IsMine)

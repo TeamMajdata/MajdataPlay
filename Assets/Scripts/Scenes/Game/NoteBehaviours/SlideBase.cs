@@ -706,6 +706,106 @@ namespace MajdataPlay.Scenes.Game.Notes.Behaviours
                 JudgeQueues[i] = emptyQueue; 
             }
         }
+        /// <summary>
+        /// Captures the judge queues and the protected judgment state of the slide for the slide inspector.
+        /// </summary>
+        /// <returns>A new snapshot; capturing allocates, so only editor tools call this.</returns>
+        internal SlideDebugInfo CaptureDebugInfo()
+        {
+            var queues = new List<SlideDebugInfo.QueueInfo>(JudgeQueues.Length);
+            for (var i = 0; i < JudgeQueues.Length; i++)
+            {
+                var remaining = JudgeQueues[i];
+                var initial = GetInitialJudgeQueue(i);
+                if (remaining.Length > initial.Length)
+                {
+                    // 判定队列被直接替换过，只能把剩余的部分当作完整的队列
+                    initial = remaining;
+                }
+                if (initial.IsEmpty)
+                {
+                    continue;
+                }
+                // 判定队列只会从头部切掉已经通过的判定区，所以剩余部分总是完整队列的后缀
+                queues.Add(new SlideDebugInfo.QueueInfo(GetJudgeQueueName(i),
+                                                        CaptureAreas(initial.Span),
+                                                        initial.Length - remaining.Length));
+            }
+            var arrowPositions = new Vector3[SlideBarTransforms.Count];
+            for (var i = 0; i < arrowPositions.Length; i++)
+            {
+                var arrowTransform = SlideBarTransforms[i];
+                if (arrowTransform != null)
+                {
+                    arrowPositions[i] = arrowTransform.position;
+                }
+            }
+            var (tableName, tableConst, tableClassicConst) = GetJudgeTableInfo();
+
+            return new SlideDebugInfo()
+            {
+                TableName = tableName,
+                TableConst = tableConst,
+                TableClassicConst = tableClassicConst,
+                IsJudged = IsJudged,
+                JudgeResult = JudgeResult,
+                JudgeDiffMSec = JudgeDiff,
+                LastWaitTimeSec = LastWaitTimeSec,
+                IsCheckable = IsCheckable,
+                ArrowPositions = arrowPositions,
+                HiddenArrowCount = LastHiddenSlideBarIndex,
+                Queues = queues.ToArray()
+            };
+        }
+        /// <summary>Gets a judge queue as it was built, before the player passed any of its areas.</summary>
+        /// <param name="index">The index of the queue in <see cref="JudgeQueues"/>.</param>
+        /// <returns>The whole queue; the base implementation only knows the areas that are still waiting.</returns>
+        private protected virtual Memory<SlideArea> GetInitialJudgeQueue(int index)
+        {
+            return JudgeQueues[index];
+        }
+        /// <summary>Gets the name the slide inspector shows for a judge queue.</summary>
+        /// <param name="index">The index of the queue in <see cref="JudgeQueues"/>.</param>
+        /// <returns>The queue name.</returns>
+        private protected virtual string GetJudgeQueueName(int index)
+        {
+            return index == 0 ? "Judge queue" : $"Judge queue {index}";
+        }
+        /// <summary>Gets the name and the judgment constants of the judge table, for the slide inspector.</summary>
+        /// <returns>The table name, empty when unknown or generated, and the modern and classic constants.</returns>
+        private protected virtual (string Name, float Const, float ClassicConst) GetJudgeTableInfo()
+        {
+            return (string.Empty, 0f, 0f);
+        }
+        /// <summary>Captures the areas of a judge queue together with the state of their sensors in this frame.</summary>
+        /// <param name="areas">The areas of the queue as it was built.</param>
+        /// <returns>The captured areas, in judgment order.</returns>
+        private SlideDebugInfo.AreaInfo[] CaptureAreas(ReadOnlySpan<SlideArea> areas)
+        {
+            var result = new SlideDebugInfo.AreaInfo[areas.Length];
+            for (var i = 0; i < areas.Length; i++)
+            {
+                var area = areas[i];
+                var sensors = area.IncludedAreas.ToArray();
+                var statuses = NoteManager is null ? Array.Empty<SwitchStatus>() : new SwitchStatus[sensors.Length];
+                for (var j = 0; j < statuses.Length; j++)
+                {
+                    statuses[j] = NoteManager!.GetSensorStatusInThisFrame(sensors[j]);
+                }
+                result[i] = new SlideDebugInfo.AreaInfo()
+                {
+                    Sensors = sensors,
+                    SensorStatuses = statuses,
+                    Policy = area.Policy,
+                    IsSkippable = area.IsSkippable,
+                    IsOn = area.On,
+                    IsFinished = area.IsFinished,
+                    ArrowProgressWhenOn = area.ArrowProgressWhenOn,
+                    ArrowProgressWhenFinished = area.ArrowProgressWhenFinished
+                };
+            }
+            return result;
+        }
         [Il2CppSetOption(Option.NullChecks, false)]
         [Il2CppSetOption(Option.ArrayBoundsChecks, false)]
         [MethodImpl(MethodImplOptions.AggressiveInlining)]

@@ -111,6 +111,31 @@ namespace MajdataPlay.Tests.Game.Notes.PlayMode
             Assert.That(star.sharedMaterial == _rig.BreakMaterial, Is.EqualTo((bool)testCase[5]));
         }
 
+        /// <summary>Checks that the state captured for the slide inspector shows the three lanes of the wifi table.</summary>
+        /// <returns>The test coroutine.</returns>
+        [UnityTest]
+        public IEnumerator CaptureDebugInfo_ReportsTheThreeLanes()
+        {
+            var wifi = CreateWifi();
+            yield return null;
+
+            var info = wifi.CaptureDebugInfo();
+
+            Assert.That(info.TableName, Is.EqualTo("wifi"));
+            Assert.That(info.TableConst, Is.EqualTo(0.162870f));
+            Assert.That(info.TableClassicConst, Is.EqualTo(0.162870f));
+            Assert.That(info.Queues, Has.Length.EqualTo(3));
+            Assert.That(info.Queues[0].Name, Is.EqualTo("Left"));
+            Assert.That(info.Queues[1].Name, Is.EqualTo("Center"));
+            Assert.That(info.Queues[2].Name, Is.EqualTo("Right"));
+            Assert.That(info.Queues[1].Areas[3].Sensors, Is.EqualTo(new[] { SensorArea.A5, SensorArea.B5 }));
+            foreach (var lane in info.Queues)
+            {
+                Assert.That(lane.Areas, Has.Length.EqualTo(4), lane.Name);
+                Assert.That(lane.PassedCount, Is.EqualTo(0), lane.Name);
+            }
+        }
+
         /// <summary>Checks the right-hand slide result and the classic star layout.</summary>
         /// <returns>The test coroutine.</returns>
         [UnityTest]

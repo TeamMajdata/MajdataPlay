@@ -1326,6 +1326,7 @@ namespace MajdataPlay.Scenes.Game
 
             extendSlide.Metadata = slideMetadata;
             extendSlide.PredefinedTable = predefinedTable;
+            extendSlide.SlideCode = rotatedCode;
             // 判定时用 StartTiming 判断星星是否已经出发，与原来的 simai 星星一致
             extendSlide.ConnectInfo = new ConnSlideInfo()
             {

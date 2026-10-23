@@ -24,6 +24,11 @@ namespace MajdataPlay.Scenes.Game.Notes.Behaviours
         /// table from <see cref="Metadata"/>. The slide owns the table and disposes it when it is destroyed.
         /// </summary>
         public SlideTable? PredefinedTable { get; set; }
+        /// <summary>
+        /// Gets or sets the slide code the slide was parsed from, after chart rotation, for the slide inspector; empty when
+        /// the slide was built from metadata directly.
+        /// </summary>
+        public string SlideCode { get; set; } = string.Empty;
 
 
         protected override void Awake()

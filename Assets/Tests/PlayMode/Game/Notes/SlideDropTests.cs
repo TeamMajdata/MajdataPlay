@@ -217,6 +217,25 @@ namespace MajdataPlay.Tests.Game.Notes.PlayMode
             Assert.That(star.sharedMaterial == _rig.BreakMaterial, Is.EqualTo((bool)testCase[5]));
         }
 
+        /// <summary>Checks that the state captured for the slide inspector shows the prefab table and its arrows.</summary>
+        /// <returns>The test coroutine.</returns>
+        [UnityTest]
+        public IEnumerator CaptureDebugInfo_ReportsThePrefabTable()
+        {
+            var slide = CreateSlide();
+            yield return null;
+
+            var info = slide.CaptureDebugInfo();
+
+            Assert.That(info.TableName, Is.EqualTo("line3"));
+            Assert.That(info.TableConst, Is.EqualTo(Line3Const));
+            Assert.That(info.Queues, Has.Length.EqualTo(1));
+            Assert.That(info.Queues[0].Areas, Has.Length.EqualTo(3));
+            Assert.That(info.Queues[0].Areas[1].Sensors, Is.EqualTo(new[] { SensorArea.A2, SensorArea.B2 }));
+            Assert.That(info.Queues[0].Areas[1].IsSkippable, Is.False);
+            Assert.That(info.ArrowPositions, Has.Length.EqualTo(12));
+        }
+
         /// <summary>Checks that disabling slide skipping makes every judge area mandatory.</summary>
         /// <returns>The test coroutine.</returns>
         [UnityTest]
