@@ -4,8 +4,10 @@ using MajdataPlay.IO;
 using MajdataPlay.Scenes.Game.Notes;
 using MajdataPlay.Scenes.Game.Notes.Behaviours;
 using MajdataPlay.Scenes.Game.Notes.Slide;
+using MajdataPlay.Scenes.Game.Notes.Slide.Utils;
 using MajdataPlay.Scenes.Game.Parsing.Slide;
 using MajdataPlay.Scenes.Game.Utils;
+using MajdataPlay.Settings;
 using MajdataPlay.Tests;
 using MajdataPlay.Tests.Game.Notes.PlayMode.Support;
 using NUnit.Framework;
@@ -126,6 +128,71 @@ namespace MajdataPlay.Tests.Game.Notes.PlayMode
             Assert.That(queue[0].IsSkippable, Is.False);
         }
 
+        /// <summary>
+        /// Checks that a predefined table replaces the generated one: its areas, skippable flags and constant decide the
+        /// judge queue and the judge timing.
+        /// </summary>
+        /// <returns>The test coroutine.</returns>
+        [UnityTest]
+        public IEnumerator Init_UsesThePredefinedTable()
+        {
+            var table = SlideTables.FindTableBySlideCode("1K4")!;
+            var slide = CreateSlide(ThreeAreas(), SlideOkType.StraightL, conditionalLastArrow: false, predefinedTable: table);
+            yield return null;
+
+            var queue = PrivateMember.GetField<Memory<SlideArea>[]>(slide, "JudgeQueues")[0].ToArray();
+            Assert.That(queue.Length, Is.EqualTo(4));
+            Assert.That(queue[1].IncludedAreas.ToArray(), Is.EqualTo(new[] { SensorArea.B2 }));
+            Assert.That(queue[1].IsSkippable, Is.True, "line4 keeps every area skippable");
+            Assert.That(slide.QueueRemaining, Is.EqualTo(4));
+            Assert.That(slide.JudgeTimingWithOffset, Is.EqualTo(1f + (1f - 0.19f)).Within(1e-4f));
+            Assert.That(PrivateMember.GetField<float>(slide, "LastWaitTimeSec"), Is.EqualTo(0.19f).Within(1e-4f));
+        }
+
+        /// <summary>Checks that classic mode judges with the classic constant of the predefined table.</summary>
+        /// <returns>The test coroutine.</returns>
+        [UnityTest]
+        public IEnumerator Init_UsesTheClassicConstantOfThePredefinedTable()
+        {
+            _rig.Settings.Judge.Mode = JudgeModeOption.Classic;
+            var table = SlideTables.FindTableBySlideCode("1K4")!;
+            var slide = CreateSlide(ThreeAreas(), SlideOkType.StraightL, conditionalLastArrow: false, predefinedTable: table);
+            yield return null;
+
+            Assert.That(slide.JudgeTimingWithOffset, Is.EqualTo(1f + (1f - 0.2106f)).Within(1e-4f));
+        }
+
+        /// <summary>Checks that disabling slide skipping makes every judge area mandatory.</summary>
+        /// <returns>The test coroutine.</returns>
+        [UnityTest]
+        public IEnumerator Init_DisablesSkippingWhenRequested()
+        {
+            _rig.Settings.Game.SlideSkipping = false;
+            var slide = CreateSlide(ThreeAreas(), SlideOkType.StraightL, conditionalLastArrow: false);
+            yield return null;
+
+            var queue = PrivateMember.GetField<Memory<SlideArea>[]>(slide, "JudgeQueues")[0].ToArray();
+            foreach (var area in queue)
+            {
+                Assert.That(area.IsSkippable, Is.False);
+            }
+        }
+
+        /// <summary>Checks that destroying the slide disposes the predefined table it owns.</summary>
+        /// <returns>The test coroutine.</returns>
+        [UnityTest]
+        public IEnumerator OnDestroy_DisposesTheTable()
+        {
+            var table = SlideTables.FindTableBySlideCode("1K4")!;
+            var slide = CreateSlide(ThreeAreas(), SlideOkType.StraightL, conditionalLastArrow: false, predefinedTable: table);
+            yield return null;
+
+            UnityEngine.Object.Destroy(slide.gameObject);
+            yield return null;
+
+            Assert.Throws<ObjectDisposedException>(() => _ = table.JudgeQueue);
+        }
+
         /// <summary>Checks the slide result shape and facing for every result type.</summary>
         /// <param name="testCase">The result type, the expected right-hand flag and the expected shape.</param>
         /// <returns>The test coroutine.</returns>
@@ -191,8 +258,12 @@ namespace MajdataPlay.Tests.Game.Notes.PlayMode
         /// <param name="areas">The judge areas.</param>
         /// <param name="okType">The slide result type.</param>
         /// <param name="conditionalLastArrow">Whether the second to last arrow is conditional.</param>
+        /// <param name="predefinedTable">The predefined judge table, or null to generate the table from the areas.</param>
         /// <returns>The slide.</returns>
-        private ExtendSlideDrop CreateSlide(ParsingSlideArea[] areas, SlideOkType okType, bool conditionalLastArrow)
+        private ExtendSlideDrop CreateSlide(ParsingSlideArea[] areas,
+                                            SlideOkType okType,
+                                            bool conditionalLastArrow,
+                                            SlideTable? predefinedTable = null)
         {
             var slide = Spawn();
             var start = NoteHelper.GetTapPosition(1, 4.8f);
@@ -211,6 +282,7 @@ namespace MajdataPlay.Tests.Game.Notes.PlayMode
                                                      new SlidePose(0.5f, 0.5f, 30f, 1f),
                                                      okType,
                                                      SlideFlag.None);
+            slide.PredefinedTable = predefinedTable;
             slide.Timing = 0.5f;
             slide.StartTiming = 1f;
             slide.Length = 1f;

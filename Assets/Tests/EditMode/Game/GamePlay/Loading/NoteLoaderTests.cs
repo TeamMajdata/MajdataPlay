@@ -446,6 +446,10 @@ namespace MajdataPlay.Tests.Game.GamePlay.Loading
         [TestCase("1-3[8:1]-5")]
         [TestCase("1-3-5")]
         [TestCase("1-3[8:1]-5[8:1]-7")]
+        [TestCase("1-2[8:1]")]
+        [TestCase("1-3[8:1]-4[8:1]")]
+        [TestCase("1w4[8:1]")]
+        [TestCase("1w5[8:1]-3[8:1]")]
         public void CreateSlideGroup_RejectsInvalidChains(string content)
         {
             _loader.slidePrefab = CreateSlidePrefabs();
@@ -463,6 +467,9 @@ namespace MajdataPlay.Tests.Game.GamePlay.Loading
         [TestCase("1K")]
         [TestCase("xK3")]
         [TestCase("1Kx")]
+        [TestCase("9K3")]
+        [TestCase("0K3")]
+        [TestCase("1K9")]
         public void CreateExtendSlide_RejectsMalformedCodes(string content)
         {
             var note = CreateFoldedSlide(content);

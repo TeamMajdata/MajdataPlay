@@ -14,8 +14,8 @@ using NUnit.Framework;
 namespace MajdataPlay.Tests.Game.GamePlay.Loading
 {
     /// <summary>
-    /// Checks the chart-to-note helpers nested in <see cref="NoteLoader"/>: slide shape detection, rotation and mirroring,
-    /// each-note detection, random mapping and note folding.
+    /// Checks the chart-to-note helpers nested in <see cref="NoteLoader"/>: slide result facing, rotation and mirroring,
+    /// each-note detection, random mapping and note folding. Slide shapes are covered by the translator tests.
     /// </summary>
     public class NoteCreateHelperTests
     {
@@ -56,58 +56,6 @@ namespace MajdataPlay.Tests.Game.GamePlay.Loading
         public void TearDown()
         {
             _settings.Dispose();
-        }
-
-        /// <summary>Checks the prefab names detected for every slide shape, including mirrored shapes.</summary>
-        /// <param name="content">The slide text.</param>
-        /// <param name="expected">The expected prefab name; a leading minus marks a mirrored prefab.</param>
-        [TestCase("1-3", "line3")]
-        [TestCase("1-7", "line7")]
-        [TestCase("8-6", "line7")]
-        [TestCase("1>3", "circle3")]
-        [TestCase("1>1", "circle1")]
-        [TestCase("3>5", "-circle7")]
-        [TestCase("4<2", "circle7")]
-        [TestCase("1<7", "-circle3")]
-        [TestCase("1^3", "circle3")]
-        [TestCase("1^7", "-circle3")]
-        [TestCase("1v3", "v3")]
-        [TestCase("1v1", "v1")]
-        [TestCase("1pp4", "ppqq4")]
-        [TestCase("1qq4", "-ppqq6")]
-        [TestCase("1p4", "pq4")]
-        [TestCase("1q4", "-pq6")]
-        [TestCase("1s5", "s")]
-        [TestCase("1z5", "-s")]
-        [TestCase("1V75", "L5")]
-        [TestCase("1V72", "L2")]
-        [TestCase("1V35", "-L5")]
-        [TestCase("1w5", "wifi")]
-        [TestCase("1x3", "")]
-        public void DetectShapeFromText_DetectsTheSlidePrefab(string content, string expected)
-        {
-            Assert.That(PrivateMember.InvokeStatic<string>(s_helper, "DetectShapeFromText", content), Is.EqualTo(expected));
-        }
-
-        /// <summary>Checks that impossible slide shapes are rejected.</summary>
-        /// <param name="content">The invalid slide text.</param>
-        [TestCase("1-2")]
-        [TestCase("1-8")]
-        [TestCase("1^5")]
-        [TestCase("1^1")]
-        [TestCase("1v5")]
-        [TestCase("1s4")]
-        [TestCase("1z3")]
-        [TestCase("1V76")]
-        [TestCase("1V34")]
-        [TestCase("1V45")]
-        [TestCase("1w4")]
-        public void DetectShapeFromText_RejectsImpossibleShapes(string content)
-        {
-            var exception = Assert.Throws<TargetInvocationException>(() => PrivateMember.InvokeStatic(s_helper, "DetectShapeFromText", content));
-
-            Assert.That(exception!.InnerException, Is.Not.Null);
-            Assert.That(exception.InnerException!.Message, Does.Contain("エラー"));
         }
 
         /// <summary>Checks whether the slide OK must be mirrored and the end key reported for every slide family.</summary>
