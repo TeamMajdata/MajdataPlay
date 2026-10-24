@@ -1,6 +1,8 @@
 using System;
 using System.Linq;
 using System.Numerics;
+using MajdataPlay.IO;
+using MajdataPlay.Scenes.Game.Notes.Slide.Utils;
 using MajdataPlay.Scenes.Game.Parsing;
 using MajdataPlay.Scenes.Game.Parsing.Slide;
 using NUnit.Framework;
@@ -156,6 +158,70 @@ namespace MajdataPlay.Tests.Game.GamePlay.Parsing
             Assert.That(ppqq.Select(x => (x.SensorA, x.SensorB)), Is.EqualTo(new[] { (0, -1), (15, -1), (14, 16), (12, 13), (4, -1) }));
         }
 
+        /// <summary>
+        /// Checks that the slide code equivalent of every prefab slide shape produces the same judge areas,
+        /// including the sensors of OR areas, as the predefined queue of <see cref="SlideTables"/>.
+        /// </summary>
+        /// <param name="tableName">The predefined table name of the prefab shape.</param>
+        /// <param name="code">The slide code that draws the same path as the prefab, starting at key 1.</param>
+        [TestCase("circle1", "1Q9K1")]
+        [TestCase("circle2", "1Q9K2")]
+        [TestCase("circle3", "1Q9K3")]
+        [TestCase("circle4", "1Q9K4")]
+        [TestCase("circle5", "1Q9K5")]
+        [TestCase("circle6", "1Q9K6")]
+        [TestCase("circle7", "1Q9K7")]
+        [TestCase("circle8", "1Q9K8")]
+        [TestCase("line3", "1K3")]
+        [TestCase("line4", "1K4")]
+        [TestCase("line5", "1K5")]
+        [TestCase("line6", "1K6")]
+        [TestCase("line7", "1K7")]
+        [TestCase("v1", "1CK1")]
+        [TestCase("v2", "1CK2")]
+        [TestCase("v3", "1CK3")]
+        [TestCase("v4", "1CK4")]
+        [TestCase("v6", "1CK6")]
+        [TestCase("v7", "1CK7")]
+        [TestCase("v8", "1CK8")]
+        [TestCase("ppqq1", "1P3K1")]
+        [TestCase("ppqq2", "1P3K2")]
+        [TestCase("ppqq3", "1P3K3")]
+        [TestCase("ppqq4", "1P3P3K4")]
+        [TestCase("ppqq5", "1P3P3K5")]
+        [TestCase("ppqq6", "1P3K6")]
+        [TestCase("ppqq7", "1P3K7")]
+        [TestCase("ppqq8", "1P3K8")]
+        [TestCase("L2", "1A7K2")]
+        [TestCase("L3", "1A7K3")]
+        [TestCase("L4", "1A7K4")]
+        [TestCase("L5", "1A7K5")]
+        [TestCase("s", "1B7B3K5")]
+        [TestCase("pq1", "1P0K1")]
+        [TestCase("pq2", "1P0K2")]
+        [TestCase("pq3", "1P0K3")]
+        [TestCase("pq4", "1P0K4")]
+        [TestCase("pq5", "1P0K5")]
+        [TestCase("pq6", "1P0K6")]
+        [TestCase("pq7", "1P0K7")]
+        [TestCase("pq8", "1P0K8")]
+        public void BuildSlideAreas_MatchesThePredefinedTableOfEachPrefabShape(string tableName, string code)
+        {
+            using var table = SlideTables.FindTableByName(tableName);
+            Assert.That(table, Is.Not.Null, tableName);
+            var queue = table!.JudgeQueue.Span;
+            var expected = new string[queue.Length];
+            for (var i = 0; i < queue.Length; i++)
+            {
+                expected[i] = DescribeArea(queue[i].IncludedAreas.ToArray());
+            }
+
+            var areas = SlideDataBuilder.BuildSlideAreas(SlideCodeParser.Parse(code));
+            var actual = areas.Select(DescribeArea).ToArray();
+
+            Assert.That(actual, Is.EqualTo(expected), $"{tableName} = {code}");
+        }
+
         /// <summary>Checks that the push and finish lengths increase along the slide.</summary>
         /// <param name="code">A valid slide code.</param>
         [TestCase("1CK5")]
@@ -206,6 +272,26 @@ namespace MajdataPlay.Tests.Game.GamePlay.Parsing
             Assert.That(SlideDataBuilder.LastDistanceLong, Is.EqualTo(1.59).Within(1e-12));
             Assert.That(SlideDataBuilder.LastDistanceCircle, Is.EqualTo(1.75).Within(1e-12));
             Assert.That(SlideDataBuilder.HitAreaARadius, Is.EqualTo(0.8).Within(1e-12));
+        }
+
+        /// <summary>Formats the sensors of a generated judge area independently of their order.</summary>
+        /// <param name="area">The generated judge area.</param>
+        /// <returns>The sensor names in enum order, joined with <c>|</c>.</returns>
+        private static string DescribeArea(SlideAreaRawData area)
+        {
+            if (area.SensorB == -1)
+            {
+                return DescribeArea(new[] { (SensorArea)area.SensorA });
+            }
+            return DescribeArea(new[] { (SensorArea)area.SensorA, (SensorArea)area.SensorB });
+        }
+
+        /// <summary>Formats the sensors of a judge area independently of their order.</summary>
+        /// <param name="sensors">The sensors that satisfy the area.</param>
+        /// <returns>The sensor names in enum order, joined with <c>|</c>.</returns>
+        private static string DescribeArea(SensorArea[] sensors)
+        {
+            return string.Join("|", sensors.OrderBy(x => x).Select(x => x.ToString()));
         }
     }
 }

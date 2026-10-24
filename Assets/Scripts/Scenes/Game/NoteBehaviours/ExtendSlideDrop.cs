@@ -18,6 +18,17 @@ namespace MajdataPlay.Scenes.Game.Notes.Behaviours
         [field: ReadOnlyField]
         [field: SerializeField]
         public ExtendSlideMetadata? Metadata { get; set; }
+        /// <summary>
+        /// Gets or sets the judge table predefined in <see cref="Slide.Utils.SlideTables"/> for the shape of this slide,
+        /// already mirrored and rotated to its start key. When <see langword="null"/>, <see cref="Init"/> generates the
+        /// table from <see cref="Metadata"/>. The slide owns the table and disposes it when it is destroyed.
+        /// </summary>
+        public SlideTable? PredefinedTable { get; set; }
+        /// <summary>
+        /// Gets or sets the slide code the slide was parsed from, after chart rotation, for the slide inspector; empty when
+        /// the slide was built from metadata directly.
+        /// </summary>
+        public string SlideCode { get; set; } = string.Empty;
 
 
         protected override void Awake()
@@ -94,7 +105,32 @@ namespace MajdataPlay.Scenes.Game.Notes.Behaviours
             DJAutoplayRatio = SlideLength / 14;
         }
 
+        /// <summary>
+        /// Uses the predefined table, or generates one, applies the slide skipping setting and computes the judge timing.
+        /// </summary>
+        /// <param name="metadata">The parsed slide.</param>
         private void InitSlideTable(ExtendSlideMetadata metadata)
+        {
+            Table = PredefinedTable ?? BuildSlideTable(metadata);
+            JudgeQueues[0] = Table.JudgeQueue;
+            JudgeQueueLength = Table.JudgeQueue.Length;
+            if (!USERSETTING_SLIDE_SKIPPING)
+            {
+                var judgeQueue = Table.JudgeQueue.Span;
+                foreach (ref var judgeArea in judgeQueue)
+                {
+                    judgeArea.IsSkippable = false;
+                }
+            }
+
+            var percent = IsClassic ? Table.ClassicConst : Table.Const;
+            JudgeTiming = StartTiming + (Length * (1 - percent));
+            LastWaitTimeSec = Length * percent;
+        }
+        /// <summary>Generates the judge table from the judge areas found by the slide code algorithm.</summary>
+        /// <param name="metadata">The parsed slide.</param>
+        /// <returns>The generated table.</returns>
+        private static SlideTable BuildSlideTable(ExtendSlideMetadata metadata)
         {
             using var areas = new PooledList<SlideArea>();
             var parsingAreas = metadata.JudgeAreaQueue;
@@ -127,19 +163,13 @@ namespace MajdataPlay.Scenes.Game.Notes.Behaviours
             }
 
             var rentedBuffer = Pool<SlideArea>.Rent(areas.Count);
-            areas.CopyTo(rentedBuffer);            
+            areas.CopyTo(rentedBuffer);
 
-            Table = new SlideTable(rentedBuffer, areas.Count)
+            return new SlideTable(rentedBuffer, areas.Count)
             {
                 Const = metadata.SlideConst,
                 ClassicConst = metadata.SlideConst,
             };
-            JudgeQueues[0] = Table.JudgeQueue;
-            JudgeQueueLength = Table.JudgeQueue.Length;
-
-            var percent = Table.Const;
-            JudgeTiming = StartTiming + (Length * (1 - percent));
-            LastWaitTimeSec = Length * percent;
         }
         private void InitArrowAndPath(ExtendSlideMetadata metadata)
         {
@@ -154,8 +184,11 @@ namespace MajdataPlay.Scenes.Game.Notes.Behaviours
                 var rot = Quaternion.Euler(new Vector3(0, 0, arrowInfo.RotZ) + new Vector3(0f, 0f, 18f));
                 var arrowRot = Quaternion.Euler(new Vector3(0, 0, arrowInfo.RotZ));
 
-                StarPositions.Add(pos);
-                StarRotations.Add(rot);
+                if (ExtendSlideHelper.IsStarPose(i, metadata.ArrowPoses.Length, metadata.ConditionalLastArrow))
+                {
+                    StarPositions.Add(pos);
+                    StarRotations.Add(rot);
+                }
 
                 if (i == 0 || 
                     i == metadata.ArrowPoses.Length - 1 ||
@@ -215,6 +248,22 @@ namespace MajdataPlay.Scenes.Game.Notes.Behaviours
                     SlideOK.Shape = SlideOKShape.Wifi;
                     break;
             }
+        }
+
+        void OnDestroy()
+        {
+            // 这个消息会遮蔽 NoteDrop.OnDestroy，所以在这里保留它的行为
+            Active = false;
+            if (Table is not null)
+            {
+                Table.Dispose();
+            }
+            else
+            {
+                PredefinedTable?.Dispose();
+            }
+            StarPositions.Dispose();
+            StarRotations.Dispose();
         }
     }
 }

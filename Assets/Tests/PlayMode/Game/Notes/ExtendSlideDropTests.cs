@@ -1,11 +1,14 @@
 using System;
 using System.Collections;
+using System.Linq;
 using MajdataPlay.IO;
 using MajdataPlay.Scenes.Game.Notes;
 using MajdataPlay.Scenes.Game.Notes.Behaviours;
 using MajdataPlay.Scenes.Game.Notes.Slide;
+using MajdataPlay.Scenes.Game.Notes.Slide.Utils;
 using MajdataPlay.Scenes.Game.Parsing.Slide;
 using MajdataPlay.Scenes.Game.Utils;
+using MajdataPlay.Settings;
 using MajdataPlay.Tests;
 using MajdataPlay.Tests.Game.Notes.PlayMode.Support;
 using NUnit.Framework;
@@ -126,6 +129,264 @@ namespace MajdataPlay.Tests.Game.Notes.PlayMode
             Assert.That(queue[0].IsSkippable, Is.False);
         }
 
+        /// <summary>
+        /// Checks that a predefined table replaces the generated one: its areas, skippable flags and constant decide the
+        /// judge queue and the judge timing.
+        /// </summary>
+        /// <returns>The test coroutine.</returns>
+        [UnityTest]
+        public IEnumerator Init_UsesThePredefinedTable()
+        {
+            var table = SlideTables.FindTableBySlideCode("1K4")!;
+            var slide = CreateSlide(ThreeAreas(), SlideOkType.StraightL, conditionalLastArrow: false, predefinedTable: table);
+            yield return null;
+
+            var queue = PrivateMember.GetField<Memory<SlideArea>[]>(slide, "JudgeQueues")[0].ToArray();
+            Assert.That(queue.Length, Is.EqualTo(4));
+            Assert.That(queue[1].IncludedAreas.ToArray(), Is.EqualTo(new[] { SensorArea.B2 }));
+            Assert.That(queue[1].IsSkippable, Is.True, "line4 keeps every area skippable");
+            Assert.That(slide.QueueRemaining, Is.EqualTo(4));
+            Assert.That(slide.JudgeTimingWithOffset, Is.EqualTo(1f + (1f - 0.19f)).Within(1e-4f));
+            Assert.That(PrivateMember.GetField<float>(slide, "LastWaitTimeSec"), Is.EqualTo(0.19f).Within(1e-4f));
+        }
+
+        /// <summary>Checks that classic mode judges with the classic constant of the predefined table.</summary>
+        /// <returns>The test coroutine.</returns>
+        [UnityTest]
+        public IEnumerator Init_UsesTheClassicConstantOfThePredefinedTable()
+        {
+            _rig.Settings.Judge.Mode = JudgeModeOption.Classic;
+            var table = SlideTables.FindTableBySlideCode("1K4")!;
+            var slide = CreateSlide(ThreeAreas(), SlideOkType.StraightL, conditionalLastArrow: false, predefinedTable: table);
+            yield return null;
+
+            Assert.That(slide.JudgeTimingWithOffset, Is.EqualTo(1f + (1f - 0.2106f)).Within(1e-4f));
+        }
+
+        /// <summary>Checks that disabling slide skipping makes every judge area mandatory.</summary>
+        /// <returns>The test coroutine.</returns>
+        [UnityTest]
+        public IEnumerator Init_DisablesSkippingWhenRequested()
+        {
+            _rig.Settings.Game.SlideSkipping = false;
+            var slide = CreateSlide(ThreeAreas(), SlideOkType.StraightL, conditionalLastArrow: false);
+            yield return null;
+
+            var queue = PrivateMember.GetField<Memory<SlideArea>[]>(slide, "JudgeQueues")[0].ToArray();
+            foreach (var area in queue)
+            {
+                Assert.That(area.IsSkippable, Is.False);
+            }
+        }
+
+        /// <summary>Checks that destroying the slide disposes the predefined table it owns.</summary>
+        /// <returns>The test coroutine.</returns>
+        [UnityTest]
+        public IEnumerator OnDestroy_DisposesTheTable()
+        {
+            var table = SlideTables.FindTableBySlideCode("1K4")!;
+            var slide = CreateSlide(ThreeAreas(), SlideOkType.StraightL, conditionalLastArrow: false, predefinedTable: table);
+            yield return null;
+
+            UnityEngine.Object.Destroy(slide.gameObject);
+            yield return null;
+
+            Assert.Throws<ObjectDisposedException>(() => _ = table.JudgeQueue);
+        }
+
+        /// <summary>
+        /// Checks the state captured for the slide inspector while the slide is played: the generated table, the passed
+        /// areas, the pressed sensors of the current area, the hidden arrows and the judgment.
+        /// </summary>
+        /// <returns>The test coroutine.</returns>
+        [UnityTest]
+        public IEnumerator CaptureDebugInfo_TracksPassedAreasAndPressedSensors()
+        {
+            var slide = CreateSlide(ThreeAreas(), SlideOkType.StraightL, conditionalLastArrow: false);
+            _rig.RegisterSlides((slide, 0.3f));
+            yield return null;
+
+            var before = slide.CaptureDebugInfo();
+            Assert.That(before.TableName, Is.Empty, "A generated table has no name");
+            Assert.That(before.TableConst, Is.EqualTo(SlideConst));
+            Assert.That(before.Queues, Has.Length.EqualTo(1));
+            Assert.That(before.Queues[0].Name, Is.EqualTo("Judge queue"));
+            Assert.That(before.Queues[0].Areas, Has.Length.EqualTo(3));
+            Assert.That(before.Queues[0].PassedCount, Is.EqualTo(0));
+            Assert.That(before.Queues[0].Areas[1].Sensors, Is.EqualTo(new[] { SensorArea.A2, SensorArea.B2 }));
+            Assert.That(before.Queues[0].Areas[1].ArrowProgressWhenOn, Is.EqualTo(2));
+            Assert.That(before.Queues[0].Areas[1].ArrowProgressWhenFinished, Is.EqualTo(3));
+            Assert.That(before.ArrowPositions, Has.Length.EqualTo(4));
+            Assert.That(before.HiddenArrowCount, Is.EqualTo(0));
+            Assert.That(before.IsJudged, Is.False);
+
+            Press(1f, SensorArea.A1);
+            Press(1.3f, SensorArea.B2);
+            var during = slide.CaptureDebugInfo();
+            Assert.That(during.Queues[0].PassedCount, Is.EqualTo(1));
+            Assert.That(during.Queues[0].Areas[1].IsOn, Is.True);
+            Assert.That(during.Queues[0].Areas[1].SensorStatuses, Is.EqualTo(new[] { SwitchStatus.Off, SwitchStatus.On }));
+            Assert.That(during.HiddenArrowCount, Is.EqualTo(2));
+            Assert.That(during.IsCheckable, Is.True);
+
+            Press(1.6f, SensorArea.A3);
+            for (var frame = 1; frame <= 3; frame++)
+            {
+                _rig.Step(1.6f + (frame / 60f));
+            }
+            var after = slide.CaptureDebugInfo();
+            Assert.That(after.Queues[0].PassedCount, Is.EqualTo(3));
+            Assert.That(after.IsJudged, Is.True);
+            Assert.That(after.JudgeDiffMSec, Is.LessThan(0f), "Finishing before the judge timing is fast");
+            Assert.That(after.IsDJAutoEnabled, Is.False);
+            Assert.That(after.DJAutoTouchFrame, Is.EqualTo(-1));
+            Assert.That(after.DJAutoTouches, Is.Empty);
+        }
+
+        /// <summary>
+        /// Checks that the state captured for the slide inspector holds the touches of the latest DJAuto run: every touch
+        /// lies on the path no further than one frame past the DJAuto progress, and reports its radius rounded up to whole
+        /// sampling rings.
+        /// </summary>
+        /// <returns>The test coroutine.</returns>
+        [UnityTest]
+        public IEnumerator CaptureDebugInfo_RecordsTheLatestDJAutoTouches()
+        {
+            _rig.Controller.SetMods(AutoplayModeOption.DJAuto_TouchPanel_First);
+            var slide = CreateSlide(ThreeAreas(), SlideOkType.StraightL, conditionalLastArrow: false);
+            _rig.RegisterSlides((slide, 0.3f));
+            yield return null;
+
+            var before = slide.CaptureDebugInfo();
+            Assert.That(before.IsDJAutoEnabled, Is.True);
+            Assert.That(before.AutoplayMode, Is.EqualTo(AutoplayModeOption.DJAuto_TouchPanel_First));
+            Assert.That(before.DJAutoTouchFrame, Is.EqualTo(-1), "DJAuto does not run before the star starts");
+            Assert.That(before.DJAutoTouches, Is.Empty);
+
+            for (var frame = 0; frame <= 30; frame++)
+            {
+                _rig.Step(1f + (frame / 60f));
+            }
+            var info = slide.CaptureDebugInfo();
+
+            Assert.That(info.DJAutoTouchFrame, Is.EqualTo(Time.frameCount));
+            Assert.That(info.DJAutoplayProgress, Is.EqualTo(0.5f).Within(0.01f));
+            Assert.That(info.DJAutoTouches, Is.Not.Empty);
+            var start = NoteHelper.GetTapPosition(1, 4.8f);
+            var end = NoteHelper.GetTapPosition(3, 4.8f);
+            var path = end - start;
+            foreach (var touch in info.DJAutoTouches)
+            {
+                Assert.That(touch.Radius, Is.EqualTo(0.3f));
+                Assert.That(touch.SampledRadius, Is.EqualTo(0.375f).Within(1e-6f), "0.3 rounds up to three rings of 0.125");
+                var offset = touch.Position - start;
+                var along = Vector3.Dot(offset, path) / path.sqrMagnitude;
+                // DJAuto 在进度越过当前进度后还会再按一次，然后才把进度截断，所以最后一个触摸最多超前一帧的进度
+                Assert.That(along, Is.InRange(0f, info.DJAutoplayProgress + (1f / 60f)));
+                Assert.That(Vector3.Distance(touch.Position, start + (path * along)), Is.LessThan(1e-4f), "The touch lies on the path");
+            }
+        }
+
+        /// <summary>
+        /// Checks that DJAuto keeps moving after a long frame leaves it far behind the star: it moves at most 0.2 of the
+        /// path in that frame and catches up over the next frames, instead of stopping for the rest of the slide.
+        /// </summary>
+        /// <returns>The test coroutine.</returns>
+        [UnityTest]
+        public IEnumerator DJAutoplay_CatchesUpAfterALongFrame()
+        {
+            _rig.Controller.SetMods(AutoplayModeOption.DJAuto_TouchPanel_First);
+            var slide = CreateSlide(ThreeAreas(), SlideOkType.StraightL, conditionalLastArrow: false);
+            _rig.RegisterSlides((slide, 0.3f));
+            yield return null;
+
+            // 前两帧让滑条进入 Running，第三帧 DJAuto 才开始按
+            for (var frame = 0; frame <= 2; frame++)
+            {
+                _rig.Step(1f + (frame / 60f));
+            }
+            var beforeLongFrame = slide.CaptureDebugInfo().DJAutoplayProgress;
+            Assume.That(beforeLongFrame, Is.GreaterThan(0f), "DJAuto has started");
+
+            // 4 个箭头的滑条 DJAutoplayRatio 为 5/14，0.77 的差距使单步超过每帧 0.2 的上限
+            _rig.Step(1.8f);
+            Assert.That(slide.CaptureDebugInfo().DJAutoplayProgress, Is.EqualTo(beforeLongFrame + 0.2f).Within(1e-4f));
+
+            for (var frame = 1; frame <= 5; frame++)
+            {
+                _rig.Step(1.8f + (frame / 60f));
+            }
+            Assert.That(slide.CaptureDebugInfo().DJAutoplayProgress, Is.EqualTo(0.8f + (5f / 60f)).Within(1e-4f), "DJAuto has caught up with the star");
+        }
+
+        /// <summary>
+        /// Checks that the state captured for the slide inspector marks where the star is at the judge timing: the share
+        /// of the path the slide constant leaves before the end, where the star movement places the star in that frame.
+        /// </summary>
+        /// <returns>The test coroutine.</returns>
+        [UnityTest]
+        public IEnumerator CaptureDebugInfo_MarksTheStarAtTheJudgeTiming()
+        {
+            var slide = CreateSlide(ThreeAreas(), SlideOkType.StraightL, conditionalLastArrow: false);
+            _rig.RegisterSlides((slide, 0.3f));
+            yield return null;
+
+            var info = slide.CaptureDebugInfo();
+
+            Assert.That(info.HasJudgeTiming, Is.True);
+            Assert.That(info.JudgeFrameProgress, Is.EqualTo(1f - SlideConst).Within(1e-5f));
+            Assert.That(info.JudgeFrameStarPositions, Has.Length.EqualTo(1));
+            var start = NoteHelper.GetTapPosition(1, 4.8f);
+            var end = NoteHelper.GetTapPosition(3, 4.8f);
+            var expected = Vector3.Lerp(start, end, 1f - SlideConst);
+            Assert.That(Vector2.Distance(info.JudgeFrameStarPositions[0], expected), Is.LessThan(1e-4f));
+
+            _rig.Step(0.6f);
+            _rig.Step(1.1f);
+            _rig.Step(1f + (1f - SlideConst));
+            var star = PrivateMember.GetField<Memory<Transform?>>(slide, "StarTransforms").Span[0];
+            Assert.That(star, Is.Not.Null);
+            Assert.That(Vector2.Distance(star!.position, info.JudgeFrameStarPositions[0]), Is.LessThan(1e-4f), "The star is there at the judge timing");
+        }
+
+        /// <summary>
+        /// Checks that the star skips the conditional last arrow, like the star of a prefab slide, so that the judge frame
+        /// of a predefined table lands where it does on the prefab slide.
+        /// </summary>
+        /// <returns>The test coroutine.</returns>
+        [UnityTest]
+        public IEnumerator CaptureDebugInfo_StarSkipsTheConditionalLastArrow()
+        {
+            var slide = CreateSlide(ThreeAreas(), SlideOkType.StraightL, conditionalLastArrow: true);
+            _rig.RegisterSlides((slide, 0.3f));
+            yield return null;
+
+            var info = slide.CaptureDebugInfo();
+
+            // 6 个等距 pose 去掉倒数第二个后剩 5 个星星点：0.8 的进度落在 pose 3 与 pose 5 之间的 20% 处
+            var start = NoteHelper.GetTapPosition(1, 4.8f);
+            var end = NoteHelper.GetTapPosition(3, 4.8f);
+            var expected = Vector3.Lerp(start, end, (3f + (0.2f * 2f)) / 5f);
+            Assert.That(Vector2.Distance(info.JudgeFrameStarPositions[0], expected), Is.LessThan(1e-4f));
+        }
+
+        /// <summary>Checks that the captured state names the predefined table and its constants.</summary>
+        /// <returns>The test coroutine.</returns>
+        [UnityTest]
+        public IEnumerator CaptureDebugInfo_ReportsThePredefinedTable()
+        {
+            var table = SlideTables.FindTableBySlideCode("1K4")!;
+            var slide = CreateSlide(ThreeAreas(), SlideOkType.StraightL, conditionalLastArrow: false, predefinedTable: table);
+            yield return null;
+
+            var info = slide.CaptureDebugInfo();
+
+            Assert.That(info.TableName, Is.EqualTo("line4"));
+            Assert.That(info.TableConst, Is.EqualTo(0.19f));
+            Assert.That(info.TableClassicConst, Is.EqualTo(0.2106f));
+            Assert.That(info.Queues[0].Areas.Select(x => x.Sensors[0]), Is.EqualTo(new[] { SensorArea.A1, SensorArea.B2, SensorArea.B3, SensorArea.A4 }));
+        }
+
         /// <summary>Checks the slide result shape and facing for every result type.</summary>
         /// <param name="testCase">The result type, the expected right-hand flag and the expected shape.</param>
         /// <returns>The test coroutine.</returns>
@@ -191,8 +452,12 @@ namespace MajdataPlay.Tests.Game.Notes.PlayMode
         /// <param name="areas">The judge areas.</param>
         /// <param name="okType">The slide result type.</param>
         /// <param name="conditionalLastArrow">Whether the second to last arrow is conditional.</param>
+        /// <param name="predefinedTable">The predefined judge table, or null to generate the table from the areas.</param>
         /// <returns>The slide.</returns>
-        private ExtendSlideDrop CreateSlide(ParsingSlideArea[] areas, SlideOkType okType, bool conditionalLastArrow)
+        private ExtendSlideDrop CreateSlide(ParsingSlideArea[] areas,
+                                            SlideOkType okType,
+                                            bool conditionalLastArrow,
+                                            SlideTable? predefinedTable = null)
         {
             var slide = Spawn();
             var start = NoteHelper.GetTapPosition(1, 4.8f);
@@ -211,6 +476,7 @@ namespace MajdataPlay.Tests.Game.Notes.PlayMode
                                                      new SlidePose(0.5f, 0.5f, 30f, 1f),
                                                      okType,
                                                      SlideFlag.None);
+            slide.PredefinedTable = predefinedTable;
             slide.Timing = 0.5f;
             slide.StartTiming = 1f;
             slide.Length = 1f;

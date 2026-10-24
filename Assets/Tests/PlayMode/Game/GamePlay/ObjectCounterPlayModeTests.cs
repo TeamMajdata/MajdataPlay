@@ -505,6 +505,30 @@ namespace MajdataPlay.Tests.Game.GamePlay.PlayMode
             Assert.That(rig.GaugeScales[0].color.a, Is.EqualTo(0f).Within(1e-4f));
         });
 
+        /// <summary>
+        /// Checks that the captured state reports the average that places the gauge cursor, and that judging notes of a
+        /// counted chart keeps the counters consistent.
+        /// </summary>
+        /// <returns>The test coroutine.</returns>
+        [UnityTest]
+        public IEnumerator CaptureDebugInfo_ReportsTheGaugeAverageOfTheCursor() => UniTask.ToCoroutine(async () =>
+        {
+            _settings.Settings.Game.EnableJudgeTimingGauge = true;
+            var rig = await CreateCountedCounterAsync();
+
+            Report(_tap, JudgeGrade.FastGreat, 30f);
+            Report(_hold, JudgeGrade.LateGreat, -300f);
+            _counter.OnLateUpdate();
+            var info = _counter.CaptureDebugInfo();
+
+            Assert.That(info.IsJudgeTimingGaugeEnabled, Is.True);
+            Assert.That(info.JudgeTimingGaugeScaleCount, Is.EqualTo(2));
+            Assert.That(info.JudgeTimingGaugeAverageMSec, Is.EqualTo(-60f).Within(1e-3f), "The gauge clamps -300 ms to -150 ms");
+            Assert.That(rig.Cursor.anchoredPosition.x, Is.EqualTo(282.5f * (info.JudgeTimingGaugeAverageMSec / 150f)).Within(1e-3f));
+            Assert.That(info.NoteJudgeDiffsMSec, Is.EqualTo(new[] { 30f, -300f }));
+            Assert.That(info.FindInconsistencies(), Is.Empty);
+        });
+
         /// <summary>Checks that the gauge cursor stays at a finite position before the first judgement.</summary>
         /// <returns>The test coroutine.</returns>
         [UnityTest]

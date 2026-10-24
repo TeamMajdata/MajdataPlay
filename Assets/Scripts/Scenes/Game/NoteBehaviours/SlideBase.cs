@@ -212,6 +212,14 @@ namespace MajdataPlay.Scenes.Game.Notes.Behaviours
 
         private SlideArea?[] _lastTriggerAreas = new SlideArea?[3];
 
+        /// <summary>
+        /// The touches DJAuto simulated in its latest run, as centre, radius and pressed sensor bits, recorded only in
+        /// the Editor for the slide inspector.
+        /// </summary>
+        private readonly List<(Vector3 Position, float Radius, ulong PressedSensors)> _djAutoTouches = new();
+        /// <summary>The frame of the latest DJAuto run in <see cref="_djAutoTouches"/>, or -1 before the first run.</summary>
+        private int _djAutoTouchFrame = -1;
+
         public abstract void Init();
         protected void MineCheck()
         {
@@ -706,6 +714,134 @@ namespace MajdataPlay.Scenes.Game.Notes.Behaviours
                 JudgeQueues[i] = emptyQueue; 
             }
         }
+        /// <summary>
+        /// Captures the judge queues and the protected judgment state of the slide for the slide inspector.
+        /// </summary>
+        /// <returns>A new snapshot; capturing allocates, so only editor tools call this.</returns>
+        internal SlideDebugInfo CaptureDebugInfo()
+        {
+            var queues = new List<SlideDebugInfo.QueueInfo>(JudgeQueues.Length);
+            for (var i = 0; i < JudgeQueues.Length; i++)
+            {
+                var remaining = JudgeQueues[i];
+                var initial = GetInitialJudgeQueue(i);
+                if (remaining.Length > initial.Length)
+                {
+                    // 判定队列被直接替换过，只能把剩余的部分当作完整的队列
+                    initial = remaining;
+                }
+                if (initial.IsEmpty)
+                {
+                    continue;
+                }
+                // 判定队列只会从头部切掉已经通过的判定区，所以剩余部分总是完整队列的后缀
+                queues.Add(new SlideDebugInfo.QueueInfo(GetJudgeQueueName(i),
+                                                        CaptureAreas(initial.Span),
+                                                        initial.Length - remaining.Length));
+            }
+            var arrowPositions = new Vector3[SlideBarTransforms.Count];
+            for (var i = 0; i < arrowPositions.Length; i++)
+            {
+                var arrowTransform = SlideBarTransforms[i];
+                if (arrowTransform != null)
+                {
+                    arrowPositions[i] = arrowTransform.position;
+                }
+            }
+            var (tableName, tableConst, tableClassicConst) = GetJudgeTableInfo();
+            // 星星的移动不含判定偏移，所以用不含偏移的判定时机求正解帧时星星的位置
+            var hasJudgeTiming = !ConnectInfo.IsConnSlide || ConnectInfo.IsGroupPartEnd;
+            var judgeFrameProgress = Length <= 0f ? 1f : Mathf.Clamp01((JudgeTiming - StartTiming) / Length);
+
+            return new SlideDebugInfo()
+            {
+                TableName = tableName,
+                TableConst = tableConst,
+                TableClassicConst = tableClassicConst,
+                IsJudged = IsJudged,
+                JudgeResult = JudgeResult,
+                JudgeDiffMSec = JudgeDiff,
+                LastWaitTimeSec = LastWaitTimeSec,
+                HasJudgeTiming = hasJudgeTiming,
+                JudgeFrameProgress = judgeFrameProgress,
+                JudgeFrameStarPositions = hasJudgeTiming ? CaptureStarPositionsAt(judgeFrameProgress) : Array.Empty<Vector3>(),
+                IsCheckable = IsCheckable,
+                ArrowPositions = arrowPositions,
+                HiddenArrowCount = LastHiddenSlideBarIndex,
+                Queues = queues.ToArray(),
+                AutoplayMode = AutoplayMode,
+                IsDJAutoEnabled = AutoplayMode is AutoplayModeOption.DJAuto_TouchPanel_First or AutoplayModeOption.DJAuto_ButtonRing_First,
+                DJAutoplayProgress = DJAutoplayProgress,
+                DJAutoTouchFrame = _djAutoTouchFrame,
+                DJAutoTouches = CaptureDJAutoTouches()
+            };
+        }
+        /// <summary>Gets a judge queue as it was built, before the player passed any of its areas.</summary>
+        /// <param name="index">The index of the queue in <see cref="JudgeQueues"/>.</param>
+        /// <returns>The whole queue; the base implementation only knows the areas that are still waiting.</returns>
+        private protected virtual Memory<SlideArea> GetInitialJudgeQueue(int index)
+        {
+            return JudgeQueues[index];
+        }
+        /// <summary>Gets the name the slide inspector shows for a judge queue.</summary>
+        /// <param name="index">The index of the queue in <see cref="JudgeQueues"/>.</param>
+        /// <returns>The queue name.</returns>
+        private protected virtual string GetJudgeQueueName(int index)
+        {
+            return index == 0 ? "Judge queue" : $"Judge queue {index}";
+        }
+        /// <summary>Gets the name and the judgment constants of the judge table, for the slide inspector.</summary>
+        /// <returns>The table name, empty when unknown or generated, and the modern and classic constants.</returns>
+        private protected virtual (string Name, float Const, float ClassicConst) GetJudgeTableInfo()
+        {
+            return (string.Empty, 0f, 0f);
+        }
+        /// <summary>
+        /// Gets where the stars are once they have moved a share of the path, so that the slide inspector can preview
+        /// the judge frame of another slide constant.
+        /// </summary>
+        /// <param name="progress">How far along the path; values outside 0 to 1 are clamped.</param>
+        /// <returns>The world position of each star, or an empty array before the path is built.</returns>
+        internal Vector3[] CaptureStarPositionsAt(float progress)
+        {
+            return GetStarPositionsAt(Mathf.Clamp01(progress));
+        }
+        /// <summary>Gets where the stars are once they have moved a share of the path, for the slide inspector.</summary>
+        /// <param name="progress">How far along the path, from 0 to 1.</param>
+        /// <returns>The world position of each star; the base implementation knows no path and returns an empty array.</returns>
+        private protected virtual Vector3[] GetStarPositionsAt(float progress)
+        {
+            return Array.Empty<Vector3>();
+        }
+        /// <summary>Captures the areas of a judge queue together with the state of their sensors in this frame.</summary>
+        /// <param name="areas">The areas of the queue as it was built.</param>
+        /// <returns>The captured areas, in judgment order.</returns>
+        private SlideDebugInfo.AreaInfo[] CaptureAreas(ReadOnlySpan<SlideArea> areas)
+        {
+            var result = new SlideDebugInfo.AreaInfo[areas.Length];
+            for (var i = 0; i < areas.Length; i++)
+            {
+                var area = areas[i];
+                var sensors = area.IncludedAreas.ToArray();
+                var statuses = NoteManager is null ? Array.Empty<SwitchStatus>() : new SwitchStatus[sensors.Length];
+                for (var j = 0; j < statuses.Length; j++)
+                {
+                    statuses[j] = NoteManager!.GetSensorStatusInThisFrame(sensors[j]);
+                }
+                result[i] = new SlideDebugInfo.AreaInfo()
+                {
+                    Sensors = sensors,
+                    SensorStatuses = statuses,
+                    Policy = area.Policy,
+                    IsSkippable = area.IsSkippable,
+                    IsOn = area.On,
+                    IsFinished = area.IsFinished,
+                    ArrowProgressWhenOn = area.ArrowProgressWhenOn,
+                    ArrowProgressWhenFinished = area.ArrowProgressWhenFinished
+                };
+            }
+            return result;
+        }
         [Il2CppSetOption(Option.NullChecks, false)]
         [Il2CppSetOption(Option.ArrayBoundsChecks, false)]
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -770,10 +906,18 @@ namespace MajdataPlay.Scenes.Game.Notes.Behaviours
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         protected void SlideDJAutoSimulateSensorPress(Vector3 cubeRay, float rad)
         {
+            var positionSamples = InputManager.TouchPanelPositionSamples;
+            if (positionSamples.IsEmpty)
+            {
+                // 触摸位置采样表尚未生成，没有可以读取的传感器
+                RecordDJAutoTouch(cubeRay, rad, 0UL);
+                return;
+            }
             var p = 0UL;
+            var pressedSensors = 0UL;
             unsafe
             {
-                fixed (ulong* samplePtr = &InputManager.TouchPanelPositionSamples.GetPinnableReference())
+                fixed (ulong* samplePtr = &positionSamples.GetPinnableReference())
                 fixed (Vector4* circleSamplesPtr = &InputManager.UnitCircle.GetPinnableReference())
                 {
                     MobileTouchPanelHelper.PositionHandle(cubeRay,
@@ -794,20 +938,71 @@ namespace MajdataPlay.Scenes.Game.Notes.Behaviours
                     if ((p & (1UL << (i + 12))) != 0)
                     {
                         NoteManager.SimulateSensorPress((SensorArea)i);
+                        pressedSensors |= 1UL << i;
                     }
                 }
                 if ((p & (0b11 << (16 + 12))) != 0)
                 {
                     NoteManager.SimulateSensorPress(SensorArea.C);
+                    pressedSensors |= 1UL << (int)SensorArea.C;
                 }
                 for (var i = 18; i < 34; i++)
                 {
                     if ((p & (1UL << (i + 12))) != 0)
                     {
                         NoteManager.SimulateSensorPress((SensorArea)(i - 1));
+                        pressedSensors |= 1UL << (i - 1);
                     }
                 }
             }
+            RecordDJAutoTouch(cubeRay, rad, pressedSensors);
+        }
+        /// <summary>
+        /// Starts a new DJAuto run in the touch record of the slide inspector, dropping the touches of the previous run.
+        /// Only the Editor records touches.
+        /// </summary>
+        [System.Diagnostics.Conditional("UNITY_EDITOR")]
+        private protected void BeginDJAutoTouchRecord()
+        {
+            _djAutoTouches.Clear();
+            _djAutoTouchFrame = Time.frameCount;
+        }
+        /// <summary>Adds a touch simulated by DJAuto to the touch record of the slide inspector. Only the Editor records touches.</summary>
+        /// <param name="position">The world position of the touch centre.</param>
+        /// <param name="radius">The touch radius passed to the touch panel sampling.</param>
+        /// <param name="pressedSensors">The pressed sensors, one bit for each <see cref="SensorArea"/> value.</param>
+        [System.Diagnostics.Conditional("UNITY_EDITOR")]
+        private void RecordDJAutoTouch(Vector3 position, float radius, ulong pressedSensors)
+        {
+            _djAutoTouches.Add((position, radius, pressedSensors));
+        }
+        /// <summary>Captures the touches DJAuto simulated in its latest run.</summary>
+        /// <returns>The touches in the order DJAuto pressed them.</returns>
+        private SlideDebugInfo.DJAutoTouchInfo[] CaptureDJAutoTouches()
+        {
+            var result = new SlideDebugInfo.DJAutoTouchInfo[_djAutoTouches.Count];
+            for (var i = 0; i < result.Length; i++)
+            {
+                var (position, radius, pressedSensors) = _djAutoTouches[i];
+                var sensors = new List<SensorArea>();
+                for (var sensor = SensorArea.A1; sensor <= SensorArea.E8; sensor++)
+                {
+                    if ((pressedSensors & (1UL << (int)sensor)) != 0)
+                    {
+                        sensors.Add(sensor);
+                    }
+                }
+                // 采样按 FINGER_RADIUS_SEGMENT_LENGTH 的整数倍向外取圆环，最外圈会超出给定半径
+                var ringCount = Mathf.Ceil(radius / InputManager.FINGER_RADIUS_SEGMENT_LENGTH);
+                result[i] = new SlideDebugInfo.DJAutoTouchInfo()
+                {
+                    Position = position,
+                    Radius = radius,
+                    SampledRadius = ringCount * InputManager.FINGER_RADIUS_SEGMENT_LENGTH,
+                    Sensors = sensors.ToArray()
+                };
+            }
+            return result;
         }
         protected void JudgeGradeCorrection(ref JudgeGrade result)
         {

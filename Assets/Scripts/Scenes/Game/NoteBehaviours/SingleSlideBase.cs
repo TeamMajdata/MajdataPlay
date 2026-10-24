@@ -236,6 +236,38 @@ namespace MajdataPlay.Scenes.Game.Notes.Behaviours
             }
             return result;
         }
+        /// <summary>Gets the judge queue of the table, before the player passed any of its areas.</summary>
+        /// <param name="index">The index of the queue; a single slide only uses queue 0.</param>
+        /// <returns>The whole queue of the table, or the base result before the table exists.</returns>
+        private protected override Memory<SlideArea> GetInitialJudgeQueue(int index)
+        {
+            if (index != 0 || Table is null)
+            {
+                return base.GetInitialJudgeQueue(index);
+            }
+            return Table.JudgeQueue;
+        }
+        /// <summary>Gets where the star is once it has moved a share of the path, as the star movement places it.</summary>
+        /// <param name="progress">How far along the path, from 0 to 1.</param>
+        /// <returns>The star position, or an empty array before the path is built.</returns>
+        private protected override Vector3[] GetStarPositionsAt(float progress)
+        {
+            if (StarPositions.Count < 2)
+            {
+                return base.GetStarPositionsAt(progress);
+            }
+            return new[] { GetPositionFromProgress(progress) };
+        }
+        /// <summary>Gets the name and the judgment constants of the table.</summary>
+        /// <returns>The table name, empty for a generated table, and the modern and classic constants.</returns>
+        private protected override (string Name, float Const, float ClassicConst) GetJudgeTableInfo()
+        {
+            if (Table is null)
+            {
+                return base.GetJudgeTableInfo();
+            }
+            return (Table.Name ?? string.Empty, Table.Const, Table.ClassicConst);
+        }
         protected void AutoplayUpdate()
         {
             if (!IsAutoplay || IsMine)
@@ -319,20 +351,23 @@ namespace MajdataPlay.Scenes.Game.Notes.Behaviours
         protected virtual void DJAutoplay()
         {
             const float DJAUTO_SIMULATE_RAD = 0.3f;
+            const float DJAUTO_MAX_PROGRESS_PER_FRAME = 0.2f;
+            BeginDJAutoTouchRecord();
             if (IsFinished)
             {
                 return;
             }
             var currentProgress = ((Length - GetRemainingTimeWithoutOffset()) / Length).Clamp(0, 1);
-            var step = (currentProgress - DJAutoplayProgress) / (8 * DJAutoplayRatio);
+            // 单步超过每帧上限时一步也走不了，之后差距只会越来越大，所以单步不能超过上限
+            var step = Mathf.Min((currentProgress - DJAutoplayProgress) / (8 * DJAutoplayRatio), DJAUTO_MAX_PROGRESS_PER_FRAME);
             var delta = 0f;
             for (; ; )
             {
                 var cubeRay = GetPositionFromProgress(DJAutoplayProgress);
                 SlideDJAutoSimulateSensorPress(cubeRay, DJAUTO_SIMULATE_RAD);
 
-                if (delta > 0.2f ||
-                   delta + step > 0.2f ||
+                if (delta > DJAUTO_MAX_PROGRESS_PER_FRAME ||
+                   delta + step > DJAUTO_MAX_PROGRESS_PER_FRAME ||
                    DJAutoplayProgress >= currentProgress)
                 {
                     break;

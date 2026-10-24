@@ -9,7 +9,10 @@ namespace MajdataPlay.Scenes.Game.Parsing.Slide
 {
     internal readonly struct ExtendSlideMetadata
     {
-        /// <summary>slide 最后一个区占全长的比例，0~1 间的小数</summary>
+        /// <summary>
+        /// The share of the guide star movement left after the judge frame, from 0 to 1. The star passes its poses at a
+        /// constant rate, so this is a share of the star poses, not of the path length.
+        /// </summary>
         public readonly float SlideConst;
         /// <summary>slide 路径全长，单位取决于<c>MajGeo.MainRadius</c></summary>
         public readonly float SlideLength;
@@ -24,7 +27,7 @@ namespace MajdataPlay.Scenes.Game.Parsing.Slide
         /// <para>slide 每个箭头的位置与方向</para>
         /// <para>注意数组中包含了路径起点和终点，真正应该显示的箭头需要去掉这两项
         /// （对<c>ConditionalLastArrow = true</c>的情况还要视情况去掉倒数第二项）</para>
-        /// <para>普通 slide 可以直接拿这个数组来更新引导星星，Wifi 就别用这个了</para>
+        /// <para>普通 slide 用这个数组更新引导星星时，要用<c>ExtendSlideHelper.IsStarPose</c>跳过条件显示的最后一个箭头，Wifi 就别用这个了</para>
         /// </summary>
         public readonly SlidePose[] ArrowPoses;
 

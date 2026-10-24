@@ -111,6 +111,120 @@ namespace MajdataPlay.Tests.Game.Notes.PlayMode
             Assert.That(star.sharedMaterial == _rig.BreakMaterial, Is.EqualTo((bool)testCase[5]));
         }
 
+        /// <summary>Checks that the state captured for the slide inspector shows the three lanes of the wifi table.</summary>
+        /// <returns>The test coroutine.</returns>
+        [UnityTest]
+        public IEnumerator CaptureDebugInfo_ReportsTheThreeLanes()
+        {
+            var wifi = CreateWifi();
+            yield return null;
+
+            var info = wifi.CaptureDebugInfo();
+
+            Assert.That(info.TableName, Is.EqualTo("wifi"));
+            Assert.That(info.TableConst, Is.EqualTo(0.162870f));
+            Assert.That(info.TableClassicConst, Is.EqualTo(0.162870f));
+            Assert.That(info.Queues, Has.Length.EqualTo(3));
+            Assert.That(info.Queues[0].Name, Is.EqualTo("Left"));
+            Assert.That(info.Queues[1].Name, Is.EqualTo("Center"));
+            Assert.That(info.Queues[2].Name, Is.EqualTo("Right"));
+            Assert.That(info.Queues[1].Areas[3].Sensors, Is.EqualTo(new[] { SensorArea.A5, SensorArea.B5 }));
+            foreach (var lane in info.Queues)
+            {
+                Assert.That(lane.Areas, Has.Length.EqualTo(4), lane.Name);
+                Assert.That(lane.PassedCount, Is.EqualTo(0), lane.Name);
+            }
+        }
+
+        /// <summary>
+        /// Checks that the state captured for the slide inspector holds the touches of the latest DJAuto run: one narrow
+        /// touch for each side lane and a wide one for the centre lane at every step, the last ones at the DJAuto progress.
+        /// </summary>
+        /// <returns>The test coroutine.</returns>
+        [UnityTest]
+        public IEnumerator CaptureDebugInfo_RecordsTheLatestDJAutoTouches()
+        {
+            _rig.Controller.SetMods(AutoplayModeOption.DJAuto_ButtonRing_First);
+            var wifi = CreateWifi();
+            _rig.RegisterSlides((wifi, 0.3f));
+            yield return null;
+
+            for (var frame = 0; frame <= 30; frame++)
+            {
+                _rig.Step(1f + (frame / 60f));
+            }
+            var info = wifi.CaptureDebugInfo();
+
+            Assert.That(info.IsDJAutoEnabled, Is.True);
+            Assert.That(info.DJAutoTouchFrame, Is.EqualTo(Time.frameCount));
+            Assert.That(info.DJAutoplayProgress, Is.EqualTo(0.5f).Within(0.01f));
+            var touches = info.DJAutoTouches;
+            Assert.That(touches, Is.Not.Empty);
+            Assert.That(touches.Length % 3, Is.EqualTo(0), "Every step touches the three lanes");
+            for (var i = 0; i < touches.Length; i++)
+            {
+                var isCenter = i % 3 == 1;
+                Assert.That(touches[i].Radius, Is.EqualTo(isCenter ? 0.8f : 0.15f), $"Touch {i}");
+                Assert.That(touches[i].SampledRadius, Is.EqualTo(isCenter ? 0.875f : 0.25f).Within(1e-6f), $"Touch {i}");
+            }
+            var start = NoteHelper.GetTapPosition(wifi.StartPos, 4.8f);
+            var centerEnd = NoteHelper.GetTapPosition(wifi.EndPos, 4.8f);
+            var lastCenter = touches[touches.Length - 2].Position;
+            Assert.That(Vector3.Distance(lastCenter, Vector3.Lerp(start, centerEnd, info.DJAutoplayProgress)), Is.LessThan(0.1f));
+        }
+
+        /// <summary>
+        /// Checks that the state captured for the slide inspector marks where the three stars are at the judge timing, where
+        /// the star movement places them in that frame.
+        /// </summary>
+        /// <returns>The test coroutine.</returns>
+        [UnityTest]
+        public IEnumerator CaptureDebugInfo_MarksTheStarsAtTheJudgeTiming()
+        {
+            var wifi = CreateWifi();
+            _rig.RegisterSlides((wifi, 0.3f));
+            yield return null;
+
+            var info = wifi.CaptureDebugInfo();
+
+            Assert.That(info.HasJudgeTiming, Is.True);
+            Assert.That(info.JudgeFrameProgress, Is.EqualTo(1f - 0.162870f).Within(1e-5f));
+            Assert.That(info.JudgeFrameStarPositions, Has.Length.EqualTo(3));
+            var start = NoteHelper.GetTapPosition(wifi.StartPos, 4.8f);
+            var centerEnd = NoteHelper.GetTapPosition(wifi.EndPos, 4.8f);
+            var expectedCenter = Vector3.Lerp(start, centerEnd, info.JudgeFrameProgress);
+            Assert.That(Vector2.Distance(info.JudgeFrameStarPositions[1], expectedCenter), Is.LessThan(1e-4f), "The centre star");
+
+            _rig.Step(0.6f);
+            _rig.Step(1.1f);
+            _rig.Step(1f + (1f - 0.162870f));
+            var stars = PrivateMember.GetField<System.Memory<Transform?>>(wifi, "StarTransforms").Span;
+            for (var i = 0; i < 3; i++)
+            {
+                Assert.That(stars[i], Is.Not.Null, $"Star {i}");
+                Assert.That(Vector2.Distance(stars[i]!.position, info.JudgeFrameStarPositions[i]), Is.LessThan(1e-4f), $"Star {i} is there at the judge timing");
+            }
+        }
+
+        /// <summary>Checks that the ordinary autoplay, which passes the judge areas without touching, records no DJAuto touches.</summary>
+        /// <returns>The test coroutine.</returns>
+        [UnityTest]
+        public IEnumerator CaptureDebugInfo_AutoplayRecordsNoDJAutoTouches()
+        {
+            _rig.Controller.SetMods(AutoplayModeOption.Enable);
+            var wifi = CreateWifi();
+            _rig.RegisterSlides((wifi, 0.3f));
+            yield return null;
+
+            _rig.Step(1f);
+            _rig.Step(1.2f);
+            var info = wifi.CaptureDebugInfo();
+
+            Assert.That(info.IsDJAutoEnabled, Is.False);
+            Assert.That(info.DJAutoTouchFrame, Is.EqualTo(-1));
+            Assert.That(info.DJAutoTouches, Is.Empty);
+        }
+
         /// <summary>Checks the right-hand slide result and the classic star layout.</summary>
         /// <returns>The test coroutine.</returns>
         [UnityTest]

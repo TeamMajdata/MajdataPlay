@@ -27,6 +27,51 @@ namespace MajdataPlay.Scenes.Game.Notes.Behaviours
 
         WifiTable _wifiTable = SlideTables.GetWifiTable(1);
 
+        /// <summary>Gets a lane of the wifi table, before the player passed any of its areas.</summary>
+        /// <param name="index">The lane: 0 left, 1 centre, 2 right.</param>
+        /// <returns>The whole lane.</returns>
+        private protected override Memory<SlideArea> GetInitialJudgeQueue(int index)
+        {
+            return index switch
+            {
+                0 => _wifiTable.Left,
+                1 => _wifiTable.Center,
+                2 => _wifiTable.Right,
+                _ => base.GetInitialJudgeQueue(index)
+            };
+        }
+        /// <summary>Gets the name the slide inspector shows for a lane.</summary>
+        /// <param name="index">The lane: 0 left, 1 centre, 2 right.</param>
+        /// <returns>The lane name.</returns>
+        private protected override string GetJudgeQueueName(int index)
+        {
+            return index switch
+            {
+                0 => "Left",
+                1 => "Center",
+                2 => "Right",
+                _ => base.GetJudgeQueueName(index)
+            };
+        }
+        /// <summary>Gets the name and the judgment constant of the wifi table, which has one constant for both modes.</summary>
+        /// <returns>The table name and its constant twice.</returns>
+        private protected override (string Name, float Const, float ClassicConst) GetJudgeTableInfo()
+        {
+            return (_wifiTable.Name ?? string.Empty, _wifiTable.Const, _wifiTable.Const);
+        }
+        /// <summary>Gets where the three stars are once they have moved a share of their paths, as the star movement places them.</summary>
+        /// <param name="progress">How far along the paths, from 0 to 1.</param>
+        /// <returns>The positions of the right, centre and left stars.</returns>
+        private protected override Vector3[] GetStarPositionsAt(float progress)
+        {
+            var positions = new Vector3[_starEndPositions.Length];
+            for (var i = 0; i < positions.Length; i++)
+            {
+                positions[i] = Vector3.Lerp(_starStartPositions[i], _starEndPositions[i], progress);
+            }
+            return positions;
+        }
+
         protected override void Awake()
         {
             base.Awake();
@@ -492,6 +537,7 @@ namespace MajdataPlay.Scenes.Game.Notes.Behaviours
         }
         void DJAutoplay()
         {
+            BeginDJAutoTouchRecord();
             if (IsFinished)
             {
                 return;

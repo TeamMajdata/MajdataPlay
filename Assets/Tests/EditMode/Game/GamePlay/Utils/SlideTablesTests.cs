@@ -25,6 +25,20 @@ namespace MajdataPlay.Tests.Game.GamePlay.Utils
             "pq1", "pq2", "pq3", "pq4", "pq5", "pq6", "pq7", "pq8",
         };
 
+        /// <summary>The slide code of every predefined table, starting at key 1.</summary>
+        private static readonly (string Name, string SlideCode)[] s_tableShapes =
+        {
+            ("circle1", "1Q9K1"), ("circle2", "1Q9K2"), ("circle3", "1Q9K3"), ("circle4", "1Q9K4"),
+            ("circle5", "1Q9K5"), ("circle6", "1Q9K6"), ("circle7", "1Q9K7"), ("circle8", "1Q9K8"),
+            ("line3", "1K3"), ("line4", "1K4"), ("line5", "1K5"), ("line6", "1K6"), ("line7", "1K7"),
+            ("v1", "1CK1"), ("v2", "1CK2"), ("v3", "1CK3"), ("v4", "1CK4"), ("v6", "1CK6"), ("v7", "1CK7"), ("v8", "1CK8"),
+            ("ppqq1", "1P3K1"), ("ppqq2", "1P3K2"), ("ppqq3", "1P3K3"), ("ppqq4", "1P3P3K4"),
+            ("ppqq5", "1P3P3K5"), ("ppqq6", "1P3K6"), ("ppqq7", "1P3K7"), ("ppqq8", "1P3K8"),
+            ("L2", "1A7K2"), ("L3", "1A7K3"), ("L4", "1A7K4"), ("L5", "1A7K5"), ("s", "1B7B3K5"),
+            ("pq1", "1P0K1"), ("pq2", "1P0K2"), ("pq3", "1P0K3"), ("pq4", "1P0K4"),
+            ("pq5", "1P0K5"), ("pq6", "1P0K6"), ("pq7", "1P0K7"), ("pq8", "1P0K8"),
+        };
+
         /// <summary>Restores the settings changed by the wifi tests.</summary>
         private GamePlaySettingsScope _settings = null!;
 
@@ -40,6 +54,26 @@ namespace MajdataPlay.Tests.Game.GamePlay.Utils
         public void TearDown()
         {
             _settings.Dispose();
+        }
+
+        /// <summary>
+        /// Checks that the predefined shapes list every predefined table once, each with the slide code that finds that
+        /// table unrotated and unmirrored.
+        /// </summary>
+        [Test]
+        public void PredefinedShapes_ListsEveryPredefinedTableWithItsSlideCode()
+        {
+            var shapes = SlideTables.PredefinedShapes;
+
+            Assert.That(shapes, Is.EquivalentTo(s_tableShapes));
+            Assert.That(shapes.Select(x => x.Name), Is.Unique);
+            foreach (var (name, slideCode) in shapes)
+            {
+                Assert.That(SlideTables.TryMatchSlideCode(slideCode, out var tableName, out var isMirrored, out var rotation), Is.True, name);
+                Assert.That(tableName, Is.EqualTo(name));
+                Assert.That(isMirrored, Is.False, name);
+                Assert.That(rotation, Is.Zero, name);
+            }
         }
 
         /// <summary>Checks that every predefined table starts at A1, ends with a final area and has positive constants.</summary>
@@ -84,6 +118,79 @@ namespace MajdataPlay.Tests.Game.GamePlay.Utils
             Assert.That(queue[1].IsSkippable, Is.True);
             Assert.That(table.Const, Is.EqualTo(0.465f));
             Assert.That(table.ClassicConst, Is.EqualTo(0.5293f));
+        }
+
+        /// <summary>
+        /// Checks that the slide code of every predefined shape finds exactly the table found by name: the same areas,
+        /// arrow progress, skippable flags and constants.
+        /// </summary>
+        [Test]
+        public void FindTableBySlideCode_FindsEveryTableFromItsShape()
+        {
+            Assert.That(s_tableShapes.Select(x => x.Name), Is.EquivalentTo(s_tableNames));
+            foreach (var (name, slideCode) in s_tableShapes)
+            {
+                Assert.That(SlideTables.TryMatchSlideCode(slideCode, out var tableName, out var isMirrored, out var rotation), Is.True, slideCode);
+                Assert.That(tableName, Is.EqualTo(name));
+                Assert.That(isMirrored, Is.False, slideCode);
+                Assert.That(rotation, Is.EqualTo(0), slideCode);
+
+                using var byCode = SlideTables.FindTableBySlideCode(slideCode)!;
+                using var byName = SlideTables.FindTableByName(name)!;
+                var codeQueue = byCode.JudgeQueue.ToArray();
+                var nameQueue = byName.JudgeQueue.ToArray();
+                Assert.That(byCode.Name, Is.EqualTo(name));
+                Assert.That(byCode.Const, Is.EqualTo(byName.Const), name);
+                Assert.That(byCode.ClassicConst, Is.EqualTo(byName.ClassicConst), name);
+                Assert.That(codeQueue.Length, Is.EqualTo(nameQueue.Length), name);
+                for (var i = 0; i < codeQueue.Length; i++)
+                {
+                    Assert.That(codeQueue[i].IncludedAreas.ToArray(), Is.EqualTo(nameQueue[i].IncludedAreas.ToArray()), $"{name}[{i}]");
+                    Assert.That(codeQueue[i].IsSkippable, Is.EqualTo(nameQueue[i].IsSkippable), $"{name}[{i}]");
+                    Assert.That(codeQueue[i].ArrowProgressWhenOn, Is.EqualTo(nameQueue[i].ArrowProgressWhenOn), $"{name}[{i}]");
+                    Assert.That(codeQueue[i].ArrowProgressWhenFinished, Is.EqualTo(nameQueue[i].ArrowProgressWhenFinished), $"{name}[{i}]");
+                }
+            }
+        }
+
+        /// <summary>
+        /// Checks that a shape drawn from another key and in the other direction finds the table mirrored about key 1
+        /// and rotated to its start key, like the former mirrored slide prefabs.
+        /// </summary>
+        [Test]
+        public void FindTableBySlideCode_MirrorsAndRotatesTheTable()
+        {
+            Assert.That(SlideTables.TryMatchSlideCode("3P9K5", out var tableName, out var isMirrored, out var rotation), Is.True);
+            Assert.That(tableName, Is.EqualTo("circle7"));
+            Assert.That(isMirrored, Is.True);
+            Assert.That(rotation, Is.EqualTo(2));
+
+            using var table = SlideTables.FindTableBySlideCode("3P9K5")!;
+
+            Assert.That(table.Name, Is.EqualTo("circle7"));
+            Assert.That(FirstAreas(table.JudgeQueue), Is.EqualTo(new[]
+            {
+                SensorArea.A3, SensorArea.A2, SensorArea.A1, SensorArea.A8, SensorArea.A7, SensorArea.A6, SensorArea.A5
+            }));
+        }
+
+        /// <summary>Checks that slide code shorthand is expanded before the shape is matched.</summary>
+        [Test]
+        public void FindTableBySlideCode_ExpandsShorthand()
+        {
+            using var table = SlideTables.FindTableBySlideCode("1P33K4")!;
+
+            Assert.That(table.Name, Is.EqualTo("ppqq4"));
+        }
+
+        /// <summary>Checks that shapes without a predefined table find nothing and that invalid codes are rejected.</summary>
+        [Test]
+        public void FindTableBySlideCode_ReturnsNullForOtherShapes()
+        {
+            Assert.That(SlideTables.FindTableBySlideCode("1B46K1"), Is.Null);
+            Assert.That(SlideTables.TryMatchSlideCode("1B46K1", out var tableName, out _, out _), Is.False);
+            Assert.That(tableName, Is.Empty);
+            Assert.Throws<ArgumentException>(() => SlideTables.FindTableBySlideCode("1K"));
         }
 
         /// <summary>Checks that unknown names have no table.</summary>
