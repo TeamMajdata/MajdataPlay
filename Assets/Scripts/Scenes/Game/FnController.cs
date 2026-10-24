@@ -1,4 +1,4 @@
-using Cysharp.Threading.Tasks;
+﻿using Cysharp.Threading.Tasks;
 using MajdataPlay.Diagnostics;
 using MajdataPlay.IO;
 using MajdataPlay.Settings;
@@ -11,6 +11,8 @@ namespace MajdataPlay.Scenes.Game
     [DisallowMultipleComponent]
     internal sealed class FnController : MajBehaviour
     {
+        private const int InitWaitTimeSec = 1;
+
         /// <summary>Whether the track skip shortcut is enabled.</summary>
         private bool _isTrackSkipAvailable;
 
@@ -34,6 +36,8 @@ namespace MajdataPlay.Scenes.Game
 
         /// <summary>Whether every shortcut input has been released since gameplay became active.</summary>
         private bool _isFnKeyInputArmed;
+
+        private float _initWaitTimer = 0;
 
         /// <summary>The rotated outer buttons for the track skip combination.</summary>
         private readonly ButtonZone[] _buttonKeyFor2367 = new ButtonZone[4];
@@ -61,7 +65,7 @@ namespace MajdataPlay.Scenes.Game
 
         /// <summary>Loads shortcut settings and maps inputs to the current screen rotation.</summary>
         /// <param name="gpManager">The manager that owns this controller and executes gameplay transitions.</param>
-        internal void Initialize(GamePlayManager gpManager)
+        internal void Init(GamePlayManager gpManager)
         {
             _gpManager = gpManager;
             var settings = MajEnv.Settings;
@@ -225,6 +229,11 @@ namespace MajdataPlay.Scenes.Game
         {
             using (UnityProfiler.Create("FnController.OnUpdate"))
             {
+                if (_initWaitTimer < InitWaitTimeSec)
+                {
+                    _initWaitTimer += MajTimeline.DeltaTime;
+                    return;
+                }
                 switch (UpdateInputState())
                 {
                     case FnAction.TrackSkip:
@@ -247,7 +256,7 @@ namespace MajdataPlay.Scenes.Game
         /// <returns>The action selected by the current inputs, settings and hold times.</returns>
         internal FnAction UpdateInputState()
         {
-            if (_gpManager.State is not (GamePlayStatus.Running or GamePlayStatus.Blocking or GamePlayStatus.WaitForEnd))
+            if (_gpManager.State is GamePlayStatus.Ended)
             {
                 _isFnKeyInputArmed = false;
                 ResetFnKeyPressTimes();

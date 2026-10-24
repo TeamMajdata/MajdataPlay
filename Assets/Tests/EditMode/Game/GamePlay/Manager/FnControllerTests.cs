@@ -61,7 +61,7 @@ namespace MajdataPlay.Tests.Game.GamePlay.Manager
             _settings.SetDeltaTime(0.25f);
             _manager = _objects.Add<GamePlayManager>();
             _controller = _manager.gameObject.AddComponent<FnController>();
-            _controller.Initialize(_manager);
+            _controller.Init(_manager);
         }
 
         /// <summary>Destroys the gameplay objects and restores input, settings and timeline values.</summary>
@@ -87,7 +87,7 @@ namespace MajdataPlay.Tests.Game.GamePlay.Manager
             GameplayScreenRotationAngleOption rotation, string trackSkip, string fastRetry, string fastPractice)
         {
             _settings.Settings.Display.GameplayScreenRotationAngle = rotation;
-            _controller.Initialize(_manager);
+            _controller.Init(_manager);
 
             AssertKeyMapping("2367", trackSkip);
             AssertKeyMapping("3456", fastRetry);
@@ -218,7 +218,7 @@ namespace MajdataPlay.Tests.Game.GamePlay.Manager
             _settings.Settings.Game.TrackSkip = false;
             _settings.Settings.Game.FastRetry = false;
             _settings.Settings.Game.FastPractice = false;
-            _controller.Initialize(_manager);
+            _controller.Init(_manager);
             ArmInput();
             SetPressedCombination(combination);
 
@@ -240,7 +240,7 @@ namespace MajdataPlay.Tests.Game.GamePlay.Manager
         {
             _settings.Settings.Game.TrackSkip = trackSkip;
             _settings.Settings.Game.FastRetry = fastRetry;
-            _controller.Initialize(_manager);
+            _controller.Init(_manager);
             ArmInput();
             SetPressedButtons(ButtonZone.A1, ButtonZone.A2, ButtonZone.A3, ButtonZone.A4,
                 ButtonZone.A5, ButtonZone.A6, ButtonZone.A7, ButtonZone.A8);
@@ -260,7 +260,7 @@ namespace MajdataPlay.Tests.Game.GamePlay.Manager
             _settings.Settings.Game.FastRetry = false;
             _settings.Settings.Game.FastPractice = false;
             _settings.Settings.Game.GameplaySubScreenClickBehavior = behavior;
-            _controller.Initialize(_manager);
+            _controller.Init(_manager);
             ArmInput();
             SetPressedButtons(ButtonZone.P1);
 
@@ -275,7 +275,7 @@ namespace MajdataPlay.Tests.Game.GamePlay.Manager
         public void UpdateInputState_PrioritizesDelayedSubScreenAction(GameplaySubScreenClickBehaviorOption behavior, object expectedAction)
         {
             _settings.Settings.Game.GameplaySubScreenClickBehavior = behavior;
-            _controller.Initialize(_manager);
+            _controller.Init(_manager);
             ArmInput();
             SetPressedButtons(ButtonZone.P1, ButtonZone.A1, ButtonZone.A2, ButtonZone.A3, ButtonZone.A4,
                 ButtonZone.A5, ButtonZone.A6, ButtonZone.A7, ButtonZone.A8);
@@ -292,7 +292,7 @@ namespace MajdataPlay.Tests.Game.GamePlay.Manager
         public void UpdateInputState_DisabledSubScreenDoesNotFallThroughToCombinations()
         {
             _settings.Settings.Game.GameplaySubScreenClickBehavior = GameplaySubScreenClickBehaviorOption.None;
-            _controller.Initialize(_manager);
+            _controller.Init(_manager);
             ArmInput();
             SetPressedButtons(ButtonZone.P1, ButtonZone.A2, ButtonZone.A3, ButtonZone.A6, ButtonZone.A7);
 

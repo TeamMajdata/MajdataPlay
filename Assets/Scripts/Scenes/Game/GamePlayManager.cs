@@ -1,4 +1,4 @@
-using Cysharp.Text;
+﻿using Cysharp.Text;
 using Cysharp.Threading.Tasks;
 using MajdataPlay.Diagnostics;
 using MajdataPlay.Editor;
@@ -279,13 +279,8 @@ namespace MajdataPlay.Scenes.Game
             MajInstances.BackgroundVideo.Hide();
 
             _chartInfoDisplayer.SetMetadata(_songDetail, _gameInfo.CurrentLevel);
-
-            if (!TryGetComponent<FnController>(out var fnController))
-            {
-                fnController = gameObject.AddComponent<FnController>();
-            }
-            _fnController = fnController;
-            _fnController.Initialize(this);
+            _fnController = GetComponent<FnController>();
+            _fnController.Init(this);
         }
         private void Start()
         {
