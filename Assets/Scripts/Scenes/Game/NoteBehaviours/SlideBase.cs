@@ -749,6 +749,9 @@ namespace MajdataPlay.Scenes.Game.Notes.Behaviours
                 }
             }
             var (tableName, tableConst, tableClassicConst) = GetJudgeTableInfo();
+            // 星星的移动不含判定偏移，所以用不含偏移的判定时机求正解帧时星星的位置
+            var hasJudgeTiming = !ConnectInfo.IsConnSlide || ConnectInfo.IsGroupPartEnd;
+            var judgeFrameProgress = Length <= 0f ? 1f : Mathf.Clamp01((JudgeTiming - StartTiming) / Length);
 
             return new SlideDebugInfo()
             {
@@ -759,6 +762,9 @@ namespace MajdataPlay.Scenes.Game.Notes.Behaviours
                 JudgeResult = JudgeResult,
                 JudgeDiffMSec = JudgeDiff,
                 LastWaitTimeSec = LastWaitTimeSec,
+                HasJudgeTiming = hasJudgeTiming,
+                JudgeFrameProgress = judgeFrameProgress,
+                JudgeFrameStarPositions = hasJudgeTiming ? GetStarPositionsAt(judgeFrameProgress) : Array.Empty<Vector3>(),
                 IsCheckable = IsCheckable,
                 ArrowPositions = arrowPositions,
                 HiddenArrowCount = LastHiddenSlideBarIndex,
@@ -789,6 +795,13 @@ namespace MajdataPlay.Scenes.Game.Notes.Behaviours
         private protected virtual (string Name, float Const, float ClassicConst) GetJudgeTableInfo()
         {
             return (string.Empty, 0f, 0f);
+        }
+        /// <summary>Gets where the stars are once they have moved a share of the path, for the slide inspector.</summary>
+        /// <param name="progress">How far along the path, from 0 to 1.</param>
+        /// <returns>The world position of each star; the base implementation knows no path and returns an empty array.</returns>
+        private protected virtual Vector3[] GetStarPositionsAt(float progress)
+        {
+            return Array.Empty<Vector3>();
         }
         /// <summary>Captures the areas of a judge queue together with the state of their sensors in this frame.</summary>
         /// <param name="areas">The areas of the queue as it was built.</param>

@@ -236,6 +236,71 @@ namespace MajdataPlay.Tests.Game.Notes.PlayMode
             Assert.That(info.ArrowPositions, Has.Length.EqualTo(12));
         }
 
+        /// <summary>
+        /// Checks that the state captured for the slide inspector marks where the star is at the judge timing, where the
+        /// star movement places the star in that frame.
+        /// </summary>
+        /// <returns>The test coroutine.</returns>
+        [UnityTest]
+        public IEnumerator CaptureDebugInfo_MarksTheStarAtTheJudgeTiming()
+        {
+            var slide = CreateSlide();
+            _rig.RegisterSlides((slide, 0.3f));
+            yield return null;
+
+            var info = slide.CaptureDebugInfo();
+
+            Assert.That(info.HasJudgeTiming, Is.True);
+            Assert.That(info.JudgeFrameProgress, Is.EqualTo(1f - Line3Const).Within(1e-5f));
+            Assert.That(info.JudgeFrameStarPositions, Has.Length.EqualTo(1));
+
+            _rig.Step(0.6f);
+            _rig.Step(1.1f);
+            _rig.Step(1f + (1f - Line3Const));
+            var star = PrivateMember.GetField<System.Memory<Transform?>>(slide, "StarTransforms").Span[0];
+            Assert.That(star, Is.Not.Null);
+            Assert.That(Vector2.Distance(star!.position, info.JudgeFrameStarPositions[0]), Is.LessThan(1e-4f), "The star is there at the judge timing");
+        }
+
+        /// <summary>
+        /// Checks that only the end part of a connection slide, which judges the whole group, marks the star at the judge
+        /// timing.
+        /// </summary>
+        /// <returns>The test coroutine.</returns>
+        [UnityTest]
+        public IEnumerator CaptureDebugInfo_MarksTheJudgeFrameOnTheConnectionEnd()
+        {
+            var head = CreateSlide(initialize: false);
+            var tail = CreateSlide(startPos: 3, initialize: false);
+            head.ConnectInfo = new ConnSlideInfo()
+            {
+                IsGroupPart = true,
+                IsGroupPartHead = true,
+                TotalJudgeQueueLen = 6,
+                StartTiming = 1f
+            };
+            tail.ConnectInfo = new ConnSlideInfo()
+            {
+                IsGroupPart = true,
+                IsGroupPartEnd = true,
+                TotalJudgeQueueLen = 6,
+                StartTiming = 1f,
+                Parent = head
+            };
+            head.Init();
+            tail.Init();
+            yield return null;
+
+            var headInfo = head.CaptureDebugInfo();
+            var tailInfo = tail.CaptureDebugInfo();
+
+            Assert.That(headInfo.HasJudgeTiming, Is.False);
+            Assert.That(headInfo.JudgeFrameStarPositions, Is.Empty);
+            Assert.That(tailInfo.HasJudgeTiming, Is.True);
+            Assert.That(tailInfo.JudgeFrameProgress, Is.EqualTo(1f - tailInfo.TableConst).Within(1e-5f));
+            Assert.That(tailInfo.JudgeFrameStarPositions, Has.Length.EqualTo(1));
+        }
+
         /// <summary>Checks that disabling slide skipping makes every judge area mandatory.</summary>
         /// <returns>The test coroutine.</returns>
         [UnityTest]

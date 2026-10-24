@@ -59,6 +59,18 @@ namespace MajdataPlay.Scenes.Game.Notes.Behaviours
         {
             return (_wifiTable.Name ?? string.Empty, _wifiTable.Const, _wifiTable.Const);
         }
+        /// <summary>Gets where the three stars are once they have moved a share of their paths, as the star movement places them.</summary>
+        /// <param name="progress">How far along the paths, from 0 to 1.</param>
+        /// <returns>The positions of the right, centre and left stars.</returns>
+        private protected override Vector3[] GetStarPositionsAt(float progress)
+        {
+            var positions = new Vector3[_starEndPositions.Length];
+            for (var i = 0; i < positions.Length; i++)
+            {
+                positions[i] = Vector3.Lerp(_starStartPositions[i], _starEndPositions[i], progress);
+            }
+            return positions;
+        }
 
         protected override void Awake()
         {

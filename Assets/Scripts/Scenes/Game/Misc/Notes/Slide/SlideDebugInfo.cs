@@ -27,6 +27,21 @@ namespace MajdataPlay.Scenes.Game.Notes.Slide
         public float JudgeDiffMSec { get; init; }
         /// <summary>Gets the time in seconds the slide still waits after its judgment before it ends.</summary>
         public float LastWaitTimeSec { get; init; }
+        /// <summary>
+        /// Gets whether the slide has a judge timing of its own; the parts of a connection slide before its end part are
+        /// judged by the end part and have none.
+        /// </summary>
+        public bool HasJudgeTiming { get; init; }
+        /// <summary>
+        /// Gets how far along the path, from 0 to 1, the stars are at the judge timing, which is the frame a slide finished
+        /// on is judged perfect; meaningful once <see cref="HasJudgeTiming"/> is true.
+        /// </summary>
+        public float JudgeFrameProgress { get; init; }
+        /// <summary>
+        /// Gets the world positions of the stars at the judge timing, one for each star, or an empty array when the slide
+        /// has no judge timing or its path is not built yet.
+        /// </summary>
+        public Vector3[] JudgeFrameStarPositions { get; init; } = Array.Empty<Vector3>();
         /// <summary>Gets whether the slide already reads the sensors.</summary>
         public bool IsCheckable { get; init; }
         /// <summary>Gets the world positions of the arrows, in path order.</summary>

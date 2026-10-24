@@ -319,6 +319,36 @@ namespace MajdataPlay.Tests.Game.Notes.PlayMode
             Assert.That(slide.CaptureDebugInfo().DJAutoplayProgress, Is.EqualTo(0.8f + (5f / 60f)).Within(1e-4f), "DJAuto has caught up with the star");
         }
 
+        /// <summary>
+        /// Checks that the state captured for the slide inspector marks where the star is at the judge timing: the share
+        /// of the path the slide constant leaves before the end, where the star movement places the star in that frame.
+        /// </summary>
+        /// <returns>The test coroutine.</returns>
+        [UnityTest]
+        public IEnumerator CaptureDebugInfo_MarksTheStarAtTheJudgeTiming()
+        {
+            var slide = CreateSlide(ThreeAreas(), SlideOkType.StraightL, conditionalLastArrow: false);
+            _rig.RegisterSlides((slide, 0.3f));
+            yield return null;
+
+            var info = slide.CaptureDebugInfo();
+
+            Assert.That(info.HasJudgeTiming, Is.True);
+            Assert.That(info.JudgeFrameProgress, Is.EqualTo(1f - SlideConst).Within(1e-5f));
+            Assert.That(info.JudgeFrameStarPositions, Has.Length.EqualTo(1));
+            var start = NoteHelper.GetTapPosition(1, 4.8f);
+            var end = NoteHelper.GetTapPosition(3, 4.8f);
+            var expected = Vector3.Lerp(start, end, 1f - SlideConst);
+            Assert.That(Vector2.Distance(info.JudgeFrameStarPositions[0], expected), Is.LessThan(1e-4f));
+
+            _rig.Step(0.6f);
+            _rig.Step(1.1f);
+            _rig.Step(1f + (1f - SlideConst));
+            var star = PrivateMember.GetField<Memory<Transform?>>(slide, "StarTransforms").Span[0];
+            Assert.That(star, Is.Not.Null);
+            Assert.That(Vector2.Distance(star!.position, info.JudgeFrameStarPositions[0]), Is.LessThan(1e-4f), "The star is there at the judge timing");
+        }
+
         /// <summary>Checks that the captured state names the predefined table and its constants.</summary>
         /// <returns>The test coroutine.</returns>
         [UnityTest]

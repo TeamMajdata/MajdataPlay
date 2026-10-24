@@ -173,6 +173,39 @@ namespace MajdataPlay.Tests.Game.Notes.PlayMode
             Assert.That(Vector3.Distance(lastCenter, Vector3.Lerp(start, centerEnd, info.DJAutoplayProgress)), Is.LessThan(0.1f));
         }
 
+        /// <summary>
+        /// Checks that the state captured for the slide inspector marks where the three stars are at the judge timing, where
+        /// the star movement places them in that frame.
+        /// </summary>
+        /// <returns>The test coroutine.</returns>
+        [UnityTest]
+        public IEnumerator CaptureDebugInfo_MarksTheStarsAtTheJudgeTiming()
+        {
+            var wifi = CreateWifi();
+            _rig.RegisterSlides((wifi, 0.3f));
+            yield return null;
+
+            var info = wifi.CaptureDebugInfo();
+
+            Assert.That(info.HasJudgeTiming, Is.True);
+            Assert.That(info.JudgeFrameProgress, Is.EqualTo(1f - 0.162870f).Within(1e-5f));
+            Assert.That(info.JudgeFrameStarPositions, Has.Length.EqualTo(3));
+            var start = NoteHelper.GetTapPosition(wifi.StartPos, 4.8f);
+            var centerEnd = NoteHelper.GetTapPosition(wifi.EndPos, 4.8f);
+            var expectedCenter = Vector3.Lerp(start, centerEnd, info.JudgeFrameProgress);
+            Assert.That(Vector2.Distance(info.JudgeFrameStarPositions[1], expectedCenter), Is.LessThan(1e-4f), "The centre star");
+
+            _rig.Step(0.6f);
+            _rig.Step(1.1f);
+            _rig.Step(1f + (1f - 0.162870f));
+            var stars = PrivateMember.GetField<System.Memory<Transform?>>(wifi, "StarTransforms").Span;
+            for (var i = 0; i < 3; i++)
+            {
+                Assert.That(stars[i], Is.Not.Null, $"Star {i}");
+                Assert.That(Vector2.Distance(stars[i]!.position, info.JudgeFrameStarPositions[i]), Is.LessThan(1e-4f), $"Star {i} is there at the judge timing");
+            }
+        }
+
         /// <summary>Checks that the ordinary autoplay, which passes the judge areas without touching, records no DJAuto touches.</summary>
         /// <returns>The test coroutine.</returns>
         [UnityTest]

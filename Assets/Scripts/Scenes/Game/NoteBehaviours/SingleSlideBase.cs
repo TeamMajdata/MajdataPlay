@@ -247,6 +247,17 @@ namespace MajdataPlay.Scenes.Game.Notes.Behaviours
             }
             return Table.JudgeQueue;
         }
+        /// <summary>Gets where the star is once it has moved a share of the path, as the star movement places it.</summary>
+        /// <param name="progress">How far along the path, from 0 to 1.</param>
+        /// <returns>The star position, or an empty array before the path is built.</returns>
+        private protected override Vector3[] GetStarPositionsAt(float progress)
+        {
+            if (StarPositions.Count < 2)
+            {
+                return base.GetStarPositionsAt(progress);
+            }
+            return new[] { GetPositionFromProgress(progress) };
+        }
         /// <summary>Gets the name and the judgment constants of the table.</summary>
         /// <returns>The table name, empty for a generated table, and the modern and classic constants.</returns>
         private protected override (string Name, float Const, float ClassicConst) GetJudgeTableInfo()

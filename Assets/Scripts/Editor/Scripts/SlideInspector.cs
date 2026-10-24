@@ -17,8 +17,8 @@ namespace MajdataPlay.Editor
     /// Inspector of every slide behaviour. In Play Mode it adds, below the serialized fields, the judge queues with the
     /// areas the player has passed and the sensors pressed in this frame, the judge table and timings, the flags and
     /// connection of the slide, the touches of the latest run when DJAuto plays the slide, and for extend slides the slide
-    /// code with its parsed metadata. In the Scene view it can label the arrow indexes, to compare them with the arrow
-    /// progress of the judge areas, and draw the DJAuto touches.
+    /// code with its parsed metadata. In the Scene view it can mark where the stars are at the judge timing, label the
+    /// arrow indexes, to compare them with the arrow progress of the judge areas, and draw the DJAuto touches.
     /// </summary>
     [CustomEditor(typeof(SlideBase), true)]
     internal sealed class SlideInspector : Editor
@@ -32,8 +32,23 @@ namespace MajdataPlay.Editor
         /// <summary>The session key of the toggle that draws the DJAuto touches in the Scene view.</summary>
         private const string DJAutoTouchesKey = SessionKeyPrefix + "DJAutoTouches";
 
+        /// <summary>The session key of the toggle that marks the star positions at the judge timing in the Scene view.</summary>
+        private const string JudgeFrameKey = SessionKeyPrefix + "JudgeFrame";
+
         /// <summary>The radius of the dot that marks the centre of a DJAuto touch in the Scene view.</summary>
         private const float TouchCentreRadius = 0.03f;
+
+        /// <summary>The radius of the ring that marks a star position at the judge timing in the Scene view.</summary>
+        private const float JudgeFrameRadius = 0.4f;
+
+        /// <summary>The radius of the dot that marks the centre of a star position at the judge timing in the Scene view.</summary>
+        private const float JudgeFrameCentreRadius = 0.05f;
+
+        /// <summary>The Scene view colour of the outline and centre of a star position at the judge timing.</summary>
+        private static readonly Color s_judgeFrameColor = new(1f, 0.25f, 0.85f, 0.95f);
+
+        /// <summary>The Scene view colour that fills a star position at the judge timing.</summary>
+        private static readonly Color s_judgeFrameFillColor = new(1f, 0.25f, 0.85f, 0.15f);
 
         /// <summary>The Scene view colour of the outline and centre of a DJAuto touch.</summary>
         private static readonly Color s_djAutoTouchColor = new(0f, 0.9f, 1f, 0.9f);
@@ -58,6 +73,9 @@ namespace MajdataPlay.Editor
 
         /// <summary>The Scene view style of the arrows that are already hidden.</summary>
         private static GUIStyle? s_hiddenArrowLabel;
+
+        /// <summary>The Scene view style of the label beside a star position at the judge timing.</summary>
+        private static GUIStyle? s_judgeFrameLabel;
 
         /// <summary>Repaints every frame in Play Mode so the inspector follows the slide.</summary>
         /// <returns><see langword="true"/> while the editor is playing.</returns>
@@ -100,8 +118,9 @@ namespace MajdataPlay.Editor
         }
 
         /// <summary>
-        /// Labels the arrow indexes in the Scene view when the toggle in the Flags section is on, and draws the touches
-        /// of the latest DJAuto run when DJAuto plays the slide and the toggle in the DJAuto section is on.
+        /// Marks where the stars are at the judge timing when the toggle in the Timing section is on, labels the arrow
+        /// indexes in the Scene view when the toggle in the Flags section is on, and draws the touches of the latest
+        /// DJAuto run when DJAuto plays the slide and the toggle in the DJAuto section is on.
         /// </summary>
         private void OnSceneGUI()
         {
@@ -109,15 +128,20 @@ namespace MajdataPlay.Editor
             {
                 return;
             }
+            var showJudgeFrame = SessionState.GetBool(JudgeFrameKey, true);
             var showArrowLabels = SessionState.GetBool(ArrowLabelsKey, false);
             var showTouches = SessionState.GetBool(DJAutoTouchesKey, true);
-            if (!showArrowLabels && !showTouches)
+            if (!showJudgeFrame && !showArrowLabels && !showTouches)
             {
                 return;
             }
             if (!TryCapture((SlideBase)target, out var info))
             {
                 return;
+            }
+            if (showJudgeFrame)
+            {
+                DrawJudgeFrame(info.JudgeFrameStarPositions);
             }
             if (showArrowLabels)
             {
@@ -131,6 +155,23 @@ namespace MajdataPlay.Editor
             {
                 DrawDJAutoTouches(info.DJAutoTouches);
             }
+        }
+
+        /// <summary>Draws each star position at the judge timing as a filled magenta ring with a centre dot and a label.</summary>
+        /// <param name="positions">The star positions at the judge timing.</param>
+        private static void DrawJudgeFrame(Vector3[] positions)
+        {
+            var oldColor = Handles.color;
+            foreach (var position in positions)
+            {
+                Handles.color = s_judgeFrameFillColor;
+                Handles.DrawSolidDisc(position, Vector3.forward, JudgeFrameRadius);
+                Handles.color = s_judgeFrameColor;
+                Handles.DrawWireDisc(position, Vector3.forward, JudgeFrameRadius, 2f);
+                Handles.DrawSolidDisc(position, Vector3.forward, JudgeFrameCentreRadius);
+                Handles.Label(position + new Vector3(JudgeFrameRadius, JudgeFrameRadius), "Judge", GetJudgeFrameLabel());
+            }
+            Handles.color = oldColor;
         }
 
         /// <summary>
@@ -261,7 +302,10 @@ namespace MajdataPlay.Editor
             }
         }
 
-        /// <summary>Draws the timings that drive the star and the judgment.</summary>
+        /// <summary>
+        /// Draws the timings that drive the star and the judgment, with where the star is at the judge timing and the
+        /// toggle that marks it in the Scene view.
+        /// </summary>
         /// <param name="slide">The slide.</param>
         /// <param name="info">The captured state.</param>
         private static void DrawTiming(SlideBase slide, SlideDebugInfo info)
@@ -285,7 +329,31 @@ namespace MajdataPlay.Editor
                 EditorGUILayout.LabelField("Constant", $"{info.TableConst:0.####} modern, {info.TableClassicConst:0.####} classic ({usedConst} used)");
                 var starProgress = slide.Length <= 0f ? 0f : Mathf.Clamp01((now - slide.StartTiming) / slide.Length);
                 EditorGUI.ProgressBar(EditorGUI.IndentedRect(EditorGUILayout.GetControlRect()), starProgress, $"Star progress: {starProgress:P0}");
+                EditorGUILayout.LabelField("Judge frame", FormatJudgeFrame(info));
+                var showJudgeFrame = SessionState.GetBool(JudgeFrameKey, true);
+                var newShowJudgeFrame = EditorGUILayout.Toggle("Mark judge frame in Scene", showJudgeFrame);
+                if (newShowJudgeFrame != showJudgeFrame)
+                {
+                    SessionState.SetBool(JudgeFrameKey, newShowJudgeFrame);
+                    SceneView.RepaintAll();
+                }
             }
+        }
+
+        /// <summary>Formats where the stars are at the judge timing.</summary>
+        /// <param name="info">The captured state.</param>
+        /// <returns>The share of the path the stars have moved at the judge timing, or why there is none.</returns>
+        private static string FormatJudgeFrame(SlideDebugInfo info)
+        {
+            if (!info.HasJudgeTiming)
+            {
+                return "judged by the end part of the connection slide";
+            }
+            if (info.JudgeFrameStarPositions.Length == 0)
+            {
+                return $"star at {info.JudgeFrameProgress:P1} of the path (path not built yet)";
+            }
+            return $"star at {info.JudgeFrameProgress:P1} of the path";
         }
 
         /// <summary>Draws the keys, flags and arrows of the slide, with the Scene view arrow label toggle.</summary>
@@ -601,6 +669,14 @@ namespace MajdataPlay.Editor
         {
             s_hiddenArrowLabel ??= new GUIStyle(EditorStyles.label) { normal = { textColor = Color.gray } };
             return s_hiddenArrowLabel;
+        }
+
+        /// <summary>Gets the Scene view style of the label beside a star position at the judge timing.</summary>
+        /// <returns>The style.</returns>
+        private static GUIStyle GetJudgeFrameLabel()
+        {
+            s_judgeFrameLabel ??= new GUIStyle(EditorStyles.boldLabel) { normal = { textColor = s_judgeFrameColor } };
+            return s_judgeFrameLabel;
         }
     }
 }
