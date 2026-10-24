@@ -287,6 +287,38 @@ namespace MajdataPlay.Tests.Game.Notes.PlayMode
             }
         }
 
+        /// <summary>
+        /// Checks that DJAuto keeps moving after a long frame leaves it far behind the star: it moves at most 0.2 of the
+        /// path in that frame and catches up over the next frames, instead of stopping for the rest of the slide.
+        /// </summary>
+        /// <returns>The test coroutine.</returns>
+        [UnityTest]
+        public IEnumerator DJAutoplay_CatchesUpAfterALongFrame()
+        {
+            _rig.Controller.SetMods(AutoplayModeOption.DJAuto_TouchPanel_First);
+            var slide = CreateSlide(ThreeAreas(), SlideOkType.StraightL, conditionalLastArrow: false);
+            _rig.RegisterSlides((slide, 0.3f));
+            yield return null;
+
+            // 前两帧让滑条进入 Running，第三帧 DJAuto 才开始按
+            for (var frame = 0; frame <= 2; frame++)
+            {
+                _rig.Step(1f + (frame / 60f));
+            }
+            var beforeLongFrame = slide.CaptureDebugInfo().DJAutoplayProgress;
+            Assume.That(beforeLongFrame, Is.GreaterThan(0f), "DJAuto has started");
+
+            // 4 个箭头的滑条 DJAutoplayRatio 为 5/14，0.77 的差距使单步超过每帧 0.2 的上限
+            _rig.Step(1.8f);
+            Assert.That(slide.CaptureDebugInfo().DJAutoplayProgress, Is.EqualTo(beforeLongFrame + 0.2f).Within(1e-4f));
+
+            for (var frame = 1; frame <= 5; frame++)
+            {
+                _rig.Step(1.8f + (frame / 60f));
+            }
+            Assert.That(slide.CaptureDebugInfo().DJAutoplayProgress, Is.EqualTo(0.8f + (5f / 60f)).Within(1e-4f), "DJAuto has caught up with the star");
+        }
+
         /// <summary>Checks that the captured state names the predefined table and its constants.</summary>
         /// <returns>The test coroutine.</returns>
         [UnityTest]

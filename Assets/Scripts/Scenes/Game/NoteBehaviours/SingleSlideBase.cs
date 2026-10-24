@@ -340,21 +340,23 @@ namespace MajdataPlay.Scenes.Game.Notes.Behaviours
         protected virtual void DJAutoplay()
         {
             const float DJAUTO_SIMULATE_RAD = 0.3f;
+            const float DJAUTO_MAX_PROGRESS_PER_FRAME = 0.2f;
             BeginDJAutoTouchRecord();
             if (IsFinished)
             {
                 return;
             }
             var currentProgress = ((Length - GetRemainingTimeWithoutOffset()) / Length).Clamp(0, 1);
-            var step = (currentProgress - DJAutoplayProgress) / (8 * DJAutoplayRatio);
+            // 单步超过每帧上限时一步也走不了，之后差距只会越来越大，所以单步不能超过上限
+            var step = Mathf.Min((currentProgress - DJAutoplayProgress) / (8 * DJAutoplayRatio), DJAUTO_MAX_PROGRESS_PER_FRAME);
             var delta = 0f;
             for (; ; )
             {
                 var cubeRay = GetPositionFromProgress(DJAutoplayProgress);
                 SlideDJAutoSimulateSensorPress(cubeRay, DJAUTO_SIMULATE_RAD);
 
-                if (delta > 0.2f ||
-                   delta + step > 0.2f ||
+                if (delta > DJAUTO_MAX_PROGRESS_PER_FRAME ||
+                   delta + step > DJAUTO_MAX_PROGRESS_PER_FRAME ||
                    DJAutoplayProgress >= currentProgress)
                 {
                     break;
