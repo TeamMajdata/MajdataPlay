@@ -340,6 +340,7 @@ namespace MajdataPlay.Scenes.Game.Notes.Behaviours
         protected virtual void DJAutoplay()
         {
             const float DJAUTO_SIMULATE_RAD = 0.3f;
+            BeginDJAutoTouchRecord();
             if (IsFinished)
             {
                 return;

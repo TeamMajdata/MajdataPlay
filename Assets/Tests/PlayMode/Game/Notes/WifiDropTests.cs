@@ -136,6 +136,62 @@ namespace MajdataPlay.Tests.Game.Notes.PlayMode
             }
         }
 
+        /// <summary>
+        /// Checks that the state captured for the slide inspector holds the touches of the latest DJAuto run: one narrow
+        /// touch for each side lane and a wide one for the centre lane at every step, the last ones at the DJAuto progress.
+        /// </summary>
+        /// <returns>The test coroutine.</returns>
+        [UnityTest]
+        public IEnumerator CaptureDebugInfo_RecordsTheLatestDJAutoTouches()
+        {
+            _rig.Controller.SetMods(AutoplayModeOption.DJAuto_ButtonRing_First);
+            var wifi = CreateWifi();
+            _rig.RegisterSlides((wifi, 0.3f));
+            yield return null;
+
+            for (var frame = 0; frame <= 30; frame++)
+            {
+                _rig.Step(1f + (frame / 60f));
+            }
+            var info = wifi.CaptureDebugInfo();
+
+            Assert.That(info.IsDJAutoEnabled, Is.True);
+            Assert.That(info.DJAutoTouchFrame, Is.EqualTo(Time.frameCount));
+            Assert.That(info.DJAutoplayProgress, Is.EqualTo(0.5f).Within(0.01f));
+            var touches = info.DJAutoTouches;
+            Assert.That(touches, Is.Not.Empty);
+            Assert.That(touches.Length % 3, Is.EqualTo(0), "Every step touches the three lanes");
+            for (var i = 0; i < touches.Length; i++)
+            {
+                var isCenter = i % 3 == 1;
+                Assert.That(touches[i].Radius, Is.EqualTo(isCenter ? 0.8f : 0.15f), $"Touch {i}");
+                Assert.That(touches[i].SampledRadius, Is.EqualTo(isCenter ? 0.875f : 0.25f).Within(1e-6f), $"Touch {i}");
+            }
+            var start = NoteHelper.GetTapPosition(wifi.StartPos, 4.8f);
+            var centerEnd = NoteHelper.GetTapPosition(wifi.EndPos, 4.8f);
+            var lastCenter = touches[touches.Length - 2].Position;
+            Assert.That(Vector3.Distance(lastCenter, Vector3.Lerp(start, centerEnd, info.DJAutoplayProgress)), Is.LessThan(0.1f));
+        }
+
+        /// <summary>Checks that the ordinary autoplay, which passes the judge areas without touching, records no DJAuto touches.</summary>
+        /// <returns>The test coroutine.</returns>
+        [UnityTest]
+        public IEnumerator CaptureDebugInfo_AutoplayRecordsNoDJAutoTouches()
+        {
+            _rig.Controller.SetMods(AutoplayModeOption.Enable);
+            var wifi = CreateWifi();
+            _rig.RegisterSlides((wifi, 0.3f));
+            yield return null;
+
+            _rig.Step(1f);
+            _rig.Step(1.2f);
+            var info = wifi.CaptureDebugInfo();
+
+            Assert.That(info.IsDJAutoEnabled, Is.False);
+            Assert.That(info.DJAutoTouchFrame, Is.EqualTo(-1));
+            Assert.That(info.DJAutoTouches, Is.Empty);
+        }
+
         /// <summary>Checks the right-hand slide result and the classic star layout.</summary>
         /// <returns>The test coroutine.</returns>
         [UnityTest]

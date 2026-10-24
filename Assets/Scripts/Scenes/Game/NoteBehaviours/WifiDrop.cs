@@ -525,6 +525,7 @@ namespace MajdataPlay.Scenes.Game.Notes.Behaviours
         }
         void DJAutoplay()
         {
+            BeginDJAutoTouchRecord();
             if (IsFinished)
             {
                 return;

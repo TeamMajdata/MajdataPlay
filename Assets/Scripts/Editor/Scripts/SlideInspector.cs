@@ -16,8 +16,9 @@ namespace MajdataPlay.Editor
     /// <summary>
     /// Inspector of every slide behaviour. In Play Mode it adds, below the serialized fields, the judge queues with the
     /// areas the player has passed and the sensors pressed in this frame, the judge table and timings, the flags and
-    /// connection of the slide, and for extend slides the slide code with its parsed metadata. It can also label the
-    /// arrow indexes in the Scene view, to compare them with the arrow progress of the judge areas.
+    /// connection of the slide, the touches of the latest run when DJAuto plays the slide, and for extend slides the slide
+    /// code with its parsed metadata. In the Scene view it can label the arrow indexes, to compare them with the arrow
+    /// progress of the judge areas, and draw the DJAuto touches.
     /// </summary>
     [CustomEditor(typeof(SlideBase), true)]
     internal sealed class SlideInspector : Editor
@@ -27,6 +28,21 @@ namespace MajdataPlay.Editor
 
         /// <summary>The session key of the toggle that labels the arrows in the Scene view.</summary>
         private const string ArrowLabelsKey = SessionKeyPrefix + "ArrowLabels";
+
+        /// <summary>The session key of the toggle that draws the DJAuto touches in the Scene view.</summary>
+        private const string DJAutoTouchesKey = SessionKeyPrefix + "DJAutoTouches";
+
+        /// <summary>The radius of the dot that marks the centre of a DJAuto touch in the Scene view.</summary>
+        private const float TouchCentreRadius = 0.03f;
+
+        /// <summary>The Scene view colour of the outline and centre of a DJAuto touch.</summary>
+        private static readonly Color s_djAutoTouchColor = new(0f, 0.9f, 1f, 0.9f);
+
+        /// <summary>The Scene view colour that fills the radius of a DJAuto touch.</summary>
+        private static readonly Color s_djAutoTouchFillColor = new(0f, 0.9f, 1f, 0.12f);
+
+        /// <summary>The Scene view colour of the outermost ring the touch panel sampling reads for a DJAuto touch.</summary>
+        private static readonly Color s_djAutoSampledRingColor = new(1f, 0.6f, 0f, 0.8f);
 
         /// <summary>The width of the narrow columns of the judge area table.</summary>
         private const float NarrowColumnWidth = 30f;
@@ -72,6 +88,10 @@ namespace MajdataPlay.Editor
             DrawJudgeQueues(info);
             DrawTiming(slide, info);
             DrawFlags(slide, info);
+            if (info.IsDJAutoEnabled)
+            {
+                DrawDJAuto(info);
+            }
             DrawConnection(slide);
             if (slide is ExtendSlideDrop extendSlide)
             {
@@ -79,10 +99,19 @@ namespace MajdataPlay.Editor
             }
         }
 
-        /// <summary>Labels the arrow indexes in the Scene view when the toggle in the Flags section is on.</summary>
+        /// <summary>
+        /// Labels the arrow indexes in the Scene view when the toggle in the Flags section is on, and draws the touches
+        /// of the latest DJAuto run when DJAuto plays the slide and the toggle in the DJAuto section is on.
+        /// </summary>
         private void OnSceneGUI()
         {
-            if (!EditorApplication.isPlaying || !SessionState.GetBool(ArrowLabelsKey, false))
+            if (!EditorApplication.isPlaying)
+            {
+                return;
+            }
+            var showArrowLabels = SessionState.GetBool(ArrowLabelsKey, false);
+            var showTouches = SessionState.GetBool(DJAutoTouchesKey, true);
+            if (!showArrowLabels && !showTouches)
             {
                 return;
             }
@@ -90,11 +119,39 @@ namespace MajdataPlay.Editor
             {
                 return;
             }
-            for (var i = 0; i < info.ArrowPositions.Length; i++)
+            if (showArrowLabels)
             {
-                var style = i < info.HiddenArrowCount ? GetHiddenArrowLabel() : GetShownArrowLabel();
-                Handles.Label(info.ArrowPositions[i], i.ToString(), style);
+                for (var i = 0; i < info.ArrowPositions.Length; i++)
+                {
+                    var style = i < info.HiddenArrowCount ? GetHiddenArrowLabel() : GetShownArrowLabel();
+                    Handles.Label(info.ArrowPositions[i], i.ToString(), style);
+                }
             }
+            if (showTouches && info.IsDJAutoEnabled && IsLatestDJAutoRunCurrent(info))
+            {
+                DrawDJAutoTouches(info.DJAutoTouches);
+            }
+        }
+
+        /// <summary>
+        /// Draws each touch as a filled disc of the radius DJAuto asked for, outlined in cyan, with an orange ring at the
+        /// outermost ring the touch panel sampling reads.
+        /// </summary>
+        /// <param name="touches">The touches of the latest DJAuto run.</param>
+        private static void DrawDJAutoTouches(SlideDebugInfo.DJAutoTouchInfo[] touches)
+        {
+            var oldColor = Handles.color;
+            foreach (var touch in touches)
+            {
+                Handles.color = s_djAutoTouchFillColor;
+                Handles.DrawSolidDisc(touch.Position, Vector3.forward, touch.Radius);
+                Handles.color = s_djAutoTouchColor;
+                Handles.DrawWireDisc(touch.Position, Vector3.forward, touch.Radius);
+                Handles.DrawSolidDisc(touch.Position, Vector3.forward, TouchCentreRadius);
+                Handles.color = s_djAutoSampledRingColor;
+                Handles.DrawWireDisc(touch.Position, Vector3.forward, touch.SampledRadius);
+            }
+            Handles.color = oldColor;
         }
 
         /// <summary>Draws the shape, the table, the state and the judgment of the slide.</summary>
@@ -267,6 +324,99 @@ namespace MajdataPlay.Editor
                     SceneView.RepaintAll();
                 }
             }
+        }
+
+        /// <summary>
+        /// Draws the progress of DJAuto and the touches of its latest run with the sensors each one pressed, with the
+        /// toggle that draws the touches in the Scene view.
+        /// </summary>
+        /// <param name="info">The captured state.</param>
+        private static void DrawDJAuto(SlideDebugInfo info)
+        {
+            if (!Foldout("DJAuto", "DJAuto touches"))
+            {
+                return;
+            }
+            using (new EditorGUI.IndentLevelScope())
+            {
+                EditorGUILayout.LabelField("Mode", info.AutoplayMode.ToString());
+                EditorGUI.ProgressBar(EditorGUI.IndentedRect(EditorGUILayout.GetControlRect()), info.DJAutoplayProgress, $"DJAuto progress: {info.DJAutoplayProgress:P0}");
+                EditorGUILayout.LabelField("Latest run", FormatDJAutoRun(info));
+                var pressed = new SortedSet<SensorArea>();
+                foreach (var touch in info.DJAutoTouches)
+                {
+                    pressed.UnionWith(touch.Sensors);
+                }
+                EditorGUILayout.LabelField("Pressed sensors", pressed.Count == 0 ? "none" : string.Join(", ", pressed));
+                var showTouches = SessionState.GetBool(DJAutoTouchesKey, true);
+                var newShowTouches = EditorGUILayout.Toggle("Draw touches in Scene", showTouches);
+                if (newShowTouches != showTouches)
+                {
+                    SessionState.SetBool(DJAutoTouchesKey, newShowTouches);
+                    SceneView.RepaintAll();
+                }
+                if (newShowTouches)
+                {
+                    EditorGUILayout.HelpBox("Cyan discs are the touch radius DJAuto asks for; orange rings are the outermost ring the touch panel sampling reads.", MessageType.None);
+                }
+                if (info.DJAutoTouches.Length == 0)
+                {
+                    return;
+                }
+                DrawTouchRow("#", "Position", "Radius", "Sensors");
+                for (var i = 0; i < info.DJAutoTouches.Length; i++)
+                {
+                    var touch = info.DJAutoTouches[i];
+                    var sensors = touch.Sensors.Length == 0 ? "-" : string.Join(", ", touch.Sensors);
+                    DrawTouchRow(i.ToString(),
+                                 $"({touch.Position.x:0.00}, {touch.Position.y:0.00})",
+                                 $"{touch.Radius:0.###} / {touch.SampledRadius:0.###}",
+                                 sensors);
+                }
+            }
+        }
+
+        /// <summary>Draws one row of the DJAuto touch table.</summary>
+        /// <param name="index">The touch index.</param>
+        /// <param name="position">The touch centre.</param>
+        /// <param name="radius">The asked and the sampled radius.</param>
+        /// <param name="sensors">The sensors the touch pressed.</param>
+        private static void DrawTouchRow(string index, string position, string radius, string sensors)
+        {
+            var style = GetRichLabel();
+            using (new EditorGUILayout.HorizontalScope())
+            {
+                GUILayout.Space(EditorGUI.indentLevel * 15f + 15f);
+                GUILayout.Label(index, style, GUILayout.Width(NarrowColumnWidth));
+                GUILayout.Label(position, style, GUILayout.Width(WideColumnWidth + 30f));
+                GUILayout.Label(radius, style, GUILayout.Width(WideColumnWidth + 10f));
+                GUILayout.Label(sensors, style, GUILayout.MinWidth(WideColumnWidth));
+            }
+        }
+
+        /// <summary>Formats when DJAuto last ran and how many touches it simulated.</summary>
+        /// <param name="info">The captured state.</param>
+        /// <returns>The frame of the latest run relative to this frame, with the touch count.</returns>
+        private static string FormatDJAutoRun(SlideDebugInfo info)
+        {
+            if (info.DJAutoTouchFrame < 0)
+            {
+                return "not run yet";
+            }
+            var age = Time.frameCount - info.DJAutoTouchFrame;
+            var when = age <= 0 ? "this frame" : age == 1 ? "previous frame" : $"{age} frames ago";
+            return $"frame {info.DJAutoTouchFrame} ({when}), {info.DJAutoTouches.Length} touches";
+        }
+
+        /// <summary>
+        /// Gets whether the latest DJAuto run belongs to this or the previous frame, so that the Scene view does not keep
+        /// drawing the touches of a slide DJAuto has stopped playing.
+        /// </summary>
+        /// <param name="info">The captured state.</param>
+        /// <returns><see langword="true"/> when the touches are current.</returns>
+        private static bool IsLatestDJAutoRunCurrent(SlideDebugInfo info)
+        {
+            return info.DJAutoTouchFrame >= 0 && Time.frameCount - info.DJAutoTouchFrame <= 1;
         }
 
         /// <summary>Draws the connection slide information.</summary>

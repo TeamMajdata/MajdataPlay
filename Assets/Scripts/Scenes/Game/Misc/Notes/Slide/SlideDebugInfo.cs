@@ -1,4 +1,5 @@
 using MajdataPlay.IO;
+using MajdataPlay.Settings;
 using System;
 using UnityEngine;
 
@@ -7,8 +8,8 @@ namespace MajdataPlay.Scenes.Game.Notes.Slide
 {
     /// <summary>
     /// The runtime state of a slide captured for the slide inspector: every judge queue as it was built and how many of
-    /// its areas the player has passed, together with the judgment state the slide keeps protected. Capturing allocates,
-    /// so only editor tools capture it.
+    /// its areas the player has passed, together with the judgment state the slide keeps protected and the touches DJAuto
+    /// simulated in its latest run. Capturing allocates, so only editor tools capture it.
     /// </summary>
     internal sealed class SlideDebugInfo
     {
@@ -34,6 +35,16 @@ namespace MajdataPlay.Scenes.Game.Notes.Slide
         public int HiddenArrowCount { get; init; }
         /// <summary>Gets the judge queues: one for an ordinary slide, the left, centre and right lanes for a wifi slide.</summary>
         public QueueInfo[] Queues { get; init; } = Array.Empty<QueueInfo>();
+        /// <summary>Gets the autoplay mode of the slide.</summary>
+        public AutoplayModeOption AutoplayMode { get; init; }
+        /// <summary>Gets whether the autoplay mode is one of the DJAuto modes, which simulate touches on the touch panel.</summary>
+        public bool IsDJAutoEnabled { get; init; }
+        /// <summary>Gets how far along the path, from 0 to 1, DJAuto has touched.</summary>
+        public float DJAutoplayProgress { get; init; }
+        /// <summary>Gets the frame of the latest DJAuto run, or -1 when DJAuto has not run; only the Editor records it.</summary>
+        public int DJAutoTouchFrame { get; init; } = -1;
+        /// <summary>Gets the touches DJAuto simulated in its latest run, in the order it pressed them; only the Editor records them.</summary>
+        public DJAutoTouchInfo[] DJAutoTouches { get; init; } = Array.Empty<DJAutoTouchInfo>();
 
         /// <summary>One judge queue of a slide.</summary>
         internal sealed class QueueInfo
@@ -79,6 +90,22 @@ namespace MajdataPlay.Scenes.Game.Notes.Slide
             public int ArrowProgressWhenOn { get; init; }
             /// <summary>Gets how many arrows are hidden once the area is finished.</summary>
             public int ArrowProgressWhenFinished { get; init; }
+        }
+
+        /// <summary>One touch DJAuto simulated on the touch panel.</summary>
+        internal readonly struct DJAutoTouchInfo
+        {
+            /// <summary>Gets the world position of the touch centre.</summary>
+            public Vector3 Position { get; init; }
+            /// <summary>Gets the touch radius DJAuto asked for.</summary>
+            public float Radius { get; init; }
+            /// <summary>
+            /// Gets the radius of the outermost ring of points the touch panel sampling reads, which rounds
+            /// <see cref="Radius"/> up to whole sampling segments.
+            /// </summary>
+            public float SampledRadius { get; init; }
+            /// <summary>Gets the sensors the touch pressed.</summary>
+            public SensorArea[] Sensors { get; init; }
         }
     }
 }

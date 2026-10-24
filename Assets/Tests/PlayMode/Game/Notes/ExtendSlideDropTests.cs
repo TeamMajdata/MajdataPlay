@@ -238,6 +238,53 @@ namespace MajdataPlay.Tests.Game.Notes.PlayMode
             Assert.That(after.Queues[0].PassedCount, Is.EqualTo(3));
             Assert.That(after.IsJudged, Is.True);
             Assert.That(after.JudgeDiffMSec, Is.LessThan(0f), "Finishing before the judge timing is fast");
+            Assert.That(after.IsDJAutoEnabled, Is.False);
+            Assert.That(after.DJAutoTouchFrame, Is.EqualTo(-1));
+            Assert.That(after.DJAutoTouches, Is.Empty);
+        }
+
+        /// <summary>
+        /// Checks that the state captured for the slide inspector holds the touches of the latest DJAuto run: every touch
+        /// lies on the path no further than one frame past the DJAuto progress, and reports its radius rounded up to whole
+        /// sampling rings.
+        /// </summary>
+        /// <returns>The test coroutine.</returns>
+        [UnityTest]
+        public IEnumerator CaptureDebugInfo_RecordsTheLatestDJAutoTouches()
+        {
+            _rig.Controller.SetMods(AutoplayModeOption.DJAuto_TouchPanel_First);
+            var slide = CreateSlide(ThreeAreas(), SlideOkType.StraightL, conditionalLastArrow: false);
+            _rig.RegisterSlides((slide, 0.3f));
+            yield return null;
+
+            var before = slide.CaptureDebugInfo();
+            Assert.That(before.IsDJAutoEnabled, Is.True);
+            Assert.That(before.AutoplayMode, Is.EqualTo(AutoplayModeOption.DJAuto_TouchPanel_First));
+            Assert.That(before.DJAutoTouchFrame, Is.EqualTo(-1), "DJAuto does not run before the star starts");
+            Assert.That(before.DJAutoTouches, Is.Empty);
+
+            for (var frame = 0; frame <= 30; frame++)
+            {
+                _rig.Step(1f + (frame / 60f));
+            }
+            var info = slide.CaptureDebugInfo();
+
+            Assert.That(info.DJAutoTouchFrame, Is.EqualTo(Time.frameCount));
+            Assert.That(info.DJAutoplayProgress, Is.EqualTo(0.5f).Within(0.01f));
+            Assert.That(info.DJAutoTouches, Is.Not.Empty);
+            var start = NoteHelper.GetTapPosition(1, 4.8f);
+            var end = NoteHelper.GetTapPosition(3, 4.8f);
+            var path = end - start;
+            foreach (var touch in info.DJAutoTouches)
+            {
+                Assert.That(touch.Radius, Is.EqualTo(0.3f));
+                Assert.That(touch.SampledRadius, Is.EqualTo(0.375f).Within(1e-6f), "0.3 rounds up to three rings of 0.125");
+                var offset = touch.Position - start;
+                var along = Vector3.Dot(offset, path) / path.sqrMagnitude;
+                // DJAuto 在进度越过当前进度后还会再按一次，然后才把进度截断，所以最后一个触摸最多超前一帧的进度
+                Assert.That(along, Is.InRange(0f, info.DJAutoplayProgress + (1f / 60f)));
+                Assert.That(Vector3.Distance(touch.Position, start + (path * along)), Is.LessThan(1e-4f), "The touch lies on the path");
+            }
         }
 
         /// <summary>Checks that the captured state names the predefined table and its constants.</summary>
