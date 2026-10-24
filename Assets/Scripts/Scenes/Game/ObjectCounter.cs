@@ -439,16 +439,7 @@ namespace MajdataPlay.Scenes.Game
                 }
                 if(_isJudgeTimingGaugeEnabled)
                 {
-                    var diffSum = 0f;
-                    for (var i = 0; i < _gaugeScaleBindings.Length; i++)
-                    {
-                        ref var binding = ref _gaugeScaleBindings[i];
-                        diffSum += binding.DiffMSec;
-                    }
-                    var sampleCount = Mathf.Min(_judgeTimingGaugeScaleCount, _noteJudgeDiffList.Count);
-                    // Before the first tap or hold judgement there are no samples; keep the cursor centred
-                    // instead of dividing by zero (0 / 0 is NaN).
-                    var diffAvg = sampleCount > 0 ? diffSum / sampleCount : 0f;
+                    var diffAvg = GetJudgeTimingGaugeAverage();
                     var percent = Mathf.Clamp(diffAvg / 150f, -1, 1);
                     var posX = 282.5f * percent;
                     _judgeTimingGaugeCursor.anchoredPosition = new Vector2(posX, -30);
@@ -584,6 +575,81 @@ namespace MajdataPlay.Scenes.Game
             }
 
             return JudgeDetail.UnpackJudgeRecord(new JudgeInfo(_dictTotalJudgedCount));
+        }
+        /// <summary>
+        /// Captures the counters, scores, combos, timing samples and display options of the counter for the object
+        /// counter inspector.
+        /// </summary>
+        /// <returns>A new snapshot; capturing allocates, so only editor tools call this.</returns>
+        internal ObjectCounterDebugInfo CaptureDebugInfo()
+        {
+            var isDanLifeEnabled = _gameInfo is not null && _gameInfo.IsDanLifeEnabled;
+
+            return new ObjectCounterDebugInfo()
+            {
+                TapSum = TapSum,
+                HoldSum = HoldSum,
+                SlideSum = SlideSum,
+                TouchSum = TouchSum,
+                BreakSum = BreakSum,
+                NoteSum = NoteSum,
+                AllFinished = AllFinished,
+                JudgeStats = JudgeStats,
+                AccurateStats = AccurateStats,
+                TotalNoteBaseScore = TotalNoteBaseScore,
+                TotalNoteExtraScore = TotalNoteExtraScore,
+                CurrentNoteBaseScore = CurrentNoteBaseScore,
+                CurrentNoteExtraScore = CurrentNoteExtraScore,
+                CurrentNoteExtraScoreClassic = CurrentNoteExtraScoreClassic,
+                LostNoteBaseScore = LostNoteBaseScore,
+                LostNoteExtraScore = LostNoteExtraScore,
+                LostNoteExtraScoreClassic = LostNoteExtraScoreClassic,
+                Combo = _combo,
+                PerfectCombo = _pCombo,
+                CriticalPerfectCombo = _cPCombo,
+                TotalDXScore = _totalDXScore,
+                LostDXScore = _lostDXScore,
+                LastJudgeDiffMSec = _lastJudgeDiff,
+                DiffDisplayTimer = _diffTimer,
+                NoteJudgeDiffsMSec = _noteJudgeDiffList.ToArray(),
+                IsJudgeTimingGaugeEnabled = _isJudgeTimingGaugeEnabled,
+                JudgeTimingGaugeAverageMSec = GetJudgeTimingGaugeAverage(),
+                JudgeTimingGaugeScaleCount = _judgeTimingGaugeScaleCount,
+                NoteFastLateDisplayOption = _noteFastLateDisplayOption,
+                BreakFastLateDisplayOption = _breakFastLateDisplayOption,
+                CenterInfoOption = _centerInfoDisplayOption,
+                SecondaryInfoOption = _secondaryInfoDisplayOption,
+                SubScreenInfoOption = _subScreenInfoDisplayOption,
+                TopInfoOption = MajEnv.Settings.Game.TopInfo,
+                IsDanLifeEnabled = isDanLifeEnabled,
+                CurrentHP = isDanLifeEnabled ? _gameInfo.CurrentHP : 0,
+                MaxHP = isDanLifeEnabled ? _gameInfo.MaxHP : 0,
+                TapGradeCounts = (int[])_judgedTapCount.Clone(),
+                HoldGradeCounts = (int[])_judgedHoldCount.Clone(),
+                TouchHoldGradeCounts = (int[])_judgedTouchHoldCount.Clone(),
+                TouchGradeCounts = (int[])_judgedTouchCount.Clone(),
+                SlideGradeCounts = (int[])_judgedSlideCount.Clone(),
+                BreakGradeCounts = (int[])_judgedBreakCount.Clone(),
+                TotalGradeCounts = (int[])_totalJudgedCount.Clone()
+            };
+        }
+        /// <summary>
+        /// Gets the average judge difference of the latest taps and holds that the judge timing gauge shows, one for each
+        /// of its scales.
+        /// </summary>
+        /// <returns>The average in milliseconds, or 0 before the first tap or hold is judged.</returns>
+        float GetJudgeTimingGaugeAverage()
+        {
+            var diffSum = 0f;
+            for (var i = 0; i < _gaugeScaleBindings.Length; i++)
+            {
+                ref var binding = ref _gaugeScaleBindings[i];
+                diffSum += binding.DiffMSec;
+            }
+            var sampleCount = Mathf.Min(_judgeTimingGaugeScaleCount, _noteJudgeDiffList.Count);
+            // Before the first tap or hold judgement there are no samples; keep the cursor centred
+            // instead of dividing by zero (0 / 0 is NaN).
+            return sampleCount > 0 ? diffSum / sampleCount : 0f;
         }
 
         private void UpdateOutput()
