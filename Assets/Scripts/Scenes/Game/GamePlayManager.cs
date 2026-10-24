@@ -141,30 +141,15 @@ namespace MajdataPlay.Scenes.Game
         float _audioStartTime = -114514;
         int _chartRotation = 0;
 
-        ButtonZone[] _buttonKeyFor2367 = new ButtonZone[4];
-        ButtonZone[] _buttonKeyFor3456 = new ButtonZone[4];
-        ButtonZone[] _buttonKeyFor1278 = new ButtonZone[4];
-        SensorArea[] _sensorAreaFor2367 = new SensorArea[4];
-        SensorArea[] _sensorAreaFor3456 = new SensorArea[4];
-        SensorArea[] _sensorAreaFor1278 = new SensorArea[4];
+        /// <summary>The controller that owns gameplay shortcut input and hold state.</summary>
+        private FnController _fnController = null!;
 
         Accurate _historyAccurate;
 
-        bool _isTrackSkipAvailable = false;
-        bool _isFastRetryAvailable = false;
-        bool _isFastPracticeAvailable = false;
         bool _isEnforceFastRetry = false;
         bool _isManualStartGame = false;
         float? _allNotesFinishedTiming = null;
         EnforceGameFailureCondition _enforceGameFailureCondition = EnforceGameFailureCondition.Disabled;
-        GameplaySubScreenClickBehaviorOption _gameplaySubScreenClickBehavior = GameOptions.DEFAULT_GameplaySubScreenClickBehavior;
-
-        // Key timers
-        float _2367PressTime = 0;
-        float _3456PressTime = 0;
-        float _1278PressTime = 0;
-        float _p1PressTime = 0;
-        bool _isFnKeyInputArmed = false;
 
         float _devicePlaybackOffset = 0f;
 
@@ -231,11 +216,7 @@ namespace MajdataPlay.Scenes.Game
             _gameInfo = Majdata<GameInfo>.Instance!;
             _gameSettings = MajEnv.Settings;
             _enforceGameFailureCondition = _gameSettings.Game.EnforceGameFailure;
-            _gameplaySubScreenClickBehavior = _gameSettings.Game.GameplaySubScreenClickBehavior;
             _isEnforceFastRetry = (int)_enforceGameFailureCondition % 2 == 0;
-            _isTrackSkipAvailable = _gameSettings.Game.TrackSkip;
-            _isFastRetryAvailable = _gameSettings.Game.FastRetry;
-            _isFastPracticeAvailable = _gameSettings.Game.FastPractice;
             _isManualStartGame = _gameSettings.Game.ManualStartGame;
             DefaultMaterial = RuntimeDatabase.Note.DefaultMaterial;
             BreakMaterial = RuntimeDatabase.Note.BreakMaterial;
@@ -300,6 +281,13 @@ namespace MajdataPlay.Scenes.Game
             MajInstances.BackgroundVideo.Hide();
 
             _chartInfoDisplayer.SetMetadata(_songDetail, _gameInfo.CurrentLevel);
+
+            if (!TryGetComponent<FnController>(out var fnController))
+            {
+                fnController = gameObject.AddComponent<FnController>();
+            }
+            _fnController = fnController;
+            _fnController.Initialize(this);
         }
         void Start()
         {
@@ -320,130 +308,12 @@ namespace MajdataPlay.Scenes.Game
             {
                 case GameplayScreenRotationAngleOption._90:
                     _mainDisplayer.rotation = Quaternion.Euler(0, 0, -90);
-                    _buttonKeyFor2367[0] = ButtonZone.A4;
-                    _buttonKeyFor2367[1] = ButtonZone.A5;
-                    _buttonKeyFor2367[2] = ButtonZone.A8;
-                    _buttonKeyFor2367[3] = ButtonZone.A1;
-
-                    _buttonKeyFor3456[0] = ButtonZone.A5;
-                    _buttonKeyFor3456[1] = ButtonZone.A6;
-                    _buttonKeyFor3456[2] = ButtonZone.A7;
-                    _buttonKeyFor3456[3] = ButtonZone.A8;
-
-                    _sensorAreaFor2367[0] = SensorArea.A4;
-                    _sensorAreaFor2367[1] = SensorArea.A5;
-                    _sensorAreaFor2367[2] = SensorArea.A8;
-                    _sensorAreaFor2367[3] = SensorArea.A1;
-
-                    _sensorAreaFor3456[0] = SensorArea.A5;
-                    _sensorAreaFor3456[1] = SensorArea.A6;
-                    _sensorAreaFor3456[2] = SensorArea.A7;
-                    _sensorAreaFor3456[3] = SensorArea.A8;
-
-                    _buttonKeyFor1278[0] = ButtonZone.A1;
-                    _buttonKeyFor1278[1] = ButtonZone.A2;
-                    _buttonKeyFor1278[2] = ButtonZone.A3;
-                    _buttonKeyFor1278[3] = ButtonZone.A4;
-
-                    _sensorAreaFor1278[0] = SensorArea.A1;
-                    _sensorAreaFor1278[1] = SensorArea.A2;
-                    _sensorAreaFor1278[2] = SensorArea.A3;
-                    _sensorAreaFor1278[3] = SensorArea.A4;
                     break;
                 case GameplayScreenRotationAngleOption._180:
                     _mainDisplayer.rotation = Quaternion.Euler(0, 0, -180);
-                    _buttonKeyFor2367[0] = ButtonZone.A6;
-                    _buttonKeyFor2367[1] = ButtonZone.A7;
-                    _buttonKeyFor2367[2] = ButtonZone.A2;
-                    _buttonKeyFor2367[3] = ButtonZone.A3;
-
-                    _buttonKeyFor3456[0] = ButtonZone.A7;
-                    _buttonKeyFor3456[1] = ButtonZone.A8;
-                    _buttonKeyFor3456[2] = ButtonZone.A1;
-                    _buttonKeyFor3456[3] = ButtonZone.A2;
-
-                    _sensorAreaFor2367[0] = SensorArea.A6;
-                    _sensorAreaFor2367[1] = SensorArea.A7;
-                    _sensorAreaFor2367[2] = SensorArea.A2;
-                    _sensorAreaFor2367[3] = SensorArea.A3;
-
-                    _sensorAreaFor3456[0] = SensorArea.A7;
-                    _sensorAreaFor3456[1] = SensorArea.A8;
-                    _sensorAreaFor3456[2] = SensorArea.A1;
-                    _sensorAreaFor3456[3] = SensorArea.A2;
-
-                    _buttonKeyFor1278[0] = ButtonZone.A3;
-                    _buttonKeyFor1278[1] = ButtonZone.A4;
-                    _buttonKeyFor1278[2] = ButtonZone.A5;
-                    _buttonKeyFor1278[3] = ButtonZone.A6;
-
-                    _sensorAreaFor1278[0] = SensorArea.A3;
-                    _sensorAreaFor1278[1] = SensorArea.A4;
-                    _sensorAreaFor1278[2] = SensorArea.A5;
-                    _sensorAreaFor1278[3] = SensorArea.A6;
                     break;
                 case GameplayScreenRotationAngleOption._270:
                     _mainDisplayer.rotation = Quaternion.Euler(0, 0, -270);
-                    _buttonKeyFor2367[0] = ButtonZone.A8;
-                    _buttonKeyFor2367[1] = ButtonZone.A1;
-                    _buttonKeyFor2367[2] = ButtonZone.A4;
-                    _buttonKeyFor2367[3] = ButtonZone.A5;
-
-                    _buttonKeyFor3456[0] = ButtonZone.A1;
-                    _buttonKeyFor3456[1] = ButtonZone.A2;
-                    _buttonKeyFor3456[2] = ButtonZone.A3;
-                    _buttonKeyFor3456[3] = ButtonZone.A4;
-
-                    _sensorAreaFor2367[0] = SensorArea.A8;
-                    _sensorAreaFor2367[1] = SensorArea.A1;
-                    _sensorAreaFor2367[2] = SensorArea.A4;
-                    _sensorAreaFor2367[3] = SensorArea.A5;
-
-                    _sensorAreaFor3456[0] = SensorArea.A1;
-                    _sensorAreaFor3456[1] = SensorArea.A2;
-                    _sensorAreaFor3456[2] = SensorArea.A3;
-                    _sensorAreaFor3456[3] = SensorArea.A4;
-
-                    _buttonKeyFor1278[0] = ButtonZone.A5;
-                    _buttonKeyFor1278[1] = ButtonZone.A6;
-                    _buttonKeyFor1278[2] = ButtonZone.A7;
-                    _buttonKeyFor1278[3] = ButtonZone.A8;
-
-                    _sensorAreaFor1278[0] = SensorArea.A5;
-                    _sensorAreaFor1278[1] = SensorArea.A6;
-                    _sensorAreaFor1278[2] = SensorArea.A7;
-                    _sensorAreaFor1278[3] = SensorArea.A8;
-                    break;
-                default:
-                    _buttonKeyFor2367[0] = ButtonZone.A2;
-                    _buttonKeyFor2367[1] = ButtonZone.A3;
-                    _buttonKeyFor2367[2] = ButtonZone.A6;
-                    _buttonKeyFor2367[3] = ButtonZone.A7;
-
-                    _buttonKeyFor3456[0] = ButtonZone.A3;
-                    _buttonKeyFor3456[1] = ButtonZone.A4;
-                    _buttonKeyFor3456[2] = ButtonZone.A5;
-                    _buttonKeyFor3456[3] = ButtonZone.A6;
-
-                    _sensorAreaFor2367[0] = SensorArea.A2;
-                    _sensorAreaFor2367[1] = SensorArea.A3;
-                    _sensorAreaFor2367[2] = SensorArea.A6;
-                    _sensorAreaFor2367[3] = SensorArea.A7;
-
-                    _sensorAreaFor3456[0] = SensorArea.A3;
-                    _sensorAreaFor3456[1] = SensorArea.A4;
-                    _sensorAreaFor3456[2] = SensorArea.A5;
-                    _sensorAreaFor3456[3] = SensorArea.A6;
-
-                    _buttonKeyFor1278[0] = ButtonZone.A1;
-                    _buttonKeyFor1278[1] = ButtonZone.A2;
-                    _buttonKeyFor1278[2] = ButtonZone.A7;
-                    _buttonKeyFor1278[3] = ButtonZone.A8;
-
-                    _sensorAreaFor1278[0] = SensorArea.A1;
-                    _sensorAreaFor1278[1] = SensorArea.A2;
-                    _sensorAreaFor1278[2] = SensorArea.A7;
-                    _sensorAreaFor1278[3] = SensorArea.A8;
                     break;
             }
 
@@ -1188,7 +1058,7 @@ namespace MajdataPlay.Scenes.Game
             using (UnityProfiler.Create("GamePlayManager.OnUpdate"))
             {
                 NoteManagerUpdate();
-                FnKeyStateUpdate();
+                _fnController.OnUpdate();
             }
         }
         internal void OnLateUpdate()
@@ -1317,196 +1187,6 @@ namespace MajdataPlay.Scenes.Game
                     _noteManager.OnUpdate();
                     break;
             }
-        }
-        void FnKeyStateUpdate()
-        {
-            using (UnityProfiler.Create("GamePlayManager.FnKeyStateUpdate"))
-            {
-                if (State is not (GamePlayStatus.Running or GamePlayStatus.Blocking or GamePlayStatus.WaitForEnd))
-                {
-                    _isFnKeyInputArmed = false;
-                    ResetFnKeyPressTimes();
-                    return;
-                }
-                if (!_isFnKeyInputArmed)
-                {
-                    // Do not inherit a shortcut that was pressed while entering this Game scene.
-                    ResetFnKeyPressTimes();
-                    if (IsFnKeyInputReleased())
-                    {
-                        _isFnKeyInputArmed = true;
-                    }
-                    return;
-                }
-                var _inner_2367 = InputManager.CheckSensorStatus(_sensorAreaFor2367[0], SwitchStatus.On) &&
-                                   InputManager.CheckSensorStatus(_sensorAreaFor2367[1], SwitchStatus.On) &&
-                                   InputManager.CheckSensorStatus(_sensorAreaFor2367[2], SwitchStatus.On) &&
-                                   InputManager.CheckSensorStatus(_sensorAreaFor2367[3], SwitchStatus.On);
-                var _inner_3456 = InputManager.CheckSensorStatus(_sensorAreaFor3456[0], SwitchStatus.On) &&
-                                    InputManager.CheckSensorStatus(_sensorAreaFor3456[1], SwitchStatus.On) &&
-                                    InputManager.CheckSensorStatus(_sensorAreaFor3456[2], SwitchStatus.On) &&
-                                    InputManager.CheckSensorStatus(_sensorAreaFor3456[3], SwitchStatus.On);
-
-                var _outter_2367 = InputManager.CheckButtonStatus(_buttonKeyFor2367[0], SwitchStatus.On) &&
-                                    InputManager.CheckButtonStatus(_buttonKeyFor2367[1], SwitchStatus.On) &&
-                                    InputManager.CheckButtonStatus(_buttonKeyFor2367[2], SwitchStatus.On) &&
-                                    InputManager.CheckButtonStatus(_buttonKeyFor2367[3], SwitchStatus.On);
-                var _outter_3456 = InputManager.CheckButtonStatus(_buttonKeyFor3456[0], SwitchStatus.On) &&
-                                    InputManager.CheckButtonStatus(_buttonKeyFor3456[1], SwitchStatus.On) &&
-                                    InputManager.CheckButtonStatus(_buttonKeyFor3456[2], SwitchStatus.On) &&
-                                    InputManager.CheckButtonStatus(_buttonKeyFor3456[3], SwitchStatus.On);
-                
-                var _inner_1278 = InputManager.CheckSensorStatus(_sensorAreaFor1278[0], SwitchStatus.On) &&
-                                   InputManager.CheckSensorStatus(_sensorAreaFor1278[1], SwitchStatus.On) &&
-                                   InputManager.CheckSensorStatus(_sensorAreaFor1278[2], SwitchStatus.On) &&
-                                   InputManager.CheckSensorStatus(_sensorAreaFor1278[3], SwitchStatus.On);
-                var _outter_1278 = InputManager.CheckButtonStatus(_buttonKeyFor1278[0], SwitchStatus.On) &&
-                                    InputManager.CheckButtonStatus(_buttonKeyFor1278[1], SwitchStatus.On) &&
-                                    InputManager.CheckButtonStatus(_buttonKeyFor1278[2], SwitchStatus.On) &&
-                                    InputManager.CheckButtonStatus(_buttonKeyFor1278[3], SwitchStatus.On);
-#if UNITY_ANDROID || UNITY_IOS
-                var _2367 = (_inner_2367 || _outter_2367) && _isTrackSkipAvailable;
-                var _3456 = (_inner_3456 || _outter_3456) && _isFastRetryAvailable;
-                var _1278 = (_inner_1278 || _outter_1278) && _isFastPracticeAvailable;
-#else
-                var _2367 = _outter_2367 && _isTrackSkipAvailable;
-                var _3456 = _outter_3456 && _isFastRetryAvailable;
-                var _1278 = _outter_1278 && _isFastPracticeAvailable;
-#endif
-                var _p1Skip = InputManager.CheckButtonStatus(ButtonZone.P1, SwitchStatus.On);
-                if (_p1Skip)
-                {
-                    _p1PressTime += MajTimeline.DeltaTime;
-                }
-                else if (_2367)
-                {
-                    _2367PressTime += MajTimeline.DeltaTime;
-                    _3456PressTime = 0;
-                    _1278PressTime = 0;
-                }
-                else if (_3456)
-                {
-                    _3456PressTime += MajTimeline.DeltaTime;
-                    _2367PressTime = 0;
-                    _1278PressTime = 0;
-                }
-                else if (_1278)
-                {
-                    _1278PressTime += MajTimeline.DeltaTime;
-                    _2367PressTime = 0;
-                    _3456PressTime = 0;
-                }
-                else
-                {
-                    _3456PressTime = 0;
-                    _2367PressTime = 0;
-                    _1278PressTime = 0;
-                    _p1PressTime = 0;
-                }
-
-                if (_p1PressTime != 0)
-                {
-                    switch(_gameplaySubScreenClickBehavior)
-                    {
-                        case GameplaySubScreenClickBehaviorOption.TrackSkip:
-                            goto ON_TRIGGER_TRACK_SKIP;
-                        case GameplaySubScreenClickBehaviorOption.FastRetry:
-                            goto ON_TRIGGER_FAST_RETRY;
-                        case GameplaySubScreenClickBehaviorOption.TrackSkip_1_Sec_Delay:
-                            if (_p1PressTime >= 1f)
-                            {
-                                goto ON_TRIGGER_TRACK_SKIP;
-                            }
-                            break;
-                        case GameplaySubScreenClickBehaviorOption.FastRetry_1_Sec_Delay:
-                            if (_p1PressTime >= 1f)
-                            {
-                                goto ON_TRIGGER_FAST_RETRY;
-                            }
-                            break;
-                        ON_TRIGGER_TRACK_SKIP:
-                            if (IsPracticeMode)
-                            {
-                                var info = new GameInfo(GameMode.Practice, _gameInfo.Charts, _gameInfo.Levels, 114514);
-                                info.TimeRange = _gameInfo.TimeRange;
-                                Majdata<GameInfo>.Instance = info;
-                                ReturnTo("Practice").Forget();
-                            }
-                            else
-                            {
-                                TrackSkipTo().Forget();
-                            }
-                            break;
-                        ON_TRIGGER_FAST_RETRY:
-                            FastRetry().Forget();
-                            break;
-                    }
-                }
-                else if (_2367PressTime >= 0.5f && _isTrackSkipAvailable)
-                {
-                    if (IsPracticeMode)
-                    {
-                        var info = new GameInfo(GameMode.Practice, _gameInfo.Charts, _gameInfo.Levels, 114514);
-                        info.TimeRange = _gameInfo.TimeRange;
-                        Majdata<GameInfo>.Instance = info;
-                        TrackSkipTo("Practice", 2000).Forget();
-                    }
-                    else
-                    {
-                        TrackSkipTo().Forget();
-                    }
-                }
-                else if (_3456PressTime >= 0.5f && _isFastRetryAvailable)
-                {
-                    FastRetry().Forget();
-                }
-                else if (_1278PressTime >= 0.5f && _isFastPracticeAvailable)
-                {
-                    var startTime = Math.Max(ThisFrameSec - 5f, 0f);
-                    var endTime = Math.Min(ThisFrameSec + 10f, (float)_audioSample.Length.TotalSeconds);
-
-                    var info = new GameInfo(GameMode.Practice, _gameInfo.Charts, _gameInfo.Levels, 114514);
-                    info.TimeRange = new Range<double>(startTime, endTime);
-                    Majdata<GameInfo>.Instance = info;
-
-                    State = GamePlayStatus.Ended;
-                    _cts.Cancel();
-                    _audioSample?.Stop();
-                    ExitToScene("Practice", 0).Forget();
-                }
-            }
-        }
-        void ResetFnKeyPressTimes()
-        {
-            _3456PressTime = 0;
-            _2367PressTime = 0;
-            _1278PressTime = 0;
-            _p1PressTime = 0;
-        }
-        bool IsFnKeyInputReleased()
-        {
-            if (InputManager.CheckButtonStatus(ButtonZone.P1, SwitchStatus.On))
-            {
-                return false;
-            }
-            for (var i = 0; i < _buttonKeyFor2367.Length; i++)
-            {
-                if (InputManager.CheckButtonStatus(_buttonKeyFor2367[i], SwitchStatus.On) ||
-                    InputManager.CheckButtonStatus(_buttonKeyFor3456[i], SwitchStatus.On) ||
-                    InputManager.CheckButtonStatus(_buttonKeyFor1278[i], SwitchStatus.On))
-                {
-                    return false;
-                }
-#if UNITY_ANDROID || UNITY_IOS
-                if (InputManager.CheckSensorStatus(_sensorAreaFor2367[i], SwitchStatus.On) ||
-                    InputManager.CheckSensorStatus(_sensorAreaFor3456[i], SwitchStatus.On) ||
-                    InputManager.CheckSensorStatus(_sensorAreaFor1278[i], SwitchStatus.On))
-                {
-                    return false;
-                }
-#endif
-            }
-            return true;
         }
         void EnforceGameFailureLateUpdate()
         {
@@ -1748,10 +1428,14 @@ namespace MajdataPlay.Scenes.Game
                 MajInstances.SceneSwitcher.SwitchScene("Result");
             }
         }
-        async UniTaskVoid FastRetry()
+        /// <summary>Stops the current run and reloads the gameplay scene after recording has finished.</summary>
+        /// <returns>The asynchronous gameplay restart.</returns>
+        internal async UniTaskVoid FastRetry()
         {
             if (State == GamePlayStatus.Ended)
+            {
                 return;
+            }
             State = GamePlayStatus.Ended;
             var wait4Recorder = RecordHelper.StopRecordAsync();
             while (!wait4Recorder.IsCompleted)
@@ -1775,6 +1459,54 @@ namespace MajdataPlay.Scenes.Game
             _audioSample?.Stop();
             PlayGameOverEffect();
             EndGame(5000, targetScene: "TotalResult").Forget();
+        }
+
+        /// <summary>Skips the current track or returns to the current practice selection.</summary>
+        /// <param name="quickReturn">Whether practice mode uses the shorter return transition.</param>
+        /// <returns>The asynchronous transition to the song list or practice selection.</returns>
+        internal UniTaskVoid SkipTrack(bool quickReturn = false)
+        {
+            if (State == GamePlayStatus.Ended)
+            {
+                return default;
+            }
+            if (!IsPracticeMode)
+            {
+                return TrackSkipTo();
+            }
+
+            var info = new GameInfo(GameMode.Practice, _gameInfo.Charts, _gameInfo.Levels, 114514)
+            {
+                TimeRange = _gameInfo.TimeRange,
+            };
+            Majdata<GameInfo>.Instance = info;
+            if (quickReturn)
+            {
+                return ReturnTo("Practice");
+            }
+            return TrackSkipTo("Practice", 2000);
+        }
+
+        /// <summary>Opens practice selection around the current playback time and stops the current run.</summary>
+        internal void FastPractice()
+        {
+            if (State == GamePlayStatus.Ended)
+            {
+                return;
+            }
+
+            var startTime = Math.Max(ThisFrameSec - 5f, 0f);
+            var endTime = Math.Min(ThisFrameSec + 10f, (float)_audioSample!.Length.TotalSeconds);
+            var info = new GameInfo(GameMode.Practice, _gameInfo.Charts, _gameInfo.Levels, 114514)
+            {
+                TimeRange = new Range<double>(startTime, endTime),
+            };
+            Majdata<GameInfo>.Instance = info;
+
+            State = GamePlayStatus.Ended;
+            _cts.Cancel();
+            _audioSample?.Stop();
+            ExitToScene("Practice", 0).Forget();
         }
 
         async UniTaskVoid ReturnTo(string sceneName = "List")

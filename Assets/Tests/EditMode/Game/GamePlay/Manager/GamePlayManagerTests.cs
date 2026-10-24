@@ -1,3 +1,4 @@
+using Cysharp.Threading.Tasks;
 using System;
 using System.Collections.Generic;
 using System.Reflection;
@@ -16,7 +17,7 @@ namespace MajdataPlay.Tests.Game.GamePlay.Manager
 {
     /// <summary>
     /// Checks the parts of <see cref="GamePlayManager"/> that work without the gameplay scene: mode flags, dan mod
-    /// overrides, shortcut key bookkeeping, enforced failure thresholds and the guards of the ending flows.
+    /// overrides, enforced failure thresholds and the guards of the ending flows.
     /// </summary>
     public class GamePlayManagerTests
     {
@@ -203,48 +204,6 @@ namespace MajdataPlay.Tests.Game.GamePlay.Manager
             Assert.That(_manager.ModInfo.PlaybackSpeed, Is.EqualTo(2f));
         }
 
-        /// <summary>Checks that shortcut timers are reset and input is disarmed while the chart is not running.</summary>
-        [Test]
-        public void FnKeyStateUpdate_ResetsWhileNotRunning()
-        {
-            PrivateMember.SetField(_manager, "_2367PressTime", 1f);
-            PrivateMember.SetField(_manager, "_3456PressTime", 1f);
-            PrivateMember.SetField(_manager, "_1278PressTime", 1f);
-            PrivateMember.SetField(_manager, "_p1PressTime", 1f);
-            PrivateMember.SetField(_manager, "_isFnKeyInputArmed", true);
-
-            PrivateMember.Invoke(_manager, "FnKeyStateUpdate");
-
-            AssertPressTimesAreZero();
-            Assert.That(PrivateMember.GetField<bool>(_manager, "_isFnKeyInputArmed"), Is.False);
-        }
-
-        /// <summary>Checks that running arms the shortcuts once every key is released and then keeps idle timers at zero.</summary>
-        [Test]
-        public void FnKeyStateUpdate_ArmsAfterTheKeysAreReleased()
-        {
-            PrivateMember.SetProperty(_manager, nameof(GamePlayManager.State), GamePlayStatus.Running);
-            PrivateMember.SetField(_manager, "_2367PressTime", 1f);
-
-            PrivateMember.Invoke(_manager, "FnKeyStateUpdate");
-
-            Assert.That(PrivateMember.GetField<bool>(_manager, "_isFnKeyInputArmed"), Is.True);
-            AssertPressTimesAreZero();
-
-            PrivateMember.SetField(_manager, "_3456PressTime", 0.25f);
-            PrivateMember.Invoke(_manager, "FnKeyStateUpdate");
-
-            AssertPressTimesAreZero();
-            Assert.That(_manager.State, Is.EqualTo(GamePlayStatus.Running));
-        }
-
-        /// <summary>Checks that the shortcut inputs are released when no button is held.</summary>
-        [Test]
-        public void IsFnKeyInputReleased_IsTrueWithoutPressedButtons()
-        {
-            Assert.That(PrivateMember.Invoke<bool>(_manager, "IsFnKeyInputReleased"), Is.True);
-        }
-
         /// <summary>Checks that enforced failure does nothing when disabled, not running or in dan and practice sessions.</summary>
         [Test]
         public void EnforceGameFailure_SkipsWhenNotApplicable()
@@ -399,7 +358,10 @@ namespace MajdataPlay.Tests.Game.GamePlay.Manager
 
             _manager.GameOver();
             _manager.EndGame();
-            PrivateMember.Invoke(_manager, "FastRetry");
+            _manager.FastRetry().Forget();
+            _manager.SkipTrack().Forget();
+            _manager.SkipTrack(quickReturn: true).Forget();
+            _manager.FastPractice();
             PrivateMember.Invoke(_manager, "NextRound4Practice", 0);
             PrivateMember.Invoke(_manager, "TrackSkipTo", "List", 0);
             PrivateMember.Invoke(_manager, "EnforceTrackSkipTo", "List");
@@ -448,15 +410,6 @@ namespace MajdataPlay.Tests.Game.GamePlay.Manager
                 DanInfo = new DanInfo { Mods = mods },
             };
             PrivateMember.SetField(_manager, "_gameInfo", info);
-        }
-
-        /// <summary>Asserts that every shortcut timer is zero.</summary>
-        private void AssertPressTimesAreZero()
-        {
-            Assert.That(PrivateMember.GetField<float>(_manager, "_2367PressTime"), Is.EqualTo(0f));
-            Assert.That(PrivateMember.GetField<float>(_manager, "_3456PressTime"), Is.EqualTo(0f));
-            Assert.That(PrivateMember.GetField<float>(_manager, "_1278PressTime"), Is.EqualTo(0f));
-            Assert.That(PrivateMember.GetField<float>(_manager, "_p1PressTime"), Is.EqualTo(0f));
         }
     }
 }
