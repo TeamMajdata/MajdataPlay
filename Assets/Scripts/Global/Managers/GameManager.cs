@@ -3,6 +3,7 @@ using Cysharp.Threading.Tasks;
 using MajdataPlay.Collections;
 using MajdataPlay.i18n;
 using MajdataPlay.IO;
+using MajdataPlay.Net.LanSync;
 using MajdataPlay.Rendering;
 using MajdataPlay.Scenes.Test;
 using MajdataPlay.Settings;
@@ -115,6 +116,8 @@ namespace MajdataPlay
             MajTimeline.TimeProvider = _builtInTimeProviders.Span[(int)_timer];
 #if UNITY_STANDALONE
             Screen.sleepTimeout = SleepTimeout.NeverSleep;
+            // LAN rooms only exist on desktop, the mobile builds have no network permission for it.
+            LanSyncService.Init(Settings.Game);
 #endif
 
             foreach (var arg in Environment.GetCommandLineArgs())
@@ -432,6 +435,9 @@ namespace MajdataPlay
             MajAndroidDisplayResolution.Restore();
 #endif
             Screen.sleepTimeout = SleepTimeout.SystemSetting;
+#if UNITY_STANDALONE
+            LanSyncService.Shutdown();
+#endif
             RequestSave(this);
             try
             {

@@ -5,6 +5,7 @@ using MajdataPlay.Editor;
 using MajdataPlay.Extensions;
 using MajdataPlay.IO;
 using MajdataPlay.Net;
+using MajdataPlay.Net.LanSync;
 using MajdataPlay.Numerics;
 using MajdataPlay.Recording;
 using MajdataPlay.Scenes.Game.Notes;
@@ -959,6 +960,140 @@ namespace MajdataPlay.Scenes.Game
             _noteEffectPool.Init();
             await UniTask.Yield();
         }
+        /// <summary>
+        /// Holds the loading screen until this machine is allowed to start the chart.
+        /// </summary>
+        /// <remarks>
+        /// This is the only place where the LAN room influences gameplay and it only decides <i>when</i>
+        /// the chart starts. The returned schedule is reported once the audio has started, so every
+        /// machine of a room can be compared and calibrated against the others.
+        /// </remarks>
+        async UniTask<ChartStartSchedule> WaitForChartStartAsync(CancellationToken token)
+        {
+            var gameOptions = _gameSettings.Game;
+            var role = LanSyncService.Role;
+            if (role == LanSyncRoleOption.Host)
+            {
+                if (_isManualStartGame)
+                {
+                    await WaitForStartButtonAsync(token);
+                }
+                var startDelayMs = Math.Max(0, gameOptions.LanSyncStartDelayMs);
+                var scheduledTicks = LanSyncService.AnnounceStart(BuildLanSyncSongIdentity(), startDelayMs);
+                if (scheduledTicks <= 0)
+                {
+                    return ChartStartSchedule.None;
+                }
+                _sceneSwitcher.SetLoadingText($"{"MAJTEXT_LANSYNC_WAITING_START".i18n()}...");
+                await WaitUntilScheduledStartAsync(scheduledTicks, gameOptions.LanSyncAdvanceMs, token);
+                return new ChartStartSchedule(scheduledTicks, LanSyncClock.NowTicks());
+            }
+            if (role == LanSyncRoleOption.Client)
+            {
+                _sceneSwitcher.SetLoadingText($"{"MAJTEXT_LANSYNC_WAITING_HOST".i18n()}...");
+                var timeoutMs = Math.Max(0, gameOptions.LanSyncWaitTimeoutMs);
+                var deadline = LanSyncClock.NowTicks() + LanSyncClock.MillisecondsToTicks(timeoutMs);
+                var scheduledTicks = 0L;
+                while (true)
+                {
+                    token.ThrowIfCancellationRequested();
+                    if (LanSyncService.TryTakeScheduledStart(out scheduledTicks))
+                    {
+                        break;
+                    }
+                    if (LanSyncClock.NowTicks() >= deadline)
+                    {
+                        MajDebug.LogWarning("[LanSync] no start signal from the host, falling back to the local start flow");
+                        break;
+                    }
+                    await UniTask.Yield(PlayerLoopTiming.LastUpdate, token);
+                }
+                if (scheduledTicks > 0)
+                {
+                    await WaitUntilScheduledStartAsync(scheduledTicks, gameOptions.LanSyncAdvanceMs, token);
+                    return new ChartStartSchedule(scheduledTicks, LanSyncClock.NowTicks());
+                }
+            }
+            if (_isManualStartGame)
+            {
+                await WaitForStartButtonAsync(token);
+            }
+            return ChartStartSchedule.None;
+        }
+
+        async UniTask WaitForStartButtonAsync(CancellationToken token)
+        {
+            _sceneSwitcher.SetLoadingText($"{"MAJTEXT_GAME_PRESS_4TH_BUTTON_TO_CONTINUE".i18n()}...");
+            do
+            {
+                // Read the shared scene input after GameUpdater has sampled this frame.
+                await UniTask.Yield(PlayerLoopTiming.LastUpdate, token);
+            }
+            while (!(InputManager.IsButtonPressedInThisFrame(ButtonZone.A4) ||
+                     InputManager.IsSensorPressedInThisFrame(SensorArea.A4)));
+            _sceneSwitcher.SetLoadingText("Loading...");
+            await UniTask.Yield(token);
+        }
+
+        /// <summary>
+        /// Waits for the scheduled instant. A positive <paramref name="advanceMs"/> releases earlier,
+        /// which pulls a machine with a slower load pipeline back onto the room schedule.
+        /// </summary>
+        static async UniTask WaitUntilScheduledStartAsync(long scheduledTicks, int advanceMs, CancellationToken token)
+        {
+            var target = scheduledTicks - LanSyncClock.MillisecondsToTicks(advanceMs);
+            var frameGuard = LanSyncClock.MillisecondsToTicks(4);
+            while (true)
+            {
+                token.ThrowIfCancellationRequested();
+                var remaining = target - LanSyncClock.NowTicks();
+                if (remaining <= 0)
+                {
+                    return;
+                }
+                if (remaining > frameGuard)
+                {
+                    await UniTask.Yield(PlayerLoopTiming.LastUpdate, token);
+                    continue;
+                }
+                // Shorter than a frame: keep the current frame instead of oversleeping by one.
+                while (LanSyncClock.NowTicks() < target)
+                {
+                    Thread.SpinWait(64);
+                }
+                return;
+            }
+        }
+
+        LanSyncSongIdentity BuildLanSyncSongIdentity()
+        {
+            var level = (int)_gameInfo.CurrentLevel;
+            var designers = _songDetail.Designers;
+            var designer = level >= 0 && level < designers.Length ? designers[level] : string.Empty;
+            return new LanSyncSongIdentity
+            {
+                Title = _songDetail.Title,
+                Artist = _songDetail.Artist,
+                ChartHash = _songDetail.Hash,
+                Level = level,
+                Designer = designer ?? string.Empty
+            };
+        }
+
+        void ReportChartStart(in ChartStartSchedule schedule)
+        {
+            if (!schedule.HasValue)
+            {
+                return;
+            }
+            var startedTicks = LanSyncClock.NowTicks();
+            var errorMs = schedule.GetStartErrorMilliseconds(startedTicks);
+            var pipelineMs = LanSyncClock.TicksToMilliseconds(startedTicks - schedule.ReleasedUtcTicks);
+            MajDebug.LogInfo($"[LanSync] chart started {errorMs:+0.0;-0.0}ms from the room schedule " +
+                             $"(load pipeline {pipelineMs:F0}ms, advance {_gameSettings.Game.LanSyncAdvanceMs}ms). " +
+                             "Compare this offset across the machines of the room and move the odd one out with LanSyncAdvanceMs.");
+        }
+
         async UniTask PrepareToPlay()
         {
             if (_audioSample is null)
@@ -1039,19 +1174,7 @@ namespace MajdataPlay.Scenes.Game
             MajInstances.GameManager.DisableGC();
 
             await UniTask.Delay(1000, cancellationToken: token);
-            if (_isManualStartGame)
-            {
-                _sceneSwitcher.SetLoadingText($"{"MAJTEXT_GAME_PRESS_4TH_BUTTON_TO_CONTINUE".i18n()}...");
-                do
-                {
-                    // Read the shared scene input after GameUpdater has sampled this frame.
-                    await UniTask.Yield(PlayerLoopTiming.LastUpdate, token);
-                }
-                while (!(InputManager.IsButtonPressedInThisFrame(ButtonZone.A4) ||
-                         InputManager.IsSensorPressedInThisFrame(SensorArea.A4)));
-                _sceneSwitcher.SetLoadingText("Loading...");
-                await UniTask.Yield(token);
-            }
+            var chartStartSchedule = await WaitForChartStartAsync(token);
             _sceneSwitcher.SetLoadingText(string.Empty);
            
             await MajInstances.SceneSwitcher.FadeOutAsync(); //wait the animation
@@ -1100,6 +1223,7 @@ namespace MajdataPlay.Scenes.Game
             _audioSample.Play();
             _audioSample.Volume = 0;
             _audioSample.CurrentSec = startSec;
+            ReportChartStart(chartStartSchedule);
 
             _audioStartTime = _timer.ElapsedSecondsAsFloat - _audioTrackStartAt;
             MajDebug.LogInfo($"Chart playback speed: {PlaybackSpeed}x");
