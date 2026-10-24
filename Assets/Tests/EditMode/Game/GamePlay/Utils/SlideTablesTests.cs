@@ -56,6 +56,26 @@ namespace MajdataPlay.Tests.Game.GamePlay.Utils
             _settings.Dispose();
         }
 
+        /// <summary>
+        /// Checks that the predefined shapes list every predefined table once, each with the slide code that finds that
+        /// table unrotated and unmirrored.
+        /// </summary>
+        [Test]
+        public void PredefinedShapes_ListsEveryPredefinedTableWithItsSlideCode()
+        {
+            var shapes = SlideTables.PredefinedShapes;
+
+            Assert.That(shapes, Is.EquivalentTo(s_tableShapes));
+            Assert.That(shapes.Select(x => x.Name), Is.Unique);
+            foreach (var (name, slideCode) in shapes)
+            {
+                Assert.That(SlideTables.TryMatchSlideCode(slideCode, out var tableName, out var isMirrored, out var rotation), Is.True, name);
+                Assert.That(tableName, Is.EqualTo(name));
+                Assert.That(isMirrored, Is.False, name);
+                Assert.That(rotation, Is.Zero, name);
+            }
+        }
+
         /// <summary>Checks that every predefined table starts at A1, ends with a final area and has positive constants.</summary>
         [Test]
         public void FindTableByName_BuildsEveryPredefinedTable()

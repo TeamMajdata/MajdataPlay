@@ -836,6 +836,11 @@ namespace MajdataPlay.Scenes.Game.Notes.Slide.Utils
         };
         /// <summary>The predefined tables indexed by the slide code of their shape starting at key 1.</summary>
         readonly static Dictionary<string, StaticSlideTable> SLIDE_TABLES_BY_SLIDE_CODE = SLIDE_TABLES.ToDictionary(x => x.SlideCode);
+        /// <summary>
+        /// Gets the name and the slide code, drawn from key 1, of every predefined slide table except the wifi tables,
+        /// in declaration order, so that tools can build a slide of each predefined shape.
+        /// </summary>
+        public static IReadOnlyList<(string Name, string SlideCode)> PredefinedShapes { get; } = SLIDE_TABLES.Select(x => (x.Name, x.SlideCode)).ToArray();
 
         public static SlideTable? FindTableByName(string prefabName)
         {

@@ -54,6 +54,15 @@ namespace MajdataPlay
 
         [SerializeField] private bool _isEnterView = false;
         [SerializeField] private bool _isEnterTest = false;
+#if UNITY_EDITOR
+        /// <summary>
+        /// Gets or sets the path of a scene that Play Mode entered before the Init scene set up the global managers. Once
+        /// they are set up the game loads the skins, which the title scene would load, and then that scene again in view
+        /// mode instead of entering the title, so that editor-only scenes such as the slide test scene can be played
+        /// directly.
+        /// </summary>
+        internal static string? EditorReturnScenePath { get; set; }
+#endif
 
         private static readonly List<IntPtr> _windowHandles = new();
         private static readonly ReadOnlyMemory<ITimeProvider> _builtInTimeProviders = MajTimeline.BuiltInTimeProviders;
@@ -172,6 +181,22 @@ namespace MajdataPlay
             OutputManager.Init();
             CabinetLed.Init();
             RecordHelper.Init();
+#if UNITY_EDITOR
+            if (EditorReturnScenePath is string returnScenePath)
+            {
+                EditorReturnScenePath = null;
+                MajEnv.Mode = RunningMode.View;
+                // 平时由标题场景加载皮肤，这里跳过了标题场景，所以先加载皮肤
+                if (!MajInstances.SkinManager.IsInited)
+                {
+                    await MajInstances.SkinManager.InitAsync();
+                }
+                // 这个场景不一定在构建设置里，所以按路径加载
+                UnityEditor.SceneManagement.EditorSceneManager.LoadSceneInPlayMode(returnScenePath, new LoadSceneParameters(LoadSceneMode.Single));
+                await MajInstances.SceneSwitcher.FadeOutAsync();
+                return;
+            }
+#endif
             if (MajEnv.Mode == RunningMode.Test)
             {
                 EnterTestMode();

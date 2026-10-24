@@ -23,7 +23,8 @@ namespace MajdataPlay.Tests.Game.Notes.PlayMode
     /// <summary>
     /// Drives the slide factories of <see cref="NoteLoader"/>: simai slides, connection slides included, are translated
     /// into slide code and built as <see cref="ExtendSlideDrop"/>, which uses the predefined table of its shape when
-    /// there is one; wifi slides keep <see cref="WifiDrop"/>.
+    /// there is one, or built natively as <see cref="SlideDrop"/> parts when translation is off; wifi slides keep
+    /// <see cref="WifiDrop"/>.
     /// </summary>
     public class NoteLoaderSlideTests
     {
@@ -140,6 +141,55 @@ namespace MajdataPlay.Tests.Game.Notes.PlayMode
             Assert.That(SlideQueue(), Has.Count.EqualTo(1));
         }
 
+        /// <summary>Checks that the native path builds a simai slide from its slide prefab instead of translating it.</summary>
+        /// <returns>The test coroutine.</returns>
+        [UnityTest]
+        public IEnumerator CreateSlideGroup_BuildsANativeSlideWhenTranslationIsOff()
+        {
+            UseNativeLine3Prefab();
+            var eachNotes = CreateSlideGroup("1-3[8:1]");
+            yield return null;
+
+            var slides = _rig.SlideParent.GetComponentsInChildren<SlideDrop>();
+            Assert.That(slides, Has.Length.EqualTo(1));
+            Assert.That(_rig.SlideParent.GetComponentsInChildren<ExtendSlideDrop>(), Is.Empty);
+            var slide = slides[0];
+            Assert.That(slide.SlideType, Is.EqualTo("line3"));
+            Assert.That(slide.StartPos, Is.EqualTo(1));
+            Assert.That(slide.EndPos, Is.EqualTo(3));
+            Assert.That(slide.StartTiming, Is.EqualTo(1f));
+            Assert.That(slide.Length, Is.EqualTo(1f));
+            Assert.That(slide.ConnectInfo.IsConnSlide, Is.False);
+            Assert.That(eachNotes.OfType<TapPoolingInfo>().Single().StartPos, Is.EqualTo(1));
+            Assert.That(SlideQueue(), Has.Count.EqualTo(1));
+        }
+
+        /// <summary>
+        /// Checks that the native path chains the segments of a connection slide: they share the duration by their arrow
+        /// counts, link to the previous part and count the judge areas of the whole chain once.
+        /// </summary>
+        /// <returns>The test coroutine.</returns>
+        [UnityTest]
+        public IEnumerator CreateSlideGroup_ChainsNativeConnectionSlides()
+        {
+            UseNativeLine3Prefab();
+            CreateSlideGroup("1-3[8:1]-5[8:1]");
+            yield return null;
+
+            var slides = _rig.SlideParent.GetComponentsInChildren<SlideDrop>();
+            Assert.That(slides, Has.Length.EqualTo(2));
+            var head = slides.Single(x => x.ConnectInfo.IsGroupPartHead);
+            var tail = slides.Single(x => x.ConnectInfo.IsGroupPartEnd);
+            Assert.That(tail.Parent, Is.SameAs(head));
+            Assert.That(head.StartPos, Is.EqualTo(1));
+            Assert.That(tail.StartPos, Is.EqualTo(3));
+            Assert.That(tail.EndPos, Is.EqualTo(5));
+            Assert.That(head.Length, Is.EqualTo(0.5f).Within(1e-5f), "Equal arrow counts share the duration equally");
+            Assert.That(tail.StartTiming, Is.EqualTo(1.5f).Within(1e-5f));
+            Assert.That(head.ConnectInfo.TotalJudgeQueueLen, Is.EqualTo(5), "Two line3 tables of three areas share one area");
+            Assert.That(SlideQueue(), Has.Count.EqualTo(2));
+        }
+
         /// <summary>Checks that a slide code that draws an official shape uses the predefined table of that shape.</summary>
         /// <returns>The test coroutine.</returns>
         [UnityTest]
@@ -183,6 +233,13 @@ namespace MajdataPlay.Tests.Game.Notes.PlayMode
             Assert.That(slide.StartPos, Is.EqualTo(2));
             Assert.That(slide.EndPos, Is.EqualTo(7));
             Assert.That(eachNotes.OfType<TapPoolingInfo>().Single().StartPos, Is.EqualTo(2));
+        }
+
+        /// <summary>Turns translation off and gives the loader a line3 prefab, the only native shape these tests build.</summary>
+        private void UseNativeLine3Prefab()
+        {
+            _loader.IsSimaiSlideTranslated = false;
+            _loader.slidePrefab[0] = _rig.CreateSlideTemplate("line3");
         }
 
         /// <summary>Invokes the simai slide factory of the loader.</summary>
