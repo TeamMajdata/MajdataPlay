@@ -13,7 +13,7 @@ using UnityEngine;
 using UnityEngine.UIElements;
 
 
-namespace MajdataPlay.Scenes.SlideGen
+namespace MajdataPlay.TestScenes.SlideGen
 {
     public class SlideGenerator : MonoBehaviour
     {

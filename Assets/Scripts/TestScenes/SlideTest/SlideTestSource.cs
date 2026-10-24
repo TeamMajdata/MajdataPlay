@@ -1,5 +1,7 @@
 #nullable enable
-namespace MajdataPlay.Scenes.SlideTest
+using MajdataPlay;
+
+namespace MajdataPlay.TestScenes.SlideTest
 {
     /// <summary>Where the slide test scene takes the slides it generates from.</summary>
     internal enum SlideTestSource

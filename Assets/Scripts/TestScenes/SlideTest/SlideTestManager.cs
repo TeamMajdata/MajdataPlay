@@ -14,9 +14,11 @@ using System.Threading;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 using UnityEngine.Serialization;
+using MajdataPlay.Scenes.SlideTest;
+
 
 #nullable enable
-namespace MajdataPlay.Scenes.SlideTest
+namespace MajdataPlay.TestScenes.SlideTest
 {
     /// <summary>
     /// Drives the slide test scene: builds a one-note chart from simai text, from slide code or from a predefined slide

@@ -1,7 +1,7 @@
 using System;
 using MajdataPlay.Scenes.Game.Notes.Slide.Utils;
 using MajdataPlay.Scenes.Game.Parsing;
-using MajdataPlay.Scenes.SlideTest;
+using MajdataPlay.TestScenes.SlideTest;
 using NUnit.Framework;
 using UnityEngine;
 

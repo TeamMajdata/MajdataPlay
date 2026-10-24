@@ -1,6 +1,6 @@
 using System.Collections;
-using MajdataPlay.Scenes.SlideGen;
 using MajdataPlay.Tests.Game.Scenes.PlayMode.Support;
+using MajdataPlay.TestScenes.SlideGen;
 using NUnit.Framework;
 using UnityEngine;
 using UnityEngine.TestTools;
