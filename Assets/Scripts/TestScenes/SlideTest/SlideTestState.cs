@@ -1,5 +1,7 @@
 #nullable enable
-namespace MajdataPlay.Scenes.SlideTest
+using MajdataPlay;
+
+namespace MajdataPlay.TestScenes.SlideTest
 {
     /// <summary>The state of the slide test clock.</summary>
     internal enum SlideTestState

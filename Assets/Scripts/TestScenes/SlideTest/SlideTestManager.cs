@@ -14,7 +14,6 @@ using System.Threading;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 using UnityEngine.Serialization;
-using MajdataPlay.Scenes.SlideTest;
 
 
 #nullable enable

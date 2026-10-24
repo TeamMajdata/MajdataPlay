@@ -1,6 +1,5 @@
 using MajdataPlay.Scenes.Game.Notes.Behaviours;
 using MajdataPlay.Scenes.Game.Notes.Slide.Utils;
-using MajdataPlay.Scenes.SlideTest;
 using MajdataPlay.TestScenes.SlideTest;
 using System;
 using UnityEditor;
