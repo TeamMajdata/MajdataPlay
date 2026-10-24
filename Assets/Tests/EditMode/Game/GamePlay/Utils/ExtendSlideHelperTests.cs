@@ -79,7 +79,8 @@ namespace MajdataPlay.Tests.Game.GamePlay.Utils
             var metadata = ExtendSlideHelper.CreateSlideEntry(SlideCodeParser.Parse("1CK5"));
 
             Assert.That(metadata.SlideLength, Is.EqualTo(9.6f).Within(Tolerance));
-            Assert.That(metadata.SlideConst, Is.EqualTo(0.165625f).Within(Tolerance));
+            // 星星按点匀速移动：去掉条件箭头后剩 21 个星星点，距终点 1.59 处约是第 16.998 个点
+            Assert.That(metadata.SlideConst, Is.EqualTo(0.150112f).Within(Tolerance));
             Assert.That(metadata.ConditionalLastArrow, Is.True);
             Assert.That(metadata.OkType, Is.EqualTo(SlideOkType.StraightL));
             Assert.That(metadata.Flag, Is.EqualTo(SlideFlag.None));

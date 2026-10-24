@@ -136,7 +136,7 @@ namespace MajdataPlay.Scenes.Game.Utils
             areaList.Add(new ParsingSlideArea(arrowCount, arrowCount, sensorA, sensorB));
 
             var slideLength = arrowRawData[^1].PathLength;
-            var slideConst = (float)(1.0 - areaRawData[^2].LengthAfterFinish / slideLength);
+            var slideConst = CalcSlideConst(arrowRawData, conditionalLastArrow, areaRawData[^2].LengthAfterFinish);
 
             // ========== ========== ========== ========== ========== ========== ==========
             // 生成 slideOk
@@ -173,6 +173,54 @@ namespace MajdataPlay.Scenes.Game.Utils
                 areaList.ToArray(), slideConst, (float)slideLength,
                 arrowPoseList.ToArray(), conditionalLastArrow,
                 okPose, okType, flag);
+        }
+
+        /// <summary>
+        /// Checks whether the guide star passes through a pose of <see cref="ExtendSlideMetadata.ArrowPoses"/>. The star
+        /// skips the conditional last arrow, like the star of a prefab slide, whose prefab has no such arrow.
+        /// </summary>
+        /// <param name="poseIndex">The index of the pose, where 0 is the path start.</param>
+        /// <param name="poseCount">The number of poses, including the path start and end.</param>
+        /// <param name="conditionalLastArrow">Whether the last arrow is too close to the path end to be shown.</param>
+        /// <returns><see langword="true"/> when the star passes through the pose.</returns>
+        public static bool IsStarPose(int poseIndex, int poseCount, bool conditionalLastArrow)
+        {
+            return !conditionalLastArrow || poseIndex == 0 || poseIndex != poseCount - 2;
+        }
+
+        /// <summary>
+        /// Converts the path length at which the star reaches the judge frame into the slide constant. The star does not
+        /// move at a constant speed: it passes the same number of star poses per second, and the poses are not evenly
+        /// spaced (the gap before the path end is usually shorter or longer than the arrow distance), so the length is
+        /// first converted into a fractional pose index.
+        /// </summary>
+        /// <param name="arrowRawData">The arrow data of the path, including the path start and end.</param>
+        /// <param name="conditionalLastArrow">Whether the last arrow is too close to the path end to be shown.</param>
+        /// <param name="judgeLength">The path length at which the star reaches the judge frame.</param>
+        /// <returns>The share of the star movement left after the judge frame, from 0 to 1.</returns>
+        private static float CalcSlideConst(SlideArrowRawData[] arrowRawData, bool conditionalLastArrow, double judgeLength)
+        {
+            var starLengths = new List<double>(arrowRawData.Length);
+            for (var i = 0; i < arrowRawData.Length; i++)
+            {
+                if (IsStarPose(i, arrowRawData.Length, conditionalLastArrow))
+                {
+                    starLengths.Add(arrowRawData[i].PathLength);
+                }
+            }
+
+            // 找到正解帧所在的那一段：starLengths[next - 1] ~ starLengths[next]
+            var next = 1;
+            while (next < starLengths.Count - 1 && starLengths[next] < judgeLength)
+            {
+                next++;
+            }
+            var segmentStart = starLengths[next - 1];
+            var segmentLength = starLengths[next] - segmentStart;
+            var segmentProgress = segmentLength > 0 ? Math.Clamp((judgeLength - segmentStart) / segmentLength, 0.0, 1.0) : 1.0;
+            var starIndex = next - 1 + segmentProgress;
+
+            return (float)(1.0 - (starIndex / (starLengths.Count - 1)));
         }
     }
 }

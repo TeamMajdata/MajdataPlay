@@ -184,8 +184,11 @@ namespace MajdataPlay.Scenes.Game.Notes.Behaviours
                 var rot = Quaternion.Euler(new Vector3(0, 0, arrowInfo.RotZ) + new Vector3(0f, 0f, 18f));
                 var arrowRot = Quaternion.Euler(new Vector3(0, 0, arrowInfo.RotZ));
 
-                StarPositions.Add(pos);
-                StarRotations.Add(rot);
+                if (ExtendSlideHelper.IsStarPose(i, metadata.ArrowPoses.Length, metadata.ConditionalLastArrow))
+                {
+                    StarPositions.Add(pos);
+                    StarRotations.Add(rot);
+                }
 
                 if (i == 0 || 
                     i == metadata.ArrowPoses.Length - 1 ||

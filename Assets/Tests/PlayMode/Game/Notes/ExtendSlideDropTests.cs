@@ -349,6 +349,27 @@ namespace MajdataPlay.Tests.Game.Notes.PlayMode
             Assert.That(Vector2.Distance(star!.position, info.JudgeFrameStarPositions[0]), Is.LessThan(1e-4f), "The star is there at the judge timing");
         }
 
+        /// <summary>
+        /// Checks that the star skips the conditional last arrow, like the star of a prefab slide, so that the judge frame
+        /// of a predefined table lands where it does on the prefab slide.
+        /// </summary>
+        /// <returns>The test coroutine.</returns>
+        [UnityTest]
+        public IEnumerator CaptureDebugInfo_StarSkipsTheConditionalLastArrow()
+        {
+            var slide = CreateSlide(ThreeAreas(), SlideOkType.StraightL, conditionalLastArrow: true);
+            _rig.RegisterSlides((slide, 0.3f));
+            yield return null;
+
+            var info = slide.CaptureDebugInfo();
+
+            // 6 个等距 pose 去掉倒数第二个后剩 5 个星星点：0.8 的进度落在 pose 3 与 pose 5 之间的 20% 处
+            var start = NoteHelper.GetTapPosition(1, 4.8f);
+            var end = NoteHelper.GetTapPosition(3, 4.8f);
+            var expected = Vector3.Lerp(start, end, (3f + (0.2f * 2f)) / 5f);
+            Assert.That(Vector2.Distance(info.JudgeFrameStarPositions[0], expected), Is.LessThan(1e-4f));
+        }
+
         /// <summary>Checks that the captured state names the predefined table and its constants.</summary>
         /// <returns>The test coroutine.</returns>
         [UnityTest]
