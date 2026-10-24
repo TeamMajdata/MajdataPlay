@@ -17,8 +17,9 @@ namespace MajdataPlay.Editor
     /// Inspector of every slide behaviour. In Play Mode it adds, below the serialized fields, the judge queues with the
     /// areas the player has passed and the sensors pressed in this frame, the judge table and timings, the flags and
     /// connection of the slide, the touches of the latest run when DJAuto plays the slide, and for extend slides the slide
-    /// code with its parsed metadata. In the Scene view it can mark where the stars are at the judge timing, label the
-    /// arrow indexes, to compare them with the arrow progress of the judge areas, and draw the DJAuto touches.
+    /// code with its parsed metadata. In the Scene view it can mark where the stars are at the judge timing and where they
+    /// would be with a previewed slide constant, label the arrow indexes, to compare them with the arrow progress of the
+    /// judge areas, and draw the DJAuto touches.
     /// </summary>
     [CustomEditor(typeof(SlideBase), true)]
     internal sealed class SlideInspector : Editor
@@ -50,6 +51,12 @@ namespace MajdataPlay.Editor
         /// <summary>The Scene view colour that fills a star position at the judge timing.</summary>
         private static readonly Color s_judgeFrameFillColor = new(1f, 0.25f, 0.85f, 0.15f);
 
+        /// <summary>The Scene view colour of the outline and centre of a star position at the judge timing of the previewed constant.</summary>
+        private static readonly Color s_constPreviewColor = new(1f, 0.8f, 0.1f, 0.95f);
+
+        /// <summary>The Scene view colour that fills a star position at the judge timing of the previewed constant.</summary>
+        private static readonly Color s_constPreviewFillColor = new(1f, 0.8f, 0.1f, 0.15f);
+
         /// <summary>The Scene view colour of the outline and centre of a DJAuto touch.</summary>
         private static readonly Color s_djAutoTouchColor = new(0f, 0.9f, 1f, 0.9f);
 
@@ -76,6 +83,18 @@ namespace MajdataPlay.Editor
 
         /// <summary>The Scene view style of the label beside a star position at the judge timing.</summary>
         private static GUIStyle? s_judgeFrameLabel;
+
+        /// <summary>The Scene view style of the label beside a star position at the judge timing of the previewed constant.</summary>
+        private static GUIStyle? s_constPreviewLabel;
+
+        /// <summary>
+        /// Whether the inspector previews the judge frame of <see cref="_previewConst"/>. The preview belongs to this
+        /// inspector and never changes the slide, so it resets when the selection changes.
+        /// </summary>
+        private bool _isConstPreviewOn;
+
+        /// <summary>The slide constant whose judge frame the inspector previews.</summary>
+        private float _previewConst;
 
         /// <summary>Repaints every frame in Play Mode so the inspector follows the slide.</summary>
         /// <returns><see langword="true"/> while the editor is playing.</returns>
@@ -131,17 +150,26 @@ namespace MajdataPlay.Editor
             var showJudgeFrame = SessionState.GetBool(JudgeFrameKey, true);
             var showArrowLabels = SessionState.GetBool(ArrowLabelsKey, false);
             var showTouches = SessionState.GetBool(DJAutoTouchesKey, true);
-            if (!showJudgeFrame && !showArrowLabels && !showTouches)
+            if (!showJudgeFrame && !_isConstPreviewOn && !showArrowLabels && !showTouches)
             {
                 return;
             }
-            if (!TryCapture((SlideBase)target, out var info))
+            var slide = (SlideBase)target;
+            if (!TryCapture(slide, out var info))
             {
                 return;
             }
             if (showJudgeFrame)
             {
-                DrawJudgeFrame(info.JudgeFrameStarPositions);
+                DrawJudgeFrame(info.JudgeFrameStarPositions, s_judgeFrameColor, s_judgeFrameFillColor, "Judge", GetJudgeFrameLabel());
+            }
+            if (_isConstPreviewOn && info.HasJudgeTiming)
+            {
+                DrawJudgeFrame(slide.CaptureStarPositionsAt(1f - _previewConst),
+                               s_constPreviewColor,
+                               s_constPreviewFillColor,
+                               $"Const {_previewConst:0.####}",
+                               GetConstPreviewLabel());
             }
             if (showArrowLabels)
             {
@@ -157,19 +185,23 @@ namespace MajdataPlay.Editor
             }
         }
 
-        /// <summary>Draws each star position at the judge timing as a filled magenta ring with a centre dot and a label.</summary>
+        /// <summary>Draws each star position at a judge timing as a filled ring with a centre dot and a label.</summary>
         /// <param name="positions">The star positions at the judge timing.</param>
-        private static void DrawJudgeFrame(Vector3[] positions)
+        /// <param name="color">The colour of the outline, the centre dot and the label.</param>
+        /// <param name="fillColor">The colour that fills the ring.</param>
+        /// <param name="label">The text drawn beside each ring.</param>
+        /// <param name="labelStyle">The style of the label.</param>
+        private static void DrawJudgeFrame(Vector3[] positions, Color color, Color fillColor, string label, GUIStyle labelStyle)
         {
             var oldColor = Handles.color;
             foreach (var position in positions)
             {
-                Handles.color = s_judgeFrameFillColor;
+                Handles.color = fillColor;
                 Handles.DrawSolidDisc(position, Vector3.forward, JudgeFrameRadius);
-                Handles.color = s_judgeFrameColor;
+                Handles.color = color;
                 Handles.DrawWireDisc(position, Vector3.forward, JudgeFrameRadius, 2f);
                 Handles.DrawSolidDisc(position, Vector3.forward, JudgeFrameCentreRadius);
-                Handles.Label(position + new Vector3(JudgeFrameRadius, JudgeFrameRadius), "Judge", GetJudgeFrameLabel());
+                Handles.Label(position + new Vector3(JudgeFrameRadius, JudgeFrameRadius), label, labelStyle);
             }
             Handles.color = oldColor;
         }
@@ -303,12 +335,12 @@ namespace MajdataPlay.Editor
         }
 
         /// <summary>
-        /// Draws the timings that drive the star and the judgment, with where the star is at the judge timing and the
-        /// toggle that marks it in the Scene view.
+        /// Draws the timings that drive the star and the judgment, with where the star is at the judge timing, the
+        /// toggle that marks it in the Scene view and the preview of another slide constant.
         /// </summary>
         /// <param name="slide">The slide.</param>
         /// <param name="info">The captured state.</param>
-        private static void DrawTiming(SlideBase slide, SlideDebugInfo info)
+        private void DrawTiming(SlideBase slide, SlideDebugInfo info)
         {
             if (!Foldout("Timing", "Timing"))
             {
@@ -337,7 +369,51 @@ namespace MajdataPlay.Editor
                     SessionState.SetBool(JudgeFrameKey, newShowJudgeFrame);
                     SceneView.RepaintAll();
                 }
+                if (info.HasJudgeTiming)
+                {
+                    DrawConstPreview(slide, info);
+                }
             }
+        }
+
+        /// <summary>
+        /// Draws the preview of another slide constant: the toggle, the constant slider and the judge timing and star
+        /// progress that constant would give. The constant is kept by this inspector, so the slide keeps judging with its
+        /// own table.
+        /// </summary>
+        /// <param name="slide">The slide.</param>
+        /// <param name="info">The captured state.</param>
+        private void DrawConstPreview(SlideBase slide, SlideDebugInfo info)
+        {
+            var usedConst = slide.IsClassic ? info.TableClassicConst : info.TableConst;
+            var isPreviewOn = EditorGUILayout.Toggle("Preview another const", _isConstPreviewOn);
+            if (isPreviewOn != _isConstPreviewOn)
+            {
+                _isConstPreviewOn = isPreviewOn;
+                _previewConst = usedConst;
+                SceneView.RepaintAll();
+            }
+            if (!_isConstPreviewOn)
+            {
+                return;
+            }
+            using (new EditorGUILayout.HorizontalScope())
+            {
+                var newConst = EditorGUILayout.Slider("Preview const", _previewConst, 0f, 1f);
+                if (GUILayout.Button("Reset", EditorStyles.miniButton, GUILayout.Width(WideColumnWidth)))
+                {
+                    newConst = usedConst;
+                }
+                if (!Mathf.Approximately(newConst, _previewConst))
+                {
+                    _previewConst = newConst;
+                    SceneView.RepaintAll();
+                }
+            }
+            // 判定时机 = 起点 + 时长 × (1 - const)，所以 const 每变化 1，判定时机就反向移动一个时长
+            var shiftSec = (usedConst - _previewConst) * slide.Length;
+            EditorGUILayout.LabelField("Preview judge timing", $"{FormatSeconds(slide.JudgeTimingWithOffset + shiftSec)} ({shiftSec * 1000f:+0.0;-0.0;0.0} ms)");
+            EditorGUILayout.LabelField("Preview judge frame", $"star at {1f - _previewConst:P1} of the path");
         }
 
         /// <summary>Formats where the stars are at the judge timing.</summary>
@@ -677,6 +753,14 @@ namespace MajdataPlay.Editor
         {
             s_judgeFrameLabel ??= new GUIStyle(EditorStyles.boldLabel) { normal = { textColor = s_judgeFrameColor } };
             return s_judgeFrameLabel;
+        }
+
+        /// <summary>Gets the Scene view style of the label beside a star position at the judge timing of the previewed constant.</summary>
+        /// <returns>The style.</returns>
+        private static GUIStyle GetConstPreviewLabel()
+        {
+            s_constPreviewLabel ??= new GUIStyle(EditorStyles.boldLabel) { normal = { textColor = s_constPreviewColor } };
+            return s_constPreviewLabel;
         }
     }
 }

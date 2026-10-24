@@ -764,7 +764,7 @@ namespace MajdataPlay.Scenes.Game.Notes.Behaviours
                 LastWaitTimeSec = LastWaitTimeSec,
                 HasJudgeTiming = hasJudgeTiming,
                 JudgeFrameProgress = judgeFrameProgress,
-                JudgeFrameStarPositions = hasJudgeTiming ? GetStarPositionsAt(judgeFrameProgress) : Array.Empty<Vector3>(),
+                JudgeFrameStarPositions = hasJudgeTiming ? CaptureStarPositionsAt(judgeFrameProgress) : Array.Empty<Vector3>(),
                 IsCheckable = IsCheckable,
                 ArrowPositions = arrowPositions,
                 HiddenArrowCount = LastHiddenSlideBarIndex,
@@ -795,6 +795,16 @@ namespace MajdataPlay.Scenes.Game.Notes.Behaviours
         private protected virtual (string Name, float Const, float ClassicConst) GetJudgeTableInfo()
         {
             return (string.Empty, 0f, 0f);
+        }
+        /// <summary>
+        /// Gets where the stars are once they have moved a share of the path, so that the slide inspector can preview
+        /// the judge frame of another slide constant.
+        /// </summary>
+        /// <param name="progress">How far along the path; values outside 0 to 1 are clamped.</param>
+        /// <returns>The world position of each star, or an empty array before the path is built.</returns>
+        internal Vector3[] CaptureStarPositionsAt(float progress)
+        {
+            return GetStarPositionsAt(Mathf.Clamp01(progress));
         }
         /// <summary>Gets where the stars are once they have moved a share of the path, for the slide inspector.</summary>
         /// <param name="progress">How far along the path, from 0 to 1.</param>
