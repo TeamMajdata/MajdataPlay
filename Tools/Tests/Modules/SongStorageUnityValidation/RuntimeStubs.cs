@@ -92,10 +92,6 @@ namespace MajdataPlay
     /// <summary>Stores the selection and ordering values used by storage refresh.</summary>
     internal sealed class ValidationListConfig
     {
-        /// <summary>Gets or sets the selected collection index.</summary>
-        public int SelectedDir { get; set; }
-        /// <summary>Gets or sets the selected chart index.</summary>
-        public int SelectedSongIndex { get; set; }
         /// <summary>Gets or sets the stable selected collection identity.</summary>
         public Guid SelectedDirGuid { get; set; } = Guid.Empty;
         /// <summary>Gets or sets the stable selected chart hash.</summary>

@@ -90,8 +90,7 @@ namespace MajdataPlay.Tests.Game.Scenes.PlayMode.ListScene
 
             Assert.That(_covers.SelectedSong, Is.SameAs(songs[5]));
             Assert.That(Progress, Is.EqualTo("6/<size=70%>10"));
-            Assert.That(MajEnv.RuntimeConfig!.List.SelectedSongIndex, Is.EqualTo(5));
-            Assert.That(MajEnv.RuntimeConfig.List.SelectedSongHash, Is.EqualTo(songs[5].Hash));
+            Assert.That(MajEnv.RuntimeConfig!.List.SelectedSongHash, Is.EqualTo(songs[5].Hash));
             Assert.That(ActiveCovers(), Is.EqualTo(7));
             var metadata = PrivateMember.GetField<ChartMetadataDisplayer>(_center, "_metadataDisplayer");
             Assert.That(PrivateMember.GetField<TextMeshProUGUI>(metadata, "_title").text, Is.EqualTo(songs[5].Title));

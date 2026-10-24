@@ -24,13 +24,13 @@ dotnet 'C:/Program Files/dotnet/sdk/9.0.316/dotnet.dll' run --project Tools/Test
 A successful run exits with code zero and prints:
 
 ```text
-CHART_STORAGE_VALIDATION_PASSED (16 cases)
+CHART_STORAGE_VALIDATION_PASSED (17 cases)
 ```
 
 The online-first group starts the same executable in a fresh process with
 `--online-first`, so both initial-source scenarios are checked without resetting
 production private fields or creating another test project. That child also
-prints its own one-case success marker before the parent's 16-case marker.
+prints its own one-case success marker before the parent's 17-case marker.
 
 Failures exit with code one and print the exception and
 `CHART_STORAGE_VALIDATION_FAILED`. Expected injected bad-chart, provider,
@@ -146,6 +146,9 @@ or changed.
   even an attempted local query. Modified/deleted JSON does not affect online
   rebinding; an unmatched remote-only definition retains its GUID and recovers
   when its chart returns. Disabled-online removal belongs only to this path.
+- Missing collections, missing songs and empty collections retain the saved
+  collection GUID and song hash across successive source refreshes. Returning
+  content restores the saved selection without relying on temporary cursors.
 - Both source paths rebind All, favorites, local and online playlists and restore
   selection by collection identity/chart hash. Filtered-empty retained online
   bases contribute their unfiltered origins to the aggregate and count.
@@ -186,6 +189,8 @@ or mobile-device integration tests**.
 logging, UniTask, SQLite and online API boundaries. Serialization uses
 `System.Text.Json`, not production Newtonsoft.Json. Online responses are
 in-process fixture callbacks: no actual HTTP request, login or download occurs.
+The recommendation metadata name aliases the existing `ChartFixture` double;
+recommendation requests are rejected and that protocol is not validated.
 The narrow DanInfo doubles leave absent required JSON fields null, matching the
 production DTO, so malformed-definition isolation is not hidden by test defaults.
 The real storage scheduling, collection publication and lifetime decisions are

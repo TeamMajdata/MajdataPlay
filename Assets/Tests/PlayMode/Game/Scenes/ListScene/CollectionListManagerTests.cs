@@ -65,8 +65,8 @@ namespace MajdataPlay.Tests.Game.Scenes.PlayMode.ListScene
             Assert.That(_collections.SelectedCollection, Is.Not.SameAs(first));
             Assert.That(Name, Is.EqualTo("First"));
             Assert.That(_covers.SelectedSong, Is.SameAs(songs[0]));
-            Assert.That(MajEnv.RuntimeConfig!.List.SelectedDirGuid, Is.EqualTo(first.Id));
-            Assert.That(MajEnv.RuntimeConfig.List.SelectedDir, Is.EqualTo(0));
+            Assert.That(MajEnv.RuntimeConfig!.List.SelectedDirGuid, Is.EqualTo(Guid.Empty));
+            Assert.That(MajEnv.RuntimeConfig.List.SelectedSongHash, Is.Empty);
         }
 
         /// <summary>Checks that the remembered collection, song and difficulty are restored.</summary>
@@ -84,7 +84,71 @@ namespace MajdataPlay.Tests.Game.Scenes.PlayMode.ListScene
 
             Assert.That(_collections.SelectedCollection.Name, Is.EqualTo("Second"));
             Assert.That(_covers.SelectedSong, Is.SameAs(songs[2]));
+            Assert.That(MajEnv.RuntimeConfig.List.SelectedDirGuid, Is.EqualTo(second.Id));
+            Assert.That(MajEnv.RuntimeConfig.List.SelectedSongHash, Is.EqualTo(songs[2].Hash));
             Assert.That(PrivateMember.GetField<TextMeshProUGUI>(_center, "_selectedLevelTitle").text, Is.EqualTo("Master"));
+        }
+
+        /// <summary>Checks that a missing collection survives initialization until an explicit selection replaces it.</summary>
+        /// <returns>The test coroutine.</returns>
+        [UnityTest]
+        public IEnumerator Init_MissingCollectionPreservesSavedIdentities()
+        {
+            var listConfig = MajEnv.RuntimeConfig!.List;
+            var savedId = Guid.NewGuid();
+            var secondSongs = CreateSongs("collection-missing-next", 2);
+            var second = CreateCollection("Second", secondSongs);
+            listConfig.SelectedDirGuid = savedId;
+            listConfig.SelectedSongHash = "missing-song";
+
+            yield return Ready(CreateCollection("First", CreateSongs("collection-missing", 2)), second);
+
+            Assert.That(_collections.SelectedCollection.Name, Is.EqualTo("First"));
+            Assert.That(listConfig.SelectedDirGuid, Is.EqualTo(savedId));
+            Assert.That(listConfig.SelectedSongHash, Is.EqualTo("missing-song"));
+
+            _collections.NextCollection();
+
+            Assert.That(listConfig.SelectedDirGuid, Is.EqualTo(second.Id));
+            Assert.That(listConfig.SelectedSongHash, Is.EqualTo(secondSongs[0].Hash));
+        }
+
+        /// <summary>Checks that a missing song keeps its saved hash after the collection and difficulty are restored.</summary>
+        /// <returns>The test coroutine.</returns>
+        [UnityTest]
+        public IEnumerator Init_MissingSongPreservesSavedIdentities()
+        {
+            var listConfig = MajEnv.RuntimeConfig!.List;
+            var songs = CreateSongs("collection-missing-song", 3);
+            var selected = CreateCollection("Selected", songs);
+            listConfig.SelectedDirGuid = selected.Id;
+            listConfig.SelectedSongHash = "missing-song";
+            listConfig.SelectedDiff = ChartLevel.Master;
+
+            yield return Ready(CreateCollection("First", CreateSongs("collection-missing-song-first", 1)), selected);
+
+            Assert.That(_collections.SelectedCollection.Name, Is.EqualTo("Selected"));
+            Assert.That(_covers.SelectedSong, Is.SameAs(songs[0]));
+            Assert.That(listConfig.SelectedDirGuid, Is.EqualTo(selected.Id));
+            Assert.That(listConfig.SelectedSongHash, Is.EqualTo("missing-song"));
+        }
+
+        /// <summary>Checks that restoring an empty collection leaves the saved song available for a later refresh.</summary>
+        /// <returns>The test coroutine.</returns>
+        [UnityTest]
+        public IEnumerator Init_EmptyCollectionPreservesSavedIdentities()
+        {
+            var listConfig = MajEnv.RuntimeConfig!.List;
+            var selected = CreateCollection("Empty", Array.Empty<FakeSongDetail>());
+            listConfig.SelectedDirGuid = selected.Id;
+            listConfig.SelectedSongHash = "missing-song";
+
+            yield return Ready(CreateCollection("First", CreateSongs("collection-empty-first", 1)), selected);
+
+            Assert.That(_collections.SelectedCollection.Name, Is.EqualTo("Empty"));
+            Assert.That(_covers.SelectedSong, Is.Null);
+            Assert.That(listConfig.SelectedDirGuid, Is.EqualTo(selected.Id));
+            Assert.That(listConfig.SelectedSongHash, Is.EqualTo("missing-song"));
         }
 
         /// <summary>Checks that collection navigation wraps around in both directions.</summary>

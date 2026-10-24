@@ -186,7 +186,7 @@ namespace MajdataPlay
         };
 
         public static GameSetting Settings { get; private set; } = new();
-        public static RuntimeConfig? RuntimeConfig { get; private set; }
+        public static RuntimeConfig RuntimeConfig { get; private set; } = new();
         public static ApiEndpoint[]? ApiEndpoints { get; private set; }
 
         public static CancellationToken GlobalCT

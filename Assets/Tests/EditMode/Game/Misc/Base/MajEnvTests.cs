@@ -177,14 +177,16 @@ namespace MajdataPlay.Tests.Game.Misc.Base
             Assert.That(file, Is.Not.Null);
             Assert.That(MajEnv.RuntimeConfig, Is.Not.Null);
 
-            file!.WriteAllText("{\"List\":{\"SelectedSongIndex\":7,\"SelectedSongHash\":\"h\"}}");
+            var selectedId = System.Guid.Parse("4d2783ac-a6ef-40f4-b648-b043b4c58608");
+            file!.WriteAllText("{\"List\":{\"SelectedDirGuid\":\"4d2783ac-a6ef-40f4-b648-b043b4c58608\",\"SelectedSongHash\":\"h\"}}");
             Step("InitRuntimeConfig");
-            Assert.That(MajEnv.RuntimeConfig!.List.SelectedSongIndex, Is.EqualTo(7));
+            Assert.That(MajEnv.RuntimeConfig!.List.SelectedDirGuid, Is.EqualTo(selectedId));
             Assert.That(MajEnv.RuntimeConfig.List.SelectedSongHash, Is.EqualTo("h"));
 
             file.WriteAllText("not json");
             Step("InitRuntimeConfig");
-            Assert.That(MajEnv.RuntimeConfig!.List.SelectedSongIndex, Is.EqualTo(0));
+            Assert.That(MajEnv.RuntimeConfig!.List.SelectedDirGuid, Is.EqualTo(System.Guid.Empty));
+            Assert.That(MajEnv.RuntimeConfig.List.SelectedSongHash, Is.Empty);
         }
 
         /// <summary>Checks that the machine description is created with defaults, loaded, and kept when unreadable.</summary>

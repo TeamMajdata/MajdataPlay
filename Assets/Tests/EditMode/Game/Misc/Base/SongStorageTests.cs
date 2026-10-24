@@ -6,6 +6,7 @@ using System.IO;
 using System.Linq;
 using System.Reflection;
 using System.Text;
+using System.Threading.Tasks;
 using Cysharp.Threading.Tasks;
 using MajdataPlay.Collections;
 using MajdataPlay.IO.Storage;
@@ -247,7 +248,8 @@ namespace MajdataPlay.Tests.Game.Misc.Base
                 Assert.That(Collection("MyFavorites").Type, Is.EqualTo(ChartStorageType.FavoriteList));
                 Assert.That(progress.Messages, Is.Not.Empty);
                 Assert.That(SongStorage.WorkingCollection.Name, Is.EqualTo("A-Collection"));
-                Assert.That(MajEnv.RuntimeConfig!.List.SelectedDirGuid, Is.EqualTo(SongStorage.WorkingCollection.Id));
+                Assert.That(MajEnv.RuntimeConfig!.List.SelectedDirGuid, Is.EqualTo(Guid.Empty));
+                Assert.That(MajEnv.RuntimeConfig.List.SelectedSongHash, Is.Empty);
                 Assert.That(SongStorage.OrderBy, Is.SameAs(MajEnv.RuntimeConfig.List.OrderBy));
             });
         }
@@ -298,8 +300,10 @@ namespace MajdataPlay.Tests.Game.Misc.Base
                 SongStorage.CollectionIndex = 1;
                 var selected = SongStorage.WorkingCollection;
                 selected.SetCursor(selected.Single(song => song.Title == "Four"));
-                listConfig.SelectedDir = SongStorage.CollectionIndex;
-                listConfig.SelectedSongIndex = selected.Index;
+                listConfig.SelectedDirGuid = selected.Id;
+                listConfig.SelectedSongHash = selected.Current.Hash;
+                selected.Index = 0;
+                SongStorage.CollectionIndex = 0;
                 ChartFixture.CreateChart(_charts.CreateDirectory("0-First"), "Zero", "Zero");
 
                 await SongStorage.RefreshLocal();
@@ -307,8 +311,113 @@ namespace MajdataPlay.Tests.Game.Misc.Base
                 Assert.That(SongStorage.WorkingCollection.Name, Is.EqualTo("B-Collection"));
                 Assert.That(SongStorage.CollectionIndex, Is.EqualTo(2));
                 Assert.That(SongStorage.WorkingCollection.Current.Title, Is.EqualTo("Four"));
-                Assert.That(listConfig.SelectedDir, Is.EqualTo(2));
+                Assert.That(listConfig.SelectedDirGuid, Is.EqualTo(selected.Id));
                 Assert.That(listConfig.SelectedSongHash, Is.EqualTo(SongStorage.WorkingCollection.Current.Hash));
+            });
+        }
+
+        /// <summary>Checks that unavailable saved content leaves both persisted identities intact.</summary>
+        /// <param name="collectionExists">Whether the saved collection is published.</param>
+        /// <param name="collectionIsEmpty">Whether the saved collection contains no songs.</param>
+        [TestCase(false, false)]
+        [TestCase(true, false)]
+        [TestCase(true, true)]
+        public void RestoreSelection_PreservesUnavailableIdentities(bool collectionExists, bool collectionIsEmpty)
+        {
+            var listConfig = MajEnv.RuntimeConfig!.List;
+            var selectedId = Guid.NewGuid();
+            var fallback = new SongCollection("Fallback", new ISongDetail[] { new FakeSongDetail("saved-song") })
+            {
+                Id = Guid.NewGuid()
+            };
+            var selected = new SongCollection("Selected", collectionIsEmpty
+                ? Array.Empty<ISongDetail>()
+                : new ISongDetail[] { new FakeSongDetail("other-song") })
+            {
+                Id = selectedId
+            };
+            var collections = collectionExists ? new[] { fallback, selected } : new[] { fallback };
+            PrivateMember.SetStaticProperty(typeof(SongStorage), nameof(SongStorage.Collections), collections);
+            listConfig.SelectedDirGuid = selectedId;
+            listConfig.SelectedSongHash = "saved-song";
+
+            SongStorage.RestoreSelection();
+
+            Assert.That(SongStorage.WorkingCollection, Is.SameAs(collectionExists ? selected : fallback));
+            Assert.That(listConfig.SelectedDirGuid, Is.EqualTo(selectedId));
+            Assert.That(listConfig.SelectedSongHash, Is.EqualTo("saved-song"));
+        }
+
+        /// <summary>Checks that an empty library cannot replace the saved selection with the placeholder collection.</summary>
+        [Test]
+        public void RestoreSelection_EmptyLibraryPreservesSavedIdentities()
+        {
+            var listConfig = MajEnv.RuntimeConfig!.List;
+            var selectedId = Guid.NewGuid();
+            listConfig.SelectedDirGuid = selectedId;
+            listConfig.SelectedSongHash = "saved-song";
+
+            SongStorage.RestoreSelection();
+
+            Assert.That(SongStorage.WorkingCollection.IsEmpty, Is.True);
+            Assert.That(listConfig.SelectedDirGuid, Is.EqualTo(selectedId));
+            Assert.That(listConfig.SelectedSongHash, Is.EqualTo("saved-song"));
+        }
+
+        /// <summary>Checks that recommendation publication retains missing identities and restores them when content returns.</summary>
+        /// <returns>The test coroutine.</returns>
+        [UnityTest]
+        public IEnumerator PublishRecommendCollections_RestoresSavedSelectionWhenContentReturns()
+        {
+            return UniTask.ToCoroutine(async () =>
+            {
+                var listConfig = MajEnv.RuntimeConfig!.List;
+                var selectedId = Guid.NewGuid();
+                var fallback = new SongCollection("Fallback", new ISongDetail[] { new FakeSongDetail("fallback-song") })
+                {
+                    Id = Guid.NewGuid()
+                };
+                listConfig.SelectedDirGuid = selectedId;
+                listConfig.SelectedSongHash = "saved-song";
+
+                await PrivateMember.InvokeStatic<Task>(typeof(SongStorage), "PublishRecommendCollectionsAsync", (object)new[] { fallback });
+
+                Assert.That(listConfig.SelectedDirGuid, Is.EqualTo(selectedId));
+                Assert.That(listConfig.SelectedSongHash, Is.EqualTo("saved-song"));
+                var missingSong = new SongCollection("Recommendations", new ISongDetail[] { new FakeSongDetail("other-song") })
+                {
+                    Id = selectedId,
+                    Type = ChartStorageType.Recommend
+                };
+
+                await PrivateMember.InvokeStatic<Task>(typeof(SongStorage), "PublishRecommendCollectionsAsync", (object)new[] { fallback, missingSong });
+
+                Assert.That(SongStorage.WorkingCollection, Is.SameAs(missingSong));
+                Assert.That(listConfig.SelectedDirGuid, Is.EqualTo(selectedId));
+                Assert.That(listConfig.SelectedSongHash, Is.EqualTo("saved-song"));
+                var restored = new SongCollection("Recommendations", new ISongDetail[]
+                {
+                    new FakeSongDetail("other-song"),
+                    new FakeSongDetail("saved-song")
+                })
+                {
+                    Id = selectedId,
+                    Type = ChartStorageType.Recommend
+                };
+
+                await PrivateMember.InvokeStatic<Task>(typeof(SongStorage), "PublishRecommendCollectionsAsync", (object)new[] { fallback, restored });
+
+                Assert.That(SongStorage.WorkingCollection, Is.SameAs(restored));
+                Assert.That(restored.Current.Hash, Is.EqualTo("saved-song"));
+                Assert.That(listConfig.SelectedDirGuid, Is.EqualTo(selectedId));
+                Assert.That(listConfig.SelectedSongHash, Is.EqualTo("saved-song"));
+
+                await PrivateMember.InvokeStatic<Task>(typeof(SongStorage), "PublishRecommendCollectionsAsync", (object)new[] { fallback });
+
+                Assert.That(SongStorage.CollectionIndex, Is.EqualTo(0));
+                Assert.That(SongStorage.WorkingCollection, Is.SameAs(fallback));
+                Assert.That(listConfig.SelectedDirGuid, Is.EqualTo(selectedId));
+                Assert.That(listConfig.SelectedSongHash, Is.EqualTo("saved-song"));
             });
         }
 

@@ -205,7 +205,7 @@ namespace MajdataPlay.Tests.Game.Misc.Settings
         public void RuntimeConfig_JsonOmitsTransientState()
         {
             var runtime = new RuntimeConfig();
-            runtime.List.SelectedSongIndex = 4;
+            runtime.List.SelectedDirGuid = System.Guid.NewGuid();
             runtime.List.SelectedSongHash = "abc";
             runtime.List.OrderBy.Keyword = "search";
             runtime.Setting.SelectedMenu = "Audio";
@@ -213,7 +213,7 @@ namespace MajdataPlay.Tests.Game.Misc.Settings
             var json = Serializer.Json.Serialize(runtime, MajEnv.UserJsonReaderOption);
             var restored = Serializer.Json.Deserialize<RuntimeConfig>(json, MajEnv.UserJsonReaderOption)!;
 
-            Assert.That(restored.List.SelectedSongIndex, Is.EqualTo(4));
+            Assert.That(restored.List.SelectedDirGuid, Is.EqualTo(runtime.List.SelectedDirGuid));
             Assert.That(restored.List.SelectedSongHash, Is.EqualTo("abc"));
             Assert.That(restored.List.OrderBy.Keyword, Is.Empty);
             Assert.That(restored.Setting.SelectedMenu, Is.EqualTo(nameof(GameSetting.Game)));

@@ -292,10 +292,10 @@ namespace MajdataPlay.Tests
             var ids = SongStorage.Collections.Where(collection => !collection.IsVirtual && !collection.IsOnline)
                 .ToDictionary(collection => collection.Name, collection => collection.Id);
             var selectedDirectory = Array.FindIndex(SongStorage.Collections, collection => collection.Name == "Group-040");
-            MajEnv.RuntimeConfig.List.SelectedDir = selectedDirectory;
-            MajEnv.RuntimeConfig.List.SelectedSongIndex = 1;
             var selectedId = SongStorage.Collections[selectedDirectory].Id;
             var selectedHash = SongStorage.Collections[selectedDirectory][1].Hash;
+            MajEnv.RuntimeConfig.List.SelectedDirGuid = selectedId;
+            MajEnv.RuntimeConfig.List.SelectedSongHash = selectedHash;
             for (var iteration = 0; iteration < repetitions; iteration++)
             {
                 await SongStorage.RefreshLocal().ConfigureAwait(false);

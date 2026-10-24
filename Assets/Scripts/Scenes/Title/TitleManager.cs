@@ -156,11 +156,6 @@ namespace MajdataPlay.Scenes.Title
         /// <exception cref="OperationCanceledException">The title component was destroyed before initialization completed.</exception>
         async Task InitializeSongStorageAsync(CancellationToken cancellationToken)
         {
-            var listConfig = MajEnv.RuntimeConfig.List;
-            var selectedDir = listConfig.SelectedDir;
-            var dirId = listConfig.SelectedDirGuid;
-            var selectedIndex = listConfig.SelectedSongIndex;
-            var selectedSongHash = listConfig.SelectedSongHash;
             var progress = new Progress<string>();
             progress.ProgressChanged += (o, e) =>
             {
@@ -172,54 +167,6 @@ namespace MajdataPlay.Scenes.Title
             await Task.Delay(3000, cancellationToken);
             await SongStorage.InitAsync(cancellationToken);
             await SongStorage.RefreshLocal(progress, cancellationToken);
-
-            if (!SongStorage.IsEmpty)
-            {
-                // Restore saved identities after both sources are available, not from an intermediate refresh cursor.
-                listConfig.SelectedDir = selectedDir;
-                var isDirMatched = false;
-
-                if (dirId != Guid.Empty)
-                {
-                    var dirIndex = Array.FindIndex(SongStorage.Collections, x => x.Id == dirId);
-                    if (dirIndex != -1)
-                    {
-                        listConfig.SelectedDir = dirIndex;
-                        isDirMatched = true;
-                    }
-                }
-                SongStorage.CollectionIndex = listConfig.SelectedDir;
-                listConfig.SelectedDir = SongStorage.CollectionIndex;
-                var selectedCollection = SongStorage.WorkingCollection;
-                listConfig.SelectedDirGuid = selectedCollection.Id;
-
-                if (isDirMatched && !string.IsNullOrEmpty(selectedSongHash))
-                {
-                    selectedIndex = Array.FindIndex(selectedCollection.ToArray(), x => x.Hash == selectedSongHash);
-                    if (selectedIndex == -1)
-                    {
-                        selectedIndex = 0;
-                    }
-                }
-
-                if (selectedCollection.IsEmpty)
-                {
-                    listConfig.SelectedSongIndex = 0;
-                    listConfig.SelectedSongHash = string.Empty;
-                    return;
-                }
-                else if (selectedIndex >= selectedCollection.Count)
-                {
-                    selectedCollection.Index = 0;
-                    listConfig.SelectedSongIndex = 0;
-                }
-                else
-                {
-                    selectedCollection.Index = selectedIndex;
-                }
-                listConfig.SelectedSongIndex = selectedCollection.Index;
-                listConfig.SelectedSongHash = selectedCollection.Current.Hash;
-            }
         }
 
         void PrepareTitleEntrance()

@@ -222,18 +222,6 @@ namespace MajdataPlay
                 {
                     return;
                 }
-                var listConfig = MajEnv.RuntimeConfig.List;
-                var selectedIndex = listConfig.SelectedSongIndex;
-                var selectedDir = listConfig.SelectedDir;
-                var previousCollection = Collections.Length == 0
-                    ? s_emptyCollection
-                    : Collections[selectedDir.Clamp(0, Collections.Length - 1)];
-                var selectedId = Collections.Length == 0 ? listConfig.SelectedDirGuid : previousCollection.Id;
-                var selectedHash = Collections.Length == 0
-                    ? listConfig.SelectedSongHash
-                    : previousCollection.Count == 0
-                        ? null
-                        : previousCollection[selectedIndex.Clamp(0, previousCollection.Count - 1)].Hash;
                 var oldCharts = s_allCharts;
                 var oldRecommendCharts = s_recommendCharts;
                 snapshot = await Task.Run(() => refreshOnline
@@ -244,7 +232,7 @@ namespace MajdataPlay
                 snapshot = AddRecommendCollections(snapshot);
                 PublishSnapshot(snapshot);
                 isPublished = true;
-                RestoreSelection(selectedId, selectedHash, selectedDir, selectedIndex);
+                RestoreSelection();
                 await DisposeReplacedChartsAsync(oldCharts, snapshot.AllCharts).ConfigureAwait(false);
                 await DisposeReplacedChartsAsync(oldRecommendCharts, s_recommendCharts).ConfigureAwait(false);
                 MajDebug.LogInfo($"Loaded chart count: {TotalChartCount}");
@@ -344,32 +332,23 @@ namespace MajdataPlay
             s_collectionIndex = Collections.Length == 0 ? 0 : s_collectionIndex.Clamp(0, Collections.Length - 1);
         }
 
-        /// <summary>Restores a selection by stable collection ID and chart hash, falling back to clamped indices.</summary>
-        /// <param name="collectionId">The identity of the previously selected collection.</param>
-        /// <param name="songHash">The identity of the previously selected chart, if any.</param>
-        /// <param name="directoryIndex">The fallback collection index.</param>
-        /// <param name="songIndex">The fallback chart index.</param>
-        private static void RestoreSelection(Guid collectionId, string? songHash, int directoryIndex, int songIndex)
+        /// <summary>Restores the saved collection GUID and song hash without changing the persisted selection.</summary>
+        /// <remarks>Unavailable collections or songs keep their saved identities so later refreshes can restore them.</remarks>
+        internal static void RestoreSelection()
         {
-            var index = Array.FindIndex(Collections, collection => collection.Id == collectionId);
-            CollectionIndex = index < 0 ? directoryIndex : index;
-            var collection = WorkingCollection;
             var listConfig = MajEnv.RuntimeConfig.List;
-            listConfig.SelectedDir = CollectionIndex;
-            listConfig.SelectedDirGuid = collection.Id;
-            if (collection.IsEmpty)
+            var index = Array.FindIndex(Collections, collection => collection.Id == listConfig.SelectedDirGuid);
+            CollectionIndex = index < 0 ? CollectionIndex : index;
+            if (index < 0)
             {
-                listConfig.SelectedSongIndex = 0;
-                listConfig.SelectedSongHash = string.Empty;
                 return;
             }
-            collection.Index = songIndex;
-            if (songHash is not null && collection.Any(song => song.Hash == songHash))
+            var collection = Collections[index];
+            var songHash = listConfig.SelectedSongHash;
+            if (!string.IsNullOrEmpty(songHash) && collection.Any(song => song.Hash == songHash))
             {
                 collection.SetCursor(songHash);
             }
-            listConfig.SelectedSongIndex = collection.Index;
-            listConfig.SelectedSongHash = collection.Current.Hash;
         }
 
         /// <summary>Disposes obsolete chart instances while retaining chart objects reused from the unchanged source.</summary>
@@ -771,21 +750,9 @@ namespace MajdataPlay
         private static async Task PublishRecommendCollectionsAsync(SongCollection[] collections)
         {
             var oldRecommendCharts = s_recommendCharts;
-            var listConfig = MajEnv.RuntimeConfig.List;
-            var selectedIndex = listConfig.SelectedSongIndex;
-            var selectedDir = listConfig.SelectedDir;
-            var previousCollection = Collections.Length == 0
-                ? s_emptyCollection
-                : Collections[selectedDir.Clamp(0, Collections.Length - 1)];
-            var selectedId = Collections.Length == 0 ? listConfig.SelectedDirGuid : previousCollection.Id;
-            var selectedHash = Collections.Length == 0
-                ? listConfig.SelectedSongHash
-                : previousCollection.Count == 0
-                    ? null
-                    : previousCollection[selectedIndex.Clamp(0, previousCollection.Count - 1)].Hash;
             Collections = collections;
             s_recommendCharts = GetRecommendOnlyCharts(collections, s_allCharts);
-            RestoreSelection(selectedId, selectedHash, selectedDir, selectedIndex);
+            RestoreSelection();
             await DisposeReplacedChartsAsync(oldRecommendCharts, s_recommendCharts).ConfigureAwait(false);
         }
 

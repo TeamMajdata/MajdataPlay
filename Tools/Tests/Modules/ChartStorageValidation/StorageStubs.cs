@@ -1,4 +1,5 @@
 #nullable enable
+global using MajnetSongDetail = MajdataPlay.ChartFixture;
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
@@ -29,10 +30,6 @@ namespace MajdataPlay
     {
         /// <summary>Gets or sets the preferred difficulty.</summary>
         public int SelectedDiff { get; set; }
-        /// <summary>Gets or sets the selected chart index.</summary>
-        public int SelectedSongIndex { get; set; }
-        /// <summary>Gets or sets the selected collection index.</summary>
-        public int SelectedDir { get; set; }
         /// <summary>Gets or sets the persisted identity of the selected collection.</summary>
         public Guid SelectedDirGuid { get; set; }
         /// <summary>Gets or sets the persisted hash of the selected chart.</summary>
@@ -64,6 +61,9 @@ namespace MajdataPlay
         /// <summary>Gets constructed remote details so rollback tests can observe unpublished ownership cleanup.</summary>
         public static ConcurrentQueue<OnlineSongDetail> CreatedDetails { get; } = new ConcurrentQueue<OnlineSongDetail>();
 
+        /// <summary>Gets the endpoint owning this fixture song.</summary>
+        public ApiEndpoint ServerInfo { get; }
+
         /// <summary>Creates fixture metadata while retaining the caller's authoritative song-cache directory.</summary>
         /// <param name="directory">The already-created per-song cache directory and its backend.</param>
         /// <param name="source">The endpoint supplying the metadata.</param>
@@ -71,6 +71,7 @@ namespace MajdataPlay
         public OnlineSongDetail(StorageDirectory directory, ApiEndpoint source, ChartFixture metadata) : base(metadata, directory)
         {
             IsOnline = true;
+            ServerInfo = source;
             CreatedDetails.Enqueue(this);
         }
     }
@@ -158,6 +159,17 @@ namespace MajdataPlay.Net
             cancellationToken.ThrowIfCancellationRequested();
             return FavoritesHandler?.Invoke(endpoint, cancellationToken)
                 ?? throw new InvalidOperationException("Online requests are outside the chart-storage harness.");
+        }
+
+        /// <summary>Rejects recommendation requests outside the managed storage fixture scope.</summary>
+        /// <param name="endpoint">The endpoint whose recommendations were requested.</param>
+        /// <param name="page">The requested page number.</param>
+        /// <param name="pageSize">The maximum number of requested charts.</param>
+        /// <returns>No response because recommendation requests are unsupported.</returns>
+        /// <exception cref="InvalidOperationException">Recommendation fetching is outside this harness's scope.</exception>
+        public static Task<ChartFixture[]?> GetRecommendFeedAsync(ApiEndpoint endpoint, int page, int pageSize)
+        {
+            throw new InvalidOperationException("Recommendation requests are outside the chart-storage harness.");
         }
 
         /// <summary>Leaves the nonexistent response cache unchanged.</summary>

@@ -11,10 +11,6 @@ namespace MajdataPlay.Settings.Runtime;
 public class ListConfig
 {
     [Preserve]
-    public int SelectedSongIndex { get; set; } = 0;
-    [Preserve]
-    public int SelectedDir { get; set; } = 0;
-    [Preserve]
     public Guid SelectedDirGuid { get; set; } = Guid.Empty;
     [Preserve]
     public string SelectedSongHash { get; set; } = string.Empty;

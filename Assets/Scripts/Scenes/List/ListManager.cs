@@ -81,7 +81,7 @@ namespace MajdataPlay.Scenes.List
 
         float _cAreaPressTime = -1f;
 
-        readonly ListConfig _listConfig = MajEnv.RuntimeConfig?.List ?? new();
+        readonly ListConfig _listConfig = MajEnv.RuntimeConfig.List;
         readonly CancellationTokenSource _cts = new();
         readonly QuickSlideJudge _quickSlideJudge = new();
         InputRepeatState _listSlideInput;
@@ -106,6 +106,8 @@ namespace MajdataPlay.Scenes.List
 
             _favoriteAdder.PressToAddTime = 0.5f;
             _favoriteAdder.PressToRemoveTime = 0.5f;
+
+            SongStorage.RestoreSelection();
 
             InputManager.BindAnyArea(OnAnyInput);
         }

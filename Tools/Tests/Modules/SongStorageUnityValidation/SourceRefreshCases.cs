@@ -44,10 +44,10 @@ namespace MajdataPlay.Tests
                 var localCharts = localCollections.SelectMany(collection => collection.GetOriginSnapshot()).ToArray();
                 var localCount = SongStorage.TotalChartCount;
                 var selectedLocal = localCollections.First(collection => !collection.IsEmpty);
-                MajEnv.RuntimeConfig.List.SelectedDir = Array.IndexOf(SongStorage.Collections, selectedLocal);
-                MajEnv.RuntimeConfig.List.SelectedSongIndex = 1;
                 var selectedId = selectedLocal.Id;
                 var selectedHash = selectedLocal[1].Hash;
+                MajEnv.RuntimeConfig.List.SelectedDirGuid = selectedId;
+                MajEnv.RuntimeConfig.List.SelectedSongHash = selectedHash;
                 File.Delete(playlistPath);
                 MajEnv.ChartDirectory = inaccessibleRoot.Root;
                 MajEnv.ApiEndpoints = new[] { endpoint };

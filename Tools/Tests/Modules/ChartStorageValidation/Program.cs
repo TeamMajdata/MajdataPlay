@@ -44,7 +44,8 @@ namespace MajdataPlay.Tests.ChartStorageValidation
                     ("online cache directories", () => TestOnlineCacheDirectories(rootPath)),
                     ("retained online origins", () => TestRetainedOnlineOrigins(rootPath)),
                     ("standalone online first refresh", RunOnlineFirstProcessAsync),
-                    ("independent source refreshes", () => TestIndependentSourceRefresh(rootPath))
+                    ("independent source refreshes", () => TestIndependentSourceRefresh(rootPath)),
+                    ("saved selection recovery", () => TestSavedSelectionRecovery(rootPath))
                 };
                 var failedCases = 0;
                 foreach (var testCase in cases)

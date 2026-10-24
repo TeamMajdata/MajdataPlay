@@ -169,10 +169,7 @@ namespace MajdataPlay.Tests.ChartStorageValidation
             RequireCompletedProgress(refreshProgress);
             var local = SongStorage.Collections.Single(collection => collection.Name == "Fresh");
             var localId = local.Id;
-            local.SetCursor("selected");
-            MajEnv.RuntimeConfig.List.SelectedDir = Array.IndexOf(SongStorage.Collections, local);
-            MajEnv.RuntimeConfig.List.SelectedSongIndex = local.Index;
-            SongStorage.CollectionIndex = MajEnv.RuntimeConfig.List.SelectedDir;
+            SelectStorageSong(local, "selected");
             Require(SongStorage.WorkingCollection.Current.Hash == "selected", "The snapshot fixture must begin with its selected local chart.");
             SongStorage.AddToMyFavorites(local.Current);
             var previous = SongStorage.Collections;
@@ -254,7 +251,7 @@ namespace MajdataPlay.Tests.ChartStorageValidation
             serialProbe.Gate!.TrySetResult();
             await Task.WhenAll(firstRefresh, secondRefresh).WaitAsync(TimeSpan.FromSeconds(20));
             Require(secondWasWaiting && serialProbe.Active == 0 && serialProbe.CompletedCount == 6, "Explicit source refreshes must serialize admission through the shared refresh lock, then both complete.");
-            Require(SongStorage.TotalChartCount == 3 && SongStorage.WorkingCollection.Current.Hash == "selected", "Serialized refresh commits must leave a coherent total and selected chart. Total=" + SongStorage.TotalChartCount + ", selected=" + SongStorage.WorkingCollection.Current.Hash + ", runtimeIndex=" + MajEnv.RuntimeConfig.List.SelectedSongIndex);
+            Require(SongStorage.TotalChartCount == 3 && SongStorage.WorkingCollection.Current.Hash == "selected", "Serialized refresh commits must leave a coherent total and selected chart. Total=" + SongStorage.TotalChartCount + ", selected=" + SongStorage.WorkingCollection.Current.Hash + ", savedHash=" + MajEnv.RuntimeConfig.List.SelectedSongHash);
             NativeFile.Delete(Path.Combine(addedPath, "maidata.txt"));
             NativeFile.Delete(Path.Combine(movedPath, "maidata.txt"));
             SongDetail.Probe = new ParseProbe();

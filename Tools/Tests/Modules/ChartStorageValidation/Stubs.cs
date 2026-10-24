@@ -176,6 +176,22 @@ namespace MajdataPlay.Diagnostics
             Console.WriteLine("DIAGNOSTIC " + (message?.ToString() ?? string.Empty).Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries).FirstOrDefault());
         }
 
+        /// <summary>Reports a warning with its production category to the validation output.</summary>
+        /// <param name="tag">The component reporting the warning.</param>
+        /// <param name="message">The warning context.</param>
+        public static void LogWarning(string tag, object? message)
+        {
+            LogWarning($"[{tag}] {message}");
+        }
+
+        /// <summary>Reports an exception with its production category to the validation output.</summary>
+        /// <param name="tag">The component reporting the exception.</param>
+        /// <param name="exception">The exception reported by storage.</param>
+        public static void LogException(string tag, Exception? exception)
+        {
+            Console.WriteLine("EXCEPTION [" + tag + "] " + exception?.GetType().Name + ": " + exception?.Message);
+        }
+
         /// <summary>Reports unexpected save errors to the validation output.</summary>
         /// <param name="exception">The exception reported by storage.</param>
         public static void LogException(Exception? exception)
