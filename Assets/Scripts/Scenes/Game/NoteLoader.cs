@@ -1821,11 +1821,14 @@ namespace MajdataPlay.Scenes.Game
                         continue;
                     }
                 }
-                var groupedSlides = buffer.GroupBy(x => x);
+                // Group only the slots filled for this timing point: a pooled array that EnsureLength grows into is not
+                // cleared, so slots past bufferIndex may still hold notes of an earlier timing point.
+                var usedSlides = new ArraySegment<FoldingSimaiNote>(buffer.AsArray(), 0, bufferIndex);
+                var groupedSlides = usedSlides.GroupBy(x => x);
                 foreach (var slides in groupedSlides)
                 {
                     var key = slides.Key;
-                    if (key.Origin == null)
+                    if (!key.IsValid)
                     {
                         continue;
                     }
@@ -1936,6 +1939,14 @@ namespace MajdataPlay.Scenes.Game
             public SimaiNote? Origin
             {
                 get => _origin;
+            }
+            /// <summary>
+            /// Gets whether the folding note wraps a simai note. A default instance, such as a cleared slot of a pooled
+            /// buffer, is not valid and must not be folded.
+            /// </summary>
+            public bool IsValid
+            {
+                get => _origin is not null;
             }
 
             readonly SimaiNote? _origin;

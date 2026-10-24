@@ -300,6 +300,29 @@ namespace MajdataPlay.Tests.Game.GamePlay.Loading
             Assert.That(folded, Is.EqualTo(new[] { first, second }));
         }
 
+        /// <summary>
+        /// Checks that a slide buffer which grows into a pooled array still holding notes of an earlier timing point folds
+        /// only the slides of its own timing point. A 17-touch chord followed by a 12-slide chain used to bring 4 touches
+        /// of the chord back as touch notes of the chain.
+        /// </summary>
+        [Test]
+        public void NoteFolding_IgnoresNotesLeftInPooledBuffersByEarlierTimingPoints()
+        {
+            Assume.That(PrivateMember.GetStaticField<bool>(typeof(NoteLoader), "USERSETTING_NOTE_FOLDING"), Is.True);
+            var chord = Enumerable.Range(0, 17)
+                                  .Select(i => Note(SimaiNoteType.Touch, (i % 8) + 1))
+                                  .ToArray();
+            var chain = Enumerable.Range(1, 12)
+                                  .Select(i => Slide($"6-3[64:{i}]"))
+                                  .ToArray();
+            PrivateMember.InvokeStatic<SimaiNote[]>(s_helper, "NoteFolding", new object?[] { chord });
+
+            var folded = PrivateMember.InvokeStatic<SimaiNote[]>(s_helper, "NoteFolding", new object?[] { chain });
+
+            Assert.That(folded.Select(x => x.Type), Is.All.EqualTo(SimaiNoteType.Slide));
+            Assert.That(folded.Select(x => x.RawContent), Is.EquivalentTo(chain.Select(x => x.RawContent)));
+        }
+
         /// <summary>Checks the equality of the folding key: identical slides are equal, different slides are not.</summary>
         [Test]
         public void FoldingSimaiNote_ComparesByContent()
@@ -322,6 +345,18 @@ namespace MajdataPlay.Tests.Game.GamePlay.Loading
             Assert.That(converted.Equals(a), Is.True);
             Assert.That(PrivateMember.GetProperty<string>(a, "RawContent"), Is.EqualTo("1-3[8:1]"));
             Assert.That(PrivateMember.GetProperty<SimaiNote>(a, "Origin"), Is.Not.Null);
+        }
+
+        /// <summary>Checks that a folding note is valid only when it wraps a simai note, not as a cleared buffer slot.</summary>
+        [Test]
+        public void FoldingSimaiNote_IsValidOnlyWithAnOrigin()
+        {
+            var type = typeof(NoteLoader).GetNestedType("FoldingSimaiNote", BindingFlags.NonPublic)!;
+            var wrapped = Activator.CreateInstance(type, Slide("1-3[8:1]"), null)!;
+            var cleared = Activator.CreateInstance(type)!;
+
+            Assert.That(PrivateMember.GetProperty<bool>(wrapped, "IsValid"), Is.True);
+            Assert.That(PrivateMember.GetProperty<bool>(cleared, "IsValid"), Is.False);
         }
 
         /// <summary>Creates a delegate bound to a static helper method.</summary>
