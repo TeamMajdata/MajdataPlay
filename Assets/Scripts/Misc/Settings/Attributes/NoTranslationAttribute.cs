@@ -23,7 +23,7 @@ namespace MajdataPlay.Settings
     /// <para>
     /// Applied to <see cref="TranslationTarget.OptionValue"/>, it also suppresses the automatic fallback of boolean
     /// values to <c>MAJSETTING_GENERAL_OPTION_{ValueText}</c>, so neither the option-specific nor the general key is
-    /// queried.
+    /// queried. Use <see cref="TranslateValuesAttribute"/> to translate only some values of such an option.
     /// </para>
     /// </remarks>
     [AttributeUsage(AttributeTargets.Property | AttributeTargets.Field, AllowMultiple = true, Inherited = false)]

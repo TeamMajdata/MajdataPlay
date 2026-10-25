@@ -68,6 +68,15 @@ namespace MajdataPlay.Tests.Game.Misc.Settings
             [OptionName("Alias")]
             [UseTranslation(TranslationTarget.OptionValue, "MAJTEXT_FX_{0}_{1}")]
             public int Templated { get; set; } = 1;
+
+            /// <summary>An untranslated integer option that translates only the value 3.</summary>
+            [TranslateValues("3")]
+            public int Selected { get; set; } = 3;
+
+            /// <summary>A translated integer option whose selected value is ignored.</summary>
+            [UseTranslation(TranslationTarget.OptionValue)]
+            [TranslateValues("3", Key = "SELECTED_{1}")]
+            public int SelectionIgnored { get; set; } = 3;
         }
 
         /// <summary>A settings section with boolean, enum and text options.</summary>
@@ -110,6 +119,11 @@ namespace MajdataPlay.Tests.Game.Misc.Settings
             /// <summary>An enum option whose values are translated in the general table.</summary>
             [UseGeneralTranslation(TranslationTarget.OptionValue)]
             public MirrorOption SharedMirror { get; set; } = MirrorOption.Off;
+
+            /// <summary>An untranslated boolean option that translates only <see langword="true"/>.</summary>
+            [NoTranslation(TranslationTarget.OptionValue)]
+            [TranslateValues("True")]
+            public bool SelectedFlag { get; set; } = true;
 
             /// <summary>A read-only nullable enum without a value.</summary>
             public MirrorOption? NullableMirror { get; }
@@ -423,6 +437,34 @@ namespace MajdataPlay.Tests.Game.Misc.Settings
 
             Assert.That(plain.LocalizedValueText, Is.EqualTo("Upside down"));
             Assert.That(shared.LocalizedValueText, Is.EqualTo("Off"));
+        }
+
+        /// <summary>
+        /// Checks that TranslateValues translates only the listed values of untranslated options and is ignored when
+        /// the option values are translated anyway.
+        /// </summary>
+        [Test]
+        public void TranslateValues_TranslatesListedValuesOfUntranslatedOptions()
+        {
+            UseLanguage(
+                ("MAJSETTING_PROPERTY_Selected_OPTION_3", "three"),
+                ("MAJSETTING_PROPERTY_Selected_OPTION_4", "four"),
+                ("MAJSETTING_PROPERTY_SelectedFlag_OPTION_True", "Yes"),
+                ("MAJSETTING_PROPERTY_SelectedFlag_OPTION_False", "No"),
+                ("SELECTED_3", "selected three"));
+            var numbers = new NumberProbe();
+            var selected = Create<DefaultNumberEnumerator>(numbers, nameof(NumberProbe.Selected));
+            var ignored = Create<DefaultNumberEnumerator>(numbers, nameof(NumberProbe.SelectionIgnored));
+            var flag = Create<DefaultBooleanEnumerator>(new ValueProbe(), nameof(ValueProbe.SelectedFlag));
+
+            Assert.That(selected.LocalizedValueText, Is.EqualTo("three"));
+            Assert.That(ignored.LocalizedValueText, Is.EqualTo("3"));
+            Assert.That(flag.LocalizedValuesForWarmup, Is.EqualTo(new[] { "False", "Yes" }));
+
+            numbers.Selected = 4;
+            selected.Refresh();
+
+            Assert.That(selected.LocalizedValueText, Is.EqualTo("4"));
         }
 
         /// <summary>Checks that a boolean option with explicit option-specific keys still falls back to the general table.</summary>

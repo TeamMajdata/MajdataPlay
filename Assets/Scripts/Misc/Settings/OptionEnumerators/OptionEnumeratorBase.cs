@@ -106,6 +106,11 @@ namespace MajdataPlay.Settings.OptionEnumerators
         /// </remarks>
         private protected SettingTranslation PlaceholderTranslation { get; private set; } = SettingTranslation.DefaultOptionValue;
 
+        /// <summary>
+        /// Gets the values that <see cref="TranslateValuesAttribute"/> translates while the other option values stay untranslated.
+        /// </summary>
+        private protected SettingValueSelection SelectedValues { get; private set; } = SettingValueSelection.Empty;
+
         Type _memberType = null!;
         Attribute[] _attributes = Array.Empty<Attribute>();
         // True for numeric members including nullable ones; their values are only translated on explicit request.
@@ -238,7 +243,9 @@ namespace MajdataPlay.Settings.OptionEnumerators
         /// <remarks>
         /// Numeric values are not translated unless the member opts in with <see cref="UseTranslationAttribute"/> or
         /// <see cref="UseGeneralTranslationAttribute"/>; the <c>UNSET</c> and <c>NULL</c> placeholders of a missing
-        /// value are words and use <see cref="PlaceholderTranslation"/>. Opted-in numeric values use exactly the keys of
+        /// value are words and use <see cref="PlaceholderTranslation"/>. While the values are untranslated, either by default or
+        /// through <see cref="NoTranslationAttribute"/>, only the values listed by <see cref="TranslateValuesAttribute"/> are
+        /// translated (see <see cref="SelectedValues"/>). Opted-in numeric values use exactly the keys of
         /// their attributes, enum values only use the general table when requested, and boolean values that look up an
         /// option-specific key fall back to the general table afterwards
         /// (see <see cref="SettingTranslation.Resolve(Attribute[], TranslationTarget, string, Type)"/>).
@@ -252,9 +259,9 @@ namespace MajdataPlay.Settings.OptionEnumerators
             {
                 return PlaceholderTranslation.Localize(valueText);
             }
-            if (_hasNumericValues && !ValueTranslation.IsExplicit)
+            if (!ValueTranslation.IsTranslated || (_hasNumericValues && !ValueTranslation.IsExplicit))
             {
-                return valueText;
+                return SelectedValues.Localize(value, valueText);
             }
             return ValueTranslation.Localize(valueText, _hasNumericValues);
         }
@@ -267,6 +274,7 @@ namespace MajdataPlay.Settings.OptionEnumerators
             PlaceholderTranslation = valueType.IsEnum
                 ? SettingTranslation.Resolve(_attributes, TranslationTarget.OptionValue, Name)
                 : ValueTranslation;
+            SelectedValues = SettingValueSelection.Resolve(_attributes, Name, _memberType);
         }
         public virtual void Dispose()
         {

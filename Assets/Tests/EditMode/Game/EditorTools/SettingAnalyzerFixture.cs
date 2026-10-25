@@ -24,6 +24,20 @@ namespace MajdataPlay.Tests.Game.EditorTools
         [Description("FX_DESC")]
         public FixtureMode Mode { get; set; }
 
+        /// <summary>Gets or sets an untranslated numeric option that translates only the value 0.</summary>
+        [TranslateValues("0", "x")]
+        public int Selected { get; set; }
+
+        /// <summary>Gets or sets an untranslated enum option that translates one constant through a custom key.</summary>
+        [NoTranslation(TranslationTarget.OptionValue)]
+        [TranslateValues("Second", Key = "FX_PICK_{1}")]
+        public FixtureMode Picked { get; set; }
+
+        /// <summary>Gets or sets a translated numeric option on which TranslateValues has no effect.</summary>
+        [UseTranslation(TranslationTarget.OptionValue)]
+        [TranslateValues("1", Key = "FX_WASTED_{1}")]
+        public int Wasted { get; set; }
+
         /// <summary>Gets or sets an enum option whose values are translated in the general table.</summary>
         [UseGeneralTranslation(TranslationTarget.OptionValue)]
         public FixtureMode SharedMode { get; set; }

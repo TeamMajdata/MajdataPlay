@@ -324,7 +324,7 @@ namespace MajdataPlay.Settings
         /// </summary>
         [Step("0.05")]
         [Range("0", "1")]
-        [UseTranslation(TranslationTarget.OptionValue)]
+        [TranslateValues("0")]
         public float OuterJudgeDistance { get; set; } = 1f;
 
         /// <summary>
@@ -332,7 +332,7 @@ namespace MajdataPlay.Settings
         /// </summary>
         [Step("0.05")]
         [Range("0", "1")]
-        [UseTranslation(TranslationTarget.OptionValue)]
+        [TranslateValues("0")]
         public float InnerJudgeDistance { get; set; } = 1f;
 
         /// <summary>

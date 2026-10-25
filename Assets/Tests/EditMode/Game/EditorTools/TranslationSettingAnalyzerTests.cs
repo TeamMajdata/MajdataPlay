@@ -224,6 +224,19 @@ namespace MajdataPlay.Tests.Game.EditorTools
             Assert.That(TranslationSettingAnalyzer.IsNumericValueSource("Fx.Flag (option value)"), Is.False);
         }
 
+        /// <summary>Checks the keys TranslateValues requests for untranslated options and the diagnostics of its misuse.</summary>
+        [Test]
+        public void TranslateValues_CollectSelectedValueKeys()
+        {
+            Assert.That(_keys["MAJSETTING_PROPERTY_Selected_OPTION_0"], Does.Contain("Fx.Selected" + TranslationSettingAnalyzer.SelectedValueUsage));
+            Assert.That(_keys.Keys, Does.Not.Contain("MAJSETTING_PROPERTY_Selected_OPTION_x"));
+            Assert.That(HasDiagnostic("Selected", "not an invariant-culture number"), Is.True);
+            Assert.That(_keys["FX_PICK_Second"], Does.Contain("Fx.Picked" + TranslationSettingAnalyzer.SelectedValueUsage));
+            Assert.That(_keys.Keys.Any(key => key.StartsWith("MAJSETTING_PROPERTY_Picked_OPTION_", StringComparison.Ordinal)), Is.False);
+            Assert.That(_keys.Keys, Does.Not.Contain("FX_WASTED_1"));
+            Assert.That(HasDiagnostic("Wasted", "TranslateValues has no effect"), Is.True);
+        }
+
         /// <summary>Checks that visibility conditions qualify the usage paths and that unresolvable paths are reported.</summary>
         [Test]
         public void ConditionalOptions_DescribeTheirCondition()
@@ -254,8 +267,8 @@ namespace MajdataPlay.Tests.Game.EditorTools
             Assert.That(keys.Keys, Does.Contain("MAJSETTING_GENERAL_OPTION_True"));
             Assert.That(keys.Keys, Does.Contain("MAJSETTING_GENERAL_OPTION_Inner"));
             Assert.That(keys.Keys, Does.Contain("MAJSETTING_PROPERTY_LeadInTime_OPTION_5"));
-            Assert.That(keys.Keys, Does.Contain("MAJSETTING_PROPERTY_OuterJudgeDistance_OPTION_0"));
-            Assert.That(keys.Keys, Does.Contain("MAJSETTING_PROPERTY_OuterJudgeDistance_OPTION_0.05"));
+            Assert.That(keys["MAJSETTING_PROPERTY_OuterJudgeDistance_OPTION_0"].Any(source => source.EndsWith(TranslationSettingAnalyzer.SelectedValueUsage, StringComparison.Ordinal)), Is.True);
+            Assert.That(keys.Keys, Does.Not.Contain("MAJSETTING_PROPERTY_OuterJudgeDistance_OPTION_0.05"));
             Assert.That(diagnostics.Any(diagnostic => diagnostic.Contains("skin names are dynamic")), Is.True);
             Assert.That(diagnostics.Any(diagnostic => diagnostic.Contains("ShowInSettingUIWhen path")), Is.False);
         }

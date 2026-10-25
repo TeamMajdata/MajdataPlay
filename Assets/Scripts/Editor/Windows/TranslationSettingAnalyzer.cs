@@ -53,6 +53,11 @@ namespace MajdataPlay.Editor.Windows
         internal const string NumericValueFallbackUsage = " (numeric option value fallback)";
 
         /// <summary>
+        /// The usage label of a key requested by TranslateValuesAttribute for one value of an otherwise untranslated option.
+        /// </summary>
+        internal const string SelectedValueUsage = " (selected option value)";
+
+        /// <summary>
         /// Limits how many numeric values one option may contribute, so a fine grid does not flood the key inventory.
         /// </summary>
         private const int MaxNumericValues = 128;
@@ -385,6 +390,7 @@ namespace MajdataPlay.Editor.Windows
             var valueSelection = SelectTranslation(attributes, "OptionValue", property.Name, DefaultOptionValueTemplate, GeneralOptionValueTemplate, HasDefaultGeneralFallback(property.PropertyType),
                 HasGeneralValueFallback(property.PropertyType));
             CollectValues(property, enumeratorType, HasAttribute(attributes, SettingsNamespace + "OptionalAttribute"), valueSelection, path, keys, diagnostics);
+            CollectSelectedValues(property, attributes, valueSelection, path, keys, diagnostics);
         }
 
         /// <summary>
@@ -780,6 +786,85 @@ namespace MajdataPlay.Editor.Windows
         }
 
         /// <summary>
+        /// Mirrors SettingValueSelection: adds the keys TranslateValuesAttribute requests for single values of an option
+        /// whose values are otherwise untranslated, and reports the attribute where it has no effect.
+        /// </summary>
+        /// <param name="property">The option property metadata.</param>
+        /// <param name="attributes">The property's custom attribute metadata.</param>
+        /// <param name="valueSelection">The value key templates selected by the option's translation attributes.</param>
+        /// <param name="path">The UI path identifying this option.</param>
+        /// <param name="keys">Receives the selected value keys.</param>
+        /// <param name="diagnostics">Receives ineffective attributes and numeric values that cannot be parsed.</param>
+        private static void CollectSelectedValues(PropertyInfo property, IList<CustomAttributeData> attributes, TranslationSelection valueSelection,
+            string path, IDictionary<string, HashSet<string>> keys, IList<string> diagnostics)
+        {
+            var selections = attributes.Where(attribute => attribute.AttributeType.FullName == SettingsNamespace + "TranslateValuesAttribute").ToList();
+            if (selections.Count == 0)
+            {
+                return;
+            }
+            var valueType = Nullable.GetUnderlyingType(property.PropertyType) ?? property.PropertyType;
+            var isNumeric = IsNumber(valueType);
+            // Mirrors OptionEnumeratorBase.LocalizeValueText: selected values apply only while the values are untranslated.
+            var isUntranslated = !valueSelection.IsTranslated || (isNumeric && !valueSelection.IsExplicit);
+            if (!isUntranslated)
+            {
+                diagnostics.Add($"[Settings] {path}: TranslateValues has no effect because the option values are already translated.");
+                return;
+            }
+
+            var optionName = GetOptionName(attributes, property.Name);
+            foreach (var selection in selections)
+            {
+                var template = DefaultOptionValueTemplate;
+                foreach (var argument in selection.NamedArguments)
+                {
+                    if (argument.MemberName == "Key" && argument.TypedValue.Value is string key && key.Length != 0)
+                    {
+                        template = key;
+                    }
+                }
+                if (selection.ConstructorArguments.Count != 1 ||
+                    selection.ConstructorArguments[0].Value is not IReadOnlyCollection<CustomAttributeTypedArgument> values)
+                {
+                    continue;
+                }
+                foreach (var value in values)
+                {
+                    if (value.Value is not string text || text.Length == 0)
+                    {
+                        continue;
+                    }
+                    if (isNumeric && !decimal.TryParse(text, NumberStyles.Number, CultureInfo.InvariantCulture, out _))
+                    {
+                        diagnostics.Add($"[Settings] {path}: TranslateValues value \"{text}\" is not an invariant-culture number and is ignored.");
+                        continue;
+                    }
+                    AddKey(FormatKey(template, optionName, text), path + SelectedValueUsage, keys, diagnostics);
+                }
+            }
+        }
+
+        /// <summary>
+        /// Mirrors SettingTranslation.GetOptionName: the OptionNameAttribute value when present, otherwise the member name.
+        /// </summary>
+        /// <param name="attributes">The member's custom attribute metadata.</param>
+        /// <param name="memberName">The declared member name.</param>
+        /// <returns>The option name substituted for <c>{0}</c> in key templates.</returns>
+        private static string GetOptionName(IList<CustomAttributeData> attributes, string memberName)
+        {
+            foreach (var attribute in attributes)
+            {
+                if (attribute.AttributeType.FullName == SettingsNamespace + "OptionNameAttribute" &&
+                    attribute.ConstructorArguments[0].Value is string name && name.Length != 0)
+                {
+                    return name;
+                }
+            }
+            return memberName;
+        }
+
+        /// <summary>
         /// Mirrors SettingTranslation.Resolve on custom attribute data: the key templates of one translation target.
         /// </summary>
         /// <param name="attributes">The member's custom attribute metadata.</param>
@@ -796,17 +881,7 @@ namespace MajdataPlay.Editor.Windows
         private static TranslationSelection SelectTranslation(IList<CustomAttributeData> attributes, string target, string memberName,
             string defaultTemplate, string generalTemplate, bool generalByDefault, bool generalAfterSpecific)
         {
-            var optionName = memberName;
-            foreach (var attribute in attributes)
-            {
-                if (attribute.AttributeType.FullName == SettingsNamespace + "OptionNameAttribute" &&
-                    attribute.ConstructorArguments[0].Value is string name && name.Length != 0)
-                {
-                    optionName = name;
-                    break;
-                }
-            }
-
+            var optionName = GetOptionName(attributes, memberName);
             var isExplicit = false;
             var specific = new List<string>();
             var general = new List<string>();
