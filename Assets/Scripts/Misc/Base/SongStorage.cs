@@ -1213,7 +1213,7 @@ namespace MajdataPlay
                 cancellationToken.ThrowIfCancellationRequested();
                 if (chartList is null)
                 {
-                    progressReporter?.Report(ZString.Format("Failed to fetch list from {0}".i18n(), api.Name));
+                    progressReporter?.Report(ZString.Format("MAJTEXT_FAILED_TO_FETCH_ONLINE_LIST_{0}".i18n(), api.Name));
                     var fetchTask = GetCachedOnlineCollectionAsync(api, cacheDirectory, cancellationToken);
                     await Task.WhenAll(Task.Delay(3000), fetchTask).ConfigureAwait(false);
                     return fetchTask.Result;
