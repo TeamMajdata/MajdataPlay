@@ -141,9 +141,7 @@ namespace MajdataPlay
         void OnUnitySceneChanged(Scene current, Scene next)
         {
             InputManager.ResetUIInputForSceneChange();
-            //MajDebug.LogDebug(ZString.Format("Scene unloaded: {0}", current.name));
-            MajDebug.LogDebug(ZString.Format("Scene loaded: {0}", next.name));
-            //var currentScene = SceneManager.GetActiveScene();
+            MajDebug.LogInfo(nameof(SceneSwitcher), ZString.Format("Scene loaded: {0}", next.name));
             var index = Array.FindIndex(SCENE_NAMES, x => x == next.name);
             var lastScene = CurrentScene;
             if (index != -1)
