@@ -22,18 +22,20 @@ namespace MajdataPlay.Settings
     /// <see cref="UseGeneralTranslationAttribute"/> template; <see cref="NoTranslationAttribute"/> disables them all.
     /// </para>
     /// <para>
-    /// Numeric option values (options of integer or floating-point types) are not translated by default.
-    /// Apply this attribute with <see cref="TranslationTarget.OptionValue"/> to opt a numeric option into translation.
+    /// Numeric option values (options of integer or floating-point types, not enums) are not translated at all by
+    /// default: no key is looked up and the formatted number is displayed. Apply this attribute with
+    /// <see cref="TranslationTarget.OptionValue"/> to opt a numeric option into translation; only the keys of this
+    /// attribute are then looked up, with no automatic general fallback.
     /// </para>
     /// <para>
-    /// Boolean and numeric option values (including their nullable forms) automatically fall back to the general
-    /// table: after the option-specific keys of this attribute, such as <c>MAJSETTING_PROPERTY_{0}_OPTION_{1}</c>,
-    /// have been queried without a translation, <c>MAJSETTING_GENERAL_OPTION_{1}</c> is queried as well, so shared
-    /// texts such as <c>True</c>, <c>False</c> or <c>0</c> only need one general translation.
-    /// <see cref="UseGeneralTranslationAttribute"/> is not required for that fallback. Option values of other
-    /// types, such as enums and strings, only use the general table after an explicit
-    /// <see cref="UseTranslationAttribute"/> when <see cref="UseGeneralTranslationAttribute"/> is also applied.
-    /// If no key yields a translation, the raw value text is displayed.
+    /// Boolean option values (including <see cref="Nullable{T}"/> of <see cref="bool"/>) automatically fall back to
+    /// the general table: after the option-specific keys of this attribute, such as
+    /// <c>MAJSETTING_PROPERTY_{0}_OPTION_{1}</c>, have been queried without a translation,
+    /// <c>MAJSETTING_GENERAL_OPTION_{1}</c> is queried as well, so <c>True</c> and <c>False</c> only need one
+    /// general translation. <see cref="UseGeneralTranslationAttribute"/> is not required for that fallback. Option
+    /// values of every other type, including numbers, enums and strings, only use the general table after an
+    /// explicit <see cref="UseTranslationAttribute"/> when <see cref="UseGeneralTranslationAttribute"/> is also
+    /// applied. If no key yields a translation, the raw value text is displayed.
     /// </para>
     /// </remarks>
     [AttributeUsage(AttributeTargets.Property | AttributeTargets.Field, AllowMultiple = true, Inherited = false)]

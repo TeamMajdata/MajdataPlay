@@ -19,16 +19,19 @@ namespace MajdataPlay.Settings
     /// after any <see cref="UseTranslationAttribute"/> key of the same target.
     /// </para>
     /// <para>
-    /// Numeric option values (options of integer or floating-point types) are not translated by default.
-    /// Apply this attribute with <see cref="TranslationTarget.OptionValue"/> to opt a numeric option into the general table.
+    /// Numeric option values (options of integer or floating-point types, not enums) are not translated at all by
+    /// default. Apply this attribute with <see cref="TranslationTarget.OptionValue"/> to opt a numeric option into
+    /// the general table, alone or after the keys of <see cref="UseTranslationAttribute"/>; numeric values never
+    /// fall back to the general table without it.
     /// </para>
     /// <para>
-    /// Boolean and numeric option values (including their nullable forms) fall back to
+    /// Boolean option values (including <see cref="Nullable{T}"/> of <see cref="bool"/>) fall back to
     /// <c>MAJSETTING_GENERAL_OPTION_{ValueText}</c> automatically after their option-specific key
     /// (for example <c>MAJSETTING_PROPERTY_{0}_OPTION_{1}</c>) has been queried, both without translation attributes
     /// and with <see cref="UseTranslationAttribute"/>, so this attribute is not needed for that fallback. Apply it to
-    /// such a value only to look up the general table <em>without</em> the option-specific key, or to add the
-    /// general fallback to other value types such as enums and strings.
+    /// a boolean value only to look up the general table <em>without</em> the option-specific key, or to add the
+    /// general fallback after an explicit <see cref="UseTranslationAttribute"/> to other value types such as
+    /// numbers, enums and strings.
     /// </para>
     /// </remarks>
     [AttributeUsage(AttributeTargets.Property | AttributeTargets.Field, AllowMultiple = true, Inherited = false)]

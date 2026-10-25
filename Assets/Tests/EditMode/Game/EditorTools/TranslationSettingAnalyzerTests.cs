@@ -186,8 +186,9 @@ namespace MajdataPlay.Tests.Game.EditorTools
             foreach (var value in new[] { "1", "2", "3" })
             {
                 Assert.That(_keys[$"MAJSETTING_PROPERTY_Countdown_OPTION_{value}"], Does.Contain("Fx.Countdown" + TranslationSettingAnalyzer.NumericValueUsage));
-                Assert.That(_keys[$"MAJSETTING_GENERAL_OPTION_{value}"], Does.Contain("Fx.Countdown" + TranslationSettingAnalyzer.NumericValueFallbackUsage));
             }
+            // Numeric values only use the keys their attributes request, so no general fallback key is collected.
+            Assert.That(_keys.Values.Any(sources => sources.Contains("Fx.Countdown" + TranslationSettingAnalyzer.NumericValueFallbackUsage)), Is.False);
             Assert.That(_keys.Keys, Does.Not.Contain("MAJSETTING_PROPERTY_Countdown_OPTION_4"));
             var ratioValues = _keys.Keys.Where(key => key.StartsWith("MAJSETTING_PROPERTY_Ratio_OPTION_", StringComparison.Ordinal)).ToArray();
             Assert.That(ratioValues, Is.EquivalentTo(new[]

@@ -229,8 +229,9 @@ namespace MajdataPlay.Settings.OptionEnumerators
         /// <remarks>
         /// Numeric values are not translated unless the member opts in with <see cref="UseTranslationAttribute"/> or
         /// <see cref="UseGeneralTranslationAttribute"/>; the <c>UNSET</c> and <c>NULL</c> placeholders of a missing
-        /// numeric value are words and keep the default lookup. Boolean and numeric values that look up an
-        /// option-specific key fall back to the general table afterwards (see <see cref="SettingTranslation.Resolve(Attribute[], TranslationTarget, string, Type)"/>).
+        /// numeric value are words and keep the default lookup. Opted-in numeric values use exactly the keys of their
+        /// attributes, while boolean values that look up an option-specific key fall back to the general table afterwards
+        /// (see <see cref="SettingTranslation.Resolve(Attribute[], TranslationTarget, string, Type)"/>).
         /// </remarks>
         /// <param name="value">The option value, or null for a missing value.</param>
         /// <param name="valueText">The untranslated display text of <paramref name="value"/>.</param>

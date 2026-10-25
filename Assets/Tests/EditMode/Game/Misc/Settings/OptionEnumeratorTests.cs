@@ -107,6 +107,10 @@ namespace MajdataPlay.Tests.Game.Misc.Settings
             [UseGeneralTranslation(TranslationTarget.OptionValue)]
             public bool GeneralOnly { get; set; } = true;
 
+            /// <summary>A boolean option that explicitly requests its option-specific value keys.</summary>
+            [UseTranslation(TranslationTarget.OptionValue)]
+            public bool Specific { get; set; } = true;
+
             /// <summary>A read-only nullable number.</summary>
             public int? NullableNumber { get; }
         }
@@ -362,9 +366,9 @@ namespace MajdataPlay.Tests.Game.Misc.Settings
             Assert.That(templated.LocalizedValueText, Is.EqualTo("2"));
         }
 
-        /// <summary>Checks that numeric values with option-specific keys fall back to the general table, which a specific key overrides.</summary>
+        /// <summary>Checks that numeric values with option-specific keys never fall back to the general table.</summary>
         [Test]
-        public void NumberEnumerator_FallsBackToGeneralAfterSpecificKey()
+        public void NumberEnumerator_DoesNotFallBackToGeneral()
         {
             UseLanguage(
                 ("MAJSETTING_GENERAL_OPTION_3", "general three"),
@@ -374,8 +378,8 @@ namespace MajdataPlay.Tests.Game.Misc.Settings
             var templated = Create<DefaultNumberEnumerator>(probe, nameof(NumberProbe.Templated));
             var plain = Create<DefaultNumberEnumerator>(probe, nameof(NumberProbe.Plain));
 
-            Assert.That(translated.LocalizedValueText, Is.EqualTo("general three"));
-            Assert.That(templated.LocalizedValueText, Is.EqualTo("general one"));
+            Assert.That(translated.LocalizedValueText, Is.EqualTo("3"));
+            Assert.That(templated.LocalizedValueText, Is.EqualTo("1"));
             Assert.That(plain.LocalizedValueText, Is.EqualTo("3"));
 
             UseLanguage(
@@ -384,6 +388,21 @@ namespace MajdataPlay.Tests.Game.Misc.Settings
             translated.RefreshLocalization();
 
             Assert.That(translated.LocalizedValueText, Is.EqualTo("drei"));
+        }
+
+        /// <summary>Checks that a boolean option with explicit option-specific keys still falls back to the general table.</summary>
+        [Test]
+        public void BooleanEnumerator_ExplicitKeysFallBackToGeneral()
+        {
+            UseLanguage(("MAJSETTING_GENERAL_OPTION_True", "On"));
+            var enumerator = Create<DefaultBooleanEnumerator>(new ValueProbe(), nameof(ValueProbe.Specific));
+
+            Assert.That(enumerator.LocalizedValueText, Is.EqualTo("On"));
+
+            UseLanguage(("MAJSETTING_PROPERTY_Specific_OPTION_True", "Yes"), ("MAJSETTING_GENERAL_OPTION_True", "On"));
+            enumerator.RefreshLocalization();
+
+            Assert.That(enumerator.LocalizedValueText, Is.EqualTo("Yes"));
         }
 
         /// <summary>Checks that a boolean enumerator cycles between false and true.</summary>

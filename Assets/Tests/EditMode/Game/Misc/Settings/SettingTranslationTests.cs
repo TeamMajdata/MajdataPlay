@@ -247,9 +247,9 @@ namespace MajdataPlay.Tests.Game.Misc.Settings
             return PrivateMember.GetStaticField<HashSet<string>>(typeof(Localization), "_reportedMissingTranslations");
         }
 
-        /// <summary>Checks that boolean and numeric values query the general table after their option-specific keys.</summary>
+        /// <summary>Checks that only boolean values query the general table automatically after their option-specific keys.</summary>
         [Test]
-        public void Resolve_BooleanAndNumericValues_FallBackToGeneralAfterSpecificKeys()
+        public void Resolve_OnlyBooleanValues_FallBackToGeneralAfterSpecificKeys()
         {
             var number = ResolveValue(nameof(ValueRuleProbe.Number));
             var flag = ResolveValue(nameof(ValueRuleProbe.Flag));
@@ -260,8 +260,7 @@ namespace MajdataPlay.Tests.Game.Misc.Settings
             var untyped = SettingTranslation.Resolve(SettingReflectionCache.GetAttributes(typeof(ValueRuleProbe).GetProperty(nameof(ValueRuleProbe.Number))!),
                 TranslationTarget.OptionValue, nameof(ValueRuleProbe.Number));
 
-            Assert.That(number.KeyTemplates, Is.EqualTo(new[] { SettingTranslation.DefaultOptionValueTemplate, SettingTranslation.GeneralOptionValueTemplate }));
-            Assert.That(number.GetKey(1, "0"), Is.EqualTo("MAJSETTING_GENERAL_OPTION_0"));
+            Assert.That(number.KeyTemplates, Is.EqualTo(new[] { SettingTranslation.DefaultOptionValueTemplate }));
             Assert.That(flag.KeyTemplates, Is.EqualTo(new[] { "MAJTEXT_FX_{0}_{1}", SettingTranslation.GeneralOptionValueTemplate }));
             Assert.That(both.KeyTemplates, Is.EqualTo(new[] { SettingTranslation.DefaultOptionValueTemplate, SettingTranslation.GeneralOptionValueTemplate }));
             Assert.That(mode.KeyTemplates, Is.EqualTo(new[] { SettingTranslation.DefaultOptionValueTemplate }));
@@ -272,21 +271,22 @@ namespace MajdataPlay.Tests.Game.Misc.Settings
 
         /// <summary>Checks which value types fall back to the general table automatically.</summary>
         [Test]
-        public void HasGeneralValueFallback_CoversBooleanAndNumericTypes()
+        public void HasGeneralValueFallback_CoversOnlyBooleanTypes()
         {
             Assert.That(SettingTranslation.HasGeneralValueFallback(typeof(bool)), Is.True);
             Assert.That(SettingTranslation.HasGeneralValueFallback(typeof(bool?)), Is.True);
-            Assert.That(SettingTranslation.HasGeneralValueFallback(typeof(int)), Is.True);
-            Assert.That(SettingTranslation.HasGeneralValueFallback(typeof(double?)), Is.True);
-            Assert.That(SettingTranslation.HasGeneralValueFallback(typeof(decimal)), Is.True);
+            Assert.That(SettingTranslation.HasGeneralValueFallback(typeof(int)), Is.False);
+            Assert.That(SettingTranslation.HasGeneralValueFallback(typeof(double?)), Is.False);
+            Assert.That(SettingTranslation.HasGeneralValueFallback(typeof(decimal)), Is.False);
             Assert.That(SettingTranslation.HasGeneralValueFallback(typeof(ProbeMode)), Is.False);
+            Assert.That(SettingTranslation.HasGeneralValueFallback(typeof(ProbeMode?)), Is.False);
             Assert.That(SettingTranslation.HasGeneralValueFallback(typeof(string)), Is.False);
             Assert.That(SettingTranslation.HasGeneralValueFallback(null), Is.False);
         }
 
-        /// <summary>Checks the general fallback of values and that only a miss of every key is reported.</summary>
+        /// <summary>Checks that numbers use only their requested keys, booleans fall back to the general table, and only complete misses are reported.</summary>
         [Test]
-        public void Localize_FallsBackToGeneralAndReportsOnlyCompleteMisses()
+        public void Localize_UsesRequestedKeysAndReportsOnlyCompleteMisses()
         {
             UseLanguage(
                 ("MAJSETTING_PROPERTY_Number_OPTION_1", "One"),
@@ -296,12 +296,12 @@ namespace MajdataPlay.Tests.Game.Misc.Settings
             var flag = ResolveValue(nameof(ValueRuleProbe.Flag));
 
             Assert.That(number.Localize("1", true), Is.EqualTo("One"));
-            Assert.That(number.Localize("0", true), Is.EqualTo("Zero"));
+            Assert.That(number.Localize("0", true), Is.EqualTo("0"));
             Assert.That(flag.Localize("True"), Is.EqualTo("On"));
             Assert.That(number.Localize("2", true), Is.EqualTo("2"));
             Assert.That(number.Localize("2", true), Is.EqualTo("2"));
 
-            Assert.That(ReportedMissingKeys(), Is.EquivalentTo(new[] { "MAJSETTING_PROPERTY_Number_OPTION_2" }));
+            Assert.That(ReportedMissingKeys(), Is.EquivalentTo(new[] { "MAJSETTING_PROPERTY_Number_OPTION_0", "MAJSETTING_PROPERTY_Number_OPTION_2" }));
         }
 
         /// <summary>Checks that a literal key is used verbatim, including braces.</summary>

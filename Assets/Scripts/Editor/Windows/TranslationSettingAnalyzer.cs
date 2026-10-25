@@ -786,7 +786,7 @@ namespace MajdataPlay.Editor.Windows
         /// <param name="generalByDefault">Whether the built-in default also tries the general template.</param>
         /// <param name="generalAfterSpecific">
         /// Whether explicitly selected option-specific templates are always followed by the general template, as the
-        /// runtime does for boolean and numeric option values.
+        /// runtime does for boolean option values.
         /// </param>
         /// <returns>The selection; an untranslated one has no templates.</returns>
         private static TranslationSelection SelectTranslation(IList<CustomAttributeData> attributes, string target, string memberName,
@@ -869,11 +869,10 @@ namespace MajdataPlay.Editor.Windows
         /// the general table after their option-specific keys.
         /// </summary>
         /// <param name="type">The option property type, possibly nullable.</param>
-        /// <returns>True for boolean and numeric types and their nullable forms; otherwise false.</returns>
+        /// <returns>True for bool and Nullable&lt;bool&gt;; numeric and enum values follow their attributes only.</returns>
         private static bool HasGeneralValueFallback(Type type)
         {
-            var valueType = Nullable.GetUnderlyingType(type) ?? type;
-            return valueType == typeof(bool) || IsNumber(valueType);
+            return (Nullable.GetUnderlyingType(type) ?? type) == typeof(bool);
         }
 
         /// <summary>

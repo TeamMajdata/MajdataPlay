@@ -14,9 +14,9 @@ namespace MajdataPlay.Settings
     /// <remarks>
     /// Localization keys are built from key templates: <c>{0}</c> is replaced by <see cref="OptionName"/> and,
     /// for <see cref="TranslationTarget.OptionValue"/>, <c>{1}</c> by the value text. The templates are tried
-    /// in order and the first key that has a translation wins. Boolean and numeric option values always end with the
-    /// general template <see cref="GeneralOptionValueTemplate"/> after their option-specific templates. Instances are
-    /// immutable and may be shared.
+    /// in order and the first key that has a translation wins. Boolean option values always end with the general
+    /// template <see cref="GeneralOptionValueTemplate"/> after their option-specific templates. Instances are immutable
+    /// and may be shared.
     /// </remarks>
     internal sealed class SettingTranslation
     {
@@ -130,11 +130,13 @@ namespace MajdataPlay.Settings
         /// <see cref="NoTranslationAttribute"/> wins over the other attributes. Otherwise the keys of every
         /// <see cref="UseTranslationAttribute"/> are tried first, then those of every
         /// <see cref="UseGeneralTranslationAttribute"/>; their <c>{0}</c> is the <see cref="OptionNameAttribute"/>
-        /// value when present, otherwise <paramref name="memberName"/>. For option values of a boolean or numeric
+        /// value when present, otherwise <paramref name="memberName"/>. For option values of a boolean
         /// <paramref name="valueType"/>, the general template <c>MAJSETTING_GENERAL_OPTION_{1}</c> always follows the
-        /// option-specific templates, even without <see cref="UseGeneralTranslationAttribute"/>. Without any attribute
-        /// for the target the built-in default applies with <c>{0}</c> set to <paramref name="memberName"/>: the
-        /// default template, followed by the general template for option values.
+        /// option-specific templates, even without <see cref="UseGeneralTranslationAttribute"/>; numeric and enum values
+        /// use exactly the templates of their attributes. Without any attribute for the target the built-in default
+        /// applies with <c>{0}</c> set to <paramref name="memberName"/>: the default template, followed by the general
+        /// template for option values. Numeric option values are not looked up at all without an attribute, which the
+        /// option enumerators enforce.
         /// </remarks>
         /// <param name="attributes">The attributes of the setting member.</param>
         /// <param name="target">The part of the option to localize.</param>
@@ -195,19 +197,19 @@ namespace MajdataPlay.Settings
         /// Gets whether option values of a type always fall back to the general table after their option-specific keys.
         /// </summary>
         /// <remarks>
-        /// Boolean and numeric values share their spelling across options (<c>True</c>, <c>0</c>, ...), so a missing
-        /// option-specific translation is completed by <c>MAJSETTING_GENERAL_OPTION_{1}</c>.
+        /// Boolean values share their spelling across options (<c>True</c>, <c>False</c>), so a missing option-specific
+        /// translation is completed by <c>MAJSETTING_GENERAL_OPTION_{1}</c>. Numeric values are only translated as their
+        /// attributes request, and enums are not numeric, so neither falls back automatically.
         /// </remarks>
         /// <param name="valueType">The option value type, possibly nullable, or null when it is unknown.</param>
-        /// <returns>True for boolean, integer and floating-point types and their nullable forms; otherwise false.</returns>
+        /// <returns>True for <see cref="bool"/> and <see cref="Nullable{T}"/> of <see cref="bool"/>; otherwise false.</returns>
         internal static bool HasGeneralValueFallback(Type? valueType)
         {
             if (valueType is null)
             {
                 return false;
             }
-            var underlyingType = Nullable.GetUnderlyingType(valueType) ?? valueType;
-            return underlyingType == typeof(bool) || underlyingType.IsIntType() || underlyingType.IsFloatType();
+            return (Nullable.GetUnderlyingType(valueType) ?? valueType) == typeof(bool);
         }
 
         /// <summary>
