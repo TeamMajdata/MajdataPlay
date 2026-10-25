@@ -14,9 +14,9 @@ namespace MajdataPlay.Settings
     /// <remarks>
     /// Localization keys are built from key templates: <c>{0}</c> is replaced by <see cref="OptionName"/> and,
     /// for <see cref="TranslationTarget.OptionValue"/>, <c>{1}</c> by the value text. The templates are tried
-    /// in order and the first key that has a translation wins. Boolean option values always end with the general
-    /// template <see cref="GeneralOptionValueTemplate"/> after their option-specific templates, while enum values only
-    /// use it when <see cref="UseGeneralTranslationAttribute"/> requests it. Instances are immutable and may be shared.
+    /// in order and the first key that has a translation wins. Explicit attributes select exactly their keys; without
+    /// attributes, boolean values only use <see cref="GeneralOptionValueTemplate"/> and enum values only their
+    /// option-specific key (see <see cref="GetDefaultValueTemplates"/>). Instances are immutable and may be shared.
     /// </remarks>
     internal sealed class SettingTranslation
     {
@@ -111,7 +111,7 @@ namespace MajdataPlay.Settings
 
         /// <summary>
         /// Resolves the localization rule of one target from the translation attributes of a setting member
-        /// whose value type is unknown, so no type-specific general fallback is added.
+        /// whose value type is unknown, so option values use the default templates of an unknown type.
         /// </summary>
         /// <param name="attributes">The attributes of the setting member.</param>
         /// <param name="target">The part of the option to localize.</param>
@@ -130,13 +130,10 @@ namespace MajdataPlay.Settings
         /// <see cref="NoTranslationAttribute"/> wins over the other attributes. Otherwise the keys of every
         /// <see cref="UseTranslationAttribute"/> are tried first, then those of every
         /// <see cref="UseGeneralTranslationAttribute"/>; their <c>{0}</c> is the <see cref="OptionNameAttribute"/>
-        /// value when present, otherwise <paramref name="memberName"/>. For option values of a boolean
-        /// <paramref name="valueType"/>, the general template <c>MAJSETTING_GENERAL_OPTION_{1}</c> always follows the
-        /// option-specific templates, even without <see cref="UseGeneralTranslationAttribute"/>; numeric and enum values
-        /// use exactly the templates of their attributes. Without any attribute for the target the built-in default
-        /// applies with <c>{0}</c> set to <paramref name="memberName"/>: the default template, followed for option values
-        /// by the general template unless <paramref name="valueType"/> is an enum (see
-        /// <see cref="HasDefaultGeneralFallback"/>). Numeric option values are not looked up at all without an attribute,
+        /// value when present, otherwise <paramref name="memberName"/>. Explicit attributes select exactly these keys,
+        /// with no automatic fallback. Without any attribute for the target the built-in default applies with <c>{0}</c>
+        /// set to <paramref name="memberName"/>; for option values it depends on <paramref name="valueType"/> (see
+        /// <see cref="GetDefaultValueTemplates"/>). Numeric option values are not looked up at all without an attribute,
         /// which the option enumerators enforce.
         /// </remarks>
         /// <param name="attributes">The attributes of the setting member.</param>
@@ -179,58 +176,63 @@ namespace MajdataPlay.Settings
 
             if (!isExplicit)
             {
-                specificTemplates.Add(GetDefaultTemplate(target));
-                if (target == TranslationTarget.OptionValue && HasDefaultGeneralFallback(valueType))
-                {
-                    specificTemplates.Add(GeneralOptionValueTemplate);
-                }
-                return new SettingTranslation(target, memberName, false, specificTemplates.ToArray());
-            }
-            if (target == TranslationTarget.OptionValue && specificTemplates.Count != 0 && HasGeneralValueFallback(valueType))
-            {
-                AddTemplate(generalTemplates, GeneralOptionValueTemplate, optionName);
+                var defaultTemplates = target == TranslationTarget.OptionValue
+                    ? GetDefaultValueTemplates(valueType)
+                    : new[] { GetDefaultTemplate(target) };
+                return new SettingTranslation(target, memberName, false, defaultTemplates);
             }
             specificTemplates.AddRange(generalTemplates);
             return new SettingTranslation(target, optionName, true, specificTemplates.ToArray());
         }
 
         /// <summary>
-        /// Gets whether option values of a type always fall back to the general table after their option-specific keys.
+        /// Resolves how the <c>UNSET</c> and <c>NULL</c> placeholders of a missing option value are localized.
         /// </summary>
         /// <remarks>
-        /// Boolean values share their spelling across options (<c>True</c>, <c>False</c>), so a missing option-specific
-        /// translation is completed by <c>MAJSETTING_GENERAL_OPTION_{1}</c>. Numeric values are only translated as their
-        /// attributes request, and enums are not numeric, so neither falls back automatically.
+        /// The placeholders are words rather than values of the option type, so they are looked up with the keys the
+        /// attributes select (or the option-specific default key without attributes) and then always fall back to
+        /// <see cref="GeneralOptionValueTemplate"/>. <see cref="NoTranslationAttribute"/> leaves them untranslated.
         /// </remarks>
-        /// <param name="valueType">The option value type, possibly nullable, or null when it is unknown.</param>
-        /// <returns>True for <see cref="bool"/> and <see cref="Nullable{T}"/> of <see cref="bool"/>; otherwise false.</returns>
-        internal static bool HasGeneralValueFallback(Type? valueType)
+        /// <param name="attributes">The attributes of the setting member.</param>
+        /// <param name="memberName">The declared member name.</param>
+        /// <returns>The placeholder rule.</returns>
+        /// <exception cref="ArgumentNullException"><paramref name="attributes"/> or <paramref name="memberName"/> is null.</exception>
+        internal static SettingTranslation ResolvePlaceholder(Attribute[] attributes, string memberName)
         {
-            if (valueType is null)
+            var valueRule = Resolve(attributes, TranslationTarget.OptionValue, memberName, null);
+            if (!valueRule.IsTranslated || Array.IndexOf(valueRule._templates, GeneralOptionValueTemplate) >= 0)
             {
-                return false;
+                return valueRule;
             }
-            return (Nullable.GetUnderlyingType(valueType) ?? valueType) == typeof(bool);
+            var templates = new string[valueRule._templates.Length + 1];
+            valueRule._templates.CopyTo(templates, 0);
+            templates[templates.Length - 1] = GeneralOptionValueTemplate;
+            return new SettingTranslation(TranslationTarget.OptionValue, valueRule.OptionName, valueRule.IsExplicit, templates);
         }
 
         /// <summary>
-        /// Gets whether option values of a type without translation attributes try the general table after their
-        /// option-specific key.
+        /// Gets the key templates option values of a type use without translation attributes.
         /// </summary>
         /// <remarks>
-        /// Enum values are named per option, so they only use the general table when the member requests it with
-        /// <see cref="UseGeneralTranslationAttribute"/>. Every other type, and an unknown type, keeps the general
-        /// fallback; this also covers the <c>UNSET</c> and <c>NULL</c> placeholders, which are words of no value type.
+        /// Boolean values share their spelling across options (<c>True</c>, <c>False</c>), so they only use the general
+        /// table. Enum values are named per option, so they only use their option-specific key. Other values, and values
+        /// of an unknown type, use the option-specific key and then the general table. Numeric values are not looked up
+        /// at all without an attribute, which the option enumerators enforce.
         /// </remarks>
         /// <param name="valueType">The option value type, possibly nullable, or null when it is unknown.</param>
-        /// <returns>False for enums and their nullable forms; otherwise true.</returns>
-        internal static bool HasDefaultGeneralFallback(Type? valueType)
+        /// <returns>The key templates in lookup order.</returns>
+        internal static string[] GetDefaultValueTemplates(Type? valueType)
         {
-            if (valueType is null)
+            var underlyingType = valueType is null ? null : Nullable.GetUnderlyingType(valueType) ?? valueType;
+            if (underlyingType == typeof(bool))
             {
-                return true;
+                return new[] { GeneralOptionValueTemplate };
             }
-            return !(Nullable.GetUnderlyingType(valueType) ?? valueType).IsEnum;
+            if (underlyingType is not null && underlyingType.IsEnum)
+            {
+                return new[] { DefaultOptionValueTemplate };
+            }
+            return new[] { DefaultOptionValueTemplate, GeneralOptionValueTemplate };
         }
 
         /// <summary>

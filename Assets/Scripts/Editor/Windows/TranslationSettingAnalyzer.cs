@@ -162,7 +162,7 @@ namespace MajdataPlay.Editor.Windows
                     // MenuMetadata.Name is the value property's name; MenuNameAttribute is not used by the UI.
                     // The translation attributes of the root category property select the title key.
                     var categoryAttributes = category.GetCustomAttributesData();
-                    var titleSelection = SelectTranslation(categoryAttributes, "MenuName", menuProperty.Name, DefaultMenuNameTemplate, GeneralMenuNameTemplate, false, false);
+                    var titleSelection = SelectTranslation(categoryAttributes, "MenuName", menuProperty.Name, DefaultMenuNameTemplate, GeneralMenuNameTemplate, new[] { DefaultMenuNameTemplate });
                     AddTemplateKeys(titleSelection, menuProperty.Name, path + " (category)", keys, diagnostics);
                     CollectMenu(menuProperty.PropertyType, path, keys, diagnostics);
                 }
@@ -373,7 +373,7 @@ namespace MajdataPlay.Editor.Windows
                 }
             }
 
-            var nameSelection = SelectTranslation(attributes, "OptionName", property.Name, DefaultOptionNameTemplate, GeneralOptionNameTemplate, false, false);
+            var nameSelection = SelectTranslation(attributes, "OptionName", property.Name, DefaultOptionNameTemplate, GeneralOptionNameTemplate, new[] { DefaultOptionNameTemplate });
             if (!nameSelection.IsExplicit && nameKeyOverride is not null)
             {
                 // Without translation attributes an OptionName override is the complete localization key.
@@ -387,9 +387,10 @@ namespace MajdataPlay.Editor.Windows
             {
                 AddKey(descriptionKey, path + " (description)", keys, diagnostics);
             }
-            var valueSelection = SelectTranslation(attributes, "OptionValue", property.Name, DefaultOptionValueTemplate, GeneralOptionValueTemplate, HasDefaultGeneralFallback(property.PropertyType),
-                HasGeneralValueFallback(property.PropertyType));
-            CollectValues(property, enumeratorType, HasAttribute(attributes, SettingsNamespace + "OptionalAttribute"), valueSelection, path, keys, diagnostics);
+            var valueSelection = SelectTranslation(attributes, "OptionValue", property.Name, DefaultOptionValueTemplate, GeneralOptionValueTemplate,
+                GetDefaultValueTemplates(property.PropertyType));
+            var placeholderSelection = SelectPlaceholderTranslation(attributes, property.Name);
+            CollectValues(property, enumeratorType, HasAttribute(attributes, SettingsNamespace + "OptionalAttribute"), valueSelection, placeholderSelection, path, keys, diagnostics);
             CollectSelectedValues(property, attributes, valueSelection, path, keys, diagnostics);
         }
 
@@ -400,10 +401,11 @@ namespace MajdataPlay.Editor.Windows
         /// <param name="enumeratorType">The explicit enumerator override, or null for the default factory.</param>
         /// <param name="isOptional">Whether the Optional attribute changes null display text to UNSET.</param>
         /// <param name="source">The value key templates selected by the option's translation attributes.</param>
+        /// <param name="placeholderSource">The key templates of the UNSET and NULL placeholders, which always end with the general template.</param>
         /// <param name="path">The UI path identifying this option.</param>
         /// <param name="keys">Receives property-specific and general fallback value keys.</param>
         /// <param name="diagnostics">Receives unsupported enumerators and dynamic value sources.</param>
-        private static void CollectValues(PropertyInfo property, Type? enumeratorType, bool isOptional, TranslationSelection source, string path,
+        private static void CollectValues(PropertyInfo property, Type? enumeratorType, bool isOptional, TranslationSelection source, TranslationSelection placeholderSource, string path,
             IDictionary<string, HashSet<string>> keys, IList<string> diagnostics)
         {
             var type = property.PropertyType;
@@ -442,7 +444,7 @@ namespace MajdataPlay.Editor.Windows
                     // Nullable<bool> alone does not add null to DefaultBooleanEnumerator.OptionValues.
                     if (isOptional)
                     {
-                        AddValue(source, "UNSET", path, keys, diagnostics);
+                        AddValue(placeholderSource, "UNSET", path, keys, diagnostics);
                     }
                     return;
                 case EnumeratorNamespace + "DefaultEnumEnumerator":
@@ -480,7 +482,7 @@ namespace MajdataPlay.Editor.Windows
                     }
                     return;
                 case EnumeratorNamespace + "DefaultReadOnlyEnumerator":
-                    CollectReadOnlyValues(property, isOptional, source, path, keys, diagnostics);
+                    CollectReadOnlyValues(property, isOptional, source, placeholderSource, path, keys, diagnostics);
                     return;
                 case EnumeratorNamespace + "LanguageEnumerator":
                     // Only the no-language branch has a fixed value; loaded language identifiers are dynamic.
@@ -526,10 +528,11 @@ namespace MajdataPlay.Editor.Windows
         /// <param name="property">The property displayed by DefaultReadOnlyEnumerator.</param>
         /// <param name="isOptional">Whether null is displayed as UNSET instead of NULL.</param>
         /// <param name="source">The value key templates selected by the option's translation attributes.</param>
+        /// <param name="placeholderSource">The key templates of the UNSET and NULL placeholders, which always end with the general template.</param>
         /// <param name="path">The UI path identifying this option.</param>
         /// <param name="keys">Receives statically known non-numeric values and null sentinel keys.</param>
         /// <param name="diagnostics">Receives runtime-dependent values that were intentionally excluded.</param>
-        private static void CollectReadOnlyValues(PropertyInfo property, bool isOptional, TranslationSelection source, string path,
+        private static void CollectReadOnlyValues(PropertyInfo property, bool isOptional, TranslationSelection source, TranslationSelection placeholderSource, string path,
             IDictionary<string, HashSet<string>> keys, IList<string> diagnostics)
         {
             var nullableType = Nullable.GetUnderlyingType(property.PropertyType);
@@ -552,10 +555,6 @@ namespace MajdataPlay.Editor.Windows
             // Optional on a non-nullable enum or number does not manufacture a null option.
             if (nullableType is not null || !property.PropertyType.IsValueType)
             {
-                // The placeholders are words, so an enum option, whose values skip the general table by default, still uses it.
-                var placeholderSource = valueType.IsEnum
-                    ? SelectTranslation(property.GetCustomAttributesData(), "OptionValue", property.Name, DefaultOptionValueTemplate, GeneralOptionValueTemplate, true, false)
-                    : source;
                 AddValue(placeholderSource, isOptional ? "UNSET" : "NULL", path, keys, diagnostics);
             }
         }
@@ -870,16 +869,12 @@ namespace MajdataPlay.Editor.Windows
         /// <param name="attributes">The member's custom attribute metadata.</param>
         /// <param name="target">The TranslationTarget constant name: MenuName, OptionName or OptionValue.</param>
         /// <param name="memberName">The declared member name, or the displayed menu name.</param>
-        /// <param name="defaultTemplate">The built-in template of the target.</param>
+        /// <param name="defaultTemplate">The option-specific template UseTranslation selects without a custom key.</param>
         /// <param name="generalTemplate">The general table template of the target.</param>
-        /// <param name="generalByDefault">Whether the built-in default also tries the general template.</param>
-        /// <param name="generalAfterSpecific">
-        /// Whether explicitly selected option-specific templates are always followed by the general template, as the
-        /// runtime does for boolean option values.
-        /// </param>
+        /// <param name="defaultTemplates">The templates used without translation attributes, in lookup order.</param>
         /// <returns>The selection; an untranslated one has no templates.</returns>
         private static TranslationSelection SelectTranslation(IList<CustomAttributeData> attributes, string target, string memberName,
-            string defaultTemplate, string generalTemplate, bool generalByDefault, bool generalAfterSpecific)
+            string defaultTemplate, string generalTemplate, IReadOnlyList<string> defaultTemplates)
         {
             var optionName = GetOptionName(attributes, memberName);
             var isExplicit = false;
@@ -915,19 +910,28 @@ namespace MajdataPlay.Editor.Windows
 
             if (!isExplicit)
             {
-                specific.Add(defaultTemplate);
-                if (generalByDefault)
-                {
-                    specific.Add(generalTemplate);
-                }
-                return new TranslationSelection(memberName, false, specific);
-            }
-            if (generalAfterSpecific && specific.Count != 0)
-            {
-                AddDistinct(general, generalTemplate);
+                return new TranslationSelection(memberName, false, new List<string>(defaultTemplates));
             }
             specific.AddRange(general);
             return new TranslationSelection(optionName, true, specific);
+        }
+
+        /// <summary>
+        /// Mirrors SettingTranslation.ResolvePlaceholder: the value keys of an option followed by the general template,
+        /// which the UNSET and NULL placeholders always fall back to.
+        /// </summary>
+        /// <param name="attributes">The member's custom attribute metadata.</param>
+        /// <param name="memberName">The declared member name.</param>
+        /// <returns>The placeholder selection; an untranslated one has no templates.</returns>
+        private static TranslationSelection SelectPlaceholderTranslation(IList<CustomAttributeData> attributes, string memberName)
+        {
+            var selection = SelectTranslation(attributes, "OptionValue", memberName, DefaultOptionValueTemplate, GeneralOptionValueTemplate,
+                new[] { DefaultOptionValueTemplate, GeneralOptionValueTemplate });
+            if (selection.IsTranslated)
+            {
+                AddDistinct(selection.Templates, GeneralOptionValueTemplate);
+            }
+            return selection;
         }
 
         /// <summary>
@@ -944,25 +948,24 @@ namespace MajdataPlay.Editor.Windows
         }
 
         /// <summary>
-        /// Mirrors SettingTranslation.HasGeneralValueFallback: whether option values of a type always fall back to
-        /// the general table after their option-specific keys.
+        /// Mirrors SettingTranslation.GetDefaultValueTemplates: the value templates of a type without translation attributes.
         /// </summary>
         /// <param name="type">The option property type, possibly nullable.</param>
-        /// <returns>True for bool and Nullable&lt;bool&gt;; numeric and enum values follow their attributes only.</returns>
-        private static bool HasGeneralValueFallback(Type type)
+        /// <returns>
+        /// The general template for booleans, the option-specific template for enums, and both for other types.
+        /// </returns>
+        private static string[] GetDefaultValueTemplates(Type type)
         {
-            return (Nullable.GetUnderlyingType(type) ?? type) == typeof(bool);
-        }
-
-        /// <summary>
-        /// Mirrors SettingTranslation.HasDefaultGeneralFallback: whether option values of a type without translation
-        /// attributes try the general table after their option-specific key.
-        /// </summary>
-        /// <param name="type">The option property type, possibly nullable.</param>
-        /// <returns>False for enums and their nullable forms, which only use the general table on request; otherwise true.</returns>
-        private static bool HasDefaultGeneralFallback(Type type)
-        {
-            return !(Nullable.GetUnderlyingType(type) ?? type).IsEnum;
+            var valueType = Nullable.GetUnderlyingType(type) ?? type;
+            if (valueType == typeof(bool))
+            {
+                return new[] { GeneralOptionValueTemplate };
+            }
+            if (valueType.IsEnum)
+            {
+                return new[] { DefaultOptionValueTemplate };
+            }
+            return new[] { DefaultOptionValueTemplate, GeneralOptionValueTemplate };
         }
 
         /// <summary>

@@ -376,12 +376,10 @@ namespace MajdataPlay.TranslationValidation
         /// <exception cref="InvalidOperationException">A finite value label is missing or has the wrong spelling.</exception>
         private static void SettingFiniteValues(AnalysisSnapshot settings)
         {
-            RequireValueKeys(settings, nameof(GameOptions.Enabled), "False", "True");
-            RequireValueKeys(settings, nameof(GameOptions.OptionalBoolean), "False", "True", "UNSET");
-            RequireValueKeys(settings, nameof(GameOptions.NullableWithoutOptional), "False", "True");
-            RequireValueKeys(settings, nameof(ChartSetting.SlideSkipping), "False", "True", "UNSET");
-            RequireValueKeys(settings, nameof(ChartSetting.DisableVideoBG), "False", "True");
-            RequireValueKeys(settings, nameof(SFXVolume.Muted), "False", "True");
+            // Booleans without attributes only use the general table; their UNSET placeholder keeps both keys.
+            RequireKeys(settings, "MAJSETTING_GENERAL_OPTION_False", "MAJSETTING_GENERAL_OPTION_True");
+            RequireValueKeys(settings, nameof(GameOptions.OptionalBoolean), "UNSET");
+            RequireValueKeys(settings, nameof(ChartSetting.SlideSkipping), "UNSET");
             RequireEnumValueKeys(settings, nameof(GameOptions.Mode), typeof(ModeOption));
             RequireEnumValueKeys(settings, nameof(GameOptions.NumericEnum), typeof(NumericDisplayOption));
             RequireEnumValueKeys(settings, nameof(GameOptions.Access), typeof(AccessOption));

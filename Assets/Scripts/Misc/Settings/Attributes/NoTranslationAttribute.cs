@@ -21,9 +21,10 @@ namespace MajdataPlay.Settings
     /// <see cref="TranslationTarget.OptionValue"/> on non-numeric options such as enums, booleans and strings.
     /// </para>
     /// <para>
-    /// Applied to <see cref="TranslationTarget.OptionValue"/>, it also suppresses the automatic fallback of boolean
-    /// values to <c>MAJSETTING_GENERAL_OPTION_{ValueText}</c>, so neither the option-specific nor the general key is
-    /// queried. Use <see cref="TranslateValuesAttribute"/> to translate only some values of such an option.
+    /// Applied to <see cref="TranslationTarget.OptionValue"/>, it also suppresses the default lookups, such as the
+    /// general-table lookup of boolean values, so neither the option-specific nor the general key is queried, and
+    /// the <c>UNSET</c> and <c>NULL</c> placeholders stay untranslated as well. Use
+    /// <see cref="TranslateValuesAttribute"/> to translate only some values of such an option.
     /// </para>
     /// </remarks>
     [AttributeUsage(AttributeTargets.Property | AttributeTargets.Field, AllowMultiple = true, Inherited = false)]

@@ -73,6 +73,9 @@ namespace MajdataPlay.Tests.Game.Misc.Settings
             [UseTranslation(TranslationTarget.OptionValue)]
             public ProbeMode Mode { get; set; }
 
+            /// <summary>Gets or sets a boolean option without translation attributes.</summary>
+            public bool PlainFlag { get; set; }
+
             /// <summary>Gets or sets an enum option without translation attributes.</summary>
             public ProbeMode PlainMode { get; set; }
 
@@ -253,9 +256,9 @@ namespace MajdataPlay.Tests.Game.Misc.Settings
             return PrivateMember.GetStaticField<HashSet<string>>(typeof(Localization), "_reportedMissingTranslations");
         }
 
-        /// <summary>Checks that only boolean values query the general table automatically after their option-specific keys.</summary>
+        /// <summary>Checks that explicit attributes select exactly their keys, with no automatic general fallback.</summary>
         [Test]
-        public void Resolve_OnlyBooleanValues_FallBackToGeneralAfterSpecificKeys()
+        public void Resolve_ExplicitValues_UseOnlyAttributeTemplates()
         {
             var number = ResolveValue(nameof(ValueRuleProbe.Number));
             var flag = ResolveValue(nameof(ValueRuleProbe.Flag));
@@ -267,7 +270,7 @@ namespace MajdataPlay.Tests.Game.Misc.Settings
                 TranslationTarget.OptionValue, nameof(ValueRuleProbe.Number));
 
             Assert.That(number.KeyTemplates, Is.EqualTo(new[] { SettingTranslation.DefaultOptionValueTemplate }));
-            Assert.That(flag.KeyTemplates, Is.EqualTo(new[] { "MAJTEXT_FX_{0}_{1}", SettingTranslation.GeneralOptionValueTemplate }));
+            Assert.That(flag.KeyTemplates, Is.EqualTo(new[] { "MAJTEXT_FX_{0}_{1}" }));
             Assert.That(both.KeyTemplates, Is.EqualTo(new[] { SettingTranslation.DefaultOptionValueTemplate, SettingTranslation.GeneralOptionValueTemplate }));
             Assert.That(mode.KeyTemplates, Is.EqualTo(new[] { SettingTranslation.DefaultOptionValueTemplate }));
             Assert.That(generalOnly.KeyTemplates, Is.EqualTo(new[] { SettingTranslation.GeneralOptionValueTemplate }));
@@ -275,69 +278,97 @@ namespace MajdataPlay.Tests.Game.Misc.Settings
             Assert.That(untyped.KeyTemplates, Is.EqualTo(new[] { SettingTranslation.DefaultOptionValueTemplate }));
         }
 
-        /// <summary>Checks that enum values without attributes only use their option-specific key, unlike other types.</summary>
+        /// <summary>Checks the default value templates: booleans use only the general table and enums only their own key.</summary>
         [Test]
-        public void Resolve_EnumWithoutAttributes_SkipsGeneralTable()
+        public void Resolve_WithoutAttributes_DependsOnValueType()
         {
+            var plainFlag = ResolveValue(nameof(ValueRuleProbe.PlainFlag));
             var plainMode = ResolveValue(nameof(ValueRuleProbe.PlainMode));
             var nullableMode = ResolveValue(nameof(ValueRuleProbe.NullableMode));
             var untypedMode = SettingTranslation.Resolve(Array.Empty<Attribute>(), TranslationTarget.OptionValue, nameof(ValueRuleProbe.PlainMode));
 
-            Assert.That(plainMode.IsExplicit, Is.False);
+            Assert.That(plainFlag.IsExplicit, Is.False);
+            Assert.That(plainFlag.KeyTemplates, Is.EqualTo(new[] { SettingTranslation.GeneralOptionValueTemplate }));
             Assert.That(plainMode.KeyTemplates, Is.EqualTo(new[] { SettingTranslation.DefaultOptionValueTemplate }));
             Assert.That(nullableMode.KeyTemplates, Is.EqualTo(new[] { SettingTranslation.DefaultOptionValueTemplate }));
             Assert.That(untypedMode.KeyTemplates, Is.EqualTo(new[] { SettingTranslation.DefaultOptionValueTemplate, SettingTranslation.GeneralOptionValueTemplate }));
 
-            UseLanguage(("MAJSETTING_GENERAL_OPTION_Alpha", "General alpha"));
+            UseLanguage(("MAJSETTING_GENERAL_OPTION_Alpha", "General alpha"), ("MAJSETTING_PROPERTY_PlainFlag_OPTION_True", "ignored"), ("MAJSETTING_GENERAL_OPTION_True", "On"));
 
             Assert.That(plainMode.Localize(nameof(ProbeMode.Alpha)), Is.EqualTo(nameof(ProbeMode.Alpha)));
+            Assert.That(plainFlag.Localize(bool.TrueString), Is.EqualTo("On"));
         }
 
-        /// <summary>Checks which value types keep the general fallback without translation attributes.</summary>
+        /// <summary>Checks the default value templates of every value type.</summary>
         [Test]
-        public void HasDefaultGeneralFallback_ExcludesOnlyEnums()
+        public void GetDefaultValueTemplates_CoversEveryValueType()
         {
-            Assert.That(SettingTranslation.HasDefaultGeneralFallback(typeof(ProbeMode)), Is.False);
-            Assert.That(SettingTranslation.HasDefaultGeneralFallback(typeof(ProbeMode?)), Is.False);
-            Assert.That(SettingTranslation.HasDefaultGeneralFallback(typeof(bool)), Is.True);
-            Assert.That(SettingTranslation.HasDefaultGeneralFallback(typeof(int)), Is.True);
-            Assert.That(SettingTranslation.HasDefaultGeneralFallback(typeof(string)), Is.True);
-            Assert.That(SettingTranslation.HasDefaultGeneralFallback(null), Is.True);
+            var general = new[] { SettingTranslation.GeneralOptionValueTemplate };
+            var specific = new[] { SettingTranslation.DefaultOptionValueTemplate };
+            var both = new[] { SettingTranslation.DefaultOptionValueTemplate, SettingTranslation.GeneralOptionValueTemplate };
+
+            Assert.That(SettingTranslation.GetDefaultValueTemplates(typeof(bool)), Is.EqualTo(general));
+            Assert.That(SettingTranslation.GetDefaultValueTemplates(typeof(bool?)), Is.EqualTo(general));
+            Assert.That(SettingTranslation.GetDefaultValueTemplates(typeof(ProbeMode)), Is.EqualTo(specific));
+            Assert.That(SettingTranslation.GetDefaultValueTemplates(typeof(ProbeMode?)), Is.EqualTo(specific));
+            Assert.That(SettingTranslation.GetDefaultValueTemplates(typeof(int)), Is.EqualTo(both));
+            Assert.That(SettingTranslation.GetDefaultValueTemplates(typeof(string)), Is.EqualTo(both));
+            Assert.That(SettingTranslation.GetDefaultValueTemplates(null), Is.EqualTo(both));
         }
 
-        /// <summary>Checks which value types fall back to the general table automatically.</summary>
+        /// <summary>Checks that placeholders use the keys of the option and then always the general table.</summary>
         [Test]
-        public void HasGeneralValueFallback_CoversOnlyBooleanTypes()
+        public void ResolvePlaceholder_AlwaysEndsWithGeneralTable()
         {
-            Assert.That(SettingTranslation.HasGeneralValueFallback(typeof(bool)), Is.True);
-            Assert.That(SettingTranslation.HasGeneralValueFallback(typeof(bool?)), Is.True);
-            Assert.That(SettingTranslation.HasGeneralValueFallback(typeof(int)), Is.False);
-            Assert.That(SettingTranslation.HasGeneralValueFallback(typeof(double?)), Is.False);
-            Assert.That(SettingTranslation.HasGeneralValueFallback(typeof(decimal)), Is.False);
-            Assert.That(SettingTranslation.HasGeneralValueFallback(typeof(ProbeMode)), Is.False);
-            Assert.That(SettingTranslation.HasGeneralValueFallback(typeof(ProbeMode?)), Is.False);
-            Assert.That(SettingTranslation.HasGeneralValueFallback(typeof(string)), Is.False);
-            Assert.That(SettingTranslation.HasGeneralValueFallback(null), Is.False);
+            var flag = SettingTranslation.ResolvePlaceholder(ValueAttributes(nameof(ValueRuleProbe.Flag)), nameof(ValueRuleProbe.Flag));
+            var both = SettingTranslation.ResolvePlaceholder(ValueAttributes(nameof(ValueRuleProbe.Both)), nameof(ValueRuleProbe.Both));
+            var plain = SettingTranslation.ResolvePlaceholder(ValueAttributes(nameof(ValueRuleProbe.PlainMode)), nameof(ValueRuleProbe.PlainMode));
+            var raw = SettingTranslation.ResolvePlaceholder(ValueAttributes(nameof(ValueRuleProbe.Raw)), nameof(ValueRuleProbe.Raw));
+
+            Assert.That(flag.KeyTemplates, Is.EqualTo(new[] { "MAJTEXT_FX_{0}_{1}", SettingTranslation.GeneralOptionValueTemplate }));
+            Assert.That(flag.OptionName, Is.EqualTo("Alias"));
+            Assert.That(both.KeyTemplates, Is.EqualTo(new[] { SettingTranslation.DefaultOptionValueTemplate, SettingTranslation.GeneralOptionValueTemplate }));
+            Assert.That(plain.KeyTemplates, Is.EqualTo(new[] { SettingTranslation.DefaultOptionValueTemplate, SettingTranslation.GeneralOptionValueTemplate }));
+            Assert.That(raw.IsTranslated, Is.False);
+
+            UseLanguage(("MAJSETTING_GENERAL_OPTION_UNSET", "Not set"));
+
+            Assert.That(flag.Localize("UNSET"), Is.EqualTo("Not set"));
         }
 
-        /// <summary>Checks that numbers use only their requested keys, booleans fall back to the general table, and only complete misses are reported.</summary>
+        /// <summary>Gets the cached attributes of a <see cref="ValueRuleProbe"/> property.</summary>
+        /// <param name="name">The property name.</param>
+        /// <returns>The attributes.</returns>
+        private static Attribute[] ValueAttributes(string name)
+        {
+            return SettingReflectionCache.GetAttributes(typeof(ValueRuleProbe).GetProperty(name)!);
+        }
+
+        /// <summary>Checks that values use only their requested keys and that only complete misses are reported.</summary>
         [Test]
         public void Localize_UsesRequestedKeysAndReportsOnlyCompleteMisses()
         {
             UseLanguage(
                 ("MAJSETTING_PROPERTY_Number_OPTION_1", "One"),
                 ("MAJSETTING_GENERAL_OPTION_0", "Zero"),
-                ("MAJSETTING_GENERAL_OPTION_True", "On"));
+                ("MAJSETTING_GENERAL_OPTION_True", "On"),
+                ("MAJTEXT_FX_Alias_False", "Off"));
             var number = ResolveValue(nameof(ValueRuleProbe.Number));
             var flag = ResolveValue(nameof(ValueRuleProbe.Flag));
 
             Assert.That(number.Localize("1", true), Is.EqualTo("One"));
             Assert.That(number.Localize("0", true), Is.EqualTo("0"));
-            Assert.That(flag.Localize("True"), Is.EqualTo("On"));
+            Assert.That(flag.Localize("False"), Is.EqualTo("Off"));
+            Assert.That(flag.Localize("True"), Is.EqualTo("True"));
             Assert.That(number.Localize("2", true), Is.EqualTo("2"));
             Assert.That(number.Localize("2", true), Is.EqualTo("2"));
 
-            Assert.That(ReportedMissingKeys(), Is.EquivalentTo(new[] { "MAJSETTING_PROPERTY_Number_OPTION_0", "MAJSETTING_PROPERTY_Number_OPTION_2" }));
+            Assert.That(ReportedMissingKeys(), Is.EquivalentTo(new[]
+            {
+                "MAJSETTING_PROPERTY_Number_OPTION_0",
+                "MAJSETTING_PROPERTY_Number_OPTION_2",
+                "MAJTEXT_FX_Alias_True",
+            }));
         }
 
         /// <summary>Checks that a literal key is used verbatim, including braces.</summary>

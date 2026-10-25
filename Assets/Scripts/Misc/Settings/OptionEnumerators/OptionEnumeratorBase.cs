@@ -101,8 +101,8 @@ namespace MajdataPlay.Settings.OptionEnumerators
         /// Gets how the <c>UNSET</c> and <c>NULL</c> placeholders of a missing value are localized.
         /// </summary>
         /// <remarks>
-        /// The placeholders are words rather than values of the member type, so an enum member, whose values do not fall
-        /// back to the general table by default, still looks them up there.
+        /// The placeholders are words rather than values of the member type, so they always fall back to the general table
+        /// after the keys of the option (see <see cref="SettingTranslation.ResolvePlaceholder"/>).
         /// </remarks>
         private protected SettingTranslation PlaceholderTranslation { get; private set; } = SettingTranslation.DefaultOptionValue;
 
@@ -245,9 +245,8 @@ namespace MajdataPlay.Settings.OptionEnumerators
         /// <see cref="UseGeneralTranslationAttribute"/>; the <c>UNSET</c> and <c>NULL</c> placeholders of a missing
         /// value are words and use <see cref="PlaceholderTranslation"/>. While the values are untranslated, either by default or
         /// through <see cref="NoTranslationAttribute"/>, only the values listed by <see cref="TranslateValuesAttribute"/> are
-        /// translated (see <see cref="SelectedValues"/>). Opted-in numeric values use exactly the keys of
-        /// their attributes, enum values only use the general table when requested, and boolean values that look up an
-        /// option-specific key fall back to the general table afterwards
+        /// translated (see <see cref="SelectedValues"/>). Values with explicit attributes use exactly their keys; without
+        /// attributes boolean values only use the general table and enum values only their option-specific key
         /// (see <see cref="SettingTranslation.Resolve(Attribute[], TranslationTarget, string, Type)"/>).
         /// </remarks>
         /// <param name="value">The option value, or null for a missing value.</param>
@@ -270,10 +269,7 @@ namespace MajdataPlay.Settings.OptionEnumerators
             var valueType = Nullable.GetUnderlyingType(_memberType) ?? _memberType;
             _hasNumericValues = valueType.IsIntType() || valueType.IsFloatType();
             ValueTranslation = SettingTranslation.Resolve(_attributes, TranslationTarget.OptionValue, Name, _memberType);
-            // Resolving without the value type keeps the default general fallback that enum values lose.
-            PlaceholderTranslation = valueType.IsEnum
-                ? SettingTranslation.Resolve(_attributes, TranslationTarget.OptionValue, Name)
-                : ValueTranslation;
+            PlaceholderTranslation = SettingTranslation.ResolvePlaceholder(_attributes, Name);
             SelectedValues = SettingValueSelection.Resolve(_attributes, Name, _memberType);
         }
         public virtual void Dispose()

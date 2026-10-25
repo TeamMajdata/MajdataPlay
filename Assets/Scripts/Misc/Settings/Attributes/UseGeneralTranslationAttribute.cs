@@ -25,19 +25,16 @@ namespace MajdataPlay.Settings
     /// fall back to the general table without it.
     /// </para>
     /// <para>
-    /// Boolean option values (including <see cref="Nullable{T}"/> of <see cref="bool"/>) fall back to
-    /// <c>MAJSETTING_GENERAL_OPTION_{ValueText}</c> automatically after their option-specific key
-    /// (for example <c>MAJSETTING_PROPERTY_{0}_OPTION_{1}</c>) has been queried, both without translation attributes
-    /// and with <see cref="UseTranslationAttribute"/>, so this attribute is not needed for that fallback. Apply it to
-    /// a boolean value only to look up the general table <em>without</em> the option-specific key, or to add the
-    /// general fallback after an explicit <see cref="UseTranslationAttribute"/> to other value types such as
-    /// numbers, enums and strings.
+    /// Boolean option values (including <see cref="Nullable{T}"/> of <see cref="bool"/>) already use only
+    /// <c>MAJSETTING_GENERAL_OPTION_{ValueText}</c> without translation attributes, so this attribute is not needed for
+    /// them. With <see cref="UseTranslationAttribute"/>, no value type falls back to the general table automatically;
+    /// apply this attribute as well to try <c>MAJSETTING_GENERAL_OPTION_{ValueText}</c> after the option-specific keys.
     /// </para>
     /// <para>
-    /// Enum option values never fall back to the general table on their own, not even without translation
-    /// attributes. Apply this attribute to an enum option whose values are translated in the general table, such as
-    /// options sharing <c>JudgeDisplayOption</c>; combine it with <see cref="UseTranslationAttribute"/> to try the
-    /// option-specific key first.
+    /// Enum option values never use the general table on their own, not even without translation attributes. Apply
+    /// this attribute to an enum option whose values are translated in the general table, such as options sharing
+    /// <c>JudgeDisplayOption</c>; combine it with <see cref="UseTranslationAttribute"/> to try the option-specific key
+    /// first.
     /// </para>
     /// </remarks>
     [AttributeUsage(AttributeTargets.Property | AttributeTargets.Field, AllowMultiple = true, Inherited = false)]

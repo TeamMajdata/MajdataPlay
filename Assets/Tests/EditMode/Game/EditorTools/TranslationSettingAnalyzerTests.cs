@@ -66,8 +66,11 @@ namespace MajdataPlay.Tests.Game.EditorTools
         [Test]
         public void BooleanOptions_CollectFalseTrueAndUnset()
         {
-            AssertValue("Flag", "False");
-            AssertValue("Flag", "True");
+            // Booleans without attributes only use the general table.
+            Assert.That(_keys["MAJSETTING_GENERAL_OPTION_False"], Does.Contain("Fx.Flag (option value)"));
+            Assert.That(_keys["MAJSETTING_GENERAL_OPTION_True"], Does.Contain("Fx.Flag (option value)"));
+            Assert.That(_keys.Keys, Does.Not.Contain("MAJSETTING_PROPERTY_Flag_OPTION_True"));
+            // The unset placeholder keeps the option key and the general fallback.
             AssertValue("Maybe", "UNSET");
             Assert.That(_keys.Keys, Does.Not.Contain("MAJSETTING_PROPERTY_Flag_OPTION_UNSET"));
         }
@@ -189,8 +192,8 @@ namespace MajdataPlay.Tests.Game.EditorTools
 
             Assert.That(_keys["FX_SWITCH_True"], Does.Contain("Fx.Switch (option value)"));
             Assert.That(_keys["FX_SWITCH_False"], Does.Contain("Fx.Switch (option value)"));
-            Assert.That(_keys["MAJSETTING_GENERAL_OPTION_True"], Does.Contain("Fx.Switch (option value fallback)"));
-            Assert.That(_keys["MAJSETTING_GENERAL_OPTION_False"], Does.Contain("Fx.Switch (option value fallback)"));
+            // Explicit keys do not fall back to the general table.
+            Assert.That(_keys.Values.Any(sources => sources.Any(source => source.StartsWith("Fx.Switch ", StringComparison.Ordinal) && source.Contains("fallback"))), Is.False);
             Assert.That(_keys.Keys, Does.Not.Contain("MAJSETTING_PROPERTY_Switch_OPTION_True"));
 
             Assert.That(_keys.Keys, Does.Contain("MAJSETTING_GENERAL_PROPERTY_GeneralName"));

@@ -28,19 +28,20 @@ namespace MajdataPlay.Settings
     /// attribute are then looked up, with no automatic general fallback.
     /// </para>
     /// <para>
-    /// Boolean option values (including <see cref="Nullable{T}"/> of <see cref="bool"/>) automatically fall back to
-    /// the general table: after the option-specific keys of this attribute, such as
-    /// <c>MAJSETTING_PROPERTY_{0}_OPTION_{1}</c>, have been queried without a translation,
-    /// <c>MAJSETTING_GENERAL_OPTION_{1}</c> is queried as well, so <c>True</c> and <c>False</c> only need one
-    /// general translation. <see cref="UseGeneralTranslationAttribute"/> is not required for that fallback. Option
-    /// values of every other type, including numbers, enums and strings, only use the general table after an
-    /// explicit <see cref="UseTranslationAttribute"/> when <see cref="UseGeneralTranslationAttribute"/> is also
-    /// applied. If no key yields a translation, the raw value text is displayed.
+    /// For <see cref="TranslationTarget.OptionValue"/> this attribute selects exactly its keys, with no automatic
+    /// fallback to the general table for any value type; add <see cref="UseGeneralTranslationAttribute"/> to try
+    /// <c>MAJSETTING_GENERAL_OPTION_{1}</c> afterwards. If no key yields a translation, the raw value text is displayed.
     /// </para>
     /// <para>
-    /// Enum option values do not use the general table even without translation attributes: by default they only
-    /// look up <c>MAJSETTING_PROPERTY_{0}_OPTION_{1}</c>. The <c>UNSET</c> and <c>NULL</c> placeholders of a nullable
-    /// enum are words and still fall back to the general table.
+    /// Without translation attributes, boolean option values (including <see cref="Nullable{T}"/> of
+    /// <see cref="bool"/>) only look up <c>MAJSETTING_GENERAL_OPTION_{1}</c>; apply this attribute to give a boolean
+    /// option its own <c>MAJSETTING_PROPERTY_{0}_OPTION_{1}</c> texts instead. Enum option values only look up
+    /// <c>MAJSETTING_PROPERTY_{0}_OPTION_{1}</c>, and values of other types such as strings look up
+    /// <c>MAJSETTING_PROPERTY_{0}_OPTION_{1}</c> and then <c>MAJSETTING_GENERAL_OPTION_{1}</c>.
+    /// </para>
+    /// <para>
+    /// The <c>UNSET</c> and <c>NULL</c> placeholders of a missing value are words rather than values: they are looked
+    /// up with the keys of this attribute and then always fall back to the general table.
     /// </para>
     /// </remarks>
     [AttributeUsage(AttributeTargets.Property | AttributeTargets.Field, AllowMultiple = true, Inherited = false)]

@@ -132,6 +132,11 @@ namespace MajdataPlay.Tests.Game.Misc.Settings
             [UseTranslation(TranslationTarget.OptionValue)]
             public bool Specific { get; set; } = true;
 
+            /// <summary>An optional boolean option with explicit option-specific value keys, like <see cref="ChartSetting.SlideSkipping"/>.</summary>
+            [Optional]
+            [UseTranslation(TranslationTarget.OptionValue)]
+            public bool? SpecificMaybe { get; set; }
+
             /// <summary>A read-only nullable number.</summary>
             public int? NullableNumber { get; }
         }
@@ -467,19 +472,35 @@ namespace MajdataPlay.Tests.Game.Misc.Settings
             Assert.That(selected.LocalizedValueText, Is.EqualTo("4"));
         }
 
-        /// <summary>Checks that a boolean option with explicit option-specific keys still falls back to the general table.</summary>
+        /// <summary>Checks that a boolean option with explicit option-specific keys does not fall back to the general table.</summary>
         [Test]
-        public void BooleanEnumerator_ExplicitKeysFallBackToGeneral()
+        public void BooleanEnumerator_ExplicitKeysDoNotFallBack()
         {
             UseLanguage(("MAJSETTING_GENERAL_OPTION_True", "On"));
             var enumerator = Create<DefaultBooleanEnumerator>(new ValueProbe(), nameof(ValueProbe.Specific));
 
-            Assert.That(enumerator.LocalizedValueText, Is.EqualTo("On"));
+            Assert.That(enumerator.LocalizedValueText, Is.EqualTo("True"));
 
             UseLanguage(("MAJSETTING_PROPERTY_Specific_OPTION_True", "Yes"), ("MAJSETTING_GENERAL_OPTION_True", "On"));
             enumerator.RefreshLocalization();
 
             Assert.That(enumerator.LocalizedValueText, Is.EqualTo("Yes"));
+        }
+
+        /// <summary>
+        /// Checks that an optional boolean with explicit keys translates its values only through those keys while its
+        /// unset placeholder still falls back to the general table.
+        /// </summary>
+        [Test]
+        public void BooleanEnumerator_ExplicitOptionalKeepsGeneralPlaceholder()
+        {
+            UseLanguage(
+                ("MAJSETTING_GENERAL_OPTION_UNSET", "Not set"),
+                ("MAJSETTING_GENERAL_OPTION_False", "general off"),
+                ("MAJSETTING_PROPERTY_SpecificMaybe_OPTION_True", "Enabled"));
+            var enumerator = Create<DefaultBooleanEnumerator>(new ValueProbe(), nameof(ValueProbe.SpecificMaybe));
+
+            Assert.That(enumerator.LocalizedValuesForWarmup, Is.EquivalentTo(new[] { "Not set", "False", "Enabled" }));
         }
 
         /// <summary>Checks that a boolean enumerator cycles between false and true.</summary>
@@ -504,7 +525,7 @@ namespace MajdataPlay.Tests.Game.Misc.Settings
         [Test]
         public void BooleanEnumerator_OptionalIncludesUnset()
         {
-            UseLanguage(("MAJSETTING_GENERAL_OPTION_UNSET", "Not set"), ("MAJSETTING_PROPERTY_Maybe_OPTION_True", "Yes"));
+            UseLanguage(("MAJSETTING_GENERAL_OPTION_UNSET", "Not set"), ("MAJSETTING_GENERAL_OPTION_True", "Yes"), ("MAJSETTING_PROPERTY_Maybe_OPTION_True", "ignored"));
             var probe = new ValueProbe();
             var enumerator = Create<DefaultBooleanEnumerator>(probe, nameof(ValueProbe.Maybe));
 
