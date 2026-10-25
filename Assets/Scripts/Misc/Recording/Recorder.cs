@@ -7,7 +7,7 @@ using System.Threading.Tasks;
 #nullable enable
 namespace MajdataPlay.Recording
 {
-    internal static class RecordHelper
+    internal static class Recorder
     {
         public static bool IsRecording
         {

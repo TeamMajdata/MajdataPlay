@@ -21,13 +21,13 @@ using WebSocketSharp;
 namespace MajdataPlay.Tests.Game.Misc.Recording
 {
     /// <summary>
-    /// Covers the managed recording logic: the <see cref="RecordHelper"/> facade, the lifecycle and file naming of
+    /// Covers the managed recording logic: the <see cref="Recorder"/> facade, the lifecycle and file naming of
     /// <see cref="FFmpegRecorder"/> and the OBS message handling of <see cref="OBSRecorder"/>. No capture device, encoder or
     /// OBS connection is used.
     /// </summary>
     public class RecordingTests
     {
-        /// <summary>A recorder that records the calls made by <see cref="RecordHelper"/>.</summary>
+        /// <summary>A recorder that records the calls made by <see cref="Recorder"/>.</summary>
         private sealed class FakeRecorder : IRecorder
         {
             /// <summary>Gets or sets whether the fake reports an active recording.</summary>
@@ -162,8 +162,8 @@ namespace MajdataPlay.Tests.Game.Misc.Recording
             _environment = new MajEnvScope();
             _environment.UseTemporaryLayout(_temporary);
             _objects = new TestObjects();
-            _savedRecorder = PrivateMember.GetStaticField<object?>(typeof(RecordHelper), "_recorder");
-            _savedIsInited = PrivateMember.GetStaticField<int>(typeof(RecordHelper), "s_isInited");
+            _savedRecorder = PrivateMember.GetStaticField<object?>(typeof(Recorder), "_recorder");
+            _savedIsInited = PrivateMember.GetStaticField<int>(typeof(Recorder), "s_isInited");
         }
 
         /// <summary>Restores the facade and the directories.</summary>
@@ -171,10 +171,10 @@ namespace MajdataPlay.Tests.Game.Misc.Recording
         public void TearDown()
         {
             var handler = (EventHandler<EventArgs?>)Delegate.CreateDelegate(typeof(EventHandler<EventArgs?>),
-                typeof(RecordHelper).GetMethod("OnApplicationQuit", BindingFlags.Static | BindingFlags.NonPublic)!);
+                typeof(Recorder).GetMethod("OnApplicationQuit", BindingFlags.Static | BindingFlags.NonPublic)!);
             GameManager.OnAppQuit -= handler;
-            PrivateMember.SetStaticField(typeof(RecordHelper), "_recorder", _savedRecorder);
-            PrivateMember.SetStaticField(typeof(RecordHelper), "s_isInited", _savedIsInited);
+            PrivateMember.SetStaticField(typeof(Recorder), "_recorder", _savedRecorder);
+            PrivateMember.SetStaticField(typeof(Recorder), "s_isInited", _savedIsInited);
             _objects.Dispose();
             _environment.Dispose();
             _temporary.Dispose();
@@ -188,7 +188,7 @@ namespace MajdataPlay.Tests.Game.Misc.Recording
         private static FakeRecorder InstallRecorder(bool connected, bool enabled)
         {
             var recorder = new FakeRecorder { IsConnected = connected };
-            PrivateMember.SetStaticField(typeof(RecordHelper), "_recorder", recorder);
+            PrivateMember.SetStaticField(typeof(Recorder), "_recorder", recorder);
             MajEnv.Settings.Game.RecordMode = enabled ? RecordModeOption.OBSTrigger : RecordModeOption.Disable;
             return recorder;
         }
@@ -202,16 +202,16 @@ namespace MajdataPlay.Tests.Game.Misc.Recording
             {
                 var recorder = InstallRecorder(true, true);
 
-                RecordHelper.StartRecord("chart");
-                await RecordHelper.StartRecordAsync("chart2");
-                RecordHelper.StopRecord();
-                await RecordHelper.StopRecordAsync();
-                RecordHelper.OnLateUpdate();
+                Recorder.StartRecord("chart");
+                await Recorder.StartRecordAsync("chart2");
+                Recorder.StopRecord();
+                await Recorder.StopRecordAsync();
+                Recorder.OnLateUpdate();
                 recorder.IsRecording = true;
 
-                Assert.That(RecordHelper.IsEnabled, Is.True);
-                Assert.That(RecordHelper.IsConnected, Is.True);
-                Assert.That(RecordHelper.IsRecording, Is.True);
+                Assert.That(Recorder.IsEnabled, Is.True);
+                Assert.That(Recorder.IsConnected, Is.True);
+                Assert.That(Recorder.IsRecording, Is.True);
                 Assert.That(recorder.Calls, Is.EqualTo(new[] { "Name:chart", "Start", "Name:chart2", "StartAsync", "Stop", "StopAsync", "LateUpdate" }));
             });
         }
@@ -227,15 +227,15 @@ namespace MajdataPlay.Tests.Game.Misc.Recording
                 {
                     var recorder = InstallRecorder(connected, enabled);
 
-                    RecordHelper.StartRecord("chart");
-                    await RecordHelper.StartRecordAsync("chart");
-                    RecordHelper.StopRecord();
-                    await RecordHelper.StopRecordAsync();
+                    Recorder.StartRecord("chart");
+                    await Recorder.StartRecordAsync("chart");
+                    Recorder.StopRecord();
+                    await Recorder.StopRecordAsync();
 
                     Assert.That(recorder.Calls, Is.Empty);
                 }
-                PrivateMember.SetStaticField(typeof(RecordHelper), "_recorder", null);
-                Assert.That(RecordHelper.IsRecording, Is.False);
+                PrivateMember.SetStaticField(typeof(Recorder), "_recorder", null);
+                Assert.That(Recorder.IsRecording, Is.False);
             });
         }
 
@@ -244,16 +244,16 @@ namespace MajdataPlay.Tests.Game.Misc.Recording
         public void RecordHelper_StopsOnQuit()
         {
             var recorder = InstallRecorder(true, true);
-            PrivateMember.SetStaticField(typeof(RecordHelper), "s_isInited", 1);
+            PrivateMember.SetStaticField(typeof(Recorder), "s_isInited", 1);
 
-            RecordHelper.Init();
-            PrivateMember.InvokeStatic(typeof(RecordHelper), "OnApplicationQuit", null, null);
+            Recorder.Init();
+            PrivateMember.InvokeStatic(typeof(Recorder), "OnApplicationQuit", null, null);
 
-            Assert.That(PrivateMember.GetStaticField<object>(typeof(RecordHelper), "_recorder"), Is.SameAs(recorder));
+            Assert.That(PrivateMember.GetStaticField<object>(typeof(Recorder), "_recorder"), Is.SameAs(recorder));
             Assert.That(recorder.Calls, Is.EqualTo(new[] { "Stop" }));
 
             MajEnv.Settings.Game.RecordMode = RecordModeOption.Disable;
-            PrivateMember.InvokeStatic(typeof(RecordHelper), "OnApplicationQuit", null, null);
+            PrivateMember.InvokeStatic(typeof(Recorder), "OnApplicationQuit", null, null);
             Assert.That(recorder.Calls, Is.EqualTo(new[] { "Stop" }));
         }
 #endif

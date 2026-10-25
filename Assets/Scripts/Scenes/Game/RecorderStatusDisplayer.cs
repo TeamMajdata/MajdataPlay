@@ -24,22 +24,22 @@ namespace MajdataPlay.Scenes.Game
             base.Awake();
             Majdata<RecorderStatusDisplayer>.Instance = this;
             _renderer = GetComponent<SpriteRenderer>();
-            if(!RecordHelper.IsEnabled)
+            if(!Recorder.IsEnabled)
             {
                 SetActive(false);
             }
         }
         internal void OnLateUpdate()
         {
-            if (!RecordHelper.IsEnabled)
+            if (!Recorder.IsEnabled)
             {
                 return;
             }
-            if (RecordHelper.IsRecording)
+            if (Recorder.IsRecording)
             {
                 _renderer.sprite = _recording;
             }
-            else if(RecordHelper.IsConnected)
+            else if(Recorder.IsConnected)
             {
                 _renderer.sprite = _ready;
             }

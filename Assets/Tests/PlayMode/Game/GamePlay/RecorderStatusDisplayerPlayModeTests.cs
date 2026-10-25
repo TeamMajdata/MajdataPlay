@@ -23,7 +23,7 @@ namespace MajdataPlay.Tests.Game.GamePlay.PlayMode
         /// <summary>Restores the registered displayer.</summary>
         private SingletonScope<RecorderStatusDisplayer> _slot = null!;
 
-        /// <summary>The recorder installed in <see cref="RecordHelper"/> before the test.</summary>
+        /// <summary>The recorder installed in <see cref="Recorder"/> before the test.</summary>
         private object? _previousRecorder;
 
         /// <summary>The not-ready, ready and recording sprites.</summary>
@@ -36,7 +36,7 @@ namespace MajdataPlay.Tests.Game.GamePlay.PlayMode
             _objects = new TestObjects();
             _settings = new GamePlaySettingsScope();
             _slot = new SingletonScope<RecorderStatusDisplayer>();
-            _previousRecorder = PrivateMember.GetStaticField<object?>(typeof(RecordHelper), "_recorder");
+            _previousRecorder = PrivateMember.GetStaticField<object?>(typeof(Recorder), "_recorder");
             var texture = _objects.Track(new Texture2D(3, 1));
             _sprites = new Sprite[3];
             for (var i = 0; i < _sprites.Length; i++)
@@ -50,7 +50,7 @@ namespace MajdataPlay.Tests.Game.GamePlay.PlayMode
         public void TearDown()
         {
             _objects.Dispose();
-            PrivateMember.SetStaticField(typeof(RecordHelper), "_recorder", _previousRecorder);
+            PrivateMember.SetStaticField(typeof(Recorder), "_recorder", _previousRecorder);
             _slot.Dispose();
             _settings.Dispose();
         }
@@ -82,7 +82,7 @@ namespace MajdataPlay.Tests.Game.GamePlay.PlayMode
         {
             _settings.Settings.Game.RecordMode = RecordModeOption.OBSTrigger;
             var recorder = new GamePlayFakeRecorder();
-            PrivateMember.SetStaticField(typeof(RecordHelper), "_recorder", recorder);
+            PrivateMember.SetStaticField(typeof(Recorder), "_recorder", recorder);
 
             var displayer = CreateDisplayer(out var renderer);
             yield return null;

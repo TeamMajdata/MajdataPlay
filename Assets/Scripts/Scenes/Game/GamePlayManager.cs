@@ -921,7 +921,7 @@ namespace MajdataPlay.Scenes.Game
             token.ThrowIfCancellationRequested();
             await UniTask.Yield(PlayerLoopTiming.LastPostLateUpdate);
 
-            var wait4Recorder = RecordHelper.StartRecordAsync($"{_songDetail.Title}_{_songDetail.Designers[(int)_gameInfo.CurrentLevel]}");
+            var wait4Recorder = Recording.Recorder.StartRecordAsync($"{_songDetail.Title}_{_songDetail.Designers[(int)_gameInfo.CurrentLevel]}");
             while (!wait4Recorder.IsCompleted)
             {
                 token.ThrowIfCancellationRequested();
@@ -1462,7 +1462,7 @@ namespace MajdataPlay.Scenes.Game
                 return;
             }
             State = GamePlayStatus.Ended;
-            var wait4Recorder = RecordHelper.StopRecordAsync();
+            var wait4Recorder = Recording.Recorder.StopRecordAsync();
             while (!wait4Recorder.IsCompleted)
             {
                 _sceneSwitcher.SetLoadingText($"{"Waiting for recorder".i18n()}...");
@@ -1614,7 +1614,7 @@ namespace MajdataPlay.Scenes.Game
             ClearAllResources();
             await UniTask.Yield(PlayerLoopTiming.LastPostLateUpdate);
 
-            var wait4Recorder = RecordHelper.StopRecordAsync();
+            var wait4Recorder = Recording.Recorder.StopRecordAsync();
             while (!wait4Recorder.IsCompleted)
             {
                 _sceneSwitcher.SetLoadingText($"{"Waiting for recorder".i18n()}...");
