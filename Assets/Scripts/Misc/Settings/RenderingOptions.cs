@@ -117,7 +117,7 @@ namespace MajdataPlay.Settings
         /// Gets or sets the maximum frame rate; -1 removes the limit and smaller values are raised to -1.
         /// </summary>
         [Step("1")]
-        [Range("-1", null, HasMax = false, HasMin = true)]
+        [Range("-1", null)]
         [OptionEnumerator(typeof(EngineNumberSettingEnumerator))]
         public int FPSLimit
         {
@@ -218,7 +218,7 @@ namespace MajdataPlay.Settings
         /// valid range when settings are read.
         /// </remarks>
         [Step("5")]
-        [Range("10", "100", HasMax = true, HasMin = true)]
+        [Range("10", "100")]
         [ShowInSettingUIWhen(nameof(CompatibilityMode), false)]
         [ShowInSettingUIWhen(nameof(RenderQuality), RenderingQualityOption.Custom)]
         [OptionEnumerator(typeof(RenderingNumberSettingEnumerator))]
@@ -229,7 +229,7 @@ namespace MajdataPlay.Settings
         /// <see cref="RenderingQualityOption.Custom"/>, and any value other than 100% forces intermediate output.
         /// </summary>
         [Step("5")]
-        [Range("10", "200", HasMax = true, HasMin = true)]
+        [Range("10", "200")]
         [ShowInSettingUIWhen(nameof(CompatibilityMode), false)]
         [ShowInSettingUIWhen(nameof(RenderQuality), RenderingQualityOption.Custom)]
         [OptionEnumerator(typeof(RenderingNumberSettingEnumerator))]

@@ -20,7 +20,7 @@ namespace MajdataPlay.Settings
         public float AudioOffset { get; set; } = 0f;
         [Preserve]
         [Step("0.05")]
-        [Range("-2", "2", HasMax = true, HasMin = true)]
+        [Range("-2", "2")]
         public float TrackVolumeOffset { get; set; } = 0f;
         public bool DisableVideoBG { get; set; } = false;
         [Optional]

@@ -22,7 +22,7 @@ namespace MajdataPlay.Settings
     public class FFmpegDecoderOptions
     {
         public FFmpegCodecPreference PreferredDecoder { get; set; } = FFmpegCodecPreference.Hardware;
-        [Range("1", null, HasMax = false, HasMin = true)]
+        [Range("1", null)]
         public int IOTimeoutSeconds { get; set; } = 15;
     }
 }

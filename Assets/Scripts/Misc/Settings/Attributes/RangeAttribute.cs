@@ -1,4 +1,6 @@
 ﻿using System;
+using System.Globalization;
+
 #nullable enable
 namespace MajdataPlay.Settings
 {
@@ -7,9 +9,9 @@ namespace MajdataPlay.Settings
     /// </summary>
     /// <remarks>
     /// <para>
-    /// The bounds are written as decimal strings so that any numeric member type can share the attribute.
-    /// A bound is only applied when its matching <see cref="HasMin"/> or <see cref="HasMax"/> flag is set,
-    /// which allows an open-ended range on either side.
+    /// The bounds are written as invariant-culture decimal strings so that any numeric member type can share the attribute.
+    /// A non-null, non-empty bound automatically enables its matching <see cref="HasMin"/> or <see cref="HasMax"/> flag.
+    /// A null or empty bound leaves that side of the range unbounded.
     /// </para>
     /// <para>
     /// When neither this attribute nor <see cref="StepAttribute"/> is present, the number enumerator
@@ -34,26 +36,21 @@ namespace MajdataPlay.Settings
             get => _max;
         }
         /// <summary>
-        /// Gets or initializes whether <see cref="Min"/> is enforced.
+        /// Gets whether a non-null, non-empty lower bound was supplied.
         /// </summary>
-        public bool HasMin
-        {
-            get => _hasMin;
-            init => _hasMin = value;
-        }
+        public bool HasMin { get; }
         /// <summary>
-        /// Gets or initializes whether <see cref="Max"/> is enforced.
+        /// Gets whether a non-null, non-empty upper bound was supplied.
         /// </summary>
-        public bool HasMax
-        {
-            get => _hasMax;
-            init => _hasMax = value;
-        }
+        public bool HasMax { get; }
 
-        private readonly bool _hasMin;
-        private readonly bool _hasMax;
-
+        /// <summary>
+        /// Stores the parsed lower bound, or zero when no lower bound is supplied.
+        /// </summary>
         private readonly decimal _min;
+        /// <summary>
+        /// Stores the parsed upper bound, or zero when no upper bound is supplied.
+        /// </summary>
         private readonly decimal _max;
 
         /// <summary>
@@ -61,24 +58,25 @@ namespace MajdataPlay.Settings
         /// </summary>
         public RangeAttribute()
         {
-
         }
         /// <summary>
         /// Initializes a new instance of the <see cref="RangeAttribute"/> class with the given bounds.
         /// </summary>
-        /// <param name="min">The inclusive lower bound as a decimal string, or null or empty to leave <see cref="Min"/> at zero.</param>
-        /// <param name="max">The inclusive upper bound as a decimal string, or null or empty to leave <see cref="Max"/> at zero.</param>
+        /// <param name="min">The inclusive lower bound as an invariant-culture decimal string, or null or empty for no lower bound.</param>
+        /// <param name="max">The inclusive upper bound as an invariant-culture decimal string, or null or empty for no upper bound.</param>
         /// <exception cref="FormatException"><paramref name="min"/> or <paramref name="max"/> is not a valid decimal number.</exception>
         /// <exception cref="OverflowException"><paramref name="min"/> or <paramref name="max"/> is outside the range of <see cref="decimal"/>.</exception>
         public RangeAttribute(string? min, string? max)
         {
             if (!string.IsNullOrEmpty(min))
             {
-                _min = decimal.Parse(min);
+                _min = decimal.Parse(min, CultureInfo.InvariantCulture);
+                HasMin = true;
             }
             if (!string.IsNullOrEmpty(max))
             {
-                _max = decimal.Parse(max);
+                _max = decimal.Parse(max, CultureInfo.InvariantCulture);
+                HasMax = true;
             }
         }
     }

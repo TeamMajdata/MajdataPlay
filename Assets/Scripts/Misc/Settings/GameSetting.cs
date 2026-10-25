@@ -87,14 +87,14 @@ namespace MajdataPlay.Settings
         /// Gets or sets how fast notes approach the judgment ring.
         /// </summary>
         [Step("0.25")]
-        [Range(HasMax = false, HasMin = false)]
+        [Range]
         public float TapSpeed { get; set; } = 7.5f;
 
         /// <summary>
         /// Gets or sets how fast touch notes appear and close in.
         /// </summary>
         [Step("0.25")]
-        [Range(HasMax = false, HasMin = false)]
+        [Range]
         public float TouchSpeed { get; set; } = 7.5f;
 
         /// <summary>
@@ -107,7 +107,7 @@ namespace MajdataPlay.Settings
         /// Gets or sets the background dimming during gameplay, from 0 to 1; higher values are darker.
         /// </summary>
         [Step("0.05")]
-        [Range("0", "1", HasMax = true, HasMin = true)]
+        [Range("0", "1")]
         public float BackgroundDim { get; set; } = 0.8f;
 
         /// <summary>
@@ -174,7 +174,7 @@ namespace MajdataPlay.Settings
         /// Gets or sets the chart rotation in buttons, 45 degrees each; positive values are clockwise.
         /// </summary>
         [Step("1")]
-        [Range("-7", "7", HasMax = true, HasMin = true)]
+        [Range("-7", "7")]
         public int Rotation { get; set; } = 0;
 
         /// <summary>
@@ -205,7 +205,7 @@ namespace MajdataPlay.Settings
         /// Gets or sets the wait in seconds between entering the gameplay screen and the start of the chart.
         /// </summary>
         [Step("1")]
-        [Range("1", "5", HasMax = true, HasMin = true)]
+        [Range("1", "5")]
         [UseTranslation(TranslationTarget.OptionValue)]
         public int LeadInTime { get; set; } = 1;
 
@@ -316,7 +316,7 @@ namespace MajdataPlay.Settings
         /// Gets or sets where judgments of ring notes such as taps, stars, holds and breaks appear, from 0 at the center to 1 at the ring.
         /// </summary>
         [Step("0.05")]
-        [Range("0", "1", HasMax = true, HasMin = true)]
+        [Range("0", "1")]
         [UseTranslation(TranslationTarget.OptionValue)]
         public float OuterJudgeDistance { get; set; } = 1f;
 
@@ -324,7 +324,7 @@ namespace MajdataPlay.Settings
         /// Gets or sets where judgments of touch and touch hold notes appear, from 0 at the center to 1 at the ring.
         /// </summary>
         [Step("0.05")]
-        [Range("0", "1", HasMax = true, HasMin = true)]
+        [Range("0", "1")]
         [UseTranslation(TranslationTarget.OptionValue)]
         public float InnerJudgeDistance { get; set; } = 1f;
 
@@ -337,28 +337,28 @@ namespace MajdataPlay.Settings
         /// Gets or sets the size multiplier of tap notes during gameplay.
         /// </summary>
         [Step("0.01")]
-        [Range("0", "2", HasMax = true, HasMin = true)]
+        [Range("0", "2")]
         public float TapScale { get; set; } = 1f;
 
         /// <summary>
         /// Gets or sets the size multiplier of hold notes during gameplay.
         /// </summary>
         [Step("0.01")]
-        [Range("0", "2", HasMax = true, HasMin = true)]
+        [Range("0", "2")]
         public float HoldScale { get; set; } = 1f;
 
         /// <summary>
         /// Gets or sets the size multiplier of touch notes during gameplay.
         /// </summary>
         [Step("0.01")]
-        [Range("0", "2", HasMax = true, HasMin = true)]
+        [Range("0", "2")]
         public float TouchScale { get; set; } = 1f;
 
         /// <summary>
         /// Gets or sets the size multiplier of slides during gameplay, which does not affect Wi-Fi slides.
         /// </summary>
         [Step("0.01")]
-        [Range("0", "2", HasMax = true, HasMin = true)]
+        [Range("0", "2")]
         public float SlideScale { get; set; } = 1f;
 
         /// <summary>
@@ -387,14 +387,14 @@ namespace MajdataPlay.Settings
         /// Gets or sets the size multiplier of the main gameplay screen while <see cref="MainScreenTransform"/> is enabled.
         /// </summary>
         [Step("0.01")]
-        [Range("0.05", "1.5", HasMax = true, HasMin = true)]
+        [Range("0.05", "1.5")]
         public float MainScreenScale { get; set; } = 1f;
 
         /// <summary>
         /// Gets or sets the position of the main gameplay screen on the display while <see cref="MainScreenTransform"/> is enabled.
         /// </summary>
         [Step("0.01")]
-        [Range("-1", "1", HasMax = true, HasMin = true)]
+        [Range("-1", "1")]
         public float MainScreenOffset { get; set; } = 1f;
 
         /// <summary>
@@ -407,7 +407,7 @@ namespace MajdataPlay.Settings
         /// Gets or sets the position of the secondary display area.
         /// </summary>
         [Step("0.01")]
-        [Range("-5", "5", HasMax = true, HasMin = true)]
+        [Range("-5", "5")]
         public float SubDisplayOffset { get; set; } = 0f;
 
         /// <summary>
@@ -498,7 +498,7 @@ namespace MajdataPlay.Settings
         /// Gets or sets the master volume.
         /// </summary>
         [Step("0.05")]
-        [Range("0", "2", HasMax = true, HasMin = true)]
+        [Range("0", "2")]
         [OptionEnumerator(typeof(AudioVolumeEnumerator))]
         public float Global { get; set; } = 0.3f;
 
@@ -506,7 +506,7 @@ namespace MajdataPlay.Settings
         /// Gets or sets the volume of the background music in song select, result and other scenes outside gameplay.
         /// </summary>
         [Step("0.05")]
-        [Range("0", "2", HasMax = true, HasMin = true)]
+        [Range("0", "2")]
         [OptionEnumerator(typeof(AudioVolumeEnumerator))]
         public float BGM { get; set; } = 1f;
 
@@ -514,7 +514,7 @@ namespace MajdataPlay.Settings
         /// Gets or sets the volume of the music track during gameplay.
         /// </summary>
         [Step("0.05")]
-        [Range("0", "2", HasMax = true, HasMin = true)]
+        [Range("0", "2")]
         [OptionEnumerator(typeof(AudioVolumeEnumerator))]
         public float Track { get; set; } = 1f;
 
@@ -522,7 +522,7 @@ namespace MajdataPlay.Settings
         /// Gets or sets the volume of the chart guide sounds and the lead-in metronome.
         /// </summary>
         [Step("0.05")]
-        [Range("0", "2", HasMax = true, HasMin = true)]
+        [Range("0", "2")]
         [OptionEnumerator(typeof(AudioVolumeEnumerator))]
         public float Answer { get; set; } = 0.8f;
 
@@ -530,7 +530,7 @@ namespace MajdataPlay.Settings
         /// Gets or sets the volume of the tap and hold judgment sounds.
         /// </summary>
         [Step("0.05")]
-        [Range("0", "2", HasMax = true, HasMin = true)]
+        [Range("0", "2")]
         [OptionEnumerator(typeof(AudioVolumeEnumerator))]
         public float Tap { get; set; } = 0.3f;
 
@@ -538,7 +538,7 @@ namespace MajdataPlay.Settings
         /// Gets or sets the volume of the sound played by a judged EX tap or hold.
         /// </summary>
         [Step("0.05")]
-        [Range("0", "2", HasMax = true, HasMin = true)]
+        [Range("0", "2")]
         [OptionEnumerator(typeof(AudioVolumeEnumerator))]
         public float Ex { get; set; } = 0.3f;
 
@@ -546,7 +546,7 @@ namespace MajdataPlay.Settings
         /// Gets or sets the volume of the break judgment sounds.
         /// </summary>
         [Step("0.05")]
-        [Range("0", "2", HasMax = true, HasMin = true)]
+        [Range("0", "2")]
         [OptionEnumerator(typeof(AudioVolumeEnumerator))]
         public float Break { get; set; } = 0.3f;
 
@@ -554,7 +554,7 @@ namespace MajdataPlay.Settings
         /// Gets or sets the volume of the slide sound effects.
         /// </summary>
         [Step("0.05")]
-        [Range("0", "2", HasMax = true, HasMin = true)]
+        [Range("0", "2")]
         [OptionEnumerator(typeof(AudioVolumeEnumerator))]
         public float Slide { get; set; } = 0.3f;
 
@@ -562,7 +562,7 @@ namespace MajdataPlay.Settings
         /// Gets or sets the volume of the touch and touch hold judgment sounds.
         /// </summary>
         [Step("0.05")]
-        [Range("0", "2", HasMax = true, HasMin = true)]
+        [Range("0", "2")]
         [OptionEnumerator(typeof(AudioVolumeEnumerator))]
         public float Touch { get; set; } = 0.3f;
 
@@ -570,7 +570,7 @@ namespace MajdataPlay.Settings
         /// Gets or sets the volume of the firework sound of touch hanabi effects.
         /// </summary>
         [Step("0.05")]
-        [Range("0", "2", HasMax = true, HasMin = true)]
+        [Range("0", "2")]
         [OptionEnumerator(typeof(AudioVolumeEnumerator))]
         public float Hanabi { get; set; } = 0.3f;
 
@@ -578,7 +578,7 @@ namespace MajdataPlay.Settings
         /// Gets or sets the volume of the mascot voice lines.
         /// </summary>
         [Step("0.05")]
-        [Range("0", "2", HasMax = true, HasMin = true)]
+        [Range("0", "2")]
         [OptionEnumerator(typeof(AudioVolumeEnumerator))]
         public float Voice { get; set; } = 1f;
     }
@@ -592,7 +592,7 @@ namespace MajdataPlay.Settings
         /// Gets or sets the playback speed multiplier of the track.
         /// </summary>
         [Step("0.05")]
-        [Range("0", null, HasMax = false, HasMin = true)]
+        [Range("0", null)]
         public float PlaybackSpeed { get; set; } = 1f;
 
         /// <summary>

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Reflection;
 using MajdataPlay.i18n;
 using MajdataPlay.Settings;
@@ -19,7 +20,7 @@ namespace MajdataPlay.Tests.Game.Misc.Settings
         {
             /// <summary>A bounded option with a half step.</summary>
             [Step("0.5")]
-            [global::MajdataPlay.Settings.Range("0", "2", HasMax = true, HasMin = true)]
+            [global::MajdataPlay.Settings.Range("0", "2")]
             public float Bounded { get; set; } = 1f;
 
             /// <summary>An integer option without attributes.</summary>
@@ -30,8 +31,18 @@ namespace MajdataPlay.Tests.Game.Misc.Settings
 
             /// <summary>An option with a lower bound only.</summary>
             [Step("2")]
-            [global::MajdataPlay.Settings.Range("0", null, HasMin = true, HasMax = false)]
+            [global::MajdataPlay.Settings.Range("0", null)]
             public long OpenEnded { get; set; } = 4;
+
+            /// <summary>An option with an upper bound only.</summary>
+            [Step("2")]
+            [global::MajdataPlay.Settings.Range(null, "0")]
+            public long UpperBounded { get; set; } = -4;
+
+            /// <summary>An explicitly unbounded option with a custom step.</summary>
+            [Step("2")]
+            [global::MajdataPlay.Settings.Range]
+            public long Unbounded { get; set; }
 
             /// <summary>An option marked read-only.</summary>
             [ReadOnlyOption]
@@ -235,6 +246,38 @@ namespace MajdataPlay.Tests.Game.Misc.Settings
                 Assert.That(enumerator.MoveNext(), Is.True);
             }
             Assert.That(probe.OpenEnded, Is.EqualTo(20L));
+        }
+
+        /// <summary>Checks that an upper-only range stops at zero and allows negative values.</summary>
+        [Test]
+        public void NumberEnumerator_UpperBoundOnly()
+        {
+            var probe = new NumberProbe();
+            var enumerator = Create<DefaultNumberEnumerator>(probe, nameof(NumberProbe.UpperBounded));
+
+            Assert.That(enumerator.MoveNext(), Is.True);
+            Assert.That(enumerator.MoveNext(), Is.True);
+            Assert.That(enumerator.MoveNext(), Is.False);
+            Assert.That(probe.UpperBounded, Is.EqualTo(0L));
+            for (var i = 0; i < 10; i++)
+            {
+                Assert.That(enumerator.MovePrevious(), Is.True);
+            }
+            Assert.That(probe.UpperBounded, Is.EqualTo(-20L));
+        }
+
+        /// <summary>Checks that an explicitly unbounded range permits stepping across zero in both directions.</summary>
+        [Test]
+        public void NumberEnumerator_ExplicitlyUnbounded()
+        {
+            var probe = new NumberProbe();
+            var enumerator = Create<DefaultNumberEnumerator>(probe, nameof(NumberProbe.Unbounded));
+
+            Assert.That(enumerator.MovePrevious(), Is.True);
+            Assert.That(probe.Unbounded, Is.EqualTo(-2L));
+            Assert.That(enumerator.MoveNext(), Is.True);
+            Assert.That(enumerator.MoveNext(), Is.True);
+            Assert.That(probe.Unbounded, Is.EqualTo(2L));
         }
 
         /// <summary>Checks that read-only options cannot be changed.</summary>
@@ -583,11 +626,94 @@ namespace MajdataPlay.Tests.Game.Misc.Settings
             Assert.That(enumerator.MovePrevious(), Is.False);
         }
 
+        /// <summary>Checks that omitted bounds stay disabled and supplied zero bounds are enforced.</summary>
+        /// <param name="min">The lower bound text, or null or empty to omit it.</param>
+        /// <param name="max">The upper bound text, or null or empty to omit it.</param>
+        /// <param name="hasMin">Whether the lower bound should be enforced.</param>
+        /// <param name="hasMax">Whether the upper bound should be enforced.</param>
+        [TestCase(null, null, false, false)]
+        [TestCase(null, "", false, false)]
+        [TestCase("", null, false, false)]
+        [TestCase("", "", false, false)]
+        [TestCase("0", null, true, false)]
+        [TestCase("0", "", true, false)]
+        [TestCase(null, "0", false, true)]
+        [TestCase("", "0", false, true)]
+        [TestCase("0", "0", true, true)]
+        public void RangeAttribute_InfersEnabledBounds(string? min, string? max, bool hasMin, bool hasMax)
+        {
+            var range = new global::MajdataPlay.Settings.RangeAttribute(min, max);
+
+            Assert.That(range.HasMin, Is.EqualTo(hasMin));
+            Assert.That(range.HasMax, Is.EqualTo(hasMax));
+            Assert.That(range.Min, Is.EqualTo(0m));
+            Assert.That(range.Max, Is.EqualTo(0m));
+        }
+
+        /// <summary>Checks that decimal bounds retain their values regardless of the current number culture.</summary>
+        /// <param name="cultureName">The culture active while constructing the attribute.</param>
+        [TestCase("en-US")]
+        [TestCase("zh-CN")]
+        [TestCase("de-DE")]
+        [TestCase("fr-FR")]
+        public void RangeAttribute_ParsesInvariantBounds(string cultureName)
+        {
+            var savedCulture = CultureInfo.CurrentCulture;
+            try
+            {
+                CultureInfo.CurrentCulture = CultureInfo.GetCultureInfo(cultureName);
+                var range = new global::MajdataPlay.Settings.RangeAttribute("-0.05", "1.5");
+
+                Assert.That(range.Min, Is.EqualTo(-0.05m));
+                Assert.That(range.Max, Is.EqualTo(1.5m));
+                Assert.That(range.HasMin, Is.True);
+                Assert.That(range.HasMax, Is.True);
+            }
+            finally
+            {
+                CultureInfo.CurrentCulture = savedCulture;
+            }
+        }
+
+        /// <summary>Checks that the full decimal range can be supplied without losing precision.</summary>
+        [Test]
+        public void RangeAttribute_PreservesDecimalLimits()
+        {
+            var range = new global::MajdataPlay.Settings.RangeAttribute("-79228162514264337593543950335", "79228162514264337593543950335");
+
+            Assert.That(range.Min, Is.EqualTo(decimal.MinValue));
+            Assert.That(range.Max, Is.EqualTo(decimal.MaxValue));
+            Assert.That(range.HasMin, Is.True);
+            Assert.That(range.HasMax, Is.True);
+        }
+
+        /// <summary>Checks that malformed supplied bounds are rejected rather than treated as omitted.</summary>
+        /// <param name="min">The lower bound text.</param>
+        /// <param name="max">The upper bound text.</param>
+        [TestCase("invalid", null)]
+        [TestCase(null, "invalid")]
+        [TestCase(" ", null)]
+        [TestCase(null, " ")]
+        public void RangeAttribute_RejectsMalformedBounds(string? min, string? max)
+        {
+            Assert.Throws<FormatException>(() => new global::MajdataPlay.Settings.RangeAttribute(min, max));
+        }
+
+        /// <summary>Checks that out-of-range bounds retain the documented overflow behavior.</summary>
+        /// <param name="min">The lower bound text.</param>
+        /// <param name="max">The upper bound text.</param>
+        [TestCase("-79228162514264337593543950336", null)]
+        [TestCase(null, "79228162514264337593543950336")]
+        public void RangeAttribute_RejectsOverflowingBounds(string? min, string? max)
+        {
+            Assert.Throws<OverflowException>(() => new global::MajdataPlay.Settings.RangeAttribute(min, max));
+        }
+
         /// <summary>Checks the values parsed by the option attributes.</summary>
         [Test]
         public void OptionAttributes_StoreValues()
         {
-            var range = new global::MajdataPlay.Settings.RangeAttribute("1.5", "5") { HasMin = true, HasMax = true };
+            var range = new global::MajdataPlay.Settings.RangeAttribute("1.5", "5");
             var empty = new global::MajdataPlay.Settings.RangeAttribute(null, string.Empty);
             var defaultRange = new global::MajdataPlay.Settings.RangeAttribute();
             var defaultValue = new DefaultValueAttribute("3", typeof(int));
@@ -600,6 +726,7 @@ namespace MajdataPlay.Tests.Game.Misc.Settings
             Assert.That(empty.Min, Is.EqualTo(0m));
             Assert.That(empty.Max, Is.EqualTo(0m));
             Assert.That(defaultRange.HasMin, Is.False);
+            Assert.That(defaultRange.HasMax, Is.False);
             Assert.That(new StepAttribute("0.25").Value, Is.EqualTo(0.25m));
             Assert.That(defaultValue.Value, Is.EqualTo("3"));
             Assert.That(defaultValue.Type, Is.EqualTo(typeof(int)));

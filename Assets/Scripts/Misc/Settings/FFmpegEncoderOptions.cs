@@ -10,7 +10,7 @@ namespace MajdataPlay.Settings
         public FFmpegCodecPreference PreferredEncoder { get; set; } = FFmpegCodecPreference.Hardware;
         public VideoEncodingFormat EncodingFormat { get; set; } = VideoEncodingFormat.H264;
         [Step("30")]
-        [Range("1", "240", HasMax = true, HasMin = true)]
+        [Range("1", "240")]
         public int FrameRate { get; set; } = 60;
         public VideoRateControlMode RateControlMode { get; set; } = VideoRateControlMode.VBR;
         public long BitRate { get; set; } = 8000000;
