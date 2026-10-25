@@ -87,6 +87,31 @@ namespace MajdataPlay.Tests.Game.EditorTools
         [UseTranslation(TranslationTarget.OptionValue)]
         public int TranslatedCount { get; set; }
 
+        /// <summary>Gets or sets an integer option whose translated values form a finite Range/Step grid.</summary>
+        [Step("1")]
+        [Range("1", "3")]
+        [UseTranslation(TranslationTarget.OptionValue)]
+        public int Countdown { get; set; } = 1;
+
+        /// <summary>Gets or sets a floating-point option whose last step is clamped to the upper bound.</summary>
+        [Step("0.25")]
+        [Range("0", "0.6")]
+        [UseTranslation(TranslationTarget.OptionValue)]
+        public float Ratio { get; set; }
+
+        /// <summary>Gets or sets a translated numeric option whose Range has no Step, so it never moves.</summary>
+        [Range("0", "1")]
+        [UseTranslation(TranslationTarget.OptionValue)]
+        public int Stuck { get; set; }
+
+        /// <summary>Gets or sets an option shown only while <see cref="Flag"/> is true.</summary>
+        [ShowInSettingUIWhen(nameof(Flag), true)]
+        public bool Conditional { get; set; }
+
+        /// <summary>Gets or sets an option whose visibility condition names a missing setting.</summary>
+        [ShowInSettingUIWhen("Missing.Path", 1)]
+        public bool BrokenCondition { get; set; }
+
         /// <summary>Gets or sets a boolean option whose value keys use a custom template, still followed by the general table.</summary>
         [UseTranslation(TranslationTarget.OptionValue, "FX_SWITCH_{1}")]
         public bool Switch { get; set; }

@@ -179,6 +179,40 @@ namespace MajdataPlay.Tests.Game.EditorTools
             Assert.That(_keys.Keys.Any(key => key.StartsWith("MAJSETTING_PROPERTY_TranslatedCount_OPTION_", StringComparison.Ordinal)), Is.False);
         }
 
+        /// <summary>Checks that translated numeric options contribute the optional keys of their finite Range/Step grid.</summary>
+        [Test]
+        public void NumericOptions_EnumerateRangeStepValues()
+        {
+            foreach (var value in new[] { "1", "2", "3" })
+            {
+                Assert.That(_keys[$"MAJSETTING_PROPERTY_Countdown_OPTION_{value}"], Does.Contain("Fx.Countdown" + TranslationSettingAnalyzer.NumericValueUsage));
+                Assert.That(_keys[$"MAJSETTING_GENERAL_OPTION_{value}"], Does.Contain("Fx.Countdown" + TranslationSettingAnalyzer.NumericValueFallbackUsage));
+            }
+            Assert.That(_keys.Keys, Does.Not.Contain("MAJSETTING_PROPERTY_Countdown_OPTION_4"));
+            var ratioValues = _keys.Keys.Where(key => key.StartsWith("MAJSETTING_PROPERTY_Ratio_OPTION_", StringComparison.Ordinal)).ToArray();
+            Assert.That(ratioValues, Is.EquivalentTo(new[]
+            {
+                "MAJSETTING_PROPERTY_Ratio_OPTION_0",
+                "MAJSETTING_PROPERTY_Ratio_OPTION_0.25",
+                "MAJSETTING_PROPERTY_Ratio_OPTION_0.5",
+                "MAJSETTING_PROPERTY_Ratio_OPTION_0.6",
+            }));
+            Assert.That(HasDiagnostic("Stuck", "no positive Step"), Is.True);
+            Assert.That(_keys.Keys.Any(key => key.StartsWith("MAJSETTING_PROPERTY_Stuck_OPTION_", StringComparison.Ordinal)), Is.False);
+            Assert.That(TranslationSettingAnalyzer.IsNumericValueSource("Fx.Countdown" + TranslationSettingAnalyzer.NumericValueUsage), Is.True);
+            Assert.That(TranslationSettingAnalyzer.IsNumericValueSource("Fx.Flag (option value)"), Is.False);
+        }
+
+        /// <summary>Checks that visibility conditions qualify the usage paths and that unresolvable paths are reported.</summary>
+        [Test]
+        public void ConditionalOptions_DescribeTheirCondition()
+        {
+            Assert.That(_keys["MAJSETTING_PROPERTY_Conditional"], Does.Contain("Fx.Conditional [shown when Flag = True] (name)"));
+            Assert.That(_keys["MAJSETTING_PROPERTY_BrokenCondition"], Does.Contain("Fx.BrokenCondition [shown when Missing.Path = 1] (name)"));
+            Assert.That(HasDiagnostic("BrokenCondition", "cannot be resolved"), Is.True);
+            Assert.That(_diagnostics.Any(diagnostic => diagnostic.Contains("Fx.Conditional:")), Is.False);
+        }
+
         /// <summary>Checks the full analysis of the runtime settings: categories, Audio's volume page, chart settings and offset units.</summary>
         [Test]
         public void Collect_RuntimeAssembly_FindsCategoriesAndOptions()
@@ -198,7 +232,11 @@ namespace MajdataPlay.Tests.Game.EditorTools
             Assert.That(keys.Keys, Does.Contain("MAJSETTING_PROPERTY_JudgeOffset"));
             Assert.That(keys.Keys, Does.Contain("MAJSETTING_GENERAL_OPTION_True"));
             Assert.That(keys.Keys, Does.Contain("MAJSETTING_GENERAL_OPTION_Inner"));
+            Assert.That(keys.Keys, Does.Contain("MAJSETTING_PROPERTY_LeadInTime_OPTION_5"));
+            Assert.That(keys.Keys, Does.Contain("MAJSETTING_PROPERTY_OuterJudgeDistance_OPTION_0"));
+            Assert.That(keys.Keys, Does.Contain("MAJSETTING_PROPERTY_OuterJudgeDistance_OPTION_0.05"));
             Assert.That(diagnostics.Any(diagnostic => diagnostic.Contains("skin names are dynamic")), Is.True);
+            Assert.That(diagnostics.Any(diagnostic => diagnostic.Contains("ShowInSettingUIWhen path")), Is.False);
         }
 
         /// <summary>Checks that an assembly without settings types only yields the fixed offset unit keys.</summary>

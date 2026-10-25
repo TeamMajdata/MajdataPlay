@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Reflection;
 using System.Reflection.Emit;
+using System.Threading;
 
 #nullable enable
 namespace MajdataPlay.Editor.Windows
@@ -43,14 +44,40 @@ namespace MajdataPlay.Editor.Windows
         internal static void Collect(Assembly assembly, IDictionary<string, HashSet<string>> keys,
             IList<string> diagnostics)
         {
+            Collect(assembly, keys, diagnostics, null, CancellationToken.None);
+        }
+
+        /// <summary>
+        /// Adds proven keys and their source locations, and reports unresolved localization calls, while reporting
+        /// progress and observing cancellation.
+        /// </summary>
+        /// <remarks>
+        /// Each method body is first scanned for a call to a localization entry point without resolving any other
+        /// metadata token; only bodies that may call one are decoded and interpreted.
+        /// </remarks>
+        /// <param name="assembly">The assembly whose declared method and constructor bodies are inspected.</param>
+        /// <param name="keys">An ordinal dictionary of keys to ordinal sets of source locations.</param>
+        /// <param name="diagnostics">Receives unsupported IL, load failures, and dynamic key diagnostics.</param>
+        /// <param name="progress">Receives the fraction of inspected types, from 0 to 1, or null for no reports.</param>
+        /// <param name="cancellationToken">Stops the analysis between types.</param>
+        /// <exception cref="ArgumentNullException">An argument is null.</exception>
+        /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was cancelled.</exception>
+        internal static void Collect(Assembly assembly, IDictionary<string, HashSet<string>> keys,
+            IList<string> diagnostics, IProgress<float>? progress, CancellationToken cancellationToken)
+        {
             if (assembly == null || keys == null || diagnostics == null)
             {
                 throw new ArgumentNullException(assembly == null ? nameof(assembly) :
                     keys == null ? nameof(keys) : nameof(diagnostics));
             }
             var context = new AnalysisContext(diagnostics);
-            foreach (var type in GetTypes(assembly, diagnostics))
+            var filter = new LocalizationCallFilter();
+            var types = new List<Type>(GetTypes(assembly, diagnostics));
+            for (var typeIndex = 0; typeIndex < types.Count; typeIndex++)
             {
+                cancellationToken.ThrowIfCancellationRequested();
+                progress?.Report((float)typeIndex / types.Count);
+                var type = types[typeIndex];
                 try
                 {
                     var methods = new HashSet<MethodBase>();
@@ -68,7 +95,10 @@ namespace MajdataPlay.Editor.Windows
                     }
                     foreach (var method in methods)
                     {
-                        CollectMethod(method, context, keys);
+                        if (filter.MayCallLocalization(method))
+                        {
+                            CollectMethod(method, context, keys);
+                        }
                     }
                 }
                 catch (Exception exception) when (IsInspectionFailure(exception))
@@ -76,6 +106,7 @@ namespace MajdataPlay.Editor.Windows
                     diagnostics.Add($"Cannot inspect {type.FullName}: {exception.Message}");
                 }
             }
+            progress?.Report(1f);
         }
 
         /// <summary>
@@ -256,8 +287,16 @@ namespace MajdataPlay.Editor.Windows
         /// <returns>Whether it calls a supported localization method.</returns>
         private static bool IsLocalizationCall(Instruction instruction)
         {
-            if ((instruction.Code != OpCodes.Call && instruction.Code != OpCodes.Callvirt) ||
-                instruction.Operand is not MethodInfo method || !method.IsStatic || method.IsGenericMethod)
+            return (instruction.Code == OpCodes.Call || instruction.Code == OpCodes.Callvirt) &&
+                instruction.Operand is MethodBase method && IsLocalizationMethod(method);
+        }
+
+        /// <summary>Matches only the actual localization entry points and their complete signatures.</summary>
+        /// <param name="candidate">A called method or constructor.</param>
+        /// <returns>Whether it is a supported localization method.</returns>
+        private static bool IsLocalizationMethod(MethodBase candidate)
+        {
+            if (candidate is not MethodInfo method || !method.IsStatic || method.IsGenericMethod)
             {
                 return false;
             }
@@ -701,6 +740,154 @@ namespace MajdataPlay.Editor.Windows
                             array.Elements = null;
                         }
                     }
+                }
+            }
+        }
+
+        /// <summary>Skips method bodies that cannot call a localization entry point before they are fully decoded.</summary>
+        private sealed class LocalizationCallFilter
+        {
+            /// <summary>Whether each resolved call token of a module targets a localization entry point.</summary>
+            private readonly Dictionary<Module, Dictionary<int, bool>> _callTargets = new Dictionary<Module, Dictionary<int, bool>>();
+
+            /// <summary>
+            /// Scans a body for a call to a localization entry point, resolving only call and callvirt tokens.
+            /// </summary>
+            /// <remarks>
+            /// The scan is conservative: a body that cannot be read, has unknown opcodes, or calls a token that cannot be
+            /// resolved is reported as a possible caller, so the full analysis decides and reports the problem.
+            /// </remarks>
+            /// <param name="method">The method or constructor to scan.</param>
+            /// <returns>False only when the body certainly calls no localization entry point; otherwise true.</returns>
+            internal bool MayCallLocalization(MethodBase method)
+            {
+                byte[] bytes;
+                try
+                {
+                    var body = method.GetMethodBody();
+                    if (body == null)
+                    {
+                        return false;
+                    }
+                    bytes = body.GetILAsByteArray() ?? Array.Empty<byte>();
+                }
+                catch (Exception exception) when (IsInspectionFailure(exception))
+                {
+                    return true;
+                }
+
+                var position = 0;
+                while (position < bytes.Length)
+                {
+                    int encoded = bytes[position++];
+                    if (encoded == 0xFE)
+                    {
+                        if (position >= bytes.Length)
+                        {
+                            return true;
+                        }
+                        encoded = 0xFE00 | bytes[position++];
+                    }
+                    if (!s_opCodes.TryGetValue(unchecked((short)encoded), out var code))
+                    {
+                        return true;
+                    }
+                    if (code == OpCodes.Call || code == OpCodes.Callvirt)
+                    {
+                        if (bytes.Length - position < 4)
+                        {
+                            return true;
+                        }
+                        var token = ReadInt32(bytes, ref position);
+                        if (IsLocalizationToken(method, token) != false)
+                        {
+                            return true;
+                        }
+                        continue;
+                    }
+                    var operandSize = GetOperandSize(code.OperandType, bytes, position);
+                    if (operandSize < 0 || bytes.Length - position < operandSize)
+                    {
+                        return true;
+                    }
+                    position += operandSize;
+                }
+                return false;
+            }
+
+            /// <summary>Checks, with a per-module cache, whether a call token targets a localization entry point.</summary>
+            /// <param name="method">The method whose module and generic context resolve the token.</param>
+            /// <param name="token">The metadata token of the called method.</param>
+            /// <returns>Whether the target is a localization method, or null when the token cannot be resolved.</returns>
+            private bool? IsLocalizationToken(MethodBase method, int token)
+            {
+                var module = method.Module;
+                if (!_callTargets.TryGetValue(module, out var targets))
+                {
+                    targets = new Dictionary<int, bool>();
+                    _callTargets.Add(module, targets);
+                }
+                if (targets.TryGetValue(token, out var cached))
+                {
+                    return cached;
+                }
+                try
+                {
+                    var typeArguments = method.DeclaringType?.GetGenericArguments();
+                    var methodArguments = method is MethodInfo info && info.IsGenericMethod ? info.GetGenericArguments() : null;
+                    var target = module.ResolveMethod(token, typeArguments, methodArguments);
+                    // The entry points are static, non-generic members of non-generic types, so the generic context
+                    // never changes whether a token targets one, and the result can be shared across the module.
+                    var result = target != null && IsLocalizationMethod(target);
+                    targets.Add(token, result);
+                    return result;
+                }
+                catch (Exception exception) when (IsInspectionFailure(exception))
+                {
+                    return null;
+                }
+            }
+
+            /// <summary>Gets the byte length of an inline operand.</summary>
+            /// <param name="operandType">The opcode's operand type.</param>
+            /// <param name="bytes">The IL buffer, needed for the variable-length switch table.</param>
+            /// <param name="position">The position of the operand.</param>
+            /// <returns>The operand length, or -1 when it is unknown or truncated.</returns>
+            private static int GetOperandSize(OperandType operandType, byte[] bytes, int position)
+            {
+                switch (operandType)
+                {
+                    case OperandType.InlineNone:
+                        return 0;
+                    case OperandType.ShortInlineI:
+                    case OperandType.ShortInlineVar:
+                    case OperandType.ShortInlineBrTarget:
+                        return 1;
+                    case OperandType.InlineVar:
+                        return 2;
+                    case OperandType.InlineI:
+                    case OperandType.InlineSig:
+                    case OperandType.InlineBrTarget:
+                    case OperandType.InlineString:
+                    case OperandType.InlineField:
+                    case OperandType.InlineMethod:
+                    case OperandType.InlineType:
+                    case OperandType.InlineTok:
+                    case OperandType.ShortInlineR:
+                        return 4;
+                    case OperandType.InlineI8:
+                    case OperandType.InlineR:
+                        return 8;
+                    case OperandType.InlineSwitch:
+                        if (bytes.Length - position < 4)
+                        {
+                            return -1;
+                        }
+                        var countPosition = position;
+                        var count = ReadInt32(bytes, ref countPosition);
+                        return count < 0 || count > (bytes.Length - countPosition) / 4 ? -1 : 4 + (count * 4);
+                    default:
+                        return -1;
                 }
             }
         }

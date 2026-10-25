@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.Linq;
 using System.Reflection;
 
 #nullable enable
@@ -15,6 +16,9 @@ namespace MajdataPlay.Editor.Windows
     /// Root type names, built-in enumerator names, Audio.Volume, key templates, the Unavailable language
     /// fallback and the two offset-unit warmup labels deliberately model the current production schema.
     /// Custom finite string arrays are delegated to TranslationCallAnalyzer instead of executing enumerators.
+    /// Numeric options that opt into value translation contribute the values of their finite Range/Step grid, labelled
+    /// with <see cref="NumericValueUsage"/> so that they can be reviewed as optional. ShowInSettingUIWhen conditions are
+    /// appended to the usage paths of conditional menus and options, and unresolvable condition paths are reported.
     /// </remarks>
     internal static class TranslationSettingAnalyzer
     {
@@ -37,6 +41,21 @@ namespace MajdataPlay.Editor.Windows
         private const string GeneralMenuNameTemplate = "MAJSETTING_GENERAL_CATEGORY_{0}";
         private const string GeneralOptionNameTemplate = "MAJSETTING_GENERAL_PROPERTY_{0}";
         private const string GeneralOptionValueTemplate = "MAJSETTING_GENERAL_OPTION_{1}";
+
+        /// <summary>
+        /// The usage label of a numeric option value key enumerated from Range/Step.
+        /// </summary>
+        internal const string NumericValueUsage = " (numeric option value)";
+
+        /// <summary>
+        /// The usage label of the general fallback key of a numeric option value enumerated from Range/Step.
+        /// </summary>
+        internal const string NumericValueFallbackUsage = " (numeric option value fallback)";
+
+        /// <summary>
+        /// Limits how many numeric values one option may contribute, so a fine grid does not flood the key inventory.
+        /// </summary>
+        private const int MaxNumericValues = 128;
 
         /// <summary>
         /// Adds the setting menus, option labels, descriptions and finite localized values to a key inventory.
@@ -132,6 +151,9 @@ namespace MajdataPlay.Editor.Windows
                         path += ".Volume";
                     }
 
+                    // A condition on the category hides the whole menu, so it also qualifies every option path.
+                    path += DescribeVisibility(category, settingType, path, diagnostics);
+
                     // MenuMetadata.Name is the value property's name; MenuNameAttribute is not used by the UI.
                     // The translation attributes of the root category property select the title key.
                     var categoryAttributes = category.GetCustomAttributesData();
@@ -160,6 +182,7 @@ namespace MajdataPlay.Editor.Windows
                 var optionPath = path + "." + property.Name;
                 try
                 {
+                    optionPath += DescribeVisibility(property, menuType, optionPath, diagnostics);
                     CollectOption(property, optionPath, keys, diagnostics);
                 }
                 catch (Exception exception)
@@ -230,6 +253,86 @@ namespace MajdataPlay.Editor.Windows
                 }
             }
             return false;
+        }
+
+        /// <summary>
+        /// Describes the ShowInSettingUIWhen conditions of an option or menu for its key sources, and reports paths the
+        /// runtime cannot resolve.
+        /// </summary>
+        /// <remarks>
+        /// Conditional entries are still displayed whenever their condition holds, so their keys are collected; the
+        /// description only tells a reviewer when a text is visible. An unresolvable path makes the runtime always show
+        /// the entry and log an error, which is reported here ahead of time.
+        /// </remarks>
+        /// <param name="property">The option property, or for a menu its category property.</param>
+        /// <param name="ownerType">The type the member paths start at: the menu type, or the settings root for a menu.</param>
+        /// <param name="path">The UI path of the entry, for diagnostics.</param>
+        /// <param name="diagnostics">Receives conditions whose member path cannot be resolved.</param>
+        /// <returns>A suffix such as <c> [shown when Mode = Custom]</c>, or an empty string without conditions.</returns>
+        private static string DescribeVisibility(PropertyInfo property, Type ownerType, string path, IList<string> diagnostics)
+        {
+            var conditions = new List<string>();
+            foreach (var attribute in property.GetCustomAttributesData())
+            {
+                if (attribute.AttributeType.FullName != SettingsNamespace + "ShowInSettingUIWhenAttribute" ||
+                    attribute.ConstructorArguments.Count != 2 ||
+                    attribute.ConstructorArguments[0].Value is not string memberPath)
+                {
+                    continue;
+                }
+                if (!CanResolveMemberPath(ownerType, memberPath))
+                {
+                    diagnostics.Add($"[Settings] {path}: ShowInSettingUIWhen path \"{memberPath}\" cannot be resolved from {ownerType.FullName}; the runtime always shows this entry.");
+                }
+                var values = attribute.ConstructorArguments[1].Value is IReadOnlyCollection<CustomAttributeTypedArgument> arguments
+                    ? string.Join(" or ", arguments.Select(FormatArgument))
+                    : "null";
+                conditions.Add($"{memberPath} = {values}");
+            }
+            return conditions.Count == 0 ? string.Empty : $" [shown when {string.Join(" and ", conditions)}]";
+        }
+
+        /// <summary>
+        /// Checks that every segment of a dot-separated member path is a readable public instance property.
+        /// </summary>
+        /// <param name="ownerType">The type the path starts at.</param>
+        /// <param name="memberPath">The dot-separated property path.</param>
+        /// <returns>True when the path can be followed; otherwise false.</returns>
+        private static bool CanResolveMemberPath(Type ownerType, string memberPath)
+        {
+            var type = ownerType;
+            foreach (var segment in memberPath.Split('.'))
+            {
+                var property = type.GetProperty(segment, BindingFlags.Public | BindingFlags.Instance);
+                if (property is null || !IsReadableProperty(property))
+                {
+                    return false;
+                }
+                type = property.PropertyType;
+            }
+            return true;
+        }
+
+        /// <summary>
+        /// Formats an attribute argument for display, naming enum constants instead of their underlying numbers.
+        /// </summary>
+        /// <param name="argument">The attribute argument.</param>
+        /// <returns>The display text.</returns>
+        private static string FormatArgument(CustomAttributeTypedArgument argument)
+        {
+            if (argument.Value is null)
+            {
+                return "null";
+            }
+            if (argument.Value is CustomAttributeTypedArgument nested)
+            {
+                return FormatArgument(nested);
+            }
+            if (argument.ArgumentType.IsEnum)
+            {
+                return Enum.GetName(argument.ArgumentType, argument.Value) ?? Convert.ToString(argument.Value, CultureInfo.InvariantCulture) ?? string.Empty;
+            }
+            return Convert.ToString(argument.Value, CultureInfo.InvariantCulture) ?? string.Empty;
         }
 
         /// <summary>
@@ -356,8 +459,18 @@ namespace MajdataPlay.Editor.Windows
                     }
                     else if (source.IsExplicit && source.IsTranslated)
                     {
-                        // Numbers are untranslated by default; an opt-in needs keys for runtime-dependent values.
-                        diagnostics.Add($"[Settings] {path}: numeric option values opt into translation; their keys depend on runtime values and were not collected.");
+                        // Numbers are untranslated by default; an opt-in only has fixed keys within a finite Range/Step grid.
+                        if (TryGetNumericValueTexts(property, type, out var valueTexts, out var reason))
+                        {
+                            foreach (var valueText in valueTexts)
+                            {
+                                AddValue(source, valueText, path, keys, diagnostics, true);
+                            }
+                        }
+                        else
+                        {
+                            diagnostics.Add($"[Settings] {path}: numeric option values opt into translation, but {reason}; their keys depend on runtime values and were not collected.");
+                        }
                     }
                     return;
                 case EnumeratorNamespace + "DefaultReadOnlyEnumerator":
@@ -489,14 +602,141 @@ namespace MajdataPlay.Editor.Windows
         /// <param name="path">The UI path identifying this option.</param>
         /// <param name="keys">Receives the primary key and any fallback keys.</param>
         /// <param name="diagnostics">Receives invalid empty localization keys.</param>
+        /// <param name="isNumericValue">
+        /// Whether the value is one of the numbers enumerated from Range/Step; its keys are then labelled with
+        /// <see cref="NumericValueUsage"/> or <see cref="NumericValueFallbackUsage"/>.
+        /// </param>
         private static void AddValue(TranslationSelection source, string value, string path,
-            IDictionary<string, HashSet<string>> keys, IList<string> diagnostics)
+            IDictionary<string, HashSet<string>> keys, IList<string> diagnostics, bool isNumericValue = false)
         {
             for (var i = 0; i < source.Templates.Count; i++)
             {
-                var usage = i == 0 ? " (option value)" : " (option value fallback)";
+                var usage = isNumericValue
+                    ? (i == 0 ? NumericValueUsage : NumericValueFallbackUsage)
+                    : (i == 0 ? " (option value)" : " (option value fallback)");
                 AddKey(FormatKey(source.Templates[i], source.OptionName, value), path + usage, keys, diagnostics);
             }
+        }
+
+        /// <summary>
+        /// Gets whether a key source is a numeric option value enumerated from Range/Step.
+        /// </summary>
+        /// <remarks>
+        /// Numeric options usually translate only a few special values and display the number otherwise, so keys found
+        /// only through such sources are optional.
+        /// </remarks>
+        /// <param name="source">A usage location recorded by this analyzer.</param>
+        /// <returns>True for a numeric option value or its general fallback; otherwise false.</returns>
+        internal static bool IsNumericValueSource(string source)
+        {
+            return source.EndsWith(NumericValueUsage, StringComparison.Ordinal) ||
+                source.EndsWith(NumericValueFallbackUsage, StringComparison.Ordinal);
+        }
+
+        /// <summary>
+        /// Mirrors DefaultNumberEnumerator: lists the value texts a numeric option can be stepped to from its Range/Step grid.
+        /// </summary>
+        /// <remarks>
+        /// The values run from the lower bound in steps and end at the upper bound, which the enumerator clamps to. A
+        /// saved value off the grid is not covered. Texts are formatted with the invariant culture, while the runtime
+        /// uses the current culture; for cultures with another decimal separator the generated keys differ.
+        /// </remarks>
+        /// <param name="property">The numeric option property.</param>
+        /// <param name="type">The numeric property type.</param>
+        /// <param name="valueTexts">Receives the distinct value texts in ascending order.</param>
+        /// <param name="reason">Receives why the values cannot be listed, when the method returns false.</param>
+        /// <returns>True when the option has a finite grid of at most <see cref="MaxNumericValues"/> values; otherwise false.</returns>
+        private static bool TryGetNumericValueTexts(PropertyInfo property, Type type, out List<string> valueTexts, out string reason)
+        {
+            valueTexts = new List<string>();
+            var attributes = property.GetCustomAttributesData();
+            if (HasAttribute(attributes, SettingsNamespace + "ReadOnlyOptionAttribute") || property.GetSetMethod() is null)
+            {
+                reason = "the option is read-only and only shows its current value";
+                return false;
+            }
+            decimal? min = null;
+            decimal? max = null;
+            decimal? step = null;
+            var hasRange = false;
+            foreach (var attribute in attributes)
+            {
+                switch (attribute.AttributeType.FullName)
+                {
+                    case SettingsNamespace + "RangeAttribute":
+                        hasRange = true;
+                        if (attribute.ConstructorArguments.Count == 2)
+                        {
+                            min = ParseDecimal(attribute.ConstructorArguments[0].Value as string);
+                            max = ParseDecimal(attribute.ConstructorArguments[1].Value as string);
+                        }
+                        break;
+                    case SettingsNamespace + "StepAttribute":
+                        step = ParseDecimal(attribute.ConstructorArguments.Count == 1 ? attribute.ConstructorArguments[0].Value as string : null);
+                        break;
+                }
+            }
+            if (!hasRange || min is null || max is null)
+            {
+                reason = "it has no Range with both bounds";
+                return false;
+            }
+            // With a Range but without a Step, DefaultNumberEnumerator keeps a step of 0 and never moves.
+            if (step is not decimal stepValue || stepValue <= 0m)
+            {
+                reason = "it has no positive Step";
+                return false;
+            }
+            if (max < min || (max.Value - min.Value) / stepValue >= MaxNumericValues)
+            {
+                reason = $"its Range/Step grid is empty or exceeds {MaxNumericValues} values";
+                return false;
+            }
+
+            var seen = new HashSet<string>(StringComparer.Ordinal);
+            for (var value = min.Value; ; value += stepValue)
+            {
+                var clamped = Math.Min(value, max.Value);
+                var text = FormatNumber(clamped, type);
+                if (seen.Add(text))
+                {
+                    valueTexts.Add(text);
+                }
+                if (clamped >= max.Value)
+                {
+                    break;
+                }
+            }
+            reason = string.Empty;
+            return true;
+        }
+
+        /// <summary>
+        /// Parses a Range or Step argument the way the attributes do.
+        /// </summary>
+        /// <param name="text">The invariant-culture decimal text, or null or empty for none.</param>
+        /// <returns>The parsed value, or null when the text is empty or invalid.</returns>
+        private static decimal? ParseDecimal(string? text)
+        {
+            if (string.IsNullOrEmpty(text))
+            {
+                return null;
+            }
+            return decimal.TryParse(text, NumberStyles.Number, CultureInfo.InvariantCulture, out var value) ? value : null;
+        }
+
+        /// <summary>
+        /// Formats a stepped value as the property type displays it, using the invariant culture.
+        /// </summary>
+        /// <param name="value">The stepped decimal value.</param>
+        /// <param name="type">The numeric property type the value is converted to.</param>
+        /// <returns>The value text.</returns>
+        private static string FormatNumber(decimal value, Type type)
+        {
+            var converted = Convert.ChangeType(value, type, CultureInfo.InvariantCulture);
+            return converted is IFormattable formattable
+                ? formattable.ToString(null, CultureInfo.InvariantCulture)
+                : converted.ToString();
         }
 
         /// <summary>

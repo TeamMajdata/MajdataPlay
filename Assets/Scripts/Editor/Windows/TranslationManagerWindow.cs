@@ -3,6 +3,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Threading;
 using UnityEditor;
 using UnityEditor.UIElements;
 using UnityEngine;
@@ -12,6 +13,10 @@ using UnityEngine.UIElements;
 namespace MajdataPlay.Editor.Windows
 {
     /// <summary>Edits language resources and statically discovers fixed localization keys.</summary>
+    /// <remarks>
+    /// A scan never edits the template directly: it proposes additions and removals in the Review tab, and only the
+    /// changes the user checks are applied.
+    /// </remarks>
     public sealed class TranslationManagerWindow : EditorWindow
     {
         /// <summary>The fallback path when a translation template does not exist yet.</summary>
@@ -19,6 +24,38 @@ namespace MajdataPlay.Editor.Windows
 
         /// <summary>The name of the runtime assembly whose localization calls and settings are analyzed.</summary>
         private const string RuntimeAssemblyName = "MajdataPlay.Core";
+
+        /// <summary>The index of the template tab.</summary>
+        private const int TemplateTab = 0;
+
+        /// <summary>The index of the translation editing tab.</summary>
+        private const int TranslationsTab = 1;
+
+        /// <summary>The index of the key review tab.</summary>
+        private const int ReviewTab = 2;
+
+        /// <summary>The index of the analysis report tab.</summary>
+        private const int AnalysisTab = 3;
+
+        /// <summary>The number of tabs.</summary>
+        private const int TabCount = 4;
+
+        /// <summary>Selects which review candidates are listed.</summary>
+        private enum ReviewFilter
+        {
+            /// <summary>Lists every candidate.</summary>
+            All,
+
+            /// <summary>Lists proposed additions only.</summary>
+            Additions,
+
+            /// <summary>Lists proposed removals only.</summary>
+            Removals,
+        }
+
+        /// <summary>The proposed template changes of the last scan, retained across assembly reloads.</summary>
+        [SerializeField]
+        private List<TranslationKeyCandidate> _candidates = new();
 
         /// <summary>The editable template, including manually maintained keys.</summary>
         [SerializeField]
@@ -67,6 +104,9 @@ namespace MajdataPlay.Editor.Windows
         /// <summary>The sorted fixed-key report.</summary>
         private readonly List<string> _visibleFixedKeys = new();
 
+        /// <summary>The review candidates matching the current review filter and search.</summary>
+        private readonly List<TranslationKeyCandidate> _visibleCandidates = new();
+
         /// <summary>The tab pages in the current UI tree.</summary>
         private readonly List<VisualElement> _tabPages = new();
 
@@ -84,6 +124,12 @@ namespace MajdataPlay.Editor.Windows
 
         /// <summary>The unresolved-call report list.</summary>
         private ListView? _diagnosticList;
+
+        /// <summary>The review candidate list.</summary>
+        private ListView? _candidateList;
+
+        /// <summary>The review summary.</summary>
+        private Label? _reviewSummary;
 
         /// <summary>The template summary.</summary>
         private Label? _templateSummary;
@@ -112,6 +158,15 @@ namespace MajdataPlay.Editor.Windows
         /// <summary>The translation filter.</summary>
         private string _translationFilter = string.Empty;
 
+        /// <summary>The review search filter.</summary>
+        private string _reviewSearch = string.Empty;
+
+        /// <summary>The change type listed in the review tab.</summary>
+        private ReviewFilter _reviewFilter = ReviewFilter.All;
+
+        /// <summary>Whether a scan has completed since the window was enabled, so <see cref="_fixedKeys"/> is current.</summary>
+        private bool _hasAnalysis;
+
         /// <summary>The last analysis result.</summary>
         private string _analysisStatus = $"Analyze {RuntimeAssemblyName} to discover fixed keys.";
 
@@ -137,22 +192,25 @@ namespace MajdataPlay.Editor.Windows
             rootVisualElement.style.overflow = Overflow.Hidden;
             minSize = new Vector2(760, 420);
             var toolbar = CreateWrappingToolbar();
-            toolbar.Add(CreateToolbarButton("Template", () => SwitchTab(0)));
-            toolbar.Add(CreateToolbarButton("Translations", () => SwitchTab(1)));
-            toolbar.Add(CreateToolbarButton("Analysis", () => SwitchTab(2)));
+            toolbar.Add(CreateToolbarButton("Template", () => SwitchTab(TemplateTab)));
+            toolbar.Add(CreateToolbarButton("Translations", () => SwitchTab(TranslationsTab)));
+            toolbar.Add(CreateToolbarButton("Review", () => SwitchTab(ReviewTab)));
+            toolbar.Add(CreateToolbarButton("Analysis", () => SwitchTab(AnalysisTab)));
             toolbar.Add(CreateToolbarButton($"Analyze {RuntimeAssemblyName}", AnalyzeAssembly));
+            toolbar.Add(CreateToolbarButton("Save all", () => SaveAll()));
             toolbar.Add(CreateToolbarButton("Reload resources", ReloadResources));
             rootVisualElement.Add(toolbar);
-            for (var i = 0; i < 3; i++)
+            for (var i = 0; i < TabCount; i++)
             {
                 var page = new VisualElement();
                 ConfigureFlexibleContent(page);
                 _tabPages.Add(page);
                 rootVisualElement.Add(page);
             }
-            CreateTemplateEditorTab(_tabPages[0]);
-            CreateTranslationEditorTab(_tabPages[1]);
-            CreateAnalysisTab(_tabPages[2]);
+            CreateTemplateEditorTab(_tabPages[TemplateTab]);
+            CreateTranslationEditorTab(_tabPages[TranslationsTab]);
+            CreateReviewTab(_tabPages[ReviewTab]);
+            CreateAnalysisTab(_tabPages[AnalysisTab]);
             RefreshViews();
             SwitchTab(_activeTab);
         }
@@ -220,7 +278,8 @@ namespace MajdataPlay.Editor.Windows
         private void CreateTemplateEditorTab(VisualElement rootElement)
         {
             var toolbar = CreateWrappingToolbar();
-            toolbar.Add(CreateToolbarButton("Add discovered keys", AddFixedKeys));
+            toolbar.Add(CreateToolbarButton("Review discovered keys", OpenReview));
+            toolbar.Add(CreateToolbarButton("Remove filtered keys", ConfirmRemoveFilteredTemplateKeys));
             toolbar.Add(CreateToolbarButton("Save template", () => SaveTemplate()));
             var search = CreateSearchField();
             search.RegisterValueChangedCallback(evt =>
@@ -230,7 +289,7 @@ namespace MajdataPlay.Editor.Windows
             });
             toolbar.Add(search);
             rootElement.Add(toolbar);
-            rootElement.Add(new HelpBox("Analysis is additive. Manually maintained, scene/prefab and other-platform keys are not removed automatically.", HelpBoxMessageType.Info));
+            rootElement.Add(new HelpBox("A scan never edits the template directly. Review the proposed additions and removals in the Review tab and apply the ones you check. \"Remove filtered keys\" removes every key matching the search.", HelpBoxMessageType.Info));
             _templateSummary = CreateSummaryLabel();
             rootElement.Add(_templateSummary);
             _templateList = new ListView(_visibleTemplateIndices, 24, MakeTemplateRow, BindTemplateRow);
@@ -321,6 +380,9 @@ namespace MajdataPlay.Editor.Windows
             rightRoot.Add(_languageEditor);
             var toolbar = CreateWrappingToolbar();
             toolbar.Add(CreateToolbarButton("Add missing template keys", AddMissingTranslations));
+            toolbar.Add(CreateToolbarButton("Add missing keys to all languages", AddMissingTranslationsToAll));
+            toolbar.Add(CreateToolbarButton("Remove keys not in template", ConfirmRemoveObsoleteTranslations));
+            toolbar.Add(CreateToolbarButton("Remove keys not in template from all languages", ConfirmRemoveObsoleteTranslationsFromAll));
             toolbar.Add(CreateToolbarButton("Save language", () => SaveSelectedLanguage()));
             var search = CreateSearchField();
             search.RegisterValueChangedCallback(evt =>
@@ -386,6 +448,97 @@ namespace MajdataPlay.Editor.Windows
             element.tooltip = GetSources(entry.Key);
         }
 
+        /// <summary>Creates the review of the template changes proposed by the last scan.</summary>
+        /// <param name="rootElement">The tab's root.</param>
+        private void CreateReviewTab(VisualElement rootElement)
+        {
+            rootElement.Add(new HelpBox(
+                "+ Add: found by the scan but missing from the template. - Remove: in the template but not found by the scan. " +
+                "Check the changes to keep and apply them; nothing is written until the template is saved. Optional additions are " +
+                "numeric option values, which display the number when untranslated. Removals start unchecked because keys used by " +
+                "dynamic code, other platforms or external data cannot be proven. Hover over a key to see its sources.",
+                HelpBoxMessageType.Info));
+            var toolbar = CreateWrappingToolbar();
+            var filter = new EnumField(_reviewFilter);
+            filter.style.flexShrink = 0;
+            filter.style.minWidth = 90;
+            filter.RegisterValueChangedCallback(evt =>
+            {
+                _reviewFilter = (ReviewFilter)evt.newValue;
+                RefreshReviewView();
+            });
+            toolbar.Add(filter);
+            toolbar.Add(CreateToolbarButton("Check listed", () => SetListedCandidatesChecked(true)));
+            toolbar.Add(CreateToolbarButton("Uncheck listed", () => SetListedCandidatesChecked(false)));
+            toolbar.Add(CreateToolbarButton("Check required additions", CheckRequiredAdditions));
+            toolbar.Add(CreateToolbarButton("Apply checked", ApplyCheckedCandidates));
+            var search = CreateSearchField();
+            search.RegisterValueChangedCallback(evt =>
+            {
+                _reviewSearch = evt.newValue;
+                RefreshReviewView();
+            });
+            toolbar.Add(search);
+            rootElement.Add(toolbar);
+            _reviewSummary = CreateSummaryLabel();
+            rootElement.Add(_reviewSummary);
+            _candidateList = new ListView(_visibleCandidates, 22, MakeCandidateRow, BindCandidateRow);
+            _candidateList.selectionType = SelectionType.None;
+            ConfigureFlexibleContent(_candidateList);
+            rootElement.Add(_candidateList);
+        }
+
+        /// <summary>Creates a recycled review row.</summary>
+        /// <returns>A check box, the proposed change, the key and a note.</returns>
+        private VisualElement MakeCandidateRow()
+        {
+            var row = new VisualElement();
+            row.style.flexDirection = FlexDirection.Row;
+            row.style.alignItems = Align.Center;
+            var toggle = new Toggle { name = "checked" };
+            toggle.style.flexShrink = 0;
+            toggle.RegisterValueChangedCallback(evt =>
+            {
+                if (row.userData is not TranslationKeyCandidate candidate)
+                {
+                    return;
+                }
+                Undo.RecordObject(this, "Check translation key change");
+                candidate.IsChecked = evt.newValue;
+                RefreshReviewSummary();
+            });
+            row.Add(toggle);
+            var change = new Label { name = "change" };
+            change.style.width = 70;
+            change.style.flexShrink = 0;
+            row.Add(change);
+            var key = new Label { name = "key" };
+            ConfigureFlexibleContent(key);
+            key.style.overflow = Overflow.Hidden;
+            row.Add(key);
+            var note = new Label { name = "note" };
+            note.style.flexShrink = 0;
+            note.style.unityFontStyleAndWeight = FontStyle.Italic;
+            row.Add(note);
+            return row;
+        }
+
+        /// <summary>Binds a recycled review row.</summary>
+        /// <param name="element">The row to bind.</param>
+        /// <param name="index">The index in the filtered list.</param>
+        private void BindCandidateRow(VisualElement element, int index)
+        {
+            var candidate = _visibleCandidates[index];
+            element.userData = candidate;
+            element.tooltip = candidate.Details;
+            element.Q<Toggle>("checked").SetValueWithoutNotify(candidate.IsChecked);
+            element.Q<Label>("change").text = candidate.Change == TranslationKeyChange.Add ? "+ Add" : "- Remove";
+            element.Q<Label>("key").text = candidate.Key;
+            element.Q<Label>("note").text = candidate.Change == TranslationKeyChange.Remove
+                ? "not found by scan"
+                : candidate.IsOptional ? "optional numeric value" : string.Empty;
+        }
+
         /// <summary>Creates reports of inferred keys and unresolved dynamic calls.</summary>
         /// <param name="rootElement">The tab's root.</param>
         private void CreateAnalysisTab(VisualElement rootElement)
@@ -416,7 +569,14 @@ namespace MajdataPlay.Editor.Windows
             rootElement.Add(_diagnosticList);
         }
 
-        /// <summary>Analyzes the loaded assembly without executing game or setting initialization.</summary>
+        /// <summary>
+        /// Scans the loaded assembly, the setting metadata and the scenes and prefabs without executing game code, and
+        /// proposes the resulting template changes for review.
+        /// </summary>
+        /// <remarks>
+        /// The scan writes into fresh collections and replaces the previous results only when it completes, so a
+        /// cancelled or failed scan keeps them.
+        /// </remarks>
         private void AnalyzeAssembly()
         {
             if (EditorApplication.isCompiling || EditorApplication.isUpdating)
@@ -432,43 +592,150 @@ namespace MajdataPlay.Editor.Windows
                 RefreshAnalysisView();
                 return;
             }
-            _fixedKeys.Clear();
-            _diagnostics.Clear();
+            var keys = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
+            var diagnostics = new List<string>();
+            var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+            using var cancellation = new CancellationTokenSource();
             try
             {
-                EditorUtility.DisplayProgressBar("Translation analysis", "Reading method bodies and setting metadata...", 0.5f);
-                TranslationCallAnalyzer.Collect(assembly, _fixedKeys, _diagnostics);
-                TranslationSettingAnalyzer.Collect(assembly, _fixedKeys, _diagnostics);
-                _analysisStatus = $"{_fixedKeys.Count} fixed keys; {_diagnostics.Count} diagnostics. Current compiled platform only.";
+                TranslationCallAnalyzer.Collect(assembly, keys, diagnostics,
+                    new CancelableProgressBar("Reading method bodies...", 0f, 0.8f, cancellation), cancellation.Token);
+                new CancelableProgressBar("Reading setting metadata...", 0.8f, 0.9f, cancellation).Report(0f);
+                cancellation.Token.ThrowIfCancellationRequested();
+                TranslationSettingAnalyzer.Collect(assembly, keys, diagnostics);
+                new CancelableProgressBar("Reading scenes and prefabs...", 0.9f, 1f, cancellation).Report(0f);
+                cancellation.Token.ThrowIfCancellationRequested();
+                TranslationAssetAnalyzer.Collect(FindSceneAndPrefabPaths(), keys, diagnostics);
+            }
+            catch (OperationCanceledException)
+            {
+                _analysisStatus = "Analysis cancelled; the previous results were kept.";
+                RefreshAnalysisView();
+                return;
             }
             catch (Exception exception)
             {
-                _fixedKeys.Clear();
-                _diagnostics.Clear();
-                _analysisStatus = "Analysis failed; partial results were discarded. See the Console.";
+                _analysisStatus = "Analysis failed; the previous results were kept. See the Console.";
                 Debug.LogException(exception);
+                RefreshAnalysisView();
+                return;
             }
             finally
             {
                 EditorUtility.ClearProgressBar();
             }
+
+            Undo.RecordObject(this, "Analyze translation keys");
+            _fixedKeys.Clear();
+            foreach (var pair in keys)
+            {
+                _fixedKeys.Add(pair.Key, pair.Value);
+            }
+            _diagnostics.Clear();
+            _diagnostics.AddRange(diagnostics);
+            _candidates = TranslationKeyReview.Build(_fixedKeys, _templateContent);
+            _hasAnalysis = true;
+            var additions = _candidates.Count(candidate => candidate.Change == TranslationKeyChange.Add);
+            _analysisStatus = $"{_fixedKeys.Count} fixed keys in {stopwatch.ElapsedMilliseconds} ms; {additions} additions and " +
+                $"{_candidates.Count - additions} removals to review; {_diagnostics.Count} diagnostics. Current compiled platform only.";
             RefreshViews();
-            SwitchTab(2);
+            SwitchTab(ReviewTab);
         }
 
-        /// <summary>Adds discovered keys without deleting manually maintained template entries.</summary>
-        private void AddFixedKeys()
+        /// <summary>Lists the scenes and prefabs under Assets whose <c>LocalizeTMP</c> keys are scanned.</summary>
+        /// <returns>The distinct asset paths.</returns>
+        private static IEnumerable<string> FindSceneAndPrefabPaths()
         {
-            var existing = new HashSet<string>(_templateContent, StringComparer.Ordinal);
-            var additions = _fixedKeys.Keys.Where(key => !existing.Contains(key)).OrderBy(key => key, StringComparer.Ordinal).ToArray();
-            if (additions.Length == 0)
+            var folders = new[] { "Assets" };
+            return AssetDatabase.FindAssets("t:Scene", folders)
+                .Concat(AssetDatabase.FindAssets("t:Prefab", folders))
+                .Distinct(StringComparer.Ordinal)
+                .Select(AssetDatabase.GUIDToAssetPath)
+                .Where(path => path.Length != 0);
+        }
+
+        /// <summary>Shows the review of the last scan, scanning first when no scan has completed yet.</summary>
+        private void OpenReview()
+        {
+            if (!_hasAnalysis)
+            {
+                AnalyzeAssembly();
+                return;
+            }
+            SwitchTab(ReviewTab);
+        }
+
+        /// <summary>Checks or unchecks every candidate listed by the current review filter and search.</summary>
+        /// <param name="isChecked">The new checked state.</param>
+        private void SetListedCandidatesChecked(bool isChecked)
+        {
+            Undo.RecordObject(this, isChecked ? "Check listed translation key changes" : "Uncheck listed translation key changes");
+            TranslationKeyReview.SetChecked(_visibleCandidates, isChecked);
+            RefreshReviewView();
+        }
+
+        /// <summary>Checks every addition that is not optional, whatever the current filter.</summary>
+        private void CheckRequiredAdditions()
+        {
+            Undo.RecordObject(this, "Check required translation key additions");
+            TranslationKeyReview.SetChecked(_candidates.Where(candidate => candidate.Change == TranslationKeyChange.Add && !candidate.IsOptional), true);
+            RefreshReviewView();
+        }
+
+        /// <summary>Applies the checked review candidates to the template, which then needs saving.</summary>
+        private void ApplyCheckedCandidates()
+        {
+            if (!_candidates.Any(candidate => candidate.IsChecked))
             {
                 return;
             }
-            Undo.RecordObject(this, "Add discovered translation keys");
-            _templateContent.AddRange(additions);
+            Undo.RecordObject(this, "Apply translation key changes");
+            var (added, removed) = TranslationKeyReview.Apply(_templateContent, _candidates);
+            if (added != 0 || removed != 0)
+            {
+                _templateDirty = true;
+            }
+            _analysisStatus = $"Applied {added} additions and {removed} removals to the template; save the template to keep them.";
+            RefreshViews();
+        }
+
+        /// <summary>Removes every template key matching the search after confirmation.</summary>
+        private void ConfirmRemoveFilteredTemplateKeys()
+        {
+            if (_templateFilter.Length == 0 || _visibleTemplateIndices.Count == 0)
+            {
+                EditorUtility.DisplayDialog("Remove filtered keys", "Enter a search that matches the keys to remove first.", "OK");
+                return;
+            }
+            if (EditorUtility.DisplayDialog("Remove filtered keys", $"Remove the {_visibleTemplateIndices.Count} template keys matching \"{_templateFilter}\"? Language files are not changed.", "Remove", "Cancel"))
+            {
+                RemoveTemplateKeys(_visibleTemplateIndices.ToArray());
+            }
+        }
+
+        /// <summary>Removes several template keys in one undoable step.</summary>
+        /// <param name="indices">The indices into the template of the keys to remove.</param>
+        /// <returns>The number of removed keys.</returns>
+        private int RemoveTemplateKeys(IReadOnlyCollection<int> indices)
+        {
+            var removals = new HashSet<int>(indices.Where(index => index >= 0 && index < _templateContent.Count));
+            if (removals.Count == 0)
+            {
+                return 0;
+            }
+            Undo.RecordObject(this, "Remove translation template keys");
+            var kept = new List<string>(_templateContent.Count - removals.Count);
+            for (var i = 0; i < _templateContent.Count; i++)
+            {
+                if (!removals.Contains(i))
+                {
+                    kept.Add(_templateContent[i]);
+                }
+            }
+            _templateContent = kept;
             _templateDirty = true;
             RefreshViews();
+            return removals.Count;
         }
 
         /// <summary>Adds a nonempty, unique manually maintained template key.</summary>
@@ -486,7 +753,7 @@ namespace MajdataPlay.Editor.Windows
             RefreshViews();
         }
 
-        /// <summary>Adds missing template entries while preserving existing translation text.</summary>
+        /// <summary>Adds missing template entries to the selected language while preserving existing translation text.</summary>
         private void AddMissingTranslations()
         {
             var document = GetSelectedLanguage();
@@ -494,19 +761,107 @@ namespace MajdataPlay.Editor.Windows
             {
                 return;
             }
-            var existing = new HashSet<string>(document.Entries.Select(entry => entry.Key), StringComparer.Ordinal);
-            var additions = _templateContent.Where(key => !string.IsNullOrWhiteSpace(key) && existing.Add(key)).OrderBy(key => key, StringComparer.Ordinal).ToArray();
-            if (additions.Length == 0)
+            AddMissingKeys(new[] { document });
+        }
+
+        /// <summary>Adds missing template entries to every language while preserving existing translation text.</summary>
+        private void AddMissingTranslationsToAll()
+        {
+            AddMissingKeys(_languages);
+        }
+
+        /// <summary>Adds the template keys that several languages lack as empty entries, in one undoable step.</summary>
+        /// <param name="documents">The languages to complete.</param>
+        /// <returns>The total number of added entries.</returns>
+        private int AddMissingKeys(IReadOnlyList<TranslationDocument> documents)
+        {
+            var templateKeys = _templateContent.Where(key => !string.IsNullOrWhiteSpace(key)).Distinct(StringComparer.Ordinal).OrderBy(key => key, StringComparer.Ordinal).ToArray();
+            var undoRecorded = false;
+            var total = 0;
+            foreach (var document in documents)
             {
+                var existing = new HashSet<string>(document.Entries.Select(entry => entry.Key), StringComparer.Ordinal);
+                var additions = templateKeys.Where(key => !existing.Contains(key)).ToArray();
+                if (additions.Length == 0)
+                {
+                    continue;
+                }
+                if (!undoRecorded)
+                {
+                    Undo.RecordObject(this, "Add missing language keys");
+                    undoRecorded = true;
+                }
+                foreach (var key in additions)
+                {
+                    document.Entries.Add(new TranslationEntry { Key = key });
+                }
+                document.IsDirty = true;
+                total += additions.Length;
+            }
+            if (total != 0)
+            {
+                RefreshViews();
+            }
+            return total;
+        }
+
+        /// <summary>Removes the selected language's entries whose keys are not in the template, after confirmation.</summary>
+        private void ConfirmRemoveObsoleteTranslations()
+        {
+            var document = GetSelectedLanguage();
+            if (document is not null)
+            {
+                ConfirmRemoveObsoleteKeys(new[] { document });
+            }
+        }
+
+        /// <summary>Removes every language's entries whose keys are not in the template, after confirmation.</summary>
+        private void ConfirmRemoveObsoleteTranslationsFromAll()
+        {
+            ConfirmRemoveObsoleteKeys(_languages);
+        }
+
+        /// <summary>Asks before removing the entries whose keys are not in the template, since their texts are lost.</summary>
+        /// <param name="documents">The languages to clean up.</param>
+        private void ConfirmRemoveObsoleteKeys(IReadOnlyList<TranslationDocument> documents)
+        {
+            var templateKeys = new HashSet<string>(_templateContent, StringComparer.Ordinal);
+            var count = documents.Sum(document => document.Entries.Count(entry => !templateKeys.Contains(entry.Key)));
+            if (count == 0)
+            {
+                EditorUtility.DisplayDialog("Remove keys not in template", "Every entry is in the template.", "OK");
                 return;
             }
-            Undo.RecordObject(this, "Add missing language keys");
-            foreach (var key in additions)
+            var languages = string.Join(", ", documents.Select(document => document.Code));
+            if (EditorUtility.DisplayDialog("Remove keys not in template", $"Remove {count} entries whose keys are not in the template from {languages}? Their translated texts are discarded when the languages are saved.", "Remove", "Cancel"))
             {
-                document.Entries.Add(new TranslationEntry { Key = key });
+                RemoveObsoleteKeys(documents);
             }
-            document.IsDirty = true;
+        }
+
+        /// <summary>Removes the entries whose keys are not in the template from several languages, in one undoable step.</summary>
+        /// <param name="documents">The languages to clean up.</param>
+        /// <returns>The total number of removed entries.</returns>
+        private int RemoveObsoleteKeys(IReadOnlyList<TranslationDocument> documents)
+        {
+            var templateKeys = new HashSet<string>(_templateContent, StringComparer.Ordinal);
+            if (!documents.Any(document => document.Entries.Exists(entry => !templateKeys.Contains(entry.Key))))
+            {
+                return 0;
+            }
+            Undo.RecordObject(this, "Remove language keys not in template");
+            var total = 0;
+            foreach (var document in documents)
+            {
+                var removed = document.Entries.RemoveAll(entry => !templateKeys.Contains(entry.Key));
+                if (removed != 0)
+                {
+                    document.IsDirty = true;
+                    total += removed;
+                }
+            }
             RefreshViews();
+            return total;
         }
 
         /// <summary>Updates document metadata and records the edit for undo.</summary>
@@ -568,6 +923,11 @@ namespace MajdataPlay.Editor.Windows
                 }
             }
             _languages.Sort((left, right) => StringComparer.Ordinal.Compare(left.Code, right.Code));
+            if (_hasAnalysis)
+            {
+                // The reloaded template may differ from the one the last scan was compared with.
+                _candidates = TranslationKeyReview.Build(_fixedKeys, _templateContent);
+            }
             _templateDirty = false;
             _selectedLanguageIndex = _languages.Count == 0 ? -1 : Math.Clamp(_selectedLanguageIndex, 0, _languages.Count - 1);
             _isLoaded = true;
@@ -698,8 +1058,53 @@ namespace MajdataPlay.Editor.Windows
             }
             RefreshTemplateView();
             RefreshTranslationView();
+            RefreshReviewView();
             RefreshAnalysisView();
             UpdateUnsavedState();
+        }
+
+        /// <summary>Refreshes the filtered review list and its summary.</summary>
+        private void RefreshReviewView()
+        {
+            _visibleCandidates.Clear();
+            foreach (var candidate in _candidates)
+            {
+                var matchesChange = _reviewFilter switch
+                {
+                    ReviewFilter.Additions => candidate.Change == TranslationKeyChange.Add,
+                    ReviewFilter.Removals => candidate.Change == TranslationKeyChange.Remove,
+                    _ => true,
+                };
+                if (matchesChange && MatchesFilter(candidate.Key, _reviewSearch))
+                {
+                    _visibleCandidates.Add(candidate);
+                }
+            }
+            _candidateList?.RefreshItems();
+            RefreshReviewSummary();
+        }
+
+        /// <summary>Reports how many changes are proposed and checked.</summary>
+        private void RefreshReviewSummary()
+        {
+            if (_reviewSummary is null)
+            {
+                return;
+            }
+            if (_candidates.Count == 0)
+            {
+                _reviewSummary.text = _hasAnalysis
+                    ? "The template matches the last scan; there is nothing to review."
+                    : $"Analyze {RuntimeAssemblyName} to propose template changes.";
+                return;
+            }
+            var additions = _candidates.Count(candidate => candidate.Change == TranslationKeyChange.Add);
+            var checkedAdditions = _candidates.Count(candidate => candidate.Change == TranslationKeyChange.Add && candidate.IsChecked);
+            var optionalAdditions = _candidates.Count(candidate => candidate.Change == TranslationKeyChange.Add && candidate.IsOptional);
+            var removals = _candidates.Count - additions;
+            var checkedRemovals = _candidates.Count(candidate => candidate.Change == TranslationKeyChange.Remove && candidate.IsChecked);
+            _reviewSummary.text = $"{additions} additions ({checkedAdditions} checked, {optionalAdditions} optional); " +
+                $"{removals} removals ({checkedRemovals} checked). {_visibleCandidates.Count} listed.";
         }
 
         /// <summary>Refreshes the template filter and missing-key count.</summary>
@@ -716,8 +1121,8 @@ namespace MajdataPlay.Editor.Windows
             _templateList?.RefreshItems();
             if (_templateSummary is not null)
             {
-                var missing = _fixedKeys.Keys.Count(key => !_templateContent.Contains(key, StringComparer.Ordinal));
-                _templateSummary.text = $"{_templateContent.Count} template keys; {missing} discovered keys not in template. {_templatePath}";
+                var additions = _candidates.Count(candidate => candidate.Change == TranslationKeyChange.Add);
+                _templateSummary.text = $"{_templateContent.Count} template keys; {additions} additions and {_candidates.Count - additions} removals pending review. {_templatePath}";
             }
         }
 
@@ -802,21 +1207,31 @@ namespace MajdataPlay.Editor.Windows
             RefreshViews();
         }
 
-        /// <summary>Saves all dirty documents when Unity requests saving before close.</summary>
-        public override void SaveChanges()
+        /// <summary>Saves the template and every edited language, stopping at the first failure or cancellation.</summary>
+        /// <returns>Whether everything was saved.</returns>
+        private bool SaveAll()
         {
             if (_templateDirty && !SaveTemplate())
             {
-                return;
+                return false;
             }
             foreach (var document in _languages)
             {
                 if (document.IsDirty && !SaveLanguage(document))
                 {
-                    return;
+                    return false;
                 }
             }
-            base.SaveChanges();
+            return true;
+        }
+
+        /// <summary>Saves all dirty documents when Unity requests saving before close.</summary>
+        public override void SaveChanges()
+        {
+            if (SaveAll())
+            {
+                base.SaveChanges();
+            }
         }
 
         /// <summary>Discards editing state and restores the current resource files.</summary>
@@ -826,6 +1241,45 @@ namespace MajdataPlay.Editor.Windows
             LoadResources();
             RefreshViews();
             base.DiscardChanges();
+        }
+
+        /// <summary>Shows a cancelable progress bar for one stage of the scan and cancels the scan when the user asks.</summary>
+        private sealed class CancelableProgressBar : IProgress<float>
+        {
+            /// <summary>The stage description shown under the title.</summary>
+            private readonly string _info;
+
+            /// <summary>The overall progress at the start of the stage.</summary>
+            private readonly float _start;
+
+            /// <summary>The overall progress at the end of the stage.</summary>
+            private readonly float _end;
+
+            /// <summary>The source cancelled when the user presses Cancel.</summary>
+            private readonly CancellationTokenSource _cancellation;
+
+            /// <summary>Initializes a new instance of the <see cref="CancelableProgressBar"/> class.</summary>
+            /// <param name="info">The stage description shown under the title.</param>
+            /// <param name="start">The overall progress at the start of the stage, from 0 to 1.</param>
+            /// <param name="end">The overall progress at the end of the stage, from 0 to 1.</param>
+            /// <param name="cancellation">The source cancelled when the user presses Cancel.</param>
+            internal CancelableProgressBar(string info, float start, float end, CancellationTokenSource cancellation)
+            {
+                _info = info;
+                _start = start;
+                _end = end;
+                _cancellation = cancellation;
+            }
+
+            /// <summary>Shows the progress of the stage and requests cancellation when the user presses Cancel.</summary>
+            /// <param name="value">The progress of the stage, from 0 to 1.</param>
+            public void Report(float value)
+            {
+                if (EditorUtility.DisplayCancelableProgressBar("Translation analysis", _info, Mathf.Lerp(_start, _end, value)))
+                {
+                    _cancellation.Cancel();
+                }
+            }
         }
 
         /// <summary>Opens the translation editor from Unity's Window menu.</summary>

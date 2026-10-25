@@ -53,7 +53,10 @@ namespace MajdataPlay.Tests.Game.EditorTools
             Assert.That(_window.hasUnsavedChanges, Is.False);
         }
 
-        /// <summary>Checks that the UI tree has three tabs and switching shows only the selected one.</summary>
+        /// <summary>Gets the review candidates.</summary>
+        private List<TranslationKeyCandidate> Candidates => PrivateMember.GetField<List<TranslationKeyCandidate>>(_window, "_candidates");
+
+        /// <summary>Checks that the UI tree has four tabs and switching shows only the selected one.</summary>
         [Test]
         public void CreateGUI_BuildsTabsAndSwitches()
         {
@@ -62,7 +65,7 @@ namespace MajdataPlay.Tests.Game.EditorTools
             PrivateMember.Invoke(_window, "SwitchTab", 1);
             PrivateMember.Invoke(_window, "SwitchTab", 7);
 
-            Assert.That(pages.Count, Is.EqualTo(3));
+            Assert.That(pages.Count, Is.EqualTo(4));
             Assert.That(pages[1].style.display.value, Is.EqualTo(DisplayStyle.Flex));
             Assert.That(pages[0].style.display.value, Is.EqualTo(DisplayStyle.None));
             Assert.That(PrivateMember.GetField<int>(_window, "_activeTab"), Is.EqualTo(1));
@@ -88,25 +91,103 @@ namespace MajdataPlay.Tests.Game.EditorTools
             Assert.That(_window.hasUnsavedChanges, Is.True);
         }
 
-        /// <summary>Checks that analysis discovers keys, adds missing ones to the template once and explains sources.</summary>
+        /// <summary>
+        /// Checks that analysis proposes additions and removals without editing the template, and that only the checked
+        /// changes are applied.
+        /// </summary>
         [Test]
-        public void AnalyzeAndAddFixedKeys_SynchronizesTemplate()
+        public void AnalyzeAndApplyCandidates_SynchronizesTemplateAfterReview()
         {
+            Template.Add("MajTestManual.Unknown");
+            var original = Template.ToList();
+
             PrivateMember.Invoke(_window, "AnalyzeAssembly");
             var fixedKeys = PrivateMember.GetField<Dictionary<string, HashSet<string>>>(_window, "_fixedKeys");
 
             Assert.That(fixedKeys, Is.Not.Empty);
+            Assert.That(fixedKeys.Keys, Does.Contain("MAJTEXT_LIST_INPUT_HINT"), "scene LocalizeTMP keys are scanned");
             Assert.That(PrivateMember.GetField<string>(_window, "_analysisStatus"), Does.Contain("fixed keys"));
             Assert.That(PrivateMember.GetField<int>(_window, "_activeTab"), Is.EqualTo(2));
+            Assert.That(Template, Is.EqualTo(original));
+            var removal = Candidates.Single(candidate => candidate.Key == "MajTestManual.Unknown");
+            Assert.That(removal.Change, Is.EqualTo(TranslationKeyChange.Remove));
+            Assert.That(removal.IsChecked, Is.False);
+            Assert.That(Candidates.Where(candidate => candidate.Change == TranslationKeyChange.Add).All(candidate => candidate.IsChecked != candidate.IsOptional), Is.True);
 
-            PrivateMember.Invoke(_window, "AddFixedKeys");
-            var count = Template.Count;
-            PrivateMember.Invoke(_window, "AddFixedKeys");
+            PrivateMember.Invoke(_window, "SetListedCandidatesChecked", false);
+            PrivateMember.Invoke(_window, "CheckRequiredAdditions");
+            removal.IsChecked = true;
+            PrivateMember.Invoke(_window, "ApplyCheckedCandidates");
 
-            Assert.That(Template.Count, Is.EqualTo(count));
-            Assert.That(fixedKeys.Keys.All(key => Template.Contains(key)), Is.True);
+            Assert.That(Template, Does.Not.Contain("MajTestManual.Unknown"));
+            Assert.That(fixedKeys.Keys.Where(key => !Candidates.Any(candidate => candidate.Key == key)).All(key => Template.Contains(key)), Is.True);
+            Assert.That(Candidates.All(candidate => !candidate.IsChecked), Is.True);
+            Assert.That(Candidates.Where(candidate => candidate.Change == TranslationKeyChange.Add).All(candidate => candidate.IsOptional), Is.True);
+            Assert.That(_window.hasUnsavedChanges, Is.True);
             Assert.That(PrivateMember.Invoke<string>(_window, "GetSources", "MAJTEXT_LIST_EMPTY_COLLECTION"), Does.Contain("CoverListManager"));
             Assert.That(PrivateMember.Invoke<string>(_window, "GetSources", "MajTestManual.Unknown"), Does.StartWith("Not proven"));
+        }
+
+        /// <summary>Checks that the review filter and search select the candidates a batch check applies to.</summary>
+        [Test]
+        public void ReviewFilter_LimitsBatchChecks()
+        {
+            Candidates.Clear();
+            Candidates.Add(new TranslationKeyCandidate { Key = "MajTest.AddA", Change = TranslationKeyChange.Add });
+            Candidates.Add(new TranslationKeyCandidate { Key = "MajTest.AddB", Change = TranslationKeyChange.Add });
+            Candidates.Add(new TranslationKeyCandidate { Key = "MajTest.RemoveA", Change = TranslationKeyChange.Remove });
+            var filterType = typeof(TranslationManagerWindow).GetNestedType("ReviewFilter", System.Reflection.BindingFlags.NonPublic)!;
+            PrivateMember.SetField(_window, "_reviewFilter", System.Enum.Parse(filterType, "Removals"));
+            PrivateMember.Invoke(_window, "RefreshReviewView");
+
+            PrivateMember.Invoke(_window, "SetListedCandidatesChecked", true);
+
+            Assert.That(Candidates.Where(candidate => candidate.IsChecked).Select(candidate => candidate.Key), Is.EqualTo(new[] { "MajTest.RemoveA" }));
+
+            PrivateMember.SetField(_window, "_reviewFilter", System.Enum.Parse(filterType, "All"));
+            PrivateMember.SetField(_window, "_reviewSearch", "addb");
+            PrivateMember.Invoke(_window, "RefreshReviewView");
+            PrivateMember.Invoke(_window, "SetListedCandidatesChecked", true);
+
+            Assert.That(Candidates.Count(candidate => candidate.IsChecked), Is.EqualTo(2));
+            Assert.That(PrivateMember.GetField<Label>(_window, "_reviewSummary").text, Does.Contain("1 listed"));
+        }
+
+        /// <summary>Checks that several template keys are removed in one step.</summary>
+        [Test]
+        public void RemoveTemplateKeys_RemovesSeveralKeys()
+        {
+            PrivateMember.SetField(_window, "_templateContent", new List<string> { "A", "B", "C", "D" });
+
+            var removed = PrivateMember.Invoke<int>(_window, "RemoveTemplateKeys", new[] { 3, 1, 1, 9 });
+
+            Assert.That(removed, Is.EqualTo(2));
+            Assert.That(Template, Is.EqualTo(new[] { "A", "C" }));
+            Assert.That(_window.hasUnsavedChanges, Is.True);
+            Assert.That(PrivateMember.Invoke<int>(_window, "RemoveTemplateKeys", new int[0]), Is.EqualTo(0));
+        }
+
+        /// <summary>Checks the batch completion and cleanup of every language against the template.</summary>
+        [Test]
+        public void BatchLanguageOperations_SynchronizeEveryLanguage()
+        {
+            var first = new TranslationDocument { Code = "aa", Entries = { new TranslationEntry { Key = "A", Text = "a" }, new TranslationEntry { Key = "OLD", Text = "old" } } };
+            var second = new TranslationDocument { Code = "bb", Entries = { new TranslationEntry { Key = "B", Text = "b" } } };
+            Languages.Clear();
+            Languages.Add(first);
+            Languages.Add(second);
+            PrivateMember.SetField(_window, "_templateContent", new List<string> { "A", "B" });
+
+            PrivateMember.Invoke(_window, "AddMissingTranslationsToAll");
+            var removed = PrivateMember.Invoke<int>(_window, "RemoveObsoleteKeys", Languages);
+
+            Assert.That(first.Entries.Select(entry => entry.Key), Is.EquivalentTo(new[] { "A", "B" }));
+            Assert.That(first.Entries.Single(entry => entry.Key == "A").Text, Is.EqualTo("a"));
+            Assert.That(second.Entries.Select(entry => entry.Key), Is.EquivalentTo(new[] { "A", "B" }));
+            Assert.That(removed, Is.EqualTo(1));
+            Assert.That(first.IsDirty && second.IsDirty, Is.True);
+            Assert.That(PrivateMember.Invoke<int>(_window, "AddMissingKeys", Languages), Is.EqualTo(0));
+            Assert.That(PrivateMember.Invoke<int>(_window, "RemoveObsoleteKeys", Languages), Is.EqualTo(0));
         }
 
         /// <summary>Checks that missing template keys are added to the selected language once, preserving existing text.</summary>

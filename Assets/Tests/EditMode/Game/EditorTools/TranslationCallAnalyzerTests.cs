@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading;
 using MajdataPlay.Editor.Windows;
 using NUnit.Framework;
 
@@ -139,6 +140,57 @@ namespace MajdataPlay.Tests.Game.EditorTools
             Assert.That(keys["MajTestCall.Extension"], Does.Contain("manual"));
             Assert.That(keys["MajTestCall.Extension"].Count, Is.GreaterThan(1));
             Assert.That(keys.ContainsKey("Manual.Key"), Is.True);
+        }
+
+        /// <summary>Checks that the analysis reports monotonic progress up to completion and yields the same keys.</summary>
+        [Test]
+        public void Collect_ReportsProgress()
+        {
+            var plainKeys = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
+            var keys = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
+            var reports = new List<float>();
+
+            TranslationCallAnalyzer.Collect(typeof(TranslationCallFixtures).Assembly, plainKeys, new List<string>());
+            TranslationCallAnalyzer.Collect(typeof(TranslationCallFixtures).Assembly, keys, new List<string>(),
+                new RecordingProgress(reports), CancellationToken.None);
+
+            Assert.That(reports, Is.Not.Empty);
+            Assert.That(reports, Is.Ordered);
+            Assert.That(reports.Last(), Is.EqualTo(1f));
+            Assert.That(keys.Keys, Is.EquivalentTo(plainKeys.Keys));
+        }
+
+        /// <summary>Checks that a cancelled analysis stops with <see cref="OperationCanceledException"/>.</summary>
+        [Test]
+        public void Collect_ObservesCancellation()
+        {
+            using var cancellation = new CancellationTokenSource();
+            cancellation.Cancel();
+
+            Assert.That(() => TranslationCallAnalyzer.Collect(typeof(TranslationCallFixtures).Assembly,
+                    new Dictionary<string, HashSet<string>>(), new List<string>(), null, cancellation.Token),
+                Throws.InstanceOf<OperationCanceledException>());
+        }
+
+        /// <summary>Records progress reports synchronously, unlike <see cref="Progress{T}"/>.</summary>
+        private sealed class RecordingProgress : IProgress<float>
+        {
+            /// <summary>The recorded reports.</summary>
+            private readonly List<float> _reports;
+
+            /// <summary>Initializes a new instance of the <see cref="RecordingProgress"/> class.</summary>
+            /// <param name="reports">Receives the reports.</param>
+            internal RecordingProgress(List<float> reports)
+            {
+                _reports = reports;
+            }
+
+            /// <summary>Records one report.</summary>
+            /// <param name="value">The reported progress.</param>
+            public void Report(float value)
+            {
+                _reports.Add(value);
+            }
         }
 
         /// <summary>Checks that the production runtime assembly contains discoverable keys.</summary>

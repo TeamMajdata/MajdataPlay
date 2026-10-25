@@ -22,6 +22,9 @@ namespace MajdataPlay.Editor.Windows
         /// <summary>The production window owned by the asynchronous layout validation.</summary>
         private static TranslationManagerWindow? s_window;
 
+        /// <summary>The number of tabs of the translation manager window.</summary>
+        private const int TabCount = 4;
+
         /// <summary>The current resize-and-tab scenario.</summary>
         private static int s_layoutCase;
 
@@ -58,7 +61,7 @@ namespace MajdataPlay.Editor.Windows
                 window = EditorWindow.GetWindow<TranslationManagerWindow>();
                 Invoke(window, "CreateGUI");
                 Invoke(window, "CreateGUI");
-                Assert(GetField<IList>(window, "_tabPages").Count == 3, "UI recreation does not duplicate tab pages.");
+                Assert(GetField<IList>(window, "_tabPages").Count == TabCount, "UI recreation does not duplicate tab pages.");
                 var serialized = new SerializedObject(window);
                 Assert(serialized.FindProperty("_languages").arraySize == Resources.LoadAll<TextAsset>("Langs").Count(asset => !asset.name.EndsWith(".tpl", StringComparison.Ordinal)), "All language documents are serializable and loaded.");
                 var languages = GetField<List<TranslationDocument>>(window, "_languages");
@@ -117,9 +120,9 @@ namespace MajdataPlay.Editor.Windows
                 }
                 if (!s_layoutPrepared)
                 {
-                    var size = s_layoutSizes[s_layoutCase / 3];
+                    var size = s_layoutSizes[s_layoutCase / TabCount];
                     window.position = new Rect(40, 40, size.x, size.y);
-                    Invoke(window, "SwitchTab", s_layoutCase % 3);
+                    Invoke(window, "SwitchTab", s_layoutCase % TabCount);
                     window.Repaint();
                     s_layoutFrames = 12;
                     s_layoutPrepared = true;
@@ -130,10 +133,10 @@ namespace MajdataPlay.Editor.Windows
                 {
                     return;
                 }
-                ValidateLayout(window, s_layoutCase % 3);
+                ValidateLayout(window, s_layoutCase % TabCount);
                 s_layoutCase++;
                 s_layoutPrepared = false;
-                if (s_layoutCase == s_layoutSizes.Length * 3)
+                if (s_layoutCase == s_layoutSizes.Length * TabCount)
                 {
                     FinishLayoutValidation(null);
                 }
@@ -171,10 +174,11 @@ namespace MajdataPlay.Editor.Windows
                     AssertInside(button, toolbar, "Toolbar buttons are not clipped or pushed outside the toolbar.");
                 }
             }
-            var summaryName = tab == 0 ? "_templateSummary" : tab == 1 ? "_languageSummary" : "_analysisSummary";
+            var summaryName = tab == 0 ? "_templateSummary" : tab == 1 ? "_languageSummary" : tab == 2 ? "_reviewSummary" : "_analysisSummary";
             AssertInside(GetField<Label>(window, summaryName), page, "Summary labels wrap within their tab.");
             var listNames = tab == 0 ? new[] { "_templateList" } :
-                tab == 1 ? new[] { "_languageList", "_translationList" } : new[] { "_analysisList", "_diagnosticList" };
+                tab == 1 ? new[] { "_languageList", "_translationList" } :
+                tab == 2 ? new[] { "_candidateList" } : new[] { "_analysisList", "_diagnosticList" };
             foreach (var field in listNames)
             {
                 var list = GetField<ListView>(window, field);
@@ -264,13 +268,20 @@ namespace MajdataPlay.Editor.Windows
             Assert((int)count.GetValue(null)! == 0, "No fixture method, accessor, constructor or initializer was executed.");
             var template = GetField<List<string>>(window, "_templateContent");
             var original = new HashSet<string>(template, StringComparer.Ordinal);
-            Invoke(window, "AddFixedKeys");
+            Assert(original.SetEquals(template), "Analysis only proposes changes and leaves the template untouched.");
+            var candidates = GetField<List<TranslationKeyCandidate>>(window, "_candidates");
+            Assert(candidates.Where(candidate => candidate.Change == TranslationKeyChange.Remove).All(candidate => !candidate.IsChecked), "Proposed removals start unchecked.");
+            foreach (var candidate in candidates)
+            {
+                candidate.IsChecked = candidate.Change == TranslationKeyChange.Add;
+            }
+            Invoke(window, "ApplyCheckedCandidates");
             template = GetField<List<string>>(window, "_templateContent");
-            Assert(original.IsSubsetOf(template), "Additive analysis preserves all preexisting template keys.");
-            Assert(keys.Keys.All(key => template.Contains(key, StringComparer.Ordinal)), "All fixed keys are added to the template.");
+            Assert(original.IsSubsetOf(template), "Applying only additions preserves all preexisting template keys.");
+            Assert(keys.Keys.All(key => template.Contains(key, StringComparer.Ordinal)), "All checked fixed keys are added to the template.");
             var size = template.Count;
-            Invoke(window, "AddFixedKeys");
-            Assert(template.Count == size, "Repeated synchronization does not duplicate keys.");
+            Invoke(window, "ApplyCheckedCandidates");
+            Assert(template.Count == size, "Repeated application does not duplicate keys.");
             Assert((bool)Invoke(window, "SaveTemplate")!, "Template saving succeeds in the isolated project.");
             Assert(JArray.Parse(File.ReadAllText("Assets/Resources/Langs/template.tpl.json")).Count == size, "The saved template contains every retained key.");
         }

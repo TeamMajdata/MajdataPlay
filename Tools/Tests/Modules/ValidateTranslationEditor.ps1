@@ -29,7 +29,7 @@ Copy-Item (Join-Path $root 'ProjectSettings/ProjectVersion.txt') (Join-Path $pro
         'com.unity.modules.uielements' = '1.0.0'
     }
 } | ConvertTo-Json -Depth 4 | Set-Content (Join-Path $project 'Packages/manifest.json')
-foreach ($source in @('TranslationCallAnalyzer.cs', 'TranslationSettingAnalyzer.cs', 'TranslationDocument.cs', 'TranslationManagerWindow.cs')) {
+foreach ($source in @('TranslationCallAnalyzer.cs', 'TranslationSettingAnalyzer.cs', 'TranslationAssetAnalyzer.cs', 'TranslationKeyReview.cs', 'TranslationDocument.cs', 'TranslationManagerWindow.cs')) {
     Copy-Item (Join-Path $root "Assets/Scripts/Editor/Windows/$source") $editor
 }
 foreach ($source in @('ExecutionGuard.cs', 'LocalizationFixtures.cs', 'CallFixtures.cs', 'SettingMetadataFixtures.cs', 'SettingFixtures.cs', 'OptionEnumeratorFixtures.cs', 'OptionFieldFlowFixtures.cs')) {
