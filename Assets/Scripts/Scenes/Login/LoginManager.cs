@@ -85,6 +85,8 @@ namespace MajdataPlay.Scenes.Login
             }
             _loading.SetActive(false);
             Hint();
+            _usernameInput.richText = false;
+            _passwordInput.richText = false;
             _usernameInput.onValueChanged.AddListener(_ => UpdateClearButtons());
             _passwordInput.onValueChanged.AddListener(_ => UpdateClearButtons());
             UpdateClearButtons();
@@ -132,6 +134,7 @@ namespace MajdataPlay.Scenes.Login
 
         static void Focus(TMP_InputField inputField)
         {
+            if (!inputField.interactable || inputField.readOnly || inputField.isFocused) return;
             inputField.Select();
             inputField.ActivateInputField();
             inputField.MoveTextEnd(false);
