@@ -412,7 +412,8 @@ namespace MajdataPlay.TranslationValidation
         }
 
         /// <summary>
-        /// Checks actual Enum.GetValues().ToString() results rather than guessing aliases or numbers.
+        /// Checks actual Enum.GetValues().ToString() results rather than guessing aliases or numbers. Enum values skip
+        /// the general table unless the option requests it, so only the property-specific key is required.
         /// </summary>
         /// <param name="settings">The setting-key snapshot.</param>
         /// <param name="property">The property containing the enum option.</param>
@@ -422,7 +423,7 @@ namespace MajdataPlay.TranslationValidation
         {
             foreach (var value in Enum.GetValues(enumType))
             {
-                RequireValueKeys(settings, property, value.ToString()!);
+                RequireKeys(settings, $"MAJSETTING_PROPERTY_{property}_OPTION_{value}");
             }
         }
 

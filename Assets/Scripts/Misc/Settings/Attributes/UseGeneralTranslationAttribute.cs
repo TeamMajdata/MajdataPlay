@@ -33,6 +33,12 @@ namespace MajdataPlay.Settings
     /// general fallback after an explicit <see cref="UseTranslationAttribute"/> to other value types such as
     /// numbers, enums and strings.
     /// </para>
+    /// <para>
+    /// Enum option values never fall back to the general table on their own, not even without translation
+    /// attributes. Apply this attribute to an enum option whose values are translated in the general table, such as
+    /// options sharing <c>JudgeDisplayOption</c>; combine it with <see cref="UseTranslationAttribute"/> to try the
+    /// option-specific key first.
+    /// </para>
     /// </remarks>
     [AttributeUsage(AttributeTargets.Property | AttributeTargets.Field, AllowMultiple = true, Inherited = false)]
     public class UseGeneralTranslationAttribute : Attribute

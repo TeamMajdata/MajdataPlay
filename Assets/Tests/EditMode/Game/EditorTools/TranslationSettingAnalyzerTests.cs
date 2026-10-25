@@ -76,9 +76,28 @@ namespace MajdataPlay.Tests.Game.EditorTools
         [Test]
         public void EnumOptions_CollectEveryConstant()
         {
-            AssertValue("Mode", "First");
-            AssertValue("Mode", "Second");
-            AssertValue("Mode", "Third");
+            AssertSpecificValueOnly("Mode", "First");
+            AssertSpecificValueOnly("Mode", "Second");
+            AssertSpecificValueOnly("Mode", "Third");
+        }
+
+        /// <summary>Checks that an enum option requesting the general table uses only its general keys.</summary>
+        [Test]
+        public void EnumOptions_UseGeneralTableOnRequest()
+        {
+            Assert.That(_keys["MAJSETTING_GENERAL_OPTION_Second"], Does.Contain("Fx.SharedMode (option value)"));
+            Assert.That(_keys.Keys, Does.Not.Contain("MAJSETTING_PROPERTY_SharedMode_OPTION_Second"));
+        }
+
+        /// <summary>Checks that an enum value only adds its option-specific key, because enums skip the general table by default.</summary>
+        /// <param name="property">The property name.</param>
+        /// <param name="value">The value text.</param>
+        private void AssertSpecificValueOnly(string property, string value)
+        {
+            Assert.That(_keys.Keys, Does.Contain($"MAJSETTING_PROPERTY_{property}_OPTION_{value}"));
+            var hasFallback = _keys.TryGetValue($"MAJSETTING_GENERAL_OPTION_{value}", out var sources) &&
+                sources.Contains($"Fx.{property} (option value fallback)");
+            Assert.That(hasFallback, Is.False, $"{property}.{value} must not fall back to the general table.");
         }
 
         /// <summary>Checks that numbers produce no value keys.</summary>
@@ -94,7 +113,8 @@ namespace MajdataPlay.Tests.Game.EditorTools
         {
             AssertValue("Text", "NULL");
             AssertValue("OptionalText", "UNSET");
-            AssertValue("NullableMode", "Second");
+            AssertSpecificValueOnly("NullableMode", "Second");
+            // The null placeholder is a word, so it keeps the general fallback even for an enum.
             AssertValue("NullableMode", "NULL");
             AssertValue("NullableNumber", "NULL");
             Assert.That(HasDiagnostic("Text", "values require runtime data"), Is.True);
@@ -165,7 +185,7 @@ namespace MajdataPlay.Tests.Game.EditorTools
             Assert.That(_keys["Alias"], Does.Contain("Fx.Aliased (name)"));
             Assert.That(_keys.Keys, Does.Contain("FX_Alias_First").And.Contain("FX_Alias_Second").And.Contain("FX_Alias_Third"));
             Assert.That(_keys.Keys, Does.Not.Contain("MAJSETTING_PROPERTY_Aliased_OPTION_First"));
-            Assert.That(_keys["MAJSETTING_GENERAL_OPTION_First"], Does.Not.Contain("Fx.Aliased (option value fallback)"));
+            Assert.That(_keys.TryGetValue("MAJSETTING_GENERAL_OPTION_First", out var firstSources) && firstSources.Contains("Fx.Aliased (option value fallback)"), Is.False);
 
             Assert.That(_keys["FX_SWITCH_True"], Does.Contain("Fx.Switch (option value)"));
             Assert.That(_keys["FX_SWITCH_False"], Does.Contain("Fx.Switch (option value)"));

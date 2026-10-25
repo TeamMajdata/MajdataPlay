@@ -382,7 +382,7 @@ namespace MajdataPlay.Editor.Windows
             {
                 AddKey(descriptionKey, path + " (description)", keys, diagnostics);
             }
-            var valueSelection = SelectTranslation(attributes, "OptionValue", property.Name, DefaultOptionValueTemplate, GeneralOptionValueTemplate, true,
+            var valueSelection = SelectTranslation(attributes, "OptionValue", property.Name, DefaultOptionValueTemplate, GeneralOptionValueTemplate, HasDefaultGeneralFallback(property.PropertyType),
                 HasGeneralValueFallback(property.PropertyType));
             CollectValues(property, enumeratorType, HasAttribute(attributes, SettingsNamespace + "OptionalAttribute"), valueSelection, path, keys, diagnostics);
         }
@@ -546,7 +546,11 @@ namespace MajdataPlay.Editor.Windows
             // Optional on a non-nullable enum or number does not manufacture a null option.
             if (nullableType is not null || !property.PropertyType.IsValueType)
             {
-                AddValue(source, isOptional ? "UNSET" : "NULL", path, keys, diagnostics);
+                // The placeholders are words, so an enum option, whose values skip the general table by default, still uses it.
+                var placeholderSource = valueType.IsEnum
+                    ? SelectTranslation(property.GetCustomAttributesData(), "OptionValue", property.Name, DefaultOptionValueTemplate, GeneralOptionValueTemplate, true, false)
+                    : source;
+                AddValue(placeholderSource, isOptional ? "UNSET" : "NULL", path, keys, diagnostics);
             }
         }
 
@@ -873,6 +877,17 @@ namespace MajdataPlay.Editor.Windows
         private static bool HasGeneralValueFallback(Type type)
         {
             return (Nullable.GetUnderlyingType(type) ?? type) == typeof(bool);
+        }
+
+        /// <summary>
+        /// Mirrors SettingTranslation.HasDefaultGeneralFallback: whether option values of a type without translation
+        /// attributes try the general table after their option-specific key.
+        /// </summary>
+        /// <param name="type">The option property type, possibly nullable.</param>
+        /// <returns>False for enums and their nullable forms, which only use the general table on request; otherwise true.</returns>
+        private static bool HasDefaultGeneralFallback(Type type)
+        {
+            return !(Nullable.GetUnderlyingType(type) ?? type).IsEnum;
         }
 
         /// <summary>

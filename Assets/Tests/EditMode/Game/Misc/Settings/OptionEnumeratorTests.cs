@@ -107,6 +107,13 @@ namespace MajdataPlay.Tests.Game.Misc.Settings
             [UseGeneralTranslation(TranslationTarget.OptionValue)]
             public bool GeneralOnly { get; set; } = true;
 
+            /// <summary>An enum option whose values are translated in the general table.</summary>
+            [UseGeneralTranslation(TranslationTarget.OptionValue)]
+            public MirrorOption SharedMirror { get; set; } = MirrorOption.Off;
+
+            /// <summary>A read-only nullable enum without a value.</summary>
+            public MirrorOption? NullableMirror { get; }
+
             /// <summary>A boolean option that explicitly requests its option-specific value keys.</summary>
             [UseTranslation(TranslationTarget.OptionValue)]
             public bool Specific { get; set; } = true;
@@ -388,6 +395,34 @@ namespace MajdataPlay.Tests.Game.Misc.Settings
             translated.RefreshLocalization();
 
             Assert.That(translated.LocalizedValueText, Is.EqualTo("drei"));
+        }
+
+        /// <summary>
+        /// Checks that enum values only use the general table on request, while the placeholder of a missing enum value
+        /// still falls back to it.
+        /// </summary>
+        [Test]
+        public void EnumEnumerator_UsesGeneralTableOnlyOnRequest()
+        {
+            UseLanguage(
+                ("MAJSETTING_GENERAL_OPTION_UDMirror", "General UD"),
+                ("MAJSETTING_GENERAL_OPTION_Off", "General off"),
+                ("MAJSETTING_GENERAL_OPTION_NULL", "none"));
+            var probe = new ValueProbe();
+            var plain = Create<DefaultEnumEnumerator>(probe, nameof(ValueProbe.Mirror));
+            var shared = Create<DefaultEnumEnumerator>(probe, nameof(ValueProbe.SharedMirror));
+            var nullable = Create<DefaultReadOnlyEnumerator>(probe, nameof(ValueProbe.NullableMirror));
+
+            Assert.That(plain.LocalizedValueText, Is.EqualTo("UDMirror"));
+            Assert.That(shared.LocalizedValueText, Is.EqualTo("General off"));
+            Assert.That(nullable.LocalizedValueText, Is.EqualTo("none"));
+
+            UseLanguage(("MAJSETTING_PROPERTY_Mirror_OPTION_UDMirror", "Upside down"), ("MAJSETTING_PROPERTY_SharedMirror_OPTION_Off", "ignored"));
+            plain.RefreshLocalization();
+            shared.RefreshLocalization();
+
+            Assert.That(plain.LocalizedValueText, Is.EqualTo("Upside down"));
+            Assert.That(shared.LocalizedValueText, Is.EqualTo("Off"));
         }
 
         /// <summary>Checks that a boolean option with explicit option-specific keys still falls back to the general table.</summary>

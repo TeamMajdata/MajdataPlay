@@ -73,6 +73,12 @@ namespace MajdataPlay.Tests.Game.Misc.Settings
             [UseTranslation(TranslationTarget.OptionValue)]
             public ProbeMode Mode { get; set; }
 
+            /// <summary>Gets or sets an enum option without translation attributes.</summary>
+            public ProbeMode PlainMode { get; set; }
+
+            /// <summary>Gets or sets a nullable enum option without translation attributes.</summary>
+            public ProbeMode? NullableMode { get; set; }
+
             /// <summary>Gets or sets a numeric option that only uses the general table.</summary>
             [UseGeneralTranslation(TranslationTarget.OptionValue)]
             public int GeneralOnly { get; set; }
@@ -267,6 +273,36 @@ namespace MajdataPlay.Tests.Game.Misc.Settings
             Assert.That(generalOnly.KeyTemplates, Is.EqualTo(new[] { SettingTranslation.GeneralOptionValueTemplate }));
             Assert.That(raw.IsTranslated, Is.False);
             Assert.That(untyped.KeyTemplates, Is.EqualTo(new[] { SettingTranslation.DefaultOptionValueTemplate }));
+        }
+
+        /// <summary>Checks that enum values without attributes only use their option-specific key, unlike other types.</summary>
+        [Test]
+        public void Resolve_EnumWithoutAttributes_SkipsGeneralTable()
+        {
+            var plainMode = ResolveValue(nameof(ValueRuleProbe.PlainMode));
+            var nullableMode = ResolveValue(nameof(ValueRuleProbe.NullableMode));
+            var untypedMode = SettingTranslation.Resolve(Array.Empty<Attribute>(), TranslationTarget.OptionValue, nameof(ValueRuleProbe.PlainMode));
+
+            Assert.That(plainMode.IsExplicit, Is.False);
+            Assert.That(plainMode.KeyTemplates, Is.EqualTo(new[] { SettingTranslation.DefaultOptionValueTemplate }));
+            Assert.That(nullableMode.KeyTemplates, Is.EqualTo(new[] { SettingTranslation.DefaultOptionValueTemplate }));
+            Assert.That(untypedMode.KeyTemplates, Is.EqualTo(new[] { SettingTranslation.DefaultOptionValueTemplate, SettingTranslation.GeneralOptionValueTemplate }));
+
+            UseLanguage(("MAJSETTING_GENERAL_OPTION_Alpha", "General alpha"));
+
+            Assert.That(plainMode.Localize(nameof(ProbeMode.Alpha)), Is.EqualTo(nameof(ProbeMode.Alpha)));
+        }
+
+        /// <summary>Checks which value types keep the general fallback without translation attributes.</summary>
+        [Test]
+        public void HasDefaultGeneralFallback_ExcludesOnlyEnums()
+        {
+            Assert.That(SettingTranslation.HasDefaultGeneralFallback(typeof(ProbeMode)), Is.False);
+            Assert.That(SettingTranslation.HasDefaultGeneralFallback(typeof(ProbeMode?)), Is.False);
+            Assert.That(SettingTranslation.HasDefaultGeneralFallback(typeof(bool)), Is.True);
+            Assert.That(SettingTranslation.HasDefaultGeneralFallback(typeof(int)), Is.True);
+            Assert.That(SettingTranslation.HasDefaultGeneralFallback(typeof(string)), Is.True);
+            Assert.That(SettingTranslation.HasDefaultGeneralFallback(null), Is.True);
         }
 
         /// <summary>Checks which value types fall back to the general table automatically.</summary>

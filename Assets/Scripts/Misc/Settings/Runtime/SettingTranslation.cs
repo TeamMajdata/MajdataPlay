@@ -15,8 +15,8 @@ namespace MajdataPlay.Settings
     /// Localization keys are built from key templates: <c>{0}</c> is replaced by <see cref="OptionName"/> and,
     /// for <see cref="TranslationTarget.OptionValue"/>, <c>{1}</c> by the value text. The templates are tried
     /// in order and the first key that has a translation wins. Boolean option values always end with the general
-    /// template <see cref="GeneralOptionValueTemplate"/> after their option-specific templates. Instances are immutable
-    /// and may be shared.
+    /// template <see cref="GeneralOptionValueTemplate"/> after their option-specific templates, while enum values only
+    /// use it when <see cref="UseGeneralTranslationAttribute"/> requests it. Instances are immutable and may be shared.
     /// </remarks>
     internal sealed class SettingTranslation
     {
@@ -134,9 +134,10 @@ namespace MajdataPlay.Settings
         /// <paramref name="valueType"/>, the general template <c>MAJSETTING_GENERAL_OPTION_{1}</c> always follows the
         /// option-specific templates, even without <see cref="UseGeneralTranslationAttribute"/>; numeric and enum values
         /// use exactly the templates of their attributes. Without any attribute for the target the built-in default
-        /// applies with <c>{0}</c> set to <paramref name="memberName"/>: the default template, followed by the general
-        /// template for option values. Numeric option values are not looked up at all without an attribute, which the
-        /// option enumerators enforce.
+        /// applies with <c>{0}</c> set to <paramref name="memberName"/>: the default template, followed for option values
+        /// by the general template unless <paramref name="valueType"/> is an enum (see
+        /// <see cref="HasDefaultGeneralFallback"/>). Numeric option values are not looked up at all without an attribute,
+        /// which the option enumerators enforce.
         /// </remarks>
         /// <param name="attributes">The attributes of the setting member.</param>
         /// <param name="target">The part of the option to localize.</param>
@@ -179,7 +180,7 @@ namespace MajdataPlay.Settings
             if (!isExplicit)
             {
                 specificTemplates.Add(GetDefaultTemplate(target));
-                if (target == TranslationTarget.OptionValue)
+                if (target == TranslationTarget.OptionValue && HasDefaultGeneralFallback(valueType))
                 {
                     specificTemplates.Add(GeneralOptionValueTemplate);
                 }
@@ -210,6 +211,26 @@ namespace MajdataPlay.Settings
                 return false;
             }
             return (Nullable.GetUnderlyingType(valueType) ?? valueType) == typeof(bool);
+        }
+
+        /// <summary>
+        /// Gets whether option values of a type without translation attributes try the general table after their
+        /// option-specific key.
+        /// </summary>
+        /// <remarks>
+        /// Enum values are named per option, so they only use the general table when the member requests it with
+        /// <see cref="UseGeneralTranslationAttribute"/>. Every other type, and an unknown type, keeps the general
+        /// fallback; this also covers the <c>UNSET</c> and <c>NULL</c> placeholders, which are words of no value type.
+        /// </remarks>
+        /// <param name="valueType">The option value type, possibly nullable, or null when it is unknown.</param>
+        /// <returns>False for enums and their nullable forms; otherwise true.</returns>
+        internal static bool HasDefaultGeneralFallback(Type? valueType)
+        {
+            if (valueType is null)
+            {
+                return true;
+            }
+            return !(Nullable.GetUnderlyingType(valueType) ?? valueType).IsEnum;
         }
 
         /// <summary>

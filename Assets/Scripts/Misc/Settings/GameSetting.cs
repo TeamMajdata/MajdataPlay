@@ -118,16 +118,19 @@ namespace MajdataPlay.Settings
         /// <summary>
         /// Gets or sets the information displayed at the center of the screen during gameplay.
         /// </summary>
+        [UseGeneralTranslation(TranslationTarget.OptionValue)]
         public BGInfoOption BGInfo { get; set; } = BGInfoOption.Combo;
 
         /// <summary>
         /// Gets or sets the information displayed below the center of the screen during gameplay.
         /// </summary>
+        [UseGeneralTranslation(TranslationTarget.OptionValue)]
         public BGInfoOption SecondaryBGInfo { get; set; } = BGInfoOption.None;
 
         /// <summary>
         /// Gets or sets the information displayed on the sub-screen during gameplay.
         /// </summary>
+        [UseGeneralTranslation(TranslationTarget.OptionValue)]
         public BGInfoOption SubScreenBGInfo { get; set; } = BGInfoOption.Achievement;
 
         /// <summary>
@@ -196,6 +199,7 @@ namespace MajdataPlay.Settings
         /// <summary>
         /// Gets or sets how gameplay is recorded.
         /// </summary>
+        [UseGeneralTranslation(TranslationTarget.OptionValue)]
         public RecordModeOption RecordMode { get; set; } = RecordModeOption.Disable;
 
         /// <summary>
@@ -277,31 +281,37 @@ namespace MajdataPlay.Settings
         /// <summary>
         /// Gets or sets the judgment levels that show fast or late; higher judgments are hidden.
         /// </summary>
+        [UseGeneralTranslation(TranslationTarget.OptionValue)]
         public JudgeDisplayOption FastLateType { get; set; } = JudgeDisplayOption.Disable;
 
         /// <summary>
         /// Gets or sets the judgment levels shown for tap and hold notes; higher judgments are hidden.
         /// </summary>
+        [UseGeneralTranslation(TranslationTarget.OptionValue)]
         public JudgeDisplayOption NoteJudgeType { get; set; } = JudgeDisplayOption.All;
 
         /// <summary>
         /// Gets or sets the judgment levels shown for touch notes; higher judgments are hidden.
         /// </summary>
+        [UseGeneralTranslation(TranslationTarget.OptionValue)]
         public JudgeDisplayOption TouchJudgeType { get; set; } = JudgeDisplayOption.All;
 
         /// <summary>
         /// Gets or sets the judgment levels shown for slides; higher judgments are hidden.
         /// </summary>
+        [UseGeneralTranslation(TranslationTarget.OptionValue)]
         public JudgeDisplayOption SlideJudgeType { get; set; } = JudgeDisplayOption.All;
 
         /// <summary>
         /// Gets or sets the judgment levels shown for break notes; higher judgments are hidden.
         /// </summary>
+        [UseGeneralTranslation(TranslationTarget.OptionValue)]
         public JudgeDisplayOption BreakJudgeType { get; set; } = JudgeDisplayOption.All;
 
         /// <summary>
         /// Gets or sets the judgment levels of break notes that show fast or late; higher judgments are hidden.
         /// </summary>
+        [UseGeneralTranslation(TranslationTarget.OptionValue)]
         public JudgeDisplayOption BreakFastLateType { get; set; } = JudgeDisplayOption.Disable;
 
         /// <summary>
@@ -361,6 +371,7 @@ namespace MajdataPlay.Settings
         /// <summary>
         /// Gets or sets where the reaction effect of a touch on the screen is displayed.
         /// </summary>
+        [UseGeneralTranslation(TranslationTarget.OptionValue)]
         public TouchFeedbackLevel TouchFeedback { get; set; } = TouchFeedbackLevel.Outer_Only;
 #if UNITY_STANDALONE
 
@@ -747,6 +758,7 @@ namespace MajdataPlay.Settings
         /// <summary>
         /// Gets the external device used as the button ring.
         /// </summary>
+        [UseGeneralTranslation(TranslationTarget.OptionValue)]
         public MobileExternalButtonRingOption ExternalButtonRing { get; init; } = MobileExternalButtonRingOption.None;
 #endif
     }

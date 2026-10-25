@@ -37,6 +37,11 @@ namespace MajdataPlay.Settings
     /// explicit <see cref="UseTranslationAttribute"/> when <see cref="UseGeneralTranslationAttribute"/> is also
     /// applied. If no key yields a translation, the raw value text is displayed.
     /// </para>
+    /// <para>
+    /// Enum option values do not use the general table even without translation attributes: by default they only
+    /// look up <c>MAJSETTING_PROPERTY_{0}_OPTION_{1}</c>. The <c>UNSET</c> and <c>NULL</c> placeholders of a nullable
+    /// enum are words and still fall back to the general table.
+    /// </para>
     /// </remarks>
     [AttributeUsage(AttributeTargets.Property | AttributeTargets.Field, AllowMultiple = true, Inherited = false)]
     public class UseTranslationAttribute : Attribute

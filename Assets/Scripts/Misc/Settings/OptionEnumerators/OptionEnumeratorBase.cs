@@ -97,6 +97,15 @@ namespace MajdataPlay.Settings.OptionEnumerators
         /// </summary>
         private protected SettingTranslation ValueTranslation { get; private set; } = SettingTranslation.DefaultOptionValue;
 
+        /// <summary>
+        /// Gets how the <c>UNSET</c> and <c>NULL</c> placeholders of a missing value are localized.
+        /// </summary>
+        /// <remarks>
+        /// The placeholders are words rather than values of the member type, so an enum member, whose values do not fall
+        /// back to the general table by default, still looks them up there.
+        /// </remarks>
+        private protected SettingTranslation PlaceholderTranslation { get; private set; } = SettingTranslation.DefaultOptionValue;
+
         Type _memberType = null!;
         Attribute[] _attributes = Array.Empty<Attribute>();
         // True for numeric members including nullable ones; their values are only translated on explicit request.
@@ -229,8 +238,9 @@ namespace MajdataPlay.Settings.OptionEnumerators
         /// <remarks>
         /// Numeric values are not translated unless the member opts in with <see cref="UseTranslationAttribute"/> or
         /// <see cref="UseGeneralTranslationAttribute"/>; the <c>UNSET</c> and <c>NULL</c> placeholders of a missing
-        /// numeric value are words and keep the default lookup. Opted-in numeric values use exactly the keys of their
-        /// attributes, while boolean values that look up an option-specific key fall back to the general table afterwards
+        /// value are words and use <see cref="PlaceholderTranslation"/>. Opted-in numeric values use exactly the keys of
+        /// their attributes, enum values only use the general table when requested, and boolean values that look up an
+        /// option-specific key fall back to the general table afterwards
         /// (see <see cref="SettingTranslation.Resolve(Attribute[], TranslationTarget, string, Type)"/>).
         /// </remarks>
         /// <param name="value">The option value, or null for a missing value.</param>
@@ -238,18 +248,25 @@ namespace MajdataPlay.Settings.OptionEnumerators
         /// <returns>The localized text, or <paramref name="valueText"/> when it is not translated or has no translation.</returns>
         protected string LocalizeValueText(object? value, string valueText)
         {
-            var isNumericValue = _hasNumericValues && value is not null;
-            if (isNumericValue && !ValueTranslation.IsExplicit)
+            if (value is null)
+            {
+                return PlaceholderTranslation.Localize(valueText);
+            }
+            if (_hasNumericValues && !ValueTranslation.IsExplicit)
             {
                 return valueText;
             }
-            return ValueTranslation.Localize(valueText, isNumericValue);
+            return ValueTranslation.Localize(valueText, _hasNumericValues);
         }
         private void InitTranslation()
         {
             var valueType = Nullable.GetUnderlyingType(_memberType) ?? _memberType;
             _hasNumericValues = valueType.IsIntType() || valueType.IsFloatType();
             ValueTranslation = SettingTranslation.Resolve(_attributes, TranslationTarget.OptionValue, Name, _memberType);
+            // Resolving without the value type keeps the default general fallback that enum values lose.
+            PlaceholderTranslation = valueType.IsEnum
+                ? SettingTranslation.Resolve(_attributes, TranslationTarget.OptionValue, Name)
+                : ValueTranslation;
         }
         public virtual void Dispose()
         {

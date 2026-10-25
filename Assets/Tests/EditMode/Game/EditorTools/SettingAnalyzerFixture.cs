@@ -24,6 +24,10 @@ namespace MajdataPlay.Tests.Game.EditorTools
         [Description("FX_DESC")]
         public FixtureMode Mode { get; set; }
 
+        /// <summary>Gets or sets an enum option whose values are translated in the general table.</summary>
+        [UseGeneralTranslation(TranslationTarget.OptionValue)]
+        public FixtureMode SharedMode { get; set; }
+
         /// <summary>Gets or sets a numeric option without description.</summary>
         [NoDescription]
         public int Count { get; set; }
