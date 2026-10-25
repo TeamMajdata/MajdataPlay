@@ -166,6 +166,31 @@ namespace MajdataPlay.Tests.Game.Misc.Base
 #endif
         }
 
+        /// <summary>Checks that legacy rendering keys are migrated when settings.json is read and that the next save writes the current layout.</summary>
+        [Test]
+        public void InitUserSettings_MigratesLegacyRenderingAndSavesCurrentLayout()
+        {
+            _environment.Set(nameof(MajEnv.RuntimeConfig), new RuntimeConfig());
+            _root.CreateFile("settings.json").WriteAllText(
+                "{\"Display\":{\"Skin\":\"custom\",\"RenderQuality\":\"High\",\"RenderScale\":100,\"FPSLimit\":60,\"VSync\":false}}");
+
+            Step("InitUserSettings");
+            Step("OnSave", null, null);
+
+            var settings = MajEnv.Settings;
+            Assert.That(settings.Display.Skin, Is.EqualTo("custom"));
+            Assert.That(settings.Rendering.RenderQuality, Is.EqualTo(RenderingQualityOption.Beautiful));
+            Assert.That(settings.Rendering.FPSLimit, Is.EqualTo(60));
+            Assert.That(settings.Rendering.VSync, Is.False);
+            Assert.That(_root.FindFile("settings.json.bak"), Is.Null);
+            var saved = JObject.Parse(_root.FindFile("settings.json")!.ReadAllText());
+            var display = (JObject)saved["Display"]!;
+            Assert.That(display.ContainsKey("RenderQuality") || display.ContainsKey("RenderScale") ||
+                        display.ContainsKey("FPSLimit") || display.ContainsKey("VSync"), Is.False);
+            Assert.That(saved["Rendering"]!["RenderQuality"]!.Value<string>(), Is.EqualTo("Beautiful"));
+            Assert.That(saved["Rendering"]!["FPSLimit"]!.Value<int>(), Is.EqualTo(60));
+        }
+
         /// <summary>Checks that unreadable settings are replaced by defaults and backed up without overwriting older backups.</summary>
         [Test]
         public void InitUserSettings_BacksUpCorruptFile()

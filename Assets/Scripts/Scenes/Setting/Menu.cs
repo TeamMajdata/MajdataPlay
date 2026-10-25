@@ -58,8 +58,7 @@ namespace MajdataPlay.Scenes.Setting
         private int[] _displayedPropertyIndices = Array.Empty<int>();
         private int _displayedOptionCount;
         private RenderingOptions? _renderingOptions;
-        private bool _compatibilityMode;
-        private bool _customRendering;
+        // The rendering preset as of the last visibility update; changing it restarts the hidden gesture.
         private RenderingQualityOption _renderingQuality;
         private int _renderingAdvancedClickCount;
         private readonly Option?[] _visibleOptions = new Option?[OPTION_POOL_CAPACITY];
@@ -93,7 +92,6 @@ namespace MajdataPlay.Scenes.Setting
             }
             _displayedPropertyIndices = new int[_properties.Length];
             _renderingOptions = Instance as RenderingOptions;
-            UpdateOptionConditions();
             UpdateOptionVisibility(true);
             _manager.InitializeOptionPool(_optionPrefab);
             _isInitialized = true;
@@ -106,8 +104,7 @@ namespace MajdataPlay.Scenes.Setting
         private void LateUpdate()
         {
             // Options edited during Update show or hide their dependent options before this frame renders.
-            var conditionsChanged = UpdateOptionConditions();
-            UpdateOptionVisibility(conditionsChanged);
+            UpdateOptionVisibility();
             if (_needsLayout)
             {
                 SnapDisplayerTo(SelectedIndex);
@@ -148,7 +145,7 @@ namespace MajdataPlay.Scenes.Setting
                 SnapDisplayerTo(SelectedIndex);
             }
             FindVisibleOption(SelectedIndex)?.HandleInput();
-            // The compatibility switch changes the visible list after its input is handled.
+            // An edited option, such as the rendering compatibility switch, shows or hides its dependent options at once.
             if (UpdateOptionVisibility())
             {
                 SnapDisplayerTo(SelectedIndex);
@@ -194,11 +191,6 @@ namespace MajdataPlay.Scenes.Setting
             }
             return true;
         }
-
-        // 普通档位只提供常用控制；缩放与诊断统一由自定义入口开放。
-        private static bool IsRenderingCommonOption(string name) => name is
-            nameof(RenderingOptions.FPSLimit) or nameof(RenderingOptions.VSync) or
-            nameof(RenderingOptions.CompatibilityMode);
 
         internal void ResetRenderingAdvancedInput() => _renderingAdvancedClickCount = 0;
         internal void RefreshVisibleEnumerators()
@@ -415,18 +407,24 @@ namespace MajdataPlay.Scenes.Setting
 
         private PropertyInfo GetDisplayedProperty(int index) => _properties[_displayedPropertyIndices[index]];
 
+        /// <summary>
+        /// Re-evaluates the <see cref="ShowInSettingUIWhenAttribute"/> conditions and rebuilds the displayed option list when any of them changed.
+        /// </summary>
+        /// <remarks>
+        /// The selected option stays selected while it is displayed; otherwise the first displayed option is selected.
+        /// Rendering options declare their preset, custom and compatibility visibility with the same attribute.
+        /// </remarks>
+        /// <param name="force">Rebuilds the list even when no condition changed, as during initialization.</param>
+        /// <returns>True when the displayed list was rebuilt.</returns>
         private bool UpdateOptionVisibility(bool force = false)
         {
-            var compatibilityMode = _renderingOptions?.CompatibilityMode ?? false;
-            var quality = _renderingOptions?.RenderQuality ?? RenderingQualityOption.Performance;
-            var customRendering = quality == RenderingQualityOption.Custom;
-            if (_renderingQuality != quality)
+            if (_renderingOptions is not null && _renderingQuality != _renderingOptions.RenderQuality)
             {
                 ResetRenderingAdvancedInput();
-                _renderingQuality = quality;
+                _renderingQuality = _renderingOptions.RenderQuality;
             }
-            if (!force && (_renderingOptions is null ||
-                (_compatibilityMode == compatibilityMode && _customRendering == customRendering)))
+            var conditionsChanged = UpdateOptionConditions();
+            if (!conditionsChanged && !force)
             {
                 return false;
             }
@@ -434,31 +432,18 @@ namespace MajdataPlay.Scenes.Setting
             var selectedProperty = _displayedOptionCount > 0
                 ? GetDisplayedProperty(SelectedIndex).Name
                 : string.Empty;
-            _compatibilityMode = compatibilityMode;
-            _customRendering = customRendering;
             ResetRenderingAdvancedInput();
             _optionAnim.TryCancel();
             // Models and enumerators stay alive, including hidden labels needed for font warmup.
-            // Rebuild only when preset/custom, compatibility or ShowInSettingUIWhen visibility changes.
+            // Rebuild only when a ShowInSettingUIWhen condition changes.
             ReleaseVisibleOptions();
             _displayedOptionCount = 0;
             for (var i = 0; i < _properties.Length; i++)
             {
-                if (!_optionConditionsMet[i])
+                if (_optionConditionsMet[i])
                 {
-                    continue;
+                    _displayedPropertyIndices[_displayedOptionCount++] = i;
                 }
-                if (compatibilityMode && !IsRenderingCommonOption(_properties[i].Name))
-                {
-                    continue;
-                }
-                if (_renderingOptions is not null && !compatibilityMode && !customRendering &&
-                    _properties[i].Name != nameof(RenderingOptions.RenderQuality) &&
-                    !IsRenderingCommonOption(_properties[i].Name))
-                {
-                    continue;
-                }
-                _displayedPropertyIndices[_displayedOptionCount++] = i;
             }
 
             SelectedIndex = 0;

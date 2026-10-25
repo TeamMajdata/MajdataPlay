@@ -1,3 +1,5 @@
+using System;
+using System.Collections.Generic;
 using MajdataPlay.Settings;
 using MajdataPlay.Utils;
 using NUnit.Framework;
@@ -5,7 +7,7 @@ using NUnit.Framework;
 #nullable enable
 namespace MajdataPlay.Tests.Game.Misc.Settings
 {
-    /// <summary>Covers presets, manual customization, deserialization repair and legacy migration of <see cref="RenderingOptions"/>.</summary>
+    /// <summary>Covers presets, manual customization, deserialization repair and setting UI visibility of <see cref="RenderingOptions"/>.</summary>
     public class RenderingOptionsTests
     {
         /// <summary>Deserializes rendering options with the settings.json reader options.</summary>
@@ -14,6 +16,48 @@ namespace MajdataPlay.Tests.Game.Misc.Settings
         private static RenderingOptions Read(string json)
         {
             return Serializer.Json.Deserialize<RenderingOptions>(json, MajEnv.UserJsonReaderOption)!;
+        }
+
+        /// <summary>Gets the names of the rendering options the setting UI lists, in declaration order.</summary>
+        /// <returns>The option names.</returns>
+        private static List<string> UiOptionNames()
+        {
+            var names = new List<string>();
+            foreach (var property in SettingReflectionCache.GetVisibleProperties(typeof(RenderingOptions)))
+            {
+                names.Add(property.Name);
+            }
+            return names;
+        }
+
+        /// <summary>Gets the names of the options a preset shows outside compatibility mode, in declaration order.</summary>
+        /// <returns>The option names.</returns>
+        private static List<string> PresetOptionNames()
+        {
+            var common = new[]
+            {
+                nameof(RenderingOptions.RenderQuality),
+                nameof(RenderingOptions.FPSLimit),
+                nameof(RenderingOptions.VSync),
+                nameof(RenderingOptions.CompatibilityMode)
+            };
+            return UiOptionNames().FindAll(name => Array.IndexOf(common, name) >= 0);
+        }
+
+        /// <summary>Gets the names of the listed options whose <see cref="ShowInSettingUIWhenAttribute"/> conditions hold.</summary>
+        /// <param name="options">The options the conditions are evaluated against.</param>
+        /// <returns>The option names in declaration order.</returns>
+        private static List<string> VisibleOptionNames(RenderingOptions options)
+        {
+            var names = new List<string>();
+            foreach (var property in SettingReflectionCache.GetVisibleProperties(typeof(RenderingOptions)))
+            {
+                if (SettingReflectionCache.GetVisibility(property).IsVisible(options))
+                {
+                    names.Add(property.Name);
+                }
+            }
+            return names;
         }
 
         /// <summary>Checks the default rendering options.</summary>
@@ -127,23 +171,6 @@ namespace MajdataPlay.Tests.Game.Misc.Settings
             Assert.That(options.VSync, Is.False);
         }
 
-        /// <summary>Checks that legacy frame pacing only fills values that were not set explicitly.</summary>
-        [Test]
-        public void MigrateFramePacing_DoesNotOverrideExplicitValues()
-        {
-            var fresh = new RenderingOptions();
-            var explicitValues = new RenderingOptions { FPSLimit = 30, VSync = true };
-
-            fresh.MigrateFramePacing(60, false);
-            fresh.MigrateFramePacing(null, null);
-            explicitValues.MigrateFramePacing(60, false);
-
-            Assert.That(fresh.FPSLimit, Is.EqualTo(60));
-            Assert.That(fresh.VSync, Is.False);
-            Assert.That(explicitValues.FPSLimit, Is.EqualTo(30));
-            Assert.That(explicitValues.VSync, Is.True);
-        }
-
         /// <summary>Checks that entering custom mode only changes the mode once.</summary>
         [Test]
         public void EnterCustomMode_IsIdempotent()
@@ -225,36 +252,54 @@ namespace MajdataPlay.Tests.Game.Misc.Settings
             Assert.That(lowScaling.OutputMode, Is.EqualTo(RenderingOutputMode.Intermediate));
         }
 
-        /// <summary>Checks the mapping of the six legacy quality levels and render scales.</summary>
-        /// <param name="quality">The legacy quality, or -1 for none.</param>
-        /// <param name="scale">The legacy render scale, or -1 for none.</param>
-        /// <param name="expectedQuality">The expected preset.</param>
-        /// <param name="expectedAntiAliasing">The expected anti-aliasing.</param>
-        /// <param name="expectedTexture">The expected texture quality.</param>
-        /// <param name="expectedScale">The expected render scale.</param>
-        /// <param name="expectedOutput">The expected output mode.</param>
-        [TestCase(-1, -1, RenderingQualityOption.Performance, RenderingAntialiasingOption.Disabled, RenderingTextureQualityOption.High, 100, RenderingOutputMode.Direct)]
-        [TestCase(0, 100, RenderingQualityOption.EnergySaving, RenderingAntialiasingOption.Disabled, RenderingTextureQualityOption.Medium, 100, RenderingOutputMode.Direct)]
-        [TestCase(1, 100, RenderingQualityOption.Performance, RenderingAntialiasingOption.Disabled, RenderingTextureQualityOption.High, 100, RenderingOutputMode.Direct)]
-        [TestCase(2, -1, RenderingQualityOption.Custom, RenderingAntialiasingOption.MSAA2x, RenderingTextureQualityOption.High, 100, RenderingOutputMode.Direct)]
-        [TestCase(3, 100, RenderingQualityOption.Beautiful, RenderingAntialiasingOption.MSAA4x, RenderingTextureQualityOption.High, 100, RenderingOutputMode.Direct)]
-        [TestCase(4, 100, RenderingQualityOption.Custom, RenderingAntialiasingOption.MSAA8x, RenderingTextureQualityOption.High, 100, RenderingOutputMode.Direct)]
-        [TestCase(5, 150, RenderingQualityOption.Custom, RenderingAntialiasingOption.MSAA8x, RenderingTextureQualityOption.High, 150, RenderingOutputMode.Intermediate)]
-        [TestCase(-1, 500, RenderingQualityOption.Custom, RenderingAntialiasingOption.MSAA2x, RenderingTextureQualityOption.High, 200, RenderingOutputMode.Intermediate)]
-        [TestCase(3, 50, RenderingQualityOption.Custom, RenderingAntialiasingOption.MSAA4x, RenderingTextureQualityOption.High, 50, RenderingOutputMode.Intermediate)]
-        public void FromLegacy_MapsQualityLevels(int quality, int scale, RenderingQualityOption expectedQuality, RenderingAntialiasingOption expectedAntiAliasing,
-                                                 RenderingTextureQualityOption expectedTexture, int expectedScale, RenderingOutputMode expectedOutput)
+        /// <summary>Checks that a preset shows only the preset selector, the frame pacing options and the compatibility switch.</summary>
+        [Test]
+        public void Visibility_PresetShowsCommonOptions()
         {
-            RenderQualityOption? legacyQuality = quality < 0 ? null : (RenderQualityOption)quality;
-            int? legacyScale = scale < 0 ? null : scale;
+            var options = new RenderingOptions { RenderQuality = RenderingQualityOption.Refined };
 
-            var options = RenderingOptions.FromLegacy(legacyQuality, legacyScale);
+            Assert.That(VisibleOptionNames(options), Is.EqualTo(PresetOptionNames()));
+        }
 
-            Assert.That(options.RenderQuality, Is.EqualTo(expectedQuality));
-            Assert.That(options.AntiAliasing, Is.EqualTo(expectedAntiAliasing));
-            Assert.That(options.TextureQuality, Is.EqualTo(expectedTexture));
-            Assert.That(options.RenderScale, Is.EqualTo(expectedScale));
-            Assert.That(options.OutputMode, Is.EqualTo(expectedOutput));
+        /// <summary>Checks that the custom preset additionally shows every detailed parameter and diagnostic.</summary>
+        [Test]
+        public void Visibility_CustomShowsEveryOption()
+        {
+            var options = new RenderingOptions();
+            options.EnterCustomMode();
+
+            Assert.That(VisibleOptionNames(options), Is.EqualTo(UiOptionNames()));
+        }
+
+        /// <summary>Checks that compatibility mode hides the preset selector and the detailed parameters, even for the custom preset.</summary>
+        [Test]
+        public void Visibility_CompatibilityShowsFramePacingAndSwitch()
+        {
+            var preset = new RenderingOptions { CompatibilityMode = true };
+            var custom = new RenderingOptions { CompatibilityMode = true };
+            custom.EnterCustomMode();
+            var expected = PresetOptionNames();
+            expected.Remove(nameof(RenderingOptions.RenderQuality));
+
+            Assert.That(VisibleOptionNames(preset), Is.EqualTo(expected));
+            Assert.That(VisibleOptionNames(custom), Is.EqualTo(expected));
+        }
+
+        /// <summary>Checks that the visibility follows the options as they change, without rebuilding the metadata.</summary>
+        [Test]
+        public void Visibility_FollowsPresetAndCompatibilityChanges()
+        {
+            var options = new RenderingOptions();
+            var antiAliasing = SettingReflectionCache.GetVisibility(typeof(RenderingOptions).GetProperty(nameof(RenderingOptions.AntiAliasing))!);
+
+            Assert.That(antiAliasing.IsVisible(options), Is.False);
+            options.EnterCustomMode();
+            Assert.That(antiAliasing.IsVisible(options), Is.True);
+            options.CompatibilityMode = true;
+            Assert.That(antiAliasing.IsVisible(options), Is.False);
+            options.CompatibilityMode = false;
+            options.RenderQuality = RenderingQualityOption.Beautiful;
+            Assert.That(antiAliasing.IsVisible(options), Is.False);
         }
 
         /// <summary>Checks that the rendering parameter value keeps its fields.</summary>

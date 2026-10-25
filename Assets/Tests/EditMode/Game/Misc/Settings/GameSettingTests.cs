@@ -2,13 +2,15 @@ using MajdataPlay.Diagnostics;
 using MajdataPlay.Settings;
 using MajdataPlay.Settings.Runtime;
 using MajdataPlay.Utils;
+using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using NUnit.Framework;
 
 #nullable enable
 namespace MajdataPlay.Tests.Game.Misc.Settings
 {
-    /// <summary>Covers the defaults, JSON round trip and legacy migration of <see cref="GameSetting"/>.</summary>
+    /// <summary>Covers the defaults, JSON round trip and settings.json reading of <see cref="GameSetting"/>.</summary>
+    /// <remarks>The upgrade of legacy keys is covered by <see cref="GameSettingMigrationTests"/>.</remarks>
     public class GameSettingTests
     {
         /// <summary>Serializes settings with the reader options used for settings.json.</summary>
@@ -19,12 +21,12 @@ namespace MajdataPlay.Tests.Game.Misc.Settings
             return Serializer.Json.Serialize(setting, MajEnv.UserJsonReaderOption);
         }
 
-        /// <summary>Deserializes settings with the reader options used for settings.json.</summary>
+        /// <summary>Deserializes settings the way settings.json is read.</summary>
         /// <param name="json">The JSON text.</param>
         /// <returns>The settings.</returns>
         private static GameSetting Read(string json)
         {
-            var setting = Serializer.Json.Deserialize<GameSetting>(json, MajEnv.UserJsonReaderOption);
+            var setting = MajEnv.DeserializeUserSettings(json);
             Assert.That(setting, Is.Not.Null);
             return setting!;
         }
@@ -112,53 +114,39 @@ namespace MajdataPlay.Tests.Game.Misc.Settings
             Assert.That(restored.Mod.AllBreak, Is.False);
         }
 
-        /// <summary>Checks that legacy rendering keys stored under Display are migrated when no Rendering section exists.</summary>
+        /// <summary>Checks that null setting categories fall back to their defaults instead of leaving the settings without them.</summary>
         [Test]
-        public void Json_MigratesLegacyDisplayRendering()
+        public void Read_NullCategoriesUseDefaults()
         {
-            var restored = Read("{\"Display\":{\"RenderQuality\":\"High\",\"RenderScale\":100,\"FPSLimit\":60,\"VSync\":false}}");
+            var restored = Read("{\"Game\":null,\"Display\":null,\"Rendering\":null}");
 
-            Assert.That(restored.Rendering.RenderQuality, Is.EqualTo(RenderingQualityOption.Beautiful));
-            Assert.That(restored.Rendering.AntiAliasing, Is.EqualTo(RenderingAntialiasingOption.MSAA4x));
-            Assert.That(restored.Rendering.FPSLimit, Is.EqualTo(60));
-            Assert.That(restored.Rendering.VSync, Is.False);
-            Assert.That(restored.Display.LegacyFPSLimit, Is.EqualTo(60));
-            Assert.That(restored.Display.LegacyVSync, Is.False);
-        }
-
-        /// <summary>Checks that an existing Rendering section wins over legacy keys, including the frame pacing it stores.</summary>
-        [Test]
-        public void Json_ExistingRenderingWinsOverLegacy()
-        {
-            var restored = Read("{\"Display\":{\"RenderQuality\":\"High\",\"FPSLimit\":60,\"VSync\":false},\"Rendering\":{\"RenderQuality\":\"Refined\",\"FPSLimit\":90,\"VSync\":true}}");
-
-            Assert.That(restored.Rendering.RenderQuality, Is.EqualTo(RenderingQualityOption.Refined));
-            Assert.That(restored.Rendering.RenderScale, Is.EqualTo(150));
-            Assert.That(restored.Rendering.FPSLimit, Is.EqualTo(90));
-            Assert.That(restored.Rendering.VSync, Is.True);
-        }
-
-        /// <summary>Checks that legacy frame pacing fills in keys missing from a newer Rendering section.</summary>
-        [Test]
-        public void Json_LegacyFramePacingFillsMissingKeys()
-        {
-            var restored = Read("{\"Display\":{\"FPSLimit\":60,\"VSync\":false},\"Rendering\":{\"RenderQuality\":\"EnergySaving\"}}");
-
-            Assert.That(restored.Rendering.RenderQuality, Is.EqualTo(RenderingQualityOption.EnergySaving));
-            Assert.That(restored.Rendering.TextureQuality, Is.EqualTo(RenderingTextureQualityOption.Medium));
-            Assert.That(restored.Rendering.FPSLimit, Is.EqualTo(60));
-            Assert.That(restored.Rendering.VSync, Is.False);
-        }
-
-        /// <summary>Checks that a null Rendering section falls back to the defaults.</summary>
-        [Test]
-        public void Json_NullRenderingUsesDefaults()
-        {
-            var restored = Read("{\"Rendering\":null}");
-
+            Assert.That(restored.Game, Is.Not.Null);
+            Assert.That(restored.Game.TapSpeed, Is.EqualTo(7.5f));
+            Assert.That(restored.Display, Is.Not.Null);
+            Assert.That(restored.Display.Skin, Is.EqualTo("default"));
             Assert.That(restored.Rendering, Is.Not.Null);
             Assert.That(restored.Rendering.RenderQuality, Is.EqualTo(RenderingQualityOption.Performance));
             Assert.That(restored.Rendering.FPSLimit, Is.EqualTo(120));
+        }
+
+        /// <summary>Checks that strings resembling dates are read exactly as written.</summary>
+        [Test]
+        public void Read_KeepsDateLikeStrings()
+        {
+            var restored = Read("{\"Display\":{\"Skin\":\"2024-01-02T03:04:05Z\"}}");
+
+            Assert.That(restored.Display.Skin, Is.EqualTo("2024-01-02T03:04:05Z"));
+        }
+
+        /// <summary>Checks that the reader rejects what the plain deserializer rejected, and returns null for the null literal.</summary>
+        [Test]
+        public void Read_RejectsInvalidDocuments()
+        {
+            Assert.That(MajEnv.DeserializeUserSettings("null"), Is.Null);
+            Assert.That(MajEnv.DeserializeUserSettings(""), Is.Null);
+            Assert.That(() => MajEnv.DeserializeUserSettings("[]"), Throws.InstanceOf<JsonException>());
+            Assert.That(() => MajEnv.DeserializeUserSettings("{} {}"), Throws.InstanceOf<JsonException>());
+            Assert.That(() => MajEnv.DeserializeUserSettings("{\"Game\":{\"TapSpeed\":\"fast\"}}"), Throws.InstanceOf<JsonException>());
         }
 
         /// <summary>Checks that the sensor opacity is snapped to the 10% steps between 10% and 90%.</summary>

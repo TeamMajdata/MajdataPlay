@@ -184,7 +184,9 @@ Graphics 默认回退仍指向 `Presets/MRP_Low.asset`。游戏启动和修改�
 
 “当前输出路径”读取 `MajRenderDiagnostics.OutputStatus`，显示最近一次主显示器 Game 相机正常提交后的实际分支：直接绘制、MSAA 直接 Resolve，或 RT+Copy，并标明缩放、兼容输出、MSAA 直出不可用、附件兼容路径等原因。附件失败或屏幕缓冲切换而退回直绘时也单独标记。状态只读且 `[JsonIgnore]`，不保存到 settings.json、不修改输出偏好、不触发应用或保存设置。它报告 CPU 已提交的路径，不是 GPU 像素正确性或黑屏检测。新的渲染帧没有主屏提交时标为不可用；同一帧额外的 Scene View、Preview 或离屏 context 不覆盖已完成的主屏结果。
 
-`RenderingOptions` 保存到 `GameSetting.Rendering`，新配置默认使用性能档 / 100% / MSAA 关闭。旧 JSON 的 `Display.RenderQuality / RenderScale` 由私有只写属性接收，不再属于公开设置或重新保存；旧六档枚举仅在内部迁移。没有实际旧字段的空配置同样使用当前默认值，避免套入旧桌面 Medium 而变成 Custom / 2x。只有部分旧字段时，缺项仍按旧平台默认补齐。旧 2x / 8x 或非默认比例保留为自定义，匹配新档的 100% VeryLow / Low / High 分别成为节能 / 性能 / 美观。新旧字段并存时有效的新分类优先，空的新对象也优先；JSON 的细项顺序不会改变预设结果。
+`RenderingOptions` 保存到 `GameSetting.Rendering`，新配置默认使用性能档 / 100% / MSAA 关闭。旧 JSON 的 `Display.RenderQuality / RenderScale / FPSLimit / VSync` 在读取 settings.json 时由 `GameSettingMigration` 在 JSON 文档上迁移到 `Rendering` 并从 `Display` 删除，`DisplayOptions` 与 `RenderingOptions` 不再携带任何兼容成员，下次保存只写现行结构；旧六档枚举仅在迁移中使用。没有实际旧字段的空配置同样使用当前默认值，避免套入旧桌面 Medium 而变成 Custom / 2x。只有部分旧字段时，缺项仍按旧平台默认补齐。旧 2x / 8x 或非默认比例保留为自定义，匹配新档的 100% VeryLow / Low / High 分别成为节能 / 性能 / 美观。新旧字段并存时有效的新分类优先，空的新对象也优先，旧帧率 / VSync 只补新分类缺少的键；值为 null 的分类按缺项处理；JSON 的细项顺序不会改变预设结果。
+
+渲染菜单的显示规则由 `RenderingOptions` 上的 `[ShowInSettingUIWhen]` 声明：渲染质量在兼容模式关闭时显示；抗锯齿、纹理精度、输出模式、两种分辨率缩放和只读诊断要求兼容模式关闭且为自定义；帧率、桌面 VSync 与兼容开关始终显示。`Menu` 不再按属性名特判渲染选项，仅保留隐藏入口的计数逻辑。
 
 `GameManager.ApplyRenderingSettings` 固定 `QualitySettings.globalTextureMipmapLimit = 0`，并通过 MRP 运行时接口覆盖 RenderScale / MSAA / 输出模式和纹理质量采样 bias。覆盖均非序列化，不写预设资产；已有管线下次绘制读取新值，仅在尺寸 / 样本 / 目标改变时重建附件。质量 bias 变化不重新上传或缩小纹理，也不改 `Texture.mipMapBias`。桌面 VSync 仍以独立显示选项为准。直接输出是偏好，后端不支持时仍自动使用兼容路径；显式选兼容输出则在 100% / 1x 时也插入颜色 RT + Copy。
 

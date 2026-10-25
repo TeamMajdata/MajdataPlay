@@ -246,7 +246,44 @@ namespace MajdataPlay.Tests.Game.Scenes.PlayMode.SettingScene
             rendering.EnterCustomMode();
             var menu = CreateMenu(_manager, rendering);
 
-            Assert.That(DisplayedCount(menu), Is.GreaterThan(4));
+            Assert.That(DisplayedCount(menu), Is.EqualTo(SettingReflectionCache.GetVisibleProperties(typeof(RenderingOptions)).Length));
+        }
+
+        /// <summary>Checks that leaving compatibility mode restores the custom rows it hid and keeps the selected row.</summary>
+        /// <returns>The test coroutine.</returns>
+        [UnityTest]
+        public IEnumerator RenderingCompatibilityMode_RestoresCustomOptions()
+        {
+            var rendering = new RenderingOptions();
+            rendering.EnterCustomMode();
+            var menu = CreateMenu(_manager, rendering);
+            var customCount = DisplayedCount(menu);
+            menu.ToOption(nameof(RenderingOptions.CompatibilityMode));
+
+            rendering.CompatibilityMode = true;
+            yield return null;
+            Assert.That(DisplayedCount(menu), Is.EqualTo(3));
+
+            rendering.CompatibilityMode = false;
+            yield return null;
+            Assert.That(DisplayedCount(menu), Is.EqualTo(customCount));
+            Assert.That(MajEnv.RuntimeConfig!.Setting.SelectedOption, Is.EqualTo(nameof(RenderingOptions.CompatibilityMode)));
+            Assert.That(NameOf(VisibleOption(menu, menu.SelectedIndex)!), Is.EqualTo("MAJSETTING_PROPERTY_CompatibilityMode"));
+        }
+
+        /// <summary>Checks that choosing a preset hides the custom rows as soon as the menu is navigated, before the next frame.</summary>
+        [Test]
+        public void RenderingPresetSelection_HidesCustomOptionsOnNavigation()
+        {
+            var rendering = new RenderingOptions();
+            rendering.EnterCustomMode();
+            var menu = CreateMenu(_manager, rendering);
+
+            rendering.RenderQuality = RenderingQualityOption.Beautiful;
+            menu.ToHead();
+
+            Assert.That(DisplayedCount(menu), Is.EqualTo(4));
+            Assert.That(NameOf(VisibleOption(menu, 0)!), Is.EqualTo("MAJSETTING_PROPERTY_RenderQuality"));
         }
 
         /// <summary>Checks that the hidden gesture counts presses only on the quality row and resets elsewhere.</summary>

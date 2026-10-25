@@ -19,6 +19,7 @@ using MajdataPlay.Platform.iOS;
 #endif
 using Newtonsoft.Json;
 using Newtonsoft.Json.Converters;
+using Newtonsoft.Json.Linq;
 using System;
 using System.Diagnostics;
 using System.IO;
@@ -202,6 +203,12 @@ namespace MajdataPlay
             {
                 new StringEnumConverter()
             }
+        };
+
+        /// <summary>The reader options of the settings.json document, which keep date-like strings such as passwords as they were written.</summary>
+        private static readonly JsonSerializerSettings s_userSettingsDocumentOption = new()
+        {
+            DateParseHandling = DateParseHandling.None
         };
 
         /// <summary>The user settings file name inside <see cref="RootDirectory"/>.</summary>
@@ -444,10 +451,18 @@ namespace MajdataPlay
             if (settingsFile is not null)
             {
                 var js = settingsFile.ReadAllText();
-                GameSetting? setting;
+                GameSetting? setting = null;
+                Exception? e = null;
+                try
+                {
+                    setting = DeserializeUserSettings(js);
+                }
+                catch (Exception ex)
+                {
+                    e = ex;
+                }
 
-
-                if (!Serializer.Json.TryDeserialize(js, out setting, out var e, UserJsonReaderOption) || setting is null)
+                if (setting is null)
                 {
                     Settings = new();
                     MajDebug.LogError($"Failed to read setting from file\nException: {e}");
@@ -494,6 +509,27 @@ namespace MajdataPlay
             Settings.Display.OuterJudgeDistance = Settings.Display.OuterJudgeDistance.Clamp(0, 1);
 
             MajDebug.MinLogLevel = Settings.Debug.DebugLevel;
+        }
+        /// <summary>Deserializes the text of settings.json, upgrading a document written by an older version to the current layout first.</summary>
+        /// <remarks>The legacy keys are migrated by <see cref="GameSettingMigration"/>; the file itself is rewritten by the next save.</remarks>
+        /// <param name="json">The text of settings.json.</param>
+        /// <returns>The settings, or null when the text is empty or the JSON literal null.</returns>
+        /// <exception cref="JsonException">The text is not a JSON object, or holds a value that cannot be read.</exception>
+        public static GameSetting? DeserializeUserSettings(string json)
+        {
+            var document = Serializer.Json.Deserialize<JToken>(json, s_userSettingsDocumentOption);
+            if (document is null || document.Type == JTokenType.Null)
+            {
+                return null;
+            }
+            if (document is not JObject root)
+            {
+                throw new JsonSerializationException($"{SettingsFileName} holds a {document.Type} instead of an object");
+            }
+            // CreateDefault matches the serializer JsonConvert uses, so the document reads like the settings.json text.
+            var serializer = JsonSerializer.CreateDefault(UserJsonReaderOption);
+            GameSettingMigration.Migrate(root, serializer);
+            return root.ToObject<GameSetting>(serializer);
         }
         private static void ReadiOSNativeSettings()
         {
