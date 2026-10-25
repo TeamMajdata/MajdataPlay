@@ -65,7 +65,7 @@ namespace MajdataPlay.Tests.ThirdParty.SkiaSharp
                 .SetName("macOS");
             yield return new TestCaseData(BuildTarget.StandaloneWindows, NativeLibraryPaths(".dll", "win-x86"))
                 .SetName("Windows32");
-            yield return new TestCaseData(BuildTarget.StandaloneWindows64, NativeLibraryPaths(".dll", "win-x64"))
+            yield return new TestCaseData(BuildTarget.StandaloneWindows64, NativeLibraryPaths(".dll", "win-x64", "win-arm64"))
                 .SetName("Windows64");
         }
 
@@ -107,16 +107,22 @@ namespace MajdataPlay.Tests.ThirdParty.SkiaSharp
         }
 
         /// <summary>
-        /// Checks that the 64-bit Windows libraries target x86-64 only, so Windows ARM64 players do not ship x64 binaries they cannot load.
+        /// Checks that the 64-bit Windows libraries of each architecture folder target the CPU of that folder in players and in the
+        /// Editor, so Windows x64 and ARM64 players each ship only the binaries they can load and the Editor loads the binaries of its
+        /// own architecture.
         /// </summary>
-        [Test]
-        public void Windows64Libraries_TargetX64()
+        /// <param name="architectureFolder">The folder under <see cref="LibraryFolder"/> named after the Windows runtime identifier.</param>
+        /// <param name="expectedCpu">The value of the Standalone Win64 and Editor <c>CPU</c> plugin settings for that architecture.</param>
+        [TestCase("win-x64", "x86_64")]
+        [TestCase("win-arm64", "ARM64")]
+        public void Windows64Libraries_TargetTheCpuOfTheirFolder(string architectureFolder, string expectedCpu)
         {
-            foreach (var path in NativeLibraryPaths(".dll", "win-x64"))
+            foreach (var path in NativeLibraryPaths(".dll", architectureFolder))
             {
                 var importer = GetPluginImporter(path);
 
-                Assert.That(importer.GetPlatformData(BuildTarget.StandaloneWindows64, "CPU"), Is.EqualTo("x86_64"), path);
+                Assert.That(importer.GetPlatformData(BuildTarget.StandaloneWindows64, "CPU"), Is.EqualTo(expectedCpu), path);
+                Assert.That(importer.GetEditorData("CPU"), Is.EqualTo(expectedCpu), path);
             }
         }
 
@@ -127,7 +133,7 @@ namespace MajdataPlay.Tests.ThirdParty.SkiaSharp
         public void Editor_LoadsOnlyTheLibrariesOfItsOperatingSystem()
         {
             var expectedOperatingSystems = new Dictionary<string, string>();
-            AddEditorLibraries(expectedOperatingSystems, NativeLibraryPaths(".dll", "win-x64"), "Windows");
+            AddEditorLibraries(expectedOperatingSystems, NativeLibraryPaths(".dll", "win-x64", "win-arm64"), "Windows");
             AddEditorLibraries(expectedOperatingSystems, NativeLibraryPaths(".dylib", "osx"), "OSX");
             AddEditorLibraries(expectedOperatingSystems, NativeLibraryPaths(".so", "linux/linux-x64/native"), "Linux");
 
