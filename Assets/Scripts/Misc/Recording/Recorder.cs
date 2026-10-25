@@ -5,6 +5,7 @@ using MajdataPlay.Runtime;
 using MajdataPlay.Settings;
 using System;
 using System.Threading.Tasks;
+using UnityEngine;
 
 #nullable enable
 namespace MajdataPlay.Recording
@@ -58,6 +59,8 @@ namespace MajdataPlay.Recording
                             MajEnv.Settings.Encoding.ContainerFormat);
                         var options = capturer.Options;
                         var encodingSetting = MajEnv.Settings.Encoding;
+                        options.Height = (int)(Screen.height * encodingSetting.ResolutionScale);
+                        options.Width = (int)(Screen.width * encodingSetting.ResolutionScale);
                         options.Format = encodingSetting.EncodingFormat;
                         options.FrameRate = encodingSetting.FrameRate;
                         options.RateControlMode = encodingSetting.RateControlMode;

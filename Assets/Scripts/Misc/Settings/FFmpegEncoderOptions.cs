@@ -16,6 +16,9 @@ namespace MajdataPlay.Settings
         public long BitRate { get; set; } = 8000000;
         [ShowInSettingUIWhen(nameof(RateControlMode), VideoRateControlMode.VBR)]
         public long MaximumBitRate { get; set; } = 16000000;
+        [Step("0.25")]
+        [Range("0.25", "1")]
+        public float ResolutionScale { get; set; } = 1f;
         [HideInSettingUI]
         public MediaContainerFormat ContainerFormat { get; set; } = MediaContainerFormat.MP4;
     }
