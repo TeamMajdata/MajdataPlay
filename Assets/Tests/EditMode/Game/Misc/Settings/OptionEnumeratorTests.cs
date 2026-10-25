@@ -100,6 +100,20 @@ namespace MajdataPlay.Tests.Game.Misc.Settings
             public int? NullableNumber { get; }
         }
 
+        /// <summary>A settings section whose enum options hold a value that is not a defined constant.</summary>
+        public sealed class UndefinedEnumProbe
+        {
+            /// <summary>A mirror value outside the declared constants.</summary>
+            public const MirrorOption UndefinedMirror = (MirrorOption)99;
+
+            /// <summary>An editable enum option holding an undefined value.</summary>
+            public MirrorOption Mirror { get; set; } = UndefinedMirror;
+
+            /// <summary>A read-only enum option holding an undefined value.</summary>
+            [ReadOnlyOption]
+            public MirrorOption LockedMirror { get; set; } = UndefinedMirror;
+        }
+
         /// <summary>The language active before the test.</summary>
         private Language _savedLanguage = null!;
 
@@ -414,6 +428,38 @@ namespace MajdataPlay.Tests.Game.Misc.Settings
             Assert.That(enumerator.ValueText, Is.EqualTo("LRMirror"));
             Assert.That(SettingReflectionCache.GetEnumValues(typeof(MirrorOption))[0], Is.EqualTo(MirrorOption.Off));
             Assert.Throws<InvalidOperationException>(() => Create<DefaultEnumEnumerator>(new ValueProbe(), nameof(ValueProbe.Number)));
+        }
+
+        /// <summary>
+        /// Checks that an enum value that is not a defined constant, as an unknown number in settings.json deserializes,
+        /// selects and stores the first constant instead of leaving the enumerator without a valid label.
+        /// </summary>
+        [Test]
+        public void EnumEnumerator_UndefinedValue_SelectsFirstConstant()
+        {
+            var probe = new UndefinedEnumProbe();
+
+            var enumerator = Create<DefaultEnumEnumerator>(probe, nameof(UndefinedEnumProbe.Mirror));
+
+            Assert.That(enumerator.Current, Is.EqualTo(MirrorOption.Off));
+            Assert.That(enumerator.ValueText, Is.EqualTo("Off"));
+            Assert.That(() => enumerator.LocalizedValueText, Throws.Nothing);
+            Assert.That(probe.Mirror, Is.EqualTo(MirrorOption.Off));
+            Assert.That(enumerator.MoveNext(), Is.True);
+            Assert.That(probe.Mirror, Is.EqualTo(MirrorOption.LRMirror));
+        }
+
+        /// <summary>Checks that a read-only enum option with an undefined value shows the first constant without writing it.</summary>
+        [Test]
+        public void EnumEnumerator_UndefinedReadOnlyValue_KeepsStoredValue()
+        {
+            var probe = new UndefinedEnumProbe();
+
+            var enumerator = Create<DefaultEnumEnumerator>(probe, nameof(UndefinedEnumProbe.LockedMirror));
+
+            Assert.That(enumerator.Current, Is.EqualTo(MirrorOption.Off));
+            Assert.That(() => enumerator.LocalizedValueText, Throws.Nothing);
+            Assert.That(probe.LockedMirror, Is.EqualTo(UndefinedEnumProbe.UndefinedMirror));
         }
 
         /// <summary>Checks that the read-only enumerator shows the current value and never edits it.</summary>

@@ -1,5 +1,6 @@
 using System;
 using System.Collections;
+using System.Collections.Generic;
 using System.Linq;
 using LitMotion;
 using MajdataPlay.i18n;
@@ -289,6 +290,51 @@ namespace MajdataPlay.Tests.Game.Scenes.PlayMode.SettingScene
 
             yield return PressButton(ButtonZone.A6);
             Assert.That(Current.SelectedIndex, Is.EqualTo(0));
+        }
+
+        /// <summary>
+        /// Checks that a category switch returns the option views of an inactive menu, as left behind by a switch that
+        /// threw before activating its menu, so that the shared pool still covers the slide of the next menu.
+        /// </summary>
+        /// <returns>The test coroutine.</returns>
+        [UnityTest]
+        public IEnumerator CategorySwitch_ReleasesViewsOfInactiveMenu()
+        {
+            MajEnv.RuntimeConfig!.Setting.SelectedMenu = nameof(GameSetting.Game);
+            yield return StartManager();
+            var stuck = Menus[_manager.Index + 1];
+
+            // The state a failed UpdateMenu leaves: the old menu is deactivated and the selected menu rented its
+            // views while inactive, but was never activated.
+            Current.gameObject.SetActive(false);
+            stuck.ToHead();
+            PrivateMember.SetProperty(_manager, nameof(SettingManager.Index), _manager.Index + 1);
+            Assert.That(stuck.gameObject.activeSelf, Is.False);
+            Assert.That(VisibleOption(stuck, 0), Is.Not.Null);
+
+            yield return PressButton(ButtonZone.A2);
+
+            Assert.That(VisibleOption(stuck, 0), Is.Null);
+            Assert.That(PooledOptionCount + HeldOptionCount(Current), Is.EqualTo(Menu.OPTION_POOL_CAPACITY));
+
+            // Sliding to the next option needs a third view while the menu is at its head.
+            yield return PressButton(ButtonZone.A3);
+            PrivateMember.GetField<MotionHandle>(Current, "_optionAnim").TryComplete();
+
+            Assert.That(Current.SelectedIndex, Is.EqualTo(1));
+            Assert.That(VisibleOption(Current, 1), Is.Not.Null);
+            Assert.That(PooledOptionCount + HeldOptionCount(Current), Is.EqualTo(Menu.OPTION_POOL_CAPACITY));
+        }
+
+        /// <summary>Gets the number of option views waiting in the shared pool.</summary>
+        private int PooledOptionCount => PrivateMember.GetField<Stack<Option>>(_manager, "_optionPool").Count;
+
+        /// <summary>Gets the number of option views a menu holds.</summary>
+        /// <param name="menu">The menu.</param>
+        /// <returns>The number of views rented by the menu.</returns>
+        private static int HeldOptionCount(Menu menu)
+        {
+            return PrivateMember.GetField<Option?[]>(menu, "_visibleOptions").Count(option => option != null);
         }
 
         /// <summary>Checks that moving before the first option of a menu switches to the previous category.</summary>

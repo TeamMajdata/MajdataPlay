@@ -39,11 +39,26 @@ public sealed class SkinEnumerator : OptionEnumeratorBase, IOptionEnumerator
         var newSkin = skins.Find(x => x.Name == OptionValues[ValueIndex].ToString());
         _skinManager.SelectedSkin = newSkin;
     }
+    /// <summary>
+    /// Lists the loaded skins and selects the current one.
+    /// </summary>
+    /// <remarks>
+    /// Without loaded skins the option becomes a read-only placeholder; the stored skin name is kept.
+    /// </remarks>
     protected override void InitInternal()
     {
         _skinManager = MajInstances.SkinManager;
         var skinNames = _skinManager.LoadedSkins.Select(x => x.Name)
                                                 .ToArray();
+        if (skinNames.Length == 0)
+        {
+            IsReadOnly = true;
+            OptionValues = new object[] { "Unavailable" };
+            ValueIndex = 0;
+            _lastValueIndex = 0;
+            InitValueTexts();
+            return;
+        }
         var currentSkin = _skinManager.SelectedSkin;
         OptionValues = skinNames;
         ValueTexts = skinNames;

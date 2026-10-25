@@ -391,8 +391,16 @@ namespace MajdataPlay.Scenes.Setting
                 _manager.ReturnOption(option);
             }
         }
-        private void ReleaseVisibleOptions()
+        /// <summary>
+        /// Stops the option slide and returns every option view of this menu to the shared pool.
+        /// </summary>
+        /// <remarks>
+        /// <see cref="SettingManager"/> calls it for menus it deselects: an inactive menu can still hold views, and
+        /// deactivating it again does not run <see cref="OnDisable"/>.
+        /// </remarks>
+        internal void ReleaseVisibleOptions()
         {
+            _optionAnim.TryCancel();
             for (var slot = 0; slot < _visibleOptions.Length; slot++)
             {
                 ReleaseOption(slot);

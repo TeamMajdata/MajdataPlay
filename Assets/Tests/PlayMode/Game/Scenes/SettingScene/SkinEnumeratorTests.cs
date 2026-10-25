@@ -142,6 +142,31 @@ namespace MajdataPlay.Tests.Game.Scenes.PlayMode.SettingScene
             Assert.That(_manager.SelectedSkin.Name, Is.EqualTo("Missing"));
         }
 
+        /// <summary>
+        /// Checks that without loaded skins the option is a read-only placeholder with a valid label instead of an empty
+        /// list, and that neither the option nor the manager selection changes.
+        /// </summary>
+        [Test]
+        public void Init_NoLoadedSkins_ShowsReadOnlyPlaceholder()
+        {
+            InstallSkins("Missing");
+            var probe = new SkinProbe { Skin = "Missing" };
+
+            var enumerator = Create(probe);
+
+            Assert.That(enumerator.Current, Is.EqualTo("Unavailable"));
+            Assert.That(enumerator.ValueText, Is.EqualTo("Unavailable"));
+            Assert.That(() => enumerator.LocalizedValueText, Throws.Nothing);
+            Assert.That(enumerator.LocalizedValuesForWarmup.Count, Is.EqualTo(1));
+            Assert.That(enumerator.MoveNext(), Is.False);
+            Assert.That(enumerator.MovePrevious(), Is.False);
+            enumerator.Refresh();
+            Assert.That(enumerator.Current, Is.EqualTo("Unavailable"));
+            Assert.That(probe.Skin, Is.EqualTo("Missing"));
+            Assert.That(_manager.SelectedSkin.Name, Is.EqualTo("Missing"));
+            Assert.That(_changes, Is.Empty);
+        }
+
         /// <summary>Checks that moving forward selects the next skin on the manager, writes the option and wraps around.</summary>
         /// <returns>The test coroutine.</returns>
         [UnityTest]

@@ -476,6 +476,8 @@ namespace MajdataPlay.Scenes.Setting
             {
                 if (i != Index)
                 {
+                    // A switch that threw before activating its menu leaves an inactive menu holding views.
+                    menu.ReleaseVisibleOptions();
                     menu.gameObject.SetActive(false);
                 }
             }
