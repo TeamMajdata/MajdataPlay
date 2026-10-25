@@ -32,8 +32,6 @@ namespace MajdataPlay.Recording
         private readonly FFmpegCameraCapturer _capturer;
         /// <summary>Supplies the final audio mix.</summary>
         private readonly IAudioRecorder _audioRecorder;
-        /// <summary>Stores the output container.</summary>
-        private readonly MediaContainerFormat _container;
         /// <summary>Stores the current lifecycle step.</summary>
         private RecorderState _state;
         /// <summary>Stores the output name prefix, usually the chart title.</summary>
@@ -69,7 +67,7 @@ namespace MajdataPlay.Recording
             }
             _capturer = capturer;
             _audioRecorder = audioRecorder ?? throw new ArgumentNullException(nameof(audioRecorder));
-            _container = container;
+            ContainerFormat = container;
         }
 
         /// <summary>Lists the recorder lifecycle steps.</summary>
@@ -89,6 +87,8 @@ namespace MajdataPlay.Recording
         public bool IsRecording => _state == RecorderState.Starting || _state == RecorderState.Recording;
         /// <summary>Gets whether the capturer component still exists and this recorder is not disposed.</summary>
         public bool IsConnected => _capturer != null && !_isDisposed;
+        /// <summary>Stores the output container.</summary>
+        private MediaContainerFormat ContainerFormat { get; }
 
         /// <summary>Starts recording without waiting; failures are logged.</summary>
         /// <exception cref="ObjectDisposedException">The recorder has been disposed.</exception>
@@ -178,7 +178,7 @@ namespace MajdataPlay.Recording
             Stream? audioOutput = null;
             try
             {
-                files = RecordingFiles.Create(_name, _container);
+                files = RecordingFiles.Create(_name, ContainerFormat);
                 audioOutput = FileSystem.File.OpenWrite(files.AudioPath);
                 // Started is raised in the same call that starts the capture clock, giving both streams one origin.
                 _capturer.Started += OnCaptureStarted;
@@ -334,7 +334,7 @@ namespace MajdataPlay.Recording
             var channels = _audioRecorder.Channels;
             // The capture DSP sees audio before the device plays it; delaying it restores what was heard with each frame.
             var audioDelay = _audioRecorder.PlaybackDelay;
-            var container = _container;
+            var container = ContainerFormat;
             try
             {
                 var audioCodec = await Task.Run(() =>
@@ -349,7 +349,7 @@ namespace MajdataPlay.Recording
                 MajDebug.LogInfo(nameof(FFmpegRecorder), $"Saved {files.OutputName} with {audioCodec ?? "no"} audio "
                     + $"delayed by {audioDelay.TotalMilliseconds:F1} ms");
             }
-            catch (Exception error) when (!(error is OperationCanceledException))
+            catch (Exception error) when (error is not OperationCanceledException)
             {
                 DeleteTemporaryFile(files.MuxedPath);
                 MajDebug.LogError(nameof(FFmpegRecorder), $"Muxing failed; keeping the video-only capture as {files.VideoOnlyOutputName}");

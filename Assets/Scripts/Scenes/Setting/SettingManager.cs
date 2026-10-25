@@ -3,6 +3,7 @@ using LitMotion;
 using MajdataPlay.Collections;
 using MajdataPlay.i18n;
 using MajdataPlay.IO;
+using MajdataPlay.Recording;
 using MajdataPlay.Settings;
 using MajdataPlay.Settings.Runtime;
 using System;
@@ -623,6 +624,7 @@ namespace MajdataPlay.Scenes.Setting
             _menuTitleDisplayerAnim.TryCancel();
             InputManager.TouchButtonRingEdge = 5.4f;
             GameManager.RequestSave(this);
+            Recorder.OnSettingsChanged();
         }
     }
 }

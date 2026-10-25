@@ -47,9 +47,9 @@ namespace MajdataPlay.Settings
         public ModOptions Mod { get; init; } = new();
 
         [ShowInSettingUIWhen($"{nameof(Game)}.{nameof(GameOptions.RecordMode)}", RecordModeOption.FFmpeg)]
-        public FFmpegEncoderOptions Encoder { get; init; } = new();
+        public FFmpegEncoderOptions Encoding { get; init; } = new();
 
-        public FFmpegDecoderOptions Decoder { get; init; } = new();
+        public FFmpegDecoderOptions Decoding { get; init; } = new();
 
         /// <summary>
         /// Gets the diagnostics and debugging options.

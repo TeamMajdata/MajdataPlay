@@ -1,5 +1,7 @@
-﻿using MajdataPlay.FFmpeg;
+﻿using MajdataPlay.Diagnostics;
+using MajdataPlay.FFmpeg;
 using MajdataPlay.IO;
+using MajdataPlay.Runtime;
 using MajdataPlay.Settings;
 using System;
 using System.Threading.Tasks;
@@ -13,86 +15,123 @@ namespace MajdataPlay.Recording
         {
             get
             {
-                return _recorder?.IsRecording ?? false;
+                return s_recorder?.IsRecording ?? false;
             }
         }
         public static bool IsConnected
         {
             get
             {
-                return _recorder.IsConnected;
+                return s_recorder?.IsConnected ?? false;
             }
         }
         public static bool IsEnabled
         {
             get
             {
-#if UNITY_STANDALONE
-                return MajEnv.Settings.Game.RecordMode == RecordModeOption.OBSTrigger;
-#else
-                return false;
-#endif
+                return MajEnv.Settings.Game.RecordMode != RecordModeOption.Disable;
             }
         }
 
-        private static IRecorder _recorder;
-        private static int s_isInited = 0;
+        private static IRecorder? s_recorder;
+        private static bool s_isInited = false;
 
         internal static void Init()
         {
-            if (s_isInited == 0)
+            if (!s_isInited)
             {
-                _recorder = new OBSRecorder();
-                //_recorder = new FFmpegRecorder(SceneSwitcher.MainCamera.GetComponent<FFmpegCameraCapturer>(), MajInstances.AudioManager.CreateAudioRecorder(), MediaContainerFormat.MP4);
-                s_isInited = 1;
+                s_isInited = true;
+                if ((PlatformInfo.IsAndroid || PlatformInfo.IsIOS) && MajEnv.Settings.Game.RecordMode == RecordModeOption.OBSTrigger)
+                {
+                    MajDebug.LogWarning(nameof(Recorder), "OBS Trigger recording is not supported on mobile platforms.");
+                    return;
+                }
+                switch (MajEnv.Settings.Game.RecordMode)
+                {
+                    case RecordModeOption.OBSTrigger:
+                        s_recorder = new OBSRecorder();
+                        break;
+                    case RecordModeOption.FFmpeg:
+                        var capturer = SceneSwitcher.MainCamera.GetComponent<FFmpegCameraCapturer>();
+                        s_recorder = new FFmpegRecorder(capturer,
+                            MajInstances.AudioManager.CreateAudioRecorder(),
+                            MajEnv.Settings.Encoding.ContainerFormat);
+                        var options = capturer.Options;
+                        var encodingSetting = MajEnv.Settings.Encoding;
+                        options.Format = encodingSetting.EncodingFormat;
+                        options.FrameRate = encodingSetting.FrameRate;
+                        options.RateControlMode = encodingSetting.RateControlMode;
+                        options.BitRate = encodingSetting.BitRate;
+                        options.MaximumBitRate = Math.Max(encodingSetting.BitRate, encodingSetting.MaximumBitRate);
+                        options.PreferredEncoderType = (VideoEncoderType)encodingSetting.PreferredEncoder;
+                        break;
+                    default:
+                        MajDebug.LogError(nameof(Recorder), "Unsupported record mode: " + MajEnv.Settings.Game.RecordMode);
+                        break;
+                }
             }
             GameManager.OnAppQuit += OnApplicationQuit;
         }
         public static void StartRecord(string filename)
         {
-            if (!IsEnabled || !_recorder.IsConnected)
+            if (s_recorder is null || !IsEnabled || !s_recorder.IsConnected)
             {
                 return;
             }
-            _recorder.SetOutputName(filename);
-            _recorder.StartRecord();
+            s_recorder.SetOutputName(filename);
+            s_recorder.StartRecord();
         }
         public static async Task StartRecordAsync(string filename)
         {
-            if (!IsEnabled || !_recorder.IsConnected)
+            if (s_recorder is null || !IsEnabled || !s_recorder.IsConnected)
             {
                 return;
             }
-            _recorder.SetOutputName(filename);
-            await _recorder.StartRecordAsync();
+            s_recorder.SetOutputName(filename);
+            await s_recorder.StartRecordAsync();
         }
         public static void StopRecord()
         {
-            if (!IsEnabled || !_recorder.IsConnected)
+            if (s_recorder is null || !IsEnabled || !s_recorder.IsConnected)
             {
                 return;
             }
-            _recorder.StopRecord();
+            s_recorder.StopRecord();
         }
         public static async Task StopRecordAsync()
         {
-            if (!IsEnabled || !_recorder.IsConnected)
+            if (s_recorder is null || !IsEnabled || !s_recorder.IsConnected)
             {
                 return;
             }
-            await _recorder.StopRecordAsync();
+            await s_recorder.StopRecordAsync();
         }
         internal static void OnLateUpdate()
         {
-            _recorder.OnLateUpdate();
-        }
-        private static void OnApplicationQuit(object? sender, EventArgs? e)
-        {
-            if (!IsEnabled || !_recorder.IsConnected)
+            if (s_recorder is null)
             {
                 return;
             }
-            _recorder.StopRecord();
+            s_recorder.OnLateUpdate();
+        }
+        internal static void OnSettingsChanged()
+        {
+            if (s_recorder is null)
+            {
+                return;
+            }
+            s_recorder.Dispose();
+            s_recorder = null;
+            s_isInited = false;
+            Init();
+        }
+        private static void OnApplicationQuit(object? sender, EventArgs? e)
+        {
+            if (s_recorder is null || !IsEnabled || !s_recorder.IsConnected)
+            {
+                return;
+            }
+            s_recorder.StopRecord();
             GameManager.OnAppQuit -= OnApplicationQuit;
         }
     }

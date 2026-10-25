@@ -13,11 +13,7 @@ namespace MajdataPlay.Settings
         /// <summary>
         /// Use the hardware decoder.
         /// </summary>
-        Hardware,
-        /// <summary>
-        /// Only use the hardware decoder.
-        /// </summary>
-        HardwareOnly,
+        Hardware
     }
     public class FFmpegDecoderOptions
     {
