@@ -133,6 +133,10 @@ out.log
 # Independent BASS HTTP stream validation harness; builds into Temp/BassHttpStreamValidation.
 !/Tools/Tests/Modules/BassHttpStreamValidation/BassHttpStreamValidation.csproj
 
+# Independent ManagedBass validation (library projects and CoreCLR runner); builds into Temp/ManagedBassValidation.
+!/Tools/Tests/Modules/ManagedBassValidation/ManagedBassValidation.csproj
+!/Tools/Tests/Modules/ManagedBassValidation/Libraries/*.csproj
+
 # Independent full Java API wrapper CLI and its validation harness.
 !/Tools/CSharp/AndroidJavaWrapperGenerator/AndroidJavaWrapperGenerator.csproj
 !/Tools/Tests/Modules/AndroidJavaWrapperGeneratorValidation/AndroidJavaWrapperGeneratorValidation.csproj

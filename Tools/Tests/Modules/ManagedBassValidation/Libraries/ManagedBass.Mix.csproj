@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- The ManagedBass mixer add-on, built like its NuGet package ManagedBass.Mix. -->
+  <PropertyGroup>
+    <TargetFrameworks>netstandard2.0;net8.0</TargetFrameworks>
+    <AssemblyName>ManagedBass.Mix</AssemblyName>
+    <RootNamespace>ManagedBass.Mix</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="$(ManagedBassSource)AddOns/BassMix/**/*.cs" Link="%(RecursiveDir)%(Filename)%(Extension)" />
+    <ProjectReference Include="ManagedBass.csproj" />
+  </ItemGroup>
+</Project>

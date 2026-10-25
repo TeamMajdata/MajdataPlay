@@ -1,0 +1,16 @@
+<Project>
+  <!-- Shared settings of the validation runner and the ManagedBass library projects it builds. -->
+  <PropertyGroup>
+    <RepositoryRoot>$([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)../../../../'))</RepositoryRoot>
+    <ManagedBassSource>$(RepositoryRoot)Assets/Plugins/ManagedBass/src/</ManagedBassSource>
+    <!-- Keep build output out of the Unity project, like the other validations. -->
+    <BaseIntermediateOutputPath>$(RepositoryRoot)Temp/ManagedBassValidation/obj/$(MSBuildProjectName)/</BaseIntermediateOutputPath>
+    <BaseOutputPath>$(RepositoryRoot)Temp/ManagedBassValidation/bin/$(MSBuildProjectName)/</BaseOutputPath>
+    <LangVersion>latest</LangVersion>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <NuGetAudit>false</NuGetAudit>
+    <!-- ManagedBass predates nullable annotations and uses obsolete members of its own API. -->
+    <NoWarn>$(NoWarn);CS0618;CS0649;CS0169;CS0414</NoWarn>
+  </PropertyGroup>
+</Project>

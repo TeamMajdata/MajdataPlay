@@ -158,6 +158,18 @@ Repeat full/replay/release with `-Install -Abi armeabi-v7a` to verify an actual
 32-bit process. Release only grants newly acquired by the dedicated test app;
 never clear another application's data or delete the selected parent directory.
 
+## ManagedBass callbacks on CoreCLR and IL2CPP
+
+See `ManagedBassValidation/README.md`. The first command builds ManagedBass as separate
+.NET assemblies and runs its callback wrappers against the bundled Windows x64 BASS; the
+second builds an isolated Android IL2CPP Player, checks the generated reverse P/Invoke
+wrappers and, with `-Serial`, runs the Player on a device.
+
+```powershell
+dotnet run -c Release --project Tools/Tests/Modules/ManagedBassValidation/ManagedBassValidation.csproj
+./Tools/Tests/Modules/ManagedBassValidation/Il2Cpp/run-android.ps1 -Architecture arm64
+```
+
 ## CustomSkin loading memory and atlas layout
 
 ```powershell

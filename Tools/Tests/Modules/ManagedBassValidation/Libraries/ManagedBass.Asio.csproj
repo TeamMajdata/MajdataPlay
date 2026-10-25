@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- The ManagedBass ASIO add-on, built like its NuGet package ManagedBass.Asio. -->
+  <PropertyGroup>
+    <TargetFrameworks>netstandard2.0;net8.0</TargetFrameworks>
+    <AssemblyName>ManagedBass.Asio</AssemblyName>
+    <RootNamespace>ManagedBass.Asio</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="$(ManagedBassSource)AddOns/BassAsio/**/*.cs" Link="%(RecursiveDir)%(Filename)%(Extension)" />
+    <ProjectReference Include="ManagedBass.csproj" />
+  </ItemGroup>
+</Project>

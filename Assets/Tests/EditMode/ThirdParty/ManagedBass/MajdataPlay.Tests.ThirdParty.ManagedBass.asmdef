@@ -1,0 +1,30 @@
+{
+    "name": "MajdataPlay.Tests.ThirdParty.ManagedBass",
+    "rootNamespace": "MajdataPlay.Tests.ThirdParty.ManagedBass",
+    "references": [
+        "UnityEngine.TestRunner",
+        "UnityEditor.TestRunner",
+        "ManagedBass",
+        "ManagedBass.BassAac",
+        "ManagedBass.BassAsio",
+        "ManagedBass.BassFx",
+        "ManagedBass.BassMix",
+        "ManagedBass.BassOpus",
+        "ManagedBass.BassWasapi"
+    ],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": true,
+    "precompiledReferences": [
+        "nunit.framework.dll"
+    ],
+    "autoReferenced": false,
+    "defineConstraints": [
+        "UNITY_INCLUDE_TESTS"
+    ],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

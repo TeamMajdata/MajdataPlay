@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- The ManagedBass Opus add-on, built like its NuGet package ManagedBass.Opus. -->
+  <PropertyGroup>
+    <TargetFrameworks>netstandard2.0;net8.0</TargetFrameworks>
+    <AssemblyName>ManagedBass.Opus</AssemblyName>
+    <RootNamespace>ManagedBass.Opus</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="$(ManagedBassSource)AddOns/BassOpus/**/*.cs" Link="%(RecursiveDir)%(Filename)%(Extension)" />
+    <ProjectReference Include="ManagedBass.csproj" />
+  </ItemGroup>
+</Project>

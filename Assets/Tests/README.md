@@ -25,8 +25,8 @@ them and production assemblies cannot reference them.
 
 `<Area>` mirrors the folder under `Assets/Scripts` that is tested (`GamePlay`, `Misc`, `Scenes`, ...),
 `<Module>` mirrors the library folder under `Assets/Plugins/MajdataPlay` (`Buffers`, `Net`, ...) and
-`<Library>` mirrors the folder under `ThirdParty` whose changes in this repository are tested (`UniTask`,
-`SkiaForUnity`).
+`<Library>` names the third-party library whose changes in this repository are tested (`UniTask` and
+`SkiaForUnity` under `ThirdParty`, the `ManagedBass` submodule under `Assets/Plugins`).
 
 Every test is written with the Unity Test Framework (`[Test]` for synchronous logic, `[UnityTest]`
 coroutines for anything that needs frames, lifecycle messages or async code).
@@ -136,8 +136,10 @@ Staging steps:
   helpers shared with EditMode tests keep the EditMode namespace),
   `MajdataPlay.Tests.ThirdParty.<RootNamespace>` for `EditMode/ThirdParty/<Library>` and
   `MajdataPlay.Tests.ThirdParty.<RootNamespace>.PlayMode` for `PlayMode/ThirdParty/<Library>`, where
-  `<RootNamespace>` is the library's root namespace (`Cysharp` for UniTask, `SkiaSharp` for SkiaForUnity)
-  so that a namespace segment does not hide a type of the same name such as `UniTask`. Code under `PlayMode/`
+  `<RootNamespace>` is the library's root namespace (`Cysharp` for UniTask, `SkiaSharp` for SkiaForUnity,
+  `ManagedBass` for ManagedBass) so that a namespace segment does not hide a type of the same name such as
+  `UniTask`. Inside `MajdataPlay.Tests.ThirdParty.ManagedBass`, refer to ManagedBass types through `using`
+  directives, as a qualified `ManagedBass.` name resolves to the test namespace. Code under `PlayMode/`
   compiles for every platform and must not use `UnityEditor`.
 - Each module has exactly one EditMode asmdef named `MajdataPlay.Tests.<Module>` and, optionally, one
   PlayMode asmdef named `MajdataPlay.Tests.<Module>.PlayMode`. Test asmdefs follow the Unity Test Framework

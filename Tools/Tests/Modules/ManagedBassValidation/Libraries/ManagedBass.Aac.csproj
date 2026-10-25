@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- The ManagedBass AAC and MP4 add-on, built like its NuGet package ManagedBass.Aac. -->
+  <PropertyGroup>
+    <TargetFrameworks>netstandard2.0;net8.0</TargetFrameworks>
+    <AssemblyName>ManagedBass.Aac</AssemblyName>
+    <RootNamespace>ManagedBass.Aac</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="$(ManagedBassSource)AddOns/BassAac/**/*.cs" Link="%(RecursiveDir)%(Filename)%(Extension)" />
+    <ProjectReference Include="ManagedBass.csproj" />
+  </ItemGroup>
+</Project>

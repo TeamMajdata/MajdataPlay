@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <!-- Run on the newest installed runtime when .NET 8 is missing. -->
+    <RollForward>Major</RollForward>
+    <PlatformTarget>x64</PlatformTarget>
+    <Nullable>enable</Nullable>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="Program.cs" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- ManagedBass as separate assemblies with the names of its NuGet packages, as a project outside Unity uses it. -->
+    <ProjectReference Include="Libraries/ManagedBass.csproj" />
+    <ProjectReference Include="Libraries/ManagedBass.Aac.csproj" />
+    <ProjectReference Include="Libraries/ManagedBass.Asio.csproj" />
+    <ProjectReference Include="Libraries/ManagedBass.Fx.csproj" />
+    <ProjectReference Include="Libraries/ManagedBass.Mix.csproj" />
+    <ProjectReference Include="Libraries/ManagedBass.Opus.csproj" />
+    <ProjectReference Include="Libraries/ManagedBass.Wasapi.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="$(RepositoryRoot)Assets/Plugins/Un4seen.Bass/Windows/bass.dll" Link="bass.dll" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="$(RepositoryRoot)Assets/Plugins/Un4seen.Bass/Windows/bassmix.dll" Link="bassmix.dll" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="$(RepositoryRoot)Assets/Plugins/Un4seen.Bass/Windows/x64/bass_aac.dll" Link="bass_aac.dll" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="$(RepositoryRoot)Assets/Plugins/Un4seen.Bass/Windows/x64/bassopus.dll" Link="bassopus.dll" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>
