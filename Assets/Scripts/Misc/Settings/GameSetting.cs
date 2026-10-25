@@ -193,13 +193,10 @@ namespace MajdataPlay.Settings
         /// </summary>
         public bool ButtonRingForTouch { get; set; } = true;
 #endif
-#if UNITY_STANDALONE
-
         /// <summary>
         /// Gets or sets how gameplay is recorded.
         /// </summary>
         public RecordModeOption RecordMode { get; set; } = RecordModeOption.Disable;
-#endif
 
         /// <summary>
         /// Gets or sets the wait in seconds between entering the gameplay screen and the start of the chart.
