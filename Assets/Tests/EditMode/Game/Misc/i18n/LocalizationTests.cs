@@ -170,6 +170,39 @@ namespace MajdataPlay.Tests.Game.Misc.i18n
             Assert.That(missing, Is.EqualTo("MISSING"));
         }
 
+        /// <summary>Checks that a missing key is reported once per language and that the silent lookup never reports it.</summary>
+        [Test]
+        public void MissingTranslations_AreReportedOncePerLanguage()
+        {
+            var first = CreateLanguage("xx", "y", ("HELLO", "Hi"));
+            PrivateMember.SetStaticField(typeof(Localization), "_current", first);
+
+            Assert.That(Localization.TryGetLocalizedText("MISSING", out _), Is.False);
+            Assert.That(Localization.TryGetLocalizedText("MISSING", out _), Is.False);
+            Assert.That("OTHER".i18n(), Is.EqualTo("OTHER"));
+            Assert.That("SILENT".Tryi18n(out var silent), Is.False);
+            Assert.That(silent, Is.EqualTo("SILENT"));
+            Assert.That(Localization.TryFindLocalizedText("QUIET", out _), Is.False);
+            Assert.That(Localization.TryGetLocalizedText("HELLO", out _), Is.True);
+
+            Assert.That(PrivateMember.GetStaticField<Language>(typeof(Localization), "_missingTranslationLanguage"), Is.SameAs(first));
+            Assert.That(ReportedMissingKeys(), Is.EquivalentTo(new[] { "MISSING", "OTHER" }));
+
+            var second = CreateLanguage("zz", "y");
+            PrivateMember.SetStaticField(typeof(Localization), "_current", second);
+            Localization.ReportMissingTranslation("NUMBER_1", "GENERAL_1", true);
+
+            Assert.That(PrivateMember.GetStaticField<Language>(typeof(Localization), "_missingTranslationLanguage"), Is.SameAs(second));
+            Assert.That(ReportedMissingKeys(), Is.EquivalentTo(new[] { "NUMBER_1" }));
+        }
+
+        /// <summary>Gets the keys reported as missing for the language that reported last.</summary>
+        /// <returns>The reported keys.</returns>
+        private static HashSet<string> ReportedMissingKeys()
+        {
+            return PrivateMember.GetStaticField<HashSet<string>>(typeof(Localization), "_reportedMissingTranslations");
+        }
+
         /// <summary>Checks that the dictionary format wins over the mapping table and that the result is cached.</summary>
         [Test]
         public void GetTranslations_PrefersDictionaryAndCaches()

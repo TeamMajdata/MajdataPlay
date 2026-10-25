@@ -45,6 +45,44 @@ namespace MajdataPlay.Tests.Game.Misc.Settings
             public bool EmptyName { get; set; }
         }
 
+        /// <summary>An enum whose values never fall back to the general table automatically.</summary>
+        public enum ProbeMode
+        {
+            /// <summary>The only value.</summary>
+            Alpha,
+        }
+
+        /// <summary>A settings section whose members check the automatic general fallback of value texts.</summary>
+        public sealed class ValueRuleProbe
+        {
+            /// <summary>Gets or sets a numeric option that opts into option-specific value keys.</summary>
+            [UseTranslation(TranslationTarget.OptionValue)]
+            public int Number { get; set; }
+
+            /// <summary>Gets or sets a nullable boolean option with a custom value template.</summary>
+            [OptionName("Alias")]
+            [UseTranslation(TranslationTarget.OptionValue, "MAJTEXT_FX_{0}_{1}")]
+            public bool? Flag { get; set; }
+
+            /// <summary>Gets or sets a numeric option that also requests the general table explicitly.</summary>
+            [UseTranslation(TranslationTarget.OptionValue)]
+            [UseGeneralTranslation(TranslationTarget.OptionValue)]
+            public float Both { get; set; }
+
+            /// <summary>Gets or sets an enum option with option-specific value keys only.</summary>
+            [UseTranslation(TranslationTarget.OptionValue)]
+            public ProbeMode Mode { get; set; }
+
+            /// <summary>Gets or sets a numeric option that only uses the general table.</summary>
+            [UseGeneralTranslation(TranslationTarget.OptionValue)]
+            public int GeneralOnly { get; set; }
+
+            /// <summary>Gets or sets a numeric option whose values are never translated.</summary>
+            [NoTranslation(TranslationTarget.OptionValue)]
+            [UseTranslation(TranslationTarget.OptionValue)]
+            public int Raw { get; set; }
+        }
+
         /// <summary>A settings root whose categories select title rules.</summary>
         public sealed class RootProbe
         {
@@ -191,6 +229,79 @@ namespace MajdataPlay.Tests.Game.Misc.Settings
             UseLanguage(("MAJSETTING_PROPERTY_Plain", "Plain option"));
 
             Assert.That(name.Localize(nameof(RuleProbe.Plain)), Is.EqualTo("Plain option"));
+        }
+
+        /// <summary>Resolves the value rule of a <see cref="ValueRuleProbe"/> member with its declared type.</summary>
+        /// <param name="name">The property name.</param>
+        /// <returns>The resolved value rule.</returns>
+        private static SettingTranslation ResolveValue(string name)
+        {
+            var property = typeof(ValueRuleProbe).GetProperty(name)!;
+            return SettingTranslation.Resolve(SettingReflectionCache.GetAttributes(property), TranslationTarget.OptionValue, name, property.PropertyType);
+        }
+
+        /// <summary>Gets the keys reported as missing for the language that reported last.</summary>
+        /// <returns>The reported keys.</returns>
+        private static HashSet<string> ReportedMissingKeys()
+        {
+            return PrivateMember.GetStaticField<HashSet<string>>(typeof(Localization), "_reportedMissingTranslations");
+        }
+
+        /// <summary>Checks that boolean and numeric values query the general table after their option-specific keys.</summary>
+        [Test]
+        public void Resolve_BooleanAndNumericValues_FallBackToGeneralAfterSpecificKeys()
+        {
+            var number = ResolveValue(nameof(ValueRuleProbe.Number));
+            var flag = ResolveValue(nameof(ValueRuleProbe.Flag));
+            var both = ResolveValue(nameof(ValueRuleProbe.Both));
+            var mode = ResolveValue(nameof(ValueRuleProbe.Mode));
+            var generalOnly = ResolveValue(nameof(ValueRuleProbe.GeneralOnly));
+            var raw = ResolveValue(nameof(ValueRuleProbe.Raw));
+            var untyped = SettingTranslation.Resolve(SettingReflectionCache.GetAttributes(typeof(ValueRuleProbe).GetProperty(nameof(ValueRuleProbe.Number))!),
+                TranslationTarget.OptionValue, nameof(ValueRuleProbe.Number));
+
+            Assert.That(number.KeyTemplates, Is.EqualTo(new[] { SettingTranslation.DefaultOptionValueTemplate, SettingTranslation.GeneralOptionValueTemplate }));
+            Assert.That(number.GetKey(1, "0"), Is.EqualTo("MAJSETTING_GENERAL_OPTION_0"));
+            Assert.That(flag.KeyTemplates, Is.EqualTo(new[] { "MAJTEXT_FX_{0}_{1}", SettingTranslation.GeneralOptionValueTemplate }));
+            Assert.That(both.KeyTemplates, Is.EqualTo(new[] { SettingTranslation.DefaultOptionValueTemplate, SettingTranslation.GeneralOptionValueTemplate }));
+            Assert.That(mode.KeyTemplates, Is.EqualTo(new[] { SettingTranslation.DefaultOptionValueTemplate }));
+            Assert.That(generalOnly.KeyTemplates, Is.EqualTo(new[] { SettingTranslation.GeneralOptionValueTemplate }));
+            Assert.That(raw.IsTranslated, Is.False);
+            Assert.That(untyped.KeyTemplates, Is.EqualTo(new[] { SettingTranslation.DefaultOptionValueTemplate }));
+        }
+
+        /// <summary>Checks which value types fall back to the general table automatically.</summary>
+        [Test]
+        public void HasGeneralValueFallback_CoversBooleanAndNumericTypes()
+        {
+            Assert.That(SettingTranslation.HasGeneralValueFallback(typeof(bool)), Is.True);
+            Assert.That(SettingTranslation.HasGeneralValueFallback(typeof(bool?)), Is.True);
+            Assert.That(SettingTranslation.HasGeneralValueFallback(typeof(int)), Is.True);
+            Assert.That(SettingTranslation.HasGeneralValueFallback(typeof(double?)), Is.True);
+            Assert.That(SettingTranslation.HasGeneralValueFallback(typeof(decimal)), Is.True);
+            Assert.That(SettingTranslation.HasGeneralValueFallback(typeof(ProbeMode)), Is.False);
+            Assert.That(SettingTranslation.HasGeneralValueFallback(typeof(string)), Is.False);
+            Assert.That(SettingTranslation.HasGeneralValueFallback(null), Is.False);
+        }
+
+        /// <summary>Checks the general fallback of values and that only a miss of every key is reported.</summary>
+        [Test]
+        public void Localize_FallsBackToGeneralAndReportsOnlyCompleteMisses()
+        {
+            UseLanguage(
+                ("MAJSETTING_PROPERTY_Number_OPTION_1", "One"),
+                ("MAJSETTING_GENERAL_OPTION_0", "Zero"),
+                ("MAJSETTING_GENERAL_OPTION_True", "On"));
+            var number = ResolveValue(nameof(ValueRuleProbe.Number));
+            var flag = ResolveValue(nameof(ValueRuleProbe.Flag));
+
+            Assert.That(number.Localize("1", true), Is.EqualTo("One"));
+            Assert.That(number.Localize("0", true), Is.EqualTo("Zero"));
+            Assert.That(flag.Localize("True"), Is.EqualTo("On"));
+            Assert.That(number.Localize("2", true), Is.EqualTo("2"));
+            Assert.That(number.Localize("2", true), Is.EqualTo("2"));
+
+            Assert.That(ReportedMissingKeys(), Is.EquivalentTo(new[] { "MAJSETTING_PROPERTY_Number_OPTION_2" }));
         }
 
         /// <summary>Checks that a literal key is used verbatim, including braces.</summary>

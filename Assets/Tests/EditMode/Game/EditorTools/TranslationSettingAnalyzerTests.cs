@@ -167,6 +167,12 @@ namespace MajdataPlay.Tests.Game.EditorTools
             Assert.That(_keys.Keys, Does.Not.Contain("MAJSETTING_PROPERTY_Aliased_OPTION_First"));
             Assert.That(_keys["MAJSETTING_GENERAL_OPTION_First"], Does.Not.Contain("Fx.Aliased (option value fallback)"));
 
+            Assert.That(_keys["FX_SWITCH_True"], Does.Contain("Fx.Switch (option value)"));
+            Assert.That(_keys["FX_SWITCH_False"], Does.Contain("Fx.Switch (option value)"));
+            Assert.That(_keys["MAJSETTING_GENERAL_OPTION_True"], Does.Contain("Fx.Switch (option value fallback)"));
+            Assert.That(_keys["MAJSETTING_GENERAL_OPTION_False"], Does.Contain("Fx.Switch (option value fallback)"));
+            Assert.That(_keys.Keys, Does.Not.Contain("MAJSETTING_PROPERTY_Switch_OPTION_True"));
+
             Assert.That(_keys.Keys, Does.Contain("MAJSETTING_GENERAL_PROPERTY_GeneralName"));
             Assert.That(_keys.Keys, Does.Not.Contain("MAJSETTING_PROPERTY_GeneralName"));
             Assert.That(HasDiagnostic("TranslatedCount", "opt into translation"), Is.True);

@@ -135,7 +135,7 @@ namespace MajdataPlay.Editor.Windows
                     // MenuMetadata.Name is the value property's name; MenuNameAttribute is not used by the UI.
                     // The translation attributes of the root category property select the title key.
                     var categoryAttributes = category.GetCustomAttributesData();
-                    var titleSelection = SelectTranslation(categoryAttributes, "MenuName", menuProperty.Name, DefaultMenuNameTemplate, GeneralMenuNameTemplate, false);
+                    var titleSelection = SelectTranslation(categoryAttributes, "MenuName", menuProperty.Name, DefaultMenuNameTemplate, GeneralMenuNameTemplate, false, false);
                     AddTemplateKeys(titleSelection, menuProperty.Name, path + " (category)", keys, diagnostics);
                     CollectMenu(menuProperty.PropertyType, path, keys, diagnostics);
                 }
@@ -265,7 +265,7 @@ namespace MajdataPlay.Editor.Windows
                 }
             }
 
-            var nameSelection = SelectTranslation(attributes, "OptionName", property.Name, DefaultOptionNameTemplate, GeneralOptionNameTemplate, false);
+            var nameSelection = SelectTranslation(attributes, "OptionName", property.Name, DefaultOptionNameTemplate, GeneralOptionNameTemplate, false, false);
             if (!nameSelection.IsExplicit && nameKeyOverride is not null)
             {
                 // Without translation attributes an OptionName override is the complete localization key.
@@ -279,7 +279,8 @@ namespace MajdataPlay.Editor.Windows
             {
                 AddKey(descriptionKey, path + " (description)", keys, diagnostics);
             }
-            var valueSelection = SelectTranslation(attributes, "OptionValue", property.Name, DefaultOptionValueTemplate, GeneralOptionValueTemplate, true);
+            var valueSelection = SelectTranslation(attributes, "OptionValue", property.Name, DefaultOptionValueTemplate, GeneralOptionValueTemplate, true,
+                HasGeneralValueFallback(property.PropertyType));
             CollectValues(property, enumeratorType, HasAttribute(attributes, SettingsNamespace + "OptionalAttribute"), valueSelection, path, keys, diagnostics);
         }
 
@@ -543,9 +544,13 @@ namespace MajdataPlay.Editor.Windows
         /// <param name="defaultTemplate">The built-in template of the target.</param>
         /// <param name="generalTemplate">The general table template of the target.</param>
         /// <param name="generalByDefault">Whether the built-in default also tries the general template.</param>
+        /// <param name="generalAfterSpecific">
+        /// Whether explicitly selected option-specific templates are always followed by the general template, as the
+        /// runtime does for boolean and numeric option values.
+        /// </param>
         /// <returns>The selection; an untranslated one has no templates.</returns>
         private static TranslationSelection SelectTranslation(IList<CustomAttributeData> attributes, string target, string memberName,
-            string defaultTemplate, string generalTemplate, bool generalByDefault)
+            string defaultTemplate, string generalTemplate, bool generalByDefault, bool generalAfterSpecific)
         {
             var optionName = memberName;
             foreach (var attribute in attributes)
@@ -581,10 +586,10 @@ namespace MajdataPlay.Editor.Windows
                         return new TranslationSelection(optionName, true, new List<string>());
                     case SettingsNamespace + "UseTranslationAttribute":
                         var key = attribute.ConstructorArguments.Count > 1 ? attribute.ConstructorArguments[1].Value as string : null;
-                        specific.Add(string.IsNullOrEmpty(key) ? defaultTemplate : key!);
+                        AddDistinct(specific, string.IsNullOrEmpty(key) ? defaultTemplate : key!);
                         break;
                     default:
-                        general.Add(generalTemplate);
+                        AddDistinct(general, generalTemplate);
                         break;
                 }
             }
@@ -598,8 +603,37 @@ namespace MajdataPlay.Editor.Windows
                 }
                 return new TranslationSelection(memberName, false, specific);
             }
+            if (generalAfterSpecific && specific.Count != 0)
+            {
+                AddDistinct(general, generalTemplate);
+            }
             specific.AddRange(general);
             return new TranslationSelection(optionName, true, specific);
+        }
+
+        /// <summary>
+        /// Adds a template unless the list already contains it, as the runtime SettingTranslation does.
+        /// </summary>
+        /// <param name="templates">The template list to extend.</param>
+        /// <param name="template">The key template.</param>
+        private static void AddDistinct(List<string> templates, string template)
+        {
+            if (!templates.Contains(template))
+            {
+                templates.Add(template);
+            }
+        }
+
+        /// <summary>
+        /// Mirrors SettingTranslation.HasGeneralValueFallback: whether option values of a type always fall back to
+        /// the general table after their option-specific keys.
+        /// </summary>
+        /// <param name="type">The option property type, possibly nullable.</param>
+        /// <returns>True for boolean and numeric types and their nullable forms; otherwise false.</returns>
+        private static bool HasGeneralValueFallback(Type type)
+        {
+            var valueType = Nullable.GetUnderlyingType(type) ?? type;
+            return valueType == typeof(bool) || IsNumber(valueType);
         }
 
         /// <summary>

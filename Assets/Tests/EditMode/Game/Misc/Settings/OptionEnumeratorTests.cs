@@ -362,6 +362,30 @@ namespace MajdataPlay.Tests.Game.Misc.Settings
             Assert.That(templated.LocalizedValueText, Is.EqualTo("2"));
         }
 
+        /// <summary>Checks that numeric values with option-specific keys fall back to the general table, which a specific key overrides.</summary>
+        [Test]
+        public void NumberEnumerator_FallsBackToGeneralAfterSpecificKey()
+        {
+            UseLanguage(
+                ("MAJSETTING_GENERAL_OPTION_3", "general three"),
+                ("MAJSETTING_GENERAL_OPTION_1", "general one"));
+            var probe = new NumberProbe();
+            var translated = Create<DefaultNumberEnumerator>(probe, nameof(NumberProbe.Translated));
+            var templated = Create<DefaultNumberEnumerator>(probe, nameof(NumberProbe.Templated));
+            var plain = Create<DefaultNumberEnumerator>(probe, nameof(NumberProbe.Plain));
+
+            Assert.That(translated.LocalizedValueText, Is.EqualTo("general three"));
+            Assert.That(templated.LocalizedValueText, Is.EqualTo("general one"));
+            Assert.That(plain.LocalizedValueText, Is.EqualTo("3"));
+
+            UseLanguage(
+                ("MAJSETTING_PROPERTY_Translated_OPTION_3", "drei"),
+                ("MAJSETTING_GENERAL_OPTION_3", "general three"));
+            translated.RefreshLocalization();
+
+            Assert.That(translated.LocalizedValueText, Is.EqualTo("drei"));
+        }
+
         /// <summary>Checks that a boolean enumerator cycles between false and true.</summary>
         [Test]
         public void BooleanEnumerator_CyclesValues()

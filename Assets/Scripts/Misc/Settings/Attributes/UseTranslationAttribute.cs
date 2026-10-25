@@ -25,6 +25,16 @@ namespace MajdataPlay.Settings
     /// Numeric option values (options of integer or floating-point types) are not translated by default.
     /// Apply this attribute with <see cref="TranslationTarget.OptionValue"/> to opt a numeric option into translation.
     /// </para>
+    /// <para>
+    /// Boolean and numeric option values (including their nullable forms) automatically fall back to the general
+    /// table: after the option-specific keys of this attribute, such as <c>MAJSETTING_PROPERTY_{0}_OPTION_{1}</c>,
+    /// have been queried without a translation, <c>MAJSETTING_GENERAL_OPTION_{1}</c> is queried as well, so shared
+    /// texts such as <c>True</c>, <c>False</c> or <c>0</c> only need one general translation.
+    /// <see cref="UseGeneralTranslationAttribute"/> is not required for that fallback. Option values of other
+    /// types, such as enums and strings, only use the general table after an explicit
+    /// <see cref="UseTranslationAttribute"/> when <see cref="UseGeneralTranslationAttribute"/> is also applied.
+    /// If no key yields a translation, the raw value text is displayed.
+    /// </para>
     /// </remarks>
     [AttributeUsage(AttributeTargets.Property | AttributeTargets.Field, AllowMultiple = true, Inherited = false)]
     public class UseTranslationAttribute : Attribute

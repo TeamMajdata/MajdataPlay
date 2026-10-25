@@ -1,4 +1,5 @@
 using MajdataPlay.Diagnostics;
+using MajdataPlay.i18n;
 using MajdataPlay.Settings.Runtime;
 using System;
 using System.Collections.Generic;
@@ -13,7 +14,9 @@ namespace MajdataPlay.Settings
     /// <remarks>
     /// Localization keys are built from key templates: <c>{0}</c> is replaced by <see cref="OptionName"/> and,
     /// for <see cref="TranslationTarget.OptionValue"/>, <c>{1}</c> by the value text. The templates are tried
-    /// in order and the first key that has a translation wins. Instances are immutable and may be shared.
+    /// in order and the first key that has a translation wins. Boolean and numeric option values always end with the
+    /// general template <see cref="GeneralOptionValueTemplate"/> after their option-specific templates. Instances are
+    /// immutable and may be shared.
     /// </remarks>
     internal sealed class SettingTranslation
     {
@@ -107,22 +110,39 @@ namespace MajdataPlay.Settings
         internal static SettingTranslation DefaultOptionValue { get; } = Resolve(Array.Empty<Attribute>(), TranslationTarget.OptionValue, string.Empty);
 
         /// <summary>
-        /// Resolves the localization rule of one target from the translation attributes of a setting member.
+        /// Resolves the localization rule of one target from the translation attributes of a setting member
+        /// whose value type is unknown, so no type-specific general fallback is added.
         /// </summary>
-        /// <remarks>
-        /// <see cref="NoTranslationAttribute"/> wins over the other attributes. Otherwise the keys of every
-        /// <see cref="UseTranslationAttribute"/> are tried first, then those of every
-        /// <see cref="UseGeneralTranslationAttribute"/>; their <c>{0}</c> is the <see cref="OptionNameAttribute"/>
-        /// value when present, otherwise <paramref name="memberName"/>. Without any attribute for the target the
-        /// built-in default applies with <c>{0}</c> set to <paramref name="memberName"/>: the default template,
-        /// followed by the general template for option values.
-        /// </remarks>
         /// <param name="attributes">The attributes of the setting member.</param>
         /// <param name="target">The part of the option to localize.</param>
         /// <param name="memberName">The declared member name; for a menu, the displayed menu name.</param>
         /// <returns>The resolved rule.</returns>
         /// <exception cref="ArgumentNullException"><paramref name="attributes"/> or <paramref name="memberName"/> is null.</exception>
         internal static SettingTranslation Resolve(Attribute[] attributes, TranslationTarget target, string memberName)
+        {
+            return Resolve(attributes, target, memberName, null);
+        }
+
+        /// <summary>
+        /// Resolves the localization rule of one target from the translation attributes of a setting member.
+        /// </summary>
+        /// <remarks>
+        /// <see cref="NoTranslationAttribute"/> wins over the other attributes. Otherwise the keys of every
+        /// <see cref="UseTranslationAttribute"/> are tried first, then those of every
+        /// <see cref="UseGeneralTranslationAttribute"/>; their <c>{0}</c> is the <see cref="OptionNameAttribute"/>
+        /// value when present, otherwise <paramref name="memberName"/>. For option values of a boolean or numeric
+        /// <paramref name="valueType"/>, the general template <c>MAJSETTING_GENERAL_OPTION_{1}</c> always follows the
+        /// option-specific templates, even without <see cref="UseGeneralTranslationAttribute"/>. Without any attribute
+        /// for the target the built-in default applies with <c>{0}</c> set to <paramref name="memberName"/>: the
+        /// default template, followed by the general template for option values.
+        /// </remarks>
+        /// <param name="attributes">The attributes of the setting member.</param>
+        /// <param name="target">The part of the option to localize.</param>
+        /// <param name="memberName">The declared member name; for a menu, the displayed menu name.</param>
+        /// <param name="valueType">The type of the option value, possibly nullable, or null when it is unknown or irrelevant.</param>
+        /// <returns>The resolved rule.</returns>
+        /// <exception cref="ArgumentNullException"><paramref name="attributes"/> or <paramref name="memberName"/> is null.</exception>
+        internal static SettingTranslation Resolve(Attribute[] attributes, TranslationTarget target, string memberName, Type? valueType)
         {
             if (attributes is null)
             {
@@ -163,8 +183,31 @@ namespace MajdataPlay.Settings
                 }
                 return new SettingTranslation(target, memberName, false, specificTemplates.ToArray());
             }
+            if (target == TranslationTarget.OptionValue && specificTemplates.Count != 0 && HasGeneralValueFallback(valueType))
+            {
+                AddTemplate(generalTemplates, GeneralOptionValueTemplate, optionName);
+            }
             specificTemplates.AddRange(generalTemplates);
             return new SettingTranslation(target, optionName, true, specificTemplates.ToArray());
+        }
+
+        /// <summary>
+        /// Gets whether option values of a type always fall back to the general table after their option-specific keys.
+        /// </summary>
+        /// <remarks>
+        /// Boolean and numeric values share their spelling across options (<c>True</c>, <c>0</c>, ...), so a missing
+        /// option-specific translation is completed by <c>MAJSETTING_GENERAL_OPTION_{1}</c>.
+        /// </remarks>
+        /// <param name="valueType">The option value type, possibly nullable, or null when it is unknown.</param>
+        /// <returns>True for boolean, integer and floating-point types and their nullable forms; otherwise false.</returns>
+        internal static bool HasGeneralValueFallback(Type? valueType)
+        {
+            if (valueType is null)
+            {
+                return false;
+            }
+            var underlyingType = Nullable.GetUnderlyingType(valueType) ?? valueType;
+            return underlyingType == typeof(bool) || underlyingType.IsIntType() || underlyingType.IsFloatType();
         }
 
         /// <summary>
@@ -216,21 +259,67 @@ namespace MajdataPlay.Settings
         /// </returns>
         internal string Localize(string rawText)
         {
+            return Localize(rawText, false);
+        }
+
+        /// <summary>
+        /// Localizes a text by trying the key templates in order.
+        /// </summary>
+        /// <remarks>
+        /// The individual lookups are silent, because a miss on an earlier template is expected whenever a later one
+        /// provides the text. Only when every template misses is the primary key reported, together with the fallback
+        /// keys, once per language through <see cref="Localization.ReportMissingTranslation"/>.
+        /// </remarks>
+        /// <param name="rawText">The untranslated text: the value text of an option value, or the displayed name otherwise.</param>
+        /// <param name="isNumericValue">
+        /// True when <paramref name="rawText"/> is the text of a numeric value. Numeric options usually translate only a
+        /// few special values, so their misses are reported at debug level instead of as warnings.
+        /// </param>
+        /// <returns>
+        /// The first translation found. Without one, an option value falls back to <paramref name="rawText"/> while a
+        /// name falls back to its primary key so that a missing translation stays visible. An untranslated rule
+        /// returns <paramref name="rawText"/> unchanged.
+        /// </returns>
+        internal string Localize(string rawText, bool isNumericValue)
+        {
             if (_templates.Length == 0)
             {
                 return rawText;
             }
-            string? primaryKey = null;
+            var primaryKey = string.Empty;
             for (var i = 0; i < _templates.Length; i++)
             {
                 var key = string.Format(_templates[i], OptionName, rawText);
-                if (key.Tryi18n(out var localizedText))
+                if (Localization.TryFindLocalizedText(key, out var localizedText))
                 {
                     return localizedText;
                 }
-                primaryKey ??= key;
+                if (i == 0)
+                {
+                    primaryKey = key;
+                }
             }
-            return Target == TranslationTarget.OptionValue ? rawText : primaryKey!;
+            Localization.ReportMissingTranslation(primaryKey, GetFallbackKeys(rawText), isNumericValue);
+            return Target == TranslationTarget.OptionValue ? rawText : primaryKey;
+        }
+
+        /// <summary>
+        /// Builds the fallback keys that follow the primary key, for a missing-translation report.
+        /// </summary>
+        /// <param name="rawText">The value text substituted for <c>{1}</c>.</param>
+        /// <returns>The comma-separated fallback keys, or null when the rule has a single template.</returns>
+        private string? GetFallbackKeys(string rawText)
+        {
+            if (_templates.Length < 2)
+            {
+                return null;
+            }
+            var fallbackKeys = new string[_templates.Length - 1];
+            for (var i = 1; i < _templates.Length; i++)
+            {
+                fallbackKeys[i - 1] = string.Format(_templates[i], OptionName, rawText);
+            }
+            return string.Join(", ", fallbackKeys);
         }
 
         /// <summary>
@@ -271,6 +360,10 @@ namespace MajdataPlay.Settings
         /// <param name="optionName">The option name the template is reported for.</param>
         private static void AddTemplate(List<string> templates, string template, string optionName)
         {
+            if (templates.Contains(template))
+            {
+                return;
+            }
             try
             {
                 string.Format(template, optionName, string.Empty);

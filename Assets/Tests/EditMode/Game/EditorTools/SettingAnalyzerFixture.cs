@@ -87,6 +87,10 @@ namespace MajdataPlay.Tests.Game.EditorTools
         [UseTranslation(TranslationTarget.OptionValue)]
         public int TranslatedCount { get; set; }
 
+        /// <summary>Gets or sets a boolean option whose value keys use a custom template, still followed by the general table.</summary>
+        [UseTranslation(TranslationTarget.OptionValue, "FX_SWITCH_{1}")]
+        public bool Switch { get; set; }
+
         /// <summary>Gets or sets an option whose name uses the general table.</summary>
         [UseGeneralTranslation(TranslationTarget.OptionName)]
         public bool GeneralName { get; set; }

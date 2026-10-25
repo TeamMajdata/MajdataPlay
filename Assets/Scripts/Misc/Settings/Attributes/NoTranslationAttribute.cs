@@ -20,6 +20,11 @@ namespace MajdataPlay.Settings
     /// and are displayed using their formatted value text, so this attribute is only needed for
     /// <see cref="TranslationTarget.OptionValue"/> on non-numeric options such as enums, booleans and strings.
     /// </para>
+    /// <para>
+    /// Applied to <see cref="TranslationTarget.OptionValue"/>, it also suppresses the automatic fallback of boolean
+    /// and numeric values to <c>MAJSETTING_GENERAL_OPTION_{ValueText}</c>, so neither the option-specific nor the
+    /// general key is queried.
+    /// </para>
     /// </remarks>
     [AttributeUsage(AttributeTargets.Property | AttributeTargets.Field, AllowMultiple = true, Inherited = false)]
     public class NoTranslationAttribute : Attribute

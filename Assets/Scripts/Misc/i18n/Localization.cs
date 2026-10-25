@@ -171,21 +171,102 @@ namespace MajdataPlay.i18n
             }
             return available;
         }
-        public static bool TryGetLocalizedText(string origin,out string strOut)
+        /// <summary>
+        /// Looks up the translation of a key in the current language and reports the key when it is missing.
+        /// </summary>
+        /// <remarks>
+        /// A missing key is reported once per language through <see cref="ReportMissingTranslation"/>, so repeated
+        /// lookups of the same key do not flood the log.
+        /// </remarks>
+        /// <param name="origin">The localization key.</param>
+        /// <param name="strOut">Receives the translation, or <paramref name="origin"/> when the key is missing.</param>
+        /// <returns>True when the current language translates <paramref name="origin"/>; otherwise false.</returns>
+        /// <exception cref="ArgumentNullException"><paramref name="origin"/> is null.</exception>
+        public static bool TryGetLocalizedText(string origin, out string strOut)
         {
-            var translations = Current.GetTranslations();
-            if (translations.TryGetValue(origin, out var content))
+            if (TryFindLocalizedText(origin, out strOut))
             {
-                strOut = content;
                 return true;
             }
-            
-            strOut = origin;
-            var currentLang = _current;
-            MajDebug.LogWarning($"[i18n]Missing translation for: {origin}\nCode: {currentLang.Code}, Author: {currentLang.Author}");
+            ReportMissingTranslation(origin);
             return false;
         }
+        /// <summary>
+        /// Looks up the translation of a key in the current language without reporting a missing key.
+        /// </summary>
+        /// <remarks>
+        /// Intended for fallback chains, where a miss is expected as long as a later key is translated; the caller
+        /// reports the chain through <see cref="ReportMissingTranslation"/> when every key misses.
+        /// </remarks>
+        /// <param name="key">The localization key.</param>
+        /// <param name="text">Receives the translation, or <paramref name="key"/> when the key is missing.</param>
+        /// <returns>True when the current language translates <paramref name="key"/>; otherwise false.</returns>
+        /// <exception cref="ArgumentNullException"><paramref name="key"/> is null.</exception>
+        internal static bool TryFindLocalizedText(string key, out string text)
+        {
+            var translations = Current.GetTranslations();
+            if (translations.TryGetValue(key, out var content))
+            {
+                text = content;
+                return true;
+            }
+            text = key;
+            return false;
+        }
+        /// <summary>
+        /// Reports a missing translation the first time it is seen for the current language.
+        /// </summary>
+        /// <remarks>
+        /// Reported keys are remembered per language and forgotten when another language becomes current, so each
+        /// language reports each missing key once. This method is thread-safe.
+        /// </remarks>
+        /// <param name="key">The missing localization key; for a fallback chain, its primary key.</param>
+        /// <param name="fallbackKeys">The fallback keys that were also missing, for the log message, or null when there were none.</param>
+        /// <param name="isExpected">
+        /// True when the text is commonly left untranslated, such as a numeric option value; the miss is then
+        /// reported at debug level instead of as a warning.
+        /// </param>
+        internal static void ReportMissingTranslation(string key, string? fallbackKeys = null, bool isExpected = false)
+        {
+            var language = _current;
+            lock (_missingTranslationLock)
+            {
+                if (!ReferenceEquals(_missingTranslationLanguage, language))
+                {
+                    _reportedMissingTranslations.Clear();
+                    _missingTranslationLanguage = language;
+                }
+                if (!_reportedMissingTranslations.Add(key))
+                {
+                    return;
+                }
+            }
+
+            var message = fallbackKeys is null
+                ? $"Missing translation for \"{key}\" in language \"{language}\""
+                : $"Missing translation for \"{key}\" and its fallbacks ({fallbackKeys}) in language \"{language}\"";
+            if (isExpected)
+            {
+                MajDebug.LogDebug(nameof(Localization), message);
+            }
+            else
+            {
+                MajDebug.LogWarning(nameof(Localization), message);
+            }
+        }
         static Language _current = Language.Default;
+        /// <summary>
+        /// The missing keys already reported for <see cref="_missingTranslationLanguage"/>.
+        /// </summary>
+        readonly static HashSet<string> _reportedMissingTranslations = new(StringComparer.Ordinal);
+        /// <summary>
+        /// The language whose missing keys <see cref="_reportedMissingTranslations"/> holds.
+        /// </summary>
+        static Language? _missingTranslationLanguage;
+        /// <summary>
+        /// Guards the missing-translation report state, which background loading tasks may also update.
+        /// </summary>
+        readonly static object _missingTranslationLock = new();
     }
 }
 

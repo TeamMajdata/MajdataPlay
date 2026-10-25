@@ -229,24 +229,26 @@ namespace MajdataPlay.Settings.OptionEnumerators
         /// <remarks>
         /// Numeric values are not translated unless the member opts in with <see cref="UseTranslationAttribute"/> or
         /// <see cref="UseGeneralTranslationAttribute"/>; the <c>UNSET</c> and <c>NULL</c> placeholders of a missing
-        /// numeric value are words and keep the default lookup.
+        /// numeric value are words and keep the default lookup. Boolean and numeric values that look up an
+        /// option-specific key fall back to the general table afterwards (see <see cref="SettingTranslation.Resolve(Attribute[], TranslationTarget, string, Type)"/>).
         /// </remarks>
         /// <param name="value">The option value, or null for a missing value.</param>
         /// <param name="valueText">The untranslated display text of <paramref name="value"/>.</param>
         /// <returns>The localized text, or <paramref name="valueText"/> when it is not translated or has no translation.</returns>
         protected string LocalizeValueText(object? value, string valueText)
         {
-            if (_hasNumericValues && value is not null && !ValueTranslation.IsExplicit)
+            var isNumericValue = _hasNumericValues && value is not null;
+            if (isNumericValue && !ValueTranslation.IsExplicit)
             {
                 return valueText;
             }
-            return ValueTranslation.Localize(valueText);
+            return ValueTranslation.Localize(valueText, isNumericValue);
         }
         private void InitTranslation()
         {
             var valueType = Nullable.GetUnderlyingType(_memberType) ?? _memberType;
             _hasNumericValues = valueType.IsIntType() || valueType.IsFloatType();
-            ValueTranslation = SettingTranslation.Resolve(_attributes, TranslationTarget.OptionValue, Name);
+            ValueTranslation = SettingTranslation.Resolve(_attributes, TranslationTarget.OptionValue, Name, _memberType);
         }
         public virtual void Dispose()
         {
