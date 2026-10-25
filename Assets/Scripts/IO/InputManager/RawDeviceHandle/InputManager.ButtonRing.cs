@@ -58,6 +58,7 @@ namespace MajdataPlay.IO
 
             readonly static bool[] _isBtnHadOnInternal = new bool[12];
             readonly static bool[] _isBtnHadOffInternal = new bool[12];
+            readonly static bool[] _textInputSuppressedKeys = new bool[8];
 
             #region Public Methods
             public static void Init()
@@ -145,9 +146,31 @@ namespace MajdataPlay.IO
                         isBtnHadOffInternal.CopyTo(isBtnHadOff);
                         buttonRealTimeStates.CopyTo(buttonStates);
 
+#if UNITY_ANDROID || UNITY_IOS
+                        FilterTextInputKeys(_mobileExternalbuttonRingOption == MobileExternalButtonRingOption.Keyboard);
+#else
+                        FilterTextInputKeys(IODetector.ButtonRingDevice == ButtonRingDeviceOption.Keyboard);
+#endif
+
                         isBtnHadOnInternal.Clear();
                         isBtnHadOffInternal.Clear();
                     }
+                }
+            }
+            static void FilterTextInputKeys(bool isKeyboard)
+            {
+                if (!isKeyboard) return;
+                var isEditingText = SuppressKeyboardGameButtons;
+                for (var i = 0; i < 8; i++)
+                {
+                    var active = _buttonStates[i] || _isBtnHadOn[i];
+                    if (isEditingText && active) _textInputSuppressedKeys[i] = true;
+                    if (!_textInputSuppressedKeys[i]) continue;
+                    // Keep a key suppressed until release even if the text field loses focus.
+                    _textInputSuppressedKeys[i] = active;
+                    _buttonStates[i] = false;
+                    _isBtnHadOn[i] = false;
+                    _isBtnHadOff[i] = true;
                 }
             }
             /// <summary>

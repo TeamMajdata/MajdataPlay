@@ -20,6 +20,7 @@ using System.Runtime.CompilerServices;
 using System.Security.Policy;
 using System.Threading;
 using UnityEngine;
+using UnityEngine.EventSystems;
 using UnityEngine.InputSystem;
 using UnityEngine.InputSystem.EnhancedTouch;
 using UnityEngine.Profiling;
@@ -33,6 +34,17 @@ namespace MajdataPlay.IO
     internal static unsafe partial class InputManager
     {
         internal const float UI_CLICK_ANIMATION_DURATION_SEC = 0.1f;
+
+        // Text fields can consume letter keys without disabling cabinet or touch input.
+        public static bool SuppressKeyboardGameButtons
+        {
+            get
+            {
+                var selected = EventSystem.current?.currentSelectedGameObject;
+                return selected != null && selected.TryGetComponent<TMPro.TMP_InputField>(out var input)
+                    && input.isActiveAndEnabled && input.isFocused;
+            }
+        }
 
         public static bool IsTouchPanelConnected
         {
