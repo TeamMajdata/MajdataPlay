@@ -78,7 +78,13 @@ namespace MajdataPlay.Tests.Game.Misc.Base
             Assert.That(MajEnv.FRAME_LENGTH_MSEC, Is.EqualTo(1000f / 60).Within(1e-4f));
             Assert.That(MajEnv.SupportedAudioFormats, Does.Contain(".mp3"));
             Assert.That(MajEnv.SupportedVideoFormats, Does.Contain(".mp4"));
+#if UNITY_ANDROID
+            Assert.That(MajEnv.HTTP_USER_AGENT, Does.StartWith("MajdataPlay Android/"));
+#elif UNITY_IOS
+            Assert.That(MajEnv.HTTP_USER_AGENT, Does.StartWith("MajdataPlay iOS/"));
+#else
             Assert.That(MajEnv.HTTP_USER_AGENT, Does.StartWith("MajdataPlay/"));
+#endif
             Assert.That(MajEnv.Randomizer, Is.SameAs(MajEnv.Randomizer));
             Assert.That(MajEnv.GameProcess.Id, Is.GreaterThan(0));
             Assert.That(MajEnv.GlobalCT.IsCancellationRequested, Is.False);
@@ -147,11 +153,17 @@ namespace MajdataPlay.Tests.Game.Misc.Base
             Assert.That(settings.Game.TapSpeed, Is.EqualTo(8.5f));
             Assert.That(settings.Display.InnerJudgeDistance, Is.EqualTo(1f));
             Assert.That(settings.Display.OuterJudgeDistance, Is.EqualTo(0f));
+#if UNITY_STANDALONE
             Assert.That(settings.IO.InputDevice.ButtonRing.PollingRateMs, Is.EqualTo(0));
             Assert.That(settings.IO.InputDevice.ButtonRing.DebounceThresholdMs, Is.EqualTo(0));
             Assert.That(settings.IO.InputDevice.TouchPanel.PollingRateMs, Is.EqualTo(0));
             Assert.That(settings.IO.InputDevice.TouchPanel.DebounceThresholdMs, Is.EqualTo(0));
+#endif
+#if UNITY_IOS
+            Assert.That(MajDebug.MinLogLevel, Is.EqualTo(LogLevel.Info), "iOS does not read DebugLevel from settings.json");
+#else
             Assert.That(MajDebug.MinLogLevel, Is.EqualTo(LogLevel.Warning));
+#endif
         }
 
         /// <summary>Checks that unreadable settings are replaced by defaults and backed up without overwriting older backups.</summary>
@@ -231,6 +243,7 @@ namespace MajdataPlay.Tests.Game.Misc.Base
             Assert.That(endpoints[1].RuntimeConfig.AuthUsername, Is.EqualTo("x"));
         }
 
+#if UNITY_STANDALONE
         /// <summary>Checks the proxy configuration for disabled, invalid, unsupported and credentialed proxies.</summary>
         [Test]
         public void InitNetwork_ConfiguresProxy()
@@ -276,6 +289,7 @@ namespace MajdataPlay.Tests.Game.Misc.Base
             PrivateMember.SetProperty(online, nameof(OnlineOptions.UseProxy), useProxy);
             PrivateMember.SetProperty(online, nameof(OnlineOptions.Proxy), proxy);
         }
+#endif
 
         /// <summary>Checks that saving writes the settings and runtime configuration, recreating deleted files.</summary>
         [Test]

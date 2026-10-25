@@ -1,3 +1,4 @@
+#if UNITY_STANDALONE
 using System;
 using System.Collections.Generic;
 using MajdataPlay.IO;
@@ -383,3 +384,4 @@ namespace MajdataPlay.Tests.Game.IO
         }
     }
 }
+#endif

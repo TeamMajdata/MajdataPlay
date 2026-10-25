@@ -106,6 +106,7 @@ namespace MajdataPlay.Tests.Game.IO
             Assert.That(KeyboardHelper.ToGamepadButton((KeyCode)key), Is.EqualTo(expected));
         }
 
+#if UNITY_STANDALONE_WIN
         /// <summary>Checks that the Windows virtual key mapping covers every logical key and rejects unknown keys.</summary>
         [Test]
         public void KeyboardHelper_ToWinKeyCode_CoversEveryKey()
@@ -119,6 +120,7 @@ namespace MajdataPlay.Tests.Game.IO
             Assert.Throws<ArgumentOutOfRangeException>(() => KeyboardHelper.ToUnityKeyCode((KeyCode)99));
             Assert.Throws<ArgumentOutOfRangeException>(() => KeyboardHelper.ToGamepadButton((KeyCode)99));
         }
+#endif
 
         /// <summary>Checks the Linux serial device name derived from a Windows COM port number.</summary>
         [Test]

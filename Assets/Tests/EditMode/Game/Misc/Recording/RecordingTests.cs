@@ -180,6 +180,7 @@ namespace MajdataPlay.Tests.Game.Misc.Recording
             _temporary.Dispose();
         }
 
+#if UNITY_STANDALONE
         /// <summary>Installs a fake recorder in the facade.</summary>
         /// <param name="connected">Whether the recorder is connected.</param>
         /// <param name="enabled">Whether OBS recording is enabled in the settings.</param>
@@ -255,6 +256,7 @@ namespace MajdataPlay.Tests.Game.Misc.Recording
             PrivateMember.InvokeStatic(typeof(RecordHelper), "OnApplicationQuit", null, null);
             Assert.That(recorder.Calls, Is.EqualTo(new[] { "Stop" }));
         }
+#endif
 
         /// <summary>Creates a recorder over a capturer component and a fake audio source.</summary>
         /// <param name="audio">The created audio source.</param>

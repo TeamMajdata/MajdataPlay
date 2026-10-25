@@ -1,3 +1,4 @@
+#if UNITY_STANDALONE
 using System;
 using System.Buffers.Binary;
 using System.IO;
@@ -188,3 +189,4 @@ namespace MajdataPlay.Tests.Game.IO
         }
     }
 }
+#endif

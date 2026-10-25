@@ -36,33 +36,50 @@ namespace MajdataPlay.Tests.Game.Misc.Settings
             var setting = new GameSetting();
 
             Assert.That(setting.Game.TapSpeed, Is.EqualTo(7.5f));
-            Assert.That(setting.Game.GameplaySubScreenClickBehavior, Is.EqualTo(GameplaySubScreenClickBehaviorOption.TrackSkip));
             Assert.That(setting.Game.LeadInTime, Is.EqualTo(1));
             Assert.That(setting.Judge.Mode, Is.EqualTo(JudgeModeOption.Modern));
             Assert.That(setting.Display.Skin, Is.EqualTo("default"));
             Assert.That(setting.Display.Language, Is.Empty);
-            Assert.That(setting.Display.MainScreenTransform, Is.False);
-            Assert.That(setting.Display.Resolution, Is.EqualTo("1080x1920"));
             Assert.That(setting.Rendering.RenderQuality, Is.EqualTo(RenderingQualityOption.Performance));
-            Assert.That(setting.Audio.Backend, Is.EqualTo(SoundBackendOption.Wasapi));
-            Assert.That(setting.Audio.Bass.DeviceBufferLengthMs, Is.EqualTo(64));
-            Assert.That(setting.Audio.Bass.DeviceUpdatePeriodMs, Is.EqualTo(16));
             Assert.That(setting.Audio.Bass.BufferLengthMs, Is.EqualTo(1000));
-            Assert.That(setting.Audio.Wasapi.Exclusive, Is.True);
-            Assert.That(setting.Audio.Asio.SampleRate, Is.EqualTo(44100));
-            Assert.That(setting.Audio.Channel.FrontVolume, Is.EqualTo(1f));
             Assert.That(setting.Audio.Volume.Global, Is.EqualTo(0.3f));
             Assert.That(setting.Debug.OffsetUnit, Is.EqualTo(OffsetUnitOption.Frame));
             Assert.That(setting.Debug.DebugLevel, Is.EqualTo(LogLevel.Info));
-            Assert.That(setting.Debug.TapPoolCapacity, Is.EqualTo(96));
             Assert.That(setting.Online.Enable, Is.False);
+            Assert.That(setting.Mod.IsAnyModActive(), Is.False);
+#if UNITY_ANDROID || UNITY_IOS
+            Assert.That(setting.Game.GameplaySubScreenClickBehavior, Is.EqualTo(GameplaySubScreenClickBehaviorOption.TrackSkip_1_Sec_Delay));
+            Assert.That(setting.Display.MainScreenTransform, Is.True);
+            Assert.That(setting.Audio.Backend, Is.EqualTo(SoundBackendOption.BassSimple));
+            Assert.That(setting.Audio.Bass.DeviceBufferLengthMs, Is.EqualTo(32));
+            Assert.That(setting.Audio.Bass.DeviceUpdatePeriodMs, Is.EqualTo(8));
+            Assert.That(setting.Debug.TapPoolCapacity, Is.EqualTo(48));
+#else
+            Assert.That(setting.Game.GameplaySubScreenClickBehavior, Is.EqualTo(GameplaySubScreenClickBehaviorOption.TrackSkip));
+            Assert.That(setting.Display.MainScreenTransform, Is.False);
+            Assert.That(setting.Audio.Backend, Is.EqualTo(SoundBackendOption.Wasapi));
+            Assert.That(setting.Audio.Bass.DeviceBufferLengthMs, Is.EqualTo(64));
+            Assert.That(setting.Audio.Bass.DeviceUpdatePeriodMs, Is.EqualTo(16));
+            Assert.That(setting.Debug.TapPoolCapacity, Is.EqualTo(96));
+#endif
+#if UNITY_IOS
+            Assert.That(setting.Online.ApiEndpoints, Is.Empty);
+#else
             Assert.That(setting.Online.ApiEndpoints, Has.Length.EqualTo(1));
             Assert.That(setting.Online.ApiEndpoints[0].Name, Is.EqualTo("MajdataNET"));
+#endif
+#if UNITY_STANDALONE
+            Assert.That(setting.Display.Resolution, Is.EqualTo("1080x1920"));
+            Assert.That(setting.Audio.Channel.FrontVolume, Is.EqualTo(1f));
             Assert.That(setting.IO.InputDevice.ButtonRing.Enable, Is.True);
             Assert.That(setting.IO.InputDevice.TouchPanel.CapacitivePanelOptions.RadiusOffset.E, Is.EqualTo(25));
             Assert.That(setting.IO.OutputDevice.Led.Brightness, Is.EqualTo(1f));
             Assert.That(setting.IO.InputDevice.ButtonRing.HidOptions.OpenPriority, Is.EqualTo(HidOpenPriority.VeryHigh));
-            Assert.That(setting.Mod.IsAnyModActive(), Is.False);
+#endif
+#if UNITY_STANDALONE_WIN
+            Assert.That(setting.Audio.Wasapi.Exclusive, Is.True);
+            Assert.That(setting.Audio.Asio.SampleRate, Is.EqualTo(44100));
+#endif
         }
 
         /// <summary>Checks that settings survive a JSON round trip and that runtime-only data is not written.</summary>

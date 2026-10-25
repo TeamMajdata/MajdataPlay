@@ -23,7 +23,9 @@ namespace MajdataPlay.Tests.Game.GamePlay.Base
                 AllTouch = true,
                 SlideNoHead = true,
                 SlideNoTrack = true,
+#if !(UNITY_ANDROID || UNITY_IOS)
                 ButtonRingForTouch = true,
+#endif
                 NoteMask = "Inner",
             };
 
@@ -41,7 +43,11 @@ namespace MajdataPlay.Tests.Game.GamePlay.Base
                 Assert.That(info.AllTouch, Is.True);
                 Assert.That(info.SlideNoHead, Is.True);
                 Assert.That(info.SlideNoTrack, Is.True);
+#if UNITY_ANDROID || UNITY_IOS
+                Assert.That(info.ButtonRingForTouch, Is.False, "Mobile mod options have no ButtonRingForTouch to copy");
+#else
                 Assert.That(info.ButtonRingForTouch, Is.True, "The editor is a standalone platform");
+#endif
                 Assert.That(info.NoteMask, Is.EqualTo("Inner"));
             }
         }
@@ -50,7 +56,7 @@ namespace MajdataPlay.Tests.Game.GamePlay.Base
         [Test]
         public void CopyConstructor_CopiesAndAllowsOverrides()
         {
-            var source = new GameModInfo(new ModOptions { PlaybackSpeed = 0.5f, AllEx = true, NoteMask = "Outer", ButtonRingForTouch = true });
+            var source = new GameModInfo(new ModOptions { PlaybackSpeed = 0.5f, AllEx = true, NoteMask = "Outer" }) { ButtonRingForTouch = true };
 
             var copy = new GameModInfo(source);
             var overridden = new GameModInfo(source) { PlaybackSpeed = 2f, AllEx = false };

@@ -1,3 +1,4 @@
+#if UNITY_STANDALONE_WIN
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -450,3 +451,4 @@ namespace MajdataPlay.Tests.Game.IO
         }
     }
 }
+#endif

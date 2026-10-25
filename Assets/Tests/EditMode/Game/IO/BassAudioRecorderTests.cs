@@ -229,6 +229,7 @@ namespace MajdataPlay.Tests.Game.IO
             Assert.That(latency, Is.GreaterThanOrEqualTo(-1));
         }
 
+#if UNITY_STANDALONE_WIN
         /// <summary>Checks the WASAPI and ASIO probes without initialized outputs.</summary>
         [Test]
         public void BackendProbes_WithoutOutput()
@@ -238,6 +239,7 @@ namespace MajdataPlay.Tests.Game.IO
 
             Assert.That(asio.Measure(0.01), Is.EqualTo(-1));
         }
+#endif
 
         /// <summary>Creates a decoding stream over a square wave.</summary>
         /// <param name="channels">The number of channels.</param>

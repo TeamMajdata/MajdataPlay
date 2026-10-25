@@ -96,6 +96,7 @@ namespace MajdataPlay.Tests.Game.Misc.ResourceUpdate
             Assert.That(PrivateMember.InvokeStatic<bool>(typeof(ResourceManifestLoader), "IsSha256", new object?[] { null }), Is.False);
         }
 
+#if UNITY_STANDALONE_WIN
         /// <summary>Checks that populated chart and skin roots are left untouched.</summary>
         [Test]
         public void RestoreManagedAssets_KeepsPopulatedRoots()
@@ -147,5 +148,6 @@ namespace MajdataPlay.Tests.Game.Misc.ResourceUpdate
             Assert.That(destination.FindDirectory("Missing"), Is.Null);
             Assert.That(destination.FindFileAt("default/HoldSkins/hold.png"), Is.Null);
         }
+#endif
     }
 }

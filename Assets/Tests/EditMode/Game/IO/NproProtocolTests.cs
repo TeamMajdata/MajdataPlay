@@ -1,3 +1,4 @@
+#if UNITY_STANDALONE
 using System;
 using MajdataPlay.IO;
 using NUnit.Framework;
@@ -161,3 +162,4 @@ namespace MajdataPlay.Tests.Game.IO
         }
     }
 }
+#endif

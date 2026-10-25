@@ -85,6 +85,7 @@ namespace MajdataPlay.Tests.Game.IO
             _settings.Dispose();
         }
 
+#if UNITY_STANDALONE
         /// <summary>Checks the stereo routing generated for every supported speaker layout.</summary>
         /// <param name="channels">The output channel count.</param>
         [TestCase(1)]
@@ -116,6 +117,7 @@ namespace MajdataPlay.Tests.Game.IO
             };
             Assert.That(matrix, Is.EqualTo(expected));
         }
+#endif
 
         /// <summary>Checks that forced mono sends both inputs equally to every speaker.</summary>
         /// <param name="channels">The output channel count.</param>

@@ -1,3 +1,4 @@
+#if UNITY_STANDALONE
 using System;
 using System.IO;
 using System.Reflection;
@@ -74,6 +75,7 @@ namespace MajdataPlay.Tests.Game.IO
             Assert.That(connect.InnerException, Is.InstanceOf<OperationCanceledException>(), "connection checks cancellation first");
         }
 
+#if UNITY_STANDALONE_WIN
         /// <summary>Checks that the NPro device fails to write LED frames and read input without a WinUSB connection.</summary>
         [Test]
         public void Npro_WithoutConnection_ReportsIOFailures()
@@ -109,5 +111,7 @@ namespace MajdataPlay.Tests.Game.IO
             Assert.DoesNotThrow(() => PrivateMember.Invoke(host, "Disconnect"));
             Assert.That(PrivateMember.GetProperty<string>(host, "DaemonThreadName"), Is.EqualTo("IO/ExclusiveTouch Thread"));
         }
+#endif
     }
 }
+#endif

@@ -60,7 +60,9 @@ namespace MajdataPlay.Tests.Game.GamePlay.PlayMode
         [UnityTest]
         public IEnumerator Awake_HidesTheIconWhenRecordingIsDisabled()
         {
+#if UNITY_STANDALONE
             _settings.Settings.Game.RecordMode = RecordModeOption.Disable;
+#endif
 
             var displayer = CreateDisplayer(out var renderer);
             yield return null;
@@ -72,6 +74,7 @@ namespace MajdataPlay.Tests.Game.GamePlay.PlayMode
             Assert.That(renderer.sprite, Is.Null);
         }
 
+#if UNITY_STANDALONE
         /// <summary>Checks the icon for a disconnected, connected and recording OBS recorder.</summary>
         /// <returns>The test coroutine.</returns>
         [UnityTest]
@@ -96,6 +99,7 @@ namespace MajdataPlay.Tests.Game.GamePlay.PlayMode
             Assert.That(renderer.sprite, Is.SameAs(_sprites[2]), "Recording");
             Assert.That(displayer.gameObject.layer, Is.EqualTo(MajEnv.DEFAULT_LAYER));
         }
+#endif
 
         /// <summary>Checks that destroying the displayer unregisters it.</summary>
         /// <returns>The test coroutine.</returns>

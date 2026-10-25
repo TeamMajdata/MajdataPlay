@@ -1,3 +1,4 @@
+#if UNITY_STANDALONE
 using System;
 using System.Collections.Generic;
 using MajdataPlay.IO;
@@ -84,6 +85,7 @@ namespace MajdataPlay.Tests.Game.IO
             Assert.That(PrivateMember.GetField<System.Threading.Thread?>(GameDeviceManager.ButtonRing!, "_daemon"), Is.Not.Null);
         }
 
+#if UNITY_STANDALONE_WIN
         /// <summary>Checks that the NPro composite device serves every enabled capability from one instance.</summary>
         [Test]
         public void Init_NPro_SharesOneDevice()
@@ -100,6 +102,7 @@ namespace MajdataPlay.Tests.Game.IO
             Assert.That(GameDeviceManager.LedDevice, Is.SameAs(GameDeviceManager.ButtonRing));
             Assert.That(Devices, Has.Count.EqualTo(3));
         }
+#endif
 
         /// <summary>Disposes started devices and clears the registry state.</summary>
         private static void Reset()
@@ -119,3 +122,4 @@ namespace MajdataPlay.Tests.Game.IO
         }
     }
 }
+#endif

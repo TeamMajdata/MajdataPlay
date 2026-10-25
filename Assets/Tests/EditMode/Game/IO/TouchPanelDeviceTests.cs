@@ -1,3 +1,4 @@
+#if UNITY_STANDALONE
 using System;
 using System.Buffers.Binary;
 using MajdataPlay.IO;
@@ -226,6 +227,7 @@ namespace MajdataPlay.Tests.Game.IO
             Assert.Throws<System.IO.InvalidDataException>(() => parse(new byte[9000]));
         }
 
+#if UNITY_STANDALONE_WIN
         /// <summary>Checks that NPro reports are reassembled across reads and published for buttons and touch.</summary>
         [Test]
         public void Npro_Reports_PublishButtonsAndTouch()
@@ -274,6 +276,7 @@ namespace MajdataPlay.Tests.Game.IO
             Assert.That(PrivateMember.GetProperty<TimeSpan>(device, "PollingInterval"), Is.EqualTo(TimeSpan.Zero));
             Assert.That(device.IsConnected, Is.False);
         }
+#endif
 
         /// <summary>Builds a nine byte serial touch report.</summary>
         /// <param name="data">The seven data bytes.</param>
@@ -334,3 +337,4 @@ namespace MajdataPlay.Tests.Game.IO
         }
     }
 }
+#endif
