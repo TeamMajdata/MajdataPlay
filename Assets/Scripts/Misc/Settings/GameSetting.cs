@@ -87,14 +87,12 @@ namespace MajdataPlay.Settings
         /// Gets or sets how fast notes approach the judgment ring.
         /// </summary>
         [Step("0.25")]
-        [Range]
         public float TapSpeed { get; set; } = 7.5f;
 
         /// <summary>
         /// Gets or sets how fast touch notes appear and close in.
         /// </summary>
         [Step("0.25")]
-        [Range]
         public float TouchSpeed { get; set; } = 7.5f;
 
         /// <summary>
@@ -199,7 +197,6 @@ namespace MajdataPlay.Settings
         /// <summary>
         /// Gets or sets how gameplay is recorded.
         /// </summary>
-        [UseGeneralTranslation(TranslationTarget.OptionValue)]
         public RecordModeOption RecordMode { get; set; } = RecordModeOption.Disable;
 
         /// <summary>
