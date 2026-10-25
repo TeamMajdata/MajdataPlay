@@ -4,6 +4,9 @@ using LitMotion;
 using LitMotion.Extensions;
 using MajdataPlay.Diagnostics;
 using MajdataPlay.IO;
+#if UNITY_ANDROID && !UNITY_EDITOR
+using MajdataPlay.Rendering;
+#endif
 using System;
 using System.Linq;
 using System.Threading.Tasks;
