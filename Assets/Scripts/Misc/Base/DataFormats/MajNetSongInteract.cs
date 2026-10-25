@@ -11,6 +11,8 @@ namespace MajdataPlay
         [Preserve]
         public bool IsLiked { get; init; }
         [Preserve]
+        public bool IsDisLiked { get; init; }
+        [Preserve]
         public int Plays { get; init; }
         [Preserve]
         public string[] Likes { get; init; }
