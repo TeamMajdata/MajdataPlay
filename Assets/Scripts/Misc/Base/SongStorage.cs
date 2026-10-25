@@ -1,4 +1,5 @@
 using Cysharp.Text;
+using Cysharp.Threading.Tasks;
 using MajdataPlay.Collections;
 using MajdataPlay.Diagnostics;
 using MajdataPlay.Extensions;
@@ -235,7 +236,7 @@ namespace MajdataPlay
                 RestoreSelection();
                 await DisposeReplacedChartsAsync(oldCharts, snapshot.AllCharts).ConfigureAwait(false);
                 await DisposeReplacedChartsAsync(oldRecommendCharts, s_recommendCharts).ConfigureAwait(false);
-                MajDebug.LogInfo($"Loaded chart count: {TotalChartCount}");
+                MajDebug.LogInfo(nameof(SongStorage), $"Loaded chart count: {TotalChartCount}");
                 if (refreshOnline)
                 {
                     Online.ClearResponseCache();
@@ -414,7 +415,7 @@ namespace MajdataPlay
                     }
                     try
                     {
-                        MajDebug.LogInfo($"[Online]Fetching fav list from {api.Url.OriginalString}");
+                        MajDebug.LogInfo(nameof(SongStorage), $"[Online]Fetching fav list from {api.Url.OriginalString}");
                         progressReporter?.Report(ZString.Format("MAJTEXT_SCANNING_FAVORITES_FROM_{0}".i18n(), api.Name));
                         var danInfos = await Online.GetUserOnlineFavCollection(api, cancellationToken).ConfigureAwait(false);
                         cancellationToken.ThrowIfCancellationRequested();
@@ -446,7 +447,7 @@ namespace MajdataPlay
                     catch (Exception e)
                     {
                         isSuccessful = false;
-                        MajDebug.LogError($"[Online]Fetching fav list from {api.Url.OriginalString} failed because of {e.Message}");
+                        MajDebug.LogError(nameof(SongStorage), $"[Online]Fetching fav list from {api.Url.OriginalString} failed because of {e.Message}");
                         MajDebug.LogException(e);
                     }
                 }
@@ -491,7 +492,7 @@ namespace MajdataPlay
                     }
                     try
                     {
-                        MajDebug.LogInfo($"[Online]Fetching recommendations from {api.Url.OriginalString}");
+                        MajDebug.LogInfo(nameof(SongStorage), $"[Online]Fetching recommendations from {api.Url.OriginalString}");
                         progressReporter?.Report(ZString.Format("MAJTEXT_SCANNING_RECOMMENDATIONS_FROM_{0}".i18n(), api.Name));
                         var charts = await FetchRecommendFeedAsync(api).ConfigureAwait(false);
                         // An empty feed is the server saying there is nothing to recommend: no folder
@@ -502,7 +503,7 @@ namespace MajdataPlay
                     }
                     catch (Exception e)
                     {
-                        MajDebug.LogError($"[Online]Fetching recommendations from {api.Url.OriginalString} failed because of {e.Message}");
+                        MajDebug.LogError(nameof(SongStorage), $"[Online]Fetching recommendations from {api.Url.OriginalString} failed because of {e.Message}");
                         MajDebug.LogException(e);
                     }
                 }
@@ -551,7 +552,7 @@ namespace MajdataPlay
                     }
                     try
                     {
-                        MajDebug.LogInfo($"[Online]Refreshing recommendations from {api.Url.OriginalString}");
+                        MajDebug.LogInfo(nameof(SongStorage), $"[Online]Refreshing recommendations from {api.Url.OriginalString}");
                         var charts = await FetchRecommendFeedAsync(api).ConfigureAwait(false);
                         if (charts is null)
                         {
@@ -563,7 +564,7 @@ namespace MajdataPlay
                     }
                     catch (Exception e)
                     {
-                        MajDebug.LogError($"[Online]Refreshing recommendations from {api.Url.OriginalString} failed because of {e.Message}");
+                        MajDebug.LogError(nameof(SongStorage), $"[Online]Refreshing recommendations from {api.Url.OriginalString} failed because of {e.Message}");
                         MajDebug.LogException(e);
                     }
                 }
@@ -808,7 +809,7 @@ namespace MajdataPlay
                 cancellationToken.ThrowIfCancellationRequested();
                 if (!MajEnv.Settings.Online.Enable)
                 {
-                    MajDebug.LogInfo("[MaiChart Refresh]Online function was disabled, skipping.");
+                    MajDebug.LogInfo(nameof(SongStorage), "[MaiChart Refresh]Online function was disabled, skipping.");
                     return collections;
                 }
                 foreach (var api in MajEnv.ApiEndpoints.OrderBy(endpoint => endpoint.Name))
@@ -818,7 +819,7 @@ namespace MajdataPlay
                     {
                         continue;
                     }
-                    MajDebug.LogInfo($"[MaiChart Refresh]Fetching chart list from {api.Url.OriginalString}");
+                    MajDebug.LogInfo(nameof(SongStorage), $"[MaiChart Refresh]Fetching chart list from {api.Url.OriginalString}");
                     progressReporter?.Report(ZString.Format("MAJTEXT_SCANNING_CHARTS_FROM_{0}".i18n(), api.Name));
                     var collection = await GetOnlineCollection(api, progressReporter, cancellationToken).ConfigureAwait(false);
                     if (!collection.IsEmpty)
@@ -889,7 +890,7 @@ namespace MajdataPlay
                                     }
                                     catch (Exception e)
                                     {
-                                        MajDebug.LogError($"[MaiChart Scanner][{entry.Name}]Failed to scan collection: {e}");
+                                        MajDebug.LogError(nameof(SongStorage), $"[MaiChart Scanner][{entry.Name}]Failed to scan collection: {e}");
                                         throw;
                                     }
                                 }
@@ -987,7 +988,7 @@ namespace MajdataPlay
                     continue;
                 }
                 collections.Add(collection);
-                MajDebug.LogInfo($"Loaded Dan: {playlist.Info.Name}");
+                MajDebug.LogInfo(nameof(SongStorage), $"Loaded Dan: {playlist.Info.Name}");
             }
             cancellationToken.ThrowIfCancellationRequested();
             return new StorageSnapshot(collections.ToArray(), allCharts, favorites, localPlaylists);
@@ -1049,12 +1050,12 @@ namespace MajdataPlay
                 cancellationToken.ThrowIfCancellationRequested();
                 if (!success || dan is null)
                 {
-                    MajDebug.LogError($"Failed to load dan from {file.Location}\nException: {exception}");
+                    MajDebug.LogError(nameof(SongStorage), $"Failed to load dan from {file.Location}\nException: {exception}");
                     return null;
                 }
                 if (dan.Name is null || dan.SongHashs is null)
                 {
-                    MajDebug.LogError($"Failed to load dan from {file.Location}: the name or song hashes are missing.");
+                    MajDebug.LogError(nameof(SongStorage), $"Failed to load dan from {file.Location}: the name or song hashes are missing.");
                     return null;
                 }
                 return new LocalPlaylistDefinition(id, dan);
@@ -1065,7 +1066,7 @@ namespace MajdataPlay
             }
             catch (Exception e)
             {
-                MajDebug.LogError($"Failed to load dan from {file.Location}\nException: {e}");
+                MajDebug.LogError(nameof(SongStorage), $"Failed to load dan from {file.Location}\nException: {e}");
                 return null;
             }
         }
@@ -1205,7 +1206,7 @@ namespace MajdataPlay
             {
                 return collection;
             }
-            MajDebug.LogInfo("Loading online charts from:" + api.Url);
+            MajDebug.LogInfo(nameof(SongStorage), "Loading online charts from:" + api.Url);
             try
             {
                 var chartList = await Online.GetChartListAsync(api, cancellationToken).ConfigureAwait(false);
@@ -1213,7 +1214,9 @@ namespace MajdataPlay
                 if (chartList is null)
                 {
                     progressReporter?.Report(ZString.Format("Failed to fetch list from {0}".i18n(), api.Name));
-                    return await GetCachedOnlineCollectionAsync(api, cacheDirectory, cancellationToken).ConfigureAwait(false);
+                    var fetchTask = GetCachedOnlineCollectionAsync(api, cacheDirectory, cancellationToken);
+                    await Task.WhenAll(Task.Delay(3000), fetchTask).ConfigureAwait(false);
+                    return fetchTask.Result;
                 }
                 var gameList = new ISongDetail[chartList.Length];
                 try
@@ -1225,7 +1228,7 @@ namespace MajdataPlay
                         var chartDirectory = cacheDirectory.CreateDirectory(cacheName);
                         gameList[i] = new OnlineSongDetail(chartDirectory, api, chartList[i]);
                     }
-                    MajDebug.LogInfo("Loaded online charts list:" + gameList.Length);
+                    MajDebug.LogInfo(nameof(SongStorage), "Loaded online charts list:" + gameList.Length);
                     return new OnlineSongCollection(api, cacheDirectory, name, gameList);
                 }
                 catch
@@ -1263,7 +1266,7 @@ namespace MajdataPlay
             try
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                MajDebug.LogInfo("Loaded cached online charts list:" + charts.Length);
+                MajDebug.LogInfo(nameof(SongStorage), "Loaded cached online charts list:" + charts.Length);
                 return new OnlineSongCollection(api, cacheDirectory, api.Name, charts);
             }
             catch
@@ -1321,7 +1324,7 @@ namespace MajdataPlay
                                             .ToArray();
                 if (targetCharts.Length == 0)
                 {
-                    MajDebug.LogError("Failed to load dan, songs are empty or unable to find:" + danInfo.Name);
+                    MajDebug.LogError(nameof(SongStorage), "Failed to load dan, songs are empty or unable to find:" + danInfo.Name);
                     return default;
                 }
                 if (source is not null)
@@ -1548,7 +1551,7 @@ namespace MajdataPlay
                         backupName = $"{backupName}.bak";
                     }
                     exportFile.CopyTo(exportDirectory, backupName);
-                    MajDebug.LogError($"Failed to load favorites\nPath: {exportFile.Location}\nException: {exception}");
+                    MajDebug.LogError(nameof(SongStorage), $"Failed to load favorites\nPath: {exportFile.Location}\nException: {exception}");
                 }
             }
 
@@ -1597,16 +1600,16 @@ namespace MajdataPlay
                     var backupName = MyFavoriteFileName + ".bak";
                     storageDirectory.FindFile(backupName)?.Delete();
                     storageFile.Rename(backupName);
-                    MajDebug.LogInfo("Migrated favorites from legacy JSON to SQLite, old file backed up.");
+                    MajDebug.LogInfo(nameof(SongStorage), "Migrated favorites from legacy JSON to SQLite, old file backed up.");
                 }
                 catch (Exception ex)
                 {
-                    MajDebug.LogError($"Failed to backup legacy favorite file: {ex.Message}");
+                    MajDebug.LogError(nameof(SongStorage), $"Failed to backup legacy favorite file: {ex.Message}");
                 }
             }
             catch (Exception e)
             {
-                MajDebug.LogError($"Failed to migrate favorites from JSON: {e.Message}");
+                MajDebug.LogError(nameof(SongStorage), $"Failed to migrate favorites from JSON: {e.Message}");
             }
         }
 
