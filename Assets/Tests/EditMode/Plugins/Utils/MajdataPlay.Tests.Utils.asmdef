@@ -6,7 +6,9 @@
         "UnityEditor.TestRunner",
         "MajdataPlay.Tests.Shared",
         "UniTask",
-        "MajdataPlay.Utils"
+        "MajdataPlay.Utils",
+        "MajdataPlay.Utils.Editor",
+        "MajdataPlay.Tests.Utils.PlayMode"
     ],
     "includePlatforms": [
         "Editor"
