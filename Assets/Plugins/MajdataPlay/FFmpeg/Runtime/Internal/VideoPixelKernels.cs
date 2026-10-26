@@ -26,9 +26,9 @@ namespace MajdataPlay.FFmpeg.Internal
         /// <summary>Sets the bit offset of the blue channel in a little-endian RGBA8 word.</summary>
         private const int BlueShift = 16;
         /// <summary>Sets the number of fractional bits of the fixed-point luma coefficients.</summary>
-        private const int FixedPointBits = 16;
+        internal const int FixedPointBits = 16;
         /// <summary>Sets the fractional bits of the chroma coefficients, which also divide the sum of four pixels by four.</summary>
-        private const int ChromaBits = FixedPointBits + 2;
+        internal const int ChromaBits = FixedPointBits + 2;
         /// <summary>Stores the BT.709 red luma weight.</summary>
         private const double Bt709Red = 0.2126;
         /// <summary>Stores the BT.709 blue luma weight.</summary>
@@ -40,27 +40,27 @@ namespace MajdataPlay.FFmpeg.Internal
         /// <summary>Maps a full-range color difference onto half of the 224 limited-range chroma codes, in fixed point.</summary>
         private const double ChromaScale = 112.0 / 255.0 * (1 << FixedPointBits);
         /// <summary>Stores the fixed-point red weight of limited-range luma.</summary>
-        private const int LumaRed = (int)((Bt709Red * LumaScale) + 0.5);
+        internal const int LumaRed = (int)((Bt709Red * LumaScale) + 0.5);
         /// <summary>Stores the fixed-point green weight of limited-range luma.</summary>
-        private const int LumaGreen = (int)((Bt709Green * LumaScale) + 0.5);
+        internal const int LumaGreen = (int)((Bt709Green * LumaScale) + 0.5);
         /// <summary>Stores the fixed-point blue weight of limited-range luma.</summary>
-        private const int LumaBlue = (int)((Bt709Blue * LumaScale) + 0.5);
+        internal const int LumaBlue = (int)((Bt709Blue * LumaScale) + 0.5);
         /// <summary>Adds the limited-range black level of 16 and half a code for rounding to fixed-point luma.</summary>
-        private const int LumaOffset = (16 << FixedPointBits) + (1 << (FixedPointBits - 1));
+        internal const int LumaOffset = (16 << FixedPointBits) + (1 << (FixedPointBits - 1));
         /// <summary>Stores the fixed-point blue weight of the blue difference.</summary>
-        private const int BlueDifferenceBlue = (int)(ChromaScale + 0.5);
+        internal const int BlueDifferenceBlue = (int)(ChromaScale + 0.5);
         /// <summary>Stores the fixed-point red weight of the blue difference.</summary>
-        private const int BlueDifferenceRed = -(int)((ChromaScale * Bt709Red / (1.0 - Bt709Blue)) + 0.5);
+        internal const int BlueDifferenceRed = -(int)((ChromaScale * Bt709Red / (1.0 - Bt709Blue)) + 0.5);
         /// <summary>Stores the fixed-point green weight of the blue difference, chosen so that gray maps exactly to neutral chroma.</summary>
-        private const int BlueDifferenceGreen = -(BlueDifferenceBlue + BlueDifferenceRed);
+        internal const int BlueDifferenceGreen = -(BlueDifferenceBlue + BlueDifferenceRed);
         /// <summary>Stores the fixed-point red weight of the red difference.</summary>
-        private const int RedDifferenceRed = (int)(ChromaScale + 0.5);
+        internal const int RedDifferenceRed = (int)(ChromaScale + 0.5);
         /// <summary>Stores the fixed-point blue weight of the red difference.</summary>
-        private const int RedDifferenceBlue = -(int)((ChromaScale * Bt709Blue / (1.0 - Bt709Red)) + 0.5);
+        internal const int RedDifferenceBlue = -(int)((ChromaScale * Bt709Blue / (1.0 - Bt709Red)) + 0.5);
         /// <summary>Stores the fixed-point green weight of the red difference, chosen so that gray maps exactly to neutral chroma.</summary>
-        private const int RedDifferenceGreen = -(RedDifferenceRed + RedDifferenceBlue);
+        internal const int RedDifferenceGreen = -(RedDifferenceRed + RedDifferenceBlue);
         /// <summary>Adds the neutral chroma level of 128 and half a code for rounding to fixed-point chroma.</summary>
-        private const int ChromaOffset = (128 << ChromaBits) + (1 << (ChromaBits - 1));
+        internal const int ChromaOffset = (128 << ChromaBits) + (1 << (ChromaBits - 1));
 
         /// <summary>Copies a range of RGBA source lines through a quarter-turn rotation and Unity's vertical coordinate flip.</summary>
         /// <param name="source">The borrowed top-down RGBA source pixels.</param>
@@ -160,6 +160,41 @@ namespace MajdataPlay.FFmpeg.Internal
                     var sample = (long)(x / 2) * chromaStep;
                     blueRow[sample] = (byte)BlueDifferenceOf(red, green, blue).x;
                     redRow[sample] = (byte)RedDifferenceOf(red, green, blue).x;
+                }
+            }
+        }
+
+        /// <summary>Copies a tightly packed NV12 image into 4:2:0 planes, splitting the interleaved chroma for planar destinations.</summary>
+        /// <param name="source">The Y plane of <paramref name="width"/> by <paramref name="height"/> bytes, followed by <paramref name="height"/> / 2 rows of interleaved Cb, Cr pairs.</param>
+        /// <param name="width">The even image width in pixels.</param>
+        /// <param name="height">The even image height in pixels.</param>
+        /// <param name="planes">The writable destination planes, which do not overlap the source.</param>
+        [BurstCompile]
+        public static void CopyNv12ToYuv420([NoAlias] byte* source, int width, int height, in Yuv420Planes planes)
+        {
+            for (var y = 0; y < height; y++)
+            {
+                Buffer.MemoryCopy(source + ((long)y * width), planes.Luma + ((long)y * planes.LumaStride), width, width);
+            }
+
+            var chroma = source + ((long)width * height);
+            var pairs = width / 2;
+            for (var row = 0; row < height / 2; row++)
+            {
+                var input = chroma + ((long)row * width);
+                var blueRow = planes.BlueDifference + ((long)row * planes.BlueDifferenceStride);
+                if (planes.ChromaStep == 2)
+                {
+                    // An NV12 destination interleaves its chroma like the source, starting with Cb.
+                    Buffer.MemoryCopy(input, blueRow, width, width);
+                    continue;
+                }
+
+                var redRow = planes.RedDifference + ((long)row * planes.RedDifferenceStride);
+                for (var x = 0; x < pairs; x++)
+                {
+                    blueRow[x] = input[2 * x];
+                    redRow[x] = input[(2 * x) + 1];
                 }
             }
         }

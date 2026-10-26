@@ -60,6 +60,50 @@ namespace MajdataPlay.Tests.Plugins.FFmpeg
             Assert.Throws<ArgumentOutOfRangeException>(() => new VideoEncodeSession(path, new EncoderOptions { Width = 1 }, 2, CancellationToken.None));
             Assert.Throws<ArgumentOutOfRangeException>(() => new VideoEncodeSession(path, Options(), 0, CancellationToken.None));
             Assert.Throws<ArgumentOutOfRangeException>(() => new VideoEncodeSession(path, Options(), 9, CancellationToken.None));
+            Assert.Throws<ArgumentOutOfRangeException>(() => new VideoEncodeSession(path, Options(), 2, (CapturePixelLayout)99, CancellationToken.None));
+        }
+
+        /// <summary>Checks that an NV12 session sizes its buffers for NV12, starts no converter threads, and encodes its frames.</summary>
+        /// <returns>The test coroutine.</returns>
+        [UnityTest]
+        public IEnumerator Nv12Session_EncodesFramesWithoutConverterThreads()
+        {
+            var path = FFmpegTestMedia.PathIn(_directory, "nv12.mkv");
+            var session = new VideoEncodeSession(path, Options(), 2, CapturePixelLayout.Nv12, CancellationToken.None);
+            yield return PlayModeWait.Until(() => session.Ready.IsCompleted, WaitLimit.TotalSeconds);
+
+            Assert.That(session.Ready.Status, Is.EqualTo(TaskStatus.RanToCompletion));
+            Assert.That(session.PixelLayout, Is.EqualTo(CapturePixelLayout.Nv12));
+            Assert.That(session.ConverterThreadCount, Is.EqualTo(0));
+            for (var i = 0; i < 2; i++)
+            {
+                var frame = session.TryReserve(i, true)!;
+                Assert.That(frame.Pixels.Length, Is.EqualTo(32 * 16 * 3 / 2));
+                Array.Fill(frame.Pixels, (byte)(100 + i));
+                session.CompleteReadback(frame, true);
+            }
+
+            yield return PlayModeWait.Until(() => session.EncodedFrames == 2, WaitLimit.TotalSeconds);
+            session.Stop();
+            yield return PlayModeWait.Until(() => session.Completion.IsCompleted, WaitLimit.TotalSeconds);
+
+            Assert.That(session.Completion.Status, Is.EqualTo(TaskStatus.RanToCompletion));
+            Assert.That(session.EncodedFrames, Is.EqualTo(2));
+            using var decoder = new FFmpegVideoDecoder();
+            decoder.Open(path, CancellationToken.None);
+            var frames = 0;
+            while (true)
+            {
+                using var decoded = decoder.ReadFrame();
+                if (decoded == null)
+                {
+                    break;
+                }
+
+                frames++;
+            }
+
+            Assert.That(frames, Is.EqualTo(2));
         }
 
         /// <summary>Checks a complete recording: reservations, out-of-order readbacks, statistics and finalization.</summary>

@@ -96,6 +96,15 @@ namespace MajdataPlay.Tests.Plugins.FFmpeg
             }
         }
 
+        /// <summary>Checks whether this graphics device supports GPU conversion at the test recording size.</summary>
+        /// <returns>True when a GPU converter can be created.</returns>
+        private static bool SupportsGpuConversion()
+        {
+            var options = Options();
+            using var converter = CaptureGpuConverter.TryCreate(options.Width, options.Height, true, out _);
+            return converter != null;
+        }
+
         /// <summary>Decodes a recording and returns its frame count.</summary>
         /// <param name="path">The recorded file.</param>
         /// <param name="width">Receives the decoded width.</param>
@@ -146,6 +155,8 @@ namespace MajdataPlay.Tests.Plugins.FFmpeg
             Assert.That(capturer.SoftwareThreadCount, Is.EqualTo(0));
             Assert.That(capturer.SoftwareThreadingMode, Is.EqualTo("none"));
             Assert.That(capturer.ConverterThreadCount, Is.EqualTo(0));
+            Assert.That(capturer.UsesGpuColorConversion, Is.False);
+            Assert.That(capturer.PreferGpuColorConversion, Is.True);
             Assert.That(capturer.DroppedFrames, Is.EqualTo(0));
             Assert.That(capturer.TimeSeconds, Is.EqualTo(0));
             Assert.Throws<ArgumentOutOfRangeException>(() => capturer.BufferedFrameLimit = 0);
@@ -227,7 +238,9 @@ namespace MajdataPlay.Tests.Plugins.FFmpeg
             Assert.That(capturer.BitRate, Is.EqualTo(200000));
             Assert.That(capturer.MaximumBitRate, Is.EqualTo(200000));
             Assert.That(capturer.SoftwareThreadCount, Is.EqualTo(1));
-            Assert.That(capturer.ConverterThreadCount, Is.EqualTo(1));
+            // GPU conversion replaces the CPU converter wherever the device supports it.
+            Assert.That(capturer.UsesGpuColorConversion, Is.EqualTo(SupportsGpuConversion()));
+            Assert.That(capturer.ConverterThreadCount, Is.EqualTo(capturer.UsesGpuColorConversion ? 0 : 1));
 
             yield return RenderFor(camera, 0.6);
             var stop = capturer.StopRecordingAsync();
@@ -247,6 +260,29 @@ namespace MajdataPlay.Tests.Plugins.FFmpeg
 
             yield return PlayModeWait.Frames(2);
             Assert.That(stopped, Is.EqualTo(1));
+        }
+
+        /// <summary>Checks that declining GPU conversion records RGBA readbacks through the CPU converter.</summary>
+        /// <returns>The test coroutine.</returns>
+        [UnityTest]
+        public IEnumerator Record_WithoutGpuConversion_UsesCpuConverter()
+        {
+            var capturer = CreateCapturer(true, out var camera);
+            capturer.PreferGpuColorConversion = false;
+            var path = FFmpegTestMedia.PathIn(_directory, "cpu.mkv");
+            var start = capturer.StartRecordingAsync(path);
+            yield return PlayModeWait.Until(() => start.IsCompleted);
+
+            Assert.That(start.Status, Is.EqualTo(TaskStatus.RanToCompletion));
+            Assert.That(capturer.UsesGpuColorConversion, Is.False);
+            Assert.That(capturer.ConverterThreadCount, Is.EqualTo(1));
+            yield return RenderFor(camera, 0.4);
+            var stop = capturer.StopRecordingAsync();
+            yield return PlayModeWait.Until(() => stop.IsCompleted);
+
+            Assert.That(stop.Status, Is.EqualTo(TaskStatus.RanToCompletion));
+            Assert.That(capturer.EncodedFrames, Is.GreaterThan(2));
+            Assert.That(CountFrames(path, out _), Is.EqualTo(capturer.EncodedFrames));
         }
 
         /// <summary>Checks that recording a main-display camera registers with the MRP capture bridge only while recording.</summary>

@@ -190,6 +190,42 @@ namespace MajdataPlay.Tests.Plugins.FFmpeg
             Assert.That(encoder.EncodedFrames, Is.EqualTo(1));
         }
 
+        /// <summary>Checks that NV12 input needs an NV12 encoder, which creates no converter threads and produces a decodable file.</summary>
+        [Test]
+        public void EncodeNv12_ValidatesLayoutAndEncodes()
+        {
+            var nv12 = new byte[Width * Height * 3 / 2];
+            Array.Fill(nv12, (byte)128);
+            using (var rgba = new FFmpegVideoEncoder(Options()))
+            {
+                rgba.Open(FFmpegTestMedia.PathIn(_directory, "rgba.mkv"), CancellationToken.None);
+                Assert.Throws<InvalidOperationException>(() => rgba.EncodeNv12(nv12, 0));
+            }
+
+            Assert.Throws<ArgumentOutOfRangeException>(() => new FFmpegVideoEncoder(Options(), (CapturePixelLayout)99));
+            var path = FFmpegTestMedia.PathIn(_directory, "nv12.mkv");
+            using (var encoder = new FFmpegVideoEncoder(Options(), CapturePixelLayout.Nv12))
+            {
+                Assert.Throws<InvalidOperationException>(() => encoder.EncodeNv12(nv12, 0));
+                encoder.Open(path, CancellationToken.None);
+                Assert.That(encoder.ConverterThreadCount, Is.EqualTo(0));
+                Assert.Throws<InvalidOperationException>(() => encoder.Encode(FFmpegTestMedia.CreateFrame(Width, Height, 0), 0, false));
+                Assert.Throws<ArgumentException>(() => encoder.EncodeNv12(new byte[10], 0));
+                Assert.Throws<ArgumentOutOfRangeException>(() => encoder.EncodeNv12(nv12, -1));
+                for (var i = 0; i < 4; i++)
+                {
+                    encoder.EncodeNv12(nv12, i);
+                }
+
+                Assert.Throws<ArgumentOutOfRangeException>(() => encoder.EncodeNv12(nv12, 3));
+                encoder.Complete();
+                Assert.That(encoder.EncodedFrames, Is.EqualTo(4));
+            }
+
+            Assert.That(CountFrames(path, out var codec), Is.EqualTo(4));
+            Assert.That(codec, Is.EqualTo("mpeg4"));
+        }
+
         /// <summary>Checks that the encoder rejects use from another thread.</summary>
         [Test]
         public void Encode_FromAnotherThread_IsRejected()

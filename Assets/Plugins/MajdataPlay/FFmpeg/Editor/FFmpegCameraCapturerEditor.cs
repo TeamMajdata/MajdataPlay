@@ -161,6 +161,8 @@ namespace MajdataPlay.FFmpeg.Editor
             EditorGUILayout.LabelField("Bitrate (maximum)", FormatBitRate(capturer.MaximumBitRate));
             EditorGUILayout.LabelField("Software threads (actual)", capturer.SoftwareThreadCount.ToString());
             EditorGUILayout.LabelField("Software threading (actual)", capturer.SoftwareThreadingMode);
+            EditorGUILayout.LabelField("Color conversion (actual)", capturer.Width == 0 ? "Not started"
+                : capturer.UsesGpuColorConversion ? "GPU (NV12 readback)" : "CPU (RGBA readback)");
             EditorGUILayout.LabelField("Converter threads (actual)", capturer.ConverterThreadCount.ToString());
             EditorGUILayout.LabelField("Submitted frames", capturer.EncodedFrames.ToString());
             EditorGUILayout.LabelField("Dropped frame intervals", capturer.DroppedFrames.ToString());

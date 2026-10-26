@@ -27,18 +27,18 @@ namespace MajdataPlay.FFmpeg.Internal
         {
             /// <summary>Identifies the matching reusable GPU texture.</summary>
             public readonly int Slot;
-            /// <summary>Stores packed RGBA8 pixels until encoding finishes.</summary>
+            /// <summary>Stores the tightly packed readback pixels in the session's layout until encoding finishes.</summary>
             public readonly byte[] Pixels;
             /// <summary>Stores the capture timestamp in units of the recording frame rate.</summary>
             public long FrameIndex;
-            /// <summary>Requests conversion of bottom-first readback rows to top-first video rows.</summary>
+            /// <summary>Requests conversion of bottom-first readback rows to top-first video rows; NV12 frames are already top-first.</summary>
             public bool FlipVertically;
             /// <summary>Tracks the current buffer owner under the session lock.</summary>
             internal BufferState _state;
 
             /// <summary>Creates one fixed-size capture buffer.</summary>
             /// <param name="slot">The corresponding GPU texture index.</param>
-            /// <param name="size">The packed RGBA byte count.</param>
+            /// <param name="size">The packed frame byte count.</param>
             public CaptureFrame(int slot, int size)
             {
                 Slot = slot;
@@ -52,6 +52,8 @@ namespace MajdataPlay.FFmpeg.Internal
         private readonly CaptureFrame[] _frames;
         /// <summary>Holds the immutable configuration for this session.</summary>
         private readonly EncoderOptions _options;
+        /// <summary>Stores the pixel layout of every capture buffer.</summary>
+        private readonly CapturePixelLayout _layout;
         /// <summary>Stores the local output path.</summary>
         private readonly string _path;
         /// <summary>Links recording cancellation to the caller's lifetime.</summary>
@@ -85,12 +87,26 @@ namespace MajdataPlay.FFmpeg.Internal
         /// <summary>Stores the largest number of buffers reserved at once.</summary>
         private int _peakReservedFrames;
 
-        /// <summary>Starts a worker with bounded capture storage.</summary>
+        /// <summary>Starts a worker with bounded storage for RGBA8 captures.</summary>
         /// <param name="path">The local output file to create.</param>
         /// <param name="options">The validated configuration snapshot.</param>
         /// <param name="capacity">The maximum simultaneous GPU, queued, and encoder reservations.</param>
         /// <param name="cancellationToken">Cancellation for the entire recording lifetime.</param>
+        /// <exception cref="ArgumentOutOfRangeException">The options or capacity are invalid.</exception>
         public VideoEncodeSession(string path, EncoderOptions options, int capacity, CancellationToken cancellationToken)
+            : this(path, options, capacity, CapturePixelLayout.Rgba32, cancellationToken)
+        {
+        }
+
+        /// <summary>Starts a worker with bounded capture storage in one pixel layout.</summary>
+        /// <param name="path">The local output file to create.</param>
+        /// <param name="options">The validated configuration snapshot.</param>
+        /// <param name="capacity">The maximum simultaneous GPU, queued, and encoder reservations.</param>
+        /// <param name="layout">The layout that every readback writes into the capture buffers.</param>
+        /// <param name="cancellationToken">Cancellation for the entire recording lifetime.</param>
+        /// <exception cref="ArgumentOutOfRangeException">The options, capacity, or layout are invalid.</exception>
+        public VideoEncodeSession(string path, EncoderOptions options, int capacity, CapturePixelLayout layout,
+            CancellationToken cancellationToken)
         {
             _path = path;
             _options = options.ValidateAndClone();
@@ -98,10 +114,16 @@ namespace MajdataPlay.FFmpeg.Internal
             {
                 throw new ArgumentOutOfRangeException(nameof(capacity));
             }
+            if (!Enum.IsDefined(typeof(CapturePixelLayout), layout))
+            {
+                throw new ArgumentOutOfRangeException(nameof(layout));
+            }
+            _layout = layout;
+            var frameSize = layout.GetFrameByteCount(_options.Width, _options.Height);
             _frames = new CaptureFrame[capacity];
             for (var i = 0; i < capacity; i++)
             {
-                _frames[i] = new CaptureFrame(i, checked(_options.Width * _options.Height * 4));
+                _frames[i] = new CaptureFrame(i, frameSize);
             }
             _cancel = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             new Thread(Run) { IsBackground = true, Name = "FFmpeg camera encoder" }.Start();
@@ -257,6 +279,8 @@ namespace MajdataPlay.FFmpeg.Internal
 
         /// <summary>Gets the number of capture buffers, which bounds simultaneous GPU, queued, and encoder reservations.</summary>
         public int Capacity => _frames.Length;
+        /// <summary>Gets the pixel layout that readbacks write into the capture buffers.</summary>
+        public CapturePixelLayout PixelLayout => _layout;
         /// <summary>Gets the largest number of buffers reserved at once, including the reservation that found the pool full.</summary>
         /// <remarks>Reaching <see cref="Capacity"/> repeatedly means readback latency and encoding need more buffers.</remarks>
         public int PeakReservedFrames
@@ -345,7 +369,7 @@ namespace MajdataPlay.FFmpeg.Internal
         {
             try
             {
-                using (var encoder = new FFmpegVideoEncoder(_options))
+                using (var encoder = new FFmpegVideoEncoder(_options, _layout))
                 {
                     encoder.Open(_path, _cancel.Token);
                     Publish(encoder);
@@ -359,7 +383,14 @@ namespace MajdataPlay.FFmpeg.Internal
                         }
                         try
                         {
-                            encoder.Encode(frame.Pixels, frame.FrameIndex, frame.FlipVertically);
+                            if (_layout == CapturePixelLayout.Nv12)
+                            {
+                                encoder.EncodeNv12(frame.Pixels, frame.FrameIndex);
+                            }
+                            else
+                            {
+                                encoder.Encode(frame.Pixels, frame.FrameIndex, frame.FlipVertically);
+                            }
                             Publish(encoder);
                         }
                         finally

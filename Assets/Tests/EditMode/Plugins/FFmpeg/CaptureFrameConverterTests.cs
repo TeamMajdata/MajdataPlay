@@ -98,6 +98,97 @@ namespace MajdataPlay.Tests.Plugins.FFmpeg
             }
         }
 
+        /// <summary>Packs the visible samples of a YUV420P or NV12 frame as a tightly packed NV12 image.</summary>
+        /// <param name="frame">The frame to read.</param>
+        /// <returns>The Y plane followed by the interleaved Cb, Cr rows.</returns>
+        private static byte[] PackNv12(AVFrame* frame)
+        {
+            var width = frame->width;
+            var height = frame->height;
+            var packed = new byte[width * height * 3 / 2];
+            for (var y = 0; y < height; y++)
+            {
+                for (var x = 0; x < width; x++)
+                {
+                    packed[(y * width) + x] = ReadSample(frame, 0, x, y);
+                }
+            }
+
+            for (var y = 0; y < height / 2; y++)
+            {
+                for (var x = 0; x < width / 2; x++)
+                {
+                    var sample = (width * height) + (y * width) + (2 * x);
+                    packed[sample] = ReadSample(frame, 1, x, y);
+                    packed[sample + 1] = ReadSample(frame, 2, x, y);
+                }
+            }
+
+            return packed;
+        }
+
+        /// <summary>Checks the packed frame sizes of both capture layouts.</summary>
+        [Test]
+        public void GetFrameByteCount_ReturnsPackedSizes()
+        {
+            Assert.That(CapturePixelLayout.Rgba32.GetFrameByteCount(540, 1200), Is.EqualTo(540 * 1200 * 4));
+            Assert.That(CapturePixelLayout.Nv12.GetFrameByteCount(540, 1200), Is.EqualTo(540 * 1200 * 3 / 2));
+            Assert.Throws<ArgumentOutOfRangeException>(() => ((CapturePixelLayout)99).GetFrameByteCount(2, 2));
+        }
+
+        /// <summary>Checks NV12 copy length, destination and format validation.</summary>
+        [Test]
+        public void CopyNv12_RejectsInvalidInput()
+        {
+            var nv12 = new byte[8 * 4 * 3 / 2];
+            var rgba = NativeFrames.Allocate(8, 4, AVPixelFormat.AV_PIX_FMT_RGBA);
+            var smaller = NativeFrames.Allocate(8, 2, AVPixelFormat.AV_PIX_FMT_NV12);
+            var valid = NativeFrames.Allocate(8, 4, AVPixelFormat.AV_PIX_FMT_NV12);
+            try
+            {
+                Assert.Throws<ArgumentException>(() => CaptureFrameConverter.CopyNv12(new byte[8 * 4 * 4], 8, 4, valid));
+                Assert.Throws<ArgumentNullException>(() => CaptureFrameConverter.CopyNv12(nv12, 8, 4, null));
+                Assert.Throws<NotSupportedException>(() => CaptureFrameConverter.CopyNv12(nv12, 8, 4, rgba));
+                Assert.Throws<NotSupportedException>(() => CaptureFrameConverter.CopyNv12(nv12, 8, 4, smaller));
+                Assert.DoesNotThrow(() => CaptureFrameConverter.CopyNv12(nv12, 8, 4, valid));
+            }
+            finally
+            {
+                NativeFrames.Free(rgba);
+                NativeFrames.Free(smaller);
+                NativeFrames.Free(valid);
+            }
+        }
+
+        /// <summary>Checks that copying a converted NV12 image reproduces the converted samples in both destination formats.</summary>
+        /// <param name="format">The destination format.</param>
+        [TestCase(AVPixelFormat.AV_PIX_FMT_YUV420P)]
+        [TestCase(AVPixelFormat.AV_PIX_FMT_NV12)]
+        public void CopyNv12_ReproducesConvertedSamples(AVPixelFormat format)
+        {
+            const int width = 322;
+            const int height = 200;
+            var pixels = CreateRandomRgba(width, height, 11);
+            var converted = NativeFrames.Allocate(width, height, AVPixelFormat.AV_PIX_FMT_NV12);
+            var expected = NativeFrames.Allocate(width, height, format);
+            var copied = NativeFrames.Allocate(width, height, format);
+            try
+            {
+                using var converter = new CaptureFrameConverter(width, height, 1);
+                converter.Convert(pixels, true, converted);
+                converter.Convert(pixels, true, expected);
+                CaptureFrameConverter.CopyNv12(PackNv12(converted), width, height, copied);
+
+                AssertSameSamples(expected, copied, "format " + format);
+            }
+            finally
+            {
+                NativeFrames.Free(converted);
+                NativeFrames.Free(expected);
+                NativeFrames.Free(copied);
+            }
+        }
+
         /// <summary>Checks constructor validation.</summary>
         [Test]
         public void Constructor_RejectsInvalidArguments()

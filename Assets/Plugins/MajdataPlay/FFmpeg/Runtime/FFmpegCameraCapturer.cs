@@ -77,6 +77,10 @@ namespace MajdataPlay.FFmpeg
         [SerializeField]
         [FormerlySerializedAs("ReadbackOrientation")]
         private CameraReadbackOrientation _readbackOrientation;
+        /// <summary>Requests RGBA to NV12 conversion on the GPU before readback when the device supports it.</summary>
+        [SerializeField]
+        [FormerlySerializedAs("PreferGpuColorConversion")]
+        private bool _preferGpuColorConversion = true;
         /// <summary>Tracks elapsed recording time independently of the Unity time scale.</summary>
         private readonly Stopwatch _clock = new Stopwatch();
         /// <summary>Owns the active background encoding session.</summary>
@@ -147,6 +151,15 @@ namespace MajdataPlay.FFmpeg
         }
         /// <summary>Gets or sets the readback row interpretation used for the next recording.</summary>
         public CameraReadbackOrientation ReadbackOrientation { get => _readbackOrientation; set => _readbackOrientation = value; }
+        /// <summary>Gets or sets whether the next recording converts RGBA to NV12 on the GPU before readback when the device supports it.</summary>
+        /// <remarks>
+        /// GPU conversion reads back 1.5 instead of 4 bytes per pixel and needs no CPU converter threads, with samples equal
+        /// to the CPU conversion. Without support for the conversion shader or R8 render and readback targets the
+        /// recording converts on the CPU; see <see cref="UsesGpuColorConversion"/>.
+        /// </remarks>
+        public bool PreferGpuColorConversion { get => _preferGpuColorConversion; set => _preferGpuColorConversion = value; }
+        /// <summary>Gets whether the active or last recording converts RGBA to NV12 on the GPU, or false before recording starts.</summary>
+        public bool UsesGpuColorConversion => _session?.PixelLayout == CapturePixelLayout.Nv12;
         /// <summary>Gets the current recording state.</summary>
         public CameraCaptureState State { get; private set; }
         /// <summary>Gets whether new rendered camera frames are being captured.</summary>
@@ -191,7 +204,7 @@ namespace MajdataPlay.FFmpeg
         public int SoftwareThreadCount => _session?.SoftwareThreadCount ?? 0;
         /// <summary>Gets how the active software codec parallelizes encoding: <c>frame</c>, <c>slice</c>, <c>codec</c>, or <c>none</c> for one thread, hardware, or before initialization.</summary>
         public string SoftwareThreadingMode => _session?.SoftwareThreadingMode ?? "none";
-        /// <summary>Gets the active RGBA color-converter worker count, or zero before initialization.</summary>
+        /// <summary>Gets the active RGBA color-converter worker count, or zero before initialization or with GPU color conversion.</summary>
         public int ConverterThreadCount => _session?.ConverterThreadCount ?? 0;
         /// <summary>Gets the active recording format, or null before recording starts.</summary>
         public VideoEncodingFormat? EncodingFormat => _activeOptions?.Format;
@@ -286,11 +299,11 @@ namespace MajdataPlay.FFmpeg
             VideoEncodeSession? session = null;
             try
             {
-                var resources = new CaptureResources(options, _bufferedFrameLimit);
-                resources.FlipVertically = _readbackOrientation != CameraReadbackOrientation.TopFirst;
+                var resources = new CaptureResources(options, _bufferedFrameLimit,
+                    _readbackOrientation != CameraReadbackOrientation.TopFirst, _preferGpuColorConversion);
                 try
                 {
-                    session = new VideoEncodeSession(path, options, _bufferedFrameLimit, cancellationToken);
+                    session = new VideoEncodeSession(path, options, _bufferedFrameLimit, resources.PixelLayout, cancellationToken);
                     _session = session;
                     resources.Session = session;
                 }
@@ -706,6 +719,10 @@ namespace MajdataPlay.FFmpeg
         {
             /// <summary>Owns one GPU copy and cached callback per bounded frame slot.</summary>
             private readonly ReadbackSlot[] _slots;
+            /// <summary>Converts captures to NV12 before readback, or null when slots read back RGBA for CPU conversion.</summary>
+            private readonly CaptureGpuConverter? _gpuConverter;
+            /// <summary>Stores the texture format requested from every readback.</summary>
+            private readonly TextureFormat _readbackFormat;
             /// <summary>Counts outstanding GPU readbacks that must finish before texture destruction.</summary>
             private int _pending;
             /// <summary>Requests texture destruction as soon as pending readbacks finish.</summary>
@@ -718,22 +735,41 @@ namespace MajdataPlay.FFmpeg
             public VideoEncodeSession? Session { get; set; }
             /// <summary>Gets the reusable command buffer for Built-in rendering.</summary>
             public CommandBuffer Commands { get; } = new CommandBuffer { name = "FFmpeg Camera Capture" };
-            /// <summary>Gets or sets the fixed row conversion for this recording.</summary>
-            public bool FlipVertically { get; set; }
+            /// <summary>Gets the fixed row conversion for this recording.</summary>
+            public bool FlipVertically { get; }
+            /// <summary>Gets the layout that the readbacks deliver to the encoding session.</summary>
+            public CapturePixelLayout PixelLayout => _gpuConverter != null ? CapturePixelLayout.Nv12 : CapturePixelLayout.Rgba32;
             /// <summary>Gets the task reporting that all owned GPU resources have been released.</summary>
             public Task Released => _releasedCompletion.Task;
 
             /// <summary>Allocates fixed GPU copies without redirecting the source camera.</summary>
             /// <param name="options">The fixed recording resolution.</param>
             /// <param name="capacity">The simultaneous capture limit.</param>
-            public CaptureResources(EncoderOptions options, int capacity)
+            /// <param name="flipVertically">Whether the captured rows are bottom-first.</param>
+            /// <param name="preferGpuConversion">Whether to convert to NV12 on the GPU when the device supports it.</param>
+            /// <exception cref="NotSupportedException">The graphics device cannot create a capture target.</exception>
+            public CaptureResources(EncoderOptions options, int capacity, bool flipVertically, bool preferGpuConversion)
             {
+                FlipVertically = flipVertically;
                 _slots = new ReadbackSlot[capacity];
                 try
                 {
+                    if (preferGpuConversion)
+                    {
+                        _gpuConverter = CaptureGpuConverter.TryCreate(options.Width, options.Height, flipVertically, out var reason);
+                        if (_gpuConverter == null)
+                        {
+                            MajDebug.LogInfo("FFmpeg", "[Capturer] Converting captures on the CPU because " + reason + ".");
+                        }
+                    }
+
+                    _readbackFormat = _gpuConverter != null ? CaptureGpuConverter.ReadbackFormat : TextureFormat.RGBA32;
                     for (var i = 0; i < capacity; i++)
                     {
-                        _slots[i] = new ReadbackSlot(this, options.Width, options.Height);
+                        var texture = _gpuConverter != null ? _gpuConverter.CreateTarget()
+                            : CaptureGpuConverter.CreateRgbaTarget(options.Width, options.Height)
+                                ?? throw new NotSupportedException("Cannot create the camera's RGBA8 capture target.");
+                        _slots[i] = new ReadbackSlot(this, texture);
                     }
                 }
                 catch
@@ -755,8 +791,18 @@ namespace MajdataPlay.FFmpeg
                 _pending++;
                 try
                 {
-                    commands.Blit(source, slot.Texture, new Vector2(viewport.width, viewport.height), new Vector2(viewport.x, viewport.y));
-                    commands.RequestAsyncReadback(slot.Texture, 0, TextureFormat.RGBA32, slot.Callback);
+                    var scale = new Vector2(viewport.width, viewport.height);
+                    var offset = new Vector2(viewport.x, viewport.y);
+                    if (_gpuConverter != null)
+                    {
+                        _gpuConverter.Record(commands, source, scale, offset, slot.Texture);
+                    }
+                    else
+                    {
+                        commands.Blit(source, slot.Texture, scale, offset);
+                    }
+
+                    commands.RequestAsyncReadback(slot.Texture, 0, _readbackFormat, slot.Callback);
                 }
                 catch (Exception error)
                 {
@@ -796,6 +842,7 @@ namespace MajdataPlay.FFmpeg
                     Destroy(slot.Texture);
                 }
 
+                _gpuConverter?.Dispose();
                 Commands.Dispose();
                 _releasedCompletion.TrySetResult(true);
             }
@@ -805,35 +852,20 @@ namespace MajdataPlay.FFmpeg
             {
                 /// <summary>Retains the resource owner until the GPU completion runs.</summary>
                 private readonly CaptureResources _owner;
-                /// <summary>Gets the single-sample RGBA texture owned by this slot.</summary>
+                /// <summary>Gets the single-sample RGBA or NV12 readback texture owned by this slot.</summary>
                 public RenderTexture Texture { get; }
                 /// <summary>Gets the cached callback, avoiding a delegate allocation per frame.</summary>
                 public Action<AsyncGPUReadbackRequest> Callback { get; }
                 /// <summary>Gets or sets the reservation associated with the current GPU request.</summary>
                 public VideoEncodeSession.CaptureFrame? Frame { get; set; }
 
-                /// <summary>Allocates one fixed-resolution GPU capture target.</summary>
+                /// <summary>Takes ownership of one fixed-resolution GPU capture target.</summary>
                 /// <param name="owner">The resource lifetime and encoding owner.</param>
-                /// <param name="width">The recording width in pixels.</param>
-                /// <param name="height">The recording height in pixels.</param>
-                /// <exception cref="NotSupportedException">The graphics device cannot create an RGBA8 target.</exception>
-                public ReadbackSlot(CaptureResources owner, int width, int height)
+                /// <param name="texture">The created readback target, destroyed when the owner releases its resources.</param>
+                public ReadbackSlot(CaptureResources owner, RenderTexture texture)
                 {
                     _owner = owner;
-                    Texture = new RenderTexture(width, height, 0, RenderTextureFormat.ARGB32, RenderTextureReadWrite.sRGB)
-                    {
-                        name = "FFmpeg camera readback",
-                        antiAliasing = 1,
-                        useMipMap = false,
-                        autoGenerateMips = false
-                    };
-
-                    if (!Texture.Create())
-                    {
-                        Destroy(Texture);
-                        throw new NotSupportedException("Cannot create the camera's RGBA8 capture target.");
-                    }
-
+                    Texture = texture;
                     Callback = Complete;
                 }
 
