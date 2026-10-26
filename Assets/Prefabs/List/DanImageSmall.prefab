@@ -218,8 +218,8 @@ MonoBehaviour:
       m_Calls: []
   m_text: "\u767A\u72C2\u521D\u6BB5"
   m_isRightToLeft: 0
-  m_fontAsset: {fileID: 11400000, guid: a014c8b097dfdb24997585b34c61b2ca, type: 2}
-  m_sharedMaterial: {fileID: -3293904412965985367, guid: a014c8b097dfdb24997585b34c61b2ca, type: 2}
+  m_fontAsset: {fileID: 11400000, guid: 464b47ef51400ec4db25bf3fa2d3c9af, type: 2}
+  m_sharedMaterial: {fileID: 2100000, guid: 38ad4aa54ff8ebe468dc8aac3d6c1cfd, type: 2}
   m_fontSharedMaterials: []
   m_fontMaterial: {fileID: 0}
   m_fontMaterials: []
