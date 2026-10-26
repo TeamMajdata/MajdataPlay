@@ -1,9 +1,14 @@
-using MajdataPlay.UnsafeKit;
 using System;
 using System.Dynamic;
 using System.IO;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+#if UNITY_EDITOR_WIN || UNITY_STANDALONE_WIN || UNITY_WSA
+using NativeLong = System.Int32;
+#else
+// C long is pointer-sized on Android/Unix, including 32-bit ARM.
+using NativeLong = System.IntPtr;
+#endif
 
 #nullable enable
 namespace MajdataPlay.Net.Curl.Core.PInvoke
@@ -154,8 +159,10 @@ namespace MajdataPlay.Net.Curl.Core.PInvoke
 
 
 
-        [DllImport(DLL_NAME, EntryPoint = "curl_global_init", CallingConvention = CallingConvention.Cdecl)]
-        public static extern CurlCode Init(CurlInitOption flags);
+        public static CurlCode Init(CurlInitOption flags) => curl_global_init((NativeLong)(long)flags);
+
+        [DllImport(DLL_NAME, CallingConvention = CallingConvention.Cdecl)]
+        static extern CurlCode curl_global_init(NativeLong flags);
 
         [DllImport(DLL_NAME, EntryPoint = "curl_global_cleanup", CallingConvention = CallingConvention.Cdecl)]
         public static extern void CleanUp();
@@ -171,12 +178,16 @@ namespace MajdataPlay.Net.Curl.Core.PInvoke
         public static unsafe CurlVersionInfo GetVersionInfo(int age)
         {
             var ptr = curl_version_info(age);
+            if (ptr == IntPtr.Zero)
+            {
+                throw new InvalidOperationException("curl_version_info returned a null pointer.");
+            }
             var info = Marshal.PtrToStructure<CurlVersionInfoRawData>(ptr);
             var protocols = Array.Empty<string>();
             var protocolsPtr = info.Protocols;
             var protocolCount = 0;
 
-            while (*protocolsPtr != null)
+            while (protocolsPtr != null && *protocolsPtr != null)
             {
                 protocolsPtr++;
                 protocolCount++;
@@ -200,14 +211,14 @@ namespace MajdataPlay.Net.Curl.Core.PInvoke
                 Host = Marshal.PtrToStringUTF8((IntPtr)info.Host),
                 Features = info.Features,
                 SslVersion = Marshal.PtrToStringUTF8((IntPtr)info.SslVersion),
-                SslVersionNum = info.SslVersionNum,
+                SslVersionNum = (long)info.SslVersionNum,
                 LibzVersion = Marshal.PtrToStringUTF8((IntPtr)info.LibzVersion),
                 Protocols = protocols
             };
         }
 
         [DllImport(DLL_NAME, CallingConvention = CallingConvention.Cdecl)]
-        static extern IntPtr curl_version_info(CLong age);
+        static extern IntPtr curl_version_info(int age);
 
 
         [StructLayout(LayoutKind.Sequential)]
@@ -225,7 +236,7 @@ namespace MajdataPlay.Net.Curl.Core.PInvoke
 
             public byte* SslVersion;
 
-            public long SslVersionNum;
+            public NativeLong SslVersionNum;
 
             public byte* LibzVersion;
 

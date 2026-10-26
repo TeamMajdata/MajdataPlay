@@ -14,6 +14,7 @@ namespace MajdataPlay.Settings
         Yuan,
         Dao,
         Nov,
+        NPro,
         Pipe = 9999
     }
 }

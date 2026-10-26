@@ -27,7 +27,7 @@ namespace MajdataPlay.Numerics
             var v = source - origin;
             var d = v.magnitude;
             var ratio = (d + distance) / d;
-            return v * ratio;
+            return origin + (v * ratio);
         }
     }
 }

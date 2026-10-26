@@ -536,7 +536,7 @@ namespace MajdataPlay.Scenes.Game.Notes.Controllers
                     _rentedArrayForAnswerSoundPoints[i] = tp;
                 }
                 print("TimingPoint Count " + answerTimingPoints.Count);
-                _answerTimingPoints = _rentedArrayForAnswerSoundPoints.AsMemory(0, answerTimingPoints.Capacity);
+                _answerTimingPoints = _rentedArrayForAnswerSoundPoints.AsMemory(0, answerTimingPoints.Count);
                 FirstClockTiming = _answerTimingPoints.Span[0].Timing;
             });
         }

@@ -1,127 +1,134 @@
 using Cysharp.Threading.Tasks;
-using MajdataPlay.Settings;
+using LitMotion;
 using MajdataPlay.Collections;
-using MajdataPlay.Extensions;
-using MajdataPlay.IO;
 using MajdataPlay.i18n;
-using MajdataPlay.Utils;
+using MajdataPlay.IO;
+using MajdataPlay.Recording;
+using MajdataPlay.Settings;
+using MajdataPlay.Settings.Runtime;
 using System;
 using System.Collections.Generic;
 using System.Reflection;
-using UnityEngine;
-using MajdataPlay.Settings.Runtime;
-using UnityEngine.Serialization;
 using TMPro;
-using LitMotion;
+using UnityEngine;
+using UnityEngine.Serialization;
 
 namespace MajdataPlay.Scenes.Setting
 {
     public class SettingManager : MonoBehaviour
     {
-        const float MENU_TITLE_VISIBLE_DISTANCE = 3.5f;
+        private const float MenuTitleVisibleDistance = 3.5f;
 
         // Metadata survives scene changes, but never retains a GameSetting/ChartSetting instance.
-        static readonly Dictionary<Type, MenuMetadata[]> _menuMetadataCache = new();
+        private static readonly Dictionary<Type, MenuMetadata[]> s_menuMetadataCache = new();
 
         public int Index { get; private set; } = 0;
         public GameSetting Setting => MajEnv.Settings;
 
-        public GameObject menuPrefab;
+        [SerializeField]
+        [FormerlySerializedAs("menuPrefab")]
+        private GameObject _menuPrefab;
 
         [SerializeField]
         [FormerlySerializedAs("menuTitleDisplayerPrefab")]
-        MenuTitleDisplayer _menuTitleDisplayerPrefab;
+        private MenuTitleDisplayer _menuTitleDisplayerPrefab;
 
         [SerializeField]
         [FormerlySerializedAs("menuListRoot")]
-        GameObject _menuListRoot;
+        private GameObject _menuListRoot;
 
         [SerializeField]
         [FormerlySerializedAs("menuTitleDisplayerListRoot")]
-        GameObject _menuTitleDisplayerListRoot;
+        private GameObject _menuTitleDisplayerListRoot;
 
         [SerializeField]
         [FormerlySerializedAs("descriptionText")]
-        TextMeshProUGUI _descriptionTextDisplayer;
+        private TextMeshProUGUI _descriptionTextDisplayer;
 
-        Menu[] menus = Array.Empty<Menu>();
-        MenuTitleDisplayer[] _menuTitleDisplayers = Array.Empty<MenuTitleDisplayer>();
+        private Menu[] _menus = Array.Empty<Menu>();
+        // Whether each menu is listed; its title cursor counts listed menus only.
+        private bool[] _isMenuDisplayed = Array.Empty<bool>();
+        private MenuTitleDisplayer[] _menuTitleDisplayers = Array.Empty<MenuTitleDisplayer>();
 
-        float _listCursorPos = 0;
-        int _listCursorTarget = 0;
-        MotionHandle _menuTitleDisplayerAnim;
-        readonly Stack<Option> _optionPool = new(Menu.OPTION_POOL_CAPACITY);
-        readonly HashSet<TMP_FontAsset> _optionFonts = new();
-        Transform _optionPoolRoot = null!;
-        string _descriptionText = null!;
+        private float _listCursorPos = 0;
+        private int _listCursorTarget = 0;
+        private MotionHandle _menuTitleDisplayerAnim;
+        private readonly Stack<Option> _optionPool = new(Menu.OPTION_POOL_CAPACITY);
+        private readonly HashSet<TMP_FontAsset> _optionFonts = new();
+        private Transform _optionPoolRoot = null!;
+        private string _descriptionText = null!;
 
-        bool _isExited = false;
-        bool _isInited = false;
-        OffsetUnitOption _lastOffsetUnit;
-        InputRepeatState _categoryInput;
-        InputRepeatState _optionInput;
-        bool _advancedInputHeld;
+        private bool _isExited = false;
+        private bool _isInited = false;
+        private OffsetUnitOption _lastOffsetUnit;
+        private InputRepeatState _categoryInput;
+        private InputRepeatState _optionInput;
+        private bool _advancedInputHeld;
 
-        readonly SettingConfig _settingConfig = MajEnv.RuntimeConfig?.Setting ?? new();
-        void Awake()
+        private readonly SettingConfig _settingConfig = MajEnv.RuntimeConfig?.Setting ?? new();
+        private void Awake()
         {
             InputManager.TouchButtonRingEdge = 4.8f;
             _lastOffsetUnit = Setting.Debug.OffsetUnit;
             EnsureNestedCanvas(_menuTitleDisplayerListRoot);
             EnsureNestedCanvas(_descriptionTextDisplayer.gameObject);
         }
-        void Start()
+        private void Start()
         {
             var categories = GetMenuMetadata(Setting.GetType());
             var offset = 0;
             var listRoot = _menuListRoot.transform;
             if (!_settingConfig.IgnoreChartSettingPage && !string.IsNullOrEmpty(MajEnv.RuntimeConfig.List.SelectedSongHash))
             {
-                menus = new Menu[categories.Length + 1];
+                _menus = new Menu[categories.Length + 1];
                 offset = 1;
                 var chartSetting = ChartSettingStorage.GetSetting(MajEnv.RuntimeConfig.List.SelectedSongHash);
                 var chartSettingType = chartSetting.GetType();
-                var menuObj = Instantiate(menuPrefab, listRoot);
+                var menuObj = Instantiate(_menuPrefab, listRoot);
                 menuObj.SetActive(false);
                 menuObj.name = chartSettingType.Name;
                 var menu = menuObj.GetComponent<Menu>();
-                menus[0] = menu;
+                _menus[0] = menu;
                 menu.Instance = chartSetting;
                 menu.Name = chartSettingType.Name;
+                menu.TitleTranslation = SettingReflectionCache.GetMenuTranslation(null, chartSettingType.Name);
             }
             else
             {
-                menus = new Menu[categories.Length];
+                _menus = new Menu[categories.Length];
             }
             foreach (var (i, category) in categories.WithIndex())
             {
-                var menuObj = Instantiate(menuPrefab, listRoot);
+                var menuObj = Instantiate(_menuPrefab, listRoot);
                 menuObj.SetActive(false);
                 menuObj.name = category.Name;
                 var menu = menuObj.GetComponent<Menu>();
-                menus[i + offset] = menu;
+                _menus[i + offset] = menu;
                 menu.Instance = category.GetInstance(Setting);
                 menu.Name = category.Name;
+                menu.TitleTranslation = category.TitleTranslation;
+                menu.Visibility = category.Visibility;
             }
+            _isMenuDisplayed = new bool[_menus.Length];
             // Build scene-local enumerators before the fade opens and before any navigation.
             // Only immutable reflection metadata is shared with subsequent Setting visits.
-            foreach (var menu in menus)
+            foreach (var menu in _menus)
             {
                 menu.Init();
             }
             RestoreSelectedMenu();
-            menus[Index].ToOption(_settingConfig.SelectedOption);
-            menus[Index].gameObject.SetActive(true);
+            _menus[Index].ToOption(_settingConfig.SelectedOption);
+            _menus[Index].gameObject.SetActive(true);
 
             MajInstances.AudioManager.PlaySFX("settings.wav");
 
-            _menuTitleDisplayers = new MenuTitleDisplayer[menus.Length];
+            _menuTitleDisplayers = new MenuTitleDisplayer[_menus.Length];
             var menuTitleDisplayerListRoot = _menuTitleDisplayerListRoot.transform;
-            for (var i = 0; i < menus.Length; i++)
+            for (var i = 0; i < _menus.Length; i++)
             {
-                var menu = menus[i];
+                var menu = _menus[i];
                 var displayer = Instantiate(_menuTitleDisplayerPrefab, menuTitleDisplayerListRoot);
-                displayer.Initialize($"MAJSETTING_CATEGORY_{menu.Name}");
+                displayer.Initialize(menu.GetLocalizedTitle);
                 _menuTitleDisplayers[i] = displayer;
             }
             WarmupTextFonts();
@@ -129,12 +136,12 @@ namespace MajdataPlay.Scenes.Setting
             UpdateMenuTitleDisplayerPosition();
             InitializeCurrentMenu().Forget();
         }
-        void OnLanguageChanged(object sender, Language language)
+        private void OnLanguageChanged(object sender, Language language)
         {
             // Complete glyph/feature discovery before TMP reaches Canvas PreRender.
             WarmupTextFonts();
         }
-        void WarmupTextFonts()
+        private void WarmupTextFonts()
         {
             var warmup = new SettingFontWarmup();
             var descriptionFont = _descriptionTextDisplayer.font;
@@ -143,21 +150,21 @@ namespace MajdataPlay.Scenes.Setting
                 // Numeric values may change without visiting a new enum label.
                 warmup.AddText(font, "0123456789.,+-:%/()eE NaNInfinity∞");
             }
-            foreach (var menu in menus)
+            foreach (var menu in _menus)
             {
                 menu.CollectWarmupText(warmup, _optionFonts, descriptionFont);
             }
             for (var i = 0; i < _menuTitleDisplayers.Length; i++)
             {
-                warmup.AddText(_menuTitleDisplayers[i].Font, $"MAJSETTING_CATEGORY_{menus[i].Name}".i18n());
+                warmup.AddText(_menuTitleDisplayers[i].Font, _menus[i].GetLocalizedTitle());
             }
             warmup.AddText(descriptionFont, $"MAJTEXT_SETTING_OFFSETUNIT_{OffsetUnitOption.Second}".i18n());
             warmup.AddText(descriptionFont, $"MAJTEXT_SETTING_OFFSETUNIT_{OffsetUnitOption.Frame}".i18n());
             warmup.Warmup();
         }
-        static MenuMetadata[] GetMenuMetadata(Type settingType)
+        private static MenuMetadata[] GetMenuMetadata(Type settingType)
         {
-            if (_menuMetadataCache.TryGetValue(settingType, out var cached))
+            if (s_menuMetadataCache.TryGetValue(settingType, out var cached))
             {
                 return cached;
             }
@@ -175,20 +182,26 @@ namespace MajdataPlay.Scenes.Setting
             }
             // Include chart options even if the first visit has no selected chart.
             SettingReflectionCache.GetVisibleProperties(typeof(ChartSetting));
-            _menuMetadataCache.Add(settingType, categories);
+            s_menuMetadataCache.Add(settingType, categories);
             return categories;
         }
 
-        sealed class MenuMetadata
+        private sealed class MenuMetadata
         {
-            readonly PropertyInfo _categoryProperty;
-            readonly PropertyInfo _valueProperty;
+            private readonly PropertyInfo _categoryProperty;
+            private readonly PropertyInfo _valueProperty;
             internal string Name => _valueProperty.Name;
+            // The translation attributes live on the root category property; {0} is the displayed menu name.
+            internal SettingTranslation TitleTranslation { get; }
+            // Like the translation attributes, the visibility conditions live on the root category property.
+            internal SettingVisibility Visibility { get; }
 
             internal MenuMetadata(PropertyInfo categoryProperty, PropertyInfo valueProperty)
             {
                 _categoryProperty = categoryProperty;
                 _valueProperty = valueProperty;
+                TitleTranslation = SettingReflectionCache.GetMenuTranslation(categoryProperty, valueProperty.Name);
+                Visibility = SettingReflectionCache.GetVisibility(categoryProperty);
             }
 
             internal object GetInstance(GameSetting setting)
@@ -199,13 +212,13 @@ namespace MajdataPlay.Scenes.Setting
                 return _valueProperty.GetValue(root);
             }
         }
-        void Update()
+        private void Update()
         {
-            if(_isExited || !_isInited)
+            if (_isExited || !_isInited)
             {
                 return;
             }
-            var currentMenu = menus[Index];
+            var currentMenu = _menus[Index];
             var isCalibratorRequested = InputManager.IsButtonClickCompletedInThisFrame(ButtonZone.A1) ||
                                         InputManager.IsSensorClickCompletedInThisFrame(SensorArea.A1);
             if (isCalibratorRequested)
@@ -275,6 +288,12 @@ namespace MajdataPlay.Scenes.Setting
             {
                 currentMenu.RefreshVisibleEnumerators();
             }
+            // An edited option can list or unlist other menus; update the list before navigating it.
+            if (UpdateMenuVisibility())
+            {
+                _menuTitleDisplayerAnim.TryCancel();
+                NormalizeMenuTitleCursor();
+            }
             if (nextCategoryPressed || previousCategoryPressed)
             {
                 if (_categoryInput.Update(
@@ -309,12 +328,12 @@ namespace MajdataPlay.Scenes.Setting
             _optionInput.Reset();
         }
 
-        void SwitchOption(int direction)
+        private void SwitchOption(int direction)
         {
-            menus[Index].SwitchOption(direction);
+            _menus[Index].SwitchOption(direction);
         }
 
-        void SwitchCategory(int direction)
+        private void SwitchCategory(int direction)
         {
             if (direction > 0)
             {
@@ -326,7 +345,7 @@ namespace MajdataPlay.Scenes.Setting
             }
         }
 
-        async UniTaskVoid InitializeCurrentMenu()
+        private async UniTaskVoid InitializeCurrentMenu()
         {
             await UniTask.DelayFrame(3);
             MajInstances.SceneSwitcher.FadeOut();
@@ -336,7 +355,7 @@ namespace MajdataPlay.Scenes.Setting
             _isInited = true;
         }
 
-        void SetSettingLights()
+        private void SetSettingLights()
         {
             CabinetLed.SetAllLight(Color.white);
             CabinetLed.SetButtonLight(Color.green, 3);
@@ -347,18 +366,20 @@ namespace MajdataPlay.Scenes.Setting
             CabinetLed.SetButtonLight(Color.blue, 7);
         }
 
-        void RestoreSelectedMenu()
+        private void RestoreSelectedMenu()
         {
-            var index = Array.FindIndex(menus, x => x.Name == _settingConfig.SelectedMenu);
-            if(index == -1)
+            var index = Array.FindIndex(_menus, x => x.Name == _settingConfig.SelectedMenu);
+            if (index == -1 || !_menus[index].Visibility.IsVisible(Setting))
             {
-                index = Array.FindIndex(menus, x => x.Name == nameof(GameSetting.Game));
+                index = Array.FindIndex(_menus, x => x.Name == nameof(GameSetting.Game));
                 _settingConfig.SelectedOption = string.Empty;
             }
 
             Index = index;
-            _listCursorPos = index;
-            _listCursorTarget = index;
+            UpdateMenuVisibility();
+            var position = GetDisplayedMenuPosition(index);
+            _listCursorPos = position;
+            _listCursorTarget = position;
         }
 
         internal void PreviousMenu()
@@ -369,26 +390,42 @@ namespace MajdataPlay.Scenes.Setting
         {
             MoveMenu(1);
         }
-        void MoveMenu(int direction)
+        private void MoveMenu(int direction)
         {
-            if (menus.Length == 0)
+            if (_menus.Length == 0)
             {
                 return;
             }
 
-            var targetIndex = Index + direction;
-            var crossesBoundary = targetIndex < 0 || targetIndex >= menus.Length;
-            targetIndex = targetIndex switch
+            // Skip unlisted menus; a full cycle ends back on the current menu, which is always listed.
+            var targetIndex = Index;
+            var crossesBoundary = false;
+            for (var step = 0; step < _menus.Length; step++)
             {
-                < 0 => menus.Length - 1,
-                _ when targetIndex >= menus.Length => 0,
-                _ => targetIndex
-            };
+                targetIndex += direction;
+                if (targetIndex < 0)
+                {
+                    targetIndex = _menus.Length - 1;
+                    crossesBoundary = true;
+                }
+                else if (targetIndex >= _menus.Length)
+                {
+                    targetIndex = 0;
+                    crossesBoundary = true;
+                }
+                if (_isMenuDisplayed[targetIndex])
+                {
+                    break;
+                }
+            }
 
             Index = targetIndex;
-            _listCursorTarget = targetIndex;
-            _settingConfig.SelectedMenu = menus[Index].Name;
-            UpdateMenu(direction, !crossesBoundary);
+            _settingConfig.SelectedMenu = _menus[Index].Name;
+            // The previous menu leaves the list here when only being selected kept it listed;
+            // the title positions then shift, so they snap instead of animating.
+            var isListChanged = UpdateMenuVisibility();
+            _listCursorTarget = GetDisplayedMenuPosition(Index);
+            UpdateMenu(direction, !crossesBoundary && !isListChanged);
         }
         public void SetDescriptionText(string text)
         {
@@ -433,17 +470,19 @@ namespace MajdataPlay.Scenes.Setting
             // Reparent only on rent, after that transition has finished.
             _optionPool.Push(option);
         }
-        void UpdateMenu(int direction, bool animateTitle = true)
+        private void UpdateMenu(int direction, bool animateTitle = true)
         {
             // Return the old category's views before the new category rents them.
-            foreach (var (i, menu) in menus.WithIndex())
+            foreach (var (i, menu) in _menus.WithIndex())
             {
                 if (i != Index)
                 {
+                    // A switch that threw before activating its menu leaves an inactive menu holding views.
+                    menu.ReleaseVisibleOptions();
                     menu.gameObject.SetActive(false);
                 }
             }
-            var currentMenu = menus[Index];
+            var currentMenu = _menus[Index];
             currentMenu.Init();
             if (direction > 0)
             {
@@ -457,8 +496,7 @@ namespace MajdataPlay.Scenes.Setting
             _menuTitleDisplayerAnim.TryCancel();
             if (!animateTitle)
             {
-                _listCursorPos = Index;
-                UpdateMenuTitleDisplayerPosition();
+                NormalizeMenuTitleCursor();
                 return;
             }
             _menuTitleDisplayerAnim = LMotion.Create(_listCursorPos, _listCursorTarget, 0.25f)
@@ -470,13 +508,20 @@ namespace MajdataPlay.Scenes.Setting
                                                  UpdateMenuTitleDisplayerPosition();
                                              });
         }
-        void UpdateMenuTitleDisplayerPosition()
+        private void UpdateMenuTitleDisplayerPosition()
         {
+            var position = 0;
             for (var i = 0; i < _menuTitleDisplayers.Length; i++)
             {
                 var displayer = _menuTitleDisplayers[i];
-                var distance = i - _listCursorPos;
-                var isVisible = Mathf.Abs(distance) <= MENU_TITLE_VISIBLE_DISTANCE;
+                if (!_isMenuDisplayed[i])
+                {
+                    displayer.SetVisible(false);
+                    continue;
+                }
+                var distance = position - _listCursorPos;
+                position++;
+                var isVisible = Mathf.Abs(distance) <= MenuTitleVisibleDistance;
                 displayer.SetVisible(isVisible);
                 if (isVisible)
                 {
@@ -484,13 +529,53 @@ namespace MajdataPlay.Scenes.Setting
                 }
             }
         }
-        void NormalizeMenuTitleCursor()
+        private void NormalizeMenuTitleCursor()
         {
-            _listCursorPos = Index;
-            _listCursorTarget = Index;
+            var position = GetDisplayedMenuPosition(Index);
+            _listCursorPos = position;
+            _listCursorTarget = position;
             UpdateMenuTitleDisplayerPosition();
         }
-        bool UpdateOffsetUnitIfNeeded()
+        /// <summary>
+        /// Re-evaluates which menus the category list shows from their <see cref="ShowInSettingUIWhenAttribute"/> conditions.
+        /// </summary>
+        /// <remarks>
+        /// The selected menu is always listed, so a menu never vanishes while it is being edited and the list is never empty.
+        /// Menus without conditions are not read, so the check is free until a menu declares one.
+        /// </remarks>
+        /// <returns>True when a menu was listed or unlisted since the last evaluation.</returns>
+        private bool UpdateMenuVisibility()
+        {
+            var hasChanged = false;
+            for (var i = 0; i < _menus.Length; i++)
+            {
+                var isDisplayed = i == Index || _menus[i].Visibility.IsVisible(Setting);
+                if (_isMenuDisplayed[i] != isDisplayed)
+                {
+                    _isMenuDisplayed[i] = isDisplayed;
+                    hasChanged = true;
+                }
+            }
+            return hasChanged;
+        }
+        /// <summary>
+        /// Gets the position of a menu in the category list, which counts listed menus only.
+        /// </summary>
+        /// <param name="menuIndex">The index of the menu in the full menu array.</param>
+        /// <returns>The number of listed menus before the menu.</returns>
+        private int GetDisplayedMenuPosition(int menuIndex)
+        {
+            var position = 0;
+            for (var i = 0; i < menuIndex; i++)
+            {
+                if (_isMenuDisplayed[i])
+                {
+                    position++;
+                }
+            }
+            return position;
+        }
+        private bool UpdateOffsetUnitIfNeeded()
         {
             var currentOffsetUnit = Setting.Debug.OffsetUnit;
             if (currentOffsetUnit == _lastOffsetUnit)
@@ -517,7 +602,7 @@ namespace MajdataPlay.Scenes.Setting
             _lastOffsetUnit = currentOffsetUnit;
             return true;
         }
-        static float ConvertOffsetUnit(float value, bool convertToSecond)
+        private static float ConvertOffsetUnit(float value, bool convertToSecond)
         {
             var decimalValue = Convert.ToDecimal(value);
             var convertedValue = convertToSecond
@@ -525,7 +610,7 @@ namespace MajdataPlay.Scenes.Setting
                 : Math.Round(decimalValue / (decimal)MajEnv.FRAME_LENGTH_SEC, 1);
             return Convert.ToSingle(convertedValue);
         }
-        static void EnsureNestedCanvas(GameObject target)
+        private static void EnsureNestedCanvas(GameObject target)
         {
             if (!target.TryGetComponent<Canvas>(out _))
             {
@@ -539,6 +624,7 @@ namespace MajdataPlay.Scenes.Setting
             _menuTitleDisplayerAnim.TryCancel();
             InputManager.TouchButtonRingEdge = 5.4f;
             GameManager.RequestSave(this);
+            Recorder.OnSettingsChanged();
         }
     }
 }

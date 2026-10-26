@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="shortcut_import_archive_long">Import from archive</string>
+    <string name="shortcut_import_archive_short">Import archive</string>
+    <string name="shortcut_import_folder_long">Import from folder</string>
+    <string name="shortcut_import_folder_short">Import folder</string>
+</resources>

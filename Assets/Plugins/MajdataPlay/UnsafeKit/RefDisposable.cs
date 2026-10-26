@@ -23,7 +23,10 @@ namespace MajdataPlay.UnsafeKit
             public readonly void Dispose()
             {
                 Instance?.Dispose();
-                Instance = default;
+                if (SetNullWhenDispose)
+                {
+                    Instance = default;
+                }
             }
         }
         public static Disposable<T> From<T>(ref T instance, bool setNullWhenDispose = false) where T : IDisposable

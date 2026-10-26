@@ -46,7 +46,7 @@ Shader "Maj/UI/Rect Mask"
             #pragma fragment frag
 
 
-            #include "Assets/Rendering/MajRenderPipeline/Library/MajCore.hlsl"
+            #include "Assets/Plugins/MajdataPlay/Rendering/RenderPipelines/MajRenderPipeline/Library/MajCore.hlsl"
 
 
 

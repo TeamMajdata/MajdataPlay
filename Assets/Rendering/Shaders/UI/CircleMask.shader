@@ -58,7 +58,7 @@ Shader "Maj/UI/Circle Mask"
             // UGUI Mask can enable this keyword on runtime stencil-material copies.
             #pragma multi_compile_local _ UNITY_UI_ALPHACLIP
 
-            #include "Assets/Rendering/MajRenderPipeline/Library/MajCore.hlsl"
+            #include "Assets/Plugins/MajdataPlay/Rendering/RenderPipelines/MajRenderPipeline/Library/MajCore.hlsl"
 
             sampler2D _MainTex;
             half4 _Color;

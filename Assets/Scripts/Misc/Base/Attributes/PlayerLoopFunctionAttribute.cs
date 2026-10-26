@@ -19,13 +19,14 @@ namespace MajdataPlay
 
         LoopTiming _timing = LoopTiming.Update;
 
+        // Flag values must be distinct bits: implicit numbering made LateUpdate (3) equal PreUpdate | Update.
         [Flags]
         public enum LoopTiming
         {
             PreUpdate = 1,
-            Update,
-            LateUpdate,
-            FixedUpdate
+            Update = 2,
+            LateUpdate = 4,
+            FixedUpdate = 8
         }
     }
 }

@@ -43,7 +43,7 @@ Shader "Maj/UI/Rounded Rect"
             #pragma fragment frag
             #pragma target 3.0
 
-            #include "Assets/Rendering/MajRenderPipeline/Library/MajCore.hlsl"
+            #include "Assets/Plugins/MajdataPlay/Rendering/RenderPipelines/MajRenderPipeline/Library/MajCore.hlsl"
 
             // Keep the runtime UGUI Mask variant even when saved materials have Alpha Clip off.
             #pragma multi_compile_local _ UNITY_UI_ALPHACLIP

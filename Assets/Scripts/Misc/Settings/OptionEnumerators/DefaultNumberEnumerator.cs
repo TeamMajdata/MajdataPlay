@@ -120,28 +120,6 @@ public class DefaultNumberEnumerator : OptionEnumeratorBase, IOptionEnumerator
     {
         var currentValue = Value;
         ValueTexts[0] = currentValue?.ToString() ?? (IsOptional ? "UNSET" : "NULL");
-        if (currentValue is null)
-        {
-            if (!ValueTextLocalizationTemplate.Format(Name, ValueText).Tryi18n(out var localizedText) &&
-                !GeneralValueTextLocalizationTemplate.Format(ValueText).Tryi18n(out localizedText))
-            {
-                LocalizedValueTexts[0] = ValueText;
-            }
-            else
-            {
-                LocalizedValueTexts[0] = localizedText;
-            }
-        }
-        else
-        {
-            if (ValueTextLocalizationTemplate.Format(Name, ValueText).Tryi18n(out var localizedText))
-            {
-                LocalizedValueTexts[0] = localizedText;
-            }
-            else
-            {
-                LocalizedValueTexts[0] = ValueText;
-            }
-        }
+        LocalizedValueTexts[0] = LocalizeValueText(currentValue, ValueTexts[0]);
     }
 }

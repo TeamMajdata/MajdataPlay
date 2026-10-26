@@ -63,7 +63,7 @@ Shader "Maj/Sprites/Default"
             #pragma multi_compile_local _ PIXELSNAP_ON
             #pragma multi_compile _ ETC1_EXTERNAL_ALPHA
             #include "UnitySprites.cginc"
-            #include "Assets/Rendering/MajRenderPipeline/Library/MajMipSampling.hlsl"
+            #include "Assets/Plugins/MajdataPlay/Rendering/RenderPipelines/MajRenderPipeline/Library/MajMipSampling.hlsl"
 
             // Keep SpriteVert, UnityPerDrawSprite and Unity's instancing fields from the engine include.
             // The default renderer/vertex tint, flip, PixelSnap and external-alpha contracts stay unchanged.

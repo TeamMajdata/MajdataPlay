@@ -10,7 +10,7 @@
             double classic = 0;
 
             dx = newRecord.DX > DX ? newRecord.DX : DX;
-            classic = newRecord.Classic > classic ? newRecord.Classic : classic;
+            classic = newRecord.Classic > Classic ? newRecord.Classic : Classic;
 
             return new Accurate()
             {

@@ -93,7 +93,7 @@ PrefabInstance:
       objectReference: {fileID: 0}
     - target: {fileID: 310387828536440237, guid: c630796fc37682545877a45dfe2be198, type: 3}
       propertyPath: m_LocalPosition.z
-      value: 0
+      value: -4.4000001
       objectReference: {fileID: 0}
     - target: {fileID: 310387828536440237, guid: c630796fc37682545877a45dfe2be198, type: 3}
       propertyPath: m_LocalRotation.w
@@ -125,7 +125,7 @@ PrefabInstance:
       objectReference: {fileID: 0}
     - target: {fileID: 548578996992170818, guid: c630796fc37682545877a45dfe2be198, type: 3}
       propertyPath: m_SortingLayer
-      value: 10
+      value: 0
       objectReference: {fileID: 0}
     - target: {fileID: 548578996992170818, guid: c630796fc37682545877a45dfe2be198, type: 3}
       propertyPath: m_SortingOrder
@@ -133,7 +133,7 @@ PrefabInstance:
       objectReference: {fileID: 0}
     - target: {fileID: 548578996992170818, guid: c630796fc37682545877a45dfe2be198, type: 3}
       propertyPath: m_SortingLayerID
-      value: 910687335
+      value: 0
       objectReference: {fileID: 0}
     - target: {fileID: 4084572716065402907, guid: c630796fc37682545877a45dfe2be198, type: 3}
       propertyPath: m_Controller

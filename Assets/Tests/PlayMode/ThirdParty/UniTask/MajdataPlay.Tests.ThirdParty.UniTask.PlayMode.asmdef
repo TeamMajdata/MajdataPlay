@@ -1,0 +1,21 @@
+{
+    "name": "MajdataPlay.Tests.ThirdParty.UniTask.PlayMode",
+    "rootNamespace": "MajdataPlay.Tests.ThirdParty.Cysharp.PlayMode",
+    "references": [
+        "UnityEngine.TestRunner",
+        "UniTask"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": true,
+    "precompiledReferences": [
+        "nunit.framework.dll"
+    ],
+    "autoReferenced": false,
+    "defineConstraints": [
+        "UNITY_INCLUDE_TESTS"
+    ],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

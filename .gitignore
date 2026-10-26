@@ -107,23 +107,42 @@ out.log
 # .NET build output of the Tools/CSharp tools is always local.
 /Tools/CSharp/**/bin/
 /Tools/CSharp/**/obj/
-!/Tools/Tests/AndroidJavaGeneratorValidation/AndroidJavaGeneratorValidation.csproj
+!/Tools/Tests/Modules/AndroidJavaGeneratorValidation/AndroidJavaGeneratorValidation.csproj
 /Assets/Plugins/MajdataPlay/Platform/Android/MajdataPlay.SourceGenerators.AndroidJava.dll.meta
 
 # Independent storage validation harness (not a Unity-generated project).
-!/Tools/Tests/FileSystemValidation/FileSystemValidation.csproj
-!/Tools/Tests/ChartStorageValidation/ChartStorageValidation.csproj
-!/Tools/Tests/ResourceStorageValidation/ResourceStorageValidation.csproj
+!/Tools/Tests/Modules/FileSystemValidation/FileSystemValidation.csproj
+!/Tools/Tests/Modules/ChartStorageValidation/ChartStorageValidation.csproj
+!/Tools/Tests/Modules/ResourceStorageValidation/ResourceStorageValidation.csproj
 
 # Independent libcurl HTTP handler validation harness; builds into Temp/CurlValidation.
-!/Tools/Tests/CurlValidation/CurlValidation.csproj
+!/Tools/Tests/Modules/CurlValidation/CurlValidation.csproj
+
+# Independent MRP camera capture bridge validation; builds into Temp/MrpCaptureValidation.
+!/Tools/Tests/Modules/MrpCaptureValidation/MrpCaptureValidation.csproj
+
+# Independent background material lifecycle validation; builds into Temp/BackgroundLifecycleValidation.
+!/Tools/Tests/Modules/BackgroundLifecycleValidation/BackgroundLifecycleValidation.csproj
+
+# Independent recorder lifecycle validation; builds into Temp/RecorderLifecycleValidation.
+!/Tools/Tests/Modules/RecorderLifecycleValidation/RecorderLifecycleValidation.csproj
+
+# Independent audio recorder output latency validation; builds into Temp/AudioRecorderLatencyValidation.
+!/Tools/Tests/Modules/AudioRecorderLatencyValidation/AudioRecorderLatencyValidation.csproj
+
+# Independent BASS HTTP stream validation harness; builds into Temp/BassHttpStreamValidation.
+!/Tools/Tests/Modules/BassHttpStreamValidation/BassHttpStreamValidation.csproj
+
+# Independent ManagedBass validation (library projects and CoreCLR runner); builds into Temp/ManagedBassValidation.
+!/Tools/Tests/Modules/ManagedBassValidation/ManagedBassValidation.csproj
+!/Tools/Tests/Modules/ManagedBassValidation/Libraries/*.csproj
 
 # Independent full Java API wrapper CLI and its validation harness.
 !/Tools/CSharp/AndroidJavaWrapperGenerator/AndroidJavaWrapperGenerator.csproj
-!/Tools/Tests/AndroidJavaWrapperGeneratorValidation/AndroidJavaWrapperGeneratorValidation.csproj
-/Tools/Tests/AndroidJavaWrapperGeneratorValidation/bin/
-/Tools/Tests/AndroidJavaWrapperGeneratorValidation/obj/
-/Tools/Tests/AndroidJavaWrapperGeneratorValidation/.work/
+!/Tools/Tests/Modules/AndroidJavaWrapperGeneratorValidation/AndroidJavaWrapperGeneratorValidation.csproj
+/Tools/Tests/Modules/AndroidJavaWrapperGeneratorValidation/bin/
+/Tools/Tests/Modules/AndroidJavaWrapperGeneratorValidation/obj/
+/Tools/Tests/Modules/AndroidJavaWrapperGeneratorValidation/.work/
 
 # Generated Java bindings compile in an independent project before Unity imports its DLL.
 !/Tools/AndroidJavaWrapper/AndroidJavaWrapper.csproj
@@ -145,3 +164,5 @@ out.log
 /Tools/AndroidJavaWrapper/src/**/*.meta
 !/Tools/AndroidJavaWrapper/src/**/*.e.cs.meta
 /Tools/CSharp/AndroidJavaWrapperGenerator/.work/
+/Tools/Tests/FFmpegValidation/bin
+/Tools/Tests/FFmpegValidation/obj

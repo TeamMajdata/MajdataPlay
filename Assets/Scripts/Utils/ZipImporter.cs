@@ -1,8 +1,10 @@
+#nullable enable
 using System;
 using System.Collections.Generic;
 using System.IO;
 using System.IO.Compression;
 using Cysharp.Threading.Tasks;
+using MajdataPlay.IO.Storage;
 using UnityEngine;
 
 namespace MajdataPlay.Utils
@@ -68,7 +70,7 @@ namespace MajdataPlay.Utils
         {
             MajDebug.LogDebug("[ZipImporter] Got file: " + tempFilePath);
             
-            if (!File.Exists(tempFilePath))
+            if (!FileSystem.File.Open(tempFilePath).Exists)
             {
                 MajDebug.LogError("[ZipImporter] File not found: " + tempFilePath);
                 return;
@@ -81,11 +83,11 @@ namespace MajdataPlay.Utils
                 return;
             }
             
-            Directory.CreateDirectory(ImportRoot);
+            FileSystem.Directory.Create(ImportRoot);
             
             var folderName = Path.GetFileNameWithoutExtension(tempFilePath);
             var outDir = Path.Combine(ImportRoot, folderName);
-            Directory.CreateDirectory(outDir);
+            FileSystem.Directory.Create(outDir);
 
             try
             {
@@ -96,8 +98,14 @@ namespace MajdataPlay.Utils
                 
                 if (deleteTempAfterSuccess)
                 {
-                    try { File.Delete(tempFilePath); }
-                    catch (Exception e) { MajDebug.LogWarning("[ZipImporter] Delete temp failed: " + e.Message); }
+                    try
+                    {
+                        FileSystem.File.Open(tempFilePath).Delete();
+                    }
+                    catch (Exception e)
+                    {
+                        MajDebug.LogWarning("[ZipImporter] Delete temp failed: " + e.Message);
+                    }
                 }
                 ReloadList(folderName).Forget();
                 OnPackageExtracted?.Invoke(outDir);
@@ -107,10 +115,20 @@ namespace MajdataPlay.Utils
             {
                 MajDebug.LogError("[ZipImporter] Extract FAILED: " + e);
                 
-                try { Directory.Delete(outDir, true); } catch { /* ignore */ }
+                try
+                {
+                    FileSystem.Directory.Open(outDir).Delete(recursive: true);
+                }
+                catch
+                {
+                    // Cleanup must not mask the extraction failure.
+                }
             }
         }
 
+        /// <summary>Refreshes local collections after an import and returns to the list scene.</summary>
+        /// <param name="folderName">The imported folder name displayed in refresh progress.</param>
+        /// <returns>An operation that completes after local collections are refreshed and the list scene is restored.</returns>
         private async static UniTask ReloadList(string folderName)
         {
             await MajInstances.SceneSwitcher.FadeInAsync();
@@ -126,7 +144,7 @@ namespace MajdataPlay.Utils
             {
                 MajInstances.SceneSwitcher.SetLoadingText($"Importing {folderName}...\n"+e);
             };
-            var task = SongStorage.RefreshLocalAsync(progress);
+            var task = SongStorage.RefreshLocal(progress);
             while(!task.IsCompleted)
             {
                 await UniTask.Yield();
@@ -144,34 +162,55 @@ namespace MajdataPlay.Utils
         }
 
         
+        /// <summary>Extracts a local archive through storage streams while rejecting traversal outside its destination.</summary>
+        /// <param name="zipPath">The local packaged chart archive.</param>
+        /// <param name="destinationDirectory">The local directory receiving the extracted entries.</param>
+        /// <exception cref="UnauthorizedAccessException">The archive or destination cannot be accessed.</exception>
+        /// <exception cref="IOException">An entry escapes the destination or file extraction fails.</exception>
         private static void UnzipToDirectorySafe(string zipPath, string destinationDirectory)
         {
-            string destRootFull = Path.GetFullPath(destinationDirectory);
+            var destRootFull = Path.GetFullPath(destinationDirectory);
             if (!destRootFull.EndsWith(Path.DirectorySeparatorChar.ToString(), StringComparison.Ordinal))
+            {
                 destRootFull += Path.DirectorySeparatorChar;
+            }
 
-            using var archive = ZipFile.OpenRead(zipPath);
+            using var archiveStream = FileSystem.File.Open(zipPath).OpenRead();
+            using var archive = new ZipArchive(archiveStream, ZipArchiveMode.Read);
 
             foreach (var entry in archive.Entries)
             {
                 
                 if (string.IsNullOrEmpty(entry.Name))
+                {
                     continue;
+                }
                 
-                string combinedPath = Path.Combine(destinationDirectory, entry.FullName);
-                string fullPath = Path.GetFullPath(combinedPath);
+                var combinedPath = Path.Combine(destinationDirectory, entry.FullName);
+                var fullPath = Path.GetFullPath(combinedPath);
                 
                 if (!fullPath.StartsWith(destRootFull, StringComparison.Ordinal))
+                {
                     throw new IOException("Zip entry escapes destination: " + entry.FullName);
+                }
 
                 var dir = Path.GetDirectoryName(fullPath);
                 if (!string.IsNullOrEmpty(dir))
-                    Directory.CreateDirectory(dir);
+                {
+                    FileSystem.Directory.Create(dir);
+                }
                 
-                if (File.Exists(fullPath))
-                    File.Delete(fullPath);
+                if (FileSystem.File.Open(fullPath).Exists)
+                {
+                    FileSystem.File.Open(fullPath).Delete();
+                }
 
-                entry.ExtractToFile(fullPath);
+                using (var entryStream = entry.Open())
+                using (var outputStream = FileSystem.File.Create(fullPath).OpenWrite())
+                {
+                    entryStream.CopyTo(outputStream);
+                }
+                FileSystem.File.Open(fullPath).SetLastWriteTime(entry.LastWriteTime.DateTime);
             }
         }
     }

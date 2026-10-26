@@ -1,0 +1,31 @@
+{
+  "target": "linux-x64",
+  "files": [
+    {
+      "file": "libva.so.2",
+      "bytes": 196121,
+      "sha256": "b281c2249d3c0852369df46ae32abd6ff356ec0ba0914464dc2567a3b3c87042",
+      "version": "1.20.0",
+      "license": "libva.copyright",
+      "licenseSha256": "8d234a9a0e094a1c13a4e21e2a28856763a1890306e17679502c894606f8638c"
+    },
+    {
+      "file": "libva-drm.so.2",
+      "bytes": 18185,
+      "sha256": "8f3c8a2274a6292f667714f90c074bc7a07e4a1c2019b4753f48cdee637b052a",
+      "version": "1.20.0",
+      "license": "libva-drm.copyright",
+      "licenseSha256": "8d234a9a0e094a1c13a4e21e2a28856763a1890306e17679502c894606f8638c"
+    },
+    {
+      "file": "libdrm.so.2",
+      "bytes": 101089,
+      "sha256": "dbae1615397d652ab40d6a2d29e66dfcabad65427374c07c9f27bf1ea969bd55",
+      "version": "2.4.125",
+      "license": "libdrm.copyright",
+      "licenseSha256": "512c9a57fd8b449aa157351da9df07bf8e19f767e496a72205a4020268ddb2e0"
+    }
+  ],
+  "postProcessing": "patchelf --set-rpath $ORIGIN",
+  "note": "GPU-specific VAAPI/Vulkan driver implementations are supplied by the host system."
+}

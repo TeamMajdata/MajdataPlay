@@ -4,7 +4,6 @@ using MajdataPlay.IO;
 using MajdataPlay.Timer;
 using MajdataPlay.Utils;
 using System;
-using System.IO;
 using TMPro;
 using UnityEngine;
 #nullable enable
@@ -45,13 +44,18 @@ namespace MajdataPlay.Scenes.Calibrator
 
         async UniTaskVoid LoadCalibrationAudioAsync()
         {
-            var path = Path.Combine(MajEnv.AssetsPath, "SFX", CALIBRATION_AUDIO_FILE_NAME);
             try
             {
-                _calibrationAudio = await MajInstances.AudioManager.LoadMusicAsync(path, normalize: false);
+                var audioFile = MajEnv.AssetsDirectory.FindFileAt($"SFX/{CALIBRATION_AUDIO_FILE_NAME}");
+                if (audioFile is null)
+                {
+                    MajDebug.LogError($"[Audio Calibration] Audio file not found: SFX/{CALIBRATION_AUDIO_FILE_NAME}");
+                    return;
+                }
+                _calibrationAudio = await MajInstances.AudioManager.LoadMusicAsync(audioFile.Location, normalize: false);
                 if (_calibrationAudio.IsEmpty)
                 {
-                    MajDebug.LogError($"[Audio Calibration] Failed to load: {path}");
+                    MajDebug.LogError($"[Audio Calibration] Failed to load: {audioFile.Location}");
                     return;
                 }
 

@@ -48,6 +48,12 @@ namespace MajdataPlay.Scenes.Result.Components.Indicators
                                      });
         }
 
+        void OnDestroy()
+        {
+            // The looping motion binds to the uploading icon, which is destroyed with this indicator.
+            _iconAnimHandle.TryCancel();
+        }
+
         public void SetText(string text)
         {
             _textDisplayer.text = text;

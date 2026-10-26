@@ -17,7 +17,7 @@ Shader "Maj/Effects/HoldShineShader"
 				{
 			    Name "HoldShine"
 			Tags { "LightMode" = "SRPDefaultUnlit" }
-			ZTest Always
+			ZTest LEqual
 			Cull Off
 			ZWrite Off
 			Blend SrcAlpha OneMinusSrcAlpha
@@ -30,7 +30,7 @@ Shader "Maj/Effects/HoldShineShader"
 			//vert和frag函数
 			#pragma vertex vert
 			#pragma fragment frag
-			#include "Assets/Rendering/MajRenderPipeline/Library/MajCore.hlsl"
+			#include "Assets/Plugins/MajdataPlay/Rendering/RenderPipelines/MajRenderPipeline/Library/MajCore.hlsl"
 
 
 			struct appdata_t

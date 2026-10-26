@@ -1,0 +1,444 @@
+diff --git a/libavcodec/amfenc.c b/libavcodec/amfenc.c
+--- a/libavcodec/amfenc.c
++++ b/libavcodec/amfenc.c
+@@ -49,6 +49,86 @@
+ #include <dlfcn.h>
+ #endif
+ 
++/* Shared internal helpers; public FFmpeg headers and decoder paths are unchanged. */
++int ff_amf_set_rate_control_property(AVCodecContext *avctx, const wchar_t *name,
++                                    AMF_VARIANT_TYPE type, amf_int64 value);
++int ff_amf_check_rate_control(AVCodecContext *avctx,
++                             const wchar_t *const names[7], amf_int64 peak);
++
++/* Critical rate-control properties must survive AMF initialization unchanged. */
++static int amf_check_rate_control_property(AVCodecContext *avctx,
++                                         const wchar_t *name,
++                                         AMF_VARIANT_TYPE type,
++                                         amf_int64 expected)
++{
++    AMFEncoderContext *ctx = avctx->priv_data;
++    AMFVariantStruct actual = { 0 };
++    AMF_RESULT result;
++    int ret = 0;
++
++    result = ctx->encoder->pVtbl->GetProperty(ctx->encoder, name, &actual);
++    if (result != AMF_OK) {
++        av_log(avctx, AV_LOG_ERROR, "GetProperty(%ls) failed with error %d\n", name, result);
++        ret = AVERROR_EXTERNAL;
++    } else if (actual.type != type ||
++               (type == AMF_VARIANT_BOOL ?
++                (actual.boolValue != 0) != (expected != 0) :
++                actual.int64Value != expected)) {
++        av_log(avctx, AV_LOG_ERROR, "AMF changed rate-control property %ls (expected type %d, value %lld; got type %d, value %lld)\n",
++               name, type, (long long)expected, actual.type,
++               (long long)(actual.type == AMF_VARIANT_BOOL ? actual.boolValue :
++                           actual.type == AMF_VARIANT_INT64 ? actual.int64Value : -1));
++        ret = AVERROR_EXTERNAL;
++    }
++    AMFVariantClear(&actual);
++    return ret;
++}
++
++int ff_amf_set_rate_control_property(AVCodecContext *avctx, const wchar_t *name,
++                                    AMF_VARIANT_TYPE type, amf_int64 value)
++{
++    AMFEncoderContext *ctx = avctx->priv_data;
++    AMFVariantStruct requested = { 0 };
++    AMF_RESULT result;
++
++    result = type == AMF_VARIANT_BOOL ? AMFVariantAssignBool(&requested, value != 0) :
++                                       AMFVariantAssignInt64(&requested, value);
++    if (result == AMF_OK)
++        result = ctx->encoder->pVtbl->SetProperty(ctx->encoder, name, requested);
++    AMFVariantClear(&requested);
++    if (result != AMF_OK) {
++        av_log(avctx, AV_LOG_ERROR, "SetProperty(%ls) failed with error %d\n", name, result);
++        return AVERROR_EXTERNAL;
++    }
++    return amf_check_rate_control_property(avctx, name, type, value);
++}
++
++/* Property order: mode, VBV size/fullness, target, peak, HRD, filler. */
++int ff_amf_check_rate_control(AVCodecContext *avctx,
++                             const wchar_t *const names[7], amf_int64 peak)
++{
++    AMFEncoderContext *ctx = avctx->priv_data;
++    amf_int64 values[7] = { ctx->rate_control_mode, avctx->rc_buffer_size, 0,
++                           avctx->bit_rate, peak, ctx->enforce_hrd, ctx->filler_data };
++    int i, ret;
++
++    if (avctx->rc_buffer_size && avctx->rc_initial_buffer_occupancy)
++        values[2] = FFMIN((int64_t)avctx->rc_initial_buffer_occupancy * 64 / avctx->rc_buffer_size, 64);
++    for (i = 0; i < 7; i++) {
++        if ((i == 1 && !avctx->rc_buffer_size) ||
++            (i == 2 && (!avctx->rc_buffer_size || !avctx->rc_initial_buffer_occupancy)) ||
++            (i == 3 && !avctx->bit_rate) || (i == 4 && !peak) ||
++            (i >= 5 && values[i] == -1))
++            continue;
++        ret = amf_check_rate_control_property(avctx, names[i],
++                                             i >= 5 ? AMF_VARIANT_BOOL : AMF_VARIANT_INT64,
++                                             values[i]);
++        if (ret < 0)
++            return ret;
++    }
++    return 0;
++}
++
+ #define FFMPEG_AMF_WRITER_ID L"ffmpeg_amf"
+ 
+ 
+diff --git a/libavcodec/amfenc_h264.c b/libavcodec/amfenc_h264.c
+--- a/libavcodec/amfenc_h264.c
++++ b/libavcodec/amfenc_h264.c
+@@ -25,6 +25,23 @@
+ #include "amfenc.h"
+ #include "codec_internal.h"
+ #include <AMF/components/PreAnalysis.h>
++
++/* Shared internal helpers; public FFmpeg headers and decoder paths are unchanged. */
++int ff_amf_set_rate_control_property(AVCodecContext *avctx, const wchar_t *name,
++                                    AMF_VARIANT_TYPE type, amf_int64 value);
++int ff_amf_check_rate_control(AVCodecContext *avctx,
++                             const wchar_t *const names[7], amf_int64 peak);
++
++/* Order matches ff_amf_check_rate_control. */
++static const wchar_t *const rate_control_properties[7] = {
++    AMF_VIDEO_ENCODER_RATE_CONTROL_METHOD,
++    AMF_VIDEO_ENCODER_VBV_BUFFER_SIZE,
++    AMF_VIDEO_ENCODER_INITIAL_VBV_BUFFER_FULLNESS,
++    AMF_VIDEO_ENCODER_TARGET_BITRATE,
++    AMF_VIDEO_ENCODER_PEAK_BITRATE,
++    AMF_VIDEO_ENCODER_ENFORCE_HRD,
++    AMF_VIDEO_ENCODER_FILLER_DATA_ENABLE,
++};
+ 
+ #define OFFSET(x) offsetof(AMFEncoderContext, x)
+ #define VE AV_OPT_FLAG_VIDEO_PARAM | AV_OPT_FLAG_ENCODING_PARAM
+@@ -338,16 +355,25 @@
+     }
+ 
+     // Dynamic parameters
+-    AMF_ASSIGN_PROPERTY_INT64(res, ctx->encoder, AMF_VIDEO_ENCODER_RATE_CONTROL_METHOD, ctx->rate_control_mode);
++    ret = ff_amf_set_rate_control_property(avctx, AMF_VIDEO_ENCODER_RATE_CONTROL_METHOD,
++                                           AMF_VARIANT_INT64, ctx->rate_control_mode);
++    if (ret < 0)
++        return ret;
+ 
+     /// VBV Buffer
+     if (avctx->rc_buffer_size != 0) {
+-        AMF_ASSIGN_PROPERTY_INT64(res, ctx->encoder, AMF_VIDEO_ENCODER_VBV_BUFFER_SIZE, avctx->rc_buffer_size);
++        ret = ff_amf_set_rate_control_property(avctx, AMF_VIDEO_ENCODER_VBV_BUFFER_SIZE,
++                                               AMF_VARIANT_INT64, avctx->rc_buffer_size);
++        if (ret < 0)
++            return ret;
+         if (avctx->rc_initial_buffer_occupancy != 0) {
+-            int amf_buffer_fullness = avctx->rc_initial_buffer_occupancy * 64 / avctx->rc_buffer_size;
++            int amf_buffer_fullness = (int64_t)avctx->rc_initial_buffer_occupancy * 64 / avctx->rc_buffer_size;
+             if (amf_buffer_fullness > 64)
+                 amf_buffer_fullness = 64;
+-            AMF_ASSIGN_PROPERTY_INT64(res, ctx->encoder, AMF_VIDEO_ENCODER_INITIAL_VBV_BUFFER_FULLNESS, amf_buffer_fullness);
++            ret = ff_amf_set_rate_control_property(avctx, AMF_VIDEO_ENCODER_INITIAL_VBV_BUFFER_FULLNESS,
++                                                   AMF_VARIANT_INT64, amf_buffer_fullness);
++            if (ret < 0)
++                return ret;
+         }
+     }
+     /// Maximum Access Unit Size and AUD
+@@ -382,17 +408,26 @@
+         AMF_ASSIGN_PROPERTY_INT64(res, ctx->encoder, AMF_VIDEO_ENCODER_QP_B, ctx->qp_b);
+ 
+     if (avctx->bit_rate) {
+-        AMF_ASSIGN_PROPERTY_INT64(res, ctx->encoder, AMF_VIDEO_ENCODER_TARGET_BITRATE, avctx->bit_rate);
++        ret = ff_amf_set_rate_control_property(avctx, AMF_VIDEO_ENCODER_TARGET_BITRATE,
++                                               AMF_VARIANT_INT64, avctx->bit_rate);
++        if (ret < 0)
++            return ret;
+     }
+ 
+     if (ctx->rate_control_mode == AMF_VIDEO_ENCODER_RATE_CONTROL_METHOD_CBR) {
+         if (avctx->bit_rate) {
+-            AMF_ASSIGN_PROPERTY_INT64(res, ctx->encoder, AMF_VIDEO_ENCODER_PEAK_BITRATE, avctx->bit_rate);
++            ret = ff_amf_set_rate_control_property(avctx, AMF_VIDEO_ENCODER_PEAK_BITRATE,
++                                                   AMF_VARIANT_INT64, avctx->bit_rate);
++            if (ret < 0)
++                return ret;
+         }
+     }
+ 
+     if (avctx->rc_max_rate) {
+-        AMF_ASSIGN_PROPERTY_INT64(res, ctx->encoder, AMF_VIDEO_ENCODER_PEAK_BITRATE, avctx->rc_max_rate);
++        ret = ff_amf_set_rate_control_property(avctx, AMF_VIDEO_ENCODER_PEAK_BITRATE,
++                                               AMF_VARIANT_INT64, avctx->rc_max_rate);
++        if (ret < 0)
++            return ret;
+     } else if (ctx->rate_control_mode == AMF_VIDEO_ENCODER_RATE_CONTROL_METHOD_PEAK_CONSTRAINED_VBR) {
+         av_log(ctx, AV_LOG_DEBUG, "rate control mode is vbr_peak but max_rate is not set, default max_rate will be applied.\n");
+     }
+@@ -557,11 +592,17 @@
+ 
+     // Enforce HRD, Filler Data, VBAQ, Frame Skipping, Deblocking Filter
+     if (ctx->enforce_hrd != -1) {
+-        AMF_ASSIGN_PROPERTY_BOOL(res, ctx->encoder, AMF_VIDEO_ENCODER_ENFORCE_HRD, ((ctx->enforce_hrd == 0) ? false : true));
++        ret = ff_amf_set_rate_control_property(avctx, AMF_VIDEO_ENCODER_ENFORCE_HRD,
++                                               AMF_VARIANT_BOOL, ((ctx->enforce_hrd == 0) ? false : true));
++        if (ret < 0)
++            return ret;
+     }
+ 
+     if (ctx->filler_data != -1) {
+-        AMF_ASSIGN_PROPERTY_BOOL(res, ctx->encoder, AMF_VIDEO_ENCODER_FILLER_DATA_ENABLE, ((ctx->filler_data == 0) ? false : true));
++        ret = ff_amf_set_rate_control_property(avctx, AMF_VIDEO_ENCODER_FILLER_DATA_ENABLE,
++                                               AMF_VARIANT_BOOL, ((ctx->filler_data == 0) ? false : true));
++        if (ret < 0)
++            return ret;
+     }
+ 
+     if (ctx->skip_frame != -1) {
+@@ -626,7 +667,10 @@
+     buffer->pVtbl->Release(buffer);
+     var.pInterface->pVtbl->Release(var.pInterface);
+ 
+-    return 0;
++    /* Verify the final driver state after Init and all dynamic assignments. */
++    return ff_amf_check_rate_control(avctx, rate_control_properties,
++                                     avctx->rc_max_rate ? avctx->rc_max_rate :
++                                     ctx->rate_control_mode == AMF_VIDEO_ENCODER_RATE_CONTROL_METHOD_CBR ? avctx->bit_rate : 0);
+ }
+ 
+ static const FFCodecDefault defaults[] = {
+diff --git a/libavcodec/amfenc_hevc.c b/libavcodec/amfenc_hevc.c
+--- a/libavcodec/amfenc_hevc.c
++++ b/libavcodec/amfenc_hevc.c
+@@ -25,6 +25,23 @@
+ #include "amfenc.h"
+ #include "codec_internal.h"
+ #include <AMF/components/PreAnalysis.h>
++
++/* Shared internal helpers; public FFmpeg headers and decoder paths are unchanged. */
++int ff_amf_set_rate_control_property(AVCodecContext *avctx, const wchar_t *name,
++                                    AMF_VARIANT_TYPE type, amf_int64 value);
++int ff_amf_check_rate_control(AVCodecContext *avctx,
++                             const wchar_t *const names[7], amf_int64 peak);
++
++/* Order matches ff_amf_check_rate_control. */
++static const wchar_t *const rate_control_properties[7] = {
++    AMF_VIDEO_ENCODER_HEVC_RATE_CONTROL_METHOD,
++    AMF_VIDEO_ENCODER_HEVC_VBV_BUFFER_SIZE,
++    AMF_VIDEO_ENCODER_HEVC_INITIAL_VBV_BUFFER_FULLNESS,
++    AMF_VIDEO_ENCODER_HEVC_TARGET_BITRATE,
++    AMF_VIDEO_ENCODER_HEVC_PEAK_BITRATE,
++    AMF_VIDEO_ENCODER_HEVC_ENFORCE_HRD,
++    AMF_VIDEO_ENCODER_HEVC_FILLER_DATA_ENABLE,
++};
+ 
+ #define OFFSET(x) offsetof(AMFEncoderContext, x)
+ #define VE AV_OPT_FLAG_VIDEO_PARAM | AV_OPT_FLAG_ENCODING_PARAM
+@@ -366,16 +383,25 @@
+         AMF_ASSIGN_PROPERTY_BOOL(res, ctx->encoder, AMF_VIDEO_ENCODER_HEVC_HIGH_MOTION_QUALITY_BOOST_ENABLE, ((ctx->hw_high_motion_quality_boost == 0) ? false : true));
+     }
+ 
+-    AMF_ASSIGN_PROPERTY_INT64(res, ctx->encoder, AMF_VIDEO_ENCODER_HEVC_RATE_CONTROL_METHOD, ctx->rate_control_mode);
++    ret = ff_amf_set_rate_control_property(avctx, AMF_VIDEO_ENCODER_HEVC_RATE_CONTROL_METHOD,
++                                           AMF_VARIANT_INT64, ctx->rate_control_mode);
++    if (ret < 0)
++        return ret;
+ 
+     if (avctx->rc_buffer_size) {
+-        AMF_ASSIGN_PROPERTY_INT64(res, ctx->encoder, AMF_VIDEO_ENCODER_HEVC_VBV_BUFFER_SIZE, avctx->rc_buffer_size);
++        ret = ff_amf_set_rate_control_property(avctx, AMF_VIDEO_ENCODER_HEVC_VBV_BUFFER_SIZE,
++                                               AMF_VARIANT_INT64, avctx->rc_buffer_size);
++        if (ret < 0)
++            return ret;
+ 
+         if (avctx->rc_initial_buffer_occupancy != 0) {
+-            int amf_buffer_fullness = avctx->rc_initial_buffer_occupancy * 64 / avctx->rc_buffer_size;
++            int amf_buffer_fullness = (int64_t)avctx->rc_initial_buffer_occupancy * 64 / avctx->rc_buffer_size;
+             if (amf_buffer_fullness > 64)
+                 amf_buffer_fullness = 64;
+-            AMF_ASSIGN_PROPERTY_INT64(res, ctx->encoder, AMF_VIDEO_ENCODER_HEVC_INITIAL_VBV_BUFFER_FULLNESS, amf_buffer_fullness);
++            ret = ff_amf_set_rate_control_property(avctx, AMF_VIDEO_ENCODER_HEVC_INITIAL_VBV_BUFFER_FULLNESS,
++                                                   AMF_VARIANT_INT64, amf_buffer_fullness);
++            if (ret < 0)
++                return ret;
+         }
+     }
+ 
+@@ -398,25 +424,40 @@
+ 
+     // init dynamic rate control params
+     if (ctx->enforce_hrd != -1) {
+-        AMF_ASSIGN_PROPERTY_BOOL(res, ctx->encoder, AMF_VIDEO_ENCODER_HEVC_ENFORCE_HRD, ((ctx->enforce_hrd == 0) ? false : true));
++        ret = ff_amf_set_rate_control_property(avctx, AMF_VIDEO_ENCODER_HEVC_ENFORCE_HRD,
++                                               AMF_VARIANT_BOOL, ((ctx->enforce_hrd == 0) ? false : true));
++        if (ret < 0)
++            return ret;
+     }
+ 
+     if (ctx->filler_data != -1) {
+-        AMF_ASSIGN_PROPERTY_BOOL(res, ctx->encoder, AMF_VIDEO_ENCODER_HEVC_FILLER_DATA_ENABLE, ((ctx->filler_data == 0) ? false : true));
++        ret = ff_amf_set_rate_control_property(avctx, AMF_VIDEO_ENCODER_HEVC_FILLER_DATA_ENABLE,
++                                               AMF_VARIANT_BOOL, ((ctx->filler_data == 0) ? false : true));
++        if (ret < 0)
++            return ret;
+     }
+ 
+     if (avctx->bit_rate) {
+-        AMF_ASSIGN_PROPERTY_INT64(res, ctx->encoder, AMF_VIDEO_ENCODER_HEVC_TARGET_BITRATE, avctx->bit_rate);
++        ret = ff_amf_set_rate_control_property(avctx, AMF_VIDEO_ENCODER_HEVC_TARGET_BITRATE,
++                                               AMF_VARIANT_INT64, avctx->bit_rate);
++        if (ret < 0)
++            return ret;
+     }
+ 
+     if (ctx->rate_control_mode == AMF_VIDEO_ENCODER_HEVC_RATE_CONTROL_METHOD_CBR) {
+         if (avctx->bit_rate) {
+-            AMF_ASSIGN_PROPERTY_INT64(res, ctx->encoder, AMF_VIDEO_ENCODER_HEVC_PEAK_BITRATE, avctx->bit_rate);
++            ret = ff_amf_set_rate_control_property(avctx, AMF_VIDEO_ENCODER_HEVC_PEAK_BITRATE,
++                                                   AMF_VARIANT_INT64, avctx->bit_rate);
++            if (ret < 0)
++                return ret;
+         }
+     }
+ 
+     if (avctx->rc_max_rate) {
+-        AMF_ASSIGN_PROPERTY_INT64(res, ctx->encoder, AMF_VIDEO_ENCODER_HEVC_PEAK_BITRATE, avctx->rc_max_rate);
++        ret = ff_amf_set_rate_control_property(avctx, AMF_VIDEO_ENCODER_HEVC_PEAK_BITRATE,
++                                               AMF_VARIANT_INT64, avctx->rc_max_rate);
++        if (ret < 0)
++            return ret;
+     } else if (ctx->rate_control_mode == AMF_VIDEO_ENCODER_HEVC_RATE_CONTROL_METHOD_PEAK_CONSTRAINED_VBR) {
+         av_log(ctx, AV_LOG_DEBUG, "rate control mode is vbr_peak but max_rate is not set, default max_rate will be applied.\n");
+     }
+@@ -555,7 +596,10 @@
+     buffer->pVtbl->Release(buffer);
+     var.pInterface->pVtbl->Release(var.pInterface);
+ 
+-    return 0;
++    /* Verify the final driver state after Init and all dynamic assignments. */
++    return ff_amf_check_rate_control(avctx, rate_control_properties,
++                                     avctx->rc_max_rate ? avctx->rc_max_rate :
++                                     ctx->rate_control_mode == AMF_VIDEO_ENCODER_HEVC_RATE_CONTROL_METHOD_CBR ? avctx->bit_rate : 0);
+ }
+ static const FFCodecDefault defaults[] = {
+     { "refs",       "-1"  },
+diff --git a/libavcodec/amfenc_av1.c b/libavcodec/amfenc_av1.c
+--- a/libavcodec/amfenc_av1.c
++++ b/libavcodec/amfenc_av1.c
+@@ -25,6 +25,23 @@
+ #include "libavutil/pixdesc.h"
+ #include "amfenc.h"
+ #include "codec_internal.h"
++
++/* Shared internal helpers; public FFmpeg headers and decoder paths are unchanged. */
++int ff_amf_set_rate_control_property(AVCodecContext *avctx, const wchar_t *name,
++                                    AMF_VARIANT_TYPE type, amf_int64 value);
++int ff_amf_check_rate_control(AVCodecContext *avctx,
++                             const wchar_t *const names[7], amf_int64 peak);
++
++/* Order matches ff_amf_check_rate_control. */
++static const wchar_t *const rate_control_properties[7] = {
++    AMF_VIDEO_ENCODER_AV1_RATE_CONTROL_METHOD,
++    AMF_VIDEO_ENCODER_AV1_VBV_BUFFER_SIZE,
++    AMF_VIDEO_ENCODER_AV1_INITIAL_VBV_BUFFER_FULLNESS,
++    AMF_VIDEO_ENCODER_AV1_TARGET_BITRATE,
++    AMF_VIDEO_ENCODER_AV1_PEAK_BITRATE,
++    AMF_VIDEO_ENCODER_AV1_ENFORCE_HRD,
++    AMF_VIDEO_ENCODER_AV1_FILLER_DATA,
++};
+ 
+ #define OFFSET(x) offsetof(AMFEncoderContext, x)
+ #define VE AV_OPT_FLAG_VIDEO_PARAM | AV_OPT_FLAG_ENCODING_PARAM
+@@ -373,47 +390,67 @@
+         AMF_ASSIGN_PROPERTY_BOOL(res, ctx->encoder, AMF_VIDEO_ENCODER_AV1_HIGH_MOTION_QUALITY_BOOST, ((ctx->hw_high_motion_quality_boost == 0) ? false : true));
+     }
+ 
+-    AMF_ASSIGN_PROPERTY_INT64(res, ctx->encoder, AMF_VIDEO_ENCODER_AV1_RATE_CONTROL_METHOD, ctx->rate_control_mode);
++    ret = ff_amf_set_rate_control_property(avctx, AMF_VIDEO_ENCODER_AV1_RATE_CONTROL_METHOD,
++                                           AMF_VARIANT_INT64, ctx->rate_control_mode);
++    if (ret < 0)
++        return ret;
+ 
+     if (avctx->rc_buffer_size) {
+-        AMF_ASSIGN_PROPERTY_INT64(res, ctx->encoder, AMF_VIDEO_ENCODER_AV1_VBV_BUFFER_SIZE, avctx->rc_buffer_size);
++        ret = ff_amf_set_rate_control_property(avctx, AMF_VIDEO_ENCODER_AV1_VBV_BUFFER_SIZE,
++                                               AMF_VARIANT_INT64, avctx->rc_buffer_size);
++        if (ret < 0)
++            return ret;
+ 
+         if (avctx->rc_initial_buffer_occupancy != 0) {
+-            int amf_buffer_fullness = avctx->rc_initial_buffer_occupancy * 64 / avctx->rc_buffer_size;
++            int amf_buffer_fullness = (int64_t)avctx->rc_initial_buffer_occupancy * 64 / avctx->rc_buffer_size;
+             if (amf_buffer_fullness > 64)
+                 amf_buffer_fullness = 64;
+-            AMF_ASSIGN_PROPERTY_INT64(res, ctx->encoder, AMF_VIDEO_ENCODER_AV1_INITIAL_VBV_BUFFER_FULLNESS, amf_buffer_fullness);
++            ret = ff_amf_set_rate_control_property(avctx, AMF_VIDEO_ENCODER_AV1_INITIAL_VBV_BUFFER_FULLNESS,
++                                                   AMF_VARIANT_INT64, amf_buffer_fullness);
++            if (ret < 0)
++                return ret;
+         }
+     }
+ 
+     // init dynamic rate control params
+     if (ctx->enforce_hrd != -1) {
+-        AMF_ASSIGN_PROPERTY_BOOL(res, ctx->encoder, AMF_VIDEO_ENCODER_AV1_ENFORCE_HRD, ((ctx->enforce_hrd == 0) ? false : true));
++        ret = ff_amf_set_rate_control_property(avctx, AMF_VIDEO_ENCODER_AV1_ENFORCE_HRD,
++                                               AMF_VARIANT_BOOL, ((ctx->enforce_hrd == 0) ? false : true));
++        if (ret < 0)
++            return ret;
+     }
+ 
+     if (ctx->filler_data != -1) {
+-        AMF_ASSIGN_PROPERTY_BOOL(res, ctx->encoder, AMF_VIDEO_ENCODER_AV1_FILLER_DATA, ((ctx->filler_data == 0) ? false : true));
++        ret = ff_amf_set_rate_control_property(avctx, AMF_VIDEO_ENCODER_AV1_FILLER_DATA,
++                                               AMF_VARIANT_BOOL, ((ctx->filler_data == 0) ? false : true));
++        if (ret < 0)
++            return ret;
+     }
+ 
+     if (avctx->bit_rate) {
+-        AMF_ASSIGN_PROPERTY_INT64(res, ctx->encoder, AMF_VIDEO_ENCODER_AV1_TARGET_BITRATE, avctx->bit_rate);
++        ret = ff_amf_set_rate_control_property(avctx, AMF_VIDEO_ENCODER_AV1_TARGET_BITRATE,
++                                               AMF_VARIANT_INT64, avctx->bit_rate);
++        if (ret < 0)
++            return ret;
+     }
+ 
+     if (ctx->rate_control_mode == AMF_VIDEO_ENCODER_AV1_RATE_CONTROL_METHOD_CBR) {
+         if (avctx->bit_rate) {
+-            AMF_ASSIGN_PROPERTY_INT64(res, ctx->encoder, AMF_VIDEO_ENCODER_AV1_PEAK_BITRATE, avctx->bit_rate);
++            ret = ff_amf_set_rate_control_property(avctx, AMF_VIDEO_ENCODER_AV1_PEAK_BITRATE,
++                                                   AMF_VARIANT_INT64, avctx->bit_rate);
++            if (ret < 0)
++                return ret;
+         }
+     }
+ 
+     if (avctx->rc_max_rate) {
+-        AMF_ASSIGN_PROPERTY_INT64(res, ctx->encoder, AMF_VIDEO_ENCODER_AV1_PEAK_BITRATE, avctx->rc_max_rate);
++        ret = ff_amf_set_rate_control_property(avctx, AMF_VIDEO_ENCODER_AV1_PEAK_BITRATE,
++                                               AMF_VARIANT_INT64, avctx->rc_max_rate);
++        if (ret < 0)
++            return ret;
+     }
+     else if (ctx->rate_control_mode == AMF_VIDEO_ENCODER_AV1_RATE_CONTROL_METHOD_PEAK_CONSTRAINED_VBR) {
+         av_log(ctx, AV_LOG_DEBUG, "rate control mode is vbr_peak but max_rate is not set, default max_rate will be applied.\n");
+-    }
+-    if (avctx->bit_rate > 0) {
+-        ctx->rate_control_mode = AMF_VIDEO_ENCODER_AV1_RATE_CONTROL_METHOD_CBR;
+-        av_log(ctx, AV_LOG_DEBUG, "Rate control turned to CBR\n");
+     }
+ 
+     switch (ctx->align)
+@@ -717,7 +754,10 @@
+         avctx->coded_side_data[avctx->nb_coded_side_data - 1].size = sizeof(uint32_t) * 4;
+     }
+ 
+-    return 0;
++    /* Verify the final driver state after Init and all dynamic assignments. */
++    return ff_amf_check_rate_control(avctx, rate_control_properties,
++                                     avctx->rc_max_rate ? avctx->rc_max_rate :
++                                     ctx->rate_control_mode == AMF_VIDEO_ENCODER_AV1_RATE_CONTROL_METHOD_CBR ? avctx->bit_rate : 0);
+ }
+ 
+ static const FFCodecDefault defaults[] = {

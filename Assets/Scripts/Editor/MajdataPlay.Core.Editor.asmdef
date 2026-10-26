@@ -1,0 +1,21 @@
+{
+    "name": "MajdataPlay.Core.Editor",
+    "rootNamespace": "MajdataPlay.Editor",
+    "references": [
+        "Live2D.Cubism",
+        "MajdataPlay.Core",
+        "MajdataPlay.Runtime",
+        "UniTask"
+    ],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

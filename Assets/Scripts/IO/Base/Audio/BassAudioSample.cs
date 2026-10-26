@@ -1,5 +1,6 @@
 using MajdataPlay.Diagnostics;
 using MajdataPlay.Extensions;
+using MajdataPlay.IO.Storage;
 using MajdataPlay.Numerics;
 using MajdataPlay.Utils;
 using ManagedBass;
@@ -8,7 +9,6 @@ using ManagedBass.Fx;
 using ManagedBass.Mix;
 using ManagedBass.Opus;
 using System;
-using System.IO;
 using System.Runtime.InteropServices;
 using System.Threading;
 using System.Threading.Tasks;
@@ -286,29 +286,57 @@ namespace MajdataPlay.IO
         }
         public static BassAudioSample Create(string path, int globalMixer, bool normalize = true, bool speedChange = false)
         {
-            var buf = File.ReadAllBytes(path);
+            var buf = FileSystem.File.Open(path).ReadAllBytes();
 
             return Create(buf, globalMixer, normalize, speedChange);
         }
         public static async ValueTask<BassAudioSample> CreateAsync(string path, int globalMixer, bool normalize = true, bool speedChange = false)
         {
-            var buf = await File.ReadAllBytesAsync(path);
+            var buf = await FileSystem.File.Open(path).ReadAllBytesAsync();
 
             return Create(buf, globalMixer, normalize, speedChange);
         }
+        /// <summary>Creates a sample that streams an online audio file downloaded by <see cref="MajEnv.SharedHttpClient"/>.</summary>
+        /// <param name="uri">The absolute HTTP or HTTPS address of the audio file.</param>
+        /// <param name="globalMixer">The BASS mixer the sample is played through.</param>
+        /// <returns>A sample that cannot seek beyond the downloaded data.</returns>
+        /// <remarks>Blocks until the response headers and the beginning of the body have arrived; prefer <see cref="CreateFromUriAsync"/>.</remarks>
+        /// <exception cref="OperationCanceledException">The request was cancelled by the client.</exception>
+        /// <exception cref="System.Net.Http.HttpRequestException">The request failed or returned an error status code.</exception>
+        /// <exception cref="System.IO.IOException">The download failed before the format could be identified.</exception>
+        /// <exception cref="BassException">BASS could not create the stream.</exception>
         public static BassAudioSample CreateFromUri(Uri uri, int globalMixer)
         {
-            var decode = Bass.CreateStream(uri.OriginalString, 0, BassFlags.Decode | BassFlags.Prescan | BassFlags.AsyncFile, null);
-            MajDebug.LogInfo(decode);
-            MajDebug.LogInfo(Bass.LastError);
-
-            var sample = new BassAudioSample(decode, globalMixer, 1, false)
+            return CreateFromUriAsync(uri, globalMixer).AsTask().GetAwaiter().GetResult();
+        }
+        /// <summary>Creates a sample that streams an online audio file downloaded by <see cref="MajEnv.SharedHttpClient"/>.</summary>
+        /// <param name="uri">The absolute HTTP or HTTPS address of the audio file.</param>
+        /// <param name="globalMixer">The BASS mixer the sample is played through.</param>
+        /// <param name="token">Cancels the request and the stream creation; it does not affect the returned sample.</param>
+        /// <returns>A sample that cannot seek beyond the downloaded data.</returns>
+        /// <remarks>BASS reads the beginning of the body on the thread that resumes the request, so call this off the main thread.</remarks>
+        /// <exception cref="OperationCanceledException"><paramref name="token"/> was cancelled or the request was cancelled by the client.</exception>
+        /// <exception cref="System.Net.Http.HttpRequestException">The request failed or returned an error status code.</exception>
+        /// <exception cref="System.IO.IOException">The download failed before the format could be identified.</exception>
+        /// <exception cref="BassException">BASS could not create the stream.</exception>
+        public static async ValueTask<BassAudioSample> CreateFromUriAsync(Uri uri, int globalMixer, CancellationToken token = default)
+        {
+            var decode = await BassHttpFileSource.CreateStreamAsync(MajEnv.SharedHttpClient, uri, BassFlags.Decode, token).ConfigureAwait(false);
+            try
             {
-                CanSeek = false
-            };
-            sample.Volume = 1;
+                var sample = new BassAudioSample(decode, globalMixer, 1, false)
+                {
+                    CanSeek = false
+                };
+                sample.Volume = 1;
 
-            return sample;
+                return sample;
+            }
+            catch
+            {
+                Bass.StreamFree(decode);
+                throw;
+            }
         }
     }
 }

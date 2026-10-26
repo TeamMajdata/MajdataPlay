@@ -1,4 +1,4 @@
-using MajdataPlay.UI;
+using MajdataPlay.Behaviours.UI;
 using UnityEditor;
 using UnityEditorInternal;
 using UnityEngine;

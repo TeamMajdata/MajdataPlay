@@ -1,3 +1,4 @@
+using MajdataPlay.IO.Storage;
 using MajdataPlay.Diagnostics;
 using MajdataPlay.Net.Curl.Core;
 using MajdataPlay.Net.Curl.Core.PInvoke;
@@ -31,7 +32,8 @@ namespace MajdataPlay.Net.Curl.Utils
         public static void ApplySystemCA(CurlEasy curlEasy)
         {
 #if UNITY_ANDROID
-            if(File.Exists(_androidCAPath))
+            var returnCode = default(CurlCode?);
+            if(FileSystem.File.Open(_androidCAPath).Exists)
             {
                 var code = LibCurl.Easy.SetOption(curlEasy.Handle, CurlOption.CaInfo, _androidCAPath);
                 if (code != CurlCode.Ok)

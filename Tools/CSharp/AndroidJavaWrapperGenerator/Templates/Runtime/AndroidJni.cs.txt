@@ -1,0 +1,1544 @@
+using System;
+using System.Collections.Concurrent;
+using System.Collections.Generic;
+using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
+using System.Security;
+using UnityEngine;
+
+#nullable enable
+
+namespace __ROOT_NAMESPACE__
+{
+    /// <summary>
+    /// Executes generated JNI bindings using JVM descriptors, without runtime signature inference.
+    /// </summary>
+    /// <remarks>
+    /// Requires an Android player and the Unity main thread or a JVM-attached thread. Object results
+    /// own global references and must be disposed. Declared array component types, null elements,
+    /// and jagged arrays are preserved. Only managed descriptors, never VM-bound JNI IDs, are cached. Attach background threads with
+    /// AndroidJNI.AttachCurrentThread before access; detach only threads that the caller attached.
+    /// JVM arrays use C# jagged arrays of any declared rank up to the JVM limit of 255 dimensions.
+    /// </remarks>
+    public static partial class AndroidJni
+    {
+        /// <summary>
+        /// Reuses parsed descriptors without retaining JNI references across domain reloads.
+        /// </summary>
+        private static readonly ConcurrentDictionary<string, MethodSignature> s_signatures = new ConcurrentDictionary<string, MethodSignature>();
+
+        /// <summary>
+        /// Resolves a Java class as an ordinary, caller-owned java.lang.Class object reference.
+        /// </summary>
+        /// <param name="className">The Java binary class name, preserving nested-type dollar signs.</param>
+        /// <returns>An independent global reference to the represented Java class object.</returns>
+        /// <remarks>
+        /// Class lookup may initialize the represented type. Dispose the result on the Unity
+        /// main thread or a JVM-attached thread.
+        /// </remarks>
+        /// <exception cref="PlatformNotSupportedException">Execution is not in an Android player.</exception>
+        /// <exception cref="ArgumentException">The class name is empty or invalid.</exception>
+        /// <exception cref="AndroidJavaException">Unity cannot resolve the Java class.</exception>
+        /// <exception cref="JavaInvocationException">Java raises an exception while copying the reference.</exception>
+        /// <exception cref="InvalidOperationException">JNI cannot allocate a frame or returns a null reference.</exception>
+        public static AndroidJavaObject GetClass(string className)
+        {
+            EnsureAndroid();
+            ValidateClassName(className);
+            using var frame = new LocalFrame(16);
+            using var javaClass = new JavaClassReference(className);
+            return CopyReference(javaClass.GetRawClass());
+        }
+
+        /// <summary>
+        /// Constructs a Java object with an exact constructor descriptor.
+        /// </summary>
+        /// <param name="className">The Java binary class name.</param>
+        /// <param name="descriptor">The constructor's complete JVM descriptor, ending in V.</param>
+        /// <param name="arguments">Primitive, string, Java-reference, or jagged-array arguments in declaration order.</param>
+        /// <returns>A caller-owned Unity Java object containing independent global references.</returns>
+        /// <exception cref="PlatformNotSupportedException">Execution is not in an Android player.</exception>
+        /// <exception cref="ArgumentException">The class name, descriptor, or arguments are invalid.</exception>
+        /// <exception cref="ObjectDisposedException">An argument's Java reference has been disposed.</exception>
+        /// <exception cref="AndroidJavaException">Unity cannot resolve a Java class.</exception>
+        /// <exception cref="JavaInvocationException">Java raises an exception during lookup or construction.</exception>
+        /// <exception cref="InvalidOperationException">JNI cannot allocate a frame or returns a null reference or identifier.</exception>
+        public static AndroidJavaObject Construct(string className, string descriptor, params object?[] arguments)
+        {
+            EnsureAndroid();
+            ValidateClassName(className);
+            var signature = GetSignature(descriptor);
+            if (signature.ReturnType != "V")
+            {
+                throw new ArgumentException("A constructor requires a void JVM return descriptor.", nameof(descriptor));
+            }
+
+            ValidateArgumentCount(signature, arguments);
+            using var frame = new LocalFrame(Math.Max(32, arguments.Length + 16));
+            using var javaClass = new JavaClassReference(className);
+            var classReference = javaClass.GetRawClass();
+            var constructor = ResolveMethod(classReference, "<init>", descriptor, false);
+            var jniArguments = WriteArguments(signature, arguments);
+            var result = AndroidJNI.NewObject(classReference, constructor, jniArguments);
+            CheckException();
+            return CopyReference(result);
+        }
+
+        /// <summary>
+        /// Calls a virtual or static Java method using its exact declared JVM descriptor.
+        /// </summary>
+        /// <typeparam name="T">The descriptor's primitive, string, Unity Java-reference, or jagged-array result type.</typeparam>
+        /// <param name="instance">The receiver, or null to call a static method.</param>
+        /// <param name="className">The binary name of the Java class or interface declaring the method.</param>
+        /// <param name="name">The case-sensitive Java method name.</param>
+        /// <param name="descriptor">The complete declared JVM method descriptor.</param>
+        /// <param name="arguments">The method arguments in their Java declaration order.</param>
+        /// <returns>The converted result, preserving null references and null array leaves.</returns>
+        /// <exception cref="PlatformNotSupportedException">Execution is not in an Android player.</exception>
+        /// <exception cref="ArgumentException">Names, the descriptor, the receiver, or arguments are invalid.</exception>
+        /// <exception cref="InvalidCastException">T does not match the declared Java return type.</exception>
+        /// <exception cref="ObjectDisposedException">The receiver or an argument has a disposed Java reference.</exception>
+        /// <exception cref="AndroidJavaException">Unity cannot resolve a Java class.</exception>
+        /// <exception cref="JavaInvocationException">Java raises an exception during lookup or invocation.</exception>
+        /// <exception cref="InvalidOperationException">JNI cannot allocate a frame or resolve an identifier.</exception>
+        /// <exception cref="AggregateException">Result conversion and reference cleanup both fail.</exception>
+        public static T Call<T>(AndroidJavaObject? instance, string className, string name, string descriptor, params object?[] arguments)
+        {
+            EnsureAndroid();
+            ValidateClassName(className);
+            ValidateMemberName(name);
+            var signature = GetSignature(descriptor);
+            ValidateResultType(signature.ReturnType, typeof(T));
+            ValidateArgumentCount(signature, arguments);
+            using var frame = new LocalFrame(Math.Max(32, arguments.Length + 16));
+            using var javaClass = new JavaClassReference(className);
+            var classReference = javaClass.GetRawClass();
+            var isStatic = instance is null;
+            var target = isStatic ? classReference : GetReceiver(instance!, classReference);
+            var method = ResolveMethod(classReference, name, descriptor, isStatic);
+            var jniArguments = WriteArguments(signature, arguments);
+            var result = Invoke(target, method, signature.ReturnType[0], jniArguments, isStatic);
+            CheckException();
+            if (signature.ReturnType[0] == 'L' || signature.ReturnType[0] == '[')
+            {
+                return (T)ReadReference((IntPtr)result, signature.ReturnType, typeof(T))!;
+            }
+
+            return (T)result;
+        }
+
+        /// <summary>
+        /// Calls a virtual or static Java method whose declared result is void.
+        /// </summary>
+        /// <param name="instance">The receiver, or null to call a static method.</param>
+        /// <param name="className">The binary name of the Java class or interface declaring the method.</param>
+        /// <param name="name">The case-sensitive Java method name.</param>
+        /// <param name="descriptor">The complete method descriptor, ending in V.</param>
+        /// <param name="arguments">The method arguments in their Java declaration order.</param>
+        /// <exception cref="PlatformNotSupportedException">Execution is not in an Android player.</exception>
+        /// <exception cref="ArgumentException">Names, the descriptor, the receiver, or arguments are invalid.</exception>
+        /// <exception cref="ObjectDisposedException">The receiver or an argument has a disposed Java reference.</exception>
+        /// <exception cref="AndroidJavaException">Unity cannot resolve a Java class.</exception>
+        /// <exception cref="JavaInvocationException">Java raises an exception during lookup or invocation.</exception>
+        /// <exception cref="InvalidOperationException">JNI cannot allocate a frame or resolve an identifier.</exception>
+        public static void Call(AndroidJavaObject? instance, string className, string name, string descriptor, params object?[] arguments)
+        {
+            EnsureAndroid();
+            ValidateClassName(className);
+            ValidateMemberName(name);
+            var signature = GetSignature(descriptor);
+            if (signature.ReturnType != "V")
+            {
+                throw new ArgumentException("The non-generic overload requires a void JVM return descriptor.", nameof(descriptor));
+            }
+
+            ValidateArgumentCount(signature, arguments);
+            using var frame = new LocalFrame(Math.Max(32, arguments.Length + 16));
+            using var javaClass = new JavaClassReference(className);
+            var classReference = javaClass.GetRawClass();
+            var isStatic = instance is null;
+            var target = isStatic ? classReference : GetReceiver(instance!, classReference);
+            var method = ResolveMethod(classReference, name, descriptor, isStatic);
+            var jniArguments = WriteArguments(signature, arguments);
+            if (isStatic)
+            {
+                AndroidJNI.CallStaticVoidMethod(target, method, jniArguments);
+            }
+            else
+            {
+                AndroidJNI.CallVoidMethod(target, method, jniArguments);
+            }
+
+            CheckException();
+        }
+
+        /// <summary>
+        /// Reads a Java field using its declaring class and exact JVM descriptor.
+        /// </summary>
+        /// <typeparam name="T">The descriptor's primitive, string, Unity Java-reference, or jagged-array result type.</typeparam>
+        /// <param name="instance">The owner, or null to read a static field.</param>
+        /// <param name="className">The binary name of the Java class or interface declaring the field.</param>
+        /// <param name="name">The case-sensitive Java field name.</param>
+        /// <param name="descriptor">The exact JVM field descriptor.</param>
+        /// <returns>The converted field value, preserving null references and null array leaves.</returns>
+        /// <exception cref="PlatformNotSupportedException">Execution is not in an Android player.</exception>
+        /// <exception cref="ArgumentException">Names, the descriptor, or the receiver are invalid.</exception>
+        /// <exception cref="InvalidCastException">T does not match the declared Java field type.</exception>
+        /// <exception cref="ObjectDisposedException">The receiver's Java reference has been disposed.</exception>
+        /// <exception cref="AndroidJavaException">Unity cannot resolve a Java class.</exception>
+        /// <exception cref="JavaInvocationException">Java raises an exception during lookup or field access.</exception>
+        /// <exception cref="InvalidOperationException">JNI cannot allocate a frame or resolve an identifier.</exception>
+        /// <exception cref="AggregateException">Result conversion and reference cleanup both fail.</exception>
+        public static T GetField<T>(AndroidJavaObject? instance, string className, string name, string descriptor)
+        {
+            EnsureAndroid();
+            ValidateClassName(className);
+            ValidateMemberName(name);
+            var position = 0;
+            ReadDescriptor(descriptor, ref position, false);
+            if (position != descriptor.Length)
+            {
+                throw new ArgumentException("A field descriptor must contain exactly one Java type.", nameof(descriptor));
+            }
+
+            ValidateResultType(descriptor, typeof(T));
+            using var frame = new LocalFrame(32);
+            using var javaClass = new JavaClassReference(className);
+            var classReference = javaClass.GetRawClass();
+            var isStatic = instance is null;
+            var target = isStatic ? classReference : GetReceiver(instance!, classReference);
+            var field = isStatic
+                ? AndroidJNI.GetStaticFieldID(classReference, name, descriptor)
+                : AndroidJNI.GetFieldID(classReference, name, descriptor);
+            CheckException();
+            if (field == IntPtr.Zero)
+            {
+                throw new InvalidOperationException("JNI field lookup returned a null identifier without a Java exception.");
+            }
+
+            var result = ReadField(target, field, descriptor[0], isStatic);
+            CheckException();
+            if (descriptor[0] == 'L' || descriptor[0] == '[')
+            {
+                return (T)ReadReference((IntPtr)result, descriptor, typeof(T))!;
+            }
+
+            return (T)result;
+        }
+
+        /// <summary>
+        /// Transfers an owned Java result to a generated wrapper or interface implementation.
+        /// </summary>
+        /// <typeparam name="TWrapper">The generated class or interface implementing IJavaObject.</typeparam>
+        /// <param name="value">The caller-owned Unity Java reference, or null.</param>
+        /// <param name="factory">A factory that adopts the non-null reference and returns a non-null wrapper.</param>
+        /// <returns>The owning wrapper, or the default nullable result when Java returned null.</returns>
+        /// <remarks>
+        /// The factory must adopt the supplied reference. If it fails, the reference is disposed.
+        /// Generated wrappers are reference types; the null result is default(TWrapper) for a value-type implementation.
+        /// </remarks>
+        /// <exception cref="ArgumentNullException">The factory is null.</exception>
+        /// <exception cref="InvalidCastException">The result is incompatible with the registered Java wrapper type.</exception>
+        /// <exception cref="InvalidOperationException">The factory returns null for a non-null Java reference.</exception>
+        /// <exception cref="PlatformNotSupportedException">Reference cleanup is required outside Android.</exception>
+        /// <exception cref="AggregateException">Wrapper construction and reference cleanup both fail.</exception>
+        public static TWrapper? Wrap<TWrapper>(AndroidJavaObject? value, Func<AndroidJavaObject, TWrapper> factory)
+            where TWrapper : IJavaObject
+        {
+            if (factory is null)
+            {
+                throw new ArgumentNullException(nameof(factory));
+            }
+
+            if (value is null)
+            {
+                return default;
+            }
+
+            try
+            {
+                JavaWrapperConverter.Validate<TWrapper>(value);
+                var wrapper = factory(value);
+                if (wrapper is null)
+                {
+                    throw new InvalidOperationException("The wrapper factory returned null for a non-null Java reference.");
+                }
+
+                return wrapper;
+            }
+            catch (Exception conversionException)
+            {
+                try
+                {
+                    EnsureAndroid();
+                    value.Dispose();
+                }
+                catch (Exception cleanupException)
+                {
+                    throw new AggregateException("Wrapper construction and Java-reference cleanup both failed.", conversionException, cleanupException);
+                }
+
+                throw;
+            }
+        }
+
+        /// <summary>
+        /// Maps one array dimension while preserving null arrays and nullable nested elements.
+        /// </summary>
+        /// <typeparam name="TSource">The source element type, including nullable references.</typeparam>
+        /// <typeparam name="TResult">The converted wrapper or nested-array element type.</typeparam>
+        /// <param name="values">The source array, or null.</param>
+        /// <param name="converter">The generated conversion that adopts each owned Java result.</param>
+        /// <returns>The converted array, or null when the source array is null.</returns>
+        /// <remarks>
+        /// Failed conversion disposes disposable results and source elements recursively.
+        /// Successful conversion transfers Java-reference ownership to the returned wrappers.
+        /// Pure managed values and null or empty arrays require no JNI access.
+        /// </remarks>
+        /// <exception cref="ArgumentNullException">The converter is null.</exception>
+        /// <exception cref="AggregateException">Conversion and reference cleanup both fail.</exception>
+        public static TResult[]? MapArray<TSource, TResult>(TSource[]? values, Func<TSource, TResult> converter)
+        {
+            if (converter is null)
+            {
+                throw new ArgumentNullException(nameof(converter));
+            }
+
+            if (values is null)
+            {
+                return null;
+            }
+
+            var results = new TResult[values.Length];
+            try
+            {
+                for (var i = 0; i < values.Length; i++)
+                {
+                    results[i] = converter(values[i]);
+                }
+
+                return results;
+            }
+            catch (Exception conversionException)
+            {
+                var cleanupErrors = new List<Exception>();
+                DisposeReferences(results, cleanupErrors);
+                DisposeReferences(values, cleanupErrors);
+                if (cleanupErrors.Count != 0)
+                {
+                    cleanupErrors.Insert(0, conversionException);
+                    throw new AggregateException("Array conversion and reference cleanup both failed.", cleanupErrors);
+                }
+
+                throw;
+            }
+        }
+
+        /// <summary>
+        /// Rejects JNI access outside Android players, including Editor imports of the compiled runtime library.
+        /// </summary>
+        /// <exception cref="PlatformNotSupportedException">Execution is not in an Android player.</exception>
+        internal static void EnsureAndroid()
+        {
+#if !UNITY_ANDROID || UNITY_EDITOR
+            throw new PlatformNotSupportedException("Generated Java wrappers require an Android player; JNI is unavailable in the Unity Editor.");
+#else
+            if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows) || RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
+            {
+                throw new PlatformNotSupportedException("Generated Java wrappers require an Android player.");
+            }
+
+            try
+            {
+                // Unity marks the platform getter as thread-safe, including JVM-attached worker threads.
+                if (IsAndroidPlayer())
+                {
+                    return;
+                }
+            }
+            catch (Exception exception) when (exception is MissingMethodException || exception is TypeLoadException || exception is SecurityException)
+            {
+                throw new PlatformNotSupportedException("Generated Java wrappers require a running Android Unity player.", exception);
+            }
+
+            throw new PlatformNotSupportedException("Generated Java wrappers require an Android player; JNI is unavailable in the Unity Editor.");
+#endif
+        }
+
+        /// <summary>Queries Unity's thread-safe platform getter only after portable host checks succeed.</summary>
+        /// <returns>True when the current Unity runtime is an Android Player.</returns>
+        /// <remarks>Inlining is disabled so plain managed hosts do not resolve Unity internal calls before platform rejection.</remarks>
+        /// <exception cref="MissingMethodException">The host cannot resolve Unity's native platform getter.</exception>
+        /// <exception cref="TypeLoadException">The host cannot load Unity's native platform metadata.</exception>
+        /// <exception cref="SecurityException">The managed host cannot execute Unity internal calls.</exception>
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        private static bool IsAndroidPlayer()
+        {
+            return Application.platform == RuntimePlatform.Android;
+        }
+
+        /// <summary>
+        /// Validates the binary class name before passing it to Unity's class resolver.
+        /// </summary>
+        /// <param name="className">The Java binary class name.</param>
+        /// <exception cref="ArgumentException">The name is empty or contains descriptor delimiters.</exception>
+        private static void ValidateClassName(string className)
+        {
+            if (string.IsNullOrWhiteSpace(className) || className.IndexOfAny(new[] { '[', ';', '(', ')', '\0' }) >= 0)
+            {
+                throw new ArgumentException("A valid Java binary class name is required.", nameof(className));
+            }
+        }
+
+        /// <summary>
+        /// Rejects an empty member name before invoking JNI lookup.
+        /// </summary>
+        /// <param name="name">The case-sensitive Java member name.</param>
+        /// <exception cref="ArgumentException">The member name is empty.</exception>
+        private static void ValidateMemberName(string name)
+        {
+            if (string.IsNullOrWhiteSpace(name))
+            {
+                throw new ArgumentException("A Java member name is required.", nameof(name));
+            }
+        }
+
+        /// <summary>
+        /// Checks the number of arguments against the complete parsed descriptor.
+        /// </summary>
+        /// <param name="signature">The parsed method descriptor.</param>
+        /// <param name="arguments">The boxed arguments in declaration order.</param>
+        /// <exception cref="ArgumentException">The arguments are null or have the wrong count.</exception>
+        private static void ValidateArgumentCount(MethodSignature signature, object?[] arguments)
+        {
+            if (arguments is null || arguments.Length != signature.Parameters.Length)
+            {
+                throw new ArgumentException("Argument count does not match the JVM descriptor.", nameof(arguments));
+            }
+        }
+
+        /// <summary>
+        /// Checks the managed result shape before invoking a descriptor-exact JNI operation.
+        /// </summary>
+        /// <param name="descriptor">The complete non-void Java result descriptor.</param>
+        /// <param name="resultType">The requested primitive, string, Java-reference, or jagged-array type.</param>
+        /// <exception cref="InvalidCastException">The requested type does not match the descriptor.</exception>
+        private static void ValidateResultType(string descriptor, Type resultType)
+        {
+            if (descriptor[0] == '[')
+            {
+                var elementType = resultType.GetElementType();
+                if (!resultType.IsArray || resultType.GetArrayRank() != 1 || elementType is null
+                    || resultType != elementType.MakeArrayType())
+                {
+                    throw new InvalidCastException("A JVM array requires a one-dimensional managed jagged-array result.");
+                }
+
+                ValidateResultType(descriptor.Substring(1), elementType);
+                return;
+            }
+
+            Type? primitiveType = null;
+            switch (descriptor)
+            {
+                case "Z":
+                    primitiveType = typeof(bool);
+                    break;
+                case "B":
+                    primitiveType = typeof(sbyte);
+                    break;
+                case "C":
+                    primitiveType = typeof(char);
+                    break;
+                case "S":
+                    primitiveType = typeof(short);
+                    break;
+                case "I":
+                    primitiveType = typeof(int);
+                    break;
+                case "J":
+                    primitiveType = typeof(long);
+                    break;
+                case "F":
+                    primitiveType = typeof(float);
+                    break;
+                case "D":
+                    primitiveType = typeof(double);
+                    break;
+            }
+
+            if (primitiveType == resultType
+                || (descriptor[0] == 'L' && resultType == typeof(AndroidJavaObject))
+                || (descriptor == "Ljava/lang/String;" && resultType == typeof(string)))
+            {
+                return;
+            }
+
+            throw new InvalidCastException($"JVM type {descriptor} cannot be returned as {resultType.FullName}.");
+        }
+
+        /// <summary>
+        /// Resolves a method using the exact JNI signature without Unity signature inference.
+        /// </summary>
+        /// <param name="classReference">The declaring class's live JNI reference.</param>
+        /// <param name="name">The Java method name or constructor name.</param>
+        /// <param name="descriptor">The exact JVM method descriptor.</param>
+        /// <param name="isStatic">Whether to resolve a static method.</param>
+        /// <returns>The method identifier valid for this invocation.</returns>
+        /// <exception cref="JavaInvocationException">Java raises an exception during method resolution.</exception>
+        /// <exception cref="InvalidOperationException">JNI returns a null identifier without an exception.</exception>
+        private static IntPtr ResolveMethod(IntPtr classReference, string name, string descriptor, bool isStatic)
+        {
+            var method = isStatic
+                ? AndroidJNI.GetStaticMethodID(classReference, name, descriptor)
+                : AndroidJNI.GetMethodID(classReference, name, descriptor);
+            CheckException();
+            if (method == IntPtr.Zero)
+            {
+                throw new InvalidOperationException("JNI method lookup returned a null identifier without a Java exception.");
+            }
+
+            return method;
+        }
+
+        /// <summary>
+        /// Gets a non-null object reference and rejects an externally disposed Unity object.
+        /// </summary>
+        /// <param name="javaObject">The Unity Java object containing the reference.</param>
+        /// <returns>The existing global object reference, without transferring ownership.</returns>
+        /// <exception cref="ObjectDisposedException">The object has no live Java object reference.</exception>
+        private static IntPtr GetObjectReference(AndroidJavaObject javaObject)
+        {
+            var reference = javaObject.GetRawObject();
+            if (reference == IntPtr.Zero)
+            {
+                throw new ObjectDisposedException(nameof(javaObject), "The Unity reference has no live Java object handle.");
+            }
+
+            return reference;
+        }
+
+        /// <summary>
+        /// Checks that an instance belongs to the class or interface declaring the requested member.
+        /// </summary>
+        /// <param name="instance">The live Unity Java receiver.</param>
+        /// <param name="classReference">The declaring class or interface reference.</param>
+        /// <returns>The borrowed receiver reference.</returns>
+        /// <exception cref="ObjectDisposedException">The receiver has no live Java reference.</exception>
+        /// <exception cref="ArgumentException">The receiver does not implement the declaring type.</exception>
+        /// <exception cref="JavaInvocationException">Java raises an exception during the type check.</exception>
+        private static IntPtr GetReceiver(AndroidJavaObject instance, IntPtr classReference)
+        {
+            var reference = GetObjectReference(instance);
+            var compatible = AndroidJNI.IsInstanceOf(reference, classReference);
+            CheckException();
+            if (!compatible)
+            {
+                throw new ArgumentException("The receiver is not an instance of the declaring Java type.", nameof(instance));
+            }
+
+            return reference;
+        }
+
+        /// <summary>
+        /// Copies a local or global reference into independent Unity-owned global references.
+        /// </summary>
+        /// <param name="reference">The non-null Java object or class reference.</param>
+        /// <returns>An owning Unity Java object that survives the current local frame.</returns>
+        /// <exception cref="AndroidJavaException">Unity cannot create its global references.</exception>
+        /// <exception cref="JavaInvocationException">Java raises an exception while copying the reference.</exception>
+        /// <exception cref="InvalidOperationException">The source reference is null.</exception>
+        /// <exception cref="AggregateException">Reference creation and cleanup both fail.</exception>
+        internal static AndroidJavaObject CopyReference(IntPtr reference)
+        {
+            if (reference == IntPtr.Zero)
+            {
+                throw new InvalidOperationException("JNI returned a null reference without a Java exception.");
+            }
+
+            var result = new AndroidJavaObject(reference);
+            try
+            {
+                CheckException();
+                GetObjectReference(result);
+                return result;
+            }
+            catch (Exception conversionException)
+            {
+                try
+                {
+                    result.Dispose();
+                }
+                catch (Exception cleanupException)
+                {
+                    throw new AggregateException("Java-reference creation and cleanup both failed.", conversionException, cleanupException);
+                }
+
+                throw;
+            }
+        }
+
+        /// <summary>Checks whether a live Unity reference is assignable to a generated Java wrapper type.</summary>
+        /// <param name="javaReference">The live Java reference to check without changing its ownership.</param>
+        /// <param name="className">The generated wrapper's exact Java binary class or interface name.</param>
+        /// <exception cref="PlatformNotSupportedException">Execution is outside an Android player.</exception>
+        /// <exception cref="ArgumentException">The Java binary class name is invalid.</exception>
+        /// <exception cref="ObjectDisposedException">The reference has no live Java object handle.</exception>
+        /// <exception cref="AndroidJavaException">Unity cannot resolve the requested Java class.</exception>
+        /// <exception cref="JavaInvocationException">Java raises an exception during the type check.</exception>
+        /// <exception cref="InvalidCastException">The reference is not assignable to the wrapper's Java type.</exception>
+        internal static void ValidateInstance(AndroidJavaObject javaReference, string className)
+        {
+            EnsureAndroid();
+            ValidateClassName(className);
+            var reference = GetObjectReference(javaReference);
+            using var javaClass = new JavaClassReference(className);
+            var compatible = AndroidJNI.IsInstanceOf(reference, javaClass.GetRawClass());
+            CheckException();
+            if (!compatible)
+            {
+                throw new InvalidCastException("The Java object is not an instance of " + className + ".");
+            }
+        }
+
+        /// <summary>
+        /// Parses and caches the argument and result portions of a JVM method descriptor.
+        /// </summary>
+        /// <param name="descriptor">The complete JVM method descriptor.</param>
+        /// <returns>The immutable parsed signature.</returns>
+        /// <exception cref="ArgumentException">The descriptor is malformed.</exception>
+        private static MethodSignature GetSignature(string descriptor)
+        {
+            if (string.IsNullOrEmpty(descriptor))
+            {
+                throw new ArgumentException("A JVM descriptor is required.", nameof(descriptor));
+            }
+
+            return s_signatures.GetOrAdd(descriptor, MethodSignature.Parse);
+        }
+
+        /// <summary>
+        /// Reads one exact JVM type, rejecting malformed references, void arguments, and void arrays.
+        /// </summary>
+        /// <param name="descriptor">The containing JVM descriptor.</param>
+        /// <param name="position">The cursor advanced past the type.</param>
+        /// <param name="allowVoid">Whether a scalar void result is permitted.</param>
+        /// <returns>The exact substring describing one JVM type.</returns>
+        /// <exception cref="ArgumentException">The descriptor is malformed or exceeds 255 array dimensions.</exception>
+        private static string ReadDescriptor(string descriptor, ref int position, bool allowVoid)
+        {
+            if (string.IsNullOrEmpty(descriptor) || position < 0 || position >= descriptor.Length)
+            {
+                throw new ArgumentException("Incomplete JVM descriptor.", nameof(descriptor));
+            }
+
+            var start = position;
+            while (position < descriptor.Length && descriptor[position] == '[')
+            {
+                position++;
+            }
+
+            if (position >= descriptor.Length || position - start > 255)
+            {
+                throw new ArgumentException("Invalid JVM array descriptor.", nameof(descriptor));
+            }
+
+            var kind = descriptor[position++];
+            if (kind == 'L')
+            {
+                var end = descriptor.IndexOf(';', position);
+                if (end <= position || descriptor[position] == '/' || descriptor[end - 1] == '/')
+                {
+                    throw new ArgumentException("Incomplete JVM object descriptor.", nameof(descriptor));
+                }
+
+                for (var i = position; i < end; i++)
+                {
+                    var character = descriptor[i];
+                    if (character == '.' || character == '[' || character == '(' || character == ')'
+                        || character == '\0' || (character == '/' && descriptor[i - 1] == '/'))
+                    {
+                        throw new ArgumentException("Invalid JVM object descriptor.", nameof(descriptor));
+                    }
+                }
+
+                position = end + 1;
+            }
+            else if ("ZBCSIJFD".IndexOf(kind) < 0 && !(kind == 'V' && allowVoid && position == start + 1))
+            {
+                throw new ArgumentException("Invalid JVM type descriptor.", nameof(descriptor));
+            }
+
+            return descriptor.Substring(start, position - start);
+        }
+
+        /// <summary>
+        /// Marshals boxed arguments using declared, rather than inferred, Java types.
+        /// </summary>
+        /// <param name="signature">The parsed method signature.</param>
+        /// <param name="arguments">The boxed generated arguments.</param>
+        /// <returns>The JNI arguments valid within the current local frame.</returns>
+        /// <exception cref="ArgumentException">An argument count or primitive type is incorrect.</exception>
+        private static jvalue[] WriteArguments(MethodSignature signature, object?[] arguments)
+        {
+            if (arguments is null || arguments.Length != signature.Parameters.Length)
+            {
+                throw new ArgumentException("Argument count does not match the JVM descriptor.", nameof(arguments));
+            }
+
+            var results = new jvalue[arguments.Length];
+            for (var i = 0; i < arguments.Length; i++)
+            {
+                var value = arguments[i];
+                try
+                {
+                    switch (signature.Parameters[i][0])
+                    {
+                        case 'Z':
+                            results[i].z = (bool)value!;
+                            break;
+                        case 'B':
+                            results[i].b = (sbyte)value!;
+                            break;
+                        case 'C':
+                            results[i].c = (char)value!;
+                            break;
+                        case 'S':
+                            results[i].s = (short)value!;
+                            break;
+                        case 'I':
+                            results[i].i = (int)value!;
+                            break;
+                        case 'J':
+                            results[i].j = (long)value!;
+                            break;
+                        case 'F':
+                            results[i].f = (float)value!;
+                            break;
+                        case 'D':
+                            results[i].d = (double)value!;
+                            break;
+                        default:
+                            results[i].l = WriteReference(value, signature.Parameters[i], out _);
+                            break;
+                    }
+                }
+                catch (Exception exception) when (exception is InvalidCastException || exception is NullReferenceException)
+                {
+                    throw new ArgumentException($"Argument {i} does not match JVM type {signature.Parameters[i]}.", nameof(arguments), exception);
+                }
+            }
+
+            CheckException();
+            return results;
+        }
+
+        /// <summary>
+        /// Marshals a nullable string, interface implementation, Unity reference, or jagged array.
+        /// </summary>
+        /// <param name="value">The managed argument, preserving null leaves.</param>
+        /// <param name="descriptor">The declared Java object or array descriptor.</param>
+        /// <param name="isLocal">Whether the result belongs to the current local-reference frame.</param>
+        /// <returns>The borrowed global or newly allocated local reference, or zero for null.</returns>
+        /// <exception cref="ArgumentException">The argument does not match the declared reference type.</exception>
+        /// <exception cref="ObjectDisposedException">A wrapper or Unity reference has been disposed.</exception>
+        /// <exception cref="AndroidJavaException">Unity cannot resolve a declared component class.</exception>
+        /// <exception cref="JavaInvocationException">Java raises an exception during marshaling.</exception>
+        /// <exception cref="InvalidOperationException">JNI cannot allocate a frame or reference.</exception>
+        private static IntPtr WriteReference(object? value, string descriptor, out bool isLocal)
+        {
+            isLocal = false;
+            if (value is null)
+            {
+                return IntPtr.Zero;
+            }
+
+            IntPtr reference;
+            if (value is IJavaObject wrapper)
+            {
+                reference = GetObjectReference(wrapper.JavaReference);
+            }
+            else if (value is AndroidJavaObject javaObject)
+            {
+                reference = GetObjectReference(javaObject);
+            }
+            else if (value is string text)
+            {
+                // UTF-16 preserves embedded NULs and supplementary characters.
+                isLocal = true;
+                reference = AndroidJNI.NewString(text);
+                CheckException();
+                if (reference == IntPtr.Zero)
+                {
+                    throw new InvalidOperationException("JNI string allocation returned null without an exception.");
+                }
+            }
+            else if (value is Array array && descriptor[0] == '[')
+            {
+                isLocal = true;
+                return WriteArray(array, descriptor);
+            }
+            else
+            {
+                throw new ArgumentException($"Unsupported managed argument for JVM type {descriptor}.", nameof(value));
+            }
+
+            var declaredClass = ResolveArrayComponent(descriptor);
+            try
+            {
+                var compatible = AndroidJNI.IsInstanceOf(reference, declaredClass);
+                CheckException();
+                if (!compatible)
+                {
+                    throw new ArgumentException($"The reference is not assignable to JVM type {descriptor}.", nameof(value));
+                }
+            }
+            finally
+            {
+                AndroidJNI.DeleteLocalRef(declaredClass);
+            }
+
+            return reference;
+        }
+
+        /// <summary>
+        /// Creates one Java array dimension using the exact declared component class.
+        /// </summary>
+        /// <param name="values">The zero-based managed array for this jagged-array dimension.</param>
+        /// <param name="descriptor">The complete JVM array descriptor for this dimension.</param>
+        /// <returns>A local JNI array reference preserved in the caller's frame.</returns>
+        /// <exception cref="ArgumentException">A rectangular or nonzero-based array is supplied.</exception>
+        /// <exception cref="InvalidCastException">A primitive leaf array has the wrong managed element type.</exception>
+        /// <exception cref="ObjectDisposedException">An element's Java reference has been disposed.</exception>
+        /// <exception cref="AndroidJavaException">Unity cannot resolve a component class.</exception>
+        /// <exception cref="JavaInvocationException">Java raises an exception while allocating or populating the array.</exception>
+        /// <exception cref="InvalidOperationException">JNI cannot allocate a frame or array.</exception>
+        private static IntPtr WriteArray(Array values, string descriptor)
+        {
+            if (values.Rank != 1 || values.GetLowerBound(0) != 0)
+            {
+                throw new ArgumentException("Represent Java arrays as zero-based C# jagged arrays, not rectangular arrays.", nameof(values));
+            }
+
+            using var frame = new LocalFrame(16);
+            var component = descriptor.Substring(1);
+            IntPtr result;
+            switch (component)
+            {
+                case "Z":
+                    result = AndroidJNI.ToBooleanArray((bool[])values);
+                    break;
+                case "B":
+                    result = AndroidJNI.ToSByteArray((sbyte[])values);
+                    break;
+                case "C":
+                    result = AndroidJNI.ToCharArray((char[])values);
+                    break;
+                case "S":
+                    result = AndroidJNI.ToShortArray((short[])values);
+                    break;
+                case "I":
+                    result = AndroidJNI.ToIntArray((int[])values);
+                    break;
+                case "J":
+                    result = AndroidJNI.ToLongArray((long[])values);
+                    break;
+                case "F":
+                    result = AndroidJNI.ToFloatArray((float[])values);
+                    break;
+                case "D":
+                    result = AndroidJNI.ToDoubleArray((double[])values);
+                    break;
+                default:
+                    var componentClass = ResolveArrayComponent(component);
+                    result = AndroidJNI.NewObjectArray(values.Length, componentClass, IntPtr.Zero);
+                    CheckException();
+                    AndroidJNI.DeleteLocalRef(componentClass);
+                    if (result == IntPtr.Zero)
+                    {
+                        throw new InvalidOperationException("JNI array allocation returned null without an exception.");
+                    }
+
+                    for (var i = 0; i < values.Length; i++)
+                    {
+                        var item = WriteReference(values.GetValue(i), component, out var isLocal);
+                        try
+                        {
+                            AndroidJNI.SetObjectArrayElement(result, i, item);
+                            CheckException();
+                        }
+                        finally
+                        {
+                            if (isLocal && item != IntPtr.Zero)
+                            {
+                                AndroidJNI.DeleteLocalRef(item);
+                            }
+                        }
+                    }
+
+                    break;
+            }
+
+            CheckException();
+            if (result == IntPtr.Zero)
+            {
+                throw new InvalidOperationException("JNI array allocation returned null without an exception.");
+            }
+
+            return frame.Preserve(result);
+        }
+
+        /// <summary>
+        /// Resolves a declared object or array class through the leaf type's class loader.
+        /// </summary>
+        /// <param name="descriptor">An object descriptor or a nested-array descriptor.</param>
+        /// <returns>A local JNI class reference preserved in the caller's frame.</returns>
+        /// <remarks>JNI leaf-class lookup may initialize that class.</remarks>
+        /// <exception cref="AndroidJavaException">Unity cannot resolve a declared class.</exception>
+        /// <exception cref="JavaInvocationException">Java raises an exception while resolving the array class.</exception>
+        /// <exception cref="InvalidOperationException">JNI cannot allocate a frame or returns a null reference or identifier.</exception>
+        private static IntPtr ResolveArrayComponent(string descriptor)
+        {
+            using var frame = new LocalFrame(16);
+            if (descriptor[0] == 'L')
+            {
+                using var javaClass = new JavaClassReference(descriptor.Substring(1, descriptor.Length - 2).Replace('/', '.'));
+                var reference = AndroidJNI.NewLocalRef(javaClass.GetRawClass());
+                CheckException();
+                if (reference == IntPtr.Zero)
+                {
+                    throw new InvalidOperationException("JNI class reference allocation returned null without an exception.");
+                }
+
+                return frame.Preserve(reference);
+            }
+
+            var leaf = descriptor.TrimStart('[');
+            using var classClass = new JavaClassReference("java.lang.Class");
+            using var leafClass = leaf[0] == 'L'
+                ? new JavaClassReference(leaf.Substring(1, leaf.Length - 2).Replace('/', '.'))
+                : null;
+            var classLoader = IntPtr.Zero;
+            if (leafClass is not null)
+            {
+                var getLoader = ResolveMethod(classClass.GetRawClass(), "getClassLoader", "()Ljava/lang/ClassLoader;", false);
+                classLoader = AndroidJNI.CallObjectMethod(leafClass.GetRawClass(), getLoader, Array.Empty<jvalue>());
+                CheckException();
+            }
+
+            var name = AndroidJNI.NewString(descriptor.Replace('/', '.'));
+            CheckException();
+            if (name == IntPtr.Zero)
+            {
+                throw new InvalidOperationException("JNI class-name allocation returned null without an exception.");
+            }
+
+            var forName = ResolveMethod(classClass.GetRawClass(), "forName", "(Ljava/lang/String;ZLjava/lang/ClassLoader;)Ljava/lang/Class;", true);
+            var arguments = new[] { new jvalue { l = name }, new jvalue { z = false }, new jvalue { l = classLoader } };
+            var result = AndroidJNI.CallStaticObjectMethod(classClass.GetRawClass(), forName, arguments);
+            CheckException();
+            if (result == IntPtr.Zero)
+            {
+                throw new InvalidOperationException("JNI array-class lookup returned null without an exception.");
+            }
+
+            return frame.Preserve(result);
+        }
+
+        /// <summary>
+        /// Converts a local Java reference into a string, owned Unity reference, or managed array.
+        /// </summary>
+        /// <param name="reference">The local JNI reference.</param>
+        /// <param name="descriptor">The exact Java reference descriptor.</param>
+        /// <param name="resultType">The generated managed result type.</param>
+        /// <returns>The managed value, or null for a null JNI reference.</returns>
+        /// <exception cref="InvalidCastException">The result type is incompatible with the descriptor.</exception>
+        private static object? ReadReference(IntPtr reference, string descriptor, Type resultType)
+        {
+            if (reference == IntPtr.Zero)
+            {
+                return null;
+            }
+
+            if (descriptor[0] == '[')
+            {
+                return ReadArray(reference, descriptor, resultType);
+            }
+
+            if (resultType == typeof(string))
+            {
+                var result = AndroidJNI.GetStringChars(reference);
+                CheckException();
+                return result;
+            }
+
+            if (resultType == typeof(AndroidJavaObject))
+            {
+                // Unity creates independent globals before the invocation's local frame is popped.
+                return CopyReference(reference);
+            }
+
+            throw new InvalidCastException($"JVM reference {descriptor} cannot be returned as {resultType.FullName}.");
+        }
+
+        /// <summary>
+        /// Converts a Java array while bounding temporary references for each nested dimension.
+        /// </summary>
+        /// <param name="reference">The local Java array reference.</param>
+        /// <param name="descriptor">The complete JVM array descriptor.</param>
+        /// <param name="resultType">The validated managed jagged-array result type.</param>
+        /// <returns>The primitive, string, Java-reference, or nested managed array.</returns>
+        /// <exception cref="InvalidCastException">The result type is not an array.</exception>
+        /// <exception cref="JavaInvocationException">Java raises an exception during array conversion.</exception>
+        /// <exception cref="AndroidJavaException">Unity cannot create global object references.</exception>
+        /// <exception cref="InvalidOperationException">JNI cannot allocate a local frame.</exception>
+        /// <exception cref="AggregateException">Result conversion and reference cleanup both fail.</exception>
+        private static Array ReadArray(IntPtr reference, string descriptor, Type resultType)
+        {
+            using var frame = new LocalFrame(16);
+            var elementType = resultType.GetElementType()
+                ?? throw new InvalidCastException("A JVM array requires a managed array return type.");
+            var component = descriptor.Substring(1);
+            Array result;
+            switch (component)
+            {
+                case "Z":
+                    result = AndroidJNI.FromBooleanArray(reference);
+                    break;
+                case "B":
+                    result = AndroidJNI.FromSByteArray(reference);
+                    break;
+                case "C":
+                    result = AndroidJNI.FromCharArray(reference);
+                    break;
+                case "S":
+                    result = AndroidJNI.FromShortArray(reference);
+                    break;
+                case "I":
+                    result = AndroidJNI.FromIntArray(reference);
+                    break;
+                case "J":
+                    result = AndroidJNI.FromLongArray(reference);
+                    break;
+                case "F":
+                    result = AndroidJNI.FromFloatArray(reference);
+                    break;
+                case "D":
+                    result = AndroidJNI.FromDoubleArray(reference);
+                    break;
+                default:
+                    var length = AndroidJNI.GetArrayLength(reference);
+                    CheckException();
+                    result = Array.CreateInstance(elementType, length);
+                    try
+                    {
+                        for (var i = 0; i < length; i++)
+                        {
+                            var item = AndroidJNI.GetObjectArrayElement(reference, i);
+                            try
+                            {
+                                CheckException();
+                                result.SetValue(ReadReference(item, component, elementType), i);
+                            }
+                            finally
+                            {
+                                AndroidJNI.DeleteLocalRef(item);
+                            }
+                        }
+                    }
+                    catch (Exception conversionException)
+                    {
+                        var cleanupErrors = new List<Exception>();
+                        DisposeReferences(result, cleanupErrors);
+                        if (cleanupErrors.Count != 0)
+                        {
+                            cleanupErrors.Insert(0, conversionException);
+                            throw new AggregateException("Array reading and Java-reference cleanup both failed.", cleanupErrors);
+                        }
+
+                        throw;
+                    }
+
+                    break;
+            }
+
+            CheckException();
+            return result;
+        }
+
+        /// <summary>
+        /// Invokes the JNI entry point matching a method's exact return kind.
+        /// </summary>
+        /// <param name="target">The receiver object or static class reference.</param>
+        /// <param name="method">The resolved method identifier.</param>
+        /// <param name="kind">The first character of the return descriptor.</param>
+        /// <param name="arguments">The marshaled JNI arguments.</param>
+        /// <param name="isStatic">Whether this is a static invocation.</param>
+        /// <returns>A boxed primitive result or a local object pointer.</returns>
+        /// <exception cref="ArgumentException">The return kind is unsupported.</exception>
+        private static object Invoke(IntPtr target, IntPtr method, char kind, jvalue[] arguments, bool isStatic)
+        {
+            switch (kind)
+            {
+                case 'Z':
+                    return isStatic ? AndroidJNI.CallStaticBooleanMethod(target, method, arguments) : AndroidJNI.CallBooleanMethod(target, method, arguments);
+                case 'B':
+                    return isStatic ? AndroidJNI.CallStaticSByteMethod(target, method, arguments) : AndroidJNI.CallSByteMethod(target, method, arguments);
+                case 'C':
+                    return isStatic ? AndroidJNI.CallStaticCharMethod(target, method, arguments) : AndroidJNI.CallCharMethod(target, method, arguments);
+                case 'S':
+                    return isStatic ? AndroidJNI.CallStaticShortMethod(target, method, arguments) : AndroidJNI.CallShortMethod(target, method, arguments);
+                case 'I':
+                    return isStatic ? AndroidJNI.CallStaticIntMethod(target, method, arguments) : AndroidJNI.CallIntMethod(target, method, arguments);
+                case 'J':
+                    return isStatic ? AndroidJNI.CallStaticLongMethod(target, method, arguments) : AndroidJNI.CallLongMethod(target, method, arguments);
+                case 'F':
+                    return isStatic ? AndroidJNI.CallStaticFloatMethod(target, method, arguments) : AndroidJNI.CallFloatMethod(target, method, arguments);
+                case 'D':
+                    return isStatic ? AndroidJNI.CallStaticDoubleMethod(target, method, arguments) : AndroidJNI.CallDoubleMethod(target, method, arguments);
+                case 'L':
+                case '[':
+                    return isStatic ? AndroidJNI.CallStaticObjectMethod(target, method, arguments) : AndroidJNI.CallObjectMethod(target, method, arguments);
+                default:
+                    throw new ArgumentException("Unsupported JVM method return kind.", nameof(kind));
+            }
+        }
+
+        /// <summary>
+        /// Reads a field using the JNI entry point matching its exact JVM kind.
+        /// </summary>
+        /// <param name="target">The owner object or static class reference.</param>
+        /// <param name="field">The resolved field identifier.</param>
+        /// <param name="kind">The first character of the field descriptor.</param>
+        /// <param name="isStatic">Whether this is a static field.</param>
+        /// <returns>A boxed primitive value or a local object pointer.</returns>
+        /// <exception cref="ArgumentException">The field kind is unsupported.</exception>
+        private static object ReadField(IntPtr target, IntPtr field, char kind, bool isStatic)
+        {
+            switch (kind)
+            {
+                case 'Z':
+                    return isStatic ? AndroidJNI.GetStaticBooleanField(target, field) : AndroidJNI.GetBooleanField(target, field);
+                case 'B':
+                    return isStatic ? AndroidJNI.GetStaticSByteField(target, field) : AndroidJNI.GetSByteField(target, field);
+                case 'C':
+                    return isStatic ? AndroidJNI.GetStaticCharField(target, field) : AndroidJNI.GetCharField(target, field);
+                case 'S':
+                    return isStatic ? AndroidJNI.GetStaticShortField(target, field) : AndroidJNI.GetShortField(target, field);
+                case 'I':
+                    return isStatic ? AndroidJNI.GetStaticIntField(target, field) : AndroidJNI.GetIntField(target, field);
+                case 'J':
+                    return isStatic ? AndroidJNI.GetStaticLongField(target, field) : AndroidJNI.GetLongField(target, field);
+                case 'F':
+                    return isStatic ? AndroidJNI.GetStaticFloatField(target, field) : AndroidJNI.GetFloatField(target, field);
+                case 'D':
+                    return isStatic ? AndroidJNI.GetStaticDoubleField(target, field) : AndroidJNI.GetDoubleField(target, field);
+                case 'L':
+                case '[':
+                    return isStatic ? AndroidJNI.GetStaticObjectField(target, field) : AndroidJNI.GetObjectField(target, field);
+                default:
+                    throw new ArgumentException("Unsupported JVM field kind.", nameof(kind));
+            }
+        }
+
+        /// <summary>
+        /// Clears a pending Java exception and reports its original message and stack trace.
+        /// </summary>
+        /// <exception cref="JavaInvocationException">JNI reports a pending Java exception.</exception>
+        private static void CheckException()
+        {
+            var exception = AndroidJNI.ExceptionOccurred();
+            if (exception == IntPtr.Zero)
+            {
+                return;
+            }
+
+            AndroidJNI.ExceptionClear();
+            var message = "Java exception during generated JNI invocation.";
+            var stack = string.Empty;
+            var classNames = new List<string>();
+            AndroidJavaObject? throwableReference = null;
+            var throwableClass = IntPtr.Zero;
+            var logClass = IntPtr.Zero;
+            try
+            {
+                // Keep an independent global reference before the caller's local frame unwinds.
+                var copiedReference = new AndroidJavaObject(exception);
+                try
+                {
+                    CheckDiagnosticException();
+                    GetObjectReference(copiedReference);
+                    throwableReference = copiedReference;
+                }
+                catch
+                {
+                    copiedReference.Dispose();
+                    throw;
+                }
+
+                // Do not use Unity's exception formatter here: an overridden Throwable.toString()
+                // can throw, leaving secondary diagnostic JNI calls with a pending exception.
+                throwableClass = AndroidJNI.GetObjectClass(exception);
+                CheckDiagnosticException();
+                ReadThrowableClassNames(throwableClass, classNames);
+                var toString = AndroidJNI.GetMethodID(throwableClass, "toString", "()Ljava/lang/String;");
+                CheckDiagnosticException();
+                var description = AndroidJNI.CallObjectMethod(exception, toString, Array.Empty<jvalue>());
+                try
+                {
+                    CheckDiagnosticException();
+                    if (description != IntPtr.Zero)
+                    {
+                        message = AndroidJNI.GetStringChars(description);
+                        CheckDiagnosticException();
+                    }
+                }
+                finally
+                {
+                    AndroidJNI.DeleteLocalRef(description);
+                }
+
+                logClass = AndroidJNI.FindClass("android/util/Log");
+                CheckDiagnosticException();
+                var method = AndroidJNI.GetStaticMethodID(logClass, "getStackTraceString", "(Ljava/lang/Throwable;)Ljava/lang/String;");
+                CheckDiagnosticException();
+                var result = AndroidJNI.CallStaticObjectMethod(logClass, method, new[] { new jvalue { l = exception } });
+                try
+                {
+                    CheckDiagnosticException();
+                    if (result != IntPtr.Zero)
+                    {
+                        stack = AndroidJNI.GetStringChars(result);
+                        CheckDiagnosticException();
+                    }
+                }
+                finally
+                {
+                    AndroidJNI.DeleteLocalRef(result);
+                }
+            }
+            catch (Exception diagnosticException)
+            {
+                message += " Exception details could not be read: " + diagnosticException.Message;
+            }
+            finally
+            {
+                // Diagnostic calls must never leave a second exception pending on this JVM thread.
+                AndroidJNI.ExceptionClear();
+                AndroidJNI.DeleteLocalRef(logClass);
+                AndroidJNI.DeleteLocalRef(throwableClass);
+                AndroidJNI.DeleteLocalRef(exception);
+            }
+
+            if (throwableReference is not null)
+            {
+                throw JavaWrapperConverter.CreateException(throwableReference, classNames, message, stack);
+            }
+
+            throw new JavaInvocationException(message, stack);
+        }
+
+        /// <summary>Captures the throwable's exact class and superclass names without loading unrelated classes.</summary>
+        /// <param name="throwableClass">The local Java Class reference representing the original throwable.</param>
+        /// <param name="classNames">The destination receiving actual class first and successive superclasses.</param>
+        /// <exception cref="InvalidOperationException">A diagnostic JNI lookup or call raises a secondary exception.</exception>
+        private static void ReadThrowableClassNames(IntPtr throwableClass, List<string> classNames)
+        {
+            var classClass = IntPtr.Zero;
+            var currentClass = IntPtr.Zero;
+            try
+            {
+                classClass = AndroidJNI.FindClass("java/lang/Class");
+                CheckDiagnosticException();
+                var getName = AndroidJNI.GetMethodID(classClass, "getName", "()Ljava/lang/String;");
+                CheckDiagnosticException();
+                var getSuperclass = AndroidJNI.GetMethodID(classClass, "getSuperclass", "()Ljava/lang/Class;");
+                CheckDiagnosticException();
+                currentClass = AndroidJNI.NewLocalRef(throwableClass);
+                CheckDiagnosticException();
+                while (currentClass != IntPtr.Zero)
+                {
+                    var name = AndroidJNI.CallObjectMethod(currentClass, getName, Array.Empty<jvalue>());
+                    try
+                    {
+                        CheckDiagnosticException();
+                        if (name != IntPtr.Zero)
+                        {
+                            var className = AndroidJNI.GetStringChars(name);
+                            CheckDiagnosticException();
+                            classNames.Add(className);
+                        }
+                    }
+                    finally
+                    {
+                        AndroidJNI.DeleteLocalRef(name);
+                    }
+
+                    var parentClass = AndroidJNI.CallObjectMethod(currentClass, getSuperclass, Array.Empty<jvalue>());
+                    try
+                    {
+                        CheckDiagnosticException();
+                    }
+                    catch
+                    {
+                        AndroidJNI.DeleteLocalRef(parentClass);
+                        throw;
+                    }
+
+                    AndroidJNI.DeleteLocalRef(currentClass);
+                    currentClass = parentClass;
+                }
+            }
+            finally
+            {
+                AndroidJNI.DeleteLocalRef(currentClass);
+                AndroidJNI.DeleteLocalRef(classClass);
+            }
+        }
+
+        /// <summary>
+        /// Clears secondary Java failures without recursively trying to format their throwables.
+        /// </summary>
+        /// <exception cref="InvalidOperationException">A JNI diagnostic operation raises a Java exception.</exception>
+        private static void CheckDiagnosticException()
+        {
+            var exception = AndroidJNI.ExceptionOccurred();
+            if (exception == IntPtr.Zero)
+            {
+                return;
+            }
+
+            AndroidJNI.ExceptionClear();
+            AndroidJNI.DeleteLocalRef(exception);
+            throw new InvalidOperationException("Java raised an exception while reading the original throwable's details.");
+        }
+
+        /// <summary>
+        /// Attempts every disposable array element during failed conversion and collects cleanup failures.
+        /// </summary>
+        /// <param name="values">The source or partially initialized result array.</param>
+        /// <param name="errors">The errors accumulated while disposing nested elements.</param>
+        private static void DisposeReferences(Array values, List<Exception> errors)
+        {
+            foreach (var value in values)
+            {
+                if (value is Array nested)
+                {
+                    DisposeReferences(nested, errors);
+                }
+                else if (value is IDisposable disposable)
+                {
+                    try
+                    {
+                        if (disposable is AndroidJavaObject)
+                        {
+                            EnsureAndroid();
+                        }
+
+                        disposable.Dispose();
+                    }
+                    catch (Exception exception)
+                    {
+                        errors.Add(exception);
+                    }
+                }
+            }
+        }
+
+        /// <summary>
+        /// Holds immutable argument and result descriptors for one Java method.
+        /// </summary>
+        private sealed partial class MethodSignature
+        {
+            /// <summary>
+            /// Gets the parameter descriptors in declaration order.
+            /// </summary>
+            public string[] Parameters { get; }
+
+            /// <summary>
+            /// Gets the method's result descriptor.
+            /// </summary>
+            public string ReturnType { get; }
+
+            /// <summary>
+            /// Initializes a parsed method signature.
+            /// </summary>
+            /// <param name="parameters">The argument descriptors.</param>
+            /// <param name="returnType">The result descriptor.</param>
+            private MethodSignature(string[] parameters, string returnType)
+            {
+                Parameters = parameters;
+                ReturnType = returnType;
+            }
+
+            /// <summary>
+            /// Parses a complete JVM method descriptor without inspecting runtime arguments.
+            /// </summary>
+            /// <param name="descriptor">The complete method descriptor.</param>
+            /// <returns>The parsed immutable signature.</returns>
+            /// <exception cref="ArgumentException">The descriptor is malformed.</exception>
+            public static MethodSignature Parse(string descriptor)
+            {
+                if (string.IsNullOrEmpty(descriptor) || descriptor[0] != '(')
+                {
+                    throw new ArgumentException("A JVM method descriptor must start with '('.", nameof(descriptor));
+                }
+
+                var parameters = new List<string>();
+                var position = 1;
+                while (position < descriptor.Length && descriptor[position] != ')')
+                {
+                    parameters.Add(ReadDescriptor(descriptor, ref position, false));
+                }
+
+                if (position >= descriptor.Length || descriptor[position++] != ')')
+                {
+                    throw new ArgumentException("Incomplete JVM method parameter list.", nameof(descriptor));
+                }
+
+                var result = ReadDescriptor(descriptor, ref position, true);
+                if (position != descriptor.Length)
+                {
+                    throw new ArgumentException("Unexpected characters after the JVM result type.", nameof(descriptor));
+                }
+
+                return new MethodSignature(parameters.ToArray(), result);
+            }
+        }
+
+        /// <summary>Owns a JNI class reference while preserving generated Java exception translation.</summary>
+        /// <remarks>
+        /// Class lookup uses the same raw FindClass entry point as Unity's AndroidJavaClass.
+        /// The global reference survives nested local-frame preservation until deterministic disposal.
+        /// </remarks>
+        private sealed class JavaClassReference : IDisposable
+        {
+            /// <summary>Stores the owned global class reference, or zero after disposal.</summary>
+            private IntPtr _reference;
+
+            /// <summary>Resolves a Java class and copies its temporary handle into an owned global reference.</summary>
+            /// <param name="className">The exact Java binary class name.</param>
+            /// <exception cref="JavaInvocationException">Java raises an exception during lookup or reference copying.</exception>
+            /// <exception cref="InvalidOperationException">JNI returns a null class or global reference without an exception.</exception>
+            internal JavaClassReference(string className)
+            {
+                var localReference = AndroidJNI.FindClass(className.Replace('.', '/'));
+                try
+                {
+                    CheckException();
+                    if (localReference == IntPtr.Zero)
+                    {
+                        throw new InvalidOperationException("JNI class lookup returned null without a Java exception.");
+                    }
+
+                    _reference = AndroidJNI.NewGlobalRef(localReference);
+                    try
+                    {
+                        CheckException();
+                        if (_reference == IntPtr.Zero)
+                        {
+                            throw new InvalidOperationException("JNI class-reference copying returned null without a Java exception.");
+                        }
+                    }
+                    catch
+                    {
+                        AndroidJNI.DeleteGlobalRef(_reference);
+                        _reference = IntPtr.Zero;
+                        throw;
+                    }
+                }
+                finally
+                {
+                    AndroidJNI.DeleteLocalRef(localReference);
+                }
+            }
+
+            /// <summary>Gets the live JNI class handle without transferring ownership.</summary>
+            /// <returns>The owned global class reference.</returns>
+            /// <exception cref="ObjectDisposedException">The class reference has already been disposed.</exception>
+            internal IntPtr GetRawClass()
+            {
+                if (_reference == IntPtr.Zero)
+                {
+                    throw new ObjectDisposedException(nameof(JavaClassReference));
+                }
+
+                return _reference;
+            }
+
+            /// <summary>Releases the owned global class reference at most once.</summary>
+            public void Dispose()
+            {
+                var reference = _reference;
+                _reference = IntPtr.Zero;
+                AndroidJNI.DeleteGlobalRef(reference);
+            }
+        }
+
+        /// <summary>
+        /// Bounds temporary JNI references and can preserve one result in the caller's frame.
+        /// </summary>
+        private sealed partial class LocalFrame : IDisposable
+        {
+            /// <summary>
+            /// Indicates whether this frame still needs to be popped.
+            /// </summary>
+            private bool _active;
+
+            /// <summary>
+            /// Creates a JNI frame with the requested minimum local-reference capacity.
+            /// </summary>
+            /// <param name="capacity">The minimum number of available local-reference slots.</param>
+            /// <exception cref="JavaInvocationException">The JVM raises an exception while allocating the frame.</exception>
+            /// <exception cref="InvalidOperationException">JNI rejects the frame without a Java exception.</exception>
+            public LocalFrame(int capacity)
+            {
+                if (AndroidJNI.PushLocalFrame(capacity) < 0)
+                {
+                    CheckException();
+                    throw new InvalidOperationException("JNI could not allocate a local-reference frame.");
+                }
+
+                _active = true;
+            }
+
+            /// <summary>
+            /// Pops this frame and preserves one local reference in the caller's frame.
+            /// </summary>
+            /// <param name="reference">The local reference to retain across the frame boundary.</param>
+            /// <returns>The equivalent reference owned by the caller's local frame.</returns>
+            /// <exception cref="ObjectDisposedException">The local frame has already been popped.</exception>
+            /// <exception cref="JavaInvocationException">Java raises an exception while preserving the reference.</exception>
+            /// <exception cref="InvalidOperationException">JNI returns null for a non-null preserved reference.</exception>
+            public IntPtr Preserve(IntPtr reference)
+            {
+                if (!_active)
+                {
+                    throw new ObjectDisposedException(nameof(LocalFrame));
+                }
+
+                _active = false;
+                var result = AndroidJNI.PopLocalFrame(reference);
+                CheckException();
+                if (reference != IntPtr.Zero && result == IntPtr.Zero)
+                {
+                    throw new InvalidOperationException("JNI could not preserve a local reference in the caller's frame.");
+                }
+
+                return result;
+            }
+
+            /// <summary>
+            /// Releases every temporary reference remaining in this frame exactly once.
+            /// </summary>
+            public void Dispose()
+            {
+                if (_active)
+                {
+                    _active = false;
+                    AndroidJNI.PopLocalFrame(IntPtr.Zero);
+                }
+            }
+        }
+    }
+}

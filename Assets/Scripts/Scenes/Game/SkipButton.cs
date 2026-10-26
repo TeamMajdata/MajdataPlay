@@ -1,7 +1,8 @@
 using Cysharp.Threading.Tasks;
 using MajdataPlay.IO;
-using MajdataPlay.UI;
+using MajdataPlay.Behaviours.UI;
 using MajdataPlay.Utils;
+using System.Threading;
 using UnityEngine;
 #nullable enable
 namespace MajdataPlay.Scenes.Game
@@ -18,6 +19,7 @@ namespace MajdataPlay.Scenes.Game
         SensorArea[] _boundSensorAreas = new SensorArea[DEFAULT_SENSOR_AREAS.Length];
         bool _isBound = false;
         bool _isTriggered = false;
+        CancellationTokenSource? _bindCts;
 
         void Awake()
         {
@@ -41,14 +43,22 @@ namespace MajdataPlay.Scenes.Game
         }
         void OnEnable()
         {
-            DelayBind().Forget();
+            _bindCts?.Cancel();
+            _bindCts?.Dispose();
+            _bindCts = new CancellationTokenSource();
+            DelayBind(_bindCts.Token).Forget();
         }
-        async UniTaskVoid DelayBind()
+        async UniTaskVoid DelayBind(CancellationToken token)
         {
             if (_isBound)
                 return;
+            // The delay is cancelled by OnDisable, so a button disabled within the second never binds.
+            var isCanceled = await UniTask.Delay(1000, cancellationToken: token).SuppressCancellationThrow();
+            if (isCanceled || _isBound)
+            {
+                return;
+            }
             _isBound = true;
-            await UniTask.Delay(1000);
             foreach (var sensorArea in _boundSensorAreas)
             {
                 InputManager.BindSensor(OnAreaDown, sensorArea);
@@ -60,6 +70,9 @@ namespace MajdataPlay.Scenes.Game
         }
         void OnDisable()
         {
+            _bindCts?.Cancel();
+            _bindCts?.Dispose();
+            _bindCts = null;
             _isBound = false;
             foreach (var sensorArea in _boundSensorAreas)
             {

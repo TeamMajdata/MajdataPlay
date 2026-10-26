@@ -1,0 +1,198 @@
+using System;
+using System.Threading;
+using UnityEngine;
+
+#nullable enable
+
+namespace __ROOT_NAMESPACE__
+{
+    /// <summary>
+    /// Owns or borrows the Unity Java reference used by a generated Java wrapper.
+    /// </summary>
+    /// <remarks>
+    /// Generated java.lang.Object wrappers and their subclasses derive from this type.
+    /// Java exception wrappers use the same owner through JavaInvocationException composition.
+    /// An owned reference must be disposed deterministically on the Unity main thread or
+    /// a JVM-attached thread. Borrowing does not extend the external owner's lifetime.
+    /// Do not race calls against disposal or independently dispose an adopted reference.
+    /// </remarks>
+    public partial class JavaObjectReference : IJavaObject
+    {
+        /// <summary>
+        /// Identifies the Java class declaring the virtual object methods.
+        /// </summary>
+        private const string ObjectClassName = "java.lang.Object";
+
+        /// <summary>
+        /// Stores the live reference, or null after this wrapper has been disposed.
+        /// </summary>
+        private AndroidJavaObject? _javaObject;
+
+        /// <summary>
+        /// Indicates whether disposing this wrapper must also dispose the Unity reference.
+        /// </summary>
+        private readonly bool _ownsReference;
+
+        /// <summary>
+        /// Gets the live Java reference used by generated calls and interface arguments.
+        /// </summary>
+        /// <exception cref="ObjectDisposedException">This wrapper has been disposed.</exception>
+        public AndroidJavaObject JavaReference
+        {
+            get
+            {
+                return Volatile.Read(ref _javaObject)
+                    ?? throw new ObjectDisposedException(GetType().FullName);
+            }
+        }
+
+        /// <summary>
+        /// Initializes a derived wrapper by adopting or borrowing an existing reference.
+        /// </summary>
+        /// <param name="javaObject">The non-null Unity Java reference.</param>
+        /// <param name="ownsReference">Whether to adopt and eventually dispose the reference.</param>
+        /// <exception cref="ArgumentNullException">The Java reference is null.</exception>
+        internal JavaObjectReference(AndroidJavaObject javaObject, bool ownsReference = true)
+        {
+            _javaObject = javaObject ?? throw new ArgumentNullException(nameof(javaObject));
+            _ownsReference = ownsReference;
+        }
+
+        /// <summary>
+        /// Constructs a Java instance using an exact descriptor and adopts its global reference.
+        /// </summary>
+        /// <param name="className">The Java binary class name, preserving nested-type dollar signs.</param>
+        /// <param name="descriptor">The exact constructor descriptor, ending in V.</param>
+        /// <param name="arguments">The constructor arguments in their declaration order.</param>
+        /// <exception cref="PlatformNotSupportedException">Execution is not in an Android player.</exception>
+        /// <exception cref="ArgumentException">The descriptor or arguments are invalid.</exception>
+        /// <exception cref="AndroidJavaException">Unity cannot resolve the Java class.</exception>
+        /// <exception cref="JavaInvocationException">Java raises an exception during construction.</exception>
+        /// <exception cref="InvalidOperationException">JNI cannot allocate a frame or returns a null object.</exception>
+        protected JavaObjectReference(string className, string descriptor, params object?[] arguments)
+        {
+            _javaObject = AndroidJni.Construct(className, descriptor, arguments);
+            _ownsReference = true;
+        }
+
+        /// <summary>
+        /// Compares live wrappers through the Java object's virtual equals(Object) method.
+        /// </summary>
+        /// <param name="obj">Another Java wrapper, or an unrelated managed value.</param>
+        /// <returns>True for managed identity or Java equality; otherwise false.</returns>
+        /// <remarks>
+        /// Managed identity and comparisons with null or unrelated values do not invoke JNI,
+        /// including after disposal. Distinct wrappers must both remain live during the call.
+        /// </remarks>
+        /// <exception cref="ObjectDisposedException">Either distinct wrapper has been disposed.</exception>
+        /// <exception cref="PlatformNotSupportedException">A JNI comparison is required outside Android.</exception>
+        /// <exception cref="AndroidJavaException">Unity cannot resolve the Java class.</exception>
+        /// <exception cref="JavaInvocationException">Java raises an exception during equality.</exception>
+        /// <exception cref="InvalidOperationException">JNI cannot allocate a frame or resolve a method.</exception>
+        public override bool Equals(object? obj)
+        {
+            if (ReferenceEquals(this, obj))
+            {
+                return true;
+            }
+
+            if (obj is not IJavaObject other)
+            {
+                return false;
+            }
+
+            var javaObject = JavaReference;
+            var otherJavaObject = other.JavaReference;
+            return AndroidJni.Call<bool>(javaObject, ObjectClassName, "equals", "(Ljava/lang/Object;)Z", otherJavaObject);
+        }
+
+        /// <summary>
+        /// Returns the Java object's virtual hashCode() result.
+        /// </summary>
+        /// <returns>The hash code supplied by the Java object.</returns>
+        /// <exception cref="ObjectDisposedException">This wrapper has been disposed.</exception>
+        /// <exception cref="PlatformNotSupportedException">Execution is not in an Android player.</exception>
+        /// <exception cref="AndroidJavaException">Unity cannot resolve the Java class.</exception>
+        /// <exception cref="JavaInvocationException">Java raises an exception while computing the hash.</exception>
+        /// <exception cref="InvalidOperationException">JNI cannot allocate a frame or resolve a method.</exception>
+        public override int GetHashCode()
+        {
+            return AndroidJni.Call<int>(JavaReference, ObjectClassName, "hashCode", "()I");
+        }
+
+        /// <summary>
+        /// Returns the Java object's virtual toString() result.
+        /// </summary>
+        /// <returns>The Java string representation, or null when Java returns null.</returns>
+        /// <exception cref="ObjectDisposedException">This wrapper has been disposed.</exception>
+        /// <exception cref="PlatformNotSupportedException">Execution is not in an Android player.</exception>
+        /// <exception cref="AndroidJavaException">Unity cannot resolve the Java class.</exception>
+        /// <exception cref="JavaInvocationException">Java raises an exception while formatting the object.</exception>
+        /// <exception cref="InvalidOperationException">JNI cannot allocate a frame or resolve a method.</exception>
+        public override string? ToString()
+        {
+            return AndroidJni.Call<string?>(JavaReference, ObjectClassName, "toString", "()Ljava/lang/String;");
+        }
+
+        /// <summary>
+        /// Compares nullable wrappers using managed identity and virtual Java equality.
+        /// </summary>
+        /// <param name="left">The first wrapper, or null.</param>
+        /// <param name="right">The second wrapper, or null.</param>
+        /// <returns>True for managed identity or equality of two live wrappers; otherwise false.</returns>
+        /// <exception cref="ObjectDisposedException">Either distinct non-null wrapper has been disposed.</exception>
+        /// <exception cref="PlatformNotSupportedException">A JNI comparison is required outside Android.</exception>
+        /// <exception cref="AndroidJavaException">Unity cannot resolve the Java class.</exception>
+        /// <exception cref="JavaInvocationException">Java raises an exception during equality.</exception>
+        /// <exception cref="InvalidOperationException">JNI cannot allocate a frame or resolve a method.</exception>
+        public static bool operator ==(JavaObjectReference? left, JavaObjectReference? right)
+        {
+            if (ReferenceEquals(left, right))
+            {
+                return true;
+            }
+
+            return left is not null && right is not null && left.Equals(right);
+        }
+
+        /// <summary>
+        /// Determines whether nullable wrappers differ according to Java equality.
+        /// </summary>
+        /// <param name="left">The first wrapper, or null.</param>
+        /// <param name="right">The second wrapper, or null.</param>
+        /// <returns>True when the equality operator returns false; otherwise false.</returns>
+        /// <exception cref="ObjectDisposedException">Either distinct non-null wrapper has been disposed.</exception>
+        /// <exception cref="PlatformNotSupportedException">A JNI comparison is required outside Android.</exception>
+        /// <exception cref="AndroidJavaException">Unity cannot resolve the Java class.</exception>
+        /// <exception cref="JavaInvocationException">Java raises an exception during equality.</exception>
+        /// <exception cref="InvalidOperationException">JNI cannot allocate a frame or resolve a method.</exception>
+        public static bool operator !=(JavaObjectReference? left, JavaObjectReference? right)
+        {
+            return !(left == right);
+        }
+
+        /// <summary>
+        /// Releases an owned reference once or stops borrowing an externally owned reference.
+        /// </summary>
+        /// <remarks>
+        /// Borrowed and already disposed wrappers can be disposed without JNI access.
+        /// Owned live references require the Unity main thread or a JVM-attached thread.
+        /// </remarks>
+        /// <exception cref="PlatformNotSupportedException">An owned live reference is disposed outside Android.</exception>
+        public void Dispose()
+        {
+            if (_ownsReference && Volatile.Read(ref _javaObject) is not null)
+            {
+                AndroidJni.EnsureAndroid();
+            }
+
+            var javaObject = Interlocked.Exchange(ref _javaObject, null);
+            if (_ownsReference && javaObject is not null)
+            {
+                javaObject.Dispose();
+            }
+
+            GC.SuppressFinalize(this);
+        }
+    }
+}

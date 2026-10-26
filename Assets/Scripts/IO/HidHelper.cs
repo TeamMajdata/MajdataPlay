@@ -1,4 +1,4 @@
-﻿#if UNITY_STANDALONE
+#if UNITY_STANDALONE
 using HidSharp;
 using MajdataPlay.Collections;
 using MajdataPlay.Extensions;
@@ -19,21 +19,21 @@ namespace MajdataPlay.IO
 
     internal static class HidHelper
     {
-        public static IEnumerable<HidDevice> Devices
+        public static IEnumerable<HidSharp.HidDevice> Devices
         {
             get
             {
                 return DeviceList.Local.GetHidDevices();
             }
         }
-        public static bool TryGetDevices(DeviceFilter filter, [NotNullWhen(true)] out IEnumerable<HidDevice> devices)
+        public static bool TryGetDevices(DeviceFilter filter, [NotNullWhen(true)] out IEnumerable<HidSharp.HidDevice> devices)
         {
             try
             {
                 var pid = filter.ProductId;
                 var vid = filter.VendorId;
                 var deviceName = filter.DeviceName;
-                var result = new PooledList<HidDevice>();
+                var result = new PooledList<HidSharp.HidDevice>();
 
                 foreach (var d in Devices)
                 {
@@ -69,14 +69,14 @@ namespace MajdataPlay.IO
                 MajDebug.LogException(e);
             }
 
-            devices = Array.Empty<HidDevice>();
+            devices = Array.Empty<HidSharp.HidDevice>();
             return false;
         }
         public static bool TryGetAndOpenDevice(
             string tag,
             DeviceFilter filter,
             OpenConfiguration hidConfig,
-            [NotNullWhen(true)] out HidDevice? hidDevice,
+            [NotNullWhen(true)] out HidSharp.HidDevice? hidDevice,
             [NotNullWhen(true)] out HidStream? hidStream,
             bool isReconnecting)
         {

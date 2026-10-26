@@ -1,5 +1,13 @@
 {
   "dependencies": {
+    "com.ammariqais.skiaforunity": {
+      "version": "file:../ThirdParty/SkiaForUnity",
+      "depth": 0,
+      "source": "local",
+      "dependencies": {
+        "com.unity.nuget.newtonsoft-json": "3.2.0"
+      }
+    },
     "com.annulusgames.lit-motion": {
       "version": "https://github.com/annulusgames/LitMotion.git?path=src/LitMotion/Assets/LitMotion",
       "depth": 0,
@@ -405,6 +413,12 @@
         "com.unity.modules.jsonserialize": "1.0.0"
       },
       "url": "https://packages.unity.com"
+    },
+    "net.majdata.ffmpeg-autogen": {
+      "version": "file:../ThirdParty/FFmpeg.AutoGen/Unity",
+      "depth": 0,
+      "source": "local",
+      "dependencies": {}
     },
     "unity-missing-scripts-finder": {
       "version": "https://github.com/RimuruDev/Unity-MissingScriptsFinder.git",

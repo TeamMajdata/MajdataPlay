@@ -1,0 +1,23 @@
+using System;
+using UnityEngine;
+
+#nullable enable
+
+namespace __ROOT_NAMESPACE__
+{
+    /// <summary>
+    /// Provides the live Unity Java reference shared by generated Java classes and interfaces.
+    /// </summary>
+    /// <remarks>
+    /// Owned references must be disposed on the Unity main thread or a JVM-attached thread.
+    /// Implementations represent existing Java objects and do not implement Java callbacks.
+    /// </remarks>
+    public interface IJavaObject : IDisposable
+    {
+        /// <summary>
+        /// Gets the live Java object used for descriptor-exact calls and argument marshaling.
+        /// </summary>
+        /// <exception cref="ObjectDisposedException">The wrapper has been disposed.</exception>
+        AndroidJavaObject JavaReference { get; }
+    }
+}

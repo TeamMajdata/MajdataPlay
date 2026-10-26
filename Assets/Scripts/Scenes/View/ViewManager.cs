@@ -4,6 +4,7 @@ using MajdataPlay.Scenes.Game;
 using MajdataPlay.Scenes.Game.Notes;
 using MajdataPlay.Scenes.Game.Notes.Controllers;
 using MajdataPlay.IO;
+using MajdataPlay.IO.Storage;
 using MajdataPlay.Numerics;
 using MajdataPlay.Timer;
 using MajdataPlay.Utils;
@@ -76,7 +77,8 @@ namespace MajdataPlay.Scenes.View
 
         float _playbackSpeed = 1f;
 
-        readonly string CACHE_PATH = Path.Combine(MajEnv.CachePath, "View");
+        /// <summary>Stores the view media cache initialized when the component awakens.</summary>
+        private StorageDirectory _cacheDirectory = null!;
 
         // Assets
         static AudioSampleWrap? _audioSample = null;
@@ -100,10 +102,7 @@ namespace MajdataPlay.Scenes.View
         protected override void Awake()
         {
             base.Awake();
-            if(!Directory.Exists(CACHE_PATH))
-            {
-                Directory.CreateDirectory(CACHE_PATH);
-            }
+            _cacheDirectory = MajEnv.CacheDirectory.CreateDirectory("View");
             Majdata<ViewManager>.Instance = this;
             Majdata<INoteController>.Instance = this;
             Majdata<INoteTimeProvider>.Instance = this;
@@ -114,7 +113,7 @@ namespace MajdataPlay.Scenes.View
             //PlayerSettings.resizableWindow = true;
             //Screen.SetResolution(1920, 1080, false);
         }
-        void Start()
+        async void Start()
         {
             _bgManager = Majdata<BGManager>.Instance!;
             //_httpServer = Majdata<WsServer>.Instance!;
@@ -127,7 +126,19 @@ namespace MajdataPlay.Scenes.View
 
             if (!string.IsNullOrEmpty(_videoPath))
             {
-                _bgManager.SetMovieAsync(_videoPath, _bgCover).AsTask().Wait();
+                var previousState = _state;
+                _state = ViewStatus.Busy;
+                try
+                {
+                    await _bgManager.SetMovieAsync(_videoPath, _bgCover);
+                }
+                finally
+                {
+                    if (this != null && _state == ViewStatus.Busy && previousState != ViewStatus.Busy)
+                    {
+                        _state = previousState;
+                    }
+                }
             }
             else if (_bgCover is not null)
             {
@@ -325,7 +336,7 @@ namespace MajdataPlay.Scenes.View
             {
                 if(_audioSample is not null) _audioSample.Dispose();
                 var sample = await MajInstances.AudioManager.LoadMusicAsync(audioPath, true, true);
-                if (File.Exists(bgPath))
+                if (FileSystem.File.Open(bgPath).Exists)
                 {
                     var cover = await SpriteLoader.LoadFromFileAsync(bgPath);
                     _bgCover = cover;
@@ -353,8 +364,8 @@ namespace MajdataPlay.Scenes.View
             _state = ViewStatus.Busy;
             try
             {
-                var sampleCachePath = Path.Combine(CACHE_PATH, "track.majplay");
-                var videoCachePath = Path.Combine(CACHE_PATH, "video.majplay");
+                var sampleCachePath = Path.Combine(_cacheDirectory.Location, "track.majplay");
+                var videoCachePath = Path.Combine(_cacheDirectory.Location, "video.majplay");
                 await File.WriteAllBytesAsync(sampleCachePath, audio);
 
                 var sample = await MajInstances.AudioManager.LoadMusicAsync(sampleCachePath, true);

@@ -67,7 +67,7 @@ namespace MajdataPlay.Scenes.Game.Notes.Behaviours
             _tapLineRenderer = _tapLineObject.GetComponent<SpriteRenderer>();
             _tapLineTransform = _tapLineObject.transform;
 
-            Transform.localScale = new Vector3(0, 0);
+            Transform.localScale = new Vector3(0f, 0f, 1f);
 
             SetActiveWithRenderer(false);
         }
@@ -111,11 +111,12 @@ namespace MajdataPlay.Scenes.Game.Notes.Behaviours
             }
 
             Transform.rotation = Quaternion.Euler(0, 0, -22.5f + (-45f * (StartPos - 1)));
-            Transform.localScale = new Vector3(0, 0);
+            Transform.localScale = new Vector3(0f, 0f, 1f);
 
             _tapLineObject.transform.rotation = Quaternion.Euler(0, 0, -22.5f + (-45f * (StartPos - 1)));
-            _thisRenderer.sortingOrder = SortOrder - TAP_SPRITE_SORT_ORDER;
-            _exRenderer.sortingOrder = SortOrder - TAP_EX_SORT_ORDER;
+            NoteHelper.Sorting.Apply(_thisRenderer, NoteHelper.Sorting.NoteLayer.Tap, SortOrder - TAP_SPRITE_SORT_ORDER);
+            NoteHelper.Sorting.Apply(_exRenderer, NoteHelper.Sorting.NoteLayer.Tap, SortOrder - TAP_EX_SORT_ORDER, parentZIndex: Transform.localPosition.z);
+            NoteHelper.Sorting.Apply(_tapLineRenderer, NoteHelper.Sorting.NoteLayer.TapLines);
 
             LoadSkin();
             SetActiveWithoutRenderer(true);
@@ -192,7 +193,7 @@ namespace MajdataPlay.Scenes.Game.Notes.Behaviours
                     case NoteStatus.Inited:
                         if (destScale >= 0f)
                         {
-                            Transform.position = _innerPos;
+                            NoteHelper.Sorting.SetPosition(Transform, _innerPos);
                             _tapLineTransform.localScale = new Vector3(1.225f / 4.8f, 1.225f / 4.8f, 1f);
                             SetNoteRendererActive(true);
                             SetExRendererActive(true);
@@ -209,11 +210,11 @@ namespace MajdataPlay.Scenes.Game.Notes.Behaviours
                             if (distance < 1.225f)
                             {
                                 Distance = distance;
-                                Transform.localScale = new Vector3(destScale, destScale) * USERSETTING_TAP_SCALE;
+                                Transform.localScale = new Vector3(destScale * USERSETTING_TAP_SCALE, destScale * USERSETTING_TAP_SCALE, 1f);
                             }
                             else
                             {
-                                Transform.localScale = new Vector3(1f, 1f) * USERSETTING_TAP_SCALE;
+                                Transform.localScale = new Vector3(USERSETTING_TAP_SCALE, USERSETTING_TAP_SCALE, 1f);
                                 State = NoteStatus.Running;
                                 goto case NoteStatus.Running;
                             }
@@ -222,7 +223,7 @@ namespace MajdataPlay.Scenes.Game.Notes.Behaviours
                     case NoteStatus.Running:
                         {
                             Distance = distance;
-                            Transform.position = _outerPos * (distance / 4.8f);
+                            NoteHelper.Sorting.SetPosition(Transform, _outerPos * (distance / 4.8f));
                             var lineScale = Mathf.Abs(distance / 4.8f);
                             _tapLineTransform.localScale = new Vector3(lineScale, lineScale, 1f);
                         }

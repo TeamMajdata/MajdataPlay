@@ -8,20 +8,20 @@ namespace MajdataPlay.Threading
 {
     public static class UniTaskExtensions
     {
-        public static UniTask Register(this UniTask source, string taskName = "", string sceneName = "")
+        public static UniTask Register(this UniTask source, string taskName = "", string sceneName = null)
         {
             return TaskTracker.Register(source, taskName, sceneName);
         }
-        public static UniTask RegisterAsWorker(this UniTask source, string taskName = "", string sceneName = "")
+        public static UniTask RegisterAsWorker(this UniTask source, string taskName = "", string sceneName = null)
         {
             return TaskTracker.Register(source, taskName, sceneName, true);
         }
 
-        public static UniTask<T> Register<T>(this UniTask<T> source, string taskName = "", string sceneName = "")
+        public static UniTask<T> Register<T>(this UniTask<T> source, string taskName = "", string sceneName = null)
         {
             return TaskTracker.Register(source, taskName, sceneName);
         }
-        public static UniTask<T> RegisterAsWorker<T>(this UniTask<T> source, string taskName = "", string sceneName = "")
+        public static UniTask<T> RegisterAsWorker<T>(this UniTask<T> source, string taskName = "", string sceneName = null)
         {
             return TaskTracker.Register(source, taskName, sceneName, true);
         }

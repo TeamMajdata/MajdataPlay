@@ -4,6 +4,7 @@ using MajdataPlay.Scenes.Result.Components;
 using UnityEditor;
 using UnityEngine;
 
+#nullable enable
 namespace MajdataPlay.Editor
 {
     using Editor = UnityEditor.Editor;
@@ -13,7 +14,8 @@ namespace MajdataPlay.Editor
     {
         double _previewRepaintUntil;
         bool _isPreviewing;
-        SongFeedbackPanel _feedbackPreview;
+        /// <summary>The feedback panel whose edit mode preview must be reset on reload or play mode entry.</summary>
+        SongFeedbackPanel? _feedbackPreview;
 
         void OnEnable()
         {

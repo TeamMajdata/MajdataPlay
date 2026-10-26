@@ -1,5 +1,6 @@
 ﻿using MajdataPlay.Scenes.Game.Notes;
 using MajdataPlay.Utils;
+using MajdataPlay.Scenes.Game.Utils;
 using Unity.IL2CPP.CompilerServices;
 using UnityEngine;
 #nullable enable
@@ -9,15 +10,21 @@ namespace MajdataPlay.Scenes.Game
     [Il2CppSetOption(Option.ArrayBoundsChecks, false)]
     internal sealed class HoldEffectDisplayer: MajComponent
     {
+        /// <summary>
+        /// Gets the world position or updates its X and Y coordinates while preserving sorting depth.
+        /// </summary>
         public Vector3 Position
         {
             get => Transform.position;
-            set => Transform.position = value;
+            set => NoteHelper.Sorting.SetPosition(Transform, value);
         }
+        /// <summary>
+        /// Gets the local position or updates its X and Y coordinates while preserving sorting depth.
+        /// </summary>
         public Vector3 LocalPosition
         {
             get => Transform.localPosition;
-            set => Transform.localPosition = value;
+            set => NoteHelper.Sorting.SetLocalPosition(Transform, value);
         }
 
         Material _material;

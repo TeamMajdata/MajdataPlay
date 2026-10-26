@@ -1,0 +1,31 @@
+{
+    "name": "MajdataPlay.FFmpeg",
+    "rootNamespace": "MajdataPlay.FFmpeg",
+    "references": [
+        "FFmpeg.AutoGen",
+        "MajdataPlay.Diagnostics",
+        "MajdataPlay.IO",
+        "MajdataPlay.MajRenderPipe",
+        "MajdataPlay.Platform.Android",
+        "Unity.Burst",
+        "Unity.Mathematics",
+        "Unity.RenderPipelines.Core.Runtime"
+    ],
+    "includePlatforms": [
+        "Android",
+        "Editor",
+        "iOS",
+        "LinuxStandalone64",
+        "macOSStandalone",
+        "WindowsStandalone32",
+        "WindowsStandalone64"
+    ],
+    "excludePlatforms": [],
+    "allowUnsafeCode": true,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

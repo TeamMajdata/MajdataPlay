@@ -88,7 +88,7 @@ namespace MajdataPlay.Scenes.Game.Notes.Behaviours
             _endPointTransform = _endPointObject.transform;
             _endRenderer = _endPointObject.GetComponent<SpriteRenderer>();
 
-            Transform.localScale = new Vector3(0, 0);
+            Transform.localScale = new Vector3(0f, 0f, 1f);
 
             SetActiveWithRenderer(false);
         }
@@ -148,14 +148,15 @@ namespace MajdataPlay.Scenes.Game.Notes.Behaviours
             }
 
             Transform.rotation = Quaternion.Euler(0, 0, -22.5f + -45f * (StartPos - 1));
-            Transform.localScale = new Vector3(0, 0);
+            Transform.localScale = new Vector3(0f, 0f, 1f);
 
             _tapLineTransform.rotation = Quaternion.Euler(0, 0, -22.5f + -45f * (StartPos - 1));
             _thisRenderer.size = new Vector2(1.22f, 1.4f);
             _exRenderer.size = new Vector2(1.22f, 1.4f);
-            _thisRenderer.sortingOrder = SortOrder - _spriteSortOrder;
-            _exRenderer.sortingOrder = SortOrder - _exSortOrder;
-            _endRenderer.sortingOrder = SortOrder - _endSortOrder;
+            NoteHelper.Sorting.Apply(_thisRenderer, NoteHelper.Sorting.NoteLayer.Tap, SortOrder - _spriteSortOrder);
+            NoteHelper.Sorting.Apply(_exRenderer, NoteHelper.Sorting.NoteLayer.Tap, SortOrder - _exSortOrder, parentZIndex: Transform.localPosition.z);
+            NoteHelper.Sorting.Apply(_endRenderer, NoteHelper.Sorting.NoteLayer.Tap, SortOrder - _endSortOrder, parentZIndex: Transform.localPosition.z);
+            NoteHelper.Sorting.Apply(_tapLineRenderer, NoteHelper.Sorting.NoteLayer.TapLines);
 
             LoadSkin();
             SetActiveWithoutRenderer(true);
@@ -276,7 +277,7 @@ namespace MajdataPlay.Scenes.Game.Notes.Behaviours
                             _exRenderer.size = new Vector2(1.22f, 1.42f);
                             _thisRenderer.size = new Vector2(1.22f, 1.42f);
                             _tapLineTransform.localScale = new Vector3(0.2552f, 0.2552f, 1f);
-                            Transform.position = _innerPos;
+                            NoteHelper.Sorting.SetPosition(Transform, _innerPos);
                             SetExRendererActive(true);
                             SetNoteRendererActive(true);
 
@@ -292,11 +293,11 @@ namespace MajdataPlay.Scenes.Game.Notes.Behaviours
                         if (distance < 1.225f)
                         {
                             Distance = distance;
-                            Transform.localScale = new Vector3(destScale, destScale) * USERSETTING_HOLD_SCALE;
+                            Transform.localScale = new Vector3(destScale * USERSETTING_HOLD_SCALE, destScale * USERSETTING_HOLD_SCALE, 1f);
                         }
                         else
                         {
-                            Transform.localScale = new Vector3(1f, 1f) * USERSETTING_HOLD_SCALE;
+                            Transform.localScale = new Vector3(USERSETTING_HOLD_SCALE, USERSETTING_HOLD_SCALE, 1f);
                             State = NoteStatus.Running;
                             goto case NoteStatus.Running;
                         }
@@ -333,11 +334,11 @@ namespace MajdataPlay.Scenes.Game.Notes.Behaviours
 
                         lineScale = lineScale >= 1f ? 1f : lineScale;
 
-                        Transform.position = _outerPos * (dis / 4.8f); //0.325
+                        NoteHelper.Sorting.SetPosition(Transform, _outerPos * (dis / 4.8f)); //0.325
                         _tapLineTransform.localScale = new Vector3(lineScale, lineScale, 1f);
                         _thisRenderer.size = new Vector2(1.22f, size);
                         _exRenderer.size = new Vector2(1.22f, size);
-                        _endPointTransform.localPosition = new Vector3(0f, 0.6825f - size / 2);
+                        _endPointTransform.localPosition = new Vector3(0f, 0.6825f - size / 2, _endPointTransform.localPosition.z);
 
                         break;
                     case NoteStatus.Arrived:
@@ -347,7 +348,7 @@ namespace MajdataPlay.Scenes.Game.Notes.Behaviours
                         var scale = Mathf.Abs(ratio);
                         _tapLineTransform.localScale = new Vector3(1f, 1f, 1f);
                         Distance = endDistance;
-                        Transform.position = _outerPos * ratio;
+                        NoteHelper.Sorting.SetPosition(Transform, _outerPos * ratio);
                         _tapLineTransform.localScale = new Vector3(scale, scale, 1f);
                         break;
                     default:

@@ -96,9 +96,9 @@ namespace MajdataPlay.Scenes.Game.Notes.Behaviours
             _pointObject.SetActive(true);
             _borderObject.SetActive(true);
 
-            Transform.position = new Vector3(0, 0, 0);
+            NoteHelper.Sorting.SetPosition(Transform, Vector3.zero);
             SetFansColor(new Color(1f, 1f, 1f, 0f));
-            SetFansPosition(0.4f);
+            SetFansPosition(TouchFanStartDistance);
 
             SetActiveWithRenderer(false);
 
@@ -109,7 +109,8 @@ namespace MajdataPlay.Scenes.Game.Notes.Behaviours
             }
             _borderRenderer.enabled = false;
 
-            Transform.localScale *= USERSETTING_TOUCH_SCALE;
+            var scale = Transform.localScale;
+            Transform.localScale = new Vector3(scale.x * USERSETTING_TOUCH_SCALE, scale.y * USERSETTING_TOUCH_SCALE, 1f);
         }
         public void Init(TouchHoldPoolingInfo poolingInfo)
         {
@@ -147,7 +148,9 @@ namespace MajdataPlay.Scenes.Game.Notes.Behaviours
                 _buttonPos = null;
             }
             PlayerReleaseTimeSec = 0;
-            JudgableRange = new(JudgeTimingWithOffset - 0.15f, JudgeTimingWithOffset + 0.316667f, ContainsType.Closed);
+            JudgableRange = new(JudgeTimingWithOffset - (TOUCH_JUDGE_SEG_1ST_PERFECT_MSEC / 1000f),
+                JudgeTimingWithOffset + (TOUCH_JUDGE_GOOD_AREA_MSEC / 1000f),
+                ContainsType.Closed);
             _waitReleaseTimeSec = 0;
 
             if (Length <= TOUCH_HOLD_HEAD_IGNORE_LENGTH_SEC + TOUCH_HOLD_TAIL_IGNORE_LENGTH_SEC)
@@ -169,15 +172,17 @@ namespace MajdataPlay.Scenes.Game.Notes.Behaviours
             SetFansColor(new Color(1f, 1f, 1f, 0f));
             SetActiveWithoutRenderer(true);
 
-            Transform.position = NoteHelper.GetTouchAreaPosition(SensorPos);
-            SetFansPosition(0.4f);
+            NoteHelper.Sorting.SetPosition(Transform, NoteHelper.GetTouchAreaPosition(SensorPos));
+            SetFansPosition(TouchFanStartDistance);
 
             for (var i = 0; i < 4; i++)
             {
-                _fanRenderers[i].sortingOrder = SortOrder - (_fanSpriteSortOrder + i);
+                NoteHelper.Sorting.Apply(_fanRenderers[i], NoteHelper.Sorting.NoteLayer.Touch, SortOrder - (_fanSpriteSortOrder + i));
             }
-            _pointRenderer.sortingOrder = SortOrder - _pointBorderSortOrder;
-            _borderRenderer.SortingOrder = SortOrder - _borderSortOrder;
+            NoteHelper.Sorting.Apply(_pointRenderer, NoteHelper.Sorting.NoteLayer.Touch, SortOrder - _pointBorderSortOrder);
+            _borderRenderer.SortingLayerName = "Default";
+            _borderRenderer.SortingOrder = 0;
+            NoteHelper.Sorting.SetLocalZPosition(_borderObject.transform, NoteHelper.Sorting.GetZIndex(NoteHelper.Sorting.NoteLayer.TouchHoldBorder, SortOrder - _borderSortOrder));
 
             State = NoteStatus.Inited;
         }
@@ -385,7 +390,7 @@ namespace MajdataPlay.Scenes.Game.Notes.Behaviours
                     case NoteStatus.Running:
                         {
                             var pow = -Mathf.Exp(8 * (timing * 0.43f / moveDuration) - 0.85f) + 0.42f;
-                            var distance = Mathf.Clamp(pow, 0f, 0.4f);
+                            var distance = Mathf.Clamp(pow * TouchFadeInRatio, 0f, TouchFanStartDistance);
                             if (float.IsNaN(distance))
                             {
                                 distance = 0f;
@@ -393,7 +398,7 @@ namespace MajdataPlay.Scenes.Game.Notes.Behaviours
                             if (timing >= 0)
                             {
                                 var _pow = -Mathf.Exp(-0.85f) + 0.42f;
-                                var _distance = Mathf.Clamp(_pow, 0f, 0.4f);
+                                var _distance = Mathf.Clamp(_pow * TouchFadeInRatio, 0f, TouchFanStartDistance);
                                 SetFansPosition(_distance);
                                 SetBorderActive(true);
                                 State = NoteStatus.Arrived;
@@ -675,6 +680,7 @@ namespace MajdataPlay.Scenes.Game.Notes.Behaviours
             for (var i = 0; i < 4; i++)
             {
                 var pos = (0.226f + distance) * GetAngle(i);
+                pos.z = _fanTransforms[i].localPosition.z;
                 _fanTransforms[i].localPosition = pos;
             }
         }

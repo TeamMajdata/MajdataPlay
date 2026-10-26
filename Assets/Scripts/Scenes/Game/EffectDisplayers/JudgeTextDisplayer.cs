@@ -3,6 +3,7 @@ using MajdataPlay.Extensions;
 using MajdataPlay.Numerics;
 using MajdataPlay.Scenes.Game.Notes;
 using MajdataPlay.Scenes.Game.Notes.Skins;
+using MajdataPlay.Scenes.Game.Utils;
 using System;
 using System.Linq;
 using System.Runtime.CompilerServices;
@@ -15,15 +16,21 @@ namespace MajdataPlay.Scenes.Game
     [Il2CppSetOption(Option.ArrayBoundsChecks, false)]
     internal sealed class JudgeTextDisplayer: MajComponent
     {
+        /// <summary>
+        /// Gets the world position or updates its X and Y coordinates while preserving sorting depth.
+        /// </summary>
         public Vector3 Position
         {
             get => Transform.position;
-            set => Transform.position = value;
+            set => NoteHelper.Sorting.SetPosition(Transform, value);
         }
+        /// <summary>
+        /// Gets the local position or updates its X and Y coordinates while preserving sorting depth.
+        /// </summary>
         public Vector3 LocalPosition
         {
             get => Transform.localPosition;
-            set => Transform.localPosition = value;
+            set => NoteHelper.Sorting.SetLocalPosition(Transform, value);
         }
 
         Animator _animator;

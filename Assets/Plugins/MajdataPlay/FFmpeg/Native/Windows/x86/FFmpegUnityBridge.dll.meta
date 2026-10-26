@@ -1,0 +1,29 @@
+fileFormatVersion: 2
+guid: 094b778a681441c8937e95de9b0a495b
+PluginImporter:
+  externalObjects: {}
+  serializedVersion: 3
+  iconMap: {}
+  executionOrder: {}
+  defineConstraints: []
+  isPreloaded: 1
+  isOverridable: 0
+  isExplicitlyReferenced: 0
+  validateReferences: 1
+  platformData:
+    Any:
+      enabled: 0
+      settings: {}
+    Editor:
+      enabled: 0
+      settings:
+        CPU: AnyCPU
+        DefaultValueInitialized: true
+        OS: AnyOS
+    Win:
+      enabled: 1
+      settings:
+        CPU: x86
+  userData:
+  assetBundleName:
+  assetBundleVariant:

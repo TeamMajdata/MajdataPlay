@@ -23,8 +23,8 @@ Shader "Maj/Notes/FrontToBackComposite"
             #pragma vertex Vert
             #pragma fragment Frag
 
-            #include "Assets/Rendering/MajRenderPipeline/Library/MajCore.hlsl"
-            #include "Assets/Rendering/MajRenderPipeline/Library/MajBlit.hlsl"
+            #include "Assets/Plugins/MajdataPlay/Rendering/RenderPipelines/MajRenderPipeline/Library/MajCore.hlsl"
+            #include "Assets/Plugins/MajdataPlay/Rendering/RenderPipelines/MajRenderPipeline/Library/MajBlit.hlsl"
 
             half4 Frag(Varyings IN) : SV_Target
             {

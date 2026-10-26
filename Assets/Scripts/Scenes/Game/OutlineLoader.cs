@@ -13,7 +13,8 @@ namespace MajdataPlay.Scenes.Game
         private bool _effectAvailable = false;
         private GameManager _gameManager;
         private SpriteRenderer _renderer;
-        private GamePlayManager _gpManager;
+        /// <summary>The game play manager, or <see langword="null"/> in scenes without one such as the view and slide test scenes.</summary>
+        private GamePlayManager? _gpManager;
         private readonly int OUTLINE_ANIM_HASH = Animator.StringToHash("play");
         void Awake()
         {
@@ -22,10 +23,10 @@ namespace MajdataPlay.Scenes.Game
         void Start()
         {
             _gameManager = MajInstances.GameManager;
-            _gpManager = Majdata<GamePlayManager>.Instance!;
+            _gpManager = Majdata<GamePlayManager>.Instance;
             _renderer = GetComponent<SpriteRenderer>();
             _renderer.sprite = MajInstances.SkinManager.SelectedSkin.Outline;
-            _isClassicMode = _gpManager.IsClassicMode;
+            _isClassicMode = _gpManager?.IsClassicMode ?? false;
             if(MajEnv.Mode != RunningMode.View)
             {
                 _effectAvailable = MajInstances.SkinManager.SelectedSkin.IsOutlineAvailable && _isClassicMode;

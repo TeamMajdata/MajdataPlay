@@ -1,5 +1,6 @@
 ﻿using Cysharp.Threading.Tasks;
 using MajdataPlay.Diagnostics;
+using MajdataPlay.IO.Storage;
 using MajdataPlay.Utils;
 using System;
 using System.Collections.Generic;
@@ -17,7 +18,10 @@ namespace MajdataPlay.Settings
         static bool _isInited = false;
 
         readonly static Dictionary<string, ChartSetting> _storage = new(1024);
-        static string STORAGE_PATH = string.Empty;
+        /// <summary>Defines the chart-settings filename relative to the application storage root.</summary>
+        private const string StorageFileName = "ChartSetting.db";
+        /// <summary>Retains the directory and backend selected when chart settings initialize.</summary>
+        private static StorageDirectory? s_storageDirectory;
 
         static SpinLock _lock = new();
         
@@ -29,23 +33,25 @@ namespace MajdataPlay.Settings
             }
             try
             {
-                if(string.IsNullOrEmpty(STORAGE_PATH))
-                {
-                    STORAGE_PATH = Path.Combine(MajEnv.RootPath, "ChartSetting.db");
-                }
+                var storageDirectory = s_storageDirectory ??= MajEnv.RootDirectory;
                 await UniTask.SwitchToThreadPool();
                 GameManager.OnSave += OnSave;
-                if (!File.Exists(STORAGE_PATH))
+                var storageFile = storageDirectory.FindFile(StorageFileName);
+                if (storageFile is null)
                 {
                     return;
                 }
-                using var fileStream = File.OpenRead(STORAGE_PATH);
+                using var fileStream = storageFile.OpenRead();
                 var (isSuccess, data, exception) = await Serializer.Json.TryDeserializeAsync<ChartSetting[]>(fileStream);
                 if (!isSuccess)
                 {
-                    var path = Path.Combine(STORAGE_PATH, $"{DateTime.Now:yyyy-MM-dd-HH-mm-ss}.bak");
-                    File.Copy(STORAGE_PATH, path);
-                    MajDebug.LogError($"Failed to load chart settings\nPath: {STORAGE_PATH}\nException: {exception}");
+                    var lastWriteTime = storageFile.Entry?.LastWriteTimeUtc;
+                    var backupFile = storageFile.CopyTo(storageDirectory, $"{StorageFileName}.{DateTime.Now:yyyy-MM-dd-HH-mm-ss}.bak");
+                    if (lastWriteTime is DateTime timestamp)
+                    {
+                        backupFile.SetLastWriteTime(timestamp);
+                    }
+                    MajDebug.LogError($"Failed to load chart settings\nPath: {storageFile.Location}\nException: {exception}");
                 }
                 else
                 {
@@ -169,7 +175,10 @@ namespace MajdataPlay.Settings
             {
                 @lock.Enter(ref isLocked);
                 var json = Serializer.Json.Serialize(_storage.Values);
-                File.WriteAllText(STORAGE_PATH, json);                
+                var storageDirectory = s_storageDirectory!;
+                var storageFile = storageDirectory.FindFile(StorageFileName)
+                    ?? storageDirectory.CreateFile(StorageFileName, "application/json");
+                storageFile.WriteAllText(json);
             }
             catch(Exception e)
             {

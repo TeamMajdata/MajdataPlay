@@ -24,6 +24,9 @@ namespace MajdataPlay.IO
         const int NOV_USB_VID = 0x3356;
         const int FL_USB_PID = 0x0103;
         const int FL_USB_VID = 0x227D;
+        const int NPRO_USB_1P_PID = 0x5751;
+        const int NPRO_USB_2P_PID = 0x5752;
+        const int NPRO_USB_VID = 0x2E3C;
         const int GENERAL_HID_1P_PID = 33;
         const int GENERAL_HID_1P_VID = 3235;
         const int GENERAL_HID_2P_PID = 33;
@@ -70,11 +73,17 @@ namespace MajdataPlay.IO
             var ledDeviceSettings = ioSettings.OutputDevice.Led;
             var userManufacturer = ioSettings.Manufacturer;
             var userButtonRingType = buttonRingSettings.Type;
+#if UNITY_STANDALONE_WIN
+            var hasNproUsbDevice = HasWinUsbDevice(NPRO_USB_VID, playerIndex == 1 ? NPRO_USB_1P_PID : NPRO_USB_2P_PID);
+#else
+            var hasNproUsbDevice = false;
+#endif
 
             var manufacturer = DeviceManufacturerOption.General;
             var buttonRingType = userButtonRingType ?? ButtonRingDeviceOption.Keyboard;
 
             MajDebug.LogInfo($"Nov USB device present: {hasNovUsbDevice}");
+            MajDebug.LogInfo($"NPro USB device present: {hasNproUsbDevice}");
             MajDebug.LogInfo($"All available HID devices:\n{string.Join('\n', hidDevices)}");
             MajDebug.LogInfo($"All available serial ports:\n{string.Join('\n', serialPorts)}");
 
@@ -98,7 +107,7 @@ namespace MajdataPlay.IO
                     LedDeviceSerialConnInfo = new()
                     {
 #if UNITY_STANDALONE_WIN
-                        PortName = "COM" + (ledDeviceSettings.SerialPortOptions.Port ?? (playerIndex == 1 ? 3 : 4)),
+                        PortName = "COM" + (ledDeviceSettings.SerialPortOptions.Port ?? (playerIndex == 1 ? 21 : 22)),
 #else
                         PortName = ledDeviceSettings.SerialPortOptions.Port ?? WinSerialPortToLinuxPortName((playerIndex == 1 ? 21 : 22)),
 #endif
@@ -134,7 +143,7 @@ namespace MajdataPlay.IO
                             LedDeviceSerialConnInfo = new()
                             {
 #if UNITY_STANDALONE_WIN
-                                PortName = "COM" + (ledDeviceSettings.SerialPortOptions.Port ?? (playerIndex == 1 ? 3 : 4)),
+                                PortName = "COM" + (ledDeviceSettings.SerialPortOptions.Port ?? (playerIndex == 1 ? 21 : 22)),
 #else
                                 PortName = ledDeviceSettings.SerialPortOptions.Port ?? WinSerialPortToLinuxPortName((playerIndex == 1 ? 21 : 22)),
 #endif
@@ -163,7 +172,7 @@ namespace MajdataPlay.IO
                             LedDeviceSerialConnInfo = new()
                             {
 #if UNITY_STANDALONE_WIN
-                                PortName = "COM" + (ledDeviceSettings.SerialPortOptions.Port ?? (playerIndex == 1 ? 3 : 4)),
+                                PortName = "COM" + (ledDeviceSettings.SerialPortOptions.Port ?? (playerIndex == 1 ? 21 : 22)),
 #else
                                 PortName = ledDeviceSettings.SerialPortOptions.Port ?? WinSerialPortToLinuxPortName((playerIndex == 1 ? 21 : 22)),
 #endif
@@ -211,13 +220,18 @@ namespace MajdataPlay.IO
                             LedDeviceSerialConnInfo = new()
                             {
 #if UNITY_STANDALONE_WIN
-                                PortName = "COM" + (ledDeviceSettings.SerialPortOptions.Port ?? (playerIndex == 1 ? 3 : 4)),
+                                PortName = "COM" + (ledDeviceSettings.SerialPortOptions.Port ?? (playerIndex == 1 ? 21 : 22)),
 #else
                                 PortName = ledDeviceSettings.SerialPortOptions.Port ?? WinSerialPortToLinuxPortName((playerIndex == 1 ? 21 : 22)),
 #endif
                                 BaudRate = ledDeviceSettings.SerialPortOptions.BaudRate ?? 115200,
                             };
                             break;
+#if UNITY_STANDALONE_WIN
+                        case DeviceManufacturerOption.NPro:
+                            buttonRingType = ButtonRingDeviceOption.HID;
+                            break;
+#endif
                         case DeviceManufacturerOption.Pipe:
                             buttonRingType = userButtonRingType ?? ButtonRingDeviceOption.Pipe;
                             break;
@@ -259,9 +273,15 @@ namespace MajdataPlay.IO
 
                         return result;
                     });
-                    if (filteredHidDevices.Count() != 0 || hasNovUsbDevice)
+                    if (filteredHidDevices.Count() != 0 || hasNovUsbDevice || hasNproUsbDevice)
                     {
-                        if (hidDevices.Any(x => x.ProductID == yuanDefaultHidPID && x.VendorID == yuanDefaultHidVID))
+                        if (hasNproUsbDevice)
+                        {
+                            MajDebug.LogInfo("Manufacturer detect result: NPro");
+                            manufacturer = DeviceManufacturerOption.NPro;
+                            buttonRingType = ButtonRingDeviceOption.HID;
+                        }
+                        else if (hidDevices.Any(x => x.ProductID == yuanDefaultHidPID && x.VendorID == yuanDefaultHidVID))
                         {
                             MajDebug.LogInfo("Manufacturer detect result: Yuan");
                             manufacturer = DeviceManufacturerOption.Yuan;

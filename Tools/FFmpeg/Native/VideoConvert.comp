@@ -1,0 +1,24 @@
+#version 450
+layout(local_size_x=8,local_size_y=8) in;
+layout(set=0,binding=0) uniform sampler2D firstPlane;
+layout(set=0,binding=1) uniform sampler2D secondPlane;
+layout(set=0,binding=2,rgba8) writeonly uniform image2D outputImage;
+layout(push_constant) uniform Parameters { vec4 uvScaleOffset; ivec4 info; } parameters;
+void main() {
+    ivec2 p=ivec2(gl_GlobalInvocationID.xy);
+    ivec2 size=imageSize(outputImage);
+    if(any(greaterThanEqual(p,size))) return;
+    vec2 uv=(vec2(p)+0.5)/vec2(size);
+    uv=uv*parameters.uvScaleOffset.xy+parameters.uvScaleOffset.zw;
+    vec3 rgb;
+    if(parameters.info.x==1) rgb=texture(firstPlane,uv).rgb;
+    else {
+        float y=texture(firstPlane,uv).r;
+        vec2 cbcr=texture(secondPlane,uv).rg-vec2(128.0/255.0);
+        if(parameters.info.y==0) { y=(y-16.0/255.0)*(255.0/219.0); cbcr*=255.0/224.0; }
+        if(parameters.info.z!=0)
+            rgb=vec3(y+1.5748*cbcr.y,y-0.187324*cbcr.x-0.468124*cbcr.y,y+1.8556*cbcr.x);
+        else rgb=vec3(y+1.402*cbcr.y,y-0.344136*cbcr.x-0.714136*cbcr.y,y+1.772*cbcr.x);
+    }
+    imageStore(outputImage,p,vec4(clamp(rgb,0.0,1.0),1.0));
+}

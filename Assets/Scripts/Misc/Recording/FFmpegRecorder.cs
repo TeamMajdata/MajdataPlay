@@ -1,686 +1,542 @@
-/*using Cysharp.Threading.Tasks;
-using MajdataPlay.IO;
-using MajdataPlay.Types;
-using MajdataPlay.Utils;
-using ManagedBass.Asio;
-using ManagedBass.Wasapi;
-using NeoSmart.AsyncLock;
-using System;
-using System.Buffers;
-using System.Collections;
-using System.Collections.Concurrent;
-using System.Diagnostics;
-using System.IO;
-using System.IO.Pipes;
-using System.Runtime.CompilerServices;
-using System.Text;
-using System.Threading.Tasks;
-using UnityEngine;
-using UnityEngine.Profiling;
 #nullable enable
+using MajdataPlay.Diagnostics;
+using MajdataPlay.FFmpeg;
+using MajdataPlay.IO;
+using MajdataPlay.IO.Storage;
+using System;
+using System.IO;
+using System.Runtime.ExceptionServices;
+using System.Runtime.InteropServices;
+using System.Threading;
+using System.Threading.Tasks;
+
 namespace MajdataPlay.Recording
 {
-    public class FFmpegRecorder : IRecorder
+    /// <summary>Records the video of an <see cref="FFmpegCameraCapturer"/> and the audio of an <see cref="IAudioRecorder"/> into one MP4 or Matroska file.</summary>
+    /// <remarks>
+    /// While recording, the capturer encodes video into a Matroska file in <see cref="MajEnv.TempDirectory"/> and a worker drains the
+    /// audio recorder into a raw float PCM file beside it. Audio starts in the same call that starts the capturer's clock, so the
+    /// audio recorder's <see cref="IAudioRecorder.PlaybackDelay"/> is the time on the video timeline at which the first captured
+    /// frame was heard. Stopping finalizes the capture and muxes both files on a worker thread, copying the video packets without
+    /// re-encoding and delaying the audio by that amount, then moves the result into <see cref="MajEnv.RecordOutputsDirectory"/>.
+    /// If muxing fails, the video-only capture is kept in the output directory instead. Control the recorder on the Unity main
+    /// thread. The recorder owns the audio recorder but not the capturer component.
+    /// </remarks>
+    public sealed class FFmpegRecorder : IRecorder
     {
-        public bool IsRecording { get; private set; } = false;
-        public bool IsConnected { get; private set; } = true;
+        /// <summary>Sets how often the worker drains captured audio to the temporary PCM file.</summary>
+        private const int AudioDrainIntervalMilliseconds = 20;
+        /// <summary>Sets how many seconds of audio one drain pass can move.</summary>
+        private const int AudioDrainBufferDivisor = 10;
+        /// <summary>Supplies the camera video.</summary>
+        private readonly FFmpegCameraCapturer _capturer;
+        /// <summary>Supplies the final audio mix.</summary>
+        private readonly IAudioRecorder _audioRecorder;
+        /// <summary>Stores the current lifecycle step.</summary>
+        private RecorderState _state;
+        /// <summary>Stores the output name prefix, usually the chart title.</summary>
+        private string _name = string.Empty;
+        /// <summary>Stores the files of the active recording, or null while idle.</summary>
+        private RecordingFiles? _files;
+        /// <summary>Completes when the current start attempt finishes.</summary>
+        private Task _startTask = Task.CompletedTask;
+        /// <summary>Completes when the current finalization finishes.</summary>
+        private Task _finalizeTask = Task.CompletedTask;
+        /// <summary>Completes when the audio worker has written and closed the PCM file.</summary>
+        private Task _audioDrainTask = Task.CompletedTask;
+        /// <summary>Asks the audio worker to perform its final drain and exit.</summary>
+        private CancellationTokenSource? _audioDrainStop;
+        /// <summary>Indicates that Dispose has been called.</summary>
+        private bool _isDisposed;
 
+        /// <summary>Creates a recorder over an existing capturer and audio recorder.</summary>
+        /// <param name="capturer">The scene capturer supplying video; its encoder options select the video format.</param>
+        /// <param name="audioRecorder">The audio source, such as one from <see cref="AudioManager.CreateAudioRecorder"/>; this recorder takes ownership.</param>
+        /// <param name="container">The output container.</param>
+        /// <exception cref="ArgumentNullException">The capturer or audio recorder is null.</exception>
+        /// <exception cref="ArgumentOutOfRangeException">The container is not defined.</exception>
+        public FFmpegRecorder(FFmpegCameraCapturer capturer, IAudioRecorder audioRecorder, MediaContainerFormat container)
+        {
+            if (capturer == null)
+            {
+                throw new ArgumentNullException(nameof(capturer));
+            }
+            if (!Enum.IsDefined(typeof(MediaContainerFormat), container))
+            {
+                throw new ArgumentOutOfRangeException(nameof(container));
+            }
+            _capturer = capturer;
+            _audioRecorder = audioRecorder ?? throw new ArgumentNullException(nameof(audioRecorder));
+            ContainerFormat = container;
+        }
 
-        bool _isDisposed = false;
-        string _name = "";
-        string _timestamp = string.Empty;
-        string _wavPath = Path.Combine(MajEnv.RecordOutputsPath, $"{_defaultTimestamp}out.wav");
-        string _mp4Path = Path.Combine(MajEnv.RecordOutputsPath, $"{_defaultTimestamp}out.mp4");
-        string _outputPath = Path.Combine(MajEnv.RecordOutputsPath, $"{_defaultTimestamp}.mp4");
+        /// <summary>Lists the recorder lifecycle steps.</summary>
+        private enum RecorderState
+        {
+            /// <summary>No recording is active.</summary>
+            Idle,
+            /// <summary>The capturer is opening its encoder.</summary>
+            Starting,
+            /// <summary>Video and audio are being captured.</summary>
+            Recording,
+            /// <summary>Capture has stopped and the output is being written.</summary>
+            Finalizing
+        }
 
-        readonly WavRecorder _wavRecorder = new(32);
-        readonly ScreenRecorder _screenRecorder = new();
-        readonly static string _defaultTimestamp = $"{DateTime.UnixEpoch:yyyy-MM-dd_HH_mm_ss}";
-        readonly static string FFMPEG_PATH = Path.Combine(MajEnv.AssetsPath, "Libraries", "ffmpeg.exe");
+        /// <summary>Gets whether a recording is starting or capturing.</summary>
+        public bool IsRecording => _state == RecorderState.Starting || _state == RecorderState.Recording;
+        /// <summary>Gets whether the capturer component still exists and this recorder is not disposed.</summary>
+        public bool IsConnected => _capturer != null && !_isDisposed;
+        /// <summary>Stores the output container.</summary>
+        private MediaContainerFormat ContainerFormat { get; }
 
-
+        /// <summary>Starts recording without waiting; failures are logged.</summary>
+        /// <exception cref="ObjectDisposedException">The recorder has been disposed.</exception>
         public void StartRecord()
         {
             EnsureIsOpen();
-            if (IsRecording)
-            {
-                return;
-            }
-            IsRecording = true;
-            _timestamp = $"{DateTime.Now:yyyy-MM-dd_HH_mm_ss}";
-            _wavPath = Path.Combine(MajEnv.RecordOutputsPath, $"{_timestamp}out.wav");
-            _mp4Path = Path.Combine(MajEnv.RecordOutputsPath, $"{_timestamp}out.mp4");
-            _outputPath = Path.Combine(MajEnv.RecordOutputsPath, $"{_name}_{_timestamp}.mp4");
-
-            _screenRecorder.StartRecord(_mp4Path);
-            _wavRecorder.Start();
+            _ = LogFailureAsync(StartRecordAsync(), "start");
         }
-        public async Task StartRecordAsync()
+
+        /// <summary>Opens the capture files and starts video and audio capture together.</summary>
+        /// <returns>A task completing when capture has begun; calls while not idle complete immediately.</returns>
+        /// <exception cref="ObjectDisposedException">The recorder has been disposed.</exception>
+        /// <exception cref="InvalidOperationException">The capturer cannot start or stopped before capture began.</exception>
+        /// <exception cref="NotSupportedException">The capturer's encoder or GPU readback is unavailable.</exception>
+        /// <exception cref="IOException">A temporary file cannot be created.</exception>
+        public Task StartRecordAsync()
         {
             EnsureIsOpen();
-            if (IsRecording)
+            if (_state != RecorderState.Idle)
             {
-                return;
+                return Task.CompletedTask;
             }
-            IsRecording = true;
-            _timestamp = $"{DateTime.Now:yyyy-MM-dd_HH_mm_ss}";
-            _wavPath = Path.Combine(MajEnv.RecordOutputsPath, $"{_timestamp}out.wav");
-            _mp4Path = Path.Combine(MajEnv.RecordOutputsPath, $"{_timestamp}out.mp4");
-            _outputPath = Path.Combine(MajEnv.RecordOutputsPath, $"{_name}_{_timestamp}.mp4");
-
-            await _screenRecorder.StartRecordAsync(_mp4Path);
-            _wavRecorder.Start();
+            _state = RecorderState.Starting;
+            _startTask = StartCoreAsync();
+            return _startTask;
         }
+
+        /// <summary>Stops recording without waiting for the output; failures are logged.</summary>
+        /// <exception cref="ObjectDisposedException">The recorder has been disposed.</exception>
         public void StopRecord()
         {
             EnsureIsOpen();
-            if (!IsRecording)
-            {
-                return;
-            }
-            IsRecording = false;
-            _screenRecorder.StopRecord();
-            _wavRecorder.Stop();
-            using (var fileStream = File.Create(_wavPath))
-            {
-                _wavRecorder.Export(fileStream);
-            }
-            
-            var args = $"-y -i {_mp4Path} -i {_wavPath} -c:v copy -c:a aac -strict experimental -shortest {_outputPath}";
-            var startInfo = new ProcessStartInfo(FFMPEG_PATH, args)
-            {
-                UseShellExecute = false,
-                CreateNoWindow = true
-            };
-            var p = new Process { StartInfo = startInfo };
-            p.Start();
-            p.WaitForExit();
-            File.Delete(_mp4Path);
-            File.Delete(_wavPath);
-            _timestamp = string.Empty;
-        }
-        public async Task StopRecordAsync()
-        {
-            EnsureIsOpen();
-            if (!IsRecording)
-            {
-                return;
-            }
-            IsRecording = false;
-            await _screenRecorder.StopRecordAsync();
-            _wavRecorder.Stop();
-            using (var fileStream = File.Create(_wavPath))
-            {
-                await _wavRecorder.ExportAsync(fileStream);
-            }
-            await Task.Run(() =>
-            {
-                var args = $"-y -i {_mp4Path} -i {_wavPath} -c:v copy -c:a aac -strict experimental -shortest {_outputPath}";
-                var startInfo = new ProcessStartInfo(FFMPEG_PATH, args)
-                {
-                    UseShellExecute = false,
-                    CreateNoWindow = true
-                };
-                var p = new Process { StartInfo = startInfo };
-                p.Start();
-                p.WaitForExit();
-                File.Delete(_mp4Path);
-                File.Delete(_wavPath);
-                _timestamp = string.Empty;
-            });
+            _ = LogFailureAsync(StopRecordAsync(), "stop");
         }
 
-        public void SetOutputName(string name)
-        {
-            _name = name;
-        }
-        public void OnLateUpdate()
+        /// <summary>Stops capture and waits until the output file has been written.</summary>
+        /// <returns>A task completing after the output is written and temporary files are removed.</returns>
+        /// <exception cref="ObjectDisposedException">The recorder has been disposed.</exception>
+        /// <exception cref="InvalidOperationException">Capture or muxing failed.</exception>
+        /// <exception cref="NotSupportedException">The output container cannot store the captured media.</exception>
+        /// <exception cref="IOException">Reading the capture or writing the output failed.</exception>
+        public Task StopRecordAsync()
         {
             EnsureIsOpen();
-            if(!IsRecording)
+            return StopCoreAsync();
+        }
+
+        /// <summary>Sets the prefix of the next output file name.</summary>
+        /// <param name="name">The prefix, usually the chart title; characters invalid in file names are replaced.</param>
+        public void SetOutputName(string name)
+        {
+            _name = name ?? string.Empty;
+        }
+
+        /// <summary>Finalizes the recording when the capturer stops or fails on its own.</summary>
+        public void OnLateUpdate()
+        {
+            if (_state != RecorderState.Recording || _isDisposed)
             {
                 return;
             }
-            _wavRecorder.OnLateUpdate();
+            if (_capturer == null || _capturer.State == CameraCaptureState.Error || _capturer.State == CameraCaptureState.Stopped
+                || _audioDrainTask.IsFaulted)
+            {
+                MajDebug.LogWarning(nameof(FFmpegRecorder), "A recording source stopped unexpectedly; finalizing the recording");
+                _ = LogFailureAsync(StopCoreAsync(), "finalize");
+            }
         }
+
+        /// <summary>Stops any active recording, lets its output finish, and then releases the audio recorder.</summary>
+        /// <remarks>Repeated disposal has no effect.</remarks>
         public void Dispose()
         {
-            if(_isDisposed)
+            if (_isDisposed)
             {
                 return;
             }
-            StopRecord();
-            _wavRecorder.Dispose();
             _isDisposed = true;
+            _ = LogFailureAsync(DisposeCoreAsync(), "dispose");
         }
-        void EnsureIsOpen()
+
+        /// <summary>Starts the capturer and, from its Started event, the audio recorder and its drain worker.</summary>
+        /// <returns>A task completing when capture has begun.</returns>
+        private async Task StartCoreAsync()
         {
-            if(_isDisposed)
+            RecordingFiles? files = null;
+            Stream? audioOutput = null;
+            try
+            {
+                files = RecordingFiles.Create(_name, ContainerFormat);
+                audioOutput = FileSystem.File.OpenWrite(files.AudioPath);
+                // Started is raised in the same call that starts the capture clock, giving both streams one origin.
+                _capturer.Started += OnCaptureStarted;
+                try
+                {
+                    await _capturer.StartRecordingAsync(files.VideoPath);
+                }
+                finally
+                {
+                    _capturer.Started -= OnCaptureStarted;
+                }
+                if (!_capturer.IsRecording)
+                {
+                    throw new InvalidOperationException("The capturer stopped before recording began.");
+                }
+
+                var drainStop = new CancellationTokenSource();
+                var drainOutput = audioOutput;
+                audioOutput = null;
+                _audioDrainStop = drainStop;
+                _audioDrainTask = Task.Factory.StartNew(() => DrainAudio(drainOutput, drainStop.Token),
+                    CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default);
+                _files = files;
+                _state = RecorderState.Recording;
+                MajDebug.LogInfo(nameof(FFmpegRecorder), $"Recording {_capturer.Width}x{_capturer.Height}@{_capturer.FrameRate} "
+                    + $"{_capturer.EncoderName} with {_audioRecorder.SampleRate} Hz x{_audioRecorder.Channels} audio");
+            }
+            catch
+            {
+                try
+                {
+                    try
+                    {
+                        _audioRecorder.Stop();
+                    }
+                    finally
+                    {
+                        audioOutput?.Dispose();
+                        if (files != null)
+                        {
+                            DeleteTemporaryFile(files.AudioPath);
+                            if (_capturer.CanStartRecording)
+                            {
+                                DeleteTemporaryFile(files.VideoPath);
+                            }
+                        }
+                    }
+                }
+                finally
+                {
+                    _state = RecorderState.Idle;
+                }
+                throw;
+            }
+        }
+
+        /// <summary>Starts audio capture at the capturer's clock origin.</summary>
+        /// <param name="capturer">The capturer that began recording.</param>
+        private void OnCaptureStarted(FFmpegCameraCapturer capturer)
+        {
+            _audioRecorder.Start();
+        }
+
+        /// <summary>Waits for a pending start, then finalizes an active recording or waits for one already finalizing.</summary>
+        /// <returns>A task completing when no recording is active.</returns>
+        private async Task StopCoreAsync()
+        {
+            if (_state == RecorderState.Starting)
+            {
+                try
+                {
+                    await _startTask;
+                }
+                catch
+                {
+                    // The start caller observes this failure; nothing was recorded.
+                    return;
+                }
+            }
+            if (_state == RecorderState.Recording)
+            {
+                _finalizeTask = FinalizeAsync();
+            }
+            await _finalizeTask;
+        }
+
+        /// <summary>Stops both sources in one frame, waits for their files, and writes the output.</summary>
+        /// <returns>A task completing after the output is written and temporary files are removed.</returns>
+        private async Task FinalizeAsync()
+        {
+            _state = RecorderState.Finalizing;
+            var files = _files!;
+            var drainStop = _audioDrainStop!;
+            _files = null;
+            _audioDrainStop = null;
+            try
+            {
+                // Both sources stop in the same frame so their timelines also end together.
+                Exception? stopError = null;
+                try
+                {
+                    _audioRecorder.Stop();
+                }
+                catch (Exception error)
+                {
+                    stopError = error;
+                }
+                var videoCompletion = Task.CompletedTask;
+                try
+                {
+                    videoCompletion = _capturer.StopRecordingAsync();
+                }
+                catch (Exception error)
+                {
+                    stopError ??= error;
+                }
+                drainStop.Cancel();
+                try
+                {
+                    // Observe both tasks even if one source fails before the other has finished.
+                    await Task.WhenAll(_audioDrainTask, videoCompletion);
+                }
+                catch (Exception error)
+                {
+                    stopError ??= error;
+                }
+                if (stopError != null)
+                {
+                    ExceptionDispatchInfo.Capture(stopError).Throw();
+                }
+                await WriteOutputAsync(files);
+                DeleteTemporaryFile(files.AudioPath);
+                DeleteTemporaryFile(files.VideoPath);
+            }
+            catch
+            {
+                MajDebug.LogError(nameof(FFmpegRecorder), $"Recording finalization failed; untransferred recovery sources are retained: video={files.VideoPath}; PCM={files.AudioPath}");
+                throw;
+            }
+            finally
+            {
+                drainStop.Dispose();
+                _state = RecorderState.Idle;
+            }
+        }
+
+        /// <summary>Muxes the temporary files into a local file and moves it into the output directory.</summary>
+        /// <param name="files">The files of the finished recording.</param>
+        /// <returns>A task completing after the output has been moved.</returns>
+        private async Task WriteOutputAsync(RecordingFiles files)
+        {
+            var sampleRate = _audioRecorder.SampleRate;
+            var channels = _audioRecorder.Channels;
+            // The capture DSP sees audio before the device plays it; delaying it restores what was heard with each frame.
+            var audioDelay = _audioRecorder.PlaybackDelay;
+            var container = ContainerFormat;
+            try
+            {
+                var audioCodec = await Task.Run(() =>
+                {
+                    using (var pcm = FileSystem.File.OpenRead(files.AudioPath))
+                    using (var output = FileSystem.File.OpenWrite(files.MuxedPath))
+                    {
+                        return FFmpegMediaMuxer.Mux(files.VideoPath, pcm, sampleRate, channels, output, container, audioDelay);
+                    }
+                });
+                MoveToOutputDirectory(files.MuxedPath, files.OutputName);
+                MajDebug.LogInfo(nameof(FFmpegRecorder), $"Saved {files.OutputName} with {audioCodec ?? "no"} audio "
+                    + $"delayed by {audioDelay.TotalMilliseconds:F1} ms");
+            }
+            catch (Exception error) when (error is not OperationCanceledException)
+            {
+                DeleteTemporaryFile(files.MuxedPath);
+                MajDebug.LogError(nameof(FFmpegRecorder), $"Muxing failed; keeping the video-only capture as {files.VideoOnlyOutputName}");
+                try
+                {
+                    MoveToOutputDirectory(files.VideoPath, files.VideoOnlyOutputName);
+                }
+                catch (Exception moveError)
+                {
+                    // Keep the muxing failure as the reported error.
+                    MajDebug.LogError(nameof(FFmpegRecorder), $"Cannot keep the video-only capture: {moveError.Message}");
+                }
+                throw;
+            }
+        }
+
+        /// <summary>Copies captured audio to the PCM file until asked to stop, then drains the remainder and closes the file.</summary>
+        /// <param name="output">The PCM file, owned and closed by this worker.</param>
+        /// <param name="stopToken">Signals that the audio recorder has stopped.</param>
+        private void DrainAudio(Stream output, CancellationToken stopToken)
+        {
+            var samples = new float[Math.Max(1, _audioRecorder.SampleRate / AudioDrainBufferDivisor) * _audioRecorder.Channels];
+            using (output)
+            {
+                var waitHandle = stopToken.WaitHandle;
+                while (!stopToken.IsCancellationRequested)
+                {
+                    WriteAvailableAudio(output, samples);
+                    if (waitHandle.WaitOne(AudioDrainIntervalMilliseconds))
+                    {
+                        // Stopping is the normal exit; the final drain below collects the remaining samples.
+                        break;
+                    }
+                }
+                WriteAvailableAudio(output, samples);
+                output.Flush();
+            }
+        }
+
+        /// <summary>Writes every currently buffered audio sample as little-endian float bytes.</summary>
+        /// <param name="output">The PCM file.</param>
+        /// <param name="samples">The reusable transfer buffer.</param>
+        private void WriteAvailableAudio(Stream output, float[] samples)
+        {
+            int count;
+            while ((count = _audioRecorder.Read(samples)) > 0)
+            {
+                output.Write(MemoryMarshal.AsBytes(samples.AsSpan(0, count)));
+            }
+        }
+
+        /// <summary>Finishes any recording and releases the audio recorder.</summary>
+        /// <returns>A task completing after the audio recorder is disposed.</returns>
+        private async Task DisposeCoreAsync()
+        {
+            try
+            {
+                await StopCoreAsync();
+            }
+            finally
+            {
+                _audioRecorder.Dispose();
+            }
+        }
+
+        /// <summary>Moves a local file into the output directory, copying when the directory uses another storage backend.</summary>
+        /// <param name="sourcePath">The local file to move.</param>
+        /// <param name="outputName">The file name in the output directory.</param>
+        private static void MoveToOutputDirectory(string sourcePath, string outputName)
+        {
+            var outputDirectory = MajEnv.RecordOutputsDirectory;
+            var source = FileSystem.File.Open(sourcePath);
+            if (ReferenceEquals(source.FileSystem, outputDirectory.FileSystem))
+            {
+                FileSystem.File.Move(source.Location, outputDirectory.Location, outputName);
+            }
+            else
+            {
+                source.CopyTo(outputDirectory, outputName);
+                source.Delete();
+            }
+        }
+
+        /// <summary>Deletes a temporary file if it exists, logging instead of throwing on failure.</summary>
+        /// <param name="path">The temporary file path.</param>
+        private static void DeleteTemporaryFile(string path)
+        {
+            try
+            {
+                var file = FileSystem.File.Open(path);
+                if (file.Exists)
+                {
+                    file.Delete();
+                }
+            }
+            catch (Exception error)
+            {
+                MajDebug.LogWarning(nameof(FFmpegRecorder), $"Cannot delete temporary recording file {path}: {error.Message}");
+            }
+        }
+
+        /// <summary>Observes a fire-and-forget operation and logs its failure.</summary>
+        /// <param name="operation">The operation to observe.</param>
+        /// <param name="description">The operation name used in the log.</param>
+        /// <returns>A task that never faults.</returns>
+        private static async Task LogFailureAsync(Task operation, string description)
+        {
+            try
+            {
+                await operation;
+            }
+            catch (Exception error)
+            {
+                MajDebug.LogError(nameof(FFmpegRecorder), $"Recording {description} failed: {error}");
+            }
+        }
+
+        /// <summary>Throws when the recorder has been disposed.</summary>
+        /// <exception cref="ObjectDisposedException">The recorder has been disposed.</exception>
+        private void EnsureIsOpen()
+        {
+            if (_isDisposed)
             {
                 throw new ObjectDisposedException(nameof(FFmpegRecorder));
             }
         }
-        class WavRecorder : IDisposable
+
+        /// <summary>Holds the temporary and output names of one recording.</summary>
+        private sealed class RecordingFiles
         {
-            int _dataSize = 0;
-            bool _isRecording = false;
-            bool _isDisposed = false;
-            
-            readonly int _sampleRate;
-            readonly int _channels;
-            readonly int _bitsPerSample;
-            readonly MemoryStream _stream = new(4096 * 10_0000);
-            readonly ConcurrentQueue<Sample> _cachedSamples = new();
+            /// <summary>Gets the local Matroska file written by the capturer.</summary>
+            public string VideoPath { get; }
+            /// <summary>Gets the local raw float PCM file written by the audio worker.</summary>
+            public string AudioPath { get; }
+            /// <summary>Gets the local file receiving the muxed output before it is moved.</summary>
+            public string MuxedPath { get; }
+            /// <summary>Gets the file name of the muxed output in the output directory.</summary>
+            public string OutputName { get; }
+            /// <summary>Gets the file name used for the video-only capture when muxing fails.</summary>
+            public string VideoOnlyOutputName { get; }
 
-            public WavRecorder(int bitsPerSample)
+            /// <summary>Stores the names of one recording.</summary>
+            /// <param name="videoPath">The local capture file.</param>
+            /// <param name="audioPath">The local PCM file.</param>
+            /// <param name="muxedPath">The local muxed file.</param>
+            /// <param name="outputName">The output file name.</param>
+            /// <param name="videoOnlyOutputName">The fallback output file name.</param>
+            private RecordingFiles(string videoPath, string audioPath, string muxedPath, string outputName, string videoOnlyOutputName)
             {
-                var audioBackend = MajInstances.GameManager.Setting.Audio.Backend;
-                if (audioBackend == SoundBackendType.Wasapi)
-                {
-                    BassWasapi.GetInfo(out var wasapiInfo);
-                    _sampleRate = wasapiInfo.Frequency;
-                    _channels = wasapiInfo.Channels;
-                }
-                else if (audioBackend == SoundBackendType.Asio)
-                {
-                    _channels = BassAsio.Info.Inputs;
-                    _sampleRate = (int)BassAsio.Rate;
-                }
-                _bitsPerSample = bitsPerSample;
-            }
-
-            public void Start()
-            {
-                EnsureIsOpen();
-                if (_isRecording)
-                {
-                    return;
-                }
-                try
-                {
-                    WriteHeader();
-                    _isRecording = true;
-                    _dataSize = 0;
-                    AudioManager.OnBassProcessExtraLogic += HandleData;
-                }
-                catch (Exception e)
-                {
-                    MajDebug.LogError($"Failed to create WAV file: {e.Message}");
-                    Stop();
-                }
-            }
-            public void Stop()
-            {
-                AudioManager.OnBassProcessExtraLogic -= HandleData;
-                EnsureIsOpen();
-                WriteSampleIntoStream();
-                Finish();
-                _stream.Position = 0;
-            }
-            public void OnLateUpdate()
-            {
-                EnsureIsOpen();
-                if (!_isRecording)
-                    return;
-                WriteSampleIntoStream();
-            }
-            public void Export(Stream stream)
-            {
-                EnsureIsOpen();
-                if (_isRecording)
-                {
-                    Stop();
-                }
-                if(_dataSize == 0)
-                {
-                    return;
-                }
-                _stream.CopyTo(stream);
-            }
-            public async Task ExportAsync(Stream stream)
-            {
-                EnsureIsOpen();
-                if (_isRecording)
-                {
-                    Stop();
-                }
-                if (_dataSize == 0)
-                {
-                    return;
-                }
-                await _stream.CopyToAsync(stream);
-            }
-            public void Dispose()
-            {
-                if (_isDisposed)
-                {
-                    return;
-                }
-                AudioManager.OnBassProcessExtraLogic -= HandleData;
-                if (_isRecording)
-                {
-                    Stop();
-                }
-                _isDisposed = true;
-                _stream?.Dispose();
+                VideoPath = videoPath;
+                AudioPath = audioPath;
+                MuxedPath = muxedPath;
+                OutputName = outputName;
+                VideoOnlyOutputName = videoOnlyOutputName;
             }
 
-
-
-            void EnsureIsOpen()
+            /// <summary>Creates unique temporary paths and timestamped output names.</summary>
+            /// <param name="name">The output name prefix, possibly empty.</param>
+            /// <param name="container">The output container, which selects the extension.</param>
+            /// <returns>The names of a new recording.</returns>
+            public static RecordingFiles Create(string name, MediaContainerFormat container)
             {
-                if(_isDisposed)
-                {
-                    throw new ObjectDisposedException(nameof(WavRecorder));
-                }
+                var timestamp = $"{DateTime.Now:yyyy-MM-dd_HH_mm_ss}";
+                var baseName = string.IsNullOrWhiteSpace(name) ? timestamp : $"{SanitizeFileName(name)}_{timestamp}";
+                var extension = container == MediaContainerFormat.MP4 ? ".mp4" : ".mkv";
+                // The capturer requires a native path, which the cache-backed temporary directory always provides.
+                var tempPrefix = Path.Combine(MajEnv.TempDirectory.Location, $"record_{Guid.NewGuid():N}");
+                return new RecordingFiles(tempPrefix + ".video.mkv", tempPrefix + ".audio.pcm", tempPrefix + ".muxed" + extension,
+                    baseName + extension, baseName + "_video-only.mkv");
             }
-            void WriteSampleIntoStream()
+
+            /// <summary>Replaces characters that are invalid in file names on any target platform.</summary>
+            /// <param name="name">The requested name.</param>
+            /// <returns>The name with invalid characters replaced by underscores.</returns>
+            private static string SanitizeFileName(string name)
             {
-                lock (_cachedSamples)
+                var characters = name.Trim().ToCharArray();
+                var invalid = Path.GetInvalidFileNameChars();
+                for (var i = 0; i < characters.Length; i++)
                 {
-                    while (_cachedSamples.TryDequeue(out var sample))
+                    if (Array.IndexOf(invalid, characters[i]) >= 0 || characters[i] == ':' || characters[i] == '/' || characters[i] == '\\')
                     {
-                        using (sample)
-                        {
-                            var buffer = sample.Buffer;
-                            if (buffer.IsEmpty)
-                            {
-                                continue;
-                            }
-                            _stream.Write(buffer);
-                            _dataSize += buffer.Length;
-                        }
+                        characters[i] = '_';
                     }
                 }
-            }
-            private void WriteHeader()
-            {
-                // RIFF header
-                WriteString("RIFF");
-                WriteInt(0); // Placeholder for file size
-                WriteString("WAVE");
-
-                // fmt chunk
-                WriteString("fmt ");
-                WriteInt(16); // PCM chunk size
-                WriteShort((ushort)(_bitsPerSample == 32 ? 3 : 1)); // Audio format (3 = IEEE float)
-                WriteShort((ushort)_channels);
-                WriteInt(_sampleRate);
-                WriteInt(_sampleRate * _channels * (_bitsPerSample / 8)); // Byte rate
-                WriteShort((ushort)(_channels * (_bitsPerSample / 8))); // Block align
-                WriteShort((ushort)_bitsPerSample);
-
-                // data chunk header
-                WriteString("data");
-                WriteInt(0); // Placeholder for data size
-            }
-            private void HandleData(IntPtr buffer, int length, IntPtr user)
-            {
-                if (!_isRecording)
-                    return;
-
-                try
-                {
-                    _cachedSamples.Enqueue(new Sample(buffer, length));
-                }
-                catch (Exception e)
-                {
-                    MajDebug.LogError($"Error writing audio data: {e.Message}");
-                    Dispose();
-                }
-            }
-            private void Finish()
-            {
-                if (!_isRecording) 
-                    return;
-
-                try
-                {
-                    _isRecording = false;
-
-                    // Update RIFF size
-                    _stream.Seek(4, SeekOrigin.Begin);
-                    WriteInt(_dataSize + 36); // 36 = total header size
-
-                    // Update data chunk size
-                    _stream.Seek(40, SeekOrigin.Begin);
-                    WriteInt(_dataSize);
-                }
-                catch (Exception e)
-                {
-                    MajDebug.LogError($"Error finalizing WAV file: {e.Message}");
-                }
-            }
-            private unsafe void WriteShort(ushort value)
-            {
-                var ptr = stackalloc byte[2];
-                *(short*)ptr = (short)value;
-
-                _stream.Write(new ReadOnlySpan<byte>(ptr, 2));
-            }
-            private unsafe void WriteInt(int value)
-            {
-                var ptr = stackalloc byte[4];
-                *(int*)ptr = (int)value;
-
-                _stream.Write(BitConverter.GetBytes(value), 0, 4);
-            }
-            private void WriteString(string value)
-            {
-                _stream.Write(Encoding.ASCII.GetBytes(value), 0, value.Length);
-            }
-            struct Sample: IDisposable
-            {
-                public ReadOnlySpan<byte> Buffer
-                {
-                    get
-                    {
-                        if (_isDisposed)
-                        {
-                            throw new ObjectDisposedException(nameof(Sample));
-                        }
-                        var buffer = _buffer.AsSpan();
-                        return buffer.Slice(0, _length);
-                    }
-                }
-                bool _isDisposed;
-                readonly byte[] _buffer;
-                readonly int _length;
-                public unsafe Sample(IntPtr buffer, int length)
-                {
-                    var data = new ReadOnlySpan<byte>((void*)buffer, length);
-                    _length = length;
-                    var pooledBuffer = ArrayPool<byte>.Shared.Rent(length);
-                    data.CopyTo(pooledBuffer);
-                    _buffer = pooledBuffer;
-                    _isDisposed = false;
-                }
-                public void Dispose()
-                {
-                    if(_isDisposed)
-                    {
-                        return;
-                    }
-                    _isDisposed = true;
-                    ArrayPool<byte>.Shared.Return(_buffer);
-                }
-            }
-        }
-        class ScreenRecorder
-        {
-            public bool IsRecording { get; private set; } = false;
-
-            int _screenWidth = 1920;
-            int _screenHeight = 1080;
-            int _targetFrameRate = 60;
-
-            int _originScreenWidth = 1920;
-            int _originScreenHeight = 1080;
-            int _originFrameRate = 60;
-
-            string _exportPath = Path.Combine(MajEnv.RecordOutputsPath, $"{_defaultTimestamp}out.mp4");
-            UniTask _captureScreenTask = UniTask.CompletedTask;
-            Process? _ffmpegProcess = null;
-            NamedPipeServerStream? _pipeStream = null;
-
-            readonly AsyncLock _recodingSyncLock = new();
-            readonly static string _defaultTimestamp = $"{DateTime.UnixEpoch:yyyy-MM-dd_HH_mm_ss}";
-
-            public async UniTask StartRecordAsync(string exportPath)
-            {
-                if (IsRecording)
-                    return;
-                var task = _recodingSyncLock.LockAsync();
-                while (!task.IsCompleted)
-                {
-                    await UniTask.Yield();
-                }
-
-                using (task.Result)
-                {
-                    StartRecordInternal(exportPath);
-                }
-            }
-            public void StartRecord(string exportPath)
-            {
-                if (IsRecording)
-                    return;
-                using (_recodingSyncLock.Lock())
-                {
-                    StartRecordInternal(exportPath);
-                }
-            }
-            public async UniTask StopRecordAsync()
-            {
-                if (!IsRecording)
-                    return;
-                var task = _recodingSyncLock.LockAsync();
-                while (!task.IsCompleted)
-                {
-                    await UniTask.Yield();
-                }
-                using (task.Result)
-                {
-                    StopRecordInternal();
-                    await WaitFFmpegExitAsync();
-                }
-            }
-            public void StopRecord()
-            {
-                if (!IsRecording)
-                    return;
-                using (_recodingSyncLock.LockAsync())
-                {
-                    StopRecordInternal();
-                    WaitFFmpegExit();
-                }
-            }
-            void StartRecordInternal(string exportPath)
-            {
-                _originScreenWidth = Screen.width;
-                _originScreenHeight = Screen.height;
-                _screenWidth = _originScreenWidth;
-                _screenHeight = _originScreenHeight;
-                _originFrameRate = MajEnv.UserSettings.Rendering.FPSLimit;
-                var isForceFullScreen = Screen.fullScreen;
-                if (_screenWidth % 2 != 0)
-                    _screenWidth++;
-                if (_screenHeight % 2 != 0)
-                    _screenHeight++;
-                if (_screenWidth < 128)
-                    _screenWidth = 128;
-                if (_screenHeight < 128)
-                    _screenHeight = 128;
-                if (_originFrameRate <= 0)
-                {
-                    _targetFrameRate = 60;
-                }
-                else
-                {
-                    _targetFrameRate = _originFrameRate;
-                }
-                if(MajEnv.UserSettings.Rendering.VSync)
-                {
-                    _targetFrameRate = (int)Screen.currentResolution.refreshRateRatio.value;
-                }
-                Application.targetFrameRate = _targetFrameRate;
-                Screen.SetResolution(_screenWidth, _screenHeight, isForceFullScreen);
-                IsRecording = true;
-                _exportPath = exportPath;
-                _captureScreenTask = CaptureScreenAsync();
-            }
-            void StopRecordInternal()
-            {
-                IsRecording = false;
-                _pipeStream = CreatePipeStream();
-                Application.targetFrameRate = _originFrameRate;
-                Screen.SetResolution(_originScreenWidth, _originScreenHeight, Screen.fullScreen);
-            }
-            async Task WaitFFmpegExitAsync()
-            {
-                if (_ffmpegProcess is null || _ffmpegProcess.HasExited)
-                    return;
-                var p = _ffmpegProcess;
-                await Task.Run(() =>
-                {
-                    p.WaitForExit(2000);
-                });
-                if(!p.HasExited)
-                {
-                    p.Kill();
-                }
-            }
-            void WaitFFmpegExit()
-            {
-                if (_ffmpegProcess is null || _ffmpegProcess.HasExited)
-                    return;
-                var p = _ffmpegProcess;
-                p.WaitForExit(2000);
-                if (!p.HasExited)
-                {
-                    p.Kill();
-                }
-            }
-            async UniTask CaptureScreenAsync()
-            {
-                //var wait4EndOfFramePromise = new WaitForEndOfFrame();
-                if(_pipeStream is null)
-                {
-                    _pipeStream = CreatePipeStream();
-                }
-                var pipeServer = _pipeStream;
-                using (pipeServer)
-                {
-                    var encodeParams = GetEncodeParams();
-                    var args =
-                        $"-hide_banner -y -f rawvideo -pix_fmt rgba -s \"{_screenWidth}x{_screenHeight}\" -r {_targetFrameRate} -i \\\\.\\pipe\\MajdataPlayRec -vf \"vflip\" {encodeParams} -pix_fmt yuv420p -t \"{int.MaxValue:0.0000}\" \"{_exportPath}\"";
-                    var startinfo = new ProcessStartInfo(FFMPEG_PATH, args)
-                    {
-                        UseShellExecute = false,
-                        CreateNoWindow = true
-                    };
-                    var behaviour = MajInstances.GameManager;
-                    startinfo.EnvironmentVariables.Add("FFREPORT", "file=out.log:level=24");
-
-                    _ffmpegProcess = Process.Start(startinfo);
-                    var p = _ffmpegProcess;
-                    var task = pipeServer.WaitForConnectionAsync();
-                    while(!task.IsCompleted)
-                    {
-                        await UniTask.WaitForEndOfFrame(behaviour);
-                    }                    
-                    Texture2D lastPresentTexture;
-                    var buffer = Array.Empty<byte>();
-                    await UniTask.WaitForEndOfFrame(behaviour);
-                    using (pipeServer)
-                    {
-                        while (pipeServer.IsConnected && IsRecording && !p.HasExited)
-                        {
-                            try
-                            {
-                                var read = 0;
-
-                                Profiler.BeginSample("Capture Screenshot");
-                                lastPresentTexture = ScreenCapture.CaptureScreenshotAsTexture();
-                                Profiler.EndSample();
-                                read = ReadDataIntoBuffer(lastPresentTexture.GetRawTextureData<byte>(), ref buffer);
-                                pipeServer.Write(buffer, 0, read);
-                                lastPresentTexture.Reinitialize(0, 0);
-                            }
-                            catch
-                            {
-                                // ignore single frame catching failed
-                            }
-                            finally
-                            {
-                                await UniTask.WaitForEndOfFrame(behaviour);
-                            }
-                        }
-                    }
-                    p.WaitForExit(2000);
-                    if(!p.HasExited)
-                    {
-                        p.Kill();
-                    }
-                    MajDebug.Log("FFmpeg has exited");
-                }
-            }
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            int ReadDataIntoBuffer(ReadOnlySpan<byte> data, ref byte[] buffer)
-            {
-                if (data.Length > buffer.Length)
-                {
-                    buffer = new byte[data.Length];
-                }
-                data.CopyTo(buffer);
-                return data.Length;
-            }
-            NamedPipeServerStream CreatePipeStream()
-            {
-                if(_pipeStream is not null)
-                {
-                    _pipeStream.Dispose();
-                }
-                _pipeStream = new NamedPipeServerStream("MajdataPlayRec", PipeDirection.Out);
-                return _pipeStream;
-            }
-            string GetEncodeParams()
-            {
-                var head = "-codec:v";
-                var postfix = "";
-                var encoder = "h264";
-                var @params = "";
-                var isHWEncoder = false;
-                switch(MajEnv.UserSettings.Game.RecordEncoder)
-                {
-                    case RecordEncoder.H264:
-                        encoder = "h264";
-                        break;
-                    case RecordEncoder.HEVC:
-                        encoder = "hevc";
-                        break;
-                    case RecordEncoder.VP9:
-                        encoder = "vp9";
-                        break;
-                    case RecordEncoder.AV1:
-                        encoder = "av1";
-                        break;
-                }
-                if(MajEnv.UserSettings.Debug.EnableHWEncoder)
-                {
-                    switch (MajEnv.HWEncoder)
-                    {
-                        case HardwareEncoder.None:
-                            break;
-                        case HardwareEncoder.NVENC:
-                            if (MajEnv.UserSettings.Game.RecordEncoder == RecordEncoder.VP9)
-                            {
-                                break;
-                            }
-                            postfix = "_nvenc";
-                            isHWEncoder = true;
-                            break;
-                        case HardwareEncoder.AMF:
-                            if (MajEnv.UserSettings.Game.RecordEncoder == RecordEncoder.VP9)
-                            {
-                                break;
-                            }
-                            postfix = "_amf";
-                            isHWEncoder = true;
-                            break;
-                        case HardwareEncoder.QSV:
-                            postfix = "_qsv";
-                            isHWEncoder = true;
-                            break;
-                    }
-                }
-                if(!isHWEncoder)
-                {
-                    @params = "-preset fast";
-                }
-                return $"{head} {encoder}{postfix} {@params}";
+                return new string(characters);
             }
         }
     }
 }
-*/

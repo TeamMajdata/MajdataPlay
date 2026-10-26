@@ -1,6 +1,8 @@
 {
   "dependencies": {
+    "net.majdata.ffmpeg-autogen": "file:../ThirdParty/FFmpeg.AutoGen/Unity",
     "com.cysharp.unitask": "file:../ThirdParty/UniTask/src/UniTask/Assets/Plugins/UniTask",
+    "com.ammariqais.skiaforunity": "file:../ThirdParty/SkiaForUnity",
     "com.annulusgames.lit-motion": "https://github.com/annulusgames/LitMotion.git?path=src/LitMotion/Assets/LitMotion",
     "com.gilzoide.sqlite-net": "https://github.com/gilzoide/unity-sqlite-net.git#1.3.2",
     "com.github-glitchenzo.nugetforunity": "https://github.com/GlitchEnzo/NuGetForUnity.git?path=/src/NuGetForUnity",

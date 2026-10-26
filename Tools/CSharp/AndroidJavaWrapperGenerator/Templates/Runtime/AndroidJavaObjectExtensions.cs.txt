@@ -1,0 +1,29 @@
+using System;
+using UnityEngine;
+
+#nullable enable
+
+namespace __ROOT_NAMESPACE__
+{
+    /// <summary>Provides checked conversion of Unity Java references to generated Java wrappers.</summary>
+    public static class AndroidJavaObjectExtensions
+    {
+        /// <summary>Adopts or borrows a Unity reference after checking the requested wrapper's Java type.</summary>
+        /// <typeparam name="TWrapper">The concrete generated wrapper type.</typeparam>
+        /// <param name="javaReference">The live Unity reference, or null.</param>
+        /// <param name="ownsReference">Whether to transfer ownership, including cleanup after failed conversion.</param>
+        /// <returns>The typed wrapper, or null when the supplied reference is null.</returns>
+        /// <exception cref="InvalidCastException">The Java object is not assignable to the requested Java type.</exception>
+        /// <exception cref="InvalidOperationException">No generated wrapper factory is available.</exception>
+        /// <exception cref="ObjectDisposedException">The Unity reference has been disposed.</exception>
+        /// <exception cref="PlatformNotSupportedException">A non-null reference is converted outside Android.</exception>
+        /// <exception cref="AndroidJavaException">Unity cannot resolve the requested Java class.</exception>
+        /// <exception cref="JavaInvocationException">Java raises an exception during the type check.</exception>
+        /// <exception cref="AggregateException">Conversion and owned-reference cleanup both fail.</exception>
+        public static TWrapper? ToWrapper<TWrapper>(this AndroidJavaObject? javaReference, bool ownsReference = true)
+            where TWrapper : class, IJavaObject
+        {
+            return JavaWrapperConverter.ToWrapper<TWrapper>(javaReference, ownsReference);
+        }
+    }
+}

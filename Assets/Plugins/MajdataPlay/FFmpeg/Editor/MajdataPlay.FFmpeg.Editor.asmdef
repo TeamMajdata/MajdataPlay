@@ -1,0 +1,19 @@
+{
+    "name": "MajdataPlay.FFmpeg.Editor",
+    "rootNamespace": "MajdataPlay.FFmpeg.Editor",
+    "references": [
+        "FFmpeg.AutoGen",
+        "MajdataPlay.FFmpeg"
+    ],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

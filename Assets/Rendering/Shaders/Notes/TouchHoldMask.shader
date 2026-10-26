@@ -25,7 +25,7 @@ Shader "Maj/Notes/TouchHoldMask"
             #pragma vertex vert
             #pragma fragment frag
             #pragma multi_compile_instancing 
-            #include "Assets/Rendering/MajRenderPipeline/Library/MajCore.hlsl"
+            #include "Assets/Plugins/MajdataPlay/Rendering/RenderPipelines/MajRenderPipeline/Library/MajCore.hlsl"
 
             // 保留原径向遮罩的角度精度与边缘计算。
             static const float MAJ_MASK_PI = 3.14159265359f;

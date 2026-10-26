@@ -5,7 +5,9 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 using MajdataPlay.Settings;
+using MajdataPlay.Scenes.Game.Parsing;
 
+#nullable enable
 namespace MajdataPlay.Utils
 {
     public static class SimaiMirror
@@ -199,7 +201,62 @@ namespace MajdataPlay.Utils
             return resultString.ToString();
         }
 
+        /// <summary>
+        /// Mirrors one part of the chart: a note, or same-head slides joined by <c>*</c>. In slides written as slide code
+        /// (the part contains <c>K</c>) the slide code commands are moved with <see cref="SlideCodeShape"/>; everything
+        /// else is mirrored with the key maps.
+        /// </summary>
+        /// <param name="str">The part, including whitespace and the separator that ends it.</param>
+        /// <param name="type">The mirror option.</param>
+        /// <returns>The mirrored part.</returns>
         private static string NoteMirrorPart(string str, MirrorOption type)
+        {
+            if (!str.Contains('K'))
+            {
+                return SimaiMirrorPart(str, type);
+            }
+            if (!TryGetRotoreflection(type, out var isMirrored, out var rotation))
+            {
+                return str;
+            }
+
+            // slide code 的 P/Q 和圆编号不能按键位逐字符映射，所以 slide code 交给 SlideCodeShape 移动；
+            // 起点键位、标记、时长以及与 slide code 连接的 simai 星星（如 1bA357K1>1[1:1] 的 >1）仍按键位映射
+            var result = new StringBuilder(str.Length);
+            var simaiStart = 0;
+            var isInBracket = false;
+            var i = 0;
+            while (i < str.Length)
+            {
+                var c = str[i];
+                if (!isInBracket && Array.IndexOf(SlideCodeParser.CommandChars, c) >= 0)
+                {
+                    result.Append(SimaiMirrorPart(str.Substring(simaiStart, i - simaiStart), type));
+                    i = AppendMovedSlideCode(result, str, i, isMirrored, rotation);
+                    simaiStart = i;
+                    continue;
+                }
+
+                if (c == '[')
+                {
+                    isInBracket = true;
+                }
+                else if (c == ']')
+                {
+                    isInBracket = false;
+                }
+                i++;
+            }
+            result.Append(SimaiMirrorPart(str.Substring(simaiStart), type));
+
+            return result.ToString();
+        }
+
+        /// <summary>Mirrors simai note text character by character with the key maps of the option.</summary>
+        /// <param name="str">The note text.</param>
+        /// <param name="type">The mirror option.</param>
+        /// <returns>The mirrored note text.</returns>
+        private static string SimaiMirrorPart(string str, MirrorOption type)
         {
             switch (type)
             {
@@ -212,6 +269,105 @@ namespace MajdataPlay.Utils
             }
 
             return str;
+        }
+
+        /// <summary>
+        /// Appends the commands of a slide code, for example <c>P3K6</c> of <c>1P3K6[8:1]</c>, each moved by
+        /// <see cref="SlideCodeShape"/>. Shorthand such as <c>P33</c>, note flags and whitespace keep their places.
+        /// </summary>
+        /// <param name="result">Receives the moved commands.</param>
+        /// <param name="str">The text that contains the slide code.</param>
+        /// <param name="start">The index of the first command letter; the start key before it is not part of the commands.</param>
+        /// <param name="isMirrored">Whether the commands are mirrored about the line through key 1, the centre and key 5 first.</param>
+        /// <param name="rotation">The clockwise rotation, in keys, applied after the mirror.</param>
+        /// <returns>
+        /// The index after the commands: after the key that follows <c>K</c>, or at the <c>[</c> or <c>*</c> that ends a
+        /// code without <c>K</c>.
+        /// </returns>
+        private static int AppendMovedSlideCode(StringBuilder result, string str, int start, bool isMirrored, int rotation)
+        {
+            // start 处是命令字母，它会先设置命令类型
+            var commandType = SlideCodeParser.CommandType.Invalid;
+            for (var i = start; i < str.Length; i++)
+            {
+                var c = str[i];
+                if (c == '[' || c == '*')
+                {
+                    return i;
+                }
+
+                var commandIndex = Array.IndexOf(SlideCodeParser.CommandChars, c);
+                if (commandIndex >= 0)
+                {
+                    commandType = (SlideCodeParser.CommandType)commandIndex;
+                    // 命令字母只取决于命令类型，与数值无关：镜像时 P（逆时针）和 Q（顺时针）互换
+                    var movedType = MoveCommand(new SlideCodeParser.Command(commandType, 0), isMirrored, rotation).Type;
+                    result.Append(SlideCodeParser.CommandChars[(int)movedType]);
+                    continue;
+                }
+
+                var value = SlideCodeParser.TryParseDigit(c);
+                if (value < 0)
+                {
+                    // 标记和空白字符
+                    result.Append(c);
+                    continue;
+                }
+
+                // 简写（如 P33）中的每个数字都是一条命令
+                var moved = MoveCommand(new SlideCodeParser.Command(commandType, value), isMirrored, rotation);
+                result.Append((char)('0' + moved.Value));
+                if (commandType == SlideCodeParser.CommandType.NodeEnd)
+                {
+                    return i + 1;
+                }
+            }
+
+            return str.Length;
+        }
+
+        /// <summary>
+        /// Gets how a mirror option moves the keys, as a mirror about the line through key 1, the centre and key 5 followed
+        /// by a clockwise rotation, the form that
+        /// <see cref="MajdataPlay.Scenes.Game.Parsing.Slide.ParametricSlidePath.SetRotoreflection"/> takes.
+        /// </summary>
+        /// <param name="type">The mirror option.</param>
+        /// <param name="isMirrored">Receives whether the keys are mirrored about the key 1 axis.</param>
+        /// <param name="rotation">Receives the clockwise rotation, in keys, applied after the mirror.</param>
+        /// <returns><see langword="true"/> when the option moves the keys; <see langword="false"/> for <see cref="MirrorOption.Off"/>.</returns>
+        private static bool TryGetRotoreflection(MirrorOption type, out bool isMirrored, out int rotation)
+        {
+            switch (type)
+            {
+                case MirrorOption.LRMirror:
+                    // 与 MIRROR_LEFT_RIGHT_MAP（k → 9 - k）一致：关于 1 键轴镜像（k → 2 - k，按 8 取模）后逆时针转一个键位
+                    isMirrored = true;
+                    rotation = -1;
+                    return true;
+                case MirrorOption.UDMirror:
+                    // 与 MIRROR_UPSIDE_DOWN_MAP（k → 5 - k，按 8 取模）一致：关于 1 键轴镜像后顺时针转三个键位
+                    isMirrored = true;
+                    rotation = 3;
+                    return true;
+                default:
+                    isMirrored = false;
+                    rotation = 0;
+                    return false;
+            }
+        }
+
+        /// <summary>Moves a slide code command by an optional mirror about the key 1 axis and a clockwise rotation.</summary>
+        /// <param name="command">The command.</param>
+        /// <param name="isMirrored">Whether to mirror the command about the line through key 1, the centre and key 5 first.</param>
+        /// <param name="rotation">The clockwise rotation, in keys, applied after the mirror.</param>
+        /// <returns>The moved command.</returns>
+        private static SlideCodeParser.Command MoveCommand(SlideCodeParser.Command command, bool isMirrored, int rotation)
+        {
+            if (isMirrored)
+            {
+                command = SlideCodeShape.Mirror(command);
+            }
+            return SlideCodeShape.Rotate(command, rotation);
         }
 
         private static string NormalMirrorPart(string str, Dictionary<char, char> normalMap, Dictionary<char, char> specialMap, HashSet<char> specialPrefix)

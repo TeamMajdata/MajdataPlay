@@ -1,4 +1,5 @@
 ﻿using MajdataPlay.Settings.OptionEnumerators;
+using MajdataPlay.Settings.Runtime;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -20,10 +21,11 @@ namespace MajdataPlay.Settings
         public float AudioOffset { get; set; } = 0f;
         [Preserve]
         [Step("0.05")]
-        [Range("-2", "2", HasMax = true, HasMin = true)]
+        [Range("-2", "2")]
         public float TrackVolumeOffset { get; set; } = 0f;
         public bool DisableVideoBG { get; set; } = false;
         [Optional]
+        [UseTranslation(TranslationTarget.OptionValue)]
         public bool? SlideSkipping { get; set; } = null;
     }
 }

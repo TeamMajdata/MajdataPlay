@@ -1,8 +1,9 @@
-﻿using Cysharp.Threading.Tasks;
+using Cysharp.Threading.Tasks;
 using MajdataPlay.Buffers;
 
 using MajdataPlay.Diagnostics;
 using MajdataPlay.Drawing;
+using MajdataPlay.IO.Storage;
 using MajdataPlay.Rendering;
 using System;
 using System.Collections.Generic;
@@ -165,7 +166,8 @@ namespace MajdataPlay.Scenes.Game.Notes.Skins
         static readonly Sprite _dummySprite = SpriteLoader.EmptySprite;
 
         bool _canUnload = true;
-        readonly string _path = string.Empty;
+        /// <summary>The skin collection directory, or null for the built-in empty skin.</summary>
+        readonly StorageDirectory? _directory;
         readonly SemaphoreSlim _loadSyncLock = new(1, 1);
         private Texture2D? _atlasTexture;
 
@@ -309,12 +311,34 @@ namespace MajdataPlay.Scenes.Game.Notes.Skins
             Array.Fill(EachLines, _dummySprite);
         }
 
+        /// <summary>Creates a skin named after an existing skin collection directory.</summary>
+        /// <param name="skinCollectionPath">The skin collection directory location on any backend.</param>
+        /// <param name="loadIntoMemory">Whether to load every sprite synchronously now.</param>
+        /// <exception cref="DirectoryNotFoundException">The location does not denote an existing directory.</exception>
         public CustomSkin(string skinCollectionPath, bool loadIntoMemory) :
-            this(new DirectoryInfo(skinCollectionPath).Name, skinCollectionPath, loadIntoMemory)
+            this(FileSystem.Directory.Open(skinCollectionPath), loadIntoMemory)
         { }
-        public CustomSkin(string name, string skinCollectionPath, bool loadIntoMemory) : this(name)
+        /// <summary>Creates a skin with an explicit name from a skin collection directory.</summary>
+        /// <param name="name">The displayed skin name.</param>
+        /// <param name="skinCollectionPath">The skin collection directory location on any backend.</param>
+        /// <param name="loadIntoMemory">Whether to load every sprite synchronously now.</param>
+        public CustomSkin(string name, string skinCollectionPath, bool loadIntoMemory) :
+            this(name, FileSystem.Directory.Open(skinCollectionPath), loadIntoMemory)
+        { }
+        /// <summary>Creates a skin named after an existing skin collection directory handle.</summary>
+        /// <param name="directory">The skin collection directory on any backend.</param>
+        /// <param name="loadIntoMemory">Whether to load every sprite synchronously now.</param>
+        /// <exception cref="DirectoryNotFoundException">The handle does not denote an existing directory.</exception>
+        CustomSkin(StorageDirectory directory, bool loadIntoMemory) :
+            this(RequireName(directory), directory, loadIntoMemory)
+        { }
+        /// <summary>Creates a skin whose sprites are resolved through a skin collection directory handle.</summary>
+        /// <param name="name">The displayed skin name.</param>
+        /// <param name="directory">The skin collection directory on any backend.</param>
+        /// <param name="loadIntoMemory">Whether to load every sprite synchronously now.</param>
+        CustomSkin(string name, StorageDirectory directory, bool loadIntoMemory) : this(name)
         {
-            _path = skinCollectionPath;
+            _directory = directory;
 
             if (loadIntoMemory)
             {
@@ -322,15 +346,35 @@ namespace MajdataPlay.Scenes.Game.Notes.Skins
             }
         }
 
+        /// <summary>Creates an unloaded skin from an existing skin collection directory.</summary>
+        /// <param name="skinCollectionPath">The skin collection directory location on any backend.</param>
+        /// <returns>A skin named after the directory, loaded on demand.</returns>
+        /// <exception cref="DirectoryNotFoundException">The location does not denote an existing directory.</exception>
         public static CustomSkin Create(string skinCollectionPath)
         {
-            var dirInfo = new DirectoryInfo(skinCollectionPath);
-            if (!dirInfo.Exists)
-            {
-                throw new DirectoryNotFoundException($"The skin collection path '{skinCollectionPath}' does not exist.");
-            }
+            return new CustomSkin(FileSystem.Directory.Open(skinCollectionPath), false);
+        }
 
-            return new CustomSkin(dirInfo.Name, skinCollectionPath, false);
+        /// <summary>Reads the backend-reported name of an existing skin collection directory.</summary>
+        /// <param name="directory">The skin collection directory on any backend.</param>
+        /// <returns>The directory's authoritative display name.</returns>
+        /// <exception cref="DirectoryNotFoundException">The handle does not denote an existing directory.</exception>
+        static string RequireName(StorageDirectory directory)
+        {
+            var entry = directory.Entry;
+            if (entry is null || !entry.IsDirectory)
+            {
+                throw new DirectoryNotFoundException($"The skin collection path '{directory.Location}' does not exist.");
+            }
+            return entry.Name;
+        }
+
+        /// <summary>Gets the skin collection directory of a loadable skin.</summary>
+        /// <returns>The skin collection directory handle.</returns>
+        /// <exception cref="InvalidOperationException">The built-in empty skin has no skin collection directory.</exception>
+        StorageDirectory RequireDirectory()
+        {
+            return _directory ?? throw new InvalidOperationException("The built-in empty skin has no skin collection directory.");
         }
 
         public async UniTask LoadAsync(CancellationToken token = default)
@@ -522,12 +566,13 @@ namespace MajdataPlay.Scenes.Game.Notes.Skins
 
         private async UniTask PerformLoadAsync()
         {
-            IsOutlineAvailable = File.Exists($"{_path}/outline.png");
+            var directory = RequireDirectory();
+            IsOutlineAvailable = directory.FindFile("outline.png") is not null;
 
             SubDisplay = await LoadSpriteDirectAsync("SubBackgourd.png");
             LoadingSplash = await LoadSpriteDirectAsync("now_loading.png");
 
-            var builder = new AtlasBuilder(_path, SpriteOutlineSnap, SpriteOutlineDetail, SpriteAlphaTolerance);
+            var builder = new AtlasBuilder(directory, SpriteOutlineSnap, SpriteOutlineDetail, SpriteAlphaTolerance);
             QueueAtlasElements(builder);
 
             _atlasTexture = await builder.BuildAndAssignAsync();
@@ -539,12 +584,13 @@ namespace MajdataPlay.Scenes.Game.Notes.Skins
 
         private void PerformLoad()
         {
-            IsOutlineAvailable = File.Exists($"{_path}/outline.png");
+            var directory = RequireDirectory();
+            IsOutlineAvailable = directory.FindFile("outline.png") is not null;
 
             SubDisplay = LoadSpriteDirectSync("SubBackgourd.png");
             LoadingSplash = LoadSpriteDirectSync("now_loading.png");
 
-            var builder = new AtlasBuilder(_path, SpriteOutlineSnap, SpriteOutlineDetail, SpriteAlphaTolerance);
+            var builder = new AtlasBuilder(directory, SpriteOutlineSnap, SpriteOutlineDetail, SpriteAlphaTolerance);
             QueueAtlasElements(builder);
 
             _atlasTexture = builder.BuildAndAssign();
@@ -722,40 +768,79 @@ namespace MajdataPlay.Scenes.Game.Notes.Skins
 
         // --- 直接加载独立的图片 ---
 
+        /// <summary>
+        /// Loads an image outside the atlas, reading and decoding it on the thread pool.
+        /// </summary>
+        /// <param name="subPath">The image path relative to the skin directory.</param>
+        /// <returns>The outlined sprite, or null when the file is missing or cannot be decoded.</returns>
+        /// <exception cref="IOException">Reading the file failed.</exception>
         private async UniTask<Sprite?> LoadSpriteDirectAsync(string subPath)
         {
-            var fullPath = Path.Combine(_path, subPath);
-            if (!File.Exists(fullPath)) return null;
+            var file = RequireDirectory().FindFileAt(subPath);
+            if (file is null)
+            {
+                return null;
+            }
 
-            byte[] data = await File.ReadAllBytesAsync(fullPath);
-
-            // Keep pixels readable until the custom outline has been generated.
-            var tex = await TextureLoader.LoadFromMemoryAsync(data, false);
+            await UniTask.SwitchToThreadPool();
+            using var image = DecodeIndependent(file, subPath);
             await UniTask.SwitchToMainThread();
-            if (tex == null) return null;
-
-            return CreateIndependentSprite(tex, subPath);
+            return image is null ? null : CreateIndependentSprite(image, subPath);
         }
 
+        /// <summary>
+        /// Loads an image outside the atlas on the calling (main) thread.
+        /// </summary>
+        /// <param name="subPath">The image path relative to the skin directory.</param>
+        /// <returns>The outlined sprite, or null when the file is missing or cannot be decoded.</returns>
+        /// <exception cref="IOException">Reading the file failed.</exception>
         private Sprite? LoadSpriteDirectSync(string subPath)
         {
-            var fullPath = Path.Combine(_path, subPath);
-            if (!File.Exists(fullPath)) return null;
+            var file = RequireDirectory().FindFileAt(subPath);
+            if (file is null)
+            {
+                return null;
+            }
 
-            byte[] data = File.ReadAllBytes(fullPath);
-            var tex = TextureLoader.LoadFromMemory(data, false);
-            if (tex == null) return null;
-
-            return CreateIndependentSprite(tex, subPath);
+            using var image = DecodeIndependent(file, subPath);
+            return image is null ? null : CreateIndependentSprite(image, subPath);
         }
 
-        private static Sprite CreateIndependentSprite(Texture2D texture, string name)
+        /// <summary>
+        /// Reads and decodes an image into native memory. Safe off the main thread.
+        /// </summary>
+        /// <param name="file">The image file.</param>
+        /// <param name="subPath">The image path, for diagnostics.</param>
+        /// <returns>The decoded pixels, or null when the image cannot be decoded.</returns>
+        /// <exception cref="IOException">Reading the file failed.</exception>
+        private static DecodedImage? DecodeIndependent(StorageFile file, string subPath)
         {
+            using var encoded = EncodedImage.Open(file);
+            var image = encoded.Decode();
+            if (image is null)
+            {
+                MajDebug.LogWarning(nameof(CustomSkin), $"Skin image '{subPath}' could not be decoded; it is left unassigned.");
+            }
+            return image;
+        }
+
+        /// <summary>
+        /// Uploads decoded pixels to their own texture and creates an outlined sprite from them.
+        /// </summary>
+        /// <param name="image">The decoded pixels.</param>
+        /// <param name="name">The sprite name.</param>
+        /// <returns>The sprite, which owns its non-readable texture.</returns>
+        private static Sprite CreateIndependentSprite(DecodedImage image, string name)
+        {
+            // Keep the texture readable until the custom outline has been installed.
+            var texture = image.ToTexture2D(false);
             Sprite? sprite = null;
             try
             {
+                // The outline reads the native decoded pixels; no texture data is copied to the managed heap.
                 sprite = AtlasBuilder.CreateOutlinedSprite(texture,
-                    new Rect(0, 0, texture.width, texture.height), texture, name, default,
+                    new Rect(0, 0, texture.width, texture.height), image.Pixels,
+                    image.Width, image.Height, name, default,
                     SpriteOutlineSnap, SpriteOutlineDetail, SpriteAlphaTolerance);
                 texture.Apply(updateMipmaps: false, makeNoLongerReadable: true);
                 return sprite;
@@ -803,21 +888,49 @@ namespace MajdataPlay.Scenes.Game.Notes.Skins
     }
 
     /// <summary>
-    /// 使用 TextureLoader 支持全异步与内存优化的图集构建器
+    /// Builds one sprite atlas from a skin directory with bounded memory: image headers are read first so that the
+    /// atlas is allocated once at its final size, then the sources are decoded and copied into it one at a time.
+    /// Peak memory is the atlas plus a single decoded source, independent of the number of sources.
     /// </summary>
     public class AtlasBuilder
     {
         private struct SpriteTask
         {
-            public string FullPath;
+            public string SubPath;
             public Action<Sprite?> Assigner;
             public Vector4 Border;
         }
 
+        /// <summary>
+        /// Pairs a queued sprite with its file and, once read, its encoded bytes in native memory.
+        /// </summary>
+        private struct AtlasSource
+        {
+            /// <summary>
+            /// The queued sprite.
+            /// </summary>
+            public SpriteTask Task;
+
+            /// <summary>
+            /// The source file.
+            /// </summary>
+            public StorageFile File;
+
+            /// <summary>
+            /// The encoded image with its header dimensions, or null before it is read.
+            /// </summary>
+            public EncodedImage? Image;
+        }
+
+        /// <summary>
+        /// Holds the transparent gap between packed sprites, in atlas pixels.
+        /// </summary>
+        private const int AtlasPadding = 2;
+
         private readonly List<SpriteTask> _tasks = new();
         private readonly List<Sprite> _sprites = new();
         internal IEnumerable<Sprite> Sprites => _sprites;
-        private readonly string _basePath;
+        private readonly StorageDirectory _directory;
         private readonly float _outlineSnap;
         private readonly float _outlineDetail;
         private readonly byte _alphaTolerance;
@@ -826,9 +939,10 @@ namespace MajdataPlay.Scenes.Game.Notes.Skins
         /// <param name="outlineDetail">Detail in [0, 1]; higher values retain more vertices.
         /// This is a runtime approximation, not Unity Editor's internal outline algorithm.</param>
         /// <param name="alphaTolerance">Pixels with alpha at or below this value are transparent.</param>
-        public AtlasBuilder(string basePath, float outlineSnap = 1f, float outlineDetail = 1f, byte alphaTolerance = 0)
+        /// <param name="directory">The skin collection directory whose relative sprite paths are resolved through its backend.</param>
+        public AtlasBuilder(StorageDirectory directory, float outlineSnap = 1f, float outlineDetail = 1f, byte alphaTolerance = 0)
         {
-            _basePath = basePath;
+            _directory = directory;
             _outlineSnap = Mathf.Max(0f, outlineSnap);
             _outlineDetail = Mathf.Clamp01(outlineDetail);
             _alphaTolerance = alphaTolerance;
@@ -839,89 +953,310 @@ namespace MajdataPlay.Scenes.Game.Notes.Skins
         {
             _tasks.Add(new SpriteTask
             {
-                FullPath = Path.Combine(_basePath, subPath),
+                SubPath = subPath,
                 Assigner = assigner,
                 Border = border
             });
         }
 
         /// <summary>
-        /// 全异步流程：异步读取IO -> 异步解析图像 -> 主线程打包图集
+        /// Builds the atlas and assigns every queued sprite. File reads and decoding run on the thread pool;
+        /// atlas writes and sprite creation run on the main thread.
         /// </summary>
+        /// <returns>The atlas shared by the assigned sprites, or null when no queued image could be read.</returns>
+        /// <exception cref="InvalidOperationException">The images cannot be packed within the device's texture limit.</exception>
+        /// <exception cref="IOException">Reading a source file failed.</exception>
         public async UniTask<Texture2D?> BuildAndAssignAsync()
         {
-            using var textures = new PooledList<Texture2D>(_tasks.Count);
-            using var validTasks = new PooledList<SpriteTask>(_tasks.Count);
-
-            foreach (var task in _tasks)
+            await UniTask.SwitchToMainThread();
+            using var candidates = FindSources();
+            try
             {
-                if (!File.Exists(task.FullPath))
+                await UniTask.SwitchToThreadPool();
+                OpenSources(candidates);
+                await UniTask.SwitchToMainThread();
+                using var sources = SelectReadableSources(candidates);
+                if (sources.Count == 0)
                 {
-                    task.Assigner(null);
-                    continue;
+                    return null;
                 }
 
-                byte[] data = await File.ReadAllBytesAsync(task.FullPath);
-                // 必须为 false：PackTextures 需要读取图片的 CPU 像素数据
-                Texture2D? tex = await TextureLoader.LoadFromMemoryAsync(data, false);
-
-                if (tex != null)
+                var layout = CreateLayout(sources);
+                var atlas = CreateAtlas(layout);
+                try
                 {
-                    textures.Add(tex);
-                    validTasks.Add(task);
+                    for (var i = 0; i < sources.Count; i++)
+                    {
+                        await UniTask.SwitchToThreadPool();
+                        using var image = DecodeSource(sources[i]);
+                        await UniTask.SwitchToMainThread();
+                        PlaceSource(atlas, layout[i], sources[i], image);
+                    }
+                    return CompleteAtlas(atlas);
                 }
-                else
+                catch
                 {
-                    task.Assigner(null);
+                    // A decode failure surfaces on the thread pool; Unity objects are destroyed on the main thread.
+                    await UniTask.SwitchToMainThread();
+                    DestroyPartialAtlas(atlas);
+                    throw;
                 }
             }
-
-            // PackTextures 只能在主线程执行
-            await UniTask.SwitchToMainThread();
-            return ExecutePack(textures, validTasks);
+            finally
+            {
+                CloseSources(candidates);
+            }
         }
 
         /// <summary>
-        /// 兼容同步构造函数的同步流程
+        /// Builds the atlas and assigns every queued sprite on the calling (main) thread.
         /// </summary>
+        /// <returns>The atlas shared by the assigned sprites, or null when no queued image could be read.</returns>
+        /// <exception cref="InvalidOperationException">The images cannot be packed within the device's texture limit.</exception>
+        /// <exception cref="IOException">Reading a source file failed.</exception>
         public Texture2D? BuildAndAssign()
         {
-            using var textures = new PooledList<Texture2D>(_tasks.Count);
-            using var validTasks = new PooledList<SpriteTask>(_tasks.Count);
+            using var candidates = FindSources();
+            try
+            {
+                OpenSources(candidates);
+                using var sources = SelectReadableSources(candidates);
+                if (sources.Count == 0)
+                {
+                    return null;
+                }
 
+                var layout = CreateLayout(sources);
+                var atlas = CreateAtlas(layout);
+                try
+                {
+                    for (var i = 0; i < sources.Count; i++)
+                    {
+                        using var image = DecodeSource(sources[i]);
+                        PlaceSource(atlas, layout[i], sources[i], image);
+                    }
+                    return CompleteAtlas(atlas);
+                }
+                catch
+                {
+                    DestroyPartialAtlas(atlas);
+                    throw;
+                }
+            }
+            finally
+            {
+                CloseSources(candidates);
+            }
+        }
+
+        /// <summary>
+        /// Resolves every queued path, assigning null to sprites whose file does not exist.
+        /// </summary>
+        /// <returns>The existing sources, not yet read.</returns>
+        private PooledList<AtlasSource> FindSources()
+        {
+            _sprites.Clear();
+            var sources = new PooledList<AtlasSource>(_tasks.Count);
             foreach (var task in _tasks)
             {
-                if (!File.Exists(task.FullPath))
+                var file = _directory.FindFileAt(task.SubPath);
+                if (file is null)
                 {
                     task.Assigner(null);
                     continue;
                 }
-
-                byte[] data = File.ReadAllBytes(task.FullPath);
-                Texture2D? tex = TextureLoader.LoadFromMemory(data, false);
-
-                if (tex != null)
-                {
-                    textures.Add(tex);
-                    validTasks.Add(task);
-                }
-                else
-                {
-                    task.Assigner(null);
-                }
+                sources.Add(new AtlasSource { Task = task, File = file });
             }
-
-            return ExecutePack(textures, validTasks);
+            return sources;
         }
 
-        internal static Sprite CreateOutlinedSprite(Texture2D texture, Rect rect, Texture2D source,
-    string name, Vector4 border, float snap, float detail, byte alphaTolerance)
+        /// <summary>
+        /// Reads each source's encoded bytes into native memory and its header dimensions,
+        /// without decoding pixels. Each file is opened once for the whole build. Safe off the main thread.
+        /// </summary>
+        /// <param name="sources">The sources to update in place.</param>
+        /// <exception cref="IOException">Reading a source file failed; sources read so far remain open for <see cref="CloseSources"/>.</exception>
+        private static void OpenSources(PooledList<AtlasSource> sources)
         {
-            // Preserve the source's world size when PackTextures downsizes it.
+            for (var i = 0; i < sources.Count; i++)
+            {
+                var source = sources[i];
+                source.Image = EncodedImage.Open(source.File);
+                sources[i] = source;
+            }
+        }
+
+        /// <summary>
+        /// Releases every source's encoded bytes. Safe to call more than once and off the main thread.
+        /// </summary>
+        /// <param name="sources">The sources to release.</param>
+        private static void CloseSources(PooledList<AtlasSource> sources)
+        {
+            foreach (var source in sources)
+            {
+                source.Image?.Dispose();
+            }
+        }
+
+        /// <summary>
+        /// Keeps the sources with supported headers, assigning null to the others.
+        /// </summary>
+        /// <param name="candidates">The sources after their headers were read.</param>
+        /// <returns>The sources to pack.</returns>
+        private static PooledList<AtlasSource> SelectReadableSources(PooledList<AtlasSource> candidates)
+        {
+            var sources = new PooledList<AtlasSource>(candidates.Count);
+            foreach (var source in candidates)
+            {
+                if (source.Image is { IsSupported: true })
+                {
+                    sources.Add(source);
+                    continue;
+                }
+                MajDebug.LogWarning(nameof(AtlasBuilder), $"Skin image '{source.Task.SubPath}' is not a supported image; it is left unassigned.");
+                source.Task.Assigner(null);
+            }
+            return sources;
+        }
+
+        /// <summary>
+        /// Lays out the sources within the device's texture limit.
+        /// </summary>
+        /// <param name="sources">The sources with supported headers.</param>
+        /// <returns>The layout, with slots in source order.</returns>
+        /// <exception cref="InvalidOperationException">The sources cannot be packed.</exception>
+        private static AtlasLayout CreateLayout(PooledList<AtlasSource> sources)
+        {
+            using var sizes = new PooledList<(int Width, int Height)>(sources.Count);
+            foreach (var source in sources)
+            {
+                sizes.Add((source.Image!.Width, source.Image.Height));
+            }
+            var maximumAtlasSize = Math.Min(8192, SystemInfo.maxTextureSize);
+            var layout = AtlasLayout.Create(sizes, AtlasPadding, maximumAtlasSize);
+            if (layout.Scale < 1.0)
+            {
+                MajDebug.LogWarning(nameof(AtlasBuilder), $"Skin images exceed a {maximumAtlasSize}-pixel atlas; scaling them by {layout.Scale:F3}.");
+            }
+            return layout;
+        }
+
+        /// <summary>
+        /// Allocates the atlas at its final size with a transparent base level.
+        /// </summary>
+        /// <param name="layout">The layout that determines the atlas size.</param>
+        /// <returns>A readable RGBA32 atlas with a full mipmap chain.</returns>
+        private static unsafe Texture2D CreateAtlas(AtlasLayout layout)
+        {
+            // Skip Unity's own initialization; only the base level is read before Apply regenerates the mipmaps.
+            var atlas = new Texture2D(layout.Width, layout.Height, TextureFormat.RGBA32, -1, false, true);
+            var pixels = atlas.GetPixelData<Color32>(0);
+            UnsafeUtility.MemClear(pixels.GetUnsafePtr(), (long)pixels.Length * UnsafeUtility.SizeOf<Color32>());
+            return atlas;
+        }
+
+        /// <summary>
+        /// Decodes one source and releases its encoded bytes. Safe off the main thread.
+        /// </summary>
+        /// <param name="source">The source to decode.</param>
+        /// <returns>The decoded pixels, or null when the image is corrupt.</returns>
+        private static DecodedImage? DecodeSource(AtlasSource source)
+        {
+            using var encoded = source.Image!;
+            return encoded.Decode();
+        }
+
+        /// <summary>
+        /// Copies one decoded source into its slot and assigns its sprite.
+        /// </summary>
+        /// <param name="atlas">The readable atlas.</param>
+        /// <param name="slot">The source's slot in the atlas.</param>
+        /// <param name="source">The queued source.</param>
+        /// <param name="image">The decoded source, or null when decoding failed.</param>
+        private void PlaceSource(Texture2D atlas, AtlasSlot slot, AtlasSource source, DecodedImage? image)
+        {
+            if (image is null)
+            {
+                MajDebug.LogWarning(nameof(AtlasBuilder), $"Skin image '{source.Task.SubPath}' could not be decoded; it is left unassigned.");
+                source.Task.Assigner(null);
+                return;
+            }
+
+            var sourcePixels = image.Pixels;
+            new CopyToAtlasJob
+            {
+                Source = sourcePixels,
+                SourceWidth = image.Width,
+                SourceHeight = image.Height,
+                Atlas = atlas.GetPixelData<Color32>(0),
+                AtlasWidth = atlas.width,
+                X = slot.X,
+                Y = slot.Y,
+                Width = slot.Width,
+                Height = slot.Height
+            }.Schedule(slot.Height, 16).Complete();
+
+            var rect = new Rect(slot.X, slot.Y, slot.Width, slot.Height);
+            var scaleX = rect.width / image.Width;
+            var scaleY = rect.height / image.Height;
+            var sourceBorder = source.Task.Border;
+            var border = new Vector4(sourceBorder.x * scaleX, sourceBorder.y * scaleY,
+                sourceBorder.z * scaleX, sourceBorder.w * scaleY);
+            var sprite = CreateOutlinedSprite(atlas, rect, sourcePixels, image.Width, image.Height,
+                source.Task.SubPath, border, _outlineSnap, _outlineDetail, _alphaTolerance);
+            source.Task.Assigner(sprite);
+            _sprites.Add(sprite);
+        }
+
+        /// <summary>
+        /// Generates the mipmaps, uploads the atlas and releases its CPU copy.
+        /// </summary>
+        /// <param name="atlas">The filled atlas.</param>
+        /// <returns>The same atlas, now non-readable.</returns>
+        private static Texture2D CompleteAtlas(Texture2D atlas)
+        {
+            // The atlas stays readable until every sprite and custom mesh exists.
+            atlas.Apply(updateMipmaps: true, makeNoLongerReadable: true);
+            return atlas;
+        }
+
+        /// <summary>
+        /// Releases the sprites created so far and the atlas after a failed build.
+        /// </summary>
+        /// <param name="atlas">The partially filled atlas.</param>
+        private void DestroyPartialAtlas(Texture2D atlas)
+        {
+            foreach (var sprite in _sprites)
+            {
+                UnityEngine.Object.DestroyImmediate(sprite, true);
+            }
+            _sprites.Clear();
+            UnityEngine.Object.DestroyImmediate(atlas, true);
+        }
+
+        /// <summary>
+        /// Creates a sprite on an atlas region with a custom outline mesh computed from the source pixels.
+        /// </summary>
+        /// <param name="texture">The texture the sprite samples.</param>
+        /// <param name="rect">The sprite's region in <paramref name="texture"/>.</param>
+        /// <param name="sourcePixels">The unscaled source pixels, row 0 being the bottom row.</param>
+        /// <param name="sourceWidth">The source width in pixels.</param>
+        /// <param name="sourceHeight">The source height in pixels.</param>
+        /// <param name="name">The sprite name.</param>
+        /// <param name="border">The nine-slice border in atlas pixels.</param>
+        /// <param name="snap">The outline grid size in source pixels.</param>
+        /// <param name="detail">The outline detail in [0, 1].</param>
+        /// <param name="alphaTolerance">Pixels with alpha at or below this value are transparent.</param>
+        /// <returns>The outlined sprite.</returns>
+        /// <exception cref="ArgumentException">The source dimensions do not match the pixels.</exception>
+        internal static Sprite CreateOutlinedSprite(Texture2D texture, Rect rect, NativeArray<Color32> sourcePixels,
+            int sourceWidth, int sourceHeight, string name, Vector4 border, float snap, float detail, byte alphaTolerance)
+        {
+            // Preserve the source's world size when the atlas downsizes it.
             // Use the longer axis to minimize pixel-rounding error on thin textures.
-            var packedScale = source.width >= source.height
-                ? rect.width / source.width
-                : rect.height / source.height;
+            var packedScale = sourceWidth >= sourceHeight
+                ? rect.width / sourceWidth
+                : rect.height / sourceHeight;
             var pixelsPerUnit = 100f * packedScale;
             // Polygon is an editor import mode, not a runtime SpriteMeshType.
             // Tight supplies the initial mesh; OverrideGeometry installs our polygon mesh.
@@ -930,7 +1265,7 @@ namespace MajdataPlay.Scenes.Game.Notes.Skins
             try
             {
                 sprite.name = name;
-                ApplyCustomOutline(sprite, source, snap, detail, alphaTolerance);
+                ApplyCustomOutline(sprite, sourcePixels, sourceWidth, sourceHeight, snap, detail, alphaTolerance);
                 return sprite;
             }
             catch
@@ -940,11 +1275,12 @@ namespace MajdataPlay.Scenes.Game.Notes.Skins
             }
         }
 
-        private static void ApplyCustomOutline(Sprite sprite, Texture2D source, float snap, float detail, byte alphaTolerance)
+        private static void ApplyCustomOutline(Sprite sprite, NativeArray<Color32> sourcePixels, int sourceWidth, int sourceHeight,
+            float snap, float detail, byte alphaTolerance)
         {
             using var points = new NativeList<float2>(128, Allocator.TempJob);
             using var outlines = new NativeList<int2>(16, Allocator.TempJob);
-            var complete = BuildOutlines(source.GetPixelData<Color32>(0), source.width, source.height,
+            var complete = BuildOutlines(sourcePixels, sourceWidth, sourceHeight,
                 snap, detail, alphaTolerance, points, outlines);
             if (complete && outlines.Length == 0)
             {
@@ -965,13 +1301,13 @@ namespace MajdataPlay.Scenes.Game.Notes.Skins
             }
 
             // OverrideGeometry uses rect-local pixels, NOT pivot-relative world units.
-            // Scale for PackTextures resizing; never add the atlas rect's position.
+            // Scale for atlas resizing; never add the atlas rect's position.
             var size = sprite.rect.size;
             for (var i = 0; i < vertices.Length; i++)
             {
                 vertices[i] = new Vector2(
-                    Mathf.Clamp01(vertices[i].x / source.width) * size.x,
-                    Mathf.Clamp01(vertices[i].y / source.height) * size.y);
+                    Mathf.Clamp01(vertices[i].x / sourceWidth) * size.x,
+                    Mathf.Clamp01(vertices[i].y / sourceHeight) * size.y);
             }
             sprite.OverrideGeometry(vertices, triangles);
         }
@@ -983,9 +1319,10 @@ namespace MajdataPlay.Scenes.Game.Notes.Skins
             if (width <= 0 || height <= 0 || pixels.Length < pixelCount)
                 throw new ArgumentException("Invalid sprite pixel dimensions.");
 
-            // Four directed boundary bits per pixel, plus one completion byte. The
-            // rental may be dirty; Execute overwrites EVERY used byte before reading.
-            using var edges = Pool<byte>.Rent(checked(pixelCount + 1));
+            // Four directed boundary bits per pixel, plus one completion byte, in native memory
+            // so large sprites do not allocate on the managed heap. The buffer is uninitialized;
+            // Execute overwrites EVERY used byte before reading.
+            using var edges = new NativeArray<byte>(checked(pixelCount + 1), Allocator.TempJob, NativeArrayOptions.UninitializedMemory);
             using var loop = new NativeList<float2>(128, Allocator.TempJob);
             using var cleaned = new NativeList<float2>(128, Allocator.TempJob);
             using var snapped = new NativeList<float2>(128, Allocator.TempJob);
@@ -993,30 +1330,28 @@ namespace MajdataPlay.Scenes.Game.Notes.Skins
             using var keep = new NativeList<byte>(128, Allocator.TempJob);
             using var pending = new NativeList<int2>(32, Allocator.TempJob);
 
-            // Run is deliberately synchronous: no job may outlive the fixed block,
-            // the rented array, or the texture-owned pixel view. Do not Schedule this.
-            fixed (byte* edgeBits = edges.AsArray())
+            // Run is deliberately synchronous: no job may outlive the edge buffer
+            // or the caller-owned pixel view. Do not Schedule this.
+            var edgeBits = (byte*)edges.GetUnsafePtr();
+            new OutlineJob
             {
-                new OutlineJob
-                {
-                    Pixels = pixels,
-                    Width = width,
-                    Height = height,
-                    Snap = snap,
-                    Tolerance = 4f * (1f - Mathf.Clamp01(detail)),
-                    AlphaTolerance = alphaTolerance,
-                    EdgeBits = edgeBits,
-                    Points = points,
-                    Outlines = outlines,
-                    Loop = loop,
-                    Cleaned = cleaned,
-                    Snapped = snapped,
-                    Simplified = simplified,
-                    Keep = keep,
-                    Pending = pending
-                }.Run();
-                return edgeBits[pixelCount] == 1;
-            }
+                Pixels = pixels,
+                Width = width,
+                Height = height,
+                Snap = snap,
+                Tolerance = 4f * (1f - Mathf.Clamp01(detail)),
+                AlphaTolerance = alphaTolerance,
+                EdgeBits = edgeBits,
+                Points = points,
+                Outlines = outlines,
+                Loop = loop,
+                Cleaned = cleaned,
+                Snapped = snapped,
+                Simplified = simplified,
+                Keep = keep,
+                Pending = pending
+            }.Run();
+            return edgeBits[pixelCount] == 1;
         }
 
         [BurstCompile(FloatMode = FloatMode.Strict)]
@@ -1289,6 +1624,14 @@ namespace MajdataPlay.Scenes.Game.Notes.Skins
             if (vertexCount < 3 || vertexCount > ushort.MaxValue || indexCount == 0 || indexCount > int.MaxValue)
                 return false;
 
+            if (geometry.Count == 1)
+            {
+                // A single part already has exact-size arrays with part-relative indices; use them without copying.
+                vertices = geometry[0].Vertices;
+                triangles = geometry[0].Indices;
+                return true;
+            }
+
             // Allocate the final exact-size arrays once, without intermediate Lists
             // or ToArray copies. OverrideGeometry also consumes the full array lengths.
             vertices = new Vector2[(int)vertexCount];
@@ -1305,141 +1648,103 @@ namespace MajdataPlay.Scenes.Game.Notes.Skins
             return true;
         }
 
-
-
-
-
-
         /// <summary>
-        /// Packs and assigns sprites on the main thread within the active graphics device's texture limit.
+        /// Copies one source image into its atlas slot, resampling bilinearly when the slot is smaller.
+        /// Each index writes one slot row, so parallel rows never overlap.
         /// </summary>
-        /// <param name="textures">Readable source textures, released after packing.</param>
-        /// <param name="validTasks">Assignment tasks corresponding to the source textures.</param>
-        /// <returns>The packed atlas, or null when there are no source textures.</returns>
-        private Texture2D? ExecutePack(PooledList<Texture2D> textures, PooledList<SpriteTask> validTasks)
-        {
-            _sprites.Clear();
-            if (textures.Count == 0)
-            {
-                return null;
-            }
-
-            var maximumAtlasSize = Math.Min(8192, SystemInfo.maxTextureSize);
-            var longestSide = maximumAtlasSize;
-            foreach (var texture in textures)
-                longestSide = Math.Max(longestSide, Math.Max(texture.width, texture.height));
-            // If any input exceeds the limit, resize the entire set by the same ratio.
-            var resizeScale = (float)maximumAtlasSize / longestSide;
-            // PackTextures resizes the atlas; avoid allocating the maximum size before packing.
-            var atlas = new Texture2D(2, 2);
-            var packingTextures = textures.ToArray();
-            Rect[] rects;
-            try
-            {
-                for (var i = 0; i < packingTextures.Length; i++)
-                    packingTextures[i] = ResizeForAtlas(textures[i], resizeScale);
-                rects = atlas.PackTextures(packingTextures, 2, maximumAtlasSize);
-            }
-            catch
-            {
-                UnityEngine.Object.DestroyImmediate(atlas, true);
-                throw;
-            }
-            finally
-            {
-                for (var i = 0; i < packingTextures.Length; i++)
-                    if (packingTextures[i] != textures[i])
-                        UnityEngine.Object.DestroyImmediate(packingTextures[i], true);
-            }
-
-            // Keep the atlas readable until all Tight sprites and custom meshes exist.
-
-
-
-            for (int i = 0; i < rects.Length; i++)
-            {
-                Rect uv = rects[i];
-                Rect pixelRect = new Rect(
-                    uv.x * atlas.width,
-                    uv.y * atlas.height,
-                    uv.width * atlas.width,
-                    uv.height * atlas.height
-                );
-
-                var scaleX = pixelRect.width / textures[i].width;
-                var scaleY = pixelRect.height / textures[i].height;
-                var sourceBorder = validTasks[i].Border;
-                var border = new Vector4(sourceBorder.x * scaleX, sourceBorder.y * scaleY,
-                    sourceBorder.z * scaleX, sourceBorder.w * scaleY);
-                var sprite = CreateOutlinedSprite(atlas, pixelRect, textures[i], validTasks[i].FullPath,
-                    border, _outlineSnap, _outlineDetail, _alphaTolerance);
-                validTasks[i].Assigner(sprite);
-                _sprites.Add(sprite);
-            }
-
-            atlas.Apply(updateMipmaps: false, makeNoLongerReadable: true);
-            foreach (var t in textures)
-            {
-                UnityEngine.Object.DestroyImmediate(t, true);
-            }
-
-            return atlas;
-        }
-
-        private static Texture2D ResizeForAtlas(Texture2D source, float scale)
-        {
-            if (scale >= 1f) return source;
-
-            // PackTextures clamps oversized axes independently. Resize uniformly first
-            // so a device's texture limit cannot change the sprite's aspect ratio.
-            var width = Math.Max(1, Mathf.RoundToInt(source.width * scale));
-            var height = Math.Max(1, Mathf.RoundToInt(source.height * scale));
-            if (width == source.width && height == source.height) return source;
-            var resized = new Texture2D(width, height, TextureFormat.RGBA32, false);
-            try
-            {
-                new ResizeTextureJob
-                {
-                    Source = source.GetPixelData<Color32>(0),
-                    Destination = resized.GetPixelData<Color32>(0),
-                    SourceWidth = source.width,
-                    SourceHeight = source.height,
-                    Width = width,
-                    Height = height
-                }.Schedule(width * height, 64).Complete();
-                resized.Apply(updateMipmaps: false, makeNoLongerReadable: false);
-                return resized;
-            }
-            catch
-            {
-                UnityEngine.Object.DestroyImmediate(resized, true);
-                throw;
-            }
-        }
-
         [BurstCompile(FloatMode = FloatMode.Strict)]
-        private struct ResizeTextureJob : IJobParallelFor
+        private struct CopyToAtlasJob : IJobParallelFor
         {
-            [ReadOnly] public NativeArray<Color32> Source;
-            [WriteOnly] public NativeArray<Color32> Destination;
-            public int SourceWidth, SourceHeight, Width, Height;
+            /// <summary>
+            /// The source pixels, row 0 being the bottom row.
+            /// </summary>
+            [ReadOnly]
+            public NativeArray<Color32> Source;
 
-            public void Execute(int index)
+            /// <summary>
+            /// The atlas base level, row 0 being the bottom row.
+            /// </summary>
+            [WriteOnly]
+            [NativeDisableParallelForRestriction]
+            public NativeArray<Color32> Atlas;
+
+            /// <summary>
+            /// The source width in pixels.
+            /// </summary>
+            public int SourceWidth;
+
+            /// <summary>
+            /// The source height in pixels.
+            /// </summary>
+            public int SourceHeight;
+
+            /// <summary>
+            /// The atlas width in pixels.
+            /// </summary>
+            public int AtlasWidth;
+
+            /// <summary>
+            /// The slot's left edge in atlas pixels.
+            /// </summary>
+            public int X;
+
+            /// <summary>
+            /// The slot's bottom edge in atlas pixels.
+            /// </summary>
+            public int Y;
+
+            /// <summary>
+            /// The slot width in atlas pixels.
+            /// </summary>
+            public int Width;
+
+            /// <summary>
+            /// The slot height in atlas pixels.
+            /// </summary>
+            public int Height;
+
+            /// <summary>
+            /// Writes one slot row.
+            /// </summary>
+            /// <param name="row">The slot row, counted from the slot's bottom edge.</param>
+            public void Execute(int row)
             {
-                var position = (new float2(index % Width, index / Width) + 0.5f)
-                    * new float2((float)SourceWidth / Width, (float)SourceHeight / Height) - 0.5f;
-                var lower = (int2)math.floor(position);
-                var upper = math.min(lower + 1, new int2(SourceWidth - 1, SourceHeight - 1));
-                var fraction = math.frac(position);
-                var bottom = math.lerp(ToFloat(Source[lower.y * SourceWidth + lower.x]),
-                    ToFloat(Source[lower.y * SourceWidth + upper.x]), fraction.x);
-                var top = math.lerp(ToFloat(Source[upper.y * SourceWidth + lower.x]),
-                    ToFloat(Source[upper.y * SourceWidth + upper.x]), fraction.x);
-                var color = math.round(math.lerp(bottom, top, fraction.y));
-                Destination[index] = new Color32((byte)color.x, (byte)color.y, (byte)color.z, (byte)color.w);
+                var destination = (Y + row) * AtlasWidth + X;
+                if (Width == SourceWidth && Height == SourceHeight)
+                {
+                    var source = row * SourceWidth;
+                    for (var x = 0; x < Width; x++)
+                    {
+                        Atlas[destination + x] = Source[source + x];
+                    }
+                    return;
+                }
+
+                var ratio = new float2((float)SourceWidth / Width, (float)SourceHeight / Height);
+                for (var x = 0; x < Width; x++)
+                {
+                    var position = (new float2(x, row) + 0.5f) * ratio - 0.5f;
+                    var lower = math.max((int2)math.floor(position), int2.zero);
+                    var upper = math.min(lower + 1, new int2(SourceWidth - 1, SourceHeight - 1));
+                    var fraction = math.saturate(position - lower);
+                    var bottom = math.lerp(ToFloat(Source[lower.y * SourceWidth + lower.x]),
+                        ToFloat(Source[lower.y * SourceWidth + upper.x]), fraction.x);
+                    var top = math.lerp(ToFloat(Source[upper.y * SourceWidth + lower.x]),
+                        ToFloat(Source[upper.y * SourceWidth + upper.x]), fraction.x);
+                    var color = math.round(math.lerp(bottom, top, fraction.y));
+                    Atlas[destination + x] = new Color32((byte)color.x, (byte)color.y, (byte)color.z, (byte)color.w);
+                }
             }
 
-            private static float4 ToFloat(Color32 color) => new float4(color.r, color.g, color.b, color.a);
+            /// <summary>
+            /// Widens a colour for interpolation.
+            /// </summary>
+            /// <param name="color">The colour.</param>
+            /// <returns>The channels as floats in [0, 255].</returns>
+            private static float4 ToFloat(Color32 color)
+            {
+                return new float4(color.r, color.g, color.b, color.a);
+            }
         }
     }
 }

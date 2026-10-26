@@ -959,10 +959,6 @@ PrefabInstance:
       propertyPath: m_SortingLayerID
       value: 1199593265
       objectReference: {fileID: 0}
-    - target: {fileID: 307026145555316282, guid: 37bdf9fbdeb38224783acd28ed56b012, type: 3}
-      propertyPath: m_OverrideSorting
-      value: 1
-      objectReference: {fileID: 0}
     - target: {fileID: 4485814405497562604, guid: 37bdf9fbdeb38224783acd28ed56b012, type: 3}
       propertyPath: m_Pivot.x
       value: 0
@@ -1047,10 +1043,6 @@ PrefabInstance:
       propertyPath: m_SortingLayerID
       value: -711869039
       objectReference: {fileID: 0}
-    - target: {fileID: 5182002033360230505, guid: 37bdf9fbdeb38224783acd28ed56b012, type: 3}
-      propertyPath: m_OverrideSorting
-      value: 1
-      objectReference: {fileID: 0}
     - target: {fileID: 7565134130864407949, guid: 37bdf9fbdeb38224783acd28ed56b012, type: 3}
       propertyPath: m_Color.b
       value: 0
@@ -1087,17 +1079,9 @@ PrefabInstance:
       propertyPath: m_Camera
       value: 
       objectReference: {fileID: 189424105}
-    - target: {fileID: 8350591977979412089, guid: 37bdf9fbdeb38224783acd28ed56b012, type: 3}
-      propertyPath: m_RenderMode
-      value: 1
-      objectReference: {fileID: 0}
     - target: {fileID: 8393004949030024863, guid: 37bdf9fbdeb38224783acd28ed56b012, type: 3}
       propertyPath: m_SortingLayerID
       value: 2124158571
-      objectReference: {fileID: 0}
-    - target: {fileID: 8393004949030024863, guid: 37bdf9fbdeb38224783acd28ed56b012, type: 3}
-      propertyPath: m_OverrideSorting
-      value: 1
       objectReference: {fileID: 0}
     - target: {fileID: 8442623165532972581, guid: 37bdf9fbdeb38224783acd28ed56b012, type: 3}
       propertyPath: CoverBigDisplayer
@@ -1242,8 +1226,8 @@ MonoBehaviour:
   _loading: {fileID: 962216817}
   _hintTextObject: {fileID: 579125878}
   _hintText: {fileID: 579125880}
-  ErrorColor: {r: 1, g: 0.23137255, b: 0.23137255, a: 1}
-  SucceedColor: {r: 0.39607844, g: 0.972549, b: 0, a: 1}
+  _errorColor: {r: 1, g: 0.23137255, b: 0.23137255, a: 1}
+  _succeedColor: {r: 0.39607844, g: 0.972549, b: 0, a: 1}
 --- !u!224 &388100773
 RectTransform:
   m_ObjectHideFlags: 0

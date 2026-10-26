@@ -34,7 +34,7 @@ Shader "Maj/Common/BrightnessAdjust"
             #pragma multi_compile_instancing
 
             // 显式使用 MRP 的矩阵与实例化声明，避免 CGPROGRAM 自动注入 Built-in 变量。
-            #include "Assets/Rendering/MajRenderPipeline/Library/MajCore.hlsl"
+            #include "Assets/Plugins/MajdataPlay/Rendering/RenderPipelines/MajRenderPipeline/Library/MajCore.hlsl"
 
             struct appdata_t
             {

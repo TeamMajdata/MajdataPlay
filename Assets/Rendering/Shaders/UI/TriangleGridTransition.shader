@@ -58,7 +58,7 @@ Shader "Maj/UI/Majdata Triangle Grid Transition"
             #pragma target 3.0
             #pragma multi_compile_local _ UNITY_UI_ALPHACLIP
 
-            #include "Assets/Rendering/MajRenderPipeline/Library/MajCore.hlsl"
+            #include "Assets/Plugins/MajdataPlay/Rendering/RenderPipelines/MajRenderPipeline/Library/MajCore.hlsl"
 
             struct appdata_t
             {

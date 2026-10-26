@@ -2,7 +2,6 @@
 using System;
 using System.Collections.Generic;
 using System.Text;
-using Unity.VisualScripting;
 using UnityEditor;
 using UnityEngine;
 using UnityEngine.Profiling;
@@ -147,7 +146,7 @@ namespace MajdataPlay.Editor.Windows
                 {
                     cache = new AnimatorCache()
                     {
-                        Monitor = animator.GetOrAddComponent<AnimatorMonitor>(),
+                        Monitor = animator.TryGetComponent<AnimatorMonitor>(out var existingMonitor) ? existingMonitor : animator.gameObject.AddComponent<AnimatorMonitor>(),
                         GameObject = animator.gameObject,
                         Transform = animator.transform
                     };

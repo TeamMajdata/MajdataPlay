@@ -411,10 +411,6 @@ PrefabInstance:
       propertyPath: m_SortingLayerID
       value: 1199593265
       objectReference: {fileID: 0}
-    - target: {fileID: 307026145555316282, guid: 37bdf9fbdeb38224783acd28ed56b012, type: 3}
-      propertyPath: m_OverrideSorting
-      value: 1
-      objectReference: {fileID: 0}
     - target: {fileID: 4485814405497562604, guid: 37bdf9fbdeb38224783acd28ed56b012, type: 3}
       propertyPath: m_Pivot.x
       value: 0
@@ -498,10 +494,6 @@ PrefabInstance:
     - target: {fileID: 5182002033360230505, guid: 37bdf9fbdeb38224783acd28ed56b012, type: 3}
       propertyPath: m_SortingLayerID
       value: -711869039
-      objectReference: {fileID: 0}
-    - target: {fileID: 5182002033360230505, guid: 37bdf9fbdeb38224783acd28ed56b012, type: 3}
-      propertyPath: m_OverrideSorting
-      value: 1
       objectReference: {fileID: 0}
     - target: {fileID: 7565134130864407949, guid: 37bdf9fbdeb38224783acd28ed56b012, type: 3}
       propertyPath: m_Color.b
@@ -1151,7 +1143,6 @@ GameObject:
   - component: {fileID: 1127180456}
   - component: {fileID: 1127180458}
   - component: {fileID: 1127180455}
-  - component: {fileID: 1127180457}
   m_Layer: 5
   m_Name: Main_Display
   m_TagString: Untagged
@@ -1225,39 +1216,6 @@ CanvasRenderer:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 1127180453}
   m_CullTransparentMesh: 1
---- !u!114 &1127180457
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1127180453}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: e4b176ff446f80b488686f76d54d6e09, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
-  _basePosY: 0
-  _originalPosY: 0
-  _parentRt: {fileID: 0}
-  _screenHeight: 1920
-  _screenWidth: 1080
-  _canvasScaleFactor: 1
-  _lastMainDisplayOffset: NaN
-  _lastMainDisplayScale: NaN
-  _lastSubDisplayOffset: NaN
-  _lastSubDisplayScale: NaN
-  _lastTransformDisplay: 0
-  _cachedScreenCenterY: 0
-  _canvasScaler: {fileID: 0}
-  _baseReferenceResolution: {x: 0, y: 0}
-  _subCover: {fileID: 0}
-  _subCoverTransform: {fileID: 0}
-  _subCoverRectTransform: {fileID: 0}
-  _subCoverBottom: {fileID: 0}
-  _subCoverBottomTransform: {fileID: 0}
-  _subCoverBottomRectTransform: {fileID: 0}
-  _subDisplay: {fileID: 0}
 --- !u!223 &1127180458
 Canvas:
   m_ObjectHideFlags: 0
@@ -1272,7 +1230,7 @@ Canvas:
   m_PlaneDistance: 100
   m_PixelPerfect: 0
   m_ReceivesEvents: 1
-  m_OverrideSorting: 1
+  m_OverrideSorting: 0
   m_OverridePixelPerfect: 0
   m_SortingBucketNormalizedSize: 0
   m_VertexColorAlwaysGammaSpace: 0

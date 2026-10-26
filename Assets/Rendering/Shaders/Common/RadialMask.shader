@@ -35,7 +35,7 @@ Shader "Maj/Common/RadialMask"
             #pragma vertex vert
             #pragma fragment frag
             #pragma multi_compile_instancing 
-            #include "Assets/Rendering/MajRenderPipeline/Library/MajCore.hlsl"
+            #include "Assets/Plugins/MajdataPlay/Rendering/RenderPipelines/MajRenderPipeline/Library/MajCore.hlsl"
 
             // 与原 UnityCG 的 PI 保持相同精度；角度计算继续用 float，避免细边缘抖动。
             static const float MAJ_MASK_PI = 3.14159265359f;

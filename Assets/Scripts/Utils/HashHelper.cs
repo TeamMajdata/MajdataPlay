@@ -53,29 +53,34 @@ namespace MajdataPlay.Utils
             return Convert.ToBase64String(hash);
         }
 
+        // The synchronous overloads hash on the calling thread. Blocking on the async overloads would deadlock the
+        // main thread, because their continuations resume on Unity's synchronization context.
         public static byte[] ComputeHash(byte[] data)
         {
-            return ComputeHashAsync(data).Result;
+            using var md5 = MD5.Create();
+            return md5.ComputeHash(data);
         }
         public static byte[] ComputeHash(byte[] data, int offset, int count)
         {
-            return ComputeHashAsync(data, offset, count).Result;
+            using var md5 = MD5.Create();
+            return md5.ComputeHash(data, offset, count);
         }
         public static byte[] ComputeHash(Stream inputStream)
         {
-            return ComputeHashAsync(inputStream).Result;
+            using var md5 = MD5.Create();
+            return md5.ComputeHash(inputStream);
         }
         public static string ComputeHashAsBase64String(byte[] data)
         {
-            return ComputeHashAsBase64StringAsync(data).Result;
+            return Convert.ToBase64String(ComputeHash(data));
         }
         public static string ComputeHashAsBase64String(byte[] data, int offset, int count)
         {
-            return ComputeHashAsBase64StringAsync(data, offset, count).Result;
+            return Convert.ToBase64String(ComputeHash(data, offset, count));
         }
         public static string ComputeHashAsBase64String(Stream inputStream)
         {
-            return ComputeHashAsBase64StringAsync(inputStream).Result;
+            return Convert.ToBase64String(ComputeHash(inputStream));
         }
 
         public static string ToHexString(byte[] hash) => BitConverter.ToString(hash);

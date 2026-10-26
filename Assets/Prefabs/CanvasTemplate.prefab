@@ -11,7 +11,6 @@ GameObject:
   - component: {fileID: 8053637610791840999}
   - component: {fileID: 1133653314586614399}
   - component: {fileID: 8393004949030024863}
-  - component: {fileID: 2116093767782935674}
   m_Layer: 5
   m_Name: Main_Display
   m_TagString: Untagged
@@ -69,39 +68,6 @@ Canvas:
   m_SortingLayerID: 0
   m_SortingOrder: 0
   m_TargetDisplay: 0
---- !u!114 &2116093767782935674
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 5205452559665588105}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: e4b176ff446f80b488686f76d54d6e09, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
-  _basePosY: 0
-  _originalPosY: 0
-  _parentRt: {fileID: 0}
-  _screenHeight: 1920
-  _screenWidth: 1080
-  _canvasScaleFactor: 1
-  _lastMainDisplayOffset: NaN
-  _lastMainDisplayScale: NaN
-  _lastSubDisplayOffset: NaN
-  _lastSubDisplayScale: NaN
-  _lastTransformDisplay: 0
-  _cachedScreenCenterY: 0
-  _canvasScaler: {fileID: 0}
-  _baseReferenceResolution: {x: 0, y: 0}
-  _subCover: {fileID: 0}
-  _subCoverTransform: {fileID: 0}
-  _subCoverRectTransform: {fileID: 0}
-  _subCoverBottom: {fileID: 0}
-  _subCoverBottomTransform: {fileID: 0}
-  _subCoverBottomRectTransform: {fileID: 0}
-  _subDisplay: {fileID: 0}
 --- !u!1 &6663982196746428825
 GameObject:
   m_ObjectHideFlags: 0
@@ -183,7 +149,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: fe87c0e1cc204ed48ad3b37840f39efc, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  m_Material: {fileID: 2100000, guid: 78a3c5eb06624f448a0238577d1de902, type: 2}
+  m_Material: {fileID: 2100000, guid: 1b12dc9204227dc42bb2fc6a3075a021, type: 2}
   m_Color: {r: 0, g: 0, b: 0, a: 1}
   m_RaycastTarget: 1
   m_RaycastPadding: {x: 0, y: 0, z: 0, w: 0}
@@ -282,6 +248,7 @@ GameObject:
   - component: {fileID: 2831381290939742984}
   - component: {fileID: 1131959240587113175}
   - component: {fileID: 4875952154813158424}
+  - component: {fileID: 6142739085517203841}
   m_Layer: 5
   m_Name: CanvasTemplate
   m_TagString: Untagged
@@ -387,6 +354,19 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 8f22683a1392b4049ab7a46b5c1da278, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::MajdataPlay.UI.CanvasConfigurator
+--- !u!114 &6142739085517203841
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 7942307277902318624}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 1b04a7b56be54212abc39bfd9d22717f, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  _mainDisplayFollowers: []
 --- !u!1 &8706002990538471679
 GameObject:
   m_ObjectHideFlags: 0
@@ -468,7 +448,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: fe87c0e1cc204ed48ad3b37840f39efc, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  m_Material: {fileID: 2100000, guid: 78a3c5eb06624f448a0238577d1de902, type: 2}
+  m_Material: {fileID: 2100000, guid: 1b12dc9204227dc42bb2fc6a3075a021, type: 2}
   m_Color: {r: 0, g: 0, b: 0, a: 1}
   m_RaycastTarget: 1
   m_RaycastPadding: {x: 0, y: 0, z: 0, w: 0}

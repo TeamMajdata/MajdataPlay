@@ -327,7 +327,6 @@ namespace MajdataPlay.Scenes.List
         }
         void UpdateListConfiguration()
         {
-            _listConfig.SelectedDir = _listDesiredPos;
             _listConfig.SelectedDirGuid = _currentCollection.Id;
         }
         void UpdateCollectionIcon()
@@ -532,25 +531,34 @@ namespace MajdataPlay.Scenes.List
                 _utageSortedCollections = newCollections;
             }
         }
+        /// <summary>Restores the visible selection while retaining saved identities when their content is unavailable.</summary>
         void RestoreContextFromConfiguration()
         {
             var selectedCollectionUUID = _listConfig.SelectedDirGuid;
             var selectedSongHash = _listConfig.SelectedSongHash;
-            var index = Array.FindIndex(_collections, x => x.Id == selectedCollectionUUID);
-            if(index == -1)
+            try
             {
-                index = 0;
+                var index = Array.FindIndex(_collections, x => x.Id == selectedCollectionUUID);
+                if (index == -1)
+                {
+                    index = 0;
+                }
+                SlideListTo(index, true, true);
+                SlideToDifficulty((int)_listConfig.SelectedDiff);
+                if (string.IsNullOrEmpty(selectedSongHash))
+                {
+                    _coverListManager.SlideListToHead();
+                }
+                else
+                {
+                    _coverListManager.SetCursor(selectedSongHash, true, true);
+                }
             }
-            SlideListTo(index, true, true);
-            SlideToDifficulty((int)_listConfig.SelectedDiff);
-            if(string.IsNullOrEmpty(selectedSongHash))
+            finally
             {
-                _coverListManager.SlideListToHead();
+                _listConfig.SelectedDirGuid = selectedCollectionUUID;
+                _listConfig.SelectedSongHash = selectedSongHash;
             }
-            else
-            {
-                _coverListManager.SetCursor(selectedSongHash, true, true);
-            }            
         }
 
         Vector2 GetDisplayerPositionFromDelta(float delta)

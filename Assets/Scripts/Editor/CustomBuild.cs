@@ -3,6 +3,10 @@ using System.Linq;
 using System;
 using UnityEditor;
 using UnityEditor.Build.Reporting;
+#if UNITY_STANDALONE_OSX
+using UnityEditor.Build;
+using UnityEditor.OSXStandalone;
+#endif
 
 namespace MajdataPlay.Editor
 {
@@ -88,6 +92,11 @@ namespace MajdataPlay.Editor
                     }
                 case BuildTarget.StandaloneOSX:
                     PlayerSettings.SetScriptingBackend(BuildTargetGroup.Standalone, ScriptingImplementation.Mono2x);
+                    if (options.TryGetValue("macOSArchitecture", out var macOSArchitecture) &&
+                        !string.IsNullOrEmpty(macOSArchitecture))
+                    {
+                        ApplyMacOSArchitecture(macOSArchitecture);
+                    }
                     break;
             }
 
@@ -101,6 +110,29 @@ namespace MajdataPlay.Editor
             buildSubtarget = (int)buildSubtargetValue;
 #endif
             return (buildTarget, buildSubtarget, options["customBuildPath"]);
+        }
+
+        /// <summary>
+        /// Sets the CPU architecture of the macOS player.
+        /// Only the ARM64 native plugins (FFmpeg, libcurl) are enabled for the macOS player;
+        /// their x86_64 copies are Editor-only, so an Intel or Universal player would lack them.
+        /// </summary>
+        /// <param name="value">A <c>UnityEditor.Build.OSArchitecture</c> name, such as <c>ARM64</c>.</param>
+        private static void ApplyMacOSArchitecture(string value)
+        {
+#if UNITY_STANDALONE_OSX
+            if (!Enum.TryParse(value, true, out OSArchitecture architecture))
+            {
+                Console.WriteLine($"{value} is not a defined {nameof(OSArchitecture)}");
+                EditorApplication.Exit(140);
+                return;
+            }
+            UserBuildSettings.architecture = architecture;
+            Console.WriteLine($"macOS architecture set to {architecture}.");
+#else
+            Console.WriteLine("-macOSArchitecture requires the macOS build target to be active.");
+            EditorApplication.Exit(141);
+#endif
         }
 
         private static Dictionary<string, string> GetValidatedOptions()

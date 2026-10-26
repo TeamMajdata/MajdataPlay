@@ -452,11 +452,11 @@ namespace MajdataPlay.Scenes.Result
             _isInited = true;
             CabinetLed.SetButtonLight(Color.yellow, 4);
             var t1 = _scoreSaveTask;
-            if (RecordHelper.IsEnabled)
+            if (Recorder.IsEnabled)
             {
                 await UniTask.Delay(3000);
             }
-            var t2 = RecordHelper.StopRecordAsync();
+            var t2 = Recorder.StopRecordAsync();
             while (!t1.IsCompleted || !t2.IsCompleted)
             {
                 await UniTask.Yield();

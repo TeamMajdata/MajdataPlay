@@ -1187,7 +1187,6 @@ GameObject:
   - component: {fileID: 2800794618870294913}
   - component: {fileID: 4086060769853655662}
   - component: {fileID: 1238866493186942958}
-  - component: {fileID: 8142111092342664001}
   m_Layer: 5
   m_Name: Main_Display_ribbon
   m_TagString: Untagged
@@ -1235,7 +1234,7 @@ Canvas:
   m_PlaneDistance: 100
   m_PixelPerfect: 0
   m_ReceivesEvents: 1
-  m_OverrideSorting: 1
+  m_OverrideSorting: 0
   m_OverridePixelPerfect: 0
   m_SortingBucketNormalizedSize: 0
   m_VertexColorAlwaysGammaSpace: 0
@@ -1252,39 +1251,6 @@ CanvasRenderer:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 1353372395962235708}
   m_CullTransparentMesh: 1
---- !u!114 &8142111092342664001
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1353372395962235708}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: e4b176ff446f80b488686f76d54d6e09, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
-  _basePosY: 0
-  _originalPosY: 0
-  _parentRt: {fileID: 0}
-  _screenHeight: 1920
-  _screenWidth: 1080
-  _canvasScaleFactor: 1
-  _lastMainDisplayOffset: NaN
-  _lastMainDisplayScale: NaN
-  _lastSubDisplayOffset: NaN
-  _lastSubDisplayScale: NaN
-  _lastTransformDisplay: 0
-  _cachedScreenCenterY: 0
-  _canvasScaler: {fileID: 0}
-  _baseReferenceResolution: {x: 0, y: 0}
-  _subCover: {fileID: 0}
-  _subCoverTransform: {fileID: 0}
-  _subCoverRectTransform: {fileID: 0}
-  _subCoverBottom: {fileID: 0}
-  _subCoverBottomTransform: {fileID: 0}
-  _subCoverBottomRectTransform: {fileID: 0}
-  _subDisplay: {fileID: 0}
 --- !u!1 &1381956579693865574
 GameObject:
   m_ObjectHideFlags: 0

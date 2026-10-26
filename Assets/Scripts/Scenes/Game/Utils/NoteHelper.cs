@@ -8,10 +8,119 @@ using System.Text;
 using System.Threading.Tasks;
 using UnityEngine;
 
+#nullable enable
 namespace MajdataPlay.Scenes.Game.Utils
 {
     internal static class NoteHelper
     {
+        /// <summary>
+        /// Converts the gameplay sprite stack to parent-relative Z coordinates.
+        /// Smaller Z coordinates are drawn closer to the gameplay camera.
+        /// Every Z index lies on an exact binary grid, so adjacent orders stay distinct after
+        /// the parent depth is added, as long as world Z and camera distance stay below 128 units.
+        /// </summary>
+        internal static class Sorting
+        {
+            /// <summary>
+            /// Separates adjacent gameplay groups in their parent plane.
+            /// A power of two keeps every group boundary exactly representable.
+            /// </summary>
+            private const float LayerSpacing = 0.5f;
+
+            /// <summary>
+            /// Separates adjacent sort orders by 2^-17, so the signed 16-bit order range fills one group.
+            /// Every multiple of 2^-17 below 128 is an exact float, including the Notes depth of 100.
+            /// </summary>
+            private const float OrderStep = 1f / 131072f;
+
+            /// <summary>
+            /// Identifies the back-to-front groups of gameplay sprites.
+            /// </summary>
+            internal enum NoteLayer
+            {
+                /// <summary>Slide and Wifi tracks.</summary>
+                Slides,
+                /// <summary>Stars following slide paths.</summary>
+                SlideStars,
+                /// <summary>Slide judgment results.</summary>
+                SlideOK,
+                /// <summary>Tap guide lines and each lines.</summary>
+                TapLines,
+                /// <summary>Tap, Hold and slide-head sprites.</summary>
+                Tap,
+                /// <summary>TouchHold progress borders.</summary>
+                TouchHoldBorder,
+                /// <summary>Touch, TouchHold and multiple-touch borders.</summary>
+                Touch
+            }
+
+            /// <summary>
+            /// Gets a sprite's Z index on an exact grid of one step per sort order.
+            /// Each group occupies the disjoint range (-(layer + 1) * 0.5, -layer * 0.5] relative to its parent.
+            /// </summary>
+            /// <param name="layer">The sprite's gameplay group.</param>
+            /// <param name="sortOrder">
+            /// The front-to-back priority; larger values appear in front.
+            /// Values outside the signed 16-bit range are clamped and share the boundary depth.
+            /// </param>
+            /// <returns>The local Z index for the sprite's gameplay group.</returns>
+            internal static float GetZIndex(NoteLayer layer, int sortOrder = 0)
+            {
+                var clampedOrder = Math.Clamp(sortOrder, short.MinValue, short.MaxValue);
+                var orderIndex = clampedOrder - short.MinValue;
+                return (-(int)layer * LayerSpacing) - (orderIndex * OrderStep);
+            }
+
+            /// <summary>
+            /// Assigns a sprite to Default with zero order and positions its pivot by local depth.
+            /// </summary>
+            /// <param name="renderer">The sprite renderer to configure.</param>
+            /// <param name="layer">The sprite's gameplay group.</param>
+            /// <param name="sortOrder">The priority within the gameplay group.</param>
+            /// <param name="parentZIndex">The sorting index already assigned to a parent note, or zero for a root sprite.</param>
+            internal static void Apply(SpriteRenderer renderer, NoteLayer layer, int sortOrder = 0, float parentZIndex = 0f)
+            {
+                renderer.sortingLayerID = 0;
+                renderer.sortingOrder = 0;
+                renderer.spriteSortPoint = SpriteSortPoint.Pivot;
+                SetLocalZPosition(renderer.transform, GetZIndex(layer, sortOrder) - parentZIndex);
+            }
+
+            /// <summary>
+            /// Moves a transform in the playfield while preserving its world-space depth.
+            /// </summary>
+            /// <param name="transform">The transform to move.</param>
+            /// <param name="position">The desired world-space X and Y coordinates.</param>
+            internal static void SetPosition(Transform transform, Vector3 position)
+            {
+                position.z = transform.position.z;
+                transform.position = position;
+            }
+
+            /// <summary>
+            /// Moves a child in its parent plane while preserving its local depth.
+            /// </summary>
+            /// <param name="transform">The transform to move.</param>
+            /// <param name="position">The desired local X and Y coordinates.</param>
+            internal static void SetLocalPosition(Transform transform, Vector3 position)
+            {
+                position.z = transform.localPosition.z;
+                transform.localPosition = position;
+            }
+
+            /// <summary>
+            /// Changes a transform's local depth without changing its local X and Y coordinates.
+            /// </summary>
+            /// <param name="transform">The transform to position.</param>
+            /// <param name="z">The desired local Z coordinate.</param>
+            internal static void SetLocalZPosition(Transform transform, float z)
+            {
+                var position = transform.localPosition;
+                position.z = z;
+                transform.localPosition = position;
+            }
+        }
+
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static SensorArea GetSensor(char areaPos, int startPos)
         {

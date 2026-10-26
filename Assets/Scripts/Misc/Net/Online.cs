@@ -31,7 +31,7 @@ namespace MajdataPlay.Net
     internal static class Online
     {
         readonly static HttpClient _client = MajEnv.SharedHttpClient;
-        readonly static JsonSerializer _defaultJsonSerializer = JsonSerializer.Create(_defaultJsonSerializerSettings);
+        // Declared before the serializer: static initializers run in textual order.
         readonly static JsonSerializerSettings _defaultJsonSerializerSettings = new()
         {
             ContractResolver = new DefaultContractResolver
@@ -40,6 +40,7 @@ namespace MajdataPlay.Net
             },
             ObjectCreationHandling = ObjectCreationHandling.Replace
         };
+        readonly static JsonSerializer _defaultJsonSerializer = JsonSerializer.Create(_defaultJsonSerializerSettings);
 
         public const string API_GET_USER_PROFILE = "account/profile";
         public const string API_GET_AVATAR = "avatar/{0}";

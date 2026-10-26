@@ -8,8 +8,10 @@ namespace MajdataPlay.Collections
         public static bool TryGetElement<T>(this List<T> source, int index, out T? element)
         {
             element = default;
-            if (index >= source.Count)
+            if ((uint)index >= (uint)source.Count)
+            {
                 return false;
+            }
 
             element = source[index];
             return true;

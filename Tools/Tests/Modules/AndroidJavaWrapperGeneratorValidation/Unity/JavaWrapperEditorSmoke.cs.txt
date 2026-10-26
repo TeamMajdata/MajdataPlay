@@ -1,0 +1,189 @@
+using System;
+using System.IO;
+using System.Reflection;
+using UnityEditor;
+using UnityEngine;
+
+#nullable enable
+
+namespace MajdataPlay.Tests.AndroidJavaWrapperGeneratorValidation.Unity
+{
+    /// <summary>Exercises the production background CLI refresh in an isolated pinned Unity Editor project.</summary>
+    internal static class JavaWrapperEditorSmoke
+    {
+        /// <summary>Identifies progress persisted across the imported DLL domain reload.</summary>
+        private const string ActiveKey = "JavaWrapperEditorSmoke.Active";
+        /// <summary>Records the UTC timeout boundary persisted across domain reload.</summary>
+        private const string StartedKey = "JavaWrapperEditorSmoke.Started";
+        /// <summary>Starts the real cached-documentation menu action and installs a completion observer.</summary>
+        public static void Run()
+        {
+            var extension = Path.Combine(Path.GetDirectoryName(Application.dataPath)!, "Tools/AndroidJavaWrapper/src/Bindings/Java/Lang/Integer.Smoke.e.cs");
+            Directory.CreateDirectory(Path.GetDirectoryName(extension)!);
+            File.WriteAllText(extension, SmokeExtensionSource);
+            SessionState.SetBool(ActiveKey, true);
+            SessionState.SetInt("JavaWrapperEditorSmoke.Phase", 1);
+            SessionState.SetString(StartedKey, DateTime.UtcNow.Ticks.ToString());
+            var refresh = FindRefresh();
+            refresh.GetMethod("CancelGeneration", BindingFlags.NonPublic | BindingFlags.Static)!.Invoke(null, null);
+            refresh.GetMethod("RegenerateOffline", BindingFlags.NonPublic | BindingFlags.Static)!.Invoke(null, null);
+            EditorApplication.update -= Check;
+            EditorApplication.update += Check;
+            Debug.Log("EDITOR_WRAPPER_SMOKE_STARTED");
+        }
+        /// <summary>Restores the smoke observer after the compiled library triggers a script reload.</summary>
+        [InitializeOnLoadMethod]
+        private static void Resume()
+        {
+            if (SessionState.GetBool(ActiveKey, false))
+            {
+                EditorApplication.update -= Check;
+                EditorApplication.update += Check;
+            }
+        }
+        /// <summary>Returns the imported production refresh controller type.</summary>
+        /// <returns>The controller type in the isolated project assembly.</returns>
+        private static Type FindRefresh()
+        {
+            foreach (var assembly in AppDomain.CurrentDomain.GetAssemblies())
+            {
+                var type = assembly.GetType("MajdataPlay.Platform.Android.Editor.JavaWrapperRefresh");
+                if (type != null)
+                {
+                    return type;
+                }
+            }
+            throw new InvalidOperationException("Production Editor refresh type was not imported.");
+        }
+        /// <summary>Completes only after generation, publication, importing, and script compilation are idle.</summary>
+        private static void Check()
+        {
+            if (!SessionState.GetBool(ActiveKey, false))
+            {
+                return;
+            }
+            var started = new DateTime(long.Parse(SessionState.GetString(StartedKey, "0")), DateTimeKind.Utc);
+            if (DateTime.UtcNow - started > TimeSpan.FromMinutes(8))
+            {
+                Debug.LogError("EDITOR_WRAPPER_SMOKE_TIMEOUT");
+                EditorApplication.Exit(2);
+                return;
+            }
+            var refresh = FindRefresh();
+            var running = refresh.GetField("s_process", BindingFlags.NonPublic | BindingFlags.Static)!.GetValue(null) != null;
+            var pending = (bool)refresh.GetField("s_refreshPending", BindingFlags.NonPublic | BindingFlags.Static)!.GetValue(null)!;
+            var phase = SessionState.GetInt("JavaWrapperEditorSmoke.Phase", 0);
+            var building = (bool)refresh.GetField("s_building", BindingFlags.NonPublic | BindingFlags.Static)!.GetValue(null)!;
+            if (phase == 1 && running && !building)
+            {
+                refresh.GetMethod("CancelGeneration", BindingFlags.NonPublic | BindingFlags.Static)!.Invoke(null, null);
+                refresh.GetMethod("RegenerateOffline", BindingFlags.NonPublic | BindingFlags.Static)!.Invoke(null, null);
+                SessionState.SetInt("JavaWrapperEditorSmoke.Phase", 2);
+                Debug.Log("EDITOR_WRAPPER_SMOKE_CANCELED_FIRST_CLI");
+                return;
+            }
+            var runtime = Path.Combine(Application.dataPath, "Plugins/MajdataPlay/Platform/Android");
+            var sources = Path.Combine(Path.GetDirectoryName(Application.dataPath)!, "Tools/AndroidJavaWrapper/src");
+            if (Environment.OSVersion.Platform == PlatformID.Win32NT)
+            {
+                runtime = @"\\?\" + Path.GetFullPath(runtime);
+                sources = @"\\?\" + Path.GetFullPath(sources);
+            }
+            var library = Path.Combine(runtime, "MajdataPlay.Platform.Android.Runtime.dll");
+            if (running || pending || EditorApplication.isCompiling || EditorApplication.isUpdating
+                || !File.Exists(library) || !File.Exists(library + ".meta"))
+            {
+                return;
+            }
+            Assembly? bindings = null;
+            foreach (var assembly in AppDomain.CurrentDomain.GetAssemblies())
+            {
+                if (assembly.GetName().Name == "MajdataPlay.Platform.Android.Runtime"
+                    && assembly.GetType("MajdataPlay.Platform.Android.Runtime.Bindings.Android.Net.Uri") != null
+                    && assembly.GetType("MajdataPlay.Platform.Android.Runtime.AndroidJni") != null
+                    && assembly.GetType("MajdataPlay.Platform.Android.Runtime.IJavaObject") != null
+                    && assembly.GetType("MajdataPlay.Platform.Android.Runtime.JavaInvocationException") != null
+                    && assembly.GetType("MajdataPlay.Platform.Android.Runtime.JavaObjectReference") != null)
+                {
+                    bindings = assembly;
+                    break;
+                }
+            }
+            if (bindings == null)
+            {
+                return;
+            }
+            var sourceCount = Directory.GetFiles(sources, "*.cs", SearchOption.AllDirectories).Length;
+            if (sourceCount < 6191 || !File.Exists(Path.Combine(sources, "Bindings/Com/Unity3d/Player/UnityPlayerActivity.g.cs"))
+                || !File.Exists(Path.Combine(sources, "Bindings/Net/Majdata/Majdataplay/StorageAccess.g.cs"))
+                || Directory.Exists(Path.Combine(runtime, "Runtime/Bindings")))
+            {
+                Debug.LogError("EDITOR_WRAPPER_SMOKE_INCOMPLETE: " + sourceCount);
+                EditorApplication.Exit(3);
+                return;
+            }
+            var integer = bindings.GetType("MajdataPlay.Platform.Android.Runtime.Bindings.Java.Lang.Integer", true)!;
+            if ((int)integer.GetProperty("WrapperSmokeValue", BindingFlags.Public | BindingFlags.Static)!.GetValue(null)! != 37)
+            {
+                Debug.LogError("EDITOR_WRAPPER_SMOKE_EXTENSION_MISSING");
+                EditorApplication.Exit(4);
+                return;
+            }
+            try
+            {
+                bindings.GetType("MajdataPlay.Platform.Android.Runtime.AndroidJni", true)!.GetMethod("GetClass")!.Invoke(null, new object[] { "java.lang.Object" });
+                Debug.LogError("EDITOR_WRAPPER_SMOKE_JNI_GUARD_MISSING");
+                EditorApplication.Exit(5);
+                return;
+            }
+            catch (TargetInvocationException exception) when (exception.InnerException is PlatformNotSupportedException)
+            {
+            }
+            var probe = Path.Combine(sources, "Bindings/Android/Net/Uri.g.cs");
+            var extension = Path.Combine(sources, "Bindings/Java/Lang/Integer.Smoke.e.cs");
+            if (phase == 2)
+            {
+                SessionState.SetString("JavaWrapperEditorSmoke.ProbeMeta", File.ReadAllText(library + ".meta"));
+                SessionState.SetString("JavaWrapperEditorSmoke.LibraryTime", File.GetLastWriteTimeUtc(library).Ticks.ToString());
+                SessionState.SetString("JavaWrapperEditorSmoke.ProbeTime", File.GetLastWriteTimeUtc(probe).Ticks.ToString());
+                SessionState.SetString("JavaWrapperEditorSmoke.ExtensionTime", File.GetLastWriteTimeUtc(extension).Ticks.ToString());
+                SessionState.SetInt("JavaWrapperEditorSmoke.Phase", 3);
+                refresh.GetMethod("RegenerateOffline", BindingFlags.NonPublic | BindingFlags.Static)!.Invoke(null, null);
+                Debug.Log("EDITOR_WRAPPER_SMOKE_REPEAT_STARTED");
+                return;
+            }
+            if (File.ReadAllText(library + ".meta") != SessionState.GetString("JavaWrapperEditorSmoke.ProbeMeta", "")
+                || File.GetLastWriteTimeUtc(library).Ticks.ToString() != SessionState.GetString("JavaWrapperEditorSmoke.LibraryTime", "")
+                || File.GetLastWriteTimeUtc(probe).Ticks.ToString() != SessionState.GetString("JavaWrapperEditorSmoke.ProbeTime", "")
+                || File.GetLastWriteTimeUtc(extension).Ticks.ToString() != SessionState.GetString("JavaWrapperEditorSmoke.ExtensionTime", "")
+                || File.ReadAllText(extension) != SmokeExtensionSource)
+            {
+                Debug.LogError("EDITOR_WRAPPER_SMOKE_ASSET_IDENTITY_CHANGED");
+                EditorApplication.Exit(4);
+                return;
+            }
+            SessionState.SetBool(ActiveKey, false);
+            Debug.Log("EDITOR_WRAPPER_SMOKE_PASS: " + sourceCount + " sources compiled into one imported DLL with partial extensions.");
+            EditorApplication.Exit(0);
+        }
+
+        /// <summary>Provides a safe user partial extension whose property must appear in the imported DLL.</summary>
+        private const string SmokeExtensionSource = @"#nullable enable
+namespace MajdataPlay.Platform.Android.Runtime.Bindings.Java.Lang
+{
+    /// <summary>Adds a validation-only user extension.</summary>
+    public partial class Integer
+    {
+        /// <summary>Returns the known managed value used to verify extension compilation.</summary>
+        public static int WrapperSmokeValue
+        {
+            get
+            {
+                return 37;
+            }
+        }
+    }
+}
+";
+    }
+}

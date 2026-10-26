@@ -38,6 +38,7 @@ public class MajdataPlayActivity extends UnityPlayerActivity
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data)
     {
+        super.onActivityResult(requestCode, resultCode, data);
         if (onActivityResultCallbackProxy != null)
         {
             onActivityResultCallbackProxy.OnActivityResult(requestCode, resultCode, data);

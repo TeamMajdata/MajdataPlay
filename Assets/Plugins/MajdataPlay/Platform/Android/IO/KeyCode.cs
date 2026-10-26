@@ -1,349 +1,686 @@
-﻿using MajdataPlay.Platform.Android.Runtime;
-using System;
-using System.Collections.Generic;
-using System.Text;
+#nullable enable
 
 namespace MajdataPlay.Platform.Android.IO
 {
+    /// <summary>Identifies Android key codes while preserving their public names and numeric values.</summary>
+    /// <remarks>Values match the compile-time constants in the pinned Android SDK API 36.</remarks>
     public enum KeyCode
     {
-        Unknown = KeyEvent.KEYCODE_UNKNOWN,
-        SoftLeft = KeyEvent.KEYCODE_SOFT_LEFT,
-        SoftRight = KeyEvent.KEYCODE_SOFT_RIGHT,
-        Home = KeyEvent.KEYCODE_HOME,
-        Back = KeyEvent.KEYCODE_BACK,
-        Call = KeyEvent.KEYCODE_CALL,
-        Endcall = KeyEvent.KEYCODE_ENDCALL,
-        Num0 = KeyEvent.KEYCODE_0,
-        Num1 = KeyEvent.KEYCODE_1,
-        Num2 = KeyEvent.KEYCODE_2,
-        Num3 = KeyEvent.KEYCODE_3,
-        Num4 = KeyEvent.KEYCODE_4,
-        Num5 = KeyEvent.KEYCODE_5,
-        Num6 = KeyEvent.KEYCODE_6,
-        Num7 = KeyEvent.KEYCODE_7,
-        Num8 = KeyEvent.KEYCODE_8,
-        Num9 = KeyEvent.KEYCODE_9,
-        Star = KeyEvent.KEYCODE_STAR,
-        Pound = KeyEvent.KEYCODE_POUND,
-        DpadUp = KeyEvent.KEYCODE_DPAD_UP,
-        DpadDown = KeyEvent.KEYCODE_DPAD_DOWN,
-        DpadLeft = KeyEvent.KEYCODE_DPAD_LEFT,
-        DpadRight = KeyEvent.KEYCODE_DPAD_RIGHT,
-        DpadCenter = KeyEvent.KEYCODE_DPAD_CENTER,
-        VolumeUp = KeyEvent.KEYCODE_VOLUME_UP,
-        VolumeDown = KeyEvent.KEYCODE_VOLUME_DOWN,
-        Power = KeyEvent.KEYCODE_POWER,
-        Camera = KeyEvent.KEYCODE_CAMERA,
-        Clear = KeyEvent.KEYCODE_CLEAR,
-        A = KeyEvent.KEYCODE_A,
-        B = KeyEvent.KEYCODE_B,
-        C = KeyEvent.KEYCODE_C,
-        D = KeyEvent.KEYCODE_D,
-        E = KeyEvent.KEYCODE_E,
-        F = KeyEvent.KEYCODE_F,
-        G = KeyEvent.KEYCODE_G,
-        H = KeyEvent.KEYCODE_H,
-        I = KeyEvent.KEYCODE_I,
-        J = KeyEvent.KEYCODE_J,
-        K = KeyEvent.KEYCODE_K,
-        L = KeyEvent.KEYCODE_L,
-        M = KeyEvent.KEYCODE_M,
-        N = KeyEvent.KEYCODE_N,
-        O = KeyEvent.KEYCODE_O,
-        P = KeyEvent.KEYCODE_P,
-        Q = KeyEvent.KEYCODE_Q,
-        R = KeyEvent.KEYCODE_R,
-        S = KeyEvent.KEYCODE_S,
-        T = KeyEvent.KEYCODE_T,
-        U = KeyEvent.KEYCODE_U,
-        V = KeyEvent.KEYCODE_V,
-        W = KeyEvent.KEYCODE_W,
-        X = KeyEvent.KEYCODE_X,
-        Y = KeyEvent.KEYCODE_Y,
-        Z = KeyEvent.KEYCODE_Z,
-        Comma = KeyEvent.KEYCODE_COMMA,
-        Period = KeyEvent.KEYCODE_PERIOD,
-        AltLeft = KeyEvent.KEYCODE_ALT_LEFT,
-        AltRight = KeyEvent.KEYCODE_ALT_RIGHT,
-        ShiftLeft = KeyEvent.KEYCODE_SHIFT_LEFT,
-        ShiftRight = KeyEvent.KEYCODE_SHIFT_RIGHT,
-        Tab = KeyEvent.KEYCODE_TAB,
-        Space = KeyEvent.KEYCODE_SPACE,
-        Sym = KeyEvent.KEYCODE_SYM,
-        Explorer = KeyEvent.KEYCODE_EXPLORER,
-        Envelope = KeyEvent.KEYCODE_ENVELOPE,
-        Enter = KeyEvent.KEYCODE_ENTER,
-        Del = KeyEvent.KEYCODE_DEL,
-        Grave = KeyEvent.KEYCODE_GRAVE,
-        Minus = KeyEvent.KEYCODE_MINUS,
-        Equals = KeyEvent.KEYCODE_EQUALS,
-        LeftBracket = KeyEvent.KEYCODE_LEFT_BRACKET,
-        RightBracket = KeyEvent.KEYCODE_RIGHT_BRACKET,
-        Backslash = KeyEvent.KEYCODE_BACKSLASH,
-        Semicolon = KeyEvent.KEYCODE_SEMICOLON,
-        Apostrophe = KeyEvent.KEYCODE_APOSTROPHE,
-        Slash = KeyEvent.KEYCODE_SLASH,
-        At = KeyEvent.KEYCODE_AT,
-        Num = KeyEvent.KEYCODE_NUM,
-        Headsethook = KeyEvent.KEYCODE_HEADSETHOOK,
-        Focus = KeyEvent.KEYCODE_FOCUS,
-        Plus = KeyEvent.KEYCODE_PLUS,
-        Menu = KeyEvent.KEYCODE_MENU,
-        Notification = KeyEvent.KEYCODE_NOTIFICATION,
-        Search = KeyEvent.KEYCODE_SEARCH,
-        MediaPlayPause = KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE,
-        MediaStop = KeyEvent.KEYCODE_MEDIA_STOP,
-        MediaNext = KeyEvent.KEYCODE_MEDIA_NEXT,
-        MediaPrevious = KeyEvent.KEYCODE_MEDIA_PREVIOUS,
-        MediaRewind = KeyEvent.KEYCODE_MEDIA_REWIND,
-        MediaFastForward = KeyEvent.KEYCODE_MEDIA_FAST_FORWARD,
-        Mute = KeyEvent.KEYCODE_MUTE,
-        PageUp = KeyEvent.KEYCODE_PAGE_UP,
-        PageDown = KeyEvent.KEYCODE_PAGE_DOWN,
-        Pictsymbols = KeyEvent.KEYCODE_PICTSYMBOLS,
-        SwitchCharset = KeyEvent.KEYCODE_SWITCH_CHARSET,
-        ButtonA = KeyEvent.KEYCODE_BUTTON_A,
-        ButtonB = KeyEvent.KEYCODE_BUTTON_B,
-        ButtonC = KeyEvent.KEYCODE_BUTTON_C,
-        ButtonX = KeyEvent.KEYCODE_BUTTON_X,
-        ButtonY = KeyEvent.KEYCODE_BUTTON_Y,
-        ButtonZ = KeyEvent.KEYCODE_BUTTON_Z,
-        ButtonL1 = KeyEvent.KEYCODE_BUTTON_L1,
-        ButtonR1 = KeyEvent.KEYCODE_BUTTON_R1,
-        ButtonL2 = KeyEvent.KEYCODE_BUTTON_L2,
-        ButtonR2 = KeyEvent.KEYCODE_BUTTON_R2,
-        ButtonThumbl = KeyEvent.KEYCODE_BUTTON_THUMBL,
-        ButtonThumbr = KeyEvent.KEYCODE_BUTTON_THUMBR,
-        ButtonStart = KeyEvent.KEYCODE_BUTTON_START,
-        ButtonSelect = KeyEvent.KEYCODE_BUTTON_SELECT,
-        ButtonMode = KeyEvent.KEYCODE_BUTTON_MODE,
-        Escape = KeyEvent.KEYCODE_ESCAPE,
-        ForwardDel = KeyEvent.KEYCODE_FORWARD_DEL,
-        CtrlLeft = KeyEvent.KEYCODE_CTRL_LEFT,
-        CtrlRight = KeyEvent.KEYCODE_CTRL_RIGHT,
-        CapsLock = KeyEvent.KEYCODE_CAPS_LOCK,
-        ScrollLock = KeyEvent.KEYCODE_SCROLL_LOCK,
-        MetaLeft = KeyEvent.KEYCODE_META_LEFT,
-        MetaRight = KeyEvent.KEYCODE_META_RIGHT,
-        Function = KeyEvent.KEYCODE_FUNCTION,
-        Sysrq = KeyEvent.KEYCODE_SYSRQ,
-        Break = KeyEvent.KEYCODE_BREAK,
-        MoveHome = KeyEvent.KEYCODE_MOVE_HOME,
-        MoveEnd = KeyEvent.KEYCODE_MOVE_END,
-        Insert = KeyEvent.KEYCODE_INSERT,
-        Forward = KeyEvent.KEYCODE_FORWARD,
-        MediaPlay = KeyEvent.KEYCODE_MEDIA_PLAY,
-        MediaPause = KeyEvent.KEYCODE_MEDIA_PAUSE,
-        MediaClose = KeyEvent.KEYCODE_MEDIA_CLOSE,
-        MediaEject = KeyEvent.KEYCODE_MEDIA_EJECT,
-        MediaRecord = KeyEvent.KEYCODE_MEDIA_RECORD,
-        F1 = KeyEvent.KEYCODE_F1,
-        F2 = KeyEvent.KEYCODE_F2,
-        F3 = KeyEvent.KEYCODE_F3,
-        F4 = KeyEvent.KEYCODE_F4,
-        F5 = KeyEvent.KEYCODE_F5,
-        F6 = KeyEvent.KEYCODE_F6,
-        F7 = KeyEvent.KEYCODE_F7,
-        F8 = KeyEvent.KEYCODE_F8,
-        F9 = KeyEvent.KEYCODE_F9,
-        F10 = KeyEvent.KEYCODE_F10,
-        F11 = KeyEvent.KEYCODE_F11,
-        F12 = KeyEvent.KEYCODE_F12,
-        NumLock = KeyEvent.KEYCODE_NUM_LOCK,
-        Numpad0 = KeyEvent.KEYCODE_NUMPAD_0,
-        Numpad1 = KeyEvent.KEYCODE_NUMPAD_1,
-        Numpad2 = KeyEvent.KEYCODE_NUMPAD_2,
-        Numpad3 = KeyEvent.KEYCODE_NUMPAD_3,
-        Numpad4 = KeyEvent.KEYCODE_NUMPAD_4,
-        Numpad5 = KeyEvent.KEYCODE_NUMPAD_5,
-        Numpad6 = KeyEvent.KEYCODE_NUMPAD_6,
-        Numpad7 = KeyEvent.KEYCODE_NUMPAD_7,
-        Numpad8 = KeyEvent.KEYCODE_NUMPAD_8,
-        Numpad9 = KeyEvent.KEYCODE_NUMPAD_9,
-        NumpadDivide = KeyEvent.KEYCODE_NUMPAD_DIVIDE,
-        NumpadMultiply = KeyEvent.KEYCODE_NUMPAD_MULTIPLY,
-        NumpadSubtract = KeyEvent.KEYCODE_NUMPAD_SUBTRACT,
-        NumpadAdd = KeyEvent.KEYCODE_NUMPAD_ADD,
-        NumpadDot = KeyEvent.KEYCODE_NUMPAD_DOT,
-        NumpadComma = KeyEvent.KEYCODE_NUMPAD_COMMA,
-        NumpadEnter = KeyEvent.KEYCODE_NUMPAD_ENTER,
-        NumpadEquals = KeyEvent.KEYCODE_NUMPAD_EQUALS,
-        NumpadLeftParen = KeyEvent.KEYCODE_NUMPAD_LEFT_PAREN,
-        NumpadRightParen = KeyEvent.KEYCODE_NUMPAD_RIGHT_PAREN,
-        VolumeMute = KeyEvent.KEYCODE_VOLUME_MUTE,
-        Info = KeyEvent.KEYCODE_INFO,
-        ChannelUp = KeyEvent.KEYCODE_CHANNEL_UP,
-        ChannelDown = KeyEvent.KEYCODE_CHANNEL_DOWN,
-        ZoomIn = KeyEvent.KEYCODE_ZOOM_IN,
-        ZoomOut = KeyEvent.KEYCODE_ZOOM_OUT,
-        Tv = KeyEvent.KEYCODE_TV,
-        Window = KeyEvent.KEYCODE_WINDOW,
-        Guide = KeyEvent.KEYCODE_GUIDE,
-        Dvr = KeyEvent.KEYCODE_DVR,
-        Bookmark = KeyEvent.KEYCODE_BOOKMARK,
-        Captions = KeyEvent.KEYCODE_CAPTIONS,
-        Settings = KeyEvent.KEYCODE_SETTINGS,
-        TvPower = KeyEvent.KEYCODE_TV_POWER,
-        TvInput = KeyEvent.KEYCODE_TV_INPUT,
-        StbPower = KeyEvent.KEYCODE_STB_POWER,
-        StbInput = KeyEvent.KEYCODE_STB_INPUT,
-        AvrPower = KeyEvent.KEYCODE_AVR_POWER,
-        AvrInput = KeyEvent.KEYCODE_AVR_INPUT,
-        ProgRed = KeyEvent.KEYCODE_PROG_RED,
-        ProgGreen = KeyEvent.KEYCODE_PROG_GREEN,
-        ProgYellow = KeyEvent.KEYCODE_PROG_YELLOW,
-        ProgBlue = KeyEvent.KEYCODE_PROG_BLUE,
-        AppSwitch = KeyEvent.KEYCODE_APP_SWITCH,
-        Button1 = KeyEvent.KEYCODE_BUTTON_1,
-        Button2 = KeyEvent.KEYCODE_BUTTON_2,
-        Button3 = KeyEvent.KEYCODE_BUTTON_3,
-        Button4 = KeyEvent.KEYCODE_BUTTON_4,
-        Button5 = KeyEvent.KEYCODE_BUTTON_5,
-        Button6 = KeyEvent.KEYCODE_BUTTON_6,
-        Button7 = KeyEvent.KEYCODE_BUTTON_7,
-        Button8 = KeyEvent.KEYCODE_BUTTON_8,
-        Button9 = KeyEvent.KEYCODE_BUTTON_9,
-        Button10 = KeyEvent.KEYCODE_BUTTON_10,
-        Button11 = KeyEvent.KEYCODE_BUTTON_11,
-        Button12 = KeyEvent.KEYCODE_BUTTON_12,
-        Button13 = KeyEvent.KEYCODE_BUTTON_13,
-        Button14 = KeyEvent.KEYCODE_BUTTON_14,
-        Button15 = KeyEvent.KEYCODE_BUTTON_15,
-        Button16 = KeyEvent.KEYCODE_BUTTON_16,
-        LanguageSwitch = KeyEvent.KEYCODE_LANGUAGE_SWITCH,
-        MannerMode = KeyEvent.KEYCODE_MANNER_MODE,
-        Key3DMode = KeyEvent.KEYCODE_3D_MODE,
-        Contacts = KeyEvent.KEYCODE_CONTACTS,
-        Calendar = KeyEvent.KEYCODE_CALENDAR,
-        Music = KeyEvent.KEYCODE_MUSIC,
-        Calculator = KeyEvent.KEYCODE_CALCULATOR,
-        ZenkakuHankaku = KeyEvent.KEYCODE_ZENKAKU_HANKAKU,
-        Eisu = KeyEvent.KEYCODE_EISU,
-        Muhenkan = KeyEvent.KEYCODE_MUHENKAN,
-        Henkan = KeyEvent.KEYCODE_HENKAN,
-        KatakanaHiragana = KeyEvent.KEYCODE_KATAKANA_HIRAGANA,
-        Yen = KeyEvent.KEYCODE_YEN,
-        Ro = KeyEvent.KEYCODE_RO,
-        Kana = KeyEvent.KEYCODE_KANA,
-        Assist = KeyEvent.KEYCODE_ASSIST,
-        BrightnessDown = KeyEvent.KEYCODE_BRIGHTNESS_DOWN,
-        BrightnessUp = KeyEvent.KEYCODE_BRIGHTNESS_UP,
-        MediaAudioTrack = KeyEvent.KEYCODE_MEDIA_AUDIO_TRACK,
-        Sleep = KeyEvent.KEYCODE_SLEEP,
-        Wakeup = KeyEvent.KEYCODE_WAKEUP,
-        Pairing = KeyEvent.KEYCODE_PAIRING,
-        MediaTopMenu = KeyEvent.KEYCODE_MEDIA_TOP_MENU,
-        Num11 = KeyEvent.KEYCODE_11,
-        Num12 = KeyEvent.KEYCODE_12,
-        LastChannel = KeyEvent.KEYCODE_LAST_CHANNEL,
-        TvDataService = KeyEvent.KEYCODE_TV_DATA_SERVICE,
-        VoiceAssist = KeyEvent.KEYCODE_VOICE_ASSIST,
-        TvRadioService = KeyEvent.KEYCODE_TV_RADIO_SERVICE,
-        TvTeletext = KeyEvent.KEYCODE_TV_TELETEXT,
-        TvNumberEntry = KeyEvent.KEYCODE_TV_NUMBER_ENTRY,
-        TvTerrestrialAnalog = KeyEvent.KEYCODE_TV_TERRESTRIAL_ANALOG,
-        TvTerrestrialDigital = KeyEvent.KEYCODE_TV_TERRESTRIAL_DIGITAL,
-        TvSatellite = KeyEvent.KEYCODE_TV_SATELLITE,
-        TvSatelliteBs = KeyEvent.KEYCODE_TV_SATELLITE_BS,
-        TvSatelliteCs = KeyEvent.KEYCODE_TV_SATELLITE_CS,
-        TvSatelliteService = KeyEvent.KEYCODE_TV_SATELLITE_SERVICE,
-        TvNetwork = KeyEvent.KEYCODE_TV_NETWORK,
-        TvAntennaCable = KeyEvent.KEYCODE_TV_ANTENNA_CABLE,
-        TvInputHdmi1 = KeyEvent.KEYCODE_TV_INPUT_HDMI_1,
-        TvInputHdmi2 = KeyEvent.KEYCODE_TV_INPUT_HDMI_2,
-        TvInputHdmi3 = KeyEvent.KEYCODE_TV_INPUT_HDMI_3,
-        TvInputHdmi4 = KeyEvent.KEYCODE_TV_INPUT_HDMI_4,
-        TvInputComposite1 = KeyEvent.KEYCODE_TV_INPUT_COMPOSITE_1,
-        TvInputComposite2 = KeyEvent.KEYCODE_TV_INPUT_COMPOSITE_2,
-        TvInputComponent1 = KeyEvent.KEYCODE_TV_INPUT_COMPONENT_1,
-        TvInputComponent2 = KeyEvent.KEYCODE_TV_INPUT_COMPONENT_2,
-        TvInputVga1 = KeyEvent.KEYCODE_TV_INPUT_VGA_1,
-        TvAudioDescription = KeyEvent.KEYCODE_TV_AUDIO_DESCRIPTION,
-        TvAudioDescriptionMixUp = KeyEvent.KEYCODE_TV_AUDIO_DESCRIPTION_MIX_UP,
-        TvAudioDescriptionMixDown = KeyEvent.KEYCODE_TV_AUDIO_DESCRIPTION_MIX_DOWN,
-        TvZoomMode = KeyEvent.KEYCODE_TV_ZOOM_MODE,
-        TvContentsMenu = KeyEvent.KEYCODE_TV_CONTENTS_MENU,
-        TvMediaContextMenu = KeyEvent.KEYCODE_TV_MEDIA_CONTEXT_MENU,
-        TvTimerProgramming = KeyEvent.KEYCODE_TV_TIMER_PROGRAMMING,
-        Help = KeyEvent.KEYCODE_HELP,
-        NavigatePrevious = KeyEvent.KEYCODE_NAVIGATE_PREVIOUS,
-        NavigateNext = KeyEvent.KEYCODE_NAVIGATE_NEXT,
-        NavigateIn = KeyEvent.KEYCODE_NAVIGATE_IN,
-        NavigateOut = KeyEvent.KEYCODE_NAVIGATE_OUT,
-        StemPrimary = KeyEvent.KEYCODE_STEM_PRIMARY,
-        Stem1 = KeyEvent.KEYCODE_STEM_1,
-        Stem2 = KeyEvent.KEYCODE_STEM_2,
-        Stem3 = KeyEvent.KEYCODE_STEM_3,
-        DpadUpLeft = KeyEvent.KEYCODE_DPAD_UP_LEFT,
-        DpadDownLeft = KeyEvent.KEYCODE_DPAD_DOWN_LEFT,
-        DpadUpRight = KeyEvent.KEYCODE_DPAD_UP_RIGHT,
-        DpadDownRight = KeyEvent.KEYCODE_DPAD_DOWN_RIGHT,
-        MediaSkipForward = KeyEvent.KEYCODE_MEDIA_SKIP_FORWARD,
-        MediaSkipBackward = KeyEvent.KEYCODE_MEDIA_SKIP_BACKWARD,
-        MediaStepForward = KeyEvent.KEYCODE_MEDIA_STEP_FORWARD,
-        MediaStepBackward = KeyEvent.KEYCODE_MEDIA_STEP_BACKWARD,
-        SoftSleep = KeyEvent.KEYCODE_SOFT_SLEEP,
-        Cut = KeyEvent.KEYCODE_CUT,
-        Copy = KeyEvent.KEYCODE_COPY,
-        Paste = KeyEvent.KEYCODE_PASTE,
-        SystemNavigationUp = KeyEvent.KEYCODE_SYSTEM_NAVIGATION_UP,
-        SystemNavigationDown = KeyEvent.KEYCODE_SYSTEM_NAVIGATION_DOWN,
-        SystemNavigationLeft = KeyEvent.KEYCODE_SYSTEM_NAVIGATION_LEFT,
-        SystemNavigationRight = KeyEvent.KEYCODE_SYSTEM_NAVIGATION_RIGHT,
-        AllApps = KeyEvent.KEYCODE_ALL_APPS,
-        Refresh = KeyEvent.KEYCODE_REFRESH,
-        ThumbsUp = KeyEvent.KEYCODE_THUMBS_UP,
-        ThumbsDown = KeyEvent.KEYCODE_THUMBS_DOWN,
-        ProfileSwitch = KeyEvent.KEYCODE_PROFILE_SWITCH,
-        VideoApp1 = KeyEvent.KEYCODE_VIDEO_APP_1,
-        VideoApp2 = KeyEvent.KEYCODE_VIDEO_APP_2,
-        VideoApp3 = KeyEvent.KEYCODE_VIDEO_APP_3,
-        VideoApp4 = KeyEvent.KEYCODE_VIDEO_APP_4,
-        VideoApp5 = KeyEvent.KEYCODE_VIDEO_APP_5,
-        VideoApp6 = KeyEvent.KEYCODE_VIDEO_APP_6,
-        VideoApp7 = KeyEvent.KEYCODE_VIDEO_APP_7,
-        VideoApp8 = KeyEvent.KEYCODE_VIDEO_APP_8,
-        FeaturedApp1 = KeyEvent.KEYCODE_FEATURED_APP_1,
-        FeaturedApp2 = KeyEvent.KEYCODE_FEATURED_APP_2,
-        FeaturedApp3 = KeyEvent.KEYCODE_FEATURED_APP_3,
-        FeaturedApp4 = KeyEvent.KEYCODE_FEATURED_APP_4,
-        DemoApp1 = KeyEvent.KEYCODE_DEMO_APP_1,
-        DemoApp2 = KeyEvent.KEYCODE_DEMO_APP_2,
-        DemoApp3 = KeyEvent.KEYCODE_DEMO_APP_3,
-        DemoApp4 = KeyEvent.KEYCODE_DEMO_APP_4,
-        KeyboardBacklightDown = KeyEvent.KEYCODE_KEYBOARD_BACKLIGHT_DOWN,
-        KeyboardBacklightUp = KeyEvent.KEYCODE_KEYBOARD_BACKLIGHT_UP,
-        KeyboardBacklightToggle = KeyEvent.KEYCODE_KEYBOARD_BACKLIGHT_TOGGLE,
-        StylusButtonPrimary = KeyEvent.KEYCODE_STYLUS_BUTTON_PRIMARY,
-        StylusButtonSecondary = KeyEvent.KEYCODE_STYLUS_BUTTON_SECONDARY,
-        StylusButtonTertiary = KeyEvent.KEYCODE_STYLUS_BUTTON_TERTIARY,
-        StylusButtonTail = KeyEvent.KEYCODE_STYLUS_BUTTON_TAIL,
-        RecentApps = KeyEvent.KEYCODE_RECENT_APPS,
-        Macro1 = KeyEvent.KEYCODE_MACRO_1,
-        Macro2 = KeyEvent.KEYCODE_MACRO_2,
-        Macro3 = KeyEvent.KEYCODE_MACRO_3,
-        Macro4 = KeyEvent.KEYCODE_MACRO_4,
-        EmojiPicker = KeyEvent.KEYCODE_EMOJI_PICKER,
-        Screenshot = KeyEvent.KEYCODE_SCREENSHOT,
-        Dictate = KeyEvent.KEYCODE_DICTATE,
-        New = KeyEvent.KEYCODE_NEW,
-        Close = KeyEvent.KEYCODE_CLOSE,
-        DoNotDisturb = KeyEvent.KEYCODE_DO_NOT_DISTURB,
-        Print = KeyEvent.KEYCODE_PRINT,
-        Lock = KeyEvent.KEYCODE_LOCK,
-        Fullscreen = KeyEvent.KEYCODE_FULLSCREEN,
-        F13 = KeyEvent.KEYCODE_F13,
-        F14 = KeyEvent.KEYCODE_F14,
-        F15 = KeyEvent.KEYCODE_F15,
-        F16 = KeyEvent.KEYCODE_F16,
-        F17 = KeyEvent.KEYCODE_F17,
-        F18 = KeyEvent.KEYCODE_F18,
-        F19 = KeyEvent.KEYCODE_F19,
-        F20 = KeyEvent.KEYCODE_F20,
-        F21 = KeyEvent.KEYCODE_F21,
-        F22 = KeyEvent.KEYCODE_F22,
-        F23 = KeyEvent.KEYCODE_F23,
-        F24 = KeyEvent.KEYCODE_F24,
+        /// <summary>Identifies the <c>KEYCODE_UNKNOWN</c> Android key code.</summary>
+        Unknown = 0,
+        /// <summary>Identifies the <c>KEYCODE_SOFT_LEFT</c> Android key code.</summary>
+        SoftLeft = 1,
+        /// <summary>Identifies the <c>KEYCODE_SOFT_RIGHT</c> Android key code.</summary>
+        SoftRight = 2,
+        /// <summary>Identifies the <c>KEYCODE_HOME</c> Android key code.</summary>
+        Home = 3,
+        /// <summary>Identifies the <c>KEYCODE_BACK</c> Android key code.</summary>
+        Back = 4,
+        /// <summary>Identifies the <c>KEYCODE_CALL</c> Android key code.</summary>
+        Call = 5,
+        /// <summary>Identifies the <c>KEYCODE_ENDCALL</c> Android key code.</summary>
+        Endcall = 6,
+        /// <summary>Identifies the <c>KEYCODE_0</c> Android key code.</summary>
+        Num0 = 7,
+        /// <summary>Identifies the <c>KEYCODE_1</c> Android key code.</summary>
+        Num1 = 8,
+        /// <summary>Identifies the <c>KEYCODE_2</c> Android key code.</summary>
+        Num2 = 9,
+        /// <summary>Identifies the <c>KEYCODE_3</c> Android key code.</summary>
+        Num3 = 10,
+        /// <summary>Identifies the <c>KEYCODE_4</c> Android key code.</summary>
+        Num4 = 11,
+        /// <summary>Identifies the <c>KEYCODE_5</c> Android key code.</summary>
+        Num5 = 12,
+        /// <summary>Identifies the <c>KEYCODE_6</c> Android key code.</summary>
+        Num6 = 13,
+        /// <summary>Identifies the <c>KEYCODE_7</c> Android key code.</summary>
+        Num7 = 14,
+        /// <summary>Identifies the <c>KEYCODE_8</c> Android key code.</summary>
+        Num8 = 15,
+        /// <summary>Identifies the <c>KEYCODE_9</c> Android key code.</summary>
+        Num9 = 16,
+        /// <summary>Identifies the <c>KEYCODE_STAR</c> Android key code.</summary>
+        Star = 17,
+        /// <summary>Identifies the <c>KEYCODE_POUND</c> Android key code.</summary>
+        Pound = 18,
+        /// <summary>Identifies the <c>KEYCODE_DPAD_UP</c> Android key code.</summary>
+        DpadUp = 19,
+        /// <summary>Identifies the <c>KEYCODE_DPAD_DOWN</c> Android key code.</summary>
+        DpadDown = 20,
+        /// <summary>Identifies the <c>KEYCODE_DPAD_LEFT</c> Android key code.</summary>
+        DpadLeft = 21,
+        /// <summary>Identifies the <c>KEYCODE_DPAD_RIGHT</c> Android key code.</summary>
+        DpadRight = 22,
+        /// <summary>Identifies the <c>KEYCODE_DPAD_CENTER</c> Android key code.</summary>
+        DpadCenter = 23,
+        /// <summary>Identifies the <c>KEYCODE_VOLUME_UP</c> Android key code.</summary>
+        VolumeUp = 24,
+        /// <summary>Identifies the <c>KEYCODE_VOLUME_DOWN</c> Android key code.</summary>
+        VolumeDown = 25,
+        /// <summary>Identifies the <c>KEYCODE_POWER</c> Android key code.</summary>
+        Power = 26,
+        /// <summary>Identifies the <c>KEYCODE_CAMERA</c> Android key code.</summary>
+        Camera = 27,
+        /// <summary>Identifies the <c>KEYCODE_CLEAR</c> Android key code.</summary>
+        Clear = 28,
+        /// <summary>Identifies the <c>KEYCODE_A</c> Android key code.</summary>
+        A = 29,
+        /// <summary>Identifies the <c>KEYCODE_B</c> Android key code.</summary>
+        B = 30,
+        /// <summary>Identifies the <c>KEYCODE_C</c> Android key code.</summary>
+        C = 31,
+        /// <summary>Identifies the <c>KEYCODE_D</c> Android key code.</summary>
+        D = 32,
+        /// <summary>Identifies the <c>KEYCODE_E</c> Android key code.</summary>
+        E = 33,
+        /// <summary>Identifies the <c>KEYCODE_F</c> Android key code.</summary>
+        F = 34,
+        /// <summary>Identifies the <c>KEYCODE_G</c> Android key code.</summary>
+        G = 35,
+        /// <summary>Identifies the <c>KEYCODE_H</c> Android key code.</summary>
+        H = 36,
+        /// <summary>Identifies the <c>KEYCODE_I</c> Android key code.</summary>
+        I = 37,
+        /// <summary>Identifies the <c>KEYCODE_J</c> Android key code.</summary>
+        J = 38,
+        /// <summary>Identifies the <c>KEYCODE_K</c> Android key code.</summary>
+        K = 39,
+        /// <summary>Identifies the <c>KEYCODE_L</c> Android key code.</summary>
+        L = 40,
+        /// <summary>Identifies the <c>KEYCODE_M</c> Android key code.</summary>
+        M = 41,
+        /// <summary>Identifies the <c>KEYCODE_N</c> Android key code.</summary>
+        N = 42,
+        /// <summary>Identifies the <c>KEYCODE_O</c> Android key code.</summary>
+        O = 43,
+        /// <summary>Identifies the <c>KEYCODE_P</c> Android key code.</summary>
+        P = 44,
+        /// <summary>Identifies the <c>KEYCODE_Q</c> Android key code.</summary>
+        Q = 45,
+        /// <summary>Identifies the <c>KEYCODE_R</c> Android key code.</summary>
+        R = 46,
+        /// <summary>Identifies the <c>KEYCODE_S</c> Android key code.</summary>
+        S = 47,
+        /// <summary>Identifies the <c>KEYCODE_T</c> Android key code.</summary>
+        T = 48,
+        /// <summary>Identifies the <c>KEYCODE_U</c> Android key code.</summary>
+        U = 49,
+        /// <summary>Identifies the <c>KEYCODE_V</c> Android key code.</summary>
+        V = 50,
+        /// <summary>Identifies the <c>KEYCODE_W</c> Android key code.</summary>
+        W = 51,
+        /// <summary>Identifies the <c>KEYCODE_X</c> Android key code.</summary>
+        X = 52,
+        /// <summary>Identifies the <c>KEYCODE_Y</c> Android key code.</summary>
+        Y = 53,
+        /// <summary>Identifies the <c>KEYCODE_Z</c> Android key code.</summary>
+        Z = 54,
+        /// <summary>Identifies the <c>KEYCODE_COMMA</c> Android key code.</summary>
+        Comma = 55,
+        /// <summary>Identifies the <c>KEYCODE_PERIOD</c> Android key code.</summary>
+        Period = 56,
+        /// <summary>Identifies the <c>KEYCODE_ALT_LEFT</c> Android key code.</summary>
+        AltLeft = 57,
+        /// <summary>Identifies the <c>KEYCODE_ALT_RIGHT</c> Android key code.</summary>
+        AltRight = 58,
+        /// <summary>Identifies the <c>KEYCODE_SHIFT_LEFT</c> Android key code.</summary>
+        ShiftLeft = 59,
+        /// <summary>Identifies the <c>KEYCODE_SHIFT_RIGHT</c> Android key code.</summary>
+        ShiftRight = 60,
+        /// <summary>Identifies the <c>KEYCODE_TAB</c> Android key code.</summary>
+        Tab = 61,
+        /// <summary>Identifies the <c>KEYCODE_SPACE</c> Android key code.</summary>
+        Space = 62,
+        /// <summary>Identifies the <c>KEYCODE_SYM</c> Android key code.</summary>
+        Sym = 63,
+        /// <summary>Identifies the <c>KEYCODE_EXPLORER</c> Android key code.</summary>
+        Explorer = 64,
+        /// <summary>Identifies the <c>KEYCODE_ENVELOPE</c> Android key code.</summary>
+        Envelope = 65,
+        /// <summary>Identifies the <c>KEYCODE_ENTER</c> Android key code.</summary>
+        Enter = 66,
+        /// <summary>Identifies the <c>KEYCODE_DEL</c> Android key code.</summary>
+        Del = 67,
+        /// <summary>Identifies the <c>KEYCODE_GRAVE</c> Android key code.</summary>
+        Grave = 68,
+        /// <summary>Identifies the <c>KEYCODE_MINUS</c> Android key code.</summary>
+        Minus = 69,
+        /// <summary>Identifies the <c>KEYCODE_EQUALS</c> Android key code.</summary>
+        Equals = 70,
+        /// <summary>Identifies the <c>KEYCODE_LEFT_BRACKET</c> Android key code.</summary>
+        LeftBracket = 71,
+        /// <summary>Identifies the <c>KEYCODE_RIGHT_BRACKET</c> Android key code.</summary>
+        RightBracket = 72,
+        /// <summary>Identifies the <c>KEYCODE_BACKSLASH</c> Android key code.</summary>
+        Backslash = 73,
+        /// <summary>Identifies the <c>KEYCODE_SEMICOLON</c> Android key code.</summary>
+        Semicolon = 74,
+        /// <summary>Identifies the <c>KEYCODE_APOSTROPHE</c> Android key code.</summary>
+        Apostrophe = 75,
+        /// <summary>Identifies the <c>KEYCODE_SLASH</c> Android key code.</summary>
+        Slash = 76,
+        /// <summary>Identifies the <c>KEYCODE_AT</c> Android key code.</summary>
+        At = 77,
+        /// <summary>Identifies the <c>KEYCODE_NUM</c> Android key code.</summary>
+        Num = 78,
+        /// <summary>Identifies the <c>KEYCODE_HEADSETHOOK</c> Android key code.</summary>
+        Headsethook = 79,
+        /// <summary>Identifies the <c>KEYCODE_FOCUS</c> Android key code.</summary>
+        Focus = 80,
+        /// <summary>Identifies the <c>KEYCODE_PLUS</c> Android key code.</summary>
+        Plus = 81,
+        /// <summary>Identifies the <c>KEYCODE_MENU</c> Android key code.</summary>
+        Menu = 82,
+        /// <summary>Identifies the <c>KEYCODE_NOTIFICATION</c> Android key code.</summary>
+        Notification = 83,
+        /// <summary>Identifies the <c>KEYCODE_SEARCH</c> Android key code.</summary>
+        Search = 84,
+        /// <summary>Identifies the <c>KEYCODE_MEDIA_PLAY_PAUSE</c> Android key code.</summary>
+        MediaPlayPause = 85,
+        /// <summary>Identifies the <c>KEYCODE_MEDIA_STOP</c> Android key code.</summary>
+        MediaStop = 86,
+        /// <summary>Identifies the <c>KEYCODE_MEDIA_NEXT</c> Android key code.</summary>
+        MediaNext = 87,
+        /// <summary>Identifies the <c>KEYCODE_MEDIA_PREVIOUS</c> Android key code.</summary>
+        MediaPrevious = 88,
+        /// <summary>Identifies the <c>KEYCODE_MEDIA_REWIND</c> Android key code.</summary>
+        MediaRewind = 89,
+        /// <summary>Identifies the <c>KEYCODE_MEDIA_FAST_FORWARD</c> Android key code.</summary>
+        MediaFastForward = 90,
+        /// <summary>Identifies the <c>KEYCODE_MUTE</c> Android key code.</summary>
+        Mute = 91,
+        /// <summary>Identifies the <c>KEYCODE_PAGE_UP</c> Android key code.</summary>
+        PageUp = 92,
+        /// <summary>Identifies the <c>KEYCODE_PAGE_DOWN</c> Android key code.</summary>
+        PageDown = 93,
+        /// <summary>Identifies the <c>KEYCODE_PICTSYMBOLS</c> Android key code.</summary>
+        Pictsymbols = 94,
+        /// <summary>Identifies the <c>KEYCODE_SWITCH_CHARSET</c> Android key code.</summary>
+        SwitchCharset = 95,
+        /// <summary>Identifies the <c>KEYCODE_BUTTON_A</c> Android key code.</summary>
+        ButtonA = 96,
+        /// <summary>Identifies the <c>KEYCODE_BUTTON_B</c> Android key code.</summary>
+        ButtonB = 97,
+        /// <summary>Identifies the <c>KEYCODE_BUTTON_C</c> Android key code.</summary>
+        ButtonC = 98,
+        /// <summary>Identifies the <c>KEYCODE_BUTTON_X</c> Android key code.</summary>
+        ButtonX = 99,
+        /// <summary>Identifies the <c>KEYCODE_BUTTON_Y</c> Android key code.</summary>
+        ButtonY = 100,
+        /// <summary>Identifies the <c>KEYCODE_BUTTON_Z</c> Android key code.</summary>
+        ButtonZ = 101,
+        /// <summary>Identifies the <c>KEYCODE_BUTTON_L1</c> Android key code.</summary>
+        ButtonL1 = 102,
+        /// <summary>Identifies the <c>KEYCODE_BUTTON_R1</c> Android key code.</summary>
+        ButtonR1 = 103,
+        /// <summary>Identifies the <c>KEYCODE_BUTTON_L2</c> Android key code.</summary>
+        ButtonL2 = 104,
+        /// <summary>Identifies the <c>KEYCODE_BUTTON_R2</c> Android key code.</summary>
+        ButtonR2 = 105,
+        /// <summary>Identifies the <c>KEYCODE_BUTTON_THUMBL</c> Android key code.</summary>
+        ButtonThumbl = 106,
+        /// <summary>Identifies the <c>KEYCODE_BUTTON_THUMBR</c> Android key code.</summary>
+        ButtonThumbr = 107,
+        /// <summary>Identifies the <c>KEYCODE_BUTTON_START</c> Android key code.</summary>
+        ButtonStart = 108,
+        /// <summary>Identifies the <c>KEYCODE_BUTTON_SELECT</c> Android key code.</summary>
+        ButtonSelect = 109,
+        /// <summary>Identifies the <c>KEYCODE_BUTTON_MODE</c> Android key code.</summary>
+        ButtonMode = 110,
+        /// <summary>Identifies the <c>KEYCODE_ESCAPE</c> Android key code.</summary>
+        Escape = 111,
+        /// <summary>Identifies the <c>KEYCODE_FORWARD_DEL</c> Android key code.</summary>
+        ForwardDel = 112,
+        /// <summary>Identifies the <c>KEYCODE_CTRL_LEFT</c> Android key code.</summary>
+        CtrlLeft = 113,
+        /// <summary>Identifies the <c>KEYCODE_CTRL_RIGHT</c> Android key code.</summary>
+        CtrlRight = 114,
+        /// <summary>Identifies the <c>KEYCODE_CAPS_LOCK</c> Android key code.</summary>
+        CapsLock = 115,
+        /// <summary>Identifies the <c>KEYCODE_SCROLL_LOCK</c> Android key code.</summary>
+        ScrollLock = 116,
+        /// <summary>Identifies the <c>KEYCODE_META_LEFT</c> Android key code.</summary>
+        MetaLeft = 117,
+        /// <summary>Identifies the <c>KEYCODE_META_RIGHT</c> Android key code.</summary>
+        MetaRight = 118,
+        /// <summary>Identifies the <c>KEYCODE_FUNCTION</c> Android key code.</summary>
+        Function = 119,
+        /// <summary>Identifies the <c>KEYCODE_SYSRQ</c> Android key code.</summary>
+        Sysrq = 120,
+        /// <summary>Identifies the <c>KEYCODE_BREAK</c> Android key code.</summary>
+        Break = 121,
+        /// <summary>Identifies the <c>KEYCODE_MOVE_HOME</c> Android key code.</summary>
+        MoveHome = 122,
+        /// <summary>Identifies the <c>KEYCODE_MOVE_END</c> Android key code.</summary>
+        MoveEnd = 123,
+        /// <summary>Identifies the <c>KEYCODE_INSERT</c> Android key code.</summary>
+        Insert = 124,
+        /// <summary>Identifies the <c>KEYCODE_FORWARD</c> Android key code.</summary>
+        Forward = 125,
+        /// <summary>Identifies the <c>KEYCODE_MEDIA_PLAY</c> Android key code.</summary>
+        MediaPlay = 126,
+        /// <summary>Identifies the <c>KEYCODE_MEDIA_PAUSE</c> Android key code.</summary>
+        MediaPause = 127,
+        /// <summary>Identifies the <c>KEYCODE_MEDIA_CLOSE</c> Android key code.</summary>
+        MediaClose = 128,
+        /// <summary>Identifies the <c>KEYCODE_MEDIA_EJECT</c> Android key code.</summary>
+        MediaEject = 129,
+        /// <summary>Identifies the <c>KEYCODE_MEDIA_RECORD</c> Android key code.</summary>
+        MediaRecord = 130,
+        /// <summary>Identifies the <c>KEYCODE_F1</c> Android key code.</summary>
+        F1 = 131,
+        /// <summary>Identifies the <c>KEYCODE_F2</c> Android key code.</summary>
+        F2 = 132,
+        /// <summary>Identifies the <c>KEYCODE_F3</c> Android key code.</summary>
+        F3 = 133,
+        /// <summary>Identifies the <c>KEYCODE_F4</c> Android key code.</summary>
+        F4 = 134,
+        /// <summary>Identifies the <c>KEYCODE_F5</c> Android key code.</summary>
+        F5 = 135,
+        /// <summary>Identifies the <c>KEYCODE_F6</c> Android key code.</summary>
+        F6 = 136,
+        /// <summary>Identifies the <c>KEYCODE_F7</c> Android key code.</summary>
+        F7 = 137,
+        /// <summary>Identifies the <c>KEYCODE_F8</c> Android key code.</summary>
+        F8 = 138,
+        /// <summary>Identifies the <c>KEYCODE_F9</c> Android key code.</summary>
+        F9 = 139,
+        /// <summary>Identifies the <c>KEYCODE_F10</c> Android key code.</summary>
+        F10 = 140,
+        /// <summary>Identifies the <c>KEYCODE_F11</c> Android key code.</summary>
+        F11 = 141,
+        /// <summary>Identifies the <c>KEYCODE_F12</c> Android key code.</summary>
+        F12 = 142,
+        /// <summary>Identifies the <c>KEYCODE_NUM_LOCK</c> Android key code.</summary>
+        NumLock = 143,
+        /// <summary>Identifies the <c>KEYCODE_NUMPAD_0</c> Android key code.</summary>
+        Numpad0 = 144,
+        /// <summary>Identifies the <c>KEYCODE_NUMPAD_1</c> Android key code.</summary>
+        Numpad1 = 145,
+        /// <summary>Identifies the <c>KEYCODE_NUMPAD_2</c> Android key code.</summary>
+        Numpad2 = 146,
+        /// <summary>Identifies the <c>KEYCODE_NUMPAD_3</c> Android key code.</summary>
+        Numpad3 = 147,
+        /// <summary>Identifies the <c>KEYCODE_NUMPAD_4</c> Android key code.</summary>
+        Numpad4 = 148,
+        /// <summary>Identifies the <c>KEYCODE_NUMPAD_5</c> Android key code.</summary>
+        Numpad5 = 149,
+        /// <summary>Identifies the <c>KEYCODE_NUMPAD_6</c> Android key code.</summary>
+        Numpad6 = 150,
+        /// <summary>Identifies the <c>KEYCODE_NUMPAD_7</c> Android key code.</summary>
+        Numpad7 = 151,
+        /// <summary>Identifies the <c>KEYCODE_NUMPAD_8</c> Android key code.</summary>
+        Numpad8 = 152,
+        /// <summary>Identifies the <c>KEYCODE_NUMPAD_9</c> Android key code.</summary>
+        Numpad9 = 153,
+        /// <summary>Identifies the <c>KEYCODE_NUMPAD_DIVIDE</c> Android key code.</summary>
+        NumpadDivide = 154,
+        /// <summary>Identifies the <c>KEYCODE_NUMPAD_MULTIPLY</c> Android key code.</summary>
+        NumpadMultiply = 155,
+        /// <summary>Identifies the <c>KEYCODE_NUMPAD_SUBTRACT</c> Android key code.</summary>
+        NumpadSubtract = 156,
+        /// <summary>Identifies the <c>KEYCODE_NUMPAD_ADD</c> Android key code.</summary>
+        NumpadAdd = 157,
+        /// <summary>Identifies the <c>KEYCODE_NUMPAD_DOT</c> Android key code.</summary>
+        NumpadDot = 158,
+        /// <summary>Identifies the <c>KEYCODE_NUMPAD_COMMA</c> Android key code.</summary>
+        NumpadComma = 159,
+        /// <summary>Identifies the <c>KEYCODE_NUMPAD_ENTER</c> Android key code.</summary>
+        NumpadEnter = 160,
+        /// <summary>Identifies the <c>KEYCODE_NUMPAD_EQUALS</c> Android key code.</summary>
+        NumpadEquals = 161,
+        /// <summary>Identifies the <c>KEYCODE_NUMPAD_LEFT_PAREN</c> Android key code.</summary>
+        NumpadLeftParen = 162,
+        /// <summary>Identifies the <c>KEYCODE_NUMPAD_RIGHT_PAREN</c> Android key code.</summary>
+        NumpadRightParen = 163,
+        /// <summary>Identifies the <c>KEYCODE_VOLUME_MUTE</c> Android key code.</summary>
+        VolumeMute = 164,
+        /// <summary>Identifies the <c>KEYCODE_INFO</c> Android key code.</summary>
+        Info = 165,
+        /// <summary>Identifies the <c>KEYCODE_CHANNEL_UP</c> Android key code.</summary>
+        ChannelUp = 166,
+        /// <summary>Identifies the <c>KEYCODE_CHANNEL_DOWN</c> Android key code.</summary>
+        ChannelDown = 167,
+        /// <summary>Identifies the <c>KEYCODE_ZOOM_IN</c> Android key code.</summary>
+        ZoomIn = 168,
+        /// <summary>Identifies the <c>KEYCODE_ZOOM_OUT</c> Android key code.</summary>
+        ZoomOut = 169,
+        /// <summary>Identifies the <c>KEYCODE_TV</c> Android key code.</summary>
+        Tv = 170,
+        /// <summary>Identifies the <c>KEYCODE_WINDOW</c> Android key code.</summary>
+        Window = 171,
+        /// <summary>Identifies the <c>KEYCODE_GUIDE</c> Android key code.</summary>
+        Guide = 172,
+        /// <summary>Identifies the <c>KEYCODE_DVR</c> Android key code.</summary>
+        Dvr = 173,
+        /// <summary>Identifies the <c>KEYCODE_BOOKMARK</c> Android key code.</summary>
+        Bookmark = 174,
+        /// <summary>Identifies the <c>KEYCODE_CAPTIONS</c> Android key code.</summary>
+        Captions = 175,
+        /// <summary>Identifies the <c>KEYCODE_SETTINGS</c> Android key code.</summary>
+        Settings = 176,
+        /// <summary>Identifies the <c>KEYCODE_TV_POWER</c> Android key code.</summary>
+        TvPower = 177,
+        /// <summary>Identifies the <c>KEYCODE_TV_INPUT</c> Android key code.</summary>
+        TvInput = 178,
+        /// <summary>Identifies the <c>KEYCODE_STB_POWER</c> Android key code.</summary>
+        StbPower = 179,
+        /// <summary>Identifies the <c>KEYCODE_STB_INPUT</c> Android key code.</summary>
+        StbInput = 180,
+        /// <summary>Identifies the <c>KEYCODE_AVR_POWER</c> Android key code.</summary>
+        AvrPower = 181,
+        /// <summary>Identifies the <c>KEYCODE_AVR_INPUT</c> Android key code.</summary>
+        AvrInput = 182,
+        /// <summary>Identifies the <c>KEYCODE_PROG_RED</c> Android key code.</summary>
+        ProgRed = 183,
+        /// <summary>Identifies the <c>KEYCODE_PROG_GREEN</c> Android key code.</summary>
+        ProgGreen = 184,
+        /// <summary>Identifies the <c>KEYCODE_PROG_YELLOW</c> Android key code.</summary>
+        ProgYellow = 185,
+        /// <summary>Identifies the <c>KEYCODE_PROG_BLUE</c> Android key code.</summary>
+        ProgBlue = 186,
+        /// <summary>Identifies the <c>KEYCODE_APP_SWITCH</c> Android key code.</summary>
+        AppSwitch = 187,
+        /// <summary>Identifies the <c>KEYCODE_BUTTON_1</c> Android key code.</summary>
+        Button1 = 188,
+        /// <summary>Identifies the <c>KEYCODE_BUTTON_2</c> Android key code.</summary>
+        Button2 = 189,
+        /// <summary>Identifies the <c>KEYCODE_BUTTON_3</c> Android key code.</summary>
+        Button3 = 190,
+        /// <summary>Identifies the <c>KEYCODE_BUTTON_4</c> Android key code.</summary>
+        Button4 = 191,
+        /// <summary>Identifies the <c>KEYCODE_BUTTON_5</c> Android key code.</summary>
+        Button5 = 192,
+        /// <summary>Identifies the <c>KEYCODE_BUTTON_6</c> Android key code.</summary>
+        Button6 = 193,
+        /// <summary>Identifies the <c>KEYCODE_BUTTON_7</c> Android key code.</summary>
+        Button7 = 194,
+        /// <summary>Identifies the <c>KEYCODE_BUTTON_8</c> Android key code.</summary>
+        Button8 = 195,
+        /// <summary>Identifies the <c>KEYCODE_BUTTON_9</c> Android key code.</summary>
+        Button9 = 196,
+        /// <summary>Identifies the <c>KEYCODE_BUTTON_10</c> Android key code.</summary>
+        Button10 = 197,
+        /// <summary>Identifies the <c>KEYCODE_BUTTON_11</c> Android key code.</summary>
+        Button11 = 198,
+        /// <summary>Identifies the <c>KEYCODE_BUTTON_12</c> Android key code.</summary>
+        Button12 = 199,
+        /// <summary>Identifies the <c>KEYCODE_BUTTON_13</c> Android key code.</summary>
+        Button13 = 200,
+        /// <summary>Identifies the <c>KEYCODE_BUTTON_14</c> Android key code.</summary>
+        Button14 = 201,
+        /// <summary>Identifies the <c>KEYCODE_BUTTON_15</c> Android key code.</summary>
+        Button15 = 202,
+        /// <summary>Identifies the <c>KEYCODE_BUTTON_16</c> Android key code.</summary>
+        Button16 = 203,
+        /// <summary>Identifies the <c>KEYCODE_LANGUAGE_SWITCH</c> Android key code.</summary>
+        LanguageSwitch = 204,
+        /// <summary>Identifies the <c>KEYCODE_MANNER_MODE</c> Android key code.</summary>
+        MannerMode = 205,
+        /// <summary>Identifies the <c>KEYCODE_3D_MODE</c> Android key code.</summary>
+        Key3DMode = 206,
+        /// <summary>Identifies the <c>KEYCODE_CONTACTS</c> Android key code.</summary>
+        Contacts = 207,
+        /// <summary>Identifies the <c>KEYCODE_CALENDAR</c> Android key code.</summary>
+        Calendar = 208,
+        /// <summary>Identifies the <c>KEYCODE_MUSIC</c> Android key code.</summary>
+        Music = 209,
+        /// <summary>Identifies the <c>KEYCODE_CALCULATOR</c> Android key code.</summary>
+        Calculator = 210,
+        /// <summary>Identifies the <c>KEYCODE_ZENKAKU_HANKAKU</c> Android key code.</summary>
+        ZenkakuHankaku = 211,
+        /// <summary>Identifies the <c>KEYCODE_EISU</c> Android key code.</summary>
+        Eisu = 212,
+        /// <summary>Identifies the <c>KEYCODE_MUHENKAN</c> Android key code.</summary>
+        Muhenkan = 213,
+        /// <summary>Identifies the <c>KEYCODE_HENKAN</c> Android key code.</summary>
+        Henkan = 214,
+        /// <summary>Identifies the <c>KEYCODE_KATAKANA_HIRAGANA</c> Android key code.</summary>
+        KatakanaHiragana = 215,
+        /// <summary>Identifies the <c>KEYCODE_YEN</c> Android key code.</summary>
+        Yen = 216,
+        /// <summary>Identifies the <c>KEYCODE_RO</c> Android key code.</summary>
+        Ro = 217,
+        /// <summary>Identifies the <c>KEYCODE_KANA</c> Android key code.</summary>
+        Kana = 218,
+        /// <summary>Identifies the <c>KEYCODE_ASSIST</c> Android key code.</summary>
+        Assist = 219,
+        /// <summary>Identifies the <c>KEYCODE_BRIGHTNESS_DOWN</c> Android key code.</summary>
+        BrightnessDown = 220,
+        /// <summary>Identifies the <c>KEYCODE_BRIGHTNESS_UP</c> Android key code.</summary>
+        BrightnessUp = 221,
+        /// <summary>Identifies the <c>KEYCODE_MEDIA_AUDIO_TRACK</c> Android key code.</summary>
+        MediaAudioTrack = 222,
+        /// <summary>Identifies the <c>KEYCODE_SLEEP</c> Android key code.</summary>
+        Sleep = 223,
+        /// <summary>Identifies the <c>KEYCODE_WAKEUP</c> Android key code.</summary>
+        Wakeup = 224,
+        /// <summary>Identifies the <c>KEYCODE_PAIRING</c> Android key code.</summary>
+        Pairing = 225,
+        /// <summary>Identifies the <c>KEYCODE_MEDIA_TOP_MENU</c> Android key code.</summary>
+        MediaTopMenu = 226,
+        /// <summary>Identifies the <c>KEYCODE_11</c> Android key code.</summary>
+        Num11 = 227,
+        /// <summary>Identifies the <c>KEYCODE_12</c> Android key code.</summary>
+        Num12 = 228,
+        /// <summary>Identifies the <c>KEYCODE_LAST_CHANNEL</c> Android key code.</summary>
+        LastChannel = 229,
+        /// <summary>Identifies the <c>KEYCODE_TV_DATA_SERVICE</c> Android key code.</summary>
+        TvDataService = 230,
+        /// <summary>Identifies the <c>KEYCODE_VOICE_ASSIST</c> Android key code.</summary>
+        VoiceAssist = 231,
+        /// <summary>Identifies the <c>KEYCODE_TV_RADIO_SERVICE</c> Android key code.</summary>
+        TvRadioService = 232,
+        /// <summary>Identifies the <c>KEYCODE_TV_TELETEXT</c> Android key code.</summary>
+        TvTeletext = 233,
+        /// <summary>Identifies the <c>KEYCODE_TV_NUMBER_ENTRY</c> Android key code.</summary>
+        TvNumberEntry = 234,
+        /// <summary>Identifies the <c>KEYCODE_TV_TERRESTRIAL_ANALOG</c> Android key code.</summary>
+        TvTerrestrialAnalog = 235,
+        /// <summary>Identifies the <c>KEYCODE_TV_TERRESTRIAL_DIGITAL</c> Android key code.</summary>
+        TvTerrestrialDigital = 236,
+        /// <summary>Identifies the <c>KEYCODE_TV_SATELLITE</c> Android key code.</summary>
+        TvSatellite = 237,
+        /// <summary>Identifies the <c>KEYCODE_TV_SATELLITE_BS</c> Android key code.</summary>
+        TvSatelliteBs = 238,
+        /// <summary>Identifies the <c>KEYCODE_TV_SATELLITE_CS</c> Android key code.</summary>
+        TvSatelliteCs = 239,
+        /// <summary>Identifies the <c>KEYCODE_TV_SATELLITE_SERVICE</c> Android key code.</summary>
+        TvSatelliteService = 240,
+        /// <summary>Identifies the <c>KEYCODE_TV_NETWORK</c> Android key code.</summary>
+        TvNetwork = 241,
+        /// <summary>Identifies the <c>KEYCODE_TV_ANTENNA_CABLE</c> Android key code.</summary>
+        TvAntennaCable = 242,
+        /// <summary>Identifies the <c>KEYCODE_TV_INPUT_HDMI_1</c> Android key code.</summary>
+        TvInputHdmi1 = 243,
+        /// <summary>Identifies the <c>KEYCODE_TV_INPUT_HDMI_2</c> Android key code.</summary>
+        TvInputHdmi2 = 244,
+        /// <summary>Identifies the <c>KEYCODE_TV_INPUT_HDMI_3</c> Android key code.</summary>
+        TvInputHdmi3 = 245,
+        /// <summary>Identifies the <c>KEYCODE_TV_INPUT_HDMI_4</c> Android key code.</summary>
+        TvInputHdmi4 = 246,
+        /// <summary>Identifies the <c>KEYCODE_TV_INPUT_COMPOSITE_1</c> Android key code.</summary>
+        TvInputComposite1 = 247,
+        /// <summary>Identifies the <c>KEYCODE_TV_INPUT_COMPOSITE_2</c> Android key code.</summary>
+        TvInputComposite2 = 248,
+        /// <summary>Identifies the <c>KEYCODE_TV_INPUT_COMPONENT_1</c> Android key code.</summary>
+        TvInputComponent1 = 249,
+        /// <summary>Identifies the <c>KEYCODE_TV_INPUT_COMPONENT_2</c> Android key code.</summary>
+        TvInputComponent2 = 250,
+        /// <summary>Identifies the <c>KEYCODE_TV_INPUT_VGA_1</c> Android key code.</summary>
+        TvInputVga1 = 251,
+        /// <summary>Identifies the <c>KEYCODE_TV_AUDIO_DESCRIPTION</c> Android key code.</summary>
+        TvAudioDescription = 252,
+        /// <summary>Identifies the <c>KEYCODE_TV_AUDIO_DESCRIPTION_MIX_UP</c> Android key code.</summary>
+        TvAudioDescriptionMixUp = 253,
+        /// <summary>Identifies the <c>KEYCODE_TV_AUDIO_DESCRIPTION_MIX_DOWN</c> Android key code.</summary>
+        TvAudioDescriptionMixDown = 254,
+        /// <summary>Identifies the <c>KEYCODE_TV_ZOOM_MODE</c> Android key code.</summary>
+        TvZoomMode = 255,
+        /// <summary>Identifies the <c>KEYCODE_TV_CONTENTS_MENU</c> Android key code.</summary>
+        TvContentsMenu = 256,
+        /// <summary>Identifies the <c>KEYCODE_TV_MEDIA_CONTEXT_MENU</c> Android key code.</summary>
+        TvMediaContextMenu = 257,
+        /// <summary>Identifies the <c>KEYCODE_TV_TIMER_PROGRAMMING</c> Android key code.</summary>
+        TvTimerProgramming = 258,
+        /// <summary>Identifies the <c>KEYCODE_HELP</c> Android key code.</summary>
+        Help = 259,
+        /// <summary>Identifies the <c>KEYCODE_NAVIGATE_PREVIOUS</c> Android key code.</summary>
+        NavigatePrevious = 260,
+        /// <summary>Identifies the <c>KEYCODE_NAVIGATE_NEXT</c> Android key code.</summary>
+        NavigateNext = 261,
+        /// <summary>Identifies the <c>KEYCODE_NAVIGATE_IN</c> Android key code.</summary>
+        NavigateIn = 262,
+        /// <summary>Identifies the <c>KEYCODE_NAVIGATE_OUT</c> Android key code.</summary>
+        NavigateOut = 263,
+        /// <summary>Identifies the <c>KEYCODE_STEM_PRIMARY</c> Android key code.</summary>
+        StemPrimary = 264,
+        /// <summary>Identifies the <c>KEYCODE_STEM_1</c> Android key code.</summary>
+        Stem1 = 265,
+        /// <summary>Identifies the <c>KEYCODE_STEM_2</c> Android key code.</summary>
+        Stem2 = 266,
+        /// <summary>Identifies the <c>KEYCODE_STEM_3</c> Android key code.</summary>
+        Stem3 = 267,
+        /// <summary>Identifies the <c>KEYCODE_DPAD_UP_LEFT</c> Android key code.</summary>
+        DpadUpLeft = 268,
+        /// <summary>Identifies the <c>KEYCODE_DPAD_DOWN_LEFT</c> Android key code.</summary>
+        DpadDownLeft = 269,
+        /// <summary>Identifies the <c>KEYCODE_DPAD_UP_RIGHT</c> Android key code.</summary>
+        DpadUpRight = 270,
+        /// <summary>Identifies the <c>KEYCODE_DPAD_DOWN_RIGHT</c> Android key code.</summary>
+        DpadDownRight = 271,
+        /// <summary>Identifies the <c>KEYCODE_MEDIA_SKIP_FORWARD</c> Android key code.</summary>
+        MediaSkipForward = 272,
+        /// <summary>Identifies the <c>KEYCODE_MEDIA_SKIP_BACKWARD</c> Android key code.</summary>
+        MediaSkipBackward = 273,
+        /// <summary>Identifies the <c>KEYCODE_MEDIA_STEP_FORWARD</c> Android key code.</summary>
+        MediaStepForward = 274,
+        /// <summary>Identifies the <c>KEYCODE_MEDIA_STEP_BACKWARD</c> Android key code.</summary>
+        MediaStepBackward = 275,
+        /// <summary>Identifies the <c>KEYCODE_SOFT_SLEEP</c> Android key code.</summary>
+        SoftSleep = 276,
+        /// <summary>Identifies the <c>KEYCODE_CUT</c> Android key code.</summary>
+        Cut = 277,
+        /// <summary>Identifies the <c>KEYCODE_COPY</c> Android key code.</summary>
+        Copy = 278,
+        /// <summary>Identifies the <c>KEYCODE_PASTE</c> Android key code.</summary>
+        Paste = 279,
+        /// <summary>Identifies the <c>KEYCODE_SYSTEM_NAVIGATION_UP</c> Android key code.</summary>
+        SystemNavigationUp = 280,
+        /// <summary>Identifies the <c>KEYCODE_SYSTEM_NAVIGATION_DOWN</c> Android key code.</summary>
+        SystemNavigationDown = 281,
+        /// <summary>Identifies the <c>KEYCODE_SYSTEM_NAVIGATION_LEFT</c> Android key code.</summary>
+        SystemNavigationLeft = 282,
+        /// <summary>Identifies the <c>KEYCODE_SYSTEM_NAVIGATION_RIGHT</c> Android key code.</summary>
+        SystemNavigationRight = 283,
+        /// <summary>Identifies the <c>KEYCODE_ALL_APPS</c> Android key code.</summary>
+        AllApps = 284,
+        /// <summary>Identifies the <c>KEYCODE_REFRESH</c> Android key code.</summary>
+        Refresh = 285,
+        /// <summary>Identifies the <c>KEYCODE_THUMBS_UP</c> Android key code.</summary>
+        ThumbsUp = 286,
+        /// <summary>Identifies the <c>KEYCODE_THUMBS_DOWN</c> Android key code.</summary>
+        ThumbsDown = 287,
+        /// <summary>Identifies the <c>KEYCODE_PROFILE_SWITCH</c> Android key code.</summary>
+        ProfileSwitch = 288,
+        /// <summary>Identifies the <c>KEYCODE_VIDEO_APP_1</c> Android key code.</summary>
+        VideoApp1 = 289,
+        /// <summary>Identifies the <c>KEYCODE_VIDEO_APP_2</c> Android key code.</summary>
+        VideoApp2 = 290,
+        /// <summary>Identifies the <c>KEYCODE_VIDEO_APP_3</c> Android key code.</summary>
+        VideoApp3 = 291,
+        /// <summary>Identifies the <c>KEYCODE_VIDEO_APP_4</c> Android key code.</summary>
+        VideoApp4 = 292,
+        /// <summary>Identifies the <c>KEYCODE_VIDEO_APP_5</c> Android key code.</summary>
+        VideoApp5 = 293,
+        /// <summary>Identifies the <c>KEYCODE_VIDEO_APP_6</c> Android key code.</summary>
+        VideoApp6 = 294,
+        /// <summary>Identifies the <c>KEYCODE_VIDEO_APP_7</c> Android key code.</summary>
+        VideoApp7 = 295,
+        /// <summary>Identifies the <c>KEYCODE_VIDEO_APP_8</c> Android key code.</summary>
+        VideoApp8 = 296,
+        /// <summary>Identifies the <c>KEYCODE_FEATURED_APP_1</c> Android key code.</summary>
+        FeaturedApp1 = 297,
+        /// <summary>Identifies the <c>KEYCODE_FEATURED_APP_2</c> Android key code.</summary>
+        FeaturedApp2 = 298,
+        /// <summary>Identifies the <c>KEYCODE_FEATURED_APP_3</c> Android key code.</summary>
+        FeaturedApp3 = 299,
+        /// <summary>Identifies the <c>KEYCODE_FEATURED_APP_4</c> Android key code.</summary>
+        FeaturedApp4 = 300,
+        /// <summary>Identifies the <c>KEYCODE_DEMO_APP_1</c> Android key code.</summary>
+        DemoApp1 = 301,
+        /// <summary>Identifies the <c>KEYCODE_DEMO_APP_2</c> Android key code.</summary>
+        DemoApp2 = 302,
+        /// <summary>Identifies the <c>KEYCODE_DEMO_APP_3</c> Android key code.</summary>
+        DemoApp3 = 303,
+        /// <summary>Identifies the <c>KEYCODE_DEMO_APP_4</c> Android key code.</summary>
+        DemoApp4 = 304,
+        /// <summary>Identifies the <c>KEYCODE_KEYBOARD_BACKLIGHT_DOWN</c> Android key code.</summary>
+        KeyboardBacklightDown = 305,
+        /// <summary>Identifies the <c>KEYCODE_KEYBOARD_BACKLIGHT_UP</c> Android key code.</summary>
+        KeyboardBacklightUp = 306,
+        /// <summary>Identifies the <c>KEYCODE_KEYBOARD_BACKLIGHT_TOGGLE</c> Android key code.</summary>
+        KeyboardBacklightToggle = 307,
+        /// <summary>Identifies the <c>KEYCODE_STYLUS_BUTTON_PRIMARY</c> Android key code.</summary>
+        StylusButtonPrimary = 308,
+        /// <summary>Identifies the <c>KEYCODE_STYLUS_BUTTON_SECONDARY</c> Android key code.</summary>
+        StylusButtonSecondary = 309,
+        /// <summary>Identifies the <c>KEYCODE_STYLUS_BUTTON_TERTIARY</c> Android key code.</summary>
+        StylusButtonTertiary = 310,
+        /// <summary>Identifies the <c>KEYCODE_STYLUS_BUTTON_TAIL</c> Android key code.</summary>
+        StylusButtonTail = 311,
+        /// <summary>Identifies the <c>KEYCODE_RECENT_APPS</c> Android key code.</summary>
+        RecentApps = 312,
+        /// <summary>Identifies the <c>KEYCODE_MACRO_1</c> Android key code.</summary>
+        Macro1 = 313,
+        /// <summary>Identifies the <c>KEYCODE_MACRO_2</c> Android key code.</summary>
+        Macro2 = 314,
+        /// <summary>Identifies the <c>KEYCODE_MACRO_3</c> Android key code.</summary>
+        Macro3 = 315,
+        /// <summary>Identifies the <c>KEYCODE_MACRO_4</c> Android key code.</summary>
+        Macro4 = 316,
+        /// <summary>Identifies the <c>KEYCODE_EMOJI_PICKER</c> Android key code.</summary>
+        EmojiPicker = 317,
+        /// <summary>Identifies the <c>KEYCODE_SCREENSHOT</c> Android key code.</summary>
+        Screenshot = 318,
+        /// <summary>Identifies the <c>KEYCODE_DICTATE</c> Android key code.</summary>
+        Dictate = 319,
+        /// <summary>Identifies the <c>KEYCODE_NEW</c> Android key code.</summary>
+        New = 320,
+        /// <summary>Identifies the <c>KEYCODE_CLOSE</c> Android key code.</summary>
+        Close = 321,
+        /// <summary>Identifies the <c>KEYCODE_DO_NOT_DISTURB</c> Android key code.</summary>
+        DoNotDisturb = 322,
+        /// <summary>Identifies the <c>KEYCODE_PRINT</c> Android key code.</summary>
+        Print = 323,
+        /// <summary>Identifies the <c>KEYCODE_LOCK</c> Android key code.</summary>
+        Lock = 324,
+        /// <summary>Identifies the <c>KEYCODE_FULLSCREEN</c> Android key code.</summary>
+        Fullscreen = 325,
+        /// <summary>Identifies the <c>KEYCODE_F13</c> Android key code.</summary>
+        F13 = 326,
+        /// <summary>Identifies the <c>KEYCODE_F14</c> Android key code.</summary>
+        F14 = 327,
+        /// <summary>Identifies the <c>KEYCODE_F15</c> Android key code.</summary>
+        F15 = 328,
+        /// <summary>Identifies the <c>KEYCODE_F16</c> Android key code.</summary>
+        F16 = 329,
+        /// <summary>Identifies the <c>KEYCODE_F17</c> Android key code.</summary>
+        F17 = 330,
+        /// <summary>Identifies the <c>KEYCODE_F18</c> Android key code.</summary>
+        F18 = 331,
+        /// <summary>Identifies the <c>KEYCODE_F19</c> Android key code.</summary>
+        F19 = 332,
+        /// <summary>Identifies the <c>KEYCODE_F20</c> Android key code.</summary>
+        F20 = 333,
+        /// <summary>Identifies the <c>KEYCODE_F21</c> Android key code.</summary>
+        F21 = 334,
+        /// <summary>Identifies the <c>KEYCODE_F22</c> Android key code.</summary>
+        F22 = 335,
+        /// <summary>Identifies the <c>KEYCODE_F23</c> Android key code.</summary>
+        F23 = 336,
+        /// <summary>Identifies the <c>KEYCODE_F24</c> Android key code.</summary>
+        F24 = 337,
     }
 }

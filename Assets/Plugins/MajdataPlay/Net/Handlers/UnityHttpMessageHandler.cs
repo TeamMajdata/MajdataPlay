@@ -49,7 +49,11 @@ namespace MajdataPlay.Net.Handlers
 
                 foreach (var kv in uwr.GetResponseHeaders())
                 {
-                    response.Headers.TryAddWithoutValidation(kv.Key, kv.Value);
+                    // Content headers such as Content-Type are rejected by the response headers and belong to the content.
+                    if (!response.Headers.TryAddWithoutValidation(kv.Key, kv.Value))
+                    {
+                        response.Content?.Headers.TryAddWithoutValidation(kv.Key, kv.Value);
+                    }
                 }
 
                 response.RequestMessage = request;
@@ -66,9 +70,9 @@ namespace MajdataPlay.Net.Handlers
 
             if (request.Content != null)
             {
-                var contentLength = request.Content.Headers.ContentLength ?? 0;
+                // Size the upload from the body itself: Content-Length is absent for content of unknown length.
                 var body = await request.Content.ReadAsByteArrayAsync();
-                var buffer = new NativeArray<byte>((int)contentLength, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
+                var buffer = new NativeArray<byte>(body.Length, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
                 buffer.CopyFrom(body);
 
                 uwr = new UnityWebRequest(request.RequestUri, method)

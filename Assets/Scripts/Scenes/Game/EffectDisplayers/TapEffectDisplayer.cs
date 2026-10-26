@@ -2,6 +2,7 @@
 using MajdataPlay.Numerics;
 using MajdataPlay.Scenes.Game.Notes;
 using MajdataPlay.Scenes.Game.Notes.Controllers;
+using MajdataPlay.Scenes.Game.Utils;
 using MajdataPlay.Utils;
 using System.Runtime.CompilerServices;
 using Unity.IL2CPP.CompilerServices;
@@ -14,17 +15,24 @@ namespace MajdataPlay.Scenes.Game
     [Il2CppSetOption(Option.ArrayBoundsChecks, false)]
     internal class TapEffectDisplayer : MonoBehaviour
     {
+        /// <summary>
+        /// Gets the world position of the judgment effect.
+        /// </summary>
         public Vector3 Position => effectParent.transform.position;
+        /// <summary>
+        /// Gets the local position or updates its X and Y coordinates and the text layout while preserving sorting depth.
+        /// </summary>
         public Vector3 LocalPosition
         {
             get => effectParent.transform.localPosition;
             set
             {
-                effectParent.transform.localPosition = value;
+                NoteHelper.Sorting.SetLocalPosition(effectParent.transform, value);
                 //perfectDisplayer.transform.localPosition = value;
                 //greatDisplayer.transform.localPosition = value;
                 //goodDisplayer.transform.localPosition = value;
                 var effectPosition = value;
+                effectPosition.z = 0f;
                 var textDistance = 1f * (2 - DistanceRatio);
                 var fastLateDistance = textDistance + 0.66f;
 
@@ -73,6 +81,7 @@ namespace MajdataPlay.Scenes.Game
         {
             Reset();
             var effectPosition = effectParent.transform.localPosition;
+            effectPosition.z = 0f;
             var textDistance = 1f * (2 - DistanceRatio);
             var fastLateDistance = textDistance + 0.66f;
 

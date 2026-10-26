@@ -110,7 +110,13 @@ namespace MajdataPlay.Scenes.Game.Parsing
         public static void NodeToNode(SlidePathConstructor constructor, Command last, Command current)
         {
             if (Command.IsSame(last, current)) return;
-            constructor.LineToPoint(GetNodePosition(current));
+            var target = GetNodePosition(current);
+            // Different commands can name the same point ("A3" then "K3"); a zero-length line has no tangent.
+            if ((target - GetNodePosition(last)).Magnitude < 1e-6)
+            {
+                return;
+            }
+            constructor.LineToPoint(target);
         }
 
         public static void NodeToOrbit(SlidePathConstructor constructor, Command last, Command current)

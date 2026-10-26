@@ -1,0 +1,137 @@
+using System;
+using UnityEngine;
+
+#nullable enable
+
+namespace __ROOT_NAMESPACE__
+{
+    /// <summary>
+    /// Owns a Java throwable that can be thrown and caught as a managed exception.
+    /// </summary>
+    /// <remarks>
+    /// Generated java.lang.Throwable wrappers derive from this type. Their Java inheritance
+    /// hierarchy is preserved below Throwable while this root supplies CLR Exception behavior.
+    /// The live throwable must be disposed on the Unity main thread or a JVM-attached thread.
+    /// The message includes the original Java stack trace when diagnostics succeed.
+    /// Unity class resolution may separately throw UnityEngine.AndroidJavaException.
+    /// </remarks>
+    public partial class JavaInvocationException : Exception, IJavaObject
+    {
+        /// <summary>Stores the owned or borrowed Java throwable reference, when one was captured.</summary>
+        private readonly JavaObjectReference? _reference;
+
+        /// <summary>Stores the recovered original Java description and stack trace.</summary>
+        private string? _javaMessage;
+
+        /// <summary>Gets the actual Java binary class name of the captured throwable.</summary>
+        public string JavaClassName { get; private set; } = "java.lang.Throwable";
+
+        /// <summary>
+        /// Gets the original Java stack trace, or an empty string if diagnostics failed.
+        /// </summary>
+        public string JavaStackTrace { get; private set; } = string.Empty;
+
+        /// <summary>Gets the original Java description and stack trace when they were captured.</summary>
+        public override string Message => _javaMessage ?? base.Message;
+
+        /// <summary>Gets the live Java throwable reference retained by this exception.</summary>
+        /// <exception cref="ObjectDisposedException">The throwable wrapper has been disposed.</exception>
+        /// <exception cref="InvalidOperationException">This diagnostic-only exception has no Java reference.</exception>
+        public AndroidJavaObject JavaReference => _reference?.JavaReference
+            ?? throw new InvalidOperationException("No Java throwable reference was captured for this exception.");
+
+        /// <summary>Adopts or borrows an existing Java throwable for a generated exception wrapper.</summary>
+        /// <param name="javaReference">The non-null Java throwable reference.</param>
+        /// <param name="ownsReference">Whether disposal must release the reference.</param>
+        /// <exception cref="ArgumentNullException">The reference is null.</exception>
+        internal JavaInvocationException(AndroidJavaObject javaReference, bool ownsReference = true)
+            : base("Java exception during generated JNI invocation.")
+        {
+            _reference = new JavaObjectReference(javaReference, ownsReference);
+        }
+
+        /// <summary>Constructs a Java throwable through its exact Java constructor descriptor.</summary>
+        /// <param name="className">The Java throwable's binary class name.</param>
+        /// <param name="descriptor">The complete Java constructor descriptor.</param>
+        /// <param name="arguments">The constructor arguments in Java declaration order.</param>
+        /// <exception cref="PlatformNotSupportedException">Execution is outside an Android player.</exception>
+        /// <exception cref="ArgumentException">A Java name, descriptor, or argument is invalid.</exception>
+        /// <exception cref="AndroidJavaException">Unity cannot resolve the Java class.</exception>
+        /// <exception cref="JavaInvocationException">Java raises an exception during construction.</exception>
+        /// <exception cref="InvalidOperationException">JNI cannot construct the requested throwable.</exception>
+        protected JavaInvocationException(string className, string descriptor, params object?[] arguments)
+            : this(AndroidJni.Construct(className, descriptor, arguments), ownsReference: true)
+        {
+            JavaClassName = className;
+        }
+
+        /// <summary>
+        /// Initializes an invocation failure with the Java description and stack trace.
+        /// </summary>
+        /// <param name="message">The original Java throwable's description.</param>
+        /// <param name="javaStackTrace">The recovered Java stack trace, or an empty string.</param>
+        /// <exception cref="ArgumentNullException">Either diagnostic string is null.</exception>
+        public JavaInvocationException(string message, string javaStackTrace)
+            : base((message ?? throw new ArgumentNullException(nameof(message)))
+                + Environment.NewLine + (javaStackTrace ?? throw new ArgumentNullException(nameof(javaStackTrace))))
+        {
+            JavaStackTrace = javaStackTrace;
+        }
+
+        /// <summary>Attaches diagnostics captured before the original JNI local reference was released.</summary>
+        /// <param name="className">The actual Java throwable class name.</param>
+        /// <param name="message">The original Java throwable description.</param>
+        /// <param name="javaStackTrace">The recovered Java stack trace.</param>
+        internal void SetJavaDetails(string className, string message, string javaStackTrace)
+        {
+            JavaClassName = className;
+            JavaStackTrace = javaStackTrace;
+            _javaMessage = message + Environment.NewLine + javaStackTrace;
+        }
+
+        /// <summary>Compares a retained throwable using Java virtual equality.</summary>
+        /// <param name="obj">Another Java wrapper, or an unrelated managed value.</param>
+        /// <returns>True for managed identity or Java equality; otherwise false.</returns>
+        /// <exception cref="ObjectDisposedException">A compared Java reference has been disposed.</exception>
+        /// <exception cref="PlatformNotSupportedException">JNI equality is requested outside Android.</exception>
+        /// <exception cref="AndroidJavaException">Unity cannot resolve Java equality metadata.</exception>
+        /// <exception cref="JavaInvocationException">Java raises an exception during equality.</exception>
+        /// <exception cref="InvalidOperationException">JNI cannot resolve the equals method.</exception>
+        public override bool Equals(object? obj)
+        {
+            return ReferenceEquals(this, obj) || (_reference is not null && _reference.Equals(obj));
+        }
+
+        /// <summary>Returns Java virtual hashCode for retained throwables and managed identity otherwise.</summary>
+        /// <returns>The retained Java object's hash code, or this diagnostic exception's managed hash code.</returns>
+        /// <exception cref="ObjectDisposedException">The retained Java reference is disposed.</exception>
+        /// <exception cref="PlatformNotSupportedException">JNI hashing is requested outside Android.</exception>
+        /// <exception cref="AndroidJavaException">Unity cannot resolve Java hashing metadata.</exception>
+        /// <exception cref="JavaInvocationException">Java raises an exception while hashing.</exception>
+        /// <exception cref="InvalidOperationException">JNI cannot resolve hashCode.</exception>
+        public override int GetHashCode()
+        {
+            return _reference?.GetHashCode() ?? base.GetHashCode();
+        }
+
+        /// <summary>Formats a retained throwable through Java virtual toString.</summary>
+        /// <returns>The Java representation, or the managed representation for a diagnostic-only exception.</returns>
+        /// <exception cref="ObjectDisposedException">The retained Java reference is disposed.</exception>
+        /// <exception cref="PlatformNotSupportedException">JNI formatting is requested outside Android.</exception>
+        /// <exception cref="AndroidJavaException">Unity cannot resolve Java formatting metadata.</exception>
+        /// <exception cref="JavaInvocationException">Java raises an exception during formatting.</exception>
+        /// <exception cref="InvalidOperationException">JNI cannot resolve toString.</exception>
+        public override string ToString()
+        {
+            return _reference is null ? base.ToString() : _reference.ToString() ?? string.Empty;
+        }
+
+        /// <summary>Releases an owned throwable reference once or ends the current borrow.</summary>
+        /// <exception cref="PlatformNotSupportedException">An owned live reference is disposed outside Android.</exception>
+        public void Dispose()
+        {
+            _reference?.Dispose();
+            GC.SuppressFinalize(this);
+        }
+    }
+}

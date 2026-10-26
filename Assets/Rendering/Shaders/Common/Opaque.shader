@@ -37,7 +37,7 @@ Shader "Maj/Common/Opaque"
             #pragma target 3.0
             #pragma multi_compile_instancing
 
-            #include "Assets/Rendering/MajRenderPipeline/Library/MajCore.hlsl"
+            #include "Assets/Plugins/MajdataPlay/Rendering/RenderPipelines/MajRenderPipeline/Library/MajCore.hlsl"
 
             TEXTURE2D(_MainTex);
             SAMPLER(sampler_MainTex);

@@ -68,7 +68,7 @@ Shader "Maj/Notes/FrontToBackSprite"
             #pragma shader_feature_local_fragment _ALPHA_CLIP
             #pragma multi_compile_instancing
 
-            #include "Assets/Rendering/MajRenderPipeline/Library/MajCore.hlsl"
+            #include "Assets/Plugins/MajdataPlay/Rendering/RenderPipelines/MajRenderPipeline/Library/MajCore.hlsl"
 
             TEXTURE2D(_MainTex);
             SAMPLER(sampler_MainTex);

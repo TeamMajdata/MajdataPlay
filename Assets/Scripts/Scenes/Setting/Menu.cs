@@ -3,7 +3,6 @@ using MajdataPlay.Editor;
 using MajdataPlay.Numerics;
 using MajdataPlay.Settings;
 using MajdataPlay.Settings.Runtime;
-using MajdataPlay.Utils;
 using System;
 using System.Collections.Generic;
 using System.Reflection;
@@ -15,14 +14,14 @@ namespace MajdataPlay.Scenes.Setting
 {
     public class Menu : MonoBehaviour
     {
-        const float OPTION_MOVE_DURATION = 0.18f;
-        const int VISIBLE_OPTION_RADIUS = 1;
-        const int RENDERING_ADVANCED_CLICK_COUNT = 10;
+        private const float OPTION_MOVE_DURATION = 0.18f;
+        private const int VISIBLE_OPTION_RADIUS = 1;
+        private const int RENDERING_ADVANCED_CLICK_COUNT = 10;
         // Three resting views plus one incoming/outgoing view during a slide.
-        internal const int OPTION_POOL_CAPACITY = VISIBLE_OPTION_RADIUS * 2 + 2;
-        static readonly Vector3 UNSELECTED_OPTION_SCALE = Vector3.one * 0.6f;
-        static readonly Color SELECTED_OPTION_COLOR = new(0.8823529f, 0.8078431f, 0.6392157f, 1f);
-        static readonly Color UNSELECTED_OPTION_COLOR = new(0.3607843f, 0.3098039f, 0.2862745f, 1f);
+        internal const int OPTION_POOL_CAPACITY = (VISIBLE_OPTION_RADIUS * 2) + 2;
+        private static readonly Vector3 s_unselectedOptionScale = Vector3.one * 0.6f;
+        private static readonly Color s_selectedOptionColor = new(0.8823529f, 0.8078431f, 0.6392157f, 1f);
+        private static readonly Color s_unselectedOptionColor = new(0.3607843f, 0.3098039f, 0.2862745f, 1f);
 
         [field: SerializeField, ReadOnlyField]
         public string Name { get; set; } = string.Empty;
@@ -33,34 +32,44 @@ namespace MajdataPlay.Scenes.Setting
         /// Option对象<para>e.g. GameSetting.Game</para>
         /// </summary>
         public object Instance { get; set; } = null!;
+        /// <summary>
+        /// Gets or sets how the menu title is localized. Without one the default <c>MAJSETTING_CATEGORY_{Name}</c> key is used.
+        /// </summary>
+        internal SettingTranslation? TitleTranslation { get; set; }
+        /// <summary>
+        /// Gets or sets when the menu itself is listed; <see cref="SettingManager"/> evaluates it against the setting root.
+        /// </summary>
+        internal SettingVisibility Visibility { get; set; } = SettingVisibility.Always;
 
         [SerializeField]
         [FormerlySerializedAs("optionPrefab")]
-        GameObject _optionPrefab = null!;
+        private GameObject _optionPrefab = null!;
 
-        SettingManager _manager = null!;
+        private SettingManager _manager = null!;
 
         [SerializeField, ReadOnlyField]
-        float _listCursorPos = 0;
+        private float _listCursorPos = 0;
 
-        PropertyInfo[] _properties = Array.Empty<PropertyInfo>();
-        OptionData[] _optionData = Array.Empty<OptionData>();
-        int[] _displayedPropertyIndices = Array.Empty<int>();
-        int _displayedOptionCount;
-        RenderingOptions? _renderingOptions;
-        bool _compatibilityMode;
-        bool _customRendering;
-        RenderingQualityOption _renderingQuality;
-        int _renderingAdvancedClickCount;
-        readonly Option?[] _visibleOptions = new Option?[OPTION_POOL_CAPACITY];
-        readonly int[] _visibleIndices = { -1, -1, -1, -1 };
+        private PropertyInfo[] _properties = Array.Empty<PropertyInfo>();
+        private OptionData[] _optionData = Array.Empty<OptionData>();
+        private SettingVisibility[] _optionVisibilities = Array.Empty<SettingVisibility>();
+        // The ShowInSettingUIWhen result of each property, as of the last evaluation.
+        private bool[] _optionConditionsMet = Array.Empty<bool>();
+        private int[] _displayedPropertyIndices = Array.Empty<int>();
+        private int _displayedOptionCount;
+        private RenderingOptions? _renderingOptions;
+        // The rendering preset as of the last visibility update; changing it restarts the hidden gesture.
+        private RenderingQualityOption _renderingQuality;
+        private int _renderingAdvancedClickCount;
+        private readonly Option?[] _visibleOptions = new Option?[OPTION_POOL_CAPACITY];
+        private readonly int[] _visibleIndices = { -1, -1, -1, -1 };
 
-        MotionHandle _optionAnim;
-        bool _isInitialized = false;
-        bool _needsLayout;
+        private MotionHandle _optionAnim;
+        private bool _isInitialized = false;
+        private bool _needsLayout;
 
-        readonly SettingConfig _settingConfig = MajEnv.RuntimeConfig?.Setting ?? new();
-        void Awake()
+        private readonly SettingConfig _settingConfig = MajEnv.RuntimeConfig?.Setting ?? new();
+        private void Awake()
         {
             _manager = FindAnyObjectByType<SettingManager>();
         }
@@ -73,10 +82,13 @@ namespace MajdataPlay.Scenes.Setting
 
             _properties = SettingReflectionCache.GetVisibleProperties(Instance.GetType());
             _optionData = new OptionData[_properties.Length];
+            _optionVisibilities = new SettingVisibility[_properties.Length];
+            _optionConditionsMet = new bool[_properties.Length];
             // Prepare every model while entering Setting, never inside a scrolling callback.
             for (var i = 0; i < _properties.Length; i++)
             {
                 _optionData[i] = new OptionData(_properties[i], Instance);
+                _optionVisibilities[i] = SettingReflectionCache.GetVisibility(_properties[i]);
             }
             _displayedPropertyIndices = new int[_properties.Length];
             _renderingOptions = Instance as RenderingOptions;
@@ -84,27 +96,28 @@ namespace MajdataPlay.Scenes.Setting
             _manager.InitializeOptionPool(_optionPrefab);
             _isInitialized = true;
         }
-        void OnEnable()
+        private void OnEnable()
         {
             // Do not reparent pooled children while Unity is activating this hierarchy.
             _needsLayout = _isInitialized && FindVisibleOption(SelectedIndex) is null;
         }
-        void LateUpdate()
+        private void LateUpdate()
         {
+            // Options edited during Update show or hide their dependent options before this frame renders.
             UpdateOptionVisibility();
             if (_needsLayout)
             {
                 SnapDisplayerTo(SelectedIndex);
             }
         }
-        void OnDisable()
+        private void OnDisable()
         {
             ResetRenderingAdvancedInput();
             _needsLayout = false;
             _optionAnim.TryCancel();
             ReleaseVisibleOptions();
         }
-        void OnDestroy()
+        private void OnDestroy()
         {
             _optionAnim.TryCancel();
             foreach (var data in _optionData)
@@ -132,7 +145,7 @@ namespace MajdataPlay.Scenes.Setting
                 SnapDisplayerTo(SelectedIndex);
             }
             FindVisibleOption(SelectedIndex)?.HandleInput();
-            // The compatibility switch changes the visible list after its input is handled.
+            // An edited option, such as the rendering compatibility switch, shows or hides its dependent options at once.
             if (UpdateOptionVisibility())
             {
                 SnapDisplayerTo(SelectedIndex);
@@ -179,11 +192,6 @@ namespace MajdataPlay.Scenes.Setting
             return true;
         }
 
-        // 普通档位只提供常用控制；缩放与诊断统一由自定义入口开放。
-        static bool IsRenderingCommonOption(string name) => name is
-            nameof(RenderingOptions.FPSLimit) or nameof(RenderingOptions.VSync) or
-            nameof(RenderingOptions.CompatibilityMode);
-
         internal void ResetRenderingAdvancedInput() => _renderingAdvancedClickCount = 0;
         internal void RefreshVisibleEnumerators()
         {
@@ -204,7 +212,16 @@ namespace MajdataPlay.Scenes.Setting
                 data.CollectWarmupText(warmup, optionFonts, descriptionFont);
             }
         }
-        void MoveOption(int direction)
+        /// <summary>
+        /// Localizes the menu title for the current language.
+        /// </summary>
+        /// <returns>The translated title, or its primary key when no translation exists.</returns>
+        internal string GetLocalizedTitle()
+        {
+            TitleTranslation ??= SettingReflectionCache.GetMenuTranslation(null, Name);
+            return TitleTranslation.Localize(Name);
+        }
+        private void MoveOption(int direction)
         {
             UpdateOptionVisibility();
             var targetIndex = SelectedIndex + direction;
@@ -222,7 +239,7 @@ namespace MajdataPlay.Scenes.Setting
             SelectOption(targetIndex, true);
         }
 
-        void DisplayerMoveTo(float targetPos, float duration)
+        private void DisplayerMoveTo(float targetPos, float duration)
         {
             _optionAnim.TryCancel();
             // Keep the selected view in the bounded window even after rapid repeated input.
@@ -238,12 +255,12 @@ namespace MajdataPlay.Scenes.Setting
                                          menu.UpdateDisplayerPosition();
                                      });
         }
-        void CompleteOptionMove()
+        private void CompleteOptionMove()
         {
             _listCursorPos = SelectedIndex;
             UpdateDisplayerPosition();
         }
-        void UpdateDisplayerPosition()
+        private void UpdateDisplayerPosition()
         {
             _needsLayout = false;
             if (_displayedOptionCount == 0)
@@ -278,7 +295,7 @@ namespace MajdataPlay.Scenes.Setting
                 }
             }
         }
-        Option? FindVisibleOption(int index)
+        private Option? FindVisibleOption(int index)
         {
             for (var slot = 0; slot < _visibleOptions.Length; slot++)
             {
@@ -330,7 +347,7 @@ namespace MajdataPlay.Scenes.Setting
             }
             SelectOption(index, false);
         }
-        void SelectOption(int index, bool useAnimation)
+        private void SelectOption(int index, bool useAnimation)
         {
             var nextIndex = index.Clamp(0, _displayedOptionCount - 1);
             if (SelectedIndex != nextIndex)
@@ -348,7 +365,7 @@ namespace MajdataPlay.Scenes.Setting
                 SnapDisplayerTo(SelectedIndex);
             }
         }
-        Option EnsureOption(int index)
+        private Option EnsureOption(int index)
         {
             var option = FindVisibleOption(index);
             if (option is not null)
@@ -364,7 +381,7 @@ namespace MajdataPlay.Scenes.Setting
             option.Bind(_manager, data);
             return option;
         }
-        void ReleaseOption(int slot)
+        private void ReleaseOption(int slot)
         {
             var option = _visibleOptions[slot];
             _visibleOptions[slot] = null;
@@ -374,34 +391,48 @@ namespace MajdataPlay.Scenes.Setting
                 _manager.ReturnOption(option);
             }
         }
-        void ReleaseVisibleOptions()
+        /// <summary>
+        /// Stops the option slide and returns every option view of this menu to the shared pool.
+        /// </summary>
+        /// <remarks>
+        /// <see cref="SettingManager"/> calls it for menus it deselects: an inactive menu can still hold views, and
+        /// deactivating it again does not run <see cref="OnDisable"/>.
+        /// </remarks>
+        internal void ReleaseVisibleOptions()
         {
+            _optionAnim.TryCancel();
             for (var slot = 0; slot < _visibleOptions.Length; slot++)
             {
                 ReleaseOption(slot);
             }
         }
-        void SnapDisplayerTo(float targetPos)
+        private void SnapDisplayerTo(float targetPos)
         {
             _optionAnim.TryCancel();
             _listCursorPos = targetPos;
             UpdateDisplayerPosition();
         }
 
-        PropertyInfo GetDisplayedProperty(int index) => _properties[_displayedPropertyIndices[index]];
+        private PropertyInfo GetDisplayedProperty(int index) => _properties[_displayedPropertyIndices[index]];
 
-        bool UpdateOptionVisibility(bool force = false)
+        /// <summary>
+        /// Re-evaluates the <see cref="ShowInSettingUIWhenAttribute"/> conditions and rebuilds the displayed option list when any of them changed.
+        /// </summary>
+        /// <remarks>
+        /// The selected option stays selected while it is displayed; otherwise the first displayed option is selected.
+        /// Rendering options declare their preset, custom and compatibility visibility with the same attribute.
+        /// </remarks>
+        /// <param name="force">Rebuilds the list even when no condition changed, as during initialization.</param>
+        /// <returns>True when the displayed list was rebuilt.</returns>
+        private bool UpdateOptionVisibility(bool force = false)
         {
-            var compatibilityMode = _renderingOptions?.CompatibilityMode ?? false;
-            var quality = _renderingOptions?.RenderQuality ?? RenderingQualityOption.Performance;
-            var customRendering = quality == RenderingQualityOption.Custom;
-            if (_renderingQuality != quality)
+            if (_renderingOptions is not null && _renderingQuality != _renderingOptions.RenderQuality)
             {
                 ResetRenderingAdvancedInput();
-                _renderingQuality = quality;
+                _renderingQuality = _renderingOptions.RenderQuality;
             }
-            if (!force && (_renderingOptions is null ||
-                (_compatibilityMode == compatibilityMode && _customRendering == customRendering)))
+            var conditionsChanged = UpdateOptionConditions();
+            if (!conditionsChanged && !force)
             {
                 return false;
             }
@@ -409,27 +440,18 @@ namespace MajdataPlay.Scenes.Setting
             var selectedProperty = _displayedOptionCount > 0
                 ? GetDisplayedProperty(SelectedIndex).Name
                 : string.Empty;
-            _compatibilityMode = compatibilityMode;
-            _customRendering = customRendering;
             ResetRenderingAdvancedInput();
             _optionAnim.TryCancel();
             // Models and enumerators stay alive, including hidden labels needed for font warmup.
-            // Rebuild only when preset/custom or compatibility visibility changes.
+            // Rebuild only when a ShowInSettingUIWhen condition changes.
             ReleaseVisibleOptions();
             _displayedOptionCount = 0;
             for (var i = 0; i < _properties.Length; i++)
             {
-                if (compatibilityMode && !IsRenderingCommonOption(_properties[i].Name))
+                if (_optionConditionsMet[i])
                 {
-                    continue;
+                    _displayedPropertyIndices[_displayedOptionCount++] = i;
                 }
-                if (_renderingOptions is not null && !compatibilityMode && !customRendering &&
-                    _properties[i].Name != nameof(RenderingOptions.RenderQuality) &&
-                    !IsRenderingCommonOption(_properties[i].Name))
-                {
-                    continue;
-                }
-                _displayedPropertyIndices[_displayedOptionCount++] = i;
             }
 
             SelectedIndex = 0;
@@ -450,17 +472,37 @@ namespace MajdataPlay.Scenes.Setting
             return true;
         }
 
-        static Vector3 GetOptionTransformScale(float diff)
+        /// <summary>
+        /// Re-evaluates the <see cref="ShowInSettingUIWhenAttribute"/> conditions of every option against the menu instance.
+        /// </summary>
+        /// <remarks>Options without conditions are not read, so only conditional options cost a property read per call.</remarks>
+        /// <returns>True when any option became shown or hidden since the last evaluation.</returns>
+        private bool UpdateOptionConditions()
         {
-            return Vector3.Lerp(Vector3.one, UNSELECTED_OPTION_SCALE, Mathf.Clamp01(Mathf.Abs(diff)));
+            var hasChanged = false;
+            for (var i = 0; i < _optionVisibilities.Length; i++)
+            {
+                var isMet = _optionVisibilities[i].IsVisible(Instance);
+                if (_optionConditionsMet[i] != isMet)
+                {
+                    _optionConditionsMet[i] = isMet;
+                    hasChanged = true;
+                }
+            }
+            return hasChanged;
         }
-        static Vector3 GetOptionTransformPosition(float diff)
+
+        private static Vector3 GetOptionTransformScale(float diff)
+        {
+            return Vector3.Lerp(Vector3.one, s_unselectedOptionScale, Mathf.Clamp01(Mathf.Abs(diff)));
+        }
+        private static Vector3 GetOptionTransformPosition(float diff)
         {
             return new Vector3(380 * diff, -220, 0);
         }
-        static Color GetOptionTextColor(float diff)
+        private static Color GetOptionTextColor(float diff)
         {
-            return Color.Lerp(SELECTED_OPTION_COLOR, UNSELECTED_OPTION_COLOR, Mathf.Clamp01(Mathf.Abs(diff)));
+            return Color.Lerp(s_selectedOptionColor, s_unselectedOptionColor, Mathf.Clamp01(Mathf.Abs(diff)));
         }
     }
 }

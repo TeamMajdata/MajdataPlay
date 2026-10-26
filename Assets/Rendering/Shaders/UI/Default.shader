@@ -78,7 +78,7 @@ Shader "Maj/UI/Default"
 
             #include "UnityCG.cginc"
             #include "UnityUI.cginc"
-            #include "Assets/Rendering/MajRenderPipeline/Library/MajMipSampling.hlsl"
+            #include "Assets/Plugins/MajdataPlay/Rendering/RenderPipelines/MajRenderPipeline/Library/MajMipSampling.hlsl"
 
             #pragma multi_compile_local _ UNITY_UI_CLIP_RECT
             #pragma multi_compile_local _ UNITY_UI_ALPHACLIP

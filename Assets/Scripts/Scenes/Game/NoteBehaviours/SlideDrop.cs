@@ -103,7 +103,7 @@ namespace MajdataPlay.Scenes.Game.Notes.Behaviours
             SetSlideBarAlpha(0f);
             SlideLength = SlideBars.Count + 1;
 
-            starTransforms[0].position = StarPositions[0];
+            NoteHelper.Sorting.SetPosition(starTransforms[0], StarPositions[0]);
             starTransforms[0].transform.localScale = new Vector3(0f, 0f, 1f);
         }
         /// <summary>
@@ -162,7 +162,7 @@ namespace MajdataPlay.Scenes.Game.Notes.Behaviours
             //fadeInAnimator.speed = 0.2f / interval;
             //fadeInAnimator.SetTrigger("slide");
             var starTransforms = StarTransforms.Span;
-            starTransforms[0].position = StarPositions[0];
+            NoteHelper.Sorting.SetPosition(starTransforms[0], StarPositions[0]);
             starTransforms[0].transform.localScale = new Vector3(0f, 0f, 1f);
             JudgeQueues[0] = Table.JudgeQueue;
             JudgeQueueLength = Table.JudgeQueue.Length;
@@ -284,7 +284,9 @@ namespace MajdataPlay.Scenes.Game.Notes.Behaviours
             for (var i = 0; i < SlideBars.Count; i++)
             {
                 var bar = SlideBars[i];
-                StarPositions.Add(bar.transform.position);
+                var position = bar.transform.position;
+                position.z = 0f;
+                StarPositions.Add(position);
 
                 StarRotations.Add(Quaternion.Euler(SlideBars[i].transform.rotation.normalized.eulerAngles + new Vector3(0f, 0f, 18f)));
                 if (i == SlideBars.Count - 1)

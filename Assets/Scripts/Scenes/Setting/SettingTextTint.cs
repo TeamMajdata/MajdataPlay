@@ -8,10 +8,10 @@ namespace MajdataPlay.Scenes.Setting
     // Animate the renderer tint without dirtying TMP's layout or glyph mesh.
     internal sealed class SettingTextTint : IDisposable
     {
-        readonly TextMeshProUGUI _text;
-        readonly List<CanvasRenderer> _renderers = new(4);
-        Color _color;
-        bool _isDisposed;
+        private readonly TextMeshProUGUI _text;
+        private readonly List<CanvasRenderer> _renderers = new(4);
+        private Color _color;
+        private bool _isDisposed;
 
         internal SettingTextTint(TextMeshProUGUI text)
         {
@@ -32,19 +32,19 @@ namespace MajdataPlay.Scenes.Setting
             ApplyColor();
         }
 
-        void OnPreRenderText(TMP_TextInfo textInfo)
+        private void OnPreRenderText(TMP_TextInfo textInfo)
         {
             // A new glyph can create another fallback-font or atlas submesh.
             RefreshRenderers();
         }
 
-        void RefreshRenderers()
+        private void RefreshRenderers()
         {
             _text.GetComponentsInChildren(true, _renderers);
             ApplyColor();
         }
 
-        void ApplyColor()
+        private void ApplyColor()
         {
             for (var i = 0; i < _renderers.Count; i++)
             {

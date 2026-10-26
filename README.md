@@ -50,7 +50,9 @@ Simai is a maimai chart discription language developed by [Celeca](https://twitt
 
 ### Requirements
 
-- Unity Editor (version specified in ProjectSettings/ProjectVersion.txt)
+- Unity Editor (version specified in ProjectSettings/ProjectVersion.txt), with Android Build Support (SDK API 36 and OpenJDK) for Java-wrapper generation, including desktop Editor imports
+
+- .NET 9 SDK for the independent Android Java wrapper CLI (not for building the Unity project)
 
 - git
 
@@ -95,6 +97,38 @@ m_EditorVersion: 6000.3.17f1
 ```
 
 Install this version using Unity Hub.
+
+### Generate the Android Java Bindings
+
+The storage backend uses a locally compiled Android Java wrapper DLL.
+Generate them with the independent CLI before the first Unity import:
+
+```powershell
+Push-Location Tools/CSharp/AndroidJavaWrapperGenerator
+dotnet run --project AndroidJavaWrapperGenerator.csproj -- --project ../../.. --unity-data "C:/Program Files/Unity Editors/6000.3.17f1/Editor/Data" --no-docs
+Pop-Location
+```
+
+This builds the independent generator and `Tools/AndroidJavaWrapper` library;
+Unity-generated projects are built only by Unity.
+Pass another `--unity-data` directory for a different installation and `--sdk`
+for a separately configured Android SDK. Fresh checkouts and CI need the same
+binding generation step. Sources are generated into `Tools/AndroidJavaWrapper/src`,
+alongside tracked `.e.cs` partial extensions. The standalone project compiles
+`MajdataPlay.Platform.Android.Runtime.dll` and installs it into
+`Assets/Plugins/MajdataPlay/Platform/Android` only after successful compilation.
+The project no longer requires the legacy Roslyn analyzer.
+
+The Editor command **Tools > MajdataPlay > Android > Regenerate Java wrappers**
+uses the independent `Tools/CSharp/AndroidJavaWrapperGenerator` CLI to generate
+the complete SDK/BCL plus Java inputs from `Assets/Plugins/Android` and the current
+Unity Android player. It runs in the background with official documentation and
+compiles and installs the wrapper DLL. Helpers use
+`MajdataPlay.Platform.Android.Runtime`; bindings use its `Bindings` namespace.
+Automatic Java asset refreshes reuse cached pages and fetch missing documentation. See
+`Assets/Plugins/MajdataPlay/Platform/Android/README.md` for output ownership,
+cancellation and setup. See `Tools/AndroidJavaWrapper/README.md` for partial
+extensions and rebuilding the DLL without regenerating Java bindings.
 
 ### Open the Project in Unity Hub
 

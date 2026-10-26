@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- The ManagedBass WASAPI add-on, built like its NuGet package ManagedBass.Wasapi. -->
+  <PropertyGroup>
+    <TargetFrameworks>netstandard2.0;net8.0</TargetFrameworks>
+    <AssemblyName>ManagedBass.Wasapi</AssemblyName>
+    <RootNamespace>ManagedBass.Wasapi</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="$(ManagedBassSource)AddOns/BassWasapi/**/*.cs" Link="%(RecursiveDir)%(Filename)%(Extension)" />
+    <ProjectReference Include="ManagedBass.csproj" />
+  </ItemGroup>
+</Project>

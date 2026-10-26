@@ -52,6 +52,9 @@ namespace MajdataPlay.Scenes.Game
 
         int _practiceCount = 1;
         int _index = 0;
+        // Results has one slot per played round, while _index is the position in the chart queue, which also
+        // counts skipped (null) charts.
+        int _resultIndex = 0;
         ISongDetail[] _chartQueue;
         ChartLevel[] _levels;
         public GameInfo(GameMode mode, ISongDetail[] chartQueue, ChartLevel[] levels, int practiceCount)
@@ -117,13 +120,13 @@ namespace MajdataPlay.Scenes.Game
         }
         public void RecordResult(in GameResult result)
         {
-            Results[_index] = result;
+            Results[_resultIndex] = result;
         }
         public GameResult GetLastResult()
         {
             if (Results.Length == 0)
                 return default;
-            var index = _index.Clamp(0, Results.Length - 1);
+            var index = _resultIndex.Clamp(0, Results.Length - 1);
             return Results[index];
         }
         public bool NextRound()
@@ -156,6 +159,7 @@ namespace MajdataPlay.Scenes.Game
                         return false;
                     }
                     _index++;
+                    _resultIndex++;
                     return true;
                 default:
                     if (_index >= _chartQueue.Length)
@@ -175,6 +179,7 @@ namespace MajdataPlay.Scenes.Game
                         {
                             Current = _chartQueue[_index];
                             CurrentLevel = _levels[_index];
+                            _resultIndex++;
                             return true;
                         }
                     }

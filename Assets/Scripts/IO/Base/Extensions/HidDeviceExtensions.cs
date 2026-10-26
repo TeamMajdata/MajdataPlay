@@ -1,4 +1,4 @@
-﻿#if UNITY_STANDALONE
+#if UNITY_STANDALONE
 using HidSharp;
 using System;
 using System.Collections.Generic;
@@ -14,7 +14,7 @@ namespace MajdataPlay.IO
     internal static class HidDeviceExtensions
     {
         readonly static Regex _deviceInterfaceRegex = new Regex("&mi_([0-9A-Fa-f]{2})");
-        public static int GetInterfaceIndex(this HidDevice device)
+        public static int GetInterfaceIndex(this HidSharp.HidDevice device)
         {
             var matchResult = _deviceInterfaceRegex.Match(device.DevicePath);
             try

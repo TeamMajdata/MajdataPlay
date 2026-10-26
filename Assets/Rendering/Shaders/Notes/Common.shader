@@ -28,7 +28,7 @@ Shader "Maj/Notes/Common"
             #pragma multi_compile_instancing 
             #pragma vertex vert
             #pragma fragment frag
-            #include "Assets/Rendering/MajRenderPipeline/Library/MajCore.hlsl"
+            #include "Assets/Plugins/MajdataPlay/Rendering/RenderPipelines/MajRenderPipeline/Library/MajCore.hlsl"
 
             sampler2D _MainTex;
 

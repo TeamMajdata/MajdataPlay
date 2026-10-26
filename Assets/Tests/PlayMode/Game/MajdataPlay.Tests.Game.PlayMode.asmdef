@@ -1,0 +1,41 @@
+{
+    "name": "MajdataPlay.Tests.Game.PlayMode",
+    "rootNamespace": "MajdataPlay.Tests.Game",
+    "references": [
+        "UnityEngine.TestRunner",
+        "MajdataPlay.Tests.Shared",
+        "MajdataPlay.Core",
+        "Gilzoide.SqliteNet",
+        "LitMotion",
+        "MajSimai",
+        "MajdataPlay.Buffers",
+        "MajdataPlay.Collections",
+        "MajdataPlay.Diagnostics",
+        "MajdataPlay.Drawing",
+        "MajdataPlay.FFmpeg",
+        "MajdataPlay.IO",
+        "MajdataPlay.MajRenderPipe",
+        "MajdataPlay.Net",
+        "MajdataPlay.Numerics",
+        "MajdataPlay.Runtime",
+        "MajdataPlay.Utils",
+        "UniTask",
+        "Unity.TextMeshPro",
+        "Unity.VectorGraphics",
+        "UnityEngine.UI"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": true,
+    "precompiledReferences": [
+        "nunit.framework.dll",
+        "Newtonsoft.Json.dll"
+    ],
+    "autoReferenced": false,
+    "defineConstraints": [
+        "UNITY_INCLUDE_TESTS"
+    ],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

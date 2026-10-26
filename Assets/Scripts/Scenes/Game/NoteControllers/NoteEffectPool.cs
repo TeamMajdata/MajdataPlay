@@ -67,25 +67,41 @@ namespace MajdataPlay.Scenes.Game.Notes.Controllers
         }
         internal void Reset()
         {
+            // Keys and sensors the chart never uses have no effect displayer, so their slots are null.
             foreach (var effect in _tapJudgeEffects)
             {
-                effect.Reset();
+                if (effect != null)
+                {
+                    effect.Reset();
+                }
             }
             foreach (var effect in _touchHoldJudgeEffects)
             {
-                effect.Reset();
+                if (effect != null)
+                {
+                    effect.Reset();
+                }
             }
             foreach (var effect in _touchJudgeEffects)
             {
-                effect.Reset();
+                if (effect != null)
+                {
+                    effect.Reset();
+                }
             }
             foreach (var effect in _holdEffects)
             {
-                effect.Reset();
+                if (effect != null)
+                {
+                    effect.Reset();
+                }
             }
             foreach (var effect in _touchHoldEffects)
             {
-                effect.Reset();
+                if (effect != null)
+                {
+                    effect.Reset();
+                }
             }
         }
 
@@ -129,7 +145,9 @@ namespace MajdataPlay.Scenes.Game.Notes.Controllers
                 obj.name = $"TapEffect_{i + 1}";
                 obj.transform.rotation = rotation;
                 if (_gpManager != null && _gpManager.IsClassicMode)
-                    obj.transform.GetChild(0).localScale = new Vector3(1.4f, 1.4f, 0);
+                {
+                    obj.transform.GetChild(0).localScale = new Vector3(1.4f, 1.4f, 1f);
+                }
                 var displayer = obj.GetComponent<TapEffectDisplayer>();
                 displayer.DistanceRatio = MajEnv.Settings.Display.OuterJudgeDistance;
                 displayer.ResetAll();
@@ -207,12 +225,12 @@ namespace MajdataPlay.Scenes.Game.Notes.Controllers
                 if (pos < SensorArea.B1)
                 {
                     var position = NoteHelper.GetTapPosition(i + 1, 4.8f);
-                    obj.transform.position = position;
+                    NoteHelper.Sorting.SetPosition(obj.transform, position);
                 }
                 else
                 {
                     var position = NoteHelper.GetTouchAreaPosition(pos);
-                    obj.transform.position = position;
+                    NoteHelper.Sorting.SetPosition(obj.transform, position);
                 }
                 var displayer = obj.GetComponent<TouchFeedbackDisplayer>();
                 displayer.Reset();

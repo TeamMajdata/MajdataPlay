@@ -3,6 +3,7 @@ using MajdataPlay.Diagnostics;
 using MajdataPlay.Editor;
 using MajdataPlay.Scenes.Game.Misc.Notes;
 using MajdataPlay.Scenes.Game.Notes.Slide;
+using MajdataPlay.Scenes.Game.Utils;
 using MajdataPlay.Utils;
 using System;
 using System.Runtime.CompilerServices;
@@ -53,6 +54,7 @@ namespace MajdataPlay.Scenes.Game.Notes.Behaviours
             base.Awake();
             _displayCP = MajEnv.Settings.Display.DisplayCriticalPerfect;
             _spriteRenderer = GetComponent<SpriteRenderer>();
+            NoteHelper.Sorting.Apply(_spriteRenderer, NoteHelper.Sorting.NoteLayer.SlideOK);
             _animator = GetComponent<Animator>();
             _animator.enabled = false;
             _defaultMaterial = _spriteRenderer.sharedMaterial;
@@ -134,7 +136,7 @@ namespace MajdataPlay.Scenes.Game.Notes.Behaviours
             {
                 sortingOrder += STRIDE - _sortingOrder;
             }
-            _spriteRenderer.sortingOrder = sortingOrder;
+            NoteHelper.Sorting.Apply(_spriteRenderer, NoteHelper.Sorting.NoteLayer.SlideOK, sortingOrder);
 
             Play(isBreak);
             State = NoteStatus.Running;
@@ -155,7 +157,9 @@ namespace MajdataPlay.Scenes.Game.Notes.Behaviours
             {
                 _animator.SetTrigger(MODERN_ANIM_HASH);
             }
+            var z = Transform.localPosition.z;
             _animator.Update(0.0000001f);
+            NoteHelper.Sorting.SetLocalZPosition(Transform, z);
         }
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         internal void OnUpdate()
@@ -163,7 +167,9 @@ namespace MajdataPlay.Scenes.Game.Notes.Behaviours
             using (UnityProfiler.Create("SlideOK.OnUpdate"))
             {
                 var delta = MajTimeline.DeltaTime;
+                var z = Transform.localPosition.z;
                 _animator.Update(delta);
+                NoteHelper.Sorting.SetLocalZPosition(Transform, z);
                 if (_elapsedTime > 0.5f)
                 {
                     State = NoteStatus.End;

@@ -1,0 +1,56 @@
+{
+    "name": "MajdataPlay.Tests.Game",
+    "rootNamespace": "MajdataPlay.Tests.Game",
+    "references": [
+        "UnityEngine.TestRunner",
+        "UnityEditor.TestRunner",
+        "MajdataPlay.Tests.Shared",
+        "MajdataPlay.Tests.Game.PlayMode",
+        "MajdataPlay.Core",
+        "MajdataPlay.Core.Editor",
+        "Gilzoide.SqliteNet",
+        "HidSharp",
+        "MajRadar",
+        "MajSimai",
+        "MajdataPlay.Buffers",
+        "MajdataPlay.Collections",
+        "MajdataPlay.Diagnostics",
+        "MajdataPlay.Drawing",
+        "MajdataPlay.FFmpeg",
+        "MajdataPlay.IO",
+        "MajdataPlay.IO.Ports",
+        "MajdataPlay.MajRenderPipe",
+        "MajdataPlay.Net",
+        "MajdataPlay.Numerics",
+        "MajdataPlay.Runtime",
+        "MajdataPlay.Syscall",
+        "MajdataPlay.Threading",
+        "MajdataPlay.Utils",
+        "ManagedBass",
+        "ManagedBass.BassMix",
+        "UniTask",
+        "Unity.InputSystem",
+        "Unity.TextMeshPro",
+        "UnityEngine.UI",
+        "ZString"
+    ],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": true,
+    "precompiledReferences": [
+        "nunit.framework.dll",
+        "Newtonsoft.Json.dll",
+        "Semver.dll",
+        "websocket-sharp.dll",
+        "DiscordRPC.dll"
+    ],
+    "autoReferenced": false,
+    "defineConstraints": [
+        "UNITY_INCLUDE_TESTS"
+    ],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

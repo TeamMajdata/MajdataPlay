@@ -1,0 +1,921 @@
+#nullable enable
+using System;
+using System.Collections.Concurrent;
+using System.Collections.Generic;
+using System.IO;
+using System.IO.Compression;
+using System.Linq;
+using System.Security.Cryptography;
+using System.Text;
+using System.Threading;
+using System.Threading.Tasks;
+using MajdataPlay;
+using MajdataPlay.Diagnostics;
+using MajdataPlay.IO.Storage;
+using MajdataPlay.ResourceUpdate;
+using MajdataPlay.Tests.FileSystemValidation;
+using UnityEngine;
+
+namespace ResourceStorageValidation
+{
+    /// <summary>Exercises linked resource migration behavior using isolated local fixtures.</summary>
+    internal static class Program
+    {
+        /// <summary>Runs all cases independently and reports a deterministic validation marker.</summary>
+        /// <returns>Zero when all cases pass, otherwise one.</returns>
+        public static int Main()
+        {
+            var cases = new (string name, Action run)[]
+            {
+                ("Desktop restores empty chart and skin roots", DesktopRestoresEmptyRoots),
+                ("Desktop preserves nonempty managed roots", DesktopPreservesExistingRoots),
+                ("Mobile initial extraction moves managed assets", MobileInitialExtraction),
+                ("Mobile concurrent extraction preserves nested files and calling context", MobileExtractsNestedFilesOnCallingContext),
+                ("Mobile extraction uses bounded background workers", MobileBoundsBackgroundWorkers),
+                ("Mobile pre-cancelled extraction never commits", MobileRejectsPreCancelledExtraction),
+                ("Mobile cancellation from progress prevents commitment and permits retry", MobileCancelsFromProgress),
+                ("Mobile cancellation drains in-flight workers before retry", MobileCancellationDrainsWorkers),
+                ("Mobile progress failure drains in-flight workers before retry", MobileProgressFailureDrainsWorkers),
+                ("Mobile concurrent hash failure never commits and permits retry", MobileConcurrentHashFailure),
+                ("Mobile extraction preserves literal packaged names", MobileExtractsLiteralPackagedNames),
+                ("Mobile extraction preserves existing managed assets", MobilePreservesExistingManagedAssets),
+                ("Mobile incomplete extraction retries safely", MobileRetriesIncompleteExtraction),
+                ("Mobile update respects official hashes and player choices", MobileUpdatePreservesPlayerChoices),
+                ("Mobile rejects packaged hash mismatch", MobileRejectsPackagedHashMismatch),
+                ("Mobile resumes pending managed moves", MobileResumesPendingMoves),
+                ("Mobile atomic commitment failure cleans temporary file", MobileCleansFailedAtomicWrite),
+                ("Mobile moves managed assets into a provider-backed root", MobileMovesManagedAssetsAcrossBackends),
+                ("Mobile preserves existing provider-backed managed assets", MobilePreservesExistingProviderManagedAssets),
+                ("Mobile retries an interrupted cross-backend move", MobileRetriesInterruptedCrossBackendMove),
+                ("Mobile extraction and check report progress", MobileReportsProgress),
+                ("Desktop restore reports progress", DesktopReportsProgress)
+            };
+            var failures = 0;
+            foreach (var (name, run) in cases)
+            {
+                try
+                {
+                    run();
+                    Console.WriteLine($"PASS {name}");
+                }
+                catch (Exception exception)
+                {
+                    failures++;
+                    Console.WriteLine($"FAIL {name}: {exception}");
+                }
+            }
+            Console.WriteLine($"{cases.Length - failures}/{cases.Length} cases passed.");
+            Console.WriteLine(failures == 0
+                ? "RESOURCE_STORAGE_VALIDATION_PASSED"
+                : "RESOURCE_STORAGE_VALIDATION_FAILED");
+            return failures == 0 ? 0 : 1;
+        }
+
+        /// <summary>Checks desktop copying creates nested charts and skins in otherwise empty roots.</summary>
+        private static void DesktopRestoresEmptyRoots()
+        {
+            using var fixture = new Fixture(usePackagedArchive: false);
+            fixture.Package("MaiCharts/Original/song/maidata.txt", "official chart");
+            fixture.Package("Skins/default/skin.json", "official skin");
+            var packagedChartPath = Path.Combine(Application.streamingAssetsPath, "MaiCharts/Original/song/maidata.txt");
+            var timestamp = new DateTime(2023, 4, 5, 6, 7, 8, DateTimeKind.Utc);
+            File.SetLastWriteTimeUtc(packagedChartPath, timestamp);
+            File.SetAttributes(packagedChartPath, File.GetAttributes(packagedChartPath) | FileAttributes.Hidden);
+            RestoreDesktop();
+            fixture.AssertText("MaiCharts/Original/song/maidata.txt", "official chart");
+            fixture.AssertText("Skins/default/skin.json", "official skin");
+            var restoredChartPath = fixture.PathFor("MaiCharts/Original/song/maidata.txt");
+            Assert(File.GetLastWriteTimeUtc(restoredChartPath) == timestamp,
+                "Desktop restore must preserve the packaged modification timestamp.");
+            if (OperatingSystem.IsWindows())
+            {
+                Assert((File.GetAttributes(restoredChartPath) & FileAttributes.Hidden) != 0,
+                    "Desktop restore must preserve the packaged hidden attribute on Windows.");
+            }
+            AssertNoErrors();
+        }
+
+        /// <summary>Checks a populated chart root stays intact while an empty skin root is restored.</summary>
+        private static void DesktopPreservesExistingRoots()
+        {
+            using var fixture = new Fixture(usePackagedArchive: false);
+            fixture.Package("MaiCharts/Original/maidata.txt", "official chart");
+            fixture.Package("Skins/default/skin.json", "official skin");
+            fixture.Write("MaiCharts/custom/maidata.txt", "player chart");
+            RestoreDesktop();
+            fixture.AssertText("MaiCharts/custom/maidata.txt", "player chart");
+            fixture.AssertMissing("MaiCharts/Original/maidata.txt");
+            fixture.AssertText("Skins/default/skin.json", "official skin");
+            AssertNoErrors();
+        }
+
+        /// <summary>Checks initial extraction commits unmanaged files before moving bundled managed directories.</summary>
+        private static void MobileInitialExtraction()
+        {
+            using var fixture = new Fixture();
+            fixture.Package("Config/options.txt", "official options");
+            fixture.Package("MaiCharts/Original/song/maidata.txt", "official chart");
+            fixture.Package("Skins/default/skin.json", "official skin");
+            InitializeMobile();
+            AssertNoErrors();
+            fixture.AssertText("Assets/Config/options.txt", "official options");
+            fixture.AssertText("MaiCharts/Original/song/maidata.txt", "official chart");
+            fixture.AssertText("Skins/default/skin.json", "official skin");
+            fixture.AssertMissing("Assets/MaiCharts/Original");
+            fixture.AssertMissing("Assets/Skins/default");
+            fixture.AssertMissing("Assets/.pending-managed-asset-moves");
+            fixture.AssertMissing("Assets.extracting-v2");
+            AssertNoErrors();
+        }
+
+        /// <summary>Checks shared nested destinations and progress remain correct while Unity paths stay on the caller thread.</summary>
+        private static void MobileExtractsNestedFilesOnCallingContext()
+        {
+            using var fixture = new Fixture();
+            PackageConcurrentFiles(fixture);
+            var callingThreadId = Environment.CurrentManagedThreadId;
+            Application.StreamingAssetsOwnerThreadId = callingThreadId;
+            var reports = new List<ProgressReport>();
+            using var context = new CallerSynchronizationContext();
+            var progress = new ProgressReporter(report =>
+            {
+                Assert(Environment.CurrentManagedThreadId == callingThreadId && SynchronizationContext.Current == context,
+                    "Extraction and installation progress must run on the invoking synchronization context.");
+                reports.Add(report);
+            });
+            Assert(context.Run(() => MobileResourceImporter.ImportAsync(progress, new FrameBudget(), CancellationToken.None).AsTask()),
+                "Every nested packaged file must be verified and committed.");
+            AssertNoErrors();
+            AssertConcurrentFiles(fixture);
+            var extraction = reports.Where(report => report.HasTotal).ToArray();
+            Assert(extraction.Length == ResourceManifestLoader.V2Hashes.Count + 1 &&
+                extraction.Select(report => report.Completed).SequenceEqual(Enumerable.Range(0, extraction.Length)),
+                "Parallel completion must report every count once in increasing order, from zero through the total.");
+            AssertNoErrors();
+        }
+
+        /// <summary>Checks independent copies overlap on the bounded number of background tasks.</summary>
+        private static void MobileBoundsBackgroundWorkers()
+        {
+            using var fixture = new Fixture();
+            PackageConcurrentFiles(fixture);
+            var workerCount = Math.Min(Environment.ProcessorCount, 4);
+            using var entered = new CountdownEvent(workerCount);
+            using var release = new ManualResetEventSlim();
+            var workers = new ConcurrentDictionary<int, byte>();
+            var callingThreadId = Environment.CurrentManagedThreadId;
+            MajDebug.ExtractionCopyCompleted = () =>
+            {
+                Assert(Environment.CurrentManagedThreadId != callingThreadId && Task.CurrentId.HasValue,
+                    "Packaged reads, hashing, and staged writes must finish on background tasks.");
+                if (workers.TryAdd(Task.CurrentId!.Value, 0) && workers.Count <= workerCount)
+                {
+                    entered.Signal();
+                }
+                Assert(release.Wait(TimeSpan.FromSeconds(15)), "Timed out waiting to release extraction workers.");
+            };
+            var import = MobileResourceImporter.ImportAsync(new ProgressReporter(_ =>
+            {
+            }), new FrameBudget(), CancellationToken.None).AsTask();
+            try
+            {
+                Assert(entered.Wait(TimeSpan.FromSeconds(10)), "The expected background workers must overlap before any can continue.");
+                Assert(!import.IsCompleted, "Extraction cannot complete while its copies are held in flight.");
+            }
+            finally
+            {
+                release.Set();
+                import.GetAwaiter().GetResult();
+                MajDebug.ExtractionCopyCompleted = null;
+            }
+            Assert(workers.Count == workerCount, "Extraction must use at most four workers and no more than the processor count.");
+            AssertNoErrors();
+            AssertConcurrentFiles(fixture);
+            AssertNoErrors();
+        }
+
+        /// <summary>Checks cancellation before launch prevents staging, commitment, and managed moves.</summary>
+        private static void MobileRejectsPreCancelledExtraction()
+        {
+            using var fixture = new Fixture();
+            PackageConcurrentFiles(fixture);
+            using var cancellation = new CancellationTokenSource();
+            cancellation.Cancel();
+            AssertCancelled(() => MobileResourceImporter.ImportAsync(new ProgressReporter(_ =>
+            {
+            }), new FrameBudget(), cancellation.Token).AsTask().GetAwaiter().GetResult());
+            AssertUncommitted(fixture);
+            fixture.AssertMissing("Assets.extracting-v2");
+            AssertNoErrors();
+        }
+
+        /// <summary>Checks a progress callback can cancel even the final report before commitment, then retry cleanly.</summary>
+        private static void MobileCancelsFromProgress()
+        {
+            using var fixture = new Fixture();
+            PackageConcurrentFiles(fixture);
+            using var cancellation = new CancellationTokenSource();
+            var progress = new ProgressReporter(report =>
+            {
+                if (report.HasTotal && report.Completed > 0)
+                {
+                    cancellation.Cancel();
+                }
+            });
+            AssertCancelled(() => MobileResourceImporter.ImportAsync(progress, new FrameBudget(), cancellation.Token).AsTask().GetAwaiter().GetResult());
+            AssertUncommitted(fixture);
+            InitializeMobile();
+            AssertConcurrentFiles(fixture);
+            fixture.AssertMissing("Assets.extracting-v2");
+            AssertNoErrors();
+        }
+
+        /// <summary>Checks cancellation waits for all in-flight copies before returning and a retry replaces leftover staging.</summary>
+        private static void MobileCancellationDrainsWorkers()
+        {
+            using var fixture = new Fixture();
+            PackageConcurrentFiles(fixture);
+            using var entered = new ManualResetEventSlim();
+            using var release = new ManualResetEventSlim();
+            using var cancellation = new CancellationTokenSource();
+            var finishedCopies = 0;
+            MajDebug.ExtractionCopyCompleted = () =>
+            {
+                entered.Set();
+                Assert(release.Wait(TimeSpan.FromSeconds(15)), "Timed out waiting to release cancelled extraction copies.");
+                Interlocked.Increment(ref finishedCopies);
+            };
+            var import = MobileResourceImporter.ImportAsync(new ProgressReporter(_ =>
+            {
+            }), new FrameBudget(), cancellation.Token).AsTask();
+            try
+            {
+                Assert(entered.Wait(TimeSpan.FromSeconds(10)), "A packaged copy must be in flight before cancellation.");
+                cancellation.Cancel();
+                Assert(!SpinWait.SpinUntil(() => import.IsCompleted, TimeSpan.FromMilliseconds(100)),
+                    "Cancellation must keep awaiting copies that are still in flight.");
+            }
+            finally
+            {
+                release.Set();
+                AssertCancelled(() => import.GetAwaiter().GetResult());
+                MajDebug.ExtractionCopyCompleted = null;
+            }
+            Assert(finishedCopies > 0, "Cancelled extraction must drain the in-flight copies before it returns.");
+            AssertUncommitted(fixture);
+            InitializeMobile();
+            AssertConcurrentFiles(fixture);
+            fixture.AssertMissing("Assets.extracting-v2");
+            AssertNoErrors();
+        }
+
+        /// <summary>Checks a failed progress callback waits for remaining background copies before allowing an immediate retry.</summary>
+        private static void MobileProgressFailureDrainsWorkers()
+        {
+            using var fixture = new Fixture();
+            PackageConcurrentFiles(fixture);
+            using var blocked = new ManualResetEventSlim();
+            using var reported = new ManualResetEventSlim();
+            using var release = new ManualResetEventSlim();
+            var completedCopies = 0;
+            MajDebug.ExtractionCopyCompleted = () =>
+            {
+                if (Interlocked.Increment(ref completedCopies) > 1)
+                {
+                    blocked.Set();
+                    Assert(release.Wait(TimeSpan.FromSeconds(15)), "Timed out waiting to release copies after progress failure.");
+                }
+            };
+            var failure = new InvalidOperationException("Injected progress failure.");
+            var progress = new ProgressReporter(report =>
+            {
+                if (report.HasTotal && report.Completed > 0)
+                {
+                    reported.Set();
+                    throw failure;
+                }
+            });
+            var import = MobileResourceImporter.ImportAsync(progress, new FrameBudget(), CancellationToken.None).AsTask();
+            try
+            {
+                Assert(blocked.Wait(TimeSpan.FromSeconds(10)) && reported.Wait(TimeSpan.FromSeconds(10)),
+                    "Progress must fail while another extraction copy remains in flight.");
+                Assert(!SpinWait.SpinUntil(() => import.IsCompleted, TimeSpan.FromMilliseconds(100)),
+                    "Progress failure must keep awaiting in-flight extraction copies.");
+            }
+            finally
+            {
+                release.Set();
+                try
+                {
+                    import.GetAwaiter().GetResult();
+                    Assert(false, "The injected progress failure must propagate to the caller.");
+                }
+                catch (InvalidOperationException exception) when (ReferenceEquals(exception, failure))
+                {
+                }
+                finally
+                {
+                    MajDebug.ExtractionCopyCompleted = null;
+                }
+            }
+            AssertUncommitted(fixture);
+            InitializeMobile();
+            AssertConcurrentFiles(fixture);
+            AssertNoErrors();
+        }
+
+        /// <summary>Checks one rejected hash prevents an otherwise concurrent workload from committing, then permits retry.</summary>
+        private static void MobileConcurrentHashFailure()
+        {
+            using var fixture = new Fixture();
+            PackageConcurrentFiles(fixture);
+            const string rejectedPath = "Config/shared/group0/resource00.txt";
+            var expectedHash = ResourceManifestLoader.V2Hashes[rejectedPath];
+            ResourceManifestLoader.V2Hashes[rejectedPath] = Hash("incorrect expected bytes");
+            InitializeMobile();
+            AssertUncommitted(fixture);
+            Assert(MajDebug.Errors.Any(message => message.Contains("hash mismatch", StringComparison.Ordinal)),
+                "A rejected hash in a parallel extraction must be logged.");
+            MajDebug.Errors.Clear();
+            ResourceManifestLoader.V2Hashes[rejectedPath] = expectedHash;
+            InitializeMobile();
+            AssertConcurrentFiles(fixture);
+            fixture.AssertMissing("Assets.extracting-v2");
+            AssertNoErrors();
+        }
+
+        /// <summary>Seeds enough files with shared nested parents to exercise all bounded workers and managed moves.</summary>
+        /// <param name="fixture">The isolated packaged-resource fixture.</param>
+        private static void PackageConcurrentFiles(Fixture fixture)
+        {
+            for (var i = 0; i < 24; i++)
+            {
+                fixture.Package($"Config/shared/group{i % 3}/resource{i:D2}.txt", $"verified resource {i}\n" + new string((char)('a' + i), 4096));
+            }
+            fixture.Package("MaiCharts/Original/maidata.txt", "parallel official chart");
+            fixture.Package("Skins/default/skin.json", "parallel official skin");
+        }
+
+        /// <summary>Checks all nested unmanaged bytes, both managed moves, and staging cleanup after a successful extraction.</summary>
+        /// <param name="fixture">The extracted-resource fixture.</param>
+        private static void AssertConcurrentFiles(Fixture fixture)
+        {
+            for (var i = 0; i < 24; i++)
+            {
+                fixture.AssertText($"Assets/Config/shared/group{i % 3}/resource{i:D2}.txt", $"verified resource {i}\n" + new string((char)('a' + i), 4096));
+            }
+            fixture.AssertText("MaiCharts/Original/maidata.txt", "parallel official chart");
+            fixture.AssertText("Skins/default/skin.json", "parallel official skin");
+            fixture.AssertMissing("Assets/.pending-managed-asset-moves");
+            fixture.AssertMissing("Assets.extracting-v2");
+        }
+
+        /// <summary>Checks unsuccessful extraction did not expose resources or move bundled managed directories.</summary>
+        /// <param name="fixture">The unsuccessful extraction fixture.</param>
+        private static void AssertUncommitted(Fixture fixture)
+        {
+            fixture.AssertMissing("Assets");
+            fixture.AssertMissing("MaiCharts/Original");
+            fixture.AssertMissing("Skins/default");
+        }
+
+        /// <summary>Checks an operation reports cancellation instead of returning normally.</summary>
+        /// <param name="operation">The extraction operation expected to throw.</param>
+        /// <exception cref="InvalidOperationException">The operation returned without cancellation.</exception>
+        private static void AssertCancelled(Action operation)
+        {
+            try
+            {
+                operation();
+            }
+            catch (OperationCanceledException)
+            {
+                return;
+            }
+            Assert(false, "The extraction operation must propagate cancellation.");
+        }
+
+        /// <summary>Checks literal percent escapes, URI delimiters, spaces, and Unicode survive packaged extraction.</summary>
+        private static void MobileExtractsLiteralPackagedNames()
+        {
+            using var fixture = new Fixture();
+            const string relativePath = "Config/中文 %20 # + !/data %20 # + 中文.txt";
+            fixture.Package(relativePath, "literal packaged names");
+            fixture.Package("MaiCharts/Original/maidata.txt", "official chart");
+            fixture.Package("Skins/default/skin.json", "official skin");
+            InitializeMobile();
+            fixture.AssertText("Assets/" + relativePath, "literal packaged names");
+            AssertNoErrors();
+        }
+
+        /// <summary>Checks extraction never overwrites an existing customized player-managed tree.</summary>
+        private static void MobilePreservesExistingManagedAssets()
+        {
+            using var fixture = new Fixture();
+            fixture.Package("Config/options.txt", "official options");
+            fixture.Package("MaiCharts/Original/maidata.txt", "new official chart", "old official chart", changed: true);
+            fixture.Package("Skins/default/skin.json", "official skin");
+            fixture.Write("MaiCharts/Original/maidata.txt", "player customization");
+            InitializeMobile();
+            fixture.AssertText("MaiCharts/Original/maidata.txt", "player customization");
+            fixture.AssertText("Skins/default/skin.json", "official skin");
+            fixture.AssertMissing("Assets/.pending-managed-asset-moves");
+            AssertNoErrors();
+        }
+
+        /// <summary>Checks missing packaged input prevents commitment and a later retry recreates the staging tree.</summary>
+        private static void MobileRetriesIncompleteExtraction()
+        {
+            using var fixture = new Fixture();
+            fixture.Package("MaiCharts/Original/maidata.txt", "official chart");
+            fixture.Package("Skins/default/skin.json", "official skin");
+            ResourceManifestLoader.V2Hashes["Config/missing.txt"] = Hash("later options");
+            InitializeMobile();
+            fixture.AssertMissing("Assets");
+            fixture.AssertMissing("MaiCharts/Original");
+            Assert(MajDebug.Errors.Count != 0, "Incomplete extraction must log the failed source.");
+            MajDebug.Errors.Clear();
+            fixture.Package("Config/missing.txt", "later options");
+            InitializeMobile();
+            fixture.AssertText("Assets/Config/missing.txt", "later options");
+            fixture.AssertText("MaiCharts/Original/maidata.txt", "official chart");
+            fixture.AssertMissing("Assets.extracting-v2");
+            AssertNoErrors();
+        }
+
+        /// <summary>Checks hash-gated replacement, customization/deletion protection, and missing resource synchronization.</summary>
+        private static void MobileUpdatePreservesPlayerChoices()
+        {
+            using var fixture = new Fixture();
+            fixture.Package("Config/official.txt", "new official", "old official", changed: true);
+            fixture.Package("Config/custom.txt", "new official", "old official", changed: true);
+            fixture.Package("Config/player.txt", "new path official", changed: true);
+            fixture.Package("Config/missing.txt", "missing official");
+            fixture.Package("MaiCharts/Original/deleted.txt", "new chart", "old chart", changed: true);
+            fixture.Package("MaiCharts/Original/new.txt", "new chart path", changed: true);
+            fixture.Package("Skins/default/missing.txt", "missing skin");
+            fixture.Write("Assets/Config/official.txt", "old official");
+            fixture.Write("Assets/Config/custom.txt", "player customization");
+            fixture.Write("Assets/Config/player.txt", "player new path");
+            InitializeMobile();
+            AssertNoErrors();
+            fixture.AssertText("Assets/Config/official.txt", "new official");
+            fixture.AssertText("Assets/Config/custom.txt", "player customization");
+            fixture.AssertText("Assets/Config/player.txt", "player new path");
+            fixture.AssertText("Assets/Config/missing.txt", "missing official");
+            fixture.AssertMissing("MaiCharts/Original/deleted.txt");
+            fixture.AssertMissing("MaiCharts/Original/new.txt");
+            fixture.AssertMissing("Skins/default/missing.txt");
+            Assert(!Directory.EnumerateFiles(MajEnv.AssetsDirectory.Location, "*.tmp", SearchOption.AllDirectories).Any(),
+                "Successful updates must consume their temporary files.");
+            AssertNoErrors();
+        }
+
+        /// <summary>Checks a bad package hash prevents replacement of an otherwise eligible official local file.</summary>
+        private static void MobileRejectsPackagedHashMismatch()
+        {
+            using var fixture = new Fixture();
+            fixture.Package("Config/official.txt", "corrupt package", "old official", changed: true);
+            ResourceManifestLoader.V2Hashes["Config/official.txt"] = Hash("expected official");
+            fixture.Write("Assets/Config/official.txt", "old official");
+            InitializeMobile();
+            fixture.AssertText("Assets/Config/official.txt", "old official");
+            Assert(MajDebug.Errors.Any(message => message.Contains("hash mismatch", StringComparison.Ordinal)),
+                "The rejected package hash must be reported.");
+        }
+
+        /// <summary>Checks an interrupted managed move resumes while protecting an existing destination tree.</summary>
+        private static void MobileResumesPendingMoves()
+        {
+            using var fixture = new Fixture();
+            fixture.Write("Assets/.pending-managed-asset-moves", string.Empty);
+            fixture.Write("Assets/MaiCharts/Original/maidata.txt", "staged official chart");
+            fixture.Write("Assets/Skins/default/skin.json", "staged official skin");
+            fixture.Write("MaiCharts/Original/maidata.txt", "player customization");
+            InitializeMobile();
+            fixture.AssertText("MaiCharts/Original/maidata.txt", "player customization");
+            fixture.AssertText("Skins/default/skin.json", "staged official skin");
+            fixture.AssertMissing("Assets/MaiCharts/Original");
+            fixture.AssertMissing("Assets/.pending-managed-asset-moves");
+            AssertNoErrors();
+        }
+
+        /// <summary>Checks a destination directory collision leaves the directory intact and removes staged bytes.</summary>
+        private static void MobileCleansFailedAtomicWrite()
+        {
+            using var fixture = new Fixture();
+            var destination = fixture.PathFor("Assets/conflict.bin");
+            Directory.CreateDirectory(destination);
+            var failed = false;
+            try
+            {
+                ResourceFiles.WriteAllBytesAtomically(MajEnv.AssetsDirectory, "conflict.bin", Encoding.UTF8.GetBytes("replacement"));
+            }
+            catch (IOException)
+            {
+                failed = true;
+            }
+            Assert(failed, "Committing a staged file over a directory must fail.");
+            Assert(Directory.Exists(destination), "Commitment failure must preserve the existing directory.");
+            Assert(!Directory.EnumerateFiles(MajEnv.AssetsDirectory.Location, "*.tmp").Any(),
+                "Commitment failure must remove the new temporary file.");
+            AssertNoErrors();
+        }
+
+        /// <summary>Checks bundled managed directories cross from native extraction into a content provider chart and skin root.</summary>
+        private static void MobileMovesManagedAssetsAcrossBackends()
+        {
+            using var fixture = new Fixture();
+            var provider = fixture.UseProviderManagedRoots();
+            fixture.Package("Config/options.txt", "official options");
+            fixture.Package("MaiCharts/Original/song/maidata.txt", "official chart");
+            fixture.Package("MaiCharts/Original/song/track.mp3", "official track");
+            fixture.Package("Skins/default/skin.json", "official skin");
+            InitializeMobile();
+            AssertNoErrors();
+            fixture.AssertText("Assets/Config/options.txt", "official options");
+            AssertProviderText(MajEnv.ChartDirectory, "Original/song/maidata.txt", "official chart");
+            AssertProviderText(MajEnv.ChartDirectory, "Original/song/track.mp3", "official track");
+            AssertProviderText(MajEnv.SkinDirectory, "default/skin.json", "official skin");
+            Assert(MajEnv.ChartDirectory.FindFileAt("Original/song/maidata.txt")!.Entry!.LastWriteTimeUtc is not null,
+                "A cross-backend move must carry the extracted modification time to the provider.");
+            AssertOnlyChild(MajEnv.ChartDirectory, "Original");
+            AssertOnlyChild(MajEnv.SkinDirectory, "default");
+            fixture.AssertMissing("Assets/MaiCharts/Original");
+            fixture.AssertMissing("Assets/Skins/default");
+            fixture.AssertMissing("Assets/.pending-managed-asset-moves");
+            fixture.AssertMissing("Assets.extracting-v2");
+            Assert(provider.OpenStreamCount == 0, "Every provider stream must be disposed after the move.");
+            AssertNoErrors();
+        }
+
+        /// <summary>Checks a customized provider-backed managed tree is never replaced while the extracted duplicate is removed.</summary>
+        private static void MobilePreservesExistingProviderManagedAssets()
+        {
+            using var fixture = new Fixture();
+            fixture.UseProviderManagedRoots();
+            var customization = MajEnv.ChartDirectory.CreateDirectory("Original").CreateFile("maidata.txt");
+            customization.WriteAllText("player customization");
+            fixture.Package("MaiCharts/Original/maidata.txt", "new official chart", "old official chart", changed: true);
+            fixture.Package("Skins/default/skin.json", "official skin");
+            InitializeMobile();
+            AssertNoErrors();
+            AssertProviderText(MajEnv.ChartDirectory, "Original/maidata.txt", "player customization");
+            AssertProviderText(MajEnv.SkinDirectory, "default/skin.json", "official skin");
+            AssertOnlyChild(MajEnv.ChartDirectory, "Original");
+            fixture.AssertMissing("Assets/MaiCharts/Original");
+            fixture.AssertMissing("Assets/Skins/default");
+            fixture.AssertMissing("Assets/.pending-managed-asset-moves");
+            AssertNoErrors();
+        }
+
+        /// <summary>Checks a provider write failure keeps the extracted source and the pending marker, and the next start completes the move.</summary>
+        private static void MobileRetriesInterruptedCrossBackendMove()
+        {
+            using var fixture = new Fixture();
+            var provider = fixture.UseProviderManagedRoots();
+            fixture.Package("MaiCharts/Original/maidata.txt", "official chart");
+            fixture.Package("Skins/default/skin.json", "official skin");
+            provider.NewFileWriteFailureAfterBytes = 0;
+            InitializeMobile();
+            Assert(MajDebug.Errors.Count == 2 &&
+                MajDebug.Errors.All(message => message.Contains("Move failed", StringComparison.Ordinal)),
+                "Both interrupted cross-backend moves must be reported as failed moves.");
+            MajDebug.Errors.Clear();
+            Assert(!MajEnv.ChartDirectory.EnumerateEntries().Any() && !MajEnv.SkinDirectory.EnumerateEntries().Any(),
+                "A failed transfer must remove its temporary provider copy.");
+            fixture.AssertText("Assets/MaiCharts/Original/maidata.txt", "official chart");
+            fixture.AssertText("Assets/Skins/default/skin.json", "official skin");
+            Assert(File.Exists(fixture.PathFor("Assets/.pending-managed-asset-moves")),
+                "The pending marker must survive a failed move.");
+            Assert(provider.OpenStreamCount == 0, "Every provider stream must be disposed after a failed move.");
+            provider.NewFileWriteFailureAfterBytes = null;
+            InitializeMobile();
+            AssertNoErrors();
+            AssertProviderText(MajEnv.ChartDirectory, "Original/maidata.txt", "official chart");
+            AssertProviderText(MajEnv.SkinDirectory, "default/skin.json", "official skin");
+            AssertOnlyChild(MajEnv.ChartDirectory, "Original");
+            AssertOnlyChild(MajEnv.SkinDirectory, "default");
+            fixture.AssertMissing("Assets/MaiCharts/Original");
+            fixture.AssertMissing("Assets/Skins/default");
+            fixture.AssertMissing("Assets/.pending-managed-asset-moves");
+            Assert(provider.OpenStreamCount == 0, "Every provider stream must be disposed after the resumed move.");
+        }
+
+        /// <summary>Checks that extraction reports every extracted file and the install step, and a later check reports every checked file.</summary>
+        private static void MobileReportsProgress()
+        {
+            using var fixture = new Fixture();
+            fixture.Package("Config/options.txt", "official options");
+            fixture.Package("MaiCharts/Original/maidata.txt", "official chart");
+            fixture.Package("Skins/default/skin.json", "official skin");
+            var reports = new System.Collections.Generic.List<ProgressReport>();
+            InitializeMobile(reports);
+            AssertNoErrors();
+            var extraction = reports.Where(report => report.Message == reports[0].Message).ToArray();
+            Assert(extraction.Length == 4 && extraction[0].Completed == 0 && extraction.All(report => report.Total == 3),
+                "Extraction must report its start and each of the three packaged files.");
+            Assert(extraction[3].Completed == 3 && extraction[3].Fraction == 1f && extraction[3].ToString().EndsWith("3/3 (100%)", StringComparison.Ordinal),
+                "The last extraction report must be complete.");
+            Assert(reports.Count == 5 && !reports[4].HasTotal && reports[4].ToString() == reports[4].Message,
+                "Installing the bundled charts and skin must be reported without counts.");
+
+            reports.Clear();
+            InitializeMobile(reports);
+            AssertNoErrors();
+            Assert(reports.Count != 0 && reports[reports.Count - 1].Completed == 3 && reports[reports.Count - 1].Total == 3,
+                "A later check must finish by reporting every packaged file as checked.");
+        }
+
+        /// <summary>Checks that restoring empty desktop roots reports each restored group to completion.</summary>
+        private static void DesktopReportsProgress()
+        {
+            using var fixture = new Fixture(usePackagedArchive: false);
+            fixture.Package("MaiCharts/Original/a/maidata.txt", "official chart a");
+            fixture.Package("MaiCharts/Original/b/maidata.txt", "official chart b");
+            fixture.Package("Skins/default/skin.json", "official skin");
+            var reports = new System.Collections.Generic.List<ProgressReport>();
+            RestoreDesktop(reports);
+            AssertNoErrors();
+            var messages = reports.Select(report => report.Message).Distinct().ToArray();
+            Assert(messages.Length == 2, "Charts and skins must be reported as separate steps.");
+            Assert(reports.Count(report => report.Message == messages[0]) == 3 &&
+                   reports.Last(report => report.Message == messages[0]).Completed == 2,
+                "The chart step must report its start and both chart files.");
+            Assert(reports[reports.Count - 1].Completed == 1 && reports[reports.Count - 1].Total == 1,
+                "The skin step must finish by reporting its only file.");
+        }
+
+        /// <summary>Runs the mobile startup flow of <c>GameManager.CheckResourcesAsync</c> without substituting its resource behavior.</summary>
+        /// <param name="reports">Receives every progress report, or null to discard them.</param>
+        private static void InitializeMobile(System.Collections.Generic.List<ProgressReport>? reports = null)
+        {
+            var progress = new ProgressReporter(report => reports?.Add(report));
+            var budget = new FrameBudget();
+            if (!MajEnv.AssetsDirectory.Exists)
+            {
+                MobileResourceImporter.ImportAsync(progress, budget, CancellationToken.None).AsTask().GetAwaiter().GetResult();
+            }
+            else
+            {
+                MobileResourceChecker.CheckAsync(progress, budget, CancellationToken.None).AsTask().GetAwaiter().GetResult();
+            }
+        }
+
+        /// <summary>Runs the Windows startup flow of <c>GameManager.CheckResourcesAsync</c>.</summary>
+        /// <param name="reports">Receives every progress report, or null to discard them.</param>
+        private static void RestoreDesktop(System.Collections.Generic.List<ProgressReport>? reports = null)
+        {
+            var progress = new ProgressReporter(report => reports?.Add(report));
+            DesktopResourceChecker.CheckAsync(progress, new FrameBudget(), CancellationToken.None).AsTask().GetAwaiter().GetResult();
+        }
+
+        /// <summary>Computes the same lowercase SHA-256 representation used by validated resource manifests.</summary>
+        /// <param name="text">The UTF-8 fixture content.</param>
+        /// <returns>The content's lowercase SHA-256 hexadecimal hash.</returns>
+        private static string Hash(string text)
+        {
+            return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(text))).ToLowerInvariant();
+        }
+
+        /// <summary>Checks a file committed below a provider-backed root through the root's own backend.</summary>
+        /// <param name="root">The provider-backed managed root.</param>
+        /// <param name="relativePath">The path relative to the root.</param>
+        /// <param name="expectedText">The expected decoded content.</param>
+        /// <exception cref="InvalidOperationException">The file is missing or its content differs.</exception>
+        private static void AssertProviderText(StorageDirectory root, string relativePath, string expectedText)
+        {
+            var file = root.FindFileAt(relativePath);
+            Assert(file is not null, $"Missing provider file at {relativePath}.");
+            Assert(file!.ReadAllText() == expectedText, $"Unexpected provider content at {relativePath}.");
+        }
+
+        /// <summary>Checks a managed root holds exactly one child, so no temporary transfer copy was left behind.</summary>
+        /// <param name="directory">The managed root to inspect.</param>
+        /// <param name="name">The only expected child name.</param>
+        /// <exception cref="InvalidOperationException">The root holds another child or none.</exception>
+        private static void AssertOnlyChild(StorageDirectory directory, string name)
+        {
+            var names = directory.EnumerateEntries().Select(entry => entry.Name).ToArray();
+            Assert(names.Length == 1 && names[0] == name,
+                $"Expected only '{name}' in {directory.Location}, found: {string.Join(", ", names)}.");
+        }
+
+        /// <summary>Fails when the production workflow logged an unexpected resource error.</summary>
+        /// <exception cref="InvalidOperationException">An error was recorded.</exception>
+        private static void AssertNoErrors()
+        {
+            Assert(MajDebug.Errors.Count == 0, string.Join(Environment.NewLine, MajDebug.Errors));
+        }
+
+        /// <summary>Fails a case when a behavioral requirement is not satisfied.</summary>
+        /// <param name="condition">Whether the requirement was satisfied.</param>
+        /// <param name="message">The failure context.</param>
+        /// <exception cref="InvalidOperationException">The condition is false.</exception>
+        private static void Assert(bool condition, string message)
+        {
+            if (!condition)
+            {
+                throw new InvalidOperationException(message);
+            }
+        }
+
+        /// <summary>Pumps awaited continuations on the invoking thread without requiring the Unity player loop.</summary>
+        private sealed class CallerSynchronizationContext : SynchronizationContext, IDisposable
+        {
+            /// <summary>Holds continuations posted by background completions until the invoking thread runs them.</summary>
+            private readonly BlockingCollection<(SendOrPostCallback callback, object? state)> _callbacks = new();
+
+            /// <summary>Queues a continuation for the invoking thread.</summary>
+            /// <param name="callback">The continuation to execute.</param>
+            /// <param name="state">The continuation state.</param>
+            public override void Post(SendOrPostCallback callback, object? state)
+            {
+                _callbacks.Add((callback, state));
+            }
+
+            /// <summary>Runs an asynchronous operation while pumping its captured synchronization context.</summary>
+            /// <param name="operation">The operation to start on the invoking thread.</param>
+            /// <returns>The operation's extraction result.</returns>
+            public bool Run(Func<Task<bool>> operation)
+            {
+                var previous = Current;
+                SetSynchronizationContext(this);
+                try
+                {
+                    var task = operation();
+                    while (!task.IsCompleted)
+                    {
+                        if (_callbacks.TryTake(out var item, 10))
+                        {
+                            item.callback(item.state);
+                        }
+                    }
+                    return task.GetAwaiter().GetResult();
+                }
+                finally
+                {
+                    SetSynchronizationContext(previous);
+                }
+            }
+
+            /// <summary>Releases the continuation queue after the operation and its workers have finished.</summary>
+            public void Dispose()
+            {
+                _callbacks.Dispose();
+            }
+        }
+
+        /// <summary>Owns one isolated tree and resets all narrow global substitutes for a validation case.</summary>
+        private sealed class Fixture : IDisposable
+        {
+            /// <summary>Owns the absolute fixture root beneath the ignored validation work directory.</summary>
+            private readonly string _root;
+
+            /// <summary>Owns the native package directory used by desktop and iOS fixture operations.</summary>
+            private readonly string _packageRoot;
+
+            /// <summary>Owns the Android APK fixture path, or null for a native packaged-resource root.</summary>
+            private readonly string? _archivePath;
+
+            /// <summary>Creates isolated app and package roots with empty player-managed directories.</summary>
+            /// <param name="usePackagedArchive">Whether Android mobile cases read from a real APK-shaped ZIP archive.</param>
+            public Fixture(bool usePackagedArchive = true)
+            {
+                Application.StreamingAssetsOwnerThreadId = null;
+                MajDebug.ExtractionCopyCompleted = null;
+                var workRoot = Path.GetFullPath(Path.Combine("Temp", "ResourceStorageValidation", "work"));
+                _root = Path.Combine(workRoot, Guid.NewGuid().ToString("N"));
+                MajEnv.RootDirectory = FileSystem.Directory.Create(Path.Combine(_root, "App"));
+                _packageRoot = Path.Combine(_root, "Package");
+                _archivePath = null;
+                Directory.CreateDirectory(_packageRoot);
+                Application.streamingAssetsPath = _packageRoot;
+#if UNITY_ANDROID
+                if (usePackagedArchive)
+                {
+                    _archivePath = Path.Combine(_root, "Package %20 # 中文.apk");
+                    using var archive = ZipFile.Open(_archivePath, ZipArchiveMode.Create);
+                    var archiveRoot = Path.GetPathRoot(_archivePath)!;
+                    var segments = _archivePath.Substring(archiveRoot.Length).Split(Path.DirectorySeparatorChar);
+                    for (var i = 0; i < segments.Length; i++)
+                    {
+                        segments[i] = Uri.EscapeDataString(segments[i]);
+                    }
+                    Application.streamingAssetsPath = "jar:" + new Uri(archiveRoot).AbsoluteUri +
+                        string.Join("/", segments) + "!/assets";
+                }
+#endif
+                // A previous case may have placed the managed roots on a provider.
+                MajEnv.ChartDirectoryOverride = null;
+                MajEnv.SkinDirectoryOverride = null;
+                Directory.CreateDirectory(MajEnv.ChartDirectory.Location);
+                Directory.CreateDirectory(MajEnv.SkinDirectory.Location);
+                ResourceManifestLoader.V1Hashes.Clear();
+                ResourceManifestLoader.V2Hashes.Clear();
+                ResourceManifestLoader.DiffPaths.Clear();
+                MajDebug.Errors.Clear();
+            }
+
+            /// <summary>Registers a fresh in-memory content provider and places the chart and skin roots on it.</summary>
+            /// <returns>The provider, so a case can inject failures and check stream disposal.</returns>
+            public MemoryFileSystem UseProviderManagedRoots()
+            {
+                var provider = new MemoryFileSystem();
+                FileSystem.RegisterContentProvider(provider);
+                var providerRoot = FileSystem.Directory.Open(provider.RootLocation);
+                MajEnv.ChartDirectoryOverride = providerRoot.CreateDirectory("MaiCharts");
+                MajEnv.SkinDirectoryOverride = providerRoot.CreateDirectory("Skins");
+                return provider;
+            }
+
+            /// <summary>Writes packaged fixture content and registers its validated manifest entries.</summary>
+            /// <param name="relativePath">The portable packaged relative path.</param>
+            /// <param name="text">The packaged content.</param>
+            /// <param name="previousText">Previous official content, when upgrading an existing resource.</param>
+            /// <param name="changed">Whether the path appears in the official update diff.</param>
+            public void Package(string relativePath, string text, string? previousText = null, bool changed = false)
+            {
+                if (_archivePath is null)
+                {
+                    WriteText(Path.Combine(_packageRoot, relativePath), text);
+                }
+                else
+                {
+                    using var archive = ZipFile.Open(_archivePath, ZipArchiveMode.Update);
+                    var name = "assets/" + relativePath;
+                    archive.GetEntry(name)?.Delete();
+                    var entry = archive.CreateEntry(name, CompressionLevel.Optimal);
+                    using var stream = entry.Open();
+                    using var writer = new StreamWriter(stream, new UTF8Encoding(false));
+                    writer.Write(text);
+                }
+                ResourceManifestLoader.V2Hashes[relativePath] = Hash(text);
+                if (previousText is not null)
+                {
+                    ResourceManifestLoader.V1Hashes[relativePath] = Hash(previousText);
+                }
+                if (changed)
+                {
+                    ResourceManifestLoader.DiffPaths.Add(relativePath);
+                }
+            }
+
+            /// <summary>Writes local application fixture content without involving a production operation.</summary>
+            /// <param name="relativePath">The path relative to the fixture's application root.</param>
+            /// <param name="text">The local content to seed.</param>
+            public void Write(string relativePath, string text)
+            {
+                WriteText(PathFor(relativePath), text);
+            }
+
+            /// <summary>Resolves an application fixture path.</summary>
+            /// <param name="relativePath">The path relative to the fixture's application root.</param>
+            /// <returns>The absolute local fixture path.</returns>
+            public string PathFor(string relativePath)
+            {
+                return Path.Combine(MajEnv.RootDirectory.Location, relativePath);
+            }
+
+            /// <summary>Checks committed fixture bytes directly through the platform filesystem.</summary>
+            /// <param name="relativePath">The path relative to the application root.</param>
+            /// <param name="expectedText">The expected decoded content.</param>
+            /// <exception cref="InvalidOperationException">The committed file content differs.</exception>
+            public void AssertText(string relativePath, string expectedText)
+            {
+                Assert(File.ReadAllText(PathFor(relativePath)) == expectedText,
+                    $"Unexpected content at {relativePath}.");
+            }
+
+            /// <summary>Checks that neither a local file nor a local directory occupies a fixture path.</summary>
+            /// <param name="relativePath">The path relative to the application root.</param>
+            /// <exception cref="InvalidOperationException">A filesystem entry still exists.</exception>
+            public void AssertMissing(string relativePath)
+            {
+                var path = PathFor(relativePath);
+                Assert(!File.Exists(path) && !Directory.Exists(path), $"Unexpected entry at {relativePath}.");
+            }
+
+            /// <summary>Removes only this case's verified fixture tree.</summary>
+            /// <exception cref="InvalidOperationException">The cleanup target escaped the work directory.</exception>
+            public void Dispose()
+            {
+                var workRoot = Path.GetFullPath(Path.Combine("Temp", "ResourceStorageValidation", "work"))
+                    + Path.DirectorySeparatorChar;
+                Assert(Path.GetFullPath(_root).StartsWith(workRoot, StringComparison.OrdinalIgnoreCase),
+                    "Fixture cleanup target escaped the validation work directory.");
+                Directory.Delete(_root, recursive: true);
+            }
+
+            /// <summary>Seeds fixture bytes and creates their parent directories.</summary>
+            /// <param name="path">The fixture's absolute local destination.</param>
+            /// <param name="text">The UTF-8 content to seed without a byte order mark.</param>
+            private static void WriteText(string path, string text)
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+                File.WriteAllText(path, text, new UTF8Encoding(false));
+            }
+        }
+    }
+}
