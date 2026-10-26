@@ -5,6 +5,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Runtime.ExceptionServices;
 using System.Threading;
+using System.Threading.Tasks;
 #nullable enable
 namespace MajdataPlay.Net.Curl.Core
 {
@@ -14,9 +15,9 @@ namespace MajdataPlay.Net.Curl.Core
     /// <remarks>
     /// Every field shared by the writer and the reader, including the pooled buffers, is guarded by <see cref="_sync"/>.
     /// <see cref="Dispose(bool)"/> and <see cref="Abort(Exception)"/> may therefore run on any thread, even while another
-    /// thread is blocked in <see cref="Read(byte[], int, int)"/>, without returning a buffer to the pool while it is still
+    /// thread is blocked in <see cref="Read(Span{byte})"/>, without returning a buffer to the pool while it is still
     /// being copied. Disposing releases the buffers immediately; only the native easy handle is released by the owner
-    /// through the dispose callback.
+    /// through the dispose callback. Asynchronous reads wait on <see cref="_stateChanged"/> instead of blocking a thread.
     /// </remarks>
     internal class CurlResponseStream : Stream
     {
@@ -38,6 +39,11 @@ namespace MajdataPlay.Net.Curl.Core
             get => throw new NotSupportedException();
             set => throw new NotSupportedException();
         }
+
+        /// <summary>
+        /// Completes a canceled wait; the state is the <see cref="TaskCompletionSource{TResult}"/> to complete.
+        /// </summary>
+        static readonly Action<object?> s_completeWaiter = state => ((TaskCompletionSource<bool>)state!).TrySetResult(true);
 
         /// <summary>
         /// Guards every mutable field below and is the monitor a blocked reader waits on.
@@ -73,6 +79,12 @@ namespace MajdataPlay.Net.Curl.Core
         /// The chunk the reader is currently copying from.
         /// </summary>
         MemoryChunk _currentChunk;
+
+        /// <summary>
+        /// Completed and cleared by the next write, completion, abort or disposal; created by an asynchronous read that
+        /// found no bytes. Created with <see cref="TaskCreationOptions.RunContinuationsAsynchronously"/>.
+        /// </summary>
+        TaskCompletionSource<bool>? _stateChanged;
 
         /// <summary>
         /// The reason the transfer was aborted, rethrown by every later read.
@@ -151,7 +163,7 @@ namespace MajdataPlay.Net.Curl.Core
                     return CurlCallbackReturn.Write.Error;
                 }
                 _bufferedBytes += chunk.Length;
-                Monitor.PulseAll(_sync);
+                NotifyStateChangedLocked();
             }
 
             return (UIntPtr)chunk.Length;
@@ -165,7 +177,7 @@ namespace MajdataPlay.Net.Curl.Core
             lock (_sync)
             {
                 _isWritingCompleted = true;
-                Monitor.PulseAll(_sync);
+                NotifyStateChangedLocked();
             }
         }
 
@@ -185,7 +197,7 @@ namespace MajdataPlay.Net.Curl.Core
                 _abortException ??= ex;
                 _isWritingCompleted = true;
                 ReleaseBufferedChunks();
-                Monitor.PulseAll(_sync);
+                NotifyStateChangedLocked();
             }
         }
 
@@ -196,45 +208,41 @@ namespace MajdataPlay.Net.Curl.Core
         /// <param name="offset">The offset in <paramref name="buffer"/> at which to start writing.</param>
         /// <param name="count">The maximum number of bytes to read.</param>
         /// <returns>The number of bytes read; 0 at the end of the body.</returns>
+        /// <exception cref="ArgumentNullException"><paramref name="buffer"/> is null.</exception>
+        /// <exception cref="ArgumentOutOfRangeException"><paramref name="offset"/> and <paramref name="count"/> do not describe a range of <paramref name="buffer"/>.</exception>
         /// <exception cref="ObjectDisposedException">The stream was disposed before or during the read.</exception>
         /// <exception cref="Exception">The abort reason passed to <see cref="Abort(Exception)"/>.</exception>
         public override int Read(byte[] buffer, int offset, int count)
         {
-            var bytesRead = 0;
-            var shouldResume = false;
+            if (buffer is null)
+            {
+                throw new ArgumentNullException(nameof(buffer));
+            }
+
+            return Read(buffer.AsSpan(offset, count));
+        }
+
+        /// <summary>
+        /// Reads body bytes straight from the buffered chunk, blocking until at least one byte is available, the body ends,
+        /// or the stream is aborted or disposed.
+        /// </summary>
+        /// <remarks>
+        /// Overridden because <see cref="Stream.Read(Span{byte})"/> rents a temporary array as large as
+        /// <paramref name="buffer"/>; destinations above the shared pool's size limit were allocated anew on every call.
+        /// </remarks>
+        /// <param name="buffer">The destination span; at most its length is read.</param>
+        /// <returns>The number of bytes read; 0 at the end of the body.</returns>
+        /// <exception cref="ObjectDisposedException">The stream was disposed before or during the read.</exception>
+        /// <exception cref="Exception">The abort reason passed to <see cref="Abort(Exception)"/>.</exception>
+        public override int Read(Span<byte> buffer)
+        {
+            int bytesRead;
+            bool shouldResume;
             lock (_sync)
             {
-                while (true)
+                while (!TryReadLocked(buffer, out bytesRead, out shouldResume))
                 {
-                    ThrowIfDisposed();
-                    if (_abortException is not null)
-                    {
-                        ExceptionDispatchInfo.Capture(_abortException).Throw();
-                    }
-                    if (count == 0 || _currentChunk.Remaining > 0)
-                    {
-                        break;
-                    }
-                    ReleaseChunk(ref _currentChunk);
-                    if (_readyChunks.Count > 0)
-                    {
-                        _currentChunk = _readyChunks.Dequeue();
-                        continue;
-                    }
-                    if (_isWritingCompleted)
-                    {
-                        return 0;
-                    }
                     Monitor.Wait(_sync);
-                }
-                bytesRead = Math.Min(count, _currentChunk.Remaining);
-                _currentChunk.Buffer.AsSpan(_currentChunk.Offset, bytesRead).CopyTo(buffer.AsSpan(offset, bytesRead));
-                _currentChunk.Offset += bytesRead;
-                _bufferedBytes -= bytesRead;
-                if (_isPaused && _bufferedBytes <= _lwmBytes)
-                {
-                    _isPaused = false;
-                    shouldResume = true;
                 }
             }
             if (shouldResume)
@@ -243,6 +251,204 @@ namespace MajdataPlay.Net.Curl.Core
             }
 
             return bytesRead;
+        }
+
+        /// <summary>
+        /// Reads body bytes without blocking a thread: completes synchronously when bytes are buffered or the body has ended,
+        /// otherwise waits asynchronously for a write, the end of the body, an abort or disposal.
+        /// </summary>
+        /// <param name="buffer">The destination array.</param>
+        /// <param name="offset">The offset in <paramref name="buffer"/> at which to start writing.</param>
+        /// <param name="count">The maximum number of bytes to read.</param>
+        /// <param name="cancellationToken">Stops waiting for bytes; buffered bytes are left for the next read.</param>
+        /// <returns>A task returning the number of bytes read; 0 at the end of the body.</returns>
+        /// <exception cref="ArgumentNullException"><paramref name="buffer"/> is null.</exception>
+        /// <exception cref="ArgumentOutOfRangeException"><paramref name="offset"/> and <paramref name="count"/> do not describe a range of <paramref name="buffer"/>.</exception>
+        /// <exception cref="OperationCanceledException">The returned task is canceled when <paramref name="cancellationToken"/> is canceled first.</exception>
+        /// <exception cref="ObjectDisposedException">The returned task faults when the stream was disposed before or during the read.</exception>
+        /// <exception cref="Exception">The returned task faults with the abort reason passed to <see cref="Abort(Exception)"/>.</exception>
+        public override Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken)
+        {
+            if (buffer is null)
+            {
+                throw new ArgumentNullException(nameof(buffer));
+            }
+
+            return ReadAsync(buffer.AsMemory(offset, count), cancellationToken).AsTask();
+        }
+
+        /// <summary>
+        /// Reads body bytes without blocking a thread: completes synchronously when bytes are buffered or the body has ended,
+        /// otherwise waits asynchronously for a write, the end of the body, an abort or disposal.
+        /// </summary>
+        /// <remarks>
+        /// Overridden because <see cref="Stream.ReadAsync(Memory{byte}, CancellationToken)"/> runs the blocking
+        /// <see cref="Read(Span{byte})"/> on a thread-pool thread for the whole network wait and ignores
+        /// <paramref name="cancellationToken"/> once started. Only one read may be outstanding at a time.
+        /// </remarks>
+        /// <param name="buffer">The destination memory; at most its length is read.</param>
+        /// <param name="cancellationToken">Stops waiting for bytes; buffered bytes are left for the next read.</param>
+        /// <returns>A value task returning the number of bytes read; 0 at the end of the body.</returns>
+        /// <exception cref="OperationCanceledException">The returned task is canceled when <paramref name="cancellationToken"/> is canceled first.</exception>
+        /// <exception cref="ObjectDisposedException">The returned task faults when the stream was disposed before or during the read.</exception>
+        /// <exception cref="Exception">The returned task faults with the abort reason passed to <see cref="Abort(Exception)"/>.</exception>
+        public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            if (cancellationToken.IsCancellationRequested)
+            {
+                return new ValueTask<int>(Task.FromCanceled<int>(cancellationToken));
+            }
+            try
+            {
+                if (TryReadOrGetWaiter(buffer.Span, out var bytesRead, out var waiter))
+                {
+                    return new ValueTask<int>(bytesRead);
+                }
+
+                return WaitAndReadAsync(buffer, waiter, cancellationToken);
+            }
+            catch (Exception e)
+            {
+                return new ValueTask<int>(Task.FromException<int>(e));
+            }
+        }
+
+        /// <summary>
+        /// Waits for the stream state to change and retries the read until it completes.
+        /// </summary>
+        /// <param name="buffer">The destination memory.</param>
+        /// <param name="waiter">The task completed by the next state change.</param>
+        /// <param name="cancellationToken">Stops waiting for bytes.</param>
+        /// <returns>The number of bytes read; 0 at the end of the body.</returns>
+        /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled while waiting.</exception>
+        /// <exception cref="ObjectDisposedException">The stream was disposed while waiting.</exception>
+        /// <exception cref="Exception">The abort reason passed to <see cref="Abort(Exception)"/>.</exception>
+        async ValueTask<int> WaitAndReadAsync(Memory<byte> buffer, Task waiter, CancellationToken cancellationToken)
+        {
+            while (true)
+            {
+                await WaitForStateChangeAsync(waiter, cancellationToken).ConfigureAwait(false);
+                if (TryReadOrGetWaiter(buffer.Span, out var bytesRead, out waiter))
+                {
+                    return bytesRead;
+                }
+            }
+        }
+
+        /// <summary>
+        /// Waits for <paramref name="waiter"/> or for <paramref name="cancellationToken"/> to be canceled.
+        /// </summary>
+        /// <param name="waiter">The task completed by the next state change.</param>
+        /// <param name="cancellationToken">Stops waiting.</param>
+        /// <returns>A task completing when the stream state changed.</returns>
+        /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled first.</exception>
+        static async Task WaitForStateChangeAsync(Task waiter, CancellationToken cancellationToken)
+        {
+            if (!cancellationToken.CanBeCanceled)
+            {
+                await waiter.ConfigureAwait(false);
+                return;
+            }
+            var canceled = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            using (cancellationToken.Register(s_completeWaiter, canceled))
+            {
+                var completed = await Task.WhenAny(waiter, canceled.Task).ConfigureAwait(false);
+                if (completed != waiter)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                }
+            }
+        }
+
+        /// <summary>
+        /// Reads under <see cref="_sync"/>, or returns the task completed by the next state change when no byte is available.
+        /// </summary>
+        /// <param name="buffer">The destination span.</param>
+        /// <param name="bytesRead">The number of bytes read when the read completed.</param>
+        /// <param name="waiter">The task to wait for when the read did not complete; otherwise a completed task.</param>
+        /// <returns><see langword="true"/> when the read completed; <see langword="false"/> when the caller must wait.</returns>
+        /// <exception cref="ObjectDisposedException">The stream has been disposed.</exception>
+        /// <exception cref="Exception">The abort reason passed to <see cref="Abort(Exception)"/>.</exception>
+        bool TryReadOrGetWaiter(Span<byte> buffer, out int bytesRead, out Task waiter)
+        {
+            bool shouldResume;
+            lock (_sync)
+            {
+                if (!TryReadLocked(buffer, out bytesRead, out shouldResume))
+                {
+                    _stateChanged ??= new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+                    waiter = _stateChanged.Task;
+                    return false;
+                }
+            }
+            if (shouldResume)
+            {
+                _onResume();
+            }
+            waiter = Task.CompletedTask;
+
+            return true;
+        }
+
+        /// <summary>
+        /// Copies buffered bytes into <paramref name="buffer"/>. Must be called while holding <see cref="_sync"/>.
+        /// </summary>
+        /// <param name="buffer">The destination span.</param>
+        /// <param name="bytesRead">The number of bytes read; 0 for an empty destination or at the end of the body.</param>
+        /// <param name="shouldResume">Whether the caller must resume the paused transfer after releasing <see cref="_sync"/>.</param>
+        /// <returns><see langword="true"/> when the read completed; <see langword="false"/> when no byte is available yet.</returns>
+        /// <exception cref="ObjectDisposedException">The stream has been disposed.</exception>
+        /// <exception cref="Exception">The abort reason passed to <see cref="Abort(Exception)"/>.</exception>
+        bool TryReadLocked(Span<byte> buffer, out int bytesRead, out bool shouldResume)
+        {
+            bytesRead = 0;
+            shouldResume = false;
+            while (true)
+            {
+                ThrowIfDisposed();
+                if (_abortException is not null)
+                {
+                    ExceptionDispatchInfo.Capture(_abortException).Throw();
+                }
+                if (buffer.IsEmpty || _currentChunk.Remaining > 0)
+                {
+                    break;
+                }
+                ReleaseChunk(ref _currentChunk);
+                if (_readyChunks.Count > 0)
+                {
+                    _currentChunk = _readyChunks.Dequeue();
+                    continue;
+                }
+                if (_isWritingCompleted)
+                {
+                    return true;
+                }
+                return false;
+            }
+            bytesRead = Math.Min(buffer.Length, _currentChunk.Remaining);
+            _currentChunk.Buffer.AsSpan(_currentChunk.Offset, bytesRead).CopyTo(buffer);
+            _currentChunk.Offset += bytesRead;
+            _bufferedBytes -= bytesRead;
+            if (_isPaused && _bufferedBytes <= _lwmBytes)
+            {
+                _isPaused = false;
+                shouldResume = true;
+            }
+
+            return true;
+        }
+
+        /// <summary>
+        /// Wakes blocked and asynchronous readers after a state change. Must be called while holding <see cref="_sync"/>.
+        /// </summary>
+        void NotifyStateChangedLocked()
+        {
+            Monitor.PulseAll(_sync);
+            var stateChanged = _stateChanged;
+            _stateChanged = null;
+            // Continuations run asynchronously, so they never execute on the libcurl worker thread or under the lock.
+            stateChanged?.TrySetResult(true);
         }
 
         /// <inheritdoc/>
@@ -302,7 +508,7 @@ namespace MajdataPlay.Net.Curl.Core
                 _isDisposed = true;
                 _isWritingCompleted = true;
                 ReleaseBufferedChunks();
-                Monitor.PulseAll(_sync);
+                NotifyStateChangedLocked();
                 return true;
             }
         }
