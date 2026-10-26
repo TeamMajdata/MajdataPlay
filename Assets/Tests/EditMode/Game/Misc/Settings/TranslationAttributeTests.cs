@@ -98,7 +98,8 @@ namespace MajdataPlay.Tests.Game.Misc.Settings
         {
             var types = new[]
             {
-                typeof(DefaultValueAttribute), typeof(global::MajdataPlay.Settings.DescriptionAttribute), typeof(MenuNameAttribute),
+                typeof(DefaultValueAttribute), typeof(global::MajdataPlay.Settings.DescriptionAttribute), typeof(FoldNumberAttribute),
+                typeof(MenuNameAttribute),
                 typeof(NoDescriptionAttribute), typeof(OptionEnumeratorAttribute), typeof(OptionNameAttribute), typeof(OptionalAttribute),
                 typeof(global::MajdataPlay.Settings.RangeAttribute), typeof(ReadOnlyOptionAttribute), typeof(StepAttribute)
             };
