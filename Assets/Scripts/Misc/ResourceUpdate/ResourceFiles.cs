@@ -15,14 +15,16 @@ namespace MajdataPlay.ResourceUpdate
         /// <param name="destinationRoot">The existing directory receiving the verified bytes at the same relative path.</param>
         /// <param name="expectedHash">The official SHA-256 hash expected for the packaged bytes.</param>
         /// <param name="operation">The operation label used in resource logs.</param>
+        /// <param name="packagedRoot">The packaged root captured on the main thread, or null to read Unity's current path.</param>
         /// <returns>Whether the packaged bytes were verified and committed; failures are logged.</returns>
         public static bool TryCopyVerified(
             string relativePath,
             StorageDirectory destinationRoot,
             string expectedHash,
-            string operation)
+            string operation,
+            string? packagedRoot = null)
         {
-            if (!TryReadVerified(relativePath, expectedHash, operation, out var data))
+            if (!TryReadVerified(relativePath, expectedHash, operation, out var data, packagedRoot))
             {
                 return false;
             }
@@ -45,10 +47,11 @@ namespace MajdataPlay.ResourceUpdate
         /// <param name="expectedHash">The official SHA-256 hash expected for the packaged bytes.</param>
         /// <param name="operation">The operation label used in resource logs.</param>
         /// <param name="data">Receives the verified bytes, or an empty array after failure.</param>
+        /// <param name="packagedRoot">The packaged root captured on the main thread, or null to read Unity's current path.</param>
         /// <returns>Whether the bytes were read and match the hash; failures are logged.</returns>
-        public static bool TryReadVerified(string relativePath, string expectedHash, string operation, out byte[] data)
+        public static bool TryReadVerified(string relativePath, string expectedHash, string operation, out byte[] data, string? packagedRoot = null)
         {
-            if (!PackagedResources.TryReadAllBytes(relativePath, out data))
+            if (!PackagedResources.TryReadAllBytes(relativePath, out data, packagedRoot))
             {
                 return false;
             }

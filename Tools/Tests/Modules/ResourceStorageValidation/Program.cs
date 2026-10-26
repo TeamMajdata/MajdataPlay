@@ -1,11 +1,14 @@
 #nullable enable
 using System;
+using System.Collections.Concurrent;
+using System.Collections.Generic;
 using System.IO;
 using System.IO.Compression;
 using System.Linq;
 using System.Security.Cryptography;
 using System.Text;
 using System.Threading;
+using System.Threading.Tasks;
 using MajdataPlay;
 using MajdataPlay.Diagnostics;
 using MajdataPlay.IO.Storage;
@@ -27,6 +30,13 @@ namespace ResourceStorageValidation
                 ("Desktop restores empty chart and skin roots", DesktopRestoresEmptyRoots),
                 ("Desktop preserves nonempty managed roots", DesktopPreservesExistingRoots),
                 ("Mobile initial extraction moves managed assets", MobileInitialExtraction),
+                ("Mobile concurrent extraction preserves nested files and calling context", MobileExtractsNestedFilesOnCallingContext),
+                ("Mobile extraction uses bounded background workers", MobileBoundsBackgroundWorkers),
+                ("Mobile pre-cancelled extraction never commits", MobileRejectsPreCancelledExtraction),
+                ("Mobile cancellation from progress prevents commitment and permits retry", MobileCancelsFromProgress),
+                ("Mobile cancellation drains in-flight workers before retry", MobileCancellationDrainsWorkers),
+                ("Mobile progress failure drains in-flight workers before retry", MobileProgressFailureDrainsWorkers),
+                ("Mobile concurrent hash failure never commits and permits retry", MobileConcurrentHashFailure),
                 ("Mobile extraction preserves literal packaged names", MobileExtractsLiteralPackagedNames),
                 ("Mobile extraction preserves existing managed assets", MobilePreservesExistingManagedAssets),
                 ("Mobile incomplete extraction retries safely", MobileRetriesIncompleteExtraction),
@@ -116,6 +126,274 @@ namespace ResourceStorageValidation
             fixture.AssertMissing("Assets/.pending-managed-asset-moves");
             fixture.AssertMissing("Assets.extracting-v2");
             AssertNoErrors();
+        }
+
+        /// <summary>Checks shared nested destinations and progress remain correct while Unity paths stay on the caller thread.</summary>
+        private static void MobileExtractsNestedFilesOnCallingContext()
+        {
+            using var fixture = new Fixture();
+            PackageConcurrentFiles(fixture);
+            var callingThreadId = Environment.CurrentManagedThreadId;
+            Application.StreamingAssetsOwnerThreadId = callingThreadId;
+            var reports = new List<ProgressReport>();
+            using var context = new CallerSynchronizationContext();
+            var progress = new ProgressReporter(report =>
+            {
+                Assert(Environment.CurrentManagedThreadId == callingThreadId && SynchronizationContext.Current == context,
+                    "Extraction and installation progress must run on the invoking synchronization context.");
+                reports.Add(report);
+            });
+            Assert(context.Run(() => MobileResourceImporter.ImportAsync(progress, new FrameBudget(), CancellationToken.None).AsTask()),
+                "Every nested packaged file must be verified and committed.");
+            AssertNoErrors();
+            AssertConcurrentFiles(fixture);
+            var extraction = reports.Where(report => report.HasTotal).ToArray();
+            Assert(extraction.Length == ResourceManifestLoader.V2Hashes.Count + 1 &&
+                extraction.Select(report => report.Completed).SequenceEqual(Enumerable.Range(0, extraction.Length)),
+                "Parallel completion must report every count once in increasing order, from zero through the total.");
+            AssertNoErrors();
+        }
+
+        /// <summary>Checks independent copies overlap on the bounded number of background tasks.</summary>
+        private static void MobileBoundsBackgroundWorkers()
+        {
+            using var fixture = new Fixture();
+            PackageConcurrentFiles(fixture);
+            var workerCount = Math.Min(Environment.ProcessorCount, 4);
+            using var entered = new CountdownEvent(workerCount);
+            using var release = new ManualResetEventSlim();
+            var workers = new ConcurrentDictionary<int, byte>();
+            var callingThreadId = Environment.CurrentManagedThreadId;
+            MajDebug.ExtractionCopyCompleted = () =>
+            {
+                Assert(Environment.CurrentManagedThreadId != callingThreadId && Task.CurrentId.HasValue,
+                    "Packaged reads, hashing, and staged writes must finish on background tasks.");
+                if (workers.TryAdd(Task.CurrentId!.Value, 0) && workers.Count <= workerCount)
+                {
+                    entered.Signal();
+                }
+                Assert(release.Wait(TimeSpan.FromSeconds(15)), "Timed out waiting to release extraction workers.");
+            };
+            var import = MobileResourceImporter.ImportAsync(new ProgressReporter(_ =>
+            {
+            }), new FrameBudget(), CancellationToken.None).AsTask();
+            try
+            {
+                Assert(entered.Wait(TimeSpan.FromSeconds(10)), "The expected background workers must overlap before any can continue.");
+                Assert(!import.IsCompleted, "Extraction cannot complete while its copies are held in flight.");
+            }
+            finally
+            {
+                release.Set();
+                import.GetAwaiter().GetResult();
+                MajDebug.ExtractionCopyCompleted = null;
+            }
+            Assert(workers.Count == workerCount, "Extraction must use at most four workers and no more than the processor count.");
+            AssertNoErrors();
+            AssertConcurrentFiles(fixture);
+            AssertNoErrors();
+        }
+
+        /// <summary>Checks cancellation before launch prevents staging, commitment, and managed moves.</summary>
+        private static void MobileRejectsPreCancelledExtraction()
+        {
+            using var fixture = new Fixture();
+            PackageConcurrentFiles(fixture);
+            using var cancellation = new CancellationTokenSource();
+            cancellation.Cancel();
+            AssertCancelled(() => MobileResourceImporter.ImportAsync(new ProgressReporter(_ =>
+            {
+            }), new FrameBudget(), cancellation.Token).AsTask().GetAwaiter().GetResult());
+            AssertUncommitted(fixture);
+            fixture.AssertMissing("Assets.extracting-v2");
+            AssertNoErrors();
+        }
+
+        /// <summary>Checks a progress callback can cancel even the final report before commitment, then retry cleanly.</summary>
+        private static void MobileCancelsFromProgress()
+        {
+            using var fixture = new Fixture();
+            PackageConcurrentFiles(fixture);
+            using var cancellation = new CancellationTokenSource();
+            var progress = new ProgressReporter(report =>
+            {
+                if (report.HasTotal && report.Completed > 0)
+                {
+                    cancellation.Cancel();
+                }
+            });
+            AssertCancelled(() => MobileResourceImporter.ImportAsync(progress, new FrameBudget(), cancellation.Token).AsTask().GetAwaiter().GetResult());
+            AssertUncommitted(fixture);
+            InitializeMobile();
+            AssertConcurrentFiles(fixture);
+            fixture.AssertMissing("Assets.extracting-v2");
+            AssertNoErrors();
+        }
+
+        /// <summary>Checks cancellation waits for all in-flight copies before returning and a retry replaces leftover staging.</summary>
+        private static void MobileCancellationDrainsWorkers()
+        {
+            using var fixture = new Fixture();
+            PackageConcurrentFiles(fixture);
+            using var entered = new ManualResetEventSlim();
+            using var release = new ManualResetEventSlim();
+            using var cancellation = new CancellationTokenSource();
+            var finishedCopies = 0;
+            MajDebug.ExtractionCopyCompleted = () =>
+            {
+                entered.Set();
+                Assert(release.Wait(TimeSpan.FromSeconds(15)), "Timed out waiting to release cancelled extraction copies.");
+                Interlocked.Increment(ref finishedCopies);
+            };
+            var import = MobileResourceImporter.ImportAsync(new ProgressReporter(_ =>
+            {
+            }), new FrameBudget(), cancellation.Token).AsTask();
+            try
+            {
+                Assert(entered.Wait(TimeSpan.FromSeconds(10)), "A packaged copy must be in flight before cancellation.");
+                cancellation.Cancel();
+                Assert(!SpinWait.SpinUntil(() => import.IsCompleted, TimeSpan.FromMilliseconds(100)),
+                    "Cancellation must keep awaiting copies that are still in flight.");
+            }
+            finally
+            {
+                release.Set();
+                AssertCancelled(() => import.GetAwaiter().GetResult());
+                MajDebug.ExtractionCopyCompleted = null;
+            }
+            Assert(finishedCopies > 0, "Cancelled extraction must drain the in-flight copies before it returns.");
+            AssertUncommitted(fixture);
+            InitializeMobile();
+            AssertConcurrentFiles(fixture);
+            fixture.AssertMissing("Assets.extracting-v2");
+            AssertNoErrors();
+        }
+
+        /// <summary>Checks a failed progress callback waits for remaining background copies before allowing an immediate retry.</summary>
+        private static void MobileProgressFailureDrainsWorkers()
+        {
+            using var fixture = new Fixture();
+            PackageConcurrentFiles(fixture);
+            using var blocked = new ManualResetEventSlim();
+            using var reported = new ManualResetEventSlim();
+            using var release = new ManualResetEventSlim();
+            var completedCopies = 0;
+            MajDebug.ExtractionCopyCompleted = () =>
+            {
+                if (Interlocked.Increment(ref completedCopies) > 1)
+                {
+                    blocked.Set();
+                    Assert(release.Wait(TimeSpan.FromSeconds(15)), "Timed out waiting to release copies after progress failure.");
+                }
+            };
+            var failure = new InvalidOperationException("Injected progress failure.");
+            var progress = new ProgressReporter(report =>
+            {
+                if (report.HasTotal && report.Completed > 0)
+                {
+                    reported.Set();
+                    throw failure;
+                }
+            });
+            var import = MobileResourceImporter.ImportAsync(progress, new FrameBudget(), CancellationToken.None).AsTask();
+            try
+            {
+                Assert(blocked.Wait(TimeSpan.FromSeconds(10)) && reported.Wait(TimeSpan.FromSeconds(10)),
+                    "Progress must fail while another extraction copy remains in flight.");
+                Assert(!SpinWait.SpinUntil(() => import.IsCompleted, TimeSpan.FromMilliseconds(100)),
+                    "Progress failure must keep awaiting in-flight extraction copies.");
+            }
+            finally
+            {
+                release.Set();
+                try
+                {
+                    import.GetAwaiter().GetResult();
+                    Assert(false, "The injected progress failure must propagate to the caller.");
+                }
+                catch (InvalidOperationException exception) when (ReferenceEquals(exception, failure))
+                {
+                }
+                finally
+                {
+                    MajDebug.ExtractionCopyCompleted = null;
+                }
+            }
+            AssertUncommitted(fixture);
+            InitializeMobile();
+            AssertConcurrentFiles(fixture);
+            AssertNoErrors();
+        }
+
+        /// <summary>Checks one rejected hash prevents an otherwise concurrent workload from committing, then permits retry.</summary>
+        private static void MobileConcurrentHashFailure()
+        {
+            using var fixture = new Fixture();
+            PackageConcurrentFiles(fixture);
+            const string rejectedPath = "Config/shared/group0/resource00.txt";
+            var expectedHash = ResourceManifestLoader.V2Hashes[rejectedPath];
+            ResourceManifestLoader.V2Hashes[rejectedPath] = Hash("incorrect expected bytes");
+            InitializeMobile();
+            AssertUncommitted(fixture);
+            Assert(MajDebug.Errors.Any(message => message.Contains("hash mismatch", StringComparison.Ordinal)),
+                "A rejected hash in a parallel extraction must be logged.");
+            MajDebug.Errors.Clear();
+            ResourceManifestLoader.V2Hashes[rejectedPath] = expectedHash;
+            InitializeMobile();
+            AssertConcurrentFiles(fixture);
+            fixture.AssertMissing("Assets.extracting-v2");
+            AssertNoErrors();
+        }
+
+        /// <summary>Seeds enough files with shared nested parents to exercise all bounded workers and managed moves.</summary>
+        /// <param name="fixture">The isolated packaged-resource fixture.</param>
+        private static void PackageConcurrentFiles(Fixture fixture)
+        {
+            for (var i = 0; i < 24; i++)
+            {
+                fixture.Package($"Config/shared/group{i % 3}/resource{i:D2}.txt", $"verified resource {i}\n" + new string((char)('a' + i), 4096));
+            }
+            fixture.Package("MaiCharts/Original/maidata.txt", "parallel official chart");
+            fixture.Package("Skins/default/skin.json", "parallel official skin");
+        }
+
+        /// <summary>Checks all nested unmanaged bytes, both managed moves, and staging cleanup after a successful extraction.</summary>
+        /// <param name="fixture">The extracted-resource fixture.</param>
+        private static void AssertConcurrentFiles(Fixture fixture)
+        {
+            for (var i = 0; i < 24; i++)
+            {
+                fixture.AssertText($"Assets/Config/shared/group{i % 3}/resource{i:D2}.txt", $"verified resource {i}\n" + new string((char)('a' + i), 4096));
+            }
+            fixture.AssertText("MaiCharts/Original/maidata.txt", "parallel official chart");
+            fixture.AssertText("Skins/default/skin.json", "parallel official skin");
+            fixture.AssertMissing("Assets/.pending-managed-asset-moves");
+            fixture.AssertMissing("Assets.extracting-v2");
+        }
+
+        /// <summary>Checks unsuccessful extraction did not expose resources or move bundled managed directories.</summary>
+        /// <param name="fixture">The unsuccessful extraction fixture.</param>
+        private static void AssertUncommitted(Fixture fixture)
+        {
+            fixture.AssertMissing("Assets");
+            fixture.AssertMissing("MaiCharts/Original");
+            fixture.AssertMissing("Skins/default");
+        }
+
+        /// <summary>Checks an operation reports cancellation instead of returning normally.</summary>
+        /// <param name="operation">The extraction operation expected to throw.</param>
+        /// <exception cref="InvalidOperationException">The operation returned without cancellation.</exception>
+        private static void AssertCancelled(Action operation)
+        {
+            try
+            {
+                operation();
+            }
+            catch (OperationCanceledException)
+            {
+                return;
+            }
+            Assert(false, "The extraction operation must propagate cancellation.");
         }
 
         /// <summary>Checks literal percent escapes, URI delimiters, spaces, and Unicode survive packaged extraction.</summary>
@@ -302,7 +580,7 @@ namespace ResourceStorageValidation
             provider.NewFileWriteFailureAfterBytes = 0;
             InitializeMobile();
             Assert(MajDebug.Errors.Count == 2 &&
-                MajDebug.Errors.TrueForAll(message => message.Contains("Move failed", StringComparison.Ordinal)),
+                MajDebug.Errors.All(message => message.Contains("Move failed", StringComparison.Ordinal)),
                 "Both interrupted cross-backend moves must be reported as failed moves.");
             MajDebug.Errors.Clear();
             Assert(!MajEnv.ChartDirectory.EnumerateEntries().Any() && !MajEnv.SkinDirectory.EnumerateEntries().Any(),
@@ -443,6 +721,52 @@ namespace ResourceStorageValidation
             }
         }
 
+        /// <summary>Pumps awaited continuations on the invoking thread without requiring the Unity player loop.</summary>
+        private sealed class CallerSynchronizationContext : SynchronizationContext, IDisposable
+        {
+            /// <summary>Holds continuations posted by background completions until the invoking thread runs them.</summary>
+            private readonly BlockingCollection<(SendOrPostCallback callback, object? state)> _callbacks = new();
+
+            /// <summary>Queues a continuation for the invoking thread.</summary>
+            /// <param name="callback">The continuation to execute.</param>
+            /// <param name="state">The continuation state.</param>
+            public override void Post(SendOrPostCallback callback, object? state)
+            {
+                _callbacks.Add((callback, state));
+            }
+
+            /// <summary>Runs an asynchronous operation while pumping its captured synchronization context.</summary>
+            /// <param name="operation">The operation to start on the invoking thread.</param>
+            /// <returns>The operation's extraction result.</returns>
+            public bool Run(Func<Task<bool>> operation)
+            {
+                var previous = Current;
+                SetSynchronizationContext(this);
+                try
+                {
+                    var task = operation();
+                    while (!task.IsCompleted)
+                    {
+                        if (_callbacks.TryTake(out var item, 10))
+                        {
+                            item.callback(item.state);
+                        }
+                    }
+                    return task.GetAwaiter().GetResult();
+                }
+                finally
+                {
+                    SetSynchronizationContext(previous);
+                }
+            }
+
+            /// <summary>Releases the continuation queue after the operation and its workers have finished.</summary>
+            public void Dispose()
+            {
+                _callbacks.Dispose();
+            }
+        }
+
         /// <summary>Owns one isolated tree and resets all narrow global substitutes for a validation case.</summary>
         private sealed class Fixture : IDisposable
         {
@@ -459,6 +783,8 @@ namespace ResourceStorageValidation
             /// <param name="usePackagedArchive">Whether Android mobile cases read from a real APK-shaped ZIP archive.</param>
             public Fixture(bool usePackagedArchive = true)
             {
+                Application.StreamingAssetsOwnerThreadId = null;
+                MajDebug.ExtractionCopyCompleted = null;
                 var workRoot = Path.GetFullPath(Path.Combine("Temp", "ResourceStorageValidation", "work"));
                 _root = Path.Combine(workRoot, Guid.NewGuid().ToString("N"));
                 MajEnv.RootDirectory = FileSystem.Directory.Create(Path.Combine(_root, "App"));

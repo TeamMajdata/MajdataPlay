@@ -1,10 +1,12 @@
 #nullable enable
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 using MajdataPlay.IO.Storage;
+using MajdataPlay.ResourceUpdate;
 
 namespace MajdataPlay
 {
@@ -69,7 +71,7 @@ namespace MajdataPlay.ResourceUpdate
         }
     }
 
-    /// <summary>Replaces the UniTask frame budget, so linked workflows run to completion synchronously.</summary>
+    /// <summary>Replaces the UniTask frame budget without requiring a player loop.</summary>
     internal sealed class FrameBudget
     {
         /// <summary>Gets how many times the linked workflows asked whether to yield.</summary>
@@ -94,7 +96,10 @@ namespace MajdataPlay.Diagnostics
     internal static class MajDebug
     {
         /// <summary>Gets all errors logged by the current case.</summary>
-        public static List<string> Errors { get; } = new();
+        public static ConcurrentQueue<string> Errors { get; } = new();
+
+        /// <summary>Gets or sets the hook observing a completed extraction copy on its worker.</summary>
+        public static Action? ExtractionCopyCompleted { get; set; }
 
         /// <summary>Accepts an informational message without affecting assertions.</summary>
         /// <param name="message">The production workflow's informational message.</param>
@@ -107,6 +112,10 @@ namespace MajdataPlay.Diagnostics
         /// <param name="message">The production workflow's informational message.</param>
         public static void LogInfo(string tag, string message)
         {
+            if (tag == nameof(ResourceFiles) && message.StartsWith("Extract:", StringComparison.Ordinal))
+            {
+                ExtractionCopyCompleted?.Invoke();
+            }
         }
 
         /// <summary>Accepts a warning without affecting assertions, as a tolerated transfer detail is not a failure.</summary>
@@ -119,7 +128,7 @@ namespace MajdataPlay.Diagnostics
         /// <param name="message">The failure and its local fixture context.</param>
         public static void LogError(string message)
         {
-            Errors.Add(message);
+            Errors.Enqueue(message);
         }
 
         /// <summary>Records a tagged production failure for the case to assert.</summary>
@@ -127,7 +136,7 @@ namespace MajdataPlay.Diagnostics
         /// <param name="message">The failure and its local fixture context.</param>
         public static void LogError(string tag, string message)
         {
-            Errors.Add(message);
+            Errors.Enqueue(message);
         }
     }
 }
@@ -137,7 +146,28 @@ namespace UnityEngine
     /// <summary>Supplies the packaged fixture path used by the linked importer and checkers.</summary>
     internal static class Application
     {
+        /// <summary>Stores the current fixture's packaged resource root.</summary>
+        private static string s_streamingAssetsPath = string.Empty;
+
+        /// <summary>Gets or sets the only thread allowed to query Unity's path, or null to disable the guard.</summary>
+        public static int? StreamingAssetsOwnerThreadId { get; set; }
+
         /// <summary>Gets or sets the current fixture's packaged resource root.</summary>
-        public static string streamingAssetsPath { get; set; } = string.Empty;
+        /// <exception cref="InvalidOperationException">A guarded Unity property is queried from another thread.</exception>
+        public static string streamingAssetsPath
+        {
+            get
+            {
+                if (StreamingAssetsOwnerThreadId is int ownerThreadId && Environment.CurrentManagedThreadId != ownerThreadId)
+                {
+                    throw new InvalidOperationException("Unity's packaged path was queried from a background thread.");
+                }
+                return s_streamingAssetsPath;
+            }
+            set
+            {
+                s_streamingAssetsPath = value;
+            }
+        }
     }
 }

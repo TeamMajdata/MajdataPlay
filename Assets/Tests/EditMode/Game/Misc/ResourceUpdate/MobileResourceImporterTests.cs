@@ -1,3 +1,4 @@
+using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
@@ -36,7 +37,12 @@ namespace MajdataPlay.Tests.Game.Misc.ResourceUpdate
                 environment.UseTemporaryLayout(temporary);
                 Assert.That(ResourceManifestLoader.TryGetV2Hashes(out var hashes), Is.True);
                 var reports = new List<ProgressReport>();
-                var progress = new ProgressReporter(reports.Add);
+                var mainThreadId = Thread.CurrentThread.ManagedThreadId;
+                var progress = new ProgressReporter(report =>
+                {
+                    Assert.That(Thread.CurrentThread.ManagedThreadId, Is.EqualTo(mainThreadId), "Loading UI must be updated on the Unity main thread.");
+                    reports.Add(report);
+                });
 
                 var imported = await MobileResourceImporter.ImportAsync(progress, new FrameBudget(), CancellationToken.None);
 
@@ -48,6 +54,7 @@ namespace MajdataPlay.Tests.Game.Misc.ResourceUpdate
                 Assert.That(MajEnv.AssetsDirectory.FindFile(MobileManagedAssetMover.PendingMovesMarkerName), Is.Null);
                 var extraction = reports.Where(report => report.Total == hashes.Count).ToArray();
                 Assert.That(extraction.Length, Is.EqualTo(hashes.Count + 1));
+                Assert.That(extraction.Select(report => report.Completed), Is.EqualTo(Enumerable.Range(0, hashes.Count + 1)));
                 Assert.That(extraction[extraction.Length - 1].Completed, Is.EqualTo(hashes.Count));
                 Assert.That(reports[reports.Count - 1].HasTotal, Is.False, "installing the charts and skin is the last step");
 
@@ -60,6 +67,51 @@ namespace MajdataPlay.Tests.Game.Misc.ResourceUpdate
                 Assert.That(MajEnv.AssetsDirectory.FindFileAt(soundEffect), Is.Not.Null);
                 Assert.That(reports[reports.Count - 1].Completed, Is.EqualTo(hashes.Count));
                 Assert.That(reports[reports.Count - 1].Total, Is.EqualTo(hashes.Count));
+            });
+        }
+
+        /// <summary>Checks that cancellation from a progress callback drains workers before an immediate extraction retry.</summary>
+        /// <returns>The test coroutine.</returns>
+        [UnityTest]
+        public IEnumerator ImportAsync_CancelledFromProgress_DoesNotCommitAndCanRetry()
+        {
+            return UniTask.ToCoroutine(async () =>
+            {
+                using var temporary = new TemporaryDirectory();
+                using var environment = new MajEnvScope();
+                using var cancellation = new CancellationTokenSource();
+                environment.UseTemporaryLayout(temporary);
+                var cancelled = false;
+                var progress = new ProgressReporter(report =>
+                {
+                    if (report.HasTotal && report.Completed > 0)
+                    {
+                        cancellation.Cancel();
+                    }
+                });
+
+                try
+                {
+                    await MobileResourceImporter.ImportAsync(progress, new FrameBudget(), cancellation.Token);
+                }
+                catch (OperationCanceledException)
+                {
+                    cancelled = true;
+                }
+
+                Assert.That(cancelled, Is.True);
+                Assert.That(MajEnv.AssetsDirectory.Exists, Is.False, "A cancelled extraction must not commit its staging directory.");
+                Assert.That(MajEnv.ChartDirectory.FindDirectory("Original"), Is.Null);
+                Assert.That(MajEnv.SkinDirectory.FindDirectory("default"), Is.Null);
+
+                var imported = await MobileResourceImporter.ImportAsync(
+                    new ProgressReporter(_ =>
+                    {
+                    }), new FrameBudget(), CancellationToken.None);
+
+                Assert.That(imported, Is.True, "An immediate retry must not race workers from the cancelled extraction.");
+                Assert.That(MajEnv.ChartDirectory.FindDirectory("Original"), Is.Not.Null);
+                Assert.That(MajEnv.SkinDirectory.FindDirectory("default"), Is.Not.Null);
             });
         }
     }

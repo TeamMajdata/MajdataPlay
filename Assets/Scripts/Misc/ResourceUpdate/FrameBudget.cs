@@ -8,8 +8,9 @@ namespace MajdataPlay.ResourceUpdate
 {
     /// <summary>Splits synchronous main-thread work across frames so that the loading screen keeps rendering progress.</summary>
     /// <remarks>
-    /// Resource work stays on the main thread because storage backends such as Android SAF and the APK archive are not
-    /// guaranteed to be usable from worker threads. Call <see cref="YieldIfExceededAsync"/> between work items.
+    /// Incremental resource checks and managed asset moves stay on the main thread because destinations such as Android
+    /// SAF may require it. First-start extraction uses separate workers for native storage and independent APK streams.
+    /// Call <see cref="YieldIfExceededAsync"/> between main-thread work items; do not share a budget among workers.
     /// </remarks>
     internal sealed class FrameBudget
     {
