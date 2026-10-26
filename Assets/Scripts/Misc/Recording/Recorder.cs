@@ -119,13 +119,12 @@ namespace MajdataPlay.Recording
         }
         internal static void OnSettingsChanged()
         {
-            if (s_recorder is null)
+            if (s_recorder is not null)
             {
-                return;
+                s_recorder.Dispose();
+                s_recorder = null;
+                s_isInited = false;
             }
-            s_recorder.Dispose();
-            s_recorder = null;
-            s_isInited = false;
             Init();
         }
         private static void OnApplicationQuit(object? sender, EventArgs? e)

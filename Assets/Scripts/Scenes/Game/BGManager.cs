@@ -61,6 +61,7 @@ namespace MajdataPlay.Scenes.Game
             _videoPlayer.Loop = false;
             _videoPlayer.TextureChanged += OnVideoTextureChanged;
             _videoPlayer.ErrorReceived += OnVideoError;
+            _videoPlayer.PreferredDecoderType = (VideoDecoderType)MajEnv.Settings.Decoding.PreferredDecoder;
             _backgroundMaterial = new Material(_coverRenderer.material);
             _coverRenderer.material = _backgroundMaterial;
             _videoRenderer.material = _backgroundMaterial;
