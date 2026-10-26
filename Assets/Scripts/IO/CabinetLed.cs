@@ -31,8 +31,9 @@ namespace MajdataPlay.IO
         readonly static LedCommonUpdateFunction[] _ledCommFuncs = new LedCommonUpdateFunction[9];
         readonly static LedLinearUpdateFunction[] _ledLinearFuncs = new LedLinearUpdateFunction[9];
         readonly static LedSineUpdateFunction[] _ledSineFuncs = new LedSineUpdateFunction[9];
-        
-        public static void Init()
+
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSceneLoad)]
+        private static void Init()
         {
 #if UNITY_STANDALONE
             IsEnabled = MajEnv.Settings.IO.OutputDevice.Led.Enable;

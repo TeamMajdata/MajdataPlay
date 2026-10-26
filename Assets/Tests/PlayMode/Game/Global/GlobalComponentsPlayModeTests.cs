@@ -134,7 +134,6 @@ namespace MajdataPlay.Tests.Game.Global.PlayMode
         [UnityTest]
         public IEnumerator GameUpdater_DrivesTheFrame()
         {
-            CabinetLed.Init();
             var led = CreateLedRenderer(8);
             CreateTouchPanelRenderer(0);
             var root = InactiveObjects.Create(_objects, "GameUpdater");

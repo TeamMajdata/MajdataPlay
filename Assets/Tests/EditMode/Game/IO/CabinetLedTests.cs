@@ -330,7 +330,6 @@ namespace MajdataPlay.Tests.Game.IO
         private void Init(bool enabled)
         {
             _settings.Settings.IO.OutputDevice.Led = new LedOptions { Enable = enabled };
-            CabinetLed.Init();
             PrivateMember.SetStaticField(typeof(CabinetLed), "_lastUpdateTime", MajTimeline.UnscaledTime);
         }
 

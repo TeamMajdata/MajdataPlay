@@ -237,7 +237,6 @@ namespace MajdataPlay
             IODetector.Init();
             InputManager.Init(Majdata<DummyTouchPanelRenderer>.Instance!.InstanceID2SensorIndexMappingTable);
             OutputManager.Init();
-            CabinetLed.Init();
             Recorder.Init();
 #if UNITY_EDITOR
             if (EditorReturnScenePath is string returnScenePath)
