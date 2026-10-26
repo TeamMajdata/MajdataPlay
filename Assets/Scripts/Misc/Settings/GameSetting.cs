@@ -117,6 +117,28 @@ namespace MajdataPlay.Settings
         public int LeadInTime { get; set; } = 1;
 
         public bool ManualStartGame { get; set; } = false;
+
+        public LanSyncRoleOption LanSyncRole { get; set; } = LanSyncRoleOption.Disabled;
+
+        [Step("1")]
+        [Range("1", "9999", HasMax = true, HasMin = true)]
+        public int LanSyncRoomCode { get; set; } = 1;
+
+        [Step("1")]
+        [Range("1024", "65535", HasMax = true, HasMin = true)]
+        public int LanSyncPort { get; set; } = 27966;
+
+        [Step("500")]
+        [Range("0", "30000", HasMax = true, HasMin = true)]
+        public int LanSyncStartDelayMs { get; set; } = 3000;
+
+        [Step("1")]
+        [Range("-1000", "1000", HasMax = true, HasMin = true)]
+        public int LanSyncAdvanceMs { get; set; } = 0;
+
+        [Step("500")]
+        [Range("1000", "60000", HasMax = true, HasMin = true)]
+        public int LanSyncWaitTimeoutMs { get; set; } = 15000;
     }
     
     public class JudgeOptions
