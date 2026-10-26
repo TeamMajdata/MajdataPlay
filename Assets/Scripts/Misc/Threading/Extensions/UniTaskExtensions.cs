@@ -10,24 +10,20 @@ namespace MajdataPlay.Threading
     {
         public static UniTask Register(this UniTask source, string taskName = "")
         {
-            var currentScene = SceneSwitcher.CurrentScene;
-            return TaskTracker.Register(source, taskName, currentScene.ToString());
+            return TaskTracker.Register(source, taskName, TaskRegistrationScene.GetName());
         }
         public static UniTask RegisterAsWorker(this UniTask source, string taskName = "")
         {
-            var currentScene = SceneSwitcher.CurrentScene;
-            return TaskTracker.Register(source, taskName, currentScene.ToString(), true);
+            return TaskTracker.Register(source, taskName, TaskRegistrationScene.GetName(), true);
         }
 
         public static UniTask<T> Register<T>(this UniTask<T> source, string taskName = "")
         {
-            var currentScene = SceneSwitcher.CurrentScene;
-            return TaskTracker.Register(source, taskName, currentScene.ToString());
+            return TaskTracker.Register(source, taskName, TaskRegistrationScene.GetName());
         }
         public static UniTask<T> RegisterAsWorker<T>(this UniTask<T> source, string taskName = "")
         {
-            var currentScene = SceneSwitcher.CurrentScene;
-            return TaskTracker.Register(source, taskName, currentScene.ToString(), true);
+            return TaskTracker.Register(source, taskName, TaskRegistrationScene.GetName(), true);
         }
     }
 }

@@ -577,6 +577,82 @@ namespace MajdataPlay.Tests.Plugins.Threading
             Assert.That(TaskTracker.EnableStackTrace, Is.EqualTo(UnityEditor.EditorPrefs.GetBool("MajdataPlay.TaskTracker.StackTrace", true)));
         }
 
+        /// <summary>Checks that tracking is supported in the Editor by default.</summary>
+        [Test]
+        public void IsTrackingSupported_IsTrueInEditor()
+        {
+            Assert.That(TaskTracker.IsTrackingSupported, Is.True);
+        }
+
+        /// <summary>Checks that, as in players, Task registrations are returned unchanged and nothing is recorded.</summary>
+        [Test]
+        public void Register_TrackingUnsupported_ReturnsTasksWithoutRecording()
+        {
+            var name = TaskTrackerIsolation.UniqueName("player");
+            var scene = TaskTrackerIsolation.UniqueName("scene");
+            var plain = new TaskCompletionSource<bool>();
+            var typed = new TaskCompletionSource<int>();
+            var entries = TaskTrackerIsolation.Entries.Count;
+            var activeEntries = TaskTrackerIsolation.ActiveEntries.Count;
+            TaskTracker.IsTrackingSupported = false;
+
+            var returned = TaskTracker.Register((Task)plain.Task, name, scene);
+            var returnedTyped = TaskTracker.Register(typed.Task, name, scene, true);
+
+            Assert.That(returned, Is.SameAs(plain.Task));
+            Assert.That(returnedTyped, Is.SameAs(typed.Task));
+            Assert.That(TaskTrackerIsolation.Entries.Count, Is.EqualTo(entries));
+            Assert.That(TaskTrackerIsolation.ActiveEntries.Count, Is.EqualTo(activeEntries));
+            Assert.That(TaskTrackerIsolation.Find(name), Is.Empty);
+            Assert.That(TaskTracker.HasRunningTasks(true, scene), Is.False);
+            Assert.Throws<ArgumentNullException>(() => TaskTracker.Register((Task)null!));
+        }
+
+        /// <summary>Checks that, as in players, ValueTask and UniTask registrations return the original without wrapping it.</summary>
+        /// <returns>The test coroutine.</returns>
+        [UnityTest]
+        public IEnumerator Register_TrackingUnsupported_ReturnsValueTasksAndUniTasksUnwrapped() => UniTask.ToCoroutine(async () =>
+        {
+            var name = TaskTrackerIsolation.UniqueName("player");
+            var scene = TaskTrackerIsolation.UniqueName("scene");
+            var entries = TaskTrackerIsolation.Entries.Count;
+            var activeEntries = TaskTrackerIsolation.ActiveEntries.Count;
+            var valueTask = default(ValueTask);
+            var valueTaskOfT = new ValueTask<int>(5);
+            var uniTask = new UniTaskCompletionSource();
+            var uniTaskOfT = new UniTaskCompletionSource<int>();
+            TaskTracker.IsTrackingSupported = false;
+
+            var returnedValueTask = TaskTracker.Register(valueTask, name, scene);
+            var returnedValueTaskOfT = TaskTracker.Register(valueTaskOfT, name, scene);
+            var returnedUniTask = TaskTracker.Register(uniTask.Task, name, scene);
+            var returnedUniTaskOfT = TaskTracker.Register(uniTaskOfT.Task, name, scene);
+
+            // A tracked registration would wrap these in a new backing Task, so they would no longer compare equal.
+            Assert.That(returnedValueTask == valueTask, Is.True);
+            Assert.That(returnedValueTaskOfT == valueTaskOfT, Is.True);
+            Assert.That(TaskTrackerIsolation.Entries.Count, Is.EqualTo(entries));
+            Assert.That(TaskTrackerIsolation.ActiveEntries.Count, Is.EqualTo(activeEntries));
+            Assert.That(TaskTracker.HasRunningTasks(true, scene), Is.False);
+            uniTask.TrySetResult();
+            uniTaskOfT.TrySetResult(9);
+            await returnedUniTask;
+            Assert.That(await returnedUniTaskOfT, Is.EqualTo(9));
+            Assert.That(TaskTrackerIsolation.Find(name), Is.Empty);
+        });
+
+        /// <summary>Checks that, as in players, runtime initialization does not subscribe to scene changes.</summary>
+        [Test]
+        public void InitializeRuntime_TrackingUnsupported_SkipsSceneTracking()
+        {
+            PrivateMember.SetStaticField(typeof(TaskTracker), "_activeScene", "stale");
+            TaskTracker.IsTrackingSupported = false;
+
+            PrivateMember.InvokeStatic(typeof(TaskTracker), "InitializeRuntime");
+
+            Assert.That(PrivateMember.GetStaticField<string>(typeof(TaskTracker), "_activeScene"), Is.EqualTo("stale"));
+        }
+
         /// <summary>Checks that an active scene change refreshes the cached scene name.</summary>
         [Test]
         public void OnActiveSceneChanged_RefreshesCachedScene()
