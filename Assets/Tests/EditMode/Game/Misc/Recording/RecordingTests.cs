@@ -152,7 +152,7 @@ namespace MajdataPlay.Tests.Game.Misc.Recording
         private object? _savedRecorder;
 
         /// <summary>The facade initialization flag before the test.</summary>
-        private int _savedIsInited;
+        private bool _savedIsInited;
 
         /// <summary>Prepares temporary directories and captures the facade state.</summary>
         [SetUp]
@@ -162,8 +162,8 @@ namespace MajdataPlay.Tests.Game.Misc.Recording
             _environment = new MajEnvScope();
             _environment.UseTemporaryLayout(_temporary);
             _objects = new TestObjects();
-            _savedRecorder = PrivateMember.GetStaticField<object?>(typeof(Recorder), "_recorder");
-            _savedIsInited = PrivateMember.GetStaticField<int>(typeof(Recorder), "s_isInited");
+            _savedRecorder = PrivateMember.GetStaticField<object?>(typeof(Recorder), "s_recorder");
+            _savedIsInited = PrivateMember.GetStaticField<bool>(typeof(Recorder), "s_isInited");
         }
 
         /// <summary>Restores the facade and the directories.</summary>
@@ -173,7 +173,7 @@ namespace MajdataPlay.Tests.Game.Misc.Recording
             var handler = (EventHandler<EventArgs?>)Delegate.CreateDelegate(typeof(EventHandler<EventArgs?>),
                 typeof(Recorder).GetMethod("OnApplicationQuit", BindingFlags.Static | BindingFlags.NonPublic)!);
             GameManager.OnAppQuit -= handler;
-            PrivateMember.SetStaticField(typeof(Recorder), "_recorder", _savedRecorder);
+            PrivateMember.SetStaticField(typeof(Recorder), "s_recorder", _savedRecorder);
             PrivateMember.SetStaticField(typeof(Recorder), "s_isInited", _savedIsInited);
             _objects.Dispose();
             _environment.Dispose();
@@ -188,7 +188,7 @@ namespace MajdataPlay.Tests.Game.Misc.Recording
         private static FakeRecorder InstallRecorder(bool connected, bool enabled)
         {
             var recorder = new FakeRecorder { IsConnected = connected };
-            PrivateMember.SetStaticField(typeof(Recorder), "_recorder", recorder);
+            PrivateMember.SetStaticField(typeof(Recorder), "s_recorder", recorder);
             MajEnv.Settings.Game.RecordMode = enabled ? RecordModeOption.OBSTrigger : RecordModeOption.Disable;
             return recorder;
         }
@@ -234,7 +234,7 @@ namespace MajdataPlay.Tests.Game.Misc.Recording
 
                     Assert.That(recorder.Calls, Is.Empty);
                 }
-                PrivateMember.SetStaticField(typeof(Recorder), "_recorder", null);
+                PrivateMember.SetStaticField(typeof(Recorder), "s_recorder", null);
                 Assert.That(Recorder.IsRecording, Is.False);
             });
         }
@@ -244,12 +244,12 @@ namespace MajdataPlay.Tests.Game.Misc.Recording
         public void RecordHelper_StopsOnQuit()
         {
             var recorder = InstallRecorder(true, true);
-            PrivateMember.SetStaticField(typeof(Recorder), "s_isInited", 1);
+            PrivateMember.SetStaticField(typeof(Recorder), "s_isInited", true);
 
             Recorder.Init();
             PrivateMember.InvokeStatic(typeof(Recorder), "OnApplicationQuit", null, null);
 
-            Assert.That(PrivateMember.GetStaticField<object>(typeof(Recorder), "_recorder"), Is.SameAs(recorder));
+            Assert.That(PrivateMember.GetStaticField<object>(typeof(Recorder), "s_recorder"), Is.SameAs(recorder));
             Assert.That(recorder.Calls, Is.EqualTo(new[] { "Stop" }));
 
             MajEnv.Settings.Game.RecordMode = RecordModeOption.Disable;
