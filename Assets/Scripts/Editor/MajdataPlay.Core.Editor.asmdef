@@ -5,7 +5,8 @@
         "Live2D.Cubism",
         "MajdataPlay.Core",
         "MajdataPlay.Runtime",
-        "UniTask"
+        "UniTask",
+        "Unity.TextMeshPro"
     ],
     "includePlatforms": [
         "Editor"
