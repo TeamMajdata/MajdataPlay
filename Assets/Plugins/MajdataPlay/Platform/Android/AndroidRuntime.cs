@@ -48,12 +48,15 @@ namespace MajdataPlay.Platform.Android
         /// <summary>Keeps the registered activity-result proxy alive for the Java activity's lifetime.</summary>
         private static OnActivityResultCallbackProxy? s_onActivityResultCallbackProxy;
 
+        private static readonly AndroidLogger s_logger = new();
+
         /// <summary>Registers production callbacks and publishes metadata only after initialization succeeds.</summary>
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
         private static void Init()
         {
             IsInitialized = false;
 #if ANDROID_RUNTIME
+            MajDebug.AddLogger(s_logger);
             VersionCode = 0;
             SdkVersion = 0;
             TargetSdkVersion = 0;
