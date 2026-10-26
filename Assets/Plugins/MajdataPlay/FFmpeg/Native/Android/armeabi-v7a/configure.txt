@@ -213,20 +213,22 @@ escape130               pcm_u32be
 evrc                    pcm_u32le
 
 Enabled encoders:
-aac                     pcm_f64be               pcm_s64be
-h263                    pcm_f64le               pcm_s64le
-libaom_av1              pcm_mulaw               pcm_s8
-libmp3lame              pcm_s16be               pcm_s8_planar
-libopus                 pcm_s16be_planar        pcm_u16be
-libvpx_vp9              pcm_s16le               pcm_u16le
-libx264                 pcm_s16le_planar        pcm_u24be
-libx265                 pcm_s24be               pcm_u24le
-mpeg4                   pcm_s24daud             pcm_u32be
-pcm_alaw                pcm_s24le               pcm_u32le
-pcm_bluray              pcm_s24le_planar        pcm_u8
-pcm_dvd                 pcm_s32be               pcm_vidc
-pcm_f32be               pcm_s32le
-pcm_f32le               pcm_s32le_planar
+aac                     pcm_f32be               pcm_s64be
+av1_mediacodec          pcm_f32le               pcm_s64le
+h263                    pcm_f64be               pcm_s8
+h264_mediacodec         pcm_f64le               pcm_s8_planar
+hevc_mediacodec         pcm_mulaw               pcm_u16be
+libaom_av1              pcm_s16be               pcm_u16le
+libmp3lame              pcm_s16be_planar        pcm_u24be
+libopus                 pcm_s16le               pcm_u24le
+libvpx_vp9              pcm_s16le_planar        pcm_u32be
+libx264                 pcm_s24be               pcm_u32le
+libx265                 pcm_s24daud             pcm_u8
+mpeg4                   pcm_s24le               pcm_vidc
+mpeg4_mediacodec        pcm_s24le_planar        vp8_mediacodec
+pcm_alaw                pcm_s32be               vp9_mediacodec
+pcm_bluray              pcm_s32le
+pcm_dvd                 pcm_s32le_planar
 
 Enabled hwaccels:
 av1_vulkan              hevc_vulkan
@@ -426,13 +428,10 @@ Enabled outdevs:
 License: GPL version 3 or later
 
 WARNING: spirv-headers not found, swscale SPIR-V backend unavailable
-config.h is unchanged
-config_components.h is unchanged
 checkasm_config_generated.h is unchanged
 checkasm_header_config_generated.h is unchanged
 libavutil/avconfig.h is unchanged
 libavfilter/filter_list.c is unchanged
-libavcodec/codec_list.c is unchanged
 libavcodec/parser_list.c is unchanged
 libavcodec/bsf_list.c is unchanged
 libavformat/demuxer_list.c is unchanged

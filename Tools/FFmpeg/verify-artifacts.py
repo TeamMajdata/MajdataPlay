@@ -454,6 +454,12 @@ def verify_software_encoder_provenance(directory, manifest):
     assert manifest.get('buildDependencies', {}).get('softwareEncoders') == lock, (target, 'software dependency lock mismatch')
     encoders = manifest.get('recordingProfile', {}).get('encoders', [])
     assert {'mpeg4', 'aac', *SOFTWARE_ENCODERS.values()} <= set(encoders), (target, 'incomplete software recording profile')
+    if target.startswith('android-'):
+        hardware = {name + '_mediacodec' for name in ['h264', 'hevc', 'vp8', 'vp9', 'mpeg4', 'av1']}
+        assert hardware <= set(encoders), (target, 'incomplete Android hardware recording profile')
+        configured = {name for option in manifest['configure'] if option.startswith('--enable-encoder=')
+                      for name in option.split('=', 1)[1].split(',')}
+        assert hardware <= configured, (target, 'Android MediaCodec encoders were not requested')
     for option in ['--enable-gpl', '--enable-libx264', '--enable-libx265', '--enable-libvpx', '--enable-libaom']:
         assert option in manifest['configure'], (target, option, 'software encoder configure flag missing')
     licenses = {item['file']: item for item in manifest.get('buildDependencyLicenses', [])}

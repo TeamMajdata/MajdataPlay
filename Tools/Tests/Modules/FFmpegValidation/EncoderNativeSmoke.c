@@ -28,7 +28,19 @@
 #include <libavutil/opt.h>
 #include <libswscale/swscale.h>
 
-enum { Width = 128, Height = 64, FrameRate = 30, FrameCount = 60, MaxThreads = 2 };
+// Android encoders commonly require at least 128 rows; other suites keep their small fixture.
+#ifndef ENCODER_SMOKE_WIDTH
+#define ENCODER_SMOKE_WIDTH 128
+#endif
+#ifndef ENCODER_SMOKE_HEIGHT
+#define ENCODER_SMOKE_HEIGHT 64
+#endif
+enum { Width = ENCODER_SMOKE_WIDTH, Height = ENCODER_SMOKE_HEIGHT,
+       FrameRate = 30, FrameCount = 60, MaxThreads = 2 };
+#if defined(__ANDROID__)
+static const char* AndroidCodecName;
+static int AndroidNdkCodec;
+#endif
 static const int64_t TargetBitRate = 200000;
 static const int64_t MaximumBitRate = 400000;
 static int Checks;
@@ -188,6 +200,16 @@ static int ReceivePackets(Output* test, int draining) {
 }
 
 static int ConfigureHardware(AVCodecContext* codec, const char* name, int cbr) {
+#if defined(__ANDROID__)
+    if (strstr(name, "_mediacodec")) {
+        // The Java driver supplies only a component classified by Android as hardware.
+        // An explicit name prevents createEncoderByType from selecting a software codec.
+        return Check(AndroidCodecName != NULL, "MediaCodec uses an explicitly verified hardware component")
+            && Native(av_opt_set(codec->priv_data, "codec_name", AndroidCodecName, 0), "select hardware component")
+            && Native(av_opt_set_int(codec->priv_data, "ndk_codec", AndroidNdkCodec, 0), "select JNI/NDK wrapper")
+            && Native(av_opt_set(codec->priv_data, "bitrate_mode", cbr ? "cbr" : "vbr", 0), "request MediaCodec CBR/VBR");
+    }
+#endif
     if (!strcmp(name, "libx264")) {
         return Native(av_opt_set(codec->priv_data, "preset", "veryfast", 0), "x264 preset")
             && Native(av_opt_set(codec->priv_data, "nal-hrd", "vbr", 0), "MP4-compatible x264 HRD")
@@ -245,7 +267,7 @@ static int Encode(const char* path, const char* name, int cbr) {
     if (!strcmp(name, "mpeg4") && !Check(!hardware && encoder->id == AV_CODEC_ID_MPEG4,
                                         "MPEG4 is the built-in software encoder")) goto cleanup;
     if (!Native(avformat_alloc_output_context2(&test.muxer, NULL,
-                        !strcmp(name, "libvpx-vp9") ? "webm" : "mp4", path), "allocate video output")) goto cleanup;
+                        (encoder->id == AV_CODEC_ID_VP8 || encoder->id == AV_CODEC_ID_VP9) ? "webm" : "mp4", path), "allocate video output")) goto cleanup;
     test.encoder = avcodec_alloc_context3(encoder);
     if (!Check(test.encoder != NULL, "encoder context allocation")) goto cleanup;
     test.encoder->width = Width;
@@ -269,7 +291,7 @@ static int Encode(const char* path, const char* name, int cbr) {
     if (!Native(avcodec_open2(test.encoder, encoder, NULL), "open selected encoder")) goto cleanup;
     if (!Check(test.encoder->bit_rate == TargetBitRate && test.encoder->rc_min_rate == (cbr ? TargetBitRate : 0)
                && test.encoder->rc_max_rate == maximum && test.encoder->rc_buffer_size == maximum,
-               "opened codec preserves target, CBR/VBR minimum, effective maximum and one-second VBV")) goto cleanup;
+               "FFmpeg context preserves requested target, rate fields and buffer size")) goto cleanup;
     if (!Check(hardware || (test.encoder->thread_count > 0 && test.encoder->thread_count <= MaxThreads),
                "actual software worker count respects the configured maximum")) goto cleanup;
     test.stream = avformat_new_stream(test.muxer, NULL);
@@ -356,14 +378,16 @@ static int Encode(const char* path, const char* name, int cbr) {
            name, cbr ? "CBR" : "VBR", ComplexPattern ? "complex" : "flat", hardware ? 0 : test.encoder->thread_count,
            TargetBitRate, maximum, (test.bytes - test.last_second_bytes) * 8, actual, test.packets, test.bytes);
     if (!Check(actual > 0, "real compressed payload populates the measured media window")) goto cleanup;
-    if (ComplexPattern && (!strcmp(name, "libvpx-vp9") || !strcmp(name, "libaom-av1"))) {
+    if (strstr(name, "_mediacodec")) {
+        printf("NOTE: MediaCodec mode and target are requests; rc_max_rate/VBV and driver acceptance are not verified.\n");
+    } else if (ComplexPattern && (!strcmp(name, "libvpx-vp9") || !strcmp(name, "libaom-av1"))) {
         printf("NOTE: VPX/AOM rate limits are codec budgets; this complex fixture records measured overshoot rather than asserting a hard payload boundary.\n");
     } else if (!Check(actual <= maximum + test.encoder->rc_buffer_size + 8192,
                       "last-second encoded payload fits the rate plus configured VBV burst capacity")) goto cleanup;
     if (cbr && !ComplexPattern && (!strcmp(name, "mpeg4") || !strcmp(name, "libx264"))
         && !Check(llabs(actual - TargetBitRate) <= TargetBitRate / 5,
                       "CBR flat scene maintains the target through native filler/rate control")) goto cleanup;
-    if (cbr && hardware) printf("NOTE: this hardware test verifies accepted CBR configuration and measured payload; constant target padding is not validated.\n");
+    if (cbr && hardware && !strstr(name, "_mediacodec")) printf("NOTE: this hardware test verifies accepted CBR configuration and measured payload; constant target padding is not validated.\n");
     success = 1;
 cleanup:
     CloseOutput(&test);
@@ -413,7 +437,8 @@ static int Decode(const char* path, enum AVCodecID expected_codec) {
     if (!Native(test.stream, "select recorded video stream")) goto cleanup;
     AVCodecParameters* parameters = test.demuxer->streams[test.stream]->codecpar;
     if (!Check(parameters->codec_id == expected_codec, "container retains the requested encoding format")) goto cleanup;
-    const AVCodec* decoder = avcodec_find_decoder(parameters->codec_id);
+    const AVCodec* decoder = parameters->codec_id == AV_CODEC_ID_AV1
+        ? avcodec_find_decoder_by_name("libdav1d") : avcodec_find_decoder(parameters->codec_id);
     if (!Check(decoder != NULL && !(decoder->capabilities & AV_CODEC_CAP_HARDWARE), "roundtrip uses an actual software decoder")) goto cleanup;
     test.decoder = avcodec_alloc_context3(decoder);
     if (!Check(test.decoder != NULL, "decoder context allocation")) goto cleanup;

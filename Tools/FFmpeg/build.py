@@ -1274,6 +1274,9 @@ def recording_configuration(target):
         encoders += ['h264_vaapi', 'hevc_vaapi', 'vp9_vaapi', 'av1_vaapi']
     elif target.startswith(('macos-', 'ios-')):
         encoders += ['h264_videotoolbox']
+    elif target.startswith('android-'):
+        encoders += ['h264_mediacodec', 'hevc_mediacodec', 'vp8_mediacodec',
+                     'vp9_mediacodec', 'mpeg4_mediacodec', 'av1_mediacodec']
     muxers = ['mov', 'mp4', 'matroska', 'webm', 'avi', 'adts', 'latm', 'ogg', 'opus', 'mp3', 'wav']
     return encoders, muxers
 

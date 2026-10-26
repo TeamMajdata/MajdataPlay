@@ -77,6 +77,13 @@ int main(int argc, char** argv) {
         CHECK(requested_encoder && !(requested_encoder->capabilities & AV_CODEC_CAP_HARDWARE),
               "every requested software encoder is compiled into the staged native profile");
     }
+    const char* hardware_encoders[] = {"h264_mediacodec", "hevc_mediacodec", "vp8_mediacodec",
+                                       "vp9_mediacodec", "mpeg4_mediacodec", "av1_mediacodec"};
+    for (unsigned int index = 0; index < sizeof(hardware_encoders) / sizeof(hardware_encoders[0]); ++index) {
+        const AVCodec* requested_encoder = p_avcodec_find_encoder_by_name(hardware_encoders[index]);
+        CHECK(requested_encoder && (requested_encoder->capabilities & AV_CODEC_CAP_HARDWARE),
+              "every Android MediaCodec encoder wrapper is compiled into the native profile");
+    }
     const char* containers[] = {"mov", "mp4", "matroska", "webm", "avi"};
     for (int index = 0; index < 5; ++index) CHECK(p_av_guess_format(containers[index], NULL, NULL) != NULL,
                                                "all requested recording muxers are present");

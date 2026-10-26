@@ -1,6 +1,44 @@
 # 本机验证结果
 
-最近验证日期：2026-10-17；此前 Android SAF 验证执行于 2026-10-12，渲染验证执行于 2026-10-07，跨平台矩阵执行于 2026-10-03。Windows / Unity 6000.3.17f1 / AMD Radeon RX 580 2048SP；Linux 使用本机 WSL Ubuntu 24.04；Android 真机为 Mi MIX 2S / Android 15 API 35 / Adreno 630 / Vulkan 1.1.128；Apple 构建测试使用用户提供的 Mac mini M4。当前 Windows/Linux/Android 图形桥接 ABI 为 **4**，Apple 保持 **2**；下方 ABI2/3 的记录为此前版本实测。
+最近验证日期：2026-10-26；此前 Android SAF 验证执行于 2026-10-12，渲染验证执行于 2026-10-07，跨平台矩阵执行于 2026-10-03。Windows / Unity 6000.3.17f1 / AMD Radeon RX 580 2048SP；Linux 使用本机 WSL Ubuntu 24.04；Android 真机为 Mi MIX 2S / Android 15 API 35 / Adreno 630 / Vulkan 1.1.128；Apple 构建测试使用用户提供的 Mac mini M4。当前 Windows/Linux/Android 图形桥接 ABI 为 **4**，Apple 保持 **2**；下方 ABI2/3 的记录为此前版本实测。
+
+## 2026-10-26：Android MediaCodec 原生硬件编码
+
+按固定 FFmpeg n9.0.1 commit、143 个绑定公开头文件和既有两份检查补丁，从源码重建 Android ARM64 / ARMv7 的七个 FFmpeg 库及 ABI4 图形桥接。构建采用缓存的 Linux NDK r27c、API 23、静态 libc++、16 KiB 最大页大小；源码、第三方绑定与子模块指针未变。`recording_configuration` 显式加入六种 MediaCodec encoder，并由原有配置检查逐项验证；产物审计同时要求清单和 configure 参数包含它们。
+
+设备：**Mi MIX 2S，Android 15 / API 35，Adreno 630，Vulkan 1.1.128**。验证入口由 **Unity 6000.3.17f1** 附带的 Windows NDK/JDK/SDK 编译，通过 ADB 的 `app_process64` / `app_process32` 在设备 VM 中运行，不安装 APK、不启动 Unity Player。
+
+| 格式 / 设备组件 | ARM64 | ARMv7 |
+| --- | --- | --- |
+| H.264 / `OMX.qcom.video.encoder.avc` | VBR：JNI/NDK × 平坦/复杂，4 组 PASS | 同左，4 组 PASS |
+| HEVC / `OMX.qcom.video.encoder.hevc` | VBR/CBR：JNI/NDK × 平坦/复杂，8 组 PASS | 同左，8 组 PASS |
+| VP8 / `OMX.qcom.video.encoder.vp8` | VBR：JNI/NDK × 平坦/复杂，4 组 PASS | 同左，4 组 PASS |
+| VP9 / MPEG4 / AV1 | 原生入口注册 PASS；无满足 NV12/尺寸/帧率/码率条件的硬件组件，SKIP 设备编码 | 同左 |
+| 往返断言 | **16 组，17,152 assertions PASS** | **16 组，17,152 assertions PASS** |
+| 原生加载回归 | **64 checks PASS** | **64 checks PASS** |
+
+Android 能力查询对本机 H.264 和 VP8 不声明 CBR 支持，因此对应模式明确 SKIP；HEVC 的 CBR 和 VBR 均执行。硬件身份由 `MediaCodecInfo.isHardwareAccelerated() == true`、`isSoftwareOnly() == false` 及能力查询确认，再通过 FFmpeg `codec_name` 打开指定组件。JNI、NDK 均另行验证：不存在的指定组件会打开失败，不得自动选用软件实现。每个 ABI 的六个 MediaCodec 包装器均通过实际 `avcodec_find_encoder_by_name` 查询，且报告 `AV_CODEC_CAP_HARDWARE`。
+
+每组输入为 320×192、30 fps、60 帧，时间轴有一个故意保留的缺帧间隔；两 ABI 共 **1,920 帧**。检查实际压缩包、MP4/WebM 完成索引、同格式软件解码的全部帧数、红上蓝下像素/方向、PTS 间隔、编码与解码排空至稳定 EOF、排他创建拒绝覆盖原文件。复杂场景包括右半幅随机噪声、静态恢复及持续噪声。`AndroidNativeSmoke.c` 另外验证实际八个动态库、固定 ABI、软件录制配置、六个 MediaCodec encoder、解码器/Vulkan 后端及设备 GPU 导入前置能力；它不执行 Unity 渲染。
+
+实测复杂画面单个媒体时间窗口码率可超过请求值，例如 ARM64 HEVC/CBR 目标 200,000 bit/s 时最后窗口约 **247,744 bit/s**；VP8/VBR 在请求 `rc_max_rate=400,000` 时约 **690,984 bit/s**。这些数值证明不能把 `AVCodecContext` 中保留的请求字段当成驱动已接受的最大码率或 VBV 保证。本次仅提供原生编码入口，托管 `FFmpegVideoEncoder` / Camera 仍遵循其现有码率契约并使用同格式软件回退。
+
+复现：
+
+```powershell
+./Tools/Tests/Modules/FFmpegValidation/run-android-encoders.ps1 -Architecture arm64
+./Tools/Tests/Modules/FFmpegValidation/run-android-encoders.ps1 -Architecture armv7
+python Tools/FFmpeg/verify-artifacts.py --targets android-arm64,android-armv7 --skip-host-load
+```
+
+完整日志、32 个实际输出文件及原生加载回归报告保存在忽略目录：
+
+- `.work/android-encoders/arm64-20261026-040852-9931639/`（`device.txt`、`native-loader.txt`、`output/`）。
+- `.work/android-encoders/armv7-20261026-041014-2377465/`（相同结构）。
+
+产物审计：**14 个 FFmpeg 库与两个 bridge 的 SHA256、目标架构、Unity importer/既有 GUID、许可证/固定依赖及至少 16 KiB PT_LOAD 对齐 PASS**。测试 C 代码以 `-Wall -Wextra -Werror` 编译通过。桥接重建仍有相邻既有 `lock_queue/unlock_queue` 弃用警告；无新增桥接源码改动。
+
+**未验证：**MediaCodec 驱动最终码率模式回读、最大码率/VBV 限制、恒定填充、Surface/GPU 输入、Unity Camera/Player 集成、API 23–28、其他分辨率/帧率/设备。VP9/MPEG4/AV1 的硬件编码需要满足条件的设备继续验证；入口注册成功不等于该设备硬件编码可用。
 
 ## 2026-10-17：Camera 软件编码多线程
 

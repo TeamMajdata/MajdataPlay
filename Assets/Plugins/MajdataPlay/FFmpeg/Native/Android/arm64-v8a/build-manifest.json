@@ -21,7 +21,7 @@
     "note": "All upstream public headers present in the binding header snapshot are compared after CRLF normalization before building. Generated avconfig.h and ffversion.h are excluded."
   },
   "host": "Linux-6.18.54.1-microsoft-standard-WSL2-x86_64-with-glibc2.39",
-  "builtUtc": "2026-10-17T14:09:20.538534+00:00",
+  "builtUtc": "2026-10-26T04:05:51.472753+00:00",
   "configure": [
     "--prefix=/home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005/install/android-arm64",
     "--disable-doc",
@@ -40,7 +40,7 @@
     "--disable-decoder=adpcm_circus,adpcm_ima_escape,adpcm_ima_hvqm2,adpcm_ima_hvqm4,adpcm_ima_magix,adpcm_ima_pda,adpcm_n64,adpcm_psxc,ahx",
     "--disable-parser=ahx",
     "--disable-bsf=ahx_to_mp2",
-    "--enable-encoder=mpeg4,libx264,libx265,libvpx_vp9,libaom_av1,aac,libopus,libmp3lame,pcm_alaw,pcm_bluray,pcm_dvd,pcm_f32be,pcm_f32le,pcm_f64be,pcm_f64le,pcm_mulaw,pcm_s8,pcm_s8_planar,pcm_s16be,pcm_s16be_planar,pcm_s16le,pcm_s16le_planar,pcm_s24be,pcm_s24daud,pcm_s24le,pcm_s24le_planar,pcm_s32be,pcm_s32le,pcm_s32le_planar,pcm_s64be,pcm_s64le,pcm_u8,pcm_u16be,pcm_u16le,pcm_u24be,pcm_u24le,pcm_u32be,pcm_u32le,pcm_vidc",
+    "--enable-encoder=mpeg4,libx264,libx265,libvpx_vp9,libaom_av1,aac,libopus,libmp3lame,pcm_alaw,pcm_bluray,pcm_dvd,pcm_f32be,pcm_f32le,pcm_f64be,pcm_f64le,pcm_mulaw,pcm_s8,pcm_s8_planar,pcm_s16be,pcm_s16be_planar,pcm_s16le,pcm_s16le_planar,pcm_s24be,pcm_s24daud,pcm_s24le,pcm_s24le_planar,pcm_s32be,pcm_s32le,pcm_s32le_planar,pcm_s64be,pcm_s64le,pcm_u8,pcm_u16be,pcm_u16le,pcm_u24be,pcm_u24le,pcm_u32be,pcm_u32le,pcm_vidc,h264_mediacodec,hevc_mediacodec,vp8_mediacodec,vp9_mediacodec,mpeg4_mediacodec,av1_mediacodec",
     "--enable-muxer=mov,mp4,matroska,webm,avi,adts,latm,ogg,opus,mp3,wav",
     "--enable-shared",
     "--disable-static",
@@ -53,7 +53,7 @@
     "--ranlib=llvm-ranlib",
     "--nm=llvm-nm",
     "--strip=llvm-strip",
-    "--sysroot=/home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005/toolchains/android-ndk-r27c/toolchains/llvm/prebuilt/linux-x86_64/sysroot",
+    "--sysroot=/home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005/toolchains/android-ndk-r27c-linux-local/toolchains/llvm/prebuilt/linux-x86_64/sysroot",
     "--enable-jni",
     "--enable-mediacodec",
     "--extra-ldflags=-Wl,-z,max-page-size=16384",
@@ -62,55 +62,55 @@
     "--extra-cflags=-I/home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005/toolchains/Vulkan-Headers-vulkan-sdk-1.4.328.1/include",
     "--disable-hwaccel=apv_vulkan,dpx_vulkan,ffv1_vulkan,prores_raw_vulkan,prores_vulkan",
     "--enable-libdav1d",
-    "--pkg-config=sh /home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005/dav1d-android-arm64-b4245348338a/pkg-config.sh",
+    "--pkg-config=sh /home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005/dav1d-android-arm64-8c12667383e9/pkg-config.sh",
     "--enable-libx264",
     "--enable-libx265",
     "--enable-libvpx",
     "--enable-libaom",
     "--disable-decoder=libvpx_vp8,libvpx_vp9,libaom_av1",
-    "--pkg-config=sh /home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005/software-android-arm64-cc6fc0c6b35f/pkg-config.sh",
+    "--pkg-config=sh /home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005/software-android-arm64-7e7aa2749eef/pkg-config.sh",
     "--extra-ldflags=-Wl,--exclude-libs,ALL",
     "--enable-libopus",
     "--enable-libmp3lame",
-    "--extra-cflags=-I/home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005/audio-android-arm64-ea4193c19a12/lame/install/include",
-    "--extra-ldflags=-L/home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005/audio-android-arm64-ea4193c19a12/lame/install/lib",
-    "--pkg-config=sh /home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005/audio-android-arm64-ea4193c19a12/pkg-config.sh"
+    "--extra-cflags=-I/home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005/audio-android-arm64-c1d2dd40b3df/lame/install/include",
+    "--extra-ldflags=-L/home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005/audio-android-arm64-c1d2dd40b3df/lame/install/lib",
+    "--pkg-config=sh /home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005/audio-android-arm64-c1d2dd40b3df/pkg-config.sh"
   ],
   "files": [
     {
       "file": "libavcodec.so",
-      "bytes": 20604752,
-      "sha256": "fe9281a69dcf5223ed868bd1a8f55a41b5094e886c645de3e908efb97afd19a9"
+      "bytes": 20647520,
+      "sha256": "59957a443c7ba7ee073fad34ff89415733dd3d344a4ae3e8b7599832c6489175"
     },
     {
       "file": "libavdevice.so",
-      "bytes": 10688,
-      "sha256": "505f611a199fc8cd4b7d861bd9c15606fdfcd021f26d66e5a49657e13323206d"
+      "bytes": 10800,
+      "sha256": "8fd87e276cb09a77c1f06b191732af41eb2cf3c26581174310a543da6530f37b"
     },
     {
       "file": "libavfilter.so",
-      "bytes": 139784,
-      "sha256": "c0b19e823eb24c2fdfd6bfc4852dac1c3f5d7cda8a5998eaf6a190706ddb6261"
+      "bytes": 139880,
+      "sha256": "66427d26f9d287dd8a16badeb8e961a39406642cca7fd62ecd9d22be6448ee0b"
     },
     {
       "file": "libavformat.so",
-      "bytes": 2219344,
-      "sha256": "f8c36ab9e3753f1bafb024ba1debdbfd2eb95a3d1012690b93ab691371b07561"
+      "bytes": 2219456,
+      "sha256": "fb7bb4c2b91c535d3cf00c68541cc20da65ae1fe97c88a3250bbf382335c57af"
     },
     {
       "file": "libavutil.so",
-      "bytes": 823160,
-      "sha256": "2c2d4c36eba3375c016bdbf67785495cdb09a6de5cb665091055e27f41e0bfef"
+      "bytes": 823256,
+      "sha256": "f5f7cca24f3047da8dcd45bb187750bc7fa02d2fbaa40c55e84fe0c51271282f"
     },
     {
       "file": "libswresample.so",
-      "bytes": 99352,
-      "sha256": "861e9a9ed2f285113c12658121f08712b2809afe6b930406029f7bbeeb41214b"
+      "bytes": 99448,
+      "sha256": "119543a7470a2d657be17ba81d0e1d1a04085a02eefc13b737480861ecd80b22"
     },
     {
       "file": "libswscale.so",
-      "bytes": 1281592,
-      "sha256": "fb1b632a9540130656b9ea67e5ed7ceadcac7fe3e816b9fcb8b566b278bfcc95"
+      "bytes": 1281688,
+      "sha256": "a9652bb7ace045ed89f52e0f6852bcf3a383d939bad9b0ab3cbfb1511ef9b68a"
     }
   ],
   "softwareDecoders": [
@@ -156,7 +156,13 @@
       "pcm_u24le",
       "pcm_u32be",
       "pcm_u32le",
-      "pcm_vidc"
+      "pcm_vidc",
+      "h264_mediacodec",
+      "hevc_mediacodec",
+      "vp8_mediacodec",
+      "vp9_mediacodec",
+      "mpeg4_mediacodec",
+      "av1_mediacodec"
     ],
     "muxers": [
       "mov",
@@ -355,7 +361,7 @@
         ]
       },
       "configure": [
-        "--prefix=/home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005/software-android-arm64-cc6fc0c6b35f/x264/install",
+        "--prefix=/home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005/software-android-arm64-7e7aa2749eef/x264/install",
         "--host=aarch64-linux-android",
         "--enable-static",
         "--enable-pic",
@@ -392,7 +398,7 @@
         "-S",
         "/home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005/toolchains/x265-1d117bed4747/source",
         "-B",
-        "/home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005/software-android-arm64-cc6fc0c6b35f/x265/build",
+        "/home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005/software-android-arm64-7e7aa2749eef/x265/build",
         "-G",
         "Ninja",
         "-DCMAKE_MAKE_PROGRAM=/usr/bin/ninja",
@@ -402,15 +408,15 @@
         "-DCMAKE_INSTALL_LIBDIR=lib",
         "-DCMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY",
         "-DCMAKE_SYSTEM_PROCESSOR=arm64",
-        "-DCMAKE_TOOLCHAIN_FILE=/home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005/toolchains/android-ndk-r27c/build/cmake/android.toolchain.cmake",
+        "-DCMAKE_TOOLCHAIN_FILE=/home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005/toolchains/android-ndk-r27c-linux-local/build/cmake/android.toolchain.cmake",
         "-DANDROID_ABI=arm64-v8a",
         "-DANDROID_PLATFORM=android-23",
         "-DANDROID_STL=c++_static",
-        "-DCMAKE_C_FLAGS=--target=aarch64-linux-android23 -I/home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005/toolchains/Vulkan-Headers-vulkan-sdk-1.4.328.1/include --sysroot=/home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005/toolchains/android-ndk-r27c/toolchains/llvm/prebuilt/linux-x86_64/sysroot",
-        "-DCMAKE_CXX_FLAGS=--target=aarch64-linux-android23 -I/home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005/toolchains/Vulkan-Headers-vulkan-sdk-1.4.328.1/include --sysroot=/home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005/toolchains/android-ndk-r27c/toolchains/llvm/prebuilt/linux-x86_64/sysroot",
-        "-DCMAKE_EXE_LINKER_FLAGS=-Wl,-z,max-page-size=16384 --sysroot=/home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005/toolchains/android-ndk-r27c/toolchains/llvm/prebuilt/linux-x86_64/sysroot",
-        "-DCMAKE_SHARED_LINKER_FLAGS=-Wl,-z,max-page-size=16384 --sysroot=/home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005/toolchains/android-ndk-r27c/toolchains/llvm/prebuilt/linux-x86_64/sysroot",
-        "-DCMAKE_INSTALL_PREFIX=/home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005/software-android-arm64-cc6fc0c6b35f/x265/install",
+        "-DCMAKE_C_FLAGS=--target=aarch64-linux-android23 -I/home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005/toolchains/Vulkan-Headers-vulkan-sdk-1.4.328.1/include --sysroot=/home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005/toolchains/android-ndk-r27c-linux-local/toolchains/llvm/prebuilt/linux-x86_64/sysroot",
+        "-DCMAKE_CXX_FLAGS=--target=aarch64-linux-android23 -I/home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005/toolchains/Vulkan-Headers-vulkan-sdk-1.4.328.1/include --sysroot=/home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005/toolchains/android-ndk-r27c-linux-local/toolchains/llvm/prebuilt/linux-x86_64/sysroot",
+        "-DCMAKE_EXE_LINKER_FLAGS=-Wl,-z,max-page-size=16384 --sysroot=/home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005/toolchains/android-ndk-r27c-linux-local/toolchains/llvm/prebuilt/linux-x86_64/sysroot",
+        "-DCMAKE_SHARED_LINKER_FLAGS=-Wl,-z,max-page-size=16384 --sysroot=/home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005/toolchains/android-ndk-r27c-linux-local/toolchains/llvm/prebuilt/linux-x86_64/sysroot",
+        "-DCMAKE_INSTALL_PREFIX=/home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005/software-android-arm64-7e7aa2749eef/x265/install",
         "-DENABLE_SHARED=OFF",
         "-DENABLE_CLI=OFF",
         "-DENABLE_PIC=ON",
@@ -430,8 +436,8 @@
         "-DENABLE_SVE2=OFF"
       ],
       "archive": "libx265.a",
-      "bytes": 13342436,
-      "sha256": "0d12ec6d31f383204e880fc6027c5f445f5dbda1969f9e4555e9175827977f27",
+      "bytes": 13365892,
+      "sha256": "a396dabc7bc80d5fa06c77944203e5969f99fb867e34ef7a82024f6379aea59d",
       "static": true,
       "pic": true,
       "cmakeVersion": "cmake version 3.28.3",
@@ -461,7 +467,7 @@
         ]
       },
       "configure": [
-        "--prefix=/home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005/software-android-arm64-cc6fc0c6b35f/libvpx/install",
+        "--prefix=/home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005/software-android-arm64-7e7aa2749eef/libvpx/install",
         "--target=generic-gnu",
         "--enable-pic",
         "--enable-static",
@@ -479,7 +485,7 @@
       ],
       "archive": "libvpx.a",
       "bytes": 1351640,
-      "sha256": "8daf5f9cd871b5514ac2dd00f5c44becfc70366ba07e7795d93afeb3070a167f",
+      "sha256": "757126a6a570cae545471bc3681751879dbb7b16e514a4a6bd57a8cfcac725ef",
       "static": true,
       "pic": true
     },
@@ -505,7 +511,7 @@
         "-S",
         "/home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005/toolchains/libaom-92d4c37fbdd0",
         "-B",
-        "/home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005/software-android-arm64-cc6fc0c6b35f/libaom/build",
+        "/home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005/software-android-arm64-7e7aa2749eef/libaom/build",
         "-G",
         "Ninja",
         "-DCMAKE_MAKE_PROGRAM=/usr/bin/ninja",
@@ -515,15 +521,15 @@
         "-DCMAKE_INSTALL_LIBDIR=lib",
         "-DCMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY",
         "-DCMAKE_SYSTEM_PROCESSOR=arm64",
-        "-DCMAKE_TOOLCHAIN_FILE=/home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005/toolchains/android-ndk-r27c/build/cmake/android.toolchain.cmake",
+        "-DCMAKE_TOOLCHAIN_FILE=/home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005/toolchains/android-ndk-r27c-linux-local/build/cmake/android.toolchain.cmake",
         "-DANDROID_ABI=arm64-v8a",
         "-DANDROID_PLATFORM=android-23",
         "-DANDROID_STL=c++_static",
-        "-DCMAKE_C_FLAGS=--target=aarch64-linux-android23 -I/home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005/toolchains/Vulkan-Headers-vulkan-sdk-1.4.328.1/include --sysroot=/home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005/toolchains/android-ndk-r27c/toolchains/llvm/prebuilt/linux-x86_64/sysroot",
-        "-DCMAKE_CXX_FLAGS=--target=aarch64-linux-android23 -I/home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005/toolchains/Vulkan-Headers-vulkan-sdk-1.4.328.1/include --sysroot=/home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005/toolchains/android-ndk-r27c/toolchains/llvm/prebuilt/linux-x86_64/sysroot",
-        "-DCMAKE_EXE_LINKER_FLAGS=-Wl,-z,max-page-size=16384 --sysroot=/home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005/toolchains/android-ndk-r27c/toolchains/llvm/prebuilt/linux-x86_64/sysroot",
-        "-DCMAKE_SHARED_LINKER_FLAGS=-Wl,-z,max-page-size=16384 --sysroot=/home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005/toolchains/android-ndk-r27c/toolchains/llvm/prebuilt/linux-x86_64/sysroot",
-        "-DCMAKE_INSTALL_PREFIX=/home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005/software-android-arm64-cc6fc0c6b35f/libaom/install",
+        "-DCMAKE_C_FLAGS=--target=aarch64-linux-android23 -I/home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005/toolchains/Vulkan-Headers-vulkan-sdk-1.4.328.1/include --sysroot=/home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005/toolchains/android-ndk-r27c-linux-local/toolchains/llvm/prebuilt/linux-x86_64/sysroot",
+        "-DCMAKE_CXX_FLAGS=--target=aarch64-linux-android23 -I/home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005/toolchains/Vulkan-Headers-vulkan-sdk-1.4.328.1/include --sysroot=/home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005/toolchains/android-ndk-r27c-linux-local/toolchains/llvm/prebuilt/linux-x86_64/sysroot",
+        "-DCMAKE_EXE_LINKER_FLAGS=-Wl,-z,max-page-size=16384 --sysroot=/home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005/toolchains/android-ndk-r27c-linux-local/toolchains/llvm/prebuilt/linux-x86_64/sysroot",
+        "-DCMAKE_SHARED_LINKER_FLAGS=-Wl,-z,max-page-size=16384 --sysroot=/home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005/toolchains/android-ndk-r27c-linux-local/toolchains/llvm/prebuilt/linux-x86_64/sysroot",
+        "-DCMAKE_INSTALL_PREFIX=/home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005/software-android-arm64-7e7aa2749eef/libaom/install",
         "-DBUILD_SHARED_LIBS=OFF",
         "-DCONFIG_PIC=1",
         "-DCONFIG_AV1_ENCODER=1",
@@ -542,8 +548,8 @@
         "-DCMAKE_THREAD_LIBS_INIT="
       ],
       "archive": "libaom.a",
-      "bytes": 39092482,
-      "sha256": "41af1c1bdc24457d4404d21d8297c48963effe8d19c5593de2792aa9639bde6b",
+      "bytes": 39101346,
+      "sha256": "ba1b912f3e5f53d2373d4f62238bb8788d3b863168db768c8ee373ec2a1b988a",
       "static": true,
       "pic": true,
       "cmakeVersion": "cmake version 3.28.3"
@@ -565,7 +571,7 @@
         "-S",
         "/home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005/toolchains/opus-1.6.1",
         "-B",
-        "/home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005/audio-android-arm64-ea4193c19a12/opus/build",
+        "/home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005/audio-android-arm64-c1d2dd40b3df/opus/build",
         "-G",
         "Ninja",
         "-DCMAKE_MAKE_PROGRAM=/usr/bin/ninja",
@@ -575,15 +581,15 @@
         "-DCMAKE_INSTALL_LIBDIR=lib",
         "-DCMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY",
         "-DCMAKE_SYSTEM_PROCESSOR=arm64",
-        "-DCMAKE_TOOLCHAIN_FILE=/home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005/toolchains/android-ndk-r27c/build/cmake/android.toolchain.cmake",
+        "-DCMAKE_TOOLCHAIN_FILE=/home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005/toolchains/android-ndk-r27c-linux-local/build/cmake/android.toolchain.cmake",
         "-DANDROID_ABI=arm64-v8a",
         "-DANDROID_PLATFORM=android-23",
         "-DANDROID_STL=c++_static",
-        "-DCMAKE_C_FLAGS=--target=aarch64-linux-android23 -I/home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005/toolchains/Vulkan-Headers-vulkan-sdk-1.4.328.1/include --sysroot=/home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005/toolchains/android-ndk-r27c/toolchains/llvm/prebuilt/linux-x86_64/sysroot",
-        "-DCMAKE_CXX_FLAGS=--target=aarch64-linux-android23 -I/home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005/toolchains/Vulkan-Headers-vulkan-sdk-1.4.328.1/include --sysroot=/home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005/toolchains/android-ndk-r27c/toolchains/llvm/prebuilt/linux-x86_64/sysroot",
-        "-DCMAKE_EXE_LINKER_FLAGS=-Wl,-z,max-page-size=16384 --sysroot=/home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005/toolchains/android-ndk-r27c/toolchains/llvm/prebuilt/linux-x86_64/sysroot",
-        "-DCMAKE_SHARED_LINKER_FLAGS=-Wl,-z,max-page-size=16384 --sysroot=/home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005/toolchains/android-ndk-r27c/toolchains/llvm/prebuilt/linux-x86_64/sysroot",
-        "-DCMAKE_INSTALL_PREFIX=/home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005/audio-android-arm64-ea4193c19a12/opus/install",
+        "-DCMAKE_C_FLAGS=--target=aarch64-linux-android23 -I/home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005/toolchains/Vulkan-Headers-vulkan-sdk-1.4.328.1/include --sysroot=/home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005/toolchains/android-ndk-r27c-linux-local/toolchains/llvm/prebuilt/linux-x86_64/sysroot",
+        "-DCMAKE_CXX_FLAGS=--target=aarch64-linux-android23 -I/home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005/toolchains/Vulkan-Headers-vulkan-sdk-1.4.328.1/include --sysroot=/home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005/toolchains/android-ndk-r27c-linux-local/toolchains/llvm/prebuilt/linux-x86_64/sysroot",
+        "-DCMAKE_EXE_LINKER_FLAGS=-Wl,-z,max-page-size=16384 --sysroot=/home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005/toolchains/android-ndk-r27c-linux-local/toolchains/llvm/prebuilt/linux-x86_64/sysroot",
+        "-DCMAKE_SHARED_LINKER_FLAGS=-Wl,-z,max-page-size=16384 --sysroot=/home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005/toolchains/android-ndk-r27c-linux-local/toolchains/llvm/prebuilt/linux-x86_64/sysroot",
+        "-DCMAKE_INSTALL_PREFIX=/home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005/audio-android-arm64-c1d2dd40b3df/opus/install",
         "-DBUILD_SHARED_LIBS=OFF",
         "-DOPUS_BUILD_SHARED_LIBRARY=OFF",
         "-DOPUS_BUILD_TESTING=OFF",
@@ -593,8 +599,8 @@
         "-DOPUS_OSCE=OFF"
       ],
       "archive": "libopus.a",
-      "bytes": 3564778,
-      "sha256": "508c0a0f6712ef349637c64d78baf21f145ad8a1d1bfe8d10ba3b0fc5a6ea737",
+      "bytes": 3568066,
+      "sha256": "ef6500365a46f8f7888aa4715a67925e89dc0e366328d9eaacc2ae6b04408b49",
       "static": true,
       "pic": true
     },
@@ -609,7 +615,7 @@
         ]
       },
       "configure": [
-        "--prefix=/home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005/audio-android-arm64-ea4193c19a12/lame/install",
+        "--prefix=/home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005/audio-android-arm64-c1d2dd40b3df/lame/install",
         "--host=aarch64-linux-android",
         "--enable-static",
         "--disable-shared",
@@ -684,7 +690,7 @@
     },
     {
       "file": "compiler-runtime.LICENSE.txt",
-      "sha256": "1b61c3a0d4f9cf23ecc51bb035479c7c48ae2973853b531646e33256ac4b2496",
+      "sha256": "d020a7a0c88fb32ab4c24d2fd66b027616a1ec820d3e31ab2ddea088e83309c3",
       "license": "Apache-2.0 WITH LLVM-exception and Android NDK runtime notices",
       "runtimeArchives": [
         {
@@ -705,11 +711,11 @@
       ],
       "sourceNotices": [
         {
-          "file": "/home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005/toolchains/android-ndk-r27c/toolchains/llvm/prebuilt/linux-x86_64/NOTICE",
+          "file": "/home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005/toolchains/android-ndk-r27c-linux-local/toolchains/llvm/prebuilt/linux-x86_64/NOTICE",
           "sha256": "f96f763beb66a7ba7a667647fc64c0226ace875e590c831fdd9579ec1c1d91e1"
         },
         {
-          "file": "/home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005/toolchains/android-ndk-r27c/toolchains/llvm/prebuilt/linux-x86_64/sysroot/NOTICE",
+          "file": "/home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005/toolchains/android-ndk-r27c-linux-local/toolchains/llvm/prebuilt/linux-x86_64/sysroot/NOTICE",
           "sha256": "d5f5557f82bc42ce657d0513ba9a7d0c55e64eb99d4998994d92f2b5c2b1fb3c"
         }
       ]

@@ -123,8 +123,13 @@ Linux/Android 默认没有外部 TLS 后端，支持本地文件和 HTTP；HTTPS
 | Windows ARM64 | 上述软件视频和音频 encoder；显式禁用 AMF、ffnvcodec/NVENC、NVDEC/CUVID | 同上 |
 | Linux x64 | 上述 NVENC，以及 `h264_vaapi`、`hevc_vaapi`、`vp9_vaapi`、`av1_vaapi` | 同上 |
 | macOS / iOS | `h264_videotoolbox` | 同上 |
+| Android ARM64 / ARMv7 | `h264_mediacodec`、`hevc_mediacodec`、`vp8_mediacodec`、`vp9_mediacodec`、`mpeg4_mediacodec`、`av1_mediacodec` | 同上 |
 
-Android 同样提供这四种软件编码器。编码器选择失败可以在同一格式内回退，不能悄悄把请求的 H.264 改为 MPEG-4。容器也必须支持选择的编码，比如 WebM 不接受 MPEG-4/H.264。
+Android 同时提供六种 MediaCodec 原生编码入口和上述四种软件编码器。MediaCodec 支持哪些格式取决于设备；入口注册成功不代表设备存在对应硬件编码器。原生调用方应通过 Android `MediaCodecList` 查询硬件组件并显式设置 `codec_name`，避免按 MIME 自动选到系统软件实现。`ndk_codec=1` 使用 NDK，`ndk_codec=0` 使用 JNI（须先用 `av_jni_set_java_vm` 初始化）；CPU 输入支持 YUV420P/NV12，Surface 输入需额外的硬件上下文。
+
+MediaCodec 的 `bitrate_mode=cbr/vbr` 与 `AVCodecContext.bit_rate` 是请求值；固定上游包装器没有检查驱动对模式的最终接受结果，也没有实现 `rc_max_rate` / VBV 上限保证。当前托管 `FFmpegVideoEncoder` / Camera 录制器要求可检查的最大码率，仍按原有规则回退至同格式软件编码。原生硬件编码的设备回归、复现脚本与限制见 [Android 编码验证](../Tests/Modules/FFmpegValidation/README.md#android-mediacodec-原生硬件编码)。
+
+编码器选择失败可以在同一格式内回退，不能悄悄把请求的 H.264 改为 MPEG-4。容器也必须支持选择的编码，比如 WebM 不接受 MPEG-4/H.264。
 
 ### 音频编解码
 

@@ -574,3 +574,21 @@ Camera fixture 通过真实离屏 Camera.Render / URP Standard RenderRequest 驱
 脚本默认使用 Unity 6000.3.17f1，复用 `.work/camera-builtin/Project-x64-native-video`；`-ProjectDirectory` 只能指定本验证目录 `.work` 内的隔离工程。它使用普通 Editor 事件循环，在 `EditorWindow.OnGUI` 的真实 Layout/Repaint 中绘制 Unity 自动选择的生产 `FFmpegCameraCapturerEditor`，执行录制、Pause/Resume handler、FPS 采样、停止与多选检查。开始/停止调用 runtime API，文件选择窗口和鼠标按钮点击未自动化。窗口关闭、域重载和异步观察器的生命周期也需结合源码审查；这些检查不替代主工程场景和手动 Inspector 交互。
 
 报告与完整 Editor 日志保存在隔离工程同级的 `inspector/`，所有输出仍在忽略目录。脚本不会启动或修改主 Unity 工程。
+
+## Android MediaCodec 原生硬件编码
+
+先按 `Tools/FFmpeg/README.md` 重建 `android-arm64,android-armv7`。在 Windows 上使用固定 Unity 6000.3.17f1 的 Android NDK、SDK 和 OpenJDK，以及已授权的 ADB 实机：
+
+```powershell
+./Tools/Tests/Modules/FFmpegValidation/run-android-encoders.ps1 -Architecture arm64
+./Tools/Tests/Modules/FFmpegValidation/run-android-encoders.ps1 -Architecture armv7
+# 多台设备时添加 -Serial；其他编辑器安装路径可用 -UnityEditor 指定。
+```
+
+脚本以 `-Wall -Wextra -Werror` 编译 `AndroidEncoderSmoke.c`，复用 `EncoderNativeSmoke.c` 的真实像素、时间戳、封装与资源清理断言；编译 Java 硬件选择器为 dex，通过 `app_process64` / `app_process32` 在设备 VM 中运行，不安装 APK。所有库均从指定架构的正式 Unity 插件目录复制到唯一的 `/data/local/tmp/majdata-encoder-*` 路径；输出和完整日志拉取到忽略的 `.work/android-encoders/`，超时由设备端 `timeout` 终止本次进程。
+
+测试要求 Android API 29+，以 `MediaCodecInfo.isHardwareAccelerated()`、`isSoftwareOnly()` 和能力查询确认硬件组件，再通过 FFmpeg `codec_name` 显式打开该组件，不允许按 MIME 选到软件实现。该要求只属于设备验证入口；交付原生库仍以 API 23 为最低版本。每个 ABI 必须注册 H.264、HEVC、VP8、VP9、MPEG4、AV1 六个 MediaCodec 包装器；H.264 硬件 VBR 的四种 JNI/NDK、平坦/复杂画面组合必须全部成功，CBR 及其余格式按设备能力报告 SKIP，已宣称支持的组合运行失败会使整个验证失败。
+
+每个可用格式组合覆盖 JNI / NDK、请求 CBR / VBR、平坦 / 复杂画面：320×192、30 fps、60 帧，时间轴中保留一个缺帧间隔；验证实际压缩包、MP4 或 WebM 索引、相同格式的软件解码、全部 60 帧的像素/方向/PTS、编码及解码 EOF 排空、重复 EOF，以及排他创建拒绝覆盖原输出。
+
+MediaCodec 模式与目标码率为请求值。实测码率会记录在日志中，但这些检查不证明驱动回读、最大码率/VBV 限制或恒定填充。Surface 输入、Unity Camera/渲染集成、API 23–28 和其他设备需另行验证。当前托管录制器因其最大码率契约仍保留 MediaCodec 拒绝/同格式软件回退。实机结果见 [RESULTS.md](RESULTS.md)。

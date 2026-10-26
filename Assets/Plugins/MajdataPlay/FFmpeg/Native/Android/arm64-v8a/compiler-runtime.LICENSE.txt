@@ -3,7 +3,7 @@ libc++_static.a SHA256 eaf7cc854939f43f3003059c925c775eecf7c20a566b694a1feb470fe
 libc++abi.a SHA256 4a80f9655c9072e8178193bc1cdd47e427db6a3d47bdd9ed67490ee521e0e110
 libunwind.a SHA256 e18ac802388d5bbf5b0f7b348c38051c8b05ac7f50010bc6fa4f199a5c37618a
 
---- /home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005/toolchains/android-ndk-r27c/toolchains/llvm/prebuilt/linux-x86_64/NOTICE ---
+--- /home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005/toolchains/android-ndk-r27c-linux-local/toolchains/llvm/prebuilt/linux-x86_64/NOTICE ---
 ==============================================================================
 The LLVM Project is under the Apache License v2.0 with LLVM Exceptions:
 ==============================================================================
@@ -2419,7 +2419,7 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS WITH THE
 SOFTWARE.
 
---- /home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005/toolchains/android-ndk-r27c/toolchains/llvm/prebuilt/linux-x86_64/sysroot/NOTICE ---
+--- /home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005/toolchains/android-ndk-r27c-linux-local/toolchains/llvm/prebuilt/linux-x86_64/sysroot/NOTICE ---
 Copyright (C) 2018 The Android Open Source Project
 
 Licensed under the Apache License, Version 2.0 (the "License");
