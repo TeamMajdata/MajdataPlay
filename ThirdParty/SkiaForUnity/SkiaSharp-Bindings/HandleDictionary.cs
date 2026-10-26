@@ -20,7 +20,10 @@ namespace SkiaSharp
 #endif
 		internal static readonly Dictionary<IntPtr, WeakReference> instances = new Dictionary<IntPtr, WeakReference> ();
 
-#if DEBUG
+		// MajdataPlay patch: upstream records these under DEBUG, which Unity defines for every development build.
+		// Capturing a stack trace while holding instancesLock stalled every thread creating Skia objects, so the
+		// leak diagnostics are opt-in through their own scripting define symbol.
+#if SKIASHARP_TRACK_HANDLE_STACKS
 		internal static readonly Dictionary<IntPtr, string> stackTraces = new Dictionary<IntPtr, string> ();
 #endif
 
@@ -159,7 +162,7 @@ namespace SkiaSharp
 				}
 
 				instances[handle] = new WeakReference (instance);
-#if DEBUG
+#if SKIASHARP_TRACK_HANDLE_STACKS
 				stackTraces[handle] = Environment.StackTrace;
 #endif
 			} finally {
@@ -186,7 +189,7 @@ namespace SkiaSharp
 				var existed = instances.TryGetValue (handle, out var weak);
 				if (existed && (!weak.IsAlive || weak.Target == instance)) {
 					instances.Remove (handle);
-#if DEBUG
+#if SKIASHARP_TRACK_HANDLE_STACKS
 					stackTraces.Remove (handle);
 #endif
 				} else {
