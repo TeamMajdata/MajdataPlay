@@ -258,6 +258,235 @@ namespace MajdataPlay.Tests.Game.EditorTools
             Assert.That(hangul.HasCharacter((int)HangulGa), Is.True);
         }
 
+        /// <summary>Checks that baking adds characters to a static asset and leaves it static, non-readable and without a runtime source font.</summary>
+        [Test]
+        public void Prewarm_BakesIntoStaticAssetAndKeepsItStatic()
+        {
+            var latin = CreateDynamicFontAsset(LatinFontPath);
+            latin.TryAddCharacters(new[] { 0x41u }, out _, false);
+            MakeStatic(latin);
+
+            var result = TmpFontPrewarmer.Prewarm(latin, CodePoints("BC"), StaticBakeOptions());
+
+            LogAssert.NoUnexpectedReceived();
+            Assert.That(result.AddedPerAsset[latin], Is.EqualTo(2));
+            Assert.That(latin.HasCharacter('A') && latin.HasCharacter('B') && latin.HasCharacter('C'), Is.True);
+            Assert.That(latin.atlasPopulationMode, Is.EqualTo(AtlasPopulationMode.Static));
+            Assert.That(latin.atlasTexture.isReadable, Is.False);
+            Assert.That(latin.sourceFontFile, Is.Null);
+            Assert.That(result.GrownAtlasSizes, Is.Empty);
+        }
+
+        /// <summary>Checks that a static primary is filled before its dynamic same-face fallback, which then receives nothing.</summary>
+        [Test]
+        public void Prewarm_FillsStaticPrimaryBeforeDynamicFallback()
+        {
+            var latin = CreateDynamicFontAsset(LatinFontPath);
+            var latinDynamic = CreateDynamicFontAsset(LatinFontPath);
+            MakeStatic(latin);
+            latin.fallbackFontAssetTable = new List<TMP_FontAsset> { latinDynamic };
+
+            var result = TmpFontPrewarmer.Prewarm(latin, CodePoints("XY"), StaticBakeOptions());
+
+            Assert.That(result.AddedPerAsset[latin], Is.EqualTo(2));
+            Assert.That(result.AddedPerAsset.ContainsKey(latinDynamic), Is.False);
+            Assert.That(latinDynamic.characterTable, Is.Empty);
+        }
+
+        /// <summary>Checks that a full single-atlas static asset is rebuilt at a larger size that keeps its characters and fits the new ones.</summary>
+        [Test]
+        public void Prewarm_GrowsFullStaticAtlas()
+        {
+            var latin = CreateDynamicFontAsset(LatinFontPath, 64);
+            latin.isMultiAtlasTexturesEnabled = false;
+            latin.TryAddCharacters(new[] { 0x41u }, out _, false);
+            MakeStatic(latin);
+            const string added = "BCDEFGHIJKLMNOP";
+
+            var result = TmpFontPrewarmer.Prewarm(latin, CodePoints(added), StaticBakeOptions());
+
+            Assert.That(result.UnsupportedCodePoints, Is.Empty);
+            Assert.That(result.AddedPerAsset[latin], Is.EqualTo(added.Length));
+            Assert.That(latin.HasCharacter('A'), Is.True, "Characters baked before the rebuild must survive it.");
+            Assert.That(added.All(c => latin.HasCharacter(c)), Is.True);
+            Assert.That(latin.atlasWidth * latin.atlasHeight, Is.GreaterThan(64 * 64));
+            Assert.That(result.GrownAtlasSizes[latin], Is.EqualTo(new Vector2Int(latin.atlasWidth, latin.atlasHeight)));
+            Assert.That(latin.atlasTexture.width, Is.EqualTo(latin.atlasWidth));
+            Assert.That(latin.material.GetFloat(ShaderUtilities.ID_TextureWidth), Is.EqualTo(latin.atlasWidth));
+            Assert.That(latin.material.GetFloat(ShaderUtilities.ID_TextureHeight), Is.EqualTo(latin.atlasHeight));
+            Assert.That(latin.atlasPopulationMode, Is.EqualTo(AtlasPopulationMode.Static));
+            Assert.That(latin.atlasTexture.isReadable, Is.False);
+        }
+
+        /// <summary>Checks that the size limit stops growth and the characters that still do not fit are reported as unsupported.</summary>
+        [Test]
+        public void Prewarm_StaticAtlasGrowthStopsAtLimit()
+        {
+            var latin = CreateDynamicFontAsset(LatinFontPath, 64);
+            latin.isMultiAtlasTexturesEnabled = false;
+            MakeStatic(latin);
+            var options = StaticBakeOptions();
+            options.MaxStaticAtlasSize = 128;
+
+            var result = TmpFontPrewarmer.Prewarm(latin, CodePoints("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"), options);
+
+            Assert.That(latin.atlasWidth, Is.EqualTo(128));
+            Assert.That(latin.atlasHeight, Is.EqualTo(128));
+            Assert.That(result.UnsupportedCodePoints, Is.Not.Empty);
+            Assert.That(result.AddedCount + result.UnsupportedCodePoints.Count, Is.EqualTo(result.RequestedCount));
+        }
+
+        /// <summary>Checks that without growth a full static atlas keeps its size and the overflow is reported as unsupported.</summary>
+        [Test]
+        public void Prewarm_WithoutGrowth_ReportsStaticOverflowAsUnsupported()
+        {
+            var latin = CreateDynamicFontAsset(LatinFontPath, 64);
+            latin.isMultiAtlasTexturesEnabled = false;
+            MakeStatic(latin);
+            var options = StaticBakeOptions();
+            options.GrowStaticAtlases = false;
+
+            var result = TmpFontPrewarmer.Prewarm(latin, CodePoints("ABCDEFGHIJKLMNOP"), options);
+
+            Assert.That(latin.atlasWidth, Is.EqualTo(64));
+            Assert.That(latin.atlasHeight, Is.EqualTo(64));
+            Assert.That(result.GrownAtlasSizes, Is.Empty);
+            Assert.That(result.UnsupportedCodePoints, Is.Not.Empty);
+            Assert.That(latin.atlasPopulationMode, Is.EqualTo(AtlasPopulationMode.Static));
+        }
+
+        /// <summary>Checks that a static asset without a source font is reported and skipped while its fallbacks are still filled.</summary>
+        [Test]
+        public void Prewarm_SkipsStaticAssetWithoutSourceFont()
+        {
+            var latin = CreateDynamicFontAsset(LatinFontPath);
+            var hangul = CreateDynamicFontAsset(HangulFontPath);
+            MakeStatic(latin);
+            using (var serializedObject = new SerializedObject(latin))
+            {
+                serializedObject.FindProperty("m_SourceFontFileGUID").stringValue = string.Empty;
+                serializedObject.ApplyModifiedPropertiesWithoutUndo();
+            }
+            latin.fallbackFontAssetTable = new List<TMP_FontAsset> { hangul };
+
+            var result = TmpFontPrewarmer.Prewarm(latin, new[] { HangulGa }, StaticBakeOptions());
+
+            Assert.That(TmpFontPrewarmer.GetSourceFont(latin), Is.Null);
+            Assert.That(result.StaticAssetsWithoutSourceFont, Is.EqualTo(new[] { latin }));
+            Assert.That(latin.characterTable, Is.Empty);
+            Assert.That(hangul.HasCharacter((int)HangulGa), Is.True);
+        }
+
+        /// <summary>Checks that a static asset finds its source font through the GUID TMP keeps after dropping the font reference.</summary>
+        [Test]
+        public void GetSourceFont_ResolvesStaticAssetThroughGuid()
+        {
+            var latin = CreateDynamicFontAsset(LatinFontPath);
+            MakeStatic(latin);
+
+            var font = TmpFontPrewarmer.GetSourceFont(latin);
+
+            Assert.That(latin.sourceFontFile, Is.Null);
+            Assert.That(font, Is.EqualTo(AssetDatabase.LoadAssetAtPath<Font>(LatinFontPath)));
+        }
+
+        /// <summary>Checks that a baked persistent static asset is written to disk as static with a non-readable atlas and the new characters.</summary>
+        [Test]
+        public void Prewarm_SavesBakedStaticAsset()
+        {
+            using var folder = new TemporaryAssetFolder();
+            var asset = CreatePersistentFontAsset(folder, "Static.asset");
+            MakeStatic(asset);
+            EditorUtility.SetDirty(asset);
+            AssetDatabase.SaveAssets();
+            var options = StaticBakeOptions();
+            options.SaveAssets = true;
+
+            var result = TmpFontPrewarmer.Prewarm(asset, CodePoints("AB"), options);
+
+            Assert.That(result.AddedCount, Is.EqualTo(2));
+            var text = folder.ReadText("Static.asset");
+            StringAssert.Contains("m_AtlasPopulationMode: 0", text);
+            StringAssert.Contains("m_IsReadable: 0", text);
+            StringAssert.Contains("m_Unicode: 65", text);
+            StringAssert.Contains("m_Unicode: 66", text);
+        }
+
+        /// <summary>Checks the window's description of a static asset for each option combination.</summary>
+        [Test]
+        public void DescribeStaticHandling_FollowsOptions()
+        {
+            var latin = CreateDynamicFontAsset(LatinFontPath);
+            latin.isMultiAtlasTexturesEnabled = false;
+            MakeStatic(latin);
+            _window = ScriptableObject.CreateInstance<TmpFontPrewarmWindow>();
+
+            var growing = _window.DescribeStaticHandling(latin);
+            _window.Options.GrowStaticAtlases = false;
+            var fixedSize = _window.DescribeStaticHandling(latin);
+            _window.Options.IncludeStaticAssets = false;
+            var skipped = _window.DescribeStaticHandling(latin);
+
+            Assert.That(growing, Does.Contain("grows up to 4096"));
+            Assert.That(fixedSize, Does.Contain("go to its fallbacks"));
+            Assert.That(skipped, Does.Contain("baking into static assets is off"));
+        }
+
+        /// <summary>Checks that the summary names grown atlases and static assets without a source font.</summary>
+        [Test]
+        public void Describe_ListsGrownAtlasesAndStaticAssetsWithoutSource()
+        {
+            var latin = CreateBareFontAsset("Latin");
+            var result = new TmpFontPrewarmResult(latin)
+            {
+                RequestedCount = 1,
+                AddedCount = 1
+            };
+            result.AddedPerAsset[latin] = 1;
+            result.GrownAtlasSizes[latin] = new Vector2Int(128, 64);
+            result.StaticAssetsWithoutSourceFont.Add(latin);
+
+            var line = TmpFontPrewarmWindow.Describe(result);
+
+            Assert.That(line, Is.EqualTo("Latin: requested 1, already present 0, added 1 (Latin: 1), grew atlas Latin: 128x64, static without source font: Latin"));
+        }
+
+        /// <summary>
+        /// Checks that a character a later static asset already has is still added to an earlier dynamic asset whose source font has it,
+        /// because TMP generates it there at runtime before reaching the static asset.
+        /// </summary>
+        [Test]
+        public void Prewarm_AddsCharacterThatOnlyALaterStaticAssetHas()
+        {
+            var latin = CreateDynamicFontAsset(LatinFontPath);
+            var baked = CreateDynamicFontAsset(LatinFontPath);
+            baked.TryAddCharacters(new[] { 0x41u }, out _, false);
+            MakeStatic(baked);
+            latin.fallbackFontAssetTable = new List<TMP_FontAsset> { baked };
+
+            var result = TmpFontPrewarmer.Prewarm(latin, CodePoints("A"), InMemoryOptions());
+
+            Assert.That(result.AlreadyPresentCount, Is.Zero);
+            Assert.That(result.AddedPerAsset[latin], Is.EqualTo(1));
+            Assert.That(latin.HasCharacter('A'), Is.True);
+        }
+
+        /// <summary>Checks that a character an earlier static asset has counts as present and is not added to a later dynamic asset.</summary>
+        [Test]
+        public void Prewarm_CountsCharacterOfEarlierStaticAssetAsPresent()
+        {
+            var baked = CreateDynamicFontAsset(LatinFontPath);
+            var latin = CreateDynamicFontAsset(LatinFontPath);
+            baked.TryAddCharacters(new[] { 0x41u }, out _, false);
+            MakeStatic(baked);
+            baked.fallbackFontAssetTable = new List<TMP_FontAsset> { latin };
+
+            var result = TmpFontPrewarmer.Prewarm(baked, CodePoints("A"), InMemoryOptions());
+
+            Assert.That(result.AlreadyPresentCount, Is.EqualTo(1));
+            Assert.That(latin.characterTable, Is.Empty);
+        }
+
         /// <summary>Checks that canceling stops before the next batch and reports the rest as unprocessed, not unsupported.</summary>
         [Test]
         public void Prewarm_CancelStopsAndReportsUnprocessed()
@@ -402,14 +631,33 @@ namespace MajdataPlay.Tests.Game.EditorTools
             };
         }
 
+        /// <summary>Gets in-memory options that bake static assets.</summary>
+        /// <returns>Default options with saving disabled and static baking enabled.</returns>
+        private static TmpFontPrewarmOptions StaticBakeOptions()
+        {
+            var options = InMemoryOptions();
+            options.IncludeStaticAssets = true;
+            return options;
+        }
+
+        /// <summary>Turns a font asset static the way TMP's inspector does: no runtime source font and non-readable atlases.</summary>
+        /// <param name="asset">The font asset.</param>
+        private static void MakeStatic(TMP_FontAsset asset)
+        {
+            asset.atlasPopulationMode = AtlasPopulationMode.Static;
+            TmpFontPrewarmer.SetAtlasTexturesReadable(asset, false);
+            Assert.That(asset.atlasTexture.isReadable, Is.False);
+        }
+
         /// <summary>Creates a small in-memory dynamic font asset that the test destroys.</summary>
         /// <param name="fontPath">The project path of the source font.</param>
+        /// <param name="atlasSize">The atlas width and height.</param>
         /// <returns>The font asset.</returns>
-        private TMP_FontAsset CreateDynamicFontAsset(string fontPath)
+        private TMP_FontAsset CreateDynamicFontAsset(string fontPath, int atlasSize = 256)
         {
             var font = AssetDatabase.LoadAssetAtPath<Font>(fontPath);
             Assert.That(font, Is.Not.Null, fontPath);
-            var asset = TMP_FontAsset.CreateFontAsset(font, 24, 3, GlyphRenderMode.SDFAA, 256, 256);
+            var asset = TMP_FontAsset.CreateFontAsset(font, 24, 3, GlyphRenderMode.SDFAA, atlasSize, atlasSize);
             _createdAssets.Add(asset);
             return asset;
         }

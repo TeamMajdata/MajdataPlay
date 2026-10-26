@@ -10,7 +10,8 @@ namespace MajdataPlay.Editor.Windows
 {
     /// <summary>
     /// Editor window that adds characters to selected or dropped TMP font assets ahead of use, from literal characters,
-    /// character set files and Unicode ranges, so the glyphs are not rasterized at runtime.
+    /// character set files and Unicode ranges, so the glyphs are not rasterized at runtime. Dynamic assets receive the glyphs
+    /// directly; static assets can be baked in place and stay static.
     /// </summary>
     internal sealed class TmpFontPrewarmWindow : EditorWindow
     {
@@ -19,6 +20,15 @@ namespace MajdataPlay.Editor.Windows
 
         /// <summary>The number of unsupported code points listed in a result line.</summary>
         private const int UnsupportedSampleCount = 16;
+
+        /// <summary>The atlas size limits offered for growing static atlases.</summary>
+        private static readonly int[] MaxStaticAtlasSizes = { 1024, 2048, 4096, 8192 };
+
+        /// <summary>The labels of <see cref="MaxStaticAtlasSizes"/>.</summary>
+        private static readonly GUIContent[] MaxStaticAtlasSizeLabels =
+        {
+            new("1024"), new("2048"), new("4096"), new("8192")
+        };
 
         /// <summary>The font assets to prewarm, in the order they are processed.</summary>
         private readonly List<TMP_FontAsset> _fontAssets = new();
@@ -29,8 +39,11 @@ namespace MajdataPlay.Editor.Windows
         /// <summary>The summaries of the last run, one per font asset.</summary>
         private readonly List<string> _resultLines = new();
 
-        /// <summary>How glyphs are added and saved.</summary>
-        private readonly TmpFontPrewarmOptions _options = new();
+        /// <summary>How glyphs are added and saved; the window bakes static assets by default.</summary>
+        private readonly TmpFontPrewarmOptions _options = new()
+        {
+            IncludeStaticAssets = true
+        };
 
         /// <summary>The literal characters to add.</summary>
         private string _characters = string.Empty;
@@ -52,6 +65,9 @@ namespace MajdataPlay.Editor.Windows
 
         /// <summary>The font assets to prewarm.</summary>
         internal IReadOnlyList<TMP_FontAsset> FontAssets => _fontAssets;
+
+        /// <summary>How glyphs are added and saved.</summary>
+        internal TmpFontPrewarmOptions Options => _options;
 
         /// <summary>The literal characters to add; setting it marks the code points for rebuilding.</summary>
         internal string Characters
@@ -252,13 +268,15 @@ namespace MajdataPlay.Editor.Windows
             }
         }
 
-        /// <summary>Warns about population mode settings that defeat or limit prewarming.</summary>
+        /// <summary>Explains how a static asset is handled and warns about population mode settings that defeat or limit prewarming.</summary>
         /// <param name="fontAsset">The listed font asset.</param>
-        private static void DrawFontAssetWarning(TMP_FontAsset fontAsset)
+        private void DrawFontAssetWarning(TMP_FontAsset fontAsset)
         {
             if (!TmpFontPrewarmer.IsDynamic(fontAsset))
             {
-                EditorGUILayout.HelpBox("Static: no glyphs can be added to this asset. Its fallbacks are still prewarmed.", MessageType.Info);
+                EditorGUILayout.HelpBox(DescribeStaticHandling(fontAsset), TmpFontPrewarmer.GetSourceFont(fontAsset) == null && _options.IncludeStaticAssets
+                                            ? MessageType.Warning
+                                            : MessageType.Info);
                 return;
             }
             if (!TmpFontPrewarmer.GetClearDynamicDataOnBuild(fontAsset))
@@ -272,6 +290,28 @@ namespace MajdataPlay.Editor.Windows
                 TmpFontPrewarmer.SetClearDynamicDataOnBuild(fontAsset, false);
             }
             EditorGUILayout.EndHorizontal();
+        }
+
+        /// <summary>Describes what a run does to a static asset with the current options.</summary>
+        /// <param name="fontAsset">The static font asset.</param>
+        /// <returns>The help text shown under the asset.</returns>
+        internal string DescribeStaticHandling(TMP_FontAsset fontAsset)
+        {
+            if (!_options.IncludeStaticAssets)
+            {
+                return "Static: baking into static assets is off, so no glyphs are added to this asset. Its fallbacks are still prewarmed.";
+            }
+            if (TmpFontPrewarmer.GetSourceFont(fontAsset) == null)
+            {
+                return "Static without a source font reference: characters cannot be baked into it. Its fallbacks are still prewarmed.";
+            }
+            var growth = fontAsset.isMultiAtlasTexturesEnabled
+                ? "new atlas pages are added when it is full"
+                : _options.GrowStaticAtlases
+                    ? $"the atlas grows up to {_options.MaxStaticAtlasSize} when full"
+                    : "characters that do not fit go to its fallbacks";
+            return $"Static {fontAsset.atlasWidth}x{fontAsset.atlasHeight}: characters its source font has are baked into the atlas " +
+                   $"({growth}); it stays static with a non-readable atlas.";
         }
 
         /// <summary>Draws the literal characters, character set files and Unicode range inputs.</summary>
@@ -369,6 +409,29 @@ namespace MajdataPlay.Editor.Windows
             _options.IncludeFontFeatures = EditorGUILayout.ToggleLeft(
                 new GUIContent("Include font features", "Reads ligature and kerning data for the new glyphs. Slower; rarely needed for CJK."),
                 _options.IncludeFontFeatures);
+            _options.IncludeStaticAssets = EditorGUILayout.ToggleLeft(
+                new GUIContent("Bake into static font assets",
+                               "Static assets in the chain receive the characters their source font has, then stay static with a non-readable atlas. " +
+                               "Their own font feature setting is used so the kerning stays consistent."),
+                _options.IncludeStaticAssets);
+            using (new EditorGUI.DisabledScope(!_options.IncludeStaticAssets))
+            {
+                EditorGUI.indentLevel++;
+                _options.GrowStaticAtlases = EditorGUILayout.ToggleLeft(
+                    new GUIContent("Grow full static atlases",
+                                   "Rebuilds a full single-atlas static asset at the next power-of-two size with its existing characters plus the new ones, " +
+                                   "and updates the atlas size on its material presets."),
+                    _options.GrowStaticAtlases);
+                using (new EditorGUI.DisabledScope(!_options.GrowStaticAtlases))
+                {
+                    _options.MaxStaticAtlasSize = EditorGUILayout.IntPopup(
+                        new GUIContent("Max static atlas size", "The largest width or height a static atlas may grow to."),
+                        _options.MaxStaticAtlasSize,
+                        MaxStaticAtlasSizeLabels,
+                        MaxStaticAtlasSizes);
+                }
+                EditorGUI.indentLevel--;
+            }
             _options.BatchSize = Mathf.Clamp(EditorGUILayout.IntField(
                 new GUIContent("Batch size", "Characters per TryAddCharacters call."),
                 _options.BatchSize), 1, 4096);
@@ -407,7 +470,12 @@ namespace MajdataPlay.Editor.Windows
         private void RunPrewarm()
         {
             var fallbackNote = _options.IncludeFallbacks ? " and their fallbacks" : string.Empty;
-            var message = $"Add up to {_codePoints.Count} characters to {_fontAssets.Count} font asset(s){fallbackNote}?\n\n" +
+            var staticNote = _options.IncludeStaticAssets
+                ? _options.GrowStaticAtlases
+                    ? " Static assets are baked in place and their atlases may be rebuilt at a larger size."
+                    : " Static assets are baked in place."
+                : string.Empty;
+            var message = $"Add up to {_codePoints.Count} characters to {_fontAssets.Count} font asset(s){fallbackNote}?{staticNote}\n\n" +
                           "Modified assets are saved to disk and the change cannot be undone.";
             if (!EditorUtility.DisplayDialog(WindowTitle, message, "Prewarm", "Cancel"))
             {
@@ -519,6 +587,14 @@ namespace MajdataPlay.Editor.Windows
                     isFirst = false;
                 }
                 builder.Append(')');
+            }
+            foreach (var pair in result.GrownAtlasSizes)
+            {
+                builder.Append($", grew atlas {pair.Key.name}: {pair.Value.x}x{pair.Value.y}");
+            }
+            foreach (var asset in result.StaticAssetsWithoutSourceFont)
+            {
+                builder.Append($", static without source font: {asset.name}");
             }
             if (result.UnsupportedCodePoints.Count > 0)
             {
