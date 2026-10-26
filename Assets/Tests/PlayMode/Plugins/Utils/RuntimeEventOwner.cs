@@ -33,6 +33,19 @@ namespace MajdataPlay.Tests.Plugins.Utils.PlayMode
         [FormerlySerializedAs("EventList")]
         private List<RuntimeEvent<Action<int>>> _eventList = new();
 
+        /// <summary>An event exposed only through the read-only <see cref="ReadOnlyValueChanged"/> property.</summary>
+        [SerializeField]
+        [FormerlySerializedAs("ReadOnlyValueChanged")]
+        private RuntimeEvent<Action<int>> _readOnlyValueChanged = new();
+
+        /// <summary>Gets an event stored in an auto-property with a private setter, as the project serializes public state.</summary>
+        [field: SerializeField]
+        [field: FormerlySerializedAs("AutoValueChanged")]
+        public RuntimeEvent<Action<int>> AutoValueChanged { get; private set; } = new();
+
+        /// <summary>Gets an event through a get-only property over a serialized field.</summary>
+        public RuntimeEvent<Action<int>> ReadOnlyValueChanged => _readOnlyValueChanged;
+
         /// <summary>Gets the <c>Action&lt;int&gt;</c> event; the setter accepts only the same instance.</summary>
         /// <exception cref="InvalidOperationException">The setter receives another instance.</exception>
         public RuntimeEvent<Action<int>> ValueChanged

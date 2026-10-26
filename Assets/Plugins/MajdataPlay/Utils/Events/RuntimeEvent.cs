@@ -31,9 +31,10 @@ namespace MajdataPlay.Utils.Events
         public abstract Type DelegateType { get; }
 
         /// <summary>
-        /// Rejects replacing the event instance through a property setter. A property that exposes a serialized
-        /// <see cref="RuntimeEvent{TDelegate}"/> needs a setter for <c>+=</c> and <c>-=</c> to compile; those operators
-        /// pass the same instance back, which this method accepts.
+        /// Rejects replacing the event instance through a property setter. A property needs a setter only when other
+        /// classes should use <c>+=</c> and <c>-=</c>, which pass the same instance back to it; this method accepts that
+        /// instance and nothing else. Read-only properties do not need it, because their callers use
+        /// <see cref="RuntimeEvent{TDelegate}.Add"/> and <see cref="RuntimeEvent{TDelegate}.Remove"/>.
         /// </summary>
         /// <param name="current">The instance that the property exposes.</param>
         /// <param name="value">The value passed to the setter.</param>
@@ -48,36 +49,45 @@ namespace MajdataPlay.Utils.Events
             if (!ReferenceEquals(current, value))
             {
                 throw new InvalidOperationException(
-                    "A RuntimeEvent cannot be replaced; use += and -= to add and remove listeners.");
+                    "A RuntimeEvent cannot be replaced; use Add and Remove, or += and -=, to change its listeners.");
             }
         }
     }
 
     /// <summary>
     /// An event whose listeners are the <see cref="BindableMethodAttribute"/> methods bound in the Inspector, followed by
-    /// the delegates added at runtime with <c>+=</c>.
+    /// the delegates added at runtime with <see cref="Add"/> or <c>+=</c>.
     /// </summary>
     /// <remarks>
     /// <para>
-    /// Declare it as a private serialized field and expose it through a property whose setter calls
-    /// <see cref="RuntimeEvent.ThrowIfReplaced"/>, so other classes can subscribe with <c>+=</c> but cannot replace it.
-    /// Readonly fields and get-only properties are not supported: Unity does not serialize them, and C# does not allow
-    /// <c>+=</c> on them.
+    /// Unity deserializes the event only into a field it can write: it skips <c>readonly</c> fields and the backing
+    /// fields of get-only auto-properties (<c>{ get; }</c>) without a warning, and their Inspector bindings are lost.
+    /// Store the event in a private serialized field, or in an auto-property with a private setter marked
+    /// <c>[field: SerializeField]</c>, and expose it through a read-only property. Callers change the listeners with
+    /// <see cref="Add"/> and <see cref="Remove"/>, which work on read-only members because they change the instance in
+    /// place.
     /// </para>
     /// <code>
     /// [SerializeField]
     /// [FormerlySerializedAs("Judged")]
     /// private RuntimeEvent&lt;JudgedHandler&gt; _judged = new();
     ///
-    /// public RuntimeEvent&lt;JudgedHandler&gt; Judged
-    /// {
-    ///     get => _judged;
-    ///     set => RuntimeEvent.ThrowIfReplaced(_judged, value);
-    /// }
+    /// public RuntimeEvent&lt;JudgedHandler&gt; Judged => _judged;
     ///
-    /// // Subscribe: owner.Judged += OnJudged;
+    /// [field: SerializeField]
+    /// [field: FormerlySerializedAs("Missed")]
+    /// public RuntimeEvent&lt;MissedHandler&gt; Missed { get; private set; } = new();
+    ///
+    /// // Subscribe: owner.Judged.Add(OnJudged);
+    /// // Remove:    owner.Judged.Remove(OnJudged);
     /// // Raise:     _judged.Invoker?.Invoke(in result);
     /// </code>
+    /// <para>
+    /// The <c>+=</c> and <c>-=</c> operators do the same as <see cref="Add"/> and <see cref="Remove"/>, but C# writes
+    /// their result back, so they need an assignable member. To let other classes use them, give the property a setter
+    /// that calls <see cref="RuntimeEvent.ThrowIfReplaced"/>, which accepts only the same instance:
+    /// <c>set =&gt; RuntimeEvent.ThrowIfReplaced(_judged, value);</c>.
+    /// </para>
     /// <para>
     /// The bindings are turned into delegates on the first access to <see cref="Invoker"/> after Unity deserializes the
     /// event; call <see cref="Resolve"/> from <c>Awake</c> to do that work before a hot path raises the event. Invoking
@@ -94,7 +104,7 @@ namespace MajdataPlay.Utils.Events
         [NonSerialized]
         private TDelegate? _boundListeners;
 
-        /// <summary>The delegates added with <c>+=</c> and not removed with <c>-=</c>.</summary>
+        /// <summary>The delegates added with <see cref="Add"/> or <c>+=</c> and not removed yet.</summary>
         [NonSerialized]
         private TDelegate? _runtimeListeners;
 
@@ -138,7 +148,38 @@ namespace MajdataPlay.Utils.Events
             UpdateInvoker();
         }
 
-        /// <summary>Adds a runtime listener after the bound methods and the listeners added before it.</summary>
+        /// <summary>
+        /// Adds a runtime listener after the bound methods and the listeners added before it. The instance is changed in
+        /// place, so this works through read-only fields and properties.
+        /// </summary>
+        /// <param name="listener">The listener to add; null is ignored.</param>
+        public void Add(TDelegate? listener)
+        {
+            if (listener is null)
+            {
+                return;
+            }
+            _runtimeListeners = (TDelegate?)Delegate.Combine(_runtimeListeners, listener);
+            UpdateInvoker();
+        }
+
+        /// <summary>
+        /// Removes the last occurrence of a runtime listener. Methods bound in the Inspector are not affected, even when
+        /// <paramref name="listener"/> calls the same method. The instance is changed in place, so this works through
+        /// read-only fields and properties.
+        /// </summary>
+        /// <param name="listener">The listener to remove; null or a listener that was not added is ignored.</param>
+        public void Remove(TDelegate? listener)
+        {
+            if (listener is null)
+            {
+                return;
+            }
+            _runtimeListeners = (TDelegate?)Delegate.Remove(_runtimeListeners, listener);
+            UpdateInvoker();
+        }
+
+        /// <summary>Adds a runtime listener like <see cref="Add"/>, for <c>+=</c> on assignable members.</summary>
         /// <param name="runtimeEvent">The event to add the listener to; it is changed in place.</param>
         /// <param name="listener">The listener to add; null is ignored.</param>
         /// <returns><paramref name="runtimeEvent"/> itself, so that <c>+=</c> keeps the same instance.</returns>
@@ -149,18 +190,11 @@ namespace MajdataPlay.Utils.Events
             {
                 throw new ArgumentNullException(nameof(runtimeEvent));
             }
-            if (listener is not null)
-            {
-                runtimeEvent._runtimeListeners = (TDelegate?)Delegate.Combine(runtimeEvent._runtimeListeners, listener);
-                runtimeEvent.UpdateInvoker();
-            }
+            runtimeEvent.Add(listener);
             return runtimeEvent;
         }
 
-        /// <summary>
-        /// Removes the last occurrence of a runtime listener. Methods bound in the Inspector are not affected, even when
-        /// <paramref name="listener"/> calls the same method.
-        /// </summary>
+        /// <summary>Removes a runtime listener like <see cref="Remove"/>, for <c>-=</c> on assignable members.</summary>
         /// <param name="runtimeEvent">The event to remove the listener from; it is changed in place.</param>
         /// <param name="listener">The listener to remove; null or a listener that was not added is ignored.</param>
         /// <returns><paramref name="runtimeEvent"/> itself, so that <c>-=</c> keeps the same instance.</returns>
@@ -171,11 +205,7 @@ namespace MajdataPlay.Utils.Events
             {
                 throw new ArgumentNullException(nameof(runtimeEvent));
             }
-            if (listener is not null)
-            {
-                runtimeEvent._runtimeListeners = (TDelegate?)Delegate.Remove(runtimeEvent._runtimeListeners, listener);
-                runtimeEvent.UpdateInvoker();
-            }
+            runtimeEvent.Remove(listener);
             return runtimeEvent;
         }
 

@@ -11,7 +11,8 @@ namespace MajdataPlay.Tests.Plugins.Utils
 {
     /// <summary>
     /// Covers <see cref="RuntimeEvent{TDelegate}"/>: resolving serialized bindings, the order of bound and runtime
-    /// listeners, the <c>+</c> and <c>-</c> operators, re-resolving after deserialization, cloning with
+    /// listeners, <see cref="RuntimeEvent{TDelegate}.Add"/>, <see cref="RuntimeEvent{TDelegate}.Remove"/> and the
+    /// <c>+</c> and <c>-</c> operators, read-only exposing members, re-resolving after deserialization, cloning with
     /// <see cref="Object.Instantiate(Object)"/> and the replacement guard of exposing properties.
     /// </summary>
     public class RuntimeEventTests
@@ -21,6 +22,12 @@ namespace MajdataPlay.Tests.Plugins.Utils
 
         /// <summary>The property path of <see cref="RuntimeEventOwner.PayloadChanged"/>.</summary>
         private const string PayloadChangedPath = "_payloadChanged";
+
+        /// <summary>The property path of the field behind <see cref="RuntimeEventOwner.ReadOnlyValueChanged"/>.</summary>
+        private const string ReadOnlyValueChangedPath = "_readOnlyValueChanged";
+
+        /// <summary>The property path of the backing field of <see cref="RuntimeEventOwner.AutoValueChanged"/>.</summary>
+        private const string AutoValueChangedPath = "<AutoValueChanged>k__BackingField";
 
         /// <summary>Creates and destroys the test objects.</summary>
         private TestObjects _objects = null!;
@@ -316,6 +323,109 @@ namespace MajdataPlay.Tests.Plugins.Utils
 
             Assert.That(json, Does.Contain("\"_valueChanged\":{\"_bindings\":[{\"_target\":"));
             Assert.That(json, Does.Contain("\"_methodName\":\"OnValue\""));
+        }
+
+        /// <summary>
+        /// Checks that an event behind a get-only property is deserialized and that <see cref="RuntimeEvent{TDelegate}.Add"/>
+        /// adds a runtime listener after the bound methods.
+        /// </summary>
+        [Test]
+        public void Add_ThroughReadOnlyProperty_RunsAfterDeserializedBindings()
+        {
+            RuntimeEventTestBindings.Set(_owner, ReadOnlyValueChangedPath, (_listener, "OnValue"));
+
+            _owner.ReadOnlyValueChanged.Add(value => _listener.Calls.Add($"Runtime:{value}"));
+            _owner.ReadOnlyValueChanged.Invoker!.Invoke(13);
+
+            Assert.That(_owner.ReadOnlyValueChanged.Bindings[0].MethodName, Is.EqualTo("OnValue"));
+            Assert.That(_listener.Calls, Is.EqualTo(new[] { "OnValue:13", "Runtime:13" }));
+        }
+
+        /// <summary>
+        /// Checks that <see cref="RuntimeEvent{TDelegate}.Remove"/> removes the last occurrence of a runtime listener but
+        /// never a binding to the same method.
+        /// </summary>
+        [Test]
+        public void Remove_ThroughReadOnlyProperty_RemovesRuntimeListenerButKeepsBinding()
+        {
+            RuntimeEventTestBindings.Set(_owner, ReadOnlyValueChangedPath, (_listener, "OnValue"));
+            var runtimeEvent = _owner.ReadOnlyValueChanged;
+            Action<int> other = value => _listener.Calls.Add($"Other:{value}");
+            runtimeEvent.Add(_listener.OnValue);
+            runtimeEvent.Add(other);
+            runtimeEvent.Add(_listener.OnValue);
+            runtimeEvent.Invoker!.Invoke(1);
+
+            runtimeEvent.Remove(_listener.OnValue);
+            runtimeEvent.Invoker!.Invoke(2);
+            runtimeEvent.Remove(_listener.OnValue);
+            runtimeEvent.Remove(_listener.OnValue);
+            runtimeEvent.Remove(other);
+            runtimeEvent.Invoker!.Invoke(3);
+
+            Assert.That(_listener.Calls, Is.EqualTo(new[]
+            {
+                "OnValue:1", "OnValue:1", "Other:1", "OnValue:1",
+                "OnValue:2", "OnValue:2", "Other:2",
+                "OnValue:3",
+            }));
+        }
+
+        /// <summary>Checks that <see cref="RuntimeEvent{TDelegate}.Add"/> and <see cref="RuntimeEvent{TDelegate}.Remove"/> ignore null.</summary>
+        [Test]
+        public void AddAndRemove_IgnoreNullListeners()
+        {
+            var runtimeEvent = new RuntimeEvent<Action<int>>();
+
+            runtimeEvent.Add(null);
+            runtimeEvent.Remove(null);
+
+            Assert.That(runtimeEvent.Invoker, Is.Null);
+        }
+
+        /// <summary>
+        /// Checks that an event in an auto-property with a private setter and <c>[field: SerializeField]</c> is
+        /// deserialized, cloned with its game object and changed with <see cref="RuntimeEvent{TDelegate}.Add"/>.
+        /// </summary>
+        [Test]
+        public void AutoPropertyWithPrivateSetter_DeserializesBindingsAndSupportsAdd()
+        {
+            RuntimeEventTestBindings.Set(_owner, AutoValueChangedPath, (_listener, "OnValue"));
+            _owner.AutoValueChanged.Add(value => _listener.Calls.Add($"Runtime:{value}"));
+            _owner.AutoValueChanged.Invoker!.Invoke(4);
+
+            var clone = _objects.Track(Object.Instantiate(_owner.gameObject));
+            var cloneListener = clone.GetComponent<RuntimeEventListener>();
+            clone.GetComponent<RuntimeEventOwner>().AutoValueChanged.Invoker!.Invoke(5);
+
+            Assert.That(_listener.Calls, Is.EqualTo(new[] { "OnValue:4", "Runtime:4" }));
+            Assert.That(cloneListener.Calls, Is.EqualTo(new[] { "OnValue:5" }));
+        }
+
+        /// <summary>
+        /// Checks that runtime listeners can be changed through a readonly field. Unity does not serialize readonly
+        /// fields, so such an event has no Inspector bindings.
+        /// </summary>
+        [Test]
+        public void AddAndRemove_WorkThroughReadonlyField()
+        {
+            var holder = new ReadonlyEventHolder();
+            var calls = 0;
+            Action<int> listener = _ => calls++;
+
+            holder.Event.Add(listener);
+            holder.Event.Invoker!.Invoke(0);
+            holder.Event.Remove(listener);
+
+            Assert.That(calls, Is.EqualTo(1));
+            Assert.That(holder.Event.Invoker, Is.Null);
+        }
+
+        /// <summary>Holds an event in a readonly field, where <c>+=</c> does not compile.</summary>
+        private sealed class ReadonlyEventHolder
+        {
+            /// <summary>The event.</summary>
+            public readonly RuntimeEvent<Action<int>> Event = new();
         }
     }
 }
