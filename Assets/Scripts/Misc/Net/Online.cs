@@ -604,7 +604,9 @@ namespace MajdataPlay.Net
         {
             await UniTask.SwitchToThreadPool();
             var uri = BuildMaiChartUri(song.ServerInfo, API_POST_MAICHART_INTERACT, song.Id);
-            using var formData = new MultipartFormDataContent
+            // SendAsync's HttpRequestMessage owns and disposes the form, including on failure.
+            // Disposing it again here throws in Unity's MultipartContent implementation on iOS.
+            var formData = new MultipartFormDataContent
             {
                 { new StringContent(type), "type" },
                 { new StringContent(content), "content" },
