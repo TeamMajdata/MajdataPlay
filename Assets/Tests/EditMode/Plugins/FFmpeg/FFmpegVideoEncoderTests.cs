@@ -260,6 +260,7 @@ namespace MajdataPlay.Tests.Plugins.FFmpeg
                 Assert.That(encoder.EncoderName, Is.EqualTo(encoderName));
                 Assert.That(encoder.EncoderType, Is.EqualTo(VideoEncoderType.Software));
                 Assert.That(encoder.HardwareFallbackReason, Is.Null);
+                Assert.That(encoder.IsMaximumBitRateEnforced, Is.True);
                 Assert.That(encoder.SoftwareThreadCount, Is.InRange(1, 2));
                 Assert.That(new[] { "frame", "slice", "codec", "none" }, Does.Contain(encoder.SoftwareThreadingMode));
                 Assert.That(encoder.ConverterThreadCount, Is.GreaterThanOrEqualTo(1));

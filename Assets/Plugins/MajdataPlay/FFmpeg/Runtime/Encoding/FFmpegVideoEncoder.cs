@@ -3,8 +3,10 @@ using AOT;
 using FFmpeg.AutoGen;
 using MajdataPlay.Diagnostics;
 using MajdataPlay.FFmpeg.Internal;
+using MajdataPlay.FFmpeg.Interop;
 using MajdataPlay.IO.Storage;
 using System;
+using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Runtime.InteropServices;
@@ -49,6 +51,8 @@ namespace MajdataPlay.FFmpeg
         private AVBufferRef* _hardwareDevice;
         /// <summary>Owns an optional VAAPI frame pool reference.</summary>
         private AVBufferRef* _hardwareFrames;
+        /// <summary>Stores the Android hardware component and input format chosen for the MediaCodec candidate, if any.</summary>
+        private MediaCodecEncoderSelection? _mediaCodecSelection;
         /// <summary>Owns the multi-threaded RGBA to encoder-pixel-format converter.</summary>
         private SwsContext* _scale;
         /// <summary>Owns the custom seekable local-file AVIO context.</summary>
@@ -91,8 +95,14 @@ namespace MajdataPlay.FFmpeg
         /// <summary>Gets the configured target bitrate in bits per second.</summary>
         public long BitRate => _options.BitRate;
         /// <summary>Gets the effective encoder maximum bitrate in bits per second; CBR uses its constant target.</summary>
-        /// <remarks>VBV encoders use a buffered limit; libvpx/libaom use rate-control budgets that can overshoot in either mode. Neither limits individual packet sizes.</remarks>
+        /// <remarks>
+        /// VBV encoders use a buffered limit; libvpx/libaom use rate-control budgets that can overshoot in either mode. Neither limits individual packet sizes.
+        /// Android MediaCodec VBR receives only the target bitrate, so this value is not enforced; see <see cref="IsMaximumBitRateEnforced"/>.
+        /// </remarks>
         public long MaximumBitRate => RateControlMode == VideoRateControlMode.CBR ? _options.BitRate : _options.MaximumBitRate;
+        /// <summary>Gets whether the opened encoder receives <see cref="MaximumBitRate"/> as a rate limit or budget.</summary>
+        /// <remarks>False for Android MediaCodec, which accepts a target bitrate and mode but no peak rate. True before opening.</remarks>
+        public bool IsMaximumBitRateEnforced => !(_mediaCodecSelection.HasValue && EncoderType == VideoEncoderType.Hardware);
         /// <summary>Gets the reason hardware preference fell back to software, or null when no fallback occurred.</summary>
         public string? HardwareFallbackReason { get; private set; }
         /// <summary>Gets the current compressed video bitrate estimated over up to one recording second, in bits per second.</summary>
@@ -188,6 +198,9 @@ namespace MajdataPlay.FFmpeg
                 _opened = true;
                 MajDebug.LogInfo("FFmpeg", "[Encoder] Opened encoder=" + EncoderName + ", backend=" + EncoderType
                     + ", mode=" + RateControlMode + ", target=" + _options.BitRate + ", maximum=" + _codec->rc_max_rate
+                    + (IsMaximumBitRateEnforced ? string.Empty : " (not enforced by MediaCodec)")
+                    + (_mediaCodecSelection.HasValue ? ", component=" + _mediaCodecSelection.Value.ComponentName
+                        + ", input=" + _mediaCodecSelection.Value.PixelFormat : string.Empty)
                     + ", software workers=" + SoftwareThreadCount + " (" + SoftwareThreadingMode + "), converter threads="
                     + ConverterThreadCount + ".");
             }
@@ -320,7 +333,10 @@ namespace MajdataPlay.FFmpeg
                         return;
                     }
 #elif UNITY_ANDROID
-                    failures.Append("MediaCodec does not expose a verified maximum bitrate and hardware-only selection through this FFmpeg wrapper; ");
+                    if (TryMediaCodec(failures))
+                    {
+                        return;
+                    }
 #endif
                 }
                 else
@@ -345,6 +361,66 @@ namespace MajdataPlay.FFmpeg
                 throw new NotSupportedException("No encoder supports " + _options.Format + " with " + _options.RateControlMode
                     + " and the requested rate limit. Rebuild FFmpeg with the required encoder and muxer; formats are not substituted. " + failures);
             }
+        }
+
+        /// <summary>Opens an Android hardware MediaCodec component chosen from <c>MediaCodecList</c> for VBR recording.</summary>
+        /// <param name="failures">The startup diagnostics receiving rejected candidate reasons.</param>
+        /// <returns>True when a hardware component opened and became the selected encoder.</returns>
+        /// <remarks>
+        /// The component is opened by its exact name, so MediaCodec cannot substitute a software implementation.
+        /// CBR is not selected because the wrapper has no checked constant-rate padding.
+        /// </remarks>
+        /// <exception cref="OperationCanceledException">Cancellation was requested.</exception>
+        /// <exception cref="OutOfMemoryException">The codec context cannot be allocated.</exception>
+        private bool TryMediaCodec(StringBuilder failures)
+        {
+            var name = MediaCodecEncoderSelector.GetEncoderName(_options.Format);
+            var mimeType = MediaCodecEncoderSelector.GetMimeType(_options.Format);
+            if (name == null || mimeType == null)
+            {
+                failures.Append("No MediaCodec wrapper is used for ").Append(_options.Format).Append("; ");
+                return false;
+            }
+
+            if (_options.RateControlMode == VideoRateControlMode.CBR)
+            {
+                failures.Append("MediaCodec CBR has no checked constant-rate padding through this FFmpeg wrapper; ");
+                return false;
+            }
+
+            if (ffmpeg.avcodec_find_encoder_by_name(name) == null)
+            {
+                failures.Append(name).Append(" is not compiled in; ");
+                return false;
+            }
+
+            IReadOnlyList<MediaCodecEncoderCandidate> candidates;
+            try
+            {
+                var (codedWidth, codedHeight) = MediaCodecEncoderSelector.GetConfiguredSize(_options.Format, Width, Height);
+                candidates = AndroidMediaCodecEncoderQuery.GetCandidates(mimeType, codedWidth, codedHeight, FrameRate,
+                    checked((int)_options.BitRate), false);
+            }
+            catch (Exception error) when (!(error is OperationCanceledException))
+            {
+                // A failed capability query only rules out hardware; software fallback still records the requested format.
+                failures.Append("MediaCodec capability query failed: ").Append(error.Message).Append("; ");
+                return false;
+            }
+
+            if (!MediaCodecEncoderSelector.TrySelect(candidates, out var selection, failures))
+            {
+                return false;
+            }
+
+            _mediaCodecSelection = selection;
+            if (TryEncoder(name, true, failures))
+            {
+                return true;
+            }
+
+            _mediaCodecSelection = null;
+            return false;
         }
 
         /// <summary>Opens one known encoder and frees all candidate resources if it cannot satisfy the requested configuration.</summary>
@@ -404,6 +480,11 @@ namespace MajdataPlay.FFmpeg
                 if (name.EndsWith("_vaapi", StringComparison.Ordinal))
                 {
                     ConfigureVaapi();
+                }
+                else if (_mediaCodecSelection.HasValue && name.EndsWith("_mediacodec", StringComparison.Ordinal))
+                {
+                    // FFmpeg's wrapper lists YUV420P first, but many components only accept NV12.
+                    _codec->pix_fmt = _mediaCodecSelection.Value.PixelFormat;
                 }
                 else
                 {
@@ -500,6 +581,20 @@ namespace MajdataPlay.FFmpeg
             else if (name.EndsWith("_vaapi", StringComparison.Ordinal))
             {
                 SetOption("rc_mode", cbr ? "CBR" : "VBR");
+            }
+            else if (name.EndsWith("_mediacodec", StringComparison.Ordinal))
+            {
+                if (!_mediaCodecSelection.HasValue || cbr)
+                {
+                    throw new NotSupportedException("MediaCodec requires a verified hardware component and VBR rate control.");
+                }
+
+                // Opening by exact name prevents MIME lookup from choosing a software component.
+                SetOption("codec_name", _mediaCodecSelection.Value.ComponentName);
+                // The NDK API needs no JVM attachment on the encoder worker.
+                SetOption("ndk_codec", "1");
+                // MediaCodec receives only the target and mode; it has no peak-rate or VBV key.
+                SetOption("bitrate_mode", "vbr");
             }
             else if (name == "h264_videotoolbox")
             {

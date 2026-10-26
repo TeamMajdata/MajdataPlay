@@ -591,4 +591,4 @@ Camera fixture 通过真实离屏 Camera.Render / URP Standard RenderRequest 驱
 
 每个可用格式组合覆盖 JNI / NDK、请求 CBR / VBR、平坦 / 复杂画面：320×192、30 fps、60 帧，时间轴中保留一个缺帧间隔；验证实际压缩包、MP4 或 WebM 索引、相同格式的软件解码、全部 60 帧的像素/方向/PTS、编码及解码 EOF 排空、重复 EOF，以及排他创建拒绝覆盖原输出。
 
-MediaCodec 模式与目标码率为请求值。实测码率会记录在日志中，但这些检查不证明驱动回读、最大码率/VBV 限制或恒定填充。Surface 输入、Unity Camera/渲染集成、API 23–28 和其他设备需另行验证。当前托管录制器因其最大码率契约仍保留 MediaCodec 拒绝/同格式软件回退。实机结果见 [RESULTS.md](RESULTS.md)。
+MediaCodec 模式与目标码率为请求值。实测码率会记录在日志中，但这些检查不证明驱动回读、最大码率/VBV 限制或恒定填充。Surface 输入、Unity Camera/渲染集成、API 23–28 和其他设备需另行验证。托管录制器现在在 VBR 下选择经 `MediaCodecList` 确认的硬件组件（最大码率不受保证）；选择逻辑由 `Assets/Tests` 的 `MediaCodecEncoderSelectorTests` 在 Editor 中覆盖，Unity Player 内的实际 MediaCodec 录制需在设备上另行验证。CBR 仍回退同格式软件编码。实机结果见 [RESULTS.md](RESULTS.md)。

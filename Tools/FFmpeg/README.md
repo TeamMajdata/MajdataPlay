@@ -127,7 +127,7 @@ Linux/Android 默认没有外部 TLS 后端，支持本地文件和 HTTP；HTTPS
 
 Android 同时提供六种 MediaCodec 原生编码入口和上述四种软件编码器。MediaCodec 支持哪些格式取决于设备；入口注册成功不代表设备存在对应硬件编码器。原生调用方应通过 Android `MediaCodecList` 查询硬件组件并显式设置 `codec_name`，避免按 MIME 自动选到系统软件实现。`ndk_codec=1` 使用 NDK，`ndk_codec=0` 使用 JNI（须先用 `av_jni_set_java_vm` 初始化）；CPU 输入支持 YUV420P/NV12，Surface 输入需额外的硬件上下文。
 
-MediaCodec 的 `bitrate_mode=cbr/vbr` 与 `AVCodecContext.bit_rate` 是请求值；固定上游包装器没有检查驱动对模式的最终接受结果，也没有实现 `rc_max_rate` / VBV 上限保证。当前托管 `FFmpegVideoEncoder` / Camera 录制器要求可检查的最大码率，仍按原有规则回退至同格式软件编码。原生硬件编码的设备回归、复现脚本与限制见 [Android 编码验证](../Tests/Modules/FFmpegValidation/README.md#android-mediacodec-原生硬件编码)。
+MediaCodec 的 `bitrate_mode=cbr/vbr` 与 `AVCodecContext.bit_rate` 是请求值；固定上游包装器没有检查驱动对模式的最终接受结果，也没有实现 `rc_max_rate` / VBV 上限保证。托管 `FFmpegVideoEncoder` / Camera 录制器在硬件偏好且请求 VBR 时选用 H.264、HEVC、VP9、AV1 的 MediaCodec：要求 Android API 29+，经 `MediaCodecList` 按 `isHardwareAccelerated()`、`isSoftwareOnly()`、非 alias、NV12/YUV420P 输入（优先 NV12）、FFmpeg 实际配置的 16 对齐尺寸与帧率、目标码率范围及 VBR 模式筛选组件，再以 `codec_name` + `ndk_codec=1` + `bitrate_mode=vbr` 打开。MediaCodec 只接收目标码率，最大码率不下发也不受保证，`FFmpegVideoEncoder.IsMaximumBitRateEnforced` 为 false，打开日志标注 “not enforced by MediaCodec”。CBR、MPEG4、API 29 以下、无合格组件或打开失败时仍回退至同格式软件编码并公开原因。原生硬件编码的设备回归、复现脚本与限制见 [Android 编码验证](../Tests/Modules/FFmpegValidation/README.md#android-mediacodec-原生硬件编码)。
 
 编码器选择失败可以在同一格式内回退，不能悄悄把请求的 H.264 改为 MPEG-4。容器也必须支持选择的编码，比如 WebM 不接受 MPEG-4/H.264。
 
@@ -153,7 +153,7 @@ PCM 包含 8/16/24/32/64-bit 整数、32/64-bit 浮点、大小端、平面格�
 
 H.264 CBR 使用等目标/最大 VBV、filler 和 MP4 兼容的 VBR HRD 信令；x265 使用严格 CBR 参数，并通过上述补丁使未知参数或非法值在打开时返回错误。VP9/AV1 使用原生 CBR 或单遍 VBR；两种模式的最大码率均为原生码率预算，复杂场景可能超出预算，不能视为每帧或瞬时负载硬上限；这两种编码器也不保证平坦画面使用 filler 填满目标码率。
 
-上述硬件条目是构建入口。硬件不存在、驱动过旧、不支持请求格式或码率模式时仍会失败/回退；新 `FFmpegCameraCapturer` 的实际 encoder/type/rate-control 信息以成功打开的会话为准。它不选择 MediaFoundation、MediaCodec 和 HEVC VideoToolbox：固定 FFmpeg 源码中的这些包装器未对请求的最大码率/码率模式提供充分的可检查配置结果，不能将请求值冒充已生效值。用户自建的同 ABI 库可提供 NVENC/AMF、x264/x265/libvpx/libaom 等组件实际支持的入口，仍须按该构建的许可证与运行时依赖分发。
+上述硬件条目是构建入口。硬件不存在、驱动过旧、不支持请求格式或码率模式时仍会失败/回退；新 `FFmpegCameraCapturer` 的实际 encoder/type/rate-control 信息以成功打开的会话为准。它不选择 MediaFoundation 和 HEVC VideoToolbox：固定 FFmpeg 源码中的这些包装器未对请求的最大码率/码率模式提供充分的可检查配置结果，不能将请求值冒充已生效值。Android MediaCodec 仅用于 VBR，且明确报告最大码率不受保证（见上文 Android 段落）。用户自建的同 ABI 库可提供 NVENC/AMF、x264/x265/libvpx/libaom 等组件实际支持的入口，仍须按该构建的许可证与运行时依赖分发。
 
 上游 AMF 包装器会忽略若干驱动属性设置错误。录制补丁检查码率模式、VBV 缓冲、目标/峰值码率、HRD 与 CBR filler 的设置和回读，并在驱动拒绝请求时让编码器打开失败。构建用 `--extra-version=MajdataPlay-AMF-RC-v1-<补丁 SHA256 前12位>` 标记此能力；C# 录制器只接受与当前补丁匹配的 AMF 原生库，旧 AMF 库会被拒绝并按同格式回退。修改补丁时须同步 C# 中的能力标记。`sourcePatches` 在两份构建清单中记录完整 SHA256，交付目录附带原始补丁，方便按固定源码重建。
 
