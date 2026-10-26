@@ -288,6 +288,7 @@ namespace MajdataPlay.Scenes.Result.Components
                         return false;
                     }
                 }
+                _commentInput.text = "";
                 return true;
             }
             catch (OperationCanceledException) when (token.IsCancellationRequested) { return false; }
@@ -304,7 +305,6 @@ namespace MajdataPlay.Scenes.Result.Components
                 IsBusy = false;
                 if (this != null)
                 {
-                    _commentInput.text = "";
                     RefreshControls();
                 }
             }
