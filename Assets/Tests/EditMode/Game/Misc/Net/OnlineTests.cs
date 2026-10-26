@@ -4,6 +4,7 @@ using System.Linq;
 using System.Net;
 using System.Net.Http;
 using System.Threading;
+using System.Threading.Tasks;
 using Cysharp.Threading.Tasks;
 using MajdataPlay.Net;
 using MajdataPlay.Tests;
@@ -541,6 +542,109 @@ namespace MajdataPlay.Tests.Game.Misc.Net
                 Online.ClearResponseCache();
                 await Online.GetChartInteractAsync(song);
                 Assert.That(_http.Requests.Length, Is.EqualTo(4));
+            });
+        }
+
+        /// <summary>Checks feedback methods, multipart fields and cache invalidation after each successful interaction.</summary>
+        /// <returns>The test coroutine.</returns>
+        [UnityTest]
+        public IEnumerator ChartInteract_FeedbackRequestsInvalidateCache()
+        {
+            return UniTask.ToCoroutine(async () =>
+            {
+                using var song = CreateSong();
+                var getCount = 0;
+                var fields = Array.Empty<(string Name, string Content)>();
+                var mediaType = string.Empty;
+                _http.Responder = request =>
+                {
+                    if (request.Method == HttpMethod.Get)
+                    {
+                        getCount++;
+                        return StubHttpScope.Respond(HttpStatusCode.OK, $"{{\"plays\":{getCount},\"likes\":[],\"comments\":[]}}");
+                    }
+                    mediaType = request.Content?.Headers.ContentType?.MediaType ?? string.Empty;
+                    fields = request.Content is MultipartFormDataContent form
+                        ? form.Select(part => (part.Headers.ContentDisposition?.Name?.Trim('"') ?? string.Empty,
+                            part.ReadAsStringAsync().GetAwaiter().GetResult())).ToArray()
+                        : Array.Empty<(string, string)>();
+                    return StubHttpScope.Respond(HttpStatusCode.OK, "{}");
+                };
+                await Online.GetChartInteractAsync(song);
+                var cases = new (Func<ValueTask<EndpointResponse>> Send, HttpMethod Method, string Type, string Content)[]
+                {
+                    (() => Online.PostDislikeAsync(song), HttpMethod.Post, "dislike", "dislike"),
+                    (() => Online.PostCommentAsync(song, "Helpful comment"), HttpMethod.Post, "comment", "Helpful comment"),
+                    (() => Online.DeleteLikeAsync(song), HttpMethod.Delete, "like", string.Empty),
+                    (() => Online.DeleteDislikeAsync(song), HttpMethod.Delete, "dislike", string.Empty),
+                };
+                foreach (var item in cases)
+                {
+                    var before = _http.Requests.Length;
+                    var expectedGetCount = getCount + 1;
+                    var response = await item.Send();
+
+                    Assert.That(response.IsSuccessfully, Is.True);
+                    var request = _http.Requests.Last();
+                    Assert.That(request.Method, Is.EqualTo(item.Method));
+                    Assert.That(request.Uri.AbsoluteUri, Is.EqualTo($"https://api.invalid/api/maichart/{song.Id}/interact"));
+                    Assert.That(mediaType, Is.EqualTo("multipart/form-data"));
+                    Assert.That(fields, Is.EquivalentTo(new[] { ("type", item.Type), ("content", item.Content) }));
+
+                    var refreshed = await Online.GetChartInteractAsync(song);
+                    Assert.That(refreshed!.Value.Plays, Is.EqualTo(expectedGetCount));
+                    await Online.GetChartInteractAsync(song);
+                    Assert.That(_http.Requests.Length, Is.EqualTo(before + 2), "A successful interaction refreshes the cache once.");
+                }
+                Assert.That(getCount, Is.EqualTo(cases.Length + 1));
+            });
+        }
+
+        /// <summary>Checks that an explicit refresh bypasses a live interaction cache and replaces its response.</summary>
+        /// <returns>The test coroutine.</returns>
+        [UnityTest]
+        public IEnumerator ChartInteract_ForceRefreshReplacesCachedResponse()
+        {
+            return UniTask.ToCoroutine(async () =>
+            {
+                using var song = CreateSong();
+                _http.RespondWith(HttpStatusCode.OK, "{\"plays\":1,\"likes\":[],\"comments\":[]}");
+                await Online.GetChartInteractAsync(song);
+                _http.RespondWith(HttpStatusCode.OK, "{\"plays\":2,\"likes\":[],\"comments\":[]}");
+
+                var cached = await Online.GetChartInteractAsync(song);
+                Assert.That(cached!.Value.Plays, Is.EqualTo(1));
+                Assert.That(_http.Requests.Length, Is.EqualTo(1));
+
+                var refreshed = await Online.GetChartInteractAsync(song, forceRefresh: true);
+                Assert.That(refreshed!.Value.Plays, Is.EqualTo(2));
+                var next = await Online.GetChartInteractAsync(song);
+                Assert.That(next!.Value.Plays, Is.EqualTo(2));
+                Assert.That(_http.Requests.Length, Is.EqualTo(2));
+            });
+        }
+
+        /// <summary>Checks that a failed comment is sent only once, even when its response is lost or the server fails.</summary>
+        /// <returns>The test coroutine.</returns>
+        [UnityTest]
+        public IEnumerator PostCommentAsync_DoesNotRetryFailures()
+        {
+            return UniTask.ToCoroutine(async () =>
+            {
+                using var song = CreateSong();
+                _http.Responder = _ => throw new HttpRequestException("lost comment response");
+
+                var lost = await Online.PostCommentAsync(song, "First comment");
+
+                Assert.That(lost.ErrorCode, Is.EqualTo(HttpErrorCode.Unreachable));
+                Assert.That(_http.Requests.Length, Is.EqualTo(1));
+                _http.RespondWith(HttpStatusCode.ServiceUnavailable, "{}");
+
+                var failed = await Online.PostCommentAsync(song, "Second comment");
+
+                Assert.That(failed.IsSuccessfully, Is.False);
+                Assert.That(failed.StatusCode, Is.EqualTo(HttpStatusCode.ServiceUnavailable));
+                Assert.That(_http.Requests.Length, Is.EqualTo(2));
             });
         }
 

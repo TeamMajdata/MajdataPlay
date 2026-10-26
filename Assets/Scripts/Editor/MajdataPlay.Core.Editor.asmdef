@@ -4,7 +4,8 @@
     "references": [
         "Live2D.Cubism",
         "MajdataPlay.Core",
-        "MajdataPlay.Runtime"
+        "MajdataPlay.Runtime",
+        "UniTask"
     ],
     "includePlatforms": [
         "Editor"

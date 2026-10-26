@@ -3,7 +3,9 @@ using System.Collections.Generic;
 using System.Reflection;
 using MajdataPlay.IO;
 using NUnit.Framework;
+using TMPro;
 using UnityEngine;
+using UnityEngine.EventSystems;
 
 #nullable enable
 namespace MajdataPlay.Tests.Game.IO
@@ -20,6 +22,15 @@ namespace MajdataPlay.Tests.Game.IO
         /// <summary>The installed default settings.</summary>
         private SettingsScope _settings = null!;
 
+        /// <summary>The Unity objects created by the current test.</summary>
+        private TestObjects _objects = null!;
+
+        /// <summary>The event system selected before the current test.</summary>
+        private EventSystem? _originalEventSystem;
+
+        /// <summary>The event system manually enabled for synchronous EditMode checks, if any.</summary>
+        private EventSystem? _manuallyEnabledEventSystem;
+
         /// <summary>The events received through subscriptions.</summary>
         private readonly List<InputEventArgs> _events = new();
 
@@ -29,6 +40,9 @@ namespace MajdataPlay.Tests.Game.IO
         {
             _settings = new SettingsScope();
             _scope = new InputManagerScope();
+            _objects = new TestObjects();
+            _originalEventSystem = EventSystem.current;
+            _manuallyEnabledEventSystem = null;
             _events.Clear();
         }
 
@@ -36,6 +50,16 @@ namespace MajdataPlay.Tests.Game.IO
         [TearDown]
         public void TearDown()
         {
+            var eventSystems = PrivateMember.GetStaticField<List<EventSystem>>(typeof(EventSystem), "m_EventSystems");
+            if (_manuallyEnabledEventSystem != null && eventSystems.Contains(_manuallyEnabledEventSystem))
+            {
+                UnityMessages.Send(_manuallyEnabledEventSystem, "OnDisable");
+            }
+            _objects.Dispose();
+            if (_originalEventSystem != null && eventSystems.Contains(_originalEventSystem))
+            {
+                EventSystem.current = _originalEventSystem;
+            }
             _scope.Dispose();
             _settings.Dispose();
         }
@@ -328,6 +352,98 @@ namespace MajdataPlay.Tests.Game.IO
             Assert.That(error.InnerException, Is.TypeOf<ArgumentOutOfRangeException>());
         }
 
+        /// <summary>Checks that a typing key stays blocked after focus loss until release and a new press.</summary>
+        [Test]
+        public void KeyboardTextInput_HeldKeyRemainsSuppressedUntilRelease()
+        {
+            var input = FocusTextInput();
+            var type = InputManagerScope.ButtonRingType;
+            _scope.Device.Buttons[0] = true;
+            _scope.Device.ButtonHadOn[0] = true;
+
+            ReadKeyboardButtons();
+
+            Assert.That(PrivateMember.InvokeStatic<bool>(type, "IsOn", 0), Is.False);
+            Assert.That(PrivateMember.InvokeStatic<bool>(type, "IsHadOn", 0), Is.False);
+            Assert.That(PrivateMember.InvokeStatic<bool>(type, "IsHadOff", 0), Is.True);
+            input.DeactivateInputField();
+            Assert.That(InputManager.SuppressKeyboardGameButtons, Is.False);
+
+            ReadKeyboardButtons();
+
+            Assert.That(PrivateMember.InvokeStatic<bool>(type, "IsOn", 0), Is.False, "held after focus loss");
+            Assert.That(PrivateMember.InvokeStatic<bool>(type, "IsHadOn", 0), Is.False);
+            _scope.Device.Buttons[0] = false;
+            _scope.Device.ButtonHadOn[0] = false;
+            ReadKeyboardButtons();
+            Assert.That(PrivateMember.InvokeStatic<bool>(type, "IsHadOff", 0), Is.True);
+
+            _scope.Device.Buttons[0] = true;
+            _scope.Device.ButtonHadOn[0] = true;
+            ReadKeyboardButtons();
+
+            Assert.That(PrivateMember.InvokeStatic<bool>(type, "IsOn", 0), Is.True, "new press after release");
+            Assert.That(PrivateMember.InvokeStatic<bool>(type, "IsHadOn", 0), Is.True);
+        }
+
+        /// <summary>Checks that a cabinet device keeps publishing game buttons while a text field is focused.</summary>
+        [Test]
+        public void KeyboardTextInput_CabinetDeviceRemainsAvailable()
+        {
+            FocusTextInput();
+            _scope.Device.Buttons[0] = true;
+            _scope.Device.ButtonHadOn[7] = true;
+
+            InputManager.OnPreUpdate();
+
+            Assert.That(InputManager.CheckButtonStatus(ButtonZone.A1, SwitchStatus.On), Is.True);
+            Assert.That(InputManager.CheckButtonStatus(ButtonZone.A8, SwitchStatus.On), Is.True);
+        }
+
+        /// <summary>Checks that text input leaves all four keyboard function buttons available.</summary>
+        [Test]
+        public void KeyboardTextInput_FunctionKeysRemainAvailable()
+        {
+            FocusTextInput();
+            var type = InputManagerScope.ButtonRingType;
+            for (var i = 8; i < 12; i++)
+            {
+                _scope.Device.Buttons[i] = true;
+                _scope.Device.ButtonHadOn[i] = true;
+            }
+
+            ReadKeyboardButtons();
+
+            for (var i = 8; i < 12; i++)
+            {
+                Assert.That(PrivateMember.InvokeStatic<bool>(type, "IsOn", i), Is.True, $"function button {i}");
+                Assert.That(PrivateMember.InvokeStatic<bool>(type, "IsHadOn", i), Is.True, $"function edge {i}");
+            }
+        }
+
+        /// <summary>Checks that a typing pulse between snapshots is suppressed and later pulses recover.</summary>
+        [Test]
+        public void KeyboardTextInput_ShortPressIsSuppressedThroughHadOn()
+        {
+            var input = FocusTextInput();
+            var type = InputManagerScope.ButtonRingType;
+            _scope.Device.ButtonHadOn[2] = true;
+
+            ReadKeyboardButtons();
+
+            Assert.That(PrivateMember.InvokeStatic<bool>(type, "IsOn", 2), Is.False);
+            Assert.That(PrivateMember.InvokeStatic<bool>(type, "IsHadOn", 2), Is.False);
+            Assert.That(PrivateMember.InvokeStatic<bool>(type, "IsHadOff", 2), Is.True);
+
+            input.DeactivateInputField();
+            _scope.Device.ButtonHadOn[2] = false;
+            ReadKeyboardButtons();
+            _scope.Device.ButtonHadOn[2] = true;
+            ReadKeyboardButtons();
+
+            Assert.That(PrivateMember.InvokeStatic<bool>(type, "IsHadOn", 2), Is.True, "new pulse after release");
+        }
+
         /// <summary>Checks the per-index and per-area queries of the touch panel facade, including the merged C area.</summary>
         [Test]
         public void TouchPanelFacade_Queries()
@@ -416,6 +532,36 @@ namespace MajdataPlay.Tests.Game.IO
                 InputManager.TouchButtonRingEdge = saved.Item9;
                 InputManager.SubScreenEdge = saved.Item10;
             }
+        }
+
+        /// <summary>Creates and selects an active text field with its focused state set for synchronous EditMode checks.</summary>
+        /// <returns>The focused input field.</returns>
+        private TMP_InputField FocusTextInput()
+        {
+            var eventSystem = _objects.Add<EventSystem>();
+            var eventSystems = PrivateMember.GetStaticField<List<EventSystem>>(typeof(EventSystem), "m_EventSystems");
+            if (!eventSystems.Contains(eventSystem))
+            {
+                _manuallyEnabledEventSystem = eventSystem;
+                UnityMessages.Send(eventSystem, "OnEnable");
+            }
+            EventSystem.current = eventSystem;
+            var inputObject = _objects.Create("Focused text input");
+            inputObject.AddComponent<RectTransform>();
+            var input = inputObject.AddComponent<TMP_InputField>();
+            eventSystem.SetSelectedGameObject(inputObject);
+            // TMP normally sets this during its next player update, which EditMode does not run.
+            PrivateMember.SetField(input, "m_AllowInput", true);
+            Assert.That(InputManager.SuppressKeyboardGameButtons, Is.True);
+            return input;
+        }
+
+        /// <summary>Reads the scripted snapshot and applies the keyboard filter without a native keyboard reader.</summary>
+        private static void ReadKeyboardButtons()
+        {
+            var type = InputManagerScope.ButtonRingType;
+            PrivateMember.InvokeStatic(type, "OnPreUpdate");
+            PrivateMember.InvokeStatic(type, "FilterTextInputKeys", true);
         }
 
         /// <summary>Records an input event.</summary>

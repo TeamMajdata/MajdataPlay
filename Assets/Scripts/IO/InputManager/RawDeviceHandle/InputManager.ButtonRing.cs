@@ -15,15 +15,53 @@ namespace MajdataPlay.IO
             static readonly bool[] _isBtnHadOn = new bool[12];
             static readonly bool[] _isBtnHadOff = new bool[12];
 
+            /// <summary>Tracks game keys suppressed by a text field until their release.</summary>
+            static readonly bool[] _textInputSuppressedKeys = new bool[8];
+
             public static void Init()
             {
                 GameDeviceManager.Init();
                 _device = GameDeviceManager.ButtonRing;
             }
 
+            /// <summary>Reads the frame snapshot and suppresses keyboard game keys consumed by text input.</summary>
             public static void OnPreUpdate()
             {
                 _device?.ReadButtons(_buttonStates, _isBtnHadOn, _isBtnHadOff);
+#if UNITY_STANDALONE
+                FilterTextInputKeys(_device is KeyboardButtonRingDevice);
+#elif UNITY_ANDROID
+                FilterTextInputKeys(_device is AndroidKeyboardButtonRingDevice);
+#elif UNITY_IOS
+                FilterTextInputKeys(_device is IOSKeyboardButtonRingDevice);
+#endif
+            }
+            /// <summary>Keeps keyboard game keys inactive until release after a text field consumes them.</summary>
+            /// <param name="isKeyboard">Whether the current device supplies keyboard input.</param>
+            static void FilterTextInputKeys(bool isKeyboard)
+            {
+                if (!isKeyboard)
+                {
+                    return;
+                }
+                var isEditingText = SuppressKeyboardGameButtons;
+                for (var i = 0; i < _textInputSuppressedKeys.Length; i++)
+                {
+                    var active = _buttonStates[i] || _isBtnHadOn[i];
+                    if (isEditingText && active)
+                    {
+                        _textInputSuppressedKeys[i] = true;
+                    }
+                    if (!_textInputSuppressedKeys[i])
+                    {
+                        continue;
+                    }
+                    // Keep a key suppressed until release even if the text field loses focus.
+                    _textInputSuppressedKeys[i] = active;
+                    _buttonStates[i] = false;
+                    _isBtnHadOn[i] = false;
+                    _isBtnHadOff[i] = true;
+                }
             }
             #region Queries
             /// <summary>

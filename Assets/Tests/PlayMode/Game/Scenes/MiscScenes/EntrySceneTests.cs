@@ -1,6 +1,5 @@
 using System;
 using System.Collections;
-using System.Threading.Tasks;
 using LitMotion;
 using MajdataPlay.IO;
 using MajdataPlay.Net;
@@ -13,13 +12,14 @@ using NUnit.Framework;
 using TMPro;
 using Unity.VectorGraphics;
 using UnityEngine;
+using UnityEngine.EventSystems;
 using UnityEngine.TestTools;
 using UnityEngine.UI;
 
 #nullable enable
 namespace MajdataPlay.Tests.Game.Scenes.PlayMode.MiscScenes
 {
-    /// <summary>Covers the title and login entry scenes and the result screen's online interaction panel without network.</summary>
+    /// <summary>Covers the title and login entry scenes and the result screen's score sender without network.</summary>
     public class EntrySceneTests : SceneTestBase
     {
         /// <summary>The canvas holding the scene objects.</summary>
@@ -282,8 +282,55 @@ namespace MajdataPlay.Tests.Game.Scenes.PlayMode.MiscScenes
             Assert.That(password.text, Is.Empty);
         }
 
-        /// <summary>Creates an online interaction panel.</summary>
-        /// <returns>The panel.</returns>
+        /// <summary>Checks that login never selects inputs that cannot be edited.</summary>
+        /// <param name="interactable">Whether the input accepts interaction.</param>
+        /// <param name="readOnly">Whether the input prevents text edits.</param>
+        [TestCase(false, false)]
+        [TestCase(true, true)]
+        public void Login_FocusIgnoresUneditableInputs(bool interactable, bool readOnly)
+        {
+            var eventSystem = Objects.Add<EventSystem>();
+            EventSystem.current = eventSystem;
+            var input = CreateInputField("User", _canvas);
+            input.interactable = interactable;
+            input.readOnly = readOnly;
+
+            PrivateMember.InvokeStatic(typeof(LoginManager), "Focus", input);
+
+            Assert.That(eventSystem.currentSelectedGameObject, Is.Null);
+            Assert.That(input.isFocused, Is.False);
+        }
+
+        /// <summary>Checks that editable inputs receive focus and an existing caret and selection survive refocusing.</summary>
+        /// <returns>The test coroutine.</returns>
+        [UnityTest]
+        public IEnumerator Login_FocusPreservesExistingSelection()
+        {
+            var eventSystem = Objects.Add<EventSystem>();
+            EventSystem.current = eventSystem;
+            var input = CreateInputField("User", _canvas);
+            input.text = "player";
+            yield return null;
+
+            PrivateMember.InvokeStatic(typeof(LoginManager), "Focus", input);
+            yield return null;
+
+            Assert.That(eventSystem.currentSelectedGameObject, Is.EqualTo(input.gameObject));
+            Assert.That(input.isFocused, Is.True);
+            input.selectionAnchorPosition = 1;
+            input.selectionFocusPosition = 4;
+
+            PrivateMember.InvokeStatic(typeof(LoginManager), "Focus", input);
+            yield return null;
+
+            Assert.That(input.isFocused, Is.True);
+            Assert.That(input.selectionAnchorPosition, Is.EqualTo(1));
+            Assert.That(input.selectionFocusPosition, Is.EqualTo(4));
+            Assert.That(input.caretPosition, Is.EqualTo(4));
+        }
+
+        /// <summary>Creates an online score sender with its upload indicator.</summary>
+        /// <returns>The sender.</returns>
         private OnlineInteractionSender CreateSender()
         {
             var indicator = AddInactiveUi<ScoreUploadIndicator>("Indicator", _canvas);
@@ -293,8 +340,6 @@ namespace MajdataPlay.Tests.Game.Scenes.PlayMode.MiscScenes
             PrivateMember.SetField(indicator, "_textDisplayer", CreateText("Text", indicator.transform));
             Activate(indicator);
             var sender = AddInactiveUi<OnlineInteractionSender>("Sender", _canvas);
-            sender.infotext = CreateText("Info", sender.transform);
-            sender.thumb = CreateImage("Thumb", sender.transform);
             PrivateMember.SetField(sender, "_scoreUploadIndicator", indicator);
             Activate(sender);
             return sender;
@@ -322,48 +367,48 @@ namespace MajdataPlay.Tests.Game.Scenes.PlayMode.MiscScenes
             return new OnlineSongDetail(directory.Directory.CreateDirectory("song"), endpoint, detail);
         }
 
-        /// <summary>Checks that local songs and guests hide the thumb-up panel and never post scores.</summary>
-        /// <returns>The test coroutine.</returns>
-        [UnityTest]
-        public IEnumerator Sender_LocalOrGuestHidesPanel()
+        /// <summary>Checks that local songs and guests never initialize score uploads or post scores.</summary>
+        [Test]
+        public void Sender_LocalOrGuestDoesNotPostScores()
         {
             using var directory = new TemporaryDirectory();
             var local = CreateSender();
             local.Init(new FakeSongDetail("majtest-interaction-local"), new MaiScore());
-            Assert.That(local.infotext.text, Is.Empty);
-            Assert.That(local.thumb.gameObject.activeSelf, Is.False);
-            var post = local.SendScoreAsync();
-            yield return null;
-            Assert.That(post.IsCompleted, Is.True);
+            var localPost = local.SendScoreAsync();
+            Assert.That(localPost.IsCompleted, Is.True);
+            Assert.That(localPost.IsFaulted, Is.False);
+            Assert.That(PrivateMember.GetField<bool>(local, "_isLocalOrGuest"), Is.True);
+            Assert.That(PrivateMember.GetField<bool>(local, "_isInited"), Is.False);
 
             var guest = CreateSender();
             guest.Init(OnlineSong(directory, NetAuthMethodOption.None), new MaiScore());
-            Assert.That(guest.thumb.gameObject.activeSelf, Is.False);
+            var guestPost = guest.SendScoreAsync();
+            Assert.That(guestPost.IsCompleted, Is.True);
+            Assert.That(guestPost.IsFaulted, Is.False);
             Assert.That(PrivateMember.GetField<bool>(guest, "_isLocalOrGuest"), Is.True);
+            Assert.That(PrivateMember.GetField<bool>(guest, "_isInited"), Is.False);
         }
 
-        /// <summary>Checks that a logged-in online song offers the thumb-up and an already liked chart is reported.</summary>
-        /// <returns>The test coroutine.</returns>
-        [UnityTest]
-        public IEnumerator Sender_LoggedInOffersThumbUp()
+        /// <summary>Checks that logged-in songs initialize score uploads and a posted score is never sent again.</summary>
+        [Test]
+        public void Sender_LoggedInInitializesAndSkipsPostedScore()
         {
             using var directory = new TemporaryDirectory();
             var sender = CreateSender();
-            sender.Init(OnlineSong(directory, NetAuthMethodOption.Plain), new MaiScore());
-            Assert.That(sender.infotext.text, Is.EqualTo("MAJTEXT_THUMBUP_INFO"));
+            var song = OnlineSong(directory, NetAuthMethodOption.Plain);
+            var score = new MaiScore();
+            sender.Init(song, score);
             Assert.That(PrivateMember.GetField<bool>(sender, "_isInited"), Is.True);
+            Assert.That(PrivateMember.GetField<bool>(sender, "_isLocalOrGuest"), Is.False);
+            Assert.That(PrivateMember.GetField<OnlineSongDetail>(sender, "_onlineDetail"), Is.SameAs(song));
+            Assert.That(PrivateMember.GetField<MaiScore>(sender, "_score"), Is.SameAs(score));
 
-            PrivateMember.SetField(sender, "_isAlreadyThumbUp", true);
             PrivateMember.SetField(sender, "_isScorePosted", true);
-            InputSimulator.SetSensor(SensorArea.E3, true);
-            InputSimulator.SetSensor(SensorArea.E4, true);
-            InputSimulator.Step();
-            yield return null;
+            var post = sender.SendScoreAsync();
 
-            var like = (Task)PrivateMember.Invoke(sender, "SendLikeAsync", System.Threading.CancellationToken.None)!;
-            yield return WaitUntil(() => like.IsCompleted, 3f);
-            Assert.That(sender.infotext.text, Is.EqualTo("MAJTEXT_THUMBUP_ALREADY"));
-            Assert.That(sender.SendScoreAsync().IsCompleted, Is.True);
+            Assert.That(post.IsCompleted, Is.True);
+            Assert.That(post.IsFaulted, Is.False);
+            Assert.That(PrivateMember.GetField<bool>(sender, "_isScorePosted"), Is.True);
         }
     }
 }

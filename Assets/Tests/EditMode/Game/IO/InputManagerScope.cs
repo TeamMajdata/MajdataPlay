@@ -128,7 +128,7 @@ namespace MajdataPlay.Tests.Game.IO
                 var array = PrivateMember.GetStaticField<Array>(typeof(InputManager), name);
                 Array.Clear(array, 0, array.Length);
             }
-            foreach (var name in new[] { "_buttonStates", "_isBtnHadOn", "_isBtnHadOff" })
+            foreach (var name in new[] { "_buttonStates", "_isBtnHadOn", "_isBtnHadOff", "_textInputSuppressedKeys" })
             {
                 var array = PrivateMember.GetStaticField<Array>(s_buttonRingType, name);
                 Array.Clear(array, 0, array.Length);

@@ -140,12 +140,44 @@ namespace MajdataPlay.Tests.Game.Scenes.PlayMode.ResultScene
             PrivateMember.SetField(indicator, "_textDisplayer", CreateText("IndicatorText", indicator.transform));
             Activate(indicator);
             var sender = AddInactiveUi<OnlineInteractionSender>("Sender", manager.transform);
-            sender.infotext = CreateText("Info", sender.transform);
-            sender.thumb = CreateImage("Thumb", sender.transform);
             PrivateMember.SetField(sender, "_scoreUploadIndicator", indicator);
             Activate(sender);
             PrivateMember.SetField(manager, "_onlineInteractionSender", sender);
+            PrivateMember.SetField(manager, "_feedbackPanel", CreateFeedbackPanel(manager));
             return manager;
+        }
+
+        /// <summary>Creates the separate feedback view required by the result screen.</summary>
+        /// <param name="manager">The result screen which owns the view.</param>
+        /// <returns>The configured panel, activated together with its parent screen.</returns>
+        private SongFeedbackPanel CreateFeedbackPanel(ResultScreenManager manager)
+        {
+            var feedback = AddInactiveUi<SongFeedbackPanel>("Feedback", manager.transform);
+            var panel = CreateRect("Panel", feedback.transform);
+            var songResult = CreateRect("SongResult", feedback.transform);
+            var scoreIndicators = CreateRect("ScoreIndicators", feedback.transform);
+            var entry = CreateRect("Entry", feedback.transform);
+            PrivateMember.SetField(feedback, "_panel", panel);
+            PrivateMember.SetField(feedback, "_songResult", songResult);
+            PrivateMember.SetField(feedback, "_scoreIndicators", scoreIndicators);
+            PrivateMember.SetField(feedback, "_feedbackEntry", entry);
+            PrivateMember.SetField(feedback, "_feedbackEntryLabel", CreateText("EntryLabel", entry.transform));
+            PrivateMember.SetField(feedback, "_scoreCanvasGroup", songResult.AddComponent<CanvasGroup>());
+            PrivateMember.SetField(feedback, "_scoreIndicatorsCanvasGroup", scoreIndicators.AddComponent<CanvasGroup>());
+            PrivateMember.SetField(feedback, "_feedbackCanvasGroup", panel.AddComponent<CanvasGroup>());
+            PrivateMember.SetField(feedback, "_likeButton", Objects.Add<Button>("Like", panel.transform));
+            PrivateMember.SetField(feedback, "_dislikeButton", Objects.Add<Button>("Dislike", panel.transform));
+            PrivateMember.SetField(feedback, "_likeOutline", CreateRect("LikeOutline", panel.transform));
+            PrivateMember.SetField(feedback, "_dislikeOutline", CreateRect("DislikeOutline", panel.transform));
+            PrivateMember.SetField(feedback, "_commentInput", CreateInputField("Comment", panel.transform));
+            PrivateMember.SetField(feedback, "_clearButton", Objects.Add<Button>("Clear", panel.transform));
+            PrivateMember.SetField(feedback, "_status", CreateText("Status", panel.transform));
+            PrivateMember.SetField(feedback, "_backIcon", CreateRect("BackIcon", feedback.transform));
+            PrivateMember.SetField(feedback, "_nextIcon", CreateRect("NextIcon", feedback.transform));
+            PrivateMember.SetField(feedback, "_backLabel", CreateText("BackLabel", feedback.transform));
+            PrivateMember.SetField(feedback, "_nextLabel", CreateText("NextLabel", feedback.transform));
+            Activate(feedback);
+            return feedback;
         }
 
         /// <summary>Completes the screen's motions so nothing animates destroyed objects after the test.</summary>
@@ -193,6 +225,9 @@ namespace MajdataPlay.Tests.Game.Scenes.PlayMode.ResultScene
             Assert.That(Sfx("bgm_result.mp3").PlayOneShotCount, Is.EqualTo(1));
             Assert.That(Sfx("SSS+.wav").PlayOneShotCount, Is.EqualTo(1));
             Assert.That(manager._noteJudgeDiffGraph.texture, Is.Not.Null);
+            var feedback = PrivateMember.GetField<SongFeedbackPanel>(manager, "_feedbackPanel");
+            Assert.That(feedback.IsAvailable, Is.False);
+            Assert.That(feedback.IsOpen, Is.False);
         }
 
         /// <summary>Checks the clear marks, ranks and failure message of non-perfect results.</summary>

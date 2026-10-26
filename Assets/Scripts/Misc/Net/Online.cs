@@ -464,20 +464,20 @@ namespace MajdataPlay.Net
                 }
             }
         }
-        public static async ValueTask<MajNetSongInteract?> GetChartInteractAsync(OnlineSongDetail song, CancellationToken token = default)
+        public static async ValueTask<MajNetSongInteract?> GetChartInteractAsync(OnlineSongDetail song, CancellationToken token = default, bool forceRefresh = false)
         {
             await UniTask.SwitchToThreadPool();
             var cachedResponse = GetCachedResponse(song);
             var cachedInteract = cachedResponse.Interact;
             var isCacheAlive = (DateTime.Now - cachedInteract.LastActive).TotalSeconds < MajEnv.ONLINE_RESPONSE_CACHE_TTL_SEC;
-            if (isCacheAlive)
+            if (isCacheAlive && !forceRefresh)
             {
                 return cachedInteract.Response;
             }
             using (await cachedInteract.RequestLock.LockAsync(token))
             {
                 isCacheAlive = (DateTime.Now - cachedInteract.LastActive).TotalSeconds < MajEnv.ONLINE_RESPONSE_CACHE_TTL_SEC;
-                if (isCacheAlive)
+                if (isCacheAlive && !forceRefresh)
                 {
                     return cachedInteract.Response;
                 }
@@ -581,53 +581,48 @@ namespace MajdataPlay.Net
             }
         }
 
-        public static async ValueTask<EndpointResponse> PostLikeAsync(OnlineSongDetail song, CancellationToken token = default)
+        public static ValueTask<EndpointResponse> PostLikeAsync(OnlineSongDetail song, CancellationToken token = default)
+        {
+            return SendChartInteractionAsync(song, HttpMethod.Post, "like", "like", token);
+        }
+        public static ValueTask<EndpointResponse> PostDislikeAsync(OnlineSongDetail song, CancellationToken token = default)
+        {
+            return SendChartInteractionAsync(song, HttpMethod.Post, "dislike", "dislike", token);
+        }
+        public static ValueTask<EndpointResponse> PostCommentAsync(OnlineSongDetail song, string comment, CancellationToken token = default)
+        {
+            return SendChartInteractionAsync(song, HttpMethod.Post, "comment", comment, token);
+        }
+        public static ValueTask<EndpointResponse> DeleteLikeAsync(OnlineSongDetail song, CancellationToken token = default)
+        {
+            return SendChartInteractionAsync(song, HttpMethod.Delete, "like", "", token);
+        }
+        public static ValueTask<EndpointResponse> DeleteDislikeAsync(OnlineSongDetail song, CancellationToken token = default)
+        {
+            return SendChartInteractionAsync(song, HttpMethod.Delete, "dislike", "", token);
+        }
+        static async ValueTask<EndpointResponse> SendChartInteractionAsync(OnlineSongDetail song, HttpMethod method, string type, string content, CancellationToken token)
         {
             await UniTask.SwitchToThreadPool();
-            var serverInfo = song.ServerInfo;
-            var interactUrl = BuildMaiChartUri(song.ServerInfo, API_POST_MAICHART_INTERACT, song.Id);
-            var rsp = default(EndpointResponse);
-
-            for (var i = 0; i <= MajEnv.HTTP_REQUEST_MAX_RETRY; i++)
+            var uri = BuildMaiChartUri(song.ServerInfo, API_POST_MAICHART_INTERACT, song.Id);
+            // SendAsync's HttpRequestMessage owns and disposes the form, including on failure.
+            // Disposing it again here throws in Unity's MultipartContent implementation on iOS.
+            var formData = new MultipartFormDataContent
             {
-                var formData = new MultipartFormDataContent
+                { new StringContent(type), "type" },
+                { new StringContent(content), "content" },
+            };
+            // Comments are not idempotent; a lost response must not trigger an automatic repost.
+            var response = await SendAsync(method, uri, formData, token);
+            if (response.IsSuccessfully)
+            {
+                var cache = GetCachedResponse(song).Interact;
+                using (await cache.RequestLock.LockAsync())
                 {
-                    { new StringContent("like"), "type" },
-                    { new StringContent("..."), "content" },
-                };
-                rsp = await PostAsync(interactUrl, formData, token);
-                if (rsp.IsSuccessfully)
-                {
-                    MajDebug.LogDebug(rsp);
-                    var cachedResponse = GetCachedResponse(song);
-                    using (await cachedResponse.Interact.RequestLock.LockAsync())
-                    {
-                        cachedResponse.Interact.LastActive = DateTime.UnixEpoch;
-                    }
-                    return rsp;
-                }
-                else
-                {
-                    MajDebug.LogError("Failed to post like interact");
-                }
-
-                if (rsp.ErrorCode == HttpErrorCode.Canceled)
-                {
-                    break;
-                }
-                else if (rsp.StatusCode is HttpStatusCode.BadRequest
-                    or HttpStatusCode.NotFound
-                    or HttpStatusCode.Unauthorized
-                    or HttpStatusCode.Forbidden)
-                {
-                    break;
-                }
-                else if (!rsp.IsSuccessfully && rsp.StatusCode is not null)
-                {
-                    break;
+                    cache.LastActive = DateTime.UnixEpoch;
                 }
             }
-            return rsp;
+            return response;
         }
         public static async ValueTask<EndpointResponse> PostScoreAsync(OnlineSongDetail song, MaiScore score, CancellationToken token = default)
         {
@@ -983,12 +978,20 @@ namespace MajdataPlay.Net
         {
             return PostAsync(uri, new ByteArrayContent(content.Array, content.Offset, content.Count), token);
         }
-        static async ValueTask<EndpointResponse> PostAsync(Uri uri, HttpContent? content, CancellationToken token = default, HttpClient? client = null)
+        static ValueTask<EndpointResponse> PostAsync(Uri uri, HttpContent? content, CancellationToken token = default, HttpClient? client = null)
+        {
+            return SendAsync(HttpMethod.Post, uri, content, token, client);
+        }
+        static async ValueTask<EndpointResponse> SendAsync(HttpMethod method, Uri uri, HttpContent? content, CancellationToken token = default, HttpClient? client = null)
         {
             try
             {
                 client ??= MajEnv.SharedHttpClient;
-                var rsp = await (content is null ? client.PostAsync(uri, new StringContent(string.Empty, Encoding.UTF8, "application/json"), token) : client.PostAsync(uri, content, token));
+                using var request = new HttpRequestMessage(method, uri)
+                {
+                    Content = content ?? new StringContent(string.Empty, Encoding.UTF8, "application/json")
+                };
+                using var rsp = await client.SendAsync(request, token);
                 var buffer = await rsp.Content.ReadAsByteArrayAsync();
                 var epRsp = default(EndpointResponse);
                 if (!((int)rsp.StatusCode).InRange(200, 299))
@@ -1003,7 +1006,7 @@ namespace MajdataPlay.Net
                         Headers = rsp.Headers.ToDictionary(kv => kv.Key.ToLower(), kv => kv.Value),
                         Message = ""
                     };
-                    MajDebug.LogError($"[Online][POST] {uri} - Unsuccessful\n{epRsp}");
+                    MajDebug.LogError($"[Online][{method}] {uri} - Unsuccessful\n{epRsp}");
                     return epRsp;
                 }
                 epRsp = new EndpointResponse(buffer, _defaultJsonSerializer, _defaultJsonSerializerSettings)
@@ -1016,7 +1019,7 @@ namespace MajdataPlay.Net
                     Headers = rsp.Headers.ToDictionary(kv => kv.Key.ToLower(), kv => kv.Value),
                     Message = "Ok"
                 };
-                MajDebug.LogDebug($"[Online][POST] {uri}\n{epRsp}");
+                MajDebug.LogDebug($"[Online][{method}] {uri}\n{epRsp}");
                 return epRsp;
             }
             catch (OperationCanceledException)
@@ -1025,11 +1028,11 @@ namespace MajdataPlay.Net
                 if (token.IsCancellationRequested)
                 {
                     errorCode = HttpErrorCode.Canceled;
-                    MajDebug.LogError($"[Online][POST] {uri} - Canceled");
+                    MajDebug.LogError($"[Online][{method}] {uri} - Canceled");
                 }
                 else
                 {
-                    MajDebug.LogError($"[Online][POST] {uri} - Timeout");
+                    MajDebug.LogError($"[Online][{method}] {uri} - Timeout");
                 }
                 return new EndpointResponse(Array.Empty<byte>(), _defaultJsonSerializer, _defaultJsonSerializerSettings)
                 {
@@ -1043,7 +1046,7 @@ namespace MajdataPlay.Net
             }
             catch (Exception e)
             {
-                MajDebug.LogError($"[Online][POST] {uri} - Unknown Error\n{e}");
+                MajDebug.LogError($"[Online][{method}] {uri} - Unknown Error\n{e}");
                 return new EndpointResponse(Array.Empty<byte>(), _defaultJsonSerializer, _defaultJsonSerializerSettings)
                 {
                     Endpoint = uri,

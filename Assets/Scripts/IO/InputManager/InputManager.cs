@@ -5,6 +5,10 @@ using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Runtime.CompilerServices;
+using System.Security.Policy;
+using System.Threading;
+using UnityEngine;
+using UnityEngine.EventSystems;
 using UnityEngine.InputSystem;
 using UnityEngine.Profiling;
 #nullable enable
@@ -13,6 +17,17 @@ namespace MajdataPlay.IO
     internal static unsafe partial class InputManager
     {
         internal const float UI_CLICK_ANIMATION_DURATION_SEC = 0.1f;
+
+        /// <summary>Gets whether the focused text field consumes keyboard game-button input.</summary>
+        public static bool SuppressKeyboardGameButtons
+        {
+            get
+            {
+                var selected = EventSystem.current?.currentSelectedGameObject;
+                return selected != null && selected.TryGetComponent<TMPro.TMP_InputField>(out var input)
+                    && input.isActiveAndEnabled && input.isFocused;
+            }
+        }
 
         public static bool IsTouchPanelConnected
         {

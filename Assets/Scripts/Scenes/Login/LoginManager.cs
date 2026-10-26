@@ -87,6 +87,8 @@ namespace MajdataPlay.Scenes.Login
             }
             _loading.SetActive(false);
             Hint();
+            _usernameInput.richText = false;
+            _passwordInput.richText = false;
             _usernameInput.onValueChanged.AddListener(_ => UpdateClearButtons());
             _passwordInput.onValueChanged.AddListener(_ => UpdateClearButtons());
             UpdateClearButtons();
@@ -132,8 +134,14 @@ namespace MajdataPlay.Scenes.Login
             _passwordClearButton.SetActive(!string.IsNullOrEmpty(_passwordInput.text));
         }
 
+        /// <summary>Focuses an editable input field without resetting an existing text selection.</summary>
+        /// <param name="inputField">The input field to focus when it is editable and not already focused.</param>
         private static void Focus(TMP_InputField inputField)
         {
+            if (!inputField.interactable || inputField.readOnly || inputField.isFocused)
+            {
+                return;
+            }
             inputField.Select();
             inputField.ActivateInputField();
             inputField.MoveTextEnd(false);
@@ -420,8 +428,7 @@ namespace MajdataPlay.Scenes.Login
             _isExited = true;
             RefreshListBackgroundAsync();
         }
-        /// <summary>Refreshes the requested online collections and online favorites before returning to the list scene.</summary>
-        /// <param name="refreshOnline">Whether to refresh online collections in addition to online favorites.</param>
+        /// <summary>Refreshes online collections, recommendations and online favorites before returning to the list scene.</summary>
         private static async void RefreshListBackgroundAsync()
         {
             var sceneSwitcher = MajInstances.SceneSwitcher;
