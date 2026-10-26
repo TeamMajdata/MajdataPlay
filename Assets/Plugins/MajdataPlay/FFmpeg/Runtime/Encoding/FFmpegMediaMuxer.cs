@@ -36,8 +36,6 @@ namespace MajdataPlay.FFmpeg
         private const int AudioPacketFrames = 1024;
         /// <summary>Sets the size of the native output buffer.</summary>
         private const int OutputBufferSize = 65536;
-        /// <summary>Scales nominal float samples to signed 16-bit PCM.</summary>
-        private const float Pcm16Scale = 32767f;
         /// <summary>Roots the managed output write callback for IL2CPP and Mono.</summary>
         private static readonly avio_alloc_context_write_packet s_writeCallback = WriteOutput;
         /// <summary>Roots the managed output seek callback for IL2CPP and Mono.</summary>
@@ -183,28 +181,20 @@ namespace MajdataPlay.FFmpeg
 
         /// <summary>Converts float samples to signed 16-bit PCM, clamping values outside the nominal range.</summary>
         /// <param name="source">The float samples.</param>
-        /// <param name="destination">The 16-bit samples, at least as long as the source.</param>
+        /// <param name="destination">The 16-bit samples, at least as long as the source and not overlapping it.</param>
+        /// <remarks>Scaled samples round to the nearest integer with ties to even; NaN becomes silence.</remarks>
+        /// <exception cref="ArgumentException">The destination is shorter than the source.</exception>
         internal static void ConvertToPcm16(ReadOnlySpan<float> source, Span<short> destination)
         {
-            for (var i = 0; i < source.Length; i++)
+            if (destination.Length < source.Length)
             {
-                var scaled = source[i] * Pcm16Scale;
-                if (float.IsNaN(scaled))
-                {
-                    destination[i] = 0;
-                }
-                else if (scaled >= short.MaxValue)
-                {
-                    destination[i] = short.MaxValue;
-                }
-                else if (scaled <= short.MinValue)
-                {
-                    destination[i] = short.MinValue;
-                }
-                else
-                {
-                    destination[i] = (short)MathF.Round(scaled);
-                }
+                throw new ArgumentException("The destination must hold every converted sample.", nameof(destination));
+            }
+
+            fixed (float* input = source)
+            fixed (short* output = destination)
+            {
+                AudioSampleKernels.ConvertToPcm16(input, output, source.Length);
             }
         }
 
@@ -584,12 +574,11 @@ namespace MajdataPlay.FFmpeg
                 samples.CopyTo(new Span<float>(_audioFrame->data[0], samples.Length));
                 return;
             }
-            for (uint channel = 0; channel < _channels; channel++)
+            fixed (float* interleaved = samples)
             {
-                var plane = new Span<float>(_audioFrame->data[channel], frames);
-                for (var frame = 0; frame < frames; frame++)
+                for (uint channel = 0; channel < _channels; channel++)
                 {
-                    plane[frame] = samples[frame * _channels + (int)channel];
+                    AudioSampleKernels.ExtractChannel(interleaved, _channels, (int)channel, (float*)_audioFrame->data[channel], frames);
                 }
             }
         }

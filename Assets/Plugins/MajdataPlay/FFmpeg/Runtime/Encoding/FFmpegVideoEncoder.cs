@@ -23,8 +23,6 @@ namespace MajdataPlay.FFmpeg
         private const string CheckedAmfConfigurationOption = "--extra-version=MajdataPlay-AMF-RC-v1-c0604b924b6a";
         /// <summary>Identifies the native wrapper that rejects ignored x265 parameters.</summary>
         private const string CheckedX265ConfigurationMarker = "MajdataPlay-X265-Params-v1-5b457330f94a";
-        /// <summary>Limits color-converter workers so each one converts at least this many output rows.</summary>
-        private const int MinimumConverterRowsPerThread = 32;
         /// <summary>Roots the managed local-file write callback for IL2CPP and Mono.</summary>
         private static readonly avio_alloc_context_write_packet s_writeCallback = WriteOutput;
         /// <summary>Roots the managed local-file seek callback for IL2CPP and Mono.</summary>
@@ -41,8 +39,6 @@ namespace MajdataPlay.FFmpeg
         private AVStream* _stream;
         /// <summary>Owns reusable compressed packet storage.</summary>
         private AVPacket* _packet;
-        /// <summary>Owns aligned RGBA input staging and padding required by SIMD converters.</summary>
-        private AVFrame* _rgba;
         /// <summary>Owns reusable CPU encoder input frame storage.</summary>
         private AVFrame* _frame;
         /// <summary>Owns reusable hardware upload frame storage when VAAPI is selected.</summary>
@@ -54,7 +50,7 @@ namespace MajdataPlay.FFmpeg
         /// <summary>Stores the Android hardware component and input format chosen for the MediaCodec candidate, if any.</summary>
         private MediaCodecEncoderSelection? _mediaCodecSelection;
         /// <summary>Owns the multi-threaded RGBA to encoder-pixel-format converter.</summary>
-        private SwsContext* _scale;
+        private CaptureFrameConverter? _converter;
         /// <summary>Owns the custom seekable local-file AVIO context.</summary>
         private AVIOContext* _io;
         /// <summary>Owns the output file opened with CreateNew to prevent overwrite races.</summary>
@@ -121,7 +117,7 @@ namespace MajdataPlay.FFmpeg
         public int SoftwareThreadCount { get; private set; }
         /// <summary>Gets how the software codec parallelizes encoding: <c>frame</c>, <c>slice</c>, <c>codec</c> for library-managed workers, or <c>none</c> for one thread or hardware encoding.</summary>
         public string SoftwareThreadingMode { get; private set; } = "none";
-        /// <summary>Gets the number of swscale workers converting captured RGBA frames to the encoder input format, or zero before opening.</summary>
+        /// <summary>Gets the number of threads, including the encoder worker, converting captured RGBA frames to the encoder input format, or zero before opening.</summary>
         /// <remarks>Conversion runs on the CPU for hardware encoders as well, so this is independent of <see cref="SoftwareThreadCount"/>.</remarks>
         public int ConverterThreadCount { get; private set; }
 
@@ -168,7 +164,6 @@ namespace MajdataPlay.FFmpeg
                 CheckVersion("avutil", ffmpeg.avutil_version());
                 CheckVersion("avcodec", ffmpeg.avcodec_version());
                 CheckVersion("avformat", ffmpeg.avformat_version());
-                CheckVersion("swscale", ffmpeg.swscale_version());
                 AVFormatContext* format = null;
                 var result = ffmpeg.avformat_alloc_output_context2(&format, null, null!, path);
                 _format = format;
@@ -235,21 +230,9 @@ namespace MajdataPlay.FFmpeg
                 throw new ArgumentOutOfRangeException(nameof(frameIndex), "Frame indices must be nonnegative and strictly increasing.");
             }
 
-            Check(ffmpeg.av_frame_make_writable(_rgba), "Make RGBA staging writable");
             Check(ffmpeg.av_frame_make_writable(_frame), "Make encoder frame writable");
-            var rowBytes = Width * 4;
-            fixed (byte* input = packedRgba)
-            {
-                for (var y = 0; y < Height; y++)
-                {
-                    var sourceRow = flipVertically ? Height - 1 - y : y;
-                    Buffer.MemoryCopy(input + (sourceRow * rowBytes), _rgba->data[0] + (y * _rgba->linesize[0]), rowBytes, rowBytes);
-                }
-            }
-
-            // The legacy sws_scale entry point always runs on one thread; the frame
-            // entry point distributes output rows across the converter workers.
-            Check(ffmpeg.sws_scale_frame(_scale, _frame, _rgba), "Convert capture pixels");
+            // The converter reads bottom-first rows in place, so the capture is not copied before conversion.
+            _converter!.Convert(packedRgba, flipVertically, _frame);
             _frame->pts = frameIndex;
             _frame->duration = 1;
             var submitted = _frame;
@@ -664,16 +647,7 @@ namespace MajdataPlay.FFmpeg
             Check(ffmpeg.av_opt_set(_codec->priv_data, name, value, 0), "Set encoder " + name);
         }
 
-        /// <summary>Assigns one checked integer option on the color converter before initializing it.</summary>
-        /// <param name="name">The swscale option name.</param>
-        /// <param name="value">The integer, enum, or flag value.</param>
-        /// <exception cref="InvalidOperationException">FFmpeg rejects the option or its value.</exception>
-        private void SetConverterOption(string name, long value)
-        {
-            Check(ffmpeg.av_opt_set_int(_scale, name, value, 0), "Set converter " + name);
-        }
-
-        /// <summary>Selects a supported CPU input format that swscale can produce.</summary>
+        /// <summary>Selects a supported CPU input format that the capture converter can produce.</summary>
         /// <param name="codec">The borrowed candidate codec.</param>
         /// <returns>A supported YUV420P or NV12 input format.</returns>
         /// <exception cref="NotSupportedException">The codec provides no compatible 8-bit CPU input format.</exception>
@@ -734,12 +708,16 @@ namespace MajdataPlay.FFmpeg
         }
 
         /// <summary>Allocates padded reusable pixel buffers, packet storage, and the multi-threaded color converter.</summary>
-        /// <exception cref="OutOfMemoryException">Native frame, packet, pixel storage, or the converter cannot be allocated.</exception>
-        /// <exception cref="InvalidOperationException">The converter cannot be configured.</exception>
+        /// <exception cref="OutOfMemoryException">Native frame, packet, or pixel storage cannot be allocated.</exception>
+        /// <exception cref="NotSupportedException">The encoder input format is neither YUV420P nor NV12.</exception>
         private void AllocateFrames()
         {
-            _rgba = AllocateFrame(AVPixelFormat.AV_PIX_FMT_RGBA);
             var cpuFormat = _hardwareFrames != null ? AVPixelFormat.AV_PIX_FMT_NV12 : _codec->pix_fmt;
+            if (!CaptureFrameConverter.Supports(cpuFormat))
+            {
+                throw new NotSupportedException("The capture converter cannot produce " + cpuFormat + " encoder input.");
+            }
+
             _frame = AllocateFrame(cpuFormat);
             _hardwareFrame = ffmpeg.av_frame_alloc();
             _packet = ffmpeg.av_packet_alloc();
@@ -748,32 +726,9 @@ namespace MajdataPlay.FFmpeg
                 throw new OutOfMemoryException("Cannot allocate encoder frame or packet storage.");
             }
 
-            _scale = ffmpeg.sws_alloc_context();
-            if (_scale == null)
-            {
-                throw new OutOfMemoryException("Cannot allocate capture color converter.");
-            }
-
             // Workers split output rows, so small frames do not spawn idle converter threads.
-            var converterThreads = Math.Max(1, Math.Min(_options.MaximumSoftwareThreads, Height / MinimumConverterRowsPerThread));
-            SetConverterOption("srcw", Width);
-            SetConverterOption("srch", Height);
-            SetConverterOption("src_format", (long)AVPixelFormat.AV_PIX_FMT_RGBA);
-            SetConverterOption("dstw", Width);
-            SetConverterOption("dsth", Height);
-            SetConverterOption("dst_format", (long)cpuFormat);
-            SetConverterOption("sws_flags", (long)SwsFlags.SWS_BILINEAR);
-            SetConverterOption("threads", converterThreads);
-            Check(ffmpeg.sws_init_context(_scale, null, null), "Initialize capture color converter");
-            // swscale lowers the worker count when the build has no thread support.
-            long actualThreads = 0;
-            Check(ffmpeg.av_opt_get_int(_scale, "threads", 0, &actualThreads), "Query converter threads");
-            ConverterThreadCount = (int)Math.Max(1, actualThreads);
-
-            // The parent context forwards colorspace details to every worker context.
-            var coefficients = *(int_array4*)ffmpeg.sws_getCoefficients(ffmpeg.SWS_CS_ITU709);
-            Check(ffmpeg.sws_setColorspaceDetails(_scale, in coefficients, 1, in coefficients, 0,
-                0, 1 << 16, 1 << 16), "Configure BT.709 capture colors");
+            _converter = new CaptureFrameConverter(Width, Height, _options.MaximumSoftwareThreads);
+            ConverterThreadCount = _converter.ThreadCount;
         }
 
         /// <summary>Allocates an aligned pixel frame with SDR BT.709 primaries/matrix and an sRGB transfer curve.</summary>
@@ -791,7 +746,7 @@ namespace MajdataPlay.FFmpeg
             frame->format = (int)pixelFormat;
             frame->width = Width;
             frame->height = Height;
-            frame->color_range = pixelFormat == AVPixelFormat.AV_PIX_FMT_RGBA ? AVColorRange.AVCOL_RANGE_JPEG : AVColorRange.AVCOL_RANGE_MPEG;
+            frame->color_range = AVColorRange.AVCOL_RANGE_MPEG;
             frame->colorspace = AVColorSpace.AVCOL_SPC_BT709;
             frame->color_primaries = AVColorPrimaries.AVCOL_PRI_BT709;
             frame->color_trc = AVColorTransferCharacteristic.AVCOL_TRC_IEC61966_2_1;
@@ -1105,12 +1060,6 @@ namespace MajdataPlay.FFmpeg
 
             EnsureOwner();
             _disposed = true;
-            var rgba = _rgba;
-            _rgba = null;
-            if (rgba != null)
-            {
-                ffmpeg.av_frame_free(&rgba);
-            }
             var frame = _frame;
             _frame = null;
             if (frame != null)
@@ -1129,11 +1078,8 @@ namespace MajdataPlay.FFmpeg
             {
                 ffmpeg.av_packet_free(&packet);
             }
-            if (_scale != null)
-            {
-                ffmpeg.sws_freeContext(_scale);
-                _scale = null;
-            }
+            _converter?.Dispose();
+            _converter = null;
 
             ReleaseCodec();
             if (_format != null)

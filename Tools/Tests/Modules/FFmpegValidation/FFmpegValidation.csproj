@@ -35,7 +35,9 @@
     <Reference Include="UnityEngine.CoreModule"><HintPath>$(UnityEditor)/Data/Managed/UnityEngine/UnityEngine.CoreModule.dll</HintPath></Reference>
     <Reference Include="UnityEngine.ImageConversionModule"><HintPath>$(UnityEditor)/Data/Managed/UnityEngine/UnityEngine.ImageConversionModule.dll</HintPath></Reference>
     <Reference Include="UnityEngine.AndroidJNIModule"><HintPath>$(UnityEditor)/Data/Managed/UnityEngine/UnityEngine.AndroidJNIModule.dll</HintPath></Reference>
+    <Reference Include="Unity.Burst"><HintPath>../../../../Library/ScriptAssemblies/Unity.Burst.dll</HintPath></Reference>
     <Reference Include="Unity.Collections"><HintPath>../../../../Library/ScriptAssemblies/Unity.Collections.dll</HintPath></Reference>
+    <Reference Include="Unity.Mathematics"><HintPath>../../../../Library/ScriptAssemblies/Unity.Mathematics.dll</HintPath></Reference>
     <Reference Include="Unity.RenderPipelines.Core.Runtime"><HintPath>../../../../Library/ScriptAssemblies/Unity.RenderPipelines.Core.Runtime.dll</HintPath></Reference>
   </ItemGroup>
 </Project>

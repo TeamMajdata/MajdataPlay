@@ -7,6 +7,8 @@
         "MajdataPlay.IO",
         "MajdataPlay.MajRenderPipe",
         "MajdataPlay.Platform.Android",
+        "Unity.Burst",
+        "Unity.Mathematics",
         "Unity.RenderPipelines.Core.Runtime"
     ],
     "includePlatforms": [

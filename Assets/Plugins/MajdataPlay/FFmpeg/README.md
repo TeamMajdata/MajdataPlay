@@ -2,7 +2,7 @@
 
 将 **FFmpeg Video Player** 挂在 GameObject 上，填写 Source，在 Play Mode Inspector 中可以预载、播放、暂停、停止和拖动时间轴。组件只播放视频；音轨由 MajdataPlay 现有音频系统处理。
 
-运行时程序集为 `MajdataPlay.FFmpeg`，引用项目已接入的 `FFmpeg.AutoGen`、`MajdataPlay.Diagnostics`、`Unity.RenderPipelines.Core.Runtime` 和 `MajdataPlay.MajRenderPipe`。录制适配单向依赖 MRP，MRP 本体不依赖 FFmpeg 或 Core RP。本项目绑定的原生 ABI 是 FFmpeg **9.0.1**；请使用 [Tools/FFmpeg](../../../../Tools/FFmpeg) 的构建脚本，不能混用其他主版本的库。Mono / IL2CPP 使用同一套直接 P/Invoke 和带 `MonoPInvokeCallback` 的静态回调。
+运行时程序集为 `MajdataPlay.FFmpeg`，引用项目已接入的 `FFmpeg.AutoGen`、`MajdataPlay.Diagnostics`、`Unity.RenderPipelines.Core.Runtime`、`MajdataPlay.MajRenderPipe`，以及 CPU 像素/采样循环使用的 `Unity.Burst` 和 `Unity.Mathematics`。录制适配单向依赖 MRP，MRP 本体不依赖 FFmpeg 或 Core RP。本项目绑定的原生 ABI 是 FFmpeg **9.0.1**；请使用 [Tools/FFmpeg](../../../../Tools/FFmpeg) 的构建脚本，不能混用其他主版本的库。Mono / IL2CPP 使用同一套直接 P/Invoke 和带 `MonoPInvokeCallback` 的静态回调。
 
 支持的全部软件解码格式、平台硬件解码矩阵及实际 Player 限制见 [当前 FFmpeg 解码格式支持](../../../../Tools/FFmpeg/CODEC-SUPPORT.md)。
 
@@ -88,7 +88,7 @@ AV1 软件解码使用构建时静态链接的 `libdav1d`（也兼容包含 `lib
 
 播放器会话按队列容量加 2 预分配呈现帧容器，供工作线程、队列和主线程流转；帧释放原生资源后归还本会话。稳定解码、RGBA 转换和呈现使用复用容器，`EAGAIN` 比较不装箱，Android 图像释放委托只在建立硬件会话时创建。这里的无分配指预热后的托管 GC 分配；FFmpeg 原生帧引用、像素缓冲区及驱动内部仍按各自生命周期分配和释放。
 
-CPU RGBA 上传路径按 `DecoderOptions.ConversionThreadCount`（默认在逻辑处理器不超过 4 个时为 1，否则为 `clamp(处理器数 - 2, 1, 4)`）让 libswscale 按 slice 多线程转换，并把垂直翻转或旋转复制分成 16 行对齐的行带交给按需创建的后台线程；这些线程不调用 Unity API，预热后不产生托管分配。验证方法见 [多线程 RGBA 转换](../../../../Tools/Tests/Modules/FFmpegValidation/README.md#多线程-rgba-转换)。
+CPU RGBA 上传路径按 `DecoderOptions.ConversionThreadCount`（默认在逻辑处理器不超过 4 个时为 1，否则为 `clamp(处理器数 - 2, 1, 4)`）让 libswscale 按 slice 多线程转换，并把垂直翻转或旋转复制分成 16 行对齐的行带交给按需创建的后台线程；这些线程不调用 Unity API，预热后不产生托管分配。翻转/旋转复制是 Burst 编译的 `VideoPixelKernels.CopyRgbaLines`（180° 按 4 像素向量反转，90°/270° 在 32×32 块内按 4×4 向量转置）；Burst 未启用或 Editor 尚在异步编译时运行同一份托管代码，结果逐像素相同。验证方法见 [多线程 RGBA 转换](../../../../Tools/Tests/Modules/FFmpegValidation/README.md#多线程-rgba-转换)。
 
 公开 `FFmpegVideoDecoder` 构造器与 `DecodedVideoFrame.CopyToSoftware()` 保留独立帧对象的所有权语义，返回对象仍会分配。内部复用帧不通过播放器事件暴露，避免已释放的外部旧引用影响后来租用的帧。打开、seek 日志、回退、纹理重建及调用方事件处理器不在稳定逐帧零 GC 范围内。
 
@@ -175,7 +175,7 @@ await capturer.StopRecordingAsync();
 
 所有组件控制 API 在 Unity 主线程调用。编码与封装在一个后台线程执行，GPU 回读和编码共用 1–8 个固定槽位，默认 6 个；容量包含正在回读、排队和正在编码的帧。GPU 回读通常晚 2–3 帧才完成，3 个槽位在 60 FPS 下容易被占满，场景中序列化的 `BufferedFrameLimit` 应不少于 4（推荐 6）。所有槽位被占用时丢弃该次渲染并计入 `BufferOverflowFrames`；游戏渲染慢于 `FrameRate` 而缺少画面的帧率间隔计入 `SourceGapFrames`；`DroppedFrames` 为两者之和，停止时日志输出这两项与槽位峰值。PTS 保留实际单调时钟间隔，不压缩录制时间；不通过重复帧补齐 CFR。
 
-每次渲染按其所在 Unity 帧开始时（capturer 的 `Update`，执行顺序最先）的录制时钟计时，与游戏计算该帧画面所用时刻一致，也排除了渲染前脚本与剔除耗时的抖动；每个 Unity 帧最多采集一次。时间戳不再逐帧独立向下取整：渲染与下一帧时刻相差不超过 0.75 帧时记为下一帧，晚于此才跳帧并对齐到最近的帧，因此渲染与录制帧率相同时，帧边界附近的计时抖动不会再产生“重复帧被丢弃、下一帧又跳过”的成对丢帧，时间戳与时钟偏差不超过 0.75 帧。渲染快于录制帧率时保留最接近各帧时刻的渲染。录制尺寸固定且必须为偶数，支持缩放 Camera 输出。需要异步 GPU 回读支持；捕获是 SDR sRGB RGBA8，转换为 limited-range YUV，矩阵/原色为 BT.709，transfer metadata 为 sRGB，没有 HDR tone mapping。
+每次渲染按其所在 Unity 帧开始时（capturer 的 `Update`，执行顺序最先）的录制时钟计时，与游戏计算该帧画面所用时刻一致，也排除了渲染前脚本与剔除耗时的抖动；每个 Unity 帧最多采集一次。时间戳不再逐帧独立向下取整：渲染与下一帧时刻相差不超过 0.75 帧时记为下一帧，晚于此才跳帧并对齐到最近的帧，因此渲染与录制帧率相同时，帧边界附近的计时抖动不会再产生“重复帧被丢弃、下一帧又跳过”的成对丢帧，时间戳与时钟偏差不超过 0.75 帧。渲染快于录制帧率时保留最接近各帧时刻的渲染。录制尺寸固定且必须为偶数，支持缩放 Camera 输出。需要异步 GPU 回读支持；捕获是 SDR sRGB RGBA8，转换为 limited-range YUV，矩阵/原色为 BT.709，transfer metadata 为 sRGB，没有 HDR tone mapping。RGBA→YUV420P/NV12 由 Burst 编译的 `CaptureFrameConverter` 在编码线程完成：直接按 bottom-first 行序读取回读缓冲区（不再先复制到 RGBA staging，也不再经过 libswscale），色度取 2×2 像素均值，灰色精确映射为中性色度；高度每满 32 行可多用一个线程（不超过 `MaximumSoftwareThreads`），按行对分带交给按需创建的后台线程，`ConverterThreadCount` 报告实际线程数。
 
 `FrameRate` 是采样上限和时间戳的时间基准。游戏 120 FPS、录制 30 FPS 时，约每四次 Camera 渲染采一帧；游戏 30 FPS、录制 60 FPS 时，只能获得约 30 个真实画面/秒，相邻 PTS 跨两个目标时间槽，视频保持实际经过时间。低帧率、渲染卡顿或缓冲池满会降低流畅度；CBR/VBR 是编码器采用的控制模式，缺帧和画面复杂度仍可能使实际码率偏离目标，应观察 `CurrentBitRate`。
 

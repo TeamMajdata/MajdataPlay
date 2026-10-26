@@ -13,6 +13,7 @@
         "MajdataPlay.Diagnostics",
         "MajdataPlay.MajRenderPipe",
         "Unity.RenderPipelines.Core.Runtime",
+        "Unity.Burst",
         "MajdataPlay.Tests.FFmpeg.PlayMode"
     ],
     "includePlatforms": [

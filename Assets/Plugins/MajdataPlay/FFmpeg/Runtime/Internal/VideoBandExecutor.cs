@@ -16,7 +16,7 @@ namespace MajdataPlay.FFmpeg.Internal
 
     /// <summary>Runs the bands of one job at a time on the calling thread and lazily created background threads.</summary>
     /// <remarks>
-    /// One decoder worker owns each executor and calls <see cref="Run"/> and <see cref="Dispose"/> sequentially.
+    /// One decoder or encoder worker owns each executor and calls <see cref="Run"/> and <see cref="Dispose"/> sequentially.
     /// A 64-bit claim word packs the job generation with its band count and next unclaimed band, so a band thread that
     /// wakes late can never claim a band of a finished or newer job. Job descriptors are published before the generation,
     /// and <see cref="Run"/> waits for every claimed band before it returns or rethrows. Steady-state runs allocate no
@@ -228,7 +228,7 @@ namespace MajdataPlay.FFmpeg.Internal
 
         /// <summary>Waits until every band of the current job has completed.</summary>
         /// <param name="bandCount">The number of bands in the current job.</param>
-        /// <remarks>Claimed bands are short memory copies, so this spins and yields like <see cref="GpuCompletionWait"/> without a timer-based sleep.</remarks>
+        /// <remarks>Claimed bands are short pixel copies or conversions, so this spins and yields like <see cref="GpuCompletionWait"/> without a timer-based sleep.</remarks>
         private void WaitForBands(int bandCount)
         {
             var spinWait = new SpinWait();

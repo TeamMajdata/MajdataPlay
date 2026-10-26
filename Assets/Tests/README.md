@@ -85,7 +85,12 @@ window.
 ./Tools/Tests/Run-UnityTests.ps1 -Coverage
 ./Tools/Tests/Run-UnityTests.ps1 -TestPlatform EditMode -AssemblyNames 'MajdataPlay.Tests.Game;MajdataPlay.Tests.Buffers'
 ./Tools/Tests/Run-UnityTests.ps1 -TestFilter 'MajdataPlay.Tests.Plugins.Buffers'
+./Tools/Tests/Run-UnityTests.ps1 -TestPlatform EditMode -TestFilter 'FFmpegBurstBenchmarks' -BurstSynchronousCompilation
 ```
+
+Benchmark fixtures such as `FFmpegBurstBenchmarks` are `[Explicit]` with `[Category("Benchmark")]`: they run only
+when a filter selects them by name and write `[Benchmark]` lines to the test output and the Unity log instead of
+asserting timings.
 
 | Parameter | Meaning |
 | --- | --- |
@@ -98,6 +103,7 @@ window.
 | `-SkipProjectSync` | Reuses the staged project as is; repository changes since the last sync, including test changes, are not picked up. |
 | `-NoLibrarySeed` | Imports from scratch instead of seeding a missing staged `Library` from the main project. |
 | `-NoGraphics` | Passes `-nographics`; tests that need a graphics device then fail. |
+| `-BurstSynchronousCompilation` | Passes `--burst-force-sync-compilation`, so tests exercise Burst-compiled code instead of the managed fallback that runs while the Editor compiles Burst methods asynchronously. |
 | `-TimeoutMinutes` | Limit for each Unity invocation (default 90). |
 
 The script exits with code 1 when a run fails, has no results (usually a compile error, whose `error CS`

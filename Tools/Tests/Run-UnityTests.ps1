@@ -43,6 +43,11 @@ Does not seed a missing staged Library from the main project's Library.
 .PARAMETER NoGraphics
 Passes -nographics to Unity. Tests that need a graphics device are then expected to fail.
 
+.PARAMETER BurstSynchronousCompilation
+Passes --burst-force-sync-compilation to Unity, so every Burst method is compiled before its first call
+and tests exercise the Burst-compiled code instead of the managed fallback that runs while asynchronous
+compilation is pending.
+
 .PARAMETER TimeoutMinutes
 Maximum time for each Unity invocation.
 #>
@@ -58,6 +63,7 @@ param(
     [switch]$SkipProjectSync,
     [switch]$NoLibrarySeed,
     [switch]$NoGraphics,
+    [switch]$BurstSynchronousCompilation,
     [int]$TimeoutMinutes = 90
 )
 
@@ -340,6 +346,9 @@ foreach ($platform in $platforms) {
         '-testResults', $resultFile, '-logFile', $logFile)
     if ($NoGraphics) {
         $arguments += '-nographics'
+    }
+    if ($BurstSynchronousCompilation) {
+        $arguments += '--burst-force-sync-compilation'
     }
     if ($TestFilter) {
         $arguments += @('-testFilter', $TestFilter)
