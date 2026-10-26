@@ -64,6 +64,9 @@ namespace MajdataPlay
             get => MajEnv.Settings;
         }
 
+        public bool IsInited { get; private set; }
+
+
         [SerializeField] private BuiltInTimeProvider _timer = BuiltInTimeProvider.Winapi;
 
         [SerializeField] private bool _isEnterView = false;
@@ -238,6 +241,8 @@ namespace MajdataPlay
             InputManager.Init(Majdata<DummyTouchPanelRenderer>.Instance!.InstanceID2SensorIndexMappingTable);
             OutputManager.Init();
             Recorder.Init();
+
+            IsInited = true;
 #if UNITY_EDITOR
             if (EditorReturnScenePath is string returnScenePath)
             {
@@ -254,6 +259,7 @@ namespace MajdataPlay
                 return;
             }
 #endif
+            await UniTask.Delay(1000);
             if (MajEnv.Mode == RunningMode.Test)
             {
                 EnterTestMode();
@@ -266,7 +272,6 @@ namespace MajdataPlay
             {
                 EnterTitle();
             }
-            await MajInstances.SceneSwitcher.FadeOutAsync();
         }
 
         private void DetectHWEncoder()
