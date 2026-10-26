@@ -18,6 +18,7 @@ param(
     [switch] $DisableBurst,
     [switch] $TestCameraCapture,
     [switch] $TestAndroidContent,
+    [switch] $TestAndroidEncoder,
     [switch] $CaptureUrp,
     [switch] $CaptureHardware,
     [switch] $TestCaptureThroughput,
@@ -30,6 +31,8 @@ param(
     [string] $WorkDirectory = ''
 )
 $ErrorActionPreference = 'Stop'
+if ($TestAndroidEncoder -and $TestAndroidContent) { throw 'Select one dedicated Android fixture per Player.' }
+if ($TestAndroidEncoder -and ($Platform -ne 'Android' -or $Backend -ne 'IL2CPP')) { throw 'Managed encoder device validation requires an Android IL2CPP Player.' }
 if ($TestAndroidContent -and ($Platform -ne 'Android' -or $Backend -ne 'IL2CPP')) { throw 'Native content device validation requires an Android IL2CPP Player.' }
 if ($DoubleRateSeconds -gt 3) { $RegularPlayer = $true }
 if ($CaptureUrp -or $CaptureHardware -or $TestCaptureThroughput) { $TestCameraCapture = $true }
@@ -240,6 +243,7 @@ if (-not $SkipBuild) {
     Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'UnitySmokeBuild.cs') -Destination (Join-Path $project 'Assets/Editor/UnitySmokeBuild.cs') -Force
     # The Android SAF fixture is a separate app with a real document picker;
     # its Java wrapper is generated in the production binding assembly.
+    Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'AndroidEncoderDeviceSmoke.cs') -Destination (Join-Path $project 'Assets/Smoke/AndroidEncoderDeviceSmoke.cs') -Force
     Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'AndroidContentDeviceSmoke.cs') -Destination (Join-Path $project 'Assets/Smoke/AndroidContentDeviceSmoke.cs') -Force
     if ($TestAndroidContent) {
         $manifest = @'
@@ -261,10 +265,10 @@ if (-not $SkipBuild) {
     Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'UnityCameraEditorSmoke.cs') -Destination (Join-Path $project 'Assets/Editor/UnityCameraEditorSmoke.cs') -Force
     # End-of-phase worker diagnostics are accessed by reflection in the isolated
     # performance harness. Preserve their metadata with High managed stripping.
-    [IO.File]::WriteAllText((Join-Path $project 'Assets/Smoke/link.xml'), '<linker><assembly fullname="MajdataPlay.FFmpeg"><type fullname="MajdataPlay.FFmpeg.Internal.VideoDecodeSession" preserve="all" /><type fullname="MajdataPlay.FFmpeg.FFmpegVideoPlayer" preserve="all" /></assembly></linker>', $utf8)
+    [IO.File]::WriteAllText((Join-Path $project 'Assets/Smoke/link.xml'), '<linker><assembly fullname="MajdataPlay.FFmpeg"><type fullname="MajdataPlay.FFmpeg.Internal.VideoDecodeSession" preserve="all" /><type fullname="MajdataPlay.FFmpeg.FFmpegVideoPlayer" preserve="all" /><type fullname="MajdataPlay.FFmpeg.FFmpegVideoEncoder" preserve="all" /></assembly></linker>', $utf8)
     $package = (Join-Path $repo 'ThirdParty/FFmpeg.AutoGen/Unity') -replace '\\', '/'
     Write-Json (Join-Path $project 'Packages/manifest.json') @{ dependencies = @{ 'net.majdata.ffmpeg-autogen' = "file:$package"; 'com.unity.render-pipelines.universal' = '17.3.0'; 'com.unity.ugui' = '2.0.0'; 'com.unity.modules.ui' = '1.0.0'; 'com.unity.modules.imageconversion' = '1.0.0'; 'com.unity.modules.androidjni' = '1.0.0'; 'com.unity.modules.unitywebrequest' = '1.0.0' } }
-    Write-Json (Join-Path $project 'Assets/Smoke/FFmpeg.Player.Smoke.asmdef') @{ name = 'FFmpeg.Player.Smoke'; references = @('MajdataPlay.FFmpeg', 'MajdataPlay.Diagnostics', 'MajdataPlay.Platform.Android', 'FFmpeg.AutoGen', 'Unity.RenderPipelines.Core.Runtime', 'Unity.RenderPipelines.Universal.Runtime'); allowUnsafeCode = $true }
+    Write-Json (Join-Path $project 'Assets/Smoke/FFmpeg.Player.Smoke.asmdef') @{ name = 'FFmpeg.Player.Smoke'; references = @('MajdataPlay.FFmpeg', 'MajdataPlay.IO', 'MajdataPlay.Diagnostics', 'MajdataPlay.Platform.Android', 'FFmpeg.AutoGen', 'Unity.RenderPipelines.Core.Runtime', 'Unity.RenderPipelines.Universal.Runtime'); allowUnsafeCode = $true }
     Write-Json (Join-Path $project 'Assets/Editor/FFmpeg.Player.Smoke.Editor.asmdef') @{ name = 'FFmpeg.Player.Smoke.Editor'; references = @('FFmpeg.Player.Smoke', 'MajdataPlay.FFmpeg', 'Unity.RenderPipelines.Core.Runtime', 'Unity.RenderPipelines.Universal.Runtime'); includePlatforms = @('Editor') }
     [IO.File]::WriteAllText((Join-Path $project 'ProjectSettings/ProjectVersion.txt'), "m_EditorVersion: 6000.3.17f1`n", $utf8)
     $target = if ($Platform -eq 'Android') { 'Android' } elseif ($Platform -eq 'Linux') { 'Linux64' } elseif ($Architecture -eq 'x86') { 'Win' } else { 'Win64' }
@@ -272,7 +276,7 @@ if (-not $SkipBuild) {
     $buildArgs = @('-batchmode', '-nographics', '-quit', '-projectPath', ('"' + $project + '"'), '-buildTarget', $target,
         '-logFile', ('"' + $buildLog + '"'), '-executeMethod', 'FFmpegPlayerSmokeBuild.Run', '-videoBackend', $Backend,
         '-videoArchitecture', $Architecture, '-videoPlatform', $Platform, '-videoOutput', ('"' + $result + '"'))
-    $buildArgs += @('-cameraCapture', $(if ($TestCameraCapture) { 'true' } else { 'false' }), '-captureUrp', $(if ($CaptureUrp) { 'true' } else { 'false' }), '-androidContent', $(if ($TestAndroidContent) { 'true' } else { 'false' }))
+    $buildArgs += @('-cameraCapture', $(if ($TestCameraCapture) { 'true' } else { 'false' }), '-captureUrp', $(if ($CaptureUrp) { 'true' } else { 'false' }), '-androidContent', $(if ($TestAndroidContent) { 'true' } else { 'false' }), '-androidEncoder', $(if ($TestAndroidEncoder) { 'true' } else { 'false' }))
     if ($DisableBurst) { $buildArgs += '--burst-disable-compilation' }
     $generatorVariables = @('UNITY_EDITOR_PATH', 'UNITY_ANDROID_SDK', 'UNITY_JAVA_HOME')
     $previousGeneratorEnvironment = @{}

@@ -18,6 +18,7 @@ public static class FFmpegPlayerSmokeBuild
         var architecture = FFmpegPlayerSmoke.Argument("-videoArchitecture") ?? "x64";
         var android = FFmpegPlayerSmoke.Argument("-videoPlatform") == "Android";
         var androidContent = FFmpegPlayerSmoke.Argument("-androidContent") == "true";
+        var androidEncoder = FFmpegPlayerSmoke.Argument("-androidEncoder") == "true";
         var linux = FFmpegPlayerSmoke.Argument("-videoPlatform") == "Linux";
         var output = FFmpegPlayerSmoke.Argument("-videoOutput");
         if (string.IsNullOrWhiteSpace(output))
@@ -44,8 +45,8 @@ public static class FFmpegPlayerSmokeBuild
             PlayerSettings.Android.targetSdkVersion = AndroidSdkVersions.AndroidApiLevelAuto;
             PlayerSettings.Android.useCustomKeystore = false;
             PlayerSettings.SetApplicationIdentifier(namedTarget, androidContent
-                ? "net.majdata.ffmpegcontent.validation" : "net.majdata.ffmpegplayer.validation");
-            if (androidContent)
+                ? "net.majdata.ffmpegcontent.validation" : androidEncoder ? "net.majdata.ffmpegencoder.validation" : "net.majdata.ffmpegplayer.validation");
+            if (androidContent || androidEncoder)
             {
                 PlayerSettings.Android.applicationEntry = AndroidApplicationEntry.Activity;
             }
@@ -110,6 +111,11 @@ public static class FFmpegPlayerSmokeBuild
         if (androidContent)
         {
             new GameObject("FFmpeg Content Device Smoke").AddComponent<MajdataPlay.FFmpeg.Validation.AndroidContentDeviceSmoke>();
+        }
+
+        if (androidEncoder)
+        {
+            new GameObject("FFmpeg Encoder Device Smoke").AddComponent<MajdataPlay.FFmpeg.Validation.AndroidEncoderDeviceSmoke>();
         }
 
         EditorSceneManager.SaveScene(scene, "Assets/Smoke.unity");

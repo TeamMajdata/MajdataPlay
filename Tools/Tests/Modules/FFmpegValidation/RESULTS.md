@@ -2,6 +2,23 @@
 
 最近验证日期：2026-10-26；此前 Android SAF 验证执行于 2026-10-12，渲染验证执行于 2026-10-07，跨平台矩阵执行于 2026-10-03。Windows / Unity 6000.3.17f1 / AMD Radeon RX 580 2048SP；Linux 使用本机 WSL Ubuntu 24.04；Android 真机为 Mi MIX 2S / Android 15 API 35 / Adreno 630 / Vulkan 1.1.128；Apple 构建测试使用用户提供的 Mac mini M4。当前 Windows/Linux/Android 图形桥接 ABI 为 **4**，Apple 保持 **2**；下方 ABI2/3 的记录为此前版本实测。
 
+## 2026-10-26：托管 MediaCodec CBR 选择修复
+
+用户日志中的 H.264/CBR 在 `TryMediaCodec` 内被“没有检查恒定填充”条件无条件拒绝，尚未查询设备能力；H.264/VBR 日志则已实际打开 `c2.qti.avc.encoder`。移除该全局拒绝，让能力查询使用请求的 CBR/VBR 模式，并把 `bitrate_mode` 下发为 `cbr` / `vbr`。硬件组件身份、输入格式、16 对齐编码尺寸、帧率和码率范围检查保留；驱动不支持的模式仍按同格式回退。`IsMaximumBitRateEnforced` 在两种 MediaCodec 模式中均为 false，不把 CBR 等同于 filler 填充或硬码率上限。
+
+新增 `AndroidEncoderDeviceSmoke.cs`、`run-unity.ps1 -TestAndroidEncoder` 和 `run-android-encoder-player.ps1`：隔离 Unity IL2CPP Player 直接运行生产托管编码器，检查实际软件/硬件类型、FFmpeg 的 `bitrate_mode` 私有请求参数、60 帧编码/排空、生产软件解码的尺寸/像素/PTS 间隔及稳定 EOF。默认回归 H.264 CBR/VBR 的 320×192@30 和用户日志中的 1016×1524@120；可指定 HEVC、小尺寸，以及必须报告“bitrate mode unsupported”的同格式 CBR 软件回退。参数和命令见 README。
+
+本轮已完成：
+
+- `dotnet run --project Tools/Tests/Modules/FFmpegValidation/FFmpegValidation.csproj`：**378 assertions PASS**。独立测试工程补充实际 Android wrapper DLL 引用，以满足 Diagnostics 已有的绑定命名空间依赖。
+- **Unity 6000.3.17f1 / Android ARM64 / IL2CPP / High stripping 构建 PASS**。隔离工程显式使用 Activity 入口，使其与现有 Java 测试组件的 `UnityPlayerActivity` 基类匹配。
+- ADB / **Mi MIX 2S，Android 15 API 35** 的原生回归：**16 组、17,152 assertions PASS**；H.264/VP8 VBR、HEVC CBR/VBR，均涵盖 JNI/NDK 和平坦/复杂场景。H.264 CBR 由设备能力明确报告不支持。完整日志和输出为 `.work/android-encoders/arm64-20261026-081622-0119654/`。
+- 本次改动的 `git diff --check` 与 PowerShell 语法检查 PASS。主工程原有字体/资源/Player Settings 修改未动。
+
+**托管实机验证尚未完成：**ADB 设备从日志中的 Adreno 740 设备切换到 Mi MIX 2S；后者处于安全锁屏、`mWakefulness=Dozing`，Unity Player 尚未进入测试脚本。不能把本次构建或原生回归成功计为托管设备测试成功。APK 位于本机 `%LOCALAPPDATA%/MajdataPlay.EncoderValidation/Android-arm64-IL2CPP/VideoSmoke.apk`，测试包名 `net.majdata.ffmpegencoder.validation`，已安装。解锁并保持亮屏后，先以 `-Format HEVC -StandardSizeOnly` 验证受支持的硬件 CBR，再以 `-Format H264 -StandardSizeOnly -ExpectCbrSoftwareFallback` 验证不支持模式的明确回退。
+
+日志原设备上的 **H.264/CBR、1016×1524@120、音视频混流及持续吞吐未验证**；需该设备连接后运行默认的托管设备回归，并另行进行实际 Camera/音频录制。
+
 ## 2026-10-26：Android MediaCodec 原生硬件编码
 
 按固定 FFmpeg n9.0.1 commit、143 个绑定公开头文件和既有两份检查补丁，从源码重建 Android ARM64 / ARMv7 的七个 FFmpeg 库及 ABI4 图形桥接。构建采用缓存的 Linux NDK r27c、API 23、静态 libc++、16 KiB 最大页大小；源码、第三方绑定与子模块指针未变。`recording_configuration` 显式加入六种 MediaCodec encoder，并由原有配置检查逐项验证；产物审计同时要求清单和 configure 参数包含它们。

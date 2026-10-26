@@ -97,7 +97,7 @@ namespace MajdataPlay.FFmpeg
         /// <summary>Gets the effective encoder maximum bitrate in bits per second; CBR uses its constant target.</summary>
         /// <remarks>
         /// VBV encoders use a buffered limit; libvpx/libaom use rate-control budgets that can overshoot in either mode. Neither limits individual packet sizes.
-        /// Android MediaCodec VBR receives only the target bitrate, so this value is not enforced; see <see cref="IsMaximumBitRateEnforced"/>.
+        /// Android MediaCodec receives only the target bitrate, so this value is not enforced; see <see cref="IsMaximumBitRateEnforced"/>.
         /// </remarks>
         public long MaximumBitRate => RateControlMode == VideoRateControlMode.CBR ? _options.BitRate : _options.MaximumBitRate;
         /// <summary>Gets whether the opened encoder receives <see cref="MaximumBitRate"/> as a rate limit or budget.</summary>
@@ -363,12 +363,12 @@ namespace MajdataPlay.FFmpeg
             }
         }
 
-        /// <summary>Opens an Android hardware MediaCodec component chosen from <c>MediaCodecList</c> for VBR recording.</summary>
+        /// <summary>Opens an Android hardware MediaCodec component chosen from <c>MediaCodecList</c> for the requested recording mode.</summary>
         /// <param name="failures">The startup diagnostics receiving rejected candidate reasons.</param>
         /// <returns>True when a hardware component opened and became the selected encoder.</returns>
         /// <remarks>
         /// The component is opened by its exact name, so MediaCodec cannot substitute a software implementation.
-        /// CBR is not selected because the wrapper has no checked constant-rate padding.
+        /// CBR/VBR select the driver rate-control algorithm; neither mode guarantees filler or a hard bitrate cap.
         /// </remarks>
         /// <exception cref="OperationCanceledException">Cancellation was requested.</exception>
         /// <exception cref="OutOfMemoryException">The codec context cannot be allocated.</exception>
@@ -379,12 +379,6 @@ namespace MajdataPlay.FFmpeg
             if (name == null || mimeType == null)
             {
                 failures.Append("No MediaCodec wrapper is used for ").Append(_options.Format).Append("; ");
-                return false;
-            }
-
-            if (_options.RateControlMode == VideoRateControlMode.CBR)
-            {
-                failures.Append("MediaCodec CBR has no checked constant-rate padding through this FFmpeg wrapper; ");
                 return false;
             }
 
@@ -399,7 +393,7 @@ namespace MajdataPlay.FFmpeg
             {
                 var (codedWidth, codedHeight) = MediaCodecEncoderSelector.GetConfiguredSize(_options.Format, Width, Height);
                 candidates = AndroidMediaCodecEncoderQuery.GetCandidates(mimeType, codedWidth, codedHeight, FrameRate,
-                    checked((int)_options.BitRate), false);
+                    checked((int)_options.BitRate), _options.RateControlMode == VideoRateControlMode.CBR);
             }
             catch (Exception error) when (!(error is OperationCanceledException))
             {
@@ -584,9 +578,9 @@ namespace MajdataPlay.FFmpeg
             }
             else if (name.EndsWith("_mediacodec", StringComparison.Ordinal))
             {
-                if (!_mediaCodecSelection.HasValue || cbr)
+                if (!_mediaCodecSelection.HasValue)
                 {
-                    throw new NotSupportedException("MediaCodec requires a verified hardware component and VBR rate control.");
+                    throw new NotSupportedException("MediaCodec requires a verified hardware component supporting the requested rate-control mode.");
                 }
 
                 // Opening by exact name prevents MIME lookup from choosing a software component.
@@ -594,7 +588,7 @@ namespace MajdataPlay.FFmpeg
                 // The NDK API needs no JVM attachment on the encoder worker.
                 SetOption("ndk_codec", "1");
                 // MediaCodec receives only the target and mode; it has no peak-rate or VBV key.
-                SetOption("bitrate_mode", "vbr");
+                SetOption("bitrate_mode", cbr ? "cbr" : "vbr");
             }
             else if (name == "h264_videotoolbox")
             {

@@ -202,6 +202,8 @@ await capturer.StopRecordingAsync();
 
 CBR 设置目标码率以及相同的 min/max；VBR 使用独立目标和最大码率。VBV 后端通过约 1 秒缓冲限制，单帧和短时窗口仍会波动；libvpx/libaom 的 CBR 和单遍 VBR 均使用原生码率预算，复杂画面可能超出预算，也不保证低复杂度画面填满目标码率，`MaximumBitRate` 不表示每帧或瞬时负载硬上限。软件线程数限制 FFmpeg codec worker，不包含应用采集线程和驱动的辅助线程。硬件偏好仅回退到**同格式**的软件实现，不会偷偷改换编码格式；不支持请求的模式/码率约束时明确失败。
 
+Android API 29+ 的 MediaCodec 硬件录制会查询请求的 CBR/VBR 模式、尺寸、帧率、码率范围和 CPU 输入格式，并以实际硬件组件名打开。CBR 选择驱动的恒定码率算法，不要求编码器插入 filler 填满目标；两种模式均不保证最大码率或 VBV 上限，`IsMaximumBitRateEnforced` 为 false。设备不支持所请求的模式时，回退至同格式软件编码并记录具体原因。
+
 各平台构建配置包含 `libx264`（H.264）、`libx265`（HEVC/H.265）、`libvpx-vp9`（VP9）、`libaom-av1`（AV1）和 MPEG-4 Part 2 软件编码，以及录制 muxer；均支持选择 CBR/VBR。H.264 CBR 可以写入 MP4，x265 打开时检查参数是否被接受。构建配置、依赖许可及 NVENC/AMF/VAAPI/VideoToolbox 条件见 [Tools/FFmpeg](../../../../Tools/FFmpeg/README.md)。启用 x264/x265 后，FFmpeg 产物使用 GPLv3 或后续版本许可。历史播放专用或仅 MPEG4 的原生库仍需要替换，并重启已加载旧库的 Editor/Player。AMF 必须包含构建脚本应用的码率检查补丁，x265 必须包含参数检查补丁：原生配置中的能力标记必须匹配当前补丁；旧未检查的实现会明确拒绝。
 
 iOS Player 的固定 VideoToolbox 包装器不能检查硬件独占选择，硬件偏好会明确回退到同格式软件编码并设置 `HardwareFallbackReason`，避免把系统选择结果误报为硬件。macOS 的 H.264 VideoToolbox 仍可强制硬件。

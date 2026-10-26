@@ -31,6 +31,7 @@
     <Compile Include="../../../../Assets/Plugins/ZString/**/*.cs" />
     <Compile Include="../../../../ThirdParty/FFmpeg.AutoGen/Unity/Runtime/**/*.cs" />
     <Analyzer Include="../../../../Assets/Packages/PolySharp.1.15.0/analyzers/dotnet/cs/PolySharp.SourceGenerators.dll" />
+    <Reference Include="MajdataPlay.Platform.Android.Runtime"><HintPath>../../../../Assets/Plugins/MajdataPlay/Platform/Android/MajdataPlay.Platform.Android.Runtime.dll</HintPath></Reference>
     <Reference Include="UnityEngine.CoreModule"><HintPath>$(UnityEditor)/Data/Managed/UnityEngine/UnityEngine.CoreModule.dll</HintPath></Reference>
     <Reference Include="UnityEngine.ImageConversionModule"><HintPath>$(UnityEditor)/Data/Managed/UnityEngine/UnityEngine.ImageConversionModule.dll</HintPath></Reference>
     <Reference Include="UnityEngine.AndroidJNIModule"><HintPath>$(UnityEditor)/Data/Managed/UnityEngine/UnityEngine.AndroidJNIModule.dll</HintPath></Reference>

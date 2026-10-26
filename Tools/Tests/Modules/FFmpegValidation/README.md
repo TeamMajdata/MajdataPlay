@@ -591,4 +591,17 @@ Camera fixture 通过真实离屏 Camera.Render / URP Standard RenderRequest 驱
 
 每个可用格式组合覆盖 JNI / NDK、请求 CBR / VBR、平坦 / 复杂画面：320×192、30 fps、60 帧，时间轴中保留一个缺帧间隔；验证实际压缩包、MP4 或 WebM 索引、相同格式的软件解码、全部 60 帧的像素/方向/PTS、编码及解码 EOF 排空、重复 EOF，以及排他创建拒绝覆盖原输出。
 
-MediaCodec 模式与目标码率为请求值。实测码率会记录在日志中，但这些检查不证明驱动回读、最大码率/VBV 限制或恒定填充。Surface 输入、Unity Camera/渲染集成、API 23–28 和其他设备需另行验证。托管录制器现在在 VBR 下选择经 `MediaCodecList` 确认的硬件组件（最大码率不受保证）；选择逻辑由 `Assets/Tests` 的 `MediaCodecEncoderSelectorTests` 在 Editor 中覆盖，Unity Player 内的实际 MediaCodec 录制需在设备上另行验证。CBR 仍回退同格式软件编码。实机结果见 [RESULTS.md](RESULTS.md)。
+MediaCodec 模式与目标码率为请求值。实测码率会记录在日志中，但这些检查不证明驱动回读、最大码率/VBV 限制或恒定填充。Surface 输入、Unity Camera/渲染集成、API 23–28 和其他设备需另行验证。托管录制器按所请求的 CBR/VBR 模式选择经 `MediaCodecList` 确认的硬件组件（最大码率不受保证）；选择逻辑由 `Assets/Tests` 的 `MediaCodecEncoderSelectorTests` 在 Editor 中覆盖，Unity Player 内的实际 MediaCodec 录制通过下节的设备回归单独验证。不支持所请求模式的设备仍回退同格式软件编码。实机结果见 [RESULTS.md](RESULTS.md)。
+
+### Android 托管编码器 CBR/VBR 回归
+
+下面的隔离 Unity Player 直接运行生产 `FFmpegVideoEncoder`，要求实际选择 `h264_mediacodec`、无软件回退，并检查 FFmpeg 私有 `bitrate_mode` 值为 CBR=2 / VBR=1。覆盖 320×192@30 和问题日志中的 1016×1524@120；每组 60 帧，调用 `Complete` 排空并以生产软件解码器逐帧检查尺寸、颜色、PTS 缺帧间隔和稳定 EOF。CBR 设备必须声明支持该模式；该专用回归不会把软件回退视为通过。
+
+```powershell
+./Tools/Tests/Modules/FFmpegValidation/run-unity.ps1 -Platform Android -Backend IL2CPP -Architecture arm64 -Graphics vulkan -TestAndroidEncoder -WorkDirectory "$env:LOCALAPPDATA/MajdataPlay.EncoderValidation" -BuildOnly
+./Tools/Tests/Modules/FFmpegValidation/run-android-encoder-player.ps1 -Apk "$env:LOCALAPPDATA/MajdataPlay.EncoderValidation/Android-arm64-IL2CPP/VideoSmoke.apk"
+```
+
+运行前须解锁设备并保持屏幕亮起，否则 Unity 可能无法进入测试脚本。Player 使用独立包名 `net.majdata.ffmpegencoder.validation`。ADB 脚本保存设备报告、Diagnostics 日志和实际 MP4 到 APK 旁的 `encoder-device-*`。这是生产托管编码/转换/封装与 IL2CPP 的实机验证，输入为合成 CPU RGBA；Camera 渲染、GPU 回读、音频混流和持续 120 fps 吞吐需单独验证。
+
+设备只支持 HEVC/CBR 时，可使用 `-Format HEVC -StandardSizeOnly` 验证硬件 CBR。对于已知 H.264 不支持 CBR 的设备，`-Format H264 -StandardSizeOnly -ExpectCbrSoftwareFallback` 要求 CBR 明确以“bitrate mode unsupported”为原因回退至 libx264，VBR 仍必须使用硬件；避免把未知原因回退计为通过。

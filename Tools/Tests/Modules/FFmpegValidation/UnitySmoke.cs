@@ -20,12 +20,13 @@ public sealed class FFmpegPlayerSmoke : MonoBehaviour
     private string? _report;
     /// <summary>Stores the first observed validation or playback failure.</summary>
     private Exception? _failure;
-    /// <summary>Starts the standard local-media smoke unless a dedicated camera or SAF content fixture owns the scene.</summary>
+    /// <summary>Starts the standard local-media smoke unless a dedicated camera, encoder or SAF content fixture owns the scene.</summary>
     [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
     static void Boot()
     {
         if (Argument("-cameraCapture") != "true"
-            && UnityEngine.Object.FindAnyObjectByType<MajdataPlay.FFmpeg.Validation.AndroidContentDeviceSmoke>() == null)
+            && UnityEngine.Object.FindAnyObjectByType<MajdataPlay.FFmpeg.Validation.AndroidContentDeviceSmoke>() == null
+            && UnityEngine.Object.FindAnyObjectByType<MajdataPlay.FFmpeg.Validation.AndroidEncoderDeviceSmoke>() == null)
         {
             new GameObject("FFmpeg Player validation").AddComponent<FFmpegPlayerSmoke>();
         }
