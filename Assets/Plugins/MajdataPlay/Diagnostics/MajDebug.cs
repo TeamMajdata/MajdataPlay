@@ -1,6 +1,8 @@
 using Cysharp.Text;
+using MajdataPlay.Platform.Android.Runtime.Bindings.Android.Util;
 using System;
 using System.Collections.Concurrent;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Runtime.CompilerServices;
@@ -16,8 +18,9 @@ namespace MajdataPlay.Diagnostics
         public static long MaxLogSize { get; set; } = 500L * 1024 * 1024; // 500 MB
         public static LogLevel MinLogLevel { get; set; } = LogLevel.Debug;
 
-        private static ILogger s_unityLogger = null!;
         private static TextWriter? s_logWriter;
+        private static ILogger s_unityLogger = null!;
+        private static readonly HashSet<IMajLogger> s_loggers = new();
         private static readonly CancellationTokenSource s_cancellationTokenSource = new();
 
         private static readonly Utf16PreparedFormat<DateTime, char> s_logOutputFormat = ZString.PrepareUtf16<DateTime, char>("[{0:yyyy-MM-dd HH:mm:ss.ffff}][{1}]");
@@ -25,7 +28,20 @@ namespace MajdataPlay.Diagnostics
         private static readonly object s_lockObject = new();
         private static readonly ConcurrentQueue<GameLog> s_logQueue = new();
 
-
+        public static bool AddLogger(IMajLogger logger)
+        {
+            lock (s_lockObject)
+            {
+                return s_loggers.Add(logger);
+            }
+        }
+        public static bool RemoveLogger(IMajLogger logger)
+        {
+            lock (s_lockObject)
+            {
+                return s_loggers.Remove(logger);
+            }
+        }
         public static void SetLogWriter(TextWriter? writer, bool disposeOld = true)
         {
             lock (s_lockObject)
@@ -251,13 +267,8 @@ namespace MajdataPlay.Diagnostics
 
                     s_logWriter.WriteLine(sb.AsSpan());
                     hasWritten = true;
+                    ForwardToExtenalLogger(log, sb);
 
-#if UNITY_EDITOR || DEBUG
-                    if (!log.IsFromUnityLogger)
-                    {
-                        s_unityLogger.Log(ToUnityLogLevel(log.Level), sb.ToString());
-                    }
-#endif
                     sb.Clear();
                 }
 
@@ -265,6 +276,22 @@ namespace MajdataPlay.Diagnostics
                 {
                     s_logWriter.Flush();
                 }
+            }
+        }
+
+        private static void ForwardToExtenalLogger(in GameLog log, in Utf16ValueStringBuilder sb)
+        {
+            var unityLogLevel = ToUnityLogLevel(log.Level);
+            var logMessage = sb.ToString();
+#if UNITY_EDITOR || DEBUG
+            if (!log.IsFromUnityLogger)
+            {
+                s_unityLogger.Log(unityLogLevel, logMessage);
+            }
+#endif
+            foreach (var logger in s_loggers)
+            {
+                logger.Log(log.Level, logMessage);
             }
         }
 
