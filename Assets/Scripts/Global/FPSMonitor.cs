@@ -8,8 +8,8 @@ namespace MajdataPlay
 {
     internal sealed class FPSMonitor : MajComponent
     {
-        const int AVG_FPS_SAMPLE_COUNT = 120;
-        const int LOW_FPS_SAMPLE_COUNT = 600;
+        private const int AVG_FPS_SAMPLE_COUNT = 120;
+        private const int LOW_FPS_SAMPLE_COUNT = 600;
 
         // --- Avg FPS ---
         private uint _avgFPSIndex;
@@ -48,7 +48,7 @@ namespace MajdataPlay
 
         [Il2CppSetOption(Option.NullChecks, false)]
         [Il2CppSetOption(Option.ArrayBoundsChecks, false)]
-        void LateUpdate()
+        private void LateUpdate()
         {
             var currentTime = MajTimeline.UnscaledTime;
             var delta = currentTime - _lastUpdateTiming;
@@ -83,7 +83,7 @@ namespace MajdataPlay
         [Il2CppSetOption(Option.NullChecks, false)]
         [Il2CppSetOption(Option.ArrayBoundsChecks, false)]
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        void AddSample(in long frameTicks)
+        private void AddSample(in long frameTicks)
         {
             // ------ Refresh Average FPS Buffer ------
             if (_avgFPSIndex >= AVG_FPS_SAMPLE_COUNT)
@@ -112,8 +112,8 @@ namespace MajdataPlay
 
             _lowFPSData[_lowFPSIndex++] = frameTicks;
         }
-        
-        class LowFrameComparer : IComparer<long>
+
+        private class LowFrameComparer : IComparer<long>
         {
             public int Compare(long x, long y)
             {
