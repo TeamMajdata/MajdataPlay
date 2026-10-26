@@ -43,6 +43,17 @@ namespace MajdataPlay.Tests.ThirdParty.Cysharp.PlayMode
             ThreadPool,
         }
 
+        /// <summary>The ways to get the task of <c>UniTask.Yield</c>.</summary>
+        public enum YieldOverload
+        {
+            /// <summary><c>UniTask.Yield(CancellationToken, bool)</c>.</summary>
+            Token,
+            /// <summary><c>UniTask.Yield(PlayerLoopTiming, CancellationToken, bool)</c>.</summary>
+            TimingAndToken,
+            /// <summary><c>YieldAwaitable.ToUniTask()</c>.</summary>
+            AwaitableToUniTask,
+        }
+
         /// <summary>The result the generic sources complete with.</summary>
         private const int GenericResult = 42;
 
@@ -432,6 +443,73 @@ namespace MajdataPlay.Tests.ThirdParty.Cysharp.PlayMode
 
             Assert.That(callbackThreadId, Is.EqualTo(completerThreadId));
         });
+
+        /// <summary>
+        /// Checks that the task of <c>UniTask.Yield</c> is configured for the main thread and that awaiting it on the thread pool
+        /// resumes on the main thread, so that polling loops do not queue a thread pool work item per frame.
+        /// </summary>
+        /// <param name="overload">The way the task is obtained.</param>
+        /// <param name="awaitOn">The thread that awaits the task.</param>
+        /// <returns>The test coroutine.</returns>
+        [UnityTest]
+        public IEnumerator Yield_ResumesOnMainThread([Values] YieldOverload overload, [Values] ThreadKind awaitOn) => UniTask.ToCoroutine(async () =>
+        {
+            if (awaitOn == ThreadKind.ThreadPool)
+            {
+                await UniTask.SwitchToThreadPool();
+            }
+            var awaitPoint = ResumePoint.Capture(null);
+            var task = CreateYield(overload);
+
+            Assert.That(task.ContinuationContext, Is.EqualTo(UniTaskContinuationContext.MainThread));
+            var resumePoint = await AwaitAndCaptureAsync(task).Timeout(ContinuationTimeout, DelayType.Realtime);
+
+            Assert.That(awaitPoint.IsThreadPoolThread, Is.EqualTo(awaitOn == ThreadKind.ThreadPool));
+            Assert.That(resumePoint.IsMainThread, Is.True);
+        });
+
+        /// <summary>
+        /// Checks that a <c>UniTask.Yield</c> awaited on the thread pool and canceled immediately from another thread pool thread
+        /// rethrows the cancellation on the main thread.
+        /// </summary>
+        /// <returns>The test coroutine.</returns>
+        [UnityTest]
+        public IEnumerator Yield_CanceledImmediatelyFromThreadPool_ThrowsOnMainThread() => UniTask.ToCoroutine(async () =>
+        {
+            using var cancellation = new CancellationTokenSource();
+            var pending = default(UniTask<(ResumePoint Point, Exception? Error)>);
+            // Blocking the main thread keeps the player loop from completing the yield before the cancellation.
+            System.Threading.Tasks.Task.Run(() =>
+            {
+                var task = UniTask.Yield(PlayerLoopTiming.LastPostLateUpdate, cancellation.Token, cancelImmediately: true);
+                pending = AwaitAndCaptureFailureAsync(task);
+                cancellation.Cancel();
+            }).Wait();
+
+            var (point, error) = await pending.Timeout(ContinuationTimeout, DelayType.Realtime);
+
+            Assert.That(error, Is.InstanceOf<OperationCanceledException>());
+            Assert.That(point.IsMainThread, Is.True);
+        });
+
+        /// <summary>Gets the task of <c>UniTask.Yield</c> through one of its overloads.</summary>
+        /// <param name="overload">The way the task is obtained.</param>
+        /// <returns>The pending task.</returns>
+        /// <exception cref="ArgumentOutOfRangeException"><paramref name="overload"/> is not a defined value.</exception>
+        private static UniTask CreateYield(YieldOverload overload)
+        {
+            switch (overload)
+            {
+                case YieldOverload.Token:
+                    return UniTask.Yield(CancellationToken.None);
+                case YieldOverload.TimingAndToken:
+                    return UniTask.Yield(PlayerLoopTiming.LastPostLateUpdate, CancellationToken.None);
+                case YieldOverload.AwaitableToUniTask:
+                    return UniTask.Yield().ToUniTask();
+                default:
+                    throw new ArgumentOutOfRangeException(nameof(overload));
+            }
+        }
 
         /// <summary>Gets the kind of thread an await resumes on.</summary>
         /// <param name="context">The continuation context of the awaited task.</param>
