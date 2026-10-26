@@ -1,31 +1,49 @@
 using System;
-using System.Collections.Generic;
 using System.Runtime.CompilerServices;
 using Unity.IL2CPP.CompilerServices;
 
 #nullable enable
 namespace MajdataPlay
 {
+    /// <summary>Tracks rolling average FPS and the average FPS of the slowest one percent of frames.</summary>
     internal sealed class FPSMonitor : MajComponent
     {
-        private const int AVG_FPS_SAMPLE_COUNT = 120;
-        private const int LOW_FPS_SAMPLE_COUNT = 600;
+        /// <summary>The number of recent frames used for average FPS.</summary>
+        private const int AverageFpsSampleCount = 120;
+
+        /// <summary>The number of recent frames used for one percent low FPS.</summary>
+        private const int LowFpsSampleCount = 600;
+
+        /// <summary>The number of slowest frames included in one percent low FPS.</summary>
+        private const int OnePercentLowSampleCount = LowFpsSampleCount / 100;
 
         // --- Avg FPS ---
+        /// <summary>The next average frame time slot to overwrite.</summary>
         private uint _avgFPSIndex;
+
+        /// <summary>The number of populated average frame time slots.</summary>
         private uint _avgFPSSampleCount;
+
+        /// <summary>The sum of the frame time ticks in the average window.</summary>
         private long _totalFrameTimeTicks;
-        private readonly long[] _avgFPSData = new long[AVG_FPS_SAMPLE_COUNT];
+
+        /// <summary>The rolling average frame time window.</summary>
+        private readonly long[] _avgFPSData = new long[AverageFpsSampleCount];
 
         // --- 1% Low FPS ---
+        /// <summary>The next low FPS frame time slot to overwrite.</summary>
         private uint _lowFPSIndex;
+
+        /// <summary>The number of populated low FPS frame time slots.</summary>
         private uint _lowFPSSampleCount;
-        private readonly long[] _lowFPSData = new long[LOW_FPS_SAMPLE_COUNT];
-        private readonly long[] _lowSortBuffer = new long[LOW_FPS_SAMPLE_COUNT];
 
+        /// <summary>The rolling frame time window used to select the slowest one percent.</summary>
+        private readonly long[] _lowFPSData = new long[LowFpsSampleCount];
+
+        /// <summary>The unscaled timeline time at the previous sample.</summary>
         private TimeSpan _lastUpdateTiming = TimeSpan.Zero;
-        private IComparer<long> _lowFrameComparer = new LowFrameComparer();
 
+        /// <summary>Gets the reciprocal of the mean frame time in the average window, or zero without positive elapsed time.</summary>
         internal double AverageFPS
         {
             get
@@ -56,41 +74,67 @@ namespace MajdataPlay
             _lastUpdateTiming = currentTime;
         }
 
+        /// <summary>Gets the reciprocal of the mean duration of the slowest six of the most recent 600 frames.</summary>
+        /// <param name="fps">The one percent low FPS, or zero before the window is full or without positive elapsed time.</param>
+        /// <returns>Whether all 600 frame times have been sampled.</returns>
         internal bool TryGetOnePercentLowFPS(out double fps)
         {
-            if (_lowFPSSampleCount < LOW_FPS_SAMPLE_COUNT)
+            if (_lowFPSSampleCount < LowFpsSampleCount)
             {
                 fps = 0;
                 return false;
             }
 
-            Array.Copy(_lowFPSData, _lowSortBuffer, LOW_FPS_SAMPLE_COUNT);
-            Array.Sort(_lowSortBuffer, _lowFrameComparer);
-
-            var totalLowFrameTime = 0L;
-            var sampleCount = Math.Max(1, (int)(LOW_FPS_SAMPLE_COUNT * 0.01));
-
-            for (var i = 0; i < sampleCount; i++)
+            // Keep only the six largest durations in descending order: O(n * 6) and no heap allocations.
+            Span<long> slowestFrameTicks = stackalloc long[OnePercentLowSampleCount];
+            var selectedCount = 0;
+            foreach (var frameTicks in _lowFPSData)
             {
-                totalLowFrameTime += _lowSortBuffer[i];
+                var insertionIndex = selectedCount;
+                if (selectedCount == slowestFrameTicks.Length)
+                {
+                    insertionIndex--;
+                    if (frameTicks <= slowestFrameTicks[insertionIndex])
+                    {
+                        continue;
+                    }
+                }
+                else
+                {
+                    selectedCount++;
+                }
+
+                while ((insertionIndex > 0) && (frameTicks > slowestFrameTicks[insertionIndex - 1]))
+                {
+                    slowestFrameTicks[insertionIndex] = slowestFrameTicks[insertionIndex - 1];
+                    insertionIndex--;
+                }
+                slowestFrameTicks[insertionIndex] = frameTicks;
             }
 
-            var averageLowFrameTime = (TimeSpan.FromTicks(totalLowFrameTime) / sampleCount).TotalSeconds;
-            fps = averageLowFrameTime <= 0 ? 0 : 1 / averageLowFrameTime;
+            var totalLowFrameTime = 0L;
+            foreach (var frameTicks in slowestFrameTicks)
+            {
+                totalLowFrameTime += frameTicks;
+            }
+
+            fps = totalLowFrameTime <= 0 ? 0 : (OnePercentLowSampleCount * (double)TimeSpan.TicksPerSecond) / totalLowFrameTime;
             return true;
         }
 
+        /// <summary>Adds one frame duration to both rolling windows.</summary>
+        /// <param name="frameTicks">The elapsed unscaled frame time in ticks.</param>
         [Il2CppSetOption(Option.NullChecks, false)]
         [Il2CppSetOption(Option.ArrayBoundsChecks, false)]
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private void AddSample(in long frameTicks)
         {
             // ------ Refresh Average FPS Buffer ------
-            if (_avgFPSIndex >= AVG_FPS_SAMPLE_COUNT)
+            if (_avgFPSIndex >= AverageFpsSampleCount)
             {
                 _avgFPSIndex = 0;
             }
-            if (_avgFPSSampleCount < AVG_FPS_SAMPLE_COUNT)
+            if (_avgFPSSampleCount < AverageFpsSampleCount)
             {
                 _avgFPSSampleCount++;
             }
@@ -101,24 +145,16 @@ namespace MajdataPlay
             lastAvgSample = frameTicks;
 
             // ------ Refresh 1% Low FPS Buffer ------
-            if (_lowFPSIndex >= LOW_FPS_SAMPLE_COUNT)
+            if (_lowFPSIndex >= LowFpsSampleCount)
             {
                 _lowFPSIndex = 0;
             }
-            if (_lowFPSSampleCount < LOW_FPS_SAMPLE_COUNT)
+            if (_lowFPSSampleCount < LowFpsSampleCount)
             {
                 _lowFPSSampleCount++;
             }
 
             _lowFPSData[_lowFPSIndex++] = frameTicks;
-        }
-
-        private class LowFrameComparer : IComparer<long>
-        {
-            public int Compare(long x, long y)
-            {
-                return y.CompareTo(x);
-            }
         }
     }
 }
