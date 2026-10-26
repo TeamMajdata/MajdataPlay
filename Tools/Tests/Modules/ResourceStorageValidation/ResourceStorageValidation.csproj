@@ -20,8 +20,8 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="../../../../Assets/Plugins/MajdataPlay/IO/Storage/*.cs" Link="Production/%(Filename)%(Extension)" />
-    <Compile Include="../../../../Assets/Scripts/Misc/MobileResourceUpdater.cs" Link="Production/MobileResourceUpdater.cs" />
-    <Compile Include="../../../../Assets/Scripts/Misc/DesktopResourceRestorer.cs" Link="Production/DesktopResourceRestorer.cs" />
+    <Compile Include="../../../../Assets/Scripts/Misc/Base/ProgressReporter.cs" Link="Production/ProgressReporter.cs" />
+    <Compile Include="../../../../Assets/Scripts/Misc/ResourceUpdate/*.cs" Exclude="../../../../Assets/Scripts/Misc/ResourceUpdate/FrameBudget.cs;../../../../Assets/Scripts/Misc/ResourceUpdate/ResourceManifestLoader.cs" Link="Production/%(Filename)%(Extension)" />
     <Compile Include="../../../../Assets/Scripts/Utils/StorageDirectoryTransfer.cs" Link="Production/StorageDirectoryTransfer.cs" />
     <Compile Include="../FileSystemValidation/MemoryFileSystem.cs" Link="Doubles/MemoryFileSystem.cs" />
   </ItemGroup>

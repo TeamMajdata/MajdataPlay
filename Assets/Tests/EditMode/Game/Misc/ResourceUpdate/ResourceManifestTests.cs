@@ -1,15 +1,14 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using MajdataPlay.IO.Storage;
+using MajdataPlay.ResourceUpdate;
 using MajdataPlay.Tests;
-using MajdataPlay.Tests.Game.Misc.Support;
 using NUnit.Framework;
 
 #nullable enable
 namespace MajdataPlay.Tests.Game.Misc.ResourceUpdate
 {
-    /// <summary>Covers the bundled resource manifests of <see cref="ResourceManifestLoader"/> and the Windows <see cref="DesktopResourceRestorer"/>.</summary>
+    /// <summary>Covers the bundled resource manifests of <see cref="ResourceManifestLoader"/>.</summary>
     public class ResourceManifestTests
     {
         /// <summary>A chart file listed in the bundled v2 manifest.</summary>
@@ -95,59 +94,5 @@ namespace MajdataPlay.Tests.Game.Misc.ResourceUpdate
             Assert.That(PrivateMember.InvokeStatic<bool>(typeof(ResourceManifestLoader), "IsSha256", new string('g', 64)), Is.False);
             Assert.That(PrivateMember.InvokeStatic<bool>(typeof(ResourceManifestLoader), "IsSha256", new object?[] { null }), Is.False);
         }
-
-#if UNITY_STANDALONE_WIN
-        /// <summary>Checks that populated chart and skin roots are left untouched.</summary>
-        [Test]
-        public void RestoreManagedAssets_KeepsPopulatedRoots()
-        {
-            using var temporary = new TemporaryDirectory();
-            using var environment = new MajEnvScope();
-            environment.UseTemporaryLayout(temporary);
-            MajEnv.ChartDirectory.CreateFile("user.txt");
-            MajEnv.SkinDirectory.CreateFile("user.txt");
-
-            DesktopResourceRestorer.RestoreManagedAssetsIfMissing();
-
-            Assert.That(MajEnv.ChartDirectory.EnumerateEntries().Single().Name, Is.EqualTo("user.txt"));
-            Assert.That(MajEnv.SkinDirectory.EnumerateEntries().Single().Name, Is.EqualTo("user.txt"));
-        }
-
-        /// <summary>Checks that an empty skin root is restored from the packaged resources while a populated chart root is kept.</summary>
-        [Test]
-        public void RestoreManagedAssets_RestoresEmptySkinRoot()
-        {
-            using var temporary = new TemporaryDirectory();
-            using var environment = new MajEnvScope();
-            environment.UseTemporaryLayout(temporary);
-            MajEnv.ChartDirectory.CreateFile("user.txt");
-
-            DesktopResourceRestorer.RestoreManagedAssetsIfMissing();
-
-            Assert.That(MajEnv.ChartDirectory.EnumerateEntries().Count(), Is.EqualTo(1));
-            Assert.That(MajEnv.SkinDirectory.FindFileAt("default/HoldSkins/hold.png"), Is.Not.Null);
-        }
-
-        /// <summary>Checks that restoring a group copies listed files with their nested paths and skips invalid entries.</summary>
-        [Test]
-        public void RestoreGroup_CopiesListedFiles()
-        {
-            using var temporary = new TemporaryDirectory();
-            var destination = new StorageDirectory(temporary.Directory.FileSystem, System.IO.Path.Combine(temporary.Location, "Charts"));
-            var manifest = new Dictionary<string, string>
-            {
-                { ChartFile, "unused" },
-                { "MaiCharts/Missing/maidata.txt", "unused" },
-                { "MaiCharts/", "unused" },
-                { "Skins/default/HoldSkins/hold.png", "unused" },
-            };
-
-            PrivateMember.InvokeStatic(typeof(DesktopResourceRestorer), "RestoreGroup", "MaiCharts/", destination, manifest);
-
-            Assert.That(destination.FindFileAt("Original/EX-AID/maidata.txt"), Is.Not.Null);
-            Assert.That(destination.FindDirectory("Missing"), Is.Null);
-            Assert.That(destination.FindFileAt("default/HoldSkins/hold.png"), Is.Null);
-        }
-#endif
     }
 }

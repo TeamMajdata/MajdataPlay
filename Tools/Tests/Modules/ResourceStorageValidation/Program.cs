@@ -3,12 +3,13 @@ using System;
 using System.IO;
 using System.IO.Compression;
 using System.Linq;
-using System.Reflection;
 using System.Security.Cryptography;
 using System.Text;
+using System.Threading;
 using MajdataPlay;
 using MajdataPlay.Diagnostics;
 using MajdataPlay.IO.Storage;
+using MajdataPlay.ResourceUpdate;
 using MajdataPlay.Tests.FileSystemValidation;
 using UnityEngine;
 
@@ -35,7 +36,9 @@ namespace ResourceStorageValidation
                 ("Mobile atomic commitment failure cleans temporary file", MobileCleansFailedAtomicWrite),
                 ("Mobile moves managed assets into a provider-backed root", MobileMovesManagedAssetsAcrossBackends),
                 ("Mobile preserves existing provider-backed managed assets", MobilePreservesExistingProviderManagedAssets),
-                ("Mobile retries an interrupted cross-backend move", MobileRetriesInterruptedCrossBackendMove)
+                ("Mobile retries an interrupted cross-backend move", MobileRetriesInterruptedCrossBackendMove),
+                ("Mobile extraction and check report progress", MobileReportsProgress),
+                ("Desktop restore reports progress", DesktopReportsProgress)
             };
             var failures = 0;
             foreach (var (name, run) in cases)
@@ -68,7 +71,7 @@ namespace ResourceStorageValidation
             var timestamp = new DateTime(2023, 4, 5, 6, 7, 8, DateTimeKind.Utc);
             File.SetLastWriteTimeUtc(packagedChartPath, timestamp);
             File.SetAttributes(packagedChartPath, File.GetAttributes(packagedChartPath) | FileAttributes.Hidden);
-            DesktopResourceRestorer.RestoreManagedAssetsIfMissing();
+            RestoreDesktop();
             fixture.AssertText("MaiCharts/Original/song/maidata.txt", "official chart");
             fixture.AssertText("Skins/default/skin.json", "official skin");
             var restoredChartPath = fixture.PathFor("MaiCharts/Original/song/maidata.txt");
@@ -89,7 +92,7 @@ namespace ResourceStorageValidation
             fixture.Package("MaiCharts/Original/maidata.txt", "official chart");
             fixture.Package("Skins/default/skin.json", "official skin");
             fixture.Write("MaiCharts/custom/maidata.txt", "player chart");
-            DesktopResourceRestorer.RestoreManagedAssetsIfMissing();
+            RestoreDesktop();
             fixture.AssertText("MaiCharts/custom/maidata.txt", "player chart");
             fixture.AssertMissing("MaiCharts/Original/maidata.txt");
             fixture.AssertText("Skins/default/skin.json", "official skin");
@@ -229,7 +232,7 @@ namespace ResourceStorageValidation
             var failed = false;
             try
             {
-                InvokeMobile("WriteAllBytesAtomically", MajEnv.AssetsDirectory, "conflict.bin", Encoding.UTF8.GetBytes("replacement"));
+                ResourceFiles.WriteAllBytesAtomically(MajEnv.AssetsDirectory, "conflict.bin", Encoding.UTF8.GetBytes("replacement"));
             }
             catch (IOException)
             {
@@ -322,28 +325,72 @@ namespace ResourceStorageValidation
             Assert(provider.OpenStreamCount == 0, "Every provider stream must be disposed after the resumed move.");
         }
 
-        /// <summary>Invokes the production initialization entry without substituting its resource behavior.</summary>
-        private static void InitializeMobile()
+        /// <summary>Checks that extraction reports every extracted file and the install step, and a later check reports every checked file.</summary>
+        private static void MobileReportsProgress()
         {
-            InvokeMobile("InitializeOrUpdate");
+            using var fixture = new Fixture();
+            fixture.Package("Config/options.txt", "official options");
+            fixture.Package("MaiCharts/Original/maidata.txt", "official chart");
+            fixture.Package("Skins/default/skin.json", "official skin");
+            var reports = new System.Collections.Generic.List<ProgressReport>();
+            InitializeMobile(reports);
+            AssertNoErrors();
+            var extraction = reports.Where(report => report.Message == reports[0].Message).ToArray();
+            Assert(extraction.Length == 4 && extraction[0].Completed == 0 && extraction.All(report => report.Total == 3),
+                "Extraction must report its start and each of the three packaged files.");
+            Assert(extraction[3].Completed == 3 && extraction[3].Fraction == 1f && extraction[3].ToString().EndsWith("3/3 (100%)", StringComparison.Ordinal),
+                "The last extraction report must be complete.");
+            Assert(reports.Count == 5 && !reports[4].HasTotal && reports[4].ToString() == reports[4].Message,
+                "Installing the bundled charts and skin must be reported without counts.");
+
+            reports.Clear();
+            InitializeMobile(reports);
+            AssertNoErrors();
+            Assert(reports.Count != 0 && reports[reports.Count - 1].Completed == 3 && reports[reports.Count - 1].Total == 3,
+                "A later check must finish by reporting every packaged file as checked.");
         }
 
-        /// <summary>Invokes a private production updater method and preserves its underlying exception type.</summary>
-        /// <param name="name">The production method name.</param>
-        /// <param name="arguments">The arguments expected by that method.</param>
-        /// <exception cref="MissingMethodException">The linked method no longer exists.</exception>
-        private static void InvokeMobile(string name, params object[] arguments)
+        /// <summary>Checks that restoring empty desktop roots reports each restored group to completion.</summary>
+        private static void DesktopReportsProgress()
         {
-            var method = typeof(MobileResourceUpdater).GetMethod(name, BindingFlags.Static | BindingFlags.NonPublic)
-                ?? throw new MissingMethodException(typeof(MobileResourceUpdater).FullName, name);
-            try
+            using var fixture = new Fixture(usePackagedArchive: false);
+            fixture.Package("MaiCharts/Original/a/maidata.txt", "official chart a");
+            fixture.Package("MaiCharts/Original/b/maidata.txt", "official chart b");
+            fixture.Package("Skins/default/skin.json", "official skin");
+            var reports = new System.Collections.Generic.List<ProgressReport>();
+            RestoreDesktop(reports);
+            AssertNoErrors();
+            var messages = reports.Select(report => report.Message).Distinct().ToArray();
+            Assert(messages.Length == 2, "Charts and skins must be reported as separate steps.");
+            Assert(reports.Count(report => report.Message == messages[0]) == 3 &&
+                   reports.Last(report => report.Message == messages[0]).Completed == 2,
+                "The chart step must report its start and both chart files.");
+            Assert(reports[reports.Count - 1].Completed == 1 && reports[reports.Count - 1].Total == 1,
+                "The skin step must finish by reporting its only file.");
+        }
+
+        /// <summary>Runs the mobile startup flow of <c>GameManager.CheckResourcesAsync</c> without substituting its resource behavior.</summary>
+        /// <param name="reports">Receives every progress report, or null to discard them.</param>
+        private static void InitializeMobile(System.Collections.Generic.List<ProgressReport>? reports = null)
+        {
+            var progress = new ProgressReporter(report => reports?.Add(report));
+            var budget = new FrameBudget();
+            if (!MajEnv.AssetsDirectory.Exists)
             {
-                method.Invoke(null, arguments);
+                MobileResourceImporter.ImportAsync(progress, budget, CancellationToken.None).AsTask().GetAwaiter().GetResult();
             }
-            catch (TargetInvocationException exception) when (exception.InnerException is not null)
+            else
             {
-                System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(exception.InnerException).Throw();
+                MobileResourceChecker.CheckAsync(progress, budget, CancellationToken.None).AsTask().GetAwaiter().GetResult();
             }
+        }
+
+        /// <summary>Runs the Windows startup flow of <c>GameManager.CheckResourcesAsync</c>.</summary>
+        /// <param name="reports">Receives every progress report, or null to discard them.</param>
+        private static void RestoreDesktop(System.Collections.Generic.List<ProgressReport>? reports = null)
+        {
+            var progress = new ProgressReporter(report => reports?.Add(report));
+            DesktopResourceChecker.CheckAsync(progress, new FrameBudget(), CancellationToken.None).AsTask().GetAwaiter().GetResult();
         }
 
         /// <summary>Computes the same lowercase SHA-256 representation used by validated resource manifests.</summary>

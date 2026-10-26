@@ -1,8 +1,10 @@
 # Resource storage migration validation
 
 This independent, package-free **.NET 9** executable links the production storage
-implementation, `MobileResourceUpdater`, `DesktopResourceRestorer`, and the shared
-`StorageDirectoryTransfer` helper, plus the in-memory content provider double from
+implementation, the resource importer and checkers under
+`Assets/Scripts/Misc/ResourceUpdate` (`MobileResourceImporter`, `MobileResourceChecker`,
+`MobileManagedAssetMover`, `DesktopResourceChecker` and their shared helpers),
+`ProgressReporter`, and the shared `StorageDirectoryTransfer` helper, plus the in-memory content provider double from
 `FileSystemValidation` for cross-backend cases. It does
 not build Unity's generated solution or project files. Output and fixtures stay
 under the ignored `Temp/ResourceStorageValidation/` directory.
@@ -18,8 +20,8 @@ The default selects the iOS packaged-file branch. The second command selects the
 Android branch, whose mobile cases read compressed entries from a temporary APK-shaped
 ZIP archive through production `jar:file://...!/assets` storage. Both also compile
 and exercise the Windows restorer against a native package directory. Narrow
-substitutes provide only Unity paths, logging, initialization attributes, and
-manifest dictionaries. Packaged reads use production storage with no request
+substitutes provide only Unity paths, logging, manifest dictionaries, and a
+`FrameBudget` that never yields, so the asynchronous workflows complete synchronously. Packaged reads use production storage with no request
 transport substitute. Manifest JSON parsing and Android filesystem permissions
 are outside this executable's scope.
 
@@ -34,7 +36,8 @@ file cleanup when destination commitment fails; and managed moves whose chart an
 skin roots live on a content provider: the tree crosses backends with its file
 timestamps, an existing provider tree is preserved, and an interrupted transfer
 removes its temporary copy, keeps the extracted source and marker, and completes
-on the next start.
+on the next start; and the progress reports of mobile extraction, the later mobile
+check, and the desktop restore.
 
 Each case prints `PASS` or `FAIL`, followed by `RESOURCE_STORAGE_VALIDATION_PASSED`
 or `RESOURCE_STORAGE_VALIDATION_FAILED`. Managed results do not establish Unity
