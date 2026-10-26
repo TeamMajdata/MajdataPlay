@@ -163,6 +163,7 @@ namespace MajdataPlay.FFmpeg
         /// <exception cref="ObjectDisposedException">This instance has been disposed.</exception>
         public void Open(string localOutputPath, CancellationToken cancellationToken)
         {
+            using var profile = UnityProfiler.Create("FFmpeg.Encoder.Open");
             EnsureOwner();
             if (_format != null || _opened)
             {
@@ -238,9 +239,14 @@ namespace MajdataPlay.FFmpeg
         /// <exception cref="ObjectDisposedException">This instance has been disposed.</exception>
         public void Encode(ReadOnlySpan<byte> packedRgba, long frameIndex, bool flipVertically)
         {
+            using var profile = UnityProfiler.Create("FFmpeg.Encoder.Encode");
             PrepareInput(CapturePixelLayout.Rgba32, packedRgba.Length, nameof(packedRgba), frameIndex);
-            // The converter reads bottom-first rows in place, so the capture is not copied before conversion.
-            _converter!.Convert(packedRgba, flipVertically, _frame);
+            using (UnityProfiler.Create("FFmpeg.Encoder.ConvertRGBA"))
+            {
+                // The converter reads bottom-first rows in place, so the capture is not copied before conversion.
+                _converter!.Convert(packedRgba, flipVertically, _frame);
+            }
+
             SubmitFrame(frameIndex);
         }
 
@@ -255,8 +261,13 @@ namespace MajdataPlay.FFmpeg
         /// <exception cref="ObjectDisposedException">This instance has been disposed.</exception>
         internal void EncodeNv12(ReadOnlySpan<byte> nv12, long frameIndex)
         {
+            using var profile = UnityProfiler.Create("FFmpeg.Encoder.Encode");
             PrepareInput(CapturePixelLayout.Nv12, nv12.Length, nameof(nv12), frameIndex);
-            CaptureFrameConverter.CopyNv12(nv12, Width, Height, _frame);
+            using (UnityProfiler.Create("FFmpeg.Encoder.CopyNV12"))
+            {
+                CaptureFrameConverter.CopyNv12(nv12, Width, Height, _frame);
+            }
+
             SubmitFrame(frameIndex);
         }
 
@@ -304,6 +315,7 @@ namespace MajdataPlay.FFmpeg
             var submitted = _frame;
             if (_hardwareFrames != null)
             {
+                using var profile = UnityProfiler.Create("FFmpeg.Encoder.UploadHardwareFrame");
                 ffmpeg.av_frame_unref(_hardwareFrame);
                 Check(ffmpeg.av_hwframe_get_buffer(_hardwareFrames, _hardwareFrame, 0), "Acquire encoder hardware frame");
                 Check(ffmpeg.av_hwframe_transfer_data(_hardwareFrame, _frame, 0), "Upload encoder hardware frame");
@@ -325,6 +337,7 @@ namespace MajdataPlay.FFmpeg
         /// <exception cref="ObjectDisposedException">This instance has been disposed.</exception>
         public void Complete()
         {
+            using var profile = UnityProfiler.Create("FFmpeg.Encoder.Complete");
             EnsureOwner();
             if (_completed)
             {
@@ -871,7 +884,13 @@ namespace MajdataPlay.FFmpeg
             while (true)
             {
                 _cancellation.ThrowIfCancellationRequested();
-                var result = ffmpeg.avcodec_send_frame(_codec, frame);
+                int result;
+                // Separate the codec's own time, which includes MediaCodec input copies and waits, from conversion and muxing.
+                using (UnityProfiler.Create(EncoderType == VideoEncoderType.Hardware ? "FFmpeg.Encoder.Hardware.SendFrame" : "FFmpeg.Encoder.Software.SendFrame"))
+                {
+                    result = ffmpeg.avcodec_send_frame(_codec, frame);
+                }
+
                 if (result != -ffmpeg.EAGAIN)
                 {
                     Check(result, frame == null ? "Drain video encoder" : "Send captured frame");
@@ -897,7 +916,12 @@ namespace MajdataPlay.FFmpeg
             while (true)
             {
                 _cancellation.ThrowIfCancellationRequested();
-                var result = ffmpeg.avcodec_receive_packet(_codec, _packet);
+                int result;
+                using (UnityProfiler.Create(EncoderType == VideoEncoderType.Hardware ? "FFmpeg.Encoder.Hardware.ReceivePacket" : "FFmpeg.Encoder.Software.ReceivePacket"))
+                {
+                    result = ffmpeg.avcodec_receive_packet(_codec, _packet);
+                }
+
                 if (result == ffmpeg.AVERROR_EOF)
                 {
                     return count;
@@ -929,7 +953,11 @@ namespace MajdataPlay.FFmpeg
                     }
 
                     _packet->stream_index = _stream->index;
-                    CheckOutput(ffmpeg.av_interleaved_write_frame(_format, _packet), "Mux encoded video packet");
+                    using (UnityProfiler.Create("FFmpeg.Encoder.WritePacket"))
+                    {
+                        CheckOutput(ffmpeg.av_interleaved_write_frame(_format, _packet), "Mux encoded video packet");
+                    }
+
                     Interlocked.Add(ref _bytesWritten, bytes);
                     Interlocked.Exchange(ref _currentBitRate, _bitRateTracker.Measure(_latestPacketEnd));
                     count++;

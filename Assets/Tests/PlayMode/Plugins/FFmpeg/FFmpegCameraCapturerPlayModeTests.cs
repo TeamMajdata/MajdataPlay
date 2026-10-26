@@ -285,6 +285,79 @@ namespace MajdataPlay.Tests.Plugins.FFmpeg
             Assert.That(CountFrames(path, out _), Is.EqualTo(capturer.EncodedFrames));
         }
 
+        /// <summary>Checks that a recording writes its named samples into an ordinary, non-deep profiler capture, from the main thread and the encoder worker.</summary>
+        /// <remarks>
+        /// Recorder and ProfilerRecorder do not observe Profiler.BeginSample samples, so the test enables a binary capture and
+        /// looks for each sample name, which the capture stores as UTF-16 text.
+        /// </remarks>
+        /// <returns>The test coroutine.</returns>
+        [UnityTest]
+        public IEnumerator Record_EmitsProfilerSamples()
+        {
+            if (!UnityEngine.Profiling.Profiler.supported)
+            {
+                Assert.Ignore("The profiler is unavailable in this player.");
+            }
+
+            var capturer = CreateCapturer(true, out var camera);
+            var profilerWasEnabled = UnityEngine.Profiling.Profiler.enabled;
+            UnityEngine.Profiling.Profiler.logFile = Path.Combine(_directory.Location, "profile");
+            UnityEngine.Profiling.Profiler.enableBinaryLog = true;
+            UnityEngine.Profiling.Profiler.enabled = true;
+            try
+            {
+                var start = capturer.StartRecordingAsync(FFmpegTestMedia.PathIn(_directory, "profiled.mkv"));
+                yield return PlayModeWait.Until(() => start.IsCompleted);
+                Assert.That(start.Status, Is.EqualTo(TaskStatus.RanToCompletion));
+                yield return RenderFor(camera, 0.3);
+                var stop = capturer.StopRecordingAsync();
+                yield return PlayModeWait.Until(() => stop.IsCompleted);
+                Assert.That(stop.Status, Is.EqualTo(TaskStatus.RanToCompletion));
+                // The capture still has to receive the frame that contains the encoder's final samples.
+                yield return PlayModeWait.Frames(2);
+            }
+            finally
+            {
+                UnityEngine.Profiling.Profiler.enabled = profilerWasEnabled;
+                UnityEngine.Profiling.Profiler.enableBinaryLog = false;
+                UnityEngine.Profiling.Profiler.logFile = string.Empty;
+            }
+
+            var capture = _directory.Directory.FindFile("profile.raw");
+            Assert.That(capture, Is.Not.Null, "The profiler wrote no binary capture.");
+            var bytes = capture!.ReadAllBytes();
+            var names = new[]
+            {
+                "FFmpeg.Capturer.Capture", "FFmpeg.Capturer.CompleteReadback", "FFmpeg.Capturer.CopyReadback", "FFmpeg.Encoder.Open",
+                "FFmpeg.Encoder.Encode", capturer.UsesGpuColorConversion ? "FFmpeg.Encoder.CopyNV12" : "FFmpeg.Encoder.ConvertRGBA",
+                "FFmpeg.Encoder.Software.SendFrame", "FFmpeg.Encoder.Software.ReceivePacket", "FFmpeg.Encoder.WritePacket",
+                "FFmpeg.Encoder.Complete"
+            };
+            foreach (var name in names)
+            {
+                Assert.That(Contains(bytes, System.Text.Encoding.Unicode.GetBytes(name)), Is.True, name);
+            }
+        }
+
+        /// <summary>Checks whether a byte sequence occurs in a buffer.</summary>
+        /// <param name="buffer">The buffer to search.</param>
+        /// <param name="sequence">The nonempty sequence to find.</param>
+        /// <returns>True when the sequence occurs at any offset.</returns>
+        private static bool Contains(byte[] buffer, byte[] sequence)
+        {
+            var first = sequence[0];
+            for (var offset = Array.IndexOf(buffer, first); offset >= 0 && offset + sequence.Length <= buffer.Length;
+                offset = Array.IndexOf(buffer, first, offset + 1))
+            {
+                if (buffer.AsSpan(offset, sequence.Length).SequenceEqual(sequence))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
         /// <summary>Checks that recording a main-display camera registers with the MRP capture bridge only while recording.</summary>
         /// <returns>The test coroutine.</returns>
         [UnityTest]

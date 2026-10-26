@@ -330,6 +330,45 @@ namespace MajdataPlay.Diagnostics
             Messages.Add(message);
         }
     }
+
+    /// <summary>Replaces the Unity Profiler sample scope, which needs the Unity runtime.</summary>
+    public readonly ref struct UnityProfiler
+    {
+        /// <summary>Gets the sample name.</summary>
+        public string Name { get; init; }
+
+        /// <summary>Ends the sample; the stub records nothing.</summary>
+        public void Dispose()
+        {
+        }
+
+        /// <summary>Begins a named sample; the stub records nothing.</summary>
+        /// <param name="name">The sample name.</param>
+        /// <returns>The scope that ends the sample.</returns>
+        public static UnityProfiler Create(string name)
+        {
+            return new UnityProfiler { Name = name };
+        }
+    }
+}
+
+namespace UnityEngine.Profiling
+{
+    /// <summary>Replaces the Unity Profiler thread registration, which needs the Unity runtime.</summary>
+    public static class Profiler
+    {
+        /// <summary>Registers the calling thread; the stub records nothing.</summary>
+        /// <param name="threadGroupName">The profiler thread group.</param>
+        /// <param name="threadName">The profiler thread name.</param>
+        public static void BeginThreadProfiling(string threadGroupName, string threadName)
+        {
+        }
+
+        /// <summary>Unregisters the calling thread; the stub records nothing.</summary>
+        public static void EndThreadProfiling()
+        {
+        }
+    }
 }
 
 namespace MajdataPlay.FFmpeg

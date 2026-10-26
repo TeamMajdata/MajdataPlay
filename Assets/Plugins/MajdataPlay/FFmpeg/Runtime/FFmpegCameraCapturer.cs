@@ -608,6 +608,8 @@ namespace MajdataPlay.FFmpeg
                 return;
             }
 
+            // Covers reservation and command recording; the GPU copy, conversion and readback run later on the render thread.
+            using var profile = UnityProfiler.Create("FFmpeg.Capturer.Capture");
             var unityFrame = Time.frameCount;
             if (unityFrame == _lastCaptureFrame)
             {
@@ -873,6 +875,7 @@ namespace MajdataPlay.FFmpeg
                 /// <param name="request">The completed asynchronous GPU request.</param>
                 private void Complete(AsyncGPUReadbackRequest request)
                 {
+                    using var profile = UnityProfiler.Create("FFmpeg.Capturer.CompleteReadback");
                     var frame = Frame;
                     var success = false;
                     try
@@ -887,7 +890,11 @@ namespace MajdataPlay.FFmpeg
                             throw new IOException("Asynchronous camera GPU readback failed.");
                         }
 
-                        request.GetData<byte>().CopyTo(frame.Pixels);
+                        using (UnityProfiler.Create("FFmpeg.Capturer.CopyReadback"))
+                        {
+                            request.GetData<byte>().CopyTo(frame.Pixels);
+                        }
+
                         success = true;
                     }
                     catch (Exception error)

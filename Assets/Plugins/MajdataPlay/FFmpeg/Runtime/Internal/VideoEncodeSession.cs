@@ -365,8 +365,10 @@ namespace MajdataPlay.FFmpeg.Internal
         }
 
         /// <summary>Encodes completed captures in reservation order on the owner thread.</summary>
+        /// <remarks>The worker registers with the Unity Profiler as <c>FFmpeg / Encoder</c>, so its encoder samples appear in the Timeline.</remarks>
         private void Run()
         {
+            UnityEngine.Profiling.Profiler.BeginThreadProfiling("FFmpeg", "Encoder");
             try
             {
                 using (var encoder = new FFmpegVideoEncoder(_options, _layout))
@@ -441,6 +443,8 @@ namespace MajdataPlay.FFmpeg.Internal
                 {
                     _completion.TrySetResult(true);
                 }
+
+                UnityEngine.Profiling.Profiler.EndThreadProfiling();
             }
         }
 
