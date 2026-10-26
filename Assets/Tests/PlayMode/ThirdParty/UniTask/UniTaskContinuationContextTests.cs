@@ -43,16 +43,53 @@ namespace MajdataPlay.Tests.ThirdParty.Cysharp.PlayMode
             ThreadPool,
         }
 
-        /// <summary>The ways to get the task of <c>UniTask.Yield</c>.</summary>
-        public enum YieldOverload
+        /// <summary>The player loop waits whose tasks resume on the main thread by default.</summary>
+        public enum PlayerLoopWait
         {
             /// <summary><c>UniTask.Yield(CancellationToken, bool)</c>.</summary>
-            Token,
+            YieldWithToken,
             /// <summary><c>UniTask.Yield(PlayerLoopTiming, CancellationToken, bool)</c>.</summary>
-            TimingAndToken,
+            YieldWithTimingAndToken,
             /// <summary><c>YieldAwaitable.ToUniTask()</c>.</summary>
-            AwaitableToUniTask,
+            YieldAwaitableToUniTask,
+            /// <summary><c>UniTask.NextFrame()</c>.</summary>
+            NextFrame,
+            /// <summary><c>UniTask.NextFrame(PlayerLoopTiming, CancellationToken, bool)</c>.</summary>
+            NextFrameWithTimingAndToken,
+            /// <summary><c>UniTask.DelayFrame</c>.</summary>
+            DelayFrame,
+            /// <summary><c>UniTask.Delay</c> with <see cref="DelayType.DeltaTime"/>.</summary>
+            Delay,
+            /// <summary><c>UniTask.Delay</c> with <see cref="DelayType.UnscaledDeltaTime"/>.</summary>
+            DelayUnscaled,
+            /// <summary><c>UniTask.Delay</c> with <see cref="DelayType.Realtime"/>.</summary>
+            DelayRealtime,
+            /// <summary><c>UniTask.WaitForSeconds</c>.</summary>
+            WaitForSeconds,
+            /// <summary><c>UniTask.WaitForFixedUpdate(CancellationToken, bool)</c>.</summary>
+            WaitForFixedUpdate,
+            /// <summary><c>UniTask.WaitUntil(Func{bool}, ...)</c>.</summary>
+            WaitUntil,
+            /// <summary><c>UniTask.WaitUntil{T}(T, Func{T, bool}, ...)</c>.</summary>
+            WaitUntilWithState,
+            /// <summary><c>UniTask.WaitWhile(Func{bool}, ...)</c>.</summary>
+            WaitWhile,
+            /// <summary><c>UniTask.WaitWhile{T}(T, Func{T, bool}, ...)</c>.</summary>
+            WaitWhileWithState,
+            /// <summary><c>UniTask.WaitUntilCanceled</c>.</summary>
+            WaitUntilCanceled,
+            /// <summary><c>UniTask.WaitUntilValueChanged</c>, converted with <c>AsUniTask</c>.</summary>
+            WaitUntilValueChanged,
         }
+
+        /// <summary>How long the time-based waits wait, in milliseconds.</summary>
+        private const int ShortDelayMilliseconds = 1;
+
+        /// <summary>
+        /// How long <see cref="PlayerLoopWait.WaitUntilCanceled"/> waits for its token, in milliseconds; long enough for the token to
+        /// still be pending when the wait is created, so the wait does not complete synchronously.
+        /// </summary>
+        private const int CancelAfterMilliseconds = 50;
 
         /// <summary>The result the generic sources complete with.</summary>
         private const int GenericResult = 42;
@@ -445,21 +482,21 @@ namespace MajdataPlay.Tests.ThirdParty.Cysharp.PlayMode
         });
 
         /// <summary>
-        /// Checks that the task of <c>UniTask.Yield</c> is configured for the main thread and that awaiting it on the thread pool
-        /// resumes on the main thread, so that polling loops do not queue a thread pool work item per frame.
+        /// Checks that the task of each player loop wait is configured for the main thread and that awaiting it on the thread pool
+        /// resumes on the main thread, so that polling loops do not queue a thread pool work item per wait.
         /// </summary>
-        /// <param name="overload">The way the task is obtained.</param>
+        /// <param name="wait">The player loop wait.</param>
         /// <param name="awaitOn">The thread that awaits the task.</param>
         /// <returns>The test coroutine.</returns>
         [UnityTest]
-        public IEnumerator Yield_ResumesOnMainThread([Values] YieldOverload overload, [Values] ThreadKind awaitOn) => UniTask.ToCoroutine(async () =>
+        public IEnumerator PlayerLoopWait_ResumesOnMainThread([Values] PlayerLoopWait wait, [Values] ThreadKind awaitOn) => UniTask.ToCoroutine(async () =>
         {
             if (awaitOn == ThreadKind.ThreadPool)
             {
                 await UniTask.SwitchToThreadPool();
             }
             var awaitPoint = ResumePoint.Capture(null);
-            var task = CreateYield(overload);
+            var task = CreatePlayerLoopWait(wait);
 
             Assert.That(task.ContinuationContext, Is.EqualTo(UniTaskContinuationContext.MainThread));
             var resumePoint = await AwaitAndCaptureAsync(task).Timeout(ContinuationTimeout, DelayType.Realtime);
@@ -492,22 +529,73 @@ namespace MajdataPlay.Tests.ThirdParty.Cysharp.PlayMode
             Assert.That(point.IsMainThread, Is.True);
         });
 
-        /// <summary>Gets the task of <c>UniTask.Yield</c> through one of its overloads.</summary>
-        /// <param name="overload">The way the task is obtained.</param>
-        /// <returns>The pending task.</returns>
-        /// <exception cref="ArgumentOutOfRangeException"><paramref name="overload"/> is not a defined value.</exception>
-        private static UniTask CreateYield(YieldOverload overload)
+        /// <summary>
+        /// Checks that <c>UniTask.WaitForEndOfFrame</c> is configured for the main thread. The wait is canceled instead of awaited
+        /// to completion, because the end of frame never comes in batch mode, and it is started on the main thread, because
+        /// <c>Awaitable.EndOfFrameAsync</c> has to be.
+        /// </summary>
+        /// <returns>The test coroutine.</returns>
+        [UnityTest]
+        public IEnumerator WaitForEndOfFrame_IsConfiguredForMainThread() => UniTask.ToCoroutine(async () =>
         {
-            switch (overload)
+            using var cancellation = new CancellationTokenSource();
+            var task = UniTask.WaitForEndOfFrame(cancellation.Token);
+
+            Assert.That(task.ContinuationContext, Is.EqualTo(UniTaskContinuationContext.MainThread));
+            var pending = AwaitAndCaptureFailureAsync(task);
+            cancellation.Cancel();
+            var (point, error) = await pending.Timeout(ContinuationTimeout, DelayType.Realtime);
+
+            Assert.That(error, Is.InstanceOf<OperationCanceledException>());
+            Assert.That(point.IsMainThread, Is.True);
+        });
+
+        /// <summary>Starts a player loop wait that completes within a few frames.</summary>
+        /// <param name="wait">The player loop wait.</param>
+        /// <returns>The pending task, converted to <see cref="UniTask"/> for the waits with a result.</returns>
+        /// <exception cref="ArgumentOutOfRangeException"><paramref name="wait"/> is not a defined value.</exception>
+        private static UniTask CreatePlayerLoopWait(PlayerLoopWait wait)
+        {
+            switch (wait)
             {
-                case YieldOverload.Token:
+                case PlayerLoopWait.YieldWithToken:
                     return UniTask.Yield(CancellationToken.None);
-                case YieldOverload.TimingAndToken:
+                case PlayerLoopWait.YieldWithTimingAndToken:
                     return UniTask.Yield(PlayerLoopTiming.LastPostLateUpdate, CancellationToken.None);
-                case YieldOverload.AwaitableToUniTask:
+                case PlayerLoopWait.YieldAwaitableToUniTask:
                     return UniTask.Yield().ToUniTask();
+                case PlayerLoopWait.NextFrame:
+                    return UniTask.NextFrame();
+                case PlayerLoopWait.NextFrameWithTimingAndToken:
+                    return UniTask.NextFrame(PlayerLoopTiming.LastPostLateUpdate, CancellationToken.None);
+                case PlayerLoopWait.DelayFrame:
+                    return UniTask.DelayFrame(1);
+                case PlayerLoopWait.Delay:
+                    return UniTask.Delay(ShortDelayMilliseconds);
+                case PlayerLoopWait.DelayUnscaled:
+                    return UniTask.Delay(ShortDelayMilliseconds, DelayType.UnscaledDeltaTime);
+                case PlayerLoopWait.DelayRealtime:
+                    return UniTask.Delay(ShortDelayMilliseconds, DelayType.Realtime);
+                case PlayerLoopWait.WaitForSeconds:
+                    return UniTask.WaitForSeconds(ShortDelayMilliseconds / 1000f);
+                case PlayerLoopWait.WaitForFixedUpdate:
+                    return UniTask.WaitForFixedUpdate(CancellationToken.None);
+                case PlayerLoopWait.WaitUntil:
+                    return UniTask.WaitUntil(() => true);
+                case PlayerLoopWait.WaitUntilWithState:
+                    return UniTask.WaitUntil(true, state => state);
+                case PlayerLoopWait.WaitWhile:
+                    return UniTask.WaitWhile(() => false);
+                case PlayerLoopWait.WaitWhileWithState:
+                    return UniTask.WaitWhile(false, state => state);
+                case PlayerLoopWait.WaitUntilCanceled:
+                    return UniTask.WaitUntilCanceled(new CancellationTokenSource(CancelAfterMilliseconds).Token);
+                case PlayerLoopWait.WaitUntilValueChanged:
+                    // The initial value is read on the creating thread, so the monitor must not call Unity APIs.
+                    var monitorCalls = 0;
+                    return UniTask.WaitUntilValueChanged(new object(), _ => ++monitorCalls).AsUniTask();
                 default:
-                    throw new ArgumentOutOfRangeException(nameof(overload));
+                    throw new ArgumentOutOfRangeException(nameof(wait));
             }
         }
 
