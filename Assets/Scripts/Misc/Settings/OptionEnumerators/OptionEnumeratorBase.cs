@@ -111,6 +111,11 @@ namespace MajdataPlay.Settings.OptionEnumerators
         /// </summary>
         private protected SettingValueSelection SelectedValues { get; private set; } = SettingValueSelection.Empty;
 
+        /// <summary>
+        /// Gets the values that <see cref="DisableValuesAttribute"/> removes from the choices on the current platform.
+        /// </summary>
+        private protected SettingDisabledValues DisabledValues { get; private set; } = SettingDisabledValues.None;
+
         Type _memberType = null!;
         Attribute[] _attributes = Array.Empty<Attribute>();
         // True for numeric members including nullable ones; their values are only translated on explicit request.
@@ -143,6 +148,7 @@ namespace MajdataPlay.Settings.OptionEnumerators
             IsReadOnly = GetCustomAttribute<ReadOnlyOptionAttribute>() != null || FieldInfo.IsInitOnly;
             Name = fieldInfo.Name;
             InitTranslation();
+            DisabledValues = SettingDisabledValues.Resolve(_attributes, Name, _memberType);
             InitInternal();
         }
         public void Init(PropertyInfo propertyInfo, object property)
@@ -170,6 +176,7 @@ namespace MajdataPlay.Settings.OptionEnumerators
             IsReadOnly = GetCustomAttribute<ReadOnlyOptionAttribute>() != null || !PropertyInfo.CanWrite;
             Name = propertyInfo.Name;
             InitTranslation();
+            DisabledValues = SettingDisabledValues.Resolve(_attributes, Name, _memberType);
             InitInternal();
         }
 
