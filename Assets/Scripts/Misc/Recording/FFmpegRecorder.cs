@@ -339,6 +339,7 @@ namespace MajdataPlay.Recording
             {
                 var audioCodec = await Task.Run(() =>
                 {
+                    using var profile = UnityProfiler.Create("FFmpegRecorder.Mux");
                     using (var pcm = FileSystem.File.OpenRead(files.AudioPath))
                     using (var output = FileSystem.File.OpenWrite(files.MuxedPath))
                     {
@@ -369,23 +370,32 @@ namespace MajdataPlay.Recording
         /// <summary>Copies captured audio to the PCM file until asked to stop, then drains the remainder and closes the file.</summary>
         /// <param name="output">The PCM file, owned and closed by this worker.</param>
         /// <param name="stopToken">Signals that the audio recorder has stopped.</param>
+        /// <remarks>The worker registers with the Unity Profiler as <c>FFmpeg / Recorder Audio</c>, so its writes appear in the Timeline.</remarks>
         private void DrainAudio(Stream output, CancellationToken stopToken)
         {
-            var samples = new float[Math.Max(1, _audioRecorder.SampleRate / AudioDrainBufferDivisor) * _audioRecorder.Channels];
-            using (output)
+            UnityEngine.Profiling.Profiler.BeginThreadProfiling("FFmpeg", "Recorder Audio");
+            try
             {
-                var waitHandle = stopToken.WaitHandle;
-                while (!stopToken.IsCancellationRequested)
+                var samples = new float[Math.Max(1, _audioRecorder.SampleRate / AudioDrainBufferDivisor) * _audioRecorder.Channels];
+                using (output)
                 {
-                    WriteAvailableAudio(output, samples);
-                    if (waitHandle.WaitOne(AudioDrainIntervalMilliseconds))
+                    var waitHandle = stopToken.WaitHandle;
+                    while (!stopToken.IsCancellationRequested)
                     {
-                        // Stopping is the normal exit; the final drain below collects the remaining samples.
-                        break;
+                        WriteAvailableAudio(output, samples);
+                        if (waitHandle.WaitOne(AudioDrainIntervalMilliseconds))
+                        {
+                            // Stopping is the normal exit; the final drain below collects the remaining samples.
+                            break;
+                        }
                     }
+                    WriteAvailableAudio(output, samples);
+                    output.Flush();
                 }
-                WriteAvailableAudio(output, samples);
-                output.Flush();
+            }
+            finally
+            {
+                UnityEngine.Profiling.Profiler.EndThreadProfiling();
             }
         }
 
@@ -394,6 +404,7 @@ namespace MajdataPlay.Recording
         /// <param name="samples">The reusable transfer buffer.</param>
         private void WriteAvailableAudio(Stream output, float[] samples)
         {
+            using var profile = UnityProfiler.Create("FFmpegRecorder.WriteAvailableAudio");
             int count;
             while ((count = _audioRecorder.Read(samples)) > 0)
             {
@@ -420,6 +431,8 @@ namespace MajdataPlay.Recording
         /// <param name="outputName">The file name in the output directory.</param>
         private static void MoveToOutputDirectory(string sourcePath, string outputName)
         {
+            // Runs on the continuation of the stop, usually the Unity main thread; a copy across storage backends can stall it.
+            using var profile = UnityProfiler.Create("FFmpegRecorder.MoveToOutputDirectory");
             var outputDirectory = MajEnv.RecordOutputsDirectory;
             var source = FileSystem.File.Open(sourcePath);
             if (ReferenceEquals(source.FileSystem, outputDirectory.FileSystem))

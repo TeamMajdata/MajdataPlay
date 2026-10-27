@@ -1,7 +1,9 @@
 {
     "name": "MajdataPlay.Utils",
     "rootNamespace": "MajdataPlay.Utils",
-    "references": [],
+    "references": [
+        "GUID:8545470905e4bf241a27188012585d36"
+    ],
     "includePlatforms": [],
     "excludePlatforms": [],
     "allowUnsafeCode": false,

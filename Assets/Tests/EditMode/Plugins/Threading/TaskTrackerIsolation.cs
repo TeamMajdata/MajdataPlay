@@ -27,6 +27,9 @@ namespace MajdataPlay.Tests.Plugins.Threading
         /// <summary>The saved stack trace switch.</summary>
         private readonly bool _enableStackTrace;
 
+        /// <summary>The saved Editor-only switch that turns registration into a pass-through.</summary>
+        private readonly bool _isTrackingSupported;
+
         /// <summary>The saved cached scene name.</summary>
         private readonly string _activeScene;
 
@@ -40,6 +43,7 @@ namespace MajdataPlay.Tests.Plugins.Threading
             }
             _enableTracking = TaskTracker.EnableTracking;
             _enableStackTrace = TaskTracker.EnableStackTrace;
+            _isTrackingSupported = TaskTracker.IsTrackingSupported;
             _activeScene = PrivateMember.GetStaticField<string>(typeof(TaskTracker), "_activeScene");
         }
 
@@ -99,6 +103,7 @@ namespace MajdataPlay.Tests.Plugins.Threading
             }
             TaskTracker.EnableTracking = _enableTracking;
             TaskTracker.EnableStackTrace = _enableStackTrace;
+            TaskTracker.IsTrackingSupported = _isTrackingSupported;
             PrivateMember.SetStaticField(typeof(TaskTracker), "_activeScene", _activeScene);
         }
 

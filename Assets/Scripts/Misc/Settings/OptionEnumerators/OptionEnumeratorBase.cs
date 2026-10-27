@@ -115,6 +115,8 @@ namespace MajdataPlay.Settings.OptionEnumerators
         Attribute[] _attributes = Array.Empty<Attribute>();
         // True for numeric members including nullable ones; their values are only translated on explicit request.
         bool _hasNumericValues;
+        // True for numeric members marked with FoldNumberAttribute; their untranslated values are shown folded.
+        bool _foldsNumbers;
 
         public void Init(FieldInfo fieldInfo, object field)
         {
@@ -251,23 +253,52 @@ namespace MajdataPlay.Settings.OptionEnumerators
         /// </remarks>
         /// <param name="value">The option value, or null for a missing value.</param>
         /// <param name="valueText">The untranslated display text of <paramref name="value"/>.</param>
-        /// <returns>The localized text, or <paramref name="valueText"/> when it is not translated or has no translation.</returns>
+        /// <returns>
+        /// The localized text. When it is not translated or has no translation, the folded number of an option marked with
+        /// <see cref="FoldNumberAttribute"/>, or otherwise <paramref name="valueText"/>.
+        /// </returns>
         protected string LocalizeValueText(object? value, string valueText)
         {
             if (value is null)
             {
                 return PlaceholderTranslation.Localize(valueText);
             }
+            string localizedText;
             if (!ValueTranslation.IsTranslated || (_hasNumericValues && !ValueTranslation.IsExplicit))
             {
-                return SelectedValues.Localize(value, valueText);
+                localizedText = SelectedValues.Localize(value, valueText);
             }
-            return ValueTranslation.Localize(valueText, _hasNumericValues);
+            else
+            {
+                localizedText = ValueTranslation.Localize(valueText, _hasNumericValues);
+            }
+            return FoldUntranslatedNumber(value, valueText, localizedText);
+        }
+        /// <summary>
+        /// Replaces an untranslated numeric value text with its folded form when the option is marked with
+        /// <see cref="FoldNumberAttribute"/>.
+        /// </summary>
+        /// <remarks>
+        /// The translation lookup keeps using the unfolded <paramref name="valueText"/>, so a translated value is shown as
+        /// translated and only the raw number falls back to the folded text.
+        /// </remarks>
+        /// <param name="value">The option value.</param>
+        /// <param name="valueText">The untranslated display text of <paramref name="value"/>.</param>
+        /// <param name="localizedText">The result of the translation lookup for <paramref name="valueText"/>.</param>
+        /// <returns>The folded text when it applies; otherwise <paramref name="localizedText"/>.</returns>
+        private string FoldUntranslatedNumber(object value, string valueText, string localizedText)
+        {
+            if (!_foldsNumbers || !string.Equals(localizedText, valueText, StringComparison.Ordinal))
+            {
+                return localizedText;
+            }
+            return SettingNumberFolding.TryFold(value, out var foldedText) ? foldedText : localizedText;
         }
         private void InitTranslation()
         {
             var valueType = Nullable.GetUnderlyingType(_memberType) ?? _memberType;
             _hasNumericValues = valueType.IsIntType() || valueType.IsFloatType();
+            _foldsNumbers = _hasNumericValues && GetCustomAttribute<FoldNumberAttribute>() != null;
             ValueTranslation = SettingTranslation.Resolve(_attributes, TranslationTarget.OptionValue, Name, _memberType);
             PlaceholderTranslation = SettingTranslation.ResolvePlaceholder(_attributes, Name);
             SelectedValues = SettingValueSelection.Resolve(_attributes, Name, _memberType);

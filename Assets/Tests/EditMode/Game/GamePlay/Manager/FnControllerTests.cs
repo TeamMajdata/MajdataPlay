@@ -94,14 +94,11 @@ namespace MajdataPlay.Tests.Game.GamePlay.Manager
             AssertKeyMapping("1278", fastPractice);
         }
 
-        /// <summary>Checks that inactive gameplay clears every timer and requires another release before arming.</summary>
-        /// <param name="state">The inactive gameplay state.</param>
-        [TestCase(GamePlayStatus.Start)]
-        [TestCase(GamePlayStatus.Loading)]
-        [TestCase(GamePlayStatus.Ended)]
-        public void UpdateInputState_ResetsWhileNotRunning(GamePlayStatus state)
+        /// <summary>Checks that ended gameplay clears every timer and requires another release before arming.</summary>
+        [Test]
+        public void UpdateInputState_ResetsAfterGameplayEnded()
         {
-            SetState(state);
+            SetState(GamePlayStatus.Ended);
             PrivateMember.SetField(_controller, "_2367PressTime", 1f);
             PrivateMember.SetField(_controller, "_3456PressTime", 1f);
             PrivateMember.SetField(_controller, "_1278PressTime", 1f);
@@ -114,8 +111,10 @@ namespace MajdataPlay.Tests.Game.GamePlay.Manager
             Assert.That(PrivateMember.GetField<bool>(_controller, "_isFnKeyInputArmed"), Is.False);
         }
 
-        /// <summary>Checks that active gameplay arms shortcuts after a released frame without accumulating holds.</summary>
-        /// <param name="state">The active gameplay state.</param>
+        /// <summary>Checks that gameplay before the end arms shortcuts after a released frame without accumulating holds.</summary>
+        /// <param name="state">The gameplay state before the end.</param>
+        [TestCase(GamePlayStatus.Start)]
+        [TestCase(GamePlayStatus.Loading)]
         [TestCase(GamePlayStatus.Running)]
         [TestCase(GamePlayStatus.Blocking)]
         [TestCase(GamePlayStatus.WaitForEnd)]
@@ -334,13 +333,22 @@ namespace MajdataPlay.Tests.Game.GamePlay.Manager
             AssertPressTimesAreZero();
         }
 
-        /// <summary>Checks that the existing gameplay update entry point advances its shortcut controller.</summary>
+        /// <summary>Checks that the gameplay update entry point advances its shortcut controller after the one-second start-up wait.</summary>
         [Test]
-        public void GamePlayManagerOnUpdate_UpdatesTheShortcutController()
+        public void GamePlayManagerOnUpdate_UpdatesTheShortcutControllerAfterStartupWait()
         {
             PrivateMember.SetField(_manager, "_fnController", _controller);
+            SetState(GamePlayStatus.Ended);
             PrivateMember.SetField(_controller, "_2367PressTime", 1f);
             PrivateMember.SetField(_controller, "_isFnKeyInputArmed", true);
+
+            // Four quarter-second frames only fill the one-second wait.
+            for (var i = 0; i < 4; i++)
+            {
+                _manager.OnUpdate();
+            }
+            Assert.That(PrivateMember.GetField<float>(_controller, "_2367PressTime"), Is.EqualTo(1f));
+            Assert.That(PrivateMember.GetField<bool>(_controller, "_isFnKeyInputArmed"), Is.True);
 
             _manager.OnUpdate();
 

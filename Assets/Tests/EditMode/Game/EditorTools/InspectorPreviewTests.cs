@@ -98,17 +98,27 @@ namespace MajdataPlay.Tests.Game.EditorTools
             Assert.That(PrivateMember.GetField<bool>(inspector, "_isPreviewing"), Is.True);
         }
 
-        /// <summary>Checks that the button preview scales the button and finishing restores the original scale.</summary>
-        [Test]
-        public void ButtonAnimationInspector_PreviewRestoresOriginalScale()
+        /// <summary>Checks that the button preview uses the configured duration and restores the original scale.</summary>
+        /// <param name="animationDuration">The serialized duration of each scale animation.</param>
+        [TestCase(0.4f)]
+        [TestCase(-0.1f)]
+        public void ButtonAnimationInspector_PreviewRestoresOriginalScale(float animationDuration)
         {
             var button = _objects.Add<ButtonAnimation>("Button");
+            PrivateMember.SetField(button, "_releasedScale", 1.2f);
+            PrivateMember.SetField(button, "_animationDuration", animationDuration);
             button.transform.localScale = new Vector3(2f, 2f, 2f);
             var inspector = _objects.Track((ButtonAnimationInspector)UnityEditor.Editor.CreateEditor(button));
 
+            var previewStartedAt = EditorApplication.timeSinceStartup;
             PrivateMember.Invoke(inspector, "StartPreview");
+            var previewCheckedAt = EditorApplication.timeSinceStartup;
+            var previewDuration = Mathf.Max(animationDuration, 0f) * 2f + 0.1d;
+
             Assert.That(PrivateMember.GetField<bool>(inspector, "_isPreviewing"), Is.True);
-            Assert.That(button.transform.localScale.x, Is.EqualTo(button.ReleasedScale).Within(1e-4f));
+            Assert.That(PrivateMember.GetField<double>(inspector, "_previewRepaintUntil"),
+                Is.InRange(previewStartedAt + previewDuration, previewCheckedAt + previewDuration));
+            Assert.That(button.transform.localScale.x, Is.EqualTo(1.2f).Within(1e-4f));
 
             PrivateMember.SetField(inspector, "_previewRepaintUntil", 0d);
             PrivateMember.Invoke(inspector, "RepaintPreview");

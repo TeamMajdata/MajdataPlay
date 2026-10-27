@@ -472,6 +472,43 @@ namespace MajdataPlay.Tests.Game.Misc.Base
             });
         }
 
+        /// <summary>
+        /// Checks that compressed and full-size covers are kept in their own caches and destroyed when the song is disposed.
+        /// </summary>
+        /// <returns>The test coroutine.</returns>
+        [UnityTest]
+        public IEnumerator Covers_AreCachedPerSizeUntilDisposed()
+        {
+            return UniTask.ToCoroutine(async () =>
+            {
+                var texture = new UnityEngine.Texture2D(4, 4);
+                var png = UnityEngine.ImageConversion.EncodeToPNG(texture);
+                UnityEngine.Object.DestroyImmediate(texture);
+                _http.Responder = _ => Bytes(HttpStatusCode.OK, png);
+                var song = CreateSong();
+
+                var compressed = await song.GetCoverAsync(true);
+                var compressedAgain = await song.GetCoverAsync(true);
+                var fullSize = await song.GetCoverAsync(false);
+                await UniTask.SwitchToMainThread();
+
+                Assert.That(compressed != null, Is.True);
+                Assert.That(compressedAgain, Is.SameAs(compressed));
+                Assert.That(fullSize != null, Is.True);
+                Assert.That(fullSize, Is.Not.SameAs(compressed));
+                Assert.That(song.IsCompressedCoverLoaded, Is.True);
+                Assert.That(song.IsCoverLoaded, Is.True);
+                Assert.That(_http.Requests.Count, Is.EqualTo(2));
+
+                song.Dispose();
+
+                Assert.That(compressed == null, Is.True);
+                Assert.That(fullSize == null, Is.True);
+                Assert.That(song.IsCompressedCoverLoaded, Is.False);
+                Assert.That(song.IsCoverLoaded, Is.False);
+            });
+        }
+
         /// <summary>Checks that a disposed song rejects every resource request and that disposal is idempotent.</summary>
         /// <returns>The test coroutine.</returns>
         [UnityTest]

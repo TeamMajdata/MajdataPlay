@@ -7,11 +7,12 @@ using UnityEngine;
 #nullable enable
 namespace MajdataPlay
 {
-    internal readonly struct MaidataLineGraphAnalyzeResult
+    internal readonly struct CachedMaidataAnalyzeResult
     {
+        public bool IsValid { get; init; }
         public TimeSpan Length { get; init; }
         public float MaxBPM { get; init; }
         public float MinBPM { get; init; }
-        public required Texture LineGraph { get; init; }
+        public DateTime Timestamp { get; init; }
     }
 }

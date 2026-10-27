@@ -29,6 +29,8 @@ namespace MajdataPlay.FFmpeg
         private static readonly avio_alloc_context_seek s_seekCallback = SeekOutput;
         /// <summary>Stores immutable settings for this encoder instance.</summary>
         private readonly EncoderOptions _options;
+        /// <summary>Stores the pixel layout that every submitted frame uses.</summary>
+        private readonly CapturePixelLayout _inputLayout;
         /// <summary>Reuses the existing bounded one-second compressed bitrate estimator.</summary>
         private readonly VideoBitRateTracker _bitRateTracker = new VideoBitRateTracker();
         /// <summary>Owns the output container context.</summary>
@@ -118,16 +120,34 @@ namespace MajdataPlay.FFmpeg
         /// <summary>Gets how the software codec parallelizes encoding: <c>frame</c>, <c>slice</c>, <c>codec</c> for library-managed workers, or <c>none</c> for one thread or hardware encoding.</summary>
         public string SoftwareThreadingMode { get; private set; } = "none";
         /// <summary>Gets the number of threads, including the encoder worker, converting captured RGBA frames to the encoder input format, or zero before opening.</summary>
-        /// <remarks>Conversion runs on the CPU for hardware encoders as well, so this is independent of <see cref="SoftwareThreadCount"/>.</remarks>
+        /// <remarks>
+        /// Conversion runs on the CPU for hardware encoders as well, so this is independent of <see cref="SoftwareThreadCount"/>.
+        /// It stays zero for an encoder of GPU-converted NV12 input, which only copies planes.
+        /// </remarks>
         public int ConverterThreadCount { get; private set; }
 
-        /// <summary>Creates an encoder with an independent validated options snapshot.</summary>
+        /// <summary>Creates an encoder of RGBA8 frames with an independent validated options snapshot.</summary>
         /// <param name="options">The settings to copy for this recording.</param>
         /// <exception cref="ArgumentNullException">Options are null.</exception>
         /// <exception cref="ArgumentOutOfRangeException">A setting is outside its supported range.</exception>
-        public FFmpegVideoEncoder(EncoderOptions options)
+        public FFmpegVideoEncoder(EncoderOptions options) : this(options, CapturePixelLayout.Rgba32)
+        {
+        }
+
+        /// <summary>Creates an encoder of frames in one pixel layout with an independent validated options snapshot.</summary>
+        /// <param name="options">The settings to copy for this recording.</param>
+        /// <param name="inputLayout">The layout of every submitted frame: RGBA8 for <see cref="Encode"/> or NV12 for <see cref="EncodeNv12"/>.</param>
+        /// <exception cref="ArgumentNullException">Options are null.</exception>
+        /// <exception cref="ArgumentOutOfRangeException">A setting or the layout is outside its supported range.</exception>
+        internal FFmpegVideoEncoder(EncoderOptions options, CapturePixelLayout inputLayout)
         {
             _options = (options ?? throw new ArgumentNullException(nameof(options))).ValidateAndClone();
+            if (!Enum.IsDefined(typeof(CapturePixelLayout), inputLayout))
+            {
+                throw new ArgumentOutOfRangeException(nameof(inputLayout));
+            }
+
+            _inputLayout = inputLayout;
         }
 
         /// <summary>Selects an encoder and creates a new local output file using the extension's container format.</summary>
@@ -143,6 +163,7 @@ namespace MajdataPlay.FFmpeg
         /// <exception cref="ObjectDisposedException">This instance has been disposed.</exception>
         public void Open(string localOutputPath, CancellationToken cancellationToken)
         {
+            using var profile = UnityProfiler.Create("FFmpeg.Encoder.Open");
             EnsureOwner();
             if (_format != null || _opened)
             {
@@ -212,17 +233,66 @@ namespace MajdataPlay.FFmpeg
         /// <param name="flipVertically">Whether the first input row is the bottom row and must be reversed.</param>
         /// <exception cref="ArgumentException">The input buffer has the wrong length.</exception>
         /// <exception cref="ArgumentOutOfRangeException">The frame timestamp is negative or not strictly increasing.</exception>
-        /// <exception cref="InvalidOperationException">The encoder is closed, finalized, accessed by another thread, or native conversion/encoding fails.</exception>
+        /// <exception cref="InvalidOperationException">The encoder is closed, finalized, accessed by another thread, created for NV12 input, or native conversion/encoding fails.</exception>
         /// <exception cref="IOException">Writing the local output fails.</exception>
         /// <exception cref="OperationCanceledException">Cancellation was requested.</exception>
         /// <exception cref="ObjectDisposedException">This instance has been disposed.</exception>
         public void Encode(ReadOnlySpan<byte> packedRgba, long frameIndex, bool flipVertically)
         {
+            using var profile = UnityProfiler.Create("FFmpeg.Encoder.Encode");
+            PrepareInput(CapturePixelLayout.Rgba32, packedRgba.Length, nameof(packedRgba), frameIndex);
+            using (UnityProfiler.Create("FFmpeg.Encoder.ConvertRGBA"))
+            {
+                // The converter reads bottom-first rows in place, so the capture is not copied before conversion.
+                _converter!.Convert(packedRgba, flipVertically, _frame);
+            }
+
+            SubmitFrame(frameIndex);
+        }
+
+        /// <summary>Copies a GPU-converted NV12 frame into the encoder's pixel format and drains available packets.</summary>
+        /// <param name="nv12">Exactly Width times Height times 1.5 bytes, top row first, borrowed only until this call returns.</param>
+        /// <param name="frameIndex">A nonnegative, strictly increasing timestamp in units of one output frame; gaps preserve dropped-frame timing.</param>
+        /// <exception cref="ArgumentException">The input buffer has the wrong length.</exception>
+        /// <exception cref="ArgumentOutOfRangeException">The frame timestamp is negative or not strictly increasing.</exception>
+        /// <exception cref="InvalidOperationException">The encoder is closed, finalized, accessed by another thread, created for RGBA input, or native encoding fails.</exception>
+        /// <exception cref="IOException">Writing the local output fails.</exception>
+        /// <exception cref="OperationCanceledException">Cancellation was requested.</exception>
+        /// <exception cref="ObjectDisposedException">This instance has been disposed.</exception>
+        internal void EncodeNv12(ReadOnlySpan<byte> nv12, long frameIndex)
+        {
+            using var profile = UnityProfiler.Create("FFmpeg.Encoder.Encode");
+            PrepareInput(CapturePixelLayout.Nv12, nv12.Length, nameof(nv12), frameIndex);
+            using (UnityProfiler.Create("FFmpeg.Encoder.CopyNV12"))
+            {
+                CaptureFrameConverter.CopyNv12(nv12, Width, Height, _frame);
+            }
+
+            SubmitFrame(frameIndex);
+        }
+
+        /// <summary>Validates one submitted frame and makes the reusable input frame writable.</summary>
+        /// <param name="layout">The layout of the submitted frame.</param>
+        /// <param name="length">The byte length of the submitted frame.</param>
+        /// <param name="inputName">The parameter name of the submitted frame, reported by length failures.</param>
+        /// <param name="frameIndex">The submitted timestamp.</param>
+        /// <exception cref="ArgumentException">The input buffer has the wrong length.</exception>
+        /// <exception cref="ArgumentOutOfRangeException">The frame timestamp is negative or not strictly increasing.</exception>
+        /// <exception cref="InvalidOperationException">The encoder is closed, finalized, accessed by another thread, created for another layout, or the frame cannot be made writable.</exception>
+        /// <exception cref="OperationCanceledException">Cancellation was requested.</exception>
+        /// <exception cref="ObjectDisposedException">This instance has been disposed.</exception>
+        private void PrepareInput(CapturePixelLayout layout, int length, string inputName, long frameIndex)
+        {
             EnsureOpen();
             _cancellation.ThrowIfCancellationRequested();
-            if (packedRgba.Length != checked(Width * Height * 4))
+            if (layout != _inputLayout)
             {
-                throw new ArgumentException("The input must contain exactly one tightly packed RGBA8 frame.", nameof(packedRgba));
+                throw new InvalidOperationException("This encoder accepts " + _inputLayout + " frames, not " + layout + ".");
+            }
+
+            if (length != layout.GetFrameByteCount(Width, Height))
+            {
+                throw new ArgumentException("The input must contain exactly one tightly packed " + layout + " frame.", inputName);
             }
 
             if (frameIndex < 0 || frameIndex <= _lastFrameIndex)
@@ -231,13 +301,21 @@ namespace MajdataPlay.FFmpeg
             }
 
             Check(ffmpeg.av_frame_make_writable(_frame), "Make encoder frame writable");
-            // The converter reads bottom-first rows in place, so the capture is not copied before conversion.
-            _converter!.Convert(packedRgba, flipVertically, _frame);
+        }
+
+        /// <summary>Submits the filled input frame, uploading it first for hardware frame pools, and drains available packets.</summary>
+        /// <param name="frameIndex">The validated timestamp of the frame.</param>
+        /// <exception cref="InvalidOperationException">Uploading or encoding fails.</exception>
+        /// <exception cref="IOException">Writing the local output fails.</exception>
+        /// <exception cref="OperationCanceledException">Cancellation was requested.</exception>
+        private void SubmitFrame(long frameIndex)
+        {
             _frame->pts = frameIndex;
             _frame->duration = 1;
             var submitted = _frame;
             if (_hardwareFrames != null)
             {
+                using var profile = UnityProfiler.Create("FFmpeg.Encoder.UploadHardwareFrame");
                 ffmpeg.av_frame_unref(_hardwareFrame);
                 Check(ffmpeg.av_hwframe_get_buffer(_hardwareFrames, _hardwareFrame, 0), "Acquire encoder hardware frame");
                 Check(ffmpeg.av_hwframe_transfer_data(_hardwareFrame, _frame, 0), "Upload encoder hardware frame");
@@ -259,6 +337,7 @@ namespace MajdataPlay.FFmpeg
         /// <exception cref="ObjectDisposedException">This instance has been disposed.</exception>
         public void Complete()
         {
+            using var profile = UnityProfiler.Create("FFmpeg.Encoder.Complete");
             EnsureOwner();
             if (_completed)
             {
@@ -707,7 +786,7 @@ namespace MajdataPlay.FFmpeg
             _codec->pix_fmt = AVPixelFormat.AV_PIX_FMT_VAAPI;
         }
 
-        /// <summary>Allocates padded reusable pixel buffers, packet storage, and the multi-threaded color converter.</summary>
+        /// <summary>Allocates padded reusable pixel buffers, packet storage, and, for RGBA input, the multi-threaded color converter.</summary>
         /// <exception cref="OutOfMemoryException">Native frame, packet, or pixel storage cannot be allocated.</exception>
         /// <exception cref="NotSupportedException">The encoder input format is neither YUV420P nor NV12.</exception>
         private void AllocateFrames()
@@ -724,6 +803,12 @@ namespace MajdataPlay.FFmpeg
             if (_hardwareFrame == null || _packet == null)
             {
                 throw new OutOfMemoryException("Cannot allocate encoder frame or packet storage.");
+            }
+
+            if (_inputLayout == CapturePixelLayout.Nv12)
+            {
+                // GPU-converted input is only copied into the planes, so no converter threads exist.
+                return;
             }
 
             // Workers split output rows, so small frames do not spawn idle converter threads.
@@ -799,7 +884,13 @@ namespace MajdataPlay.FFmpeg
             while (true)
             {
                 _cancellation.ThrowIfCancellationRequested();
-                var result = ffmpeg.avcodec_send_frame(_codec, frame);
+                int result;
+                // Separate the codec's own time, which includes MediaCodec input copies and waits, from conversion and muxing.
+                using (UnityProfiler.Create(EncoderType == VideoEncoderType.Hardware ? "FFmpeg.Encoder.Hardware.SendFrame" : "FFmpeg.Encoder.Software.SendFrame"))
+                {
+                    result = ffmpeg.avcodec_send_frame(_codec, frame);
+                }
+
                 if (result != -ffmpeg.EAGAIN)
                 {
                     Check(result, frame == null ? "Drain video encoder" : "Send captured frame");
@@ -825,7 +916,12 @@ namespace MajdataPlay.FFmpeg
             while (true)
             {
                 _cancellation.ThrowIfCancellationRequested();
-                var result = ffmpeg.avcodec_receive_packet(_codec, _packet);
+                int result;
+                using (UnityProfiler.Create(EncoderType == VideoEncoderType.Hardware ? "FFmpeg.Encoder.Hardware.ReceivePacket" : "FFmpeg.Encoder.Software.ReceivePacket"))
+                {
+                    result = ffmpeg.avcodec_receive_packet(_codec, _packet);
+                }
+
                 if (result == ffmpeg.AVERROR_EOF)
                 {
                     return count;
@@ -857,7 +953,11 @@ namespace MajdataPlay.FFmpeg
                     }
 
                     _packet->stream_index = _stream->index;
-                    CheckOutput(ffmpeg.av_interleaved_write_frame(_format, _packet), "Mux encoded video packet");
+                    using (UnityProfiler.Create("FFmpeg.Encoder.WritePacket"))
+                    {
+                        CheckOutput(ffmpeg.av_interleaved_write_frame(_format, _packet), "Mux encoded video packet");
+                    }
+
                     Interlocked.Add(ref _bytesWritten, bytes);
                     Interlocked.Exchange(ref _currentBitRate, _bitRateTracker.Measure(_latestPacketEnd));
                     count++;

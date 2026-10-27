@@ -1,6 +1,7 @@
 using Cysharp.Text;
 using Cysharp.Threading.Tasks;
 using MajdataPlay.Buffers;
+using MajdataPlay.Collections;
 using MajdataPlay.Databases;
 using MajdataPlay.Diagnostics;
 using MajdataPlay.Drawing;
@@ -49,10 +50,10 @@ namespace MajdataPlay
         public ApiEndpoint ServerInfo => _serverInfo;
 
         public bool IsVideoLoaded { get => _videoPath != null; }
-        public bool IsCoverLoaded { get => _fullSizeCoverRef.TryGetTarget(out _); }
-        public bool IsCompressedCoverLoaded { get => _coverRef.TryGetTarget(out _); }
-        public bool IsAudioTrackLoaded { get => _audioTrackRef.TryGetTarget(out _); }
-        public bool IsPreviewAudioTrackLoaded { get => _previewAudioTrackRef.TryGetTarget(out _); }
+        public bool IsCoverLoaded { get => Cache.LargeSprite.ContainsKey(_fullSizeCoverCacheKey); }
+        public bool IsCompressedCoverLoaded { get => Cache.Sprite.ContainsKey(_coverCacheKey); }
+        public bool IsAudioTrackLoaded { get => Cache.AudioSample.ContainsKey(_audioTrackCacheKey); }
+        public bool IsPreviewAudioTrackLoaded { get => Cache.AudioSample.ContainsKey(_previewAudioTrackCacheKey); }
         public bool IsMaidataLoaded { get => _maidata != null; }
 
         /// <summary>Retains the caller-owned per-song cache directory and its original storage backend.</summary>
@@ -72,10 +73,14 @@ namespace MajdataPlay
         private bool _isPreloaded = false;
 
         private string? _videoPath = null;
-        private WeakReference<AudioSampleWrap> _audioTrackRef = new(null!);
-        private WeakReference<AudioSampleWrap> _previewAudioTrackRef = new(null!);
-        private WeakReference<Sprite> _coverRef = new(null!);
-        private WeakReference<Sprite> _fullSizeCoverRef = new(null!);
+        /// <summary>The key of this song's music track in <see cref="Cache.AudioSample"/>.</summary>
+        private readonly string _audioTrackCacheKey;
+        /// <summary>The key of this song's streamed preview track in <see cref="Cache.AudioSample"/>.</summary>
+        private readonly string _previewAudioTrackCacheKey;
+        /// <summary>The key of this song's compressed cover in <see cref="Cache.Sprite"/>.</summary>
+        private readonly string _coverCacheKey;
+        /// <summary>The key of this song's full-size cover in <see cref="Cache.LargeSprite"/>.</summary>
+        private readonly string _fullSizeCoverCacheKey;
         private SimaiFile? _maidata = null;
 
         private volatile int _preloadJoinState = 0;
@@ -102,6 +107,12 @@ namespace MajdataPlay
         /// <exception cref="ArgumentNullException">The cache directory, endpoint or song metadata is null.</exception>
         public OnlineSongDetail(StorageDirectory directory, ApiEndpoint serverInfo, MajnetSongDetail songDetail)
         {
+            // Assigned before anything can throw, because the finalizer still runs when the constructor fails.
+            var cacheKeyScope = Cache.CreateKeyScope(nameof(OnlineSongDetail));
+            _audioTrackCacheKey = $"{cacheKeyScope}/track";
+            _previewAudioTrackCacheKey = $"{cacheKeyScope}/preview";
+            _coverCacheKey = $"{cacheKeyScope}/cover";
+            _fullSizeCoverCacheKey = $"{cacheKeyScope}/fullSizeCover";
             if (directory is null)
             {
                 throw new ArgumentNullException(nameof(directory));
@@ -193,7 +204,8 @@ namespace MajdataPlay
                 using (@lock)
                 {
                     token.ThrowIfCancellationRequested();
-                    if (_audioTrackRef.TryGetTarget(out var audioTrack) || _previewAudioTrackRef.TryGetTarget(out audioTrack))
+                    if (Cache.AudioSample.TryGetValue(_audioTrackCacheKey, out var audioTrack)
+                        || Cache.AudioSample.TryGetValue(_previewAudioTrackCacheKey, out audioTrack))
                     {
                         return audioTrack;
                     }
@@ -201,7 +213,7 @@ namespace MajdataPlay
                     var audioManager = MajInstances.AudioManager;
                     var sample = await audioManager.LoadMusicFromUriAsync(_trackUri, token);
 
-                    _previewAudioTrackRef.SetTarget(sample);
+                    StoreAudioSample(_previewAudioTrackCacheKey, sample);
 
                     return sample;
                 }
@@ -387,37 +399,12 @@ namespace MajdataPlay
                 return;
             }
             _isDisposed = true;
-            if (_audioTrackRef.TryGetTarget(out var audioTrack))
-            {
-                audioTrack.Dispose();
-            }
-            if (_previewAudioTrackRef.TryGetTarget(out audioTrack))
-            {
-                audioTrack.Dispose();
-            }
-            UniTask.Post(() =>
-            {
-                if (_coverRef.TryGetTarget(out var cover) && cover.IsNativeAlive())
-                {
-                    var tex = cover.texture;
-                    GameObject.DestroyImmediate(cover, true);
-                    GameObject.DestroyImmediate(tex, true);
-                }
-                if (_fullSizeCoverRef.TryGetTarget(out cover) && cover.IsNativeAlive())
-                {
-                    var tex = cover.texture;
-                    GameObject.DestroyImmediate(cover, true);
-                    GameObject.DestroyImmediate(tex, true);
-                }
-            });
+            // Removing releases the values: samples are disposed and the covers are destroyed on the main thread.
+            Cache.AudioSample.Remove(_audioTrackCacheKey);
+            Cache.AudioSample.Remove(_previewAudioTrackCacheKey);
+            Cache.Sprite.Remove(_coverCacheKey);
+            Cache.LargeSprite.Remove(_fullSizeCoverCacheKey);
             _maidata = null;
-            if (disposing)
-            {
-                _audioTrackRef.SetTarget(null!);
-                _previewAudioTrackRef.SetTarget(null!);
-                _coverRef.SetTarget(null!);
-                _fullSizeCoverRef.SetTarget(null!);
-            }
             _videoPath = null;
         }
         public async ValueTask DisposeAsync()
@@ -427,35 +414,22 @@ namespace MajdataPlay
                 return;
             }
             _isDisposed = true;
-            if (_audioTrackRef.TryGetTarget(out var audioTrack))
+            if (Cache.AudioSample.TryRemove(_audioTrackCacheKey, out var audioTrack))
             {
                 await audioTrack.DisposeAsync();
             }
-            if (_previewAudioTrackRef.TryGetTarget(out audioTrack))
+            if (Cache.AudioSample.TryRemove(_previewAudioTrackCacheKey, out audioTrack))
             {
                 await audioTrack.DisposeAsync();
             }
             await using (UniTask.ReturnToCurrentSynchronizationContext())
             {
+                // On the main thread the covers are destroyed before this method completes.
                 await UniTask.SwitchToMainThread();
-                if (_coverRef.TryGetTarget(out var cover) && cover.IsNativeAlive())
-                {
-                    var tex = cover.texture;
-                    GameObject.DestroyImmediate(cover, true);
-                    GameObject.DestroyImmediate(tex, true);
-                }
-                if (_fullSizeCoverRef.TryGetTarget(out cover) && cover.IsNativeAlive())
-                {
-                    var tex = cover.texture;
-                    GameObject.DestroyImmediate(cover, true);
-                    GameObject.DestroyImmediate(tex, true);
-                }
+                Cache.Sprite.Remove(_coverCacheKey);
+                Cache.LargeSprite.Remove(_fullSizeCoverCacheKey);
             }
             _maidata = null;
-            _audioTrackRef.SetTarget(null!);
-            _previewAudioTrackRef.SetTarget(null!);
-            _coverRef.SetTarget(null!);
-            _fullSizeCoverRef.SetTarget(null!);
             _videoPath = null;
         }
         //public async ValueTask UnloadUnityAssetsAsync(CancellationToken token = default)
@@ -516,7 +490,7 @@ namespace MajdataPlay
                     using (@lock)
                     {
                         token.ThrowIfCancellationRequested();
-                        if (_audioTrackRef.TryGetTarget(out var audioTrack))
+                        if (Cache.AudioSample.TryGetValue(_audioTrackCacheKey, out var audioTrack))
                         {
                             return audioTrack;
                         }
@@ -538,13 +512,12 @@ namespace MajdataPlay
                         var trackFile = download.File ?? throw new FileNotFoundException("The downloaded track is unavailable.");
                         await UniTask.SwitchToMainThread(token);
                         var sampleWrap = await MajInstances.AudioManager.LoadMusicAsync(trackFile.Location, true, true);
-                        _audioTrackRef.SetTarget(sampleWrap);
+                        StoreAudioSample(_audioTrackCacheKey, sampleWrap);
                         return sampleWrap;
                     }
                 }
                 catch (Exception e)
                 {
-                    _audioTrackRef.SetTarget(null!);
                     if (e is not OperationCanceledException)
                     {
                         MajDebug.LogException(e);
@@ -593,7 +566,8 @@ namespace MajdataPlay
         {
             ThrowIfDisposed();
             token.ThrowIfCancellationRequested();
-            var coverReference = isFullSize ? _fullSizeCoverRef : _coverRef;
+            var coverCache = isFullSize ? Cache.LargeSprite : Cache.Sprite;
+            var coverCacheKey = isFullSize ? _fullSizeCoverCacheKey : _coverCacheKey;
             var coverLock = isFullSize ? _fullSizeCoverLock : _coverLock;
             await using (UniTask.ReturnToCurrentSynchronizationContext())
             {
@@ -604,7 +578,7 @@ namespace MajdataPlay
                     using (@lock)
                     {
                         token.ThrowIfCancellationRequested();
-                        if (coverReference.TryGetTarget(out var cover) && await cover.IsNativeAliveAsync())
+                        if (coverCache.TryGetValue(coverCacheKey, out var cover) && await cover.IsNativeAliveAsync())
                         {
                             return cover;
                         }
@@ -638,7 +612,13 @@ namespace MajdataPlay
                             return await GetEmptyCoverAsync(token);
                         }
                         cover = await SpriteLoader.LoadFromFileAsync(coverFile.Location, true, token);
-                        coverReference.SetTarget(cover);
+                        await UniTask.SwitchToMainThread();
+                        // A failed load returns the shared empty sprite, which the cache must not own and later destroy.
+                        if (!ReferenceEquals(cover, SpriteLoader.EmptySprite))
+                        {
+                            coverCache.Set(coverCacheKey, cover);
+                            RemoveFromCacheIfDisposed(coverCache, coverCacheKey);
+                        }
                         return cover;
                     }
                 }
@@ -662,6 +642,32 @@ namespace MajdataPlay
             await UniTask.SwitchToMainThread(token);
             token.ThrowIfCancellationRequested();
             return Majdata<GameRuntime>.Instance!.Sprite.EmptySongCover;
+        }
+
+        /// <summary>Stores a loaded sample in <see cref="Cache.AudioSample"/>, unless it is the shared empty sample.</summary>
+        /// <param name="key">The cache key of the track.</param>
+        /// <param name="audioTrack">The loaded sample, which the cache takes ownership of.</param>
+        private void StoreAudioSample(string key, AudioSampleWrap audioTrack)
+        {
+            // A failed load returns the shared empty sample; leaving it uncached lets the next call retry.
+            if (audioTrack.IsEmpty)
+            {
+                return;
+            }
+            Cache.AudioSample.Set(key, audioTrack);
+            RemoveFromCacheIfDisposed(Cache.AudioSample, key);
+        }
+
+        /// <summary>Releases a value stored while this song was being disposed, which the disposal could not see yet.</summary>
+        /// <typeparam name="TValue">The cached value type.</typeparam>
+        /// <param name="cache">The cache the value was just stored in.</param>
+        /// <param name="key">The key the value was stored under.</param>
+        private void RemoveFromCacheIfDisposed<TValue>(LruCache<string, TValue> cache, string key)
+        {
+            if (_isDisposed)
+            {
+                cache.Remove(key);
+            }
         }
 
         /// <summary>Rejects resource operations after this song's owned media has been released.</summary>

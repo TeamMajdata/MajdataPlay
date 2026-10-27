@@ -1,28 +1,13 @@
-using Cysharp.Text;
-using Cysharp.Threading.Tasks;
-using MajdataPlay.Buffers;
 using MajdataPlay.Diagnostics;
-using MajdataPlay.Drawing;
 using MajdataPlay.Scenes.List;
 using MajdataPlay.Threading;
 using MajdataPlay.Utils;
 using MajSimai;
-using Nito.AsyncEx;
-using SkiaSharp;
 using System;
-using System.Buffers;
-using System.Collections;
-using System.Collections.Generic;
-using System.Diagnostics.CodeAnalysis;
-using System.Linq;
-using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
-using Unity.VisualScripting.Antlr3.Runtime;
 using UnityEngine;
-using UnityEngine.Serialization;
 using UnityEngine.UI;
-using UnityEngine.UIElements;
 #nullable enable
 namespace MajdataPlay.Scenes.Game
 {
@@ -32,32 +17,30 @@ namespace MajdataPlay.Scenes.Game
         public bool LastAnalyzeIsEmpty { get; private set; }
 
         [SerializeField]
-        GameObject? _iconPrefab;
+        private GameObject? _iconPrefab;
 
-        GameObject? _loadingPrefab;
-        GameObject? _errorIcon;
-        GameObject? _helpIcon;
+        private GameObject? _loadingPrefab;
+        private GameObject? _errorIcon;
+        private GameObject? _helpIcon;
 
-        RawImage _rawImage;
-        RectTransform _rectTransform;
+        private RawImage _rawImage;
+        private RectTransform _rectTransform;
 
 
-        Texture2D _emptyTexture;
+        private Texture2D _emptyTexture;
 
 #if UNITY_ANDROID || UNITY_IOS
-        const int MAX_CACHE_COUNT = 8;
+        private const int MAX_CACHE_COUNT = 8;
 #else
         const int MAX_CACHE_COUNT = 32;
 #endif
-        int _cacheCursor = 0;
+        private int _cacheCursor = 0;
 
-        float _loadDelayTimer = 0f;
+        private float _loadDelayTimer = 0f;
 
-        readonly LoadTask _loadTask = new();
+        private readonly LoadTask _loadTask = new();
 
-        readonly CacheItem[] _cachedAnalyzeResults = new CacheItem[MAX_CACHE_COUNT];
-
-        void Awake()
+        private void Awake()
         {
             Majdata<ChartVisualDisplayer>.Instance = this;
 
@@ -74,33 +57,23 @@ namespace MajdataPlay.Scenes.Game
             _emptyTexture.SetPixel(0, 0, Color.white);
             _emptyTexture.Apply();
         }
-        void OnDestroy()
+        private void OnDestroy()
         {
             Majdata<ChartVisualDisplayer>.Free();
-            for (var i = _cacheCursor - 1; i >= 0; i--)
-            {
-                ref var cachedResult = ref _cachedAnalyzeResults[i];
-                if(cachedResult.AnalyzeResult is MaidataLineGraphAnalyzeResult result)
-                {
-                    UnityEngine.Object.DestroyImmediate(result.LineGraph, true);
-                }
-                cachedResult = default;
-                _cacheCursor--;
-            }
         }
-        void LateUpdate()
+        private void LateUpdate()
         {
-            if(_loadTask.IsFinished || (_loadTask.SongDetail is null && _loadTask.Chart is null))
+            if (_loadTask.IsFinished || (_loadTask.SongDetail is null && _loadTask.Chart is null))
             {
                 return;
             }
-            else if(_loadDelayTimer > 0)
+            else if (_loadDelayTimer > 0)
             {
                 _loadDelayTimer -= MajTimeline.DeltaTime;
                 return;
             }
             var maidataLoadTask = _loadTask.MaidataLoadTask!;
-            if(maidataLoadTask is null)
+            if (maidataLoadTask is null)
             {
                 try
                 {
@@ -115,17 +88,17 @@ namespace MajdataPlay.Scenes.Game
             }
             else if (maidataLoadTask.IsCompleted)
             {
-                if(maidataLoadTask.IsCompletedSuccessfully)
+                if (maidataLoadTask.IsCompletedSuccessfully)
                 {
                     var maidata = maidataLoadTask.Result;
                     _loadTask.Maidata = maidata;
                     try
                     {
-                        if(_loadTask.SongDetail is not null)
+                        if (_loadTask.SongDetail is not null)
                         {
                             AnalyzeMaidata(maidata.Charts[(int)_loadTask.Level], _loadTask.Length);
                         }
-                        else if(_loadTask.Chart is not null)
+                        else if (_loadTask.Chart is not null)
                         {
                             AnalyzeMaidata(_loadTask.Chart, _loadTask.Length);
                         }
@@ -134,7 +107,7 @@ namespace MajdataPlay.Scenes.Game
                             SetError();
                         }
                     }
-                    catch(Exception e)
+                    catch (Exception e)
                     {
                         MajDebug.LogException(e);
                         SetError();
@@ -171,92 +144,83 @@ namespace MajdataPlay.Scenes.Game
             _loadDelayTimer = 0;
             SetLoading();
         }
-        void AnalyzeMaidata(SimaiChart chart, float? length)
+        private void AnalyzeMaidata(SimaiChart chart, float? length)
         {
-#if !UNITY_EDITOR
-            ref var cachedResult = ref _cachedAnalyzeResults[0];
-            if (TryGetCachedResultIndex(chart, out var index))
-            {
-                var a = _cachedAnalyzeResults[index];
-                Array.Copy(_cachedAnalyzeResults, 0, _cachedAnalyzeResults, 1, index);
-                cachedResult = a;
-            }
-            else
-            {
-                if (_cacheCursor == _cachedAnalyzeResults.Length)
-                {
-                    ref var last = ref _cachedAnalyzeResults[_cachedAnalyzeResults.Length - 1];
-                    if (last.AnalyzeResult is MaidataLineGraphAnalyzeResult result)
-                    {
-                        UnityEngine.Object.DestroyImmediate(result.LineGraph, true);
-                    }
-                    last = default;
-                    _cacheCursor--;
-                }
-                Array.Copy(_cachedAnalyzeResults, 0, _cachedAnalyzeResults, 1, _cacheCursor);
-                cachedResult = new()
-                {
-                    Chart = chart,
-                };
-                _cacheCursor++;
-            }
-#else
-            var cachedResult = default(CacheItem);
-#endif
+            var cache = default(CachedMaidataAnalyzeResult);
             var rect = _rectTransform.rect;
-            var anaResult = cachedResult.AnalyzeResult ??= ChartAnalyzer.AnalyzeMaidataWithGraph(chart, (int)rect.height, (int)rect.width, length);
-            if(anaResult.Length == TimeSpan.Zero)
+            var minBpm = 0f;
+            var maxBpm = 0f;
+            var anaLength = TimeSpan.Zero;
+            var graph = default(Texture?);
+            var needRefreshCache = false;
+            var graphCacheKey = $"MaidataAnalyze/{chart.Fumen}";
+            if (Cache.MaidataAnalyze.TryGetValue(chart.Fumen, out cache))
+            {
+                minBpm = cache.MinBPM;
+                maxBpm = cache.MaxBPM;
+                anaLength = cache.Length;
+                Cache.Texture.TryGetValue(graphCacheKey, out var graph2D);
+                graph = graph2D;
+            }
+            if (!cache.IsValid || graph is null)
+            {
+                var result = ChartAnalyzer.AnalyzeMaidataWithGraph(chart, (int)rect.height, (int)rect.width, length);
+                minBpm = result.MinBPM;
+                maxBpm = result.MaxBPM;
+                anaLength = result.Length;
+                graph = result.LineGraph!;
+                needRefreshCache = true;
+            }
+            if (anaLength == TimeSpan.Zero)
             {
                 SetHelp();
                 return;
             }
-            SetTexture(anaResult.LineGraph);
+            else if (needRefreshCache)
+            {
+                Cache.Texture.Set(graphCacheKey, (Texture2D)graph);
+                Cache.MaidataAnalyze.Set(chart.Fumen, new()
+                {
+                    IsValid = true,
+                    MinBPM = minBpm,
+                    MaxBPM = maxBpm,
+                    Length = anaLength,
+                    Timestamp = DateTime.Now
+                });
+            }
+            SetTexture(graph);
         }
 
-        void SetLoading()
+        private void SetLoading()
         {
             _errorIcon?.SetActive(false);
             _helpIcon?.SetActive(false);
             _loadingPrefab?.SetActive(true);
             _rawImage.texture = _emptyTexture;
         }
-        void SetHelp()
+        private void SetHelp()
         {
             _errorIcon?.SetActive(false);
             _helpIcon?.SetActive(true);
             _loadingPrefab?.SetActive(false);
             _rawImage.texture = _emptyTexture;
         }
-        void SetError()
+        private void SetError()
         {
             _errorIcon?.SetActive(true);
             _helpIcon?.SetActive(false);
             _loadingPrefab?.SetActive(false);
             _rawImage.texture = _emptyTexture;
         }
-        void SetTexture(Texture texture)
+        private void SetTexture(Texture texture)
         {
             _errorIcon?.SetActive(false);
             _helpIcon?.SetActive(false);
             _loadingPrefab?.SetActive(false);
             _rawImage.texture = texture;
         }
-        bool TryGetCachedResultIndex(SimaiChart chart, out int index)
-        {
-            index = default;
-            for (var i = 0; i < _cacheCursor; i++)
-            {
-                if (_cachedAnalyzeResults[i].Chart == chart)
-                {
-                    index = i;
-                    return true;
-                }
-            }
 
-            return false;
-        }
-
-        class LoadTask
+        private class LoadTask
         {
             public ISongDetail? SongDetail { get; set; }
             public Task<SimaiFile>? MaidataLoadTask { get; set; }
@@ -265,11 +229,6 @@ namespace MajdataPlay.Scenes.Game
             public SimaiChart? Chart { get; set; }
             public ChartLevel Level { get; set; }
             public bool IsFinished { get; set; }
-        }
-        struct CacheItem
-        {
-            public required SimaiChart Chart { get; init; }
-            public MaidataLineGraphAnalyzeResult? AnalyzeResult { get; set; }
         }
     }
 }

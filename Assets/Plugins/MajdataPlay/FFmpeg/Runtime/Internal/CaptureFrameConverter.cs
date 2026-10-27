@@ -9,7 +9,8 @@ namespace MajdataPlay.FFmpeg.Internal
     /// One encoder worker owns each converter and calls <see cref="Convert"/> and <see cref="Dispose"/> sequentially. The
     /// conversion reads the capture buffer directly, including bottom-first rows, so no RGBA staging copy is made. With more
     /// than one thread, row-pair bands run on lazily created background threads through <see cref="VideoBandExecutor"/>;
-    /// these threads never call Unity APIs. Steady-state conversions allocate no managed memory.
+    /// these threads never call Unity APIs. Steady-state conversions allocate no managed memory. Frames that
+    /// <see cref="CaptureGpuConverter"/> already converted are instead copied by <see cref="CopyNv12"/>.
     /// </remarks>
     internal sealed unsafe class CaptureFrameConverter : IDisposable
     {
@@ -94,7 +95,7 @@ namespace MajdataPlay.FFmpeg.Internal
                 throw new ArgumentException("The input must contain exactly one tightly packed RGBA8 frame.", nameof(packedRgba));
             }
 
-            var planes = GetPlanes(destination);
+            var planes = GetPlanes(destination, _width, _height);
             var rowBytes = _width * 4L;
             fixed (byte* input = packedRgba)
             {
@@ -119,18 +120,43 @@ namespace MajdataPlay.FFmpeg.Internal
             }
         }
 
+        /// <summary>Copies one GPU-converted NV12 capture frame into the planes of a writable encoder input frame.</summary>
+        /// <param name="nv12">Exactly width times height times 1.5 bytes: the Y plane, then the interleaved Cb, Cr rows, top row first.</param>
+        /// <param name="width">The even frame width in pixels.</param>
+        /// <param name="height">The even frame height in pixels.</param>
+        /// <param name="destination">The writable YUV420P or NV12 frame with these dimensions.</param>
+        /// <remarks>The copy is a few row copies, plus a chroma split for planar frames, so it runs on the calling thread.</remarks>
+        /// <exception cref="ArgumentException">The input has the wrong length.</exception>
+        /// <exception cref="ArgumentNullException"><paramref name="destination"/> is null.</exception>
+        /// <exception cref="NotSupportedException">The destination format is not YUV420P or NV12, or its dimensions differ.</exception>
+        internal static void CopyNv12(ReadOnlySpan<byte> nv12, int width, int height, AVFrame* destination)
+        {
+            if (nv12.Length != CapturePixelLayout.Nv12.GetFrameByteCount(width, height))
+            {
+                throw new ArgumentException("The input must contain exactly one tightly packed NV12 frame.", nameof(nv12));
+            }
+
+            var planes = GetPlanes(destination, width, height);
+            fixed (byte* input = nv12)
+            {
+                VideoPixelKernels.CopyNv12ToYuv420(input, width, height, in planes);
+            }
+        }
+
         /// <summary>Signals idle conversion threads to exit.</summary>
         public void Dispose()
         {
             _bandExecutor?.Dispose();
         }
 
-        /// <summary>Describes the planes of a writable YUV420P or NV12 frame with this converter's dimensions.</summary>
+        /// <summary>Describes the planes of a writable YUV420P or NV12 frame with the given dimensions.</summary>
         /// <param name="frame">The borrowed destination frame.</param>
+        /// <param name="width">The expected frame width in pixels.</param>
+        /// <param name="height">The expected frame height in pixels.</param>
         /// <returns>The plane layout passed to the conversion kernel.</returns>
         /// <exception cref="ArgumentNullException"><paramref name="frame"/> is null.</exception>
         /// <exception cref="NotSupportedException">The frame format is not YUV420P or NV12, or its dimensions differ.</exception>
-        private Yuv420Planes GetPlanes(AVFrame* frame)
+        private static Yuv420Planes GetPlanes(AVFrame* frame, int width, int height)
         {
             if (frame == null)
             {
@@ -138,9 +164,9 @@ namespace MajdataPlay.FFmpeg.Internal
             }
 
             var format = (AVPixelFormat)frame->format;
-            if (!Supports(format) || frame->width != _width || frame->height != _height)
+            if (!Supports(format) || frame->width != width || frame->height != height)
             {
-                throw new NotSupportedException("The encoder input must be a " + _width + "x" + _height
+                throw new NotSupportedException("The encoder input must be a " + width + "x" + height
                     + " YUV420P or NV12 frame, not " + frame->width + "x" + frame->height + " " + format + ".");
             }
 

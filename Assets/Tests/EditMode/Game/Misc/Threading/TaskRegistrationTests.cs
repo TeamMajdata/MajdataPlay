@@ -106,6 +106,61 @@ namespace MajdataPlay.Tests.Game.Misc.Threading
             });
         }
 
+        /// <summary>Checks that the scene name is only computed while tracking is supported.</summary>
+        [Test]
+        public void TaskRegistrationScene_GetName_FollowsTrackingSupport()
+        {
+            var supported = TaskTracker.IsTrackingSupported;
+            try
+            {
+                TaskTracker.IsTrackingSupported = true;
+                Assert.That(TaskRegistrationScene.GetName(), Is.EqualTo(Scene));
+
+                TaskTracker.IsTrackingSupported = false;
+                Assert.That(TaskRegistrationScene.GetName(), Is.Null);
+            }
+            finally
+            {
+                TaskTracker.IsTrackingSupported = supported;
+            }
+        }
+
+        /// <summary>Checks that, as in players, every extension returns its source unchanged without recording it.</summary>
+        /// <returns>The test coroutine.</returns>
+        [UnityTest]
+        public IEnumerator Extensions_TrackingUnsupported_ReturnSourcesWithoutRecording()
+        {
+            return UniTask.ToCoroutine(async () =>
+            {
+                var supported = TaskTracker.IsTrackingSupported;
+                var all = All();
+                var task = new TaskCompletionSource<int>();
+                var valueTask = new ValueTask<int>(2);
+                var uniTask = new UniTaskCompletionSource<int>();
+                try
+                {
+                    TaskTracker.IsTrackingSupported = false;
+
+                    var registeredTask = task.Task.Register("task");
+                    var registeredWorker = ((Task)task.Task).RegisterAsWorker("worker");
+                    var registeredValueTask = valueTask.Register("value-task");
+                    var registeredUniTask = uniTask.Task.RegisterAsWorker("uni-task");
+
+                    Assert.That(registeredTask, Is.SameAs(task.Task));
+                    Assert.That(registeredWorker, Is.SameAs(task.Task));
+                    Assert.That(registeredValueTask == valueTask, Is.True);
+                    Assert.That(All(), Is.EqualTo(all));
+                    task.SetResult(1);
+                    uniTask.TrySetResult(3);
+                    Assert.That(await registeredUniTask, Is.EqualTo(3));
+                }
+                finally
+                {
+                    TaskTracker.IsTrackingSupported = supported;
+                }
+            });
+        }
+
         /// <summary>Checks that UniTasks are registered and their results preserved.</summary>
         /// <returns>The test coroutine.</returns>
         [UnityTest]

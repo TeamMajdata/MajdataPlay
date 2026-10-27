@@ -86,6 +86,8 @@ AV1 软件解码使用构建时静态链接的 `libdav1d`（也兼容包含 `lib
 
 启用 Unity Profiler 时，`UnityProfiler` 记录 `FFmpeg.Player.Update`、`Present`、`CpuUpload`，以及解码打开、读帧、seek、硬件帧下载、RGBA 转换和原生图像导入等作用域。调用处不再添加外围宏，由 `UnityProfiler` 与 Unity Profiler API 自身的 `Conditional` 控制采样调用。工作线程按 [Unity 的线程采样接口](https://docs.unity3d.com/6000.3/Documentation/ScriptReference/Profiling.Profiler.BeginThreadProfiling.html) 注册为 `FFmpeg / Decoder`，并在退出时注销；其记录可在 Profiler Timeline 查看。这些计时覆盖 CPU 调用，不代表 GPU 命令执行时长。
 
+录制同样无需 Deep Profile（与其他采样一样需要 Development Build 或 Editor）：主线程记录 `FFmpeg.Capturer.Capture`（槽位预留与录制命令）、`FFmpeg.Capturer.CompleteReadback` 及其中的 `FFmpeg.Capturer.CopyReadback`（回读数据拷贝）；编码线程注册为 `FFmpeg / Encoder`，记录 `FFmpeg.Encoder.Open`、`Encode`、`ConvertRGBA`（CPU 转换回退）或 `CopyNV12`（GPU 转换）、`UploadHardwareFrame`（VAAPI）、`Hardware.SendFrame` / `Software.SendFrame`、`Hardware.ReceivePacket` / `Software.ReceivePacket`、`WritePacket` 和 `Complete`；`FFmpegRecorder` 的音频写盘线程注册为 `FFmpeg / Recorder Audio` 并记录 `FFmpegRecorder.WriteAvailableAudio`，停止后的混流与转移记录为 `FFmpegRecorder.Mux`（线程池线程）和 `FFmpegRecorder.MoveToOutputDirectory`。GPU 缩放、转换与回读拷贝由 Unity 自带的渲染线程采样（如 `Gfx.RequestAsyncReadbackData`、`Gfx.UpdateAsyncReadbackData`）反映；CPU 转换回退的行带线程不调用 Profiler，其耗时包含在 `ConvertRGBA` 中。
+
 播放器会话按队列容量加 2 预分配呈现帧容器，供工作线程、队列和主线程流转；帧释放原生资源后归还本会话。稳定解码、RGBA 转换和呈现使用复用容器，`EAGAIN` 比较不装箱，Android 图像释放委托只在建立硬件会话时创建。这里的无分配指预热后的托管 GC 分配；FFmpeg 原生帧引用、像素缓冲区及驱动内部仍按各自生命周期分配和释放。
 
 CPU RGBA 上传路径按 `DecoderOptions.ConversionThreadCount`（默认在逻辑处理器不超过 4 个时为 1，否则为 `clamp(处理器数 - 2, 1, 4)`）让 libswscale 按 slice 多线程转换，并把垂直翻转或旋转复制分成 16 行对齐的行带交给按需创建的后台线程；这些线程不调用 Unity API，预热后不产生托管分配。翻转/旋转复制是 Burst 编译的 `VideoPixelKernels.CopyRgbaLines`（180° 按 4 像素向量反转，90°/270° 在 32×32 块内按 4×4 向量转置）；Burst 未启用或 Editor 尚在异步编译时运行同一份托管代码，结果逐像素相同。验证方法见 [多线程 RGBA 转换](../../../../Tools/Tests/Modules/FFmpegValidation/README.md#多线程-rgba-转换)。
@@ -146,7 +148,7 @@ Android Player 在主线程的 Prepare 和重新创建回退会话时初始化 n
 
 `FFmpegCameraCapturer` 录制指定 Camera 的视频画面，无音频。MRP 显示输出通过独立的 `MajCameraCaptureBridge` 提供已 Resolve 的相机颜色，URP 等其他 SRP 使用 Core RP 的 `CameraCaptureBridge`，同一相机只注册其中一条路径。显式 RenderTexture 输出在整个 SRP rendering context 结束后复制，Built-in Render Pipeline 使用 Camera 的 post-render 回调；这些路径不改变 Camera 的 `targetTexture` 或 `rect`。切换管线或相机目标时重新选择捕获路径，暂停、停止或销毁相机时解除注册。
 
-MRP 仅在存在录制回调时，将符合条件的独立主屏 Game 相机改为中间颜色 RT 输出，按「场景绘制 → Resolve → 录制回调 → FinalCopy」执行；未录制时保留原有直接输出与省带宽路径。共享颜色、Depth / Nothing 清除、非主屏或立体相机不强行重定向，跳过捕获并告警。录制本身还会使用固定数量的 RGBA8 回读 RT，并进行编码所需的 CPU 像素回读。其他 SRP 的显示输出需要执行 Core RP 捕获动作；显式 RenderTexture 输出需要触发 SRP end-camera 和 end-context 回调。URP Camera Stack 捕获 Base Camera 对应的最终合成画面。Screen Space Overlay Canvas 不属于 Camera 输出；需要录入 UI 时使用 Screen Space Camera 或 World Space Canvas。MRP 不因此新增 Camera Stack 支持，且游戏设置中的录制模式仍只控制 OBS，尚未接入自动 FFmpeg 录制。
+MRP 仅在存在录制回调时，将符合条件的独立主屏 Game 相机改为中间颜色 RT 输出，按「场景绘制 → Resolve → 录制回调 → FinalCopy」执行；未录制时保留原有直接输出与省带宽路径。共享颜色、Depth / Nothing 清除、非主屏或立体相机不强行重定向，跳过捕获并告警。录制本身还会使用一张缩放用 RGBA8 RT 和固定数量的回读 RT（默认 R8 NV12，回退时 RGBA8），并进行编码所需的 CPU 像素回读。其他 SRP 的显示输出需要执行 Core RP 捕获动作；显式 RenderTexture 输出需要触发 SRP end-camera 和 end-context 回调。URP Camera Stack 捕获 Base Camera 对应的最终合成画面。Screen Space Overlay Canvas 不属于 Camera 输出；需要录入 UI 时使用 Screen Space Camera 或 World Space Canvas。MRP 不因此新增 Camera Stack 支持，且游戏设置中的录制模式仍只控制 OBS，尚未接入自动 FFmpeg 录制。
 
 ```csharp
 using MajdataPlay.FFmpeg;
@@ -175,7 +177,7 @@ await capturer.StopRecordingAsync();
 
 所有组件控制 API 在 Unity 主线程调用。编码与封装在一个后台线程执行，GPU 回读和编码共用 1–8 个固定槽位，默认 6 个；容量包含正在回读、排队和正在编码的帧。GPU 回读通常晚 2–3 帧才完成，3 个槽位在 60 FPS 下容易被占满，场景中序列化的 `BufferedFrameLimit` 应不少于 4（推荐 6）。所有槽位被占用时丢弃该次渲染并计入 `BufferOverflowFrames`；游戏渲染慢于 `FrameRate` 而缺少画面的帧率间隔计入 `SourceGapFrames`；`DroppedFrames` 为两者之和，停止时日志输出这两项与槽位峰值。PTS 保留实际单调时钟间隔，不压缩录制时间；不通过重复帧补齐 CFR。
 
-每次渲染按其所在 Unity 帧开始时（capturer 的 `Update`，执行顺序最先）的录制时钟计时，与游戏计算该帧画面所用时刻一致，也排除了渲染前脚本与剔除耗时的抖动；每个 Unity 帧最多采集一次。时间戳不再逐帧独立向下取整：渲染与下一帧时刻相差不超过 0.75 帧时记为下一帧，晚于此才跳帧并对齐到最近的帧，因此渲染与录制帧率相同时，帧边界附近的计时抖动不会再产生“重复帧被丢弃、下一帧又跳过”的成对丢帧，时间戳与时钟偏差不超过 0.75 帧。渲染快于录制帧率时保留最接近各帧时刻的渲染。录制尺寸固定且必须为偶数，支持缩放 Camera 输出。需要异步 GPU 回读支持；捕获是 SDR sRGB RGBA8，转换为 limited-range YUV，矩阵/原色为 BT.709，transfer metadata 为 sRGB，没有 HDR tone mapping。RGBA→YUV420P/NV12 由 Burst 编译的 `CaptureFrameConverter` 在编码线程完成：直接按 bottom-first 行序读取回读缓冲区（不再先复制到 RGBA staging，也不再经过 libswscale），色度取 2×2 像素均值，灰色精确映射为中性色度；高度每满 32 行可多用一个线程（不超过 `MaximumSoftwareThreads`），按行对分带交给按需创建的后台线程，`ConverterThreadCount` 报告实际线程数。
+每次渲染按其所在 Unity 帧开始时（capturer 的 `Update`，执行顺序最先）的录制时钟计时，与游戏计算该帧画面所用时刻一致，也排除了渲染前脚本与剔除耗时的抖动；每个 Unity 帧最多采集一次。时间戳不再逐帧独立向下取整：渲染与下一帧时刻相差不超过 0.75 帧时记为下一帧，晚于此才跳帧并对齐到最近的帧，因此渲染与录制帧率相同时，帧边界附近的计时抖动不会再产生“重复帧被丢弃、下一帧又跳过”的成对丢帧，时间戳与时钟偏差不超过 0.75 帧。渲染快于录制帧率时保留最接近各帧时刻的渲染。录制尺寸固定且必须为偶数，支持缩放 Camera 输出。需要异步 GPU 回读支持；捕获是 SDR sRGB RGBA8，转换为 limited-range YUV，矩阵/原色为 BT.709，transfer metadata 为 sRGB，没有 HDR tone mapping。默认（`PreferGpuColorConversion = true`）在 GPU 上完成 RGBA→NV12：缩放 Blit 之后，`Resources/FFmpegCaptureNv12.shader` 把缩放后的 RGBA 转为 `宽 × 高 × 1.5` 的 R8 回读 RT（上方为 Y 平面，下方为交错的 Cb/Cr 行，已是 top-first），回读量从每像素 4 字节降为 1.5 字节；编码线程只把平面复制进 AVFrame（YUV420P 编码器再拆分色度），不创建 CPU 转换线程，`ConverterThreadCount` 为 0、`UsesGpuColorConversion` 为 true。着色器对同样的 8 位 sRGB 码值使用 `VideoPixelKernels` 的定点系数（由 C# 传入）和整数运算，输出与 CPU 转换逐样本相同；行寻址只用 `Load` 与 `SV_Position` 的显存行号，与 AsyncGPUReadback 的行序一致，不依赖图形 API 的翻转约定。设备不支持该着色器（需 shader model 3.5 整数运算）、R8 渲染或 R8 回读，或 NV12 高度超过最大纹理尺寸时，日志说明原因并回退到 CPU 转换；设置 `PreferGpuColorConversion = false` 可直接使用 CPU 路径。CPU 路径的 RGBA→YUV420P/NV12 由 Burst 编译的 `CaptureFrameConverter` 在编码线程完成：直接按 bottom-first 行序读取回读缓冲区（不再先复制到 RGBA staging，也不再经过 libswscale），色度取 2×2 像素均值，灰色精确映射为中性色度；高度每满 32 行可多用一个线程（不超过 `MaximumSoftwareThreads`），按行对分带交给按需创建的后台线程，`ConverterThreadCount` 报告实际线程数。
 
 `FrameRate` 是采样上限和时间戳的时间基准。游戏 120 FPS、录制 30 FPS 时，约每四次 Camera 渲染采一帧；游戏 30 FPS、录制 60 FPS 时，只能获得约 30 个真实画面/秒，相邻 PTS 跨两个目标时间槽，视频保持实际经过时间。低帧率、渲染卡顿或缓冲池满会降低流畅度；CBR/VBR 是编码器采用的控制模式，缺帧和画面复杂度仍可能使实际码率偏离目标，应观察 `CurrentBitRate`。
 
@@ -195,6 +197,7 @@ await capturer.StopRecordingAsync();
 | `EncoderName`, `EncoderType`, `RateControlMode` | 实际 AVCodec、实际软件/硬件后端、实际 CBR/VBR；初始化前为 null |
 | `EncodingFormat`, `Width`, `Height`, `FrameRate` | 当前或最近会话的固定录制格式/尺寸/时间基准 |
 | `BitRate`, `MaximumBitRate`, `SoftwareThreadCount` | 会话目标、有效最大码率（bit/s）、实际 FFmpeg 软件 codec worker 数；硬件为 0 |
+| `PreferGpuColorConversion`, `UsesGpuColorConversion`, `ConverterThreadCount` | 下次录制是否优先 GPU NV12 转换；当前或最近会话是否实际使用 GPU 转换；CPU 转换线程数（GPU 转换或开始前为 0） |
 | `CurrentBitRate`, `BytesWritten`, `EncodedFrames` | 最近约 1 秒媒体时间的视频压缩码率、压缩字节数、成功提交帧数；不包含容器开销 |
 | `HardwareFallbackReason`, `DroppedFrames`, `TimeSeconds` | 硬件偏好回退原因、丢帧计数、捕获持续时间（排除初始化、录制暂停和停止排空） |
 | `SourceGapFrames`, `BufferOverflowFrames` | 丢帧的两种原因：游戏渲染慢于录制帧率而缺少画面的帧率间隔；GPU 回读与编码占满全部槽位而丢弃的渲染（稳定渲染时非零说明槽位过少或编码过慢） |
@@ -208,7 +211,7 @@ Android API 29+ 的 MediaCodec 硬件录制会查询请求的 CBR/VBR 模式、�
 
 iOS Player 的固定 VideoToolbox 包装器不能检查硬件独占选择，硬件偏好会明确回退到同格式软件编码并设置 `HardwareFallbackReason`，避免把系统选择结果误报为硬件。macOS 的 H.264 VideoToolbox 仍可强制硬件。
 
-取消 token 作用于整个录制会话；取消或 I/O 错误可能留下未完成文件。正常停止、禁用和销毁会停止新捕获，并保留已提交 GPU 请求所需纹理直到回读结束，再释放后台资源。旧 GPU 请求尚未释放时会拒绝重启，以免连续取消累积多份缓冲池；先等待 `StopRecordingAsync()`，取消时也需等待该 Task 结束并处理取消异常。需要确保文件可播放时显式等待正常的 `StopRecordingAsync()`，不要在主线程同步等待 Task。硬件编码也经 CPU RGBA 回读/转换/上传，不能把 Hardware 状态解释为 GPU 零拷贝录制。
+取消 token 作用于整个录制会话；取消或 I/O 错误可能留下未完成文件。正常停止、禁用和销毁会停止新捕获，并保留已提交 GPU 请求所需纹理直到回读结束，再释放后台资源。旧 GPU 请求尚未释放时会拒绝重启，以免连续取消累积多份缓冲池；先等待 `StopRecordingAsync()`，取消时也需等待该 Task 结束并处理取消异常。需要确保文件可播放时显式等待正常的 `StopRecordingAsync()`，不要在主线程同步等待 Task。硬件编码也经 GPU 回读（默认 NV12，回退时 RGBA 再由 CPU 转换）和 CPU 上传，不能把 Hardware 状态解释为 GPU 零拷贝录制。
 
 可独立使用 `FFmpegVideoEncoder` 编码 sRGB RGBA8 缓冲，但其 `Open` / `Encode` / `Complete` / `Dispose` 必须在同一个 owner 线程运行，调用 `Complete()` 后才有完整的输出文件。Mono/IL2CPP 均通过静态 AOT 回调写入 seekable 本地 FileStream，避免 Unicode 路径和覆盖已有文件的问题。
 

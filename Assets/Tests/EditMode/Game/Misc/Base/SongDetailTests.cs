@@ -4,10 +4,14 @@ using System.IO;
 using System.Threading;
 using Cysharp.Threading.Tasks;
 using MajdataPlay.Databases;
+using MajdataPlay.Drawing;
+using MajdataPlay.IO.Storage;
 using MajdataPlay.Tests;
 using MajdataPlay.Tests.Game.Misc.Support;
 using NUnit.Framework;
+using UnityEngine;
 using UnityEngine.TestTools;
+using Object = UnityEngine.Object;
 
 #nullable enable
 namespace MajdataPlay.Tests.Game.Misc.Base
@@ -160,6 +164,142 @@ namespace MajdataPlay.Tests.Game.Misc.Base
                     {
                         Majdata<GameRuntime>.Free();
                     }
+                }
+            });
+        }
+
+        /// <summary>Writes a decodable PNG cover into a chart directory.</summary>
+        /// <param name="directory">The chart directory.</param>
+        private static void WriteCover(StorageDirectory directory)
+        {
+            var texture = new Texture2D(4, 4);
+            try
+            {
+                directory.CreateFile("bg.png").WriteAllBytes(texture.EncodeToPNG());
+            }
+            finally
+            {
+                Object.DestroyImmediate(texture);
+            }
+        }
+
+        /// <summary>Checks that a loaded cover is kept in <see cref="Cache.Sprite"/> and destroyed when the song is disposed.</summary>
+        /// <returns>The test coroutine.</returns>
+        [UnityTest]
+        public IEnumerator GetCoverAsync_CachesCoverUntilDisposed()
+        {
+            return UniTask.ToCoroutine(async () =>
+            {
+                var directory = ChartFixture.CreateChart(_temporary.Directory, "Chart", "Cover");
+                WriteCover(directory);
+                var song = await SongDetail.ParseAsync(directory);
+
+                var cover = await song.GetCoverAsync(true);
+                var cached = await song.GetCoverAsync(false);
+                await UniTask.SwitchToMainThread();
+
+                Assert.That(cover != null, Is.True);
+                Assert.That(cover, Is.Not.SameAs(SpriteLoader.EmptySprite));
+                Assert.That(cached, Is.SameAs(cover));
+                Assert.That(song.IsCompressedCoverLoaded, Is.True);
+                Assert.That(song.IsCoverLoaded, Is.True);
+                var texture = cover.texture;
+
+                song.Dispose();
+
+                Assert.That(cover == null, Is.True);
+                Assert.That(texture == null, Is.True);
+                Assert.That(song.IsCompressedCoverLoaded, Is.False);
+            });
+        }
+
+        /// <summary>Checks that asynchronous disposal destroys the cover before it completes.</summary>
+        /// <returns>The test coroutine.</returns>
+        [UnityTest]
+        public IEnumerator DisposeAsync_DestroysCover()
+        {
+            return UniTask.ToCoroutine(async () =>
+            {
+                var directory = ChartFixture.CreateChart(_temporary.Directory, "Chart", "Cover");
+                WriteCover(directory);
+                var song = await SongDetail.ParseAsync(directory);
+                var cover = await song.GetCoverAsync(true);
+
+                await song.DisposeAsync();
+                await UniTask.SwitchToMainThread();
+
+                Assert.That(cover == null, Is.True);
+                Assert.That(song.IsCompressedCoverLoaded, Is.False);
+            });
+        }
+
+        /// <summary>Checks that a cover pushed out of the cache by newer sprites is destroyed and loaded again on demand.</summary>
+        /// <returns>The test coroutine.</returns>
+        [UnityTest]
+        public IEnumerator GetCoverAsync_ReloadsEvictedCover()
+        {
+            return UniTask.ToCoroutine(async () =>
+            {
+                var directory = ChartFixture.CreateChart(_temporary.Directory, "Chart", "Cover");
+                WriteCover(directory);
+                using var song = await SongDetail.ParseAsync(directory);
+                var fillerScope = Cache.CreateKeyScope(nameof(SongDetailTests));
+                try
+                {
+                    var evicted = await song.GetCoverAsync(true);
+                    await UniTask.SwitchToMainThread();
+
+                    for (var i = 0; i < Cache.SpriteCapacity; i++)
+                    {
+                        var texture = new Texture2D(2, 2);
+                        Cache.Sprite.Set($"{fillerScope}/{i}", Sprite.Create(texture, new Rect(0, 0, 2, 2), Vector2.zero));
+                    }
+
+                    Assert.That(evicted == null, Is.True);
+                    Assert.That(song.IsCompressedCoverLoaded, Is.False);
+
+                    var reloaded = await song.GetCoverAsync(true);
+                    await UniTask.SwitchToMainThread();
+
+                    Assert.That(reloaded != null, Is.True);
+                    Assert.That(song.IsCompressedCoverLoaded, Is.True);
+                }
+                finally
+                {
+                    await UniTask.SwitchToMainThread();
+                    for (var i = 0; i < Cache.SpriteCapacity; i++)
+                    {
+                        Cache.Sprite.Remove($"{fillerScope}/{i}");
+                    }
+                }
+            });
+        }
+
+        /// <summary>Checks that the shared empty sprite returned for an undecodable cover is not cached, so it is never destroyed.</summary>
+        /// <returns>The test coroutine.</returns>
+        [UnityTest]
+        public IEnumerator GetCoverAsync_UndecodableCover_IsNotCached()
+        {
+            return UniTask.ToCoroutine(async () =>
+            {
+                // The loader logs the decoding failure.
+                LogAssert.ignoreFailingMessages = true;
+                try
+                {
+                    var directory = ChartFixture.CreateChart(_temporary.Directory, "Chart", "BrokenCover", coverName: "bg.png");
+                    var song = await SongDetail.ParseAsync(directory);
+
+                    var cover = await song.GetCoverAsync(true);
+                    await UniTask.SwitchToMainThread();
+
+                    Assert.That(cover, Is.SameAs(SpriteLoader.EmptySprite));
+                    Assert.That(song.IsCompressedCoverLoaded, Is.False);
+                    song.Dispose();
+                    Assert.That(SpriteLoader.EmptySprite != null, Is.True);
+                }
+                finally
+                {
+                    LogAssert.ignoreFailingMessages = false;
                 }
             });
         }

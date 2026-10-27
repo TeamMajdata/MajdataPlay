@@ -13,9 +13,25 @@ namespace MajdataPlay.Threading
     /// <summary>
     /// Tracks explicitly registered Tasks. Register immediately after creation to capture
     /// the creation site. Entries (including completed Tasks) are retained until cleared.
+    /// Tracking only exists in the Editor: in players every Register overload returns its
+    /// argument unchanged and the queries report no tasks (see <see cref="IsTrackingSupported"/>).
     /// </summary>
     public static class TaskTracker
     {
+#if UNITY_EDITOR
+        /// <summary>
+        /// Whether registrations are recorded. Always true in the Editor; tests may turn it off
+        /// to exercise the player behavior. Constant false in players.
+        /// </summary>
+        public static bool IsTrackingSupported { get; internal set; } = true;
+#else
+        /// <summary>
+        /// Whether registrations are recorded. Constant false in players, where Register is a
+        /// pass-through so release code pays no stack capture, wrapping or bookkeeping cost.
+        /// </summary>
+        public static bool IsTrackingSupported => false;
+#endif
+
         private static readonly object Gate = new object();
         private static readonly Dictionary<Task, Entry> _entries = new Dictionary<Task, Entry>(new TaskComparer());
         private static readonly Dictionary<Task, Entry> _activeEntries = new Dictionary<Task, Entry>(new TaskComparer());
@@ -24,7 +40,10 @@ namespace MajdataPlay.Threading
         private static volatile bool _enableTracking = true;
         private static volatile bool _enableStackTrace = true;
 
-        /// <summary>Controls diagnostic history only. Running-task queries always remain enabled.</summary>
+        /// <summary>
+        /// Controls diagnostic history only. Running-task queries always remain enabled.
+        /// Has no effect while <see cref="IsTrackingSupported"/> is false.
+        /// </summary>
         public static bool EnableTracking
         {
             get => _enableTracking;
@@ -46,7 +65,10 @@ namespace MajdataPlay.Threading
                 _entries.Clear();
                 _activeEntries.Clear();
             }
-            InitializeSceneTracking();
+            if (IsTrackingSupported)
+            {
+                InitializeSceneTracking();
+            }
         }
 
 #if UNITY_EDITOR
@@ -85,6 +107,7 @@ namespace MajdataPlay.Threading
         /// On worker threads, sceneName defaults to the latest cached active scene.
         /// Pass an owning object's scene explicitly when using additive scenes.
         /// isWorker is an explicit category, not a thread check. The first registration wins.
+        /// Only validates and returns the Task while <see cref="IsTrackingSupported"/> is false.
         /// </summary>
         [MethodImpl(MethodImplOptions.NoInlining)]
         public static Task Register(Task task, string name = null, string sceneName = null, bool isWorker = false)
@@ -104,19 +127,31 @@ namespace MajdataPlay.Threading
         /// <summary>
         /// Consumes the original once. Always use the returned ValueTask; do not await or
         /// register the original again. Conversion also occurs when diagnostic tracking is disabled.
+        /// Returns the original unchanged while <see cref="IsTrackingSupported"/> is false.
         /// </summary>
         [MethodImpl(MethodImplOptions.NoInlining)]
         public static ValueTask Register(ValueTask task, string name = null, string sceneName = null, bool isWorker = false)
         {
+            if (!IsTrackingSupported)
+            {
+                return task;
+            }
             var backingTask = task.AsTask();
             RegisterCore(backingTask, name, sceneName, isWorker, "ValueTask");
             return new ValueTask(backingTask);
         }
 
-        /// <summary>Consumes the original once. Always use the returned ValueTask instead of the original.</summary>
+        /// <summary>
+        /// Consumes the original once. Always use the returned ValueTask instead of the original.
+        /// Returns the original unchanged while <see cref="IsTrackingSupported"/> is false.
+        /// </summary>
         [MethodImpl(MethodImplOptions.NoInlining)]
         public static ValueTask<T> Register<T>(ValueTask<T> task, string name = null, string sceneName = null, bool isWorker = false)
         {
+            if (!IsTrackingSupported)
+            {
+                return task;
+            }
             var backingTask = task.AsTask();
             RegisterCore(backingTask, name, sceneName, isWorker, "ValueTask<" + typeof(T).Name + ">");
             return new ValueTask<T>(backingTask);
@@ -125,10 +160,15 @@ namespace MajdataPlay.Threading
         /// <summary>
         /// Consumes the original once. Always use the returned UniTask; do not await or
         /// register the original again. Completion is tracked even before the returned value is awaited.
+        /// Returns the original unchanged while <see cref="IsTrackingSupported"/> is false.
         /// </summary>
         [MethodImpl(MethodImplOptions.NoInlining)]
         public static UniTask Register(UniTask task, string name = null, string sceneName = null, bool isWorker = false)
         {
+            if (!IsTrackingSupported)
+            {
+                return task;
+            }
             var backing = new TaskCompletionSource<bool>();
             var result = new UniTaskCompletionSource();
             RegisterCore(backing.Task, name, sceneName, isWorker, "UniTask");
@@ -136,10 +176,17 @@ namespace MajdataPlay.Threading
             return result.Task;
         }
 
-        /// <summary>Consumes the original once. Always use the returned UniTask instead of the original.</summary>
+        /// <summary>
+        /// Consumes the original once. Always use the returned UniTask instead of the original.
+        /// Returns the original unchanged while <see cref="IsTrackingSupported"/> is false.
+        /// </summary>
         [MethodImpl(MethodImplOptions.NoInlining)]
         public static UniTask<T> Register<T>(UniTask<T> task, string name = null, string sceneName = null, bool isWorker = false)
         {
+            if (!IsTrackingSupported)
+            {
+                return task;
+            }
             var backing = new TaskCompletionSource<T>();
             var result = new UniTaskCompletionSource<T>();
             RegisterCore(backing.Task, name, sceneName, isWorker, "UniTask<" + typeof(T).Name + ">");
@@ -240,6 +287,10 @@ namespace MajdataPlay.Threading
         {
             if (task == null)
                 throw new ArgumentNullException(nameof(task));
+            if (!IsTrackingSupported)
+            {
+                return;
+            }
             lock (Gate)
             {
                 if (_entries.ContainsKey(task) || _activeEntries.ContainsKey(task))

@@ -43,6 +43,54 @@ namespace MajdataPlay.Tests.ThirdParty.Cysharp.PlayMode
             ThreadPool,
         }
 
+        /// <summary>The player loop waits whose tasks resume on the main thread by default.</summary>
+        public enum PlayerLoopWait
+        {
+            /// <summary><c>UniTask.Yield(CancellationToken, bool)</c>.</summary>
+            YieldWithToken,
+            /// <summary><c>UniTask.Yield(PlayerLoopTiming, CancellationToken, bool)</c>.</summary>
+            YieldWithTimingAndToken,
+            /// <summary><c>YieldAwaitable.ToUniTask()</c>.</summary>
+            YieldAwaitableToUniTask,
+            /// <summary><c>UniTask.NextFrame()</c>.</summary>
+            NextFrame,
+            /// <summary><c>UniTask.NextFrame(PlayerLoopTiming, CancellationToken, bool)</c>.</summary>
+            NextFrameWithTimingAndToken,
+            /// <summary><c>UniTask.DelayFrame</c>.</summary>
+            DelayFrame,
+            /// <summary><c>UniTask.Delay</c> with <see cref="DelayType.DeltaTime"/>.</summary>
+            Delay,
+            /// <summary><c>UniTask.Delay</c> with <see cref="DelayType.UnscaledDeltaTime"/>.</summary>
+            DelayUnscaled,
+            /// <summary><c>UniTask.Delay</c> with <see cref="DelayType.Realtime"/>.</summary>
+            DelayRealtime,
+            /// <summary><c>UniTask.WaitForSeconds</c>.</summary>
+            WaitForSeconds,
+            /// <summary><c>UniTask.WaitForFixedUpdate(CancellationToken, bool)</c>.</summary>
+            WaitForFixedUpdate,
+            /// <summary><c>UniTask.WaitUntil(Func{bool}, ...)</c>.</summary>
+            WaitUntil,
+            /// <summary><c>UniTask.WaitUntil{T}(T, Func{T, bool}, ...)</c>.</summary>
+            WaitUntilWithState,
+            /// <summary><c>UniTask.WaitWhile(Func{bool}, ...)</c>.</summary>
+            WaitWhile,
+            /// <summary><c>UniTask.WaitWhile{T}(T, Func{T, bool}, ...)</c>.</summary>
+            WaitWhileWithState,
+            /// <summary><c>UniTask.WaitUntilCanceled</c>.</summary>
+            WaitUntilCanceled,
+            /// <summary><c>UniTask.WaitUntilValueChanged</c>, converted with <c>AsUniTask</c>.</summary>
+            WaitUntilValueChanged,
+        }
+
+        /// <summary>How long the time-based waits wait, in milliseconds.</summary>
+        private const int ShortDelayMilliseconds = 1;
+
+        /// <summary>
+        /// How long <see cref="PlayerLoopWait.WaitUntilCanceled"/> waits for its token, in milliseconds; long enough for the token to
+        /// still be pending when the wait is created, so the wait does not complete synchronously.
+        /// </summary>
+        private const int CancelAfterMilliseconds = 50;
+
         /// <summary>The result the generic sources complete with.</summary>
         private const int GenericResult = 42;
 
@@ -432,6 +480,124 @@ namespace MajdataPlay.Tests.ThirdParty.Cysharp.PlayMode
 
             Assert.That(callbackThreadId, Is.EqualTo(completerThreadId));
         });
+
+        /// <summary>
+        /// Checks that the task of each player loop wait is configured for the main thread and that awaiting it on the thread pool
+        /// resumes on the main thread, so that polling loops do not queue a thread pool work item per wait.
+        /// </summary>
+        /// <param name="wait">The player loop wait.</param>
+        /// <param name="awaitOn">The thread that awaits the task.</param>
+        /// <returns>The test coroutine.</returns>
+        [UnityTest]
+        public IEnumerator PlayerLoopWait_ResumesOnMainThread([Values] PlayerLoopWait wait, [Values] ThreadKind awaitOn) => UniTask.ToCoroutine(async () =>
+        {
+            if (awaitOn == ThreadKind.ThreadPool)
+            {
+                await UniTask.SwitchToThreadPool();
+            }
+            var awaitPoint = ResumePoint.Capture(null);
+            var task = CreatePlayerLoopWait(wait);
+
+            Assert.That(task.ContinuationContext, Is.EqualTo(UniTaskContinuationContext.MainThread));
+            var resumePoint = await AwaitAndCaptureAsync(task).Timeout(ContinuationTimeout, DelayType.Realtime);
+
+            Assert.That(awaitPoint.IsThreadPoolThread, Is.EqualTo(awaitOn == ThreadKind.ThreadPool));
+            Assert.That(resumePoint.IsMainThread, Is.True);
+        });
+
+        /// <summary>
+        /// Checks that a <c>UniTask.Yield</c> awaited on the thread pool and canceled immediately from another thread pool thread
+        /// rethrows the cancellation on the main thread.
+        /// </summary>
+        /// <returns>The test coroutine.</returns>
+        [UnityTest]
+        public IEnumerator Yield_CanceledImmediatelyFromThreadPool_ThrowsOnMainThread() => UniTask.ToCoroutine(async () =>
+        {
+            using var cancellation = new CancellationTokenSource();
+            var pending = default(UniTask<(ResumePoint Point, Exception? Error)>);
+            // Blocking the main thread keeps the player loop from completing the yield before the cancellation.
+            System.Threading.Tasks.Task.Run(() =>
+            {
+                var task = UniTask.Yield(PlayerLoopTiming.LastPostLateUpdate, cancellation.Token, cancelImmediately: true);
+                pending = AwaitAndCaptureFailureAsync(task);
+                cancellation.Cancel();
+            }).Wait();
+
+            var (point, error) = await pending.Timeout(ContinuationTimeout, DelayType.Realtime);
+
+            Assert.That(error, Is.InstanceOf<OperationCanceledException>());
+            Assert.That(point.IsMainThread, Is.True);
+        });
+
+        /// <summary>
+        /// Checks that <c>UniTask.WaitForEndOfFrame</c> is configured for the main thread. The wait is canceled instead of awaited
+        /// to completion, because the end of frame never comes in batch mode, and it is started on the main thread, because
+        /// <c>Awaitable.EndOfFrameAsync</c> has to be.
+        /// </summary>
+        /// <returns>The test coroutine.</returns>
+        [UnityTest]
+        public IEnumerator WaitForEndOfFrame_IsConfiguredForMainThread() => UniTask.ToCoroutine(async () =>
+        {
+            using var cancellation = new CancellationTokenSource();
+            var task = UniTask.WaitForEndOfFrame(cancellation.Token);
+
+            Assert.That(task.ContinuationContext, Is.EqualTo(UniTaskContinuationContext.MainThread));
+            var pending = AwaitAndCaptureFailureAsync(task);
+            cancellation.Cancel();
+            var (point, error) = await pending.Timeout(ContinuationTimeout, DelayType.Realtime);
+
+            Assert.That(error, Is.InstanceOf<OperationCanceledException>());
+            Assert.That(point.IsMainThread, Is.True);
+        });
+
+        /// <summary>Starts a player loop wait that completes within a few frames.</summary>
+        /// <param name="wait">The player loop wait.</param>
+        /// <returns>The pending task, converted to <see cref="UniTask"/> for the waits with a result.</returns>
+        /// <exception cref="ArgumentOutOfRangeException"><paramref name="wait"/> is not a defined value.</exception>
+        private static UniTask CreatePlayerLoopWait(PlayerLoopWait wait)
+        {
+            switch (wait)
+            {
+                case PlayerLoopWait.YieldWithToken:
+                    return UniTask.Yield(CancellationToken.None);
+                case PlayerLoopWait.YieldWithTimingAndToken:
+                    return UniTask.Yield(PlayerLoopTiming.LastPostLateUpdate, CancellationToken.None);
+                case PlayerLoopWait.YieldAwaitableToUniTask:
+                    return UniTask.Yield().ToUniTask();
+                case PlayerLoopWait.NextFrame:
+                    return UniTask.NextFrame();
+                case PlayerLoopWait.NextFrameWithTimingAndToken:
+                    return UniTask.NextFrame(PlayerLoopTiming.LastPostLateUpdate, CancellationToken.None);
+                case PlayerLoopWait.DelayFrame:
+                    return UniTask.DelayFrame(1);
+                case PlayerLoopWait.Delay:
+                    return UniTask.Delay(ShortDelayMilliseconds);
+                case PlayerLoopWait.DelayUnscaled:
+                    return UniTask.Delay(ShortDelayMilliseconds, DelayType.UnscaledDeltaTime);
+                case PlayerLoopWait.DelayRealtime:
+                    return UniTask.Delay(ShortDelayMilliseconds, DelayType.Realtime);
+                case PlayerLoopWait.WaitForSeconds:
+                    return UniTask.WaitForSeconds(ShortDelayMilliseconds / 1000f);
+                case PlayerLoopWait.WaitForFixedUpdate:
+                    return UniTask.WaitForFixedUpdate(CancellationToken.None);
+                case PlayerLoopWait.WaitUntil:
+                    return UniTask.WaitUntil(() => true);
+                case PlayerLoopWait.WaitUntilWithState:
+                    return UniTask.WaitUntil(true, state => state);
+                case PlayerLoopWait.WaitWhile:
+                    return UniTask.WaitWhile(() => false);
+                case PlayerLoopWait.WaitWhileWithState:
+                    return UniTask.WaitWhile(false, state => state);
+                case PlayerLoopWait.WaitUntilCanceled:
+                    return UniTask.WaitUntilCanceled(new CancellationTokenSource(CancelAfterMilliseconds).Token);
+                case PlayerLoopWait.WaitUntilValueChanged:
+                    // The initial value is read on the creating thread, so the monitor must not call Unity APIs.
+                    var monitorCalls = 0;
+                    return UniTask.WaitUntilValueChanged(new object(), _ => ++monitorCalls).AsUniTask();
+                default:
+                    throw new ArgumentOutOfRangeException(nameof(wait));
+            }
+        }
 
         /// <summary>Gets the kind of thread an await resumes on.</summary>
         /// <param name="context">The continuation context of the awaited task.</param>

@@ -35,7 +35,7 @@ namespace MajdataPlay.Tests.Plugins.Drawing
 
         /// <summary>Asserts that the base level of a texture holds the test pattern in Unity's bottom-up row order.</summary>
         /// <param name="texture">The readable texture.</param>
-        private static void AssertBaseLevel(Texture2D texture)
+        internal static void AssertBaseLevel(Texture2D texture)
         {
             var pixels = texture.GetPixels32(0);
             for (var y = 0; y < texture.height; y++)
@@ -49,7 +49,7 @@ namespace MajdataPlay.Tests.Plugins.Drawing
 
         /// <summary>Asserts that every mipmap level is the box filter of the level above it.</summary>
         /// <param name="texture">The readable texture.</param>
-        private static void AssertMipChain(Texture2D texture)
+        internal static void AssertMipChain(Texture2D texture)
         {
             var width = texture.width;
             var height = texture.height;
@@ -181,5 +181,101 @@ namespace MajdataPlay.Tests.Plugins.Drawing
             Assert.That(texture.height, Is.EqualTo(2));
             AssertBaseLevel(texture);
         });
+
+        /// <summary>Checks that the mipmap overload of the synchronous loader builds or skips the chain.</summary>
+        [Test]
+        public void TextureLoader_LoadFromMemory_MipmapOverload()
+        {
+            var png = TestImages.CreatePng(6, 4);
+
+            var withMips = _objects.Track(TextureLoader.LoadFromMemory(png, false, true));
+            var withoutMips = _objects.Track(TextureLoader.LoadFromMemory(png, false, false));
+
+            Assert.That(withMips.mipmapCount, Is.EqualTo(3));
+            Assert.That(withMips.filterMode, Is.EqualTo(FilterMode.Trilinear));
+            AssertMipChain(withMips);
+            Assert.That(withoutMips.mipmapCount, Is.EqualTo(1));
+            Assert.That(withoutMips.filterMode, Is.EqualTo(FilterMode.Bilinear));
+            AssertBaseLevel(withoutMips);
+        }
+
+        /// <summary>Checks that the mipmap overload of the asynchronous loader builds or skips the chain and returns on the main thread.</summary>
+        /// <returns>The test coroutine.</returns>
+        [UnityTest]
+        public IEnumerator TextureLoader_LoadFromMemoryAsync_MipmapOverload() => UniTask.ToCoroutine(async () =>
+        {
+            var png = TestImages.CreatePng(6, 4);
+
+            var withMips = _objects.Track(await TextureLoader.LoadFromMemoryAsync(png, false, true));
+            var withoutMips = _objects.Track(await TextureLoader.LoadFromMemoryAsync(png, false, false));
+
+            Assert.That(PlayerLoopHelper.IsMainThread, Is.True);
+            Assert.That(withMips.mipmapCount, Is.EqualTo(3));
+            AssertBaseLevel(withMips);
+            AssertMipChain(withMips);
+            Assert.That(withoutMips.mipmapCount, Is.EqualTo(1));
+            AssertBaseLevel(withoutMips);
+        });
+
+        /// <summary>Checks that the asynchronous loader, started on a worker thread, decodes there and still uploads on the main thread.</summary>
+        /// <returns>The test coroutine.</returns>
+        [UnityTest]
+        public IEnumerator TextureLoader_LoadFromMemoryAsync_FromWorkerThread() => UniTask.ToCoroutine(async () =>
+        {
+            var png = TestImages.CreatePng(5, 3);
+
+            var texture = _objects.Track(await System.Threading.Tasks.Task.Run(() => TextureLoader.LoadFromMemoryAsync(png, false, true)));
+
+            Assert.That(texture.mipmapCount, Is.EqualTo(3));
+            AssertBaseLevel(texture);
+        });
+
+        /// <summary>Checks that the asynchronous loader reports invalid data and cancellation.</summary>
+        /// <returns>The test coroutine.</returns>
+        [UnityTest]
+        public IEnumerator TextureLoader_LoadFromMemoryAsync_InvalidDataOrCanceled_Throws() => UniTask.ToCoroutine(async () =>
+        {
+            var png = TestImages.CreatePng(2, 2);
+            Exception? invalid = null;
+            Exception? canceled = null;
+
+            try
+            {
+                await TextureLoader.LoadFromMemoryAsync(new byte[] { 1, 2, 3, 4 }, false, true);
+            }
+            catch (Exception e)
+            {
+                invalid = e;
+            }
+            try
+            {
+                await TextureLoader.LoadFromMemoryAsync(png, false, true, new System.Threading.CancellationToken(true));
+            }
+            catch (Exception e)
+            {
+                canceled = e;
+            }
+
+            Assert.That(invalid, Is.InstanceOf<ArgumentException>());
+            Assert.That(canceled, Is.InstanceOf<OperationCanceledException>());
+        });
+
+        /// <summary>Checks that the mipmap overloads of the bitmap and surface conversions skip the chain on request.</summary>
+        [Test]
+        public void ToTexture2D_WithoutMipmaps_HasOneLevel()
+        {
+            using var bitmap = TestImages.CreateBitmap(4, 4, SKColorType.Bgra8888);
+            var info = new SKImageInfo(4, 2, SKColorType.Rgba8888, SKAlphaType.Premul);
+            using var surface = SKSurface.Create(info);
+            surface.Canvas.Clear(new SKColor(200, 100, 50, 255));
+
+            var fromBitmap = _objects.Track(bitmap.ToTexture2D(false, false));
+            var fromSurface = _objects.Track(surface.ToTexture2D(info, false));
+
+            Assert.That(fromBitmap.mipmapCount, Is.EqualTo(1));
+            AssertBaseLevel(fromBitmap);
+            Assert.That(fromSurface.mipmapCount, Is.EqualTo(1));
+            Assert.That(fromSurface.GetPixel(3, 1), Is.EqualTo((Color)new Color32(200, 100, 50, 255)));
+        }
     }
 }

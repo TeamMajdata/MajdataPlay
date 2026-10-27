@@ -1,4 +1,4 @@
-﻿using MajdataPlay.FFmpeg;
+using MajdataPlay.FFmpeg;
 using MajdataPlay.Settings.Runtime;
 using System;
 using System.Collections.Generic;
@@ -12,13 +12,19 @@ namespace MajdataPlay.Settings
         [NoTranslation(TranslationTarget.OptionValue)]
         public VideoEncodingFormat EncodingFormat { get; set; } = VideoEncodingFormat.H264;
         [Step("30")]
-        [Range("1", "240")]
+        [Range("30", "240")]
         public int FrameRate { get; set; } = 60;
         [NoTranslation(TranslationTarget.OptionValue)]
         public VideoRateControlMode RateControlMode { get; set; } = VideoRateControlMode.VBR;
-        public long BitRate { get; set; } = 8000000;
+        [FoldNumber]
+        [Step("50000")] // 50K
+        [Range("100000", null)] // 100K
+        public long BitRate { get; set; } = 4000000;
+        [FoldNumber]
+        [Step("50000")] // 50K
+        [Range("100000", null)] // 100K
         [ShowInSettingUIWhen(nameof(RateControlMode), VideoRateControlMode.VBR)]
-        public long MaximumBitRate { get; set; } = 16000000;
+        public long MaximumBitRate { get; set; } = 8000000;
         [Step("0.25")]
         [Range("0.25", "1")]
         public float ResolutionScale { get; set; } = 1f;

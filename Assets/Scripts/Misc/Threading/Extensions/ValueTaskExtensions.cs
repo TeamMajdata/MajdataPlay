@@ -9,24 +9,20 @@ namespace MajdataPlay.Threading
     {
         public static ValueTask Register(this ValueTask source, string taskName = "")
         {
-            var currentScene = SceneSwitcher.CurrentScene;
-            return TaskTracker.Register(source, taskName, currentScene.ToString());
+            return TaskTracker.Register(source, taskName, TaskRegistrationScene.GetName());
         }
         public static ValueTask RegisterAsWorker(this ValueTask source, string taskName = "")
         {
-            var currentScene = SceneSwitcher.CurrentScene;
-            return TaskTracker.Register(source, taskName, currentScene.ToString(), true);
+            return TaskTracker.Register(source, taskName, TaskRegistrationScene.GetName(), true);
         }
 
         public static ValueTask<T> Register<T>(this ValueTask<T> source, string taskName = "")
         {
-            var currentScene = SceneSwitcher.CurrentScene;
-            return TaskTracker.Register(source, taskName, currentScene.ToString());
+            return TaskTracker.Register(source, taskName, TaskRegistrationScene.GetName());
         }
         public static ValueTask<T> RegisterAsWorker<T>(this ValueTask<T> source, string taskName = "")
         {
-            var currentScene = SceneSwitcher.CurrentScene;
-            return TaskTracker.Register(source, taskName, currentScene.ToString(), true);
+            return TaskTracker.Register(source, taskName, TaskRegistrationScene.GetName(), true);
         }
     }
 }
