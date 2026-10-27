@@ -109,7 +109,7 @@ namespace MajdataPlay
             }
         }
 
-        public void SetRadar(PooledList<float> scores, float esti)
+        public void SetRadar(IList<float> scores, float esti)
         {
             if (_radarMaterial == null)
             {
@@ -250,7 +250,7 @@ namespace MajdataPlay
         {
             _currentSongDetail = songDetail;
             _currentLevel = level;
-            SetRadar(new List<float> { 0, 0, 0, 0, 0, 0, 0 }, 0);
+            SetRadar(new PooledList<float> { 0, 0, 0, 0, 0, 0, 0 }, 0);
             _cancellationToken = token;
             _loadDelayTimer = loadDelayMS / 1000f;
         }
