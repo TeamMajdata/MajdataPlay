@@ -166,7 +166,7 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 71c1514a6bd24e1e882cebbe1904ce04, type: 3}
-  m_Name: NotoSansSymbols2-Regular SDF
+  m_Name: '[UI]NotoSansSymbols2-Regular SDF'
   m_EditorClassIdentifier: 
   m_Version: 1.1.0
   m_FaceInfo:
