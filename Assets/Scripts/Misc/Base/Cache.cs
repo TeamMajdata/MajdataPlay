@@ -1,4 +1,5 @@
 using Cysharp.Threading.Tasks;
+using MajdataPlay.Caches;
 using MajdataPlay.Collections;
 using MajdataPlay.Drawing;
 using MajdataPlay.IO;
@@ -32,6 +33,7 @@ namespace MajdataPlay
 
         /// <summary>The number of samples <see cref="AudioSample"/> keeps.</summary>
         public const int AudioSampleCapacity = 8;
+        public const int MaidataRadarCapacity = 64;
 
         /// <summary>Gets the cache for textures the caller created and hands over; evicted textures are destroyed.</summary>
         public static LruCache<string, Texture2D> Texture { get; } = new(TextureCapacity, ReleaseTexture);
@@ -50,6 +52,8 @@ namespace MajdataPlay
 
         /// <summary>Gets the cache for loaded music and preview samples; evicted samples are disposed.</summary>
         public static LruCache<string, AudioSampleWrap> AudioSample { get; } = new(AudioSampleCapacity, ReleaseAudioSample);
+
+        public static LruCache<string, CachedRadarAnalyzeResult> MaidataRadar { get; } = new(MaidataRadarCapacity);
 
         private static long s_nextKeyScopeId = 0;
 
