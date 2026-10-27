@@ -117,7 +117,7 @@ namespace MajdataPlay
                 return;
             }
 
-            using var scoreZero = new PooledList<float> { 0, 0, 0, 0, 0, 0, 0 };
+            var scoreZero = new PooledList<float> { 0, 0, 0, 0, 0, 0, 0 };
 
             // 雷达图数值动画
             for (int i = 0; i < 6; i++)
