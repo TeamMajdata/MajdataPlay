@@ -74,19 +74,19 @@ namespace MajdataPlay.Tests.Game.Misc.PlayMode
 
         /// <summary>Creates an animated button bound to the A1 button and sensor with a hold circle.</summary>
         /// <param name="holdTriggerTime">The hold time, or zero for a click.</param>
-        /// <returns>The animation component.</returns>
-        private ButtonAnimation CreateButton(float holdTriggerTime)
+        /// <returns>The animation component and its hold circle.</returns>
+        private (ButtonAnimation Animation, Image Circle) CreateButton(float holdTriggerTime)
         {
             var circle = _objects.Add<Image>("Circle");
             var animation = _objects.Add<ButtonAnimation>("Button");
-            animation.BindButton = new[] { ButtonZone.A1 };
-            animation.BindSensor = new[] { SensorArea.A1 };
-            animation.HoldCircle = circle;
-            animation.HoldTriggerTime = holdTriggerTime;
-            animation.AnimationDuration = 0.05f;
-            animation.StartColor = Color.white;
-            animation.EndColor = Color.green;
-            return animation;
+            PrivateMember.SetField(animation, "_bindButton", new[] { ButtonZone.A1 });
+            PrivateMember.SetField(animation, "_bindSensor", new[] { SensorArea.A1 });
+            PrivateMember.SetField(animation, "_holdCircle", circle);
+            PrivateMember.SetField(animation, "_holdTriggerTime", holdTriggerTime);
+            PrivateMember.SetField(animation, "_animationDuration", 0.05f);
+            PrivateMember.SetField(animation, "_startColor", Color.white);
+            PrivateMember.SetField(animation, "_endColor", Color.green);
+            return (animation, circle);
         }
 
         /// <summary>Checks that the hold circle is configured as an empty radial fill on start.</summary>
@@ -94,15 +94,15 @@ namespace MajdataPlay.Tests.Game.Misc.PlayMode
         [UnityTest]
         public IEnumerator Start_ConfiguresHoldCircle()
         {
-            var animation = CreateButton(1f);
-            animation.HoldCircle.fillAmount = 0.7f;
+            var (_, circle) = CreateButton(1f);
+            circle.fillAmount = 0.7f;
 
             yield return null;
 
-            Assert.That(animation.HoldCircle.type, Is.EqualTo(Image.Type.Filled));
-            Assert.That(animation.HoldCircle.fillMethod, Is.EqualTo(Image.FillMethod.Radial360));
-            Assert.That(animation.HoldCircle.fillAmount, Is.EqualTo(0f));
-            Assert.That(animation.HoldCircle.color, Is.EqualTo(Color.white));
+            Assert.That(circle.type, Is.EqualTo(Image.Type.Filled));
+            Assert.That(circle.fillMethod, Is.EqualTo(Image.FillMethod.Radial360));
+            Assert.That(circle.fillAmount, Is.EqualTo(0f));
+            Assert.That(circle.color, Is.EqualTo(Color.white));
         }
 
         /// <summary>Checks that a click shrinks the button and releases it automatically.</summary>
@@ -110,7 +110,7 @@ namespace MajdataPlay.Tests.Game.Misc.PlayMode
         [UnityTest]
         public IEnumerator Click_ShrinksAndRestores()
         {
-            var animation = CreateButton(0f);
+            var (animation, _) = CreateButton(0f);
             yield return null;
 
             SetButton(true, true, false);
@@ -128,7 +128,7 @@ namespace MajdataPlay.Tests.Game.Misc.PlayMode
         [UnityTest]
         public IEnumerator Hold_CompletesCircle()
         {
-            var animation = CreateButton(0.1f);
+            var (animation, circle) = CreateButton(0.1f);
             yield return null;
 
             SetSensor(true, true, false);
@@ -136,7 +136,7 @@ namespace MajdataPlay.Tests.Game.Misc.PlayMode
             SetSensor(true, false, false);
             yield return new WaitForSeconds(0.25f);
 
-            Assert.That(animation.HoldCircle.fillAmount, Is.EqualTo(1f));
+            Assert.That(circle.fillAmount, Is.EqualTo(1f));
             Assert.That(animation.transform.localScale.x, Is.LessThan(1f));
 
             SetSensor(false, false, true);
@@ -152,21 +152,21 @@ namespace MajdataPlay.Tests.Game.Misc.PlayMode
         [UnityTest]
         public IEnumerator Hold_ReleasedEarlyDrainsCircle()
         {
-            var animation = CreateButton(2f);
+            var (animation, circle) = CreateButton(2f);
             yield return null;
 
             SetButton(true, true, false);
             yield return null;
             SetButton(true, false, false);
             yield return new WaitForSeconds(0.3f);
-            Assert.That(animation.HoldCircle.fillAmount, Is.GreaterThan(0f));
+            Assert.That(circle.fillAmount, Is.GreaterThan(0f));
 
             SetButton(false, false, true);
             yield return null;
             SetButton(false, false, false);
             yield return new WaitForSeconds(0.4f);
 
-            Assert.That(animation.HoldCircle.fillAmount, Is.EqualTo(0f).Within(1e-3f));
+            Assert.That(circle.fillAmount, Is.EqualTo(0f).Within(1e-3f));
             Assert.That(animation.transform.localScale.x, Is.EqualTo(1f).Within(1e-3f));
         }
 
@@ -175,8 +175,8 @@ namespace MajdataPlay.Tests.Game.Misc.PlayMode
         [UnityTest]
         public IEnumerator OnDisable_ResetsState()
         {
-            var animation = CreateButton(2f);
-            animation.ReleasedScale = 1.2f;
+            var (animation, circle) = CreateButton(2f);
+            PrivateMember.SetField(animation, "_releasedScale", 1.2f);
             yield return null;
             SetButton(true, true, false);
             yield return null;
@@ -185,18 +185,19 @@ namespace MajdataPlay.Tests.Game.Misc.PlayMode
 
             animation.enabled = false;
 
-            Assert.That(animation.HoldCircle.fillAmount, Is.EqualTo(0f));
-            Assert.That(animation.HoldCircle.color, Is.EqualTo(Color.white));
+            Assert.That(circle.fillAmount, Is.EqualTo(0f));
+            Assert.That(circle.color, Is.EqualTo(Color.white));
             Assert.That(animation.transform.localScale, Is.EqualTo(new Vector3(1.2f, 1.2f, 1.2f)));
         }
 
+#if UNITY_EDITOR
         /// <summary>Checks the editor preview of the click animation and its cancellation.</summary>
         /// <returns>The test coroutine.</returns>
         [UnityTest]
         public IEnumerator Preview_PlaysAndStops()
         {
-            var animation = CreateButton(0f);
-            animation.HoldCircle = null!;
+            var (animation, _) = CreateButton(0f);
+            PrivateMember.SetField(animation, "_holdCircle", null);
             yield return null;
 
             animation.PlayClickAnimationPreview();
@@ -207,5 +208,6 @@ namespace MajdataPlay.Tests.Game.Misc.PlayMode
             yield return new WaitForSeconds(0.1f);
             Assert.That(animation.transform.localScale, Is.EqualTo(new Vector3(2f, 2f, 2f)));
         }
+#endif
     }
 }
