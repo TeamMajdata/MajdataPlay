@@ -34,6 +34,7 @@ namespace MajdataPlay
         /// <summary>The number of samples <see cref="AudioSample"/> keeps.</summary>
         public const int AudioSampleCapacity = 8;
         public const int MaidataRadarCapacity = 64;
+        public const int MaidataAnalyzeCapacity = 256;
 
         /// <summary>Gets the cache for textures the caller created and hands over; evicted textures are destroyed.</summary>
         public static LruCache<string, Texture2D> Texture { get; } = new(TextureCapacity, ReleaseTexture);
@@ -54,6 +55,7 @@ namespace MajdataPlay
         public static LruCache<string, AudioSampleWrap> AudioSample { get; } = new(AudioSampleCapacity, ReleaseAudioSample);
 
         public static LruCache<string, CachedRadarAnalyzeResult> MaidataRadar { get; } = new(MaidataRadarCapacity);
+        public static LruCache<string, CachedMaidataAnalyzeResult> MaidataAnalyze { get; } = new(MaidataAnalyzeCapacity);
 
         private static long s_nextKeyScopeId = 0;
 

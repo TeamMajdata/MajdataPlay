@@ -12,5 +12,6 @@ namespace MajdataPlay
         public TimeSpan Length { get; init; }
         public float MaxBPM { get; init; }
         public float MinBPM { get; init; }
+        public Texture? LineGraph { get; init; }
     }
 }
