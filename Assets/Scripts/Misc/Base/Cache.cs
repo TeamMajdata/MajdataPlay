@@ -51,7 +51,7 @@ namespace MajdataPlay
         /// <summary>Gets the cache for loaded music and preview samples; evicted samples are disposed.</summary>
         public static LruCache<string, AudioSampleWrap> AudioSample { get; } = new(AudioSampleCapacity, ReleaseAudioSample);
 
-        static long s_nextKeyScopeId = 0;
+        private static long s_nextKeyScopeId = 0;
 
         /// <summary>Creates a key prefix that is unique for the process, so one owner's entries never collide with another's.</summary>
         /// <param name="ownerName">A readable name of the owner kind, used only to make keys easier to identify while debugging.</param>
@@ -64,7 +64,7 @@ namespace MajdataPlay
         /// <summary>Destroys an evicted texture on the main thread.</summary>
         /// <param name="key">The key the texture was stored under.</param>
         /// <param name="texture">The evicted texture.</param>
-        static void ReleaseTexture(string key, Texture2D texture)
+        private static void ReleaseTexture(string key, Texture2D texture)
         {
             RunOnMainThread(() => DestroyObject(texture));
         }
@@ -72,7 +72,7 @@ namespace MajdataPlay
         /// <summary>Destroys an evicted sprite and the texture it owns on the main thread.</summary>
         /// <param name="key">The key the sprite was stored under.</param>
         /// <param name="sprite">The evicted sprite.</param>
-        static void ReleaseSprite(string key, UnityEngine.Sprite sprite)
+        private static void ReleaseSprite(string key, UnityEngine.Sprite sprite)
         {
             RunOnMainThread(() =>
             {
@@ -90,7 +90,7 @@ namespace MajdataPlay
         /// <summary>Disposes an evicted audio sample.</summary>
         /// <param name="key">The key the sample was stored under.</param>
         /// <param name="sample">The evicted sample.</param>
-        static void ReleaseAudioSample(string key, AudioSampleWrap sample)
+        private static void ReleaseAudioSample(string key, AudioSampleWrap sample)
         {
             // Every backend's Dispose may be called from any thread.
             sample.Dispose();
@@ -98,7 +98,7 @@ namespace MajdataPlay
 
         /// <summary>Runs an action now when called on the main thread, otherwise queues it for the main thread.</summary>
         /// <param name="action">The action that touches Unity objects.</param>
-        static void RunOnMainThread(Action action)
+        private static void RunOnMainThread(Action action)
         {
             if (PlayerLoopHelper.IsMainThread)
             {
@@ -112,7 +112,7 @@ namespace MajdataPlay
 
         /// <summary>Destroys a Unity object that may already have been destroyed. Must be called on the main thread.</summary>
         /// <param name="obj">The object to destroy.</param>
-        static void DestroyObject(Object? obj)
+        private static void DestroyObject(Object? obj)
         {
             if (obj == null)
             {
