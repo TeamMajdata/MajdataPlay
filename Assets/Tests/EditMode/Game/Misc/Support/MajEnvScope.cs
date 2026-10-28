@@ -24,7 +24,7 @@ namespace MajdataPlay.Tests.Game.Misc.Support
             nameof(MajEnv.PersistentDirectory),
             nameof(MajEnv.AssetsDirectory),
             nameof(MajEnv.CacheDirectory),
-            nameof(MajEnv.RuntimeCacheDirectory),
+            nameof(MajEnv.RuntimeDirectory),
             nameof(MajEnv.TempDirectory),
             nameof(MajEnv.ChartDirectory),
             nameof(MajEnv.SettingsPath),
@@ -71,7 +71,7 @@ namespace MajdataPlay.Tests.Game.Misc.Support
             Set(nameof(MajEnv.PersistentDirectory), root);
             Set(nameof(MajEnv.AssetsDirectory), new StorageDirectory(root.FileSystem, Path.Combine(root.Location, "StreamingAssets")));
             Set(nameof(MajEnv.CacheDirectory), cache);
-            Set(nameof(MajEnv.RuntimeCacheDirectory), cache.CreateDirectory("Runtime"));
+            Set(nameof(MajEnv.RuntimeDirectory), root.CreateDirectory("Runtime"));
             Set(nameof(MajEnv.TempDirectory), cache.CreateDirectory("Temp"));
             Set(nameof(MajEnv.ChartDirectory), root.CreateDirectory("MaiCharts"));
             Set(nameof(MajEnv.SkinDirectory), root.CreateDirectory("Skins"));

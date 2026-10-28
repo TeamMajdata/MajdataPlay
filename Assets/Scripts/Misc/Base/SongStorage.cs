@@ -111,7 +111,7 @@ namespace MajdataPlay
 
         /// <summary>Records whether favorites storage and save handling have been initialized.</summary>
         private static bool s_isInitialized = false;
-        /// <summary>Stores the shared connection to the persistent favorites database.</summary>
+        /// <summary>Stores the shared connection to the runtime database, which holds the favorites table.</summary>
         private static SQLiteAsyncConnection? s_favoritesDatabase;
         /// <summary>Guards <see cref="s_favoritesDatabase"/> and <see cref="s_pendingFavoriteWrites"/> between writers and shutdown.</summary>
         private static readonly object s_favoritesWriteLock = new();
@@ -127,8 +127,8 @@ namespace MajdataPlay
         private static readonly SongCollection s_emptyCollection = SongCollection.Empty("default");
         /// <summary>Defines the portable favorites export filename.</summary>
         private const string MyFavoriteFileName = "MyFavorites.json";
-        /// <summary>The SQLite favorites database file name inside <see cref="MajEnv.RuntimeCacheDirectory"/>.</summary>
-        private const string FavoriteDatabaseFileName = "MajFavorites.db";
+        /// <summary>The legacy SQLite favorites database file name inside <see cref="MajEnv.RuntimeDirectory"/>, merged into the runtime database.</summary>
+        private const string LegacyFavoriteDatabaseFileName = "MajFavorites.db";
 
         /// <summary>The page size of the recommendation feed; the server snapshot holds at most 150 charts, so two pages fetch all of it.</summary>
         private const int RecommendPageSize = 100;
@@ -1502,23 +1502,28 @@ namespace MajdataPlay
             // Init SQLite DB (once)
             if (s_favoritesDatabase is null)
             {
-                var runtimeDirectory = MajEnv.RuntimeCacheDirectory;
-                var databaseFile = runtimeDirectory.FindFile(FavoriteDatabaseFileName);
-                // SQLite leaves a database empty until its first table is created, so an empty file is still a new database.
-                var isDbExists = databaseFile is not null && databaseFile.Entry is { Length: > 0 };
+                var runtimeDirectory = MajEnv.RuntimeDirectory;
                 // SQLite needs a resolvable location, so the file is created through the directory before the connection opens it.
-                databaseFile ??= runtimeDirectory.CreateFile(FavoriteDatabaseFileName, "application/vnd.sqlite3");
+                var databaseFile = runtimeDirectory.FindFile(MajEnv.RuntimeDatabaseFileName)
+                    ?? runtimeDirectory.CreateFile(MajEnv.RuntimeDatabaseFileName, "application/vnd.sqlite3");
                 var database = new SQLiteAsyncConnection(databaseFile.Location, SQLiteOpenFlags.ReadWrite | SQLiteOpenFlags.Create | SQLiteOpenFlags.FullMutex);
                 try
                 {
+                    // The runtime database is shared with the runtime configuration, so only the favorites table tells whether favorites were stored before.
+                    var hasFavoriteTable = await HasFavoriteTableAsync(database).ConfigureAwait(false);
                     await database.CreateTableAsync<FavoriteHashDB>().ConfigureAwait(false);
-                    if (!isDbExists)
+                    if (!hasFavoriteTable)
                     {
                         var legacyFile = runtimeDirectory.FindFile(MyFavoriteFileName);
                         if (legacyFile is not null)
                         {
                             await MigrateFavFromJsonAsync(database, runtimeDirectory, legacyFile).ConfigureAwait(false);
                         }
+                    }
+                    var legacyDatabaseFile = runtimeDirectory.FindFile(LegacyFavoriteDatabaseFileName);
+                    if (legacyDatabaseFile is not null)
+                    {
+                        await MergeLegacyFavoriteDatabaseAsync(database, runtimeDirectory, legacyDatabaseFile).ConfigureAwait(false);
                     }
                 }
                 catch
@@ -1610,6 +1615,64 @@ namespace MajdataPlay
             catch (Exception e)
             {
                 MajDebug.LogError(nameof(SongStorage), $"Failed to migrate favorites from JSON: {e.Message}");
+            }
+        }
+        /// <summary>Checks whether a database already contains the favorites table.</summary>
+        /// <param name="database">The open database connection to query.</param>
+        /// <returns>True when the favorites table exists; otherwise false.</returns>
+        /// <exception cref="SQLiteException">The schema could not be queried.</exception>
+        private static async Task<bool> HasFavoriteTableAsync(SQLiteAsyncConnection database)
+        {
+            var tableCount = await database.ExecuteScalarAsync<int>(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'FavoriteHashes'").ConfigureAwait(false);
+            return tableCount > 0;
+        }
+        /// <summary>Merges the favorites of the legacy favorites database into the runtime database and retains a backup.</summary>
+        /// <param name="database">The successfully initialized runtime database connection which is not yet globally published.</param>
+        /// <param name="storageDirectory">The runtime directory containing the legacy database and its backup.</param>
+        /// <param name="storageFile">The existing legacy favorites database to merge.</param>
+        /// <returns>A task which completes after merging or logging a recoverable merge failure.</returns>
+        /// <remarks>
+        /// Favorites already in the runtime database are kept, so a merge interrupted before the backup is taken can be
+        /// repeated by the next startup without duplicates.
+        /// </remarks>
+        private static async Task MergeLegacyFavoriteDatabaseAsync(SQLiteAsyncConnection database, StorageDirectory storageDirectory, StorageFile storageFile)
+        {
+            try
+            {
+                var legacyDatabase = new SQLiteAsyncConnection(storageFile.Location, SQLiteOpenFlags.ReadOnly | SQLiteOpenFlags.FullMutex);
+                List<FavoriteHashDB> rows;
+                try
+                {
+                    // An empty legacy file was created but never received the table.
+                    rows = await HasFavoriteTableAsync(legacyDatabase).ConfigureAwait(false)
+                        ? await legacyDatabase.Table<FavoriteHashDB>().ToListAsync().ConfigureAwait(false)
+                        : new List<FavoriteHashDB>();
+                }
+                finally
+                {
+                    await legacyDatabase.CloseAsync().ConfigureAwait(false);
+                }
+
+                await database.RunInTransactionAsync(conn =>
+                {
+                    foreach (var row in rows)
+                    {
+                        if (!string.IsNullOrEmpty(row.Hash))
+                        {
+                            conn.Execute("INSERT OR IGNORE INTO FavoriteHashes (Hash) VALUES (?)", row.Hash);
+                        }
+                    }
+                }).ConfigureAwait(false);
+
+                var backupName = LegacyFavoriteDatabaseFileName + ".bak";
+                storageDirectory.FindFile(backupName)?.Delete();
+                storageFile.Rename(backupName);
+                MajDebug.LogInfo(nameof(SongStorage), $"Merged {rows.Count} favorites from the legacy favorites database into the runtime database, old file backed up.");
+            }
+            catch (Exception e)
+            {
+                MajDebug.LogError(nameof(SongStorage), $"Failed to merge the legacy favorites database: {e.Message}");
             }
         }
 

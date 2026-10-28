@@ -10,15 +10,41 @@ namespace MajdataPlay.Editor.Windows
 {
     /// <summary>
     /// Editor window that adds characters to selected or dropped TMP font assets ahead of use, from literal characters,
-    /// character set files and Unicode ranges, so the glyphs are not rasterized at runtime.
+    /// character set files and Unicode ranges, so the glyphs are not rasterized at runtime. Dynamic assets receive the glyphs
+    /// directly; static assets can be baked in place and stay static. Glyphs can be cleared again, either all of them or only the
+    /// listed characters, from dynamic assets, static assets or both.
     /// </summary>
     internal sealed class TmpFontPrewarmWindow : EditorWindow
     {
         /// <summary>The window title.</summary>
         private const string WindowTitle = "TMP Font Prewarmer";
 
-        /// <summary>The number of unsupported code points listed in a result line.</summary>
+        /// <summary>The number of unsupported or lost code points listed in a result line.</summary>
         private const int UnsupportedSampleCount = 16;
+
+        /// <summary>The number of asset names listed in a confirmation dialog.</summary>
+        private const int DialogAssetNameCount = 12;
+
+        /// <summary>The atlas size limits offered for growing static atlases.</summary>
+        private static readonly int[] MaxStaticAtlasSizes = { 1024, 2048, 4096, 8192 };
+
+        /// <summary>The labels of <see cref="MaxStaticAtlasSizes"/>.</summary>
+        private static readonly GUIContent[] MaxStaticAtlasSizeLabels =
+        {
+            new("1024"), new("2048"), new("4096"), new("8192")
+        };
+
+        /// <summary>The clear targets offered by the window, in menu order.</summary>
+        private static readonly int[] ClearTargets =
+        {
+            (int)TmpFontClearTarget.DynamicOnly, (int)TmpFontClearTarget.StaticOnly, (int)TmpFontClearTarget.DynamicAndStatic
+        };
+
+        /// <summary>The labels of <see cref="ClearTargets"/>.</summary>
+        private static readonly GUIContent[] ClearTargetLabels =
+        {
+            new("Dynamic only"), new("Static only"), new("Dynamic and static")
+        };
 
         /// <summary>The font assets to prewarm, in the order they are processed.</summary>
         private readonly List<TMP_FontAsset> _fontAssets = new();
@@ -29,8 +55,11 @@ namespace MajdataPlay.Editor.Windows
         /// <summary>The summaries of the last run, one per font asset.</summary>
         private readonly List<string> _resultLines = new();
 
-        /// <summary>How glyphs are added and saved.</summary>
-        private readonly TmpFontPrewarmOptions _options = new();
+        /// <summary>How glyphs are added and saved; the window bakes static assets by default.</summary>
+        private readonly TmpFontPrewarmOptions _options = new()
+        {
+            IncludeStaticAssets = true
+        };
 
         /// <summary>The literal characters to add.</summary>
         private string _characters = string.Empty;
@@ -52,6 +81,9 @@ namespace MajdataPlay.Editor.Windows
 
         /// <summary>The font assets to prewarm.</summary>
         internal IReadOnlyList<TMP_FontAsset> FontAssets => _fontAssets;
+
+        /// <summary>How glyphs are added and saved.</summary>
+        internal TmpFontPrewarmOptions Options => _options;
 
         /// <summary>The literal characters to add; setting it marks the code points for rebuilding.</summary>
         internal string Characters
@@ -217,7 +249,7 @@ namespace MajdataPlay.Editor.Windows
             }
             using (new EditorGUI.DisabledScope(_fontAssets.Count == 0))
             {
-                if (GUILayout.Button("Clear"))
+                if (GUILayout.Button("Clear List"))
                 {
                     _fontAssets.Clear();
                 }
@@ -252,13 +284,15 @@ namespace MajdataPlay.Editor.Windows
             }
         }
 
-        /// <summary>Warns about population mode settings that defeat or limit prewarming.</summary>
+        /// <summary>Explains how a static asset is handled and warns about population mode settings that defeat or limit prewarming.</summary>
         /// <param name="fontAsset">The listed font asset.</param>
-        private static void DrawFontAssetWarning(TMP_FontAsset fontAsset)
+        private void DrawFontAssetWarning(TMP_FontAsset fontAsset)
         {
             if (!TmpFontPrewarmer.IsDynamic(fontAsset))
             {
-                EditorGUILayout.HelpBox("Static: no glyphs can be added to this asset. Its fallbacks are still prewarmed.", MessageType.Info);
+                EditorGUILayout.HelpBox(DescribeStaticHandling(fontAsset), TmpFontPrewarmer.GetSourceFont(fontAsset) == null && _options.IncludeStaticAssets
+                                            ? MessageType.Warning
+                                            : MessageType.Info);
                 return;
             }
             if (!TmpFontPrewarmer.GetClearDynamicDataOnBuild(fontAsset))
@@ -272,6 +306,28 @@ namespace MajdataPlay.Editor.Windows
                 TmpFontPrewarmer.SetClearDynamicDataOnBuild(fontAsset, false);
             }
             EditorGUILayout.EndHorizontal();
+        }
+
+        /// <summary>Describes what a run does to a static asset with the current options.</summary>
+        /// <param name="fontAsset">The static font asset.</param>
+        /// <returns>The help text shown under the asset.</returns>
+        internal string DescribeStaticHandling(TMP_FontAsset fontAsset)
+        {
+            if (!_options.IncludeStaticAssets)
+            {
+                return "Static: baking into static assets is off, so no glyphs are added to this asset. Its fallbacks are still prewarmed.";
+            }
+            if (TmpFontPrewarmer.GetSourceFont(fontAsset) == null)
+            {
+                return "Static without a source font reference: characters cannot be baked into it. Its fallbacks are still prewarmed.";
+            }
+            var growth = fontAsset.isMultiAtlasTexturesEnabled
+                ? "new atlas pages are added when it is full"
+                : _options.GrowStaticAtlases
+                    ? $"the atlas grows up to {_options.MaxStaticAtlasSize} when full"
+                    : "characters that do not fit go to its fallbacks";
+            return $"Static {fontAsset.atlasWidth}x{fontAsset.atlasHeight}: characters its source font has are baked into the atlas " +
+                   $"({growth}); it stays static with a non-readable atlas.";
         }
 
         /// <summary>Draws the literal characters, character set files and Unicode range inputs.</summary>
@@ -369,23 +425,71 @@ namespace MajdataPlay.Editor.Windows
             _options.IncludeFontFeatures = EditorGUILayout.ToggleLeft(
                 new GUIContent("Include font features", "Reads ligature and kerning data for the new glyphs. Slower; rarely needed for CJK."),
                 _options.IncludeFontFeatures);
+            _options.IncludeStaticAssets = EditorGUILayout.ToggleLeft(
+                new GUIContent("Bake into static font assets",
+                               "Static assets in the chain receive the characters their source font has, then stay static with a non-readable atlas. " +
+                               "Their own font feature setting is used so the kerning stays consistent."),
+                _options.IncludeStaticAssets);
+            using (new EditorGUI.DisabledScope(!_options.IncludeStaticAssets))
+            {
+                EditorGUI.indentLevel++;
+                _options.GrowStaticAtlases = EditorGUILayout.ToggleLeft(
+                    new GUIContent("Grow full static atlases",
+                                   "Rebuilds a full single-atlas static asset at the next power-of-two size with its existing characters plus the new ones, " +
+                                   "and updates the atlas size on its material presets."),
+                    _options.GrowStaticAtlases);
+                using (new EditorGUI.DisabledScope(!_options.GrowStaticAtlases))
+                {
+                    _options.MaxStaticAtlasSize = EditorGUILayout.IntPopup(
+                        new GUIContent("Max static atlas size", "The largest width or height a static atlas may grow to."),
+                        _options.MaxStaticAtlasSize,
+                        MaxStaticAtlasSizeLabels,
+                        MaxStaticAtlasSizes);
+                }
+                EditorGUI.indentLevel--;
+            }
             _options.BatchSize = Mathf.Clamp(EditorGUILayout.IntField(
                 new GUIContent("Batch size", "Characters per TryAddCharacters call."),
                 _options.BatchSize), 1, 4096);
         }
 
-        /// <summary>Draws the prewarm button and runs it when clicked.</summary>
+        /// <summary>Draws the prewarm and clear buttons and runs the clicked action.</summary>
         private void DrawActions()
         {
             RefreshCodePoints();
-            var canRun = _fontAssets.Count > 0 && _codePoints.Count > 0 && _parseError is null;
-            using (new EditorGUI.DisabledScope(!canRun))
+            var hasCharacters = _codePoints.Count > 0 && _parseError is null;
+            using (new EditorGUI.DisabledScope(_fontAssets.Count == 0 || !hasCharacters))
             {
                 if (GUILayout.Button("Prewarm", GUILayout.Height(28f)))
                 {
                     RunPrewarm();
                 }
             }
+            EditorGUILayout.Space();
+            _options.ClearTarget = (TmpFontClearTarget)EditorGUILayout.IntPopup(
+                new GUIContent("Clear target", "Which font assets of the listed chains the clear actions change. Cleared static assets stay static."),
+                (int)_options.ClearTarget,
+                ClearTargetLabels,
+                ClearTargets);
+            EditorGUILayout.BeginHorizontal();
+            using (new EditorGUI.DisabledScope(_fontAssets.Count == 0))
+            {
+                if (GUILayout.Button(new GUIContent("Clear All Glyphs",
+                                                    "Removes every glyph from the clear target assets of the listed chains, like TMP's Reset.")))
+                {
+                    RunClearGlyphs();
+                }
+            }
+            using (new EditorGUI.DisabledScope(_fontAssets.Count == 0 || !hasCharacters))
+            {
+                if (GUILayout.Button(new GUIContent("Remove Listed Characters",
+                                                    "Removes only the characters above from the clear target assets of the listed chains, " +
+                                                    "rebuilding each affected atlas from its remaining characters.")))
+                {
+                    RunRemoveCharacters();
+                }
+            }
+            EditorGUILayout.EndHorizontal();
         }
 
         /// <summary>Draws the summaries of the last run.</summary>
@@ -407,7 +511,12 @@ namespace MajdataPlay.Editor.Windows
         private void RunPrewarm()
         {
             var fallbackNote = _options.IncludeFallbacks ? " and their fallbacks" : string.Empty;
-            var message = $"Add up to {_codePoints.Count} characters to {_fontAssets.Count} font asset(s){fallbackNote}?\n\n" +
+            var staticNote = _options.IncludeStaticAssets
+                ? _options.GrowStaticAtlases
+                    ? " Static assets are baked in place and their atlases may be rebuilt at a larger size."
+                    : " Static assets are baked in place."
+                : string.Empty;
+            var message = $"Add up to {_codePoints.Count} characters to {_fontAssets.Count} font asset(s){fallbackNote}?{staticNote}\n\n" +
                           "Modified assets are saved to disk and the change cannot be undone.";
             if (!EditorUtility.DisplayDialog(WindowTitle, message, "Prewarm", "Cancel"))
             {
@@ -444,6 +553,170 @@ namespace MajdataPlay.Editor.Windows
             {
                 EditorUtility.ClearProgressBar();
             }
+        }
+
+        /// <summary>Asks for confirmation, then empties the clear target assets of every listed chain.</summary>
+        private void RunClearGlyphs()
+        {
+            var affected = GetAssetsToClear();
+            var message = $"Remove every glyph from these {DescribeClearTarget()} font assets?\n\n{FormatAssetNames(affected)}\n\n" +
+                          $"{DescribeStaticClearing("Cleared static assets stay static with an empty atlas; their glyphs are not generated at runtime.")}" +
+                          "Modified assets are saved to disk and the change cannot be undone.";
+            RunClear(affected, message, (fontAsset, onProgress) => TmpFontPrewarmer.ClearGlyphs(fontAsset, _options, onProgress));
+        }
+
+        /// <summary>Asks for confirmation, then removes the listed characters from the clear target assets of every listed chain.</summary>
+        private void RunRemoveCharacters()
+        {
+            var affected = GetAssetsWithListedCharacters();
+            var message = $"Remove up to {_codePoints.Count} characters from these {DescribeClearTarget()} font assets?\n\n{FormatAssetNames(affected)}\n\n" +
+                          "Each atlas is rebuilt from its remaining characters. " +
+                          $"{DescribeStaticClearing("Rebuilt static assets stay static.")}" +
+                          "Modified assets are saved to disk and the change cannot be undone.";
+            RunClear(affected, message, (fontAsset, onProgress) => TmpFontPrewarmer.RemoveCharacters(fontAsset, _codePoints, _options, onProgress));
+        }
+
+        /// <summary>Names the population modes the current clear target includes, for confirmation messages.</summary>
+        /// <returns>"dynamic", "static" or "dynamic and static".</returns>
+        private string DescribeClearTarget()
+        {
+            return _options.ClearTarget switch
+            {
+                TmpFontClearTarget.DynamicOnly => "dynamic",
+                TmpFontClearTarget.StaticOnly => "static",
+                _ => "dynamic and static"
+            };
+        }
+
+        /// <summary>Gets a confirmation sentence about static assets for the current clear target.</summary>
+        /// <param name="clearedNote">The sentence used when static assets are cleared.</param>
+        /// <returns>The sentence followed by a space, or a note that static assets are left untouched.</returns>
+        private string DescribeStaticClearing(string clearedNote)
+        {
+            return _options.ClearTarget == TmpFontClearTarget.DynamicOnly
+                ? "Static assets are left untouched. "
+                : $"{clearedNote} ";
+        }
+
+        /// <summary>Confirms a clear action, runs it on every listed font asset with a progress bar and records the summaries.</summary>
+        /// <param name="affected">The assets the action would change, shown in the dialog; when empty nothing is run.</param>
+        /// <param name="message">The confirmation message.</param>
+        /// <param name="clear">Clears one listed font asset's chain, reporting progress to the given callback.</param>
+        private void RunClear(List<TMP_FontAsset> affected,
+                              string message,
+                              Func<TMP_FontAsset, Action<float, string>, TmpFontClearResult> clear)
+        {
+            if (affected.Count == 0)
+            {
+                EditorUtility.DisplayDialog(WindowTitle, "None of the listed font assets has glyphs to remove with the current options.", "OK");
+                return;
+            }
+            if (!EditorUtility.DisplayDialog(WindowTitle, message, "Remove", "Cancel"))
+            {
+                return;
+            }
+            _resultLines.Clear();
+            try
+            {
+                var fontAssets = _fontAssets.ToArray();
+                for (var i = 0; i < fontAssets.Length; i++)
+                {
+                    var fontAsset = fontAssets[i];
+                    if (fontAsset == null)
+                    {
+                        continue;
+                    }
+                    var assetIndex = i;
+                    var result = clear(fontAsset, (progress, info) =>
+                    {
+                        EditorUtility.DisplayProgressBar(WindowTitle,
+                                                         $"[{assetIndex + 1}/{fontAssets.Length}] {info}",
+                                                         (assetIndex + progress) / fontAssets.Length);
+                    });
+                    var line = DescribeClear(result);
+                    _resultLines.Add(line);
+                    Debug.Log($"[{nameof(TmpFontPrewarmWindow)}] {line}", fontAsset);
+                }
+            }
+            finally
+            {
+                EditorUtility.ClearProgressBar();
+            }
+        }
+
+        /// <summary>Lists the clear target assets of the listed chains that have glyphs, which "Clear All Glyphs" would empty.</summary>
+        /// <returns>The distinct assets in lookup order.</returns>
+        internal List<TMP_FontAsset> GetAssetsToClear()
+        {
+            return CollectChainAssets(asset => asset.characterTable.Count > 0 && TmpFontPrewarmer.IsClearTarget(asset, _options.ClearTarget));
+        }
+
+        /// <summary>Lists the clear target assets of the listed chains that have a listed character, which "Remove Listed Characters" would rebuild.</summary>
+        /// <returns>The distinct assets in lookup order.</returns>
+        internal List<TMP_FontAsset> GetAssetsWithListedCharacters()
+        {
+            RefreshCodePoints();
+            return CollectChainAssets(asset =>
+            {
+                if (!TmpFontPrewarmer.IsClearTarget(asset, _options.ClearTarget))
+                {
+                    return false;
+                }
+                foreach (var character in asset.characterTable)
+                {
+                    if (_codePoints.Contains(character.unicode))
+                    {
+                        return true;
+                    }
+                }
+                return false;
+            });
+        }
+
+        /// <summary>Collects the distinct assets of every listed font asset's lookup chain that match a filter.</summary>
+        /// <param name="filter">Returns true for the assets to collect.</param>
+        /// <returns>The matching assets in lookup order.</returns>
+        private List<TMP_FontAsset> CollectChainAssets(Predicate<TMP_FontAsset> filter)
+        {
+            var assets = new List<TMP_FontAsset>();
+            var seen = new HashSet<TMP_FontAsset>();
+            foreach (var fontAsset in _fontAssets)
+            {
+                if (fontAsset == null)
+                {
+                    continue;
+                }
+                foreach (var asset in TmpFontPrewarmer.GetLookupChain(fontAsset, _options.IncludeFallbacks))
+                {
+                    if (seen.Add(asset) && filter(asset))
+                    {
+                        assets.Add(asset);
+                    }
+                }
+            }
+            return assets;
+        }
+
+        /// <summary>Formats asset names for a confirmation dialog, one per line.</summary>
+        /// <param name="assets">The assets to name.</param>
+        /// <returns>Up to <see cref="DialogAssetNameCount"/> names followed by the number of further assets.</returns>
+        private static string FormatAssetNames(List<TMP_FontAsset> assets)
+        {
+            var builder = new StringBuilder();
+            var nameCount = Math.Min(DialogAssetNameCount, assets.Count);
+            for (var i = 0; i < nameCount; i++)
+            {
+                if (i > 0)
+                {
+                    builder.Append('\n');
+                }
+                builder.Append($"{assets[i].name} ({assets[i].characterTable.Count} chars)");
+            }
+            if (nameCount < assets.Count)
+            {
+                builder.Append($"\n... and {assets.Count - nameCount} more");
+            }
+            return builder.ToString();
         }
 
         /// <summary>Rebuilds the code point set from all sources when an input changed.</summary>
@@ -520,29 +793,84 @@ namespace MajdataPlay.Editor.Windows
                 }
                 builder.Append(')');
             }
+            foreach (var pair in result.GrownAtlasSizes)
+            {
+                builder.Append($", grew atlas {pair.Key.name}: {pair.Value.x}x{pair.Value.y}");
+            }
+            foreach (var asset in result.StaticAssetsWithoutSourceFont)
+            {
+                builder.Append($", static without source font: {asset.name}");
+            }
             if (result.UnsupportedCodePoints.Count > 0)
             {
-                builder.Append($", unsupported {result.UnsupportedCodePoints.Count} [");
-                var sampleCount = Math.Min(UnsupportedSampleCount, result.UnsupportedCodePoints.Count);
-                for (var i = 0; i < sampleCount; i++)
-                {
-                    if (i > 0)
-                    {
-                        builder.Append(' ');
-                    }
-                    builder.Append($"U+{result.UnsupportedCodePoints[i]:X4}");
-                }
-                if (sampleCount < result.UnsupportedCodePoints.Count)
-                {
-                    builder.Append(" ...");
-                }
-                builder.Append(']');
+                builder.Append(", unsupported ");
+                AppendCodePointSample(builder, result.UnsupportedCodePoints);
             }
             if (result.IsCanceled)
             {
                 builder.Append($", canceled with {result.UnprocessedCount} unprocessed");
             }
             return builder.ToString();
+        }
+
+        /// <summary>Formats a clear result as one summary line.</summary>
+        /// <param name="result">The result to describe.</param>
+        /// <returns>The summary, listing up to <see cref="UnsupportedSampleCount"/> characters that no longer fit.</returns>
+        internal static string DescribeClear(TmpFontClearResult result)
+        {
+            var builder = new StringBuilder();
+            builder.Append($"{result.FontAsset.name}: removed {result.RemovedCount}");
+            if (result.RemovedPerAsset.Count > 0)
+            {
+                builder.Append(" (");
+                var isFirst = true;
+                foreach (var pair in result.RemovedPerAsset)
+                {
+                    if (!isFirst)
+                    {
+                        builder.Append(", ");
+                    }
+                    builder.Append($"{pair.Key.name}: {pair.Value}");
+                    isFirst = false;
+                }
+                builder.Append(')');
+            }
+            foreach (var asset in result.SkippedAssets)
+            {
+                builder.Append($", skipped by clear target: {asset.name}");
+            }
+            foreach (var asset in result.AssetsWithoutSourceFont)
+            {
+                builder.Append($", no source font to rebuild: {asset.name}");
+            }
+            if (result.LostCodePoints.Count > 0)
+            {
+                builder.Append(", no longer fit ");
+                AppendCodePointSample(builder, result.LostCodePoints);
+            }
+            return builder.ToString();
+        }
+
+        /// <summary>Appends a count and up to <see cref="UnsupportedSampleCount"/> code points, e.g. "2 [U+0041 U+0042]".</summary>
+        /// <param name="builder">The summary being built.</param>
+        /// <param name="codePoints">The code points to sample.</param>
+        private static void AppendCodePointSample(StringBuilder builder, List<uint> codePoints)
+        {
+            builder.Append($"{codePoints.Count} [");
+            var sampleCount = Math.Min(UnsupportedSampleCount, codePoints.Count);
+            for (var i = 0; i < sampleCount; i++)
+            {
+                if (i > 0)
+                {
+                    builder.Append(' ');
+                }
+                builder.Append($"U+{codePoints[i]:X4}");
+            }
+            if (sampleCount < codePoints.Count)
+            {
+                builder.Append(" ...");
+            }
+            builder.Append(']');
         }
     }
 }

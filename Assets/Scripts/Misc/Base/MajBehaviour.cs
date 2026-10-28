@@ -1,4 +1,4 @@
-﻿using MajdataPlay.Databases;
+using MajdataPlay.Databases;
 using MajdataPlay.Editor;
 using System;
 using System.Collections.Generic;
@@ -12,15 +12,12 @@ namespace MajdataPlay
 {
     public abstract class MajBehaviour : MonoBehaviour
     {
-        [field: SerializeField, ReadOnlyField]
-        protected GameRuntime RuntimeDatabase { get; private set; }
+        protected GameRuntime RuntimeDatabase { get => GameRuntime.Instance; }
 
         protected virtual void Awake()
         {
-            RuntimeDatabase = GameRuntime.Instance;
-
             var type = GetType();
-            if(type.GetCustomAttribute<DontDestroyOnLoadAttribute>() is not null)
+            if (type.GetCustomAttribute<DontDestroyOnLoadAttribute>() is not null)
             {
                 DontDestroyOnLoad(this);
             }

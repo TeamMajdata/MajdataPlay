@@ -41,6 +41,8 @@
     <Compile Include="../../../../Assets/Scripts/Misc/Settings/Attributes/*.cs" Link="Production/%(Filename)%(Extension)" />
     <Compile Include="../../../../Assets/Scripts/Misc/Settings/Runtime/SettingReflectionCache.cs" Link="Production/SettingReflectionCache.cs" />
     <Compile Include="../../../../Assets/Scripts/Misc/Settings/Runtime/SettingNumberFolding.cs" Link="Production/SettingNumberFolding.cs" />
+    <Compile Include="../../../../Assets/Scripts/Misc/Settings/Runtime/SettingDisabledValues.cs" Link="Production/SettingDisabledValues.cs" />
+    <Compile Include="../../../../Assets/Scripts/Misc/Settings/Enums/SettingPlatform.cs" Link="Production/SettingPlatform.cs" />
     <Compile Include="../../../../Assets/Scripts/Misc/Settings/Runtime/Enums/TranslationTarget.cs" Link="Production/TranslationTarget.cs" />
     <Compile Include="../../../../Assets/Scripts/Misc/Base/Extensions/TypeExtensions.cs" Link="Production/TypeExtensions.cs" />
     <Compile Include="../../../../Assets/Scripts/IO/Base/InputState.cs" Link="Production/InputState.cs" />

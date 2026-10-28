@@ -12,6 +12,7 @@ using MajdataPlay.Tests.Game.Misc.Support;
 using MajdataPlay.Utils;
 using Newtonsoft.Json.Linq;
 using NUnit.Framework;
+using SQLite;
 
 #nullable enable
 namespace MajdataPlay.Tests.Game.Misc.Base
@@ -98,16 +99,50 @@ namespace MajdataPlay.Tests.Game.Misc.Base
         [Test]
         public void InitDirectories_CreatesLayout()
         {
+            var persistent = _temporary.Directory.CreateDirectory("Persistent");
+            _environment.Set(nameof(MajEnv.PersistentDirectory), persistent);
+
             Step("InitDirectories");
 
-            Assert.That(MajEnv.RuntimeCacheDirectory.Exists, Is.True);
+            Assert.That(MajEnv.RuntimeDirectory.Location, Is.EqualTo(persistent.FindDirectory("Runtime")!.Location));
+            Assert.That(MajEnv.CacheDirectory.FindDirectory("Runtime"), Is.Null);
             Assert.That(MajEnv.CacheDirectory.FindDirectory("Net"), Is.Not.Null);
             Assert.That(MajEnv.TempDirectory.Exists, Is.True);
             Assert.That(_root.FindDirectory("MaiCharts"), Is.Not.Null);
             Assert.That(_root.FindDirectory("Skins"), Is.Not.Null);
             Assert.That(_root.FindDirectory("Logs"), Is.Not.Null);
             Assert.That(_root.FindDirectory("RecordOutputs"), Is.Not.Null);
-            Assert.That(_root.FindDirectory("Runtime"), Is.Not.Null);
+        }
+
+        /// <summary>Checks that the legacy cache runtime directory is merged into the runtime directory and then deleted.</summary>
+        [Test]
+        public void MigrateLegacyRuntimeDirectory_MovesEntriesAndDeletesLegacy()
+        {
+            var legacy = MajEnv.CacheDirectory.CreateDirectory("Runtime");
+            legacy.CreateFile("config.json").WriteAllText("legacy config");
+            legacy.CreateFile("MajFavorites.db").WriteAllText("legacy favorites");
+            legacy.CreateDirectory("Nested").CreateFile("data.bin").WriteAllText("nested");
+            MajEnv.RuntimeDirectory.CreateFile("config.json").WriteAllText("current config");
+
+            Step("MigrateLegacyRuntimeDirectory");
+
+            var runtime = MajEnv.RuntimeDirectory;
+            Assert.That(MajEnv.CacheDirectory.FindDirectory("Runtime"), Is.Null);
+            Assert.That(runtime.FindFile("config.json")!.ReadAllText(), Is.EqualTo("current config"));
+            Assert.That(runtime.FindFile("MajFavorites.db")!.ReadAllText(), Is.EqualTo("legacy favorites"));
+            Assert.That(runtime.FindFileAt("Nested/data.bin")!.ReadAllText(), Is.EqualTo("nested"));
+        }
+
+        /// <summary>Checks that the migration leaves the runtime directory untouched when no legacy directory exists.</summary>
+        [Test]
+        public void MigrateLegacyRuntimeDirectory_WithoutLegacy_DoesNothing()
+        {
+            MajEnv.RuntimeDirectory.CreateFile("config.json").WriteAllText("current config");
+
+            Step("MigrateLegacyRuntimeDirectory");
+
+            Assert.That(MajEnv.RuntimeDirectory.FindFile("config.json")!.ReadAllText(), Is.EqualTo("current config"));
+            Assert.That(MajEnv.CacheDirectory.FindDirectory("Runtime"), Is.Null);
         }
 
         /// <summary>Checks that the language directory is only reported while the streaming assets contain it.</summary>
@@ -205,25 +240,108 @@ namespace MajdataPlay.Tests.Game.Misc.Base
             Assert.That(_root.FindFile("settings.json.bak.bak")!.ReadAllText(), Is.EqualTo("{ broken"));
         }
 
-        /// <summary>Checks that the runtime configuration is created, loaded and replaced when unreadable.</summary>
+        /// <summary>Opens runtime.db with a separate connection.</summary>
+        /// <returns>The open connection, which the caller disposes.</returns>
+        private static SQLiteConnection OpenStoredRuntimeDatabase()
+        {
+            var file = MajEnv.RuntimeDirectory.FindFile("runtime.db")!;
+            return new SQLiteConnection(file.Location, SQLiteOpenFlags.ReadWrite | SQLiteOpenFlags.FullMutex);
+        }
+
+        /// <summary>Reads one column of the stored list configuration row as text.</summary>
+        /// <param name="column">The column name.</param>
+        /// <returns>The stored text, or null when the row or value is absent.</returns>
+        private static string? ReadStoredListConfig(string column)
+        {
+            using var connection = OpenStoredRuntimeDatabase();
+            return connection.ExecuteScalar<string?>($"SELECT CAST({column} AS TEXT) FROM ListConfig WHERE Id = 0");
+        }
+
+        /// <summary>Counts the stored list configuration rows.</summary>
+        /// <returns>The number of rows.</returns>
+        private static int CountStoredListConfigRows()
+        {
+            using var connection = OpenStoredRuntimeDatabase();
+            return connection.ExecuteScalar<int>("SELECT COUNT(*) FROM ListConfig");
+        }
+
+        /// <summary>Checks that the runtime configuration is created in typed runtime.db columns, loaded and reset when unreadable.</summary>
         [Test]
         public void InitRuntimeConfig_CreatesLoadsAndRecovers()
         {
             Step("InitRuntimeConfig");
-            var file = MajEnv.RuntimeCacheDirectory.FindFile("config.json");
-            Assert.That(file, Is.Not.Null);
+            Assert.That(CountStoredListConfigRows(), Is.EqualTo(1));
+            Assert.That(MajEnv.RuntimeDirectory.FindFile("config.json"), Is.Null);
             Assert.That(MajEnv.RuntimeConfig, Is.Not.Null);
 
             var selectedId = System.Guid.Parse("4d2783ac-a6ef-40f4-b648-b043b4c58608");
-            file!.WriteAllText("{\"List\":{\"SelectedDirGuid\":\"4d2783ac-a6ef-40f4-b648-b043b4c58608\",\"SelectedSongHash\":\"h\"}}");
+            using (var connection = OpenStoredRuntimeDatabase())
+            {
+                connection.Execute(
+                    "UPDATE ListConfig SET SelectedDirGuid = ?, SelectedSongHash = ?, SelectedDiff = ? WHERE Id = 0",
+                    selectedId.ToString(), "h", (int)ChartLevel.Master);
+            }
             Step("InitRuntimeConfig");
             Assert.That(MajEnv.RuntimeConfig!.List.SelectedDirGuid, Is.EqualTo(selectedId));
             Assert.That(MajEnv.RuntimeConfig.List.SelectedSongHash, Is.EqualTo("h"));
+            Assert.That(MajEnv.RuntimeConfig.List.SelectedDiff, Is.EqualTo(ChartLevel.Master));
 
-            file.WriteAllText("not json");
+            using (var connection = OpenStoredRuntimeDatabase())
+            {
+                connection.Execute("UPDATE ListConfig SET SelectedDirGuid = 'not a guid', SelectedSongHash = NULL WHERE Id = 0");
+            }
             Step("InitRuntimeConfig");
             Assert.That(MajEnv.RuntimeConfig!.List.SelectedDirGuid, Is.EqualTo(System.Guid.Empty));
             Assert.That(MajEnv.RuntimeConfig.List.SelectedSongHash, Is.Empty);
+            Assert.That(MajEnv.RuntimeConfig.List.SelectedDiff, Is.EqualTo(ChartLevel.Easy));
+        }
+
+        /// <summary>Checks that a NULL text column, as left by a column added later, loads as an empty value.</summary>
+        [Test]
+        public void InitRuntimeConfig_LoadsNullSongHashAsEmpty()
+        {
+            Step("InitRuntimeConfig");
+            using (var connection = OpenStoredRuntimeDatabase())
+            {
+                connection.Execute("UPDATE ListConfig SET SelectedSongHash = NULL WHERE Id = 0");
+            }
+
+            Step("InitRuntimeConfig");
+
+            Assert.That(MajEnv.RuntimeConfig.List.SelectedSongHash, Is.Empty);
+        }
+
+        /// <summary>Checks that a legacy config.json is imported into runtime.db once and then backed up.</summary>
+        [Test]
+        public void InitRuntimeConfig_ImportsLegacyJson()
+        {
+            MajEnv.RuntimeDirectory.CreateFile("config.json").WriteAllText("{\"List\":{\"SelectedSongHash\":\"legacy\"}}");
+            MajEnv.RuntimeDirectory.CreateFile("config.json.bak").WriteAllText("older");
+
+            Step("InitRuntimeConfig");
+
+            Assert.That(MajEnv.RuntimeConfig.List.SelectedSongHash, Is.EqualTo("legacy"));
+            Assert.That(ReadStoredListConfig("SelectedSongHash"), Is.EqualTo("legacy"));
+            Assert.That(MajEnv.RuntimeDirectory.FindFile("config.json"), Is.Null);
+            Assert.That(MajEnv.RuntimeDirectory.FindFile("config.json.bak")!.ReadAllText(), Does.Contain("legacy"));
+
+            // A config.json appearing after the import is ignored, because runtime.db is the only source from then on.
+            MajEnv.RuntimeDirectory.CreateFile("config.json").WriteAllText("{\"List\":{\"SelectedSongHash\":\"stale\"}}");
+            Step("InitRuntimeConfig");
+            Assert.That(MajEnv.RuntimeConfig.List.SelectedSongHash, Is.EqualTo("legacy"));
+        }
+
+        /// <summary>Checks that an unreadable legacy config.json is imported as defaults and kept as a backup.</summary>
+        [Test]
+        public void InitRuntimeConfig_ImportsUnreadableLegacyJsonAsDefaults()
+        {
+            MajEnv.RuntimeDirectory.CreateFile("config.json").WriteAllText("not json");
+
+            Step("InitRuntimeConfig");
+
+            Assert.That(MajEnv.RuntimeConfig.List.SelectedSongHash, Is.Empty);
+            Assert.That(CountStoredListConfigRows(), Is.EqualTo(1));
+            Assert.That(MajEnv.RuntimeDirectory.FindFile("config.json.bak")!.ReadAllText(), Is.EqualTo("not json"));
         }
 
         /// <summary>Checks that the machine description is created with defaults, loaded, and kept when unreadable.</summary>
@@ -327,9 +445,8 @@ namespace MajdataPlay.Tests.Game.Misc.Base
             Step("OnSave", null, null);
 
             var settings = Serializer.Json.Deserialize<GameSetting>(_root.FindFile("settings.json")!.ReadAllText(), MajEnv.UserJsonReaderOption)!;
-            var runtime = Serializer.Json.Deserialize<RuntimeConfig>(MajEnv.RuntimeCacheDirectory.FindFile("config.json")!.ReadAllText())!;
             Assert.That(settings.Game.TapSpeed, Is.EqualTo(6.25f));
-            Assert.That(runtime.List.SelectedSongHash, Is.EqualTo("saved"));
+            Assert.That(ReadStoredListConfig("SelectedSongHash"), Is.EqualTo("saved"));
             Assert.That(MajEnv.SettingsPath.Location, Is.EqualTo(_root.FindFile("settings.json")!.Location));
 
             MajEnv.Settings.Game.TapSpeed = 5f;

@@ -6,7 +6,7 @@ using System.Text;
 
 namespace MajdataPlay.Settings
 {
-    public class FFmpegEncoderOptions
+    public class FFmpegEncodingOptions
     {
         public FFmpegCodecPreference PreferredEncoder { get; set; } = FFmpegCodecPreference.Hardware;
         [NoTranslation(TranslationTarget.OptionValue)]

@@ -1,5 +1,7 @@
 fileFormatVersion: 2
-guid: de525329ef016ae41b2fab95bf9e2a92
+guid: 05efa2e3d6891424ea2b70283145ceb3
+labels:
+- Font
 NativeFormatImporter:
   externalObjects: {}
   mainObjectFileID: 11400000

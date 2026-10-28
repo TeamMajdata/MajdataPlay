@@ -42,8 +42,10 @@ namespace MajdataPlay
         public static StorageDirectory ChartDirectory { get; set; } = null!;
         /// <summary>Gets or sets the disposable cache root.</summary>
         public static StorageDirectory CacheDirectory { get; set; } = null!;
-        /// <summary>Gets the runtime cache directory below the disposable cache root, created on demand like production initialization.</summary>
-        public static StorageDirectory RuntimeCacheDirectory
+        /// <summary>The SQLite runtime database file name inside <see cref="RuntimeDirectory"/>, matching production.</summary>
+        internal const string RuntimeDatabaseFileName = "runtime.db";
+        /// <summary>Gets the runtime data directory, kept below the disposable cache root by this stub and created on demand like production initialization.</summary>
+        public static StorageDirectory RuntimeDirectory
         {
             get
             {
