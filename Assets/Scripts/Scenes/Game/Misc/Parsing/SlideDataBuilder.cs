@@ -86,6 +86,164 @@ namespace MajdataPlay.Scenes.Game.Parsing
         }
 
         /// <summary>
+        /// The largest distance from the path end at which <see cref="BuildArrowData"/> may place an arrow through rounding,
+        /// for example on <c>1Q9K2</c> but not on <c>2Q9K3</c>. Such an arrow is the path end itself.
+        /// </summary>
+        private const double EndArrowTolerance = SlideGeo.Epsilon;
+
+        /// <summary>
+        /// Checks whether the last arrow of a path is so close to the path end that, as in the official game, it is only
+        /// shown when the path is followed by another segment of a connection slide.
+        /// </summary>
+        /// <param name="lastArrow">The last arrow before the path end.</param>
+        /// <param name="pathEnd">The path end.</param>
+        /// <returns><see langword="true"/> when the arrow is at most half the default arrow distance from the path end.</returns>
+        public static bool IsLastArrowConditional(SlideArrowRawData lastArrow, SlideArrowRawData pathEnd)
+        {
+            return pathEnd.PathLength - lastArrow.PathLength <= SlideGeo.DefaultDistance / 2.0;
+        }
+
+        /// <summary>
+        /// Builds the arrows of a simai connection slide segment by segment: every segment gets the arrows of
+        /// <see cref="BuildArrowData"/> for its own path, so it overlaps the standalone slide of the same shape exactly.
+        /// The joints between segments are passed by the guide star but get no arrow, unless
+        /// <paramref name="isArcJointFilled"/> fills the gap between two arcs of the judgment circle. As in the official
+        /// game, the conditional last arrow of a segment (see <see cref="IsLastArrowConditional"/>) is shown when another
+        /// segment follows.
+        /// </summary>
+        /// <param name="segmentPaths">The paths of the segments in order; each one starts where the one before it ends.</param>
+        /// <param name="isArcJointFilled">
+        /// Whether an arrow is placed where an arc of the judgment circle meets another one; otherwise the joint is left
+        /// as a gap of two arrow distances.
+        /// </param>
+        /// <param name="starData">
+        /// Receives the poses the guide star passes through, in path order: the path start, the arrows except a
+        /// conditional last arrow of the final segment, the joints between segments and the path end.
+        /// </param>
+        /// <returns>
+        /// The arrows in the layout of <see cref="BuildArrowData"/>: the path start, the arrows and the path end, with
+        /// path lengths measured from the start of the first segment.
+        /// </returns>
+        /// <exception cref="ArgumentNullException">Thrown when <paramref name="segmentPaths"/> is <see langword="null"/>.</exception>
+        /// <exception cref="ArgumentException">Thrown when <paramref name="segmentPaths"/> is empty.</exception>
+        public static SlideArrowRawData[] BuildSegmentedArrowData(IReadOnlyList<ParametricSlidePath> segmentPaths,
+                                                                  bool isArcJointFilled,
+                                                                  out SlideArrowRawData[] starData)
+        {
+            if (segmentPaths is null)
+            {
+                throw new ArgumentNullException(nameof(segmentPaths));
+            }
+            if (segmentPaths.Count == 0)
+            {
+                throw new ArgumentException("A slide needs at least one segment", nameof(segmentPaths));
+            }
+
+            var arrows = new List<SlideArrowRawData>();
+            var stars = new List<SlideArrowRawData>();
+            var startLength = 0.0;
+            for (var i = 0; i < segmentPaths.Count; i++)
+            {
+                var segmentArrows = BuildArrowData(segmentPaths[i]);
+                var endIndex = segmentArrows.Length - 1;
+                var lastArrowIndex = endIndex - 1;
+                if (lastArrowIndex > 0 &&
+                    segmentArrows[endIndex].PathLength - segmentArrows[lastArrowIndex].PathLength < EndArrowTolerance)
+                {
+                    // 舍入误差在终点上多放的箭头就是终点本身，不算箭头，否则它会在连接点上补出一个箭头
+                    lastArrowIndex--;
+                }
+                var isFinalSegment = i == segmentPaths.Count - 1;
+                // 只有最后一段的条件箭头不显示（由 ExtendSlideHelper 判断），引导星星也不经过它
+                var isLastArrowConditional = isFinalSegment &&
+                                             lastArrowIndex > 0 &&
+                                             IsLastArrowConditional(segmentArrows[lastArrowIndex], segmentArrows[endIndex]);
+
+                if (i == 0)
+                {
+                    arrows.Add(segmentArrows[0]);
+                    stars.Add(segmentArrows[0]);
+                }
+                for (var j = 1; j <= lastArrowIndex; j++)
+                {
+                    var arrow = MoveAlongChain(segmentArrows[j], startLength);
+                    arrows.Add(arrow);
+                    if (!isLastArrowConditional || j != lastArrowIndex)
+                    {
+                        stars.Add(arrow);
+                    }
+                }
+
+                var segmentEnd = MoveAlongChain(segmentArrows[endIndex], startLength);
+                if (isFinalSegment)
+                {
+                    arrows.Add(segmentEnd);
+                    stars.Add(segmentEnd);
+                }
+                else if (isArcJointFilled && IsArcJoint(segmentPaths[i], segmentPaths[i + 1]))
+                {
+                    // 圆弧上的箭头朝向是“上个箭头 → 当前箭头”，补上的箭头也一样
+                    var direction = segmentEnd.Point - arrows[^1].Point;
+                    direction /= direction.Magnitude;
+                    var jointArrow = new SlideArrowRawData(segmentEnd.Point, direction, segmentEnd.PathLength);
+                    arrows.Add(jointArrow);
+                    stars.Add(jointArrow);
+                }
+                else
+                {
+                    stars.Add(segmentEnd);
+                }
+                startLength += segmentPaths[i].GetPathLength();
+            }
+
+            starData = stars.ToArray();
+            return arrows.ToArray();
+        }
+
+        /// <summary>Moves an arrow of a segment to its place along a connection slide.</summary>
+        /// <param name="arrow">The arrow, with its path length measured from the start of its segment.</param>
+        /// <param name="segmentStartLength">The path length of the connection slide at the start of the segment.</param>
+        /// <returns>The arrow with its path length measured from the start of the connection slide.</returns>
+        private static SlideArrowRawData MoveAlongChain(SlideArrowRawData arrow, double segmentStartLength)
+        {
+            return new SlideArrowRawData(arrow.Point, arrow.Direction, segmentStartLength + arrow.PathLength);
+        }
+
+        /// <summary>Checks whether two consecutive segments of a connection slide meet as two arcs of the judgment circle.</summary>
+        /// <param name="before">The earlier segment.</param>
+        /// <param name="after">The segment that starts where <paramref name="before"/> ends.</param>
+        /// <returns>
+        /// <see langword="true"/> when <paramref name="before"/> ends and <paramref name="after"/> starts along the
+        /// judgment circle, for example at key 2 of <c>1^2^3</c>.
+        /// </returns>
+        private static bool IsArcJoint(ParametricSlidePath before, ParametricSlidePath after)
+        {
+            return IsJudgmentCircleArc(before.Segments[^1]) && IsJudgmentCircleArc(after.Segments[0]);
+        }
+
+        /// <summary>Checks whether a path segment runs along the judgment circle.</summary>
+        /// <param name="segment">The path segment.</param>
+        /// <returns><see langword="true"/> for an arc or a full turn of the judgment circle.</returns>
+        private static bool IsJudgmentCircleArc(PathSegment segment)
+        {
+            ComplexCircle circle;
+            switch (segment)
+            {
+                case ArcSegment arc:
+                    circle = arc.Circle;
+                    break;
+                case CircleSegment fullCircle:
+                    circle = fullCircle.Circle;
+                    break;
+                default:
+                    return false;
+            }
+            var judgmentCircle = SlideGeo.GetCircle(9);
+            return (circle.Center - judgmentCircle.Center).Magnitude < SlideGeo.Epsilon &&
+                   Math.Abs(circle.Radius - judgmentCircle.Radius) < SlideGeo.Epsilon;
+        }
+
+        /// <summary>
         /// <p>key 是两个 5 bit 整数拼起来，表示高 5 位的判定区前往低 5 位的判定区</p>
         /// <p>5 bit 整数与判定区的对应符合<c>SensorType</c>的定义，可取范围 0~16</p>
         /// <p>value 记录这一段路径如何被各个判定段切割</p>

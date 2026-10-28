@@ -68,7 +68,12 @@ namespace MajdataPlay.Editor
                 {
                     case SlideTestSource.Simai:
                         EditorGUILayout.PropertyField(serializedObject.FindProperty("_simai"));
-                        EditorGUILayout.PropertyField(serializedObject.FindProperty("_isSimaiSlideTranslated"), new GUIContent("Translate to slide code", "Off builds simai slides natively from the slide prefabs."));
+                        var isTranslated = serializedObject.FindProperty("_isSimaiSlideTranslated");
+                        EditorGUILayout.PropertyField(isTranslated, new GUIContent("Translate to slide code", "Off builds simai slides natively from the slide prefabs."));
+                        using (new EditorGUI.DisabledScope(!isTranslated.boolValue))
+                        {
+                            EditorGUILayout.PropertyField(serializedObject.FindProperty("_slidePathStyle"), new GUIContent("Connection arrows", "Classic: every segment overlaps its standalone slide, arcs leave a gap where they meet. Medium: the same, with the arc gaps filled. Perfect: arrows continue across the whole chain."));
+                        }
                         break;
                     case SlideTestSource.SlideCode:
                         EditorGUILayout.PropertyField(serializedObject.FindProperty("_slideCode"));

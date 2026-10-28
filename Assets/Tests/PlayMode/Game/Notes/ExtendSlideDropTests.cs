@@ -370,6 +370,51 @@ namespace MajdataPlay.Tests.Game.Notes.PlayMode
             Assert.That(Vector2.Distance(info.JudgeFrameStarPositions[0], expected), Is.LessThan(1e-4f));
         }
 
+        /// <summary>
+        /// Checks that the star follows the star poses of the metadata instead of the arrows, so that it passes a joint of
+        /// a connection slide that has no arrow.
+        /// </summary>
+        /// <returns>The test coroutine.</returns>
+        [UnityTest]
+        public IEnumerator CaptureDebugInfo_StarFollowsTheStarPoses()
+        {
+            var slide = Spawn();
+            var start = NoteHelper.GetTapPosition(1, 4.8f);
+            var end = NoteHelper.GetTapPosition(3, 4.8f);
+            var arrowPoses = new SlidePose[6];
+            for (var i = 0; i < arrowPoses.Length; i++)
+            {
+                var position = Vector3.Lerp(start, end, i / 5f);
+                arrowPoses[i] = new SlidePose(position.x, position.y, -90f, i);
+            }
+            // 星星在第 2、3 个箭头之间多经过一个没有箭头的连接点
+            var joint = new SlidePose(0f, 0f, -90f, 2.5f);
+            var starPoses = new[] { arrowPoses[0], arrowPoses[1], arrowPoses[2], joint, arrowPoses[3], arrowPoses[4], arrowPoses[5] };
+            slide.Metadata = new ExtendSlideMetadata(ThreeAreas(),
+                                                     0.5f,
+                                                     3f,
+                                                     arrowPoses,
+                                                     starPoses,
+                                                     false,
+                                                     new SlidePose(0.5f, 0.5f, 30f, 1f),
+                                                     SlideOkType.StraightL,
+                                                     SlideFlag.None);
+            slide.Timing = 0.5f;
+            slide.StartTiming = 1f;
+            slide.Length = 1f;
+            slide.Speed = 7.5f;
+            slide.Init();
+            _rig.RegisterSlides((slide, 0.3f));
+            yield return null;
+
+            var info = slide.CaptureDebugInfo();
+
+            Assert.That(slide.transform.childCount, Is.EqualTo(4), "The joint is not an arrow");
+            Assert.That(PrivateMember.GetField<MajdataPlay.Buffers.PooledList<Vector3>>(slide, "StarPositions"), Has.Count.EqualTo(7));
+            // 7 个星星点、0.5 的进度正好落在第 4 个点，也就是连接点
+            Assert.That(Vector2.Distance(info.JudgeFrameStarPositions[0], Vector2.zero), Is.LessThan(1e-4f));
+        }
+
         /// <summary>Checks that the captured state names the predefined table and its constants.</summary>
         /// <returns>The test coroutine.</returns>
         [UnityTest]

@@ -612,6 +612,7 @@ namespace MajdataPlay.Editor
                 EditorGUILayout.LabelField("Path length", metadata.SlideLength.ToString("0.###"));
                 EditorGUILayout.LabelField("Generated constant", metadata.SlideConst.ToString("0.####"));
                 EditorGUILayout.LabelField("Arrow poses", $"{metadata.ArrowPoses.Length} with both path ends, last arrow conditional: {(metadata.ConditionalLastArrow ? "yes" : "no")}");
+                EditorGUILayout.LabelField("Star poses", $"{metadata.StarPoses.Length} with both path ends");
                 EditorGUILayout.LabelField("Slide result", metadata.OkType.ToString());
                 EditorGUILayout.LabelField("Generated judge areas", EditorStyles.miniBoldLabel);
                 DrawAreaRow(string.Empty, "#", "Sensors", string.Empty, string.Empty, "Arrows");

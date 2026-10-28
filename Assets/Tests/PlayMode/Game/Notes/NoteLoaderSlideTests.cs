@@ -3,6 +3,7 @@ using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
+using MajdataPlay.Buffers;
 using MajdataPlay.Game.Notes;
 using MajdataPlay.IO;
 using MajdataPlay.Scenes.Game;
@@ -10,6 +11,8 @@ using MajdataPlay.Scenes.Game.Buffers;
 using MajdataPlay.Scenes.Game.Notes.Behaviours;
 using MajdataPlay.Scenes.Game.Notes.Slide;
 using MajdataPlay.Scenes.Game.Parsing;
+using MajdataPlay.Scenes.Game.Utils;
+using MajdataPlay.Settings;
 using MajdataPlay.Tests;
 using MajdataPlay.Tests.Game.Notes.PlayMode.Support;
 using MajSimai;
@@ -126,6 +129,39 @@ namespace MajdataPlay.Tests.Game.Notes.PlayMode
             Assert.That(slide.Length, Is.EqualTo(1f));
             Assert.That(slide.ConnectInfo.IsConnSlide, Is.False);
             Assert.That(SlideQueue(), Has.Count.EqualTo(1));
+        }
+
+        /// <summary>Checks that the loader places the arrows of connection slides in the classic style by default.</summary>
+        [Test]
+        public void SlidePathStyle_IsClassicByDefault()
+        {
+            Assert.That(_loader.SlidePathStyle, Is.EqualTo(SlidePathStyle.Classic));
+        }
+
+        /// <summary>
+        /// Checks that the loader places the arrows of a connection slide in its slide path style: 1^2^3 shows 14 arrows
+        /// with a gap at key 2 in the classic style and 15 in the medium and perfect styles, and the star always passes
+        /// the 17 points from key 1 to key 3, key 2 included.
+        /// </summary>
+        /// <param name="style">The slide path style of the loader.</param>
+        /// <returns>The test coroutine.</returns>
+        [UnityTest]
+        public IEnumerator CreateSlideGroup_PlacesConnectionArrowsInTheSlidePathStyle([Values] SlidePathStyle style)
+        {
+            _loader.SlidePathStyle = style;
+            CreateSlideGroup("1^2[8:1]^3[8:1]");
+            yield return null;
+
+            var slide = SingleExtendSlide();
+            var arrowCount = style == SlidePathStyle.Classic ? 14 : 15;
+            Assert.That(slide.transform.childCount, Is.EqualTo(arrowCount));
+            var starPositions = PrivateMember.GetField<PooledList<Vector3>>(slide, "StarPositions");
+            Assert.That(starPositions, Has.Count.EqualTo(17));
+            var joint = NoteHelper.GetTapPosition(2, 4.8f);
+            Assert.That(starPositions.Count(x => Vector2.Distance(x, joint) < 1e-3f), Is.EqualTo(1), "The star passes key 2");
+            var arrowsAtJoint = Enumerable.Range(0, slide.transform.childCount)
+                                          .Count(i => Vector2.Distance(slide.transform.GetChild(i).position, joint) < 1e-3f);
+            Assert.That(arrowsAtJoint, Is.EqualTo(arrowCount == 14 ? 0 : 1));
         }
 
         /// <summary>Checks that wifi slides still create a wifi slide.</summary>

@@ -55,6 +55,11 @@ namespace MajdataPlay.TestScenes.SlideTest
         [FormerlySerializedAs("IsSimaiSlideTranslated")]
         private bool _isSimaiSlideTranslated = true;
 
+        /// <summary>How the arrows of translated simai connection slides are placed along their segments.</summary>
+        [SerializeField]
+        [FormerlySerializedAs("SlidePathStyle")]
+        private SlidePathStyle _slidePathStyle = SlidePathStyle.Classic;
+
         /// <summary>The slide code used when <see cref="_source"/> is <see cref="SlideTestSource.SlideCode"/>, for example <c>1P6K7</c>.</summary>
         [SerializeField]
         [FormerlySerializedAs("SlideCode")]
@@ -446,6 +451,7 @@ namespace MajdataPlay.TestScenes.SlideTest
                 _noteLoader.NoteSpeed = MajEnv.Settings.Game.TapSpeed < 0 ? -noteSpeed : noteSpeed;
                 _noteLoader.TouchSpeed = MajEnv.Settings.Game.TouchSpeed;
                 _noteLoader.IsSimaiSlideTranslated = _isSimaiSlideTranslated;
+                _noteLoader.SlidePathStyle = _slidePathStyle;
                 Majdata<ChartVisualDisplayer>.Instance?.SetSimaiChart(chart, AudioLength);
 
                 // 从这里起音符组件开始保存这张谱面的状态，之后再生成就要重新加载场景

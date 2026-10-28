@@ -16,6 +16,9 @@ namespace MajdataPlay.Tests.Game.GamePlay.Parsing
         /// <summary>The tolerance used for path lengths in judge areas.</summary>
         private const double AreaTolerance = 1e-3;
 
+        /// <summary>The path length around a segment end within which an arrow counts as the segment end.</summary>
+        private const double JointTolerance = 1e-4;
+
         /// <summary>Builds the judge area lookup table used by every test.</summary>
         [SetUp]
         public void SetUp()
@@ -108,6 +111,144 @@ namespace MajdataPlay.Tests.Game.GamePlay.Parsing
             Assert.That(arrows, Has.Length.EqualTo(49));
             Assert.That(transfer.ArrowDistance, Is.EqualTo(0.463558).Within(1e-6));
             Assert.That(arrows.Any(x => Math.Abs(x.PathLength - path.AccumulatedLengths[2]) < 1e-6), Is.True);
+        }
+
+        /// <summary>Checks that a last arrow at most half an arrow distance from the path end is conditional.</summary>
+        [Test]
+        public void IsLastArrowConditional_UsesHalfTheDefaultDistance()
+        {
+            var end = new SlideArrowRawData(Complex.Zero, Complex.One, 10);
+            var half = SlideGeo.DefaultDistance / 2;
+
+            Assert.That(SlideDataBuilder.IsLastArrowConditional(new SlideArrowRawData(Complex.Zero, Complex.One, 10 - half), end), Is.True);
+            Assert.That(SlideDataBuilder.IsLastArrowConditional(new SlideArrowRawData(Complex.Zero, Complex.One, 10 - half - 1e-6), end), Is.False);
+        }
+
+        /// <summary>
+        /// Checks that every segment of a connection slide gets exactly the arrows of the standalone slide of its shape, so
+        /// that the 1q8 part of 2^1q8, 3^1q8, 4^1q8 and 5-1q8 overlaps 1q8, whether arc joints are filled or not.
+        /// </summary>
+        /// <param name="chain">The simai segments joined with <c>|</c>.</param>
+        /// <param name="isArcJointFilled">Whether arc joints are filled.</param>
+        [Test]
+        public void BuildSegmentedArrowData_EverySegmentOverlapsItsStandaloneSlide(
+            [Values("2^1|1q8", "3^1|1q8", "4^1|1q8", "5-1|1q8", "8>1|1q8", "1^2|2^3|3q1", "1q8|8-4")] string chain,
+            [Values] bool isArcJointFilled)
+        {
+            var segments = chain.Split('|');
+
+            var arrows = SlideDataBuilder.BuildSegmentedArrowData(ParseSegments(segments), isArcJointFilled, out _);
+
+            AssertEverySegmentOverlapsItsStandaloneSlide(arrows, segments);
+        }
+
+        /// <summary>
+        /// Checks that the joint of two arcs of the judgment circle gets no arrow but is passed by the star, which leaves
+        /// a gap of two arrow distances, at every rotation, including those where rounding places an arrow on the end of
+        /// the first arc.
+        /// </summary>
+        /// <param name="startKey">The start key of <c>1^2^3</c> rotated.</param>
+        [Test]
+        public void BuildSegmentedArrowData_LeavesAGapWhereTwoArcsMeet([Range(1, 8)] int startKey)
+        {
+            var segments = RotateChain(startKey, "1^2", "2^3");
+            var joint = SlideGeo.PointGroupA(WrapKey(startKey + 1));
+
+            var arrows = SlideDataBuilder.BuildSegmentedArrowData(ParseSegments(segments), false, out var stars);
+
+            Assert.That(arrows, Has.Length.EqualTo(16), "The path start, 7 + 7 arrows and the path end");
+            Assert.That(arrows.Count(x => IsAt(x, joint)), Is.Zero, "No arrow at the joint");
+            Assert.That(stars, Has.Length.EqualTo(17));
+            Assert.That(stars.Count(x => IsAt(x, joint)), Is.EqualTo(1), "The star passes the joint");
+            Assert.That(GetGaps(arrows).Max(), Is.EqualTo(2 * SlideGeo.DefaultDistance).Within(1e-6));
+            Assert.That(GetGaps(stars), Has.All.EqualTo(SlideGeo.DefaultDistance).Within(1e-6));
+        }
+
+        /// <summary>
+        /// Checks that a filled joint of two arcs gets an arrow that keeps the arrow distance and points from the previous
+        /// arrow, like every other arrow on an arc.
+        /// </summary>
+        /// <param name="startKey">The start key of <c>1^2^3</c> rotated.</param>
+        [Test]
+        public void BuildSegmentedArrowData_FillsTheJointOfTwoArcs([Range(1, 8)] int startKey)
+        {
+            var segments = RotateChain(startKey, "1^2", "2^3");
+            var joint = SlideGeo.PointGroupA(WrapKey(startKey + 1));
+
+            var arrows = SlideDataBuilder.BuildSegmentedArrowData(ParseSegments(segments), true, out var stars);
+
+            Assert.That(arrows, Has.Length.EqualTo(17));
+            Assert.That(stars, Is.EqualTo(arrows), "The star passes every arrow");
+            Assert.That(GetGaps(arrows), Has.All.EqualTo(SlideGeo.DefaultDistance).Within(1e-6));
+            var jointIndex = Array.FindIndex(arrows, x => IsAt(x, joint));
+            var chord = arrows[jointIndex].Point - arrows[jointIndex - 1].Point;
+            chord /= chord.Magnitude;
+            Assert.That((arrows[jointIndex].Direction - chord).Magnitude, Is.LessThan(1e-9));
+        }
+
+        /// <summary>Checks that a filled arc joint also covers an arc that turns back.</summary>
+        [Test]
+        public void BuildSegmentedArrowData_FillsTheJointOfArcsTurningBack()
+        {
+            var arrows = SlideDataBuilder.BuildSegmentedArrowData(ParseSegments("1>2", "2<1"), true, out _);
+
+            Assert.That(arrows.Count(x => IsAt(x, SlideGeo.PointGroupA(2))), Is.EqualTo(1));
+        }
+
+        /// <summary>Checks that joints other than two arcs get no arrow even when arc joints are filled.</summary>
+        /// <param name="first">The first simai segment.</param>
+        /// <param name="second">The second simai segment.</param>
+        /// <param name="jointKey">The key where the segments meet.</param>
+        [TestCase("1-4", "4-7", 4)]
+        [TestCase("2^1", "1q8", 1)]
+        [TestCase("1q8", "8^7", 8)]
+        public void BuildSegmentedArrowData_FillsOnlyArcJoints(string first, string second, int jointKey)
+        {
+            var joint = SlideGeo.PointGroupA(jointKey);
+
+            var arrows = SlideDataBuilder.BuildSegmentedArrowData(ParseSegments(first, second), true, out var stars);
+
+            Assert.That(arrows.Count(x => IsAt(x, joint)), Is.Zero);
+            Assert.That(stars.Count(x => IsAt(x, joint)), Is.EqualTo(1));
+            Assert.That(stars, Has.Length.EqualTo(arrows.Length + 1 - (IsLastArrowConditional(arrows) ? 1 : 0)));
+        }
+
+        /// <summary>
+        /// Checks that, as in the official game, the conditional last arrow of a segment followed by another one is shown
+        /// and passed by the star, while that of the final segment is only kept for the metadata to hide.
+        /// </summary>
+        [Test]
+        public void BuildSegmentedArrowData_ShowsTheConditionalArrowOfAnEarlierSegment()
+        {
+            var standalone = SlideDataBuilder.BuildArrowData(ParseSegments("1q8")[0]);
+            Assume.That(SlideDataBuilder.IsLastArrowConditional(standalone[^2], standalone[^1]), Is.True, "1q8 ends with a conditional arrow");
+
+            var arrows = SlideDataBuilder.BuildSegmentedArrowData(ParseSegments("1q8", "8-4"), false, out var stars);
+
+            Assert.That(arrows.Count(x => IsAt(x, standalone[^2].Point)), Is.EqualTo(1));
+            Assert.That(stars.Count(x => IsAt(x, standalone[^2].Point)), Is.EqualTo(1));
+            Assert.That(IsLastArrowConditional(arrows), Is.True, "8-4 ends with a conditional arrow");
+            Assert.That(stars.Count(x => IsAt(x, arrows[^2].Point)), Is.Zero);
+        }
+
+        /// <summary>Checks that a single segment keeps the arrows of <see cref="SlideDataBuilder.BuildArrowData"/>.</summary>
+        [Test]
+        public void BuildSegmentedArrowData_KeepsTheArrowsOfASingleSegment()
+        {
+            var expected = SlideDataBuilder.BuildArrowData(ParseSegments("1q8")[0]);
+
+            var arrows = SlideDataBuilder.BuildSegmentedArrowData(ParseSegments("1q8"), false, out var stars);
+
+            Assert.That(arrows, Is.EqualTo(expected));
+            Assert.That(stars, Is.EqualTo(expected.Where((_, i) => i != expected.Length - 2)), "The star skips the conditional arrow");
+        }
+
+        /// <summary>Checks the arguments of <see cref="SlideDataBuilder.BuildSegmentedArrowData"/>.</summary>
+        [Test]
+        public void BuildSegmentedArrowData_RejectsMissingSegments()
+        {
+            Assert.Throws<ArgumentNullException>(() => SlideDataBuilder.BuildSegmentedArrowData(null!, false, out _));
+            Assert.Throws<ArgumentException>(() => SlideDataBuilder.BuildSegmentedArrowData(Array.Empty<ParametricSlidePath>(), false, out _));
         }
 
         /// <summary>Checks the judge areas of a straight slide through the centre, ending with the long tail distance.</summary>
@@ -272,6 +413,84 @@ namespace MajdataPlay.Tests.Game.GamePlay.Parsing
             Assert.That(SlideDataBuilder.LastDistanceLong, Is.EqualTo(1.59).Within(1e-12));
             Assert.That(SlideDataBuilder.LastDistanceCircle, Is.EqualTo(1.75).Within(1e-12));
             Assert.That(SlideDataBuilder.HitAreaARadius, Is.EqualTo(0.8).Within(1e-12));
+        }
+
+        /// <summary>
+        /// Checks that, inside the path range of every segment, a connection slide has the arrows of the standalone slide
+        /// of that segment: the same count, points and directions, with path lengths moved by the segments before it.
+        /// </summary>
+        /// <param name="chainArrows">The arrows of the connection slide.</param>
+        /// <param name="simaiSegments">The simai segments of the connection slide.</param>
+        private static void AssertEverySegmentOverlapsItsStandaloneSlide(SlideArrowRawData[] chainArrows, string[] simaiSegments)
+        {
+            var startLength = 0.0;
+            foreach (var simaiSegment in simaiSegments)
+            {
+                var standalone = SlideDataBuilder.BuildArrowData(ParseSegments(simaiSegment)[0]);
+                var length = standalone[^1].PathLength;
+                var expected = standalone.Where(x => x.PathLength > JointTolerance && x.PathLength < length - JointTolerance).ToArray();
+                var actual = chainArrows.Where(x => x.PathLength > startLength + JointTolerance &&
+                                                    x.PathLength < startLength + length - JointTolerance).ToArray();
+
+                Assert.That(actual, Has.Length.EqualTo(expected.Length), simaiSegment);
+                for (var i = 0; i < expected.Length; i++)
+                {
+                    Assert.That((actual[i].Point - expected[i].Point).Magnitude, Is.LessThan(1e-9), $"{simaiSegment} arrow {i}");
+                    Assert.That((actual[i].Direction - expected[i].Direction).Magnitude, Is.LessThan(1e-9), $"{simaiSegment} arrow {i}");
+                    Assert.That(actual[i].PathLength, Is.EqualTo(startLength + expected[i].PathLength).Within(1e-9), $"{simaiSegment} arrow {i}");
+                }
+                startLength += length;
+            }
+        }
+
+        /// <summary>Parses simai segments the way the note loader parses the segments of a connection slide.</summary>
+        /// <param name="simaiSegments">The simai segments, such as <c>1-4</c>.</param>
+        /// <returns>The path of every segment.</returns>
+        private static ParametricSlidePath[] ParseSegments(params string[] simaiSegments)
+        {
+            return simaiSegments.Select(x => SlideCodeParser.Parse(SimaiSlideTranslator.Translate(x))).ToArray();
+        }
+
+        /// <summary>Rotates simai segments written from key 1 so that they start at another key.</summary>
+        /// <param name="startKey">The key the first segment starts at.</param>
+        /// <param name="simaiSegments">The simai segments starting at key 1.</param>
+        /// <returns>The rotated segments.</returns>
+        private static string[] RotateChain(int startKey, params string[] simaiSegments)
+        {
+            return simaiSegments.Select(x => new string(x.Select(c => char.IsDigit(c) ? (char)('0' + WrapKey(c - '0' + startKey - 1)) : c).ToArray())).ToArray();
+        }
+
+        /// <summary>Wraps a key that may have left the range 1 to 8.</summary>
+        /// <param name="key">The key.</param>
+        /// <returns>The key between 1 and 8.</returns>
+        private static int WrapKey(int key)
+        {
+            return ((key - 1) % 8 + 8) % 8 + 1;
+        }
+
+        /// <summary>Checks whether an arrow lies on a point.</summary>
+        /// <param name="arrow">The arrow.</param>
+        /// <param name="point">The point.</param>
+        /// <returns><see langword="true"/> when the arrow is within 1e-6 of the point.</returns>
+        private static bool IsAt(SlideArrowRawData arrow, Complex point)
+        {
+            return (arrow.Point - point).Magnitude < 1e-6;
+        }
+
+        /// <summary>Gets the path length between every two consecutive arrows.</summary>
+        /// <param name="arrows">The arrows, including the path start and end.</param>
+        /// <returns>The gaps, without the gap before the path end, which is not an arrow distance.</returns>
+        private static double[] GetGaps(SlideArrowRawData[] arrows)
+        {
+            return arrows.Skip(1).Take(arrows.Length - 2).Select((x, i) => x.PathLength - arrows[i].PathLength).ToArray();
+        }
+
+        /// <summary>Checks whether the last arrow of an arrow layout is conditional.</summary>
+        /// <param name="arrows">The arrows, including the path start and end.</param>
+        /// <returns>The result of <see cref="SlideDataBuilder.IsLastArrowConditional"/> for the last arrow.</returns>
+        private static bool IsLastArrowConditional(SlideArrowRawData[] arrows)
+        {
+            return SlideDataBuilder.IsLastArrowConditional(arrows[^2], arrows[^1]);
         }
 
         /// <summary>Formats the sensors of a generated judge area independently of their order.</summary>

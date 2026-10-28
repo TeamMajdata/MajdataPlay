@@ -825,6 +825,7 @@ namespace MajdataPlay.Scenes.Game
                 _noteLoader.NoteSpeed = ((float)(107.25 / (71.4184491 * Mathf.Pow(tapSpeed + 0.9975f, -0.985558604f))));
             }
             _noteLoader.TouchSpeed = _gameSettings.Game.TouchSpeed;
+            _noteLoader.SlidePathStyle = _gameSettings.Display.SlidePathStyle;
             _noteLoader.ChartRotation = _chartRotation + (2 * (int)_screenRotationAngle);
 
             //var loaderTask = noteLoader.LoadNotes(Chart);
