@@ -8,7 +8,20 @@ using UnityEngine.TextCore.LowLevel;
 #nullable enable
 namespace MajdataPlay.Editor.Windows
 {
-    /// <summary>Options that control how <see cref="TmpFontPrewarmer"/> adds glyphs.</summary>
+    /// <summary>Which font assets of a lookup chain the clear actions of <see cref="TmpFontPrewarmer"/> change.</summary>
+    internal enum TmpFontClearTarget
+    {
+        /// <summary>Only dynamic assets; static assets keep their baked glyphs.</summary>
+        DynamicOnly,
+
+        /// <summary>Only static assets; dynamic assets keep their prewarmed glyphs.</summary>
+        StaticOnly,
+
+        /// <summary>Dynamic and static assets alike.</summary>
+        DynamicAndStatic
+    }
+
+    /// <summary>Options that control how <see cref="TmpFontPrewarmer"/> adds and clears glyphs.</summary>
     internal sealed class TmpFontPrewarmOptions
     {
         /// <summary>Whether characters missing from a font's source file are added to its fallback font assets, in TMP's lookup order.</summary>
@@ -28,6 +41,9 @@ namespace MajdataPlay.Editor.Windows
 
         /// <summary>The largest width or height a static atlas may grow to.</summary>
         public int MaxStaticAtlasSize { get; set; } = 4096;
+
+        /// <summary>Which assets of the chain the clear actions change; static assets stay static with a non-readable atlas.</summary>
+        public TmpFontClearTarget ClearTarget { get; set; } = TmpFontClearTarget.DynamicOnly;
 
         /// <summary>The number of characters passed to one <see cref="TMP_FontAsset.TryAddCharacters(uint[], out uint[], bool)"/> call.</summary>
         public int BatchSize { get; set; } = 64;
@@ -95,8 +111,8 @@ namespace MajdataPlay.Editor.Windows
         /// <summary>The number of characters removed from each asset of the chain; assets that lost nothing are absent.</summary>
         public Dictionary<TMP_FontAsset, int> RemovedPerAsset { get; } = new();
 
-        /// <summary>The static assets left untouched because static assets are not cleared with the current options.</summary>
-        public List<TMP_FontAsset> SkippedStaticAssets { get; } = new();
+        /// <summary>The assets that had glyphs to remove but were left untouched because the clear target excludes their population mode.</summary>
+        public List<TMP_FontAsset> SkippedAssets { get; } = new();
 
         /// <summary>The assets that have characters to remove but no source font to rebuild their remaining characters from.</summary>
         public List<TMP_FontAsset> AssetsWithoutSourceFont { get; } = new();
@@ -351,18 +367,39 @@ namespace MajdataPlay.Editor.Windows
             return result;
         }
 
+        /// <summary>Checks whether a clear target includes a font asset's population mode.</summary>
+        /// <param name="fontAsset">The font asset.</param>
+        /// <param name="target">The clear target.</param>
+        /// <returns>True when the clear actions may change the asset.</returns>
+        /// <exception cref="ArgumentNullException"><paramref name="fontAsset"/> is null.</exception>
+        public static bool IsClearTarget(TMP_FontAsset fontAsset, TmpFontClearTarget target)
+        {
+            if (fontAsset == null)
+            {
+                throw new ArgumentNullException(nameof(fontAsset));
+            }
+            return target switch
+            {
+                TmpFontClearTarget.DynamicOnly => IsDynamic(fontAsset),
+                TmpFontClearTarget.StaticOnly => !IsDynamic(fontAsset),
+                _ => true
+            };
+        }
+
         /// <summary>
-        /// Empties every dynamic asset of the lookup chain the way TMP's "Reset" context menu does, removing all prewarmed and
-        /// runtime-generated glyphs. Static assets are left untouched because their glyphs cannot be generated again at runtime.
+        /// Empties every asset of the lookup chain that <see cref="TmpFontPrewarmOptions.ClearTarget"/> includes, the way TMP's "Reset"
+        /// context menu does. Dynamic assets lose their prewarmed and runtime-generated glyphs; static assets lose their baked glyphs
+        /// and stay static with an empty, non-readable atlas.
         /// </summary>
         /// <param name="fontAsset">The font asset at the start of the chain.</param>
-        /// <param name="options">Whether fallbacks are cleared and whether cleared assets are saved.</param>
+        /// <param name="options">Which assets are cleared, whether fallbacks are included and whether cleared assets are saved.</param>
         /// <param name="onProgress">Receives the progress (0 to 1) and a description before each asset is cleared.</param>
-        /// <returns>What was removed from which asset and which static assets were left untouched.</returns>
+        /// <returns>What was removed from which asset and which assets the clear target left untouched.</returns>
         /// <exception cref="ArgumentNullException"><paramref name="fontAsset"/> or <paramref name="options"/> is null.</exception>
-        public static TmpFontClearResult ClearDynamicGlyphs(TMP_FontAsset fontAsset,
-                                                            TmpFontPrewarmOptions options,
-                                                            Action<float, string>? onProgress = null)
+        /// <exception cref="InvalidOperationException">A static asset must be cleared but the Editor offers no way to change atlas readability.</exception>
+        public static TmpFontClearResult ClearGlyphs(TMP_FontAsset fontAsset,
+                                                     TmpFontPrewarmOptions options,
+                                                     Action<float, string>? onProgress = null)
         {
             if (options is null)
             {
@@ -373,18 +410,26 @@ namespace MajdataPlay.Editor.Windows
             for (var i = 0; i < chain.Count; i++)
             {
                 var asset = chain[i];
-                if (!IsDynamic(asset))
-                {
-                    result.SkippedStaticAssets.Add(asset);
-                    continue;
-                }
                 var characterCount = asset.characterTable.Count;
                 if (characterCount == 0)
                 {
                     continue;
                 }
+                if (!IsClearTarget(asset, options.ClearTarget))
+                {
+                    result.SkippedAssets.Add(asset);
+                    continue;
+                }
                 onProgress?.Invoke((float)i / chain.Count, $"{asset.name}: clearing {characterCount} characters");
-                asset.ClearFontAssetData(true);
+                var bakeScope = IsDynamic(asset) ? null : new StaticBakeScope(asset);
+                try
+                {
+                    asset.ClearFontAssetData(true);
+                }
+                finally
+                {
+                    bakeScope?.Dispose();
+                }
                 result.RemovedPerAsset[asset] = characterCount;
                 result.RemovedCount += characterCount;
                 if (options.SaveAssets)
@@ -397,13 +442,12 @@ namespace MajdataPlay.Editor.Windows
 
         /// <summary>
         /// Removes the given characters from every asset of the lookup chain that has them. TMP cannot remove single glyphs,
-        /// so each affected asset is rebuilt from its remaining characters at its current atlas size. Static assets are rebuilt
-        /// when <see cref="TmpFontPrewarmOptions.IncludeStaticAssets"/> is set and stay static with a non-readable atlas;
-        /// otherwise they are left untouched.
+        /// so each affected asset is rebuilt from its remaining characters at its current atlas size. Only assets that
+        /// <see cref="TmpFontPrewarmOptions.ClearTarget"/> includes are rebuilt; static assets stay static with a non-readable atlas.
         /// </summary>
         /// <param name="fontAsset">The font asset at the start of the chain.</param>
         /// <param name="codePoints">The code points to remove.</param>
-        /// <param name="options">Whether fallbacks and static assets are included, how glyphs are re-added and whether assets are saved.</param>
+        /// <param name="options">Which assets are rebuilt, whether fallbacks are included, how glyphs are re-added and whether assets are saved.</param>
         /// <param name="onProgress">Receives the progress (0 to 1) and a description before each asset is rebuilt.</param>
         /// <returns>What was removed from which asset, what was skipped and which remaining characters no longer fit.</returns>
         /// <exception cref="ArgumentNullException"><paramref name="fontAsset"/>, <paramref name="codePoints"/> or <paramref name="options"/> is null.</exception>
@@ -444,12 +488,12 @@ namespace MajdataPlay.Editor.Windows
                 {
                     continue;
                 }
-                var isStatic = !IsDynamic(asset);
-                if (isStatic && !options.IncludeStaticAssets)
+                if (!IsClearTarget(asset, options.ClearTarget))
                 {
-                    result.SkippedStaticAssets.Add(asset);
+                    result.SkippedAssets.Add(asset);
                     continue;
                 }
+                var isStatic = !IsDynamic(asset);
                 if (GetSourceFont(asset) is null)
                 {
                     result.AssetsWithoutSourceFont.Add(asset);

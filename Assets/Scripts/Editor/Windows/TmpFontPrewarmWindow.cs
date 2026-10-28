@@ -11,8 +11,8 @@ namespace MajdataPlay.Editor.Windows
     /// <summary>
     /// Editor window that adds characters to selected or dropped TMP font assets ahead of use, from literal characters,
     /// character set files and Unicode ranges, so the glyphs are not rasterized at runtime. Dynamic assets receive the glyphs
-    /// directly; static assets can be baked in place and stay static. Prewarmed glyphs can be cleared again, either all glyphs
-    /// of the dynamic assets or only the listed characters.
+    /// directly; static assets can be baked in place and stay static. Glyphs can be cleared again, either all of them or only the
+    /// listed characters, from dynamic assets, static assets or both.
     /// </summary>
     internal sealed class TmpFontPrewarmWindow : EditorWindow
     {
@@ -32,6 +32,18 @@ namespace MajdataPlay.Editor.Windows
         private static readonly GUIContent[] MaxStaticAtlasSizeLabels =
         {
             new("1024"), new("2048"), new("4096"), new("8192")
+        };
+
+        /// <summary>The clear targets offered by the window, in menu order.</summary>
+        private static readonly int[] ClearTargets =
+        {
+            (int)TmpFontClearTarget.DynamicOnly, (int)TmpFontClearTarget.StaticOnly, (int)TmpFontClearTarget.DynamicAndStatic
+        };
+
+        /// <summary>The labels of <see cref="ClearTargets"/>.</summary>
+        private static readonly GUIContent[] ClearTargetLabels =
+        {
+            new("Dynamic only"), new("Static only"), new("Dynamic and static")
         };
 
         /// <summary>The font assets to prewarm, in the order they are processed.</summary>
@@ -453,21 +465,26 @@ namespace MajdataPlay.Editor.Windows
                     RunPrewarm();
                 }
             }
+            EditorGUILayout.Space();
+            _options.ClearTarget = (TmpFontClearTarget)EditorGUILayout.IntPopup(
+                new GUIContent("Clear target", "Which font assets of the listed chains the clear actions change. Cleared static assets stay static."),
+                (int)_options.ClearTarget,
+                ClearTargetLabels,
+                ClearTargets);
             EditorGUILayout.BeginHorizontal();
             using (new EditorGUI.DisabledScope(_fontAssets.Count == 0))
             {
-                if (GUILayout.Button(new GUIContent("Clear Dynamic Glyphs",
-                                                    "Removes every glyph from the dynamic assets of the listed chains, like TMP's Reset. " +
-                                                    "Static assets are left untouched.")))
+                if (GUILayout.Button(new GUIContent("Clear All Glyphs",
+                                                    "Removes every glyph from the clear target assets of the listed chains, like TMP's Reset.")))
                 {
-                    RunClearDynamicGlyphs();
+                    RunClearGlyphs();
                 }
             }
             using (new EditorGUI.DisabledScope(_fontAssets.Count == 0 || !hasCharacters))
             {
                 if (GUILayout.Button(new GUIContent("Remove Listed Characters",
-                                                    "Removes only the characters above from the listed chains by rebuilding each affected atlas " +
-                                                    "from its remaining characters. Static assets are included when baking into static assets is on.")))
+                                                    "Removes only the characters above from the clear target assets of the listed chains, " +
+                                                    "rebuilding each affected atlas from its remaining characters.")))
                 {
                     RunRemoveCharacters();
                 }
@@ -538,26 +555,47 @@ namespace MajdataPlay.Editor.Windows
             }
         }
 
-        /// <summary>Asks for confirmation, then empties the dynamic assets of every listed chain.</summary>
-        private void RunClearDynamicGlyphs()
+        /// <summary>Asks for confirmation, then empties the clear target assets of every listed chain.</summary>
+        private void RunClearGlyphs()
         {
             var affected = GetAssetsToClear();
-            var message = $"Remove every glyph from these dynamic font assets?\n\n{FormatAssetNames(affected)}\n\n" +
-                          "Static assets are left untouched. Modified assets are saved to disk and the change cannot be undone.";
-            RunClear(affected, message, (fontAsset, onProgress) => TmpFontPrewarmer.ClearDynamicGlyphs(fontAsset, _options, onProgress));
+            var message = $"Remove every glyph from these {DescribeClearTarget()} font assets?\n\n{FormatAssetNames(affected)}\n\n" +
+                          $"{DescribeStaticClearing("Cleared static assets stay static with an empty atlas; their glyphs are not generated at runtime.")}" +
+                          "Modified assets are saved to disk and the change cannot be undone.";
+            RunClear(affected, message, (fontAsset, onProgress) => TmpFontPrewarmer.ClearGlyphs(fontAsset, _options, onProgress));
         }
 
-        /// <summary>Asks for confirmation, then removes the listed characters from every listed chain.</summary>
+        /// <summary>Asks for confirmation, then removes the listed characters from the clear target assets of every listed chain.</summary>
         private void RunRemoveCharacters()
         {
             var affected = GetAssetsWithListedCharacters();
-            var staticNote = _options.IncludeStaticAssets
-                ? " Static assets are rebuilt in place and stay static."
-                : " Static assets are left untouched because baking into static assets is off.";
-            var message = $"Remove up to {_codePoints.Count} characters from these font assets?\n\n{FormatAssetNames(affected)}\n\n" +
-                          $"Each atlas is rebuilt from its remaining characters.{staticNote} " +
+            var message = $"Remove up to {_codePoints.Count} characters from these {DescribeClearTarget()} font assets?\n\n{FormatAssetNames(affected)}\n\n" +
+                          "Each atlas is rebuilt from its remaining characters. " +
+                          $"{DescribeStaticClearing("Rebuilt static assets stay static.")}" +
                           "Modified assets are saved to disk and the change cannot be undone.";
             RunClear(affected, message, (fontAsset, onProgress) => TmpFontPrewarmer.RemoveCharacters(fontAsset, _codePoints, _options, onProgress));
+        }
+
+        /// <summary>Names the population modes the current clear target includes, for confirmation messages.</summary>
+        /// <returns>"dynamic", "static" or "dynamic and static".</returns>
+        private string DescribeClearTarget()
+        {
+            return _options.ClearTarget switch
+            {
+                TmpFontClearTarget.DynamicOnly => "dynamic",
+                TmpFontClearTarget.StaticOnly => "static",
+                _ => "dynamic and static"
+            };
+        }
+
+        /// <summary>Gets a confirmation sentence about static assets for the current clear target.</summary>
+        /// <param name="clearedNote">The sentence used when static assets are cleared.</param>
+        /// <returns>The sentence followed by a space, or a note that static assets are left untouched.</returns>
+        private string DescribeStaticClearing(string clearedNote)
+        {
+            return _options.ClearTarget == TmpFontClearTarget.DynamicOnly
+                ? "Static assets are left untouched. "
+                : $"{clearedNote} ";
         }
 
         /// <summary>Confirms a clear action, runs it on every listed font asset with a progress bar and records the summaries.</summary>
@@ -606,24 +644,21 @@ namespace MajdataPlay.Editor.Windows
             }
         }
 
-        /// <summary>Lists the dynamic assets of the listed chains that have glyphs, which "Clear Dynamic Glyphs" would empty.</summary>
+        /// <summary>Lists the clear target assets of the listed chains that have glyphs, which "Clear All Glyphs" would empty.</summary>
         /// <returns>The distinct assets in lookup order.</returns>
         internal List<TMP_FontAsset> GetAssetsToClear()
         {
-            return CollectChainAssets(asset => TmpFontPrewarmer.IsDynamic(asset) && asset.characterTable.Count > 0);
+            return CollectChainAssets(asset => asset.characterTable.Count > 0 && TmpFontPrewarmer.IsClearTarget(asset, _options.ClearTarget));
         }
 
-        /// <summary>
-        /// Lists the assets of the listed chains that have a listed character and would be rebuilt by "Remove Listed Characters":
-        /// dynamic assets, and static assets when baking into static assets is on.
-        /// </summary>
+        /// <summary>Lists the clear target assets of the listed chains that have a listed character, which "Remove Listed Characters" would rebuild.</summary>
         /// <returns>The distinct assets in lookup order.</returns>
         internal List<TMP_FontAsset> GetAssetsWithListedCharacters()
         {
             RefreshCodePoints();
             return CollectChainAssets(asset =>
             {
-                if (!TmpFontPrewarmer.IsDynamic(asset) && !_options.IncludeStaticAssets)
+                if (!TmpFontPrewarmer.IsClearTarget(asset, _options.ClearTarget))
                 {
                     return false;
                 }
@@ -800,9 +835,9 @@ namespace MajdataPlay.Editor.Windows
                 }
                 builder.Append(')');
             }
-            foreach (var asset in result.SkippedStaticAssets)
+            foreach (var asset in result.SkippedAssets)
             {
-                builder.Append($", static untouched: {asset.name}");
+                builder.Append($", skipped by clear target: {asset.name}");
             }
             foreach (var asset in result.AssetsWithoutSourceFont)
             {

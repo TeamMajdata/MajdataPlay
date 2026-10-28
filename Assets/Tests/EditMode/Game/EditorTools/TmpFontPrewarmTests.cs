@@ -487,9 +487,9 @@ namespace MajdataPlay.Tests.Game.EditorTools
             Assert.That(latin.characterTable, Is.Empty);
         }
 
-        /// <summary>Checks that clearing empties every dynamic asset of the chain and leaves a static asset's baked glyphs untouched.</summary>
+        /// <summary>Checks that the default clear target empties every dynamic asset of the chain and leaves a static asset's baked glyphs untouched.</summary>
         [Test]
-        public void ClearDynamicGlyphs_EmptiesDynamicChainAndLeavesStaticUntouched()
+        public void ClearGlyphs_DynamicOnly_EmptiesDynamicChainAndLeavesStaticUntouched()
         {
             var baked = CreateDynamicFontAsset(LatinFontPath);
             var latinDynamic = CreateDynamicFontAsset(LatinFontPath);
@@ -500,12 +500,12 @@ namespace MajdataPlay.Tests.Game.EditorTools
             hangul.TryAddCharacters(new[] { HangulGa }, out _, false);
             baked.fallbackFontAssetTable = new List<TMP_FontAsset> { latinDynamic, hangul };
 
-            var result = TmpFontPrewarmer.ClearDynamicGlyphs(baked, InMemoryOptions());
+            var result = TmpFontPrewarmer.ClearGlyphs(baked, InMemoryOptions());
 
             Assert.That(result.RemovedCount, Is.EqualTo(3));
             Assert.That(result.RemovedPerAsset[latinDynamic], Is.EqualTo(2));
             Assert.That(result.RemovedPerAsset[hangul], Is.EqualTo(1));
-            Assert.That(result.SkippedStaticAssets, Is.EqualTo(new[] { baked }));
+            Assert.That(result.SkippedAssets, Is.EqualTo(new[] { baked }));
             Assert.That(latinDynamic.characterTable, Is.Empty);
             Assert.That(latinDynamic.glyphTable, Is.Empty);
             Assert.That(hangul.characterTable, Is.Empty);
@@ -514,9 +514,92 @@ namespace MajdataPlay.Tests.Game.EditorTools
             Assert.That(baked.atlasTexture.isReadable, Is.False);
         }
 
+        /// <summary>Checks that the static-only target empties a static asset, keeps it static and non-readable, and leaves its dynamic fallback untouched.</summary>
+        [Test]
+        public void ClearGlyphs_StaticOnly_EmptiesStaticAssetAndLeavesDynamicUntouched()
+        {
+            var baked = CreateDynamicFontAsset(LatinFontPath);
+            var latinDynamic = CreateDynamicFontAsset(LatinFontPath);
+            baked.TryAddCharacters(new[] { 0x41u, 0x42u }, out _, false);
+            MakeStatic(baked);
+            latinDynamic.TryAddCharacters(new[] { 0x43u }, out _, false);
+            baked.fallbackFontAssetTable = new List<TMP_FontAsset> { latinDynamic };
+
+            var result = TmpFontPrewarmer.ClearGlyphs(baked, ClearOptions(TmpFontClearTarget.StaticOnly));
+
+            LogAssert.NoUnexpectedReceived();
+            Assert.That(result.RemovedPerAsset[baked], Is.EqualTo(2));
+            Assert.That(result.SkippedAssets, Is.EqualTo(new[] { latinDynamic }));
+            Assert.That(baked.characterTable, Is.Empty);
+            Assert.That(baked.glyphTable, Is.Empty);
+            Assert.That(baked.atlasPopulationMode, Is.EqualTo(AtlasPopulationMode.Static));
+            Assert.That(baked.atlasTexture.isReadable, Is.False);
+            Assert.That(baked.sourceFontFile, Is.Null);
+            Assert.That(latinDynamic.HasCharacter('C'), Is.True);
+        }
+
+        /// <summary>Checks that the dynamic-and-static target empties both kinds of asset.</summary>
+        [Test]
+        public void ClearGlyphs_DynamicAndStatic_EmptiesBoth()
+        {
+            var baked = CreateDynamicFontAsset(LatinFontPath);
+            var latinDynamic = CreateDynamicFontAsset(LatinFontPath);
+            baked.TryAddCharacters(new[] { 0x41u }, out _, false);
+            MakeStatic(baked);
+            latinDynamic.TryAddCharacters(new[] { 0x42u }, out _, false);
+            baked.fallbackFontAssetTable = new List<TMP_FontAsset> { latinDynamic };
+
+            var result = TmpFontPrewarmer.ClearGlyphs(baked, ClearOptions(TmpFontClearTarget.DynamicAndStatic));
+
+            Assert.That(result.RemovedCount, Is.EqualTo(2));
+            Assert.That(result.SkippedAssets, Is.Empty);
+            Assert.That(baked.characterTable, Is.Empty);
+            Assert.That(latinDynamic.characterTable, Is.Empty);
+            Assert.That(baked.atlasPopulationMode, Is.EqualTo(AtlasPopulationMode.Static));
+            Assert.That(baked.atlasTexture.isReadable, Is.False);
+        }
+
+        /// <summary>Checks that a cleared persistent static asset is written to disk empty, static and non-readable.</summary>
+        [Test]
+        public void ClearGlyphs_SavesClearedStaticAsset()
+        {
+            using var folder = new TemporaryAssetFolder();
+            var asset = CreatePersistentFontAsset(folder, "ClearStatic.asset");
+            asset.TryAddCharacters(new[] { 0x41u }, out _, false);
+            MakeStatic(asset);
+            EditorUtility.SetDirty(asset);
+            AssetDatabase.SaveAssets();
+            var options = ClearOptions(TmpFontClearTarget.StaticOnly);
+            options.SaveAssets = true;
+
+            var result = TmpFontPrewarmer.ClearGlyphs(asset, options);
+
+            Assert.That(result.RemovedCount, Is.EqualTo(1));
+            var text = folder.ReadText("ClearStatic.asset");
+            StringAssert.Contains("m_AtlasPopulationMode: 0", text);
+            StringAssert.Contains("m_IsReadable: 0", text);
+            StringAssert.DoesNotContain("m_Unicode: 65", text);
+        }
+
+        /// <summary>Checks which population modes each clear target includes.</summary>
+        [Test]
+        public void IsClearTarget_FollowsPopulationMode()
+        {
+            var dynamicAsset = CreateDynamicFontAsset(LatinFontPath);
+            var staticAsset = CreateDynamicFontAsset(LatinFontPath);
+            MakeStatic(staticAsset);
+
+            Assert.That(TmpFontPrewarmer.IsClearTarget(dynamicAsset, TmpFontClearTarget.DynamicOnly), Is.True);
+            Assert.That(TmpFontPrewarmer.IsClearTarget(staticAsset, TmpFontClearTarget.DynamicOnly), Is.False);
+            Assert.That(TmpFontPrewarmer.IsClearTarget(dynamicAsset, TmpFontClearTarget.StaticOnly), Is.False);
+            Assert.That(TmpFontPrewarmer.IsClearTarget(staticAsset, TmpFontClearTarget.StaticOnly), Is.True);
+            Assert.That(TmpFontPrewarmer.IsClearTarget(dynamicAsset, TmpFontClearTarget.DynamicAndStatic), Is.True);
+            Assert.That(TmpFontPrewarmer.IsClearTarget(staticAsset, TmpFontClearTarget.DynamicAndStatic), Is.True);
+        }
+
         /// <summary>Checks that clearing without fallbacks empties only the listed asset.</summary>
         [Test]
-        public void ClearDynamicGlyphs_WithoutFallbacks_LeavesFallbackUntouched()
+        public void ClearGlyphs_WithoutFallbacks_LeavesFallbackUntouched()
         {
             var latin = CreateDynamicFontAsset(LatinFontPath);
             var hangul = CreateDynamicFontAsset(HangulFontPath);
@@ -526,7 +609,7 @@ namespace MajdataPlay.Tests.Game.EditorTools
             var options = InMemoryOptions();
             options.IncludeFallbacks = false;
 
-            var result = TmpFontPrewarmer.ClearDynamicGlyphs(latin, options);
+            var result = TmpFontPrewarmer.ClearGlyphs(latin, options);
 
             Assert.That(result.RemovedCount, Is.EqualTo(1));
             Assert.That(latin.characterTable, Is.Empty);
@@ -535,13 +618,13 @@ namespace MajdataPlay.Tests.Game.EditorTools
 
         /// <summary>Checks that a cleared persistent dynamic asset is written to disk without its characters.</summary>
         [Test]
-        public void ClearDynamicGlyphs_SavesPersistentAsset()
+        public void ClearGlyphs_SavesPersistentAsset()
         {
             using var folder = new TemporaryAssetFolder();
             var asset = CreatePersistentFontAsset(folder, "Clear.asset");
             TmpFontPrewarmer.Prewarm(asset, CodePoints("AB"), new TmpFontPrewarmOptions());
 
-            var result = TmpFontPrewarmer.ClearDynamicGlyphs(asset, new TmpFontPrewarmOptions());
+            var result = TmpFontPrewarmer.ClearGlyphs(asset, new TmpFontPrewarmOptions());
 
             Assert.That(result.RemovedCount, Is.EqualTo(2));
             Assert.That(EditorUtility.IsDirty(asset), Is.False);
@@ -575,7 +658,7 @@ namespace MajdataPlay.Tests.Game.EditorTools
             latin.TryAddCharacters(new[] { 0x41u, 0x42u, 0x43u }, out _, false);
             MakeStatic(latin);
 
-            var result = TmpFontPrewarmer.RemoveCharacters(latin, CodePoints("C"), StaticBakeOptions());
+            var result = TmpFontPrewarmer.RemoveCharacters(latin, CodePoints("C"), ClearOptions(TmpFontClearTarget.DynamicAndStatic));
 
             LogAssert.NoUnexpectedReceived();
             Assert.That(result.RemovedPerAsset[latin], Is.EqualTo(1));
@@ -588,9 +671,9 @@ namespace MajdataPlay.Tests.Game.EditorTools
             Assert.That(latin.sourceFontFile, Is.Null);
         }
 
-        /// <summary>Checks that a static asset is left untouched and reported when static assets are excluded, while dynamic fallbacks are still cleared.</summary>
+        /// <summary>Checks that the dynamic-only target leaves a static asset untouched and reports it, while dynamic fallbacks are still rebuilt.</summary>
         [Test]
-        public void RemoveCharacters_WithoutStaticBaking_LeavesStaticAssetUntouched()
+        public void RemoveCharacters_DynamicOnly_LeavesStaticAssetUntouched()
         {
             var baked = CreateDynamicFontAsset(LatinFontPath);
             var latinDynamic = CreateDynamicFontAsset(LatinFontPath);
@@ -601,10 +684,30 @@ namespace MajdataPlay.Tests.Game.EditorTools
 
             var result = TmpFontPrewarmer.RemoveCharacters(baked, CodePoints("A"), InMemoryOptions());
 
-            Assert.That(result.SkippedStaticAssets, Is.EqualTo(new[] { baked }));
+            Assert.That(result.SkippedAssets, Is.EqualTo(new[] { baked }));
             Assert.That(baked.HasCharacter('A'), Is.True);
             Assert.That(latinDynamic.HasCharacter('A'), Is.False);
             Assert.That(result.RemovedCount, Is.EqualTo(1));
+        }
+
+        /// <summary>Checks that the static-only target rebuilds a static asset and leaves its dynamic fallback untouched and reported.</summary>
+        [Test]
+        public void RemoveCharacters_StaticOnly_LeavesDynamicAssetUntouched()
+        {
+            var baked = CreateDynamicFontAsset(LatinFontPath);
+            var latinDynamic = CreateDynamicFontAsset(LatinFontPath);
+            baked.TryAddCharacters(new[] { 0x41u, 0x42u }, out _, false);
+            MakeStatic(baked);
+            latinDynamic.TryAddCharacters(new[] { 0x41u }, out _, false);
+            baked.fallbackFontAssetTable = new List<TMP_FontAsset> { latinDynamic };
+
+            var result = TmpFontPrewarmer.RemoveCharacters(baked, CodePoints("A"), ClearOptions(TmpFontClearTarget.StaticOnly));
+
+            Assert.That(result.RemovedPerAsset[baked], Is.EqualTo(1));
+            Assert.That(result.SkippedAssets, Is.EqualTo(new[] { latinDynamic }));
+            Assert.That(baked.HasCharacter('A'), Is.False);
+            Assert.That(baked.HasCharacter('B'), Is.True);
+            Assert.That(latinDynamic.HasCharacter('A'), Is.True);
         }
 
         /// <summary>Checks that a static asset without a source font is reported and keeps its characters, since it cannot be rebuilt.</summary>
@@ -620,7 +723,7 @@ namespace MajdataPlay.Tests.Game.EditorTools
                 serializedObject.ApplyModifiedPropertiesWithoutUndo();
             }
 
-            var result = TmpFontPrewarmer.RemoveCharacters(latin, CodePoints("A"), StaticBakeOptions());
+            var result = TmpFontPrewarmer.RemoveCharacters(latin, CodePoints("A"), ClearOptions(TmpFontClearTarget.StaticOnly));
 
             Assert.That(result.AssetsWithoutSourceFont, Is.EqualTo(new[] { latin }));
             Assert.That(result.RemovedCount, Is.Zero);
@@ -637,7 +740,7 @@ namespace MajdataPlay.Tests.Game.EditorTools
             MakeStatic(asset);
             EditorUtility.SetDirty(asset);
             AssetDatabase.SaveAssets();
-            var options = StaticBakeOptions();
+            var options = ClearOptions(TmpFontClearTarget.StaticOnly);
             options.SaveAssets = true;
 
             var result = TmpFontPrewarmer.RemoveCharacters(asset, CodePoints("A"), options);
@@ -650,9 +753,9 @@ namespace MajdataPlay.Tests.Game.EditorTools
             StringAssert.Contains("m_Unicode: 66", text);
         }
 
-        /// <summary>Checks that the window lists each affected asset of shared chains once and follows the static option.</summary>
+        /// <summary>Checks that the window lists each affected asset of shared chains once and follows the clear target.</summary>
         [Test]
-        public void Window_ListsAffectedAssetsOnceAndFollowsStaticOption()
+        public void Window_ListsAffectedAssetsOnceAndFollowsClearTarget()
         {
             var baked = CreateDynamicFontAsset(LatinFontPath);
             var other = CreateDynamicFontAsset(LatinFontPath);
@@ -668,14 +771,21 @@ namespace MajdataPlay.Tests.Game.EditorTools
             _window.AddFontAssets(new Object[] { baked, other });
             _window.Characters = "A";
 
-            var toClear = _window.GetAssetsToClear();
-            var withStatic = _window.GetAssetsWithListedCharacters();
-            _window.Options.IncludeStaticAssets = false;
-            var withoutStatic = _window.GetAssetsWithListedCharacters();
+            var dynamicToClear = _window.GetAssetsToClear();
+            var dynamicWithListed = _window.GetAssetsWithListedCharacters();
+            _window.Options.ClearTarget = TmpFontClearTarget.StaticOnly;
+            var staticToClear = _window.GetAssetsToClear();
+            var staticWithListed = _window.GetAssetsWithListedCharacters();
+            _window.Options.ClearTarget = TmpFontClearTarget.DynamicAndStatic;
+            var bothToClear = _window.GetAssetsToClear();
+            var bothWithListed = _window.GetAssetsWithListedCharacters();
 
-            Assert.That(toClear, Is.EqualTo(new[] { shared, other }));
-            Assert.That(withStatic, Is.EqualTo(new[] { baked, shared }));
-            Assert.That(withoutStatic, Is.EqualTo(new[] { shared }));
+            Assert.That(dynamicToClear, Is.EqualTo(new[] { shared, other }));
+            Assert.That(dynamicWithListed, Is.EqualTo(new[] { shared }));
+            Assert.That(staticToClear, Is.EqualTo(new[] { baked }));
+            Assert.That(staticWithListed, Is.EqualTo(new[] { baked }));
+            Assert.That(bothToClear, Is.EqualTo(new[] { baked, shared, other }));
+            Assert.That(bothWithListed, Is.EqualTo(new[] { baked, shared }));
         }
 
         /// <summary>Checks the clear summary line, including skipped assets and characters that no longer fit.</summary>
@@ -689,13 +799,13 @@ namespace MajdataPlay.Tests.Game.EditorTools
                 RemovedCount = 2
             };
             result.RemovedPerAsset[latin] = 2;
-            result.SkippedStaticAssets.Add(baked);
+            result.SkippedAssets.Add(baked);
             result.AssetsWithoutSourceFont.Add(baked);
             result.LostCodePoints.Add(0x41);
 
             var line = TmpFontPrewarmWindow.DescribeClear(result);
 
-            Assert.That(line, Is.EqualTo("Latin: removed 2 (Latin: 2), static untouched: Baked, no source font to rebuild: Baked, no longer fit 1 [U+0041]"));
+            Assert.That(line, Is.EqualTo("Latin: removed 2 (Latin: 2), skipped by clear target: Baked, no source font to rebuild: Baked, no longer fit 1 [U+0041]"));
         }
 
         /// <summary>Checks that canceling stops before the next batch and reports the rest as unprocessed, not unsupported.</summary>
@@ -848,6 +958,16 @@ namespace MajdataPlay.Tests.Game.EditorTools
         {
             var options = InMemoryOptions();
             options.IncludeStaticAssets = true;
+            return options;
+        }
+
+        /// <summary>Gets in-memory options for a clear target.</summary>
+        /// <param name="target">Which assets the clear actions change.</param>
+        /// <returns>Default options with saving disabled and the given clear target.</returns>
+        private static TmpFontPrewarmOptions ClearOptions(TmpFontClearTarget target)
+        {
+            var options = InMemoryOptions();
+            options.ClearTarget = target;
             return options;
         }
 
