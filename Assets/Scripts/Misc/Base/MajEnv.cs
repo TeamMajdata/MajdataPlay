@@ -110,8 +110,8 @@ namespace MajdataPlay
         public static StorageDirectory AssetsDirectory { get; private set; } = null!;
         /// <summary>Gets the local cache directory.</summary>
         public static StorageDirectory CacheDirectory { get; private set; } = null!;
-        /// <summary>Gets the runtime data directory under the cache root, which holds the runtime configuration and favorites database.</summary>
-        public static StorageDirectory RuntimeCacheDirectory { get; private set; } = null!;
+        /// <summary>Gets the runtime data directory under <see cref="PersistentDirectory"/>, which holds the runtime configuration and favorites database.</summary>
+        public static StorageDirectory RuntimeDirectory { get; private set; } = null!;
         /// <summary>Gets the temporary extraction directory under the cache root.</summary>
         public static StorageDirectory TempDirectory { get; private set; } = null!;
         /// <summary>Gets the chart collection root.</summary>
@@ -213,7 +213,9 @@ namespace MajdataPlay
 
         /// <summary>The user settings file name inside <see cref="RootDirectory"/>.</summary>
         private const string SettingsFileName = "settings.json";
-        /// <summary>The runtime configuration file name inside <see cref="RuntimeCacheDirectory"/>.</summary>
+        /// <summary>The name of <see cref="RuntimeDirectory"/> inside <see cref="PersistentDirectory"/>, and of the legacy runtime directory inside <see cref="CacheDirectory"/>.</summary>
+        private const string RuntimeDirectoryName = "Runtime";
+        /// <summary>The runtime configuration file name inside <see cref="RuntimeDirectory"/>.</summary>
         private const string RuntimeConfigFileName = "config.json";
         /// <summary>The machine description file name inside <see cref="RootDirectory"/>.</summary>
         private const string MachineDescriptionFileName = "machine_description.json";
@@ -243,6 +245,7 @@ namespace MajdataPlay
             InitPath();
             InitDirectories();
             InitLogger();
+            MigrateLegacyRuntimeDirectory();
             InitSystemSettings();
             InitUserSettings();
             ReadiOSNativeSettings();
@@ -352,14 +355,13 @@ namespace MajdataPlay
         /// <exception cref="IOException">A file occupies an application directory name or creation failed.</exception>
         private static void InitDirectories()
         {
-            RuntimeCacheDirectory = CacheDirectory.CreateDirectory("Runtime");
+            RuntimeDirectory = PersistentDirectory.CreateDirectory(RuntimeDirectoryName);
             CacheDirectory.CreateDirectory("Net");
             TempDirectory = CacheDirectory.CreateDirectory("Temp");
             ChartDirectory = RootDirectory.CreateDirectory("MaiCharts");
             SkinDirectory = RootDirectory.CreateDirectory("Skins");
             LogsDirectory = RootDirectory.CreateDirectory("Logs");
             RecordOutputsDirectory = RootDirectory.CreateDirectory("RecordOutputs");
-            RootDirectory.CreateDirectory("Runtime");
         }
         /// <summary>Rotates the previous runtime log and directs log output to a new log file in <see cref="LogsDirectory"/>.</summary>
         /// <exception cref="UnauthorizedAccessException">Rotating or creating the log file was denied.</exception>
@@ -375,6 +377,56 @@ namespace MajdataPlay
             fileWriter.AutoFlush = true;
 
             MajDebug.SetLogWriter(fileWriter);
+        }
+        /// <summary>
+        /// Moves the runtime data left in the legacy <c>{CacheDirectory}/Runtime</c> directory into <see cref="RuntimeDirectory"/>,
+        /// then deletes the legacy directory.
+        /// </summary>
+        /// <remarks>
+        /// Entries already present in <see cref="RuntimeDirectory"/> are kept and the legacy copies discarded. A failure is
+        /// logged and leaves the legacy directory in place, so the next startup retries the remaining entries.
+        /// </remarks>
+        private static void MigrateLegacyRuntimeDirectory()
+        {
+            try
+            {
+                var legacyDirectory = CacheDirectory.FindDirectory(RuntimeDirectoryName);
+                if (legacyDirectory is null)
+                {
+                    return;
+                }
+
+                MergeDirectory(legacyDirectory, RuntimeDirectory);
+                legacyDirectory.Delete(recursive: true);
+                MajDebug.LogInfo(nameof(MajEnv), $"Migrated the legacy runtime directory \"{legacyDirectory.Location}\" to \"{RuntimeDirectory.Location}\"");
+            }
+            catch (Exception e)
+            {
+                MajDebug.LogError(nameof(MajEnv), "Failed to migrate the legacy runtime directory");
+                MajDebug.LogException(e);
+            }
+        }
+        /// <summary>Copies every file and subdirectory of a directory into another, keeping entries the destination already has.</summary>
+        /// <param name="source">The existing directory whose contents are copied.</param>
+        /// <param name="destination">The existing directory receiving the contents.</param>
+        /// <exception cref="DirectoryNotFoundException">The source or destination directory does not exist.</exception>
+        /// <exception cref="UnauthorizedAccessException">Enumerating, creating, or copying an entry was denied.</exception>
+        /// <exception cref="NotSupportedException">A backend cannot create directories or files.</exception>
+        /// <exception cref="IOException">Enumerating, creating, or copying an entry failed, or an entry kind conflicts.</exception>
+        private static void MergeDirectory(StorageDirectory source, StorageDirectory destination)
+        {
+            foreach (var entry in source.EnumerateEntries())
+            {
+                if (entry.IsDirectory)
+                {
+                    var sourceChild = new StorageDirectory(source.FileSystem, entry.Location);
+                    MergeDirectory(sourceChild, destination.CreateDirectory(entry.Name));
+                }
+                else if (destination.FindEntry(entry.Name) is null)
+                {
+                    new StorageFile(source.FileSystem, entry.Location).CopyTo(destination, entry.Name);
+                }
+            }
         }
         private static void InitSystemSettings()
         {
@@ -716,7 +768,7 @@ namespace MajdataPlay
         }
         private static void InitRuntimeConfig()
         {
-            var runtimeConfigFile = RuntimeCacheDirectory.FindFile(RuntimeConfigFileName);
+            var runtimeConfigFile = RuntimeDirectory.FindFile(RuntimeConfigFileName);
             if (runtimeConfigFile is not null)
             {
                 var js = runtimeConfigFile.ReadAllText();
@@ -737,7 +789,7 @@ namespace MajdataPlay
                 RuntimeConfig = new();
 
                 var json = Serializer.Json.Serialize(RuntimeConfig, UserJsonReaderOption);
-                WriteText(RuntimeCacheDirectory.CreateFile(RuntimeConfigFileName, JsonMimeType), json);
+                WriteText(RuntimeDirectory.CreateFile(RuntimeConfigFileName, JsonMimeType), json);
             }
         }
         private static void InitOthers()
@@ -792,7 +844,7 @@ namespace MajdataPlay
             // Re-resolve the files so a configuration deleted while running is recreated on every backend.
             SettingsPath = FindOrCreateFile(RootDirectory, SettingsFileName);
             WriteText(SettingsPath, json);
-            WriteText(FindOrCreateFile(RuntimeCacheDirectory, RuntimeConfigFileName), json2);
+            WriteText(FindOrCreateFile(RuntimeDirectory, RuntimeConfigFileName), json2);
 
             MajDebug.FlushLog();
         }

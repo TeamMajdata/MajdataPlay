@@ -148,7 +148,7 @@ namespace MajdataPlay.Tests.Game.Misc.Base
         /// <returns>The number of stored favorite rows.</returns>
         private static async UniTask<int> CountRowsInDatabaseFileAsync()
         {
-            var file = MajEnv.RuntimeCacheDirectory.FindFile("MajFavorites.db")!;
+            var file = MajEnv.RuntimeDirectory.FindFile("MajFavorites.db")!;
             var connection = new SQLiteAsyncConnection(file.Location, SQLiteOpenFlags.ReadOnly | SQLiteOpenFlags.FullMutex);
             try
             {
@@ -221,7 +221,7 @@ namespace MajdataPlay.Tests.Game.Misc.Base
 
                 Assert.That(_charts.Exists, Is.True);
                 Assert.That(_charts.FindDirectory("default"), Is.Not.Null);
-                Assert.That(MajEnv.RuntimeCacheDirectory.FindFile("MajFavorites.db"), Is.Not.Null);
+                Assert.That(MajEnv.RuntimeDirectory.FindFile("MajFavorites.db"), Is.Not.Null);
                 Assert.That(PrivateMember.GetStaticField<bool>(typeof(SongStorage), "s_isInitialized"), Is.True);
             });
         }
@@ -581,15 +581,15 @@ namespace MajdataPlay.Tests.Game.Misc.Base
             return UniTask.ToCoroutine(async () =>
             {
                 CreateLibrary();
-                MajEnv.RuntimeCacheDirectory.CreateFile("MyFavorites.json").WriteAllText("[\"legacy-hash\",\"\"]");
+                MajEnv.RuntimeDirectory.CreateFile("MyFavorites.json").WriteAllText("[\"legacy-hash\",\"\"]");
                 _charts.CreateFile("MyFavorites.json").WriteAllText("{\"Name\":\"My Favorites\",\"SongHashs\":[\"export-hash\"],\"IsPlayList\":true}");
 
                 await SongStorage.InitAsync();
 
                 var favorites = PrivateMember.GetStaticField<MyFavoriteSongCollection>(typeof(SongStorage), "s_myFavorites");
                 Assert.That(favorites.ExportHashSet(), Is.EquivalentTo(new[] { "legacy-hash", "export-hash" }));
-                Assert.That(MajEnv.RuntimeCacheDirectory.FindFile("MyFavorites.json"), Is.Null);
-                Assert.That(MajEnv.RuntimeCacheDirectory.FindFile("MyFavorites.json.bak"), Is.Not.Null);
+                Assert.That(MajEnv.RuntimeDirectory.FindFile("MyFavorites.json"), Is.Null);
+                Assert.That(MajEnv.RuntimeDirectory.FindFile("MyFavorites.json.bak"), Is.Not.Null);
             });
         }
 

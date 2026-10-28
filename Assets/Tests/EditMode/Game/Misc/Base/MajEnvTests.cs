@@ -98,16 +98,50 @@ namespace MajdataPlay.Tests.Game.Misc.Base
         [Test]
         public void InitDirectories_CreatesLayout()
         {
+            var persistent = _temporary.Directory.CreateDirectory("Persistent");
+            _environment.Set(nameof(MajEnv.PersistentDirectory), persistent);
+
             Step("InitDirectories");
 
-            Assert.That(MajEnv.RuntimeCacheDirectory.Exists, Is.True);
+            Assert.That(MajEnv.RuntimeDirectory.Location, Is.EqualTo(persistent.FindDirectory("Runtime")!.Location));
+            Assert.That(MajEnv.CacheDirectory.FindDirectory("Runtime"), Is.Null);
             Assert.That(MajEnv.CacheDirectory.FindDirectory("Net"), Is.Not.Null);
             Assert.That(MajEnv.TempDirectory.Exists, Is.True);
             Assert.That(_root.FindDirectory("MaiCharts"), Is.Not.Null);
             Assert.That(_root.FindDirectory("Skins"), Is.Not.Null);
             Assert.That(_root.FindDirectory("Logs"), Is.Not.Null);
             Assert.That(_root.FindDirectory("RecordOutputs"), Is.Not.Null);
-            Assert.That(_root.FindDirectory("Runtime"), Is.Not.Null);
+        }
+
+        /// <summary>Checks that the legacy cache runtime directory is merged into the runtime directory and then deleted.</summary>
+        [Test]
+        public void MigrateLegacyRuntimeDirectory_MovesEntriesAndDeletesLegacy()
+        {
+            var legacy = MajEnv.CacheDirectory.CreateDirectory("Runtime");
+            legacy.CreateFile("config.json").WriteAllText("legacy config");
+            legacy.CreateFile("MajFavorites.db").WriteAllText("legacy favorites");
+            legacy.CreateDirectory("Nested").CreateFile("data.bin").WriteAllText("nested");
+            MajEnv.RuntimeDirectory.CreateFile("config.json").WriteAllText("current config");
+
+            Step("MigrateLegacyRuntimeDirectory");
+
+            var runtime = MajEnv.RuntimeDirectory;
+            Assert.That(MajEnv.CacheDirectory.FindDirectory("Runtime"), Is.Null);
+            Assert.That(runtime.FindFile("config.json")!.ReadAllText(), Is.EqualTo("current config"));
+            Assert.That(runtime.FindFile("MajFavorites.db")!.ReadAllText(), Is.EqualTo("legacy favorites"));
+            Assert.That(runtime.FindFileAt("Nested/data.bin")!.ReadAllText(), Is.EqualTo("nested"));
+        }
+
+        /// <summary>Checks that the migration leaves the runtime directory untouched when no legacy directory exists.</summary>
+        [Test]
+        public void MigrateLegacyRuntimeDirectory_WithoutLegacy_DoesNothing()
+        {
+            MajEnv.RuntimeDirectory.CreateFile("config.json").WriteAllText("current config");
+
+            Step("MigrateLegacyRuntimeDirectory");
+
+            Assert.That(MajEnv.RuntimeDirectory.FindFile("config.json")!.ReadAllText(), Is.EqualTo("current config"));
+            Assert.That(MajEnv.CacheDirectory.FindDirectory("Runtime"), Is.Null);
         }
 
         /// <summary>Checks that the language directory is only reported while the streaming assets contain it.</summary>
@@ -210,7 +244,7 @@ namespace MajdataPlay.Tests.Game.Misc.Base
         public void InitRuntimeConfig_CreatesLoadsAndRecovers()
         {
             Step("InitRuntimeConfig");
-            var file = MajEnv.RuntimeCacheDirectory.FindFile("config.json");
+            var file = MajEnv.RuntimeDirectory.FindFile("config.json");
             Assert.That(file, Is.Not.Null);
             Assert.That(MajEnv.RuntimeConfig, Is.Not.Null);
 
@@ -327,7 +361,7 @@ namespace MajdataPlay.Tests.Game.Misc.Base
             Step("OnSave", null, null);
 
             var settings = Serializer.Json.Deserialize<GameSetting>(_root.FindFile("settings.json")!.ReadAllText(), MajEnv.UserJsonReaderOption)!;
-            var runtime = Serializer.Json.Deserialize<RuntimeConfig>(MajEnv.RuntimeCacheDirectory.FindFile("config.json")!.ReadAllText())!;
+            var runtime = Serializer.Json.Deserialize<RuntimeConfig>(MajEnv.RuntimeDirectory.FindFile("config.json")!.ReadAllText())!;
             Assert.That(settings.Game.TapSpeed, Is.EqualTo(6.25f));
             Assert.That(runtime.List.SelectedSongHash, Is.EqualTo("saved"));
             Assert.That(MajEnv.SettingsPath.Location, Is.EqualTo(_root.FindFile("settings.json")!.Location));

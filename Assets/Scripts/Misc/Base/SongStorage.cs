@@ -127,7 +127,7 @@ namespace MajdataPlay
         private static readonly SongCollection s_emptyCollection = SongCollection.Empty("default");
         /// <summary>Defines the portable favorites export filename.</summary>
         private const string MyFavoriteFileName = "MyFavorites.json";
-        /// <summary>The SQLite favorites database file name inside <see cref="MajEnv.RuntimeCacheDirectory"/>.</summary>
+        /// <summary>The SQLite favorites database file name inside <see cref="MajEnv.RuntimeDirectory"/>.</summary>
         private const string FavoriteDatabaseFileName = "MajFavorites.db";
 
         /// <summary>The page size of the recommendation feed; the server snapshot holds at most 150 charts, so two pages fetch all of it.</summary>
@@ -1502,7 +1502,7 @@ namespace MajdataPlay
             // Init SQLite DB (once)
             if (s_favoritesDatabase is null)
             {
-                var runtimeDirectory = MajEnv.RuntimeCacheDirectory;
+                var runtimeDirectory = MajEnv.RuntimeDirectory;
                 var databaseFile = runtimeDirectory.FindFile(FavoriteDatabaseFileName);
                 // SQLite leaves a database empty until its first table is created, so an empty file is still a new database.
                 var isDbExists = databaseFile is not null && databaseFile.Entry is { Length: > 0 };
