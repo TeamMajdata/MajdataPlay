@@ -83,9 +83,38 @@ namespace MajdataPlay.Editor.Windows
         }
     }
 
+    /// <summary>The outcome of clearing glyphs from one font asset and its fallback chain.</summary>
+    internal sealed class TmpFontClearResult
+    {
+        /// <summary>The font asset at the start of the cleared chain.</summary>
+        public TMP_FontAsset FontAsset { get; }
+
+        /// <summary>The number of characters removed across the chain.</summary>
+        public int RemovedCount { get; internal set; }
+
+        /// <summary>The number of characters removed from each asset of the chain; assets that lost nothing are absent.</summary>
+        public Dictionary<TMP_FontAsset, int> RemovedPerAsset { get; } = new();
+
+        /// <summary>The static assets left untouched because static assets are not cleared with the current options.</summary>
+        public List<TMP_FontAsset> SkippedStaticAssets { get; } = new();
+
+        /// <summary>The assets that have characters to remove but no source font to rebuild their remaining characters from.</summary>
+        public List<TMP_FontAsset> AssetsWithoutSourceFont { get; } = new();
+
+        /// <summary>The characters that should have stayed but no longer fit when their asset was rebuilt.</summary>
+        public List<uint> LostCodePoints { get; } = new();
+
+        /// <summary>Creates an empty result.</summary>
+        /// <param name="fontAsset">The font asset at the start of the cleared chain.</param>
+        public TmpFontClearResult(TMP_FontAsset fontAsset)
+        {
+            FontAsset = fontAsset;
+        }
+    }
+
     /// <summary>
     /// Adds characters to TMP font assets ahead of use so they need not be rasterized at runtime: dynamic assets receive the glyphs
-    /// directly, static assets can be baked in place.
+    /// directly, static assets can be baked in place. Prewarmed glyphs can be cleared again.
     /// </summary>
     internal static class TmpFontPrewarmer
     {
@@ -318,6 +347,144 @@ namespace MajdataPlay.Editor.Windows
             else
             {
                 result.UnsupportedCodePoints.AddRange(pending);
+            }
+            return result;
+        }
+
+        /// <summary>
+        /// Empties every dynamic asset of the lookup chain the way TMP's "Reset" context menu does, removing all prewarmed and
+        /// runtime-generated glyphs. Static assets are left untouched because their glyphs cannot be generated again at runtime.
+        /// </summary>
+        /// <param name="fontAsset">The font asset at the start of the chain.</param>
+        /// <param name="options">Whether fallbacks are cleared and whether cleared assets are saved.</param>
+        /// <param name="onProgress">Receives the progress (0 to 1) and a description before each asset is cleared.</param>
+        /// <returns>What was removed from which asset and which static assets were left untouched.</returns>
+        /// <exception cref="ArgumentNullException"><paramref name="fontAsset"/> or <paramref name="options"/> is null.</exception>
+        public static TmpFontClearResult ClearDynamicGlyphs(TMP_FontAsset fontAsset,
+                                                            TmpFontPrewarmOptions options,
+                                                            Action<float, string>? onProgress = null)
+        {
+            if (options is null)
+            {
+                throw new ArgumentNullException(nameof(options));
+            }
+            var chain = GetLookupChain(fontAsset, options.IncludeFallbacks);
+            var result = new TmpFontClearResult(fontAsset);
+            for (var i = 0; i < chain.Count; i++)
+            {
+                var asset = chain[i];
+                if (!IsDynamic(asset))
+                {
+                    result.SkippedStaticAssets.Add(asset);
+                    continue;
+                }
+                var characterCount = asset.characterTable.Count;
+                if (characterCount == 0)
+                {
+                    continue;
+                }
+                onProgress?.Invoke((float)i / chain.Count, $"{asset.name}: clearing {characterCount} characters");
+                asset.ClearFontAssetData(true);
+                result.RemovedPerAsset[asset] = characterCount;
+                result.RemovedCount += characterCount;
+                if (options.SaveAssets)
+                {
+                    SaveFontAsset(asset);
+                }
+            }
+            return result;
+        }
+
+        /// <summary>
+        /// Removes the given characters from every asset of the lookup chain that has them. TMP cannot remove single glyphs,
+        /// so each affected asset is rebuilt from its remaining characters at its current atlas size. Static assets are rebuilt
+        /// when <see cref="TmpFontPrewarmOptions.IncludeStaticAssets"/> is set and stay static with a non-readable atlas;
+        /// otherwise they are left untouched.
+        /// </summary>
+        /// <param name="fontAsset">The font asset at the start of the chain.</param>
+        /// <param name="codePoints">The code points to remove.</param>
+        /// <param name="options">Whether fallbacks and static assets are included, how glyphs are re-added and whether assets are saved.</param>
+        /// <param name="onProgress">Receives the progress (0 to 1) and a description before each asset is rebuilt.</param>
+        /// <returns>What was removed from which asset, what was skipped and which remaining characters no longer fit.</returns>
+        /// <exception cref="ArgumentNullException"><paramref name="fontAsset"/>, <paramref name="codePoints"/> or <paramref name="options"/> is null.</exception>
+        /// <exception cref="InvalidOperationException">A static asset must be rebuilt but the Editor offers no way to change atlas readability.</exception>
+        public static TmpFontClearResult RemoveCharacters(TMP_FontAsset fontAsset,
+                                                          IReadOnlyCollection<uint> codePoints,
+                                                          TmpFontPrewarmOptions options,
+                                                          Action<float, string>? onProgress = null)
+        {
+            if (codePoints is null)
+            {
+                throw new ArgumentNullException(nameof(codePoints));
+            }
+            if (options is null)
+            {
+                throw new ArgumentNullException(nameof(options));
+            }
+            var chain = GetLookupChain(fontAsset, options.IncludeFallbacks);
+            var result = new TmpFontClearResult(fontAsset);
+            var removedCodePoints = new HashSet<uint>(codePoints);
+            for (var i = 0; i < chain.Count; i++)
+            {
+                var asset = chain[i];
+                var kept = new List<uint>(asset.characterTable.Count);
+                var removedCount = 0;
+                foreach (var character in asset.characterTable)
+                {
+                    if (removedCodePoints.Contains(character.unicode))
+                    {
+                        removedCount++;
+                    }
+                    else
+                    {
+                        kept.Add(character.unicode);
+                    }
+                }
+                if (removedCount == 0)
+                {
+                    continue;
+                }
+                var isStatic = !IsDynamic(asset);
+                if (isStatic && !options.IncludeStaticAssets)
+                {
+                    result.SkippedStaticAssets.Add(asset);
+                    continue;
+                }
+                if (GetSourceFont(asset) is null)
+                {
+                    result.AssetsWithoutSourceFont.Add(asset);
+                    continue;
+                }
+
+                onProgress?.Invoke((float)i / chain.Count, $"{asset.name}: removing {removedCount} characters, keeping {kept.Count}");
+                var bakeScope = isStatic ? new StaticBakeScope(asset) : null;
+                try
+                {
+                    // Same feature choice as Prewarm, so a rebuilt static atlas keeps the kerning it had.
+                    var includeFontFeatures = isStatic ? asset.getFontFeatures : options.IncludeFontFeatures;
+                    asset.ClearFontAssetData(true);
+                    if (kept.Count > 0)
+                    {
+                        asset.TryAddCharacters(kept.ToArray(), out _, includeFontFeatures);
+                    }
+                }
+                finally
+                {
+                    bakeScope?.Dispose();
+                }
+                foreach (var codePoint in kept)
+                {
+                    if (!asset.HasCharacter((int)codePoint))
+                    {
+                        result.LostCodePoints.Add(codePoint);
+                    }
+                }
+                result.RemovedPerAsset[asset] = removedCount;
+                result.RemovedCount += removedCount;
+                if (options.SaveAssets)
+                {
+                    SaveFontAsset(asset);
+                }
             }
             return result;
         }

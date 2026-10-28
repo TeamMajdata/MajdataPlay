@@ -487,6 +487,217 @@ namespace MajdataPlay.Tests.Game.EditorTools
             Assert.That(latin.characterTable, Is.Empty);
         }
 
+        /// <summary>Checks that clearing empties every dynamic asset of the chain and leaves a static asset's baked glyphs untouched.</summary>
+        [Test]
+        public void ClearDynamicGlyphs_EmptiesDynamicChainAndLeavesStaticUntouched()
+        {
+            var baked = CreateDynamicFontAsset(LatinFontPath);
+            var latinDynamic = CreateDynamicFontAsset(LatinFontPath);
+            var hangul = CreateDynamicFontAsset(HangulFontPath);
+            baked.TryAddCharacters(new[] { 0x41u }, out _, false);
+            MakeStatic(baked);
+            latinDynamic.TryAddCharacters(new[] { 0x42u, 0x43u }, out _, false);
+            hangul.TryAddCharacters(new[] { HangulGa }, out _, false);
+            baked.fallbackFontAssetTable = new List<TMP_FontAsset> { latinDynamic, hangul };
+
+            var result = TmpFontPrewarmer.ClearDynamicGlyphs(baked, InMemoryOptions());
+
+            Assert.That(result.RemovedCount, Is.EqualTo(3));
+            Assert.That(result.RemovedPerAsset[latinDynamic], Is.EqualTo(2));
+            Assert.That(result.RemovedPerAsset[hangul], Is.EqualTo(1));
+            Assert.That(result.SkippedStaticAssets, Is.EqualTo(new[] { baked }));
+            Assert.That(latinDynamic.characterTable, Is.Empty);
+            Assert.That(latinDynamic.glyphTable, Is.Empty);
+            Assert.That(hangul.characterTable, Is.Empty);
+            Assert.That(baked.HasCharacter('A'), Is.True);
+            Assert.That(baked.atlasPopulationMode, Is.EqualTo(AtlasPopulationMode.Static));
+            Assert.That(baked.atlasTexture.isReadable, Is.False);
+        }
+
+        /// <summary>Checks that clearing without fallbacks empties only the listed asset.</summary>
+        [Test]
+        public void ClearDynamicGlyphs_WithoutFallbacks_LeavesFallbackUntouched()
+        {
+            var latin = CreateDynamicFontAsset(LatinFontPath);
+            var hangul = CreateDynamicFontAsset(HangulFontPath);
+            latin.TryAddCharacters(new[] { 0x41u }, out _, false);
+            hangul.TryAddCharacters(new[] { HangulGa }, out _, false);
+            latin.fallbackFontAssetTable = new List<TMP_FontAsset> { hangul };
+            var options = InMemoryOptions();
+            options.IncludeFallbacks = false;
+
+            var result = TmpFontPrewarmer.ClearDynamicGlyphs(latin, options);
+
+            Assert.That(result.RemovedCount, Is.EqualTo(1));
+            Assert.That(latin.characterTable, Is.Empty);
+            Assert.That(hangul.HasCharacter((int)HangulGa), Is.True);
+        }
+
+        /// <summary>Checks that a cleared persistent dynamic asset is written to disk without its characters.</summary>
+        [Test]
+        public void ClearDynamicGlyphs_SavesPersistentAsset()
+        {
+            using var folder = new TemporaryAssetFolder();
+            var asset = CreatePersistentFontAsset(folder, "Clear.asset");
+            TmpFontPrewarmer.Prewarm(asset, CodePoints("AB"), new TmpFontPrewarmOptions());
+
+            var result = TmpFontPrewarmer.ClearDynamicGlyphs(asset, new TmpFontPrewarmOptions());
+
+            Assert.That(result.RemovedCount, Is.EqualTo(2));
+            Assert.That(EditorUtility.IsDirty(asset), Is.False);
+            var text = folder.ReadText("Clear.asset");
+            StringAssert.DoesNotContain("m_Unicode: 65", text);
+            StringAssert.DoesNotContain("m_Unicode: 66", text);
+        }
+
+        /// <summary>Checks that removing characters rebuilds a dynamic asset with only its other characters.</summary>
+        [Test]
+        public void RemoveCharacters_RemovesOnlyListedCharactersFromDynamicAsset()
+        {
+            var latin = CreateDynamicFontAsset(LatinFontPath);
+            latin.TryAddCharacters(new[] { 0x41u, 0x42u, 0x43u }, out _, false);
+
+            var result = TmpFontPrewarmer.RemoveCharacters(latin, CodePoints("BZ"), InMemoryOptions());
+
+            Assert.That(result.RemovedCount, Is.EqualTo(1));
+            Assert.That(result.RemovedPerAsset[latin], Is.EqualTo(1));
+            Assert.That(result.LostCodePoints, Is.Empty);
+            Assert.That(latin.HasCharacter('A') && latin.HasCharacter('C'), Is.True);
+            Assert.That(latin.HasCharacter('B'), Is.False);
+            Assert.That(latin.characterTable.Count, Is.EqualTo(2));
+        }
+
+        /// <summary>Checks that removing characters from a static asset rebuilds it at the same atlas size and leaves it static and non-readable.</summary>
+        [Test]
+        public void RemoveCharacters_RebuildsStaticAssetAndKeepsItStatic()
+        {
+            var latin = CreateDynamicFontAsset(LatinFontPath, 128);
+            latin.TryAddCharacters(new[] { 0x41u, 0x42u, 0x43u }, out _, false);
+            MakeStatic(latin);
+
+            var result = TmpFontPrewarmer.RemoveCharacters(latin, CodePoints("C"), StaticBakeOptions());
+
+            LogAssert.NoUnexpectedReceived();
+            Assert.That(result.RemovedPerAsset[latin], Is.EqualTo(1));
+            Assert.That(latin.HasCharacter('A') && latin.HasCharacter('B'), Is.True);
+            Assert.That(latin.HasCharacter('C'), Is.False);
+            Assert.That(latin.atlasWidth, Is.EqualTo(128));
+            Assert.That(latin.atlasTexture.width, Is.EqualTo(128));
+            Assert.That(latin.atlasPopulationMode, Is.EqualTo(AtlasPopulationMode.Static));
+            Assert.That(latin.atlasTexture.isReadable, Is.False);
+            Assert.That(latin.sourceFontFile, Is.Null);
+        }
+
+        /// <summary>Checks that a static asset is left untouched and reported when static assets are excluded, while dynamic fallbacks are still cleared.</summary>
+        [Test]
+        public void RemoveCharacters_WithoutStaticBaking_LeavesStaticAssetUntouched()
+        {
+            var baked = CreateDynamicFontAsset(LatinFontPath);
+            var latinDynamic = CreateDynamicFontAsset(LatinFontPath);
+            baked.TryAddCharacters(new[] { 0x41u }, out _, false);
+            MakeStatic(baked);
+            latinDynamic.TryAddCharacters(new[] { 0x41u }, out _, false);
+            baked.fallbackFontAssetTable = new List<TMP_FontAsset> { latinDynamic };
+
+            var result = TmpFontPrewarmer.RemoveCharacters(baked, CodePoints("A"), InMemoryOptions());
+
+            Assert.That(result.SkippedStaticAssets, Is.EqualTo(new[] { baked }));
+            Assert.That(baked.HasCharacter('A'), Is.True);
+            Assert.That(latinDynamic.HasCharacter('A'), Is.False);
+            Assert.That(result.RemovedCount, Is.EqualTo(1));
+        }
+
+        /// <summary>Checks that a static asset without a source font is reported and keeps its characters, since it cannot be rebuilt.</summary>
+        [Test]
+        public void RemoveCharacters_ReportsStaticAssetWithoutSourceFont()
+        {
+            var latin = CreateDynamicFontAsset(LatinFontPath);
+            latin.TryAddCharacters(new[] { 0x41u, 0x42u }, out _, false);
+            MakeStatic(latin);
+            using (var serializedObject = new SerializedObject(latin))
+            {
+                serializedObject.FindProperty("m_SourceFontFileGUID").stringValue = string.Empty;
+                serializedObject.ApplyModifiedPropertiesWithoutUndo();
+            }
+
+            var result = TmpFontPrewarmer.RemoveCharacters(latin, CodePoints("A"), StaticBakeOptions());
+
+            Assert.That(result.AssetsWithoutSourceFont, Is.EqualTo(new[] { latin }));
+            Assert.That(result.RemovedCount, Is.Zero);
+            Assert.That(latin.HasCharacter('A') && latin.HasCharacter('B'), Is.True);
+        }
+
+        /// <summary>Checks that a persistent static asset is written to disk without the removed character and stays static.</summary>
+        [Test]
+        public void RemoveCharacters_SavesRebuiltStaticAsset()
+        {
+            using var folder = new TemporaryAssetFolder();
+            var asset = CreatePersistentFontAsset(folder, "Remove.asset");
+            asset.TryAddCharacters(new[] { 0x41u, 0x42u }, out _, false);
+            MakeStatic(asset);
+            EditorUtility.SetDirty(asset);
+            AssetDatabase.SaveAssets();
+            var options = StaticBakeOptions();
+            options.SaveAssets = true;
+
+            var result = TmpFontPrewarmer.RemoveCharacters(asset, CodePoints("A"), options);
+
+            Assert.That(result.RemovedCount, Is.EqualTo(1));
+            var text = folder.ReadText("Remove.asset");
+            StringAssert.Contains("m_AtlasPopulationMode: 0", text);
+            StringAssert.Contains("m_IsReadable: 0", text);
+            StringAssert.DoesNotContain("m_Unicode: 65", text);
+            StringAssert.Contains("m_Unicode: 66", text);
+        }
+
+        /// <summary>Checks that the window lists each affected asset of shared chains once and follows the static option.</summary>
+        [Test]
+        public void Window_ListsAffectedAssetsOnceAndFollowsStaticOption()
+        {
+            var baked = CreateDynamicFontAsset(LatinFontPath);
+            var other = CreateDynamicFontAsset(LatinFontPath);
+            var shared = CreateDynamicFontAsset(LatinFontPath);
+            var empty = CreateDynamicFontAsset(LatinFontPath);
+            baked.TryAddCharacters(new[] { 0x41u }, out _, false);
+            MakeStatic(baked);
+            other.TryAddCharacters(new[] { 0x42u }, out _, false);
+            shared.TryAddCharacters(new[] { 0x41u }, out _, false);
+            baked.fallbackFontAssetTable = new List<TMP_FontAsset> { shared, empty };
+            other.fallbackFontAssetTable = new List<TMP_FontAsset> { shared };
+            _window = ScriptableObject.CreateInstance<TmpFontPrewarmWindow>();
+            _window.AddFontAssets(new Object[] { baked, other });
+            _window.Characters = "A";
+
+            var toClear = _window.GetAssetsToClear();
+            var withStatic = _window.GetAssetsWithListedCharacters();
+            _window.Options.IncludeStaticAssets = false;
+            var withoutStatic = _window.GetAssetsWithListedCharacters();
+
+            Assert.That(toClear, Is.EqualTo(new[] { shared, other }));
+            Assert.That(withStatic, Is.EqualTo(new[] { baked, shared }));
+            Assert.That(withoutStatic, Is.EqualTo(new[] { shared }));
+        }
+
+        /// <summary>Checks the clear summary line, including skipped assets and characters that no longer fit.</summary>
+        [Test]
+        public void DescribeClear_ListsCountsSkippedAssetsAndLostCharacters()
+        {
+            var latin = CreateBareFontAsset("Latin");
+            var baked = CreateBareFontAsset("Baked");
+            var result = new TmpFontClearResult(latin)
+            {
+                RemovedCount = 2
+            };
+            result.RemovedPerAsset[latin] = 2;
+            result.SkippedStaticAssets.Add(baked);
+            result.AssetsWithoutSourceFont.Add(baked);
+            result.LostCodePoints.Add(0x41);
+
+            var line = TmpFontPrewarmWindow.DescribeClear(result);
+
+            Assert.That(line, Is.EqualTo("Latin: removed 2 (Latin: 2), static untouched: Baked, no source font to rebuild: Baked, no longer fit 1 [U+0041]"));
+        }
+
         /// <summary>Checks that canceling stops before the next batch and reports the rest as unprocessed, not unsupported.</summary>
         [Test]
         public void Prewarm_CancelStopsAndReportsUnprocessed()
