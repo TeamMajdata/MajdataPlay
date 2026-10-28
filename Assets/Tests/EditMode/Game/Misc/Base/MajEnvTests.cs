@@ -12,6 +12,7 @@ using MajdataPlay.Tests.Game.Misc.Support;
 using MajdataPlay.Utils;
 using Newtonsoft.Json.Linq;
 using NUnit.Framework;
+using SQLite;
 
 #nullable enable
 namespace MajdataPlay.Tests.Game.Misc.Base
@@ -239,25 +240,76 @@ namespace MajdataPlay.Tests.Game.Misc.Base
             Assert.That(_root.FindFile("settings.json.bak.bak")!.ReadAllText(), Is.EqualTo("{ broken"));
         }
 
-        /// <summary>Checks that the runtime configuration is created, loaded and replaced when unreadable.</summary>
+        /// <summary>Reads the stored runtime configuration document from runtime.db with a separate connection.</summary>
+        /// <returns>The stored JSON document, or null when no configuration row exists.</returns>
+        private static string? ReadStoredRuntimeConfig()
+        {
+            var file = MajEnv.RuntimeDirectory.FindFile("runtime.db")!;
+            using var connection = new SQLiteConnection(file.Location, SQLiteOpenFlags.ReadOnly | SQLiteOpenFlags.FullMutex);
+            return connection.ExecuteScalar<string?>("SELECT Value FROM RuntimeConfig WHERE Key = 'RuntimeConfig'");
+        }
+
+        /// <summary>Replaces the stored runtime configuration document in runtime.db with a separate connection.</summary>
+        /// <param name="json">The document to store.</param>
+        private static void WriteStoredRuntimeConfig(string json)
+        {
+            var file = MajEnv.RuntimeDirectory.FindFile("runtime.db")!;
+            using var connection = new SQLiteConnection(file.Location, SQLiteOpenFlags.ReadWrite | SQLiteOpenFlags.FullMutex);
+            connection.Execute("UPDATE RuntimeConfig SET Value = ? WHERE Key = 'RuntimeConfig'", json);
+        }
+
+        /// <summary>Checks that the runtime configuration is created in runtime.db, loaded and replaced when unreadable.</summary>
         [Test]
         public void InitRuntimeConfig_CreatesLoadsAndRecovers()
         {
             Step("InitRuntimeConfig");
-            var file = MajEnv.RuntimeDirectory.FindFile("config.json");
-            Assert.That(file, Is.Not.Null);
+            Assert.That(ReadStoredRuntimeConfig(), Is.Not.Null);
+            Assert.That(MajEnv.RuntimeDirectory.FindFile("config.json"), Is.Null);
             Assert.That(MajEnv.RuntimeConfig, Is.Not.Null);
 
             var selectedId = System.Guid.Parse("4d2783ac-a6ef-40f4-b648-b043b4c58608");
-            file!.WriteAllText("{\"List\":{\"SelectedDirGuid\":\"4d2783ac-a6ef-40f4-b648-b043b4c58608\",\"SelectedSongHash\":\"h\"}}");
+            WriteStoredRuntimeConfig("{\"List\":{\"SelectedDirGuid\":\"4d2783ac-a6ef-40f4-b648-b043b4c58608\",\"SelectedSongHash\":\"h\"}}");
             Step("InitRuntimeConfig");
             Assert.That(MajEnv.RuntimeConfig!.List.SelectedDirGuid, Is.EqualTo(selectedId));
             Assert.That(MajEnv.RuntimeConfig.List.SelectedSongHash, Is.EqualTo("h"));
 
-            file.WriteAllText("not json");
+            WriteStoredRuntimeConfig("not json");
             Step("InitRuntimeConfig");
             Assert.That(MajEnv.RuntimeConfig!.List.SelectedDirGuid, Is.EqualTo(System.Guid.Empty));
             Assert.That(MajEnv.RuntimeConfig.List.SelectedSongHash, Is.Empty);
+        }
+
+        /// <summary>Checks that a legacy config.json is imported into runtime.db once and then backed up.</summary>
+        [Test]
+        public void InitRuntimeConfig_ImportsLegacyJson()
+        {
+            MajEnv.RuntimeDirectory.CreateFile("config.json").WriteAllText("{\"List\":{\"SelectedSongHash\":\"legacy\"}}");
+            MajEnv.RuntimeDirectory.CreateFile("config.json.bak").WriteAllText("older");
+
+            Step("InitRuntimeConfig");
+
+            Assert.That(MajEnv.RuntimeConfig.List.SelectedSongHash, Is.EqualTo("legacy"));
+            Assert.That(Serializer.Json.Deserialize<RuntimeConfig>(ReadStoredRuntimeConfig()!)!.List.SelectedSongHash, Is.EqualTo("legacy"));
+            Assert.That(MajEnv.RuntimeDirectory.FindFile("config.json"), Is.Null);
+            Assert.That(MajEnv.RuntimeDirectory.FindFile("config.json.bak")!.ReadAllText(), Does.Contain("legacy"));
+
+            // A config.json appearing after the import is ignored, because runtime.db is the only source from then on.
+            MajEnv.RuntimeDirectory.CreateFile("config.json").WriteAllText("{\"List\":{\"SelectedSongHash\":\"stale\"}}");
+            Step("InitRuntimeConfig");
+            Assert.That(MajEnv.RuntimeConfig.List.SelectedSongHash, Is.EqualTo("legacy"));
+        }
+
+        /// <summary>Checks that an unreadable legacy config.json is imported as defaults and kept as a backup.</summary>
+        [Test]
+        public void InitRuntimeConfig_ImportsUnreadableLegacyJsonAsDefaults()
+        {
+            MajEnv.RuntimeDirectory.CreateFile("config.json").WriteAllText("not json");
+
+            Step("InitRuntimeConfig");
+
+            Assert.That(MajEnv.RuntimeConfig.List.SelectedSongHash, Is.Empty);
+            Assert.That(ReadStoredRuntimeConfig(), Is.Not.Null);
+            Assert.That(MajEnv.RuntimeDirectory.FindFile("config.json.bak")!.ReadAllText(), Is.EqualTo("not json"));
         }
 
         /// <summary>Checks that the machine description is created with defaults, loaded, and kept when unreadable.</summary>
@@ -361,7 +413,7 @@ namespace MajdataPlay.Tests.Game.Misc.Base
             Step("OnSave", null, null);
 
             var settings = Serializer.Json.Deserialize<GameSetting>(_root.FindFile("settings.json")!.ReadAllText(), MajEnv.UserJsonReaderOption)!;
-            var runtime = Serializer.Json.Deserialize<RuntimeConfig>(MajEnv.RuntimeDirectory.FindFile("config.json")!.ReadAllText())!;
+            var runtime = Serializer.Json.Deserialize<RuntimeConfig>(ReadStoredRuntimeConfig()!)!;
             Assert.That(settings.Game.TapSpeed, Is.EqualTo(6.25f));
             Assert.That(runtime.List.SelectedSongHash, Is.EqualTo("saved"));
             Assert.That(MajEnv.SettingsPath.Location, Is.EqualTo(_root.FindFile("settings.json")!.Location));

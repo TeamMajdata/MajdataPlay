@@ -127,8 +127,6 @@ namespace MajdataPlay
         private static readonly SongCollection s_emptyCollection = SongCollection.Empty("default");
         /// <summary>Defines the portable favorites export filename.</summary>
         private const string MyFavoriteFileName = "MyFavorites.json";
-        /// <summary>The SQLite runtime database file name inside <see cref="MajEnv.RuntimeDirectory"/>.</summary>
-        private const string RuntimeDatabaseFileName = "runtime.db";
         /// <summary>The legacy SQLite favorites database file name inside <see cref="MajEnv.RuntimeDirectory"/>, merged into the runtime database.</summary>
         private const string LegacyFavoriteDatabaseFileName = "MajFavorites.db";
 
@@ -1505,16 +1503,16 @@ namespace MajdataPlay
             if (s_favoritesDatabase is null)
             {
                 var runtimeDirectory = MajEnv.RuntimeDirectory;
-                var databaseFile = runtimeDirectory.FindFile(RuntimeDatabaseFileName);
-                // SQLite leaves a database empty until its first table is created, so an empty file is still a new database.
-                var isDbExists = databaseFile is not null && databaseFile.Entry is { Length: > 0 };
                 // SQLite needs a resolvable location, so the file is created through the directory before the connection opens it.
-                databaseFile ??= runtimeDirectory.CreateFile(RuntimeDatabaseFileName, "application/vnd.sqlite3");
+                var databaseFile = runtimeDirectory.FindFile(MajEnv.RuntimeDatabaseFileName)
+                    ?? runtimeDirectory.CreateFile(MajEnv.RuntimeDatabaseFileName, "application/vnd.sqlite3");
                 var database = new SQLiteAsyncConnection(databaseFile.Location, SQLiteOpenFlags.ReadWrite | SQLiteOpenFlags.Create | SQLiteOpenFlags.FullMutex);
                 try
                 {
+                    // The runtime database is shared with the runtime configuration, so only the favorites table tells whether favorites were stored before.
+                    var hasFavoriteTable = await HasFavoriteTableAsync(database).ConfigureAwait(false);
                     await database.CreateTableAsync<FavoriteHashDB>().ConfigureAwait(false);
-                    if (!isDbExists)
+                    if (!hasFavoriteTable)
                     {
                         var legacyFile = runtimeDirectory.FindFile(MyFavoriteFileName);
                         if (legacyFile is not null)
@@ -1619,6 +1617,16 @@ namespace MajdataPlay
                 MajDebug.LogError(nameof(SongStorage), $"Failed to migrate favorites from JSON: {e.Message}");
             }
         }
+        /// <summary>Checks whether a database already contains the favorites table.</summary>
+        /// <param name="database">The open database connection to query.</param>
+        /// <returns>True when the favorites table exists; otherwise false.</returns>
+        /// <exception cref="SQLiteException">The schema could not be queried.</exception>
+        private static async Task<bool> HasFavoriteTableAsync(SQLiteAsyncConnection database)
+        {
+            var tableCount = await database.ExecuteScalarAsync<int>(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'FavoriteHashes'").ConfigureAwait(false);
+            return tableCount > 0;
+        }
         /// <summary>Merges the favorites of the legacy favorites database into the runtime database and retains a backup.</summary>
         /// <param name="database">The successfully initialized runtime database connection which is not yet globally published.</param>
         /// <param name="storageDirectory">The runtime directory containing the legacy database and its backup.</param>
@@ -1637,9 +1645,7 @@ namespace MajdataPlay
                 try
                 {
                     // An empty legacy file was created but never received the table.
-                    var tableCount = await legacyDatabase.ExecuteScalarAsync<int>(
-                        "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'FavoriteHashes'").ConfigureAwait(false);
-                    rows = tableCount > 0
+                    rows = await HasFavoriteTableAsync(legacyDatabase).ConfigureAwait(false)
                         ? await legacyDatabase.Table<FavoriteHashDB>().ToListAsync().ConfigureAwait(false)
                         : new List<FavoriteHashDB>();
                 }

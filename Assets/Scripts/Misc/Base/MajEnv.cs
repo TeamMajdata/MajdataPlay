@@ -36,6 +36,7 @@ using MajdataPlay.Diagnostics;
 using SkiaSharp;
 using System.Text;
 using MajdataPlay.Net.Curl;
+using SQLite;
 
 #nullable enable
 namespace MajdataPlay
@@ -215,7 +216,13 @@ namespace MajdataPlay
         private const string SettingsFileName = "settings.json";
         /// <summary>The name of <see cref="RuntimeDirectory"/> inside <see cref="PersistentDirectory"/>, and of the legacy runtime directory inside <see cref="CacheDirectory"/>.</summary>
         private const string RuntimeDirectoryName = "Runtime";
-        /// <summary>The runtime configuration file name inside <see cref="RuntimeDirectory"/>.</summary>
+        /// <summary>The SQLite runtime database file name inside <see cref="RuntimeDirectory"/>, which holds the runtime configuration and favorites.</summary>
+        internal const string RuntimeDatabaseFileName = "runtime.db";
+        /// <summary>The content type requested for SQLite database files created on a provider.</summary>
+        private const string DatabaseMimeType = "application/vnd.sqlite3";
+        /// <summary>The key of the <see cref="RuntimeConfig"/> row inside the runtime database's configuration table.</summary>
+        private const string RuntimeConfigKey = "RuntimeConfig";
+        /// <summary>The legacy runtime configuration file name inside <see cref="RuntimeDirectory"/>, imported into the runtime database.</summary>
         private const string RuntimeConfigFileName = "config.json";
         /// <summary>The machine description file name inside <see cref="RootDirectory"/>.</summary>
         private const string MachineDescriptionFileName = "machine_description.json";
@@ -766,31 +773,101 @@ namespace MajdataPlay
                 WriteText(RootDirectory.CreateFile(MachineDescriptionFileName, JsonMimeType), json);
             }
         }
+        /// <summary>Loads <see cref="RuntimeConfig"/> from the runtime database, importing a legacy config.json the first time.</summary>
+        /// <remarks>
+        /// An unreadable stored configuration is replaced by defaults in memory and overwritten by the next save. An
+        /// imported config.json is renamed to config.json.bak, so the database stays the only source afterwards.
+        /// </remarks>
+        /// <exception cref="UnauthorizedAccessException">Creating the runtime database file or reading config.json was denied.</exception>
+        /// <exception cref="IOException">Creating the runtime database file or reading config.json failed.</exception>
+        /// <exception cref="SQLiteException">The runtime database could not be opened, queried or written.</exception>
         private static void InitRuntimeConfig()
         {
-            var runtimeConfigFile = RuntimeDirectory.FindFile(RuntimeConfigFileName);
-            if (runtimeConfigFile is not null)
+            using var database = OpenRuntimeDatabase();
+            var record = database.Find<RuntimeConfigRecord>(RuntimeConfigKey);
+            if (record is not null)
             {
-                var js = runtimeConfigFile.ReadAllText();
-                RuntimeConfig? setting;
-
-                if (!Serializer.Json.TryDeserialize(js, out setting, out var e, UserJsonReaderOption) || setting is null)
-                {
-                    RuntimeConfig = new();
-                    MajDebug.LogError($"Failed to read runtime config from file\nException: {e}");
-                }
-                else
-                {
-                    RuntimeConfig = setting;
-                }
+                RuntimeConfig = DeserializeRuntimeConfig(record.Value, RuntimeDatabaseFileName);
+                return;
             }
-            else
+
+            var legacyFile = RuntimeDirectory.FindFile(RuntimeConfigFileName);
+            RuntimeConfig = legacyFile is null
+                ? new()
+                : DeserializeRuntimeConfig(legacyFile.ReadAllText(), legacyFile.Location);
+            WriteRuntimeConfig(database, Serializer.Json.Serialize(RuntimeConfig, UserJsonReaderOption));
+            if (legacyFile is not null)
             {
-                RuntimeConfig = new();
-
-                var json = Serializer.Json.Serialize(RuntimeConfig, UserJsonReaderOption);
-                WriteText(RuntimeDirectory.CreateFile(RuntimeConfigFileName, JsonMimeType), json);
+                BackupLegacyRuntimeConfig(legacyFile);
             }
+        }
+        /// <summary>Deserializes a stored runtime configuration, falling back to defaults when it cannot be read.</summary>
+        /// <param name="json">The stored JSON document.</param>
+        /// <param name="source">The location the document was read from, used in the log message.</param>
+        /// <returns>The stored configuration, or a default configuration when the document is unreadable.</returns>
+        private static RuntimeConfig DeserializeRuntimeConfig(string json, string source)
+        {
+            if (!Serializer.Json.TryDeserialize(json, out RuntimeConfig? config, out var e, UserJsonReaderOption) || config is null)
+            {
+                MajDebug.LogError(nameof(MajEnv), $"Failed to read runtime config from {source}\nException: {e}");
+                return new();
+            }
+            return config;
+        }
+        /// <summary>Renames an imported legacy config.json to config.json.bak, replacing an older backup.</summary>
+        /// <param name="legacyFile">The imported legacy configuration file.</param>
+        /// <remarks>A failure is logged only; the database already holds the configuration, so the file is no longer read.</remarks>
+        private static void BackupLegacyRuntimeConfig(StorageFile legacyFile)
+        {
+            try
+            {
+                var backupName = RuntimeConfigFileName + ".bak";
+                RuntimeDirectory.FindFile(backupName)?.Delete();
+                legacyFile.Rename(backupName);
+                MajDebug.LogInfo(nameof(MajEnv), "Migrated the runtime config from config.json to the runtime database, old file backed up.");
+            }
+            catch (Exception e)
+            {
+                MajDebug.LogError(nameof(MajEnv), $"Failed to back up the legacy runtime config file: {e.Message}");
+            }
+        }
+        /// <summary>Opens an unpooled connection to the runtime database, creating the file and the configuration table when missing.</summary>
+        /// <returns>The open connection, which the caller disposes.</returns>
+        /// <remarks>
+        /// <see cref="SQLiteAsyncConnection"/> shares one pooled connection per database path, which <see cref="SongStorage"/>
+        /// closes on shutdown; a short-lived synchronous connection keeps the configuration independent of that lifetime.
+        /// </remarks>
+        /// <exception cref="UnauthorizedAccessException">Creating the database file was denied.</exception>
+        /// <exception cref="IOException">Creating the database file failed.</exception>
+        /// <exception cref="SQLiteException">The database could not be opened or the table could not be created.</exception>
+        private static SQLiteConnection OpenRuntimeDatabase()
+        {
+            // SQLite needs a resolvable location, so the file is created through the directory before the connection opens it.
+            var databaseFile = RuntimeDirectory.FindFile(RuntimeDatabaseFileName)
+                ?? RuntimeDirectory.CreateFile(RuntimeDatabaseFileName, DatabaseMimeType);
+            var database = new SQLiteConnection(databaseFile.Location, SQLiteOpenFlags.ReadWrite | SQLiteOpenFlags.Create | SQLiteOpenFlags.FullMutex);
+            try
+            {
+                database.CreateTable<RuntimeConfigRecord>();
+            }
+            catch
+            {
+                database.Dispose();
+                throw;
+            }
+            return database;
+        }
+        /// <summary>Stores the serialized runtime configuration, replacing the previous one.</summary>
+        /// <param name="database">The open runtime database connection.</param>
+        /// <param name="json">The serialized <see cref="RuntimeConfig"/>.</param>
+        /// <exception cref="SQLiteException">The configuration could not be written.</exception>
+        private static void WriteRuntimeConfig(SQLiteConnection database, string json)
+        {
+            database.InsertOrReplace(new RuntimeConfigRecord
+            {
+                Key = RuntimeConfigKey,
+                Value = json,
+            });
         }
         private static void InitOthers()
         {
@@ -844,7 +921,10 @@ namespace MajdataPlay
             // Re-resolve the files so a configuration deleted while running is recreated on every backend.
             SettingsPath = FindOrCreateFile(RootDirectory, SettingsFileName);
             WriteText(SettingsPath, json);
-            WriteText(FindOrCreateFile(RuntimeDirectory, RuntimeConfigFileName), json2);
+            using (var database = OpenRuntimeDatabase())
+            {
+                WriteRuntimeConfig(database, json2);
+            }
 
             MajDebug.FlushLog();
         }
@@ -874,6 +954,17 @@ namespace MajdataPlay
         private static StorageFile FindOrCreateFile(StorageDirectory directory, string name)
         {
             return directory.FindFile(name) ?? directory.CreateFile(name, JsonMimeType);
+        }
+
+        /// <summary>Represents one serialized configuration document in the runtime database.</summary>
+        [Table("RuntimeConfig")]
+        private sealed class RuntimeConfigRecord
+        {
+            /// <summary>Gets or sets the document key used as the primary key.</summary>
+            [PrimaryKey]
+            public string Key { get; set; } = string.Empty;
+            /// <summary>Gets or sets the serialized JSON document.</summary>
+            public string Value { get; set; } = string.Empty;
         }
     }
 }

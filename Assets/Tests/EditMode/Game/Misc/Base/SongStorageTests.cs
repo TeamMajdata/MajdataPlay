@@ -628,6 +628,28 @@ namespace MajdataPlay.Tests.Game.Misc.Base
             });
         }
 
+        /// <summary>Checks that the legacy JSON favorites are imported when runtime.db already exists but holds only the runtime configuration.</summary>
+        /// <returns>The test coroutine.</returns>
+        [UnityTest]
+        public IEnumerator InitAsync_ImportsLegacyJsonIntoRuntimeDatabaseWithoutFavoriteTable()
+        {
+            return UniTask.ToCoroutine(async () =>
+            {
+                var file = MajEnv.RuntimeDirectory.CreateFile("runtime.db");
+                using (var connection = new SQLiteConnection(file.Location, SQLiteOpenFlags.ReadWrite | SQLiteOpenFlags.FullMutex))
+                {
+                    connection.Execute("CREATE TABLE RuntimeConfig (Key varchar PRIMARY KEY NOT NULL, Value varchar)");
+                }
+                MajEnv.RuntimeDirectory.CreateFile("MyFavorites.json").WriteAllText("[\"legacy-hash\"]");
+
+                await SongStorage.InitAsync();
+
+                var favorites = PrivateMember.GetStaticField<MyFavoriteSongCollection>(typeof(SongStorage), "s_myFavorites");
+                Assert.That(favorites.ExportHashSet(), Is.EquivalentTo(new[] { "legacy-hash" }));
+                Assert.That(MajEnv.RuntimeDirectory.FindFile("MyFavorites.json.bak"), Is.Not.Null);
+            });
+        }
+
         /// <summary>Checks that an empty legacy favorites database file is backed up without changing the runtime database.</summary>
         /// <returns>The test coroutine.</returns>
         [UnityTest]
