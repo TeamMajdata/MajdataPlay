@@ -7,7 +7,8 @@ namespace MajdataPlay.Scenes.Game.Parsing
 {
     /// <summary>
     /// Translates simai slide shapes into slide code, so that every simai slide except wifi is built by the slide code
-    /// parser. The codes follow the slide code documentation, for example <c>1pp6</c> is <c>1P3K6</c>.
+    /// parser. The codes follow the slide code documentation, for example <c>1pp6</c> is <c>1P3K6</c>. A connection
+    /// slide may also chain slide code segments with simai segments, for example <c>3Q9K4</c> in <c>1^2^3Q9K4</c>.
     /// </summary>
     public static class SimaiSlideTranslator
     {
@@ -22,10 +23,11 @@ namespace MajdataPlay.Scenes.Game.Parsing
 
         /// <summary>
         /// Translates one simai slide segment, such as <c>1-4</c>, <c>8&gt;3</c>, <c>1pp6</c> or <c>2V46</c>, into slide code.
+        /// A segment written as slide code, such as <c>3Q9K4</c>, is checked and returned without shorthand.
         /// </summary>
         /// <param name="segment">
-        /// The segment: the start key, the shape and the end key (the turn key and the end key for <c>V</c>), without
-        /// durations or note flags.
+        /// The segment: the start key, the shape and the end key (the turn key and the end key for <c>V</c>), or the
+        /// start key and slide code commands up to <c>K</c> and the end key, without durations or note flags.
         /// </param>
         /// <returns>The slide code that draws the same path, for example <c>1K4</c> for <c>1-4</c>.</returns>
         /// <exception cref="ArgumentNullException">Thrown when <paramref name="segment"/> is <see langword="null"/>.</exception>
@@ -38,6 +40,10 @@ namespace MajdataPlay.Scenes.Game.Parsing
             if (segment is null)
             {
                 throw new ArgumentNullException(nameof(segment));
+            }
+            if (segment.Length > 1 && IsSlideCodeCommand(segment[1]))
+            {
+                return TranslateSlideCode(segment);
             }
             var start = ParseKey(segment, 0);
             var shapeLength = GetShapeLength(segment);
@@ -72,9 +78,12 @@ namespace MajdataPlay.Scenes.Game.Parsing
         /// <summary>
         /// Translates the segments of a simai connection slide, such as <c>1-4</c> and <c>4q7</c> from <c>1-4q7</c>, into
         /// one slide code, for example <c>1A4Q0K7</c>. Every segment but the last ends at an <c>A</c> node instead of
-        /// <c>K</c>, so the whole chain is parsed and judged as a single slide.
+        /// <c>K</c>, so the whole chain is parsed and judged as a single slide. Segments may be slide code, so
+        /// <c>1^2</c>, <c>2^3</c> and <c>3Q9K4</c> from <c>1^2^3Q9K4</c> become <c>1Q9A2Q9A3Q9K4</c>.
         /// </summary>
-        /// <param name="segments">The segments in order; each starts at the end key of the segment before it.</param>
+        /// <param name="segments">
+        /// The segments in order, each accepted by <see cref="Translate"/>; each starts at the end key of the segment before it.
+        /// </param>
         /// <returns>The slide code of the whole chain.</returns>
         /// <exception cref="ArgumentNullException">Thrown when <paramref name="segments"/> or a segment is <see langword="null"/>.</exception>
         /// <exception cref="ArgumentException">
@@ -137,6 +146,97 @@ namespace MajdataPlay.Scenes.Game.Parsing
             {
                 throw new ArgumentException("w星星尾部错误\nwスライドエラー", nameof(segment));
             }
+        }
+
+        /// <summary>
+        /// Checks whether a character is a slide code command, which starts a slide code segment when it follows a key,
+        /// such as <c>Q</c> in <c>1^2^3Q9K4</c>.
+        /// </summary>
+        /// <param name="c">The character.</param>
+        /// <returns><see langword="true"/> for <c>A</c>, <c>B</c>, <c>C</c>, <c>P</c>, <c>Q</c> and <c>K</c>.</returns>
+        public static bool IsSlideCodeCommand(char c)
+        {
+            return Array.IndexOf(SlideCodeParser.CommandChars, c) >= 0;
+        }
+
+        /// <summary>
+        /// Finds the end of the slide code segment whose commands start at an index of a slide note: the segment runs to
+        /// the end key after <c>K</c>, so in <c>1^2^3Q9K4[1:100]</c> the commands starting at 5 end before 9.
+        /// </summary>
+        /// <param name="text">The slide note text, without note flags.</param>
+        /// <param name="commandIndex">The index of the first command, right after the start key of the segment.</param>
+        /// <returns>The index after the end key.</returns>
+        /// <exception cref="ArgumentNullException">Thrown when <paramref name="text"/> is <see langword="null"/>.</exception>
+        /// <exception cref="ArgumentException">
+        /// Thrown when no command starts at <paramref name="commandIndex"/>, or the commands contain another character or
+        /// do not end with <c>K</c> and the end key.
+        /// </exception>
+        public static int FindSlideCodeEnd(string text, int commandIndex)
+        {
+            if (text is null)
+            {
+                throw new ArgumentNullException(nameof(text));
+            }
+            if (commandIndex < 0 || commandIndex >= text.Length || !IsSlideCodeCommand(text[commandIndex]))
+            {
+                throw new ArgumentException($"\"{text}\" has no slide code command at position {commandIndex}", nameof(commandIndex));
+            }
+            for (var i = commandIndex; i < text.Length; i++)
+            {
+                var c = text[i];
+                if (c == 'K')
+                {
+                    if (i + 1 < text.Length && IsDigit(text[i + 1]))
+                    {
+                        return i + 2;
+                    }
+                    break;
+                }
+                if (!IsSlideCodeCommand(c) && !IsDigit(c))
+                {
+                    throw new ArgumentException($"\"{text}\" has \"{c}\" in the slide code that starts at position {commandIndex}", nameof(text));
+                }
+            }
+            throw new ArgumentException($"The slide code that starts at position {commandIndex} of \"{text}\" does not end with K and the end key", nameof(text));
+        }
+
+        /// <summary>
+        /// Checks whether a slide note is one slide code, such as <c>1P3K6[8:1]</c>, rather than simai shapes or a
+        /// connection slide that contains slide code segments, such as <c>1^2^3Q9K4[1:100]</c> or <c>1Q9K3-7[1:1]</c>.
+        /// </summary>
+        /// <param name="text">The slide note text, without note flags.</param>
+        /// <returns>
+        /// <see langword="true"/> when the text starts with slide code commands and only durations follow the end key
+        /// after the first <c>K</c>. A slide code without an end key also counts, so that its error names the slide code.
+        /// </returns>
+        /// <exception cref="ArgumentNullException">Thrown when <paramref name="text"/> is <see langword="null"/>.</exception>
+        public static bool IsSingleSlideCode(string text)
+        {
+            if (text is null)
+            {
+                throw new ArgumentNullException(nameof(text));
+            }
+            if (text.Length < 2 || !IsSlideCodeCommand(text[1]))
+            {
+                return false;
+            }
+            var endFlagIndex = text.IndexOf('K');
+            var afterEndKey = endFlagIndex + 2;
+            return endFlagIndex < 0 || afterEndKey >= text.Length || text[afterEndKey] == '[';
+        }
+
+        /// <summary>Checks and normalizes a segment written as slide code, such as <c>3Q9K4</c> or <c>1P33K4</c>.</summary>
+        /// <param name="segment">The start key and the slide code commands up to <c>K</c> and the end key.</param>
+        /// <returns>The slide code without shorthand, for example <c>1P3P3K4</c> for <c>1P33K4</c>.</returns>
+        /// <exception cref="ArgumentException">
+        /// Thrown when the segment does not end right after its end key, a key is outside 1 to 8 or the commands are invalid.
+        /// </exception>
+        private static string TranslateSlideCode(string segment)
+        {
+            ParseKey(segment, 0);
+            RequireLength(segment, FindSlideCodeEnd(segment, 1));
+            ParseKey(segment, segment.Length - 1);
+            return SlideCodeShape.Format(SlideCodeParser.ParseCommands(segment));
         }
 
         /// <summary>Translates a straight slide, <c>-</c>.</summary>
@@ -297,6 +397,14 @@ namespace MajdataPlay.Scenes.Game.Parsing
             {
                 throw new ArgumentException($"\"{segment}\" is not a single slide segment", nameof(segment));
             }
+        }
+
+        /// <summary>Checks whether a character is an ASCII digit.</summary>
+        /// <param name="c">The character.</param>
+        /// <returns><see langword="true"/> for <c>0</c> to <c>9</c>.</returns>
+        private static bool IsDigit(char c)
+        {
+            return c >= '0' && c <= '9';
         }
 
         /// <summary>Gets how many keys clockwise a key lies from another.</summary>

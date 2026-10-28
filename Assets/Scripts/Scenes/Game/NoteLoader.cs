@@ -397,13 +397,13 @@ namespace MajdataPlay.Scenes.Game
                                         TouchArea = note.TouchArea,
                                         Count = 1
                                     };
-                                    if (foldedSlide.RawContent.Contains('K'))
+                                    if (SimaiSlideTranslator.IsSingleSlideCode(foldedSlide.RawContent))
                                     {
                                         CreateExtendSlide(timing, foldedSlide, eachNotes);
                                     }
                                     else
                                     {
-                                        CreateSlideGroup(timing, foldedSlide, eachNotes); // 星星组
+                                        CreateSlideGroup(timing, foldedSlide, eachNotes); // 星星组，可以包含 slide code 段
                                     }
                                     _noteCount += foldedSlide.Count - 1;
                                     break;
@@ -983,7 +983,9 @@ namespace MajdataPlay.Scenes.Game
         /// <summary>
         /// Builds a simai slide. Wifi slides keep their own behaviour; every other slide, including a connection slide,
         /// is translated into one slide code and built as an extend slide, or built natively from the slide prefabs when
-        /// <see cref="IsSimaiSlideTranslated"/> is <see langword="false"/>.
+        /// <see cref="IsSimaiSlideTranslated"/> is <see langword="false"/>. A connection slide may contain slide code
+        /// segments, such as <c>Q9K4</c> in <c>1^2^3Q9K4[1:100]</c>; it is always translated, because slide code has no
+        /// prefab.
         /// </summary>
         /// <param name="timing">The timing point of the slide note.</param>
         /// <param name="note">The folded simai slide note.</param>
@@ -1010,6 +1012,7 @@ namespace MajdataPlay.Scenes.Game
                                       // 1-读取到了一个未指定时长的段落
                                       // 2-读取到了一个指定时长的段落
                                       // 3-（期望）读取到了最后一个时长指定
+                var hasSlideCodeSegment = false; // slide code 段没有 prefab，只能翻译成 extend slide
                 using (var sb = ZString.CreateStringBuilder())
                 {
                     while (ptr < noteContent.Length)
@@ -1023,43 +1026,57 @@ namespace MajdataPlay.Scenes.Game
                                                                   "组合星星有错误\nSLIDE CHAIN ERROR");
                         }
                         sb.Clear();
-                        // 读取到字符
-                        var slideTypeChar = noteContent[ptr++].ToString();
                         var slidePart = new SubSlideNote();
                         slidePart.Type = SimaiNoteType.Slide;
                         slidePart.StartPosition = latestStartIndex;
-                        if (slideTypeChar == "V")
+                        var slideTypeChar = string.Empty;
+                        if (SimaiSlideTranslator.IsSlideCodeCommand(noteContent[ptr]))
                         {
-                            // 转折星星
-                            var middlePos = noteContent[ptr++];
-                            var endPos = noteContent[ptr++];
+                            // slide code 段，例如 1^2^3Q9K4 中的 Q9K4：从上一段的终点开始，到 K 后面的终点键位为止
+                            var segmentEnd = SimaiSlideTranslator.FindSlideCodeEnd(noteContent, ptr);
                             sb.Append(latestStartIndex);
-                            sb.Append(slideTypeChar);
-                            sb.Append(middlePos);
-                            sb.Append(endPos);
-
-                            //slidePart.RawContent = sb.ToString();
-                            latestStartIndex = charIntParse(endPos);
+                            sb.Append(noteContent.AsSpan(ptr, segmentEnd - ptr));
+                            latestStartIndex = charIntParse(noteContent[segmentEnd - 1]);
+                            ptr = segmentEnd;
+                            hasSlideCodeSegment = true;
                         }
                         else
                         {
-                            // 其他普通星星
-                            // 额外检查pp和qq
-                            if (noteContent[ptr] == slideTypeChar[0])
+                            // 读取到字符
+                            slideTypeChar = noteContent[ptr++].ToString();
+                            if (slideTypeChar == "V")
                             {
-                                if (ptr + 1 < noteContent.Length)
-                                {
-                                    slideTypeChar += noteContent[ptr++];
-                                }
+                                // 转折星星
+                                var middlePos = noteContent[ptr++];
+                                var endPos = noteContent[ptr++];
+                                sb.Append(latestStartIndex);
+                                sb.Append(slideTypeChar);
+                                sb.Append(middlePos);
+                                sb.Append(endPos);
+
+                                //slidePart.RawContent = sb.ToString();
+                                latestStartIndex = charIntParse(endPos);
                             }
-                            var endPos = noteContent[ptr++];
+                            else
+                            {
+                                // 其他普通星星
+                                // 额外检查pp和qq
+                                if (noteContent[ptr] == slideTypeChar[0])
+                                {
+                                    if (ptr + 1 < noteContent.Length)
+                                    {
+                                        slideTypeChar += noteContent[ptr++];
+                                    }
+                                }
+                                var endPos = noteContent[ptr++];
 
-                            sb.Append(latestStartIndex);
-                            sb.Append(slideTypeChar);
-                            sb.Append(endPos);
+                                sb.Append(latestStartIndex);
+                                sb.Append(slideTypeChar);
+                                sb.Append(endPos);
 
-                            //slidePart.RawContent = sb.ToString();
-                            latestStartIndex = charIntParse(endPos);
+                                //slidePart.RawContent = sb.ToString();
+                                latestStartIndex = charIntParse(endPos);
+                            }
                         }
 
                         var shapeText = sb.ToString(); // 不含时长的形状，例如 1-4
@@ -1164,9 +1181,9 @@ namespace MajdataPlay.Scenes.Game
                     result.SlideInstance.Init();
                     AddSlideToQueue(timing, result.SlideInstance);
                 }
-                else if (IsSimaiSlideTranslated)
+                else if (IsSimaiSlideTranslated || hasSlideCodeSegment)
                 {
-                    // 其余 simai 星星（包括连锁星星）直接翻译成一条 slide code，交给 extend slide 处理
+                    // 其余 simai 星星（包括连锁星星和含 slide code 段的连锁星星）直接翻译成一条 slide code，交给 extend slide 处理
                     var slideCode = SimaiSlideTranslator.TranslateChain(shapeTexts);
                     CreateExtendSlideFromCode(timing, note, slideCode, shapeTexts, eachNotes);
                 }
