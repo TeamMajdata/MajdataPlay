@@ -148,7 +148,7 @@ namespace MajdataPlay.Tests.Game.Misc.Base
         /// <returns>The number of stored favorite rows.</returns>
         private static async UniTask<int> CountRowsInDatabaseFileAsync()
         {
-            var file = MajEnv.RuntimeDirectory.FindFile("MajFavorites.db")!;
+            var file = MajEnv.RuntimeDirectory.FindFile("runtime.db")!;
             var connection = new SQLiteAsyncConnection(file.Location, SQLiteOpenFlags.ReadOnly | SQLiteOpenFlags.FullMutex);
             try
             {
@@ -221,7 +221,7 @@ namespace MajdataPlay.Tests.Game.Misc.Base
 
                 Assert.That(_charts.Exists, Is.True);
                 Assert.That(_charts.FindDirectory("default"), Is.Not.Null);
-                Assert.That(MajEnv.RuntimeDirectory.FindFile("MajFavorites.db"), Is.Not.Null);
+                Assert.That(MajEnv.RuntimeDirectory.FindFile("runtime.db"), Is.Not.Null);
                 Assert.That(PrivateMember.GetStaticField<bool>(typeof(SongStorage), "s_isInitialized"), Is.True);
             });
         }
@@ -590,6 +590,58 @@ namespace MajdataPlay.Tests.Game.Misc.Base
                 Assert.That(favorites.ExportHashSet(), Is.EquivalentTo(new[] { "legacy-hash", "export-hash" }));
                 Assert.That(MajEnv.RuntimeDirectory.FindFile("MyFavorites.json"), Is.Null);
                 Assert.That(MajEnv.RuntimeDirectory.FindFile("MyFavorites.json.bak"), Is.Not.Null);
+            });
+        }
+
+        /// <summary>Creates a SQLite database file holding a favorites table with the given hashes.</summary>
+        /// <param name="name">The database file name inside the runtime directory.</param>
+        /// <param name="hashes">The favorite hashes to store.</param>
+        private static void CreateFavoriteDatabase(string name, params string[] hashes)
+        {
+            var file = MajEnv.RuntimeDirectory.CreateFile(name);
+            using var connection = new SQLiteConnection(file.Location, SQLiteOpenFlags.ReadWrite | SQLiteOpenFlags.FullMutex);
+            connection.Execute("CREATE TABLE FavoriteHashes (Hash varchar PRIMARY KEY NOT NULL)");
+            foreach (var hash in hashes)
+            {
+                connection.Execute("INSERT INTO FavoriteHashes (Hash) VALUES (?)", hash);
+            }
+        }
+
+        /// <summary>Checks that the legacy favorites database is merged into the runtime database without duplicates and backed up.</summary>
+        /// <returns>The test coroutine.</returns>
+        [UnityTest]
+        public IEnumerator InitAsync_MergesLegacyFavoriteDatabase()
+        {
+            return UniTask.ToCoroutine(async () =>
+            {
+                CreateLibrary();
+                CreateFavoriteDatabase("runtime.db", "current-hash", "shared-hash");
+                CreateFavoriteDatabase("MajFavorites.db", "legacy-hash", "shared-hash");
+
+                await SongStorage.InitAsync();
+
+                var favorites = PrivateMember.GetStaticField<MyFavoriteSongCollection>(typeof(SongStorage), "s_myFavorites");
+                Assert.That(favorites.ExportHashSet(), Is.EquivalentTo(new[] { "current-hash", "shared-hash", "legacy-hash" }));
+                Assert.That(await CountStoredFavoriteAsync("shared-hash"), Is.EqualTo(1));
+                Assert.That(MajEnv.RuntimeDirectory.FindFile("MajFavorites.db"), Is.Null);
+                Assert.That(MajEnv.RuntimeDirectory.FindFile("MajFavorites.db.bak"), Is.Not.Null);
+            });
+        }
+
+        /// <summary>Checks that an empty legacy favorites database file is backed up without changing the runtime database.</summary>
+        /// <returns>The test coroutine.</returns>
+        [UnityTest]
+        public IEnumerator InitAsync_BacksUpEmptyLegacyFavoriteDatabase()
+        {
+            return UniTask.ToCoroutine(async () =>
+            {
+                MajEnv.RuntimeDirectory.CreateFile("MajFavorites.db");
+
+                await SongStorage.InitAsync();
+
+                Assert.That(await CountRowsInDatabaseFileAsync(), Is.EqualTo(0));
+                Assert.That(MajEnv.RuntimeDirectory.FindFile("MajFavorites.db"), Is.Null);
+                Assert.That(MajEnv.RuntimeDirectory.FindFile("MajFavorites.db.bak"), Is.Not.Null);
             });
         }
 
