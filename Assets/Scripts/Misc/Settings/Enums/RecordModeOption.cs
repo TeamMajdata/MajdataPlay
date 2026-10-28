@@ -1,4 +1,4 @@
-﻿using UnityEngine.Scripting;
+using UnityEngine.Scripting;
 
 namespace MajdataPlay.Settings
 {
@@ -6,6 +6,7 @@ namespace MajdataPlay.Settings
     public enum RecordModeOption
     {
         Disable,
+        [DisableValues(Platforms = SettingPlatform.Mobile)]
         OBSTrigger,
         FFmpeg
     }
