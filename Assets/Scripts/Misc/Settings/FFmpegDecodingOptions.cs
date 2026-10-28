@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Text;
 
@@ -15,7 +15,7 @@ namespace MajdataPlay.Settings
         /// </summary>
         Hardware
     }
-    public class FFmpegDecoderOptions
+    public class FFmpegDecodingOptions
     {
         public FFmpegCodecPreference PreferredDecoder { get; set; } = FFmpegCodecPreference.Hardware;
         [Range("1", null)]
