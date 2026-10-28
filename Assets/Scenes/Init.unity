@@ -2131,8 +2131,8 @@ MonoBehaviour:
   m_text: FPS <mspace=0.62em> 144.00</mspace>   1% <mspace=0.62em>  --.--</mspace>  
     Ver. 2.0.0
   m_isRightToLeft: 0
-  m_fontAsset: {fileID: 11400000, guid: 05efa2e3d6891424ea2b70283145ceb3, type: 2}
-  m_sharedMaterial: {fileID: 2098280800310027963, guid: 05efa2e3d6891424ea2b70283145ceb3, type: 2}
+  m_fontAsset: {fileID: 11400000, guid: a4d4a2ee6f704c744851bf4af3d6c3e1, type: 2}
+  m_sharedMaterial: {fileID: 2098280800310027963, guid: a4d4a2ee6f704c744851bf4af3d6c3e1, type: 2}
   m_fontSharedMaterials: []
   m_fontMaterial: {fileID: 0}
   m_fontMaterials: []
