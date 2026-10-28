@@ -240,42 +240,74 @@ namespace MajdataPlay.Tests.Game.Misc.Base
             Assert.That(_root.FindFile("settings.json.bak.bak")!.ReadAllText(), Is.EqualTo("{ broken"));
         }
 
-        /// <summary>Reads the stored runtime configuration document from runtime.db with a separate connection.</summary>
-        /// <returns>The stored JSON document, or null when no configuration row exists.</returns>
-        private static string? ReadStoredRuntimeConfig()
+        /// <summary>Opens runtime.db with a separate connection.</summary>
+        /// <returns>The open connection, which the caller disposes.</returns>
+        private static SQLiteConnection OpenStoredRuntimeDatabase()
         {
             var file = MajEnv.RuntimeDirectory.FindFile("runtime.db")!;
-            using var connection = new SQLiteConnection(file.Location, SQLiteOpenFlags.ReadOnly | SQLiteOpenFlags.FullMutex);
-            return connection.ExecuteScalar<string?>("SELECT Value FROM RuntimeConfig WHERE Key = 'RuntimeConfig'");
+            return new SQLiteConnection(file.Location, SQLiteOpenFlags.ReadWrite | SQLiteOpenFlags.FullMutex);
         }
 
-        /// <summary>Replaces the stored runtime configuration document in runtime.db with a separate connection.</summary>
-        /// <param name="json">The document to store.</param>
-        private static void WriteStoredRuntimeConfig(string json)
+        /// <summary>Reads one column of the stored list configuration row as text.</summary>
+        /// <param name="column">The column name.</param>
+        /// <returns>The stored text, or null when the row or value is absent.</returns>
+        private static string? ReadStoredListConfig(string column)
         {
-            var file = MajEnv.RuntimeDirectory.FindFile("runtime.db")!;
-            using var connection = new SQLiteConnection(file.Location, SQLiteOpenFlags.ReadWrite | SQLiteOpenFlags.FullMutex);
-            connection.Execute("UPDATE RuntimeConfig SET Value = ? WHERE Key = 'RuntimeConfig'", json);
+            using var connection = OpenStoredRuntimeDatabase();
+            return connection.ExecuteScalar<string?>($"SELECT CAST({column} AS TEXT) FROM ListConfig WHERE Id = 0");
         }
 
-        /// <summary>Checks that the runtime configuration is created in runtime.db, loaded and replaced when unreadable.</summary>
+        /// <summary>Counts the stored list configuration rows.</summary>
+        /// <returns>The number of rows.</returns>
+        private static int CountStoredListConfigRows()
+        {
+            using var connection = OpenStoredRuntimeDatabase();
+            return connection.ExecuteScalar<int>("SELECT COUNT(*) FROM ListConfig");
+        }
+
+        /// <summary>Checks that the runtime configuration is created in typed runtime.db columns, loaded and reset when unreadable.</summary>
         [Test]
         public void InitRuntimeConfig_CreatesLoadsAndRecovers()
         {
             Step("InitRuntimeConfig");
-            Assert.That(ReadStoredRuntimeConfig(), Is.Not.Null);
+            Assert.That(CountStoredListConfigRows(), Is.EqualTo(1));
             Assert.That(MajEnv.RuntimeDirectory.FindFile("config.json"), Is.Null);
             Assert.That(MajEnv.RuntimeConfig, Is.Not.Null);
 
             var selectedId = System.Guid.Parse("4d2783ac-a6ef-40f4-b648-b043b4c58608");
-            WriteStoredRuntimeConfig("{\"List\":{\"SelectedDirGuid\":\"4d2783ac-a6ef-40f4-b648-b043b4c58608\",\"SelectedSongHash\":\"h\"}}");
+            using (var connection = OpenStoredRuntimeDatabase())
+            {
+                connection.Execute(
+                    "UPDATE ListConfig SET SelectedDirGuid = ?, SelectedSongHash = ?, SelectedDiff = ? WHERE Id = 0",
+                    selectedId.ToString(), "h", (int)ChartLevel.Master);
+            }
             Step("InitRuntimeConfig");
             Assert.That(MajEnv.RuntimeConfig!.List.SelectedDirGuid, Is.EqualTo(selectedId));
             Assert.That(MajEnv.RuntimeConfig.List.SelectedSongHash, Is.EqualTo("h"));
+            Assert.That(MajEnv.RuntimeConfig.List.SelectedDiff, Is.EqualTo(ChartLevel.Master));
 
-            WriteStoredRuntimeConfig("not json");
+            using (var connection = OpenStoredRuntimeDatabase())
+            {
+                connection.Execute("UPDATE ListConfig SET SelectedDirGuid = 'not a guid', SelectedSongHash = NULL WHERE Id = 0");
+            }
             Step("InitRuntimeConfig");
             Assert.That(MajEnv.RuntimeConfig!.List.SelectedDirGuid, Is.EqualTo(System.Guid.Empty));
+            Assert.That(MajEnv.RuntimeConfig.List.SelectedSongHash, Is.Empty);
+            Assert.That(MajEnv.RuntimeConfig.List.SelectedDiff, Is.EqualTo(ChartLevel.Easy));
+        }
+
+        /// <summary>Checks that a NULL text column, as left by a column added later, loads as an empty value.</summary>
+        [Test]
+        public void InitRuntimeConfig_LoadsNullSongHashAsEmpty()
+        {
+            Step("InitRuntimeConfig");
+            using (var connection = OpenStoredRuntimeDatabase())
+            {
+                connection.Execute("UPDATE ListConfig SET SelectedSongHash = NULL WHERE Id = 0");
+            }
+
+            Step("InitRuntimeConfig");
+
             Assert.That(MajEnv.RuntimeConfig.List.SelectedSongHash, Is.Empty);
         }
 
@@ -289,7 +321,7 @@ namespace MajdataPlay.Tests.Game.Misc.Base
             Step("InitRuntimeConfig");
 
             Assert.That(MajEnv.RuntimeConfig.List.SelectedSongHash, Is.EqualTo("legacy"));
-            Assert.That(Serializer.Json.Deserialize<RuntimeConfig>(ReadStoredRuntimeConfig()!)!.List.SelectedSongHash, Is.EqualTo("legacy"));
+            Assert.That(ReadStoredListConfig("SelectedSongHash"), Is.EqualTo("legacy"));
             Assert.That(MajEnv.RuntimeDirectory.FindFile("config.json"), Is.Null);
             Assert.That(MajEnv.RuntimeDirectory.FindFile("config.json.bak")!.ReadAllText(), Does.Contain("legacy"));
 
@@ -308,7 +340,7 @@ namespace MajdataPlay.Tests.Game.Misc.Base
             Step("InitRuntimeConfig");
 
             Assert.That(MajEnv.RuntimeConfig.List.SelectedSongHash, Is.Empty);
-            Assert.That(ReadStoredRuntimeConfig(), Is.Not.Null);
+            Assert.That(CountStoredListConfigRows(), Is.EqualTo(1));
             Assert.That(MajEnv.RuntimeDirectory.FindFile("config.json.bak")!.ReadAllText(), Is.EqualTo("not json"));
         }
 
@@ -413,9 +445,8 @@ namespace MajdataPlay.Tests.Game.Misc.Base
             Step("OnSave", null, null);
 
             var settings = Serializer.Json.Deserialize<GameSetting>(_root.FindFile("settings.json")!.ReadAllText(), MajEnv.UserJsonReaderOption)!;
-            var runtime = Serializer.Json.Deserialize<RuntimeConfig>(ReadStoredRuntimeConfig()!)!;
             Assert.That(settings.Game.TapSpeed, Is.EqualTo(6.25f));
-            Assert.That(runtime.List.SelectedSongHash, Is.EqualTo("saved"));
+            Assert.That(ReadStoredListConfig("SelectedSongHash"), Is.EqualTo("saved"));
             Assert.That(MajEnv.SettingsPath.Location, Is.EqualTo(_root.FindFile("settings.json")!.Location));
 
             MajEnv.Settings.Game.TapSpeed = 5f;

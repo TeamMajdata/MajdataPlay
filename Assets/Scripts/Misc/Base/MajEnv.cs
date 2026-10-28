@@ -220,8 +220,6 @@ namespace MajdataPlay
         internal const string RuntimeDatabaseFileName = "runtime.db";
         /// <summary>The content type requested for SQLite database files created on a provider.</summary>
         private const string DatabaseMimeType = "application/vnd.sqlite3";
-        /// <summary>The key of the <see cref="RuntimeConfig"/> row inside the runtime database's configuration table.</summary>
-        private const string RuntimeConfigKey = "RuntimeConfig";
         /// <summary>The legacy runtime configuration file name inside <see cref="RuntimeDirectory"/>, imported into the runtime database.</summary>
         private const string RuntimeConfigFileName = "config.json";
         /// <summary>The machine description file name inside <see cref="RootDirectory"/>.</summary>
@@ -784,32 +782,45 @@ namespace MajdataPlay
         private static void InitRuntimeConfig()
         {
             using var database = OpenRuntimeDatabase();
-            var record = database.Find<RuntimeConfigRecord>(RuntimeConfigKey);
+            ListConfigRecord? record;
+            try
+            {
+                record = database.Find<ListConfigRecord>(ListConfigRecord.SingletonId);
+            }
+            catch (Exception e) when (e is FormatException or SQLiteException)
+            {
+                // A value that cannot be converted back, such as a malformed GUID, is reset by the next save.
+                MajDebug.LogError(nameof(MajEnv), $"Failed to read runtime config from {RuntimeDatabaseFileName}\nException: {e}");
+                RuntimeConfig = new();
+                return;
+            }
             if (record is not null)
             {
-                RuntimeConfig = DeserializeRuntimeConfig(record.Value, RuntimeDatabaseFileName);
+                RuntimeConfig = record.ToRuntimeConfig();
                 return;
             }
 
             var legacyFile = RuntimeDirectory.FindFile(RuntimeConfigFileName);
             RuntimeConfig = legacyFile is null
                 ? new()
-                : DeserializeRuntimeConfig(legacyFile.ReadAllText(), legacyFile.Location);
-            WriteRuntimeConfig(database, Serializer.Json.Serialize(RuntimeConfig, UserJsonReaderOption));
+                : DeserializeLegacyRuntimeConfig(legacyFile);
+            WriteRuntimeConfig(database, RuntimeConfig);
             if (legacyFile is not null)
             {
                 BackupLegacyRuntimeConfig(legacyFile);
             }
         }
-        /// <summary>Deserializes a stored runtime configuration, falling back to defaults when it cannot be read.</summary>
-        /// <param name="json">The stored JSON document.</param>
-        /// <param name="source">The location the document was read from, used in the log message.</param>
+        /// <summary>Deserializes a legacy config.json, falling back to defaults when it cannot be read.</summary>
+        /// <param name="legacyFile">The legacy configuration file.</param>
         /// <returns>The stored configuration, or a default configuration when the document is unreadable.</returns>
-        private static RuntimeConfig DeserializeRuntimeConfig(string json, string source)
+        /// <exception cref="UnauthorizedAccessException">Reading the file was denied.</exception>
+        /// <exception cref="IOException">Reading the file failed.</exception>
+        private static RuntimeConfig DeserializeLegacyRuntimeConfig(StorageFile legacyFile)
         {
+            var json = legacyFile.ReadAllText();
             if (!Serializer.Json.TryDeserialize(json, out RuntimeConfig? config, out var e, UserJsonReaderOption) || config is null)
             {
-                MajDebug.LogError(nameof(MajEnv), $"Failed to read runtime config from {source}\nException: {e}");
+                MajDebug.LogError(nameof(MajEnv), $"Failed to read runtime config from {legacyFile.Location}\nException: {e}");
                 return new();
             }
             return config;
@@ -848,7 +859,8 @@ namespace MajdataPlay
             var database = new SQLiteConnection(databaseFile.Location, SQLiteOpenFlags.ReadWrite | SQLiteOpenFlags.Create | SQLiteOpenFlags.FullMutex);
             try
             {
-                database.CreateTable<RuntimeConfigRecord>();
+                // Creating the table also adds the columns of fields introduced after the table was first created.
+                database.CreateTable<ListConfigRecord>();
             }
             catch
             {
@@ -857,17 +869,13 @@ namespace MajdataPlay
             }
             return database;
         }
-        /// <summary>Stores the serialized runtime configuration, replacing the previous one.</summary>
+        /// <summary>Stores the persisted fields of a runtime configuration, replacing the previously stored ones.</summary>
         /// <param name="database">The open runtime database connection.</param>
-        /// <param name="json">The serialized <see cref="RuntimeConfig"/>.</param>
+        /// <param name="config">The runtime configuration to store.</param>
         /// <exception cref="SQLiteException">The configuration could not be written.</exception>
-        private static void WriteRuntimeConfig(SQLiteConnection database, string json)
+        private static void WriteRuntimeConfig(SQLiteConnection database, RuntimeConfig config)
         {
-            database.InsertOrReplace(new RuntimeConfigRecord
-            {
-                Key = RuntimeConfigKey,
-                Value = json,
-            });
+            database.InsertOrReplace(ListConfigRecord.FromRuntimeConfig(config));
         }
         private static void InitOthers()
         {
@@ -916,14 +924,13 @@ namespace MajdataPlay
             //listConfig.SelectedDir = SongStorage.CollectionIndex;
 
             var json = Serializer.Json.Serialize(Settings, UserJsonReaderOption);
-            var json2 = Serializer.Json.Serialize(RuntimeConfig, UserJsonReaderOption);
 
             // Re-resolve the files so a configuration deleted while running is recreated on every backend.
             SettingsPath = FindOrCreateFile(RootDirectory, SettingsFileName);
             WriteText(SettingsPath, json);
             using (var database = OpenRuntimeDatabase())
             {
-                WriteRuntimeConfig(database, json2);
+                WriteRuntimeConfig(database, RuntimeConfig);
             }
 
             MajDebug.FlushLog();
@@ -956,15 +963,52 @@ namespace MajdataPlay
             return directory.FindFile(name) ?? directory.CreateFile(name, JsonMimeType);
         }
 
-        /// <summary>Represents one serialized configuration document in the runtime database.</summary>
-        [Table("RuntimeConfig")]
-        private sealed class RuntimeConfigRecord
+        /// <summary>Represents the single row holding the persisted <see cref="ListConfig"/> fields in the runtime database.</summary>
+        /// <remarks>Only the fields that config.json persisted are stored; the session-only fields keep their defaults.</remarks>
+        [Table("ListConfig")]
+        private sealed class ListConfigRecord
         {
-            /// <summary>Gets or sets the document key used as the primary key.</summary>
+            /// <summary>The primary key of the only row of the table.</summary>
+            public const int SingletonId = 0;
+
+            /// <summary>Gets or sets the row identifier, which is always <see cref="SingletonId"/>.</summary>
             [PrimaryKey]
-            public string Key { get; set; } = string.Empty;
-            /// <summary>Gets or sets the serialized JSON document.</summary>
-            public string Value { get; set; } = string.Empty;
+            public int Id { get; set; } = SingletonId;
+            /// <summary>Gets or sets the identifier of the selected chart collection.</summary>
+            public Guid SelectedDirGuid { get; set; } = Guid.Empty;
+            /// <summary>Gets or sets the hash of the selected chart, or null when the column was never written.</summary>
+            public string? SelectedSongHash { get; set; } = string.Empty;
+            /// <summary>Gets or sets the selected difficulty.</summary>
+            public ChartLevel SelectedDiff { get; set; } = ChartLevel.Easy;
+
+            /// <summary>Creates a row from the persisted fields of a runtime configuration.</summary>
+            /// <param name="config">The runtime configuration to store.</param>
+            /// <returns>The row holding the persisted fields.</returns>
+            public static ListConfigRecord FromRuntimeConfig(RuntimeConfig config)
+            {
+                var list = config.List;
+                return new ListConfigRecord
+                {
+                    SelectedDirGuid = list.SelectedDirGuid,
+                    SelectedSongHash = list.SelectedSongHash,
+                    SelectedDiff = list.SelectedDiff,
+                };
+            }
+
+            /// <summary>Creates a runtime configuration from the stored fields, leaving the session-only fields at their defaults.</summary>
+            /// <returns>The runtime configuration.</returns>
+            public RuntimeConfig ToRuntimeConfig()
+            {
+                return new RuntimeConfig
+                {
+                    List = new ListConfig
+                    {
+                        SelectedDirGuid = SelectedDirGuid,
+                        SelectedSongHash = SelectedSongHash ?? string.Empty,
+                        SelectedDiff = SelectedDiff,
+                    },
+                };
+            }
         }
     }
 }

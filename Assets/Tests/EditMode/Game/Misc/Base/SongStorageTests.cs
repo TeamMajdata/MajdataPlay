@@ -638,7 +638,7 @@ namespace MajdataPlay.Tests.Game.Misc.Base
                 var file = MajEnv.RuntimeDirectory.CreateFile("runtime.db");
                 using (var connection = new SQLiteConnection(file.Location, SQLiteOpenFlags.ReadWrite | SQLiteOpenFlags.FullMutex))
                 {
-                    connection.Execute("CREATE TABLE RuntimeConfig (Key varchar PRIMARY KEY NOT NULL, Value varchar)");
+                    connection.Execute("CREATE TABLE ListConfig (Id integer PRIMARY KEY NOT NULL, SelectedSongHash varchar)");
                 }
                 MajEnv.RuntimeDirectory.CreateFile("MyFavorites.json").WriteAllText("[\"legacy-hash\"]");
 
