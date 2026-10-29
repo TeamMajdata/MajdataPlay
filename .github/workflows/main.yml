@@ -88,7 +88,7 @@ jobs:
 
   build-android:
     name: Build (Android)
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, macOS, ARM64, majplay-android]
     if: ${{ github.event_name == 'push' || github.event_name == 'workflow_dispatch' }}
     env:
       CONFIGURATION: Release
@@ -127,13 +127,8 @@ jobs:
           restore-keys: |
             Library-${{ runner.os }}-${{ env.TARGET_PLATFORM }}-
 
-      - name: Setup Ruby and Fastlane
-        uses: ruby/setup-ruby@v1
-        with:
-          ruby-version: '3.2'
-          
       - name: Install Fastlane
-        run: gem install fastlane
+        run: gem install fastlane -v 2.236.1
 
       - name: Export Android Project
         uses: game-ci/unity-builder@v4
@@ -148,9 +143,6 @@ jobs:
           androidExportType: androidStudioProject
           androidSymbolType: debugging
 
-      - name: Fix Directory Permissions
-        run: sudo chown -R $USER:$USER ${{ env.CONFIGURATION }}/${{ env.TARGET_PLATFORM }}
-
       - name: Setup Java & Gradle Cache
         uses: actions/setup-java@v5
         with:
@@ -163,22 +155,27 @@ jobs:
         with:
           gradle-version: '9.1.0'
 
-      - name: Install Android NDK via SDK Manager
+      - name: Verify Android SDK and NDK
         run: |
-          echo "y" | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --install "ndk;23.1.7779620"
+          set -euo pipefail
+          test -x "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          test -d "$ANDROID_HOME/ndk/23.1.7779620"
+          test -d "$ANDROID_HOME/platforms/android-29"
+          test -d "$ANDROID_HOME/platforms/android-36"
 
       - name: Fix Android SDK and NDK paths
         run: |
           cd ${{ env.UNITY_PROJECT_EXPORT_PATH }}
           
-          BAD_NDK="/opt/unity/Editor/Data/PlaybackEngines/AndroidPlayer/NDK"
-          BAD_SDK="/opt/unity/Editor/Data/PlaybackEngines/AndroidPlayer/SDK"
+          UNITY_ANDROID_PLAYER="/Applications/Unity/Hub/Editor/${{ env.UNITY_VERSION }}/PlaybackEngines/AndroidPlayer"
+          BAD_NDK="$UNITY_ANDROID_PLAYER/NDK"
+          BAD_SDK="$UNITY_ANDROID_PLAYER/SDK"
           
           GOOD_NDK="$ANDROID_HOME/ndk/23.1.7779620"
           GOOD_SDK="$ANDROID_HOME"
           
-          find . -type f \( -name "*.gradle" -o -name "*.properties" \) -exec sed -i "s|$BAD_NDK|$GOOD_NDK|g" {} +
-          find . -type f \( -name "*.gradle" -o -name "*.properties" \) -exec sed -i "s|$BAD_SDK|$GOOD_SDK|g" {} +
+          find . -type f \( -name "*.gradle" -o -name "*.properties" \) -exec perl -pi -e "s|\Q$BAD_NDK\E|\Q$GOOD_NDK\E|g" {} +
+          find . -type f \( -name "*.gradle" -o -name "*.properties" \) -exec perl -pi -e "s|\Q$BAD_SDK\E|\Q$GOOD_SDK\E|g" {} +
           
           echo "sdk.dir=$GOOD_SDK" > local.properties
           echo "ndk.dir=$GOOD_NDK" >> local.properties
@@ -190,7 +187,12 @@ jobs:
 
       - name: Prepare Keystore
         run: |
-          echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 --decode > android-publish.keystore
+          set -euo pipefail
+          if base64 --decode </dev/null >/dev/null 2>&1; then
+            echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 --decode > android-publish.keystore
+          else
+            echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 -D > android-publish.keystore
+          fi
           echo "KEYSTORE_PATH=$(pwd)/android-publish.keystore" >> $GITHUB_ENV
 
       - name: Create Fastfile
@@ -268,15 +270,15 @@ jobs:
 
           # Unity property
           find "$ROOT" -type f -name "gradle.properties" \
-            -exec sed -i 's/^unity\.targetSdkVersion=.*/unity.targetSdkVersion=29/' {} +
+            -exec perl -pi -e 's/^unity\.targetSdkVersion=.*/unity.targetSdkVersion=29/' {} +
       
           # AGP 9 syntax
           find "$ROOT" -type f -name "*.gradle" \
-            -exec sed -i -E 's/(targetSdk[[:space:]]+)[0-9]+/\129/g' {} +
+            -exec perl -pi -e 's/(targetSdk\s+)[0-9]+/${1}29/g' {} +
       
           # Old AGP syntax, if any
           find "$ROOT" -type f -name "*.gradle" \
-            -exec sed -i -E 's/(targetSdkVersion[[:space:]]+)[0-9]+/\129/g' {} +
+            -exec perl -pi -e 's/(targetSdkVersion\s+)[0-9]+/${1}29/g' {} +
       
           echo "=== Final SDK configuration ==="
           grep -RIn \
@@ -328,13 +330,13 @@ jobs:
           ROOT="${{ env.UNITY_PROJECT_EXPORT_PATH }}"
 
           find "$ROOT" -type f -name "gradle.properties" \
-            -exec sed -i 's/^unity\.targetSdkVersion=.*/unity.targetSdkVersion=36/' {} +
+            -exec perl -pi -e 's/^unity\.targetSdkVersion=.*/unity.targetSdkVersion=36/' {} +
       
           find "$ROOT" -type f -name "*.gradle" \
-            -exec sed -i -E 's/(targetSdk[[:space:]]+)[0-9]+/\136/g' {} +
+            -exec perl -pi -e 's/(targetSdk\s+)[0-9]+/${1}36/g' {} +
       
           find "$ROOT" -type f -name "*.gradle" \
-            -exec sed -i -E 's/(targetSdkVersion[[:space:]]+)[0-9]+/\136/g' {} +
+            -exec perl -pi -e 's/(targetSdkVersion\s+)[0-9]+/${1}36/g' {} +
       
           echo "=== Final SDK configuration ==="
           grep -RIn \
@@ -407,7 +409,7 @@ jobs:
 
   build-apple:
     name: Build (macOS/iOS)
-    runs-on: macos-26
+    runs-on: [self-hosted, macOS, ARM64, majplay-apple]
     if: ${{ github.event_name == 'push' || github.event_name == 'workflow_dispatch' }}
     strategy:
       fail-fast: false
@@ -472,15 +474,14 @@ jobs:
         if: ${{ env.TARGET_PLATFORM == 'iOS' }}
         run: |
           set -euo pipefail
-          mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles
-          echo "${{ secrets.APPSTORE_PROFILE_BASE64 }}" | base64 --decode > ~/Library/MobileDevice/Provisioning\ Profiles/appstore.mobileprovision
-          ls -la ~/Library/MobileDevice/Provisioning\ Profiles
-
-      - name: Setup Ruby
-        if: ${{ env.TARGET_PLATFORM == 'iOS' }}
-        uses: ruby/setup-ruby@v1
-        with:
-          ruby-version: '3.3'
+          PROFILE_DIR="$HOME/Library/MobileDevice/Provisioning Profiles"
+          mkdir -p "$PROFILE_DIR"
+          if base64 --decode </dev/null >/dev/null 2>&1; then
+            echo "${{ secrets.APPSTORE_PROFILE_BASE64 }}" | base64 --decode > "$PROFILE_DIR/appstore.mobileprovision"
+          else
+            echo "${{ secrets.APPSTORE_PROFILE_BASE64 }}" | base64 -D > "$PROFILE_DIR/appstore.mobileprovision"
+          fi
+          ls -la "$PROFILE_DIR"
 
       - name: Install fastlane
         if: ${{ env.TARGET_PLATFORM == 'iOS' }}
