@@ -2,7 +2,7 @@
 
 The Android and Apple jobs use Unity **6000.3.17f1** installed on the Mac, and run
 as `majplay-ci`. Both services may use the existing HTTP proxy
-`http://172.19.0.1:10809`; configure it in their service environment, including
+`http://127.0.0.1:10808`; configure it in their service environment, including
 lowercase `http_proxy` and `https_proxy` for tools that require them.
 
 ## One-time license directory setup
@@ -60,6 +60,18 @@ and stable paths allows IL2CPP to reuse unchanged work. The iOS Unity export use
 and a fixed `Release/iOS/DerivedData`. Changes to Unity,
 source, platform settings, generated Xcode projects or native toolchains may
 invalidate portions of the cache; this does not guarantee a no-op rebuild.
+
+Xcode's archive action recreates its intermediate directory even without an
+explicit clean. `prepare_ios_cache.py` changes only the generated Unity IL2CPP
+shell phase to put its artifacts in `Release/iOS/Il2CppBuildCache/<configuration>`
+instead. The existing archive cache is moved there once, preserving compiled
+objects and Bee state. The helper checks for the expected generated phase and
+fails explicitly if a later Unity version changes its layout. This patch is
+applied after each Unity export; no tracked Unity assets or installed Editor
+files are patched.
+The archive also uses a fixed `Release/iOS/archive/MajdataPlay.xcarchive` path so
+successive CI runs replace their previous archive instead of accumulating dated
+archives in the runner account's Xcode Organizer directory.
 
 Each iOS job imports signing certificates into a keychain named for its run ID
 and attempt, with a masked random password, and removes that keychain even if a

@@ -491,6 +491,10 @@ jobs:
           buildMethod: ${{ env.TARGET_PLATFORM == 'StandaloneOSX' && 'MajdataPlay.Editor.CustomBuild.BuildRelease' || '' }}
           customParameters: ${{ env.TARGET_PLATFORM == 'StandaloneOSX' && '-macOSArchitecture ARM64' || '-AcceptExternalModificationsToPlayer' }}
 
+      - name: Preserve iOS IL2CPP compilation cache
+        if: ${{ env.TARGET_PLATFORM == 'iOS' }}
+        run: python3 Tools/CI/prepare_ios_cache.py "$CONFIGURATION/iOS/MajdataPlay/Unity-iPhone.xcodeproj/project.pbxproj"
+
       - name: Prepare temporary signing keychain
         id: signing-keychain
         if: ${{ env.TARGET_PLATFORM == 'iOS' }}
@@ -591,6 +595,7 @@ jobs:
                 output_name: "MajdataPlay.ipa",
                 clean: false,
                 derived_data_path: File.join(ENV["PROJECT_ROOT"], "Release", "iOS", "DerivedData"),
+                archive_path: File.join(ENV["PROJECT_ROOT"], "Release", "iOS", "archive", "MajdataPlay.xcarchive"),
                 export_options: {
                   method: "app-store",
                   signingStyle: "manual",

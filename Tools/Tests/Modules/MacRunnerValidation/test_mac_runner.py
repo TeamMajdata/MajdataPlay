@@ -17,6 +17,11 @@ SPEC = importlib.util.spec_from_file_location(
 )
 LICENSING = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(LICENSING)
+IOS_SPEC = importlib.util.spec_from_file_location(
+    "prepare_ios_cache", ROOT / "Tools/CI/prepare_ios_cache.py"
+)
+IOS_CACHE = importlib.util.module_from_spec(IOS_SPEC)
+IOS_SPEC.loader.exec_module(IOS_CACHE)
 SERIAL = "F4-AAAA-BBBB-CCCC-DDDD-EEEE"
 ENVIRONMENT = {
     "UNITY_SERIAL": SERIAL,
@@ -95,6 +100,48 @@ class LicensingTests(unittest.TestCase):
     def test_zero_exit_without_license_is_not_treated_as_success(self):
         with self.assertRaisesRegex(RuntimeError, "activation failed"):
             self.prepare(ENVIRONMENT, lambda command, **kwargs: subprocess.CompletedProcess(command, 0))
+
+
+class IosCacheTests(unittest.TestCase):
+    def test_archive_cache_is_migrated_and_patch_is_idempotent(self):
+        import json
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            project = root / "MajdataPlay/Unity-iPhone.xcodeproj/project.pbxproj"
+            project.parent.mkdir(parents=True)
+            script = ('mkdir -p "$CONFIGURATION_TEMP_DIR/artifacts/arm64/buildstate"\n'
+                      'ln -sF "$CONFIGURATION_TEMP_DIR/artifacts" "$PROJECT_DIR/cache"\n'
+                      'il2cpp --compile-cpp --cachedirectory=cache\n')
+            untouched = 'shellScript = "echo unrelated";'
+            project.write_text("shellScript = " + json.dumps(script) + ";\n" + untouched)
+            original_cache = root / (
+                "DerivedData/Build/Intermediates.noindex/ArchiveIntermediates/Unity-iPhone/"
+                "IntermediateBuildFilesPath/Unity-iPhone.build/Release-iphoneos/artifacts"
+            )
+            original_cache.mkdir(parents=True)
+            (original_cache / "object.o").write_bytes(b"native object")
+            original_time = (original_cache / "object.o").stat().st_mtime_ns
+            with redirect_stdout(io.StringIO()):
+                IOS_CACHE.prepare_cache(project, "Release")
+                once = project.read_text()
+                IOS_CACHE.prepare_cache(project, "Release")
+            self.assertEqual(project.read_text(), once)
+            self.assertIn(untouched, once)
+            self.assertNotIn(IOS_CACHE.ARCHIVE_CACHE, once)
+            self.assertIn(IOS_CACHE.PERSISTENT_CACHE, once)
+            persistent = root / "Il2CppBuildCache/Release/artifacts/object.o"
+            self.assertEqual(persistent.read_bytes(), b"native object")
+            self.assertEqual(persistent.stat().st_mtime_ns, original_time)
+            self.assertFalse(original_cache.exists())
+
+    def test_unexpected_unity_layout_is_not_silently_accepted(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            project = Path(temporary) / "project.pbxproj"
+            original = 'shellScript = "echo unknown layout";'
+            project.write_text(original)
+            with self.assertRaises(RuntimeError):
+                IOS_CACHE.prepare_cache(project, "Release")
+            self.assertEqual(project.read_text(), original)
 
 
 class WorkspaceTests(unittest.TestCase):
