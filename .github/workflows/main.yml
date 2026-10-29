@@ -156,17 +156,18 @@ jobs:
           androidExportType: androidStudioProject
           androidSymbolType: debugging
 
-      - name: Setup Java & Gradle Cache
+      - name: Setup Java
         uses: actions/setup-java@v5
         with:
           distribution: 'zulu'
-          java-version: '17' 
-          cache: 'gradle'
+          java-version: '17'
 
-      - name: Setup Gradle
+      - name: Setup Gradle with local cache
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '9.1.0'
+          # The persistent runner already retains ~/.gradle and exported build caches.
+          cache-disabled: true
 
       - name: Verify Android SDK and NDK
         run: |
@@ -399,16 +400,8 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-      - name: Upload Play AAB outputs as workflow artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: MajdataPlay-Android-Play-AAB
-          path: ${{ env.CI_PROJECT_PATH }}/out/*.aab
-          if-no-files-found: error
-          retention-days: 7
-
       - name: Upload to Google Play
-        # Manual runs must not publish; the AAB is still kept as a workflow artifact.
+        # Manual runs must not publish; AABs remain on the runner instead of being uploaded as artifacts.
         if: ${{ github.event_name == 'push' }}
         uses: r0adkll/upload-google-play@v1
         continue-on-error: true

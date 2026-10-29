@@ -53,6 +53,10 @@ iOS's exported Xcode project and fixed DerivedData directory persist. Old `out/`
 artifacts, signing files at the project root, and injected GameCI scripts are
 removed. Changing platforms does not replace another target's Library. No remote
 `actions/cache` restore/save is needed for these persistent self-hosted jobs.
+The Android job also disables setup-java/setup-gradle remote caching and reuses
+`~/.gradle` locally, including dependencies and the Gradle build cache enabled by
+Fastlane. The Windows/Linux jobs run on ephemeral GitHub-hosted machines and
+retain their separate Unity Library cache.
 
 Unity's incremental build pipeline is enabled by default; retaining `Library/Bee`
 and stable paths allows IL2CPP to reuse unchanged work. The iOS Unity export uses
@@ -82,3 +86,5 @@ Run `python3 -B Tools/Tests/Modules/MacRunnerValidation/test_mac_runner.py` on t
 Mac for isolated licensing/cleanup regression tests. Validate actual activation
 and builds with `workflow_dispatch`; dispatches retain artifacts without
 publishing nightly releases, Google Play uploads or TestFlight submissions.
+Android AABs stay on the runner and are not uploaded as workflow artifacts; APK
+and symbol uploads continue. Push builds can still submit the AAB to Google Play.

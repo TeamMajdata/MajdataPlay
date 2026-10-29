@@ -145,6 +145,19 @@ class IosCacheTests(unittest.TestCase):
 
 
 class WorkspaceTests(unittest.TestCase):
+    def test_self_hosted_jobs_use_only_local_caches_and_skip_aab_artifacts(self):
+        workflow = (ROOT / ".github/workflows/main.yml").read_text(encoding="utf-8")
+        android_job = workflow.split("  build-android:", 1)[1].split("  build-apple:", 1)[0]
+        apple_job = workflow.split("  build-apple:", 1)[1].split("  publish-nightly:", 1)[0]
+        self.assertIn("cache-disabled: true", android_job)
+        self.assertNotIn("cache: 'gradle'", android_job)
+        self.assertIn('flags: "--build-cache"', android_job)
+        for job in (android_job, apple_job):
+            self.assertNotIn("uses: actions/cache@", job)
+        self.assertNotIn("Upload Play AAB outputs as workflow artifact", android_job)
+        self.assertNotIn("/out/*.aab", android_job)
+        self.assertIn("uses: r0adkll/upload-google-play@v1", android_job)
+
     def test_signing_keychain_is_unique_and_cleaned_after_failures(self):
         workflow = (ROOT / ".github/workflows/main.yml").read_text(encoding="utf-8")
         self.assertIn("CI_KEYCHAIN: majplay-${{ github.run_id }}-${{ github.run_attempt }}", workflow)
