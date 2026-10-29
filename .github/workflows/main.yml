@@ -435,6 +435,7 @@ jobs:
       TARGET_PLATFORM: ${{ matrix.platform }}
       CI_PROJECT_PATH: projects/${{ matrix.platform }}
       PROJECT_ROOT: ${{ github.workspace }}/projects/${{ matrix.platform }}
+      CI_KEYCHAIN: majplay-${{ github.run_id }}-${{ github.run_attempt }}
 
     defaults:
       run:
@@ -490,10 +491,20 @@ jobs:
           buildMethod: ${{ env.TARGET_PLATFORM == 'StandaloneOSX' && 'MajdataPlay.Editor.CustomBuild.BuildRelease' || '' }}
           customParameters: ${{ env.TARGET_PLATFORM == 'StandaloneOSX' && '-macOSArchitecture ARM64' || '-AcceptExternalModificationsToPlayer' }}
 
+      - name: Prepare temporary signing keychain
+        id: signing-keychain
+        if: ${{ env.TARGET_PLATFORM == 'iOS' }}
+        run: |
+          KEYCHAIN_PASSWORD=$(openssl rand -hex 32)
+          echo "::add-mask::$KEYCHAIN_PASSWORD"
+          echo "password=$KEYCHAIN_PASSWORD" >> "$GITHUB_OUTPUT"
+
       - name: Import Apple certificate
         if: ${{ env.TARGET_PLATFORM == 'iOS' }}
         uses: apple-actions/import-codesign-certs@v3
         with:
+          keychain: ${{ env.CI_KEYCHAIN }}
+          keychain-password: ${{ steps.signing-keychain.outputs.password }}
           p12-file-base64: ${{ secrets.APPSTORE_CERTIFICATES_FILE_BASE64 }}
           p12-password: ${{ secrets.APPSTORE_CERTIFICATES_PASSWORD }}
 
@@ -686,6 +697,13 @@ jobs:
           path: ${{ env.CI_PROJECT_PATH }}/out/*
           if-no-files-found: error
           retention-days: 7
+
+      - name: Remove temporary signing keychain
+        if: ${{ always() && env.TARGET_PLATFORM == 'iOS' && steps.signing-keychain.outcome == 'success' }}
+        run: |
+          if [[ -f "$HOME/Library/Keychains/$CI_KEYCHAIN.keychain-db" ]]; then
+            security delete-keychain "$CI_KEYCHAIN.keychain"
+          fi
 
   publish-nightly:
     name: Publish nightly release (replace only after all builds succeed)

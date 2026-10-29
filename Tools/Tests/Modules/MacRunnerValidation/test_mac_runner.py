@@ -98,6 +98,14 @@ class LicensingTests(unittest.TestCase):
 
 
 class WorkspaceTests(unittest.TestCase):
+    def test_signing_keychain_is_unique_and_cleaned_after_failures(self):
+        workflow = (ROOT / ".github/workflows/main.yml").read_text(encoding="utf-8")
+        self.assertIn("CI_KEYCHAIN: majplay-${{ github.run_id }}-${{ github.run_attempt }}", workflow)
+        self.assertIn("keychain: ${{ env.CI_KEYCHAIN }}", workflow)
+        cleanup = workflow.split("      - name: Remove temporary signing keychain\n", 1)[1]
+        self.assertIn("always()", cleanup.split("        run:", 1)[0])
+        self.assertIn('security delete-keychain "$CI_KEYCHAIN.keychain"', cleanup)
+
     @unittest.skipIf(os.name == "nt", "Run Bash/Perl Android path tests on the macOS runner.")
     def test_android_sdk_paths_are_literal_gradle_strings(self):
         workflow = (ROOT / ".github/workflows/main.yml").read_text(encoding="utf-8")

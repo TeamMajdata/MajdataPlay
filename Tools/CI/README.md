@@ -61,6 +61,11 @@ and a fixed `Release/iOS/DerivedData`. Changes to Unity,
 source, platform settings, generated Xcode projects or native toolchains may
 invalidate portions of the cache; this does not guarantee a no-op rebuild.
 
+Each iOS job imports signing certificates into a keychain named for its run ID
+and attempt, with a masked random password, and removes that keychain even if a
+later step fails. This avoids the fixed `signing_temp` name colliding on the next
+job of a persistent runner. The user's login keychain is not deleted.
+
 Run `python3 -B Tools/Tests/Modules/MacRunnerValidation/test_mac_runner.py` on the
 Mac for isolated licensing/cleanup regression tests. Validate actual activation
 and builds with `workflow_dispatch`; dispatches retain artifacts without
