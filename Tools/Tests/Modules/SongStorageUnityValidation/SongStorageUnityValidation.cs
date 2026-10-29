@@ -294,8 +294,9 @@ namespace MajdataPlay.Tests
             var selectedDirectory = Array.FindIndex(SongStorage.Collections, collection => collection.Name == "Group-040");
             var selectedId = SongStorage.Collections[selectedDirectory].Id;
             var selectedHash = SongStorage.Collections[selectedDirectory][1].Hash;
+            var selectedSongId = SongStorage.Collections[selectedDirectory][1].Id;
             MajEnv.RuntimeConfig.List.SelectedDirGuid = selectedId;
-            MajEnv.RuntimeConfig.List.SelectedSongHash = selectedHash;
+            MajEnv.RuntimeConfig.List.SelectedSongId = selectedSongId;
             for (var iteration = 0; iteration < repetitions; iteration++)
             {
                 await SongStorage.RefreshLocal().ConfigureAwait(false);

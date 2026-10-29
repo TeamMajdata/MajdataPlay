@@ -976,8 +976,8 @@ namespace MajdataPlay
             public int Id { get; set; } = SingletonId;
             /// <summary>Gets or sets the identifier of the selected chart collection.</summary>
             public Guid SelectedDirGuid { get; set; } = Guid.Empty;
-            /// <summary>Gets or sets the hash of the selected chart, or null when the column was never written.</summary>
-            public string? SelectedSongHash { get; set; } = string.Empty;
+            /// <summary>Gets or sets the <see cref="ISongDetail.Id"/> of the selected chart, or null when the column was never written.</summary>
+            public string? SelectedSongId { get; set; } = string.Empty;
             /// <summary>Gets or sets the selected difficulty.</summary>
             public ChartLevel SelectedDiff { get; set; } = ChartLevel.Easy;
 
@@ -990,7 +990,7 @@ namespace MajdataPlay
                 return new ListConfigRecord
                 {
                     SelectedDirGuid = list.SelectedDirGuid,
-                    SelectedSongHash = list.SelectedSongHash,
+                    SelectedSongId = list.SelectedSongId,
                     SelectedDiff = list.SelectedDiff,
                 };
             }
@@ -1004,7 +1004,7 @@ namespace MajdataPlay
                     List = new ListConfig
                     {
                         SelectedDirGuid = SelectedDirGuid,
-                        SelectedSongHash = SelectedSongHash ?? string.Empty,
+                        SelectedSongId = SelectedSongId ?? string.Empty,
                         SelectedDiff = SelectedDiff,
                     },
                 };

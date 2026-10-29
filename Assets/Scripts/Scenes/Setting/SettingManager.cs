@@ -78,11 +78,12 @@ namespace MajdataPlay.Scenes.Setting
             var categories = GetMenuMetadata(Setting.GetType());
             var offset = 0;
             var listRoot = _menuListRoot.transform;
-            if (!_settingConfig.IgnoreChartSettingPage && !string.IsNullOrEmpty(MajEnv.RuntimeConfig.List.SelectedSongHash))
+            var selectedSong = _settingConfig.IgnoreChartSettingPage ? null : SongStorage.FindSelectedSong();
+            if (selectedSong is not null)
             {
                 _menus = new Menu[categories.Length + 1];
                 offset = 1;
-                var chartSetting = ChartSettingStorage.GetSetting(MajEnv.RuntimeConfig.List.SelectedSongHash);
+                var chartSetting = ChartSettingStorage.GetSetting(selectedSong);
                 var chartSettingType = chartSetting.GetType();
                 var menuObj = Instantiate(_menuPrefab, listRoot);
                 menuObj.SetActive(false);

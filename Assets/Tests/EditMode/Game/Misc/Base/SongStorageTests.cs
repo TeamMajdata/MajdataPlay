@@ -249,7 +249,7 @@ namespace MajdataPlay.Tests.Game.Misc.Base
                 Assert.That(progress.Messages, Is.Not.Empty);
                 Assert.That(SongStorage.WorkingCollection.Name, Is.EqualTo("A-Collection"));
                 Assert.That(MajEnv.RuntimeConfig!.List.SelectedDirGuid, Is.EqualTo(Guid.Empty));
-                Assert.That(MajEnv.RuntimeConfig.List.SelectedSongHash, Is.Empty);
+                Assert.That(MajEnv.RuntimeConfig.List.SelectedSongId, Is.Empty);
                 Assert.That(SongStorage.OrderBy, Is.SameAs(MajEnv.RuntimeConfig.List.OrderBy));
             });
         }
@@ -286,7 +286,7 @@ namespace MajdataPlay.Tests.Game.Misc.Base
             });
         }
 
-        /// <summary>Checks that the selection is restored by collection identity and chart hash after a refresh.</summary>
+        /// <summary>Checks that the selection is restored by collection identity and chart identity after a refresh.</summary>
         /// <returns>The test coroutine.</returns>
         [UnityTest]
         public IEnumerator RefreshLocal_RestoresSelection()
@@ -301,7 +301,7 @@ namespace MajdataPlay.Tests.Game.Misc.Base
                 var selected = SongStorage.WorkingCollection;
                 selected.SetCursor(selected.Single(song => song.Title == "Four"));
                 listConfig.SelectedDirGuid = selected.Id;
-                listConfig.SelectedSongHash = selected.Current.Hash;
+                listConfig.SelectedSongId = selected.Current.Id;
                 selected.Index = 0;
                 SongStorage.CollectionIndex = 0;
                 ChartFixture.CreateChart(_charts.CreateDirectory("0-First"), "Zero", "Zero");
@@ -312,7 +312,7 @@ namespace MajdataPlay.Tests.Game.Misc.Base
                 Assert.That(SongStorage.CollectionIndex, Is.EqualTo(2));
                 Assert.That(SongStorage.WorkingCollection.Current.Title, Is.EqualTo("Four"));
                 Assert.That(listConfig.SelectedDirGuid, Is.EqualTo(selected.Id));
-                Assert.That(listConfig.SelectedSongHash, Is.EqualTo(SongStorage.WorkingCollection.Current.Hash));
+                Assert.That(listConfig.SelectedSongId, Is.EqualTo(SongStorage.WorkingCollection.Current.Id));
             });
         }
 
@@ -339,13 +339,13 @@ namespace MajdataPlay.Tests.Game.Misc.Base
             var collections = collectionExists ? new[] { fallback, selected } : new[] { fallback };
             PrivateMember.SetStaticProperty(typeof(SongStorage), nameof(SongStorage.Collections), collections);
             listConfig.SelectedDirGuid = selectedId;
-            listConfig.SelectedSongHash = "saved-song";
+            listConfig.SelectedSongId = "saved-song";
 
             SongStorage.RestoreSelection();
 
             Assert.That(SongStorage.WorkingCollection, Is.SameAs(collectionExists ? selected : fallback));
             Assert.That(listConfig.SelectedDirGuid, Is.EqualTo(selectedId));
-            Assert.That(listConfig.SelectedSongHash, Is.EqualTo("saved-song"));
+            Assert.That(listConfig.SelectedSongId, Is.EqualTo("saved-song"));
         }
 
         /// <summary>Checks that an empty library cannot replace the saved selection with the placeholder collection.</summary>
@@ -355,13 +355,13 @@ namespace MajdataPlay.Tests.Game.Misc.Base
             var listConfig = MajEnv.RuntimeConfig!.List;
             var selectedId = Guid.NewGuid();
             listConfig.SelectedDirGuid = selectedId;
-            listConfig.SelectedSongHash = "saved-song";
+            listConfig.SelectedSongId = "saved-song";
 
             SongStorage.RestoreSelection();
 
             Assert.That(SongStorage.WorkingCollection.IsEmpty, Is.True);
             Assert.That(listConfig.SelectedDirGuid, Is.EqualTo(selectedId));
-            Assert.That(listConfig.SelectedSongHash, Is.EqualTo("saved-song"));
+            Assert.That(listConfig.SelectedSongId, Is.EqualTo("saved-song"));
         }
 
         /// <summary>Checks that recommendation publication retains missing identities and restores them when content returns.</summary>
@@ -378,12 +378,12 @@ namespace MajdataPlay.Tests.Game.Misc.Base
                     Id = Guid.NewGuid()
                 };
                 listConfig.SelectedDirGuid = selectedId;
-                listConfig.SelectedSongHash = "saved-song";
+                listConfig.SelectedSongId = "saved-song";
 
                 await PrivateMember.InvokeStatic<Task>(typeof(SongStorage), "PublishRecommendCollectionsAsync", (object)new[] { fallback });
 
                 Assert.That(listConfig.SelectedDirGuid, Is.EqualTo(selectedId));
-                Assert.That(listConfig.SelectedSongHash, Is.EqualTo("saved-song"));
+                Assert.That(listConfig.SelectedSongId, Is.EqualTo("saved-song"));
                 var missingSong = new SongCollection("Recommendations", new ISongDetail[] { new FakeSongDetail("other-song") })
                 {
                     Id = selectedId,
@@ -394,7 +394,7 @@ namespace MajdataPlay.Tests.Game.Misc.Base
 
                 Assert.That(SongStorage.WorkingCollection, Is.SameAs(missingSong));
                 Assert.That(listConfig.SelectedDirGuid, Is.EqualTo(selectedId));
-                Assert.That(listConfig.SelectedSongHash, Is.EqualTo("saved-song"));
+                Assert.That(listConfig.SelectedSongId, Is.EqualTo("saved-song"));
                 var restored = new SongCollection("Recommendations", new ISongDetail[]
                 {
                     new FakeSongDetail("other-song"),
@@ -410,14 +410,14 @@ namespace MajdataPlay.Tests.Game.Misc.Base
                 Assert.That(SongStorage.WorkingCollection, Is.SameAs(restored));
                 Assert.That(restored.Current.Hash, Is.EqualTo("saved-song"));
                 Assert.That(listConfig.SelectedDirGuid, Is.EqualTo(selectedId));
-                Assert.That(listConfig.SelectedSongHash, Is.EqualTo("saved-song"));
+                Assert.That(listConfig.SelectedSongId, Is.EqualTo("saved-song"));
 
                 await PrivateMember.InvokeStatic<Task>(typeof(SongStorage), "PublishRecommendCollectionsAsync", (object)new[] { fallback });
 
                 Assert.That(SongStorage.CollectionIndex, Is.EqualTo(0));
                 Assert.That(SongStorage.WorkingCollection, Is.SameAs(fallback));
                 Assert.That(listConfig.SelectedDirGuid, Is.EqualTo(selectedId));
-                Assert.That(listConfig.SelectedSongHash, Is.EqualTo("saved-song"));
+                Assert.That(listConfig.SelectedSongId, Is.EqualTo("saved-song"));
             });
         }
 

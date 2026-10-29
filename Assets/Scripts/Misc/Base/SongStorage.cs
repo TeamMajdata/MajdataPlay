@@ -333,7 +333,7 @@ namespace MajdataPlay
             s_collectionIndex = Collections.Length == 0 ? 0 : s_collectionIndex.Clamp(0, Collections.Length - 1);
         }
 
-        /// <summary>Restores the saved collection GUID and song hash without changing the persisted selection.</summary>
+        /// <summary>Restores the saved collection GUID and song identity without changing the persisted selection.</summary>
         /// <remarks>Unavailable collections or songs keep their saved identities so later refreshes can restore them.</remarks>
         internal static void RestoreSelection()
         {
@@ -345,11 +345,40 @@ namespace MajdataPlay
                 return;
             }
             var collection = Collections[index];
-            var songHash = listConfig.SelectedSongHash;
-            if (!string.IsNullOrEmpty(songHash) && collection.Any(song => song.Hash == songHash))
+            var song = FindSongById(collection, listConfig.SelectedSongId);
+            if (song is not null)
             {
-                collection.SetCursor(songHash);
+                collection.SetCursor(song);
             }
+        }
+
+        /// <summary>Finds the song saved as the list selection in the saved collection.</summary>
+        /// <returns>The selected song, or null when the saved collection or song is unavailable.</returns>
+        internal static ISongDetail? FindSelectedSong()
+        {
+            var listConfig = MajEnv.RuntimeConfig.List;
+            var collection = Array.Find(Collections, collection => collection.Id == listConfig.SelectedDirGuid);
+            return collection is null ? null : FindSongById(collection, listConfig.SelectedSongId);
+        }
+
+        /// <summary>Finds a song of a collection by its <see cref="ISongDetail.Id"/>.</summary>
+        /// <param name="collection">The collection to search.</param>
+        /// <param name="songId">The song identity, or an empty string for no selection.</param>
+        /// <returns>The first song with the identity, or null when the identity is empty or not found.</returns>
+        internal static ISongDetail? FindSongById(SongCollection collection, string songId)
+        {
+            if (string.IsNullOrEmpty(songId))
+            {
+                return null;
+            }
+            foreach (var song in collection)
+            {
+                if (song.Id == songId)
+                {
+                    return song;
+                }
+            }
+            return null;
         }
 
         /// <summary>Disposes obsolete chart instances while retaining chart objects reused from the unchanged source.</summary>

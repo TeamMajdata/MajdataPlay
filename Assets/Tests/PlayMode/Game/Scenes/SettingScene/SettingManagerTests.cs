@@ -3,6 +3,7 @@ using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
 using LitMotion;
+using MajdataPlay.Collections;
 using MajdataPlay.i18n;
 using MajdataPlay.IO;
 using MajdataPlay.Scenes.Setting;
@@ -79,6 +80,24 @@ namespace MajdataPlay.Tests.Game.Scenes.PlayMode.SettingScene
             return index;
         }
 
+        /// <summary>Publishes one collection holding a chart and saves both as the list selection.</summary>
+        /// <param name="selectedSongId">The saved song identity, or null for the identity of the published chart.</param>
+        /// <returns>The published chart.</returns>
+        private FakeSongDetail SelectChart(string? selectedSongId = null)
+        {
+            var song = new FakeSongDetail("majtest-setting-chart");
+            var collection = new SongCollection("Selected", new ISongDetail[] { song })
+            {
+                Id = Guid.NewGuid()
+            };
+            var collections = SongStorage.Collections;
+            PrivateMember.SetStaticProperty(typeof(SongStorage), nameof(SongStorage.Collections), new[] { collection });
+            AddCleanup(() => PrivateMember.SetStaticProperty(typeof(SongStorage), nameof(SongStorage.Collections), collections));
+            MajEnv.RuntimeConfig!.List.SelectedDirGuid = collection.Id;
+            MajEnv.RuntimeConfig.List.SelectedSongId = selectedSongId ?? song.Id;
+            return song;
+        }
+
         /// <summary>Holds a button for one frame of manager updates, then releases it for another frame.</summary>
         /// <param name="zone">The button.</param>
         /// <returns>The coroutine.</returns>
@@ -146,13 +165,26 @@ namespace MajdataPlay.Tests.Game.Scenes.PlayMode.SettingScene
         [UnityTest]
         public IEnumerator Start_WithSelectedChart_AddsChartSettingMenu()
         {
-            MajEnv.RuntimeConfig!.List.SelectedSongHash = "majtest-setting-chart";
+            var song = SelectChart();
 
             yield return StartManager();
 
             Assert.That(Menus[0].Name, Is.EqualTo(nameof(ChartSetting)));
-            Assert.That(Menus[0].Instance, Is.SameAs(ChartSettingStorage.GetSetting("majtest-setting-chart")));
+            Assert.That(Menus[0].Instance, Is.SameAs(ChartSettingStorage.GetSetting(song.Hash)));
             Assert.That(Menus.Length, Is.EqualTo(SettingReflectionCache.GetVisibleProperties(typeof(GameSetting)).Length + 1));
+        }
+
+        /// <summary>Checks that a saved song identity matching no published chart adds no chart setting menu.</summary>
+        /// <returns>The test coroutine.</returns>
+        [UnityTest]
+        public IEnumerator Start_WithUnavailableSelectedChart_SkipsChartSettingMenu()
+        {
+            var song = SelectChart("missing-song");
+
+            yield return StartManager();
+
+            Assert.That(song.Id, Is.Not.EqualTo("missing-song"));
+            Assert.That(Menus.Any(menu => menu.Name == nameof(ChartSetting)), Is.False);
         }
 
         /// <summary>Checks that the chart setting page can be suppressed.</summary>
@@ -160,8 +192,8 @@ namespace MajdataPlay.Tests.Game.Scenes.PlayMode.SettingScene
         [UnityTest]
         public IEnumerator Start_IgnoringChartPage_SkipsChartSettingMenu()
         {
-            MajEnv.RuntimeConfig!.List.SelectedSongHash = "majtest-setting-chart";
-            MajEnv.RuntimeConfig.Setting.IgnoreChartSettingPage = true;
+            SelectChart();
+            MajEnv.RuntimeConfig!.Setting.IgnoreChartSettingPage = true;
 
             yield return StartManager();
 

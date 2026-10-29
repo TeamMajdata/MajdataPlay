@@ -121,6 +121,8 @@ namespace MajdataPlay
         private readonly ChartFixture _metadata;
         /// <summary>Gets or sets the observer used for newly started parses.</summary>
         public static ParseProbe Probe { get; set; } = new ParseProbe();
+        /// <summary>Gets the persisted identity, which fixtures derive from the hash.</summary>
+        public string Id => _metadata.Hash;
         /// <summary>Gets the stable fixture identity.</summary>
         public string Hash => _metadata.Hash;
         /// <summary>Gets the sortable fixture title.</summary>
