@@ -414,6 +414,7 @@ namespace MajdataPlay.Scenes.View
                 else
                     _noteLoader.NoteSpeed = ((float)(107.25 / (71.4184491 * Mathf.Pow(tapSpeed + 0.9975f, -0.985558604f))));
                 _noteLoader.TouchSpeed = _setting.Game.TouchSpeed;
+                _noteLoader.SlidePathStyle = _setting.Display.SlidePathStyle;
 
                 await _noteLoader.LoadNotesIntoPoolAsync(_chart);
                 await _noteManager.InitAsync();

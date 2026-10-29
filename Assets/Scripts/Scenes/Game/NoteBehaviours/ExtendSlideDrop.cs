@@ -177,20 +177,21 @@ namespace MajdataPlay.Scenes.Game.Notes.Behaviours
             StartPos = ((int)metadata.JudgeAreaQueue[0].SensorA) + 1;
             EndPos = ((int)metadata.JudgeAreaQueue[metadata.JudgeAreaQueue.Length - 1].SensorA) + 1;
 
+            // 引导星星经过的点与箭头分开存放：连接星星的连接点可能只有星星经过，没有箭头
+            for (var i = 0; i < metadata.StarPoses.Length; i++)
+            {
+                var starInfo = metadata.StarPoses[i];
+                StarPositions.Add(new Vector3(starInfo.X, starInfo.Y));
+                StarRotations.Add(Quaternion.Euler(new Vector3(0, 0, starInfo.RotZ) + new Vector3(0f, 0f, 18f)));
+            }
+
             for (var i = 0; i < metadata.ArrowPoses.Length; i++)
             {
                 var arrowInfo = metadata.ArrowPoses[i];
                 var pos = new Vector3(arrowInfo.X, arrowInfo.Y);
-                var rot = Quaternion.Euler(new Vector3(0, 0, arrowInfo.RotZ) + new Vector3(0f, 0f, 18f));
                 var arrowRot = Quaternion.Euler(new Vector3(0, 0, arrowInfo.RotZ));
 
-                if (ExtendSlideHelper.IsStarPose(i, metadata.ArrowPoses.Length, metadata.ConditionalLastArrow))
-                {
-                    StarPositions.Add(pos);
-                    StarRotations.Add(rot);
-                }
-
-                if (i == 0 || 
+                if (i == 0 ||
                     i == metadata.ArrowPoses.Length - 1 ||
                     (i == metadata.ArrowPoses.Length - 2 && metadata.ConditionalLastArrow))
                 {

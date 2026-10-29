@@ -1,10 +1,12 @@
 using MajdataPlay.Diagnostics;
+using MajdataPlay.i18n;
 using MajdataPlay.Settings;
 using MajdataPlay.Settings.Runtime;
 using MajdataPlay.Utils;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using NUnit.Framework;
+using UnityEngine;
 
 #nullable enable
 namespace MajdataPlay.Tests.Game.Misc.Settings
@@ -42,6 +44,7 @@ namespace MajdataPlay.Tests.Game.Misc.Settings
             Assert.That(setting.Judge.Mode, Is.EqualTo(JudgeModeOption.Modern));
             Assert.That(setting.Display.Skin, Is.EqualTo("default"));
             Assert.That(setting.Display.Language, Is.Empty);
+            Assert.That(setting.Display.SlidePathStyle, Is.EqualTo(SlidePathStyle.Classic));
             Assert.That(setting.Rendering.RenderQuality, Is.EqualTo(RenderingQualityOption.Performance));
             Assert.That(setting.Audio.Bass.BufferLengthMs, Is.EqualTo(1000));
             Assert.That(setting.Audio.Volume.Global, Is.EqualTo(0.3f));
@@ -112,6 +115,42 @@ namespace MajdataPlay.Tests.Game.Misc.Settings
             Assert.That(restored.Rendering.FPSLimit, Is.EqualTo(144));
             Assert.That(restored.Debug.SensorOpacity, Is.EqualTo(40));
             Assert.That(restored.Mod.AllBreak, Is.False);
+        }
+
+        /// <summary>
+        /// Checks that the slide path style is written by name, read back, and defaults to classic for a settings.json
+        /// written before the option existed.
+        /// </summary>
+        [Test]
+        public void Json_StoresTheSlidePathStyleByName()
+        {
+            var setting = new GameSetting();
+            setting.Display.SlidePathStyle = SlidePathStyle.Medium;
+
+            var json = Write(setting);
+
+            Assert.That(JObject.Parse(json)["Display"]!["SlidePathStyle"]!.Value<string>(), Is.EqualTo("Medium"));
+            Assert.That(Read(json).Display.SlidePathStyle, Is.EqualTo(SlidePathStyle.Medium));
+            Assert.That(Read("{\"Display\":{\"Skin\":\"default\"}}").Display.SlidePathStyle, Is.EqualTo(SlidePathStyle.Classic));
+        }
+
+        /// <summary>Checks that every bundled language names the slide path style option, describes it and names its values.</summary>
+        /// <param name="code">The language code.</param>
+        [TestCase("en-US")]
+        [TestCase("ja-JP")]
+        [TestCase("zh-CN")]
+        [TestCase("zh-TW")]
+        public void SlidePathStyle_IsTranslatedInEveryBundledLanguage(string code)
+        {
+            var language = Localization.Parse(Resources.Load<TextAsset>("Langs/" + code).text)!;
+            var translations = language.GetTranslations();
+
+            Assert.That(translations.ContainsKey("MAJSETTING_PROPERTY_SlidePathStyle"), Is.True, code);
+            Assert.That(translations.ContainsKey("MAJSETTING_PROPERTY_SlidePathStyle_DESC"), Is.True, code);
+            foreach (var value in new[] { SlidePathStyle.Classic, SlidePathStyle.Medium, SlidePathStyle.Perfect })
+            {
+                Assert.That(translations.ContainsKey($"MAJSETTING_PROPERTY_SlidePathStyle_OPTION_{value}"), Is.True, $"{code} {value}");
+            }
         }
 
         /// <summary>Checks that null setting categories fall back to their defaults instead of leaving the settings without them.</summary>

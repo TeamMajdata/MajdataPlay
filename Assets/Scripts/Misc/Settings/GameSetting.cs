@@ -317,6 +317,11 @@ namespace MajdataPlay.Settings
         public JudgeModeOption SlideSortOrder { get; set; } = JudgeModeOption.Modern;
 
         /// <summary>
+        /// Gets or sets how the arrows of connected slides such as <c>1-4q7</c> are placed along their segments.
+        /// </summary>
+        public SlidePathStyle SlidePathStyle { get; set; } = SlidePathStyle.Classic;
+
+        /// <summary>
         /// Gets or sets where judgments of ring notes such as taps, stars, holds and breaks appear, from 0 at the center to 1 at the ring.
         /// </summary>
         [Step("0.05")]

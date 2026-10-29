@@ -3,6 +3,7 @@ using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
+using MajdataPlay.Buffers;
 using MajdataPlay.Game.Notes;
 using MajdataPlay.IO;
 using MajdataPlay.Scenes.Game;
@@ -10,6 +11,8 @@ using MajdataPlay.Scenes.Game.Buffers;
 using MajdataPlay.Scenes.Game.Notes.Behaviours;
 using MajdataPlay.Scenes.Game.Notes.Slide;
 using MajdataPlay.Scenes.Game.Parsing;
+using MajdataPlay.Scenes.Game.Utils;
+using MajdataPlay.Settings;
 using MajdataPlay.Tests;
 using MajdataPlay.Tests.Game.Notes.PlayMode.Support;
 using MajSimai;
@@ -126,6 +129,104 @@ namespace MajdataPlay.Tests.Game.Notes.PlayMode
             Assert.That(slide.Length, Is.EqualTo(1f));
             Assert.That(slide.ConnectInfo.IsConnSlide, Is.False);
             Assert.That(SlideQueue(), Has.Count.EqualTo(1));
+        }
+
+        /// <summary>Checks that the loader places the arrows of connection slides in the classic style by default.</summary>
+        [Test]
+        public void SlidePathStyle_IsClassicByDefault()
+        {
+            Assert.That(_loader.SlidePathStyle, Is.EqualTo(SlidePathStyle.Classic));
+        }
+
+        /// <summary>
+        /// Checks that the loader places the arrows of a connection slide in its slide path style: 1^2^3 shows 14 arrows
+        /// with a gap at key 2 in the classic style and 15 in the medium and perfect styles, and the star always passes
+        /// the 17 points from key 1 to key 3, key 2 included.
+        /// </summary>
+        /// <param name="style">The slide path style of the loader.</param>
+        /// <returns>The test coroutine.</returns>
+        [UnityTest]
+        public IEnumerator CreateSlideGroup_PlacesConnectionArrowsInTheSlidePathStyle([Values] SlidePathStyle style)
+        {
+            _loader.SlidePathStyle = style;
+            CreateSlideGroup("1^2[8:1]^3[8:1]");
+            yield return null;
+
+            var slide = SingleExtendSlide();
+            var arrowCount = style == SlidePathStyle.Classic ? 14 : 15;
+            Assert.That(slide.transform.childCount, Is.EqualTo(arrowCount));
+            var starPositions = PrivateMember.GetField<PooledList<Vector3>>(slide, "StarPositions");
+            Assert.That(starPositions, Has.Count.EqualTo(17));
+            var joint = NoteHelper.GetTapPosition(2, 4.8f);
+            Assert.That(starPositions.Count(x => Vector2.Distance(x, joint) < 1e-3f), Is.EqualTo(1), "The star passes key 2");
+            var arrowsAtJoint = Enumerable.Range(0, slide.transform.childCount)
+                                          .Count(i => Vector2.Distance(slide.transform.GetChild(i).position, joint) < 1e-3f);
+            Assert.That(arrowsAtJoint, Is.EqualTo(arrowCount == 14 ? 0 : 1));
+        }
+
+        /// <summary>
+        /// Checks that a connection slide of simai segments followed by a slide code segment, 1^2^3Q9K4, is built as one
+        /// extend slide over the whole chain, with every segment, the slide code one included, placed in the slide path
+        /// style: three 45° arcs show 21 arrows in the classic style and 23 in the others, and the star passes 25 points.
+        /// </summary>
+        /// <param name="style">The slide path style of the loader.</param>
+        /// <returns>The test coroutine.</returns>
+        [UnityTest]
+        public IEnumerator CreateSlideGroup_BuildsAConnectionSlideEndingWithSlideCode([Values] SlidePathStyle style)
+        {
+            _loader.SlidePathStyle = style;
+            CreateSlideGroup("1^2^3Q9K4[1:100]");
+            yield return null;
+
+            var slide = SingleExtendSlide();
+            Assert.That(slide.SlideCode, Is.EqualTo("1Q9A2Q9A3Q9K4"));
+            var expected = SlideDataBuilder.BuildSlideAreas(SlideCodeParser.Parse("1Q9A2Q9A3Q9K4")).Select(x => (SensorArea)x.SensorA);
+            Assert.That(FirstAreas(slide), Is.EqualTo(expected));
+            Assert.That(slide.StartPos, Is.EqualTo(1));
+            Assert.That(slide.EndPos, Is.EqualTo(4));
+            Assert.That(slide.StartTiming, Is.EqualTo(1f));
+            Assert.That(slide.Length, Is.EqualTo(1f));
+            Assert.That(slide.transform.childCount, Is.EqualTo(style == SlidePathStyle.Classic ? 21 : 23));
+            Assert.That(PrivateMember.GetField<PooledList<Vector3>>(slide, "StarPositions"), Has.Count.EqualTo(25));
+            Assert.That(SlideQueue(), Has.Count.EqualTo(1));
+        }
+
+        /// <summary>
+        /// Checks that a slide code segment may start a connection slide and that each segment may have its own duration.
+        /// </summary>
+        /// <param name="content">The slide text.</param>
+        /// <param name="expectedCode">The slide code of the whole chain.</param>
+        /// <param name="endPos">The end key of the chain.</param>
+        /// <returns>The test coroutine.</returns>
+        [UnityTest]
+        [TestCase("1Q9K3-7[1:1]", "1Q9A3K7", 7, ExpectedResult = null)]
+        [TestCase("1^2[8:1]^3[8:1]Q9K4[8:1]", "1Q9A2Q9A3Q9K4", 4, ExpectedResult = null)]
+        [TestCase("1Q9K3Q9K5[1:1]", "1Q9A3Q9K5", 5, ExpectedResult = null)]
+        public IEnumerator CreateSlideGroup_ChainsSlideCodeSegments(string content, string expectedCode, int endPos)
+        {
+            CreateSlideGroup(content);
+            yield return null;
+
+            var slide = SingleExtendSlide();
+            Assert.That(slide.SlideCode, Is.EqualTo(expectedCode));
+            Assert.That(slide.StartPos, Is.EqualTo(1));
+            Assert.That(slide.EndPos, Is.EqualTo(endPos));
+        }
+
+        /// <summary>
+        /// Checks that a connection slide with a slide code segment is translated even when simai slides are built
+        /// natively, because slide code has no slide prefab.
+        /// </summary>
+        /// <returns>The test coroutine.</returns>
+        [UnityTest]
+        public IEnumerator CreateSlideGroup_TranslatesSlideCodeChainsWhenTranslationIsOff()
+        {
+            UseNativeLine3Prefab();
+            CreateSlideGroup("1Q9K3-7[1:1]");
+            yield return null;
+
+            Assert.That(_rig.SlideParent.GetComponentsInChildren<SlideDrop>(), Is.Empty);
+            Assert.That(SingleExtendSlide().SlideCode, Is.EqualTo("1Q9A3K7"));
         }
 
         /// <summary>Checks that wifi slides still create a wifi slide.</summary>

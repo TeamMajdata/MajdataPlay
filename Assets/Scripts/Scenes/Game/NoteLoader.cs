@@ -16,6 +16,7 @@ using MajdataPlay.Scenes.Game.Notes.Slide;
 using MajdataPlay.Scenes.Game.Notes.Slide.Utils;
 using MajdataPlay.Scenes.Game.Notes.Touch;
 using MajdataPlay.Scenes.Game.Parsing;
+using MajdataPlay.Scenes.Game.Parsing.Slide;
 using MajdataPlay.Scenes.Game.Utils;
 using MajdataPlay.Settings;
 using MajSimai;
@@ -44,6 +45,12 @@ namespace MajdataPlay.Scenes.Game
         /// to compare the two.
         /// </summary>
         internal bool IsSimaiSlideTranslated { get; set; } = true;
+        /// <summary>
+        /// Gets or sets how the arrows of a translated simai connection slide are placed along its segments. Slides
+        /// written as slide code and simai slides with a single segment do not depend on it. The game and view scenes
+        /// set it from <see cref="DisplayOptions.SlidePathStyle"/>; the slide test scene switches it to compare styles.
+        /// </summary>
+        internal SlidePathStyle SlidePathStyle { get; set; } = SlidePathStyle.Classic;
         public float TouchSpeed
         {
             get => _touchSpeed;
@@ -390,13 +397,13 @@ namespace MajdataPlay.Scenes.Game
                                         TouchArea = note.TouchArea,
                                         Count = 1
                                     };
-                                    if (foldedSlide.RawContent.Contains('K'))
+                                    if (SimaiSlideTranslator.IsSingleSlideCode(foldedSlide.RawContent))
                                     {
                                         CreateExtendSlide(timing, foldedSlide, eachNotes);
                                     }
                                     else
                                     {
-                                        CreateSlideGroup(timing, foldedSlide, eachNotes); // 星星组
+                                        CreateSlideGroup(timing, foldedSlide, eachNotes); // 星星组，可以包含 slide code 段
                                     }
                                     _noteCount += foldedSlide.Count - 1;
                                     break;
@@ -976,7 +983,9 @@ namespace MajdataPlay.Scenes.Game
         /// <summary>
         /// Builds a simai slide. Wifi slides keep their own behaviour; every other slide, including a connection slide,
         /// is translated into one slide code and built as an extend slide, or built natively from the slide prefabs when
-        /// <see cref="IsSimaiSlideTranslated"/> is <see langword="false"/>.
+        /// <see cref="IsSimaiSlideTranslated"/> is <see langword="false"/>. A connection slide may contain slide code
+        /// segments, such as <c>Q9K4</c> in <c>1^2^3Q9K4[1:100]</c>; it is always translated, because slide code has no
+        /// prefab.
         /// </summary>
         /// <param name="timing">The timing point of the slide note.</param>
         /// <param name="note">The folded simai slide note.</param>
@@ -1003,6 +1012,7 @@ namespace MajdataPlay.Scenes.Game
                                       // 1-读取到了一个未指定时长的段落
                                       // 2-读取到了一个指定时长的段落
                                       // 3-（期望）读取到了最后一个时长指定
+                var hasSlideCodeSegment = false; // slide code 段没有 prefab，只能翻译成 extend slide
                 using (var sb = ZString.CreateStringBuilder())
                 {
                     while (ptr < noteContent.Length)
@@ -1016,43 +1026,57 @@ namespace MajdataPlay.Scenes.Game
                                                                   "组合星星有错误\nSLIDE CHAIN ERROR");
                         }
                         sb.Clear();
-                        // 读取到字符
-                        var slideTypeChar = noteContent[ptr++].ToString();
                         var slidePart = new SubSlideNote();
                         slidePart.Type = SimaiNoteType.Slide;
                         slidePart.StartPosition = latestStartIndex;
-                        if (slideTypeChar == "V")
+                        var slideTypeChar = string.Empty;
+                        if (SimaiSlideTranslator.IsSlideCodeCommand(noteContent[ptr]))
                         {
-                            // 转折星星
-                            var middlePos = noteContent[ptr++];
-                            var endPos = noteContent[ptr++];
+                            // slide code 段，例如 1^2^3Q9K4 中的 Q9K4：从上一段的终点开始，到 K 后面的终点键位为止
+                            var segmentEnd = SimaiSlideTranslator.FindSlideCodeEnd(noteContent, ptr);
                             sb.Append(latestStartIndex);
-                            sb.Append(slideTypeChar);
-                            sb.Append(middlePos);
-                            sb.Append(endPos);
-
-                            //slidePart.RawContent = sb.ToString();
-                            latestStartIndex = charIntParse(endPos);
+                            sb.Append(noteContent.AsSpan(ptr, segmentEnd - ptr));
+                            latestStartIndex = charIntParse(noteContent[segmentEnd - 1]);
+                            ptr = segmentEnd;
+                            hasSlideCodeSegment = true;
                         }
                         else
                         {
-                            // 其他普通星星
-                            // 额外检查pp和qq
-                            if (noteContent[ptr] == slideTypeChar[0])
+                            // 读取到字符
+                            slideTypeChar = noteContent[ptr++].ToString();
+                            if (slideTypeChar == "V")
                             {
-                                if (ptr + 1 < noteContent.Length)
-                                {
-                                    slideTypeChar += noteContent[ptr++];
-                                }
+                                // 转折星星
+                                var middlePos = noteContent[ptr++];
+                                var endPos = noteContent[ptr++];
+                                sb.Append(latestStartIndex);
+                                sb.Append(slideTypeChar);
+                                sb.Append(middlePos);
+                                sb.Append(endPos);
+
+                                //slidePart.RawContent = sb.ToString();
+                                latestStartIndex = charIntParse(endPos);
                             }
-                            var endPos = noteContent[ptr++];
+                            else
+                            {
+                                // 其他普通星星
+                                // 额外检查pp和qq
+                                if (noteContent[ptr] == slideTypeChar[0])
+                                {
+                                    if (ptr + 1 < noteContent.Length)
+                                    {
+                                        slideTypeChar += noteContent[ptr++];
+                                    }
+                                }
+                                var endPos = noteContent[ptr++];
 
-                            sb.Append(latestStartIndex);
-                            sb.Append(slideTypeChar);
-                            sb.Append(endPos);
+                                sb.Append(latestStartIndex);
+                                sb.Append(slideTypeChar);
+                                sb.Append(endPos);
 
-                            //slidePart.RawContent = sb.ToString();
-                            latestStartIndex = charIntParse(endPos);
+                                //slidePart.RawContent = sb.ToString();
+                                latestStartIndex = charIntParse(endPos);
+                            }
                         }
 
                         var shapeText = sb.ToString(); // 不含时长的形状，例如 1-4
@@ -1157,11 +1181,11 @@ namespace MajdataPlay.Scenes.Game
                     result.SlideInstance.Init();
                     AddSlideToQueue(timing, result.SlideInstance);
                 }
-                else if (IsSimaiSlideTranslated)
+                else if (IsSimaiSlideTranslated || hasSlideCodeSegment)
                 {
-                    // 其余 simai 星星（包括连锁星星）直接翻译成一条 slide code，交给 extend slide 处理
+                    // 其余 simai 星星（包括连锁星星和含 slide code 段的连锁星星）直接翻译成一条 slide code，交给 extend slide 处理
                     var slideCode = SimaiSlideTranslator.TranslateChain(shapeTexts);
-                    CreateExtendSlideFromCode(timing, note, slideCode, eachNotes);
+                    CreateExtendSlideFromCode(timing, note, slideCode, shapeTexts, eachNotes);
                 }
                 else
                 {
@@ -1536,7 +1560,7 @@ namespace MajdataPlay.Scenes.Game
                 throw new InvalidSimaiSyntaxException(timing.RawTextPositionX, timing.RawTextPositionY, note.RawContent);
             }
             var slideCode = note.RawContent.Substring(0, endFlagPos + 2);
-            CreateExtendSlideFromCode(timing, note, slideCode, eachNotes);
+            CreateExtendSlideFromCode(timing, note, slideCode, null, eachNotes);
         }
         /// <summary>
         /// Builds an extend slide from a slide code: rotates the code with the chart, parses it, uses the judge table
@@ -1546,17 +1570,23 @@ namespace MajdataPlay.Scenes.Game
         /// <param name="timing">The timing point of the slide note.</param>
         /// <param name="note">The slide note, which carries the start time, duration and flags of the whole slide.</param>
         /// <param name="slideCode">The slide code without duration, as written in the chart or translated from simai.</param>
+        /// <param name="simaiSegments">
+        /// The simai segments <paramref name="slideCode"/> was translated from, such as <c>1-4</c> and <c>4q7</c>, or
+        /// <see langword="null"/> when the slide was written as slide code.
+        /// </param>
         /// <param name="eachNotes">Receives the stars created for the slide head.</param>
         /// <exception cref="ArgumentException">Thrown when <paramref name="slideCode"/> is not valid slide code.</exception>
         /// <exception cref="ArgumentOutOfRangeException">Thrown when the slide code does not start at a key between 1 and 8.</exception>
         private void CreateExtendSlideFromCode(SimaiTimingPoint timing,
                                                FoldedSimaiNote note,
                                                string slideCode,
+                                               IReadOnlyList<string>? simaiSegments,
                                                in IList<NotePoolingInfo?> eachNotes)
         {
             // 谱面旋转和随机模式让整条星星绕圆心旋转
-            var rotatedCode = SlideCodeShape.Rotate(slideCode, GetSlideRotation(slideCode[0] - '0'));
-            var slideMetadata = ExtendSlideHelper.CreateSlideEntry(SlideCodeParser.Parse(rotatedCode));
+            var rotation = GetSlideRotation(slideCode[0] - '0');
+            var rotatedCode = SlideCodeShape.Rotate(slideCode, rotation);
+            var slideMetadata = CreateSlideMetadata(rotatedCode, simaiSegments, rotation);
             // 解析完毕后按形状查询预定义表；没有预定义表时 ExtendSlideDrop 使用 slide code 算法生成的判定表
             var predefinedTable = SlideTables.FindTableBySlideCode(rotatedCode);
             var judgeAreas = slideMetadata.JudgeAreaQueue;
@@ -1641,6 +1671,34 @@ namespace MajdataPlay.Scenes.Game
                 StarInfos = starInfos
             }, extendSlide.Length, extendSlide.SlideLength);
             AddSlideToQueue(timing, extendSlide);
+        }
+        /// <summary>
+        /// Parses a rotated slide code into extend slide metadata; a simai connection slide places its arrows in the
+        /// style of <see cref="SlidePathStyle"/>.
+        /// </summary>
+        /// <param name="rotatedCode">The slide code of the whole slide, already rotated with the chart.</param>
+        /// <param name="simaiSegments">
+        /// The simai segments the slide code was translated from, or <see langword="null"/> when it was written as slide code.
+        /// </param>
+        /// <param name="rotation">The clockwise rotation in keys that turned the slide code into <paramref name="rotatedCode"/>.</param>
+        /// <returns>The metadata of the slide.</returns>
+        /// <exception cref="ArgumentException">Thrown when a slide code or a simai segment is invalid.</exception>
+        /// <exception cref="ArgumentOutOfRangeException">Thrown when <see cref="SlidePathStyle"/> is not a defined style.</exception>
+        private ExtendSlideMetadata CreateSlideMetadata(string rotatedCode, IReadOnlyList<string>? simaiSegments, int rotation)
+        {
+            var slidePath = SlideCodeParser.Parse(rotatedCode);
+            if (simaiSegments is null || simaiSegments.Count < 2)
+            {
+                return ExtendSlideHelper.CreateSlideEntry(slidePath);
+            }
+            // 每一段单独解析，以便按单独的 slide 放箭头
+            var segmentPaths = new ParametricSlidePath[simaiSegments.Count];
+            for (var i = 0; i < simaiSegments.Count; i++)
+            {
+                var segmentCode = SlideCodeShape.Rotate(SimaiSlideTranslator.Translate(simaiSegments[i]), rotation);
+                segmentPaths[i] = SlideCodeParser.Parse(segmentCode);
+            }
+            return ExtendSlideHelper.CreateConnSlideEntry(slidePath, segmentPaths, SlidePathStyle);
         }
         /// <summary>
         /// Gets the clockwise rotation, in keys, that chart rotation and random mode apply to a slide starting at a key.

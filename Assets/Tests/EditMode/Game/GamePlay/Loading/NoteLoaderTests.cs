@@ -450,6 +450,10 @@ namespace MajdataPlay.Tests.Game.GamePlay.Loading
         [TestCase("1-3[8:1]-4[8:1]")]
         [TestCase("1w4[8:1]")]
         [TestCase("1w5[8:1]-3[8:1]")]
+        [TestCase("1^2^3Q9[1:1]")]
+        [TestCase("1^2^3Q9K[1:1]")]
+        [TestCase("1^2^3Q9K9[1:1]")]
+        [TestCase("1Q9K3-7")]
         public void CreateSlideGroup_RejectsInvalidChains(string content)
         {
             _loader.slidePrefab = CreateSlidePrefabs();

@@ -159,6 +159,129 @@ namespace MajdataPlay.Tests.Game.GamePlay.Parsing
             Assert.Throws<ArgumentNullException>(() => SimaiSlideTranslator.TranslateChain(null!));
         }
 
+        /// <summary>Checks that a segment written as slide code is returned without shorthand.</summary>
+        /// <param name="segment">The slide code segment.</param>
+        /// <param name="expected">The expected slide code.</param>
+        [TestCase("3Q9K4", "3Q9K4")]
+        [TestCase("1P33K4", "1P3P3K4")]
+        [TestCase("2K5", "2K5")]
+        [TestCase("1A357K1", "1A3A5A7K1")]
+        [TestCase("4CK8", "4CK8")]
+        public void Translate_NormalizesSlideCodeSegments(string segment, string expected)
+        {
+            Assert.That(SimaiSlideTranslator.Translate(segment), Is.EqualTo(expected));
+        }
+
+        /// <summary>Checks that malformed slide code segments are rejected.</summary>
+        /// <param name="segment">The malformed segment.</param>
+        [TestCase("3Q9")]
+        [TestCase("3Q9K")]
+        [TestCase("3Q9K4^5")]
+        [TestCase("3Q9K9")]
+        [TestCase("9Q9K4")]
+        [TestCase("3Q^9K4")]
+        [TestCase("1C3K5")]
+        public void Translate_RejectsMalformedSlideCodeSegments(string segment)
+        {
+            Assert.Throws<ArgumentException>(() => SimaiSlideTranslator.Translate(segment));
+        }
+
+        /// <summary>
+        /// Checks that simai segments and slide code segments chain into one slide code, in either order, as in
+        /// <c>1^2^3Q9K4[1:100]</c> and <c>1Q9K3-7[1:1]</c>.
+        /// </summary>
+        /// <param name="segments">The segments, separated by commas.</param>
+        /// <param name="expected">The expected slide code.</param>
+        [TestCase("1^2,2^3,3Q9K4", "1Q9A2Q9A3Q9K4")]
+        [TestCase("1Q9K3,3-7", "1Q9A3K7")]
+        [TestCase("1-4,4A6K8", "1A4A6K8")]
+        [TestCase("1Q9K3,3Q9K5", "1Q9A3Q9K5")]
+        [TestCase("1A357K1,1>1", "1A3A5A7A1Q9K1")]
+        public void TranslateChain_JoinsSlideCodeSegments(string segments, string expected)
+        {
+            var code = SimaiSlideTranslator.TranslateChain(segments.Split(','));
+
+            Assert.That(code, Is.EqualTo(expected));
+            Assert.DoesNotThrow(() => SlideCodeParser.Parse(code));
+        }
+
+        /// <summary>Checks which characters start a slide code segment.</summary>
+        /// <param name="c">The character.</param>
+        /// <param name="expected">Whether it is a slide code command.</param>
+        [TestCase('A', true)]
+        [TestCase('B', true)]
+        [TestCase('C', true)]
+        [TestCase('P', true)]
+        [TestCase('Q', true)]
+        [TestCase('K', true)]
+        [TestCase('V', false)]
+        [TestCase('p', false)]
+        [TestCase('q', false)]
+        [TestCase('-', false)]
+        [TestCase('^', false)]
+        [TestCase('3', false)]
+        public void IsSlideCodeCommand_AcceptsOnlySlideCodeCommands(char c, bool expected)
+        {
+            Assert.That(SimaiSlideTranslator.IsSlideCodeCommand(c), Is.EqualTo(expected));
+        }
+
+        /// <summary>Checks that a slide code segment ends right after the end key that follows K.</summary>
+        /// <param name="text">The slide note text.</param>
+        /// <param name="commandIndex">The index of the first command.</param>
+        /// <param name="expected">The index after the end key.</param>
+        [TestCase("1^2^3Q9K4[1:100]", 5, 9)]
+        [TestCase("1P3K6[8:1]", 1, 5)]
+        [TestCase("1Q9K3-7[1:1]", 1, 5)]
+        [TestCase("1A357K1>1[1:1]", 1, 7)]
+        [TestCase("1Q9K3Q9K5[1:1]", 5, 9)]
+        public void FindSlideCodeEnd_StopsAfterTheEndKey(string text, int commandIndex, int expected)
+        {
+            Assert.That(SimaiSlideTranslator.FindSlideCodeEnd(text, commandIndex), Is.EqualTo(expected));
+        }
+
+        /// <summary>Checks that slide code segments without a command, an end flag or an end key are rejected.</summary>
+        /// <param name="text">The slide note text.</param>
+        /// <param name="commandIndex">The index where the commands should start.</param>
+        [TestCase("1^2[1:1]", 1)]
+        [TestCase("1Q9", 1)]
+        [TestCase("1Q9K", 1)]
+        [TestCase("1Q9K[1:1]", 1)]
+        [TestCase("1Q^9K4", 1)]
+        [TestCase("1Q9K4", 5)]
+        [TestCase("1Q9K4", -1)]
+        public void FindSlideCodeEnd_RejectsMalformedSlideCode(string text, int commandIndex)
+        {
+            Assert.Throws<ArgumentException>(() => SimaiSlideTranslator.FindSlideCodeEnd(text, commandIndex));
+        }
+
+        /// <summary>
+        /// Checks which slide notes are one slide code, built directly, and which are split into segments, including
+        /// connection slides that contain slide code segments.
+        /// </summary>
+        /// <param name="text">The slide note text.</param>
+        /// <param name="expected">Whether the note is one slide code.</param>
+        [TestCase("1P3K6[8:1]", true)]
+        [TestCase("1P3K6", true)]
+        [TestCase("1P33K4[8:1]", true)]
+        [TestCase("1P3K", true)]
+        [TestCase("1^2^3Q9K4[1:100]", false)]
+        [TestCase("1Q9K3-7[1:1]", false)]
+        [TestCase("1Q9K3Q9K5[1:1]", false)]
+        [TestCase("1-4[8:1]", false)]
+        [TestCase("1V35[8:1]", false)]
+        public void IsSingleSlideCode_SeparatesSlideCodeFromConnectionSlides(string text, bool expected)
+        {
+            Assert.That(SimaiSlideTranslator.IsSingleSlideCode(text), Is.EqualTo(expected));
+        }
+
+        /// <summary>Checks that the slide code helpers reject missing text.</summary>
+        [Test]
+        public void SlideCodeHelpers_RejectNull()
+        {
+            Assert.Throws<ArgumentNullException>(() => SimaiSlideTranslator.FindSlideCodeEnd(null!, 1));
+            Assert.Throws<ArgumentNullException>(() => SimaiSlideTranslator.IsSingleSlideCode(null!));
+        }
+
         /// <summary>
         /// Checks that a connection slide whose path is an official shape uses that predefined table: 1-3-5 draws the
         /// same path as 1V35.

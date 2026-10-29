@@ -3,6 +3,7 @@ using MajdataPlay.Scenes.Game.Notes.Slide.Utils;
 using MajdataPlay.Scenes.Game.Parsing;
 using MajdataPlay.Scenes.Game.Parsing.Slide;
 using MajdataPlay.Scenes.Game.Utils;
+using MajdataPlay.Settings;
 using NUnit.Framework;
 using UnityEditor;
 using UnityEngine;
@@ -146,6 +147,38 @@ namespace MajdataPlay.Tests.Game.GamePlay.Utils
             Assert.That(Vector3.Distance(expected, actual), Is.LessThan(PathTolerance), code);
         }
 
+        /// <summary>
+        /// Checks that the generated constant of a connection slide puts the star on the path where the last judge area
+        /// begins, although the star poses include segment joints without arrows.
+        /// </summary>
+        /// <param name="style">The style of the connection slide.</param>
+        /// <param name="first">The first simai segment.</param>
+        /// <param name="second">The second simai segment.</param>
+        [TestCase(SlidePathStyle.Classic, "1^2", "2^3")]
+        [TestCase(SlidePathStyle.Medium, "1^2", "2^3")]
+        [TestCase(SlidePathStyle.Classic, "2^1", "1q8")]
+        [TestCase(SlidePathStyle.Classic, "1-4", "4q7")]
+        [TestCase(SlidePathStyle.Medium, "1q8", "8-4")]
+        [TestCase(SlidePathStyle.Classic, "1>5", "5-2")]
+        public void GeneratedConst_PlacesTheStarWhereTheLastAreaBeginsOnConnectionSlides(SlidePathStyle style, string first, string second)
+        {
+            var chainPath = SlideCodeParser.Parse(SimaiSlideTranslator.TranslateChain(new[] { first, second }));
+            var segmentPaths = new[]
+            {
+                SlideCodeParser.Parse(SimaiSlideTranslator.Translate(first)),
+                SlideCodeParser.Parse(SimaiSlideTranslator.Translate(second))
+            };
+            var areas = SlideDataBuilder.BuildSlideAreas(chainPath);
+            var metadata = ExtendSlideHelper.CreateConnSlideEntry(chainPath, segmentPaths, style);
+            var judgePoint = chainPath.GetPointAt(areas[^2].LengthAfterFinish / chainPath.GetPathLength());
+            var expected = new Vector3((float)judgePoint.Real, (float)judgePoint.Imaginary);
+
+            var actual = GetStarPosition(GetExtendStarPositions(metadata), 1f - metadata.SlideConst);
+
+            TestContext.WriteLine($"{first}{second.Substring(1)} {style}: const {metadata.SlideConst}, path {expected}, star {actual}, distance {Vector3.Distance(expected, actual)}");
+            Assert.That(Vector3.Distance(expected, actual), Is.LessThan(PathTolerance), $"{first}{second.Substring(1)} {style}");
+        }
+
         /// <summary>Checks that the star skips only the conditional last arrow, and never the path start or end.</summary>
         [Test]
         public void IsStarPose_SkipsOnlyTheConditionalLastArrow()
@@ -187,14 +220,11 @@ namespace MajdataPlay.Tests.Game.GamePlay.Utils
         /// <returns>The poses the star passes through.</returns>
         private static List<Vector3> GetExtendStarPositions(ExtendSlideMetadata metadata)
         {
-            var poses = metadata.ArrowPoses;
+            var poses = metadata.StarPoses;
             var positions = new List<Vector3>(poses.Length);
             for (var i = 0; i < poses.Length; i++)
             {
-                if (ExtendSlideHelper.IsStarPose(i, poses.Length, metadata.ConditionalLastArrow))
-                {
-                    positions.Add(new Vector3(poses[i].X, poses[i].Y));
-                }
+                positions.Add(new Vector3(poses[i].X, poses[i].Y));
             }
             return positions;
         }
