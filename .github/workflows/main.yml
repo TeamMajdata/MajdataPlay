@@ -178,7 +178,7 @@ jobs:
 
       - name: Fix Android SDK and NDK paths
         run: |
-          cd ${{ env.UNITY_PROJECT_EXPORT_PATH }}
+          cd "${{ env.UNITY_PROJECT_EXPORT_PATH }}"
           
           UNITY_ANDROID_PLAYER="/Applications/Unity/Hub/Editor/${{ env.UNITY_VERSION }}/PlaybackEngines/AndroidPlayer"
           BAD_NDK="$UNITY_ANDROID_PLAYER/NDK"
@@ -187,8 +187,8 @@ jobs:
           GOOD_NDK="$ANDROID_HOME/ndk/23.1.7779620"
           GOOD_SDK="$ANDROID_HOME"
           
-          find . -type f \( -name "*.gradle" -o -name "*.properties" \) -exec perl -pi -e "s|\Q$BAD_NDK\E|\Q$GOOD_NDK\E|g" {} +
-          find . -type f \( -name "*.gradle" -o -name "*.properties" \) -exec perl -pi -e "s|\Q$BAD_SDK\E|\Q$GOOD_SDK\E|g" {} +
+          find . -type f \( -name "*.gradle" -o -name "*.properties" \) -exec perl -pi -e "s|\Q$BAD_NDK\E|$GOOD_NDK|g" {} +
+          find . -type f \( -name "*.gradle" -o -name "*.properties" \) -exec perl -pi -e "s|\Q$BAD_SDK\E|$GOOD_SDK|g" {} +
           
           echo "sdk.dir=$GOOD_SDK" > local.properties
           echo "ndk.dir=$GOOD_NDK" >> local.properties

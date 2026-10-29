@@ -98,6 +98,27 @@ class LicensingTests(unittest.TestCase):
 
 
 class WorkspaceTests(unittest.TestCase):
+    @unittest.skipIf(os.name == "nt", "Run Bash/Perl Android path tests on the macOS runner.")
+    def test_android_sdk_paths_are_literal_gradle_strings(self):
+        workflow = (ROOT / ".github/workflows/main.yml").read_text(encoding="utf-8")
+        block = workflow.split("      - name: Fix Android SDK and NDK paths\n", 1)[1]
+        script = block.split("        run: |\n", 1)[1].split("\n      - name:", 1)[0]
+        script = "\n".join(line[10:] for line in script.splitlines())
+        script = script.replace("${{ env.UNITY_PROJECT_EXPORT_PATH }}", ".")
+        script = script.replace("${{ env.UNITY_VERSION }}", "6000.3.17f1")
+        with tempfile.TemporaryDirectory() as temporary:
+            project = Path(temporary)
+            sdk = project / "sdk-with.dots"
+            unity_android = "/Applications/Unity/Hub/Editor/6000.3.17f1/PlaybackEngines/AndroidPlayer"
+            gradle = project / "build.gradle"
+            gradle.write_text(f'ndkPath "{unity_android}/NDK"\nsdkPath "{unity_android}/SDK"\n')
+            environment = dict(os.environ, ANDROID_HOME=str(sdk))
+            subprocess.run(["bash", "-c", script], cwd=project, env=environment,
+                           check=True, capture_output=True)
+            self.assertEqual(gradle.read_text(),
+                             f'ndkPath "{sdk}/ndk/23.1.7779620"\nsdkPath "{sdk}"\n')
+            self.assertIn(f"sdk.dir={sdk}\n", (project / "local.properties").read_text())
+
     def test_ios_export_preserves_the_native_incremental_project(self):
         workflow = (ROOT / ".github/workflows/main.yml").read_text(encoding="utf-8")
         apple_job = workflow.split("  build-apple:", 1)[1].split("  publish-nightly:", 1)[0]

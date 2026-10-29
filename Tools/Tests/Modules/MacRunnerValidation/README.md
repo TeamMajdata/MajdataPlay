@@ -12,7 +12,9 @@ logs, actionable administrator setup errors, activation failure handling, and
 the actual workflow cleanup scripts. Cleanup must retain Git metadata,
 `Library/Bee`, Gradle caches and Xcode DerivedData while removing stale artifacts,
 signing files and injected build scripts. Repeating cleanup and an initial run
-without a checkout are covered.
+without a checkout are covered. Android SDK/NDK replacement is exercised with
+paths containing hyphens and dots to catch accidental Perl replacement escaping.
+The iOS append option and persistent Xcode build settings are checked as well.
 
 This suite does not validate Unity entitlements, network activation, project
 import, IL2CPP output, Xcode signing, or Android/iOS/macOS Player behavior. Run a
