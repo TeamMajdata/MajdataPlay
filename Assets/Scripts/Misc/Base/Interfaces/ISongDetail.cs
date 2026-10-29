@@ -1,4 +1,4 @@
-﻿using Cysharp.Threading.Tasks;
+using Cysharp.Threading.Tasks;
 using MajdataPlay.IO;
 using MajdataPlay.Net;
 using MajSimai;
@@ -19,6 +19,7 @@ namespace MajdataPlay
         string Description { get; }
         ReadOnlySpan<string> Designers { get; }
         ReadOnlySpan<string> Levels { get; }
+        ReadOnlySpan<string> Tags { get; }
         ChartStorageLocation Location { get; }
         DateTime Timestamp { get; }
         string Hash { get; }

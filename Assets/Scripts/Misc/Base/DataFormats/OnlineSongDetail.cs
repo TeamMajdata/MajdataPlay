@@ -30,20 +30,9 @@ namespace MajdataPlay
         public string Title { get; init; }
         public string Artist { get; init; }
         public string Description { get; init; } = string.Empty;
-        public ReadOnlySpan<string> Designers
-        {
-            get
-            {
-                return _designers;
-            }
-        }
-        public ReadOnlySpan<string> Levels
-        {
-            get
-            {
-                return _levels;
-            }
-        }
+        public ReadOnlySpan<string> Designers { get => _designers; }
+        public ReadOnlySpan<string> Levels { get => _levels; }
+        public ReadOnlySpan<string> Tags { get => _tags; }
         public ChartStorageLocation Location { get; } = ChartStorageLocation.Online;
         public DateTime Timestamp { get; init; }
         public string Hash { get; init; }
@@ -68,6 +57,7 @@ namespace MajdataPlay
 
         private readonly string[] _designers = new string[7];
         private readonly string[] _levels = new string[7];
+        private readonly string[] _tags = Array.Empty<string>();
 
         private bool _isDisposed = false;
         private bool _isPreloaded = false;
@@ -149,15 +139,15 @@ namespace MajdataPlay
             Id = songDetail.Id;
             Timestamp = songDetail.Timestamp;
 
+            var tagCount = songDetail.Tags.Length + songDetail.PublicTags.Length;
+            if (tagCount != 0)
+            {
+                _tags = songDetail.Tags.Concat(songDetail.PublicTags)
+                                       .ToArray();
+            }
+            Description = songDetail.Description;
             using (var sb = ZString.CreateStringBuilder())
             {
-                sb.AppendLine(Description);
-                foreach (var tag in songDetail.Tags.Concat(songDetail.PublicTags))
-                {
-                    sb.AppendLine(tag);
-                }
-                Description = sb.ToString();
-                sb.Clear();
                 sb.Append(songDetail.Uploader);
                 sb.Append('@');
                 sb.Append(songDetail.Designer);
