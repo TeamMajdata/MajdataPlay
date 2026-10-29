@@ -65,7 +65,7 @@ def prepare_license(editor, license_directory, state_directory, environment, run
         result = run(
             [str(editor), "-batchmode", "-nographics", "-quit",
              "-serial", serial, "-username", email, "-password", password,
-             "-projectPath", project, "-logFile", str(log_file)],
+             "-createProject", project, "-logFile", str(log_file)],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             timeout=300,

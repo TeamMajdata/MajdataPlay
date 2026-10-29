@@ -69,6 +69,8 @@ class LicensingTests(unittest.TestCase):
     def test_first_activation_keeps_license_and_hides_output(self):
         def activate(command, **kwargs):
             self.assertIn(SERIAL, command)
+            self.assertIn("-createProject", command)
+            self.assertNotIn("-projectPath", command)
             self.assertNotIn("-returnlicense", command)
             self.assertEqual(kwargs["stdout"], subprocess.DEVNULL)
             self.assertEqual(kwargs["stderr"], subprocess.DEVNULL)
