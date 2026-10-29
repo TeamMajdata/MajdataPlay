@@ -53,6 +53,11 @@ Android ARM64 Vulkan tracing, serialization and asynchronous warmup device probe
 Production scene capture is documented in
 [Rendering](../../../Assets/Scripts/Rendering/README.md).
 
+## Frame latency
+
+See [Frame latency validation](FrameLatencyValidation.md) for comparing render queue depth and
+display latency between graphics APIs with the in-game frame timing diagnostics and PresentMon.
+
 ## Translation Editor
 
 See [Translation editor validation](TranslationEditorValidation.md) for the static

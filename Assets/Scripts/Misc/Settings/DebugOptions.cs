@@ -161,6 +161,9 @@ namespace MajdataPlay.Settings
         /// <summary>Gets or sets the maximum queued graphics frames.</summary>
         [HideInSettingUI]
         public int MaxQueuedFrames { get; set; } = 2;
+        /// <summary>Gets or sets whether frame timing and render queue latency are measured, logged and shown in the runtime info overlay.</summary>
+        [HideInSettingUI]
+        public bool FrameTimingDiagnostics { get; set; } = false;
 #if UNITY_IOS || UNITY_ANDROID
         /// <summary>Gets or sets the initial pooled tap-note capacity.</summary>
         [HideInSettingUI]
