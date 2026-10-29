@@ -93,15 +93,34 @@ jobs:
     env:
       CONFIGURATION: Release
       TARGET_PLATFORM: Android
-      PROJECT_ROOT: ${{ github.workspace }}
+      CI_PROJECT_PATH: projects/Android
+      PROJECT_ROOT: ${{ github.workspace }}/projects/Android
       UNITY_PROJECT_EXPORT_PATH: Release/Android/MajdataPlay
 
+    defaults:
+      run:
+        shell: bash
+        working-directory: ${{ github.workspace }}/projects/Android
+
     steps:
+      - name: Clean previous job files while retaining incremental build data
+        working-directory: ${{ github.workspace }}
+        run: |
+          set -euo pipefail
+          if [[ -d "$PROJECT_ROOT/.git" ]]; then
+            git -C "$PROJECT_ROOT" clean -ffdx -e /Library/ -e /Release/
+          fi
+
       - name: Checkout the repository
         uses: actions/checkout@v4
         with:
+          path: ${{ env.CI_PROJECT_PATH }}
           submodules: recursive
           fetch-depth: 0
+          clean: false
+
+      - name: Prepare the persistent Unity license
+        run: python3 Tools/CI/prepare_unity_license.py
 
       - name: Extract version from unity project
         run: |
@@ -119,27 +138,21 @@ jobs:
           echo "Android AAB version code: $COUNT"
           echo "Android APK version code: $COMMIT_COUNT"
 
-      - name: Cache Unity Library
-        uses: actions/cache@v4
-        with:
-          path: Library
-          key: Library-${{ runner.os }}-${{ env.TARGET_PLATFORM }}-${{ hashFiles('ProjectSettings/ProjectVersion.txt', 'ProjectSettings/**', 'Packages/manifest.json', 'Packages/packages-lock.json') }}
-          restore-keys: |
-            Library-${{ runner.os }}-${{ env.TARGET_PLATFORM }}-
-
       - name: Install Fastlane
         run: gem install fastlane -v 2.236.1
 
       - name: Export Android Project
         uses: game-ci/unity-builder@v4
         with:
+          skipActivation: true
+          projectPath: ${{ env.CI_PROJECT_PATH }}
           unityVersion: ${{ env.UNITY_VERSION }}
           targetPlatform: ${{ env.TARGET_PLATFORM }}
           versioning: Custom
           version: ${{ env.BUNDLE_VERSION_WITH_HASH }}
           androidVersionCode: ${{ env.BUNDLE_VERSION_CODE_FOR_APK }}
           buildName: MajdataPlay
-          buildsPath: ${{ env.CONFIGURATION }}
+          buildsPath: ${{ env.CI_PROJECT_PATH }}/${{ env.CONFIGURATION }}
           androidExportType: androidStudioProject
           androidSymbolType: debugging
 
@@ -308,7 +321,7 @@ jobs:
       - name: Collect Android APK symbols
         run: |
           set -euo pipefail
-          SYMBOLS_DIR="$GITHUB_WORKSPACE/${{ env.UNITY_PROJECT_EXPORT_PATH }}/unityLibrary/symbols"
+          SYMBOLS_DIR="$PROJECT_ROOT/${{ env.UNITY_PROJECT_EXPORT_PATH }}/unityLibrary/symbols"
           # Snapshot APK symbols before the Play build can replace them.
           for ABI in armeabi-v7a arm64-v8a; do
             for LIBRARY in libmain.so libunity.so libil2cpp.so; do
@@ -317,7 +330,7 @@ jobs:
                 exit 1
               fi
             done
-            SYMBOLS_ZIP="$GITHUB_WORKSPACE/out/MajdataPlay-Android-${{ env.BUNDLE_VERSION_WITH_HASH }}-nightly.$ABI.symbols.zip"
+            SYMBOLS_ZIP="$PROJECT_ROOT/out/MajdataPlay-Android-${{ env.BUNDLE_VERSION_WITH_HASH }}-nightly.$ABI.symbols.zip"
             (cd "$SYMBOLS_DIR" && zip -qry "$SYMBOLS_ZIP" "$ABI")
           done
 
@@ -357,7 +370,7 @@ jobs:
       - name: Collect Android Play symbols
         run: |
           set -euo pipefail
-          SYMBOLS_DIR="$GITHUB_WORKSPACE/${{ env.UNITY_PROJECT_EXPORT_PATH }}/unityLibrary/symbols"
+          SYMBOLS_DIR="$PROJECT_ROOT/${{ env.UNITY_PROJECT_EXPORT_PATH }}/unityLibrary/symbols"
           for ABI in armeabi-v7a arm64-v8a; do
             for LIBRARY in libmain.so libunity.so libil2cpp.so; do
               if [[ ! -s "$SYMBOLS_DIR/$ABI/$LIBRARY" ]]; then
@@ -367,14 +380,14 @@ jobs:
             done
           done
           # Google Play expects all ABI directories at the root of one archive.
-          SYMBOLS_ZIP="$GITHUB_WORKSPACE/out/MajdataPlay-Android-${{ env.BUNDLE_VERSION_WITH_HASH }}-nightly.play.symbols.zip"
+          SYMBOLS_ZIP="$PROJECT_ROOT/out/MajdataPlay-Android-${{ env.BUNDLE_VERSION_WITH_HASH }}-nightly.play.symbols.zip"
           (cd "$SYMBOLS_DIR" && zip -qry "$SYMBOLS_ZIP" armeabi-v7a arm64-v8a)
 
       - name: Upload Android symbols as workflow artifact
         uses: actions/upload-artifact@v4
         with:
           name: MajdataPlay-Android-symbols
-          path: out/*.symbols.zip
+          path: ${{ env.CI_PROJECT_PATH }}/out/*.symbols.zip
           if-no-files-found: error
           retention-days: 7
 
@@ -382,7 +395,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: MajdataPlay-Android-foss-APK
-          path: out/*.apk
+          path: ${{ env.CI_PROJECT_PATH }}/out/*.apk
           if-no-files-found: error
           retention-days: 7
 
@@ -390,7 +403,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: MajdataPlay-Android-Play-AAB
-          path: out/*.aab
+          path: ${{ env.CI_PROJECT_PATH }}/out/*.aab
           if-no-files-found: error
           retention-days: 7
 
@@ -402,8 +415,8 @@ jobs:
         with:
           serviceAccountJsonPlainText: ${{ secrets.PLAY_DEPLOY_ACCOUNT_JSON }}
           packageName: net.majdata.majdataplay
-          releaseFiles: out/MajdataPlay-Android-${{ env.BUNDLE_VERSION_WITH_HASH }}-nightly.aab
-          debugSymbols: out/MajdataPlay-Android-${{ env.BUNDLE_VERSION_WITH_HASH }}-nightly.play.symbols.zip
+          releaseFiles: ${{ env.CI_PROJECT_PATH }}/out/MajdataPlay-Android-${{ env.BUNDLE_VERSION_WITH_HASH }}-nightly.aab
+          debugSymbols: ${{ env.CI_PROJECT_PATH }}/out/MajdataPlay-Android-${{ env.BUNDLE_VERSION_WITH_HASH }}-nightly.play.symbols.zip
           track: internal
           status: completed
 
@@ -420,13 +433,33 @@ jobs:
     env:
       CONFIGURATION: ${{ matrix.configuration }}
       TARGET_PLATFORM: ${{ matrix.platform }}
+      CI_PROJECT_PATH: projects/${{ matrix.platform }}
+      PROJECT_ROOT: ${{ github.workspace }}/projects/${{ matrix.platform }}
+
+    defaults:
+      run:
+        shell: bash
+        working-directory: ${{ github.workspace }}/projects/${{ matrix.platform }}
 
     steps:
+      - name: Clean previous job files while retaining incremental build data
+        working-directory: ${{ github.workspace }}
+        run: |
+          set -euo pipefail
+          if [[ -d "$PROJECT_ROOT/.git" ]]; then
+            git -C "$PROJECT_ROOT" clean -ffdx -e /Library/ -e /Release/
+          fi
+
       - name: Checkout the repository
         uses: actions/checkout@v4
         with:
+          path: ${{ env.CI_PROJECT_PATH }}
           submodules: recursive
           fetch-depth: 0
+          clean: false
+
+      - name: Prepare the persistent Unity license
+        run: python3 Tools/CI/prepare_unity_license.py
 
       - name: Extract version from unity project
         run: |
@@ -441,23 +474,17 @@ jobs:
           echo "BUNDLE_VERSION_CODE=$BUILD_NUMBER" >> $GITHUB_ENV
           echo "Apple build number: $BUILD_NUMBER"
 
-      - name: Cache Unity Library
-        uses: actions/cache@v4
-        with:
-          path: Library
-          key: Library-${{ runner.os }}-${{ env.TARGET_PLATFORM }}-${{ hashFiles('ProjectSettings/ProjectVersion.txt', 'ProjectSettings/**', 'Packages/manifest.json', 'Packages/packages-lock.json') }}
-          restore-keys: |
-            Library-${{ runner.os }}-${{ env.TARGET_PLATFORM }}-
-
       - name: Build Release
         uses: game-ci/unity-builder@v4
         with:
+          skipActivation: true
+          projectPath: ${{ env.CI_PROJECT_PATH }}
           unityVersion: ${{ env.UNITY_VERSION }}
           targetPlatform: ${{ env.TARGET_PLATFORM }}
           versioning: Custom
           version: ${{ env.BUNDLE_VERSION }}
           buildName: MajdataPlay
-          buildsPath: ${{ env.CONFIGURATION }}
+          buildsPath: ${{ env.CI_PROJECT_PATH }}/${{ env.CONFIGURATION }}
           # The macOS player ships Apple silicon only: the x86_64 FFmpeg/libcurl dylibs are
           # Editor-only, and Unity drops ARM64-only plugins from a Universal player.
           buildMethod: ${{ env.TARGET_PLATFORM == 'StandaloneOSX' && 'MajdataPlay.Editor.CustomBuild.BuildRelease' || '' }}
@@ -551,7 +578,8 @@ jobs:
                 export_method: "app-store",
                 output_directory: ENV["IOS_EXPORT_DIR"],
                 output_name: "MajdataPlay.ipa",
-                clean: true,
+                clean: false,
+                derived_data_path: File.join(ENV["PROJECT_ROOT"], "Release", "iOS", "DerivedData"),
                 export_options: {
                   method: "app-store",
                   signingStyle: "manual",
@@ -655,7 +683,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: out-${{ env.TARGET_PLATFORM }}
-          path: out/*
+          path: ${{ env.CI_PROJECT_PATH }}/out/*
           if-no-files-found: error
           retention-days: 7
 
