@@ -5,6 +5,22 @@ as `majplay-ci`. Both services may use the existing HTTP proxy
 `http://127.0.0.1:10808`; configure it in their service environment, including
 lowercase `http_proxy` and `https_proxy` for tools that require them.
 
+## Three concurrent runner instances
+
+| Runner directory | Custom label | Build | Work directory |
+| --- | --- | --- | --- |
+| `~/actions-runner-android` | `majplay-android` | Android | `~/actions-runner-android/_work` |
+| `~/actions-runner-apple` | `majplay-apple` | macOS | `~/actions-runner-apple/_work-macos` |
+| `~/actions-runner-ios` | `majplay-ios` | iOS | `~/actions-runner-apple/_work` |
+
+All three runners register with `self-hosted`, `macOS`, and `ARM64` labels. The
+Apple matrix maps its two targets to different custom labels, so Android, macOS
+and iOS can run simultaneously on the Mac. Work directories must be distinct:
+concurrent jobs must not share the runner's `_temp` or `_actions` directories.
+The iOS runner deliberately inherits the former Apple work directory to preserve
+absolute paths in its existing IL2CPP cache. The macOS checkout is moved once to
+`_work-macos`; its Git objects and Library are retained.
+
 ## One-time license directory setup
 
 From an administrator account on the Mac:

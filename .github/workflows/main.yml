@@ -415,13 +415,18 @@ jobs:
 
   build-apple:
     name: Build (macOS/iOS)
-    runs-on: [self-hosted, macOS, ARM64, majplay-apple]
+    runs-on: [self-hosted, macOS, ARM64, "${{ matrix.runnerLabel }}"]
     if: ${{ github.event_name == 'push' || github.event_name == 'workflow_dispatch' }}
     strategy:
       fail-fast: false
       matrix:
         configuration: [Release]
         platform: [StandaloneOSX, iOS]
+        include:
+          - platform: StandaloneOSX
+            runnerLabel: majplay-apple
+          - platform: iOS
+            runnerLabel: majplay-ios
 
     env:
       CONFIGURATION: ${{ matrix.configuration }}

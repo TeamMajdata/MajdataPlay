@@ -145,6 +145,16 @@ class IosCacheTests(unittest.TestCase):
 
 
 class WorkspaceTests(unittest.TestCase):
+    def test_mobile_and_macos_builds_use_different_runner_labels(self):
+        workflow = (ROOT / ".github/workflows/main.yml").read_text(encoding="utf-8")
+        android_job = workflow.split("  build-android:", 1)[1].split("  build-apple:", 1)[0]
+        apple_job = workflow.split("  build-apple:", 1)[1].split("  publish-nightly:", 1)[0]
+        self.assertIn("runs-on: [self-hosted, macOS, ARM64, majplay-android]", android_job)
+        self.assertIn('runs-on: [self-hosted, macOS, ARM64, "${{ matrix.runnerLabel }}"]', apple_job)
+        self.assertIn("platform: StandaloneOSX\n            runnerLabel: majplay-apple", apple_job)
+        self.assertIn("platform: iOS\n            runnerLabel: majplay-ios", apple_job)
+        self.assertNotIn("max-parallel: 1", apple_job)
+
     def test_self_hosted_jobs_use_only_local_caches_and_skip_aab_artifacts(self):
         workflow = (ROOT / ".github/workflows/main.yml").read_text(encoding="utf-8")
         android_job = workflow.split("  build-android:", 1)[1].split("  build-apple:", 1)[0]
