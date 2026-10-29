@@ -98,6 +98,13 @@ class LicensingTests(unittest.TestCase):
 
 
 class WorkspaceTests(unittest.TestCase):
+    def test_ios_export_preserves_the_native_incremental_project(self):
+        workflow = (ROOT / ".github/workflows/main.yml").read_text(encoding="utf-8")
+        apple_job = workflow.split("  build-apple:", 1)[1].split("  publish-nightly:", 1)[0]
+        self.assertIn("'-AcceptExternalModificationsToPlayer'", apple_job)
+        self.assertIn("clean: false,", apple_job)
+        self.assertIn('"Release", "iOS", "DerivedData"', apple_job)
+
     @unittest.skipIf(os.name == "nt", "Run Bash checkout cleanup tests on the macOS runner.")
     def test_workflow_cleanup_preserves_git_bee_and_native_builds(self):
         workflow = (ROOT / ".github/workflows/main.yml").read_text(encoding="utf-8")

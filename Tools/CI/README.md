@@ -55,8 +55,9 @@ removed. Changing platforms does not replace another target's Library. No remote
 `actions/cache` restore/save is needed for these persistent self-hosted jobs.
 
 Unity's incremental build pipeline is enabled by default; retaining `Library/Bee`
-and stable paths allows IL2CPP to reuse unchanged work. The iOS Fastlane build
-also uses `clean: false` and a fixed `Release/iOS/DerivedData`. Changes to Unity,
+and stable paths allows IL2CPP to reuse unchanged work. The iOS Unity export uses
+`AcceptExternalModificationsToPlayer` (append mode), and Fastlane uses `clean: false`
+and a fixed `Release/iOS/DerivedData`. Changes to Unity,
 source, platform settings, generated Xcode projects or native toolchains may
 invalidate portions of the cache; this does not guarantee a no-op rebuild.
 

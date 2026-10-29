@@ -488,7 +488,7 @@ jobs:
           # The macOS player ships Apple silicon only: the x86_64 FFmpeg/libcurl dylibs are
           # Editor-only, and Unity drops ARM64-only plugins from a Universal player.
           buildMethod: ${{ env.TARGET_PLATFORM == 'StandaloneOSX' && 'MajdataPlay.Editor.CustomBuild.BuildRelease' || '' }}
-          customParameters: ${{ env.TARGET_PLATFORM == 'StandaloneOSX' && '-macOSArchitecture ARM64' || '' }}
+          customParameters: ${{ env.TARGET_PLATFORM == 'StandaloneOSX' && '-macOSArchitecture ARM64' || '-AcceptExternalModificationsToPlayer' }}
 
       - name: Import Apple certificate
         if: ${{ env.TARGET_PLATFORM == 'iOS' }}
