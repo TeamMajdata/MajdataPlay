@@ -1,7 +1,7 @@
-using UnityEngine;
-using TMPro;
-using MajdataPlay.IO;
 using MajdataPlay.Editor;
+using MajdataPlay.IO;
+using TMPro;
+using UnityEngine;
 
 namespace MajdataPlay.Scenes.SortFind
 {
@@ -9,20 +9,20 @@ namespace MajdataPlay.Scenes.SortFind
     public class SortFindManager : MonoBehaviour
     {
         [SerializeField]
-        TextMeshProUGUI _slotText;
+        private TextMeshProUGUI _slotText;
         [SerializeField]
-        TMP_InputField _searchBar;
+        private TMP_InputField _searchBar;
         [SerializeField]
-        GameObject _clearButton;
+        private GameObject _clearButton;
 
         [SerializeField, ReadOnlyField]
-        SortType _sortType;
+        private SortType _sortType;
 
-        bool _isExited = false;
-        int _selectIndex = (int)SortType.Default;
+        private bool _isExited = false;
+        private int _selectIndex = (int)SortType.Default;
 
-        readonly SortType[] _slots = new SortType[6];
-        readonly string[] _slotTexts = new string[6]    
+        private readonly SortType[] _slots = new SortType[6];
+        private readonly string[] _slotTexts = new string[6]
         {
             "MAJTEXT_SORTFIND_SortbyDefault",
             "MAJTEXT_SORTFIND_SortbyTime",
@@ -33,7 +33,7 @@ namespace MajdataPlay.Scenes.SortFind
         };
 
         // Start is called before the first frame update
-        void Start()
+        private void Start()
         {
             for (var i = 0; i < _slots.Length; i++)
             {
@@ -48,7 +48,7 @@ namespace MajdataPlay.Scenes.SortFind
             _selectIndex = (int)SongStorage.OrderBy.SortBy;
             SetActiveSort((SortType)_selectIndex);
         }
-        void Update()
+        private void Update()
         {
             if (InputManager.IsSensorClickCompletedInThisFrame(SensorArea.D5) ||
                 InputManager.IsButtonClickCompletedInThisFrame(ButtonZone.P1) ||
@@ -56,11 +56,11 @@ namespace MajdataPlay.Scenes.SortFind
             {
                 SortAndExit();
             }
-            else if (InputManager.IsSensorPressedInThisFrame(SensorArea.E6)||
+            else if (InputManager.IsSensorPressedInThisFrame(SensorArea.E6) ||
                      InputManager.IsSensorPressedInThisFrame(SensorArea.B5)) // <
             {
                 _selectIndex--;
-                if(_selectIndex < 0)
+                if (_selectIndex < 0)
                 {
                     _selectIndex = _slots.Length - 1;
                 }
@@ -76,7 +76,7 @@ namespace MajdataPlay.Scenes.SortFind
                 }
                 SetActiveSort((SortType)_selectIndex);
             }
-            
+
             if (InputManager.IsSensorPressedInThisFrame(SensorArea.E3))
             {
                 _searchBar.text = string.Empty;
@@ -90,22 +90,22 @@ namespace MajdataPlay.Scenes.SortFind
             }
         }
 
-        static void Focus(TMP_InputField inputField)
+        private static void Focus(TMP_InputField inputField)
         {
             inputField.Select();
             inputField.ActivateInputField();
             inputField.MoveTextEnd(false);
         }
 
-        void SetActiveSort(SortType sortType)
+        private void SetActiveSort(SortType sortType)
         {
             _slotText.text = _slotTexts[(int)sortType].i18n();
             _sortType = sortType;
         }
 
-        void SortAndExit()
+        private void SortAndExit()
         {
-            if(_isExited)
+            if (_isExited)
             {
                 return;
             }
