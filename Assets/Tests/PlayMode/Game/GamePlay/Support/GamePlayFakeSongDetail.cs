@@ -54,6 +54,9 @@ namespace MajdataPlay.Tests.Game.GamePlay.PlayMode.Support
         /// <summary>Gets the song timestamp.</summary>
         public DateTime Timestamp { get; } = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
 
+        /// <summary>Gets the song identity, which fakes derive from the hash.</summary>
+        public string Id => Hash;
+
         /// <summary>Gets the song hash.</summary>
         public string Hash { get; }
 

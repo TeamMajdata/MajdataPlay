@@ -78,6 +78,9 @@ namespace MajdataPlay.Tests.Game.Misc.Support
         /// <summary>Gets the song timestamp.</summary>
         public DateTime Timestamp { get; }
 
+        /// <summary>Gets the song identity, which fakes derive from the hash.</summary>
+        public string Id => Hash;
+
         /// <summary>Gets the chart hash.</summary>
         public string Hash { get; }
 

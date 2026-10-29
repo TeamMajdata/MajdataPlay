@@ -61,6 +61,9 @@ namespace MajdataPlay.Tests.Game.Scenes.PlayMode.Support
         /// <summary>Gets or sets the song timestamp.</summary>
         public DateTime Timestamp { get; set; } = new DateTime(2024, 1, 1);
 
+        /// <summary>Gets the song identity, which fakes derive from the hash.</summary>
+        public string Id => Hash;
+
         /// <summary>Gets the unique song hash.</summary>
         public string Hash { get; }
 

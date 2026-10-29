@@ -103,6 +103,7 @@ namespace MajdataPlay.Tests.Game.Misc.Base
                 Id = Guid.NewGuid().ToString(),
                 Title = "Online",
                 Artist = "Artist",
+                Description = "Description",
                 Designer = "designer",
                 Uploader = "uploader",
                 Hash = hash ?? ChartHash(s_chart),
@@ -144,7 +145,8 @@ namespace MajdataPlay.Tests.Game.Misc.Base
             Assert.That(song.Levels.Length, Is.EqualTo(7));
             Assert.That(song.Levels[6], Is.EqualTo("7"));
             Assert.That(song.Designers[0], Is.EqualTo("uploader@designer"));
-            Assert.That(song.Description, Does.Contain("tag").And.Contain("public"));
+            Assert.That(song.Description, Is.EqualTo("Description"));
+            Assert.That(song.Tags.ToArray(), Is.EqualTo(new[] { "tag", "public" }));
             Assert.That(song.IsMaidataLoaded, Is.False);
             Assert.That(song.IsVideoLoaded, Is.False);
             Assert.That(song.IsCoverLoaded, Is.False);
@@ -154,6 +156,23 @@ namespace MajdataPlay.Tests.Game.Misc.Base
             Assert.Throws<ArgumentNullException>(() => new OnlineSongDetail(null!, _endpoint, new MajnetSongDetail()));
             Assert.Throws<ArgumentNullException>(() => new OnlineSongDetail(_cache, null!, new MajnetSongDetail()));
             Assert.Throws<ArgumentNullException>(() => new OnlineSongDetail(_cache, _endpoint, null!));
+        }
+
+        /// <summary>Checks that the server identity is exposed and written into the cache's hidden marker file.</summary>
+        [Test]
+        public void Constructor_PersistsServerIdentity()
+        {
+            using var song = CreateSong("server-hash");
+
+            Assert.That(song.Id, Is.Not.Empty);
+            Assert.That(((ISongDetail)song).Id, Is.EqualTo(song.Id));
+            Assert.That(_cache.FindFileAt(".MajdataPlay/id")!.ReadAllText(), Is.EqualTo(song.Id));
+            Assert.That(_cache.FindEntry(".MajdataPlay")!.IsHidden, Is.True);
+
+            using var replaced = CreateSong("server-hash");
+
+            Assert.That(replaced.Id, Is.Not.EqualTo(song.Id));
+            Assert.That(_cache.FindFileAt(".MajdataPlay/id")!.ReadAllText(), Is.EqualTo(replaced.Id));
         }
 
         /// <summary>Checks that the chart is downloaded with its digest, cached on disk and in memory, and reused.</summary>

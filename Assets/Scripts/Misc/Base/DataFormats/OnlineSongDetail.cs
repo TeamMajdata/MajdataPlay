@@ -136,7 +136,8 @@ namespace MajdataPlay
 
             Hash = songDetail.Hash;
             _serverInfo = serverInfo;
-            Id = songDetail.Id;
+            Id = songDetail.Id ?? string.Empty;
+            PersistId(directory, Id);
             Timestamp = songDetail.Timestamp;
 
             var tagCount = songDetail.Tags.Length + songDetail.PublicTags.Length;
@@ -667,6 +668,25 @@ namespace MajdataPlay
             if (_isDisposed)
             {
                 throw new ObjectDisposedException(nameof(OnlineSongDetail));
+            }
+        }
+        /// <summary>Writes the server-assigned identity into the cache directory's <c>.MajdataPlay/id</c> marker file.</summary>
+        /// <param name="directory">The song-specific cache directory owning the identity marker.</param>
+        /// <param name="id">The server-assigned identity; a blank identity is not written.</param>
+        /// <remarks>The marker lets cached charts scanned offline as local charts keep the server identity.</remarks>
+        private static void PersistId(StorageDirectory directory, string id)
+        {
+            if (string.IsNullOrWhiteSpace(id))
+            {
+                return;
+            }
+            try
+            {
+                DirectoryIdentity.WriteId(directory, id);
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or NotSupportedException)
+            {
+                MajDebug.LogWarning(nameof(OnlineSongDetail), $"Failed to persist the identity of online chart '{id}': {exception.Message}");
             }
         }
         /// <summary>Finds a cached file by the centralized, case-insensitive supported-resource names.</summary>

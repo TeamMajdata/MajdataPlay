@@ -14,6 +14,8 @@ namespace MajdataPlay
 {
     public interface ISongDetail
     {
+        /// <summary>Gets the chart's identity, persisted in the chart directory's <c>.MajdataPlay/id</c> marker file.</summary>
+        string Id { get; }
         string Title { get; }
         string Artist { get; }
         string Description { get; }
