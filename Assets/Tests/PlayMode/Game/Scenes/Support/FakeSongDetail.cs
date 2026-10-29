@@ -52,6 +52,9 @@ namespace MajdataPlay.Tests.Game.Scenes.PlayMode.Support
         /// <summary>Gets the level labels indexed by chart level.</summary>
         public ReadOnlySpan<string> Levels => _levels;
 
+        /// <summary>Gets an empty tag list for the in-memory song.</summary>
+        public ReadOnlySpan<string> Tags => ReadOnlySpan<string>.Empty;
+
         /// <summary>Gets or sets where the song is stored.</summary>
         public ChartStorageLocation Location { get; set; } = ChartStorageLocation.Local;
 
