@@ -2,6 +2,7 @@ using Cysharp.Text;
 using Cysharp.Threading.Tasks;
 using MajdataPlay.Diagnostics;
 using MajdataPlay.i18n;
+using MajdataPlay.Rendering;
 using MajdataPlay.Settings;
 using System;
 using TMPro;
@@ -116,7 +117,7 @@ namespace MajdataPlay
                 return;
             }
 
-            _frameTimingDiagnostics.Tick(currentTime);
+            _frameTimingDiagnostics.Tick(currentTime, LowLatencyVSync.LastWaitMilliseconds);
         }
 
         void OnLanguageChanged(object? sender, Language language)

@@ -33,6 +33,15 @@ namespace MajdataPlay.Diagnostics
         /// <summary>The unscaled time at which the current window started, or null before the first frame.</summary>
         private TimeSpan? _windowStart;
 
+        /// <summary>The sum of the frame pacing waits reported in the current window, in milliseconds.</summary>
+        private double _pacingWaitSumMs;
+
+        /// <summary>The number of frame pacing waits reported in the current window.</summary>
+        private int _pacingWaitFrames;
+
+        /// <summary>Gets the average frame pacing wait of the last completed window, in milliseconds.</summary>
+        public double LastPacingWaitMs { get; private set; }
+
         /// <summary>Gets the averages of the last completed window.</summary>
         public FrameLatencySnapshot LastSnapshot { get; private set; }
 
@@ -47,8 +56,9 @@ namespace MajdataPlay.Diagnostics
 
         /// <summary>Captures the frame timing of this frame and completes the window when it is long enough.</summary>
         /// <param name="now">The current unscaled time.</param>
+        /// <param name="pacingWaitMs">The time the main thread waited for frame pacing at the start of this frame, in milliseconds.</param>
         /// <returns>Whether a window was completed and logged during this call. Always false when the build does not report frame timings.</returns>
-        public bool Tick(TimeSpan now)
+        public bool Tick(TimeSpan now, double pacingWaitMs)
         {
             if (!IsSupported)
             {
@@ -56,6 +66,7 @@ namespace MajdataPlay.Diagnostics
                 return false;
             }
 
+            AddPacingWait(pacingWaitMs);
             FrameTimingManager.CaptureFrameTimings();
             if (FrameTimingManager.GetLatestTimings(1, _timings) > 0)
             {
@@ -63,6 +74,14 @@ namespace MajdataPlay.Diagnostics
             }
 
             return TryCompleteWindow(now);
+        }
+
+        /// <summary>Adds the frame pacing wait of one frame to the current window.</summary>
+        /// <param name="pacingWaitMs">The wait in milliseconds.</param>
+        internal void AddPacingWait(double pacingWaitMs)
+        {
+            _pacingWaitSumMs += pacingWaitMs;
+            _pacingWaitFrames++;
         }
 
         /// <summary>Adds one frame timing unless the same frame was already added.</summary>
@@ -107,9 +126,12 @@ namespace MajdataPlay.Diagnostics
             }
 
             LastSnapshot = _statistics.GetSnapshot();
-            OverlaySummary = FormatOverlaySummary(LastSnapshot);
+            LastPacingWaitMs = _pacingWaitFrames > 0 ? _pacingWaitSumMs / _pacingWaitFrames : 0;
+            OverlaySummary = FormatOverlaySummary(LastSnapshot, LastPacingWaitMs);
             _statistics.Reset();
-            MajDebug.LogInfo(nameof(FrameTimingDiagnostics), FormatLogMessage(LastSnapshot));
+            _pacingWaitSumMs = 0;
+            _pacingWaitFrames = 0;
+            MajDebug.LogInfo(nameof(FrameTimingDiagnostics), FormatLogMessage(LastSnapshot, LastPacingWaitMs));
             return true;
         }
 
@@ -120,33 +142,39 @@ namespace MajdataPlay.Diagnostics
             _windowStart = null;
             _lastFrameStartTimestamp = 0;
             LastSnapshot = default;
+            LastPacingWaitMs = 0;
+            _pacingWaitSumMs = 0;
+            _pacingWaitFrames = 0;
             OverlaySummary = WaitingOverlaySummary;
         }
 
         /// <summary>Formats the compact one-line summary of a window for the runtime info overlay.</summary>
         /// <param name="snapshot">The averages of the window.</param>
+        /// <param name="pacingWaitMs">The average frame pacing wait of the window, in milliseconds.</param>
         /// <returns>The summary, starting with the graphics API.</returns>
-        internal static string FormatOverlaySummary(in FrameLatencySnapshot snapshot)
+        internal static string FormatOverlaySummary(in FrameLatencySnapshot snapshot, double pacingWaitMs)
         {
-            return ZString.Format("{0}   start->present {1:F1}ms   start->GPU {2}   wait {3:F1}ms   GPU {4:F1}ms",
+            return ZString.Format(
+                "{0}   start->present {1:F1}ms   start->GPU {2}   wait {3:F1}ms   GPU {4:F1}ms   pacing {5:F1}ms",
                 SystemInfo.graphicsDeviceType, snapshot.StartToPresentMs, FormatOptionalMs(snapshot.StartToGpuCompleteMs),
-                snapshot.PresentWaitMs, snapshot.GpuMs);
+                snapshot.PresentWaitMs, snapshot.GpuMs, pacingWaitMs);
         }
 
         /// <summary>Formats the log message of one window.</summary>
         /// <param name="snapshot">The averages of the window.</param>
+        /// <param name="pacingWaitMs">The average frame pacing wait of the window, in milliseconds.</param>
         /// <returns>The message, including the graphics API and the presentation settings.</returns>
-        internal static string FormatLogMessage(in FrameLatencySnapshot snapshot)
+        internal static string FormatLogMessage(in FrameLatencySnapshot snapshot, double pacingWaitMs)
         {
             return ZString.Format(
                 "API={0} VSync={1} MaxQueuedFrames={2} TargetFPS={3} Mode={4} Refresh={5:F2}Hz Frames={6} | " +
                 "main={7:F2}ms presentWait={8:F2}ms render={9:F2}ms GPU={10:F2}ms | " +
-                "start->present={11:F2}ms start->GPUComplete={12} (max {13})",
+                "start->present={11:F2}ms start->GPUComplete={12} (max {13}) pacingWait={14:F2}ms",
                 SystemInfo.graphicsDeviceType, QualitySettings.vSyncCount, QualitySettings.maxQueuedFrames,
                 Application.targetFrameRate, Screen.fullScreenMode, Screen.currentResolution.refreshRateRatio.value,
                 snapshot.SampleCount, snapshot.MainThreadMs, snapshot.PresentWaitMs, snapshot.RenderThreadMs,
                 snapshot.GpuMs, snapshot.StartToPresentMs, FormatOptionalMs(snapshot.StartToGpuCompleteMs),
-                FormatOptionalMs(snapshot.MaxStartToGpuCompleteMs));
+                FormatOptionalMs(snapshot.MaxStartToGpuCompleteMs), pacingWaitMs);
         }
 
         /// <summary>Formats a millisecond value that may be unavailable.</summary>

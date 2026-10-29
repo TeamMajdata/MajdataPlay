@@ -26,7 +26,7 @@ on, the runtime info overlay (`Debug.DisplayRuntimeInfo`) shows a second line, a
 receives an `Info` entry with the tag `FrameTimingDiagnostics`:
 
 ```text
-API=Vulkan VSync=1 MaxQueuedFrames=2 TargetFPS=-1 Mode=ExclusiveFullScreen Refresh=60.00Hz Frames=300 | main=1.20ms presentWait=14.80ms render=0.90ms GPU=1.10ms | start->present=33.10ms start->GPUComplete=34.20ms (max 36.00ms)
+API=Vulkan VSync=1 MaxQueuedFrames=2 TargetFPS=-1 Mode=ExclusiveFullScreen Refresh=60.00Hz Frames=300 | main=1.20ms presentWait=14.80ms render=0.90ms GPU=1.10ms | start->present=33.10ms start->GPUComplete=34.20ms (max 36.00ms) pacingWait=0.00ms
 ```
 
 | Field | Meaning |
@@ -35,11 +35,28 @@ API=Vulkan VSync=1 MaxQueuedFrames=2 TargetFPS=-1 Mode=ExclusiveFullScreen Refre
 | `presentWait` | Time the main thread spent blocked waiting for the render thread or the swapchain. |
 | `start->present` | From the main thread starting the frame to the render thread calling Present. |
 | `start->GPUComplete` | From the main thread starting the frame to the GPU finishing it (`n/a` when the platform does not report it). |
+| `pacingWait` | Time the main thread waited for low-latency VSync pacing at the very start of the frame, before time and input are sampled (zero when pacing is off). |
 
 With VSync on, the actual work (`main`, `render`, `GPU`) is usually far below one refresh interval. The
 difference between `start->GPUComplete` and that work, divided by the refresh interval, is the number of frames
 queued inside the engine and driver. Compare that number between APIs. Frames queued after GPU completion,
 waiting in the swapchain for scanout, are not visible here; PresentMon covers them.
+
+The pacing wait happens before the game samples time and input, so it does not add display latency. When
+`pacingWait` is not zero, the latency from sampling to Present is about `start->present` minus `pacingWait`.
+
+## Low-latency VSync pacing (Vulkan)
+
+With VSync on, the Vulkan FIFO swapchain lets the game run until every swapchain image is queued, so frames
+are rendered about three refresh intervals before they are shown (D3D11 limits this queue with a waitable
+swapchain). The hidden option `Debug.LowLatencyVSync` (default `true`) makes `LowLatencyVSync` wait at the
+start of each frame so that frames are produced 0.1 % slower than the display refreshes, which keeps the queue
+empty. It applies only on desktop with the Vulkan backend and VSync on. The display then shows one frame twice
+about every 1000 frames (about 17 s at 60 Hz). If the reported refresh rate is higher than the real one, the
+pacer measures the real period after 120 unpaced frames and logs `frame interval re-measured`.
+
+To verify it, run Vulkan with VSync on twice, with `Debug.LowLatencyVSync` set to `false` and `true`, and compare
+`start->present - pacingWait`. Also watch fast-moving notes for the periodic repeated frame.
 
 ## Procedure
 

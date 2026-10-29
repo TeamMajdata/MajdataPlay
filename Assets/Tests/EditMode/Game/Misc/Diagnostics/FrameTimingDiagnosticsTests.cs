@@ -123,6 +123,8 @@ namespace MajdataPlay.Tests.Game.Misc.Diagnostics
 
             diagnostics.AddTiming(CreateTiming(1_000, 20, 30), TicksPerSecond);
             diagnostics.AddTiming(CreateTiming(100_000, 40, 50), TicksPerSecond);
+            diagnostics.AddPacingWait(10);
+            diagnostics.AddPacingWait(14);
             var windowStart = start + FrameTimingDiagnostics.WindowLength;
             Assert.That(diagnostics.TryCompleteWindow(windowStart + TimeSpan.FromSeconds(1)), Is.False);
             Assert.That(diagnostics.HasSnapshot, Is.False);
@@ -133,9 +135,12 @@ namespace MajdataPlay.Tests.Game.Misc.Diagnostics
             Assert.That(diagnostics.LastSnapshot.SampleCount, Is.EqualTo(2));
             Assert.That(diagnostics.LastSnapshot.StartToPresentMs, Is.EqualTo(30).Within(1e-9));
             Assert.That(diagnostics.OverlaySummary, Does.Contain("start->present 30.0ms"));
+            Assert.That(diagnostics.LastPacingWaitMs, Is.EqualTo(12).Within(1e-9));
+            Assert.That(diagnostics.OverlaySummary, Does.Contain("pacing 12.0ms"));
 
             diagnostics.Reset();
             Assert.That(diagnostics.HasSnapshot, Is.False);
+            Assert.That(diagnostics.LastPacingWaitMs, Is.EqualTo(0));
             Assert.That(diagnostics.OverlaySummary, Is.EqualTo(FrameTimingDiagnostics.WaitingOverlaySummary));
         }
 
@@ -145,10 +150,11 @@ namespace MajdataPlay.Tests.Game.Misc.Diagnostics
         {
             var snapshot = new FrameLatencySnapshot(3, 1, 2, 3, 4, 25.5, -1, -1);
 
-            var message = FrameTimingDiagnostics.FormatLogMessage(snapshot);
+            var message = FrameTimingDiagnostics.FormatLogMessage(snapshot, 13.5);
 
             Assert.That(message, Does.Contain("API=").And.Contain("VSync=").And.Contain("MaxQueuedFrames=")
-                .And.Contain("Frames=3").And.Contain("start->GPUComplete=n/a"));
+                .And.Contain("Frames=3").And.Contain("start->GPUComplete=n/a")
+                .And.Contain("pacingWait=13.50ms"));
         }
 
         /// <summary>Checks that the overlay summary shows the averages and marks unavailable GPU completion.</summary>
@@ -157,7 +163,7 @@ namespace MajdataPlay.Tests.Game.Misc.Diagnostics
         {
             var snapshot = new FrameLatencySnapshot(3, 1, 2.25, 3, 4.5, 25.5, -1, -1);
 
-            var summary = FrameTimingDiagnostics.FormatOverlaySummary(snapshot);
+            var summary = FrameTimingDiagnostics.FormatOverlaySummary(snapshot, 0);
 
             Assert.That(summary, Does.Contain(SystemInfo.graphicsDeviceType.ToString())
                 .And.Contain("start->present 25.5ms").And.Contain("start->GPU n/a").And.Contain("GPU 4.5ms"));
@@ -169,8 +175,8 @@ namespace MajdataPlay.Tests.Game.Misc.Diagnostics
         {
             var diagnostics = new FrameTimingDiagnostics();
 
-            Assert.DoesNotThrow(() => diagnostics.Tick(TimeSpan.Zero));
-            Assert.DoesNotThrow(() => diagnostics.Tick(FrameTimingDiagnostics.WindowLength));
+            Assert.DoesNotThrow(() => diagnostics.Tick(TimeSpan.Zero, 0));
+            Assert.DoesNotThrow(() => diagnostics.Tick(FrameTimingDiagnostics.WindowLength, 0));
         }
     }
 }

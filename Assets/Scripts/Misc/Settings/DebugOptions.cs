@@ -164,6 +164,9 @@ namespace MajdataPlay.Settings
         /// <summary>Gets or sets whether frame timing and render queue latency are measured, logged and shown in the runtime info overlay.</summary>
         [HideInSettingUI]
         public bool FrameTimingDiagnostics { get; set; } = false;
+        /// <summary>Gets or sets whether frames are paced slightly below the refresh rate when VSync is on with Vulkan on desktop, which keeps the swapchain queue empty and lowers display latency at the cost of an occasional repeated frame.</summary>
+        [HideInSettingUI]
+        public bool LowLatencyVSync { get; set; } = true;
 #if UNITY_IOS || UNITY_ANDROID
         /// <summary>Gets or sets the initial pooled tap-note capacity.</summary>
         [HideInSettingUI]
