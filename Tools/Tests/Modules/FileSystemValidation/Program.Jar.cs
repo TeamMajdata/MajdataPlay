@@ -116,6 +116,37 @@ namespace MajdataPlay.Tests.FileSystemValidation
             return Task.CompletedTask;
         }
 
+        /// <summary>Checks that one archive reader reads many literal names below a directory and owns its archive.</summary>
+        /// <returns>A completed task after archive reader validation.</returns>
+        /// <exception cref="InvalidOperationException">A regression assertion fails.</exception>
+        private static Task TestJarArchiveReader()
+        {
+            using var workspace = new TemporaryWorkspace();
+            var archivePath = CreateJarArchive(workspace);
+            var reader = StorageFacade.Directory.OpenArchiveReader(JarLocation(archivePath, "assets"));
+            Check(reader.Location == StorageFacade.Directory.Open(JarLocation(archivePath, "assets")).Location, "archive reader exposes the canonical directory URI");
+            Check(Encoding.UTF8.GetString(reader.ReadAllBytes("text.txt")) == JarText, "archive reader reads compressed entries");
+            Check(reader.ReadAllBytes("nested\\deep.bin").SequenceEqual(Payload()), "archive reader resolves nested relative paths");
+            Check(reader.ReadAllBytes("empty.bin").Length == 0, "archive reader reads empty stored entries");
+            Check(Encoding.UTF8.GetString(reader.ReadAllBytes(JarUnicodeName)) == JarUnicodeName, "archive reader takes literal names without URI escaping");
+            Check(Encoding.UTF8.GetString(reader.ReadAllBytes("%2F.txt")) == "%2F.txt", "archive reader keeps literal percent sequences");
+            Check(Encoding.UTF8.GetString(reader.ReadAllBytes("text.txt")) == JarText, "archive reader rereads entries from the same archive");
+            Throws<FileNotFoundException>(() => reader.ReadAllBytes("missing.txt"), "archive reader reports missing files");
+            Throws<FileNotFoundException>(() => reader.ReadAllBytes("nested"), "archive reader does not read directories");
+            Throws<FileNotFoundException>(() => reader.ReadAllBytes("manifest.xml"), "archive reader stays below its directory");
+            Throws<ArgumentException>(() => reader.ReadAllBytes("../manifest.xml"), "archive reader rejects traversal");
+            Throws<ArgumentException>(() => reader.ReadAllBytes(string.Empty), "archive reader requires a file name");
+            Throws<IOException>(() => StorageFacade.Directory.OpenArchiveReader(JarLocation(archivePath, "assets/text.txt")), "archive reader requires a directory");
+            Throws<DirectoryNotFoundException>(() => StorageFacade.Directory.OpenArchiveReader(JarLocation(archivePath, "missing")), "archive reader requires an existing directory");
+            Throws<ArgumentException>(() => StorageFacade.Directory.OpenArchiveReader(workspace.GetPath("native")), "archive reader requires a jar URI");
+            reader.Dispose();
+            reader.Dispose();
+            Throws<ObjectDisposedException>(() => reader.ReadAllBytes("text.txt"), "disposed archive reader refuses reads");
+            NativeFile.Delete(archivePath);
+            Check(!NativeFile.Exists(archivePath), "disposed archive reader releases the archive");
+            return Task.CompletedTask;
+        }
+
         /// <summary>Checks facade and handle extraction into native paths and opaque provider documents.</summary>
         /// <returns>A task completing after both synchronous and asynchronous copy directions.</returns>
         /// <exception cref="InvalidOperationException">An extraction assertion fails.</exception>

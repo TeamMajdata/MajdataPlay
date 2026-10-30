@@ -84,7 +84,7 @@ namespace MajdataPlay.ResourceUpdate
                 return false;
             }
 
-            // Capture Unity's path before launching workers. Each read owns its native file or APK archive stream.
+            // Capture Unity's path before launching workers. Each worker owns its native file reads or APK archive.
             var packagedRoot = Application.streamingAssetsPath;
             var files = v2Hashes.OrderBy(pair => pair.Key, StringComparer.Ordinal).ToArray();
             progress.Report(new ProgressReport(ExtractingMessage, 0, v2Hashes.Count));
@@ -133,6 +133,8 @@ namespace MajdataPlay.ResourceUpdate
             {
                 workers[i] = Task.Run(() =>
                 {
+                    // An APK archive is not thread-safe, so each worker opens and indexes it once for all its files.
+                    using var reader = PackagedResources.OpenReader(packagedRoot);
                     while (true)
                     {
                         cancellationToken.ThrowIfCancellationRequested();
@@ -142,7 +144,7 @@ namespace MajdataPlay.ResourceUpdate
                             return;
                         }
                         var (relativePath, hash) = files[index];
-                        if (!ResourceFiles.TryCopyVerified(relativePath, stagingDirectory, hash, "Extract", packagedRoot))
+                        if (!ResourceFiles.TryCopyVerified(relativePath, stagingDirectory, hash, "Extract", reader))
                         {
                             Interlocked.Exchange(ref failed, 1);
                         }

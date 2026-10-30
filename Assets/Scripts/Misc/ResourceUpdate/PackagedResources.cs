@@ -1,6 +1,5 @@
 using System;
 using System.IO;
-using MajdataPlay.Diagnostics;
 using MajdataPlay.IO.Storage;
 using UnityEngine;
 
@@ -18,24 +17,12 @@ namespace MajdataPlay.ResourceUpdate
             return FileSystem.Directory.Open(Application.streamingAssetsPath);
         }
 
-        /// <summary>Reads the complete bytes of one packaged resource.</summary>
-        /// <param name="relativePath">The portable packaged resource path from a validated manifest.</param>
-        /// <param name="data">Receives the packaged bytes, or an empty array after failure.</param>
+        /// <summary>Creates a reader for many packaged resources that opens an APK at most once.</summary>
         /// <param name="rootLocation">The packaged root captured on the main thread, or null to read Unity's current path.</param>
-        /// <returns>Whether the packaged bytes were read; failures are logged.</returns>
-        public static bool TryReadAllBytes(string relativePath, out byte[] data, string? rootLocation = null)
+        /// <returns>A caller-owned reader; give each worker its own.</returns>
+        public static PackagedResourceReader OpenReader(string? rootLocation = null)
         {
-            try
-            {
-                data = FileSystem.File.Open(GetLocation(relativePath, rootLocation)).ReadAllBytes();
-                return true;
-            }
-            catch (Exception exception)
-            {
-                MajDebug.LogError(nameof(PackagedResources), $"Failed to read packaged resource: {relativePath}\n{exception}");
-                data = Array.Empty<byte>();
-                return false;
-            }
+            return new PackagedResourceReader(rootLocation ?? Application.streamingAssetsPath);
         }
 
         /// <summary>Resolves one validated manifest path against the platform's packaged resource root.</summary>

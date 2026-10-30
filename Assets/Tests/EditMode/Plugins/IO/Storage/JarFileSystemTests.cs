@@ -233,6 +233,65 @@ namespace MajdataPlay.Tests.Plugins.IO.Storage
             Assert.That(_archive.Exists, Is.False);
         }
 
+        /// <summary>Checks that one archive reader resolves literal names below its directory and reads many files.</summary>
+        [Test]
+        public void ArchiveReader_ReadsFilesBelowDirectory()
+        {
+            using var reader = FileSystem.Directory.OpenArchiveReader(_root + "assets");
+
+            Assert.That(reader.Location, Is.EqualTo(_root + "assets"));
+            Assert.That(reader.ReadAllBytes("Config/options.txt"), Is.EqualTo(Encoding.UTF8.GetBytes("options")));
+            Assert.That(reader.ReadAllBytes("implicit/child.txt"), Is.EqualTo(Encoding.UTF8.GetBytes("child")));
+            Assert.That(reader.ReadAllBytes("space name.txt"), Is.EqualTo(Encoding.UTF8.GetBytes("space")));
+            Assert.That(reader.ReadAllBytes("100%.txt"), Is.EqualTo(Encoding.UTF8.GetBytes("percent")));
+            Assert.That(reader.ReadAllBytes("中文.txt"), Is.EqualTo(Encoding.UTF8.GetBytes("unicode")));
+            Assert.That(reader.ReadAllBytes("Config/options.txt"), Is.EqualTo(Encoding.UTF8.GetBytes("options")));
+        }
+
+        /// <summary>Checks that an archive reader rejects missing, directory, outside and malformed targets.</summary>
+        [Test]
+        public void ArchiveReader_ValidatesTargets()
+        {
+            using var reader = FileSystem.Directory.OpenArchiveReader(_root + "assets");
+
+            Assert.Throws<FileNotFoundException>(() => reader.ReadAllBytes("missing.txt"));
+            Assert.Throws<FileNotFoundException>(() => reader.ReadAllBytes("Config"));
+            Assert.Throws<FileNotFoundException>(() => reader.ReadAllBytes("implicit"));
+            Assert.Throws<FileNotFoundException>(() => reader.ReadAllBytes("top.txt"));
+            Assert.Throws<ArgumentException>(() => reader.ReadAllBytes("../top.txt"));
+            Assert.Throws<ArgumentException>(() => reader.ReadAllBytes("/top.txt"));
+            Assert.Throws<ArgumentException>(() => reader.ReadAllBytes(string.Empty));
+            Assert.Throws<ArgumentNullException>(() => reader.ReadAllBytes(null!));
+        }
+
+        /// <summary>Checks that opening an archive reader requires an existing jar directory.</summary>
+        [Test]
+        public void ArchiveReader_RequiresJarDirectory()
+        {
+            var missingArchive = ZipFixture.JarLocation(FileSystem.File.Open(Path.Combine(_temp.Location, "missing.apk")));
+
+            Assert.Throws<ArgumentNullException>(() => FileSystem.Directory.OpenArchiveReader(null!));
+            Assert.Throws<ArgumentException>(() => FileSystem.Directory.OpenArchiveReader(_temp.Location));
+            Assert.Throws<DirectoryNotFoundException>(() => FileSystem.Directory.OpenArchiveReader(_root + "missing"));
+            Assert.Throws<DirectoryNotFoundException>(() => FileSystem.Directory.OpenArchiveReader(missingArchive));
+            Assert.Throws<IOException>(() => FileSystem.Directory.OpenArchiveReader(_root + "top.txt"));
+        }
+
+        /// <summary>Checks that an archive reader keeps the archive open until it is disposed, then refuses reads.</summary>
+        [Test]
+        public void ArchiveReader_OwnsArchiveUntilDisposed()
+        {
+            var reader = FileSystem.Directory.OpenArchiveReader(_root);
+            Assert.That(reader.ReadAllBytes("top.txt"), Is.EqualTo(Encoding.UTF8.GetBytes("top")));
+
+            reader.Dispose();
+
+            Assert.DoesNotThrow(reader.Dispose);
+            Assert.Throws<ObjectDisposedException>(() => reader.ReadAllBytes("top.txt"));
+            Assert.DoesNotThrow(() => _archive.Delete());
+            Assert.That(_archive.Exists, Is.False);
+        }
+
         /// <summary>Checks asynchronous reads of an archive entry.</summary>
         /// <returns>The test coroutine.</returns>
         [UnityTest]

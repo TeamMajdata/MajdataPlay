@@ -15,16 +15,16 @@ namespace MajdataPlay.ResourceUpdate
         /// <param name="destinationRoot">The existing directory receiving the verified bytes at the same relative path.</param>
         /// <param name="expectedHash">The official SHA-256 hash expected for the packaged bytes.</param>
         /// <param name="operation">The operation label used in resource logs.</param>
-        /// <param name="packagedRoot">The packaged root captured on the main thread, or null to read Unity's current path.</param>
+        /// <param name="reader">The caller's packaged reader, or null to read through a one-shot reader of Unity's current path.</param>
         /// <returns>Whether the packaged bytes were verified and committed; failures are logged.</returns>
         public static bool TryCopyVerified(
             string relativePath,
             StorageDirectory destinationRoot,
             string expectedHash,
             string operation,
-            string? packagedRoot = null)
+            PackagedResourceReader? reader = null)
         {
-            if (!TryReadVerified(relativePath, expectedHash, operation, out var data, packagedRoot))
+            if (!TryReadVerified(relativePath, expectedHash, operation, out var data, reader))
             {
                 return false;
             }
@@ -47,11 +47,21 @@ namespace MajdataPlay.ResourceUpdate
         /// <param name="expectedHash">The official SHA-256 hash expected for the packaged bytes.</param>
         /// <param name="operation">The operation label used in resource logs.</param>
         /// <param name="data">Receives the verified bytes, or an empty array after failure.</param>
-        /// <param name="packagedRoot">The packaged root captured on the main thread, or null to read Unity's current path.</param>
+        /// <param name="reader">The caller's packaged reader, or null to read through a one-shot reader of Unity's current path.</param>
         /// <returns>Whether the bytes were read and match the hash; failures are logged.</returns>
-        public static bool TryReadVerified(string relativePath, string expectedHash, string operation, out byte[] data, string? packagedRoot = null)
+        public static bool TryReadVerified(
+            string relativePath,
+            string expectedHash,
+            string operation,
+            out byte[] data,
+            PackagedResourceReader? reader = null)
         {
-            if (!PackagedResources.TryReadAllBytes(relativePath, out data, packagedRoot))
+            if (reader is null)
+            {
+                using var oneShotReader = PackagedResources.OpenReader();
+                return TryReadVerified(relativePath, expectedHash, operation, out data, oneShotReader);
+            }
+            if (!reader.TryReadAllBytes(relativePath, out data))
             {
                 return false;
             }

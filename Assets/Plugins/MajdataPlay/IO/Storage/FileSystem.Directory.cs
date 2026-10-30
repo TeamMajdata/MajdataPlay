@@ -22,6 +22,29 @@ namespace MajdataPlay.IO.Storage
                 return new StorageDirectory(ResolveProvider(location), location);
             }
 
+            /// <summary>Opens a jar archive directory once for repeated file reads, avoiding a fresh archive per file.</summary>
+            /// <param name="location">The jar file URI of an existing directory inside a local ZIP or APK archive.</param>
+            /// <returns>A caller-owned reader; it is not thread-safe, so each worker should open its own.</returns>
+            /// <exception cref="ArgumentNullException">The location is null.</exception>
+            /// <exception cref="ArgumentException">The location is not a valid jar file URI.</exception>
+            /// <exception cref="NotSupportedException">The archive is nested or is not a local file.</exception>
+            /// <exception cref="DirectoryNotFoundException">The archive or directory does not exist.</exception>
+            /// <exception cref="UnauthorizedAccessException">Reading the archive was denied.</exception>
+            /// <exception cref="InvalidDataException">The archive does not contain valid ZIP data.</exception>
+            /// <exception cref="IOException">The location is a file, the archive cannot be opened, or its names are ambiguous.</exception>
+            public static ArchiveDirectoryReader OpenArchiveReader(string location)
+            {
+                if (location is null)
+                {
+                    throw new ArgumentNullException(nameof(location));
+                }
+                if (!location.StartsWith("jar:", StringComparison.OrdinalIgnoreCase))
+                {
+                    throw new ArgumentException("A jar file URI is required.", nameof(location));
+                }
+                return JarFileSystem.OpenDirectoryReader(location);
+            }
+
             /// <summary>Creates a local directory and missing parents, or opens an existing provider directory.</summary>
             /// <param name="location">A local path, file URI, or registered content URI.</param>
             /// <returns>A handle for the existing or created directory.</returns>
