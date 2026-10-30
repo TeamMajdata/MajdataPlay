@@ -93,7 +93,7 @@ namespace MajdataPlay.Scenes.Game.Notes.Behaviours
             _sr.sprite = _curvSprites[curvLength - 1];
             Transform.localScale = new Vector3(1.225f / 4.8f, 1.225f / 4.8f, 1f);
             Transform.rotation = Quaternion.Euler(0, 0, -45f * (startPosition - 1));
-            NoteHelper.Sorting.Apply(_sr, NoteHelper.Sorting.NoteLayer.TapLines, -2);
+            NoteHelper.Sorting.Apply(_sr, NoteHelper.Sorting.NoteLayer.TapLines, 100);
             State = NoteStatus.Inited;
             RendererState = RendererStatus.Off;
             _distanceProvider = poolingInfo.DistanceProvider;
