@@ -61,6 +61,10 @@ namespace MajdataPlay.Net
         public const string API_POST_AUTH_REQUEST = "machine/auth/request";
         public const string API_POST_AUTH_REVOKE = "machine/auth/revoke";
         public const string API_POST_RECOMMEND_IMPRESSIONS = "recommend/impressions";
+        public const string API_POST_MAICHART_INFO = "maichart/info";
+
+        // The server answers any number of chart IDs in two queries; batches only bound the size of one response
+        const int CHART_INFO_BATCH_SIZE = 500;
 
         // Same value as ImpressionSources.PlayFeed on the server; keeps Play impressions apart from the website's
         public const string RECOMMEND_SOURCE = "play-feed";
@@ -698,6 +702,77 @@ namespace MajdataPlay.Net
             }
 
             return null;
+        }
+        /// <summary>Fetches the metadata and file digests of charts from <c>POST maichart/info</c>, in batches.</summary>
+        /// <param name="apiEndpoint">The endpoint serving the charts.</param>
+        /// <param name="chartIds">The chart identities; blank identities are skipped.</param>
+        /// <param name="token">The token canceling the requests.</param>
+        /// <returns>
+        /// The info of every chart the server knows, in request order; charts the server does not know are left out.
+        /// Null when a batch failed, for example because the endpoint does not provide the API.
+        /// </returns>
+        public static async ValueTask<MajNetChartInfo[]?> GetChartInfosAsync(ApiEndpoint apiEndpoint, ReadOnlyMemory<string?> chartIds, CancellationToken token = default)
+        {
+            await UniTask.SwitchToThreadPool();
+            var url = apiEndpoint.Url.Combine(API_POST_MAICHART_INFO);
+            var infos = new List<MajNetChartInfo>(chartIds.Length);
+
+            for (var offset = 0; offset < chartIds.Length; offset += CHART_INFO_BATCH_SIZE)
+            {
+                var count = Math.Min(CHART_INFO_BATCH_SIZE, chartIds.Length - offset);
+                var json = SerializeChartIds(chartIds.Span.Slice(offset, count), out var idCount);
+                if (idCount == 0)
+                {
+                    continue;
+                }
+                var batch = default(MajNetChartInfo[]);
+                for (var i = 0; i < MajEnv.HTTP_REQUEST_MAX_RETRY; i++)
+                {
+                    var rsp = await PostAsync(url, new StringContent(json, Encoding.UTF8, "application/json"), token);
+                    var e = default(Exception?);
+                    if (rsp.IsSuccessfully && rsp.TryDeserialize<MajNetChartInfo[]>(out batch, out e) && batch is not null)
+                    {
+                        break;
+                    }
+                    batch = null;
+                    MajDebug.LogError($"Failed to get chart info: {e?.Message ?? rsp.StatusCode?.ToString() ?? "Unknown error"}");
+                    if (rsp.ErrorCode == HttpErrorCode.Canceled || rsp.StatusCode is not null)
+                    {
+                        break;
+                    }
+                }
+                if (batch is null)
+                {
+                    return null;
+                }
+                infos.AddRange(batch);
+            }
+
+            return infos.ToArray();
+        }
+        /// <summary>Writes chart identities as the JSON array body of <c>POST maichart/info</c>, skipping blank identities.</summary>
+        /// <param name="chartIds">The chart identities of one batch.</param>
+        /// <param name="idCount">Set to the number of identities written.</param>
+        /// <returns>The JSON array.</returns>
+        static string SerializeChartIds(ReadOnlySpan<string?> chartIds, out int idCount)
+        {
+            idCount = 0;
+            using var writer = new System.IO.StringWriter();
+            using (var json = new JsonTextWriter(writer))
+            {
+                json.WriteStartArray();
+                foreach (var id in chartIds)
+                {
+                    if (string.IsNullOrWhiteSpace(id))
+                    {
+                        continue;
+                    }
+                    json.WriteValue(id);
+                    idCount++;
+                }
+                json.WriteEndArray();
+            }
+            return writer.ToString();
         }
 
         public static async ValueTask<MajNetOnlineDanInfo[]?> GetUserOnlineFavCollection(ApiEndpoint apiEndpoint, CancellationToken token = default)

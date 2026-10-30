@@ -1,5 +1,6 @@
 using Cysharp.Text;
 using Cysharp.Threading.Tasks;
+using MajdataPlay.Buffers;
 using MajdataPlay.Collections;
 using MajdataPlay.Diagnostics;
 using MajdataPlay.Extensions;
@@ -658,9 +659,10 @@ namespace MajdataPlay
         /// <remarks>
         /// The endpoint's songs from the chart list are reused, so loaded covers and tracks are shared and scores are
         /// uploaded to the same endpoint. Charts uploaded after the list was fetched get songs of their own, owned by
-        /// the recommendation folders and reused until the chart list contains them.
+        /// the recommendation folders and reused until the chart list contains them; their file digests are recorded
+        /// as they are downloaded.
         /// </remarks>
-        /// <exception cref="IOException">The endpoint's cache directory could not be accessed.</exception>
+        /// <exception cref="IOException">The object store directory could not be created.</exception>
         private static OnlineSongCollection CreateRecommendCollection(ApiEndpoint api, MajnetSongDetail[] charts, ISongDetail[] baseCharts)
         {
             var knownSongs = new Dictionary<string, OnlineSongDetail>(StringComparer.Ordinal);
@@ -674,7 +676,6 @@ namespace MajdataPlay
             var created = new List<ISongDetail>();
             try
             {
-                var cacheDirectory = default(StorageDirectory);
                 var songs = new List<ISongDetail>(charts.Length);
                 var addedHashes = new HashSet<string>(StringComparer.Ordinal);
                 foreach (var chart in charts)
@@ -685,9 +686,7 @@ namespace MajdataPlay
                     }
                     if (!knownSongs.TryGetValue(chart.Hash, out var song))
                     {
-                        cacheDirectory ??= MajEnv.CacheDirectory.CreateDirectory("Net").CreateDirectory(api.Name);
-                        var cacheName = BitConverter.ToString(Convert.FromBase64String(chart.Hash));
-                        song = new OnlineSongDetail(cacheDirectory.CreateDirectory(cacheName), api, chart);
+                        song = new OnlineSongDetail(api, chart, OnlineChartCache.Shared.GetOrCreateRecord(api, chart));
                         created.Add(song);
                     }
                     songs.Add(song);
@@ -1238,15 +1237,19 @@ namespace MajdataPlay
                     await Task.WhenAll(Task.Delay(3000), fetchTask).ConfigureAwait(false);
                     return fetchTask.Result;
                 }
+                var records = await SyncOnlineChartRecordsAsync(api, chartList, cancellationToken).ConfigureAwait(false);
+                var chartCache = OnlineChartCache.Shared;
                 var gameList = new ISongDetail[chartList.Length];
                 try
                 {
                     for (var i = 0; i < chartList.Length; i++)
                     {
                         cancellationToken.ThrowIfCancellationRequested();
-                        var cacheName = BitConverter.ToString(Convert.FromBase64String(chartList[i].Hash));
-                        var chartDirectory = cacheDirectory.CreateDirectory(cacheName);
-                        gameList[i] = new OnlineSongDetail(chartDirectory, api, chartList[i]);
+                        var chart = chartList[i];
+                        var record = chart.Id is not null && records.TryGetValue(chart.Id, out var synced)
+                            ? synced
+                            : chartCache.CreateTransientRecord(api, chart);
+                        gameList[i] = new OnlineSongDetail(api, chart, record);
                     }
                     MajDebug.LogInfo(nameof(SongStorage), "Loaded online charts list:" + gameList.Length);
                     return new OnlineSongCollection(api, cacheDirectory, name, gameList);
@@ -1272,26 +1275,82 @@ namespace MajdataPlay
             }
         }
 
-        /// <summary>Scans an endpoint's cached charts without losing the online collection identity.</summary>
-        /// <param name="api">The endpoint which owns the cache.</param>
-        /// <param name="cacheDirectory">The existing cache directory and its storage backend.</param>
-        /// <param name="cancellationToken">Cancels cached-chart parsing.</param>
-        /// <returns>An online-tagged collection backed by locally cached chart details.</returns>
-        /// <exception cref="OperationCanceledException">Cached-chart scanning was canceled.</exception>
-        /// <exception cref="IOException">The cache could not be accessed.</exception>
+        /// <summary>Fetches the file digests of an endpoint's charts and synchronizes them into the online chart cache.</summary>
+        /// <param name="api">The endpoint which served the chart list.</param>
+        /// <param name="chartList">The charts of the list.</param>
+        /// <param name="cancellationToken">Cancels fetching the digests.</param>
+        /// <returns>The record of every chart with an identity, keyed by chart identity.</returns>
+        /// <remarks>
+        /// When the endpoint cannot provide the digests, the charts keep the digests recorded for their current revision
+        /// and download their other files from the chart endpoints.
+        /// </remarks>
+        /// <exception cref="OperationCanceledException">The caller canceled fetching.</exception>
+        private static async Task<Dictionary<string, OnlineChartRecord>> SyncOnlineChartRecordsAsync(ApiEndpoint api, ReadOnlyMemory<MajnetSongDetail> chartList, CancellationToken cancellationToken)
+        {
+            MajNetChartInfo[]? infoList;
+            // Cleared on return, so the pool does not keep the identities alive.
+            using (var chartIds = Pool<string?>.Rent(chartList.Length, true))
+            {
+                CopyChartIds(chartList.Span, chartIds.AsSpan());
+                infoList = await Online.GetChartInfosAsync(api, chartIds.AsMemory(0, chartList.Length), cancellationToken).ConfigureAwait(false);
+            }
+            cancellationToken.ThrowIfCancellationRequested();
+            var infos = default(Dictionary<string, MajNetChartInfo>);
+            if (infoList is null)
+            {
+                MajDebug.LogWarning(nameof(SongStorage), $"[Online]Failed to fetch chart file digests from {api.Url.OriginalString}, using the recorded digests");
+            }
+            else
+            {
+                infos = new Dictionary<string, MajNetChartInfo>(StringComparer.Ordinal);
+                foreach (var info in infoList)
+                {
+                    var id = info.Metadata?.Id;
+                    if (!string.IsNullOrEmpty(id))
+                    {
+                        infos[id!] = info;
+                    }
+                }
+            }
+            return await OnlineChartCache.Shared.SyncAsync(api, chartList, infos).ConfigureAwait(false);
+        }
+
+        /// <summary>Copies the identities of charts.</summary>
+        /// <param name="charts">The charts.</param>
+        /// <param name="chartIds">The destination, at least as long as <paramref name="charts"/>.</param>
+        private static void CopyChartIds(ReadOnlySpan<MajnetSongDetail> charts, Span<string?> chartIds)
+        {
+            for (var i = 0; i < charts.Length; i++)
+            {
+                chartIds[i] = charts[i].Id;
+            }
+        }
+
+        /// <summary>Lists an endpoint's charts whose chart and track are stored, without losing the online collection identity.</summary>
+        /// <param name="api">The endpoint which owns the charts.</param>
+        /// <param name="cacheDirectory">The endpoint's cache directory, which holds the collection identity.</param>
+        /// <param name="cancellationToken">Cancels loading the cached charts.</param>
+        /// <returns>An online collection of the cached charts, which load their files from the object store.</returns>
+        /// <exception cref="OperationCanceledException">Loading was canceled.</exception>
+        /// <exception cref="IOException">The collection identity could not be accessed.</exception>
+        /// <exception cref="SQLiteException">The online chart cache could not be read.</exception>
         private static async Task<SongCollection> GetCachedOnlineCollectionAsync(ApiEndpoint api, StorageDirectory cacheDirectory, CancellationToken cancellationToken)
         {
-            using var scanner = new SongCollectionScanner(cancellationToken);
-            var charts = await scanner.ScanAsync(cacheDirectory).ConfigureAwait(false);
+            var cached = await Task.Run(() => OnlineChartCache.Shared.LoadCached(api), cancellationToken).ConfigureAwait(false);
+            var charts = new ISongDetail[cached.Count];
             try
             {
-                cancellationToken.ThrowIfCancellationRequested();
+                for (var i = 0; i < charts.Length; i++)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    charts[i] = new OnlineSongDetail(api, cached[i].Detail, cached[i].Record);
+                }
                 MajDebug.LogInfo(nameof(SongStorage), "Loaded cached online charts list:" + charts.Length);
                 return new OnlineSongCollection(api, cacheDirectory, api.Name, charts);
             }
             catch
             {
-                DisposeUnpublishedCharts(charts);
+                DisposeUnpublishedCharts(charts.Where(chart => chart is not null));
                 throw;
             }
         }

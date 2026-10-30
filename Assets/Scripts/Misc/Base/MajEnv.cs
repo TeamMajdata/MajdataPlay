@@ -592,7 +592,8 @@ namespace MajdataPlay
             {
                 TryDeleteDirectory(CacheDirectory.FindDirectory("Net"));
                 TryDeleteDirectory(CacheDirectory.FindDirectory("View"));
-                MajDebug.LogInfo("[MajEnv][Init]iOS setting 'no_cache' is enabled. Cleared cache folders: Net, View.");
+                TryDeleteDirectory(CacheDirectory.FindDirectory(ObjectStore.DirectoryName));
+                MajDebug.LogInfo($"[MajEnv][Init]iOS setting 'no_cache' is enabled. Cleared cache folders: Net, View, {ObjectStore.DirectoryName}.");
             }
             else
             {

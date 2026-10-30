@@ -4,6 +4,7 @@ using LitMotion.Extensions;
 using MajdataPlay.Settings;
 using MajdataPlay.Extensions;
 using MajdataPlay.IO;
+using MajdataPlay.Net;
 using MajdataPlay.Utils;
 using System;
 using System.Linq;
@@ -165,8 +166,27 @@ namespace MajdataPlay.Scenes.Title
                 }
             };
             await Task.Delay(3000, cancellationToken);
+            await ScanObjectStoreAsync(cancellationToken);
             await SongStorage.InitAsync(cancellationToken);
             await SongStorage.RefreshLocal(progress, cancellationToken);
+        }
+
+        /// <summary>Indexes the stored online objects, so cached charts can be listed offline, and deletes the objects nothing references any more.</summary>
+        /// <param name="cancellationToken">Cancels the scan when the title component is destroyed.</param>
+        /// <returns>A task that completes after the scan; a failed scan is logged, and objects are then looked up on demand.</returns>
+        /// <exception cref="OperationCanceledException">The title component was destroyed before the scan completed.</exception>
+        static async Task ScanObjectStoreAsync(CancellationToken cancellationToken)
+        {
+            try
+            {
+                // Every component keeping objects must be ready before the scan, which keeps only the objects they reference.
+                await OnlineChartCache.Shared.InitializeAsync(cancellationToken);
+                await ObjectStore.Shared.ScanAsync(cancellationToken);
+            }
+            catch (Exception e) when (e is not OperationCanceledException)
+            {
+                MajDebug.LogException(nameof(TitleManager), e);
+            }
         }
 
         void PrepareTitleEntrance()

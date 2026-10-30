@@ -81,7 +81,7 @@ namespace MajdataPlay.Tests.Game.Misc.Net
         /// <returns>The online song.</returns>
         private OnlineSongDetail CreateSong()
         {
-            return new OnlineSongDetail(_temporary.Directory.CreateDirectory(Guid.NewGuid().ToString("N")), _endpoint, new MajnetSongDetail
+            var detail = new MajnetSongDetail
             {
                 Id = Guid.NewGuid().ToString(),
                 Title = "Song",
@@ -91,7 +91,11 @@ namespace MajdataPlay.Tests.Game.Misc.Net
                 Uploader = "uploader",
                 Designer = "designer",
                 Tags = new[] { "tag" },
-            });
+            };
+            var cache = new OnlineChartCache(
+                new ObjectStore(_temporary.Directory.CreateDirectory("Objects"), _temporary.Directory.CreateDirectory("Partials")),
+                false);
+            return new OnlineSongDetail(_endpoint, detail, cache.CreateTransientRecord(_endpoint, detail));
         }
 
         /// <summary>Checks that a missing endpoint and unset credentials are rejected without a request.</summary>
@@ -445,6 +449,78 @@ namespace MajdataPlay.Tests.Game.Misc.Net
                 before = _http.Requests.Length;
                 Assert.That(await Online.GetChartListAsync(_endpoint), Is.Null);
                 Assert.That(_http.Requests.Length - before, Is.EqualTo(MajEnv.HTTP_REQUEST_MAX_RETRY));
+            });
+        }
+
+        /// <summary>
+        /// Checks that chart info is posted in batches of chart identities without blank ones, and that the files of every
+        /// batch are parsed in request order.
+        /// </summary>
+        /// <returns>The test coroutine.</returns>
+        [UnityTest]
+        public IEnumerator GetChartInfosAsync_PostsBatchesAndParsesFiles()
+        {
+            return UniTask.ToCoroutine(async () =>
+            {
+                _http.Responder = request =>
+                {
+                    var ids = JArray.Parse(request.Content!.ReadAsStringAsync().GetAwaiter().GetResult());
+                    var infos = new JArray(ids.Select(id => new JObject
+                    {
+                        ["metadata"] = new JObject { ["id"] = id, ["hash"] = "h" },
+                        ["resources"] = new JObject
+                        {
+                            ["maidata"] = new JObject
+                            {
+                                ["url"] = $"https://cdn.invalid/MaiCharts/{id}/maidata.txt",
+                                ["md5"] = "0123456789abcdef0123456789abcdef",
+                                ["sha256"] = new string('a', 64),
+                                ["length"] = 3
+                            },
+                            ["track"] = null,
+                            ["video"] = null,
+                            ["coverArt"] = null,
+                            ["thumbnail"] = null
+                        }
+                    }));
+                    return StubHttpScope.Respond(HttpStatusCode.OK, infos.ToString());
+                };
+                var ids = Enumerable.Range(0, 501).Select(i => i.ToString()).Append(" ").Append(null).ToArray();
+
+                var infos = await Online.GetChartInfosAsync(_endpoint, ids);
+
+                Assert.That(_http.Requests.Length, Is.EqualTo(2));
+                Assert.That(_http.Requests.All(request => request.Method == HttpMethod.Post), Is.True);
+                Assert.That(_http.Requests[0].Uri.AbsoluteUri, Is.EqualTo("https://api.invalid/api/maichart/info"));
+                Assert.That(JArray.Parse(_http.Requests[0].Body).Count, Is.EqualTo(500));
+                Assert.That(JArray.Parse(_http.Requests[1].Body).Single().ToString(), Is.EqualTo("500"));
+                Assert.That(infos!.Select(info => info.Metadata!.Id), Is.EqualTo(Enumerable.Range(0, 501).Select(i => i.ToString())));
+                var resources = infos[7].Resources!;
+                Assert.That(resources.Maidata!.Url, Is.EqualTo(new Uri("https://cdn.invalid/MaiCharts/7/maidata.txt")));
+                Assert.That(resources.Maidata.Md5, Is.EqualTo("0123456789abcdef0123456789abcdef"));
+                Assert.That(resources.Maidata.Sha256, Is.EqualTo(new string('a', 64)));
+                Assert.That(resources.Maidata.Length, Is.EqualTo(3));
+                Assert.That(resources.Track, Is.Null);
+            });
+        }
+
+        /// <summary>Checks that an endpoint without the info API, or a failed batch, yields null.</summary>
+        /// <returns>The test coroutine.</returns>
+        [UnityTest]
+        public IEnumerator GetChartInfosAsync_ReturnsNullWhenBatchFails()
+        {
+            return UniTask.ToCoroutine(async () =>
+            {
+                _http.RespondWith(HttpStatusCode.NotFound);
+                Assert.That(await Online.GetChartInfosAsync(_endpoint, new[] { "1" }), Is.Null);
+                Assert.That(_http.Requests.Length, Is.EqualTo(1));
+
+                _http.RespondWith(HttpStatusCode.OK, "{ broken");
+                Assert.That(await Online.GetChartInfosAsync(_endpoint, new[] { "1" }), Is.Null);
+
+                var before = _http.Requests.Length;
+                Assert.That(await Online.GetChartInfosAsync(_endpoint, Array.Empty<string>()), Is.Empty);
+                Assert.That(_http.Requests.Length, Is.EqualTo(before));
             });
         }
 

@@ -54,6 +54,16 @@ namespace MajdataPlay.Tests.Game.Misc.Support
         /// <summary>The captured database field values keyed by field name.</summary>
         private readonly Dictionary<string, object?> _savedDatabaseFields = new();
 
+        /// <summary>The shared online caches captured and restored by every scope, so caches bound to temporary storage never outlive it.</summary>
+        private static readonly Type[] s_sharedCacheTypes =
+        {
+            typeof(ObjectStore),
+            typeof(OnlineChartCache),
+        };
+
+        /// <summary>The captured shared online caches keyed by type.</summary>
+        private readonly Dictionary<Type, object?> _savedSharedCaches = new();
+
         /// <summary>The captured minimum log level, which settings initialization changes.</summary>
         private readonly LogLevel _minLogLevel;
 
@@ -67,6 +77,10 @@ namespace MajdataPlay.Tests.Game.Misc.Support
             foreach (var name in s_databaseFieldNames)
             {
                 _savedDatabaseFields[name] = PrivateMember.GetStaticField<object?>(typeof(MajDatabase), name);
+            }
+            foreach (var type in s_sharedCacheTypes)
+            {
+                _savedSharedCaches[type] = PrivateMember.GetStaticField<object?>(type, "s_shared");
             }
             _minLogLevel = MajDebug.MinLogLevel;
         }
@@ -104,13 +118,18 @@ namespace MajdataPlay.Tests.Game.Misc.Support
 
         /// <summary>
         /// Detaches the open databases without closing them and allows opening again, so the next access opens the
-        /// databases of the current layout. <see cref="Dispose"/> closes whatever was opened meanwhile.
+        /// databases of the current layout. <see cref="Dispose"/> closes whatever was opened meanwhile. The shared online
+        /// caches are detached too, so they are created again inside the current layout.
         /// </summary>
         public void ResetDatabases()
         {
             PrivateMember.SetStaticField(typeof(MajDatabase), "s_runtime", null);
             PrivateMember.SetStaticField(typeof(MajDatabase), "s_scores", null);
             PrivateMember.SetStaticField(typeof(MajDatabase), "s_isShutDown", false);
+            foreach (var type in s_sharedCacheTypes)
+            {
+                PrivateMember.SetStaticField(type, "s_shared", null);
+            }
         }
 
         /// <summary>Closes the databases opened inside this scope and removes the shutdown handler they registered.</summary>
@@ -139,13 +158,17 @@ namespace MajdataPlay.Tests.Game.Misc.Support
             PrivateMember.SetStaticProperty(typeof(MajEnv), name, value);
         }
 
-        /// <summary>Closes the databases opened inside the scope, then restores every captured property, database field and the minimum log level.</summary>
+        /// <summary>Closes the databases opened inside the scope, then restores every captured property, database field, shared online cache and the minimum log level.</summary>
         public void Dispose()
         {
             CloseScopeDatabases();
             foreach (var pair in _savedDatabaseFields)
             {
                 PrivateMember.SetStaticField(typeof(MajDatabase), pair.Key, pair.Value);
+            }
+            foreach (var pair in _savedSharedCaches)
+            {
+                PrivateMember.SetStaticField(pair.Key, "s_shared", pair.Value);
             }
             foreach (var pair in _saved)
             {
