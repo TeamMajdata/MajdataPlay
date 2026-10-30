@@ -234,6 +234,10 @@ namespace MajdataPlay
         [ThreadStatic]
         private static Random? s_randomizer;
         private static readonly CancellationTokenSource s_globalCTS = new();
+#if UNITY_ANDROID && !UNITY_EDITOR
+        /// <summary>Records that environment initialization must wait for the Android permission response.</summary>
+        private static bool s_deferAndroidInitialization;
+#endif
 
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
@@ -244,8 +248,36 @@ namespace MajdataPlay
 #endif
         }
         #region Init core
+        /// <summary>Initializes the environment before scene services can read its directories or settings.</summary>
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterAssembliesLoaded)]
         private static void Init()
+        {
+#if UNITY_ANDROID && !UNITY_EDITOR
+            s_deferAndroidInitialization = AndroidStorageStartup.SupportsLegacyStorage(AndroidRuntime.SdkVersion, AndroidRuntime.TargetSdkVersion)
+                && !AndroidStorageStartup.HasPermissions();
+            if (s_deferAndroidInitialization)
+            {
+                return;
+            }
+#endif
+            InitCore();
+        }
+
+#if UNITY_ANDROID && !UNITY_EDITOR
+        /// <summary>Suspends the loaded first scene before Awake while legacy storage permissions are requested.</summary>
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSceneLoad)]
+        private static void InitAndroidStorage()
+        {
+            if (s_deferAndroidInitialization)
+            {
+                s_deferAndroidInitialization = false;
+                AndroidStorageStartup.Begin(InitCore, AndroidStorageStartup.RequestPermissionsAsync);
+            }
+        }
+#endif
+
+        /// <summary>Initializes paths and dependent services after the Android permission decision is available.</summary>
+        private static void InitCore()
         {
             InitPath();
             InitDirectories();
@@ -279,67 +311,32 @@ namespace MajdataPlay
 #elif UNITY_ANDROID
             // The persistent directory stays native whatever the root is, so native libraries always have a filename to open.
             PersistentDirectory = FileSystem.Directory.Open(Application.persistentDataPath);
-            if (AndroidRuntime.SdkVersion < 30 || AndroidRuntime.TargetSdkVersion < 30) // < Android 11
+            if (AndroidStorageStartup.SupportsLegacyStorage(AndroidRuntime.SdkVersion, AndroidRuntime.TargetSdkVersion)
+                && AndroidStorageStartup.HasPermissions())
             {
-                var androidStoragePermissions = new string[]
+                // Permission requests finish before this step, so every dependent handle uses the final root.
+                const string legacyRootPath = "/sdcard/Documents/MajdataPlay";
+                RootDirectory = FileSystem.Directory.Create(legacyRootPath);
+                if (RootDirectory.FindFile(".nomedia") is null)
                 {
-                    UnityEngine.Android.Permission.ExternalStorageRead,
-                    UnityEngine.Android.Permission.ExternalStorageWrite,
-                };
-                var isGranted = true;
-                for (var i = 0; i < androidStoragePermissions.Length; i++)
-                {
-                    var flag = 0;
-                    var permission = androidStoragePermissions[i];
-                RECHECK_PERMISSION:
-                    if (!UnityEngine.Android.Permission.HasUserAuthorizedPermission(permission))
+                    try
                     {
-                        switch (flag)
-                        {
-                            case 0:
-                                UnityEngine.Android.Permission.RequestUserPermission(permission);
-                                flag = 1;
-                                goto RECHECK_PERMISSION;
-                            case 1:
-                                isGranted = false;
-                                goto BREAK_LOOP;
-                        }
-                        continue;
-                    BREAK_LOOP:
-                        break;
+                        RootDirectory.CreateFile(".nomedia");
+                        MajDebug.LogDebug("Created .nomedia flag file");
                     }
-                }
-                if (isGranted)
-                {
-                    // The legacy shared root is a known native path, so its streaming assets path is computed from the same constant.
-                    const string legacyRootPath = "/sdcard/Documents/MajdataPlay";
-                    RootDirectory = FileSystem.Directory.Create(legacyRootPath);
-                    if (RootDirectory.FindFile(".nomedia") is null)
+                    catch (Exception e)
                     {
-                        try
-                        {
-                            RootDirectory.CreateFile(".nomedia");
-                            MajDebug.LogDebug("Created .nomedia flag file");
-                        }
-                        catch (Exception e)
-                        {
-                            MajDebug.LogError("Failed to create .nomedia flag file");
-                            MajDebug.LogException(e);
-                        }
+                        MajDebug.LogError("Failed to create .nomedia flag file");
+                        MajDebug.LogException(e);
                     }
-                    else
-                    {
-                        MajDebug.LogDebug(".nomedia flag file exists");
-                    }
-                    AssetsDirectory = FileSystem.Directory.Open(Path.Combine(legacyRootPath, "ExtStreamingAssets"));
                 }
                 else
                 {
-                    RootDirectory = PersistentDirectory;
-                    AssetsDirectory = FileSystem.Directory.Open(Path.Combine(Application.persistentDataPath, "ExtStreamingAssets"));
+                    MajDebug.LogDebug(".nomedia flag file exists");
                 }
+                AssetsDirectory = FileSystem.Directory.Open(Path.Combine(legacyRootPath, "ExtStreamingAssets"));
             }
-            else // >= Android 11
+            else
             {
                 RootDirectory = PersistentDirectory;
                 AssetsDirectory = FileSystem.Directory.Open(Path.Combine(Application.persistentDataPath, "ExtStreamingAssets"));
