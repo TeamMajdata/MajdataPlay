@@ -104,7 +104,7 @@ namespace MajdataPlay.Tests.Game.GamePlay.PlayMode
             var displayer = CreateDisplayer(out _);
             var song = new GamePlayFakeSongDetail { Maidata = new SimaiFile("Fake", "Fake", 0, "hash", Array.Empty<SimaiChart>(), null) };
 
-            displayer.SetSongDeatil(song, ChartLevel.Basic, null, 400);
+            displayer.SetSongDeatil(song, ChartLevel.Basic, 0, null, 400);
             RemoveBackgroundTasks();
             AssertIcons(loading: true, help: false, error: false);
 
