@@ -10,8 +10,9 @@ function(majvk_configure target)
   target_compile_features(${target} PRIVATE cxx_std_17)
   target_include_directories(${target} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src" "${UNITY_PLUGIN_API}" "${MAJVK_VULKAN_HEADERS}")
   if(MINGW)
-    # Statically include the compiler's C++/thread runtimes; the layer ships as a single DLL.
-    target_link_options(${target} PRIVATE -static)
+    # Statically include the compiler's C++/thread runtimes; the layer ships as a single DLL. Without a link
+    # timestamp, unchanged sources rebuild to identical binaries.
+    target_link_options(${target} PRIVATE -static -Wl,--no-insert-timestamp)
   endif()
   if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     find_package(Threads REQUIRED)
@@ -34,4 +35,12 @@ endif()
 if(MAJVK_BUILD_TESTS)
   add_executable(MajdataPlayVulkanPacingTests tests/VulkanPacingTests.cpp src/VulkanPacing.cpp)
   majvk_configure(MajdataPlayVulkanPacingTests)
+endif()
+
+# Hardware probe: drives a real swapchain through the built DLL, which it loads from its own folder.
+option(MAJVK_BUILD_PROBE "Build the Windows hardware probe" OFF)
+if(MAJVK_BUILD_PROBE AND WIN32)
+  add_executable(MajdataPlayVulkanPacingProbe tests/VulkanPacingProbe.cpp)
+  majvk_configure(MajdataPlayVulkanPacingProbe)
+  target_compile_definitions(MajdataPlayVulkanPacingProbe PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
 endif()

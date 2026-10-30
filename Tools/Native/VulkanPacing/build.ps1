@@ -23,13 +23,18 @@ Directory for CMake build trees.
 
 .PARAMETER Test
 Builds and runs the layer tests for the host before building the targets.
+
+.PARAMETER Probe
+After the targets, builds the x64 hardware probe into <BuildRoot>/probe next to a copy of the staged x64 DLL.
+Pass -Targets @() to package the probe with the DLL already staged in Assets.
 #>
 param(
     [string[]]$Targets = @('win-x86', 'win-x64', 'win-arm64'),
     [string]$LlvmMingw = $env:LLVM_MINGW,
     [string]$CMake,
     [string]$BuildRoot = (Join-Path $PSScriptRoot '.build'),
-    [switch]$Test
+    [switch]$Test,
+    [switch]$Probe
 )
 $ErrorActionPreference = 'Stop'
 
@@ -192,4 +197,15 @@ foreach ($target in $Targets) {
     $json = ($manifest | ConvertTo-Json -Depth 4) -replace "`r`n", "`n"
     [System.IO.File]::WriteAllText((Join-Path $destination 'build-manifest.json'), $json + "`n", (New-Object System.Text.UTF8Encoding $false))
     Write-Host "OK $target -> $dll"
+}
+
+if ($Probe) {
+    $probeBuild = Join-Path $BuildRoot 'probe'
+    Invoke-Checked $cmakePath @('-S', $PSScriptRoot, '-B', $probeBuild, '-G', 'Ninja', "-DCMAKE_MAKE_PROGRAM=$(ConvertTo-CMakePath $ninja)",
+        '-DCMAKE_BUILD_TYPE=Release', '-DCMAKE_SYSTEM_NAME=Windows', '-DCMAKE_SYSTEM_PROCESSOR=x86_64',
+        "-DCMAKE_CXX_COMPILER=$(ConvertTo-CMakePath "$llvm\bin\x86_64-w64-mingw32-clang++.exe")", '-DMAJVK_BUILD_PROBE=ON')
+    Invoke-Checked $cmakePath @('--build', $probeBuild, '--target', 'MajdataPlayVulkanPacingProbe')
+    # The probe loads the layer from its own folder; ship the DLL that Unity players get.
+    Copy-Item (Join-Path $output 'x86_64\MajdataPlayVulkanPacing.dll') $probeBuild -Force
+    Write-Host "PROBE $(Join-Path $probeBuild 'MajdataPlayVulkanPacingProbe.exe')"
 }

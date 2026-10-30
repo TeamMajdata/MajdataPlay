@@ -107,6 +107,36 @@ Existing `.meta` files are kept: the DLLs are preloaded and enabled only for the
 CPU. The Editor does not load the layer, because it always uses timer pacing. CMake build trees go to the
 ignored `.build/` folder. The source is platform independent; only Windows players ship it for now.
 
+## Hardware probe
+
+`tests/VulkanPacingProbe.cpp` is a minimal Windows program for checking a backend on real hardware, in particular
+`VK_AMD_anti_lag`, which the deterministic tests only model. It loads `MajdataPlayVulkanPacing.dll` from its own
+folder, registers it the way Unity's preload does, creates a Vulkan 1.1 instance, a device like Unity 6's (present
+id/wait with their features when supported) and a small window with a FIFO swapchain, and clears and presents
+frames after 2 ms of simulated game logic. It runs the same frames three times: without pacing, with the driver's
+mode only, and with present waiting followed by the driver's mode (the order `LowLatencyVSync` uses).
+
+```powershell
+./Tools/Native/VulkanPacing/build.ps1 -Probe            # or -Targets @() -Probe to reuse the staged DLL
+./Tools/Native/VulkanPacing/.build/probe/MajdataPlayVulkanPacingProbe.exe --require amd
+```
+
+Options: `--require amd|nvidia|any` (exit code 2 when that backend is not active), `--frames N` per mode (default
+300 after 60 warm-up frames), `--work-ms M` simulated game logic, `--gpu INDEX`. The `probe` folder holds the exe
+and the DLL, so it can be copied to a test machine as is; it needs nothing but the GPU driver's Vulkan loader.
+
+For each mode it prints the frame rate, the wait before input is sampled (`pacing`), the swapchain waits after it
+(`acquire`, `present`), `sample->present`, and, when the device has present waiting, `sample->shown`: from input
+sampling until `vkWaitForPresentKHR` reports the frame shown, measured on a second thread through the layer's
+non-blocking poll. A working backend moves the wait into `pacing` and lowers `sample->shown`. On an RTX 3060 Laptop
+GPU at 60 Hz (windowed) the probe printed:
+
+| mode | pacing | acquire | sample->shown (avg / p95) |
+| --- | --- | --- | --- |
+| off | 0.00 ms | 14.22 ms | 49.5 / 49.9 ms |
+| driver (`VK_NV_low_latency2`) | 9.87 ms | 0.93 ms | 34.3 / 49.6 ms |
+| wait+driver | 14.55 ms | 0.00 ms | 16.6 / 16.7 ms |
+
 ## Limitations
 
 - The FFmpeg bridge's Vulkan Video negotiation copies only the feature structures it knows, so on a device where
