@@ -132,19 +132,22 @@ namespace MajdataPlay.Tests.Game.Misc.Net
             return MajDatabase.Runtime.Read(connection => connection.ExecuteScalar<int>("SELECT COUNT(*) FROM OnlineChartCache"));
         }
 
-        /// <summary>Checks that the table is unique on the chart identity and the endpoint, so one chart has a row per endpoint.</summary>
+        /// <summary>
+        /// Checks that the table is unique on the chart identity and the server, and that endpoints whose servers report
+        /// no identifier are keyed by their URLs.
+        /// </summary>
         /// <returns>The test coroutine.</returns>
         [UnityTest]
-        public IEnumerator Table_IsUniqueOnChartIdAndEndpoint()
+        public IEnumerator Table_IsUniqueOnChartIdAndServer()
         {
             return UniTask.ToCoroutine(async () =>
             {
                 await _cache.InitializeAsync();
                 var indexSql = MajDatabase.Runtime.Read(connection => connection.ExecuteScalar<string>(
-                    "SELECT sql FROM sqlite_master WHERE type = 'index' AND name = 'IX_OnlineChartCache_ChartId_Endpoint'"));
+                    "SELECT sql FROM sqlite_master WHERE type = 'index' AND name = 'IX_OnlineChartCache_ChartId_Server'"));
 
                 Assert.That(indexSql, Does.Contain("unique").IgnoreCase);
-                Assert.That(indexSql, Does.Contain("\"ChartId\", \"Endpoint\""));
+                Assert.That(indexSql, Does.Contain("\"ChartId\", \"Server\""));
 
                 var other = new ApiEndpoint { Name = "Other", Url = new Uri("https://other.invalid/api/") };
                 await _cache.SyncAsync(_endpoint, new[] { Chart("1") }, null);
@@ -152,6 +155,131 @@ namespace MajdataPlay.Tests.Game.Misc.Net
                 await _cache.SyncAsync(other, new[] { Chart("1") }, null);
 
                 Assert.That(CountRows(), Is.EqualTo(2));
+                Assert.That(_cache.ResolveServer(other, new MajNetServerInfo { Id = " " }), Is.EqualTo("https://other.invalid/api/"));
+            });
+        }
+
+        /// <summary>Checks that the addresses of one server, such as reverse proxies, share one row per chart.</summary>
+        /// <returns>The test coroutine.</returns>
+        [UnityTest]
+        public IEnumerator ResolveServer_ProxiesOfOneServerShareRows()
+        {
+            return UniTask.ToCoroutine(async () =>
+            {
+                var proxy = new ApiEndpoint { Name = "Proxy", Url = new Uri("https://proxy.invalid/majdata/api/") };
+                var serverInfo = new MajNetServerInfo { Id = "majnet", Name = "MajdataNET" };
+
+                Assert.That(_cache.ResolveServer(_endpoint, serverInfo), Is.EqualTo("majnet"));
+                Assert.That(_cache.ResolveServer(proxy, serverInfo), Is.EqualTo("majnet"));
+                var direct = (await _cache.SyncAsync(_endpoint, new[] { Chart("1"), Chart("2") }, Info("1", Resource("maidata"), null)))["1"];
+                var proxied = (await _cache.SyncAsync(proxy, new[] { Chart("1"), Chart("2") }, Info("1", Resource("maidata"), null)))["1"];
+
+                Assert.That(CountRows(), Is.EqualTo(2));
+                Assert.That(direct.Server, Is.EqualTo("majnet"));
+                Assert.That(proxied.Server, Is.EqualTo("majnet"));
+                Assert.That(proxied.TryGetDigest(OnlineChartResourceKind.Maidata, out _), Is.True);
+                Assert.That(MajDatabase.Runtime.Read(connection => connection.ExecuteScalar<int>("SELECT COUNT(*) FROM OnlineServers WHERE Server = 'majnet'")), Is.EqualTo(2));
+            });
+        }
+
+        /// <summary>
+        /// Checks that rows recorded under an endpoint's URL move to the server's identifier once the server reports one,
+        /// keeping the server's row of a chart both have.
+        /// </summary>
+        /// <returns>The test coroutine.</returns>
+        [UnityTest]
+        public IEnumerator ResolveServer_MovesUrlRowsToServerIdentifier()
+        {
+            return UniTask.ToCoroutine(async () =>
+            {
+                var proxy = new ApiEndpoint { Name = "Proxy", Url = new Uri("https://proxy.invalid/majdata/api/") };
+                var serverInfo = new MajNetServerInfo { Id = "majnet" };
+                var kept = Resource("kept track");
+                await _cache.SyncAsync(_endpoint, new[] { Chart("1"), Chart("2") }, null);
+                _cache.ResolveServer(proxy, serverInfo);
+                await _cache.SyncAsync(proxy, new[] { Chart("2") }, Info("2", null, kept));
+
+                _cache.ResolveServer(_endpoint, serverInfo);
+
+                Assert.That(CountRows(), Is.EqualTo(2));
+                Assert.That(MajDatabase.Runtime.Read(connection => connection.ExecuteScalar<int>("SELECT COUNT(*) FROM OnlineChartCache WHERE Server = 'majnet'")), Is.EqualTo(2));
+                Assert.That(await ReadColumnAsync("TrackSha256", "2"), Is.EqualTo(kept.Sha256));
+            });
+        }
+
+        /// <summary>
+        /// Checks that the server of an endpoint is remembered across sessions and kept when its identity cannot be
+        /// fetched, so cached charts are listed offline through any address that reached the server before.
+        /// </summary>
+        /// <returns>The test coroutine.</returns>
+        [UnityTest]
+        public IEnumerator GetServerKey_RemembersServerAcrossSessions()
+        {
+            return UniTask.ToCoroutine(async () =>
+            {
+                var proxy = new ApiEndpoint { Name = "Proxy", Url = new Uri("https://proxy.invalid/majdata/api/") };
+                var unknown = new ApiEndpoint { Name = "Unknown", Url = new Uri("https://unknown.invalid/api/") };
+                var infos = Info("1", Resource("maidata"), Resource("track"));
+                _cache.ResolveServer(_endpoint, new MajNetServerInfo { Id = "majnet" });
+                _cache.ResolveServer(proxy, new MajNetServerInfo { Id = "majnet" });
+                await _cache.SyncAsync(_endpoint, new[] { Chart("1") }, infos);
+                StoreObject(infos["1"].Resources!.Maidata!.Sha256);
+                StoreObject(infos["1"].Resources!.Track!.Sha256);
+
+                var nextSession = new OnlineChartCache(ObjectStore.Shared, true);
+
+                Assert.That(nextSession.GetServerKey(proxy), Is.EqualTo("majnet"));
+                Assert.That(nextSession.ResolveServer(proxy, null), Is.EqualTo("majnet"));
+                Assert.That(nextSession.GetServerKey(unknown), Is.EqualTo("https://unknown.invalid/api/"));
+                Assert.That(nextSession.LoadCached(proxy).Select(chart => chart.Detail.Id), Is.EqualTo(new[] { "1" }));
+            });
+        }
+
+        /// <summary>A row of the chart table as it was written before charts were keyed by server.</summary>
+        [SQLite.Table("OnlineChartCache")]
+        private sealed class LegacyChartRow
+        {
+            /// <summary>Gets or sets the row identity.</summary>
+            [SQLite.PrimaryKey]
+            [SQLite.AutoIncrement]
+            public long Id { get; set; }
+            /// <summary>Gets or sets the chart identity.</summary>
+            [SQLite.Indexed(Name = "IX_OnlineChartCache_ChartId_Endpoint", Order = 1, Unique = true)]
+            public string ChartId { get; set; } = string.Empty;
+            /// <summary>Gets or sets the endpoint URL.</summary>
+            [SQLite.Indexed(Name = "IX_OnlineChartCache_ChartId_Endpoint", Order = 2, Unique = true)]
+            public string Endpoint { get; set; } = string.Empty;
+            /// <summary>Gets or sets the MD5 digest of the chart file.</summary>
+            public string? MaidataMd5 { get; set; }
+            /// <summary>Gets or sets the SHA-256 digest of the chart file.</summary>
+            public string? MaidataSha256 { get; set; }
+        }
+
+        /// <summary>Checks that a chart table keyed by endpoint URL is upgraded in place, keeping its rows and their files.</summary>
+        /// <returns>The test coroutine.</returns>
+        [UnityTest]
+        public IEnumerator InitializeAsync_UpgradesEndpointColumn()
+        {
+            return UniTask.ToCoroutine(async () =>
+            {
+                var maidata = Resource("maidata");
+                MajDatabase.Runtime.Write(connection =>
+                {
+                    connection.CreateTable<LegacyChartRow>();
+                    connection.Insert(new LegacyChartRow { ChartId = "1", Endpoint = "https://api.invalid/api/", MaidataMd5 = maidata.Md5, MaidataSha256 = maidata.Sha256 });
+                });
+
+                await _cache.InitializeAsync();
+
+                var columns = MajDatabase.Runtime.Read(connection => connection.GetTableInfo("OnlineChartCache").Select(column => column.Name).ToArray());
+                var indexes = MajDatabase.Runtime.Read(connection => connection.QueryScalars<string>("SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'OnlineChartCache'").ToArray());
+                Assert.That(columns, Does.Contain("Server").And.Not.Contain("Endpoint"));
+                Assert.That(indexes, Does.Contain("IX_OnlineChartCache_ChartId_Server").And.Not.Contain("IX_OnlineChartCache_ChartId_Endpoint"));
+                Assert.That(await ReadColumnAsync("Server", "1"), Is.EqualTo("https://api.invalid/api/"));
+                Assert.That(_cache.GetReferencedDigests(), Does.Contain(maidata.Sha256));
+
+                _cache.ResolveServer(_endpoint, new MajNetServerInfo { Id = "majnet" });
+                Assert.That(await ReadColumnAsync("Server", "1"), Is.EqualTo("majnet"));
             });
         }
 
@@ -169,7 +297,7 @@ namespace MajdataPlay.Tests.Game.Misc.Net
 
                 var record = records["1"];
                 Assert.That(record.IsResolved, Is.True);
-                Assert.That(record.Endpoint, Is.EqualTo("https://api.invalid/api/"));
+                Assert.That(record.Server, Is.EqualTo("https://api.invalid/api/"));
                 Assert.That(record.TryGetDigest(OnlineChartResourceKind.Maidata, out var maidataDigest), Is.True);
                 Assert.That(maidataDigest, Is.EqualTo(new ChartResourceDigest(maidata.Md5, maidata.Sha256)));
                 Assert.That(record.GetUrl(OnlineChartResourceKind.Track), Is.EqualTo(track.Url));

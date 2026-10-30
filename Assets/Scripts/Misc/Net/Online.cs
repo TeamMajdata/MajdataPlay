@@ -52,6 +52,7 @@ namespace MajdataPlay.Net
         public const string API_GET_MACHINE_INFO = "machine/info";
         public const string API_GET_AUTH_CHECK = "machine/auth/check";
         public const string API_GET_RECOMMEND_FEED = "recommend/feed?source={0}&page={1}&pageSize={2}";
+        public const string API_GET_SERVER_INFO = "info";
 
         public const string API_POST_USER_LOGIN = "account/login";
         public const string API_POST_USER_LOGOUT = "account/logout";
@@ -696,6 +697,32 @@ namespace MajdataPlay.Net
                     break;
                 }
                 else if (!rsp.IsSuccessfully && rsp.StatusCode is not HttpStatusCode.OK)
+                {
+                    break;
+                }
+            }
+
+            return null;
+        }
+        /// <summary>Fetches the identity of the server behind an endpoint from <c>GET info</c>.</summary>
+        /// <param name="apiEndpoint">The endpoint, which may be one of several addresses of the server, such as a reverse proxy.</param>
+        /// <param name="token">The token canceling the request.</param>
+        /// <returns>The server identity, or null when the request failed, for example because the server does not provide the API.</returns>
+        public static async ValueTask<MajNetServerInfo?> GetServerInfoAsync(ApiEndpoint apiEndpoint, CancellationToken token = default)
+        {
+            await UniTask.SwitchToThreadPool();
+            var url = apiEndpoint.Url.Combine(API_GET_SERVER_INFO);
+
+            for (var i = 0; i < MajEnv.HTTP_REQUEST_MAX_RETRY; i++)
+            {
+                var rsp = await GetAsync(url, token);
+                var e = default(Exception?);
+                if (rsp.IsSuccessfully && rsp.TryDeserialize<MajNetServerInfo>(out var serverInfo, out e) && serverInfo is not null)
+                {
+                    return serverInfo;
+                }
+                MajDebug.LogError($"Failed to get server info: {e?.Message ?? rsp.StatusCode?.ToString() ?? "Unknown error"}");
+                if (rsp.ErrorCode == HttpErrorCode.Canceled || rsp.StatusCode is not null)
                 {
                     break;
                 }

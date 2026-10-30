@@ -839,6 +839,37 @@ namespace MajdataPlay.Tests.Game.Misc.Base
             });
         }
 
+        /// <summary>Checks that the chart lists of two addresses of one server, such as a reverse proxy, share one row per chart.</summary>
+        /// <returns>The test coroutine.</returns>
+        [UnityTest]
+        public IEnumerator GetOnlineCollection_ProxiesOfOneServerShareRows()
+        {
+            return UniTask.ToCoroutine(async () =>
+            {
+                using var http = new StubHttpScope();
+                var direct = new ApiEndpoint { Name = "Direct", Url = new Uri("https://api.invalid/api/") };
+                var proxy = new ApiEndpoint { Name = "Proxy", Url = new Uri("https://proxy.invalid/majdata/api/") };
+                var ids = new[] { Guid.NewGuid().ToString(), Guid.NewGuid().ToString() };
+                http.Responder = request => request.RequestUri!.AbsolutePath switch
+                {
+                    var path when path.EndsWith("maichart/list") => StubHttpScope.Respond(System.Net.HttpStatusCode.OK, ChartListJson(ids)),
+                    var path when path.EndsWith("maichart/info") => StubHttpScope.Respond(System.Net.HttpStatusCode.OK, ChartInfoJson(ids)),
+                    _ => StubHttpScope.Respond(System.Net.HttpStatusCode.OK, "{\"id\":\"majnet\",\"name\":\"MajdataNET\"}")
+                };
+
+                var songs = (await GetOnlineCollectionAsync(direct)).Concat(await GetOnlineCollectionAsync(proxy)).Cast<OnlineSongDetail>().ToArray();
+
+                Assert.That(songs.Length, Is.EqualTo(4));
+                Assert.That(songs.All(song => song.Record.Server == "majnet"), Is.True);
+                Assert.That(CountOnlineChartRows(ids[0]), Is.EqualTo(1));
+                Assert.That(CountOnlineChartRows(ids[1]), Is.EqualTo(1));
+                foreach (var song in songs)
+                {
+                    song.Dispose();
+                }
+            });
+        }
+
         /// <summary>Checks that songs of an endpoint without the info API still get records, which learn digests from downloads.</summary>
         /// <returns>The test coroutine.</returns>
         [UnityTest]

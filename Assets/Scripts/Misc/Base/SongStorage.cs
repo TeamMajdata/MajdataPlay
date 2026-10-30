@@ -1275,18 +1275,23 @@ namespace MajdataPlay
             }
         }
 
-        /// <summary>Fetches the file digests of an endpoint's charts and synchronizes them into the online chart cache.</summary>
+        /// <summary>Fetches the server identity and file digests of an endpoint's charts and synchronizes them into the online chart cache.</summary>
         /// <param name="api">The endpoint which served the chart list.</param>
         /// <param name="chartList">The charts of the list.</param>
-        /// <param name="cancellationToken">Cancels fetching the digests.</param>
+        /// <param name="cancellationToken">Cancels fetching the identity and digests.</param>
         /// <returns>The record of every chart with an identity, keyed by chart identity.</returns>
         /// <remarks>
+        /// The records are keyed by the server, so every address of one server, such as a reverse proxy, shares them.
         /// When the endpoint cannot provide the digests, the charts keep the digests recorded for their current revision
         /// and download their other files from the chart endpoints.
         /// </remarks>
         /// <exception cref="OperationCanceledException">The caller canceled fetching.</exception>
         private static async Task<Dictionary<string, OnlineChartRecord>> SyncOnlineChartRecordsAsync(ApiEndpoint api, ReadOnlyMemory<MajnetSongDetail> chartList, CancellationToken cancellationToken)
         {
+            var serverInfo = await Online.GetServerInfoAsync(api, cancellationToken).ConfigureAwait(false);
+            cancellationToken.ThrowIfCancellationRequested();
+            var server = OnlineChartCache.Shared.ResolveServer(api, serverInfo);
+            MajDebug.LogInfo(nameof(SongStorage), $"[Online]{api.Url.OriginalString} records its charts as server {server}");
             MajNetChartInfo[]? infoList;
             // Cleared on return, so the pool does not keep the identities alive.
             using (var chartIds = Pool<string?>.Rent(chartList.Length, true))

@@ -3,6 +3,7 @@ using MajdataPlay.Diagnostics;
 using MajdataPlay.Utils;
 using SQLite;
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -17,11 +18,17 @@ namespace MajdataPlay.Net
     /// reuses the files already in the <see cref="ObjectStore"/> and charts whose files are stored can be listed offline.
     /// </summary>
     /// <remarks>
-    /// The table holds one row per chart and endpoint, unique on <c>(ChartId, Endpoint)</c>, with the MD5 and SHA-256
-    /// digests of the chart, track, video, cover art and thumbnail, and the chart metadata of the last chart list.
+    /// The <c>OnlineChartCache</c> table holds one row per chart and server, unique on <c>(ChartId, Server)</c>, with
+    /// the MD5 and SHA-256 digests of the chart, track, video, cover art and thumbnail, and the chart metadata of the
+    /// last chart list. The server key is the identifier the server reports through <c>GET info</c>, so every address
+    /// of one server, such as a reverse proxy, shares one row per chart; a server reporting no identifier is keyed by
+    /// its endpoint's URL. The <c>OnlineServers</c> table remembers the server key of every endpoint URL, so cached
+    /// charts are listed offline through any address that reached the server before.
+    /// <para>
     /// Every successful chart list refresh synchronizes the rows with the <c>maichart/info</c> API, so a file the
     /// server replaced points to its new object, and the cache reports the digests to the object store as references,
     /// so the objects no row points to any more are deleted at the next startup.
+    /// </para>
     /// </remarks>
     internal sealed class OnlineChartCache : IObjectReferenceSource
     {
@@ -44,10 +51,16 @@ namespace MajdataPlay.Net
         /// <summary>Gets whether the records are kept in the runtime database; otherwise they only live in memory.</summary>
         public bool IsPersistent { get; }
 
-        /// <summary>The name of the table in the runtime database.</summary>
+        /// <summary>The name of the chart table in the runtime database.</summary>
         private const string TableName = "OnlineChartCache";
-        /// <summary>The name of the unique index on the chart identity and the endpoint.</summary>
-        private const string ChartIndexName = "IX_OnlineChartCache_ChartId_Endpoint";
+        /// <summary>The name of the table mapping endpoint URLs to server keys.</summary>
+        private const string ServerTableName = "OnlineServers";
+        /// <summary>The name of the unique index on the chart identity and the server.</summary>
+        private const string ChartIndexName = "IX_OnlineChartCache_ChartId_Server";
+        /// <summary>The column that held the endpoint URL before charts were keyed by server.</summary>
+        private const string LegacyEndpointColumnName = "Endpoint";
+        /// <summary>The unique index on the chart identity and the endpoint URL before charts were keyed by server.</summary>
+        private const string LegacyChartIndexName = "IX_OnlineChartCache_ChartId_Endpoint";
         /// <summary>Every resource kind, in declaration order.</summary>
         private static readonly OnlineChartResourceKind[] s_kinds = (OnlineChartResourceKind[])Enum.GetValues(typeof(OnlineChartResourceKind));
 
@@ -55,8 +68,10 @@ namespace MajdataPlay.Net
         private static readonly object s_sharedLock = new();
         /// <summary>Stores the cache of the application, or null before the first access.</summary>
         private static OnlineChartCache? s_shared;
-        /// <summary>Records whether the table has been created in the runtime database.</summary>
+        /// <summary>Records whether the tables have been created in the runtime database.</summary>
         private int _isTableReady;
+        /// <summary>Stores the server key of every endpoint URL resolved or looked up in this session.</summary>
+        private readonly ConcurrentDictionary<string, string> _serverKeys = new(StringComparer.Ordinal);
 
         /// <summary>Creates a cache.</summary>
         /// <param name="objects">The store holding the charts' files.</param>
@@ -75,12 +90,88 @@ namespace MajdataPlay.Net
             }
         }
 
-        /// <summary>Gets the key identifying an endpoint in the table.</summary>
+        /// <summary>Gets the key identifying an endpoint address.</summary>
         /// <param name="api">The endpoint.</param>
         /// <returns>The absolute URI of the endpoint.</returns>
         public static string GetEndpointKey(ApiEndpoint api)
         {
             return api.Url.AbsoluteUri;
+        }
+
+        /// <summary>Resolves the server an endpoint reaches from the identity it reported, and remembers it for later sessions.</summary>
+        /// <param name="api">The endpoint.</param>
+        /// <param name="serverInfo">The identity reported by <c>GET info</c>, or null when it could not be fetched.</param>
+        /// <returns>The server key: the server's identifier, or the endpoint's URL when the server reports none.</returns>
+        /// <remarks>
+        /// Without a reported identity, the key remembered for the endpoint is kept. Once the server reports an
+        /// identifier, the rows recorded under the endpoint's URL move to it, so the addresses of one server share one
+        /// row per chart. A database failure is logged and the key then only lives in memory.
+        /// </remarks>
+        public string ResolveServer(ApiEndpoint api, MajNetServerInfo? serverInfo)
+        {
+            if (serverInfo is null)
+            {
+                return GetServerKey(api);
+            }
+            var endpoint = GetEndpointKey(api);
+            var server = string.IsNullOrWhiteSpace(serverInfo.Id) ? endpoint : serverInfo.Id;
+            _serverKeys[endpoint] = server;
+            if (!IsPersistent)
+            {
+                return server;
+            }
+            try
+            {
+                EnsureTable();
+                var updatedAt = DateTime.UtcNow.Ticks;
+                MajDatabase.Runtime.Write(connection =>
+                {
+                    connection.InsertOrReplace(new OnlineServerRow
+                    {
+                        Endpoint = endpoint,
+                        Server = server,
+                        UpdatedAtTicks = updatedAt
+                    });
+                    if (server != endpoint)
+                    {
+                        // Rows recorded under the URL belong to this endpoint alone; a chart the server already has a row for keeps that row.
+                        connection.Execute($"UPDATE OR IGNORE {TableName} SET {nameof(OnlineChartRow.Server)} = ? WHERE {nameof(OnlineChartRow.Server)} = ?", server, endpoint);
+                        connection.Execute($"DELETE FROM {TableName} WHERE {nameof(OnlineChartRow.Server)} = ?", endpoint);
+                    }
+                });
+            }
+            catch (Exception e)
+            {
+                MajDebug.LogError(nameof(OnlineChartCache), $"Failed to record the server of {api.Name}: {e}");
+            }
+            return server;
+        }
+
+        /// <summary>Gets the server key of an endpoint: the one resolved in this session, else the one remembered from an earlier session, else its URL.</summary>
+        /// <param name="api">The endpoint.</param>
+        /// <returns>The server key.</returns>
+        /// <remarks>A database failure is logged and the URL is used.</remarks>
+        public string GetServerKey(ApiEndpoint api)
+        {
+            var endpoint = GetEndpointKey(api);
+            if (_serverKeys.TryGetValue(endpoint, out var server))
+            {
+                return server;
+            }
+            server = endpoint;
+            if (IsPersistent)
+            {
+                try
+                {
+                    EnsureTable();
+                    server = MajDatabase.Runtime.Read(connection => connection.Find<OnlineServerRow>(endpoint))?.Server ?? endpoint;
+                }
+                catch (Exception e)
+                {
+                    MajDebug.LogError(nameof(OnlineChartCache), $"Failed to read the server of {api.Name}: {e}");
+                }
+            }
+            return _serverKeys.GetOrAdd(endpoint, server);
         }
 
         /// <summary>Creates the table in the runtime database on the thread pool, unless it already exists.</summary>
@@ -106,7 +197,7 @@ namespace MajdataPlay.Net
         /// </remarks>
         public async Task<Dictionary<string, OnlineChartRecord>> SyncAsync(ApiEndpoint api, ReadOnlyMemory<MajnetSongDetail> charts, IReadOnlyDictionary<string, MajNetChartInfo>? infos)
         {
-            var endpoint = GetEndpointKey(api);
+            var server = GetServerKey(api);
             var records = new Dictionary<string, OnlineChartRecord>(StringComparer.Ordinal);
             if (IsPersistent)
             {
@@ -116,7 +207,7 @@ namespace MajdataPlay.Net
                     await MajDatabase.Runtime.WriteAsync(connection =>
                     {
                         var rows = new Dictionary<string, OnlineChartRow>(StringComparer.Ordinal);
-                        foreach (var row in connection.Table<OnlineChartRow>().Where(row => row.Endpoint == endpoint))
+                        foreach (var row in connection.Table<OnlineChartRow>().Where(row => row.Server == server))
                         {
                             rows[row.ChartId] = row;
                         }
@@ -131,7 +222,7 @@ namespace MajdataPlay.Net
                             row ??= new OnlineChartRow
                             {
                                 ChartId = chart.Id,
-                                Endpoint = endpoint
+                                Server = server
                             };
                             if (Apply(row, chart, info))
                             {
@@ -184,7 +275,7 @@ namespace MajdataPlay.Net
             {
                 return CreateTransientRecord(api, chart);
             }
-            var endpoint = GetEndpointKey(api);
+            var server = GetServerKey(api);
             var chartId = chart.Id;
             try
             {
@@ -193,13 +284,13 @@ namespace MajdataPlay.Net
                 MajDatabase.Runtime.Write(connection =>
                 {
                     var row = connection.Table<OnlineChartRow>()
-                                        .Where(x => x.ChartId == chartId && x.Endpoint == endpoint)
+                                        .Where(x => x.ChartId == chartId && x.Server == server)
                                         .FirstOrDefault();
                     var isNew = row is null;
                     row ??= new OnlineChartRow
                     {
                         ChartId = chartId,
-                        Endpoint = endpoint
+                        Server = server
                     };
                     if (Apply(row, chart, null))
                     {
@@ -233,7 +324,7 @@ namespace MajdataPlay.Net
             var row = new OnlineChartRow
             {
                 ChartId = chart.Id ?? string.Empty,
-                Endpoint = GetEndpointKey(api)
+                Server = GetServerKey(api)
             };
             Apply(row, chart, info);
             return CreateRecord(row, info, false);
@@ -252,9 +343,9 @@ namespace MajdataPlay.Net
                 return charts;
             }
             EnsureTable();
-            var endpoint = GetEndpointKey(api);
+            var server = GetServerKey(api);
             var rows = MajDatabase.Runtime.Read(connection => connection.Table<OnlineChartRow>()
-                                                                        .Where(row => row.Endpoint == endpoint)
+                                                                        .Where(row => row.Server == server)
                                                                         .OrderBy(row => row.Id)
                                                                         .ToList());
             foreach (var row in rows)
@@ -310,12 +401,12 @@ namespace MajdataPlay.Net
         {
             var (md5Column, sha256Column) = GetColumns(kind);
             var sql = $"UPDATE {TableName} SET {md5Column} = ?, {sha256Column} = ?, {nameof(OnlineChartRow.UpdatedAtTicks)} = ? " +
-                      $"WHERE {nameof(OnlineChartRow.ChartId)} = ? AND {nameof(OnlineChartRow.Endpoint)} = ?";
+                      $"WHERE {nameof(OnlineChartRow.ChartId)} = ? AND {nameof(OnlineChartRow.Server)} = ?";
             var updatedAt = DateTime.UtcNow.Ticks;
             try
             {
                 var database = MajDatabase.Runtime;
-                ObserveWriteAsync(database.WriteAsync(connection => connection.Execute(sql, digest.Md5, digest.Sha256, updatedAt, record.ChartId, record.Endpoint))).Forget();
+                ObserveWriteAsync(database.WriteAsync(connection => connection.Execute(sql, digest.Md5, digest.Sha256, updatedAt, record.ChartId, record.Server))).Forget();
             }
             catch (ObjectDisposedException)
             {
@@ -328,16 +419,48 @@ namespace MajdataPlay.Net
             }
         }
 
-        /// <summary>Creates the table and its unique index once.</summary>
-        /// <exception cref="SQLiteException">The table could not be created.</exception>
+        /// <summary>Creates the tables and their indexes once, upgrading a chart table keyed by endpoint URL.</summary>
+        /// <exception cref="SQLiteException">The tables could not be created or upgraded.</exception>
         private void EnsureTable()
         {
             if (Volatile.Read(ref _isTableReady) != 0)
             {
                 return;
             }
-            MajDatabase.Runtime.Write(static connection => connection.CreateTable<OnlineChartRow>());
+            MajDatabase.Runtime.Write(static connection =>
+            {
+                RenameLegacyEndpointColumn(connection);
+                connection.CreateTable<OnlineChartRow>();
+                connection.CreateTable<OnlineServerRow>();
+            });
             Volatile.Write(ref _isTableReady, 1);
+        }
+
+        /// <summary>Upgrades a chart table written before charts were keyed by server, keeping its rows and their files.</summary>
+        /// <param name="connection">The runtime database connection, inside a transaction.</param>
+        /// <remarks>
+        /// The old <c>Endpoint</c> column holds endpoint URLs, which are the server keys of endpoints whose server reports
+        /// no identifier, so it becomes the <c>Server</c> column; the rows move to the server's identifier when the
+        /// endpoint is next resolved.
+        /// </remarks>
+        /// <exception cref="SQLiteException">The table could not be upgraded.</exception>
+        private static void RenameLegacyEndpointColumn(SQLiteConnection connection)
+        {
+            var hasLegacyColumn = false;
+            foreach (var column in connection.GetTableInfo(TableName))
+            {
+                if (column.Name == nameof(OnlineChartRow.Server))
+                {
+                    return;
+                }
+                hasLegacyColumn |= column.Name == LegacyEndpointColumnName;
+            }
+            if (!hasLegacyColumn)
+            {
+                return;
+            }
+            connection.Execute($"DROP INDEX IF EXISTS \"{LegacyChartIndexName}\"");
+            connection.Execute($"ALTER TABLE \"{TableName}\" RENAME COLUMN \"{LegacyEndpointColumnName}\" TO \"{nameof(OnlineChartRow.Server)}\"");
         }
 
         /// <summary>Logs the failure of a queued write instead of leaving it unobserved.</summary>
@@ -464,7 +587,7 @@ namespace MajdataPlay.Net
         /// <returns>The record.</returns>
         private OnlineChartRecord CreateRecord(OnlineChartRow row, MajNetChartInfo? info, bool isPersistent)
         {
-            var record = new OnlineChartRecord(this, row.Endpoint, row.ChartId, row.IsResolved, isPersistent);
+            var record = new OnlineChartRecord(this, row.Server, row.ChartId, row.IsResolved, isPersistent);
             foreach (var kind in s_kinds)
             {
                 record.Load(kind, GetDigest(row, kind), info?.Resources?.Get(kind)?.Url);
@@ -545,7 +668,7 @@ namespace MajdataPlay.Net
             };
         }
 
-        /// <summary>One chart of one endpoint, with the digests of its files.</summary>
+        /// <summary>One chart of one server, with the digests of its files.</summary>
         [Table(TableName)]
         private sealed class OnlineChartRow
         {
@@ -553,12 +676,12 @@ namespace MajdataPlay.Net
             [PrimaryKey]
             [AutoIncrement]
             public long Id { get; set; }
-            /// <summary>Gets or sets the server-assigned chart identity; unique together with <see cref="Endpoint"/>.</summary>
+            /// <summary>Gets or sets the server-assigned chart identity; unique together with <see cref="Server"/>.</summary>
             [Indexed(Name = ChartIndexName, Order = 1, Unique = true)]
             public string ChartId { get; set; } = string.Empty;
-            /// <summary>Gets or sets the endpoint key; unique together with <see cref="ChartId"/>.</summary>
+            /// <summary>Gets or sets the server key, the server's identifier or else its endpoint's URL; unique together with <see cref="ChartId"/>.</summary>
             [Indexed(Name = ChartIndexName, Order = 2, Unique = true)]
-            public string Endpoint { get; set; } = string.Empty;
+            public string Server { get; set; } = string.Empty;
             /// <summary>Gets or sets the chart hash of the chart list the row was last synchronized with.</summary>
             public string ChartHash { get; set; } = string.Empty;
             /// <summary>Gets or sets the chart metadata of the chart list as JSON, which lists the chart offline.</summary>
@@ -586,6 +709,19 @@ namespace MajdataPlay.Net
             /// <summary>Gets or sets the SHA-256 digest of the compressed cover image.</summary>
             public string? ThumbnailSha256 { get; set; }
             /// <summary>Gets or sets when the row last changed, in UTC ticks.</summary>
+            public long UpdatedAtTicks { get; set; }
+        }
+
+        /// <summary>The server an endpoint address reaches, remembered so its cached charts can be listed offline.</summary>
+        [Table(ServerTableName)]
+        private sealed class OnlineServerRow
+        {
+            /// <summary>Gets or sets the endpoint key, the absolute URI of the endpoint.</summary>
+            [PrimaryKey]
+            public string Endpoint { get; set; } = string.Empty;
+            /// <summary>Gets or sets the server key the endpoint resolved to.</summary>
+            public string Server { get; set; } = string.Empty;
+            /// <summary>Gets or sets when the endpoint was last resolved, in UTC ticks.</summary>
             public long UpdatedAtTicks { get; set; }
         }
     }

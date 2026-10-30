@@ -504,6 +504,26 @@ namespace MajdataPlay.Tests.Game.Misc.Net
             });
         }
 
+        /// <summary>Checks that the server identity is read from <c>GET info</c>, and that a server without the API yields null.</summary>
+        /// <returns>The test coroutine.</returns>
+        [UnityTest]
+        public IEnumerator GetServerInfoAsync_ReadsIdentity()
+        {
+            return UniTask.ToCoroutine(async () =>
+            {
+                _http.RespondWith(HttpStatusCode.OK, "{\"id\":\"majnet\",\"name\":\"MajdataNET\"}");
+                var serverInfo = await Online.GetServerInfoAsync(_endpoint);
+                Assert.That(serverInfo!.Id, Is.EqualTo("majnet"));
+                Assert.That(serverInfo.Name, Is.EqualTo("MajdataNET"));
+                Assert.That(_http.Requests.Single().Uri.AbsoluteUri, Is.EqualTo("https://api.invalid/api/info"));
+
+                _http.RespondWith(HttpStatusCode.NotFound);
+                var before = _http.Requests.Length;
+                Assert.That(await Online.GetServerInfoAsync(_endpoint), Is.Null);
+                Assert.That(_http.Requests.Length - before, Is.EqualTo(1));
+            });
+        }
+
         /// <summary>Checks that an endpoint without the info API, or a failed batch, yields null.</summary>
         /// <returns>The test coroutine.</returns>
         [UnityTest]

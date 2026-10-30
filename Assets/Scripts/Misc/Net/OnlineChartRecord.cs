@@ -16,8 +16,8 @@ namespace MajdataPlay.Net
     {
         /// <summary>Gets the server-assigned identity of the chart.</summary>
         public string ChartId { get; }
-        /// <summary>Gets the endpoint key, the absolute URI of the endpoint.</summary>
-        public string Endpoint { get; }
+        /// <summary>Gets the server key: the identifier of the server serving the chart, or else its endpoint's URL.</summary>
+        public string Server { get; }
         /// <summary>Gets whether the digests came from the <c>maichart/info</c> API, so a missing digest means a missing file.</summary>
         public bool IsResolved { get; }
         /// <summary>Gets the cache owning the record, which also owns the object store.</summary>
@@ -35,15 +35,15 @@ namespace MajdataPlay.Net
 
         /// <summary>Creates a record.</summary>
         /// <param name="cache">The cache owning the record.</param>
-        /// <param name="endpoint">The endpoint key.</param>
+        /// <param name="server">The server key.</param>
         /// <param name="chartId">The chart identity.</param>
         /// <param name="isResolved">Whether the digests came from the info API.</param>
         /// <param name="isPersistent">Whether digest changes are written to the runtime database.</param>
         /// <exception cref="ArgumentNullException">An argument is null.</exception>
-        internal OnlineChartRecord(OnlineChartCache cache, string endpoint, string chartId, bool isResolved, bool isPersistent)
+        internal OnlineChartRecord(OnlineChartCache cache, string server, string chartId, bool isResolved, bool isPersistent)
         {
             Cache = cache ?? throw new ArgumentNullException(nameof(cache));
-            Endpoint = endpoint ?? throw new ArgumentNullException(nameof(endpoint));
+            Server = server ?? throw new ArgumentNullException(nameof(server));
             ChartId = chartId ?? throw new ArgumentNullException(nameof(chartId));
             IsResolved = isResolved;
             _isPersistent = isPersistent;
