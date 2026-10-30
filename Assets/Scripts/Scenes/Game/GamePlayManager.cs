@@ -1,4 +1,4 @@
-﻿using Cysharp.Text;
+using Cysharp.Text;
 using Cysharp.Threading.Tasks;
 using MajdataPlay.Diagnostics;
 using MajdataPlay.Editor;
@@ -758,7 +758,7 @@ namespace MajdataPlay.Scenes.Game
             }
             _chart = _chart.AddOffset(-_displayOffsetSec);
             await UniTask.SwitchToMainThread();
-            _chartVisualDisplayer.SetSimaiChart(_chart, AudioLength);
+            _chartVisualDisplayer.SetSimaiChart(_chart, _audioTimeOffsetSec, AudioLength);
             await UniTask.SwitchToThreadPool();
             var simaiCmd = _simaiFile.Commands.FirstOrDefault(x => x.Prefix == "clock_count");
             var countnum = 4;

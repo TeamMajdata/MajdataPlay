@@ -216,10 +216,6 @@ namespace MajdataPlay
         private const string SettingsFileName = "settings.json";
         /// <summary>The name of <see cref="RuntimeDirectory"/> inside <see cref="PersistentDirectory"/>, and of the legacy runtime directory inside <see cref="CacheDirectory"/>.</summary>
         private const string RuntimeDirectoryName = "Runtime";
-        /// <summary>The SQLite runtime database file name inside <see cref="RuntimeDirectory"/>, which holds the runtime configuration and favorites.</summary>
-        internal const string RuntimeDatabaseFileName = "runtime.db";
-        /// <summary>The content type requested for SQLite database files created on a provider.</summary>
-        private const string DatabaseMimeType = "application/vnd.sqlite3";
         /// <summary>The legacy runtime configuration file name inside <see cref="RuntimeDirectory"/>, imported into the runtime database.</summary>
         private const string RuntimeConfigFileName = "config.json";
         /// <summary>The machine description file name inside <see cref="RootDirectory"/>.</summary>
@@ -234,6 +230,10 @@ namespace MajdataPlay
         [ThreadStatic]
         private static Random? s_randomizer;
         private static readonly CancellationTokenSource s_globalCTS = new();
+#if UNITY_ANDROID && !UNITY_EDITOR
+        /// <summary>Records that environment initialization must wait for the Android permission response.</summary>
+        private static bool s_deferAndroidInitialization;
+#endif
 
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
@@ -244,8 +244,36 @@ namespace MajdataPlay
 #endif
         }
         #region Init core
+        /// <summary>Initializes the environment before scene services can read its directories or settings.</summary>
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterAssembliesLoaded)]
         private static void Init()
+        {
+#if UNITY_ANDROID && !UNITY_EDITOR
+            s_deferAndroidInitialization = AndroidStorageStartup.SupportsLegacyStorage(AndroidRuntime.SdkVersion, AndroidRuntime.TargetSdkVersion)
+                && !AndroidStorageStartup.HasPermissions();
+            if (s_deferAndroidInitialization)
+            {
+                return;
+            }
+#endif
+            InitCore();
+        }
+
+#if UNITY_ANDROID && !UNITY_EDITOR
+        /// <summary>Suspends the loaded first scene before Awake while legacy storage permissions are requested.</summary>
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSceneLoad)]
+        private static void InitAndroidStorage()
+        {
+            if (s_deferAndroidInitialization)
+            {
+                s_deferAndroidInitialization = false;
+                AndroidStorageStartup.Begin(InitCore, AndroidStorageStartup.RequestPermissionsAsync);
+            }
+        }
+#endif
+
+        /// <summary>Initializes paths and dependent services after the Android permission decision is available.</summary>
+        private static void InitCore()
         {
             InitPath();
             InitDirectories();
@@ -279,67 +307,32 @@ namespace MajdataPlay
 #elif UNITY_ANDROID
             // The persistent directory stays native whatever the root is, so native libraries always have a filename to open.
             PersistentDirectory = FileSystem.Directory.Open(Application.persistentDataPath);
-            if (AndroidRuntime.SdkVersion < 30 || AndroidRuntime.TargetSdkVersion < 30) // < Android 11
+            if (AndroidStorageStartup.SupportsLegacyStorage(AndroidRuntime.SdkVersion, AndroidRuntime.TargetSdkVersion)
+                && AndroidStorageStartup.HasPermissions())
             {
-                var androidStoragePermissions = new string[]
+                // Permission requests finish before this step, so every dependent handle uses the final root.
+                const string legacyRootPath = "/sdcard/Documents/MajdataPlay";
+                RootDirectory = FileSystem.Directory.Create(legacyRootPath);
+                if (RootDirectory.FindFile(".nomedia") is null)
                 {
-                    UnityEngine.Android.Permission.ExternalStorageRead,
-                    UnityEngine.Android.Permission.ExternalStorageWrite,
-                };
-                var isGranted = true;
-                for (var i = 0; i < androidStoragePermissions.Length; i++)
-                {
-                    var flag = 0;
-                    var permission = androidStoragePermissions[i];
-                RECHECK_PERMISSION:
-                    if (!UnityEngine.Android.Permission.HasUserAuthorizedPermission(permission))
+                    try
                     {
-                        switch (flag)
-                        {
-                            case 0:
-                                UnityEngine.Android.Permission.RequestUserPermission(permission);
-                                flag = 1;
-                                goto RECHECK_PERMISSION;
-                            case 1:
-                                isGranted = false;
-                                goto BREAK_LOOP;
-                        }
-                        continue;
-                    BREAK_LOOP:
-                        break;
+                        RootDirectory.CreateFile(".nomedia");
+                        MajDebug.LogDebug("Created .nomedia flag file");
                     }
-                }
-                if (isGranted)
-                {
-                    // The legacy shared root is a known native path, so its streaming assets path is computed from the same constant.
-                    const string legacyRootPath = "/sdcard/Documents/MajdataPlay";
-                    RootDirectory = FileSystem.Directory.Create(legacyRootPath);
-                    if (RootDirectory.FindFile(".nomedia") is null)
+                    catch (Exception e)
                     {
-                        try
-                        {
-                            RootDirectory.CreateFile(".nomedia");
-                            MajDebug.LogDebug("Created .nomedia flag file");
-                        }
-                        catch (Exception e)
-                        {
-                            MajDebug.LogError("Failed to create .nomedia flag file");
-                            MajDebug.LogException(e);
-                        }
+                        MajDebug.LogError("Failed to create .nomedia flag file");
+                        MajDebug.LogException(e);
                     }
-                    else
-                    {
-                        MajDebug.LogDebug(".nomedia flag file exists");
-                    }
-                    AssetsDirectory = FileSystem.Directory.Open(Path.Combine(legacyRootPath, "ExtStreamingAssets"));
                 }
                 else
                 {
-                    RootDirectory = PersistentDirectory;
-                    AssetsDirectory = FileSystem.Directory.Open(Path.Combine(Application.persistentDataPath, "ExtStreamingAssets"));
+                    MajDebug.LogDebug(".nomedia flag file exists");
                 }
+                AssetsDirectory = FileSystem.Directory.Open(Path.Combine(legacyRootPath, "ExtStreamingAssets"));
             }
-            else // >= Android 11
+            else
             {
                 RootDirectory = PersistentDirectory;
                 AssetsDirectory = FileSystem.Directory.Open(Path.Combine(Application.persistentDataPath, "ExtStreamingAssets"));
@@ -353,6 +346,10 @@ namespace MajdataPlay
 #else
             throw new NotImplementedException();
 #endif
+            MajDebug.LogInfo(nameof(MajEnv), $"[Path]Root      : {RootDirectory.Location}");
+            MajDebug.LogInfo(nameof(MajEnv), $"[Path]Persistent: {PersistentDirectory.Location}");
+            MajDebug.LogInfo(nameof(MajEnv), $"[Path]Assets    : {AssetsDirectory.Location}");
+            MajDebug.LogInfo(nameof(MajEnv), $"[Path]Cache     : {CacheDirectory.Location}");
         }
         /// <summary>Creates the writable application directories through their parent handles, leaving missing streaming assets untouched.</summary>
         /// <exception cref="UnauthorizedAccessException">Creating an application directory was denied.</exception>
@@ -595,7 +592,8 @@ namespace MajdataPlay
             {
                 TryDeleteDirectory(CacheDirectory.FindDirectory("Net"));
                 TryDeleteDirectory(CacheDirectory.FindDirectory("View"));
-                MajDebug.LogInfo("[MajEnv][Init]iOS setting 'no_cache' is enabled. Cleared cache folders: Net, View.");
+                TryDeleteDirectory(CacheDirectory.FindDirectory(ObjectStore.DirectoryName));
+                MajDebug.LogInfo($"[MajEnv][Init]iOS setting 'no_cache' is enabled. Cleared cache folders: Net, View, {ObjectStore.DirectoryName}.");
             }
             else
             {
@@ -781,16 +779,18 @@ namespace MajdataPlay
         /// <exception cref="SQLiteException">The runtime database could not be opened, queried or written.</exception>
         private static void InitRuntimeConfig()
         {
-            using var database = OpenRuntimeDatabase();
+            var database = MajDatabase.Runtime;
+            // Creating the table also adds the columns of fields introduced after the table was first created.
+            database.Write(static connection => connection.CreateTable<ListConfigRecord>());
             ListConfigRecord? record;
             try
             {
-                record = database.Find<ListConfigRecord>(ListConfigRecord.SingletonId);
+                record = database.Read(static connection => connection.Find<ListConfigRecord>(ListConfigRecord.SingletonId));
             }
             catch (Exception e) when (e is FormatException or SQLiteException)
             {
                 // A value that cannot be converted back, such as a malformed GUID, is reset by the next save.
-                MajDebug.LogError(nameof(MajEnv), $"Failed to read runtime config from {RuntimeDatabaseFileName}\nException: {e}");
+                MajDebug.LogError(nameof(MajEnv), $"Failed to read runtime config from {MajDatabase.RuntimeDatabaseFileName}\nException: {e}");
                 RuntimeConfig = new();
                 return;
             }
@@ -842,40 +842,20 @@ namespace MajdataPlay
                 MajDebug.LogError(nameof(MajEnv), $"Failed to back up the legacy runtime config file: {e.Message}");
             }
         }
-        /// <summary>Opens an unpooled connection to the runtime database, creating the file and the configuration table when missing.</summary>
-        /// <returns>The open connection, which the caller disposes.</returns>
-        /// <remarks>
-        /// <see cref="SQLiteAsyncConnection"/> shares one pooled connection per database path, which <see cref="SongStorage"/>
-        /// closes on shutdown; a short-lived synchronous connection keeps the configuration independent of that lifetime.
-        /// </remarks>
-        /// <exception cref="UnauthorizedAccessException">Creating the database file was denied.</exception>
-        /// <exception cref="IOException">Creating the database file failed.</exception>
-        /// <exception cref="SQLiteException">The database could not be opened or the table could not be created.</exception>
-        private static SQLiteConnection OpenRuntimeDatabase()
-        {
-            // SQLite needs a resolvable location, so the file is created through the directory before the connection opens it.
-            var databaseFile = RuntimeDirectory.FindFile(RuntimeDatabaseFileName)
-                ?? RuntimeDirectory.CreateFile(RuntimeDatabaseFileName, DatabaseMimeType);
-            var database = new SQLiteConnection(databaseFile.Location, SQLiteOpenFlags.ReadWrite | SQLiteOpenFlags.Create | SQLiteOpenFlags.FullMutex);
-            try
-            {
-                // Creating the table also adds the columns of fields introduced after the table was first created.
-                database.CreateTable<ListConfigRecord>();
-            }
-            catch
-            {
-                database.Dispose();
-                throw;
-            }
-            return database;
-        }
         /// <summary>Stores the persisted fields of a runtime configuration, replacing the previously stored ones.</summary>
-        /// <param name="database">The open runtime database connection.</param>
+        /// <param name="database">The runtime database.</param>
         /// <param name="config">The runtime configuration to store.</param>
+        /// <remarks>The table is created when missing, so a save never depends on <see cref="InitRuntimeConfig"/> having run.</remarks>
+        /// <exception cref="ObjectDisposedException">The runtime database has been closed.</exception>
         /// <exception cref="SQLiteException">The configuration could not be written.</exception>
-        private static void WriteRuntimeConfig(SQLiteConnection database, RuntimeConfig config)
+        private static void WriteRuntimeConfig(MajDatabaseHandle database, RuntimeConfig config)
         {
-            database.InsertOrReplace(ListConfigRecord.FromRuntimeConfig(config));
+            var record = ListConfigRecord.FromRuntimeConfig(config);
+            database.Write(connection =>
+            {
+                connection.CreateTable<ListConfigRecord>();
+                connection.InsertOrReplace(record);
+            });
         }
         private static void InitOthers()
         {
@@ -928,10 +908,7 @@ namespace MajdataPlay
             // Re-resolve the files so a configuration deleted while running is recreated on every backend.
             SettingsPath = FindOrCreateFile(RootDirectory, SettingsFileName);
             WriteText(SettingsPath, json);
-            using (var database = OpenRuntimeDatabase())
-            {
-                WriteRuntimeConfig(database, RuntimeConfig);
-            }
+            WriteRuntimeConfig(MajDatabase.Runtime, RuntimeConfig);
 
             MajDebug.FlushLog();
         }
@@ -976,8 +953,8 @@ namespace MajdataPlay
             public int Id { get; set; } = SingletonId;
             /// <summary>Gets or sets the identifier of the selected chart collection.</summary>
             public Guid SelectedDirGuid { get; set; } = Guid.Empty;
-            /// <summary>Gets or sets the hash of the selected chart, or null when the column was never written.</summary>
-            public string? SelectedSongHash { get; set; } = string.Empty;
+            /// <summary>Gets or sets the <see cref="ISongDetail.Id"/> of the selected chart, or null when the column was never written.</summary>
+            public string? SelectedSongId { get; set; } = string.Empty;
             /// <summary>Gets or sets the selected difficulty.</summary>
             public ChartLevel SelectedDiff { get; set; } = ChartLevel.Easy;
 
@@ -990,7 +967,7 @@ namespace MajdataPlay
                 return new ListConfigRecord
                 {
                     SelectedDirGuid = list.SelectedDirGuid,
-                    SelectedSongHash = list.SelectedSongHash,
+                    SelectedSongId = list.SelectedSongId,
                     SelectedDiff = list.SelectedDiff,
                 };
             }
@@ -1004,7 +981,7 @@ namespace MajdataPlay
                     List = new ListConfig
                     {
                         SelectedDirGuid = SelectedDirGuid,
-                        SelectedSongHash = SelectedSongHash ?? string.Empty,
+                        SelectedSongId = SelectedSongId ?? string.Empty,
                         SelectedDiff = SelectedDiff,
                     },
                 };

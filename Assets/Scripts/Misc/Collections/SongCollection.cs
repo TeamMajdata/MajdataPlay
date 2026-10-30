@@ -218,13 +218,8 @@ namespace MajdataPlay.Collections
             {
                 throw new ArgumentException($"Directory '{directory.Location}' does not exist.", nameof(directory));
             }
-            var flagDirectory = directory.FindDirectory(".MajdataPlay");
-            if (flagDirectory is null)
-            {
-                flagDirectory = directory.CreateDirectory(".MajdataPlay");
-                flagDirectory.SetAttributes(FileAttributes.Directory | FileAttributes.Hidden);
-            }
-            var flagFile = flagDirectory.FindFile("id");
+            var flagDirectory = DirectoryIdentity.OpenMarkerDirectory(directory);
+            var flagFile = flagDirectory.FindFile(DirectoryIdentity.IdFileName);
             if (flagFile is not null)
             {
                 var guidStr = flagFile.ReadAllText();
@@ -242,7 +237,7 @@ namespace MajdataPlay.Collections
             else
             {
                 var guid = Guid.NewGuid();
-                flagDirectory.CreateFile("id", "text/plain").WriteAllText(guid.ToString());
+                flagDirectory.CreateFile(DirectoryIdentity.IdFileName, "text/plain").WriteAllText(guid.ToString());
                 Id = guid;
             }
         }

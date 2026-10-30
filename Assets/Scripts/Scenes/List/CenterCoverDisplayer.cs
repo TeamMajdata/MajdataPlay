@@ -342,7 +342,7 @@ namespace MajdataPlay.Scenes.List
                 var cancellationTokenOnLevelChanged = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _ctsOnLevelChanged.Token)
                                                                              .Token;
                 _metadataDisplayer.SetMetadataFromSongDetail(_currentSongDetail, (ChartLevel)_diff, loadDelayMS, cancellationTokenOnLevelChanged);
-                _chartAnalyzer.SetSongDeatil(_currentSongDetail, (ChartLevel)_diff, null, loadDelayMS, cancellationTokenOnLevelChanged);
+                _chartAnalyzer.SetSongDeatil(_currentSongDetail, (ChartLevel)_diff, 0, null, loadDelayMS, cancellationTokenOnLevelChanged);
                 _majRadar.SetRadarFromSongDetail(_currentSongDetail, (ChartLevel)_diff, loadDelayMS, cancellationTokenOnLevelChanged);
                 _onlineScoreRankDisplayer.SetSongDetail(_currentSongDetail, (ChartLevel)_diff, loadDelayMS, cancellationTokenOnLevelChanged);
                 _scoreDisplayer.SetScore(_currentSongDetail, (ChartLevel)_diff);
@@ -360,7 +360,7 @@ namespace MajdataPlay.Scenes.List
             _bgSongCoverDisplayer.color = new Color(1, 1, 1, nAlpha);
             _bgSongCoverTransform.anchoredPosition = nP;
         }
-        
+
         private async Task SetCoverAsync(ISongDetail detail, int loadDelayMS, CancellationToken token = default, Sprite? immediateCover = null)
         {
             _bgSongCoverAnim.TryCancel();

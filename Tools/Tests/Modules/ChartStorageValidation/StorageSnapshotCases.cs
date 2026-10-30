@@ -251,7 +251,7 @@ namespace MajdataPlay.Tests.ChartStorageValidation
             serialProbe.Gate!.TrySetResult();
             await Task.WhenAll(firstRefresh, secondRefresh).WaitAsync(TimeSpan.FromSeconds(20));
             Require(secondWasWaiting && serialProbe.Active == 0 && serialProbe.CompletedCount == 6, "Explicit source refreshes must serialize admission through the shared refresh lock, then both complete.");
-            Require(SongStorage.TotalChartCount == 3 && SongStorage.WorkingCollection.Current.Hash == "selected", "Serialized refresh commits must leave a coherent total and selected chart. Total=" + SongStorage.TotalChartCount + ", selected=" + SongStorage.WorkingCollection.Current.Hash + ", savedHash=" + MajEnv.RuntimeConfig.List.SelectedSongHash);
+            Require(SongStorage.TotalChartCount == 3 && SongStorage.WorkingCollection.Current.Hash == "selected", "Serialized refresh commits must leave a coherent total and selected chart. Total=" + SongStorage.TotalChartCount + ", selected=" + SongStorage.WorkingCollection.Current.Hash + ", savedId=" + MajEnv.RuntimeConfig.List.SelectedSongId);
             NativeFile.Delete(Path.Combine(addedPath, "maidata.txt"));
             NativeFile.Delete(Path.Combine(movedPath, "maidata.txt"));
             SongDetail.Probe = new ParseProbe();

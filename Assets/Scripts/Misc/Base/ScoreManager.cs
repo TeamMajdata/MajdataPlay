@@ -27,14 +27,6 @@ namespace MajdataPlay
 
         readonly static Dictionary<string, SongScores> _buckets = new();
 
-        static SQLiteAsyncConnection? _db;
-
-        /// <summary>The SQLite score database file name inside <see cref="MajEnv.PersistentDirectory"/>.</summary>
-        const string DatabaseFileName = "MajScores.db";
-        /// <summary>The temporary file name receiving a database streamed from a root other than the persistent directory.</summary>
-        const string ImportingDatabaseFileName = "MajScores.db.importing";
-        /// <summary>The content type requested for a database created in the persistent directory.</summary>
-        const string DatabaseMimeType = "application/vnd.sqlite3";
         /// <summary>The legacy JSON score file name consumed by the one-time migration.</summary>
         const string LegacyDatabaseFileName = "MajDatabase.db.db.db.db.db.db.db.db.db.db.db.db.db.db.db.db.db.db.db.db.db.db.db.db.db.db.db.db";
 
@@ -48,44 +40,35 @@ namespace MajdataPlay
             }
         };
 
+        /// <summary>Opens the score database, migrates the legacy JSON scores once and loads the stored scores.</summary>
+        /// <returns>A task that completes when the scores are loaded or the failure has been logged.</returns>
+        /// <remarks>
+        /// A failure is logged and the next call tries again; until then <see cref="SaveScore"/> keeps scores in memory only.
+        /// </remarks>
         internal static async UniTask InitAsync()
         {
             if (_isInited)
             {
                 return;
             }
-            _isInited = true;
             try
             {
-                var rootDirectory = MajEnv.RootDirectory;
-                // SQLite opens the database by filename, so it lives in the persistent directory, which is always a native path.
-                var persistentDirectory = MajEnv.PersistentDirectory;
-                var databaseFile = persistentDirectory.FindFile(DatabaseFileName);
-                // SQLite leaves a database empty until its first table is created, so an empty file is still a new database.
-                var isDbExists = databaseFile is not null && databaseFile.Entry is { Length: > 0 };
-                if (!isDbExists && !ReferenceEquals(rootDirectory, persistentDirectory))
+                // The first access may copy the database out of the root, so it is kept off the main thread.
+                var database = await Task.Run(static () => MajDatabase.Scores);
+                // Only a database that never held the score table receives the legacy JSON scores.
+                var hasScoreTable = await database.ReadAsync(HasScoreTable);
+                await database.WriteAsync(static connection =>
                 {
-                    // MajEnv shares one handle when the root is the persistent directory; any other root may still hold the database.
-                    var importedFile = await ImportRootDatabaseAsync(rootDirectory, persistentDirectory);
-                    if (importedFile is not null)
-                    {
-                        databaseFile = importedFile;
-                        isDbExists = true;
-                    }
-                }
-                // SQLite needs a resolvable location, so the file is created through the directory before the connection opens it.
-                databaseFile ??= persistentDirectory.CreateFile(DatabaseFileName, DatabaseMimeType);
-                _db = new SQLiteAsyncConnection(databaseFile.Location, SQLiteOpenFlags.ReadWrite | SQLiteOpenFlags.Create | SQLiteOpenFlags.FullMutex);
-                GameManager.OnAppQuit += OnAppQuit;
-                await _db.CreateTableAsync<MajScoreDB>();
-                await _db.CreateTableAsync<JudgeInfoRecordDB>();
-                if (!isDbExists)
+                    connection.CreateTable<MajScoreDB>();
+                    connection.CreateTable<JudgeInfoRecordDB>();
+                });
+                if (!hasScoreTable)
                 {
                     // Migrate from legacy JSON file
-                    var legacyFile = rootDirectory.FindFile(LegacyDatabaseFileName);
+                    var legacyFile = MajEnv.RootDirectory.FindFile(LegacyDatabaseFileName);
                     if (legacyFile is not null)
                     {
-                        var migrated = await MigrateFromJsonAsync(legacyFile);
+                        var migrated = await MigrateFromJsonAsync(database, legacyFile);
                         if (migrated)
                         {
                             try
@@ -101,13 +84,13 @@ namespace MajdataPlay
                     }
                 }                
 
-                // Load from SQLite
-                var rows = await _db.QueryAsync<MajScoreDB>("SELECT * FROM MajScores WHERE PlayCount > 0");
-
-                // Load all JudgeInfoRecords into an id→JudgeInfo lookup
-                var allJudgeRecords = await _db.Table<JudgeInfoRecordDB>().ToListAsync();
+                // Load from SQLite, together with all JudgeInfoRecords for an id→JudgeInfo lookup
+                var (rows, allJudgeRecords) = await database.ReadAsync(static connection =>
+                    (connection.Query<MajScoreDB>("SELECT * FROM MajScores WHERE PlayCount > 0"),
+                     connection.Table<JudgeInfoRecordDB>().ToList()));
                 var judgeInfoLookup = allJudgeRecords.ToDictionary(r => r.Id, r => r.ToJudgeInfo());
 
+                var loadedBuckets = new Dictionary<string, SongScores>();
                 var grouped = rows.Select(x => x.ToMaiScore(judgeInfoLookup)).GroupBy(x => x.Hash);
                 foreach (var group in grouped)
                 {
@@ -128,8 +111,10 @@ namespace MajdataPlay
                         ReMaster = GetOrCreate(dict, hash, ChartLevel.ReMaster),
                         UTAGE = GetOrCreate(dict, hash, ChartLevel.UTAGE),
                     };
-                    _buckets.Add(hash, scores);
+                    loadedBuckets.Add(hash, scores);
                 }
+                PublishLoadedBuckets(loadedBuckets);
+                _isInited = true;
             }
             catch(Exception e)
             {
@@ -165,6 +150,13 @@ namespace MajdataPlay
 
             return CheckAndGetSongScores(hash, song.IsOnline);
         }
+        /// <summary>Merges a game result into the stored score of a chart level and persists it.</summary>
+        /// <param name="result">The finished game.</param>
+        /// <param name="level">The played chart level.</param>
+        /// <returns>
+        /// True when the score was written to the score database; false when the level is invalid, the store has not been
+        /// initialized (the score is then kept in memory only) or the write failed.
+        /// </returns>
         public static async Task<bool> SaveScore(GameResult result, ChartLevel level)
         {
             try
@@ -196,37 +188,40 @@ namespace MajdataPlay
                 record.Timestamp = DateTime.Now;
                 record.PlayCount++;
 
-                if (_db is not null)
+                if (!_isInited)
                 {
-                    var scoreKey = MajScoreDB.MakeKey(record.Hash ?? string.Empty, record.ChartLevel);
-
-                    await _db.RunInTransactionAsync(conn =>
-                    {
-                        var detail = record.JudgeDetail ?? JudgeDetail.Empty;
-                        var tapRecord = JudgeInfoRecordDB.FromJudgeInfo(detail[ScoreNoteType.Tap]);
-                        var holdRecord = JudgeInfoRecordDB.FromJudgeInfo(detail[ScoreNoteType.Hold]);
-                        var slideRecord = JudgeInfoRecordDB.FromJudgeInfo(detail[ScoreNoteType.Slide]);
-                        var breakRecord = JudgeInfoRecordDB.FromJudgeInfo(detail[ScoreNoteType.Break]);
-                        var touchRecord = JudgeInfoRecordDB.FromJudgeInfo(detail[ScoreNoteType.Touch]);
-
-                        // Look up existing score row to get FK ids
-                        var oldRow = conn.Find<MajScoreDB>(scoreKey);
-                        conn.UpdateJudgeInfoDB(oldRow?.TapDetailId, tapRecord);
-                        conn.UpdateJudgeInfoDB(oldRow?.HoldDetailId, holdRecord);
-                        conn.UpdateJudgeInfoDB(oldRow?.SlideDetailId, slideRecord);
-                        conn.UpdateJudgeInfoDB(oldRow?.BreakDetailId, breakRecord);
-                        conn.UpdateJudgeInfoDB(oldRow?.TouchDetailId, touchRecord);
-
-                        // Upsert MajScores with FK ids
-                        var dbRow = MajScoreDB.FromMaiScore(record);
-                        dbRow.TapDetailId = tapRecord.Id;
-                        dbRow.HoldDetailId = holdRecord.Id;
-                        dbRow.SlideDetailId = slideRecord.Id;
-                        dbRow.BreakDetailId = breakRecord.Id;
-                        dbRow.TouchDetailId = touchRecord.Id;
-                        conn.InsertOrReplace(dbRow);
-                    });
+                    MajDebug.LogWarning(nameof(ScoreManager), "The score database is not ready, so the score is kept in memory only.");
+                    return false;
                 }
+
+                // The rows are built now, so the queued write stores this result even if the record changes before it runs.
+                var scoreKey = MajScoreDB.MakeKey(record.Hash ?? string.Empty, record.ChartLevel);
+                var detail = record.JudgeDetail ?? JudgeDetail.Empty;
+                var tapRecord = JudgeInfoRecordDB.FromJudgeInfo(detail[ScoreNoteType.Tap]);
+                var holdRecord = JudgeInfoRecordDB.FromJudgeInfo(detail[ScoreNoteType.Hold]);
+                var slideRecord = JudgeInfoRecordDB.FromJudgeInfo(detail[ScoreNoteType.Slide]);
+                var breakRecord = JudgeInfoRecordDB.FromJudgeInfo(detail[ScoreNoteType.Break]);
+                var touchRecord = JudgeInfoRecordDB.FromJudgeInfo(detail[ScoreNoteType.Touch]);
+                var dbRow = MajScoreDB.FromMaiScore(record);
+
+                await MajDatabase.Scores.WriteAsync(conn =>
+                {
+                    // Look up existing score row to get FK ids
+                    var oldRow = conn.Find<MajScoreDB>(scoreKey);
+                    conn.UpdateJudgeInfoDB(oldRow?.TapDetailId, tapRecord);
+                    conn.UpdateJudgeInfoDB(oldRow?.HoldDetailId, holdRecord);
+                    conn.UpdateJudgeInfoDB(oldRow?.SlideDetailId, slideRecord);
+                    conn.UpdateJudgeInfoDB(oldRow?.BreakDetailId, breakRecord);
+                    conn.UpdateJudgeInfoDB(oldRow?.TouchDetailId, touchRecord);
+
+                    // Upsert MajScores with FK ids
+                    dbRow.TapDetailId = tapRecord.Id;
+                    dbRow.HoldDetailId = holdRecord.Id;
+                    dbRow.SlideDetailId = slideRecord.Id;
+                    dbRow.BreakDetailId = breakRecord.Id;
+                    dbRow.TouchDetailId = touchRecord.Id;
+                    conn.InsertOrReplace(dbRow);
+                });
 
                 return true;
             }
@@ -314,45 +309,44 @@ namespace MajdataPlay
                     PlayCount = 0,
                 };
         }
-        /// <summary>Copies a score database left in a root other than the persistent directory, such as an Android SAF tree or the legacy shared folder, into the persistent directory once.</summary>
-        /// <param name="rootDirectory">The application root which may still hold a database.</param>
-        /// <param name="persistentDirectory">The native directory owning the live database.</param>
-        /// <returns>The imported database file, or null when the root holds no database or the import failed.</returns>
-        /// <remarks>
-        /// The database is streamed into a temporary sibling which then replaces an empty persistent database by rename,
-        /// so a failed import never leaves a partial database under the live name. The copy in the root stays in place as
-        /// a backup and is not read again while a non-empty persistent database exists.
-        /// </remarks>
-        private static async Task<StorageFile?> ImportRootDatabaseAsync(StorageDirectory rootDirectory, StorageDirectory persistentDirectory)
+        /// <summary>Replaces the local score buckets with the scores loaded from the database.</summary>
+        /// <param name="loadedBuckets">The loaded scores keyed by chart hash.</param>
+        /// <remarks>A bucket created in memory before initialization is replaced by the stored one of the same chart.</remarks>
+        static void PublishLoadedBuckets(Dictionary<string, SongScores> loadedBuckets)
         {
+            ref var @lock = ref _lock;
+            var isLocked = false;
             try
             {
-                var rootFile = rootDirectory.FindFile(DatabaseFileName);
-                // A provider may not report sizes, so only a database known to be empty is skipped.
-                if (rootFile is null || rootFile.Entry is { Length: 0 })
+                @lock.Enter(ref isLocked);
+                foreach (var pair in loadedBuckets)
                 {
-                    return null;
+                    _buckets[pair.Key] = pair.Value;
                 }
-                var stagingFile = await rootFile.CopyToAsync(
-                    persistentDirectory,
-                    ImportingDatabaseFileName,
-                    overwrite: true,
-                    cancellationToken: MajEnv.GlobalCT);
-                persistentDirectory.FindFile(DatabaseFileName)?.Delete();
-                var importedFile = stagingFile.Rename(DatabaseFileName);
-                MajDebug.LogInfo($"Imported the score database from the root: {rootFile.Location} -> {importedFile.Location}");
-                return importedFile;
             }
-            catch (Exception ex)
+            finally
             {
-                MajDebug.LogError($"Failed to import the score database from the root: {ex}");
-                return null;
+                if (isLocked)
+                {
+                    @lock.Exit();
+                }
             }
         }
-        /// <summary>Imports legacy JSON scores into the SQLite database.</summary>
+        /// <summary>Checks whether the score database already contains the score table.</summary>
+        /// <param name="connection">The open score database connection.</param>
+        /// <returns>True when the score table exists; otherwise false.</returns>
+        /// <exception cref="SQLiteException">The schema could not be queried.</exception>
+        static bool HasScoreTable(SQLiteConnection connection)
+        {
+            var tableCount = connection.ExecuteScalar<int>(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'MajScores'");
+            return tableCount > 0;
+        }
+        /// <summary>Imports legacy JSON scores into the SQLite database in one transaction.</summary>
+        /// <param name="database">The score database whose tables are ready.</param>
         /// <param name="legacyPath">The existing legacy score file to read.</param>
-        /// <returns>Whether every legacy score was imported successfully.</returns>
-        static async Task<bool> MigrateFromJsonAsync(StorageFile legacyPath)
+        /// <returns>Whether every legacy score was imported successfully; a failed import leaves the database unchanged.</returns>
+        static async Task<bool> MigrateFromJsonAsync(MajDatabaseHandle database, StorageFile legacyPath)
         {
             try
             {
@@ -365,36 +359,39 @@ namespace MajdataPlay
                     return true; // nothing to migrate
                 }
 
-                foreach (var score in scores)
+                await database.WriteAsync(conn =>
                 {
-                    if (string.IsNullOrEmpty(score.Hash) || score.PlayCount == 0)
+                    foreach (var score in scores)
                     {
-                        continue;
+                        if (string.IsNullOrEmpty(score.Hash) || score.PlayCount == 0)
+                        {
+                            continue;
+                        }
+
+                        // Insert JudgeInfoRecords first
+                        var detail = score.JudgeDetail ?? JudgeDetail.Empty;
+                        var tapRecord = JudgeInfoRecordDB.FromJudgeInfo(detail[ScoreNoteType.Tap]);
+                        var holdRecord = JudgeInfoRecordDB.FromJudgeInfo(detail[ScoreNoteType.Hold]);
+                        var slideRecord = JudgeInfoRecordDB.FromJudgeInfo(detail[ScoreNoteType.Slide]);
+                        var breakRecord = JudgeInfoRecordDB.FromJudgeInfo(detail[ScoreNoteType.Break]);
+                        var touchRecord = JudgeInfoRecordDB.FromJudgeInfo(detail[ScoreNoteType.Touch]);
+
+                        conn.Insert(tapRecord);
+                        conn.Insert(holdRecord);
+                        conn.Insert(slideRecord);
+                        conn.Insert(breakRecord);
+                        conn.Insert(touchRecord);
+
+                        // Insert MajScoreDB with FK references
+                        var dbRow = MajScoreDB.FromMaiScore(score);
+                        dbRow.TapDetailId = tapRecord.Id;
+                        dbRow.HoldDetailId = holdRecord.Id;
+                        dbRow.SlideDetailId = slideRecord.Id;
+                        dbRow.BreakDetailId = breakRecord.Id;
+                        dbRow.TouchDetailId = touchRecord.Id;
+                        conn.Insert(dbRow);
                     }
-
-                    // Insert JudgeInfoRecords first
-                    var detail = score.JudgeDetail ?? JudgeDetail.Empty;
-                    var tapRecord = JudgeInfoRecordDB.FromJudgeInfo(detail[ScoreNoteType.Tap]);
-                    var holdRecord = JudgeInfoRecordDB.FromJudgeInfo(detail[ScoreNoteType.Hold]);
-                    var slideRecord = JudgeInfoRecordDB.FromJudgeInfo(detail[ScoreNoteType.Slide]);
-                    var breakRecord = JudgeInfoRecordDB.FromJudgeInfo(detail[ScoreNoteType.Break]);
-                    var touchRecord = JudgeInfoRecordDB.FromJudgeInfo(detail[ScoreNoteType.Touch]);
-
-                    await _db!.InsertAsync(tapRecord);
-                    await _db.InsertAsync(holdRecord);
-                    await _db.InsertAsync(slideRecord);
-                    await _db.InsertAsync(breakRecord);
-                    await _db.InsertAsync(touchRecord);
-
-                    // Insert MajScoreDB with FK references
-                    var dbRow = MajScoreDB.FromMaiScore(score);
-                    dbRow.TapDetailId = tapRecord.Id;
-                    dbRow.HoldDetailId = holdRecord.Id;
-                    dbRow.SlideDetailId = slideRecord.Id;
-                    dbRow.BreakDetailId = breakRecord.Id;
-                    dbRow.TouchDetailId = touchRecord.Id;
-                    await _db.InsertAsync(dbRow);
-                }
+                });
 
                 return true;
             }
@@ -442,11 +439,6 @@ namespace MajdataPlay
                     @lock.Exit();
                 }
             }
-        }
-        static void OnAppQuit(object? sender, EventArgs? args)
-        {
-            GameManager.OnAppQuit -= OnAppQuit;
-            _db?.CloseAsync().Wait();
         }
 
         [Table("MajScores")]

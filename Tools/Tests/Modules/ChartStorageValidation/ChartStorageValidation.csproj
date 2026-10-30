@@ -16,6 +16,7 @@
   <ItemGroup>
     <Compile Include="../../../../Assets/Plugins/MajdataPlay/IO/Storage/*.cs" Link="Production/Storage/%(Filename)%(Extension)" />
     <Compile Include="../../../../Assets/Scripts/Misc/Base/ChartSettingStorage.cs" Link="Production/ChartSettingStorage.cs" />
+    <Compile Include="../../../../Assets/Scripts/Misc/Base/DirectoryIdentity.cs" Link="Production/DirectoryIdentity.cs" />
     <Compile Include="../../../../Assets/Scripts/Misc/Collections/SongCollection.cs" Link="Production/SongCollection.cs" />
     <Compile Include="../../../../Assets/Scripts/Misc/Collections/SongCollectionScanner.cs" Link="Production/SongCollectionScanner.cs" />
     <Compile Include="../../../../Assets/Scripts/Misc/Collections/OnlineSongCollection.cs" Link="Production/OnlineSongCollection.cs" />

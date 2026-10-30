@@ -236,7 +236,7 @@ namespace MajdataPlay.Tests.Game.Misc.Settings
             Assert.That(chart.SlideSkipping, Is.Null);
             Assert.That(chart.DisableVideoBG, Is.False);
             Assert.That(runtime.List.SelectedDirGuid, Is.EqualTo(System.Guid.Empty));
-            Assert.That(runtime.List.SelectedSongHash, Is.Empty);
+            Assert.That(runtime.List.SelectedSongId, Is.Empty);
             Assert.That(runtime.List.SelectedDiff, Is.EqualTo(ChartLevel.Easy));
             Assert.That(runtime.List.OrderBy.SortBy, Is.EqualTo(SortType.Default));
             Assert.That(runtime.Setting.SelectedMenu, Is.EqualTo(nameof(GameSetting.Game)));
@@ -250,7 +250,7 @@ namespace MajdataPlay.Tests.Game.Misc.Settings
         {
             var runtime = new RuntimeConfig();
             runtime.List.SelectedDirGuid = System.Guid.NewGuid();
-            runtime.List.SelectedSongHash = "abc";
+            runtime.List.SelectedSongId = "abc";
             runtime.List.OrderBy.Keyword = "search";
             runtime.Setting.SelectedMenu = "Audio";
 
@@ -258,7 +258,7 @@ namespace MajdataPlay.Tests.Game.Misc.Settings
             var restored = Serializer.Json.Deserialize<RuntimeConfig>(json, MajEnv.UserJsonReaderOption)!;
 
             Assert.That(restored.List.SelectedDirGuid, Is.EqualTo(runtime.List.SelectedDirGuid));
-            Assert.That(restored.List.SelectedSongHash, Is.EqualTo("abc"));
+            Assert.That(restored.List.SelectedSongId, Is.EqualTo("abc"));
             Assert.That(restored.List.OrderBy.Keyword, Is.Empty);
             Assert.That(restored.Setting.SelectedMenu, Is.EqualTo(nameof(GameSetting.Game)));
         }

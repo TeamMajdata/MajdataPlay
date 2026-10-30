@@ -77,7 +77,7 @@ namespace MajdataPlay.Scenes.Game
             {
                 try
                 {
-                    AnalyzeMaidata(_loadTask.Chart!, _loadTask.Length);
+                    AnalyzeMaidata(_loadTask.Chart!, _loadTask.Offset, _loadTask.Length);
                 }
                 catch (Exception e)
                 {
@@ -96,11 +96,11 @@ namespace MajdataPlay.Scenes.Game
                     {
                         if (_loadTask.SongDetail is not null)
                         {
-                            AnalyzeMaidata(maidata.Charts[(int)_loadTask.Level], _loadTask.Length);
+                            AnalyzeMaidata(maidata.Charts[(int)_loadTask.Level], maidata.Offset + _loadTask.Offset, _loadTask.Length);
                         }
                         else if (_loadTask.Chart is not null)
                         {
-                            AnalyzeMaidata(_loadTask.Chart, _loadTask.Length);
+                            AnalyzeMaidata(_loadTask.Chart, _loadTask.Offset, _loadTask.Length);
                         }
                         else
                         {
@@ -121,10 +121,11 @@ namespace MajdataPlay.Scenes.Game
                 }
             }
         }
-        public void SetSongDeatil(ISongDetail songDetail, ChartLevel chartLevel, float? length = null, int loadDelayMS = 0, CancellationToken token = default)
+        public void SetSongDeatil(ISongDetail songDetail, ChartLevel chartLevel, float offset = 0, float? length = null, int loadDelayMS = 0, CancellationToken token = default)
         {
             _loadTask.SongDetail = songDetail;
             _loadTask.Level = chartLevel;
+            _loadTask.Offset = offset;
             _loadTask.MaidataLoadTask = songDetail.GetMaidataAsync(true, token: token).AsTask();
             _loadTask.MaidataLoadTask.Register($"[{nameof(ChartVisualDisplayer)}]Load maidata");
             ListManager.AllBackgroundTasks.Add(_loadTask.MaidataLoadTask);
@@ -134,17 +135,18 @@ namespace MajdataPlay.Scenes.Game
             _loadDelayTimer = loadDelayMS / 1000f;
             SetLoading();
         }
-        public void SetSimaiChart(SimaiChart chart, float? length = null)
+        public void SetSimaiChart(SimaiChart chart, float offset = 0, float? length = null)
         {
             _loadTask.SongDetail = null;
             _loadTask.Level = default;
+            _loadTask.Offset = offset;
             _loadTask.Length = length;
             _loadTask.Chart = chart;
             _loadTask.IsFinished = false;
             _loadDelayTimer = 0;
             SetLoading();
         }
-        private void AnalyzeMaidata(SimaiChart chart, float? length)
+        private void AnalyzeMaidata(SimaiChart chart, float offset, float? length)
         {
             var cache = default(CachedMaidataAnalyzeResult);
             var rect = _rectTransform.rect;
@@ -153,7 +155,7 @@ namespace MajdataPlay.Scenes.Game
             var anaLength = TimeSpan.Zero;
             var graph = default(Texture?);
             var needRefreshCache = false;
-            var graphCacheKey = $"MaidataAnalyze/{chart.Fumen}";
+            var graphCacheKey = $"MaidataAnalyze/{chart.Fumen}/{offset}/{length}";
             if (Cache.MaidataAnalyze.TryGetValue(chart.Fumen, out cache))
             {
                 minBpm = cache.MinBPM;
@@ -164,7 +166,7 @@ namespace MajdataPlay.Scenes.Game
             }
             if (!cache.IsValid || graph is null)
             {
-                var result = ChartAnalyzer.AnalyzeMaidataWithGraph(chart, (int)rect.height, (int)rect.width, length);
+                var result = ChartAnalyzer.AnalyzeMaidataWithGraph(chart, (int)rect.height, (int)rect.width, offset, length);
                 minBpm = result.MinBPM;
                 maxBpm = result.MaxBPM;
                 anaLength = result.Length;
@@ -224,6 +226,7 @@ namespace MajdataPlay.Scenes.Game
         {
             public ISongDetail? SongDetail { get; set; }
             public Task<SimaiFile>? MaidataLoadTask { get; set; }
+            public float Offset { get; set; }
             public float? Length { get; set; }
             public SimaiFile? Maidata { get; set; }
             public SimaiChart? Chart { get; set; }

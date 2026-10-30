@@ -1,4 +1,4 @@
-﻿using Cysharp.Threading.Tasks;
+using Cysharp.Threading.Tasks;
 using MajdataPlay.IO;
 using MajdataPlay.Net;
 using MajSimai;
@@ -14,11 +14,14 @@ namespace MajdataPlay
 {
     public interface ISongDetail
     {
+        /// <summary>Gets the chart's identity, persisted in the chart directory's <c>.MajdataPlay/id</c> marker file.</summary>
+        string Id { get; }
         string Title { get; }
         string Artist { get; }
         string Description { get; }
         ReadOnlySpan<string> Designers { get; }
         ReadOnlySpan<string> Levels { get; }
+        ReadOnlySpan<string> Tags { get; }
         ChartStorageLocation Location { get; }
         DateTime Timestamp { get; }
         string Hash { get; }

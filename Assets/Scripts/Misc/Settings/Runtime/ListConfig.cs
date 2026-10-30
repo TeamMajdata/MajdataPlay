@@ -10,7 +10,7 @@ namespace MajdataPlay.Settings.Runtime
         [Preserve]
         public Guid SelectedDirGuid { get; set; } = Guid.Empty;
         [Preserve]
-        public string SelectedSongHash { get; set; } = string.Empty;
+        public string SelectedSongId { get; set; } = string.Empty;
         [Preserve]
         public ChartLevel SelectedDiff { get; set; } = ChartLevel.Easy;
         [JsonIgnore, Preserve]

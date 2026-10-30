@@ -535,7 +535,7 @@ namespace MajdataPlay.Scenes.List
         void RestoreContextFromConfiguration()
         {
             var selectedCollectionUUID = _listConfig.SelectedDirGuid;
-            var selectedSongHash = _listConfig.SelectedSongHash;
+            var selectedSongId = _listConfig.SelectedSongId;
             try
             {
                 var index = Array.FindIndex(_collections, x => x.Id == selectedCollectionUUID);
@@ -545,19 +545,21 @@ namespace MajdataPlay.Scenes.List
                 }
                 SlideListTo(index, true, true);
                 SlideToDifficulty((int)_listConfig.SelectedDiff);
-                if (string.IsNullOrEmpty(selectedSongHash))
+                if (string.IsNullOrEmpty(selectedSongId))
                 {
                     _coverListManager.SlideListToHead();
                 }
                 else
                 {
-                    _coverListManager.SetCursor(selectedSongHash, true, true);
+                    // A missing song still moves the cursor to the first song, as an unmatched cursor always has.
+                    var selectedSong = _collections.Length == 0 ? null : SongStorage.FindSongById(_collections[index], selectedSongId);
+                    _coverListManager.SetCursor(selectedSong?.Hash ?? string.Empty, true, true);
                 }
             }
             finally
             {
                 _listConfig.SelectedDirGuid = selectedCollectionUUID;
-                _listConfig.SelectedSongHash = selectedSongHash;
+                _listConfig.SelectedSongId = selectedSongId;
             }
         }
 

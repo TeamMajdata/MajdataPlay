@@ -82,6 +82,7 @@ $assembly = @{
 
 $sourcePaths = @(
     'Assets/Scripts/Misc/Base/SongStorage.cs',
+    'Assets/Scripts/Misc/Base/DirectoryIdentity.cs',
     'Assets/Scripts/Misc/Collections/SongCollection.cs',
     'Assets/Scripts/Misc/Collections/OnlineSongCollection.cs',
     'Assets/Scripts/Misc/Collections/MyFavoriteSongCollection.cs',

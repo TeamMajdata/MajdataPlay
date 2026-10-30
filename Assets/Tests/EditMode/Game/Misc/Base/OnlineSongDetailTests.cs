@@ -1,5 +1,6 @@
 using System;
 using System.Collections;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Net;
@@ -21,8 +22,10 @@ using UnityEngine.TestTools;
 namespace MajdataPlay.Tests.Game.Misc.Base
 {
     /// <summary>
-    /// Covers the cache and download logic of <see cref="OnlineSongDetail"/>: chart, video, track and cover downloads,
-    /// integrity checks, resumable chunks and failure handling. Every request is answered by a stub HTTP client.
+    /// Covers how <see cref="OnlineSongDetail"/> finds and downloads its files through its <see cref="OnlineChartRecord"/>
+    /// and the <see cref="ObjectStore"/>: chart, video, track and cover downloads, digests from the info API, digests learned
+    /// from downloads, files shared between charts, and failure handling. Every request is answered by a stub HTTP client,
+    /// and the runtime database and object store live in temporary storage.
     /// </summary>
     public class OnlineSongDetailTests
     {
@@ -35,30 +38,40 @@ namespace MajdataPlay.Tests.Game.Misc.Base
         /// <summary>The temporary storage.</summary>
         private TemporaryDirectory _temporary = null!;
 
-        /// <summary>The song cache directory.</summary>
-        private StorageDirectory _cache = null!;
+        /// <summary>The scope restoring the application directories and closing the databases opened by a test.</summary>
+        private MajEnvScope _environment = null!;
+
+        /// <summary>The cache holding the song records, bound to the temporary layout.</summary>
+        private OnlineChartCache _cache = null!;
 
         /// <summary>The endpoint serving the song.</summary>
         private ApiEndpoint _endpoint = null!;
 
-        /// <summary>Installs the stub client and an empty song cache.</summary>
+        /// <summary>Installs the stub client and an empty runtime database and object store.</summary>
         [SetUp]
         public void SetUp()
         {
             System.Runtime.CompilerServices.RuntimeHelpers.RunClassConstructor(typeof(MajEnv).TypeHandle);
             _http = new StubHttpScope();
             _temporary = new TemporaryDirectory();
-            _cache = _temporary.Directory.CreateDirectory("Song");
+            _environment = new MajEnvScope();
+            _environment.UseTemporaryLayout(_temporary);
+            _cache = OnlineChartCache.Shared;
             _endpoint = new ApiEndpoint { Name = "Server", Url = new Uri("https://api.invalid/api/") };
         }
 
-        /// <summary>Restores the HTTP clients and deletes the cache.</summary>
+        /// <summary>Restores the HTTP clients and the environment, and deletes the temporary storage.</summary>
         [TearDown]
         public void TearDown()
         {
+            LogAssert.ignoreFailingMessages = false;
             _http.Dispose();
+            _environment.Dispose();
             _temporary.Dispose();
         }
+
+        /// <summary>Gets the shared object store of the temporary layout.</summary>
+        private static ObjectStore Objects => ObjectStore.Shared;
 
         /// <summary>Computes the Simai hash of chart bytes.</summary>
         /// <param name="bytes">The chart bytes.</param>
@@ -69,40 +82,67 @@ namespace MajdataPlay.Tests.Game.Misc.Base
             return SimaiParser.ParseMetadata(stream).Hash;
         }
 
+        /// <summary>Computes the lowercase hexadecimal SHA-256 digest of bytes.</summary>
+        /// <param name="bytes">The bytes.</param>
+        /// <returns>The digest.</returns>
+        private static string Sha256(byte[] bytes)
+        {
+            using var sha256 = SHA256.Create();
+            return ObjectStore.ToHex(sha256.ComputeHash(bytes));
+        }
+
         /// <summary>Computes the Base64 SHA-256 digest the server sends in the hash header.</summary>
         /// <param name="bytes">The resource bytes.</param>
         /// <returns>The digest.</returns>
-        private static string Digest(byte[] bytes)
+        private static string HashHeader(byte[] bytes)
         {
             using var sha = SHA256.Create();
             return Convert.ToBase64String(sha.ComputeHash(bytes));
         }
 
-        /// <summary>Creates a response with binary content and an optional digest header.</summary>
+        /// <summary>Creates the info API's description of a file.</summary>
+        /// <param name="bytes">The file content.</param>
+        /// <param name="name">The file name in the direct URI.</param>
+        /// <returns>The file description.</returns>
+        private static MajNetChartResource Resource(byte[] bytes, string name)
+        {
+            using var md5 = MD5.Create();
+            return new MajNetChartResource
+            {
+                Url = new Uri("https://cdn.invalid/MaiCharts/" + name),
+                Sha256 = Sha256(bytes),
+                Md5 = ObjectStore.ToHex(md5.ComputeHash(bytes)),
+                Length = bytes.Length,
+            };
+        }
+
+        /// <summary>Creates a response with binary content and an optional hash header.</summary>
         /// <param name="status">The status code.</param>
         /// <param name="bytes">The body.</param>
-        /// <param name="digest">The digest header, or null.</param>
+        /// <param name="hashHeader">The hash header, or null.</param>
         /// <returns>The response.</returns>
-        private static HttpResponseMessage Bytes(HttpStatusCode status, byte[] bytes, string? digest = null)
+        private static HttpResponseMessage Bytes(HttpStatusCode status, byte[] bytes, string? hashHeader = null)
         {
             var response = new HttpResponseMessage(status) { Content = new ByteArrayContent(bytes) };
-            if (digest is not null)
+            if (hashHeader is not null)
             {
-                response.Headers.Add("hash", digest);
+                response.Headers.Add("hash", hashHeader);
             }
             return response;
         }
 
-        /// <summary>Creates the song served by the stub endpoint.</summary>
+        /// <summary>Creates song metadata.</summary>
         /// <param name="hash">The chart hash announced by the server, or null for the hash of the served chart.</param>
-        /// <returns>The song.</returns>
-        private OnlineSongDetail CreateSong(string? hash = null)
+        /// <param name="id">The chart identity, or null for a new one.</param>
+        /// <returns>The metadata.</returns>
+        private static MajnetSongDetail Detail(string? hash = null, string? id = null)
         {
-            return new OnlineSongDetail(_cache, _endpoint, new MajnetSongDetail
+            return new MajnetSongDetail
             {
-                Id = Guid.NewGuid().ToString(),
+                Id = id ?? Guid.NewGuid().ToString(),
                 Title = "Online",
                 Artist = "Artist",
+                Description = "Description",
                 Designer = "designer",
                 Uploader = "uploader",
                 Hash = hash ?? ChartHash(s_chart),
@@ -110,7 +150,41 @@ namespace MajdataPlay.Tests.Game.Misc.Base
                 Tags = new[] { "tag" },
                 PublicTags = new[] { "public" },
                 Timestamp = new DateTime(2024, 1, 2)
-            });
+            };
+        }
+
+        /// <summary>Creates a song whose record only lives in memory and knows no digests.</summary>
+        /// <param name="hash">The chart hash announced by the server, or null for the hash of the served chart.</param>
+        /// <returns>The song.</returns>
+        private OnlineSongDetail CreateSong(string? hash = null)
+        {
+            var detail = Detail(hash);
+            return new OnlineSongDetail(_endpoint, detail, _cache.CreateTransientRecord(_endpoint, detail));
+        }
+
+        /// <summary>Creates a song whose record is synchronized into the runtime database, with the info API's files when given.</summary>
+        /// <param name="resources">The files reported by the info API, or null when the info is not known.</param>
+        /// <param name="id">The chart identity, or null for a new one.</param>
+        /// <returns>The song.</returns>
+        private async UniTask<OnlineSongDetail> CreateSyncedSongAsync(MajNetChartResources? resources, string? id = null)
+        {
+            var detail = Detail(id: id);
+            var infos = resources is null
+                ? null
+                : new Dictionary<string, MajNetChartInfo> { [detail.Id] = new MajNetChartInfo { Metadata = detail, Resources = resources } };
+            var records = await _cache.SyncAsync(_endpoint, new[] { detail }, infos);
+            return new OnlineSongDetail(_endpoint, detail, records[detail.Id]);
+        }
+
+        /// <summary>Reads one column of a chart's row after the queued writes have finished.</summary>
+        /// <param name="column">The column name.</param>
+        /// <param name="chartId">The chart identity.</param>
+        /// <returns>The column value.</returns>
+        private static async UniTask<string?> ReadColumnAsync(string column, string chartId)
+        {
+            var database = MajDatabase.Runtime;
+            await database.WaitForWritesAsync();
+            return database.Read(connection => connection.ExecuteScalar<string?>($"SELECT {column} FROM OnlineChartCache WHERE ChartId = ?", chartId));
         }
 
         /// <summary>Awaits an operation and returns the exception it failed with.</summary>
@@ -144,27 +218,34 @@ namespace MajdataPlay.Tests.Game.Misc.Base
             Assert.That(song.Levels.Length, Is.EqualTo(7));
             Assert.That(song.Levels[6], Is.EqualTo("7"));
             Assert.That(song.Designers[0], Is.EqualTo("uploader@designer"));
-            Assert.That(song.Description, Does.Contain("tag").And.Contain("public"));
+            Assert.That(song.Description, Is.EqualTo("Description"));
+            Assert.That(song.Tags.ToArray(), Is.EqualTo(new[] { "tag", "public" }));
+            Assert.That(song.Record.ChartId, Is.EqualTo(song.Id));
             Assert.That(song.IsMaidataLoaded, Is.False);
             Assert.That(song.IsVideoLoaded, Is.False);
             Assert.That(song.IsCoverLoaded, Is.False);
             Assert.That(song.IsCompressedCoverLoaded, Is.False);
             Assert.That(song.IsAudioTrackLoaded, Is.False);
             Assert.That(song.IsPreviewAudioTrackLoaded, Is.False);
-            Assert.Throws<ArgumentNullException>(() => new OnlineSongDetail(null!, _endpoint, new MajnetSongDetail()));
-            Assert.Throws<ArgumentNullException>(() => new OnlineSongDetail(_cache, null!, new MajnetSongDetail()));
-            Assert.Throws<ArgumentNullException>(() => new OnlineSongDetail(_cache, _endpoint, null!));
+            var detail = Detail();
+            var record = _cache.CreateTransientRecord(_endpoint, detail);
+            Assert.Throws<ArgumentNullException>(() => new OnlineSongDetail(null!, detail, record));
+            Assert.Throws<ArgumentNullException>(() => new OnlineSongDetail(_endpoint, null!, record));
+            Assert.Throws<ArgumentNullException>(() => new OnlineSongDetail(_endpoint, detail, null!));
         }
 
-        /// <summary>Checks that the chart is downloaded with its digest, cached on disk and in memory, and reused.</summary>
+        /// <summary>
+        /// Checks that a chart without a recorded digest is downloaded from the chart endpoint, stored under its digest,
+        /// recorded in the runtime database, cached in memory and read again from the store.
+        /// </summary>
         /// <returns>The test coroutine.</returns>
         [UnityTest]
-        public IEnumerator GetMaidataAsync_DownloadsAndCaches()
+        public IEnumerator GetMaidataAsync_DownloadsAndRecordsChart()
         {
             return UniTask.ToCoroutine(async () =>
             {
-                _http.Responder = _ => Bytes(HttpStatusCode.OK, s_chart, Digest(s_chart));
-                using var song = CreateSong();
+                _http.Responder = _ => Bytes(HttpStatusCode.OK, s_chart, HashHeader(s_chart));
+                using var song = await CreateSyncedSongAsync(null);
                 var progress = new NetProgress();
 
                 var chart = await song.GetMaidataAsync(progress: progress);
@@ -179,41 +260,24 @@ namespace MajdataPlay.Tests.Game.Misc.Base
                 Assert.That(progress.TotalBytes, Is.EqualTo(s_chart.Length));
                 Assert.That(_http.Requests.Length, Is.EqualTo(1));
                 Assert.That(_http.Requests[0].Uri.AbsolutePath, Does.EndWith("/chart"));
-                Assert.That(_cache.FindFile("maidata.txt")!.ReadAllBytes(), Is.EqualTo(s_chart));
-                Assert.That(_cache.FindFile("maidata.txt.sha256")!.ReadAllText(), Is.EqualTo(Digest(s_chart)));
-                Assert.That(_cache.FindFile("maidata.txt.chunk"), Is.Null);
+                Assert.That(Objects.Find(Sha256(s_chart))!.ReadAllBytes(), Is.EqualTo(s_chart));
+                Assert.That(song.Record.TryGetDigest(OnlineChartResourceKind.Maidata, out var digest), Is.True);
+                Assert.That(digest.Sha256, Is.EqualTo(Sha256(s_chart)));
+                Assert.That(await ReadColumnAsync("MaidataSha256", song.Id), Is.EqualTo(Sha256(s_chart)));
             });
         }
 
-        /// <summary>Checks that a cached chart of another hash is downloaded again.</summary>
+        /// <summary>Checks that a stored chart named by the recorded digest is used without a request.</summary>
         /// <returns>The test coroutine.</returns>
         [UnityTest]
-        public IEnumerator GetMaidataAsync_RedownloadsOutdatedChart()
+        public IEnumerator GetMaidataAsync_UsesStoredObject()
         {
             return UniTask.ToCoroutine(async () =>
             {
-                _cache.CreateFile("maidata.txt").WriteAllText(ChartFixture.CreateMaidata("Outdated"));
-                _cache.CreateFile("maidata.txt.sha256").WriteAllText("stale");
-                _http.Responder = _ => Bytes(HttpStatusCode.OK, s_chart);
-                using var song = CreateSong();
-
-                var chart = await song.GetMaidataAsync();
-
-                Assert.That(chart.Title, Is.EqualTo("Online"));
-                Assert.That(_http.Requests.Length, Is.EqualTo(1));
-                Assert.That(_cache.FindFile("maidata.txt.sha256"), Is.Null);
-            });
-        }
-
-        /// <summary>Checks that a cached chart with a matching digest is used without a request.</summary>
-        /// <returns>The test coroutine.</returns>
-        [UnityTest]
-        public IEnumerator GetMaidataAsync_UsesVerifiedCache()
-        {
-            return UniTask.ToCoroutine(async () =>
-            {
-                _cache.CreateFile("maidata.txt").WriteAllBytes(s_chart);
-                using var song = CreateSong();
+                var maidata = Resource(s_chart, "1/maidata.txt");
+                var digest = maidata.Sha256;
+                Objects.Directory.CreateDirectory(digest.Substring(0, 2)).CreateFile(digest).WriteAllBytes(s_chart);
+                using var song = await CreateSyncedSongAsync(new MajNetChartResources { Maidata = maidata });
 
                 var chart = await song.GetMaidataAsync();
 
@@ -222,87 +286,60 @@ namespace MajdataPlay.Tests.Game.Misc.Base
             });
         }
 
-        /// <summary>Checks that a complete chunk verified by its stored digest is promoted without a request.</summary>
+        /// <summary>
+        /// Checks that a resolved chart is still downloaded from the chart endpoint, which counts the play, and verified
+        /// against the info API's digest.
+        /// </summary>
         /// <returns>The test coroutine.</returns>
         [UnityTest]
-        public IEnumerator GetMaidataAsync_PromotesVerifiedChunk()
+        public IEnumerator GetMaidataAsync_DownloadsResolvedChartFromChartEndpoint()
         {
             return UniTask.ToCoroutine(async () =>
             {
-                _cache.CreateFile("maidata.txt.chunk").WriteAllBytes(s_chart);
-                _cache.CreateFile("maidata.txt.sha256").WriteAllText(Digest(s_chart));
-                using var song = CreateSong();
-
-                var chart = await song.GetMaidataAsync();
-
-                Assert.That(chart.Title, Is.EqualTo("Online"));
-                Assert.That(_http.Requests, Is.Empty);
-                Assert.That(_cache.FindFile("maidata.txt"), Is.Not.Null);
-            });
-        }
-
-        /// <summary>Checks that a partial chunk is resumed with a range request.</summary>
-        /// <returns>The test coroutine.</returns>
-        [UnityTest]
-        public IEnumerator GetMaidataAsync_ResumesPartialChunk()
-        {
-            return UniTask.ToCoroutine(async () =>
-            {
-                var head = s_chart.Take(10).ToArray();
-                var tail = s_chart.Skip(10).ToArray();
-                _cache.CreateFile("maidata.txt.chunk").WriteAllBytes(head);
-                _cache.CreateFile("maidata.txt.sha256").WriteAllText(Digest(s_chart));
-                var range = default(string);
-                _http.Responder = request =>
-                {
-                    range = request.Headers.Range?.ToString();
-                    return Bytes(HttpStatusCode.PartialContent, tail);
-                };
-                using var song = CreateSong();
-
-                var chart = await song.GetMaidataAsync();
-
-                Assert.That(chart.Title, Is.EqualTo("Online"));
-                Assert.That(range, Is.EqualTo("bytes=10-"));
-                Assert.That(_cache.FindFile("maidata.txt")!.ReadAllBytes(), Is.EqualTo(s_chart));
-            });
-        }
-
-        /// <summary>Checks that an unsatisfiable range resets the chunk and that a server ignoring ranges restarts the download.</summary>
-        /// <returns>The test coroutine.</returns>
-        [UnityTest]
-        public IEnumerator GetMaidataAsync_RestartsInvalidChunks()
-        {
-            return UniTask.ToCoroutine(async () =>
-            {
-                _cache.CreateFile("maidata.txt.chunk").WriteAllBytes(Encoding.UTF8.GetBytes("garbage"));
-                var calls = 0;
-                _http.Responder = request =>
-                {
-                    calls++;
-                    return calls == 1 ? Bytes(HttpStatusCode.RequestedRangeNotSatisfiable, Array.Empty<byte>()) : Bytes(HttpStatusCode.OK, s_chart);
-                };
-                using var first = CreateSong();
-                Assert.That((await first.GetMaidataAsync()).Title, Is.EqualTo("Online"));
-                Assert.That(calls, Is.EqualTo(2));
-
-                _cache.FindFile("maidata.txt")!.Delete();
-                _cache.CreateFile("maidata.txt.chunk").WriteAllBytes(Encoding.UTF8.GetBytes("garbage"));
                 _http.Responder = _ => Bytes(HttpStatusCode.OK, s_chart);
-                using var second = CreateSong();
-                Assert.That((await second.GetMaidataAsync()).Title, Is.EqualTo("Online"));
-                Assert.That(_cache.FindFile("maidata.txt")!.ReadAllBytes(), Is.EqualTo(s_chart));
+                using var song = await CreateSyncedSongAsync(new MajNetChartResources { Maidata = Resource(s_chart, "1/maidata.txt") });
+
+                var chart = await song.GetMaidataAsync();
+
+                Assert.That(chart.Title, Is.EqualTo("Online"));
+                Assert.That(_http.Requests.Single().Uri.AbsolutePath, Does.EndWith("/chart"));
+                Assert.That(Objects.Contains(Sha256(s_chart)), Is.True);
             });
         }
 
-        /// <summary>Checks that a download failing its integrity check is retried and finally reported.</summary>
+        /// <summary>
+        /// Checks that a recorded digest the server's file no longer matches is replaced by the digest of the endpoint's
+        /// current file.
+        /// </summary>
+        /// <returns>The test coroutine.</returns>
+        [UnityTest]
+        public IEnumerator GetMaidataAsync_ReplacesOutdatedDigest()
+        {
+            return UniTask.ToCoroutine(async () =>
+            {
+                var outdated = Resource(Encoding.UTF8.GetBytes(ChartFixture.CreateMaidata("Outdated")), "1/maidata.txt");
+                _http.Responder = _ => Bytes(HttpStatusCode.OK, s_chart);
+                using var song = await CreateSyncedSongAsync(new MajNetChartResources { Maidata = outdated });
+
+                var chart = await song.GetMaidataAsync();
+
+                Assert.That(chart.Title, Is.EqualTo("Online"));
+                Assert.That(_http.Requests.Length, Is.EqualTo(MajEnv.HTTP_REQUEST_MAX_RETRY + 2));
+                Assert.That(song.Record.TryGetDigest(OnlineChartResourceKind.Maidata, out var digest), Is.True);
+                Assert.That(digest.Sha256, Is.EqualTo(Sha256(s_chart)));
+                Assert.That(await ReadColumnAsync("MaidataSha256", song.Id), Is.EqualTo(Sha256(s_chart)));
+            });
+        }
+
+        /// <summary>Checks that a download failing its hash header is retried and finally reported.</summary>
         /// <returns>The test coroutine.</returns>
         [UnityTest]
         public IEnumerator GetMaidataAsync_ReportsIntegrityFailure()
         {
             return UniTask.ToCoroutine(async () =>
             {
-                _http.Responder = _ => Bytes(HttpStatusCode.OK, s_chart, Digest(Encoding.UTF8.GetBytes("other")));
+                LogAssert.ignoreFailingMessages = true;
+                _http.Responder = _ => Bytes(HttpStatusCode.OK, s_chart, HashHeader(Encoding.UTF8.GetBytes("other")));
                 using var song = CreateSong();
 
                 var failure = await CatchAsync(async () => await song.GetMaidataAsync());
@@ -321,6 +358,7 @@ namespace MajdataPlay.Tests.Game.Misc.Base
         {
             return UniTask.ToCoroutine(async () =>
             {
+                LogAssert.ignoreFailingMessages = true;
                 using var song = CreateSong();
                 _http.Responder = _ => Bytes(HttpStatusCode.InternalServerError, Array.Empty<byte>());
                 var unsuccessful = await CatchAsync(async () => await song.GetMaidataAsync());
@@ -359,10 +397,13 @@ namespace MajdataPlay.Tests.Game.Misc.Base
             });
         }
 
-        /// <summary>Checks that a downloaded video is cached and that a missing video is remembered with a flag file.</summary>
+        /// <summary>
+        /// Checks that a video without a recorded digest is downloaded from the endpoint and stored, that a missing video
+        /// is reported empty, and that a video the info API reports missing is not requested.
+        /// </summary>
         /// <returns>The test coroutine.</returns>
         [UnityTest]
-        public IEnumerator GetVideoPathAsync_DownloadsOrRemembersMissingVideo()
+        public IEnumerator GetVideoPathAsync_DownloadsOrReportsMissingVideo()
         {
             return UniTask.ToCoroutine(async () =>
             {
@@ -371,43 +412,24 @@ namespace MajdataPlay.Tests.Game.Misc.Base
                 using (var song = CreateSong())
                 {
                     var path = await song.GetVideoPathAsync();
-                    Assert.That(Path.GetFileName(path), Is.EqualTo("bg.mp4"));
+                    Assert.That(path, Is.EqualTo(Objects.Find(Sha256(video))!.Location));
                     Assert.That(await song.GetVideoPathAsync(), Is.EqualTo(path));
                     Assert.That(song.IsVideoLoaded, Is.True);
                     Assert.That(_http.Requests[0].Uri.AbsolutePath, Does.EndWith("/video"));
                 }
 
-                _cache.FindFile("bg.mp4")!.Delete();
                 _http.Responder = _ => Bytes(HttpStatusCode.NotFound, Array.Empty<byte>());
                 using (var song = CreateSong())
                 {
                     Assert.That(await song.GetVideoPathAsync(), Is.Empty);
-                    Assert.That(_cache.FindFile("bg.mp4.cache"), Is.Not.Null);
                 }
 
                 var before = _http.Requests.Length;
-                using (var song = CreateSong())
+                using (var song = await CreateSyncedSongAsync(new MajNetChartResources { Maidata = Resource(s_chart, "1/maidata.txt") }))
                 {
                     Assert.That(await song.GetVideoPathAsync(), Is.Empty);
                     Assert.That(_http.Requests.Length, Is.EqualTo(before));
                 }
-            });
-        }
-
-        /// <summary>Checks that a cached supported video is used without a request.</summary>
-        /// <returns>The test coroutine.</returns>
-        [UnityTest]
-        public IEnumerator GetVideoPathAsync_UsesCachedVideo()
-        {
-            return UniTask.ToCoroutine(async () =>
-            {
-                _cache.CreateFile("PV.MP4").WriteAllBytes(new byte[] { 9 });
-                using var song = CreateSong();
-
-                var path = await song.GetVideoPathAsync();
-
-                Assert.That(Path.GetFileName(path), Is.EqualTo("PV.MP4"));
-                Assert.That(_http.Requests, Is.Empty);
             });
         }
 
@@ -422,12 +444,44 @@ namespace MajdataPlay.Tests.Game.Misc.Base
                 _http.Responder = _ => Bytes(HttpStatusCode.OK, track);
                 using var song = CreateSong();
 
-                var sample = await (System.Threading.Tasks.ValueTask<AudioSampleWrap>)PrivateMember.Invoke(song, "GetAudioTrackAsync", false, null, default(System.Threading.CancellationToken))!;
+                var sample = await DownloadTrackAsync(song);
 
                 Assert.That(sample, Is.SameAs(AudioSampleWrap.Empty));
-                Assert.That(_cache.FindFile("track.mp3")!.ReadAllBytes(), Is.EqualTo(track));
+                Assert.That(Objects.Find(Sha256(track))!.ReadAllBytes(), Is.EqualTo(track));
                 Assert.That(_http.Requests[0].Uri.AbsolutePath, Does.EndWith("/track"));
             });
+        }
+
+        /// <summary>
+        /// Checks that a resolved track is downloaded from the info API's direct URI, and that another chart or endpoint
+        /// with the same track reuses the stored file without a request.
+        /// </summary>
+        /// <returns>The test coroutine.</returns>
+        [UnityTest]
+        public IEnumerator DownloadTrack_SharesStoredFileAcrossCharts()
+        {
+            return UniTask.ToCoroutine(async () =>
+            {
+                var track = new byte[] { 5, 6, 7 };
+                var resource = Resource(track, "1/track.mp3");
+                _http.Responder = _ => Bytes(HttpStatusCode.OK, track);
+                using var first = await CreateSyncedSongAsync(new MajNetChartResources { Track = resource });
+                using var second = await CreateSyncedSongAsync(new MajNetChartResources { Track = resource });
+
+                await DownloadTrackAsync(first);
+                await DownloadTrackAsync(second);
+
+                Assert.That(_http.Requests.Single().Uri, Is.EqualTo(resource.Url));
+                Assert.That(Objects.Directory.FindDirectory(resource.Sha256.Substring(0, 2))!.EnumerateFiles().Count(), Is.EqualTo(1));
+            });
+        }
+
+        /// <summary>Downloads a song's track without decoding it.</summary>
+        /// <param name="song">The song.</param>
+        /// <returns>The returned sample.</returns>
+        private static async UniTask<AudioSampleWrap> DownloadTrackAsync(OnlineSongDetail song)
+        {
+            return await (System.Threading.Tasks.ValueTask<AudioSampleWrap>)PrivateMember.Invoke(song, "GetAudioTrackAsync", false, null, default(System.Threading.CancellationToken))!;
         }
 
         /// <summary>Checks that covers fall back to the runtime's empty cover when they are not loaded into memory or cannot be downloaded.</summary>
@@ -437,19 +491,21 @@ namespace MajdataPlay.Tests.Game.Misc.Base
         {
             return UniTask.ToCoroutine(async () =>
             {
+                LogAssert.ignoreFailingMessages = true;
                 var wasNull = Majdata<GameRuntime>.IsNull;
                 GameRuntime.Init();
                 try
                 {
+                    var thumbnail = new byte[] { 1, 2 };
                     _http.Responder = request => request.RequestUri!.AbsolutePath.EndsWith("/chart")
                         ? Bytes(HttpStatusCode.OK, s_chart)
-                        : Bytes(HttpStatusCode.OK, new byte[] { 1, 2 });
+                        : Bytes(HttpStatusCode.OK, thumbnail);
                     using var song = CreateSong();
                     await song.PreloadAsync();
                     await song.PreloadAsync();
                     await UniTask.SwitchToMainThread();
                     Assert.That(song.IsMaidataLoaded, Is.True);
-                    Assert.That(_cache.FindFile("bg.jpg"), Is.Not.Null);
+                    Assert.That(Objects.Contains(Sha256(thumbnail)), Is.True);
 
                     _http.Responder = _ => Bytes(HttpStatusCode.NotFound, Array.Empty<byte>());
                     var fullSize = await song.GetCoverAsync(false);
@@ -481,9 +537,7 @@ namespace MajdataPlay.Tests.Game.Misc.Base
         {
             return UniTask.ToCoroutine(async () =>
             {
-                var texture = new UnityEngine.Texture2D(4, 4);
-                var png = UnityEngine.ImageConversion.EncodeToPNG(texture);
-                UnityEngine.Object.DestroyImmediate(texture);
+                var png = CreatePng();
                 _http.Responder = _ => Bytes(HttpStatusCode.OK, png);
                 var song = CreateSong();
 
@@ -507,6 +561,36 @@ namespace MajdataPlay.Tests.Game.Misc.Base
                 Assert.That(song.IsCompressedCoverLoaded, Is.False);
                 Assert.That(song.IsCoverLoaded, Is.False);
             });
+        }
+
+        /// <summary>Checks that the compressed cover falls back to the original cover when the info API reports no thumbnail.</summary>
+        /// <returns>The test coroutine.</returns>
+        [UnityTest]
+        public IEnumerator Covers_UseOriginalCoverWithoutThumbnail()
+        {
+            return UniTask.ToCoroutine(async () =>
+            {
+                var png = CreatePng();
+                var coverArt = Resource(png, "1/bg.png");
+                _http.Responder = _ => Bytes(HttpStatusCode.OK, png);
+                using var song = await CreateSyncedSongAsync(new MajNetChartResources { CoverArt = coverArt });
+
+                var cover = await song.GetCoverAsync(true);
+                await UniTask.SwitchToMainThread();
+
+                Assert.That(cover != null, Is.True);
+                Assert.That(_http.Requests.Single().Uri, Is.EqualTo(coverArt.Url));
+            });
+        }
+
+        /// <summary>Encodes a small PNG image.</summary>
+        /// <returns>The PNG bytes.</returns>
+        private static byte[] CreatePng()
+        {
+            var texture = new UnityEngine.Texture2D(4, 4);
+            var png = UnityEngine.ImageConversion.EncodeToPNG(texture);
+            UnityEngine.Object.DestroyImmediate(texture);
+            return png;
         }
 
         /// <summary>Checks that a disposed song rejects every resource request and that disposal is idempotent.</summary>

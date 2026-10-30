@@ -97,7 +97,7 @@ namespace MajdataPlay
         /// <summary>Gets or sets the stable selected collection identity.</summary>
         public Guid SelectedDirGuid { get; set; } = Guid.Empty;
         /// <summary>Gets or sets the stable selected chart hash.</summary>
-        public string SelectedSongHash { get; set; } = string.Empty;
+        public string SelectedSongId { get; set; } = string.Empty;
         /// <summary>Gets or sets the selected difficulty.</summary>
         public int SelectedDiff { get; set; }
         /// <summary>Gets the saved ordering.</summary>

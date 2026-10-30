@@ -97,14 +97,11 @@ namespace MajdataPlay.Tests.Game.Misc.Base
             RecommendStates.Clear();
         }
 
-        /// <summary>Closes the favorites database, removes the event handlers and restores the library.</summary>
+        /// <summary>Removes the event handler and restores the library; the scope closes the runtime database after its queued writes.</summary>
         [TearDown]
         public void TearDown()
         {
             RemoveHandler(nameof(GameManager.OnSave), "OnSave");
-            RemoveHandler(nameof(GameManager.OnAppQuit), "OnAppQuit");
-            WaitForPendingFavoriteWrites();
-            PrivateMember.GetStaticField<SQLiteAsyncConnection?>(typeof(SongStorage), "s_favoritesDatabase")?.CloseAsync().Wait();
             foreach (var pair in _savedFields)
             {
                 PrivateMember.SetStaticField(typeof(SongStorage), pair.Key, pair.Value);
@@ -126,14 +123,8 @@ namespace MajdataPlay.Tests.Game.Misc.Base
             eventInfo.RemoveEventHandler(null, handler);
         }
 
-        /// <summary>Gets the favorites database opened by the library, or null.</summary>
-        private static SQLiteAsyncConnection? FavoritesDatabase => PrivateMember.GetStaticField<SQLiteAsyncConnection?>(typeof(SongStorage), "s_favoritesDatabase");
-
-        /// <summary>Waits for the queued favorite writes, so the database is not closed while a transaction is committing.</summary>
-        private static void WaitForPendingFavoriteWrites()
-        {
-            SongStorage.WaitForFavoriteWritesAsync().Wait();
-        }
+        /// <summary>Gets the runtime database once the library has prepared its favorites table, or null.</summary>
+        private static MajDatabaseHandle? FavoritesDatabase => PrivateMember.GetStaticField<MajDatabaseHandle?>(typeof(SongStorage), "s_favoritesDatabase");
 
         /// <summary>Counts the stored rows of one favorite hash after the queued writes have finished.</summary>
         /// <param name="hash">The favorite hash.</param>
@@ -141,7 +132,7 @@ namespace MajdataPlay.Tests.Game.Misc.Base
         private static async UniTask<int> CountStoredFavoriteAsync(string hash)
         {
             await SongStorage.WaitForFavoriteWritesAsync();
-            return await FavoritesDatabase!.ExecuteScalarAsync<int>("SELECT COUNT(*) FROM FavoriteHashes WHERE Hash = ?", hash);
+            return await FavoritesDatabase!.ReadAsync(connection => connection.ExecuteScalar<int>("SELECT COUNT(*) FROM FavoriteHashes WHERE Hash = ?", hash));
         }
 
         /// <summary>Opens the favorites database file with a separate connection and counts its rows.</summary>
@@ -249,7 +240,7 @@ namespace MajdataPlay.Tests.Game.Misc.Base
                 Assert.That(progress.Messages, Is.Not.Empty);
                 Assert.That(SongStorage.WorkingCollection.Name, Is.EqualTo("A-Collection"));
                 Assert.That(MajEnv.RuntimeConfig!.List.SelectedDirGuid, Is.EqualTo(Guid.Empty));
-                Assert.That(MajEnv.RuntimeConfig.List.SelectedSongHash, Is.Empty);
+                Assert.That(MajEnv.RuntimeConfig.List.SelectedSongId, Is.Empty);
                 Assert.That(SongStorage.OrderBy, Is.SameAs(MajEnv.RuntimeConfig.List.OrderBy));
             });
         }
@@ -286,7 +277,7 @@ namespace MajdataPlay.Tests.Game.Misc.Base
             });
         }
 
-        /// <summary>Checks that the selection is restored by collection identity and chart hash after a refresh.</summary>
+        /// <summary>Checks that the selection is restored by collection identity and chart identity after a refresh.</summary>
         /// <returns>The test coroutine.</returns>
         [UnityTest]
         public IEnumerator RefreshLocal_RestoresSelection()
@@ -301,7 +292,7 @@ namespace MajdataPlay.Tests.Game.Misc.Base
                 var selected = SongStorage.WorkingCollection;
                 selected.SetCursor(selected.Single(song => song.Title == "Four"));
                 listConfig.SelectedDirGuid = selected.Id;
-                listConfig.SelectedSongHash = selected.Current.Hash;
+                listConfig.SelectedSongId = selected.Current.Id;
                 selected.Index = 0;
                 SongStorage.CollectionIndex = 0;
                 ChartFixture.CreateChart(_charts.CreateDirectory("0-First"), "Zero", "Zero");
@@ -312,7 +303,7 @@ namespace MajdataPlay.Tests.Game.Misc.Base
                 Assert.That(SongStorage.CollectionIndex, Is.EqualTo(2));
                 Assert.That(SongStorage.WorkingCollection.Current.Title, Is.EqualTo("Four"));
                 Assert.That(listConfig.SelectedDirGuid, Is.EqualTo(selected.Id));
-                Assert.That(listConfig.SelectedSongHash, Is.EqualTo(SongStorage.WorkingCollection.Current.Hash));
+                Assert.That(listConfig.SelectedSongId, Is.EqualTo(SongStorage.WorkingCollection.Current.Id));
             });
         }
 
@@ -339,13 +330,13 @@ namespace MajdataPlay.Tests.Game.Misc.Base
             var collections = collectionExists ? new[] { fallback, selected } : new[] { fallback };
             PrivateMember.SetStaticProperty(typeof(SongStorage), nameof(SongStorage.Collections), collections);
             listConfig.SelectedDirGuid = selectedId;
-            listConfig.SelectedSongHash = "saved-song";
+            listConfig.SelectedSongId = "saved-song";
 
             SongStorage.RestoreSelection();
 
             Assert.That(SongStorage.WorkingCollection, Is.SameAs(collectionExists ? selected : fallback));
             Assert.That(listConfig.SelectedDirGuid, Is.EqualTo(selectedId));
-            Assert.That(listConfig.SelectedSongHash, Is.EqualTo("saved-song"));
+            Assert.That(listConfig.SelectedSongId, Is.EqualTo("saved-song"));
         }
 
         /// <summary>Checks that an empty library cannot replace the saved selection with the placeholder collection.</summary>
@@ -355,13 +346,13 @@ namespace MajdataPlay.Tests.Game.Misc.Base
             var listConfig = MajEnv.RuntimeConfig!.List;
             var selectedId = Guid.NewGuid();
             listConfig.SelectedDirGuid = selectedId;
-            listConfig.SelectedSongHash = "saved-song";
+            listConfig.SelectedSongId = "saved-song";
 
             SongStorage.RestoreSelection();
 
             Assert.That(SongStorage.WorkingCollection.IsEmpty, Is.True);
             Assert.That(listConfig.SelectedDirGuid, Is.EqualTo(selectedId));
-            Assert.That(listConfig.SelectedSongHash, Is.EqualTo("saved-song"));
+            Assert.That(listConfig.SelectedSongId, Is.EqualTo("saved-song"));
         }
 
         /// <summary>Checks that recommendation publication retains missing identities and restores them when content returns.</summary>
@@ -378,12 +369,12 @@ namespace MajdataPlay.Tests.Game.Misc.Base
                     Id = Guid.NewGuid()
                 };
                 listConfig.SelectedDirGuid = selectedId;
-                listConfig.SelectedSongHash = "saved-song";
+                listConfig.SelectedSongId = "saved-song";
 
                 await PrivateMember.InvokeStatic<Task>(typeof(SongStorage), "PublishRecommendCollectionsAsync", (object)new[] { fallback });
 
                 Assert.That(listConfig.SelectedDirGuid, Is.EqualTo(selectedId));
-                Assert.That(listConfig.SelectedSongHash, Is.EqualTo("saved-song"));
+                Assert.That(listConfig.SelectedSongId, Is.EqualTo("saved-song"));
                 var missingSong = new SongCollection("Recommendations", new ISongDetail[] { new FakeSongDetail("other-song") })
                 {
                     Id = selectedId,
@@ -394,7 +385,7 @@ namespace MajdataPlay.Tests.Game.Misc.Base
 
                 Assert.That(SongStorage.WorkingCollection, Is.SameAs(missingSong));
                 Assert.That(listConfig.SelectedDirGuid, Is.EqualTo(selectedId));
-                Assert.That(listConfig.SelectedSongHash, Is.EqualTo("saved-song"));
+                Assert.That(listConfig.SelectedSongId, Is.EqualTo("saved-song"));
                 var restored = new SongCollection("Recommendations", new ISongDetail[]
                 {
                     new FakeSongDetail("other-song"),
@@ -410,14 +401,14 @@ namespace MajdataPlay.Tests.Game.Misc.Base
                 Assert.That(SongStorage.WorkingCollection, Is.SameAs(restored));
                 Assert.That(restored.Current.Hash, Is.EqualTo("saved-song"));
                 Assert.That(listConfig.SelectedDirGuid, Is.EqualTo(selectedId));
-                Assert.That(listConfig.SelectedSongHash, Is.EqualTo("saved-song"));
+                Assert.That(listConfig.SelectedSongId, Is.EqualTo("saved-song"));
 
                 await PrivateMember.InvokeStatic<Task>(typeof(SongStorage), "PublishRecommendCollectionsAsync", (object)new[] { fallback });
 
                 Assert.That(SongStorage.CollectionIndex, Is.EqualTo(0));
                 Assert.That(SongStorage.WorkingCollection, Is.SameAs(fallback));
                 Assert.That(listConfig.SelectedDirGuid, Is.EqualTo(selectedId));
-                Assert.That(listConfig.SelectedSongHash, Is.EqualTo("saved-song"));
+                Assert.That(listConfig.SelectedSongId, Is.EqualTo("saved-song"));
             });
         }
 
@@ -525,9 +516,9 @@ namespace MajdataPlay.Tests.Game.Misc.Base
                     SongStorage.AddToMyFavorites(new FakeSongDetail($"quit-hash-{i}"));
                 }
 
-                PrivateMember.InvokeStatic(typeof(SongStorage), "OnAppQuit", null, null);
+                PrivateMember.InvokeStatic(typeof(MajDatabase), "OnAppQuit", null, null);
 
-                Assert.That(FavoritesDatabase, Is.Null);
+                Assert.That(FavoritesDatabase!.IsClosed, Is.True);
                 Assert.That(SongStorage.WaitForFavoriteWritesAsync().IsCompleted, Is.True);
                 Assert.That(await CountRowsInDatabaseFileAsync(), Is.EqualTo(200));
             });
@@ -541,7 +532,7 @@ namespace MajdataPlay.Tests.Game.Misc.Base
             return UniTask.ToCoroutine(async () =>
             {
                 await SongStorage.InitAsync();
-                PrivateMember.InvokeStatic(typeof(SongStorage), "OnAppQuit", null, null);
+                PrivateMember.InvokeStatic(typeof(MajDatabase), "OnAppQuit", null, null);
 
                 Assert.DoesNotThrow(() => SongStorage.AddToMyFavorites(new FakeSongDetail("late-hash")));
                 await SongStorage.WaitForFavoriteWritesAsync();
@@ -742,13 +733,14 @@ namespace MajdataPlay.Tests.Game.Misc.Base
             var endpoint = new ApiEndpoint { Name = "Server", Url = new Uri("https://a.invalid/api/") };
             var hashA = Convert.ToBase64String(Encoding.UTF8.GetBytes("chart-a"));
             var hashB = Convert.ToBase64String(Encoding.UTF8.GetBytes("chart-b"));
-            var known = new OnlineSongDetail(_temporary.Directory.CreateDirectory("Known"), endpoint, new MajnetSongDetail
+            var knownDetail = new MajnetSongDetail
             {
                 Id = Guid.NewGuid().ToString(),
                 Title = "Known",
                 Hash = hashA,
                 Levels = Array.Empty<string>()
-            });
+            };
+            var known = new OnlineSongDetail(endpoint, knownDetail, OnlineChartCache.Shared.CreateTransientRecord(endpoint, knownDetail));
             var charts = new[]
             {
                 new MajnetSongDetail { Id = Guid.NewGuid().ToString(), Title = "B", Hash = hashB, Levels = new[] { "1" } },
@@ -764,9 +756,181 @@ namespace MajdataPlay.Tests.Game.Misc.Base
             Assert.That(folder.Select(song => song.Hash), Is.EqualTo(new[] { hashB, hashA }));
             Assert.That(folder[1], Is.SameAs(known));
             Assert.That(folder[0].Title, Is.EqualTo("B"));
-            Assert.That(MajEnv.CacheDirectory.FindDirectory("Net")!.FindDirectory("Server"), Is.Not.Null);
+            Assert.That(((OnlineSongDetail)folder[0]).Record.ChartId, Is.EqualTo(charts[0].Id));
+            Assert.That(CountOnlineChartRows(charts[0].Id), Is.EqualTo(1));
             ((IDisposable)folder[0]).Dispose();
             known.Dispose();
+        }
+
+        /// <summary>Counts the online chart cache rows of a chart.</summary>
+        /// <param name="chartId">The chart identity.</param>
+        /// <returns>The number of rows.</returns>
+        private static int CountOnlineChartRows(string chartId)
+        {
+            return MajDatabase.Runtime.Read(connection => connection.ExecuteScalar<int>("SELECT COUNT(*) FROM OnlineChartCache WHERE ChartId = ?", chartId));
+        }
+
+        /// <summary>Creates the chart list JSON of the stub endpoint.</summary>
+        /// <param name="ids">The chart identities.</param>
+        /// <returns>The JSON array.</returns>
+        private static string ChartListJson(params string[] ids)
+        {
+            return "[" + string.Join(",", ids.Select(id => $"{{\"id\":\"{id}\",\"title\":\"Title {id}\",\"hash\":\"hash-{id}\",\"levels\":[\"1\"]}}")) + "]";
+        }
+
+        /// <summary>Creates the info JSON of the stub endpoint, giving every chart a chart file and a track.</summary>
+        /// <param name="ids">The chart identities.</param>
+        /// <returns>The JSON array.</returns>
+        private static string ChartInfoJson(params string[] ids)
+        {
+            return "[" + string.Join(",", ids.Select(id =>
+                $"{{\"metadata\":{{\"id\":\"{id}\"}},\"resources\":{{" +
+                $"\"maidata\":{{\"url\":\"https://cdn.invalid/{id}/maidata.txt\",\"md5\":\"{new string('1', 32)}\",\"sha256\":\"{DigestOf(id, "maidata")}\",\"length\":1}}," +
+                $"\"track\":{{\"url\":\"https://cdn.invalid/{id}/track.mp3\",\"md5\":\"{new string('2', 32)}\",\"sha256\":\"{DigestOf(id, "track")}\",\"length\":1}}," +
+                "\"video\":null,\"coverArt\":null,\"thumbnail\":null}}")) + "]";
+        }
+
+        /// <summary>Derives a distinct digest for a chart's file.</summary>
+        /// <param name="id">The chart identity.</param>
+        /// <param name="file">The file name.</param>
+        /// <returns>The lowercase hexadecimal SHA-256 digest of the chart identity and file name.</returns>
+        private static string DigestOf(string id, string file)
+        {
+            using var sha256 = System.Security.Cryptography.SHA256.Create();
+            return ObjectStore.ToHex(sha256.ComputeHash(Encoding.UTF8.GetBytes(id + "/" + file)));
+        }
+
+        /// <summary>Loads one endpoint's online collection through the private loader.</summary>
+        /// <param name="endpoint">The endpoint.</param>
+        /// <returns>The collection.</returns>
+        private static async UniTask<SongCollection> GetOnlineCollectionAsync(ApiEndpoint endpoint)
+        {
+            return await PrivateMember.InvokeStatic<Task<SongCollection>>(typeof(SongStorage), "GetOnlineCollection", endpoint, null, default(System.Threading.CancellationToken))!;
+        }
+
+        /// <summary>Checks that an online refresh records the info API's digests and gives every song its record.</summary>
+        /// <returns>The test coroutine.</returns>
+        [UnityTest]
+        public IEnumerator GetOnlineCollection_SyncsChartInfo()
+        {
+            return UniTask.ToCoroutine(async () =>
+            {
+                using var http = new StubHttpScope();
+                var endpoint = new ApiEndpoint { Name = "Server", Url = new Uri("https://api.invalid/api/") };
+                var ids = new[] { Guid.NewGuid().ToString(), Guid.NewGuid().ToString() };
+                http.Responder = request => request.RequestUri!.AbsolutePath.EndsWith("maichart/list")
+                    ? StubHttpScope.Respond(System.Net.HttpStatusCode.OK, ChartListJson(ids))
+                    : StubHttpScope.Respond(System.Net.HttpStatusCode.OK, ChartInfoJson(ids));
+
+                var collection = await GetOnlineCollectionAsync(endpoint);
+
+                var songs = collection.Cast<OnlineSongDetail>().ToArray();
+                Assert.That(songs.Select(song => song.Id), Is.EqualTo(ids));
+                Assert.That(songs.All(song => song.Record.IsResolved), Is.True);
+                Assert.That(songs[1].Record.TryGetDigest(OnlineChartResourceKind.Track, out var track), Is.True);
+                Assert.That(track.Sha256, Is.EqualTo(DigestOf(ids[1], "track")));
+                Assert.That(songs[1].Record.GetUrl(OnlineChartResourceKind.Track), Is.EqualTo(new Uri($"https://cdn.invalid/{ids[1]}/track.mp3")));
+                Assert.That(http.Requests.Single(request => request.Method == System.Net.Http.HttpMethod.Post).Uri.AbsolutePath, Does.EndWith("maichart/info"));
+                Assert.That(CountOnlineChartRows(ids[0]), Is.EqualTo(1));
+                foreach (var song in songs)
+                {
+                    song.Dispose();
+                }
+            });
+        }
+
+        /// <summary>Checks that the chart lists of two addresses of one server, such as a reverse proxy, share one row per chart.</summary>
+        /// <returns>The test coroutine.</returns>
+        [UnityTest]
+        public IEnumerator GetOnlineCollection_ProxiesOfOneServerShareRows()
+        {
+            return UniTask.ToCoroutine(async () =>
+            {
+                using var http = new StubHttpScope();
+                var direct = new ApiEndpoint { Name = "Direct", Url = new Uri("https://api.invalid/api/") };
+                var proxy = new ApiEndpoint { Name = "Proxy", Url = new Uri("https://proxy.invalid/majdata/api/") };
+                var ids = new[] { Guid.NewGuid().ToString(), Guid.NewGuid().ToString() };
+                http.Responder = request => request.RequestUri!.AbsolutePath switch
+                {
+                    var path when path.EndsWith("maichart/list") => StubHttpScope.Respond(System.Net.HttpStatusCode.OK, ChartListJson(ids)),
+                    var path when path.EndsWith("maichart/info") => StubHttpScope.Respond(System.Net.HttpStatusCode.OK, ChartInfoJson(ids)),
+                    _ => StubHttpScope.Respond(System.Net.HttpStatusCode.OK, "{\"id\":\"majnet\",\"name\":\"MajdataNET\"}")
+                };
+
+                var songs = (await GetOnlineCollectionAsync(direct)).Concat(await GetOnlineCollectionAsync(proxy)).Cast<OnlineSongDetail>().ToArray();
+
+                Assert.That(songs.Length, Is.EqualTo(4));
+                Assert.That(songs.All(song => song.Record.Server == "majnet"), Is.True);
+                Assert.That(CountOnlineChartRows(ids[0]), Is.EqualTo(1));
+                Assert.That(CountOnlineChartRows(ids[1]), Is.EqualTo(1));
+                foreach (var song in songs)
+                {
+                    song.Dispose();
+                }
+            });
+        }
+
+        /// <summary>Checks that songs of an endpoint without the info API still get records, which learn digests from downloads.</summary>
+        /// <returns>The test coroutine.</returns>
+        [UnityTest]
+        public IEnumerator GetOnlineCollection_WithoutChartInfo_CreatesUnresolvedRecords()
+        {
+            return UniTask.ToCoroutine(async () =>
+            {
+                using var http = new StubHttpScope();
+                var endpoint = new ApiEndpoint { Name = "Server", Url = new Uri("https://api.invalid/api/") };
+                var id = Guid.NewGuid().ToString();
+                http.Responder = request => request.RequestUri!.AbsolutePath.EndsWith("maichart/list")
+                    ? StubHttpScope.Respond(System.Net.HttpStatusCode.OK, ChartListJson(id))
+                    : StubHttpScope.Respond(System.Net.HttpStatusCode.NotFound, string.Empty);
+
+                var collection = await GetOnlineCollectionAsync(endpoint);
+
+                var song = (OnlineSongDetail)collection.Single();
+                Assert.That(song.Record.IsResolved, Is.False);
+                Assert.That(song.Record.TryGetDigest(OnlineChartResourceKind.Maidata, out _), Is.False);
+                Assert.That(song.Record.IsMissing(OnlineChartResourceKind.Video), Is.False);
+                Assert.That(CountOnlineChartRows(id), Is.EqualTo(1));
+                song.Dispose();
+            });
+        }
+
+        /// <summary>Checks that the offline collection lists only the charts whose chart file and track are stored.</summary>
+        /// <returns>The test coroutine.</returns>
+        [UnityTest]
+        public IEnumerator GetCachedOnlineCollection_ListsStoredCharts()
+        {
+            return UniTask.ToCoroutine(async () =>
+            {
+                using var http = new StubHttpScope();
+                var endpoint = new ApiEndpoint { Name = "Server", Url = new Uri("https://api.invalid/api/") };
+                var ids = new[] { Guid.NewGuid().ToString(), Guid.NewGuid().ToString() };
+                http.Responder = request => request.RequestUri!.AbsolutePath.EndsWith("maichart/list")
+                    ? StubHttpScope.Respond(System.Net.HttpStatusCode.OK, ChartListJson(ids))
+                    : StubHttpScope.Respond(System.Net.HttpStatusCode.OK, ChartInfoJson(ids));
+                foreach (var song in (await GetOnlineCollectionAsync(endpoint)).Cast<OnlineSongDetail>())
+                {
+                    song.Dispose();
+                }
+                foreach (var digest in new[] { DigestOf(ids[1], "maidata"), DigestOf(ids[1], "track"), DigestOf(ids[0], "maidata") })
+                {
+                    ObjectStore.Shared.Directory.CreateDirectory(digest.Substring(0, 2)).CreateFile(digest).WriteAllText("object");
+                }
+                await OnlineChartCache.Shared.InitializeAsync();
+                await ObjectStore.Shared.ScanAsync();
+                var cacheDirectory = MajEnv.CacheDirectory.CreateDirectory("Net").CreateDirectory(endpoint.Name);
+
+                var cached = await PrivateMember.InvokeStatic<Task<SongCollection>>(typeof(SongStorage), "GetCachedOnlineCollectionAsync", endpoint, cacheDirectory, default(System.Threading.CancellationToken))!;
+
+                var offline = (OnlineSongDetail)cached.Single();
+                Assert.That(cached.IsOnline, Is.True);
+                Assert.That(offline.Id, Is.EqualTo(ids[1]));
+                Assert.That(offline.Title, Is.EqualTo($"Title {ids[1]}"));
+                Assert.That(offline.ServerInfo, Is.SameAs(endpoint));
+                Assert.That(offline.Record.TryGetDigest(OnlineChartResourceKind.Track, out var track), Is.True);
+                Assert.That(track.Sha256, Is.EqualTo(DigestOf(ids[1], "track")));
+                offline.Dispose();
+            });
         }
 
         /// <summary>Checks that playlist identities are derived from the file contents.</summary>

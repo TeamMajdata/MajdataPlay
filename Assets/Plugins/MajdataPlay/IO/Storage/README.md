@@ -212,6 +212,19 @@ stream independently owns its archive and closes it on disposal. Metadata and
 directory queries read the archive afresh; perform substantial packaged I/O off
 the game loop, as with the other synchronous storage backends.
 
+Because every operation on a jar location reads and indexes the whole archive,
+bulk reads from an APK with thousands of entries should use one
+`ArchiveDirectoryReader`, which opens and indexes the archive once:
+
+```csharp
+using var reader = FileSystem.Directory.OpenArchiveReader(Application.streamingAssetsPath);
+var bytes = reader.ReadAllBytes("Config/options.txt"); // literal names, not URI-escaped
+```
+
+Relative paths are split and validated like `FileSystem.Path.Split` and must stay
+below the reader's directory. A reader shares one archive file stream and is not
+thread-safe; parallel workers each open their own. Disposal closes the archive.
+
 ZIP entry names use ordinal, case-sensitive comparison. URI path segments are
 percent-decoded exactly once: a literal percent sign must be encoded as `%25`.
 Use directory lookup by child name to obtain authoritative escaped locations

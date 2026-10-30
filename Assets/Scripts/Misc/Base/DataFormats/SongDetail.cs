@@ -1,6 +1,7 @@
 using Cysharp.Threading.Tasks;
 using MajdataPlay.Collections;
 using MajdataPlay.Databases;
+using MajdataPlay.Diagnostics;
 using MajdataPlay.Drawing;
 using MajdataPlay.IO;
 using MajdataPlay.IO.Storage;
@@ -17,27 +18,15 @@ namespace MajdataPlay
 {
     internal class SongDetail : ISongDetail, IDisposable
     {
+        /// <summary>Gets the identity read from, or generated into, the chart directory's <c>.MajdataPlay/id</c> file.</summary>
+        public string Id { get; }
         public string Title { get; init; } = string.Empty;
         public string Artist { get; init; } = string.Empty;
         public string Description { get; init; } = string.Empty;
-        public ReadOnlySpan<string> Designers
-        {
-            get
-            {
-                return _simaiMetadata.Designers;
-            }
-        }
-        public ReadOnlySpan<string> Levels
-        {
-            get
-            {
-                return _simaiMetadata.Levels;
-            }
-        }
-        public string Hash
-        {
-            get => _simaiMetadata.Hash;
-        }
+        public ReadOnlySpan<string> Designers { get => _simaiMetadata.Designers; }
+        public ReadOnlySpan<string> Levels { get => _simaiMetadata.Levels; }
+        public ReadOnlySpan<string> Tags { get => ReadOnlySpan<string>.Empty; }
+        public string Hash { get => _simaiMetadata.Hash; }
         public DateTime Timestamp { get; init; }
         public ChartStorageLocation Location => ChartStorageLocation.Local;
 
@@ -112,9 +101,26 @@ namespace MajdataPlay
                 _isEmptyCover = true;
             }
             _simaiMetadata = metadata;
+            Id = ReadOrCreateId(directory);
             Title = metadata.Title;
             Artist = metadata.Artist;
             Timestamp = _maidataFile.Entry?.LastWriteTimeUtc?.ToLocalTime() ?? DateTime.UnixEpoch;
+        }
+        /// <summary>Reads the chart directory's persisted identity, creating it when missing.</summary>
+        /// <param name="directory">The chart directory owning the identity marker.</param>
+        /// <returns>The persisted identity, or a GUID kept only in memory when the marker cannot be stored.</returns>
+        private static string ReadOrCreateId(StorageDirectory directory)
+        {
+            try
+            {
+                return DirectoryIdentity.GetOrCreateId(directory);
+            }
+            catch (Exception exception) when (exception is System.IO.IOException or UnauthorizedAccessException or NotSupportedException)
+            {
+                // A read-only chart directory stays playable; its identity just does not survive a rescan.
+                MajDebug.LogWarning(nameof(SongDetail), $"Failed to persist the identity of chart '{directory.Location}': {exception.Message}");
+                return Guid.NewGuid().ToString();
+            }
         }
         /// <summary>Reads and parses a chart using the storage facade for its directory location.</summary>
         /// <param name="chartFolder">The chart directory's local path or registered provider location.</param>

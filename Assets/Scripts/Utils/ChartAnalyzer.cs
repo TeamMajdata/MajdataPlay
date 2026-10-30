@@ -54,6 +54,7 @@ namespace MajdataPlay.Utils
         public static MaidataAnalyzeResult AnalyzeMaidataWithGraph(SimaiChart data,
                                                                    int height,
                                                                    int width,
+                                                                   float offset = 0,
                                                                    float? chartLength = null)
         {
             if (data.NoteTimings.IsEmpty)
@@ -62,7 +63,7 @@ namespace MajdataPlay.Utils
             }
             var noteTimings = data.NoteTimings;
             var length = chartLength ?? (float)noteTimings[noteTimings.Length - 1].Timing;
-            var bars = BuildBars(noteTimings, length);
+            var bars = BuildBars(noteTimings, offset, length);
             var graph = DrawGraph(bars, height, width);
             GetBpmRange(noteTimings, out var minBpm, out var maxBpm);
 
@@ -193,6 +194,7 @@ namespace MajdataPlay.Utils
         }
         private static NativeArray<GraphBar> BuildBars(
             ReadOnlySpan<SimaiTimingPoint> data,
+            float offset,
             float length,
             int barCount = 64)
         {
@@ -204,7 +206,7 @@ namespace MajdataPlay.Utils
             {
                 var timingPoint = data[i];
 
-                int barIndex = (int)(timingPoint.Timing / length * barCount);
+                int barIndex = (int)(Math.Max(timingPoint.Timing + offset, 0) / length * barCount);
 
                 if (barIndex < 0)
                 {

@@ -46,8 +46,9 @@ namespace MajdataPlay.Tests
                 var selectedLocal = localCollections.First(collection => !collection.IsEmpty);
                 var selectedId = selectedLocal.Id;
                 var selectedHash = selectedLocal[1].Hash;
+                var selectedSongId = selectedLocal[1].Id;
                 MajEnv.RuntimeConfig.List.SelectedDirGuid = selectedId;
-                MajEnv.RuntimeConfig.List.SelectedSongHash = selectedHash;
+                MajEnv.RuntimeConfig.List.SelectedSongId = selectedSongId;
                 File.Delete(playlistPath);
                 MajEnv.ChartDirectory = inaccessibleRoot.Root;
                 MajEnv.ApiEndpoints = new[] { endpoint };

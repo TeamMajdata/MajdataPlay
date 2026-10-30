@@ -104,7 +104,7 @@ namespace MajdataPlay.Tests.ChartStorageValidation
             var marker = CreateFixtureDirectory(Path.Combine(MajEnv.CacheDirectory.Location, "Net", endpoint.Name), ".MajdataPlay");
             NativeFile.WriteAllText(Path.Combine(marker, "id"), identity.ToString());
             MajEnv.RuntimeConfig.List.SelectedDirGuid = identity;
-            MajEnv.RuntimeConfig.List.SelectedSongHash = selectedHash;
+            MajEnv.RuntimeConfig.List.SelectedSongId = selectedHash;
             MajEnv.ApiEndpoints = new[] { endpoint };
             MajEnv.Settings.Online.Enable = true;
             Online.ChartListHandler = (source, token) => Task.FromResult<ChartFixture[]?>(new[]
@@ -320,7 +320,7 @@ namespace MajdataPlay.Tests.ChartStorageValidation
             var originalEndpoints = MajEnv.ApiEndpoints;
             var listConfig = MajEnv.RuntimeConfig.List;
             var originalId = listConfig.SelectedDirGuid;
-            var originalHash = listConfig.SelectedSongHash;
+            var originalHash = listConfig.SelectedSongId;
             try
             {
                 var root = FileSystem.Directory.Open(CreateFixtureDirectory(rootPath, "SelectionRecovery"));
@@ -333,13 +333,13 @@ namespace MajdataPlay.Tests.ChartStorageValidation
                 var savedId = Guid.NewGuid();
                 const string savedHash = "saved-song";
                 listConfig.SelectedDirGuid = savedId;
-                listConfig.SelectedSongHash = savedHash;
+                listConfig.SelectedSongId = savedHash;
 
                 await SongStorage.RefreshLocal();
-                Require(listConfig.SelectedDirGuid == savedId && listConfig.SelectedSongHash == savedHash,
+                Require(listConfig.SelectedDirGuid == savedId && listConfig.SelectedSongId == savedHash,
                     "A local refresh must retain an unavailable collection GUID and song hash.");
                 await SongStorage.RefreshOnline();
-                Require(listConfig.SelectedDirGuid == savedId && listConfig.SelectedSongHash == savedHash,
+                Require(listConfig.SelectedDirGuid == savedId && listConfig.SelectedSongId == savedHash,
                     "A subsequent source refresh must not replace the saved identities with the fallback cursor.");
 
                 var selected = MajEnv.ChartDirectory.CreateDirectory("Selected");
@@ -347,10 +347,10 @@ namespace MajdataPlay.Tests.ChartStorageValidation
                 var otherPath = WriteChart(selected.Location, "Other", new ChartFixture { Hash = "other-song", Title = "Other" });
                 await SongStorage.RefreshLocal();
                 Require(SongStorage.WorkingCollection.Id == savedId && SongStorage.WorkingCollection.Current.Hash == "other-song"
-                    && listConfig.SelectedDirGuid == savedId && listConfig.SelectedSongHash == savedHash,
+                    && listConfig.SelectedDirGuid == savedId && listConfig.SelectedSongId == savedHash,
                     "Finding the saved collection without its song must retain the saved song hash.");
                 await SongStorage.RefreshOnline();
-                Require(listConfig.SelectedDirGuid == savedId && listConfig.SelectedSongHash == savedHash,
+                Require(listConfig.SelectedDirGuid == savedId && listConfig.SelectedSongId == savedHash,
                     "Retaining a source whose saved song is absent must not save its temporary cursor.");
 
                 var selectedPath = WriteChart(selected.Location, "Saved", new ChartFixture { Hash = savedHash, Title = "Saved" });
@@ -362,11 +362,11 @@ namespace MajdataPlay.Tests.ChartStorageValidation
                 FileSystem.Directory.Open(selectedPath).Delete(true);
                 await SongStorage.RefreshLocal();
                 Require(SongStorage.WorkingCollection.Id == savedId && SongStorage.WorkingCollection.IsEmpty
-                    && listConfig.SelectedDirGuid == savedId && listConfig.SelectedSongHash == savedHash,
+                    && listConfig.SelectedDirGuid == savedId && listConfig.SelectedSongId == savedHash,
                     "An empty saved collection must not clear the remembered song hash.");
                 selected.Delete(true);
                 await SongStorage.RefreshLocal();
-                Require(listConfig.SelectedDirGuid == savedId && listConfig.SelectedSongHash == savedHash,
+                Require(listConfig.SelectedDirGuid == savedId && listConfig.SelectedSongId == savedHash,
                     "Removing a selected collection must retain both saved identities.");
             }
             finally
@@ -376,7 +376,7 @@ namespace MajdataPlay.Tests.ChartStorageValidation
                 MajEnv.Settings.Online.Enable = originalOnlineEnabled;
                 MajEnv.ApiEndpoints = originalEndpoints;
                 listConfig.SelectedDirGuid = originalId;
-                listConfig.SelectedSongHash = originalHash;
+                listConfig.SelectedSongId = originalHash;
             }
         }
 
@@ -403,7 +403,7 @@ namespace MajdataPlay.Tests.ChartStorageValidation
         {
             collection.SetCursor(hash);
             MajEnv.RuntimeConfig.List.SelectedDirGuid = collection.Id;
-            MajEnv.RuntimeConfig.List.SelectedSongHash = hash;
+            MajEnv.RuntimeConfig.List.SelectedSongId = hash;
             SongStorage.CollectionIndex = Array.IndexOf(SongStorage.Collections, collection);
         }
 

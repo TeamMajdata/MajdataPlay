@@ -69,6 +69,26 @@ namespace MajdataPlay.Tests.Game.Misc.Base
             });
         }
 
+        /// <summary>Checks that a chart's identity is generated into its hidden marker file and reused by later scans.</summary>
+        /// <returns>The test coroutine.</returns>
+        [UnityTest]
+        public IEnumerator ParseAsync_PersistsIdentity()
+        {
+            return UniTask.ToCoroutine(async () =>
+            {
+                var directory = ChartFixture.CreateChart(_temporary.Directory, "Chart", "Title");
+
+                using var first = await SongDetail.ParseAsync(directory);
+                using var second = await SongDetail.ParseAsync(directory);
+
+                Assert.That(Guid.TryParse(first.Id, out _), Is.True);
+                Assert.That(second.Id, Is.EqualTo(first.Id));
+                var idFile = directory.FindFileAt(".MajdataPlay/id")!;
+                Assert.That(idFile.ReadAllText(), Is.EqualTo(first.Id));
+                Assert.That(directory.FindEntry(".MajdataPlay")!.IsHidden, Is.True);
+            });
+        }
+
         /// <summary>Checks that the path overload opens the directory through the storage facade.</summary>
         /// <returns>The test coroutine.</returns>
         [UnityTest]

@@ -26,6 +26,9 @@ namespace MajdataPlay.Tests.Game.Scenes.PlayMode.ListScene
         /// <summary>The temporary directory backing online songs, created on demand.</summary>
         private TemporaryDirectory? _onlineCache;
 
+        /// <summary>The in-memory chart cache whose object store lives in <see cref="_onlineCache"/>, created on demand.</summary>
+        private OnlineChartCache? _onlineChartCache;
+
         /// <summary>The center cover displayers created by the test.</summary>
         private readonly List<CenterCoverDisplayer> _centers = new();
 
@@ -59,6 +62,7 @@ namespace MajdataPlay.Tests.Game.Scenes.PlayMode.ListScene
             CreateAudioManager("bgm_select.mp3");
             AddCleanup(() =>
             {
+                _onlineChartCache = null;
                 _onlineCache?.Dispose();
                 _onlineCache = null;
             });
@@ -325,13 +329,17 @@ namespace MajdataPlay.Tests.Game.Scenes.PlayMode.ListScene
             return new SimaiFile("Title", "Artist", 0f, "hash", charts, commands);
         }
 
-        /// <summary>Creates an online song backed by a temporary cache directory and a local test endpoint.</summary>
+        /// <summary>Creates an online song whose files are kept in a temporary object store, with a local test endpoint.</summary>
         /// <param name="id">The song identifier.</param>
         /// <param name="endpoint">The endpoint, or a new local endpoint when null.</param>
         /// <returns>The online song.</returns>
         internal OnlineSongDetail CreateOnlineSong(string id, ApiEndpoint? endpoint = null)
         {
             _onlineCache ??= new TemporaryDirectory();
+            _onlineChartCache ??= new OnlineChartCache(
+                new ObjectStore(_onlineCache.Directory.CreateDirectory("Objects"), _onlineCache.Directory.CreateDirectory("Partials")),
+                false);
+            endpoint ??= CreateEndpoint();
             var detail = new MajnetSongDetail
             {
                 Id = id,
@@ -344,7 +352,7 @@ namespace MajdataPlay.Tests.Game.Scenes.PlayMode.ListScene
                 Timestamp = new DateTime(2024, 2, 2),
                 Hash = "majtest-online-" + id,
             };
-            return new OnlineSongDetail(_onlineCache.Directory.CreateDirectory(id), endpoint ?? CreateEndpoint(), detail);
+            return new OnlineSongDetail(endpoint, detail, _onlineChartCache.CreateTransientRecord(endpoint, detail));
         }
 
         /// <summary>Creates a local endpoint that is never contacted by the tests.</summary>

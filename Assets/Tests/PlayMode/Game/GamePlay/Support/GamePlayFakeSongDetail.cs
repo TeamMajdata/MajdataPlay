@@ -45,11 +45,17 @@ namespace MajdataPlay.Tests.Game.GamePlay.PlayMode.Support
         /// <summary>Gets the level labels indexed by chart level.</summary>
         public ReadOnlySpan<string> Levels => _levels;
 
+        /// <summary>Gets an empty tag list for the in-memory song.</summary>
+        public ReadOnlySpan<string> Tags => ReadOnlySpan<string>.Empty;
+
         /// <summary>Gets or sets where the song is stored.</summary>
         public ChartStorageLocation Location { get; set; } = ChartStorageLocation.Local;
 
         /// <summary>Gets the song timestamp.</summary>
         public DateTime Timestamp { get; } = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+
+        /// <summary>Gets the song identity, which fakes derive from the hash.</summary>
+        public string Id => Hash;
 
         /// <summary>Gets the song hash.</summary>
         public string Hash { get; }

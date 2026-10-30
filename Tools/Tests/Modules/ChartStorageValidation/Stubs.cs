@@ -29,6 +29,8 @@ namespace MajdataPlay
     /// <summary>Supplies only the song metadata inspected by the production collection.</summary>
     public interface ISongDetail
     {
+        /// <summary>Gets the persisted chart identity used to restore the list selection.</summary>
+        string Id { get; }
         /// <summary>Gets the chart identity used by collection lookup.</summary>
         string Hash { get; }
         /// <summary>Gets whether the chart belongs to an online endpoint.</summary>

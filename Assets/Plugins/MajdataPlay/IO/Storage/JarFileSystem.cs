@@ -147,6 +147,41 @@ namespace MajdataPlay.IO.Storage
             throw new NotSupportedException("Archive entries are read-only.");
         }
 
+        /// <summary>Opens and indexes an archive once for repeated file reads below one of its directories.</summary>
+        /// <param name="directoryLocation">The jar location of an existing archive directory.</param>
+        /// <returns>A caller-owned reader that keeps the archive open until disposal.</returns>
+        /// <exception cref="ArgumentException">The jar location is malformed.</exception>
+        /// <exception cref="NotSupportedException">The archive is nested or is not a local file.</exception>
+        /// <exception cref="DirectoryNotFoundException">The archive or directory does not exist.</exception>
+        /// <exception cref="UnauthorizedAccessException">Reading the archive was denied.</exception>
+        /// <exception cref="InvalidDataException">The archive does not contain valid ZIP data.</exception>
+        /// <exception cref="IOException">The location is a file, the archive cannot be opened, or its names are ambiguous.</exception>
+        internal static ArchiveDirectoryReader OpenDirectoryReader(string directoryLocation)
+        {
+            var parsed = ParseLocation(directoryLocation);
+            var archive = RequireArchive(parsed, true);
+            try
+            {
+                var entries = IndexArchive(archive);
+                RequireDirectory(entries, parsed.EntryPath);
+                var files = new Dictionary<string, ZipArchiveEntry>(StringComparer.Ordinal);
+                foreach (var pair in entries)
+                {
+                    if (!pair.Value.IsDirectory && pair.Value.Entry is not null)
+                    {
+                        files.Add(pair.Key, pair.Value.Entry);
+                    }
+                }
+                return new ArchiveDirectoryReader(archive, files, parsed.EntryPath,
+                    BuildLocation(parsed.ArchiveUri, parsed.EntryPath));
+            }
+            catch
+            {
+                archive.Dispose();
+                throw;
+            }
+        }
+
         /// <summary>Validates a jar location and returns its canonical, escaped spelling without opening the archive.</summary>
         /// <param name="location">An absolute jar location backed by a local file URI.</param>
         /// <returns>The canonical jar URI, retaining <c>!/</c> for the archive root.</returns>

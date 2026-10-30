@@ -1,6 +1,8 @@
 using Cysharp.Text;
 using Cysharp.Threading.Tasks;
+using MajdataPlay.Diagnostics;
 using MajdataPlay.i18n;
+using MajdataPlay.Rendering;
 using MajdataPlay.Settings;
 using System;
 using TMPro;
@@ -13,6 +15,7 @@ namespace MajdataPlay
         const string NEW_VERSION_AVAILABLE_I18N_KEY = "MAJTEXT_NEW_VERSION_AVAILABLE";
         const float REFRESH_INTERVAL_SECONDS = 1f;
 
+        readonly FrameTimingDiagnostics _frameTimingDiagnostics = new();
         FPSMonitor _fpsMonitor = null!;
         TextMeshProUGUI _textDisplayer = null!;
         GameSetting _setting = null!;
@@ -60,6 +63,7 @@ namespace MajdataPlay
             var currentTime = MajTimeline.UnscaledTime;
             var delta = currentTime - _lastUpdateTiming;
             _lastUpdateTiming = currentTime;
+            TickFrameTimingDiagnostics(currentTime);
             if (_refreshTimer > 0)
             {
                 _refreshTimer -= (float)delta.TotalSeconds;
@@ -93,8 +97,27 @@ namespace MajdataPlay
                 sb.Append(')');
             }
 
+            if (_setting.Debug.FrameTimingDiagnostics)
+            {
+                sb.Append('\n');
+                sb.Append(_frameTimingDiagnostics.OverlaySummary);
+            }
+
             var text = sb.AsArraySegment();
             _textDisplayer.SetCharArray(text.Array, text.Offset, text.Count);
+        }
+
+        /// <summary>Captures frame timings while the diagnostics option is on and discards them when it is turned off.</summary>
+        /// <param name="currentTime">The current unscaled time.</param>
+        void TickFrameTimingDiagnostics(TimeSpan currentTime)
+        {
+            if (!_setting.Debug.FrameTimingDiagnostics)
+            {
+                _frameTimingDiagnostics.Reset();
+                return;
+            }
+
+            _frameTimingDiagnostics.Tick(currentTime, LowLatencyVSync.LastWaitMilliseconds);
         }
 
         void OnLanguageChanged(object? sender, Language language)

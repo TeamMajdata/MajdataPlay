@@ -6,7 +6,8 @@
         "UnityEditor.TestRunner",
         "MajdataPlay.Tests.Shared",
         "UniTask",
-        "MajdataPlay.Buffers"
+        "MajdataPlay.Buffers",
+        "MajdataPlay.Syscall"
     ],
     "includePlatforms": [
         "Editor"

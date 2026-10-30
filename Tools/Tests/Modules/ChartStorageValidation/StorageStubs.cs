@@ -33,7 +33,7 @@ namespace MajdataPlay
         /// <summary>Gets or sets the persisted identity of the selected collection.</summary>
         public Guid SelectedDirGuid { get; set; }
         /// <summary>Gets or sets the persisted hash of the selected chart.</summary>
-        public string SelectedSongHash { get; set; } = string.Empty;
+        public string SelectedSongId { get; set; } = string.Empty;
         /// <summary>Gets the runtime sort/filter settings.</summary>
         public SongOrder OrderBy { get; } = new SongOrder();
     }

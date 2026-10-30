@@ -92,6 +92,9 @@ failure in one case does not prevent the other cases from running.
   stored ZIP entries, byte/text sync and async reads, BOM detection, implicit and
   explicit directories, immediate enumeration, case-sensitive lookup, Unicode,
   and literal percent-encoded-looking archive and entry names.
+- `ArchiveDirectoryReader` bulk reads through one open archive: literal and nested
+  names below its directory, rereads, missing/directory/outside/traversal targets,
+  non-jar and file locations, and archive release after disposal.
 - Archive extraction through facade and handle copies into native paths/file
   URIs and opaque non-seekable provider destinations, explicit overwrite,
   pre-cancellation, failed-destination cleanup, independent stream lifetimes,

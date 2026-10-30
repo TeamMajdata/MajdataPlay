@@ -54,6 +54,7 @@ namespace MajdataPlay.Tests.FileSystemValidation
                 ("jar: automatic routing, metadata and sync/async reads", TestJarReads),
                 ("jar: implicit directories, immediate children and escaped names", TestJarChildren),
                 ("jar: descendants by relative path", TestJarDescendants),
+                ("jar: one archive reader for many directory files", TestJarArchiveReader),
                 ("jar: extraction to native and opaque destinations", TestJarExtraction),
                 ("jar: pre-cancellation preserves existing extraction targets", TestJarCancellation),
                 ("jar: read-only mutations preserve archive and destinations", TestJarReadOnly),

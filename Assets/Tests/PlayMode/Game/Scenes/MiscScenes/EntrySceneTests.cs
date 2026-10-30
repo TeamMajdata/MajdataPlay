@@ -346,7 +346,7 @@ namespace MajdataPlay.Tests.Game.Scenes.PlayMode.MiscScenes
         }
 
         /// <summary>Creates an online song for a guest or a logged-in endpoint.</summary>
-        /// <param name="directory">The cache directory.</param>
+        /// <param name="directory">The temporary directory holding the song's object store.</param>
         /// <param name="authMethod">The endpoint's authentication method.</param>
         /// <returns>The song.</returns>
         private static OnlineSongDetail OnlineSong(TemporaryDirectory directory, NetAuthMethodOption authMethod)
@@ -364,7 +364,10 @@ namespace MajdataPlay.Tests.Game.Scenes.PlayMode.MiscScenes
                 Uploader = "Uploader",
                 Hash = "majtest-interaction",
             };
-            return new OnlineSongDetail(directory.Directory.CreateDirectory("song"), endpoint, detail);
+            var cache = new OnlineChartCache(
+                new ObjectStore(directory.Directory.CreateDirectory("Objects"), directory.Directory.CreateDirectory("Partials")),
+                false);
+            return new OnlineSongDetail(endpoint, detail, cache.CreateTransientRecord(endpoint, detail));
         }
 
         /// <summary>Checks that local songs and guests never initialize score uploads or post scores.</summary>

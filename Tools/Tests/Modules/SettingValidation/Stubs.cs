@@ -366,7 +366,7 @@ namespace MajdataPlay.Settings.Runtime
 {
     public class SettingConfig { public string SelectedMenu = "Game", SelectedOption = ""; public bool IgnoreChartSettingPage = true; }
     public class RuntimeConfig { public SettingConfig Setting = new(); public ListConfig List = new(); }
-    public class ListConfig { public string SelectedSongHash = ""; }
+    public class ListConfig { public string SelectedSongId = ""; }
 }
 namespace MajdataPlay.Settings
 {

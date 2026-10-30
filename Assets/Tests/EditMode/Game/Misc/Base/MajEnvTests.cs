@@ -278,57 +278,57 @@ namespace MajdataPlay.Tests.Game.Misc.Base
             using (var connection = OpenStoredRuntimeDatabase())
             {
                 connection.Execute(
-                    "UPDATE ListConfig SET SelectedDirGuid = ?, SelectedSongHash = ?, SelectedDiff = ? WHERE Id = 0",
+                    "UPDATE ListConfig SET SelectedDirGuid = ?, SelectedSongId = ?, SelectedDiff = ? WHERE Id = 0",
                     selectedId.ToString(), "h", (int)ChartLevel.Master);
             }
             Step("InitRuntimeConfig");
             Assert.That(MajEnv.RuntimeConfig!.List.SelectedDirGuid, Is.EqualTo(selectedId));
-            Assert.That(MajEnv.RuntimeConfig.List.SelectedSongHash, Is.EqualTo("h"));
+            Assert.That(MajEnv.RuntimeConfig.List.SelectedSongId, Is.EqualTo("h"));
             Assert.That(MajEnv.RuntimeConfig.List.SelectedDiff, Is.EqualTo(ChartLevel.Master));
 
             using (var connection = OpenStoredRuntimeDatabase())
             {
-                connection.Execute("UPDATE ListConfig SET SelectedDirGuid = 'not a guid', SelectedSongHash = NULL WHERE Id = 0");
+                connection.Execute("UPDATE ListConfig SET SelectedDirGuid = 'not a guid', SelectedSongId = NULL WHERE Id = 0");
             }
             Step("InitRuntimeConfig");
             Assert.That(MajEnv.RuntimeConfig!.List.SelectedDirGuid, Is.EqualTo(System.Guid.Empty));
-            Assert.That(MajEnv.RuntimeConfig.List.SelectedSongHash, Is.Empty);
+            Assert.That(MajEnv.RuntimeConfig.List.SelectedSongId, Is.Empty);
             Assert.That(MajEnv.RuntimeConfig.List.SelectedDiff, Is.EqualTo(ChartLevel.Easy));
         }
 
         /// <summary>Checks that a NULL text column, as left by a column added later, loads as an empty value.</summary>
         [Test]
-        public void InitRuntimeConfig_LoadsNullSongHashAsEmpty()
+        public void InitRuntimeConfig_LoadsNullSongIdAsEmpty()
         {
             Step("InitRuntimeConfig");
             using (var connection = OpenStoredRuntimeDatabase())
             {
-                connection.Execute("UPDATE ListConfig SET SelectedSongHash = NULL WHERE Id = 0");
+                connection.Execute("UPDATE ListConfig SET SelectedSongId = NULL WHERE Id = 0");
             }
 
             Step("InitRuntimeConfig");
 
-            Assert.That(MajEnv.RuntimeConfig.List.SelectedSongHash, Is.Empty);
+            Assert.That(MajEnv.RuntimeConfig.List.SelectedSongId, Is.Empty);
         }
 
         /// <summary>Checks that a legacy config.json is imported into runtime.db once and then backed up.</summary>
         [Test]
         public void InitRuntimeConfig_ImportsLegacyJson()
         {
-            MajEnv.RuntimeDirectory.CreateFile("config.json").WriteAllText("{\"List\":{\"SelectedSongHash\":\"legacy\"}}");
+            MajEnv.RuntimeDirectory.CreateFile("config.json").WriteAllText("{\"List\":{\"SelectedSongId\":\"legacy\"}}");
             MajEnv.RuntimeDirectory.CreateFile("config.json.bak").WriteAllText("older");
 
             Step("InitRuntimeConfig");
 
-            Assert.That(MajEnv.RuntimeConfig.List.SelectedSongHash, Is.EqualTo("legacy"));
-            Assert.That(ReadStoredListConfig("SelectedSongHash"), Is.EqualTo("legacy"));
+            Assert.That(MajEnv.RuntimeConfig.List.SelectedSongId, Is.EqualTo("legacy"));
+            Assert.That(ReadStoredListConfig("SelectedSongId"), Is.EqualTo("legacy"));
             Assert.That(MajEnv.RuntimeDirectory.FindFile("config.json"), Is.Null);
             Assert.That(MajEnv.RuntimeDirectory.FindFile("config.json.bak")!.ReadAllText(), Does.Contain("legacy"));
 
             // A config.json appearing after the import is ignored, because runtime.db is the only source from then on.
-            MajEnv.RuntimeDirectory.CreateFile("config.json").WriteAllText("{\"List\":{\"SelectedSongHash\":\"stale\"}}");
+            MajEnv.RuntimeDirectory.CreateFile("config.json").WriteAllText("{\"List\":{\"SelectedSongId\":\"stale\"}}");
             Step("InitRuntimeConfig");
-            Assert.That(MajEnv.RuntimeConfig.List.SelectedSongHash, Is.EqualTo("legacy"));
+            Assert.That(MajEnv.RuntimeConfig.List.SelectedSongId, Is.EqualTo("legacy"));
         }
 
         /// <summary>Checks that an unreadable legacy config.json is imported as defaults and kept as a backup.</summary>
@@ -339,7 +339,7 @@ namespace MajdataPlay.Tests.Game.Misc.Base
 
             Step("InitRuntimeConfig");
 
-            Assert.That(MajEnv.RuntimeConfig.List.SelectedSongHash, Is.Empty);
+            Assert.That(MajEnv.RuntimeConfig.List.SelectedSongId, Is.Empty);
             Assert.That(CountStoredListConfigRows(), Is.EqualTo(1));
             Assert.That(MajEnv.RuntimeDirectory.FindFile("config.json.bak")!.ReadAllText(), Is.EqualTo("not json"));
         }
@@ -440,13 +440,13 @@ namespace MajdataPlay.Tests.Game.Misc.Base
         {
             _environment.Set(nameof(MajEnv.RuntimeConfig), new RuntimeConfig());
             MajEnv.Settings.Game.TapSpeed = 6.25f;
-            MajEnv.RuntimeConfig!.List.SelectedSongHash = "saved";
+            MajEnv.RuntimeConfig!.List.SelectedSongId = "saved";
 
             Step("OnSave", null, null);
 
             var settings = Serializer.Json.Deserialize<GameSetting>(_root.FindFile("settings.json")!.ReadAllText(), MajEnv.UserJsonReaderOption)!;
             Assert.That(settings.Game.TapSpeed, Is.EqualTo(6.25f));
-            Assert.That(ReadStoredListConfig("SelectedSongHash"), Is.EqualTo("saved"));
+            Assert.That(ReadStoredListConfig("SelectedSongId"), Is.EqualTo("saved"));
             Assert.That(MajEnv.SettingsPath.Location, Is.EqualTo(_root.FindFile("settings.json")!.Location));
 
             MajEnv.Settings.Game.TapSpeed = 5f;

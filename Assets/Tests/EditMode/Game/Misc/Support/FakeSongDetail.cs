@@ -69,11 +69,17 @@ namespace MajdataPlay.Tests.Game.Misc.Support
         /// <summary>Gets the label of each level.</summary>
         public ReadOnlySpan<string> Levels => _levels;
 
+        /// <summary>Gets an empty tag list for the in-memory song.</summary>
+        public ReadOnlySpan<string> Tags => ReadOnlySpan<string>.Empty;
+
         /// <summary>Gets whether the song is local or online.</summary>
         public ChartStorageLocation Location { get; }
 
         /// <summary>Gets the song timestamp.</summary>
         public DateTime Timestamp { get; }
+
+        /// <summary>Gets the song identity, which fakes derive from the hash.</summary>
+        public string Id => Hash;
 
         /// <summary>Gets the chart hash.</summary>
         public string Hash { get; }
