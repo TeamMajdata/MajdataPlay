@@ -167,6 +167,9 @@ namespace MajdataPlay.Settings
         /// <summary>Gets or sets whether frames are paced slightly below the refresh rate when VSync is on with Vulkan on desktop, which keeps the swapchain queue empty and lowers display latency at the cost of an occasional repeated frame.</summary>
         [HideInSettingUI]
         public bool LowLatencyVSync { get; set; } = true;
+        /// <summary>Gets or sets whether low-latency VSync waits until the previous frame is shown (VK_KHR_present_wait) on Windows players whose driver supports it, instead of pacing with a timer.</summary>
+        [HideInSettingUI]
+        public bool LowLatencyVSyncPresentWait { get; set; } = true;
 #if UNITY_IOS || UNITY_ANDROID
         /// <summary>Gets or sets the initial pooled tap-note capacity.</summary>
         [HideInSettingUI]

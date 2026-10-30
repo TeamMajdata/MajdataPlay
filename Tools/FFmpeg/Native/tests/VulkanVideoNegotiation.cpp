@@ -206,7 +206,11 @@ void VerifyStartupAcquisition() {
         auto get = [&](const char* name) { return lookup == 0 ? loader(testInstance, name) : deviceProc(testDevice, name); };
         auto acquire = reinterpret_cast<PFN_vkAcquireNextImageKHR>(get("vkAcquireNextImageKHR")); REQUIRE(acquire);
         auto acquire2 = reinterpret_cast<PFN_vkAcquireNextImage2KHR>(get("vkAcquireNextImage2KHR")); REQUIRE(acquire2);
-        REQUIRE(get("vkQueuePresentKHR") == reinterpret_cast<PFN_vkVoidFunction>(TestPresent));
+        // Presentation is wrapped for present pacing; without a tracked swapchain it forwards unchanged.
+        auto present = reinterpret_cast<PFN_vkQueuePresentKHR>(get("vkQueuePresentKHR")); REQUIRE(present);
+        VkPresentInfoKHR presentInfo{VK_STRUCTURE_TYPE_PRESENT_INFO_KHR};
+        presentInfo.swapchainCount = 1; presentInfo.pSwapchains = &testSwapchain;
+        REQUIRE(present(reinterpret_cast<VkQueue>(uintptr_t(4)), &presentInfo) == VK_SUBOPTIMAL_KHR);
         REQUIRE(!get("vkMissingTestFunction"));
         for (const VkResult result : results) {
             acquireResult = result;
@@ -243,6 +247,205 @@ void VerifyStartupAcquisition() {
     }
     REQUIRE(reloadedAcquireCalls == 4);
     std::puts("PASS: Windows Unity instance/device acquisition defers SUBOPTIMAL rebuild, preserves images/synchronization/errors/presentation, FFmpeg bypass and destruction interception");
+}
+
+// Present pacing: a driver model with VK_KHR_present_id / VK_KHR_present_wait.
+const VkDevice presentTestDevice = reinterpret_cast<VkDevice>(uintptr_t(8));
+const VkSwapchainKHR presentTestSwapchain = (VkSwapchainKHR)(uintptr_t(9));
+const VkSwapchainKHR otherTestSwapchain = (VkSwapchainKHR)(uintptr_t(10));
+bool presentFeatures = false, rejectPresentFeatures = false;
+int presentDeviceCreates = 0;
+bool lastCreateHadPresentWait = false;
+uint64_t lastPresentedId = 0, lastWaitedId = 0, lastWaitTimeout = UINT64_MAX;
+int presentCalls = 0, waitCalls = 0;
+VkResult presentResult = VK_SUCCESS, waitResult = VK_TIMEOUT;
+std::promise<void>* acquireEntered = nullptr;
+std::shared_future<void> acquireRelease;
+VKAPI_ATTR VkResult VKAPI_CALL PresentExtensions(VkPhysicalDevice, const char*, uint32_t* count, VkExtensionProperties* p) {
+    const char* names[] = {VK_KHR_PRESENT_ID_EXTENSION_NAME, VK_KHR_PRESENT_WAIT_EXTENSION_NAME};
+    if (!p) { *count = 2; return VK_SUCCESS; }
+    for (uint32_t i = 0; i < *count; ++i) { p[i] = {}; std::strcpy(p[i].extensionName, names[i]); }
+    return VK_SUCCESS;
+}
+VKAPI_ATTR void VKAPI_CALL PresentFeatures(VkPhysicalDevice, VkPhysicalDeviceFeatures2* p) {
+    for (auto* item = static_cast<VkBaseOutStructure*>(p->pNext); item; item = item->pNext) {
+        if (item->sType == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PRESENT_ID_FEATURES_KHR)
+            reinterpret_cast<VkPhysicalDevicePresentIdFeaturesKHR*>(item)->presentId = presentFeatures;
+        if (item->sType == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PRESENT_WAIT_FEATURES_KHR)
+            reinterpret_cast<VkPhysicalDevicePresentWaitFeaturesKHR*>(item)->presentWait = presentFeatures;
+    }
+}
+VKAPI_ATTR VkResult VKAPI_CALL PresentCreateDevice(VkPhysicalDevice, const VkDeviceCreateInfo* info, const VkAllocationCallbacks*, VkDevice* device) {
+    ++presentDeviceCreates;
+    bool id = false, wait = false, idExtension = false, waitExtension = false;
+    for (auto* item = static_cast<const VkBaseInStructure*>(info->pNext); item; item = item->pNext) {
+        if (item->sType == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PRESENT_ID_FEATURES_KHR)
+            id = reinterpret_cast<const VkPhysicalDevicePresentIdFeaturesKHR*>(item)->presentId;
+        if (item->sType == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PRESENT_WAIT_FEATURES_KHR)
+            wait = reinterpret_cast<const VkPhysicalDevicePresentWaitFeaturesKHR*>(item)->presentWait;
+    }
+    for (uint32_t i = 0; i < info->enabledExtensionCount; ++i) {
+        idExtension |= !std::strcmp(info->ppEnabledExtensionNames[i], VK_KHR_PRESENT_ID_EXTENSION_NAME);
+        waitExtension |= !std::strcmp(info->ppEnabledExtensionNames[i], VK_KHR_PRESENT_WAIT_EXTENSION_NAME);
+    }
+    REQUIRE(id == wait && id == idExtension && id == waitExtension); // features and extensions travel together
+    lastCreateHadPresentWait = id;
+    if (id && rejectPresentFeatures) return VK_ERROR_FEATURE_NOT_PRESENT;
+    *device = presentTestDevice; return VK_SUCCESS;
+}
+VKAPI_ATTR VkResult VKAPI_CALL PresentCreateSwapchain(VkDevice device, const VkSwapchainCreateInfoKHR*, const VkAllocationCallbacks*, VkSwapchainKHR* swapchain) {
+    REQUIRE(device == presentTestDevice); *swapchain = presentTestSwapchain; return VK_SUCCESS;
+}
+VKAPI_ATTR void VKAPI_CALL PresentDestroySwapchain(VkDevice device, VkSwapchainKHR, const VkAllocationCallbacks*) { REQUIRE(device == presentTestDevice); }
+VKAPI_ATTR VkResult VKAPI_CALL PresentQueue(VkQueue, const VkPresentInfoKHR* info) {
+    ++presentCalls; lastPresentedId = 0;
+    for (auto* item = static_cast<const VkBaseInStructure*>(info->pNext); item; item = item->pNext) {
+        if (item->sType == VK_STRUCTURE_TYPE_PRESENT_ID_KHR) {
+            auto* ids = reinterpret_cast<const VkPresentIdKHR*>(item);
+            REQUIRE(ids->swapchainCount == info->swapchainCount);
+            for (uint32_t i = 0; i < ids->swapchainCount; ++i)
+                if (info->pSwapchains[i] == presentTestSwapchain) lastPresentedId = ids->pPresentIds[i];
+                else REQUIRE(ids->pPresentIds[i] == 0);
+        }
+    }
+    return presentResult;
+}
+VKAPI_ATTR VkResult VKAPI_CALL PresentWait(VkDevice device, VkSwapchainKHR swapchain, uint64_t id, uint64_t timeout) {
+    REQUIRE(device == presentTestDevice && swapchain == presentTestSwapchain);
+    ++waitCalls; lastWaitedId = id; lastWaitTimeout = timeout;
+    return waitResult;
+}
+VKAPI_ATTR VkResult VKAPI_CALL PresentAcquire(VkDevice, VkSwapchainKHR, uint64_t, VkSemaphore, VkFence, uint32_t* index) {
+    if (acquireEntered) { acquireEntered->set_value(); acquireRelease.wait(); }
+    *index = 0; return VK_SUCCESS;
+}
+VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL PresentDeviceProc(VkDevice, const char* name) {
+#define FUNCTION(text, function) if (!std::strcmp(name, text)) return reinterpret_cast<PFN_vkVoidFunction>(function)
+    FUNCTION("vkCreateSwapchainKHR", PresentCreateSwapchain);
+    FUNCTION("vkDestroySwapchainKHR", PresentDestroySwapchain);
+    FUNCTION("vkQueuePresentKHR", PresentQueue);
+    FUNCTION("vkWaitForPresentKHR", PresentWait);
+    FUNCTION("vkAcquireNextImageKHR", PresentAcquire);
+#undef FUNCTION
+    return nullptr;
+}
+VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL PresentLoader(VkInstance, const char* name) {
+#define FUNCTION(text, function) if (!std::strcmp(name, text)) return reinterpret_cast<PFN_vkVoidFunction>(function)
+    FUNCTION("vkGetDeviceProcAddr", PresentDeviceProc);
+    FUNCTION("vkCreateDevice", PresentCreateDevice);
+    FUNCTION("vkEnumerateDeviceExtensionProperties", PresentExtensions);
+    FUNCTION("vkGetPhysicalDeviceFeatures2", PresentFeatures);
+    FUNCTION("vkGetPhysicalDeviceProperties", TestProperties);
+#undef FUNCTION
+    return nullptr;
+}
+}
+extern "C" int FFU_CALL ffu_present_wait_status();
+extern "C" int FFU_CALL ffu_present_wait_query(uint64_t* generation, uint64_t* presentId);
+extern "C" int FFU_CALL ffu_present_wait_poll(uint64_t generation, uint64_t presentId);
+namespace {
+void VerifyPresentWait() {
+    const auto loader = startupInterceptor(PresentLoader, nullptr); REQUIRE(loader);
+    const auto createDevice = reinterpret_cast<PFN_vkCreateDevice>(loader(testInstance, "vkCreateDevice")); REQUIRE(createDevice);
+    const auto deviceProc = reinterpret_cast<PFN_vkGetDeviceProcAddr>(loader(testInstance, "vkGetDeviceProcAddr")); REQUIRE(deviceProc);
+    VkDeviceCreateInfo info{VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO};
+    VkDevice device = VK_NULL_HANDLE;
+    uint64_t generation = 0, presentId = 0;
+
+    REQUIRE(createDevice(testPhysical, &info, nullptr, &device) == VK_SUCCESS);
+    REQUIRE(ffu_present_wait_status() == 2 && !lastCreateHadPresentWait); // unsupported: Unity's configuration only
+    REQUIRE(ffu_present_wait_query(&generation, &presentId) == -2 && ffu_present_wait_poll(0, 1) == -2);
+
+    presentFeatures = true; rejectPresentFeatures = true; int creates = presentDeviceCreates;
+    REQUIRE(createDevice(testPhysical, &info, nullptr, &device) == VK_SUCCESS);
+    REQUIRE(ffu_present_wait_status() == 3 && presentDeviceCreates >= creates + 2 && !lastCreateHadPresentWait);
+
+    rejectPresentFeatures = false;
+    // Unity 6 requests both features itself when the driver supports them: reuse that configuration unchanged.
+    VkPhysicalDevicePresentIdFeaturesKHR unityId{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PRESENT_ID_FEATURES_KHR, nullptr, VK_TRUE};
+    VkPhysicalDevicePresentWaitFeaturesKHR unityWait{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PRESENT_WAIT_FEATURES_KHR, &unityId, VK_TRUE};
+    const char* unityExtensions[] = {VK_KHR_PRESENT_ID_EXTENSION_NAME, VK_KHR_PRESENT_WAIT_EXTENSION_NAME};
+    VkDeviceCreateInfo unityInfo{VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO};
+    unityInfo.pNext = &unityWait; unityInfo.enabledExtensionCount = 2; unityInfo.ppEnabledExtensionNames = unityExtensions;
+    creates = presentDeviceCreates;
+    REQUIRE(createDevice(testPhysical, &unityInfo, nullptr, &device) == VK_SUCCESS);
+    REQUIRE(ffu_present_wait_status() == 0 && presentDeviceCreates == creates + 1 && lastCreateHadPresentWait);
+    unityId.presentId = VK_FALSE; unityWait.presentWait = VK_FALSE; unityInfo.enabledExtensionCount = 0;
+    creates = presentDeviceCreates;
+    REQUIRE(createDevice(testPhysical, &unityInfo, nullptr, &device) == VK_SUCCESS);
+    REQUIRE(ffu_present_wait_status() == 2 && presentDeviceCreates == creates + 1 && !lastCreateHadPresentWait);
+
+    REQUIRE(createDevice(testPhysical, &info, nullptr, &device) == VK_SUCCESS && device == presentTestDevice);
+    REQUIRE(ffu_present_wait_status() == 0 && lastCreateHadPresentWait);
+    REQUIRE(info.pNext == nullptr && info.enabledExtensionCount == 0); // borrowed Unity memory unchanged
+    REQUIRE(ffu_present_wait_query(nullptr, &presentId) == -3);
+    REQUIRE(ffu_present_wait_query(&generation, &presentId) == 1 && presentId == 0);
+    REQUIRE(ffu_present_wait_poll(generation, 1) == -1); // no swapchain yet
+
+    const auto createSwapchain = reinterpret_cast<PFN_vkCreateSwapchainKHR>(deviceProc(device, "vkCreateSwapchainKHR"));
+    const auto destroySwapchain = reinterpret_cast<PFN_vkDestroySwapchainKHR>(deviceProc(device, "vkDestroySwapchainKHR"));
+    const auto present = reinterpret_cast<PFN_vkQueuePresentKHR>(deviceProc(device, "vkQueuePresentKHR"));
+    const auto acquire = reinterpret_cast<PFN_vkAcquireNextImageKHR>(deviceProc(device, "vkAcquireNextImageKHR"));
+    REQUIRE(createSwapchain && destroySwapchain && present && acquire);
+    VkSwapchainCreateInfoKHR swapchainInfo{VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR};
+    VkSwapchainKHR swapchain = VK_NULL_HANDLE;
+    const uint64_t before = generation;
+    REQUIRE(createSwapchain(device, &swapchainInfo, nullptr, &swapchain) == VK_SUCCESS && swapchain == presentTestSwapchain);
+    REQUIRE(ffu_present_wait_query(&generation, &presentId) == 1 && generation != before && presentId == 0);
+
+    const VkQueue queue = reinterpret_cast<VkQueue>(uintptr_t(4));
+    const VkSwapchainKHR both[] = {otherTestSwapchain, presentTestSwapchain};
+    VkPresentInfoKHR presentInfo{VK_STRUCTURE_TYPE_PRESENT_INFO_KHR};
+    presentInfo.swapchainCount = 2; presentInfo.pSwapchains = both;
+    REQUIRE(present(queue, &presentInfo) == VK_SUCCESS && lastPresentedId == 1);
+    REQUIRE(present(queue, &presentInfo) == VK_SUCCESS && lastPresentedId == 2);
+    REQUIRE(ffu_present_wait_query(&generation, &presentId) == 1 && presentId == 2);
+    presentResult = VK_ERROR_OUT_OF_DATE_KHR;
+    REQUIRE(present(queue, &presentInfo) == VK_ERROR_OUT_OF_DATE_KHR && lastPresentedId == 3);
+    REQUIRE(ffu_present_wait_query(&generation, &presentId) == 1 && presentId == 2); // a failed present is never waited for
+    presentResult = VK_SUCCESS;
+    uint64_t ownIds[] = {0, 77};
+    VkPresentIdKHR own{VK_STRUCTURE_TYPE_PRESENT_ID_KHR, nullptr, 2, ownIds};
+    presentInfo.pNext = &own;
+    REQUIRE(present(queue, &presentInfo) == VK_SUCCESS && lastPresentedId == 77); // Unity's own ids are left alone
+    REQUIRE(ffu_present_wait_query(&generation, &presentId) == 1 && presentId == 77); // and followed
+    presentInfo.pNext = nullptr;
+    REQUIRE(present(queue, &presentInfo) == VK_SUCCESS && lastPresentedId == 78); // injected ids keep increasing
+    REQUIRE(ffu_present_wait_query(&generation, &presentId) == 1 && presentId == 78);
+
+    // Unity's own vkWaitForPresentKHR calls are forwarded.
+    const auto unityWaitFunction = reinterpret_cast<PFN_vkWaitForPresentKHR>(deviceProc(device, "vkWaitForPresentKHR"));
+    REQUIRE(unityWaitFunction && unityWaitFunction != PresentWait);
+    waitCalls = 0; waitResult = VK_SUCCESS;
+    REQUIRE(unityWaitFunction(device, swapchain, 78, 5) == VK_SUCCESS && waitCalls == 1 && lastWaitedId == 78 && lastWaitTimeout == 5);
+
+    waitCalls = 0;
+    REQUIRE(ffu_present_wait_poll(generation, 79) == 0 && waitCalls == 0); // not presented yet: no driver call
+    waitResult = VK_TIMEOUT;
+    REQUIRE(ffu_present_wait_poll(generation, 2) == 0 && waitCalls == 1 && lastWaitedId == 2 && lastWaitTimeout == 0);
+    waitResult = VK_SUCCESS;
+    REQUIRE(ffu_present_wait_poll(generation, 2) == 1);
+    waitResult = VK_SUBOPTIMAL_KHR;
+    REQUIRE(ffu_present_wait_poll(generation, 1) == 1);
+    waitResult = VK_ERROR_DEVICE_LOST;
+    REQUIRE(ffu_present_wait_poll(generation, 2) == VK_ERROR_DEVICE_LOST);
+    REQUIRE(ffu_present_wait_poll(generation + 1, 2) == -1); // stale generation
+
+    // A Unity swapchain call in progress, such as a blocking acquisition, keeps the poll off the swapchain.
+    std::promise<void> entered, release;
+    acquireEntered = &entered; acquireRelease = release.get_future().share();
+    std::thread renderThread([&] { uint32_t index = 0; acquire(device, swapchain, UINT64_MAX, VK_NULL_HANDLE, VK_NULL_HANDLE, &index); });
+    entered.get_future().wait();
+    waitCalls = 0; waitResult = VK_SUCCESS;
+    REQUIRE(ffu_present_wait_poll(generation, 2) == 0 && waitCalls == 0);
+    release.set_value(); renderThread.join(); acquireEntered = nullptr;
+    REQUIRE(ffu_present_wait_poll(generation, 2) == 1 && waitCalls == 1);
+
+    destroySwapchain(device, swapchain, nullptr);
+    REQUIRE(ffu_present_wait_poll(generation, 2) == -1);
+    uint64_t after = 0;
+    REQUIRE(ffu_present_wait_query(&after, &presentId) == 1 && after != generation && presentId == 0);
+    std::puts("PASS: present wait negotiation/fallback, present id injection per swapchain, zero-timeout polls, swapchain generations and in-progress Unity calls");
 }
 }
 #endif
@@ -288,6 +491,7 @@ int main() {
     REQUIRE(deviceDestroys == 1 && instanceDestroys == 1 && devices.empty() && instances.empty());
 #ifdef _WIN32
     VerifyStartupAcquisition();
+    VerifyPresentWait();
 #endif
     std::puts("PASS: Vulkan negotiation fallback, feature preservation, private queue remapping, deferred device and instance destruction through real FFmpeg buffer references");
 }

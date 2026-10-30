@@ -58,6 +58,20 @@ pacer measures the real period after 120 unpaced frames and logs `frame interval
 To verify it, run Vulkan with VSync on twice, with `Debug.LowLatencyVSync` set to `false` and `true`, and compare
 `start->present - pacingWait`. Also watch fast-moving notes for the periodic repeated frame.
 
+### Present waiting (Windows players)
+
+On Windows players whose GPU driver supports `VK_KHR_present_id` and `VK_KHR_present_wait`, the FFmpeg graphics
+bridge tags every presentation with an id and `LowLatencyVSync` instead waits at the start of each frame until the
+previous frame has been shown, like D3D11's waitable swapchain. The latency is then constant and there is no
+periodic repeated frame. The log shows which mode is active:
+
+- `Frame pacing started: each frame waits until the previous frame is shown (VK_KHR_present_wait)`
+- `Present waiting unavailable (<reason>); using timer pacing` followed by `Frame pacing started: refresh ...`
+- `Present waiting timed out|failed 30 times in a row ...; switching to timer pacing`
+
+Set the hidden option `Debug.LowLatencyVSyncPresentWait` to `false` to force timer pacing for comparison. The
+Editor always uses timer pacing, because its views present through several swapchains.
+
 ## Procedure
 
 Use the same build, display, refresh rate, window mode and scene (a chart in the Game scene, or the List

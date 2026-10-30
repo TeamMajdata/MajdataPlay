@@ -18,7 +18,9 @@ namespace MajdataPlay.Rendering
     /// Paces the main thread at the very start of each frame when VSync is on with the Vulkan backend on desktop.
     /// Unity's Vulkan FIFO swapchain lets the game run until every swapchain image is queued, so each frame is
     /// rendered about three refresh intervals before it is shown; D3D11 limits that queue with a waitable swapchain.
-    /// Producing frames slightly slower than the display (see <see cref="VSyncFramePacer"/>) keeps the queue empty.
+    /// On Windows players whose driver supports VK_KHR_present_wait, each frame waits until the previous frame has
+    /// been shown (see <see cref="PresentWaitPacer"/>). Otherwise frames are produced slightly slower than the
+    /// display (see <see cref="VSyncFramePacer"/>), which also keeps the queue empty.
     /// </summary>
     internal static class LowLatencyVSync
     {
@@ -27,20 +29,50 @@ namespace MajdataPlay.Rendering
         {
         }
 
+        /// <summary>Names how frames are paced.</summary>
+        private enum PacingMode
+        {
+            /// <summary>Frames are not paced.</summary>
+            None,
+
+            /// <summary>Frames wait until the previous frame has been shown.</summary>
+            PresentWait,
+
+            /// <summary>Frames are produced slightly slower than the display refreshes.</summary>
+            Timer,
+        }
+
         /// <summary>The remaining wait below which the thread spins instead of sleeping, one millisecond.</summary>
         private static readonly long SpinThresholdTicks = Stopwatch.Frequency / 1000;
+
+        /// <summary>The pause below which the thread spins instead of sleeping, 0.2 milliseconds.</summary>
+        private static readonly long MinSleepTicks = Stopwatch.Frequency / 5000;
 
         /// <summary>The delegate inserted into the player loop.</summary>
         private static readonly PlayerLoopSystem.UpdateFunction FrameStartDelegate = OnFrameStart;
 
-        /// <summary>The pacing state.</summary>
+        /// <summary>The timer pacing state.</summary>
         private static readonly VSyncFramePacer Pacer = new(Stopwatch.Frequency);
 
         /// <summary>Whether the player loop system has been inserted.</summary>
         private static bool _installed;
 
-        /// <summary>Whether frames were paced during the previous frame.</summary>
-        private static bool _active;
+        /// <summary>How frames were paced during the previous frame.</summary>
+        private static PacingMode _mode;
+
+#if UNITY_STANDALONE_WIN && !UNITY_EDITOR
+        /// <summary>The number of consecutive present waits that failed or timed out before switching to timer pacing.</summary>
+        private const int PresentWaitFailureLimit = 30;
+
+        /// <summary>The present wait state, or null before it is created or after it was given up.</summary>
+        private static PresentWaitPacer? _presentWaitPacer;
+
+        /// <summary>Whether present waiting was found unavailable or given up for this session.</summary>
+        private static bool _presentWaitUnavailable;
+
+        /// <summary>The number of consecutive present waits that failed or timed out.</summary>
+        private static int _presentWaitFailures;
+#endif
 
 #if UNITY_EDITOR_WIN || UNITY_STANDALONE_WIN
         /// <summary>The high-resolution timer used for sleeping, or null when unavailable.</summary>
@@ -51,7 +83,7 @@ namespace MajdataPlay.Rendering
 #endif
 
         /// <summary>Gets whether frames are currently paced.</summary>
-        public static bool IsActive => _active;
+        public static bool IsActive => _mode != PacingMode.None;
 
         /// <summary>Gets the time the main thread waited at the start of the current frame, in milliseconds.</summary>
         public static double LastWaitMilliseconds { get; private set; }
@@ -80,23 +112,110 @@ namespace MajdataPlay.Rendering
         {
             if (!ShouldPace())
             {
-                if (_active)
+                if (_mode != PacingMode.None)
                 {
-                    _active = false;
+                    _mode = PacingMode.None;
                     LastWaitMilliseconds = 0;
                     MajDebug.LogInfo(nameof(LowLatencyVSync), "Frame pacing stopped");
                 }
                 return;
             }
 
-            if (Pacer.SetRefreshRate(Screen.currentResolution.refreshRateRatio.value) || !_active)
+            var refreshRate = Screen.currentResolution.refreshRateRatio.value;
+            if (TryWaitForPresentation(refreshRate))
+            {
+                return;
+            }
+            PaceWithTimer(refreshRate);
+        }
+
+        /// <summary>Waits until the previous frame has been shown when present waiting is available.</summary>
+        /// <param name="refreshRate">The display refresh rate in hertz.</param>
+        /// <returns>Whether present waiting paced this frame; false means the caller paces with the timer.</returns>
+        private static bool TryWaitForPresentation(double refreshRate)
+        {
+#if UNITY_STANDALONE_WIN && !UNITY_EDITOR
+            if (!MajEnv.Settings.Debug.LowLatencyVSyncPresentWait || !EnsurePresentWaitPacer())
+            {
+                return false;
+            }
+            if (_mode != PacingMode.PresentWait)
+            {
+                _mode = PacingMode.PresentWait;
+                MajDebug.LogInfo(nameof(LowLatencyVSync),
+                    "Frame pacing started: each frame waits until the previous frame is shown (VK_KHR_present_wait)");
+            }
+
+            var waitStart = Stopwatch.GetTimestamp();
+            var refreshPeriodTicks = refreshRate > 0 ? (long)(Stopwatch.Frequency / refreshRate) : Stopwatch.Frequency / 60;
+            var outcome = _presentWaitPacer!.WaitForPreviousFrame(refreshPeriodTicks);
+            LastWaitMilliseconds = TicksToMilliseconds(Stopwatch.GetTimestamp() - waitStart);
+            switch (outcome)
+            {
+                case PresentWaitOutcome.Presented:
+                    _presentWaitFailures = 0;
+                    break;
+                case PresentWaitOutcome.TimedOut:
+                case PresentWaitOutcome.Failed:
+                    if (++_presentWaitFailures >= PresentWaitFailureLimit)
+                    {
+                        MajDebug.LogWarning(nameof(LowLatencyVSync), ZString.Format(
+                            "Present waiting {0} {1} times in a row (last error {2}); switching to timer pacing",
+                            outcome == PresentWaitOutcome.TimedOut ? "timed out" : "failed", _presentWaitFailures,
+                            _presentWaitPacer.LastError));
+                        _presentWaitPacer = null;
+                        _presentWaitUnavailable = true;
+                        _mode = PacingMode.None;
+                    }
+                    break;
+            }
+            return true;
+#else
+            return false;
+#endif
+        }
+
+#if UNITY_STANDALONE_WIN && !UNITY_EDITOR
+        /// <summary>Creates the present wait state once the bridge reports that present waiting is enabled.</summary>
+        /// <returns>Whether present waiting is available.</returns>
+        private static bool EnsurePresentWaitPacer()
+        {
+            if (_presentWaitPacer is not null)
+            {
+                return true;
+            }
+            if (_presentWaitUnavailable)
+            {
+                return false;
+            }
+
+            var status = VulkanPresentWaitSource.GetStatus();
+            if (status != VulkanPresentWaitSource.StatusEnabled)
+            {
+                _presentWaitUnavailable = true;
+                MajDebug.LogInfo(nameof(LowLatencyVSync), ZString.Format(
+                    "Present waiting unavailable ({0}); using timer pacing", VulkanPresentWaitSource.DescribeStatus(status)));
+                return false;
+            }
+
+            _presentWaitPacer = new PresentWaitPacer(new VulkanPresentWaitSource(), Stopwatch.GetTimestamp, Pause,
+                Stopwatch.Frequency);
+            return true;
+        }
+#endif
+
+        /// <summary>Produces frames slightly slower than the display refreshes.</summary>
+        /// <param name="refreshRate">The display refresh rate in hertz.</param>
+        private static void PaceWithTimer(double refreshRate)
+        {
+            if (Pacer.SetRefreshRate(refreshRate) || _mode != PacingMode.Timer)
             {
                 Pacer.Restart();
                 MajDebug.LogInfo(nameof(LowLatencyVSync), ZString.Format(
                     "Frame pacing started: refresh {0:F3}Hz, frame interval {1:F3}ms",
-                    Screen.currentResolution.refreshRateRatio.value, TicksToMilliseconds(Pacer.IntervalTicks)));
+                    refreshRate, TicksToMilliseconds(Pacer.IntervalTicks)));
             }
-            _active = true;
+            _mode = PacingMode.Timer;
 
             var waitStart = Stopwatch.GetTimestamp();
             var waitTicks = Pacer.GetWaitTicks(waitStart);
@@ -143,6 +262,21 @@ namespace MajdataPlay.Rendering
                 {
                     Thread.SpinWait(64);
                 }
+            }
+        }
+
+        /// <summary>Pauses the main thread for about the given time, spinning for pauses too short to sleep.</summary>
+        /// <param name="ticks">The time to pause in timestamp ticks.</param>
+        private static void Pause(long ticks)
+        {
+            var deadline = Stopwatch.GetTimestamp() + ticks;
+            if (ticks >= MinSleepTicks && TrySleep(ticks))
+            {
+                return;
+            }
+            while (Stopwatch.GetTimestamp() < deadline)
+            {
+                Thread.SpinWait(32);
             }
         }
 
