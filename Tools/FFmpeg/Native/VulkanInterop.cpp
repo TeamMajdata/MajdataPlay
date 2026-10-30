@@ -29,10 +29,6 @@ PFN_vkGetInstanceProcAddr originalLoader = nullptr;
 std::atomic<PFN_vkGetDeviceProcAddr> unityDeviceLoader{nullptr};
 std::atomic<PFN_vkAcquireNextImageKHR> acquireNextImage{nullptr};
 std::atomic<PFN_vkAcquireNextImage2KHR> acquireNextImage2{nullptr};
-std::atomic<PFN_vkQueuePresentKHR> queuePresent{nullptr};
-std::atomic<PFN_vkCreateSwapchainKHR> createSwapchain{nullptr};
-std::atomic<PFN_vkDestroySwapchainKHR> destroySwapchain{nullptr};
-std::atomic<PFN_vkWaitForPresentKHR> unityWaitForPresent{nullptr};
 VkInstance loaderInstance = VK_NULL_HANDLE;
 PFN_vkEnumerateDeviceExtensionProperties enumerateExtensions = nullptr;
 IUnityGraphicsVulkanV2* unity = nullptr;
@@ -44,193 +40,6 @@ constexpr const char* required[] = {
     VK_KHR_WIN32_KEYED_MUTEX_EXTENSION_NAME
 };
 
-// Present pacing. With VK_KHR_present_id and VK_KHR_present_wait enabled on
-// Unity's device, every presentation of the tracked swapchain carries an
-// increasing id, so the managed frame pacer can wait at the start of a frame
-// until the previous frame is shown, like D3D11's waitable swapchain. Devices
-// without both features keep Unity's unmodified configuration.
-constexpr int PresentWaitEnabled = 0;
-constexpr int PresentWaitNoDevice = 1;
-constexpr int PresentWaitUnsupported = 2;
-constexpr int PresentWaitRejected = 3;
-constexpr int PresentWaitMissingFunction = 4;
-std::atomic<int> presentWaitStatus{PresentWaitNoDevice};
-// vkWaitForPresentKHR externally synchronizes the swapchain, as acquisition,
-// presentation and destruction do. Unity's own calls register themselves in
-// swapchainUsers under this lock but run unlocked, so a blocking acquisition
-// never holds it. The managed poll try-locks it and calls the zero-timeout
-// wait only while no Unity call is in progress.
-std::mutex presentMutex;
-int swapchainUsers = 0;
-PFN_vkWaitForPresentKHR waitForPresent = nullptr;
-VkDevice presentDevice = VK_NULL_HANDLE;
-VkSwapchainKHR presentSwapchain = VK_NULL_HANDLE;
-uint64_t nextPresentId = 0;
-// Readable without the lock; a stale pair is rejected by the generation check.
-std::atomic<uint64_t> presentGeneration{0};
-std::atomic<uint64_t> lastPresentId{0};
-// Registers one Unity swapchain call for its lifetime.
-struct SwapchainUse {
-    SwapchainUse() { std::lock_guard<std::mutex> lock(presentMutex); ++swapchainUsers; }
-    ~SwapchainUse() { std::lock_guard<std::mutex> lock(presentMutex); --swapchainUsers; }
-    SwapchainUse(const SwapchainUse&) = delete;
-    SwapchainUse& operator=(const SwapchainUse&) = delete;
-};
-
-const VkBaseInStructure* FindStructure(const void* chain, VkStructureType type) {
-    for (auto* node = static_cast<const VkBaseInStructure*>(chain); node; node = node->pNext)
-        if (node->sType == type) return node;
-    return nullptr;
-}
-bool HasExtension(const VkDeviceCreateInfo* info, const char* name) {
-    for (uint32_t i = 0; i < info->enabledExtensionCount; ++i)
-        if (!std::strcmp(info->ppEnabledExtensionNames[i], name)) return true;
-    return false;
-}
-bool SupportsPresentWait(VkPhysicalDevice physical) {
-    if (!enumerateExtensions || !originalLoader) return false;
-    uint32_t count = 0;
-    if (enumerateExtensions(physical, nullptr, &count, nullptr) != VK_SUCCESS) return false;
-    std::vector<VkExtensionProperties> available(count);
-    if (enumerateExtensions(physical, nullptr, &count, available.data()) != VK_SUCCESS) return false;
-    for (const char* name : {VK_KHR_PRESENT_ID_EXTENSION_NAME, VK_KHR_PRESENT_WAIT_EXTENSION_NAME}) {
-        if (std::none_of(available.begin(), available.end(), [name](const VkExtensionProperties& e) { return std::strcmp(e.extensionName, name) == 0; }))
-            return false;
-    }
-    auto features2 = reinterpret_cast<PFN_vkGetPhysicalDeviceFeatures2>(originalLoader(loaderInstance, "vkGetPhysicalDeviceFeatures2"));
-    if (!features2) features2 = reinterpret_cast<PFN_vkGetPhysicalDeviceFeatures2>(originalLoader(loaderInstance, "vkGetPhysicalDeviceFeatures2KHR"));
-    if (!features2) return false;
-    VkPhysicalDevicePresentIdFeaturesKHR id{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PRESENT_ID_FEATURES_KHR, nullptr, VK_FALSE};
-    VkPhysicalDevicePresentWaitFeaturesKHR wait{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PRESENT_WAIT_FEATURES_KHR, &id, VK_FALSE};
-    VkPhysicalDeviceFeatures2 features{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2, &wait, {}};
-    features2(physical, &features);
-    return id.presentId && wait.presentWait;
-}
-// Starts tracking a device created with both features and loads the unwrapped wait function.
-void EnablePresentWait(VkDevice device) {
-    const auto deviceLoader = reinterpret_cast<PFN_vkGetDeviceProcAddr>(originalLoader(loaderInstance, "vkGetDeviceProcAddr"));
-    const auto waitFunction = deviceLoader ? reinterpret_cast<PFN_vkWaitForPresentKHR>(deviceLoader(device, "vkWaitForPresentKHR")) : nullptr;
-    if (!waitFunction) { presentWaitStatus = PresentWaitMissingFunction; return; }
-    {
-        std::lock_guard<std::mutex> lock(presentMutex);
-        presentDevice = device; waitForPresent = waitFunction;
-    }
-    presentWaitStatus = PresentWaitEnabled;
-}
-// Innermost device creation step: Vulkan Video negotiation copies only the
-// feature structures it knows, so the present features join its final chain.
-VKAPI_ATTR VkResult VKAPI_CALL CreateDeviceWithPresentWait(VkPhysicalDevice physical, const VkDeviceCreateInfo* original,
-                                                           const VkAllocationCallbacks* allocator, VkDevice* device) {
-    {
-        std::lock_guard<std::mutex> lock(presentMutex);
-        presentDevice = VK_NULL_HANDLE; presentSwapchain = VK_NULL_HANDLE; waitForPresent = nullptr;
-        ++presentGeneration; lastPresentId = 0;
-    }
-    presentWaitStatus = PresentWaitUnsupported;
-    const auto* unityId = FindStructure(original->pNext, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PRESENT_ID_FEATURES_KHR);
-    const auto* unityWait = FindStructure(original->pNext, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PRESENT_WAIT_FEATURES_KHR);
-    if (unityId || unityWait) {
-        // Unity 6 enables both itself when the driver supports them; reuse its configuration unchanged.
-        const VkResult result = realCreateDevice(physical, original, allocator, device);
-        const bool enabled = unityId && unityWait &&
-            reinterpret_cast<const VkPhysicalDevicePresentIdFeaturesKHR*>(unityId)->presentId &&
-            reinterpret_cast<const VkPhysicalDevicePresentWaitFeaturesKHR*>(unityWait)->presentWait &&
-            HasExtension(original, VK_KHR_PRESENT_ID_EXTENSION_NAME) && HasExtension(original, VK_KHR_PRESENT_WAIT_EXTENSION_NAME);
-        if (result == VK_SUCCESS && enabled) EnablePresentWait(*device);
-        return result;
-    }
-    if (!SupportsPresentWait(physical)) return realCreateDevice(physical, original, allocator, device);
-    std::vector<const char*> names;
-    if (original->enabledExtensionCount)
-        names.assign(original->ppEnabledExtensionNames, original->ppEnabledExtensionNames + original->enabledExtensionCount);
-    for (const char* name : {VK_KHR_PRESENT_ID_EXTENSION_NAME, VK_KHR_PRESENT_WAIT_EXTENSION_NAME})
-        if (std::none_of(names.begin(), names.end(), [name](const char* e) { return std::strcmp(e, name) == 0; })) names.push_back(name);
-    VkPhysicalDevicePresentIdFeaturesKHR id{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PRESENT_ID_FEATURES_KHR, const_cast<void*>(original->pNext), VK_TRUE};
-    VkPhysicalDevicePresentWaitFeaturesKHR wait{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PRESENT_WAIT_FEATURES_KHR, &id, VK_TRUE};
-    VkDeviceCreateInfo info = *original;
-    info.pNext = &wait;
-    info.enabledExtensionCount = static_cast<uint32_t>(names.size());
-    info.ppEnabledExtensionNames = names.data();
-    const VkResult result = realCreateDevice(physical, &info, allocator, device);
-    if (result != VK_SUCCESS) {
-        // Keep Unity's own configuration working when a driver rejects the pair.
-        presentWaitStatus = PresentWaitRejected;
-        return realCreateDevice(physical, original, allocator, device);
-    }
-    EnablePresentWait(*device);
-    return result;
-}
-VKAPI_ATTR VkResult VKAPI_CALL CreateSwapchain(VkDevice device, const VkSwapchainCreateInfoKHR* info,
-                                              const VkAllocationCallbacks* allocator, VkSwapchainKHR* swapchain) {
-    const auto create = createSwapchain.load(std::memory_order_relaxed);
-    SwapchainUse use;
-    const VkResult result = create(device, info, allocator, swapchain);
-    if (result == VK_SUCCESS) {
-        std::lock_guard<std::mutex> lock(presentMutex);
-        if (device == presentDevice) {
-            // The newest swapchain is the one Unity presents to; ids restart with it.
-            presentSwapchain = *swapchain; nextPresentId = 0;
-            ++presentGeneration; lastPresentId = 0;
-        }
-    }
-    return result;
-}
-VKAPI_ATTR void VKAPI_CALL DestroySwapchain(VkDevice device, VkSwapchainKHR swapchain, const VkAllocationCallbacks* allocator) {
-    const auto destroy = destroySwapchain.load(std::memory_order_relaxed);
-    SwapchainUse use;
-    {
-        std::lock_guard<std::mutex> lock(presentMutex);
-        if (swapchain != VK_NULL_HANDLE && swapchain == presentSwapchain) {
-            presentSwapchain = VK_NULL_HANDLE;
-            ++presentGeneration; lastPresentId = 0;
-        }
-    }
-    destroy(device, swapchain, allocator);
-}
-VKAPI_ATTR VkResult VKAPI_CALL QueuePresent(VkQueue queue, const VkPresentInfoKHR* info) {
-    const auto present = queuePresent.load(std::memory_order_relaxed);
-    SwapchainUse use;
-    uint32_t tracked = info->swapchainCount;
-    // Zero leaves the other swapchains of a multi-swapchain present without an id.
-    std::vector<uint64_t> ids;
-    uint64_t trackedId = 0;
-    {
-        std::lock_guard<std::mutex> lock(presentMutex);
-        if (presentSwapchain != VK_NULL_HANDLE) {
-            for (uint32_t i = 0; i < info->swapchainCount; ++i)
-                if (info->pSwapchains[i] == presentSwapchain) { tracked = i; break; }
-        }
-        if (tracked != info->swapchainCount) {
-            const auto* existing = reinterpret_cast<const VkPresentIdKHR*>(FindStructure(info->pNext, VK_STRUCTURE_TYPE_PRESENT_ID_KHR));
-            if (existing) {
-                // Unity attaches its own ids when it uses present waiting itself; follow them.
-                trackedId = existing->pPresentIds && tracked < existing->swapchainCount ? existing->pPresentIds[tracked] : 0;
-                if (trackedId > nextPresentId) nextPresentId = trackedId;
-            } else {
-                ids.assign(info->swapchainCount, 0);
-                trackedId = ids[tracked] = ++nextPresentId;
-            }
-        }
-    }
-    if (tracked == info->swapchainCount) return present(queue, info);
-    VkPresentIdKHR presentId{VK_STRUCTURE_TYPE_PRESENT_ID_KHR, info->pNext, info->swapchainCount, ids.data()};
-    VkPresentInfoKHR copy = *info;
-    copy.pNext = &presentId;
-    const VkResult result = present(queue, ids.empty() ? info : &copy);
-    const VkResult trackedResult = info->pResults ? info->pResults[tracked] : result;
-    if (trackedId != 0 && (trackedResult == VK_SUCCESS || trackedResult == VK_SUBOPTIMAL_KHR)) {
-        std::lock_guard<std::mutex> lock(presentMutex);
-        if (info->pSwapchains[tracked] == presentSwapchain && trackedId > lastPresentId) lastPresentId = trackedId;
-    }
-    return result;
-}
-// Unity's own present waits share the swapchain with the managed poll.
-VKAPI_ATTR VkResult VKAPI_CALL WaitForPresent(VkDevice device, VkSwapchainKHR swapchain, uint64_t presentId, uint64_t timeout) {
-    const auto wait = unityWaitForPresent.load(std::memory_order_relaxed);
-    SwapchainUse use;
-    return wait(device, swapchain, presentId, timeout);
-}
-
 // Unity 6000.3.17f1 can recreate its Windows swapchain while handling a
 // SUBOPTIMAL acquisition, then use the acquired index against the new images.
 // Both SUCCESS and SUBOPTIMAL mean an image was acquired successfully. Keep
@@ -239,17 +48,15 @@ VKAPI_ATTR VkResult VKAPI_CALL WaitForPresent(VkDevice device, VkSwapchainKHR sw
 VKAPI_ATTR VkResult VKAPI_CALL AcquireNextImage(VkDevice device, VkSwapchainKHR swapchain, uint64_t timeout,
     VkSemaphore semaphore, VkFence fence, uint32_t* index) {
     const auto acquire = acquireNextImage.load(std::memory_order_relaxed);
-    SwapchainUse use;
     const VkResult result = acquire(device, swapchain, timeout, semaphore, fence, index);
     return result == VK_SUBOPTIMAL_KHR ? VK_SUCCESS : result;
 }
 VKAPI_ATTR VkResult VKAPI_CALL AcquireNextImage2(VkDevice device, const VkAcquireNextImageInfoKHR* info, uint32_t* index) {
     const auto acquire = acquireNextImage2.load(std::memory_order_relaxed);
-    SwapchainUse use;
     const VkResult result = acquire(device, info, index);
     return result == VK_SUBOPTIMAL_KHR ? VK_SUCCESS : result;
 }
-PFN_vkVoidFunction WrapSwapchainFunction(PFN_vkVoidFunction function, const char* name) {
+PFN_vkVoidFunction WrapAcquisition(PFN_vkVoidFunction function, const char* name) {
     if (!function) return nullptr;
     if (!std::strcmp(name, "vkAcquireNextImageKHR")) {
         acquireNextImage = reinterpret_cast<PFN_vkAcquireNextImageKHR>(function);
@@ -259,41 +66,25 @@ PFN_vkVoidFunction WrapSwapchainFunction(PFN_vkVoidFunction function, const char
         acquireNextImage2 = reinterpret_cast<PFN_vkAcquireNextImage2KHR>(function);
         return reinterpret_cast<PFN_vkVoidFunction>(AcquireNextImage2);
     }
-    if (!std::strcmp(name, "vkQueuePresentKHR")) {
-        queuePresent = reinterpret_cast<PFN_vkQueuePresentKHR>(function);
-        return reinterpret_cast<PFN_vkVoidFunction>(QueuePresent);
-    }
-    if (!std::strcmp(name, "vkCreateSwapchainKHR")) {
-        createSwapchain = reinterpret_cast<PFN_vkCreateSwapchainKHR>(function);
-        return reinterpret_cast<PFN_vkVoidFunction>(CreateSwapchain);
-    }
-    if (!std::strcmp(name, "vkWaitForPresentKHR")) {
-        unityWaitForPresent = reinterpret_cast<PFN_vkWaitForPresentKHR>(function);
-        return reinterpret_cast<PFN_vkVoidFunction>(WaitForPresent);
-    }
-    if (!std::strcmp(name, "vkDestroySwapchainKHR")) {
-        destroySwapchain = reinterpret_cast<PFN_vkDestroySwapchainKHR>(function);
-        return reinterpret_cast<PFN_vkVoidFunction>(DestroySwapchain);
-    }
     return function;
 }
 VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL GetDeviceProc(VkDevice device, const char* name) {
     const auto loader = unityDeviceLoader.load();
-    return loader ? WrapSwapchainFunction(loader(device, name), name) : nullptr;
+    return loader ? WrapAcquisition(loader(device, name), name) : nullptr;
 }
 
 VKAPI_ATTR VkResult VKAPI_CALL CreateDevice(VkPhysicalDevice physical, const VkDeviceCreateInfo* original,
                                            const VkAllocationCallbacks* allocator, VkDevice* device) {
     auto enumerate = enumerateExtensions;
     extensionsEnabled = false;
-    if (!enumerate) return FfuVulkanVideoCreateDevice(CreateDeviceWithPresentWait, originalLoader, loaderInstance, physical, original, allocator, device);
+    if (!enumerate) return FfuVulkanVideoCreateDevice(realCreateDevice, originalLoader, loaderInstance, physical, original, allocator, device);
     uint32_t count = 0;
-    if (enumerate(physical, nullptr, &count, nullptr) != VK_SUCCESS) return FfuVulkanVideoCreateDevice(CreateDeviceWithPresentWait, originalLoader, loaderInstance, physical, original, allocator, device);
+    if (enumerate(physical, nullptr, &count, nullptr) != VK_SUCCESS) return FfuVulkanVideoCreateDevice(realCreateDevice, originalLoader, loaderInstance, physical, original, allocator, device);
     std::vector<VkExtensionProperties> available(count);
-    if (enumerate(physical, nullptr, &count, available.data()) != VK_SUCCESS) return FfuVulkanVideoCreateDevice(CreateDeviceWithPresentWait, originalLoader, loaderInstance, physical, original, allocator, device);
+    if (enumerate(physical, nullptr, &count, available.data()) != VK_SUCCESS) return FfuVulkanVideoCreateDevice(realCreateDevice, originalLoader, loaderInstance, physical, original, allocator, device);
     for (const char* name : required) {
         if (std::none_of(available.begin(), available.end(), [name](const VkExtensionProperties& e) { return std::strcmp(e.extensionName, name) == 0; }))
-            return FfuVulkanVideoCreateDevice(CreateDeviceWithPresentWait, originalLoader, loaderInstance, physical, original, allocator, device);
+            return FfuVulkanVideoCreateDevice(realCreateDevice, originalLoader, loaderInstance, physical, original, allocator, device);
     }
     std::vector<const char*> names;
     if (original->enabledExtensionCount)
@@ -303,11 +94,11 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDevice(VkPhysicalDevice physical, const VkD
     VkDeviceCreateInfo info = *original;
     info.enabledExtensionCount = static_cast<uint32_t>(names.size());
     info.ppEnabledExtensionNames = names.data();
-    const VkResult result = FfuVulkanVideoCreateDevice(CreateDeviceWithPresentWait, originalLoader, loaderInstance, physical, &info, allocator, device);
+    const VkResult result = FfuVulkanVideoCreateDevice(realCreateDevice, originalLoader, loaderInstance, physical, &info, allocator, device);
     extensionsEnabled = result == VK_SUCCESS;
     // Device creation must remain functional when a driver rejects a supported
     // extension combination. The player will use its software fallback.
-    if (result != VK_SUCCESS) return FfuVulkanVideoCreateDevice(CreateDeviceWithPresentWait, originalLoader, loaderInstance, physical, original, allocator, device);
+    if (result != VK_SUCCESS) return FfuVulkanVideoCreateDevice(realCreateDevice, originalLoader, loaderInstance, physical, original, allocator, device);
     return result;
 }
 VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL GetProc(VkInstance instance, const char* name) {
@@ -322,7 +113,7 @@ VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL GetProc(VkInstance instance, const char
         enumerateExtensions = reinterpret_cast<PFN_vkEnumerateDeviceExtensionProperties>(originalLoader(instance, "vkEnumerateDeviceExtensionProperties"));
         return reinterpret_cast<PFN_vkVoidFunction>(CreateDevice);
     }
-    return WrapSwapchainFunction(function, name);
+    return WrapAcquisition(function, name);
 }
 PFN_vkGetInstanceProcAddr UNITY_INTERFACE_API InitializeLoader(PFN_vkGetInstanceProcAddr value, void*) {
     originalLoader = value;
@@ -665,32 +456,4 @@ void FfuVulkanShutdown() {
         current->active = false;
     }
     current.reset();
-}
-
-// Present pacing exports for the managed frame pacer. Status: 0 enabled,
-// 1 no Vulkan device yet, 2 unsupported, 3 rejected by the driver, 4 missing
-// vkWaitForPresentKHR. These are additive to ABI 4.
-FFU_EXPORT int FFU_CALL ffu_present_wait_status() { return presentWaitStatus.load(); }
-// Reads the tracked swapchain generation and its latest presented id. Returns 1,
-// -2 when present waiting is not enabled, or -3 for null arguments.
-FFU_EXPORT int FFU_CALL ffu_present_wait_query(uint64_t* generation, uint64_t* presentId) {
-    if (!generation || !presentId) return -3;
-    if (presentWaitStatus.load() != PresentWaitEnabled) return -2;
-    *generation = presentGeneration.load();
-    *presentId = lastPresentId.load();
-    return 1;
-}
-// Polls without blocking. Returns 1 once the id is shown, 0 while pending or
-// while a Unity swapchain call is in progress, -1 when the swapchain changed,
-// -2 when present waiting is not enabled, or a negative VkResult error.
-FFU_EXPORT int FFU_CALL ffu_present_wait_poll(uint64_t generation, uint64_t presentId) {
-    if (presentWaitStatus.load() != PresentWaitEnabled) return -2;
-    std::unique_lock<std::mutex> lock(presentMutex, std::try_to_lock);
-    if (!lock.owns_lock() || swapchainUsers) return 0;
-    if (presentSwapchain == VK_NULL_HANDLE || generation != presentGeneration.load()) return -1;
-    if (presentId == 0 || presentId > lastPresentId.load()) return 0;
-    const VkResult result = waitForPresent(presentDevice, presentSwapchain, presentId, 0);
-    if (result == VK_SUCCESS || result == VK_SUBOPTIMAL_KHR) return 1;
-    if (result == VK_TIMEOUT) return 0;
-    return static_cast<int>(result);
 }

@@ -1,0 +1,10 @@
+LIBRARY MajdataPlayVulkanPacing
+EXPORTS
+    UnityPluginLoad=UnityPluginLoad@4
+    "_UnityPluginLoad@4"=UnityPluginLoad@4
+    UnityPluginUnload=UnityPluginUnload@0
+    "_UnityPluginUnload@0"=UnityPluginUnload@0
+    majvk_abi_version
+    majvk_present_wait_status
+    majvk_present_wait_query
+    majvk_present_wait_poll

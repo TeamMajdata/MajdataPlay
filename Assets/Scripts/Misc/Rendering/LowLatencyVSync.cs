@@ -176,7 +176,7 @@ namespace MajdataPlay.Rendering
         }
 
 #if UNITY_STANDALONE_WIN && !UNITY_EDITOR
-        /// <summary>Creates the present wait state once the bridge reports that present waiting is enabled.</summary>
+        /// <summary>Creates the present wait state once the native pacing layer reports that present waiting is enabled.</summary>
         /// <returns>Whether present waiting is available.</returns>
         private static bool EnsurePresentWaitPacer()
         {

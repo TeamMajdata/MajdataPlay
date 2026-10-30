@@ -107,6 +107,8 @@ out.log
 # .NET build output of the Tools/CSharp tools is always local.
 /Tools/CSharp/**/bin/
 /Tools/CSharp/**/obj/
+# CMake build trees of the Vulkan pacing layer are always local.
+/Tools/Native/VulkanPacing/.build/
 !/Tools/Tests/Modules/AndroidJavaGeneratorValidation/AndroidJavaGeneratorValidation.csproj
 /Assets/Plugins/MajdataPlay/Platform/Android/MajdataPlay.SourceGenerators.AndroidJava.dll.meta
 

@@ -1,0 +1,24 @@
+{
+    "target":  "win-arm64",
+    "abi":  1,
+    "builtUtc":  "2026-10-30T04:03:29.0958004Z",
+    "compiler":  "clang version 23.1.2 (https://github.com/llvm/llvm-project.git 85ac560262434c9ccfc0c183ec22d4138ed647fb)",
+    "cmake":  "cmake version 3.22.1-g37088a8-dirty",
+    "vulkanHeaderVersion":  275,
+    "files":  [
+                  {
+                      "file":  "MajdataPlayVulkanPacing.dll",
+                      "sha256":  "50c6362dbcd7f087dae7249ea48b81eaa3735f850ba640fd15e6a2fd8dede624",
+                      "bytes":  592896
+                  }
+              ],
+    "sourceSha256Lf":  {
+                           "CMakeLists.txt":  "dde57a339da0e21315c3aa1c2bdc2725c4b7a5ecfa8e6d0e23c4837568994dc7",
+                           "src/ExportsWin32MinGW.def":  "bbd0f986e3d6ec9503cd82826d0536fd696a4cf40f7229cbfaf2b389c01e27f5",
+                           "src/VulkanPacing.cpp":  "646ddce39f1047245c0fe902ef981d689132c0194846e068f2354e6e95ac5283",
+                           "src/VulkanPacing.h":  "806b7bff758fb4fe4ca5e4fb35b1d191ed2d0ee368396761c575115086eac9fa",
+                           "Unity/IUnityGraphics.h":  "524ca42ff0274feec5aea17a5275b774ffc1a031bdc9378f3e3eb2be787a7fa6",
+                           "Unity/IUnityGraphicsVulkan.h":  "de4c4c2a712ad996371ca9bbf513eff1ae31e68b5bc9548c7af68798a1ff72ea",
+                           "Unity/IUnityInterface.h":  "e23e267b57c049b438307542d62c30fbcd3fa77b6dac3b08842eae0df10b8239"
+                       }
+}

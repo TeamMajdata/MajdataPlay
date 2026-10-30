@@ -60,8 +60,9 @@ To verify it, run Vulkan with VSync on twice, with `Debug.LowLatencyVSync` set t
 
 ### Present waiting (Windows players)
 
-On Windows players whose GPU driver supports `VK_KHR_present_id` and `VK_KHR_present_wait`, the FFmpeg graphics
-bridge tags every presentation with an id and `LowLatencyVSync` instead waits at the start of each frame until the
+On Windows players whose GPU driver supports `VK_KHR_present_id` and `VK_KHR_present_wait` (Unity 6 then enables
+both on its device), the standalone `MajdataPlayVulkanPacing` layer ([Tools/Native/VulkanPacing](../../Native/VulkanPacing/README.md))
+tags every presentation with an id and `LowLatencyVSync` instead waits at the start of each frame until the
 previous frame has been shown, like D3D11's waitable swapchain. The latency is then constant and there is no
 periodic repeated frame. The log shows which mode is active:
 
