@@ -111,17 +111,8 @@ namespace MajdataPlay
 
         /// <summary>Records whether favorites storage and save handling have been initialized.</summary>
         private static bool s_isInitialized = false;
-        /// <summary>Stores the shared connection to the runtime database, which holds the favorites table.</summary>
-        private static SQLiteAsyncConnection? s_favoritesDatabase;
-        /// <summary>Guards <see cref="s_favoritesDatabase"/> and <see cref="s_pendingFavoriteWrites"/> between writers and shutdown.</summary>
-        private static readonly object s_favoritesWriteLock = new();
-        /// <summary>
-        /// Stores the last queued favorites write. Writes run one after another in call order, and shutdown waits for this
-        /// task before closing the connection, because closing it while a transaction commits crashes SQLite natively.
-        /// </summary>
-        private static Task s_pendingFavoriteWrites = Task.CompletedTask;
-        /// <summary>The longest time, in milliseconds, application shutdown waits for queued favorites writes.</summary>
-        private const int FavoritesShutdownTimeoutMs = 5000;
+        /// <summary>Stores the runtime database once its favorites table is ready, or null before; favorites writes are ignored until then.</summary>
+        private static volatile MajDatabaseHandle? s_favoritesDatabase;
 
         /// <summary>Supplies a harmless selection when the library contains no collections.</summary>
         private static readonly SongCollection s_emptyCollection = SongCollection.Empty("default");
@@ -1460,32 +1451,33 @@ namespace MajdataPlay
                 QueueFavoriteWrite(conn => conn.Delete<FavoriteHashDB>(hashBase64Str));
             }
         }
-        /// <summary>Queues a favorites database write after every write queued before it.</summary>
-        /// <param name="write">The write, run inside a transaction on the database's worker thread.</param>
-        /// <remarks>Does nothing when the database is not open, matching the previous behaviour before initialization.</remarks>
+        /// <summary>Queues a favorites database write after every write queued before it and logs its failure.</summary>
+        /// <param name="write">The write, run inside a transaction on the thread pool.</param>
+        /// <remarks>
+        /// Does nothing before the favorites table is ready or after the runtime database has been closed for shutdown,
+        /// because the in-memory favorites view stays authoritative for the rest of the session.
+        /// </remarks>
         private static void QueueFavoriteWrite(Action<SQLiteConnection> write)
         {
-            lock (s_favoritesWriteLock)
+            var database = s_favoritesDatabase;
+            if (database is null || database.IsClosed)
             {
-                var database = s_favoritesDatabase;
-                if (database is null)
-                {
-                    return;
-                }
-                s_pendingFavoriteWrites = RunFavoriteWriteAsync(s_pendingFavoriteWrites, database, write);
+                return;
             }
+            ObserveFavoriteWriteAsync(database.WriteAsync(write)).Forget();
         }
-        /// <summary>Runs one favorites write after the previous one and logs its failure instead of leaving it unobserved.</summary>
-        /// <param name="previous">The previously queued write, which never faults.</param>
-        /// <param name="database">The connection the write was queued for.</param>
-        /// <param name="write">The write to run inside a transaction.</param>
+        /// <summary>Logs the failure of a queued favorites write instead of leaving it unobserved.</summary>
+        /// <param name="write">The queued write.</param>
         /// <returns>A task that completes, without faulting, when the write has finished or failed.</returns>
-        private static async Task RunFavoriteWriteAsync(Task previous, SQLiteAsyncConnection database, Action<SQLiteConnection> write)
+        private static async UniTask ObserveFavoriteWriteAsync(Task write)
         {
-            await previous.ConfigureAwait(false);
             try
             {
-                await database.RunInTransactionAsync(write).ConfigureAwait(false);
+                await write.ConfigureAwait(false);
+            }
+            catch (ObjectDisposedException)
+            {
+                // The database closed for shutdown between the check and the queueing; the write is dropped like any later one.
             }
             catch (Exception e)
             {
@@ -1493,34 +1485,10 @@ namespace MajdataPlay
             }
         }
         /// <summary>Gets a task that completes when every favorites write queued so far has finished.</summary>
-        /// <returns>The task of the last queued write; it never faults.</returns>
+        /// <returns>The completion of the last queued write, or a completed task before the favorites table is ready; it never faults.</returns>
         internal static Task WaitForFavoriteWritesAsync()
         {
-            lock (s_favoritesWriteLock)
-            {
-                return s_pendingFavoriteWrites;
-            }
-        }
-        /// <summary>Detaches the favorites connection, waits for its queued writes and then closes it.</summary>
-        /// <returns>A task that completes when the connection is closed, or immediately when none is open.</returns>
-        /// <exception cref="SQLiteException">Closing the connection failed.</exception>
-        private static async Task CloseFavoritesDatabaseAsync()
-        {
-            SQLiteAsyncConnection? database;
-            Task pending;
-            lock (s_favoritesWriteLock)
-            {
-                // Detached first, so no write can be queued for a connection that is about to close.
-                database = s_favoritesDatabase;
-                s_favoritesDatabase = null;
-                pending = s_pendingFavoriteWrites;
-            }
-            if (database is null)
-            {
-                return;
-            }
-            await pending.ConfigureAwait(false);
-            await database.CloseAsync().ConfigureAwait(false);
+            return s_favoritesDatabase?.WaitForWritesAsync() ?? Task.CompletedTask;
         }
         /// <summary>Loads favorite hashes from the database and the optional portable JSON export.</summary>
         /// <returns>The loaded favorite hashes without changing the committed favorites view.</returns>
@@ -1528,43 +1496,29 @@ namespace MajdataPlay
         /// <exception cref="SQLiteException">The favorite database could not be opened or queried.</exception>
         private static async Task<HashSet<string>> LoadFavoriteHashesAsync()
         {
-            // Init SQLite DB (once)
-            if (s_favoritesDatabase is null)
+            // Prepare the favorites table (once)
+            var database = s_favoritesDatabase;
+            if (database is null)
             {
+                database = MajDatabase.Runtime;
                 var runtimeDirectory = MajEnv.RuntimeDirectory;
-                // SQLite needs a resolvable location, so the file is created through the directory before the connection opens it.
-                var databaseFile = runtimeDirectory.FindFile(MajEnv.RuntimeDatabaseFileName)
-                    ?? runtimeDirectory.CreateFile(MajEnv.RuntimeDatabaseFileName, "application/vnd.sqlite3");
-                var database = new SQLiteAsyncConnection(databaseFile.Location, SQLiteOpenFlags.ReadWrite | SQLiteOpenFlags.Create | SQLiteOpenFlags.FullMutex);
-                try
+                // The runtime database is shared with the runtime configuration, so only the favorites table tells whether favorites were stored before.
+                var hasFavoriteTable = database.Read(HasFavoriteTable);
+                database.Write(static connection => connection.CreateTable<FavoriteHashDB>());
+                if (!hasFavoriteTable)
                 {
-                    // The runtime database is shared with the runtime configuration, so only the favorites table tells whether favorites were stored before.
-                    var hasFavoriteTable = await HasFavoriteTableAsync(database).ConfigureAwait(false);
-                    await database.CreateTableAsync<FavoriteHashDB>().ConfigureAwait(false);
-                    if (!hasFavoriteTable)
+                    var legacyFile = runtimeDirectory.FindFile(MyFavoriteFileName);
+                    if (legacyFile is not null)
                     {
-                        var legacyFile = runtimeDirectory.FindFile(MyFavoriteFileName);
-                        if (legacyFile is not null)
-                        {
-                            await MigrateFavFromJsonAsync(database, runtimeDirectory, legacyFile).ConfigureAwait(false);
-                        }
-                    }
-                    var legacyDatabaseFile = runtimeDirectory.FindFile(LegacyFavoriteDatabaseFileName);
-                    if (legacyDatabaseFile is not null)
-                    {
-                        await MergeLegacyFavoriteDatabaseAsync(database, runtimeDirectory, legacyDatabaseFile).ConfigureAwait(false);
+                        await MigrateFavFromJsonAsync(database, runtimeDirectory, legacyFile).ConfigureAwait(false);
                     }
                 }
-                catch
+                var legacyDatabaseFile = runtimeDirectory.FindFile(LegacyFavoriteDatabaseFileName);
+                if (legacyDatabaseFile is not null)
                 {
-                    await database.CloseAsync().ConfigureAwait(false);
-                    throw;
+                    await MergeLegacyFavoriteDatabaseAsync(database, runtimeDirectory, legacyDatabaseFile).ConfigureAwait(false);
                 }
-                lock (s_favoritesWriteLock)
-                {
-                    s_favoritesDatabase = database;
-                }
-                GameManager.OnAppQuit += OnAppQuit;
+                s_favoritesDatabase = database;
             }
 
             // Load export JSON (user-facing, stays as JSON for portability).
@@ -1591,7 +1545,7 @@ namespace MajdataPlay
 
             // Load from SQLite
             var favoriteHashes = new HashSet<string>();
-            var rows = await s_favoritesDatabase.Table<FavoriteHashDB>().ToListAsync();
+            var rows = await database.ReadAsync(static connection => connection.Table<FavoriteHashDB>().ToList());
             foreach (var row in rows)
             {
                 if (!string.IsNullOrEmpty(row.Hash))
@@ -1606,11 +1560,11 @@ namespace MajdataPlay
             return favoriteHashes;
         }
         /// <summary>Imports the legacy JSON favorites cache into SQLite and retains a backup.</summary>
-        /// <param name="database">The successfully initialized connection which is not yet globally published.</param>
+        /// <param name="database">The runtime database whose favorites table is ready but not yet published.</param>
         /// <param name="storageDirectory">The original backend directory containing the legacy cache and backup.</param>
         /// <param name="storageFile">The existing legacy favorites file to import.</param>
         /// <returns>A task which completes after migration or logging a recoverable migration failure.</returns>
-        private static async Task MigrateFavFromJsonAsync(SQLiteAsyncConnection database, StorageDirectory storageDirectory, StorageFile storageFile)
+        private static async Task MigrateFavFromJsonAsync(MajDatabaseHandle database, StorageDirectory storageDirectory, StorageFile storageFile)
         {
             try
             {
@@ -1618,7 +1572,7 @@ namespace MajdataPlay
                 var (result, storageFav, exception) = await Serializer.Json.TryDeserializeAsync<HashSet<string>>(storageStream);
                 if (result && storageFav is not null)
                 {
-                    await database.RunInTransactionAsync(conn =>
+                    await database.WriteAsync(conn =>
                     {
                         foreach (var hash in storageFav)
                         {
@@ -1647,43 +1601,39 @@ namespace MajdataPlay
             }
         }
         /// <summary>Checks whether a database already contains the favorites table.</summary>
-        /// <param name="database">The open database connection to query.</param>
+        /// <param name="connection">The open database connection to query.</param>
         /// <returns>True when the favorites table exists; otherwise false.</returns>
         /// <exception cref="SQLiteException">The schema could not be queried.</exception>
-        private static async Task<bool> HasFavoriteTableAsync(SQLiteAsyncConnection database)
+        private static bool HasFavoriteTable(SQLiteConnection connection)
         {
-            var tableCount = await database.ExecuteScalarAsync<int>(
-                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'FavoriteHashes'").ConfigureAwait(false);
+            var tableCount = connection.ExecuteScalar<int>(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'FavoriteHashes'");
             return tableCount > 0;
         }
         /// <summary>Merges the favorites of the legacy favorites database into the runtime database and retains a backup.</summary>
-        /// <param name="database">The successfully initialized runtime database connection which is not yet globally published.</param>
+        /// <param name="database">The runtime database whose favorites table is ready but not yet published.</param>
         /// <param name="storageDirectory">The runtime directory containing the legacy database and its backup.</param>
         /// <param name="storageFile">The existing legacy favorites database to merge.</param>
         /// <returns>A task which completes after merging or logging a recoverable merge failure.</returns>
         /// <remarks>
         /// Favorites already in the runtime database are kept, so a merge interrupted before the backup is taken can be
-        /// repeated by the next startup without duplicates.
+        /// repeated by the next startup without duplicates. The legacy file is read through a short-lived read-only
+        /// connection, because it is not one of the databases <see cref="MajDatabase"/> keeps open.
         /// </remarks>
-        private static async Task MergeLegacyFavoriteDatabaseAsync(SQLiteAsyncConnection database, StorageDirectory storageDirectory, StorageFile storageFile)
+        private static async Task MergeLegacyFavoriteDatabaseAsync(MajDatabaseHandle database, StorageDirectory storageDirectory, StorageFile storageFile)
         {
             try
             {
-                var legacyDatabase = new SQLiteAsyncConnection(storageFile.Location, SQLiteOpenFlags.ReadOnly | SQLiteOpenFlags.FullMutex);
                 List<FavoriteHashDB> rows;
-                try
+                using (var legacyDatabase = new SQLiteConnection(storageFile.Location, SQLiteOpenFlags.ReadOnly | SQLiteOpenFlags.FullMutex))
                 {
                     // An empty legacy file was created but never received the table.
-                    rows = await HasFavoriteTableAsync(legacyDatabase).ConfigureAwait(false)
-                        ? await legacyDatabase.Table<FavoriteHashDB>().ToListAsync().ConfigureAwait(false)
+                    rows = HasFavoriteTable(legacyDatabase)
+                        ? legacyDatabase.Table<FavoriteHashDB>().ToList()
                         : new List<FavoriteHashDB>();
                 }
-                finally
-                {
-                    await legacyDatabase.CloseAsync().ConfigureAwait(false);
-                }
 
-                await database.RunInTransactionAsync(conn =>
+                await database.WriteAsync(conn =>
                 {
                     foreach (var row in rows)
                     {
@@ -1702,32 +1652,6 @@ namespace MajdataPlay
             catch (Exception e)
             {
                 MajDebug.LogError(nameof(SongStorage), $"Failed to merge the legacy favorites database: {e.Message}");
-            }
-        }
-
-        /// <summary>
-        /// Unsubscribes the shutdown handler, waits for queued favorites writes and closes the shared favorites connection.
-        /// </summary>
-        /// <param name="sender">The source of the shutdown event.</param>
-        /// <param name="args">The shutdown event arguments.</param>
-        /// <remarks>
-        /// When the writes do not finish within <see cref="FavoritesShutdownTimeoutMs"/>, the connection is left to the process
-        /// exit instead of being closed under a running transaction.
-        /// </remarks>
-        private static void OnAppQuit(object? sender, EventArgs? args)
-        {
-            GameManager.OnAppQuit -= OnAppQuit;
-            try
-            {
-                // Every continuation uses ConfigureAwait(false), so blocking the main thread here cannot deadlock.
-                if (!CloseFavoritesDatabaseAsync().Wait(FavoritesShutdownTimeoutMs))
-                {
-                    MajDebug.LogWarning(nameof(SongStorage), "Favorites writes did not finish before shutdown; the database was left open.");
-                }
-            }
-            catch (AggregateException e)
-            {
-                MajDebug.LogException(nameof(SongStorage), e.GetBaseException());
             }
         }
 

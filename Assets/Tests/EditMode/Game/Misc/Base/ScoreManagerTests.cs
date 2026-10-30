@@ -1,7 +1,6 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
-using System.Reflection;
 using Cysharp.Threading.Tasks;
 using MajdataPlay.Collections;
 using MajdataPlay.IO.Storage;
@@ -10,7 +9,6 @@ using MajdataPlay.Scenes.Game.Notes;
 using MajdataPlay.Tests;
 using MajdataPlay.Tests.Game.Misc.Support;
 using NUnit.Framework;
-using SQLite;
 using UnityEngine.TestTools;
 
 #nullable enable
@@ -40,17 +38,14 @@ namespace MajdataPlay.Tests.Game.Misc.Base
         /// <summary>The online buckets present before the test.</summary>
         private object? _savedOnlineBuckets;
 
-        /// <summary>The database connection present before the test.</summary>
-        private SQLiteAsyncConnection? _savedDatabase;
-
         /// <summary>The initialization flag before the test.</summary>
         private bool _savedIsInited;
 
         /// <summary>Gets the private local score buckets.</summary>
         private static Dictionary<string, SongScores> Buckets => PrivateMember.GetStaticField<Dictionary<string, SongScores>>(typeof(ScoreManager), "_buckets");
 
-        /// <summary>Gets the database opened by the score store, or null.</summary>
-        private static SQLiteAsyncConnection? Database => PrivateMember.GetStaticField<SQLiteAsyncConnection?>(typeof(ScoreManager), "_db");
+        /// <summary>Gets the score database opened through <see cref="MajDatabase"/>, or null.</summary>
+        private static MajDatabaseHandle? Database => PrivateMember.GetStaticField<MajDatabaseHandle?>(typeof(MajDatabase), "s_scores");
 
         /// <summary>Points the score store at an empty temporary layout.</summary>
         [SetUp]
@@ -61,23 +56,20 @@ namespace MajdataPlay.Tests.Game.Misc.Base
             _root = _environment.UseTemporaryLayout(_temporary);
             _savedBuckets = new List<KeyValuePair<string, SongScores>>(Buckets).ToArray();
             _savedOnlineBuckets = PrivateMember.GetStaticField<object?>(typeof(ScoreManager), "_onlineBuckets");
-            _savedDatabase = Database;
             _savedIsInited = PrivateMember.GetStaticField<bool>(typeof(ScoreManager), "_isInited");
             ResetStore();
         }
 
-        /// <summary>Closes the test database and restores the score store.</summary>
+        /// <summary>Restores the score store; the scope closes the test database.</summary>
         [TearDown]
         public void TearDown()
         {
-            CloseDatabase();
             Buckets.Clear();
             foreach (var pair in _savedBuckets)
             {
                 Buckets[pair.Key] = pair.Value;
             }
             PrivateMember.SetStaticField(typeof(ScoreManager), "_onlineBuckets", _savedOnlineBuckets);
-            PrivateMember.SetStaticField(typeof(ScoreManager), "_db", _savedDatabase);
             PrivateMember.SetStaticField(typeof(ScoreManager), "_isInited", _savedIsInited);
             _environment.Dispose();
             _temporary.Dispose();
@@ -88,18 +80,14 @@ namespace MajdataPlay.Tests.Game.Misc.Base
         {
             Buckets.Clear();
             PrivateMember.SetStaticField(typeof(ScoreManager), "_onlineBuckets", null);
-            PrivateMember.SetStaticField(typeof(ScoreManager), "_db", null);
             PrivateMember.SetStaticField(typeof(ScoreManager), "_isInited", false);
         }
 
-        /// <summary>Closes the test database and removes the shutdown handler registered by initialization.</summary>
+        /// <summary>Closes the score database, so the next access opens the file of the current layout again.</summary>
         private static void CloseDatabase()
         {
-            var handler = (EventHandler<EventArgs?>)Delegate.CreateDelegate(typeof(EventHandler<EventArgs?>),
-                typeof(ScoreManager).GetMethod("OnAppQuit", BindingFlags.Static | BindingFlags.NonPublic)!);
-            GameManager.OnAppQuit -= handler;
             Database?.CloseAsync().Wait();
-            PrivateMember.SetStaticField(typeof(ScoreManager), "_db", null);
+            PrivateMember.SetStaticField(typeof(MajDatabase), "s_scores", null);
         }
 
         /// <summary>Creates a judge detail in which every note type has the given perfect count.</summary>
@@ -204,7 +192,10 @@ namespace MajdataPlay.Tests.Game.Misc.Base
             });
         }
 
-        /// <summary>Checks that scores are kept in memory when no database is open and invalid levels are reported.</summary>
+        /// <summary>
+        /// Checks that a score saved before initialization is kept in memory but reported as not persisted, without
+        /// opening the database, and that invalid levels are reported.
+        /// </summary>
         /// <returns>The test coroutine.</returns>
         [UnityTest]
         public IEnumerator SaveScore_WithoutDatabaseAndInvalidLevel()
@@ -213,7 +204,8 @@ namespace MajdataPlay.Tests.Game.Misc.Base
             {
                 var song = new FakeSongDetail("memory-only");
 
-                Assert.That(await ScoreManager.SaveScore(CreateResult(song, 100, 50, ComboState.None, 1), ChartLevel.Basic), Is.True);
+                Assert.That(await ScoreManager.SaveScore(CreateResult(song, 100, 50, ComboState.None, 1), ChartLevel.Basic), Is.False);
+                Assert.That(Database, Is.Null);
                 Assert.That(await ScoreManager.SaveScore(CreateResult(song, 100, 50, ComboState.None, 1), (ChartLevel)99), Is.False);
 
                 Assert.That(ScoreManager.GetScore(song, ChartLevel.Basic).PlayCount, Is.EqualTo(1));
@@ -384,17 +376,29 @@ namespace MajdataPlay.Tests.Game.Misc.Base
             });
         }
 
-        /// <summary>Checks that the shutdown handler closes the database.</summary>
+        /// <summary>
+        /// Checks that the database shutdown handler waits for a score write still in flight, closes the database, and
+        /// that later saves are reported as not persisted.
+        /// </summary>
         /// <returns>The test coroutine.</returns>
         [UnityTest]
-        public IEnumerator OnAppQuit_ClosesDatabase()
+        public IEnumerator OnAppQuit_WaitsForScoreWriteAndClosesDatabase()
         {
             return UniTask.ToCoroutine(async () =>
             {
                 await ScoreManager.InitAsync();
+                var song = new FakeSongDetail("quit");
+                var inFlight = ScoreManager.SaveScore(CreateResult(song, 800, 80, ComboState.None, 4), ChartLevel.Master);
 
-                PrivateMember.InvokeStatic(typeof(ScoreManager), "OnAppQuit", null, null);
-                PrivateMember.SetStaticField(typeof(ScoreManager), "_db", null);
+                PrivateMember.InvokeStatic(typeof(MajDatabase), "OnAppQuit", null, null);
+
+                Assert.That(await inFlight, Is.True);
+                Assert.That(Database, Is.Null);
+                Assert.That(await ScoreManager.SaveScore(CreateResult(song, 900, 90, ComboState.None, 5), ChartLevel.Master), Is.False);
+                using (var connection = new SQLite.SQLiteConnection(_root.FindFile("MajScores.db")!.Location, SQLite.SQLiteOpenFlags.ReadOnly))
+                {
+                    Assert.That(connection.ExecuteScalar<long>("SELECT DXScore FROM MajScores"), Is.EqualTo(800));
+                }
 
                 // An open SQLite database cannot be deleted on Windows, so a successful delete proves the connection was closed.
                 var file = _root.FindFile("MajScores.db")!;

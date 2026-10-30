@@ -216,10 +216,6 @@ namespace MajdataPlay
         private const string SettingsFileName = "settings.json";
         /// <summary>The name of <see cref="RuntimeDirectory"/> inside <see cref="PersistentDirectory"/>, and of the legacy runtime directory inside <see cref="CacheDirectory"/>.</summary>
         private const string RuntimeDirectoryName = "Runtime";
-        /// <summary>The SQLite runtime database file name inside <see cref="RuntimeDirectory"/>, which holds the runtime configuration and favorites.</summary>
-        internal const string RuntimeDatabaseFileName = "runtime.db";
-        /// <summary>The content type requested for SQLite database files created on a provider.</summary>
-        private const string DatabaseMimeType = "application/vnd.sqlite3";
         /// <summary>The legacy runtime configuration file name inside <see cref="RuntimeDirectory"/>, imported into the runtime database.</summary>
         private const string RuntimeConfigFileName = "config.json";
         /// <summary>The machine description file name inside <see cref="RootDirectory"/>.</summary>
@@ -782,16 +778,18 @@ namespace MajdataPlay
         /// <exception cref="SQLiteException">The runtime database could not be opened, queried or written.</exception>
         private static void InitRuntimeConfig()
         {
-            using var database = OpenRuntimeDatabase();
+            var database = MajDatabase.Runtime;
+            // Creating the table also adds the columns of fields introduced after the table was first created.
+            database.Write(static connection => connection.CreateTable<ListConfigRecord>());
             ListConfigRecord? record;
             try
             {
-                record = database.Find<ListConfigRecord>(ListConfigRecord.SingletonId);
+                record = database.Read(static connection => connection.Find<ListConfigRecord>(ListConfigRecord.SingletonId));
             }
             catch (Exception e) when (e is FormatException or SQLiteException)
             {
                 // A value that cannot be converted back, such as a malformed GUID, is reset by the next save.
-                MajDebug.LogError(nameof(MajEnv), $"Failed to read runtime config from {RuntimeDatabaseFileName}\nException: {e}");
+                MajDebug.LogError(nameof(MajEnv), $"Failed to read runtime config from {MajDatabase.RuntimeDatabaseFileName}\nException: {e}");
                 RuntimeConfig = new();
                 return;
             }
@@ -843,40 +841,20 @@ namespace MajdataPlay
                 MajDebug.LogError(nameof(MajEnv), $"Failed to back up the legacy runtime config file: {e.Message}");
             }
         }
-        /// <summary>Opens an unpooled connection to the runtime database, creating the file and the configuration table when missing.</summary>
-        /// <returns>The open connection, which the caller disposes.</returns>
-        /// <remarks>
-        /// <see cref="SQLiteAsyncConnection"/> shares one pooled connection per database path, which <see cref="SongStorage"/>
-        /// closes on shutdown; a short-lived synchronous connection keeps the configuration independent of that lifetime.
-        /// </remarks>
-        /// <exception cref="UnauthorizedAccessException">Creating the database file was denied.</exception>
-        /// <exception cref="IOException">Creating the database file failed.</exception>
-        /// <exception cref="SQLiteException">The database could not be opened or the table could not be created.</exception>
-        private static SQLiteConnection OpenRuntimeDatabase()
-        {
-            // SQLite needs a resolvable location, so the file is created through the directory before the connection opens it.
-            var databaseFile = RuntimeDirectory.FindFile(RuntimeDatabaseFileName)
-                ?? RuntimeDirectory.CreateFile(RuntimeDatabaseFileName, DatabaseMimeType);
-            var database = new SQLiteConnection(databaseFile.Location, SQLiteOpenFlags.ReadWrite | SQLiteOpenFlags.Create | SQLiteOpenFlags.FullMutex);
-            try
-            {
-                // Creating the table also adds the columns of fields introduced after the table was first created.
-                database.CreateTable<ListConfigRecord>();
-            }
-            catch
-            {
-                database.Dispose();
-                throw;
-            }
-            return database;
-        }
         /// <summary>Stores the persisted fields of a runtime configuration, replacing the previously stored ones.</summary>
-        /// <param name="database">The open runtime database connection.</param>
+        /// <param name="database">The runtime database.</param>
         /// <param name="config">The runtime configuration to store.</param>
+        /// <remarks>The table is created when missing, so a save never depends on <see cref="InitRuntimeConfig"/> having run.</remarks>
+        /// <exception cref="ObjectDisposedException">The runtime database has been closed.</exception>
         /// <exception cref="SQLiteException">The configuration could not be written.</exception>
-        private static void WriteRuntimeConfig(SQLiteConnection database, RuntimeConfig config)
+        private static void WriteRuntimeConfig(MajDatabaseHandle database, RuntimeConfig config)
         {
-            database.InsertOrReplace(ListConfigRecord.FromRuntimeConfig(config));
+            var record = ListConfigRecord.FromRuntimeConfig(config);
+            database.Write(connection =>
+            {
+                connection.CreateTable<ListConfigRecord>();
+                connection.InsertOrReplace(record);
+            });
         }
         private static void InitOthers()
         {
@@ -929,10 +907,7 @@ namespace MajdataPlay
             // Re-resolve the files so a configuration deleted while running is recreated on every backend.
             SettingsPath = FindOrCreateFile(RootDirectory, SettingsFileName);
             WriteText(SettingsPath, json);
-            using (var database = OpenRuntimeDatabase())
-            {
-                WriteRuntimeConfig(database, RuntimeConfig);
-            }
+            WriteRuntimeConfig(MajDatabase.Runtime, RuntimeConfig);
 
             MajDebug.FlushLog();
         }

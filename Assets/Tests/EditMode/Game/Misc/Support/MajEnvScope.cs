@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Reflection;
 using MajdataPlay.Diagnostics;
 using MajdataPlay.IO.Storage;
 using MajdataPlay.Net;
@@ -41,6 +42,18 @@ namespace MajdataPlay.Tests.Game.Misc.Support
         /// <summary>The captured property values keyed by property name.</summary>
         private readonly Dictionary<string, object?> _saved = new();
 
+        /// <summary>The <see cref="MajDatabase"/> fields captured and restored by every scope, so databases opened in temporary storage never outlive it.</summary>
+        private static readonly string[] s_databaseFieldNames =
+        {
+            "s_runtime",
+            "s_scores",
+            "s_isShutDown",
+            "s_isQuitHandlerRegistered",
+        };
+
+        /// <summary>The captured database field values keyed by field name.</summary>
+        private readonly Dictionary<string, object?> _savedDatabaseFields = new();
+
         /// <summary>The captured minimum log level, which settings initialization changes.</summary>
         private readonly LogLevel _minLogLevel;
 
@@ -50,6 +63,10 @@ namespace MajdataPlay.Tests.Game.Misc.Support
             foreach (var name in s_propertyNames)
             {
                 _saved[name] = PrivateMember.GetStaticProperty<object?>(typeof(MajEnv), name);
+            }
+            foreach (var name in s_databaseFieldNames)
+            {
+                _savedDatabaseFields[name] = PrivateMember.GetStaticField<object?>(typeof(MajDatabase), name);
             }
             _minLogLevel = MajDebug.MinLogLevel;
         }
@@ -80,8 +97,38 @@ namespace MajdataPlay.Tests.Game.Misc.Support
             Set(nameof(MajEnv.Settings), new GameSetting());
             Set(nameof(MajEnv.RuntimeConfig), new RuntimeConfig());
             Set(nameof(MajEnv.ApiEndpoints), Array.Empty<ApiEndpoint>());
+            ResetDatabases();
             Root = root;
             return root;
+        }
+
+        /// <summary>
+        /// Detaches the open databases without closing them and allows opening again, so the next access opens the
+        /// databases of the current layout. <see cref="Dispose"/> closes whatever was opened meanwhile.
+        /// </summary>
+        public void ResetDatabases()
+        {
+            PrivateMember.SetStaticField(typeof(MajDatabase), "s_runtime", null);
+            PrivateMember.SetStaticField(typeof(MajDatabase), "s_scores", null);
+            PrivateMember.SetStaticField(typeof(MajDatabase), "s_isShutDown", false);
+        }
+
+        /// <summary>Closes the databases opened inside this scope and removes the shutdown handler they registered.</summary>
+        private void CloseScopeDatabases()
+        {
+            foreach (var name in new[] { "s_runtime", "s_scores" })
+            {
+                var handle = PrivateMember.GetStaticField<MajDatabaseHandle?>(typeof(MajDatabase), name);
+                if (handle is not null && !ReferenceEquals(handle, _savedDatabaseFields[name]))
+                {
+                    handle.CloseAsync().Wait();
+                }
+            }
+            if (!(bool)_savedDatabaseFields["s_isQuitHandlerRegistered"]!)
+            {
+                var method = typeof(MajDatabase).GetMethod("OnAppQuit", BindingFlags.Static | BindingFlags.NonPublic)!;
+                GameManager.OnAppQuit -= (EventHandler<EventArgs?>)Delegate.CreateDelegate(typeof(EventHandler<EventArgs?>), method);
+            }
         }
 
         /// <summary>Replaces one <see cref="MajEnv"/> property for the lifetime of this scope.</summary>
@@ -92,9 +139,14 @@ namespace MajdataPlay.Tests.Game.Misc.Support
             PrivateMember.SetStaticProperty(typeof(MajEnv), name, value);
         }
 
-        /// <summary>Restores every captured property and the minimum log level.</summary>
+        /// <summary>Closes the databases opened inside the scope, then restores every captured property, database field and the minimum log level.</summary>
         public void Dispose()
         {
+            CloseScopeDatabases();
+            foreach (var pair in _savedDatabaseFields)
+            {
+                PrivateMember.SetStaticField(typeof(MajDatabase), pair.Key, pair.Value);
+            }
             foreach (var pair in _saved)
             {
                 PrivateMember.SetStaticProperty(typeof(MajEnv), pair.Key, pair.Value);

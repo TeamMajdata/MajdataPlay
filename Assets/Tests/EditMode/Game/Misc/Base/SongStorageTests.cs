@@ -97,14 +97,11 @@ namespace MajdataPlay.Tests.Game.Misc.Base
             RecommendStates.Clear();
         }
 
-        /// <summary>Closes the favorites database, removes the event handlers and restores the library.</summary>
+        /// <summary>Removes the event handler and restores the library; the scope closes the runtime database after its queued writes.</summary>
         [TearDown]
         public void TearDown()
         {
             RemoveHandler(nameof(GameManager.OnSave), "OnSave");
-            RemoveHandler(nameof(GameManager.OnAppQuit), "OnAppQuit");
-            WaitForPendingFavoriteWrites();
-            PrivateMember.GetStaticField<SQLiteAsyncConnection?>(typeof(SongStorage), "s_favoritesDatabase")?.CloseAsync().Wait();
             foreach (var pair in _savedFields)
             {
                 PrivateMember.SetStaticField(typeof(SongStorage), pair.Key, pair.Value);
@@ -126,14 +123,8 @@ namespace MajdataPlay.Tests.Game.Misc.Base
             eventInfo.RemoveEventHandler(null, handler);
         }
 
-        /// <summary>Gets the favorites database opened by the library, or null.</summary>
-        private static SQLiteAsyncConnection? FavoritesDatabase => PrivateMember.GetStaticField<SQLiteAsyncConnection?>(typeof(SongStorage), "s_favoritesDatabase");
-
-        /// <summary>Waits for the queued favorite writes, so the database is not closed while a transaction is committing.</summary>
-        private static void WaitForPendingFavoriteWrites()
-        {
-            SongStorage.WaitForFavoriteWritesAsync().Wait();
-        }
+        /// <summary>Gets the runtime database once the library has prepared its favorites table, or null.</summary>
+        private static MajDatabaseHandle? FavoritesDatabase => PrivateMember.GetStaticField<MajDatabaseHandle?>(typeof(SongStorage), "s_favoritesDatabase");
 
         /// <summary>Counts the stored rows of one favorite hash after the queued writes have finished.</summary>
         /// <param name="hash">The favorite hash.</param>
@@ -141,7 +132,7 @@ namespace MajdataPlay.Tests.Game.Misc.Base
         private static async UniTask<int> CountStoredFavoriteAsync(string hash)
         {
             await SongStorage.WaitForFavoriteWritesAsync();
-            return await FavoritesDatabase!.ExecuteScalarAsync<int>("SELECT COUNT(*) FROM FavoriteHashes WHERE Hash = ?", hash);
+            return await FavoritesDatabase!.ReadAsync(connection => connection.ExecuteScalar<int>("SELECT COUNT(*) FROM FavoriteHashes WHERE Hash = ?", hash));
         }
 
         /// <summary>Opens the favorites database file with a separate connection and counts its rows.</summary>
@@ -525,9 +516,9 @@ namespace MajdataPlay.Tests.Game.Misc.Base
                     SongStorage.AddToMyFavorites(new FakeSongDetail($"quit-hash-{i}"));
                 }
 
-                PrivateMember.InvokeStatic(typeof(SongStorage), "OnAppQuit", null, null);
+                PrivateMember.InvokeStatic(typeof(MajDatabase), "OnAppQuit", null, null);
 
-                Assert.That(FavoritesDatabase, Is.Null);
+                Assert.That(FavoritesDatabase!.IsClosed, Is.True);
                 Assert.That(SongStorage.WaitForFavoriteWritesAsync().IsCompleted, Is.True);
                 Assert.That(await CountRowsInDatabaseFileAsync(), Is.EqualTo(200));
             });
@@ -541,7 +532,7 @@ namespace MajdataPlay.Tests.Game.Misc.Base
             return UniTask.ToCoroutine(async () =>
             {
                 await SongStorage.InitAsync();
-                PrivateMember.InvokeStatic(typeof(SongStorage), "OnAppQuit", null, null);
+                PrivateMember.InvokeStatic(typeof(MajDatabase), "OnAppQuit", null, null);
 
                 Assert.DoesNotThrow(() => SongStorage.AddToMyFavorites(new FakeSongDetail("late-hash")));
                 await SongStorage.WaitForFavoriteWritesAsync();
