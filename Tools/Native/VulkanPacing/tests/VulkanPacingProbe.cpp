@@ -1,7 +1,9 @@
 // Hardware probe for the pacing layer's driver low-latency backends, VK_AMD_anti_lag in particular.
 // It loads MajdataPlayVulkanPacing.dll from its own folder, registers it the way Unity does, and drives a real
 // Vulkan FIFO swapchain through it: a window, a device created like Unity 6 creates its own, and frames that only
-// clear the image. Each mode runs the same frames and reports where the frame waits and, when the device has
+// clear the image. Each mode runs the same frames (no pacing; the managed timer pacing, ported from
+// VSyncFramePacer; the driver's mode only; present waiting followed by the driver's mode, as LowLatencyVSync uses
+// them) and reports where the frame waits and, when the device has
 // present waiting, how long each frame took from input sampling until it was shown. When a pacing backend works,
 // the wait moves from presentation (after input is sampled) to the frame start (before it), so "sample->shown"
 // drops. Windows only.
@@ -11,6 +13,7 @@
 #define VK_NO_PROTOTYPES
 #define VK_USE_PLATFORM_WIN32_KHR
 #include <windows.h>
+#include <dwmapi.h>
 #include <vulkan/vulkan.h>
 #include "IUnityInterface.h"
 #include "IUnityGraphics.h"
@@ -62,6 +65,47 @@ double Now() {
 void BusyWork(double milliseconds) {
     const double end = Now() + milliseconds;
     while (Now() < end) {}
+}
+
+// A port of Assets/Scripts/Misc/Rendering/VSyncFramePacer.cs in milliseconds: frames are produced 0.1 % slower
+// than the display refreshes, the first frame waits three intervals to empty the queue, and 120 frames without a
+// wait at a period slightly longer than the interval re-measure the period.
+struct TimerPacer {
+    double reported = 0, interval = 0, next = 0, runStart = 0;
+    bool hasDeadline = false, drainPending = true;
+    int unthrottled = 0;
+    explicit TimerPacer(double period) : reported(period), interval(period * 1.001) {}
+    double Wait(double now) {
+        if (drainPending) { drainPending = false; return interval * 3; }
+        return hasDeadline ? std::max(0.0, next - now) : 0;
+    }
+    void Started(double start, double waited) {
+        if (!hasDeadline || start - next >= interval) { next = start + interval; hasDeadline = true; }
+        else next += interval;
+        if (waited > 0) { unthrottled = 0; return; }
+        if (unthrottled++ == 0) runStart = start;
+        if (unthrottled < 120) return;
+        const double measured = (start - runStart) / (unthrottled - 1);
+        unthrottled = 0;
+        if (measured <= interval || measured > reported * 1.01) return;
+        interval = measured * 1.001; hasDeadline = false; drainPending = true;
+    }
+};
+
+// The display refresh period from DWM, which reports the exact rational rate. dwmapi is loaded at run time, so the
+// probe needs no extra import library.
+double RefreshPeriodMs() {
+    using GetTimingInfo = HRESULT(WINAPI*)(HWND, DWM_TIMING_INFO*);
+    const HMODULE dwm = LoadLibraryW(L"dwmapi.dll");
+    const auto getTimingInfo = dwm ? reinterpret_cast<GetTimingInfo>(GetProcAddress(dwm, "DwmGetCompositionTimingInfo")) : nullptr;
+    DWM_TIMING_INFO timing{};
+    timing.cbSize = sizeof(timing);
+    if (getTimingInfo && SUCCEEDED(getTimingInfo(nullptr, &timing)) && timing.rateRefresh.uiNumerator)
+        return 1000.0 * timing.rateRefresh.uiDenominator / timing.rateRefresh.uiNumerator;
+    DEVMODEW mode{};
+    mode.dmSize = sizeof(mode);
+    return EnumDisplaySettingsW(nullptr, ENUM_CURRENT_SETTINGS, &mode) && mode.dmDisplayFrequency > 1
+        ? 1000.0 / mode.dmDisplayFrequency : 1000.0 / 60;
 }
 
 // Per-mode timings in milliseconds.
@@ -328,26 +372,44 @@ int main(int argc, char** argv) {
     std::vector<VkSemaphore> rendered(images.size());
     for (auto& semaphore : rendered) CHECK(vkCreateSemaphore(device, &semaphoreInfo, nullptr, &semaphore));
 
-    // Modes: no pacing; the driver's mode only; present waiting then the driver's mode (LowLatencyVSync's order).
-    struct Mode { const char* name; bool driver; bool wait; };
-    const Mode modes[] = {{"off", false, false}, {"driver", true, false}, {"wait+driver", true, true}};
+    // Modes: no pacing; timer pacing; the driver's mode only; present waiting then the driver's mode.
+    struct Mode { const char* name; bool driver; bool wait; bool timer; };
+    const Mode modes[] = {{"off", false, false, false}, {"timer", false, false, true}, {"driver", true, false, false},
+        {"wait+driver", true, true, false}};
+    const double refreshPeriod = RefreshPeriodMs();
+    const HANDLE waitTimer = CreateWaitableTimerExW(nullptr, nullptr, CREATE_WAITABLE_TIMER_HIGH_RESOLUTION, TIMER_ALL_ACCESS);
+    if (!waitTimer) { std::puts("FAIL: no high-resolution waitable timer"); return 1; }
+    std::printf("refresh period %.4f ms (%.3f Hz)\n", refreshPeriod, 1000.0 / refreshPeriod);
     const int warmup = 60;
     uint64_t frameNumber = 0;
     const bool measureShown = layer.presentWaitStatus() == 0;
     ShownTracker tracker;
     if (measureShown) tracker.Start();
-    std::printf("\n%-12s %6s %9s %9s %9s %16s %14s %14s\n", "mode", "fps", "pacing", "acquire", "present",
-        "sample->present", "sample->shown", "shown p95");
+    std::printf("\n%-12s %6s %9s %9s %9s %16s %12s %12s %12s %12s\n", "mode", "fps", "pacing", "acquire", "present",
+        "sample->present", "shown min", "shown avg", "shown p95", "shown max");
     for (const Mode& mode : modes) {
         if (mode.driver && backend == 0) { std::printf("%-12s skipped: no driver low-latency backend\n", mode.name); continue; }
         if (mode.wait && layer.presentWaitStatus() != 0) { std::printf("%-12s skipped: present waiting unavailable\n", mode.name); continue; }
         Stats stats;
+        TimerPacer timer(refreshPeriod);
         if (measureShown) tracker.Drain(nullptr);
         double previousStart = 0;
         for (int frame = 0; frame < frames + warmup; ++frame, ++frameNumber) {
             MSG message;
             while (PeekMessageW(&message, nullptr, 0, 0, PM_REMOVE)) { TranslateMessage(&message); DispatchMessageW(&message); }
             const double start = Now();
+            if (mode.timer) {
+                const double wait = timer.Wait(start);
+                const double deadline = start + wait;
+                // Like LowLatencyVSync: a high-resolution waitable timer, then a spin for the last millisecond.
+                if (deadline - Now() > 1.0) {
+                    LARGE_INTEGER due{};
+                    due.QuadPart = -static_cast<LONGLONG>((deadline - Now() - 1.0) * 10000);
+                    if (SetWaitableTimer(waitTimer, &due, 0, nullptr, nullptr, FALSE)) WaitForSingleObject(waitTimer, INFINITE);
+                }
+                while (Now() < deadline) SwitchToThread();
+                timer.Started(Now(), wait);
+            }
             if (mode.wait) {
                 // Wait until the previous frame is shown, as PresentWaitPacer does for a single-threaded renderer.
                 uint64_t generation = 0, id = 0;
@@ -428,8 +490,9 @@ int main(int argc, char** argv) {
         const double interval = Average(stats.interval);
         std::printf("%-12s %6.1f %7.2fms %7.2fms %7.2fms %14.2fms ", mode.name, interval > 0 ? 1000.0 / interval : 0,
             Average(stats.pacing), Average(stats.acquire), Average(stats.present), Average(stats.sampleToPresent));
-        if (stats.sampleToShown.empty()) std::puts("           n/a            n/a");
-        else std::printf("%12.2fms %12.2fms\n", Average(stats.sampleToShown), Percentile(stats.sampleToShown, 0.95));
+        if (stats.sampleToShown.empty()) std::puts("         n/a          n/a          n/a          n/a");
+        else std::printf("%10.2fms %10.2fms %10.2fms %10.2fms\n", Percentile(stats.sampleToShown, 0.0),
+            Average(stats.sampleToShown), Percentile(stats.sampleToShown, 0.95), Percentile(stats.sampleToShown, 1.0));
     }
     if (measureShown) tracker.Stop();
     std::puts("\npacing: wait before input is sampled. acquire/present: swapchain waits after it. sample->shown: from input");

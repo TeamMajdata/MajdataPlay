@@ -113,7 +113,8 @@ ignored `.build/` folder. The source is platform independent; only Windows playe
 `VK_AMD_anti_lag`, which the deterministic tests only model. It loads `MajdataPlayVulkanPacing.dll` from its own
 folder, registers it the way Unity's preload does, creates a Vulkan 1.1 instance, a device like Unity 6's (present
 id/wait with their features when supported) and a small window with a FIFO swapchain, and clears and presents
-frames after 2 ms of simulated game logic. It runs the same frames three times: without pacing, with the driver's
+frames after 2 ms of simulated game logic. It runs the same frames four times: without pacing, with timer pacing
+(a port of `VSyncFramePacer`, the managed fallback, timed with the refresh period DWM reports), with the driver's
 mode only, and with present waiting followed by the driver's mode (the order `LowLatencyVSync` uses).
 
 ```powershell
@@ -128,14 +129,20 @@ and the DLL, so it can be copied to a test machine as is; it needs nothing but t
 For each mode it prints the frame rate, the wait before input is sampled (`pacing`), the swapchain waits after it
 (`acquire`, `present`), `sample->present`, and, when the device has present waiting, `sample->shown`: from input
 sampling until `vkWaitForPresentKHR` reports the frame shown, measured on a second thread through the layer's
-non-blocking poll. A working backend moves the wait into `pacing` and lowers `sample->shown`. On an RTX 3060 Laptop
-GPU at 60 Hz (windowed) the probe printed:
+non-blocking poll (minimum, average, 95th percentile and maximum). A working backend moves the wait into `pacing`
+and lowers `sample->shown`. On an RTX 3060 Laptop GPU at 60 Hz (windowed, `--frames 2000`) the probe printed:
 
-| mode | pacing | acquire | sample->shown (avg / p95) |
+| mode | pacing | acquire | sample->shown (min / avg / p95 / max) |
 | --- | --- | --- | --- |
-| off | 0.00 ms | 14.22 ms | 49.5 / 49.9 ms |
-| driver (`VK_NV_low_latency2`) | 9.87 ms | 0.93 ms | 34.3 / 49.6 ms |
-| wait+driver | 14.55 ms | 0.00 ms | 16.6 / 16.7 ms |
+| off | 0.00 ms | 14.34 ms | 36.7 / 49.6 / 49.9 / 50.2 ms |
+| timer | 14.52 ms | 0.01 ms | 2.7 / 11.2 / 18.6 / 20.2 ms |
+| driver (`VK_NV_low_latency2`) | 12.30 ms | 0.19 ms | 31.3 / 34.8 / 49.7 / 50.0 ms |
+| wait+driver | 14.53 ms | 0.01 ms | 14.4 / 16.6 / 16.7 / 18.8 ms |
+
+Timer pacing produces frames slightly slower than the display refreshes, so input sampling drifts through the
+refresh interval and `sample->shown` sweeps a range about one refresh period wide; the average depends on which part
+of that sweep a run covers. Present waiting samples input right after the previous frame is shown, which holds
+`sample->shown` at one refresh period.
 
 ## Limitations
 

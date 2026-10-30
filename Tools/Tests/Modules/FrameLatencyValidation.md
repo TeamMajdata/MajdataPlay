@@ -88,7 +88,7 @@ backends. The Editor always uses timer pacing, because its views present through
 To check a driver backend without Unity, in particular `VK_AMD_anti_lag` on an AMD GPU, use the hardware probe
 described in the [pacing layer README](../../Native/VulkanPacing/README.md#hardware-probe):
 `MajdataPlayVulkanPacingProbe.exe --require amd` prints which backend is active and compares `sample->shown`
-without pacing, with the driver mode only, and with present waiting followed by the driver mode.
+without pacing, with timer pacing, with the driver mode only, and with present waiting followed by the driver mode.
 
 To check swapchain recreation on a player, resize the window and toggle fullscreen (Alt+Enter) while it runs:
 every change logs a new generation, the active backend stays active, and the diagnostics keep reporting the same
