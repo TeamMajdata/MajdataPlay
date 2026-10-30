@@ -223,5 +223,38 @@ namespace MajdataPlay.Tests.Game.Rendering
             _source.PollResult = _ => PresentWaitPacer.PollPresented;
             Assert.That(_pacer.WaitForPreviousFrame(Period60Hz), Is.EqualTo(PresentWaitOutcome.Presented));
         }
+
+        /// <summary>
+        /// Checks the waits around a window resize or fullscreen toggle: the swapchain generation changes while a
+        /// frame waits, nothing is waited for until the new swapchain presents, and a timeout remembered for the old
+        /// swapchain does not suppress waits on the new one even when its ids are lower.
+        /// </summary>
+        [Test]
+        public void SwapchainRecreation_WaitsOnTheNewSwapchain()
+        {
+            _source.Generation = 1;
+            _source.Latest = 10;
+            _source.PollResult = _ => PresentWaitPacer.PollPending;
+            Assert.That(_pacer.WaitForPreviousFrame(Period60Hz), Is.EqualTo(PresentWaitOutcome.TimedOut));
+
+            // Unity recreates the swapchain while the next frame waits.
+            _source.PollResult = _ =>
+            {
+                _source.Generation = 2;
+                _source.Latest = 0;
+                return PresentWaitPacer.PollSwapchainChanged;
+            };
+            _source.Latest = 11;
+            Assert.That(_pacer.WaitForPreviousFrame(Period60Hz), Is.EqualTo(PresentWaitOutcome.SwapchainChanged));
+
+            _source.PollResult = _ => PresentWaitPacer.PollPresented;
+            Assert.That(_pacer.WaitForPreviousFrame(Period60Hz), Is.EqualTo(PresentWaitOutcome.NoPresentation),
+                "the new swapchain has not presented yet");
+
+            _source.PolledIds.Clear();
+            _source.Latest = 3;
+            Assert.That(_pacer.WaitForPreviousFrame(Period60Hz), Is.EqualTo(PresentWaitOutcome.Presented));
+            Assert.That(_source.PolledIds, Is.EqualTo(new[] { 3UL }), "waits on the new swapchain's id");
+        }
     }
 }

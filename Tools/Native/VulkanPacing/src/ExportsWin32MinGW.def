@@ -8,3 +8,9 @@ EXPORTS
     majvk_present_wait_status
     majvk_present_wait_query
     majvk_present_wait_poll
+    majvk_low_latency_backend
+    majvk_low_latency_status
+    majvk_frame_begin
+    majvk_frame_end
+    majvk_swapchain_generation
+    majvk_present_id_source
