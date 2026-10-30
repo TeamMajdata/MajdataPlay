@@ -50,6 +50,37 @@ namespace MajdataPlay.Tests.Game.Rendering.PlayMode
             Assert.That(CountPacingStepsAtStartOfTimeUpdate(), Is.EqualTo(1));
         }
 
+        /// <summary>Checks that installing twice inserts one frame end step as the last PostLateUpdate system.</summary>
+        [Test]
+        public void Install_InsertsOneFrameEndStepAtTheEndOfPostLateUpdate()
+        {
+            LowLatencyVSync.Install();
+            LowLatencyVSync.Install();
+
+            foreach (var phase in PlayerLoop.GetCurrentPlayerLoop().subSystemList)
+            {
+                if (phase.type != typeof(PostLateUpdate))
+                {
+                    continue;
+                }
+
+                var steps = 0;
+                foreach (var system in phase.subSystemList)
+                {
+                    if (system.updateDelegate?.Method.DeclaringType == typeof(LowLatencyVSync))
+                    {
+                        steps++;
+                    }
+                }
+                var last = phase.subSystemList[phase.subSystemList.Length - 1];
+                Assert.That(steps, Is.EqualTo(1));
+                Assert.That(last.updateDelegate?.Method.DeclaringType, Is.EqualTo(typeof(LowLatencyVSync)));
+                return;
+            }
+
+            Assert.Fail("The player loop has no PostLateUpdate phase.");
+        }
+
         /// <summary>Checks that frames are not paced when the backend is not Vulkan or VSync is off.</summary>
         /// <returns>The test coroutine.</returns>
         [UnityTest]

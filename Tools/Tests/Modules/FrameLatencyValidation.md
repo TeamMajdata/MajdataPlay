@@ -58,6 +58,42 @@ pacer measures the real period after 120 unpaced frames and logs `frame interval
 To verify it, run Vulkan with VSync on twice, with `Debug.LowLatencyVSync` set to `false` and `true`, and compare
 `start->present - pacingWait`. Also watch fast-moving notes for the periodic repeated frame.
 
+### Driver low latency and present waiting (Windows players)
+
+On Windows players the standalone `MajdataPlayVulkanPacing` layer
+([Tools/Native/VulkanPacing](../../Native/VulkanPacing/README.md)) gives `LowLatencyVSync` better backends than
+the timer, each used when available:
+
+1. present waiting, `VK_KHR_present_id` + `VK_KHR_present_wait` (Unity 6 enables both itself when the driver
+   supports them); each frame waits until the previous frame has been shown, like D3D11's waitable swapchain;
+2. then the driver's low-latency mode, `VK_NV_low_latency2` (NVIDIA Reflex) or `VK_AMD_anti_lag`, which the
+   layer enables on Unity's device; the driver may delay the frame further. On its own it does not remove the
+   VSync queue (Reflex's sleep stayed near zero on an RTX 3060 Laptop GPU with FIFO presentation);
+3. the timer pacing described above when neither is available.
+
+Both layer backends keep the latency constant without the periodic repeated frame. The log shows which one is
+active and why others are skipped:
+
+- `Frame pacing started: each frame waits for the pacing layer (VK_KHR_present_wait, then VK_NV_low_latency2)`
+  (or only one of the two)
+- `Present waiting unavailable (<reason>)` / `Driver low-latency mode unavailable (<reason>)`
+- `Frame pacing started: refresh ...` when the timer takes over
+- `... failed repeatedly ...; giving it up` / `Present waiting timed out|failed 30 times ...; giving it up`
+- `Swapchain changed (generation N); pacing follows the new swapchain` after a window resize or fullscreen toggle
+- `Presentation ids come from the pacing layer|Unity`
+
+Set the hidden option `Debug.LowLatencyVSyncBackend` to `PresentWait` (skip the driver mode) or `Timer` to compare
+backends. The Editor always uses timer pacing, because its views present through several swapchains.
+
+To check a driver backend without Unity, in particular `VK_AMD_anti_lag` on an AMD GPU, use the hardware probe
+described in the [pacing layer README](../../Native/VulkanPacing/README.md#hardware-probe):
+`MajdataPlayVulkanPacingProbe.exe --require amd` prints which backend is active and compares `sample->shown`
+without pacing, with timer pacing, with the driver mode only, and with present waiting followed by the driver mode.
+
+To check swapchain recreation on a player, resize the window and toggle fullscreen (Alt+Enter) while it runs:
+every change logs a new generation, the active backend stays active, and the diagnostics keep reporting the same
+`pacingWait` range afterwards.
+
 ## Procedure
 
 Use the same build, display, refresh rate, window mode and scene (a chart in the Game scene, or the List
