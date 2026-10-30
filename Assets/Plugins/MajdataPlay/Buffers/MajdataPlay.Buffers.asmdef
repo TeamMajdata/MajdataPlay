@@ -2,7 +2,8 @@
     "name": "MajdataPlay.Buffers",
     "rootNamespace": "MajdataPlay.Buffers",
     "references": [
-        "GUID:9dbacf025564c1a4a9223fa764c2a8d6"
+        "GUID:9dbacf025564c1a4a9223fa764c2a8d6",
+        "GUID:c9d8ccb8c8c7ca74ebe3db3e772d6e94"
     ],
     "includePlatforms": [],
     "excludePlatforms": [],
