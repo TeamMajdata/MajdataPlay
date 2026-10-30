@@ -353,6 +353,10 @@ namespace MajdataPlay
 #else
             throw new NotImplementedException();
 #endif
+            MajDebug.LogInfo(nameof(MajEnv), $"[Path]Root      : {RootDirectory.Location}");
+            MajDebug.LogInfo(nameof(MajEnv), $"[Path]Persistent: {PersistentDirectory.Location}");
+            MajDebug.LogInfo(nameof(MajEnv), $"[Path]Assets    : {AssetsDirectory.Location}");
+            MajDebug.LogInfo(nameof(MajEnv), $"[Path]Cache     : {CacheDirectory.Location}");
         }
         /// <summary>Creates the writable application directories through their parent handles, leaving missing streaming assets untouched.</summary>
         /// <exception cref="UnauthorizedAccessException">Creating an application directory was denied.</exception>
