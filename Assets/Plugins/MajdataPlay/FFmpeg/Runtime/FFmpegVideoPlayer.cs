@@ -87,6 +87,9 @@ namespace MajdataPlay.FFmpeg
         /// <summary>Requires hardware frames that remain on the GPU.</summary>
         [SerializeField, FormerlySerializedAs("RequireHardwareDecoding"), Tooltip("Require native GPU frames. Unsupported codecs/devices report an error instead of uploading CPU pixels. Applies when opening media.")]
         private bool _requireHardwareDecoding;
+        /// <summary>Stores how hardware decoding continues when the GPU that renders Unity cannot decode the media.</summary>
+        [SerializeField, FormerlySerializedAs("HardwareFallbackRoute"), Tooltip("When Unity's GPU cannot hardware-decode the media: try the other GPUs with CPU upload before software decoding, or decode in software directly. Applies when opening media.")]
+        private HardwareFallbackRoute _hardwareFallbackRoute = HardwareFallbackRoute.OtherGpus;
         /// <summary>Stores the renderer that receives the video texture.</summary>
         [SerializeField, FormerlySerializedAs("TargetRenderer")]
         private Renderer? _targetRenderer;
@@ -285,6 +288,25 @@ namespace MajdataPlay.FFmpeg
         /// <summary>Gets or sets whether the next media open requires hardware decoding with a native GPU presentation path.</summary>
         /// <remarks>Overrides decoder and texture preferences. CPU upload and software fallback are prohibited; unsupported paths report an error.</remarks>
         public bool RequireHardwareDecoding { get => _requireHardwareDecoding; set => _requireHardwareDecoding = value; }
+        /// <summary>Gets or sets how hardware decoding continues on the next media open when the GPU that renders Unity cannot decode it.</summary>
+        /// <remarks>
+        /// <see cref="FFmpeg.HardwareFallbackRoute.OtherGpus"/> tries hardware decoding with CPU upload on the remaining Windows or
+        /// Linux GPUs before software decoding. <see cref="RequireHardwareDecoding"/> keeps decoding on Unity's GPU.
+        /// </remarks>
+        /// <exception cref="ArgumentOutOfRangeException">The value is not a defined fallback route.</exception>
+        public HardwareFallbackRoute HardwareFallbackRoute
+        {
+            get => _hardwareFallbackRoute;
+            set
+            {
+                if (value != HardwareFallbackRoute.OtherGpus && value != HardwareFallbackRoute.SoftwareCodec)
+                {
+                    throw new ArgumentOutOfRangeException(nameof(value));
+                }
+
+                _hardwareFallbackRoute = value;
+            }
+        }
         /// <summary>Gets or sets an optional caller-owned render texture to receive presented frames.</summary>
         /// <remarks>Changes take effect on the next presented frame. The player does not destroy this texture.</remarks>
         public RenderTexture? TargetTexture { get => _targetTexture; set => _targetTexture = value; }
@@ -364,11 +386,12 @@ namespace MajdataPlay.FFmpeg
                 {
                     IOTimeoutMilliseconds = Math.Max(1, IOTimeoutSeconds) * 1000,
                     RequireHardwareDecoding = _hardwareRequired,
-                    AllowHardwareCpuUpload = !_hardwareRequired
+                    AllowHardwareCpuUpload = !_hardwareRequired,
+                    HardwareFallbackRoute = _hardwareFallbackRoute
                 };
                 MajDebug.LogInfo("FFmpeg", "[Player] Preparing video; preferred decoder="
                     + PreferredDecoderType + ", prefer native textures=" + _preferNativeTextures + ", require GPU-only="
-                    + _hardwareRequired + ".");
+                    + _hardwareRequired + ", hardware fallback route=" + _hardwareFallbackRoute + ".");
                 if (_preferHardwareDecoding || _hardwareRequired)
                 {
                     ConfigureHardware(options, _preferNativeTextures || _hardwareRequired);
@@ -1091,7 +1114,8 @@ namespace MajdataPlay.FFmpeg
                 {
                     IOTimeoutMilliseconds = Math.Max(1, IOTimeoutSeconds) * 1000,
                     RequireHardwareDecoding = _hardwareRequired,
-                    AllowHardwareCpuUpload = !_hardwareRequired
+                    AllowHardwareCpuUpload = !_hardwareRequired,
+                    HardwareFallbackRoute = _hardwareFallbackRoute
                 };
                 if (hardwareCpuUpload || nativeTransport)
                 {

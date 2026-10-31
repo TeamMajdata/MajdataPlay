@@ -188,6 +188,8 @@ namespace MajdataPlay.FFmpeg
         public VideoRateControlMode? RateControlMode => EncoderName != null ? _session?.RateControlMode : null;
         /// <summary>Gets the hardware fallback diagnostic, or null when no fallback occurred.</summary>
         public string? HardwareFallbackReason => _session?.HardwareFallbackReason;
+        /// <summary>Gets the GPU or other device running the encoder, or null before encoder initialization.</summary>
+        public string? EncoderDevice => EncoderName != null ? _session?.EncoderDevice : null;
         /// <summary>Gets the recent compressed-video bit rate in bits per second, excluding container overhead.</summary>
         /// <remarks>Uses about one second of media time. Pausing retains the value while accepted frames may still finish encoding.</remarks>
         public long CurrentBitRate => _session?.CurrentBitRate ?? 0;

@@ -1,6 +1,7 @@
 using System;
 using MajdataPlay.FFmpeg;
 using MajdataPlay.FFmpeg.Internal;
+using MajdataPlay.FFmpeg.Interop;
 using NUnit.Framework;
 
 #nullable enable
@@ -42,6 +43,8 @@ namespace MajdataPlay.Tests.Plugins.FFmpeg
             Assert.That(options.MaximumBitRate, Is.EqualTo(16000000));
             Assert.That(options.RateControlMode, Is.EqualTo(VideoRateControlMode.VBR));
             Assert.That(options.MaximumSoftwareThreads, Is.EqualTo(Math.Min(Environment.ProcessorCount, 8)));
+            Assert.That(options.HardwareFallbackRoute, Is.EqualTo(HardwareFallbackRoute.OtherGpus));
+            Assert.That(options.HardwareGpus, Is.Null);
         }
 
         /// <summary>Checks that validation returns an independent copy with every value preserved.</summary>
@@ -49,9 +52,13 @@ namespace MajdataPlay.Tests.Plugins.FFmpeg
         public void ValidateAndClone_ReturnsIndependentEqualCopy()
         {
             var options = CreateValid();
+            var gpus = new[] { new HardwareGpu("0", "GPU", HardwareGpu.AmdVendorId, 0x73DF) };
+            options.HardwareFallbackRoute = HardwareFallbackRoute.SoftwareCodec;
+            options.HardwareGpus = gpus;
 
             var copy = options.ValidateAndClone();
             options.Width = 1280;
+            options.HardwareFallbackRoute = HardwareFallbackRoute.OtherGpus;
 
             Assert.That(copy, Is.Not.SameAs(options));
             Assert.That(copy.Width, Is.EqualTo(64));
@@ -63,6 +70,8 @@ namespace MajdataPlay.Tests.Plugins.FFmpeg
             Assert.That(copy.Format, Is.EqualTo(VideoEncodingFormat.MPEG4));
             Assert.That(copy.PreferredEncoderType, Is.EqualTo(VideoEncoderType.Software));
             Assert.That(copy.RateControlMode, Is.EqualTo(VideoRateControlMode.CBR));
+            Assert.That(copy.HardwareFallbackRoute, Is.EqualTo(HardwareFallbackRoute.SoftwareCodec));
+            Assert.That(copy.HardwareGpus, Is.SameAs(gpus));
         }
 
         /// <summary>Checks that invalid widths are rejected, including odd and out-of-range values.</summary>
@@ -196,6 +205,7 @@ namespace MajdataPlay.Tests.Plugins.FFmpeg
         /// <summary>Checks that undefined enum values are rejected for each enum option.</summary>
         /// <param name="field">The option receiving an undefined value.</param>
         [TestCase("type")]
+        [TestCase("route")]
         [TestCase("format")]
         [TestCase("mode")]
         public void ValidateAndClone_RejectsUndefinedEnums(string field)
@@ -205,6 +215,9 @@ namespace MajdataPlay.Tests.Plugins.FFmpeg
             {
                 case "type":
                     options.PreferredEncoderType = (VideoEncoderType)42;
+                    break;
+                case "route":
+                    options.HardwareFallbackRoute = (HardwareFallbackRoute)42;
                     break;
                 case "format":
                     options.Format = (VideoEncodingFormat)42;
@@ -238,6 +251,62 @@ namespace MajdataPlay.Tests.Plugins.FFmpeg
             Assert.That(options.HardwareDeviceDescription, Is.Null);
             Assert.That(options.AcquireD3D11Device, Is.Null);
             Assert.That(options.FallbackHardwareOptions, Is.Null);
+            Assert.That(options.HardwareFallbackRoute, Is.EqualTo(HardwareFallbackRoute.OtherGpus));
+            Assert.That(options.HardwareGpus, Is.Null);
+        }
+
+        /// <summary>Checks that options for an independent device keep scalar settings but drop everything bound to Unity's renderer.</summary>
+        [Test]
+        public void DecoderOptions_CopyForIndependentDevice_DropsRendererBindings()
+        {
+            var gpus = new[] { new HardwareGpu("0", "GPU", HardwareGpu.NvidiaVendorId, 0x2504) };
+            var options = new DecoderOptions
+            {
+                IOTimeoutMilliseconds = 1234,
+                MaximumPixelCount = 4096,
+                ThreadCount = 3,
+                ConversionThreadCount = 2,
+                KeepNativeFrames = true,
+                AllowHardwareCpuUpload = true,
+                HardwareDeviceDescription = "renderer",
+                HardwareDeviceType = global::FFmpeg.AutoGen.AVHWDeviceType.AV_HWDEVICE_TYPE_D3D12VA,
+                HardwareFallbackRoute = HardwareFallbackRoute.OtherGpus,
+                HardwareGpus = gpus,
+                AcquireD3D11Device = () => IntPtr.Zero,
+                AcquireHardwareDevice = () => IntPtr.Zero,
+                MapHardwareFrame = frame => frame,
+                CreateHardwareSession = (_, _) => null,
+                CreateHardwareSynchronization = _ => null!,
+                CreateHardwareFrameMapper = _ => null!,
+                ConfigureHardwareFrames = _ => 0,
+                WaitForHardwareFrame = (_, _, _) => { },
+                FallbackHardwareOptions = new DecoderOptions()
+            };
+
+            var copy = options.CopyForIndependentDevice(global::FFmpeg.AutoGen.AVHWDeviceType.AV_HWDEVICE_TYPE_D3D11VA);
+
+            Assert.That(copy, Is.Not.SameAs(options));
+            Assert.That(copy.HardwareDeviceType, Is.EqualTo(global::FFmpeg.AutoGen.AVHWDeviceType.AV_HWDEVICE_TYPE_D3D11VA));
+            Assert.That(copy.IOTimeoutMilliseconds, Is.EqualTo(1234));
+            Assert.That(copy.MaximumPixelCount, Is.EqualTo(4096));
+            Assert.That(copy.ThreadCount, Is.EqualTo(3));
+            Assert.That(copy.ConversionThreadCount, Is.EqualTo(2));
+            Assert.That(copy.AllowHardwareCpuUpload, Is.True);
+            Assert.That(copy.HardwareFallbackRoute, Is.EqualTo(HardwareFallbackRoute.OtherGpus));
+            Assert.That(copy.HardwareGpus, Is.SameAs(gpus));
+            Assert.That(copy.KeepNativeFrames, Is.False);
+            Assert.That(copy.HardwareDeviceDescription, Is.Null);
+            Assert.That(copy.FallbackHardwareOptions, Is.Null);
+            Assert.That(copy.AcquireD3D11Device, Is.Null);
+            Assert.That(copy.AcquireHardwareDevice, Is.Null);
+            Assert.That(copy.MapHardwareFrame, Is.Null);
+            Assert.That(copy.CreateHardwareSession, Is.Null);
+            Assert.That(copy.CreateHardwareSynchronization, Is.Null);
+            Assert.That(copy.CreateHardwareFrameMapper, Is.Null);
+            Assert.That(copy.ConfigureHardwareFrames, Is.Null);
+            Assert.That(copy.WaitForHardwareFrame, Is.Null);
+            Assert.That(options.KeepNativeFrames, Is.True);
+            Assert.That(options.AcquireHardwareDevice, Is.Not.Null);
         }
 
         /// <summary>Checks that a decoder options copy is shallow: values are copied and callbacks are shared.</summary>

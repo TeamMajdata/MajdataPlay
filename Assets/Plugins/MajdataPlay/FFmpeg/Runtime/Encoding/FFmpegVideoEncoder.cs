@@ -101,8 +101,13 @@ namespace MajdataPlay.FFmpeg
         /// <summary>Gets whether the opened encoder receives <see cref="MaximumBitRate"/> as a rate limit or budget.</summary>
         /// <remarks>False for Android MediaCodec, which accepts a target bitrate and mode but no peak rate. True before opening.</remarks>
         public bool IsMaximumBitRateEnforced => !(_mediaCodecSelection.HasValue && EncoderType == VideoEncoderType.Hardware);
-        /// <summary>Gets the reason hardware preference fell back to software, or null when no fallback occurred.</summary>
+        /// <summary>Gets the reason hardware preference fell back to another GPU or to software, or null when no fallback occurred.</summary>
         public string? HardwareFallbackReason { get; private set; }
+        /// <summary>Gets how hardware preference continues when Unity's renderer GPU cannot encode the requested format.</summary>
+        public HardwareFallbackRoute HardwareFallbackRoute => _options.HardwareFallbackRoute;
+        /// <summary>Gets a diagnostic description of the GPU or other device running the selected encoder, or null before opening.</summary>
+        /// <remarks>Software encoding reports <c>Software</c>; hardware encoding names the GPU and its relationship to Unity's renderer when it was selected explicitly.</remarks>
+        public string? EncoderDevice { get; private set; }
         /// <summary>Gets the current compressed video bitrate estimated over up to one recording second, in bits per second.</summary>
         public long CurrentBitRate => Interlocked.Read(ref _currentBitRate);
         /// <summary>Gets the number of frames accepted by the encoder; delayed packets are finalized by Complete.</summary>
@@ -213,7 +218,7 @@ namespace MajdataPlay.FFmpeg
                 CheckOutput(ffmpeg.avformat_write_header(_format, null), "Write video header");
                 _opened = true;
                 MajDebug.LogInfo("FFmpeg", "[Encoder] Opened encoder=" + EncoderName + ", backend=" + EncoderType
-                    + ", mode=" + RateControlMode + ", target=" + _options.BitRate + ", maximum=" + _codec->rc_max_rate
+                    + ", device=" + EncoderDevice + ", mode=" + RateControlMode + ", target=" + _options.BitRate + ", maximum=" + _codec->rc_max_rate
                     + (IsMaximumBitRateEnforced ? string.Empty : " (not enforced by MediaCodec)")
                     + (_mediaCodecSelection.HasValue ? ", component=" + _mediaCodecSelection.Value.ComponentName
                         + ", input=" + _mediaCodecSelection.Value.PixelFormat : string.Empty)
@@ -356,6 +361,7 @@ namespace MajdataPlay.FFmpeg
         }
 
         /// <summary>Attempts hardware implementations first when requested, then known software implementations of the same format.</summary>
+        /// <remarks>On Windows and Linux, hardware candidates run on Unity's renderer GPU first and then, as the fallback route allows, on the remaining GPUs.</remarks>
         /// <exception cref="NotSupportedException">No installed implementation satisfies the requested format, mode, and rate limit.</exception>
         /// <exception cref="OperationCanceledException">Cancellation was requested.</exception>
         private void SelectEncoder()
@@ -369,11 +375,10 @@ namespace MajdataPlay.FFmpeg
 
             if (_options.PreferredEncoderType == VideoEncoderType.Hardware)
             {
-                var prefix = _options.Format.ToString().ToLowerInvariant();
                 if (_options.Format != VideoEncodingFormat.MPEG4)
                 {
 #if UNITY_EDITOR_WIN || UNITY_STANDALONE_WIN
-                    if (TryEncoder(prefix + "_nvenc", true, failures) || TryEncoder(prefix + "_amf", true, failures))
+                    if (TryGpuEncoders(failures))
                     {
                         return;
                     }
@@ -390,7 +395,7 @@ namespace MajdataPlay.FFmpeg
 #elif UNITY_IOS && !UNITY_EDITOR
                     failures.Append("VideoToolbox cannot verify hardware-only encoding through this iOS FFmpeg wrapper; ");
 #elif UNITY_EDITOR_LINUX || UNITY_STANDALONE_LINUX
-                    if (TryEncoder(prefix + "_nvenc", true, failures) || TryEncoder(prefix + "_vaapi", true, failures))
+                    if (TryGpuEncoders(failures))
                     {
                         return;
                     }
@@ -424,6 +429,77 @@ namespace MajdataPlay.FFmpeg
                     + " and the requested rate limit. Rebuild FFmpeg with the required encoder and muxer; formats are not substituted. " + failures);
             }
         }
+
+#if UNITY_EDITOR_WIN || UNITY_STANDALONE_WIN || UNITY_EDITOR_LINUX || UNITY_STANDALONE_LINUX
+        /// <summary>Tries the checked hardware encoder of Unity's renderer GPU, then of each remaining GPU when the fallback route allows.</summary>
+        /// <param name="failures">The startup diagnostics receiving rejected candidate reasons.</param>
+        /// <returns>True when a hardware encoder opened and became the selected encoder.</returns>
+        /// <exception cref="OperationCanceledException">Cancellation was requested.</exception>
+        /// <exception cref="OutOfMemoryException">A codec context or device reference cannot be allocated.</exception>
+        private bool TryGpuEncoders(StringBuilder failures)
+        {
+            var prefix = _options.Format.ToString().ToLowerInvariant();
+            var gpus = _options.HardwareGpus != null
+                ? HardwareGpuCatalog.Restrict(_options.HardwareGpus, _options.HardwareFallbackRoute)
+                : HardwareGpuCatalog.GetCandidates(_options.HardwareFallbackRoute);
+            if (gpus.Count == 0)
+            {
+                // Without a GPU list, FFmpeg's default devices stand in for Unity's renderer GPU.
+#if UNITY_EDITOR_WIN || UNITY_STANDALONE_WIN
+                return TryEncoder(prefix + "_nvenc", true, failures) || TryEncoder(prefix + "_amf", true, failures);
+#else
+                return TryEncoder(prefix + "_nvenc", true, failures) || TryEncoder(prefix + "_vaapi", true, failures);
+#endif
+            }
+
+            foreach (var gpu in gpus)
+            {
+                var name = GetGpuEncoderName(prefix, gpu);
+                if (name == null)
+                {
+                    failures.Append(gpu).Append(" has no checked hardware encoder; ");
+                    continue;
+                }
+
+                if (TryEncoder(name, true, failures, gpu))
+                {
+                    if (gpu.Role == HardwareGpuRole.Other)
+                    {
+                        HardwareFallbackReason = failures.ToString().Trim() + " Encoding on " + gpu + ".";
+                        MajDebug.LogWarning("FFmpeg", "[Encoder] " + HardwareFallbackReason);
+                    }
+
+                    return true;
+                }
+            }
+
+            if (_options.HardwareFallbackRoute == HardwareFallbackRoute.SoftwareCodec)
+            {
+                failures.Append("Other GPUs were not tried because the fallback route is ").Append(_options.HardwareFallbackRoute).Append("; ");
+            }
+
+            return false;
+        }
+
+        /// <summary>Selects the checked hardware encoder for a GPU's vendor.</summary>
+        /// <param name="prefix">The lowercase format prefix, such as <c>h264</c>.</param>
+        /// <param name="gpu">The GPU that would run the encoder.</param>
+        /// <returns>The FFmpeg encoder name, or null when the vendor has no checked encoder on this platform.</returns>
+        private static string? GetGpuEncoderName(string prefix, HardwareGpu gpu)
+        {
+#if UNITY_EDITOR_WIN || UNITY_STANDALONE_WIN
+            return gpu.VendorId switch
+            {
+                HardwareGpu.NvidiaVendorId => prefix + "_nvenc",
+                HardwareGpu.AmdVendorId => prefix + "_amf",
+                _ => null
+            };
+#else
+            // NVIDIA's VAAPI driver only decodes, so NVIDIA GPUs encode through NVENC.
+            return gpu.VendorId == HardwareGpu.NvidiaVendorId ? prefix + "_nvenc" : prefix + "_vaapi";
+#endif
+        }
+#endif
 
         /// <summary>Opens an Android hardware MediaCodec component chosen from <c>MediaCodecList</c> for the requested recording mode.</summary>
         /// <param name="failures">The startup diagnostics receiving rejected candidate reasons.</param>
@@ -483,16 +559,18 @@ namespace MajdataPlay.FFmpeg
         /// <param name="name">The exact FFmpeg encoder name.</param>
         /// <param name="hardware">Whether this candidate requires hardware compression.</param>
         /// <param name="failures">The startup diagnostics receiving rejected candidate reasons.</param>
+        /// <param name="gpu">The GPU that must run a hardware candidate, or null for FFmpeg's default device or software.</param>
         /// <returns>True when the candidate opened and became the selected encoder.</returns>
         /// <exception cref="OperationCanceledException">Cancellation was requested.</exception>
-        /// <exception cref="OutOfMemoryException">The codec context cannot be allocated.</exception>
-        private bool TryEncoder(string name, bool hardware, StringBuilder failures)
+        /// <exception cref="OutOfMemoryException">The codec context or a device reference cannot be allocated.</exception>
+        private bool TryEncoder(string name, bool hardware, StringBuilder failures, HardwareGpu? gpu = null)
         {
             _cancellation.ThrowIfCancellationRequested();
+            var candidate = gpu == null ? name : name + " on " + gpu;
             var codec = ffmpeg.avcodec_find_encoder_by_name(name);
             if (codec == null)
             {
-                failures.Append(name).Append(" is not compiled in; ");
+                failures.Append(candidate).Append(" is not compiled in; ");
                 return false;
             }
 
@@ -533,9 +611,14 @@ namespace MajdataPlay.FFmpeg
                 }
 
                 ConfigureRateControl(name);
+                if (gpu != null)
+                {
+                    BindGpu(name, gpu);
+                }
+
                 if (name.EndsWith("_vaapi", StringComparison.Ordinal))
                 {
-                    ConfigureVaapi();
+                    ConfigureVaapi(gpu?.Device);
                 }
                 else if (_mediaCodecSelection.HasValue && name.EndsWith("_mediacodec", StringComparison.Ordinal))
                 {
@@ -555,15 +638,70 @@ namespace MajdataPlay.FFmpeg
 
                 EncoderName = name;
                 EncoderType = hardware ? VideoEncoderType.Hardware : VideoEncoderType.Software;
+                EncoderDevice = !hardware ? "Software"
+                    : gpu != null ? gpu.ToString()
+                    : _mediaCodecSelection.HasValue ? "MediaCodec component " + _mediaCodecSelection.Value.ComponentName
+                    : "FFmpeg default hardware device";
                 UpdateThreadDiagnostics(hardware);
                 return true;
             }
             catch (Exception error) when (error is InvalidOperationException || error is NotSupportedException)
             {
-                failures.Append(name).Append(": ").Append(error.Message).Append("; ");
+                failures.Append(candidate).Append(": ").Append(error.Message).Append("; ");
                 ReleaseCodec();
                 return false;
             }
+        }
+
+        /// <summary>Binds an NVENC or AMF candidate to one GPU before it opens.</summary>
+        /// <param name="name">The exact FFmpeg encoder name.</param>
+        /// <param name="gpu">The GPU that must run the encoder.</param>
+        /// <remarks>VAAPI candidates are bound through their render node in <see cref="ConfigureVaapi"/>.</remarks>
+        /// <exception cref="InvalidOperationException">The GPU's device cannot be created or the encoder rejects the selection.</exception>
+        /// <exception cref="NotSupportedException">The GPU cannot be mapped to a device that the encoder can select.</exception>
+        /// <exception cref="OutOfMemoryException">A device reference cannot be retained.</exception>
+        private void BindGpu(string name, HardwareGpu gpu)
+        {
+#if UNITY_EDITOR_WIN || UNITY_STANDALONE_WIN || UNITY_EDITOR_LINUX || UNITY_STANDALONE_LINUX
+            if (name.EndsWith("_nvenc", StringComparison.Ordinal))
+            {
+                // NVENC uploads CPU frames into its own CUDA context, so the CUDA ordinal selects
+                // the GPU. A session on a supplied D3D11 device opened but rejected CPU frames
+                // with EINVAL on the tested NVIDIA driver.
+                if (!CudaDeviceQuery.TryGetOrdinal(gpu, out var ordinal))
+                {
+                    throw new NotSupportedException("No CUDA device matches this GPU's adapter LUID or PCI location.");
+                }
+
+                SetOption("gpu", ordinal.ToString(CultureInfo.InvariantCulture));
+            }
+#endif
+#if UNITY_EDITOR_WIN || UNITY_STANDALONE_WIN
+            if (name.EndsWith("_amf", StringComparison.Ordinal))
+            {
+                // AMF derives its context from a supplied D3D11 device, so the DXGI adapter
+                // selects the GPU; the encoder still uploads the CPU input frames.
+                CreateHardwareDevice(AVHWDeviceType.AV_HWDEVICE_TYPE_D3D11VA, gpu.Device, "Create D3D11 encoder device");
+                _codec->hw_device_ctx = ffmpeg.av_buffer_ref(_hardwareDevice);
+                if (_codec->hw_device_ctx == null)
+                {
+                    throw new OutOfMemoryException("Cannot retain the D3D11 encoder device.");
+                }
+            }
+#endif
+        }
+
+        /// <summary>Creates the candidate's owned FFmpeg hardware device.</summary>
+        /// <param name="type">The FFmpeg hardware device type.</param>
+        /// <param name="device">The device string selecting a GPU, or null for FFmpeg's default device.</param>
+        /// <param name="operation">The operation name reported if creation fails.</param>
+        /// <exception cref="InvalidOperationException">FFmpeg cannot create the device.</exception>
+        private void CreateHardwareDevice(AVHWDeviceType type, string? device, string operation)
+        {
+            AVBufferRef* created = null;
+            var result = ffmpeg.av_hwdevice_ctx_create(&created, type, device, null, 0);
+            _hardwareDevice = created;
+            Check(result, operation);
         }
 
         /// <summary>Captures the opened codec's worker count and threading mode for diagnostics.</summary>
@@ -755,15 +893,12 @@ namespace MajdataPlay.FFmpeg
         }
 
         /// <summary>Creates a VAAPI device and an NV12 hardware frame pool for explicit CPU-to-GPU upload.</summary>
+        /// <param name="renderNode">The DRM render node of the selected GPU, or null for FFmpeg's default render node search.</param>
         /// <exception cref="InvalidOperationException">VAAPI device or pool initialization fails.</exception>
         /// <exception cref="OutOfMemoryException">A device frame pool reference cannot be allocated.</exception>
-        private void ConfigureVaapi()
+        private void ConfigureVaapi(string? renderNode)
         {
-            AVBufferRef* device = null;
-            var result = ffmpeg.av_hwdevice_ctx_create(&device, AVHWDeviceType.AV_HWDEVICE_TYPE_VAAPI,
-                "/dev/dri/renderD128", null, 0);
-            _hardwareDevice = device;
-            Check(result, "Create VAAPI encoder device");
+            CreateHardwareDevice(AVHWDeviceType.AV_HWDEVICE_TYPE_VAAPI, renderNode, "Create VAAPI encoder device");
             _hardwareFrames = ffmpeg.av_hwframe_ctx_alloc(_hardwareDevice);
             if (_hardwareFrames == null)
             {

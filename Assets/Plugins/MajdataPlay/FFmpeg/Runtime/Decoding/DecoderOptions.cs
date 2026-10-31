@@ -1,7 +1,9 @@
 #nullable enable
 using System;
+using System.Collections.Generic;
 using System.Threading;
 using FFmpeg.AutoGen;
+using MajdataPlay.FFmpeg.Interop;
 
 namespace MajdataPlay.FFmpeg.Internal
 {
@@ -42,6 +44,17 @@ namespace MajdataPlay.FFmpeg.Internal
         public bool RequireHardwareDecoding { get; set; }
         /// <summary>Gets or sets the requested FFmpeg hardware backend, or <see cref="AVHWDeviceType.AV_HWDEVICE_TYPE_NONE"/> for software decoding.</summary>
         public AVHWDeviceType HardwareDeviceType { get; set; } = AVHWDeviceType.AV_HWDEVICE_TYPE_NONE;
+        /// <summary>Gets or sets how hardware decoding continues when the GPU that renders Unity cannot decode the stream.</summary>
+        /// <remarks>
+        /// <see cref="FFmpeg.HardwareFallbackRoute.OtherGpus"/> tries hardware decoding with CPU texture upload on each remaining
+        /// GPU before software decoding. Other GPUs are only listed for Windows D3D11VA and Linux VAAPI, and only when
+        /// <see cref="AllowHardwareCpuUpload"/> is enabled without <see cref="RequireHardwareDecoding"/>.
+        /// <see cref="FFmpeg.HardwareFallbackRoute.SoftwareCodec"/> decodes in software instead.
+        /// </remarks>
+        public HardwareFallbackRoute HardwareFallbackRoute { get; set; } = HardwareFallbackRoute.OtherGpus;
+        /// <summary>Gets or sets the ordered GPUs for independent hardware devices, Unity's renderer first, or null to enumerate the system.</summary>
+        /// <remarks>The decoder still applies <see cref="HardwareFallbackRoute"/> and CPU upload restrictions to a supplied list.</remarks>
+        internal IReadOnlyList<HardwareGpu>? HardwareGpus { get; set; }
         /// <summary>Gets or sets a worker callback that acquires a D3D11 decoding device compatible with the presentation adapter.</summary>
         /// <remarks>
         /// The callback returns an <c>ID3D11Device</c> pointer with an added reference, or <see cref="IntPtr.Zero"/> if unavailable.
@@ -81,6 +94,28 @@ namespace MajdataPlay.FFmpeg.Internal
         /// <summary>Creates a shallow options copy, retaining callback and fallback references.</summary>
         /// <returns>A shallow copy with the same option values and callback references.</returns>
         internal DecoderOptions Copy() => (DecoderOptions)MemberwiseClone();
+
+        /// <summary>Creates a copy for an independent hardware device that may run on another GPU and uploads frames through the CPU.</summary>
+        /// <param name="deviceType">The FFmpeg hardware backend of the independent device.</param>
+        /// <returns>A copy without native frame retention, fallback options, or callbacks bound to Unity's graphics device.</returns>
+        internal DecoderOptions CopyForIndependentDevice(AVHWDeviceType deviceType)
+        {
+            var options = Copy();
+            options.HardwareDeviceType = deviceType;
+            options.KeepNativeFrames = false;
+            options.HardwareDeviceDescription = null;
+            options.FallbackHardwareOptions = null;
+            // Every device and frame callback targets Unity's renderer; clear new callbacks here as well.
+            options.AcquireD3D11Device = null;
+            options.AcquireHardwareDevice = null;
+            options.MapHardwareFrame = null;
+            options.CreateHardwareSession = null;
+            options.CreateHardwareSynchronization = null;
+            options.CreateHardwareFrameMapper = null;
+            options.ConfigureHardwareFrames = null;
+            options.WaitForHardwareFrame = null;
+            return options;
+        }
     }
 
     /// <summary>Converts hardware frames on their owning worker so presentation does not enter the decoder context.</summary>

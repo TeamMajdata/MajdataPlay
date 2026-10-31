@@ -55,6 +55,7 @@ public sealed class VideoExample : MonoBehaviour
 | `PreferredDecoderType` | Software 使用 FFmpeg 软件解码；Hardware 优先硬件后端，依次尝试 GPU 共享、硬件解码加 CPU 上传、软件解码 |
 | `PreferNativeTextures` | 默认 true；false 可直接选择硬件解码加 CPU 上传，便于兼容性排查 |
 | `RequireHardwareDecoding` | 保留已有严格 GPU 模式语义，覆盖上述偏好；硬件共享不支持或运行中失败时报告错误，禁止 CPU 上传及软件回退 |
+| `HardwareFallbackRoute` | Unity 渲染用显卡无法硬解时的回退路线：默认 `OtherGpus` 依次尝试其余显卡（硬解 + CPU 上传），全部失败再软解；`SoftwareCodec` 直接软解。下次打开媒体时生效，严格 GPU 模式只使用 Unity 显卡 |
 | `Prepared`, `Started`, `Paused`, `Stopped`, `EndReached`, `SeekCompleted` | 主线程事件 |
 | `TextureChanged`, `FrameReady`, `TimeChanged`, `ErrorReceived` | 输出变化、帧序号、毫秒位置、错误信息 |
 
@@ -109,6 +110,8 @@ CPU RGBA 上传路径按 `DecoderOptions.ConversionThreadCount`（默认在逻�
 Metal 的平面映射和 Windows OpenGL 的纹理映射不复制像素，但最终 RGBA 显示包含 GPU 转换。Windows 四条硬件路径都避免 CPU 像素回读/上传；D3D12、Vulkan 仍有 GPU copy，不能将其称为严格的端到端零拷贝。外部纹理必须保留帧引用直到 GPU 完成；原生桥接承担此生命周期，不应自行释放返回的 Texture。
 
 非严格模式下，共享不可用时仍先保留硬件解码：D3D11VA/VAAPI/VideoToolbox 在工作线程下载原始硬件帧并转为 RGBA；Android 重开无 Surface 的 MediaCodec 硬件 ByteBuffer 输出。Unity 主线程只上传已准备的 RGBA。该路径报告 `Hardware decode + CPU RGBA upload`，确实包含 CPU 像素传输；它失败后才改用 `Software RGBA upload`。恢复会保留播放/暂停状态与可 seek 输入的时间位置，输入打开及 I/O 仍在工作线程执行。
+
+多显卡回退：Windows 通过 DXGI 枚举硬件适配器（排除 Microsoft Basic Render Driver 等软件适配器，序号即 FFmpeg D3D11VA 设备字符串），Linux 通过 `/sys/class/drm/renderD*` 枚举 DRM render node（跳过 `vgem`）。Unity 渲染用显卡按 `SystemInfo` 的 PCI vendor/device ID 识别并排在首位；识别不到时以系统默认（第一个）适配器代替。PCI ID 与名称完全相同的显卡只保留第一个：相同型号的编解码能力一致，虚拟显示适配器（如 MuMu、GameViewer）也会重复列出其渲染显卡。`HardwareFallbackRoute = OtherGpus` 时，Unity 显卡上的全部硬件路径（共享纹理、原生后端、硬解 + CPU 上传）创建设备、打开解码器失败或在 `get_format` 拒绝硬件格式后，解码器在同一工作线程上于下一块显卡创建独立 D3D11VA/VAAPI 设备，把尚未释放的同一 packet 重新送入，继续硬解并经 CPU 上传；其他显卡的纹理无法与 Unity 共享，因此这条路径必然包含 CPU 像素传输。所有显卡都失败后才打开多线程软件解码器。为保证拒绝发生在 packet 仍待发送时，还有后续显卡可试的硬件 codec 使用单线程。`SoftwareCodec` 或 `RequireHardwareDecoding` 时不尝试其他显卡。`DecoderDevice` 会注明设备序号/路径、PCI ID 及“Unity renderer GPU”/“other GPU”，`HardwareFallbackReason` 记录各显卡的失败原因。macOS/iOS 的 VideoToolbox 与 Android MediaCodec 由系统选择硬件，两种路线行为相同。
 
 Windows/Linux/Android 的 Vulkan 桥接必须保持 PluginImporter 的 **Preload** 开启，以便在 Unity 创建设备前协商视频队列、扩展和功能；Apple 桥接使用显式注册。替换原生库或更改该设置后重启 Editor。Windows/Linux/Android 桥接 ABI 为 **4**，Apple 保持 **2**。D3D12 需要 Unity D3D12 V8 插件接口，原生解码要求设备支持相应视频解码与视频处理格式；OpenGL 需要 WGL_NV_DX_interop2；Windows Vulkan 的 D3D11VA 共享回退需要 Win32 外部内存与 keyed mutex。
 
@@ -195,6 +198,7 @@ await capturer.StopRecordingAsync();
 | `StopRecordingAsync()` | 等待 GPU 请求、编码延迟包、文件尾和资源释放；编码/写入失败会抛出异常 |
 | `State`, `IsRecording`, `IsPaused`, `CanStartRecording`, `OutputPath`, `LastError` | 生命周期和诊断；CanStartRecording 表示组件启用且旧会话/GPU 资源已关闭，不验证设置和路径 |
 | `EncoderName`, `EncoderType`, `RateControlMode` | 实际 AVCodec、实际软件/硬件后端、实际 CBR/VBR；初始化前为 null |
+| `EncoderDevice` | 实际编码设备：软件为 `Software`，硬件注明所用显卡及其是否为 Unity 渲染显卡；初始化前为 null |
 | `EncodingFormat`, `Width`, `Height`, `FrameRate` | 当前或最近会话的固定录制格式/尺寸/时间基准 |
 | `BitRate`, `MaximumBitRate`, `SoftwareThreadCount` | 会话目标、有效最大码率（bit/s）、实际 FFmpeg 软件 codec worker 数；硬件为 0 |
 | `PreferGpuColorConversion`, `UsesGpuColorConversion`, `ConverterThreadCount` | 下次录制是否优先 GPU NV12 转换；当前或最近会话是否实际使用 GPU 转换；CPU 转换线程数（GPU 转换或开始前为 0） |
@@ -204,6 +208,8 @@ await capturer.StopRecordingAsync();
 | `Started`, `Stopped`, `ErrorReceived` | 主线程事件；Stopped 表示资源关闭，错误状态需同时检查 LastError |
 
 CBR 设置目标码率以及相同的 min/max；VBR 使用独立目标和最大码率。VBV 后端通过约 1 秒缓冲限制，单帧和短时窗口仍会波动；libvpx/libaom 的 CBR 和单遍 VBR 均使用原生码率预算，复杂画面可能超出预算，也不保证低复杂度画面填满目标码率，`MaximumBitRate` 不表示每帧或瞬时负载硬上限。软件线程数限制 FFmpeg codec worker，不包含应用采集线程和驱动的辅助线程。硬件偏好仅回退到**同格式**的软件实现，不会偷偷改换编码格式；不支持请求的模式/码率约束时明确失败。
+
+`EncoderOptions.HardwareFallbackRoute` 决定 Unity 渲染用显卡没有可用硬件编码器时的路线（显卡枚举与识别同上文解码部分）：默认 `OtherGpus` 按系统顺序尝试其余显卡，全部失败再使用同格式软件编码；`SoftwareCodec` 直接使用软件编码。Windows 上 NVIDIA 显卡使用 NVENC：按 DXGI 适配器 LUID 匹配 CUDA 设备序号（`cuDeviceGetLuid`，需要驱动自带的 `nvcuda.dll`）并设置 NVENC 的 `gpu` 选项（在本机 NVIDIA 驱动上，交给 NVENC 一个 D3D11 设备虽能打开会话，但提交 CPU 帧会返回 EINVAL，因此不采用该方式）；AMD 显卡使用 AMF，把该适配器上创建的 D3D11 设备交给编码器派生 AMF 上下文；CPU 帧均由编码器自行上传。Intel 等其他厂商没有经过检查的 Windows 硬件编码器，直接跳到下一块显卡。Linux 上 NVIDIA 显卡使用 NVENC（按 PCI 位置匹配 CUDA 设备序号，需要 `libcuda.so.1`），其他显卡在其 render node 上使用 VAAPI。显卡列表不可用时沿用 FFmpeg 默认设备。成功切换到其他显卡时 `HardwareFallbackReason` 记录 Unity 显卡的失败原因，`EncoderDevice` 报告实际显卡。
 
 Android API 29+ 的 MediaCodec 硬件录制会查询请求的 CBR/VBR 模式、尺寸、帧率、码率范围和 CPU 输入格式，并以实际硬件组件名打开。CBR 选择驱动的恒定码率算法，不要求编码器插入 filler 填满目标；两种模式均不保证最大码率或 VBV 上限，`IsMaximumBitRateEnforced` 为 false。设备不支持所请求的模式时，回退至同格式软件编码并记录具体原因。
 

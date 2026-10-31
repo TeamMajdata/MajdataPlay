@@ -142,6 +142,7 @@ namespace MajdataPlay.FFmpeg.Editor
             EditorGUILayout.LabelField("State", capturer.State.ToString());
             EditorGUILayout.LabelField("Encoder", capturer.EncoderName ?? "Not initialized");
             EditorGUILayout.LabelField("Encoder type", capturer.EncoderType?.ToString() ?? "Not initialized");
+            EditorGUILayout.LabelField("Encoder device", capturer.EncoderDevice ?? "Not initialized");
             EditorGUILayout.LabelField("Rate control", capturer.RateControlMode?.ToString() ?? "Not initialized");
             EditorGUILayout.LabelField("Encoding format", capturer.EncodingFormat?.ToString() ?? "Not started");
             EditorGUILayout.LabelField("Recording size", capturer.Width > 0 ? $"{capturer.Width} x {capturer.Height}" : "Not started");
