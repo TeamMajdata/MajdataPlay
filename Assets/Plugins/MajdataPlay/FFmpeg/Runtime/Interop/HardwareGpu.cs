@@ -22,6 +22,8 @@ namespace MajdataPlay.FFmpeg.Interop
         internal const int NvidiaVendorId = 0x10DE;
         /// <summary>Gets the PCI vendor ID of AMD GPUs.</summary>
         internal const int AmdVendorId = 0x1002;
+        /// <summary>Gets the PCI vendor ID of Intel GPUs.</summary>
+        internal const int IntelVendorId = 0x8086;
 
         /// <summary>Initializes a GPU description that is not yet related to Unity's renderer.</summary>
         /// <param name="device">The FFmpeg device string: a DXGI adapter index on Windows or a DRM render node path on Linux.</param>

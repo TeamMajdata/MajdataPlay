@@ -9,16 +9,18 @@
 `ffmpeg.lock.json` 固定官方 `n9.0.1` 的 commit
 `bf1b838f2ab88b4f8fd83443325c782ea0e0f7fa`。它与项目
 `ThirdParty/FFmpeg.AutoGen/FFmpeg/include` 中的公开头文件逐文件匹配。
-每次构建都会核对 commit、比较绑定头文件（仅归一化 CRLF；排除构建生成的 `avconfig.h`、`ffversion.h`），再应用仓库中的 [AMF 码率控制检查补丁](patches/amf-rate-control.patch) 和 [x265 参数检查补丁](patches/x265-parameter-check.patch)。仅接受这两份补丁的完整源码差异，拒绝其他 tracked 修改；重复构建会校验已应用补丁而不再次修改。补丁不改变公开绑定头文件或 ABI。
+每次构建都会核对 commit、比较绑定头文件（仅归一化 CRLF；排除构建生成的 `avconfig.h`、`ffversion.h`），再应用仓库中的 [AMF 码率控制检查补丁](patches/amf-rate-control.patch)、[x265 参数检查补丁](patches/x265-parameter-check.patch) 和 [QSV 码率控制检查补丁](patches/qsv-rate-control.patch)。仅按此顺序接受这些补丁（或其前缀）的完整源码差异，拒绝其他 tracked 修改；重复构建会校验已应用补丁而不再次修改。补丁不改变公开绑定头文件或 ABI。
 **不要用 FFmpeg 8.x，也不要只改原生库文件名**。库主版本为 avcodec 63、avdevice 63、avfilter 12、avformat 63、avutil 61、swresample 7、swscale 10。
 
 `dependencies.lock.json` 另外固定 Vulkan-Headers SDK 1.4.328.1（commit `19725e4d48082fe78e26622b15d3080ccd54112b`）及 LLVM-MinGW 20260922 的各主机官方压缩包 SHA256。
 同时固定 VideoLAN dav1d 1.5.3 源码和 Meson 1.9.1 wheel 的官方下载地址与 SHA256。正常构建自动下载到忽略缓存，校验解包后的源码，并为每个目标使用 FFmpeg 相同的编译器、SDK、架构和 ABI 构建 PIC 静态 dav1d；不安装全局 Python 包。
 Windows x86/x64 与 Linux 录制同时固定官方 `nv-codec-headers` 的 `n12.1.14.1`、commit `7c8e7fc751f803c672b42c37d9199c8a4f98b327`，核对源码 commit 和工作区后使用其 NVENC 头文件，不安装 CUDA Toolkit，也不打包 NVIDIA 驱动。该 SDK 的最低驱动要求为 Windows 531.61、Linux 530.41.03；对应 GPU 仍须支持请求的编码格式。
 Windows x86/x64 还使用官方 AMF `v1.5.2`、commit `eadd00804d5f7e5cd8c85d540073198312870776` 的头文件；稀疏下载 header 源码并校验 commit 与内容，仅在忽略缓存中生成 `AMF/` include 目录。AMF 动态库由现有 AMD 显卡驱动提供，脚本不安装或打包驱动。固定 FFmpeg 要求此版本头文件；实际 AMF runtime、GPU 与目标格式须在初始化时验证。
+Windows x86/x64 与 Linux x64 的 QSV 录制固定 Intel VPL dispatcher（libvpl）`v2.17.0`、commit `d77f9195cf495b937631607333288fd917ae8939`（MIT）。脚本按 commit 获取源码并拒绝 tracked 修改或额外文件，用 FFmpeg 相同的目标编译器与 CMake 构建 PIC 静态 `libvpl.a`，并改写其 `vpl.pc`：上游文件不含这个 C++ dispatcher 所需的运行库，构建与 x265 一样显式链接静态 C++ 运行库，因此不新增运行时 DLL/so。Linux 将 dispatcher 的模块搜索目录设为 `/usr/lib/x86_64-linux-gnu`，不把构建缓存路径编进库。dispatcher 在运行时加载 Intel 显卡驱动提供的 VPL/Media SDK runtime；脚本不安装或打包驱动。FFmpeg 以 `--enable-libvpl` 构建，并显式禁用全部九个 `*_qsv` 解码器：Intel GPU 的解码继续使用 D3D11VA/VAAPI 及其原生纹理路径。
 Windows、Linux、Android 构建会自动获取并校验这些构建依赖，缓存到项目 `.build/toolchains` 或指定构建缓存，不安装系统软件。Vulkan 头文件须包含 Vulkan Video VP9 扩展；旧版 NDK / 系统 Vulkan 头文件不会覆盖此固定版本。
 未设置 `LLVM_MINGW` 时，Windows 目标使用固定的 LLVM-MinGW，它包含 D3D12 Video 解码所需的新头文件；显式设置时使用开发者提供的工具链，仍检查全部请求的硬件解码后端是否编译启用。
 `--probe` 不下载依赖：全新缓存会报告缺少固定头文件或 Meson，请先执行正常构建。Windows 原生仍需要可工作的 Bash/make；WSL 使用 Linux 主机工具链。
+Windows 原生构建可使用解包到构建缓存的便携 MSYS2：`FFMPEG_BASH` 指向其 `usr/bin/bash.exe`，并通过 pacman 安装 `make diffutils perl pkgconf mingw-w64-x86_64-nasm`（libvpx configure 需要 Perl）；PATH 需能找到 `pkg-config.exe`、`nasm.exe` 和 Ninja，`FFMPEG_ENCODER_CMAKE` 可指向 Unity Android SDK 自带的 CMake 3.22。2026-10-31 的 Windows x86/x64 产物即按此方式构建，详见 [BUILD-RESULTS.md](BUILD-RESULTS.md)。
 
 ## 一键命令
 
@@ -119,9 +121,9 @@ Linux/Android 默认没有外部 TLS 后端，支持本地文件和 HTTP；HTTPS
 | 录制目标 | 显式启用的 encoder | 显式启用的 muxer |
 | --- | --- | --- |
 | 全部平台 | `libx264`（H.264）、`libx265`（HEVC/H.265）、`libvpx-vp9`（VP9）、`libaom-av1`（AV1）、`mpeg4` 软件编码（CBR/VBR）；MPEG4 构建依赖会额外启用 `h263`；音频提供 `aac`、`libopus`、`libmp3lame` 和 31 种通用 `pcm_*` encoder | `mov`、`mp4`、`matroska`、`webm`、`avi`、`adts`、`latm`、`ogg`、`opus`、`mp3`、`wav` |
-| Windows x86/x64 | `h264_nvenc`、`hevc_nvenc`、`av1_nvenc`；`h264_amf`、`hevc_amf`、`av1_amf` | 同上 |
-| Windows ARM64 | 上述软件视频和音频 encoder；显式禁用 AMF、ffnvcodec/NVENC、NVDEC/CUVID | 同上 |
-| Linux x64 | 上述 NVENC，以及 `h264_vaapi`、`hevc_vaapi`、`vp9_vaapi`、`av1_vaapi` | 同上 |
+| Windows x86/x64 | `h264_nvenc`、`hevc_nvenc`、`av1_nvenc`；`h264_amf`、`hevc_amf`、`av1_amf`；`h264_qsv`、`hevc_qsv`、`av1_qsv`、`vp9_qsv` | 同上 |
+| Windows ARM64 | 上述软件视频和音频 encoder；显式禁用 AMF、ffnvcodec/NVENC、NVDEC/CUVID，不启用 libvpl/QSV | 同上 |
+| Linux x64 | 上述 NVENC 与 QSV，以及 `h264_vaapi`、`hevc_vaapi`、`vp9_vaapi`、`av1_vaapi` | 同上 |
 | macOS / iOS | `h264_videotoolbox` | 同上 |
 | Android ARM64 / ARMv7 | `h264_mediacodec`、`hevc_mediacodec`、`vp8_mediacodec`、`vp9_mediacodec`、`mpeg4_mediacodec`、`av1_mediacodec` | 同上 |
 
@@ -155,9 +157,13 @@ H.264 CBR 使用等目标/最大 VBV、filler 和 MP4 兼容的 VBR HRD 信令�
 
 上述硬件条目是构建入口。硬件不存在、驱动过旧、不支持请求格式或码率模式时仍会失败/回退；新 `FFmpegCameraCapturer` 的实际 encoder/type/rate-control 信息以成功打开的会话为准。它不选择 MediaFoundation 和 HEVC VideoToolbox：固定 FFmpeg 源码中的这些包装器未对请求的最大码率/码率模式提供充分的可检查配置结果，不能将请求值冒充已生效值。Android MediaCodec 按设备能力支持 CBR/VBR，且明确报告最大码率不受保证（见上文 Android 段落）。用户自建的同 ABI 库可提供 NVENC/AMF、x264/x265/libvpx/libaom 等组件实际支持的入口，仍须按该构建的许可证与运行时依赖分发。
 
-上游 AMF 包装器会忽略若干驱动属性设置错误。录制补丁检查码率模式、VBV 缓冲、目标/峰值码率、HRD 与 CBR filler 的设置和回读，并在驱动拒绝请求时让编码器打开失败。构建用 `--extra-version=MajdataPlay-AMF-RC-v1-<补丁 SHA256 前12位>` 标记此能力；C# 录制器只接受与当前补丁匹配的 AMF 原生库，旧 AMF 库会被拒绝并按同格式回退。修改补丁时须同步 C# 中的能力标记。`sourcePatches` 在两份构建清单中记录完整 SHA256，交付目录附带原始补丁，方便按固定源码重建。
+上游 AMF 包装器会忽略若干驱动属性设置错误。录制补丁检查码率模式、VBV 缓冲、目标/峰值码率、HRD 与 CBR filler 的设置和回读，并在驱动拒绝请求时让编码器打开失败。构建用 `--extra-version=MajdataPlay-AMF-RC-v1-<补丁 SHA256 前12位>` 标记此能力；C# 录制器只接受与当前补丁匹配的 AMF 原生库，旧 AMF 库会被拒绝并按同格式回退。修改补丁时须同步 C# 中的能力标记。
 
-构建时逐个检查录制 encoder/muxer 的配置符号，缺少任一项就失败。`build-provenance.json` 和交付 `build-manifest.json` 的 `recordingProfile` 保存显式列表；Windows/Linux 产物附带 `nv-codec-headers.LICENSE.txt`，Windows 另外携带 `AMF.LICENSE.txt`。2026-10-05 已按此配置重建并更新全部八个正式 Unity 平台/架构插件，以及两个独立 iOS 模拟器包；具体构建与实测边界见 [BUILD-RESULTS.md](BUILD-RESULTS.md) 和 [APPLE-RESULTS.md](APPLE-RESULTS.md)。历史播放专用库使用 `--disable-encoders --disable-muxers`，仍需重建才能录制；更新原生库后须重启已加载旧库的 Editor/Player。
+上游 QSV 包装器在 `MFXVideoENCODE_Query` / `Init` 返回正值警告时直接接受 runtime 修正后的参数，`GetVideoParam` 读回的码率控制也只用于日志。QSV 补丁在 Query 前记录请求的码率模式及经 `BRCParamMultiplier` 换算后的目标码率、VBR 峰值码率和 VBV 缓冲，在 Init 与读回参数之后逐项比较；任何一项被 runtime 改动都会让编码器打开失败。构建用 `MajdataPlay-QSV-RC-v1-<补丁 SHA256 前12位>` 标记此能力，C# 录制器只在原生库带有当前标记时选用 QSV。QSV 没有独立的码率模式选项：目标码率等于最大码率时包装器选择 CBR，因此托管层拒绝峰值等于目标的 VBR 请求，而不是悄悄改为 CBR。
+
+`sourcePatches` 在两份构建清单中记录完整 SHA256，交付目录附带原始补丁，方便按固定源码重建。
+
+构建时逐个检查录制 encoder/muxer 的配置符号，缺少任一项就失败。`build-provenance.json` 和交付 `build-manifest.json` 的 `recordingProfile` 保存显式列表；Windows/Linux 产物附带 `nv-codec-headers.LICENSE.txt`，Windows 另外携带 `AMF.LICENSE.txt`；启用 QSV 的 Windows x86/x64 与 Linux x64 产物另附带 `libvpl.LICENSE.txt`，清单的 `qsvDispatcherBuild` 记录静态 dispatcher 的源码与归档 SHA256。2026-10-05 已按此配置重建并更新全部八个正式 Unity 平台/架构插件，以及两个独立 iOS 模拟器包；具体构建与实测边界见 [BUILD-RESULTS.md](BUILD-RESULTS.md) 和 [APPLE-RESULTS.md](APPLE-RESULTS.md)。历史播放专用库使用 `--disable-encoders --disable-muxers`，仍需重建才能录制；更新原生库后须重启已加载旧库的 Editor/Player。
 
 输出位置：
 

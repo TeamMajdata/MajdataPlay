@@ -94,7 +94,7 @@ AV1 原生 `av1` 和软件 `libdav1d` 不能互换解释。播放器在软件模
 | VideoToolbox | macOS x64/ARM64、iOS device/simulator | AV1、H.263、H.264、HEVC、MPEG-1 Video、MPEG-2 Video、MPEG-4 Part 2、ProRes、ProRes RAW、VP9 | Apple 平台后端；GPU 呈现另受 Metal 桥接限制 |
 | MediaCodec | Android ARMv7/ARM64 | AV1、H.264、HEVC、MPEG-2 Video、MPEG-4 Part 2、VP8、VP9 | Android 平台默认或回退后端，选择对应 `*_mediacodec` |
 
-本构建没有 CUDA/NVDEC/CUVID、QSV、VDPAU、AMF 或 V4L2 M2M 解码入口，也没有 Apple Vulkan Video 后端。这不表示对应厂商 GPU 一定不能使用 D3D11VA、D3D12VA、VAAPI 等已列出的系统接口。
+本构建没有 CUDA/NVDEC/CUVID、QSV、VDPAU、AMF 或 V4L2 M2M 解码入口（Windows x86/x64 与 Linux x64 启用 libvpl 仅用于 QSV 编码，`*_qsv` 解码器被显式禁用），也没有 Apple Vulkan Video 后端。这不表示对应厂商 GPU 一定不能使用 D3D11VA、D3D12VA、VAAPI 等已列出的系统接口。
 
 FFmpeg 在 VideoToolbox 的 HEVC、ProRes、ProRes RAW 路径允许系统选择实现，调用 VideoToolbox 或拿到硬件帧句柄不能单独证明使用了物理硬解单元。MediaCodec 和 AudioToolbox 也应按实际系统实现与运行结果判断，不能从包装器名称推断某个芯片支持某个 profile。
 

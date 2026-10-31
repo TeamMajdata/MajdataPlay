@@ -41,6 +41,11 @@ WINDOWS_TARGETS = {
 EDITOR_ONLY_TARGETS = {'macos-x64'}
 AMF_RATE_CONTROL_PATCH = HERE / 'patches/amf-rate-control.patch'
 X265_PARAMETER_CHECK_PATCH = HERE / 'patches/x265-parameter-check.patch'
+QSV_RATE_CONTROL_PATCH = HERE / 'patches/qsv-rate-control.patch'
+# Intel QSV encoders load the GPU runtime through the static Intel VPL dispatcher.
+QSV_TARGETS = {'win-x86', 'win-x64', 'linux-x64'}
+# Intel GPUs already decode through D3D11VA/VAAPI with native texture paths.
+QSV_DECODERS = ['av1_qsv', 'h264_qsv', 'hevc_qsv', 'mjpeg_qsv', 'mpeg2_qsv', 'vc1_qsv', 'vp8_qsv', 'vp9_qsv', 'vvc_qsv']
 
 def write_text_atomic(path, contents):
     """Replace metadata without truncating a file concurrently mapped by Windows or Unity."""
@@ -72,6 +77,15 @@ def short_path(path):
         if ctypes.windll.kernel32.GetShortPathNameW(candidate, buffer, len(buffer)):
             value = str(Path(buffer.value) / original.name) if executable else buffer.value
     return value.replace('\\', '/')
+
+def join_flags(values):
+    """Join tool flags; Windows command lines would keep POSIX quotes around the '~' of short paths."""
+    # Windows short paths contain no spaces, so plain joining keeps every argument intact.
+    return ' '.join(values) if HOST == 'Windows' else shlex.join(values)
+
+def option_path(path):
+    """Quote a path inside a configure option value, which configure word-splits without removing quotes."""
+    return posix(path) if HOST == 'Windows' else shlex.quote(posix(path))
 
 def posix(path):
     value = short_path(path)
@@ -144,7 +158,7 @@ def toolchain(target):
                  '--enable-d3d11va', '--enable-d3d12va', '--enable-dxva2', '--enable-schannel']
         overlay = DEPENDENCIES.verify_d3d12_overlay()
         if overlay:
-            args += ['--extra-cflags=-I' + shlex.quote(posix(overlay))]
+            args += ['--extra-cflags=-I' + option_path(overlay)]
         if target == 'win-arm64':
             # The pinned NVIDIA/AMD SDKs do not provide Windows ARM64 runtimes.
             # Retain architecture-independent Direct3D/Vulkan decoding instead.
@@ -152,7 +166,7 @@ def toolchain(target):
         else:
             DEPENDENCIES.verify_amf_headers()
             args += ['--enable-amf', '--disable-decoder=h264_amf,hevc_amf,av1_amf,vp9_amf',
-                     '--extra-cflags=-I' + shlex.quote(posix(DEPENDENCIES.amf_headers()))]
+                     '--extra-cflags=-I' + option_path(DEPENDENCIES.amf_headers())]
     elif target == 'linux-x64':
         if not host_tool('patchelf'):
             return None, 'patchelf is required to verify and set relative ELF runtime paths'
@@ -206,7 +220,7 @@ def toolchain(target):
     if target.startswith(('win-', 'linux-', 'android-')):
         DEPENDENCIES.verify_vulkan_headers()
         args += ['--enable-vulkan', '--disable-vulkan-static',
-                 '--extra-cflags=-I' + shlex.quote(posix(DEPENDENCIES.vulkan_headers())),
+                 '--extra-cflags=-I' + option_path(DEPENDENCIES.vulkan_headers()),
                  '--disable-hwaccel=apv_vulkan,dpx_vulkan,ffv1_vulkan,prores_raw_vulkan,prores_vulkan']
     if target.startswith(('win-', 'linux-')) and target != 'win-arm64':
         DEPENDENCIES.verify_nvcodec_headers()
@@ -220,11 +234,14 @@ def amf_rate_control_patch():
             'versionMarker': 'MajdataPlay-AMF-RC-v1-' + digest[:12]}
 
 def reviewed_source_patches():
-    """Record both wrapper checks without changing the public FFmpeg ABI."""
-    digest = hashlib.sha256(X265_PARAMETER_CHECK_PATCH.read_bytes()).hexdigest()
+    """Record the wrapper checks without changing the public FFmpeg ABI."""
+    x265_digest = hashlib.sha256(X265_PARAMETER_CHECK_PATCH.read_bytes()).hexdigest()
+    qsv_digest = hashlib.sha256(QSV_RATE_CONTROL_PATCH.read_bytes()).hexdigest()
     return [amf_rate_control_patch(),
-            {'file': X265_PARAMETER_CHECK_PATCH.relative_to(HERE).as_posix(), 'sha256': digest,
-             'versionMarker': 'MajdataPlay-X265-Params-v1-' + digest[:12]}]
+            {'file': X265_PARAMETER_CHECK_PATCH.relative_to(HERE).as_posix(), 'sha256': x265_digest,
+             'versionMarker': 'MajdataPlay-X265-Params-v1-' + x265_digest[:12]},
+            {'file': QSV_RATE_CONTROL_PATCH.relative_to(HERE).as_posix(), 'sha256': qsv_digest,
+             'versionMarker': 'MajdataPlay-QSV-RC-v1-' + qsv_digest[:12]}]
 
 def source_git(*args, environment=None, quiet=False):
     """Run Git against the cache without shell interpolation or changing its real index."""
@@ -256,7 +273,7 @@ def apply_verified_source_patch():
                 raise RuntimeError('A reviewed wrapper patch does not apply to the pinned FFmpeg commit: ' + str(file))
             if source_git('diff', '--quiet', '--no-ext-diff', '--', environment=environment, quiet=True):
                 matched = index + 1
-        # A previous AMF-only build is an authenticated prefix of the reviewed
+        # A build from an earlier patch list is an authenticated prefix of the reviewed
         # patches. Partial patches or unrelated edits never match an allowed tree.
         if matched is None:
             raise RuntimeError('FFmpeg source contains edits outside a complete reviewed patch prefix')
@@ -391,7 +408,7 @@ def build_dav1d(target, specific, paths, jobs):
         '    export PKG_CONFIG_PATH=' + shlex.quote(posix(prefix / 'lib/pkgconfig')) + '\n'
         '    set -- --static "$@"\n    ;;\n' + nvcodec_case + 'esac\n'
         'exec ' + shlex.quote(pkg_config) + ' "$@"\n')
-    return prefix, ['--enable-libdav1d', '--pkg-config=' + shlex.join(['sh', posix(wrapper)])]
+    return prefix, ['--enable-libdav1d', '--pkg-config=' + join_flags(['sh', posix(wrapper)])]
 
 
 def verify_software_configuration(work):
@@ -437,7 +454,9 @@ def encoder_toolchain(target, specific, paths):
             raise RuntimeError('Missing target build executable ' + value)
         # LLVM target-driver and ranlib aliases use argv[0] to choose the target
         # or operation. Keep their symlink names while making the path absolute.
-        return str(Path(found).absolute())
+        # CMake writes compiler paths into generated scripts without escaping, so
+        # Windows backslashes such as \U would become invalid escape sequences.
+        return Path(found).absolute().as_posix() if HOST == 'Windows' else str(Path(found).absolute())
     cc[0], cxx[0] = executable(cc[0]), executable(cxx[0])
     ar = executable(flags.get('ar', cross + 'ar'))
     ranlib = executable(flags.get('ranlib', cross + 'ranlib'))
@@ -493,10 +512,11 @@ def encoder_cmake_settings(target, tools):
     cxx_flags = tools['cxx'][1:] + tools['cflags']
     if HOST == 'Windows' and 'clang' in Path(tools['cxx'][0]).name:
         cxx_flags += ['--driver-mode=g++']
-    args += ['-DCMAKE_C_FLAGS=' + shlex.join(tools['cc'][1:] + tools['cflags']),
-             '-DCMAKE_CXX_FLAGS=' + shlex.join(cxx_flags),
-             '-DCMAKE_EXE_LINKER_FLAGS=' + shlex.join(tools['ldflags']),
-             '-DCMAKE_SHARED_LINKER_FLAGS=' + shlex.join(tools['ldflags'])]
+    # CMake passes flag strings to the Windows command line verbatim.
+    args += ['-DCMAKE_C_FLAGS=' + join_flags(tools['cc'][1:] + tools['cflags']),
+             '-DCMAKE_CXX_FLAGS=' + join_flags(cxx_flags),
+             '-DCMAKE_EXE_LINKER_FLAGS=' + join_flags(tools['ldflags']),
+             '-DCMAKE_SHARED_LINKER_FLAGS=' + join_flags(tools['ldflags'])]
     return args
 
 
@@ -618,7 +638,7 @@ def build_software_encoders(target, specific, paths, jobs, bash, dav1d_config):
             shell(bash, setup + shlex.quote(make) + ' install', build, work / 'install.log')
             commands = [options]
         else:
-            options = encoder_cmake_settings(target, tools) + ['-DCMAKE_INSTALL_PREFIX=' + str(prefix)]
+            options = encoder_cmake_settings(target, tools) + ['-DCMAKE_INSTALL_PREFIX=' + prefix.as_posix()]
             if name == 'x265':
                 source = source / 'source'
                 assembly = tools['family'].startswith('x86') and bool(tools['nasm'])
@@ -680,13 +700,13 @@ def build_software_encoders(target, specific, paths, jobs, bash, dav1d_config):
         if name == 'x265':
             pc = prefix / 'lib/pkgconfig/x265.pc'
             contents = pc.read_text(encoding='utf-8')
-            contents = re.sub(r'^Libs\.private:.*$', 'Libs.private: ' + shlex.join(runtime), contents, flags=re.MULTILINE)
+            contents = re.sub(r'^Libs\.private:.*$', 'Libs.private: ' + join_flags(runtime), contents, flags=re.MULTILINE)
             write_text_atomic(pc, contents)
         elif name == 'libvpx' and target.startswith('win-'):
             pc = prefix / 'lib/pkgconfig/vpx.pc'
             contents = pc.read_text(encoding='utf-8')
             pthread_flag = runtime.index('-l:libwinpthread.a')
-            pthread_flags = shlex.join(runtime[pthread_flag - 1:pthread_flag + 1])
+            pthread_flags = join_flags(runtime[pthread_flag - 1:pthread_flag + 1])
             contents = re.sub(r'(?<!\S)-lpthread(?!\S)', pthread_flags, contents)
             write_text_atomic(pc, contents)
         DEPENDENCIES.verify_encoder_source(name)
@@ -711,7 +731,7 @@ def build_software_encoders(target, specific, paths, jobs, bash, dav1d_config):
         '    set -- --static "$@"\n    ;;\nesac\nexec ' + underlying + ' "$@"\n')
     configure = ['--enable-libx264', '--enable-libx265', '--enable-libvpx', '--enable-libaom',
                  '--disable-decoder=libvpx_vp8,libvpx_vp9,libaom_av1',
-                 '--pkg-config=' + shlex.join(['sh', posix(wrapper)])]
+                 '--pkg-config=' + join_flags(['sh', posix(wrapper)])]
     if target.startswith('win-'):
         # FFmpeg's generated .def explicitly selects its public PE exports.
         configure += ['--extra-ldflags=-Wl,--exclude-all-symbols']
@@ -738,7 +758,7 @@ def build_audio_codecs(target, specific, paths, jobs, bash, underlying_config):
         prefix.mkdir(parents=True, exist_ok=True)
         print('BUILD ' + target + ' audio codec ' + name + '; logs: ' + str(work), flush=True)
         if name == 'opus':
-            options = encoder_cmake_settings(target, tools) + ['-DCMAKE_INSTALL_PREFIX=' + str(prefix),
+            options = encoder_cmake_settings(target, tools) + ['-DCMAKE_INSTALL_PREFIX=' + prefix.as_posix(),
                 '-DBUILD_SHARED_LIBS=OFF', '-DOPUS_BUILD_SHARED_LIBRARY=OFF', '-DOPUS_BUILD_TESTING=OFF',
                 '-DOPUS_BUILD_PROGRAMS=OFF', '-DOPUS_INSTALL_PKG_CONFIG_MODULE=ON',
                 '-DOPUS_DRED=OFF', '-DOPUS_OSCE=OFF']
@@ -765,9 +785,14 @@ def build_audio_codecs(target, specific, paths, jobs, bash, underlying_config):
             def shell_flags(values):
                 values = [posix(value) if Path(value).is_file() else value for value in values]
                 return ' '.join(values) if HOST == 'Windows' else shlex.join(values)
+            cflags = tools['cflags'] + ['-O2', '-fPIC']
+            if target == 'win-x86':
+                # LAME's SSE quantizer calls intrinsics without enabling SSE, which clang
+                # rejects for an i686 baseline. Unity's Windows player already requires SSE2.
+                cflags += ['-msse2']
             exports = {'CC': shell_flags(tools['cc']), 'AR': posix(tools['ar']),
                        'RANLIB': posix(tools['ranlib']), 'STRIP': posix(tools['strip']),
-                       'CFLAGS': shell_flags(tools['cflags'] + ['-O2', '-fPIC']),
+                       'CFLAGS': shell_flags(cflags),
                        'LDFLAGS': shell_flags(tools['ldflags'])}
             setup = 'export PATH=' + shlex.quote(':'.join(posix(p) for p in paths) + ':/usr/bin') + ':"$PATH"; '
             setup += ''.join('export ' + key + '=' + shlex.quote(value) + '; ' for key, value in exports.items())
@@ -796,10 +821,75 @@ def build_audio_codecs(target, specific, paths, jobs, bash, underlying_config):
         '    export PKG_CONFIG_PATH=' + shlex.quote(posix(prefixes['opus'] / 'lib/pkgconfig')) + '\n'
         '    set -- --static "$@"\n    ;;\nesac\nexec ' + underlying + ' "$@"\n')
     configure = ['--enable-libopus', '--enable-libmp3lame',
-                 '--extra-cflags=-I' + shlex.quote(posix(prefixes['lame'] / 'include')),
-                 '--extra-ldflags=-L' + shlex.quote(posix(prefixes['lame'] / 'lib')),
-                 '--pkg-config=' + shlex.join(['sh', posix(wrapper)])]
+                 '--extra-cflags=-I' + option_path(prefixes['lame'] / 'include'),
+                 '--extra-ldflags=-L' + option_path(prefixes['lame'] / 'lib'),
+                 '--pkg-config=' + join_flags(['sh', posix(wrapper)])]
     return {'archives': archives, 'configure': configure, 'provenance': reports}
+
+
+def build_libvpl(target, specific, paths, jobs, underlying_config):
+    """Build the static PIC Intel VPL dispatcher; the Intel GPU driver provides the runtime it loads."""
+    tools = encoder_toolchain(target, specific, paths)
+    spec = DEPENDENCIES.LOCK['libvpl']
+    DEPENDENCIES.verify_libvpl_source()
+    runtime = x265_runtime_libraries(target, tools)
+    identity = hashlib.sha256(json.dumps({'recipe': 1, 'target': target, 'specific': specific,
+        'cc': tools['cc'], 'cxx': tools['cxx'], 'ar': tools['ar'], 'cmake': tools['cmake'],
+        'cmakeVersion': tools['cmakeVersion'], 'runtime': runtime, 'source': spec}, sort_keys=True).encode()).hexdigest()[:12]
+    work = CACHE / ('libvpl-' + target + '-' + identity)
+    build, prefix = work / 'build', work / 'install'
+    build.mkdir(parents=True, exist_ok=True)
+    prefix.mkdir(parents=True, exist_ok=True)
+    print('BUILD ' + target + ' Intel VPL dispatcher; logs: ' + str(work), flush=True)
+    options = encoder_cmake_settings(target, tools)
+    if target.startswith('win-'):
+        # For non-MSVC compilers the dispatcher defines a wcscpy_s macro before its
+        # first windows.h include, which breaks the 64-bit secure-CRT inline in
+        # MinGW-w64's stralign.h. Parse windows.h first instead of editing the pinned
+        # source; NOMINMAX keeps its min/max macros away from numeric_limits::max().
+        index = next(i for i, option in enumerate(options) if option.startswith('-DCMAKE_CXX_FLAGS='))
+        options[index] += ' -include windows.h -DNOMINMAX'
+    options += ['-DCMAKE_INSTALL_PREFIX=' + prefix.as_posix(),
+        '-DBUILD_SHARED_LIBS=OFF', '-DBUILD_TESTS=OFF', '-DBUILD_EXAMPLES=OFF', '-DINSTALL_EXAMPLES=OFF',
+        '-DINSTALL_DEV=ON', '-DINSTALL_LIB=ON']
+    if target == 'linux-x64':
+        # The dispatcher compiles its install directory into the runtime search path.
+        # Search the distribution's library directory instead of this build cache.
+        options += ['-DMFX_MODULES_DIR=/usr/lib/x86_64-linux-gnu']
+    commands = [[tools['cmake'], '-S', str(DEPENDENCIES.libvpl_source()), '-B', str(build)] + options,
+                [tools['cmake'], '--build', str(build), '--parallel', str(max(1, jobs))],
+                [tools['cmake'], '--install', str(build)]]
+    for args, log_name in zip(commands, ['configure.log', 'build.log', 'install.log']):
+        with (work / log_name).open('w', encoding='utf-8') as output:
+            subprocess.run(args, env=tools['environment'], stdout=output, stderr=subprocess.STDOUT, check=True)
+    archive = prefix / 'lib/libvpl.a'
+    if not archive.is_file():
+        raise RuntimeError('Missing static Intel VPL dispatcher archive ' + str(archive))
+    # The upstream file omits the C++ runtime of this static C++ dispatcher. Link the
+    # same static runtime archives as x265, so FFmpeg gains no runtime DLL or .so.
+    system = ['-lole32', '-lgdi32', '-luuid'] if target.startswith('win-') else []
+    pc = prefix / 'lib/pkgconfig/vpl.pc'
+    contents = pc.read_text(encoding='utf-8')
+    contents, count = re.subn(r'^Libs:.*$', lambda match: 'Libs: -L${libdir} -lvpl ' + join_flags(system + runtime),
+                              contents, flags=re.MULTILINE)
+    if count != 1:
+        raise RuntimeError('Unexpected Intel VPL pkg-config file: ' + str(pc))
+    write_text_atomic(pc, re.sub(r'^Libs\.private:.*$', 'Libs.private:', contents, flags=re.MULTILINE))
+    DEPENDENCIES.verify_libvpl_source()
+    report = {'source': spec, 'configure': commands[0], 'archive': archive.name, 'bytes': archive.stat().st_size,
+              'sha256': hashlib.sha256(archive.read_bytes()).hexdigest(), 'static': True, 'pic': True,
+              'cmakeVersion': tools['cmakeVersion'], 'cxxRuntimeLink': runtime}
+    write_text_atomic(work / 'build-provenance.json', json.dumps(report, indent=2) + '\n')
+    underlying = next(arg.split('=', 1)[1] for arg in underlying_config if arg.startswith('--pkg-config='))
+    wrapper = work / 'pkg-config.sh'
+    # FFmpeg queries "vpl >= 2.6"; the expanded argument list still contains " vpl ".
+    write_text_atomic(wrapper, '#!/bin/sh\ncase " $* " in\n  *" vpl "*)\n'
+        '    unset PKG_CONFIG_SYSROOT_DIR PKG_CONFIG_LIBDIR\n'
+        '    export PKG_CONFIG_PATH=' + shlex.quote(posix(prefix / 'lib/pkgconfig')) + '\n'
+        '    set -- --static "$@"\n    ;;\nesac\nexec ' + underlying + ' "$@"\n')
+    configure = ['--enable-libvpl', '--disable-decoder=' + ','.join(QSV_DECODERS),
+                 '--pkg-config=' + join_flags(['sh', posix(wrapper)])]
+    return {'archive': archive, 'configure': configure, 'provenance': report}
 
 
 def write_meta(file, target):
@@ -978,6 +1068,9 @@ def stage(target, prefix, config, logs, dav1d_prefix, source_patches, software_b
             report['buildDependencyLicenses'] += stage_nvcodec_license(destination)
         if target.startswith('win-') and target != 'win-arm64':
             report['buildDependencyLicenses'] += stage_amf_license(destination)
+        if software_build.get('libvpl'):
+            report['qsvDispatcherBuild'] = software_build['libvpl']['provenance']
+            report['buildDependencyLicenses'] += stage_libvpl_license(destination)
         if target.startswith('win-') and os.environ.get('FFMPEG_D3D12_HEADERS'):
             report['d3d12HeaderOverlay'] = {'directory': str(DEPENDENCIES.verify_d3d12_overlay()),
                                           'files': DEPENDENCIES.LOCK['d3d12HeaderOverlay']['files']}
@@ -1203,10 +1296,17 @@ def verify_hardware_configuration(target, work):
         required += ['D3D11VA', 'DXVA2', 'SCHANNEL']
     configuration = '\n'.join((work / name).read_text() for name in ['config.h', 'config_components.h'])
     if target == 'win-arm64':
-        unsupported = [name for name in ['AMF', 'FFNVCODEC', 'NVENC', 'NVDEC', 'CUVID']
+        unsupported = [name for name in ['AMF', 'FFNVCODEC', 'NVENC', 'NVDEC', 'CUVID', 'LIBVPL']
                        if re.search(r'^#define CONFIG_' + name + r' 1$', configuration, re.MULTILINE)]
         if unsupported:
             raise RuntimeError('Unsupported Windows ARM64 vendor backend was enabled: ' + ', '.join(unsupported))
+    if target in QSV_TARGETS:
+        required += ['LIBVPL', 'QSV']
+        # QSV is an encoder backend here; Intel decoding stays on D3D11VA/VAAPI.
+        decoders = [name.upper() + '_DECODER' for name in QSV_DECODERS
+                    if re.search(r'^#define CONFIG_' + name.upper() + r'_DECODER 1$', configuration, re.MULTILINE)]
+        if decoders:
+            raise RuntimeError('QSV decoders were enabled: ' + ', '.join(decoders))
     missing = [name for name in required if not re.search(r'^#define CONFIG_' + name + r' 1$', configuration, re.MULTILINE)]
     if missing:
         raise RuntimeError('Requested native hardware backend was disabled: ' + ', '.join(missing))
@@ -1248,6 +1348,19 @@ def stage_amf_license(destination):
                          '  externalObjects: {}\n  userData:\n  assetBundleName:\n  assetBundleVariant:\n')
     return [{'file': file.name, 'sha256': hashlib.sha256(file.read_bytes()).hexdigest(), 'license': 'MIT'}]
 
+def stage_libvpl_license(destination):
+    """Carry the pinned Intel VPL dispatcher license with QSV encoder binaries."""
+    DEPENDENCIES.verify_libvpl_source()
+    spec = DEPENDENCIES.LOCK['libvpl']
+    file = destination / 'libvpl.LICENSE.txt'
+    contents = 'Intel(R) Video Processing Library dispatcher ' + spec['tag'] + '\n' + spec['repository'] + '\n'
+    contents += 'Commit: ' + spec['commit'] + '\nLinked statically into the FFmpeg libraries for QSV encoding; '
+    contents += 'the Intel GPU driver provides the runtime it loads.\n\n'
+    contents += (DEPENDENCIES.libvpl_source() / 'LICENSE').read_text(encoding='utf-8')
+    write_text_atomic(file, contents)
+    write_license_meta(file)
+    return [{'file': file.name, 'sha256': hashlib.sha256(file.read_bytes()).hexdigest(), 'license': spec['license']}]
+
 def pcm_encoders():
     """List all portable PCM encoders in the pinned FFmpeg release (excluding Apple wrappers)."""
     return ['pcm_' + name for name in (
@@ -1270,6 +1383,8 @@ def recording_configuration(target):
         encoders += ['h264_nvenc', 'hevc_nvenc', 'av1_nvenc']
     if target.startswith('win-') and target != 'win-arm64':
         encoders += ['h264_amf', 'hevc_amf', 'av1_amf']
+    if target in QSV_TARGETS:
+        encoders += ['h264_qsv', 'hevc_qsv', 'av1_qsv', 'vp9_qsv']
     if target == 'linux-x64':
         encoders += ['h264_vaapi', 'hevc_vaapi', 'vp9_vaapi', 'av1_vaapi']
     elif target.startswith(('macos-', 'ios-')):
@@ -1371,8 +1486,16 @@ def main():
             print(f'BUILD {target}; logs: {work}', flush=True)
             dav1d_prefix, dav1d_config = build_dav1d(target, specific, paths, options.jobs)
             config += dav1d_config
-            software_build = build_software_encoders(target, specific, paths, options.jobs, bash, dav1d_config)
+            # Each pkg-config wrapper forwards other queries to the previous one.
+            pkg_config_chain = dav1d_config
+            libvpl_build = None
+            if target in QSV_TARGETS:
+                libvpl_build = build_libvpl(target, specific, paths, options.jobs, dav1d_config)
+                config += libvpl_build['configure']
+                pkg_config_chain = libvpl_build['configure']
+            software_build = build_software_encoders(target, specific, paths, options.jobs, bash, pkg_config_chain)
             config += software_build['configure']
+            software_build['libvpl'] = libvpl_build
             audio_build = build_audio_codecs(target, specific, paths, options.jobs, bash, software_build['configure'])
             config += audio_build['configure']
             software_build['archives'] += audio_build['archives']
@@ -1383,6 +1506,7 @@ def main():
                                    'sourcePatches': source_patches,
                                    'softwareEncoders': software_build['provenance'],
                                    'audioCodecs': audio_build['provenance'],
+                                   'libvpl': libvpl_build['provenance'] if libvpl_build else None,
                                    'dav1d': DEPENDENCIES.LOCK['dav1d']}, sort_keys=True)
             if (work / 'ffbuild/config.mak').exists() and (not settings_file.exists() or settings_file.read_text() != settings):
                 shell(bash, setup + shlex.quote(make) + ' clean', work, work / 'clean.log')
@@ -1401,6 +1525,8 @@ def main():
                           'license': 'GPL-3.0-or-later', 'softwareEncoderBuilds': software_build['provenance'],
                           'audioCodecBuilds': audio_build['provenance'],
                           'recordingProfile': recording_profile}
+            if libvpl_build:
+                provenance['qsvDispatcherBuild'] = libvpl_build['provenance']
             if target.startswith(('win-', 'linux-', 'android-')):
                 provenance['verifiedHardwareBackends'] = verify_hardware_configuration(target, work)
             # Keep the build evidence beside the usable prefix even when a loaded Unity DLL prevents staging.

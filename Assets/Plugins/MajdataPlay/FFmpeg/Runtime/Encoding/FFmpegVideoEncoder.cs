@@ -23,6 +23,27 @@ namespace MajdataPlay.FFmpeg
         private const string CheckedAmfConfigurationOption = "--extra-version=MajdataPlay-AMF-RC-v1-c0604b924b6a";
         /// <summary>Identifies the native wrapper that rejects ignored x265 parameters.</summary>
         private const string CheckedX265ConfigurationMarker = "MajdataPlay-X265-Params-v1-5b457330f94a";
+        /// <summary>Identifies the native wrapper that fails when the Intel runtime corrects a QSV rate-control request.</summary>
+        internal const string CheckedQsvConfigurationMarker = "MajdataPlay-QSV-RC-v1-140460417695";
+#if UNITY_EDITOR_WIN || UNITY_STANDALONE_WIN
+        /// <summary>Lists the backends tried on FFmpeg's default devices when no GPU list is available.</summary>
+        private static readonly string[] s_windowsDefaultEncoders = { "_nvenc", "_amf", "_qsv" };
+        /// <summary>Lists the AMD hardware encoder backend.</summary>
+        private static readonly string[] s_amfEncoder = { "_amf" };
+        /// <summary>Lists the Intel hardware encoder backend.</summary>
+        private static readonly string[] s_qsvEncoder = { "_qsv" };
+#elif UNITY_EDITOR_LINUX || UNITY_STANDALONE_LINUX
+        /// <summary>Lists the backends tried on FFmpeg's default devices when no GPU list is available.</summary>
+        private static readonly string[] s_linuxDefaultEncoders = { "_nvenc", "_vaapi", "_qsv" };
+        /// <summary>Lists the Intel hardware encoder backends.</summary>
+        private static readonly string[] s_intelLinuxEncoders = { "_vaapi", "_qsv" };
+        /// <summary>Lists the hardware encoder backend of other render nodes.</summary>
+        private static readonly string[] s_vaapiEncoder = { "_vaapi" };
+#endif
+#if UNITY_EDITOR_WIN || UNITY_STANDALONE_WIN || UNITY_EDITOR_LINUX || UNITY_STANDALONE_LINUX
+        /// <summary>Lists the NVIDIA hardware encoder backend.</summary>
+        private static readonly string[] s_nvencEncoder = { "_nvenc" };
+#endif
         /// <summary>Roots the managed local-file write callback for IL2CPP and Mono.</summary>
         private static readonly avio_alloc_context_write_packet s_writeCallback = WriteOutput;
         /// <summary>Roots the managed local-file seek callback for IL2CPP and Mono.</summary>
@@ -445,24 +466,33 @@ namespace MajdataPlay.FFmpeg
             if (gpus.Count == 0)
             {
                 // Without a GPU list, FFmpeg's default devices stand in for Unity's renderer GPU.
-#if UNITY_EDITOR_WIN || UNITY_STANDALONE_WIN
-                return TryEncoder(prefix + "_nvenc", true, failures) || TryEncoder(prefix + "_amf", true, failures);
-#else
-                return TryEncoder(prefix + "_nvenc", true, failures) || TryEncoder(prefix + "_vaapi", true, failures);
-#endif
+                foreach (var suffix in GetGpuEncoderSuffixes(0))
+                {
+                    if (TryEncoder(prefix + suffix, true, failures))
+                    {
+                        return true;
+                    }
+                }
+
+                return false;
             }
 
             foreach (var gpu in gpus)
             {
-                var name = GetGpuEncoderName(prefix, gpu);
-                if (name == null)
+                var suffixes = GetGpuEncoderSuffixes(gpu.VendorId);
+                if (suffixes.Length == 0)
                 {
                     failures.Append(gpu).Append(" has no checked hardware encoder; ");
                     continue;
                 }
 
-                if (TryEncoder(name, true, failures, gpu))
+                foreach (var suffix in suffixes)
                 {
+                    if (!TryEncoder(prefix + suffix, true, failures, gpu))
+                    {
+                        continue;
+                    }
+
                     if (gpu.Role == HardwareGpuRole.Other)
                     {
                         HardwareFallbackReason = failures.ToString().Trim() + " Encoding on " + gpu + ".";
@@ -481,22 +511,30 @@ namespace MajdataPlay.FFmpeg
             return false;
         }
 
-        /// <summary>Selects the checked hardware encoder for a GPU's vendor.</summary>
-        /// <param name="prefix">The lowercase format prefix, such as <c>h264</c>.</param>
-        /// <param name="gpu">The GPU that would run the encoder.</param>
-        /// <returns>The FFmpeg encoder name, or null when the vendor has no checked encoder on this platform.</returns>
-        private static string? GetGpuEncoderName(string prefix, HardwareGpu gpu)
+        /// <summary>Lists the checked hardware encoder backends for a GPU vendor, in the order they are tried.</summary>
+        /// <param name="vendorId">The GPU's PCI vendor ID, or zero for FFmpeg's default devices without a GPU list.</param>
+        /// <returns>FFmpeg encoder name suffixes such as <c>_nvenc</c>; empty when the vendor has no checked encoder on this platform.</returns>
+        private static string[] GetGpuEncoderSuffixes(int vendorId)
         {
 #if UNITY_EDITOR_WIN || UNITY_STANDALONE_WIN
-            return gpu.VendorId switch
+            return vendorId switch
             {
-                HardwareGpu.NvidiaVendorId => prefix + "_nvenc",
-                HardwareGpu.AmdVendorId => prefix + "_amf",
-                _ => null
+                0 => s_windowsDefaultEncoders,
+                HardwareGpu.NvidiaVendorId => s_nvencEncoder,
+                HardwareGpu.AmdVendorId => s_amfEncoder,
+                HardwareGpu.IntelVendorId => s_qsvEncoder,
+                _ => Array.Empty<string>()
             };
 #else
             // NVIDIA's VAAPI driver only decodes, so NVIDIA GPUs encode through NVENC.
-            return gpu.VendorId == HardwareGpu.NvidiaVendorId ? prefix + "_nvenc" : prefix + "_vaapi";
+            // Intel GPUs prefer VAAPI, which QSV also runs on, and keep QSV as a second backend.
+            return vendorId switch
+            {
+                0 => s_linuxDefaultEncoders,
+                HardwareGpu.NvidiaVendorId => s_nvencEncoder,
+                HardwareGpu.IntelVendorId => s_intelLinuxEncoders,
+                _ => s_vaapiEncoder
+            };
 #endif
         }
 #endif
@@ -653,7 +691,7 @@ namespace MajdataPlay.FFmpeg
             }
         }
 
-        /// <summary>Binds an NVENC or AMF candidate to one GPU before it opens.</summary>
+        /// <summary>Binds an NVENC, AMF or QSV candidate to one GPU before it opens.</summary>
         /// <param name="name">The exact FFmpeg encoder name.</param>
         /// <param name="gpu">The GPU that must run the encoder.</param>
         /// <remarks>VAAPI candidates are bound through their render node in <see cref="ConfigureVaapi"/>.</remarks>
@@ -674,6 +712,23 @@ namespace MajdataPlay.FFmpeg
                 }
 
                 SetOption("gpu", ordinal.ToString(CultureInfo.InvariantCulture));
+            }
+
+            if (name.EndsWith("_qsv", StringComparison.Ordinal))
+            {
+                // A QSV session runs on the GPU of its child device: a D3D11 adapter on
+                // Windows or a DRM render node on Linux. The encoder uploads CPU frames.
+#if UNITY_EDITOR_WIN || UNITY_STANDALONE_WIN
+                CreateHardwareDevice(AVHWDeviceType.AV_HWDEVICE_TYPE_D3D11VA, gpu.Device, "Create D3D11 device for QSV");
+#else
+                CreateHardwareDevice(AVHWDeviceType.AV_HWDEVICE_TYPE_VAAPI, gpu.Device, "Create VAAPI device for QSV");
+#endif
+                DeriveHardwareDevice(AVHWDeviceType.AV_HWDEVICE_TYPE_QSV, "Derive QSV encoder device");
+                _codec->hw_device_ctx = ffmpeg.av_buffer_ref(_hardwareDevice);
+                if (_codec->hw_device_ctx == null)
+                {
+                    throw new OutOfMemoryException("Cannot retain the QSV encoder device.");
+                }
             }
 #endif
 #if UNITY_EDITOR_WIN || UNITY_STANDALONE_WIN
@@ -702,6 +757,28 @@ namespace MajdataPlay.FFmpeg
             var result = ffmpeg.av_hwdevice_ctx_create(&created, type, device, null, 0);
             _hardwareDevice = created;
             Check(result, operation);
+        }
+
+        /// <summary>Replaces the candidate's owned hardware device with a device of another type derived from it.</summary>
+        /// <param name="type">The FFmpeg hardware device type to derive.</param>
+        /// <param name="operation">The operation name reported if derivation fails.</param>
+        /// <remarks>The derived device retains its source device, so only the derived reference stays owned.</remarks>
+        /// <exception cref="InvalidOperationException">FFmpeg cannot derive the device.</exception>
+        private void DeriveHardwareDevice(AVHWDeviceType type, string operation)
+        {
+            var source = _hardwareDevice;
+            _hardwareDevice = null;
+            try
+            {
+                AVBufferRef* derived = null;
+                var result = ffmpeg.av_hwdevice_ctx_create_derived(&derived, type, source, 0);
+                _hardwareDevice = derived;
+                Check(result, operation);
+            }
+            finally
+            {
+                ffmpeg.av_buffer_unref(&source);
+            }
         }
 
         /// <summary>Captures the opened codec's worker count and threading mode for diagnostics.</summary>
@@ -770,6 +847,21 @@ namespace MajdataPlay.FFmpeg
                 if (cbr)
                 {
                     SetOption("filler_data", "1");
+                }
+            }
+            else if (name.EndsWith("_qsv", StringComparison.Ordinal))
+            {
+                if (ffmpeg.avcodec_configuration().IndexOf(CheckedQsvConfigurationMarker, StringComparison.Ordinal) < 0)
+                {
+                    throw new NotSupportedException("This QSV build does not verify the Intel runtime's rate control. Rebuild native libraries with "
+                        + CheckedQsvConfigurationMarker + ".");
+                }
+
+                // QSV has no mode option: it selects CBR when the maximum equals the
+                // target and VBR otherwise, and the native check rejects corrections.
+                if (!cbr && _options.MaximumBitRate == _options.BitRate)
+                {
+                    throw new NotSupportedException("QSV selects CBR when the VBR maximum bitrate equals the target.");
                 }
             }
             else if (name.EndsWith("_vaapi", StringComparison.Ordinal))

@@ -1,0 +1,81 @@
+diff --git a/libavcodec/qsvenc.c b/libavcodec/qsvenc.c
+--- a/libavcodec/qsvenc.c
++++ b/libavcodec/qsvenc.c
+@@ -1634,12 +1634,58 @@ static int qsvenc_init_session(AVCodecContext *avctx, QSVEncContext *q)
+     return 0;
+ }
+ 
++/* Bitrate settings that the runtime must keep, in kbit/s and KB after BRCParamMultiplier. */
++typedef struct QSVRateControlRequest {
++    mfxU16 method;
++    mfxU32 target;
++    mfxU32 maximum;
++    mfxU32 buffer;
++} QSVRateControlRequest;
++
++static void qsv_capture_rate_control(const mfxVideoParam *param, QSVRateControlRequest *request)
++{
++    mfxU32 multiplier = FFMAX(param->mfx.BRCParamMultiplier, 1);
++
++    request->method  = param->mfx.RateControlMethod;
++    request->target  = param->mfx.TargetKbps * multiplier;
++    request->maximum = param->mfx.MaxKbps * multiplier;
++    request->buffer  = param->mfx.BufferSizeInKB * multiplier;
++}
++
++/* Query and Init may silently correct unsupported settings. A CBR or VBR
++ * request must keep its method, target, VBR peak and VBV size unchanged. */
++static int qsv_check_rate_control(AVCodecContext *avctx, const QSVRateControlRequest *requested,
++                                  const mfxVideoParam *param)
++{
++    QSVRateControlRequest actual;
++
++    qsv_capture_rate_control(param, &actual);
++    if (actual.method != requested->method) {
++        av_log(avctx, AV_LOG_ERROR, "QSV changed the rate-control method from %s to %s\n",
++               print_ratecontrol(requested->method), print_ratecontrol(actual.method));
++        return AVERROR_EXTERNAL;
++    }
++    if (requested->method != MFX_RATECONTROL_CBR && requested->method != MFX_RATECONTROL_VBR)
++        return 0;
++    if (actual.target != requested->target ||
++        (requested->method == MFX_RATECONTROL_VBR && actual.maximum != requested->maximum) ||
++        (requested->buffer && actual.buffer != requested->buffer)) {
++        av_log(avctx, AV_LOG_ERROR, "QSV changed the rate-control limits (expected target %u, maximum %u, "
++               "buffer %u; got target %u, maximum %u, buffer %u)\n",
++               (unsigned)requested->target, (unsigned)requested->maximum, (unsigned)requested->buffer,
++               (unsigned)actual.target, (unsigned)actual.maximum, (unsigned)actual.buffer);
++        return AVERROR_EXTERNAL;
++    }
++    return 0;
++}
++
+ int ff_qsv_enc_init(AVCodecContext *avctx, QSVEncContext *q)
+ {
+     int iopattern = 0;
+     int opaque_alloc = 0;
+     int ret;
+     void *tmp;
++    QSVRateControlRequest rate_control;
+ #if HAVE_STRUCT_MFXCONFIGINTERFACE
+     mfxExtBuffer ext_buf;
+     mfxConfigInterface *iface = NULL;
+@@ -1791,6 +1837,7 @@ int ff_qsv_enc_init(AVCodecContext *avctx, QSVEncContext *q)
+     }
+ #endif
+ 
++    qsv_capture_rate_control(&q->param, &rate_control);
+     ret = MFXVideoENCODE_Query(q->session, &q->param, &q->param);
+     if (ret == MFX_WRN_PARTIAL_ACCELERATION) {
+         av_log(avctx, AV_LOG_WARNING, "Encoder will work with partial HW acceleration\n");
+@@ -1844,6 +1891,10 @@ int ff_qsv_enc_init(AVCodecContext *avctx, QSVEncContext *q)
+         return ret;
+     }
+ 
++    ret = qsv_check_rate_control(avctx, &rate_control, &q->param);
++    if (ret < 0)
++        return ret;
++
+     q->avctx = avctx;
+ 
+     return 0;

@@ -31,7 +31,9 @@ EDITOR_ONLY_TARGETS = {'macos-x64'}
 PATCH_MARKERS = {
     'patches/amf-rate-control.patch': 'MajdataPlay-AMF-RC-v1-',
     'patches/x265-parameter-check.patch': 'MajdataPlay-X265-Params-v1-',
+    'patches/qsv-rate-control.patch': 'MajdataPlay-QSV-RC-v1-',
 }
+QSV_DECODERS = ['av1_qsv', 'h264_qsv', 'hevc_qsv', 'mjpeg_qsv', 'mpeg2_qsv', 'vc1_qsv', 'vp8_qsv', 'vp9_qsv', 'vvc_qsv']
 SOFTWARE_ENCODERS = {'x264': 'libx264', 'x265': 'libx265', 'libvpx': 'libvpx-vp9', 'libaom': 'libaom-av1'}
 
 def host_target(system, machine, pointer_bytes, python_platform):
@@ -437,6 +439,30 @@ def verify_source_patches(directory, manifest):
         assert 'patches/amf-rate-control.patch' in identities, (target, 'checked AMF source patch provenance missing')
     if 'libx265' in encoders:
         assert 'patches/x265-parameter-check.patch' in identities, (target, 'checked x265 source patch provenance missing')
+    if any(encoder.endswith('_qsv') for encoder in encoders):
+        assert 'patches/qsv-rate-control.patch' in identities, (target, 'checked QSV source patch provenance missing')
+
+
+def verify_qsv_dispatcher(directory, manifest):
+    """Verify the pinned static Intel VPL dispatcher and its notice for QSV encoder builds."""
+    target = manifest['target']
+    encoders = manifest.get('recordingProfile', {}).get('encoders', [])
+    build = manifest.get('qsvDispatcherBuild')
+    if not any(encoder.endswith('_qsv') for encoder in encoders):
+        assert build is None, (target, 'Intel VPL dispatcher recorded without QSV encoders')
+        return
+    lock = json.loads((ROOT / 'Tools/FFmpeg/dependencies.lock.json').read_text(encoding='utf-8'))['libvpl']
+    assert build is not None and build['source'] == lock, (target, 'Intel VPL dispatcher source identity mismatch')
+    assert build['static'] is True and build['pic'] is True and build['archive'] == 'libvpl.a', (target, 'Intel VPL dispatcher must be static PIC')
+    assert '--enable-libvpl' in manifest['configure'], (target, 'QSV encoders require --enable-libvpl')
+    assert '--disable-decoder=' + ','.join(QSV_DECODERS) in manifest['configure'], (target, 'QSV decoders must stay disabled')
+    licenses = {item['file']: item for item in manifest.get('buildDependencyLicenses', [])}
+    item = licenses.get('libvpl.LICENSE.txt')
+    assert item and item['license'] == lock['license'], (target, 'Intel VPL dispatcher license provenance missing')
+    file = directory / 'libvpl.LICENSE.txt'
+    assert hashlib.sha256(file.read_bytes()).hexdigest() == item['sha256'], (target, 'Intel VPL dispatcher license hash mismatch')
+    assert lock['commit'] in file.read_text(encoding='utf-8'), (target, 'Intel VPL dispatcher license lacks the pinned commit')
+    print(f'PASS {target}: static Intel VPL dispatcher {lock["tag"]} and its MIT notice verified (QSV runtime unverified)')
 
 
 def verify_software_encoder_provenance(directory, manifest):
@@ -606,6 +632,7 @@ def main():
             verify_source_lock(manifest)
             verify_asset_pairs(directory, target)
             verify_source_patches(directory, manifest)
+            verify_qsv_dispatcher(directory, manifest)
             verify_software_encoder_provenance(directory, manifest)
             verify_audio_codec_provenance(directory, manifest)
             for item in manifest.get('buildDependencyLicenses', []):
