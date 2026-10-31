@@ -17,6 +17,9 @@
 Windows x86/x64 与 Linux 录制同时固定官方 `nv-codec-headers` 的 `n12.1.14.1`、commit `7c8e7fc751f803c672b42c37d9199c8a4f98b327`，核对源码 commit 和工作区后使用其 NVENC 头文件，不安装 CUDA Toolkit，也不打包 NVIDIA 驱动。该 SDK 的最低驱动要求为 Windows 531.61、Linux 530.41.03；对应 GPU 仍须支持请求的编码格式。
 Windows x86/x64 还使用官方 AMF `v1.5.2`、commit `eadd00804d5f7e5cd8c85d540073198312870776` 的头文件；稀疏下载 header 源码并校验 commit 与内容，仅在忽略缓存中生成 `AMF/` include 目录。AMF 动态库由现有 AMD 显卡驱动提供，脚本不安装或打包驱动。固定 FFmpeg 要求此版本头文件；实际 AMF runtime、GPU 与目标格式须在初始化时验证。
 Windows x86/x64 与 Linux x64 的 QSV 录制固定 Intel VPL dispatcher（libvpl）`v2.17.0`、commit `d77f9195cf495b937631607333288fd917ae8939`（MIT）。脚本按 commit 获取源码并拒绝 tracked 修改或额外文件，用 FFmpeg 相同的目标编译器与 CMake 构建 PIC 静态 `libvpl.a`，并改写其 `vpl.pc`：上游文件不含这个 C++ dispatcher 所需的运行库，构建与 x265 一样显式链接静态 C++ 运行库，因此不新增运行时 DLL/so。Linux 将 dispatcher 的模块搜索目录设为 `/usr/lib/x86_64-linux-gnu`，不把构建缓存路径编进库。dispatcher 在运行时加载 Intel 显卡驱动提供的 VPL/Media SDK runtime；脚本不安装或打包驱动。FFmpeg 以 `--enable-libvpl` 构建，并显式禁用全部九个 `*_qsv` 解码器：Intel GPU 的解码继续使用 D3D11VA/VAAPI 及其原生纹理路径。
+
+Linux QSV 编码复用现有 GPU 选择：Intel GPU 先尝试 VAAPI 编码，再尝试 QSV；QSV 从所选 `/dev/dri/renderD*` 的 VAAPI 设备派生，上传 CPU 帧进行编码。目标系统须提供兼容的 Intel VAAPI 驱动、VPL GPU runtime（`libmfx-gen.so.1.2`，旧平台为兼容的 Media SDK runtime）及 render node 访问权限；静态 dispatcher 不包含这些驱动。缺少设备、驱动、格式或所请求码率配置时，现有托管选择逻辑保留失败原因并按配置尝试其他 GPU 或同格式软件编码。构建和产物检查同时要求 VAAPI/libdrm，避免丢失 QSV 的子设备后端。
+
 Windows、Linux、Android 构建会自动获取并校验这些构建依赖，缓存到项目 `.build/toolchains` 或指定构建缓存，不安装系统软件。Vulkan 头文件须包含 Vulkan Video VP9 扩展；旧版 NDK / 系统 Vulkan 头文件不会覆盖此固定版本。
 未设置 `LLVM_MINGW` 时，Windows 目标使用固定的 LLVM-MinGW，它包含 D3D12 Video 解码所需的新头文件；显式设置时使用开发者提供的工具链，仍检查全部请求的硬件解码后端是否编译启用。
 `--probe` 不下载依赖：全新缓存会报告缺少固定头文件或 Meson，请先执行正常构建。Windows 原生仍需要可工作的 Bash/make；WSL 使用 Linux 主机工具链。

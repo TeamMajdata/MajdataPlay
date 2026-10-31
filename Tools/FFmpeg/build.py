@@ -1294,6 +1294,9 @@ def verify_hardware_configuration(target, work):
         required += ['D3D12VA', 'H264_D3D12VA_HWACCEL', 'HEVC_D3D12VA_HWACCEL', 'AV1_D3D12VA_HWACCEL', 'VP9_D3D12VA_HWACCEL']
     if target == 'win-arm64':
         required += ['D3D11VA', 'DXVA2', 'SCHANNEL']
+    if target == 'linux-x64':
+        # QSV sessions derive from the selected DRM render node's VAAPI device.
+        required += ['VAAPI', 'LIBDRM']
     configuration = '\n'.join((work / name).read_text() for name in ['config.h', 'config_components.h'])
     if target == 'win-arm64':
         unsupported = [name for name in ['AMF', 'FFNVCODEC', 'NVENC', 'NVDEC', 'CUVID', 'LIBVPL']

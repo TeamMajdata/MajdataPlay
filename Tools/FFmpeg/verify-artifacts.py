@@ -455,6 +455,8 @@ def verify_qsv_dispatcher(directory, manifest):
     assert build is not None and build['source'] == lock, (target, 'Intel VPL dispatcher source identity mismatch')
     assert build['static'] is True and build['pic'] is True and build['archive'] == 'libvpl.a', (target, 'Intel VPL dispatcher must be static PIC')
     assert '--enable-libvpl' in manifest['configure'], (target, 'QSV encoders require --enable-libvpl')
+    if target == 'linux-x64':
+        assert {'--enable-vaapi', '--enable-libdrm'} <= set(manifest['configure']), (target, 'Linux QSV requires its VAAPI/DRM child device')
     assert '--disable-decoder=' + ','.join(QSV_DECODERS) in manifest['configure'], (target, 'QSV decoders must stay disabled')
     licenses = {item['file']: item for item in manifest.get('buildDependencyLicenses', [])}
     item = licenses.get('libvpl.LICENSE.txt')
