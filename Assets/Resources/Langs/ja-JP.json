@@ -56,6 +56,7 @@
     "MAJSETTING_CATEGORY_Judge": "判定",
     "MAJSETTING_CATEGORY_Mod": "Mod",
     "MAJSETTING_CATEGORY_Volume": "サウンド設定",
+    "MAJSETTING_CATEGORY_Touch": "タッチ設定",
     "MAJSETTING_PROPERTY_AllBreak": "すべてBREAK",
     "MAJSETTING_PROPERTY_AllBreak_DESC": "すべてのノーツをBREAKノーツに変更します。",
     "MAJSETTING_PROPERTY_AllEx": "すべてEX",

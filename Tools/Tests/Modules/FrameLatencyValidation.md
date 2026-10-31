@@ -13,7 +13,7 @@ machine, driver, display mode and refresh rate.
 
 ## In-game diagnostics
 
-Set the hidden debug option in `settings.json` and start the game:
+Set the hidden debug option in `system-settings.json` and start the game:
 
 ```json
 "Debug": {
@@ -22,7 +22,7 @@ Set the hidden debug option in `settings.json` and start the game:
 ```
 
 `ProjectSettings` enables **Frame Timing Stats**, so release Players report frame timings. While the option is
-on, the runtime info overlay (`Debug.DisplayRuntimeInfo`) shows a second line, and every 5 seconds the log
+on, the runtime info overlay (`Rendering.DisplayRuntimeInfo`) shows a second line, and every 5 seconds the log
 receives an `Info` entry with the tag `FrameTimingDiagnostics`:
 
 ```text

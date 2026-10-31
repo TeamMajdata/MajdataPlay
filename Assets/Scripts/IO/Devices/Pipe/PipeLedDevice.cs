@@ -22,7 +22,7 @@ namespace MajdataPlay.IO
 
         public PipeLedDevice()
         {
-            var options = MajEnv.Settings.IO.OutputDevice.Led;
+            var options = MajEnv.SystemSettings.IO.OutputDevice.Led;
             _throttler = options.Throttler;
             _pollingInterval = TimeSpan.FromMilliseconds(Math.Min(500, Math.Max(0, options.RefreshRateMs)));
         }

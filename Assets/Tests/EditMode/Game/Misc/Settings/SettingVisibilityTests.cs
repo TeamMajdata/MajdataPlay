@@ -327,7 +327,7 @@ namespace MajdataPlay.Tests.Game.Misc.Settings
         [Test]
         public void RealSettings_AllConditionsResolve()
         {
-            var pending = new Queue<Type>(new[] { typeof(GameSetting), typeof(ChartSetting) });
+            var pending = new Queue<Type>(new[] { typeof(SettingRoot), typeof(ChartSetting) });
             var visited = new HashSet<Type>();
             while (pending.Count > 0)
             {
@@ -339,15 +339,47 @@ namespace MajdataPlay.Tests.Game.Misc.Settings
                 foreach (var property in SettingReflectionCache.GetVisibleProperties(type))
                 {
                     var attributes = Attribute.GetCustomAttributes(property, true);
-                    Assert.DoesNotThrow(() => SettingVisibility.Resolve(type, property.Name, attributes), $"{type.Name}.{property.Name}");
+                    var ownerType = SettingReflectionCache.GetConditionOwnerType(property);
+                    Assert.DoesNotThrow(() => SettingVisibility.Resolve(ownerType, property.Name, attributes), $"{type.Name}.{property.Name}");
                     var propertyType = property.PropertyType;
-                    if (propertyType.IsClass && propertyType != typeof(string) && propertyType.Namespace == typeof(GameSetting).Namespace)
+                    if (propertyType.IsClass && propertyType != typeof(string) && propertyType.Namespace == typeof(SettingRoot).Namespace)
                     {
                         pending.Enqueue(propertyType);
                     }
                 }
             }
             Assert.That(visited, Does.Contain(typeof(DebugOptions)));
+            Assert.That(visited, Does.Contain(typeof(TouchOptions)));
+        }
+
+        /// <summary>Checks that menu conditions start at <see cref="SettingRoot"/> while option conditions start at their menu.</summary>
+        [Test]
+        public void GetConditionOwnerType_MenusStartAtTheSettingRoot()
+        {
+            var encoding = SettingReflectionCache.GetProperty(typeof(SystemSetting), nameof(SystemSetting.Encoding));
+            var game = SettingReflectionCache.GetProperty(typeof(UserSetting), nameof(UserSetting.Game));
+            var maximumBitRate = SettingReflectionCache.GetProperty(typeof(FFmpegEncodingOptions), nameof(FFmpegEncodingOptions.MaximumBitRate));
+            var root = SettingReflectionCache.GetProperty(typeof(SettingRoot), nameof(SettingRoot.System));
+
+            Assert.That(SettingReflectionCache.GetConditionOwnerType(encoding), Is.EqualTo(typeof(SettingRoot)));
+            Assert.That(SettingReflectionCache.GetConditionOwnerType(game), Is.EqualTo(typeof(SettingRoot)));
+            Assert.That(SettingReflectionCache.GetConditionOwnerType(maximumBitRate), Is.EqualTo(typeof(FFmpegEncodingOptions)));
+            Assert.That(SettingReflectionCache.GetConditionOwnerType(root), Is.EqualTo(typeof(SettingRoot)));
+            Assert.Throws<ArgumentNullException>(() => SettingReflectionCache.GetConditionOwnerType(null!));
+        }
+
+        /// <summary>Checks that the system Encoding menu is listed only while the user records with FFmpeg.</summary>
+        [Test]
+        public void EncodingMenu_FollowsTheUserRecordMode()
+        {
+            var encoding = SettingReflectionCache.GetProperty(typeof(SystemSetting), nameof(SystemSetting.Encoding));
+            var visibility = SettingReflectionCache.GetVisibility(encoding);
+            var root = new SettingRoot(new UserSetting(), new SystemSetting());
+
+            Assert.That(visibility, Is.Not.SameAs(SettingVisibility.Always));
+            Assert.That(visibility.IsVisible(root), Is.False);
+            root.User.Game.RecordMode = RecordModeOption.FFmpeg;
+            Assert.That(visibility.IsVisible(root), Is.True);
         }
     }
 }

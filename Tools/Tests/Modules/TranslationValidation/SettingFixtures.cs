@@ -5,17 +5,56 @@ using MajdataPlay.TranslationValidation;
 namespace MajdataPlay.Settings
 {
     /// <summary>
-    /// Supplies the exact root settings type name expected by the production metadata scanner.
+    /// Supplies the exact root type name expected by the production metadata scanner, which holds the setting roots.
     /// </summary>
-    internal sealed class GameSetting
+    internal sealed class SettingRoot
     {
         /// <summary>
         /// Rejects construction because a setting scanner must not create live setting objects.
         /// </summary>
         /// <exception cref="InvalidOperationException">Always thrown if this fixture is constructed.</exception>
-        public GameSetting()
+        public SettingRoot()
         {
-            throw ExecutionGuard.Executed(nameof(GameSetting));
+            throw ExecutionGuard.Executed(nameof(SettingRoot));
+        }
+
+        /// <summary>
+        /// Gets the user settings root through a getter that must not be evaluated.
+        /// </summary>
+        /// <exception cref="InvalidOperationException">Always thrown if the getter executes.</exception>
+        public UserSetting User
+        {
+            get
+            {
+                throw ExecutionGuard.Executed(nameof(User));
+            }
+        }
+
+        /// <summary>
+        /// Gets the system settings root through a getter that must not be evaluated.
+        /// </summary>
+        /// <exception cref="InvalidOperationException">Always thrown if the getter executes.</exception>
+        public SystemSetting System
+        {
+            get
+            {
+                throw ExecutionGuard.Executed(nameof(System));
+            }
+        }
+    }
+
+    /// <summary>
+    /// Supplies the user settings root, whose visible categories are menus.
+    /// </summary>
+    internal sealed class UserSetting
+    {
+        /// <summary>
+        /// Rejects construction because a setting scanner must not create live setting objects.
+        /// </summary>
+        /// <exception cref="InvalidOperationException">Always thrown if this fixture is constructed.</exception>
+        public UserSetting()
+        {
+            throw ExecutionGuard.Executed(nameof(UserSetting));
         }
 
         /// <summary>
@@ -44,9 +83,37 @@ namespace MajdataPlay.Settings
         }
 
         /// <summary>
-        /// Gets audio metadata whose Volume property is the actual visible category.
+        /// Gets the volume category through a getter that must not be evaluated.
         /// </summary>
         /// <exception cref="InvalidOperationException">Always thrown if the getter executes.</exception>
+        public SFXVolume Volume
+        {
+            get
+            {
+                throw ExecutionGuard.Executed(nameof(Volume));
+            }
+        }
+    }
+
+    /// <summary>
+    /// Supplies the system settings root, whose categories are all hidden from the setting UI.
+    /// </summary>
+    internal sealed class SystemSetting
+    {
+        /// <summary>
+        /// Rejects construction because a setting scanner must not create live setting objects.
+        /// </summary>
+        /// <exception cref="InvalidOperationException">Always thrown if this fixture is constructed.</exception>
+        public SystemSetting()
+        {
+            throw ExecutionGuard.Executed(nameof(SystemSetting));
+        }
+
+        /// <summary>
+        /// Gets audio backend options hidden from the setting UI.
+        /// </summary>
+        /// <exception cref="InvalidOperationException">Always thrown if the getter executes.</exception>
+        [HideInSettingUI]
         public SoundOptions Audio
         {
             get
@@ -305,24 +372,12 @@ namespace MajdataPlay.Settings
     }
 
     /// <summary>
-    /// Contains non-volume audio options that the current settings category mapping does not expose.
+    /// Contains audio backend options of a category hidden from the setting UI.
     /// </summary>
     internal sealed class SoundOptions
     {
         /// <summary>
-        /// Gets the actual visible audio category without evaluating a runtime getter.
-        /// </summary>
-        /// <exception cref="InvalidOperationException">Always thrown if the getter executes.</exception>
-        public SFXVolume Volume
-        {
-            get
-            {
-                throw ExecutionGuard.Executed(nameof(Volume));
-            }
-        }
-
-        /// <summary>
-        /// Gets or sets an audio-container boolean that is outside the bound Volume category.
+        /// Gets or sets an audio backend boolean of the hidden category.
         /// </summary>
         public bool ForceMono
         {
@@ -331,7 +386,7 @@ namespace MajdataPlay.Settings
         }
 
         /// <summary>
-        /// Gets or sets an audio-container enum that must not be recursively treated as a visible option.
+        /// Gets or sets an audio backend enum of the hidden category.
         /// </summary>
         public ModeOption Backend
         {
@@ -341,7 +396,7 @@ namespace MajdataPlay.Settings
     }
 
     /// <summary>
-    /// Supplies the properties of the specially bound Audio.Volume category.
+    /// Supplies the properties of the Volume category of the user settings.
     /// </summary>
     internal sealed class SFXVolume
     {
@@ -355,7 +410,7 @@ namespace MajdataPlay.Settings
         }
 
         /// <summary>
-        /// Gets or sets a finite boolean proving that Audio.Volume properties are the ones scanned.
+        /// Gets or sets a finite boolean proving that the Volume category properties are scanned.
         /// </summary>
         public bool Muted
         {

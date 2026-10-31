@@ -158,86 +158,178 @@ namespace MajdataPlay.Tests.Game.Misc.Base
             Assert.That(MajEnv.LangDirectory, Is.Not.Null);
         }
 
-        /// <summary>Checks that the first startup writes default settings and clamps judge distances.</summary>
+        /// <summary>Checks that the first startup writes default user and system settings and clamps judge distances.</summary>
         [Test]
-        public void InitUserSettings_CreatesDefaults()
+        public void InitSettings_CreatesDefaults()
         {
-            Step("InitUserSettings");
+            Step("InitSettings");
 
-            var file = _root.FindFile("settings.json");
-            Assert.That(file, Is.Not.Null);
-            Assert.That(MajEnv.SettingsPath.Location, Is.EqualTo(file!.Location));
-            var json = JObject.Parse(file.ReadAllText());
-            Assert.That(json["Game"], Is.Not.Null);
-            Assert.That(MajEnv.Settings.Display.InnerJudgeDistance, Is.EqualTo(1f));
-            Assert.That(MajDebug.MinLogLevel, Is.EqualTo(MajEnv.Settings.Debug.DebugLevel));
+            var userFile = _root.FindFile("settings.json");
+            var systemFile = _root.FindFile("system-settings.json");
+            Assert.That(userFile, Is.Not.Null);
+            Assert.That(systemFile, Is.Not.Null);
+            Assert.That(MajEnv.UserSettingsPath.Location, Is.EqualTo(userFile!.Location));
+            Assert.That(MajEnv.SystemSettingsPath.Location, Is.EqualTo(systemFile!.Location));
+            var userJson = JObject.Parse(userFile.ReadAllText());
+            var systemJson = JObject.Parse(systemFile.ReadAllText());
+            Assert.That(userJson["Game"], Is.Not.Null);
+            Assert.That(userJson["Rendering"], Is.Null);
+            Assert.That(systemJson["Rendering"], Is.Not.Null);
+            Assert.That(systemJson["Game"], Is.Null);
+            Assert.That(MajEnv.UserSettings.Judge.InnerJudgeDistance, Is.EqualTo(1f));
+            Assert.That(MajDebug.MinLogLevel, Is.EqualTo(MajEnv.SystemSettings.Debug.DebugLevel));
         }
 
-        /// <summary>Checks that stored settings are loaded and sanitized.</summary>
+        /// <summary>Checks that stored settings are loaded from both files and sanitized.</summary>
         [Test]
-        public void InitUserSettings_LoadsAndSanitizes()
+        public void InitSettings_LoadsAndSanitizes()
         {
             _root.CreateFile("settings.json").WriteAllText(
-                "{\"Game\":{\"TapSpeed\":8.5},\"Display\":{\"InnerJudgeDistance\":4,\"OuterJudgeDistance\":-1}," +
-                "\"Debug\":{\"DebugLevel\":\"Warning\"}," +
+                "{\"Game\":{\"TapSpeed\":8.5},\"Judge\":{\"InnerJudgeDistance\":4,\"OuterJudgeDistance\":-1}}");
+            _root.CreateFile("system-settings.json").WriteAllText(
+                "{\"Debug\":{\"DebugLevel\":\"Warning\"}," +
                 "\"IO\":{\"InputDevice\":{\"ButtonRing\":{\"PollingRateMs\":-5,\"DebounceThresholdMs\":-1},\"TouchPanel\":{\"PollingRateMs\":-2,\"DebounceThresholdMs\":-3}}}}");
 
-            Step("InitUserSettings");
+            Step("InitSettings");
 
-            var settings = MajEnv.Settings;
-            Assert.That(settings.Game.TapSpeed, Is.EqualTo(8.5f));
-            Assert.That(settings.Display.InnerJudgeDistance, Is.EqualTo(1f));
-            Assert.That(settings.Display.OuterJudgeDistance, Is.EqualTo(0f));
+            var user = MajEnv.UserSettings;
+            var system = MajEnv.SystemSettings;
+            Assert.That(user.Game.TapSpeed, Is.EqualTo(8.5f));
+            Assert.That(user.Judge.InnerJudgeDistance, Is.EqualTo(1f));
+            Assert.That(user.Judge.OuterJudgeDistance, Is.EqualTo(0f));
 #if UNITY_STANDALONE
-            Assert.That(settings.IO.InputDevice.ButtonRing.PollingRateMs, Is.EqualTo(0));
-            Assert.That(settings.IO.InputDevice.ButtonRing.DebounceThresholdMs, Is.EqualTo(0));
-            Assert.That(settings.IO.InputDevice.TouchPanel.PollingRateMs, Is.EqualTo(0));
-            Assert.That(settings.IO.InputDevice.TouchPanel.DebounceThresholdMs, Is.EqualTo(0));
+            Assert.That(system.IO.InputDevice.ButtonRing.PollingRateMs, Is.EqualTo(0));
+            Assert.That(system.IO.InputDevice.ButtonRing.DebounceThresholdMs, Is.EqualTo(0));
+            Assert.That(system.IO.InputDevice.TouchPanel.PollingRateMs, Is.EqualTo(0));
+            Assert.That(system.IO.InputDevice.TouchPanel.DebounceThresholdMs, Is.EqualTo(0));
 #endif
 #if UNITY_IOS
-            Assert.That(MajDebug.MinLogLevel, Is.EqualTo(LogLevel.Info), "iOS does not read DebugLevel from settings.json");
+            Assert.That(MajDebug.MinLogLevel, Is.EqualTo(LogLevel.Info), "iOS does not read DebugLevel from system-settings.json");
 #else
             Assert.That(MajDebug.MinLogLevel, Is.EqualTo(LogLevel.Warning));
 #endif
         }
 
-        /// <summary>Checks that legacy rendering keys are migrated when settings.json is read and that the next save writes the current layout.</summary>
+        /// <summary>Checks that legacy rendering keys are migrated when settings.json is read and that the next save writes the current layouts.</summary>
         [Test]
-        public void InitUserSettings_MigratesLegacyRenderingAndSavesCurrentLayout()
+        public void InitSettings_MigratesLegacyRenderingAndSavesCurrentLayout()
         {
             _environment.Set(nameof(MajEnv.RuntimeConfig), new RuntimeConfig());
             _root.CreateFile("settings.json").WriteAllText(
                 "{\"Display\":{\"Skin\":\"custom\",\"RenderQuality\":\"High\",\"RenderScale\":100,\"FPSLimit\":60,\"VSync\":false}}");
 
-            Step("InitUserSettings");
+            Step("InitSettings");
             Step("OnSave", null, null);
 
-            var settings = MajEnv.Settings;
-            Assert.That(settings.Display.Skin, Is.EqualTo("custom"));
-            Assert.That(settings.Rendering.RenderQuality, Is.EqualTo(RenderingQualityOption.Beautiful));
-            Assert.That(settings.Rendering.FPSLimit, Is.EqualTo(60));
-            Assert.That(settings.Rendering.VSync, Is.False);
+            Assert.That(MajEnv.UserSettings.Display.Skin, Is.EqualTo("custom"));
+            var rendering = MajEnv.SystemSettings.Rendering;
+            Assert.That(rendering.RenderQuality, Is.EqualTo(RenderingQualityOption.Beautiful));
+            Assert.That(rendering.FPSLimit, Is.EqualTo(60));
+            Assert.That(rendering.VSync, Is.False);
             Assert.That(_root.FindFile("settings.json.bak"), Is.Null);
-            var saved = JObject.Parse(_root.FindFile("settings.json")!.ReadAllText());
-            var display = (JObject)saved["Display"]!;
+            var savedUser = JObject.Parse(_root.FindFile("settings.json")!.ReadAllText());
+            var savedSystem = JObject.Parse(_root.FindFile("system-settings.json")!.ReadAllText());
+            var display = (JObject)savedUser["Display"]!;
             Assert.That(display.ContainsKey("RenderQuality") || display.ContainsKey("RenderScale") ||
                         display.ContainsKey("FPSLimit") || display.ContainsKey("VSync"), Is.False);
-            Assert.That(saved["Rendering"]!["RenderQuality"]!.Value<string>(), Is.EqualTo("Beautiful"));
-            Assert.That(saved["Rendering"]!["FPSLimit"]!.Value<int>(), Is.EqualTo(60));
+            Assert.That(savedUser.ContainsKey("Rendering"), Is.False);
+            Assert.That(savedSystem["Rendering"]!["RenderQuality"]!.Value<string>(), Is.EqualTo("Beautiful"));
+            Assert.That(savedSystem["Rendering"]!["FPSLimit"]!.Value<int>(), Is.EqualTo(60));
+        }
+
+        /// <summary>
+        /// Checks that the system settings of a legacy settings.json are written to system-settings.json during startup,
+        /// that settings.json keeps its legacy layout until the next save, and that the save leaves only user settings in it.
+        /// </summary>
+        [Test]
+        public void InitSettings_SplitsLegacySettingsIntoSystemSettings()
+        {
+            _environment.Set(nameof(MajEnv.RuntimeConfig), new RuntimeConfig());
+            const string legacy = "{\"Game\":{\"TapSpeed\":8.5,\"BGInfo\":\"None\"},\"Display\":{\"MainScreenScale\":0.8}," +
+                                  "\"Audio\":{\"ForceMono\":true,\"Volume\":{\"Global\":0.9}},\"Debug\":{\"MaxQueuedFrames\":3,\"OffsetUnit\":\"Second\"}}";
+            _root.CreateFile("settings.json").WriteAllText(legacy);
+
+            Step("InitSettings");
+
+            Assert.That(_root.FindFile("settings.json")!.ReadAllText(), Is.EqualTo(legacy));
+            var system = JObject.Parse(_root.FindFile("system-settings.json")!.ReadAllText());
+            Assert.That(system["Audio"]!["ForceMono"]!.Value<bool>(), Is.True);
+            Assert.That(((JObject)system["Audio"]!).ContainsKey("Volume"), Is.False);
+            Assert.That(system["Debug"]!["MaxQueuedFrames"]!.Value<int>(), Is.EqualTo(3));
+            Assert.That(system["Rendering"]!["MainScreenScale"]!.Value<float>(), Is.EqualTo(0.8f));
+            Assert.That(MajEnv.UserSettings.Game.TapSpeed, Is.EqualTo(8.5f));
+            Assert.That(MajEnv.UserSettings.Display.BGInfo, Is.EqualTo(BGInfoOption.None));
+            Assert.That(MajEnv.UserSettings.Volume.Global, Is.EqualTo(0.9f));
+            Assert.That(MajEnv.UserSettings.Judge.OffsetUnit, Is.EqualTo(OffsetUnitOption.Second));
+
+            Step("OnSave", null, null);
+
+            var user = JObject.Parse(_root.FindFile("settings.json")!.ReadAllText());
+            Assert.That(user.Properties().Select(category => category.Name), Is.EqualTo(new[] { "Game", "Judge", "Display", "Volume", "Touch" }));
+            Assert.That(user["Display"]!["BGInfo"]!.Value<string>(), Is.EqualTo("None"));
         }
 
         /// <summary>Checks that unreadable settings are replaced by defaults and backed up without overwriting older backups.</summary>
         [Test]
-        public void InitUserSettings_BacksUpCorruptFile()
+        public void InitSettings_BacksUpCorruptFile()
         {
             _root.CreateFile("settings.json").WriteAllText("{ broken");
             _root.CreateFile("settings.json.bak").WriteAllText("older");
 
-            Step("InitUserSettings");
+            Step("InitSettings");
 
-            Assert.That(MajEnv.Settings.Game.TapSpeed, Is.EqualTo(7.5f));
+            Assert.That(MajEnv.UserSettings.Game.TapSpeed, Is.EqualTo(7.5f));
             Assert.That(_root.FindFile("settings.json.bak")!.ReadAllText(), Is.EqualTo("older"));
             Assert.That(_root.FindFile("settings.json.bak.bak")!.ReadAllText(), Is.EqualTo("{ broken"));
+        }
+
+        /// <summary>Checks that an unreadable system-settings.json is backed up and replaced by defaults while settings.json is kept.</summary>
+        [Test]
+        public void InitSettings_BacksUpCorruptSystemFileOnly()
+        {
+            _root.CreateFile("settings.json").WriteAllText("{\"Game\":{\"TapSpeed\":8.5}}");
+            _root.CreateFile("system-settings.json").WriteAllText("{\"Debug\":{\"MaxQueuedFrames\":\"many\"}}");
+
+            Step("InitSettings");
+
+            Assert.That(MajEnv.UserSettings.Game.TapSpeed, Is.EqualTo(8.5f));
+            Assert.That(MajEnv.SystemSettings.Debug.MaxQueuedFrames, Is.EqualTo(2));
+            Assert.That(_root.FindFile("settings.json.bak"), Is.Null);
+            Assert.That(_root.FindFile("system-settings.json.bak")!.ReadAllText(), Is.EqualTo("{\"Debug\":{\"MaxQueuedFrames\":\"many\"}}"));
+        }
+
+        /// <summary>
+        /// Checks that legacy system settings that cannot be read back up settings.json, their source, while
+        /// system-settings.json is created with defaults and the user settings are kept.
+        /// </summary>
+        [Test]
+        public void InitSettings_BacksUpLegacySourceOfUnreadableSystemSettings()
+        {
+            const string legacy = "{\"Game\":{\"TapSpeed\":8.5},\"Debug\":{\"MaxQueuedFrames\":\"many\"}}";
+            _root.CreateFile("settings.json").WriteAllText(legacy);
+
+            Step("InitSettings");
+
+            Assert.That(MajEnv.UserSettings.Game.TapSpeed, Is.EqualTo(8.5f));
+            Assert.That(MajEnv.SystemSettings.Debug.MaxQueuedFrames, Is.EqualTo(2));
+            Assert.That(_root.FindFile("settings.json.bak")!.ReadAllText(), Is.EqualTo(legacy));
+            Assert.That(JObject.Parse(_root.FindFile("system-settings.json")!.ReadAllText())["Debug"]!["MaxQueuedFrames"]!.Value<int>(), Is.EqualTo(2));
+        }
+
+        /// <summary>Checks that a legacy value that cannot be upgraded backs up settings.json and keeps system-settings.json.</summary>
+        [Test]
+        public void InitSettings_UnreadableLegacyValueKeepsSystemSettings()
+        {
+            const string legacy = "{\"Game\":{\"TapSpeed\":8.5},\"Display\":{\"RenderQuality\":\"Bogus\"},\"Debug\":{\"MaxQueuedFrames\":3}}";
+            _root.CreateFile("settings.json").WriteAllText(legacy);
+            _root.CreateFile("system-settings.json").WriteAllText("{\"Debug\":{\"MaxQueuedFrames\":4}}");
+
+            Step("InitSettings");
+
+            Assert.That(MajEnv.UserSettings.Game.TapSpeed, Is.EqualTo(7.5f));
+            Assert.That(MajEnv.SystemSettings.Debug.MaxQueuedFrames, Is.EqualTo(4));
+            Assert.That(_root.FindFile("settings.json.bak")!.ReadAllText(), Is.EqualTo(legacy));
+            Assert.That(_root.FindFile("system-settings.json.bak"), Is.Null);
         }
 
         /// <summary>Opens runtime.db with a separate connection.</summary>
@@ -367,7 +459,7 @@ namespace MajdataPlay.Tests.Game.Misc.Base
         [Test]
         public void InitOnlineEndpoints_NormalizesEndpoints()
         {
-            MajEnv.Settings.Online.ApiEndpoints = new[]
+            MajEnv.SystemSettings.Online.ApiEndpoints = new[]
             {
                 new ApiEndpoint { Name = "Main", Url = new Uri("https://example.invalid/api"), Username = "u", Password = "p" },
                 new ApiEndpoint { Name = "Duplicate", Url = new Uri("https://example.invalid/api/") },
@@ -428,31 +520,35 @@ namespace MajdataPlay.Tests.Game.Misc.Base
         /// <param name="proxy">The proxy URL.</param>
         private static void ConfigureProxy(bool useProxy, string proxy)
         {
-            var online = MajEnv.Settings.Online;
+            var online = MajEnv.SystemSettings.Online;
             PrivateMember.SetProperty(online, nameof(OnlineOptions.UseProxy), useProxy);
             PrivateMember.SetProperty(online, nameof(OnlineOptions.Proxy), proxy);
         }
 #endif
 
-        /// <summary>Checks that saving writes the settings and runtime configuration, recreating deleted files.</summary>
+        /// <summary>Checks that saving writes the user and system settings and runtime configuration, recreating deleted files.</summary>
         [Test]
         public void OnSave_WritesConfiguration()
         {
             _environment.Set(nameof(MajEnv.RuntimeConfig), new RuntimeConfig());
-            MajEnv.Settings.Game.TapSpeed = 6.25f;
+            MajEnv.UserSettings.Game.TapSpeed = 6.25f;
+            MajEnv.SystemSettings.Rendering.FPSLimit = 90;
             MajEnv.RuntimeConfig!.List.SelectedSongId = "saved";
 
             Step("OnSave", null, null);
 
-            var settings = Serializer.Json.Deserialize<GameSetting>(_root.FindFile("settings.json")!.ReadAllText(), MajEnv.UserJsonReaderOption)!;
-            Assert.That(settings.Game.TapSpeed, Is.EqualTo(6.25f));
+            var user = Serializer.Json.Deserialize<UserSetting>(_root.FindFile("settings.json")!.ReadAllText(), MajEnv.UserJsonReaderOption)!;
+            var system = Serializer.Json.Deserialize<SystemSetting>(_root.FindFile("system-settings.json")!.ReadAllText(), MajEnv.UserJsonReaderOption)!;
+            Assert.That(user.Game.TapSpeed, Is.EqualTo(6.25f));
+            Assert.That(system.Rendering.FPSLimit, Is.EqualTo(90));
             Assert.That(ReadStoredListConfig("SelectedSongId"), Is.EqualTo("saved"));
-            Assert.That(MajEnv.SettingsPath.Location, Is.EqualTo(_root.FindFile("settings.json")!.Location));
+            Assert.That(MajEnv.UserSettingsPath.Location, Is.EqualTo(_root.FindFile("settings.json")!.Location));
+            Assert.That(MajEnv.SystemSettingsPath.Location, Is.EqualTo(_root.FindFile("system-settings.json")!.Location));
 
-            MajEnv.Settings.Game.TapSpeed = 5f;
+            MajEnv.UserSettings.Game.TapSpeed = 5f;
             Step("OnSave", null, null);
             var shorter = _root.FindFile("settings.json")!.ReadAllText();
-            Assert.That(Serializer.Json.Deserialize<GameSetting>(shorter, MajEnv.UserJsonReaderOption)!.Game.TapSpeed, Is.EqualTo(5f));
+            Assert.That(Serializer.Json.Deserialize<UserSetting>(shorter, MajEnv.UserJsonReaderOption)!.Game.TapSpeed, Is.EqualTo(5f));
         }
 
         /// <summary>Checks that the cache cleanup helper deletes existing directories and ignores missing ones.</summary>

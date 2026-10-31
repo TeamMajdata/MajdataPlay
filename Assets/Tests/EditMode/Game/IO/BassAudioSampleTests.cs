@@ -49,7 +49,7 @@ namespace MajdataPlay.Tests.Game.IO
         {
             _temporary = new TemporaryDirectory();
             _settings = new SettingsScope();
-            _settings.Settings.Audio.Volume.Global = 0.5f;
+            _settings.UserSettings.Volume.Global = 0.5f;
             _savedMatrix = AudioManager.MixingMatrix;
             PrivateMember.SetStaticProperty(typeof(AudioManager), nameof(AudioManager.MixingMatrix), new float[,] { { 1f, 0f }, { 0f, 1f } });
             _mixer = BassMix.CreateMixerStream(BassTestSupport.SampleRate, 2, BassFlags.MixerNonStop | BassFlags.Decode | BassFlags.Float);

@@ -68,7 +68,7 @@ namespace MajdataPlay.Scenes.TotalResult
 
             if (result is GameResult gameResult)
             {
-                if (MajInstances.GameManager.Settings.Judge.Mode == JudgeModeOption.Classic)
+                if (MajInstances.GameManager.UserSettings.Judge.Mode == JudgeModeOption.Classic)
                 {
                     _achievementDisplayer.text = $"{gameResult.Acc.Classic:F2}%";
                 }

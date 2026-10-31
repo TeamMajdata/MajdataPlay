@@ -67,7 +67,7 @@ namespace MajdataPlay.Tests.Game.Scenes.PlayMode.ListScene
         [UnityTest]
         public IEnumerator Play_AppliesDemoRange()
         {
-            MajEnv.Settings.Audio.Volume.BGM = 0.6f;
+            MajEnv.UserSettings.Volume.BGM = 0.6f;
             var sample = new FakeAudioSample("preview", TimeSpan.FromSeconds(60));
             var song = Song("majtest-preview-range", sample, ("demo_seek", "5"), ("demo_len", "10"));
 
@@ -189,7 +189,7 @@ namespace MajdataPlay.Tests.Game.Scenes.PlayMode.ListScene
         [Test]
         public void Destroy_RestoresListMusicVolume()
         {
-            MajEnv.Settings.Audio.Volume.BGM = 0.3f;
+            MajEnv.UserSettings.Volume.BGM = 0.3f;
 
             UnityEngine.Object.DestroyImmediate(_player.gameObject);
 

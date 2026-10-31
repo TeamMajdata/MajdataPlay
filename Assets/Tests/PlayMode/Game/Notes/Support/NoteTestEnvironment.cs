@@ -21,8 +21,11 @@ namespace MajdataPlay.Tests.Game.Notes.PlayMode.Support
         /// <summary>The frame length used for <see cref="MajTimeline.DeltaTime"/> during tests.</summary>
         public const float FrameLength = 1f / 60f;
 
-        /// <summary>The settings that were active before the test.</summary>
-        private readonly GameSetting _savedSettings;
+        /// <summary>The user settings that were active before the test.</summary>
+        private readonly UserSetting _savedUserSettings;
+
+        /// <summary>The system settings that were active before the test.</summary>
+        private readonly SystemSetting _savedSystemSettings;
 
         /// <summary>The running mode that was active before the test.</summary>
         private readonly RunningMode _savedMode;
@@ -48,7 +51,8 @@ namespace MajdataPlay.Tests.Game.Notes.PlayMode.Support
         /// <summary>Captures the global state and installs the test defaults.</summary>
         public NoteTestEnvironment()
         {
-            _savedSettings = MajEnv.Settings;
+            _savedUserSettings = MajEnv.UserSettings;
+            _savedSystemSettings = MajEnv.SystemSettings;
             _savedMode = MajEnv.Mode;
             _savedDeltaTime = MajTimeline.UnscaledDeltaTime;
             _savedTimeScale = MajTimeline.TimeScale;
@@ -60,20 +64,25 @@ namespace MajdataPlay.Tests.Game.Notes.PlayMode.Support
             CaptureField(typeof(EachLineDrop), "_isCurvSpritesInited");
             CaptureField(typeof(SlideOK), "s_GlobalSortingOrder");
 
-            Settings = new GameSetting();
-            Settings.Debug.TapPoolCapacity = 0;
-            Settings.Debug.HoldPoolCapacity = 0;
-            Settings.Debug.TouchPoolCapacity = 0;
-            Settings.Debug.TouchHoldPoolCapacity = 0;
-            Settings.Debug.EachLinePoolCapacity = 0;
-            PrivateMember.SetStaticProperty(typeof(MajEnv), nameof(MajEnv.Settings), Settings);
+            UserSettings = new UserSetting();
+            SystemSettings = new SystemSetting();
+            SystemSettings.Debug.TapPoolCapacity = 0;
+            SystemSettings.Debug.HoldPoolCapacity = 0;
+            SystemSettings.Debug.TouchPoolCapacity = 0;
+            SystemSettings.Debug.TouchHoldPoolCapacity = 0;
+            SystemSettings.Debug.EachLinePoolCapacity = 0;
+            PrivateMember.SetStaticProperty(typeof(MajEnv), nameof(MajEnv.UserSettings), UserSettings);
+            PrivateMember.SetStaticProperty(typeof(MajEnv), nameof(MajEnv.SystemSettings), SystemSettings);
             MajEnv.Mode = RunningMode.View;
             MajTimeline.TimeScale = 1f;
             SetDeltaTime(FrameLength);
         }
 
-        /// <summary>Gets the fresh settings object installed for the test.</summary>
-        public GameSetting Settings { get; }
+        /// <summary>Gets the fresh user settings object installed for the test.</summary>
+        public UserSetting UserSettings { get; }
+
+        /// <summary>Gets the fresh system settings object installed for the test.</summary>
+        public SystemSetting SystemSettings { get; }
 
         /// <summary>Gets the tracker that destroys every Unity object created by the test.</summary>
         public TestObjects Objects { get; } = new();
@@ -106,7 +115,8 @@ namespace MajdataPlay.Tests.Game.Notes.PlayMode.Support
             {
                 PrivateMember.SetStaticField(owner, name, value);
             }
-            PrivateMember.SetStaticProperty(typeof(MajEnv), nameof(MajEnv.Settings), _savedSettings);
+            PrivateMember.SetStaticProperty(typeof(MajEnv), nameof(MajEnv.UserSettings), _savedUserSettings);
+            PrivateMember.SetStaticProperty(typeof(MajEnv), nameof(MajEnv.SystemSettings), _savedSystemSettings);
             MajEnv.Mode = _savedMode;
             MajTimeline.TimeScale = _savedTimeScale;
             SetDeltaTime(_savedDeltaTime);

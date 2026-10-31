@@ -29,12 +29,21 @@
     <Compile Include="../../../../Assets/Scripts/Misc/Settings/OptionEnumerators/GameOffsetEnumerator.cs" Link="Production/GameOffsetEnumerator.cs" />
     <Compile Include="../../../../Assets/Scripts/Misc/Settings/OptionEnumerators/NoteMaskEnumerator.cs" Link="Production/NoteMaskEnumerator.cs" />
     <Compile Include="../../../../Assets/Scripts/Misc/Settings/OptionEnumerators/Rendering*Enumerator.cs" Link="Production/%(Filename)%(Extension)" />
-    <Compile Include="../../../../Assets/Scripts/Misc/Settings/DebugOptions.cs" Link="Production/DebugOptions.cs" />
+    <Compile Include="../../../../Assets/Scripts/Misc/Settings/SettingRoot.cs" Link="Production/SettingRoot.cs" />
+    <Compile Include="../../../../Assets/Scripts/Misc/Settings/System/DebugOptions.cs" Link="Production/DebugOptions.cs" />
+    <Compile Include="../../../../Assets/Scripts/Misc/Settings/User/DisplayOptions.cs" Link="Production/DisplayOptions.cs" />
+    <Compile Include="../../../../Assets/Scripts/Misc/Settings/User/TouchOptions.cs" Link="Production/TouchOptions.cs" />
     <Compile Include="../../../../Assets/Scripts/Misc/Settings/Enums/SensorDebugStyle.cs" Link="Production/SensorDebugStyle.cs" />
     <Compile Include="../../../../Assets/Scripts/Misc/Settings/Enums/SensorDebugPosition.cs" Link="Production/SensorDebugPosition.cs" />
     <Compile Include="../../../../Assets/Scripts/Misc/Settings/Enums/DJAutoPolicyOption.cs" Link="Production/DJAutoPolicyOption.cs" />
+    <Compile Include="../../../../Assets/Scripts/Misc/Settings/Enums/LowLatencyVSyncBackendOption.cs" Link="Production/LowLatencyVSyncBackendOption.cs" />
+    <Compile Include="../../../../Assets/Scripts/Misc/Settings/Enums/GameplayScreenRotationAngleOption.cs" Link="Production/GameplayScreenRotationAngleOption.cs" />
+    <Compile Include="../../../../Assets/Scripts/Misc/Settings/Enums/SlidePathStyle.cs" Link="Production/SlidePathStyle.cs" />
+    <Compile Include="../../../../Assets/Scripts/Misc/Settings/Enums/TouchFeedbackLevel.cs" Link="Production/TouchFeedbackLevel.cs" />
+    <Compile Include="../../../../Assets/Scripts/Misc/Settings/Enums/BGInfoOption.cs" Link="Production/BGInfoOption.cs" />
+    <Compile Include="../../../../Assets/Scripts/Misc/Settings/Enums/TopInfoDisplayOption.cs" Link="Production/TopInfoDisplayOption.cs" />
     <Compile Include="../../../../Assets/Plugins/MajdataPlay/Diagnostics/Enums/LogLevel.cs" Link="Production/LogLevel.cs" />
-    <Compile Include="../../../../Assets/Scripts/Misc/Settings/RenderingOptions.cs" Link="Production/RenderingOptions.cs" />
+    <Compile Include="../../../../Assets/Scripts/Misc/Settings/System/RenderingOptions.cs" Link="Production/RenderingOptions.cs" />
     <Compile Include="../../../../Assets/Scripts/Misc/Settings/Enums/RenderQualityOption.cs" Link="Production/RenderQualityOption.cs" />
     <Compile Include="../../../../Assets/Plugins/MajdataPlay/Rendering/RenderPipelines/MajRenderPipeline/Runtime/MajRenderDiagnostics.cs" Link="Production/MajRenderDiagnostics.cs" />
     <Compile Include="../../../../Assets/Scripts/Misc/Settings/Interfaces/IOptionEnumerator.cs" Link="Production/IOptionEnumerator.cs" />

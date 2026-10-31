@@ -79,7 +79,7 @@ namespace MajdataPlay.Tests.Game.GamePlay.Counting
             Assert.That(info.NoteFastLateDisplayOption, Is.EqualTo(JudgeDisplayOption.All));
             Assert.That(info.BreakFastLateDisplayOption, Is.EqualTo(JudgeDisplayOption.BelowCP));
             Assert.That(info.CenterInfoOption, Is.EqualTo(BGInfoOption.Combo));
-            Assert.That(info.TopInfoOption, Is.EqualTo(MajEnv.Settings.Game.TopInfo));
+            Assert.That(info.TopInfoOption, Is.EqualTo(MajEnv.UserSettings.Display.TopInfo));
             Assert.That(info.IsJudgeTimingGaugeEnabled, Is.False);
             Assert.That(info.JudgeTimingGaugeAverageMSec, Is.EqualTo(0f), "Without gauge scales the average stays centred");
             Assert.That(info.IsDanLifeEnabled, Is.False);

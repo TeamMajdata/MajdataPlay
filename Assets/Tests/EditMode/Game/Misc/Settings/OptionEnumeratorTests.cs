@@ -170,7 +170,7 @@ namespace MajdataPlay.Tests.Game.Misc.Settings
         {
             _savedLanguage = PrivateMember.GetStaticField<Language>(typeof(Localization), "_current");
             _savedAvailable = Localization.Available;
-            _savedOffsetUnit = MajEnv.Settings.Debug.OffsetUnit;
+            _savedOffsetUnit = MajEnv.UserSettings.Judge.OffsetUnit;
             PrivateMember.SetStaticField(typeof(Localization), "_current", Language.Default);
         }
 
@@ -180,7 +180,7 @@ namespace MajdataPlay.Tests.Game.Misc.Settings
         {
             PrivateMember.SetStaticField(typeof(Localization), "_current", _savedLanguage);
             PrivateMember.SetStaticProperty(typeof(Localization), nameof(Localization.Available), _savedAvailable);
-            MajEnv.Settings.Debug.OffsetUnit = _savedOffsetUnit;
+            MajEnv.UserSettings.Judge.OffsetUnit = _savedOffsetUnit;
         }
 
         /// <summary>Creates and initializes an enumerator for a property.</summary>
@@ -691,14 +691,14 @@ namespace MajdataPlay.Tests.Game.Misc.Settings
         [Test]
         public void GameOffsetEnumerator_FollowsOffsetUnit()
         {
-            MajEnv.Settings.Debug.OffsetUnit = OffsetUnitOption.Frame;
+            MajEnv.UserSettings.Judge.OffsetUnit = OffsetUnitOption.Frame;
             var judge = new JudgeOptions();
             var enumerator = Create<GameOffsetEnumerator>(judge, nameof(JudgeOptions.AudioOffset));
 
             Assert.That(enumerator.MoveNext(), Is.True);
             Assert.That(judge.AudioOffset, Is.EqualTo(0.1f).Within(1e-6f));
 
-            MajEnv.Settings.Debug.OffsetUnit = OffsetUnitOption.Second;
+            MajEnv.UserSettings.Judge.OffsetUnit = OffsetUnitOption.Second;
             enumerator.Refresh();
             Assert.That(enumerator.MoveNext(), Is.True);
 
@@ -712,7 +712,7 @@ namespace MajdataPlay.Tests.Game.Misc.Settings
         [Test]
         public void GameOffsetEnumerator_DisplayOffsetHasLowerBound()
         {
-            MajEnv.Settings.Debug.OffsetUnit = OffsetUnitOption.Frame;
+            MajEnv.UserSettings.Judge.OffsetUnit = OffsetUnitOption.Frame;
             var debug = new DebugOptions();
             var enumerator = Create<GameOffsetEnumerator>(debug, nameof(DebugOptions.DisplayOffset));
 

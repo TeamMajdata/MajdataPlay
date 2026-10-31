@@ -200,8 +200,11 @@ namespace MajdataPlay.Tests.Game.Notes.PlayMode.Support
         /// <summary>Gets the object tracker of the test.</summary>
         public TestObjects Objects => Environment.Objects;
 
-        /// <summary>Gets the settings installed for the test.</summary>
-        public GameSetting Settings => Environment.Settings;
+        /// <summary>Gets the user settings installed for the test.</summary>
+        public UserSetting UserSettings => Environment.UserSettings;
+
+        /// <summary>Gets the system settings installed for the test.</summary>
+        public SystemSetting SystemSettings => Environment.SystemSettings;
 
         /// <summary>Gets the inactive root that holds every template.</summary>
         public Transform Templates { get; }

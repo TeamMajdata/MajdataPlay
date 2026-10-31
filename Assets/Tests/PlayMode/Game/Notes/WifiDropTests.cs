@@ -230,8 +230,8 @@ namespace MajdataPlay.Tests.Game.Notes.PlayMode
         [UnityTest]
         public IEnumerator Init_ClassicRightHandedWifi()
         {
-            _rig.Settings.Judge.Mode = JudgeModeOption.Classic;
-            _rig.Settings.Game.SlideSkipping = false;
+            _rig.UserSettings.Judge.Mode = JudgeModeOption.Classic;
+            _rig.UserSettings.Game.SlideSkipping = false;
             var wifi = CreateWifi(isJustR: true);
             yield return null;
 
@@ -277,7 +277,7 @@ namespace MajdataPlay.Tests.Game.Notes.PlayMode
         [UnityTest]
         public IEnumerator OnUpdate_ClassicStarScaling()
         {
-            _rig.Settings.Judge.Mode = JudgeModeOption.Classic;
+            _rig.UserSettings.Judge.Mode = JudgeModeOption.Classic;
             var wifi = CreateWifi();
             yield return null;
 
@@ -324,7 +324,7 @@ namespace MajdataPlay.Tests.Game.Notes.PlayMode
         [UnityTest]
         public IEnumerator Play_ClassicWifiUsesClassicJudgment()
         {
-            _rig.Settings.Judge.Mode = JudgeModeOption.Classic;
+            _rig.UserSettings.Judge.Mode = JudgeModeOption.Classic;
             var wifi = CreateWifi();
             _rig.RegisterSlides((wifi, 0.3f));
             yield return null;
@@ -348,8 +348,8 @@ namespace MajdataPlay.Tests.Game.Notes.PlayMode
         [UnityTest]
         public IEnumerator Play_AutoplayRandomGradeAndEarlyBars()
         {
-            _rig.Settings.Debug.OffsetUnit = OffsetUnitOption.Second;
-            _rig.Settings.Game.SlideFadeInOffset = 0.1f;
+            _rig.UserSettings.Judge.OffsetUnit = OffsetUnitOption.Second;
+            _rig.UserSettings.Game.SlideFadeInOffset = 0.1f;
             _rig.Controller.SetMods(AutoplayModeOption.Enable);
             _rig.Controller.AutoplayGrade = (JudgeGrade)77;
             var wifi = CreateWifi();
@@ -421,7 +421,7 @@ namespace MajdataPlay.Tests.Game.Notes.PlayMode
         [UnityTest]
         public IEnumerator Play_ClassicHidesBarsWhenNearlyDone()
         {
-            _rig.Settings.Judge.Mode = JudgeModeOption.Classic;
+            _rig.UserSettings.Judge.Mode = JudgeModeOption.Classic;
             var wifi = CreateWifi();
             var bars = wifi.GetComponentsInChildren<SpriteRenderer>(true);
             _rig.RegisterSlides((wifi, 0.3f));

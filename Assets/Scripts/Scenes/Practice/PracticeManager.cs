@@ -65,14 +65,14 @@ namespace MajdataPlay.Scenes.Practice
         void Awake()
         {
             InputManager.TouchButtonRingEdge = 4.8f;
-            _touchSimulationRadius = MajEnv.Settings.Debug.TouchSimulationRadius;
-            MajEnv.Settings.Debug.TouchSimulationRadius = 0;
+            _touchSimulationRadius = MajEnv.UserSettings.Touch.TouchSimulationRadius;
+            MajEnv.UserSettings.Touch.TouchSimulationRadius = 0;
         }
         private void Start()
         {
             _gameInfo = Majdata<GameInfo>.Instance!;
             _gameInfo.PracticeCount = _practiceCount;
-            _playbackSpeed = MajEnv.Settings.Mod.PlaybackSpeed;
+            _playbackSpeed = MajEnv.SystemSettings.Mod.PlaybackSpeed;
             _playbackSpeedTitle.text = "MAJSETTING_PROPERTY_PlaybackSpeed".i18n();
             _playbackSpeedValue.text = ZString.Format("{0:F2}", _playbackSpeed);
             InitAsync().Forget();
@@ -120,7 +120,7 @@ namespace MajdataPlay.Scenes.Practice
             }
             _audioTrack.Play();
             _audioTrack.CurrentSec = _startTime;
-            _audioTrack.Volume = MajEnv.Settings.Audio.Volume.BGM;
+            _audioTrack.Volume = MajEnv.UserSettings.Volume.BGM;
             CabinetLed.SetAllLight(Color.white);
             CabinetLed.SetButtonLight(Color.green, 3);
             CabinetLed.SetButtonLight(Color.red, 4);
@@ -137,14 +137,14 @@ namespace MajdataPlay.Scenes.Practice
             {
                 _isExited = true;
                 _gameInfo.TimeRange = new Range<double>(_startTime, _endTime);
-                MajEnv.Settings.Mod.PlaybackSpeed = _playbackSpeed;
+                MajEnv.SystemSettings.Mod.PlaybackSpeed = _playbackSpeed;
                 MajInstances.SceneSwitcher.SwitchScene("Game", false);
                 throw new OperationCanceledException();
             }
             else if(btnA5State.ClickCompletedThisFrame)
             {
                 _isExited = true;
-                MajEnv.Settings.Mod.PlaybackSpeed = 1;
+                MajEnv.SystemSettings.Mod.PlaybackSpeed = 1;
                 MajInstances.SceneSwitcher.SwitchScene("List", false);
                 throw new OperationCanceledException();
             }
@@ -190,7 +190,7 @@ namespace MajdataPlay.Scenes.Practice
             var needUpdatePBSValue = false;
             var increaseSpeedPressed = e2State.IsPressed || b2State.IsPressed;
             var decreaseSpeedPressed = e8State.IsPressed || b7State.IsPressed;
-            var iterationSpeed = MajEnv.Settings.Debug.MenuOptionIterationSpeed;
+            var iterationSpeed = MajEnv.SystemSettings.Debug.MenuOptionIterationSpeed;
             var repeatInterval = 1f / (iterationSpeed is 0 ? 15 : iterationSpeed);
             if (_playbackSpeedInput.Update(
                 increaseSpeedPressed,
@@ -319,7 +319,7 @@ namespace MajdataPlay.Scenes.Practice
             InputManager.TouchButtonRingEdge = 5.4f;
             _audioTrack?.Stop();
             _audioTrack = null;
-            MajEnv.Settings.Debug.TouchSimulationRadius = _touchSimulationRadius;
+            MajEnv.UserSettings.Touch.TouchSimulationRadius = _touchSimulationRadius;
             _isExited = true;
         }
     }

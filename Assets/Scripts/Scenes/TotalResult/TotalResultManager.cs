@@ -68,7 +68,7 @@ namespace MajdataPlay.Scenes.TotalResult
             var levels = _gameInfo.Levels;
             var songInfos = _gameInfo.Charts;
             var name = danInfo.Name;
-            var isClassic = MajInstances.GameManager.Settings.Judge.Mode == JudgeModeOption.Classic;
+            var isClassic = MajInstances.GameManager.UserSettings.Judge.Mode == JudgeModeOption.Classic;
             var totalAchievementValue = results.Sum(result => isClassic ? result.Acc.Classic : result.Acc.DX);
             if (_gameInfo.IsDanLifeEnabled)
             {

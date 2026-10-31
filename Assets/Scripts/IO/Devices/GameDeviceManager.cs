@@ -24,8 +24,8 @@ namespace MajdataPlay.IO
             }
             _initialized = true;
 #if UNITY_STANDALONE
-            var input = MajEnv.Settings.IO.InputDevice;
-            var output = MajEnv.Settings.IO.OutputDevice;
+            var input = MajEnv.SystemSettings.IO.InputDevice;
+            var output = MajEnv.SystemSettings.IO.OutputDevice;
             var manufacturer = IODetector.DeviceManufacturer;
             if (manufacturer == DeviceManufacturerOption.Dao)
             {
@@ -107,7 +107,7 @@ namespace MajdataPlay.IO
                 }
             }
 #elif UNITY_ANDROID || UNITY_IOS
-            switch (MajEnv.Settings.IO.InputDevice.ExternalButtonRing)
+            switch (MajEnv.SystemSettings.IO.InputDevice.ExternalButtonRing)
             {
                 case MobileExternalButtonRingOption.Keyboard:
 #if UNITY_ANDROID

@@ -25,7 +25,7 @@ namespace MajdataPlay
         //float _lastMainScreenPos = 1f;
 
         Transform _transform;
-        DisplayOptions? _displayOptions;
+        RenderingOptions? _renderingOptions;
 
         [SerializeField]
         [ReadOnlyField]
@@ -56,7 +56,7 @@ namespace MajdataPlay
         
         void Awake()
         {
-            _displayOptions = MajEnv.Settings?.Display;
+            _renderingOptions = MajEnv.SystemSettings?.Rendering;
             _transform = transform;
             _cam = GetComponent<Camera>();
             _originalCameraY = _transform.position.y; // 保存场景原始相机位置
@@ -124,17 +124,17 @@ namespace MajdataPlay
             {
                 case FLAG_NOT_INIT:
                     {
-                        _displayOptions = MajEnv.Settings?.Display;
-                        if (_displayOptions is null)
+                        _renderingOptions = MajEnv.SystemSettings?.Rendering;
+                        if (_renderingOptions is null)
                         {
                             return;
                         }
                         _flag = FLAG_INITED;
                         
-                        _lastTransformDisplay = _displayOptions.MainScreenTransform;
-                        _lastMainScreenOffset = _displayOptions.MainScreenOffset;
-                        _lastMainScreenScale = _displayOptions.MainScreenScale;
-                        //transform.position = new Vector3(0, 1.5f + 2.7f * (MajEnv.Settings?.Display.MainScreenPosition ?? 1f), -10); //Original
+                        _lastTransformDisplay = _renderingOptions.MainScreenTransform;
+                        _lastMainScreenOffset = _renderingOptions.MainScreenOffset;
+                        _lastMainScreenScale = _renderingOptions.MainScreenScale;
+                        //transform.position = new Vector3(0, 1.5f + 2.7f * (MajEnv.SystemSettings?.Rendering.MainScreenPosition ?? 1f), -10); //Original
 
 
                         // 主相机始终使用完整屏幕，不再按长宽比额外平移 viewport。
@@ -150,9 +150,9 @@ namespace MajdataPlay
                     {
                         bool screenChanged = RefreshScreenLayout();
                         var transformDisplay = _lastTransformDisplay;
-                        _lastTransformDisplay = _displayOptions!.MainScreenTransform;
-                        _lastMainScreenOffset = _displayOptions!.MainScreenOffset;
-                        _lastMainScreenScale = _displayOptions!.MainScreenScale;
+                        _lastTransformDisplay = _renderingOptions!.MainScreenTransform;
+                        _lastMainScreenOffset = _renderingOptions!.MainScreenOffset;
+                        _lastMainScreenScale = _renderingOptions!.MainScreenScale;
                         //如果没开调整显示位置，就直接return
                         if (!_lastTransformDisplay)
                         {

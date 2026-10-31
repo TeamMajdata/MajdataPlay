@@ -37,7 +37,8 @@ namespace MajdataPlay.Tests.Game.GamePlay.Manager
             _objects = new TestObjects();
             _settings = new GamePlaySettingsScope();
             _manager = _objects.Add<GamePlayManager>();
-            PrivateMember.SetField(_manager, "_gameSettings", _settings.Settings);
+            PrivateMember.SetField(_manager, "_userSettings", _settings.UserSettings);
+            PrivateMember.SetField(_manager, "_systemSettings", _settings.SystemSettings);
             PrivateMember.SetProperty(_manager, nameof(GamePlayManager.ModInfo), new GameModInfo(new ModOptions()));
         }
 
@@ -93,10 +94,10 @@ namespace MajdataPlay.Tests.Game.GamePlay.Manager
         {
             Assert.That(_manager.IsClassicMode, Is.False);
 
-            _settings.Settings.Judge.Mode = JudgeModeOption.Classic;
+            _settings.UserSettings.Judge.Mode = JudgeModeOption.Classic;
             Assert.That(_manager.IsClassicMode, Is.True);
 
-            PrivateMember.SetField(_manager, "_gameSettings", null);
+            PrivateMember.SetField(_manager, "_userSettings", null);
             Assert.That(_manager.IsClassicMode, Is.False);
         }
 
@@ -261,7 +262,7 @@ namespace MajdataPlay.Tests.Game.GamePlay.Manager
         [Test]
         public void EnforceGameFailure_UsesTheClassicAchievementInClassicMode()
         {
-            _settings.Settings.Judge.Mode = JudgeModeOption.Classic;
+            _settings.UserSettings.Judge.Mode = JudgeModeOption.Classic;
             PrivateMember.SetField(_manager, "_objectCounter", CreateCounter());
             PrivateMember.SetField(_manager, "_gameInfo", new GameInfo(GameMode.Normal, null!, null!));
             PrivateMember.SetField(_manager, "_enforceGameFailureCondition", EnforceGameFailureCondition.Retry_SSS);

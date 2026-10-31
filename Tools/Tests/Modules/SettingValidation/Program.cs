@@ -214,7 +214,7 @@ internal static class Program
             var menu = fixture.Menus[0];
             menu.ToHead();
             var offset = View(nameof(OffsetSettings.DisplayOffset));
-            MajEnv.Settings.Debug.OffsetUnit = OffsetUnitOption.Second;
+            MajEnv.UserSettings.Judge.OffsetUnit = OffsetUnitOption.Second;
             menu.RefreshVisibleEnumerators();
             Check(Value(offset) == "0", "zero offset value unexpectedly changed");
             Check(fixture.Description.text.Contains("Second"), "zero offset unit change missed selected description");
@@ -251,16 +251,16 @@ internal static class Program
     {
         var getMenus = typeof(SettingManager).GetMethod("GetMenuMetadata", BindingFlags.Static | BindingFlags.NonPublic);
         ChartDiscoveryProbeAttribute.Created = 0;
-        var categories = (Array)getMenus.Invoke(null, new object[] { typeof(GameSetting) });
+        var categories = (Array)getMenus.Invoke(null, new object[] { typeof(SettingRoot) });
         Check(ChartDiscoveryProbeAttribute.Created == 1, "first metadata preparation must include chart settings even without a selected chart");
-        Check(ReferenceEquals(categories, getMenus.Invoke(null, new object[] { typeof(GameSetting) })), "manager rebuilt category metadata");
+        Check(ReferenceEquals(categories, getMenus.Invoke(null, new object[] { typeof(SettingRoot) })), "manager rebuilt category metadata");
         var volumeCategory = categories.Cast<object>().Single(value =>
             (string)value.GetType().GetProperty("Name", BindingFlags.Instance | BindingFlags.NonPublic).GetValue(value) == "Volume");
         var getInstance = volumeCategory.GetType().GetMethod("GetInstance", BindingFlags.Instance | BindingFlags.NonPublic);
-        var originalSettings = new GameSetting();
-        var freshSettings = new GameSetting();
-        Check(ReferenceEquals(getInstance.Invoke(volumeCategory, new object[] { originalSettings }), originalSettings.Audio.Volume), "audio metadata must target nested Volume settings");
-        Check(ReferenceEquals(getInstance.Invoke(volumeCategory, new object[] { freshSettings }), freshSettings.Audio.Volume), "cached category metadata retained an earlier settings instance");
+        var originalSettings = new SettingRoot(new UserSetting(), new SystemSetting());
+        var freshSettings = new SettingRoot(new UserSetting(), new SystemSetting());
+        Check(ReferenceEquals(getInstance.Invoke(volumeCategory, new object[] { originalSettings }), originalSettings.User.Volume), "volume metadata must target the user Volume settings");
+        Check(ReferenceEquals(getInstance.Invoke(volumeCategory, new object[] { freshSettings }), freshSettings.User.Volume), "cached category metadata retained an earlier settings instance");
 
         DiscoveryProbeAttribute.Created = 0;
         WarmupEnumerator.Created = WarmupEnumerator.Initialized = WarmupEnumerator.Disposed = 0;
@@ -308,7 +308,7 @@ internal static class Program
             }
             Check(WarmupEnumerator.Disposed == (scene + 1) * 12, "scene exit failed to release all eagerly prepared enumerators");
             Check(DiscoveryProbeAttribute.Created == 6, "scene recreation repeated cached attribute discovery");
-            Check(ReferenceEquals(categories, getMenus.Invoke(null, new object[] { typeof(GameSetting) })) && ChartDiscoveryProbeAttribute.Created == 1,
+            Check(ReferenceEquals(categories, getMenus.Invoke(null, new object[] { typeof(SettingRoot) })) && ChartDiscoveryProbeAttribute.Created == 1,
                 "scene recreation rediscovered category or chart metadata");
         }
     }
@@ -1012,11 +1012,11 @@ internal static class Program
     /// <summary>Validates the production sensor options with the production menu and enum cache.</summary>
     private static void SensorStyleSettings()
     {
-        var defaults = new DebugOptions();
+        var defaults = new DisplayOptions();
         Check(defaults.SensorStyle == SensorDebugStyle.RedGreen && defaults.SensorOpacity == 20 && !defaults.DisplaySensor &&
             defaults.SensorPosition == SensorDebugPosition.MainScreen,
             "older configurations must preserve hidden red/green borders on the main screen at twenty percent");
-        var missing = System.Text.Json.JsonSerializer.Deserialize<DebugOptions>("{}");
+        var missing = System.Text.Json.JsonSerializer.Deserialize<DisplayOptions>("{}");
         Check(missing.SensorStyle == SensorDebugStyle.RedGreen && missing.SensorPosition == SensorDebugPosition.MainScreen,
             "missing JSON options changed the existing appearance or position");
         foreach (var style in new[] { SensorDebugStyle.Brightness, SensorDebugStyle.RedGreen, SensorDebugStyle.Classic })
@@ -1025,19 +1025,19 @@ internal static class Program
             {
                 defaults.SensorStyle = style;
                 defaults.SensorPosition = position;
-                var restored = System.Text.Json.JsonSerializer.Deserialize<DebugOptions>(System.Text.Json.JsonSerializer.Serialize(defaults));
+                var restored = System.Text.Json.JsonSerializer.Deserialize<DisplayOptions>(System.Text.Json.JsonSerializer.Serialize(defaults));
                 Check(restored.SensorStyle == style && restored.SensorPosition == position && restored.SensorOpacity == 20,
                     "numeric JSON round-trip lost the selected style, position or opacity");
             }
         }
-        var legacy = System.Text.Json.JsonSerializer.Deserialize<DebugOptions>("{\"DisplaySensor\":true,\"SensorStyle\":0,\"SensorOpacity\":30}");
+        var legacy = System.Text.Json.JsonSerializer.Deserialize<DisplayOptions>("{\"DisplaySensor\":true,\"SensorStyle\":0,\"SensorOpacity\":30}");
         Check(legacy.DisplaySensor && legacy.SensorStyle == SensorDebugStyle.Brightness && legacy.SensorOpacity == 30 &&
             legacy.SensorPosition == SensorDebugPosition.MainScreen, "existing brightness configurations must remain on the main screen");
         defaults.SensorStyle = (SensorDebugStyle)999;
         Check(defaults.SensorStyle == SensorDebugStyle.RedGreen, "invalid numeric style must select the known safe default");
         defaults.SensorPosition = (SensorDebugPosition)999;
         Check(defaults.SensorPosition == SensorDebugPosition.MainScreen, "invalid numeric position must select the main screen");
-        var invalid = System.Text.Json.JsonSerializer.Deserialize<DebugOptions>("{\"SensorStyle\":-1,\"SensorPosition\":-1}");
+        var invalid = System.Text.Json.JsonSerializer.Deserialize<DisplayOptions>("{\"SensorStyle\":-1,\"SensorPosition\":-1}");
         Check(invalid.SensorStyle == SensorDebugStyle.RedGreen && invalid.SensorPosition == SensorDebugPosition.MainScreen,
             "invalid JSON sensor options must select the existing safe defaults");
         defaults.SensorOpacity = 1;
@@ -1052,17 +1052,17 @@ internal static class Program
         {
             defaults.SensorOpacity = percentage;
             var opacityJson = System.Text.Json.JsonSerializer.Serialize(defaults);
-            var opacityRestored = System.Text.Json.JsonSerializer.Deserialize<DebugOptions>(opacityJson);
+            var opacityRestored = System.Text.Json.JsonSerializer.Deserialize<DisplayOptions>(opacityJson);
             Check(defaults.SensorOpacity == percentage && opacityRestored.SensorOpacity == percentage,
                 "opacity JSON round-trip changed an allowed ten-percent step: " + percentage);
         }
         foreach (var percentage in new[] { 10, 20, 30, 40, 50 })
         {
-            var olderOpacity = System.Text.Json.JsonSerializer.Deserialize<DebugOptions>("{\"SensorOpacity\":" + percentage + "}");
+            var olderOpacity = System.Text.Json.JsonSerializer.Deserialize<DisplayOptions>("{\"SensorOpacity\":" + percentage + "}");
             Check(olderOpacity.SensorOpacity == percentage, "the expanded range changed an existing saved opacity");
         }
-        var tooHighOpacity = System.Text.Json.JsonSerializer.Deserialize<DebugOptions>("{\"SensorOpacity\":999}");
-        var tooLowOpacity = System.Text.Json.JsonSerializer.Deserialize<DebugOptions>("{\"SensorOpacity\":-999}");
+        var tooHighOpacity = System.Text.Json.JsonSerializer.Deserialize<DisplayOptions>("{\"SensorOpacity\":999}");
+        var tooLowOpacity = System.Text.Json.JsonSerializer.Deserialize<DisplayOptions>("{\"SensorOpacity\":-999}");
         Check(tooHighOpacity.SensorOpacity == 90 && tooLowOpacity.SensorOpacity == 10,
             "external JSON opacities must clamp to the expanded range");
         defaults.SensorOpacity = 85;
@@ -1070,12 +1070,12 @@ internal static class Program
         defaults.SensorOpacity = 24;
         Check(defaults.SensorOpacity == 20, "opacity must still normalize external values to ten percent steps");
 
-        var properties = SettingReflectionCache.GetVisibleProperties(typeof(DebugOptions));
+        var properties = SettingReflectionCache.GetVisibleProperties(typeof(DisplayOptions));
         var names = properties.Select(property => property.Name).ToArray();
-        Check(Array.IndexOf(names, nameof(DebugOptions.SensorPosition)) == Array.IndexOf(names, nameof(DebugOptions.DisplaySensor)) + 1 &&
-            Array.IndexOf(names, nameof(DebugOptions.SensorStyle)) == Array.IndexOf(names, nameof(DebugOptions.SensorPosition)) + 1 &&
-            Array.IndexOf(names, nameof(DebugOptions.SensorOpacity)) == Array.IndexOf(names, nameof(DebugOptions.SensorStyle)) + 1,
-            "sensor visibility, position, style and opacity must remain adjacent in the debug menu");
+        Check(Array.IndexOf(names, nameof(DisplayOptions.SensorPosition)) == Array.IndexOf(names, nameof(DisplayOptions.DisplaySensor)) + 1 &&
+            Array.IndexOf(names, nameof(DisplayOptions.SensorStyle)) == Array.IndexOf(names, nameof(DisplayOptions.SensorPosition)) + 1 &&
+            Array.IndexOf(names, nameof(DisplayOptions.SensorOpacity)) == Array.IndexOf(names, nameof(DisplayOptions.SensorStyle)) + 1,
+            "sensor visibility, position, style and opacity must remain adjacent in the display menu");
         var constants = SettingReflectionCache.GetEnumValues(typeof(SensorDebugStyle));
         Check(constants.Length == 3 && (SensorDebugStyle)constants[0] == SensorDebugStyle.Brightness &&
             (SensorDebugStyle)constants[1] == SensorDebugStyle.RedGreen && (SensorDebugStyle)constants[2] == SensorDebugStyle.Classic &&
@@ -1088,7 +1088,7 @@ internal static class Program
 
         using var fixture = new Fixture(defaults);
         var menu = fixture.Menus[0];
-        menu.ToOption(nameof(DebugOptions.SensorStyle));
+        menu.ToOption(nameof(DisplayOptions.SensorStyle));
         foreach (var language in Language.All)
         {
             Localization.Change(language);
@@ -1100,48 +1100,48 @@ internal static class Program
             {
                 Check(!string.IsNullOrWhiteSpace(Translations.LookupRendering(key, language)), language.Code + " is missing " + key);
             }
-            Check(Value(View(nameof(DebugOptions.SensorStyle))) == Translations.LookupRendering(
+            Check(Value(View(nameof(DisplayOptions.SensorStyle))) == Translations.LookupRendering(
                 "MAJSETTING_PROPERTY_SensorStyle_OPTION_RedGreen", language), "the selected style did not localize");
-            ClickNext(View(nameof(DebugOptions.SensorStyle)));
+            ClickNext(View(nameof(DisplayOptions.SensorStyle)));
             Check(defaults.SensorStyle == SensorDebugStyle.Classic, "next style input did not select classic");
             Frame();
-            Check(Value(View(nameof(DebugOptions.SensorStyle))) == Translations.LookupRendering(
+            Check(Value(View(nameof(DisplayOptions.SensorStyle))) == Translations.LookupRendering(
                 "MAJSETTING_PROPERTY_SensorStyle_OPTION_Classic", language), "classic did not display its localized label");
-            ClickNext(View(nameof(DebugOptions.SensorStyle)));
+            ClickNext(View(nameof(DisplayOptions.SensorStyle)));
             Check(defaults.SensorStyle == SensorDebugStyle.Brightness, "next style input did not select brightness");
             Frame();
-            Check(Value(View(nameof(DebugOptions.SensorStyle))) == Translations.LookupRendering(
+            Check(Value(View(nameof(DisplayOptions.SensorStyle))) == Translations.LookupRendering(
                 "MAJSETTING_PROPERTY_SensorStyle_OPTION_Brightness", language), "brightness did not display its localized label");
-            ClickNext(View(nameof(DebugOptions.SensorStyle)));
+            ClickNext(View(nameof(DisplayOptions.SensorStyle)));
             Check(defaults.SensorStyle == SensorDebugStyle.RedGreen, "next style input did not wrap to red/green");
             Frame();
-            menu.ToOption(nameof(DebugOptions.SensorPosition));
-            Check(Value(View(nameof(DebugOptions.SensorPosition))) == Translations.LookupRendering(
+            menu.ToOption(nameof(DisplayOptions.SensorPosition));
+            Check(Value(View(nameof(DisplayOptions.SensorPosition))) == Translations.LookupRendering(
                 "MAJSETTING_PROPERTY_SensorPosition_OPTION_MainScreen", language), "main screen did not display its localized label");
-            ClickNext(View(nameof(DebugOptions.SensorPosition)));
+            ClickNext(View(nameof(DisplayOptions.SensorPosition)));
             Check(defaults.SensorPosition == SensorDebugPosition.SubScreen, "next position input did not select the secondary screen");
             Frame();
-            Check(Value(View(nameof(DebugOptions.SensorPosition))) == Translations.LookupRendering(
+            Check(Value(View(nameof(DisplayOptions.SensorPosition))) == Translations.LookupRendering(
                 "MAJSETTING_PROPERTY_SensorPosition_OPTION_SubScreen", language), "secondary screen did not display its localized label");
-            ClickNext(View(nameof(DebugOptions.SensorPosition)));
+            ClickNext(View(nameof(DisplayOptions.SensorPosition)));
             Check(defaults.SensorPosition == SensorDebugPosition.MainScreen, "next position input did not wrap to the main screen");
-            menu.ToOption(nameof(DebugOptions.SensorOpacity));
+            menu.ToOption(nameof(DisplayOptions.SensorOpacity));
             defaults.SensorOpacity = 10;
             Frame();
-            var opacityData = Get<OptionData>(View(nameof(DebugOptions.SensorOpacity)), "_data");
+            var opacityData = Get<OptionData>(View(nameof(DisplayOptions.SensorOpacity)), "_data");
             Check(!opacityData.MovePrevious() && defaults.SensorOpacity == 10, "opacity must stop at the ten-percent lower boundary");
             for (var percentage = 10; percentage <= 90; percentage += 10)
             {
-                Check(Value(View(nameof(DebugOptions.SensorOpacity))) == percentage + "%",
+                Check(Value(View(nameof(DisplayOptions.SensorOpacity))) == percentage + "%",
                     language.Code + " is missing the localized opacity percentage " + percentage);
                 if (percentage < 90)
                 {
-                    ClickNext(View(nameof(DebugOptions.SensorOpacity)));
+                    ClickNext(View(nameof(DisplayOptions.SensorOpacity)));
                     Check(defaults.SensorOpacity == percentage + 10, "opacity menu input did not use a ten-percent step");
                     Frame();
                 }
             }
-            ClickNext(View(nameof(DebugOptions.SensorOpacity)));
+            ClickNext(View(nameof(DisplayOptions.SensorOpacity)));
             Check(defaults.SensorOpacity == 90 && !opacityData.MoveNext(), "opacity must stop at the ninety-percent upper boundary");
             for (var percentage = 80; percentage >= 10; percentage -= 10)
             {
@@ -1150,20 +1150,20 @@ internal static class Program
                 Frame();
             }
             defaults.SensorOpacity = 20;
-            menu.ToOption(nameof(DebugOptions.SensorStyle));
+            menu.ToOption(nameof(DisplayOptions.SensorStyle));
             Frame();
         }
         defaults.SensorStyle = SensorDebugStyle.Brightness;
         Frame();
-        Check(Value(View(nameof(DebugOptions.SensorStyle))) == Translations.LookupRendering(
+        Check(Value(View(nameof(DisplayOptions.SensorStyle))) == Translations.LookupRendering(
             "MAJSETTING_PROPERTY_SensorStyle_OPTION_Brightness", Localization.Current),
             "external style change did not refresh the cached option");
         Check(ReferenceEquals(constants, SettingReflectionCache.GetEnumValues(typeof(SensorDebugStyle))),
             "menu interaction replaced the shared style enum metadata");
-        menu.ToOption(nameof(DebugOptions.SensorPosition));
+        menu.ToOption(nameof(DisplayOptions.SensorPosition));
         defaults.SensorPosition = SensorDebugPosition.SubScreen;
         Frame();
-        Check(Value(View(nameof(DebugOptions.SensorPosition))) == Translations.LookupRendering(
+        Check(Value(View(nameof(DisplayOptions.SensorPosition))) == Translations.LookupRendering(
             "MAJSETTING_PROPERTY_SensorPosition_OPTION_SubScreen", Localization.Current),
             "external position change did not refresh the cached option");
         Check(ReferenceEquals(positions, SettingReflectionCache.GetEnumValues(typeof(SensorDebugPosition))),
@@ -1180,11 +1180,10 @@ internal static class Program
     static void RenderingLocalizationWarmup()
     {
         var getMenus = typeof(SettingManager).GetMethod("GetMenuMetadata", BindingFlags.Static | BindingFlags.NonPublic);
-        var categories = ((Array)getMenus.Invoke(null, new object[] { typeof(GameSetting) })).Cast<object>().Select(value =>
+        var categories = ((Array)getMenus.Invoke(null, new object[] { typeof(SettingRoot) })).Cast<object>().Select(value =>
             (string)value.GetType().GetProperty("Name", BindingFlags.Instance | BindingFlags.NonPublic).GetValue(value)).ToArray();
-        Check(Array.IndexOf(categories, "Rendering") == Array.IndexOf(categories, "Display") + 1 &&
-            Array.IndexOf(categories, "Volume") == Array.IndexOf(categories, "Rendering") + 1,
-            "the rendering category must be between Display and the nested audio Volume page");
+        Check(categories.SequenceEqual(new[] { "Game", "Judge", "Display", "Volume", "Touch", "Rendering", "Debug" }),
+            "the menus must list the user categories before the system categories and leave out the hidden Audio category");
 
         var settings = new RenderingOptions { CompatibilityMode = true };
         GameManager.RenderingApplies = 0;
@@ -1249,7 +1248,8 @@ internal static class Program
             UObject.InstantiateCount = 0;
             LMotion.Motions.Clear();
             InputManager.ClearFrame();
-            MajEnv.Settings = new GameSetting();
+            MajEnv.UserSettings = new UserSetting();
+            MajEnv.SystemSettings = new SystemSetting();
             MajEnv.Mode = RunningMode.Normal;
             MajInstances.SceneSwitcher.SwitchedScenes.Clear();
             GameManager.SaveRequests = 0;

@@ -21,7 +21,7 @@ namespace MajdataPlay.Scenes.TotalResult
 
         public void DisplayResult(ISongDetail song, GameResult result, ChartLevel chartlevel)
         {
-            var isClassic = MajInstances.GameManager.Settings.Judge.Mode == JudgeModeOption.Classic;
+            var isClassic = MajInstances.GameManager.UserSettings.Judge.Mode == JudgeModeOption.Classic;
             title.text = song.Title;
             artist.text = song.Artist;
             designer.text = song.Designers[(int)chartlevel];

@@ -58,7 +58,7 @@ namespace MajdataPlay.IO
             set
             {
                 ThrowIfDisposed();
-                var volume = value.Clamp(0, 1) * MajEnv.Settings.Audio.Volume.Global.Clamp(0, 1);
+                var volume = value.Clamp(0, 1) * MajEnv.UserSettings.Volume.Global.Clamp(0, 1);
                 _audioSource!.volume = volume;
             }
         }

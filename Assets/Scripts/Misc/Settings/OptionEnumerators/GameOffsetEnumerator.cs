@@ -12,12 +12,12 @@ public sealed class GameOffsetEnumerator : DefaultNumberEnumerator, IOptionEnume
     protected override void InitInternal()
     {
         base.InitInternal();
-        _lastOffsetUnit = MajEnv.Settings.Debug.OffsetUnit;
+        _lastOffsetUnit = MajEnv.UserSettings.Judge.OffsetUnit;
         UpdateOptionStep();
     }
     void CheckOffsetUnit()
     {
-        var currentOffsetUnit = MajEnv.Settings.Debug.OffsetUnit;
+        var currentOffsetUnit = MajEnv.UserSettings.Judge.OffsetUnit;
         if (currentOffsetUnit == _lastOffsetUnit)
         {
             return;
@@ -32,6 +32,6 @@ public sealed class GameOffsetEnumerator : DefaultNumberEnumerator, IOptionEnume
     {
         MaxValue = null;
         MinValue = Name == "DisplayOffset" ? 0 : null;
-        Step = MajEnv.Settings.Debug.OffsetUnit == OffsetUnitOption.Second ? 0.001m : 0.1m;
+        Step = MajEnv.UserSettings.Judge.OffsetUnit == OffsetUnitOption.Second ? 0.001m : 0.1m;
     }
 }

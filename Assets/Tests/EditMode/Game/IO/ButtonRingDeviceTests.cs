@@ -94,7 +94,7 @@ namespace MajdataPlay.Tests.Game.IO
         [Test]
         public void Rosen_PollingIntervalAndDisconnect()
         {
-            _settings.Settings.IO.InputDevice.ButtonRing.PollingRateMs = 3;
+            _settings.SystemSettings.IO.InputDevice.ButtonRing.PollingRateMs = 3;
             var device = new RosenButtonRingDevice();
             var report = new byte[32];
             report[1 + 28] = 0b0100_1001;
@@ -214,10 +214,10 @@ namespace MajdataPlay.Tests.Game.IO
         [Test]
         public void Dao_PollingInterval_UsesFastestEnabledCapability()
         {
-            var input = _settings.Settings.IO.InputDevice;
+            var input = _settings.SystemSettings.IO.InputDevice;
             input.ButtonRing.PollingRateMs = 8;
             input.TouchPanel.PollingRateMs = 4;
-            _settings.Settings.IO.OutputDevice.Led.RefreshRateMs = 2;
+            _settings.SystemSettings.IO.OutputDevice.Led.RefreshRateMs = 2;
 
             var withLeds = new DaoCompositeDevice(true);
             var withoutLeds = new DaoCompositeDevice(false);
@@ -287,7 +287,7 @@ namespace MajdataPlay.Tests.Game.IO
         [Test]
         public void Keyboard_ConnectsAndPublishesSamples()
         {
-            _settings.Settings.IO.InputDevice.ButtonRing.PollingRateMs = 5;
+            _settings.SystemSettings.IO.InputDevice.ButtonRing.PollingRateMs = 5;
             var device = new KeyboardButtonRingDevice();
 
             Assert.That(PrivateMember.Invoke<bool>(device, "Connect", CancellationToken.None), Is.True);

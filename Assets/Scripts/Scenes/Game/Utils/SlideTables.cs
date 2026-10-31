@@ -914,7 +914,7 @@ namespace MajdataPlay.Scenes.Game.Notes.Slide.Utils
         }
         public static WifiTable GetWifiTable(int startPos)
         {
-            var predefinedTable = (MajEnv.Settings?.Judge.Mode ?? JudgeModeOption.Modern) == JudgeModeOption.Modern ? WIFISLIDE_JUDGE_QUEUE : WIFISLIDE_JUDGE_QUEUE_CLASSIC;
+            var predefinedTable = (MajEnv.UserSettings?.Judge.Mode ?? JudgeModeOption.Modern) == JudgeModeOption.Modern ? WIFISLIDE_JUDGE_QUEUE : WIFISLIDE_JUDGE_QUEUE_CLASSIC;
             var table = predefinedTable.Build();
             var diff = Math.Abs(1 - startPos);
 

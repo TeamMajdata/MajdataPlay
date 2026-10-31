@@ -313,12 +313,12 @@ namespace MajdataPlay.Scenes.Game
                 _gaugeScaleBindings[i] = new(_judgeTimingGaugeScaleTransforms[i], scaleImage);
             }
 
-            _breakFastLateDisplayOption = MajEnv.Settings.Display.BreakFastLateType;
-            _noteFastLateDisplayOption = MajEnv.Settings.Display.FastLateType;
-            _centerInfoDisplayOption = MajEnv.Settings.Game.BGInfo;
-            _secondaryInfoDisplayOption = MajEnv.Settings.Game.SecondaryBGInfo;
-            _subScreenInfoDisplayOption = MajEnv.Settings.Game.SubScreenBGInfo;
-            _isJudgeTimingGaugeEnabled = MajEnv.Settings.Game.EnableJudgeTimingGauge;
+            _breakFastLateDisplayOption = MajEnv.UserSettings.Judge.BreakFastLateType;
+            _noteFastLateDisplayOption = MajEnv.UserSettings.Judge.FastLateType;
+            _centerInfoDisplayOption = MajEnv.UserSettings.Display.BGInfo;
+            _secondaryInfoDisplayOption = MajEnv.UserSettings.Display.SecondaryBGInfo;
+            _subScreenInfoDisplayOption = MajEnv.UserSettings.Display.SubScreenBGInfo;
+            _isJudgeTimingGaugeEnabled = MajEnv.UserSettings.Judge.EnableJudgeTimingGauge;
 
             if (_isJudgeTimingGaugeEnabled)
             {
@@ -332,7 +332,7 @@ namespace MajdataPlay.Scenes.Game
             //clean up
             Clear();
 
-            switch (MajEnv.Settings.Game.TopInfo)
+            switch (MajEnv.UserSettings.Display.TopInfo)
             {
                 case TopInfoDisplayOption.Judge:
                     _topInfoJudgeParent.SetActive(true);
@@ -616,7 +616,7 @@ namespace MajdataPlay.Scenes.Game
                 CenterInfoOption = _centerInfoDisplayOption,
                 SecondaryInfoOption = _secondaryInfoDisplayOption,
                 SubScreenInfoOption = _subScreenInfoDisplayOption,
-                TopInfoOption = MajEnv.Settings.Game.TopInfo,
+                TopInfoOption = MajEnv.UserSettings.Display.TopInfo,
                 IsDanLifeEnabled = isDanLifeEnabled,
                 CurrentHP = isDanLifeEnabled ? _gameInfo.CurrentHP : 0,
                 MaxHP = isDanLifeEnabled ? _gameInfo.MaxHP : 0,
@@ -1267,7 +1267,7 @@ namespace MajdataPlay.Scenes.Game
             _lateCountDisplayer.SetText(_sb);
             _sb.Clear();
 
-            switch (MajEnv.Settings.Game.TopInfo)
+            switch (MajEnv.UserSettings.Display.TopInfo)
             {
                 case TopInfoDisplayOption.Judge:
                     {

@@ -82,9 +82,9 @@ namespace MajdataPlay.Rendering
                 Fail("bundled charts or skin initialization are unavailable");
                 yield break;
             }
-            MajEnv.Settings.Mod.AutoPlay = AutoplayModeOption.Enable;
-            MajEnv.Settings.Mod.PlaybackSpeed = 1f;
-            MajEnv.Settings.Online.Enable = false;
+            MajEnv.SystemSettings.Mod.AutoPlay = AutoplayModeOption.Enable;
+            MajEnv.SystemSettings.Mod.PlaybackSpeed = 1f;
+            MajEnv.SystemSettings.Online.Enable = false;
             MajDebug.LogInfo(nameof(AndroidFullCaptureDriver), "GSC_FULL_CAPTURE_TITLE_READY");
             if (IsManualCaptureRequested())
             {
@@ -114,7 +114,7 @@ namespace MajdataPlay.Rendering
                 MajDebug.LogInfo(nameof(AndroidFullCaptureDriver),
                     $"GSC_GROUP_BEGIN group={_group}/{GroupCount}; requestedMSAA={_requestedSamples}; "
                     + $"output={(_intermediate ? "Intermediate" : "Direct")}; renderScale={_scale}; "
-                    + $"compatibility={MajEnv.Settings.Rendering.CompatibilityMode}; quality={QualitySettings.names[QualitySettings.GetQualityLevel()]}; chart={selected.Title}; difficulty=Master");
+                    + $"compatibility={MajEnv.SystemSettings.Rendering.CompatibilityMode}; quality={QualitySettings.names[QualitySettings.GetQualityLevel()]}; chart={selected.Title}; difficulty=Master");
                 var startFrame = Time.frameCount;
                 var startTime = Time.realtimeSinceStartup;
                 Majdata<GameInfo>.Instance = new GameInfo(GameMode.Normal, new[] { selected }, new[] { ChartLevel.Master });
@@ -209,7 +209,7 @@ namespace MajdataPlay.Rendering
             _requestedSamples = 1 << ((configuration - 1) / 2);
             _intermediate = (configuration & 1) == 0;
             _scale = _intermediate && _requestedSamples == 1 ? 50 : _intermediate && _requestedSamples == 4 ? 150 : 100;
-            var options = MajEnv.Settings.Rendering;
+            var options = MajEnv.SystemSettings.Rendering;
             options.RenderQuality = RenderingQualityOption.Custom;
             options.CompatibilityMode = _intermediate && _requestedSamples == 1;
             options.SystemResolutionScaling = 100;

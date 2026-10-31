@@ -59,9 +59,20 @@ namespace MajdataPlay
         public static event EventHandler<bool>? OnAppFocus;
         public static event EventHandler<bool>? OnAppPause;
 
-        public GameSetting Settings
+        /// <summary>
+        /// Gets the user settings, which are the same instance as <see cref="MajEnv.UserSettings"/>.
+        /// </summary>
+        public UserSetting UserSettings
         {
-            get => MajEnv.Settings;
+            get => MajEnv.UserSettings;
+        }
+
+        /// <summary>
+        /// Gets the system settings, which are the same instance as <see cref="MajEnv.SystemSettings"/>.
+        /// </summary>
+        public SystemSetting SystemSettings
+        {
+            get => MajEnv.SystemSettings;
         }
 
         public bool IsInited { get; private set; }
@@ -177,7 +188,7 @@ namespace MajdataPlay
                 if (arg == "--view-mode")
                 {
                     MajEnv.Mode = RunningMode.View;
-                    Settings.Mod.AutoPlay = AutoplayModeOption.Enable;
+                    SystemSettings.Mod.AutoPlay = AutoplayModeOption.Enable;
                     break;
                 }
             }
@@ -190,13 +201,13 @@ namespace MajdataPlay
             else if (_isEnterView)
             {
                 MajEnv.Mode = RunningMode.View;
-                Settings.Mod.AutoPlay = AutoplayModeOption.Enable;
+                SystemSettings.Mod.AutoPlay = AutoplayModeOption.Enable;
             }
 #endif
 
             ApplyScreenConfig();
 #if OSX_RUNTIME
-            if (Settings.Debug.FullScreen && MajEnv.Mode != RunningMode.View)
+            if (SystemSettings.Rendering.FullScreen && MajEnv.Mode != RunningMode.View)
             {
                 await ApplyMacOSFullscreenAsync();
             }
@@ -205,20 +216,20 @@ namespace MajdataPlay
             var availableLangs = Localization.Available;
             if (!availableLangs.IsEmpty())
             {
-                if (string.IsNullOrEmpty(Settings.Display.Language))
+                if (string.IsNullOrEmpty(UserSettings.Display.Language))
                 {
                     if (Localization.SetLangByCode(Application.systemLanguage.ToLocale()))
                     {
-                        Settings.Display.Language = Localization.Current.ToString();
+                        UserSettings.Display.Language = Localization.Current.ToString();
                     }
                 }
                 else
                 {
-                    var lang = availableLangs.Find(x => x.ToString() == Settings.Display.Language);
+                    var lang = availableLangs.Find(x => x.ToString() == UserSettings.Display.Language);
                     if (lang is null)
                     {
                         lang = availableLangs.First();
-                        Settings.Display.Language = lang.ToString();
+                        UserSettings.Display.Language = lang.ToString();
                     }
 
                     Localization.Current = lang;
@@ -227,13 +238,13 @@ namespace MajdataPlay
 
             ApplyDisplaySettings();
 #if UNITY_EDITOR || !(UNITY_ANDROID || UNITY_IOS)
-            QualitySettings.vSyncCount = Settings.Rendering.VSync ? 1 : 0;
+            QualitySettings.vSyncCount = SystemSettings.Rendering.VSync ? 1 : 0;
 #endif
-            QualitySettings.maxQueuedFrames = Settings.Debug.MaxQueuedFrames;
+            QualitySettings.maxQueuedFrames = SystemSettings.Debug.MaxQueuedFrames;
             LowLatencyVSync.Install();
             DetectHWEncoder();
 #if (!UNITY_EDITOR && UNITY_STANDALONE_WIN)
-            if (Settings.Display.Topmost)
+            if (SystemSettings.Rendering.Topmost)
             {
                 SetWindowTopmost();
             }
@@ -351,7 +362,7 @@ namespace MajdataPlay
         }
         private void ApplyDisplaySettings()
         {
-            var renderingOptions = MajEnv.Settings.Rendering;
+            var renderingOptions = MajEnv.SystemSettings.Rendering;
             ApplyRenderingSettings();
 #if UNITY_STANDALONE || UNITY_EDITOR
             QualitySettings.vSyncCount = renderingOptions.VSync ? 1 : 0;
@@ -367,7 +378,7 @@ namespace MajdataPlay
             int baseline = Mathf.Min(UnityDefaultQualityLevel, QualitySettings.names.Length - 1);
             if (baseline >= 0 && QualitySettings.GetQualityLevel() != baseline)
                 QualitySettings.SetQualityLevel(baseline, true);
-            var parameters = MajEnv.Settings.Rendering.GetEffectiveParameters();
+            var parameters = MajEnv.SystemSettings.Rendering.GetEffectiveParameters();
             // 保留完整 mip 链；纹理精度是采样 LOD 的 +0/+1/+2，而不是最高可用 mip 的下限。
             if (QualitySettings.globalTextureMipmapLimit != 0)
                 QualitySettings.globalTextureMipmapLimit = 0;
@@ -377,12 +388,12 @@ namespace MajdataPlay
 #if UNITY_ANDROID && !UNITY_EDITOR
             // 两个比例独立相乘；兼容模式暂时恢复原系统缓冲。
             MajAndroidDisplayResolution.Configure(GraphicsSettings.currentRenderPipeline is MajRenderPipelineAsset
-                && !MajEnv.Settings.Rendering.CompatibilityMode
-                ? MajEnv.Settings.Rendering.SystemResolutionScaling : 100);
+                && !MajEnv.SystemSettings.Rendering.CompatibilityMode
+                ? MajEnv.SystemSettings.Rendering.SystemResolutionScaling : 100);
 #endif
 #if UNITY_STANDALONE || UNITY_EDITOR
             // SetQualityLevel 会应用资产的 VSync 值，同步方式继续尊重独立显示选项。
-            QualitySettings.vSyncCount = MajEnv.Settings.Rendering.VSync ? 1 : 0;
+            QualitySettings.vSyncCount = MajEnv.SystemSettings.Rendering.VSync ? 1 : 0;
 #endif
         }
 
@@ -394,7 +405,7 @@ namespace MajdataPlay
 #if (UNITY_STANDALONE_WIN || UNITY_STANDALONE_OSX) && !UNITY_EDITOR
             if (MajEnv.Mode != RunningMode.View)
             {
-                var fullScreen = Settings.Debug.FullScreen;
+                var fullScreen = SystemSettings.Rendering.FullScreen;
 #if UNITY_STANDALONE_OSX
                 Screen.fullScreen = fullScreen;
                 Screen.fullScreenMode = fullScreen
@@ -405,7 +416,7 @@ namespace MajdataPlay
                 Screen.fullScreenMode = FullScreenMode.ExclusiveFullScreen;
 #endif
 
-                var resolution = Settings.Display.Resolution.ToLower();
+                var resolution = SystemSettings.Rendering.Resolution.ToLower();
 #if UNITY_STANDALONE_OSX
                 if (!fullScreen && resolution is not "auto")
 #else
@@ -427,7 +438,7 @@ namespace MajdataPlay
                 }
             }
 #endif
-            Application.targetFrameRate = Settings.Rendering.FPSLimit;
+            Application.targetFrameRate = SystemSettings.Rendering.FPSLimit;
         }
 
 #if UNITY_STANDALONE_OSX && !UNITY_EDITOR

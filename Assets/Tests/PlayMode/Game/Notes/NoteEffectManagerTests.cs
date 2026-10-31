@@ -81,7 +81,7 @@ namespace MajdataPlay.Tests.Game.Notes.PlayMode
         [UnityTest]
         public IEnumerator Awake_ReadsFeedbackRange([Values(TouchFeedbackLevel.All, TouchFeedbackLevel.Outer_Only, TouchFeedbackLevel.Inner_Only, TouchFeedbackLevel.Disable)] TouchFeedbackLevel level)
         {
-            _rig.Settings.Display.TouchFeedback = level;
+            _rig.UserSettings.Display.TouchFeedback = level;
             var manager = _rig.Objects.Add<NoteEffectManager>("Manager");
             yield return null;
 
@@ -118,7 +118,7 @@ namespace MajdataPlay.Tests.Game.Notes.PlayMode
         [UnityTest]
         public IEnumerator AnyAreaClick_FiltersEvents()
         {
-            _rig.Settings.Display.TouchFeedback = TouchFeedbackLevel.All;
+            _rig.UserSettings.Display.TouchFeedback = TouchFeedbackLevel.All;
             var manager = _rig.Objects.Add<NoteEffectManager>("AllFeedback");
             yield return null;
             foreach (SensorArea area in Enum.GetValues(typeof(SensorArea)))

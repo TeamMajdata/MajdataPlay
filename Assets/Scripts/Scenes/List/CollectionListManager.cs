@@ -442,7 +442,7 @@ namespace MajdataPlay.Scenes.List
                     var sortedMaster = Array.Empty<ISongDetail>();
                     var sortedReMaster = Array.Empty<ISongDetail>();
                     var sortedUTAGE = Array.Empty<ISongDetail>();
-                    if (MajEnv.Settings.Judge.Mode == Settings.JudgeModeOption.Classic)
+                    if (MajEnv.UserSettings.Judge.Mode == Settings.JudgeModeOption.Classic)
                     {
                         sortedEasy = songAndScores.OrderByDescending(x => x.Item2.Easy.Acc.Classic)
                                                   .Select(x => x.x)

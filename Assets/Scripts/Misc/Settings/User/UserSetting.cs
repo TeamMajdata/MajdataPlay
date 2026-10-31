@@ -1,10 +1,7 @@
-using System;
-using System.Collections.Generic;
-using System.Text;
-
-namespace MajdataPlay.Settings.User
+#nullable enable
+namespace MajdataPlay.Settings
 {
-    internal class UserSetting
+    public class UserSetting
     {
         public GameOptions Game { get; init; } = new();
 
@@ -12,8 +9,8 @@ namespace MajdataPlay.Settings.User
 
         public DisplayOptions Display { get; init; } = new();
 
-        public SFXVolume Volume { get; set; } = new();
+        public SFXVolume Volume { get; init; } = new();
 
-        public TouchOptions Touch { get; set; } = new();
+        public TouchOptions Touch { get; init; } = new();
     }
 }

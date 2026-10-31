@@ -79,7 +79,7 @@ namespace MajdataPlay.Scenes.Game.Notes.Controllers
         const string SENSOR_OUT_OF_RANGE = "Sensor index requested by Note is out of range";
         const string BUTTON_IS_NULL = "Button index requested by Note is null";
         const string BUTTON_OUT_OF_RANGE = "Button index requested by Note is out of range";
-        readonly bool USERSETTING_IS_AUTOPLAY = (MajEnv.Settings?.Mod.AutoPlay ?? AutoplayModeOption.Disable) != AutoplayModeOption.Disable;
+        readonly bool USERSETTING_IS_AUTOPLAY = (MajEnv.SystemSettings?.Mod.AutoPlay ?? AutoplayModeOption.Disable) != AutoplayModeOption.Disable;
 
         void Awake()
         {

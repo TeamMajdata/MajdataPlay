@@ -173,8 +173,8 @@ internal static partial class Program
 
     static void VerifySupplementalDeviceFactory()
     {
-        var input = MajEnv.Settings.IO.InputDevice;
-        var output = MajEnv.Settings.IO.OutputDevice;
+        var input = MajEnv.SystemSettings.IO.InputDevice;
+        var output = MajEnv.SystemSettings.IO.OutputDevice;
         var original = (input.ButtonRing.Enable, input.TouchPanel.Enable, output.Led.Enable, IODetector.DeviceManufacturer);
         ResetPointerInputs();
         ResetDeviceFactory();

@@ -137,7 +137,7 @@ namespace MajdataPlay.Scenes.Result
             if (string.IsNullOrEmpty(Localization.Current.Code))
             {
                 Localization.Init();
-                if (!Localization.SetLang(MajEnv.Settings.Display.Language)
+                if (!Localization.SetLang(MajEnv.UserSettings.Display.Language)
                  && !Localization.SetLangByCode(Application.systemLanguage.ToLocale()))
                     Localization.SetLangByCode("en-US");
             }
@@ -172,7 +172,7 @@ namespace MajdataPlay.Scenes.Result
             rank.text = "";
             var listConfig = MajEnv.RuntimeConfig.List;
             var result = _gameInfo.GetLastResult();
-            var isClassic = MajEnv.Settings.Judge.Mode == JudgeModeOption.Classic;
+            var isClassic = MajEnv.UserSettings.Judge.Mode == JudgeModeOption.Classic;
 
             CabinetLed.SetAllLight(Color.white);
 
@@ -225,7 +225,7 @@ namespace MajdataPlay.Scenes.Result
 
             var rect = _noteJudgeDiffGraph.GetComponent<RectTransform>().rect;
             _noteJudgeDiffGraph.texture = DrawNoteJudgeDiffGraph(result.NoteJudgeDiffs.Span, (int)rect.height, (int)rect.width);
-            if(MajEnv.Settings.Debug.OffsetUnit == OffsetUnitOption.Second)
+            if(MajEnv.UserSettings.Judge.OffsetUnit == OffsetUnitOption.Second)
             {
                 if (result.NoteJudgeDiffs.IsEmpty)
                 {
@@ -287,7 +287,7 @@ namespace MajdataPlay.Scenes.Result
                 totalJudgeRecord.IsAllPerfect, 
                 totalJudgeRecord.IsFullCombo, 
                 gameObject.GetCancellationTokenOnDestroy()).Forget();
-            if (!MajInstances.GameManager.Settings.Mod.IsAnyModActive())
+            if (!MajInstances.GameManager.SystemSettings.Mod.IsAnyModActive())
             {
                 var localScoreSaveTask = ScoreManager.SaveScore(result, result.Level);
                 if (song is OnlineSongDetail onlineSong && onlineSong.ServerInfo.RuntimeConfig.AuthMethod != NetAuthMethodOption.None)

@@ -51,7 +51,7 @@ namespace MajdataPlay.Scenes.Result.Components
             {
                 return;
             }
-            if (!_isScorePosted && !MajInstances.GameManager.Settings.Mod.IsAnyModActive() && 
+            if (!_isScorePosted && !MajInstances.GameManager.SystemSettings.Mod.IsAnyModActive() &&
                 (InputManager.IsSensorPressedInThisFrame(SensorArea.D4) ||
                 InputManager.IsSensorPressedInThisFrame(SensorArea.A3))
                 )

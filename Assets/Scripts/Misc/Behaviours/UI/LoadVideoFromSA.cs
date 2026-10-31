@@ -34,7 +34,7 @@ namespace MajdataPlay.Behaviours.UI
         }
         private async UniTask DelayPlayVideo()
         {
-            while (MajEnv.Settings is null)
+            while (MajEnv.UserSettings is null || MajEnv.SystemSettings is null)
             {
                 await UniTask.Yield();
             }

@@ -56,7 +56,7 @@ namespace MajdataPlay.Scenes.View
         }
         public bool IsAutoplay => AutoplayMode != AutoplayModeOption.Disable;
         public GameModInfo ModInfo { get; private set; }
-        public AutoplayModeOption AutoplayMode => MajEnv.Settings.Mod.AutoPlay;
+        public AutoplayModeOption AutoplayMode => MajEnv.SystemSettings.Mod.AutoPlay;
         public JudgeGrade AutoplayGrade { get; private set; } = JudgeGrade.Perfect;
         public Material BreakMaterial { get; private set; }
         public Material DefaultMaterial { get; private set; }
@@ -85,7 +85,7 @@ namespace MajdataPlay.Scenes.View
         static Sprite? _bgCover = null;
         static string? _videoPath = null;
         //WsServer _httpServer;
-        GameSetting _setting = MajEnv.Settings;
+        UserSetting _setting = MajEnv.UserSettings;
         NoteLoader _noteLoader;
         NoteManager _noteManager;
         NoteAudioManager _noteAudioManager;
@@ -106,7 +106,7 @@ namespace MajdataPlay.Scenes.View
             Majdata<ViewManager>.Instance = this;
             Majdata<INoteController>.Instance = this;
             Majdata<INoteTimeProvider>.Instance = this;
-            ModInfo = MajEnv.Settings.Mod;
+            ModInfo = MajEnv.SystemSettings.Mod;
             DefaultMaterial = RuntimeDatabase.Note.DefaultMaterial;
             BreakMaterial = RuntimeDatabase.Note.BreakMaterial;
             HoldShineMaterial = RuntimeDatabase.Note.HoldShineMaterial;

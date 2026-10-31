@@ -99,7 +99,7 @@ namespace MajdataPlay.Tests.Game.Scenes.PlayMode.PracticeScene
         [UnityTest]
         public IEnumerator Start_LoadsAndPlaysPracticeRange()
         {
-            MajEnv.Settings.Debug.TouchSimulationRadius = 0.7f;
+            MajEnv.UserSettings.Touch.TouchSimulationRadius = 0.7f;
             Sfx("bgm_select.mp3").Playing = true;
 
             yield return StartScene();
@@ -115,7 +115,7 @@ namespace MajdataPlay.Tests.Game.Scenes.PlayMode.PracticeScene
             Assert.That(PrivateMember.GetField<TextMeshProUGUI>(_manager, "_playbackSpeedTitle").text, Is.EqualTo("MAJSETTING_PROPERTY_PlaybackSpeed"));
             Assert.That(_manager.startTimeText.text, Is.EqualTo("0:00.000"));
             Assert.That(_manager.endTimeText.text, Is.EqualTo("1:00.000"));
-            Assert.That(MajEnv.Settings.Debug.TouchSimulationRadius, Is.EqualTo(0f));
+            Assert.That(MajEnv.UserSettings.Touch.TouchSimulationRadius, Is.EqualTo(0f));
             Assert.That(InputManager.TouchButtonRingEdge, Is.EqualTo(4.8f).Within(1e-4f));
         }
 
@@ -218,7 +218,7 @@ namespace MajdataPlay.Tests.Game.Scenes.PlayMode.PracticeScene
         [UnityTest]
         public IEnumerator BackButton_ResetsSpeedAndLeaves()
         {
-            MajEnv.Settings.Mod.PlaybackSpeed = 1.5f;
+            MajEnv.SystemSettings.Mod.PlaybackSpeed = 1.5f;
             yield return StartScene();
             ExpectSceneSwitch();
             LogAssert.Expect(LogType.Exception, new Regex("OperationCanceledException"));
@@ -227,7 +227,7 @@ namespace MajdataPlay.Tests.Game.Scenes.PlayMode.PracticeScene
             yield return null;
 
             Assert.That(PrivateMember.GetField<bool>(_manager, "_isExited"), Is.True);
-            Assert.That(MajEnv.Settings.Mod.PlaybackSpeed, Is.EqualTo(1f));
+            Assert.That(MajEnv.SystemSettings.Mod.PlaybackSpeed, Is.EqualTo(1f));
         }
 
         /// <summary>Checks that the start button stores the range and speed and starts the game.</summary>
@@ -245,7 +245,7 @@ namespace MajdataPlay.Tests.Game.Scenes.PlayMode.PracticeScene
             var range = Majdata<GameInfo>.Instance!.TimeRange!.Value;
             Assert.That(range.Start, Is.EqualTo(3d).Within(1e-4));
             Assert.That(range.End, Is.EqualTo(9d).Within(1e-4));
-            Assert.That(MajEnv.Settings.Mod.PlaybackSpeed, Is.EqualTo(1f));
+            Assert.That(MajEnv.SystemSettings.Mod.PlaybackSpeed, Is.EqualTo(1f));
         }
 
         /// <summary>Checks that destroying the scene stops the track and restores the touch settings.</summary>
@@ -253,12 +253,12 @@ namespace MajdataPlay.Tests.Game.Scenes.PlayMode.PracticeScene
         [UnityTest]
         public IEnumerator Destroy_RestoresSettings()
         {
-            MajEnv.Settings.Debug.TouchSimulationRadius = 0.4f;
+            MajEnv.UserSettings.Touch.TouchSimulationRadius = 0.4f;
             yield return StartScene();
 
             UnityEngine.Object.DestroyImmediate(_manager.gameObject);
 
-            Assert.That(MajEnv.Settings.Debug.TouchSimulationRadius, Is.EqualTo(0.4f));
+            Assert.That(MajEnv.UserSettings.Touch.TouchSimulationRadius, Is.EqualTo(0.4f));
             Assert.That(InputManager.TouchButtonRingEdge, Is.EqualTo(5.4f).Within(1e-4f));
             Assert.That(_track.StopCount, Is.GreaterThanOrEqualTo(1));
         }

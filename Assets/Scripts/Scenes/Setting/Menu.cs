@@ -29,7 +29,7 @@ namespace MajdataPlay.Scenes.Setting
         [field: SerializeField, ReadOnlyField]
         public int SelectedIndex { get; private set; }
         /// <summary>
-        /// Option对象<para>e.g. GameSetting.Game</para>
+        /// Option对象<para>e.g. UserSetting.Game</para>
         /// </summary>
         public object Instance { get; set; } = null!;
         /// <summary>

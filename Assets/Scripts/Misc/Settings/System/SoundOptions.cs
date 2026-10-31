@@ -2,7 +2,7 @@
 namespace MajdataPlay.Settings
 {
     /// <summary>
-    /// Contains the audio volume and output backend options.
+    /// Contains the audio output backend options.
     /// </summary>
     public class SoundOptions
     {
@@ -19,11 +19,6 @@ namespace MajdataPlay.Settings
         /// Gets or sets whether every output channel plays a mono downmix.
         /// </summary>
         public bool ForceMono { get; set; } = false;
-
-        /// <summary>
-        /// Gets or sets the volumes of the music and sound effects.
-        /// </summary>
-        public SFXVolume Volume { get; set; } = new();
 #if UNITY_STANDALONE
 #if UNITY_STANDALONE_WIN
 

@@ -54,10 +54,10 @@ namespace MajdataPlay.Tests.Game.GamePlay.Manager
             {
                 PrivateMember.SetProperty(control, "State", SwitchStatus.Off);
             }
-            _settings.Settings.Game.TrackSkip = true;
-            _settings.Settings.Game.FastRetry = true;
-            _settings.Settings.Game.FastPractice = true;
-            _settings.Settings.Game.GameplaySubScreenClickBehavior = GameplaySubScreenClickBehaviorOption.TrackSkip_1_Sec_Delay;
+            _settings.UserSettings.Game.TrackSkip = true;
+            _settings.UserSettings.Game.FastRetry = true;
+            _settings.UserSettings.Game.FastPractice = true;
+            _settings.UserSettings.Game.GameplaySubScreenClickBehavior = GameplaySubScreenClickBehaviorOption.TrackSkip_1_Sec_Delay;
             _settings.SetDeltaTime(0.25f);
             _manager = _objects.Add<GamePlayManager>();
             _controller = _manager.gameObject.AddComponent<FnController>();
@@ -86,7 +86,7 @@ namespace MajdataPlay.Tests.Game.GamePlay.Manager
         public void Initialize_MapsButtonsAndSensorsForScreenRotation(
             GameplayScreenRotationAngleOption rotation, string trackSkip, string fastRetry, string fastPractice)
         {
-            _settings.Settings.Display.GameplayScreenRotationAngle = rotation;
+            _settings.SystemSettings.Rendering.GameplayScreenRotationAngle = rotation;
             _controller.Init(_manager);
 
             AssertKeyMapping("2367", trackSkip);
@@ -214,9 +214,9 @@ namespace MajdataPlay.Tests.Game.GamePlay.Manager
         [TestCase("1278")]
         public void UpdateInputState_IgnoresDisabledCombinations(string combination)
         {
-            _settings.Settings.Game.TrackSkip = false;
-            _settings.Settings.Game.FastRetry = false;
-            _settings.Settings.Game.FastPractice = false;
+            _settings.UserSettings.Game.TrackSkip = false;
+            _settings.UserSettings.Game.FastRetry = false;
+            _settings.UserSettings.Game.FastPractice = false;
             _controller.Init(_manager);
             ArmInput();
             SetPressedCombination(combination);
@@ -237,8 +237,8 @@ namespace MajdataPlay.Tests.Game.GamePlay.Manager
         [TestCase(false, false, FnController.FnAction.FastPractice)]
         public void UpdateInputState_PrioritizesEnabledCombinations(bool trackSkip, bool fastRetry, object expectedAction)
         {
-            _settings.Settings.Game.TrackSkip = trackSkip;
-            _settings.Settings.Game.FastRetry = fastRetry;
+            _settings.UserSettings.Game.TrackSkip = trackSkip;
+            _settings.UserSettings.Game.FastRetry = fastRetry;
             _controller.Init(_manager);
             ArmInput();
             SetPressedButtons(ButtonZone.A1, ButtonZone.A2, ButtonZone.A3, ButtonZone.A4,
@@ -255,10 +255,10 @@ namespace MajdataPlay.Tests.Game.GamePlay.Manager
         [TestCase(GameplaySubScreenClickBehaviorOption.FastRetry, FnController.FnAction.FastRetry)]
         public void UpdateInputState_TriggersImmediateSubScreenAction(GameplaySubScreenClickBehaviorOption behavior, object expectedAction)
         {
-            _settings.Settings.Game.TrackSkip = false;
-            _settings.Settings.Game.FastRetry = false;
-            _settings.Settings.Game.FastPractice = false;
-            _settings.Settings.Game.GameplaySubScreenClickBehavior = behavior;
+            _settings.UserSettings.Game.TrackSkip = false;
+            _settings.UserSettings.Game.FastRetry = false;
+            _settings.UserSettings.Game.FastPractice = false;
+            _settings.UserSettings.Game.GameplaySubScreenClickBehavior = behavior;
             _controller.Init(_manager);
             ArmInput();
             SetPressedButtons(ButtonZone.P1);
@@ -273,7 +273,7 @@ namespace MajdataPlay.Tests.Game.GamePlay.Manager
         [TestCase(GameplaySubScreenClickBehaviorOption.FastRetry_1_Sec_Delay, FnController.FnAction.FastRetry)]
         public void UpdateInputState_PrioritizesDelayedSubScreenAction(GameplaySubScreenClickBehaviorOption behavior, object expectedAction)
         {
-            _settings.Settings.Game.GameplaySubScreenClickBehavior = behavior;
+            _settings.UserSettings.Game.GameplaySubScreenClickBehavior = behavior;
             _controller.Init(_manager);
             ArmInput();
             SetPressedButtons(ButtonZone.P1, ButtonZone.A1, ButtonZone.A2, ButtonZone.A3, ButtonZone.A4,
@@ -290,7 +290,7 @@ namespace MajdataPlay.Tests.Game.GamePlay.Manager
         [Test]
         public void UpdateInputState_DisabledSubScreenDoesNotFallThroughToCombinations()
         {
-            _settings.Settings.Game.GameplaySubScreenClickBehavior = GameplaySubScreenClickBehaviorOption.None;
+            _settings.UserSettings.Game.GameplaySubScreenClickBehavior = GameplaySubScreenClickBehaviorOption.None;
             _controller.Init(_manager);
             ArmInput();
             SetPressedButtons(ButtonZone.P1, ButtonZone.A2, ButtonZone.A3, ButtonZone.A6, ButtonZone.A7);

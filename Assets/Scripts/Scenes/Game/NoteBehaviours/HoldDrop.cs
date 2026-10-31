@@ -60,7 +60,7 @@ namespace MajdataPlay.Scenes.Game.Notes.Behaviours
         ButtonZone? _buttonPos;
         Range<float> _bodyCheckRange;
 
-        readonly float _noteAppearRate = MajEnv.Settings?.Debug.NoteAppearRate ?? 0.265f;
+        readonly float _noteAppearRate = MajEnv.UserSettings?.Game.NoteAppearRate ?? 0.265f;
         //readonly float _touchPanelOffset = MajEnv.UserSetting?.Judge.TouchPanelOffset ?? 0;
 
         const int _spriteSortOrder = 1;

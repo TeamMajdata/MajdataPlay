@@ -43,15 +43,28 @@ namespace MajdataPlay
     /// <summary>Exposes controllable settings to the production renderer.</summary>
     public static class MajEnv
     {
-        /// <summary>Gets the current test settings.</summary>
-        public static TestSettings Settings { get; } = new();
+        /// <summary>Gets the current test user settings.</summary>
+        public static TestUserSettings UserSettings { get; } = new();
     }
 
-    /// <summary>Groups the real production debug options for this isolated scene.</summary>
-    public sealed class TestSettings
+    /// <summary>Groups the real production display options for this isolated scene.</summary>
+    public sealed class TestUserSettings
     {
         /// <summary>Gets the current sensor settings.</summary>
-        public Settings.DebugOptions Debug { get; } = new();
+        public Settings.DisplayOptions Display { get; } = new();
+    }
+}
+
+namespace MajdataPlay.Settings.OptionEnumerators
+{
+    /// <summary>Names the language enumerator referenced by the production display options.</summary>
+    public sealed class LanguageEnumerator
+    {
+    }
+
+    /// <summary>Names the skin enumerator referenced by the production display options.</summary>
+    public sealed class SkinEnumerator
+    {
     }
 }
 

@@ -7,7 +7,7 @@ using UnityEngine.Scripting;
 #nullable enable
 namespace MajdataPlay.Settings
 {
-    // 现行渲染预设与 Unity Quality 等级分开；旧 JSON 的六个画质值只在 GameSettingMigration 中迁移。
+    // 现行渲染预设与 Unity Quality 等级分开；旧 JSON 的六个画质值只在 SettingMigration 中迁移。
     /// <summary>
     /// Lists the rendering presets; <see cref="Custom"/> keeps the detailed parameters chosen by the user.
     /// </summary>
@@ -69,7 +69,7 @@ namespace MajdataPlay.Settings
     }
 
     /// <summary>
-    /// Contains the rendering quality, frame pacing and output options.
+    /// Contains the rendering quality, frame pacing and output options, followed by the window and screen layout options.
     /// </summary>
     /// <remarks>
     /// <para>
@@ -77,9 +77,10 @@ namespace MajdataPlay.Settings
     /// parameters returned by <see cref="GetEffectiveParameters"/>, so the selection is restored when it is turned off.
     /// </para>
     /// <para>
-    /// The setting UI always shows the frame pacing options and the compatibility switch. The preset selector is hidden
-    /// in compatibility mode, and the detailed parameters and diagnostics are only shown for the <see cref="RenderingQualityOption.Custom"/>
-    /// preset outside compatibility mode, as declared by <see cref="ShowInSettingUIWhenAttribute"/>.
+    /// The setting UI always shows the frame pacing options, the compatibility switch and the trailing runtime statistics and
+    /// screen layout options. The preset selector is hidden in compatibility mode, and the detailed parameters and
+    /// diagnostics are only shown for the <see cref="RenderingQualityOption.Custom"/> preset outside compatibility mode, as
+    /// declared by <see cref="ShowInSettingUIWhenAttribute"/>.
     /// </para>
     /// </remarks>
     [Preserve]
@@ -289,6 +290,74 @@ namespace MajdataPlay.Settings
         [ShowInSettingUIWhen(nameof(CompatibilityMode), false)]
         [ShowInSettingUIWhen(nameof(RenderQuality), RenderingQualityOption.Custom)]
         public MajRenderOutputStatus CurrentOutputPath => MajRenderDiagnostics.OutputStatus;
+
+        /// <summary>Gets or sets whether runtime statistics are displayed.</summary>
+        public bool DisplayRuntimeInfo { get; set; } = true;
+
+#if UNITY_STANDALONE
+        /// <summary>
+        /// Gets or sets the window resolution as <c>width</c>x<c>height</c>.
+        /// </summary>
+        [HideInSettingUI]
+        public string Resolution { get; set; } = "1080x1920";
+
+        /// <summary>Gets or sets whether the game window covers the whole screen.</summary>
+        [HideInSettingUI]
+        public bool FullScreen { get; set; } = true;
+
+        /// <summary>
+        /// Gets or sets whether the game window stays on top of other windows.
+        /// </summary>
+        [HideInSettingUI]
+        public bool Topmost { get; set; } = false;
+#endif
+
+        /// <summary>
+        /// Gets or sets whether the ratio and position of the main screen are adjusted manually instead of using the default layout.
+        /// </summary>
+#if UNITY_ANDROID || UNITY_IOS
+        public bool MainScreenTransform { get; set; } = true;
+#else
+        public bool MainScreenTransform { get; set; } = false;
+#endif
+
+        /// <summary>
+        /// Gets or sets the size multiplier of the main gameplay screen while <see cref="MainScreenTransform"/> is enabled.
+        /// </summary>
+        [Step("0.01")]
+        [Range("0.05", "1.5")]
+        public float MainScreenScale { get; set; } = 1f;
+
+        /// <summary>
+        /// Gets or sets the position of the main gameplay screen on the display while <see cref="MainScreenTransform"/> is enabled.
+        /// </summary>
+        [Step("0.01")]
+        [Range("-1", "1")]
+        public float MainScreenOffset { get; set; } = 1f;
+
+        /// <summary>
+        /// Gets or sets the vertical screen center of the last applied main screen layout, cached by the layout provider.
+        /// </summary>
+        [HideInSettingUI]
+        public float MainScreenCachedScreenCenterY { get; set; } = 960f;
+
+        /// <summary>
+        /// Gets or sets the position of the secondary display area.
+        /// </summary>
+        [Step("0.01")]
+        [Range("-5", "5")]
+        public float SubDisplayOffset { get; set; } = 0f;
+
+        /// <summary>
+        /// Gets or sets the size multiplier of the secondary display area.
+        /// </summary>
+        [Step("0.01")]
+        public float SubDisplayScale { get; set; } = 1f;
+
+        /// <summary>
+        /// Gets or sets the screen orientation during gameplay.
+        /// </summary>
+        public GameplayScreenRotationAngleOption GameplayScreenRotationAngle { get; set; } = GameplayScreenRotationAngleOption.Zero;
 
         /// <summary>
         /// Switches to the <see cref="RenderingQualityOption.Custom"/> preset while keeping the current parameters, as

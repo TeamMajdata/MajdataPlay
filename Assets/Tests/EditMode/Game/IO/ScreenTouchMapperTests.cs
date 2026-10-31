@@ -205,18 +205,18 @@ namespace MajdataPlay.Tests.Game.IO
 
             ScreenTouchMapper.OnPreUpdate();
             var unchanged = PrivateMember.GetStaticField<ushort>(typeof(ScreenTouchMapper), "_version");
-            _settings.Settings.Display.MainScreenTransform = true;
-            _settings.Settings.Display.MainScreenOffset = 0.8f;
+            _settings.SystemSettings.Rendering.MainScreenTransform = true;
+            _settings.SystemSettings.Rendering.MainScreenOffset = 0.8f;
             ScreenTouchMapper.OnPreUpdate();
             var changed = PrivateMember.GetStaticField<ushort>(typeof(ScreenTouchMapper), "_version");
-            _settings.Settings.Display.MainScreenTransform = false;
-            _settings.Settings.Display.MainScreenOffset = 0.5f;
+            _settings.SystemSettings.Rendering.MainScreenTransform = false;
+            _settings.SystemSettings.Rendering.MainScreenOffset = 0.5f;
             ScreenTouchMapper.OnPreUpdate();
 
             Assert.That(unchanged, Is.EqualTo(before));
             Assert.That(changed, Is.EqualTo((ushort)(before + 1)));
             Assert.That(PrivateMember.GetStaticField<float>(typeof(ScreenTouchMapper), "_lastMainScreenOffset"), Is.EqualTo(1f));
-            Assert.That(ScreenTouchMapper.FingerRadius, Is.EqualTo(_settings.Settings.Debug.TouchSimulationRadius));
+            Assert.That(ScreenTouchMapper.FingerRadius, Is.EqualTo(_settings.UserSettings.Touch.TouchSimulationRadius));
         }
 
         /// <summary>Checks that a pointer is clicked once, held, and removed after it disappears.</summary>

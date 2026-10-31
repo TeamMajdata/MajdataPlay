@@ -96,7 +96,7 @@ namespace MajdataPlay.Scenes.List
             {
                 MajDebug.LogError("[ListManager] [Awake] " + ex.Message);
             }
-            _isOnlineEnabled = MajEnv.Settings.Online.Enable;
+            _isOnlineEnabled = MajEnv.SystemSettings.Online.Enable;
 
 
             _favoriteAdder.PressToAddTime = 0.5f;

@@ -362,6 +362,12 @@ namespace MajdataPlay.IO
     public static class CabinetLed { public static void SetAllLight(UnityEngine.Color color) { } public static void SetButtonLight(UnityEngine.Color color, int index) { } }
     public class AudioManager { public int VolumeReads, Previews; public void ReadVolumeFromSettings() => VolumeReads++; public void PlaySFX(string name) => Previews++; }
 }
+namespace MajdataPlay.Settings.OptionEnumerators
+{
+    // DisplayOptions names these production enumerators; the setting UI falls back to a read-only value for them here.
+    public sealed class LanguageEnumerator { }
+    public sealed class SkinEnumerator { }
+}
 namespace MajdataPlay.Settings.Runtime
 {
     public class SettingConfig { public string SelectedMenu = "Game", SelectedOption = ""; public bool IgnoreChartSettingPage = true; }
@@ -371,12 +377,12 @@ namespace MajdataPlay.Settings.Runtime
 namespace MajdataPlay.Settings
 {
     public enum OffsetUnitOption { Frame, Second }
-    public class GameSetting { public GameOptions Game { get; } = new(); public JudgeOptions Judge { get; } = new(); public DisplayOptions Display { get; } = new(); public RenderingOptions Rendering { get; } = new(); public AudioOptions Audio { get; } = new(); public DebugOptions Debug { get; } = new(); }
-    public class AudioOptions { public SFXVolume Volume { get; } = new(); }
+    public class UserSetting { public GameOptions Game { get; } = new(); public JudgeOptions Judge { get; } = new(); public DisplayOptions Display { get; } = new(); public SFXVolume Volume { get; } = new(); public TouchOptions Touch { get; } = new(); }
+    public class SystemSetting { public RenderingOptions Rendering { get; } = new(); [HideInSettingUI] public AudioOptions Audio { get; } = new(); public DebugOptions Debug { get; } = new(); }
+    public class AudioOptions { public bool ForceMono { get; set; } }
     public class ChartSetting { [ChartDiscoveryProbe] public int ChartSpeed { get; set; } }
     public class GameOptions { public float SlideFadeInOffset { get; set; } }
-    public class JudgeOptions { public float AudioOffset { get; set; } public float JudgeOffset { get; set; } public float AnswerOffset { get; set; } public float TouchPanelOffset { get; set; } }
-    public class DisplayOptions { public string Language { get; set; } = "en-US"; }
+    public class JudgeOptions { public float AudioOffset { get; set; } public float JudgeOffset { get; set; } public float AnswerOffset { get; set; } public float TouchPanelOffset { get; set; } public OffsetUnitOption OffsetUnit { get; set; } }
     public class SFXVolume { public float Answer { get; set; } public float Tap { get; set; } public float Ex { get; set; } public float Break { get; set; } public float Slide { get; set; } public float Touch { get; set; } public float Hanabi { get; set; } public float Voice { get; set; } }
     public static class ChartSettingStorage { public static object GetSetting(string hash) => new GameOptions(); public static void ConvertUnitToSecond() { } public static void ConvertUnitToFrame() { } }
 }
@@ -390,7 +396,8 @@ namespace MajdataPlay
     public static class MajEnv
     {
         public const float FRAME_LENGTH_SEC = 1f / 60;
-        public static Settings.GameSetting Settings = new();
+        public static Settings.UserSetting UserSettings = new();
+        public static Settings.SystemSetting SystemSettings = new();
         public static Settings.Runtime.RuntimeConfig RuntimeConfig = new();
         public static RunningMode Mode;
     }

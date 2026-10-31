@@ -9,7 +9,7 @@ namespace MajdataPlay.IO
         public YuanButtonRingDevice() : base(IODetector.ButtonRingHidConnInfo) { }
         protected override string DaemonThreadName => "IO/ButtonRing Thread";
         protected override TimeSpan PollingInterval =>
-            TimeSpan.FromMilliseconds(MajEnv.Settings.IO.InputDevice.ButtonRing.PollingRateMs);
+            TimeSpan.FromMilliseconds(MajEnv.SystemSettings.IO.InputDevice.ButtonRing.PollingRateMs);
 
         protected override void OnDisconnected() => _buttons.Clear();
         public override void OnPreUpdate() => _buttons.OnPreUpdate();

@@ -1,20 +1,18 @@
 using Newtonsoft.Json;
-using System;
-using System.Collections.Generic;
-using System.Text;
-
-namespace MajdataPlay.Settings.System
+#nullable enable
+namespace MajdataPlay.Settings
 {
-    internal class SystemSetting
+    public class SystemSetting
     {
         public RenderingOptions Rendering { get; init; } = new();
 
+        [HideInSettingUI]
         public SoundOptions Audio { get; init; } = new();
 
         [JsonIgnore]
         public ModOptions Mod { get; init; } = new();
 
-        [ShowInSettingUIWhen($"{nameof(Game)}.{nameof(GameOptions.RecordMode)}", RecordModeOption.FFmpeg)]
+        [ShowInSettingUIWhen($"{nameof(SettingRoot.User)}.{nameof(UserSetting.Game)}.{nameof(GameOptions.RecordMode)}", RecordModeOption.FFmpeg)]
         public FFmpegEncodingOptions Encoding { get; init; } = new();
 
         public FFmpegDecodingOptions Decoding { get; init; } = new();

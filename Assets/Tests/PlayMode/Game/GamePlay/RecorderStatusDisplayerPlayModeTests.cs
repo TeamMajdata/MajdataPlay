@@ -61,7 +61,7 @@ namespace MajdataPlay.Tests.Game.GamePlay.PlayMode
         public IEnumerator Awake_HidesTheIconWhenRecordingIsDisabled()
         {
 #if UNITY_STANDALONE
-            _settings.Settings.Game.RecordMode = RecordModeOption.Disable;
+            _settings.UserSettings.Game.RecordMode = RecordModeOption.Disable;
 #endif
 
             var displayer = CreateDisplayer(out var renderer);
@@ -80,7 +80,7 @@ namespace MajdataPlay.Tests.Game.GamePlay.PlayMode
         [UnityTest]
         public IEnumerator OnLateUpdate_ShowsTheRecorderState()
         {
-            _settings.Settings.Game.RecordMode = RecordModeOption.OBSTrigger;
+            _settings.UserSettings.Game.RecordMode = RecordModeOption.OBSTrigger;
             var recorder = new GamePlayFakeRecorder();
             PrivateMember.SetStaticField(typeof(Recorder), "s_recorder", recorder);
 

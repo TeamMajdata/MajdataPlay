@@ -17,7 +17,7 @@ namespace MajdataPlay.IO
         readonly bool _writeLeds;
 
         public DaoCompositeDevice(bool writeLeds) : this(
-            MajEnv.Settings.IO.InputDevice.ButtonRing.Enable || MajEnv.Settings.IO.InputDevice.TouchPanel.Enable,
+            MajEnv.SystemSettings.IO.InputDevice.ButtonRing.Enable || MajEnv.SystemSettings.IO.InputDevice.TouchPanel.Enable,
             writeLeds)
         {
         }
@@ -36,11 +36,11 @@ namespace MajdataPlay.IO
         {
             get
             {
-                var input = MajEnv.Settings.IO.InputDevice;
+                var input = MajEnv.SystemSettings.IO.InputDevice;
                 var interval = double.MaxValue;
                 if (input.ButtonRing.Enable) interval = Math.Min(interval, input.ButtonRing.PollingRateMs);
                 if (input.TouchPanel.Enable) interval = Math.Min(interval, input.TouchPanel.PollingRateMs);
-                if (_writeLeds) interval = Math.Min(interval, MajEnv.Settings.IO.OutputDevice.Led.RefreshRateMs);
+                if (_writeLeds) interval = Math.Min(interval, MajEnv.SystemSettings.IO.OutputDevice.Led.RefreshRateMs);
                 return TimeSpan.FromMilliseconds(interval == double.MaxValue ? 0 : Math.Max(0, interval));
             }
         }
@@ -50,7 +50,7 @@ namespace MajdataPlay.IO
             base.OnConnected(token);
             // Poll output even when the input report stream is idle.
             if (_readInputs && _writeLeds)
-                Stream!.ReadTimeout = (int)Math.Max(1, Math.Min(10, MajEnv.Settings.IO.OutputDevice.Led.RefreshRateMs));
+                Stream!.ReadTimeout = (int)Math.Max(1, Math.Min(10, MajEnv.SystemSettings.IO.OutputDevice.Led.RefreshRateMs));
             _leds.Reset();
         }
 

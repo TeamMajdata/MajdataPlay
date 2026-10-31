@@ -60,7 +60,7 @@ namespace MajdataPlay.Tests.Game.Scenes.PlayMode.ListScene
         /// <returns>The coroutine.</returns>
         private IEnumerator StartScene(bool onlineEnabled = false)
         {
-            MajEnv.Settings.Online.Enable = onlineEnabled;
+            MajEnv.SystemSettings.Online.Enable = onlineEnabled;
             _manager = AddInactiveUi<ListManager>("List", Canvas);
             var user = AddInactiveUi<UserInfoDisplayer>("User", Canvas);
             PrivateMember.SetField(user, "_usernameDisplayer", CreateText("Name", user.transform));

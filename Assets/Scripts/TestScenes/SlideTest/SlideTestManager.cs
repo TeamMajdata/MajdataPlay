@@ -234,7 +234,7 @@ namespace MajdataPlay.TestScenes.SlideTest
             Majdata<SlideTestManager>.Instance = this;
             Majdata<INoteController>.Instance = this;
             Majdata<INoteTimeProvider>.Instance = this;
-            ModInfo = new GameModInfo(MajEnv.Settings.Mod)
+            ModInfo = new GameModInfo(MajEnv.SystemSettings.Mod)
             {
                 AutoPlay = _autoplay
             };
@@ -442,14 +442,14 @@ namespace MajdataPlay.TestScenes.SlideTest
                 Fumen = BuildFumen();
                 var chart = SimaiParser.ParseChart(Fumen.AsSpan());
                 _endSec = GetEndSec(chart);
-                ModInfo = new GameModInfo(MajEnv.Settings.Mod)
+                ModInfo = new GameModInfo(MajEnv.SystemSettings.Mod)
                 {
                     AutoPlay = _autoplay
                 };
-                var tapSpeed = Math.Abs(MajEnv.Settings.Game.TapSpeed);
+                var tapSpeed = Math.Abs(MajEnv.UserSettings.Game.TapSpeed);
                 var noteSpeed = (float)(107.25 / (71.4184491 * Mathf.Pow(tapSpeed + 0.9975f, -0.985558604f)));
-                _noteLoader.NoteSpeed = MajEnv.Settings.Game.TapSpeed < 0 ? -noteSpeed : noteSpeed;
-                _noteLoader.TouchSpeed = MajEnv.Settings.Game.TouchSpeed;
+                _noteLoader.NoteSpeed = MajEnv.UserSettings.Game.TapSpeed < 0 ? -noteSpeed : noteSpeed;
+                _noteLoader.TouchSpeed = MajEnv.UserSettings.Game.TouchSpeed;
                 _noteLoader.IsSimaiSlideTranslated = _isSimaiSlideTranslated;
                 _noteLoader.SlidePathStyle = _slidePathStyle;
                 Majdata<ChartVisualDisplayer>.Instance?.SetSimaiChart(chart, AudioLength);

@@ -47,7 +47,7 @@ namespace MajdataPlay.Scenes.List
             AudioSampleWrap? previewSample = null;
             try
             {
-                selectSound.SetVolume(MajEnv.Settings.Audio.Volume.BGM);
+                selectSound.SetVolume(MajEnv.UserSettings.Volume.BGM);
                 await UniTask.SwitchToThreadPool();
                 await Task.Delay(loadDelayMS, cancellationToken: token);
 
@@ -130,7 +130,7 @@ namespace MajdataPlay.Scenes.List
                     previewLengthSec = Math.Max(0, previewLengthSec);
                 }
                 MajDebug.LogDebug($"Playing preview song\nOffset: {previewOffsetSec}s\nLength: {previewLengthSec}s");
-                previewSample.SetVolume(MajEnv.Settings.Audio.Volume.BGM);
+                previewSample.SetVolume(MajEnv.UserSettings.Volume.BGM);
                 //set sample.CurrentSec Not implmented
                 previewSample.IsLoop = true;
                 if(previewSample.CanSeek)
@@ -154,7 +154,7 @@ namespace MajdataPlay.Scenes.List
                 for (var i = 1f; i > 0; i = i - 0.2f)
                 {
                     token.ThrowIfCancellationRequested();
-                    selectSound.Volume = i * MajEnv.Settings.Audio.Volume.BGM;
+                    selectSound.Volume = i * MajEnv.UserSettings.Volume.BGM;
                     await UniTask.Delay(100, cancellationToken: token, cancelImmediately: true);
                 }
                 while (true)
@@ -169,18 +169,18 @@ namespace MajdataPlay.Scenes.List
                                 for (var i = 1f; i > 0; i = i - 0.2f)
                                 {
                                     token.ThrowIfCancellationRequested();
-                                    previewSample.Volume = i * MajEnv.Settings.Audio.Volume.BGM;
+                                    previewSample.Volume = i * MajEnv.UserSettings.Volume.BGM;
                                     await UniTask.Delay(100, cancellationToken: token, cancelImmediately: true);
                                 }
                                 previewSample.Pause();
                                 await UniTask.Delay(1000, cancellationToken: token, cancelImmediately: true);
-                                previewSample.Volume = MajEnv.Settings.Audio.Volume.BGM;
+                                previewSample.Volume = MajEnv.UserSettings.Volume.BGM;
                                 previewSample.CurrentSec = previewOffsetSec;
                                 previewSample.Play();
                             }
                         }
                     }
-                    previewSample.Volume = MajEnv.Settings.Audio.Volume.BGM;
+                    previewSample.Volume = MajEnv.UserSettings.Volume.BGM;
                     await UniTask.Yield(token, cancelImmediately: true);
                 }
             }
@@ -201,7 +201,7 @@ namespace MajdataPlay.Scenes.List
         private void OnDestroy()
         {
             var selectSound = MajInstances.AudioManager.GetSFX("bgm_select.mp3");
-            selectSound.SetVolume(MajEnv.Settings.Audio.Volume.BGM);
+            selectSound.SetVolume(MajEnv.UserSettings.Volume.BGM);
         }
     }
 }

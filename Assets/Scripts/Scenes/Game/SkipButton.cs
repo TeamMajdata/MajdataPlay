@@ -21,7 +21,7 @@ namespace MajdataPlay.Scenes.Game
 
         private void Awake()
         {
-            var rotationOffset = (int)MajEnv.Settings.Display.GameplayScreenRotationAngle * 2;
+            var rotationOffset = (int)MajEnv.SystemSettings.Rendering.GameplayScreenRotationAngle * 2;
             for (var i = 0; i < s_defaultSensorArea.Length; i++)
             {
                 _boundSensorAreas[i] = s_defaultSensorArea[i].Diff(rotationOffset);

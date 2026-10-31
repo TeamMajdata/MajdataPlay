@@ -13,7 +13,7 @@ namespace MajdataPlay.Editor.Windows
     /// <remarks>
     /// Only the supplied assembly's compiled platform branches are available. This mirrors the current
     /// SettingManager, Menu, SettingOptionMetadata and OptionEnumeratorBase schema, not arbitrary object graphs.
-    /// Root type names, built-in enumerator names, Audio.Volume, key templates, the Unavailable language
+    /// Root type names, built-in enumerator names, key templates, the Unavailable language
     /// fallback and the two offset-unit warmup labels deliberately model the current production schema.
     /// Custom finite string arrays are delegated to TranslationCallAnalyzer instead of executing enumerators.
     /// Numeric options that opt into value translation contribute the values of their finite Range/Step grid, labelled
@@ -84,13 +84,17 @@ namespace MajdataPlay.Editor.Windows
                 throw new ArgumentNullException(nameof(diagnostics));
             }
 
-            var gameSetting = FindType(assembly, SettingsNamespace + "GameSetting", diagnostics);
-            if (gameSetting is not null)
+            // The menus are the categories of every setting root held by SettingRoot, whose menu conditions start at SettingRoot.
+            var settingRoot = FindType(assembly, SettingsNamespace + "SettingRoot", diagnostics);
+            if (settingRoot is not null)
             {
-                CollectCategories(gameSetting, keys, diagnostics);
+                foreach (var root in GetVisibleProperties(settingRoot, diagnostics))
+                {
+                    CollectCategories(root.PropertyType, settingRoot, keys, diagnostics);
+                }
             }
 
-            // ChartSetting is a separate, conditionally displayed menu, not a GameSetting category.
+            // ChartSetting is a separate, conditionally displayed menu, not a category of a setting root.
             var chartSetting = FindType(assembly, SettingsNamespace + "ChartSetting", diagnostics);
             if (chartSetting is not null)
             {
@@ -130,41 +134,28 @@ namespace MajdataPlay.Editor.Windows
         }
 
         /// <summary>
-        /// Mirrors the root menu selection, including the Audio.Volume category substitution.
+        /// Mirrors the menu selection of one setting root, whose visible categories are the menus.
         /// </summary>
         /// <param name="settingType">The declared root settings type.</param>
+        /// <param name="conditionOwnerType">The type the ShowInSettingUIWhen member paths of the categories start at.</param>
         /// <param name="keys">Receives fixed category and option localization keys.</param>
         /// <param name="diagnostics">Receives metadata that cannot safely describe a menu.</param>
-        private static void CollectCategories(Type settingType, IDictionary<string, HashSet<string>> keys, IList<string> diagnostics)
+        private static void CollectCategories(Type settingType, Type conditionOwnerType, IDictionary<string, HashSet<string>> keys, IList<string> diagnostics)
         {
             foreach (var category in GetVisibleProperties(settingType, diagnostics))
             {
                 var path = $"{settingType.FullName}.{category.Name}";
                 try
                 {
-                    var menuProperty = category;
-                    if (category.Name == "Audio")
-                    {
-                        // GetMenuMetadata looks up Volume directly; its own HideInSettingUI is not consulted.
-                        var volume = category.PropertyType.GetProperty("Volume", BindingFlags.Public | BindingFlags.Instance);
-                        if (volume is null || !IsReadableProperty(volume))
-                        {
-                            diagnostics.Add($"[Settings] {path}.Volume does not expose a public, non-indexed getter.");
-                            continue;
-                        }
-                        menuProperty = volume;
-                        path += ".Volume";
-                    }
-
                     // A condition on the category hides the whole menu, so it also qualifies every option path.
-                    path += DescribeVisibility(category, settingType, path, diagnostics);
+                    path += DescribeVisibility(category, conditionOwnerType, path, diagnostics);
 
-                    // MenuMetadata.Name is the value property's name; MenuNameAttribute is not used by the UI.
-                    // The translation attributes of the root category property select the title key.
+                    // MenuMetadata.Name is the category property's name; MenuNameAttribute is not used by the UI.
+                    // The translation attributes of the category property select the title key.
                     var categoryAttributes = category.GetCustomAttributesData();
-                    var titleSelection = SelectTranslation(categoryAttributes, "MenuName", menuProperty.Name, DefaultMenuNameTemplate, GeneralMenuNameTemplate, new[] { DefaultMenuNameTemplate });
-                    AddTemplateKeys(titleSelection, menuProperty.Name, path + " (category)", keys, diagnostics);
-                    CollectMenu(menuProperty.PropertyType, path, keys, diagnostics);
+                    var titleSelection = SelectTranslation(categoryAttributes, "MenuName", category.Name, DefaultMenuNameTemplate, GeneralMenuNameTemplate, new[] { DefaultMenuNameTemplate });
+                    AddTemplateKeys(titleSelection, category.Name, path + " (category)", keys, diagnostics);
+                    CollectMenu(category.PropertyType, path, keys, diagnostics);
                 }
                 catch (Exception exception)
                 {

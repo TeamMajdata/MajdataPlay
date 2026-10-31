@@ -250,20 +250,21 @@ namespace MajdataPlay.Tests.Game.EditorTools
             Assert.That(_diagnostics.Any(diagnostic => diagnostic.Contains("Fx.Conditional:")), Is.False);
         }
 
-        /// <summary>Checks the full analysis of the runtime settings: categories, Audio's volume page, chart settings and offset units.</summary>
+        /// <summary>Checks the full analysis of the runtime settings: user and system categories, chart settings and offset units.</summary>
         [Test]
         public void Collect_RuntimeAssembly_FindsCategoriesAndOptions()
         {
             var keys = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
             var diagnostics = new List<string>();
 
-            TranslationSettingAnalyzer.Collect(typeof(GameSetting).Assembly, keys, diagnostics);
+            TranslationSettingAnalyzer.Collect(typeof(SettingRoot).Assembly, keys, diagnostics);
 
             Assert.That(keys.Keys, Does.Contain("MAJSETTING_CATEGORY_Game"));
             Assert.That(keys.Keys, Does.Contain("MAJSETTING_CATEGORY_Volume"));
             Assert.That(keys.Keys, Does.Not.Contain("MAJSETTING_CATEGORY_Audio"));
             Assert.That(keys.Keys, Does.Contain("MAJSETTING_CATEGORY_ChartSetting"));
             Assert.That(keys.Keys, Does.Contain("MAJSETTING_CATEGORY_Rendering"));
+            Assert.That(keys.Keys, Does.Contain("MAJSETTING_CATEGORY_Touch"));
             Assert.That(keys.Keys, Does.Contain("MAJTEXT_SETTING_OFFSETUNIT_Second"));
             Assert.That(keys.Keys, Does.Contain("MAJTEXT_SETTING_OFFSETUNIT_Frame"));
             Assert.That(keys.Keys, Does.Contain("MAJSETTING_PROPERTY_JudgeOffset"));
@@ -293,7 +294,7 @@ namespace MajdataPlay.Tests.Game.EditorTools
         [Test]
         public void Collect_RejectsNullArguments()
         {
-            var assembly = typeof(GameSetting).Assembly;
+            var assembly = typeof(SettingRoot).Assembly;
             var keys = new Dictionary<string, HashSet<string>>();
             var diagnostics = new List<string>();
 
@@ -302,18 +303,34 @@ namespace MajdataPlay.Tests.Game.EditorTools
             Assert.That(() => TranslationSettingAnalyzer.Collect(assembly, keys, null!), Throws.ArgumentNullException.With.Property("ParamName").EqualTo("diagnostics"));
         }
 
-        /// <summary>Checks that a category named Audio without a volume page is reported.</summary>
+        /// <summary>Checks that every visible category of a setting root becomes a menu whose options are collected.</summary>
         [Test]
-        public void CollectCategories_AudioWithoutVolume_IsReported()
+        public void CollectCategories_CollectsEveryVisibleCategory()
         {
             var keys = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
             var diagnostics = new List<string>();
 
-            PrivateMember.InvokeStatic(typeof(TranslationSettingAnalyzer), "CollectCategories", typeof(SettingRootFixture), keys, diagnostics);
+            PrivateMember.InvokeStatic(typeof(TranslationSettingAnalyzer), "CollectCategories", typeof(SettingRootFixture), typeof(SettingRootFixture), keys, diagnostics);
 
             Assert.That(keys.Keys, Does.Contain("MAJSETTING_CATEGORY_Fixture"));
             Assert.That(keys.Keys, Does.Contain("MAJSETTING_PROPERTY_Flag"));
-            Assert.That(diagnostics.Any(diagnostic => diagnostic.Contains("Audio.Volume does not expose a public, non-indexed getter")), Is.True);
+            Assert.That(keys["MAJSETTING_PROPERTY_Flag"], Does.Contain(typeof(SettingRootFixture).FullName + ".Fixture.Flag (name)"));
+        }
+
+        /// <summary>Checks that the menu conditions of a real setting root are resolved from <see cref="SettingRoot"/>.</summary>
+        [Test]
+        public void CollectCategories_ResolvesMenuConditionsFromTheSettingRoot()
+        {
+            var keys = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
+            var fromRoot = new List<string>();
+            var fromSystem = new List<string>();
+
+            PrivateMember.InvokeStatic(typeof(TranslationSettingAnalyzer), "CollectCategories", typeof(SystemSetting), typeof(SettingRoot), keys, fromRoot);
+            PrivateMember.InvokeStatic(typeof(TranslationSettingAnalyzer), "CollectCategories", typeof(SystemSetting), typeof(SystemSetting), keys, fromSystem);
+
+            Assert.That(keys["MAJSETTING_CATEGORY_Encoding"].Any(source => source.Contains("[shown when User.Game.RecordMode = FFmpeg]")), Is.True);
+            Assert.That(fromRoot.Any(diagnostic => diagnostic.Contains("ShowInSettingUIWhen path")), Is.False);
+            Assert.That(fromSystem.Any(diagnostic => diagnostic.Contains("ShowInSettingUIWhen path")), Is.True);
         }
 
         /// <summary>Checks that the translation attributes of a category select or suppress its title key.</summary>
@@ -323,7 +340,7 @@ namespace MajdataPlay.Tests.Game.EditorTools
             var keys = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
             var diagnostics = new List<string>();
 
-            PrivateMember.InvokeStatic(typeof(TranslationSettingAnalyzer), "CollectCategories", typeof(SettingRootFixture), keys, diagnostics);
+            PrivateMember.InvokeStatic(typeof(TranslationSettingAnalyzer), "CollectCategories", typeof(SettingRootFixture), typeof(SettingRootFixture), keys, diagnostics);
 
             Assert.That(keys["FX_MENU_Titled"], Does.Contain(typeof(SettingRootFixture).FullName + ".Titled (category)"));
             Assert.That(keys.Keys, Does.Not.Contain("MAJSETTING_CATEGORY_Titled"));

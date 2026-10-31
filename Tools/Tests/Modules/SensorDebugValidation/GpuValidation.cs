@@ -61,7 +61,7 @@ namespace MajdataPlay.Tests.SensorDebugValidation
                 GraphicsSettings.defaultRenderPipeline = pipeline;
                 QualitySettings.renderPipeline = null;
 
-                var settings = MajEnv.Settings.Debug;
+                var settings = MajEnv.UserSettings.Display;
                 settings.DisplaySensor = true;
                 settings.SensorStyle = SensorDebugStyle.Classic;
                 settings.SensorOpacity = 20;

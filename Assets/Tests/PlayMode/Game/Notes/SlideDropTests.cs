@@ -170,9 +170,9 @@ namespace MajdataPlay.Tests.Game.Notes.PlayMode
         [UnityTest]
         public IEnumerator Init_MirroredClassicSlide()
         {
-            _rig.Settings.Judge.Mode = JudgeModeOption.Classic;
-            _rig.Settings.Debug.OffsetUnit = OffsetUnitOption.Second;
-            _rig.Settings.Game.SlideFadeInOffset = 0.1f;
+            _rig.UserSettings.Judge.Mode = JudgeModeOption.Classic;
+            _rig.UserSettings.Judge.OffsetUnit = OffsetUnitOption.Second;
+            _rig.UserSettings.Game.SlideFadeInOffset = 0.1f;
             var slide = CreateSlide(startPos: 2, isMirror: true, isJustR: true);
             yield return null;
 
@@ -190,7 +190,7 @@ namespace MajdataPlay.Tests.Game.Notes.PlayMode
         [UnityTest]
         public IEnumerator Init_ConvertsFrameFadeInOffset()
         {
-            _rig.Settings.Game.SlideFadeInOffset = 6f;
+            _rig.UserSettings.Game.SlideFadeInOffset = 6f;
             var slide = CreateSlide();
             yield return null;
 
@@ -306,7 +306,7 @@ namespace MajdataPlay.Tests.Game.Notes.PlayMode
         [UnityTest]
         public IEnumerator Init_DisablesSkippingWhenRequested()
         {
-            _rig.Settings.Game.SlideSkipping = false;
+            _rig.UserSettings.Game.SlideSkipping = false;
             var slide = CreateSlide();
             yield return null;
 
@@ -354,7 +354,7 @@ namespace MajdataPlay.Tests.Game.Notes.PlayMode
         [UnityTest]
         public IEnumerator OnUpdate_ClassicStarScaling()
         {
-            _rig.Settings.Judge.Mode = JudgeModeOption.Classic;
+            _rig.UserSettings.Judge.Mode = JudgeModeOption.Classic;
             var slide = CreateSlide();
             var star = _rig.SlideStar(0);
             yield return null;
@@ -423,7 +423,7 @@ namespace MajdataPlay.Tests.Game.Notes.PlayMode
         [UnityTest]
         public IEnumerator Play_ClassicSlideUsesClassicJudgment()
         {
-            _rig.Settings.Judge.Mode = JudgeModeOption.Classic;
+            _rig.UserSettings.Judge.Mode = JudgeModeOption.Classic;
             var slide = CreateSlide();
             _rig.RegisterSlides((slide, 0.3f));
             yield return null;

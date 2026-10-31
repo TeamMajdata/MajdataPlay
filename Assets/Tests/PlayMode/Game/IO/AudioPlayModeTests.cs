@@ -21,22 +21,31 @@ namespace MajdataPlay.Tests.Game.IO.PlayMode
         /// <summary>The created objects.</summary>
         private TestObjects _objects = null!;
 
-        /// <summary>The settings before the test.</summary>
-        private GameSetting _savedSettings = null!;
+        /// <summary>The user settings before the test.</summary>
+        private UserSetting _savedUserSettings = null!;
 
-        /// <summary>The installed default settings.</summary>
-        private GameSetting _settings = null!;
+        /// <summary>The system settings before the test.</summary>
+        private SystemSetting _savedSystemSettings = null!;
+
+        /// <summary>The installed default user settings.</summary>
+        private UserSetting _userSettings = null!;
+
+        /// <summary>The installed default system settings.</summary>
+        private SystemSetting _systemSettings = null!;
 
         /// <summary>Installs default settings and the object tracker.</summary>
         [SetUp]
         public void SetUp()
         {
             _objects = new TestObjects();
-            _savedSettings = MajEnv.Settings;
-            _settings = new GameSetting();
-            _settings.Audio.Volume.Global = 0.5f;
-            _settings.Audio.Backend = SoundBackendOption.Unity;
-            PrivateMember.SetStaticProperty(typeof(MajEnv), nameof(MajEnv.Settings), _settings);
+            _savedUserSettings = MajEnv.UserSettings;
+            _savedSystemSettings = MajEnv.SystemSettings;
+            _userSettings = new UserSetting();
+            _systemSettings = new SystemSetting();
+            _userSettings.Volume.Global = 0.5f;
+            _systemSettings.Audio.Backend = SoundBackendOption.Unity;
+            PrivateMember.SetStaticProperty(typeof(MajEnv), nameof(MajEnv.UserSettings), _userSettings);
+            PrivateMember.SetStaticProperty(typeof(MajEnv), nameof(MajEnv.SystemSettings), _systemSettings);
         }
 
         /// <summary>Destroys the objects and restores the settings.</summary>
@@ -48,7 +57,8 @@ namespace MajdataPlay.Tests.Game.IO.PlayMode
             {
                 MajdataPlay.Majdata<AudioManager>.Free();
             }
-            PrivateMember.SetStaticProperty(typeof(MajEnv), nameof(MajEnv.Settings), _savedSettings);
+            PrivateMember.SetStaticProperty(typeof(MajEnv), nameof(MajEnv.UserSettings), _savedUserSettings);
+            PrivateMember.SetStaticProperty(typeof(MajEnv), nameof(MajEnv.SystemSettings), _savedSystemSettings);
         }
 
         /// <summary>Checks the clip backed sample properties and transport controls.</summary>

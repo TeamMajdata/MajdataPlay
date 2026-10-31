@@ -66,6 +66,7 @@
     "MAJSETTING_CATEGORY_Judge": "判定設定",
     "MAJSETTING_CATEGORY_Mod": "模組",
     "MAJSETTING_CATEGORY_Volume": "音量設定",
+    "MAJSETTING_CATEGORY_Touch": "觸控設定",
     "MAJSETTING_PROPERTY_AllBreak": "全Break",
     "MAJSETTING_PROPERTY_AllBreak_DESC": "所有音符全部變成Break",
     "MAJSETTING_PROPERTY_AllEx": "全Ex",

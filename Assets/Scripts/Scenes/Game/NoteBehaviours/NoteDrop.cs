@@ -160,7 +160,7 @@ namespace MajdataPlay.Scenes.Game.Notes.Behaviours
         protected NoteManager NoteManager;
         protected NoteEffectManager EffectManager;
         protected NoteAudioManager AudioEffMana;
-        protected GameSetting Settings;
+        protected UserSetting UserSettings;
         protected Random Randomizer;
 
         protected bool USERSETTING_SLIDE_SKIPPING = false;
@@ -210,23 +210,23 @@ namespace MajdataPlay.Scenes.Game.Notes.Behaviours
             base.Awake();
 
             var gameInfo = Majdata<GameInfo>.Instance;
-            Settings = MajEnv.Settings;
+            UserSettings = MajEnv.UserSettings;
             Randomizer = new();
             ObjectCounter = Majdata<ObjectCounter>.Instance!;
             NoteManager = Majdata<NoteManager>.Instance!;
             EffectManager = Majdata<NoteEffectManager>.Instance!;
             AudioEffMana = Majdata<NoteAudioManager>.Instance!;
 
-            USERSETTING_SLIDE_SKIPPING = gameInfo?.ChartSettings.SlideSkipping ?? Settings.Game.SlideSkipping;
-            USERSETTING_JUDGE_OFFSET_SEC = ((MajEnv.Settings?.Judge.JudgeOffset ?? 0) + (MajEnv.Settings?.Debug.DisplayOffset ?? 0)) * ((MajEnv.Settings?.Debug.OffsetUnit ?? OffsetUnitOption.Second) == OffsetUnitOption.Second ? 1 : FRAME_LENGTH_SEC);
-            USERSETTING_TOUCHPANEL_OFFSET_SEC = (MajEnv.Settings?.Judge.TouchPanelOffset ?? 0) * ((MajEnv.Settings?.Debug.OffsetUnit ?? OffsetUnitOption.Second) == OffsetUnitOption.Second ? 1 : FRAME_LENGTH_SEC);
-            USERSETTING_TAP_SCALE = MajEnv.Settings?.Display.TapScale ?? 1;
-            USERSETTING_HOLD_SCALE = MajEnv.Settings?.Display.HoldScale ?? 1;
-            USERSETTING_TOUCH_SCALE = MajEnv.Settings?.Display.TouchScale ?? 1;
-            USERSETTING_SLIDE_SCALE = MajEnv.Settings?.Display.SlideScale ?? 1;
-            USERSETTING_DISPLAY_HOLD_HEAD_JUDGE_RESULT = MajEnv.Settings?.Display.DisplayHoldHeadJudgeResult ?? false;
-            USERSETTING_SLIDE_JUDGE_MODE = MajEnv.Settings?.Judge.Mode ?? JudgeModeOption.Modern;
-            USERSETTING_DJAUTO_POLICY = MajEnv.Settings?.Debug.DJAutoPolicy ?? DJAutoPolicyOption.Strict;
+            USERSETTING_SLIDE_SKIPPING = gameInfo?.ChartSettings.SlideSkipping ?? UserSettings.Game.SlideSkipping;
+            USERSETTING_JUDGE_OFFSET_SEC = ((MajEnv.UserSettings?.Judge.JudgeOffset ?? 0) + (MajEnv.SystemSettings?.Debug.DisplayOffset ?? 0)) * ((MajEnv.UserSettings?.Judge.OffsetUnit ?? OffsetUnitOption.Second) == OffsetUnitOption.Second ? 1 : FRAME_LENGTH_SEC);
+            USERSETTING_TOUCHPANEL_OFFSET_SEC = (MajEnv.UserSettings?.Judge.TouchPanelOffset ?? 0) * ((MajEnv.UserSettings?.Judge.OffsetUnit ?? OffsetUnitOption.Second) == OffsetUnitOption.Second ? 1 : FRAME_LENGTH_SEC);
+            USERSETTING_TAP_SCALE = MajEnv.UserSettings?.Display.TapScale ?? 1;
+            USERSETTING_HOLD_SCALE = MajEnv.UserSettings?.Display.HoldScale ?? 1;
+            USERSETTING_TOUCH_SCALE = MajEnv.UserSettings?.Display.TouchScale ?? 1;
+            USERSETTING_SLIDE_SCALE = MajEnv.UserSettings?.Display.SlideScale ?? 1;
+            USERSETTING_DISPLAY_HOLD_HEAD_JUDGE_RESULT = MajEnv.UserSettings?.Judge.DisplayHoldHeadJudgeResult ?? false;
+            USERSETTING_SLIDE_JUDGE_MODE = MajEnv.UserSettings?.Judge.Mode ?? JudgeModeOption.Modern;
+            USERSETTING_DJAUTO_POLICY = MajEnv.SystemSettings?.Debug.DJAutoPolicy ?? DJAutoPolicyOption.Strict;
 
             _noteController = Majdata<INoteController>.Instance!;
             ModInfo = _noteController.ModInfo;

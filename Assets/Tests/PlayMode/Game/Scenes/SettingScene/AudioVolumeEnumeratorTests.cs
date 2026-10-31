@@ -34,7 +34,7 @@ namespace MajdataPlay.Tests.Game.Scenes.PlayMode.SettingScene
         [SetUp]
         public void SetUp()
         {
-            _volume = MajEnv.Settings.Audio.Volume;
+            _volume = MajEnv.UserSettings.Volume;
             CreateAudioManager();
             foreach (var (_, sfx, type) in s_previews)
             {

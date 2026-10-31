@@ -71,7 +71,7 @@ namespace MajdataPlay.Tests.Game.Global.PlayMode
             Assert.That(text.enabled, Is.False);
             Assert.That(MajdataPlay.Majdata<RuntimeInfoDisplayer>.Instance, Is.SameAs(displayer));
 
-            PrivateMember.SetField(displayer, "_setting", MajEnv.Settings);
+            PrivateMember.SetField(displayer, "_setting", MajEnv.SystemSettings);
             PrivateMember.SetField(displayer, "_versionText", "9.8.7");
             PrivateMember.SetField(displayer, "_refreshTimer", 0f);
             displayer.enabled = true;
@@ -82,19 +82,19 @@ namespace MajdataPlay.Tests.Game.Global.PlayMode
             Assert.That(text.text, Does.Contain("FPS").And.Contain("Ver. 9.8.7").And.Contain("--.--"));
             Assert.That(text.text, Does.Not.Contain("frame timing"), "the diagnostics line is off by default");
 
-            _settings.Settings.Debug.FrameTimingDiagnostics = true;
+            _settings.SystemSettings.Debug.FrameTimingDiagnostics = true;
             PrivateMember.SetField(displayer, "_refreshTimer", 0f);
             yield return null;
             yield return null;
 
             Assert.That(text.text, Does.Contain("\nframe timing:"), "the diagnostics line follows the option");
-            _settings.Settings.Debug.FrameTimingDiagnostics = false;
+            _settings.SystemSettings.Debug.FrameTimingDiagnostics = false;
 
             PrivateMember.Invoke(displayer, "OnLanguageChanged", null, null);
             PrivateMember.SetField(displayer, "_hasNewVersionAvailable", true);
             PrivateMember.Invoke(displayer, "OnLanguageChanged", null, null);
             PrivateMember.SetField(displayer, "_newVersionAvailableText", "UPDATE");
-            _settings.Settings.Debug.DisplayRuntimeInfo = false;
+            _settings.SystemSettings.Rendering.DisplayRuntimeInfo = false;
             yield return null;
             yield return null;
 

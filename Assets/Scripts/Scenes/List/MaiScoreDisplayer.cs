@@ -40,7 +40,7 @@ namespace MajdataPlay.Scenes.List
             }
             else
             {
-                var isClassic = MajInstances.GameManager.Settings.Judge.Mode == JudgeModeOption.Classic;
+                var isClassic = MajInstances.GameManager.UserSettings.Judge.Mode == JudgeModeOption.Classic;
                 _archieveRate.text = isClassic ? $"{score.Acc.Classic:F2}%" : $"{score.Acc.DX:F4}%";
                 _archieveRate.enabled = true;
                 _APbg.SetActive(false);

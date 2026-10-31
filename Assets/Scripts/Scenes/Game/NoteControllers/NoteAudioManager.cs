@@ -87,14 +87,15 @@ namespace MajdataPlay.Scenes.Game.Notes.Controllers
                     _noteSFXs[i] = sfx;
                 }
             }
-            var settings = MajEnv.Settings;
-            if (settings.Debug.OffsetUnit == OffsetUnitOption.Second)
+            var userSettings = MajEnv.UserSettings;
+            var systemSettings = MajEnv.SystemSettings;
+            if (userSettings.Judge.OffsetUnit == OffsetUnitOption.Second)
             {
-                _answerOffsetSec = settings.Judge.AnswerOffset + settings.Debug.DisplayOffset;
+                _answerOffsetSec = userSettings.Judge.AnswerOffset + systemSettings.Debug.DisplayOffset;
             }
             else
             {
-                _answerOffsetSec = (settings.Judge.AnswerOffset + settings.Debug.DisplayOffset) * MajEnv.FRAME_LENGTH_SEC;
+                _answerOffsetSec = (userSettings.Judge.AnswerOffset + systemSettings.Debug.DisplayOffset) * MajEnv.FRAME_LENGTH_SEC;
             }
         }
         private void Start()

@@ -260,7 +260,7 @@ namespace MajdataPlay.Tests.Game.GamePlay.Utils
         [Test]
         public void GetWifiTable_ModernQueuesRotateWithTheStartKey()
         {
-            _settings.Settings.Judge.Mode = JudgeModeOption.Modern;
+            _settings.UserSettings.Judge.Mode = JudgeModeOption.Modern;
 
             using var atA1 = SlideTables.GetWifiTable(1);
             using var atA3 = SlideTables.GetWifiTable(3);
@@ -278,7 +278,7 @@ namespace MajdataPlay.Tests.Game.GamePlay.Utils
         [Test]
         public void GetWifiTable_ClassicCenterEndsAtC()
         {
-            _settings.Settings.Judge.Mode = JudgeModeOption.Classic;
+            _settings.UserSettings.Judge.Mode = JudgeModeOption.Classic;
 
             using var table = SlideTables.GetWifiTable(1);
 

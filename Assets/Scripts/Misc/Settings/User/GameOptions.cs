@@ -43,37 +43,14 @@ namespace MajdataPlay.Settings
         public float BackgroundDim { get; set; } = 0.8f;
 
         /// <summary>
+        /// Gets or sets whether the video of an online chart is skipped while it is downloaded.
+        /// </summary>
+        public bool SkipVideoDownload { get; set; } = false;
+
+        /// <summary>
         /// Gets or sets whether stars rotate while approaching the judgment ring.
         /// </summary>
         public bool StarRotation { get; set; } = true;
-
-        /// <summary>
-        /// Gets or sets the information displayed at the center of the screen during gameplay.
-        /// </summary>
-        [UseGeneralTranslation(TranslationTarget.OptionValue)]
-        public BGInfoOption BGInfo { get; set; } = BGInfoOption.Combo;
-
-        /// <summary>
-        /// Gets or sets the information displayed below the center of the screen during gameplay.
-        /// </summary>
-        [UseGeneralTranslation(TranslationTarget.OptionValue)]
-        public BGInfoOption SecondaryBGInfo { get; set; } = BGInfoOption.None;
-
-        /// <summary>
-        /// Gets or sets the information displayed on the sub-screen during gameplay.
-        /// </summary>
-        [UseGeneralTranslation(TranslationTarget.OptionValue)]
-        public BGInfoOption SubScreenBGInfo { get; set; } = BGInfoOption.Achievement;
-
-        /// <summary>
-        /// Gets or sets the information displayed on the bar between buttons 1 and 8.
-        /// </summary>
-        public TopInfoDisplayOption TopInfo { get; set; } = TopInfoDisplayOption.None;
-
-        /// <summary>
-        /// Gets or sets whether the real-time timing offset gauge and the average judgment position are shown.
-        /// </summary>
-        public bool EnableJudgeTimingGauge { get; set; } = false;
 
         /// <summary>
         /// Gets or sets whether holding buttons 2, 3, 6 and 7 skips the track.
@@ -145,5 +122,9 @@ namespace MajdataPlay.Settings
         /// Gets or sets whether gameplay waits for a button press after loading, as used in tournaments.
         /// </summary>
         public bool ManualStartGame { get; set; } = false;
+
+        /// <summary>Gets or sets the note appearance threshold.</summary>
+        [Step("0.001")]
+        public float NoteAppearRate { get; set; } = 0.265f;
     }
 }

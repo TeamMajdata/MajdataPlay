@@ -31,7 +31,7 @@ namespace MajdataPlay.Recording
         {
             get
             {
-                return MajEnv.Settings.Game.RecordMode != RecordModeOption.Disable;
+                return MajEnv.UserSettings.Game.RecordMode != RecordModeOption.Disable;
             }
         }
 
@@ -45,12 +45,12 @@ namespace MajdataPlay.Recording
                 return;
             }
             s_isInited = true;
-            if ((PlatformInfo.IsAndroid || PlatformInfo.IsIOS) && MajEnv.Settings.Game.RecordMode == RecordModeOption.OBSTrigger)
+            if ((PlatformInfo.IsAndroid || PlatformInfo.IsIOS) && MajEnv.UserSettings.Game.RecordMode == RecordModeOption.OBSTrigger)
             {
                 MajDebug.LogWarning(nameof(Recorder), "OBS Trigger recording is not supported on mobile platforms.");
                 return;
             }
-            switch (MajEnv.Settings.Game.RecordMode)
+            switch (MajEnv.UserSettings.Game.RecordMode)
             {
                 case RecordModeOption.OBSTrigger:
                     s_recorder = new OBSRecorder();
@@ -59,9 +59,9 @@ namespace MajdataPlay.Recording
                     var capturer = SceneSwitcher.MainCamera.GetComponent<FFmpegCameraCapturer>();
                     s_recorder = new FFmpegRecorder(capturer,
                         MajInstances.AudioManager.CreateAudioRecorder(),
-                        MajEnv.Settings.Encoding.ContainerFormat);
+                        MajEnv.SystemSettings.Encoding.ContainerFormat);
                     var options = capturer.Options;
-                    var encodingSetting = MajEnv.Settings.Encoding;
+                    var encodingSetting = MajEnv.SystemSettings.Encoding;
                     options.Height = (int)(Screen.height * encodingSetting.ResolutionScale);
                     options.Width = (int)(Screen.width * encodingSetting.ResolutionScale);
                     options.Format = encodingSetting.EncodingFormat;
@@ -74,7 +74,7 @@ namespace MajdataPlay.Recording
                 case RecordModeOption.Disable:
                     return;
                 default:
-                    MajDebug.LogError(nameof(Recorder), "Unsupported record mode: " + MajEnv.Settings.Game.RecordMode);
+                    MajDebug.LogError(nameof(Recorder), "Unsupported record mode: " + MajEnv.UserSettings.Game.RecordMode);
                     break;
             }
             GameManager.OnAppQuit += OnApplicationQuit;

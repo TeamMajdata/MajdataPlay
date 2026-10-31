@@ -7,7 +7,7 @@ using UnityEngine.UI;
 namespace MajdataPlay
 {
     /// <summary>
-    /// Calculates the shared <see cref="ScreenPosCanvasLayout"/> from the screen size and the display settings.
+    /// Calculates the shared <see cref="ScreenPosCanvasLayout"/> from the screen size and the screen layout settings.
     /// </summary>
     /// <remarks>
     /// This component lives on the persistent <c>GlobalCanvas</c>. Every canvas, including <c>GlobalCanvas</c> itself,
@@ -56,8 +56,8 @@ namespace MajdataPlay
 
         private void LateUpdate()
         {
-            var displayOptions = MajEnv.Settings?.Display;
-            if (displayOptions is null)
+            var renderingOptions = MajEnv.SystemSettings?.Rendering;
+            if (renderingOptions is null)
             {
                 return;
             }
@@ -68,7 +68,7 @@ namespace MajdataPlay
                 return;
             }
 
-            var input = CreateInput(screenWidth, screenHeight, displayOptions);
+            var input = CreateInput(screenWidth, screenHeight, renderingOptions);
             if (HasLayout && input.Equals(_lastInput))
             {
                 return;
@@ -79,7 +79,7 @@ namespace MajdataPlay
             Layout = layout;
             HasLayout = true;
             Version++;
-            displayOptions.MainScreenCachedScreenCenterY = layout.ScreenCenterY;
+            renderingOptions.MainScreenCachedScreenCenterY = layout.ScreenCenterY;
             MajDebug.LogDebug(nameof(ScreenPosCanvasLayoutProvider), $"Layout v{Version}: screen {screenWidth}x{screenHeight}, reference resolution {layout.ReferenceResolution}");
         }
 
@@ -88,19 +88,19 @@ namespace MajdataPlay
         /// </summary>
         /// <param name="screenWidth">The screen width in pixels.</param>
         /// <param name="screenHeight">The screen height in pixels.</param>
-        /// <param name="displayOptions">The display settings to read.</param>
+        /// <param name="renderingOptions">The rendering settings to read.</param>
         /// <returns>The layout input.</returns>
-        private ScreenPosCanvasLayoutInput CreateInput(int screenWidth, int screenHeight, DisplayOptions displayOptions)
+        private ScreenPosCanvasLayoutInput CreateInput(int screenWidth, int screenHeight, RenderingOptions renderingOptions)
         {
             return new ScreenPosCanvasLayoutInput(
                 screenWidth,
                 screenHeight,
                 _baseReferenceResolution,
-                displayOptions.MainScreenTransform,
-                displayOptions.MainScreenOffset,
-                displayOptions.MainScreenScale,
-                displayOptions.SubDisplayOffset,
-                displayOptions.SubDisplayScale);
+                renderingOptions.MainScreenTransform,
+                renderingOptions.MainScreenOffset,
+                renderingOptions.MainScreenScale,
+                renderingOptions.SubDisplayOffset,
+                renderingOptions.SubDisplayScale);
         }
     }
 }

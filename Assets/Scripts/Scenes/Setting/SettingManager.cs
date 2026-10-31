@@ -19,11 +19,32 @@ namespace MajdataPlay.Scenes.Setting
     {
         private const float MenuTitleVisibleDistance = 3.5f;
 
-        // Metadata survives scene changes, but never retains a GameSetting/ChartSetting instance.
+        // Metadata survives scene changes, but never retains a setting or ChartSetting instance.
         private static readonly Dictionary<Type, MenuMetadata[]> s_menuMetadataCache = new();
 
         public int Index { get; private set; } = 0;
-        public GameSetting Setting => MajEnv.Settings;
+        /// <summary>
+        /// Gets the user and system settings edited by the menus, which menu conditions are evaluated against.
+        /// </summary>
+        /// <remarks>
+        /// The roots are read from <see cref="MajEnv"/> on every access, so replaced settings instances are followed;
+        /// the holder is only recreated when one of them changed.
+        /// </remarks>
+        public SettingRoot Setting
+        {
+            get
+            {
+                var user = MajEnv.UserSettings;
+                var system = MajEnv.SystemSettings;
+                if (_setting is null || !ReferenceEquals(_setting.User, user) || !ReferenceEquals(_setting.System, system))
+                {
+                    _setting = new SettingRoot(user, system);
+                }
+                return _setting;
+            }
+        }
+
+        private SettingRoot _setting;
 
         [SerializeField]
         [FormerlySerializedAs("menuPrefab")]
@@ -69,13 +90,13 @@ namespace MajdataPlay.Scenes.Setting
         private void Awake()
         {
             InputManager.TouchButtonRingEdge = 4.8f;
-            _lastOffsetUnit = Setting.Debug.OffsetUnit;
+            _lastOffsetUnit = Setting.User.Judge.OffsetUnit;
             EnsureNestedCanvas(_menuTitleDisplayerListRoot);
             EnsureNestedCanvas(_descriptionTextDisplayer.gameObject);
         }
         private void Start()
         {
-            var categories = GetMenuMetadata(Setting.GetType());
+            var categories = GetMenuMetadata(typeof(SettingRoot));
             var offset = 0;
             var listRoot = _menuListRoot.transform;
             var selectedSong = _settingConfig.IgnoreChartSettingPage ? null : SongStorage.FindSelectedSong();
@@ -170,47 +191,44 @@ namespace MajdataPlay.Scenes.Setting
                 return cached;
             }
 
-            var properties = SettingReflectionCache.GetVisibleProperties(settingType);
-            var categories = new MenuMetadata[properties.Length];
-            for (var i = 0; i < properties.Length; i++)
+            // The menus are the categories of every setting root, user settings first.
+            var categories = new List<MenuMetadata>();
+            foreach (var rootProperty in SettingReflectionCache.GetVisibleProperties(settingType))
             {
-                var property = properties[i];
-                var valueProperty = property.Name == nameof(GameSetting.Audio)
-                    ? SettingReflectionCache.GetProperty(property.PropertyType, "Volume")
-                    : property;
-                categories[i] = new MenuMetadata(property, valueProperty);
-                SettingReflectionCache.GetVisibleProperties(valueProperty.PropertyType);
+                foreach (var categoryProperty in SettingReflectionCache.GetVisibleProperties(rootProperty.PropertyType))
+                {
+                    categories.Add(new MenuMetadata(rootProperty, categoryProperty));
+                    SettingReflectionCache.GetVisibleProperties(categoryProperty.PropertyType);
+                }
             }
             // Include chart options even if the first visit has no selected chart.
             SettingReflectionCache.GetVisibleProperties(typeof(ChartSetting));
-            s_menuMetadataCache.Add(settingType, categories);
-            return categories;
+            var result = categories.ToArray();
+            s_menuMetadataCache.Add(settingType, result);
+            return result;
         }
 
         private sealed class MenuMetadata
         {
+            private readonly PropertyInfo _rootProperty;
             private readonly PropertyInfo _categoryProperty;
-            private readonly PropertyInfo _valueProperty;
-            internal string Name => _valueProperty.Name;
-            // The translation attributes live on the root category property; {0} is the displayed menu name.
+            internal string Name => _categoryProperty.Name;
+            // The translation attributes live on the category property; {0} is the displayed menu name.
             internal SettingTranslation TitleTranslation { get; }
-            // Like the translation attributes, the visibility conditions live on the root category property.
+            // Like the translation attributes, the visibility conditions live on the category property.
             internal SettingVisibility Visibility { get; }
 
-            internal MenuMetadata(PropertyInfo categoryProperty, PropertyInfo valueProperty)
+            internal MenuMetadata(PropertyInfo rootProperty, PropertyInfo categoryProperty)
             {
+                _rootProperty = rootProperty;
                 _categoryProperty = categoryProperty;
-                _valueProperty = valueProperty;
-                TitleTranslation = SettingReflectionCache.GetMenuTranslation(categoryProperty, valueProperty.Name);
+                TitleTranslation = SettingReflectionCache.GetMenuTranslation(categoryProperty, categoryProperty.Name);
                 Visibility = SettingReflectionCache.GetVisibility(categoryProperty);
             }
 
-            internal object GetInstance(GameSetting setting)
+            internal object GetInstance(SettingRoot setting)
             {
-                var root = _categoryProperty == _valueProperty
-                    ? (object)setting
-                    : _categoryProperty.GetValue(setting);
-                return _valueProperty.GetValue(root);
+                return _categoryProperty.GetValue(_rootProperty.GetValue(setting));
             }
         }
         private void Update()
@@ -372,7 +390,7 @@ namespace MajdataPlay.Scenes.Setting
             var index = Array.FindIndex(_menus, x => x.Name == _settingConfig.SelectedMenu);
             if (index == -1 || !_menus[index].Visibility.IsVisible(Setting))
             {
-                index = Array.FindIndex(_menus, x => x.Name == nameof(GameSetting.Game));
+                index = Array.FindIndex(_menus, x => x.Name == nameof(UserSetting.Game));
                 _settingConfig.SelectedOption = string.Empty;
             }
 
@@ -578,19 +596,19 @@ namespace MajdataPlay.Scenes.Setting
         }
         private bool UpdateOffsetUnitIfNeeded()
         {
-            var currentOffsetUnit = Setting.Debug.OffsetUnit;
+            var currentOffsetUnit = Setting.User.Judge.OffsetUnit;
             if (currentOffsetUnit == _lastOffsetUnit)
             {
                 return false;
             }
 
             var convertToSecond = currentOffsetUnit == OffsetUnitOption.Second;
-            Setting.Game.SlideFadeInOffset = ConvertOffsetUnit(Setting.Game.SlideFadeInOffset, convertToSecond);
-            Setting.Judge.AudioOffset = ConvertOffsetUnit(Setting.Judge.AudioOffset, convertToSecond);
-            Setting.Judge.JudgeOffset = ConvertOffsetUnit(Setting.Judge.JudgeOffset, convertToSecond);
-            Setting.Judge.AnswerOffset = ConvertOffsetUnit(Setting.Judge.AnswerOffset, convertToSecond);
-            Setting.Judge.TouchPanelOffset = ConvertOffsetUnit(Setting.Judge.TouchPanelOffset, convertToSecond);
-            Setting.Debug.DisplayOffset = ConvertOffsetUnit(Setting.Debug.DisplayOffset, convertToSecond);
+            Setting.User.Game.SlideFadeInOffset = ConvertOffsetUnit(Setting.User.Game.SlideFadeInOffset, convertToSecond);
+            Setting.User.Judge.AudioOffset = ConvertOffsetUnit(Setting.User.Judge.AudioOffset, convertToSecond);
+            Setting.User.Judge.JudgeOffset = ConvertOffsetUnit(Setting.User.Judge.JudgeOffset, convertToSecond);
+            Setting.User.Judge.AnswerOffset = ConvertOffsetUnit(Setting.User.Judge.AnswerOffset, convertToSecond);
+            Setting.User.Judge.TouchPanelOffset = ConvertOffsetUnit(Setting.User.Judge.TouchPanelOffset, convertToSecond);
+            Setting.System.Debug.DisplayOffset = ConvertOffsetUnit(Setting.System.Debug.DisplayOffset, convertToSecond);
 
             if (convertToSecond)
             {
