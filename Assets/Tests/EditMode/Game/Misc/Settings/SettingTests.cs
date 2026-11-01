@@ -249,28 +249,6 @@ namespace MajdataPlay.Tests.Game.Misc.Settings
             Assert.That(() => MajEnv.DeserializeSettings(null, "{\"Debug\":{\"MaxQueuedFrames\":\"many\"}}"), Throws.InstanceOf<JsonException>());
         }
 
-        /// <summary>Checks that the sensor opacity is snapped to the 10% steps between 10% and 90%.</summary>
-        /// <param name="value">The assigned value.</param>
-        /// <param name="expected">The stored value.</param>
-        [TestCase(-5, 10)]
-        [TestCase(10, 10)]
-        [TestCase(14, 10)]
-        [TestCase(15, 20)]
-        [TestCase(26, 30)]
-        [TestCase(45, 50)]
-        [TestCase(84, 80)]
-        [TestCase(85, 90)]
-        [TestCase(90, 90)]
-        [TestCase(99, 90)]
-        public void SensorOpacity_SnapsToSteps(int value, int expected)
-        {
-            var display = new DisplayOptions();
-
-            display.SensorOpacity = value;
-
-            Assert.That(display.SensorOpacity, Is.EqualTo(expected));
-        }
-
         /// <summary>Checks which mods count as active.</summary>
         [Test]
         public void IsAnyModActive_DetectsGameplayMods()

@@ -12,6 +12,7 @@ namespace MajdataPlay.Settings
     /// The bounds are written as invariant-culture decimal strings so that any numeric member type can share the attribute.
     /// A non-null, non-empty bound automatically enables its matching <see cref="HasMin"/> or <see cref="HasMax"/> flag.
     /// A null or empty bound leaves that side of the range unbounded.
+    /// The setting UI clamps a stored value outside the range to the nearest bound.
     /// </para>
     /// <para>
     /// When neither this attribute nor <see cref="StepAttribute"/> is present, the number enumerator

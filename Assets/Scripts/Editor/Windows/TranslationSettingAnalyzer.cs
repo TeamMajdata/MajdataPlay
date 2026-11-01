@@ -638,7 +638,7 @@ namespace MajdataPlay.Editor.Windows
         /// </summary>
         /// <remarks>
         /// The values run from the lower bound in steps and end at the upper bound, which the enumerator clamps to. A
-        /// saved value off the grid is not covered. Texts are formatted with the invariant culture, while the runtime
+        /// saved value off the grid is snapped onto it by the enumerator. Texts are formatted with the invariant culture, while the runtime
         /// uses the current culture; for cultures with another decimal separator the generated keys differ.
         /// </remarks>
         /// <param name="property">The numeric option property.</param>

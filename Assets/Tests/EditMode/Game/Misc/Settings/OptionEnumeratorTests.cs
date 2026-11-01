@@ -155,6 +155,24 @@ namespace MajdataPlay.Tests.Game.Misc.Settings
             public MirrorOption LockedMirror { get; set; } = UndefinedMirror;
         }
 
+        /// <summary>A settings section with numeric options that exercise snapping onto the step grid.</summary>
+        public sealed class SnapProbe
+        {
+            /// <summary>An option whose grid starts at its lower bound and whose upper bound is off the grid.</summary>
+            [Step("0.4")]
+            [global::MajdataPlay.Settings.Range("0.1", "1.4")]
+            public float OffGridMax { get; set; } = 0.5f;
+
+            /// <summary>An option with a range but no step, which is only clamped.</summary>
+            [global::MajdataPlay.Settings.Range("0", "1")]
+            public float RangeOnly { get; set; } = 0.37f;
+
+            /// <summary>A read-only option holding a value off its grid.</summary>
+            [ReadOnlyOption]
+            [Step("2")]
+            public int LockedOffGrid { get; set; } = 3;
+        }
+
         /// <summary>The language active before the test.</summary>
         private Language _savedLanguage = null!;
 
@@ -205,6 +223,50 @@ namespace MajdataPlay.Tests.Game.Misc.Settings
                 dictionary[key] = value;
             }
             PrivateMember.SetStaticField(typeof(Localization), "_current", new Language { Code = "xx-XX", Author = "Test", Translations = dictionary });
+        }
+
+        /// <summary>Parses an invariant-culture decimal test argument.</summary>
+        /// <param name="text">The decimal text.</param>
+        /// <returns>The parsed value.</returns>
+        private static decimal ParseDecimal(string text)
+        {
+            return decimal.Parse(text, CultureInfo.InvariantCulture);
+        }
+
+        /// <summary>Parses an optional invariant-culture decimal test argument.</summary>
+        /// <param name="text">The decimal text, or null for none.</param>
+        /// <returns>The parsed value, or null when <paramref name="text"/> is null.</returns>
+        private static decimal? ParseOptionalDecimal(string? text)
+        {
+            return text is null ? null : ParseDecimal(text);
+        }
+
+        /// <summary>Determines whether a property type is edited by the number enumerator.</summary>
+        /// <param name="type">The property type.</param>
+        /// <returns>True for the integral and floating-point types; false for enums, nullable numbers and other types.</returns>
+        private static bool IsNumber(Type type)
+        {
+            if (type.IsEnum)
+            {
+                return false;
+            }
+            switch (Type.GetTypeCode(type))
+            {
+                case TypeCode.SByte:
+                case TypeCode.Byte:
+                case TypeCode.Int16:
+                case TypeCode.UInt16:
+                case TypeCode.Int32:
+                case TypeCode.UInt32:
+                case TypeCode.Int64:
+                case TypeCode.UInt64:
+                case TypeCode.Single:
+                case TypeCode.Double:
+                case TypeCode.Decimal:
+                    return true;
+                default:
+                    return false;
+            }
         }
 
         /// <summary>Checks that initialization rejects null members and owners.</summary>
@@ -368,6 +430,145 @@ namespace MajdataPlay.Tests.Game.Misc.Settings
             enumerator.RefreshLocalization();
             Assert.That(enumerator.LocalizedValueText, Is.EqualTo("8"));
             enumerator.Dispose();
+        }
+
+        /// <summary>Checks that a value is snapped to the nearest grid value from the lower bound, or from zero, and clamped into the range.</summary>
+        /// <param name="value">The value to snap, as an invariant decimal.</param>
+        /// <param name="step">The step, as an invariant decimal.</param>
+        /// <param name="min">The lower bound, or null for none.</param>
+        /// <param name="max">The upper bound, or null for none.</param>
+        /// <param name="expected">The snapped value, as an invariant decimal.</param>
+        [TestCase("0.07", "0.05", "0.02", null, "0.07")]
+        [TestCase("0.08", "0.05", null, null, "0.1")]
+        [TestCase("-0.15", "0.1", null, null, "-0.2")]
+        [TestCase("-3", "2", null, "0", "-4")]
+        [TestCase("1.31", "0.4", "0.1", "1.4", "1.3")]
+        [TestCase("1.39", "0.4", "0.1", "1.4", "1.4")]
+        [TestCase("2", "0.4", "0.1", "1.4", "1.4")]
+        [TestCase("-1", "0.4", "0.1", "1.4", "0.1")]
+        [TestCase("0.37", "0", "0", "1", "0.37")]
+        [TestCase("1.5", "0", "0", "1", "1")]
+        public void Snap_RoundsToTheGridAndClampsToTheRange(string value, string step, string? min, string? max, string expected)
+        {
+            var snapped = DefaultNumberEnumerator.Snap(ParseDecimal(value), ParseDecimal(step), ParseOptionalDecimal(min), ParseOptionalDecimal(max));
+
+            Assert.That(snapped, Is.EqualTo(ParseDecimal(expected)));
+        }
+
+        /// <summary>Checks that the setting UI snaps a stored sensor opacity to the 10% steps between 10% and 90%.</summary>
+        /// <param name="value">The stored value.</param>
+        /// <param name="expected">The value after the option is shown.</param>
+        [TestCase(-5, 10)]
+        [TestCase(10, 10)]
+        [TestCase(14, 10)]
+        [TestCase(15, 20)]
+        [TestCase(26, 30)]
+        [TestCase(45, 50)]
+        [TestCase(84, 80)]
+        [TestCase(85, 90)]
+        [TestCase(90, 90)]
+        [TestCase(99, 90)]
+        public void NumberEnumerator_SnapsStoredSensorOpacity(int value, int expected)
+        {
+            var display = new DisplayOptions { SensorOpacity = value };
+
+            var enumerator = Create<DefaultNumberEnumerator>(display, nameof(DisplayOptions.SensorOpacity));
+
+            Assert.That(display.SensorOpacity, Is.EqualTo(expected));
+            Assert.That(enumerator.ValueText, Is.EqualTo(expected.ToString()));
+        }
+
+        /// <summary>Checks that a value written elsewhere is snapped on refresh and that stepping continues on the grid.</summary>
+        [Test]
+        public void NumberEnumerator_SnapsValueChangedElsewhereOnRefresh()
+        {
+            var probe = new NumberProbe();
+            var enumerator = Create<DefaultNumberEnumerator>(probe, nameof(NumberProbe.Bounded));
+
+            probe.Bounded = 1.3f;
+            enumerator.Refresh();
+
+            Assert.That(probe.Bounded, Is.EqualTo(1.5f));
+            Assert.That(enumerator.ValueText, Is.EqualTo(1.5f.ToString()));
+            Assert.That(enumerator.MoveNext(), Is.True);
+            Assert.That(probe.Bounded, Is.EqualTo(2f));
+        }
+
+        /// <summary>Checks that stepping reaches an upper bound off the grid and steps back down onto the grid.</summary>
+        [Test]
+        public void NumberEnumerator_StepsBetweenTheGridAndAnOffGridUpperBound()
+        {
+            var probe = new SnapProbe();
+            var enumerator = Create<DefaultNumberEnumerator>(probe, nameof(SnapProbe.OffGridMax));
+
+            Assert.That(enumerator.MoveNext(), Is.True);
+            Assert.That(probe.OffGridMax, Is.EqualTo(0.9f));
+            Assert.That(enumerator.MoveNext(), Is.True);
+            Assert.That(probe.OffGridMax, Is.EqualTo(1.3f));
+            Assert.That(enumerator.MoveNext(), Is.True);
+            Assert.That(probe.OffGridMax, Is.EqualTo(1.4f));
+            Assert.That(enumerator.MoveNext(), Is.False);
+            Assert.That(enumerator.MovePrevious(), Is.True);
+            Assert.That(probe.OffGridMax, Is.EqualTo(1.3f));
+        }
+
+        /// <summary>Checks that an option with a range but no step is clamped without being moved onto a grid.</summary>
+        [Test]
+        public void NumberEnumerator_OnlyClampsWithoutStep()
+        {
+            var inRange = new SnapProbe();
+            var outOfRange = new SnapProbe { RangeOnly = 1.5f };
+
+            Create<DefaultNumberEnumerator>(inRange, nameof(SnapProbe.RangeOnly));
+            Create<DefaultNumberEnumerator>(outOfRange, nameof(SnapProbe.RangeOnly));
+
+            Assert.That(inRange.RangeOnly, Is.EqualTo(0.37f));
+            Assert.That(outOfRange.RangeOnly, Is.EqualTo(1f));
+        }
+
+        /// <summary>Checks that a read-only option keeps a stored value off its grid.</summary>
+        [Test]
+        public void NumberEnumerator_DoesNotSnapReadOnlyOptions()
+        {
+            var probe = new SnapProbe();
+
+            var enumerator = Create<DefaultNumberEnumerator>(probe, nameof(SnapProbe.LockedOffGrid));
+
+            Assert.That(probe.LockedOffGrid, Is.EqualTo(3));
+            Assert.That(enumerator.ValueText, Is.EqualTo("3"));
+        }
+
+        /// <summary>
+        /// Checks that every numeric option of the default settings is already on its grid, so opening the setting menu
+        /// does not change an untouched setting.
+        /// </summary>
+        [Test]
+        public void NumberEnumerator_DefaultSettingsAreOnTheirGrids()
+        {
+            var checkedOptions = 0;
+            foreach (var root in new object[] { new UserSetting(), new SystemSetting() })
+            {
+                foreach (var categoryProperty in root.GetType().GetProperties(BindingFlags.Public | BindingFlags.Instance))
+                {
+                    var category = categoryProperty.GetValue(root)!;
+                    foreach (var property in category.GetType().GetProperties(BindingFlags.Public | BindingFlags.Instance))
+                    {
+                        if (property.GetSetMethod() is null || !IsNumber(property.PropertyType))
+                        {
+                            continue;
+                        }
+                        var defaultValue = property.GetValue(category);
+                        var isOffset = property.GetCustomAttribute<OptionEnumeratorAttribute>()?.EnumeratorType == typeof(GameOffsetEnumerator);
+                        var enumerator = isOffset ? (IOptionEnumerator)new GameOffsetEnumerator() : new DefaultNumberEnumerator();
+
+                        enumerator.Init(property, category);
+
+                        Assert.That(property.GetValue(category), Is.EqualTo(defaultValue), $"{category.GetType().Name}.{property.Name}");
+                        checkedOptions++;
+                    }
+                }
+            }
+            Assert.That(checkedOptions, Is.GreaterThan(30));
         }
 
         /// <summary>Checks that numeric values are translated only when the option opts in, substituting the option name into custom templates.</summary>
@@ -719,6 +920,27 @@ namespace MajdataPlay.Tests.Game.Misc.Settings
             Assert.That(enumerator.MovePrevious(), Is.False);
             Assert.That(enumerator.MoveNext(), Is.True);
             Assert.That(debug.DisplayOffset, Is.EqualTo(0.1f).Within(1e-6f));
+        }
+
+        /// <summary>Checks that offsets are snapped to the step of the current offset unit, also right after the unit changes.</summary>
+        [Test]
+        public void GameOffsetEnumerator_SnapsToTheStepOfTheOffsetUnit()
+        {
+            MajEnv.UserSettings.Judge.OffsetUnit = OffsetUnitOption.Frame;
+            var judge = new JudgeOptions { AudioOffset = 1.26f };
+            var enumerator = Create<GameOffsetEnumerator>(judge, nameof(JudgeOptions.AudioOffset));
+
+            Assert.That(judge.AudioOffset, Is.EqualTo(1.3f).Within(1e-6f));
+
+            MajEnv.UserSettings.Judge.OffsetUnit = OffsetUnitOption.Second;
+            judge.AudioOffset = 0.0216667f;
+            enumerator.Refresh();
+            Assert.That(judge.AudioOffset, Is.EqualTo(0.022f).Within(1e-6f));
+
+            MajEnv.UserSettings.Judge.OffsetUnit = OffsetUnitOption.Frame;
+            judge.AudioOffset = 1.26f;
+            enumerator.Refresh();
+            Assert.That(judge.AudioOffset, Is.EqualTo(1.3f).Within(1e-6f));
         }
 
         /// <summary>Checks that the language enumerator lists the available languages and switches the active language.</summary>
