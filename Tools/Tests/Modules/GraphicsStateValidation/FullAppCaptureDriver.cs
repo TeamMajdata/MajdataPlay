@@ -84,7 +84,7 @@ namespace MajdataPlay.Rendering
             }
             MajEnv.SystemSettings.Mod.AutoPlay = AutoplayModeOption.Enable;
             MajEnv.SystemSettings.Mod.PlaybackSpeed = 1f;
-            MajEnv.SystemSettings.Online.Enable = false;
+            MajEnv.SystemSettings.Network.Online.Enable = false;
             MajDebug.LogInfo(nameof(AndroidFullCaptureDriver), "GSC_FULL_CAPTURE_TITLE_READY");
             if (IsManualCaptureRequested())
             {

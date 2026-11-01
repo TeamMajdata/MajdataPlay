@@ -102,7 +102,8 @@ namespace MajdataPlay.Tests.Game.Misc.Settings
             Assert.That(system["Rendering"]!["FPSLimit"]!.Value<int>(), Is.EqualTo(60));
             Assert.That(system["Audio"]!["ForceMono"]!.Value<bool>(), Is.True);
             Assert.That(system["Debug"]!["DebugLevel"]!.Value<string>(), Is.EqualTo("Warning"));
-            Assert.That(system["Online"]!["Enable"]!.Value<bool>(), Is.True);
+            Assert.That(system.ContainsKey("Online"), Is.False);
+            Assert.That(system["Network"]!["Online"]!["Enable"]!.Value<bool>(), Is.True);
             Assert.That(system.ContainsKey("Encoding") && system.ContainsKey("Decoding") && system.ContainsKey("IO"), Is.True);
             Assert.That(SettingMigration.Migrate(user, system, CreateSerializer()), Is.False, "migrated documents are current");
         }
@@ -195,7 +196,8 @@ namespace MajdataPlay.Tests.Game.Misc.Settings
                 "\"MainScreenTransform\":true,\"MainScreenScale\":0.8,\"GameplayScreenRotationAngle\":\"_180\"}," +
                 "\"Audio\":{\"ForceMono\":true,\"Volume\":{\"Global\":0.9,\"Tap\":0.1}}," +
                 "\"Debug\":{\"DebugLevel\":\"Warning\",\"NoteAppearRate\":0.3,\"OffsetUnit\":\"Second\",\"DisplaySensor\":true," +
-                "\"SensorOpacity\":40,\"TouchRadiusAdjust\":0.3,\"TouchCAreaExtraRadius\":0.5,\"DisplayRuntimeInfo\":false}}");
+                "\"SensorOpacity\":40,\"TouchRadiusAdjust\":0.3,\"TouchCAreaExtraRadius\":0.5,\"DisplayRuntimeInfo\":false}," +
+                "\"Online\":{\"Enable\":true,\"ApiEndpoints\":[]}}");
 
             Assert.That(user.Game.TapSpeed, Is.EqualTo(8.5f));
             Assert.That(user.Game.SkipVideoDownload, Is.True);
@@ -220,6 +222,10 @@ namespace MajdataPlay.Tests.Game.Misc.Settings
             Assert.That(system.Rendering.MainScreenScale, Is.EqualTo(0.8f));
             Assert.That(system.Rendering.GameplayScreenRotationAngle, Is.EqualTo(GameplayScreenRotationAngleOption._180));
             Assert.That(system.Rendering.DisplayRuntimeInfo, Is.False);
+            Assert.That(system.Network.Online.ApiEndpoints, Is.Empty);
+#if !UNITY_IOS
+            Assert.That(system.Network.Online.Enable, Is.True);
+#endif
         }
 
         /// <summary>Checks that options already stored in their current category win over the same options in their legacy category.</summary>
@@ -430,6 +436,81 @@ namespace MajdataPlay.Tests.Game.Misc.Settings
             Assert.That(system["Rendering"]!.Value<int>(), Is.EqualTo(5));
             Assert.That(((JObject)user["Display"]!).Count, Is.EqualTo(0));
             Assert.That(() => system.ToObject<SystemSetting>(CreateSerializer()), Throws.InstanceOf<JsonException>());
+        }
+
+        /// <summary>
+        /// Checks that the legacy Online category of system-settings.json moves into the Network category: the proxy keys
+        /// form the Proxy options and the other keys keep their names in the Online options.
+        /// </summary>
+        [Test]
+        public void Migrate_MovesLegacyOnlineCategoryToNetwork()
+        {
+            var user = new JObject();
+            var system = JObject.Parse("{\"Online\":{\"Enable\":true,\"UseProxy\":false,\"Proxy\":\"http://proxy.invalid:1\"," +
+                                       "\"ApiEndpoints\":[{\"Name\":\"n\",\"Url\":\"https://example.invalid/\"}]}}");
+
+            var changed = SettingMigration.Migrate(user, system, CreateSerializer());
+
+            Assert.That(changed, Is.True);
+            Assert.That(system.ContainsKey("Online"), Is.False);
+            var network = (JObject)system["Network"]!;
+            var online = (JObject)network["Online"]!;
+            var proxy = (JObject)network["Proxy"]!;
+            Assert.That(network.Count, Is.EqualTo(2));
+            Assert.That(online.Count, Is.EqualTo(2));
+            Assert.That(online["Enable"]!.Value<bool>(), Is.True);
+            Assert.That(online["ApiEndpoints"]![0]!["Name"]!.Value<string>(), Is.EqualTo("n"));
+            Assert.That(proxy.Count, Is.EqualTo(2));
+            Assert.That(proxy["Enable"]!.Value<bool>(), Is.False);
+            Assert.That(proxy["Url"]!.Value<string>(), Is.EqualTo("http://proxy.invalid:1"));
+            Assert.That(SettingMigration.Migrate(user, system, CreateSerializer()), Is.False, "migrated documents are current");
+        }
+
+        /// <summary>Checks that the Network options system-settings.json already has keep their values and only receive the legacy keys they lack.</summary>
+        [Test]
+        public void Read_ExistingNetworkWinsOverLegacyOnline()
+        {
+            var (_, system) = Read("{}",
+                "{\"Online\":{\"Enable\":true,\"ApiEndpoints\":[{\"Name\":\"legacy\",\"Url\":\"https://legacy.invalid/\"}]}," +
+                "\"Network\":{\"Online\":{\"Enable\":false}}}");
+
+            Assert.That(system.Network.Online.Enable, Is.False);
+            Assert.That(system.Network.Online.ApiEndpoints, Has.Length.EqualTo(1));
+            Assert.That(system.Network.Online.ApiEndpoints[0].Name, Is.EqualTo("legacy"));
+        }
+
+        /// <summary>Checks that the legacy proxy keys fill the proxy options and lose to the proxy options system-settings.json already has.</summary>
+        [Test]
+        public void Read_LegacyProxyKeysFillTheProxyOptions()
+        {
+            var (_, system) = Read("{}",
+                "{\"Online\":{\"UseProxy\":false,\"Proxy\":\"http://legacy.invalid:1\"}," +
+                "\"Network\":{\"Proxy\":{\"Url\":\"http://current.invalid:2\"}}}");
+
+            Assert.That(system.Network.Proxy.Enable, Is.False);
+            Assert.That(system.Network.Proxy.Url, Is.EqualTo("http://current.invalid:2"));
+        }
+
+        /// <summary>
+        /// Checks that Network options that are not objects are left for the deserializer to reject, and the legacy Online
+        /// values meant for them are dropped.
+        /// </summary>
+        [Test]
+        public void Migrate_KeepsInvalidNetworkForTheDeserializer()
+        {
+            var system = JObject.Parse("{\"Online\":{\"Enable\":true},\"Network\":5}");
+            var invalidProxy = JObject.Parse("{\"Online\":{\"Enable\":true,\"UseProxy\":false},\"Network\":{\"Proxy\":5}}");
+
+            var changed = SettingMigration.Migrate(new JObject(), system, CreateSerializer());
+            var proxyChanged = SettingMigration.Migrate(new JObject(), invalidProxy, CreateSerializer());
+
+            Assert.That(changed, Is.True);
+            Assert.That(system.ContainsKey("Online"), Is.False);
+            Assert.That(system["Network"]!.Value<int>(), Is.EqualTo(5));
+            Assert.That(() => system.ToObject<SystemSetting>(CreateSerializer()), Throws.InstanceOf<JsonException>());
+            Assert.That(proxyChanged, Is.True);
+            Assert.That(invalidProxy["Network"]!["Proxy"]!.Value<int>(), Is.EqualTo(5));
+            Assert.That(invalidProxy["Network"]!["Online"]!["Enable"]!.Value<bool>(), Is.True);
         }
 
         /// <summary>Checks that a legacy quality level that cannot be read rejects the document, like any other invalid value.</summary>

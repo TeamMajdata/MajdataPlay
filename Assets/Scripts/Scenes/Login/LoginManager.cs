@@ -563,7 +563,7 @@ namespace MajdataPlay.Scenes.Login
                 try
                 {
 
-                    rsp = await Online.RegisterAsync(endpoint, MajEnv.MachineInfo, token);
+                    rsp = await Online.RegisterAsync(endpoint, MajEnv.SystemSettings.Network.Online.Machine, token);
                     if (!rsp.IsSuccessfully)
                     {
                         throw s_exception;

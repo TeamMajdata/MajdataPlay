@@ -139,7 +139,7 @@ namespace MajdataPlay.Tests.ChartStorageValidation
             var storagePath = CreateFixtureDirectory(rootPath, "StorageSnapshot");
             MajEnv.ChartDirectory = FileSystem.Directory.Open(Path.Combine(storagePath, "Charts"));
             MajEnv.CacheDirectory = FileSystem.Directory.Open(CreateFixtureDirectory(storagePath, "Cache"));
-            MajEnv.SystemSettings.Online.Enable = false;
+            MajEnv.SystemSettings.Network.Online.Enable = false;
             var beforeInitialization = SongStorage.Collections;
             var countBeforeInitialization = SongStorage.TotalChartCount;
             await SongStorage.InitAsync();

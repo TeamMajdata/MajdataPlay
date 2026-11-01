@@ -27,6 +27,9 @@ namespace MajdataPlay.Settings
     /// The options that changed category then move to their current category, which may belong to the other document.
     /// The rendering keys that older versions stored in the <c>Display</c> category, <c>RenderQuality</c>,
     /// <c>RenderScale</c>, <c>FPSLimit</c> and <c>VSync</c>, are converted to the <c>Rendering</c> category first.
+    /// The <c>Online</c> category of system-settings.json becomes the <c>Online</c> options of the <c>Network</c>
+    /// category, except its <c>UseProxy</c> and <c>Proxy</c> keys, which become the <c>Enable</c> and <c>Url</c> keys of
+    /// the <c>Proxy</c> options.
     /// </para>
     /// </remarks>
     internal static class SettingMigration
@@ -56,6 +59,21 @@ namespace MajdataPlay.Settings
         /// The legacy key of the volumes in the <c>Audio</c> category, which are now the <c>Volume</c> category.
         /// </summary>
         private const string LegacyVolumeKey = "Volume";
+
+        /// <summary>
+        /// The legacy category of the online and proxy options, which are now part of the <c>Network</c> category.
+        /// </summary>
+        private const string LegacyOnlineCategory = "Online";
+
+        /// <summary>
+        /// The legacy key of the proxy switch in the <c>Online</c> category, which is now <see cref="ProxyOptions.Enable"/>.
+        /// </summary>
+        private const string LegacyUseProxyKey = "UseProxy";
+
+        /// <summary>
+        /// The legacy key of the proxy URL in the <c>Online</c> category, which is now <see cref="ProxyOptions.Url"/>.
+        /// </summary>
+        private const string LegacyProxyKey = "Proxy";
 
         // 旧版 settings.json 中属于系统设置的分类名，是历史格式，不能跟随 SystemSetting 的属性重命名。
         /// <summary>
@@ -142,6 +160,7 @@ namespace MajdataPlay.Settings
             changed |= MoveLegacySystemCategories(user, system);
             changed |= MoveLegacyRenderingKeys(user, system, serializer);
             changed |= MoveLegacyVolume(user, system);
+            changed |= MoveLegacyOnlineCategory(system);
             foreach (var move in LegacyOptionMoves)
             {
                 changed |= MoveLegacyOptions(user, system, move);
@@ -283,6 +302,60 @@ namespace MajdataPlay.Settings
             CopyIfMissing(user, nameof(UserSetting.Volume), legacyVolume);
             MajDebug.LogInfo(nameof(SettingMigration), "Moved the legacy volume settings from Audio to Volume");
             return true;
+        }
+
+        /// <summary>
+        /// Moves the legacy <c>Online</c> category of system-settings.json into the <c>Network</c> category.
+        /// </summary>
+        /// <remarks>
+        /// The proxy keys become the <see cref="ProxyOptions"/> of <c>Network</c>, and every other key moves under the
+        /// same name to its <see cref="NetworkOptions.Online"/> options. Existing <c>Network</c> options keep their
+        /// values and only receive the keys they lack. Options that are not objects keep their value, which the
+        /// deserializer reports like any other invalid value, and the legacy values meant for them are dropped.
+        /// </remarks>
+        /// <param name="system">The root object of system-settings.json, which holds both categories.</param>
+        /// <returns>True when the legacy category was found and removed.</returns>
+        private static bool MoveLegacyOnlineCategory(JObject system)
+        {
+            if (!system.TryGetValue(LegacyOnlineCategory, out var legacyToken))
+            {
+                return false;
+            }
+            system.Remove(LegacyOnlineCategory);
+            if (legacyToken is JObject legacy && GetOrCreateObject(system, nameof(SystemSetting.Network)) is JObject network)
+            {
+                foreach (var option in legacy.Properties())
+                {
+                    var (options, key) = option.Name switch
+                    {
+                        LegacyUseProxyKey => (nameof(NetworkOptions.Proxy), nameof(ProxyOptions.Enable)),
+                        LegacyProxyKey => (nameof(NetworkOptions.Proxy), nameof(ProxyOptions.Url)),
+                        _ => (nameof(NetworkOptions.Online), option.Name)
+                    };
+                    if (GetOrCreateObject(network, options) is JObject target)
+                    {
+                        CopyIfMissing(target, key, option.Value);
+                    }
+                }
+            }
+            MajDebug.LogInfo(nameof(SettingMigration), "Moved the legacy Online settings to Network");
+            return true;
+        }
+
+        /// <summary>
+        /// Gets the object stored under a key, creating an empty one when the key is missing.
+        /// </summary>
+        /// <param name="parent">The object holding the key.</param>
+        /// <param name="key">The key of the object.</param>
+        /// <returns>The object; null when the key holds a value that is not an object.</returns>
+        private static JObject? GetOrCreateObject(JObject parent, string key)
+        {
+            if (!parent.TryGetValue(key, out var token))
+            {
+                token = new JObject();
+                parent[key] = token;
+            }
+            return token as JObject;
         }
 
         /// <summary>

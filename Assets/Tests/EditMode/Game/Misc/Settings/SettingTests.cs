@@ -65,7 +65,10 @@ namespace MajdataPlay.Tests.Game.Misc.Settings
             Assert.That(system.Rendering.DisplayRuntimeInfo, Is.True);
             Assert.That(system.Audio.Bass.BufferLengthMs, Is.EqualTo(1000));
             Assert.That(system.Debug.DebugLevel, Is.EqualTo(LogLevel.Info));
-            Assert.That(system.Online.Enable, Is.False);
+            Assert.That(system.Network.Online.Enable, Is.False);
+            Assert.That(system.Network.Online.Machine.Name, Is.EqualTo("MajdataPlay Client"));
+            Assert.That(system.Network.Proxy.Enable, Is.True);
+            Assert.That(system.Network.Proxy.Url, Is.Empty);
             Assert.That(system.Mod.IsAnyModActive(), Is.False);
 #if UNITY_ANDROID || UNITY_IOS
             Assert.That(user.Game.GameplaySubScreenClickBehavior, Is.EqualTo(GameplaySubScreenClickBehaviorOption.TrackSkip_1_Sec_Delay));
@@ -85,10 +88,10 @@ namespace MajdataPlay.Tests.Game.Misc.Settings
             Assert.That(system.Debug.TapPoolCapacity, Is.EqualTo(96));
 #endif
 #if UNITY_IOS
-            Assert.That(system.Online.ApiEndpoints, Is.Empty);
+            Assert.That(system.Network.Online.ApiEndpoints, Is.Empty);
 #else
-            Assert.That(system.Online.ApiEndpoints, Has.Length.EqualTo(1));
-            Assert.That(system.Online.ApiEndpoints[0].Name, Is.EqualTo("MajdataNET"));
+            Assert.That(system.Network.Online.ApiEndpoints, Has.Length.EqualTo(1));
+            Assert.That(system.Network.Online.ApiEndpoints[0].Name, Is.EqualTo("MajdataNET"));
 #endif
 #if UNITY_STANDALONE
             Assert.That(system.Rendering.Resolution, Is.EqualTo("1080x1920"));
@@ -123,6 +126,7 @@ namespace MajdataPlay.Tests.Game.Misc.Settings
             system.Common.RecordMode = RecordModeOption.FFmpeg;
             system.Rendering.RenderQuality = RenderingQualityOption.Beautiful;
             system.Rendering.FPSLimit = 144;
+            system.Network.Online.Enable = true;
             system.Mod.AllBreak = true;
 
             var userJson = Write(user);
@@ -134,7 +138,7 @@ namespace MajdataPlay.Tests.Game.Misc.Settings
             Assert.That(parsedUser.Properties().Select(category => category.Name),
                 Is.EqualTo(new[] { "Game", "Judge", "Display", "Volume", "Touch" }));
             Assert.That(parsedSystem.Properties().Select(category => category.Name),
-                Is.EqualTo(new[] { "Common", "Rendering", "Audio", "Encoding", "Decoding", "Debug", "Online", "IO" }));
+                Is.EqualTo(new[] { "Common", "Rendering", "Audio", "Encoding", "Decoding", "Debug", "Network", "IO" }));
             Assert.That(((JObject)parsedSystem["Audio"]!).ContainsKey("Volume"), Is.False);
             Assert.That(parsedSystem["Rendering"]!["RenderQuality"]!.Value<string>(), Is.EqualTo("Beautiful"));
             Assert.That(restoredUser.Game.TapSpeed, Is.EqualTo(9.25f));
@@ -147,6 +151,11 @@ namespace MajdataPlay.Tests.Game.Misc.Settings
             Assert.That(restoredSystem.Rendering.RenderQuality, Is.EqualTo(RenderingQualityOption.Beautiful));
             Assert.That(restoredSystem.Rendering.AntiAliasing, Is.EqualTo(RenderingAntialiasingOption.MSAA4x));
             Assert.That(restoredSystem.Rendering.FPSLimit, Is.EqualTo(144));
+#if UNITY_IOS
+            Assert.That(restoredSystem.Network.Online.Enable, Is.False, "the iOS settings app owns the switch");
+#else
+            Assert.That(restoredSystem.Network.Online.Enable, Is.True);
+#endif
             Assert.That(restoredSystem.Mod.AllBreak, Is.False);
         }
 
@@ -231,10 +240,10 @@ namespace MajdataPlay.Tests.Game.Misc.Settings
         public void Read_KeepsDateLikeStrings()
         {
             var (user, system) = Read("{\"Display\":{\"Skin\":\"2024-01-02T03:04:05Z\"}}",
-                "{\"Online\":{\"ApiEndpoints\":[{\"Name\":\"n\",\"Url\":\"https://example.invalid/\",\"Password\":\"2024-01-02T03:04:05Z\"}]}}");
+                "{\"Network\":{\"Online\":{\"ApiEndpoints\":[{\"Name\":\"n\",\"Url\":\"https://example.invalid/\",\"Password\":\"2024-01-02T03:04:05Z\"}]}}}");
 
             Assert.That(user.Display.Skin, Is.EqualTo("2024-01-02T03:04:05Z"));
-            Assert.That(system.Online.ApiEndpoints[0].Password, Is.EqualTo("2024-01-02T03:04:05Z"));
+            Assert.That(system.Network.Online.ApiEndpoints[0].Password, Is.EqualTo("2024-01-02T03:04:05Z"));
         }
 
         /// <summary>Checks that the reader rejects what the plain deserializer rejected, and returns null for the null literal.</summary>

@@ -296,7 +296,7 @@ namespace MajdataPlay
                         && collection.Type == ChartStorageType.List)
                     .ToList();
                 collections.AddRange(onlineCollections);
-                var onlinePlaylists = MajEnv.SystemSettings.Online.Enable
+                var onlinePlaylists = MajEnv.SystemSettings.Network.Online.Enable
                     ? Collections.OfType<OnlineSongCollection>()
                         .Where(collection => collection.Type is ChartStorageType.PlayList or ChartStorageType.Dan)
                         .ToArray()
@@ -421,7 +421,7 @@ namespace MajdataPlay
             await s_refreshLock.WaitAsync(cancellationToken).ConfigureAwait(false);
             try
             {
-                if (!MajEnv.SystemSettings.Online.Enable)
+                if (!MajEnv.SystemSettings.Network.Online.Enable)
                 {
                     return true;
                 }
@@ -493,7 +493,7 @@ namespace MajdataPlay
         /// <returns>A task which completes after the folders are published and obsolete charts are released.</returns>
         internal static async Task RefreshRecommendAsync(IProgress<string>? progressReporter = null)
         {
-            if (!MajEnv.SystemSettings.Online.Enable)
+            if (!MajEnv.SystemSettings.Network.Online.Enable)
             {
                 return;
             }
@@ -710,7 +710,7 @@ namespace MajdataPlay
         /// <returns>The replacement library including the rebuilt folders, which are dropped while online functions are disabled.</returns>
         private static StorageSnapshot AddRecommendCollections(StorageSnapshot snapshot)
         {
-            if (!MajEnv.SystemSettings.Online.Enable)
+            if (!MajEnv.SystemSettings.Network.Online.Enable)
             {
                 return snapshot;
             }
@@ -826,7 +826,7 @@ namespace MajdataPlay
             try
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                if (!MajEnv.SystemSettings.Online.Enable)
+                if (!MajEnv.SystemSettings.Network.Online.Enable)
                 {
                     MajDebug.LogInfo(nameof(SongStorage), "[MaiChart Refresh]Online function was disabled, skipping.");
                     return collections;

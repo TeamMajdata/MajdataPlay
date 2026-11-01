@@ -140,11 +140,6 @@ namespace MajdataPlay
         /// <summary>Gets the directory receiving recorded audio and video files.</summary>
         public static StorageDirectory RecordOutputsDirectory { get; private set; } = null!;
         public static bool IsLowMemoryDevice { get; private set; }
-        public static MachineInfo MachineInfo { get; private set; } = new()
-        {
-            Name = "MajdataPlay Client",
-            Description = "MajdataPlay Client QR Code Authentication",
-        };
         public static Random Randomizer
         {
             get
@@ -225,8 +220,10 @@ namespace MajdataPlay
         private const string RuntimeDirectoryName = "Runtime";
         /// <summary>The legacy runtime configuration file name inside <see cref="RuntimeDirectory"/>, imported into the runtime database.</summary>
         private const string RuntimeConfigFileName = "config.json";
-        /// <summary>The machine description file name inside <see cref="RootDirectory"/>.</summary>
+        /// <summary>The legacy machine description file name inside <see cref="RootDirectory"/>, imported into <see cref="OnlineOptions.Machine"/>.</summary>
         private const string MachineDescriptionFileName = "machine_description.json";
+        /// <summary>The JSON path of <see cref="OnlineOptions.Machine"/> inside system-settings.json.</summary>
+        private const string MachineSettingPath = nameof(SystemSetting.Network) + "." + nameof(NetworkOptions.Online) + "." + nameof(OnlineOptions.Machine);
         /// <summary>The current runtime log file name inside <see cref="LogsDirectory"/>.</summary>
         private const string LogFileName = "MajPlayRuntime.log";
         /// <summary>The rotated previous runtime log file name inside <see cref="LogsDirectory"/>.</summary>
@@ -292,7 +289,6 @@ namespace MajdataPlay
             InitNetwork();
             InitRuntimeConfig();
             InitOnlineEndpoints();
-            InitOnlineMachineInfo();
             InitOthers();
         }
 
@@ -511,7 +507,8 @@ namespace MajdataPlay
         /// <remarks>
         /// An unreadable file falls back to the defaults of its settings. The system settings of an older settings.json
         /// are moved to system-settings.json, which is written at once; settings.json itself keeps its legacy layout until
-        /// the next save.
+        /// the next save. A legacy machine_description.json is imported into the system settings by
+        /// <see cref="ImportLegacyMachineDescription"/>.
         /// </remarks>
         /// <exception cref="UnauthorizedAccessException">Reading or creating a settings file was denied.</exception>
         /// <exception cref="IOException">A settings file could not be read, created, or written.</exception>
@@ -553,8 +550,55 @@ namespace MajdataPlay
 #endif
             UserSettings.Judge.InnerJudgeDistance = UserSettings.Judge.InnerJudgeDistance.Clamp(0, 1);
             UserSettings.Judge.OuterJudgeDistance = UserSettings.Judge.OuterJudgeDistance.Clamp(0, 1);
+            ImportLegacyMachineDescription(systemDocument);
 
             MajDebug.MinLogLevel = SystemSettings.Debug.DebugLevel;
+        }
+
+        /// <summary>Imports a legacy machine_description.json into <see cref="OnlineOptions.Machine"/> of <see cref="SystemSettings"/>.</summary>
+        /// <remarks>
+        /// The file is only imported while system-settings.json holds no machine description, which the current layout
+        /// always writes. The imported settings are written to system-settings.json at once and the file is renamed to
+        /// machine_description.json.bak, so system-settings.json stays the only source afterwards. An unreadable file is
+        /// logged and left in place, and the default machine description is kept.
+        /// </remarks>
+        /// <param name="systemDocument">The upgraded document of system-settings.json that <see cref="SystemSettings"/> was read from.</param>
+        /// <exception cref="UnauthorizedAccessException">Reading the file or writing system-settings.json was denied.</exception>
+        /// <exception cref="IOException">The file could not be read, or system-settings.json could not be written.</exception>
+        private static void ImportLegacyMachineDescription(JObject systemDocument)
+        {
+            var legacyFile = RootDirectory.FindFile(MachineDescriptionFileName);
+            if (legacyFile is null || systemDocument.SelectToken(MachineSettingPath) is not null)
+            {
+                return;
+            }
+            var json = legacyFile.ReadAllText();
+            if (!Serializer.Json.TryDeserialize(json, out MachineInfo? machine, out var e, UserJsonReaderOption) || machine is null)
+            {
+                MajDebug.LogError(nameof(MajEnv), $"Failed to read the machine description from {MachineDescriptionFileName}\nException: {e}");
+                return;
+            }
+            SystemSettings.Network.Online.Machine = machine;
+            WriteText(SystemSettingsPath, Serializer.Json.Serialize(SystemSettings, UserJsonReaderOption));
+            BackupLegacyMachineDescription(legacyFile);
+        }
+
+        /// <summary>Renames an imported legacy machine_description.json to machine_description.json.bak, replacing an older backup.</summary>
+        /// <param name="legacyFile">The imported legacy machine description file.</param>
+        /// <remarks>A failure is logged only; system-settings.json already holds the machine description, so the file is no longer read.</remarks>
+        private static void BackupLegacyMachineDescription(StorageFile legacyFile)
+        {
+            try
+            {
+                var backupName = MachineDescriptionFileName + ".bak";
+                RootDirectory.FindFile(backupName)?.Delete();
+                legacyFile.Rename(backupName);
+                MajDebug.LogInfo(nameof(MajEnv), $"Migrated the machine description from {MachineDescriptionFileName} to {SystemSettingsFileName}, old file backed up.");
+            }
+            catch (Exception e)
+            {
+                MajDebug.LogError(nameof(MajEnv), $"Failed to back up the legacy machine description file: {e.Message}");
+            }
         }
 
         /// <summary>Reads the JSON document of a settings file, backing up a file that does not hold a JSON object.</summary>
@@ -703,21 +747,20 @@ namespace MajdataPlay
             }
 
             SystemSettings.Debug.NoteFolding = IOSNativeSettings.DebugNoteFolding;
-            SystemSettings.Online.Enable = IOSNativeSettings.Online;
+            SystemSettings.Network.Online.Enable = IOSNativeSettings.Online;
 
             MajDebug.MinLogLevel = SystemSettings.Debug.DebugLevel;
 #endif
         }
         private static void InitNetwork()
         {
-#if UNITY_STANDALONE
-            if(SystemSettings.Online.UseProxy)
+            if(SystemSettings.Network.Proxy.Enable)
             {
-                if(!string.IsNullOrEmpty(SystemSettings.Online.Proxy))
+                if(!string.IsNullOrEmpty(SystemSettings.Network.Proxy.Url))
                 {
-                    if(!Uri.TryCreate(SystemSettings.Online.Proxy, UriKind.Absolute, out var proxyUri))
+                    if(!Uri.TryCreate(SystemSettings.Network.Proxy.Url, UriKind.Absolute, out var proxyUri))
                     {
-                        MajDebug.LogError($"Invalid proxy URL: {SystemSettings.Online.Proxy}");
+                        MajDebug.LogError($"Invalid proxy URL: {SystemSettings.Network.Proxy.Url}");
                         return;
                     }
                     switch (proxyUri.Scheme)
@@ -753,7 +796,6 @@ namespace MajdataPlay
                 s_httpClientHandler.UseProxy = false;
                 //_httpClientHandler.Proxy = null;
             }
-#endif
         }
         private static void InitOnlineEndpoints()
         {
@@ -761,7 +803,7 @@ namespace MajdataPlay
             using (var buffer = new PooledList<ApiEndpoint>())
             {
                 using var apiEndpoints = new PooledList<ApiEndpoint>();
-                apiEndpoints.AddRange(SystemSettings.Online.ApiEndpoints.AsSpan());
+                apiEndpoints.AddRange(SystemSettings.Network.Online.ApiEndpoints.AsSpan());
 
 #if UNITY_IOS && !UNITY_EDITOR
                 if (IOSNativeSettings.MajnetEnabled)
@@ -841,30 +883,6 @@ namespace MajdataPlay
                                      .Select(x => x.FirstOrDefault())
                                      .Where(x => x is not null)
                                      .ToArray();
-            }
-        }
-        private static void InitOnlineMachineInfo()
-        {
-            var machineDescriptionFile = RootDirectory.FindFile(MachineDescriptionFileName);
-
-            if (machineDescriptionFile is not null)
-            {
-                var js = machineDescriptionFile.ReadAllText();
-                MachineInfo? machineInfo;
-
-                if (!Serializer.Json.TryDeserialize(js, out machineInfo, out var e, UserJsonReaderOption) || machineInfo is null)
-                {
-                    MajDebug.LogError($"Failed to read machine description from file\nException: {e}");
-                }
-                else
-                {
-                    MachineInfo = machineInfo;
-                }
-            }
-            else
-            {
-                var json = Serializer.Json.Serialize(MachineInfo, UserJsonReaderOption);
-                WriteText(RootDirectory.CreateFile(MachineDescriptionFileName, JsonMimeType), json);
             }
         }
         /// <summary>Loads <see cref="RuntimeConfig"/> from the runtime database, importing a legacy config.json the first time.</summary>

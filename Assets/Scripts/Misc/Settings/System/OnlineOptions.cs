@@ -1,4 +1,7 @@
 using MajdataPlay.Net;
+#if UNITY_IOS
+using Newtonsoft.Json;
+#endif
 #nullable enable
 namespace MajdataPlay.Settings
 {
@@ -8,12 +11,6 @@ namespace MajdataPlay.Settings
         [JsonIgnore]
 #endif
         public bool Enable { get; set; } = false;
-#if UNITY_STANDALONE
-
-        public bool UseProxy { get; init; } = true;
-
-        public string Proxy { get; init; } = string.Empty;
-#endif
 
         public ApiEndpoint[] ApiEndpoints { get; set; } = new ApiEndpoint[]
         {
@@ -26,6 +23,12 @@ namespace MajdataPlay.Settings
                 Password = "YourPassword"
             }
 #endif
+        };
+
+        public MachineInfo Machine { get; set; } = new()
+        {
+            Name = "MajdataPlay Client",
+            Description = "MajdataPlay Client QR Code Authentication"
         };
     }
 }

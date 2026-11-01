@@ -22,7 +22,7 @@ namespace MajdataPlay.Settings
         public DebugOptions Debug { get; init; } = new();
 
         [HideInSettingUI]
-        public OnlineOptions Online { get; init; } = new();
+        public NetworkOptions Network { get; init; } = new();
 
         [HideInSettingUI]
         public IOOptions IO { get; init; } = new();

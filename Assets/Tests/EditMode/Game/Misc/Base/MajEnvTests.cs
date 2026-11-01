@@ -176,6 +176,8 @@ namespace MajdataPlay.Tests.Game.Misc.Base
             Assert.That(userJson["Rendering"], Is.Null);
             Assert.That(systemJson["Rendering"], Is.Not.Null);
             Assert.That(systemJson["Game"], Is.Null);
+            Assert.That(systemJson["Network"]!["Online"]!["Machine"]!["Name"]!.Value<string>(), Is.EqualTo("MajdataPlay Client"));
+            Assert.That(_root.FindFile("machine_description.json"), Is.Null);
             Assert.That(MajEnv.UserSettings.Judge.InnerJudgeDistance, Is.EqualTo(1f));
             Assert.That(MajDebug.MinLogLevel, Is.EqualTo(MajEnv.SystemSettings.Debug.DebugLevel));
         }
@@ -436,30 +438,50 @@ namespace MajdataPlay.Tests.Game.Misc.Base
             Assert.That(MajEnv.RuntimeDirectory.FindFile("config.json.bak")!.ReadAllText(), Is.EqualTo("not json"));
         }
 
-        /// <summary>Checks that the machine description is created with defaults, loaded, and kept when unreadable.</summary>
+        /// <summary>
+        /// Checks that a legacy machine_description.json is imported into the system settings, written to
+        /// system-settings.json and backed up, and that the machine description system-settings.json then holds wins.
+        /// </summary>
         [Test]
-        public void InitOnlineMachineInfo_CreatesAndLoads()
+        public void InitSettings_ImportsLegacyMachineDescription()
         {
-            Step("InitOnlineMachineInfo");
-            var file = _root.FindFile("machine_description.json");
-            Assert.That(file, Is.Not.Null);
-            Assert.That(JObject.Parse(file!.ReadAllText())["Name"]!.Value<string>(), Is.EqualTo(MajEnv.MachineInfo.Name));
+            _root.CreateFile("machine_description.json").WriteAllText("{\"Name\":\"Cabinet\",\"Description\":\"Corner\"}");
 
-            file.WriteAllText("{\"Name\":\"Cabinet\",\"Description\":\"Corner\"}");
-            Step("InitOnlineMachineInfo");
-            Assert.That(MajEnv.MachineInfo.Name, Is.EqualTo("Cabinet"));
-            Assert.That(MajEnv.MachineInfo.Description, Is.EqualTo("Corner"));
+            Step("InitSettings");
 
-            file.WriteAllText("[broken");
-            Step("InitOnlineMachineInfo");
-            Assert.That(MajEnv.MachineInfo.Name, Is.EqualTo("Cabinet"));
+            var machine = MajEnv.SystemSettings.Network.Online.Machine;
+            var system = JObject.Parse(_root.FindFile("system-settings.json")!.ReadAllText());
+            Assert.That(machine.Name, Is.EqualTo("Cabinet"));
+            Assert.That(machine.Description, Is.EqualTo("Corner"));
+            Assert.That(system["Network"]!["Online"]!["Machine"]!["Name"]!.Value<string>(), Is.EqualTo("Cabinet"));
+            Assert.That(_root.FindFile("machine_description.json"), Is.Null);
+            Assert.That(_root.FindFile("machine_description.json.bak")!.ReadAllText(), Does.Contain("Cabinet"));
+
+            _root.CreateFile("machine_description.json").WriteAllText("{\"Name\":\"Ignored\"}");
+            Step("InitSettings");
+
+            Assert.That(MajEnv.SystemSettings.Network.Online.Machine.Name, Is.EqualTo("Cabinet"));
+            Assert.That(_root.FindFile("machine_description.json"), Is.Not.Null);
+        }
+
+        /// <summary>Checks that an unreadable legacy machine_description.json keeps the default machine description and stays in place.</summary>
+        [Test]
+        public void InitSettings_UnreadableMachineDescriptionKeepsDefaults()
+        {
+            _root.CreateFile("machine_description.json").WriteAllText("[broken");
+
+            Step("InitSettings");
+
+            Assert.That(MajEnv.SystemSettings.Network.Online.Machine.Name, Is.EqualTo("MajdataPlay Client"));
+            Assert.That(_root.FindFile("machine_description.json")!.ReadAllText(), Is.EqualTo("[broken"));
+            Assert.That(_root.FindFile("machine_description.json.bak"), Is.Null);
         }
 
         /// <summary>Checks that endpoints get a trailing slash, keep their credentials and are deduplicated by URL.</summary>
         [Test]
         public void InitOnlineEndpoints_NormalizesEndpoints()
         {
-            MajEnv.SystemSettings.Online.ApiEndpoints = new[]
+            MajEnv.SystemSettings.Network.Online.ApiEndpoints = new[]
             {
                 new ApiEndpoint { Name = "Main", Url = new Uri("https://example.invalid/api"), Username = "u", Password = "p" },
                 new ApiEndpoint { Name = "Duplicate", Url = new Uri("https://example.invalid/api/") },
@@ -478,7 +500,6 @@ namespace MajdataPlay.Tests.Game.Misc.Base
             Assert.That(endpoints[1].RuntimeConfig.AuthUsername, Is.EqualTo("x"));
         }
 
-#if UNITY_STANDALONE
         /// <summary>Checks the proxy configuration for disabled, invalid, unsupported and credentialed proxies.</summary>
         [Test]
         public void InitNetwork_ConfiguresProxy()
@@ -520,11 +541,9 @@ namespace MajdataPlay.Tests.Game.Misc.Base
         /// <param name="proxy">The proxy URL.</param>
         private static void ConfigureProxy(bool useProxy, string proxy)
         {
-            var online = MajEnv.SystemSettings.Online;
-            PrivateMember.SetProperty(online, nameof(OnlineOptions.UseProxy), useProxy);
-            PrivateMember.SetProperty(online, nameof(OnlineOptions.Proxy), proxy);
+            var options = new ProxyOptions { Enable = useProxy, Url = proxy };
+            PrivateMember.SetProperty(MajEnv.SystemSettings.Network, nameof(NetworkOptions.Proxy), options);
         }
-#endif
 
         /// <summary>Checks that saving writes the user and system settings and runtime configuration, recreating deleted files.</summary>
         [Test]

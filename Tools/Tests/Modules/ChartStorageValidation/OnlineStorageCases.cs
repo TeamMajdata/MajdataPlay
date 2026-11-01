@@ -112,7 +112,7 @@ namespace MajdataPlay.Tests.ChartStorageValidation
             var injected = SongStorage.Collections.Concat(new SongCollection[] { retained, oldPlaylist, oldCourse, failedCourse }).ToArray();
             var collectionsProperty = typeof(SongStorage).GetProperty(nameof(SongStorage.Collections), BindingFlags.Public | BindingFlags.Static)!;
             collectionsProperty.SetValue(null, injected);
-            MajEnv.SystemSettings.Online.Enable = true;
+            MajEnv.SystemSettings.Network.Online.Enable = true;
             MajEnv.ApiEndpoints = new[] { endpoint, failingEndpoint };
             try
             {
@@ -219,7 +219,7 @@ namespace MajdataPlay.Tests.ChartStorageValidation
             {
                 Online.FavoritesHandler = null;
                 MajEnv.ApiEndpoints = originalEndpoints;
-                MajEnv.SystemSettings.Online.Enable = false;
+                MajEnv.SystemSettings.Network.Online.Enable = false;
             }
         }
     }

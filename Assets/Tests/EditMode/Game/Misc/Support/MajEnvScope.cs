@@ -38,7 +38,6 @@ namespace MajdataPlay.Tests.Game.Misc.Support
             nameof(MajEnv.SystemSettings),
             nameof(MajEnv.RuntimeConfig),
             nameof(MajEnv.ApiEndpoints),
-            nameof(MajEnv.MachineInfo),
         };
 
         /// <summary>The captured property values keyed by property name.</summary>
