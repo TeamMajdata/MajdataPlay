@@ -190,7 +190,7 @@ namespace MajdataPlay.Tests.Game.Misc.Settings
         public void Read_LegacySettingsKeepTheirMovedValues()
         {
             var (user, system) = Read(
-                "{\"Game\":{\"TapSpeed\":8.5,\"BGInfo\":\"None\",\"TopInfo\":\"Judge\",\"EnableJudgeTimingGauge\":true}," +
+                "{\"Game\":{\"TapSpeed\":8.5,\"BGInfo\":\"None\",\"TopInfo\":\"Judge\",\"EnableJudgeTimingGauge\":true,\"RecordMode\":\"FFmpeg\"}," +
                 "\"Display\":{\"Skin\":\"custom\",\"SkipVideoDownload\":true,\"FastLateType\":\"All\",\"InnerJudgeDistance\":0.5," +
                 "\"MainScreenTransform\":true,\"MainScreenScale\":0.8,\"GameplayScreenRotationAngle\":\"_180\"}," +
                 "\"Audio\":{\"ForceMono\":true,\"Volume\":{\"Global\":0.9,\"Tap\":0.1}}," +
@@ -213,6 +213,7 @@ namespace MajdataPlay.Tests.Game.Misc.Settings
             Assert.That(user.Volume.Tap, Is.EqualTo(0.1f));
             Assert.That(user.Touch.TouchRadiusAdjust, Is.EqualTo(0.3f));
             Assert.That(user.Touch.TouchCAreaExtraRadius, Is.EqualTo(0.5f));
+            Assert.That(system.Common.RecordMode, Is.EqualTo(RecordModeOption.FFmpeg));
             Assert.That(system.Audio.ForceMono, Is.True);
             Assert.That(system.Debug.DebugLevel, Is.EqualTo(LogLevel.Warning));
             Assert.That(system.Rendering.MainScreenTransform, Is.True);
@@ -226,13 +227,14 @@ namespace MajdataPlay.Tests.Game.Misc.Settings
         public void Read_CurrentOptionsWinOverLegacyOptions()
         {
             var (user, system) = Read(
-                "{\"Game\":{\"BGInfo\":\"None\"},\"Display\":{\"BGInfo\":\"Achievement\",\"MainScreenScale\":0.8},\"Volume\":{\"Global\":0.4}," +
-                "\"Audio\":{\"Volume\":{\"Global\":0.9}},\"Debug\":{\"OffsetUnit\":\"Second\"}}",
-                "{\"Rendering\":{\"MainScreenScale\":0.6}}");
+                "{\"Game\":{\"BGInfo\":\"None\",\"RecordMode\":\"OBSTrigger\"},\"Display\":{\"BGInfo\":\"Achievement\",\"MainScreenScale\":0.8}," +
+                "\"Volume\":{\"Global\":0.4},\"Audio\":{\"Volume\":{\"Global\":0.9}},\"Debug\":{\"OffsetUnit\":\"Second\"}}",
+                "{\"Common\":{\"RecordMode\":\"FFmpeg\"},\"Rendering\":{\"MainScreenScale\":0.6}}");
 
             Assert.That(user.Display.BGInfo, Is.EqualTo(BGInfoOption.Achievement));
             Assert.That(user.Volume.Global, Is.EqualTo(0.4f));
             Assert.That(user.Judge.OffsetUnit, Is.EqualTo(OffsetUnitOption.Second));
+            Assert.That(system.Common.RecordMode, Is.EqualTo(RecordModeOption.FFmpeg));
             Assert.That(system.Rendering.MainScreenScale, Is.EqualTo(0.6f));
         }
 

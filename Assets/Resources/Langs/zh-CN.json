@@ -4,6 +4,7 @@
   "Translations": {
     "MAJSETTING_CATEGORY_Audio": "音频设定",
     "MAJSETTING_CATEGORY_ChartSetting": "谱面设置",
+    "MAJSETTING_CATEGORY_Common": "通用设定",
     "MAJSETTING_CATEGORY_Debug": "调试",
     "MAJSETTING_CATEGORY_Decoding": "解码设定",
     "MAJSETTING_CATEGORY_Display": "显示设定",

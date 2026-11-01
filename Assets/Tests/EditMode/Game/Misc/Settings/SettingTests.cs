@@ -60,6 +60,7 @@ namespace MajdataPlay.Tests.Game.Misc.Settings
             Assert.That(user.Volume.Global, Is.EqualTo(0.3f));
             Assert.That(user.Touch.TouchSimulationRadius, Is.EqualTo(0.5f));
             Assert.That(user.Touch.TouchCAreaExtraRadius, Is.EqualTo(0.25f));
+            Assert.That(system.Common.RecordMode, Is.EqualTo(RecordModeOption.Disable));
             Assert.That(system.Rendering.RenderQuality, Is.EqualTo(RenderingQualityOption.Performance));
             Assert.That(system.Rendering.DisplayRuntimeInfo, Is.True);
             Assert.That(system.Audio.Bass.BufferLengthMs, Is.EqualTo(1000));
@@ -119,6 +120,7 @@ namespace MajdataPlay.Tests.Game.Misc.Settings
             user.Display.Skin = "custom";
             user.Display.SensorOpacity = 40;
             user.Touch.TouchRadiusAdjust = 0.35f;
+            system.Common.RecordMode = RecordModeOption.FFmpeg;
             system.Rendering.RenderQuality = RenderingQualityOption.Beautiful;
             system.Rendering.FPSLimit = 144;
             system.Mod.AllBreak = true;
@@ -132,7 +134,7 @@ namespace MajdataPlay.Tests.Game.Misc.Settings
             Assert.That(parsedUser.Properties().Select(category => category.Name),
                 Is.EqualTo(new[] { "Game", "Judge", "Display", "Volume", "Touch" }));
             Assert.That(parsedSystem.Properties().Select(category => category.Name),
-                Is.EqualTo(new[] { "Rendering", "Audio", "Encoding", "Decoding", "Debug", "Online", "IO" }));
+                Is.EqualTo(new[] { "Common", "Rendering", "Audio", "Encoding", "Decoding", "Debug", "Online", "IO" }));
             Assert.That(((JObject)parsedSystem["Audio"]!).ContainsKey("Volume"), Is.False);
             Assert.That(parsedSystem["Rendering"]!["RenderQuality"]!.Value<string>(), Is.EqualTo("Beautiful"));
             Assert.That(restoredUser.Game.TapSpeed, Is.EqualTo(9.25f));
@@ -141,6 +143,7 @@ namespace MajdataPlay.Tests.Game.Misc.Settings
             Assert.That(restoredUser.Display.Skin, Is.EqualTo("custom"));
             Assert.That(restoredUser.Display.SensorOpacity, Is.EqualTo(40));
             Assert.That(restoredUser.Touch.TouchRadiusAdjust, Is.EqualTo(0.35f));
+            Assert.That(restoredSystem.Common.RecordMode, Is.EqualTo(RecordModeOption.FFmpeg));
             Assert.That(restoredSystem.Rendering.RenderQuality, Is.EqualTo(RenderingQualityOption.Beautiful));
             Assert.That(restoredSystem.Rendering.AntiAliasing, Is.EqualTo(RenderingAntialiasingOption.MSAA4x));
             Assert.That(restoredSystem.Rendering.FPSLimit, Is.EqualTo(144));

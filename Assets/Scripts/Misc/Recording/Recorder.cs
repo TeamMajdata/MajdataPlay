@@ -31,7 +31,7 @@ namespace MajdataPlay.Recording
         {
             get
             {
-                return MajEnv.UserSettings.Game.RecordMode != RecordModeOption.Disable;
+                return MajEnv.SystemSettings.Common.RecordMode != RecordModeOption.Disable;
             }
         }
 
@@ -45,12 +45,12 @@ namespace MajdataPlay.Recording
                 return;
             }
             s_isInited = true;
-            if ((PlatformInfo.IsAndroid || PlatformInfo.IsIOS) && MajEnv.UserSettings.Game.RecordMode == RecordModeOption.OBSTrigger)
+            if ((PlatformInfo.IsAndroid || PlatformInfo.IsIOS) && MajEnv.SystemSettings.Common.RecordMode == RecordModeOption.OBSTrigger)
             {
                 MajDebug.LogWarning(nameof(Recorder), "OBS Trigger recording is not supported on mobile platforms.");
                 return;
             }
-            switch (MajEnv.UserSettings.Game.RecordMode)
+            switch (MajEnv.SystemSettings.Common.RecordMode)
             {
                 case RecordModeOption.OBSTrigger:
                     s_recorder = new OBSRecorder();
@@ -74,7 +74,7 @@ namespace MajdataPlay.Recording
                 case RecordModeOption.Disable:
                     return;
                 default:
-                    MajDebug.LogError(nameof(Recorder), "Unsupported record mode: " + MajEnv.UserSettings.Game.RecordMode);
+                    MajDebug.LogError(nameof(Recorder), "Unsupported record mode: " + MajEnv.SystemSettings.Common.RecordMode);
                     break;
             }
             GameManager.OnAppQuit += OnApplicationQuit;

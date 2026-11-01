@@ -368,9 +368,9 @@ namespace MajdataPlay.Tests.Game.Misc.Settings
             Assert.Throws<ArgumentNullException>(() => SettingReflectionCache.GetConditionOwnerType(null!));
         }
 
-        /// <summary>Checks that the system Encoding menu is listed only while the user records with FFmpeg.</summary>
+        /// <summary>Checks that the Encoding menu is listed only while the common record mode is FFmpeg.</summary>
         [Test]
-        public void EncodingMenu_FollowsTheUserRecordMode()
+        public void EncodingMenu_FollowsTheRecordMode()
         {
             var encoding = SettingReflectionCache.GetProperty(typeof(SystemSetting), nameof(SystemSetting.Encoding));
             var visibility = SettingReflectionCache.GetVisibility(encoding);
@@ -378,7 +378,7 @@ namespace MajdataPlay.Tests.Game.Misc.Settings
 
             Assert.That(visibility, Is.Not.SameAs(SettingVisibility.Always));
             Assert.That(visibility.IsVisible(root), Is.False);
-            root.User.Game.RecordMode = RecordModeOption.FFmpeg;
+            root.System.Common.RecordMode = RecordModeOption.FFmpeg;
             Assert.That(visibility.IsVisible(root), Is.True);
         }
     }

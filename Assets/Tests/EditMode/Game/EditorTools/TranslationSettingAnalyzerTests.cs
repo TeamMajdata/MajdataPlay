@@ -328,7 +328,7 @@ namespace MajdataPlay.Tests.Game.EditorTools
             PrivateMember.InvokeStatic(typeof(TranslationSettingAnalyzer), "CollectCategories", typeof(SystemSetting), typeof(SettingRoot), keys, fromRoot);
             PrivateMember.InvokeStatic(typeof(TranslationSettingAnalyzer), "CollectCategories", typeof(SystemSetting), typeof(SystemSetting), keys, fromSystem);
 
-            Assert.That(keys["MAJSETTING_CATEGORY_Encoding"].Any(source => source.Contains("[shown when User.Game.RecordMode = FFmpeg]")), Is.True);
+            Assert.That(keys["MAJSETTING_CATEGORY_Encoding"].Any(source => source.Contains("[shown when System.Common.RecordMode = FFmpeg]")), Is.True);
             Assert.That(fromRoot.Any(diagnostic => diagnostic.Contains("ShowInSettingUIWhen path")), Is.False);
             Assert.That(fromSystem.Any(diagnostic => diagnostic.Contains("ShowInSettingUIWhen path")), Is.True);
         }

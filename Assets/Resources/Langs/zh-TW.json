@@ -59,6 +59,7 @@
     "MAJTEXT_COMPILING_SHADERS": "正在編譯著色器",
     "MAJSETTING_CATEGORY_Audio": "音訊設定",
     "MAJSETTING_CATEGORY_ChartSetting": "譜面設定",
+    "MAJSETTING_CATEGORY_Common": "通用設定",
     "MAJSETTING_CATEGORY_Debug": "除錯",
     "MAJSETTING_CATEGORY_Display": "顯示設定",
     "MAJSETTING_CATEGORY_Rendering": "渲染設定",

@@ -92,6 +92,7 @@ namespace MajdataPlay.Settings
         {
             new("Game", nameof(UserSetting.Display), "BGInfo", "SecondaryBGInfo", "SubScreenBGInfo", "TopInfo"),
             new("Game", nameof(UserSetting.Judge), "EnableJudgeTimingGauge"),
+            new("Game", nameof(SystemSetting.Common), "RecordMode"),
             new("Display", nameof(UserSetting.Game), "SkipVideoDownload"),
             new("Display", nameof(UserSetting.Judge), "DisplayCriticalPerfect", "DisplayBreakScore", "FastLateType",
                 "NoteJudgeType", "TouchJudgeType", "SlideJudgeType", "BreakJudgeType", "BreakFastLateType",

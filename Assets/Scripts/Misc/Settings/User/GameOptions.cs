@@ -54,8 +54,6 @@ namespace MajdataPlay.Settings
         public bool ButtonRingForTouch { get; set; } = false;
 #endif
 
-        public RecordModeOption RecordMode { get; set; } = RecordModeOption.Disable;
-
         [Step("1")]
         [Range("1", "5")]
         [UseTranslation(TranslationTarget.OptionValue)]

@@ -59,6 +59,7 @@
     "MAJTEXT_COMPILING_SHADERS": "Compiling shaders",
     "MAJSETTING_CATEGORY_Audio": "Audio Settings",
     "MAJSETTING_CATEGORY_ChartSetting": "Chart Settings",
+    "MAJSETTING_CATEGORY_Common": "General Settings",
     "MAJSETTING_CATEGORY_Debug": "Debug",
     "MAJSETTING_CATEGORY_Display": "Display Settings",
     "MAJSETTING_CATEGORY_Rendering": "Rendering Settings",

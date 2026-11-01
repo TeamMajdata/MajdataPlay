@@ -49,6 +49,7 @@
     "MAJSETTING_GENERAL_OPTION_S_Border": "ボーダー（SS）",
     "MAJSETTING_CATEGORY_Audio": "サウンド",
     "MAJSETTING_CATEGORY_ChartSetting": "譜面別設定",
+    "MAJSETTING_CATEGORY_Common": "共通設定",
     "MAJSETTING_CATEGORY_Debug": "デバッグ",
     "MAJSETTING_CATEGORY_Display": "表示",
     "MAJSETTING_CATEGORY_Rendering": "描画設定",

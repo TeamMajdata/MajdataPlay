@@ -7,8 +7,8 @@ namespace MajdataPlay.Settings
     /// </summary>
     /// <remarks>
     /// The categories of <see cref="UserSetting"/> and <see cref="SystemSetting"/> are the menus of the setting UI. The
-    /// member paths of <see cref="ShowInSettingUIWhenAttribute"/> on a menu start at this type, so a menu of one root
-    /// can depend on an option of the other, such as <c>"User.Game.RecordMode"</c>.
+    /// member paths of <see cref="ShowInSettingUIWhenAttribute"/> on a menu start at this type, so a menu can depend on
+    /// an option of either root, such as <c>"System.Common.RecordMode"</c>.
     /// </remarks>
     public sealed class SettingRoot
     {

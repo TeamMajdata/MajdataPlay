@@ -443,8 +443,8 @@ namespace MajdataPlay.Tests.Game.Scenes.PlayMode.SettingScene
             Assert.That(names, Is.EqualTo(new[]
             {
                 nameof(UserSetting.Game), nameof(UserSetting.Judge), nameof(UserSetting.Display), nameof(UserSetting.Volume),
-                nameof(UserSetting.Touch), nameof(SystemSetting.Rendering), nameof(SystemSetting.Mod),
-                nameof(SystemSetting.Encoding), nameof(SystemSetting.Decoding), nameof(SystemSetting.Debug)
+                nameof(UserSetting.Touch), nameof(SystemSetting.Common), nameof(SystemSetting.Rendering),
+                nameof(SystemSetting.Mod), nameof(SystemSetting.Encoding), nameof(SystemSetting.Decoding), nameof(SystemSetting.Debug)
             }));
             Assert.That(instances[nameof(UserSetting.Game)], Is.SameAs(setting.User.Game));
             Assert.That(instances[nameof(UserSetting.Volume)], Is.SameAs(setting.User.Volume));
