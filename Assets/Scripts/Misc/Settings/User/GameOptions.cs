@@ -3,9 +3,6 @@ using MajdataPlay.Settings.Runtime;
 #nullable enable
 namespace MajdataPlay.Settings
 {
-    /// <summary>
-    /// Contains the gameplay options.
-    /// </summary>
     public class GameOptions
     {
 #if UNITY_ANDROID || UNITY_IOS
@@ -14,27 +11,15 @@ namespace MajdataPlay.Settings
         public const GameplaySubScreenClickBehaviorOption DefaultGameplaySubScreenClickBehavior = GameplaySubScreenClickBehaviorOption.TrackSkip;
 #endif
 
-        /// <summary>
-        /// Gets or sets how fast notes approach the judgment ring.
-        /// </summary>
         [Step("0.25")]
         public float TapSpeed { get; set; } = 7.5f;
 
-        /// <summary>
-        /// Gets or sets how fast touch notes appear and close in.
-        /// </summary>
         [Step("0.25")]
         public float TouchSpeed { get; set; } = 7.5f;
 
-        /// <summary>
-        /// Gets or sets the appearance timing offset of slide paths in the selected offset unit; positive values are later.
-        /// </summary>
         [OptionEnumerator(typeof(GameOffsetEnumerator))]
         public float SlideFadeInOffset { get; set; } = 0f;
 
-        /// <summary>
-        /// Gets or sets the background dimming during gameplay, from 0 to 1; higher values are darker.
-        /// </summary>
         [Step("0.05")]
         [Range("0", "1")]
         public float BackgroundDim { get; set; } = 0.8f;
@@ -62,13 +47,13 @@ namespace MajdataPlay.Settings
         public bool SlideSkipping { get; set; } = true;
 
         public RandomModeOption Random { get; set; } = RandomModeOption.Disabled;
-#if UNITY_ANDROID || UNITY_IOS
 
-        /// <summary>
-        /// Gets or sets whether slides and touch notes can be played with the buttons.
-        /// </summary>
+#if UNITY_ANDROID || UNITY_IOS
         public bool ButtonRingForTouch { get; set; } = true;
+#else
+        public bool ButtonRingForTouch { get; set; } = false;
 #endif
+
         public RecordModeOption RecordMode { get; set; } = RecordModeOption.Disable;
 
         [Step("1")]

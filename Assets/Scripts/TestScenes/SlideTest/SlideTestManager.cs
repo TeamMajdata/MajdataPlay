@@ -234,7 +234,7 @@ namespace MajdataPlay.TestScenes.SlideTest
             Majdata<SlideTestManager>.Instance = this;
             Majdata<INoteController>.Instance = this;
             Majdata<INoteTimeProvider>.Instance = this;
-            ModInfo = new GameModInfo(MajEnv.SystemSettings.Mod)
+            ModInfo = new GameModInfo(MajEnv.SystemSettings.Mod, MajEnv.UserSettings.Game)
             {
                 AutoPlay = _autoplay
             };
@@ -442,7 +442,7 @@ namespace MajdataPlay.TestScenes.SlideTest
                 Fumen = BuildFumen();
                 var chart = SimaiParser.ParseChart(Fumen.AsSpan());
                 _endSec = GetEndSec(chart);
-                ModInfo = new GameModInfo(MajEnv.SystemSettings.Mod)
+                ModInfo = new GameModInfo(MajEnv.SystemSettings.Mod, MajEnv.UserSettings.Game)
                 {
                     AutoPlay = _autoplay
                 };

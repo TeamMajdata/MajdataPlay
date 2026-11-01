@@ -68,6 +68,7 @@ namespace MajdataPlay.Tests.Game.Misc.Settings
             Assert.That(system.Mod.IsAnyModActive(), Is.False);
 #if UNITY_ANDROID || UNITY_IOS
             Assert.That(user.Game.GameplaySubScreenClickBehavior, Is.EqualTo(GameplaySubScreenClickBehaviorOption.TrackSkip_1_Sec_Delay));
+            Assert.That(user.Game.ButtonRingForTouch, Is.True);
             Assert.That(system.Rendering.MainScreenTransform, Is.True);
             Assert.That(system.Audio.Backend, Is.EqualTo(SoundBackendOption.BassSimple));
             Assert.That(system.Audio.Bass.DeviceBufferLengthMs, Is.EqualTo(32));
@@ -75,6 +76,7 @@ namespace MajdataPlay.Tests.Game.Misc.Settings
             Assert.That(system.Debug.TapPoolCapacity, Is.EqualTo(48));
 #else
             Assert.That(user.Game.GameplaySubScreenClickBehavior, Is.EqualTo(GameplaySubScreenClickBehaviorOption.TrackSkip));
+            Assert.That(user.Game.ButtonRingForTouch, Is.False);
             Assert.That(system.Rendering.MainScreenTransform, Is.False);
             Assert.That(system.Audio.Backend, Is.EqualTo(SoundBackendOption.Wasapi));
             Assert.That(system.Audio.Bass.DeviceBufferLengthMs, Is.EqualTo(64));
@@ -112,6 +114,7 @@ namespace MajdataPlay.Tests.Game.Misc.Settings
             var user = new UserSetting();
             var system = new SystemSetting();
             user.Game.TapSpeed = 9.25f;
+            user.Game.ButtonRingForTouch = true;
             user.Judge.AudioOffset = -1.5f;
             user.Display.Skin = "custom";
             user.Display.SensorOpacity = 40;
@@ -133,6 +136,7 @@ namespace MajdataPlay.Tests.Game.Misc.Settings
             Assert.That(((JObject)parsedSystem["Audio"]!).ContainsKey("Volume"), Is.False);
             Assert.That(parsedSystem["Rendering"]!["RenderQuality"]!.Value<string>(), Is.EqualTo("Beautiful"));
             Assert.That(restoredUser.Game.TapSpeed, Is.EqualTo(9.25f));
+            Assert.That(restoredUser.Game.ButtonRingForTouch, Is.True);
             Assert.That(restoredUser.Judge.AudioOffset, Is.EqualTo(-1.5f));
             Assert.That(restoredUser.Display.Skin, Is.EqualTo("custom"));
             Assert.That(restoredUser.Display.SensorOpacity, Is.EqualTo(40));

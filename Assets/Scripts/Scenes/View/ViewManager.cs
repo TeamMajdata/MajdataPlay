@@ -106,7 +106,7 @@ namespace MajdataPlay.Scenes.View
             Majdata<ViewManager>.Instance = this;
             Majdata<INoteController>.Instance = this;
             Majdata<INoteTimeProvider>.Instance = this;
-            ModInfo = MajEnv.SystemSettings.Mod;
+            ModInfo = new GameModInfo(MajEnv.SystemSettings.Mod, MajEnv.UserSettings.Game);
             DefaultMaterial = RuntimeDatabase.Note.DefaultMaterial;
             BreakMaterial = RuntimeDatabase.Note.BreakMaterial;
             HoldShineMaterial = RuntimeDatabase.Note.HoldShineMaterial;

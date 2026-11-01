@@ -17,12 +17,12 @@ namespace MajdataPlay.Settings
         [NoTranslation(TranslationTarget.OptionValue)]
         public VideoRateControlMode RateControlMode { get; set; } = VideoRateControlMode.VBR;
         [FoldNumber]
-        [Step("50000")] // 50K
-        [Range("100000", null)] // 100K
+        [Step("50000")]
+        [Range("100000", null)]
         public long BitRate { get; set; } = 4000000;
         [FoldNumber]
-        [Step("50000")] // 50K
-        [Range("100000", null)] // 100K
+        [Step("50000")]
+        [Range("100000", null)]
         [ShowInSettingUIWhen(nameof(RateControlMode), VideoRateControlMode.VBR)]
         public long MaximumBitRate { get; set; } = 8000000;
         [Step("0.25")]

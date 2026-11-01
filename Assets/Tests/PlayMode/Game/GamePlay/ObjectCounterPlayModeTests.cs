@@ -71,7 +71,7 @@ namespace MajdataPlay.Tests.Game.GamePlay.PlayMode
             var services = _objects.Create("Services");
             services.SetActive(false);
             _manager = services.AddComponent<GamePlayManager>();
-            PrivateMember.SetProperty(_manager, nameof(GamePlayManager.ModInfo), new GameModInfo(new ModOptions()));
+            PrivateMember.SetProperty(_manager, nameof(GamePlayManager.ModInfo), new GameModInfo(new ModOptions(), new GameOptions()));
             _slots.Add(new SingletonScope<GamePlayManager>(_manager));
             _slots.Add(new SingletonScope<OutlineLoader>(services.AddComponent<OutlineLoader>()));
             var xxlbSlot = new SingletonScope<XxlbAnimationController>();
@@ -234,7 +234,7 @@ namespace MajdataPlay.Tests.Game.GamePlay.PlayMode
         [UnityTest]
         public IEnumerator Start_ShowsAutoplayOrLife()
         {
-            PrivateMember.SetProperty(_manager, nameof(GamePlayManager.ModInfo), new GameModInfo(new ModOptions { AutoPlay = AutoplayModeOption.Enable }));
+            PrivateMember.SetProperty(_manager, nameof(GamePlayManager.ModInfo), new GameModInfo(new ModOptions { AutoPlay = AutoplayModeOption.Enable }, new GameOptions()));
             var autoplay = CreateCounter();
             yield return null;
             Assert.That(autoplay.CenterHeader.text, Is.EqualTo("AUTOPLAY"));

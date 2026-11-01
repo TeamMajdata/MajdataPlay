@@ -6,13 +6,7 @@ namespace MajdataPlay.Settings
 {
     public enum FFmpegCodecPreference
     {
-        /// <summary>
-        /// Use the software decoder.
-        /// </summary>
         Software,
-        /// <summary>
-        /// Use the hardware decoder.
-        /// </summary>
         Hardware
     }
     public class FFmpegDecodingOptions
