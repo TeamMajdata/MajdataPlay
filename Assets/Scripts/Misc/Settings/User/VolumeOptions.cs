@@ -2,7 +2,7 @@ using MajdataPlay.Settings.OptionEnumerators;
 #nullable enable
 namespace MajdataPlay.Settings
 {
-    public class SFXVolume
+    public class VolumeOptions
     {
         [Step("0.05")]
         [Range("0", "2")]

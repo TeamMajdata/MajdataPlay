@@ -9,7 +9,7 @@ namespace MajdataPlay.Settings
 
         public DisplayOptions Display { get; init; } = new();
 
-        public SFXVolume Volume { get; init; } = new();
+        public VolumeOptions Volume { get; init; } = new();
 
         public TouchOptions Touch { get; init; } = new();
     }
