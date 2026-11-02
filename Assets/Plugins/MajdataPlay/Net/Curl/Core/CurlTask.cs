@@ -97,6 +97,25 @@ namespace MajdataPlay.Net.Curl.Core
         }
 
         /// <summary>
+        /// Gets the statistics of the handler that sends this transfer, or <see langword="null"/> without one.
+        /// </summary>
+        internal CurlHandlerStatistics? Statistics { get; }
+
+        /// <summary>
+        /// Gets whether this transfer reports the connections it uses to <see cref="Statistics"/>.
+        /// </summary>
+        internal bool IsTrackingConnection { get; }
+
+        /// <summary>
+        /// Gets the libcurl identifier of the connection the transfer uses, or -1 before it got one or when it does not
+        /// track its connection. Written by libcurl's pre-request callback on the multi worker.
+        /// </summary>
+        internal long ConnectionId
+        {
+            get => Volatile.Read(ref _connectionId);
+        }
+
+        /// <summary>
         /// The <see cref="CurlTaskState"/> value, stored as an integer for <see cref="Interlocked"/> transitions.
         /// </summary>
         int _state = (int)CurlTaskState.Created;
@@ -110,6 +129,16 @@ namespace MajdataPlay.Net.Curl.Core
         /// Set to 1 once the native resources have been released.
         /// </summary>
         int _isNativeReleased = 0;
+
+        /// <summary>
+        /// Backing field of <see cref="ConnectionId"/>.
+        /// </summary>
+        long _connectionId = -1;
+
+        /// <summary>
+        /// The <c>CURLINFO_NUM_CONNECTS</c> value the last pre-request callback saw. Multi worker only.
+        /// </summary>
+        long _openedConnections;
 
         /// <summary>
         /// Backing field of <see cref="IsAttached"/>.
@@ -167,6 +196,10 @@ namespace MajdataPlay.Net.Curl.Core
         /// <param name="onDispose">Asks the owner to dispose the transfer.</param>
         /// <param name="onCancel">Asks the owner to cancel the transfer.</param>
         /// <param name="token">The caller's cancellation token; observed once <see cref="RegisterCancellation"/> is called.</param>
+        /// <param name="statistics">
+        /// The statistics of the sending handler, or <see langword="null"/>. The transfer tracks its connection when
+        /// given statistics while <see cref="CurlStatistics.IsConnectionTrackingEnabled"/> is set.
+        /// </param>
         /// <exception cref="InvalidOperationException">libcurl rejected one of the callback options.</exception>
         public CurlTask(CurlEasy curlEasy,
             CurlRequest request,
@@ -174,13 +207,16 @@ namespace MajdataPlay.Net.Curl.Core
             Action<CurlTask> onResume,
             Action<CurlTask> onDispose,
             Action<CurlTask> onCancel,
-            CancellationToken token = default)
+            CancellationToken token = default,
+            CurlHandlerStatistics? statistics = null)
         {
             Easy = curlEasy;
             Request = request;
             Response = new CurlResponse(curlEasy, request, OnResumeRequested, OnDisposeRequested, config);
             Config = config;
             CancellationToken = token;
+            Statistics = statistics;
+            IsTrackingConnection = statistics is not null && CurlStatistics.IsConnectionTrackingEnabled;
             _onResume = onResume;
             _onDispose = onDispose;
             _onCancel = onCancel;
@@ -190,9 +226,9 @@ namespace MajdataPlay.Net.Curl.Core
             Easy.SetOption(CurlOption.Private, handlePtr);
             Easy.SetOption(CurlOption.WriteData, handlePtr);
             Easy.SetOption(CurlOption.HeaderData, handlePtr);
-            if (request.Record is not null)
+            if (request.Record is not null || IsTrackingConnection)
             {
-                CurlNetworkCapture.Attach(Easy, handlePtr);
+                CurlNetworkCapture.Attach(Easy, handlePtr, IsTrackingConnection);
             }
         }
 
@@ -265,6 +301,36 @@ namespace MajdataPlay.Net.Curl.Core
         }
 
         /// <summary>
+        /// Reports the connection libcurl gave this transfer to <see cref="Statistics"/>. Called by libcurl's
+        /// pre-request callback on the multi worker, once per request including every followed redirect.
+        /// </summary>
+        /// <param name="remoteAddress">The remote endpoint of the connection.</param>
+        /// <param name="localAddress">The local endpoint of the connection.</param>
+        internal void OnConnectionReady(string remoteAddress, string localAddress)
+        {
+            var statistics = Statistics;
+            if (statistics is null || !IsTrackingConnection || !Easy.IsAllocated)
+            {
+                return;
+            }
+            var handle = Easy.Handle;
+            if (LibCurl.Easy.GetInfoOffT(handle, CurlInfo.ConnId, out var connectionId) != CurlCode.Ok || connectionId < 0)
+            {
+                return;
+            }
+            // CURLINFO_NUM_CONNECTS counts the connections the whole transfer opened, redirects included, so the
+            // connection is new when the count grew since the previous request of this transfer.
+            var isNew = false;
+            if (LibCurl.Easy.GetInfo(handle, CurlInfo.NumConnects, out long openedConnections) == CurlCode.Ok)
+            {
+                isNew = openedConnections > _openedConnections;
+                _openedConnections = openedConnections;
+            }
+            var previousConnectionId = Interlocked.Exchange(ref _connectionId, connectionId);
+            statistics.OnConnectionUsed(previousConnectionId, connectionId, isNew, remoteAddress, localAddress);
+        }
+
+        /// <summary>
         /// Moves from <see cref="CurlTaskState.Created"/> to <see cref="CurlTaskState.Submitted"/>.
         /// </summary>
         /// <returns><see langword="true"/> if the transition happened.</returns>
@@ -310,6 +376,7 @@ namespace MajdataPlay.Net.Curl.Core
             {
                 // The record is finished before the reader can observe the end of the body.
                 Record?.OnCompleted();
+                Statistics?.OnRequestFinished(CurlNetworkRequestState.Completed);
                 Response.ResultCode = result;
                 Response.Complete();
                 return true;
@@ -340,6 +407,7 @@ namespace MajdataPlay.Net.Curl.Core
             if (oldState == state)
             {
                 Record?.OnFailed(abortException);
+                Statistics?.OnRequestFinished(CurlNetworkRecord.GetFailureState(abortException));
                 Response.Abort(abortException);
                 _taskSource.TrySetException(abortException);
                 return true;
@@ -372,6 +440,7 @@ namespace MajdataPlay.Net.Curl.Core
             if (oldState == state)
             {
                 Record?.OnCancelled();
+                Statistics?.OnRequestFinished(CurlNetworkRequestState.Cancelled);
                 Response.Abort();
                 _taskSource.TrySetCanceled(CancellationToken);
                 return true;

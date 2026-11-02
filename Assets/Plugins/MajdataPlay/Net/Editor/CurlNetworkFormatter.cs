@@ -8,7 +8,7 @@ using System.Text;
 namespace MajdataPlay.Net.Editor
 {
     /// <summary>
-    /// Formats and parses what the Curl Network window shows: sizes, durations, status texts, cookies, query strings,
+    /// Formats and parses what the Curl Debugger's Network tab shows: sizes, durations, status texts, cookies, query strings,
     /// bodies, timing phases and cURL commands.
     /// </summary>
     internal static class CurlNetworkFormatter

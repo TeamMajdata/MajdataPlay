@@ -279,6 +279,12 @@ namespace MajdataPlay.Net.Curl.Core.PInvoke
         /// </summary>
         PostTransferTimeT = 0x600043,
 
+        /// <summary>
+        /// Identifier of the last connection used by the transfer, unique within its connection pool, or -1
+        /// (libcurl 8.2.0 and later).
+        /// </summary>
+        ConnId = 0x600040,
+
 
         // ============================================================
         // SOCKET

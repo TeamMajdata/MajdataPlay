@@ -174,6 +174,18 @@ namespace MajdataPlay.Net.Curl.Diagnostics
         public int RedirectCount { get; internal init; }
 
         /// <summary>
+        /// Gets libcurl's identifier of the connection the request used, matching
+        /// <see cref="CurlConnectionInfo.Id"/>, or <see langword="null"/> before libcurl reported it.
+        /// </summary>
+        public long? ConnectionId { get; internal init; }
+
+        /// <summary>
+        /// Gets whether the request reused a pooled connection instead of opening one, or <see langword="null"/>
+        /// before libcurl reported its connection.
+        /// </summary>
+        public bool? IsConnectionReused { get; internal init; }
+
+        /// <summary>
         /// Gets the reason the request failed or was cancelled, or <see langword="null"/>.
         /// </summary>
         public string? Error { get; internal init; }

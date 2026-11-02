@@ -2,7 +2,7 @@
 namespace MajdataPlay.Net.Editor
 {
     /// <summary>
-    /// One cookie of a <c>Cookie</c> request header or a <c>Set-Cookie</c> response header, as the Curl Network window shows it.
+    /// One cookie of a <c>Cookie</c> request header or a <c>Set-Cookie</c> response header, as the Curl Debugger shows it.
     /// </summary>
     internal readonly struct CurlNetworkCookie
     {

@@ -2,7 +2,7 @@
 namespace MajdataPlay.Net.Editor
 {
     /// <summary>
-    /// The columns of the Curl Network request table, in display order.
+    /// The columns of the request table in the Curl Debugger's Network tab, in display order.
     /// </summary>
     internal enum CurlNetworkColumn
     {

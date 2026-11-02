@@ -13,22 +13,19 @@ using TreeViewState = UnityEditor.IMGUI.Controls.TreeViewState<int>;
 namespace MajdataPlay.Net.Editor
 {
     /// <summary>
-    /// An Editor window in the style of a browser's network panel that lists the requests sent through
-    /// <see cref="Curl.CurlHttpMessageHandler"/>, both running and finished, with their headers, bodies, cookies and timings.
+    /// The Network tab of the Curl Debugger, in the style of a browser's network panel: the requests sent through
+    /// <see cref="Curl.CurlHttpMessageHandler"/>, both running and finished, with their headers, bodies, cookies and
+    /// timings.
     /// </summary>
     /// <remarks>
-    /// Recording through <see cref="CurlNetworkMonitor"/> is on while the window is open and its Record toggle is on.
-    /// The history lives in memory, so a domain reload (entering Play Mode with domain reload enabled) clears it.
+    /// Serialized with the window, so the table layout, filters, recording switch and details panel survive domain
+    /// reloads. The history itself lives in <see cref="CurlNetworkMonitor"/>, so a domain reload clears it.
     /// </remarks>
-    public sealed class CurlNetworkWindow : EditorWindow
+    [Serializable]
+    internal sealed class CurlNetworkPanel
     {
         /// <summary>
-        /// The window title.
-        /// </summary>
-        private const string WindowTitle = "Curl Network";
-
-        /// <summary>
-        /// The prefix of the window's EditorPrefs keys.
+        /// The prefix of the panel's EditorPrefs keys.
         /// </summary>
         private const string PreferencePrefix = "MajdataPlay.CurlNetwork.";
 
@@ -41,11 +38,6 @@ namespace MajdataPlay.Net.Editor
         /// The EditorPrefs key of <see cref="CurlNetworkMonitor.MaxBodyCaptureBytes"/>.
         /// </summary>
         private const string MaxBodyCaptureBytesPreference = PreferencePrefix + "MaxBodyCaptureBytes";
-
-        /// <summary>
-        /// The time between checks for new data, in seconds.
-        /// </summary>
-        private const double RefreshInterval = 0.25;
 
         /// <summary>
         /// The height of the status bar.
@@ -125,34 +117,40 @@ namespace MajdataPlay.Net.Editor
         private float _detailsWidth = 480f;
 
         /// <summary>
-        /// The request table.
+        /// The request table, created by <see cref="Enable"/>.
         /// </summary>
+        [NonSerialized]
         private CurlNetworkTable? _table;
 
         /// <summary>
         /// The records of the last refresh by id.
         /// </summary>
-        private readonly Dictionary<long, CurlNetworkRecord> _records = new();
+        [NonSerialized]
+        private Dictionary<long, CurlNetworkRecord> _records = new();
 
         /// <summary>
         /// The snapshots of the last refresh, oldest first.
         /// </summary>
+        [NonSerialized]
         private CurlNetworkSnapshot[] _snapshots = Array.Empty<CurlNetworkSnapshot>();
 
         /// <summary>
         /// The <see cref="CurlNetworkMonitor.Version"/> of the last refresh.
         /// </summary>
+        [NonSerialized]
         private int _lastVersion;
-
-        /// <summary>
-        /// The editor time of the next check for new data.
-        /// </summary>
-        private double _nextRefresh;
 
         /// <summary>
         /// Whether the splitter is being dragged.
         /// </summary>
+        [NonSerialized]
         private bool _isResizing;
+
+        /// <summary>
+        /// Asks the hosting window to repaint.
+        /// </summary>
+        [NonSerialized]
+        private Action? _repaint;
 
         /// <summary>
         /// The text a context menu command copies.
@@ -186,21 +184,22 @@ namespace MajdataPlay.Net.Editor
         }
 
         /// <summary>
-        /// Opens the window.
+        /// Gets whether new requests are recorded.
         /// </summary>
-        [MenuItem("Window/Curl Network")]
-        public static void OpenWindow()
+        public bool IsRecording
         {
-            GetWindow<CurlNetworkWindow>(WindowTitle).Show();
+            get => _isRecording;
         }
 
         /// <summary>
-        /// Builds the table, applies the saved settings, starts recording and loads the history.
+        /// Builds the table, applies the saved settings, applies the recording switch and loads the history.
         /// </summary>
-        private void OnEnable()
+        /// <param name="repaint">Asks the hosting window to repaint.</param>
+        public void Enable(Action repaint)
         {
-            titleContent = new GUIContent(WindowTitle);
-            minSize = new Vector2(640, 320);
+            _repaint = repaint;
+            _records ??= new Dictionary<long, CurlNetworkRecord>();
+            _snapshots ??= Array.Empty<CurlNetworkSnapshot>();
             ApplyPreferences();
             var headerState = CurlNetworkTable.CreateHeaderState();
             if (MultiColumnHeaderState.CanOverwriteSerializedFields(_headerState, headerState))
@@ -223,7 +222,7 @@ namespace MajdataPlay.Net.Editor
         /// <summary>
         /// Detaches from the table and the details panel and frees preview textures.
         /// </summary>
-        private void OnDisable()
+        public void Disable()
         {
             if (_table is not null)
             {
@@ -232,41 +231,28 @@ namespace MajdataPlay.Net.Editor
             }
             _details.CloseRequested -= OnDetailsCloseRequested;
             _details.Dispose();
+            _repaint = null;
         }
 
         /// <summary>
-        /// Stops recording once the window is closed.
+        /// Reloads when the history changed.
         /// </summary>
-        private void OnDestroy()
+        /// <returns>Whether the panel needs a repaint: the history changed or a listed request is still running.</returns>
+        public bool Update()
         {
-            CurlNetworkMonitor.IsEnabled = false;
-        }
-
-        /// <summary>
-        /// Reloads when the history changed and keeps pending durations moving.
-        /// </summary>
-        private void Update()
-        {
-            if (EditorApplication.timeSinceStartup < _nextRefresh)
-            {
-                return;
-            }
-            _nextRefresh = EditorApplication.timeSinceStartup + RefreshInterval;
             if (CurlNetworkMonitor.Version != _lastVersion)
             {
                 Refresh();
-                Repaint();
+                return true;
             }
-            else if (_table is not null && _table.HasPendingRows)
-            {
-                Repaint();
-            }
+
+            return _table is not null && _table.HasPendingRows;
         }
 
         /// <summary>
         /// Takes new snapshots of the history and rebuilds the table and the details panel.
         /// </summary>
-        private void Refresh()
+        public void Refresh()
         {
             if (_table is null)
             {
@@ -289,17 +275,28 @@ namespace MajdataPlay.Net.Editor
         }
 
         /// <summary>
+        /// Turns recording on or off.
+        /// </summary>
+        /// <param name="isRecording">Whether new requests are recorded.</param>
+        public void SetRecording(bool isRecording)
+        {
+            _isRecording = isRecording;
+            CurlNetworkMonitor.IsEnabled = isRecording;
+        }
+
+        /// <summary>
         /// Draws the toolbar, the table, the details panel of the selected request and the status bar.
         /// </summary>
-        private void OnGUI()
+        /// <param name="rect">The area of the panel.</param>
+        public void OnGUI(Rect rect)
         {
             if (_table is null)
             {
                 return;
             }
             var toolbarHeight = EditorStyles.toolbar.fixedHeight > 0 ? EditorStyles.toolbar.fixedHeight : 21f;
-            DrawToolbar(new Rect(0, 0, position.width, toolbarHeight));
-            var content = new Rect(0, toolbarHeight, position.width, Math.Max(0, position.height - toolbarHeight - StatusBarHeight));
+            DrawToolbar(new Rect(rect.x, rect.y, rect.width, toolbarHeight));
+            var content = new Rect(rect.x, rect.y + toolbarHeight, rect.width, Math.Max(0, rect.height - toolbarHeight - StatusBarHeight));
             if (_details.Record is null)
             {
                 _table.UpdateTimeline();
@@ -316,7 +313,7 @@ namespace MajdataPlay.Net.Editor
                 _table.OnGUI(tableRect);
                 _details.OnGUI(detailsRect);
             }
-            DrawStatusBar(new Rect(0, position.height - StatusBarHeight, position.width, StatusBarHeight));
+            DrawStatusBar(new Rect(rect.x, rect.yMax - StatusBarHeight, rect.width, StatusBarHeight));
         }
 
         /// <summary>
@@ -445,7 +442,7 @@ namespace MajdataPlay.Net.Editor
                     {
                         _detailsWidth = Mathf.Clamp(content.xMax - current.mousePosition.x, MinDetailsWidth, Math.Max(MinDetailsWidth, content.width - MinTableWidth));
                         current.Use();
-                        Repaint();
+                        _repaint?.Invoke();
                     }
                     break;
                 case EventType.MouseUp:
@@ -455,16 +452,6 @@ namespace MajdataPlay.Net.Editor
                     EditorGUI.DrawRect(new Rect(splitter.x + 1, splitter.y, 1, splitter.height), new Color(0f, 0f, 0f, 0.35f));
                     break;
             }
-        }
-
-        /// <summary>
-        /// Turns recording on or off.
-        /// </summary>
-        /// <param name="isRecording">Whether new requests are recorded.</param>
-        private void SetRecording(bool isRecording)
-        {
-            _isRecording = isRecording;
-            CurlNetworkMonitor.IsEnabled = isRecording;
         }
 
         /// <summary>
@@ -484,7 +471,7 @@ namespace MajdataPlay.Net.Editor
         private void OnSelectedSnapshotChanged(CurlNetworkSnapshot? snapshot)
         {
             UpdateDetails();
-            Repaint();
+            _repaint?.Invoke();
         }
 
         /// <summary>
@@ -494,7 +481,7 @@ namespace MajdataPlay.Net.Editor
         {
             _table?.SetSelection(new List<int>());
             UpdateDetails();
-            Repaint();
+            _repaint?.Invoke();
         }
 
         /// <summary>

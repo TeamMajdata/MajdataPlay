@@ -96,6 +96,19 @@ namespace MajdataPlay.Net.Curl.Core
         readonly Action<CurlTask> _onCancelRequested;
 
         /// <summary>
+        /// The request counters and connection pool of this multi handle, listed in <see cref="CurlStatistics"/>.
+        /// </summary>
+        readonly CurlHandlerStatistics _statistics;
+
+        /// <summary>
+        /// Gets the request counters and connection pool of this multi handle.
+        /// </summary>
+        internal CurlHandlerStatistics Statistics
+        {
+            get => _statistics;
+        }
+
+        /// <summary>
         /// Creates the multi handle and starts its worker.
         /// </summary>
         /// <exception cref="CurlException">libcurl's global initialization failed.</exception>
@@ -113,6 +126,7 @@ namespace MajdataPlay.Net.Curl.Core
             _onResumeRequested = OnTaskResume;
             _onDisposeRequested = OnTaskDispose;
             _onCancelRequested = OnTaskCancel;
+            _statistics = CurlStatistics.Register();
             _workerThread = Task.Factory.StartNew(Run, CancellationToken.None,
                 TaskCreationOptions.LongRunning, TaskScheduler.Default);
         }
@@ -140,6 +154,8 @@ namespace MajdataPlay.Net.Curl.Core
                     // Registered before the task is visible to the worker, so the worker always sees the registration.
                     // An already-cancelled token calls OnTaskCancel synchronously; the lock is re-entrant.
                     curlTask.RegisterCancellation();
+                    // Counted before the worker can dequeue it, so the queued count never goes negative.
+                    _statistics.OnRequestQueued();
                     _pendingToSubmitTasks.Enqueue(curlTask);
                     WakeUp();
                     isQueued = true;
@@ -177,7 +193,7 @@ namespace MajdataPlay.Net.Curl.Core
                 {
                     Record = CurlNetworkMonitor.TryCreateRecord(request, config)
                 };
-                curlTask = new CurlTask(curlEasy, curlRequest, config, _onResumeRequested, _onDisposeRequested, _onCancelRequested, token);
+                curlTask = new CurlTask(curlEasy, curlRequest, config, _onResumeRequested, _onDisposeRequested, _onCancelRequested, token, _statistics);
 
                 curlRequest.ApplyTo(curlEasy);
                 config.ApplyToEasy(curlEasy, curlRequest.RequestUri);
@@ -309,6 +325,7 @@ namespace MajdataPlay.Net.Curl.Core
         {
             while (_pendingToSubmitTasks.TryDequeue(out var pendingTask))
             {
+                _statistics.OnRequestDequeued();
                 if (pendingTask.CancellationToken.IsCancellationRequested)
                 {
                     pendingTask.TryEnterCancelledState();
@@ -322,6 +339,7 @@ namespace MajdataPlay.Net.Curl.Core
                     continue;
                 }
                 pendingTask.Config.ApplyToMulti(this);
+                _statistics.OnMaxConnectionsPerHostApplied(pendingTask.Config.MaxConnectionsPerServer);
                 var returnCode = LibCurl.Multi.AddEasyHandle(ThisHandle, pendingTask.Easy.Handle);
                 if (returnCode != CurlMCode.Ok)
                 {
@@ -331,6 +349,7 @@ namespace MajdataPlay.Net.Curl.Core
                 }
                 pendingTask.IsAttached = true;
                 _activeTasks.Add(pendingTask);
+                _statistics.OnRequestAttached();
             }
         }
 
@@ -439,6 +458,8 @@ namespace MajdataPlay.Net.Curl.Core
             }
             LibCurl.Multi.RemoveEasyHandle(ThisHandle, task.Easy.Handle);
             task.IsAttached = false;
+            // Removing the handle has already reported a connection libcurl closed for it, such as an aborted one.
+            _statistics.OnRequestDetached(task.ConnectionId);
             return true;
         }
 
@@ -519,6 +540,8 @@ namespace MajdataPlay.Net.Curl.Core
                     {
                         LibCurl.Multi.CleanUp(handle);
                         LibCurlLifecycle.Release();
+                        // curl_multi_cleanup closes the pooled connections without reporting them.
+                        CurlStatistics.OnHandlerDisposed(_statistics);
                     }
                 }
                 // Releasing a registration waits for a running cancellation callback, which may be blocked on the

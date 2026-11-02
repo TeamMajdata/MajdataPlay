@@ -11,7 +11,7 @@ namespace MajdataPlay.Tests.Plugins.Net.Curl.Diagnostics
 {
     /// <summary>
     /// Saves the static state of <see cref="CurlNetworkMonitor"/> (history, switch and limits), empties the history for
-    /// the test and restores everything when disposed, so a Curl Network window open during the run keeps its history.
+    /// the test and restores everything when disposed, so a Curl Debugger open during the run keeps its history.
     /// </summary>
     internal sealed class CurlNetworkMonitorIsolation : IDisposable
     {

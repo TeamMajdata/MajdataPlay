@@ -16,7 +16,7 @@ using TreeViewState = UnityEditor.IMGUI.Controls.TreeViewState<int>;
 namespace MajdataPlay.Net.Editor
 {
     /// <summary>
-    /// The request table of the Curl Network window: one row per request with sortable, hideable columns and a waterfall.
+    /// The request table of the Curl Debugger's Network tab: one row per request with sortable, hideable columns and a waterfall.
     /// </summary>
     internal sealed class CurlNetworkTable : TreeView
     {

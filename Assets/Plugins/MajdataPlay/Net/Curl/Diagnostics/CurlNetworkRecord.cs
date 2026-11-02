@@ -386,8 +386,20 @@ namespace MajdataPlay.Net.Curl.Diagnostics
         /// <param name="exception">The failure reported to the caller.</param>
         internal void OnFailed(Exception exception)
         {
-            var state = exception is ObjectDisposedException ? CurlNetworkRequestState.Cancelled : CurlNetworkRequestState.Failed;
-            Finish(state, exception.Message);
+            Finish(GetFailureState(exception), exception.Message);
+        }
+
+        /// <summary>
+        /// Classifies the exception that ended a transfer early.
+        /// </summary>
+        /// <param name="exception">The failure reported to the caller.</param>
+        /// <returns>
+        /// <see cref="CurlNetworkRequestState.Cancelled"/> when the response or the handler was disposed first;
+        /// otherwise <see cref="CurlNetworkRequestState.Failed"/>.
+        /// </returns>
+        internal static CurlNetworkRequestState GetFailureState(Exception exception)
+        {
+            return exception is ObjectDisposedException ? CurlNetworkRequestState.Cancelled : CurlNetworkRequestState.Failed;
         }
 
         /// <summary>
@@ -480,6 +492,9 @@ namespace MajdataPlay.Net.Curl.Diagnostics
                 IsResponseBodyTruncated = _responseBody.IsTruncated,
                 ResponseHeaderSize = Math.Max(_receivedHeaderBytes, info?.HeaderSize ?? 0),
                 RedirectCount = info?.RedirectCount ?? 0,
+                ConnectionId = info?.ConnectionId,
+                // A connect that failed opened nothing yet, so only a request that got a response was really reused.
+                IsConnectionReused = info?.ConnectionId is not null && _firstResponseByteTimestamp != 0 ? info.Value.NewConnections == 0 : null,
                 Error = _error,
                 Timings = info?.Timings,
                 QueuedTimestamp = _queuedTimestamp,

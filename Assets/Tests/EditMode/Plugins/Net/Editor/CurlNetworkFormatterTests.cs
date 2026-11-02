@@ -11,7 +11,7 @@ using NUnit.Framework;
 namespace MajdataPlay.Tests.Plugins.Net.Editor
 {
     /// <summary>
-    /// Covers the formatting and parsing helpers of the Curl Network window.
+    /// Covers the formatting and parsing helpers of the Curl Debugger's Network tab.
     /// </summary>
     public class CurlNetworkFormatterTests
     {

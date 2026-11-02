@@ -62,6 +62,16 @@ namespace MajdataPlay.Net.Curl.Diagnostics
         public int RedirectCount { get; init; }
 
         /// <summary>
+        /// Gets libcurl's identifier of the last connection used, or <see langword="null"/> before one was assigned.
+        /// </summary>
+        public long? ConnectionId { get; init; }
+
+        /// <summary>
+        /// Gets the number of connections the transfer had to open; 0 when it reused a pooled one.
+        /// </summary>
+        public int NewConnections { get; init; }
+
+        /// <summary>
         /// Gets the timing points of the transfer.
         /// </summary>
         public CurlNetworkTimings Timings { get; init; }
@@ -83,6 +93,8 @@ namespace MajdataPlay.Net.Curl.Diagnostics
                 RemoteAddress = FormatRemoteAddress(ReadString(easyHandle, CurlInfo.PrimaryIp), ReadLong(easyHandle, CurlInfo.PrimaryPort)),
                 HeaderSize = ReadLong(easyHandle, CurlInfo.HeaderSize),
                 RedirectCount = (int)ReadLong(easyHandle, CurlInfo.RedirectCount),
+                ConnectionId = ReadConnectionId(easyHandle),
+                NewConnections = (int)ReadLong(easyHandle, CurlInfo.NumConnects),
                 Timings = new CurlNetworkTimings
                 {
                     NameLookup = ReadMicroseconds(easyHandle, CurlInfo.NameLookupTimeT),
@@ -156,6 +168,21 @@ namespace MajdataPlay.Net.Curl.Diagnostics
         private static string? ReadString(IntPtr easyHandle, CurlInfo info)
         {
             return LibCurl.Easy.GetInfo(easyHandle, info, out string? value) == CurlCode.Ok ? value : null;
+        }
+
+        /// <summary>
+        /// Reads <c>CURLINFO_CONN_ID</c>.
+        /// </summary>
+        /// <param name="easyHandle">The easy handle.</param>
+        /// <returns>The connection identifier, or <see langword="null"/> when there is none or libcurl rejected the key.</returns>
+        private static long? ReadConnectionId(IntPtr easyHandle)
+        {
+            if (LibCurl.Easy.GetInfoOffT(easyHandle, CurlInfo.ConnId, out var connectionId) != CurlCode.Ok || connectionId < 0)
+            {
+                return null;
+            }
+
+            return connectionId;
         }
 
         /// <summary>

@@ -10,17 +10,12 @@ using UnityEngine;
 namespace MajdataPlay.Net.Editor
 {
     /// <summary>
-    /// The request details panel of the Curl Network window, with Headers, Payload, Response, Cookies and Timing tabs.
+    /// The request details panel of the Curl Debugger's Network tab, with Headers, Payload, Response, Cookies and Timing tabs.
     /// </summary>
     /// <remarks>Serialized with the window, so the chosen tab, modes and folded sections survive domain reloads.</remarks>
     [Serializable]
     internal sealed class CurlNetworkDetailsView : IDisposable
     {
-        /// <summary>
-        /// The width of the name column of key/value rows.
-        /// </summary>
-        private const float KeyColumnWidth = 190f;
-
         /// <summary>
         /// The width of the name column of the Timing tab.
         /// </summary>
@@ -30,11 +25,6 @@ namespace MajdataPlay.Net.Editor
         /// The width of the duration column of the Timing tab.
         /// </summary>
         private const float PhaseDurationWidth = 80f;
-
-        /// <summary>
-        /// The longest value drawn in one selectable label, keeping it below the IMGUI mesh limit.
-        /// </summary>
-        private const int MaxLabelLength = 8000;
 
         /// <summary>
         /// The tab names, in <see cref="CurlNetworkDetailsTab"/> order.
@@ -163,30 +153,6 @@ namespace MajdataPlay.Net.Editor
         private float _viewWidth;
 
         /// <summary>
-        /// The style of section headers.
-        /// </summary>
-        [NonSerialized]
-        private GUIStyle? _sectionStyle;
-
-        /// <summary>
-        /// The style of header names and table headings.
-        /// </summary>
-        [NonSerialized]
-        private GUIStyle? _keyStyle;
-
-        /// <summary>
-        /// The style of wrapped values.
-        /// </summary>
-        [NonSerialized]
-        private GUIStyle? _valueStyle;
-
-        /// <summary>
-        /// The style of single-line table cells.
-        /// </summary>
-        [NonSerialized]
-        private GUIStyle? _cellStyle;
-
-        /// <summary>
         /// Raised when the close button is clicked.
         /// </summary>
         public event Action? CloseRequested;
@@ -258,7 +224,6 @@ namespace MajdataPlay.Net.Editor
         /// <param name="rect">The area of the panel.</param>
         public void OnGUI(Rect rect)
         {
-            EnsureStyles();
             _viewWidth = Math.Max(100f, rect.width - 24f);
             GUILayout.BeginArea(rect);
             using (new EditorGUILayout.HorizontalScope(EditorStyles.toolbar))
@@ -314,6 +279,10 @@ namespace MajdataPlay.Net.Editor
             }
             rows.Add(new("Remote Address", snapshot.RemoteAddress ?? "-"));
             rows.Add(new("Protocol", snapshot.Protocol ?? "-"));
+            if (snapshot.ConnectionId is { } connectionId)
+            {
+                rows.Add(new("Connection", FormatConnection(connectionId, snapshot.IsConnectionReused)));
+            }
             rows.Add(new("Started", snapshot.StartedAt.ToString("yyyy-MM-dd HH:mm:ss.fff", CultureInfo.InvariantCulture)));
             if (snapshot.RedirectCount > 0)
             {
@@ -321,6 +290,26 @@ namespace MajdataPlay.Net.Editor
             }
 
             return rows;
+        }
+
+        /// <summary>
+        /// Describes the connection a request used, as listed in the Info tab.
+        /// </summary>
+        /// <param name="connectionId">libcurl's connection identifier.</param>
+        /// <param name="isReused">Whether the connection was reused from the pool, or <see langword="null"/> when unknown.</param>
+        /// <returns>Such as <c>#3 (reused)</c>, <c>#4 (new)</c> or <c>#5</c>.</returns>
+        internal static string FormatConnection(long connectionId, bool? isReused)
+        {
+            var id = "#" + connectionId.ToString(CultureInfo.InvariantCulture);
+            switch (isReused)
+            {
+                case true:
+                    return id + " (reused)";
+                case false:
+                    return id + " (new)";
+                default:
+                    return id;
+            }
         }
 
         /// <summary>
@@ -379,10 +368,10 @@ namespace MajdataPlay.Net.Editor
         private void DrawHeaders(CurlNetworkSnapshot snapshot)
         {
             _scroll = EditorGUILayout.BeginScrollView(_scroll);
-            _isGeneralExpanded = EditorGUILayout.Foldout(_isGeneralExpanded, "General", true, _sectionStyle!);
+            _isGeneralExpanded = CurlEditorGUI.DrawSection(_isGeneralExpanded, "General");
             if (_isGeneralExpanded)
             {
-                DrawKeyValues(GetGeneralRows(snapshot));
+                CurlEditorGUI.DrawKeyValues(GetGeneralRows(snapshot), _viewWidth);
             }
             DrawHeaderSection("Response Headers", snapshot.StatusLine, snapshot.ResponseHeaders, ref _isResponseHeadersExpanded, ref _showRawResponseHeaders);
             DrawHeaderSection("Request Headers", snapshot.RequestLine, snapshot.RequestHeaders, ref _isRequestHeadersExpanded, ref _showRawRequestHeaders);
@@ -405,7 +394,7 @@ namespace MajdataPlay.Net.Editor
         {
             using (new EditorGUILayout.HorizontalScope())
             {
-                isExpanded = EditorGUILayout.Foldout(isExpanded, $"{title} ({headers.Count})", true, _sectionStyle!);
+                isExpanded = CurlEditorGUI.DrawSection(isExpanded, $"{title} ({headers.Count})");
                 GUILayout.FlexibleSpace();
                 showRaw = GUILayout.Toggle(showRaw, "Raw", EditorStyles.miniButton, GUILayout.Width(44));
             }
@@ -415,11 +404,11 @@ namespace MajdataPlay.Net.Editor
             }
             if (showRaw)
             {
-                DrawSelectableBlock(CurlNetworkFormatter.FormatHeaderBlock(firstLine, headers));
+                CurlEditorGUI.DrawSelectableBlock(CurlNetworkFormatter.FormatHeaderBlock(firstLine, headers), _viewWidth);
             }
             else
             {
-                DrawKeyValues(headers);
+                CurlEditorGUI.DrawKeyValues(headers, _viewWidth);
             }
         }
 
@@ -433,11 +422,11 @@ namespace MajdataPlay.Net.Editor
             var query = CurlNetworkFormatter.ParseQuery(snapshot.Url);
             if (query.Count > 0)
             {
-                _isQueryExpanded = EditorGUILayout.Foldout(_isQueryExpanded, $"Query String Parameters ({query.Count})", true, _sectionStyle!);
+                _isQueryExpanded = CurlEditorGUI.DrawSection(_isQueryExpanded, $"Query String Parameters ({query.Count})");
                 if (_isQueryExpanded)
                 {
                     _queryScroll = EditorGUILayout.BeginScrollView(_queryScroll, GUILayout.MaxHeight(160));
-                    DrawKeyValues(query);
+                    CurlEditorGUI.DrawKeyValues(query, _viewWidth);
                     EditorGUILayout.EndScrollView();
                 }
             }
@@ -456,7 +445,7 @@ namespace MajdataPlay.Net.Editor
             if (_payloadMode == CurlNetworkBodyMode.Pretty && RequestBody.IsForm)
             {
                 _scroll = EditorGUILayout.BeginScrollView(_scroll);
-                DrawKeyValues(RequestBody.GetFormFields());
+                CurlEditorGUI.DrawKeyValues(RequestBody.GetFormFields(), _viewWidth);
                 EditorGUILayout.EndScrollView();
                 return;
             }
@@ -534,7 +523,7 @@ namespace MajdataPlay.Net.Editor
                 {
                     rows.Add(new[] { cookie.Name, cookie.Value });
                 }
-                DrawTable(new[] { "Name", "Value" }, new[] { 0.3f, 0.7f }, rows);
+                CurlEditorGUI.DrawTable(new[] { "Name", "Value" }, new[] { 0.3f, 0.7f }, rows, _viewWidth);
             }
             EditorGUILayout.Space();
             EditorGUILayout.LabelField($"Response Cookies ({snapshot.ResponseCookies.Count})", EditorStyles.boldLabel);
@@ -561,7 +550,7 @@ namespace MajdataPlay.Net.Editor
                     });
                 }
                 var headers = new[] { "Name", "Value", "Domain", "Path", "Expires / Max-Age", "HttpOnly", "Secure", "SameSite" };
-                DrawTable(headers, new[] { 0.14f, 0.26f, 0.13f, 0.08f, 0.17f, 0.07f, 0.06f, 0.09f }, rows);
+                CurlEditorGUI.DrawTable(headers, new[] { 0.14f, 0.26f, 0.13f, 0.08f, 0.17f, 0.07f, 0.06f, 0.09f }, rows, _viewWidth);
             }
             EditorGUILayout.EndScrollView();
         }
@@ -619,92 +608,7 @@ namespace MajdataPlay.Net.Editor
                 EditorGUI.DrawRect(new Rect(x, bar.y, Math.Min(width, Math.Max(1f, bar.xMax - x)), bar.height), color);
             }
             var durationRect = new Rect(row.xMax - PhaseDurationWidth, row.y, PhaseDurationWidth, row.height);
-            GUI.Label(durationRect, CurlNetworkFormatter.FormatDuration(phase.Duration), _cellStyle!);
-        }
-
-        /// <summary>
-        /// Draws name and value rows; values wrap and can be selected.
-        /// </summary>
-        /// <param name="pairs">The rows.</param>
-        private void DrawKeyValues(IReadOnlyList<KeyValuePair<string, string>> pairs)
-        {
-            if (pairs.Count == 0)
-            {
-                EditorGUILayout.LabelField("(none)", EditorStyles.miniLabel);
-                return;
-            }
-            var keyWidth = Math.Min(KeyColumnWidth, _viewWidth * 0.4f);
-            var lineHeight = EditorGUIUtility.singleLineHeight;
-            foreach (var pair in pairs)
-            {
-                var value = Truncate(pair.Value);
-                var valueWidth = Math.Max(20f, _viewWidth - keyWidth);
-                var height = Math.Max(lineHeight, _valueStyle!.CalcHeight(new GUIContent(value), valueWidth));
-                var row = GUILayoutUtility.GetRect(_viewWidth, height, GUILayout.ExpandWidth(true));
-                GUI.Label(new Rect(row.x + 12, row.y, keyWidth - 12, lineHeight), new GUIContent(pair.Key, pair.Key), _keyStyle!);
-                EditorGUI.SelectableLabel(new Rect(row.x + keyWidth, row.y, row.width - keyWidth, height), value, _valueStyle!);
-            }
-        }
-
-        /// <summary>
-        /// Draws a table with a heading row and selectable single-line cells.
-        /// </summary>
-        /// <param name="headers">The column headings.</param>
-        /// <param name="weights">The share of the width of every column.</param>
-        /// <param name="rows">The cells of every row.</param>
-        private void DrawTable(string[] headers, float[] weights, List<string[]> rows)
-        {
-            var lineHeight = EditorGUIUtility.singleLineHeight;
-            var widths = new float[headers.Length];
-            var tableWidth = 0f;
-            for (var i = 0; i < headers.Length; i++)
-            {
-                widths[i] = Math.Max(48f, _viewWidth * weights[i]);
-                tableWidth += widths[i];
-            }
-            var headingRow = GUILayoutUtility.GetRect(tableWidth, lineHeight, GUILayout.ExpandWidth(true));
-            DrawCells(headingRow, widths, headers, true);
-            foreach (var row in rows)
-            {
-                var rowRect = GUILayoutUtility.GetRect(tableWidth, lineHeight, GUILayout.ExpandWidth(true));
-                DrawCells(rowRect, widths, row, false);
-            }
-        }
-
-        /// <summary>
-        /// Draws the cells of one table row.
-        /// </summary>
-        /// <param name="row">The row area.</param>
-        /// <param name="widths">The column widths.</param>
-        /// <param name="cells">The cell texts.</param>
-        /// <param name="isHeading">Whether the row is the heading row.</param>
-        private void DrawCells(Rect row, float[] widths, string[] cells, bool isHeading)
-        {
-            var x = row.x;
-            for (var i = 0; i < cells.Length; i++)
-            {
-                var cell = new Rect(x, row.y, widths[i] - 4, row.height);
-                if (isHeading)
-                {
-                    GUI.Label(cell, cells[i], _keyStyle!);
-                }
-                else
-                {
-                    EditorGUI.SelectableLabel(cell, Truncate(cells[i]), _cellStyle!);
-                }
-                x += widths[i];
-            }
-        }
-
-        /// <summary>
-        /// Draws multi-line selectable text.
-        /// </summary>
-        /// <param name="text">The text.</param>
-        private void DrawSelectableBlock(string text)
-        {
-            text = Truncate(text);
-            var height = _valueStyle!.CalcHeight(new GUIContent(text), _viewWidth) + 4;
-            EditorGUILayout.SelectableLabel(text, _valueStyle!, GUILayout.Height(height));
+            GUI.Label(durationRect, CurlNetworkFormatter.FormatDuration(phase.Duration), CurlEditorGUI.CellStyle);
         }
 
         /// <summary>
@@ -714,16 +618,6 @@ namespace MajdataPlay.Net.Editor
         private static Rect GetRemainingRect()
         {
             return GUILayoutUtility.GetRect(0, 100000, 0, 100000, GUILayout.ExpandWidth(true), GUILayout.ExpandHeight(true));
-        }
-
-        /// <summary>
-        /// Shortens text that one label cannot draw.
-        /// </summary>
-        /// <param name="text">The text.</param>
-        /// <returns>The text, cut at <see cref="MaxLabelLength"/> characters with an ellipsis.</returns>
-        private static string Truncate(string text)
-        {
-            return text.Length <= MaxLabelLength ? text : text.Substring(0, MaxLabelLength) + "...";
         }
 
         /// <summary>
@@ -743,17 +637,6 @@ namespace MajdataPlay.Net.Editor
             }
 
             return null;
-        }
-
-        /// <summary>
-        /// Creates the styles on first draw.
-        /// </summary>
-        private void EnsureStyles()
-        {
-            _sectionStyle ??= new GUIStyle(EditorStyles.foldout) { fontStyle = FontStyle.Bold };
-            _keyStyle ??= new GUIStyle(EditorStyles.label) { fontStyle = FontStyle.Bold, clipping = TextClipping.Clip };
-            _valueStyle ??= new GUIStyle(EditorStyles.label) { wordWrap = true, richText = false };
-            _cellStyle ??= new GUIStyle(EditorStyles.label) { clipping = TextClipping.Clip, richText = false };
         }
     }
 }

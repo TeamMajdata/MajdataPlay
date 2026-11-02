@@ -8,7 +8,7 @@ namespace MajdataPlay.Net.Curl.Diagnostics
 {
     /// <summary>
     /// Records the requests sent through <see cref="CurlHttpMessageHandler"/> while <see cref="IsEnabled"/> is set, for
-    /// debugging tools such as the Editor's Curl Network window.
+    /// debugging tools such as the Editor's Curl Debugger.
     /// </summary>
     /// <remarks>
     /// Recording is off by default and costs one flag check per request while it stays off. A request is recorded only

@@ -2,7 +2,7 @@
 namespace MajdataPlay.Net.Editor
 {
     /// <summary>
-    /// Which requests the Curl Network window lists.
+    /// Which requests the Curl Debugger's Network tab lists.
     /// </summary>
     internal enum CurlNetworkStateFilter
     {
