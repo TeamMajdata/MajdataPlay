@@ -122,7 +122,7 @@ namespace MajdataPlay.Tests.Game.GamePlay.Loading
         {
             _controllerSlot.Set(new GamePlayFakeNoteController
             {
-                ModInfo = new GameModInfo(new MajdataPlay.Settings.ModOptions { SlideNoHead = true, SlideNoTrack = true }),
+                ModInfo = new GameModInfo(new MajdataPlay.Settings.ModOptions { SlideNoHead = true, SlideNoTrack = true }, new MajdataPlay.Settings.GameOptions()),
             });
 
             UnityMessages.Send(_loader, "Start");

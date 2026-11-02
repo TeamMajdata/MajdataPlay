@@ -70,7 +70,7 @@ namespace MajdataPlay.Settings
         /// <summary>
         /// Evaluates every condition against the current settings.
         /// </summary>
-        /// <param name="owner">The instance that declares the annotated property: the menu instance for an option, the setting root for a menu.</param>
+        /// <param name="owner">The instance that declares the annotated property: the menu instance for an option, the <see cref="SettingRoot"/> for a menu.</param>
         /// <returns>True when every condition holds, which is always the case without conditions.</returns>
         /// <exception cref="ArgumentNullException"><paramref name="owner"/> is null.</exception>
         internal bool IsVisible(object owner)

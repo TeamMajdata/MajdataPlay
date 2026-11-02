@@ -10,8 +10,9 @@ namespace MajdataPlay.Settings
     /// <para>
     /// <see cref="MemberPath"/> names the controlling setting relative to the type that declares the annotated
     /// property, with dots between nested settings. On an option it usually names a sibling option of the same menu,
-    /// such as <c>nameof(DisplaySensor)</c>. On a menu, which is a property of <see cref="GameSetting"/>, it starts at the
-    /// setting root, such as <c>"Debug.DisplaySensor"</c>. Every segment must be a readable public property.
+    /// such as <c>nameof(DisplaySensor)</c>. On a menu, which is a property of <see cref="UserSetting"/> or
+    /// <see cref="SystemSetting"/>, it starts at <see cref="SettingRoot"/>, which holds both, such as
+    /// <c>"User.Display.DisplaySensor"</c>. Every segment must be a readable public property.
     /// </para>
     /// <para>
     /// A condition holds when the controlling setting equals any of <see cref="Values"/>. Each value is converted to the

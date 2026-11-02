@@ -8,6 +8,7 @@ using System.Threading.Tasks;
 using MajdataPlay.Collections;
 using MajdataPlay.IO.Storage;
 using MajdataPlay.Net;
+using MajdataPlay.Net.Models;
 
 namespace MajdataPlay.Tests.ChartStorageValidation
 {
@@ -112,7 +113,7 @@ namespace MajdataPlay.Tests.ChartStorageValidation
             var injected = SongStorage.Collections.Concat(new SongCollection[] { retained, oldPlaylist, oldCourse, failedCourse }).ToArray();
             var collectionsProperty = typeof(SongStorage).GetProperty(nameof(SongStorage.Collections), BindingFlags.Public | BindingFlags.Static)!;
             collectionsProperty.SetValue(null, injected);
-            MajEnv.Settings.Online.Enable = true;
+            MajEnv.SystemSettings.Network.Online.Enable = true;
             MajEnv.ApiEndpoints = new[] { endpoint, failingEndpoint };
             try
             {
@@ -219,7 +220,7 @@ namespace MajdataPlay.Tests.ChartStorageValidation
             {
                 Online.FavoritesHandler = null;
                 MajEnv.ApiEndpoints = originalEndpoints;
-                MajEnv.Settings.Online.Enable = false;
+                MajEnv.SystemSettings.Network.Online.Enable = false;
             }
         }
     }

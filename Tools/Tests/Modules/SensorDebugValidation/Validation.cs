@@ -61,7 +61,7 @@ namespace MajdataPlay.Tests.SensorDebugValidation
                 typeof(DummyTouchPanelRenderer).GetMethod("Awake", flags)!.Invoke(component, null);
                 Check(renderers.All(renderer => !renderer.enabled), "Awake disables every renderer before the first update.");
                 Check(component.InstanceID2SensorIndexMappingTable.Count == 34, "All input mappings survive initialization.");
-                var settings = MajEnv.Settings.Debug;
+                var settings = MajEnv.UserSettings.Display;
                 var block = new MaterialPropertyBlock();
                 var colorId = Shader.PropertyToID("_BaseColor");
                 var materialColor = material.GetColor(colorId);
@@ -131,25 +131,25 @@ namespace MajdataPlay.Tests.SensorDebugValidation
                 ObjectCreationHandling = ObjectCreationHandling.Replace,
                 Converters = { new StringEnumConverter() }
             };
-            var defaults = JsonConvert.DeserializeObject<DebugOptions>("{}", serializer)!;
+            var defaults = JsonConvert.DeserializeObject<DisplayOptions>("{}", serializer)!;
             Check(defaults.SensorStyle == SensorDebugStyle.RedGreen && defaults.SensorOpacity == 20 && defaults.SensorPosition == SensorDebugPosition.MainScreen, "Missing new keys preserve the main-screen red/green default.");
             foreach (var style in new[] { SensorDebugStyle.Brightness, SensorDebugStyle.RedGreen, SensorDebugStyle.Classic })
             {
-                var options = new DebugOptions { SensorStyle = style, SensorOpacity = 30, DisplaySensor = true, DisplayOffset = 0.125f };
+                var options = new DisplayOptions { SensorStyle = style, SensorOpacity = 30, DisplaySensor = true, TapScale = 1.25f };
                 var json = JsonConvert.SerializeObject(options, serializer);
                 Check(json.Contains("\"SensorStyle\":\"" + style + "\""), "The saved enum uses its stable string name.");
-                var restored = JsonConvert.DeserializeObject<DebugOptions>(json, serializer)!;
-                Check(restored.SensorStyle == style && restored.SensorOpacity == 30 && restored.DisplaySensor && restored.DisplayOffset == 0.125f, "New and existing debug fields round-trip together.");
+                var restored = JsonConvert.DeserializeObject<DisplayOptions>(json, serializer)!;
+                Check(restored.SensorStyle == style && restored.SensorOpacity == 30 && restored.DisplaySensor && restored.TapScale == 1.25f, "New and existing display fields round-trip together.");
             }
-            var invalid = JsonConvert.DeserializeObject<DebugOptions>("{\"SensorStyle\":1234}", serializer)!;
+            var invalid = JsonConvert.DeserializeObject<DisplayOptions>("{\"SensorStyle\":1234}", serializer)!;
             Check(invalid.SensorStyle == SensorDebugStyle.RedGreen, "Unknown numeric styles fall back safely.");
             foreach (var position in new[] { SensorDebugPosition.MainScreen, SensorDebugPosition.SubScreen })
             {
-                var json = JsonConvert.SerializeObject(new DebugOptions { SensorPosition = position }, serializer);
+                var json = JsonConvert.SerializeObject(new DisplayOptions { SensorPosition = position }, serializer);
                 Check(json.Contains("\"SensorPosition\":\"" + position + "\""), "The position enum uses a stable JSON string.");
-                Check(JsonConvert.DeserializeObject<DebugOptions>(json, serializer)!.SensorPosition == position, "The sensor display position round-trips.");
+                Check(JsonConvert.DeserializeObject<DisplayOptions>(json, serializer)!.SensorPosition == position, "The sensor display position round-trips.");
             }
-            invalid = JsonConvert.DeserializeObject<DebugOptions>("{\"SensorPosition\":1234}", serializer)!;
+            invalid = JsonConvert.DeserializeObject<DisplayOptions>("{\"SensorPosition\":1234}", serializer)!;
             Check(invalid.SensorPosition == SensorDebugPosition.MainScreen, "Unknown numeric positions fall back to the main screen.");
         }
 
@@ -170,7 +170,7 @@ namespace MajdataPlay.Tests.SensorDebugValidation
         /// <param name="originalMatrices">The original input transforms.</param>
         private static void ValidatePositions(DummyTouchPanelRenderer component, MeshFilter[] filters, MeshRenderer[] renderers, MeshCollider[] colliders, Mesh[] colliderMeshes, Matrix4x4[] originalMatrices)
         {
-            var settings = MajEnv.Settings.Debug;
+            var settings = MajEnv.UserSettings.Display;
             var transformId = Shader.PropertyToID("_SensorDisplayTransform");
             var colorId = Shader.PropertyToID("_BaseColor");
             var block = new MaterialPropertyBlock();
@@ -288,7 +288,7 @@ namespace MajdataPlay.Tests.SensorDebugValidation
             var positions = filters.Select(filter => filter.transform.localPosition).ToArray();
             var rotations = filters.Select(filter => filter.transform.localRotation).ToArray();
             var scales = filters.Select(filter => filter.transform.localScale).ToArray();
-            var settings = MajEnv.Settings.Debug;
+            var settings = MajEnv.UserSettings.Display;
             var edge = new Vector4(-6, 12, 6, 7);
             var block = new MaterialPropertyBlock();
             var transformId = Shader.PropertyToID("_SensorDisplayTransform");

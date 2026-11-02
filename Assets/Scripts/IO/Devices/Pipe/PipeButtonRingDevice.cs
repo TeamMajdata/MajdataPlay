@@ -20,7 +20,7 @@ namespace MajdataPlay.IO
         NamedPipeClientStream? _stream;
         public PipeButtonRingDevice() => _onPacket = OnPacketReceived;
         protected override string DaemonThreadName => "IO/ButtonRing Thread";
-        protected override TimeSpan PollingInterval => TimeSpan.FromMilliseconds(MajEnv.Settings.IO.InputDevice.ButtonRing.PollingRateMs);
+        protected override TimeSpan PollingInterval => TimeSpan.FromMilliseconds(MajEnv.SystemSettings.IO.InputDevice.ButtonRing.PollingRateMs);
 
         protected override bool Connect(CancellationToken token)
         {

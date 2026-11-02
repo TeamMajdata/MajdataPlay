@@ -27,6 +27,20 @@ namespace MajdataPlay.Net.Curl.Lifecycle
         /// </summary>
         static readonly object s_initLock = new object();
 
+        /// <summary>
+        /// Gets the number of live handles that depend on the initialized libcurl global state.
+        /// </summary>
+        public static int ReferenceCount
+        {
+            get
+            {
+                lock (s_initLock)
+                {
+                    return s_refCount;
+                }
+            }
+        }
+
         static LibCurlLifecycle()
         {
             // curl_global_cleanup() must only run once every curl user is gone and while the process is

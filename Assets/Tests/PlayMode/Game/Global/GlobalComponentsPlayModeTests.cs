@@ -82,8 +82,8 @@ namespace MajdataPlay.Tests.Game.Global.PlayMode
                 Assert.That(renderers[0].enabled, Is.False, "sensors start hidden");
                 Assert.That(renderers[0].sortingOrder, Is.EqualTo(short.MaxValue));
 
-                _settings.Settings.Debug.DisplaySensor = true;
-                _settings.Settings.Debug.SensorOpacity = 30;
+                _settings.UserSettings.Display.DisplaySensor = true;
+                _settings.UserSettings.Display.SensorOpacity = 30;
                 raw.Span.Clear();
                 raw.Span[3] = true;
                 renderer.OnPreUpdate();
@@ -93,7 +93,7 @@ namespace MajdataPlay.Tests.Game.Global.PlayMode
                 Assert.That(ReadColor(renderers[3]), Is.EqualTo(new Color(0f, 1f, 0f, 0.3f)));
                 Assert.That(ReadColor(renderers[0]), Is.EqualTo(new Color(1f, 0f, 0f, 0.3f)));
 
-                _settings.Settings.Debug.DisplaySensor = false;
+                _settings.UserSettings.Display.DisplaySensor = false;
                 renderer.OnPreUpdate();
                 Assert.That(renderers[3].enabled, Is.False);
             }

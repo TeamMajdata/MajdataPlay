@@ -3,6 +3,7 @@ using MajdataPlay.Buffers;
 using MajdataPlay.Diagnostics;
 using MajdataPlay.IO;
 using MajdataPlay.Net;
+using MajdataPlay.Net.Models;
 using QRCoder;
 using System;
 using System.Linq;
@@ -280,7 +281,7 @@ namespace MajdataPlay.Scenes.Login
                             {
                                 if (authCheckCooldownSec < 0)
                                 {
-                                    authCheckTask = Online.AuthCheckAsync(endpoint, authRequestId, cts.Token);
+                                    authCheckTask = Online.Machine.AuthCheckAsync(endpoint, authRequestId, cts.Token);
                                     authCheckCooldownSec = 2d;
                                     MajDebug.LogDebug("Checking the auth session");
                                 }
@@ -339,7 +340,7 @@ namespace MajdataPlay.Scenes.Login
                             var username = _usernameInput.text;
                             var password = _passwordInput.text;
                             MajDebug.LogInfo("Trying to log in via Plain");
-                            var task = Online.LoginAsync(endpoint, username, password);
+                            var task = Online.Account.LoginAsync(endpoint, username, password);
 
                             _loading.SetActive(true);
                             while (!task.IsCompleted)
@@ -479,8 +480,8 @@ namespace MajdataPlay.Scenes.Login
         }
         private async ValueTask<UserData> FetchUserDataAsync(ApiEndpoint endpoint, CancellationToken token = default)
         {
-            var fetchProfileRsp = await Online.GetUserProfileAsync(endpoint, token);
-            var userScores = await Online.GetUserScoresAsync(endpoint, token);
+            var fetchProfileRsp = await Online.Account.GetProfileAsync(endpoint, token);
+            var userScores = await Online.Account.GetScoresAsync(endpoint, token);
             var userInfo = default(UserProfile?);
             if (fetchProfileRsp.TryDeserialize(out var userInfoOut, out var e))
             {
@@ -507,7 +508,7 @@ namespace MajdataPlay.Scenes.Login
                 var result = (UserProfile)userInfo;
                 _loading.SetActive(true);
                 Hint("MAJTEXT_LOGIN_DOWNLOADING_AVATAR".i18n(), false);
-                var avatarTask = Online.GetAvatarAsync(endpoint, result.AvatarId, onError: Hint);
+                var avatarTask = Online.Account.GetAvatarAsync(endpoint, result.AvatarId, onError: Hint);
                 while (!avatarTask.IsCompleted)
                 {
                     await UniTask.Yield();
@@ -539,7 +540,7 @@ namespace MajdataPlay.Scenes.Login
         }
         private async UniTask RevokeAuthSession(ApiEndpoint endpoint, string authId, CancellationToken token = default)
         {
-            var revokeTask = Online.AuthRevokeAsync(endpoint, authId);
+            var revokeTask = Online.Machine.AuthRevokeAsync(endpoint, authId);
             while (!revokeTask.IsCompleted)
             {
                 await UniTask.Yield();
@@ -558,12 +559,12 @@ namespace MajdataPlay.Scenes.Login
         {
             await UniTask.SwitchToThreadPool();
             EndpointResponse rsp;
-            if (!Online.IsMachineRegistered(endpoint))
+            if (!Online.Machine.IsRegistered(endpoint))
             {
                 try
                 {
 
-                    rsp = await Online.RegisterAsync(endpoint, MajEnv.MachineInfo, token);
+                    rsp = await Online.Machine.RegisterAsync(endpoint, MajEnv.SystemSettings.Network.Online.Machine, token);
                     if (!rsp.IsSuccessfully)
                     {
                         throw s_exception;
@@ -578,7 +579,7 @@ namespace MajdataPlay.Scenes.Login
 
             try
             {
-                rsp = await Online.AuthRequestAsync(endpoint, token);
+                rsp = await Online.Machine.AuthRequestAsync(endpoint, token);
                 if (!rsp.IsDeserializable || rsp.StatusCode != HttpStatusCode.Created)
                 {
                     throw s_exception;

@@ -501,7 +501,7 @@ namespace MajdataPlay.Tests.Game.IO
                 InputManager.UseGameplayTouchEnhancementFeatures = true;
                 InputManager.TouchButtonRingEdge = 4.5f;
                 InputManager.SubScreenEdge = new Vector4(1, 2, 3, 4);
-                _settings.Settings.Debug.TouchSimulationRadius = 0.9f;
+                _settings.UserSettings.Touch.TouchSimulationRadius = 0.9f;
 
                 Assert.That(ScreenTouchMapper.Override_TouchSimulationRadius, Is.EqualTo(0.7f));
                 Assert.That(InputManager.Override_TouchAAreaExtraRadius, Is.EqualTo(0.1f));

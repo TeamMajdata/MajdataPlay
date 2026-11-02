@@ -13,7 +13,7 @@ machine, driver, display mode and refresh rate.
 
 ## In-game diagnostics
 
-Set the hidden debug option in `settings.json` and start the game:
+Set the hidden debug option in `system-settings.json` and start the game:
 
 ```json
 "Debug": {
@@ -22,7 +22,7 @@ Set the hidden debug option in `settings.json` and start the game:
 ```
 
 `ProjectSettings` enables **Frame Timing Stats**, so release Players report frame timings. While the option is
-on, the runtime info overlay (`Debug.DisplayRuntimeInfo`) shows a second line, and every 5 seconds the log
+on, the runtime info overlay (`Rendering.DisplayRuntimeInfo`) shows a second line, and every 5 seconds the log
 receives an `Info` entry with the tag `FrameTimingDiagnostics`:
 
 ```text
@@ -49,13 +49,13 @@ The pacing wait happens before the game samples time and input, so it does not a
 
 With VSync on, the Vulkan FIFO swapchain lets the game run until every swapchain image is queued, so frames
 are rendered about three refresh intervals before they are shown (D3D11 limits this queue with a waitable
-swapchain). The hidden option `Debug.LowLatencyVSync` (default `true`) makes `LowLatencyVSync` wait at the
+swapchain). The hidden option `Rendering.VulkanLowLatencyVSync` (default `true`) makes `LowLatencyVSync` wait at the
 start of each frame so that frames are produced 0.1 % slower than the display refreshes, which keeps the queue
 empty. It applies only on desktop with the Vulkan backend and VSync on. The display then shows one frame twice
 about every 1000 frames (about 17 s at 60 Hz). If the reported refresh rate is higher than the real one, the
 pacer measures the real period after 120 unpaced frames and logs `frame interval re-measured`.
 
-To verify it, run Vulkan with VSync on twice, with `Debug.LowLatencyVSync` set to `false` and `true`, and compare
+To verify it, run Vulkan with VSync on twice, with `Rendering.VulkanLowLatencyVSync` set to `false` and `true`, and compare
 `start->present - pacingWait`. Also watch fast-moving notes for the periodic repeated frame.
 
 ### Driver low latency and present waiting (Windows players)
@@ -82,7 +82,7 @@ active and why others are skipped:
 - `Swapchain changed (generation N); pacing follows the new swapchain` after a window resize or fullscreen toggle
 - `Presentation ids come from the pacing layer|Unity`
 
-Set the hidden option `Debug.LowLatencyVSyncBackend` to `PresentWait` (skip the driver mode) or `Timer` to compare
+Set the hidden option `Rendering.VulkanLowLatencyVSyncBackend` to `PresentWait` (skip the driver mode) or `Timer` to compare
 backends. The Editor always uses timer pacing, because its views present through several swapchains.
 
 To check a driver backend without Unity, in particular `VK_AMD_anti_lag` on an AMD GPU, use the hardware probe

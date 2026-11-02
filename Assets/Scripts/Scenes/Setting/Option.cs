@@ -144,7 +144,7 @@ namespace MajdataPlay.Scenes.Setting
         private void RefreshDescriptionUnit()
         {
             if (_isSelected && _data is not null && _data.IsOffsetOption &&
-                _descriptionOffsetUnit != MajEnv.Settings.Debug.OffsetUnit)
+                _descriptionOffsetUnit != MajEnv.UserSettings.Judge.OffsetUnit)
             {
                 SetDescriptionText();
             }
@@ -166,7 +166,7 @@ namespace MajdataPlay.Scenes.Setting
 
         private static float GetRepeatInterval()
         {
-            var iterationSpeed = MajEnv.Settings.Debug.MenuOptionIterationSpeed;
+            var iterationSpeed = MajEnv.SystemSettings.Common.MenuOptionIterationSpeed;
             return 1f / (iterationSpeed is 0 ? 15 : iterationSpeed);
         }
 
@@ -176,7 +176,7 @@ namespace MajdataPlay.Scenes.Setting
             {
                 return;
             }
-            _descriptionOffsetUnit = MajEnv.Settings.Debug.OffsetUnit;
+            _descriptionOffsetUnit = MajEnv.UserSettings.Judge.OffsetUnit;
             if (!_data.HasDescription)
             {
                 _manager.SetDescriptionText(string.Empty);

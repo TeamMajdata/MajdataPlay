@@ -218,7 +218,7 @@ namespace MajdataPlay.Rendering
         private static bool TryPaceWithLayer(double refreshRate)
         {
 #if UNITY_STANDALONE_WIN && !UNITY_EDITOR
-            var allowed = MajEnv.Settings.Debug.LowLatencyVSyncBackend;
+            var allowed = MajEnv.SystemSettings.Rendering.VulkanLowLatencyVSyncBackend;
             var presentWait = allowed != LowLatencyVSyncBackendOption.Timer && EnsurePresentWaitPacer();
             var driver = allowed == LowLatencyVSyncBackendOption.Auto && EnsureDriverPacer();
             if (!presentWait && !driver)
@@ -396,7 +396,7 @@ namespace MajdataPlay.Rendering
 #if (UNITY_ANDROID || UNITY_IOS) && !UNITY_EDITOR
             return false;
 #else
-            return MajEnv.Settings.Debug.LowLatencyVSync
+            return MajEnv.SystemSettings.Rendering.VulkanLowLatencyVSync
                 && QualitySettings.vSyncCount > 0
                 && SystemInfo.graphicsDeviceType == GraphicsDeviceType.Vulkan;
 #endif

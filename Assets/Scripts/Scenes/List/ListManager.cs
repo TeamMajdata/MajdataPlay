@@ -96,7 +96,7 @@ namespace MajdataPlay.Scenes.List
             {
                 MajDebug.LogError("[ListManager] [Awake] " + ex.Message);
             }
-            _isOnlineEnabled = MajEnv.Settings.Online.Enable;
+            _isOnlineEnabled = MajEnv.SystemSettings.Network.Online.Enable;
 
 
             _favoriteAdder.PressToAddTime = 0.5f;
@@ -635,7 +635,7 @@ namespace MajdataPlay.Scenes.List
             }
             await UniTask.Delay(100);
             sceneSwitcher.SetLoadingText("MAJTEXT_LOGGING_OUT".i18n() + "...");
-            var task = Online.LogoutAllAsync();
+            var task = Online.Account.LogoutAllAsync();
             while (!task.IsCompleted)
             {
                 await UniTask.Yield();

@@ -227,7 +227,7 @@ namespace MajdataPlay.Tests.Game.Notes.PlayMode
         [UnityTest]
         public IEnumerator NeverPressed_IsMiss()
         {
-            _rig.Settings.Display.DisplayHoldHeadJudgeResult = true;
+            _rig.UserSettings.Judge.DisplayHoldHeadJudgeResult = true;
             var hold = _rig.SpawnHold(GameplayRig.HoldInfo(timing: 1f, length: 1f));
             yield return null;
 
@@ -320,7 +320,7 @@ namespace MajdataPlay.Tests.Game.Notes.PlayMode
         [UnityTest]
         public IEnumerator Classic_ReleaseEndsHoldWithReleaseJudgment()
         {
-            _rig.Settings.Judge.Mode = JudgeModeOption.Classic;
+            _rig.UserSettings.Judge.Mode = JudgeModeOption.Classic;
             var hold = _rig.SpawnHold(GameplayRig.HoldInfo(timing: 1f, length: 1f));
             var renderer = hold.GetComponent<SpriteRenderer>();
             yield return null;
@@ -342,7 +342,7 @@ namespace MajdataPlay.Tests.Game.Notes.PlayMode
         [UnityTest]
         public IEnumerator Classic_ReleaseAtEndIsPerfect()
         {
-            _rig.Settings.Judge.Mode = JudgeModeOption.Classic;
+            _rig.UserSettings.Judge.Mode = JudgeModeOption.Classic;
             var hold = _rig.SpawnHold(GameplayRig.HoldInfo(timing: 1f, length: 1f));
             yield return null;
             _rig.SetButton(ButtonZone.A1, SwitchStatus.Off, SwitchStatus.On);
@@ -364,7 +364,7 @@ namespace MajdataPlay.Tests.Game.Notes.PlayMode
         [UnityTest]
         public IEnumerator Classic_ForceEndsOverlongAndMissedHolds()
         {
-            _rig.Settings.Judge.Mode = JudgeModeOption.Classic;
+            _rig.UserSettings.Judge.Mode = JudgeModeOption.Classic;
             var held = _rig.SpawnHold(GameplayRig.HoldInfo(startPos: 1, timing: 1f, length: 1f));
             var missed = _rig.SpawnHold(GameplayRig.HoldInfo(startPos: 2, timing: 1f, length: 1f));
             yield return null;

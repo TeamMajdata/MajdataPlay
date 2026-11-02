@@ -217,6 +217,16 @@ namespace MajdataPlay.Net.Curl.Core.PInvoke
         /// </summary>
         SeekData = CurlOptionType.ObjectPointer + 168,
 
+        /// <summary>
+        /// Pass a pointer to the debug callback userdata.
+        /// </summary>
+        DebugData = CurlOptionType.ObjectPointer + 95,
+
+        /// <summary>
+        /// Pass a pointer to the pre-request callback userdata.
+        /// </summary>
+        PrereqData = CurlOptionType.ObjectPointer + 313,
+
         #endregion
 
 
@@ -261,6 +271,11 @@ namespace MajdataPlay.Net.Curl.Core.PInvoke
         /// Callback function for seeking in the input stream
         /// </summary>
         SeekFunction = CurlOptionType.FunctionPointer + 167,
+
+        /// <summary>
+        /// Pre-request callback, called once a connection is ready and just before each request is sent.
+        /// </summary>
+        PrereqFunction = CurlOptionType.FunctionPointer + 312,
 
         #endregion
 

@@ -3,6 +3,7 @@ using System.Collections;
 using LitMotion;
 using MajdataPlay.IO;
 using MajdataPlay.Net;
+using MajdataPlay.Net.Models;
 using MajdataPlay.Scenes.Login;
 using MajdataPlay.Scenes.Result.Components;
 using MajdataPlay.Scenes.Result.Components.Indicators;
@@ -180,7 +181,7 @@ namespace MajdataPlay.Tests.Game.Scenes.PlayMode.MiscScenes
             PrivateMember.Invoke(title, "OnAreaClick", null, Event(true, false, ButtonZone.A4));
             Assert.That(Sfx("bgm_title.mp3").StopCount, Is.EqualTo(1));
 
-            MajEnv.Settings.Online.Enable = true;
+            MajEnv.SystemSettings.Network.Online.Enable = true;
             ExpectSceneSwitch();
             PrivateMember.Invoke(title, "OnAreaClick", null, Event(false, false, area: SensorArea.E4));
             Assert.That(Sfx("MajdataPlay.wav").StopCount, Is.EqualTo(2));

@@ -121,13 +121,13 @@ internal static partial class Program
         Check(!typeof(KeyboardButtonRingDevice).IsNested && typeof(KeyboardButtonRingDevice).Namespace == "MajdataPlay.IO",
             "Keyboard device is standalone rather than nested under InputManager");
         var previousKeyboard = Keyboard.current;
-        var previousPolling = MajEnv.Settings.IO.InputDevice.ButtonRing.PollingRateMs;
+        var previousPolling = MajEnv.SystemSettings.IO.InputDevice.ButtonRing.PollingRateMs;
         try
         {
             var keyboard = new Keyboard();
             Keyboard.current = keyboard;
             var device = new KeyboardButtonRingDevice();
-            MajEnv.Settings.IO.InputDevice.ButtonRing.PollingRateMs = 17;
+            MajEnv.SystemSettings.IO.InputDevice.ButtonRing.PollingRateMs = 17;
             var interval = (TimeSpan)typeof(KeyboardButtonRingDevice).GetProperty("PollingInterval", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(device)!;
             Check(interval.TotalMilliseconds == 17, "Standalone keyboard reads polling settings without InputManager state");
             keyboard[Key.W].isPressed = true;
@@ -168,7 +168,7 @@ internal static partial class Program
         finally
         {
             Keyboard.current = previousKeyboard;
-            MajEnv.Settings.IO.InputDevice.ButtonRing.PollingRateMs = previousPolling;
+            MajEnv.SystemSettings.IO.InputDevice.ButtonRing.PollingRateMs = previousPolling;
         }
     }
 
@@ -281,8 +281,8 @@ internal static partial class Program
 
     static void VerifySharedDaoPolling()
     {
-        var input = MajEnv.Settings.IO.InputDevice;
-        var led = MajEnv.Settings.IO.OutputDevice.Led;
+        var input = MajEnv.SystemSettings.IO.InputDevice;
+        var led = MajEnv.SystemSettings.IO.OutputDevice.Led;
         input.ButtonRing.Enable = true;
         input.TouchPanel.Enable = true;
         input.ButtonRing.PollingRateMs = 100;
@@ -404,8 +404,8 @@ internal static partial class Program
 
     static void VerifySharedDeviceFactory()
     {
-        var input = MajEnv.Settings.IO.InputDevice;
-        var output = MajEnv.Settings.IO.OutputDevice;
+        var input = MajEnv.SystemSettings.IO.InputDevice;
+        var output = MajEnv.SystemSettings.IO.OutputDevice;
         var previousButtonConnection = IODetector.ButtonRingHidConnInfo;
         var previousLedConnection = IODetector.LedDeviceHidConnInfo;
         var previousManufacturer = IODetector.DeviceManufacturer;

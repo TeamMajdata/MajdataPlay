@@ -37,7 +37,7 @@ namespace MajdataPlay.Scenes.Game
         {
             get
             {
-                return (_gameSettings?.Judge.Mode ?? JudgeModeOption.Modern) == JudgeModeOption.Classic;
+                return (_userSettings?.Judge.Mode ?? JudgeModeOption.Modern) == JudgeModeOption.Classic;
             }
         }
         // Timeline
@@ -117,8 +117,8 @@ namespace MajdataPlay.Scenes.Game
         private Sprite _maskSpriteB;
         [SerializeField]
         private Animator _bgInfoHeaderAnim;
-        [SerializeField]
-        private GameSetting _gameSettings;
+        private UserSetting _userSettings;
+        private SystemSetting _systemSettings;
         [SerializeField]
         private GameObject _skipBtn;
         [SerializeField]
@@ -212,10 +212,11 @@ namespace MajdataPlay.Scenes.Game
             Majdata<INoteController>.Instance = this;
             Majdata<INoteTimeProvider>.Instance = this;
             _gameInfo = Majdata<GameInfo>.Instance!;
-            _gameSettings = MajEnv.Settings;
-            _enforceGameFailureCondition = _gameSettings.Game.EnforceGameFailure;
+            _userSettings = MajEnv.UserSettings;
+            _systemSettings = MajEnv.SystemSettings;
+            _enforceGameFailureCondition = _userSettings.Game.EnforceGameFailure;
             _isEnforceFastRetry = (int)_enforceGameFailureCondition % 2 == 0;
-            _isManualStartGame = _gameSettings.Game.ManualStartGame;
+            _isManualStartGame = _userSettings.Game.ManualStartGame;
             DefaultMaterial = RuntimeDatabase.Note.DefaultMaterial;
             BreakMaterial = RuntimeDatabase.Note.BreakMaterial;
             HoldShineMaterial = RuntimeDatabase.Note.HoldShineMaterial;
@@ -224,7 +225,7 @@ namespace MajdataPlay.Scenes.Game
                 throw new ArgumentNullException(nameof(_gameInfo));
             }
             //print(MajInstances.GameManager.SelectedIndex);
-            _screenRotationAngle = _gameSettings.Display.GameplayScreenRotationAngle;
+            _screenRotationAngle = _systemSettings.Rendering.GameplayScreenRotationAngle;
             _songDetail = _gameInfo.Current;
             HistoryScore = ScoreManager.GetScore(_songDetail, _listConfig.SelectedDiff);
             if (HistoryScore is not null)
@@ -236,21 +237,21 @@ namespace MajdataPlay.Scenes.Game
             var diffColor = RuntimeDatabase.DifficultyColors[(int)_gameInfo.CurrentLevel];
             _levelCircleDisplayer.color = diffColor;
             _levelBGDisplayer.color = diffColor;
-            if (_gameSettings.Debug.OffsetUnit == OffsetUnitOption.Second)
+            if (_userSettings.Judge.OffsetUnit == OffsetUnitOption.Second)
             {
-                _audioTimeOffsetSec = _gameSettings.Judge.AudioOffset;
+                _audioTimeOffsetSec = _userSettings.Judge.AudioOffset;
                 _audioTimeOffsetSec += _chartSetting.AudioOffset;
-                _displayOffsetSec = _gameSettings.Debug.DisplayOffset;
+                _displayOffsetSec = _systemSettings.Debug.DisplayOffset;
             }
             else
             {
-                _audioTimeOffsetSec = _gameSettings.Judge.AudioOffset * MajEnv.FRAME_LENGTH_SEC;
+                _audioTimeOffsetSec = _userSettings.Judge.AudioOffset * MajEnv.FRAME_LENGTH_SEC;
                 _audioTimeOffsetSec += _chartSetting.AudioOffset * MajEnv.FRAME_LENGTH_SEC;
-                _displayOffsetSec = _gameSettings.Debug.DisplayOffset * MajEnv.FRAME_LENGTH_SEC;
+                _displayOffsetSec = _systemSettings.Debug.DisplayOffset * MajEnv.FRAME_LENGTH_SEC;
             }
-            _trackVolume = (MajEnv.Settings.Audio.Volume.Track + _chartSetting.TrackVolumeOffset).Clamp(0, 2);
+            _trackVolume = (MajEnv.UserSettings.Volume.Track + _chartSetting.TrackVolumeOffset).Clamp(0, 2);
 #if !UNITY_EDITOR && UNITY_STANDALONE
-            if(_gameSettings.Debug.HideCursorInGame)
+            if(_systemSettings.Common.HideCursorInGame)
             {
                 Cursor.visible = false;
             }
@@ -265,7 +266,7 @@ namespace MajdataPlay.Scenes.Game
                 Destroy(GameObject.Find("EventSystem"));
             }
 #if UNITY_ANDROID || UNITY_IOS
-            InputManager.UseOuterTouchAsSensor = _gameSettings.Game.ButtonRingForTouch;
+            InputManager.UseOuterTouchAsSensor = _userSettings.Game.ButtonRingForTouch;
             InputManager.UseGameplayTouchEnhancementFeatures = true;
 #endif
             InputManager.TouchButtonRingEdge = 5.4f;
@@ -295,7 +296,7 @@ namespace MajdataPlay.Scenes.Game
             _recorderStateDisplayer = Majdata<RecorderStatusDisplayer>.Instance!;
 
             _errText = GameObject.Find("ErrText").GetComponent<TextMeshProUGUI>();
-            _chartRotation = _gameSettings.Game.Rotation.Clamp(-7, 7);
+            _chartRotation = _userSettings.Game.Rotation.Clamp(-7, 7);
 
             switch (_screenRotationAngle)
             {
@@ -454,8 +455,8 @@ namespace MajdataPlay.Scenes.Game
         }
         private void LoadGameMod()
         {
-            var modsetting = MajInstances.GameManager.Settings.Mod;
-            ModInfo = modsetting;
+            var modsetting = MajInstances.GameManager.SystemSettings.Mod;
+            ModInfo = new GameModInfo(modsetting, _userSettings.Game);
             //AutoplayParam = mod5.Value ?? 7;
         }
         /// <summary>
@@ -509,7 +510,7 @@ namespace MajdataPlay.Scenes.Game
                         lastPercent = percent;
                         _sceneSwitcher.SetLoadingText($"{"MAJTEXT_DOWNLOADING_PICTURE".i18n()}...\n{percent * 100:F2}%");
                     }
-                    if (!(_chartSetting.DisableVideoBG || _gameSettings.Display.SkipVideoDownload))
+                    if (!(_chartSetting.DisableVideoBG || _userSettings.Game.SkipVideoDownload))
                     {
                         lastPercent = 0;
                         progress.Reset();
@@ -651,7 +652,7 @@ namespace MajdataPlay.Scenes.Game
                     _audioTrackStartAt = (float)startAt;
                 }
             }
-            AudioLength = (float)_audioSample.Length.TotalSeconds / MajEnv.Settings.Mod.PlaybackSpeed;
+            AudioLength = (float)_audioSample.Length.TotalSeconds / MajEnv.SystemSettings.Mod.PlaybackSpeed;
         }
         /// <summary>
         /// Parse the chart into memory
@@ -662,7 +663,7 @@ namespace MajdataPlay.Scenes.Game
         {
             void ChartMirror(ref string chartContent)
             {
-                var mirrorType = _gameSettings.Game.Mirror;
+                var mirrorType = _userSettings.Game.Mirror;
                 if (mirrorType is MirrorOption.Off)
                 {
                     return;
@@ -777,14 +778,14 @@ namespace MajdataPlay.Scenes.Game
         {
             await UniTask.Yield(PlayerLoopTiming.LastPostLateUpdate);
 
-            var dim = _gameSettings.Game.BackgroundDim;
+            var dim = _userSettings.Game.BackgroundDim;
 
             if (dim < 1f)
             {
                 var isNeed2DownloadVideo = _songDetail.IsOnline && !_songDetail.IsVideoLoaded;
                 var cover = await _songDetail.GetCoverAsync(false);
                 await UniTask.SwitchToMainThread();
-                if (_chartSetting.DisableVideoBG || (_gameSettings.Display.SkipVideoDownload && isNeed2DownloadVideo))
+                if (_chartSetting.DisableVideoBG || (_userSettings.Game.SkipVideoDownload && isNeed2DownloadVideo))
                 {
                     _bgManager.SetBackgroundPic(cover);
                 }
@@ -814,9 +815,9 @@ namespace MajdataPlay.Scenes.Game
         {
             await UniTask.Yield(PlayerLoopTiming.LastPostLateUpdate);
 
-            var tapSpeed = Math.Abs(_gameSettings.Game.TapSpeed);
+            var tapSpeed = Math.Abs(_userSettings.Game.TapSpeed);
 
-            if (_gameSettings.Game.TapSpeed < 0)
+            if (_userSettings.Game.TapSpeed < 0)
             {
                 _noteLoader.NoteSpeed = -((float)(107.25 / (71.4184491 * Mathf.Pow(tapSpeed + 0.9975f, -0.985558604f))));
             }
@@ -824,8 +825,8 @@ namespace MajdataPlay.Scenes.Game
             {
                 _noteLoader.NoteSpeed = ((float)(107.25 / (71.4184491 * Mathf.Pow(tapSpeed + 0.9975f, -0.985558604f))));
             }
-            _noteLoader.TouchSpeed = _gameSettings.Game.TouchSpeed;
-            _noteLoader.SlidePathStyle = _gameSettings.Display.SlidePathStyle;
+            _noteLoader.TouchSpeed = _userSettings.Game.TouchSpeed;
+            _noteLoader.SlidePathStyle = _userSettings.Display.SlidePathStyle;
             _noteLoader.ChartRotation = _chartRotation + (2 * (int)_screenRotationAngle);
 
             //var loaderTask = noteLoader.LoadNotes(Chart);
@@ -886,7 +887,7 @@ namespace MajdataPlay.Scenes.Game
             const float BG_FADE_IN_LENGTH_SEC = 0.25f;
             Time.timeScale = 1f;
             var firstClockTiming = _noteAudioManager.FirstClockTiming;
-            var leadInTime = _gameSettings.Game.LeadInTime.Clamp(1, 5);
+            var leadInTime = _userSettings.Game.LeadInTime.Clamp(1, 5);
             float extraTime = leadInTime;
             if (firstClockTiming < 0f)
             {
@@ -966,7 +967,7 @@ namespace MajdataPlay.Scenes.Game
             var startSec = _audioTrackStartAt * PlaybackSpeed;
             if (!IsPracticeMode)
             {
-                var userSettingBGDim = _gameSettings.Game.BackgroundDim;
+                var userSettingBGDim = _userSettings.Game.BackgroundDim;
                 var dimDiff = 1 - userSettingBGDim;
                 var bgFadeStartTiming = MathF.Min(firstClockTiming, -BG_FADE_IN_LENGTH_SEC);
                 while (_timer.ElapsedSecondsAsFloat - _audioStartTime < 0)
@@ -997,7 +998,7 @@ namespace MajdataPlay.Scenes.Game
                 _bgManager.PlayVideo(videoStartAt, PlaybackSpeed);
                 MajDebug.LogDebug("Video wait loop exited");
             });
-            _bgManager.SetBrightness(1 - _gameSettings.Game.BackgroundDim);
+            _bgManager.SetBrightness(1 - _userSettings.Game.BackgroundDim);
             _audioSample.Play();
             _audioSample.Volume = 0;
             _audioSample.CurrentSec = startSec;
@@ -1041,7 +1042,7 @@ namespace MajdataPlay.Scenes.Game
             {
                 return;
             }
-            switch (MajEnv.Settings.Game.BGInfo)
+            switch (MajEnv.UserSettings.Display.BGInfo)
             {
                 case BGInfoOption.Achievement_101:
                 case BGInfoOption.Achievement_100:
@@ -1335,7 +1336,7 @@ namespace MajdataPlay.Scenes.Game
                             var realTimeDifferenceb = (float)_bgManager.CurrentSec - (timeOffset * playbackSpeed);
 
                             _thisFrameSec = timeOffset;
-                            if (MajEnv.Settings.Audio.Backend == SoundBackendOption.BassSimple)
+                            if (MajEnv.SystemSettings.Audio.Backend == SoundBackendOption.BassSimple)
                             {
                                 var diff = _thisFrameSec - _audioTrackStartAt;
                                 if (diff <= 2f && diff >= 0f)

@@ -60,7 +60,7 @@ namespace MajdataPlay.IO
         public static ReadOnlySpan<Vector4> UnitCircle => _unitCircle.Span;
         public static ReadOnlySpan<ulong> TouchPanelPositionSamples => IsInitialized
             ? new ReadOnlySpan<ulong>(_posData, 1280 * 1280) : ReadOnlySpan<ulong>.Empty;
-        public static float FingerRadius => MajEnv.Settings.Debug.TouchSimulationRadius;
+        public static float FingerRadius => MajEnv.UserSettings.Touch.TouchSimulationRadius;
         public static float TouchButtonRingEdge
         {
             get => _lastTouchButtonRingEdge;
@@ -123,19 +123,19 @@ namespace MajdataPlay.IO
 
         public static void OnPreUpdate()
         {
-            var debugOptions = MajEnv.Settings.Debug;
-            var displayOptions = MajEnv.Settings.Display;
+            var touchOptions = MajEnv.UserSettings.Touch;
+            var renderingOptions = MajEnv.SystemSettings.Rendering;
             var height = Screen.height;
             var width = Screen.width;
             var fingerRad = Override_TouchSimulationRadius ?? FingerRadius;
-            var touchRadiusAdjust = debugOptions.TouchRadiusAdjust;
-            var aExtraRad = Override_TouchAAreaExtraRadius ?? debugOptions.TouchAAreaExtraRadius;
-            var bExtraRad = Override_TouchBAreaExtraRadius ?? debugOptions.TouchBAreaExtraRadius;
-            var cExtraRad = Override_TouchCAreaExtraRadius ?? debugOptions.TouchCAreaExtraRadius;
-            var dExtraRad = Override_TouchDAreaExtraRadius ?? debugOptions.TouchDAreaExtraRadius;
-            var eExtraRad = Override_TouchEAreaExtraRadius ?? debugOptions.TouchEAreaExtraRadius;
-            var mainScreenTransform = displayOptions.MainScreenTransform;
-            var mainScreenOffset = displayOptions.MainScreenOffset;
+            var touchRadiusAdjust = touchOptions.TouchRadiusAdjust;
+            var aExtraRad = Override_TouchAAreaExtraRadius ?? touchOptions.TouchAAreaExtraRadius;
+            var bExtraRad = Override_TouchBAreaExtraRadius ?? touchOptions.TouchBAreaExtraRadius;
+            var cExtraRad = Override_TouchCAreaExtraRadius ?? touchOptions.TouchCAreaExtraRadius;
+            var dExtraRad = Override_TouchDAreaExtraRadius ?? touchOptions.TouchDAreaExtraRadius;
+            var eExtraRad = Override_TouchEAreaExtraRadius ?? touchOptions.TouchEAreaExtraRadius;
+            var mainScreenTransform = renderingOptions.MainScreenTransform;
+            var mainScreenOffset = renderingOptions.MainScreenOffset;
 
             var isModified = height != _lastScreenHeight ||
                              width != _lastScreenWidth ||

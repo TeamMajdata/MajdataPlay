@@ -66,7 +66,7 @@ namespace MajdataPlay.Tests.Game.GamePlay.PlayMode
         [UnityTest]
         public IEnumerator Awake_RotatesTheBoundSensors()
         {
-            _settings.Settings.Display.GameplayScreenRotationAngle = GameplayScreenRotationAngleOption._90;
+            _settings.SystemSettings.Rendering.GameplayScreenRotationAngle = GameplayScreenRotationAngleOption._90;
 
             var button = CreateButton();
             yield return null;

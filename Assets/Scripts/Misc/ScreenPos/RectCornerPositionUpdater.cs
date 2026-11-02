@@ -33,7 +33,7 @@ namespace MajdataPlay
         [ReadOnlyField]
         int _frameCount = 0;
 
-        DisplayOptions? _displayOptions;
+        RenderingOptions? _renderingOptions;
         RectTransform _rectTransform = null!;
 
         /// <summary>The screen width observed while scheduling the last corner refresh.</summary>
@@ -61,8 +61,8 @@ namespace MajdataPlay
                 _frameCount++;
                 return;
             }
-            var displayOptions = _displayOptions ??= MajEnv.Settings?.Display;
-            if (displayOptions is null)
+            var renderingOptions = _renderingOptions ??= MajEnv.SystemSettings?.Rendering;
+            if (renderingOptions is null)
             {
                 return;
             }
@@ -74,11 +74,11 @@ namespace MajdataPlay
             }
             var provider = Majdata<ScreenPosCanvasLayoutProvider>.Instance;
             var layoutVersion = provider != null && provider.HasLayout ? provider.Version : -1;
-            var transformDisplay = displayOptions.MainScreenTransform;
-            var subDisplayOffset = displayOptions.SubDisplayOffset;
-            var subDisplayScale = displayOptions.SubDisplayScale;
-            var screenOffset = displayOptions.MainScreenOffset;
-            var screenScale = displayOptions.MainScreenScale;
+            var transformDisplay = renderingOptions.MainScreenTransform;
+            var subDisplayOffset = renderingOptions.SubDisplayOffset;
+            var subDisplayScale = renderingOptions.SubDisplayScale;
+            var screenOffset = renderingOptions.MainScreenOffset;
+            var screenScale = renderingOptions.MainScreenScale;
             var subChanged = subDisplayOffset != _lastSubDisplayOffset || subDisplayScale != _lastSubDisplayScale;
             var mainChanged = screenOffset != _lastMainDisplayOffset || screenScale != _lastMainDisplayScale;
             var isAnyUpdated = transformDisplay != _lastTransformDisplay || subChanged || mainChanged ||

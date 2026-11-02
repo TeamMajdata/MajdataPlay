@@ -8,6 +8,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using MajdataPlay.IO.Storage;
 using MajdataPlay.Net;
+using MajdataPlay.Net.Models;
 
 namespace MajdataPlay
 {
@@ -36,23 +37,6 @@ namespace MajdataPlay
         public string SelectedSongId { get; set; } = string.Empty;
         /// <summary>Gets the runtime sort/filter settings.</summary>
         public SongOrder OrderBy { get; } = new SongOrder();
-    }
-
-    /// <summary>Supplies the online playlist shape referenced by production storage.</summary>
-    internal sealed class MajNetOnlineDanInfo
-    {
-        /// <summary>Gets the fixture endpoint identity.</summary>
-        public string Id { get; init; } = string.Empty;
-        /// <summary>Gets the display name.</summary>
-        public string Name { get; init; } = string.Empty;
-        /// <summary>Gets the description.</summary>
-        public string Description { get; init; } = string.Empty;
-        /// <summary>Gets the chart hashes.</summary>
-        public string[] SongHashs { get; init; } = Array.Empty<string>();
-        /// <summary>Gets the playlist flag.</summary>
-        public bool IsPlayList { get; init; }
-        /// <summary>Gets the forced game-over flag.</summary>
-        public bool IsForceGameover { get; init; }
     }
 
     /// <summary>Compiles unused online chart branches without network or Unity dependencies.</summary>
@@ -135,47 +119,79 @@ namespace MajdataPlay.Net
         public static Func<ApiEndpoint, CancellationToken, Task<MajNetOnlineDanInfo[]?>>? FavoritesHandler { get; set; }
         /// <summary>Gets or sets an explicitly configured in-process chart-list response.</summary>
         public static Func<ApiEndpoint, CancellationToken, Task<ChartFixture[]?>>? ChartListHandler { get; set; }
-        /// <summary>Runs a configured offline chart-list fixture or rejects execution outside this harness's scope.</summary>
-        /// <param name="endpoint">The requested endpoint.</param>
-        /// <param name="cancellationToken">Cancels the deterministic offline API boundary.</param>
-        /// <returns>The configured chart-list response without any network access.</returns>
-        /// <exception cref="InvalidOperationException">The harness entered an online network branch.</exception>
-        /// <exception cref="OperationCanceledException">The caller canceled the fixture request.</exception>
-        public static Task<ChartFixture[]?> GetChartListAsync(ApiEndpoint endpoint, CancellationToken cancellationToken = default)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            var handler = ChartListHandler ?? throw new InvalidOperationException("Online requests are outside the chart-storage harness.");
-            return handler(endpoint, cancellationToken);
-        }
-
-        /// <summary>Runs only an explicitly configured in-process playlist response.</summary>
-        /// <param name="endpoint">The requested endpoint.</param>
-        /// <param name="cancellationToken">Cancels the deterministic offline API boundary.</param>
-        /// <returns>The configured response task without issuing any network request.</returns>
-        /// <exception cref="InvalidOperationException">No offline response handler was configured.</exception>
-        /// <exception cref="OperationCanceledException">The request was canceled.</exception>
-        public static Task<MajNetOnlineDanInfo[]?> GetUserOnlineFavCollection(ApiEndpoint endpoint, CancellationToken cancellationToken = default)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            return FavoritesHandler?.Invoke(endpoint, cancellationToken)
-                ?? throw new InvalidOperationException("Online requests are outside the chart-storage harness.");
-        }
-
-        /// <summary>Rejects recommendation requests outside the managed storage fixture scope.</summary>
-        /// <param name="endpoint">The endpoint whose recommendations were requested.</param>
-        /// <param name="page">The requested page number.</param>
-        /// <param name="pageSize">The maximum number of requested charts.</param>
-        /// <returns>No response because recommendation requests are unsupported.</returns>
-        /// <exception cref="InvalidOperationException">Recommendation fetching is outside this harness's scope.</exception>
-        public static Task<ChartFixture[]?> GetRecommendFeedAsync(ApiEndpoint endpoint, int page, int pageSize)
-        {
-            throw new InvalidOperationException("Recommendation requests are outside the chart-storage harness.");
-        }
-
         /// <summary>Leaves the nonexistent response cache unchanged.</summary>
         public static void ClearResponseCache()
         {
         }
+
+        /// <summary>Supplies the chart APIs read by production storage.</summary>
+        internal static class MaiChart
+        {
+            /// <summary>Runs a configured offline chart-list fixture or rejects execution outside this harness's scope.</summary>
+            /// <param name="endpoint">The requested endpoint.</param>
+            /// <param name="cancellationToken">Cancels the deterministic offline API boundary.</param>
+            /// <returns>The configured chart-list response without any network access.</returns>
+            /// <exception cref="InvalidOperationException">The harness entered an online network branch.</exception>
+            /// <exception cref="OperationCanceledException">The caller canceled the fixture request.</exception>
+            public static Task<ChartFixture[]?> GetListAsync(ApiEndpoint endpoint, CancellationToken cancellationToken = default)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var handler = ChartListHandler ?? throw new InvalidOperationException("Online requests are outside the chart-storage harness.");
+                return handler(endpoint, cancellationToken);
+            }
+        }
+
+        /// <summary>Supplies the account APIs read by production storage.</summary>
+        internal static class Account
+        {
+            /// <summary>Runs only an explicitly configured in-process playlist response.</summary>
+            /// <param name="endpoint">The requested endpoint.</param>
+            /// <param name="cancellationToken">Cancels the deterministic offline API boundary.</param>
+            /// <returns>The configured response task without issuing any network request.</returns>
+            /// <exception cref="InvalidOperationException">No offline response handler was configured.</exception>
+            /// <exception cref="OperationCanceledException">The request was canceled.</exception>
+            public static Task<MajNetOnlineDanInfo[]?> GetFavoriteCollectionsAsync(ApiEndpoint endpoint, CancellationToken cancellationToken = default)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                return FavoritesHandler?.Invoke(endpoint, cancellationToken)
+                    ?? throw new InvalidOperationException("Online requests are outside the chart-storage harness.");
+            }
+        }
+
+        /// <summary>Supplies the recommendation APIs read by production storage.</summary>
+        internal static class Recommend
+        {
+            /// <summary>Rejects recommendation requests outside the managed storage fixture scope.</summary>
+            /// <param name="endpoint">The endpoint whose recommendations were requested.</param>
+            /// <param name="page">The requested page number.</param>
+            /// <param name="pageSize">The maximum number of requested charts.</param>
+            /// <returns>No response because recommendation requests are unsupported.</returns>
+            /// <exception cref="InvalidOperationException">Recommendation fetching is outside this harness's scope.</exception>
+            public static Task<ChartFixture[]?> GetFeedAsync(ApiEndpoint endpoint, int page, int pageSize)
+            {
+                throw new InvalidOperationException("Recommendation requests are outside the chart-storage harness.");
+            }
+        }
+    }
+}
+
+namespace MajdataPlay.Net.Models
+{
+    /// <summary>Supplies the online playlist shape referenced by production storage.</summary>
+    internal sealed class MajNetOnlineDanInfo
+    {
+        /// <summary>Gets the fixture endpoint identity.</summary>
+        public string Id { get; init; } = string.Empty;
+        /// <summary>Gets the display name.</summary>
+        public string Name { get; init; } = string.Empty;
+        /// <summary>Gets the description.</summary>
+        public string Description { get; init; } = string.Empty;
+        /// <summary>Gets the chart hashes.</summary>
+        public string[] SongHashs { get; init; } = Array.Empty<string>();
+        /// <summary>Gets the playlist flag.</summary>
+        public bool IsPlayList { get; init; }
+        /// <summary>Gets the forced game-over flag.</summary>
+        public bool IsForceGameover { get; init; }
     }
 }
 

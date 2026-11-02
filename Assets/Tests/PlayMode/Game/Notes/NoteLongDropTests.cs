@@ -202,8 +202,8 @@ namespace MajdataPlay.Tests.Game.Notes.PlayMode
         [Test]
         public void RemainingTime_IsClampedAtZero()
         {
-            _environment.Settings.Debug.OffsetUnit = OffsetUnitOption.Second;
-            _environment.Settings.Judge.JudgeOffset = 0.1f;
+            _environment.UserSettings.Judge.OffsetUnit = OffsetUnitOption.Second;
+            _environment.UserSettings.Judge.JudgeOffset = 0.1f;
             var hold = CreateHold();
             _controller.ThisFrameSec = 1.5f;
 

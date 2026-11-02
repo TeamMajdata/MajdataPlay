@@ -22,21 +22,24 @@ namespace MajdataPlay.Scenes.Game
         public bool ButtonRingForTouch { get; init; }
         public string NoteMask { get; init; }
 
-        public GameModInfo(ModOptions options)
+        /// <summary>
+        /// Creates the modifiers of a play from the session modifiers and the gameplay options.
+        /// </summary>
+        /// <param name="modOptions">The session modifiers to copy.</param>
+        /// <param name="gameOptions">The gameplay options that supply <see cref="ButtonRingForTouch"/>.</param>
+        public GameModInfo(ModOptions modOptions, GameOptions gameOptions)
         {
-            PlaybackSpeed = options.PlaybackSpeed;
-            AutoPlay = options.AutoPlay;
-            JudgeStyle = options.JudgeStyle;
-            SubdivideSlideJudgeGrade = options.SubdivideSlideJudgeGrade;
-            AllBreak = options.AllBreak;
-            AllEx = options.AllEx;
-            AllTouch = options.AllTouch;
-            SlideNoHead = options.SlideNoHead;
-            SlideNoTrack = options.SlideNoTrack;
-#if !(UNITY_ANDROID || UNITY_IOS)
-            ButtonRingForTouch = options.ButtonRingForTouch;
-#endif
-            NoteMask = options.NoteMask;
+            PlaybackSpeed = modOptions.PlaybackSpeed;
+            AutoPlay = modOptions.AutoPlay;
+            JudgeStyle = modOptions.JudgeStyle;
+            SubdivideSlideJudgeGrade = modOptions.SubdivideSlideJudgeGrade;
+            AllBreak = modOptions.AllBreak;
+            AllEx = modOptions.AllEx;
+            AllTouch = modOptions.AllTouch;
+            SlideNoHead = modOptions.SlideNoHead;
+            SlideNoTrack = modOptions.SlideNoTrack;
+            ButtonRingForTouch = gameOptions.ButtonRingForTouch;
+            NoteMask = modOptions.NoteMask;
         }
         public GameModInfo(GameModInfo options)
         {
@@ -51,11 +54,6 @@ namespace MajdataPlay.Scenes.Game
             SlideNoTrack = options.SlideNoTrack;
             ButtonRingForTouch = options.ButtonRingForTouch;
             NoteMask = options.NoteMask;
-        }
-
-        public static implicit operator GameModInfo(ModOptions options)
-        {
-            return new(options);
         }
     }
 }

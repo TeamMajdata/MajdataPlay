@@ -129,7 +129,7 @@ namespace MajdataPlay.Scenes.Game
         ObjectCounter _objectCounter;
         NotePoolManager _poolManager;
 
-        readonly static bool USERSETTING_NOTE_FOLDING = MajEnv.Settings?.Debug.NoteFolding ?? true;
+        readonly static bool USERSETTING_NOTE_FOLDING = MajEnv.SystemSettings?.Common.NoteFolding ?? true;
 
         readonly static IReadOnlyDictionary<SimaiNoteType, int> NOTE_LAYER_COUNT = new Dictionary<SimaiNoteType, int>()
         {
@@ -315,7 +315,7 @@ namespace MajdataPlay.Scenes.Game
 
                 var lastNoteTime = maiChart.NoteTimings[^1].Timing;
                 var randomMappingTableLifeTime = new Range<double>(double.MinValue, double.MinValue, ContainsType.Closed);
-                var isSRandomEnabled = MajEnv.Settings.Game.Random == RandomModeOption.S_RANDOM;
+                var isSRandomEnabled = MajEnv.UserSettings.Game.Random == RandomModeOption.S_RANDOM;
                 for (var i = 0; i < maiChart.NoteTimings.Length; i++)
                 {
                     var timing = maiChart.NoteTimings[i];
@@ -519,7 +519,7 @@ namespace MajdataPlay.Scenes.Game
                 binding ??= new EachLineBinding();
                 var time = (float)timing.Timing;
                 var speed = NoteSpeed * timing.HSpeed;
-                var scaleRate = MajEnv.Settings.Debug.NoteAppearRate;
+                var scaleRate = MajEnv.UserSettings.Game.NoteAppearRate;
                 var appearDiff = (-(1 - (scaleRate * 1.225f)) - (4.8f * scaleRate)) / (speed * scaleRate);
                 var appearTiming = time + appearDiff;
 
@@ -568,7 +568,7 @@ namespace MajdataPlay.Scenes.Game
                 var startPos = note.StartPosition;
                 var noteTiming = (float)timing.Timing;
                 var speed = NoteSpeed * timing.HSpeed;
-                var scaleRate = MajEnv.Settings.Debug.NoteAppearRate;
+                var scaleRate = MajEnv.UserSettings.Game.NoteAppearRate;
                 var appearDiff = (-(1 - (scaleRate * 1.225f)) - (4.8f * scaleRate)) / (Math.Abs(speed) * scaleRate);
                 var appearTiming = Math.Min(noteTiming + appearDiff, noteTiming - 0.15f);
                 var sortOrder = _noteSortOrder;
@@ -620,7 +620,7 @@ namespace MajdataPlay.Scenes.Game
                 var startPos = note.StartPosition;
                 var noteTiming = (float)timing.Timing;
                 var speed = Math.Abs(NoteSpeed * timing.HSpeed);
-                var scaleRate = MajEnv.Settings.Debug.NoteAppearRate;
+                var scaleRate = MajEnv.UserSettings.Game.NoteAppearRate;
                 var appearDiff = (-(1 - (scaleRate * 1.225f)) - (4.8f * scaleRate)) / (speed * scaleRate);
                 var appearTiming = Math.Min(noteTiming + appearDiff, noteTiming - 0.15f);
                 var sortOrder = _noteSortOrder;
@@ -671,8 +671,8 @@ namespace MajdataPlay.Scenes.Game
             {
                 var noteTiming = (float)timing.Timing;
                 var speed = NoteSpeed * timing.HSpeed;
-                var scaleRate = MajEnv.Settings.Debug.NoteAppearRate;
-                var slideFadeInTiming = (-3.926913f / speed) + MajEnv.Settings.Game.SlideFadeInOffset + (float)timing.Timing;
+                var scaleRate = MajEnv.UserSettings.Game.NoteAppearRate;
+                var slideFadeInTiming = (-3.926913f / speed) + MajEnv.UserSettings.Game.SlideFadeInOffset + (float)timing.Timing;
                 var appearDiff = (-(1 - (scaleRate * 1.225f)) - (4.8f * scaleRate)) / (Math.Abs(speed) * scaleRate);
                 var appearTiming = Math.Min(noteTiming + appearDiff, noteTiming - 0.15f);
                 var sortOrder = _noteSortOrder;
@@ -1223,8 +1223,8 @@ namespace MajdataPlay.Scenes.Game
         void AddSlideToQueue<T>(SimaiTimingPoint timing, T SliCompo) where T : SlideBase
         {
             var speed = NoteSpeed * timing.HSpeed;
-            var scaleRate = MajEnv.Settings.Debug.NoteAppearRate;
-            var slideFadeInTiming = Math.Max((-3.926913f / speed) + MajEnv.Settings.Game.SlideFadeInOffset + (float)timing.Timing, -5f);
+            var scaleRate = MajEnv.UserSettings.Game.NoteAppearRate;
+            var slideFadeInTiming = Math.Max((-3.926913f / speed) + MajEnv.UserSettings.Game.SlideFadeInOffset + (float)timing.Timing, -5f);
             var appearDiff = (-(1 - (scaleRate * 1.225f)) - (4.8f * scaleRate)) / (Math.Abs(speed) * scaleRate);
             var appearTiming = (float)timing.Timing + appearDiff;
             _slideQueueInfos.Add(new()
@@ -1431,7 +1431,7 @@ namespace MajdataPlay.Scenes.Game
             sliCompo.IsSlideNoTrack = _isSlideNoTrack;
             sliCompo.Multiple = multiple;
             var slideBarCount = slide.transform.childCount - 1;
-            if (MajEnv.Settings.Display.SlideSortOrder == JudgeModeOption.Classic)
+            if (MajEnv.UserSettings.Judge.SlideSortOrder == JudgeModeOption.Classic)
             {
                 _slideLayer += slideBarCount;
                 sliCompo.SortOrder = _slideLayer;
@@ -1518,7 +1518,7 @@ namespace MajdataPlay.Scenes.Game
             //    leftStar
             //};
             var slideBarCount = slideWifi.transform.childCount - 1;
-            if (MajEnv.Settings.Display.SlideSortOrder == JudgeModeOption.Classic)
+            if (MajEnv.UserSettings.Judge.SlideSortOrder == JudgeModeOption.Classic)
             {
                 _slideLayer += slideBarCount;
                 WifiCompo.SortOrder = _slideLayer;
@@ -1645,7 +1645,7 @@ namespace MajdataPlay.Scenes.Game
 
             // 显示的箭头不含路径起点、终点，以及离终点太近而不显示的最后一个箭头
             var slideBarCount = slideMetadata.ArrowPoses.Length - 2 - (slideMetadata.ConditionalLastArrow ? 1 : 0);
-            if (MajEnv.Settings.Display.SlideSortOrder == JudgeModeOption.Classic)
+            if (MajEnv.UserSettings.Judge.SlideSortOrder == JudgeModeOption.Classic)
             {
                 _slideLayer += slideBarCount;
                 extendSlide.SortOrder = _slideLayer;
@@ -2306,7 +2306,7 @@ namespace MajdataPlay.Scenes.Game
             public static void SetNewPositionIfRequested(ref int originPos,
                                                          IReadOnlyDictionary<int, int> mappingTable)
             {
-                switch (MajEnv.Settings.Game.Random)
+                switch (MajEnv.UserSettings.Game.Random)
                 {
                     case RandomModeOption.Disabled:
                         return;
@@ -2319,7 +2319,7 @@ namespace MajdataPlay.Scenes.Game
             public static void SetNewPositionIfRequested(ref SensorArea originPos,
                                                          IReadOnlyDictionary<SensorArea, SensorArea> mappingTable)
             {
-                switch (MajEnv.Settings.Game.Random)
+                switch (MajEnv.UserSettings.Game.Random)
                 {
                     case RandomModeOption.Disabled:
                         return;
@@ -2333,7 +2333,7 @@ namespace MajdataPlay.Scenes.Game
                                                               ref int originEndPos,
                                                               IReadOnlyDictionary<int, int> mappingTable)
             {
-                switch (MajEnv.Settings.Game.Random)
+                switch (MajEnv.UserSettings.Game.Random)
                 {
                     case RandomModeOption.Disabled:
                         return;

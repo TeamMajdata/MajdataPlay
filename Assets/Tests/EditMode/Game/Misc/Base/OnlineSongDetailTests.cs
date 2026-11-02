@@ -12,6 +12,7 @@ using MajdataPlay.Databases;
 using MajdataPlay.IO;
 using MajdataPlay.IO.Storage;
 using MajdataPlay.Net;
+using MajdataPlay.Net.Models;
 using MajdataPlay.Tests;
 using MajdataPlay.Tests.Game.Misc.Support;
 using MajSimai;

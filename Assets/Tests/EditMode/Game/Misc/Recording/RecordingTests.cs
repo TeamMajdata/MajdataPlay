@@ -189,7 +189,7 @@ namespace MajdataPlay.Tests.Game.Misc.Recording
         {
             var recorder = new FakeRecorder { IsConnected = connected };
             PrivateMember.SetStaticField(typeof(Recorder), "s_recorder", recorder);
-            MajEnv.Settings.Game.RecordMode = enabled ? RecordModeOption.OBSTrigger : RecordModeOption.Disable;
+            MajEnv.SystemSettings.Common.RecordMode = enabled ? RecordModeOption.OBSTrigger : RecordModeOption.Disable;
             return recorder;
         }
 
@@ -252,7 +252,7 @@ namespace MajdataPlay.Tests.Game.Misc.Recording
             Assert.That(PrivateMember.GetStaticField<object>(typeof(Recorder), "s_recorder"), Is.SameAs(recorder));
             Assert.That(recorder.Calls, Is.EqualTo(new[] { "Stop" }));
 
-            MajEnv.Settings.Game.RecordMode = RecordModeOption.Disable;
+            MajEnv.SystemSettings.Common.RecordMode = RecordModeOption.Disable;
             PrivateMember.InvokeStatic(typeof(Recorder), "OnApplicationQuit", null, null);
             Assert.That(recorder.Calls, Is.EqualTo(new[] { "Stop" }));
         }

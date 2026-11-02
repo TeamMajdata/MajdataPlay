@@ -83,7 +83,7 @@ namespace MajdataPlay.Tests.Game.Scenes.PlayMode.TotalResultScene
             var displayer = CreateDanSong(_canvas);
             Activate(displayer);
             var song = new FakeSongDetail("majtest-dan-missing", "Missing", "1") { Cover = CreateSprite("Cover") };
-            MajEnv.Settings.Judge.Mode = JudgeModeOption.Classic;
+            MajEnv.UserSettings.Judge.Mode = JudgeModeOption.Classic;
 
             displayer.SetSongDetail(song, ChartLevel.Expert, new GameResult { Acc = new Accurate { Classic = 98.765 } });
             Assert.That(TextOf(displayer, "_achievementDisplayer"), Is.EqualTo($"{98.765:F2}%"));
@@ -115,7 +115,7 @@ namespace MajdataPlay.Tests.Game.Scenes.PlayMode.TotalResultScene
             Assert.That(displayer.level.text, Is.EqualTo("Master 13"));
             Assert.That(displayer.accDX.text, Is.EqualTo($"{97.5:F4}%"));
 
-            MajEnv.Settings.Judge.Mode = JudgeModeOption.Classic;
+            MajEnv.UserSettings.Judge.Mode = JudgeModeOption.Classic;
             displayer.DisplayResult(song, new GameResult { Acc = new Accurate { Classic = 96.25 } }, ChartLevel.Master);
             Assert.That(displayer.accDX.text, Is.EqualTo($"{96.25:F2}%"));
         }
@@ -192,7 +192,7 @@ namespace MajdataPlay.Tests.Game.Scenes.PlayMode.TotalResultScene
             Assert.That(Sfx("challenge_fail.wav").PlayOneShotCount, Is.EqualTo(1));
             Object.DestroyImmediate(failed.gameObject);
 
-            MajEnv.Settings.Judge.Mode = JudgeModeOption.Classic;
+            MajEnv.UserSettings.Judge.Mode = JudgeModeOption.Classic;
             var lifeless = CreateManager(startHp: -1, currentHp: 0, displayers: 1);
             Activate(lifeless);
             yield return null;

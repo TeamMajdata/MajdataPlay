@@ -286,7 +286,7 @@ namespace MajdataPlay.Tests.Game.GamePlay.Loading
         [TestCase(RandomModeOption.S_RANDOM, true)]
         public void SetNewPositionIfRequested_RemapsOnlyInRandomModes(RandomModeOption mode, bool expectRemap)
         {
-            _settings.Settings.Game.Random = mode;
+            _settings.UserSettings.Game.Random = mode;
             var buttonTable = CreateButtonTable(4);
             var sensorTable = new Dictionary<SensorArea, SensorArea> { { SensorArea.E2, SensorArea.E6 } };
             var key = new object?[] { 2, buttonTable };
@@ -307,7 +307,7 @@ namespace MajdataPlay.Tests.Game.GamePlay.Loading
         [Test]
         public void SetSlideNewPositionIfRequested_KeepsForwardSlides()
         {
-            _settings.Settings.Game.Random = RandomModeOption.RANDOM;
+            _settings.UserSettings.Game.Random = RandomModeOption.RANDOM;
             var slide = new object?[] { 1, 4, CreateButtonTable(2) };
 
             PrivateMember.InvokeStatic(s_helper, "SetSlideNewPositionIfRequested", slide);

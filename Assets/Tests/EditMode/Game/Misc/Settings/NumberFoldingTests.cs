@@ -169,9 +169,9 @@ namespace MajdataPlay.Tests.Game.Misc.Settings
             Assert.That(probe.Folded, Is.EqualTo(1500));
             Assert.That(folded.LocalizedValueText, Is.EqualTo("1.5k"));
 
-            probe.Folded = 999;
+            probe.Folded = 500;
             folded.Refresh();
-            Assert.That(folded.LocalizedValueText, Is.EqualTo("999"));
+            Assert.That(folded.LocalizedValueText, Is.EqualTo("500"));
 
             probe.Folded = 3000000;
             folded.Refresh();

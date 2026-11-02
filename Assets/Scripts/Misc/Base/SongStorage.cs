@@ -6,6 +6,7 @@ using MajdataPlay.Diagnostics;
 using MajdataPlay.Extensions;
 using MajdataPlay.IO.Storage;
 using MajdataPlay.Net;
+using MajdataPlay.Net.Models;
 using MajdataPlay.Numerics;
 using MajdataPlay.Utils;
 using SQLite;
@@ -296,7 +297,7 @@ namespace MajdataPlay
                         && collection.Type == ChartStorageType.List)
                     .ToList();
                 collections.AddRange(onlineCollections);
-                var onlinePlaylists = MajEnv.Settings.Online.Enable
+                var onlinePlaylists = MajEnv.SystemSettings.Network.Online.Enable
                     ? Collections.OfType<OnlineSongCollection>()
                         .Where(collection => collection.Type is ChartStorageType.PlayList or ChartStorageType.Dan)
                         .ToArray()
@@ -421,7 +422,7 @@ namespace MajdataPlay
             await s_refreshLock.WaitAsync(cancellationToken).ConfigureAwait(false);
             try
             {
-                if (!MajEnv.Settings.Online.Enable)
+                if (!MajEnv.SystemSettings.Network.Online.Enable)
                 {
                     return true;
                 }
@@ -438,7 +439,7 @@ namespace MajdataPlay
                     {
                         MajDebug.LogInfo(nameof(SongStorage), $"[Online]Fetching fav list from {api.Url.OriginalString}");
                         progressReporter?.Report(ZString.Format("MAJTEXT_SCANNING_FAVORITES_FROM_{0}".i18n(), api.Name));
-                        var danInfos = await Online.GetUserOnlineFavCollection(api, cancellationToken).ConfigureAwait(false);
+                        var danInfos = await Online.Account.GetFavoriteCollectionsAsync(api, cancellationToken).ConfigureAwait(false);
                         cancellationToken.ThrowIfCancellationRequested();
                         if (danInfos is null)
                         {
@@ -493,7 +494,7 @@ namespace MajdataPlay
         /// <returns>A task which completes after the folders are published and obsolete charts are released.</returns>
         internal static async Task RefreshRecommendAsync(IProgress<string>? progressReporter = null)
         {
-            if (!MajEnv.Settings.Online.Enable)
+            if (!MajEnv.SystemSettings.Network.Online.Enable)
             {
                 return;
             }
@@ -626,7 +627,7 @@ namespace MajdataPlay
             var charts = new List<MajnetSongDetail>(RecommendPageSize);
             for (var page = 0; page < RecommendMaxPageCount; page++)
             {
-                var feed = await Online.GetRecommendFeedAsync(api, page, RecommendPageSize).ConfigureAwait(false);
+                var feed = await Online.Recommend.GetFeedAsync(api, page, RecommendPageSize).ConfigureAwait(false);
                 if (feed is null)
                 {
                     if (page == 0)
@@ -710,7 +711,7 @@ namespace MajdataPlay
         /// <returns>The replacement library including the rebuilt folders, which are dropped while online functions are disabled.</returns>
         private static StorageSnapshot AddRecommendCollections(StorageSnapshot snapshot)
         {
-            if (!MajEnv.Settings.Online.Enable)
+            if (!MajEnv.SystemSettings.Network.Online.Enable)
             {
                 return snapshot;
             }
@@ -826,7 +827,7 @@ namespace MajdataPlay
             try
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                if (!MajEnv.Settings.Online.Enable)
+                if (!MajEnv.SystemSettings.Network.Online.Enable)
                 {
                     MajDebug.LogInfo(nameof(SongStorage), "[MaiChart Refresh]Online function was disabled, skipping.");
                     return collections;
@@ -1228,7 +1229,7 @@ namespace MajdataPlay
             MajDebug.LogInfo(nameof(SongStorage), "Loading online charts from:" + api.Url);
             try
             {
-                var chartList = await Online.GetChartListAsync(api, cancellationToken).ConfigureAwait(false);
+                var chartList = await Online.MaiChart.GetListAsync(api, cancellationToken).ConfigureAwait(false);
                 cancellationToken.ThrowIfCancellationRequested();
                 if (chartList is null)
                 {
@@ -1297,7 +1298,7 @@ namespace MajdataPlay
             using (var chartIds = Pool<string?>.Rent(chartList.Length, true))
             {
                 CopyChartIds(chartList.Span, chartIds.AsSpan());
-                infoList = await Online.GetChartInfosAsync(api, chartIds.AsMemory(0, chartList.Length), cancellationToken).ConfigureAwait(false);
+                infoList = await Online.MaiChart.GetInfosAsync(api, chartIds.AsMemory(0, chartList.Length), cancellationToken).ConfigureAwait(false);
             }
             cancellationToken.ThrowIfCancellationRequested();
             var infos = default(Dictionary<string, MajNetChartInfo>);

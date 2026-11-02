@@ -17,24 +17,24 @@ namespace MajdataPlay.Tests.Game.Scenes.PlayMode.SettingScene
         /// <summary>The preview sound and sample type of every volume option that has a preview.</summary>
         private static readonly (string Option, string Sfx, SFXSampleType Type)[] s_previews =
         {
-            (nameof(SFXVolume.Answer), "answer.wav", SFXSampleType.Answer),
-            (nameof(SFXVolume.Tap), "tap_perfect.wav", SFXSampleType.Tap),
-            (nameof(SFXVolume.Ex), "tap_ex.wav", SFXSampleType.Ex),
-            (nameof(SFXVolume.Break), "break.wav", SFXSampleType.Break),
-            (nameof(SFXVolume.Slide), "slide.wav", SFXSampleType.Slide),
-            (nameof(SFXVolume.Touch), "touch.wav", SFXSampleType.Touch),
-            (nameof(SFXVolume.Hanabi), "touch_hanabi.wav", SFXSampleType.Hanabi),
-            (nameof(SFXVolume.Voice), "MajdataPlay.wav", SFXSampleType.Voice),
+            (nameof(VolumeOptions.Answer), "answer.wav", SFXSampleType.Answer),
+            (nameof(VolumeOptions.Tap), "tap_perfect.wav", SFXSampleType.Tap),
+            (nameof(VolumeOptions.Ex), "tap_ex.wav", SFXSampleType.Ex),
+            (nameof(VolumeOptions.Break), "break.wav", SFXSampleType.Break),
+            (nameof(VolumeOptions.Slide), "slide.wav", SFXSampleType.Slide),
+            (nameof(VolumeOptions.Touch), "touch.wav", SFXSampleType.Touch),
+            (nameof(VolumeOptions.Hanabi), "touch_hanabi.wav", SFXSampleType.Hanabi),
+            (nameof(VolumeOptions.Voice), "MajdataPlay.wav", SFXSampleType.Voice),
         };
 
         /// <summary>The volume settings edited by the enumerators under test.</summary>
-        private SFXVolume _volume = null!;
+        private VolumeOptions _volume = null!;
 
         /// <summary>Installs a stub audio manager holding one fake sample per preview sound.</summary>
         [SetUp]
         public void SetUp()
         {
-            _volume = MajEnv.Settings.Audio.Volume;
+            _volume = MajEnv.UserSettings.Volume;
             CreateAudioManager();
             foreach (var (_, sfx, type) in s_previews)
             {
@@ -43,7 +43,7 @@ namespace MajdataPlay.Tests.Game.Scenes.PlayMode.SettingScene
         }
 
         /// <summary>Creates and initializes an enumerator for one volume option.</summary>
-        /// <param name="option">The <see cref="SFXVolume"/> property name.</param>
+        /// <param name="option">The <see cref="VolumeOptions"/> property name.</param>
         /// <returns>The initialized enumerator.</returns>
         private AudioVolumeEnumerator Create(string option)
         {
@@ -57,7 +57,7 @@ namespace MajdataPlay.Tests.Game.Scenes.PlayMode.SettingScene
         /// <returns>The property.</returns>
         private static PropertyInfo Property(string option)
         {
-            return typeof(SFXVolume).GetProperty(option)!;
+            return typeof(VolumeOptions).GetProperty(option)!;
         }
 
         /// <summary>Writes a volume option behind the enumerator's back, as the settings file or another menu would.</summary>
@@ -87,7 +87,7 @@ namespace MajdataPlay.Tests.Game.Scenes.PlayMode.SettingScene
         [Test]
         public void Refresh_UnchangedValue_IsSilent()
         {
-            var enumerator = Create(nameof(SFXVolume.Answer));
+            var enumerator = Create(nameof(VolumeOptions.Answer));
 
             enumerator.Refresh();
             enumerator.Refresh();
@@ -99,14 +99,14 @@ namespace MajdataPlay.Tests.Game.Scenes.PlayMode.SettingScene
         /// <summary>Checks that a changed option plays only its own preview, applies the new volume, and does not replay on the next refresh.</summary>
         /// <param name="option">The volume option.</param>
         /// <param name="sfx">The preview sound expected for the option.</param>
-        [TestCase(nameof(SFXVolume.Answer), "answer.wav")]
-        [TestCase(nameof(SFXVolume.Tap), "tap_perfect.wav")]
-        [TestCase(nameof(SFXVolume.Ex), "tap_ex.wav")]
-        [TestCase(nameof(SFXVolume.Break), "break.wav")]
-        [TestCase(nameof(SFXVolume.Slide), "slide.wav")]
-        [TestCase(nameof(SFXVolume.Touch), "touch.wav")]
-        [TestCase(nameof(SFXVolume.Hanabi), "touch_hanabi.wav")]
-        [TestCase(nameof(SFXVolume.Voice), "MajdataPlay.wav")]
+        [TestCase(nameof(VolumeOptions.Answer), "answer.wav")]
+        [TestCase(nameof(VolumeOptions.Tap), "tap_perfect.wav")]
+        [TestCase(nameof(VolumeOptions.Ex), "tap_ex.wav")]
+        [TestCase(nameof(VolumeOptions.Break), "break.wav")]
+        [TestCase(nameof(VolumeOptions.Slide), "slide.wav")]
+        [TestCase(nameof(VolumeOptions.Touch), "touch.wav")]
+        [TestCase(nameof(VolumeOptions.Hanabi), "touch_hanabi.wav")]
+        [TestCase(nameof(VolumeOptions.Voice), "MajdataPlay.wav")]
         public void Refresh_ChangedValue_PlaysPreviewAndAppliesVolume(string option, string sfx)
         {
             var enumerator = Create(option);
@@ -125,14 +125,14 @@ namespace MajdataPlay.Tests.Game.Scenes.PlayMode.SettingScene
 
         /// <summary>Checks that options without a preview sound still re-apply every sample volume when they change.</summary>
         /// <param name="option">A volume option that has no preview sound.</param>
-        [TestCase(nameof(SFXVolume.Global))]
-        [TestCase(nameof(SFXVolume.BGM))]
-        [TestCase(nameof(SFXVolume.Track))]
+        [TestCase(nameof(VolumeOptions.Global))]
+        [TestCase(nameof(VolumeOptions.BGM))]
+        [TestCase(nameof(VolumeOptions.Track))]
         public void Refresh_OptionWithoutPreview_OnlyAppliesVolumes(string option)
         {
             var enumerator = Create(option);
             SetVolume(option, 0.1f);
-            SetVolume(nameof(SFXVolume.Answer), 0.25f);
+            SetVolume(nameof(VolumeOptions.Answer), 0.25f);
 
             enumerator.Refresh();
 
@@ -145,7 +145,7 @@ namespace MajdataPlay.Tests.Game.Scenes.PlayMode.SettingScene
         [Test]
         public void MoveNext_ThenRefresh_PlaysPreviewOnce()
         {
-            var enumerator = Create(nameof(SFXVolume.Tap));
+            var enumerator = Create(nameof(VolumeOptions.Tap));
 
             Assert.That(enumerator.MoveNext(), Is.True);
             Assert.That(_volume.Tap, Is.EqualTo(0.35f).Within(1e-6f));
@@ -161,7 +161,7 @@ namespace MajdataPlay.Tests.Game.Scenes.PlayMode.SettingScene
         [Test]
         public void MovePrevious_AfterRefresh_PlaysPreviewAgain()
         {
-            var enumerator = Create(nameof(SFXVolume.Break));
+            var enumerator = Create(nameof(VolumeOptions.Break));
             enumerator.MoveNext();
             enumerator.Refresh();
 

@@ -17,7 +17,7 @@ namespace MajdataPlay.IO
         public ExclusiveTouchHost()
         {
             var connection = IODetector.TouchPanelUsbConnInfo;
-            var options = MajEnv.Settings.IO.InputDevice.TouchPanel.CapacitivePanelOptions;
+            var options = MajEnv.SystemSettings.IO.InputDevice.TouchPanel.CapacitivePanelOptions;
             _candidates = new UsbDevice[]
             {
                 new PdxTouchDevice((ushort)connection.VendorId, (ushort)connection.ProductId,

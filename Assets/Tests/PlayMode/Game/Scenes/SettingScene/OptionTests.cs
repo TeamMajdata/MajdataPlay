@@ -82,7 +82,7 @@ namespace MajdataPlay.Tests.Game.Scenes.PlayMode.SettingScene
         [Test]
         public void SetSelected_OffsetOption_AppendsUnit()
         {
-            MajEnv.Settings.Debug.OffsetUnit = OffsetUnitOption.Second;
+            MajEnv.UserSettings.Judge.OffsetUnit = OffsetUnitOption.Second;
             Bind(nameof(SettingFixture.AudioOffset));
 
             _option.SetSelected(true);
@@ -95,11 +95,11 @@ namespace MajdataPlay.Tests.Game.Scenes.PlayMode.SettingScene
         [UnityTest]
         public IEnumerator LateUpdate_RefreshesDescriptionWhenOffsetUnitChanges()
         {
-            MajEnv.Settings.Debug.OffsetUnit = OffsetUnitOption.Frame;
+            MajEnv.UserSettings.Judge.OffsetUnit = OffsetUnitOption.Frame;
             Bind(nameof(SettingFixture.AudioOffset));
             _option.SetSelected(true);
 
-            MajEnv.Settings.Debug.OffsetUnit = OffsetUnitOption.Second;
+            MajEnv.UserSettings.Judge.OffsetUnit = OffsetUnitOption.Second;
             yield return null;
 
             Assert.That(Description.text, Does.EndWith("MAJTEXT_SETTING_OFFSETUNIT_Second"));
@@ -170,7 +170,7 @@ namespace MajdataPlay.Tests.Game.Scenes.PlayMode.SettingScene
         [Test]
         public void HandleInput_RepeatsWhileHeld()
         {
-            MajEnv.Settings.Debug.MenuOptionIterationSpeed = 0;
+            MajEnv.SystemSettings.Common.MenuOptionIterationSpeed = 0;
             Bind(nameof(SettingFixture.Mode));
             _option.SetSelected(true);
             _option.HandleInput();

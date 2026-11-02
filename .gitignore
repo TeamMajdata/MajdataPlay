@@ -16,6 +16,7 @@
 #/Assets/Plugin/
 /Assets/i18n
 /settings.json
+/system-settings.json
 /ModSettings.json
 /MajDatabase.db.db.db.db.db.db.db.db.db.db.db.db.db.db.db.db.db.db.db.db.db.db.db.db.db.db.db.db
 /MajScores.db
@@ -81,6 +82,7 @@ crashlytics-build.properties
 /[Aa]ssets/[Ss]treamingAssets/aa/*
 #/[Aa]ssets/[Ss]treamingAssets/MaiCharts/*
 /[Aa]ssets/[Ss]treamingAssets/settings.json
+/[Aa]ssets/[Ss]treamingAssets/system-settings.json
 /[Aa]ssets/[Ss]prites/[Gg]ame/[Nn]otes/*
 /[Aa]ssets/[Ss]prites/[Gg]ame/[Tt]extSprites/*
 /MajPlayRuntime.log

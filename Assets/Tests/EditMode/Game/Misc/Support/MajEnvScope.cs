@@ -28,15 +28,16 @@ namespace MajdataPlay.Tests.Game.Misc.Support
             nameof(MajEnv.RuntimeDirectory),
             nameof(MajEnv.TempDirectory),
             nameof(MajEnv.ChartDirectory),
-            nameof(MajEnv.SettingsPath),
+            nameof(MajEnv.UserSettingsPath),
+            nameof(MajEnv.SystemSettingsPath),
             nameof(MajEnv.SkinDirectory),
             nameof(MajEnv.LogsDirectory),
             nameof(MajEnv.LogPath),
             nameof(MajEnv.RecordOutputsDirectory),
-            nameof(MajEnv.Settings),
+            nameof(MajEnv.UserSettings),
+            nameof(MajEnv.SystemSettings),
             nameof(MajEnv.RuntimeConfig),
             nameof(MajEnv.ApiEndpoints),
-            nameof(MajEnv.MachineInfo),
         };
 
         /// <summary>The captured property values keyed by property name.</summary>
@@ -108,7 +109,8 @@ namespace MajdataPlay.Tests.Game.Misc.Support
             Set(nameof(MajEnv.SkinDirectory), root.CreateDirectory("Skins"));
             Set(nameof(MajEnv.LogsDirectory), root.CreateDirectory("Logs"));
             Set(nameof(MajEnv.RecordOutputsDirectory), root.CreateDirectory("RecordOutputs"));
-            Set(nameof(MajEnv.Settings), new GameSetting());
+            Set(nameof(MajEnv.UserSettings), new UserSetting());
+            Set(nameof(MajEnv.SystemSettings), new SystemSetting());
             Set(nameof(MajEnv.RuntimeConfig), new RuntimeConfig());
             Set(nameof(MajEnv.ApiEndpoints), Array.Empty<ApiEndpoint>());
             ResetDatabases();

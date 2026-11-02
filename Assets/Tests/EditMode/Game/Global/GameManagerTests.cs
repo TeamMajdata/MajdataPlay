@@ -66,11 +66,12 @@ namespace MajdataPlay.Tests.Game.Global
             _settings.Dispose();
         }
 
-        /// <summary>Checks that the settings property exposes the active settings.</summary>
+        /// <summary>Checks that the settings properties expose the active user and system settings.</summary>
         [Test]
         public void Settings_ExposesTheActiveSettings()
         {
-            Assert.That(_manager.Settings, Is.SameAs(MajEnv.Settings));
+            Assert.That(_manager.UserSettings, Is.SameAs(MajEnv.UserSettings));
+            Assert.That(_manager.SystemSettings, Is.SameAs(MajEnv.SystemSettings));
         }
 
         /// <summary>Checks that save requests reach every subscriber and a failing subscriber is contained.</summary>

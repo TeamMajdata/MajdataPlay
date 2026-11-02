@@ -1,5 +1,6 @@
 #nullable enable
 using MajdataPlay.Net;
+using MajdataPlay.Net.Models;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -59,42 +60,50 @@ namespace MajdataPlay.Net
             s_fixtureCharts = charts?.ToArray();
         }
 
-        /// <summary>Returns only an explicitly supplied DTO fixture and rejects all other chart-list requests.</summary>
-        /// <param name="source">The endpoint whose fixture response is requested.</param>
-        /// <param name="cancellationToken">The token checked before returning the offline response.</param>
-        /// <returns>A copy of the explicitly supplied fixture list; network execution is forbidden.</returns>
-        /// <exception cref="NotSupportedException">A network request was attempted.</exception>
-        public static Task<MajnetSongDetail[]?> GetChartListAsync(ApiEndpoint source, CancellationToken cancellationToken)
-        {
-            Interlocked.Increment(ref s_chartListRequestCount);
-            cancellationToken.ThrowIfCancellationRequested();
-            if (ReferenceEquals(source, s_fixtureSource))
-            {
-                return Task.FromResult<MajnetSongDetail[]?>(s_fixtureCharts?.ToArray());
-            }
-            throw new NotSupportedException("Network requests are outside the metadata harness.");
-        }
-
-        /// <summary>Rejects online favorite requests.</summary>
-        /// <param name="source">The unused endpoint.</param>
-        /// <param name="cancellationToken">The unused request token.</param>
-        /// <returns>No list; network execution is forbidden.</returns>
-        /// <exception cref="NotSupportedException">A network request was attempted.</exception>
-        public static Task<MajNetOnlineDanInfo[]?> GetUserOnlineFavCollection(ApiEndpoint source, CancellationToken cancellationToken)
-        {
-            throw new NotSupportedException("Network requests are outside the metadata harness.");
-        }
-
         /// <summary>Clears only the explicitly supplied offline response, never remote state.</summary>
         public static void ClearResponseCache()
         {
             s_fixtureSource = null;
             s_fixtureCharts = null;
         }
+
+        /// <summary>Supplies the chart APIs read by production storage.</summary>
+        internal static class MaiChart
+        {
+            /// <summary>Returns only an explicitly supplied DTO fixture and rejects all other chart-list requests.</summary>
+            /// <param name="source">The endpoint whose fixture response is requested.</param>
+            /// <param name="cancellationToken">The token checked before returning the offline response.</param>
+            /// <returns>A copy of the explicitly supplied fixture list; network execution is forbidden.</returns>
+            /// <exception cref="NotSupportedException">A network request was attempted.</exception>
+            public static Task<MajnetSongDetail[]?> GetListAsync(ApiEndpoint source, CancellationToken cancellationToken)
+            {
+                Interlocked.Increment(ref s_chartListRequestCount);
+                cancellationToken.ThrowIfCancellationRequested();
+                if (ReferenceEquals(source, s_fixtureSource))
+                {
+                    return Task.FromResult<MajnetSongDetail[]?>(s_fixtureCharts?.ToArray());
+                }
+                throw new NotSupportedException("Network requests are outside the metadata harness.");
+            }
+        }
+
+        /// <summary>Supplies the account APIs read by production storage.</summary>
+        internal static class Account
+        {
+            /// <summary>Rejects online favorite requests.</summary>
+            /// <param name="source">The unused endpoint.</param>
+            /// <param name="cancellationToken">The unused request token.</param>
+            /// <returns>No list; network execution is forbidden.</returns>
+            /// <exception cref="NotSupportedException">A network request was attempted.</exception>
+            public static Task<MajNetOnlineDanInfo[]?> GetFavoriteCollectionsAsync(ApiEndpoint source, CancellationToken cancellationToken)
+            {
+                throw new NotSupportedException("Network requests are outside the metadata harness.");
+            }
+        }
     }
 }
 
-namespace MajdataPlay
+namespace MajdataPlay.Net.Models
 {
     /// <summary>Supplies only the remote playlist shape needed to compile disabled branches.</summary>
     internal sealed class MajNetOnlineDanInfo

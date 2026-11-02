@@ -22,7 +22,7 @@ namespace MajdataPlay.IO
 
         protected override string DaemonThreadName => "IO/TouchPanel Thread";
         protected override TimeSpan PollingInterval =>
-            TimeSpan.FromMilliseconds(MajEnv.Settings.IO.InputDevice.TouchPanel.PollingRateMs);
+            TimeSpan.FromMilliseconds(MajEnv.SystemSettings.IO.InputDevice.TouchPanel.PollingRateMs);
 
         public override void OnPreUpdate() => _states.OnPreUpdate();
         public void ReadTouchPanel(Span<bool> states, Span<bool> hadOn, Span<bool> hadOff) =>

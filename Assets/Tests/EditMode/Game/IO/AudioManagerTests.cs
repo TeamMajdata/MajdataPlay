@@ -97,7 +97,7 @@ namespace MajdataPlay.Tests.Game.IO
         [TestCase(8)]
         public void MixingMatrix_RoutesStereoToEachLayout(int channels)
         {
-            var volumes = _settings.Settings.Audio.Channel;
+            var volumes = _settings.SystemSettings.Audio.Channel;
             volumes.FrontVolume = 0.9f;
             volumes.CenterAndLFEVolume = 0.8f;
             volumes.SideVolume = 0.7f;
@@ -131,7 +131,7 @@ namespace MajdataPlay.Tests.Game.IO
         [TestCase(8, 8)]
         public void MixingMatrix_ForceMono_UsesEqualWeights(int channels, int rows)
         {
-            _settings.Settings.Audio.ForceMono = true;
+            _settings.SystemSettings.Audio.ForceMono = true;
 
             PrivateMember.InvokeStatic(typeof(AudioManager), "GenerateMixingMatrix", channels);
             var matrix = AudioManager.MixingMatrix;
@@ -200,7 +200,7 @@ namespace MajdataPlay.Tests.Game.IO
         [Test]
         public void ReadVolumeFromSettings_AppliesGroupVolumes()
         {
-            var volume = _settings.Settings.Audio.Volume;
+            var volume = _settings.UserSettings.Volume;
             volume.Answer = 0.11f;
             volume.Tap = 0.12f;
             volume.Ex = 0.13f;
@@ -255,7 +255,7 @@ namespace MajdataPlay.Tests.Game.IO
             var wav = WriteWave("track.wav");
 
             Assert.That(_manager.LoadMusic(_temporary.Location + "/missing.wav"), Is.SameAs(AudioSampleWrap.Empty));
-            _settings.Settings.Audio.Backend = (SoundBackendOption)99;
+            _settings.SystemSettings.Audio.Backend = (SoundBackendOption)99;
             Assert.That(_manager.LoadMusic(wav), Is.SameAs(AudioSampleWrap.Empty));
             Assert.That(_manager.LoadMusicFromUri(new Uri("https://example.invalid/a.wav")), Is.SameAs(AudioSampleWrap.Empty));
         }
@@ -268,11 +268,11 @@ namespace MajdataPlay.Tests.Game.IO
             PrivateMember.SetStaticField(typeof(AudioManager), "BassGlobalMixer", _mixer);
             PrivateMember.SetStaticProperty(typeof(AudioManager), nameof(AudioManager.MixingMatrix), new float[,] { { 1f, 0f }, { 0f, 1f } });
 
-            _settings.Settings.Audio.Backend = SoundBackendOption.BassSimple;
+            _settings.SystemSettings.Audio.Backend = SoundBackendOption.BassSimple;
             using var simple = _manager.LoadMusic(wav, false);
-            _settings.Settings.Audio.Backend = SoundBackendOption.Wasapi;
+            _settings.SystemSettings.Audio.Backend = SoundBackendOption.Wasapi;
             using var mixed = _manager.LoadMusic(wav, false);
-            _settings.Settings.Audio.Backend = SoundBackendOption.Asio;
+            _settings.SystemSettings.Audio.Backend = SoundBackendOption.Asio;
             using var asio = _manager.LoadMusic(wav, true, true);
 
             Assert.That(simple, Is.TypeOf<BassSimpleAudioSample>());
@@ -292,12 +292,12 @@ namespace MajdataPlay.Tests.Game.IO
                 PrivateMember.SetStaticField(typeof(AudioManager), "BassGlobalMixer", _mixer);
                 PrivateMember.SetStaticProperty(typeof(AudioManager), nameof(AudioManager.MixingMatrix), new float[,] { { 1f, 0f }, { 0f, 1f } });
 
-                _settings.Settings.Audio.Backend = SoundBackendOption.BassSimple;
+                _settings.SystemSettings.Audio.Backend = SoundBackendOption.BassSimple;
                 var simple = await _manager.LoadMusicAsync(wav, false);
-                _settings.Settings.Audio.Backend = SoundBackendOption.Wasapi;
+                _settings.SystemSettings.Audio.Backend = SoundBackendOption.Wasapi;
                 var mixed = await _manager.LoadMusicAsync(wav, false);
                 var missing = await _manager.LoadMusicAsync(_temporary.Location + "/missing.wav");
-                _settings.Settings.Audio.Backend = (SoundBackendOption)99;
+                _settings.SystemSettings.Audio.Backend = (SoundBackendOption)99;
                 var unknown = await _manager.LoadMusicAsync(wav);
                 var unknownUri = await _manager.LoadMusicFromUriAsync(new Uri("https://example.invalid/a.wav"));
 
@@ -315,16 +315,16 @@ namespace MajdataPlay.Tests.Game.IO
         [Test]
         public void CreateAudioRecorder_DependsOnTheBackend()
         {
-            _settings.Settings.Audio.Backend = SoundBackendOption.Unity;
+            _settings.SystemSettings.Audio.Backend = SoundBackendOption.Unity;
             Assert.Throws<NotSupportedException>(() => _manager.CreateAudioRecorder());
 
-            _settings.Settings.Audio.Backend = SoundBackendOption.Wasapi;
+            _settings.SystemSettings.Audio.Backend = SoundBackendOption.Wasapi;
             Assert.Throws<InvalidOperationException>(() => _manager.CreateAudioRecorder(), "no global mixer yet");
 
             PrivateMember.SetStaticField(typeof(AudioManager), "BassGlobalMixer", _mixer);
             Assert.Throws<InvalidOperationException>(() => _manager.CreateAudioRecorder(), "WASAPI is not initialized");
 
-            _settings.Settings.Audio.Backend = SoundBackendOption.Asio;
+            _settings.SystemSettings.Audio.Backend = SoundBackendOption.Asio;
             using var recorder = _manager.CreateAudioRecorder();
             Assert.That(recorder.Channels, Is.EqualTo(2));
             Assert.That(recorder.SampleRate, Is.EqualTo(BassTestSupport.SampleRate));
@@ -334,7 +334,7 @@ namespace MajdataPlay.Tests.Game.IO
         [Test]
         public void AsioPanelAndPause_AreSafeForOtherBackends()
         {
-            _settings.Settings.Audio.Backend = SoundBackendOption.Unity;
+            _settings.SystemSettings.Audio.Backend = SoundBackendOption.Unity;
 
             Assert.DoesNotThrow(() => _manager.OpenAsioPannel());
             Assert.DoesNotThrow(() => PrivateMember.Invoke(_manager, "OnAppPause", null, true));
@@ -355,7 +355,7 @@ namespace MajdataPlay.Tests.Game.IO
         {
             var tap = AddSample("tap.wav", SFXSampleType.Tap);
             _samples.Add(null!);
-            _settings.Settings.Audio.Backend = SoundBackendOption.BassSimple;
+            _settings.SystemSettings.Audio.Backend = SoundBackendOption.BassSimple;
             try
             {
                 UnityMessages.Send(_manager, "OnDestroy");
@@ -379,7 +379,7 @@ namespace MajdataPlay.Tests.Game.IO
         public void OnDestroy_UnityBackend_KeepsSamples()
         {
             var tap = AddSample("tap.wav", SFXSampleType.Tap);
-            _settings.Settings.Audio.Backend = SoundBackendOption.Unity;
+            _settings.SystemSettings.Audio.Backend = SoundBackendOption.Unity;
 
             UnityMessages.Send(_manager, "OnDestroy");
 

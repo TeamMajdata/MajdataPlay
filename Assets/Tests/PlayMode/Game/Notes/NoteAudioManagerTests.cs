@@ -150,15 +150,15 @@ namespace MajdataPlay.Tests.Game.Notes.PlayMode
         [UnityTest]
         public IEnumerator Awake_ReadsAnswerOffset()
         {
-            _rig.Settings.Debug.OffsetUnit = OffsetUnitOption.Second;
-            _rig.Settings.Judge.AnswerOffset = 0.1f;
-            _rig.Settings.Debug.DisplayOffset = 0.05f;
+            _rig.UserSettings.Judge.OffsetUnit = OffsetUnitOption.Second;
+            _rig.UserSettings.Judge.AnswerOffset = 0.1f;
+            _rig.SystemSettings.Debug.DisplayOffset = 0.05f;
             var audio = _rig.NoteAudio;
             UnityMessages.Send(audio, "Awake");
             var seconds = PrivateMember.GetField<float>(audio, "_answerOffsetSec");
-            _rig.Settings.Debug.OffsetUnit = OffsetUnitOption.Frame;
-            _rig.Settings.Judge.AnswerOffset = 6f;
-            _rig.Settings.Debug.DisplayOffset = 0f;
+            _rig.UserSettings.Judge.OffsetUnit = OffsetUnitOption.Frame;
+            _rig.UserSettings.Judge.AnswerOffset = 6f;
+            _rig.SystemSettings.Debug.DisplayOffset = 0f;
             UnityMessages.Send(audio, "Awake");
             var frames = PrivateMember.GetField<float>(audio, "_answerOffsetSec");
             yield return null;

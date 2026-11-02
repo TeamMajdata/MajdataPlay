@@ -125,7 +125,7 @@ namespace MajdataPlay.Tests.Game.Notes.PlayMode
         [UnityTest]
         public IEnumerator Play_ShowsClassCTextWhenFastLateIsShown()
         {
-            _rig.Settings.Display.FastLateType = JudgeDisplayOption.All;
+            _rig.UserSettings.Judge.FastLateType = JudgeDisplayOption.All;
             var displayer = Create(false);
             yield return null;
 
@@ -146,9 +146,9 @@ namespace MajdataPlay.Tests.Game.Notes.PlayMode
         [UnityTest]
         public IEnumerator Play_ShowsClassCBreakAndCriticalText()
         {
-            _rig.Settings.Display.FastLateType = JudgeDisplayOption.All;
-            _rig.Settings.Display.BreakFastLateType = JudgeDisplayOption.All;
-            _rig.Settings.Display.DisplayCriticalPerfect = true;
+            _rig.UserSettings.Judge.FastLateType = JudgeDisplayOption.All;
+            _rig.UserSettings.Judge.BreakFastLateType = JudgeDisplayOption.All;
+            _rig.UserSettings.Judge.DisplayCriticalPerfect = true;
             var displayer = Create(false);
             yield return null;
 
@@ -164,8 +164,8 @@ namespace MajdataPlay.Tests.Game.Notes.PlayMode
         [UnityTest]
         public IEnumerator Play_ShowsClassCBreakTextWithoutBreakScore()
         {
-            _rig.Settings.Display.BreakFastLateType = JudgeDisplayOption.All;
-            _rig.Settings.Display.DisplayBreakScore = false;
+            _rig.UserSettings.Judge.BreakFastLateType = JudgeDisplayOption.All;
+            _rig.UserSettings.Judge.DisplayBreakScore = false;
             var displayer = Create(false);
             yield return null;
 
@@ -181,8 +181,8 @@ namespace MajdataPlay.Tests.Game.Notes.PlayMode
         [UnityTest]
         public IEnumerator Play_ShowsDirectionInTextSlotWhenTextIsHidden()
         {
-            _rig.Settings.Display.NoteJudgeType = JudgeDisplayOption.MissOnly;
-            _rig.Settings.Display.FastLateType = JudgeDisplayOption.BelowCP;
+            _rig.UserSettings.Judge.NoteJudgeType = JudgeDisplayOption.MissOnly;
+            _rig.UserSettings.Judge.FastLateType = JudgeDisplayOption.BelowCP;
             var displayer = Create(false);
             yield return null;
 
@@ -201,7 +201,7 @@ namespace MajdataPlay.Tests.Game.Notes.PlayMode
         [UnityTest]
         public IEnumerator Play_BreakFastLateThresholdSelectsText()
         {
-            _rig.Settings.Display.BreakFastLateType = JudgeDisplayOption.BelowP;
+            _rig.UserSettings.Judge.BreakFastLateType = JudgeDisplayOption.BelowP;
             var displayer = Create(false);
             yield return null;
 
@@ -219,7 +219,7 @@ namespace MajdataPlay.Tests.Game.Notes.PlayMode
         [UnityTest]
         public IEnumerator Play_HidesTextsWhenDisabled()
         {
-            _rig.Settings.Display.OuterJudgeDistance = 0f;
+            _rig.UserSettings.Judge.OuterJudgeDistance = 0f;
             var displayer = Create(false);
             yield return null;
 
@@ -234,7 +234,7 @@ namespace MajdataPlay.Tests.Game.Notes.PlayMode
         [UnityTest]
         public IEnumerator TouchHoldVariant_UsesTouchJudgeSetting()
         {
-            _rig.Settings.Display.TouchJudgeType = JudgeDisplayOption.Disable;
+            _rig.UserSettings.Judge.TouchJudgeType = JudgeDisplayOption.Disable;
             var displayer = Create(true);
             yield return null;
 
@@ -301,10 +301,10 @@ namespace MajdataPlay.Tests.Game.Notes.PlayMode
         [UnityTest]
         public IEnumerator Play_ShowsClassCTextForEveryHit([ValueSource(typeof(ClassCCases), nameof(ClassCCases.Options))] object[] testCase)
         {
-            _rig.Settings.Display.FastLateType = JudgeDisplayOption.All;
-            _rig.Settings.Display.BreakFastLateType = JudgeDisplayOption.All;
-            _rig.Settings.Display.DisplayBreakScore = (bool)testCase[1];
-            _rig.Settings.Display.DisplayCriticalPerfect = (bool)testCase[2];
+            _rig.UserSettings.Judge.FastLateType = JudgeDisplayOption.All;
+            _rig.UserSettings.Judge.BreakFastLateType = JudgeDisplayOption.All;
+            _rig.UserSettings.Judge.DisplayBreakScore = (bool)testCase[1];
+            _rig.UserSettings.Judge.DisplayCriticalPerfect = (bool)testCase[2];
             var displayer = Create(false);
             yield return null;
 

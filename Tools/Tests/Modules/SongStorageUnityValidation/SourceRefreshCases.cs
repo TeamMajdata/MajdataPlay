@@ -52,7 +52,7 @@ namespace MajdataPlay.Tests
                 File.Delete(playlistPath);
                 MajEnv.ChartDirectory = inaccessibleRoot.Root;
                 MajEnv.ApiEndpoints = new[] { endpoint };
-                MajEnv.Settings.Online.Enable = true;
+                MajEnv.SystemSettings.Network.Online.Enable = true;
                 Online.SupplyChartList(endpoint, new[] { metadata });
                 await SongStorage.RefreshOnline().ConfigureAwait(false);
                 Require(localCollections.All(collection => ReferenceEquals(SongStorage.Collections.Single(current => current.Id == collection.Id), collection))
@@ -77,7 +77,7 @@ namespace MajdataPlay.Tests
                     IsPlayList = true
                 }), new UTF8Encoding(false));
                 MajEnv.ChartDirectory = nativeChartRoot;
-                MajEnv.Settings.Online.Enable = false;
+                MajEnv.SystemSettings.Network.Online.Enable = false;
                 var requestsBeforeLocal = Online.ChartListRequestCount;
                 await SongStorage.RefreshLocal().ConfigureAwait(false);
                 Require(ReferenceEquals(SongStorage.Collections.Single(collection => collection.Id == remote.Id), remote)
@@ -93,7 +93,7 @@ namespace MajdataPlay.Tests
                     && localCollections.All(collection => ReferenceEquals(SongStorage.Collections.Single(current => current.Id == collection.Id), collection))
                     && !SongStorage.Collections.Any(collection => collection.Id == playlistId) && inaccessibleRoot.AccessAttemptCount == 0,
                     "Only an explicit disabled-online refresh may remove remote content, without replacing local bases or rereading deleted definitions.");
-                MajEnv.Settings.Online.Enable = true;
+                MajEnv.SystemSettings.Network.Online.Enable = true;
                 Online.SupplyChartList(endpoint, new[] { metadata });
                 await SongStorage.RefreshOnline().ConfigureAwait(false);
                 Require(SongStorage.Collections.Single(collection => collection.Id == playlistId).Single().Hash == metadata.Hash
@@ -106,7 +106,7 @@ namespace MajdataPlay.Tests
             {
                 MajEnv.ChartDirectory = nativeChartRoot;
                 MajEnv.ApiEndpoints = originalEndpoints;
-                MajEnv.Settings.Online.Enable = false;
+                MajEnv.SystemSettings.Network.Online.Enable = false;
                 await SongStorage.RefreshOnline().ConfigureAwait(false);
             }
         }

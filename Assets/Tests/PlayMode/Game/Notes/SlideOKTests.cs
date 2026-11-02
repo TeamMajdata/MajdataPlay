@@ -103,7 +103,7 @@ namespace MajdataPlay.Tests.Game.Notes.PlayMode
         [UnityTest]
         public IEnumerator PlayResult_UsesCriticalPerfectWhenEnabled()
         {
-            _rig.Settings.Display.DisplayCriticalPerfect = true;
+            _rig.UserSettings.Judge.DisplayCriticalPerfect = true;
             var result = NoteTemplates.AddSlideOK(_rig.SlideParent);
             yield return null;
             result.Shape = SlideOKShape.Str;

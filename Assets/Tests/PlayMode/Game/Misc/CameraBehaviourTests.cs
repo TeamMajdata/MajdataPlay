@@ -33,10 +33,10 @@ namespace MajdataPlay.Tests.Game.Misc.PlayMode
         {
             _objects = new TestObjects();
             _savedMainCamera = SceneSwitcher.MainCamera;
-            var display = MajEnv.Settings.Display;
-            _savedTransform = display.MainScreenTransform;
-            _savedOffset = display.MainScreenOffset;
-            _savedScale = display.MainScreenScale;
+            var rendering = MajEnv.SystemSettings.Rendering;
+            _savedTransform = rendering.MainScreenTransform;
+            _savedOffset = rendering.MainScreenOffset;
+            _savedScale = rendering.MainScreenScale;
         }
 
         /// <summary>Restores the shared camera, the singleton slot and the display settings.</summary>
@@ -46,10 +46,10 @@ namespace MajdataPlay.Tests.Game.Misc.PlayMode
             _objects.Dispose();
             Majdata<GlobalCamera>.Free();
             SceneSwitcher.MainCamera = _savedMainCamera!;
-            var display = MajEnv.Settings.Display;
-            display.MainScreenTransform = _savedTransform;
-            display.MainScreenOffset = _savedOffset;
-            display.MainScreenScale = _savedScale;
+            var rendering = MajEnv.SystemSettings.Rendering;
+            rendering.MainScreenTransform = _savedTransform;
+            rendering.MainScreenOffset = _savedOffset;
+            rendering.MainScreenScale = _savedScale;
         }
 
         /// <summary>Checks that the global camera registers itself as the main camera and survives scene loads.</summary>
@@ -125,8 +125,8 @@ namespace MajdataPlay.Tests.Game.Misc.PlayMode
         public IEnumerator ScreenPosCameraMover_AppliesDisplayTransform()
         {
             Assume.That(Screen.width > 0 && Screen.height > 0, "A screen size is required.");
-            var display = MajEnv.Settings.Display;
-            display.MainScreenTransform = false;
+            var rendering = MajEnv.SystemSettings.Rendering;
+            rendering.MainScreenTransform = false;
             var camera = _objects.Add<Camera>("Camera");
             camera.orthographic = true;
             camera.orthographicSize = 5f;
@@ -140,18 +140,18 @@ namespace MajdataPlay.Tests.Game.Misc.PlayMode
             Assert.That(camera.transform.position.y, Is.EqualTo(2f + adjustment).Within(1e-3f));
             Assert.That(camera.orthographicSize, Is.EqualTo(size).Within(1e-3f));
 
-            display.MainScreenTransform = true;
-            display.MainScreenOffset = 1f;
-            display.MainScreenScale = 2f;
+            rendering.MainScreenTransform = true;
+            rendering.MainScreenOffset = 1f;
+            rendering.MainScreenScale = 2f;
             yield return null;
             Assert.That(camera.transform.position.y, Is.EqualTo(1.5f + 2.7f + adjustment).Within(1e-3f));
             Assert.That(camera.orthographicSize, Is.EqualTo(size / 2f).Within(1e-3f));
 
-            display.MainScreenOffset = 0f;
+            rendering.MainScreenOffset = 0f;
             yield return null;
             Assert.That(camera.transform.position.y, Is.EqualTo(1.5f + adjustment).Within(1e-3f));
 
-            display.MainScreenTransform = false;
+            rendering.MainScreenTransform = false;
             yield return null;
             Assert.That(camera.transform.position.y, Is.EqualTo(2f + adjustment).Within(1e-3f));
             Assert.That(camera.orthographicSize, Is.EqualTo(size).Within(1e-3f));
@@ -163,10 +163,10 @@ namespace MajdataPlay.Tests.Game.Misc.PlayMode
         public IEnumerator ScreenPosCameraMover_PerspectiveCameraOnlyMoves()
         {
             Assume.That(Screen.width > 0 && Screen.height > 0, "A screen size is required.");
-            var display = MajEnv.Settings.Display;
-            display.MainScreenTransform = true;
-            display.MainScreenOffset = 0.5f;
-            display.MainScreenScale = 0f;
+            var rendering = MajEnv.SystemSettings.Rendering;
+            rendering.MainScreenTransform = true;
+            rendering.MainScreenOffset = 0.5f;
+            rendering.MainScreenScale = 0f;
             var camera = _objects.Add<Camera>("Camera");
             camera.orthographic = false;
             camera.gameObject.AddComponent<ScreenPosCameraMover>();

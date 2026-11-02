@@ -62,7 +62,7 @@ namespace MajdataPlay
         /// <summary>Applies visibility, selected geometry, opacity, and the current touch state.</summary>
         internal void OnPreUpdate()
         {
-            var settings = MajEnv.Settings.Debug;
+            var settings = MajEnv.UserSettings.Display;
             var visible = settings.DisplaySensor;
             if (!visible)
             {
@@ -106,7 +106,7 @@ namespace MajdataPlay
         {
             // Camera, Canvas layout, and SubScreenEdge are updated at orders 100 through 175.
             // Only visual vertices and their culling bounds move; input colliders never move.
-            var settings = MajEnv.Settings.Debug;
+            var settings = MajEnv.UserSettings.Display;
             if (!settings.DisplaySensor)
             {
                 SetSensorsVisible(false);

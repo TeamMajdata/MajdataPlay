@@ -47,7 +47,7 @@ namespace MajdataPlay.Scenes.Game.Notes.Controllers
         public void Init()
         {
             var noteLoader = Majdata<NoteLoader>.Instance!;
-            var debugOptions = MajEnv.Settings.Debug;
+            var debugOptions = MajEnv.SystemSettings.Debug;
             var isHadTap = false;
             var isHadHold = false;
             var isHadTouch = false;

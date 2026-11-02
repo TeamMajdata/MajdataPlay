@@ -66,8 +66,8 @@ namespace MajdataPlay.IO
             var serialPorts = DeviceList.Local.GetSerialDevices();
 #endif
 
-            var ioSettings = MajEnv.Settings.IO;
-            var playerIndex = ioSettings.InputDevice.Player;
+            var ioSettings = MajEnv.SystemSettings.IO;
+            var playerIndex = ioSettings.Player;
             var buttonRingSettings = ioSettings.InputDevice.ButtonRing;
             var touchPanelSettings = ioSettings.InputDevice.TouchPanel;
             var ledDeviceSettings = ioSettings.OutputDevice.Led;

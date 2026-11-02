@@ -37,8 +37,9 @@ namespace MajdataPlay.Tests.Game.GamePlay.Manager
             _objects = new TestObjects();
             _settings = new GamePlaySettingsScope();
             _manager = _objects.Add<GamePlayManager>();
-            PrivateMember.SetField(_manager, "_gameSettings", _settings.Settings);
-            PrivateMember.SetProperty(_manager, nameof(GamePlayManager.ModInfo), new GameModInfo(new ModOptions()));
+            PrivateMember.SetField(_manager, "_userSettings", _settings.UserSettings);
+            PrivateMember.SetField(_manager, "_systemSettings", _settings.SystemSettings);
+            PrivateMember.SetProperty(_manager, nameof(GamePlayManager.ModInfo), new GameModInfo(new ModOptions(), new GameOptions()));
         }
 
         /// <summary>Destroys the manager and restores the settings.</summary>
@@ -80,7 +81,7 @@ namespace MajdataPlay.Tests.Game.GamePlay.Manager
         [Test]
         public void IsAutoplay_FollowsTheMod()
         {
-            PrivateMember.SetProperty(_manager, nameof(GamePlayManager.ModInfo), new GameModInfo(new ModOptions { AutoPlay = AutoplayModeOption.DJAuto_ButtonRing_First, PlaybackSpeed = 1.5f }));
+            PrivateMember.SetProperty(_manager, nameof(GamePlayManager.ModInfo), new GameModInfo(new ModOptions { AutoPlay = AutoplayModeOption.DJAuto_ButtonRing_First, PlaybackSpeed = 1.5f }, new GameOptions()));
 
             Assert.That(_manager.IsAutoplay, Is.True);
             Assert.That(_manager.AutoplayMode, Is.EqualTo(AutoplayModeOption.DJAuto_ButtonRing_First));
@@ -93,10 +94,10 @@ namespace MajdataPlay.Tests.Game.GamePlay.Manager
         {
             Assert.That(_manager.IsClassicMode, Is.False);
 
-            _settings.Settings.Judge.Mode = JudgeModeOption.Classic;
+            _settings.UserSettings.Judge.Mode = JudgeModeOption.Classic;
             Assert.That(_manager.IsClassicMode, Is.True);
 
-            PrivateMember.SetField(_manager, "_gameSettings", null);
+            PrivateMember.SetField(_manager, "_userSettings", null);
             Assert.That(_manager.IsClassicMode, Is.False);
         }
 
@@ -146,7 +147,7 @@ namespace MajdataPlay.Tests.Game.GamePlay.Manager
         [Test]
         public void LoadDanModSettings_ParsesStringOverrides()
         {
-            PrivateMember.SetProperty(_manager, nameof(GamePlayManager.ModInfo), new GameModInfo(new ModOptions { AllTouch = true, PlaybackSpeed = 0.5f }));
+            PrivateMember.SetProperty(_manager, nameof(GamePlayManager.ModInfo), new GameModInfo(new ModOptions { AllTouch = true, PlaybackSpeed = 0.5f }, new GameOptions()));
             SetDanMods(new Dictionary<string, JToken>
             {
                 { "PlaybackSpeed", new JValue("1.25") },
@@ -177,7 +178,7 @@ namespace MajdataPlay.Tests.Game.GamePlay.Manager
         [Test]
         public void LoadDanModSettings_IgnoresInvalidStrings()
         {
-            PrivateMember.SetProperty(_manager, nameof(GamePlayManager.ModInfo), new GameModInfo(new ModOptions { PlaybackSpeed = 0.75f, JudgeStyle = JudgeStyleOption.GORI }));
+            PrivateMember.SetProperty(_manager, nameof(GamePlayManager.ModInfo), new GameModInfo(new ModOptions { PlaybackSpeed = 0.75f, JudgeStyle = JudgeStyleOption.GORI }, new GameOptions()));
             SetDanMods(new Dictionary<string, JToken>
             {
                 { "PlaybackSpeed", new JValue("fast") },
@@ -261,7 +262,7 @@ namespace MajdataPlay.Tests.Game.GamePlay.Manager
         [Test]
         public void EnforceGameFailure_UsesTheClassicAchievementInClassicMode()
         {
-            _settings.Settings.Judge.Mode = JudgeModeOption.Classic;
+            _settings.UserSettings.Judge.Mode = JudgeModeOption.Classic;
             PrivateMember.SetField(_manager, "_objectCounter", CreateCounter());
             PrivateMember.SetField(_manager, "_gameInfo", new GameInfo(GameMode.Normal, null!, null!));
             PrivateMember.SetField(_manager, "_enforceGameFailureCondition", EnforceGameFailureCondition.Retry_SSS);

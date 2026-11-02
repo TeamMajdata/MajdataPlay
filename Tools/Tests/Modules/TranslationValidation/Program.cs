@@ -139,7 +139,7 @@ namespace MajdataPlay.TranslationValidation
         private static AnalysisSnapshot CollectSettings()
         {
             var snapshot = new AnalysisSnapshot();
-            TranslationSettingAnalyzer.Collect(typeof(GameSetting).Assembly, snapshot.Keys, snapshot.Diagnostics);
+            TranslationSettingAnalyzer.Collect(typeof(SettingRoot).Assembly, snapshot.Keys, snapshot.Diagnostics);
             return snapshot;
         }
 

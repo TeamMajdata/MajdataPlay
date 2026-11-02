@@ -106,7 +106,7 @@ namespace MajdataPlay.Tests.ChartStorageValidation
             MajEnv.RuntimeConfig.List.SelectedDirGuid = identity;
             MajEnv.RuntimeConfig.List.SelectedSongId = selectedHash;
             MajEnv.ApiEndpoints = new[] { endpoint };
-            MajEnv.Settings.Online.Enable = true;
+            MajEnv.SystemSettings.Network.Online.Enable = true;
             Online.ChartListHandler = (source, token) => Task.FromResult<ChartFixture[]?>(new[]
             {
                 new ChartFixture { Hash = remoteHash, Title = "Remote first" },
@@ -170,13 +170,13 @@ namespace MajdataPlay.Tests.ChartStorageValidation
             try
             {
                 SQLite.SQLiteAsyncConnection.QueryException = new IOException("Source refreshes must not requery favorites storage.");
-                MajEnv.Settings.Online.Enable = false;
+                MajEnv.SystemSettings.Network.Online.Enable = false;
                 await SongStorage.RefreshOnline();
                 FileSystem.RegisterContentProvider(backend);
                 MajEnv.ChartDirectory = backend.Root;
                 MajEnv.CacheDirectory = FileSystem.Directory.Open(CreateFixtureDirectory(path, "Cache"));
                 MajEnv.ApiEndpoints = new[] { endpoint };
-                MajEnv.Settings.Online.Enable = true;
+                MajEnv.SystemSettings.Network.Online.Enable = true;
                 Online.ChartListHandler = (source, token) =>
                 {
                     Interlocked.Increment(ref requestCount);
@@ -228,7 +228,7 @@ namespace MajdataPlay.Tests.ChartStorageValidation
 
                 backend.RejectAccess = false;
                 NativeFile.WriteAllText(Path.Combine(localChartPath, "maidata.txt"), JsonSerializer.Serialize(new ChartFixture { Hash = "split-local", Title = "Local replacement" }));
-                MajEnv.Settings.Online.Enable = false;
+                MajEnv.SystemSettings.Network.Online.Enable = false;
                 var requestsBeforeLocalRefresh = requestCount;
                 await SongStorage.RefreshLocal();
                 local = SongStorage.Collections.Single(collection => collection.Id == local.Id);
@@ -245,7 +245,7 @@ namespace MajdataPlay.Tests.ChartStorageValidation
                 NativeFile.Delete(remoteOnlyPath);
                 backend.RejectAccess = true;
                 accessCount = backend.AccessCount;
-                MajEnv.Settings.Online.Enable = true;
+                MajEnv.SystemSettings.Network.Online.Enable = true;
                 SelectStorageSong(remote, remoteHash);
                 SongDetail.Probe = new ParseProbe();
                 await SongStorage.RefreshOnline();
@@ -280,7 +280,7 @@ namespace MajdataPlay.Tests.ChartStorageValidation
                 var localBeforeDisable = SongStorage.Collections.Single(collection => collection.Id == local.Id);
                 var localSongBeforeDisable = (SongDetail)localBeforeDisable.Single();
                 var requestsBeforeDisable = requestCount;
-                MajEnv.Settings.Online.Enable = false;
+                MajEnv.SystemSettings.Network.Online.Enable = false;
                 await SongStorage.RefreshOnline();
                 Require(SongStorage.Collections.All(collection => !collection.IsOnline) && SongStorage.TotalChartCount == 1
                     && ReferenceEquals(SongStorage.Collections.Single(collection => collection.Id == local.Id), localBeforeDisable)
@@ -289,7 +289,7 @@ namespace MajdataPlay.Tests.ChartStorageValidation
                 Require(!SongStorage.Collections.Any(collection => collection.Id == remoteOnlyId)
                     && SongStorage.Collections.Single(collection => collection.Id == mixedId).Single().Hash == "split-local",
                     "Disabled-online rebinding must keep the local portion of cached playlists and hide only unmatched remote-only views.");
-                MajEnv.Settings.Online.Enable = true;
+                MajEnv.SystemSettings.Network.Online.Enable = true;
                 await SongStorage.RefreshOnline();
                 Require(SongStorage.Collections.Single(collection => collection.Id == remoteOnlyId).Single().Hash == remoteHash
                     && backend.AccessCount == accessCount,
@@ -302,7 +302,7 @@ namespace MajdataPlay.Tests.ChartStorageValidation
                 MajEnv.ChartDirectory = originalChartPath;
                 MajEnv.CacheDirectory = originalCachePath;
                 MajEnv.ApiEndpoints = originalEndpoints;
-                MajEnv.Settings.Online.Enable = false;
+                MajEnv.SystemSettings.Network.Online.Enable = false;
                 Online.ChartListHandler = originalChartHandler;
                 Online.FavoritesHandler = originalFavoritesHandler;
                 SQLite.SQLiteAsyncConnection.QueryException = originalQueryException;
@@ -316,7 +316,7 @@ namespace MajdataPlay.Tests.ChartStorageValidation
         {
             var originalChartRoot = MajEnv.ChartDirectory;
             var originalCacheRoot = MajEnv.CacheDirectory;
-            var originalOnlineEnabled = MajEnv.Settings.Online.Enable;
+            var originalOnlineEnabled = MajEnv.SystemSettings.Network.Online.Enable;
             var originalEndpoints = MajEnv.ApiEndpoints;
             var listConfig = MajEnv.RuntimeConfig.List;
             var originalId = listConfig.SelectedDirGuid;
@@ -326,7 +326,7 @@ namespace MajdataPlay.Tests.ChartStorageValidation
                 var root = FileSystem.Directory.Open(CreateFixtureDirectory(rootPath, "SelectionRecovery"));
                 MajEnv.ChartDirectory = root.CreateDirectory("Charts");
                 MajEnv.CacheDirectory = root.CreateDirectory("Cache");
-                MajEnv.Settings.Online.Enable = false;
+                MajEnv.SystemSettings.Network.Online.Enable = false;
                 MajEnv.ApiEndpoints = Array.Empty<ApiEndpoint>();
                 var fallback = MajEnv.ChartDirectory.CreateDirectory("Fallback");
                 WriteChart(fallback.Location, "First", new ChartFixture { Hash = "fallback-song", Title = "Fallback" });
@@ -373,7 +373,7 @@ namespace MajdataPlay.Tests.ChartStorageValidation
             {
                 MajEnv.ChartDirectory = originalChartRoot;
                 MajEnv.CacheDirectory = originalCacheRoot;
-                MajEnv.Settings.Online.Enable = originalOnlineEnabled;
+                MajEnv.SystemSettings.Network.Online.Enable = originalOnlineEnabled;
                 MajEnv.ApiEndpoints = originalEndpoints;
                 listConfig.SelectedDirGuid = originalId;
                 listConfig.SelectedSongId = originalHash;

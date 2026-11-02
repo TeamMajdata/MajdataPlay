@@ -1,5 +1,6 @@
 ﻿using MajdataPlay.Net.Curl;
 using MajdataPlay.Net.Curl.Core;
+using MajdataPlay.Net.Curl.Diagnostics;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -43,6 +44,14 @@ namespace MajdataPlay.Net.Curl
         public bool AllowAutoRedirect { get; set; } = true;
         public bool UseDefaultCredentials { get; set; }
         public bool UseProxy { get; set; } = false;
+
+        /// <summary>
+        /// Gets the request counters and connection pool of this handler, also listed in <see cref="CurlStatistics"/>.
+        /// </summary>
+        public CurlHandlerStatistics Statistics
+        {
+            get => _curlMulti.Statistics;
+        }
 
         readonly CurlMulti _curlMulti;
 

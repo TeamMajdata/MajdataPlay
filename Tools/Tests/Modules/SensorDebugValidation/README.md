@@ -35,10 +35,10 @@ that reversing only those 34 flag changes reproduces the baseline scene text.
 The first command stages an isolated project under ignored
 `Temp/SensorDebugValidation`. It imports the real full-area FBX, five baked
 border meshes, sensor material, shader, and MRP includes. It runs the production
-`DummyTouchPanelRenderer`, `DebugOptions`, `SensorDebugStyle`, and
+`DummyTouchPanelRenderer`, `DisplayOptions`, `SensorDebugStyle`, and
 `SensorDebugPosition` with real Unity MeshFilter, MeshRenderer, MeshCollider, and
 MaterialPropertyBlock objects. Only game services, input data, secondary display
-edges, unrelated timing enumerator type, and hierarchy enumeration are narrow
+edges, the unrelated language and skin enumerator types, and hierarchy enumeration are narrow
 substitutes. The installed Editor's Newtonsoft DLL checks string enum serialization
 with the same StringEnumConverter / replacement policy used by the game.
 
@@ -53,7 +53,7 @@ invalid-edge hiding and recovery, style/position changes while hidden, and
 resetting automatic bounds
 on return to the main screen. Collider geometry, input transforms, and material
 colors must remain unchanged by visualization; switching debug display off must
-disable every renderer. The second command covers the actual DebugOptions model,
+disable every renderer. The second command covers the actual DisplayOptions model,
 default/JSON behavior, localized enum menus, and setting refresh.
 
 The headless Editor test does not render pixels, exercise real touch I/O, run the
