@@ -45,7 +45,7 @@ namespace MajdataPlay.Net
                 }
                 var url = apiEndpoint.Url.Combine(string.Format(API_GET_FEED, SOURCE, page, pageSize));
 
-                for (var i = 0; i <= MajEnv.HTTP_REQUEST_MAX_RETRY; i++)
+                for (var i = 0; i <= MajEnv.HttpRequestMaxRetry; i++)
                 {
                     var rsp = await GetAsync(url, token, MajEnv.BackgroundHttpClient);
                     var e = default(Exception?);

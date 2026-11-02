@@ -323,7 +323,7 @@ namespace MajdataPlay.Tests.Game.Misc.Net
                 var failure = await CatchAsync(async () => await _store.GetOrDownloadAsync(s_uri, null, null, default));
 
                 Assert.That(((HttpException)failure!).ErrorCode, Is.EqualTo(HttpErrorCode.IntegrityCheckFailed));
-                Assert.That(_http.Requests.Length, Is.EqualTo(MajEnv.HTTP_REQUEST_MAX_RETRY + 1));
+                Assert.That(_http.Requests.Length, Is.EqualTo(MajEnv.HttpRequestMaxRetry + 1));
                 Assert.That(_store.Contains(Sha256(s_content)), Is.False);
                 Assert.That(CountPartials(), Is.Zero);
             });
@@ -342,7 +342,7 @@ namespace MajdataPlay.Tests.Game.Misc.Net
                 var failure = await CatchAsync(async () => await _store.GetOrDownloadAsync(s_uri, digest, null, default));
 
                 Assert.That(((HttpException)failure!).ErrorCode, Is.EqualTo(HttpErrorCode.IntegrityCheckFailed));
-                Assert.That(_http.Requests.Length, Is.EqualTo(MajEnv.HTTP_REQUEST_MAX_RETRY + 1));
+                Assert.That(_http.Requests.Length, Is.EqualTo(MajEnv.HttpRequestMaxRetry + 1));
                 Assert.That(FindObjectFile(digest, digest), Is.Null);
                 Assert.That(CountPartials(), Is.Zero);
             });

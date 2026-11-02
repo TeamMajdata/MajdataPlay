@@ -219,7 +219,7 @@ namespace MajdataPlay.Tests.Game.Misc.Net
                 _http.RespondWith(HttpStatusCode.InternalServerError, "{}");
                 var failed = await Online.Account.GetProfileAsync(_endpoint);
                 Assert.That(failed.IsSuccessfully, Is.False);
-                Assert.That(_http.Requests.Length, Is.EqualTo(2 + MajEnv.HTTP_REQUEST_MAX_RETRY + 1));
+                Assert.That(_http.Requests.Length, Is.EqualTo(2 + MajEnv.HttpRequestMaxRetry + 1));
             });
         }
 
@@ -242,7 +242,7 @@ namespace MajdataPlay.Tests.Game.Misc.Net
                 _http.RespondWith(HttpStatusCode.BadGateway);
                 var before = _http.Requests.Length;
                 Assert.That(await Online.Account.GetScoresAsync(_endpoint), Is.Empty);
-                Assert.That(_http.Requests.Length - before, Is.EqualTo(MajEnv.HTTP_REQUEST_MAX_RETRY + 1));
+                Assert.That(_http.Requests.Length - before, Is.EqualTo(MajEnv.HttpRequestMaxRetry + 1));
             });
         }
 
@@ -450,7 +450,7 @@ namespace MajdataPlay.Tests.Game.Misc.Net
                 _http.RespondWith(HttpStatusCode.OK, "{ broken");
                 before = _http.Requests.Length;
                 Assert.That(await Online.MaiChart.GetListAsync(_endpoint), Is.Null);
-                Assert.That(_http.Requests.Length - before, Is.EqualTo(MajEnv.HTTP_REQUEST_MAX_RETRY));
+                Assert.That(_http.Requests.Length - before, Is.EqualTo(MajEnv.HttpRequestMaxRetry));
             });
         }
 
@@ -886,12 +886,12 @@ namespace MajdataPlay.Tests.Game.Misc.Net
                 using var song = CreateSong();
                 _http.RespondWith(HttpStatusCode.OK, "{ broken");
                 Assert.That(await Online.MaiChart.GetInteractSummaryAsync(song), Is.Null);
-                Assert.That(_http.Requests.Length, Is.EqualTo(MajEnv.HTTP_REQUEST_MAX_RETRY + 1));
+                Assert.That(_http.Requests.Length, Is.EqualTo(MajEnv.HttpRequestMaxRetry + 1));
 
                 _http.Responder = _ => throw new HttpRequestException("offline");
                 var before = _http.Requests.Length;
                 Assert.That(await Online.MaiChart.GetScoreInfoAsync(song), Is.Null);
-                Assert.That(_http.Requests.Length - before, Is.EqualTo(MajEnv.HTTP_REQUEST_MAX_RETRY + 1));
+                Assert.That(_http.Requests.Length - before, Is.EqualTo(MajEnv.HttpRequestMaxRetry + 1));
 
                 _http.RespondWith(HttpStatusCode.ServiceUnavailable, "{}");
                 before = _http.Requests.Length;

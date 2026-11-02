@@ -215,7 +215,7 @@ namespace MajdataPlay.Net
                 try
                 {
                     var uri = apiEndpoint.Url.Combine(API_GET_SCORES);
-                    for (var i = 0; i <= MajEnv.HTTP_REQUEST_MAX_RETRY; i++)
+                    for (var i = 0; i <= MajEnv.HttpRequestMaxRetry; i++)
                     {
                         var rsp = await GetAsync(uri, token);
                         if (rsp.StatusCode is HttpStatusCode.Unauthorized)
@@ -257,7 +257,7 @@ namespace MajdataPlay.Net
                 }
                 var url = apiEndpoint.Url.Combine(API_GET_FAVORITE_COLLECTIONS);
 
-                for (var i = 0; i < MajEnv.HTTP_REQUEST_MAX_RETRY; i++)
+                for (var i = 0; i < MajEnv.HttpRequestMaxRetry; i++)
                 {
                     var rsp = await GetAsync(url, token);
                     var e = default(Exception?);
@@ -305,7 +305,7 @@ namespace MajdataPlay.Net
                 }
                 await UniTask.SwitchToThreadPool();
                 var url = apiEndpoint.Url.Combine(string.Format(API_GET_AVATAR, Uri.EscapeDataString(avatarId)));
-                for (var i = 0; i <= MajEnv.HTTP_REQUEST_MAX_RETRY; i++)
+                for (var i = 0; i <= MajEnv.HttpRequestMaxRetry; i++)
                 {
                     try
                     {
@@ -318,7 +318,7 @@ namespace MajdataPlay.Net
                                 return default;
                             }
                             await UniTask.SwitchToMainThread();
-                            onError?.Invoke("MAJTEXT_LOGIN_DOWNLOAD_AVATAR_FAILED_RETRIED_TIMES_{0}/{1}".i18n(i + 1, MajEnv.HTTP_REQUEST_MAX_RETRY + 1), true);
+                            onError?.Invoke("MAJTEXT_LOGIN_DOWNLOAD_AVATAR_FAILED_RETRIED_TIMES_{0}/{1}".i18n(i + 1, MajEnv.HttpRequestMaxRetry + 1), true);
                             await UniTask.SwitchToThreadPool();
                             continue;
                         }
@@ -344,7 +344,7 @@ namespace MajdataPlay.Net
             {
                 var uri = apiEndpoint.Url.Combine(API_GET_PROFILE);
                 var rsp = default(EndpointResponse);
-                for (var i = 0; i <= MajEnv.HTTP_REQUEST_MAX_RETRY; i++)
+                for (var i = 0; i <= MajEnv.HttpRequestMaxRetry; i++)
                 {
                     rsp = await GetAsync(uri, token);
                     if (rsp.StatusCode is HttpStatusCode.Unauthorized)

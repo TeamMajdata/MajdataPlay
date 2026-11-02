@@ -90,7 +90,7 @@ namespace MajdataPlay.Tests.Game.Misc.Base
             Assert.That(MajEnv.GameProcess.Id, Is.GreaterThan(0));
             Assert.That(MajEnv.GlobalCT.IsCancellationRequested, Is.False);
             Assert.That(MajEnv.SharedHttpClient, Is.Not.SameAs(MajEnv.BackgroundHttpClient));
-            Assert.That(MajEnv.SharedHttpClient.Timeout, Is.EqualTo(TimeSpan.FromMilliseconds(MajEnv.HTTP_TIMEOUT_MS)));
+            Assert.That(MajEnv.SharedHttpClient.Timeout, Is.EqualTo(MajEnv.HttpTimeout));
             Assert.That(MajEnv.UserJsonReaderOption.Converters, Is.Not.Empty);
             Assert.That(MajInstances.GameVersion.ToString(), Is.EqualTo("0.1.51"));
         }

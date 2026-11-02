@@ -120,7 +120,7 @@ namespace MajdataPlay.Net
             await UniTask.SwitchToThreadPool();
             var url = apiEndpoint.Url.Combine(API_GET_SERVER_INFO);
 
-            for (var i = 0; i < MajEnv.HTTP_REQUEST_MAX_RETRY; i++)
+            for (var i = 0; i < MajEnv.HttpRequestMaxRetry; i++)
             {
                 var rsp = await GetAsync(url, token);
                 var e = default(Exception?);

@@ -48,7 +48,7 @@ namespace MajdataPlay.Net
                 await UniTask.SwitchToThreadPool();
                 var url = apiEndpoint.Url.Combine(API_GET_LIST);
 
-                for (var i = 0; i < MajEnv.HTTP_REQUEST_MAX_RETRY; i++)
+                for (var i = 0; i < MajEnv.HttpRequestMaxRetry; i++)
                 {
                     var rsp = await GetAsync(url, token);
                     var e = default(Exception?);
@@ -105,7 +105,7 @@ namespace MajdataPlay.Net
                                 return Array.Empty<MajNetChartInfo>();
                             }
                             var batch = default(MajNetChartInfo[]);
-                            for (var i = 0; i < MajEnv.HTTP_REQUEST_MAX_RETRY; i++)
+                            for (var i = 0; i < MajEnv.HttpRequestMaxRetry; i++)
                             {
                                 var rsp = await PostAsync(url, CreateJsonContent(json), token);
                                 var e = default(Exception?);
@@ -266,7 +266,7 @@ namespace MajdataPlay.Net
                 var json = await SerializeJsonAsync(score);
                 var rsp = default(EndpointResponse);
 
-                for (var i = 0; i < MajEnv.HTTP_REQUEST_MAX_RETRY; i++)
+                for (var i = 0; i < MajEnv.HttpRequestMaxRetry; i++)
                 {
                     rsp = await PostAsync(scoreUrl, CreateJsonContent(json), token);
                     if (rsp.IsSuccessfully)
@@ -324,7 +324,7 @@ namespace MajdataPlay.Net
             private static async ValueTask<T> FetchAsync<T>(Uri uri, string description, CancellationToken token) where T : struct
             {
                 var rsp = default(EndpointResponse);
-                for (var i = 0; i <= MajEnv.HTTP_REQUEST_MAX_RETRY; i++)
+                for (var i = 0; i <= MajEnv.HttpRequestMaxRetry; i++)
                 {
                     var e = default(Exception?);
                     rsp = await GetAsync(uri, token);

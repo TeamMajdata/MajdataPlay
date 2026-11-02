@@ -47,9 +47,13 @@ namespace MajdataPlay
         public const int DEFAULT_LAYER = 0;
         public const int HIDDEN_LAYER = 3;
         public const int UI_LAYER = 5;
-        public const int HTTP_BUFFER_SIZE = 8192;
-        public const int HTTP_REQUEST_MAX_RETRY = 4;
-        public const int HTTP_TIMEOUT_MS = 10000;
+        public const int HttpBufferSize = 8192;
+        public const int HttpRequestMaxRetry = 4;
+        public static readonly TimeSpan HttpTimeout = TimeSpan.FromMilliseconds(90_000);
+        public static readonly TimeSpan HttpConnectTimeout = TimeSpan.FromMilliseconds(2000);
+        public static readonly TimeSpan HttpLowSpeedTimeout = TimeSpan.FromMilliseconds(18_000);
+        public const int HttpLowSpeedLimit = 16_0000; // 16KB/s
+        public const int HttpMaxCachedConnections = 8;
         public const float FRAME_LENGTH_SEC = 1f / 60;
         public const float FRAME_LENGTH_MSEC = FRAME_LENGTH_SEC * 1000;
 
@@ -161,11 +165,15 @@ namespace MajdataPlay
             Proxy = WebRequest.GetSystemWebProxy(),
             UseProxy = true,
             CookieContainer = new CookieContainer(),
+            ConnectTimeout = HttpConnectTimeout,
+            LowSpeedTimeout = HttpLowSpeedTimeout,
+            LowSpeedLimit = HttpLowSpeedLimit,
             MaxConnectionsPerServer = 64,
+            MaxCachedConnections = HttpMaxCachedConnections
         };
         public static HttpClient SharedHttpClient { get; } = new HttpClient(s_httpClientHandler)
         {
-            Timeout = TimeSpan.FromMilliseconds(HTTP_TIMEOUT_MS),
+            Timeout = HttpTimeout,
             DefaultRequestHeaders =
             {
                 UserAgent = { new ProductInfoHeaderValue("MajdataPlay", MajInstances.GameVersion.ToString()) },
@@ -178,7 +186,7 @@ namespace MajdataPlay
         /// </summary>
         public static HttpClient BackgroundHttpClient { get; } = new HttpClient(s_httpClientHandler, disposeHandler: false)
         {
-            Timeout = TimeSpan.FromMilliseconds(HTTP_TIMEOUT_MS),
+            Timeout = HttpTimeout,
             DefaultRequestHeaders =
             {
                 UserAgent = { new ProductInfoHeaderValue("MajdataPlay", MajInstances.GameVersion.ToString()) },
@@ -438,12 +446,12 @@ namespace MajdataPlay
         /// <summary>Configures the shared HTTP and thread defaults, registers the save and quit handlers and logs the startup check.</summary>
         private static void InitRuntimeEnvironment()
         {
-            SharedHttpClient.Timeout = TimeSpan.FromMilliseconds(HTTP_TIMEOUT_MS);
+            SharedHttpClient.Timeout = HttpTimeout;
             MainThread.Priority = THREAD_PRIORITY_MAIN;
 
             IsLowMemoryDevice = SystemInfo.systemMemorySize < 4096;
 
-            UnityWebRequestFactory.Timeout = TimeSpan.FromMilliseconds(HTTP_TIMEOUT_MS);
+            UnityWebRequestFactory.Timeout = HttpTimeout;
             UnityWebRequestFactory.UserAgent = HTTP_USER_AGENT;
 
             GameManager.OnAppQuit += OnApplicationQuit;
