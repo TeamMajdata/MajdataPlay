@@ -1,15 +1,10 @@
 using MajdataPlay.Net;
-#if UNITY_IOS
-using Newtonsoft.Json;
-#endif
 #nullable enable
 namespace MajdataPlay.Settings
 {
     public class OnlineOptions
     {
-#if UNITY_IOS
-        [JsonIgnore]
-#endif
+        [JsonIgnoreOnPlatform(SettingPlatform.IOS)]
         public bool Enable { get; set; } = false;
 
         public ApiEndpoint[] ApiEndpoints { get; set; } = new ApiEndpoint[]

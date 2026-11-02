@@ -1,6 +1,5 @@
 using MajdataPlay.Diagnostics;
 using MajdataPlay.Settings.OptionEnumerators;
-using Newtonsoft.Json;
 #nullable enable
 namespace MajdataPlay.Settings
 {
@@ -18,9 +17,7 @@ namespace MajdataPlay.Settings
         public bool HideCursorInGame { get; set; } = true;
 #endif
         [HideInSettingUI]
-#if UNITY_IOS
-        [JsonIgnore]
-#endif
+        [JsonIgnoreOnPlatform(SettingPlatform.IOS)]
         public bool NoteFolding { get; set; } = true;
 
         public DJAutoPolicyOption DJAutoPolicy { get; set; } = DJAutoPolicyOption.Strict;
@@ -57,9 +54,7 @@ namespace MajdataPlay.Settings
 #endif
 
         [HideInSettingUI]
-#if UNITY_IOS
-        [JsonIgnore]
-#endif
+        [JsonIgnoreOnPlatform(SettingPlatform.IOS)]
         public LogLevel DebugLevel { get; set; } = LogLevel.Info;
     }
 }

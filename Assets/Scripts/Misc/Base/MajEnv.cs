@@ -200,6 +200,7 @@ namespace MajdataPlay
         {
             Formatting = Formatting.Indented,
             ObjectCreationHandling = ObjectCreationHandling.Replace,
+            ContractResolver = new SettingContractResolver(),
             Converters =
             {
                 new StringEnumConverter()

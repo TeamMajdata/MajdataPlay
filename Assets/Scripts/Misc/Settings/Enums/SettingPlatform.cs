@@ -3,7 +3,7 @@ using System;
 namespace MajdataPlay.Settings
 {
     /// <summary>
-    /// Specifies the target platforms that a setting UI rule such as <see cref="DisableValuesAttribute"/> applies to.
+    /// Specifies the target platforms that setting UI rules and JSON exclusions apply to.
     /// </summary>
     /// <remarks>
     /// The platform is the build target: in the Unity Editor it is the platform currently selected in the build settings.
