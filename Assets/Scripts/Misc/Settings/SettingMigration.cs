@@ -31,7 +31,8 @@ namespace MajdataPlay.Settings
     /// <c>RenderScale</c>, <c>FPSLimit</c> and <c>VSync</c>, are converted to the <c>Rendering</c> category first.
     /// The <c>Online</c> category of system-settings.json becomes the <c>Online</c> options of the <c>Network</c>
     /// category, except its <c>UseProxy</c> and <c>Proxy</c> keys, which become the <c>Enable</c> and <c>Url</c> keys of
-    /// the <c>Proxy</c> options.
+    /// the <c>Proxy</c> options. The <c>Player</c> key of the <c>InputDevice</c> options in the <c>IO</c> category moves
+    /// up to the <c>IO</c> category itself.
     /// </para>
     /// </remarks>
     internal static class SettingMigration
@@ -76,6 +77,13 @@ namespace MajdataPlay.Settings
         /// The legacy key of the proxy URL in the <c>Online</c> category, which is now <see cref="ProxyOptions.Url"/>.
         /// </summary>
         private const string LegacyProxyKey = "Proxy";
+
+        // IOOptions.Player 只在桌面平台存在，无法用 nameof 引用；SettingMigrationTests 会检查它仍是 IOOptions 的属性。
+        /// <summary>
+        /// The key of the player number, which older versions stored in the <c>InputDevice</c> options of the <c>IO</c>
+        /// category and which is now a key of the <c>IO</c> category itself.
+        /// </summary>
+        internal const string PlayerKey = "Player";
 
         // 旧版 settings.json 中属于系统设置的分类名，是历史格式，不能跟随 SystemSetting 的属性重命名。
         /// <summary>
@@ -167,6 +175,7 @@ namespace MajdataPlay.Settings
             changed |= MoveLegacyRenderingKeys(user, system, serializer);
             changed |= MoveLegacyVolume(user, system);
             changed |= MoveLegacyOnlineCategory(system);
+            changed |= MoveLegacyPlayer(system);
             foreach (var move in LegacyOptionMoves)
             {
                 changed |= MoveLegacyOptions(user, system, move);
@@ -345,6 +354,32 @@ namespace MajdataPlay.Settings
                 }
             }
             MajDebug.LogInfo(nameof(SettingMigration), "Moved the legacy Online settings to Network");
+            return true;
+        }
+
+        /// <summary>
+        /// Moves the legacy player number of the <c>InputDevice</c> options up to the <c>IO</c> category.
+        /// </summary>
+        /// <remarks>
+        /// A player number the <c>IO</c> category already has keeps its value, and the legacy one is dropped.
+        /// </remarks>
+        /// <param name="system">The root object of system-settings.json, which holds the <c>IO</c> category.</param>
+        /// <returns>True when the legacy key was found and removed.</returns>
+        private static bool MoveLegacyPlayer(JObject system)
+        {
+            if (system[nameof(SystemSetting.IO)] is not JObject io ||
+                io[nameof(IOOptions.InputDevice)] is not JObject inputDevice)
+            {
+                return false;
+            }
+            var hasLegacyKey = false;
+            var legacyPlayer = TakeLegacyValue(inputDevice, PlayerKey, ref hasLegacyKey);
+            if (!hasLegacyKey)
+            {
+                return false;
+            }
+            CopyIfMissing(io, PlayerKey, legacyPlayer);
+            MajDebug.LogInfo(nameof(SettingMigration), "Moved the legacy player number from InputDevice to IO");
             return true;
         }
 

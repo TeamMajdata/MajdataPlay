@@ -5,9 +5,7 @@ namespace MajdataPlay.Settings
     {
         public static class InputDevice
         {
-#if UNITY_STANDALONE
-            public const int Player = 1;
-#else
+#if !UNITY_STANDALONE
             public const MobileExternalButtonRingOption ExternalButtonRing = MobileExternalButtonRingOption.None;
 #endif
         }

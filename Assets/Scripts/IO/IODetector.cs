@@ -67,7 +67,7 @@ namespace MajdataPlay.IO
 #endif
 
             var ioSettings = MajEnv.SystemSettings.IO;
-            var playerIndex = ioSettings.InputDevice.Player;
+            var playerIndex = ioSettings.Player;
             var buttonRingSettings = ioSettings.InputDevice.ButtonRing;
             var touchPanelSettings = ioSettings.InputDevice.TouchPanel;
             var ledDeviceSettings = ioSettings.OutputDevice.Led;

@@ -10,6 +10,8 @@ namespace MajdataPlay.Settings
             {
                 get => null;
             }
+
+            public const int Player = 1;
 #endif
         }
     }

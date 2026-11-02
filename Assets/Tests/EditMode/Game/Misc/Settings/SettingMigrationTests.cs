@@ -536,6 +536,75 @@ namespace MajdataPlay.Tests.Game.Misc.Settings
             Assert.That(invalidProxy["Network"]!["Online"]!["Enable"]!.Value<bool>(), Is.True);
         }
 
+        /// <summary>
+        /// Checks that the legacy player number leaves the InputDevice options for the IO category, keeping the other
+        /// InputDevice keys.
+        /// </summary>
+        [Test]
+        public void Migrate_MovesLegacyPlayerToIO()
+        {
+            var system = JObject.Parse("{\"IO\":{\"InputDevice\":{\"Player\":2,\"ButtonRing\":{\"Enable\":false}}}}");
+
+            var changed = SettingMigration.Migrate(new JObject(), system, CreateSerializer());
+
+            Assert.That(changed, Is.True);
+            var io = (JObject)system["IO"]!;
+            var inputDevice = (JObject)io["InputDevice"]!;
+            Assert.That(io[SettingMigration.PlayerKey]!.Value<int>(), Is.EqualTo(2));
+            Assert.That(inputDevice.ContainsKey(SettingMigration.PlayerKey), Is.False);
+            Assert.That(inputDevice["ButtonRing"]!["Enable"]!.Value<bool>(), Is.False);
+            Assert.That(SettingMigration.Migrate(new JObject(), system, CreateSerializer()), Is.False, "migrated documents are current");
+        }
+
+        /// <summary>Checks that a player number the IO category already has wins over the legacy one, which is still removed.</summary>
+        [Test]
+        public void Migrate_ExistingPlayerWinsOverLegacy()
+        {
+            var system = JObject.Parse("{\"IO\":{\"Player\":1,\"InputDevice\":{\"Player\":2}}}");
+
+            var changed = SettingMigration.Migrate(new JObject(), system, CreateSerializer());
+
+            Assert.That(changed, Is.True);
+            Assert.That(system["IO"]![SettingMigration.PlayerKey]!.Value<int>(), Is.EqualTo(1));
+            Assert.That(((JObject)system["IO"]!["InputDevice"]!).ContainsKey(SettingMigration.PlayerKey), Is.False);
+        }
+
+        /// <summary>Checks that IO categories without InputDevice options, or with ones that are not objects, are left unchanged.</summary>
+        [Test]
+        public void Migrate_IgnoresIOWithoutInputDeviceOptions()
+        {
+            var withoutInputDevice = JObject.Parse("{\"IO\":{\"Player\":2}}");
+            var invalidInputDevice = JObject.Parse("{\"IO\":{\"InputDevice\":5}}");
+            var originalWithout = withoutInputDevice.DeepClone();
+            var originalInvalid = invalidInputDevice.DeepClone();
+
+            Assert.That(SettingMigration.Migrate(new JObject(), withoutInputDevice, CreateSerializer()), Is.False);
+            Assert.That(SettingMigration.Migrate(new JObject(), invalidInputDevice, CreateSerializer()), Is.False);
+            Assert.That(JToken.DeepEquals(withoutInputDevice, originalWithout), Is.True);
+            Assert.That(JToken.DeepEquals(invalidInputDevice, originalInvalid), Is.True);
+        }
+
+#if UNITY_STANDALONE
+        /// <summary>Checks that the migrated player number key is a property of the IO options and no longer one of the InputDevice options.</summary>
+        [Test]
+        public void PlayerKey_NamesTheIOProperty()
+        {
+            Assert.That(typeof(IOOptions).GetProperty(SettingMigration.PlayerKey), Is.Not.Null);
+            Assert.That(typeof(InputDeviceOptions).GetProperty(SettingMigration.PlayerKey), Is.Null);
+        }
+
+        /// <summary>Checks the player number after reading a legacy settings.json and a legacy system-settings.json.</summary>
+        [Test]
+        public void Read_LegacyPlayerKeepsItsValue()
+        {
+            var (_, fromSettings) = Read("{\"IO\":{\"InputDevice\":{\"Player\":2}}}");
+            var (_, fromSystemSettings) = Read("{}", "{\"IO\":{\"InputDevice\":{\"Player\":2}}}");
+
+            Assert.That(fromSettings.IO.Player, Is.EqualTo(2));
+            Assert.That(fromSystemSettings.IO.Player, Is.EqualTo(2));
+        }
+#endif
+
         /// <summary>Checks that a legacy quality level that cannot be read rejects the document, like any other invalid value.</summary>
         [Test]
         public void Migrate_InvalidLegacyQualityThrows()

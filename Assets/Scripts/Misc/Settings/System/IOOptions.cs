@@ -5,6 +5,8 @@ namespace MajdataPlay.Settings
     {
 #if UNITY_STANDALONE
         public DeviceManufacturerOption? Manufacturer { get; set; } = SettingDefaults.IO.Manufacturer;
+
+        public int Player { get; set; } = SettingDefaults.IO.Player;
 #endif
 
         public InputDeviceOptions InputDevice { get; set; } = new();
