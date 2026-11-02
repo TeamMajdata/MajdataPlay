@@ -79,12 +79,13 @@ namespace MajdataPlay.Tests.Game.Misc.Net
         }
 
         /// <summary>Creates an online song served by the test endpoint.</summary>
+        /// <param name="chartId">The identifier of the chart, or null for a new one.</param>
         /// <returns>The online song.</returns>
-        private OnlineSongDetail CreateSong()
+        private OnlineSongDetail CreateSong(string? chartId = null)
         {
             var detail = new MajnetSongDetail
             {
-                Id = Guid.NewGuid().ToString(),
+                Id = chartId ?? Guid.NewGuid().ToString(),
                 Title = "Song",
                 Artist = "Artist",
                 Hash = "aGFzaA==",
@@ -765,6 +766,38 @@ namespace MajdataPlay.Tests.Game.Misc.Net
                 await Online.MaiChart.GetCommentsAsync(song);
                 await Online.MaiChart.GetInteractSummaryAsync(song);
                 Assert.That(_http.Requests.Length, Is.EqualTo(6), "A posted comment refreshes the comments and the counts.");
+            });
+        }
+
+        /// <summary>
+        /// Checks that responses are cached by request URI, so every song object of a chart shares them, and that a change
+        /// of the login drops them, since they carry the votes of the user who read them.
+        /// </summary>
+        /// <returns>The test coroutine.</returns>
+        [UnityTest]
+        public IEnumerator ResponseCache_IsSharedPerChartAndDroppedOnLoginChange()
+        {
+            return UniTask.ToCoroutine(async () =>
+            {
+                using var song = CreateSong();
+                using var sameChart = CreateSong(song.Id);
+                _http.RespondWith(HttpStatusCode.OK, "{\"plays\":1,\"myVote\":0}");
+
+                await Online.MaiChart.GetInteractSummaryAsync(song);
+                Assert.That((await Online.MaiChart.GetInteractSummaryAsync(sameChart))!.Value.Plays, Is.EqualTo(1));
+                Assert.That(_http.Requests.Length, Is.EqualTo(1));
+
+                SetStatistic("IsUserLoggedIn", true);
+                await Online.MaiChart.GetInteractSummaryAsync(song);
+                Assert.That(_http.Requests.Length, Is.EqualTo(2), "A login drops the cached responses.");
+
+                SetStatistic("IsUserLoggedIn", true);
+                await Online.MaiChart.GetInteractSummaryAsync(song);
+                Assert.That(_http.Requests.Length, Is.EqualTo(2), "Confirming the same login keeps them.");
+
+                SetStatistic("IsUserLoggedIn", false);
+                await Online.MaiChart.GetInteractSummaryAsync(song);
+                Assert.That(_http.Requests.Length, Is.EqualTo(3), "A logout drops them.");
             });
         }
 

@@ -1,5 +1,6 @@
 using Cysharp.Threading.Tasks;
 using MajdataPlay.Buffers;
+using MajdataPlay.Collections;
 using MajdataPlay.Diagnostics;
 using MajdataPlay.Net.Models;
 using MajdataPlay.Numerics;
@@ -8,7 +9,6 @@ using Newtonsoft.Json;
 using Newtonsoft.Json.Serialization;
 using Nito.AsyncEx;
 using System;
-using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
 using System.Net;
@@ -23,7 +23,7 @@ namespace MajdataPlay.Net
     /// Accesses the APIs of the online servers. The APIs are grouped like the routes of the server:
     /// <see cref="Account"/> for <c>account/*</c> and <c>avatar/*</c>, <see cref="Machine"/> for <c>machine/*</c>,
     /// <see cref="MaiChart"/> for <c>maichart/*</c> and <see cref="Recommend"/> for <c>recommend/*</c>.
-    /// The login and machine registration state of every endpoint and the responses cached per chart are shared by the groups.
+    /// The login and machine registration state of every endpoint and the cached responses are shared by the groups.
     /// </summary>
     internal static partial class Online
     {
@@ -48,13 +48,19 @@ namespace MajdataPlay.Net
 
         /// <summary>Guards <see cref="_endpointStatistics"/>.</summary>
         private static SpinLock _dictLock = new();
-        /// <summary>Guards <see cref="_cachedResponse"/>.</summary>
-        private static SpinLock _cachedResponseLock = new();
 
-        /// <summary>The responses cached per online chart.</summary>
-        private static readonly Dictionary<OnlineSongDetail, CachedApiEndpointResponse> _cachedResponse = new();
         /// <summary>The login and machine registration state of every endpoint that was accessed.</summary>
         private static readonly Dictionary<ApiEndpoint, ApiEndpointStatistics> _endpointStatistics = new();
+
+        // Declared before the caches: static initializers run in textual order.
+        /// <summary>How long a response read from a server is reused.</summary>
+        private static readonly TimeSpan s_responseTimeToLive = TimeSpan.FromSeconds(MajEnv.ONLINE_RESPONSE_CACHE_TTL_SEC);
+        /// <summary>The responses of <c>GET maichart/{chartId}/interactsum</c>, by request URI.</summary>
+        private static readonly TtlCache<Uri, MajNetChartInteractSummary> s_interactSummaries = new(s_responseTimeToLive);
+        /// <summary>The responses of <c>GET maichart/{chartId}/comments</c>, by request URI, which holds the order and the page.</summary>
+        private static readonly TtlCache<Uri, MajNetCommentPage> s_commentPages = new(s_responseTimeToLive);
+        /// <summary>The responses of <c>GET maichart/{chartId}/score</c>, by request URI.</summary>
+        private static readonly TtlCache<Uri, MajNetSongScoreInfo> s_scoreInfos = new(s_responseTimeToLive);
 
         /// <summary>
         /// Revalidates the machine registration and the login of every endpoint that reports them, so a session that expired
@@ -130,23 +136,15 @@ namespace MajdataPlay.Net
 
             return null;
         }
-        /// <summary>Drops the responses cached per online chart, so the next requests reach the server.</summary>
+        /// <summary>
+        /// Drops every cached response, so the next requests reach the server. Requests still running are not cached when
+        /// they complete.
+        /// </summary>
         public static void ClearResponseCache()
         {
-            ref var @lock = ref _cachedResponseLock;
-            var isLocked = false;
-            try
-            {
-                @lock.Enter(ref isLocked);
-                _cachedResponse.Clear();
-            }
-            finally
-            {
-                if (isLocked)
-                {
-                    @lock.Exit();
-                }
-            }
+            s_interactSummaries.Clear();
+            s_commentPages.Clear();
+            s_scoreInfos.Clear();
         }
 
         #region Internal method
@@ -383,31 +381,6 @@ namespace MajdataPlay.Net
                 }
             }
         }
-        /// <summary>Gets the responses cached for an online chart, creating them on first access.</summary>
-        /// <param name="songDetail">The online chart.</param>
-        /// <returns>The cached responses.</returns>
-        private static CachedApiEndpointResponse GetCachedResponse(OnlineSongDetail songDetail)
-        {
-            ref var @lock = ref _cachedResponseLock;
-            var isLocked = false;
-            try
-            {
-                @lock.Enter(ref isLocked);
-                if (!_cachedResponse.TryGetValue(songDetail, out var cachedResponse))
-                {
-                    cachedResponse = new CachedApiEndpointResponse();
-                    _cachedResponse[songDetail] = cachedResponse;
-                }
-                return cachedResponse;
-            }
-            finally
-            {
-                if (isLocked)
-                {
-                    @lock.Exit();
-                }
-            }
-        }
         #endregion
 
         /// <summary>The login and machine registration state of an endpoint; null while unknown.</summary>
@@ -418,7 +391,10 @@ namespace MajdataPlay.Net
 
             /// <summary>Gets or sets whether the machine is registered on the endpoint.</summary>
             public bool? IsMachineRegistered { get; set; }
-            /// <summary>Gets or sets whether the user is logged in; logging out also clears the user shown for the endpoint.</summary>
+            /// <summary>
+            /// Gets or sets whether the user is logged in; logging out also clears the user shown for the endpoint, and any
+            /// change drops the cached responses.
+            /// </summary>
             public bool? IsUserLoggedIn
             {
                 get
@@ -434,6 +410,11 @@ namespace MajdataPlay.Net
                         Endpoint.RuntimeConfig.Nickname = string.Empty;
                     }
                     Endpoint.RuntimeConfig.IsLoggedIn = value ?? false;
+                    if (_isUserLoggedIn != value)
+                    {
+                        // Cached counts and comments carry the votes of the user who read them.
+                        ClearResponseCache();
+                    }
                     _isUserLoggedIn = value;
                 }
             }
@@ -452,46 +433,6 @@ namespace MajdataPlay.Net
             public AwaitableDisposable<IDisposable> LockAsync(CancellationToken token = default)
             {
                 return _lock.LockAsync(token);
-            }
-        }
-        /// <summary>The responses cached for an online chart.</summary>
-        private class CachedApiEndpointResponse
-        {
-            /// <summary>Gets the cached response of <c>GET maichart/{chartId}/interactsum</c>.</summary>
-            public CachedResponse<MajNetChartInteractSummary> InteractSummary { get; } = new();
-            /// <summary>Gets the cached response of <c>GET maichart/{chartId}/score</c>.</summary>
-            public CachedResponse<MajNetSongScoreInfo> ScoreInfo { get; } = new();
-            /// <summary>Gets the cached pages of <c>GET maichart/{chartId}/comments</c>, by order and page number.</summary>
-            public ConcurrentDictionary<(CommentSort Sort, int Page), CachedResponse<MajNetCommentPage>> Comments { get; } = new();
-        }
-        /// <summary>A cached response, alive for <see cref="MajEnv.ONLINE_RESPONSE_CACHE_TTL_SEC"/> after it was fetched.</summary>
-        /// <typeparam name="T">The type of the response body.</typeparam>
-        private class CachedResponse<T> where T : struct
-        {
-            /// <summary>Gets or sets the response body.</summary>
-            public T Response { get; set; }
-            /// <summary>Gets the lock serializing the requests that refresh the response.</summary>
-            public AsyncLock RequestLock { get; } = new();
-            /// <summary>Gets or sets the moment the response was fetched; <see cref="DateTime.UnixEpoch"/> invalidates it.</summary>
-            public DateTime LastActive { get; set; }
-
-            /// <summary>Gets whether the response is still alive.</summary>
-            public bool IsAlive
-            {
-                get
-                {
-                    return (DateTime.Now - LastActive).TotalSeconds < MajEnv.ONLINE_RESPONSE_CACHE_TTL_SEC;
-                }
-            }
-
-            /// <summary>Marks the response as outdated, so the next request reaches the server.</summary>
-            /// <returns>A task that completes when the response was invalidated.</returns>
-            public async ValueTask InvalidateAsync()
-            {
-                using (await RequestLock.LockAsync())
-                {
-                    LastActive = DateTime.UnixEpoch;
-                }
             }
         }
     }

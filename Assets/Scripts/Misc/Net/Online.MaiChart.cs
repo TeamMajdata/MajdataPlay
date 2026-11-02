@@ -1,5 +1,6 @@
 using Cysharp.Text;
 using Cysharp.Threading.Tasks;
+using MajdataPlay.Collections;
 using MajdataPlay.Diagnostics;
 using MajdataPlay.Net.Models;
 using Newtonsoft.Json;
@@ -16,7 +17,7 @@ namespace MajdataPlay.Net
     {
         /// <summary>
         /// Accesses the chart APIs of a server, <c>maichart/*</c>: the chart list and file metadata, and the votes,
-        /// comments and rankings of a chart. Read responses are cached per chart and refreshed after this client changes
+        /// comments and rankings of a chart. Read responses are cached by request URI and dropped after this client changes
         /// them.
         /// </summary>
         public static class MaiChart
@@ -129,7 +130,7 @@ namespace MajdataPlay.Net
             {
                 await UniTask.SwitchToThreadPool();
                 var uri = BuildChartUri(song.ServerInfo, API_GET_INTERACT_SUMMARY, song.Id);
-                return await GetCachedAsync(GetCachedResponse(song).InteractSummary, uri, "chart interactions", forceRefresh, token);
+                return await GetCachedAsync(s_interactSummaries, uri, "chart interactions", forceRefresh, token);
             }
             /// <summary>
             /// Stores the vote of the current user on a chart with <c>PUT maichart/{chartId}/vote</c> and invalidates the
@@ -156,7 +157,7 @@ namespace MajdataPlay.Net
                 var rsp = await SendAsync(HttpMethod.Put, uri, CreateJsonContent(json), token);
                 if (rsp.IsSuccessfully)
                 {
-                    await GetCachedResponse(song).InteractSummary.InvalidateAsync();
+                    s_interactSummaries.Remove(BuildChartUri(song.ServerInfo, API_GET_INTERACT_SUMMARY, song.Id));
                 }
                 return new EndpointResponse<MajNetVoteResult>(rsp);
             }
@@ -180,8 +181,7 @@ namespace MajdataPlay.Net
                 var uriBuilder = new UriBuilder(BuildChartUri(song.ServerInfo, API_COMMENTS, song.Id));
                 uriBuilder.Query = $"sort={ToQueryValue(sort)}&page={page}";
                 await UniTask.SwitchToThreadPool();
-                var cache = GetCachedResponse(song).Comments.GetOrAdd((sort, page), _ => new CachedResponse<MajNetCommentPage>());
-                return await GetCachedAsync(cache, uriBuilder.Uri, "chart comments", false, token);
+                return await GetCachedAsync(s_commentPages, uriBuilder.Uri, "chart comments", false, token);
             }
             /// <summary>
             /// Posts a top-level comment on a chart with <c>POST maichart/{chartId}/comments</c> and invalidates the cached
@@ -206,10 +206,10 @@ namespace MajdataPlay.Net
                 var rsp = await PostAsync(uri, CreateJsonContent(json), token);
                 if (rsp.IsSuccessfully)
                 {
-                    var cachedResponse = GetCachedResponse(song);
-                    await cachedResponse.InteractSummary.InvalidateAsync();
-                    // A request still in flight stores its page in a dropped entry, so no stale page survives.
-                    cachedResponse.Comments.Clear();
+                    s_interactSummaries.Remove(BuildChartUri(song.ServerInfo, API_GET_INTERACT_SUMMARY, song.Id));
+                    // The pages of every order share the path of the comments and differ only in the query.
+                    var comments = uri.GetLeftPart(UriPartial.Path);
+                    s_commentPages.RemoveWhere(pageUri => pageUri.GetLeftPart(UriPartial.Path) == comments);
                 }
                 return new EndpointResponse<MajNetComment>(rsp);
             }
@@ -224,7 +224,7 @@ namespace MajdataPlay.Net
             {
                 await UniTask.SwitchToThreadPool();
                 var uri = BuildChartUri(song.ServerInfo, API_SCORE, song.Id);
-                return await GetCachedAsync(GetCachedResponse(song).ScoreInfo, uri, "chart score info", false, token);
+                return await GetCachedAsync(s_scoreInfos, uri, "chart score info", false, token);
             }
             /// <summary>Sends a score of a chart to <c>POST maichart/{chartId}/score</c> and invalidates the cached rankings.</summary>
             /// <param name="song">The online chart.</param>
@@ -244,7 +244,7 @@ namespace MajdataPlay.Net
                     if (rsp.IsSuccessfully)
                     {
                         MajDebug.LogDebug(LOG_TAG, rsp);
-                        await GetCachedResponse(song).ScoreInfo.InvalidateAsync();
+                        s_scoreInfos.Remove(scoreUrl);
                         return rsp;
                     }
                     else
@@ -260,45 +260,57 @@ namespace MajdataPlay.Net
                 return rsp;
             }
             /// <summary>
-            /// Returns a live cached response, or fetches it with GET and caches it; concurrent callers share one request.
+            /// Returns a live cached response, or fetches it with GET and caches it. Callers asking for the same URI while it
+            /// is fetched share that request, and a failed request is not cached.
             /// </summary>
             /// <typeparam name="T">The type of the response body.</typeparam>
-            /// <param name="cache">The cached response.</param>
+            /// <param name="cache">The cache of the responses of the API, by request URI.</param>
             /// <param name="uri">The requested URI.</param>
             /// <param name="description">What is fetched, for the log.</param>
             /// <param name="forceRefresh">Whether to bypass a live cached response and replace it.</param>
             /// <param name="token">The token canceling the request.</param>
             /// <returns>The response body, or null when every attempt failed.</returns>
-            private static async ValueTask<T?> GetCachedAsync<T>(CachedResponse<T> cache, Uri uri, string description, bool forceRefresh, CancellationToken token) where T : struct
+            /// <exception cref="OperationCanceledException"><paramref name="token"/> was canceled while waiting for another caller's request.</exception>
+            private static async ValueTask<T?> GetCachedAsync<T>(TtlCache<Uri, T> cache, Uri uri, string description, bool forceRefresh, CancellationToken token) where T : struct
             {
-                if (cache.IsAlive && !forceRefresh)
+                Func<Uri, CancellationToken, ValueTask<T>> fetch = (requestUri, requestToken) => FetchAsync<T>(requestUri, description, requestToken);
+                try
                 {
-                    return cache.Response;
+                    return forceRefresh
+                        ? await cache.RefreshAsync(uri, fetch, token)
+                        : await cache.GetOrAddAsync(uri, fetch, token);
                 }
-                using (await cache.RequestLock.LockAsync(token))
+                catch (HttpException)
                 {
-                    if (cache.IsAlive && !forceRefresh)
-                    {
-                        return cache.Response;
-                    }
-                    for (var i = 0; i <= MajEnv.HTTP_REQUEST_MAX_RETRY; i++)
-                    {
-                        var e = default(Exception?);
-                        var rsp = await GetAsync(uri, token);
-                        if (rsp.IsSuccessfully && rsp.IsDeserializable && rsp.TryDeserialize<T?>(out var value, out e) && value is T response)
-                        {
-                            cache.Response = response;
-                            cache.LastActive = DateTime.Now;
-                            return response;
-                        }
-                        MajDebug.LogError(LOG_TAG, $"[Online] Failed to get {description}: {e?.Message ?? rsp.StatusCode?.ToString() ?? "Unknown error"}");
-                        if (!ShouldRetry(rsp))
-                        {
-                            break;
-                        }
-                    }
+                    // FetchAsync logged every failed attempt.
                     return null;
                 }
+            }
+            /// <summary>Reads a response body with GET, retrying the failures worth another attempt.</summary>
+            /// <typeparam name="T">The type of the response body.</typeparam>
+            /// <param name="uri">The requested URI.</param>
+            /// <param name="description">What is fetched, for the log.</param>
+            /// <param name="token">The token canceling the request.</param>
+            /// <returns>A task returning the response body.</returns>
+            /// <exception cref="HttpException">Every attempt failed; the exception describes the last one.</exception>
+            private static async ValueTask<T> FetchAsync<T>(Uri uri, string description, CancellationToken token) where T : struct
+            {
+                var rsp = default(EndpointResponse);
+                for (var i = 0; i <= MajEnv.HTTP_REQUEST_MAX_RETRY; i++)
+                {
+                    var e = default(Exception?);
+                    rsp = await GetAsync(uri, token);
+                    if (rsp.IsSuccessfully && rsp.IsDeserializable && rsp.TryDeserialize<T?>(out var value, out e) && value is T response)
+                    {
+                        return response;
+                    }
+                    MajDebug.LogError(LOG_TAG, $"[Online] Failed to get {description}: {e?.Message ?? rsp.StatusCode?.ToString() ?? "Unknown error"}");
+                    if (!ShouldRetry(rsp))
+                    {
+                        break;
+                    }
+                }
+                throw new HttpException(uri.ToString(), rsp.ErrorCode, rsp.StatusCode, $"Failed to get {description}");
             }
             /// <summary>Gets whether a failed chart request is worth another attempt: it was not canceled and the server did not refuse it with a status code.</summary>
             /// <param name="rsp">The response that could not be used.</param>
