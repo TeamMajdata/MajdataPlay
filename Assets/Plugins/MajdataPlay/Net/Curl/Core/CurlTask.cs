@@ -1,5 +1,6 @@
 ﻿using AOT;
 using MajdataPlay.Net.Curl.Core.PInvoke;
+using MajdataPlay.Net.Curl.Diagnostics;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -84,6 +85,15 @@ namespace MajdataPlay.Net.Curl.Core
         internal bool IsResponsePublished
         {
             get => _isResponsePublished;
+        }
+
+        /// <summary>
+        /// Gets the network monitor's record of this transfer, or <see langword="null"/> when recording was off as the
+        /// request was sent.
+        /// </summary>
+        internal CurlNetworkRecord? Record
+        {
+            get => Request.Record;
         }
 
         /// <summary>
@@ -180,6 +190,10 @@ namespace MajdataPlay.Net.Curl.Core
             Easy.SetOption(CurlOption.Private, handlePtr);
             Easy.SetOption(CurlOption.WriteData, handlePtr);
             Easy.SetOption(CurlOption.HeaderData, handlePtr);
+            if (request.Record is not null)
+            {
+                CurlNetworkCapture.Attach(Easy, handlePtr);
+            }
         }
 
         ~CurlTask()
@@ -237,6 +251,20 @@ namespace MajdataPlay.Net.Curl.Core
         }
 
         /// <summary>
+        /// Copies libcurl's timing and connection details into <see cref="Record"/>, if there is one. Only call this from
+        /// the multi worker while the easy handle is attached to the multi handle, or from one of its callbacks.
+        /// </summary>
+        public void CaptureTransferInfo()
+        {
+            var record = Record;
+            if (record is null || !Easy.IsAllocated)
+            {
+                return;
+            }
+            record.OnTransferInfo(CurlTransferInfo.Read(Easy.Handle));
+        }
+
+        /// <summary>
         /// Moves from <see cref="CurlTaskState.Created"/> to <see cref="CurlTaskState.Submitted"/>.
         /// </summary>
         /// <returns><see langword="true"/> if the transition happened.</returns>
@@ -244,7 +272,12 @@ namespace MajdataPlay.Net.Curl.Core
         {
             var lastState = Interlocked.CompareExchange(ref _state, (int)CurlTaskState.Submitted, (int)CurlTaskState.Created);
 
-            return lastState == (int)CurlTaskState.Created;
+            if (lastState == (int)CurlTaskState.Created)
+            {
+                Record?.OnSubmitted();
+                return true;
+            }
+            return false;
         }
 
         /// <summary>
@@ -275,6 +308,8 @@ namespace MajdataPlay.Net.Curl.Core
 
             if (lastState == (int)CurlTaskState.HeaderRead)
             {
+                // The record is finished before the reader can observe the end of the body.
+                Record?.OnCompleted();
                 Response.ResultCode = result;
                 Response.Complete();
                 return true;
@@ -304,6 +339,7 @@ namespace MajdataPlay.Net.Curl.Core
             var oldState = Interlocked.CompareExchange(ref _state, (int)CurlTaskState.Faulted, state);
             if (oldState == state)
             {
+                Record?.OnFailed(abortException);
                 Response.Abort(abortException);
                 _taskSource.TrySetException(abortException);
                 return true;
@@ -335,6 +371,7 @@ namespace MajdataPlay.Net.Curl.Core
 
             if (oldState == state)
             {
+                Record?.OnCancelled();
                 Response.Abort();
                 _taskSource.TrySetCanceled(CancellationToken);
                 return true;

@@ -72,6 +72,16 @@ namespace MajdataPlay.Net.Curl.Core.PInvoke
 
             [DllImport(DLL_NAME, EntryPoint = "curl_unity_getinfo_long", CallingConvention = CallingConvention.Cdecl)]
             public static extern CurlCode GetInfo(IntPtr curl, CurlInfo info, out long value);
+
+            /// <summary>
+            /// Reads a <c>CURLINFO_OFF_T</c> value. <c>curl_off_t</c> is 64-bit on every target, unlike C <c>long</c>.
+            /// </summary>
+            /// <param name="curl">The easy handle.</param>
+            /// <param name="info">An <c>OFF_T</c> info key such as <see cref="CurlInfo.TotalTimeT"/>.</param>
+            /// <param name="value">Receives the value.</param>
+            /// <returns>The libcurl result code.</returns>
+            [DllImport(DLL_NAME, EntryPoint = "curl_unity_getinfo_off_t", CallingConvention = CallingConvention.Cdecl)]
+            public static extern CurlCode GetInfoOffT(IntPtr curl, CurlInfo info, out long value);
             [DllImport(DLL_NAME, EntryPoint = "curl_unity_getinfo_ptr", CallingConvention = CallingConvention.Cdecl)]
             public static extern CurlCode GetInfo(IntPtr curl, CurlInfo info, out IntPtr value);
             public static CurlCode GetInfo(IntPtr curl, CurlInfo info, out string? value)

@@ -83,16 +83,23 @@ namespace MajdataPlay.Net.Curl.Core
             {
                 return UIntPtr.Zero;
             }
-            else if(curlTask.State != CurlTaskState.HeaderRead)
+            else if(curlTask.State != CurlTaskState.HeaderRead && curlTask.TryEnterHeaderReadState())
             {
-                curlTask.TryEnterHeaderReadState();
+                // libcurl knows the connection and the time to first byte by now, so a long download shows them early.
+                curlTask.CaptureTransferInfo();
             }
             var curlRsp = curlTask.Response;
             var responseStream = curlRsp._responseStream;
             var length = (int)(size.ToUInt32() * nmemb.ToUInt32());
             var buffer = new ReadOnlySpan<byte>((void*)ptr, length);
+            var result = responseStream.WriteChunk(buffer);
+            // A paused or rejected chunk is delivered again or not at all, so only accepted bytes are recorded.
+            if (result == (UIntPtr)length)
+            {
+                curlTask.Record?.OnResponseBodyReceived(buffer);
+            }
 
-            return responseStream.WriteChunk(buffer);
+            return result;
         }
         /// <summary>
         /// libcurl header callback. Called on the multi worker thread once per header line, including status lines,
@@ -125,6 +132,10 @@ namespace MajdataPlay.Net.Curl.Core
                 return UIntPtr.Zero;
             }
             var line = new ReadOnlySpan<byte>((void*)ptr, length);
+            if (state == CurlTaskState.Submitted)
+            {
+                curlTask.Record?.OnResponseHeaderLine(line);
+            }
             TrimHttpHeader(ref line);
             if (line.Length == 0)
             {

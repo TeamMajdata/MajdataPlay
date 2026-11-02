@@ -1,5 +1,6 @@
 ﻿using MajdataPlay.Diagnostics;
 using MajdataPlay.Net.Curl.Core.PInvoke;
+using MajdataPlay.Net.Curl.Diagnostics;
 using MajdataPlay.Net.Curl.Lifecycle;
 using MajdataPlay.Net.Curl.Utils;
 using MajdataPlay.UnsafeKit;
@@ -149,6 +150,10 @@ namespace MajdataPlay.Net.Curl.Core
                 curlTask.ReleaseNativeResources();
                 throw new ObjectDisposedException(nameof(CurlMulti));
             }
+            if (curlTask.Record is not null)
+            {
+                CurlNetworkMonitor.Register(curlTask.Record);
+            }
 
             return curlTask.Task;
         }
@@ -168,7 +173,10 @@ namespace MajdataPlay.Net.Curl.Core
             var curlTask = default(CurlTask);
             try
             {
-                var curlRequest = new CurlRequest(request, contentStream);
+                var curlRequest = new CurlRequest(request, contentStream)
+                {
+                    Record = CurlNetworkMonitor.TryCreateRecord(request, config)
+                };
                 curlTask = new CurlTask(curlEasy, curlRequest, config, _onResumeRequested, _onDisposeRequested, _onCancelRequested, token);
 
                 curlRequest.ApplyTo(curlEasy);
@@ -335,6 +343,10 @@ namespace MajdataPlay.Net.Curl.Core
             {
                 if (cancelTask.TryEnterCancelledState())
                 {
+                    if (cancelTask.IsAttached)
+                    {
+                        cancelTask.CaptureTransferInfo();
+                    }
                     TryDetach(cancelTask);
                     FinishDetachedTask(cancelTask);
                 }
@@ -363,6 +375,11 @@ namespace MajdataPlay.Net.Curl.Core
         {
             while (_pendingToDisposeTasks.TryDequeue(out var disposeTask))
             {
+                // Only an attached transfer is guaranteed to still own its easy handle here.
+                if (disposeTask.IsAttached)
+                {
+                    disposeTask.CaptureTransferInfo();
+                }
                 TryDetach(disposeTask);
                 disposeTask.TryFail(new ObjectDisposedException(nameof(CurlResponse)));
                 disposeTask.ReleaseNativeResources();
@@ -393,6 +410,7 @@ namespace MajdataPlay.Net.Curl.Core
             var result = multiMsg.Data.Result;
             // Read the error details while the easy handle is still guaranteed to be alive.
             var curlErr = CurlUtility.GetEasyException(easyHandle, result);
+            curlTask.CaptureTransferInfo();
             LibCurl.Easy.SetOption(easyHandle, CurlOption.Private, IntPtr.Zero);
             // Once detached, a published response may release the easy handle on another thread at any moment.
             TryDetach(curlTask);

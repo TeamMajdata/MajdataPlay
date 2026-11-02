@@ -1,5 +1,6 @@
 using AOT;
 using MajdataPlay.Net.Curl.Core.PInvoke;
+using MajdataPlay.Net.Curl.Diagnostics;
 using MajdataPlay.Net.Curl.Lifecycle;
 using MajdataPlay.Net.Curl.Utils;
 using MajdataPlay.UnsafeKit;
@@ -31,6 +32,12 @@ namespace MajdataPlay.Net.Curl.Core
         {
             get => Message.Method;
         }
+
+        /// <summary>
+        /// Gets the network monitor's record of this request, which receives the uploaded body bytes, or
+        /// <see langword="null"/> when recording was off as the request was sent.
+        /// </summary>
+        public CurlNetworkRecord? Record { get; init; }
 
         int _applyFlag = 0;
 
@@ -119,6 +126,7 @@ namespace MajdataPlay.Net.Curl.Core
             try
             {
                 var read = contentStream.Read(buffer);
+                curlReq.Record?.OnRequestBodyRead(buffer.Slice(0, read));
 
                 return (UIntPtr)read;
             }
@@ -147,7 +155,8 @@ namespace MajdataPlay.Net.Curl.Core
             }
             try
             {
-                contentStream.Seek(offset, origin);
+                var position = contentStream.Seek(offset, origin);
+                curlReq.Record?.OnRequestBodyRewound(position);
             }
             catch
             {

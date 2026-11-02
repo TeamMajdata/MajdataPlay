@@ -217,6 +217,11 @@ namespace MajdataPlay.Net.Curl.Core.PInvoke
         /// </summary>
         SeekData = CurlOptionType.ObjectPointer + 168,
 
+        /// <summary>
+        /// Pass a pointer to the debug callback userdata.
+        /// </summary>
+        DebugData = CurlOptionType.ObjectPointer + 95,
+
         #endregion
 
 
