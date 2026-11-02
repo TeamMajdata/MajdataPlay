@@ -50,7 +50,7 @@ namespace MajdataPlay
         public const int HttpBufferSize = 8192;
         public const int HttpRequestMaxRetry = 4;
         public static readonly TimeSpan HttpTimeout = TimeSpan.FromMilliseconds(90_000);
-        public static readonly TimeSpan HttpConnectTimeout = TimeSpan.FromMilliseconds(2000);
+        public static readonly TimeSpan HttpConnectTimeout = TimeSpan.FromMilliseconds(4000);
         public static readonly TimeSpan HttpLowSpeedTimeout = TimeSpan.FromMilliseconds(18_000);
         public const int HttpLowSpeedLimit = 16_0000; // 16KB/s
         public const int HttpMaxCachedConnections = 8;
