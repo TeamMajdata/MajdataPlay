@@ -1,5 +1,6 @@
 using Cysharp.Text;
 using Cysharp.Threading.Tasks;
+using MajdataPlay.Buffers;
 using MajdataPlay.Collections;
 using MajdataPlay.Diagnostics;
 using MajdataPlay.Net.Models;
@@ -83,37 +84,64 @@ namespace MajdataPlay.Net
             {
                 await UniTask.SwitchToThreadPool();
                 var url = apiEndpoint.Url.Combine(API_POST_INFO);
-                var infos = new List<MajNetChartInfo>(chartIds.Length);
-
-                for (var offset = 0; offset < chartIds.Length; offset += INFO_BATCH_SIZE)
+                using var infos = new PooledList<MajNetChartInfo>(chartIds.Length);
+                var taskCount = (int)Math.Ceiling(chartIds.Length / (float)INFO_BATCH_SIZE);
+                var tasks = new Task<MajNetChartInfo[]>[taskCount];
+                var taskIdCounter = 0;
+                var gate = new SemaphoreSlim(MaxConcurrency, MaxConcurrency);
+                Parallel.For(0, taskCount, i =>
                 {
-                    var count = Math.Min(INFO_BATCH_SIZE, chartIds.Length - offset);
-                    var json = SerializeChartIds(chartIds.Span.Slice(offset, count), out var idCount);
-                    if (idCount == 0)
+                    var taskId = Interlocked.Increment(ref taskIdCounter) - 1;
+                    tasks[taskId] = Task.Run(async () =>
                     {
-                        continue;
-                    }
-                    var batch = default(MajNetChartInfo[]);
-                    for (var i = 0; i < MajEnv.HTTP_REQUEST_MAX_RETRY; i++)
-                    {
-                        var rsp = await PostAsync(url, CreateJsonContent(json), token);
-                        var e = default(Exception?);
-                        if (rsp.IsSuccessfully && rsp.TryDeserialize<MajNetChartInfo[]>(out batch, out e) && batch is not null)
+                        gate.Wait(token);
+                        try
                         {
-                            break;
+                            var offset = taskId * INFO_BATCH_SIZE;
+                            var count = Math.Min(INFO_BATCH_SIZE, chartIds.Length - offset);
+                            var json = SerializeChartIds(chartIds.Span.Slice(offset, count), out var idCount);
+                            if (idCount == 0)
+                            {
+                                return Array.Empty<MajNetChartInfo>();
+                            }
+                            var batch = default(MajNetChartInfo[]);
+                            for (var i = 0; i < MajEnv.HTTP_REQUEST_MAX_RETRY; i++)
+                            {
+                                var rsp = await PostAsync(url, CreateJsonContent(json), token);
+                                var e = default(Exception?);
+                                if (rsp.IsSuccessfully && rsp.TryDeserialize<MajNetChartInfo[]>(out batch, out e) && batch is not null)
+                                {
+                                    break;
+                                }
+                                batch = null;
+                                MajDebug.LogError(LOG_TAG, $"[Online] Failed to get chart info: {e?.Message ?? rsp.StatusCode?.ToString() ?? "Unknown error"}");
+                                if (rsp.ErrorCode == HttpErrorCode.Canceled || rsp.StatusCode is not null)
+                                {
+                                    break;
+                                }
+                            }
+                            if (batch is null)
+                            {
+                                return Array.Empty<MajNetChartInfo>();
+                            }
+                            return batch;
                         }
-                        batch = null;
-                        MajDebug.LogError(LOG_TAG, $"[Online] Failed to get chart info: {e?.Message ?? rsp.StatusCode?.ToString() ?? "Unknown error"}");
-                        if (rsp.ErrorCode == HttpErrorCode.Canceled || rsp.StatusCode is not null)
+                        finally
                         {
-                            break;
+                            gate.Release();
                         }
-                    }
-                    if (batch is null)
+                    });
+                });
+                await Task.WhenAll(tasks);
+                token.ThrowIfCancellationRequested();
+                for (var i = 0; i < tasks.Length; i++)
+                {
+                    var batch = tasks[i].Result;
+                    if (batch.Length == 0)
                     {
                         return null;
                     }
-                    infos.AddRange(batch);
+                    infos.AddRange(batch.AsSpan());
                 }
 
                 return infos.ToArray();

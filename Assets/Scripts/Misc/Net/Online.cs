@@ -27,6 +27,7 @@ namespace MajdataPlay.Net
     /// </summary>
     internal static partial class Online
     {
+        private const int MaxConcurrency = 32;
         /// <summary>The tag of the log messages of the online APIs.</summary>
         private const string LOG_TAG = "Network";
 
