@@ -4,6 +4,7 @@ using Cysharp.Threading.Tasks;
 using MajdataPlay.Diagnostics;
 using MajdataPlay.IO;
 using MajdataPlay.Net;
+using MajdataPlay.Net.Models;
 using LitMotion;
 using TMPro;
 using UnityEngine;
@@ -47,7 +48,11 @@ namespace MajdataPlay.Scenes.Result.Components
         bool _loading;
         int _vote;
         int _submittedVote;
-        bool _voteNeedsRefresh;
+        /// <summary>
+        /// Whether the last vote request failed, so the server may or may not hold it; the next submit then sends the
+        /// vote even when it equals <see cref="_submittedVote"/>.
+        /// </summary>
+        bool _isVoteUnconfirmed;
         bool _likeHeld;
         bool _dislikeHeld;
         MotionHandle _fade;
@@ -168,6 +173,8 @@ namespace MajdataPlay.Scenes.Result.Components
             if (!visible) _commentInput.DeactivateInputField();
         }
 
+        /// <summary>Loads the current vote of the user on the song from <c>GET maichart/{chartId}/interactsum</c>.</summary>
+        /// <returns>A task that completes when the vote was loaded or the failure was shown.</returns>
         async UniTask LoadInteractionAsync()
         {
             _loading = true;
@@ -176,17 +183,17 @@ namespace MajdataPlay.Scenes.Result.Components
             var token = this.GetCancellationTokenOnDestroy();
             try
             {
-                var response = await Online.GetChartInteractAsync(_song!, token, forceRefresh: true);
+                var response = await Online.MaiChart.GetInteractSummaryAsync(_song!, token, forceRefresh: true);
                 await UniTask.SwitchToMainThread(token);
-                if (response is not MajNetSongInteract interaction)
+                if (response is not MajNetChartInteractSummary summary)
                 {
                     _status.text = "MAJTEXT_FEEDBACK_LOAD_FAILED".i18n();
                     return;
                 }
                 _loaded = true;
-                _vote = interaction.IsLiked ? 1 : interaction.IsDisLiked ? -1 : 0;
+                _vote = Math.Sign(summary.MyVote);
                 _submittedVote = _vote;
-                _voteNeedsRefresh = false;
+                _isVoteUnconfirmed = false;
                 _status.text = "";
             }
             catch (OperationCanceledException) when (token.IsCancellationRequested) { }
@@ -224,6 +231,11 @@ namespace MajdataPlay.Scenes.Result.Components
             else if (dislikePressed) SelectVote(-1);
         }
 
+        /// <summary>
+        /// Sends the vote when it changed or its last request failed, then the comment when one was written. The vote
+        /// states the wanted result, so it is safe to send again; the comment is sent once.
+        /// </summary>
+        /// <returns>True when nothing is left to send and the result screen may continue; false while busy or after a failure.</returns>
         public async UniTask<bool> SubmitAsync()
         {
             if (IsBusy || _loading) return false;
@@ -235,7 +247,11 @@ namespace MajdataPlay.Scenes.Result.Components
             }
             var vote = _vote;
             var comment = _commentInput.text.Trim();
-            if (vote == 0 && _submittedVote == 0 && !_voteNeedsRefresh && comment.Length == 0) return true;
+            var sendsVote = vote != _submittedVote || _isVoteUnconfirmed;
+            if (!sendsVote && comment.Length == 0)
+            {
+                return true;
+            }
 
             IsBusy = true;
             _commentInput.DeactivateInputField();
@@ -244,31 +260,11 @@ namespace MajdataPlay.Scenes.Result.Components
             var token = this.GetCancellationTokenOnDestroy();
             try
             {
-                if (_voteNeedsRefresh)
+                if (sendsVote)
                 {
-                    // A failed response does not prove that the server rejected the previous vote.
-                    // Refresh only the server baseline, preserving the player's current draft.
-                    var interaction = await Online.GetChartInteractAsync(_song!, token, forceRefresh: true);
-                    await UniTask.SwitchToMainThread(token);
-                    if (interaction is not MajNetSongInteract current)
-                    {
-                        ShowFailure(null);
-                        return false;
-                    }
-                    _submittedVote = current.IsLiked ? 1 : current.IsDisLiked ? -1 : 0;
-                    _voteNeedsRefresh = false;
-                }
-                if (vote != 0 || _submittedVote != 0)
-                {
-                    _voteNeedsRefresh = true;
-                    var response = await (vote switch
-                    {
-                        1 => Online.PostLikeAsync(_song!, token),
-                        -1 => Online.PostDislikeAsync(_song!, token),
-                        _ => _submittedVote > 0
-                            ? Online.DeleteLikeAsync(_song!, token)
-                            : Online.DeleteDislikeAsync(_song!, token)
-                    });
+                    // A failed response does not prove that the server rejected the vote, so it stays unconfirmed.
+                    _isVoteUnconfirmed = true;
+                    var response = await Online.MaiChart.VoteAsync(_song!, vote, token);
                     await UniTask.SwitchToMainThread(token);
                     if (!response.IsSuccessfully)
                     {
@@ -276,11 +272,11 @@ namespace MajdataPlay.Scenes.Result.Components
                         return false;
                     }
                     _submittedVote = vote;
-                    _voteNeedsRefresh = false;
+                    _isVoteUnconfirmed = false;
                 }
                 if (comment.Length != 0)
                 {
-                    var response = await Online.PostCommentAsync(_song!, comment, token);
+                    var response = await Online.MaiChart.PostCommentAsync(_song!, comment, token);
                     await UniTask.SwitchToMainThread(token);
                     if (!response.IsSuccessfully)
                     {

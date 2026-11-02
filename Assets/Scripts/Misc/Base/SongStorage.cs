@@ -6,6 +6,7 @@ using MajdataPlay.Diagnostics;
 using MajdataPlay.Extensions;
 using MajdataPlay.IO.Storage;
 using MajdataPlay.Net;
+using MajdataPlay.Net.Models;
 using MajdataPlay.Numerics;
 using MajdataPlay.Utils;
 using SQLite;
@@ -438,7 +439,7 @@ namespace MajdataPlay
                     {
                         MajDebug.LogInfo(nameof(SongStorage), $"[Online]Fetching fav list from {api.Url.OriginalString}");
                         progressReporter?.Report(ZString.Format("MAJTEXT_SCANNING_FAVORITES_FROM_{0}".i18n(), api.Name));
-                        var danInfos = await Online.GetUserOnlineFavCollection(api, cancellationToken).ConfigureAwait(false);
+                        var danInfos = await Online.Account.GetFavoriteCollectionsAsync(api, cancellationToken).ConfigureAwait(false);
                         cancellationToken.ThrowIfCancellationRequested();
                         if (danInfos is null)
                         {
@@ -626,7 +627,7 @@ namespace MajdataPlay
             var charts = new List<MajnetSongDetail>(RecommendPageSize);
             for (var page = 0; page < RecommendMaxPageCount; page++)
             {
-                var feed = await Online.GetRecommendFeedAsync(api, page, RecommendPageSize).ConfigureAwait(false);
+                var feed = await Online.Recommend.GetFeedAsync(api, page, RecommendPageSize).ConfigureAwait(false);
                 if (feed is null)
                 {
                     if (page == 0)
@@ -1228,7 +1229,7 @@ namespace MajdataPlay
             MajDebug.LogInfo(nameof(SongStorage), "Loading online charts from:" + api.Url);
             try
             {
-                var chartList = await Online.GetChartListAsync(api, cancellationToken).ConfigureAwait(false);
+                var chartList = await Online.MaiChart.GetListAsync(api, cancellationToken).ConfigureAwait(false);
                 cancellationToken.ThrowIfCancellationRequested();
                 if (chartList is null)
                 {
@@ -1297,7 +1298,7 @@ namespace MajdataPlay
             using (var chartIds = Pool<string?>.Rent(chartList.Length, true))
             {
                 CopyChartIds(chartList.Span, chartIds.AsSpan());
-                infoList = await Online.GetChartInfosAsync(api, chartIds.AsMemory(0, chartList.Length), cancellationToken).ConfigureAwait(false);
+                infoList = await Online.MaiChart.GetInfosAsync(api, chartIds.AsMemory(0, chartList.Length), cancellationToken).ConfigureAwait(false);
             }
             cancellationToken.ThrowIfCancellationRequested();
             var infos = default(Dictionary<string, MajNetChartInfo>);

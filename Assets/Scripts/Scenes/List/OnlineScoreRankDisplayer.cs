@@ -2,6 +2,7 @@
 using MajdataPlay.Diagnostics;
 using MajdataPlay.i18n;
 using MajdataPlay.Net;
+using MajdataPlay.Net.Models;
 using MajdataPlay.Scenes.Game;
 using MajdataPlay.Threading;
 using MajdataPlay.Utils;
@@ -135,7 +136,7 @@ namespace MajdataPlay.Scenes.List
                     _loadTimer = 0f;
                     return;
                 }
-                _onlineScoreFetchTask = Online.GetChartScoreInfoAsync(_currentSongDetail, _cancellationToken)
+                _onlineScoreFetchTask = Online.MaiChart.GetScoreInfoAsync(_currentSongDetail, _cancellationToken)
                                               .AsTask()
                                               .Register($"[{nameof(OnlineScoreRankDisplayer)}]Fetch online ranking");
                 ListManager.AllBackgroundTasks.Add(_onlineScoreFetchTask);

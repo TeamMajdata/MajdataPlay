@@ -2,6 +2,7 @@
 using MajdataPlay.Collections;
 using MajdataPlay.IO.Storage;
 using MajdataPlay.Net;
+using MajdataPlay.Net.Models;
 using MajSimai;
 using System;
 using System.Collections.Generic;

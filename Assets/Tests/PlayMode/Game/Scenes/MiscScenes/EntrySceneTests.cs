@@ -3,6 +3,7 @@ using System.Collections;
 using LitMotion;
 using MajdataPlay.IO;
 using MajdataPlay.Net;
+using MajdataPlay.Net.Models;
 using MajdataPlay.Scenes.Login;
 using MajdataPlay.Scenes.Result.Components;
 using MajdataPlay.Scenes.Result.Components.Indicators;

@@ -3,7 +3,7 @@ using Newtonsoft.Json.Serialization;
 using UnityEngine.Scripting;
 
 #nullable enable
-namespace MajdataPlay
+namespace MajdataPlay.Net.Models
 {
     /// <summary>The metadata and downloadable files of an online chart, as returned by the <c>maichart/info</c> API.</summary>
     [Preserve]
