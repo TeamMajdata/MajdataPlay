@@ -129,6 +129,16 @@ namespace MajdataPlay
         private const int RecommendMaxPageCount = 2;
         /// <summary>The age after which a feed is fetched again, well within the server's 30-minute impression window.</summary>
         private static readonly TimeSpan s_recommendRefreshInterval = TimeSpan.FromMinutes(10);
+        /// <summary>
+        /// How far before the recorded end of the last chart changes range the next query starts, which covers the 60-second
+        /// public cache of the chart list and changes written just after the server read the clock; repeated changes are harmless.
+        /// </summary>
+        private static readonly TimeSpan s_onlineChangesOverlap = TimeSpan.FromMinutes(2);
+        /// <summary>
+        /// The age after which the whole chart list is read again instead of only its changes, because the server orders the
+        /// list by recent activity, which the changes do not report.
+        /// </summary>
+        private static readonly TimeSpan s_onlineFullRefreshInterval = TimeSpan.FromDays(1);
         /// <summary>Stores the last successfully fetched feed of each endpoint, which rebuilds its folder whenever the library is republished.</summary>
         private static readonly ConcurrentDictionary<ApiEndpoint, RecommendFeedState> s_recommendStates = new();
         /// <summary>Stores the chart instances owned by recommendation folders because their endpoint's chart list lacks them.</summary>
@@ -1209,11 +1219,20 @@ namespace MajdataPlay
             }
         }
 
-        /// <summary>Fetches one online collection, falling back to cached local charts after a fetch timeout or unavailable list.</summary>
+        /// <summary>
+        /// Fetches one online collection, refreshing the cached chart list from its changes when possible, and falling back
+        /// to cached local charts after a fetch timeout or unavailable list.
+        /// </summary>
         /// <param name="api">The online endpoint whose chart list is requested.</param>
         /// <param name="progressReporter">Receives fetch failure status messages.</param>
         /// <param name="cancellationToken">Cancels fetching or cached-chart scanning.</param>
         /// <returns>The online collection, cached charts, or an empty collection when loading fails.</returns>
+        /// <remarks>
+        /// The changes since the server's sync point are queried first. A complete range is applied to the cached list
+        /// while the last full read is younger than <see cref="s_onlineFullRefreshInterval"/>; otherwise the whole list
+        /// is read and the end of the range becomes the new sync point. A server without the changes API is always read
+        /// in full, and an unreachable server lists the cached charts without trying the list.
+        /// </remarks>
         /// <exception cref="OperationCanceledException">The caller canceled loading.</exception>
         /// <exception cref="IOException">The endpoint's cache directory could not be created.</exception>
         private static async Task<SongCollection> GetOnlineCollection(ApiEndpoint api, IProgress<string>? progressReporter, CancellationToken cancellationToken)
@@ -1229,37 +1248,47 @@ namespace MajdataPlay
             MajDebug.LogInfo(nameof(SongStorage), "Loading online charts from:" + api.Url);
             try
             {
+                var chartCache = OnlineChartCache.Shared;
+                var syncPoint = await Task.Run(() => chartCache.GetSyncPoint(api), cancellationToken).ConfigureAwait(false);
+                var changesResponse = await Online.MaiChart.GetChangesAsync(api, GetChangesQueryStart(syncPoint), null, cancellationToken).ConfigureAwait(false);
+                cancellationToken.ThrowIfCancellationRequested();
+                if (IsUnreachable(changesResponse))
+                {
+                    return await GetUnreachableOnlineCollectionAsync(api, cacheDirectory, progressReporter, cancellationToken).ConfigureAwait(false);
+                }
+                var changes = ReadChanges(api, changesResponse);
+                await ResolveOnlineServerAsync(api, cancellationToken).ConfigureAwait(false);
+
+                if (changes is { IsComplete: true } && syncPoint is { } point && DateTime.UtcNow - point.FullSyncAt < s_onlineFullRefreshInterval)
+                {
+                    var listed = await ApplyOnlineChartChangesAsync(api, changes, cancellationToken).ConfigureAwait(false);
+                    if (listed is not null)
+                    {
+                        var refreshed = CreateOnlineSongCollection(api, cacheDirectory, listed, cancellationToken);
+                        MajDebug.LogInfo(nameof(SongStorage), $"Loaded online charts list from {changes.Changes.Length} changes:" + refreshed.Count);
+                        return refreshed;
+                    }
+                }
+
                 var chartList = await Online.MaiChart.GetListAsync(api, cancellationToken).ConfigureAwait(false);
                 cancellationToken.ThrowIfCancellationRequested();
                 if (chartList is null)
                 {
-                    progressReporter?.Report(ZString.Format("MAJTEXT_FAILED_TO_FETCH_ONLINE_LIST_{0}".i18n(), api.Name));
-                    var fetchTask = GetCachedOnlineCollectionAsync(api, cacheDirectory, cancellationToken);
-                    await Task.WhenAll(Task.Delay(3000), fetchTask).ConfigureAwait(false);
-                    return fetchTask.Result;
+                    return await GetUnreachableOnlineCollectionAsync(api, cacheDirectory, progressReporter, cancellationToken).ConfigureAwait(false);
                 }
-                var records = await SyncOnlineChartRecordsAsync(api, chartList, cancellationToken).ConfigureAwait(false);
-                var chartCache = OnlineChartCache.Shared;
-                var gameList = new ISongDetail[chartList.Length];
-                try
+                var records = await SyncOnlineChartRecordsAsync(api, chartList, changes?.To, cancellationToken).ConfigureAwait(false);
+                var charts = new (MajnetSongDetail Detail, OnlineChartRecord Record)[chartList.Length];
+                for (var i = 0; i < chartList.Length; i++)
                 {
-                    for (var i = 0; i < chartList.Length; i++)
-                    {
-                        cancellationToken.ThrowIfCancellationRequested();
-                        var chart = chartList[i];
-                        var record = chart.Id is not null && records.TryGetValue(chart.Id, out var synced)
-                            ? synced
-                            : chartCache.CreateTransientRecord(api, chart);
-                        gameList[i] = new OnlineSongDetail(api, chart, record);
-                    }
-                    MajDebug.LogInfo(nameof(SongStorage), "Loaded online charts list:" + gameList.Length);
-                    return new OnlineSongCollection(api, cacheDirectory, name, gameList);
+                    var chart = chartList[i];
+                    var record = chart.Id is not null && records.TryGetValue(chart.Id, out var synced)
+                        ? synced
+                        : chartCache.CreateTransientRecord(api, chart);
+                    charts[i] = (chart, record);
                 }
-                catch
-                {
-                    DisposeUnpublishedCharts(gameList.Where(chart => chart is not null));
-                    throw;
-                }
+                var loaded = CreateOnlineSongCollection(api, cacheDirectory, charts, cancellationToken);
+                MajDebug.LogInfo(nameof(SongStorage), "Loaded online charts list:" + loaded.Count);
+                return loaded;
             }
             catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
             {
@@ -1276,23 +1305,123 @@ namespace MajdataPlay
             }
         }
 
-        /// <summary>Fetches the server identity and file digests of an endpoint's charts and synchronizes them into the online chart cache.</summary>
-        /// <param name="api">The endpoint which served the chart list.</param>
-        /// <param name="chartList">The charts of the list.</param>
-        /// <param name="cancellationToken">Cancels fetching the identity and digests.</param>
-        /// <returns>The record of every chart with an identity, keyed by chart identity.</returns>
+        /// <summary>Fetches the identity of the server an endpoint reaches and resolves the key its charts are cached under.</summary>
+        /// <param name="api">The endpoint.</param>
+        /// <param name="cancellationToken">Cancels fetching the identity.</param>
+        /// <returns>A task completing when the server is resolved.</returns>
         /// <remarks>
-        /// The records are keyed by the server, so every address of one server, such as a reverse proxy, shares them.
-        /// When the endpoint cannot provide the digests, the charts keep the digests recorded for their current revision
-        /// and download their other files from the chart endpoints.
+        /// The records are keyed by the server, so every address of one server, such as a reverse proxy, shares them;
+        /// without a reported identity, the key remembered for the endpoint is kept.
         /// </remarks>
         /// <exception cref="OperationCanceledException">The caller canceled fetching.</exception>
-        private static async Task<Dictionary<string, OnlineChartRecord>> SyncOnlineChartRecordsAsync(ApiEndpoint api, ReadOnlyMemory<MajnetSongDetail> chartList, CancellationToken cancellationToken)
+        private static async Task ResolveOnlineServerAsync(ApiEndpoint api, CancellationToken cancellationToken)
         {
             var serverInfo = await Online.GetServerInfoAsync(api, cancellationToken).ConfigureAwait(false);
             cancellationToken.ThrowIfCancellationRequested();
             var server = OnlineChartCache.Shared.ResolveServer(api, serverInfo);
             MajDebug.LogInfo(nameof(SongStorage), $"[Online]{api.Url.OriginalString} records its charts as server {server}");
+        }
+
+        /// <summary>Gets where the next chart changes query of a server starts.</summary>
+        /// <param name="syncPoint">The sync point of the server, or null when none is recorded.</param>
+        /// <returns>
+        /// <see cref="s_onlineChangesOverlap"/> before the recorded end of the last range; without one, the Unix epoch, which
+        /// the server reports as an incomplete range ending at its current time, the sync point of the following full read.
+        /// </returns>
+        private static DateTime GetChangesQueryStart(OnlineChartSyncPoint? syncPoint)
+        {
+            var epoch = new DateTime(1970, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+            if (syncPoint is not { } point || point.ChangesTo - epoch <= s_onlineChangesOverlap)
+            {
+                return epoch;
+            }
+            return point.ChangesTo - s_onlineChangesOverlap;
+        }
+
+        /// <summary>Gets whether a failed request means the server cannot be reached at all, so reading the chart list would only wait again.</summary>
+        /// <param name="response">The response of the last attempt.</param>
+        /// <returns>True when the request got no status code and was not canceled; otherwise false.</returns>
+        private static bool IsUnreachable(EndpointResponse<MajNetChartChanges> response)
+        {
+            return !response.IsSuccessfully && response.StatusCode is null && response.ErrorCode != HttpErrorCode.Canceled;
+        }
+
+        /// <summary>Reads the changes of a chart changes query.</summary>
+        /// <param name="api">The endpoint which answered the query.</param>
+        /// <param name="response">The response of the last attempt.</param>
+        /// <returns>The changes, or null when the query failed or the response has no range end, as from a server without the API.</returns>
+        private static MajNetChartChanges? ReadChanges(ApiEndpoint api, EndpointResponse<MajNetChartChanges> response)
+        {
+            if (!response.IsSuccessfully || !response.TryDeserialize(out var changes, out _) || changes.To == default)
+            {
+                MajDebug.LogInfo(nameof(SongStorage), $"[Online]{api.Url.OriginalString} provides no chart changes, reading the whole list");
+                return null;
+            }
+            return changes;
+        }
+
+        /// <summary>Applies a complete range of chart changes to the cached chart list of an endpoint's server.</summary>
+        /// <param name="api">The endpoint which answered the query.</param>
+        /// <param name="changes">The complete range of changes.</param>
+        /// <param name="cancellationToken">Cancels fetching the info of the added and modified charts.</param>
+        /// <returns>
+        /// The listed charts after the changes, or null when the info of the added and modified charts could not be
+        /// fetched or the cache could not be written, so the whole list has to be read instead.
+        /// </returns>
+        /// <exception cref="OperationCanceledException">The caller canceled fetching.</exception>
+        private static async Task<IReadOnlyList<(MajnetSongDetail Detail, OnlineChartRecord Record)>?> ApplyOnlineChartChangesAsync(ApiEndpoint api, MajNetChartChanges changes, CancellationToken cancellationToken)
+        {
+            var chartIds = changes.Changes.Where(change => change.Kind != MajNetChartChangeKind.Deleted && !string.IsNullOrWhiteSpace(change.ChartId))
+                                          .Select(change => (string?)change.ChartId)
+                                          .Distinct(StringComparer.Ordinal)
+                                          .ToArray();
+            var infos = new Dictionary<string, MajNetChartInfo>(StringComparer.Ordinal);
+            if (chartIds.Length > 0)
+            {
+                var infoList = await Online.MaiChart.GetInfosAsync(api, chartIds, cancellationToken).ConfigureAwait(false);
+                cancellationToken.ThrowIfCancellationRequested();
+                if (infoList is null)
+                {
+                    MajDebug.LogWarning(nameof(SongStorage), $"[Online]Failed to fetch the changed charts from {api.Url.OriginalString}, reading the whole list");
+                    return null;
+                }
+                AddInfos(infos, infoList);
+            }
+            return await OnlineChartCache.Shared.ApplyChangesAsync(api, changes, infos).ConfigureAwait(false);
+        }
+
+        /// <summary>Adds chart info to a dictionary keyed by chart identity, skipping info without an identity.</summary>
+        /// <param name="infos">The dictionary receiving the info.</param>
+        /// <param name="infoList">The info returned by the info API.</param>
+        private static void AddInfos(Dictionary<string, MajNetChartInfo> infos, MajNetChartInfo[] infoList)
+        {
+            foreach (var info in infoList)
+            {
+                var id = info.Metadata?.Id;
+                if (!string.IsNullOrEmpty(id))
+                {
+                    infos[id!] = info;
+                }
+            }
+        }
+
+        /// <summary>Fetches the file digests of an endpoint's charts and synchronizes them into the online chart cache.</summary>
+        /// <param name="api">The endpoint which served the chart list.</param>
+        /// <param name="chartList">The charts of the list.</param>
+        /// <param name="changesTo">
+        /// The end of the chart changes range queried before the list was read, which becomes the server's sync point
+        /// once the digests are synchronized; null when the server provides no changes.
+        /// </param>
+        /// <param name="cancellationToken">Cancels fetching the digests.</param>
+        /// <returns>The record of every chart with an identity, keyed by chart identity.</returns>
+        /// <remarks>
+        /// When the endpoint cannot provide the digests, the charts keep the digests recorded for their current revision
+        /// and download their other files from the chart endpoints, and the sync point is left unchanged, because files
+        /// replaced before it would not be reported again.
+        /// </remarks>
+        /// <exception cref="OperationCanceledException">The caller canceled fetching.</exception>
+        private static async Task<Dictionary<string, OnlineChartRecord>> SyncOnlineChartRecordsAsync(ApiEndpoint api, ReadOnlyMemory<MajnetSongDetail> chartList, DateTime? changesTo, CancellationToken cancellationToken)
+        {
             MajNetChartInfo[]? infoList;
             // Cleared on return, so the pool does not keep the identities alive.
             using (var chartIds = Pool<string?>.Rent(chartList.Length, true))
@@ -1309,16 +1438,9 @@ namespace MajdataPlay
             else
             {
                 infos = new Dictionary<string, MajNetChartInfo>(StringComparer.Ordinal);
-                foreach (var info in infoList)
-                {
-                    var id = info.Metadata?.Id;
-                    if (!string.IsNullOrEmpty(id))
-                    {
-                        infos[id!] = info;
-                    }
-                }
+                AddInfos(infos, infoList);
             }
-            return await OnlineChartCache.Shared.SyncAsync(api, chartList, infos).ConfigureAwait(false);
+            return await OnlineChartCache.Shared.SyncAsync(api, chartList, infos, infos is null ? null : changesTo).ConfigureAwait(false);
         }
 
         /// <summary>Copies the identities of charts.</summary>
@@ -1343,20 +1465,51 @@ namespace MajdataPlay
         private static async Task<SongCollection> GetCachedOnlineCollectionAsync(ApiEndpoint api, StorageDirectory cacheDirectory, CancellationToken cancellationToken)
         {
             var cached = await Task.Run(() => OnlineChartCache.Shared.LoadCached(api), cancellationToken).ConfigureAwait(false);
-            var charts = new ISongDetail[cached.Count];
+            var collection = CreateOnlineSongCollection(api, cacheDirectory, cached, cancellationToken);
+            MajDebug.LogInfo(nameof(SongStorage), "Loaded cached online charts list:" + collection.Count);
+            return collection;
+        }
+
+        /// <summary>Reports that an endpoint's chart list could not be fetched and lists its cached charts instead.</summary>
+        /// <param name="api">The endpoint which owns the charts.</param>
+        /// <param name="cacheDirectory">The endpoint's cache directory, which holds the collection identity.</param>
+        /// <param name="progressReporter">Receives the failure status message.</param>
+        /// <param name="cancellationToken">Cancels loading the cached charts.</param>
+        /// <returns>An online collection of the cached charts, completed no sooner than three seconds later so the message can be read.</returns>
+        /// <exception cref="OperationCanceledException">Loading was canceled.</exception>
+        /// <exception cref="IOException">The collection identity could not be accessed.</exception>
+        /// <exception cref="SQLiteException">The online chart cache could not be read.</exception>
+        private static async Task<SongCollection> GetUnreachableOnlineCollectionAsync(ApiEndpoint api, StorageDirectory cacheDirectory, IProgress<string>? progressReporter, CancellationToken cancellationToken)
+        {
+            progressReporter?.Report(ZString.Format("MAJTEXT_FAILED_TO_FETCH_ONLINE_LIST_{0}".i18n(), api.Name));
+            var fetchTask = GetCachedOnlineCollectionAsync(api, cacheDirectory, cancellationToken);
+            await Task.WhenAll(Task.Delay(3000), fetchTask).ConfigureAwait(false);
+            return fetchTask.Result;
+        }
+
+        /// <summary>Creates the online collection of an endpoint from chart metadata and records, disposing the created songs on failure.</summary>
+        /// <param name="api">The endpoint which owns the charts.</param>
+        /// <param name="cacheDirectory">The endpoint's cache directory, which holds the collection identity.</param>
+        /// <param name="charts">The metadata and record of every chart, in list order.</param>
+        /// <param name="cancellationToken">Cancels creating the songs.</param>
+        /// <returns>The online collection.</returns>
+        /// <exception cref="OperationCanceledException">Creating the songs was canceled.</exception>
+        /// <exception cref="IOException">The collection identity could not be accessed.</exception>
+        private static OnlineSongCollection CreateOnlineSongCollection(ApiEndpoint api, StorageDirectory cacheDirectory, IReadOnlyList<(MajnetSongDetail Detail, OnlineChartRecord Record)> charts, CancellationToken cancellationToken)
+        {
+            var songs = new ISongDetail[charts.Count];
             try
             {
-                for (var i = 0; i < charts.Length; i++)
+                for (var i = 0; i < songs.Length; i++)
                 {
                     cancellationToken.ThrowIfCancellationRequested();
-                    charts[i] = new OnlineSongDetail(api, cached[i].Detail, cached[i].Record);
+                    songs[i] = new OnlineSongDetail(api, charts[i].Detail, charts[i].Record);
                 }
-                MajDebug.LogInfo(nameof(SongStorage), "Loaded cached online charts list:" + charts.Length);
-                return new OnlineSongCollection(api, cacheDirectory, api.Name, charts);
+                return new OnlineSongCollection(api, cacheDirectory, api.Name, songs);
             }
             catch
             {
-                DisposeUnpublishedCharts(charts.Where(chart => chart is not null));
+                DisposeUnpublishedCharts(songs.Where(chart => chart is not null));
                 throw;
             }
         }

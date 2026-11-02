@@ -493,9 +493,11 @@ namespace MajdataPlay.Tests.Game.Misc.Net
 
                 Assert.That(_http.Requests.Length, Is.EqualTo(2));
                 Assert.That(_http.Requests.All(request => request.Method == HttpMethod.Post), Is.True);
-                Assert.That(_http.Requests[0].Uri.AbsoluteUri, Is.EqualTo("https://api.invalid/api/maichart/info"));
-                Assert.That(JArray.Parse(_http.Requests[0].Body).Count, Is.EqualTo(500));
-                Assert.That(JArray.Parse(_http.Requests[1].Body).Single().ToString(), Is.EqualTo("500"));
+                Assert.That(_http.Requests.All(request => request.Uri.AbsoluteUri == "https://api.invalid/api/maichart/info"), Is.True);
+                // The batches are posted concurrently, so the requests are recorded in no particular order.
+                var batches = _http.Requests.Select(request => JArray.Parse(request.Body)).OrderByDescending(batch => batch.Count).ToArray();
+                Assert.That(batches[0].Count, Is.EqualTo(500));
+                Assert.That(batches[1].Single().ToString(), Is.EqualTo("500"));
                 Assert.That(infos!.Select(info => info.Metadata!.Id), Is.EqualTo(Enumerable.Range(0, 501).Select(i => i.ToString())));
                 var resources = infos[7].Resources!;
                 Assert.That(resources.Maidata!.Url, Is.EqualTo(new Uri("https://cdn.invalid/MaiCharts/7/maidata.txt")));
@@ -543,6 +545,110 @@ namespace MajdataPlay.Tests.Game.Misc.Net
                 var before = _http.Requests.Length;
                 Assert.That(await Online.MaiChart.GetInfosAsync(_endpoint, Array.Empty<string>()), Is.Empty);
                 Assert.That(_http.Requests.Length, Is.EqualTo(before));
+            });
+        }
+
+        /// <summary>
+        /// Checks that the chart changes query sends the range in UTC with milliseconds, and that every kind of change,
+        /// its changed files and its changed metadata are parsed.
+        /// </summary>
+        /// <returns>The test coroutine.</returns>
+        [UnityTest]
+        public IEnumerator GetChangesAsync_SendsRangeAndParsesChanges()
+        {
+            return UniTask.ToCoroutine(async () =>
+            {
+                var sha256 = new string('a', 64);
+                _http.RespondWith(HttpStatusCode.OK, new JObject
+                {
+                    ["to"] = "2026-11-02T08:00:00.123Z",
+                    ["isComplete"] = true,
+                    ["changes"] = new JArray
+                    {
+                        new JObject { ["chartId"] = "added", ["kind"] = 0, ["changedAt"] = "2026-11-02T07:00:00Z", ["resources"] = null, ["metadata"] = null },
+                        new JObject
+                        {
+                            ["chartId"] = "modified",
+                            ["kind"] = 1,
+                            ["changedAt"] = "2026-11-02T07:30:00Z",
+                            ["resources"] = new JObject
+                            {
+                                ["track"] = new JObject { ["url"] = "https://cdn.invalid/track.mp3", ["md5"] = "0123456789abcdef0123456789abcdef", ["sha256"] = sha256, ["length"] = 4 },
+                                ["video"] = null
+                            },
+                            ["metadata"] = new JObject { ["publicTags"] = new JArray("爆发") }
+                        },
+                        new JObject { ["chartId"] = "deleted", ["kind"] = 2, ["changedAt"] = "2026-11-02T07:45:00Z", ["resources"] = null, ["metadata"] = null }
+                    }
+                }.ToString());
+                var from = new DateTime(2026, 11, 1, 0, 0, 0, 5, DateTimeKind.Utc);
+
+                var response = await Online.MaiChart.GetChangesAsync(_endpoint, from.ToLocalTime(), new DateTime(2026, 11, 2, 0, 0, 0, DateTimeKind.Unspecified));
+
+                Assert.That(response.TryDeserialize(out var changes, out _), Is.True);
+                var request = _http.Requests.Single();
+                Assert.That(request.Method, Is.EqualTo(HttpMethod.Get));
+                Assert.That(request.Uri.GetLeftPart(UriPartial.Path), Is.EqualTo("https://api.invalid/api/maichart/changes"));
+                Assert.That(request.Uri.Query, Is.EqualTo("?from=2026-11-01T00:00:00.005Z&to=2026-11-02T00:00:00.000Z"));
+                Assert.That(changes!.To, Is.EqualTo(new DateTime(2026, 11, 2, 8, 0, 0, 123, DateTimeKind.Utc)));
+                Assert.That(changes.To.Kind, Is.EqualTo(DateTimeKind.Utc));
+                Assert.That(changes.IsComplete, Is.True);
+                Assert.That(changes.Changes.Select(change => change.ChartId), Is.EqualTo(new[] { "added", "modified", "deleted" }));
+                Assert.That(changes.Changes.Select(change => change.Kind), Is.EqualTo(new[] { MajNetChartChangeKind.Added, MajNetChartChangeKind.Modified, MajNetChartChangeKind.Deleted }));
+                Assert.That(changes.Changes[0].Resources, Is.Null);
+                Assert.That(changes.Changes[0].Metadata, Is.Null);
+
+                var modified = changes.Changes[1];
+                Assert.That(modified.ChangedAt, Is.EqualTo(new DateTime(2026, 11, 2, 7, 30, 0, DateTimeKind.Utc)));
+                Assert.That(modified.TryGetResourceChange(OnlineChartResourceKind.Track, out var track), Is.True);
+                Assert.That(track!.Url, Is.EqualTo(new Uri("https://cdn.invalid/track.mp3")));
+                Assert.That(track.Sha256, Is.EqualTo(sha256));
+                Assert.That(track.Length, Is.EqualTo(4));
+                Assert.That(modified.TryGetResourceChange(OnlineChartResourceKind.Video, out var video), Is.True);
+                Assert.That(video, Is.Null);
+                Assert.That(modified.TryGetResourceChange(OnlineChartResourceKind.CoverArt, out _), Is.False);
+                Assert.That(modified.Metadata!.PublicTags, Is.EqualTo(new[] { "爆发" }));
+                Assert.That(modified.Metadata.Tags, Is.Null);
+            });
+        }
+
+        /// <summary>
+        /// Checks that an incomplete range is returned without changes, that the end of the range is left to the server
+        /// when omitted, and that a refused, unreadable or unreachable response is returned after the expected attempts.
+        /// </summary>
+        /// <returns>The test coroutine.</returns>
+        [UnityTest]
+        public IEnumerator GetChangesAsync_HandlesIncompleteAndFailedResponses()
+        {
+            return UniTask.ToCoroutine(async () =>
+            {
+                var from = new DateTime(2026, 11, 1, 0, 0, 0, DateTimeKind.Utc);
+                _http.RespondWith(HttpStatusCode.OK, "{\"to\":\"2026-11-02T08:00:00Z\",\"isComplete\":false,\"changes\":[]}");
+                var incomplete = await Online.MaiChart.GetChangesAsync(_endpoint, from);
+                Assert.That(incomplete.TryDeserialize(out var changes, out _), Is.True);
+                Assert.That(changes!.IsComplete, Is.False);
+                Assert.That(changes.Changes, Is.Empty);
+                Assert.That(_http.Requests.Single().Uri.Query, Is.EqualTo("?from=2026-11-01T00:00:00.000Z"));
+
+                _http.RespondWith(HttpStatusCode.BadRequest, "{\"code\":6}");
+                var before = _http.Requests.Length;
+                var refused = await Online.MaiChart.GetChangesAsync(_endpoint, from);
+                Assert.That(refused.IsSuccessfully, Is.False);
+                Assert.That(refused.StatusCode, Is.EqualTo(HttpStatusCode.BadRequest));
+                Assert.That(_http.Requests.Length - before, Is.EqualTo(1));
+
+                _http.RespondWith(HttpStatusCode.OK, "{ broken");
+                before = _http.Requests.Length;
+                var broken = await Online.MaiChart.GetChangesAsync(_endpoint, from);
+                Assert.That(broken.TryDeserialize(out _, out _), Is.False);
+                Assert.That(_http.Requests.Length - before, Is.EqualTo(MajEnv.HttpRequestMaxRetry));
+
+                _http.Responder = _ => throw new HttpRequestException("offline");
+                before = _http.Requests.Length;
+                var offline = await Online.MaiChart.GetChangesAsync(_endpoint, from);
+                Assert.That(offline.ErrorCode, Is.EqualTo(HttpErrorCode.Unreachable));
+                Assert.That(offline.StatusCode, Is.Null);
+                Assert.That(_http.Requests.Length - before, Is.EqualTo(MajEnv.HttpRequestMaxRetry));
             });
         }
 

@@ -7,6 +7,7 @@ using MajdataPlay.Net.Models;
 using Newtonsoft.Json;
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Net;
 using System.Net.Http;
 using System.Threading;
@@ -17,7 +18,7 @@ namespace MajdataPlay.Net
     internal static partial class Online
     {
         /// <summary>
-        /// Accesses the chart APIs of a server, <c>maichart/*</c>: the chart list and file metadata, and the votes,
+        /// Accesses the chart APIs of a server, <c>maichart/*</c>: the chart list, its changes and file metadata, and the votes,
         /// comments and rankings of a chart. Read responses are cached by request URI and dropped after this client changes
         /// them.
         /// </summary>
@@ -27,6 +28,10 @@ namespace MajdataPlay.Net
             private const string API_GET_LIST = "maichart/list";
             /// <summary>The route of the metadata and files of several charts.</summary>
             private const string API_POST_INFO = "maichart/info";
+            /// <summary>The route of the charts that changed within a time range.</summary>
+            private const string API_GET_CHANGES = "maichart/changes";
+            /// <summary>The format of the moments in the query of <c>GET maichart/changes</c>: UTC with milliseconds, the precision the server stores.</summary>
+            private const string CHANGES_QUERY_TIME_FORMAT = "yyyy-MM-dd'T'HH:mm:ss.fff'Z'";
             /// <summary>The route of the counts of a chart and the vote of the current user, formatted with the chart identifier.</summary>
             private const string API_GET_INTERACT_SUMMARY = "maichart/{0}/interactsum";
             /// <summary>The route that stores the vote of the current user on a chart, formatted with the chart identifier.</summary>
@@ -145,6 +150,49 @@ namespace MajdataPlay.Net
                 }
 
                 return infos.ToArray();
+            }
+            /// <summary>
+            /// Fetches the charts that were uploaded, modified or deleted within a time range from
+            /// <c>GET maichart/changes</c>, so a cached chart list is updated without reading the whole list again.
+            /// </summary>
+            /// <param name="apiEndpoint">The endpoint serving the charts.</param>
+            /// <param name="from">
+            /// The start of the range, inclusive, normally the <see cref="MajNetChartChanges.To"/> of the previous query; a
+            /// moment of unspecified kind is read as UTC, as the server does.
+            /// </param>
+            /// <param name="to">The end of the range, exclusive, or null for the current time of the server.</param>
+            /// <param name="token">The token canceling the request.</param>
+            /// <returns>
+            /// The response of the last attempt, deserializable to the changes when it succeeded. A server without the API
+            /// answers 404, and one whose current time is earlier than <paramref name="from"/> answers 400; an unreachable
+            /// server gives no status code.
+            /// </returns>
+            public static async ValueTask<EndpointResponse<MajNetChartChanges>> GetChangesAsync(ApiEndpoint apiEndpoint, DateTime from, DateTime? to = null, CancellationToken token = default)
+            {
+                await UniTask.SwitchToThreadPool();
+                var uriBuilder = new UriBuilder(apiEndpoint.Url.Combine(API_GET_CHANGES));
+                uriBuilder.Query = to is { } end
+                    ? $"from={FormatChangesQueryTime(from)}&to={FormatChangesQueryTime(end)}"
+                    : $"from={FormatChangesQueryTime(from)}";
+                var uri = uriBuilder.Uri;
+                var rsp = default(EndpointResponse);
+
+                for (var i = 0; i < MajEnv.HttpRequestMaxRetry; i++)
+                {
+                    rsp = await GetAsync(uri, token);
+                    var e = default(Exception?);
+                    if (rsp.IsSuccessfully && rsp.TryDeserialize<MajNetChartChanges>(out var changes, out e) && changes is not null)
+                    {
+                        break;
+                    }
+                    MajDebug.LogError(LOG_TAG, $"[Online] Failed to get chart changes: {e?.Message ?? rsp.StatusCode?.ToString() ?? "Unknown error"}");
+                    if (!ShouldRetry(rsp))
+                    {
+                        break;
+                    }
+                }
+
+                return new EndpointResponse<MajNetChartChanges>(rsp);
             }
             /// <summary>
             /// Fetches the counts of a chart and the vote of the current user from <c>GET maichart/{chartId}/interactsum</c>.
@@ -362,6 +410,14 @@ namespace MajdataPlay.Net
                     CommentSort.Controversial => "controversial",
                     _ => throw new ArgumentOutOfRangeException(nameof(sort), sort, null)
                 };
+            }
+            /// <summary>Formats a moment for the query of <c>GET maichart/changes</c>.</summary>
+            /// <param name="moment">The moment; one of unspecified kind is taken to be UTC already.</param>
+            /// <returns>The moment in UTC as ISO 8601 with milliseconds, which needs no escaping in a query.</returns>
+            private static string FormatChangesQueryTime(DateTime moment)
+            {
+                var utc = moment.Kind == DateTimeKind.Local ? moment.ToUniversalTime() : moment;
+                return utc.ToString(CHANGES_QUERY_TIME_FORMAT, CultureInfo.InvariantCulture);
             }
             /// <summary>Writes chart identities as the JSON array body of <c>POST maichart/info</c>, skipping blank identities.</summary>
             /// <param name="chartIds">The chart identities of one batch.</param>
