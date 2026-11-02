@@ -7,6 +7,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Cysharp.Threading.Tasks;
 using MajdataPlay.Net;
+using MajdataPlay.Net.Models;
 using MajdataPlay.Tests;
 using MajdataPlay.Tests.Game.Misc.Support;
 using Newtonsoft.Json.Linq;
@@ -108,15 +109,15 @@ namespace MajdataPlay.Tests.Game.Misc.Net
                 var failure = default(Exception);
                 try
                 {
-                    await Online.LoginAsync(null!, "user", "pass");
+                    await Online.Account.LoginAsync(null!, "user", "pass");
                 }
                 catch (ArgumentNullException exception)
                 {
                     failure = exception;
                 }
 
-                var placeholder = await Online.LoginAsync(_endpoint, "YourUsername", "x");
-                var empty = await Online.LoginAsync(_endpoint, "user", string.Empty);
+                var placeholder = await Online.Account.LoginAsync(_endpoint, "YourUsername", "x");
+                var empty = await Online.Account.LoginAsync(_endpoint, "user", string.Empty);
 
                 Assert.That(failure, Is.Not.Null);
                 Assert.That(placeholder.ErrorCode, Is.EqualTo(HttpErrorCode.InvalidRequest));
@@ -135,8 +136,8 @@ namespace MajdataPlay.Tests.Game.Misc.Net
             {
                 _http.RespondWith(HttpStatusCode.OK, "{}");
 
-                var first = await Online.LoginAsync(_endpoint, "user", "secret-password");
-                var second = await Online.LoginAsync(_endpoint, "user", "secret-password");
+                var first = await Online.Account.LoginAsync(_endpoint, "user", "secret-password");
+                var second = await Online.Account.LoginAsync(_endpoint, "user", "secret-password");
 
                 Assert.That(first.IsSuccessfully, Is.True);
                 Assert.That(second.StatusCode, Is.EqualTo(HttpStatusCode.OK));
@@ -167,7 +168,7 @@ namespace MajdataPlay.Tests.Game.Misc.Net
                 {
                     _http.RespondWith(status, body);
 
-                    var response = await Online.LoginAsync(_endpoint, "user", "pass");
+                    var response = await Online.Account.LoginAsync(_endpoint, "user", "pass");
 
                     Assert.That(response.IsSuccessfully, Is.False, message);
                     Assert.That(response.StatusCode, Is.EqualTo(status), message);
@@ -186,7 +187,7 @@ namespace MajdataPlay.Tests.Game.Misc.Net
             {
                 _http.RespondWith(HttpStatusCode.Forbidden, "{\"code\":0}");
 
-                var response = await Online.LoginAsync(_endpoint, "user", "pass");
+                var response = await Online.Account.LoginAsync(_endpoint, "user", "pass");
 
                 Assert.That(response.IsSuccessfully, Is.True);
                 Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.OK));
@@ -197,25 +198,25 @@ namespace MajdataPlay.Tests.Game.Misc.Net
         /// <summary>Checks that the profile request updates the login state.</summary>
         /// <returns>The test coroutine.</returns>
         [UnityTest]
-        public IEnumerator GetUserProfileAsync_TracksLoginState()
+        public IEnumerator GetProfileAsync_TracksLoginState()
         {
             return UniTask.ToCoroutine(async () =>
             {
                 _http.RespondWith(HttpStatusCode.OK, "{\"username\":\"player\",\"nickname\":\"Nick\"}");
-                var profile = await Online.GetUserProfileAsync(_endpoint);
+                var profile = await Online.Account.GetProfileAsync(_endpoint);
                 Assert.That(profile.IsSuccessfully, Is.True);
                 Assert.That(profile.Deserialize().DisplayName, Is.EqualTo("Nick"));
                 Assert.That(_endpoint.RuntimeConfig.IsLoggedIn, Is.True);
 
                 _http.RespondWith(HttpStatusCode.Unauthorized, "{}");
                 _endpoint.RuntimeConfig.Username = "player";
-                var unauthorized = await Online.GetUserProfileAsync(_endpoint);
+                var unauthorized = await Online.Account.GetProfileAsync(_endpoint);
                 Assert.That(unauthorized.StatusCode, Is.EqualTo(HttpStatusCode.Unauthorized));
                 Assert.That(_endpoint.RuntimeConfig.IsLoggedIn, Is.False);
                 Assert.That(_endpoint.RuntimeConfig.Username, Is.Empty);
 
                 _http.RespondWith(HttpStatusCode.InternalServerError, "{}");
-                var failed = await Online.GetUserProfileAsync(_endpoint);
+                var failed = await Online.Account.GetProfileAsync(_endpoint);
                 Assert.That(failed.IsSuccessfully, Is.False);
                 Assert.That(_http.Requests.Length, Is.EqualTo(2 + MajEnv.HTTP_REQUEST_MAX_RETRY + 1));
             });
@@ -224,22 +225,22 @@ namespace MajdataPlay.Tests.Game.Misc.Net
         /// <summary>Checks the user score request, its unauthorized result and its retries.</summary>
         /// <returns>The test coroutine.</returns>
         [UnityTest]
-        public IEnumerator GetUserScoresAsync_HandlesResponses()
+        public IEnumerator GetScoresAsync_HandlesResponses()
         {
             return UniTask.ToCoroutine(async () =>
             {
                 _http.RespondWith(HttpStatusCode.OK, "[{\"hash\":\"h\",\"dxScore\":12,\"chartLevel\":4,\"comboState\":2}]");
-                var scores = await Online.GetUserScoresAsync(_endpoint);
+                var scores = await Online.Account.GetScoresAsync(_endpoint);
                 Assert.That(scores.Single().Hash, Is.EqualTo("h"));
                 Assert.That(scores.Single().DXScore, Is.EqualTo(12u));
                 Assert.That(scores.Single().ChartLevel, Is.EqualTo(ChartLevel.Master));
 
                 _http.RespondWith(HttpStatusCode.Unauthorized);
-                Assert.That(await Online.GetUserScoresAsync(_endpoint), Is.Empty);
+                Assert.That(await Online.Account.GetScoresAsync(_endpoint), Is.Empty);
 
                 _http.RespondWith(HttpStatusCode.BadGateway);
                 var before = _http.Requests.Length;
-                Assert.That(await Online.GetUserScoresAsync(_endpoint), Is.Empty);
+                Assert.That(await Online.Account.GetScoresAsync(_endpoint), Is.Empty);
                 Assert.That(_http.Requests.Length - before, Is.EqualTo(MajEnv.HTTP_REQUEST_MAX_RETRY + 1));
             });
         }
@@ -251,22 +252,22 @@ namespace MajdataPlay.Tests.Game.Misc.Net
         {
             return UniTask.ToCoroutine(async () =>
             {
-                Assert.That(Online.IsMachineRegistered(_endpoint), Is.False);
+                Assert.That(Online.Machine.IsRegistered(_endpoint), Is.False);
                 _http.RespondWith(HttpStatusCode.OK, "{}");
-                var registered = await Online.RegisterAsync(_endpoint, new MachineInfo { Name = "Cabinet" });
+                var registered = await Online.Machine.RegisterAsync(_endpoint, new MachineInfo { Name = "Cabinet" });
                 Assert.That(registered.IsSuccessfully, Is.True);
-                Assert.That(Online.IsMachineRegistered(_endpoint), Is.True);
+                Assert.That(Online.Machine.IsRegistered(_endpoint), Is.True);
                 Assert.That(_http.Requests.Single().Uri.AbsolutePath, Is.EqualTo("/api/machine/register"));
                 Assert.That(_http.Requests.Single().Body, Does.Contain("Cabinet"));
 
                 StubHttpScope.ClearOnlineState();
                 _http.RespondWith(HttpStatusCode.NotFound);
-                var unsupported = await Online.RegisterAsync(_endpoint, new MachineInfo());
-                var cached = await Online.RegisterAsync(_endpoint, new MachineInfo());
+                var unsupported = await Online.Machine.RegisterAsync(_endpoint, new MachineInfo());
+                var cached = await Online.Machine.RegisterAsync(_endpoint, new MachineInfo());
                 Assert.That(unsupported.ErrorCode, Is.EqualTo(HttpErrorCode.NotSupported));
                 Assert.That(cached.Message, Is.EqualTo("MAJTEXT_ONLINE_MACHINE_REGISTRATION_UNSUPPORTED"));
                 Assert.That(_http.Requests.Length, Is.EqualTo(2));
-                Assert.That(Online.IsMachineRegistered(_endpoint), Is.False);
+                Assert.That(Online.Machine.IsRegistered(_endpoint), Is.False);
             });
         }
 
@@ -279,7 +280,7 @@ namespace MajdataPlay.Tests.Game.Misc.Net
             {
                 _http.RespondWith(HttpStatusCode.OK, "{}");
 
-                await Online.RegisterAsync(_endpoint, new MachineInfo { Name = "Cabinet" });
+                await Online.Machine.RegisterAsync(_endpoint, new MachineInfo { Name = "Cabinet" });
 
                 Assert.That(JObject.Parse(_http.Requests.Single().Body).ContainsKey("name"), Is.True);
             });
@@ -288,15 +289,15 @@ namespace MajdataPlay.Tests.Game.Misc.Net
         /// <summary>Checks the machine check request.</summary>
         /// <returns>The test coroutine.</returns>
         [UnityTest]
-        public IEnumerator CheckMachineRegisterAsync_FollowsStatus()
+        public IEnumerator CheckRegistrationAsync_FollowsStatus()
         {
             return UniTask.ToCoroutine(async () =>
             {
                 _http.RespondWith(HttpStatusCode.OK, "{}");
-                Assert.That(await Online.CheckMachineRegisterAsync(_endpoint), Is.True);
+                Assert.That(await Online.Machine.CheckRegistrationAsync(_endpoint), Is.True);
 
                 _http.RespondWith(HttpStatusCode.Forbidden);
-                Assert.That(await Online.CheckMachineRegisterAsync(_endpoint), Is.False);
+                Assert.That(await Online.Machine.CheckRegistrationAsync(_endpoint), Is.False);
                 Assert.That(_http.Requests[0].Uri.AbsolutePath, Is.EqualTo("/api/machine/info"));
             });
         }
@@ -309,24 +310,24 @@ namespace MajdataPlay.Tests.Game.Misc.Net
             return UniTask.ToCoroutine(async () =>
             {
                 _http.Responder = _ => throw new HttpRequestException("offline");
-                Assert.That(await Online.CheckMachineRegisterAsync(_endpoint), Is.False);
+                Assert.That(await Online.Machine.CheckRegistrationAsync(_endpoint), Is.False);
 
                 _http.Responder = _ => throw new System.Threading.Tasks.TaskCanceledException("timeout");
-                Assert.That(await Online.CheckMachineRegisterAsync(_endpoint), Is.False);
+                Assert.That(await Online.Machine.CheckRegistrationAsync(_endpoint), Is.False);
 
                 SetStatistic("IsMachineRegistrationSupported", true);
                 _http.Responder = _ => throw new HttpRequestException("offline");
-                var post = await Online.AuthRevokeAsync(_endpoint, "id");
+                var post = await Online.Machine.AuthRevokeAsync(_endpoint, "id");
                 Assert.That(post.ErrorCode, Is.EqualTo(HttpErrorCode.Unreachable));
 
                 _http.Responder = _ => throw new System.Threading.Tasks.TaskCanceledException("timeout");
-                var timeout = await Online.AuthRevokeAsync(_endpoint, "id");
+                var timeout = await Online.Machine.AuthRevokeAsync(_endpoint, "id");
                 Assert.That(timeout.ErrorCode, Is.EqualTo(HttpErrorCode.Timeout));
 
                 using var canceled = new CancellationTokenSource();
                 canceled.Cancel();
-                var getCanceled = await Online.AuthCheckAsync(_endpoint, "id", canceled.Token);
-                var postCanceled = await Online.AuthRevokeAsync(_endpoint, "id", canceled.Token);
+                var getCanceled = await Online.Machine.AuthCheckAsync(_endpoint, "id", canceled.Token);
+                var postCanceled = await Online.Machine.AuthRevokeAsync(_endpoint, "id", canceled.Token);
                 Assert.That(getCanceled.ErrorCode, Is.EqualTo(HttpErrorCode.Canceled));
                 Assert.That(postCanceled.ErrorCode, Is.EqualTo(HttpErrorCode.Canceled));
             });
@@ -342,9 +343,9 @@ namespace MajdataPlay.Tests.Game.Misc.Net
                 var unknown = 0;
                 foreach (var request in new Func<UniTask>[]
                 {
-                    async () => await Online.AuthRequestAsync(_endpoint),
-                    async () => await Online.AuthCheckAsync(_endpoint, "id"),
-                    async () => await Online.AuthRevokeAsync(_endpoint, "id"),
+                    async () => await Online.Machine.AuthRequestAsync(_endpoint),
+                    async () => await Online.Machine.AuthCheckAsync(_endpoint, "id"),
+                    async () => await Online.Machine.AuthRevokeAsync(_endpoint, "id"),
                 })
                 {
                     try
@@ -359,24 +360,24 @@ namespace MajdataPlay.Tests.Game.Misc.Net
                 Assert.That(unknown, Is.EqualTo(3));
 
                 SetStatistic("IsMachineRegistrationSupported", false);
-                Assert.That((await Online.AuthRequestAsync(_endpoint)).ErrorCode, Is.EqualTo(HttpErrorCode.NotSupported));
-                Assert.That((await Online.AuthCheckAsync(_endpoint, "id")).ErrorCode, Is.EqualTo(HttpErrorCode.NotSupported));
-                Assert.That((await Online.AuthRevokeAsync(_endpoint, "id")).ErrorCode, Is.EqualTo(HttpErrorCode.NotSupported));
+                Assert.That((await Online.Machine.AuthRequestAsync(_endpoint)).ErrorCode, Is.EqualTo(HttpErrorCode.NotSupported));
+                Assert.That((await Online.Machine.AuthCheckAsync(_endpoint, "id")).ErrorCode, Is.EqualTo(HttpErrorCode.NotSupported));
+                Assert.That((await Online.Machine.AuthRevokeAsync(_endpoint, "id")).ErrorCode, Is.EqualTo(HttpErrorCode.NotSupported));
                 Assert.That(_http.Requests, Is.Empty);
 
                 SetStatistic("IsMachineRegistrationSupported", true);
                 _http.RespondWith(HttpStatusCode.Created, "{\"authId\":\"x\"}");
-                var created = await Online.AuthRequestAsync(_endpoint);
+                var created = await Online.Machine.AuthRequestAsync(_endpoint);
                 Assert.That(created.IsSuccessfully, Is.True);
                 Assert.That(created.IsDeserializable, Is.True);
 
                 _http.RespondWith(HttpStatusCode.OK, "{}");
-                var notCreated = await Online.AuthRequestAsync(_endpoint);
+                var notCreated = await Online.Machine.AuthRequestAsync(_endpoint);
                 Assert.That(notCreated.IsSuccessfully, Is.False);
                 Assert.That(notCreated.Message, Is.EqualTo("MAJTEXT_ONLINE_MACHINE_AUTH_REQUEST_FAILED"));
 
-                var check = await Online.AuthCheckAsync(_endpoint, "abc");
-                var revoke = await Online.AuthRevokeAsync(_endpoint, "abc");
+                var check = await Online.Machine.AuthCheckAsync(_endpoint, "abc");
+                var revoke = await Online.Machine.AuthRevokeAsync(_endpoint, "abc");
                 Assert.That(check.IsSuccessfully, Is.True);
                 Assert.That(revoke.IsSuccessfully, Is.True);
                 var requests = _http.Requests;
@@ -395,10 +396,10 @@ namespace MajdataPlay.Tests.Game.Misc.Net
             return UniTask.ToCoroutine(async () =>
             {
                 _http.RespondWith(HttpStatusCode.OK, "{}");
-                await Online.LoginAsync(_endpoint, "user", "pass");
+                await Online.Account.LoginAsync(_endpoint, "user", "pass");
                 _endpoint.RuntimeConfig.AuthMethod = NetAuthMethodOption.None;
 
-                await Online.LogoutAllAsync();
+                await Online.Account.LogoutAllAsync();
 
                 Assert.That(_endpoint.RuntimeConfig.IsLoggedIn, Is.False);
                 Assert.That(_endpoint.RuntimeConfig.Username, Is.EqualTo("???"));
@@ -432,22 +433,22 @@ namespace MajdataPlay.Tests.Game.Misc.Net
         /// <summary>Checks the chart list request, its invalid responses and its retries.</summary>
         /// <returns>The test coroutine.</returns>
         [UnityTest]
-        public IEnumerator GetChartListAsync_HandlesResponses()
+        public IEnumerator GetListAsync_HandlesResponses()
         {
             return UniTask.ToCoroutine(async () =>
             {
                 _http.RespondWith(HttpStatusCode.OK, "[{\"id\":\"1\",\"title\":\"A\",\"hash\":\"h\"}]");
-                var list = await Online.GetChartListAsync(_endpoint);
+                var list = await Online.MaiChart.GetListAsync(_endpoint);
                 Assert.That(list!.Single().Title, Is.EqualTo("A"));
 
                 _http.RespondWith(HttpStatusCode.NotFound);
                 var before = _http.Requests.Length;
-                Assert.That(await Online.GetChartListAsync(_endpoint), Is.Null);
+                Assert.That(await Online.MaiChart.GetListAsync(_endpoint), Is.Null);
                 Assert.That(_http.Requests.Length - before, Is.EqualTo(1));
 
                 _http.RespondWith(HttpStatusCode.OK, "{ broken");
                 before = _http.Requests.Length;
-                Assert.That(await Online.GetChartListAsync(_endpoint), Is.Null);
+                Assert.That(await Online.MaiChart.GetListAsync(_endpoint), Is.Null);
                 Assert.That(_http.Requests.Length - before, Is.EqualTo(MajEnv.HTTP_REQUEST_MAX_RETRY));
             });
         }
@@ -458,7 +459,7 @@ namespace MajdataPlay.Tests.Game.Misc.Net
         /// </summary>
         /// <returns>The test coroutine.</returns>
         [UnityTest]
-        public IEnumerator GetChartInfosAsync_PostsBatchesAndParsesFiles()
+        public IEnumerator GetInfosAsync_PostsBatchesAndParsesFiles()
         {
             return UniTask.ToCoroutine(async () =>
             {
@@ -487,7 +488,7 @@ namespace MajdataPlay.Tests.Game.Misc.Net
                 };
                 var ids = Enumerable.Range(0, 501).Select(i => i.ToString()).Append(" ").Append(null).ToArray();
 
-                var infos = await Online.GetChartInfosAsync(_endpoint, ids);
+                var infos = await Online.MaiChart.GetInfosAsync(_endpoint, ids);
 
                 Assert.That(_http.Requests.Length, Is.EqualTo(2));
                 Assert.That(_http.Requests.All(request => request.Method == HttpMethod.Post), Is.True);
@@ -527,19 +528,19 @@ namespace MajdataPlay.Tests.Game.Misc.Net
         /// <summary>Checks that an endpoint without the info API, or a failed batch, yields null.</summary>
         /// <returns>The test coroutine.</returns>
         [UnityTest]
-        public IEnumerator GetChartInfosAsync_ReturnsNullWhenBatchFails()
+        public IEnumerator GetInfosAsync_ReturnsNullWhenBatchFails()
         {
             return UniTask.ToCoroutine(async () =>
             {
                 _http.RespondWith(HttpStatusCode.NotFound);
-                Assert.That(await Online.GetChartInfosAsync(_endpoint, new[] { "1" }), Is.Null);
+                Assert.That(await Online.MaiChart.GetInfosAsync(_endpoint, new[] { "1" }), Is.Null);
                 Assert.That(_http.Requests.Length, Is.EqualTo(1));
 
                 _http.RespondWith(HttpStatusCode.OK, "{ broken");
-                Assert.That(await Online.GetChartInfosAsync(_endpoint, new[] { "1" }), Is.Null);
+                Assert.That(await Online.MaiChart.GetInfosAsync(_endpoint, new[] { "1" }), Is.Null);
 
                 var before = _http.Requests.Length;
-                Assert.That(await Online.GetChartInfosAsync(_endpoint, Array.Empty<string>()), Is.Empty);
+                Assert.That(await Online.MaiChart.GetInfosAsync(_endpoint, Array.Empty<string>()), Is.Empty);
                 Assert.That(_http.Requests.Length, Is.EqualTo(before));
             });
         }
@@ -547,24 +548,24 @@ namespace MajdataPlay.Tests.Game.Misc.Net
         /// <summary>Checks the favorite collection request, which requires a logged-in user.</summary>
         /// <returns>The test coroutine.</returns>
         [UnityTest]
-        public IEnumerator GetUserOnlineFavCollection_RequiresLogin()
+        public IEnumerator GetFavoriteCollectionsAsync_RequiresLogin()
         {
             return UniTask.ToCoroutine(async () =>
             {
-                Assert.That(await Online.GetUserOnlineFavCollection(_endpoint), Is.Null);
+                Assert.That(await Online.Account.GetFavoriteCollectionsAsync(_endpoint), Is.Null);
                 Assert.That(_http.Requests, Is.Empty);
 
                 SetStatistic("IsUserLoggedIn", true);
                 _http.RespondWith(HttpStatusCode.OK, "[{\"id\":\"1\",\"name\":\"Fav\",\"createdBy\":\"u\",\"description\":\"d\",\"songHashs\":[\"a\"],\"isPlayList\":true}]");
-                var collections = await Online.GetUserOnlineFavCollection(_endpoint);
+                var collections = await Online.Account.GetFavoriteCollectionsAsync(_endpoint);
                 Assert.That(collections!.Single().Name, Is.EqualTo("Fav"));
                 Assert.That(collections.Single().IsPlayList, Is.True);
 
                 _http.RespondWith(HttpStatusCode.InternalServerError);
-                Assert.That(await Online.GetUserOnlineFavCollection(_endpoint), Is.Null);
+                Assert.That(await Online.Account.GetFavoriteCollectionsAsync(_endpoint), Is.Null);
 
                 _http.RespondWith(HttpStatusCode.Unauthorized);
-                Assert.That(await Online.GetUserOnlineFavCollection(_endpoint), Is.Null);
+                Assert.That(await Online.Account.GetFavoriteCollectionsAsync(_endpoint), Is.Null);
                 Assert.That(_endpoint.RuntimeConfig.IsLoggedIn, Is.False);
             });
         }
@@ -572,23 +573,23 @@ namespace MajdataPlay.Tests.Game.Misc.Net
         /// <summary>Checks the recommendation feed request.</summary>
         /// <returns>The test coroutine.</returns>
         [UnityTest]
-        public IEnumerator GetRecommendFeedAsync_HandlesResponses()
+        public IEnumerator GetFeedAsync_HandlesResponses()
         {
             return UniTask.ToCoroutine(async () =>
             {
-                Assert.That(await Online.GetRecommendFeedAsync(_endpoint, 0, 10), Is.Null);
+                Assert.That(await Online.Recommend.GetFeedAsync(_endpoint, 0, 10), Is.Null);
 
                 SetStatistic("IsUserLoggedIn", true);
                 _http.RespondWith(HttpStatusCode.OK, "[{\"id\":\"1\",\"title\":\"R\",\"hash\":\"h\"}]");
-                var feed = await Online.GetRecommendFeedAsync(_endpoint, 1, 50);
+                var feed = await Online.Recommend.GetFeedAsync(_endpoint, 1, 50);
                 Assert.That(feed!.Single().Title, Is.EqualTo("R"));
                 Assert.That(_http.Requests.Single().Uri.Query, Is.EqualTo("?source=play-feed&page=1&pageSize=50"));
 
                 _http.RespondWith(HttpStatusCode.InternalServerError);
-                Assert.That(await Online.GetRecommendFeedAsync(_endpoint, 0, 10), Is.Null);
+                Assert.That(await Online.Recommend.GetFeedAsync(_endpoint, 0, 10), Is.Null);
 
                 _http.RespondWith(HttpStatusCode.Unauthorized);
-                Assert.That(await Online.GetRecommendFeedAsync(_endpoint, 0, 10), Is.Null);
+                Assert.That(await Online.Recommend.GetFeedAsync(_endpoint, 0, 10), Is.Null);
                 Assert.That(_endpoint.RuntimeConfig.IsLoggedIn, Is.False);
             });
         }
@@ -596,13 +597,13 @@ namespace MajdataPlay.Tests.Game.Misc.Net
         /// <summary>Checks that impressions are posted with the play feed source and the chart hashes.</summary>
         /// <returns>The test coroutine.</returns>
         [UnityTest]
-        public IEnumerator PostRecommendImpressionsAsync_PostsHashes()
+        public IEnumerator PostImpressionsAsync_PostsHashes()
         {
             return UniTask.ToCoroutine(async () =>
             {
                 _http.RespondWith(HttpStatusCode.OK, "{}");
 
-                var response = await Online.PostRecommendImpressionsAsync(_endpoint, new[] { "a", "b" });
+                var response = await Online.Recommend.PostImpressionsAsync(_endpoint, new[] { "a", "b" });
 
                 Assert.That(response.IsSuccessfully, Is.True);
                 var request = _http.Requests.Single();
@@ -622,21 +623,21 @@ namespace MajdataPlay.Tests.Game.Misc.Net
                 using var song = CreateSong();
                 _http.RespondWith(HttpStatusCode.OK, "{\"isLiked\":false,\"plays\":3,\"likes\":[],\"comments\":[]}");
 
-                var first = await Online.GetChartInteractAsync(song);
-                var cached = await Online.GetChartInteractAsync(song);
+                var first = await Online.MaiChart.GetInteractAsync(song);
+                var cached = await Online.MaiChart.GetInteractAsync(song);
                 Assert.That(first!.Value.Plays, Is.EqualTo(3));
                 Assert.That(cached!.Value.Plays, Is.EqualTo(3));
                 Assert.That(_http.Requests.Length, Is.EqualTo(1));
                 Assert.That(_http.Requests[0].Uri.AbsolutePath, Is.EqualTo($"/api/maichart/{song.Id}/interact"));
 
-                var like = await Online.PostLikeAsync(song);
+                var like = await Online.MaiChart.PostLikeAsync(song);
                 Assert.That(like.IsSuccessfully, Is.True);
                 Assert.That(_http.Requests[1].Body, Does.Contain("like"));
-                await Online.GetChartInteractAsync(song);
+                await Online.MaiChart.GetInteractAsync(song);
                 Assert.That(_http.Requests.Length, Is.EqualTo(3));
 
                 Online.ClearResponseCache();
-                await Online.GetChartInteractAsync(song);
+                await Online.MaiChart.GetInteractAsync(song);
                 Assert.That(_http.Requests.Length, Is.EqualTo(4));
             });
         }
@@ -666,13 +667,13 @@ namespace MajdataPlay.Tests.Game.Misc.Net
                         : Array.Empty<(string, string)>();
                     return StubHttpScope.Respond(HttpStatusCode.OK, "{}");
                 };
-                await Online.GetChartInteractAsync(song);
+                await Online.MaiChart.GetInteractAsync(song);
                 var cases = new (Func<ValueTask<EndpointResponse>> Send, HttpMethod Method, string Type, string Content)[]
                 {
-                    (() => Online.PostDislikeAsync(song), HttpMethod.Post, "dislike", "dislike"),
-                    (() => Online.PostCommentAsync(song, "Helpful comment"), HttpMethod.Post, "comment", "Helpful comment"),
-                    (() => Online.DeleteLikeAsync(song), HttpMethod.Delete, "like", string.Empty),
-                    (() => Online.DeleteDislikeAsync(song), HttpMethod.Delete, "dislike", string.Empty),
+                    (() => Online.MaiChart.PostDislikeAsync(song), HttpMethod.Post, "dislike", "dislike"),
+                    (() => Online.MaiChart.PostCommentAsync(song, "Helpful comment"), HttpMethod.Post, "comment", "Helpful comment"),
+                    (() => Online.MaiChart.DeleteLikeAsync(song), HttpMethod.Delete, "like", string.Empty),
+                    (() => Online.MaiChart.DeleteDislikeAsync(song), HttpMethod.Delete, "dislike", string.Empty),
                 };
                 foreach (var item in cases)
                 {
@@ -687,9 +688,9 @@ namespace MajdataPlay.Tests.Game.Misc.Net
                     Assert.That(mediaType, Is.EqualTo("multipart/form-data"));
                     Assert.That(fields, Is.EquivalentTo(new[] { ("type", item.Type), ("content", item.Content) }));
 
-                    var refreshed = await Online.GetChartInteractAsync(song);
+                    var refreshed = await Online.MaiChart.GetInteractAsync(song);
                     Assert.That(refreshed!.Value.Plays, Is.EqualTo(expectedGetCount));
-                    await Online.GetChartInteractAsync(song);
+                    await Online.MaiChart.GetInteractAsync(song);
                     Assert.That(_http.Requests.Length, Is.EqualTo(before + 2), "A successful interaction refreshes the cache once.");
                 }
                 Assert.That(getCount, Is.EqualTo(cases.Length + 1));
@@ -705,16 +706,16 @@ namespace MajdataPlay.Tests.Game.Misc.Net
             {
                 using var song = CreateSong();
                 _http.RespondWith(HttpStatusCode.OK, "{\"plays\":1,\"likes\":[],\"comments\":[]}");
-                await Online.GetChartInteractAsync(song);
+                await Online.MaiChart.GetInteractAsync(song);
                 _http.RespondWith(HttpStatusCode.OK, "{\"plays\":2,\"likes\":[],\"comments\":[]}");
 
-                var cached = await Online.GetChartInteractAsync(song);
+                var cached = await Online.MaiChart.GetInteractAsync(song);
                 Assert.That(cached!.Value.Plays, Is.EqualTo(1));
                 Assert.That(_http.Requests.Length, Is.EqualTo(1));
 
-                var refreshed = await Online.GetChartInteractAsync(song, forceRefresh: true);
+                var refreshed = await Online.MaiChart.GetInteractAsync(song, forceRefresh: true);
                 Assert.That(refreshed!.Value.Plays, Is.EqualTo(2));
-                var next = await Online.GetChartInteractAsync(song);
+                var next = await Online.MaiChart.GetInteractAsync(song);
                 Assert.That(next!.Value.Plays, Is.EqualTo(2));
                 Assert.That(_http.Requests.Length, Is.EqualTo(2));
             });
@@ -730,13 +731,13 @@ namespace MajdataPlay.Tests.Game.Misc.Net
                 using var song = CreateSong();
                 _http.Responder = _ => throw new HttpRequestException("lost comment response");
 
-                var lost = await Online.PostCommentAsync(song, "First comment");
+                var lost = await Online.MaiChart.PostCommentAsync(song, "First comment");
 
                 Assert.That(lost.ErrorCode, Is.EqualTo(HttpErrorCode.Unreachable));
                 Assert.That(_http.Requests.Length, Is.EqualTo(1));
                 _http.RespondWith(HttpStatusCode.ServiceUnavailable, "{}");
 
-                var failed = await Online.PostCommentAsync(song, "Second comment");
+                var failed = await Online.MaiChart.PostCommentAsync(song, "Second comment");
 
                 Assert.That(failed.IsSuccessfully, Is.False);
                 Assert.That(failed.StatusCode, Is.EqualTo(HttpStatusCode.ServiceUnavailable));
@@ -753,17 +754,44 @@ namespace MajdataPlay.Tests.Game.Misc.Net
             {
                 using var song = CreateSong();
                 _http.RespondWith(HttpStatusCode.NotFound);
-                Assert.That(await Online.GetChartInteractAsync(song), Is.Null);
-                Assert.That((await Online.PostLikeAsync(song)).IsSuccessfully, Is.False);
+                Assert.That(await Online.MaiChart.GetInteractAsync(song), Is.Null);
+                Assert.That((await Online.MaiChart.PostLikeAsync(song)).IsSuccessfully, Is.False);
 
                 _http.RespondWith(HttpStatusCode.InternalServerError);
-                Assert.That(await Online.GetChartInteractAsync(song), Is.Null);
-                Assert.That((await Online.PostLikeAsync(song)).IsSuccessfully, Is.False);
+                Assert.That(await Online.MaiChart.GetInteractAsync(song), Is.Null);
+                Assert.That((await Online.MaiChart.PostLikeAsync(song)).IsSuccessfully, Is.False);
 
                 using var canceled = new CancellationTokenSource();
                 canceled.Cancel();
                 _http.RespondWith(HttpStatusCode.OK, "{}");
-                Assert.That((await Online.PostLikeAsync(song, canceled.Token)).ErrorCode, Is.EqualTo(HttpErrorCode.Canceled));
+                Assert.That((await Online.MaiChart.PostLikeAsync(song, canceled.Token)).ErrorCode, Is.EqualTo(HttpErrorCode.Canceled));
+            });
+        }
+
+        /// <summary>
+        /// Checks that chart requests retry an unreadable successful response and an unreachable server, but stop at the
+        /// first status code that refuses them.
+        /// </summary>
+        /// <returns>The test coroutine.</returns>
+        [UnityTest]
+        public IEnumerator ChartInteract_RetriesOnlyUnreadableOrUnansweredResponses()
+        {
+            return UniTask.ToCoroutine(async () =>
+            {
+                using var song = CreateSong();
+                _http.RespondWith(HttpStatusCode.OK, "{ broken");
+                Assert.That(await Online.MaiChart.GetInteractAsync(song), Is.Null);
+                Assert.That(_http.Requests.Length, Is.EqualTo(MajEnv.HTTP_REQUEST_MAX_RETRY + 1));
+
+                _http.Responder = _ => throw new HttpRequestException("offline");
+                var before = _http.Requests.Length;
+                Assert.That(await Online.MaiChart.GetScoreInfoAsync(song), Is.Null);
+                Assert.That(_http.Requests.Length - before, Is.EqualTo(MajEnv.HTTP_REQUEST_MAX_RETRY + 1));
+
+                _http.RespondWith(HttpStatusCode.ServiceUnavailable, "{}");
+                before = _http.Requests.Length;
+                Assert.That(await Online.MaiChart.GetInteractAsync(song), Is.Null);
+                Assert.That(_http.Requests.Length - before, Is.EqualTo(1));
             });
         }
 
@@ -777,24 +805,24 @@ namespace MajdataPlay.Tests.Game.Misc.Net
                 using var song = CreateSong();
                 _http.RespondWith(HttpStatusCode.OK, "{\"hash\":\"h\",\"scores\":[[{\"player\":{\"username\":\"p\"},\"acc\":100.5}]]}");
 
-                var first = await Online.GetChartScoreInfoAsync(song);
-                await Online.GetChartScoreInfoAsync(song);
+                var first = await Online.MaiChart.GetScoreInfoAsync(song);
+                await Online.MaiChart.GetScoreInfoAsync(song);
                 Assert.That(first!.Value.Scores[0][0].Player.Username, Is.EqualTo("p"));
                 Assert.That(_http.Requests.Length, Is.EqualTo(1));
 
-                var posted = await Online.PostScoreAsync(song, new MaiScore { Hash = "h", DXScore = 10 });
+                var posted = await Online.MaiChart.PostScoreAsync(song, new MaiScore { Hash = "h", DXScore = 10 });
                 Assert.That(posted.IsSuccessfully, Is.True);
                 Assert.That(_http.Requests[1].Uri.AbsolutePath, Is.EqualTo($"/api/maichart/{song.Id}/score"));
-                await Online.GetChartScoreInfoAsync(song);
+                await Online.MaiChart.GetScoreInfoAsync(song);
                 Assert.That(_http.Requests.Length, Is.EqualTo(3));
 
                 Online.ClearResponseCache();
                 _http.RespondWith(HttpStatusCode.Unauthorized);
-                Assert.That(await Online.GetChartScoreInfoAsync(song), Is.Null);
-                Assert.That((await Online.PostScoreAsync(song, new MaiScore())).IsSuccessfully, Is.False);
+                Assert.That(await Online.MaiChart.GetScoreInfoAsync(song), Is.Null);
+                Assert.That((await Online.MaiChart.PostScoreAsync(song, new MaiScore())).IsSuccessfully, Is.False);
                 _http.RespondWith(HttpStatusCode.ServiceUnavailable);
-                Assert.That(await Online.GetChartScoreInfoAsync(song), Is.Null);
-                Assert.That((await Online.PostScoreAsync(song, new MaiScore())).StatusCode, Is.EqualTo(HttpStatusCode.ServiceUnavailable));
+                Assert.That(await Online.MaiChart.GetScoreInfoAsync(song), Is.Null);
+                Assert.That((await Online.MaiChart.PostScoreAsync(song, new MaiScore())).StatusCode, Is.EqualTo(HttpStatusCode.ServiceUnavailable));
             });
         }
 
@@ -805,12 +833,12 @@ namespace MajdataPlay.Tests.Game.Misc.Net
         {
             return UniTask.ToCoroutine(async () =>
             {
-                Assert.That(await Online.GetAvatarAsync(_endpoint, null), Is.Null);
-                Assert.That(await Online.GetAvatarAsync(_endpoint, string.Empty), Is.Null);
+                Assert.That(await Online.Account.GetAvatarAsync(_endpoint, null), Is.Null);
+                Assert.That(await Online.Account.GetAvatarAsync(_endpoint, string.Empty), Is.Null);
                 Assert.That(_http.Requests, Is.Empty);
 
                 _http.RespondWith(HttpStatusCode.NotFound);
-                Assert.That(await Online.GetAvatarAsync(_endpoint, "a b"), Is.Null);
+                Assert.That(await Online.Account.GetAvatarAsync(_endpoint, "a b"), Is.Null);
                 Assert.That(_http.Requests.Single().Uri.AbsolutePath, Is.EqualTo("/api/avatar/a%20b"));
             });
         }

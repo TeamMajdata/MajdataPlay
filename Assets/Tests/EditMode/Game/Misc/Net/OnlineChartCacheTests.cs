@@ -6,6 +6,7 @@ using System.Security.Cryptography;
 using System.Text;
 using Cysharp.Threading.Tasks;
 using MajdataPlay.Net;
+using MajdataPlay.Net.Models;
 using MajdataPlay.Tests;
 using MajdataPlay.Tests.Game.Misc.Support;
 using NUnit.Framework;

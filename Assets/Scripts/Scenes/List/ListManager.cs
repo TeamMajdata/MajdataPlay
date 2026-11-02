@@ -635,7 +635,7 @@ namespace MajdataPlay.Scenes.List
             }
             await UniTask.Delay(100);
             sceneSwitcher.SetLoadingText("MAJTEXT_LOGGING_OUT".i18n() + "...");
-            var task = Online.LogoutAllAsync();
+            var task = Online.Account.LogoutAllAsync();
             while (!task.IsCompleted)
             {
                 await UniTask.Yield();

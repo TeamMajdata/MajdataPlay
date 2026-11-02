@@ -3,6 +3,7 @@ using System.Collections;
 using System.Collections.Generic;
 using System.Threading;
 using LitMotion;
+using MajdataPlay.Net.Models;
 using MajdataPlay.Scenes.List;
 using MajdataPlay.Tests.Game.Scenes.PlayMode.Support;
 using NUnit.Framework;

@@ -1,14 +1,80 @@
 using System;
+using MajdataPlay.Net.Models;
 using MajdataPlay.Scenes.Game;
 using MajdataPlay.Utils;
 using NUnit.Framework;
 
 #nullable enable
-namespace MajdataPlay.Tests.Game.Misc.Base
+namespace MajdataPlay.Tests.Game.Misc.Net.Models
 {
-    /// <summary>Covers the JSON contracts of the MajNet data formats that carry courses, interactions and online scores.</summary>
-    public class MajNetDataFormatTests
+    /// <summary>Covers the JSON contracts of the online models: profiles, machines, chart metadata, collections, interactions and online scores.</summary>
+    public class NetModelTests
     {
+        /// <summary>Checks that the display name falls back to the user name when no nickname is set.</summary>
+        [Test]
+        public void UserProfileDisplayName_FallsBackToUsername()
+        {
+            var withoutNickname = new UserProfile { Username = "user", Nickname = string.Empty };
+            var withNickname = new UserProfile { Username = "user", Nickname = "nick" };
+            var nullNickname = new UserProfile { Username = "user" };
+
+            Assert.That(withoutNickname.DisplayName, Is.EqualTo("user"));
+            Assert.That(withNickname.DisplayName, Is.EqualTo("nick"));
+            Assert.That(nullNickname.DisplayName, Is.EqualTo("user"));
+        }
+
+        /// <summary>Checks that the user profile reads the camel case JSON returned by the server.</summary>
+        [Test]
+        public void UserProfile_DeserializesCamelCaseJson()
+        {
+            var profile = Serializer.Json.Deserialize<UserProfile>("{\"id\":\"1\",\"username\":\"u\",\"nickname\":\"n\",\"avatarId\":\"a\"}");
+
+            Assert.That(profile.Id, Is.EqualTo("1"));
+            Assert.That(profile.Username, Is.EqualTo("u"));
+            Assert.That(profile.Nickname, Is.EqualTo("n"));
+            Assert.That(profile.AvatarId, Is.EqualTo("a"));
+        }
+
+        /// <summary>Checks the default machine description.</summary>
+        [Test]
+        public void MachineInfo_HasDefaultName()
+        {
+            var info = new MachineInfo();
+
+            Assert.That(info.Name, Is.EqualTo("Private arcade"));
+            Assert.That(info.Description, Is.Null);
+        }
+
+        /// <summary>Checks that the online song detail metadata defaults its tag lists to empty arrays.</summary>
+        [Test]
+        public void MajnetSongDetail_DefaultsTagsToEmpty()
+        {
+            var detail = Serializer.Json.Deserialize<MajnetSongDetail>("{\"id\":\"x\",\"title\":\"t\",\"hash\":\"h\"}");
+
+            Assert.That(detail, Is.Not.Null);
+            Assert.That(detail!.Id, Is.EqualTo("x"));
+            Assert.That(detail.Title, Is.EqualTo("t"));
+            Assert.That(detail.Tags, Is.Empty);
+            Assert.That(detail.PublicTags, Is.Empty);
+        }
+
+        /// <summary>Checks that the fields the server leaves out keep empty values instead of null.</summary>
+        [Test]
+        public void MajnetSongDetail_OmittedFields_AreEmpty()
+        {
+            var detail = Serializer.Json.Deserialize<MajnetSongDetail>("{}");
+
+            Assert.That(detail, Is.Not.Null);
+            Assert.That(detail!.Id, Is.Empty);
+            Assert.That(detail.Title, Is.Empty);
+            Assert.That(detail.Artist, Is.Empty);
+            Assert.That(detail.Designer, Is.Empty);
+            Assert.That(detail.Description, Is.Empty);
+            Assert.That(detail.Uploader, Is.Empty);
+            Assert.That(detail.Hash, Is.Empty);
+            Assert.That(detail.Levels, Is.Empty);
+        }
+
         /// <summary>Checks that an online course description reads the camel case JSON returned by the server.</summary>
         [Test]
         public void OnlineDanInfo_DeserializesCamelCaseJson()

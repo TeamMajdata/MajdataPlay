@@ -131,7 +131,7 @@ namespace MajdataPlay.Net
                         MajDebug.LogException(e);
                     }
                 }
-                await Online.PostRecommendImpressionsAsync(endpoint, chartHashes);
+                await Online.Recommend.PostImpressionsAsync(endpoint, chartHashes);
             }
             catch (Exception e)
             {

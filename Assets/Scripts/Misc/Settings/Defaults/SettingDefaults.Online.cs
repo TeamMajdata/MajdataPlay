@@ -1,4 +1,5 @@
 using MajdataPlay.Net;
+using MajdataPlay.Net.Models;
 #nullable enable
 namespace MajdataPlay.Settings
 {

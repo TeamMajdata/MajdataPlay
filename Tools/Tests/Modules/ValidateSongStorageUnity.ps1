@@ -89,7 +89,7 @@ $sourcePaths = @(
     'Assets/Scripts/Misc/Collections/SongCollectionScanner.cs',
     'Assets/Scripts/Misc/Base/DataFormats/SongDetail.cs',
     'Assets/Scripts/Misc/Base/DataFormats/OnlineSongDetail.cs',
-    'Assets/Scripts/Misc/Base/DataFormats/MajnetSongDetail.cs',
+    'Assets/Scripts/Misc/Net/Models/MajnetSongDetail.cs',
     'Assets/Plugins/MajdataPlay/Net/HttpRange.cs',
     'Assets/Plugins/MajdataPlay/Net/HttpErrorCode.cs',
     'Assets/Plugins/MajdataPlay/Net/Exceptions/HttpException.cs',

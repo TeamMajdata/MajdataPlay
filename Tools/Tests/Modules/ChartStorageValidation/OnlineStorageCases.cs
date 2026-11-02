@@ -8,6 +8,7 @@ using System.Threading.Tasks;
 using MajdataPlay.Collections;
 using MajdataPlay.IO.Storage;
 using MajdataPlay.Net;
+using MajdataPlay.Net.Models;
 
 namespace MajdataPlay.Tests.ChartStorageValidation
 {

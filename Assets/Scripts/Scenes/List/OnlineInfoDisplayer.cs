@@ -1,6 +1,7 @@
 using Cysharp.Threading.Tasks;
 using MajdataPlay.Diagnostics;
 using MajdataPlay.Net;
+using MajdataPlay.Net.Models;
 using System;
 using System.Threading;
 using System.Threading.Tasks;
@@ -108,7 +109,7 @@ namespace MajdataPlay.Scenes.List
             try
             {
                 await UniTask.SwitchToThreadPool();
-                var interact = await Online.GetChartInteractAsync(song, token);
+                var interact = await Online.MaiChart.GetInteractAsync(song, token);
                 token.ThrowIfCancellationRequested();
                 if (interact is null)
                 {

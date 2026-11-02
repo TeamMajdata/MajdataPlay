@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using Cysharp.Threading.Tasks;
 using MajdataPlay.Collections;
 using MajdataPlay.IO.Storage;
+using MajdataPlay.Net.Models;
 using MajdataPlay.Scenes.Game;
 using MajdataPlay.Scenes.Game.Notes;
 using MajdataPlay.Tests;

@@ -3,6 +3,7 @@ using MajdataPlay.Collections;
 using MajdataPlay.Diagnostics;
 using MajdataPlay.IO.Storage;
 using MajdataPlay.Json;
+using MajdataPlay.Net.Models;
 using MajdataPlay.Scenes.Game;
 using MajdataPlay.Scenes.Game.Notes;
 using MajdataPlay.Utils;

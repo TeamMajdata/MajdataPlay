@@ -4,6 +4,7 @@ using Cysharp.Threading.Tasks;
 using MajdataPlay.Diagnostics;
 using MajdataPlay.IO;
 using MajdataPlay.Net;
+using MajdataPlay.Net.Models;
 using LitMotion;
 using TMPro;
 using UnityEngine;
@@ -176,7 +177,7 @@ namespace MajdataPlay.Scenes.Result.Components
             var token = this.GetCancellationTokenOnDestroy();
             try
             {
-                var response = await Online.GetChartInteractAsync(_song!, token, forceRefresh: true);
+                var response = await Online.MaiChart.GetInteractAsync(_song!, token, forceRefresh: true);
                 await UniTask.SwitchToMainThread(token);
                 if (response is not MajNetSongInteract interaction)
                 {
@@ -248,7 +249,7 @@ namespace MajdataPlay.Scenes.Result.Components
                 {
                     // A failed response does not prove that the server rejected the previous vote.
                     // Refresh only the server baseline, preserving the player's current draft.
-                    var interaction = await Online.GetChartInteractAsync(_song!, token, forceRefresh: true);
+                    var interaction = await Online.MaiChart.GetInteractAsync(_song!, token, forceRefresh: true);
                     await UniTask.SwitchToMainThread(token);
                     if (interaction is not MajNetSongInteract current)
                     {
@@ -263,11 +264,11 @@ namespace MajdataPlay.Scenes.Result.Components
                     _voteNeedsRefresh = true;
                     var response = await (vote switch
                     {
-                        1 => Online.PostLikeAsync(_song!, token),
-                        -1 => Online.PostDislikeAsync(_song!, token),
+                        1 => Online.MaiChart.PostLikeAsync(_song!, token),
+                        -1 => Online.MaiChart.PostDislikeAsync(_song!, token),
                         _ => _submittedVote > 0
-                            ? Online.DeleteLikeAsync(_song!, token)
-                            : Online.DeleteDislikeAsync(_song!, token)
+                            ? Online.MaiChart.DeleteLikeAsync(_song!, token)
+                            : Online.MaiChart.DeleteDislikeAsync(_song!, token)
                     });
                     await UniTask.SwitchToMainThread(token);
                     if (!response.IsSuccessfully)
@@ -280,7 +281,7 @@ namespace MajdataPlay.Scenes.Result.Components
                 }
                 if (comment.Length != 0)
                 {
-                    var response = await Online.PostCommentAsync(_song!, comment, token);
+                    var response = await Online.MaiChart.PostCommentAsync(_song!, comment, token);
                     await UniTask.SwitchToMainThread(token);
                     if (!response.IsSuccessfully)
                     {

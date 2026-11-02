@@ -84,7 +84,7 @@ namespace MajdataPlay.Scenes.Result.Components
                     _scoreUploadIndicator.SetUploading();
                     _scoreUploadIndicator.SetText("MAJTEXT_SCORE_SENDING".i18n());
                     await UniTask.SwitchToThreadPool();
-                    var rsp = await Online.PostScoreAsync(_onlineDetail, _score, token);
+                    var rsp = await Online.MaiChart.PostScoreAsync(_onlineDetail, _score, token);
                     await UniTask.SwitchToMainThread();
 
                     if (rsp.IsSuccessfully)

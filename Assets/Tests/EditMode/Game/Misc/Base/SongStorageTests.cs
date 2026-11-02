@@ -11,6 +11,7 @@ using Cysharp.Threading.Tasks;
 using MajdataPlay.Collections;
 using MajdataPlay.IO.Storage;
 using MajdataPlay.Net;
+using MajdataPlay.Net.Models;
 using MajdataPlay.Tests;
 using MajdataPlay.Tests.Game.Misc.Support;
 using MajdataPlay.Utils;

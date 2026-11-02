@@ -1,11 +1,10 @@
-using MajdataPlay.Net;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Serialization;
 using System;
 using UnityEngine.Scripting;
 
 #nullable enable
-namespace MajdataPlay
+namespace MajdataPlay.Net.Models
 {
     /// <summary>The downloadable files of an online chart, as returned by the <c>maichart/info</c> API; a file the server does not store is null.</summary>
     [Preserve]
