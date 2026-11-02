@@ -434,7 +434,7 @@ namespace MajdataPlay.Net.Curl.Core
             }
             var result = multiMsg.Data.Result;
             // Read the error details while the easy handle is still guaranteed to be alive.
-            var curlErr = CurlUtility.GetEasyException(easyHandle, result);
+            var curlErr = CurlUtility.GetEasyException(easyHandle, result, result == CurlCode.Ok ? null : curlTask.Easy.GetErrorDetail());
             curlTask.CaptureTransferInfo();
             LibCurl.Easy.SetOption(easyHandle, CurlOption.Private, IntPtr.Zero);
             // Once detached, a published response may release the easy handle on another thread at any moment.

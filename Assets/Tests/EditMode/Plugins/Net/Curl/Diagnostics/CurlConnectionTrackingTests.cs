@@ -1,6 +1,7 @@
 #nullable enable
 using System;
 using System.Collections;
+using System.Diagnostics;
 using System.Linq;
 using System.Net;
 using System.Net.Http;
@@ -293,6 +294,47 @@ namespace MajdataPlay.Tests.Plugins.Net.Curl.Diagnostics
             Assert.That(server.ConnectionCount, Is.GreaterThanOrEqualTo(2));
             Assert.That(snapshot.ConnectionReuses, Is.GreaterThanOrEqualTo(1));
             Assert.That(snapshot.ConnectionsClosed, Is.GreaterThanOrEqualTo(1));
+        });
+
+        /// <summary>
+        /// Checks that the connect timeout stops counting once a new connection is up, so a late answer with a slow body
+        /// that together take longer than the timeout still completes.
+        /// </summary>
+        /// <returns>The test coroutine.</returns>
+        [UnityTest]
+        public IEnumerator ConnectTimeout_DoesNotLimitSlowResponseOnNewConnection() => UniTask.ToCoroutine(async () =>
+        {
+            using var server = new KeepAliveHttpServer();
+            using var handler = new CurlHttpMessageHandler { ConnectTimeout = TimeSpan.FromSeconds(1) };
+            using var client = new HttpClient(handler, false);
+            var stopwatch = Stopwatch.StartNew();
+
+            var body = await GetAsync(client, server.Url + "slow");
+
+            Assert.That(body.Length, Is.EqualTo(KeepAliveHttpServer.SlowChunkCount * KeepAliveHttpServer.SlowChunkLength));
+            Assert.That(stopwatch.Elapsed, Is.GreaterThan(TimeSpan.FromSeconds(1.5)), "The response must outlast the connect timeout.");
+            Assert.That(handler.Statistics.GetSnapshot().ConnectionReuses, Is.Zero);
+        });
+
+        /// <summary>
+        /// Checks that the connect timeout does not limit a slow response on a pooled connection, which skips the connect
+        /// phase entirely.
+        /// </summary>
+        /// <returns>The test coroutine.</returns>
+        [UnityTest]
+        public IEnumerator ConnectTimeout_DoesNotLimitSlowResponseOnReusedConnection() => UniTask.ToCoroutine(async () =>
+        {
+            using var server = new KeepAliveHttpServer();
+            using var handler = new CurlHttpMessageHandler { ConnectTimeout = TimeSpan.FromSeconds(1) };
+            using var client = new HttpClient(handler, false);
+            await GetAsync(client, server.Url + "first");
+            var stopwatch = Stopwatch.StartNew();
+
+            var body = await GetAsync(client, server.Url + "slow");
+
+            Assert.That(body.Length, Is.EqualTo(KeepAliveHttpServer.SlowChunkCount * KeepAliveHttpServer.SlowChunkLength));
+            Assert.That(stopwatch.Elapsed, Is.GreaterThan(TimeSpan.FromSeconds(1.5)), "The response must outlast the connect timeout.");
+            Assert.That(handler.Statistics.GetSnapshot().ConnectionReuses, Is.EqualTo(1));
         });
 
         /// <summary>Checks the failure and cancellation counters, and that an aborted connection leaves the pool.</summary>

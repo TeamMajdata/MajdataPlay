@@ -14,11 +14,24 @@ namespace MajdataPlay.Tests.Plugins.Net.Curl.Diagnostics
     /// A minimal HTTP/1.1 server bound to 127.0.0.1 that keeps connections open between requests, so connection reuse
     /// can be observed. The request path picks the behavior: <c>/close</c> answers with <c>Connection: close</c>,
     /// <c>/drop</c> answers as keep-alive and then closes the connection silently, <c>/hold</c> waits for
-    /// <see cref="ReleaseHeld"/> before answering, <c>/redirect</c> redirects to <c>/redirected</c> on the same
-    /// connection, and any other path answers <c>ok</c> at once.
+    /// <see cref="ReleaseHeld"/> before answering, <c>/slow</c> answers late and sends its body in slow chunks,
+    /// <c>/redirect</c> redirects to <c>/redirected</c> on the same connection, and any other path answers <c>ok</c> at
+    /// once.
     /// </summary>
     internal sealed class KeepAliveHttpServer : IDisposable
     {
+        /// <summary>How long <c>/slow</c> waits before sending its headers, in milliseconds.</summary>
+        public const int SlowHeaderDelayMs = 700;
+
+        /// <summary>The number of body chunks <c>/slow</c> sends.</summary>
+        public const int SlowChunkCount = 15;
+
+        /// <summary>The length of each <c>/slow</c> body chunk, in bytes.</summary>
+        public const int SlowChunkLength = 1024;
+
+        /// <summary>The pause before each <c>/slow</c> body chunk, in milliseconds.</summary>
+        public const int SlowChunkIntervalMs = 100;
+
         /// <summary>The listening socket.</summary>
         private readonly TcpListener _listener;
 
@@ -129,6 +142,11 @@ namespace MajdataPlay.Tests.Plugins.Net.Curl.Diagnostics
                         await _release.Task.ConfigureAwait(false);
                         Interlocked.Decrement(ref _heldCount);
                     }
+                    if (target == "/slow")
+                    {
+                        await WriteSlowResponseAsync(stream).ConfigureAwait(false);
+                        continue;
+                    }
                     var isClosing = target == "/close";
                     var head = target == "/redirect"
                         ? "HTTP/1.1 302 Found\r\nLocation: /redirected\r\nContent-Length: 0\r\n\r\n"
@@ -150,6 +168,27 @@ namespace MajdataPlay.Tests.Plugins.Net.Curl.Diagnostics
             {
                 _clients.TryRemove(client, out _);
                 client.Close();
+            }
+        }
+
+        /// <summary>
+        /// Answers <c>/slow</c>: the headers after <see cref="SlowHeaderDelayMs"/>, then <see cref="SlowChunkCount"/>
+        /// body chunks of <see cref="SlowChunkLength"/> bytes, one every <see cref="SlowChunkIntervalMs"/>.
+        /// </summary>
+        /// <param name="stream">The connection stream.</param>
+        /// <returns>A task completing once the whole response has been written.</returns>
+        private static async Task WriteSlowResponseAsync(Stream stream)
+        {
+            await Task.Delay(SlowHeaderDelayMs).ConfigureAwait(false);
+            var head = Encoding.ASCII.GetBytes($"HTTP/1.1 200 OK\r\nContent-Length: {SlowChunkCount * SlowChunkLength}\r\n\r\n");
+            await stream.WriteAsync(head, 0, head.Length).ConfigureAwait(false);
+            await stream.FlushAsync().ConfigureAwait(false);
+            var chunk = new byte[SlowChunkLength];
+            for (var i = 0; i < SlowChunkCount; i++)
+            {
+                await Task.Delay(SlowChunkIntervalMs).ConfigureAwait(false);
+                await stream.WriteAsync(chunk, 0, chunk.Length).ConfigureAwait(false);
+                await stream.FlushAsync().ConfigureAwait(false);
             }
         }
 

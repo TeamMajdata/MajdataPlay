@@ -220,6 +220,12 @@ namespace MajdataPlay.Net.Curl.Core.PInvoke
         ReadData = CurlOptionType.ObjectPointer + 9,
 
         /// <summary>
+        /// Buffer of at least <c>CURL_ERROR_SIZE</c> bytes that receives a readable description of the last error
+        /// (<c>CURLOPT_ERRORBUFFER</c>).
+        /// </summary>
+        ErrorBuffer = CurlOptionType.ObjectPointer + 10,
+
+        /// <summary>
         /// Pass a pointer to the header callback userdata.
         /// </summary>
         HeaderData = CurlOptionType.ObjectPointer + 29,

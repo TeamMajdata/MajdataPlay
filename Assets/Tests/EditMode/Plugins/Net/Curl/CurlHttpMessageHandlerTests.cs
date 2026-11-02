@@ -44,17 +44,22 @@ namespace MajdataPlay.Tests.Plugins.Net.Curl
 
         /// <summary>
         /// Asserts that an exception reports a libcurl timeout the way HttpClient reports its own: a cancellation whose
-        /// token was not cancelled, with a <see cref="TimeoutException"/> wrapping the curl error.
+        /// token was not cancelled, with a <see cref="TimeoutException"/> wrapping the curl error, whose message names the
+        /// limit that expired.
         /// </summary>
         /// <param name="exception">The exception the request or body read failed with.</param>
-        private static void AssertCurlTimeout(TaskCanceledException exception)
+        /// <param name="detailPattern">A regular expression for libcurl's error-buffer description of the expired limit.</param>
+        private static void AssertCurlTimeout(TaskCanceledException exception, string detailPattern)
         {
+            const string Prefix = "Curl Error 28 (OperationTimedOut): ";
             Assert.That(exception.CancellationToken.IsCancellationRequested, Is.False);
             Assert.That(exception.InnerException, Is.InstanceOf<TimeoutException>());
             Assert.That(exception.InnerException!.InnerException, Is.InstanceOf<CurlException>());
             var curl = (CurlException)exception.InnerException.InnerException!;
             Assert.That(curl.ErrorCode, Is.EqualTo(CurlCode.OperationTimedOut));
             Assert.That(exception.Message, Is.EqualTo(curl.Message));
+            Assert.That(curl.Message, Does.StartWith(Prefix));
+            Assert.That(curl.Message.Substring(Prefix.Length), Does.Match(detailPattern));
         }
 
         /// <summary>Gets the libcurl features bitmask.</summary>
@@ -284,7 +289,7 @@ namespace MajdataPlay.Tests.Plugins.Net.Curl
             var exception = await NetAsyncAssert.ThrowsAsync<TaskCanceledException>(
                 () => SendAsync(client, new HttpRequestMessage(HttpMethod.Get, server.Url)));
 
-            AssertCurlTimeout(exception);
+            AssertCurlTimeout(exception, @"^Operation timed out after \d+ milliseconds");
         });
 
         /// <summary>
@@ -308,7 +313,7 @@ namespace MajdataPlay.Tests.Plugins.Net.Curl
                 () => SendAsync(client, new HttpRequestMessage(HttpMethod.Get, server.Url), token: cancellation.Token));
 
             Assert.That(cancellation.IsCancellationRequested, Is.False);
-            AssertCurlTimeout(exception);
+            AssertCurlTimeout(exception, @"^Operation timed out after \d+ milliseconds");
         });
 
         /// <summary>Checks that the transfer timeout keeps running after the headers and fails a stalled body read.</summary>
@@ -334,7 +339,7 @@ namespace MajdataPlay.Tests.Plugins.Net.Curl
                 await read;
             });
 
-            AssertCurlTimeout(exception);
+            AssertCurlTimeout(exception, @"^Operation timed out after \d+ milliseconds");
         });
 
         /// <summary>Checks that the connect timeout fails a request whose server accepts TCP but never answers the TLS handshake.</summary>
@@ -353,7 +358,7 @@ namespace MajdataPlay.Tests.Plugins.Net.Curl
                 var exception = await NetAsyncAssert.ThrowsAsync<TaskCanceledException>(
                     () => SendAsync(client, new HttpRequestMessage(HttpMethod.Get, $"https://127.0.0.1:{port}/")));
 
-                AssertCurlTimeout(exception);
+                AssertCurlTimeout(exception, "(?i)(connection timed out after|connection timeout)");
             }
             finally
             {
@@ -387,7 +392,69 @@ namespace MajdataPlay.Tests.Plugins.Net.Curl
                 await read;
             });
 
-            AssertCurlTimeout(exception);
+            AssertCurlTimeout(exception, @"^Operation too slow\. Less than 1 bytes/sec transferred the last 1 seconds$");
+        });
+
+        /// <summary>Writes headers after a delay, then a body at a steady rate of 48 KiB/s in 4.8 KiB pieces.</summary>
+        /// <param name="stream">The connection stream.</param>
+        /// <param name="headerDelayMs">How long to wait before the headers.</param>
+        /// <param name="token">The server's cancellation token.</param>
+        /// <returns>A task completing once 240 KiB of body have been written.</returns>
+        private static async Task WriteSteadyBodyAsync(Stream stream, int headerDelayMs, CancellationToken token)
+        {
+            const int PieceLength = 4915;
+            const int PieceCount = 50;
+            await Task.Delay(headerDelayMs, token);
+            await LoopbackHttpServer.WriteAsync(stream, $"HTTP/1.1 200 OK\r\nContent-Length: {PieceLength * PieceCount}\r\n\r\n");
+            var piece = new byte[PieceLength];
+            for (var i = 0; i < PieceCount; i++)
+            {
+                await stream.WriteAsync(piece, 0, piece.Length, token);
+                await stream.FlushAsync(token);
+                await Task.Delay(100, token);
+            }
+        }
+
+        /// <summary>Checks that a body arriving steadily faster than the low-speed limit completes.</summary>
+        /// <returns>The test coroutine.</returns>
+        [UnityTest]
+        public IEnumerator LowSpeedTimeout_SteadyBodyAboveLimitCompletes() => UniTask.ToCoroutine(async () =>
+        {
+            using var server = new LoopbackHttpServer((request, stream, token) => WriteSteadyBodyAsync(stream, 0, token));
+            using var client = new HttpClient(new CurlHttpMessageHandler
+            {
+                LowSpeedTimeout = TimeSpan.FromSeconds(4),
+                LowSpeedLimit = 32 * 1024
+            });
+
+            using var response = await SendAsync(client, new HttpRequestMessage(HttpMethod.Get, server.Url));
+
+            Assert.That((await response.Content.ReadAsByteArrayAsync()).Length, Is.EqualTo(4915 * 50));
+        });
+
+        /// <summary>
+        /// Checks that the wait for the response counts towards the low-speed timeout: libcurl averages the speed over up
+        /// to five seconds from the start of the transfer, so 2.3 s without a byte keep the average below the limit even
+        /// after the same steady body starts arriving faster than it, and the transfer is aborted 4 s after it started.
+        /// </summary>
+        /// <returns>The test coroutine.</returns>
+        [UnityTest]
+        public IEnumerator LowSpeedTimeout_CountsWaitForResponse() => UniTask.ToCoroutine(async () =>
+        {
+            using var server = new LoopbackHttpServer((request, stream, token) => WriteSteadyBodyAsync(stream, 2300, token));
+            using var client = new HttpClient(new CurlHttpMessageHandler
+            {
+                ConnectTimeout = TimeSpan.FromSeconds(2),
+                LowSpeedTimeout = TimeSpan.FromSeconds(4),
+                LowSpeedLimit = 32 * 1024
+            });
+            var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+
+            var exception = await NetAsyncAssert.ThrowsAsync<TaskCanceledException>(
+                () => SendAsync(client, new HttpRequestMessage(HttpMethod.Get, server.Url)));
+
+            AssertCurlTimeout(exception, @"^Operation too slow\. Less than 32768 bytes/sec transferred the last 4 seconds$");
+            Assert.That(stopwatch.Elapsed, Is.LessThan(TimeSpan.FromSeconds(5)), "The steady body would need about 7.3 s in total.");
         });
 
         /// <summary>Checks that time spent paused on a full body buffer does not count towards the low-speed timeout.</summary>

@@ -178,12 +178,27 @@ namespace MajdataPlay.Net.Curl
         /// low-speed check.
         /// </summary>
         /// <remarks>
-        /// libcurl measures this in whole seconds, so the value is rounded up to whole seconds. The speed is averaged over
-        /// roughly the last five seconds, so a transfer that stalls right after a burst is aborted up to about five
-        /// seconds later than this value. Time spent paused because
-        /// the reader has not drained <see cref="ResponseBodyBufferSize"/> is not counted. An expired limit fails the
-        /// request, or the pending body read, with the timeout exception described on
-        /// <see cref="SendAsync(HttpRequestMessage, CancellationToken)"/>.
+        /// <para>
+        /// libcurl measures this in whole seconds, so the value is rounded up to whole seconds. The check starts with the
+        /// transfer, not with the first body byte, and libcurl averages the speed over up to the last five seconds,
+        /// refreshed about once a second. This has two consequences:
+        /// </para>
+        /// <list type="bullet">
+        /// <item><description>
+        /// The wait for the response counts. Seconds without a byte stay in the average after the body starts, so a
+        /// server that answers late can make a body that arrives faster than <see cref="LowSpeedLimit"/> fail. For
+        /// example, with 4 seconds and 32 KiB/s, a 48 KiB/s body that starts 2.3 seconds in is aborted 4 seconds after
+        /// the transfer started. Choose a value well above the expected time to the first byte.
+        /// </description></item>
+        /// <item><description>
+        /// A transfer that stalls right after a burst is aborted up to about five seconds later than this value.
+        /// </description></item>
+        /// </list>
+        /// <para>
+        /// The check is skipped while the transfer is paused because the reader has not drained
+        /// <see cref="ResponseBodyBufferSize"/>. An expired limit fails the request, or the pending body read, with the
+        /// timeout exception described on <see cref="SendAsync(HttpRequestMessage, CancellationToken)"/>.
+        /// </para>
         /// </remarks>
         /// <exception cref="ArgumentOutOfRangeException">
         /// The value is neither positive nor <see cref="System.Threading.Timeout.InfiniteTimeSpan"/>.

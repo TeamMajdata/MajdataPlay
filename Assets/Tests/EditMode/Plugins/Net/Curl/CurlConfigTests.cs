@@ -249,6 +249,19 @@ namespace MajdataPlay.Tests.Plugins.Net.Curl
             Assert.That(thrown.ErrorCode, Is.EqualTo(CurlCode.UrlMalformed));
         }
 
+        /// <summary>Checks that libcurl's error-buffer detail replaces the generic description, which stays the fallback.</summary>
+        [Test]
+        public void GetEasyException_PrefersErrorBufferDetail()
+        {
+            var detailed = CurlUtility.GetEasyException(IntPtr.Zero, CurlCode.OperationTimedOut, "Operation too slow.")!;
+            var empty = CurlUtility.GetEasyException(IntPtr.Zero, CurlCode.OperationTimedOut, string.Empty)!;
+            var generic = CurlUtility.GetEasyException(IntPtr.Zero, CurlCode.OperationTimedOut)!;
+
+            Assert.That(detailed.Message, Is.EqualTo("Curl Error 28 (OperationTimedOut): Operation too slow."));
+            Assert.That(empty.Message, Is.EqualTo(generic.Message));
+            Assert.That(generic.Message, Does.Not.Contain("Operation too slow"));
+        }
+
         /// <summary>Checks that an easy handle without an OS error adds no OS details.</summary>
         [Test]
         public void GetEasyException_ReadsOsErrorFromHandle()
