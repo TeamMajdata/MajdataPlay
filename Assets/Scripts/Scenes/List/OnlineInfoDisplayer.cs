@@ -51,6 +51,10 @@ namespace MajdataPlay.Scenes.List
         Color _thumbUpNormalColor;
 
 
+        /// <summary>Shows the online counts and comments of a song, or hides the displayer for a local song.</summary>
+        /// <param name="songDetail">The selected song.</param>
+        /// <param name="loadDelayMS">The delay before the requests, so quickly skipped songs send none.</param>
+        /// <param name="token">The token canceling the requests and the comment rotation, for example when another song is selected.</param>
         public void SetSongDetail(ISongDetail songDetail, int loadDelayMS = 0, CancellationToken token = default)
         {
             if (!songDetail.IsOnline)
@@ -62,61 +66,84 @@ namespace MajdataPlay.Scenes.List
             _likeCountDisplayer.text = "--";
             _playCountDisplayer.text = "--";
             _commentCountDisplayer.text = "--";
+            _commentBox.SetActive(false);
             _ = RefreshContentAsync((OnlineSongDetail)songDetail, loadDelayMS, token);
         }
+        /// <summary>
+        /// Shows the score, plays and comment count of a song, then rotates its live top-level comments in the
+        /// <see cref="CommentSort.Best"/> order, five seconds each.
+        /// </summary>
+        /// <param name="detail">The online song.</param>
+        /// <param name="loadDelayMS">The delay before the requests.</param>
+        /// <param name="token">The token canceling the requests and the rotation.</param>
+        /// <returns>A task that completes when every comment was shown or a request failed.</returns>
+        /// <exception cref="OperationCanceledException"><paramref name="token"/> was canceled.</exception>
         async ValueTask RefreshContentAsync(OnlineSongDetail detail, int loadDelayMS, CancellationToken token = default)
         {
             await UniTask.SwitchToThreadPool();
             await Task.Delay(loadDelayMS, token);
-            var (isSuccessfully1, interact) = await GetOnlineInteractionAsync(detail, token);
+            var summary = await RequestAsync(() => Online.MaiChart.GetInteractSummaryAsync(detail, token), token);
 
             await UniTask.SwitchToMainThread(token);
-            if (isSuccessfully1)
+            if (summary is not MajNetChartInteractSummary counts)
             {
-                var totalLikes = interact.Likes.Length - interact.DisLikeCount;
-                _likeCountDisplayer.text = totalLikes.ToString();
-                _playCountDisplayer.text = interact.Plays.ToString();
-                _commentCountDisplayer.text = interact.Comments.Length.ToString();
-
-                if (interact.IsLiked)
-                {
-                    _thumbUpImage.color = _thumbUpGreenColor;
-                }
-                else if (totalLikes > 5)
-                {
-                    _thumbUpImage.color = _thumbUpGoldColor;
-                }
-                else
-                {
-                    _thumbUpImage.color = _thumbUpNormalColor;
-                }
-
-                _commentBox.SetActive(true);
-                foreach (var comment in interact.Comments)
-                {
-                    var text = comment.Sender + $"{"MAJTEXT_SAY".i18n()}\n" + comment.Content + "\n";
-                    _commentTextDisplayer.text = text;
-                    await UniTask.Delay(5000, cancellationToken: token);
-                    token.ThrowIfCancellationRequested();
-                }
-                _commentBox.SetActive(false);
+                return;
             }
+            _likeCountDisplayer.text = counts.Score.ToString();
+            _playCountDisplayer.text = counts.Plays.ToString();
+            _commentCountDisplayer.text = counts.Comments.ToString();
+
+            if (counts.MyVote > 0)
+            {
+                _thumbUpImage.color = _thumbUpGreenColor;
+            }
+            else if (counts.Score > 5)
+            {
+                _thumbUpImage.color = _thumbUpGoldColor;
+            }
+            else
+            {
+                _thumbUpImage.color = _thumbUpNormalColor;
+            }
+
+            if (counts.Comments == 0)
+            {
+                return;
+            }
+            var page = await RequestAsync(() => Online.MaiChart.GetCommentsAsync(detail, CommentSort.Best, 1, token), token);
+            await UniTask.SwitchToMainThread(token);
+            if (page is not MajNetCommentPage comments)
+            {
+                return;
+            }
+            _commentBox.SetActive(true);
+            foreach (var comment in comments.Items)
+            {
+                // A deleted comment with replies stays in the thread as a placeholder without author or text.
+                if (comment.IsPlaceholder)
+                {
+                    continue;
+                }
+                var text = comment.Author + $"{"MAJTEXT_SAY".i18n()}\n" + comment.Body + "\n";
+                _commentTextDisplayer.text = text;
+                await UniTask.Delay(5000, cancellationToken: token);
+                token.ThrowIfCancellationRequested();
+            }
+            _commentBox.SetActive(false);
         }
-
-
-        async ValueTask<(bool IsSuccessfully, MajNetSongInteract Interact)> GetOnlineInteractionAsync(OnlineSongDetail song, CancellationToken token = default)
+        /// <summary>Runs an online request on the thread pool and logs its failures other than cancellation.</summary>
+        /// <typeparam name="T">The type of the response.</typeparam>
+        /// <param name="request">The request.</param>
+        /// <param name="token">The token canceling the request.</param>
+        /// <returns>The response, or null when the request failed or was canceled.</returns>
+        async ValueTask<T?> RequestAsync<T>(Func<ValueTask<T?>> request, CancellationToken token) where T : struct
         {
             try
             {
                 await UniTask.SwitchToThreadPool();
-                var interact = await Online.MaiChart.GetInteractAsync(song, token);
+                var response = await request();
                 token.ThrowIfCancellationRequested();
-                if (interact is null)
-                {
-                    return (false, default);
-                }
-
-                return (true, (MajNetSongInteract)interact);
+                return response;
             }
             catch (Exception ex)
             {
@@ -132,7 +159,7 @@ namespace MajdataPlay.Scenes.List
                     MajDebug.LogException(ex);
                 }
             }
-            return (false, default);
+            return null;
         }
     }
 }

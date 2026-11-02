@@ -8,6 +8,7 @@ using Newtonsoft.Json;
 using Newtonsoft.Json.Serialization;
 using Nito.AsyncEx;
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
 using System.Net;
@@ -456,10 +457,12 @@ namespace MajdataPlay.Net
         /// <summary>The responses cached for an online chart.</summary>
         private class CachedApiEndpointResponse
         {
-            /// <summary>Gets the cached response of <c>GET maichart/{chartId}/interact</c>.</summary>
-            public CachedResponse<MajNetSongInteract> Interact { get; } = new();
+            /// <summary>Gets the cached response of <c>GET maichart/{chartId}/interactsum</c>.</summary>
+            public CachedResponse<MajNetChartInteractSummary> InteractSummary { get; } = new();
             /// <summary>Gets the cached response of <c>GET maichart/{chartId}/score</c>.</summary>
             public CachedResponse<MajNetSongScoreInfo> ScoreInfo { get; } = new();
+            /// <summary>Gets the cached pages of <c>GET maichart/{chartId}/comments</c>, by order and page number.</summary>
+            public ConcurrentDictionary<(CommentSort Sort, int Page), CachedResponse<MajNetCommentPage>> Comments { get; } = new();
         }
         /// <summary>A cached response, alive for <see cref="MajEnv.ONLINE_RESPONSE_CACHE_TTL_SEC"/> after it was fetched.</summary>
         /// <typeparam name="T">The type of the response body.</typeparam>

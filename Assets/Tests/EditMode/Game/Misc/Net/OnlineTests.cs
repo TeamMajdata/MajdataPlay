@@ -613,109 +613,180 @@ namespace MajdataPlay.Tests.Game.Misc.Net
             });
         }
 
-        /// <summary>Checks that chart interactions are cached until a like invalidates them.</summary>
+        /// <summary>Checks that the chart counts are cached until a vote invalidates them, and that the vote is sent as JSON.</summary>
         /// <returns>The test coroutine.</returns>
         [UnityTest]
-        public IEnumerator ChartInteract_IsCachedUntilLiked()
+        public IEnumerator InteractSummary_IsCachedUntilVoted()
         {
             return UniTask.ToCoroutine(async () =>
             {
                 using var song = CreateSong();
-                _http.RespondWith(HttpStatusCode.OK, "{\"isLiked\":false,\"plays\":3,\"likes\":[],\"comments\":[]}");
+                _http.Responder = request => request.Method == HttpMethod.Put
+                    ? StubHttpScope.Respond(HttpStatusCode.OK, "{\"score\":4,\"upvotes\":5,\"downvotes\":1,\"myVote\":1}")
+                    : StubHttpScope.Respond(HttpStatusCode.OK, "{\"chartId\":\"" + song.Id + "\",\"plays\":3,\"score\":3,\"upvotes\":4,\"downvotes\":1,\"comments\":2,\"myVote\":0}");
 
-                var first = await Online.MaiChart.GetInteractAsync(song);
-                var cached = await Online.MaiChart.GetInteractAsync(song);
-                Assert.That(first!.Value.Plays, Is.EqualTo(3));
-                Assert.That(cached!.Value.Plays, Is.EqualTo(3));
+                var first = await Online.MaiChart.GetInteractSummaryAsync(song);
+                var cached = await Online.MaiChart.GetInteractSummaryAsync(song);
+                Assert.That(first!.Value.ChartId, Is.EqualTo(song.Id));
+                Assert.That(first.Value.Plays, Is.EqualTo(3));
+                Assert.That(first.Value.Comments, Is.EqualTo(2));
+                Assert.That(cached!.Value.Score, Is.EqualTo(3));
                 Assert.That(_http.Requests.Length, Is.EqualTo(1));
-                Assert.That(_http.Requests[0].Uri.AbsolutePath, Is.EqualTo($"/api/maichart/{song.Id}/interact"));
+                Assert.That(_http.Requests[0].Uri.AbsolutePath, Is.EqualTo($"/api/maichart/{song.Id}/interactsum"));
 
-                var like = await Online.MaiChart.PostLikeAsync(song);
-                Assert.That(like.IsSuccessfully, Is.True);
-                Assert.That(_http.Requests[1].Body, Does.Contain("like"));
-                await Online.MaiChart.GetInteractAsync(song);
-                Assert.That(_http.Requests.Length, Is.EqualTo(3));
+                var vote = await Online.MaiChart.VoteAsync(song, 1);
+                Assert.That(vote.IsSuccessfully, Is.True);
+                Assert.That(vote.Deserialize().MyVote, Is.EqualTo(1));
+                Assert.That(vote.Deserialize().Upvotes, Is.EqualTo(5));
+                var request = _http.Requests[1];
+                Assert.That(request.Method, Is.EqualTo(HttpMethod.Put));
+                Assert.That(request.Uri.AbsolutePath, Is.EqualTo($"/api/maichart/{song.Id}/vote"));
+                Assert.That(JObject.Parse(request.Body)["value"]!.Value<int>(), Is.EqualTo(1));
+                await Online.MaiChart.GetInteractSummaryAsync(song);
+                Assert.That(_http.Requests.Length, Is.EqualTo(3), "A stored vote refreshes the counts.");
 
                 Online.ClearResponseCache();
-                await Online.MaiChart.GetInteractAsync(song);
+                await Online.MaiChart.GetInteractSummaryAsync(song);
                 Assert.That(_http.Requests.Length, Is.EqualTo(4));
             });
         }
 
-        /// <summary>Checks feedback methods, multipart fields and cache invalidation after each successful interaction.</summary>
+        /// <summary>
+        /// Checks that a withdrawn vote is sent as 0 in a JSON body, that an invalid vote is rejected without a request, and
+        /// that a refused vote keeps the cached counts.
+        /// </summary>
         /// <returns>The test coroutine.</returns>
         [UnityTest]
-        public IEnumerator ChartInteract_FeedbackRequestsInvalidateCache()
+        public IEnumerator VoteAsync_SendsWantedVote()
         {
             return UniTask.ToCoroutine(async () =>
             {
                 using var song = CreateSong();
-                var getCount = 0;
-                var fields = Array.Empty<(string Name, string Content)>();
                 var mediaType = string.Empty;
                 _http.Responder = request =>
                 {
                     if (request.Method == HttpMethod.Get)
                     {
-                        getCount++;
-                        return StubHttpScope.Respond(HttpStatusCode.OK, $"{{\"plays\":{getCount},\"likes\":[],\"comments\":[]}}");
+                        return StubHttpScope.Respond(HttpStatusCode.OK, "{\"plays\":1}");
                     }
                     mediaType = request.Content?.Headers.ContentType?.MediaType ?? string.Empty;
-                    fields = request.Content is MultipartFormDataContent form
-                        ? form.Select(part => (part.Headers.ContentDisposition?.Name?.Trim('"') ?? string.Empty,
-                            part.ReadAsStringAsync().GetAwaiter().GetResult())).ToArray()
-                        : Array.Empty<(string, string)>();
-                    return StubHttpScope.Respond(HttpStatusCode.OK, "{}");
+                    return StubHttpScope.Respond(HttpStatusCode.OK, "{\"score\":0,\"upvotes\":0,\"downvotes\":0,\"myVote\":0}");
                 };
-                await Online.MaiChart.GetInteractAsync(song);
-                var cases = new (Func<ValueTask<EndpointResponse>> Send, HttpMethod Method, string Type, string Content)[]
-                {
-                    (() => Online.MaiChart.PostDislikeAsync(song), HttpMethod.Post, "dislike", "dislike"),
-                    (() => Online.MaiChart.PostCommentAsync(song, "Helpful comment"), HttpMethod.Post, "comment", "Helpful comment"),
-                    (() => Online.MaiChart.DeleteLikeAsync(song), HttpMethod.Delete, "like", string.Empty),
-                    (() => Online.MaiChart.DeleteDislikeAsync(song), HttpMethod.Delete, "dislike", string.Empty),
-                };
-                foreach (var item in cases)
-                {
-                    var before = _http.Requests.Length;
-                    var expectedGetCount = getCount + 1;
-                    var response = await item.Send();
 
-                    Assert.That(response.IsSuccessfully, Is.True);
-                    var request = _http.Requests.Last();
-                    Assert.That(request.Method, Is.EqualTo(item.Method));
-                    Assert.That(request.Uri.AbsoluteUri, Is.EqualTo($"https://api.invalid/api/maichart/{song.Id}/interact"));
-                    Assert.That(mediaType, Is.EqualTo("multipart/form-data"));
-                    Assert.That(fields, Is.EquivalentTo(new[] { ("type", item.Type), ("content", item.Content) }));
+                var withdrawn = await Online.MaiChart.VoteAsync(song, 0);
+                Assert.That(withdrawn.IsSuccessfully, Is.True);
+                Assert.That(JObject.Parse(_http.Requests[0].Body)["value"]!.Value<int>(), Is.EqualTo(0));
+                Assert.That(mediaType, Is.EqualTo("application/json"));
 
-                    var refreshed = await Online.MaiChart.GetInteractAsync(song);
-                    Assert.That(refreshed!.Value.Plays, Is.EqualTo(expectedGetCount));
-                    await Online.MaiChart.GetInteractAsync(song);
-                    Assert.That(_http.Requests.Length, Is.EqualTo(before + 2), "A successful interaction refreshes the cache once.");
+                var failure = default(Exception);
+                try
+                {
+                    await Online.MaiChart.VoteAsync(song, 2);
                 }
-                Assert.That(getCount, Is.EqualTo(cases.Length + 1));
+                catch (ArgumentOutOfRangeException exception)
+                {
+                    failure = exception;
+                }
+                Assert.That(failure, Is.Not.Null);
+                Assert.That(_http.Requests.Length, Is.EqualTo(1));
+
+                await Online.MaiChart.GetInteractSummaryAsync(song);
+                _http.RespondWith(HttpStatusCode.Forbidden, "{\"code\":-127,\"message\":\"The uploader disabled interactions on their charts\"}");
+                var refused = await Online.MaiChart.VoteAsync(song, 1);
+                Assert.That(refused.IsSuccessfully, Is.False);
+                Assert.That(refused.StatusCode, Is.EqualTo(HttpStatusCode.Forbidden));
+                Assert.That((await Online.MaiChart.GetInteractSummaryAsync(song))!.Value.Plays, Is.EqualTo(1));
+                Assert.That(_http.Requests.Length, Is.EqualTo(3), "A refused vote keeps the cached counts.");
             });
         }
 
-        /// <summary>Checks that an explicit refresh bypasses a live interaction cache and replaces its response.</summary>
+        /// <summary>
+        /// Checks that comment pages are read per order and page, keep placeholders and replies, and are cached until a
+        /// comment is posted as JSON.
+        /// </summary>
         /// <returns>The test coroutine.</returns>
         [UnityTest]
-        public IEnumerator ChartInteract_ForceRefreshReplacesCachedResponse()
+        public IEnumerator Comments_AreCachedPerPageUntilCommentPosted()
         {
             return UniTask.ToCoroutine(async () =>
             {
                 using var song = CreateSong();
-                _http.RespondWith(HttpStatusCode.OK, "{\"plays\":1,\"likes\":[],\"comments\":[]}");
-                await Online.MaiChart.GetInteractAsync(song);
-                _http.RespondWith(HttpStatusCode.OK, "{\"plays\":2,\"likes\":[],\"comments\":[]}");
+                const string page = "{\"items\":[{\"id\":\"65f0c0ffee0000000000000a\",\"chartId\":null,\"chartHash\":\"h\",\"parentId\":null,"
+                    + "\"depth\":0,\"authorId\":null,\"author\":\"\",\"body\":\"\",\"createdAt\":\"2026-01-02T03:04:05Z\",\"editedAt\":null,"
+                    + "\"deleted\":true,\"removed\":false,\"score\":0,\"myVote\":0,\"replyCount\":1,\"replies\":["
+                    + "{\"id\":\"65f0c0ffee0000000000000b\",\"parentId\":\"65f0c0ffee0000000000000a\",\"depth\":1,\"author\":\"bob\","
+                    + "\"body\":\"reply\",\"deleted\":false,\"removed\":false,\"score\":2,\"myVote\":1,\"replyCount\":0,\"replies\":[]}]}],"
+                    + "\"total\":1,\"commentCount\":1,\"page\":1,\"pageSize\":20,\"sort\":\"best\"}";
+                const string created = "{\"id\":\"65f0c0ffee0000000000000c\",\"author\":\"me\",\"body\":\"Nice chart\",\"score\":1,\"myVote\":1,\"replies\":[]}";
+                _http.Responder = request =>
+                {
+                    if (request.Method == HttpMethod.Post)
+                    {
+                        return StubHttpScope.Respond(HttpStatusCode.Created, created);
+                    }
+                    return request.RequestUri!.AbsolutePath.EndsWith("interactsum")
+                        ? StubHttpScope.Respond(HttpStatusCode.OK, "{\"comments\":1}")
+                        : StubHttpScope.Respond(HttpStatusCode.OK, page);
+                };
 
-                var cached = await Online.MaiChart.GetInteractAsync(song);
+                var first = await Online.MaiChart.GetCommentsAsync(song);
+                await Online.MaiChart.GetCommentsAsync(song);
+                Assert.That(_http.Requests.Length, Is.EqualTo(1));
+                Assert.That(_http.Requests[0].Uri.AbsolutePath, Is.EqualTo($"/api/maichart/{song.Id}/comments"));
+                Assert.That(_http.Requests[0].Uri.Query, Is.EqualTo("?sort=best&page=1"));
+                var placeholder = first!.Value.Items.Single();
+                Assert.That(placeholder.IsPlaceholder, Is.True);
+                Assert.That(placeholder.Replies.Single().Author, Is.EqualTo("bob"));
+                Assert.That(placeholder.Replies.Single().ParentId, Is.EqualTo(placeholder.Id));
+                Assert.That(first.Value.Sort, Is.EqualTo(CommentSort.Best));
+
+                await Online.MaiChart.GetCommentsAsync(song, CommentSort.Controversial, 2);
+                Assert.That(_http.Requests[1].Uri.Query, Is.EqualTo("?sort=controversial&page=2"));
+                var failure = default(Exception);
+                try
+                {
+                    await Online.MaiChart.GetCommentsAsync(song, CommentSort.Best, 0);
+                }
+                catch (ArgumentOutOfRangeException exception)
+                {
+                    failure = exception;
+                }
+                Assert.That(failure, Is.Not.Null);
+
+                await Online.MaiChart.GetInteractSummaryAsync(song);
+                var posted = await Online.MaiChart.PostCommentAsync(song, "Nice chart");
+                Assert.That(posted.StatusCode, Is.EqualTo(HttpStatusCode.Created));
+                Assert.That(posted.Deserialize().Body, Is.EqualTo("Nice chart"));
+                var post = _http.Requests[3];
+                Assert.That(post.Method, Is.EqualTo(HttpMethod.Post));
+                Assert.That(post.Uri.AbsolutePath, Is.EqualTo($"/api/maichart/{song.Id}/comments"));
+                Assert.That(JObject.Parse(post.Body)["body"]!.Value<string>(), Is.EqualTo("Nice chart"));
+
+                await Online.MaiChart.GetCommentsAsync(song);
+                await Online.MaiChart.GetInteractSummaryAsync(song);
+                Assert.That(_http.Requests.Length, Is.EqualTo(6), "A posted comment refreshes the comments and the counts.");
+            });
+        }
+
+        /// <summary>Checks that an explicit refresh bypasses live cached counts and replaces them.</summary>
+        /// <returns>The test coroutine.</returns>
+        [UnityTest]
+        public IEnumerator InteractSummary_ForceRefreshReplacesCachedResponse()
+        {
+            return UniTask.ToCoroutine(async () =>
+            {
+                using var song = CreateSong();
+                _http.RespondWith(HttpStatusCode.OK, "{\"plays\":1}");
+                await Online.MaiChart.GetInteractSummaryAsync(song);
+                _http.RespondWith(HttpStatusCode.OK, "{\"plays\":2}");
+
+                var cached = await Online.MaiChart.GetInteractSummaryAsync(song);
                 Assert.That(cached!.Value.Plays, Is.EqualTo(1));
                 Assert.That(_http.Requests.Length, Is.EqualTo(1));
 
-                var refreshed = await Online.MaiChart.GetInteractAsync(song, forceRefresh: true);
+                var refreshed = await Online.MaiChart.GetInteractSummaryAsync(song, forceRefresh: true);
                 Assert.That(refreshed!.Value.Plays, Is.EqualTo(2));
-                var next = await Online.MaiChart.GetInteractAsync(song);
+                var next = await Online.MaiChart.GetInteractSummaryAsync(song);
                 Assert.That(next!.Value.Plays, Is.EqualTo(2));
                 Assert.That(_http.Requests.Length, Is.EqualTo(2));
             });
@@ -735,12 +806,12 @@ namespace MajdataPlay.Tests.Game.Misc.Net
 
                 Assert.That(lost.ErrorCode, Is.EqualTo(HttpErrorCode.Unreachable));
                 Assert.That(_http.Requests.Length, Is.EqualTo(1));
-                _http.RespondWith(HttpStatusCode.ServiceUnavailable, "{}");
+                _http.RespondWith(HttpStatusCode.TooManyRequests, "{}");
 
                 var failed = await Online.MaiChart.PostCommentAsync(song, "Second comment");
 
                 Assert.That(failed.IsSuccessfully, Is.False);
-                Assert.That(failed.StatusCode, Is.EqualTo(HttpStatusCode.ServiceUnavailable));
+                Assert.That(failed.StatusCode, Is.EqualTo(HttpStatusCode.TooManyRequests));
                 Assert.That(_http.Requests.Length, Is.EqualTo(2));
             });
         }
@@ -754,17 +825,18 @@ namespace MajdataPlay.Tests.Game.Misc.Net
             {
                 using var song = CreateSong();
                 _http.RespondWith(HttpStatusCode.NotFound);
-                Assert.That(await Online.MaiChart.GetInteractAsync(song), Is.Null);
-                Assert.That((await Online.MaiChart.PostLikeAsync(song)).IsSuccessfully, Is.False);
+                Assert.That(await Online.MaiChart.GetInteractSummaryAsync(song), Is.Null);
+                Assert.That(await Online.MaiChart.GetCommentsAsync(song), Is.Null);
+                Assert.That((await Online.MaiChart.VoteAsync(song, 1)).IsSuccessfully, Is.False);
 
                 _http.RespondWith(HttpStatusCode.InternalServerError);
-                Assert.That(await Online.MaiChart.GetInteractAsync(song), Is.Null);
-                Assert.That((await Online.MaiChart.PostLikeAsync(song)).IsSuccessfully, Is.False);
+                Assert.That(await Online.MaiChart.GetInteractSummaryAsync(song), Is.Null);
+                Assert.That((await Online.MaiChart.VoteAsync(song, 1)).IsSuccessfully, Is.False);
 
                 using var canceled = new CancellationTokenSource();
                 canceled.Cancel();
                 _http.RespondWith(HttpStatusCode.OK, "{}");
-                Assert.That((await Online.MaiChart.PostLikeAsync(song, canceled.Token)).ErrorCode, Is.EqualTo(HttpErrorCode.Canceled));
+                Assert.That((await Online.MaiChart.VoteAsync(song, 1, canceled.Token)).ErrorCode, Is.EqualTo(HttpErrorCode.Canceled));
             });
         }
 
@@ -780,7 +852,7 @@ namespace MajdataPlay.Tests.Game.Misc.Net
             {
                 using var song = CreateSong();
                 _http.RespondWith(HttpStatusCode.OK, "{ broken");
-                Assert.That(await Online.MaiChart.GetInteractAsync(song), Is.Null);
+                Assert.That(await Online.MaiChart.GetInteractSummaryAsync(song), Is.Null);
                 Assert.That(_http.Requests.Length, Is.EqualTo(MajEnv.HTTP_REQUEST_MAX_RETRY + 1));
 
                 _http.Responder = _ => throw new HttpRequestException("offline");
@@ -790,7 +862,7 @@ namespace MajdataPlay.Tests.Game.Misc.Net
 
                 _http.RespondWith(HttpStatusCode.ServiceUnavailable, "{}");
                 before = _http.Requests.Length;
-                Assert.That(await Online.MaiChart.GetInteractAsync(song), Is.Null);
+                Assert.That(await Online.MaiChart.GetCommentsAsync(song), Is.Null);
                 Assert.That(_http.Requests.Length - before, Is.EqualTo(1));
             });
         }

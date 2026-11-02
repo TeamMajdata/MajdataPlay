@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 using MajdataPlay.Net.Models;
 using MajdataPlay.Scenes.Game;
 using MajdataPlay.Utils;
@@ -106,60 +107,70 @@ namespace MajdataPlay.Tests.Game.Misc.Net.Models
             Assert.That(info.IsForceGameover, Is.False);
         }
 
-        /// <summary>Checks that a song interaction summary reads its like list and nested comment threads.</summary>
+        /// <summary>Checks that the chart counts read the camel case JSON of <c>GET maichart/{chartId}/interactsum</c>.</summary>
         [Test]
-        public void SongInteract_DeserializesNestedComments()
+        public void ChartInteractSummary_DeserializesCamelCaseJson()
         {
-            const string json = "{\"isLiked\":true,\"plays\":12,\"likes\":[\"u1\",\"u2\"],\"disLikeCount\":1,\"comments\":["
-                + "{\"sender\":\"alice\",\"content\":\"nice\",\"timestamp\":\"2024-01-02T03:04:05Z\",\"replies\":["
-                + "{\"sender\":\"bob\",\"content\":\"agreed\",\"timestamp\":\"2024-01-02T03:05:00Z\",\"replies\":[]}]}]}";
+            const string json = "{\"chartId\":\"6f9619ff-8b86-d011-b42d-00c04fc964ff\",\"plays\":12,\"score\":3,\"upvotes\":5,"
+                + "\"downvotes\":2,\"comments\":4,\"myVote\":-1}";
 
-            var interact = Serializer.Json.Deserialize<MajNetSongInteract>(json);
+            var summary = Serializer.Json.Deserialize<MajNetChartInteractSummary>(json);
 
-            Assert.That(interact.IsLiked, Is.True);
-            Assert.That(interact.Plays, Is.EqualTo(12));
-            Assert.That(interact.Likes, Is.EqualTo(new[] { "u1", "u2" }));
-            Assert.That(interact.DisLikeCount, Is.EqualTo(1));
-            Assert.That(interact.Comments, Has.Length.EqualTo(1));
-            var comment = interact.Comments[0];
-            Assert.That(comment.Sender, Is.EqualTo("alice"));
-            Assert.That(comment.Content, Is.EqualTo("nice"));
-            Assert.That(comment.Timestamp.ToUniversalTime(), Is.EqualTo(new DateTime(2024, 1, 2, 3, 4, 5, DateTimeKind.Utc)));
-            Assert.That(comment.Replies, Has.Length.EqualTo(1));
-            Assert.That(comment.Replies[0].Sender, Is.EqualTo("bob"));
-            Assert.That(comment.Replies[0].Content, Is.EqualTo("agreed"));
-            Assert.That(comment.Replies[0].Replies, Is.Empty);
+            Assert.That(summary.ChartId, Is.EqualTo("6f9619ff-8b86-d011-b42d-00c04fc964ff"));
+            Assert.That(summary.Plays, Is.EqualTo(12));
+            Assert.That(summary.Score, Is.EqualTo(3));
+            Assert.That(summary.Upvotes, Is.EqualTo(5));
+            Assert.That(summary.Downvotes, Is.EqualTo(2));
+            Assert.That(summary.Comments, Is.EqualTo(4));
+            Assert.That(summary.MyVote, Is.EqualTo(-1));
         }
 
-        /// <summary>Checks that a song interaction summary serializes with camel case names and reads back unchanged.</summary>
+        /// <summary>Checks that a comment vote result, which carries the score alone, leaves the vote counts null.</summary>
         [Test]
-        public void SongInteract_RoundTripsThroughJson()
+        public void VoteResult_CommentVote_HasNoCounts()
         {
-            var timestamp = new DateTime(2024, 5, 6, 7, 8, 9, DateTimeKind.Utc);
-            var original = new MajNetSongInteract
-            {
-                IsLiked = false,
-                Plays = 3,
-                Likes = new[] { "x" },
-                DisLikeCount = 2,
-                Comments = new[]
-                {
-                    new ChartCommentSummary { Sender = "s", Content = "c", Timestamp = timestamp, Replies = Array.Empty<ChartCommentSummary>() },
-                },
-            };
+            var chart = Serializer.Json.Deserialize<MajNetVoteResult>("{\"score\":1,\"upvotes\":2,\"downvotes\":1,\"myVote\":1}");
+            var comment = Serializer.Json.Deserialize<MajNetVoteResult>("{\"score\":-2,\"myVote\":0}");
 
-            var json = Serializer.Json.Serialize(original);
-            var copy = Serializer.Json.Deserialize<MajNetSongInteract>(json);
+            Assert.That(chart.Upvotes, Is.EqualTo(2));
+            Assert.That(chart.Downvotes, Is.EqualTo(1));
+            Assert.That(comment.Score, Is.EqualTo(-2));
+            Assert.That(comment.Upvotes, Is.Null);
+            Assert.That(comment.Downvotes, Is.Null);
+        }
 
-            Assert.That(json, Does.Contain("\"isLiked\":false"));
-            Assert.That(json, Does.Contain("\"disLikeCount\":2"));
-            Assert.That(json, Does.Not.Contain("\"IsLiked\""));
-            Assert.That(copy.Plays, Is.EqualTo(3));
-            Assert.That(copy.Likes, Is.EqualTo(new[] { "x" }));
-            Assert.That(copy.DisLikeCount, Is.EqualTo(2));
-            Assert.That(copy.Comments[0].Sender, Is.EqualTo("s"));
-            Assert.That(copy.Comments[0].Timestamp.ToUniversalTime(), Is.EqualTo(timestamp));
-            Assert.That(copy.Comments[0].Replies, Is.Empty);
+        /// <summary>
+        /// Checks that a comment page reads its order by camel case name, nested replies, placeholders and the optional
+        /// identifiers and edit moment.
+        /// </summary>
+        [Test]
+        public void CommentPage_DeserializesThreads()
+        {
+            const string json = "{\"items\":[{\"id\":\"a\",\"chartId\":\"c\",\"chartHash\":\"h\",\"parentId\":null,\"depth\":0,"
+                + "\"authorId\":\"u\",\"author\":\"alice\",\"body\":\"nice\",\"createdAt\":\"2024-01-02T03:04:05Z\","
+                + "\"editedAt\":\"2024-01-02T04:00:00Z\",\"deleted\":false,\"removed\":false,\"score\":3,\"myVote\":1,\"replyCount\":2,"
+                + "\"replies\":[{\"id\":\"b\",\"parentId\":\"a\",\"depth\":1,\"authorId\":null,\"author\":\"\",\"body\":\"\","
+                + "\"createdAt\":\"2024-01-02T03:05:00Z\",\"editedAt\":null,\"deleted\":false,\"removed\":true,\"replies\":[]}]}],"
+                + "\"total\":1,\"commentCount\":2,\"page\":1,\"pageSize\":20,\"sort\":\"controversial\"}";
+
+            var page = Serializer.Json.Deserialize<MajNetCommentPage>(json);
+
+            Assert.That(page.Sort, Is.EqualTo(CommentSort.Controversial));
+            Assert.That(page.CommentCount, Is.EqualTo(2));
+            Assert.That(page.PageSize, Is.EqualTo(20));
+            var comment = page.Items.Single();
+            Assert.That(comment.Author, Is.EqualTo("alice"));
+            Assert.That(comment.Body, Is.EqualTo("nice"));
+            Assert.That(comment.ParentId, Is.Null);
+            Assert.That(comment.CreatedAt.ToUniversalTime(), Is.EqualTo(new DateTime(2024, 1, 2, 3, 4, 5, DateTimeKind.Utc)));
+            Assert.That(comment.EditedAt, Is.Not.Null);
+            Assert.That(comment.IsPlaceholder, Is.False);
+            Assert.That(comment.MyVote, Is.EqualTo(1));
+            var removed = comment.Replies.Single();
+            Assert.That(removed.ParentId, Is.EqualTo("a"));
+            Assert.That(removed.AuthorId, Is.Null);
+            Assert.That(removed.EditedAt, Is.Null);
+            Assert.That(removed.IsPlaceholder, Is.True);
         }
 
         /// <summary>Checks that an online score sheet reads its per-difficulty score lists, player profiles and combo states.</summary>
