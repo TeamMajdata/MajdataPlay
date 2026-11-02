@@ -83,10 +83,12 @@ namespace MajdataPlay.Settings
         public bool VSync { get; set; } = SettingDefaults.Rendering.VSync;
 
         [HideInSettingUI]
+        [JsonIgnoreOnPlatform(SettingPlatform.Mobile)]
         public bool VulkanLowLatencyVSync { get; set; } = SettingDefaults.Rendering.VulkanLowLatencyVSync;
 
         [HideInSettingUI]
-        public LowLatencyVSyncBackendOption VulkanLowLatencyVSyncBackend { get; set; } = SettingDefaults.Rendering.VulkanLowLatencyVSyncBackend;
+        [JsonIgnoreOnPlatform(SettingPlatform.Mobile)]
+        public VulkanLowLatencyVSyncBackendOption VulkanLowLatencyVSyncBackend { get; set; } = SettingDefaults.Rendering.VulkanLowLatencyVSyncBackend;
 
         [ShowInSettingUIWhen(nameof(CompatibilityMode), false)]
         [ShowInSettingUIWhen(nameof(RenderQuality), RenderingQualityOption.Custom)]

@@ -13,7 +13,7 @@ namespace MajdataPlay.Settings
 
             public const bool VulkanLowLatencyVSync = true;
 
-            public const LowLatencyVSyncBackendOption VulkanLowLatencyVSyncBackend = LowLatencyVSyncBackendOption.Auto;
+            public const VulkanLowLatencyVSyncBackendOption VulkanLowLatencyVSyncBackend = VulkanLowLatencyVSyncBackendOption.Auto;
 
             public const RenderingAntialiasingOption AntiAliasing = RenderingAntialiasingOption.Disabled;
 

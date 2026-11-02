@@ -245,7 +245,7 @@ namespace MajdataPlay.Tests.Game.Misc.Settings
             Assert.That(system.Common.HideCursorInGame, Is.False);
             Assert.That(system.Common.DJAutoPolicy, Is.EqualTo(DJAutoPolicyOption.Permissive));
             Assert.That(system.Rendering.VulkanLowLatencyVSync, Is.False);
-            Assert.That(system.Rendering.VulkanLowLatencyVSyncBackend, Is.EqualTo(LowLatencyVSyncBackendOption.Timer));
+            Assert.That(system.Rendering.VulkanLowLatencyVSyncBackend, Is.EqualTo(VulkanLowLatencyVSyncBackendOption.Timer));
 #if !UNITY_IOS
             Assert.That(system.Common.NoteFolding, Is.False);
 #endif
