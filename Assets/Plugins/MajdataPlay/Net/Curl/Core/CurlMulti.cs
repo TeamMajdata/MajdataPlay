@@ -435,7 +435,7 @@ namespace MajdataPlay.Net.Curl.Core
             TryDetach(curlTask);
             if (curlErr is not null)
             {
-                curlTask.TryFail(curlErr);
+                curlTask.TryFail(CurlUtility.GetTransferException(curlErr));
             }
             else
             {

@@ -104,6 +104,25 @@ namespace MajdataPlay.Net.Curl.Utils
 
             return new CurlException(code, exMsg);
         }
+        /// <summary>
+        /// Converts the error that ended a transfer into the exception reported to the caller, following the
+        /// <see cref="System.Net.Http.HttpClient"/> convention for timeouts.
+        /// </summary>
+        /// <param name="curlException">The error libcurl reported for the transfer.</param>
+        /// <returns>
+        /// For <see cref="CurlCode.OperationTimedOut"/>, a <see cref="TaskCanceledException"/> whose inner exception is a
+        /// <see cref="TimeoutException"/> wrapping <paramref name="curlException"/>; its token is not cancelled, so callers
+        /// can tell it from their own cancellation. Otherwise <paramref name="curlException"/> itself.
+        /// </returns>
+        public static Exception GetTransferException(CurlException curlException)
+        {
+            if (curlException.ErrorCode != CurlCode.OperationTimedOut)
+            {
+                return curlException;
+            }
+            var timeout = new TimeoutException(curlException.Message, curlException);
+            return new TaskCanceledException(curlException.Message, timeout);
+        }
 
         static string GetCurlErrorMessage(CurlCode code)
         {

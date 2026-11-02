@@ -39,6 +39,26 @@ namespace MajdataPlay.Net.Curl
         public bool AllowAutoRedirect { get; init; }
         public bool UseDefaultCredentials { get; init; }
         public bool UseProxy { get; init; }
+        /// <summary>
+        /// Gets the limit for the whole transfer, from name resolution to the last body byte. Zero or a negative value
+        /// means no limit.
+        /// </summary>
+        public TimeSpan Timeout { get; init; }
+        /// <summary>
+        /// Gets the limit for resolving the host and completing the connection and TLS handshakes. Zero or a negative
+        /// value uses libcurl's built-in 300-second limit.
+        /// </summary>
+        public TimeSpan ConnectTimeout { get; init; }
+        /// <summary>
+        /// Gets how long the transfer may stay below <see cref="LowSpeedLimit"/> before it is aborted. Zero or a
+        /// negative value disables the low-speed check.
+        /// </summary>
+        public TimeSpan LowSpeedTimeout { get; init; }
+        /// <summary>
+        /// Gets the average transfer speed, in bytes per second, below which <see cref="LowSpeedTimeout"/> starts
+        /// counting.
+        /// </summary>
+        public int LowSpeedLimit { get; init; }
 
         internal readonly void ApplyToMulti(CurlMulti multi)
         {
@@ -51,6 +71,16 @@ namespace MajdataPlay.Net.Curl
         {
             var easyHandle = curlEasy.Handle;
             var returnCode = default(CurlCode);
+
+            returnCode = LibCurl.Easy.SetOption(easyHandle, CurlOption.TimeoutMs, ToCurlMilliseconds(Timeout));
+            CurlUtility.EnsureSuccess(easyHandle, returnCode);
+            returnCode = LibCurl.Easy.SetOption(easyHandle, CurlOption.ConnectTimeoutMs, ToCurlMilliseconds(ConnectTimeout));
+            CurlUtility.EnsureSuccess(easyHandle, returnCode);
+            var lowSpeedTime = ToCurlSeconds(LowSpeedTimeout);
+            returnCode = LibCurl.Easy.SetOption(easyHandle, CurlOption.LowSpeedTime, lowSpeedTime);
+            CurlUtility.EnsureSuccess(easyHandle, returnCode);
+            returnCode = LibCurl.Easy.SetOption(easyHandle, CurlOption.LowSpeedLimit, lowSpeedTime > 0 ? Math.Max(LowSpeedLimit, 0) : 0);
+            CurlUtility.EnsureSuccess(easyHandle, returnCode);
 
             returnCode = LibCurl.Easy.SetOption(easyHandle, CurlOption.FollowLocation, AllowAutoRedirect ? 1 : 0);
             CurlUtility.EnsureSuccess(easyHandle, returnCode);
@@ -142,6 +172,54 @@ namespace MajdataPlay.Net.Curl
                 options |= CurlSslOption.NoRevoke;
             }
             return options;
+        }
+        /// <summary>
+        /// Converts a timeout to the millisecond value of <c>CURLOPT_TIMEOUT_MS</c> or <c>CURLOPT_CONNECTTIMEOUT_MS</c>.
+        /// </summary>
+        /// <param name="timeout">The timeout to convert; zero or a negative value means no timeout.</param>
+        /// <returns>
+        /// The timeout rounded up to whole milliseconds and capped at <see cref="int.MaxValue"/>, because the options are
+        /// a C <c>long</c> that is 32 bits wide on Windows and ARMv7; 0 when there is no timeout.
+        /// </returns>
+        internal static long ToCurlMilliseconds(TimeSpan timeout)
+        {
+            if (timeout <= TimeSpan.Zero)
+            {
+                return 0;
+            }
+            var milliseconds = DivideRoundingUp(timeout.Ticks, TimeSpan.TicksPerMillisecond);
+            return Math.Min(milliseconds, int.MaxValue);
+        }
+        /// <summary>
+        /// Converts a timeout to the second value of <c>CURLOPT_LOW_SPEED_TIME</c>, which has no millisecond variant.
+        /// </summary>
+        /// <param name="timeout">The timeout to convert; zero or a negative value disables the check.</param>
+        /// <returns>
+        /// The timeout rounded up to whole seconds and capped at <see cref="int.MaxValue"/>; 0 when the check is disabled.
+        /// </returns>
+        internal static long ToCurlSeconds(TimeSpan timeout)
+        {
+            if (timeout <= TimeSpan.Zero)
+            {
+                return 0;
+            }
+            var seconds = DivideRoundingUp(timeout.Ticks, TimeSpan.TicksPerSecond);
+            return Math.Min(seconds, int.MaxValue);
+        }
+        /// <summary>
+        /// Divides a non-negative tick count, rounding up without overflowing near <see cref="long.MaxValue"/>.
+        /// </summary>
+        /// <param name="ticks">The non-negative tick count.</param>
+        /// <param name="ticksPerUnit">The number of ticks in one target unit.</param>
+        /// <returns>The number of whole target units covering <paramref name="ticks"/>.</returns>
+        private static long DivideRoundingUp(long ticks, long ticksPerUnit)
+        {
+            var units = ticks / ticksPerUnit;
+            if ((ticks % ticksPerUnit) != 0)
+            {
+                units++;
+            }
+            return units;
         }
         readonly string GetEncodingString(DecompressionMethods methods)
         {

@@ -3,6 +3,7 @@ using System;
 using System.IO;
 using System.Net;
 using System.Security.Authentication;
+using System.Threading;
 using MajdataPlay.Net.Curl;
 using MajdataPlay.Net.Curl.Core.PInvoke;
 using MajdataPlay.Net.Curl.Utils;
@@ -46,6 +47,10 @@ namespace MajdataPlay.Tests.Plugins.Net.Curl
             Assert.That(handler.AllowAutoRedirect, Is.True);
             Assert.That(handler.UseDefaultCredentials, Is.False);
             Assert.That(handler.UseProxy, Is.False);
+            Assert.That(handler.Timeout, Is.EqualTo(Timeout.InfiniteTimeSpan));
+            Assert.That(handler.ConnectTimeout, Is.EqualTo(Timeout.InfiniteTimeSpan));
+            Assert.That(handler.LowSpeedTimeout, Is.EqualTo(Timeout.InfiniteTimeSpan));
+            Assert.That(handler.LowSpeedLimit, Is.EqualTo(1));
         }
 
         /// <summary>Checks that the per-request snapshot copies every handler setting.</summary>
@@ -73,7 +78,11 @@ namespace MajdataPlay.Tests.Plugins.Net.Curl
                 AutomaticDecompression = DecompressionMethods.GZip,
                 AllowAutoRedirect = false,
                 UseDefaultCredentials = true,
-                UseProxy = true
+                UseProxy = true,
+                Timeout = TimeSpan.FromSeconds(6),
+                ConnectTimeout = TimeSpan.FromSeconds(7),
+                LowSpeedTimeout = TimeSpan.FromSeconds(8),
+                LowSpeedLimit = 9
             };
 
             var config = PrivateMember.Invoke<CurlHttpConfig>(handler, "CopyCurrentConfig");
@@ -94,6 +103,51 @@ namespace MajdataPlay.Tests.Plugins.Net.Curl
             Assert.That(config.AllowAutoRedirect, Is.False);
             Assert.That(config.UseDefaultCredentials, Is.True);
             Assert.That(config.UseProxy, Is.True);
+            Assert.That(config.Timeout, Is.EqualTo(TimeSpan.FromSeconds(6)));
+            Assert.That(config.ConnectTimeout, Is.EqualTo(TimeSpan.FromSeconds(7)));
+            Assert.That(config.LowSpeedTimeout, Is.EqualTo(TimeSpan.FromSeconds(8)));
+            Assert.That(config.LowSpeedLimit, Is.EqualTo(9));
+        }
+
+        /// <summary>Checks that the timeout settings accept positive values and the infinite sentinel only.</summary>
+        [Test]
+        public void Handler_TimeoutSettingsRejectNonPositiveValues()
+        {
+            using var handler = new CurlHttpMessageHandler();
+
+            Assert.Throws<ArgumentOutOfRangeException>(() => handler.Timeout = TimeSpan.Zero);
+            Assert.Throws<ArgumentOutOfRangeException>(() => handler.ConnectTimeout = TimeSpan.FromSeconds(-1));
+            Assert.Throws<ArgumentOutOfRangeException>(() => handler.LowSpeedTimeout = TimeSpan.FromTicks(-1));
+            Assert.Throws<ArgumentOutOfRangeException>(() => handler.LowSpeedLimit = 0);
+            Assert.DoesNotThrow(() => handler.Timeout = TimeSpan.FromTicks(1));
+            Assert.DoesNotThrow(() => handler.ConnectTimeout = Timeout.InfiniteTimeSpan);
+            Assert.DoesNotThrow(() => handler.LowSpeedTimeout = TimeSpan.MaxValue);
+            Assert.DoesNotThrow(() => handler.LowSpeedLimit = int.MaxValue);
+            Assert.That(handler.Timeout, Is.EqualTo(TimeSpan.FromTicks(1)));
+        }
+
+        /// <summary>Checks that millisecond timeouts round up, cap at the 32-bit C long range and map "no limit" to 0.</summary>
+        [Test]
+        public void ToCurlMilliseconds_RoundsUpAndCaps()
+        {
+            Assert.That(CurlHttpConfig.ToCurlMilliseconds(Timeout.InfiniteTimeSpan), Is.EqualTo(0));
+            Assert.That(CurlHttpConfig.ToCurlMilliseconds(TimeSpan.Zero), Is.EqualTo(0));
+            Assert.That(CurlHttpConfig.ToCurlMilliseconds(TimeSpan.FromTicks(1)), Is.EqualTo(1));
+            Assert.That(CurlHttpConfig.ToCurlMilliseconds(TimeSpan.FromMilliseconds(1500)), Is.EqualTo(1500));
+            Assert.That(CurlHttpConfig.ToCurlMilliseconds(TimeSpan.FromDays(30)), Is.EqualTo(int.MaxValue));
+            Assert.That(CurlHttpConfig.ToCurlMilliseconds(TimeSpan.MaxValue), Is.EqualTo(int.MaxValue));
+        }
+
+        /// <summary>Checks that low-speed timeouts round up to whole seconds and map "disabled" to 0.</summary>
+        [Test]
+        public void ToCurlSeconds_RoundsUpAndCaps()
+        {
+            Assert.That(CurlHttpConfig.ToCurlSeconds(Timeout.InfiniteTimeSpan), Is.EqualTo(0));
+            Assert.That(CurlHttpConfig.ToCurlSeconds(TimeSpan.Zero), Is.EqualTo(0));
+            Assert.That(CurlHttpConfig.ToCurlSeconds(TimeSpan.FromMilliseconds(1)), Is.EqualTo(1));
+            Assert.That(CurlHttpConfig.ToCurlSeconds(TimeSpan.FromMilliseconds(1500)), Is.EqualTo(2));
+            Assert.That(CurlHttpConfig.ToCurlSeconds(TimeSpan.FromSeconds(30)), Is.EqualTo(30));
+            Assert.That(CurlHttpConfig.ToCurlSeconds(TimeSpan.MaxValue), Is.EqualTo(int.MaxValue));
         }
 
         /// <summary>Checks that TLS 1.3 wins over TLS 1.2 and other protocol sets use libcurl's default.</summary>
@@ -169,6 +223,26 @@ namespace MajdataPlay.Tests.Plugins.Net.Curl
 
             Assert.That(exception.ErrorCode, Is.EqualTo(CurlCode.CouldNotResolveHost));
             Assert.That(exception.Message, Does.Not.Contain("OS Error"));
+        }
+
+        /// <summary>
+        /// Checks that a timed-out transfer is reported as an uncancelled <see cref="System.Threading.Tasks.TaskCanceledException"/>
+        /// wrapping a <see cref="TimeoutException"/>, and every other curl error is reported unchanged.
+        /// </summary>
+        [Test]
+        public void GetTransferException_MapsOnlyTimeouts()
+        {
+            var refused = new CurlException(CurlCode.CouldNotConnect, "refused");
+            var timedOut = new CurlException(CurlCode.OperationTimedOut, "timed out");
+
+            var mapped = CurlUtility.GetTransferException(timedOut);
+
+            Assert.That(CurlUtility.GetTransferException(refused), Is.SameAs(refused));
+            Assert.That(mapped, Is.InstanceOf<System.Threading.Tasks.TaskCanceledException>());
+            Assert.That(((OperationCanceledException)mapped).CancellationToken.IsCancellationRequested, Is.False);
+            Assert.That(mapped.Message, Is.EqualTo("timed out"));
+            Assert.That(mapped.InnerException, Is.InstanceOf<TimeoutException>());
+            Assert.That(mapped.InnerException!.InnerException, Is.SameAs(timedOut));
         }
 
         /// <summary>Checks that the message constructors keep the error code, message and inner exception.</summary>

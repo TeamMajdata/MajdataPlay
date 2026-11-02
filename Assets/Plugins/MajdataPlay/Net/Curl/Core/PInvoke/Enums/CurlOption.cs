@@ -35,6 +35,12 @@ namespace MajdataPlay.Net.Curl.Core.PInvoke
         /// <summary>Connection timeout in seconds.</summary>
         ConnectTimeout = 78,
 
+        /// <summary>Specify timeout in milliseconds (<c>CURLOPT_TIMEOUT_MS</c>).</summary>
+        TimeoutMs = 155,
+
+        /// <summary>Connection timeout in milliseconds (<c>CURLOPT_CONNECTTIMEOUT_MS</c>).</summary>
+        ConnectTimeoutMs = 156,
+
         /// <summary>Maximum number of redirects.</summary>
         MaxRedirs = 68,
 
