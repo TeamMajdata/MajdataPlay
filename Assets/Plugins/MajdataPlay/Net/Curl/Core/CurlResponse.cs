@@ -31,6 +31,12 @@ namespace MajdataPlay.Net.Curl.Core
         readonly CurlResponseStream _responseStream;
         readonly static CurlReadOrWriteCallback _onWriteCallback; // Download
         readonly static CurlReadOrWriteCallback _onHeaderReceivedCallback;
+        /// <summary>The shared <see cref="Version"/> of HTTP/2 responses.</summary>
+        private static readonly Version s_http20 = new Version(2, 0);
+        /// <summary>The shared <see cref="Version"/> of HTTP/3 responses.</summary>
+        private static readonly Version s_http30 = new Version(3, 0);
+        /// <summary>The <c>HTTP/</c> prefix every status line starts with.</summary>
+        private static readonly byte[] s_httpPrefix = Encoding.ASCII.GetBytes("HTTP/");
 
         static CurlResponse()
         {
@@ -188,6 +194,11 @@ namespace MajdataPlay.Net.Curl.Core
                 if (code > 0)
                 {
                     StatusCode = (HttpStatusCode)code;
+                    var version = ParseHttpVersion(line);
+                    if (version is not null)
+                    {
+                        Version = version;
+                    }
                     Headers.Clear();
                     Content.Headers.Clear();
                 }
@@ -283,6 +294,78 @@ namespace MajdataPlay.Net.Curl.Core
                 }
             }
             return -1;
+        }
+        /// <summary>
+        /// Parses the protocol version of a status line such as <c>HTTP/1.1 200 OK</c>, or the <c>HTTP/2 200</c> and
+        /// <c>HTTP/3 200</c> lines libcurl synthesizes for HTTP/2 and HTTP/3 responses.
+        /// </summary>
+        /// <param name="line">The status line, starting with <c>HTTP/</c> and without its line ending.</param>
+        /// <returns>
+        /// The version, shared for 1.0, 1.1, 2.0 and 3.0; <see langword="null"/> when the line has no valid
+        /// <c>major[.minor]</c> version followed by a space or the end of the line.
+        /// </returns>
+        internal static Version? ParseHttpVersion(ReadOnlySpan<byte> line)
+        {
+            const int VersionStart = 5;
+            if (line.Length <= VersionStart || !line.Slice(0, VersionStart).SequenceEqual(s_httpPrefix))
+            {
+                return null;
+            }
+            var index = VersionStart;
+            if (!TryParseVersionNumber(line, ref index, out var major))
+            {
+                return null;
+            }
+            var minor = 0;
+            if (index < line.Length && line[index] == '.')
+            {
+                index++;
+                if (!TryParseVersionNumber(line, ref index, out minor))
+                {
+                    return null;
+                }
+            }
+            if (index < line.Length && line[index] != ' ')
+            {
+                return null;
+            }
+
+            switch (major, minor)
+            {
+                case (1, 0):
+                    return HttpVersion.Version10;
+                case (1, 1):
+                    return HttpVersion.Version11;
+                case (2, 0):
+                    return s_http20;
+                case (3, 0):
+                    return s_http30;
+                default:
+                    return new Version(major, minor);
+            }
+        }
+        /// <summary>
+        /// Reads one to four decimal digits of a status line version.
+        /// </summary>
+        /// <param name="line">The status line.</param>
+        /// <param name="index">The position of the first digit; advanced past the digits that were read.</param>
+        /// <param name="value">The number that was read, or 0 when there was none.</param>
+        /// <returns><see langword="true"/> if one to four digits were read.</returns>
+        static bool TryParseVersionNumber(ReadOnlySpan<byte> line, ref int index, out int value)
+        {
+            const int MaxDigits = 4;
+            var start = index;
+            value = 0;
+            while (index < line.Length && line[index] >= '0' && line[index] <= '9')
+            {
+                if (index - start == MaxDigits)
+                {
+                    return false;
+                }
+                value = (value * 10) + (line[index] - '0');
+                index++;
+            }
+            return index > start;
         }
         static string GetKeyString(ReadOnlySpan<byte> keyBytes)
         {

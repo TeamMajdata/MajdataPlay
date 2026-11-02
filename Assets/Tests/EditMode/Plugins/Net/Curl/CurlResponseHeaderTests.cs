@@ -2,6 +2,7 @@
 using System;
 using System.Linq;
 using System.Net;
+using System.Text;
 using MajdataPlay.Net.Curl.Core;
 using MajdataPlay.Net.Curl.Core.PInvoke;
 using NUnit.Framework;
@@ -67,6 +68,74 @@ namespace MajdataPlay.Tests.Plugins.Net.Curl
             Accept(line);
 
             Assert.That(Response.StatusCode, Is.EqualTo(HttpStatusCode.Accepted));
+        }
+
+        /// <summary>Checks that the status line sets the protocol version, including the short forms libcurl uses for HTTP/2 and HTTP/3.</summary>
+        /// <param name="line">The status line.</param>
+        /// <param name="major">The expected major version.</param>
+        /// <param name="minor">The expected minor version.</param>
+        [TestCase("HTTP/1.0 200 OK\r\n", 1, 0)]
+        [TestCase("HTTP/1.1 200 OK\r\n", 1, 1)]
+        [TestCase("HTTP/2 200\r\n", 2, 0)]
+        [TestCase("HTTP/2.0 200\r\n", 2, 0)]
+        [TestCase("HTTP/3 200\r\n", 3, 0)]
+        [TestCase("HTTP/1.0   301 Moved\r\n", 1, 0)]
+        public void StatusLine_SetsVersion(string line, int major, int minor)
+        {
+            Accept(line);
+
+            Assert.That(Response.Version, Is.EqualTo(new Version(major, minor)));
+        }
+
+        /// <summary>Checks that a status line with a malformed version keeps the previous version.</summary>
+        /// <param name="line">A status line with a malformed version.</param>
+        [TestCase("HTTP/x 200 OK\r\n")]
+        [TestCase("HTTP/1. 200 OK\r\n")]
+        [TestCase("HTTP/.1 200 OK\r\n")]
+        [TestCase("HTTP/1.1x 200 OK\r\n")]
+        [TestCase("HTTP/12345 200 OK\r\n")]
+        public void StatusLine_IgnoresMalformedVersion(string line)
+        {
+            Accept("HTTP/1.0 202 Accepted\r\n");
+
+            Accept(line);
+
+            Assert.That(Response.Version, Is.EqualTo(HttpVersion.Version10));
+        }
+
+        /// <summary>Checks that the response reports HTTP/1.1 until a status line arrives.</summary>
+        [Test]
+        public void Version_DefaultsToHttp11()
+        {
+            Assert.That(Response.Version, Is.EqualTo(HttpVersion.Version11));
+        }
+
+        /// <summary>Checks that the final response decides the version when an earlier block, such as a redirect, used another one.</summary>
+        [Test]
+        public void Version_FollowsFinalResponse()
+        {
+            Accept("HTTP/1.1 301 Moved Permanently\r\n");
+            Accept("Location: https://example.invalid/\r\n");
+            Accept("\r\n");
+
+            Accept("HTTP/2 200\r\n");
+
+            Assert.That(Response.Version, Is.EqualTo(new Version(2, 0)));
+        }
+
+        /// <summary>Checks that the common versions are shared instances, so parsing allocates nothing for them.</summary>
+        [Test]
+        public void ParseHttpVersion_SharesCommonVersions()
+        {
+            var http2 = Encoding.ASCII.GetBytes("HTTP/2 200");
+
+            Assert.That(CurlResponse.ParseHttpVersion(Encoding.ASCII.GetBytes("HTTP/1.1 200 OK")), Is.SameAs(HttpVersion.Version11));
+            Assert.That(CurlResponse.ParseHttpVersion(Encoding.ASCII.GetBytes("HTTP/1.0 200 OK")), Is.SameAs(HttpVersion.Version10));
+            Assert.That(CurlResponse.ParseHttpVersion(http2), Is.SameAs(CurlResponse.ParseHttpVersion(http2)));
+            Assert.That(CurlResponse.ParseHttpVersion(Encoding.ASCII.GetBytes("HTTP/1.2 200")), Is.EqualTo(new Version(1, 2)));
+            Assert.That(CurlResponse.ParseHttpVersion(Encoding.ASCII.GetBytes("HTTP/2")), Is.EqualTo(new Version(2, 0)));
+            Assert.That(CurlResponse.ParseHttpVersion(Encoding.ASCII.GetBytes("HTTPS/1.1 200")), Is.Null);
+            Assert.That(CurlResponse.ParseHttpVersion(Encoding.ASCII.GetBytes("HTTP/")), Is.Null);
         }
 
         /// <summary>Checks that header names are matched case-insensitively and values are trimmed.</summary>

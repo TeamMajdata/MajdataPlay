@@ -89,6 +89,7 @@ namespace MajdataPlay.Tests.Plugins.Net.Curl
 
             Assert.That(response, Is.InstanceOf<CurlResponse>());
             Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.OK));
+            Assert.That(response.Version, Is.EqualTo(HttpVersion.Version11));
             Assert.That(body, Is.EqualTo("hello"));
             Assert.That(response.Headers.GetValues("X-Test").Single(), Is.EqualTo("one"));
             Assert.That(response.Content.Headers.ContentType!.MediaType, Is.EqualTo("text/plain"));
@@ -98,6 +99,21 @@ namespace MajdataPlay.Tests.Plugins.Net.Curl
             Assert.That(received!.Method, Is.EqualTo("GET"));
             Assert.That(received.Target, Is.EqualTo("/path?q=1"));
             Assert.That(received.GetHeader("X-Request"), Is.EqualTo("abc"));
+        });
+
+        /// <summary>Checks that the response reports the HTTP version of the server's status line.</summary>
+        /// <returns>The test coroutine.</returns>
+        [UnityTest]
+        public IEnumerator Get_ReportsHttp10Version() => UniTask.ToCoroutine(async () =>
+        {
+            using var server = new LoopbackHttpServer((request, stream, token) =>
+                LoopbackHttpServer.WriteAsync(stream, "HTTP/1.0 200 OK\r\nContent-Length: 2\r\n\r\nok"));
+            using var client = new HttpClient(new CurlHttpMessageHandler());
+
+            using var response = await SendAsync(client, new HttpRequestMessage(HttpMethod.Get, server.Url));
+
+            Assert.That(response.Version, Is.EqualTo(HttpVersion.Version10));
+            Assert.That(await response.Content.ReadAsStringAsync(), Is.EqualTo("ok"));
         });
 
         /// <summary>Checks that an error status is returned as a response rather than an exception.</summary>
