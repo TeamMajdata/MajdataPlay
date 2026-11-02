@@ -393,6 +393,59 @@ namespace MajdataPlay.Tests.Game.Misc.Net
             });
         }
 
+        /// <summary>
+        /// Checks that a deleted chart whose chart file and track are stored is marked deleted and stays listed, both when
+        /// a changes range deletes it and when it leaves the list of a full sync, and that it loses its row once its
+        /// files are gone, while a deleted chart without stored files loses its row at once.
+        /// </summary>
+        /// <returns>The test coroutine.</returns>
+        [UnityTest]
+        public IEnumerator DeletedCharts_StayListedWhileStored()
+        {
+            return UniTask.ToCoroutine(async () =>
+            {
+                var server = OnlineChartCache.GetEndpointKey(_endpoint);
+                var infos = new Dictionary<string, MajNetChartInfo>();
+                foreach (var id in new[] { "1", "2", "4" })
+                {
+                    infos[id] = Info(id, Resource(id + " maidata"), Resource(id + " track"))[id];
+                }
+                await _cache.SyncAsync(_endpoint, new[] { Chart("1"), Chart("2"), Chart("4") }, infos);
+                foreach (var id in new[] { "1", "4" })
+                {
+                    StoreObject(infos[id].Resources!.Maidata!.Sha256);
+                    StoreObject(infos[id].Resources!.Track!.Sha256);
+                }
+                var to = new DateTime(2026, 11, 2, 0, 0, 0, DateTimeKind.Utc);
+
+                var listed = await _cache.ApplyChangesAsync(_endpoint, Changes(to, (MajNetChartChangeKind.Deleted, "1"), (MajNetChartChangeKind.Deleted, "2")), new Dictionary<string, MajNetChartInfo>());
+
+                Assert.That(listed!.Select(chart => chart.Detail.Id), Is.EqualTo(new[] { "1", "4" }));
+                Assert.That(listed.Select(chart => chart.Record.IsDeletedOnServer), Is.EqualTo(new[] { true, false }));
+                Assert.That(CountOnlineChartRows("2"), Is.Zero);
+
+                var records = await _cache.SyncAsync(_endpoint, new[] { Chart("3") }, null);
+
+                Assert.That(records.Keys, Is.EqualTo(new[] { "3" }));
+                Assert.That(ListedChartIds(server), Is.EqualTo(new[] { "3", "1", "4" }));
+                var deleted = _cache.LoadChartsDeletedOnServer(_endpoint);
+                Assert.That(deleted.Select(chart => chart.Detail.Id), Is.EqualTo(new[] { "1", "4" }));
+                Assert.That(deleted.All(chart => chart.Record.IsDeletedOnServer), Is.True);
+                Assert.That(deleted[0].Record.TryGetDigest(OnlineChartResourceKind.Track, out _), Is.True);
+
+                ObjectStore.Shared.Find(infos["1"].Resources!.Track!.Sha256)!.Delete();
+                await _cache.SyncAsync(_endpoint, new[] { Chart("3") }, null);
+
+                Assert.That(CountOnlineChartRows("1"), Is.Zero);
+                Assert.That(_cache.LoadChartsDeletedOnServer(_endpoint).Select(chart => chart.Detail.Id), Is.EqualTo(new[] { "4" }));
+
+                await _cache.SyncAsync(_endpoint, new[] { Chart("4"), Chart("3") }, null);
+
+                Assert.That(_cache.LoadChartsDeletedOnServer(_endpoint), Is.Empty);
+                Assert.That(ListedChartIds(server), Is.EqualTo(new[] { "4", "3" }));
+            });
+        }
+
         /// <summary>Counts the rows of a chart.</summary>
         /// <param name="chartId">The chart identity.</param>
         /// <returns>The number of rows.</returns>

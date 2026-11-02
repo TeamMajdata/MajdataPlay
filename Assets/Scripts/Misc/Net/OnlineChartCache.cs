@@ -236,9 +236,11 @@ namespace MajdataPlay.Net
         /// <remarks>
         /// A chart with info gets the info's digests, replacing the digests of files the server changed. A chart without
         /// info keeps its recorded digests while its chart hash is unchanged; otherwise its digests are cleared, so its
-        /// files are downloaded from the chart endpoint again. The charts of the list are marked listed in list order,
-        /// and the other charts of the server unlisted. A database failure is logged and the records then only live in
-        /// memory.
+        /// files are downloaded from the chart endpoint again. The charts of the list are marked listed in list order. A
+        /// listed chart that left the list was deleted: when its chart file and track are stored it is marked deleted and
+        /// stays listed after the list, read back with <see cref="LoadChartsDeletedOnServer"/>. A deleted chart whose files are no
+        /// longer stored loses its row, and the other charts of the server are unlisted. A database failure is logged
+        /// and the records then only live in memory.
         /// </remarks>
         public async Task<Dictionary<string, OnlineChartRecord>> SyncAsync(ApiEndpoint api, ReadOnlyMemory<MajnetSongDetail> charts, IReadOnlyDictionary<string, MajNetChartInfo>? infos, DateTime? changesTo = null)
         {
@@ -285,11 +287,29 @@ namespace MajdataPlay.Net
                             }
                             records[chart.Id] = CreateRecord(row, info, true);
                         }
-                        foreach (var row in rows.Values)
+                        var missingRows = rows.Values.Where(row => !records.ContainsKey(row.ChartId) && (row.IsListed || row.IsDeletedOnServer))
+                                                     .OrderBy(row => row.ListOrder)
+                                                     .ThenBy(row => row.Id)
+                                                     .ToList();
+                        foreach (var row in missingRows)
                         {
-                            // A row outside the list keeps its digests, so a chart reached another way, such as a recommendation, keeps its files.
-                            if (row.IsListed && !records.ContainsKey(row.ChartId))
+                            var isPlayable = HasPlayableFiles(row);
+                            if (row.IsListed && isPlayable)
                             {
+                                // A listed chart that left the list was deleted; its stored files keep it listed after the server's charts.
+                                row.IsDeletedOnServer = true;
+                                SetListed(row, listOrder++);
+                                row.UpdatedAtTicks = DateTime.UtcNow.Ticks;
+                                connection.Update(row);
+                            }
+                            else if (row.IsDeletedOnServer && !isPlayable)
+                            {
+                                // The stored files that kept the deleted chart are gone, so nothing plays it any more.
+                                connection.Delete(row);
+                            }
+                            else if (row.IsListed)
+                            {
+                                // A row outside the list keeps its digests, so a chart reached another way, such as a recommendation, keeps its files.
                                 row.IsListed = false;
                                 row.UpdatedAtTicks = DateTime.UtcNow.Ticks;
                                 connection.Update(row);
@@ -345,10 +365,12 @@ namespace MajdataPlay.Net
         /// database could not be written, in which case nothing changed.
         /// </returns>
         /// <remarks>
-        /// A deleted chart loses its row, so the objects of its files are released. An added or modified chart takes its
-        /// metadata and digests from its info and is listed, a chart that was not listed going before every listed chart;
-        /// one without info no longer exists on the server and is unlisted. The time of the last full sync is kept. A
-        /// database failure is logged.
+        /// A deleted chart whose chart file and track are stored is marked deleted and keeps its row and its place, so it
+        /// stays playable; any other deleted chart loses its row, so the objects of its files are released. An added or
+        /// modified chart takes its metadata and digests from its info, which also clears a deletion mark, and is listed,
+        /// a chart that was not listed going before every listed chart. One without info was deleted after the range: it
+        /// is unlisted unless its chart file and track are stored, and its deletion arrives with a later range. The time
+        /// of the last full sync is kept. A database failure is logged.
         /// </remarks>
         /// <exception cref="ArgumentException"><paramref name="changes"/> is not complete.</exception>
         public async Task<IReadOnlyList<(MajnetSongDetail Detail, OnlineChartRecord Record)>?> ApplyChangesAsync(ApiEndpoint api, MajNetChartChanges changes, IReadOnlyDictionary<string, MajNetChartInfo> infos)
@@ -388,7 +410,21 @@ namespace MajdataPlay.Net
                         rows.TryGetValue(chartId, out var row);
                         if (change.Kind == MajNetChartChangeKind.Deleted)
                         {
-                            if (row is not null)
+                            if (row is null)
+                            {
+                                continue;
+                            }
+                            if (HasPlayableFiles(row))
+                            {
+                                // The stored chart stays playable, so it keeps its row and its place in the list.
+                                if (!row.IsDeletedOnServer)
+                                {
+                                    row.IsDeletedOnServer = true;
+                                    row.UpdatedAtTicks = DateTime.UtcNow.Ticks;
+                                    connection.Update(row);
+                                }
+                            }
+                            else
                             {
                                 connection.Delete(row);
                                 rows.Remove(chartId);
@@ -398,8 +434,8 @@ namespace MajdataPlay.Net
                         var info = FindInfo(infos, chartId);
                         if (info?.Metadata is not { } detail)
                         {
-                            // The chart was deleted after the range; the deletion arrives with a later range.
-                            if (row is { IsListed: true })
+                            // The chart was deleted after the range; the deletion arrives with a later range, which keeps a stored chart listed.
+                            if (row is { IsListed: true } && !HasPlayableFiles(row))
                             {
                                 row.IsListed = false;
                                 row.UpdatedAtTicks = DateTime.UtcNow.Ticks;
@@ -453,7 +489,17 @@ namespace MajdataPlay.Net
             }
 
             var charts = new List<(MajnetSongDetail, OnlineChartRecord)>(listedRows!.Count);
-            foreach (var row in listedRows)
+            AddCharts(charts, listedRows, infos);
+            return charts;
+        }
+
+        /// <summary>Adds the metadata and record of rows to a chart listing, skipping rows whose metadata cannot be read.</summary>
+        /// <param name="charts">The listing receiving the charts.</param>
+        /// <param name="rows">The rows, in listing order.</param>
+        /// <param name="infos">The info of this session keyed by chart identity, which supplies direct download URIs, or null.</param>
+        private void AddCharts(List<(MajnetSongDetail, OnlineChartRecord)> charts, List<OnlineChartRow> rows, IReadOnlyDictionary<string, MajNetChartInfo>? infos)
+        {
+            foreach (var row in rows)
             {
                 if (!Serializer.Json.TryDeserialize<MajnetSongDetail>(row.Detail, out var detail, out var exception) || detail is null)
                 {
@@ -462,7 +508,6 @@ namespace MajdataPlay.Net
                 }
                 charts.Add((detail, CreateRecord(row, FindInfo(infos, row.ChartId), true)));
             }
-            return charts;
         }
 
         /// <summary>Gets the record of a chart outside the chart list, such as a recommended chart, creating its row when needed.</summary>
@@ -551,7 +596,7 @@ namespace MajdataPlay.Net
             foreach (var row in rows)
             {
                 // A chart can be played once its chart and track are stored; the other files are optional.
-                if (!Objects.Contains(row.MaidataSha256) || !Objects.Contains(row.TrackSha256))
+                if (!HasPlayableFiles(row))
                 {
                     continue;
                 }
@@ -561,6 +606,41 @@ namespace MajdataPlay.Net
                     continue;
                 }
                 charts.Add((detail, CreateRecord(row, null, true)));
+            }
+            return charts;
+        }
+
+        /// <summary>
+        /// Loads the listed charts of an endpoint's server that the server deleted, which stay listed because their chart
+        /// and track are stored, so a chart list read in full lists them after the server's charts.
+        /// </summary>
+        /// <param name="api">The endpoint.</param>
+        /// <returns>
+        /// The metadata and record of every such chart in list order; empty when the cache is not persistent or the
+        /// database could not be read.
+        /// </returns>
+        /// <remarks>Run this off the main thread; a database failure and rows whose metadata cannot be read are logged.</remarks>
+        public IReadOnlyList<(MajnetSongDetail Detail, OnlineChartRecord Record)> LoadChartsDeletedOnServer(ApiEndpoint api)
+        {
+            var charts = new List<(MajnetSongDetail, OnlineChartRecord)>();
+            if (!IsPersistent)
+            {
+                return charts;
+            }
+            var server = GetServerKey(api);
+            try
+            {
+                EnsureTable();
+                var rows = MajDatabase.Runtime.Read(connection => connection.Table<OnlineChartRow>()
+                                                                            .Where(row => row.Server == server && row.IsListed == true && row.IsDeletedOnServer == true)
+                                                                            .OrderBy(row => row.ListOrder)
+                                                                            .ThenBy(row => row.Id)
+                                                                            .ToList());
+                AddCharts(charts, rows, null);
+            }
+            catch (Exception e)
+            {
+                MajDebug.LogError(nameof(OnlineChartCache), $"Failed to read the deleted charts of {api.Name}: {e}");
             }
             return charts;
         }
@@ -753,11 +833,25 @@ namespace MajdataPlay.Net
                 row.ChartHash = chartHash;
                 isChanged = true;
             }
+            if (row.IsDeletedOnServer)
+            {
+                // The server reported the chart again, so it exists.
+                row.IsDeletedOnServer = false;
+                isChanged = true;
+            }
             if (isChanged)
             {
                 row.UpdatedAtTicks = DateTime.UtcNow.Ticks;
             }
             return isChanged;
+        }
+
+        /// <summary>Gets whether the chart file and track of a row are stored, so the chart can be played without the server.</summary>
+        /// <param name="row">The row.</param>
+        /// <returns>True when both objects are in the object store; otherwise false.</returns>
+        private bool HasPlayableFiles(OnlineChartRow row)
+        {
+            return Objects.Contains(row.MaidataSha256) && Objects.Contains(row.TrackSha256);
         }
 
         /// <summary>Marks a row listed at a position of the chart list.</summary>
@@ -812,7 +906,7 @@ namespace MajdataPlay.Net
         /// <returns>The record.</returns>
         private OnlineChartRecord CreateRecord(OnlineChartRow row, MajNetChartInfo? info, bool isPersistent)
         {
-            var record = new OnlineChartRecord(this, row.Server, row.ChartId, row.IsResolved, isPersistent);
+            var record = new OnlineChartRecord(this, row.Server, row.ChartId, row.IsResolved, isPersistent, row.IsDeletedOnServer);
             foreach (var kind in s_kinds)
             {
                 record.Load(kind, GetDigest(row, kind), info?.Resources?.Get(kind)?.Url);
@@ -937,6 +1031,11 @@ namespace MajdataPlay.Net
             public bool IsListed { get; set; }
             /// <summary>Gets or sets the position of the chart in the chart list, lower first; meaningful while <see cref="IsListed"/> is true.</summary>
             public long ListOrder { get; set; }
+            /// <summary>
+            /// Gets or sets whether the server deleted the chart. Only a chart whose chart file and track are stored keeps its
+            /// row once deleted, and a listed one stays listed, after the charts of the server's list.
+            /// </summary>
+            public bool IsDeletedOnServer { get; set; }
             /// <summary>Gets or sets when the row last changed, in UTC ticks.</summary>
             public long UpdatedAtTicks { get; set; }
         }

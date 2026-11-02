@@ -801,6 +801,14 @@ namespace MajdataPlay.Tests.Game.Misc.Base
             return ObjectStore.ToHex(sha256.ComputeHash(Encoding.UTF8.GetBytes(id + "/" + file)));
         }
 
+        /// <summary>Makes every recorded full chart list read older than the full refresh interval, so the next refresh reads the whole list.</summary>
+        private static void ExpireOnlineFullSync()
+        {
+            var interval = PrivateMember.GetStaticField<TimeSpan>(typeof(SongStorage), "s_onlineFullRefreshInterval");
+            var expired = DateTime.UtcNow - interval - TimeSpan.FromMinutes(1);
+            MajDatabase.Runtime.Write(connection => connection.Execute("UPDATE OnlineChartChangeQueries SET LastFullSyncTicks = ?", expired.Ticks));
+        }
+
         /// <summary>Loads one endpoint's online collection through the private loader.</summary>
         /// <param name="endpoint">The endpoint.</param>
         /// <returns>The collection.</returns>
@@ -987,7 +995,7 @@ namespace MajdataPlay.Tests.Game.Misc.Base
                 Assert.That(CountOnlineChartRows(ids[1]), Is.Zero);
                 Assert.That(OnlineChartCache.Shared.GetSyncPoint(endpoint)!.Value.ChangesTo, Is.EqualTo(new DateTime(2026, 11, 3, 0, 0, 0, DateTimeKind.Utc)));
 
-                MajDatabase.Runtime.Write(connection => connection.Execute("UPDATE OnlineChartChangeQueries SET LastFullSyncTicks = ?", DateTime.UtcNow.AddDays(-2).Ticks));
+                ExpireOnlineFullSync();
                 changesJson = "{\"to\":\"2026-11-04T00:00:00Z\",\"isComplete\":true,\"changes\":[]}";
 
                 var third = (await GetOnlineCollectionAsync(endpoint)).Cast<OnlineSongDetail>().ToArray();
@@ -996,6 +1004,60 @@ namespace MajdataPlay.Tests.Game.Misc.Base
                 Assert.That(third.Select(song => song.Id), Is.EqualTo(ids));
                 Assert.That(OnlineChartCache.Shared.GetSyncPoint(endpoint)!.Value.FullSyncAt, Is.GreaterThan(DateTime.UtcNow.AddMinutes(-1)));
                 foreach (var song in first.Concat(second).Concat(third))
+                {
+                    song.Dispose();
+                }
+            });
+        }
+
+        /// <summary>
+        /// Checks that a chart the server deleted stays in the collection, marked deleted, while its chart file and track
+        /// are stored, both after a refresh from changes and after the whole list is read again.
+        /// </summary>
+        /// <returns>The test coroutine.</returns>
+        [UnityTest]
+        public IEnumerator GetOnlineCollection_KeepsStoredDeletedCharts()
+        {
+            return UniTask.ToCoroutine(async () =>
+            {
+                using var http = new StubHttpScope();
+                var endpoint = new ApiEndpoint { Name = "Server", Url = new Uri("https://api.invalid/api/") };
+                var ids = new[] { Guid.NewGuid().ToString(), Guid.NewGuid().ToString() };
+                var listed = ids;
+                var changesJson = "{\"to\":\"2026-11-02T00:00:00Z\",\"isComplete\":false,\"changes\":[]}";
+                http.Responder = request => request.RequestUri!.AbsolutePath switch
+                {
+                    var path when path.EndsWith("maichart/changes") => StubHttpScope.Respond(System.Net.HttpStatusCode.OK, changesJson),
+                    var path when path.EndsWith("maichart/list") => StubHttpScope.Respond(System.Net.HttpStatusCode.OK, ChartListJson(listed)),
+                    var path when path.EndsWith("maichart/info") => StubHttpScope.Respond(
+                        System.Net.HttpStatusCode.OK,
+                        ChartInfoJson(Newtonsoft.Json.Linq.JArray.Parse(request.Content!.ReadAsStringAsync().GetAwaiter().GetResult()).Select(id => id.ToString()).ToArray())),
+                    _ => StubHttpScope.Respond(System.Net.HttpStatusCode.OK, "{\"id\":\"majnet\",\"name\":\"MajdataNET\"}")
+                };
+                var songs = new List<OnlineSongDetail>();
+                songs.AddRange((await GetOnlineCollectionAsync(endpoint)).Cast<OnlineSongDetail>());
+                foreach (var digest in new[] { DigestOf(ids[0], "maidata"), DigestOf(ids[0], "track") })
+                {
+                    ObjectStore.Shared.Directory.CreateDirectory(digest.Substring(0, 2)).CreateFile(digest).WriteAllText("object");
+                }
+                changesJson = "{\"to\":\"2026-11-03T00:00:00Z\",\"isComplete\":true,\"changes\":[" +
+                              $"{{\"chartId\":\"{ids[0]}\",\"kind\":2,\"changedAt\":\"2026-11-02T01:00:00Z\"}}]}}";
+                listed = new[] { ids[1] };
+
+                var refreshed = (await GetOnlineCollectionAsync(endpoint)).Cast<OnlineSongDetail>().ToArray();
+                songs.AddRange(refreshed);
+
+                Assert.That(refreshed.Select(song => song.Id), Is.EqualTo(ids));
+                Assert.That(refreshed.Select(song => song.Record.IsDeletedOnServer), Is.EqualTo(new[] { true, false }));
+
+                ExpireOnlineFullSync();
+                var reread = (await GetOnlineCollectionAsync(endpoint)).Cast<OnlineSongDetail>().ToArray();
+                songs.AddRange(reread);
+
+                Assert.That(reread.Select(song => song.Id), Is.EqualTo(new[] { ids[1], ids[0] }));
+                Assert.That(reread[1].Record.IsDeletedOnServer, Is.True);
+                Assert.That(reread[1].Title, Is.EqualTo($"Title {ids[0]}"));
+                foreach (var song in songs)
                 {
                     song.Dispose();
                 }

@@ -1277,7 +1277,9 @@ namespace MajdataPlay
                     return await GetUnreachableOnlineCollectionAsync(api, cacheDirectory, progressReporter, cancellationToken).ConfigureAwait(false);
                 }
                 var records = await SyncOnlineChartRecordsAsync(api, chartList, changes?.To, cancellationToken).ConfigureAwait(false);
-                var charts = new (MajnetSongDetail Detail, OnlineChartRecord Record)[chartList.Length];
+                // Charts the server deleted stay listed after its charts while their chart file and track are stored.
+                var deletedCharts = await Task.Run(() => chartCache.LoadChartsDeletedOnServer(api), cancellationToken).ConfigureAwait(false);
+                var charts = new (MajnetSongDetail Detail, OnlineChartRecord Record)[chartList.Length + deletedCharts.Count];
                 for (var i = 0; i < chartList.Length; i++)
                 {
                     var chart = chartList[i];
@@ -1285,6 +1287,10 @@ namespace MajdataPlay
                         ? synced
                         : chartCache.CreateTransientRecord(api, chart);
                     charts[i] = (chart, record);
+                }
+                for (var i = 0; i < deletedCharts.Count; i++)
+                {
+                    charts[chartList.Length + i] = deletedCharts[i];
                 }
                 var loaded = CreateOnlineSongCollection(api, cacheDirectory, charts, cancellationToken);
                 MajDebug.LogInfo(nameof(SongStorage), "Loaded online charts list:" + loaded.Count);
