@@ -24,7 +24,9 @@ namespace MajdataPlay.Settings
     /// defaults instead of leaving its setting root without it.
     /// </para>
     /// <para>
-    /// The options that changed category then move to their current category, which may belong to the other document.
+    /// The options that changed category then move to their current category, which may belong to the other document,
+    /// and the options renamed by the move, such as <c>LowLatencyVSync</c> of <c>Debug</c>, take their current key, such
+    /// as <see cref="RenderingOptions.VulkanLowLatencyVSync"/>.
     /// The rendering keys that older versions stored in the <c>Display</c> category, <c>RenderQuality</c>,
     /// <c>RenderScale</c>, <c>FPSLimit</c> and <c>VSync</c>, are converted to the <c>Rendering</c> category first.
     /// The <c>Online</c> category of system-settings.json becomes the <c>Online</c> options of the <c>Network</c>
@@ -102,7 +104,7 @@ namespace MajdataPlay.Settings
             nameof(UserSetting.Touch)
         };
 
-        // 键名同时是旧位置与现行位置的名称；SettingMigrationTests 会检查它们仍是目标分类的属性。
+        // 键名同时是旧位置与现行位置的名称，改名的选项写作 (旧键名, 现行键名)；SettingMigrationTests 会检查现行键名仍是目标分类的属性。
         /// <summary>
         /// Gets the options that moved to another category, by legacy category and current category.
         /// </summary>
@@ -124,7 +126,11 @@ namespace MajdataPlay.Settings
             new("Debug", nameof(UserSetting.Touch), "TouchSimulationRadius", "TouchAAreaExtraRadius",
                 "TouchBAreaExtraRadius", "TouchCAreaExtraRadius", "TouchDAreaExtraRadius", "TouchEAreaExtraRadius",
                 "TouchRadiusAdjust"),
-            new("Debug", nameof(SystemSetting.Rendering), "DisplayRuntimeInfo", "FullScreen")
+            new("Debug", nameof(SystemSetting.Rendering), "DisplayRuntimeInfo", "FullScreen"),
+            new("Debug", nameof(SystemSetting.Common), "MenuOptionIterationSpeed", "HideCursorInGame", "NoteFolding",
+                "DJAutoPolicy"),
+            new("Debug", nameof(SystemSetting.Rendering), ("LowLatencyVSync", "VulkanLowLatencyVSync"),
+                ("LowLatencyVSyncBackend", "VulkanLowLatencyVSyncBackend"))
         };
 
         /// <summary>
@@ -379,10 +385,10 @@ namespace MajdataPlay.Settings
             var movedCount = 0;
             JObject? target = null;
             var targetRoot = GetDocument(user, system, move.TargetCategory);
-            foreach (var key in move.Keys)
+            foreach (var (legacyKey, currentKey) in move.Keys)
             {
                 var hasLegacyKey = false;
-                var legacyValue = TakeLegacyValue(source, key, ref hasLegacyKey);
+                var legacyValue = TakeLegacyValue(source, legacyKey, ref hasLegacyKey);
                 if (!hasLegacyKey)
                 {
                     continue;
@@ -399,7 +405,7 @@ namespace MajdataPlay.Settings
                 }
                 if (target is not null)
                 {
-                    CopyIfMissing(target, key, legacyValue);
+                    CopyIfMissing(target, currentKey, legacyValue);
                 }
             }
             if (movedCount == 0)
@@ -539,7 +545,7 @@ namespace MajdataPlay.Settings
         }
 
         /// <summary>
-        /// Describes options that moved from a legacy category to their current category under the same key.
+        /// Describes options that moved from a legacy category to their current category, under the same key or renamed.
         /// </summary>
         internal sealed class LegacyOptionMove
         {
@@ -554,17 +560,29 @@ namespace MajdataPlay.Settings
             internal string TargetCategory { get; }
 
             /// <summary>
-            /// Gets the keys of the moved options, which are the same in both categories.
+            /// Gets the keys of the moved options in the legacy category and in the current category.
             /// </summary>
-            internal IReadOnlyList<string> Keys { get; }
+            internal IReadOnlyList<(string LegacyKey, string CurrentKey)> Keys { get; }
 
             /// <summary>
-            /// Initializes a new instance of the <see cref="LegacyOptionMove"/> class.
+            /// Initializes a new instance of the <see cref="LegacyOptionMove"/> class for options that keep their keys.
             /// </summary>
             /// <param name="sourceCategory">The category that stored the options in older versions.</param>
             /// <param name="targetCategory">The category that stores the options now.</param>
-            /// <param name="keys">The keys of the moved options.</param>
+            /// <param name="keys">The keys of the moved options, which are the same in both categories.</param>
             internal LegacyOptionMove(string sourceCategory, string targetCategory, params string[] keys)
+                : this(sourceCategory, targetCategory, Array.ConvertAll(keys, key => (key, key)))
+            {
+            }
+
+            /// <summary>
+            /// Initializes a new instance of the <see cref="LegacyOptionMove"/> class for options renamed by the move.
+            /// </summary>
+            /// <param name="sourceCategory">The category that stored the options in older versions.</param>
+            /// <param name="targetCategory">The category that stores the options now.</param>
+            /// <param name="keys">The legacy key and the current key of each moved option.</param>
+            internal LegacyOptionMove(string sourceCategory, string targetCategory,
+                                      params (string LegacyKey, string CurrentKey)[] keys)
             {
                 SourceCategory = sourceCategory;
                 TargetCategory = targetCategory;

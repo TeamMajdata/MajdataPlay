@@ -166,7 +166,7 @@ namespace MajdataPlay.Scenes.Setting
 
         private static float GetRepeatInterval()
         {
-            var iterationSpeed = MajEnv.SystemSettings.Debug.MenuOptionIterationSpeed;
+            var iterationSpeed = MajEnv.SystemSettings.Common.MenuOptionIterationSpeed;
             return 1f / (iterationSpeed is 0 ? 15 : iterationSpeed);
         }
 

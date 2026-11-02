@@ -6,25 +6,11 @@ namespace MajdataPlay.Settings
     {
         public static class Debug
         {
-            public const int MenuOptionIterationSpeed = 45;
-
             public const float DisplayOffset = 0f;
-
-#if UNITY_STANDALONE
-            public const bool HideCursorInGame = true;
-#endif
-
-            public const bool NoteFolding = true;
-
-            public const DJAutoPolicyOption DJAutoPolicy = DJAutoPolicyOption.Strict;
 
             public const int MaxQueuedFrames = 2;
 
             public const bool FrameTimingDiagnostics = false;
-
-            public const bool LowLatencyVSync = true;
-
-            public const LowLatencyVSyncBackendOption LowLatencyVSyncBackend = LowLatencyVSyncBackendOption.Auto;
 
 #if UNITY_ANDROID || UNITY_IOS
             public const int TapPoolCapacity = 48;

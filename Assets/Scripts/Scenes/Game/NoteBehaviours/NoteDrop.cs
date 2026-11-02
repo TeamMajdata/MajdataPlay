@@ -226,7 +226,7 @@ namespace MajdataPlay.Scenes.Game.Notes.Behaviours
             USERSETTING_SLIDE_SCALE = MajEnv.UserSettings?.Display.SlideScale ?? 1;
             USERSETTING_DISPLAY_HOLD_HEAD_JUDGE_RESULT = MajEnv.UserSettings?.Judge.DisplayHoldHeadJudgeResult ?? false;
             USERSETTING_SLIDE_JUDGE_MODE = MajEnv.UserSettings?.Judge.Mode ?? JudgeModeOption.Modern;
-            USERSETTING_DJAUTO_POLICY = MajEnv.SystemSettings?.Debug.DJAutoPolicy ?? DJAutoPolicyOption.Strict;
+            USERSETTING_DJAUTO_POLICY = MajEnv.SystemSettings?.Common.DJAutoPolicy ?? DJAutoPolicyOption.Strict;
 
             _noteController = Majdata<INoteController>.Instance!;
             ModInfo = _noteController.ModInfo;

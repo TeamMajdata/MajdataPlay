@@ -82,6 +82,12 @@ namespace MajdataPlay.Settings
         [OptionEnumerator(typeof(EngineBooleanSettingEnumerator))]
         public bool VSync { get; set; } = SettingDefaults.Rendering.VSync;
 
+        [HideInSettingUI]
+        public bool VulkanLowLatencyVSync { get; set; } = SettingDefaults.Rendering.VulkanLowLatencyVSync;
+
+        [HideInSettingUI]
+        public LowLatencyVSyncBackendOption VulkanLowLatencyVSyncBackend { get; set; } = SettingDefaults.Rendering.VulkanLowLatencyVSyncBackend;
+
         [ShowInSettingUIWhen(nameof(CompatibilityMode), false)]
         [ShowInSettingUIWhen(nameof(RenderQuality), RenderingQualityOption.Custom)]
         [OptionEnumerator(typeof(RenderingEnumSettingEnumerator))]

@@ -129,7 +129,7 @@ namespace MajdataPlay.Scenes.Game
         ObjectCounter _objectCounter;
         NotePoolManager _poolManager;
 
-        readonly static bool USERSETTING_NOTE_FOLDING = MajEnv.SystemSettings?.Debug.NoteFolding ?? true;
+        readonly static bool USERSETTING_NOTE_FOLDING = MajEnv.SystemSettings?.Common.NoteFolding ?? true;
 
         readonly static IReadOnlyDictionary<SimaiNoteType, int> NOTE_LAYER_COUNT = new Dictionary<SimaiNoteType, int>()
         {

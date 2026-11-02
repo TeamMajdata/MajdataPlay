@@ -135,16 +135,16 @@ namespace MajdataPlay.Tests.Game.Misc.Settings
             {
                 var source = GetCategoryType(move.SourceCategory);
                 var target = GetCategoryType(move.TargetCategory);
-                foreach (var key in move.Keys)
+                foreach (var (legacyKey, currentKey) in move.Keys)
                 {
-                    Assert.That(source.GetProperty(key, BindingFlags.Public | BindingFlags.Instance), Is.Null, $"{move.SourceCategory}.{key}");
+                    Assert.That(source.GetProperty(legacyKey, BindingFlags.Public | BindingFlags.Instance), Is.Null, $"{move.SourceCategory}.{legacyKey}");
 #if !UNITY_STANDALONE
-                    if (s_standaloneOnlyOptions.Contains(key))
+                    if (s_standaloneOnlyOptions.Contains(currentKey))
                     {
                         continue;
                     }
 #endif
-                    Assert.That(target.GetProperty(key, BindingFlags.Public | BindingFlags.Instance), Is.Not.Null, $"{move.TargetCategory}.{key}");
+                    Assert.That(target.GetProperty(currentKey, BindingFlags.Public | BindingFlags.Instance), Is.Not.Null, $"{move.TargetCategory}.{currentKey}");
                 }
             }
         }
@@ -165,9 +165,9 @@ namespace MajdataPlay.Tests.Game.Misc.Settings
                     source = new JObject();
                     root[move.SourceCategory] = source;
                 }
-                foreach (var key in move.Keys)
+                foreach (var (legacyKey, _) in move.Keys)
                 {
-                    source[key] = $"value{index++}";
+                    source[legacyKey] = $"value{index++}";
                 }
             }
 
@@ -177,11 +177,11 @@ namespace MajdataPlay.Tests.Game.Misc.Settings
             foreach (var move in SettingMigration.LegacyOptionMoves)
             {
                 var targetRoot = typeof(UserSetting).GetProperty(move.TargetCategory) is not null ? user : system;
-                foreach (var key in move.Keys)
+                foreach (var (legacyKey, currentKey) in move.Keys)
                 {
-                    Assert.That(targetRoot[move.TargetCategory]![key]!.Value<string>(), Is.EqualTo($"value{index++}"), $"{move.TargetCategory}.{key}");
+                    Assert.That(targetRoot[move.TargetCategory]![currentKey]!.Value<string>(), Is.EqualTo($"value{index++}"), $"{move.TargetCategory}.{currentKey}");
                     var sourceRoot = move.SourceCategory is "Game" or "Display" ? user : system;
-                    Assert.That(((JObject)sourceRoot[move.SourceCategory]!).ContainsKey(key), Is.False, $"{move.SourceCategory}.{key}");
+                    Assert.That(((JObject)sourceRoot[move.SourceCategory]!).ContainsKey(legacyKey), Is.False, $"{move.SourceCategory}.{legacyKey}");
                 }
             }
         }
@@ -225,6 +225,29 @@ namespace MajdataPlay.Tests.Game.Misc.Settings
             Assert.That(system.Network.Online.ApiEndpoints, Is.Empty);
 #if !UNITY_IOS
             Assert.That(system.Network.Online.Enable, Is.True);
+#endif
+        }
+
+        /// <summary>
+        /// Checks that the general options and the renamed Vulkan frame pacing options of a legacy <c>Debug</c> category
+        /// keep their values in <c>Common</c> and <c>Rendering</c>.
+        /// </summary>
+        [Test]
+        public void Read_LegacyDebugOptionsMoveToCommonAndRendering()
+        {
+            var (_, system) = Read("{}",
+                "{\"Debug\":{\"DebugLevel\":\"Warning\",\"MenuOptionIterationSpeed\":30,\"HideCursorInGame\":false," +
+                "\"NoteFolding\":false,\"DJAutoPolicy\":\"Permissive\",\"LowLatencyVSync\":false," +
+                "\"LowLatencyVSyncBackend\":\"Timer\"}}");
+
+            Assert.That(system.Debug.DebugLevel, Is.EqualTo(LogLevel.Warning));
+            Assert.That(system.Common.MenuOptionIterationSpeed, Is.EqualTo(30));
+            Assert.That(system.Common.HideCursorInGame, Is.False);
+            Assert.That(system.Common.DJAutoPolicy, Is.EqualTo(DJAutoPolicyOption.Permissive));
+            Assert.That(system.Rendering.VulkanLowLatencyVSync, Is.False);
+            Assert.That(system.Rendering.VulkanLowLatencyVSyncBackend, Is.EqualTo(LowLatencyVSyncBackendOption.Timer));
+#if !UNITY_IOS
+            Assert.That(system.Common.NoteFolding, Is.False);
 #endif
         }
 

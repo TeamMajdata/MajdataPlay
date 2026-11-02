@@ -213,15 +213,17 @@ namespace MajdataPlay.Tests.Game.Misc.Settings
         public void Json_ProductionOptionsPreservePlatformBehavior(SettingPlatform platform, bool ignored)
         {
             var serializer = CreateSerializer(platform);
+            var common = JObject.FromObject(new CommonOptions(), serializer);
             var debug = JObject.FromObject(new DebugOptions(), serializer);
             var online = JObject.FromObject(new OnlineOptions(), serializer);
-            var restoredDebug = JObject.Parse("{\"NoteFolding\":false,\"DebugLevel\":\"Error\"}").ToObject<DebugOptions>(serializer)!;
+            var restoredCommon = JObject.Parse("{\"NoteFolding\":false}").ToObject<CommonOptions>(serializer)!;
+            var restoredDebug = JObject.Parse("{\"DebugLevel\":\"Error\"}").ToObject<DebugOptions>(serializer)!;
             var restoredOnline = JObject.Parse("{\"Enable\":true}").ToObject<OnlineOptions>(serializer)!;
 
-            Assert.That(debug.ContainsKey(nameof(DebugOptions.NoteFolding)), Is.EqualTo(!ignored));
+            Assert.That(common.ContainsKey(nameof(CommonOptions.NoteFolding)), Is.EqualTo(!ignored));
             Assert.That(debug.ContainsKey(nameof(DebugOptions.DebugLevel)), Is.EqualTo(!ignored));
             Assert.That(online.ContainsKey(nameof(OnlineOptions.Enable)), Is.EqualTo(!ignored));
-            Assert.That(restoredDebug.NoteFolding, Is.EqualTo(ignored));
+            Assert.That(restoredCommon.NoteFolding, Is.EqualTo(ignored));
             Assert.That(restoredDebug.DebugLevel, Is.EqualTo(ignored ? LogLevel.Info : LogLevel.Error));
             Assert.That(restoredOnline.Enable, Is.EqualTo(!ignored));
         }
@@ -231,12 +233,12 @@ namespace MajdataPlay.Tests.Game.Misc.Settings
         public void SettingsSerializer_UsesCurrentBuildTargetResolver()
         {
             Assert.That(MajEnv.UserJsonReaderOption.ContractResolver, Is.InstanceOf<SettingContractResolver>());
-            var json = JObject.Parse(Serializer.Json.Serialize(new DebugOptions(), MajEnv.UserJsonReaderOption));
-            var (_, system) = MajEnv.DeserializeSettings("{}", "{\"Debug\":{\"NoteFolding\":false,\"DebugLevel\":\"Error\"}}");
+            var json = JObject.Parse(Serializer.Json.Serialize(new CommonOptions(), MajEnv.UserJsonReaderOption));
+            var (_, system) = MajEnv.DeserializeSettings("{}", "{\"Common\":{\"NoteFolding\":false},\"Debug\":{\"DebugLevel\":\"Error\"}}");
             var ignored = SettingPlatformInfo.Current == SettingPlatform.IOS;
 
-            Assert.That(json.ContainsKey(nameof(DebugOptions.NoteFolding)), Is.EqualTo(!ignored));
-            Assert.That(system!.Debug.NoteFolding, Is.EqualTo(ignored));
+            Assert.That(json.ContainsKey(nameof(CommonOptions.NoteFolding)), Is.EqualTo(!ignored));
+            Assert.That(system!.Common.NoteFolding, Is.EqualTo(ignored));
             Assert.That(system.Debug.DebugLevel, Is.EqualTo(ignored ? LogLevel.Info : LogLevel.Error));
         }
     }

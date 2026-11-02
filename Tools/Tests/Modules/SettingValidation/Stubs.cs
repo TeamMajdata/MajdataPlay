@@ -378,7 +378,7 @@ namespace MajdataPlay.Settings
 {
     public enum OffsetUnitOption { Frame, Second }
     public class UserSetting { public GameOptions Game { get; } = new(); public JudgeOptions Judge { get; } = new(); public DisplayOptions Display { get; } = new(); public SFXVolume Volume { get; } = new(); public TouchOptions Touch { get; } = new(); }
-    public class SystemSetting { public RenderingOptions Rendering { get; } = new(); [HideInSettingUI] public AudioOptions Audio { get; } = new(); public DebugOptions Debug { get; } = new(); }
+    public class SystemSetting { public CommonOptions Common { get; } = new(); public RenderingOptions Rendering { get; } = new(); [HideInSettingUI] public AudioOptions Audio { get; } = new(); public DebugOptions Debug { get; } = new(); }
     public class AudioOptions { public bool ForceMono { get; set; } }
     public class ChartSetting { [ChartDiscoveryProbe] public int ChartSpeed { get; set; } }
     public class GameOptions { public float SlideFadeInOffset { get; set; } }

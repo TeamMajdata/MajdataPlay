@@ -170,7 +170,7 @@ namespace MajdataPlay.Tests.Game.Scenes.PlayMode.SettingScene
         [Test]
         public void HandleInput_RepeatsWhileHeld()
         {
-            MajEnv.SystemSettings.Debug.MenuOptionIterationSpeed = 0;
+            MajEnv.SystemSettings.Common.MenuOptionIterationSpeed = 0;
             Bind(nameof(SettingFixture.Mode));
             _option.SetSelected(true);
             _option.HandleInput();

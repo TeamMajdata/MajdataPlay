@@ -747,7 +747,7 @@ namespace MajdataPlay
                 SystemSettings.Debug.DebugLevel = logLevel;
             }
 
-            SystemSettings.Debug.NoteFolding = IOSNativeSettings.DebugNoteFolding;
+            SystemSettings.Common.NoteFolding = IOSNativeSettings.DebugNoteFolding;
             SystemSettings.Network.Online.Enable = IOSNativeSettings.Online;
 
             MajDebug.MinLogLevel = SystemSettings.Debug.DebugLevel;

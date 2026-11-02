@@ -18,7 +18,7 @@ At the start of each frame `LowLatencyVSync` uses, when available:
 
 When neither is available, **timer pacing** in C# (`VSyncFramePacer`) produces frames slightly slower than the
 display refreshes, so input is sampled late; it needs nothing from this layer. A backend that keeps failing is
-given up and the others continue. The hidden setting `Debug.LowLatencyVSyncBackend` (`Auto`, `PresentWait`,
+given up and the others continue. The hidden setting `Rendering.VulkanLowLatencyVSyncBackend` (`Auto`, `PresentWait`,
 `Timer`) limits the backends for comparisons.
 
 ## How it works

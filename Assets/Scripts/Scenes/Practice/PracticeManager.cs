@@ -190,7 +190,7 @@ namespace MajdataPlay.Scenes.Practice
             var needUpdatePBSValue = false;
             var increaseSpeedPressed = e2State.IsPressed || b2State.IsPressed;
             var decreaseSpeedPressed = e8State.IsPressed || b7State.IsPressed;
-            var iterationSpeed = MajEnv.SystemSettings.Debug.MenuOptionIterationSpeed;
+            var iterationSpeed = MajEnv.SystemSettings.Common.MenuOptionIterationSpeed;
             var repeatInterval = 1f / (iterationSpeed is 0 ? 15 : iterationSpeed);
             if (_playbackSpeedInput.Update(
                 increaseSpeedPressed,

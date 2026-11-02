@@ -248,7 +248,7 @@ namespace MajdataPlay.Tests.Game.Notes.PlayMode
             settings.Display.TapScale = 1.5f;
             settings.Game.SlideSkipping = false;
             settings.Judge.Mode = JudgeModeOption.Classic;
-            _environment.SystemSettings.Debug.DJAutoPolicy = DJAutoPolicyOption.Permissive;
+            _environment.SystemSettings.Common.DJAutoPolicy = DJAutoPolicyOption.Permissive;
             _controller.SetMods(AutoplayModeOption.Enable, buttonRingForTouch: true);
 
             var note = CreateNote();
