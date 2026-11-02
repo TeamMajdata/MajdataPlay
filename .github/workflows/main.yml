@@ -770,8 +770,9 @@ jobs:
           fi
           STAGE="$RUNNER_TEMP/rhythmhub"
           rm -rf "$STAGE" && mkdir -p "$STAGE"
-          # ditto keeps the bundle's symlinks, permissions and code signature intact.
-          ditto "$found" "$STAGE/MajdataPlay.app"
+          # cp -c clones on APFS: no extra disk space. -p keeps permissions, -R copies symlinks as links;
+          # the code signature lives inside the bundle, so it is preserved.
+          cp -cpR "$found" "$STAGE/"
           {
             echo "channel=$channel"
             echo "prune=$prune"
