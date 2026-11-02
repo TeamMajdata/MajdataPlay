@@ -34,7 +34,90 @@ namespace MajdataPlay.Net.Curl
         /// </summary>
         public int ResponseBodyBufferSize { get; set; } = 64 * 1024;
         public long MaxRequestContentBufferSize { get; set; } = int.MaxValue;
-        public int MaxConnectionsPerServer { get; set; } = 8;
+        /// <summary>
+        /// Gets or sets the limit on simultaneous connections to one host, applied as
+        /// <c>CURLMOPT_MAX_HOST_CONNECTIONS</c>. Requests beyond it wait for a free connection. Defaults to 8.
+        /// </summary>
+        /// <remarks>
+        /// The limit is shared by every request of this handler; the value of the latest submitted request applies.
+        /// </remarks>
+        /// <exception cref="ArgumentOutOfRangeException">The value is less than 1.</exception>
+        public int MaxConnectionsPerServer
+        {
+            get => _maxConnectionsPerServer;
+            set
+            {
+                if (value < 1)
+                {
+                    throw new ArgumentOutOfRangeException(nameof(MaxConnectionsPerServer), value, "At least one connection per server must be allowed.");
+                }
+                _maxConnectionsPerServer = value;
+            }
+        }
+        /// <summary>
+        /// Gets or sets how many connections libcurl may keep open in its connection pool, applied as
+        /// <c>CURLMOPT_MAXCONNECTS</c>. When a finished transfer would exceed it, libcurl closes the oldest idle
+        /// connection. Defaults to 0, which lets libcurl size the pool from the number of running transfers.
+        /// </summary>
+        /// <remarks>
+        /// The pool is shared by every request of this handler; the value of the latest submitted request applies.
+        /// </remarks>
+        /// <exception cref="ArgumentOutOfRangeException">The value is negative.</exception>
+        public int MaxCachedConnections
+        {
+            get => _maxCachedConnections;
+            set
+            {
+                if (value < 0)
+                {
+                    throw new ArgumentOutOfRangeException(nameof(MaxCachedConnections), value, "The connection pool size cannot be negative.");
+                }
+                _maxCachedConnections = value;
+            }
+        }
+        /// <summary>
+        /// Gets or sets how long a pooled connection may have been idle and still be reused, applied as
+        /// <c>CURLOPT_MAXAGE_CONN</c>. An older idle connection is closed instead of being reused. Defaults to 118
+        /// seconds, libcurl's own default; <see cref="System.Threading.Timeout.InfiniteTimeSpan"/> means no limit.
+        /// </summary>
+        /// <remarks>
+        /// libcurl measures this in whole seconds, so the value is rounded up to whole seconds and capped at
+        /// <see cref="int.MaxValue"/> seconds. It is checked when a request looks for a connection to reuse.
+        /// </remarks>
+        /// <exception cref="ArgumentOutOfRangeException">
+        /// The value is neither positive nor <see cref="System.Threading.Timeout.InfiniteTimeSpan"/>.
+        /// </exception>
+        public TimeSpan PooledConnectionIdleTimeout
+        {
+            get => _pooledConnectionIdleTimeout;
+            set
+            {
+                EnsureValidTimeout(value, nameof(PooledConnectionIdleTimeout));
+                _pooledConnectionIdleTimeout = value;
+            }
+        }
+        /// <summary>
+        /// Gets or sets how long after it was opened a pooled connection may still be reused, applied as
+        /// <c>CURLOPT_MAXLIFETIME_CONN</c>. An older connection is closed instead of being reused, so that, for example,
+        /// DNS changes are picked up. Defaults to <see cref="System.Threading.Timeout.InfiniteTimeSpan"/>, which means
+        /// no limit.
+        /// </summary>
+        /// <remarks>
+        /// libcurl measures this in whole seconds, so the value is rounded up to whole seconds and capped at
+        /// <see cref="int.MaxValue"/> seconds. A transfer already using the connection is not interrupted.
+        /// </remarks>
+        /// <exception cref="ArgumentOutOfRangeException">
+        /// The value is neither positive nor <see cref="System.Threading.Timeout.InfiniteTimeSpan"/>.
+        /// </exception>
+        public TimeSpan PooledConnectionLifetime
+        {
+            get => _pooledConnectionLifetime;
+            set
+            {
+                EnsureValidTimeout(value, nameof(PooledConnectionLifetime));
+                _pooledConnectionLifetime = value;
+            }
+        }
         public int MaxAutomaticRedirections { get; set; } = 50;
         public ICredentials? DefaultProxyCredentials { get; set; }
         public ICredentials? Credentials { get; set; }
@@ -146,6 +229,10 @@ namespace MajdataPlay.Net.Curl
         private TimeSpan _connectTimeout = System.Threading.Timeout.InfiniteTimeSpan;
         private TimeSpan _lowSpeedTimeout = System.Threading.Timeout.InfiniteTimeSpan;
         private int _lowSpeedLimit = 1;
+        private int _maxConnectionsPerServer = 8;
+        private int _maxCachedConnections;
+        private TimeSpan _pooledConnectionIdleTimeout = TimeSpan.FromSeconds(118);
+        private TimeSpan _pooledConnectionLifetime = System.Threading.Timeout.InfiniteTimeSpan;
 
         public CurlHttpMessageHandler()
         {
@@ -228,7 +315,10 @@ namespace MajdataPlay.Net.Curl
                 Timeout = Timeout,
                 ConnectTimeout = ConnectTimeout,
                 LowSpeedTimeout = LowSpeedTimeout,
-                LowSpeedLimit = LowSpeedLimit
+                LowSpeedLimit = LowSpeedLimit,
+                MaxCachedConnections = MaxCachedConnections,
+                PooledConnectionIdleTimeout = PooledConnectionIdleTimeout,
+                PooledConnectionLifetime = PooledConnectionLifetime
             };
 
             return config;

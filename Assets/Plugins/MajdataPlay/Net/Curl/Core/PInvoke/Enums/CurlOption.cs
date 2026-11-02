@@ -41,6 +41,12 @@ namespace MajdataPlay.Net.Curl.Core.PInvoke
         /// <summary>Connection timeout in milliseconds (<c>CURLOPT_CONNECTTIMEOUT_MS</c>).</summary>
         ConnectTimeoutMs = 156,
 
+        /// <summary>Longest time in seconds a pooled connection may have been idle to be reused (<c>CURLOPT_MAXAGE_CONN</c>).</summary>
+        MaxAgeConn = 288,
+
+        /// <summary>Longest time in seconds since a pooled connection was created for it to be reused (<c>CURLOPT_MAXLIFETIME_CONN</c>).</summary>
+        MaxLifetimeConn = 314,
+
         /// <summary>Maximum number of redirects.</summary>
         MaxRedirs = 68,
 

@@ -202,6 +202,99 @@ namespace MajdataPlay.Tests.Plugins.Net.Curl.Diagnostics
             Assert.That(idle.CompletedRequests, Is.EqualTo(2));
         });
 
+        /// <summary>Checks that the per-host limit makes a second request wait for, and then reuse, the only connection.</summary>
+        /// <returns>The test coroutine.</returns>
+        [UnityTest]
+        public IEnumerator MaxConnectionsPerServer_QueuesRequestsBeyondLimit() => UniTask.ToCoroutine(async () =>
+        {
+            using var server = new KeepAliveHttpServer();
+            using var handler = new CurlHttpMessageHandler { MaxConnectionsPerServer = 1 };
+            using var client = new HttpClient(handler, false);
+
+            var first = GetAsync(client, server.Url + "hold");
+            var second = GetAsync(client, server.Url + "hold");
+            await WaitUntilAsync(() => server.HeldCount == 1, "the first request to reach the server");
+            // Gives the second request time to open a connection of its own if the limit were not applied.
+            await Task.Delay(300);
+            var heldWhileLimited = server.HeldCount;
+            var connectionsWhileLimited = server.ConnectionCount;
+            server.ReleaseHeld();
+            await Task.WhenAll(first, second);
+
+            Assert.That(heldWhileLimited, Is.EqualTo(1));
+            Assert.That(connectionsWhileLimited, Is.EqualTo(1));
+            Assert.That(server.RequestCount, Is.EqualTo(2));
+            Assert.That(server.ConnectionCount, Is.EqualTo(1));
+            Assert.That(handler.Statistics.GetSnapshot().MaxConnectionsPerHost, Is.EqualTo(1));
+        });
+
+        /// <summary>Checks that a pool smaller than the connections in use closes the surplus connection once it is idle.</summary>
+        /// <returns>The test coroutine.</returns>
+        [UnityTest]
+        public IEnumerator MaxCachedConnections_ClosesConnectionsBeyondPool() => UniTask.ToCoroutine(async () =>
+        {
+            using var server = new KeepAliveHttpServer();
+            using var handler = new CurlHttpMessageHandler { MaxCachedConnections = 1 };
+            using var client = new HttpClient(handler, false);
+
+            var first = GetAsync(client, server.Url + "hold");
+            var second = GetAsync(client, server.Url + "hold");
+            await WaitUntilAsync(() => server.HeldCount == 2, "both requests to reach the server");
+            server.ReleaseHeld();
+            await Task.WhenAll(first, second);
+            await WaitUntilAsync(() => handler.Statistics.GetSnapshot().ConnectionsClosed == 1, "the surplus connection to close");
+            var snapshot = handler.Statistics.GetSnapshot();
+
+            Assert.That(server.ConnectionCount, Is.EqualTo(2));
+            Assert.That(snapshot.ConnectionsOpened, Is.EqualTo(2));
+            Assert.That(snapshot.OpenConnections, Is.EqualTo(1));
+            Assert.That(snapshot.IdleConnections, Is.EqualTo(1));
+        });
+
+        /// <summary>Checks that a connection idle for longer than the idle timeout is replaced instead of reused.</summary>
+        /// <returns>The test coroutine.</returns>
+        [UnityTest]
+        public IEnumerator PooledConnectionIdleTimeout_ReplacesIdleConnection() => UniTask.ToCoroutine(async () =>
+        {
+            using var server = new KeepAliveHttpServer();
+            using var handler = new CurlHttpMessageHandler { PooledConnectionIdleTimeout = TimeSpan.FromSeconds(1) };
+            using var client = new HttpClient(handler, false);
+
+            await GetAsync(client, server.Url + "first");
+            // libcurl compares whole seconds, so a 1-second limit expires once the connection has idled for 2 seconds.
+            await Task.Delay(2500);
+            await GetAsync(client, server.Url + "second");
+            var snapshot = handler.Statistics.GetSnapshot();
+
+            Assert.That(server.ConnectionCount, Is.EqualTo(2));
+            Assert.That(snapshot.ConnectionsOpened, Is.EqualTo(2));
+            Assert.That(snapshot.ConnectionReuses, Is.Zero);
+            Assert.That(snapshot.ConnectionsClosed, Is.EqualTo(1));
+        });
+
+        /// <summary>Checks that a connection older than its lifetime is replaced even though it never sat idle for long.</summary>
+        /// <returns>The test coroutine.</returns>
+        [UnityTest]
+        public IEnumerator PooledConnectionLifetime_ReplacesOldConnection() => UniTask.ToCoroutine(async () =>
+        {
+            using var server = new KeepAliveHttpServer();
+            using var handler = new CurlHttpMessageHandler { PooledConnectionLifetime = TimeSpan.FromSeconds(1) };
+            using var client = new HttpClient(handler, false);
+
+            await GetAsync(client, server.Url + "first");
+            // Requests every 600 ms keep the connection busy; libcurl retires it once it is 2 whole seconds old.
+            for (var i = 0; i < 5; i++)
+            {
+                await Task.Delay(600);
+                await GetAsync(client, server.Url + "next");
+            }
+            var snapshot = handler.Statistics.GetSnapshot();
+
+            Assert.That(server.ConnectionCount, Is.GreaterThanOrEqualTo(2));
+            Assert.That(snapshot.ConnectionReuses, Is.GreaterThanOrEqualTo(1));
+            Assert.That(snapshot.ConnectionsClosed, Is.GreaterThanOrEqualTo(1));
+        });
+
         /// <summary>Checks the failure and cancellation counters, and that an aborted connection leaves the pool.</summary>
         /// <returns>The test coroutine.</returns>
         [UnityTest]

@@ -29,7 +29,26 @@ namespace MajdataPlay.Net.Curl
         /// </summary>
         public int ResponseBodyBufferSize { get; init; }
         public long MaxRequestContentBufferSize { get; init; }
+        /// <summary>
+        /// Gets the limit on simultaneous connections to one host, applied as <c>CURLMOPT_MAX_HOST_CONNECTIONS</c>. Zero
+        /// means no limit.
+        /// </summary>
         public int MaxConnectionsPerServer { get; init; }
+        /// <summary>
+        /// Gets the number of connections libcurl may keep open in its connection pool, applied as
+        /// <c>CURLMOPT_MAXCONNECTS</c>. Zero lets libcurl size the pool itself.
+        /// </summary>
+        public int MaxCachedConnections { get; init; }
+        /// <summary>
+        /// Gets how long a pooled connection may have been idle and still be reused, applied as
+        /// <c>CURLOPT_MAXAGE_CONN</c>. Zero keeps libcurl's default of 118 seconds; a negative value means no limit.
+        /// </summary>
+        public TimeSpan PooledConnectionIdleTimeout { get; init; }
+        /// <summary>
+        /// Gets how long after it was opened a pooled connection may still be reused, applied as
+        /// <c>CURLOPT_MAXLIFETIME_CONN</c>. Zero or a negative value means no limit.
+        /// </summary>
+        public TimeSpan PooledConnectionLifetime { get; init; }
         public int MaxAutomaticRedirections { get; init; }
         public ICredentials? DefaultProxyCredentials { get; init; }
         public ICredentials? Credentials { get; init; }
@@ -60,11 +79,21 @@ namespace MajdataPlay.Net.Curl
         /// </summary>
         public int LowSpeedLimit { get; init; }
 
-        internal readonly void ApplyToMulti(CurlMulti multi)
+        /// <summary>
+        /// Applies the connection pool limits to the multi handle shared by every request of the handler.
+        /// </summary>
+        /// <param name="multi">The multi handle the request is about to be added to.</param>
+        /// <returns><see cref="CurlMCode.Ok"/>, or the code of the first option libcurl rejected.</returns>
+        internal readonly CurlMCode ApplyToMulti(CurlMulti multi)
         {
             var multiHandle = multi.Handle;
 
-            LibCurl.Multi.SetOption(multiHandle, CurlMOption.MaxHostConnections, (IntPtr)MaxConnectionsPerServer);
+            var returnCode = LibCurl.Multi.SetOption(multiHandle, CurlMOption.MaxHostConnections, (long)Math.Max(MaxConnectionsPerServer, 0));
+            if (returnCode != CurlMCode.Ok)
+            {
+                return returnCode;
+            }
+            return LibCurl.Multi.SetOption(multiHandle, CurlMOption.MaxConnections, (long)Math.Max(MaxCachedConnections, 0));
         }
 
         internal readonly void ApplyToEasy(CurlEasy curlEasy, Uri requestUri)
@@ -80,6 +109,14 @@ namespace MajdataPlay.Net.Curl
             returnCode = LibCurl.Easy.SetOption(easyHandle, CurlOption.LowSpeedTime, lowSpeedTime);
             CurlUtility.EnsureSuccess(easyHandle, returnCode);
             returnCode = LibCurl.Easy.SetOption(easyHandle, CurlOption.LowSpeedLimit, lowSpeedTime > 0 ? Math.Max(LowSpeedLimit, 0) : 0);
+            CurlUtility.EnsureSuccess(easyHandle, returnCode);
+
+            if (PooledConnectionIdleTimeout != TimeSpan.Zero)
+            {
+                returnCode = LibCurl.Easy.SetOption(easyHandle, CurlOption.MaxAgeConn, ToCurlMaxAgeSeconds(PooledConnectionIdleTimeout));
+                CurlUtility.EnsureSuccess(easyHandle, returnCode);
+            }
+            returnCode = LibCurl.Easy.SetOption(easyHandle, CurlOption.MaxLifetimeConn, ToCurlSeconds(PooledConnectionLifetime));
             CurlUtility.EnsureSuccess(easyHandle, returnCode);
 
             returnCode = LibCurl.Easy.SetOption(easyHandle, CurlOption.FollowLocation, AllowAutoRedirect ? 1 : 0);
@@ -205,6 +242,23 @@ namespace MajdataPlay.Net.Curl
             }
             var seconds = DivideRoundingUp(timeout.Ticks, TimeSpan.TicksPerSecond);
             return Math.Min(seconds, int.MaxValue);
+        }
+        /// <summary>
+        /// Converts an idle timeout to the second value of <c>CURLOPT_MAXAGE_CONN</c>, where 0 would make almost every
+        /// pooled connection too old to reuse rather than lift the limit.
+        /// </summary>
+        /// <param name="idleTimeout">The idle timeout to convert; a negative value means no limit.</param>
+        /// <returns>
+        /// The timeout rounded up to whole seconds and capped at <see cref="int.MaxValue"/>; <see cref="int.MaxValue"/>
+        /// when there is no limit.
+        /// </returns>
+        internal static long ToCurlMaxAgeSeconds(TimeSpan idleTimeout)
+        {
+            if (idleTimeout < TimeSpan.Zero)
+            {
+                return int.MaxValue;
+            }
+            return ToCurlSeconds(idleTimeout);
         }
         /// <summary>
         /// Divides a non-negative tick count, rounding up without overflowing near <see cref="long.MaxValue"/>.

@@ -51,6 +51,9 @@ namespace MajdataPlay.Tests.Plugins.Net.Curl
             Assert.That(handler.ConnectTimeout, Is.EqualTo(Timeout.InfiniteTimeSpan));
             Assert.That(handler.LowSpeedTimeout, Is.EqualTo(Timeout.InfiniteTimeSpan));
             Assert.That(handler.LowSpeedLimit, Is.EqualTo(1));
+            Assert.That(handler.MaxCachedConnections, Is.Zero);
+            Assert.That(handler.PooledConnectionIdleTimeout, Is.EqualTo(TimeSpan.FromSeconds(118)));
+            Assert.That(handler.PooledConnectionLifetime, Is.EqualTo(Timeout.InfiniteTimeSpan));
         }
 
         /// <summary>Checks that the per-request snapshot copies every handler setting.</summary>
@@ -82,7 +85,10 @@ namespace MajdataPlay.Tests.Plugins.Net.Curl
                 Timeout = TimeSpan.FromSeconds(6),
                 ConnectTimeout = TimeSpan.FromSeconds(7),
                 LowSpeedTimeout = TimeSpan.FromSeconds(8),
-                LowSpeedLimit = 9
+                LowSpeedLimit = 9,
+                MaxCachedConnections = 10,
+                PooledConnectionIdleTimeout = TimeSpan.FromSeconds(11),
+                PooledConnectionLifetime = TimeSpan.FromSeconds(12)
             };
 
             var config = PrivateMember.Invoke<CurlHttpConfig>(handler, "CopyCurrentConfig");
@@ -107,6 +113,9 @@ namespace MajdataPlay.Tests.Plugins.Net.Curl
             Assert.That(config.ConnectTimeout, Is.EqualTo(TimeSpan.FromSeconds(7)));
             Assert.That(config.LowSpeedTimeout, Is.EqualTo(TimeSpan.FromSeconds(8)));
             Assert.That(config.LowSpeedLimit, Is.EqualTo(9));
+            Assert.That(config.MaxCachedConnections, Is.EqualTo(10));
+            Assert.That(config.PooledConnectionIdleTimeout, Is.EqualTo(TimeSpan.FromSeconds(11)));
+            Assert.That(config.PooledConnectionLifetime, Is.EqualTo(TimeSpan.FromSeconds(12)));
         }
 
         /// <summary>Checks that the timeout settings accept positive values and the infinite sentinel only.</summary>
@@ -124,6 +133,33 @@ namespace MajdataPlay.Tests.Plugins.Net.Curl
             Assert.DoesNotThrow(() => handler.LowSpeedTimeout = TimeSpan.MaxValue);
             Assert.DoesNotThrow(() => handler.LowSpeedLimit = int.MaxValue);
             Assert.That(handler.Timeout, Is.EqualTo(TimeSpan.FromTicks(1)));
+        }
+
+        /// <summary>Checks that the connection pool settings reject values libcurl cannot express as intended.</summary>
+        [Test]
+        public void Handler_PoolSettingsRejectInvalidValues()
+        {
+            using var handler = new CurlHttpMessageHandler();
+
+            Assert.Throws<ArgumentOutOfRangeException>(() => handler.MaxConnectionsPerServer = 0);
+            Assert.Throws<ArgumentOutOfRangeException>(() => handler.MaxCachedConnections = -1);
+            Assert.Throws<ArgumentOutOfRangeException>(() => handler.PooledConnectionIdleTimeout = TimeSpan.Zero);
+            Assert.Throws<ArgumentOutOfRangeException>(() => handler.PooledConnectionLifetime = TimeSpan.FromSeconds(-1));
+            Assert.DoesNotThrow(() => handler.MaxConnectionsPerServer = 1);
+            Assert.DoesNotThrow(() => handler.MaxCachedConnections = 0);
+            Assert.DoesNotThrow(() => handler.PooledConnectionIdleTimeout = Timeout.InfiniteTimeSpan);
+            Assert.DoesNotThrow(() => handler.PooledConnectionLifetime = TimeSpan.FromMilliseconds(1));
+            Assert.That(handler.MaxConnectionsPerServer, Is.EqualTo(1));
+        }
+
+        /// <summary>Checks that an idle timeout maps "no limit" to the largest value, because 0 would forbid reuse.</summary>
+        [Test]
+        public void ToCurlMaxAgeSeconds_MapsNoLimitToMaximum()
+        {
+            Assert.That(CurlHttpConfig.ToCurlMaxAgeSeconds(Timeout.InfiniteTimeSpan), Is.EqualTo(int.MaxValue));
+            Assert.That(CurlHttpConfig.ToCurlMaxAgeSeconds(TimeSpan.FromSeconds(118)), Is.EqualTo(118));
+            Assert.That(CurlHttpConfig.ToCurlMaxAgeSeconds(TimeSpan.FromMilliseconds(1500)), Is.EqualTo(2));
+            Assert.That(CurlHttpConfig.ToCurlMaxAgeSeconds(TimeSpan.MaxValue), Is.EqualTo(int.MaxValue));
         }
 
         /// <summary>Checks that millisecond timeouts round up, cap at the 32-bit C long range and map "no limit" to 0.</summary>

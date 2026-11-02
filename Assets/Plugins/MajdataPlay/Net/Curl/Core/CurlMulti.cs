@@ -338,9 +338,15 @@ namespace MajdataPlay.Net.Curl.Core
                     FinishDetachedTask(pendingTask);
                     continue;
                 }
-                pendingTask.Config.ApplyToMulti(this);
+                var returnCode = pendingTask.Config.ApplyToMulti(this);
+                if (returnCode != CurlMCode.Ok)
+                {
+                    pendingTask.TryFail(new InvalidOperationException($"libcurl error: curl_multi_setopt returned {returnCode}"));
+                    FinishDetachedTask(pendingTask);
+                    continue;
+                }
                 _statistics.OnMaxConnectionsPerHostApplied(pendingTask.Config.MaxConnectionsPerServer);
-                var returnCode = LibCurl.Multi.AddEasyHandle(ThisHandle, pendingTask.Easy.Handle);
+                returnCode = LibCurl.Multi.AddEasyHandle(ThisHandle, pendingTask.Easy.Handle);
                 if (returnCode != CurlMCode.Ok)
                 {
                     pendingTask.TryFail(new InvalidOperationException($"libcurl error: curl_multi_add_handle returned {returnCode}"));
