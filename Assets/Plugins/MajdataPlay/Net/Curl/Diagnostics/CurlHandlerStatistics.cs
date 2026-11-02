@@ -77,6 +77,11 @@ namespace MajdataPlay.Net.Curl.Diagnostics
         private int _maxConnectionsPerHost;
 
         /// <summary>
+        /// The <c>CURLMOPT_MAXCONNECTS</c> value applied last, 0 when libcurl sizes the pool itself.
+        /// </summary>
+        private int _maxCachedConnections;
+
+        /// <summary>
         /// Whether a request of this handler tracked its connection.
         /// </summary>
         private bool _isTrackingConnections;
@@ -147,6 +152,7 @@ namespace MajdataPlay.Net.Curl.Diagnostics
                     FailedRequests = _failedRequests,
                     CancelledRequests = _cancelledRequests,
                     MaxConnectionsPerHost = _maxConnectionsPerHost,
+                    MaxCachedConnections = _maxCachedConnections,
                     IsTrackingConnections = _isTrackingConnections,
                     ConnectionsOpened = _connectionsOpened,
                     ConnectionReuses = _connectionReuses,
@@ -230,14 +236,16 @@ namespace MajdataPlay.Net.Curl.Diagnostics
         }
 
         /// <summary>
-        /// Records the <c>CURLMOPT_MAX_HOST_CONNECTIONS</c> value applied to the multi handle.
+        /// Records the connection pool limits applied to the multi handle.
         /// </summary>
-        /// <param name="maxConnectionsPerHost">The value.</param>
-        internal void OnMaxConnectionsPerHostApplied(int maxConnectionsPerHost)
+        /// <param name="maxConnectionsPerHost">The <c>CURLMOPT_MAX_HOST_CONNECTIONS</c> value.</param>
+        /// <param name="maxCachedConnections">The <c>CURLMOPT_MAXCONNECTS</c> value, 0 when libcurl sizes the pool itself.</param>
+        internal void OnPoolLimitsApplied(int maxConnectionsPerHost, int maxCachedConnections)
         {
             lock (_sync)
             {
                 _maxConnectionsPerHost = maxConnectionsPerHost;
+                _maxCachedConnections = maxCachedConnections;
             }
         }
 

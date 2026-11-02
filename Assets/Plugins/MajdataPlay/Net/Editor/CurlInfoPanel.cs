@@ -22,6 +22,7 @@ namespace MajdataPlay.Net.Editor
         private static readonly string[] s_handlerHeadings =
         {
             "#", "State", "Created", "Requests", "Queued", "Running", "Completed", "Failed", "Cancelled", "Open", "Idle", "Reused",
+            "Pool limit",
         };
 
         /// <summary>
@@ -29,7 +30,7 @@ namespace MajdataPlay.Net.Editor
         /// </summary>
         private static readonly float[] s_handlerWeights =
         {
-            0.04f, 0.09f, 0.10f, 0.09f, 0.08f, 0.08f, 0.10f, 0.08f, 0.09f, 0.07f, 0.07f, 0.08f,
+            0.04f, 0.08f, 0.08f, 0.08f, 0.07f, 0.07f, 0.09f, 0.07f, 0.08f, 0.07f, 0.07f, 0.07f, 0.09f,
         };
 
         /// <summary>
@@ -227,6 +228,14 @@ namespace MajdataPlay.Net.Editor
                 }
                 else
                 {
+                    if (totals.AliveHandlers == 0)
+                    {
+                        totals.MaxCachedConnections = handler.MaxCachedConnections;
+                    }
+                    else if (totals.MaxCachedConnections != handler.MaxCachedConnections)
+                    {
+                        totals.HasMixedMaxCachedConnections = true;
+                    }
                     totals.AliveHandlers++;
                     totals.MaxConnectionsPerHost = Math.Max(totals.MaxConnectionsPerHost, handler.MaxConnectionsPerHost);
                 }
@@ -310,8 +319,33 @@ namespace MajdataPlay.Net.Editor
                 new("Reuse rate", reuseRate),
                 new("Closed", Format(totals.ConnectionsClosed)),
                 new("Max per host", maxPerHost),
-                new("Idle limit", "libcurl default: 4 per transfer in progress (CURLMOPT_MAXCONNECTS not set)"),
+                new("Idle limit", FormatIdleLimit(totals)),
             };
+        }
+
+        /// <summary>
+        /// Describes the <c>CURLMOPT_MAXCONNECTS</c> limit of the live handlers.
+        /// </summary>
+        /// <param name="totals">The totals of every handler.</param>
+        /// <returns>
+        /// "-" without live handlers, a note when they use different limits, libcurl's default when none is set, or the
+        /// shared limit.
+        /// </returns>
+        internal static string FormatIdleLimit(Totals totals)
+        {
+            if (totals.AliveHandlers == 0)
+            {
+                return "-";
+            }
+            if (totals.HasMixedMaxCachedConnections)
+            {
+                return "Differs between handlers (CURLMOPT_MAXCONNECTS), see the Pool limit column";
+            }
+            if (totals.MaxCachedConnections == 0)
+            {
+                return "libcurl default: 4 per transfer in progress (CURLMOPT_MAXCONNECTS not set)";
+            }
+            return $"{Format(totals.MaxCachedConnections)} connections per handler (CURLMOPT_MAXCONNECTS)";
         }
 
         /// <summary>
@@ -338,6 +372,7 @@ namespace MajdataPlay.Net.Editor
                     Format(handler.OpenConnections),
                     Format(handler.IdleConnections),
                     Format(handler.ConnectionReuses),
+                    handler.MaxCachedConnections == 0 ? "default" : Format(handler.MaxCachedConnections),
                 });
             }
 
@@ -507,6 +542,16 @@ namespace MajdataPlay.Net.Editor
             /// The largest <c>CURLMOPT_MAX_HOST_CONNECTIONS</c> of the live handlers.
             /// </summary>
             public int MaxConnectionsPerHost;
+
+            /// <summary>
+            /// The <c>CURLMOPT_MAXCONNECTS</c> of the first live handler, 0 when libcurl sizes its pool itself.
+            /// </summary>
+            public int MaxCachedConnections;
+
+            /// <summary>
+            /// Whether the live handlers use different <c>CURLMOPT_MAXCONNECTS</c> values.
+            /// </summary>
+            public bool HasMixedMaxCachedConnections;
 
             /// <summary>
             /// Gets the number of open connections at least one transfer uses.

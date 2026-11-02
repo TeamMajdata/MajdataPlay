@@ -68,6 +68,12 @@ namespace MajdataPlay.Net.Curl.Diagnostics
         public int MaxConnectionsPerHost { get; internal init; }
 
         /// <summary>
+        /// Gets the value of <c>CURLMOPT_MAXCONNECTS</c> applied last, or 0 when libcurl sizes the pool itself, which is
+        /// also the case before the first request.
+        /// </summary>
+        public int MaxCachedConnections { get; internal init; }
+
+        /// <summary>
         /// Gets whether connection tracking was on for at least one request of this handler.
         /// </summary>
         public bool IsTrackingConnections { get; internal init; }

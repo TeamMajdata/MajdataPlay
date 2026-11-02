@@ -345,7 +345,7 @@ namespace MajdataPlay.Net.Curl.Core
                     FinishDetachedTask(pendingTask);
                     continue;
                 }
-                _statistics.OnMaxConnectionsPerHostApplied(pendingTask.Config.MaxConnectionsPerServer);
+                _statistics.OnPoolLimitsApplied(pendingTask.Config.MaxConnectionsPerServer, pendingTask.Config.MaxCachedConnections);
                 returnCode = LibCurl.Multi.AddEasyHandle(ThisHandle, pendingTask.Easy.Handle);
                 if (returnCode != CurlMCode.Ok)
                 {

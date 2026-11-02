@@ -154,7 +154,7 @@ namespace MajdataPlay.Tests.Plugins.Net.Curl.Diagnostics
             statistics.OnRequestAttached();
             statistics.OnConnectionUsed(-1, 0, true, "a:80", "l:1");
             statistics.OnConnectionUsed(-1, 1, true, "a:80", "l:2");
-            statistics.OnMaxConnectionsPerHostApplied(8);
+            statistics.OnPoolLimitsApplied(8, 3);
 
             statistics.OnDisposed();
             var disposedAt = statistics.GetSnapshot().DisposedAt;
@@ -170,6 +170,7 @@ namespace MajdataPlay.Tests.Plugins.Net.Curl.Diagnostics
             Assert.That(snapshot.RunningRequests, Is.Zero);
             Assert.That(snapshot.TotalRequests, Is.EqualTo(1));
             Assert.That(snapshot.MaxConnectionsPerHost, Is.EqualTo(8));
+            Assert.That(snapshot.MaxCachedConnections, Is.EqualTo(3));
         }
 
         /// <summary>Checks registration order, the cap on disposed handlers and clearing them.</summary>

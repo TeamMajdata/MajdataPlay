@@ -250,6 +250,7 @@ namespace MajdataPlay.Tests.Plugins.Net.Curl.Diagnostics
             Assert.That(snapshot.ConnectionsOpened, Is.EqualTo(2));
             Assert.That(snapshot.OpenConnections, Is.EqualTo(1));
             Assert.That(snapshot.IdleConnections, Is.EqualTo(1));
+            Assert.That(snapshot.MaxCachedConnections, Is.EqualTo(1));
         });
 
         /// <summary>Checks that a connection idle for longer than the idle timeout is replaced instead of reused.</summary>

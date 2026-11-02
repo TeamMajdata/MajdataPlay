@@ -37,11 +37,12 @@ namespace MajdataPlay.Tests.Plugins.Net.Editor
         /// connection #1, the second reusing it) and a pool of two connections, #1 idle.
         /// </summary>
         /// <param name="maxPerHost">The applied <c>CURLMOPT_MAX_HOST_CONNECTIONS</c>.</param>
+        /// <param name="maxCached">The applied <c>CURLMOPT_MAXCONNECTS</c>, 0 for libcurl's default.</param>
         /// <returns>The registered statistics.</returns>
-        private static CurlHandlerStatistics CreateBusyHandler(int maxPerHost)
+        private static CurlHandlerStatistics CreateBusyHandler(int maxPerHost, int maxCached = 0)
         {
             var statistics = CurlStatistics.Register();
-            statistics.OnMaxConnectionsPerHostApplied(maxPerHost);
+            statistics.OnPoolLimitsApplied(maxPerHost, maxCached);
             for (var i = 0; i < 4; i++)
             {
                 statistics.OnRequestQueued();
@@ -102,6 +103,32 @@ namespace MajdataPlay.Tests.Plugins.Net.Editor
             Assert.That(totals.MaxConnectionsPerHost, Is.EqualTo(8));
         }
 
+        /// <summary>
+        /// Checks that the idle limit row shows the limit shared by the live handlers, libcurl's default when none is set,
+        /// and a note when the live handlers differ, ignoring disposed handlers.
+        /// </summary>
+        [Test]
+        public void IdleLimit_DescribesLiveHandlerLimits()
+        {
+            var four = CreateBusyHandler(8, 4);
+            var otherFour = CreateBusyHandler(8, 4);
+            var unset = CreateBusyHandler(8);
+            var disposed = CreateBusyHandler(8, 16);
+            CurlStatistics.OnHandlerDisposed(disposed);
+
+            var shared = CurlInfoPanel.GetTotals(new[] { four.GetSnapshot(), otherFour.GetSnapshot(), disposed.GetSnapshot() });
+            var mixed = CurlInfoPanel.GetTotals(new[] { four.GetSnapshot(), unset.GetSnapshot() });
+            var handlerRows = CurlInfoPanel.GetHandlerRows(new[] { four.GetSnapshot(), unset.GetSnapshot() });
+
+            Assert.That(shared.HasMixedMaxCachedConnections, Is.False);
+            Assert.That(CurlInfoPanel.FormatIdleLimit(shared), Is.EqualTo("4 connections per handler (CURLMOPT_MAXCONNECTS)"));
+            Assert.That(mixed.HasMixedMaxCachedConnections, Is.True);
+            Assert.That(CurlInfoPanel.FormatIdleLimit(mixed), Does.StartWith("Differs between handlers"));
+            Assert.That(CurlInfoPanel.FormatIdleLimit(CurlInfoPanel.GetTotals(new[] { unset.GetSnapshot() })), Does.StartWith("libcurl default"));
+            Assert.That(CurlInfoPanel.FormatIdleLimit(CurlInfoPanel.GetTotals(new[] { disposed.GetSnapshot() })), Is.EqualTo("-"));
+            Assert.That(handlerRows.Select(x => x[x.Length - 1]), Is.EqualTo(new[] { "4", "default" }));
+        }
+
         /// <summary>Checks the rows of the Requests and Connection Pool sections.</summary>
         [Test]
         public void SectionRows_DescribeTotals()
@@ -127,9 +154,11 @@ namespace MajdataPlay.Tests.Plugins.Net.Editor
             Assert.That(pool["Reused"], Does.StartWith("1 "));
             Assert.That(pool["Reuse rate"], Is.EqualTo("33%"));
             Assert.That(pool["Max per host"], Does.StartWith("8 "));
+            Assert.That(pool["Idle limit"], Does.StartWith("libcurl default"));
             Assert.That(untracked["Connection tracking"], Does.StartWith("Off"));
             Assert.That(untracked["Reuse rate"], Is.EqualTo("-"));
             Assert.That(untracked["Max per host"], Is.EqualTo("-"));
+            Assert.That(untracked["Idle limit"], Is.EqualTo("-"));
         }
 
         /// <summary>Checks the handler and connection table rows.</summary>
@@ -147,7 +176,7 @@ namespace MajdataPlay.Tests.Plugins.Net.Editor
             Assert.That(handlers.Single(), Is.EqualTo(new[]
             {
                 busy.Id.ToString(CultureInfo.InvariantCulture), "Alive", snapshot.CreatedAt.ToString("HH:mm:ss", CultureInfo.InvariantCulture),
-                "4", "1", "1", "1", "1", "0", "3", "1", "2",
+                "4", "1", "1", "1", "1", "0", "3", "1", "2", "default",
             }));
             Assert.That(connections.Select(x => x[1]), Is.EqualTo(new[] { "#0", "#1", "#9" }));
             Assert.That(connections[0], Is.EqualTo(new[]
