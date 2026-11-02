@@ -3,13 +3,7 @@ namespace MajdataPlay.Settings
 {
     public class SoundOptions
     {
-#if UNITY_IOS || UNITY_ANDROID
-        private static readonly SoundBackendOption s_defaultSoundBackend = SoundBackendOption.BassSimple;
-#else
-        private static readonly SoundBackendOption s_defaultSoundBackend = SoundBackendOption.Wasapi;
-#endif
-
-        public bool ForceMono { get; set; } = false;
+        public bool ForceMono { get; set; } = SettingDefaults.Sound.ForceMono;
 #if UNITY_STANDALONE
 #if UNITY_STANDALONE_WIN
 
@@ -23,6 +17,6 @@ namespace MajdataPlay.Settings
 
         public BassAudioOptions Bass { get; set; } = new();
 
-        public SoundBackendOption Backend { get; set; } = s_defaultSoundBackend;
+        public SoundBackendOption Backend { get; set; } = SettingDefaults.Sound.Backend;
     }
 }

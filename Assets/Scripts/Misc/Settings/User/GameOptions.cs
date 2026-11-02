@@ -5,63 +5,53 @@ namespace MajdataPlay.Settings
 {
     public class GameOptions
     {
-#if UNITY_ANDROID || UNITY_IOS
-        public const GameplaySubScreenClickBehaviorOption DefaultGameplaySubScreenClickBehavior = GameplaySubScreenClickBehaviorOption.TrackSkip_1_Sec_Delay;
-#else
-        public const GameplaySubScreenClickBehaviorOption DefaultGameplaySubScreenClickBehavior = GameplaySubScreenClickBehaviorOption.TrackSkip;
-#endif
+        [Step("0.25")]
+        public float TapSpeed { get; set; } = SettingDefaults.Game.TapSpeed;
 
         [Step("0.25")]
-        public float TapSpeed { get; set; } = 7.5f;
-
-        [Step("0.25")]
-        public float TouchSpeed { get; set; } = 7.5f;
+        public float TouchSpeed { get; set; } = SettingDefaults.Game.TouchSpeed;
 
         [OptionEnumerator(typeof(GameOffsetEnumerator))]
-        public float SlideFadeInOffset { get; set; } = 0f;
+        public float SlideFadeInOffset { get; set; } = SettingDefaults.Game.SlideFadeInOffset;
 
         [Step("0.05")]
         [Range("0", "1")]
-        public float BackgroundDim { get; set; } = 0.8f;
+        public float BackgroundDim { get; set; } = SettingDefaults.Game.BackgroundDim;
 
-        public bool SkipVideoDownload { get; set; } = false;
+        public bool SkipVideoDownload { get; set; } = SettingDefaults.Game.SkipVideoDownload;
 
-        public bool StarRotation { get; set; } = true;
+        public bool StarRotation { get; set; } = SettingDefaults.Game.StarRotation;
 
-        public bool TrackSkip { get; set; } = true;
+        public bool TrackSkip { get; set; } = SettingDefaults.Game.TrackSkip;
 
-        public EnforceGameFailureCondition EnforceGameFailure { get; set; } = EnforceGameFailureCondition.Disabled;
+        public EnforceGameFailureCondition EnforceGameFailure { get; set; } = SettingDefaults.Game.EnforceGameFailure;
 
-        public bool FastRetry { get; set; } = true;
+        public bool FastRetry { get; set; } = SettingDefaults.Game.FastRetry;
 
-        public bool FastPractice { get; set; } = false;
+        public bool FastPractice { get; set; } = SettingDefaults.Game.FastPractice;
 
-        public GameplaySubScreenClickBehaviorOption GameplaySubScreenClickBehavior { get; set; } = DefaultGameplaySubScreenClickBehavior;
+        public GameplaySubScreenClickBehaviorOption GameplaySubScreenClickBehavior { get; set; } = SettingDefaults.Game.GameplaySubScreenClickBehavior;
 
-        public MirrorOption Mirror { get; set; } = MirrorOption.Off;
+        public MirrorOption Mirror { get; set; } = SettingDefaults.Game.Mirror;
 
         [Step("1")]
         [Range("-7", "7")]
-        public int Rotation { get; set; } = 0;
+        public int Rotation { get; set; } = SettingDefaults.Game.Rotation;
 
-        public bool SlideSkipping { get; set; } = true;
+        public bool SlideSkipping { get; set; } = SettingDefaults.Game.SlideSkipping;
 
-        public RandomModeOption Random { get; set; } = RandomModeOption.Disabled;
+        public RandomModeOption Random { get; set; } = SettingDefaults.Game.Random;
 
-#if UNITY_ANDROID || UNITY_IOS
-        public bool ButtonRingForTouch { get; set; } = true;
-#else
-        public bool ButtonRingForTouch { get; set; } = false;
-#endif
+        public bool ButtonRingForTouch { get; set; } = SettingDefaults.Game.ButtonRingForTouch;
 
         [Step("1")]
         [Range("1", "5")]
         [UseTranslation(TranslationTarget.OptionValue)]
-        public int LeadInTime { get; set; } = 1;
+        public int LeadInTime { get; set; } = SettingDefaults.Game.LeadInTime;
 
-        public bool ManualStartGame { get; set; } = false;
+        public bool ManualStartGame { get; set; } = SettingDefaults.Game.ManualStartGame;
 
         [Step("0.001")]
-        public float NoteAppearRate { get; set; } = 0.265f;
+        public float NoteAppearRate { get; set; } = SettingDefaults.Game.NoteAppearRate;
     }
 }

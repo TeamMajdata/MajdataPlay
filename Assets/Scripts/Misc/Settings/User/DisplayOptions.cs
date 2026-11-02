@@ -6,51 +6,51 @@ namespace MajdataPlay.Settings
     public class DisplayOptions
     {
         [OptionEnumerator(typeof(LanguageEnumerator))]
-        public string Language { get; set; } = "";
+        public string Language { get; set; } = SettingDefaults.Display.Language;
 
         [OptionEnumerator(typeof(SkinEnumerator))]
-        public string Skin { get; set; } = "default";
+        public string Skin { get; set; } = SettingDefaults.Display.Skin;
 
         [UseGeneralTranslation(TranslationTarget.OptionValue)]
-        public BGInfoOption BGInfo { get; set; } = BGInfoOption.Combo;
+        public BGInfoOption BGInfo { get; set; } = SettingDefaults.Display.BGInfo;
 
         [UseGeneralTranslation(TranslationTarget.OptionValue)]
-        public BGInfoOption SecondaryBGInfo { get; set; } = BGInfoOption.None;
+        public BGInfoOption SecondaryBGInfo { get; set; } = SettingDefaults.Display.SecondaryBGInfo;
 
         [UseGeneralTranslation(TranslationTarget.OptionValue)]
-        public BGInfoOption SubScreenBGInfo { get; set; } = BGInfoOption.Achievement;
+        public BGInfoOption SubScreenBGInfo { get; set; } = SettingDefaults.Display.SubScreenBGInfo;
 
-        public TopInfoDisplayOption TopInfo { get; set; } = TopInfoDisplayOption.None;
+        public TopInfoDisplayOption TopInfo { get; set; } = SettingDefaults.Display.TopInfo;
 
         [Step("0.01")]
         [Range("0", "2")]
-        public float TapScale { get; set; } = 1f;
+        public float TapScale { get; set; } = SettingDefaults.Display.TapScale;
 
         [Step("0.01")]
         [Range("0", "2")]
-        public float HoldScale { get; set; } = 1f;
+        public float HoldScale { get; set; } = SettingDefaults.Display.HoldScale;
 
         [Step("0.01")]
         [Range("0", "2")]
-        public float TouchScale { get; set; } = 1f;
+        public float TouchScale { get; set; } = SettingDefaults.Display.TouchScale;
 
         [Step("0.01")]
         [Range("0", "2")]
-        public float SlideScale { get; set; } = 1f;
+        public float SlideScale { get; set; } = SettingDefaults.Display.SlideScale;
 
-        public SlidePathStyle SlidePathStyle { get; set; } = SlidePathStyle.Classic;
+        public SlidePathStyle SlidePathStyle { get; set; } = SettingDefaults.Display.SlidePathStyle;
 
         [UseGeneralTranslation(TranslationTarget.OptionValue)]
-        public TouchFeedbackLevel TouchFeedback { get; set; } = TouchFeedbackLevel.Outer_Only;
+        public TouchFeedbackLevel TouchFeedback { get; set; } = SettingDefaults.Display.TouchFeedback;
 
-        public bool DisplaySensor { get; set; } = false;
+        public bool DisplaySensor { get; set; } = SettingDefaults.Display.DisplaySensor;
 
-        public SensorDebugPosition SensorPosition { get; set; } = SensorDebugPosition.MainScreen;
+        public SensorDebugPosition SensorPosition { get; set; } = SettingDefaults.Display.SensorPosition;
 
-        public SensorDebugStyle SensorStyle { get; set; } = SensorDebugStyle.RedGreen;
+        public SensorDebugStyle SensorStyle { get; set; } = SettingDefaults.Display.SensorStyle;
 
         [Step("10")]
         [Range("10", "90")]
-        public int SensorOpacity { get; set; } = 20;
+        public int SensorOpacity { get; set; } = SettingDefaults.Display.SensorOpacity;
     }
 }

@@ -11,8 +11,8 @@ namespace MajdataPlay.Settings
     }
     public class FFmpegDecodingOptions
     {
-        public FFmpegCodecPreference PreferredDecoder { get; set; } = FFmpegCodecPreference.Hardware;
+        public FFmpegCodecPreference PreferredDecoder { get; set; } = SettingDefaults.FFmpegDecoding.PreferredDecoder;
         [Range("1", null)]
-        public int IOTimeoutSeconds { get; set; } = 15;
+        public int IOTimeoutSeconds { get; set; } = SettingDefaults.FFmpegDecoding.IOTimeoutSeconds;
     }
 }

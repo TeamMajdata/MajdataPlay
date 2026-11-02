@@ -5,25 +5,10 @@ namespace MajdataPlay.Settings
     public class OnlineOptions
     {
         [JsonIgnoreOnPlatform(SettingPlatform.IOS)]
-        public bool Enable { get; set; } = false;
+        public bool Enable { get; set; } = SettingDefaults.Online.Enable;
 
-        public ApiEndpoint[] ApiEndpoints { get; set; } = new ApiEndpoint[]
-        {
-#if !UNITY_IOS
-            new ApiEndpoint()
-            {
-                Name = "MajdataNET",
-                Url = new("https://majdata.net/api3/api/"),
-                Username = "YourUsername",
-                Password = "YourPassword"
-            }
-#endif
-        };
+        public ApiEndpoint[] ApiEndpoints { get; set; } = SettingDefaults.Online.ApiEndpoints;
 
-        public MachineInfo Machine { get; set; } = new()
-        {
-            Name = "MajdataPlay Client",
-            Description = "MajdataPlay Client QR Code Authentication"
-        };
+        public MachineInfo Machine { get; set; } = SettingDefaults.Online.Machine;
     }
 }

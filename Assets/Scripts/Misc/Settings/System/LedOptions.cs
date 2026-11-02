@@ -3,13 +3,13 @@ namespace MajdataPlay.Settings
 {
     public class LedOptions
     {
-        public bool Enable { get; init; } = true;
+        public bool Enable { get; init; } = SettingDefaults.Led.Enable;
 
-        public float Brightness { get; set; } = 1.0f;
+        public float Brightness { get; set; } = SettingDefaults.Led.Brightness;
 
-        public int RefreshRateMs { get; set; } = 16;
+        public int RefreshRateMs { get; set; } = SettingDefaults.Led.RefreshRateMs;
 
-        public bool Throttler { get; set; } = true;
+        public bool Throttler { get; set; } = SettingDefaults.Led.Throttler;
 
         public SerialPortOptions SerialPortOptions { get; set; } = new();
 

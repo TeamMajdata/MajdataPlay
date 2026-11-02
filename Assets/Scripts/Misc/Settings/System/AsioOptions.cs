@@ -3,8 +3,8 @@ namespace MajdataPlay.Settings
 {
     public class AsioOptions
     {
-        public int DeviceIndex { get; set; } = 0;
+        public int DeviceIndex { get; set; } = SettingDefaults.Asio.DeviceIndex;
 
-        public int SampleRate { get; set; } = 44100;
+        public int SampleRate { get; set; } = SettingDefaults.Asio.SampleRate;
     }
 }

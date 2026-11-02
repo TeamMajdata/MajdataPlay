@@ -30,6 +30,10 @@
     <Compile Include="../../../../Assets/Scripts/Misc/Settings/OptionEnumerators/NoteMaskEnumerator.cs" Link="Production/NoteMaskEnumerator.cs" />
     <Compile Include="../../../../Assets/Scripts/Misc/Settings/OptionEnumerators/Rendering*Enumerator.cs" Link="Production/%(Filename)%(Extension)" />
     <Compile Include="../../../../Assets/Scripts/Misc/Settings/SettingRoot.cs" Link="Production/SettingRoot.cs" />
+    <Compile Include="../../../../Assets/Scripts/Misc/Settings/Defaults/SettingDefaults.Debug.cs" Link="Production/SettingDefaults.Debug.cs" />
+    <Compile Include="../../../../Assets/Scripts/Misc/Settings/Defaults/SettingDefaults.Display.cs" Link="Production/SettingDefaults.Display.cs" />
+    <Compile Include="../../../../Assets/Scripts/Misc/Settings/Defaults/SettingDefaults.Rendering.cs" Link="Production/SettingDefaults.Rendering.cs" />
+    <Compile Include="../../../../Assets/Scripts/Misc/Settings/Defaults/SettingDefaults.Touch.cs" Link="Production/SettingDefaults.Touch.cs" />
     <Compile Include="../../../../Assets/Scripts/Misc/Settings/System/DebugOptions.cs" Link="Production/DebugOptions.cs" />
     <Compile Include="../../../../Assets/Scripts/Misc/Settings/User/DisplayOptions.cs" Link="Production/DisplayOptions.cs" />
     <Compile Include="../../../../Assets/Scripts/Misc/Settings/User/TouchOptions.cs" Link="Production/TouchOptions.cs" />

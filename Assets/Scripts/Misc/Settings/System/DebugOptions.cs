@@ -6,55 +6,42 @@ namespace MajdataPlay.Settings
     public class DebugOptions
     {
         [HideInSettingUI]
-        public int MenuOptionIterationSpeed { get; set; } = 45;
+        public int MenuOptionIterationSpeed { get; set; } = SettingDefaults.Debug.MenuOptionIterationSpeed;
 
         [Range("0", null)]
         [OptionEnumerator(typeof(GameOffsetEnumerator))]
-        public float DisplayOffset { get; set; } = 0f;
+        public float DisplayOffset { get; set; } = SettingDefaults.Debug.DisplayOffset;
 
 #if UNITY_STANDALONE
         [HideInSettingUI]
-        public bool HideCursorInGame { get; set; } = true;
+        public bool HideCursorInGame { get; set; } = SettingDefaults.Debug.HideCursorInGame;
 #endif
         [HideInSettingUI]
         [JsonIgnoreOnPlatform(SettingPlatform.IOS)]
-        public bool NoteFolding { get; set; } = true;
+        public bool NoteFolding { get; set; } = SettingDefaults.Debug.NoteFolding;
 
-        public DJAutoPolicyOption DJAutoPolicy { get; set; } = DJAutoPolicyOption.Strict;
+        public DJAutoPolicyOption DJAutoPolicy { get; set; } = SettingDefaults.Debug.DJAutoPolicy;
         [HideInSettingUI]
-        public int MaxQueuedFrames { get; set; } = 2;
+        public int MaxQueuedFrames { get; set; } = SettingDefaults.Debug.MaxQueuedFrames;
         [HideInSettingUI]
-        public bool FrameTimingDiagnostics { get; set; } = false;
+        public bool FrameTimingDiagnostics { get; set; } = SettingDefaults.Debug.FrameTimingDiagnostics;
         [HideInSettingUI]
-        public bool LowLatencyVSync { get; set; } = true;
+        public bool LowLatencyVSync { get; set; } = SettingDefaults.Debug.LowLatencyVSync;
         [HideInSettingUI]
-        public LowLatencyVSyncBackendOption LowLatencyVSyncBackend { get; set; } = LowLatencyVSyncBackendOption.Auto;
-#if UNITY_IOS || UNITY_ANDROID
+        public LowLatencyVSyncBackendOption LowLatencyVSyncBackend { get; set; } = SettingDefaults.Debug.LowLatencyVSyncBackend;
         [HideInSettingUI]
-        public int TapPoolCapacity { get; set; } = 48;
+        public int TapPoolCapacity { get; set; } = SettingDefaults.Debug.TapPoolCapacity;
         [HideInSettingUI]
-        public int HoldPoolCapacity { get; set; } = 48;
+        public int HoldPoolCapacity { get; set; } = SettingDefaults.Debug.HoldPoolCapacity;
         [HideInSettingUI]
-        public int TouchPoolCapacity { get; set; } = 64;
+        public int TouchPoolCapacity { get; set; } = SettingDefaults.Debug.TouchPoolCapacity;
         [HideInSettingUI]
-        public int TouchHoldPoolCapacity { get; set; } = 64;
+        public int TouchHoldPoolCapacity { get; set; } = SettingDefaults.Debug.TouchHoldPoolCapacity;
         [HideInSettingUI]
-        public int EachLinePoolCapacity { get; set; } = 24;
-#else
-        [HideInSettingUI]
-        public int TapPoolCapacity { get; set; } = 96;
-        [HideInSettingUI]
-        public int HoldPoolCapacity { get; set; } = 96;
-        [HideInSettingUI]
-        public int TouchPoolCapacity { get; set; } = 64;
-        [HideInSettingUI]
-        public int TouchHoldPoolCapacity { get; set; } = 64;
-        [HideInSettingUI]
-        public int EachLinePoolCapacity { get; set; } = 48;
-#endif
+        public int EachLinePoolCapacity { get; set; } = SettingDefaults.Debug.EachLinePoolCapacity;
 
         [HideInSettingUI]
         [JsonIgnoreOnPlatform(SettingPlatform.IOS)]
-        public LogLevel DebugLevel { get; set; } = LogLevel.Info;
+        public LogLevel DebugLevel { get; set; } = SettingDefaults.Debug.DebugLevel;
     }
 }

@@ -44,12 +44,12 @@ namespace MajdataPlay.Settings
     [Preserve]
     public sealed class RenderingOptions
     {
-        private RenderingQualityOption _quality = RenderingQualityOption.Performance;
-        private RenderingAntialiasingOption _antiAliasing = RenderingAntialiasingOption.Disabled;
-        private RenderingTextureQualityOption _textureQuality = RenderingTextureQualityOption.High;
-        private RenderingOutputMode _outputMode = RenderingOutputMode.Direct;
-        private int _renderScale = 100;
-        private int _fpsLimit = 120;
+        private RenderingQualityOption _quality = SettingDefaults.Rendering.RenderQuality;
+        private RenderingAntialiasingOption _antiAliasing = SettingDefaults.Rendering.AntiAliasing;
+        private RenderingTextureQualityOption _textureQuality = SettingDefaults.Rendering.TextureQuality;
+        private RenderingOutputMode _outputMode = SettingDefaults.Rendering.OutputMode;
+        private int _renderScale = SettingDefaults.Rendering.RenderScale;
+        private int _fpsLimit = SettingDefaults.Rendering.FPSLimit;
         private bool _deserializing;
 
         [ShowInSettingUIWhen(nameof(CompatibilityMode), false)]
@@ -80,7 +80,7 @@ namespace MajdataPlay.Settings
         [HideInSettingUI]
 #endif
         [OptionEnumerator(typeof(EngineBooleanSettingEnumerator))]
-        public bool VSync { get; set; } = true;
+        public bool VSync { get; set; } = SettingDefaults.Rendering.VSync;
 
         [ShowInSettingUIWhen(nameof(CompatibilityMode), false)]
         [ShowInSettingUIWhen(nameof(RenderQuality), RenderingQualityOption.Custom)]
@@ -138,14 +138,14 @@ namespace MajdataPlay.Settings
         }
 
         [OptionEnumerator(typeof(RenderingBooleanSettingEnumerator))]
-        public bool CompatibilityMode { get; set; }
+        public bool CompatibilityMode { get; set; } = SettingDefaults.Rendering.CompatibilityMode;
 
         [Step("5")]
         [Range("10", "100")]
         [ShowInSettingUIWhen(nameof(CompatibilityMode), false)]
         [ShowInSettingUIWhen(nameof(RenderQuality), RenderingQualityOption.Custom)]
         [OptionEnumerator(typeof(RenderingNumberSettingEnumerator))]
-        public int SystemResolutionScaling { get; set; } = 100;
+        public int SystemResolutionScaling { get; set; } = SettingDefaults.Rendering.SystemResolutionScaling;
 
         [Step("5")]
         [Range("10", "200")]
@@ -195,44 +195,40 @@ namespace MajdataPlay.Settings
         [ShowInSettingUIWhen(nameof(RenderQuality), RenderingQualityOption.Custom)]
         public MajRenderOutputStatus CurrentOutputPath => MajRenderDiagnostics.OutputStatus;
 
-        public bool DisplayRuntimeInfo { get; set; } = true;
+        public bool DisplayRuntimeInfo { get; set; } = SettingDefaults.Rendering.DisplayRuntimeInfo;
 
 #if UNITY_STANDALONE
         [HideInSettingUI]
-        public string Resolution { get; set; } = "1080x1920";
+        public string Resolution { get; set; } = SettingDefaults.Rendering.Resolution;
 
         [HideInSettingUI]
-        public bool FullScreen { get; set; } = true;
+        public bool FullScreen { get; set; } = SettingDefaults.Rendering.FullScreen;
 
         [HideInSettingUI]
-        public bool Topmost { get; set; } = false;
+        public bool Topmost { get; set; } = SettingDefaults.Rendering.Topmost;
 #endif
 
-#if UNITY_ANDROID || UNITY_IOS
-        public bool MainScreenTransform { get; set; } = true;
-#else
-        public bool MainScreenTransform { get; set; } = false;
-#endif
+        public bool MainScreenTransform { get; set; } = SettingDefaults.Rendering.MainScreenTransform;
 
         [Step("0.01")]
         [Range("0.05", "1.5")]
-        public float MainScreenScale { get; set; } = 1f;
+        public float MainScreenScale { get; set; } = SettingDefaults.Rendering.MainScreenScale;
 
         [Step("0.01")]
         [Range("-1", "1")]
-        public float MainScreenOffset { get; set; } = 1f;
+        public float MainScreenOffset { get; set; } = SettingDefaults.Rendering.MainScreenOffset;
 
         [HideInSettingUI]
-        public float MainScreenCachedScreenCenterY { get; set; } = 960f;
+        public float MainScreenCachedScreenCenterY { get; set; } = SettingDefaults.Rendering.MainScreenCachedScreenCenterY;
 
         [Step("0.01")]
         [Range("-5", "5")]
-        public float SubDisplayOffset { get; set; } = 0f;
+        public float SubDisplayOffset { get; set; } = SettingDefaults.Rendering.SubDisplayOffset;
 
         [Step("0.01")]
-        public float SubDisplayScale { get; set; } = 1f;
+        public float SubDisplayScale { get; set; } = SettingDefaults.Rendering.SubDisplayScale;
 
-        public GameplayScreenRotationAngleOption GameplayScreenRotationAngle { get; set; } = GameplayScreenRotationAngleOption.Zero;
+        public GameplayScreenRotationAngleOption GameplayScreenRotationAngle { get; set; } = SettingDefaults.Rendering.GameplayScreenRotationAngle;
 
         public bool EnterCustomMode()
         {
@@ -288,19 +284,19 @@ namespace MajdataPlay.Settings
             SystemResolutionScaling = Math.Max(10, Math.Min(100, SystemResolutionScaling));
             if (!Enum.IsDefined(typeof(RenderingQualityOption), _quality))
             {
-                _quality = RenderingQualityOption.Performance;
+                _quality = SettingDefaults.Rendering.RenderQuality;
             }
             if (!Enum.IsDefined(typeof(RenderingAntialiasingOption), _antiAliasing))
             {
-                _antiAliasing = RenderingAntialiasingOption.Disabled;
+                _antiAliasing = SettingDefaults.Rendering.AntiAliasing;
             }
             if (!Enum.IsDefined(typeof(RenderingTextureQualityOption), _textureQuality))
             {
-                _textureQuality = RenderingTextureQualityOption.High;
+                _textureQuality = SettingDefaults.Rendering.TextureQuality;
             }
             if (!Enum.IsDefined(typeof(RenderingOutputMode), _outputMode))
             {
-                _outputMode = RenderingOutputMode.Direct;
+                _outputMode = SettingDefaults.Rendering.OutputMode;
             }
             _renderScale = Math.Max(10, Math.Min(200, _renderScale));
             ApplyPreset();

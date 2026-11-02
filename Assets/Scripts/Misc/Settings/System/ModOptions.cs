@@ -6,26 +6,26 @@ namespace MajdataPlay.Settings
     {
         [Step("0.05")]
         [Range("0", null)]
-        public float PlaybackSpeed { get; set; } = 1f;
+        public float PlaybackSpeed { get; set; } = SettingDefaults.Mod.PlaybackSpeed;
 
-        public AutoplayModeOption AutoPlay { get; set; } = AutoplayModeOption.Disable;
+        public AutoplayModeOption AutoPlay { get; set; } = SettingDefaults.Mod.AutoPlay;
 
-        public JudgeStyleOption JudgeStyle { get; set; } = JudgeStyleOption.DEFAULT;
+        public JudgeStyleOption JudgeStyle { get; set; } = SettingDefaults.Mod.JudgeStyle;
 
-        public bool SubdivideSlideJudgeGrade { get; set; } = false;
+        public bool SubdivideSlideJudgeGrade { get; set; } = SettingDefaults.Mod.SubdivideSlideJudgeGrade;
 
-        public bool AllBreak { get; set; } = false;
+        public bool AllBreak { get; set; } = SettingDefaults.Mod.AllBreak;
 
-        public bool AllEx { get; set; } = false;
+        public bool AllEx { get; set; } = SettingDefaults.Mod.AllEx;
 
-        public bool AllTouch { get; set; } = false;
+        public bool AllTouch { get; set; } = SettingDefaults.Mod.AllTouch;
 
-        public bool SlideNoHead { get; set; } = false;
+        public bool SlideNoHead { get; set; } = SettingDefaults.Mod.SlideNoHead;
 
-        public bool SlideNoTrack { get; set; } = false;
+        public bool SlideNoTrack { get; set; } = SettingDefaults.Mod.SlideNoTrack;
 
         [OptionEnumerator(typeof(NoteMaskEnumerator))]
-        public string NoteMask { get; set; } = "Disable";
+        public string NoteMask { get; set; } = SettingDefaults.Mod.NoteMask;
 
         public bool IsAnyModActive()
         {
