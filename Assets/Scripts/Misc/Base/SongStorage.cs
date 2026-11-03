@@ -138,7 +138,7 @@ namespace MajdataPlay
         /// The age after which the whole chart list is read again instead of only its changes, because the server orders the
         /// list by recent activity, which the changes do not report.
         /// </summary>
-        private static readonly TimeSpan s_onlineFullRefreshInterval = TimeSpan.FromDays(1);
+        private static readonly TimeSpan s_onlineFullRefreshInterval = TimeSpan.FromDays(14);
         /// <summary>Stores the last successfully fetched feed of each endpoint, which rebuilds its folder whenever the library is republished.</summary>
         private static readonly ConcurrentDictionary<ApiEndpoint, RecommendFeedState> s_recommendStates = new();
         /// <summary>Stores the chart instances owned by recommendation folders because their endpoint's chart list lacks them.</summary>
