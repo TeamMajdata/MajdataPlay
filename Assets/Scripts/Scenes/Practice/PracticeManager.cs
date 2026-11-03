@@ -96,7 +96,7 @@ namespace MajdataPlay.Scenes.Practice
 
                 var chart = await SimaiParser.ParseChartAsync(songinfo.Levels[levelIndex], songinfo.Designers[levelIndex], maidata);
                 await UniTask.SwitchToMainThread();
-                chartAnalyzer.SetSimaiChart(chart, _totalTime);
+                chartAnalyzer.SetSimaiChart(chart, 0, _totalTime);
                 if (_gameInfo.TimeRange is not null)
                 {
                     _startTime = (float)_gameInfo.TimeRange.Value.Start;
