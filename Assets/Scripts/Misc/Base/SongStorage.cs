@@ -852,7 +852,7 @@ namespace MajdataPlay
                     MajDebug.LogInfo(nameof(SongStorage), $"[MaiChart Refresh]Fetching chart list from {api.Url.OriginalString}");
                     progressReporter?.Report(ZString.Format("MAJTEXT_SCANNING_CHARTS_FROM_{0}".i18n(), api.Name));
                     var collection = await GetOnlineCollection(api, progressReporter, cancellationToken).ConfigureAwait(false);
-                    if (!collection.IsEmpty)
+                    if (collection is not null)
                     {
                         collections.Add(collection);
                     }
@@ -1043,17 +1043,14 @@ namespace MajdataPlay
                     SongHashs = playlist.GetOriginSnapshot().Select(chart => chart.Hash).ToArray()
                 };
                 var rebound = await GetDanCollectionAsync(snapshot.AllCharts, playlist.Id, info, playlist.Source).ConfigureAwait(false);
-                if (rebound is null)
+                // Keep the complete definition even when every requested chart is temporarily unavailable.
+                rebound ??= new OnlineSongCollection(playlist.Source, playlist.Name, Array.Empty<ISongDetail>())
                 {
-                    // Keep the complete definition even when every requested chart is temporarily unavailable.
-                    rebound = new OnlineSongCollection(playlist.Source, playlist.Name, Array.Empty<ISongDetail>())
-                    {
-                        Id = playlist.Id,
-                        Type = playlist.Type,
-                        DanInfo = playlist.Type == ChartStorageType.Dan ? info : null,
-                        Definition = info
-                    };
-                }
+                    Id = playlist.Id,
+                    Type = playlist.Type,
+                    DanInfo = playlist.Type == ChartStorageType.Dan ? info : null,
+                    Definition = info
+                };
                 collections.Add(rebound);
             }
             cancellationToken.ThrowIfCancellationRequested();
@@ -1235,7 +1232,7 @@ namespace MajdataPlay
         /// </remarks>
         /// <exception cref="OperationCanceledException">The caller canceled loading.</exception>
         /// <exception cref="IOException">The endpoint's cache directory could not be created.</exception>
-        private static async Task<SongCollection> GetOnlineCollection(ApiEndpoint api, IProgress<string>? progressReporter, CancellationToken cancellationToken)
+        private static async Task<SongCollection?> GetOnlineCollection(ApiEndpoint api, IProgress<string>? progressReporter, CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
             var name = api.Name;
