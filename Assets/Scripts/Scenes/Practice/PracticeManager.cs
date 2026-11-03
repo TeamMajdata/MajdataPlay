@@ -1,16 +1,11 @@
 using Cysharp.Text;
 using Cysharp.Threading.Tasks;
-using Cysharp.Threading.Tasks.Triggers;
 using MajdataPlay.Extensions;
-using MajdataPlay.Scenes.Game;
 using MajdataPlay.IO;
 using MajdataPlay.Numerics;
-using MajdataPlay.UnsafeKit;
-using MajdataPlay.Utils;
+using MajdataPlay.Scenes.Game;
 using MajSimai;
 using System;
-using System.Collections;
-using System.Collections.Generic;
 using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Threading;
@@ -31,38 +26,38 @@ namespace MajdataPlay.Scenes.Practice
         public TextMeshProUGUI rTimeText;
         public Slider progress;
 
-        const string TIME_STRING = "{0}:{1:00}.{2:000}";
+        private const string TIME_STRING = "{0}:{1:00}.{2:000}";
 
         private float _startTime = 0;
         private float _endTime = 0;
         private float _totalTime = 0;
-        InputRepeatState _playbackSpeedInput;
-        float _startDecreaseHeldDuration;
-        float _startIncreaseHeldDuration;
-        float _endDecreaseHeldDuration;
-        float _endIncreaseHeldDuration;
-        private AudioSampleWrap _audioTrack = AudioSampleWrap.Empty;
+        private InputRepeatState _playbackSpeedInput;
+        private float _startDecreaseHeldDuration;
+        private float _startIncreaseHeldDuration;
+        private float _endDecreaseHeldDuration;
+        private float _endIncreaseHeldDuration;
+        private AudioSampleWrap? _audioTrack = AudioSampleWrap.Empty;
 
         [SerializeField]
-        TextMeshProUGUI _playbackSpeedTitle;
+        private TextMeshProUGUI _playbackSpeedTitle;
         [SerializeField]
-        TextMeshPro _playbackSpeedValue;
+        private TextMeshPro _playbackSpeedValue;
 
         private CancellationTokenSource cts = new CancellationTokenSource();
 
-        int _practiceCount = 114514;
-        float _step = 0.2f;
-        float _playbackSpeed = 1f;
+        private int _practiceCount = 114514;
+        private float _step = 0.2f;
+        private float _playbackSpeed = 1f;
 
-        bool _isInited = false;
-        bool _isExited = false;
+        private bool _isInited = false;
+        private bool _isExited = false;
 
-        GameInfo _gameInfo;
-        SimaiFile _simaiFile;
+        private GameInfo _gameInfo;
+        private SimaiFile _simaiFile;
 
-        float _touchSimulationRadius = 0f;
+        private float _touchSimulationRadius = 0f;
 
-        void Awake()
+        private void Awake()
         {
             InputManager.TouchButtonRingEdge = 4.8f;
             _touchSimulationRadius = MajEnv.UserSettings.Touch.TouchSimulationRadius;
@@ -77,13 +72,14 @@ namespace MajdataPlay.Scenes.Practice
             _playbackSpeedValue.text = ZString.Format("{0:F2}", _playbackSpeed);
             InitAsync().Forget();
         }
-        async UniTaskVoid InitAsync()
+        private async UniTaskVoid InitAsync()
         {
             await using (UniTask.ReturnToMainThread())
             {
                 await UniTask.SwitchToThreadPool();
                 var songinfo = _gameInfo.Charts.FirstOrDefault();
-                var level = _gameInfo.Levels.FirstOrDefault();
+
+                _ = _gameInfo.Levels.FirstOrDefault();
                 await songinfo.PreloadAsync();
                 _audioTrack = await songinfo.GetAudioTrackAsync();
                 _totalTime = (float)_audioTrack.Length.TotalSeconds;
@@ -114,7 +110,7 @@ namespace MajdataPlay.Scenes.Practice
                 }
             }
             var bgmSFX = MajInstances.AudioManager.GetSFX("bgm_select.mp3");
-            if(bgmSFX.IsPlaying)
+            if (bgmSFX.IsPlaying)
             {
                 bgmSFX.Stop();
             }
@@ -128,12 +124,12 @@ namespace MajdataPlay.Scenes.Practice
             _playbackSpeedInput.SuppressUntilRelease();
             _isInited = true;
         }
-        void ButtonCheck()
+        private void ButtonCheck()
         {
             ref readonly var btnA4State = ref InputManager.GetButtonState(ButtonZone.A4);
             ref readonly var btnA5State = ref InputManager.GetButtonState(ButtonZone.A5);
 
-            if(btnA4State.ClickCompletedThisFrame)
+            if (btnA4State.ClickCompletedThisFrame)
             {
                 _isExited = true;
                 _gameInfo.TimeRange = new Range<double>(_startTime, _endTime);
@@ -141,7 +137,7 @@ namespace MajdataPlay.Scenes.Practice
                 MajInstances.SceneSwitcher.SwitchScene("Game", false);
                 throw new OperationCanceledException();
             }
-            else if(btnA5State.ClickCompletedThisFrame)
+            else if (btnA5State.ClickCompletedThisFrame)
             {
                 _isExited = true;
                 MajEnv.SystemSettings.Mod.PlaybackSpeed = 1;
@@ -149,7 +145,7 @@ namespace MajdataPlay.Scenes.Practice
                 throw new OperationCanceledException();
             }
         }
-        void SensorCheck()
+        private void SensorCheck()
         {
             // Start Time "<"
             ref readonly var e6State = ref InputManager.GetSensorState(SensorArea.A6);
@@ -166,12 +162,12 @@ namespace MajdataPlay.Scenes.Practice
             ref readonly var e2State = ref InputManager.GetSensorState(SensorArea.E2);
             ref readonly var b2State = ref InputManager.GetSensorState(SensorArea.B2);
 
-            if(e6State.PressedThisFrame)
+            if (e6State.PressedThisFrame)
             {
                 _startTime = Mathf.Clamp(_startTime - 0.2f, 0, _totalTime);
                 _audioTrack.CurrentSec = _startTime;
             }
-            else if(b5State.PressedThisFrame)
+            else if (b5State.PressedThisFrame)
             {
                 _startTime = Mathf.Clamp(_startTime + 0.2f, 0, _totalTime);
                 _audioTrack.CurrentSec = _startTime;
@@ -204,8 +200,8 @@ namespace MajdataPlay.Scenes.Practice
                 _playbackSpeed += speedDirection * 0.01f;
                 needUpdatePBSValue = true;
             }
-            _playbackSpeed = Mathf.Max(_playbackSpeed , 0.01f);
-            if(needUpdatePBSValue)
+            _playbackSpeed = Mathf.Max(_playbackSpeed, 0.01f);
+            if (needUpdatePBSValue)
             {
                 _playbackSpeed = MathF.Round(_playbackSpeed, 2);
                 _playbackSpeedValue.text = ZString.Format("{0:F2}", _playbackSpeed);
@@ -217,7 +213,7 @@ namespace MajdataPlay.Scenes.Practice
                 Mathf.Max(
                     UpdateHeldDuration(ref _endDecreaseHeldDuration, b4State.IsPressed),
                     UpdateHeldDuration(ref _endIncreaseHeldDuration, e4State.IsPressed)));
-            if(pressTime < 0.5f)
+            if (pressTime < 0.5f)
             {
                 return;
             }
@@ -241,21 +237,21 @@ namespace MajdataPlay.Scenes.Practice
                 maxValue = _endTime;
                 minValue = 0;
             }
-            else if(b5State.IsPressed)
+            else if (b5State.IsPressed)
             {
                 value = ref _startTime;
                 direction = 1;
                 maxValue = _endTime;
                 minValue = 0;
             }
-            else if(b4State.IsPressed)
+            else if (b4State.IsPressed)
             {
                 value = ref _endTime;
                 direction = -1;
                 maxValue = _totalTime;
                 minValue = _startTime;
             }
-            else if(e4State.IsPressed)
+            else if (e4State.IsPressed)
             {
                 value = ref _endTime;
                 direction = 1;
@@ -266,17 +262,17 @@ namespace MajdataPlay.Scenes.Practice
             {
                 return;
             }
-            value = (value + _step * MajTimeline.DeltaTime * ratio * direction).Clamp(minValue, maxValue);
+            value = (value + (_step * MajTimeline.DeltaTime * ratio * direction)).Clamp(minValue, maxValue);
 
             _audioTrack.CurrentSec = value;
             _audioTrack.Play();
         }
-        static float UpdateHeldDuration(ref float heldDuration, bool isPressed)
+        private static float UpdateHeldDuration(ref float heldDuration, bool isPressed)
         {
             heldDuration = isPressed ? heldDuration + MajTimeline.DeltaTime : 0f;
             return heldDuration;
         }
-        void Update()
+        private void Update()
         {
             if (!_isInited || _isExited || _audioTrack is null)
             {
@@ -293,7 +289,7 @@ namespace MajdataPlay.Scenes.Practice
                 _audioTrack.CurrentSec = _startTime;
             }
         }
-        void UpdateSBTextMeshProUGUI()
+        private void UpdateSBTextMeshProUGUI()
         {
             var start = TimeSpan.FromSeconds(_startTime - _simaiFile.Offset);
             var end = TimeSpan.FromSeconds(_endTime - _simaiFile.Offset);
