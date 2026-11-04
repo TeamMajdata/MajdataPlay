@@ -187,7 +187,7 @@ namespace MajdataPlay.Rendering
             {
                 if (_swapchainGeneration != 0)
                 {
-                    MajDebug.LogInfo(nameof(LowLatencyVSync), ZString.Format(
+                    MajDebug.LogInfo(nameof(VulkanLowLatencyVSync), ZString.Format(
                         "Swapchain changed (generation {0}); pacing follows the new swapchain", generation));
                 }
                 _swapchainGeneration = generation;
@@ -198,7 +198,7 @@ namespace MajdataPlay.Rendering
                 if (source != 0)
                 {
                     _presentIdSourceLogged = true;
-                    MajDebug.LogInfo(nameof(LowLatencyVSync), source switch
+                    MajDebug.LogInfo(nameof(VulkanLowLatencyVSync), source switch
                     {
                         2 => "Presentation ids come from Unity",
                         3 => "Presentation ids come from Unity and are replaced with frame ids for the driver's latency markers",
@@ -233,7 +233,7 @@ namespace MajdataPlay.Rendering
             {
                 _mode = PacingMode.Layer;
                 _layerBackends = backends;
-                MajDebug.LogInfo(nameof(LowLatencyVSync), ZString.Format(
+                MajDebug.LogInfo(nameof(VulkanLowLatencyVSync), ZString.Format(
                     "Frame pacing started: each frame waits for the pacing layer ({0})", backends));
             }
 
@@ -269,7 +269,7 @@ namespace MajdataPlay.Rendering
                 case PresentWaitOutcome.Failed:
                     if (++_presentWaitFailures >= PresentWaitFailureLimit)
                     {
-                        MajDebug.LogWarning(nameof(LowLatencyVSync), ZString.Format(
+                        MajDebug.LogWarning(nameof(VulkanLowLatencyVSync), ZString.Format(
                             "Present waiting {0} {1} times in a row (last error {2}); giving it up",
                             outcome == PresentWaitOutcome.TimedOut ? "timed out" : "failed", _presentWaitFailures,
                             _presentWaitPacer.LastError));
@@ -287,7 +287,7 @@ namespace MajdataPlay.Rendering
             _driverPacer!.BeginFrame(refreshPeriodTicks, Stopwatch.Frequency);
             if (_driverPacer.HasGivenUp)
             {
-                MajDebug.LogWarning(nameof(LowLatencyVSync), ZString.Format(
+                MajDebug.LogWarning(nameof(VulkanLowLatencyVSync), ZString.Format(
                     "{0} failed repeatedly (last result {1}); giving it up", _driverBackendName, _driverPacer.LastError));
                 _driverPacer = null;
                 _driverUnavailable = true;
@@ -313,7 +313,7 @@ namespace MajdataPlay.Rendering
             if (backend == 0)
             {
                 _driverUnavailable = true;
-                MajDebug.LogInfo(nameof(LowLatencyVSync), ZString.Format(
+                MajDebug.LogInfo(nameof(VulkanLowLatencyVSync), ZString.Format(
                     "Driver low-latency mode unavailable ({0})", VulkanPacingLayer.DescribeLowLatencyStatus(status)));
                 return false;
             }
@@ -340,7 +340,7 @@ namespace MajdataPlay.Rendering
             if (status != 0)
             {
                 _presentWaitUnavailable = true;
-                MajDebug.LogInfo(nameof(LowLatencyVSync), ZString.Format(
+                MajDebug.LogInfo(nameof(VulkanLowLatencyVSync), ZString.Format(
                     "Present waiting unavailable ({0})", VulkanPacingLayer.DescribePresentWaitStatus(status)));
                 return false;
             }
