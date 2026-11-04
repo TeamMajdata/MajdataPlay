@@ -8,7 +8,7 @@ namespace MajdataPlay.Settings
 
         public TouchPanelOptions TouchPanel { get; set; } = new();
 #else
-        [UseGeneralTranslation(TranslationTarget.OptionValue)]
+        [UseGeneralTranslation(Runtime.TranslationTarget.OptionValue)]
         public MobileExternalButtonRingOption ExternalButtonRing { get; init; } = SettingDefaults.InputDevice.ExternalButtonRing;
 #endif
     }
