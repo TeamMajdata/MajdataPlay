@@ -169,7 +169,8 @@ namespace MajdataPlay
             LowSpeedTimeout = HttpLowSpeedTimeout,
             LowSpeedLimit = HttpLowSpeedLimit,
             MaxConnectionsPerServer = 64,
-            MaxCachedConnections = HttpMaxCachedConnections
+            MaxCachedConnections = HttpMaxCachedConnections,
+            PreferredHttpVersion = CurlHttpVersions.Http3
         };
         public static HttpClient SharedHttpClient { get; } = new HttpClient(s_httpClientHandler)
         {
