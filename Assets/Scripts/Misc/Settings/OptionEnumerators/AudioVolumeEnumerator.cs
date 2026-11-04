@@ -1,4 +1,4 @@
-﻿using MajdataPlay.IO;
+using MajdataPlay.IO;
 
 namespace MajdataPlay.Settings.OptionEnumerators;
 public sealed class AudioVolumeEnumerator : DefaultNumberEnumerator, IOptionEnumerator
@@ -33,14 +33,14 @@ public sealed class AudioVolumeEnumerator : DefaultNumberEnumerator, IOptionEnum
     {
         var previewSfxName = Name switch
         {
-            nameof(SFXVolume.Answer) => "answer.wav",
-            nameof(SFXVolume.Tap) => "tap_perfect.wav",
-            nameof(SFXVolume.Ex) => "tap_ex.wav",
-            nameof(SFXVolume.Break) => "break.wav",
-            nameof(SFXVolume.Slide) => "slide.wav",
-            nameof(SFXVolume.Touch) => "touch.wav",
-            nameof(SFXVolume.Hanabi) => "touch_hanabi.wav",
-            nameof(SFXVolume.Voice) => "MajdataPlay.wav",
+            nameof(VolumeOptions.Answer) => "answer.wav",
+            nameof(VolumeOptions.Tap) => "tap_perfect.wav",
+            nameof(VolumeOptions.Ex) => "tap_ex.wav",
+            nameof(VolumeOptions.Break) => "break.wav",
+            nameof(VolumeOptions.Slide) => "slide.wav",
+            nameof(VolumeOptions.Touch) => "touch.wav",
+            nameof(VolumeOptions.Hanabi) => "touch_hanabi.wav",
+            nameof(VolumeOptions.Voice) => "MajdataPlay.wav",
             _ => null
         };
 

@@ -6,6 +6,7 @@ using System.Security.Cryptography;
 using System.Text;
 using Cysharp.Threading.Tasks;
 using MajdataPlay.Net;
+using MajdataPlay.Net.Models;
 using MajdataPlay.Tests;
 using MajdataPlay.Tests.Game.Misc.Support;
 using NUnit.Framework;
@@ -233,6 +234,224 @@ namespace MajdataPlay.Tests.Game.Misc.Net
                 Assert.That(nextSession.GetServerKey(unknown), Is.EqualTo("https://unknown.invalid/api/"));
                 Assert.That(nextSession.LoadCached(proxy).Select(chart => chart.Detail.Id), Is.EqualTo(new[] { "1" }));
             });
+        }
+
+        /// <summary>
+        /// Checks that the sync point of a full sync is kept per server across sessions, follows the URL rows to the
+        /// server's identifier, yields to the sync point the server already has, and is kept by a sync without a range.
+        /// </summary>
+        /// <returns>The test coroutine.</returns>
+        [UnityTest]
+        public IEnumerator SyncAsync_KeepsSyncPointPerServer()
+        {
+            return UniTask.ToCoroutine(async () =>
+            {
+                var proxy = new ApiEndpoint { Name = "Proxy", Url = new Uri("https://proxy.invalid/majdata/api/") };
+                var other = new ApiEndpoint { Name = "Other", Url = new Uri("https://other.invalid/api/") };
+                var serverInfo = new MajNetServerInfo { Id = "majnet" };
+                var first = new DateTime(2026, 11, 1, 8, 0, 0, 123, DateTimeKind.Utc);
+                var second = new DateTime(2026, 11, 2, 8, 0, 0, 456, DateTimeKind.Utc);
+                Assert.That(_cache.GetSyncPoint(_endpoint), Is.Null);
+
+                var beforeSync = DateTime.UtcNow;
+                await _cache.SyncAsync(_endpoint, new[] { Chart("1") }, null, first.ToLocalTime());
+                var point = _cache.GetSyncPoint(_endpoint)!.Value;
+                Assert.That(point.ChangesTo, Is.EqualTo(first));
+                Assert.That(point.FullSyncAt, Is.InRange(beforeSync, DateTime.UtcNow));
+                _cache.ResolveServer(_endpoint, serverInfo);
+
+                var nextSession = new OnlineChartCache(ObjectStore.Shared, true);
+                Assert.That(nextSession.GetSyncPoint(proxy), Is.Null);
+                nextSession.ResolveServer(proxy, serverInfo);
+                var restored = nextSession.GetSyncPoint(proxy)!.Value.ChangesTo;
+                Assert.That(restored, Is.EqualTo(first));
+                Assert.That(restored.Kind, Is.EqualTo(DateTimeKind.Utc));
+
+                await nextSession.SyncAsync(proxy, new[] { Chart("1") }, null, second);
+                await _cache.SyncAsync(other, new[] { Chart("1") }, null, first);
+                nextSession.ResolveServer(other, serverInfo);
+
+                Assert.That(nextSession.GetSyncPoint(_endpoint)!.Value.ChangesTo, Is.EqualTo(second));
+                Assert.That(nextSession.GetSyncPoint(other)!.Value.ChangesTo, Is.EqualTo(second));
+                Assert.That(MajDatabase.Runtime.Read(connection => connection.QueryScalars<string>("SELECT Server FROM OnlineChartChangeQueries").ToArray()), Is.EqualTo(new[] { "majnet" }));
+
+                await nextSession.SyncAsync(proxy, new[] { Chart("1") }, null);
+                Assert.That(nextSession.GetSyncPoint(proxy)!.Value.ChangesTo, Is.EqualTo(second));
+            });
+        }
+
+        /// <summary>Checks that a cache which is not persistent records no sync point and applies no changes.</summary>
+        /// <returns>The test coroutine.</returns>
+        [UnityTest]
+        public IEnumerator SyncPoint_IgnoredWhenNotPersistent()
+        {
+            return UniTask.ToCoroutine(async () =>
+            {
+                var transient = new OnlineChartCache(
+                    new ObjectStore(_temporary.Directory.CreateDirectory("TransientObjects"), _temporary.Directory.CreateDirectory("TransientPartials")),
+                    false);
+
+                await transient.SyncAsync(_endpoint, new[] { Chart("1") }, null, DateTime.UtcNow);
+
+                Assert.That(transient.GetSyncPoint(_endpoint), Is.Null);
+                Assert.That(_cache.GetSyncPoint(_endpoint), Is.Null);
+                Assert.That(await transient.ApplyChangesAsync(_endpoint, Changes(DateTime.UtcNow), new Dictionary<string, MajNetChartInfo>()), Is.Null);
+            });
+        }
+
+        /// <summary>Creates a complete range of chart changes.</summary>
+        /// <param name="to">The end of the range.</param>
+        /// <param name="changes">The kind and chart identity of every change, in order.</param>
+        /// <returns>The changes.</returns>
+        private static MajNetChartChanges Changes(DateTime to, params (MajNetChartChangeKind Kind, string ChartId)[] changes)
+        {
+            return new MajNetChartChanges
+            {
+                To = to,
+                IsComplete = true,
+                Changes = changes.Select(change => new MajNetChartChange { ChartId = change.ChartId, Kind = change.Kind, ChangedAt = to }).ToArray(),
+            };
+        }
+
+        /// <summary>Lists the listed charts of a server key in list order, as the table records them.</summary>
+        /// <param name="server">The server key.</param>
+        /// <returns>The chart identities.</returns>
+        private static string[] ListedChartIds(string server)
+        {
+            return MajDatabase.Runtime.Read(connection => connection.QueryScalars<string>(
+                "SELECT ChartId FROM OnlineChartCache WHERE Server = ? AND IsListed = 1 ORDER BY ListOrder, Id", server).ToArray());
+        }
+
+        /// <summary>Checks that a full sync lists the charts in list order and unlists the charts no longer in the list, keeping their rows.</summary>
+        /// <returns>The test coroutine.</returns>
+        [UnityTest]
+        public IEnumerator SyncAsync_RecordsListOrder()
+        {
+            return UniTask.ToCoroutine(async () =>
+            {
+                var server = OnlineChartCache.GetEndpointKey(_endpoint);
+                await _cache.SyncAsync(_endpoint, new[] { Chart("1"), Chart("2"), Chart("3") }, null);
+                Assert.That(ListedChartIds(server), Is.EqualTo(new[] { "1", "2", "3" }));
+
+                await _cache.SyncAsync(_endpoint, new[] { Chart("3"), Chart("1") }, null);
+
+                Assert.That(ListedChartIds(server), Is.EqualTo(new[] { "3", "1" }));
+                Assert.That(CountRows(), Is.EqualTo(3));
+            });
+        }
+
+        /// <summary>
+        /// Checks that applying changes puts added charts first, updates modified charts from their info, removes deleted
+        /// charts, unlists charts the info no longer knows, records the end of the range and keeps the time of the full sync.
+        /// </summary>
+        /// <returns>The test coroutine.</returns>
+        [UnityTest]
+        public IEnumerator ApplyChangesAsync_UpdatesListedCharts()
+        {
+            return UniTask.ToCoroutine(async () =>
+            {
+                var server = OnlineChartCache.GetEndpointKey(_endpoint);
+                var fullSyncTo = new DateTime(2026, 11, 1, 0, 0, 0, DateTimeKind.Utc);
+                var changesTo = new DateTime(2026, 11, 2, 0, 0, 0, DateTimeKind.Utc);
+                await _cache.SyncAsync(_endpoint, new[] { Chart("1"), Chart("2"), Chart("3"), Chart("4") }, null, fullSyncTo);
+                var fullSyncAt = _cache.GetSyncPoint(_endpoint)!.Value.FullSyncAt;
+                var track = Resource("new track");
+                var infos = Info("2", Resource("maidata"), track);
+                infos["2"].Metadata!.PublicTags = new[] { "爆发" };
+                foreach (var added in Info("a", Resource("a maidata"), Resource("a track")).Concat(Info("b", null, null)))
+                {
+                    infos.Add(added.Key, added.Value);
+                }
+                var changes = Changes(
+                    changesTo,
+                    (MajNetChartChangeKind.Added, "a"),
+                    (MajNetChartChangeKind.Modified, "2"),
+                    (MajNetChartChangeKind.Deleted, "3"),
+                    (MajNetChartChangeKind.Modified, "4"),
+                    (MajNetChartChangeKind.Added, "b"),
+                    (MajNetChartChangeKind.Deleted, "unknown"));
+
+                var listed = await _cache.ApplyChangesAsync(_endpoint, changes, infos);
+
+                Assert.That(listed!.Select(chart => chart.Detail.Id), Is.EqualTo(new[] { "b", "a", "1", "2" }));
+                Assert.That(ListedChartIds(server), Is.EqualTo(new[] { "b", "a", "1", "2" }));
+                Assert.That(CountOnlineChartRows("3"), Is.Zero);
+                Assert.That(CountOnlineChartRows("4"), Is.EqualTo(1));
+                var modified = listed.Single(chart => chart.Detail.Id == "2");
+                Assert.That(modified.Detail.PublicTags, Is.EqualTo(new[] { "爆发" }));
+                Assert.That(modified.Record.TryGetDigest(OnlineChartResourceKind.Track, out var digest), Is.True);
+                Assert.That(digest.Sha256, Is.EqualTo(track.Sha256));
+                Assert.That(modified.Record.GetUrl(OnlineChartResourceKind.Track), Is.EqualTo(track.Url));
+                var point = _cache.GetSyncPoint(_endpoint)!.Value;
+                Assert.That(point.ChangesTo, Is.EqualTo(changesTo));
+                Assert.That(point.FullSyncAt, Is.EqualTo(fullSyncAt));
+
+                // A range overlapping the last one reports the same changes again, which leaves the list as it is.
+                var again = await _cache.ApplyChangesAsync(_endpoint, changes, infos);
+                Assert.That(again!.Select(chart => chart.Detail.Id), Is.EqualTo(new[] { "b", "a", "1", "2" }));
+                Assert.Throws<ArgumentException>(() => _cache.ApplyChangesAsync(_endpoint, new MajNetChartChanges { To = changesTo }, infos).GetAwaiter().GetResult());
+            });
+        }
+
+        /// <summary>
+        /// Checks that a deleted chart whose chart file and track are stored is marked deleted and stays listed, both when
+        /// a changes range deletes it and when it leaves the list of a full sync, and that it loses its row once its
+        /// files are gone, while a deleted chart without stored files loses its row at once.
+        /// </summary>
+        /// <returns>The test coroutine.</returns>
+        [UnityTest]
+        public IEnumerator DeletedCharts_StayListedWhileStored()
+        {
+            return UniTask.ToCoroutine(async () =>
+            {
+                var server = OnlineChartCache.GetEndpointKey(_endpoint);
+                var infos = new Dictionary<string, MajNetChartInfo>();
+                foreach (var id in new[] { "1", "2", "4" })
+                {
+                    infos[id] = Info(id, Resource(id + " maidata"), Resource(id + " track"))[id];
+                }
+                await _cache.SyncAsync(_endpoint, new[] { Chart("1"), Chart("2"), Chart("4") }, infos);
+                foreach (var id in new[] { "1", "4" })
+                {
+                    StoreObject(infos[id].Resources!.Maidata!.Sha256);
+                    StoreObject(infos[id].Resources!.Track!.Sha256);
+                }
+                var to = new DateTime(2026, 11, 2, 0, 0, 0, DateTimeKind.Utc);
+
+                var listed = await _cache.ApplyChangesAsync(_endpoint, Changes(to, (MajNetChartChangeKind.Deleted, "1"), (MajNetChartChangeKind.Deleted, "2")), new Dictionary<string, MajNetChartInfo>());
+
+                Assert.That(listed!.Select(chart => chart.Detail.Id), Is.EqualTo(new[] { "1", "4" }));
+                Assert.That(listed.Select(chart => chart.Record.IsDeletedOnServer), Is.EqualTo(new[] { true, false }));
+                Assert.That(CountOnlineChartRows("2"), Is.Zero);
+
+                var records = await _cache.SyncAsync(_endpoint, new[] { Chart("3") }, null);
+
+                Assert.That(records.Keys, Is.EqualTo(new[] { "3" }));
+                Assert.That(ListedChartIds(server), Is.EqualTo(new[] { "3", "1", "4" }));
+                var deleted = _cache.LoadChartsDeletedOnServer(_endpoint);
+                Assert.That(deleted.Select(chart => chart.Detail.Id), Is.EqualTo(new[] { "1", "4" }));
+                Assert.That(deleted.All(chart => chart.Record.IsDeletedOnServer), Is.True);
+                Assert.That(deleted[0].Record.TryGetDigest(OnlineChartResourceKind.Track, out _), Is.True);
+
+                ObjectStore.Shared.Find(infos["1"].Resources!.Track!.Sha256)!.Delete();
+                await _cache.SyncAsync(_endpoint, new[] { Chart("3") }, null);
+
+                Assert.That(CountOnlineChartRows("1"), Is.Zero);
+                Assert.That(_cache.LoadChartsDeletedOnServer(_endpoint).Select(chart => chart.Detail.Id), Is.EqualTo(new[] { "4" }));
+
+                await _cache.SyncAsync(_endpoint, new[] { Chart("4"), Chart("3") }, null);
+
+                Assert.That(_cache.LoadChartsDeletedOnServer(_endpoint), Is.Empty);
+                Assert.That(ListedChartIds(server), Is.EqualTo(new[] { "4", "3" }));
+            });
+        }
+
+        /// <summary>Counts the rows of a chart.</summary>
+        /// <param name="chartId">The chart identity.</param>
+        /// <returns>The number of rows.</returns>
+        private static int CountOnlineChartRows(string chartId)
+        {
+            return MajDatabase.Runtime.Read(connection => connection.ExecuteScalar<int>("SELECT COUNT(*) FROM OnlineChartCache WHERE ChartId = ?", chartId));
         }
 
         /// <summary>A row of the chart table as it was written before charts were keyed by server.</summary>

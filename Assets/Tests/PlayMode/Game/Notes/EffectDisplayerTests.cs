@@ -87,8 +87,8 @@ namespace MajdataPlay.Tests.Game.Notes.PlayMode
         [UnityTest]
         public IEnumerator TouchEffect_ShowsTexts()
         {
-            _rig.Settings.Display.FastLateType = JudgeDisplayOption.All;
-            _rig.Settings.Display.DisplayBreakScore = false;
+            _rig.UserSettings.Judge.FastLateType = JudgeDisplayOption.All;
+            _rig.UserSettings.Judge.DisplayBreakScore = false;
             var displayer = CreateTouchEffect(SensorArea.C);
             yield return null;
             var text = displayer.transform.Find("JudgeText");
@@ -117,8 +117,8 @@ namespace MajdataPlay.Tests.Game.Notes.PlayMode
         [UnityTest]
         public IEnumerator TouchEffect_ShowsBreakScoreAndCriticalText()
         {
-            _rig.Settings.Display.FastLateType = JudgeDisplayOption.All;
-            _rig.Settings.Display.DisplayCriticalPerfect = true;
+            _rig.UserSettings.Judge.FastLateType = JudgeDisplayOption.All;
+            _rig.UserSettings.Judge.DisplayCriticalPerfect = true;
             var displayer = CreateTouchEffect(SensorArea.C);
             yield return null;
             var sprite = displayer.transform.Find("JudgeText").GetChild(0).GetComponent<SpriteRenderer>();
@@ -135,10 +135,10 @@ namespace MajdataPlay.Tests.Game.Notes.PlayMode
         [UnityTest]
         public IEnumerator TouchEffect_DirectionInTextSlotWhenTextHidden()
         {
-            _rig.Settings.Display.TouchJudgeType = JudgeDisplayOption.MissOnly;
-            _rig.Settings.Display.BreakJudgeType = JudgeDisplayOption.MissOnly;
-            _rig.Settings.Display.FastLateType = JudgeDisplayOption.All;
-            _rig.Settings.Display.BreakFastLateType = JudgeDisplayOption.All;
+            _rig.UserSettings.Judge.TouchJudgeType = JudgeDisplayOption.MissOnly;
+            _rig.UserSettings.Judge.BreakJudgeType = JudgeDisplayOption.MissOnly;
+            _rig.UserSettings.Judge.FastLateType = JudgeDisplayOption.All;
+            _rig.UserSettings.Judge.BreakFastLateType = JudgeDisplayOption.All;
             var displayer = CreateTouchEffect(SensorArea.C);
             yield return null;
 
@@ -155,7 +155,7 @@ namespace MajdataPlay.Tests.Game.Notes.PlayMode
         [UnityTest]
         public IEnumerator TouchEffect_HidesTextsWhenDisabled()
         {
-            _rig.Settings.Display.InnerJudgeDistance = 0f;
+            _rig.UserSettings.Judge.InnerJudgeDistance = 0f;
             var displayer = CreateTouchEffect(SensorArea.C);
             yield return null;
 
@@ -277,9 +277,9 @@ namespace MajdataPlay.Tests.Game.Notes.PlayMode
         [UnityTest]
         public IEnumerator TouchEffect_ShowsClassCTextForEveryHit([ValueSource(typeof(ClassCCases), nameof(ClassCCases.Options))] object[] testCase)
         {
-            _rig.Settings.Display.FastLateType = JudgeDisplayOption.All;
-            _rig.Settings.Display.DisplayBreakScore = (bool)testCase[1];
-            _rig.Settings.Display.DisplayCriticalPerfect = (bool)testCase[2];
+            _rig.UserSettings.Judge.FastLateType = JudgeDisplayOption.All;
+            _rig.UserSettings.Judge.DisplayBreakScore = (bool)testCase[1];
+            _rig.UserSettings.Judge.DisplayCriticalPerfect = (bool)testCase[2];
             var displayer = CreateTouchEffect(SensorArea.C);
             yield return null;
             var sprite = displayer.transform.Find("JudgeText").GetChild(0).GetComponent<SpriteRenderer>();

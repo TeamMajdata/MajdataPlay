@@ -29,15 +29,15 @@ namespace MajdataPlay.Tests.Game.Misc.PlayMode
         public void SetUp()
         {
             _objects = new TestObjects();
-            var display = MajEnv.Settings.Display;
-            _savedDisplay = (display.MainScreenTransform, display.MainScreenOffset, display.MainScreenScale,
-                             display.SubDisplayOffset, display.SubDisplayScale, display.MainScreenCachedScreenCenterY);
+            var rendering = MajEnv.SystemSettings.Rendering;
+            _savedDisplay = (rendering.MainScreenTransform, rendering.MainScreenOffset, rendering.MainScreenScale,
+                             rendering.SubDisplayOffset, rendering.SubDisplayScale, rendering.MainScreenCachedScreenCenterY);
             _savedEdge = InputManager.SubScreenEdge;
-            display.MainScreenTransform = true;
-            display.MainScreenOffset = 1f;
-            display.MainScreenScale = 1f;
-            display.SubDisplayOffset = 0f;
-            display.SubDisplayScale = 1f;
+            rendering.MainScreenTransform = true;
+            rendering.MainScreenOffset = 1f;
+            rendering.MainScreenScale = 1f;
+            rendering.SubDisplayOffset = 0f;
+            rendering.SubDisplayScale = 1f;
         }
 
         /// <summary>Restores the display settings and releases the provider slot.</summary>
@@ -46,13 +46,13 @@ namespace MajdataPlay.Tests.Game.Misc.PlayMode
         {
             _objects.Dispose();
             Majdata<ScreenPosCanvasLayoutProvider>.Free();
-            var display = MajEnv.Settings.Display;
-            display.MainScreenTransform = _savedDisplay.Transform;
-            display.MainScreenOffset = _savedDisplay.Offset;
-            display.MainScreenScale = _savedDisplay.Scale;
-            display.SubDisplayOffset = _savedDisplay.SubOffset;
-            display.SubDisplayScale = _savedDisplay.SubScale;
-            display.MainScreenCachedScreenCenterY = _savedDisplay.CenterY;
+            var rendering = MajEnv.SystemSettings.Rendering;
+            rendering.MainScreenTransform = _savedDisplay.Transform;
+            rendering.MainScreenOffset = _savedDisplay.Offset;
+            rendering.MainScreenScale = _savedDisplay.Scale;
+            rendering.SubDisplayOffset = _savedDisplay.SubOffset;
+            rendering.SubDisplayScale = _savedDisplay.SubScale;
+            rendering.MainScreenCachedScreenCenterY = _savedDisplay.CenterY;
             InputManager.SubScreenEdge = _savedEdge;
         }
 
@@ -71,9 +71,9 @@ namespace MajdataPlay.Tests.Game.Misc.PlayMode
         /// <returns>The expected layout.</returns>
         private static ScreenPosCanvasLayout ExpectedLayout()
         {
-            var display = MajEnv.Settings.Display;
+            var rendering = MajEnv.SystemSettings.Rendering;
             return ScreenPosCanvasLayout.Calculate(new ScreenPosCanvasLayoutInput(Screen.width, Screen.height, new Vector2(1080f, 1920f),
-                display.MainScreenTransform, display.MainScreenOffset, display.MainScreenScale, display.SubDisplayOffset, display.SubDisplayScale));
+                rendering.MainScreenTransform, rendering.MainScreenOffset, rendering.MainScreenScale, rendering.SubDisplayOffset, rendering.SubDisplayScale));
         }
 
         /// <summary>Creates a named rectangle under a parent.</summary>
@@ -101,12 +101,12 @@ namespace MajdataPlay.Tests.Game.Misc.PlayMode
             Assert.That(provider.HasLayout, Is.True);
             Assert.That(provider.Version, Is.EqualTo(1));
             Assert.That(provider.Layout.MainDisplayPosition, Is.EqualTo(ExpectedLayout().MainDisplayPosition));
-            Assert.That(MajEnv.Settings.Display.MainScreenCachedScreenCenterY, Is.EqualTo(provider.Layout.ScreenCenterY));
+            Assert.That(MajEnv.SystemSettings.Rendering.MainScreenCachedScreenCenterY, Is.EqualTo(provider.Layout.ScreenCenterY));
 
             yield return null;
             Assert.That(provider.Version, Is.EqualTo(1));
 
-            MajEnv.Settings.Display.MainScreenScale = 0.5f;
+            MajEnv.SystemSettings.Rendering.MainScreenScale = 0.5f;
             yield return null;
             Assert.That(provider.Version, Is.EqualTo(2));
             Assert.That(provider.Layout.ReferenceResolution, Is.EqualTo(ExpectedLayout().ReferenceResolution));
@@ -132,8 +132,8 @@ namespace MajdataPlay.Tests.Game.Misc.PlayMode
         public IEnumerator Applier_AppliesSharedLayout()
         {
             Assume.That(Screen.width > 0 && Screen.height > 0, "A screen size is required.");
-            MajEnv.Settings.Display.MainScreenScale = 0.8f;
-            MajEnv.Settings.Display.SubDisplayScale = 1.5f;
+            MajEnv.SystemSettings.Rendering.MainScreenScale = 0.8f;
+            MajEnv.SystemSettings.Rendering.SubDisplayScale = 1.5f;
             var provider = CreateProvider();
             var canvas = _objects.Create("Canvas");
             canvas.AddComponent<Canvas>();
@@ -202,7 +202,7 @@ namespace MajdataPlay.Tests.Game.Misc.PlayMode
             Assert.That(InputManager.SubScreenEdge, Is.EqualTo(new Vector4(8f, 21f, 12f, 19f)));
 
             rect.position = new Vector3(0f, 0f, 0f);
-            MajEnv.Settings.Display.SubDisplayOffset = 0.5f;
+            MajEnv.SystemSettings.Rendering.SubDisplayOffset = 0.5f;
             yield return null;
             yield return null;
             yield return null;

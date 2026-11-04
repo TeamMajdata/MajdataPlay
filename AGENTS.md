@@ -16,7 +16,7 @@ MajdataPlay 是一个跨平台 Simai 谱面播放器，也是一个 Unity 项目
 - 克隆后先执行 `git submodule update --init --recursive`。不要在未初始化的子模块上判断缺失类型或自行复制依赖。
 - 开始修改前运行 `git status --short`。工作区中的既有修改属于用户；不得覆盖、回退、格式化或清理与任务无关的改动。
 - 不要编辑或提交 Unity/IDE 生成目录和本地数据：`Library/`、`Temp/`、`obj/`、`Build/`、`Logs/`、`UserSettings/`、`.vs/`、`.idea/`、`Cache/`、`RecordOutputs/`，以及根目录生成的解决方案和项目文件。
-- `settings.json`、数据库、谱面、皮肤、日志、密钥和打包产物是本地运行数据或敏感数据，不得纳入提交。
+- `settings.json`、`system-settings.json`、数据库、谱面、皮肤、日志、密钥和打包产物是本地运行数据或敏感数据，不得纳入提交。
 - `Assets/Plugins/HidSharp`、`Assets/Plugins/ManagedBass`、`Assets/Plugins/UniTask`、`Assets/Plugins/MajSimai`、`Assets/Plugins/MajRadar` 和 `ThirdParty/FFmpeg.AutoGen` 是 Git 子模块。除非任务明确要求更新对应依赖，否则不要修改子模块内容或指针。
 - 修改 Unity 资产时必须保留对应 `.meta` 文件。新增、移动或删除资产时让资产与 `.meta` 成对变化，不要重建现有 GUID。
 

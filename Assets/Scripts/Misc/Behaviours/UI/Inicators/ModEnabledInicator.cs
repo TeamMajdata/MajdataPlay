@@ -16,7 +16,7 @@ namespace MajdataPlay.Behaviours.UI.Inicators
             {
                 actionTo = gameObject;
             }
-            actionTo.SetActive(MajInstances.GameManager.Settings.Mod.IsAnyModActive());
+            actionTo.SetActive(MajInstances.GameManager.SystemSettings.Mod.IsAnyModActive());
         }
     }
 }

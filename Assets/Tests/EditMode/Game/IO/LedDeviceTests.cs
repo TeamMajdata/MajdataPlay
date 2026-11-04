@@ -78,7 +78,7 @@ namespace MajdataPlay.Tests.Game.IO
         [Test]
         public void RosenLed_Configuration()
         {
-            _settings.Settings.IO.OutputDevice.Led.RefreshRateMs = 20;
+            _settings.SystemSettings.IO.OutputDevice.Led.RefreshRateMs = 20;
             var device = new RosenLedDevice();
             device.WriteLeds(new Color[8], 10);
             DeviceTestSupport.BindParser(device)(new byte[] { 1, 2, 3 });
@@ -139,7 +139,7 @@ namespace MajdataPlay.Tests.Game.IO
         [Test]
         public void DaoLed_WriteAndReset_DoNotNeedADevice()
         {
-            _settings.Settings.IO.OutputDevice.Led.RefreshRateMs = -5;
+            _settings.SystemSettings.IO.OutputDevice.Led.RefreshRateMs = -5;
             var output = new DaoLedOutput();
 
             Assert.DoesNotThrow(() => output.WriteLeds(new Color[8], 1));
@@ -150,9 +150,9 @@ namespace MajdataPlay.Tests.Game.IO
         [Test]
         public void PipeLed_Configuration_ClampsRefreshInterval()
         {
-            _settings.Settings.IO.OutputDevice.Led.RefreshRateMs = 5000;
+            _settings.SystemSettings.IO.OutputDevice.Led.RefreshRateMs = 5000;
             var slow = new PipeLedDevice();
-            _settings.Settings.IO.OutputDevice.Led.RefreshRateMs = -1;
+            _settings.SystemSettings.IO.OutputDevice.Led.RefreshRateMs = -1;
             var fast = new PipeLedDevice();
             fast.WriteLeds(new Color[8], 0);
             DeviceTestSupport.BindParser(fast)(new byte[] { 1 });

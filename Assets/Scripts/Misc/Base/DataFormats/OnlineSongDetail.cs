@@ -8,6 +8,7 @@ using MajdataPlay.Drawing;
 using MajdataPlay.IO;
 using MajdataPlay.IO.Storage;
 using MajdataPlay.Net;
+using MajdataPlay.Net.Models;
 using MajSimai;
 using Nito.AsyncEx;
 using System;

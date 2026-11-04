@@ -5,6 +5,9 @@ using System.Threading;
 using FFmpeg.AutoGen;
 using MajdataPlay.FFmpeg;
 using MajdataPlay.FFmpeg.Internal;
+#if UNITY_EDITOR_WIN || UNITY_STANDALONE_WIN
+using MajdataPlay.FFmpeg.Interop;
+#endif
 using NUnit.Framework;
 
 #nullable enable
@@ -476,7 +479,9 @@ namespace MajdataPlay.Tests.Plugins.FFmpeg
             if (decoder.HardwareDecoding)
             {
                 Assert.That(decoder.TransferMode, Is.EqualTo("Hardware decode + CPU RGBA upload"));
-                Assert.That(decoder.DecoderDevice, Does.Contain("FFmpeg default hardware device"));
+                // A listed GPU names the independent device; without a list FFmpeg chooses it.
+                Assert.That(decoder.DecoderDevice, Does.Contain("FFmpeg default hardware device")
+                    .Or.Contain("Unity renderer GPU").Or.Contain("Unity renderer not identified"));
                 Assert.That(decoder.ActiveHardwareDeviceType, Is.EqualTo(AVHWDeviceType.AV_HWDEVICE_TYPE_D3D11VA));
             }
         }
@@ -612,6 +617,203 @@ namespace MajdataPlay.Tests.Plugins.FFmpeg
 
             Assert.That(error!.Message, Does.Contain("frame pool configuration failed"));
         }
+
+#if UNITY_EDITOR_WIN || UNITY_STANDALONE_WIN
+        /// <summary>The width of the clip that exceeds the 4096-pixel H.264 limit of common hardware decoders.</summary>
+        private const int OversizedWidth = 4608;
+        /// <summary>The number of frames in the oversized clip.</summary>
+        private const int OversizedFrames = 10;
+        /// <summary>Stores the lazily encoded oversized H.264 clip, or an empty string before the first use.</summary>
+        private string _oversized = "";
+
+        /// <summary>Gets an H.264 clip wider than hardware decoders accept, so their pixel-format selection rejects it.</summary>
+        /// <returns>The path of the clip.</returns>
+        private string OversizedClip()
+        {
+            if (_oversized.Length == 0)
+            {
+                _oversized = FFmpegTestMedia.CreateVideo(_directory, "oversized-h264.mp4", OversizedFrames, 30, VideoEncodingFormat.H264, OversizedWidth, 64);
+            }
+
+            return _oversized;
+        }
+
+        /// <summary>Gets the first DXGI hardware adapter or ignores the test when this machine has none.</summary>
+        /// <param name="role">The role to assign to the adapter.</param>
+        /// <returns>The adapter with the requested role.</returns>
+        private static HardwareGpu FirstAdapter(HardwareGpuRole role)
+        {
+            var adapters = DxgiAdapterQuery.GetAdapters(false);
+            if (adapters.Count == 0)
+            {
+                Assert.Ignore("This machine has no DXGI hardware adapter.");
+            }
+
+            return adapters[0].WithRole(role);
+        }
+
+        /// <summary>Gets the Microsoft Basic Render Driver, a software adapter on which D3D11VA devices cannot be created.</summary>
+        /// <returns>The software adapter, listed as Unity's renderer.</returns>
+        /// <remarks>FFmpeg silently opens the default adapter for a nonexistent index, so a real adapter is needed to make device creation fail.</remarks>
+        private static HardwareGpu UnopenableRenderer()
+        {
+            foreach (var adapter in DxgiAdapterQuery.GetAdapters(true))
+            {
+                if (adapter.VendorId == 0x1414 && adapter.DeviceId == 0x8C)
+                {
+                    return adapter.WithRole(HardwareGpuRole.Renderer);
+                }
+            }
+
+            Assert.Ignore("DXGI does not list the Microsoft Basic Render Driver.");
+            return null!;
+        }
+
+        /// <summary>Reads every remaining frame and checks that each was decoded by hardware and uploaded through the CPU.</summary>
+        /// <param name="decoder">The open decoder.</param>
+        /// <returns>The presentation times in decoding order.</returns>
+        private static List<double> ReadAllUploaded(FFmpegVideoDecoder decoder)
+        {
+            var times = new List<double>();
+            while (true)
+            {
+                using var frame = decoder.ReadFrame();
+                if (frame == null)
+                {
+                    return times;
+                }
+
+                Assert.That(frame.IsHardwareFrame, Is.False);
+                Assert.That(frame.HardwareDecoded, Is.True);
+                Assert.That(frame.TransferMode, Is.EqualTo("Hardware decode + CPU RGBA upload"));
+                times.Add(frame.PresentationTime);
+            }
+        }
+
+        /// <summary>Checks that an unopenable renderer GPU is followed by hardware decoding with CPU upload on another GPU.</summary>
+        [Test]
+        public void HardwareDecode_RendererDeviceUnavailable_UsesOtherGpu()
+        {
+            var renderer = UnopenableRenderer();
+            var other = FirstAdapter(HardwareGpuRole.Other);
+            using var decoder = new FFmpegVideoDecoder(new DecoderOptions
+            {
+                HardwareDeviceType = AVHWDeviceType.AV_HWDEVICE_TYPE_D3D11VA,
+                HardwareGpus = new List<HardwareGpu> { renderer, other }
+            });
+            decoder.Open(_h264, CancellationToken.None);
+            if (!decoder.HardwareDecoding)
+            {
+                Assert.Ignore("H.264 D3D11VA decoding is unavailable on " + other + ": " + decoder.HardwareFallbackReason);
+            }
+
+            Assert.That(decoder.DecoderDevice, Is.EqualTo("D3D11VA on " + other));
+            Assert.That(decoder.HardwareFallbackReason, Does.Contain("Hardware device creation failed on " + renderer));
+            Assert.That(decoder.ActiveHardwareDeviceType, Is.EqualTo(AVHWDeviceType.AV_HWDEVICE_TYPE_D3D11VA));
+            Assert.That(ReadAllUploaded(decoder).Count, Is.EqualTo(30));
+            Assert.That(decoder.TransferMode, Is.EqualTo("Hardware decode + CPU RGBA upload"));
+        }
+
+        /// <summary>Checks that the software codec route decodes in software instead of trying another GPU.</summary>
+        [Test]
+        public void HardwareDecode_SoftwareCodecRoute_SkipsOtherGpus()
+        {
+            var renderer = UnopenableRenderer();
+            using var decoder = new FFmpegVideoDecoder(new DecoderOptions
+            {
+                HardwareDeviceType = AVHWDeviceType.AV_HWDEVICE_TYPE_D3D11VA,
+                HardwareFallbackRoute = HardwareFallbackRoute.SoftwareCodec,
+                HardwareGpus = new List<HardwareGpu> { renderer, FirstAdapter(HardwareGpuRole.Other) }
+            });
+            decoder.Open(_h264, CancellationToken.None);
+
+            Assert.That(decoder.HardwareDecoding, Is.False);
+            Assert.That(decoder.DecoderDevice, Is.EqualTo("Software"));
+            Assert.That(decoder.HardwareFallbackReason, Does.Contain("Hardware device creation failed on " + renderer));
+            Assert.That(ReadAll(decoder).Count, Is.EqualTo(30));
+        }
+
+        /// <summary>Checks that a stream rejected by the renderer GPU reopens its pending packet on the next GPU, then in software.</summary>
+        /// <remarks>This machine may have one GPU, so the same adapter is listed again as the other GPU and rejects the stream too.</remarks>
+        [Test]
+        public void HardwareDecode_RendererRejectsStream_TriesOtherGpuThenSoftware()
+        {
+            var renderer = FirstAdapter(HardwareGpuRole.Renderer);
+            var other = renderer.WithRole(HardwareGpuRole.Other);
+            using var decoder = new FFmpegVideoDecoder(new DecoderOptions
+            {
+                HardwareDeviceType = AVHWDeviceType.AV_HWDEVICE_TYPE_D3D11VA,
+                HardwareGpus = new List<HardwareGpu> { renderer, other }
+            });
+            decoder.Open(OversizedClip(), CancellationToken.None);
+            if (decoder.DecoderDevice != "D3D11VA on " + renderer)
+            {
+                Assert.Ignore("No D3D11VA device opened on " + renderer + ": " + decoder.HardwareFallbackReason);
+            }
+
+            // A GPU remains, so the renderer's codec is single-threaded and rejects the format synchronously.
+            Assert.That(decoder.DecoderThreadCount, Is.EqualTo(1));
+            var times = ReadAll(decoder);
+            if (decoder.HardwareFallbackReason == null || !decoder.HardwareFallbackReason.Contains("rejected"))
+            {
+                Assert.Ignore(renderer + " decodes " + OversizedWidth + "-pixel-wide H.264.");
+            }
+
+            Assert.That(times.Count, Is.EqualTo(OversizedFrames));
+            Assert.That(times[0], Is.EqualTo(0).Within(0.001));
+            Assert.That(decoder.HardwareFallbackReason, Does.Contain("rejected the requested hardware pixel format on " + renderer + ". Trying the next GPU."));
+            Assert.That(decoder.HardwareFallbackReason, Does.Contain("Reopened the h264 decoder on " + other + " with CPU upload."));
+            Assert.That(decoder.HardwareFallbackReason, Does.Contain("rejected the requested hardware pixel format on " + other));
+            Assert.That(decoder.HardwareDecoding, Is.False);
+            Assert.That(decoder.DecoderDevice, Is.EqualTo("Software"));
+            Assert.That(decoder.ActiveHardwareDeviceType, Is.EqualTo(AVHWDeviceType.AV_HWDEVICE_TYPE_NONE));
+        }
+
+        /// <summary>Checks that a stream rejected on a supplied renderer device moves to another GPU without the renderer's callbacks.</summary>
+        [Test]
+        public void HardwareDecode_SuppliedRendererRejectsStream_ReopensWithoutRendererCallbacks()
+        {
+            var renderer = FirstAdapter(HardwareGpuRole.Renderer);
+            var other = renderer.WithRole(HardwareGpuRole.Other);
+            var device = CreateD3D11Device();
+            var synchronization = new CountingSynchronization();
+            var mapper = new CloningMapper();
+            var options = new DecoderOptions
+            {
+                HardwareDeviceType = AVHWDeviceType.AV_HWDEVICE_TYPE_D3D11VA,
+                KeepNativeFrames = true,
+                AcquireHardwareDevice = () => device,
+                CreateHardwareSynchronization = _ => synchronization,
+                CreateHardwareFrameMapper = _ => mapper,
+                HardwareGpus = new List<HardwareGpu> { renderer, other }
+            };
+            using (var decoder = new FFmpegVideoDecoder(options))
+            {
+                decoder.Open(OversizedClip(), CancellationToken.None);
+                if (!decoder.HardwareDecoding)
+                {
+                    Assert.Ignore("The supplied D3D11VA device was not used: " + decoder.HardwareFallbackReason);
+                }
+
+                var times = ReadAll(decoder);
+                if (decoder.HardwareFallbackReason == null || !decoder.HardwareFallbackReason.Contains("rejected"))
+                {
+                    Assert.Ignore(renderer + " decodes " + OversizedWidth + "-pixel-wide H.264.");
+                }
+
+                Assert.That(times.Count, Is.EqualTo(OversizedFrames));
+                Assert.That(times[0], Is.EqualTo(0).Within(0.001));
+                // The supplied device belongs to the renderer, so the renderer entry is not opened again.
+                Assert.That(decoder.HardwareFallbackReason, Does.StartWith("The decoder rejected the requested hardware pixel format. Trying the next GPU."));
+                Assert.That(decoder.HardwareFallbackReason, Does.Contain("Reopened the h264 decoder on " + other + " with CPU upload."));
+                Assert.That(decoder.HardwareFallbackReason, Does.Not.Contain(renderer.ToString()));
+                Assert.That(synchronization.Disposed, Is.True);
+                Assert.That(mapper.Disposed, Is.True);
+                Assert.That(mapper.Maps, Is.EqualTo(0));
+                Assert.That(decoder.DecoderDevice, Is.EqualTo("Software"));
+            }
+        }
+#endif
 
         /// <summary>Checks the dimension validation helper.</summary>
         [Test]

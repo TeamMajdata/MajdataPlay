@@ -105,8 +105,8 @@ namespace MajdataPlay.Tests.Game.Notes.PlayMode
         [UnityTest]
         public IEnumerator Awake_PicksBreakShine([ValueSource(nameof(ShineCases))] object[] testCase)
         {
-            _rig.Settings.Display.DisplayCriticalPerfect = (bool)testCase[0];
-            _rig.Settings.Display.DisplayBreakScore = (bool)testCase[1];
+            _rig.UserSettings.Judge.DisplayCriticalPerfect = (bool)testCase[0];
+            _rig.UserSettings.Judge.DisplayBreakScore = (bool)testCase[1];
 
             var displayer = CreateJudgeText();
             yield return null;
@@ -138,7 +138,7 @@ namespace MajdataPlay.Tests.Game.Notes.PlayMode
         [UnityTest]
         public IEnumerator Play_PicksCriticalPerfectText([ValueSource(nameof(CriticalCases))] object[] testCase)
         {
-            _rig.Settings.Display.DisplayCriticalPerfect = true;
+            _rig.UserSettings.Judge.DisplayCriticalPerfect = true;
             var displayer = CreateJudgeText();
             yield return null;
 
@@ -166,7 +166,7 @@ namespace MajdataPlay.Tests.Game.Notes.PlayMode
         [UnityTest]
         public IEnumerator Play_BreakUsesTapTextWithoutBreakScore()
         {
-            _rig.Settings.Display.DisplayBreakScore = false;
+            _rig.UserSettings.Judge.DisplayBreakScore = false;
             var displayer = CreateJudgeText();
             yield return null;
 

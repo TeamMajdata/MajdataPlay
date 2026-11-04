@@ -1,5 +1,6 @@
 ﻿using MajdataPlay.Diagnostics;
 using MajdataPlay.Net.Curl.Core.PInvoke;
+using MajdataPlay.Net.Curl.Diagnostics;
 using MajdataPlay.Net.Curl.Lifecycle;
 using MajdataPlay.Net.Curl.Utils;
 using MajdataPlay.UnsafeKit;
@@ -95,6 +96,19 @@ namespace MajdataPlay.Net.Curl.Core
         readonly Action<CurlTask> _onCancelRequested;
 
         /// <summary>
+        /// The request counters and connection pool of this multi handle, listed in <see cref="CurlStatistics"/>.
+        /// </summary>
+        readonly CurlHandlerStatistics _statistics;
+
+        /// <summary>
+        /// Gets the request counters and connection pool of this multi handle.
+        /// </summary>
+        internal CurlHandlerStatistics Statistics
+        {
+            get => _statistics;
+        }
+
+        /// <summary>
         /// Creates the multi handle and starts its worker.
         /// </summary>
         /// <exception cref="CurlException">libcurl's global initialization failed.</exception>
@@ -112,6 +126,7 @@ namespace MajdataPlay.Net.Curl.Core
             _onResumeRequested = OnTaskResume;
             _onDisposeRequested = OnTaskDispose;
             _onCancelRequested = OnTaskCancel;
+            _statistics = CurlStatistics.Register();
             _workerThread = Task.Factory.StartNew(Run, CancellationToken.None,
                 TaskCreationOptions.LongRunning, TaskScheduler.Default);
         }
@@ -139,6 +154,8 @@ namespace MajdataPlay.Net.Curl.Core
                     // Registered before the task is visible to the worker, so the worker always sees the registration.
                     // An already-cancelled token calls OnTaskCancel synchronously; the lock is re-entrant.
                     curlTask.RegisterCancellation();
+                    // Counted before the worker can dequeue it, so the queued count never goes negative.
+                    _statistics.OnRequestQueued();
                     _pendingToSubmitTasks.Enqueue(curlTask);
                     WakeUp();
                     isQueued = true;
@@ -148,6 +165,10 @@ namespace MajdataPlay.Net.Curl.Core
             {
                 curlTask.ReleaseNativeResources();
                 throw new ObjectDisposedException(nameof(CurlMulti));
+            }
+            if (curlTask.Record is not null)
+            {
+                CurlNetworkMonitor.Register(curlTask.Record);
             }
 
             return curlTask.Task;
@@ -168,8 +189,11 @@ namespace MajdataPlay.Net.Curl.Core
             var curlTask = default(CurlTask);
             try
             {
-                var curlRequest = new CurlRequest(request, contentStream);
-                curlTask = new CurlTask(curlEasy, curlRequest, config, _onResumeRequested, _onDisposeRequested, _onCancelRequested, token);
+                var curlRequest = new CurlRequest(request, contentStream)
+                {
+                    Record = CurlNetworkMonitor.TryCreateRecord(request, config)
+                };
+                curlTask = new CurlTask(curlEasy, curlRequest, config, _onResumeRequested, _onDisposeRequested, _onCancelRequested, token, _statistics);
 
                 curlRequest.ApplyTo(curlEasy);
                 config.ApplyToEasy(curlEasy, curlRequest.RequestUri);
@@ -301,6 +325,7 @@ namespace MajdataPlay.Net.Curl.Core
         {
             while (_pendingToSubmitTasks.TryDequeue(out var pendingTask))
             {
+                _statistics.OnRequestDequeued();
                 if (pendingTask.CancellationToken.IsCancellationRequested)
                 {
                     pendingTask.TryEnterCancelledState();
@@ -313,8 +338,15 @@ namespace MajdataPlay.Net.Curl.Core
                     FinishDetachedTask(pendingTask);
                     continue;
                 }
-                pendingTask.Config.ApplyToMulti(this);
-                var returnCode = LibCurl.Multi.AddEasyHandle(ThisHandle, pendingTask.Easy.Handle);
+                var returnCode = pendingTask.Config.ApplyToMulti(this);
+                if (returnCode != CurlMCode.Ok)
+                {
+                    pendingTask.TryFail(new InvalidOperationException($"libcurl error: curl_multi_setopt returned {returnCode}"));
+                    FinishDetachedTask(pendingTask);
+                    continue;
+                }
+                _statistics.OnPoolLimitsApplied(pendingTask.Config.MaxConnectionsPerServer, pendingTask.Config.MaxCachedConnections);
+                returnCode = LibCurl.Multi.AddEasyHandle(ThisHandle, pendingTask.Easy.Handle);
                 if (returnCode != CurlMCode.Ok)
                 {
                     pendingTask.TryFail(new InvalidOperationException($"libcurl error: curl_multi_add_handle returned {returnCode}"));
@@ -323,6 +355,7 @@ namespace MajdataPlay.Net.Curl.Core
                 }
                 pendingTask.IsAttached = true;
                 _activeTasks.Add(pendingTask);
+                _statistics.OnRequestAttached();
             }
         }
 
@@ -335,6 +368,10 @@ namespace MajdataPlay.Net.Curl.Core
             {
                 if (cancelTask.TryEnterCancelledState())
                 {
+                    if (cancelTask.IsAttached)
+                    {
+                        cancelTask.CaptureTransferInfo();
+                    }
                     TryDetach(cancelTask);
                     FinishDetachedTask(cancelTask);
                 }
@@ -363,6 +400,11 @@ namespace MajdataPlay.Net.Curl.Core
         {
             while (_pendingToDisposeTasks.TryDequeue(out var disposeTask))
             {
+                // Only an attached transfer is guaranteed to still own its easy handle here.
+                if (disposeTask.IsAttached)
+                {
+                    disposeTask.CaptureTransferInfo();
+                }
                 TryDetach(disposeTask);
                 disposeTask.TryFail(new ObjectDisposedException(nameof(CurlResponse)));
                 disposeTask.ReleaseNativeResources();
@@ -392,13 +434,14 @@ namespace MajdataPlay.Net.Curl.Core
             }
             var result = multiMsg.Data.Result;
             // Read the error details while the easy handle is still guaranteed to be alive.
-            var curlErr = CurlUtility.GetEasyException(easyHandle, result);
+            var curlErr = CurlUtility.GetEasyException(easyHandle, result, result == CurlCode.Ok ? null : curlTask.Easy.GetErrorDetail());
+            curlTask.CaptureTransferInfo();
             LibCurl.Easy.SetOption(easyHandle, CurlOption.Private, IntPtr.Zero);
             // Once detached, a published response may release the easy handle on another thread at any moment.
             TryDetach(curlTask);
             if (curlErr is not null)
             {
-                curlTask.TryFail(curlErr);
+                curlTask.TryFail(CurlUtility.GetTransferException(curlErr));
             }
             else
             {
@@ -421,6 +464,8 @@ namespace MajdataPlay.Net.Curl.Core
             }
             LibCurl.Multi.RemoveEasyHandle(ThisHandle, task.Easy.Handle);
             task.IsAttached = false;
+            // Removing the handle has already reported a connection libcurl closed for it, such as an aborted one.
+            _statistics.OnRequestDetached(task.ConnectionId);
             return true;
         }
 
@@ -501,6 +546,8 @@ namespace MajdataPlay.Net.Curl.Core
                     {
                         LibCurl.Multi.CleanUp(handle);
                         LibCurlLifecycle.Release();
+                        // curl_multi_cleanup closes the pooled connections without reporting them.
+                        CurlStatistics.OnHandlerDisposed(_statistics);
                     }
                 }
                 // Releasing a registration waits for a running cancellation callback, which may be blocked on the

@@ -293,12 +293,12 @@ namespace MajdataPlay.IO
             MajDebug.LogInfo("[InputManager]Start initialization");
             _isInited = true;
             MajDebug.LogDebug("[InputManager]Reading config from game settings");
-            _isSensorRendererEnabled = MajEnv.Settings.Debug.DisplaySensor;
+            _isSensorRendererEnabled = MajEnv.UserSettings.Display.DisplaySensor;
 #if UNITY_STANDALONE
-            _btnDebounceThresholdMs = TimeSpan.FromMilliseconds(MajEnv.Settings.IO.InputDevice.ButtonRing.DebounceThresholdMs);
-            _sensorDebounceThresholdMs = TimeSpan.FromMilliseconds(MajEnv.Settings.IO.InputDevice.TouchPanel.DebounceThresholdMs);
-            _isBtnDebounceEnabled = MajEnv.Settings.IO.InputDevice.ButtonRing.Debounce;
-            _isSensorDebounceEnabled = MajEnv.Settings.IO.InputDevice.TouchPanel.Debounce;
+            _btnDebounceThresholdMs = TimeSpan.FromMilliseconds(MajEnv.SystemSettings.IO.InputDevice.ButtonRing.DebounceThresholdMs);
+            _sensorDebounceThresholdMs = TimeSpan.FromMilliseconds(MajEnv.SystemSettings.IO.InputDevice.TouchPanel.DebounceThresholdMs);
+            _isBtnDebounceEnabled = MajEnv.SystemSettings.IO.InputDevice.ButtonRing.Debounce;
+            _isSensorDebounceEnabled = MajEnv.SystemSettings.IO.InputDevice.TouchPanel.Debounce;
 #else
             _btnDebounceThresholdMs = TimeSpan.Zero;
             _sensorDebounceThresholdMs = TimeSpan.Zero;

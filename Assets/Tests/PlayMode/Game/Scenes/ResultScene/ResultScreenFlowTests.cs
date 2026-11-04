@@ -244,7 +244,7 @@ namespace MajdataPlay.Tests.Game.Scenes.PlayMode.ResultScene
                 (97.1, JudgeRecords.Info((JudgeGrade.Miss, 1), (JudgeGrade.Perfect, 1)), JudgeRecords.Info(), string.Empty, "S", "您赢了"),
                 (80, JudgeRecords.Info((JudgeGrade.Miss, 1)), JudgeRecords.Info(), string.Empty, string.Empty, "您输了"),
             };
-            MajEnv.Settings.Debug.OffsetUnit = OffsetUnitOption.Second;
+            MajEnv.UserSettings.Judge.OffsetUnit = OffsetUnitOption.Second;
             foreach (var (dx, tap, breakInfo, clear, rank, omg) in cases)
             {
                 InstallGame(GameMode.Normal, dx, JudgeRecords.Detail(tap: tap, breakInfo: breakInfo), Array.Empty<float>());
@@ -268,7 +268,7 @@ namespace MajdataPlay.Tests.Game.Scenes.PlayMode.ResultScene
         [UnityTest]
         public IEnumerator Start_ClassicModeAndEmptyDifferences()
         {
-            MajEnv.Settings.Judge.Mode = JudgeModeOption.Classic;
+            MajEnv.UserSettings.Judge.Mode = JudgeModeOption.Classic;
             InstallGame(GameMode.Normal, 99, JudgeRecords.Detail(tap: JudgeRecords.Info((JudgeGrade.Perfect, 1))), Array.Empty<float>());
             var manager = CreateScreen();
 

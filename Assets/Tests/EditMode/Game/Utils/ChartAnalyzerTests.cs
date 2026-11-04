@@ -101,19 +101,21 @@ namespace MajdataPlay.Tests.Game.Utils
             Assert.That(MaxAlphaInColumn(texture, 325), Is.EqualTo(0f), "empty bar");
         }
 
-        /// <summary>Checks that every note type contributes to the graph and repeated calls reuse the cached drawing state.</summary>
+        /// <summary>Checks that a positive offset shifts the notes and repeated calls reuse the cached drawing state.</summary>
         [Test]
-        public void AnalyzeMaidataWithGraph_AllNoteTypes_DrawRepeatedly()
+        public void AnalyzeMaidataWithGraph_AllNoteTypes_WithOffset_DrawRepeatedly()
         {
             var chart = SimaiParser.ParseChart("(120){4}1/C,1-5[4:1]/E1,2h[4:1]/Ch[4:1],3,E".AsSpan());
 
-            var first = ChartAnalyzer.AnalyzeMaidataWithGraph(chart, 50, 320, 2f);
-            var second = ChartAnalyzer.AnalyzeMaidataWithGraph(chart, 50, 320, 2f);
+            var first = ChartAnalyzer.AnalyzeMaidataWithGraph(chart, 50, 320, 2f, 4f);
+            var second = ChartAnalyzer.AnalyzeMaidataWithGraph(chart, 50, 320, 2f, 4f);
             var firstTexture = (Texture2D)_objects.Track(first.LineGraph);
             var secondTexture = (Texture2D)_objects.Track(second.LineGraph);
 
             Assert.That(first.MinBPM, Is.EqualTo(120f));
-            Assert.That(MaxAlphaInColumn(firstTexture, 2), Is.GreaterThan(0.5f));
+            Assert.That(first.Length.TotalSeconds, Is.EqualTo(4d));
+            Assert.That(MaxAlphaInColumn(firstTexture, 2), Is.EqualTo(0f), "The offset leaves the beginning empty.");
+            Assert.That(MaxAlphaInColumn(firstTexture, 162), Is.GreaterThan(0.5f), "The first notes start halfway through the graph.");
             Assert.That(secondTexture.GetPixels32(), Is.EqualTo(firstTexture.GetPixels32()));
         }
 

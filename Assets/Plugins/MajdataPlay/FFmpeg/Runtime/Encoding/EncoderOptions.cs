@@ -1,5 +1,7 @@
 #nullable enable
 using System;
+using System.Collections.Generic;
+using MajdataPlay.FFmpeg.Interop;
 using UnityEngine;
 
 namespace MajdataPlay.FFmpeg
@@ -54,6 +56,17 @@ namespace MajdataPlay.FFmpeg
         /// <summary>Gets or sets the preferred backend; hardware preference permits software fallback within the requested format.</summary>
         [field: SerializeField]
         public VideoEncoderType PreferredEncoderType { get; set; } = VideoEncoderType.Software;
+        /// <summary>Gets or sets how hardware preference continues when the GPU that renders Unity has no checked encoder for the requested format.</summary>
+        /// <remarks>
+        /// <see cref="HardwareFallbackRoute.OtherGpus"/> tries the checked hardware encoders of each remaining GPU before the
+        /// same-format software encoder; <see cref="HardwareFallbackRoute.SoftwareCodec"/> uses the software encoder directly.
+        /// Only Windows and Linux enumerate other GPUs. Software preference ignores this setting.
+        /// </remarks>
+        [field: SerializeField]
+        public HardwareFallbackRoute HardwareFallbackRoute { get; set; } = HardwareFallbackRoute.OtherGpus;
+        /// <summary>Gets or sets the ordered GPUs to try, Unity's renderer first, or null to enumerate the system when recording starts.</summary>
+        /// <remarks>This value is not serialized. The encoder still applies <see cref="HardwareFallbackRoute"/> to a supplied list.</remarks>
+        internal IReadOnlyList<HardwareGpu>? HardwareGpus { get; set; }
         /// <summary>Gets or sets the maximum FFmpeg software codec worker count and RGBA color-converter worker count, between 1 and 128.</summary>
         /// <remarks>This controls codec and converter workers, not all auxiliary threads created by an external library or driver. Hardware encoders still convert captured frames on the CPU.</remarks>
         [field: SerializeField]
@@ -104,6 +117,7 @@ namespace MajdataPlay.FFmpeg
             }
 
             if (!Enum.IsDefined(typeof(VideoEncoderType), PreferredEncoderType)
+                || !Enum.IsDefined(typeof(HardwareFallbackRoute), HardwareFallbackRoute)
                 || !Enum.IsDefined(typeof(VideoEncodingFormat), Format)
                 || !Enum.IsDefined(typeof(VideoRateControlMode), RateControlMode))
             {
@@ -116,6 +130,8 @@ namespace MajdataPlay.FFmpeg
                 Height = Height,
                 FrameRate = FrameRate,
                 PreferredEncoderType = PreferredEncoderType,
+                HardwareFallbackRoute = HardwareFallbackRoute,
+                HardwareGpus = HardwareGpus,
                 MaximumSoftwareThreads = MaximumSoftwareThreads,
                 Format = Format,
                 BitRate = BitRate,

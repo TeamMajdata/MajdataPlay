@@ -30,10 +30,10 @@ namespace MajdataPlay.Tests.Game.IO
             _savedDevices = Devices.ToArray();
             _savedManufacturer = IODetector.DeviceManufacturer;
             _settings = new SettingsScope();
-            var input = _settings.Settings.IO.InputDevice;
+            var input = _settings.SystemSettings.IO.InputDevice;
             input.ButtonRing = new ButtonRingOptions { Enable = false };
             input.TouchPanel = new TouchPanelOptions { Enable = false };
-            _settings.Settings.IO.OutputDevice.Led = new LedOptions { Enable = false };
+            _settings.SystemSettings.IO.OutputDevice.Led = new LedOptions { Enable = false };
             Reset();
         }
 
@@ -76,7 +76,7 @@ namespace MajdataPlay.Tests.Game.IO
         public void Init_KeyboardButtonRing_StartsTheKeyboardDevice()
         {
             PrivateMember.SetStaticProperty(typeof(IODetector), nameof(IODetector.DeviceManufacturer), DeviceManufacturerOption.General);
-            _settings.Settings.IO.InputDevice.ButtonRing = new ButtonRingOptions { Enable = true };
+            _settings.SystemSettings.IO.InputDevice.ButtonRing = new ButtonRingOptions { Enable = true };
 
             GameDeviceManager.Init();
 
@@ -91,9 +91,9 @@ namespace MajdataPlay.Tests.Game.IO
         public void Init_NPro_SharesOneDevice()
         {
             PrivateMember.SetStaticProperty(typeof(IODetector), nameof(IODetector.DeviceManufacturer), DeviceManufacturerOption.NPro);
-            _settings.Settings.IO.InputDevice.ButtonRing = new ButtonRingOptions { Enable = true };
-            _settings.Settings.IO.InputDevice.TouchPanel = new TouchPanelOptions { Enable = true };
-            _settings.Settings.IO.OutputDevice.Led = new LedOptions { Enable = true };
+            _settings.SystemSettings.IO.InputDevice.ButtonRing = new ButtonRingOptions { Enable = true };
+            _settings.SystemSettings.IO.InputDevice.TouchPanel = new TouchPanelOptions { Enable = true };
+            _settings.SystemSettings.IO.OutputDevice.Led = new LedOptions { Enable = true };
 
             GameDeviceManager.Init();
 

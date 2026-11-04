@@ -6,27 +6,37 @@ using UnityEngine;
 #nullable enable
 namespace MajdataPlay.Tests.Game.Global.PlayMode
 {
-    /// <summary>Replaces <see cref="MajEnv.Settings"/> with fresh defaults in Play Mode and restores the original when disposed.</summary>
+    /// <summary>Replaces <see cref="MajEnv.UserSettings"/> and <see cref="MajEnv.SystemSettings"/> with fresh defaults in Play Mode and restores the originals when disposed.</summary>
     internal sealed class PlayModeSettingsScope : IDisposable
     {
-        /// <summary>The settings object that was active before the scope.</summary>
-        private readonly GameSetting _original;
+        /// <summary>The user settings object that was active before the scope.</summary>
+        private readonly UserSetting _originalUser;
 
-        /// <summary>Installs a new default settings object.</summary>
+        /// <summary>The system settings object that was active before the scope.</summary>
+        private readonly SystemSetting _originalSystem;
+
+        /// <summary>Installs new default settings objects.</summary>
         public PlayModeSettingsScope()
         {
-            _original = MajEnv.Settings;
-            Settings = new GameSetting();
-            PrivateMember.SetStaticProperty(typeof(MajEnv), nameof(MajEnv.Settings), Settings);
+            _originalUser = MajEnv.UserSettings;
+            _originalSystem = MajEnv.SystemSettings;
+            UserSettings = new UserSetting();
+            SystemSettings = new SystemSetting();
+            PrivateMember.SetStaticProperty(typeof(MajEnv), nameof(MajEnv.UserSettings), UserSettings);
+            PrivateMember.SetStaticProperty(typeof(MajEnv), nameof(MajEnv.SystemSettings), SystemSettings);
         }
 
-        /// <summary>Gets the settings object installed for the scope.</summary>
-        public GameSetting Settings { get; }
+        /// <summary>Gets the user settings object installed for the scope.</summary>
+        public UserSetting UserSettings { get; }
 
-        /// <summary>Restores the original settings object.</summary>
+        /// <summary>Gets the system settings object installed for the scope.</summary>
+        public SystemSetting SystemSettings { get; }
+
+        /// <summary>Restores the original settings objects.</summary>
         public void Dispose()
         {
-            PrivateMember.SetStaticProperty(typeof(MajEnv), nameof(MajEnv.Settings), _original);
+            PrivateMember.SetStaticProperty(typeof(MajEnv), nameof(MajEnv.UserSettings), _originalUser);
+            PrivateMember.SetStaticProperty(typeof(MajEnv), nameof(MajEnv.SystemSettings), _originalSystem);
         }
     }
 

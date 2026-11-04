@@ -131,6 +131,27 @@ namespace MajdataPlay.Tests.Plugins.Net.Curl
             Assert.That(effectiveUrl, Does.StartWith("unsupported-scheme"));
         }
 
+        /// <summary>
+        /// Checks that every easy handle installs an error buffer, which stays empty until a failure, then names its
+        /// cause, and reads as empty once the handle is disposed.
+        /// </summary>
+        [Test]
+        public void ErrorBuffer_DescribesLastFailure()
+        {
+            var easy = new CurlEasy();
+            easy.SetOption(CurlOption.Url, UnsupportedUrl);
+            var before = easy.GetErrorDetail();
+
+            easy.Perform();
+            var after = easy.GetErrorDetail();
+            easy.Dispose();
+
+            Assert.That(before, Is.Null);
+            Assert.That(after, Does.Contain("unsupported-scheme"));
+            Assert.That(after, Is.Not.EqualTo(LibCurl.Easy.GetErrorMessage(CurlCode.UnsupportedProtocol)));
+            Assert.That(easy.GetErrorDetail(), Is.Null);
+        }
+
         /// <summary>Checks that numeric, floating-point and pointer information can be queried from a fresh handle.</summary>
         [Test]
         public void GetInfo_ReadsEveryKind()

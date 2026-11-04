@@ -147,8 +147,8 @@ namespace MajdataPlay.Tests.Game.Notes.PlayMode
         [Test]
         public void Judge_AppliesJudgeOffset()
         {
-            _environment.Settings.Debug.OffsetUnit = OffsetUnitOption.Second;
-            _environment.Settings.Judge.JudgeOffset = 0.1f;
+            _environment.UserSettings.Judge.OffsetUnit = OffsetUnitOption.Second;
+            _environment.UserSettings.Judge.JudgeOffset = 0.1f;
             var note = CreateNote();
 
             note.RunJudge(AnswerTiming + 0.1f);
@@ -240,15 +240,15 @@ namespace MajdataPlay.Tests.Game.Notes.PlayMode
         [UnityTest]
         public IEnumerator Awake_ReadsSettingsInSeconds()
         {
-            var settings = _environment.Settings;
-            settings.Debug.OffsetUnit = OffsetUnitOption.Second;
+            var settings = _environment.UserSettings;
+            settings.Judge.OffsetUnit = OffsetUnitOption.Second;
             settings.Judge.JudgeOffset = 0.5f;
-            settings.Debug.DisplayOffset = 0.25f;
+            _environment.SystemSettings.Debug.DisplayOffset = 0.25f;
             settings.Judge.TouchPanelOffset = 0.125f;
             settings.Display.TapScale = 1.5f;
             settings.Game.SlideSkipping = false;
             settings.Judge.Mode = JudgeModeOption.Classic;
-            settings.Debug.DJAutoPolicy = DJAutoPolicyOption.Permissive;
+            _environment.SystemSettings.Common.DJAutoPolicy = DJAutoPolicyOption.Permissive;
             _controller.SetMods(AutoplayModeOption.Enable, buttonRingForTouch: true);
 
             var note = CreateNote();
@@ -272,8 +272,8 @@ namespace MajdataPlay.Tests.Game.Notes.PlayMode
         [UnityTest]
         public IEnumerator Awake_ConvertsFrameOffsets()
         {
-            var settings = _environment.Settings;
-            settings.Debug.OffsetUnit = OffsetUnitOption.Frame;
+            var settings = _environment.UserSettings;
+            settings.Judge.OffsetUnit = OffsetUnitOption.Frame;
             settings.Judge.JudgeOffset = 3f;
             settings.Judge.TouchPanelOffset = 6f;
 

@@ -11,7 +11,7 @@ namespace MajdataPlay.Settings.Runtime;
 public class SettingConfig
 {
     [JsonIgnore, Preserve]
-    public string SelectedMenu { get; set; } = nameof(GameSetting.Game);
+    public string SelectedMenu { get; set; } = nameof(UserSetting.Game);
     [JsonIgnore, Preserve]
     public string SelectedOption { get; set; } = string.Empty;
     [JsonIgnore, Preserve]

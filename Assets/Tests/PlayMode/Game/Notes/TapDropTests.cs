@@ -250,7 +250,7 @@ namespace MajdataPlay.Tests.Game.Notes.PlayMode
         [UnityTest]
         public IEnumerator SensorClick_UsesTouchPanelOffset()
         {
-            _rig.Settings.Judge.TouchPanelOffset = 3f;
+            _rig.UserSettings.Judge.TouchPanelOffset = 3f;
             var tap = _rig.SpawnTap(GameplayRig.TapInfo(startPos: 2, timing: 1f));
             yield return null;
             _rig.SetSensor(SensorArea.A2, SwitchStatus.Off, SwitchStatus.On);
@@ -476,7 +476,7 @@ namespace MajdataPlay.Tests.Game.Notes.PlayMode
         [UnityTest]
         public IEnumerator DjAutoplay_PermissivePolicyFallsBackToSensor()
         {
-            _rig.Settings.Debug.DJAutoPolicy = DJAutoPolicyOption.Permissive;
+            _rig.SystemSettings.Common.DJAutoPolicy = DJAutoPolicyOption.Permissive;
             _rig.Controller.SetMods(AutoplayModeOption.DJAuto_ButtonRing_First);
             PrivateMember.SetField(_rig.NoteManager, "USERSETTING_IS_AUTOPLAY", true);
             var tap = _rig.SpawnTap(GameplayRig.TapInfo(timing: 1f));

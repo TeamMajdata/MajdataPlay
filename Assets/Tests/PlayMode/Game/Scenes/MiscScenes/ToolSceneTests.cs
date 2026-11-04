@@ -139,7 +139,7 @@ namespace MajdataPlay.Tests.Game.Scenes.PlayMode.MiscScenes
 
             PrivateMember.SetStaticField(typeof(ViewManager), "_state", ViewStatus.Playing);
             PrivateMember.SetStaticField(typeof(ViewManager), "_errMsg", "oops");
-            MajEnv.Settings.Mod.AutoPlay = AutoplayModeOption.Enable;
+            MajEnv.SystemSettings.Mod.AutoPlay = AutoplayModeOption.Enable;
 
             Assert.That(ViewManager.Summary.State, Is.EqualTo(ViewStatus.Playing));
             Assert.That(ViewManager.Summary.ErrMsg, Is.EqualTo("oops"));
@@ -148,7 +148,7 @@ namespace MajdataPlay.Tests.Game.Scenes.PlayMode.MiscScenes
             Assert.That(manager.AutoplayMode, Is.EqualTo(AutoplayModeOption.Enable));
 
             PrivateMember.SetStaticField(typeof(ViewManager), "_state", ViewStatus.Paused);
-            MajEnv.Settings.Mod.AutoPlay = AutoplayModeOption.Disable;
+            MajEnv.SystemSettings.Mod.AutoPlay = AutoplayModeOption.Disable;
             Assert.That(manager.IsStart, Is.False);
             Assert.That(manager.IsAutoplay, Is.False);
             Assert.That(manager.ThisFrameSec, Is.EqualTo(manager.ThisFixedUpdateSec));

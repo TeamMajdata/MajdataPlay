@@ -280,7 +280,7 @@ namespace MajdataPlay.Tests
 
             MajEnv.ChartDirectory = FileSystem.Directory.Open(rootPath);
             MajEnv.CacheDirectory = FileSystem.Directory.Create(Path.Combine(fixtures, "Cache"));
-            MajEnv.Settings.Online.Enable = false;
+            MajEnv.SystemSettings.Network.Online.Enable = false;
             var beforeInitialization = SongStorage.Collections;
             var countBeforeInitialization = SongStorage.TotalChartCount;
             await SongStorage.InitAsync().ConfigureAwait(false);

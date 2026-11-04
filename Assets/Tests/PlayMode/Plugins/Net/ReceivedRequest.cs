@@ -11,11 +11,13 @@ namespace MajdataPlay.Tests.Plugins.Net
         /// <summary>Initializes a recorded request without a body.</summary>
         /// <param name="method">The request method.</param>
         /// <param name="target">The request target, either a path or an absolute URI for proxy requests.</param>
+        /// <param name="protocol">The HTTP version token from the request line.</param>
         /// <param name="headers">The header fields in arrival order.</param>
-        public ReceivedRequest(string method, string target, IReadOnlyList<KeyValuePair<string, string>> headers)
+        public ReceivedRequest(string method, string target, string protocol, IReadOnlyList<KeyValuePair<string, string>> headers)
         {
             Method = method;
             Target = target;
+            Protocol = protocol;
             Headers = headers;
         }
 
@@ -24,6 +26,9 @@ namespace MajdataPlay.Tests.Plugins.Net
 
         /// <summary>Gets the request target.</summary>
         public string Target { get; }
+
+        /// <summary>Gets the HTTP version token from the request line.</summary>
+        public string Protocol { get; }
 
         /// <summary>Gets the header fields in arrival order.</summary>
         public IReadOnlyList<KeyValuePair<string, string>> Headers { get; }

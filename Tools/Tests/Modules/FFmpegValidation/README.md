@@ -533,9 +533,11 @@ mkdir -p /tmp/software-recording-output
 bash Tools/Tests/Modules/FFmpegValidation/run-linux.sh
 ```
 
-需要 Linux x64（也可 WSL）、C 编译器、`readelf` 和 `ldd`。可依次传入绝对库目录和视频路径。测试程序仅链接 `libdl`，不在链接阶段依赖 FFmpeg；首先用绝对路径 `dlopen libavformat.so.63`，由产物自身的 `$ORIGIN` RUNPATH 解析 avcodec/avutil，然后加载其余全部七库。运行时明确移除 `LD_LIBRARY_PATH`，并检查实际加载的 avcodec 来源，避免系统安装或测试环境掩盖缺失依赖。
+需要 Linux x64（也可 WSL）、C 编译器、`readelf` 和 `ldd`。可依次传入绝对库目录和视频路径。测试程序仅链接 `libdl`，不在链接阶段依赖 FFmpeg；首先用绝对路径 `dlopen libavformat.so.63`，由产物自身的 `$ORIGIN` RUNPATH 解析 avcodec/avutil，然后加载其余全部七库。运行时明确移除 `LD_LIBRARY_PATH`，并检查实际加载的 avcodec 来源，避免系统安装或测试环境掩盖缺失依赖。还检查 Linux QSV 的 H.264/HEVC/AV1/VP9 编码器注册、当前码率控制补丁标记、VAAPI/libdrm 子设备配置，以及全部九个 QSV 解码器保持禁用；随后实际解码媒体并转换 RGBA。这些检查不创建 Intel 编码会话，不代表 QSV 硬件 CBR/VBR 编码已验证。
 
 2026-10-03 本机 WSL 结果：**PASS，144 checks**，H.264 1920×1080 实际解码 30 帧并缩放到 RGBA32，像素亮度范围 0–177，校验和 `ae2450db4c195031`。七个 staged ELF 库均检查 `$ORIGIN`。证据保存到忽略的 `.work/linux-native.txt`；程序源为 [LinuxNativeSmoke.c](LinuxNativeSmoke.c)。这项结果证明 Linux 库的加载、解封装、解码和像素转换，不代表 Linux Unity 图形显示已经实机验证。
+
+2026-10-31 补齐 QSV 编码交付后复验 **161 checks PASS**，30 帧解码的像素校验和保持一致；四个 QSV 编码器注册及码率检查标记通过，全部 QSV 解码器仍禁用。另通过沿用桥接 ABI 4 加载、四种软件视频编码器 CBR/VBR、MPEG4 和 35 组音频往返。命令、计数与 QSV 无 Intel 实机的限制见 [同日 Linux 构建记录](../../../FFmpeg/BUILD-RESULTS.md)。
 
 ## Camera 录制 Player
 

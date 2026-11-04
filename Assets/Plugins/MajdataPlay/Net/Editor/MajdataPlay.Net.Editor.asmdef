@@ -1,0 +1,6 @@
+{
+    "name": "MajdataPlay.Net.Editor",
+    "rootNamespace": "MajdataPlay.Net.Editor",
+    "references": ["MajdataPlay.Net"],
+    "includePlatforms": ["Editor"]
+}

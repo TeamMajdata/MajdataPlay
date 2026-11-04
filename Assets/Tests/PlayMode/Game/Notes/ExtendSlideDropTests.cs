@@ -155,7 +155,7 @@ namespace MajdataPlay.Tests.Game.Notes.PlayMode
         [UnityTest]
         public IEnumerator Init_UsesTheClassicConstantOfThePredefinedTable()
         {
-            _rig.Settings.Judge.Mode = JudgeModeOption.Classic;
+            _rig.UserSettings.Judge.Mode = JudgeModeOption.Classic;
             var table = SlideTables.FindTableBySlideCode("1K4")!;
             var slide = CreateSlide(ThreeAreas(), SlideOkType.StraightL, conditionalLastArrow: false, predefinedTable: table);
             yield return null;
@@ -168,7 +168,7 @@ namespace MajdataPlay.Tests.Game.Notes.PlayMode
         [UnityTest]
         public IEnumerator Init_DisablesSkippingWhenRequested()
         {
-            _rig.Settings.Game.SlideSkipping = false;
+            _rig.UserSettings.Game.SlideSkipping = false;
             var slide = CreateSlide(ThreeAreas(), SlideOkType.StraightL, conditionalLastArrow: false);
             yield return null;
 

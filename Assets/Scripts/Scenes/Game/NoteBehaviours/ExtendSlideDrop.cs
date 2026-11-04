@@ -76,13 +76,13 @@ namespace MajdataPlay.Scenes.Game.Notes.Behaviours
             // 在8.0速时应当提前300ms显示Slide
             FadeInTiming = -3.926913f / Speed;
             var fadeInOffset = 0f;
-            if (Settings.Debug.OffsetUnit == OffsetUnitOption.Second)
+            if (UserSettings.Judge.OffsetUnit == OffsetUnitOption.Second)
             {
-                fadeInOffset = Settings.Game.SlideFadeInOffset;
+                fadeInOffset = UserSettings.Game.SlideFadeInOffset;
             }
             else
             {
-                fadeInOffset = Settings.Game.SlideFadeInOffset * MajEnv.FRAME_LENGTH_SEC;
+                fadeInOffset = UserSettings.Game.SlideFadeInOffset * MajEnv.FRAME_LENGTH_SEC;
             }
             FadeInTiming += fadeInOffset;
             FadeInTiming += Timing;

@@ -22,7 +22,7 @@ namespace MajdataPlay.IO
 
         public RosenLedDevice() : base(IODetector.LedDeviceSerialConnInfo)
         {
-            var options = MajEnv.Settings.IO.OutputDevice.Led;
+            var options = MajEnv.SystemSettings.IO.OutputDevice.Led;
             _brightness = Mathf.Clamp01(options.Brightness);
             _throttler = options.Throttler;
             var refreshRate = Math.Max(0, options.RefreshRateMs);

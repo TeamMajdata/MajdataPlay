@@ -5,6 +5,7 @@ Run from the repository root with Python 3.10 or newer:
 ```powershell
 python -B Tools/Tests/Modules/FFmpegBuildValidation/test_windows_arm64.py
 python -B Tools/Tests/Modules/FFmpegBuildValidation/test_audio_codecs.py
+python -B Tools/Tests/Modules/FFmpegBuildValidation/test_qsv.py
 ```
 
 The offline suite imports the production build recipe and uses inert compiler files
@@ -21,6 +22,13 @@ archive extraction boundaries and source tampering/additions, and rejects old
 artifacts without audio dependency evidence. It also keeps Android C++ runtime
 search paths isolated from the NDK's static Bionic libc/libm. Real waveform tests are documented
 in `Tools/Tests/Modules/FFmpegValidation/README.md`.
+
+The QSV suite checks H.264/HEVC/AV1/VP9 encoder selection on Windows x86/x64
+and Linux x64, retention of the Linux VAAPI/DRM child-device backend, disabled
+QSV decoders, static PIC VPL dispatcher configuration and C++ link closure, and
+pinned dispatcher/license provenance. It does not create an Intel GPU session.
+Linux loader and decoder integration checks are described in
+`Tools/Tests/Modules/FFmpegValidation/README.md`.
 
 Verify real staged outputs separately with:
 

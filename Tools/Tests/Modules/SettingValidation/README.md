@@ -16,7 +16,7 @@ dotnet run --project Tools/Tests/Modules/SettingValidation/SettingValidation.csp
 
 The project links the production `Menu`, `Option`, `SettingManager`, option
 enumerators, `RenderingOptions`, `MajRenderDiagnostics`, settings attributes, and input repeat
-implementation directly. It also links the production `DebugOptions`, `SensorDebugStyle`, `SensorDebugPosition`, and their required enums so sensor defaults and menu metadata are not copied into a test stub. It uses no NuGet packages. The command above writes all
+implementation directly. It also links the production `SettingRoot`, `DisplayOptions`, `TouchOptions`, `DebugOptions`, `SensorDebugStyle`, `SensorDebugPosition`, and their required enums so sensor defaults and menu metadata are not copied into a test stub. It uses no NuGet packages. The command above writes all
 build output outside the Unity project; omitting these properties retains the
 older `Temp/SettingValidation` default. Rendering translations are copied from
 the four actual project language tables into this external output directory.
@@ -121,7 +121,7 @@ visible custom resolution control; its old visibility expectations were updated.
 Unity objects, TMP, LitMotion scheduling, localization, and external game services
 are narrow test doubles. The tests check production control flow and TMP setter
 calls, not rendered pixels, Canvas rebuilds, real LitMotion timing, or Unity's
-native lifecycle. GameSetting is a narrow category-layout stub here; actual JSON
+native lifecycle. UserSetting and SystemSetting are narrow category-layout stubs here; actual JSON
 migration and Unity rendering application require separate checks. The rendering
 apply counter verifies call timing, not GPU state or output pixels. Compile the project with Unity and inspect Setting in Play Mode
 for those integration checks.

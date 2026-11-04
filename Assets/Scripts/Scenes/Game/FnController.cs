@@ -68,15 +68,16 @@ namespace MajdataPlay.Scenes.Game
         internal void Init(GamePlayManager gpManager)
         {
             _gpManager = gpManager;
-            var settings = MajEnv.Settings;
-            _isTrackSkipAvailable = settings.Game.TrackSkip;
-            _isFastRetryAvailable = settings.Game.FastRetry;
-            _isFastPracticeAvailable = settings.Game.FastPractice;
-            _gameplaySubScreenClickBehavior = settings.Game.GameplaySubScreenClickBehavior;
+            var userSettings = MajEnv.UserSettings;
+            var systemSettings = MajEnv.SystemSettings;
+            _isTrackSkipAvailable = userSettings.Game.TrackSkip;
+            _isFastRetryAvailable = userSettings.Game.FastRetry;
+            _isFastPracticeAvailable = userSettings.Game.FastPractice;
+            _gameplaySubScreenClickBehavior = userSettings.Game.GameplaySubScreenClickBehavior;
             _isFnKeyInputArmed = false;
             ResetFnKeyPressTimes();
 
-            switch (settings.Display.GameplayScreenRotationAngle)
+            switch (systemSettings.Rendering.GameplayScreenRotationAngle)
             {
                 case GameplayScreenRotationAngleOption._90:
                     _buttonKeyFor2367[0] = ButtonZone.A4;

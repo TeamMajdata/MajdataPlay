@@ -20,10 +20,10 @@
     "bindingHeaders": "ThirdParty/FFmpeg.AutoGen/FFmpeg/include",
     "note": "All upstream public headers present in the binding header snapshot are compared after CRLF normalization before building. Generated avconfig.h and ffversion.h are excluded."
   },
-  "host": "Linux-6.18.54.1-microsoft-standard-WSL2-x86_64-with-glibc2.39",
-  "builtUtc": "2026-10-17T13:53:11.361893+00:00",
+  "host": "Windows-11-10.0.26200-SP0",
+  "builtUtc": "2026-10-31T09:03:26.747038+00:00",
   "configure": [
-    "--prefix=/home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005/install/win-x86",
+    "--prefix=/c/Users/kiris/AppData/Local/Packages/CLAUDE~1/LOCALC~1/Local/MajFFB/install/win-x86",
     "--disable-doc",
     "--disable-programs",
     "--disable-debug",
@@ -36,15 +36,22 @@
     "--enable-gpl",
     "--enable-version3",
     "--disable-nonfree",
-    "--extra-version=MajdataPlay-AMF-RC-v1-c0604b924b6a_MajdataPlay-X265-Params-v1-5b457330f94a",
+    "--extra-version=MajdataPlay-AMF-RC-v1-c0604b924b6a_MajdataPlay-X265-Params-v1-5b457330f94a_MajdataPlay-QSV-RC-v1-140460417695",
     "--disable-decoder=adpcm_circus,adpcm_ima_escape,adpcm_ima_hvqm2,adpcm_ima_hvqm4,adpcm_ima_magix,adpcm_ima_pda,adpcm_n64,adpcm_psxc,ahx",
     "--disable-parser=ahx",
     "--disable-bsf=ahx_to_mp2",
-    "--enable-encoder=mpeg4,libx264,libx265,libvpx_vp9,libaom_av1,aac,libopus,libmp3lame,pcm_alaw,pcm_bluray,pcm_dvd,pcm_f32be,pcm_f32le,pcm_f64be,pcm_f64le,pcm_mulaw,pcm_s8,pcm_s8_planar,pcm_s16be,pcm_s16be_planar,pcm_s16le,pcm_s16le_planar,pcm_s24be,pcm_s24daud,pcm_s24le,pcm_s24le_planar,pcm_s32be,pcm_s32le,pcm_s32le_planar,pcm_s64be,pcm_s64le,pcm_u8,pcm_u16be,pcm_u16le,pcm_u24be,pcm_u24le,pcm_u32be,pcm_u32le,pcm_vidc,h264_nvenc,hevc_nvenc,av1_nvenc,h264_amf,hevc_amf,av1_amf",
+    "--enable-encoder=mpeg4,libx264,libx265,libvpx_vp9,libaom_av1,aac,libopus,libmp3lame,pcm_alaw,pcm_bluray,pcm_dvd,pcm_f32be,pcm_f32le,pcm_f64be,pcm_f64le,pcm_mulaw,pcm_s8,pcm_s8_planar,pcm_s16be,pcm_s16be_planar,pcm_s16le,pcm_s16le_planar,pcm_s24be,pcm_s24daud,pcm_s24le,pcm_s24le_planar,pcm_s32be,pcm_s32le,pcm_s32le_planar,pcm_s64be,pcm_s64le,pcm_u8,pcm_u16be,pcm_u16le,pcm_u24be,pcm_u24le,pcm_u32be,pcm_u32le,pcm_vidc,h264_nvenc,hevc_nvenc,av1_nvenc,h264_amf,hevc_amf,av1_amf,h264_qsv,hevc_qsv,av1_qsv,vp9_qsv",
     "--enable-muxer=mov,mp4,matroska,webm,avi,adts,latm,ogg,opus,mp3,wav",
     "--enable-shared",
     "--disable-static",
     "--cross-prefix=i686-w64-mingw32-",
+    "--cc=i686-w64-mingw32-clang",
+    "--cxx=i686-w64-mingw32-clang++",
+    "--ar=llvm-ar",
+    "--ranlib=llvm-ranlib",
+    "--nm=llvm-nm",
+    "--strip=llvm-strip",
+    "--windres=i686-w64-mingw32-windres",
     "--extra-ldflags=-static-libgcc",
     "--target-os=mingw32",
     "--arch=x86",
@@ -54,69 +61,71 @@
     "--enable-d3d12va",
     "--enable-dxva2",
     "--enable-schannel",
-    "--extra-cflags=-I/home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005/toolchains/d3d12-header-overlay",
     "--enable-amf",
     "--disable-decoder=h264_amf,hevc_amf,av1_amf,vp9_amf",
-    "--extra-cflags=-I/home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005/toolchains/AMF-v1.5.2-include",
+    "--extra-cflags=-I/c/Users/kiris/AppData/Local/Packages/CLAUDE~1/LOCALC~1/Local/MajFFB/TOOLCH~1/AMF-V1~1.2-I",
     "--enable-vulkan",
     "--disable-vulkan-static",
-    "--extra-cflags=-I/home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005/toolchains/Vulkan-Headers-vulkan-sdk-1.4.328.1/include",
+    "--extra-cflags=-I/c/Users/kiris/AppData/Local/Packages/CLAUDE~1/LOCALC~1/Local/MajFFB/TOOLCH~1/VULKAN~1.1/include",
     "--disable-hwaccel=apv_vulkan,dpx_vulkan,ffv1_vulkan,prores_raw_vulkan,prores_vulkan",
     "--enable-ffnvcodec",
     "--enable-nvenc",
     "--disable-nvdec",
     "--disable-cuvid",
     "--enable-libdav1d",
-    "--pkg-config=sh /home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005/dav1d-win-x86-9d4457dbea6e/pkg-config.sh",
+    "--pkg-config=sh /c/Users/kiris/AppData/Local/Packages/CLAUDE~1/LOCALC~1/Local/MajFFB/DAV1D-~2/PKG-CO~1.SH",
+    "--enable-libvpl",
+    "--disable-decoder=av1_qsv,h264_qsv,hevc_qsv,mjpeg_qsv,mpeg2_qsv,vc1_qsv,vp8_qsv,vp9_qsv,vvc_qsv",
+    "--pkg-config=sh /c/Users/kiris/AppData/Local/Packages/CLAUDE~1/LOCALC~1/Local/MajFFB/LIBVPL~2/PKG-CO~1.SH",
     "--enable-libx264",
     "--enable-libx265",
     "--enable-libvpx",
     "--enable-libaom",
     "--disable-decoder=libvpx_vp8,libvpx_vp9,libaom_av1",
-    "--pkg-config=sh /home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005/software-win-x86-0d96150b556e/pkg-config.sh",
+    "--pkg-config=sh /c/Users/kiris/AppData/Local/Packages/CLAUDE~1/LOCALC~1/Local/MajFFB/SOFTWA~2/PKG-CO~1.SH",
     "--extra-ldflags=-Wl,--exclude-all-symbols",
     "--extra-ldflags=-static-libstdc++",
     "--enable-libopus",
     "--enable-libmp3lame",
-    "--extra-cflags=-I/home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005/audio-win-x86-8540de850398/lame/install/include",
-    "--extra-ldflags=-L/home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005/audio-win-x86-8540de850398/lame/install/lib",
-    "--pkg-config=sh /home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005/audio-win-x86-8540de850398/pkg-config.sh"
+    "--extra-cflags=-I/c/Users/kiris/AppData/Local/Packages/CLAUDE~1/LOCALC~1/Local/MajFFB/AUDIO-~2/lame/install/include",
+    "--extra-ldflags=-L/c/Users/kiris/AppData/Local/Packages/CLAUDE~1/LOCALC~1/Local/MajFFB/AUDIO-~2/lame/install/lib",
+    "--pkg-config=sh /c/Users/kiris/AppData/Local/Packages/CLAUDE~1/LOCALC~1/Local/MajFFB/AUDIO-~2/PKG-CO~1.SH"
   ],
   "files": [
     {
       "file": "avcodec-63.dll",
-      "bytes": 29407758,
-      "sha256": "e63691fb22723fc5017b41110b9ad6d65ee8167d6b783e1878731674418e9e3e"
+      "bytes": 31662592,
+      "sha256": "717006f560a68237eb54f2fa41ff1e7bbd4628d512fe20ffedb43e510d21a4e6"
     },
     {
       "file": "avdevice-63.dll",
-      "bytes": 20494,
-      "sha256": "c29627b58f4889286154dc5e55d3c73c279ae0098f77a10e728108fa4410fdf6"
+      "bytes": 13824,
+      "sha256": "dc1a89bf53c504f82970f49714b260de3ce43c960b79ba7d947a23526c039cff"
     },
     {
       "file": "avfilter-12.dll",
-      "bytes": 171022,
-      "sha256": "c6cc86cf1443fb71d6d37a02ae0167085e7729a529c977a8e35e97a5c688df38"
+      "bytes": 145920,
+      "sha256": "f491fec303d8ba9d389d4326780bc55da7b743f79f7688b7850b9a5117a9de4a"
     },
     {
       "file": "avformat-63.dll",
-      "bytes": 2580494,
-      "sha256": "680525a802fd9d5a0ff4c6690a49ad3a49d4c5e2ec8a3d19fd7592ec108f5938"
+      "bytes": 2027520,
+      "sha256": "cce217efaaab814c2d6d8904c930529302d25e8db01a37e0a63828b60b96b531"
     },
     {
       "file": "avutil-61.dll",
-      "bytes": 1137678,
-      "sha256": "a376baee6015ac9f1e6c2c58afd643c16f9fd8e6ccf1548b2885a8ea3eb9908c"
+      "bytes": 2054144,
+      "sha256": "bfb72179f8e58a20d6cf321748e2ed7e7f83198d759811e786b0cb56189d74bb"
     },
     {
       "file": "swresample-7.dll",
-      "bytes": 130574,
-      "sha256": "d092d862e133c68dd3f0890fb1ff47d633681346a8d6b7ef1df1f37d5160b53c"
+      "bytes": 138240,
+      "sha256": "3cb306346e58786e0a719ba655248f7abda233fee5b1305acf602e1a12d71c9b"
     },
     {
       "file": "swscale-10.dll",
-      "bytes": 1018382,
-      "sha256": "7d6a29755f7d96d97292d85ad4610d79ec33e8db66e76a1775f9e3683e2ae9ae"
+      "bytes": 1560064,
+      "sha256": "37240dc09e3d8131c7bc49cfc28255d58a62ceb301937109f1fd3a21564ce0e5"
     }
   ],
   "softwareDecoders": [
@@ -168,7 +177,11 @@
       "av1_nvenc",
       "h264_amf",
       "hevc_amf",
-      "av1_amf"
+      "av1_amf",
+      "h264_qsv",
+      "hevc_qsv",
+      "av1_qsv",
+      "vp9_qsv"
     ],
     "muxers": [
       "mov",
@@ -252,6 +265,16 @@
       "repository": "https://github.com/GPUOpen-LibrariesAndSDKs/AMF.git",
       "tag": "v1.5.2",
       "commit": "eadd00804d5f7e5cd8c85d540073198312870776"
+    },
+    "libvpl": {
+      "version": "2.17.0",
+      "repository": "https://github.com/intel/libvpl.git",
+      "tag": "v2.17.0",
+      "commit": "d77f9195cf495b937631607333288fd917ae8939",
+      "license": "MIT",
+      "licenseFiles": [
+        "LICENSE"
+      ]
     },
     "d3d12HeaderOverlay": {
       "source": "llvm-mingw-20260922-ucrt-x86_64.zip",
@@ -367,7 +390,7 @@
         ]
       },
       "configure": [
-        "--prefix=/home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005/software-win-x86-0d96150b556e/x264/install",
+        "--prefix=/c/Users/kiris/AppData/Local/Packages/CLAUDE~1/LOCALC~1/Local/MajFFB/SOFTWA~2/x264/install",
         "--host=i686-w64-mingw32",
         "--enable-static",
         "--enable-pic",
@@ -382,8 +405,8 @@
         "--chroma-format=420"
       ],
       "archive": "libx264.a",
-      "bytes": 1380718,
-      "sha256": "f8c6a92138d6e1d920cc32404e0c2de97d47f346f3363f9c6786ab820beae147",
+      "bytes": 1760190,
+      "sha256": "532ca13043a93e2e2608262b3e2603623759dd376c42e0449e9bef87bd07fe33",
       "static": true,
       "pic": true
     },
@@ -400,14 +423,14 @@
         ]
       },
       "configure": [
-        "/usr/bin/cmake",
+        "C:/Program Files/Unity/Hub/Editor/6000.3.17f1/Editor/Data/PlaybackEngines/AndroidPlayer/SDK/cmake/3.22.1/bin/cmake.exe",
         "-S",
-        "/home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005/toolchains/x265-1d117bed4747/source",
+        "C:\\Users\\kiris\\AppData\\Local\\Packages\\Claude_pzs8sxrjxfjjc\\LocalCache\\Local\\MajFFB\\toolchains\\x265-1d117bed4747\\source",
         "-B",
-        "/home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005/software-win-x86-0d96150b556e/x265/build",
+        "C:\\Users\\kiris\\AppData\\Local\\Packages\\Claude_pzs8sxrjxfjjc\\LocalCache\\Local\\MajFFB\\software-win-x86-a56eb42b206c\\x265\\build",
         "-G",
         "Ninja",
-        "-DCMAKE_MAKE_PROGRAM=/usr/bin/ninja",
+        "-DCMAKE_MAKE_PROGRAM=C:/Program Files/Unity/Hub/Editor/6000.3.17f1/Editor/Data/PlaybackEngines/AndroidPlayer/SDK/cmake/3.22.1/bin/ninja.EXE",
         "-DCMAKE_BUILD_TYPE=Release",
         "-DCMAKE_POLICY_VERSION_MINIMUM=3.5",
         "-DCMAKE_POSITION_INDEPENDENT_CODE=ON",
@@ -415,16 +438,16 @@
         "-DCMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY",
         "-DCMAKE_SYSTEM_PROCESSOR=x86",
         "-DCMAKE_SYSTEM_NAME=Windows",
-        "-DCMAKE_C_COMPILER=/usr/bin/i686-w64-mingw32-gcc",
-        "-DCMAKE_CXX_COMPILER=/usr/bin/i686-w64-mingw32-g++",
-        "-DCMAKE_AR=/usr/bin/i686-w64-mingw32-ar",
-        "-DCMAKE_RANLIB=/usr/bin/i686-w64-mingw32-ranlib",
+        "-DCMAKE_C_COMPILER=C:/Users/kiris/AppData/Local/Packages/Claude_pzs8sxrjxfjjc/LocalCache/Local/MajFFB/toolchains/llvm-mingw-20260922-ucrt-x86_64/bin/i686-w64-mingw32-clang.EXE",
+        "-DCMAKE_CXX_COMPILER=C:/Users/kiris/AppData/Local/Packages/Claude_pzs8sxrjxfjjc/LocalCache/Local/MajFFB/toolchains/llvm-mingw-20260922-ucrt-x86_64/bin/i686-w64-mingw32-clang++.EXE",
+        "-DCMAKE_AR=C:/Users/kiris/AppData/Local/Packages/Claude_pzs8sxrjxfjjc/LocalCache/Local/MajFFB/toolchains/llvm-mingw-20260922-ucrt-x86_64/bin/llvm-ar.EXE",
+        "-DCMAKE_RANLIB=C:/Users/kiris/AppData/Local/Packages/Claude_pzs8sxrjxfjjc/LocalCache/Local/MajFFB/toolchains/llvm-mingw-20260922-ucrt-x86_64/bin/llvm-ranlib.EXE",
         "-DCMAKE_RC_COMPILER=i686-w64-mingw32-windres",
-        "-DCMAKE_C_FLAGS=-I/home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005/toolchains/d3d12-header-overlay -I/home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005/toolchains/AMF-v1.5.2-include -I/home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005/toolchains/Vulkan-Headers-vulkan-sdk-1.4.328.1/include",
-        "-DCMAKE_CXX_FLAGS=-I/home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005/toolchains/d3d12-header-overlay -I/home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005/toolchains/AMF-v1.5.2-include -I/home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005/toolchains/Vulkan-Headers-vulkan-sdk-1.4.328.1/include",
+        "-DCMAKE_C_FLAGS=-Ic:/Users/kiris/AppData/Local/Packages/CLAUDE~1/LOCALC~1/Local/MajFFB/TOOLCH~1/AMF-V1~1.2-I -Ic:/Users/kiris/AppData/Local/Packages/CLAUDE~1/LOCALC~1/Local/MajFFB/TOOLCH~1/VULKAN~1.1/include",
+        "-DCMAKE_CXX_FLAGS=-Ic:/Users/kiris/AppData/Local/Packages/CLAUDE~1/LOCALC~1/Local/MajFFB/TOOLCH~1/AMF-V1~1.2-I -Ic:/Users/kiris/AppData/Local/Packages/CLAUDE~1/LOCALC~1/Local/MajFFB/TOOLCH~1/VULKAN~1.1/include --driver-mode=g++",
         "-DCMAKE_EXE_LINKER_FLAGS=-static-libgcc",
         "-DCMAKE_SHARED_LINKER_FLAGS=-static-libgcc",
-        "-DCMAKE_INSTALL_PREFIX=/home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005/software-win-x86-0d96150b556e/x265/install",
+        "-DCMAKE_INSTALL_PREFIX=C:/Users/kiris/AppData/Local/Packages/Claude_pzs8sxrjxfjjc/LocalCache/Local/MajFFB/software-win-x86-a56eb42b206c/x265/install",
         "-DENABLE_SHARED=OFF",
         "-DENABLE_CLI=OFF",
         "-DENABLE_PIC=ON",
@@ -442,18 +465,22 @@
         "-DENABLE_NEON_I8MM=OFF",
         "-DENABLE_SVE=OFF",
         "-DENABLE_SVE2=OFF",
-        "-DNASM_EXECUTABLE=/home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005/toolchains/linux-packages/usr/bin/nasm"
+        "-DNASM_EXECUTABLE=C:\\Users\\kiris\\AppData\\Local\\MajFFB\\toolchains\\msys64\\mingw64\\bin\\nasm.EXE"
       ],
       "archive": "libx265.a",
-      "bytes": 4969910,
-      "sha256": "d7ef84888a2241595ad4011856c3fccbc297bd3c6d8de64acf02e0df6c391d00",
+      "bytes": 4628728,
+      "sha256": "148a2ebcb7e6f9cbd945d511238569df52068df5895c42099fe63e2e3c2a92d9",
       "static": true,
       "pic": true,
-      "cmakeVersion": "cmake version 3.28.3",
+      "cmakeVersion": "cmake version 3.22.1-g37088a8-dirty",
       "cxxRuntimeLink": [
-        "-L/usr/lib/gcc/i686-w64-mingw32/13-win32",
-        "-l:libstdc++.a",
-        "-L/usr/i686-w64-mingw32/lib",
+        "-L/c/Users/kiris/AppData/Local/Packages/CLAUDE~1/LOCALC~1/Local/MajFFB/TOOLCH~1/LLVM-M~1/I686-W~1/lib",
+        "-l:libc++.a",
+        "-L/c/Users/kiris/AppData/Local/Packages/CLAUDE~1/LOCALC~1/Local/MajFFB/TOOLCH~1/LLVM-M~1/I686-W~1/lib",
+        "-l:libc++abi.a",
+        "-L/c/Users/kiris/AppData/Local/Packages/CLAUDE~1/LOCALC~1/Local/MajFFB/TOOLCH~1/LLVM-M~1/I686-W~1/lib",
+        "-l:libunwind.a",
+        "-L/c/Users/kiris/AppData/Local/Packages/CLAUDE~1/LOCALC~1/Local/MajFFB/TOOLCH~1/LLVM-M~1/I686-W~1/lib",
         "-l:libwinpthread.a",
         "-lm"
       ]
@@ -473,7 +500,7 @@
         ]
       },
       "configure": [
-        "--prefix=/home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005/software-win-x86-0d96150b556e/libvpx/install",
+        "--prefix=/c/Users/kiris/AppData/Local/Packages/CLAUDE~1/LOCALC~1/Local/MajFFB/SOFTWA~2/libvpx/install",
         "--target=x86-win32-gcc",
         "--enable-pic",
         "--enable-static",
@@ -490,8 +517,8 @@
         "--as=nasm"
       ],
       "archive": "libvpx.a",
-      "bytes": 2197942,
-      "sha256": "9eb23a9fe737d03a469517f1605e5e78ef26d3651441396795b15af2e15651bc",
+      "bytes": 2123120,
+      "sha256": "eab7dc097ddf15656a87a44cc32578a56b733dd18ea2a92d92c14ad2182be49e",
       "static": true,
       "pic": true
     },
@@ -513,14 +540,14 @@
         ]
       },
       "configure": [
-        "/usr/bin/cmake",
+        "C:/Program Files/Unity/Hub/Editor/6000.3.17f1/Editor/Data/PlaybackEngines/AndroidPlayer/SDK/cmake/3.22.1/bin/cmake.exe",
         "-S",
-        "/home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005/toolchains/libaom-92d4c37fbdd0",
+        "C:\\Users\\kiris\\AppData\\Local\\Packages\\Claude_pzs8sxrjxfjjc\\LocalCache\\Local\\MajFFB\\toolchains\\libaom-92d4c37fbdd0",
         "-B",
-        "/home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005/software-win-x86-0d96150b556e/libaom/build",
+        "C:\\Users\\kiris\\AppData\\Local\\Packages\\Claude_pzs8sxrjxfjjc\\LocalCache\\Local\\MajFFB\\software-win-x86-a56eb42b206c\\libaom\\build",
         "-G",
         "Ninja",
-        "-DCMAKE_MAKE_PROGRAM=/usr/bin/ninja",
+        "-DCMAKE_MAKE_PROGRAM=C:/Program Files/Unity/Hub/Editor/6000.3.17f1/Editor/Data/PlaybackEngines/AndroidPlayer/SDK/cmake/3.22.1/bin/ninja.EXE",
         "-DCMAKE_BUILD_TYPE=Release",
         "-DCMAKE_POLICY_VERSION_MINIMUM=3.5",
         "-DCMAKE_POSITION_INDEPENDENT_CODE=ON",
@@ -528,16 +555,16 @@
         "-DCMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY",
         "-DCMAKE_SYSTEM_PROCESSOR=x86",
         "-DCMAKE_SYSTEM_NAME=Windows",
-        "-DCMAKE_C_COMPILER=/usr/bin/i686-w64-mingw32-gcc",
-        "-DCMAKE_CXX_COMPILER=/usr/bin/i686-w64-mingw32-g++",
-        "-DCMAKE_AR=/usr/bin/i686-w64-mingw32-ar",
-        "-DCMAKE_RANLIB=/usr/bin/i686-w64-mingw32-ranlib",
+        "-DCMAKE_C_COMPILER=C:/Users/kiris/AppData/Local/Packages/Claude_pzs8sxrjxfjjc/LocalCache/Local/MajFFB/toolchains/llvm-mingw-20260922-ucrt-x86_64/bin/i686-w64-mingw32-clang.EXE",
+        "-DCMAKE_CXX_COMPILER=C:/Users/kiris/AppData/Local/Packages/Claude_pzs8sxrjxfjjc/LocalCache/Local/MajFFB/toolchains/llvm-mingw-20260922-ucrt-x86_64/bin/i686-w64-mingw32-clang++.EXE",
+        "-DCMAKE_AR=C:/Users/kiris/AppData/Local/Packages/Claude_pzs8sxrjxfjjc/LocalCache/Local/MajFFB/toolchains/llvm-mingw-20260922-ucrt-x86_64/bin/llvm-ar.EXE",
+        "-DCMAKE_RANLIB=C:/Users/kiris/AppData/Local/Packages/Claude_pzs8sxrjxfjjc/LocalCache/Local/MajFFB/toolchains/llvm-mingw-20260922-ucrt-x86_64/bin/llvm-ranlib.EXE",
         "-DCMAKE_RC_COMPILER=i686-w64-mingw32-windres",
-        "-DCMAKE_C_FLAGS=-I/home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005/toolchains/d3d12-header-overlay -I/home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005/toolchains/AMF-v1.5.2-include -I/home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005/toolchains/Vulkan-Headers-vulkan-sdk-1.4.328.1/include",
-        "-DCMAKE_CXX_FLAGS=-I/home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005/toolchains/d3d12-header-overlay -I/home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005/toolchains/AMF-v1.5.2-include -I/home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005/toolchains/Vulkan-Headers-vulkan-sdk-1.4.328.1/include",
+        "-DCMAKE_C_FLAGS=-Ic:/Users/kiris/AppData/Local/Packages/CLAUDE~1/LOCALC~1/Local/MajFFB/TOOLCH~1/AMF-V1~1.2-I -Ic:/Users/kiris/AppData/Local/Packages/CLAUDE~1/LOCALC~1/Local/MajFFB/TOOLCH~1/VULKAN~1.1/include",
+        "-DCMAKE_CXX_FLAGS=-Ic:/Users/kiris/AppData/Local/Packages/CLAUDE~1/LOCALC~1/Local/MajFFB/TOOLCH~1/AMF-V1~1.2-I -Ic:/Users/kiris/AppData/Local/Packages/CLAUDE~1/LOCALC~1/Local/MajFFB/TOOLCH~1/VULKAN~1.1/include --driver-mode=g++",
         "-DCMAKE_EXE_LINKER_FLAGS=-static-libgcc",
         "-DCMAKE_SHARED_LINKER_FLAGS=-static-libgcc",
-        "-DCMAKE_INSTALL_PREFIX=/home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005/software-win-x86-0d96150b556e/libaom/install",
+        "-DCMAKE_INSTALL_PREFIX=C:/Users/kiris/AppData/Local/Packages/Claude_pzs8sxrjxfjjc/LocalCache/Local/MajFFB/software-win-x86-a56eb42b206c/libaom/install",
         "-DBUILD_SHARED_LIBS=OFF",
         "-DCONFIG_PIC=1",
         "-DCONFIG_AV1_ENCODER=1",
@@ -557,11 +584,11 @@
         "-DCMAKE_USE_WIN32_THREADS_INIT=1"
       ],
       "archive": "libaom.a",
-      "bytes": 8839834,
-      "sha256": "38f222cbcc0792de5e898940c11bee618df9148dce2a25a77fa57f43af905562",
+      "bytes": 10697330,
+      "sha256": "272a3ab46e2d4a49ae4cd0609d4187901b48203dd4c310e00862f5fdf3a8293e",
       "static": true,
       "pic": true,
-      "cmakeVersion": "cmake version 3.28.3"
+      "cmakeVersion": "cmake version 3.22.1-g37088a8-dirty"
     }
   },
   "audioCodecBuilds": {
@@ -576,14 +603,14 @@
         ]
       },
       "configure": [
-        "/usr/bin/cmake",
+        "C:/Program Files/Unity/Hub/Editor/6000.3.17f1/Editor/Data/PlaybackEngines/AndroidPlayer/SDK/cmake/3.22.1/bin/cmake.exe",
         "-S",
-        "/home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005/toolchains/opus-1.6.1",
+        "C:\\Users\\kiris\\AppData\\Local\\Packages\\Claude_pzs8sxrjxfjjc\\LocalCache\\Local\\MajFFB\\toolchains\\opus-1.6.1",
         "-B",
-        "/home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005/audio-win-x86-8540de850398/opus/build",
+        "C:\\Users\\kiris\\AppData\\Local\\Packages\\Claude_pzs8sxrjxfjjc\\LocalCache\\Local\\MajFFB\\audio-win-x86-10223886223c\\opus\\build",
         "-G",
         "Ninja",
-        "-DCMAKE_MAKE_PROGRAM=/usr/bin/ninja",
+        "-DCMAKE_MAKE_PROGRAM=C:/Program Files/Unity/Hub/Editor/6000.3.17f1/Editor/Data/PlaybackEngines/AndroidPlayer/SDK/cmake/3.22.1/bin/ninja.EXE",
         "-DCMAKE_BUILD_TYPE=Release",
         "-DCMAKE_POLICY_VERSION_MINIMUM=3.5",
         "-DCMAKE_POSITION_INDEPENDENT_CODE=ON",
@@ -591,16 +618,16 @@
         "-DCMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY",
         "-DCMAKE_SYSTEM_PROCESSOR=x86",
         "-DCMAKE_SYSTEM_NAME=Windows",
-        "-DCMAKE_C_COMPILER=/usr/bin/i686-w64-mingw32-gcc",
-        "-DCMAKE_CXX_COMPILER=/usr/bin/i686-w64-mingw32-g++",
-        "-DCMAKE_AR=/usr/bin/i686-w64-mingw32-ar",
-        "-DCMAKE_RANLIB=/usr/bin/i686-w64-mingw32-ranlib",
+        "-DCMAKE_C_COMPILER=C:/Users/kiris/AppData/Local/Packages/Claude_pzs8sxrjxfjjc/LocalCache/Local/MajFFB/toolchains/llvm-mingw-20260922-ucrt-x86_64/bin/i686-w64-mingw32-clang.EXE",
+        "-DCMAKE_CXX_COMPILER=C:/Users/kiris/AppData/Local/Packages/Claude_pzs8sxrjxfjjc/LocalCache/Local/MajFFB/toolchains/llvm-mingw-20260922-ucrt-x86_64/bin/i686-w64-mingw32-clang++.EXE",
+        "-DCMAKE_AR=C:/Users/kiris/AppData/Local/Packages/Claude_pzs8sxrjxfjjc/LocalCache/Local/MajFFB/toolchains/llvm-mingw-20260922-ucrt-x86_64/bin/llvm-ar.EXE",
+        "-DCMAKE_RANLIB=C:/Users/kiris/AppData/Local/Packages/Claude_pzs8sxrjxfjjc/LocalCache/Local/MajFFB/toolchains/llvm-mingw-20260922-ucrt-x86_64/bin/llvm-ranlib.EXE",
         "-DCMAKE_RC_COMPILER=i686-w64-mingw32-windres",
-        "-DCMAKE_C_FLAGS=-I/home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005/toolchains/d3d12-header-overlay -I/home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005/toolchains/AMF-v1.5.2-include -I/home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005/toolchains/Vulkan-Headers-vulkan-sdk-1.4.328.1/include",
-        "-DCMAKE_CXX_FLAGS=-I/home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005/toolchains/d3d12-header-overlay -I/home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005/toolchains/AMF-v1.5.2-include -I/home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005/toolchains/Vulkan-Headers-vulkan-sdk-1.4.328.1/include",
+        "-DCMAKE_C_FLAGS=-Ic:/Users/kiris/AppData/Local/Packages/CLAUDE~1/LOCALC~1/Local/MajFFB/TOOLCH~1/AMF-V1~1.2-I -Ic:/Users/kiris/AppData/Local/Packages/CLAUDE~1/LOCALC~1/Local/MajFFB/TOOLCH~1/VULKAN~1.1/include",
+        "-DCMAKE_CXX_FLAGS=-Ic:/Users/kiris/AppData/Local/Packages/CLAUDE~1/LOCALC~1/Local/MajFFB/TOOLCH~1/AMF-V1~1.2-I -Ic:/Users/kiris/AppData/Local/Packages/CLAUDE~1/LOCALC~1/Local/MajFFB/TOOLCH~1/VULKAN~1.1/include --driver-mode=g++",
         "-DCMAKE_EXE_LINKER_FLAGS=-static-libgcc",
         "-DCMAKE_SHARED_LINKER_FLAGS=-static-libgcc",
-        "-DCMAKE_INSTALL_PREFIX=/home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005/audio-win-x86-8540de850398/opus/install",
+        "-DCMAKE_INSTALL_PREFIX=C:/Users/kiris/AppData/Local/Packages/Claude_pzs8sxrjxfjjc/LocalCache/Local/MajFFB/audio-win-x86-10223886223c/opus/install",
         "-DBUILD_SHARED_LIBS=OFF",
         "-DOPUS_BUILD_SHARED_LIBRARY=OFF",
         "-DOPUS_BUILD_TESTING=OFF",
@@ -610,8 +637,8 @@
         "-DOPUS_OSCE=OFF"
       ],
       "archive": "libopus.a",
-      "bytes": 695354,
-      "sha256": "fd310500b64f32cf15d135aaf0406ec3d648cde3ff83a3c9e982c09faa126f39",
+      "bytes": 778482,
+      "sha256": "e2f30675c7a5be332b073a45266abb1c4f4e9c8df9deabf5d6245066898a931c",
       "static": true,
       "pic": true
     },
@@ -626,7 +653,7 @@
         ]
       },
       "configure": [
-        "--prefix=/home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005/audio-win-x86-8540de850398/lame/install",
+        "--prefix=/c/Users/kiris/AppData/Local/Packages/CLAUDE~1/LOCALC~1/Local/MajFFB/AUDIO-~2/lame/install",
         "--host=i686-w64-mingw32",
         "--enable-static",
         "--disable-shared",
@@ -637,8 +664,8 @@
         "--disable-nasm"
       ],
       "archive": "libmp3lame.a",
-      "bytes": 276136,
-      "sha256": "559463ee272c09b6a8a6c590d7359b0b5cef8c72d9d9672bc06fd0c280564a82",
+      "bytes": 344258,
+      "sha256": "f88ed7b970a910e72bcfe7c0473fdb203b2407697ed396bc418fca1000e32818",
       "static": true,
       "pic": true
     }
@@ -655,6 +682,12 @@
       "sha256": "5b457330f94aa63e539798ae28b3ffcd05388a58a29ba49546da79b944e0f0de",
       "versionMarker": "MajdataPlay-X265-Params-v1-5b457330f94a",
       "stagedFile": "x265-parameter-check.patch"
+    },
+    {
+      "file": "patches/qsv-rate-control.patch",
+      "sha256": "1404604176957ff80f805c542d2fdcd5ccdeb7107a21f7f738fbdb3a7eab740c",
+      "versionMarker": "MajdataPlay-QSV-RC-v1-140460417695",
+      "stagedFile": "qsv-rate-control.patch"
     }
   ],
   "buildDependencyLicenses": [
@@ -701,28 +734,38 @@
     },
     {
       "file": "compiler-runtime.LICENSE.txt",
-      "sha256": "c12c39f1685081f32cda2eb6e9300ac03c381d58e1bf77bd0c857f1acfa91cb7",
-      "license": "GPL-3.0-or-later WITH GCC-exception-3.1 and mingw-w64 runtime notices",
+      "sha256": "410e8731b0110138bfc6850f4de08dee07431d5d9f48d7bfb33ef24a0e5d7c30",
+      "license": "Apache-2.0 WITH LLVM-exception and mingw-w64 runtime notices",
       "runtimeArchives": [
         {
-          "file": "libstdc++.a",
-          "bytes": 5657884,
-          "sha256": "f43573a2df3c1f0e8d99a77541537a8415ac469cb18b8bace9afea253a274bea"
+          "file": "libc++.a",
+          "bytes": 3312752,
+          "sha256": "17c80ed46ec250625bb25171217621cc10ff5c836cf805a4b834326c4aa8b270"
+        },
+        {
+          "file": "libc++abi.a",
+          "bytes": 652726,
+          "sha256": "952ef870f5d87d6cbbaaa3d0398f754a0061ad3fa8a7ed6ca103c6ba26873e5f"
+        },
+        {
+          "file": "libunwind.a",
+          "bytes": 115248,
+          "sha256": "45d642088bc9c3acf076b561ab6c0f1787980426e6c818241ceba61bf0e6479f"
         },
         {
           "file": "libwinpthread.a",
-          "bytes": 256944,
-          "sha256": "9473331bceb62a8394c5d0387654797fac6c2477e9f3c1e2d96c772c368e3d96"
+          "bytes": 269104,
+          "sha256": "5f5ad7f6b79cef72cda663668c6c7830293fe4a89e10536690814a09f666c75b"
         }
       ],
       "sourceNotices": [
         {
-          "file": "/usr/share/doc/gcc-mingw-w64-base/copyright",
-          "sha256": "a481f772f7a53335f13b32c6c54eb1c8577ce97704edd3757ab7ed4287a8e96a"
+          "file": "C:\\Users\\kiris\\AppData\\Local\\Packages\\Claude_pzs8sxrjxfjjc\\LocalCache\\Local\\MajFFB\\toolchains\\llvm-mingw-20260922-ucrt-x86_64\\LICENSE.TXT",
+          "sha256": "8d85c1057d742e597985c7d4e6320b015a9139385cff4cbae06ffc0ebe89afee"
         },
         {
-          "file": "/usr/share/doc/mingw-w64-common/copyright",
-          "sha256": "af23297b7d17e8e31817a5d58088de6fdafe34705bb5a7d1d330f08711b31314"
+          "file": "C:\\Users\\kiris\\AppData\\Local\\Packages\\Claude_pzs8sxrjxfjjc\\LocalCache\\Local\\MajFFB\\toolchains\\llvm-mingw-20260922-ucrt-x86_64\\include\\pthread.h",
+          "sha256": "69e923029c2f2acd7c8295143bddc22b6bf537c4e9e00dda2db543029340231b"
         }
       ]
     },
@@ -740,6 +783,11 @@
       "file": "AMF.LICENSE.txt",
       "sha256": "2439b49e51726eff0c51f5774f33d8eb48d69ef3ec81eef5a29e8797778401c6",
       "license": "MIT"
+    },
+    {
+      "file": "libvpl.LICENSE.txt",
+      "sha256": "0465ca16eec315c974120ce87105c5d09fd394beaf1375fe9c81ca8eed9fbc71",
+      "license": "MIT"
     }
   ],
   "verifiedHardwareBackends": [
@@ -752,13 +800,70 @@
     "H264_D3D12VA_HWACCEL",
     "HEVC_D3D12VA_HWACCEL",
     "AV1_D3D12VA_HWACCEL",
-    "VP9_D3D12VA_HWACCEL"
+    "VP9_D3D12VA_HWACCEL",
+    "LIBVPL",
+    "QSV"
   ],
-  "d3d12HeaderOverlay": {
-    "directory": "/home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005/toolchains/d3d12-header-overlay",
-    "files": {
-      "d3d12.h": "23935395fe8939ac0ca71c5b34cd7b21a689ff5e9641846563613f24bc0dd85e",
-      "d3d12video.h": "23216f1bcb62c8c0c9e09d66cf12d639eb1abcad9a1ba31e0d517a428cd56aee"
-    }
+  "qsvDispatcherBuild": {
+    "source": {
+      "version": "2.17.0",
+      "repository": "https://github.com/intel/libvpl.git",
+      "tag": "v2.17.0",
+      "commit": "d77f9195cf495b937631607333288fd917ae8939",
+      "license": "MIT",
+      "licenseFiles": [
+        "LICENSE"
+      ]
+    },
+    "configure": [
+      "C:/Program Files/Unity/Hub/Editor/6000.3.17f1/Editor/Data/PlaybackEngines/AndroidPlayer/SDK/cmake/3.22.1/bin/cmake.exe",
+      "-S",
+      "C:\\Users\\kiris\\AppData\\Local\\Packages\\Claude_pzs8sxrjxfjjc\\LocalCache\\Local\\MajFFB\\toolchains\\libvpl-d77f9195cf49",
+      "-B",
+      "C:\\Users\\kiris\\AppData\\Local\\Packages\\Claude_pzs8sxrjxfjjc\\LocalCache\\Local\\MajFFB\\libvpl-win-x86-91a9aeb683d2\\build",
+      "-G",
+      "Ninja",
+      "-DCMAKE_MAKE_PROGRAM=C:/Program Files/Unity/Hub/Editor/6000.3.17f1/Editor/Data/PlaybackEngines/AndroidPlayer/SDK/cmake/3.22.1/bin/ninja.EXE",
+      "-DCMAKE_BUILD_TYPE=Release",
+      "-DCMAKE_POLICY_VERSION_MINIMUM=3.5",
+      "-DCMAKE_POSITION_INDEPENDENT_CODE=ON",
+      "-DCMAKE_INSTALL_LIBDIR=lib",
+      "-DCMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY",
+      "-DCMAKE_SYSTEM_PROCESSOR=x86",
+      "-DCMAKE_SYSTEM_NAME=Windows",
+      "-DCMAKE_C_COMPILER=C:/Users/kiris/AppData/Local/Packages/Claude_pzs8sxrjxfjjc/LocalCache/Local/MajFFB/toolchains/llvm-mingw-20260922-ucrt-x86_64/bin/i686-w64-mingw32-clang.EXE",
+      "-DCMAKE_CXX_COMPILER=C:/Users/kiris/AppData/Local/Packages/Claude_pzs8sxrjxfjjc/LocalCache/Local/MajFFB/toolchains/llvm-mingw-20260922-ucrt-x86_64/bin/i686-w64-mingw32-clang++.EXE",
+      "-DCMAKE_AR=C:/Users/kiris/AppData/Local/Packages/Claude_pzs8sxrjxfjjc/LocalCache/Local/MajFFB/toolchains/llvm-mingw-20260922-ucrt-x86_64/bin/llvm-ar.EXE",
+      "-DCMAKE_RANLIB=C:/Users/kiris/AppData/Local/Packages/Claude_pzs8sxrjxfjjc/LocalCache/Local/MajFFB/toolchains/llvm-mingw-20260922-ucrt-x86_64/bin/llvm-ranlib.EXE",
+      "-DCMAKE_RC_COMPILER=i686-w64-mingw32-windres",
+      "-DCMAKE_C_FLAGS=-Ic:/Users/kiris/AppData/Local/Packages/CLAUDE~1/LOCALC~1/Local/MajFFB/TOOLCH~1/AMF-V1~1.2-I -Ic:/Users/kiris/AppData/Local/Packages/CLAUDE~1/LOCALC~1/Local/MajFFB/TOOLCH~1/VULKAN~1.1/include",
+      "-DCMAKE_CXX_FLAGS=-Ic:/Users/kiris/AppData/Local/Packages/CLAUDE~1/LOCALC~1/Local/MajFFB/TOOLCH~1/AMF-V1~1.2-I -Ic:/Users/kiris/AppData/Local/Packages/CLAUDE~1/LOCALC~1/Local/MajFFB/TOOLCH~1/VULKAN~1.1/include --driver-mode=g++ -include windows.h -DNOMINMAX",
+      "-DCMAKE_EXE_LINKER_FLAGS=-static-libgcc",
+      "-DCMAKE_SHARED_LINKER_FLAGS=-static-libgcc",
+      "-DCMAKE_INSTALL_PREFIX=C:/Users/kiris/AppData/Local/Packages/Claude_pzs8sxrjxfjjc/LocalCache/Local/MajFFB/libvpl-win-x86-91a9aeb683d2/install",
+      "-DBUILD_SHARED_LIBS=OFF",
+      "-DBUILD_TESTS=OFF",
+      "-DBUILD_EXAMPLES=OFF",
+      "-DINSTALL_EXAMPLES=OFF",
+      "-DINSTALL_DEV=ON",
+      "-DINSTALL_LIB=ON"
+    ],
+    "archive": "libvpl.a",
+    "bytes": 839768,
+    "sha256": "60bcf438eeb1b4955421f708cb5f2c0ef664fccfa4581fa5904876de7544b06a",
+    "static": true,
+    "pic": true,
+    "cmakeVersion": "cmake version 3.22.1-g37088a8-dirty",
+    "cxxRuntimeLink": [
+      "-L/c/Users/kiris/AppData/Local/Packages/CLAUDE~1/LOCALC~1/Local/MajFFB/TOOLCH~1/LLVM-M~1/I686-W~1/lib",
+      "-l:libc++.a",
+      "-L/c/Users/kiris/AppData/Local/Packages/CLAUDE~1/LOCALC~1/Local/MajFFB/TOOLCH~1/LLVM-M~1/I686-W~1/lib",
+      "-l:libc++abi.a",
+      "-L/c/Users/kiris/AppData/Local/Packages/CLAUDE~1/LOCALC~1/Local/MajFFB/TOOLCH~1/LLVM-M~1/I686-W~1/lib",
+      "-l:libunwind.a",
+      "-L/c/Users/kiris/AppData/Local/Packages/CLAUDE~1/LOCALC~1/Local/MajFFB/TOOLCH~1/LLVM-M~1/I686-W~1/lib",
+      "-l:libwinpthread.a",
+      "-lm"
+    ]
   }
 }

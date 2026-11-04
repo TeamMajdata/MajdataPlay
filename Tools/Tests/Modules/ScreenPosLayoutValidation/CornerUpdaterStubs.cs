@@ -126,8 +126,8 @@ namespace MajdataPlay.IO
 
 namespace MajdataPlay.Settings
 {
-    /// <summary>Supplies only the display settings consumed by the production updater.</summary>
-    public sealed class DisplayOptions
+    /// <summary>Supplies only the screen layout settings consumed by the production updater.</summary>
+    public sealed class RenderingOptions
     {
         /// <summary>Whether user display transforms are enabled.</summary>
         public bool MainScreenTransform { get; set; }
@@ -141,11 +141,11 @@ namespace MajdataPlay.Settings
         public float SubDisplayScale { get; set; } = 1f;
     }
 
-    /// <summary>Exposes display options through the same settings path as production.</summary>
-    public sealed class GameSetting
+    /// <summary>Exposes the screen layout options through the same settings path as production.</summary>
+    public sealed class SystemSetting
     {
-        /// <summary>The current display settings.</summary>
-        public DisplayOptions Display { get; } = new DisplayOptions();
+        /// <summary>The current rendering settings, which hold the screen layout.</summary>
+        public RenderingOptions Rendering { get; } = new RenderingOptions();
     }
 }
 
@@ -154,8 +154,8 @@ namespace MajdataPlay
     /// <summary>Provides the scene-local settings dependency.</summary>
     public static class MajEnv
     {
-        /// <summary>The current settings root.</summary>
-        public static Settings.GameSetting? Settings { get; set; }
+        /// <summary>The current system settings.</summary>
+        public static Settings.SystemSetting? SystemSettings { get; set; }
     }
 
     /// <summary>Provides the layout singleton used by production.</summary>

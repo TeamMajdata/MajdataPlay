@@ -138,6 +138,7 @@ namespace MajdataPlay.Tests.Plugins.FFmpeg
             Assert.Throws<ArgumentOutOfRangeException>(() => player.PlaybackRate = 0);
             Assert.Throws<ArgumentOutOfRangeException>(() => player.PlaybackRate = float.NaN);
             Assert.Throws<ArgumentOutOfRangeException>(() => player.PreferredDecoderType = (VideoDecoderType)5);
+            Assert.Throws<ArgumentOutOfRangeException>(() => player.HardwareFallbackRoute = (HardwareFallbackRoute)5);
             player.NextFrame();
             player.Pause();
             Assert.That(player.State, Is.EqualTo(VideoPlaybackState.Idle));
@@ -149,10 +150,12 @@ namespace MajdataPlay.Tests.Plugins.FFmpeg
         {
             var player = CreatePlayer();
             var target = _objects.Track(new RenderTexture(8, 8, 0));
+            Assert.That(player.HardwareFallbackRoute, Is.EqualTo(HardwareFallbackRoute.OtherGpus));
 
             player.PreferredDecoderType = VideoDecoderType.Hardware;
             player.PreferNativeTextures = false;
             player.RequireHardwareDecoding = true;
+            player.HardwareFallbackRoute = HardwareFallbackRoute.SoftwareCodec;
             player.TargetTexture = target;
             player.Loop = true;
             player.PlayOnAwake = true;
@@ -164,6 +167,7 @@ namespace MajdataPlay.Tests.Plugins.FFmpeg
             Assert.That(player.PreferredDecoderType, Is.EqualTo(VideoDecoderType.Hardware));
             Assert.That(player.PreferNativeTextures, Is.False);
             Assert.That(player.RequireHardwareDecoding, Is.True);
+            Assert.That(player.HardwareFallbackRoute, Is.EqualTo(HardwareFallbackRoute.SoftwareCodec));
             Assert.That(player.TargetTexture, Is.SameAs(target));
             Assert.That(player.Loop, Is.True);
             Assert.That(player.PlayOnAwake, Is.True);

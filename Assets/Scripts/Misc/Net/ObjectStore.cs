@@ -537,7 +537,7 @@ namespace MajdataPlay.Net
             }
             var chunkName = GetChunkName(uri, expectedSha256);
             var chunkFile = PartialDirectory.FindFile(chunkName);
-            for (var i = 0; i <= MajEnv.HTTP_REQUEST_MAX_RETRY; i++)
+            for (var i = 0; i <= MajEnv.HttpRequestMaxRetry; i++)
             {
                 token.ThrowIfCancellationRequested();
                 try
@@ -599,7 +599,7 @@ namespace MajdataPlay.Net
                     {
                         MajDebug.LogWarning(nameof(ObjectStore), $"Hash mismatch for online resource {uri}. Expected: {expected}, received: {computed.Sha256}");
                         DeleteIfExists(ref chunkFile);
-                        if (i == MajEnv.HTTP_REQUEST_MAX_RETRY)
+                        if (i == MajEnv.HttpRequestMaxRetry)
                         {
                             throw new HttpException(uri.OriginalString, HttpErrorCode.IntegrityCheckFailed);
                         }
@@ -616,7 +616,7 @@ namespace MajdataPlay.Net
                 }
                 catch (Exception e) when (e is not HttpException || ((HttpException)e).ErrorCode == HttpErrorCode.IntegrityCheckFailed)
                 {
-                    if (i == MajEnv.HTTP_REQUEST_MAX_RETRY)
+                    if (i == MajEnv.HttpRequestMaxRetry)
                     {
                         if (e is HttpException)
                         {
@@ -721,7 +721,7 @@ namespace MajdataPlay.Net
         {
             using var sha256 = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
             using var md5 = IncrementalHash.CreateHash(HashAlgorithmName.MD5);
-            using (var buffer = Pool<byte>.Rent(MajEnv.HTTP_BUFFER_SIZE))
+            using (var buffer = Pool<byte>.Rent(MajEnv.HttpBufferSize))
             {
                 using var stream = file.OpenRead();
                 var span = buffer.AsSpan();
@@ -751,7 +751,7 @@ namespace MajdataPlay.Net
         /// <exception cref="IOException">Reading or writing a stream failed.</exception>
         private static async Task CopyWithProgressAsync(Stream source, Stream destination, INetProgress progress, long existingLength, long totalLength, CancellationToken token)
         {
-            using var buffer = Pool<byte>.Rent(MajEnv.HTTP_BUFFER_SIZE);
+            using var buffer = Pool<byte>.Rent(MajEnv.HttpBufferSize);
             var memory = buffer.AsMemory();
             var transferred = existingLength;
             int read;

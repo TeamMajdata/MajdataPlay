@@ -7,6 +7,8 @@ using System.Security.Authentication;
 using System.Text;
 using System.Threading.Tasks;
 using MajdataPlay.Net.Curl.Core;
+using MajdataPlay.Net.Curl.Diagnostics;
+using MajdataPlay.Net.Curl.Lifecycle;
 using MajdataPlay.Net.Curl.Utils;
 
 #nullable enable
@@ -14,6 +16,25 @@ namespace MajdataPlay.Net.Curl
 {
     public readonly struct CurlHttpConfig
     {
+        /// <summary>Stores the explicit allowlist. A zero-initialized snapshot allows every version.</summary>
+        private readonly CurlHttpVersions? _enabledHttpVersions;
+        /// <summary>Stores the validated preference for this snapshot.</summary>
+        private readonly CurlHttpVersions _preferredHttpVersion;
+
+        /// <inheritdoc cref="CurlHttpMessageHandler.EnabledHttpVersions"/>
+        public CurlHttpVersions EnabledHttpVersions
+        {
+            get => _enabledHttpVersions ?? CurlHttpVersions.All;
+            init => _enabledHttpVersions = ValidateEnabledHttpVersions(value);
+        }
+
+        /// <inheritdoc cref="CurlHttpMessageHandler.PreferredHttpVersion"/>
+        public CurlHttpVersions PreferredHttpVersion
+        {
+            get => _preferredHttpVersion;
+            init => _preferredHttpVersion = ValidatePreferredHttpVersion(value);
+        }
+
         public SslProtocols SslProtocols { get; init; }
         public IWebProxy? Proxy { get; init; }
         public bool PreAuthenticate { get; init; }
@@ -29,7 +50,26 @@ namespace MajdataPlay.Net.Curl
         /// </summary>
         public int ResponseBodyBufferSize { get; init; }
         public long MaxRequestContentBufferSize { get; init; }
+        /// <summary>
+        /// Gets the limit on simultaneous connections to one host, applied as <c>CURLMOPT_MAX_HOST_CONNECTIONS</c>. Zero
+        /// means no limit.
+        /// </summary>
         public int MaxConnectionsPerServer { get; init; }
+        /// <summary>
+        /// Gets the number of connections libcurl may keep open in its connection pool, applied as
+        /// <c>CURLMOPT_MAXCONNECTS</c>. Zero lets libcurl size the pool itself.
+        /// </summary>
+        public int MaxCachedConnections { get; init; }
+        /// <summary>
+        /// Gets how long a pooled connection may have been idle and still be reused, applied as
+        /// <c>CURLOPT_MAXAGE_CONN</c>. Zero keeps libcurl's default of 118 seconds; a negative value means no limit.
+        /// </summary>
+        public TimeSpan PooledConnectionIdleTimeout { get; init; }
+        /// <summary>
+        /// Gets how long after it was opened a pooled connection may still be reused, applied as
+        /// <c>CURLOPT_MAXLIFETIME_CONN</c>. Zero or a negative value means no limit.
+        /// </summary>
+        public TimeSpan PooledConnectionLifetime { get; init; }
         public int MaxAutomaticRedirections { get; init; }
         public ICredentials? DefaultProxyCredentials { get; init; }
         public ICredentials? Credentials { get; init; }
@@ -39,18 +79,79 @@ namespace MajdataPlay.Net.Curl
         public bool AllowAutoRedirect { get; init; }
         public bool UseDefaultCredentials { get; init; }
         public bool UseProxy { get; init; }
+        /// <summary>
+        /// Gets the limit for the whole transfer, from name resolution to the last body byte. Zero or a negative value
+        /// means no limit.
+        /// </summary>
+        public TimeSpan Timeout { get; init; }
+        /// <summary>
+        /// Gets the limit for resolving the host and completing the connection and TLS handshakes. Zero or a negative
+        /// value uses libcurl's built-in 300-second limit.
+        /// </summary>
+        public TimeSpan ConnectTimeout { get; init; }
+        /// <summary>
+        /// Gets how long the transfer may stay below <see cref="LowSpeedLimit"/> before it is aborted. Zero or a
+        /// negative value disables the low-speed check.
+        /// </summary>
+        public TimeSpan LowSpeedTimeout { get; init; }
+        /// <summary>
+        /// Gets the average transfer speed, in bytes per second, below which <see cref="LowSpeedTimeout"/> starts
+        /// counting.
+        /// </summary>
+        public int LowSpeedLimit { get; init; }
 
-        internal readonly void ApplyToMulti(CurlMulti multi)
+        /// <summary>
+        /// Applies the connection pool limits to the multi handle shared by every request of the handler.
+        /// </summary>
+        /// <param name="multi">The multi handle the request is about to be added to.</param>
+        /// <returns><see cref="CurlMCode.Ok"/>, or the code of the first option libcurl rejected.</returns>
+        internal readonly CurlMCode ApplyToMulti(CurlMulti multi)
         {
             var multiHandle = multi.Handle;
 
-            LibCurl.Multi.SetOption(multiHandle, CurlMOption.MaxHostConnections, (IntPtr)MaxConnectionsPerServer);
+            var returnCode = LibCurl.Multi.SetOption(multiHandle, CurlMOption.MaxHostConnections, (long)Math.Max(MaxConnectionsPerServer, 0));
+            if (returnCode != CurlMCode.Ok)
+            {
+                return returnCode;
+            }
+            return LibCurl.Multi.SetOption(multiHandle, CurlMOption.MaxConnections, (long)Math.Max(MaxCachedConnections, 0));
         }
 
         internal readonly void ApplyToEasy(CurlEasy curlEasy, Uri requestUri)
         {
             var easyHandle = curlEasy.Handle;
             var returnCode = default(CurlCode);
+
+            var httpVersion = GetHttpVersionMode(LibCurlLifecycle.Features, requestUri.Scheme == Uri.UriSchemeHttps);
+            if (httpVersion != CurlHttpVersionMode.Default)
+            {
+                returnCode = LibCurl.Easy.SetOption(easyHandle, CurlOption.HttpVersion, (long)httpVersion);
+                CurlUtility.EnsureSuccess(easyHandle, returnCode);
+                if (httpVersion == CurlHttpVersionMode.Http2PriorKnowledge && UseProxy)
+                {
+                    // libcurl ignores h2 prior knowledge when forwarding plain HTTP through a proxy.
+                    returnCode = LibCurl.Easy.SetOption(easyHandle, CurlOption.HttpProxyTunnel, 1L);
+                    CurlUtility.EnsureSuccess(easyHandle, returnCode);
+                }
+            }
+
+            returnCode = LibCurl.Easy.SetOption(easyHandle, CurlOption.TimeoutMs, ToCurlMilliseconds(Timeout));
+            CurlUtility.EnsureSuccess(easyHandle, returnCode);
+            returnCode = LibCurl.Easy.SetOption(easyHandle, CurlOption.ConnectTimeoutMs, ToCurlMilliseconds(ConnectTimeout));
+            CurlUtility.EnsureSuccess(easyHandle, returnCode);
+            var lowSpeedTime = ToCurlSeconds(LowSpeedTimeout);
+            returnCode = LibCurl.Easy.SetOption(easyHandle, CurlOption.LowSpeedTime, lowSpeedTime);
+            CurlUtility.EnsureSuccess(easyHandle, returnCode);
+            returnCode = LibCurl.Easy.SetOption(easyHandle, CurlOption.LowSpeedLimit, lowSpeedTime > 0 ? Math.Max(LowSpeedLimit, 0) : 0);
+            CurlUtility.EnsureSuccess(easyHandle, returnCode);
+
+            if (PooledConnectionIdleTimeout != TimeSpan.Zero)
+            {
+                returnCode = LibCurl.Easy.SetOption(easyHandle, CurlOption.MaxAgeConn, ToCurlMaxAgeSeconds(PooledConnectionIdleTimeout));
+                CurlUtility.EnsureSuccess(easyHandle, returnCode);
+            }
+            returnCode = LibCurl.Easy.SetOption(easyHandle, CurlOption.MaxLifetimeConn, ToCurlSeconds(PooledConnectionLifetime));
+            CurlUtility.EnsureSuccess(easyHandle, returnCode);
 
             returnCode = LibCurl.Easy.SetOption(easyHandle, CurlOption.FollowLocation, AllowAutoRedirect ? 1 : 0);
             CurlUtility.EnsureSuccess(easyHandle, returnCode);
@@ -128,6 +229,85 @@ namespace MajdataPlay.Net.Curl
             }
 
         }
+        /// <summary>Checks the set of versions a caller wants to enable.</summary>
+        /// <param name="value">The flags to validate.</param>
+        /// <returns>The validated flags.</returns>
+        /// <exception cref="ArgumentOutOfRangeException">The set is empty or contains unknown bits.</exception>
+        internal static CurlHttpVersions ValidateEnabledHttpVersions(CurlHttpVersions value)
+        {
+            if (value == CurlHttpVersions.None || (value & ~CurlHttpVersions.All) != 0)
+            {
+                throw new ArgumentOutOfRangeException(nameof(EnabledHttpVersions), value, "Enable at least one known HTTP version.");
+            }
+            return value;
+        }
+
+        /// <summary>Checks a caller's preferred version independently of the enabled set.</summary>
+        /// <param name="value">The preference to validate.</param>
+        /// <returns>The validated preference.</returns>
+        /// <exception cref="ArgumentOutOfRangeException">The preference is neither a single known version nor None.</exception>
+        internal static CurlHttpVersions ValidatePreferredHttpVersion(CurlHttpVersions value)
+        {
+            if (value is not (CurlHttpVersions.None or CurlHttpVersions.Http10 or CurlHttpVersions.Http11
+                or CurlHttpVersions.Http2 or CurlHttpVersions.Http3))
+            {
+                throw new ArgumentOutOfRangeException(nameof(PreferredHttpVersion), value, "Select one HTTP version or None.");
+            }
+            return value;
+        }
+
+        /// <summary>Selects a native negotiation mode whose fallbacks are enabled by the caller.</summary>
+        /// <param name="features">The features compiled into the loaded libcurl.</param>
+        /// <param name="isHttps">Whether the request URI permits HTTP/3.</param>
+        /// <returns>The mode to use for this transfer.</returns>
+        /// <exception cref="InvalidOperationException">The preferred version is disabled.</exception>
+        /// <exception cref="NotSupportedException">No enabled version is available for this request.</exception>
+        internal CurlHttpVersionMode GetHttpVersionMode(CurlFeatures features, bool isHttps)
+        {
+            var enabled = EnabledHttpVersions;
+            var preferred = PreferredHttpVersion;
+            if (preferred == CurlHttpVersions.None && enabled == CurlHttpVersions.All)
+            {
+                return CurlHttpVersionMode.Default;
+            }
+            if ((enabled & preferred) != preferred)
+            {
+                throw new InvalidOperationException("The preferred HTTP version must be enabled.");
+            }
+
+            var available = enabled;
+            if ((features & CurlFeatures.Http2) == 0)
+            {
+                available &= ~CurlHttpVersions.Http2;
+            }
+            if (!isHttps || (features & CurlFeatures.Http3) == 0)
+            {
+                available &= ~CurlHttpVersions.Http3;
+            }
+            var candidates = (preferred & available) != 0 ? preferred : available;
+            if ((candidates & CurlHttpVersions.Http3) != 0)
+            {
+                // libcurl's HTTP/3 fallback can select either HTTP/2 or HTTP/1.1.
+                var canFallBack = (available & CurlHttpVersions.Http11) != 0
+                    && ((features & CurlFeatures.Http2) == 0 || (available & CurlHttpVersions.Http2) != 0);
+                return canFallBack ? CurlHttpVersionMode.Http3 : CurlHttpVersionMode.Http3Only;
+            }
+            if ((candidates & CurlHttpVersions.Http2) != 0)
+            {
+                return (available & CurlHttpVersions.Http11) != 0
+                    ? CurlHttpVersionMode.Http2 : CurlHttpVersionMode.Http2PriorKnowledge;
+            }
+            if ((candidates & CurlHttpVersions.Http11) != 0)
+            {
+                return CurlHttpVersionMode.Http11;
+            }
+            if ((candidates & CurlHttpVersions.Http10) != 0)
+            {
+                return CurlHttpVersionMode.Http10;
+            }
+            throw new NotSupportedException("None of the enabled HTTP versions are supported by libcurl for this URI.");
+        }
+
         /// <summary>
         /// Combines every <c>CURLOPT_SSL_OPTIONS</c> bit for a request. libcurl stores the option as one bitmask, so
         /// setting it more than once keeps only the last value.
@@ -142,6 +322,71 @@ namespace MajdataPlay.Net.Curl
                 options |= CurlSslOption.NoRevoke;
             }
             return options;
+        }
+        /// <summary>
+        /// Converts a timeout to the millisecond value of <c>CURLOPT_TIMEOUT_MS</c> or <c>CURLOPT_CONNECTTIMEOUT_MS</c>.
+        /// </summary>
+        /// <param name="timeout">The timeout to convert; zero or a negative value means no timeout.</param>
+        /// <returns>
+        /// The timeout rounded up to whole milliseconds and capped at <see cref="int.MaxValue"/>, because the options are
+        /// a C <c>long</c> that is 32 bits wide on Windows and ARMv7; 0 when there is no timeout.
+        /// </returns>
+        internal static long ToCurlMilliseconds(TimeSpan timeout)
+        {
+            if (timeout <= TimeSpan.Zero)
+            {
+                return 0;
+            }
+            var milliseconds = DivideRoundingUp(timeout.Ticks, TimeSpan.TicksPerMillisecond);
+            return Math.Min(milliseconds, int.MaxValue);
+        }
+        /// <summary>
+        /// Converts a timeout to the second value of <c>CURLOPT_LOW_SPEED_TIME</c>, which has no millisecond variant.
+        /// </summary>
+        /// <param name="timeout">The timeout to convert; zero or a negative value disables the check.</param>
+        /// <returns>
+        /// The timeout rounded up to whole seconds and capped at <see cref="int.MaxValue"/>; 0 when the check is disabled.
+        /// </returns>
+        internal static long ToCurlSeconds(TimeSpan timeout)
+        {
+            if (timeout <= TimeSpan.Zero)
+            {
+                return 0;
+            }
+            var seconds = DivideRoundingUp(timeout.Ticks, TimeSpan.TicksPerSecond);
+            return Math.Min(seconds, int.MaxValue);
+        }
+        /// <summary>
+        /// Converts an idle timeout to the second value of <c>CURLOPT_MAXAGE_CONN</c>, where 0 would make almost every
+        /// pooled connection too old to reuse rather than lift the limit.
+        /// </summary>
+        /// <param name="idleTimeout">The idle timeout to convert; a negative value means no limit.</param>
+        /// <returns>
+        /// The timeout rounded up to whole seconds and capped at <see cref="int.MaxValue"/>; <see cref="int.MaxValue"/>
+        /// when there is no limit.
+        /// </returns>
+        internal static long ToCurlMaxAgeSeconds(TimeSpan idleTimeout)
+        {
+            if (idleTimeout < TimeSpan.Zero)
+            {
+                return int.MaxValue;
+            }
+            return ToCurlSeconds(idleTimeout);
+        }
+        /// <summary>
+        /// Divides a non-negative tick count, rounding up without overflowing near <see cref="long.MaxValue"/>.
+        /// </summary>
+        /// <param name="ticks">The non-negative tick count.</param>
+        /// <param name="ticksPerUnit">The number of ticks in one target unit.</param>
+        /// <returns>The number of whole target units covering <paramref name="ticks"/>.</returns>
+        private static long DivideRoundingUp(long ticks, long ticksPerUnit)
+        {
+            var units = ticks / ticksPerUnit;
+            if ((ticks % ticksPerUnit) != 0)
+            {
+                units++;
+            }
+            return units;
         }
         readonly string GetEncodingString(DecompressionMethods methods)
         {

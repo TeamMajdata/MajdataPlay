@@ -40,7 +40,7 @@ namespace MajdataPlay.Net.Curl.Core.PInvoke
         /// Primary IP address.
         /// char**
         /// </summary>
-        PrimaryIp = 0x100026,
+        PrimaryIp = 0x100020,
 
         /// <summary>
         /// Local IP address.
@@ -131,6 +131,12 @@ namespace MajdataPlay.Net.Curl.Core.PInvoke
         /// HTTP version used.
         /// </summary>
         HttpVersion = 0x20002E,
+
+        /// <summary>
+        /// Destination port of the most recent connection.
+        /// long*
+        /// </summary>
+        PrimaryPort = 0x200028,
 
         /// <summary>
         /// Filetime is valid.
@@ -237,6 +243,47 @@ namespace MajdataPlay.Net.Curl.Core.PInvoke
         /// Start transfer time in microseconds.
         /// </summary>
         StartTransferTimeT = 0x600036,
+
+        /// <summary>
+        /// Total transfer time in microseconds, including name resolving, connecting and every redirect.
+        /// </summary>
+        TotalTimeT = 0x600032,
+
+        /// <summary>
+        /// Time in microseconds from the start until name resolving completed.
+        /// </summary>
+        NameLookupTimeT = 0x600033,
+
+        /// <summary>
+        /// Time in microseconds from the start until the connection to the remote host or proxy completed.
+        /// </summary>
+        ConnectTimeT = 0x600034,
+
+        /// <summary>
+        /// Time in microseconds from the start until the file transfer was just about to begin.
+        /// </summary>
+        PreTransferTimeT = 0x600035,
+
+        /// <summary>
+        /// Time in microseconds taken by every redirect step before the final transfer started.
+        /// </summary>
+        RedirectTimeT = 0x600037,
+
+        /// <summary>
+        /// Time in microseconds from the start until the SSL/TLS handshake completed.
+        /// </summary>
+        AppConnectTimeT = 0x600038,
+
+        /// <summary>
+        /// Time in microseconds from the start until the last request byte was sent (libcurl 8.10.0 and later).
+        /// </summary>
+        PostTransferTimeT = 0x600043,
+
+        /// <summary>
+        /// Identifier of the last connection used by the transfer, unique within its connection pool, or -1
+        /// (libcurl 8.2.0 and later).
+        /// </summary>
+        ConnId = 0x600040,
 
 
         // ============================================================

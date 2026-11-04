@@ -47,11 +47,11 @@ namespace MajdataPlay.Tests.Game.Misc.Settings
             _savedEntries = Storage.ToArray();
             _savedIsInited = PrivateMember.GetStaticField<bool>(typeof(ChartSettingStorage), "_isInited");
             _savedDirectory = PrivateMember.GetStaticField<StorageDirectory?>(typeof(ChartSettingStorage), "s_storageDirectory");
-            _savedOffsetUnit = MajEnv.Settings.Debug.OffsetUnit;
+            _savedOffsetUnit = MajEnv.UserSettings.Judge.OffsetUnit;
             Storage.Clear();
             PrivateMember.SetStaticField(typeof(ChartSettingStorage), "_isInited", false);
             PrivateMember.SetStaticField(typeof(ChartSettingStorage), "s_storageDirectory", _temporary.Directory);
-            MajEnv.Settings.Debug.OffsetUnit = OffsetUnitOption.Frame;
+            MajEnv.UserSettings.Judge.OffsetUnit = OffsetUnitOption.Frame;
         }
 
         /// <summary>Restores the storage state and removes the save handler registered by initialization.</summary>
@@ -67,7 +67,7 @@ namespace MajdataPlay.Tests.Game.Misc.Settings
             }
             PrivateMember.SetStaticField(typeof(ChartSettingStorage), "_isInited", _savedIsInited);
             PrivateMember.SetStaticField(typeof(ChartSettingStorage), "s_storageDirectory", _savedDirectory);
-            MajEnv.Settings.Debug.OffsetUnit = _savedOffsetUnit;
+            MajEnv.UserSettings.Judge.OffsetUnit = _savedOffsetUnit;
             _temporary.Dispose();
         }
 
@@ -131,7 +131,7 @@ namespace MajdataPlay.Tests.Game.Misc.Settings
         {
             return UniTask.ToCoroutine(async () =>
             {
-                MajEnv.Settings.Debug.OffsetUnit = OffsetUnitOption.Second;
+                MajEnv.UserSettings.Judge.OffsetUnit = OffsetUnitOption.Second;
                 _temporary.WriteText(StorageFileName, "[{\"Hash\":\"frames\",\"Unit\":1,\"AudioOffset\":6}]");
 
                 await ChartSettingStorage.InitAsync();

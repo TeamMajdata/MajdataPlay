@@ -113,10 +113,12 @@ namespace MajdataPlay.Settings
         /// Gets when a setting option or a setting menu is shown, as declared by its <see cref="ShowInSettingUIWhenAttribute"/> attributes.
         /// </summary>
         /// <remarks>
-        /// Member paths start at the type the property was obtained from. Conditions that cannot be resolved are logged
-        /// as an error and the entry is always shown, so a mistake never removes an option or breaks the setting scene.
+        /// Member paths start at the type the property was obtained from, except that the conditions of a menu, which is
+        /// a category of <see cref="UserSetting"/> or <see cref="SystemSetting"/>, start at <see cref="SettingRoot"/>.
+        /// Conditions that cannot be resolved are logged as an error and the entry is always shown, so a mistake never
+        /// removes an option or breaks the setting scene.
         /// </remarks>
-        /// <param name="property">The option property, or for a menu its category property on the setting root.</param>
+        /// <param name="property">The option property, or for a menu its category property on <see cref="UserSetting"/> or <see cref="SystemSetting"/>.</param>
         /// <returns>The cached visibility; <see cref="SettingVisibility.Always"/> without conditions.</returns>
         /// <exception cref="ArgumentNullException"><paramref name="property"/> is null.</exception>
         internal static SettingVisibility GetVisibility(PropertyInfo property)
@@ -129,7 +131,7 @@ namespace MajdataPlay.Settings
             {
                 if (!s_visibilities.TryGetValue(property, out var visibility))
                 {
-                    var ownerType = property.ReflectedType ?? property.DeclaringType!;
+                    var ownerType = GetConditionOwnerType(property);
                     try
                     {
                         visibility = SettingVisibility.Resolve(ownerType, property.Name, GetAttributes(property));
@@ -143,6 +145,25 @@ namespace MajdataPlay.Settings
                 }
                 return visibility;
             }
+        }
+
+        /// <summary>
+        /// Gets the type the <see cref="ShowInSettingUIWhenAttribute"/> member paths of a property start at.
+        /// </summary>
+        /// <param name="property">The option property, or for a menu its category property on <see cref="UserSetting"/> or <see cref="SystemSetting"/>.</param>
+        /// <returns>
+        /// <see cref="SettingRoot"/> for a category of <see cref="UserSetting"/> or <see cref="SystemSetting"/>; otherwise
+        /// the type the property was obtained from.
+        /// </returns>
+        /// <exception cref="ArgumentNullException"><paramref name="property"/> is null.</exception>
+        internal static Type GetConditionOwnerType(PropertyInfo property)
+        {
+            if (property is null)
+            {
+                throw new ArgumentNullException(nameof(property));
+            }
+            var ownerType = property.ReflectedType ?? property.DeclaringType!;
+            return SettingRoot.IsRootType(ownerType) ? typeof(SettingRoot) : ownerType;
         }
 
         internal static Attribute[] GetAttributes(MemberInfo member)

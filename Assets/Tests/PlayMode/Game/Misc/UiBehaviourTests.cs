@@ -133,7 +133,7 @@ namespace MajdataPlay.Tests.Game.Misc.PlayMode
         [Test]
         public void ModEnabledIndicator_FollowsMods()
         {
-            var mod = MajEnv.Settings.Mod;
+            var mod = MajEnv.SystemSettings.Mod;
             var savedAllBreak = mod.AllBreak;
             var managerObject = _objects.Create("GameManager");
             managerObject.SetActive(false);

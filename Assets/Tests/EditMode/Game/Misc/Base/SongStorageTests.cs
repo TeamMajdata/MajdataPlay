@@ -11,6 +11,7 @@ using Cysharp.Threading.Tasks;
 using MajdataPlay.Collections;
 using MajdataPlay.IO.Storage;
 using MajdataPlay.Net;
+using MajdataPlay.Net.Models;
 using MajdataPlay.Tests;
 using MajdataPlay.Tests.Game.Misc.Support;
 using MajdataPlay.Utils;
@@ -800,6 +801,14 @@ namespace MajdataPlay.Tests.Game.Misc.Base
             return ObjectStore.ToHex(sha256.ComputeHash(Encoding.UTF8.GetBytes(id + "/" + file)));
         }
 
+        /// <summary>Makes every recorded full chart list read older than the full refresh interval, so the next refresh reads the whole list.</summary>
+        private static void ExpireOnlineFullSync()
+        {
+            var interval = PrivateMember.GetStaticField<TimeSpan>(typeof(SongStorage), "s_onlineFullRefreshInterval");
+            var expired = DateTime.UtcNow - interval - TimeSpan.FromMinutes(1);
+            MajDatabase.Runtime.Write(connection => connection.Execute("UPDATE OnlineChartChangeQueries SET LastFullSyncTicks = ?", expired.Ticks));
+        }
+
         /// <summary>Loads one endpoint's online collection through the private loader.</summary>
         /// <param name="endpoint">The endpoint.</param>
         /// <returns>The collection.</returns>
@@ -930,6 +939,147 @@ namespace MajdataPlay.Tests.Game.Misc.Base
                 Assert.That(offline.Record.TryGetDigest(OnlineChartResourceKind.Track, out var track), Is.True);
                 Assert.That(track.Sha256, Is.EqualTo(DigestOf(ids[1], "track")));
                 offline.Dispose();
+            });
+        }
+
+        /// <summary>
+        /// Checks that the first refresh reads the whole list and records the end of the incomplete changes range, that
+        /// the next refresh applies the changes since then without reading the list, and that an old full sync reads the
+        /// whole list again.
+        /// </summary>
+        /// <returns>The test coroutine.</returns>
+        [UnityTest]
+        public IEnumerator GetOnlineCollection_RefreshesFromChanges()
+        {
+            return UniTask.ToCoroutine(async () =>
+            {
+                using var http = new StubHttpScope();
+                var endpoint = new ApiEndpoint { Name = "Server", Url = new Uri("https://api.invalid/api/") };
+                var ids = new[] { Guid.NewGuid().ToString(), Guid.NewGuid().ToString(), Guid.NewGuid().ToString() };
+                var added = Guid.NewGuid().ToString();
+                var changesJson = "{\"to\":\"2026-11-02T00:00:00Z\",\"isComplete\":false,\"changes\":[]}";
+                http.Responder = request => request.RequestUri!.AbsolutePath switch
+                {
+                    var path when path.EndsWith("maichart/changes") => StubHttpScope.Respond(System.Net.HttpStatusCode.OK, changesJson),
+                    var path when path.EndsWith("maichart/list") => StubHttpScope.Respond(System.Net.HttpStatusCode.OK, ChartListJson(ids)),
+                    var path when path.EndsWith("maichart/info") => StubHttpScope.Respond(
+                        System.Net.HttpStatusCode.OK,
+                        ChartInfoJson(Newtonsoft.Json.Linq.JArray.Parse(request.Content!.ReadAsStringAsync().GetAwaiter().GetResult()).Select(id => id.ToString()).ToArray())),
+                    _ => StubHttpScope.Respond(System.Net.HttpStatusCode.OK, "{\"id\":\"majnet\",\"name\":\"MajdataNET\"}")
+                };
+                int CountRequests(string route) => http.Requests.Count(request => request.Uri.AbsolutePath.EndsWith(route));
+
+                var first = (await GetOnlineCollectionAsync(endpoint)).Cast<OnlineSongDetail>().ToArray();
+
+                Assert.That(first.Select(song => song.Id), Is.EqualTo(ids));
+                Assert.That(CountRequests("maichart/list"), Is.EqualTo(1));
+                Assert.That(http.Requests.First().Uri.Query, Is.EqualTo("?from=1970-01-01T00:00:00.000Z"));
+                Assert.That(OnlineChartCache.Shared.GetSyncPoint(endpoint)!.Value.ChangesTo, Is.EqualTo(new DateTime(2026, 11, 2, 0, 0, 0, DateTimeKind.Utc)));
+
+                changesJson = "{\"to\":\"2026-11-03T00:00:00Z\",\"isComplete\":true,\"changes\":[" +
+                              $"{{\"chartId\":\"{ids[1]}\",\"kind\":2,\"changedAt\":\"2026-11-02T01:00:00Z\"}}," +
+                              $"{{\"chartId\":\"{ids[2]}\",\"kind\":1,\"changedAt\":\"2026-11-02T02:00:00Z\",\"metadata\":{{\"tags\":[\"new\"]}}}}," +
+                              $"{{\"chartId\":\"{added}\",\"kind\":0,\"changedAt\":\"2026-11-02T03:00:00Z\"}}]}}";
+                var before = http.Requests.Length;
+
+                var second = (await GetOnlineCollectionAsync(endpoint)).Cast<OnlineSongDetail>().ToArray();
+
+                var requests = http.Requests.Skip(before).ToArray();
+                Assert.That(second.Select(song => song.Id), Is.EqualTo(new[] { added, ids[0], ids[2] }));
+                Assert.That(requests.Any(request => request.Uri.AbsolutePath.EndsWith("maichart/list")), Is.False);
+                Assert.That(requests[0].Uri.Query, Is.EqualTo("?from=2026-11-01T23:58:00.000Z"));
+                var infoRequest = requests.Single(request => request.Uri.AbsolutePath.EndsWith("maichart/info"));
+                Assert.That(Newtonsoft.Json.Linq.JArray.Parse(infoRequest.Body).Select(id => id.ToString()), Is.EquivalentTo(new[] { ids[2], added }));
+                Assert.That(second[0].Record.TryGetDigest(OnlineChartResourceKind.Track, out var track), Is.True);
+                Assert.That(track.Sha256, Is.EqualTo(DigestOf(added, "track")));
+                Assert.That(CountOnlineChartRows(ids[1]), Is.Zero);
+                Assert.That(OnlineChartCache.Shared.GetSyncPoint(endpoint)!.Value.ChangesTo, Is.EqualTo(new DateTime(2026, 11, 3, 0, 0, 0, DateTimeKind.Utc)));
+
+                ExpireOnlineFullSync();
+                changesJson = "{\"to\":\"2026-11-04T00:00:00Z\",\"isComplete\":true,\"changes\":[]}";
+
+                var third = (await GetOnlineCollectionAsync(endpoint)).Cast<OnlineSongDetail>().ToArray();
+
+                Assert.That(CountRequests("maichart/list"), Is.EqualTo(2));
+                Assert.That(third.Select(song => song.Id), Is.EqualTo(ids));
+                Assert.That(OnlineChartCache.Shared.GetSyncPoint(endpoint)!.Value.FullSyncAt, Is.GreaterThan(DateTime.UtcNow.AddMinutes(-1)));
+                foreach (var song in first.Concat(second).Concat(third))
+                {
+                    song.Dispose();
+                }
+            });
+        }
+
+        /// <summary>
+        /// Checks that a chart the server deleted stays in the collection, marked deleted, while its chart file and track
+        /// are stored, both after a refresh from changes and after the whole list is read again.
+        /// </summary>
+        /// <returns>The test coroutine.</returns>
+        [UnityTest]
+        public IEnumerator GetOnlineCollection_KeepsStoredDeletedCharts()
+        {
+            return UniTask.ToCoroutine(async () =>
+            {
+                using var http = new StubHttpScope();
+                var endpoint = new ApiEndpoint { Name = "Server", Url = new Uri("https://api.invalid/api/") };
+                var ids = new[] { Guid.NewGuid().ToString(), Guid.NewGuid().ToString() };
+                var listed = ids;
+                var changesJson = "{\"to\":\"2026-11-02T00:00:00Z\",\"isComplete\":false,\"changes\":[]}";
+                http.Responder = request => request.RequestUri!.AbsolutePath switch
+                {
+                    var path when path.EndsWith("maichart/changes") => StubHttpScope.Respond(System.Net.HttpStatusCode.OK, changesJson),
+                    var path when path.EndsWith("maichart/list") => StubHttpScope.Respond(System.Net.HttpStatusCode.OK, ChartListJson(listed)),
+                    var path when path.EndsWith("maichart/info") => StubHttpScope.Respond(
+                        System.Net.HttpStatusCode.OK,
+                        ChartInfoJson(Newtonsoft.Json.Linq.JArray.Parse(request.Content!.ReadAsStringAsync().GetAwaiter().GetResult()).Select(id => id.ToString()).ToArray())),
+                    _ => StubHttpScope.Respond(System.Net.HttpStatusCode.OK, "{\"id\":\"majnet\",\"name\":\"MajdataNET\"}")
+                };
+                var songs = new List<OnlineSongDetail>();
+                songs.AddRange((await GetOnlineCollectionAsync(endpoint)).Cast<OnlineSongDetail>());
+                foreach (var digest in new[] { DigestOf(ids[0], "maidata"), DigestOf(ids[0], "track") })
+                {
+                    ObjectStore.Shared.Directory.CreateDirectory(digest.Substring(0, 2)).CreateFile(digest).WriteAllText("object");
+                }
+                changesJson = "{\"to\":\"2026-11-03T00:00:00Z\",\"isComplete\":true,\"changes\":[" +
+                              $"{{\"chartId\":\"{ids[0]}\",\"kind\":2,\"changedAt\":\"2026-11-02T01:00:00Z\"}}]}}";
+                listed = new[] { ids[1] };
+
+                var refreshed = (await GetOnlineCollectionAsync(endpoint)).Cast<OnlineSongDetail>().ToArray();
+                songs.AddRange(refreshed);
+
+                Assert.That(refreshed.Select(song => song.Id), Is.EqualTo(ids));
+                Assert.That(refreshed.Select(song => song.Record.IsDeletedOnServer), Is.EqualTo(new[] { true, false }));
+
+                ExpireOnlineFullSync();
+                var reread = (await GetOnlineCollectionAsync(endpoint)).Cast<OnlineSongDetail>().ToArray();
+                songs.AddRange(reread);
+
+                Assert.That(reread.Select(song => song.Id), Is.EqualTo(new[] { ids[1], ids[0] }));
+                Assert.That(reread[1].Record.IsDeletedOnServer, Is.True);
+                Assert.That(reread[1].Title, Is.EqualTo($"Title {ids[0]}"));
+                foreach (var song in songs)
+                {
+                    song.Dispose();
+                }
+            });
+        }
+
+        /// <summary>Checks that an unreachable server lists the cached charts without trying to read the whole list.</summary>
+        /// <returns>The test coroutine.</returns>
+        [UnityTest]
+        public IEnumerator GetOnlineCollection_Unreachable_SkipsChartList()
+        {
+            return UniTask.ToCoroutine(async () =>
+            {
+                using var http = new StubHttpScope();
+                var endpoint = new ApiEndpoint { Name = "Server", Url = new Uri("https://api.invalid/api/") };
+                http.Responder = _ => throw new System.Net.Http.HttpRequestException("offline");
+
+                var collection = await GetOnlineCollectionAsync(endpoint);
+
+                Assert.That(collection.IsOnline, Is.True);
+                Assert.That(collection.Count, Is.Zero);
+                Assert.That(http.Requests.All(request => request.Uri.AbsolutePath.EndsWith("maichart/changes")), Is.True);
             });
         }
 

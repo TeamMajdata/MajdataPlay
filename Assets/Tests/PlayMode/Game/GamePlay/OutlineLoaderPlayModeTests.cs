@@ -48,7 +48,8 @@ namespace MajdataPlay.Tests.Game.GamePlay.PlayMode
             services.SetActive(false);
             _skinManager = services.AddComponent<SkinManager>();
             var manager = services.AddComponent<GamePlayManager>();
-            PrivateMember.SetField(manager, "_gameSettings", _settings.Settings);
+            PrivateMember.SetField(manager, "_userSettings", _settings.UserSettings);
+            PrivateMember.SetField(manager, "_systemSettings", _settings.SystemSettings);
             _skinSlot.Set(_skinManager);
             _managerSlot.Set(manager);
         }
@@ -86,7 +87,7 @@ namespace MajdataPlay.Tests.Game.GamePlay.PlayMode
         [UnityTest]
         public IEnumerator Start_ColorsTheEffectInClassicMode()
         {
-            _settings.Settings.Judge.Mode = JudgeModeOption.Classic;
+            _settings.UserSettings.Judge.Mode = JudgeModeOption.Classic;
             _settings.RuntimeConfig.List.SelectedDiff = ChartLevel.Expert;
             UseSkin(CreateSkinWithOutline());
 
@@ -108,7 +109,7 @@ namespace MajdataPlay.Tests.Game.GamePlay.PlayMode
             var modern = CreateLoader(out _, out var modernEffect);
             yield return null;
 
-            _settings.Settings.Judge.Mode = JudgeModeOption.Classic;
+            _settings.UserSettings.Judge.Mode = JudgeModeOption.Classic;
             MajEnv.Mode = RunningMode.View;
             var view = CreateLoader(out _, out var viewEffect);
             yield return null;

@@ -20,7 +20,7 @@ internal static class CornerUpdaterValidation
         rectangle.Bounds = new Rect(-5f, 10f, 10f, 4f);
         Screen.width = 1080;
         Screen.height = 1920;
-        MajEnv.Settings = new GameSetting();
+        MajEnv.SystemSettings = new SystemSetting();
         var provider = new ScreenPosCanvasLayoutProvider { HasLayout = true, Version = 1 };
         Majdata<ScreenPosCanvasLayoutProvider>.Instance = provider;
         var type = typeof(RectCornerPositionUpdater);
@@ -57,7 +57,7 @@ internal static class CornerUpdaterValidation
         Check(rectangle.Reads == 3 && InputManager.SubScreenEdge.y == 18f,
             "latest provider layout publishes after it settles", ref assertions);
 
-        MajEnv.Settings.Display.MainScreenScale = 0.8f;
+        MajEnv.SystemSettings.Rendering.MainScreenScale = 0.8f;
         lateUpdate();
         rectangle.Bounds = new Rect(-4f, 11f, 8f, 3f);
         lateUpdate();

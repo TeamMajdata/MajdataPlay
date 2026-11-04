@@ -41,7 +41,40 @@ namespace MajdataPlay.Tests.Game.Misc.Settings
                 nameof(RenderingOptions.VSync),
                 nameof(RenderingOptions.CompatibilityMode)
             };
-            return UiOptionNames().FindAll(name => Array.IndexOf(common, name) >= 0);
+            var names = UiOptionNames().FindAll(name => Array.IndexOf(common, name) >= 0);
+            names.AddRange(s_screenOptionNames);
+            return names;
+        }
+
+        /// <summary>The runtime statistics and screen layout options listed after the rendering parameters, which are always shown.</summary>
+        private static readonly string[] s_screenOptionNames =
+        {
+            nameof(RenderingOptions.DisplayRuntimeInfo),
+            nameof(RenderingOptions.MainScreenTransform),
+            nameof(RenderingOptions.MainScreenScale),
+            nameof(RenderingOptions.MainScreenOffset),
+            nameof(RenderingOptions.SubDisplayOffset),
+            nameof(RenderingOptions.SubDisplayScale),
+            nameof(RenderingOptions.GameplayScreenRotationAngle)
+        };
+
+        /// <summary>
+        /// Checks that the rendering preset stays the first row and the screen layout options moved from the Display menu
+        /// follow the rendering parameters, while the window options and the cached layout value stay hidden.
+        /// </summary>
+        [Test]
+        public void UiOptions_ListScreenLayoutAfterRenderingParameters()
+        {
+            var names = UiOptionNames();
+
+            Assert.That(names[0], Is.EqualTo(nameof(RenderingOptions.RenderQuality)));
+            Assert.That(names.GetRange(names.Count - s_screenOptionNames.Length, s_screenOptionNames.Length), Is.EqualTo(s_screenOptionNames));
+            Assert.That(names, Has.No.Member(nameof(RenderingOptions.MainScreenCachedScreenCenterY)));
+#if UNITY_STANDALONE
+            Assert.That(names, Has.No.Member(nameof(RenderingOptions.Resolution)));
+            Assert.That(names, Has.No.Member(nameof(RenderingOptions.FullScreen)));
+            Assert.That(names, Has.No.Member(nameof(RenderingOptions.Topmost)));
+#endif
         }
 
         /// <summary>Gets the names of the listed options whose <see cref="ShowInSettingUIWhenAttribute"/> conditions hold.</summary>
@@ -252,7 +285,7 @@ namespace MajdataPlay.Tests.Game.Misc.Settings
             Assert.That(lowScaling.OutputMode, Is.EqualTo(RenderingOutputMode.Intermediate));
         }
 
-        /// <summary>Checks that a preset shows only the preset selector, the frame pacing options and the compatibility switch.</summary>
+        /// <summary>Checks that a preset shows only the preset selector, the frame pacing options, the compatibility switch and the screen options.</summary>
         [Test]
         public void Visibility_PresetShowsCommonOptions()
         {

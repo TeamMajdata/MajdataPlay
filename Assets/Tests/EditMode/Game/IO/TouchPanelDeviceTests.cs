@@ -119,7 +119,7 @@ namespace MajdataPlay.Tests.Game.IO
         [Test]
         public void Rosen_DisconnectAndProperties()
         {
-            _settings.Settings.IO.InputDevice.TouchPanel.PollingRateMs = 7;
+            _settings.SystemSettings.IO.InputDevice.TouchPanel.PollingRateMs = 7;
             var device = new RosenTouchPanelDevice();
             var parse = DeviceTestSupport.BindParser(device);
             parse(Report(0b11111, 0, 0, 0, 0, 0, 0));
@@ -210,7 +210,7 @@ namespace MajdataPlay.Tests.Game.IO
         [Test]
         public void Pipe_IgnoresHeartbeatsAndClearsOnDisconnect()
         {
-            _settings.Settings.IO.InputDevice.TouchPanel.PollingRateMs = 2;
+            _settings.SystemSettings.IO.InputDevice.TouchPanel.PollingRateMs = 2;
             var device = new PipeTouchPanelDevice();
             var parse = DeviceTestSupport.BindParser(device);
             parse(PipePacketBytes(PipePacketType.HeartBeat, new byte[8] { 1, 0, 0, 0, 0, 0, 0, 0 }));

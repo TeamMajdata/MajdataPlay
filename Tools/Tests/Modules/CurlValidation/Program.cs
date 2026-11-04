@@ -18,6 +18,8 @@ using MajdataPlay.Net.Curl.Core;
 using MajdataPlay.Net.Curl.Core.PInvoke;
 using MajdataPlay.Net.Curl.Lifecycle;
 
+#nullable enable
+
 /// <summary>
 /// Runs the libcurl HTTP handler against loopback servers with the real bundled Windows x64 libcurl.
 /// </summary>
@@ -41,6 +43,7 @@ internal static class Program
         (nameof(RequestsSubmittedDuringDisposalAlwaysFinish), RequestsSubmittedDuringDisposalAlwaysFinish),
         (nameof(CancellationRacingWithDisposalDoesNotLoseRequests), CancellationRacingWithDisposalDoesNotLoseRequests),
         (nameof(LargeBodyIsDeliveredIntact), LargeBodyIsDeliveredIntact),
+        (nameof(HeadKeepsContentLengthWithoutReadingABody), HeadKeepsContentLengthWithoutReadingABody),
         (nameof(SmallResponseBufferDoesNotStallBody), SmallResponseBufferDoesNotStallBody),
         (nameof(DisposingResponseDuringReadKeepsBuffersConsistent), DisposingResponseDuringReadKeepsBuffersConsistent),
         (nameof(DisposingClientDuringReadKeepsBuffersConsistent), DisposingClientDuringReadKeepsBuffersConsistent),
@@ -49,6 +52,8 @@ internal static class Program
         (nameof(LongLivedTokenDoesNotRetainResponse), LongLivedTokenDoesNotRetainResponse),
         (nameof(ThrowingUploadStreamFailsRequest), ThrowingUploadStreamFailsRequest),
         (nameof(SslOptionsKeepNativeCaStore), SslOptionsKeepNativeCaStore),
+        (nameof(HttpVersionSettingsChangeTheRequestLine), HttpVersionSettingsChangeTheRequestLine),
+        (nameof(Http2FallsBackOnlyWhenHttp11IsEnabled), Http2FallsBackOnlyWhenHttp11IsEnabled),
         (nameof(BodyBufferIsSizedIndependentlyOfHeaderLimit), BodyBufferIsSizedIndependentlyOfHeaderLimit),
         (nameof(ChunkedTrailersDoNotAbortTransfer), ChunkedTrailersDoNotAbortTransfer),
         (nameof(HeaderLineIsCountedOnce), HeaderLineIsCountedOnce),
@@ -235,6 +240,23 @@ internal static class Program
         CheckPattern(body.Result, 0, Length);
     }
 
+    /// <summary>
+    /// Checks that a HEAD response can report a representation length while sending no body.
+    /// </summary>
+    private static void HeadKeepsContentLengthWithoutReadingABody()
+    {
+        using var server = LoopbackServer.Scripted((stream, request, stop) =>
+            WriteAsync(stream, stop, "HTTP/1.1 200 OK\r\nContent-Length: 12345\r\nConnection: close\r\n\r\n"));
+        using var client = new HttpClient(new CurlHttpMessageHandler()) { Timeout = TimeSpan.FromMilliseconds(TimeoutMs) };
+        using var request = new HttpRequestMessage(HttpMethod.Head, server.Url);
+
+        using var response = client.SendAsync(request).GetAwaiter().GetResult();
+        Check(response.StatusCode == HttpStatusCode.OK, "HEAD must return the response status.");
+        Check(response.Content.Headers.ContentLength == 12345, "HEAD must retain the advertised representation length.");
+        using var body = response.Content.ReadAsStreamAsync().GetAwaiter().GetResult();
+        Check(body.ReadByte() == -1, "The HEAD response stream must be empty.");
+    }
+
     static void SmallResponseBufferDoesNotStallBody()
     {
         // A single libcurl write larger than the high-water mark must not pause a transfer whose buffer is empty, or no
@@ -406,6 +428,56 @@ internal static class Program
         Check(withRevocation == CurlSslOption.NativeCa, $"Unexpected SSL options {withRevocation}.");
     }
 
+    /// <summary>
+    /// Checks the outgoing request line as the same handler changes policy with a reusable connection in its pool.
+    /// </summary>
+    private static void HttpVersionSettingsChangeTheRequestLine()
+    {
+        using var server = LoopbackServer.Scripted((stream, request, stop) =>
+            WriteAsync(stream, stop, $"{request.Version} 200 OK\r\nContent-Length: 8\r\nConnection: keep-alive\r\n\r\n{request.Version}"),
+            keepAlive: true);
+        using var handler = new CurlHttpMessageHandler
+        {
+            EnabledHttpVersions = CurlHttpVersions.Http10 | CurlHttpVersions.Http11,
+            PreferredHttpVersion = CurlHttpVersions.Http11,
+        };
+        using var client = new HttpClient(handler) { Timeout = TimeSpan.FromMilliseconds(TimeoutMs) };
+
+        Check(client.GetStringAsync(server.Url).GetAwaiter().GetResult() == "HTTP/1.1", "The server must receive HTTP/1.1.");
+        handler.PreferredHttpVersion = CurlHttpVersions.Http10;
+        handler.EnabledHttpVersions = CurlHttpVersions.Http10;
+        Check(client.GetStringAsync(server.Url).GetAwaiter().GetResult() == "HTTP/1.0", "The server must receive HTTP/1.0 after the policy changes.");
+    }
+
+    /// <summary>
+    /// Checks both sides of a protocol downgrade against a server that always responds using HTTP/1.1.
+    /// </summary>
+    private static void Http2FallsBackOnlyWhenHttp11IsEnabled()
+    {
+        using var server = LoopbackServer.Scripted((stream, request, stop) =>
+            WriteAsync(stream, stop, "HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: keep-alive\r\n\r\nOK"),
+            keepAlive: true);
+        using var handler = new CurlHttpMessageHandler
+        {
+            EnabledHttpVersions = CurlHttpVersions.Http11 | CurlHttpVersions.Http2,
+            PreferredHttpVersion = CurlHttpVersions.Http2,
+        };
+        using var client = new HttpClient(handler) { Timeout = TimeSpan.FromMilliseconds(TimeoutMs) };
+
+        using var response = client.GetAsync(server.Url).GetAwaiter().GetResult();
+        Check(response.IsSuccessStatusCode && response.Version == HttpVersion.Version11, "The HTTP/1.1 response must be accepted as a fallback.");
+        handler.EnabledHttpVersions = CurlHttpVersions.Http2;
+        try
+        {
+            using var unexpected = client.GetAsync(server.Url).GetAwaiter().GetResult();
+        }
+        catch (HttpRequestException)
+        {
+            return;
+        }
+        throw new InvalidOperationException("An HTTP/2-only request must fail against this HTTP/1.1 server.");
+    }
+
     static void BodyBufferIsSizedIndependentlyOfHeaderLimit()
     {
         const int BufferSize = 1024 * 1024;
@@ -463,9 +535,9 @@ internal static class Program
     static void HeaderLimitResetsAfterRedirect()
     {
         // Each response is within the limit; together they are not.
-        using var server = LoopbackServer.Scripted((stream, target, stop) =>
+        using var server = LoopbackServer.Scripted((stream, request, stop) =>
         {
-            if (target == "/final")
+            if (request.Target == "/final")
             {
                 return WriteAsync(stream, stop, OkResponse());
             }
@@ -637,17 +709,21 @@ internal static class Program
     }
 
     /// <summary>
-    /// Minimal HTTP/1.1 loopback server; each accepted connection serves one response and then closes.
+    /// Minimal HTTP loopback server that can optionally serve multiple responses on one connection.
     /// </summary>
     sealed class LoopbackServer : IDisposable
     {
         readonly TcpListener _listener = new(IPAddress.Loopback, 0);
         readonly CancellationTokenSource _stop = new();
-        readonly Func<NetworkStream, string, CancellationToken, Task> _respond;
+        readonly Func<NetworkStream, (string Target, string Version), CancellationToken, Task> _respond;
 
-        LoopbackServer(Func<NetworkStream, string, CancellationToken, Task> respond)
+        /// <summary>Whether to accept more requests on the connection after each response.</summary>
+        private readonly bool _keepAlive;
+
+        LoopbackServer(Func<NetworkStream, (string Target, string Version), CancellationToken, Task> respond, bool keepAlive = false)
         {
             _respond = respond;
+            _keepAlive = keepAlive;
             _listener.Start();
             _ = AcceptLoopAsync();
         }
@@ -707,11 +783,14 @@ internal static class Program
         }
 
         /// <summary>
-        /// Answers every request with <paramref name="respond"/>, which receives the request target.
+        /// Answers each request using its request line.
         /// </summary>
-        public static LoopbackServer Scripted(Func<NetworkStream, string, CancellationToken, Task> respond)
+        /// <param name="respond">Writes the response given the request target and version.</param>
+        /// <param name="keepAlive">Whether to keep the connection open after responding.</param>
+        /// <returns>The listening loopback server.</returns>
+        public static LoopbackServer Scripted(Func<NetworkStream, (string Target, string Version), CancellationToken, Task> respond, bool keepAlive = false)
         {
-            return new LoopbackServer(respond);
+            return new LoopbackServer(respond, keepAlive);
         }
 
         public void Dispose()
@@ -744,8 +823,15 @@ internal static class Program
                 try
                 {
                     var stream = connection.GetStream();
-                    var target = await ReadRequestAsync(stream, _stop.Token).ConfigureAwait(false);
-                    await _respond(stream, target, _stop.Token).ConfigureAwait(false);
+                    do
+                    {
+                        var request = await ReadRequestAsync(stream, _stop.Token).ConfigureAwait(false);
+                        if (request is null)
+                        {
+                            return;
+                        }
+                        await _respond(stream, request.Value, _stop.Token).ConfigureAwait(false);
+                    } while (_keepAlive);
                 }
                 catch (Exception)
                 {
@@ -755,9 +841,12 @@ internal static class Program
         }
 
         /// <summary>
-        /// Reads one request, including its body, and returns its request target (for example "/final").
+        /// Reads one request, including its body.
         /// </summary>
-        static async Task<string> ReadRequestAsync(NetworkStream stream, CancellationToken stop)
+        /// <param name="stream">The accepted client connection.</param>
+        /// <param name="stop">Cancels the read on server shutdown.</param>
+        /// <returns>The target and version from the request line, or null when the connection closes.</returns>
+        static async Task<(string Target, string Version)?> ReadRequestAsync(NetworkStream stream, CancellationToken stop)
         {
             var head = new List<byte>();
             var buffer = new byte[1];
@@ -765,13 +854,16 @@ internal static class Program
             {
                 if (await stream.ReadAsync(buffer, stop).ConfigureAwait(false) == 0)
                 {
-                    return string.Empty;
+                    return null;
                 }
                 head.Add(buffer[0]);
             }
             var text = Encoding.ASCII.GetString(head.ToArray());
             var requestLine = text.Substring(0, text.IndexOf("\r\n", StringComparison.Ordinal)).Split(' ');
-            var target = requestLine.Length > 1 ? requestLine[1] : string.Empty;
+            if (requestLine.Length != 3)
+            {
+                return null;
+            }
             var lengthLine = text.Split("\r\n").FirstOrDefault(l => l.StartsWith("Content-Length:", StringComparison.OrdinalIgnoreCase));
             if (lengthLine is not null)
             {
@@ -782,12 +874,12 @@ internal static class Program
                     var read = await stream.ReadAsync(body.AsMemory(0, (int)Math.Min(body.Length, remaining)), stop).ConfigureAwait(false);
                     if (read == 0)
                     {
-                        return target;
+                        return null;
                     }
                     remaining -= read;
                 }
             }
-            return target;
+            return (requestLine[1], requestLine[2]);
         }
     }
 }

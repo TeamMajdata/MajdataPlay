@@ -109,7 +109,7 @@ namespace MajdataPlay.Tests.Game.Notes.PlayMode
         [UnityTest]
         public IEnumerator Start_AppliesTouchScale()
         {
-            _rig.Settings.Display.TouchScale = 2f;
+            _rig.UserSettings.Display.TouchScale = 2f;
             var border = Object.Instantiate(_rig.TouchBorderTemplate, _rig.Objects.Create("Parent").transform).GetComponent<TouchBorder>();
             border.AreaPosition = SensorArea.A2;
             yield return null;

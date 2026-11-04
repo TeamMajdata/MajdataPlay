@@ -26,7 +26,7 @@ namespace MajdataPlay.IO
 
         public DaoLedOutput()
         {
-            var options = MajEnv.Settings.IO.OutputDevice.Led;
+            var options = MajEnv.SystemSettings.IO.OutputDevice.Led;
             _throttler = options.Throttler;
             _brightness = Mathf.Clamp01(options.Brightness);
             _refreshTicks = (long)(Math.Max(0, options.RefreshRateMs) * (double)Stopwatch.Frequency / 1000);

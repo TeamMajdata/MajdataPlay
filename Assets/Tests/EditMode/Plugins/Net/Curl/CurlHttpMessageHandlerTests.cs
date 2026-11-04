@@ -14,6 +14,7 @@ using Cysharp.Threading.Tasks;
 using MajdataPlay.Net.Curl;
 using MajdataPlay.Net.Curl.Core;
 using MajdataPlay.Net.Curl.Core.PInvoke;
+using MajdataPlay.Net.Curl.Diagnostics;
 using NUnit.Framework;
 using UnityEngine.TestTools;
 
@@ -40,6 +41,26 @@ namespace MajdataPlay.Tests.Plugins.Net.Curl
             var send = client.SendAsync(request, option, token);
             await NetAsyncAssert.CompletesWithin(send, TimeoutMs, "The request");
             return await send;
+        }
+
+        /// <summary>
+        /// Asserts that an exception reports a libcurl timeout the way HttpClient reports its own: a cancellation whose
+        /// token was not cancelled, with a <see cref="TimeoutException"/> wrapping the curl error, whose message names the
+        /// limit that expired.
+        /// </summary>
+        /// <param name="exception">The exception the request or body read failed with.</param>
+        /// <param name="detailPattern">A regular expression for libcurl's error-buffer description of the expired limit.</param>
+        private static void AssertCurlTimeout(TaskCanceledException exception, string detailPattern)
+        {
+            const string Prefix = "Curl Error 28 (OperationTimedOut): ";
+            Assert.That(exception.CancellationToken.IsCancellationRequested, Is.False);
+            Assert.That(exception.InnerException, Is.InstanceOf<TimeoutException>());
+            Assert.That(exception.InnerException!.InnerException, Is.InstanceOf<CurlException>());
+            var curl = (CurlException)exception.InnerException.InnerException!;
+            Assert.That(curl.ErrorCode, Is.EqualTo(CurlCode.OperationTimedOut));
+            Assert.That(exception.Message, Is.EqualTo(curl.Message));
+            Assert.That(curl.Message, Does.StartWith(Prefix));
+            Assert.That(curl.Message.Substring(Prefix.Length), Does.Match(detailPattern));
         }
 
         /// <summary>Gets the libcurl features bitmask.</summary>
@@ -74,6 +95,7 @@ namespace MajdataPlay.Tests.Plugins.Net.Curl
 
             Assert.That(response, Is.InstanceOf<CurlResponse>());
             Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.OK));
+            Assert.That(response.Version, Is.EqualTo(HttpVersion.Version11));
             Assert.That(body, Is.EqualTo("hello"));
             Assert.That(response.Headers.GetValues("X-Test").Single(), Is.EqualTo("one"));
             Assert.That(response.Content.Headers.ContentType!.MediaType, Is.EqualTo("text/plain"));
@@ -83,6 +105,61 @@ namespace MajdataPlay.Tests.Plugins.Net.Curl
             Assert.That(received!.Method, Is.EqualTo("GET"));
             Assert.That(received.Target, Is.EqualTo("/path?q=1"));
             Assert.That(received.GetHeader("X-Request"), Is.EqualTo("abc"));
+        });
+
+        /// <summary>Checks that the response reports the HTTP version of the server's status line.</summary>
+        /// <returns>The test coroutine.</returns>
+        [UnityTest]
+        public IEnumerator Get_ReportsHttp10Version() => UniTask.ToCoroutine(async () =>
+        {
+            using var server = new LoopbackHttpServer((request, stream, token) =>
+                LoopbackHttpServer.WriteAsync(stream, "HTTP/1.0 200 OK\r\nContent-Length: 2\r\n\r\nok"));
+            using var client = new HttpClient(new CurlHttpMessageHandler());
+
+            using var response = await SendAsync(client, new HttpRequestMessage(HttpMethod.Get, server.Url));
+
+            Assert.That(response.Version, Is.EqualTo(HttpVersion.Version10));
+            Assert.That(await response.Content.ReadAsStringAsync(), Is.EqualTo("ok"));
+        });
+
+        /// <summary>Checks that each request uses the HTTP/1.x version currently preferred by its handler.</summary>
+        /// <returns>The test coroutine.</returns>
+        [UnityTest]
+        public IEnumerator HttpVersions_ApplyChangedPreferenceToNextRequest() => UniTask.ToCoroutine(async () =>
+        {
+            using var server = new LoopbackHttpServer((request, stream, token) =>
+                LoopbackHttpServer.WriteAsync(stream, $"{request.Protocol} 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"));
+            using var handler = new CurlHttpMessageHandler
+            {
+                EnabledHttpVersions = CurlHttpVersions.Http10 | CurlHttpVersions.Http11,
+                PreferredHttpVersion = CurlHttpVersions.Http10
+            };
+            using var client = new HttpClient(handler);
+
+            using var first = await SendAsync(client, new HttpRequestMessage(HttpMethod.Get, server.Url));
+            handler.PreferredHttpVersion = CurlHttpVersions.Http11;
+            using var second = await SendAsync(client, new HttpRequestMessage(HttpMethod.Get, server.Url));
+
+            Assert.That(server.Requests.Select(request => request.Protocol), Is.EqualTo(new[] { "HTTP/1.0", "HTTP/1.1" }));
+        });
+
+        /// <summary>Checks that preferring HTTP/2 still permits a successful exchange with an HTTP/1.1-only peer.</summary>
+        /// <returns>The test coroutine.</returns>
+        [UnityTest]
+        public IEnumerator HttpVersions_AllowHttp11WithHttp2Preferred() => UniTask.ToCoroutine(async () =>
+        {
+            using var server = LoopbackHttpServer.Respond(200, "ok");
+            using var client = new HttpClient(new CurlHttpMessageHandler
+            {
+                EnabledHttpVersions = CurlHttpVersions.Http11 | CurlHttpVersions.Http2,
+                PreferredHttpVersion = CurlHttpVersions.Http2
+            });
+
+            using var response = await SendAsync(client, new HttpRequestMessage(HttpMethod.Get, server.Url));
+
+            Assert.That(server.Requests.Single().Protocol, Is.EqualTo("HTTP/1.1"));
+            Assert.That(response.Version, Is.EqualTo(HttpVersion.Version11));
+            Assert.That(await response.Content.ReadAsStringAsync(), Is.EqualTo("ok"));
         });
 
         /// <summary>Checks that an error status is returned as a response rather than an exception.</summary>
@@ -98,6 +175,60 @@ namespace MajdataPlay.Tests.Plugins.Net.Curl
             Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.NotFound));
             Assert.That(response.IsSuccessStatusCode, Is.False);
             Assert.That(await response.Content.ReadAsStringAsync(), Is.EqualTo("missing"));
+        });
+
+        /// <summary>Checks that HEAD preserves the GET representation length without waiting for its body.</summary>
+        /// <returns>The test coroutine.</returns>
+        [UnityTest]
+        public IEnumerator Head_ReturnsRepresentationHeadersWithoutBody() => UniTask.ToCoroutine(async () =>
+        {
+            using var server = new LoopbackHttpServer((request, stream, token) =>
+            {
+                const string headers = "HTTP/1.1 200 OK\r\nContent-Length: 5\r\nContent-Type: text/plain\r\nConnection: close\r\n\r\n";
+                var hasBody = request.Method == "GET" && request.Target == "/";
+                return LoopbackHttpServer.WriteAsync(stream, hasBody ? headers + "hello" : headers);
+            });
+            using var client = new HttpClient(new CurlHttpMessageHandler());
+            using var headRequest = new HttpRequestMessage(HttpMethod.Head, server.Url);
+
+            using var head = await SendAsync(client, headRequest, HttpCompletionOption.ResponseHeadersRead);
+
+            Assert.That(server.Requests.Single().Method, Is.EqualTo("HEAD"));
+            Assert.That(head.StatusCode, Is.EqualTo(HttpStatusCode.OK));
+            Assert.That(head.Content.Headers.ContentLength, Is.EqualTo(5));
+            Assert.That(head.Content.Headers.ContentType!.MediaType, Is.EqualTo("text/plain"));
+            Assert.That(await head.Content.ReadAsByteArrayAsync(), Is.Empty);
+
+            using var emptyHeadRequest = new HttpRequestMessage(HttpMethod.Head, server.Url) { Content = new ByteArrayContent(Array.Empty<byte>()) };
+            using var emptyHead = await SendAsync(client, emptyHeadRequest, HttpCompletionOption.ResponseHeadersRead);
+            Assert.That(await emptyHead.Content.ReadAsByteArrayAsync(), Is.Empty);
+
+            using var getRequest = new HttpRequestMessage(HttpMethod.Get, server.Url);
+            using var get = await SendAsync(client, getRequest);
+            Assert.That(await get.Content.ReadAsStringAsync(), Is.EqualTo("hello"));
+
+            using var truncatedGet = new HttpRequestMessage(HttpMethod.Get, server.Url + "truncated");
+            var exception = await NetAsyncAssert.ThrowsAsync<HttpRequestException>(() => SendAsync(client, truncatedGet));
+            Assert.That(exception.InnerException, Is.InstanceOf<CurlException>());
+            Assert.That(((CurlException)exception.InnerException!).ErrorCode, Is.EqualTo(CurlCode.PartialFile));
+        });
+
+        /// <summary>Checks that a HEAD request with nonempty or unknown-length content fails before data reaches the server.</summary>
+        /// <returns>The test coroutine.</returns>
+        [UnityTest]
+        public IEnumerator Head_RejectsNonemptyOrUnknownLengthContentBeforeSending() => UniTask.ToCoroutine(async () =>
+        {
+            using var server = LoopbackHttpServer.Respond(200, string.Empty);
+            using var client = new HttpClient(new CurlHttpMessageHandler());
+            using var known = new HttpRequestMessage(HttpMethod.Head, server.Url) { Content = new ByteArrayContent(new byte[] { 1 }) };
+            using var body = new UnseekableStream(new byte[] { 1 });
+            using var unknown = new HttpRequestMessage(HttpMethod.Head, server.Url) { Content = new StreamContent(body) };
+
+            await NetAsyncAssert.ThrowsAsync<NotSupportedException>(() => SendAsync(client, known));
+            await NetAsyncAssert.ThrowsAsync<NotSupportedException>(() => SendAsync(client, unknown));
+
+            Assert.That(body.Position, Is.Zero);
+            Assert.That(server.RequestCount, Is.Zero);
         });
 
         /// <summary>Checks that an empty body publishes the response when the transfer completes.</summary>
@@ -240,6 +371,212 @@ namespace MajdataPlay.Tests.Plugins.Net.Curl
 
             Assert.That(curl.ErrorCode, Is.EqualTo(CurlCode.CouldNotConnect));
             Assert.That(curl.Message, Does.Contain("OS Error"));
+        });
+
+        /// <summary>Checks that the transfer timeout fails a request whose server never answers.</summary>
+        /// <returns>The test coroutine.</returns>
+        [UnityTest]
+        public IEnumerator Timeout_WhileWaitingForHeadersFailsRequest() => UniTask.ToCoroutine(async () =>
+        {
+            using var server = new LoopbackHttpServer((request, stream, token) => Task.Delay(Timeout.Infinite, token));
+            using var client = new HttpClient(new CurlHttpMessageHandler { Timeout = TimeSpan.FromMilliseconds(500) });
+
+            var exception = await NetAsyncAssert.ThrowsAsync<TaskCanceledException>(
+                () => SendAsync(client, new HttpRequestMessage(HttpMethod.Get, server.Url)));
+
+            AssertCurlTimeout(exception, @"^Operation timed out after \d+ milliseconds");
+        });
+
+        /// <summary>
+        /// Checks that a timeout while HttpClient buffers the body surfaces from SendAsync as the same timeout, so the
+        /// usual "cancelled although my token was not" check recognises it.
+        /// </summary>
+        /// <returns>The test coroutine.</returns>
+        [UnityTest]
+        public IEnumerator Timeout_WhileBufferingContentFailsSend() => UniTask.ToCoroutine(async () =>
+        {
+            using var server = new LoopbackHttpServer(async (request, stream, token) =>
+            {
+                await LoopbackHttpServer.WriteAsync(stream, "HTTP/1.1 200 OK\r\nContent-Length: 100000\r\n\r\npartial");
+                await stream.FlushAsync(token);
+                await Task.Delay(Timeout.Infinite, token);
+            });
+            using var client = new HttpClient(new CurlHttpMessageHandler { Timeout = TimeSpan.FromSeconds(1) });
+            using var cancellation = new CancellationTokenSource();
+
+            var exception = await NetAsyncAssert.ThrowsAsync<TaskCanceledException>(
+                () => SendAsync(client, new HttpRequestMessage(HttpMethod.Get, server.Url), token: cancellation.Token));
+
+            Assert.That(cancellation.IsCancellationRequested, Is.False);
+            AssertCurlTimeout(exception, @"^Operation timed out after \d+ milliseconds");
+        });
+
+        /// <summary>Checks that the transfer timeout keeps running after the headers and fails a stalled body read.</summary>
+        /// <returns>The test coroutine.</returns>
+        [UnityTest]
+        public IEnumerator Timeout_CoversBodyRead() => UniTask.ToCoroutine(async () =>
+        {
+            using var server = new LoopbackHttpServer(async (request, stream, token) =>
+            {
+                await LoopbackHttpServer.WriteAsync(stream, "HTTP/1.1 200 OK\r\nContent-Length: 100000\r\n\r\npartial");
+                await stream.FlushAsync(token);
+                await Task.Delay(Timeout.Infinite, token);
+            });
+            using var client = new HttpClient(new CurlHttpMessageHandler { Timeout = TimeSpan.FromSeconds(1) });
+            using var response = await SendAsync(client, new HttpRequestMessage(HttpMethod.Get, server.Url),
+                HttpCompletionOption.ResponseHeadersRead);
+            var body = await response.Content.ReadAsStreamAsync();
+
+            var read = Task.Run(() => body.CopyTo(Stream.Null));
+            var exception = await NetAsyncAssert.ThrowsAsync<TaskCanceledException>(async () =>
+            {
+                await NetAsyncAssert.CompletesWithin(read.ContinueWith(_ => { }), TimeoutMs, "Reading the body");
+                await read;
+            });
+
+            AssertCurlTimeout(exception, @"^Operation timed out after \d+ milliseconds");
+        });
+
+        /// <summary>Checks that the connect timeout fails a request whose server accepts TCP but never answers the TLS handshake.</summary>
+        /// <returns>The test coroutine.</returns>
+        [UnityTest]
+        public IEnumerator ConnectTimeout_StalledHandshakeFailsRequest() => UniTask.ToCoroutine(async () =>
+        {
+            // The kernel completes the TCP handshake from the backlog, so the TLS ClientHello simply goes unanswered.
+            var listener = new TcpListener(IPAddress.Loopback, 0);
+            listener.Start();
+            try
+            {
+                var port = ((IPEndPoint)listener.LocalEndpoint).Port;
+                using var client = new HttpClient(new CurlHttpMessageHandler { ConnectTimeout = TimeSpan.FromMilliseconds(500) });
+
+                var exception = await NetAsyncAssert.ThrowsAsync<TaskCanceledException>(
+                    () => SendAsync(client, new HttpRequestMessage(HttpMethod.Get, $"https://127.0.0.1:{port}/")));
+
+                AssertCurlTimeout(exception, "(?i)(connection timed out after|connection timeout)");
+            }
+            finally
+            {
+                listener.Stop();
+            }
+        });
+
+        /// <summary>
+        /// Checks that the low-speed timeout fails a body read once the server stops sending. libcurl averages the speed
+        /// over about five seconds, so the failure arrives roughly six to seven seconds after the headers.
+        /// </summary>
+        /// <returns>The test coroutine.</returns>
+        [UnityTest]
+        public IEnumerator LowSpeedTimeout_StalledBodyFailsRead() => UniTask.ToCoroutine(async () =>
+        {
+            using var server = new LoopbackHttpServer(async (request, stream, token) =>
+            {
+                await LoopbackHttpServer.WriteAsync(stream, "HTTP/1.1 200 OK\r\nContent-Length: 100000\r\n\r\npartial");
+                await stream.FlushAsync(token);
+                await Task.Delay(Timeout.Infinite, token);
+            });
+            using var client = new HttpClient(new CurlHttpMessageHandler { LowSpeedTimeout = TimeSpan.FromSeconds(1) });
+            using var response = await SendAsync(client, new HttpRequestMessage(HttpMethod.Get, server.Url),
+                HttpCompletionOption.ResponseHeadersRead);
+            var body = await response.Content.ReadAsStreamAsync();
+
+            var read = Task.Run(() => body.CopyTo(Stream.Null));
+            var exception = await NetAsyncAssert.ThrowsAsync<TaskCanceledException>(async () =>
+            {
+                await NetAsyncAssert.CompletesWithin(read.ContinueWith(_ => { }), TimeoutMs, "Reading the body");
+                await read;
+            });
+
+            AssertCurlTimeout(exception, @"^Operation too slow\. Less than 1 bytes/sec transferred the last 1 seconds$");
+        });
+
+        /// <summary>Writes headers after a delay, then a body at a steady rate of 48 KiB/s in 4.8 KiB pieces.</summary>
+        /// <param name="stream">The connection stream.</param>
+        /// <param name="headerDelayMs">How long to wait before the headers.</param>
+        /// <param name="token">The server's cancellation token.</param>
+        /// <returns>A task completing once 240 KiB of body have been written.</returns>
+        private static async Task WriteSteadyBodyAsync(Stream stream, int headerDelayMs, CancellationToken token)
+        {
+            const int PieceLength = 4915;
+            const int PieceCount = 50;
+            await Task.Delay(headerDelayMs, token);
+            await LoopbackHttpServer.WriteAsync(stream, $"HTTP/1.1 200 OK\r\nContent-Length: {PieceLength * PieceCount}\r\n\r\n");
+            var piece = new byte[PieceLength];
+            for (var i = 0; i < PieceCount; i++)
+            {
+                await stream.WriteAsync(piece, 0, piece.Length, token);
+                await stream.FlushAsync(token);
+                await Task.Delay(100, token);
+            }
+        }
+
+        /// <summary>Checks that a body arriving steadily faster than the low-speed limit completes.</summary>
+        /// <returns>The test coroutine.</returns>
+        [UnityTest]
+        public IEnumerator LowSpeedTimeout_SteadyBodyAboveLimitCompletes() => UniTask.ToCoroutine(async () =>
+        {
+            using var server = new LoopbackHttpServer((request, stream, token) => WriteSteadyBodyAsync(stream, 0, token));
+            using var client = new HttpClient(new CurlHttpMessageHandler
+            {
+                LowSpeedTimeout = TimeSpan.FromSeconds(4),
+                LowSpeedLimit = 32 * 1024
+            });
+
+            using var response = await SendAsync(client, new HttpRequestMessage(HttpMethod.Get, server.Url));
+
+            Assert.That((await response.Content.ReadAsByteArrayAsync()).Length, Is.EqualTo(4915 * 50));
+        });
+
+        /// <summary>
+        /// Checks that the wait for the response counts towards the low-speed timeout: libcurl averages the speed over up
+        /// to five seconds from the start of the transfer, so 2.3 s without a byte keep the average below the limit even
+        /// after the same steady body starts arriving faster than it, and the transfer is aborted 4 s after it started.
+        /// </summary>
+        /// <returns>The test coroutine.</returns>
+        [UnityTest]
+        public IEnumerator LowSpeedTimeout_CountsWaitForResponse() => UniTask.ToCoroutine(async () =>
+        {
+            using var server = new LoopbackHttpServer((request, stream, token) => WriteSteadyBodyAsync(stream, 2300, token));
+            using var client = new HttpClient(new CurlHttpMessageHandler
+            {
+                ConnectTimeout = TimeSpan.FromSeconds(2),
+                LowSpeedTimeout = TimeSpan.FromSeconds(4),
+                LowSpeedLimit = 32 * 1024
+            });
+            var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+
+            var exception = await NetAsyncAssert.ThrowsAsync<TaskCanceledException>(
+                () => SendAsync(client, new HttpRequestMessage(HttpMethod.Get, server.Url)));
+
+            AssertCurlTimeout(exception, @"^Operation too slow\. Less than 32768 bytes/sec transferred the last 4 seconds$");
+            Assert.That(stopwatch.Elapsed, Is.LessThan(TimeSpan.FromSeconds(5)), "The steady body would need about 7.3 s in total.");
+        });
+
+        /// <summary>Checks that time spent paused on a full body buffer does not count towards the low-speed timeout.</summary>
+        /// <returns>The test coroutine.</returns>
+        [UnityTest]
+        public IEnumerator LowSpeedTimeout_IgnoresPausedTransfer() => UniTask.ToCoroutine(async () =>
+        {
+            var payload = Enumerable.Range(0, 512 * 1024).Select(x => (byte)(x % 251)).ToArray();
+            using var server = new LoopbackHttpServer((request, stream, token) => LoopbackHttpServer.WriteResponseAsync(stream, 200, payload));
+            using var client = new HttpClient(new CurlHttpMessageHandler
+            {
+                ResponseBodyBufferSize = 4096,
+                LowSpeedTimeout = TimeSpan.FromSeconds(1)
+            });
+
+            using var response = await SendAsync(client, new HttpRequestMessage(HttpMethod.Get, server.Url), HttpCompletionOption.ResponseHeadersRead);
+            await Task.Delay(TimeSpan.FromSeconds(3));
+            var read = Task.Run(async () =>
+            {
+                using var body = await response.Content.ReadAsStreamAsync();
+                using var copy = new MemoryStream();
+                body.CopyTo(copy);
+                return copy.ToArray();
+            });
+            await NetAsyncAssert.CompletesWithin(read, TimeoutMs, "Reading the body");
+
+            Assert.That(read.Result, Is.EqualTo(payload));
         });
 
         /// <summary>Checks that cancelling while waiting for headers cancels the request.</summary>
@@ -466,6 +803,32 @@ namespace MajdataPlay.Tests.Plugins.Net.Curl
             Assert.That(await response.Content.ReadAsStringAsync(), Is.EqualTo("proxied"));
             Assert.That(received!.Target, Is.EqualTo("http://target.invalid/resource"));
             Assert.That(received.GetHeader("Proxy-Authorization"), Is.EqualTo("Basic " + Convert.ToBase64String(Encoding.ASCII.GetBytes("proxy:secret"))));
+        });
+
+        /// <summary>Checks that an HTTP/1.1 proxy cannot forward an HTTP/2-only request as an HTTP/1.1 GET.</summary>
+        /// <returns>The test coroutine.</returns>
+        [UnityTest]
+        public IEnumerator Proxy_Http2OnlyRequestsRequireTunnel() => UniTask.ToCoroutine(async () =>
+        {
+            if (((CurlFeatures)Features() & CurlFeatures.Http2) == 0)
+            {
+                Assert.Ignore("The loaded libcurl lacks HTTP/2 support.");
+            }
+
+            using var proxy = LoopbackHttpServer.Respond(403, "tunnel refused");
+            using var client = new HttpClient(new CurlHttpMessageHandler
+            {
+                EnabledHttpVersions = CurlHttpVersions.Http2,
+                UseProxy = true,
+                Proxy = new WebProxy(proxy.Url)
+            });
+
+            await NetAsyncAssert.ThrowsAsync<HttpRequestException>(
+                () => SendAsync(client, new HttpRequestMessage(HttpMethod.Get, "http://target.invalid/resource")));
+
+            var received = proxy.Requests.Single();
+            Assert.That(received.Method, Is.EqualTo("CONNECT"));
+            Assert.That(received.Target, Is.EqualTo("target.invalid:80"));
         });
 
         /// <summary>Checks that a proxy which bypasses local addresses lets loopback requests go directly.</summary>

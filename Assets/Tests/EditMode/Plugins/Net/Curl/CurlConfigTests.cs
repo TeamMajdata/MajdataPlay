@@ -3,8 +3,10 @@ using System;
 using System.IO;
 using System.Net;
 using System.Security.Authentication;
+using System.Threading;
 using MajdataPlay.Net.Curl;
 using MajdataPlay.Net.Curl.Core.PInvoke;
+using MajdataPlay.Net.Curl.Diagnostics;
 using MajdataPlay.Net.Curl.Utils;
 using NUnit.Framework;
 using UnityEngine;
@@ -31,6 +33,8 @@ namespace MajdataPlay.Tests.Plugins.Net.Curl
             using var handler = new CurlHttpMessageHandler();
 
             Assert.That(handler.SslProtocols, Is.EqualTo(SslProtocols.Tls12 | SslProtocols.Tls13));
+            Assert.That(handler.EnabledHttpVersions, Is.EqualTo(CurlHttpVersions.All));
+            Assert.That(handler.PreferredHttpVersion, Is.EqualTo(CurlHttpVersions.None));
             Assert.That(handler.Proxy, Is.Null);
             Assert.That(handler.PreAuthenticate, Is.False);
             Assert.That(handler.MaxResponseHeadersLength, Is.EqualTo(64 * 1024));
@@ -46,6 +50,13 @@ namespace MajdataPlay.Tests.Plugins.Net.Curl
             Assert.That(handler.AllowAutoRedirect, Is.True);
             Assert.That(handler.UseDefaultCredentials, Is.False);
             Assert.That(handler.UseProxy, Is.False);
+            Assert.That(handler.Timeout, Is.EqualTo(Timeout.InfiniteTimeSpan));
+            Assert.That(handler.ConnectTimeout, Is.EqualTo(Timeout.InfiniteTimeSpan));
+            Assert.That(handler.LowSpeedTimeout, Is.EqualTo(Timeout.InfiniteTimeSpan));
+            Assert.That(handler.LowSpeedLimit, Is.EqualTo(1));
+            Assert.That(handler.MaxCachedConnections, Is.Zero);
+            Assert.That(handler.PooledConnectionIdleTimeout, Is.EqualTo(TimeSpan.FromSeconds(118)));
+            Assert.That(handler.PooledConnectionLifetime, Is.EqualTo(Timeout.InfiniteTimeSpan));
         }
 
         /// <summary>Checks that the per-request snapshot copies every handler setting.</summary>
@@ -59,6 +70,8 @@ namespace MajdataPlay.Tests.Plugins.Net.Curl
             using var handler = new CurlHttpMessageHandler
             {
                 SslProtocols = SslProtocols.Tls12,
+                EnabledHttpVersions = CurlHttpVersions.Http11 | CurlHttpVersions.Http2,
+                PreferredHttpVersion = CurlHttpVersions.Http11,
                 Proxy = proxy,
                 PreAuthenticate = true,
                 MaxResponseHeadersLength = 1,
@@ -73,12 +86,21 @@ namespace MajdataPlay.Tests.Plugins.Net.Curl
                 AutomaticDecompression = DecompressionMethods.GZip,
                 AllowAutoRedirect = false,
                 UseDefaultCredentials = true,
-                UseProxy = true
+                UseProxy = true,
+                Timeout = TimeSpan.FromSeconds(6),
+                ConnectTimeout = TimeSpan.FromSeconds(7),
+                LowSpeedTimeout = TimeSpan.FromSeconds(8),
+                LowSpeedLimit = 9,
+                MaxCachedConnections = 10,
+                PooledConnectionIdleTimeout = TimeSpan.FromSeconds(11),
+                PooledConnectionLifetime = TimeSpan.FromSeconds(12)
             };
 
             var config = PrivateMember.Invoke<CurlHttpConfig>(handler, "CopyCurrentConfig");
 
             Assert.That(config.SslProtocols, Is.EqualTo(SslProtocols.Tls12));
+            Assert.That(config.EnabledHttpVersions, Is.EqualTo(CurlHttpVersions.Http11 | CurlHttpVersions.Http2));
+            Assert.That(config.PreferredHttpVersion, Is.EqualTo(CurlHttpVersions.Http11));
             Assert.That(config.Proxy, Is.SameAs(proxy));
             Assert.That(config.PreAuthenticate, Is.True);
             Assert.That(config.MaxResponseHeadersLength, Is.EqualTo(1));
@@ -94,6 +116,138 @@ namespace MajdataPlay.Tests.Plugins.Net.Curl
             Assert.That(config.AllowAutoRedirect, Is.False);
             Assert.That(config.UseDefaultCredentials, Is.True);
             Assert.That(config.UseProxy, Is.True);
+            Assert.That(config.Timeout, Is.EqualTo(TimeSpan.FromSeconds(6)));
+            Assert.That(config.ConnectTimeout, Is.EqualTo(TimeSpan.FromSeconds(7)));
+            Assert.That(config.LowSpeedTimeout, Is.EqualTo(TimeSpan.FromSeconds(8)));
+            Assert.That(config.LowSpeedLimit, Is.EqualTo(9));
+            Assert.That(config.MaxCachedConnections, Is.EqualTo(10));
+            Assert.That(config.PooledConnectionIdleTimeout, Is.EqualTo(TimeSpan.FromSeconds(11)));
+            Assert.That(config.PooledConnectionLifetime, Is.EqualTo(TimeSpan.FromSeconds(12)));
+        }
+
+        /// <summary>Checks that enabled versions form a nonempty set and a preference names at most one known version.</summary>
+        [Test]
+        public void Handler_HttpVersionsRejectInvalidFlags()
+        {
+            using var handler = new CurlHttpMessageHandler();
+            var unknownVersion = (CurlHttpVersions)16;
+
+            Assert.Throws<ArgumentOutOfRangeException>(() => handler.EnabledHttpVersions = CurlHttpVersions.None);
+            Assert.Throws<ArgumentOutOfRangeException>(() => handler.EnabledHttpVersions = CurlHttpVersions.Http11 | unknownVersion);
+            Assert.Throws<ArgumentOutOfRangeException>(() => handler.PreferredHttpVersion = unknownVersion);
+            Assert.Throws<ArgumentOutOfRangeException>(() => handler.PreferredHttpVersion = CurlHttpVersions.Http11 | CurlHttpVersions.Http2);
+        }
+
+        /// <summary>Checks the CURLOPT_HTTP_VERSION value for a handler snapshot and native library capabilities.</summary>
+        /// <param name="enabled">The enabled versions.</param>
+        /// <param name="preferred">The preferred version.</param>
+        /// <param name="features">The HTTP features available in the native build.</param>
+        /// <param name="isHttps">Whether the request uses TLS.</param>
+        /// <param name="expected">The expected native option value.</param>
+        [TestCase(CurlHttpVersions.All, CurlHttpVersions.None, CurlFeatures.Http2 | CurlFeatures.Http3, true, 0)]
+        [TestCase(CurlHttpVersions.Http10, CurlHttpVersions.None, CurlFeatures.None, false, 1)]
+        [TestCase(CurlHttpVersions.Http11, CurlHttpVersions.None, CurlFeatures.None, false, 2)]
+        [TestCase(CurlHttpVersions.Http11 | CurlHttpVersions.Http2, CurlHttpVersions.Http2, CurlFeatures.Http2, true, 3)]
+        [TestCase(CurlHttpVersions.Http2, CurlHttpVersions.None, CurlFeatures.Http2, true, 5)]
+        [TestCase(CurlHttpVersions.All, CurlHttpVersions.Http3, CurlFeatures.Http2 | CurlFeatures.Http3, true, 30)]
+        [TestCase(CurlHttpVersions.Http11 | CurlHttpVersions.Http3, CurlHttpVersions.Http3, CurlFeatures.Http2 | CurlFeatures.Http3, true, 31)]
+        [TestCase(CurlHttpVersions.Http3, CurlHttpVersions.None, CurlFeatures.Http3, true, 31)]
+        [TestCase(CurlHttpVersions.All, CurlHttpVersions.Http3, CurlFeatures.Http2, true, 3)]
+        [TestCase(CurlHttpVersions.Http11 | CurlHttpVersions.Http3, CurlHttpVersions.Http3, CurlFeatures.None, true, 2)]
+        [TestCase(CurlHttpVersions.Http11 | CurlHttpVersions.Http3, CurlHttpVersions.Http3, CurlFeatures.Http3, false, 2)]
+        public void GetHttpVersionMode_RespectsEnabledVersionsAndBuildFeatures(CurlHttpVersions enabled,
+            CurlHttpVersions preferred, CurlFeatures features, bool isHttps, int expected)
+        {
+            var config = new CurlHttpConfig { EnabledHttpVersions = enabled, PreferredHttpVersion = preferred };
+
+            Assert.That((long)config.GetHttpVersionMode(features, isHttps), Is.EqualTo(expected));
+        }
+
+        /// <summary>Checks that a zero-initialized configuration leaves protocol negotiation to libcurl.</summary>
+        [Test]
+        public void GetHttpVersionMode_DefaultConfigKeepsNativeDefault()
+        {
+            Assert.That(default(CurlHttpConfig).GetHttpVersionMode(CurlFeatures.None, false), Is.EqualTo(CurlHttpVersionMode.Default));
+        }
+
+        /// <summary>Checks that invalid preferences and requests with no usable protocol fail before negotiation.</summary>
+        [Test]
+        public void GetHttpVersionMode_RejectsInvalidPreferenceAndUnavailableProtocol()
+        {
+            var invalidPreference = new CurlHttpConfig { EnabledHttpVersions = CurlHttpVersions.Http11, PreferredHttpVersion = CurlHttpVersions.Http2 };
+            var requiresHttp3 = new CurlHttpConfig { EnabledHttpVersions = CurlHttpVersions.Http3 };
+
+            Assert.Throws<InvalidOperationException>(() => invalidPreference.GetHttpVersionMode(CurlFeatures.Http2, true));
+            Assert.Throws<NotSupportedException>(() => requiresHttp3.GetHttpVersionMode(CurlFeatures.Http2, true));
+            Assert.Throws<NotSupportedException>(() => requiresHttp3.GetHttpVersionMode(CurlFeatures.Http3, false));
+        }
+
+        /// <summary>Checks that the timeout settings accept positive values and the infinite sentinel only.</summary>
+        [Test]
+        public void Handler_TimeoutSettingsRejectNonPositiveValues()
+        {
+            using var handler = new CurlHttpMessageHandler();
+
+            Assert.Throws<ArgumentOutOfRangeException>(() => handler.Timeout = TimeSpan.Zero);
+            Assert.Throws<ArgumentOutOfRangeException>(() => handler.ConnectTimeout = TimeSpan.FromSeconds(-1));
+            Assert.Throws<ArgumentOutOfRangeException>(() => handler.LowSpeedTimeout = TimeSpan.FromTicks(-1));
+            Assert.Throws<ArgumentOutOfRangeException>(() => handler.LowSpeedLimit = 0);
+            Assert.DoesNotThrow(() => handler.Timeout = TimeSpan.FromTicks(1));
+            Assert.DoesNotThrow(() => handler.ConnectTimeout = Timeout.InfiniteTimeSpan);
+            Assert.DoesNotThrow(() => handler.LowSpeedTimeout = TimeSpan.MaxValue);
+            Assert.DoesNotThrow(() => handler.LowSpeedLimit = int.MaxValue);
+            Assert.That(handler.Timeout, Is.EqualTo(TimeSpan.FromTicks(1)));
+        }
+
+        /// <summary>Checks that the connection pool settings reject values libcurl cannot express as intended.</summary>
+        [Test]
+        public void Handler_PoolSettingsRejectInvalidValues()
+        {
+            using var handler = new CurlHttpMessageHandler();
+
+            Assert.Throws<ArgumentOutOfRangeException>(() => handler.MaxConnectionsPerServer = 0);
+            Assert.Throws<ArgumentOutOfRangeException>(() => handler.MaxCachedConnections = -1);
+            Assert.Throws<ArgumentOutOfRangeException>(() => handler.PooledConnectionIdleTimeout = TimeSpan.Zero);
+            Assert.Throws<ArgumentOutOfRangeException>(() => handler.PooledConnectionLifetime = TimeSpan.FromSeconds(-1));
+            Assert.DoesNotThrow(() => handler.MaxConnectionsPerServer = 1);
+            Assert.DoesNotThrow(() => handler.MaxCachedConnections = 0);
+            Assert.DoesNotThrow(() => handler.PooledConnectionIdleTimeout = Timeout.InfiniteTimeSpan);
+            Assert.DoesNotThrow(() => handler.PooledConnectionLifetime = TimeSpan.FromMilliseconds(1));
+            Assert.That(handler.MaxConnectionsPerServer, Is.EqualTo(1));
+        }
+
+        /// <summary>Checks that an idle timeout maps "no limit" to the largest value, because 0 would forbid reuse.</summary>
+        [Test]
+        public void ToCurlMaxAgeSeconds_MapsNoLimitToMaximum()
+        {
+            Assert.That(CurlHttpConfig.ToCurlMaxAgeSeconds(Timeout.InfiniteTimeSpan), Is.EqualTo(int.MaxValue));
+            Assert.That(CurlHttpConfig.ToCurlMaxAgeSeconds(TimeSpan.FromSeconds(118)), Is.EqualTo(118));
+            Assert.That(CurlHttpConfig.ToCurlMaxAgeSeconds(TimeSpan.FromMilliseconds(1500)), Is.EqualTo(2));
+            Assert.That(CurlHttpConfig.ToCurlMaxAgeSeconds(TimeSpan.MaxValue), Is.EqualTo(int.MaxValue));
+        }
+
+        /// <summary>Checks that millisecond timeouts round up, cap at the 32-bit C long range and map "no limit" to 0.</summary>
+        [Test]
+        public void ToCurlMilliseconds_RoundsUpAndCaps()
+        {
+            Assert.That(CurlHttpConfig.ToCurlMilliseconds(Timeout.InfiniteTimeSpan), Is.EqualTo(0));
+            Assert.That(CurlHttpConfig.ToCurlMilliseconds(TimeSpan.Zero), Is.EqualTo(0));
+            Assert.That(CurlHttpConfig.ToCurlMilliseconds(TimeSpan.FromTicks(1)), Is.EqualTo(1));
+            Assert.That(CurlHttpConfig.ToCurlMilliseconds(TimeSpan.FromMilliseconds(1500)), Is.EqualTo(1500));
+            Assert.That(CurlHttpConfig.ToCurlMilliseconds(TimeSpan.FromDays(30)), Is.EqualTo(int.MaxValue));
+            Assert.That(CurlHttpConfig.ToCurlMilliseconds(TimeSpan.MaxValue), Is.EqualTo(int.MaxValue));
+        }
+
+        /// <summary>Checks that low-speed timeouts round up to whole seconds and map "disabled" to 0.</summary>
+        [Test]
+        public void ToCurlSeconds_RoundsUpAndCaps()
+        {
+            Assert.That(CurlHttpConfig.ToCurlSeconds(Timeout.InfiniteTimeSpan), Is.EqualTo(0));
+            Assert.That(CurlHttpConfig.ToCurlSeconds(TimeSpan.Zero), Is.EqualTo(0));
+            Assert.That(CurlHttpConfig.ToCurlSeconds(TimeSpan.FromMilliseconds(1)), Is.EqualTo(1));
+            Assert.That(CurlHttpConfig.ToCurlSeconds(TimeSpan.FromMilliseconds(1500)), Is.EqualTo(2));
+            Assert.That(CurlHttpConfig.ToCurlSeconds(TimeSpan.FromSeconds(30)), Is.EqualTo(30));
+            Assert.That(CurlHttpConfig.ToCurlSeconds(TimeSpan.MaxValue), Is.EqualTo(int.MaxValue));
         }
 
         /// <summary>Checks that TLS 1.3 wins over TLS 1.2 and other protocol sets use libcurl's default.</summary>
@@ -159,6 +313,19 @@ namespace MajdataPlay.Tests.Plugins.Net.Curl
             Assert.That(thrown.ErrorCode, Is.EqualTo(CurlCode.UrlMalformed));
         }
 
+        /// <summary>Checks that libcurl's error-buffer detail replaces the generic description, which stays the fallback.</summary>
+        [Test]
+        public void GetEasyException_PrefersErrorBufferDetail()
+        {
+            var detailed = CurlUtility.GetEasyException(IntPtr.Zero, CurlCode.OperationTimedOut, "Operation too slow.")!;
+            var empty = CurlUtility.GetEasyException(IntPtr.Zero, CurlCode.OperationTimedOut, string.Empty)!;
+            var generic = CurlUtility.GetEasyException(IntPtr.Zero, CurlCode.OperationTimedOut)!;
+
+            Assert.That(detailed.Message, Is.EqualTo("Curl Error 28 (OperationTimedOut): Operation too slow."));
+            Assert.That(empty.Message, Is.EqualTo(generic.Message));
+            Assert.That(generic.Message, Does.Not.Contain("Operation too slow"));
+        }
+
         /// <summary>Checks that an easy handle without an OS error adds no OS details.</summary>
         [Test]
         public void GetEasyException_ReadsOsErrorFromHandle()
@@ -169,6 +336,26 @@ namespace MajdataPlay.Tests.Plugins.Net.Curl
 
             Assert.That(exception.ErrorCode, Is.EqualTo(CurlCode.CouldNotResolveHost));
             Assert.That(exception.Message, Does.Not.Contain("OS Error"));
+        }
+
+        /// <summary>
+        /// Checks that a timed-out transfer is reported as an uncancelled <see cref="System.Threading.Tasks.TaskCanceledException"/>
+        /// wrapping a <see cref="TimeoutException"/>, and every other curl error is reported unchanged.
+        /// </summary>
+        [Test]
+        public void GetTransferException_MapsOnlyTimeouts()
+        {
+            var refused = new CurlException(CurlCode.CouldNotConnect, "refused");
+            var timedOut = new CurlException(CurlCode.OperationTimedOut, "timed out");
+
+            var mapped = CurlUtility.GetTransferException(timedOut);
+
+            Assert.That(CurlUtility.GetTransferException(refused), Is.SameAs(refused));
+            Assert.That(mapped, Is.InstanceOf<System.Threading.Tasks.TaskCanceledException>());
+            Assert.That(((OperationCanceledException)mapped).CancellationToken.IsCancellationRequested, Is.False);
+            Assert.That(mapped.Message, Is.EqualTo("timed out"));
+            Assert.That(mapped.InnerException, Is.InstanceOf<TimeoutException>());
+            Assert.That(mapped.InnerException!.InnerException, Is.SameAs(timedOut));
         }
 
         /// <summary>Checks that the message constructors keep the error code, message and inner exception.</summary>

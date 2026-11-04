@@ -12,8 +12,11 @@ namespace MajdataPlay.Tests.Game.GamePlay.PlayMode.Support
     /// </summary>
     internal sealed class GamePlaySettingsScope : IDisposable
     {
-        /// <summary>The settings that were installed before the scope was created.</summary>
-        private readonly GameSetting _previousSettings;
+        /// <summary>The user settings that were installed before the scope was created.</summary>
+        private readonly UserSetting _previousUserSettings;
+
+        /// <summary>The system settings that were installed before the scope was created.</summary>
+        private readonly SystemSetting _previousSystemSettings;
 
         /// <summary>The runtime configuration that was installed before the scope was created.</summary>
         private readonly RuntimeConfig? _previousRuntimeConfig;
@@ -30,21 +33,27 @@ namespace MajdataPlay.Tests.Game.GamePlay.PlayMode.Support
         /// <summary>Captures the current static state and installs default settings and runtime configuration.</summary>
         public GamePlaySettingsScope()
         {
-            _previousSettings = MajEnv.Settings;
+            _previousUserSettings = MajEnv.UserSettings;
+            _previousSystemSettings = MajEnv.SystemSettings;
             _previousRuntimeConfig = MajEnv.RuntimeConfig;
             _previousMode = MajEnv.Mode;
             _previousDeltaTime = MajTimeline.UnscaledDeltaTime;
             _previousTimeScale = MajTimeline.TimeScale;
-            Settings = new GameSetting();
+            UserSettings = new UserSetting();
+            SystemSettings = new SystemSetting();
             RuntimeConfig = new RuntimeConfig();
-            PrivateMember.SetStaticProperty(typeof(MajEnv), nameof(MajEnv.Settings), Settings);
+            PrivateMember.SetStaticProperty(typeof(MajEnv), nameof(MajEnv.UserSettings), UserSettings);
+            PrivateMember.SetStaticProperty(typeof(MajEnv), nameof(MajEnv.SystemSettings), SystemSettings);
             PrivateMember.SetStaticProperty(typeof(MajEnv), nameof(MajEnv.RuntimeConfig), RuntimeConfig);
             MajEnv.Mode = RunningMode.Play;
             MajTimeline.TimeScale = 1f;
         }
 
-        /// <summary>Gets the settings installed as <see cref="MajEnv.Settings"/> for the scope.</summary>
-        public GameSetting Settings { get; }
+        /// <summary>Gets the user settings installed as <see cref="MajEnv.UserSettings"/> for the scope.</summary>
+        public UserSetting UserSettings { get; }
+
+        /// <summary>Gets the system settings installed as <see cref="MajEnv.SystemSettings"/> for the scope.</summary>
+        public SystemSetting SystemSettings { get; }
 
         /// <summary>Gets the runtime configuration installed as <see cref="MajEnv.RuntimeConfig"/> for the scope.</summary>
         public RuntimeConfig RuntimeConfig { get; }
@@ -59,7 +68,8 @@ namespace MajdataPlay.Tests.Game.GamePlay.PlayMode.Support
         /// <summary>Restores the captured settings, runtime configuration, running mode and timeline values.</summary>
         public void Dispose()
         {
-            PrivateMember.SetStaticProperty(typeof(MajEnv), nameof(MajEnv.Settings), _previousSettings);
+            PrivateMember.SetStaticProperty(typeof(MajEnv), nameof(MajEnv.UserSettings), _previousUserSettings);
+            PrivateMember.SetStaticProperty(typeof(MajEnv), nameof(MajEnv.SystemSettings), _previousSystemSettings);
             PrivateMember.SetStaticProperty(typeof(MajEnv), nameof(MajEnv.RuntimeConfig), _previousRuntimeConfig);
             PrivateMember.SetStaticProperty(typeof(MajTimeline), nameof(MajTimeline.UnscaledDeltaTime), _previousDeltaTime);
             MajEnv.Mode = _previousMode;

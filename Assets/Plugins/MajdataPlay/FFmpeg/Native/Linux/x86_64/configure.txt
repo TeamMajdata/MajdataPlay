@@ -1,9 +1,9 @@
-install prefix            /home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005/install/linux-x64
-source path               ./src
+install prefix            /var/tmp/majdata-ffmpeg-linux-qsv-20261031/install/linux-x64
+source path               /var/tmp/majdata-ffmpeg-linux-qsv-20261031/source
 C compiler                cc
 C library                 glibc
 ARCH                      x86 (generic)
-version string suffix     MajdataPlay-AMF-RC-v1-c0604b924b6a_MajdataPlay-X265-Params-v1-5b457330f94a
+version string suffix     MajdataPlay-AMF-RC-v1-c0604b924b6a_MajdataPlay-X265-Params-v1-5b457330f94a_MajdataPlay-QSV-RC-v1-140460417695
 big-endian                no
 runtime cpu detection     yes
 standalone assembly       yes
@@ -48,8 +48,9 @@ libaom                  libopus                 libx265
 libdav1d                libvpx
 
 External libraries providing hardware acceleration:
-cuda                    libdrm                  vaapi
-ffnvcodec               nvenc                   vulkan
+cuda                    libmfx                  vaapi
+ffnvcodec               libvpl                  vulkan
+libdrm                  nvenc
 
 Libraries:
 avcodec                 avformat                swscale
@@ -221,22 +222,23 @@ escape130               pcm_u32le               zero12v
 evrc                    pcm_u8
 
 Enabled encoders:
-aac                     pcm_bluray              pcm_s32le
-av1_nvenc               pcm_dvd                 pcm_s32le_planar
-av1_vaapi               pcm_f32be               pcm_s64be
-h263                    pcm_f32le               pcm_s64le
-h264_nvenc              pcm_f64be               pcm_s8
-h264_vaapi              pcm_f64le               pcm_s8_planar
-hevc_nvenc              pcm_mulaw               pcm_u16be
-hevc_vaapi              pcm_s16be               pcm_u16le
-libaom_av1              pcm_s16be_planar        pcm_u24be
-libmp3lame              pcm_s16le               pcm_u24le
-libopus                 pcm_s16le_planar        pcm_u32be
-libvpx_vp9              pcm_s24be               pcm_u32le
-libx264                 pcm_s24daud             pcm_u8
-libx265                 pcm_s24le               pcm_vidc
-mpeg4                   pcm_s24le_planar        vp9_vaapi
-pcm_alaw                pcm_s32be
+aac                     mpeg4                   pcm_s32be
+av1_nvenc               pcm_alaw                pcm_s32le
+av1_qsv                 pcm_bluray              pcm_s32le_planar
+av1_vaapi               pcm_dvd                 pcm_s64be
+h263                    pcm_f32be               pcm_s64le
+h264_nvenc              pcm_f32le               pcm_s8
+h264_qsv                pcm_f64be               pcm_s8_planar
+h264_vaapi              pcm_f64le               pcm_u16be
+hevc_nvenc              pcm_mulaw               pcm_u16le
+hevc_qsv                pcm_s16be               pcm_u24be
+hevc_vaapi              pcm_s16be_planar        pcm_u24le
+libaom_av1              pcm_s16le               pcm_u32be
+libmp3lame              pcm_s16le_planar        pcm_u32le
+libopus                 pcm_s24be               pcm_u8
+libvpx_vp9              pcm_s24daud             pcm_vidc
+libx264                 pcm_s24le               vp9_qsv
+libx265                 pcm_s24le_planar        vp9_vaapi
 
 Enabled hwaccels:
 av1_vaapi               hevc_vaapi              vc1_vaapi
@@ -438,14 +440,3 @@ Enabled outdevs:
 License: GPL version 3 or later
 
 WARNING: spirv-headers not found, swscale SPIR-V backend unavailable
-checkasm_config_generated.h is unchanged
-checkasm_header_config_generated.h is unchanged
-checkasm_config_generated.asm is unchanged
-libavutil/avconfig.h is unchanged
-libavfilter/filter_list.c is unchanged
-libavcodec/parser_list.c is unchanged
-libavcodec/bsf_list.c is unchanged
-libavformat/demuxer_list.c is unchanged
-libavdevice/indev_list.c is unchanged
-libavdevice/outdev_list.c is unchanged
-libavformat/protocol_list.c is unchanged

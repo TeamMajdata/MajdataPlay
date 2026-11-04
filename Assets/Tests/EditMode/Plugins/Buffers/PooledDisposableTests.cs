@@ -161,7 +161,8 @@ namespace MajdataPlay.Tests.Plugins.Buffers
         [Test]
         public void Dispose_BeyondCapacity_KeepsPoolBounded()
         {
-            var tokens = new PooledDisposable[257];
+            var capacity = PrivateMember.GetStaticField<int>(typeof(PooledDisposable), "PoolCapacity");
+            var tokens = new PooledDisposable[capacity + 1];
             var subsequent = new PooledDisposable[tokens.Length];
             try
             {
@@ -174,7 +175,7 @@ namespace MajdataPlay.Tests.Plugins.Buffers
                     token.Dispose();
                 }
 
-                Assert.That(PrivateMember.GetStaticField<int>(typeof(PooledDisposable), "s_poolCount"), Is.EqualTo(256));
+                Assert.That(PrivateMember.GetStaticField<int>(typeof(PooledDisposable), "s_poolCount"), Is.EqualTo(capacity));
 
                 var activeStates = new HashSet<object>();
                 for (var i = 0; i < subsequent.Length; i++)

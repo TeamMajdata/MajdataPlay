@@ -30,6 +30,15 @@ namespace MajdataPlay.Tests.Game.Scenes.PlayMode.SettingScene
             _settings = new SettingFixture();
         }
 
+        /// <summary>
+        /// The rows a rendering preset shows: the preset, the two frame pacing options, the compatibility switch and the seven
+        /// runtime statistics and screen layout options.
+        /// </summary>
+        private const int RenderingPresetRows = 11;
+
+        /// <summary>The rows compatibility mode shows, which are the rows of a preset without the preset selector.</summary>
+        private const int RenderingCompatibilityRows = RenderingPresetRows - 1;
+
         /// <summary>Gets the number of options the menu currently displays.</summary>
         /// <param name="menu">The menu.</param>
         /// <returns>The displayed option count.</returns>
@@ -216,7 +225,7 @@ namespace MajdataPlay.Tests.Game.Scenes.PlayMode.SettingScene
             var rendering = new RenderingOptions();
             var menu = CreateMenu(_manager, rendering);
 
-            Assert.That(DisplayedCount(menu), Is.EqualTo(4));
+            Assert.That(DisplayedCount(menu), Is.EqualTo(RenderingPresetRows));
             menu.ToHead();
             Assert.That(NameOf(VisibleOption(menu, 0)!), Is.EqualTo("MAJSETTING_PROPERTY_RenderQuality"));
         }
@@ -233,7 +242,7 @@ namespace MajdataPlay.Tests.Game.Scenes.PlayMode.SettingScene
             rendering.CompatibilityMode = true;
             yield return null;
 
-            Assert.That(DisplayedCount(menu), Is.EqualTo(3));
+            Assert.That(DisplayedCount(menu), Is.EqualTo(RenderingCompatibilityRows));
             Assert.That(MajEnv.RuntimeConfig!.Setting.SelectedOption, Is.EqualTo(nameof(RenderingOptions.CompatibilityMode)));
             Assert.That(NameOf(VisibleOption(menu, menu.SelectedIndex)!), Is.EqualTo("MAJSETTING_PROPERTY_CompatibilityMode"));
         }
@@ -262,7 +271,7 @@ namespace MajdataPlay.Tests.Game.Scenes.PlayMode.SettingScene
 
             rendering.CompatibilityMode = true;
             yield return null;
-            Assert.That(DisplayedCount(menu), Is.EqualTo(3));
+            Assert.That(DisplayedCount(menu), Is.EqualTo(RenderingCompatibilityRows));
 
             rendering.CompatibilityMode = false;
             yield return null;
@@ -282,7 +291,7 @@ namespace MajdataPlay.Tests.Game.Scenes.PlayMode.SettingScene
             rendering.RenderQuality = RenderingQualityOption.Beautiful;
             menu.ToHead();
 
-            Assert.That(DisplayedCount(menu), Is.EqualTo(4));
+            Assert.That(DisplayedCount(menu), Is.EqualTo(RenderingPresetRows));
             Assert.That(NameOf(VisibleOption(menu, 0)!), Is.EqualTo("MAJSETTING_PROPERTY_RenderQuality"));
         }
 

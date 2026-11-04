@@ -63,11 +63,11 @@ namespace MajdataPlay.IO
 
                 DontDestroyOnLoad(this);
 
-                var backend = MajEnv.Settings.Audio.Backend;
+                var backend = MajEnv.SystemSettings.Audio.Backend;
                 var isBassBackend = backend is (SoundBackendOption.BassSimple or SoundBackendOption.Asio or SoundBackendOption.Wasapi);
 #if UNITY_STANDALONE_WIN
-                var wasapiOptions = MajEnv.Settings.Audio.Wasapi;
-                var asioOptions = MajEnv.Settings.Audio.Asio;
+                var wasapiOptions = MajEnv.SystemSettings.Audio.Wasapi;
+                var asioOptions = MajEnv.SystemSettings.Audio.Asio;
 
                 var deviceIndex = asioOptions.DeviceIndex;
 
@@ -85,14 +85,14 @@ namespace MajdataPlay.IO
 #else
                         backend = SoundBackendOption.Unity;
 #endif
-                        MajEnv.Settings.Audio.Backend = backend;
+                        MajEnv.SystemSettings.Audio.Backend = backend;
                         MajDebug.LogDebug($"[Audio]Fallback to {backend}");
                         break;
                 }
 #endif
                 if (isBassBackend)
                 {
-                    var bassAudioOptions = MajEnv.Settings.Audio.Bass;
+                    var bassAudioOptions = MajEnv.SystemSettings.Audio.Bass;
                     bassAudioOptions.UpdatePeriodMs = bassAudioOptions.UpdatePeriodMs.Clamp(5, 100);
                     bassAudioOptions.BufferLengthMs = bassAudioOptions.BufferLengthMs.Clamp(bassAudioOptions.UpdatePeriodMs + 1, 5000);
                     bassAudioOptions.DeviceUpdatePeriodMs = bassAudioOptions.DeviceUpdatePeriodMs.Clamp(1, int.MaxValue);
@@ -384,9 +384,9 @@ namespace MajdataPlay.IO
         private void OnDestroy()
         {
             GameManager.OnAppPause -= OnAppPause;
-            if (MajEnv.Settings.Audio.Backend == SoundBackendOption.Wasapi
-                || MajEnv.Settings.Audio.Backend == SoundBackendOption.Asio ||
-                MajEnv.Settings.Audio.Backend == SoundBackendOption.BassSimple)
+            if (MajEnv.SystemSettings.Audio.Backend == SoundBackendOption.Wasapi
+                || MajEnv.SystemSettings.Audio.Backend == SoundBackendOption.Asio ||
+                MajEnv.SystemSettings.Audio.Backend == SoundBackendOption.BassSimple)
             {
                 foreach (var sample in SFXSamples)
                 {
@@ -433,7 +433,7 @@ namespace MajdataPlay.IO
         }
         public void ReadVolumeFromSettings()
         {
-            var volume = MajEnv.Settings.Audio.Volume;
+            var volume = MajEnv.UserSettings.Volume;
             foreach (var sample in SFXSamples)
             {
                 if (sample is null || sample.IsEmpty)
@@ -460,7 +460,7 @@ namespace MajdataPlay.IO
         public AudioSampleWrap LoadMusic(string path, bool normalize = true, bool speedChange = false)
         {
             MajDebug.LogInfo($"Try creating channel from file: {path}");
-            var backend = MajEnv.Settings.Audio.Backend;
+            var backend = MajEnv.SystemSettings.Audio.Backend;
             if (FileSystem.File.Open(path).Exists)
             {
                 AudioSampleWrap? sample;
@@ -492,7 +492,7 @@ namespace MajdataPlay.IO
         public AudioSampleWrap LoadMusicFromUri(Uri uri)
         {
             MajDebug.LogInfo($"Try creating channel from uri: {uri}");
-            var backend = MajEnv.Settings.Audio.Backend;
+            var backend = MajEnv.SystemSettings.Audio.Backend;
             AudioSampleWrap? sample;
             switch (backend)
             {
@@ -517,7 +517,7 @@ namespace MajdataPlay.IO
         {
             MajDebug.LogInfo($"Try creating channel from file: {path}");
             await UniTask.SwitchToThreadPool();
-            var backend = MajEnv.Settings.Audio.Backend;
+            var backend = MajEnv.SystemSettings.Audio.Backend;
             if (FileSystem.File.Open(path).Exists)
             {
                 AudioSampleWrap? sample;
@@ -559,7 +559,7 @@ namespace MajdataPlay.IO
         {
             MajDebug.LogInfo($"Try creating channel from uri: {uri}");
             await UniTask.SwitchToThreadPool();
-            var backend = MajEnv.Settings.Audio.Backend;
+            var backend = MajEnv.SystemSettings.Audio.Backend;
             AudioSampleWrap? sample;
             switch (backend)
             {
@@ -635,7 +635,7 @@ namespace MajdataPlay.IO
         public void OpenAsioPannel()
         {
 #if UNITY_STANDALONE_WIN
-            if (MajEnv.Settings.Audio.Backend == SoundBackendOption.Asio)
+            if (MajEnv.SystemSettings.Audio.Backend == SoundBackendOption.Asio)
             {
                 BassAsio.ControlPanel();
             }
@@ -653,7 +653,7 @@ namespace MajdataPlay.IO
         /// <exception cref="InvalidOperationException">The Bass output has not been initialized or cannot accept a capture DSP or latency probe.</exception>
         public IAudioRecorder CreateAudioRecorder()
         {
-            var backend = MajEnv.Settings.Audio.Backend;
+            var backend = MajEnv.SystemSettings.Audio.Backend;
             int outputChannel;
             BassOutputLatencyProbe latencyProbe;
             switch (backend)
@@ -743,7 +743,7 @@ namespace MajdataPlay.IO
 
             float[,] matrix;
 
-            var isForceMono = MajEnv.Settings.Audio.ForceMono;
+            var isForceMono = MajEnv.SystemSettings.Audio.ForceMono;
 #if UNITY_ANDROID || UNITY_IOS
             var volumeSettings = new
             {
@@ -753,7 +753,7 @@ namespace MajdataPlay.IO
                 RearVolume = 1f
             };
 #else
-            var volumeSettings = MajEnv.Settings.Audio.Channel;
+            var volumeSettings = MajEnv.SystemSettings.Audio.Channel;
 #endif
             if (isForceMono)
             {

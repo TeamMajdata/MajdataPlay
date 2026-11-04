@@ -612,7 +612,7 @@ namespace MajdataPlay.Tests.Game.Notes.PlayMode
             slide.SetSlideOK(NoteTemplates.AddSlideOK(slide.transform));
             Assert.That(slide.RunPlaySlideOK(JudgeGrade.Perfect), Is.True);
 
-            _rig.Settings.Display.SlideJudgeType = JudgeDisplayOption.MissOnly;
+            _rig.UserSettings.Judge.SlideJudgeType = JudgeDisplayOption.MissOnly;
             Assert.That(slide.RunPlaySlideOK(JudgeGrade.Perfect), Is.False);
             Assert.That(slide.RunPlaySlideOK(JudgeGrade.Miss), Is.True);
         }

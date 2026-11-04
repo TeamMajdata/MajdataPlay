@@ -19,7 +19,7 @@ namespace MajdataPlay.IO
 
         protected override string DaemonThreadName => "IO/TouchPanel Thread";
         protected override TimeSpan PollingInterval =>
-            TimeSpan.FromMilliseconds(MajEnv.Settings.IO.InputDevice.TouchPanel.PollingRateMs);
+            TimeSpan.FromMilliseconds(MajEnv.SystemSettings.IO.InputDevice.TouchPanel.PollingRateMs);
 
         public override void OnPreUpdate() => _states.OnPreUpdate();
         public void ReadTouchPanel(Span<bool> states, Span<bool> hadOn, Span<bool> hadOff) =>
@@ -88,7 +88,7 @@ namespace MajdataPlay.IO
             try
             {
                 MajDebug.LogInfo(nameof(RosenTouchPanelDevice), $"Starting to initialize the touch panel...");
-                var sensConfig = MajEnv.Settings.IO.InputDevice.TouchPanel.Sensitivities;
+                var sensConfig = MajEnv.SystemSettings.IO.InputDevice.TouchPanel.Sensitivities;
                 var index = IODetector.PlayerIndex == 1 ? 'L' : 'R';
                 var sens = (sensConfig.A, sensConfig.B, sensConfig.C, sensConfig.D, sensConfig.E);
                 MajDebug.LogInfo(nameof(RosenTouchPanelDevice), $"Sensitivities:\nA:{sens.A}\nB:{sens.B}\nC:{sens.C}\nD:{sens.D}\nE:{sens.E}");

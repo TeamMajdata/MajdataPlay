@@ -10,6 +10,8 @@ namespace MajdataPlay.Settings
     /// The step is written as a decimal string so that any numeric member type can share the attribute.
     /// When neither this attribute nor <see cref="RangeAttribute"/> is present, the number enumerator
     /// uses a default step of 1 for integers and 0.001 for floating-point types.
+    /// The steps form a grid that starts at the lower bound of <see cref="RangeAttribute"/>, or at zero without one;
+    /// the setting UI snaps a stored value that is off this grid to the nearest grid value.
     /// </remarks>
     [AttributeUsage(AttributeTargets.Property | AttributeTargets.Field, AllowMultiple = false, Inherited = false)]
     public sealed class StepAttribute : Attribute

@@ -1,16 +1,12 @@
-﻿using AOT;
+using AOT;
 using MajdataPlay.Net.Curl.Core.PInvoke;
 using MajdataPlay.UnsafeKit;
 using System;
-using System.Collections.Generic;
 using System.Linq;
 using System.Net;
 using System.Net.Http;
-using System.Net.Http.Headers;
 using System.Runtime.InteropServices;
 using System.Text;
-using System.Threading;
-using System.Threading.Tasks;
 #nullable enable
 namespace MajdataPlay.Net.Curl.Core
 {
@@ -20,22 +16,28 @@ namespace MajdataPlay.Net.Curl.Core
         public CurlHttpConfig Config { get; }
         internal CurlRequest Request { get; }
 
-        int _disposeFlag = 0;
+        private int _disposeFlag = 0;
         /// <summary>
         /// Bytes received so far in the current header block, checked against <see cref="CurlHttpConfig.MaxResponseHeadersLength"/>.
         /// </summary>
-        long _currentHeadersLength = 0;
+        private long _currentHeadersLength = 0;
 
-        readonly Action _onResume;
-        readonly Action _onDispose;
-        readonly CurlResponseStream _responseStream;
-        readonly static CurlReadOrWriteCallback _onWriteCallback; // Download
-        readonly static CurlReadOrWriteCallback _onHeaderReceivedCallback;
+        private readonly Action _onResume;
+        private readonly Action _onDispose;
+        private readonly CurlResponseStream _responseStream;
+        private static readonly CurlReadOrWriteCallback s_onWriteCallback; // Download
+        private static readonly CurlReadOrWriteCallback s_onHeaderReceivedCallback;
+        /// <summary>The shared <see cref="Version"/> of HTTP/2 responses.</summary>
+        private static readonly Version s_http20 = new Version(2, 0);
+        /// <summary>The shared <see cref="Version"/> of HTTP/3 responses.</summary>
+        private static readonly Version s_http30 = new Version(3, 0);
+        /// <summary>The <c>HTTP/</c> prefix every status line starts with.</summary>
+        private static readonly byte[] s_httpPrefix = Encoding.ASCII.GetBytes("HTTP/");
 
         static CurlResponse()
         {
-            _onWriteCallback = OnWriteCallback;
-            _onHeaderReceivedCallback = OnHeaderReceived;
+            s_onWriteCallback = OnWriteCallback;
+            s_onHeaderReceivedCallback = OnHeaderReceived;
         }
 
         /// <summary>
@@ -54,12 +56,12 @@ namespace MajdataPlay.Net.Curl.Core
             _onResume = onResume;
             _onDispose = onDispose;
             _responseStream = new CurlResponseStream(config.ResponseBodyBufferSize, _onResume, _onDispose);
-            
+
             Content = new StreamContent(_responseStream);
             RequestMessage = Request.Message;
 
-            handle.SetOption(CurlOption.WriteFunction, Marshal.GetFunctionPointerForDelegate(_onWriteCallback));
-            handle.SetOption(CurlOption.HeaderFunction, Marshal.GetFunctionPointerForDelegate(_onHeaderReceivedCallback));
+            handle.SetOption(CurlOption.WriteFunction, Marshal.GetFunctionPointerForDelegate(s_onWriteCallback));
+            handle.SetOption(CurlOption.HeaderFunction, Marshal.GetFunctionPointerForDelegate(s_onHeaderReceivedCallback));
         }
 
         internal void Complete()
@@ -77,22 +79,29 @@ namespace MajdataPlay.Net.Curl.Core
 
 
         [MonoPInvokeCallback(typeof(CurlReadOrWriteCallback))]
-        static unsafe UIntPtr OnWriteCallback(IntPtr ptr, UIntPtr size, UIntPtr nmemb, IntPtr userdata)
+        private static unsafe UIntPtr OnWriteCallback(IntPtr ptr, UIntPtr size, UIntPtr nmemb, IntPtr userdata)
         {
             if (!UnsafeHelper.TryGetInstanceFromGCHandle<CurlTask>(userdata, out var curlTask))
             {
                 return UIntPtr.Zero;
             }
-            else if(curlTask.State != CurlTaskState.HeaderRead)
+            else if (curlTask.State != CurlTaskState.HeaderRead && curlTask.TryEnterHeaderReadState())
             {
-                curlTask.TryEnterHeaderReadState();
+                // libcurl knows the connection and the time to first byte by now, so a long download shows them early.
+                curlTask.CaptureTransferInfo();
             }
             var curlRsp = curlTask.Response;
             var responseStream = curlRsp._responseStream;
             var length = (int)(size.ToUInt32() * nmemb.ToUInt32());
             var buffer = new ReadOnlySpan<byte>((void*)ptr, length);
+            var result = responseStream.WriteChunk(buffer);
+            // A paused or rejected chunk is delivered again or not at all, so only accepted bytes are recorded.
+            if (result == (UIntPtr)length)
+            {
+                curlTask.Record?.OnResponseBodyReceived(buffer);
+            }
 
-            return responseStream.WriteChunk(buffer);
+            return result;
         }
         /// <summary>
         /// libcurl header callback. Called on the multi worker thread once per header line, including status lines,
@@ -104,7 +113,7 @@ namespace MajdataPlay.Net.Curl.Core
         /// <param name="userdata">The GC handle of the owning <see cref="CurlTask"/>.</param>
         /// <returns>The line length to accept it, or 0 to abort the transfer.</returns>
         [MonoPInvokeCallback(typeof(CurlReadOrWriteCallback))]
-        static unsafe UIntPtr OnHeaderReceived(IntPtr ptr, UIntPtr size, UIntPtr nmemb, IntPtr userdata)
+        private static unsafe UIntPtr OnHeaderReceived(IntPtr ptr, UIntPtr size, UIntPtr nmemb, IntPtr userdata)
         {
             if (!UnsafeHelper.TryGetInstanceFromGCHandle<CurlTask>(userdata, out var curlTask))
             {
@@ -125,6 +134,10 @@ namespace MajdataPlay.Net.Curl.Core
                 return UIntPtr.Zero;
             }
             var line = new ReadOnlySpan<byte>((void*)ptr, length);
+            if (state == CurlTaskState.Submitted)
+            {
+                curlTask.Record?.OnResponseHeaderLine(line);
+            }
             TrimHttpHeader(ref line);
             if (line.Length == 0)
             {
@@ -142,7 +155,7 @@ namespace MajdataPlay.Net.Curl.Core
 
             return (UIntPtr)length;
         }
-        static void TrimHttpHeader(ref ReadOnlySpan<byte> line)
+        private static void TrimHttpHeader(ref ReadOnlySpan<byte> line)
         {
             while (line.Length > 0)
             {
@@ -157,7 +170,7 @@ namespace MajdataPlay.Net.Curl.Core
                 }
             }
         }
-        void ParseHttpHeader(ReadOnlySpan<byte> line)
+        private void ParseHttpHeader(ReadOnlySpan<byte> line)
         {
             if (line.Length == 0)
             {
@@ -177,6 +190,11 @@ namespace MajdataPlay.Net.Curl.Core
                 if (code > 0)
                 {
                     StatusCode = (HttpStatusCode)code;
+                    var version = ParseHttpVersion(line);
+                    if (version is not null)
+                    {
+                        Version = version;
+                    }
                     Headers.Clear();
                     Content.Headers.Clear();
                 }
@@ -237,7 +255,7 @@ namespace MajdataPlay.Net.Curl.Core
 
             return;
         }
-        static int ParseStatusCode(ReadOnlySpan<byte> line)
+        private static int ParseStatusCode(ReadOnlySpan<byte> line)
         {
             int firstSpace = -1;
             for (int i = 5; i < line.Length; i++)
@@ -273,7 +291,79 @@ namespace MajdataPlay.Net.Curl.Core
             }
             return -1;
         }
-        static string GetKeyString(ReadOnlySpan<byte> keyBytes)
+        /// <summary>
+        /// Parses the protocol version of a status line such as <c>HTTP/1.1 200 OK</c>, or the <c>HTTP/2 200</c> and
+        /// <c>HTTP/3 200</c> lines libcurl synthesizes for HTTP/2 and HTTP/3 responses.
+        /// </summary>
+        /// <param name="line">The status line, starting with <c>HTTP/</c> and without its line ending.</param>
+        /// <returns>
+        /// The version, shared for 1.0, 1.1, 2.0 and 3.0; <see langword="null"/> when the line has no valid
+        /// <c>major[.minor]</c> version followed by a space or the end of the line.
+        /// </returns>
+        internal static Version? ParseHttpVersion(ReadOnlySpan<byte> line)
+        {
+            const int VersionStart = 5;
+            if (line.Length <= VersionStart || !line.Slice(0, VersionStart).SequenceEqual(s_httpPrefix))
+            {
+                return null;
+            }
+            var index = VersionStart;
+            if (!TryParseVersionNumber(line, ref index, out var major))
+            {
+                return null;
+            }
+            var minor = 0;
+            if (index < line.Length && line[index] == '.')
+            {
+                index++;
+                if (!TryParseVersionNumber(line, ref index, out minor))
+                {
+                    return null;
+                }
+            }
+            if (index < line.Length && line[index] != ' ')
+            {
+                return null;
+            }
+
+            switch (major, minor)
+            {
+                case (1, 0):
+                    return HttpVersion.Version10;
+                case (1, 1):
+                    return HttpVersion.Version11;
+                case (2, 0):
+                    return s_http20;
+                case (3, 0):
+                    return s_http30;
+                default:
+                    return new Version(major, minor);
+            }
+        }
+        /// <summary>
+        /// Reads one to four decimal digits of a status line version.
+        /// </summary>
+        /// <param name="line">The status line.</param>
+        /// <param name="index">The position of the first digit; advanced past the digits that were read.</param>
+        /// <param name="value">The number that was read, or 0 when there was none.</param>
+        /// <returns><see langword="true"/> if one to four digits were read.</returns>
+        private static bool TryParseVersionNumber(ReadOnlySpan<byte> line, ref int index, out int value)
+        {
+            const int MaxDigits = 4;
+            var start = index;
+            value = 0;
+            while (index < line.Length && line[index] >= '0' && line[index] <= '9')
+            {
+                if (index - start == MaxDigits)
+                {
+                    return false;
+                }
+                value = (value * 10) + (line[index] - '0');
+                index++;
+            }
+            return index > start;
+        }
+        private static string GetKeyString(ReadOnlySpan<byte> keyBytes)
         {
             if (IsMatch(keyBytes, "Content-Type"))
             {
@@ -314,7 +404,7 @@ namespace MajdataPlay.Net.Curl.Core
 
             return Encoding.UTF8.GetString(keyBytes);
         }
-        static bool IsMatch(ReadOnlySpan<byte> span, string knownKey)
+        private static bool IsMatch(ReadOnlySpan<byte> span, string knownKey)
         {
             if (span.Length != knownKey.Length)
             {
@@ -343,7 +433,7 @@ namespace MajdataPlay.Net.Curl.Core
             }
             return true;
         }
-        static ReadOnlySpan<byte> TrimSpan(ReadOnlySpan<byte> span)
+        private static ReadOnlySpan<byte> TrimSpan(ReadOnlySpan<byte> span)
         {
             var start = 0;
             while (start < span.Length && span[start] == 32)

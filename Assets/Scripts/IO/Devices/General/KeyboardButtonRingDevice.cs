@@ -10,7 +10,7 @@ namespace MajdataPlay.IO
         readonly bool[] _buttonRealTimeStates = new bool[12];
         protected override string DaemonThreadName => "IO/ButtonRing Thread";
         protected override TimeSpan PollingInterval =>
-            TimeSpan.FromMilliseconds(MajEnv.Settings.IO.InputDevice.ButtonRing.PollingRateMs);
+            TimeSpan.FromMilliseconds(MajEnv.SystemSettings.IO.InputDevice.ButtonRing.PollingRateMs);
         protected override bool Connect(CancellationToken token) => true;
         protected override void Parse(ReadOnlySpan<byte> data) { }
         protected override void Update(CancellationToken token)

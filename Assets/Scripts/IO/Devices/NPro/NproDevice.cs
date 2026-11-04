@@ -61,7 +61,7 @@ namespace MajdataPlay.IO
             : base(Vid, LocalProductId, string.Empty, NproReportFramer.MaxChunkLength)
         {
             _writeLeds = writeLeds;
-            var options = MajEnv.Settings.IO.OutputDevice.Led;
+            var options = MajEnv.SystemSettings.IO.OutputDevice.Led;
             _brightness = Mathf.Clamp01(options.Brightness);
             _throttler = options.Throttler;
             _refreshTicks = Stopwatch.Frequency * Math.Max(0, options.RefreshRateMs) / 1000;

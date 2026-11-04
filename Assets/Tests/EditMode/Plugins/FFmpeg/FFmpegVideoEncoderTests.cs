@@ -1,9 +1,13 @@
 using System;
+#if UNITY_EDITOR_WIN || UNITY_STANDALONE_WIN
+using System.Collections.Generic;
+#endif
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Threading;
 using MajdataPlay.FFmpeg;
 using MajdataPlay.FFmpeg.Internal;
+using MajdataPlay.FFmpeg.Interop;
 using NUnit.Framework;
 
 #nullable enable
@@ -425,24 +429,267 @@ namespace MajdataPlay.Tests.Plugins.FFmpeg
         {
             var options = Options(VideoEncodingFormat.H264, VideoRateControlMode.CBR);
             options.PreferredEncoderType = VideoEncoderType.Hardware;
+            var path = FFmpegTestMedia.PathIn(_directory, "hardware.mp4");
             using var encoder = new FFmpegVideoEncoder(options);
-            encoder.Open(FFmpegTestMedia.PathIn(_directory, "hardware.mp4"), CancellationToken.None);
+            encoder.Open(path, CancellationToken.None);
 
             if (encoder.EncoderType == VideoEncoderType.Hardware)
             {
-                Assert.That(encoder.EncoderName, Does.EndWith("_nvenc").Or.EndWith("_amf"));
+                Assert.That(encoder.EncoderName, Does.StartWith("h264_"));
                 Assert.That(encoder.SoftwareThreadCount, Is.EqualTo(0));
             }
             else
             {
                 Assert.That(encoder.EncoderName, Is.EqualTo("libx264"));
-                Assert.That(encoder.HardwareFallbackReason, Does.Contain("h264_nvenc"));
-                Assert.That(encoder.HardwareFallbackReason, Does.Contain("MediaFoundation"));
+                Assert.That(encoder.EncoderDevice, Is.EqualTo("Software"));
+                Assert.That(encoder.HardwareFallbackReason, Is.Not.Null.And.Not.Empty);
             }
 
             encoder.Encode(FFmpegTestMedia.CreateFrame(Width, Height, 0), 0, false);
             encoder.Complete();
             Assert.That(encoder.EncodedFrames, Is.EqualTo(1));
+            Assert.That(encoder.EncoderDevice, Is.Not.Null.And.Not.Empty);
+            Assert.That(CountFrames(path, out var codec), Is.EqualTo(1));
+            Assert.That(codec, Is.EqualTo("h264"));
         }
+
+        /// <summary>Checks that software preference reports the software device and ignores GPUs.</summary>
+        [Test]
+        public void SoftwarePreference_ReportsSoftwareDevice()
+        {
+            var options = Options();
+            options.HardwareGpus = new[] { new HardwareGpu("0", "Unused GPU", HardwareGpu.NvidiaVendorId, 0x2504) };
+            using var encoder = new FFmpegVideoEncoder(options);
+            encoder.Open(FFmpegTestMedia.PathIn(_directory, "software.mkv"), CancellationToken.None);
+
+            Assert.That(encoder.EncoderType, Is.EqualTo(VideoEncoderType.Software));
+            Assert.That(encoder.EncoderDevice, Is.EqualTo("Software"));
+            Assert.That(encoder.HardwareFallbackReason, Is.Null);
+            Assert.That(encoder.HardwareFallbackRoute, Is.EqualTo(HardwareFallbackRoute.OtherGpus));
+        }
+
+#if UNITY_EDITOR_WIN || UNITY_STANDALONE_WIN
+        /// <summary>The width of hardware encoder tests, above common NVENC and AMF minimums.</summary>
+        private const int HardwareWidth = 320;
+        /// <summary>The height of hardware encoder tests.</summary>
+        private const int HardwareHeight = 240;
+        /// <summary>The PCI vendor ID of VMware virtual GPUs, a vendor without a checked hardware encoder.</summary>
+        private const int VMwareVendorId = 0x15AD;
+
+        /// <summary>Creates options for an H.264 hardware recording on a supplied GPU list.</summary>
+        /// <param name="gpus">The ordered GPUs, Unity's renderer first.</param>
+        /// <param name="route">The fallback route.</param>
+        /// <returns>Valid options.</returns>
+        private static EncoderOptions HardwareOptions(IReadOnlyList<HardwareGpu> gpus, HardwareFallbackRoute route)
+        {
+            var options = Options(VideoEncodingFormat.H264);
+            options.Width = HardwareWidth;
+            options.Height = HardwareHeight;
+            options.PreferredEncoderType = VideoEncoderType.Hardware;
+            options.HardwareFallbackRoute = route;
+            options.HardwareGpus = gpus;
+            return options;
+        }
+
+        /// <summary>Gets the first DXGI adapter with a checked hardware encoder vendor, or ignores the test.</summary>
+        /// <returns>The NVIDIA or AMD adapter, listed as another GPU.</returns>
+        private static HardwareGpu EncoderAdapter()
+        {
+            foreach (var adapter in DxgiAdapterQuery.GetAdapters(false))
+            {
+                if (adapter.VendorId == HardwareGpu.NvidiaVendorId || adapter.VendorId == HardwareGpu.AmdVendorId)
+                {
+                    return adapter.WithRole(HardwareGpuRole.Other);
+                }
+            }
+
+            Assert.Ignore("This machine has no NVIDIA or AMD DXGI adapter.");
+            return null!;
+        }
+
+        /// <summary>Gets the DXGI index of the Microsoft Basic Render Driver, on which D3D11 encoder devices cannot be created.</summary>
+        /// <returns>The adapter's FFmpeg device string.</returns>
+        /// <remarks>FFmpeg silently opens the default adapter for a nonexistent index, so a real adapter is needed to make device creation fail.</remarks>
+        private static string UnopenableAdapterDevice()
+        {
+            foreach (var adapter in DxgiAdapterQuery.GetAdapters(true))
+            {
+                if (adapter.VendorId == 0x1414 && adapter.DeviceId == 0x8C)
+                {
+                    return adapter.Device;
+                }
+            }
+
+            Assert.Ignore("DXGI does not list the Microsoft Basic Render Driver.");
+            return null!;
+        }
+
+        /// <summary>Encodes three frames, finalizes the file, and checks that it decodes.</summary>
+        /// <param name="encoder">The open encoder.</param>
+        /// <param name="path">The output file.</param>
+        private static void EncodeThreeFrames(FFmpegVideoEncoder encoder, string path)
+        {
+            for (var i = 0; i < 3; i++)
+            {
+                encoder.Encode(FFmpegTestMedia.CreateFrame(HardwareWidth, HardwareHeight, i), i, false);
+            }
+
+            encoder.Complete();
+            Assert.That(CountFrames(path, out var codec), Is.EqualTo(3));
+            Assert.That(codec, Is.EqualTo("h264"));
+        }
+
+        /// <summary>Checks that a renderer GPU without a checked encoder is followed by the encoder of another GPU.</summary>
+        [Test]
+        public void HardwarePreference_RendererWithoutEncoder_UsesOtherGpu()
+        {
+            var other = EncoderAdapter();
+            var renderer = new HardwareGpu("99", "VMware SVGA renderer", VMwareVendorId, 0x0405).WithRole(HardwareGpuRole.Renderer);
+            var path = FFmpegTestMedia.PathIn(_directory, "other-gpu.mp4");
+            using var encoder = new FFmpegVideoEncoder(HardwareOptions(new[] { renderer, other }, HardwareFallbackRoute.OtherGpus));
+            encoder.Open(path, CancellationToken.None);
+            if (encoder.EncoderType != VideoEncoderType.Hardware)
+            {
+                Assert.Ignore("No checked H.264 hardware encoder opened on " + other + ": " + encoder.HardwareFallbackReason);
+            }
+
+            Assert.That(encoder.EncoderName, Is.EqualTo(other.VendorId == HardwareGpu.NvidiaVendorId ? "h264_nvenc" : "h264_amf"));
+            Assert.That(encoder.EncoderDevice, Is.EqualTo(other.ToString()));
+            Assert.That(encoder.HardwareFallbackReason, Does.Contain(renderer + " has no checked hardware encoder"));
+            Assert.That(encoder.HardwareFallbackReason, Does.EndWith("Encoding on " + other + "."));
+            EncodeThreeFrames(encoder, path);
+        }
+
+        /// <summary>Checks that a renderer GPU whose encoder device cannot be selected is followed by another GPU of the same vendor.</summary>
+        /// <remarks>
+        /// The renderer has no LUID, so no CUDA device matches it for NVENC, and it names the Microsoft Basic Render Driver,
+        /// on which AMF cannot create its D3D11 device.
+        /// </remarks>
+        [Test]
+        public void HardwarePreference_RendererDeviceUnavailable_UsesOtherGpu()
+        {
+            var other = EncoderAdapter();
+            var renderer = new HardwareGpu(UnopenableAdapterDevice(), "Missing renderer", other.VendorId, other.DeviceId).WithRole(HardwareGpuRole.Renderer);
+            var path = FFmpegTestMedia.PathIn(_directory, "missing-renderer.mp4");
+            using var encoder = new FFmpegVideoEncoder(HardwareOptions(new[] { renderer, other }, HardwareFallbackRoute.OtherGpus));
+            encoder.Open(path, CancellationToken.None);
+            if (encoder.EncoderType != VideoEncoderType.Hardware)
+            {
+                Assert.Ignore("No checked H.264 hardware encoder opened on " + other + ": " + encoder.HardwareFallbackReason);
+            }
+
+            Assert.That(encoder.EncoderDevice, Is.EqualTo(other.ToString()));
+            Assert.That(encoder.HardwareFallbackReason, Does.Contain(" on " + renderer + ": "));
+            Assert.That(encoder.HardwareFallbackReason, Does.EndWith("Encoding on " + other + "."));
+            EncodeThreeFrames(encoder, path);
+        }
+
+        /// <summary>Checks that an NVIDIA adapter maps to a CUDA ordinal by its LUID and that an unknown LUID matches nothing.</summary>
+        [Test]
+        public void CudaDevice_MapsNvidiaAdapterByLuid()
+        {
+            var adapter = EncoderAdapter();
+            if (adapter.VendorId != HardwareGpu.NvidiaVendorId)
+            {
+                Assert.Ignore("The first encoder adapter is not an NVIDIA GPU.");
+            }
+
+            bool found;
+            int ordinal;
+            try
+            {
+                found = CudaDeviceQuery.TryGetOrdinal(adapter, out ordinal);
+            }
+            catch (NotSupportedException error)
+            {
+                Assert.Ignore("The CUDA driver is unavailable: " + error.Message);
+                return;
+            }
+
+            Assert.That(found, Is.True);
+            Assert.That(ordinal, Is.GreaterThanOrEqualTo(0));
+            Assert.That(CudaDeviceQuery.TryGetOrdinal(new HardwareGpu("0", "No LUID", HardwareGpu.NvidiaVendorId, adapter.DeviceId), out ordinal), Is.False);
+            Assert.That(ordinal, Is.EqualTo(-1));
+        }
+
+        /// <summary>Checks that the software codec route uses the same-format software encoder instead of another GPU.</summary>
+        [Test]
+        public void HardwarePreference_SoftwareCodecRoute_SkipsOtherGpus()
+        {
+            var renderer = new HardwareGpu("99", "VMware SVGA renderer", VMwareVendorId, 0x0405).WithRole(HardwareGpuRole.Renderer);
+            var path = FFmpegTestMedia.PathIn(_directory, "software-route.mp4");
+            using var encoder = new FFmpegVideoEncoder(HardwareOptions(new[] { renderer, EncoderAdapter() }, HardwareFallbackRoute.SoftwareCodec));
+            encoder.Open(path, CancellationToken.None);
+
+            Assert.That(encoder.EncoderName, Is.EqualTo("libx264"));
+            Assert.That(encoder.EncoderType, Is.EqualTo(VideoEncoderType.Software));
+            Assert.That(encoder.EncoderDevice, Is.EqualTo("Software"));
+            Assert.That(encoder.HardwareFallbackRoute, Is.EqualTo(HardwareFallbackRoute.SoftwareCodec));
+            Assert.That(encoder.HardwareFallbackReason, Does.Contain(renderer + " has no checked hardware encoder"));
+            Assert.That(encoder.HardwareFallbackReason, Does.Contain("Other GPUs were not tried because the fallback route is SoftwareCodec"));
+            Assert.That(encoder.HardwareFallbackReason, Does.Not.Contain("_nvenc").And.Not.Contain("_amf"));
+            EncodeThreeFrames(encoder, path);
+        }
+
+        /// <summary>Ignores the test unless the loaded native libraries contain the QSV encoders.</summary>
+        private static unsafe void RequireQsvBuild()
+        {
+            if (global::FFmpeg.AutoGen.ffmpeg.avcodec_find_encoder_by_name("h264_qsv") == null)
+            {
+                Assert.Ignore("The loaded FFmpeg libraries were built without QSV encoders.");
+            }
+        }
+
+        /// <summary>Checks that every native build with QSV encoders carries the reviewed rate-control check.</summary>
+        [Test]
+        public void QsvBuild_CarriesRateControlCheckMarker()
+        {
+            RequireQsvBuild();
+
+            Assert.That(global::FFmpeg.AutoGen.ffmpeg.avcodec_configuration(), Does.Contain(FFmpegVideoEncoder.CheckedQsvConfigurationMarker));
+            Assert.That(global::FFmpeg.AutoGen.ffmpeg.avcodec_configuration(), Does.Contain("--enable-libvpl"));
+        }
+
+        /// <summary>Checks that an Intel renderer is tried with QSV before another GPU, and that QSV can run or fails cleanly.</summary>
+        /// <remarks>
+        /// The Intel entry names the Microsoft Basic Render Driver, so its D3D11 child device cannot be created
+        /// on machines without an Intel GPU, and the recording continues on the machine's NVIDIA or AMD GPU.
+        /// </remarks>
+        [Test]
+        public void HardwarePreference_IntelRenderer_TriesQsvBeforeOtherGpu()
+        {
+            RequireQsvBuild();
+            var other = EncoderAdapter();
+            var renderer = new HardwareGpu(UnopenableAdapterDevice(), "Intel renderer", HardwareGpu.IntelVendorId, 0x46A6).WithRole(HardwareGpuRole.Renderer);
+            var path = FFmpegTestMedia.PathIn(_directory, "intel-renderer.mp4");
+            using var encoder = new FFmpegVideoEncoder(HardwareOptions(new[] { renderer, other }, HardwareFallbackRoute.OtherGpus));
+            encoder.Open(path, CancellationToken.None);
+            if (encoder.EncoderType != VideoEncoderType.Hardware)
+            {
+                Assert.Ignore("No checked H.264 hardware encoder opened on " + other + ": " + encoder.HardwareFallbackReason);
+            }
+
+            Assert.That(encoder.HardwareFallbackReason, Does.Contain("h264_qsv on " + renderer + ": Create D3D11 device for QSV: "));
+            Assert.That(encoder.EncoderDevice, Is.EqualTo(other.ToString()));
+            EncodeThreeFrames(encoder, path);
+        }
+
+        /// <summary>Checks that a VBR request whose maximum equals its target is rejected for QSV, which would encode it as CBR.</summary>
+        [Test]
+        public void HardwarePreference_QsvVbrWithoutHeadroom_IsRejected()
+        {
+            RequireQsvBuild();
+            var renderer = new HardwareGpu("0", "Intel renderer", HardwareGpu.IntelVendorId, 0x46A6).WithRole(HardwareGpuRole.Renderer);
+            var options = HardwareOptions(new[] { renderer }, HardwareFallbackRoute.SoftwareCodec);
+            options.RateControlMode = VideoRateControlMode.VBR;
+            options.MaximumBitRate = options.BitRate;
+            using var encoder = new FFmpegVideoEncoder(options);
+            encoder.Open(FFmpegTestMedia.PathIn(_directory, "qsv-vbr.mp4"), CancellationToken.None);
+
+            Assert.That(encoder.EncoderName, Is.EqualTo("libx264"));
+            Assert.That(encoder.HardwareFallbackReason, Does.Contain("h264_qsv on " + renderer
+                + ": QSV selects CBR when the VBR maximum bitrate equals the target."));
+        }
+#endif
     }
 }

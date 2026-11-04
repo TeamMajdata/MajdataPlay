@@ -70,11 +70,12 @@ unresolved readonly fields must produce diagnostics identifying their source.
 
 ### Setting metadata and finite values
 
-The fixtures declare production-named `GameSetting` and `ChartSetting` types and
-narrow attribute/option-enumerator types. Checks follow the current UI schema:
+The fixtures declare production-named `SettingRoot`, `UserSetting`, `SystemSetting` and
+`ChartSetting` types and narrow attribute/option-enumerator types. Checks follow the current
+UI schema:
 
-- Visible category names are based on the actual bound property; `Audio.Volume`
-  binds the `Volume` category and does not expose other `SoundOptions` properties.
+- The visible categories of the setting roots held by `SettingRoot` are the menus, named
+  after their property; the hidden `Audio` category exposes none of its `SoundOptions` properties.
 - `OptionName` and `Description` replace default name/description keys;
   `NoDescription` suppresses description keys. `MenuName` does not replace
   category names in the current setting UI.

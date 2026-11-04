@@ -354,7 +354,7 @@ namespace MajdataPlay.Scenes.Title
             _flag = false;
             MajInstances.AudioManager.StopSFX("bgm_title.mp3");
             MajInstances.AudioManager.StopSFX("MajdataPlay.wav");
-            if (MajEnv.Settings.Online.Enable)
+            if (MajEnv.SystemSettings.Network.Online.Enable)
             {
                 MajInstances.SceneSwitcher.SwitchScene("Login", false);
             }

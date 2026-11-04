@@ -76,6 +76,8 @@ namespace MajdataPlay.FFmpeg.Internal
         private VideoRateControlMode _rateControlMode;
         /// <summary>Retains the reason for selecting software after a hardware preference.</summary>
         private string? _hardwareFallbackReason;
+        /// <summary>Retains the description of the device running the initialized encoder.</summary>
+        private string? _encoderDevice;
         /// <summary>Store the latest compressed-video rate, encoded count, and byte count.</summary>
         private long _currentBitRate, _encodedFrames, _bytesWritten;
         /// <summary>Stores the active software codec worker count, or zero for hardware.</summary>
@@ -207,6 +209,17 @@ namespace MajdataPlay.FFmpeg.Internal
                 lock (_gate)
                 {
                     return _hardwareFallbackReason;
+                }
+            }
+        }
+        /// <summary>Gets the description of the GPU or other device running the encoder, or null before initialization.</summary>
+        public string? EncoderDevice
+        {
+            get
+            {
+                lock (_gate)
+                {
+                    return _encoderDevice;
                 }
             }
         }
@@ -494,6 +507,7 @@ namespace MajdataPlay.FFmpeg.Internal
                 _encoderType = encoder.EncoderType;
                 _rateControlMode = encoder.RateControlMode;
                 _hardwareFallbackReason = encoder.HardwareFallbackReason;
+                _encoderDevice = encoder.EncoderDevice;
                 _currentBitRate = encoder.CurrentBitRate;
                 _encodedFrames = encoder.EncodedFrames;
                 _bytesWritten = encoder.BytesWritten;

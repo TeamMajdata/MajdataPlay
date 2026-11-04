@@ -7,44 +7,9 @@ using NUnit.Framework;
 #nullable enable
 namespace MajdataPlay.Tests.Game.Misc.Base
 {
-    /// <summary>Covers the plain data formats shared by the game and the online service.</summary>
+    /// <summary>Covers the plain data formats of the game; the models of the online service are covered by <c>NetModelTests</c>.</summary>
     public class DataFormatTests
     {
-        /// <summary>Checks that the display name falls back to the user name when no nickname is set.</summary>
-        [Test]
-        public void UserProfileDisplayName_FallsBackToUsername()
-        {
-            var withoutNickname = new UserProfile { Username = "user", Nickname = string.Empty };
-            var withNickname = new UserProfile { Username = "user", Nickname = "nick" };
-            var nullNickname = new UserProfile { Username = "user" };
-
-            Assert.That(withoutNickname.DisplayName, Is.EqualTo("user"));
-            Assert.That(withNickname.DisplayName, Is.EqualTo("nick"));
-            Assert.That(nullNickname.DisplayName, Is.EqualTo("user"));
-        }
-
-        /// <summary>Checks that the user profile reads the camel case JSON returned by the server.</summary>
-        [Test]
-        public void UserProfile_DeserializesCamelCaseJson()
-        {
-            var profile = Serializer.Json.Deserialize<UserProfile>("{\"id\":\"1\",\"username\":\"u\",\"nickname\":\"n\",\"avatarId\":\"a\"}");
-
-            Assert.That(profile.Id, Is.EqualTo("1"));
-            Assert.That(profile.Username, Is.EqualTo("u"));
-            Assert.That(profile.Nickname, Is.EqualTo("n"));
-            Assert.That(profile.AvatarId, Is.EqualTo("a"));
-        }
-
-        /// <summary>Checks the default machine description.</summary>
-        [Test]
-        public void MachineInfo_HasDefaultName()
-        {
-            var info = new MachineInfo();
-
-            Assert.That(info.Name, Is.EqualTo("Private arcade"));
-            Assert.That(info.Description, Is.Null);
-        }
-
         /// <summary>Checks the default course settings and damage table.</summary>
         [Test]
         public void DanInfo_HasDefaultCourseRules()
@@ -99,19 +64,6 @@ namespace MajdataPlay.Tests.Game.Misc.Base
             Assert.That(analysis.Length, Is.EqualTo(TimeSpan.FromSeconds(2)));
             Assert.That(analysis.MaxBPM, Is.EqualTo(200f));
             Assert.That(analysis.MinBPM, Is.EqualTo(100f));
-        }
-
-        /// <summary>Checks that the online song detail metadata defaults its tag lists to empty arrays.</summary>
-        [Test]
-        public void MajnetSongDetail_DefaultsTagsToEmpty()
-        {
-            var detail = Serializer.Json.Deserialize<MajnetSongDetail>("{\"id\":\"x\",\"title\":\"t\",\"hash\":\"h\"}");
-
-            Assert.That(detail, Is.Not.Null);
-            Assert.That(detail!.Id, Is.EqualTo("x"));
-            Assert.That(detail.Title, Is.EqualTo("t"));
-            Assert.That(detail.Tags, Is.Empty);
-            Assert.That(detail.PublicTags, Is.Empty);
         }
     }
 }

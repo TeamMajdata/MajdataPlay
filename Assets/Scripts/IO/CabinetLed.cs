@@ -36,7 +36,7 @@ namespace MajdataPlay.IO
         private static void Init()
         {
 #if UNITY_STANDALONE
-            IsEnabled = MajEnv.Settings.IO.OutputDevice.Led.Enable;
+            IsEnabled = MajEnv.SystemSettings.IO.OutputDevice.Led.Enable;
 #else
             IsEnabled = false;
 #endif

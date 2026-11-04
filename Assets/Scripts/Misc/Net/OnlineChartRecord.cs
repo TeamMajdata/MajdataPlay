@@ -20,6 +20,11 @@ namespace MajdataPlay.Net
         public string Server { get; }
         /// <summary>Gets whether the digests came from the <c>maichart/info</c> API, so a missing digest means a missing file.</summary>
         public bool IsResolved { get; }
+        /// <summary>
+        /// Gets whether the server deleted the chart; it is still listed because its chart file and track are stored, but
+        /// its other files and its online interactions are gone.
+        /// </summary>
+        public bool IsDeletedOnServer { get; }
         /// <summary>Gets the cache owning the record, which also owns the object store.</summary>
         public OnlineChartCache Cache { get; }
 
@@ -39,14 +44,16 @@ namespace MajdataPlay.Net
         /// <param name="chartId">The chart identity.</param>
         /// <param name="isResolved">Whether the digests came from the info API.</param>
         /// <param name="isPersistent">Whether digest changes are written to the runtime database.</param>
+        /// <param name="isDeletedOnServer">Whether the server deleted the chart.</param>
         /// <exception cref="ArgumentNullException">An argument is null.</exception>
-        internal OnlineChartRecord(OnlineChartCache cache, string server, string chartId, bool isResolved, bool isPersistent)
+        internal OnlineChartRecord(OnlineChartCache cache, string server, string chartId, bool isResolved, bool isPersistent, bool isDeletedOnServer = false)
         {
             Cache = cache ?? throw new ArgumentNullException(nameof(cache));
             Server = server ?? throw new ArgumentNullException(nameof(server));
             ChartId = chartId ?? throw new ArgumentNullException(nameof(chartId));
             IsResolved = isResolved;
             _isPersistent = isPersistent;
+            IsDeletedOnServer = isDeletedOnServer;
         }
 
         /// <summary>Gets the recorded digest of a file.</summary>

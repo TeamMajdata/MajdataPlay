@@ -52,7 +52,7 @@ namespace MajdataPlay.Scenes.Game.Notes.Behaviours
         protected override void Awake()
         {
             base.Awake();
-            _displayCP = MajEnv.Settings.Display.DisplayCriticalPerfect;
+            _displayCP = MajEnv.UserSettings.Judge.DisplayCriticalPerfect;
             _spriteRenderer = GetComponent<SpriteRenderer>();
             NoteHelper.Sorting.Apply(_spriteRenderer, NoteHelper.Sorting.NoteLayer.SlideOK);
             _animator = GetComponent<Animator>();

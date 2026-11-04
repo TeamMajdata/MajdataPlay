@@ -201,7 +201,8 @@ namespace MajdataPlay.Tests.Plugins.Net
                     headers.Add(new KeyValuePair<string, string>(lines[i].Substring(0, colon).Trim(), lines[i].Substring(colon + 1).Trim()));
                 }
             }
-            var request = new ReceivedRequest(requestLine[0], requestLine.Length > 1 ? requestLine[1] : string.Empty, headers);
+            var request = new ReceivedRequest(requestLine[0], requestLine.Length > 1 ? requestLine[1] : string.Empty,
+                requestLine.Length > 2 ? requestLine[2] : string.Empty, headers);
             if (string.Equals(request.GetHeader("Expect"), "100-continue", StringComparison.OrdinalIgnoreCase))
             {
                 await WriteAsync(stream, "HTTP/1.1 100 Continue\r\n\r\n").ConfigureAwait(false);

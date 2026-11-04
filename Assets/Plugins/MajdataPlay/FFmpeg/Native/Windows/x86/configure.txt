@@ -1,11 +1,11 @@
-install prefix            /home/lezi/.cache/majdata-ffmpeg-full-encoding-20261005/install/win-x86
-source path               ./src
-C compiler                i686-w64-mingw32-gcc
+install prefix            /c/Users/kiris/AppData/Local/Packages/CLAUDE~1/LOCALC~1/Local/MajFFB/install/win-x86
+source path               /c/Users/kiris/AppData/Local/Packages/CLAUDE~1/LOCALC~1/Local/MajFFB/source
+C compiler                i686-w64-mingw32-clang
 C library                 mingw64
 host C compiler           gcc
-host C library            glibc
+host C library            mingw64
 ARCH                      x86 (generic)
-version string suffix     MajdataPlay-AMF-RC-v1-c0604b924b6a_MajdataPlay-X265-Params-v1-5b457330f94a
+version string suffix     MajdataPlay-AMF-RC-v1-c0604b924b6a_MajdataPlay-X265-Params-v1-5b457330f94a_MajdataPlay-QSV-RC-v1-140460417695
 big-endian                no
 runtime cpu detection     yes
 standalone assembly       yes
@@ -39,7 +39,7 @@ threading support         w32threads
 safe bitstream reader     yes
 texi2html enabled         no
 perl enabled              yes
-pod2man enabled           yes
+pod2man enabled           no
 makeinfo enabled          no
 makeinfo supports HTML    no
 experimental features     yes
@@ -51,9 +51,10 @@ libdav1d                libvpx                  schannel
 libmp3lame              libx264
 
 External libraries providing hardware acceleration:
-amf                     d3d12va                 nvenc
-cuda                    dxva2                   vulkan
-d3d11va                 ffnvcodec
+amf                     dxva2                   nvenc
+cuda                    ffnvcodec               vulkan
+d3d11va                 libmfx
+d3d12va                 libvpl
 
 Libraries:
 avcodec                 avformat                swscale
@@ -225,22 +226,23 @@ escape130               pcm_u32le               zero12v
 evrc                    pcm_u8
 
 Enabled encoders:
-aac                     pcm_bluray              pcm_s32le
-av1_amf                 pcm_dvd                 pcm_s32le_planar
-av1_nvenc               pcm_f32be               pcm_s64be
-h263                    pcm_f32le               pcm_s64le
-h264_amf                pcm_f64be               pcm_s8
-h264_nvenc              pcm_f64le               pcm_s8_planar
-hevc_amf                pcm_mulaw               pcm_u16be
-hevc_nvenc              pcm_s16be               pcm_u16le
-libaom_av1              pcm_s16be_planar        pcm_u24be
-libmp3lame              pcm_s16le               pcm_u24le
-libopus                 pcm_s16le_planar        pcm_u32be
-libvpx_vp9              pcm_s24be               pcm_u32le
-libx264                 pcm_s24daud             pcm_u8
-libx265                 pcm_s24le               pcm_vidc
-mpeg4                   pcm_s24le_planar
-pcm_alaw                pcm_s32be
+aac                     mpeg4                   pcm_s32be
+av1_amf                 pcm_alaw                pcm_s32le
+av1_nvenc               pcm_bluray              pcm_s32le_planar
+av1_qsv                 pcm_dvd                 pcm_s64be
+h263                    pcm_f32be               pcm_s64le
+h264_amf                pcm_f32le               pcm_s8
+h264_nvenc              pcm_f64be               pcm_s8_planar
+h264_qsv                pcm_f64le               pcm_u16be
+hevc_amf                pcm_mulaw               pcm_u16le
+hevc_nvenc              pcm_s16be               pcm_u24be
+hevc_qsv                pcm_s16be_planar        pcm_u24le
+libaom_av1              pcm_s16le               pcm_u32be
+libmp3lame              pcm_s16le_planar        pcm_u32le
+libopus                 pcm_s24be               pcm_u8
+libvpx_vp9              pcm_s24daud             pcm_vidc
+libx264                 pcm_s24le               vp9_qsv
+libx265                 pcm_s24le_planar
 
 Enabled hwaccels:
 av1_d3d11va             hevc_d3d11va2           vc1_dxva2
@@ -450,14 +452,3 @@ Enabled outdevs:
 License: GPL version 3 or later
 
 WARNING: spirv-headers not found, swscale SPIR-V backend unavailable
-checkasm_config_generated.h is unchanged
-checkasm_header_config_generated.h is unchanged
-checkasm_config_generated.asm is unchanged
-libavutil/avconfig.h is unchanged
-libavfilter/filter_list.c is unchanged
-libavcodec/parser_list.c is unchanged
-libavcodec/bsf_list.c is unchanged
-libavformat/demuxer_list.c is unchanged
-libavdevice/indev_list.c is unchanged
-libavdevice/outdev_list.c is unchanged
-libavformat/protocol_list.c is unchanged

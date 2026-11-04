@@ -1,5 +1,6 @@
 ﻿using MajdataPlay.Net.Curl;
 using MajdataPlay.Net.Curl.Core;
+using MajdataPlay.Net.Curl.Diagnostics;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -16,6 +17,39 @@ namespace MajdataPlay.Net.Curl
 {
     public class CurlHttpMessageHandler : HttpMessageHandler
     {
+        /// <summary>
+        /// Gets or sets the HTTP versions enabled for request negotiation. Defaults to <see cref="CurlHttpVersions.All"/>.
+        /// </summary>
+        /// <remarks>
+        /// HTTP/2 and HTTP/3 require support in the loaded libcurl. HTTP/3 also requires an HTTPS URI.
+        /// This setting controls initial negotiation. libcurl can retry using HTTP/1.1 for NTLM authentication
+        /// or when an HTTP/2 peer sends HTTP_1_1_REQUIRED. The server chooses its own response version.
+        /// </remarks>
+        /// <exception cref="ArgumentOutOfRangeException">The set is empty or contains an unknown version.</exception>
+        public CurlHttpVersions EnabledHttpVersions
+        {
+            get => _enabledHttpVersions;
+            set => _enabledHttpVersions = CurlHttpConfig.ValidateEnabledHttpVersions(value);
+        }
+
+        /// <summary>
+        /// Gets or sets the version to try first. Defaults to <see cref="CurlHttpVersions.None"/>, which preserves
+        /// libcurl's default negotiation when all versions are enabled.
+        /// </summary>
+        /// <remarks>
+        /// With an explicit policy, the handler selects the highest available enabled version if there is no
+        /// preference or the preference is unavailable for the URI or library. An explicit preference must be
+        /// included in <see cref="EnabledHttpVersions"/> when sending. HTTP/2 can fall back to HTTP/1.1.
+        /// HTTP/3 permits native fallback only when every version libcurl could fall back to is enabled.
+        /// A lower preference does not trigger retries with higher versions. libcurl may reuse a compatible connection.
+        /// </remarks>
+        /// <exception cref="ArgumentOutOfRangeException">The value is neither one known version nor None.</exception>
+        public CurlHttpVersions PreferredHttpVersion
+        {
+            get => _preferredHttpVersion;
+            set => _preferredHttpVersion = CurlHttpConfig.ValidatePreferredHttpVersion(value);
+        }
+
         public SslProtocols SslProtocols { get; set; } = SslProtocols.Tls12 | SslProtocols.Tls13;
         public IWebProxy? Proxy { get; set; }
         public bool PreAuthenticate { get; set; }
@@ -33,7 +67,90 @@ namespace MajdataPlay.Net.Curl
         /// </summary>
         public int ResponseBodyBufferSize { get; set; } = 64 * 1024;
         public long MaxRequestContentBufferSize { get; set; } = int.MaxValue;
-        public int MaxConnectionsPerServer { get; set; } = 8;
+        /// <summary>
+        /// Gets or sets the limit on simultaneous connections to one host, applied as
+        /// <c>CURLMOPT_MAX_HOST_CONNECTIONS</c>. Requests beyond it wait for a free connection. Defaults to 8.
+        /// </summary>
+        /// <remarks>
+        /// The limit is shared by every request of this handler; the value of the latest submitted request applies.
+        /// </remarks>
+        /// <exception cref="ArgumentOutOfRangeException">The value is less than 1.</exception>
+        public int MaxConnectionsPerServer
+        {
+            get => _maxConnectionsPerServer;
+            set
+            {
+                if (value < 1)
+                {
+                    throw new ArgumentOutOfRangeException(nameof(MaxConnectionsPerServer), value, "At least one connection per server must be allowed.");
+                }
+                _maxConnectionsPerServer = value;
+            }
+        }
+        /// <summary>
+        /// Gets or sets how many connections libcurl may keep open in its connection pool, applied as
+        /// <c>CURLMOPT_MAXCONNECTS</c>. When a finished transfer would exceed it, libcurl closes the oldest idle
+        /// connection. Defaults to 0, which lets libcurl size the pool from the number of running transfers.
+        /// </summary>
+        /// <remarks>
+        /// The pool is shared by every request of this handler; the value of the latest submitted request applies.
+        /// </remarks>
+        /// <exception cref="ArgumentOutOfRangeException">The value is negative.</exception>
+        public int MaxCachedConnections
+        {
+            get => _maxCachedConnections;
+            set
+            {
+                if (value < 0)
+                {
+                    throw new ArgumentOutOfRangeException(nameof(MaxCachedConnections), value, "The connection pool size cannot be negative.");
+                }
+                _maxCachedConnections = value;
+            }
+        }
+        /// <summary>
+        /// Gets or sets how long a pooled connection may have been idle and still be reused, applied as
+        /// <c>CURLOPT_MAXAGE_CONN</c>. An older idle connection is closed instead of being reused. Defaults to 118
+        /// seconds, libcurl's own default; <see cref="System.Threading.Timeout.InfiniteTimeSpan"/> means no limit.
+        /// </summary>
+        /// <remarks>
+        /// libcurl measures this in whole seconds, so the value is rounded up to whole seconds and capped at
+        /// <see cref="int.MaxValue"/> seconds. It is checked when a request looks for a connection to reuse.
+        /// </remarks>
+        /// <exception cref="ArgumentOutOfRangeException">
+        /// The value is neither positive nor <see cref="System.Threading.Timeout.InfiniteTimeSpan"/>.
+        /// </exception>
+        public TimeSpan PooledConnectionIdleTimeout
+        {
+            get => _pooledConnectionIdleTimeout;
+            set
+            {
+                EnsureValidTimeout(value, nameof(PooledConnectionIdleTimeout));
+                _pooledConnectionIdleTimeout = value;
+            }
+        }
+        /// <summary>
+        /// Gets or sets how long after it was opened a pooled connection may still be reused, applied as
+        /// <c>CURLOPT_MAXLIFETIME_CONN</c>. An older connection is closed instead of being reused, so that, for example,
+        /// DNS changes are picked up. Defaults to <see cref="System.Threading.Timeout.InfiniteTimeSpan"/>, which means
+        /// no limit.
+        /// </summary>
+        /// <remarks>
+        /// libcurl measures this in whole seconds, so the value is rounded up to whole seconds and capped at
+        /// <see cref="int.MaxValue"/> seconds. A transfer already using the connection is not interrupted.
+        /// </remarks>
+        /// <exception cref="ArgumentOutOfRangeException">
+        /// The value is neither positive nor <see cref="System.Threading.Timeout.InfiniteTimeSpan"/>.
+        /// </exception>
+        public TimeSpan PooledConnectionLifetime
+        {
+            get => _pooledConnectionLifetime;
+            set
+            {
+                EnsureValidTimeout(value, nameof(PooledConnectionLifetime));
+                _pooledConnectionLifetime = value;
+            }
+        }
         public int MaxAutomaticRedirections { get; set; } = 50;
         public ICredentials? DefaultProxyCredentials { get; set; }
         public ICredentials? Credentials { get; set; }
@@ -43,8 +160,131 @@ namespace MajdataPlay.Net.Curl
         public bool AllowAutoRedirect { get; set; } = true;
         public bool UseDefaultCredentials { get; set; }
         public bool UseProxy { get; set; } = false;
+        /// <summary>
+        /// Gets or sets the limit for the whole transfer, from name resolution until the last response body byte has
+        /// been received. Defaults to <see cref="System.Threading.Timeout.InfiniteTimeSpan"/>, which means no limit.
+        /// </summary>
+        /// <remarks>
+        /// Unlike <see cref="HttpClient.Timeout"/>, this limit keeps running while the response body is read, including
+        /// while the transfer is paused because the reader has not drained <see cref="ResponseBodyBufferSize"/>. It is
+        /// rounded up to whole milliseconds and capped at <see cref="int.MaxValue"/> milliseconds. An expired limit fails
+        /// the request, or the pending body read, with the timeout exception described on
+        /// <see cref="SendAsync(HttpRequestMessage, CancellationToken)"/>.
+        /// </remarks>
+        /// <exception cref="ArgumentOutOfRangeException">
+        /// The value is neither positive nor <see cref="System.Threading.Timeout.InfiniteTimeSpan"/>.
+        /// </exception>
+        public TimeSpan Timeout
+        {
+            get => _timeout;
+            set
+            {
+                EnsureValidTimeout(value, nameof(Timeout));
+                _timeout = value;
+            }
+        }
+        /// <summary>
+        /// Gets or sets the limit for resolving the host and completing the TCP, proxy and TLS handshakes. Defaults to
+        /// <see cref="System.Threading.Timeout.InfiniteTimeSpan"/>, which leaves libcurl's built-in 300-second limit in
+        /// place.
+        /// </summary>
+        /// <remarks>
+        /// The value is rounded up to whole milliseconds and capped at <see cref="int.MaxValue"/> milliseconds. An expired
+        /// limit fails the request with the timeout exception described on
+        /// <see cref="SendAsync(HttpRequestMessage, CancellationToken)"/>.
+        /// </remarks>
+        /// <exception cref="ArgumentOutOfRangeException">
+        /// The value is neither positive nor <see cref="System.Threading.Timeout.InfiniteTimeSpan"/>.
+        /// </exception>
+        public TimeSpan ConnectTimeout
+        {
+            get => _connectTimeout;
+            set
+            {
+                EnsureValidTimeout(value, nameof(ConnectTimeout));
+                _connectTimeout = value;
+            }
+        }
+        /// <summary>
+        /// Gets or sets how long the average transfer speed may stay below <see cref="LowSpeedLimit"/> before the
+        /// transfer is aborted. Defaults to <see cref="System.Threading.Timeout.InfiniteTimeSpan"/>, which disables the
+        /// low-speed check.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// libcurl measures this in whole seconds, so the value is rounded up to whole seconds. The check starts with the
+        /// transfer, not with the first body byte, and libcurl averages the speed over up to the last five seconds,
+        /// refreshed about once a second. This has two consequences:
+        /// </para>
+        /// <list type="bullet">
+        /// <item><description>
+        /// The wait for the response counts. Seconds without a byte stay in the average after the body starts, so a
+        /// server that answers late can make a body that arrives faster than <see cref="LowSpeedLimit"/> fail. For
+        /// example, with 4 seconds and 32 KiB/s, a 48 KiB/s body that starts 2.3 seconds in is aborted 4 seconds after
+        /// the transfer started. Choose a value well above the expected time to the first byte.
+        /// </description></item>
+        /// <item><description>
+        /// A transfer that stalls right after a burst is aborted up to about five seconds later than this value.
+        /// </description></item>
+        /// </list>
+        /// <para>
+        /// The check is skipped while the transfer is paused because the reader has not drained
+        /// <see cref="ResponseBodyBufferSize"/>. An expired limit fails the request, or the pending body read, with the
+        /// timeout exception described on <see cref="SendAsync(HttpRequestMessage, CancellationToken)"/>.
+        /// </para>
+        /// </remarks>
+        /// <exception cref="ArgumentOutOfRangeException">
+        /// The value is neither positive nor <see cref="System.Threading.Timeout.InfiniteTimeSpan"/>.
+        /// </exception>
+        public TimeSpan LowSpeedTimeout
+        {
+            get => _lowSpeedTimeout;
+            set
+            {
+                EnsureValidTimeout(value, nameof(LowSpeedTimeout));
+                _lowSpeedTimeout = value;
+            }
+        }
+        /// <summary>
+        /// Gets or sets the average transfer speed, in bytes per second, below which <see cref="LowSpeedTimeout"/>
+        /// starts counting. Defaults to 1, so that only a stalled transfer is aborted. It has no effect while
+        /// <see cref="LowSpeedTimeout"/> is <see cref="System.Threading.Timeout.InfiniteTimeSpan"/>.
+        /// </summary>
+        /// <exception cref="ArgumentOutOfRangeException">The value is less than 1.</exception>
+        public int LowSpeedLimit
+        {
+            get => _lowSpeedLimit;
+            set
+            {
+                if (value < 1)
+                {
+                    throw new ArgumentOutOfRangeException(nameof(LowSpeedLimit), value, "The low-speed limit must be at least 1 byte per second.");
+                }
+                _lowSpeedLimit = value;
+            }
+        }
+
+        /// <summary>
+        /// Gets the request counters and connection pool of this handler, also listed in <see cref="CurlStatistics"/>.
+        /// </summary>
+        public CurlHandlerStatistics Statistics
+        {
+            get => _curlMulti.Statistics;
+        }
 
         readonly CurlMulti _curlMulti;
+        /// <summary>The versions enabled for subsequent requests.</summary>
+        private CurlHttpVersions _enabledHttpVersions = CurlHttpVersions.All;
+        /// <summary>The preferred version for subsequent requests.</summary>
+        private CurlHttpVersions _preferredHttpVersion;
+        private TimeSpan _timeout = System.Threading.Timeout.InfiniteTimeSpan;
+        private TimeSpan _connectTimeout = System.Threading.Timeout.InfiniteTimeSpan;
+        private TimeSpan _lowSpeedTimeout = System.Threading.Timeout.InfiniteTimeSpan;
+        private int _lowSpeedLimit = 1;
+        private int _maxConnectionsPerServer = 8;
+        private int _maxCachedConnections;
+        private TimeSpan _pooledConnectionIdleTimeout = TimeSpan.FromSeconds(118);
+        private TimeSpan _pooledConnectionLifetime = System.Threading.Timeout.InfiniteTimeSpan;
 
         public CurlHttpMessageHandler()
         {
@@ -60,6 +300,26 @@ namespace MajdataPlay.Net.Curl
             base.Dispose(disposing);
         }
 
+        /// <summary>
+        /// Sends a request through libcurl and publishes the response once its headers have arrived.
+        /// </summary>
+        /// <param name="request">The request to send.</param>
+        /// <param name="cancellationToken">The token cancelling the request and the reads of its response body.</param>
+        /// <returns>The response, whose body streams from the running transfer.</returns>
+        /// <exception cref="InvalidOperationException">The preferred HTTP version is disabled.</exception>
+        /// <exception cref="NotSupportedException">
+        /// No enabled HTTP version is available for the URI and library, or a HEAD request has content of nonzero or
+        /// unknown length.
+        /// </exception>
+        /// <exception cref="TaskCanceledException">
+        /// <see cref="Timeout"/>, <see cref="ConnectTimeout"/> or <see cref="LowSpeedTimeout"/> expired. As with
+        /// <see cref="HttpClient.Timeout"/>, the exception's token is not cancelled and its inner exception is a
+        /// <see cref="TimeoutException"/>, which wraps the <see cref="CurlException"/> with
+        /// <see cref="Core.PInvoke.CurlCode.OperationTimedOut"/>. Body reads that hit one of these limits throw the same exception.
+        /// </exception>
+        /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was cancelled.</exception>
+        /// <exception cref="HttpRequestException">libcurl failed the request for another reason; the inner exception is
+        /// the <see cref="CurlException"/>.</exception>
         protected override async Task<HttpResponseMessage> SendAsync(
             HttpRequestMessage request,
             CancellationToken cancellationToken)
@@ -67,7 +327,7 @@ namespace MajdataPlay.Net.Curl
             var config = CopyCurrentConfig();
             var content = request.Content;
             var contentStream = default(Stream?);
-            if(content is not null)
+            if (content is not null && request.Method != HttpMethod.Head)
             {
                 contentStream = await content.ReadAsStreamAsync().ConfigureAwait(false);
             }
@@ -93,6 +353,8 @@ namespace MajdataPlay.Net.Curl
         {
             var config = new CurlHttpConfig()
             {
+                EnabledHttpVersions = EnabledHttpVersions,
+                PreferredHttpVersion = PreferredHttpVersion,
                 SslProtocols = SslProtocols,
                 Proxy = Proxy,
                 PreAuthenticate = PreAuthenticate,
@@ -108,10 +370,33 @@ namespace MajdataPlay.Net.Curl
                 AutomaticDecompression = AutomaticDecompression,
                 AllowAutoRedirect = AllowAutoRedirect,
                 UseDefaultCredentials = UseDefaultCredentials,
-                UseProxy = UseProxy
+                UseProxy = UseProxy,
+                Timeout = Timeout,
+                ConnectTimeout = ConnectTimeout,
+                LowSpeedTimeout = LowSpeedTimeout,
+                LowSpeedLimit = LowSpeedLimit,
+                MaxCachedConnections = MaxCachedConnections,
+                PooledConnectionIdleTimeout = PooledConnectionIdleTimeout,
+                PooledConnectionLifetime = PooledConnectionLifetime
             };
 
             return config;
+        }
+
+        /// <summary>
+        /// Checks a timeout setting the same way <see cref="HttpClient.Timeout"/> does.
+        /// </summary>
+        /// <param name="value">The timeout to check.</param>
+        /// <param name="paramName">The name of the property being set.</param>
+        /// <exception cref="ArgumentOutOfRangeException">
+        /// <paramref name="value"/> is neither positive nor <see cref="System.Threading.Timeout.InfiniteTimeSpan"/>.
+        /// </exception>
+        private static void EnsureValidTimeout(TimeSpan value, string paramName)
+        {
+            if (value <= TimeSpan.Zero && value != System.Threading.Timeout.InfiniteTimeSpan)
+            {
+                throw new ArgumentOutOfRangeException(paramName, value, "The timeout must be positive or Timeout.InfiniteTimeSpan.");
+            }
         }
     }
 }

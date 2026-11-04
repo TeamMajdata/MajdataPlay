@@ -50,7 +50,7 @@ namespace MajdataPlay.Scenes.Game.Notes.Behaviours
         float _noteAppearRate = 0.265f;
         
         SpriteRenderer _sr;
-        GameSetting _gameSetting = new();
+        UserSetting _userSetting = new();
         INoteController _noteController;
         NotePoolManager _poolManager;
 
@@ -64,8 +64,8 @@ namespace MajdataPlay.Scenes.Game.Notes.Behaviours
             base.Awake();
             _noteController = Majdata<INoteController>.Instance!;
             _poolManager = FindObjectOfType<NotePoolManager>();
-            _gameSetting = MajEnv.Settings;
-            _noteAppearRate = _gameSetting.Debug.NoteAppearRate;
+            _userSetting = MajEnv.UserSettings;
+            _noteAppearRate = _userSetting.Game.NoteAppearRate;
             _sr = gameObject.GetComponent<SpriteRenderer>();
             _sr.sprite = null!;
             RendererState = RendererStatus.Off;

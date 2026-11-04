@@ -4,6 +4,7 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
+#nullable enable
 namespace MajdataPlay.Net.Curl.Core.PInvoke
 {
     /// <summary>
@@ -29,11 +30,26 @@ namespace MajdataPlay.Net.Curl.Core.PInvoke
         /// <summary>Enable progress meter.</summary>
         NoProgress = 43,
 
+        /// <summary>Perform an HTTP HEAD transfer and finish after the response headers (<c>CURLOPT_NOBODY</c>).</summary>
+        NoBody = 44,
+
         /// <summary>Specify timeout in seconds.</summary>
         Timeout = 13,
 
         /// <summary>Connection timeout in seconds.</summary>
         ConnectTimeout = 78,
+
+        /// <summary>Specify timeout in milliseconds (<c>CURLOPT_TIMEOUT_MS</c>).</summary>
+        TimeoutMs = 155,
+
+        /// <summary>Connection timeout in milliseconds (<c>CURLOPT_CONNECTTIMEOUT_MS</c>).</summary>
+        ConnectTimeoutMs = 156,
+
+        /// <summary>Longest time in seconds a pooled connection may have been idle to be reused (<c>CURLOPT_MAXAGE_CONN</c>).</summary>
+        MaxAgeConn = 288,
+
+        /// <summary>Longest time in seconds since a pooled connection was created for it to be reused (<c>CURLOPT_MAXLIFETIME_CONN</c>).</summary>
+        MaxLifetimeConn = 314,
 
         /// <summary>Maximum number of redirects.</summary>
         MaxRedirs = 68,
@@ -208,6 +224,12 @@ namespace MajdataPlay.Net.Curl.Core.PInvoke
         ReadData = CurlOptionType.ObjectPointer + 9,
 
         /// <summary>
+        /// Buffer of at least <c>CURL_ERROR_SIZE</c> bytes that receives a readable description of the last error
+        /// (<c>CURLOPT_ERRORBUFFER</c>).
+        /// </summary>
+        ErrorBuffer = CurlOptionType.ObjectPointer + 10,
+
+        /// <summary>
         /// Pass a pointer to the header callback userdata.
         /// </summary>
         HeaderData = CurlOptionType.ObjectPointer + 29,
@@ -216,6 +238,16 @@ namespace MajdataPlay.Net.Curl.Core.PInvoke
         /// Pass a pointer to the seek callback userdata.
         /// </summary>
         SeekData = CurlOptionType.ObjectPointer + 168,
+
+        /// <summary>
+        /// Pass a pointer to the debug callback userdata.
+        /// </summary>
+        DebugData = CurlOptionType.ObjectPointer + 95,
+
+        /// <summary>
+        /// Pass a pointer to the pre-request callback userdata.
+        /// </summary>
+        PrereqData = CurlOptionType.ObjectPointer + 313,
 
         #endregion
 
@@ -261,6 +293,11 @@ namespace MajdataPlay.Net.Curl.Core.PInvoke
         /// Callback function for seeking in the input stream
         /// </summary>
         SeekFunction = CurlOptionType.FunctionPointer + 167,
+
+        /// <summary>
+        /// Pre-request callback, called once a connection is ready and just before each request is sent.
+        /// </summary>
+        PrereqFunction = CurlOptionType.FunctionPointer + 312,
 
         #endregion
 

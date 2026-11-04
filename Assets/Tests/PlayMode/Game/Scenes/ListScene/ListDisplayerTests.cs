@@ -85,12 +85,12 @@ namespace MajdataPlay.Tests.Game.Scenes.PlayMode.ListScene
             var displayer = CreateScoreDisplayer(Canvas);
             var rate = PrivateMember.GetField<TextMeshProUGUI>(displayer, "_archieveRate");
 
-            MajEnv.Settings.Judge.Mode = JudgeModeOption.Classic;
+            MajEnv.UserSettings.Judge.Mode = JudgeModeOption.Classic;
             displayer.SetScore(ScoredSong("majtest-score-classic", ChartLevel.Basic, 2, 99.12345, 98.5), ChartLevel.Basic);
             Assert.That(rate.text, Is.EqualTo($"{98.5:F2}%"));
             Assert.That(rate.enabled, Is.True);
 
-            MajEnv.Settings.Judge.Mode = JudgeModeOption.Modern;
+            MajEnv.UserSettings.Judge.Mode = JudgeModeOption.Modern;
             displayer.SetScore(ScoredSong("majtest-score-dx", ChartLevel.Basic, 2, 99.12345, 98.5), ChartLevel.Basic);
             Assert.That(rate.text, Is.EqualTo($"{99.12345:F4}%"));
         }

@@ -54,6 +54,26 @@ int main(int argc, char** argv) {
     LOAD(format, av_packet_alloc); LOAD(format, av_packet_unref); LOAD(format, av_packet_free);
     LOAD(format, av_frame_alloc); LOAD(format, av_frame_free); LOAD(format, av_frame_unref);
     LOAD(scale, sws_getContext); LOAD(scale, sws_scale); LOAD(scale, sws_freeContext);
+    LOAD(format, avcodec_configuration); LOAD(format, avcodec_find_encoder_by_name);
+    LOAD(format, avcodec_find_decoder_by_name); LOAD(format, av_hwdevice_find_type_by_name);
+    const char* configuration = p_avcodec_configuration();
+    CHECK(strstr(configuration, "--enable-libvpl") != NULL, "QSV links the Intel VPL dispatcher");
+    CHECK(strstr(configuration, "MajdataPlay-QSV-RC-v1-140460417695") != NULL, "QSV rate-control checks are compiled in");
+    CHECK(strstr(configuration, "--enable-vaapi") != NULL && strstr(configuration, "--enable-libdrm") != NULL,
+          "QSV retains its VAAPI/DRM child device backend");
+    CHECK(p_av_hwdevice_find_type_by_name("qsv") == AV_HWDEVICE_TYPE_QSV, "QSV hardware device type is registered");
+    const char* qsvEncoders[] = {"h264_qsv", "hevc_qsv", "av1_qsv", "vp9_qsv"};
+    const enum AVCodecID qsvCodecs[] = {AV_CODEC_ID_H264, AV_CODEC_ID_HEVC, AV_CODEC_ID_AV1, AV_CODEC_ID_VP9};
+    for (unsigned i = 0; i < sizeof(qsvEncoders) / sizeof(qsvEncoders[0]); ++i) {
+        const AVCodec* encoder = p_avcodec_find_encoder_by_name(qsvEncoders[i]);
+        CHECK(encoder != NULL && encoder->id == qsvCodecs[i], qsvEncoders[i]);
+    }
+    const char* qsvDecoders[] = {"av1_qsv", "h264_qsv", "hevc_qsv", "mjpeg_qsv", "mpeg2_qsv",
+                                "vc1_qsv", "vp8_qsv", "vp9_qsv", "vvc_qsv"};
+    for (unsigned i = 0; i < sizeof(qsvDecoders) / sizeof(qsvDecoders[0]); ++i) {
+        CHECK(p_avcodec_find_decoder_by_name(qsvDecoders[i]) == NULL, "QSV decoders stay disabled");
+    }
+    printf("QSV: H.264/HEVC/AV1/VP9 encoder registration and checked rate control PASS; Intel GPU runtime unverified\n");
     CHECK((p_avformat_version() >> 16) == 63 && (p_avcodec_version() >> 16) == 63 && (p_avutil_version() >> 16) == 61,
           "loaded FFmpeg version matches the generated binding ABI");
     Dl_info resolved;

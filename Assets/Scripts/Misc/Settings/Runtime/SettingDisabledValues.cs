@@ -26,7 +26,7 @@ namespace MajdataPlay.Settings
         /// <remarks>
         /// Tests replace it to evaluate the rules of another platform and must restore it afterwards.
         /// </remarks>
-        internal static SettingPlatform CurrentPlatform { get; set; } = GetBuildPlatform();
+        internal static SettingPlatform CurrentPlatform { get; set; } = SettingPlatformInfo.Current;
 
         /// <summary>
         /// Gets whether no value is disabled.
@@ -261,27 +261,6 @@ namespace MajdataPlay.Settings
             {
                 values.Add(value);
             }
-        }
-
-        /// <summary>
-        /// Gets the build target platform.
-        /// </summary>
-        /// <returns>The platform selected by the Unity platform defines, or <see cref="SettingPlatform.None"/> on an unknown platform.</returns>
-        private static SettingPlatform GetBuildPlatform()
-        {
-#if UNITY_ANDROID
-            return SettingPlatform.Android;
-#elif UNITY_IOS
-            return SettingPlatform.IOS;
-#elif UNITY_STANDALONE_WIN
-            return SettingPlatform.Windows;
-#elif UNITY_STANDALONE_LINUX
-            return SettingPlatform.Linux;
-#elif UNITY_STANDALONE_OSX
-            return SettingPlatform.MacOS;
-#else
-            return SettingPlatform.None;
-#endif
         }
     }
 }

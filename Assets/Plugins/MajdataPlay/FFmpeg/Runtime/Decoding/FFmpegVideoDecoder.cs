@@ -1,5 +1,6 @@
 #nullable enable
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.Globalization;
 using System.Runtime.InteropServices;
@@ -7,6 +8,7 @@ using System.Threading;
 using AOT;
 using FFmpeg.AutoGen;
 using MajdataPlay.Diagnostics;
+using MajdataPlay.FFmpeg.Interop;
 
 namespace MajdataPlay.FFmpeg.Internal
 {
@@ -111,8 +113,17 @@ namespace MajdataPlay.FFmpeg.Internal
         private bool _gpuSynchronizedCodec;
         /// <summary>Indicates that pixel-format selection rejected the hardware format without choosing a software alternative.</summary>
         private bool _hardwareFormatRejected;
-        /// <summary>Requests replacing the GPU-synchronized codec with a multi-threaded software decoder before the next codec call.</summary>
-        private bool _softwareReopenRequested;
+        /// <summary>Requests replacing a single-threaded hardware codec whose format was rejected, by a decoder on the next GPU or a multi-threaded software decoder, before the next codec call.</summary>
+        private bool _fallbackReopenRequested;
+        /// <summary>Indicates that an independent-device codec runs on one thread so a rejected hardware format can move the pending packet to the next GPU.</summary>
+        /// <remarks>Frame threads would report the rejection only after the packet was consumed. Accessed only on the owning worker.</remarks>
+        private bool _gpuFallbackCodec;
+        /// <summary>Lists the GPUs that may host independent hardware devices, Unity's renderer first, or null before hardware is configured.</summary>
+        private IReadOnlyList<HardwareGpu>? _hardwareGpus;
+        /// <summary>Indexes the next entry of <see cref="_hardwareGpus"/> that may host an independent hardware device.</summary>
+        private int _nextHardwareGpu;
+        /// <summary>Identifies the GPU of the active independent hardware device, or null for a supplied device, FFmpeg's default device, or software.</summary>
+        private HardwareGpu? _activeHardwareGpu;
         /// <summary>Stores the monotonic start time of the most recent expired high-speed frame conversion.</summary>
         private long _lastPresentationTimestamp;
         /// <summary>Supplies the playback deadlines used to discard expired frames, or null to present every decoded frame.</summary>
@@ -426,6 +437,16 @@ namespace MajdataPlay.FFmpeg.Internal
                         continue;
                     }
 
+                    if (codecResult < 0 && _activeHardwareGpu != null && HasNextHardwareGpu)
+                    {
+                        // The next iteration creates the independent device on the next GPU.
+                        HardwareFallbackReason = "Hardware decoder open failed on " + _activeHardwareGpu + ": " + ErrorText(codecResult);
+                        MajDebug.LogWarning("FFmpeg", "[Decoder] " + HardwareFallbackReason + "; trying the next GPU.");
+                        ReleaseCodec();
+                        _hardwarePixelFormat = AVPixelFormat.AV_PIX_FMT_NONE;
+                        continue;
+                    }
+
                     if (codecResult < 0 && selectedMediaCodec && _codec->hw_device_ctx != null && _options.AllowHardwareCpuUpload && !_options.RequireHardwareDecoding)
                     {
                         HardwareFallbackReason = "MediaCodec Surface open failed: " + ErrorText(codecResult);
@@ -479,11 +500,11 @@ namespace MajdataPlay.FFmpeg.Internal
                     }
 
                     TransferMode = HardwareDecoding ? (_cpuTransport ? "Hardware decode + CPU RGBA upload" : "Native GPU frames") : "Software RGBA upload";
-                    if (_softwareReopenRequested)
+                    if (_fallbackReopenRequested)
                     {
                         // A codec that negotiates its pixel format while opening rejected the
                         // hardware format before any packet was consumed.
-                        ReopenSoftwareDecoder();
+                        ReopenFallbackDecoder();
                     }
 
                     break;
@@ -577,7 +598,7 @@ namespace MajdataPlay.FFmpeg.Internal
                     result = ffmpeg.avcodec_receive_frame(_codec, _frame);
                 }
 
-                if (_softwareReopenRequested)
+                if (_fallbackReopenRequested)
                 {
                     ReplaceRejectedHardwareCodec();
                     continue;
@@ -677,7 +698,7 @@ namespace MajdataPlay.FFmpeg.Internal
                         result = ffmpeg.avcodec_send_packet(_codec, _packet);
                     }
 
-                    if (_softwareReopenRequested)
+                    if (_fallbackReopenRequested)
                     {
                         // The codec never writes to the submitted packet, so the same
                         // keyframe is re-sent to the replacement software decoder.
@@ -1271,12 +1292,15 @@ namespace MajdataPlay.FFmpeg.Internal
                 return;
             }
 
+            // Pixel-format selection decides whether another GPU follows a rejection, so list the GPUs first.
+            var gpus = EnsureHardwareGpus();
             AVBufferRef* device = null;
             try
             {
                 int result = -1;
                 bool suppliedDevice = false;
                 bool genericDevice = false;
+                string? independentFailure = null;
                 try
                 {
                     if (_options.CreateHardwareSession != null && !_cpuTransport)
@@ -1365,7 +1389,7 @@ namespace MajdataPlay.FFmpeg.Internal
                         MajDebug.LogWarning("FFmpeg", "[Decoder] " + HardwareFallbackReason + "; trying an independent hardware device for CPU upload.");
                     }
 
-                    result = ffmpeg.av_hwdevice_ctx_create(&device, _options.HardwareDeviceType, null, null, 0);
+                    result = CreateIndependentDevice(&device, out independentFailure);
                     genericDevice = true;
                     if (!canCreateNativeDevice)
                     {
@@ -1375,7 +1399,7 @@ namespace MajdataPlay.FFmpeg.Internal
 
                 if (result < 0)
                 {
-                    HardwareFallbackReason = "Hardware device creation failed: " + ErrorText(result);
+                    HardwareFallbackReason = independentFailure ?? "Hardware device creation failed: " + ErrorText(result);
                     MajDebug.LogWarning("FFmpeg", "[Decoder] " + HardwareFallbackReason);
                     return;
                 }
@@ -1430,12 +1454,24 @@ namespace MajdataPlay.FFmpeg.Internal
                     }
                 }
 
+                // A supplied device runs on Unity's renderer, the first listed GPU.
+                var otherGpuRemains = _activeHardwareGpu != null ? HasNextHardwareGpu
+                    : suppliedDevice && gpus.Count > Math.Max(_nextHardwareGpu, 1);
+                if (otherGpuRemains && !_gpuSynchronizedCodec)
+                {
+                    // A rejected hardware format must surface inside this worker's codec call
+                    // while the packet is still pending, so the next GPU can decode that packet.
+                    _codec->thread_count = 1;
+                    _gpuFallbackCodec = true;
+                }
+
                 _codec->hw_device_ctx = device;
                 device = null;
                 _codec->get_format = s_formatCallback;
                 HardwareDecoding = true;
                 var kind = _options.HardwareDeviceType.ToString().Replace("AV_HWDEVICE_TYPE_", "");
-                DecoderDevice = genericDevice && suppliedDevice ? kind + " (FFmpeg default hardware device)"
+                DecoderDevice = _activeHardwareGpu != null ? kind + " on " + _activeHardwareGpu
+                    : genericDevice && suppliedDevice ? kind + " (FFmpeg default hardware device)"
                     : DescribeHardwareDevice(genericDevice ? kind + " (FFmpeg default hardware device)" : kind);
             }
             finally
@@ -1492,8 +1528,67 @@ namespace MajdataPlay.FFmpeg.Internal
             _codec->opaque = (void*)GCHandle.ToIntPtr(_selfHandle);
             _skippingNonReferenceFrames = false;
             _gpuSynchronizedCodec = false;
+            _gpuFallbackCodec = false;
             _hardwareFormatRejected = false;
-            _softwareReopenRequested = false;
+            _fallbackReopenRequested = false;
+        }
+
+        /// <summary>Lists the GPUs for independent hardware devices once per decoder, applying the fallback route.</summary>
+        /// <returns>
+        /// The GPUs with Unity's renderer first; only the renderer when other GPUs are not permitted; or an empty list when
+        /// this platform does not select GPUs and FFmpeg's default device is used instead.
+        /// </returns>
+        private IReadOnlyList<HardwareGpu> EnsureHardwareGpus()
+        {
+            if (_hardwareGpus == null)
+            {
+                // Another GPU can only reach Unity's textures through CPU upload.
+                var route = _options.AllowHardwareCpuUpload && !_options.RequireHardwareDecoding
+                    ? _options.HardwareFallbackRoute : HardwareFallbackRoute.SoftwareCodec;
+                _hardwareGpus = _options.HardwareGpus != null ? HardwareGpuCatalog.Restrict(_options.HardwareGpus, route)
+                    : HardwareGpuCatalog.GetCandidates(route);
+            }
+
+            return _hardwareGpus;
+        }
+
+        /// <summary>Gets whether a listed GPU remains for an independent hardware device.</summary>
+        private bool HasNextHardwareGpu => _hardwareGpus != null && _nextHardwareGpu < _hardwareGpus.Count;
+
+        /// <summary>Creates an independent hardware device on the next listed GPU that opens, or on FFmpeg's default device without a GPU list.</summary>
+        /// <param name="device">Receives the owned FFmpeg device reference on success.</param>
+        /// <param name="failure">Receives the last per-GPU failure, or null when no listed GPU was tried.</param>
+        /// <returns>A nonnegative value on success, or a negative FFmpeg error.</returns>
+        /// <remarks>Listed GPUs are only used for the platform backend; renderer-native backends keep FFmpeg's default device.</remarks>
+        private int CreateIndependentDevice(AVBufferRef** device, out string? failure)
+        {
+            failure = null;
+            _activeHardwareGpu = null;
+            var gpus = _options.HardwareDeviceType == HardwareGpuCatalog.DeviceType ? EnsureHardwareGpus() : Array.Empty<HardwareGpu>();
+            if (gpus.Count == 0)
+            {
+                return ffmpeg.av_hwdevice_ctx_create(device, _options.HardwareDeviceType, null, null, 0);
+            }
+
+            var result = -1;
+            while (_nextHardwareGpu < gpus.Count)
+            {
+                var gpu = gpus[_nextHardwareGpu++];
+                result = ffmpeg.av_hwdevice_ctx_create(device, _options.HardwareDeviceType, gpu.Device, null, 0);
+                if (result >= 0)
+                {
+                    _activeHardwareGpu = gpu;
+                    return result;
+                }
+
+                failure = "Hardware device creation failed on " + gpu + ": " + ErrorText(result);
+                // Report the skipped GPU even when a later GPU opens.
+                HardwareFallbackReason = failure;
+                MajDebug.LogWarning("FFmpeg", "[Decoder] " + failure);
+            }
+
+            failure ??= "No remaining GPU can host an independent " + _options.HardwareDeviceType + " device.";
+            return result;
         }
 
         /// <summary>Releases the current codec and activates the configured fallback hardware options if available.</summary>
@@ -1537,27 +1632,119 @@ namespace MajdataPlay.FFmpeg.Internal
             _hardwareFrameMapper?.Dispose();
             _hardwareFrameMapper = null;
             _pendingHardwarePackets = 0;
+            // The codec owned the independent device.
+            _activeHardwareGpu = null;
         }
 
-        /// <summary>Replaces the GPU-synchronized codec that rejected its hardware pixel format while the rejected packet is still pending.</summary>
+        /// <summary>Replaces the single-threaded hardware codec that rejected its hardware pixel format while the rejected packet is still pending.</summary>
         /// <remarks>
-        /// The codec never writes to a submitted packet, so the pending keyframe is re-sent to the replacement software decoder
+        /// The codec never writes to a submitted packet, so the pending keyframe is re-sent to the replacement decoder
         /// and decoding resumes without repositioning the demuxer. A packet that was already released cannot be recovered here.
         /// </remarks>
         /// <exception cref="NotSupportedException">The rejected packet was already released, or the build has no software decoder for the stream.</exception>
-        /// <exception cref="InvalidOperationException">FFmpeg cannot configure or open the software decoder.</exception>
-        /// <exception cref="OutOfMemoryException">FFmpeg cannot allocate the software codec context.</exception>
+        /// <exception cref="InvalidOperationException">FFmpeg cannot configure or open the replacement decoder.</exception>
+        /// <exception cref="OutOfMemoryException">FFmpeg cannot allocate the replacement codec context or device.</exception>
         private void ReplaceRejectedHardwareCodec()
         {
             ffmpeg.av_frame_unref(_frame);
             if (!_packetPending)
             {
-                _softwareReopenRequested = false;
+                _fallbackReopenRequested = false;
                 throw new NotSupportedException((HardwareFallbackReason ?? "The decoder rejected the requested hardware pixel format.")
-                    + " The rejected packet is no longer available for a software decoder.");
+                    + " The rejected packet is no longer available for a replacement decoder.");
             }
 
-            ReopenSoftwareDecoder();
+            ReopenFallbackDecoder();
+        }
+
+        /// <summary>Replaces a codec whose hardware format was rejected, preferring hardware decoding on the next GPU over software decoding.</summary>
+        /// <remarks>Pending input state is preserved so the caller continues decoding from the current packet.</remarks>
+        /// <exception cref="NotSupportedException">No GPU remains and the loaded FFmpeg build has no software decoder for the stream.</exception>
+        /// <exception cref="InvalidOperationException">FFmpeg cannot configure or open the replacement decoder.</exception>
+        /// <exception cref="OutOfMemoryException">FFmpeg cannot allocate the replacement codec context or device.</exception>
+        private void ReopenFallbackDecoder()
+        {
+            if (!TryReopenOnNextGpu())
+            {
+                ReopenSoftwareDecoder();
+            }
+        }
+
+        /// <summary>Releases the rejected codec and opens hardware decoding with CPU upload on the next listed GPU that accepts the stream.</summary>
+        /// <returns>True when a decoder opened on another GPU; false when no remaining GPU can open one.</returns>
+        /// <remarks>
+        /// Unity cannot sample textures that belong to another GPU, so the replacement downloads frames for CPU upload and
+        /// uses options without callbacks bound to Unity's renderer. A GPU that also rejects the format during decoding
+        /// requests the next replacement in turn; after the last GPU, decoding continues in software.
+        /// </remarks>
+        /// <exception cref="InvalidOperationException">FFmpeg cannot configure the replacement codec context.</exception>
+        /// <exception cref="OutOfMemoryException">FFmpeg cannot allocate the replacement codec context or device.</exception>
+        private bool TryReopenOnNextGpu()
+        {
+            if (!HasNextHardwareGpu)
+            {
+                return false;
+            }
+
+            var stream = _format->streams[_videoStreamIndex];
+            // FFmpeg's native av1 decoder provides the hwaccels that libdav1d lacks.
+            var codec = stream->codecpar->codec_id == AVCodecID.AV_CODEC_ID_AV1
+                ? ffmpeg.avcodec_find_decoder_by_name("av1") : ffmpeg.avcodec_find_decoder(stream->codecpar->codec_id);
+            if (codec == null)
+            {
+                return false;
+            }
+
+            var reason = HardwareFallbackReason ?? "The decoder rejected the requested hardware pixel format.";
+            // Preroll candidates may reference the hardware frame pool that is released with the codec.
+            ReleaseSeekCandidate();
+            ReleaseCodec();
+            _options = _options.CopyForIndependentDevice(HardwareGpuCatalog.DeviceType);
+            _hardwarePixelFormat = AVPixelFormat.AV_PIX_FMT_NONE;
+            _hardwareDeviceDescription = null;
+            _cpuTransport = true;
+            _mediaCodecHardware = false;
+            _draining = false;
+            _ended = false;
+            while (HasNextHardwareGpu)
+            {
+                AllocateCodec(codec, stream);
+                HardwareFallbackReason = null;
+                ConfigureHardware(codec);
+                var gpu = _activeHardwareGpu;
+                if (_codec->hw_device_ctx == null || gpu == null)
+                {
+                    reason += " " + (HardwareFallbackReason ?? "No remaining GPU can host a hardware decoder.");
+                    break;
+                }
+
+                if (HardwareFallbackReason != null)
+                {
+                    // Keep device creation failures on GPUs skipped before this one.
+                    reason += " " + HardwareFallbackReason;
+                }
+
+                var result = ffmpeg.avcodec_open2(_codec, codec, null);
+                if (result >= 0)
+                {
+                    UpdateThreadDiagnostics();
+                    DecoderName = ffmpeg.PtrToStringUTF8(codec->name);
+                    _hardwareDeviceDescription = DecoderDevice;
+                    TransferMode = "Hardware decode + CPU RGBA upload";
+                    HardwareFallbackReason = reason + " Reopened the " + DecoderName + " decoder on " + gpu + " with CPU upload.";
+                    MajDebug.LogWarning("FFmpeg", "[Decoder] " + HardwareFallbackReason);
+                    return true;
+                }
+
+                reason += " Hardware decoder open failed on " + gpu + ": " + ErrorText(result) + ".";
+                ReleaseCodec();
+                _hardwarePixelFormat = AVPixelFormat.AV_PIX_FMT_NONE;
+            }
+
+            ReleaseCodec();
+            _hardwarePixelFormat = AVPixelFormat.AV_PIX_FMT_NONE;
+            HardwareFallbackReason = reason;
+            return false;
         }
 
         /// <summary>Releases the hardware codec and its GPU resources, then opens a multi-threaded software decoder for the same stream.</summary>
@@ -1660,22 +1847,43 @@ namespace MajdataPlay.FFmpeg.Internal
                     }
                 }
 
+                var gpu = self._activeHardwareGpu;
+                var rejection = "The decoder rejected the requested hardware pixel format" + (gpu != null ? " on " + gpu : string.Empty) + ".";
+                // Keep the renderer's rejection while later GPUs are tried.
+                self.HardwareFallbackReason = gpu?.Role == HardwareGpuRole.Other && self.HardwareFallbackReason != null
+                    ? self.HardwareFallbackReason + " " + rejection : rejection;
                 self.HardwareDecoding = false;
-                self.HardwareFallbackReason = "The decoder rejected the requested hardware pixel format.";
-                MajDebug.LogWarning("FFmpeg", "[Decoder] " + self.HardwareFallbackReason);
+                MajDebug.LogWarning("FFmpeg", "[Decoder] " + rejection);
                 if (self._options.RequireHardwareDecoding || self._options.FallbackHardwareOptions != null)
                 {
                     self._hardwareFormatRejected = true;
                     return AVPixelFormat.AV_PIX_FMT_NONE;
                 }
 
-                if (self._gpuSynchronizedCodec && Math.Min(self._options.ThreadCount, 16) > 1)
+                if (gpu == null && self._hardwareGpus is { Count: > 0 })
+                {
+                    // A supplied device decodes on Unity's renderer, the first listed GPU.
+                    self._nextHardwareGpu = Math.Max(self._nextHardwareGpu, 1);
+                }
+
+                if ((self._gpuSynchronizedCodec || self._gpuFallbackCodec) && self.HasNextHardwareGpu)
+                {
+                    // Format selection runs inside the owning worker's codec call, which
+                    // re-sends the pending packet to a decoder on the next GPU.
+                    self.HardwareFallbackReason += " Trying the next GPU.";
+                    self._hardwareFormatRejected = true;
+                    self._fallbackReopenRequested = true;
+                    return AVPixelFormat.AV_PIX_FMT_NONE;
+                }
+
+                if ((self._gpuSynchronizedCodec || self._gpuFallbackCodec) && Math.Min(self._options.ThreadCount, 16) > 1)
                 {
                     // Software decoding must not inherit the single codec thread reserved for
-                    // GPU completion markers. The owning worker reopens a threaded software decoder.
-                    self.HardwareFallbackReason += " The GPU-synchronized codec is replaced by a multi-threaded software decoder.";
+                    // GPU completion markers or GPU fallback. The owning worker reopens a threaded software decoder.
+                    self.HardwareFallbackReason += (self._gpuSynchronizedCodec ? " The GPU-synchronized codec" : " The single-threaded hardware codec")
+                        + " is replaced by a multi-threaded software decoder.";
                     self._hardwareFormatRejected = true;
-                    self._softwareReopenRequested = true;
+                    self._fallbackReopenRequested = true;
                     return AVPixelFormat.AV_PIX_FMT_NONE;
                 }
 

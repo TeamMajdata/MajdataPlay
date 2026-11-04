@@ -267,7 +267,7 @@ namespace MajdataPlay.Tests.Game.Scenes.PlayMode.ListScene
             ScoreManager.GetScore(songs[0], ChartLevel.Easy).Acc = new Accurate { DX = 100, Classic = 90 };
             ScoreManager.GetScore(songs[1], ChartLevel.Easy).Acc = new Accurate { DX = 90, Classic = 100 };
             MajEnv.RuntimeConfig!.List.OrderBy.SortBy = SortType.ByRank;
-            MajEnv.Settings.Judge.Mode = JudgeModeOption.Classic;
+            MajEnv.UserSettings.Judge.Mode = JudgeModeOption.Classic;
 
             yield return Ready(CreateCollection("Classic", songs));
 

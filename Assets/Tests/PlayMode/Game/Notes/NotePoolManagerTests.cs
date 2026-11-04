@@ -223,7 +223,7 @@ namespace MajdataPlay.Tests.Game.Notes.PlayMode
         /// <param name="capacity">The capacity.</param>
         private void SetCapacities(int capacity)
         {
-            var debug = _rig.Settings.Debug;
+            var debug = _rig.SystemSettings.Debug;
             debug.TapPoolCapacity = capacity;
             debug.HoldPoolCapacity = capacity;
             debug.TouchPoolCapacity = capacity;

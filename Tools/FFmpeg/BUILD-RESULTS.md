@@ -1,5 +1,60 @@
 # FFmpeg 构建记录
 
+## 2026-10-31：补齐 Linux x64 QSV 编码交付
+
+沿用同日 Windows QSV 工作已实现的编码器选择、GPU 绑定、固定 libvpl 和码率控制检查，重建并交付 `Assets/Plugins/MajdataPlay/FFmpeg/Native/Linux/x86_64` 中七个 FFmpeg `.so`。新增 `libvpl.LICENSE.txt`、`qsv-rate-control.patch` 及各自 `.meta`，更新构建清单与配置。已有 ABI 4 `libFFmpegUnityBridge.so`、VAAPI/libdrm 运行库及其许可无需重建，字节与此前交付一致；已有 Unity GUID 与 importer 配置保留。
+
+FFmpeg 仍固定 `n9.0.1` / `bf1b838f2ab88b4f8fd83443325c782ea0e0f7fa`，核对 143 个绑定公开头文件并依次应用既有 AMF、x265、QSV 三项检查补丁。新增原生 `h264_qsv`、`hevc_qsv`、`av1_qsv`、`vp9_qsv` 编码器；全部九个 `*_qsv` 解码器保持禁用，保留 VAAPI/Vulkan 和其余原生解码配置及现有 NVENC/VAAPI/软件编码器。未修改播放器或托管编码器实现。
+
+Intel VPL dispatcher 仍为 `v2.17.0` / `d77f9195cf495b937631607333288fd917ae8939`，PIC 静态归档 `libvpl.a` 为 932,390 字节，SHA256 为 `b87382564753a805461a3bb9e77847c638198a1484f3420c78f29d4b836727ef`；来源、CMake 命令和静态 C++ 链接参数记入 `qsvDispatcherBuild`。产物不依赖额外的 `libvpl.so` 或 `libstdc++.so`。Intel GPU runtime 与厂商 VAAPI 驱动仍由目标系统提供。
+
+构建主机为 WSL Ubuntu 24.04 / x86_64，GCC/G++ 13.3.0、CMake 3.28.3、Ninja 1.11.1、NASM 2.16.01。使用独立缓存 `/var/tmp/majdata-ffmpeg-linux-qsv-20261031`；libva 1.20.0 API、libdrm 2.4.125 开发包及 pkgconf/patchelf/NASM 仅从 Ubuntu 包解包到该缓存，未系统安装。LAME 的 SourceForge 下载超时，改从 Debian 上游原始归档镜像取得完全相同的 `lame_3.100.orig.tar.gz`，仍按 lock 中的 SHA256 `ddfe36cab873794038ae2c1210557ad34857a4b6bdc515785d1da9e175b1da1e` 校验。
+
+在 WSL 仓库根目录、上述隔离包已解包的前提下，实际构建环境与命令为：
+
+```bash
+export FFMPEG_BUILD_ROOT=/var/tmp/majdata-ffmpeg-linux-qsv-20261031
+linux_packages="$FFMPEG_BUILD_ROOT/toolchains/linux-packages/root"
+export PATH="$linux_packages/usr/bin:/usr/bin:/bin"
+export LD_LIBRARY_PATH="$linux_packages/usr/lib/x86_64-linux-gnu"
+export PKG_CONFIG="$linux_packages/usr/bin/pkg-config"
+export PKG_CONFIG_PATH="$linux_packages/usr/lib/x86_64-linux-gnu/pkgconfig"
+export PKG_CONFIG_SYSROOT_DIR="$linux_packages"
+export FFMPEG_ENCODER_CMAKE=/usr/bin/cmake
+python3 Tools/FFmpeg/build.py --targets linux-x64 --require-all --without-bridge --jobs 12
+```
+
+本轮补充 Linux 构建与产物检查，要求 QSV 的 VAAPI/libdrm 子设备后端同时存在；扩展 Linux 原生 smoke，检查四个 QSV 编码器及当前码率控制标记，并拒绝意外启用 QSV 解码器。原生检查已先在旧交付库上复现缺失 QSV 的失败，再在新库上通过。
+
+| 验证 | 结果与范围 |
+| --- | --- |
+| `python -B Tools/Tests/Modules/FFmpegBuildValidation/test_qsv.py` | **10 tests PASS**；QSV 目标矩阵、Linux 子设备依赖、静态 dispatcher 与许可证据、禁用 QSV 解码器 |
+| `test_audio_codecs.py` / `FFmpegArtifactValidation` | **6 / 50 tests PASS**；保留音频配置与既有产物校验 |
+| `env -u LD_LIBRARY_PATH python3 Tools/FFmpeg/verify-artifacts.py --targets linux-x64` | **PASS**；七库 SHA256/ELF/importer、固定版本、QSV/软件/音频注册、静态 dispatcher 与许可证、三项运行库、桥接 ABI 4 |
+| `bash Tools/Tests/Modules/FFmpegValidation/run-linux.sh` | **161 checks PASS**；无 `LD_LIBRARY_PATH` 加载、QSV 注册与检查补丁、原生解码配置；H.264 1920×1080 解码 30 帧，RGBA 校验和仍为 `ae2450db4c195031` |
+| `LoadLinuxBridge.py` | **PASS**；沿用桥接 ABI 4、无设备/无效帧保护、同目录 FFmpeg/VAAPI 依赖加载 |
+| `NativeSoftwareEncoderSmoke.c` | **31,820 checks PASS**；x264/x265/VP9/AV1，CBR/VBR、平坦/复杂画面、重新解码、PTS、排空、线程限制与 x265 参数拒绝 |
+| `EncoderNativeSmoke.c`（MPEG4） | **5,803 checks PASS**；CBR/VBR、目标填充、解码像素、PTS、排空与独占输出 |
+| `AudioCodecSmoke.c` | **3,391,382 checks PASS**；35 组真实立体声音频往返及音频容器 |
+
+上述原生验证均使用本轮交付库，运行时移除构建阶段的 `LD_LIBRARY_PATH`。加载证据保存在忽略的 `Tools/Tests/Modules/FFmpegValidation/.work/linux-native.txt`，编码/音频证据为同目录的 `linux-qsv-{software,mpeg4,audio}.txt`；编码媒体保存在构建缓存 `encoding-5jF35Q/`。
+
+**未验证：**本机物理 GPU 为 AMD Radeon RX 580 2048SP，没有 Intel GPU；QSV 硬件会话、目标 Intel 驱动/runtime 加载、QSV CBR/VBR 实际输出及码率读回补丁没有实机结果。本轮未运行 Linux Unity Player、Camera 录制或 GPU 纹理显示，不能从库加载、注册和软件往返测试推断这些层面已经通过。
+
+## 2026-10-31：Windows x86/x64 加入 QSV 编码并改用原生 Windows 主机构建
+
+重建并交付 `win-x64`、`win-x86` 的七个 FFmpeg DLL（桥接源码未改，沿用现有 `FFmpegUnityBridge.dll`）。FFmpeg 仍为 `n9.0.1` / `bf1b838f2ab88b4f8fd83443325c782ea0e0f7fa`，核对 143 个绑定公开头文件，按顺序应用 AMF、x265 与新增的 [QSV 码率控制检查补丁](patches/qsv-rate-control.patch)；`--extra-version` 依次包含 `MajdataPlay-AMF-RC-v1-c0604b924b6a`、`MajdataPlay-X265-Params-v1-5b457330f94a`、`MajdataPlay-QSV-RC-v1-140460417695`。新增静态 Intel VPL dispatcher（libvpl `v2.17.0` / `d77f9195cf495b937631607333288fd917ae8939`，MIT）与 `h264_qsv`、`hevc_qsv`、`av1_qsv`、`vp9_qsv` encoder；九个 `*_qsv` 解码器保持禁用。产物附带 `libvpl.LICENSE.txt` 与补丁副本，清单 `qsvDispatcherBuild` 记录 dispatcher 归档（x64 875,240 字节、x86 839,768 字节）及 SHA256。
+
+本机没有可用 WSL，改用原生 Windows 主机：固定 LLVM-MinGW 20260922 UCRT（Clang 23.1.2）作为目标编译器；放在忽略构建缓存中的便携 MSYS2 base 2026-09-27（SHA256 已对照官方发布文件）提供 Bash、GNU make 4.4.1、diffutils、Perl 5.42.3（libvpx configure 需要）、pkgconf 3.0.10，以及 MSYS2 mingw64 的 NASM 3.02；CMake 3.22.1 与 Ninja 1.10.2 取自 Unity 6000.3.17f1 自带的 Android SDK。均未进行系统安装；FFmpeg configure 与各依赖的 configure/make 在本机 MSYS2 中没有出现以往记录的 `child_copy / fork` 故障。Python 访问 `downloads.xiph.org` 时因服务器证书链不完整而校验失败，Opus/LAME 源码包改用 Windows `curl`（Schannel）获取，仍由脚本按锁定 SHA256 校验。
+
+**编译器与 C 运行库发生变化**：此前 x86/x64 DLL 由 WSL MinGW-w64 GCC 13（msvcrt、静态 libstdc++/winpthread）构建，本轮与 ARM64 及桥接一致改为 LLVM-MinGW（UCRT、静态 libc++/libc++abi/libunwind），`compiler-runtime.LICENSE.txt` 已相应更新。DLL 只导入 Windows 系统 DLL 和 `api-ms-win-crt-*` UCRT API set，没有新增需随包部署的运行库。
+
+原生 Windows 路径此前未完整跑通，本轮修复构建脚本：CMake 编译器/安装路径改用正斜杠（CMake 3.22 会把未转义的 `\U` 写入生成脚本）；交给 CMake、`.pc` 与 FFmpeg configure 选项的值在 Windows 上不再用 POSIX 引号包裹 8.3 短路径中的 `~`（configure 拆分这些值但不去除引号）；libvpl 在 Windows 上预先包含 `windows.h` 并定义 `NOMINMAX`，避免其非 MSVC `wcscpy_s` 宏破坏 MinGW-w64 64 位 `stralign.h`，固定源码不作修改；x86 的 LAME 以 `-msse2` 编译，其 SSE 量化代码使用 intrinsic 却未开启 SSE（Unity Windows Player 本身要求 SSE2）。
+
+复验：`verify-artifacts.py --targets win-x86,win-x64` 通过（含 QSV 补丁标记、libvpl 来源与许可、x64 实际加载与录制 encoder 导出）；`FFmpegBuildValidation/verify_windows_dlls.py` 的 PE 机器类型、导出与依赖闭包检查通过；`NativeLoadSmoke.c` 分别编译为 32/64 位并加载 x86/x64 目录，七个库精确版本、libdav1d、五个软件 encoder 与桥接 ABI 4 均 PASS，另行确认两种架构的 avcodec 均注册四个 QSV encoder 并带补丁标记。Unity EditMode（370）与 PlayMode（41）FFmpeg 测试在新 x64 DLL 上全部通过，包括 NVENC 录制、D3D11VA 解码与 QSV 选择/拒绝路径。
+
+未验证：本机没有 Intel GPU，QSV 编码、补丁的码率回读检查及 Intel runtime 加载未经实机运行；x86 未运行 Unity Player（FFmpegValidation 的 Player 脚本要求 .NET SDK 9，本机只有 SDK 10），也未运行 IL2CPP；Linux x64 的 QSV 配置未构建，正式 Linux 库仍是旧版本。`test_windows_arm64.py` 的 `test_importer_arm64_cpu_and_disabled_editor` 在本轮之前已失败：#353 将 importer 改为 serializedVersion 3 后测试仍断言 `Standalone: Win64`。
+
 ## 2026-10-08：Windows ARM64 原生库构建
 
 完成 `win-arm64` 交叉编译并交付到 `Assets/Plugins/MajdataPlay/FFmpeg/Native/Windows/arm64`：七个 FFmpeg DLL（avcodec 63、avdevice 63、avfilter 12、avformat 63、avutil 61、swresample 7、swscale 10）及 **ABI 4 `FFmpegUnityBridge.dll`**。二进制、构建清单、配置、许可证和检查补丁均有配对 `.meta`。

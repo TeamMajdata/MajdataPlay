@@ -75,15 +75,33 @@ def verify_audio_source(name, extract=False):
             raise RuntimeError('Pinned audio codec license is missing: ' + filename)
 
 
-def encoder_source(name):
+def pinned_checkout(name, spec):
     """Locate a dependency by its immutable official Git object identity."""
-    return SHARED / (name + '-' + LOCK['softwareEncoders'][name]['commit'][:12])
+    return SHARED / (name + '-' + spec['commit'][:12])
+
+
+def encoder_source(name):
+    """Locate a pinned software encoder source checkout."""
+    return pinned_checkout(name, LOCK['softwareEncoders'][name])
+
+
+def libvpl_source():
+    """Locate the pinned Intel VPL dispatcher source that QSV encoders link statically."""
+    return pinned_checkout('libvpl', LOCK['libvpl'])
 
 
 def verify_encoder_source(name):
+    """Reject changed commits, tracked edits, or additional software encoder source files."""
+    verify_pinned_checkout(name, LOCK['softwareEncoders'][name], encoder_source(name))
+
+
+def verify_libvpl_source():
+    """Reject changed commits, tracked edits, or additional Intel VPL dispatcher source files."""
+    verify_pinned_checkout('libvpl', LOCK['libvpl'], libvpl_source())
+
+
+def verify_pinned_checkout(name, spec, root):
     """Reject changed commits, tracked edits, or additional source files."""
-    spec = LOCK['softwareEncoders'][name]
-    root = encoder_source(name)
     if not (root / '.git').is_dir():
         raise RuntimeError('Pinned ' + name + ' source is missing; run a non-probe build')
     git = ['git', '--no-optional-locks', '-c', 'core.autocrlf=false', '-c', 'core.filemode=false', '-C', str(root)]
@@ -110,9 +128,17 @@ def verify_encoder_source(name):
 
 
 def ensure_encoder_source(name):
+    """Fetch only the pinned official software encoder commit into a private, verified source cache."""
+    ensure_pinned_checkout(name, LOCK['softwareEncoders'][name], encoder_source(name))
+
+
+def ensure_libvpl_source():
+    """Fetch only the pinned official Intel VPL dispatcher commit into a private, verified source cache."""
+    ensure_pinned_checkout('libvpl', LOCK['libvpl'], libvpl_source())
+
+
+def ensure_pinned_checkout(name, spec, root):
     """Fetch only the pinned official commit into a private, verified source cache."""
-    spec = LOCK['softwareEncoders'][name]
-    root = encoder_source(name)
     if not root.exists():
         SHARED.mkdir(parents=True, exist_ok=True)
         subprocess.run(['git', '-c', 'core.autocrlf=false', 'init', str(root)], check=True)
@@ -130,7 +156,7 @@ def ensure_encoder_source(name):
                                  stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False).returncode == 0
         if not has_tag:
             subprocess.run(['git', '-C', str(root), 'fetch', '--depth', '1', 'origin', tag + ':' + tag], check=True)
-    verify_encoder_source(name)
+    verify_pinned_checkout(name, spec, root)
 
 
 def meson_command():
@@ -355,6 +381,8 @@ def prepare(targets, cache):
         ensure_nvcodec_headers()
     if any(target in ('win-x86', 'win-x64') for target in targets):
         ensure_amf_headers()
+    if any(target in ('win-x86', 'win-x64', 'linux-x64') for target in targets):
+        ensure_libvpl_source()
     if any(target.startswith('win-') for target in targets):
         ensure_llvm(cache)
 

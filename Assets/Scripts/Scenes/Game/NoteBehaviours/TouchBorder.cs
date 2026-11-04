@@ -20,7 +20,7 @@ namespace MajdataPlay.Scenes.Game.Notes.Behaviours
         Sprite[] _each = new Sprite[2];
         Sprite[] _break = new Sprite[2];
 
-        readonly float USERSETTING_TOUCH_SCALE = MajEnv.Settings?.Display.TouchScale ?? 1;
+        readonly float USERSETTING_TOUCH_SCALE = MajEnv.UserSettings?.Display.TouchScale ?? 1;
         void Start()
         {
             var index = AreaPosition.GetIndex();

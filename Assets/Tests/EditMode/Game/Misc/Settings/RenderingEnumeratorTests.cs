@@ -102,7 +102,7 @@ namespace MajdataPlay.Tests.Game.Misc.Settings
 
             Assert.That(options.AntiAliasing, Is.EqualTo(RenderingAntialiasingOption.MSAA2x));
             Assert.That(options.RenderQuality, Is.EqualTo(RenderingQualityOption.Custom));
-            Assert.That(QualitySettings.vSyncCount, Is.EqualTo(MajEnv.Settings.Rendering.VSync ? 1 : 0));
+            Assert.That(QualitySettings.vSyncCount, Is.EqualTo(MajEnv.SystemSettings.Rendering.VSync ? 1 : 0));
         }
 
         /// <summary>Checks that the render scale enumerator shows percentages and applies changes.</summary>

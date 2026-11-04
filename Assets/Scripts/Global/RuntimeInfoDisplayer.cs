@@ -18,7 +18,7 @@ namespace MajdataPlay
         readonly FrameTimingDiagnostics _frameTimingDiagnostics = new();
         FPSMonitor _fpsMonitor = null!;
         TextMeshProUGUI _textDisplayer = null!;
-        GameSetting _setting = null!;
+        SystemSetting _setting = null!;
 
         string _versionText = string.Empty;
         string _newVersionAvailableText = string.Empty;
@@ -49,16 +49,16 @@ namespace MajdataPlay
 
         internal void Init()
         {
-            _setting = MajEnv.Settings;
+            _setting = MajEnv.SystemSettings;
             _versionText = MajInstances.GameVersion.ToString();
-            _textDisplayer.enabled = _setting.Debug.DisplayRuntimeInfo;
+            _textDisplayer.enabled = _setting.Rendering.DisplayRuntimeInfo;
             enabled = true;
             CheckForUpdateAsync().Forget();
         }
 
         void LateUpdate()
         {
-            _textDisplayer.enabled = _setting.Debug.DisplayRuntimeInfo;
+            _textDisplayer.enabled = _setting.Rendering.DisplayRuntimeInfo;
 
             var currentTime = MajTimeline.UnscaledTime;
             var delta = currentTime - _lastUpdateTiming;

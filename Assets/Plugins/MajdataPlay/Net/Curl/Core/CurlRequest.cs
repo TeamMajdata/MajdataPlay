@@ -1,5 +1,6 @@
 using AOT;
 using MajdataPlay.Net.Curl.Core.PInvoke;
+using MajdataPlay.Net.Curl.Diagnostics;
 using MajdataPlay.Net.Curl.Lifecycle;
 using MajdataPlay.Net.Curl.Utils;
 using MajdataPlay.UnsafeKit;
@@ -31,6 +32,12 @@ namespace MajdataPlay.Net.Curl.Core
         {
             get => Message.Method;
         }
+
+        /// <summary>
+        /// Gets the network monitor's record of this request, which receives the uploaded body bytes, or
+        /// <see langword="null"/> when recording was off as the request was sent.
+        /// </summary>
+        public CurlNetworkRecord? Record { get; init; }
 
         int _applyFlag = 0;
 
@@ -74,6 +81,11 @@ namespace MajdataPlay.Net.Curl.Core
             }
             GC.SuppressFinalize(this);
         }
+        /// <summary>Configures the native request method, headers and upload callbacks for this transfer.</summary>
+        /// <param name="curlEasy">The easy handle for this request.</param>
+        /// <exception cref="InvalidOperationException">The options were already applied or libcurl rejected an option.</exception>
+        /// <exception cref="ObjectDisposedException">The easy handle was disposed.</exception>
+        /// <exception cref="NotSupportedException">A HEAD request specifies content with nonzero or unknown length.</exception>
         public void ApplyTo(CurlEasy curlEasy)
         {
             if (Interlocked.CompareExchange(ref _applyFlag, 1 , 0) == 1)
@@ -81,7 +93,27 @@ namespace MajdataPlay.Net.Curl.Core
                 throw new InvalidOperationException("The curl options have already been applied and cannot be applied again.");
             }
             curlEasy.SetOption(CurlOption.Url, RequestUri.OriginalString);
-            curlEasy.SetOption(CurlOption.CustomRequest, Method.Method);
+            if (Method == HttpMethod.Head)
+            {
+                if (Content is not null && Content.Headers.ContentLength != 0)
+                {
+                    throw new NotSupportedException("A HEAD request can only have content with a known length of zero.");
+                }
+                // A custom verb alone leaves libcurl waiting for the representation's Content-Length bytes.
+                curlEasy.SetOption(CurlOption.NoBody, 1L);
+            }
+            else
+            {
+                curlEasy.SetOption(CurlOption.CustomRequest, Method.Method);
+                if (_contentStream is not null)
+                {
+                    curlEasy.SetOption(CurlOption.Upload, 1);
+                    if (_contentStream.CanSeek)
+                    {
+                        curlEasy.SetOption(CurlOption.InFileSizeLarge, _contentStream.Length);
+                    }
+                }
+            }
             curlEasy.SetHeaders(Message.Headers.Concat(Message.Content?.Headers?.AsEnumerable() ?? Array.Empty<KeyValuePair<string, IEnumerable<string>>>()));
             curlEasy.SetOption(CurlOption.ReadFunction, Marshal.GetFunctionPointerForDelegate(_onReadCallback));
             curlEasy.SetOption(CurlOption.SeekFunction, Marshal.GetFunctionPointerForDelegate(_onSeekCallback));
@@ -91,14 +123,6 @@ namespace MajdataPlay.Net.Curl.Core
             curlEasy.SetOption(CurlOption.ReadData, handlePtr);
             curlEasy.SetOption(CurlOption.SeekData, handlePtr);
 
-            if (_contentStream is not null)
-            {
-                curlEasy.SetOption(CurlOption.Upload, 1);
-                if (_contentStream.CanSeek)
-                {
-                    curlEasy.SetOption(CurlOption.InFileSizeLarge, _contentStream.Length);
-                }
-            }
             CurlUtility.ApplySystemCA(curlEasy);
         }
 
@@ -119,6 +143,7 @@ namespace MajdataPlay.Net.Curl.Core
             try
             {
                 var read = contentStream.Read(buffer);
+                curlReq.Record?.OnRequestBodyRead(buffer.Slice(0, read));
 
                 return (UIntPtr)read;
             }
@@ -147,7 +172,8 @@ namespace MajdataPlay.Net.Curl.Core
             }
             try
             {
-                contentStream.Seek(offset, origin);
+                var position = contentStream.Seek(offset, origin);
+                curlReq.Record?.OnRequestBodyRewound(position);
             }
             catch
             {
@@ -160,7 +186,7 @@ namespace MajdataPlay.Net.Curl.Core
         {
             var contentStream = default(Stream?);
             var content = requestMessage.Content;
-            if(content is not null)
+            if (content is not null && requestMessage.Method != HttpMethod.Head)
             {
                 contentStream = await content.ReadAsStreamAsync();
             }
