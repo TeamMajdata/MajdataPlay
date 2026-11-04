@@ -1,4 +1,6 @@
-﻿using System.Collections.Generic;
+﻿#nullable enable
+
+using System.Collections.Generic;
 using System.Linq;
 using System;
 using UnityEditor;
@@ -22,6 +24,19 @@ namespace MajdataPlay.Editor
             var (a, b, c) = Handle();
             Build(a, b, c, null);
         }
+        public static void BuildAndroidExport()
+        {
+#if UNITY_ANDROID
+            EditorUserBuildSettings.exportAsGoogleAndroidProject = true;
+            UnityEditor.Android.UserBuildSettings.DebugSymbols.level = Unity.Android.Types.DebugSymbolLevel.Full;
+            var (a, b, c) = Handle();
+            Build(a, b, c, BuildOptions.AcceptExternalModificationsToPlayer);
+#else
+            Console.WriteLine("BuildAndroidExport requires the Android build target to be active.");
+            EditorApplication.Exit(142);
+#endif
+        }
+
         public static void BuildDebug()
         {
             var (a, b, c) = Handle();

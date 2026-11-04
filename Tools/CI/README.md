@@ -1,27 +1,39 @@
-# macOS self-hosted build runners
+# Native self-hosted build runners
 
-The Android and Apple jobs use Unity **6000.3.17f1** installed on the Mac, and run
-as `majplay-ci`. Both services may use the existing HTTP proxy
-`http://127.0.0.1:10808`; configure it in their service environment, including
-lowercase `http_proxy` and `https_proxy` for tools that require them.
+All three self-hosted builds use Unity **6000.3.17f1**. Android and macOS run
+natively as `runner` on the Linux host `majplay-runner`; iOS runs as `majplay-ci`
+on `mac-mini-majplay-ci`. The Linux shell, runner services, SDK Manager, Ruby
+and Gradle use the HTTP proxy configured for the Linux runner account.
 
 ## Three concurrent runner instances
 
 | Runner directory | Custom label | Build | Work directory |
 | --- | --- | --- | --- |
-| `~/actions-runner-android` | `majplay-android` | Android | `~/actions-runner-android/_work` |
-| `~/actions-runner-apple` | `majplay-apple` | macOS | `~/actions-runner-apple/_work-macos` |
-| `~/actions-runner-ios` | `majplay-ios` | iOS | `~/actions-runner-apple/_work` |
+| `majplay-runner:~/actions-runner-android` | `majplay-android` | Android | `~/actions-runner-android/_work` |
+| `majplay-runner:~/actions-runner-macos` | `majplay-apple` | macOS (Mono ARM64) | `~/actions-runner-macos/_work-macos` |
+| `mac-mini-majplay-ci:~/actions-runner-ios` | `majplay-ios` | iOS | `~/actions-runner-apple/_work` |
 
-All three runners register with `self-hosted`, `macOS`, and `ARM64` labels. The
-Apple matrix maps its two targets to different custom labels, so Android, macOS
-and iOS can run simultaneously on the Mac. Work directories must be distinct:
-concurrent jobs must not share the runner's `_temp` or `_actions` directories.
-The iOS runner deliberately inherits the former Apple work directory to preserve
-absolute paths in its existing IL2CPP cache. The macOS checkout is moved once to
-`_work-macos`; its Git objects and Library are retained.
+The two Linux runners use `self-hosted`, `Linux`, and `X64` labels. They invoke
+the installed Editor through `Tools/CI/run_native_build.sh`. The macOS player
+remains Mono ARM64 and uses the existing custom build method. The native Android
+entry point exports the Gradle project and debugging symbols before Fastlane
+builds the APKs and AAB. The iOS runner uses `self-hosted`, `macOS`, and `ARM64`,
+the native macOS Editor, and Xcode. Its installation, logs, and inherited Apple
+workspace remain in the Mac user's home directory to preserve the old absolute
+IL2CPP cache paths. Concurrent jobs use separate `_temp` and `_actions` folders.
 
-## One-time license directory setup
+On `majplay-runner`, shell profiles source `~/.config/majplay/proxy.sh` and
+`~/ci-setup/env.sh`. User services load `~/.config/majplay/proxy.env` and
+`~/.config/majplay/build.env`. SDK Manager uses explicit proxy arguments, and
+`~/.gradle/gradle.properties` sets Java's HTTP/HTTPS proxy. Unity Editor/modules,
+Ruby 3.3.6, runtime libraries, zip/unzip, JDK 17, and Android tools are installed
+under the runner's home directory. The Android SDK contains NDK 23.1.7779620
+for the existing Gradle build, Android 29/36 and build tools 36.0.0; the Unity
+Android module uses its matching NDK. Fastlane stays pinned to 2.236.1.
+`UNITY_HOME` and `UNITY_EDITOR` identify the native Editor. User services require
+lingering so the runners survive logout and start on boot.
+
+## Persistent native licensing
 
 From an administrator account on the Mac:
 
@@ -35,7 +47,11 @@ GameCI's macOS entrypoint attempts to create this directory with sudo; an
 unprivileged runner cannot do so. Do not grant the runner passwordless sudo or
 make the license directory world-writable.
 
-`prepare_unity_license.py` serializes initial activation across both runner
+On Linux, the helper creates the user-owned license directory at
+`~/.local/share/unity3d/Unity` and retains activation state under
+`~/.local/state/MajdataPlayCI`.
+
+`prepare_unity_license.py` serializes initial activation across native runner
 services using a user-scoped file lock. It reuses a readable installed ULF, or
 activates with `UNITY_SERIAL` (or the legacy serial decoded from `UNITY_LICENSE`),
 `UNITY_EMAIL`, and `UNITY_PASSWORD` from repository secrets. Unity validates the
@@ -44,8 +60,9 @@ never printed. The private activation log is kept at
 `~/Library/Application Support/MajdataPlayCI/license-activation.log`; inspect it
 locally if activation fails and do not upload it as a workflow artifact.
 
-The build action uses `skipActivation: true` after preparation. Jobs retain the
-license rather than returning it while another runner is building. The machine's
+The iOS build action uses `skipActivation: true` after preparation. Native Linux
+builds invoke the Editor directly. Jobs retain the license while other native
+runners may be building. The machine's
 license must be managed as a persistent activation, including returning it before
 decommissioning the Mac. A license in another user's Unity Hub session alone is
 not proof that the runner account can build. To renew an invalid/expired license,

@@ -136,7 +136,7 @@ jobs:
 
   build-android:
     name: Build (Android)
-    runs-on: [self-hosted, macOS, ARM64, majplay-android]
+    runs-on: [self-hosted, Linux, X64, majplay-android]
     if: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && !startsWith(github.ref, 'refs/tags/') }}
     env:
       CONFIGURATION: Release
@@ -190,19 +190,7 @@ jobs:
         run: gem install fastlane -v 2.236.1
 
       - name: Export Android Project
-        uses: game-ci/unity-builder@v4
-        with:
-          skipActivation: true
-          projectPath: ${{ env.CI_PROJECT_PATH }}
-          unityVersion: ${{ env.UNITY_VERSION }}
-          targetPlatform: ${{ env.TARGET_PLATFORM }}
-          versioning: Custom
-          version: ${{ env.BUNDLE_VERSION_WITH_HASH }}
-          androidVersionCode: ${{ env.BUNDLE_VERSION_CODE_FOR_APK }}
-          buildName: MajdataPlay
-          buildsPath: ${{ env.CI_PROJECT_PATH }}/${{ env.CONFIGURATION }}
-          androidExportType: androidStudioProject
-          androidSymbolType: debugging
+        run: bash Tools/CI/run_native_build.sh
 
       - name: Setup Java
         uses: actions/setup-java@v5
@@ -229,7 +217,7 @@ jobs:
         run: |
           cd "${{ env.UNITY_PROJECT_EXPORT_PATH }}"
           
-          UNITY_ANDROID_PLAYER="/Applications/Unity/Hub/Editor/${{ env.UNITY_VERSION }}/PlaybackEngines/AndroidPlayer"
+          UNITY_ANDROID_PLAYER="$UNITY_HOME/Editor/Data/PlaybackEngines/AndroidPlayer"
           BAD_NDK="$UNITY_ANDROID_PLAYER/NDK"
           BAD_SDK="$UNITY_ANDROID_PLAYER/SDK"
           
@@ -462,8 +450,8 @@ jobs:
           status: completed
 
   build-apple:
-    name: Build (macOS/iOS)
-    runs-on: [self-hosted, macOS, ARM64, "${{ matrix.runnerLabel }}"]
+    name: Build (${{ matrix.platform }})
+    runs-on: [self-hosted, "${{ matrix.runnerOS }}", "${{ matrix.runnerArch }}", "${{ matrix.runnerLabel }}"]
     if: ${{ github.event_name == 'push' || github.event_name == 'workflow_dispatch' }}
     permissions:
       contents: read
@@ -472,7 +460,7 @@ jobs:
       fail-fast: false
       matrix:
         # Tags build macOS only (for RhythmHub stable); iOS and TestFlight stay on branch pushes.
-        include: ${{ fromJSON(startsWith(github.ref, 'refs/tags/v') && '[{"configuration":"Release","platform":"StandaloneOSX","runnerLabel":"majplay-apple"}]' || '[{"configuration":"Release","platform":"StandaloneOSX","runnerLabel":"majplay-apple"},{"configuration":"Release","platform":"iOS","runnerLabel":"majplay-ios"}]') }}
+        include: ${{ fromJSON(startsWith(github.ref, 'refs/tags/v') && '[{"configuration":"Release","platform":"StandaloneOSX","runnerLabel":"majplay-apple","runnerOS":"Linux","runnerArch":"X64"}]' || '[{"configuration":"Release","platform":"StandaloneOSX","runnerLabel":"majplay-apple","runnerOS":"Linux","runnerArch":"X64"},{"configuration":"Release","platform":"iOS","runnerLabel":"majplay-ios","runnerOS":"macOS","runnerArch":"ARM64"}]') }}
 
     env:
       CONFIGURATION: ${{ matrix.configuration }}
@@ -519,7 +507,12 @@ jobs:
           echo "BUNDLE_VERSION_CODE=$BUILD_NUMBER" >> $GITHUB_ENV
           echo "Apple build number: $BUILD_NUMBER"
 
+      - name: Build macOS Release
+        if: ${{ env.TARGET_PLATFORM == 'StandaloneOSX' }}
+        run: bash Tools/CI/run_native_build.sh
+
       - name: Build Release
+        if: ${{ env.TARGET_PLATFORM == 'iOS' }}
         uses: game-ci/unity-builder@v4
         with:
           skipActivation: true
@@ -530,10 +523,7 @@ jobs:
           version: ${{ env.BUNDLE_VERSION }}
           buildName: MajdataPlay
           buildsPath: ${{ env.CI_PROJECT_PATH }}/${{ env.CONFIGURATION }}
-          # The macOS player ships Apple silicon only: the x86_64 FFmpeg/libcurl dylibs are
-          # Editor-only, and Unity drops ARM64-only plugins from a Universal player.
-          buildMethod: ${{ env.TARGET_PLATFORM == 'StandaloneOSX' && 'MajdataPlay.Editor.CustomBuild.BuildRelease' || '' }}
-          customParameters: ${{ env.TARGET_PLATFORM == 'StandaloneOSX' && '-macOSArchitecture ARM64' || '-AcceptExternalModificationsToPlayer' }}
+          customParameters: '-AcceptExternalModificationsToPlayer'
 
       - name: Preserve iOS IL2CPP compilation cache
         if: ${{ env.TARGET_PLATFORM == 'iOS' }}
@@ -770,9 +760,8 @@ jobs:
           fi
           STAGE="$RUNNER_TEMP/rhythmhub"
           rm -rf "$STAGE" && mkdir -p "$STAGE"
-          # cp -c clones on APFS: no extra disk space. -p keeps permissions, -R copies symlinks as links;
-          # the code signature lives inside the bundle, so it is preserved.
-          cp -cpR "$found" "$STAGE/"
+          # Preserve bundle permissions and symlinks on the Linux build host.
+          cp -a "$found" "$STAGE/"
           {
             echo "channel=$channel"
             echo "prune=$prune"

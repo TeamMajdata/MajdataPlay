@@ -1,4 +1,4 @@
-"""Activate Unity once for the macOS runner account, without returning its license."""
+"""Activate native Unity once for a runner account, without returning its license."""
 
 import base64
 import binascii
@@ -81,19 +81,28 @@ def prepare_license(editor, license_directory, state_directory, environment, run
 
 
 def main():
-    """Serialize first activation across both runner services on this Mac."""
+    """Serialize first activation across native runners on the same machine."""
     import fcntl
 
     version = os.environ["UNITY_VERSION"]
-    editor = Path(f"/Applications/Unity/Hub/Editor/{version}/Unity.app/Contents/MacOS/Unity")
+    home = Path.home()
+    if sys.platform == "darwin":
+        editor = Path(f"/Applications/Unity/Hub/Editor/{version}/Unity.app/Contents/MacOS/Unity")
+        license_directory = Path("/Library/Application Support/Unity")
+        state_directory = home / "Library/Application Support/MajdataPlayCI"
+    elif sys.platform.startswith("linux"):
+        editor = Path(os.environ["UNITY_EDITOR"])
+        license_directory = home / ".local/share/unity3d/Unity"
+        license_directory.mkdir(parents=True, exist_ok=True, mode=0o700)
+        state_directory = home / ".local/state/MajdataPlayCI"
+    else:
+        raise RuntimeError("Native Unity licensing requires macOS or Linux.")
     if not editor.is_file():
         raise RuntimeError(f"Required Unity Editor is missing: {editor}")
-    state_directory = Path.home() / "Library/Application Support/MajdataPlayCI"
     state_directory.mkdir(parents=True, exist_ok=True, mode=0o700)
     with (state_directory / "license.lock").open("a") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
-        prepare_license(editor, Path("/Library/Application Support/Unity"),
-                        state_directory, os.environ)
+        prepare_license(editor, license_directory, state_directory, os.environ)
 
 
 if __name__ == "__main__":

@@ -5,6 +5,7 @@ from contextlib import redirect_stdout
 import importlib.util
 import io
 import os
+import sys
 from pathlib import Path
 import subprocess
 import tempfile
@@ -149,10 +150,20 @@ class WorkspaceTests(unittest.TestCase):
         workflow = (ROOT / ".github/workflows/main.yml").read_text(encoding="utf-8")
         android_job = workflow.split("  build-android:", 1)[1].split("  build-apple:", 1)[0]
         apple_job = workflow.split("  build-apple:", 1)[1].split("  publish-nightly:", 1)[0]
-        self.assertIn("runs-on: [self-hosted, macOS, ARM64, majplay-android]", android_job)
-        self.assertIn('runs-on: [self-hosted, macOS, ARM64, "${{ matrix.runnerLabel }}"]', apple_job)
-        self.assertIn("platform: StandaloneOSX\n            runnerLabel: majplay-apple", apple_job)
-        self.assertIn("platform: iOS\n            runnerLabel: majplay-ios", apple_job)
+        import json
+        import re
+        self.assertIn("runs-on: [self-hosted, Linux, X64, majplay-android]", android_job)
+        self.assertIn('"${{ matrix.runnerOS }}", "${{ matrix.runnerArch }}"', apple_job)
+        expression = apple_job.split("include: ", 1)[1].splitlines()[0]
+        matrices = [json.loads(value) for value in re.findall(r"'(\[\{.*?\}\])'", expression)]
+        self.assertEqual(len(matrices), 2)
+        self.assertEqual([item["platform"] for item in matrices[0]], ["StandaloneOSX"])
+        routes = {item["platform"]: (item["runnerOS"], item["runnerArch"], item["runnerLabel"])
+                  for item in matrices[1]}
+        self.assertEqual(routes, {"StandaloneOSX": ("Linux", "X64", "majplay-apple"),
+                                  "iOS": ("macOS", "ARM64", "majplay-ios")})
+        self.assertIn("run: bash Tools/CI/run_native_build.sh", android_job)
+        self.assertNotIn("uses: game-ci/unity-builder@", android_job)
         self.assertNotIn("max-parallel: 1", apple_job)
 
     def test_self_hosted_jobs_use_only_local_caches_and_skip_aab_artifacts(self):
@@ -187,10 +198,11 @@ class WorkspaceTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             project = Path(temporary)
             sdk = project / "sdk-with.dots"
-            unity_android = "/Applications/Unity/Hub/Editor/6000.3.17f1/PlaybackEngines/AndroidPlayer"
+            unity_home = project / "unity.with.dots"
+            unity_android = f"{unity_home}/Editor/Data/PlaybackEngines/AndroidPlayer"
             gradle = project / "build.gradle"
             gradle.write_text(f'ndkPath "{unity_android}/NDK"\nsdkPath "{unity_android}/SDK"\n')
-            environment = dict(os.environ, ANDROID_HOME=str(sdk))
+            environment = dict(os.environ, ANDROID_HOME=str(sdk), UNITY_HOME=str(unity_home))
             subprocess.run(["bash", "-c", script], cwd=project, env=environment,
                            check=True, capture_output=True)
             self.assertEqual(gradle.read_text(),
@@ -235,6 +247,61 @@ class WorkspaceTests(unittest.TestCase):
                     self.assertFalse((project / relative).exists(), relative)
                 environment["PROJECT_ROOT"] = str(project / "not-yet-cloned")
                 subprocess.run(["bash", "-c", script], env=environment, check=True, capture_output=True)
+
+
+class NativeBuildTests(unittest.TestCase):
+    @unittest.skipIf(os.name == "nt", "Native builder requires Bash on the Linux runner.")
+    def test_native_builds_pass_platform_options_and_preserve_output_paths(self):
+        import json
+        import sys
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            editor = root / "fake-unity"
+            captured = root / "arguments.json"
+            editor.write_text(f"#!{sys.executable}\nimport json, os, sys\n"
+                              "from pathlib import Path\n"
+                              "Path(os.environ['CAPTURE_ARGUMENTS']).write_text(json.dumps(sys.argv[1:]))\n")
+            editor.chmod(0o700)
+            for target in ("Android", "StandaloneOSX"):
+                with self.subTest(target=target):
+                    environment = dict(os.environ, UNITY_EDITOR=str(editor), PROJECT_ROOT=str(root),
+                                       CONFIGURATION="Release", TARGET_PLATFORM=target,
+                                       BUNDLE_VERSION="1.2.3", BUNDLE_VERSION_WITH_HASH="1.2.3-test",
+                                       BUNDLE_VERSION_CODE_FOR_APK="1234", CAPTURE_ARGUMENTS=str(captured))
+                    subprocess.run(["bash", str(ROOT / "Tools/CI/run_native_build.sh")],
+                                   env=environment, check=True, capture_output=True)
+                    arguments = json.loads(captured.read_text())
+                    self.assertIn("-batchmode", arguments)
+                    self.assertIn("-nographics", arguments)
+                    self.assertEqual(arguments[arguments.index("-buildTarget") + 1], target)
+                    output = arguments[arguments.index("-customBuildPath") + 1]
+                    if target == "Android":
+                        self.assertEqual(output, str(root / "Release/Android/MajdataPlay"))
+                        self.assertEqual(arguments[arguments.index("-androidVersionCode") + 1], "1234")
+                        self.assertEqual(arguments[arguments.index("-buildVersion") + 1], "1.2.3-test")
+                        self.assertEqual(arguments[arguments.index("-executeMethod") + 1],
+                                         "MajdataPlay.Editor.CustomBuild.BuildAndroidExport")
+                    else:
+                        self.assertEqual(output, str(root / "Release/StandaloneOSX/MajdataPlay.app"))
+                        self.assertEqual(arguments[arguments.index("-macOSArchitecture") + 1], "ARM64")
+                        self.assertEqual(arguments[arguments.index("-buildVersion") + 1], "1.2.3")
+
+    @unittest.skipUnless(sys.platform.startswith("linux"), "Linux home-directory licensing setup.")
+    def test_linux_license_setup_uses_user_owned_directories(self):
+        from unittest import mock
+        with tempfile.TemporaryDirectory() as temporary:
+            home = Path(temporary)
+            editor = home / "Unity"
+            editor.touch()
+            with mock.patch.object(LICENSING.Path, "home", return_value=home), \
+                 mock.patch.dict(os.environ, {"UNITY_VERSION": "6000.3.17f1", "UNITY_EDITOR": str(editor)}), \
+                 mock.patch.object(LICENSING, "prepare_license") as activate:
+                LICENSING.main()
+            license_directory = home / ".local/share/unity3d/Unity"
+            state_directory = home / ".local/state/MajdataPlayCI"
+            self.assertTrue(license_directory.is_dir())
+            self.assertTrue((state_directory / "license.lock").is_file())
+            self.assertEqual(activate.call_args.args[:3], (editor, license_directory, state_directory))
 
 
 if __name__ == "__main__":
