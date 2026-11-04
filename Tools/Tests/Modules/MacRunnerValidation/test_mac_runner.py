@@ -32,6 +32,14 @@ ENVIRONMENT = {
 ULF = '<root><License id="Terms"/></root>'
 
 
+def bash_environment(**overrides):
+    """Keep runner shell startup files from replacing isolated fixture settings."""
+    environment = dict(os.environ, BASH_ENV=os.devnull, **overrides)
+    for name in ("SSH_CLIENT", "SSH_CONNECTION"):
+        environment.pop(name, None)
+    return environment
+
+
 class LicensingTests(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
@@ -179,6 +187,29 @@ class WorkspaceTests(unittest.TestCase):
         self.assertNotIn("/out/*.aab", android_job)
         self.assertIn("uses: r0adkll/upload-google-play@v1", android_job)
 
+    @unittest.skipIf(os.name == "nt", "Run Bash temporary directory tests on a native runner.")
+    def test_android_build_routes_native_and_java_temporary_files_to_runner_disk(self):
+        workflow = (ROOT / ".github/workflows/main.yml").read_text(encoding="utf-8")
+        block = workflow.split("      - name: Configure Android temporary files\n", 1)[1]
+        script = block.split("        run: |\n", 1)[1].split("\n      - name:", 1)[0]
+        script = "\n".join(line[10:] for line in script.splitlines())
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary) / "runner temp.with-dots"
+            directory.mkdir()
+            github_env = Path(temporary) / "github-env"
+            environment = bash_environment(RUNNER_TEMP=str(directory), GITHUB_ENV=str(github_env),
+                                           JAVA_TOOL_OPTIONS="-Dci.fixture=preserved")
+            subprocess.run(["bash", "-c", script], env=environment, check=True, capture_output=True)
+            variables = dict(line.split("=", 1) for line in github_env.read_text().splitlines())
+            self.assertEqual(variables["TMPDIR"], str(directory))
+            self.assertIn("-Dci.fixture=preserved", variables["JAVA_TOOL_OPTIONS"])
+            if sys.platform.startswith("linux"):
+                result = subprocess.run(["java", "-XshowSettings:properties", "-version"],
+                                        env=dict(environment, **variables), check=True,
+                                        capture_output=True, text=True)
+                self.assertIn(f"java.io.tmpdir = {directory}", result.stderr)
+                self.assertIn("ci.fixture = preserved", result.stderr)
+
     def test_signing_keychain_is_unique_and_cleaned_after_failures(self):
         workflow = (ROOT / ".github/workflows/main.yml").read_text(encoding="utf-8")
         self.assertIn("CI_KEYCHAIN: majplay-${{ github.run_id }}-${{ github.run_attempt }}", workflow)
@@ -202,7 +233,7 @@ class WorkspaceTests(unittest.TestCase):
             unity_android = f"{unity_home}/Editor/Data/PlaybackEngines/AndroidPlayer"
             gradle = project / "build.gradle"
             gradle.write_text(f'ndkPath "{unity_android}/NDK"\nsdkPath "{unity_android}/SDK"\n')
-            environment = dict(os.environ, ANDROID_HOME=str(sdk), UNITY_HOME=str(unity_home))
+            environment = bash_environment(ANDROID_HOME=str(sdk), UNITY_HOME=str(unity_home))
             subprocess.run(["bash", "-c", script], cwd=project, env=environment,
                            check=True, capture_output=True)
             self.assertEqual(gradle.read_text(),
@@ -212,7 +243,8 @@ class WorkspaceTests(unittest.TestCase):
     def test_ios_export_preserves_the_native_incremental_project(self):
         workflow = (ROOT / ".github/workflows/main.yml").read_text(encoding="utf-8")
         apple_job = workflow.split("  build-apple:", 1)[1].split("  publish-nightly:", 1)[0]
-        self.assertIn("'-AcceptExternalModificationsToPlayer'", apple_job)
+        self.assertIn("buildMethod: MajdataPlay.Editor.CustomBuild.BuildIOSExport", apple_job)
+        self.assertNotIn("customParameters: '-AcceptExternalModificationsToPlayer'", apple_job)
         self.assertIn("clean: false,", apple_job)
         self.assertIn('"Release", "iOS", "DerivedData"', apple_job)
 
@@ -236,7 +268,7 @@ class WorkspaceTests(unittest.TestCase):
                     file = project / relative
                     file.parent.mkdir(parents=True, exist_ok=True)
                     file.write_text("test")
-                environment = dict(os.environ, PROJECT_ROOT=str(project))
+                environment = bash_environment(PROJECT_ROOT=str(project))
                 # Run the actual workflow script, including its first-checkout guard.
                 for _ in range(2):
                     subprocess.run(["bash", "-c", script], env=environment, check=True, capture_output=True)
@@ -264,10 +296,12 @@ class NativeBuildTests(unittest.TestCase):
             editor.chmod(0o700)
             for target in ("Android", "StandaloneOSX"):
                 with self.subTest(target=target):
-                    environment = dict(os.environ, UNITY_EDITOR=str(editor), PROJECT_ROOT=str(root),
-                                       CONFIGURATION="Release", TARGET_PLATFORM=target,
-                                       BUNDLE_VERSION="1.2.3", BUNDLE_VERSION_WITH_HASH="1.2.3-test",
-                                       BUNDLE_VERSION_CODE_FOR_APK="1234", CAPTURE_ARGUMENTS=str(captured))
+                    environment = bash_environment(
+                        UNITY_EDITOR=str(editor), PROJECT_ROOT=str(root),
+                        CONFIGURATION="Release", TARGET_PLATFORM=target,
+                        BUNDLE_VERSION="1.2.3", BUNDLE_VERSION_WITH_HASH="1.2.3-test",
+                        BUNDLE_VERSION_CODE_FOR_APK="1234", CAPTURE_ARGUMENTS=str(captured)
+                    )
                     subprocess.run(["bash", str(ROOT / "Tools/CI/run_native_build.sh")],
                                    env=environment, check=True, capture_output=True)
                     arguments = json.loads(captured.read_text())

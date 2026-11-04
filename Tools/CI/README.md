@@ -91,9 +91,17 @@ The Android job also disables setup-java/setup-gradle remote caching and reuses
 Fastlane. The Windows/Linux jobs run on ephemeral GitHub-hosted machines and
 retain their separate Unity Library cache.
 
+Android sets `TMPDIR` and Java's `java.io.tmpdir` to the disk-backed runner temp
+directory. The Linux host's `/tmp` is a tmpfs with per-user quotas; bundletool can
+exceed that quota while packaging an AAB even when the workspace has free space.
+Both settings are needed because Java does not use `TMPDIR` for this property.
+
 Unity's incremental build pipeline is enabled by default; retaining `Library/Bee`
-and stable paths allows IL2CPP to reuse unchanged work. The iOS Unity export uses
-`AcceptExternalModificationsToPlayer` (append mode), and Fastlane uses `clean: false`
+and stable paths allows IL2CPP to reuse unchanged work. The iOS custom build entry
+point asks `BuildPipeline.BuildCanBeAppended` before enabling
+`AcceptExternalModificationsToPlayer`. A first or incompatible export uses a fresh
+build instead, so an empty output cannot fail with `The build cannot be appended`.
+Fastlane uses `clean: false`
 and a fixed `Release/iOS/DerivedData`. Changes to Unity,
 source, platform settings, generated Xcode projects or native toolchains may
 invalidate portions of the cache; this does not guarantee a no-op rebuild.

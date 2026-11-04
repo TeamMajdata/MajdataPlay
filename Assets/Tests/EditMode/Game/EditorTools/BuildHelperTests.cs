@@ -115,6 +115,25 @@ namespace MajdataPlay.Tests.Game.EditorTools
             Assert.That(options["batchmode"], Is.Empty);
         }
 
+        /// <summary>Checks that a first or incomplete iOS export does not request append mode.</summary>
+        /// <param name="createIncompleteProject">Whether to create an incomplete Xcode project directory.</param>
+        [TestCase(false)]
+        [TestCase(true)]
+        public void CustomBuild_IOSExportWithoutAppendableProjectUsesFreshBuild(bool createIncompleteProject)
+        {
+            using var temporary = new TemporaryDirectory();
+            var buildPath = Path.Combine(temporary.Location, "iOS");
+            if (createIncompleteProject)
+            {
+                var output = temporary.Directory.CreateDirectory("iOS");
+                output.CreateDirectory("Unity-iPhone.xcodeproj");
+            }
+
+            var options = CustomBuild.GetIOSExportOptions(buildPath);
+
+            Assert.That(options, Is.EqualTo(BuildOptions.None));
+        }
+
         /// <summary>Checks that an empty build summary can be reported.</summary>
         [Test]
         public void CustomBuild_ReportsBuildSummary()

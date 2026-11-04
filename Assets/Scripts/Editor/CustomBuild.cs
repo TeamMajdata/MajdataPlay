@@ -24,6 +24,38 @@ namespace MajdataPlay.Editor
             var (a, b, c) = Handle();
             Build(a, b, c, null);
         }
+        /// <summary>
+        /// Exports an iOS Xcode project, appending only when Unity accepts the existing output.
+        /// </summary>
+        /// <exception cref="InvalidOperationException">The requested build target is not iOS.</exception>
+        public static void BuildIOSExport()
+        {
+            var (buildTarget, buildSubtarget, buildPath) = Handle();
+            if (buildTarget != BuildTarget.iOS)
+            {
+                throw new InvalidOperationException("BuildIOSExport requires the iOS build target.");
+            }
+
+            var options = GetIOSExportOptions(buildPath);
+            UnityEngine.Debug.Log($"iOS export options: {options}.");
+            Build(buildTarget, buildSubtarget, buildPath, options);
+        }
+
+        /// <summary>
+        /// Selects append mode for a compatible iOS export or a fresh export otherwise.
+        /// </summary>
+        /// <param name="buildPath">The destination of the generated Xcode project.</param>
+        /// <returns>Append mode when Unity can reuse the output; otherwise no additional options.</returns>
+        internal static BuildOptions GetIOSExportOptions(string buildPath)
+        {
+            if (BuildPipeline.BuildCanBeAppended(BuildTarget.iOS, buildPath) == CanAppendBuild.Yes)
+            {
+                return BuildOptions.AcceptExternalModificationsToPlayer;
+            }
+
+            return BuildOptions.None;
+        }
+
         public static void BuildAndroidExport()
         {
 #if UNITY_ANDROID

@@ -167,6 +167,12 @@ jobs:
           fetch-depth: 0
           clean: false
 
+      - name: Configure Android temporary files
+        run: |
+          # /tmp has a per-user tmpfs quota; bundletool needs disk-backed space.
+          printf 'TMPDIR=%s\n' "$RUNNER_TEMP" >> "$GITHUB_ENV"
+          printf 'JAVA_TOOL_OPTIONS=%s -Djava.io.tmpdir="%s"\n' "${JAVA_TOOL_OPTIONS:-}" "$RUNNER_TEMP" >> "$GITHUB_ENV"
+
       - name: Prepare the persistent Unity license
         run: python3 Tools/CI/prepare_unity_license.py
 
@@ -523,7 +529,7 @@ jobs:
           version: ${{ env.BUNDLE_VERSION }}
           buildName: MajdataPlay
           buildsPath: ${{ env.CI_PROJECT_PATH }}/${{ env.CONFIGURATION }}
-          customParameters: '-AcceptExternalModificationsToPlayer'
+          buildMethod: MajdataPlay.Editor.CustomBuild.BuildIOSExport
 
       - name: Preserve iOS IL2CPP compilation cache
         if: ${{ env.TARGET_PLATFORM == 'iOS' }}
