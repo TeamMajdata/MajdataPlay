@@ -104,6 +104,44 @@ namespace MajdataPlay.Tests.Game.Scenes.ResultScene
             });
         }
 
+        /// <summary>Checks that switching from a like to a dislike and withdrawing it both use the JSON vote endpoint.</summary>
+        /// <returns>The test coroutine.</returns>
+        [UnityTest]
+        public IEnumerator SubmitAsync_SendsDislikeAndWithdrawal()
+        {
+            return UniTask.ToCoroutine(async () =>
+            {
+                _http.Responder = request => request.Method == HttpMethod.Get
+                    ? StubHttpScope.Respond(HttpStatusCode.OK, "{\"score\":1,\"upvotes\":1,\"downvotes\":0,\"myVote\":1}")
+                    : StubHttpScope.Respond(HttpStatusCode.OK, "{}");
+
+                Assert.That(await _panel.SubmitAsync(), Is.False, "The first submit loads the existing like.");
+                Assert.That(PrivateMember.GetField<GameObject>(_panel, "_likeOutline").activeSelf, Is.True);
+
+                _panel.SelectVote(-1);
+                Assert.That(PrivateMember.GetField<GameObject>(_panel, "_likeOutline").activeSelf, Is.False);
+                Assert.That(PrivateMember.GetField<GameObject>(_panel, "_dislikeOutline").activeSelf, Is.True);
+                Assert.That(await _panel.SubmitAsync(), Is.True);
+
+                _panel.SelectVote(-1);
+                Assert.That(PrivateMember.GetField<GameObject>(_panel, "_dislikeOutline").activeSelf, Is.False);
+                Assert.That(await _panel.SubmitAsync(), Is.True);
+
+                var requests = _http.Requests;
+                Assert.That(requests.Length, Is.EqualTo(3));
+                for (var i = 1; i < requests.Length; i++)
+                {
+                    Assert.That(requests[i].Method, Is.EqualTo(HttpMethod.Put));
+                    Assert.That(requests[i].Uri.AbsolutePath, Is.EqualTo($"/api/maichart/{_song.Id}/vote"));
+                }
+                Assert.That(JObject.Parse(requests[1].Body)["value"]!.Value<int>(), Is.EqualTo(-1));
+                Assert.That(JObject.Parse(requests[2].Body)["value"]!.Value<int>(), Is.EqualTo(0));
+
+                Assert.That(await _panel.SubmitAsync(), Is.True);
+                Assert.That(_http.Requests.Length, Is.EqualTo(3), "A confirmed withdrawal sends nothing again.");
+            });
+        }
+
         /// <summary>
         /// Checks that a vote whose response was lost stays unconfirmed, so going back to the stored vote still sends it,
         /// because the server may already hold the lost vote.

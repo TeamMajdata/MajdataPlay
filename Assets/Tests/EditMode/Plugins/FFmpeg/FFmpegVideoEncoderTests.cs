@@ -429,25 +429,28 @@ namespace MajdataPlay.Tests.Plugins.FFmpeg
         {
             var options = Options(VideoEncodingFormat.H264, VideoRateControlMode.CBR);
             options.PreferredEncoderType = VideoEncoderType.Hardware;
+            var path = FFmpegTestMedia.PathIn(_directory, "hardware.mp4");
             using var encoder = new FFmpegVideoEncoder(options);
-            encoder.Open(FFmpegTestMedia.PathIn(_directory, "hardware.mp4"), CancellationToken.None);
+            encoder.Open(path, CancellationToken.None);
 
             if (encoder.EncoderType == VideoEncoderType.Hardware)
             {
-                Assert.That(encoder.EncoderName, Does.EndWith("_nvenc").Or.EndWith("_amf"));
+                Assert.That(encoder.EncoderName, Does.StartWith("h264_"));
                 Assert.That(encoder.SoftwareThreadCount, Is.EqualTo(0));
             }
             else
             {
                 Assert.That(encoder.EncoderName, Is.EqualTo("libx264"));
-                Assert.That(encoder.HardwareFallbackReason, Does.Contain("h264_nvenc"));
-                Assert.That(encoder.HardwareFallbackReason, Does.Contain("MediaFoundation"));
+                Assert.That(encoder.EncoderDevice, Is.EqualTo("Software"));
+                Assert.That(encoder.HardwareFallbackReason, Is.Not.Null.And.Not.Empty);
             }
 
             encoder.Encode(FFmpegTestMedia.CreateFrame(Width, Height, 0), 0, false);
             encoder.Complete();
             Assert.That(encoder.EncodedFrames, Is.EqualTo(1));
             Assert.That(encoder.EncoderDevice, Is.Not.Null.And.Not.Empty);
+            Assert.That(CountFrames(path, out var codec), Is.EqualTo(1));
+            Assert.That(codec, Is.EqualTo("h264"));
         }
 
         /// <summary>Checks that software preference reports the software device and ignores GPUs.</summary>

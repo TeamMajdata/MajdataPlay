@@ -22,9 +22,6 @@ namespace MajdataPlay.Tests.Plugins.Platform
         /// <summary>The entries received from the Unity log while the test runs.</summary>
         private readonly List<(LogType Type, string Message)> _entries = new();
 
-        /// <summary>A value indicating whether failing log messages were ignored before the test.</summary>
-        private bool _savedIgnoreFailingMessages;
-
         /// <summary>Records one entry received from the Unity log.</summary>
         /// <param name="condition">The message of the entry.</param>
         /// <param name="stackTrace">The stack trace of the entry, which is ignored.</param>
@@ -34,22 +31,19 @@ namespace MajdataPlay.Tests.Plugins.Platform
             _entries.Add((type, condition));
         }
 
-        /// <summary>Subscribes to the Unity log and keeps error-level entries from failing the test.</summary>
+        /// <summary>Subscribes to the Unity log to inspect each entry.</summary>
         [SetUp]
         public void SetUp()
         {
             _entries.Clear();
-            _savedIgnoreFailingMessages = LogAssert.ignoreFailingMessages;
-            LogAssert.ignoreFailingMessages = true;
             Application.logMessageReceived += OnLogMessageReceived;
         }
 
-        /// <summary>Restores the failing-message setting and unsubscribes from the Unity log.</summary>
+        /// <summary>Unsubscribes from the Unity log.</summary>
         [TearDown]
         public void TearDown()
         {
             Application.logMessageReceived -= OnLogMessageReceived;
-            LogAssert.ignoreFailingMessages = _savedIgnoreFailingMessages;
         }
 
         /// <summary>Gets the single entry the test wrote.</summary>
@@ -139,6 +133,7 @@ namespace MajdataPlay.Tests.Plugins.Platform
         {
             var logger = new AndroidLogger();
             var exception = new InvalidOperationException("boom");
+            LogAssert.Expect(LogType.Error, "failed" + Environment.NewLine + exception);
 
             logger.Log(LogLevel.Error, exception, "failed");
 
@@ -152,8 +147,10 @@ namespace MajdataPlay.Tests.Plugins.Platform
         public void Log_TaggedEntryWithException_PrefixesTagBeforeMessage()
         {
             var logger = new AndroidLogger();
+            var exception = new TimeoutException("late");
+            LogAssert.Expect(LogType.Error, "[Net]timeout" + Environment.NewLine + exception);
 
-            logger.Log(LogLevel.Fatal, "Net", new TimeoutException("late"), "timeout");
+            logger.Log(LogLevel.Fatal, "Net", exception, "timeout");
 
             var message = SingleEntry().Message;
             Assert.That(message, Does.StartWith("[Net]timeout" + Environment.NewLine));
@@ -171,6 +168,7 @@ namespace MajdataPlay.Tests.Plugins.Platform
         public void Log_MapsLevelsToUnityLogTypes(LogLevel level, LogType expected)
         {
             var logger = new AndroidLogger();
+            LogAssert.Expect(expected, "message");
 
             logger.Log(level, "message");
 

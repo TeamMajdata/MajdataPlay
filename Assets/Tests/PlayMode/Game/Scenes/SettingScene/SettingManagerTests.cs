@@ -222,7 +222,7 @@ namespace MajdataPlay.Tests.Game.Scenes.PlayMode.SettingScene
             Assert.That(PrivateMember.GetField<float>(_manager, "_listCursorPos"), Is.EqualTo(_manager.Index));
         }
 
-        /// <summary>Checks that the previous category button wraps from the first menu to the last without animation.</summary>
+        /// <summary>Checks that the previous category button wraps to the last menu while its title cursor skips unlisted menus.</summary>
         /// <returns>The test coroutine.</returns>
         [UnityTest]
         public IEnumerator PreviousCategoryButton_WrapsToLastMenu()
@@ -234,7 +234,9 @@ namespace MajdataPlay.Tests.Game.Scenes.PlayMode.SettingScene
             yield return PressButton(ButtonZone.A7);
 
             Assert.That(_manager.Index, Is.EqualTo(Menus.Length - 1));
-            Assert.That(PrivateMember.GetField<float>(_manager, "_listCursorPos"), Is.EqualTo(Menus.Length - 1));
+            var listedMenuCount = Menus.Count(menu => menu.Visibility.IsVisible(_manager.Setting));
+            Assert.That(CursorPosition, Is.EqualTo(listedMenuCount - 1));
+            Assert.That(PrivateMember.GetField<MotionHandle>(_manager, "_menuTitleDisplayerAnim").IsActive(), Is.False);
             Assert.That(Current.SelectedIndex, Is.EqualTo(PrivateMember.GetField<int>(Current, "_displayedOptionCount") - 1));
         }
 

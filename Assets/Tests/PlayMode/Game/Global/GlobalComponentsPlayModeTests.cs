@@ -103,28 +103,30 @@ namespace MajdataPlay.Tests.Game.Global.PlayMode
             }
         }
 
-        /// <summary>Checks that hiding and showing the background video moves its renderer between layers.</summary>
+        /// <summary>Checks that hiding and showing the background video disables and enables its renderer.</summary>
         /// <returns>The test coroutine.</returns>
         [UnityTest]
-        public IEnumerator BackgroundVideo_HideAndShowSwitchLayers()
+        public IEnumerator BackgroundVideo_HideAndShowToggleRenderer()
         {
             var root = InactiveObjects.Create(_objects, "BackgroundVideo");
             var player = root.AddComponent<FFmpegVideoPlayer>();
             var spriteObject = _objects.Create("BackgroundSprite", root.transform);
             var sprite = spriteObject.AddComponent<SpriteRenderer>();
             var controller = root.AddComponent<BackgroundVideoController>();
+            // Exercise the controls without starting the global game initialization and video preparation.
+            controller.enabled = false;
             PrivateMember.SetField(controller, "_videoPlayer", player);
             PrivateMember.SetField(controller, "_videoRenderer", sprite);
             root.SetActive(true);
             yield return null;
 
             controller.Hide();
-            Assert.That(spriteObject.layer, Is.EqualTo(MajEnv.HIDDEN_LAYER));
+            Assert.That(sprite.enabled, Is.False);
             controller.Pause();
             controller.Stop();
             var error = Assert.Throws<InvalidOperationException>(() => controller.Show(), "no video source is configured");
             Assert.That(error.Message, Does.Contain("Url"));
-            Assert.That(spriteObject.layer, Is.EqualTo(MajEnv.DEFAULT_LAYER));
+            Assert.That(sprite.enabled, Is.True);
             Assert.Throws<InvalidOperationException>(() => controller.Play());
             Assert.That(MajdataPlay.Majdata<BackgroundVideoController>.Instance, Is.SameAs(controller));
         }

@@ -191,24 +191,31 @@ namespace MajdataPlay.Tests.Plugins.Threading
         }
 
         /// <summary>Checks that a worker thread records the cached active scene and marks it as cached.</summary>
-        /// <returns>The test coroutine.</returns>
-        [UnityTest]
-        public IEnumerator Register_WorkerThreadWithoutScene_RecordsCachedScene() => UniTask.ToCoroutine(async () =>
+        [Test]
+        public void Register_WorkerThreadWithoutScene_RecordsCachedScene()
         {
             var name = TaskTrackerIsolation.UniqueName("worker");
             var source = new TaskCompletionSource<int>();
             PrivateMember.SetStaticField(typeof(TaskTracker), "_activeScene", "Cached/Scene.unity");
 
-            await Task.Run(() =>
+            try
             {
-                TaskTracker.Register(source.Task, name);
-            });
+                // Keep the main thread here so its Editor update cannot refresh the seeded scene cache.
+                var registered = Task.Run(() =>
+                {
+                    TaskTracker.Register(source.Task, name);
+                });
+                Assert.That(registered.Wait(TimeSpan.FromSeconds(10)), Is.True, "The worker did not register the task.");
 
-            var snapshot = TaskTrackerIsolation.Single(name);
-            Assert.That(snapshot.SceneName, Is.EqualTo("Cached/Scene.unity"));
-            Assert.That(snapshot.IsSceneCached, Is.True);
-            source.SetResult(1);
-        });
+                var snapshot = TaskTrackerIsolation.Single(name);
+                Assert.That(snapshot.SceneName, Is.EqualTo("Cached/Scene.unity"));
+                Assert.That(snapshot.IsSceneCached, Is.True);
+            }
+            finally
+            {
+                source.TrySetResult(1);
+            }
+        }
 
         /// <summary>Checks the running-task queries with worker and scene filters as tasks complete.</summary>
         [Test]
