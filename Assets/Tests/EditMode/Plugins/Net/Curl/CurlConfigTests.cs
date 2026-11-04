@@ -6,6 +6,7 @@ using System.Security.Authentication;
 using System.Threading;
 using MajdataPlay.Net.Curl;
 using MajdataPlay.Net.Curl.Core.PInvoke;
+using MajdataPlay.Net.Curl.Diagnostics;
 using MajdataPlay.Net.Curl.Utils;
 using NUnit.Framework;
 using UnityEngine;
@@ -32,6 +33,8 @@ namespace MajdataPlay.Tests.Plugins.Net.Curl
             using var handler = new CurlHttpMessageHandler();
 
             Assert.That(handler.SslProtocols, Is.EqualTo(SslProtocols.Tls12 | SslProtocols.Tls13));
+            Assert.That(handler.EnabledHttpVersions, Is.EqualTo(CurlHttpVersions.All));
+            Assert.That(handler.PreferredHttpVersion, Is.EqualTo(CurlHttpVersions.None));
             Assert.That(handler.Proxy, Is.Null);
             Assert.That(handler.PreAuthenticate, Is.False);
             Assert.That(handler.MaxResponseHeadersLength, Is.EqualTo(64 * 1024));
@@ -67,6 +70,8 @@ namespace MajdataPlay.Tests.Plugins.Net.Curl
             using var handler = new CurlHttpMessageHandler
             {
                 SslProtocols = SslProtocols.Tls12,
+                EnabledHttpVersions = CurlHttpVersions.Http11 | CurlHttpVersions.Http2,
+                PreferredHttpVersion = CurlHttpVersions.Http11,
                 Proxy = proxy,
                 PreAuthenticate = true,
                 MaxResponseHeadersLength = 1,
@@ -94,6 +99,8 @@ namespace MajdataPlay.Tests.Plugins.Net.Curl
             var config = PrivateMember.Invoke<CurlHttpConfig>(handler, "CopyCurrentConfig");
 
             Assert.That(config.SslProtocols, Is.EqualTo(SslProtocols.Tls12));
+            Assert.That(config.EnabledHttpVersions, Is.EqualTo(CurlHttpVersions.Http11 | CurlHttpVersions.Http2));
+            Assert.That(config.PreferredHttpVersion, Is.EqualTo(CurlHttpVersions.Http11));
             Assert.That(config.Proxy, Is.SameAs(proxy));
             Assert.That(config.PreAuthenticate, Is.True);
             Assert.That(config.MaxResponseHeadersLength, Is.EqualTo(1));
@@ -116,6 +123,63 @@ namespace MajdataPlay.Tests.Plugins.Net.Curl
             Assert.That(config.MaxCachedConnections, Is.EqualTo(10));
             Assert.That(config.PooledConnectionIdleTimeout, Is.EqualTo(TimeSpan.FromSeconds(11)));
             Assert.That(config.PooledConnectionLifetime, Is.EqualTo(TimeSpan.FromSeconds(12)));
+        }
+
+        /// <summary>Checks that enabled versions form a nonempty set and a preference names at most one known version.</summary>
+        [Test]
+        public void Handler_HttpVersionsRejectInvalidFlags()
+        {
+            using var handler = new CurlHttpMessageHandler();
+            var unknownVersion = (CurlHttpVersions)16;
+
+            Assert.Throws<ArgumentOutOfRangeException>(() => handler.EnabledHttpVersions = CurlHttpVersions.None);
+            Assert.Throws<ArgumentOutOfRangeException>(() => handler.EnabledHttpVersions = CurlHttpVersions.Http11 | unknownVersion);
+            Assert.Throws<ArgumentOutOfRangeException>(() => handler.PreferredHttpVersion = unknownVersion);
+            Assert.Throws<ArgumentOutOfRangeException>(() => handler.PreferredHttpVersion = CurlHttpVersions.Http11 | CurlHttpVersions.Http2);
+        }
+
+        /// <summary>Checks the CURLOPT_HTTP_VERSION value for a handler snapshot and native library capabilities.</summary>
+        /// <param name="enabled">The enabled versions.</param>
+        /// <param name="preferred">The preferred version.</param>
+        /// <param name="features">The HTTP features available in the native build.</param>
+        /// <param name="isHttps">Whether the request uses TLS.</param>
+        /// <param name="expected">The expected native option value.</param>
+        [TestCase(CurlHttpVersions.All, CurlHttpVersions.None, CurlFeatures.Http2 | CurlFeatures.Http3, true, 0)]
+        [TestCase(CurlHttpVersions.Http10, CurlHttpVersions.None, CurlFeatures.None, false, 1)]
+        [TestCase(CurlHttpVersions.Http11, CurlHttpVersions.None, CurlFeatures.None, false, 2)]
+        [TestCase(CurlHttpVersions.Http11 | CurlHttpVersions.Http2, CurlHttpVersions.Http2, CurlFeatures.Http2, true, 3)]
+        [TestCase(CurlHttpVersions.Http2, CurlHttpVersions.None, CurlFeatures.Http2, true, 5)]
+        [TestCase(CurlHttpVersions.All, CurlHttpVersions.Http3, CurlFeatures.Http2 | CurlFeatures.Http3, true, 30)]
+        [TestCase(CurlHttpVersions.Http11 | CurlHttpVersions.Http3, CurlHttpVersions.Http3, CurlFeatures.Http2 | CurlFeatures.Http3, true, 31)]
+        [TestCase(CurlHttpVersions.Http3, CurlHttpVersions.None, CurlFeatures.Http3, true, 31)]
+        [TestCase(CurlHttpVersions.All, CurlHttpVersions.Http3, CurlFeatures.Http2, true, 3)]
+        [TestCase(CurlHttpVersions.Http11 | CurlHttpVersions.Http3, CurlHttpVersions.Http3, CurlFeatures.None, true, 2)]
+        [TestCase(CurlHttpVersions.Http11 | CurlHttpVersions.Http3, CurlHttpVersions.Http3, CurlFeatures.Http3, false, 2)]
+        public void GetHttpVersionMode_RespectsEnabledVersionsAndBuildFeatures(CurlHttpVersions enabled,
+            CurlHttpVersions preferred, CurlFeatures features, bool isHttps, int expected)
+        {
+            var config = new CurlHttpConfig { EnabledHttpVersions = enabled, PreferredHttpVersion = preferred };
+
+            Assert.That((long)config.GetHttpVersionMode(features, isHttps), Is.EqualTo(expected));
+        }
+
+        /// <summary>Checks that a zero-initialized configuration leaves protocol negotiation to libcurl.</summary>
+        [Test]
+        public void GetHttpVersionMode_DefaultConfigKeepsNativeDefault()
+        {
+            Assert.That(default(CurlHttpConfig).GetHttpVersionMode(CurlFeatures.None, false), Is.EqualTo(CurlHttpVersionMode.Default));
+        }
+
+        /// <summary>Checks that invalid preferences and requests with no usable protocol fail before negotiation.</summary>
+        [Test]
+        public void GetHttpVersionMode_RejectsInvalidPreferenceAndUnavailableProtocol()
+        {
+            var invalidPreference = new CurlHttpConfig { EnabledHttpVersions = CurlHttpVersions.Http11, PreferredHttpVersion = CurlHttpVersions.Http2 };
+            var requiresHttp3 = new CurlHttpConfig { EnabledHttpVersions = CurlHttpVersions.Http3 };
+
+            Assert.Throws<InvalidOperationException>(() => invalidPreference.GetHttpVersionMode(CurlFeatures.Http2, true));
+            Assert.Throws<NotSupportedException>(() => requiresHttp3.GetHttpVersionMode(CurlFeatures.Http2, true));
+            Assert.Throws<NotSupportedException>(() => requiresHttp3.GetHttpVersionMode(CurlFeatures.Http3, false));
         }
 
         /// <summary>Checks that the timeout settings accept positive values and the infinite sentinel only.</summary>

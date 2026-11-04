@@ -14,6 +14,7 @@ using Cysharp.Threading.Tasks;
 using MajdataPlay.Net.Curl;
 using MajdataPlay.Net.Curl.Core;
 using MajdataPlay.Net.Curl.Core.PInvoke;
+using MajdataPlay.Net.Curl.Diagnostics;
 using NUnit.Framework;
 using UnityEngine.TestTools;
 
@@ -121,6 +122,46 @@ namespace MajdataPlay.Tests.Plugins.Net.Curl
             Assert.That(await response.Content.ReadAsStringAsync(), Is.EqualTo("ok"));
         });
 
+        /// <summary>Checks that each request uses the HTTP/1.x version currently preferred by its handler.</summary>
+        /// <returns>The test coroutine.</returns>
+        [UnityTest]
+        public IEnumerator HttpVersions_ApplyChangedPreferenceToNextRequest() => UniTask.ToCoroutine(async () =>
+        {
+            using var server = new LoopbackHttpServer((request, stream, token) =>
+                LoopbackHttpServer.WriteAsync(stream, $"{request.Protocol} 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"));
+            using var handler = new CurlHttpMessageHandler
+            {
+                EnabledHttpVersions = CurlHttpVersions.Http10 | CurlHttpVersions.Http11,
+                PreferredHttpVersion = CurlHttpVersions.Http10
+            };
+            using var client = new HttpClient(handler);
+
+            using var first = await SendAsync(client, new HttpRequestMessage(HttpMethod.Get, server.Url));
+            handler.PreferredHttpVersion = CurlHttpVersions.Http11;
+            using var second = await SendAsync(client, new HttpRequestMessage(HttpMethod.Get, server.Url));
+
+            Assert.That(server.Requests.Select(request => request.Protocol), Is.EqualTo(new[] { "HTTP/1.0", "HTTP/1.1" }));
+        });
+
+        /// <summary>Checks that preferring HTTP/2 still permits a successful exchange with an HTTP/1.1-only peer.</summary>
+        /// <returns>The test coroutine.</returns>
+        [UnityTest]
+        public IEnumerator HttpVersions_AllowHttp11WithHttp2Preferred() => UniTask.ToCoroutine(async () =>
+        {
+            using var server = LoopbackHttpServer.Respond(200, "ok");
+            using var client = new HttpClient(new CurlHttpMessageHandler
+            {
+                EnabledHttpVersions = CurlHttpVersions.Http11 | CurlHttpVersions.Http2,
+                PreferredHttpVersion = CurlHttpVersions.Http2
+            });
+
+            using var response = await SendAsync(client, new HttpRequestMessage(HttpMethod.Get, server.Url));
+
+            Assert.That(server.Requests.Single().Protocol, Is.EqualTo("HTTP/1.1"));
+            Assert.That(response.Version, Is.EqualTo(HttpVersion.Version11));
+            Assert.That(await response.Content.ReadAsStringAsync(), Is.EqualTo("ok"));
+        });
+
         /// <summary>Checks that an error status is returned as a response rather than an exception.</summary>
         /// <returns>The test coroutine.</returns>
         [UnityTest]
@@ -134,6 +175,60 @@ namespace MajdataPlay.Tests.Plugins.Net.Curl
             Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.NotFound));
             Assert.That(response.IsSuccessStatusCode, Is.False);
             Assert.That(await response.Content.ReadAsStringAsync(), Is.EqualTo("missing"));
+        });
+
+        /// <summary>Checks that HEAD preserves the GET representation length without waiting for its body.</summary>
+        /// <returns>The test coroutine.</returns>
+        [UnityTest]
+        public IEnumerator Head_ReturnsRepresentationHeadersWithoutBody() => UniTask.ToCoroutine(async () =>
+        {
+            using var server = new LoopbackHttpServer((request, stream, token) =>
+            {
+                const string headers = "HTTP/1.1 200 OK\r\nContent-Length: 5\r\nContent-Type: text/plain\r\nConnection: close\r\n\r\n";
+                var hasBody = request.Method == "GET" && request.Target == "/";
+                return LoopbackHttpServer.WriteAsync(stream, hasBody ? headers + "hello" : headers);
+            });
+            using var client = new HttpClient(new CurlHttpMessageHandler());
+            using var headRequest = new HttpRequestMessage(HttpMethod.Head, server.Url);
+
+            using var head = await SendAsync(client, headRequest, HttpCompletionOption.ResponseHeadersRead);
+
+            Assert.That(server.Requests.Single().Method, Is.EqualTo("HEAD"));
+            Assert.That(head.StatusCode, Is.EqualTo(HttpStatusCode.OK));
+            Assert.That(head.Content.Headers.ContentLength, Is.EqualTo(5));
+            Assert.That(head.Content.Headers.ContentType!.MediaType, Is.EqualTo("text/plain"));
+            Assert.That(await head.Content.ReadAsByteArrayAsync(), Is.Empty);
+
+            using var emptyHeadRequest = new HttpRequestMessage(HttpMethod.Head, server.Url) { Content = new ByteArrayContent(Array.Empty<byte>()) };
+            using var emptyHead = await SendAsync(client, emptyHeadRequest, HttpCompletionOption.ResponseHeadersRead);
+            Assert.That(await emptyHead.Content.ReadAsByteArrayAsync(), Is.Empty);
+
+            using var getRequest = new HttpRequestMessage(HttpMethod.Get, server.Url);
+            using var get = await SendAsync(client, getRequest);
+            Assert.That(await get.Content.ReadAsStringAsync(), Is.EqualTo("hello"));
+
+            using var truncatedGet = new HttpRequestMessage(HttpMethod.Get, server.Url + "truncated");
+            var exception = await NetAsyncAssert.ThrowsAsync<HttpRequestException>(() => SendAsync(client, truncatedGet));
+            Assert.That(exception.InnerException, Is.InstanceOf<CurlException>());
+            Assert.That(((CurlException)exception.InnerException!).ErrorCode, Is.EqualTo(CurlCode.PartialFile));
+        });
+
+        /// <summary>Checks that a HEAD request with nonempty or unknown-length content fails before data reaches the server.</summary>
+        /// <returns>The test coroutine.</returns>
+        [UnityTest]
+        public IEnumerator Head_RejectsNonemptyOrUnknownLengthContentBeforeSending() => UniTask.ToCoroutine(async () =>
+        {
+            using var server = LoopbackHttpServer.Respond(200, string.Empty);
+            using var client = new HttpClient(new CurlHttpMessageHandler());
+            using var known = new HttpRequestMessage(HttpMethod.Head, server.Url) { Content = new ByteArrayContent(new byte[] { 1 }) };
+            using var body = new UnseekableStream(new byte[] { 1 });
+            using var unknown = new HttpRequestMessage(HttpMethod.Head, server.Url) { Content = new StreamContent(body) };
+
+            await NetAsyncAssert.ThrowsAsync<NotSupportedException>(() => SendAsync(client, known));
+            await NetAsyncAssert.ThrowsAsync<NotSupportedException>(() => SendAsync(client, unknown));
+
+            Assert.That(body.Position, Is.Zero);
+            Assert.That(server.RequestCount, Is.Zero);
         });
 
         /// <summary>Checks that an empty body publishes the response when the transfer completes.</summary>
@@ -708,6 +803,32 @@ namespace MajdataPlay.Tests.Plugins.Net.Curl
             Assert.That(await response.Content.ReadAsStringAsync(), Is.EqualTo("proxied"));
             Assert.That(received!.Target, Is.EqualTo("http://target.invalid/resource"));
             Assert.That(received.GetHeader("Proxy-Authorization"), Is.EqualTo("Basic " + Convert.ToBase64String(Encoding.ASCII.GetBytes("proxy:secret"))));
+        });
+
+        /// <summary>Checks that an HTTP/1.1 proxy cannot forward an HTTP/2-only request as an HTTP/1.1 GET.</summary>
+        /// <returns>The test coroutine.</returns>
+        [UnityTest]
+        public IEnumerator Proxy_Http2OnlyRequestsRequireTunnel() => UniTask.ToCoroutine(async () =>
+        {
+            if (((CurlFeatures)Features() & CurlFeatures.Http2) == 0)
+            {
+                Assert.Ignore("The loaded libcurl lacks HTTP/2 support.");
+            }
+
+            using var proxy = LoopbackHttpServer.Respond(403, "tunnel refused");
+            using var client = new HttpClient(new CurlHttpMessageHandler
+            {
+                EnabledHttpVersions = CurlHttpVersions.Http2,
+                UseProxy = true,
+                Proxy = new WebProxy(proxy.Url)
+            });
+
+            await NetAsyncAssert.ThrowsAsync<HttpRequestException>(
+                () => SendAsync(client, new HttpRequestMessage(HttpMethod.Get, "http://target.invalid/resource")));
+
+            var received = proxy.Requests.Single();
+            Assert.That(received.Method, Is.EqualTo("CONNECT"));
+            Assert.That(received.Target, Is.EqualTo("target.invalid:80"));
         });
 
         /// <summary>Checks that a proxy which bypasses local addresses lets loopback requests go directly.</summary>

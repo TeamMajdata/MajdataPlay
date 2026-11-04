@@ -26,6 +26,7 @@ returned twice. The checks cover:
   disposal.
 - Body delivery: an intact 8 MiB body, and a body whose libcurl writes exceed
   the backpressure high-water mark while the buffer is empty.
+- HEAD responses retain a nonzero representation length and expose an empty body.
 - Dispose races: disposing the response or the client while another thread is
   blocked reading the body.
 - Native lifetime: these checks use `LibCurlLifecycle`'s reference count.
@@ -35,6 +36,9 @@ returned twice. The checks cover:
   token.
 - Upload failures: an upload stream that throws fails the request instead of
   unwinding through libcurl.
+- HTTP versions. A persistent server echoes the request-line version before and
+  after a handler switches from HTTP/1.1 to HTTP/1.0. An HTTP/1.1-only server
+  accepts an HTTP/2 preference with fallback and fails an HTTP/2-only request.
 - Body buffer: the backpressure buffer follows `ResponseBodyBufferSize`, not
   `MaxResponseHeadersLength`.
 - Header limit: chunked trailers that arrive after the response has been

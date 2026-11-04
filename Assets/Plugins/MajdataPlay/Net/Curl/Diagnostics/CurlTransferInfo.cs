@@ -10,26 +10,6 @@ namespace MajdataPlay.Net.Curl.Diagnostics
     internal readonly struct CurlTransferInfo
     {
         /// <summary>
-        /// <c>CURL_HTTP_VERSION_1_0</c>.
-        /// </summary>
-        private const long HttpVersion10 = 1;
-
-        /// <summary>
-        /// <c>CURL_HTTP_VERSION_1_1</c>.
-        /// </summary>
-        private const long HttpVersion11 = 2;
-
-        /// <summary>
-        /// <c>CURL_HTTP_VERSION_2_0</c>.
-        /// </summary>
-        private const long HttpVersion2 = 3;
-
-        /// <summary>
-        /// <c>CURL_HTTP_VERSION_3</c>.
-        /// </summary>
-        private const long HttpVersion3 = 30;
-
-        /// <summary>
         /// Gets the last HTTP status code received, or 0 when none was received.
         /// </summary>
         public int ResponseCode { get; init; }
@@ -116,15 +96,15 @@ namespace MajdataPlay.Net.Curl.Diagnostics
         /// <returns>The protocol name, or <see langword="null"/> for 0 and unknown values.</returns>
         internal static string? GetProtocolName(long httpVersion)
         {
-            switch (httpVersion)
+            switch ((CurlHttpVersionMode)httpVersion)
             {
-                case HttpVersion10:
+                case CurlHttpVersionMode.Http10:
                     return "http/1.0";
-                case HttpVersion11:
+                case CurlHttpVersionMode.Http11:
                     return "http/1.1";
-                case HttpVersion2:
+                case CurlHttpVersionMode.Http2:
                     return "h2";
-                case HttpVersion3:
+                case CurlHttpVersionMode.Http3:
                     return "h3";
                 default:
                     return null;

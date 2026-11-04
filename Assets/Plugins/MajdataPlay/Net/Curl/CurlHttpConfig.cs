@@ -7,6 +7,8 @@ using System.Security.Authentication;
 using System.Text;
 using System.Threading.Tasks;
 using MajdataPlay.Net.Curl.Core;
+using MajdataPlay.Net.Curl.Diagnostics;
+using MajdataPlay.Net.Curl.Lifecycle;
 using MajdataPlay.Net.Curl.Utils;
 
 #nullable enable
@@ -14,6 +16,25 @@ namespace MajdataPlay.Net.Curl
 {
     public readonly struct CurlHttpConfig
     {
+        /// <summary>Stores the explicit allowlist. A zero-initialized snapshot allows every version.</summary>
+        private readonly CurlHttpVersions? _enabledHttpVersions;
+        /// <summary>Stores the validated preference for this snapshot.</summary>
+        private readonly CurlHttpVersions _preferredHttpVersion;
+
+        /// <inheritdoc cref="CurlHttpMessageHandler.EnabledHttpVersions"/>
+        public CurlHttpVersions EnabledHttpVersions
+        {
+            get => _enabledHttpVersions ?? CurlHttpVersions.All;
+            init => _enabledHttpVersions = ValidateEnabledHttpVersions(value);
+        }
+
+        /// <inheritdoc cref="CurlHttpMessageHandler.PreferredHttpVersion"/>
+        public CurlHttpVersions PreferredHttpVersion
+        {
+            get => _preferredHttpVersion;
+            init => _preferredHttpVersion = ValidatePreferredHttpVersion(value);
+        }
+
         public SslProtocols SslProtocols { get; init; }
         public IWebProxy? Proxy { get; init; }
         public bool PreAuthenticate { get; init; }
@@ -100,6 +121,19 @@ namespace MajdataPlay.Net.Curl
         {
             var easyHandle = curlEasy.Handle;
             var returnCode = default(CurlCode);
+
+            var httpVersion = GetHttpVersionMode(LibCurlLifecycle.Features, requestUri.Scheme == Uri.UriSchemeHttps);
+            if (httpVersion != CurlHttpVersionMode.Default)
+            {
+                returnCode = LibCurl.Easy.SetOption(easyHandle, CurlOption.HttpVersion, (long)httpVersion);
+                CurlUtility.EnsureSuccess(easyHandle, returnCode);
+                if (httpVersion == CurlHttpVersionMode.Http2PriorKnowledge && UseProxy)
+                {
+                    // libcurl ignores h2 prior knowledge when forwarding plain HTTP through a proxy.
+                    returnCode = LibCurl.Easy.SetOption(easyHandle, CurlOption.HttpProxyTunnel, 1L);
+                    CurlUtility.EnsureSuccess(easyHandle, returnCode);
+                }
+            }
 
             returnCode = LibCurl.Easy.SetOption(easyHandle, CurlOption.TimeoutMs, ToCurlMilliseconds(Timeout));
             CurlUtility.EnsureSuccess(easyHandle, returnCode);
@@ -195,6 +229,85 @@ namespace MajdataPlay.Net.Curl
             }
 
         }
+        /// <summary>Checks the set of versions a caller wants to enable.</summary>
+        /// <param name="value">The flags to validate.</param>
+        /// <returns>The validated flags.</returns>
+        /// <exception cref="ArgumentOutOfRangeException">The set is empty or contains unknown bits.</exception>
+        internal static CurlHttpVersions ValidateEnabledHttpVersions(CurlHttpVersions value)
+        {
+            if (value == CurlHttpVersions.None || (value & ~CurlHttpVersions.All) != 0)
+            {
+                throw new ArgumentOutOfRangeException(nameof(EnabledHttpVersions), value, "Enable at least one known HTTP version.");
+            }
+            return value;
+        }
+
+        /// <summary>Checks a caller's preferred version independently of the enabled set.</summary>
+        /// <param name="value">The preference to validate.</param>
+        /// <returns>The validated preference.</returns>
+        /// <exception cref="ArgumentOutOfRangeException">The preference is neither a single known version nor None.</exception>
+        internal static CurlHttpVersions ValidatePreferredHttpVersion(CurlHttpVersions value)
+        {
+            if (value is not (CurlHttpVersions.None or CurlHttpVersions.Http10 or CurlHttpVersions.Http11
+                or CurlHttpVersions.Http2 or CurlHttpVersions.Http3))
+            {
+                throw new ArgumentOutOfRangeException(nameof(PreferredHttpVersion), value, "Select one HTTP version or None.");
+            }
+            return value;
+        }
+
+        /// <summary>Selects a native negotiation mode whose fallbacks are enabled by the caller.</summary>
+        /// <param name="features">The features compiled into the loaded libcurl.</param>
+        /// <param name="isHttps">Whether the request URI permits HTTP/3.</param>
+        /// <returns>The mode to use for this transfer.</returns>
+        /// <exception cref="InvalidOperationException">The preferred version is disabled.</exception>
+        /// <exception cref="NotSupportedException">No enabled version is available for this request.</exception>
+        internal CurlHttpVersionMode GetHttpVersionMode(CurlFeatures features, bool isHttps)
+        {
+            var enabled = EnabledHttpVersions;
+            var preferred = PreferredHttpVersion;
+            if (preferred == CurlHttpVersions.None && enabled == CurlHttpVersions.All)
+            {
+                return CurlHttpVersionMode.Default;
+            }
+            if ((enabled & preferred) != preferred)
+            {
+                throw new InvalidOperationException("The preferred HTTP version must be enabled.");
+            }
+
+            var available = enabled;
+            if ((features & CurlFeatures.Http2) == 0)
+            {
+                available &= ~CurlHttpVersions.Http2;
+            }
+            if (!isHttps || (features & CurlFeatures.Http3) == 0)
+            {
+                available &= ~CurlHttpVersions.Http3;
+            }
+            var candidates = (preferred & available) != 0 ? preferred : available;
+            if ((candidates & CurlHttpVersions.Http3) != 0)
+            {
+                // libcurl's HTTP/3 fallback can select either HTTP/2 or HTTP/1.1.
+                var canFallBack = (available & CurlHttpVersions.Http11) != 0
+                    && ((features & CurlFeatures.Http2) == 0 || (available & CurlHttpVersions.Http2) != 0);
+                return canFallBack ? CurlHttpVersionMode.Http3 : CurlHttpVersionMode.Http3Only;
+            }
+            if ((candidates & CurlHttpVersions.Http2) != 0)
+            {
+                return (available & CurlHttpVersions.Http11) != 0
+                    ? CurlHttpVersionMode.Http2 : CurlHttpVersionMode.Http2PriorKnowledge;
+            }
+            if ((candidates & CurlHttpVersions.Http11) != 0)
+            {
+                return CurlHttpVersionMode.Http11;
+            }
+            if ((candidates & CurlHttpVersions.Http10) != 0)
+            {
+                return CurlHttpVersionMode.Http10;
+            }
+            throw new NotSupportedException("None of the enabled HTTP versions are supported by libcurl for this URI.");
+        }
+
         /// <summary>
         /// Combines every <c>CURLOPT_SSL_OPTIONS</c> bit for a request. libcurl stores the option as one bitmask, so
         /// setting it more than once keeps only the last value.

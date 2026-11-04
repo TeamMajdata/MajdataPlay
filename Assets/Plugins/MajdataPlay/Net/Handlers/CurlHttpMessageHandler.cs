@@ -17,6 +17,39 @@ namespace MajdataPlay.Net.Curl
 {
     public class CurlHttpMessageHandler : HttpMessageHandler
     {
+        /// <summary>
+        /// Gets or sets the HTTP versions enabled for request negotiation. Defaults to <see cref="CurlHttpVersions.All"/>.
+        /// </summary>
+        /// <remarks>
+        /// HTTP/2 and HTTP/3 require support in the loaded libcurl. HTTP/3 also requires an HTTPS URI.
+        /// This setting controls initial negotiation. libcurl can retry using HTTP/1.1 for NTLM authentication
+        /// or when an HTTP/2 peer sends HTTP_1_1_REQUIRED. The server chooses its own response version.
+        /// </remarks>
+        /// <exception cref="ArgumentOutOfRangeException">The set is empty or contains an unknown version.</exception>
+        public CurlHttpVersions EnabledHttpVersions
+        {
+            get => _enabledHttpVersions;
+            set => _enabledHttpVersions = CurlHttpConfig.ValidateEnabledHttpVersions(value);
+        }
+
+        /// <summary>
+        /// Gets or sets the version to try first. Defaults to <see cref="CurlHttpVersions.None"/>, which preserves
+        /// libcurl's default negotiation when all versions are enabled.
+        /// </summary>
+        /// <remarks>
+        /// With an explicit policy, the handler selects the highest available enabled version if there is no
+        /// preference or the preference is unavailable for the URI or library. An explicit preference must be
+        /// included in <see cref="EnabledHttpVersions"/> when sending. HTTP/2 can fall back to HTTP/1.1.
+        /// HTTP/3 permits native fallback only when every version libcurl could fall back to is enabled.
+        /// A lower preference does not trigger retries with higher versions. libcurl may reuse a compatible connection.
+        /// </remarks>
+        /// <exception cref="ArgumentOutOfRangeException">The value is neither one known version nor None.</exception>
+        public CurlHttpVersions PreferredHttpVersion
+        {
+            get => _preferredHttpVersion;
+            set => _preferredHttpVersion = CurlHttpConfig.ValidatePreferredHttpVersion(value);
+        }
+
         public SslProtocols SslProtocols { get; set; } = SslProtocols.Tls12 | SslProtocols.Tls13;
         public IWebProxy? Proxy { get; set; }
         public bool PreAuthenticate { get; set; }
@@ -240,6 +273,10 @@ namespace MajdataPlay.Net.Curl
         }
 
         readonly CurlMulti _curlMulti;
+        /// <summary>The versions enabled for subsequent requests.</summary>
+        private CurlHttpVersions _enabledHttpVersions = CurlHttpVersions.All;
+        /// <summary>The preferred version for subsequent requests.</summary>
+        private CurlHttpVersions _preferredHttpVersion;
         private TimeSpan _timeout = System.Threading.Timeout.InfiniteTimeSpan;
         private TimeSpan _connectTimeout = System.Threading.Timeout.InfiniteTimeSpan;
         private TimeSpan _lowSpeedTimeout = System.Threading.Timeout.InfiniteTimeSpan;
@@ -269,6 +306,11 @@ namespace MajdataPlay.Net.Curl
         /// <param name="request">The request to send.</param>
         /// <param name="cancellationToken">The token cancelling the request and the reads of its response body.</param>
         /// <returns>The response, whose body streams from the running transfer.</returns>
+        /// <exception cref="InvalidOperationException">The preferred HTTP version is disabled.</exception>
+        /// <exception cref="NotSupportedException">
+        /// No enabled HTTP version is available for the URI and library, or a HEAD request has content of nonzero or
+        /// unknown length.
+        /// </exception>
         /// <exception cref="TaskCanceledException">
         /// <see cref="Timeout"/>, <see cref="ConnectTimeout"/> or <see cref="LowSpeedTimeout"/> expired. As with
         /// <see cref="HttpClient.Timeout"/>, the exception's token is not cancelled and its inner exception is a
@@ -285,7 +327,7 @@ namespace MajdataPlay.Net.Curl
             var config = CopyCurrentConfig();
             var content = request.Content;
             var contentStream = default(Stream?);
-            if(content is not null)
+            if (content is not null && request.Method != HttpMethod.Head)
             {
                 contentStream = await content.ReadAsStreamAsync().ConfigureAwait(false);
             }
@@ -311,6 +353,8 @@ namespace MajdataPlay.Net.Curl
         {
             var config = new CurlHttpConfig()
             {
+                EnabledHttpVersions = EnabledHttpVersions,
+                PreferredHttpVersion = PreferredHttpVersion,
                 SslProtocols = SslProtocols,
                 Proxy = Proxy,
                 PreAuthenticate = PreAuthenticate,

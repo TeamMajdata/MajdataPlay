@@ -4,6 +4,7 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
+#nullable enable
 namespace MajdataPlay.Net.Curl.Core.PInvoke
 {
     /// <summary>
@@ -28,6 +29,9 @@ namespace MajdataPlay.Net.Curl.Core.PInvoke
 
         /// <summary>Enable progress meter.</summary>
         NoProgress = 43,
+
+        /// <summary>Perform an HTTP HEAD transfer and finish after the response headers (<c>CURLOPT_NOBODY</c>).</summary>
+        NoBody = 44,
 
         /// <summary>Specify timeout in seconds.</summary>
         Timeout = 13,

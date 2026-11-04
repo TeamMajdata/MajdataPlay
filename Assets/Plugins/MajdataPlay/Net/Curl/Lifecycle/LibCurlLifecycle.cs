@@ -1,6 +1,7 @@
 ﻿using MajdataPlay.Diagnostics;
 using MajdataPlay.Net.Curl.Core;
 using MajdataPlay.Net.Curl.Core.PInvoke;
+using MajdataPlay.Net.Curl.Diagnostics;
 using System;
 #nullable enable
 namespace MajdataPlay.Net.Curl.Lifecycle
@@ -26,6 +27,9 @@ namespace MajdataPlay.Net.Curl.Lifecycle
         /// Serializes global initialization and cleanup.
         /// </summary>
         static readonly object s_initLock = new object();
+
+        /// <summary>Gets the features of the loaded library after a handle has retained it.</summary>
+        internal static CurlFeatures Features { get; private set; }
 
         /// <summary>
         /// Gets the number of live handles that depend on the initialized libcurl global state.
@@ -72,6 +76,7 @@ namespace MajdataPlay.Net.Curl.Lifecycle
                         throw new CurlException(returnCode);
                     }
                     var info = LibCurl.GetVersionInfo(0);
+                    Features = (CurlFeatures)info.Features;
                     MajDebug.LogInfo($"""
                                     [libcurl]version info:
                                     Age: {info.Age}
