@@ -29,7 +29,7 @@ namespace MajdataPlay.Rendering
     /// are produced slightly slower than the display (see <see cref="VSyncFramePacer"/>), which also keeps the
     /// queue empty and samples input late.
     /// </summary>
-    internal static class LowLatencyVSync
+    internal static class VulkanLowLatencyVSync
     {
         /// <summary>Identifies the frame start system in the player loop.</summary>
         private sealed class PlayerLoopMarker
@@ -136,7 +136,7 @@ namespace MajdataPlay.Rendering
             if (!InsertIntoPhase(ref loop, typeof(TimeUpdate), typeof(PlayerLoopMarker), FrameStartDelegate, true) ||
                 !InsertIntoPhase(ref loop, typeof(PostLateUpdate), typeof(FrameEndMarker), FrameEndDelegate, false))
             {
-                MajDebug.LogError(nameof(LowLatencyVSync), "Failed to insert the pacing steps into the player loop");
+                MajDebug.LogError(nameof(VulkanLowLatencyVSync), "Failed to insert the pacing steps into the player loop");
                 return;
             }
 
@@ -153,7 +153,7 @@ namespace MajdataPlay.Rendering
                 {
                     _mode = PacingMode.None;
                     LastWaitMilliseconds = 0;
-                    MajDebug.LogInfo(nameof(LowLatencyVSync), "Frame pacing stopped");
+                    MajDebug.LogInfo(nameof(VulkanLowLatencyVSync), "Frame pacing stopped");
                 }
                 return;
             }
@@ -366,7 +366,7 @@ namespace MajdataPlay.Rendering
             if (Pacer.SetRefreshRate(refreshRate) || _mode != PacingMode.Timer)
             {
                 Pacer.Restart();
-                MajDebug.LogInfo(nameof(LowLatencyVSync), ZString.Format(
+                MajDebug.LogInfo(nameof(VulkanLowLatencyVSync), ZString.Format(
                     "Frame pacing started: refresh {0:F3}Hz, frame interval {1:F3}ms",
                     refreshRate, TicksToMilliseconds(Pacer.IntervalTicks)));
             }
@@ -383,7 +383,7 @@ namespace MajdataPlay.Rendering
             LastWaitMilliseconds = TicksToMilliseconds(frameStart - waitStart);
             if (Pacer.OnFrameStarted(frameStart, waitTicks))
             {
-                MajDebug.LogInfo(nameof(LowLatencyVSync), ZString.Format(
+                MajDebug.LogInfo(nameof(VulkanLowLatencyVSync), ZString.Format(
                     "The display refreshes slower than reported; frame interval re-measured as {0:F3}ms",
                     TicksToMilliseconds(Pacer.IntervalTicks)));
             }
@@ -447,7 +447,7 @@ namespace MajdataPlay.Rendering
                 _timerCreationAttempted = true;
                 if (!HighResolutionWaitableTimer.TryCreate(out _timer))
                 {
-                    MajDebug.LogWarning(nameof(LowLatencyVSync),
+                    MajDebug.LogWarning(nameof(VulkanLowLatencyVSync),
                         "High-resolution waitable timer unavailable; frame pacing spins instead of sleeping");
                 }
             }

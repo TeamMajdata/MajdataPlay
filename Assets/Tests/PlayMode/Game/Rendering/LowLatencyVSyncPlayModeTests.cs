@@ -11,11 +11,11 @@ using UnityEngine.TestTools;
 #nullable enable
 namespace MajdataPlay.Tests.Game.Rendering.PlayMode
 {
-    /// <summary>Verifies that <see cref="LowLatencyVSync"/> runs first in the player loop and only paces Vulkan with VSync.</summary>
+    /// <summary>Verifies that <see cref="VulkanLowLatencyVSync"/> runs first in the player loop and only paces Vulkan with VSync.</summary>
     public class LowLatencyVSyncPlayModeTests
     {
         /// <summary>Counts the pacing steps at the start of the TimeUpdate phase.</summary>
-        /// <returns>The number of leading TimeUpdate systems whose delegate belongs to <see cref="LowLatencyVSync"/>.</returns>
+        /// <returns>The number of leading TimeUpdate systems whose delegate belongs to <see cref="VulkanLowLatencyVSync"/>.</returns>
         private static int CountPacingStepsAtStartOfTimeUpdate()
         {
             foreach (var phase in PlayerLoop.GetCurrentPlayerLoop().subSystemList)
@@ -28,7 +28,7 @@ namespace MajdataPlay.Tests.Game.Rendering.PlayMode
                 var count = 0;
                 foreach (var system in phase.subSystemList)
                 {
-                    if (system.updateDelegate?.Method.DeclaringType != typeof(LowLatencyVSync))
+                    if (system.updateDelegate?.Method.DeclaringType != typeof(VulkanLowLatencyVSync))
                     {
                         break;
                     }
@@ -44,8 +44,8 @@ namespace MajdataPlay.Tests.Game.Rendering.PlayMode
         [Test]
         public void Install_InsertsOneStepAtTheStartOfTimeUpdate()
         {
-            LowLatencyVSync.Install();
-            LowLatencyVSync.Install();
+            VulkanLowLatencyVSync.Install();
+            VulkanLowLatencyVSync.Install();
 
             Assert.That(CountPacingStepsAtStartOfTimeUpdate(), Is.EqualTo(1));
         }
@@ -54,8 +54,8 @@ namespace MajdataPlay.Tests.Game.Rendering.PlayMode
         [Test]
         public void Install_InsertsOneFrameEndStepAtTheEndOfPostLateUpdate()
         {
-            LowLatencyVSync.Install();
-            LowLatencyVSync.Install();
+            VulkanLowLatencyVSync.Install();
+            VulkanLowLatencyVSync.Install();
 
             foreach (var phase in PlayerLoop.GetCurrentPlayerLoop().subSystemList)
             {
@@ -67,14 +67,14 @@ namespace MajdataPlay.Tests.Game.Rendering.PlayMode
                 var steps = 0;
                 foreach (var system in phase.subSystemList)
                 {
-                    if (system.updateDelegate?.Method.DeclaringType == typeof(LowLatencyVSync))
+                    if (system.updateDelegate?.Method.DeclaringType == typeof(VulkanLowLatencyVSync))
                     {
                         steps++;
                     }
                 }
                 var last = phase.subSystemList[phase.subSystemList.Length - 1];
                 Assert.That(steps, Is.EqualTo(1));
-                Assert.That(last.updateDelegate?.Method.DeclaringType, Is.EqualTo(typeof(LowLatencyVSync)));
+                Assert.That(last.updateDelegate?.Method.DeclaringType, Is.EqualTo(typeof(VulkanLowLatencyVSync)));
                 return;
             }
 
@@ -89,13 +89,13 @@ namespace MajdataPlay.Tests.Game.Rendering.PlayMode
             var previousVSync = QualitySettings.vSyncCount;
             try
             {
-                LowLatencyVSync.Install();
+                VulkanLowLatencyVSync.Install();
                 QualitySettings.vSyncCount = 0;
                 yield return null;
                 yield return null;
 
-                Assert.That(LowLatencyVSync.IsActive, Is.False, "VSync off");
-                Assert.That(LowLatencyVSync.LastWaitMilliseconds, Is.EqualTo(0));
+                Assert.That(VulkanLowLatencyVSync.IsActive, Is.False, "VSync off");
+                Assert.That(VulkanLowLatencyVSync.LastWaitMilliseconds, Is.EqualTo(0));
 
                 if (SystemInfo.graphicsDeviceType != GraphicsDeviceType.Vulkan)
                 {
@@ -103,7 +103,7 @@ namespace MajdataPlay.Tests.Game.Rendering.PlayMode
                     yield return null;
                     yield return null;
 
-                    Assert.That(LowLatencyVSync.IsActive, Is.False, "not Vulkan");
+                    Assert.That(VulkanLowLatencyVSync.IsActive, Is.False, "not Vulkan");
                 }
             }
             finally

@@ -241,7 +241,7 @@ namespace MajdataPlay
             QualitySettings.vSyncCount = SystemSettings.Rendering.VSync ? 1 : 0;
 #endif
             QualitySettings.maxQueuedFrames = SystemSettings.Debug.MaxQueuedFrames;
-            LowLatencyVSync.Install();
+            VulkanLowLatencyVSync.Install();
             DetectHWEncoder();
 #if (!UNITY_EDITOR && UNITY_STANDALONE_WIN)
             if (SystemSettings.Rendering.Topmost)
