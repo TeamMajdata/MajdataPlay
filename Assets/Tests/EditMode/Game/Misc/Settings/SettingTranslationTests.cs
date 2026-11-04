@@ -168,6 +168,27 @@ namespace MajdataPlay.Tests.Game.Misc.Settings
             Assert.That(SettingTranslation.DefaultOptionValue.IsExplicit, Is.False);
         }
 
+#if !UNITY_STANDALONE
+        /// <summary>Checks that mobile external button ring choices use the shared general value translations.</summary>
+        /// <param name="value">The supported mobile input choice.</param>
+        [TestCase(MobileExternalButtonRingOption.None)]
+        [TestCase(MobileExternalButtonRingOption.Keyboard)]
+        [TestCase(MobileExternalButtonRingOption.Gamepad)]
+        public void Resolve_MobileExternalButtonRing_UsesGeneralValueTranslations(MobileExternalButtonRingOption value)
+        {
+            var property = typeof(InputDeviceOptions).GetProperty(nameof(InputDeviceOptions.ExternalButtonRing))!;
+            var rule = SettingTranslation.Resolve(SettingReflectionCache.GetAttributes(property),
+                TranslationTarget.OptionValue, property.Name, property.PropertyType);
+            var valueName = value.ToString();
+            var localizedValue = "Translated " + valueName;
+            UseLanguage(($"MAJSETTING_GENERAL_OPTION_{valueName}", localizedValue));
+
+            Assert.That(rule.IsExplicit, Is.True);
+            Assert.That(rule.KeyTemplates, Is.EqualTo(new[] { SettingTranslation.GeneralOptionValueTemplate }));
+            Assert.That(rule.Localize(valueName), Is.EqualTo(localizedValue));
+        }
+#endif
+
         /// <summary>Checks that explicit templates come before the general table and substitute the option name override.</summary>
         [Test]
         public void Resolve_ExplicitAttributes_OrderTemplatesAndUseOptionName()

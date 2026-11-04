@@ -219,8 +219,8 @@ namespace MajdataPlay.Rendering
         {
 #if UNITY_STANDALONE_WIN && !UNITY_EDITOR
             var allowed = MajEnv.SystemSettings.Rendering.VulkanLowLatencyVSyncBackend;
-            var presentWait = allowed != LowLatencyVSyncBackendOption.Timer && EnsurePresentWaitPacer();
-            var driver = allowed == LowLatencyVSyncBackendOption.Auto && EnsureDriverPacer();
+            var presentWait = allowed != VulkanLowLatencyVSyncBackendOption.Timer && EnsurePresentWaitPacer();
+            var driver = allowed == VulkanLowLatencyVSyncBackendOption.Auto && EnsureDriverPacer();
             if (!presentWait && !driver)
             {
                 return false;

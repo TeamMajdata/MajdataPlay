@@ -1,3 +1,5 @@
+using MajdataPlay.Settings.Runtime;
+
 #nullable enable
 namespace MajdataPlay.Settings
 {

@@ -43,7 +43,7 @@
     <Compile Include="../../../../Assets/Scripts/Misc/Settings/Enums/SensorDebugPosition.cs" Link="Production/SensorDebugPosition.cs" />
     <Compile Include="../../../../Assets/Scripts/Misc/Settings/Enums/DJAutoPolicyOption.cs" Link="Production/DJAutoPolicyOption.cs" />
     <Compile Include="../../../../Assets/Scripts/Misc/Settings/Enums/RecordModeOption.cs" Link="Production/RecordModeOption.cs" />
-    <Compile Include="../../../../Assets/Scripts/Misc/Settings/Enums/LowLatencyVSyncBackendOption.cs" Link="Production/LowLatencyVSyncBackendOption.cs" />
+    <Compile Include="../../../../Assets/Scripts/Misc/Settings/Enums/VulkanLowLatencyVSyncBackendOption.cs" Link="Production/VulkanLowLatencyVSyncBackendOption.cs" />
     <Compile Include="../../../../Assets/Scripts/Misc/Settings/Enums/GameplayScreenRotationAngleOption.cs" Link="Production/GameplayScreenRotationAngleOption.cs" />
     <Compile Include="../../../../Assets/Scripts/Misc/Settings/Enums/SlidePathStyle.cs" Link="Production/SlidePathStyle.cs" />
     <Compile Include="../../../../Assets/Scripts/Misc/Settings/Enums/TouchFeedbackLevel.cs" Link="Production/TouchFeedbackLevel.cs" />
