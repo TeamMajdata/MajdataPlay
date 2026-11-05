@@ -168,7 +168,10 @@ namespace MajdataPlay.Tests.Game.Notes.PlayMode
             Assert.That(Majdata<NoteAudioManager>.Instance, Is.SameAs(audio));
         }
 
-        /// <summary>Checks that practice charts get answer sounds for notes, hold ends and mines but none for headless slides.</summary>
+        /// <summary>
+        /// Checks that practice charts get answer sounds for notes, hold ends, mines and slide heads but none for headless
+        /// slides.
+        /// </summary>
         /// <returns>The test coroutine.</returns>
         [UnityTest]
         public IEnumerator GenerateAnswerSfx_SchedulesNoteAnswers() => UniTask.ToCoroutine(async () =>
@@ -178,7 +181,8 @@ namespace MajdataPlay.Tests.Game.Notes.PlayMode
                 Point(1.0, Note(SimaiNoteType.Tap)),
                 Point(2.0, Note(SimaiNoteType.Hold, holdTime: 0.5)),
                 Point(3.0, Note(SimaiNoteType.Tap, isMine: true)),
-                Point(4.0, Note(SimaiNoteType.Slide, isSlideNoHead: true)));
+                Point(4.0, Note(SimaiNoteType.Slide)),
+                Point(5.0, HeadedSlide(isHeadMine: false, isPathMine: true)));
 
             await audio.GenerateAnswerSFX(chart, true);
 
@@ -194,6 +198,50 @@ namespace MajdataPlay.Tests.Game.Notes.PlayMode
             AnswerAt(audio, 3.0f);
             Assert.That(_rig.SoundRequests[GameplayRig.SfxMine], Is.True);
             Assert.That(_rig.SoundRequests[GameplayRig.SfxAnswer], Is.False);
+            AnswerAt(audio, 4.0f);
+            Assert.That(_rig.SoundRequests[GameplayRig.SfxAnswer], Is.False, "A headless slide has no answer");
+            Assert.That(_rig.SoundRequests[GameplayRig.SfxMine], Is.False, "A headless slide has no answer");
+            AnswerAt(audio, 5.0f);
+            Assert.That(_rig.SoundRequests[GameplayRig.SfxAnswer], Is.True, "The slide head answers");
+            Assert.That(_rig.SoundRequests[GameplayRig.SfxMine], Is.False, "A mine path does not make the head a mine");
+        });
+
+        /// <summary>
+        /// Checks the answer sounds of the parsed MajSimai 3.0 slide shapes: a head answers once with its own mine flag,
+        /// a same-head group and an <c>@</c> head answer once, and slides without a head (<c>?</c>, <c>!</c>) are silent,
+        /// as in the 2.x model.
+        /// </summary>
+        /// <returns>The test coroutine.</returns>
+        [UnityTest]
+        public IEnumerator GenerateAnswerSfx_ParsedSlideShapes_AnswerOnlyForHeads() => UniTask.ToCoroutine(async () =>
+        {
+            var audio = _rig.NoteAudio;
+            var chart = SimaiParser.ParseChart("(120){4},,1-5[8:1],,1?-5[8:1],,1m-5[8:1],,1-5[8:1]m,,1-3[8:1]*-5[8:1],,1@-5[8:1],,1!-5[8:1]b,E");
+
+            await audio.GenerateAnswerSFX(chart, true);
+
+            var schedule = PrivateMember.GetField<object>(audio, "_answerTimingPoints");
+            Assert.That(schedule.GetType().GetProperty("Length")!.GetValue(schedule), Is.EqualTo(5), "One answer per slide head, none for headless slides");
+            AnswerAt(audio, 0.9f);
+            Assert.That(_rig.SoundRequests[GameplayRig.SfxAnswer], Is.False);
+            AnswerAt(audio, 1.0f);
+            Assert.That(_rig.SoundRequests[GameplayRig.SfxAnswer], Is.True, "1-5[8:1]");
+            AnswerAt(audio, 2.0f);
+            Assert.That(_rig.SoundRequests[GameplayRig.SfxAnswer], Is.False, "1?-5[8:1]");
+            Assert.That(_rig.SoundRequests[GameplayRig.SfxMine], Is.False, "1?-5[8:1]");
+            AnswerAt(audio, 3.0f);
+            Assert.That(_rig.SoundRequests[GameplayRig.SfxMine], Is.True, "1m-5[8:1]");
+            Assert.That(_rig.SoundRequests[GameplayRig.SfxAnswer], Is.False, "1m-5[8:1]");
+            AnswerAt(audio, 4.0f);
+            Assert.That(_rig.SoundRequests[GameplayRig.SfxAnswer], Is.True, "1-5[8:1]m");
+            Assert.That(_rig.SoundRequests[GameplayRig.SfxMine], Is.False, "1-5[8:1]m");
+            AnswerAt(audio, 5.0f);
+            Assert.That(_rig.SoundRequests[GameplayRig.SfxAnswer], Is.True, "1-3[8:1]*-5[8:1]");
+            AnswerAt(audio, 6.0f);
+            Assert.That(_rig.SoundRequests[GameplayRig.SfxAnswer], Is.True, "1@-5[8:1]");
+            AnswerAt(audio, 7.0f);
+            Assert.That(_rig.SoundRequests[GameplayRig.SfxAnswer], Is.False, "1!-5[8:1]b");
+            Assert.That(_rig.SoundRequests[GameplayRig.SfxMine], Is.False, "1!-5[8:1]b");
         });
 
         /// <summary>Checks that clock sounds precede the chart when it starts within the first measure.</summary>
@@ -331,28 +379,52 @@ namespace MajdataPlay.Tests.Game.Notes.PlayMode
 
         /// <summary>Creates a timing point at 120 BPM.</summary>
         /// <param name="timing">The timing in seconds.</param>
-        /// <param name="note">The note at that timing.</param>
+        /// <param name="notes">The notes at that timing.</param>
         /// <returns>The timing point.</returns>
-        private static SimaiTimingPoint Point(double timing, SimaiNote note)
+        private static SimaiTimingPoint Point(double timing, params SimaiNote[] notes)
         {
-            return new SimaiTimingPoint(timing, new[] { note }, "1".AsSpan(), bpm: 120f);
+            return new SimaiTimingPoint(timing, notes, "1".AsSpan(), bpm: 120f);
         }
 
-        /// <summary>Creates a note.</summary>
+        /// <summary>Creates a note. A <see cref="SimaiNoteType.Slide"/> created here has no head.</summary>
         /// <param name="type">The note type.</param>
         /// <param name="holdTime">The hold time in seconds.</param>
         /// <param name="isMine">Whether the note is a mine.</param>
-        /// <param name="isSlideNoHead">Whether the note is a slide without a head.</param>
         /// <returns>The note.</returns>
-        private static SimaiNote Note(SimaiNoteType type, double holdTime = 0, bool isMine = false, bool isSlideNoHead = false)
+        private static SimaiNote Note(SimaiNoteType type, double holdTime = 0, bool isMine = false)
         {
             return new SimaiNote()
             {
                 Type = type,
                 HoldTime = holdTime,
-                IsMine = isMine,
-                IsSlideNoHead = isSlideNoHead
+                IsMine = isMine
             };
+        }
+
+        /// <summary>
+        /// Creates a slide with a head in the MajSimai 3.0 shape: a star head <see cref="SimaiNoteType.Tap"/> that lists
+        /// the slide in its related notes, followed by the slide.
+        /// </summary>
+        /// <param name="isHeadMine">Whether the star head is a mine.</param>
+        /// <param name="isPathMine">Whether the slide path is a mine.</param>
+        /// <returns>The head and the slide, in timing point order.</returns>
+        private static SimaiNote[] HeadedSlide(bool isHeadMine, bool isPathMine)
+        {
+            var slide = new SimaiNote()
+            {
+                Type = SimaiNoteType.Slide,
+                RawContent = "1-5[8:1]",
+                IsMine = isPathMine
+            };
+            var head = new SimaiNote()
+            {
+                Type = SimaiNoteType.Tap,
+                RawContent = "1",
+                IsMine = isHeadMine,
+                IsStar = true,
+                RelatedNotes = new[] { slide }
+            };
+            return new[] { head, slide };
         }
     }
 }

@@ -448,7 +448,10 @@ namespace MajdataPlay.Scenes.Game.Notes.Controllers
                                               var isMine = false;
                                               foreach (var note in x.Notes)
                                               {
-                                                  if(note.IsSlideNoHead)
+                                                  // A slide path never answers by itself: the star head of a slide is
+                                                  // its own Tap note since MajSimai 3.0 and answers with its own mine
+                                                  // flag, and a slide without a head has nothing to answer.
+                                                  if(note.Type == SimaiNoteType.Slide)
                                                   {
                                                       continue;
                                                   }

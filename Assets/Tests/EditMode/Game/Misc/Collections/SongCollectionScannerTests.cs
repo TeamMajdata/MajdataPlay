@@ -34,7 +34,7 @@ namespace MajdataPlay.Tests.Game.Misc.Collections
             _temporary.Dispose();
         }
 
-        /// <summary>Checks that valid charts are loaded while incomplete, broken and loose entries are skipped and counted correctly.</summary>
+        /// <summary>Checks that valid and leniently parsed charts are loaded while incomplete and loose entries are skipped and counted correctly.</summary>
         /// <returns>The test coroutine.</returns>
         [UnityTest]
         public IEnumerator ScanAsync_LoadsValidCharts()
@@ -53,11 +53,13 @@ namespace MajdataPlay.Tests.Game.Misc.Collections
 
                 var songs = await scanner.ScanAsync(collection);
 
-                Assert.That(songs.Select(song => song.Title), Is.EquivalentTo(new[] { "Alpha", "Beta" }));
+                // Since MajSimai 3.0 the lenient parser ignores an '&' line without '=' (with a warning) instead of
+                // throwing, so the "Broken" entry loads as a song without a title.
+                Assert.That(songs.Select(song => song.Title), Is.EquivalentTo(new[] { "Alpha", "Beta", string.Empty }));
                 Assert.That(songs.All(song => song is SongDetail), Is.True);
                 Assert.That(scanner.DiscoveredChartCount, Is.EqualTo(3));
                 Assert.That(scanner.ProcessedChartCount, Is.EqualTo(3));
-                Assert.That(scanner.LoadedChartCount, Is.EqualTo(2));
+                Assert.That(scanner.LoadedChartCount, Is.EqualTo(3));
             });
         }
 

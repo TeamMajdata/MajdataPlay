@@ -119,6 +119,27 @@ namespace MajdataPlay.Tests.Game.Utils
             Assert.That(secondTexture.GetPixels32(), Is.EqualTo(firstTexture.GetPixels32()));
         }
 
+        /// <summary>
+        /// Checks that the star head of a slide adds no tap to the graph, so that a slide draws the same bars with or
+        /// without a head, as one slide note did before MajSimai 3.0.
+        /// </summary>
+        /// <param name="headed">The chart with slide heads.</param>
+        /// <param name="headless">The same chart with slides that have no head.</param>
+        [TestCase("(120){4}1-5[8:1],,,,,,,,,,,,,,,2,E", "(120){4}1?-5[8:1],,,,,,,,,,,,,,,2,E")]
+        [TestCase("(120){4}1-3[8:1]*-5[8:1],,,,,,,,,,,,,,,2,E", "(120){4}1?-3[8:1]/1?-5[8:1],,,,,,,,,,,,,,,2,E")]
+        [TestCase("(120){4}1b-5[8:1]b,,,,,,,,,,,,,,,2,E", "(120){4}1!-5[8:1]b,,,,,,,,,,,,,,,2,E")]
+        [TestCase("(120){4}1@-5[8:1],,,,,,,,,,,,,,,2,E", "(120){4}1?-5[8:1],,,,,,,,,,,,,,,2,E")]
+        public void AnalyzeMaidataWithGraph_SlideHeads_DrawLikeHeadlessSlides(string headed, string headless)
+        {
+            var headedResult = ChartAnalyzer.AnalyzeMaidataWithGraph(SimaiParser.ParseChart(headed.AsSpan()), 100, 640);
+            var headlessResult = ChartAnalyzer.AnalyzeMaidataWithGraph(SimaiParser.ParseChart(headless.AsSpan()), 100, 640);
+            var headedTexture = (Texture2D)_objects.Track(headedResult.LineGraph);
+            var headlessTexture = (Texture2D)_objects.Track(headlessResult.LineGraph);
+
+            Assert.That(MaxAlphaInColumn(headedTexture, 5), Is.GreaterThan(0.5f), "The slide bar is drawn");
+            Assert.That(headedTexture.GetPixels32(), Is.EqualTo(headlessTexture.GetPixels32()));
+        }
+
         /// <summary>Finds the largest alpha value in one pixel column.</summary>
         /// <param name="texture">The readable texture.</param>
         /// <param name="x">The column.</param>

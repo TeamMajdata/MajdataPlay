@@ -1,4 +1,5 @@
 using MajdataPlay.Drawing;
+using MajdataPlay.Extensions;
 using MajSimai;
 using SkiaSharp;
 using System;
@@ -225,6 +226,13 @@ namespace MajdataPlay.Utils
                     switch (note.Type)
                     {
                         case SimaiNoteType.Tap:
+                            // The star head of a slide is drawn as part of its slide, as one slide note was before
+                            // MajSimai 3.0.
+                            if (!note.IsSlideHead())
+                            {
+                                bar.Tap += 1;
+                            }
+                            break;
                         case SimaiNoteType.Hold:
                             bar.Tap += 1;
                             break;

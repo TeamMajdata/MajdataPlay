@@ -7,7 +7,6 @@
         "MajdataPlay.Core",
         "Gilzoide.SqliteNet",
         "LitMotion",
-        "MajSimai",
         "MajdataPlay.Buffers",
         "MajdataPlay.Collections",
         "MajdataPlay.Diagnostics",
@@ -29,6 +28,7 @@
     "allowUnsafeCode": false,
     "overrideReferences": true,
     "precompiledReferences": [
+        "MajSimai.dll",
         "nunit.framework.dll",
         "Newtonsoft.Json.dll"
     ],
