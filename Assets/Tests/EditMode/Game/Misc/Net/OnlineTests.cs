@@ -1020,12 +1020,16 @@ namespace MajdataPlay.Tests.Game.Misc.Net
                 await Online.MaiChart.GetScoreInfoAsync(song);
                 Assert.That(first!.Value.Scores[0][0].Player.Username, Is.EqualTo("p"));
                 Assert.That(_http.Requests.Length, Is.EqualTo(1));
+                Assert.That(_http.Requests[0].Method, Is.EqualTo(HttpMethod.Get));
+                Assert.That(_http.Requests[0].Uri.AbsolutePath, Is.EqualTo($"/api/maiscore/leaderboard/chart/by-id/{song.Id}"));
 
                 var posted = await Online.MaiChart.PostScoreAsync(song, new MaiScore { Hash = "h", DXScore = 10 });
                 Assert.That(posted.IsSuccessfully, Is.True);
+                Assert.That(_http.Requests[1].Method, Is.EqualTo(HttpMethod.Post));
                 Assert.That(_http.Requests[1].Uri.AbsolutePath, Is.EqualTo($"/api/maichart/{song.Id}/score"));
                 await Online.MaiChart.GetScoreInfoAsync(song);
                 Assert.That(_http.Requests.Length, Is.EqualTo(3));
+                Assert.That(_http.Requests[2].Uri.AbsolutePath, Is.EqualTo($"/api/maiscore/leaderboard/chart/by-id/{song.Id}"));
 
                 Online.ClearResponseCache();
                 _http.RespondWith(HttpStatusCode.Unauthorized);

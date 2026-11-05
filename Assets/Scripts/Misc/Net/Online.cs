@@ -60,7 +60,7 @@ namespace MajdataPlay.Net
         private static readonly TtlCache<Uri, MajNetChartInteractSummary> s_interactSummaries = new(s_responseTimeToLive);
         /// <summary>The responses of <c>GET maichart/{chartId}/comments</c>, by request URI, which holds the order and the page.</summary>
         private static readonly TtlCache<Uri, MajNetCommentPage> s_commentPages = new(s_responseTimeToLive);
-        /// <summary>The responses of <c>GET maichart/{chartId}/score</c>, by request URI.</summary>
+        /// <summary>The responses of <c>GET maiscore/leaderboard/chart/by-id/{chartId}</c>, by request URI.</summary>
         private static readonly TtlCache<Uri, MajNetSongScoreInfo> s_scoreInfos = new(s_responseTimeToLive);
 
         /// <summary>
