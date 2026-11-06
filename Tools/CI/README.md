@@ -21,6 +21,23 @@ The iOS runner deliberately inherits the former Apple work directory to preserve
 absolute paths in its existing IL2CPP cache. The macOS checkout is moved once to
 `_work-macos`; its Git objects and Library are retained.
 
+## iOS signing in a LaunchDaemon
+
+The iOS service must set `SessionCreate` to `true` in its launchd plist so
+Xcode inherits a security audit session with a dynamic keychain search list.
+Without it, certificate import can succeed while archive reports that no signing
+identity exists. Signing in an SSH login does not validate the daemon session.
+Apply this from an administrator terminal while the iOS runner is idle:
+
+```bash
+sudo /usr/bin/plutil -replace SessionCreate -bool true /Library/LaunchDaemons/actions.runner.majplay-ios.plist
+sudo /bin/launchctl bootout system/actions.runner.majplay-ios
+sudo /bin/launchctl bootstrap system /Library/LaunchDaemons/actions.runner.majplay-ios.plist
+```
+
+This changes the service session, retaining the `majplay-ci` account and the
+existing runner identity, environment and storage validation launcher.
+
 ## One-time license directory setup
 
 From an administrator account on the Mac:
@@ -60,9 +77,12 @@ runs, so Git reuses repository objects and initialized submodules. The Android
 checkout retains full history because its version code uses `git rev-list`.
 The first run at each new path still downloads a checkout.
 
-Before checkout, `git clean` removes stale job files except root `Library/` and
-`Release/`. Checkout uses `clean: false`, while its normal tracked-file reset
-still discards previous CI modifications to tracked files. This is exclusively
+After checkout, `git clean -ffdx` removes stale job files except root `Library/`
+and `Release/`. Cleaning after the new revision is checked out also removes
+submodules deleted by that revision; cleaning before checkout leaves those
+previously tracked directories in place and can load duplicate Unity assemblies.
+Checkout uses `clean: false`, while its normal tracked-file reset still discards
+previous CI modifications to tracked files. This is exclusively
 for dedicated CI checkouts, not developers' working directories. Git metadata,
 Unity's `Library/Bee`, Android's exported Gradle project and its caches, and
 iOS's exported Xcode project and fixed DerivedData directory persist. Old `out/`
@@ -88,14 +108,19 @@ instead. The existing archive cache is moved there once, preserving compiled
 objects and Bee state. The helper checks for the expected generated phase and
 fails explicitly if a later Unity version changes its layout. This patch is
 applied after each Unity export; no tracked Unity assets or installed Editor
-files are patched.
+files are patched. Repeated append exports can add the same build phase ID more
+than once to a target. The helper keeps its first reference, preserving phase
+order and references belonging to other targets, so Xcode does not create
+duplicate archive tasks.
 The archive also uses a fixed `Release/iOS/archive/MajdataPlay.xcarchive` path so
 successive CI runs replace their previous archive instead of accumulating dated
 archives in the runner account's Xcode Organizer directory.
 
-Each iOS job imports signing certificates into a keychain named for its run ID
-and attempt, with a masked random password, and removes that keychain even if a
-later step fails. This avoids the fixed `signing_temp` name colliding on the next
+Each iOS job imports signing certificates into a keychain in the runner temporary
+directory, using an absolute path named for its run ID and attempt and a masked
+random password. An absolute path avoids default keychain-directory resolution
+in the runner service session. Cleanup uses the same absolute path and removes
+the keychain even if a later step fails. This avoids the fixed `signing_temp` name colliding on the next
 job of a persistent runner. The user's login keychain is not deleted.
 
 Run `python3 -B Tools/Tests/Modules/MacRunnerValidation/test_mac_runner.py` on the
