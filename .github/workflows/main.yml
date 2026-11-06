@@ -75,6 +75,22 @@ jobs:
                   print("SIGNING", name, "exit", result.returncode, "diagnostics", markers, flush=True)
                   if result.returncode == 0:
                       success = candidate
+              for domain in ("default", "dynamic"):
+                  selection = ["/usr/bin/security", "list-keychains"]
+                  if domain != "default":
+                      selection += ["-d", domain]
+                  selection += ["-s", keychain, "/System/Library/Keychains/SystemRootCertificates.keychain"]
+                  updated = subprocess.run(selection, check=False, capture_output=True, text=True)
+                  print("SEARCH LIST", domain, "update exit", updated.returncode, flush=True)
+                  candidate = variants[-1][1]
+                  result = subprocess.run(candidate, **dict(kwargs, check=False))
+                  markers = [text for text in ("errSecInternalComponent", "unable to build chain",
+                             "User interaction is not allowed", "not found", "could not be found")
+                             if text.lower() in result.stderr.lower()]
+                  print("SIGNING AFTER SEARCH UPDATE", domain, "exit", result.returncode,
+                        "diagnostics", markers, flush=True)
+                  if result.returncode == 0:
+                      success = candidate
               if success is None:
                   raise RuntimeError("All signing variants failed.")
               return subprocess.run(success, **kwargs)
