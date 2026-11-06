@@ -677,6 +677,17 @@ namespace MajdataPlay.Scenes.Game
             _accRate[3] = decimal.ToDouble(newAccRate[3] * 100);
             _accRate[4] = decimal.ToDouble(newAccRate[4] * 100);
         }
+        /// <summary>
+        /// Counts the notes of a chart by kind and sets the note sums, the total scores and the total DX score.
+        /// </summary>
+        /// <remarks>
+        /// Since MajSimai 3.0 the star head of a slide is its own <see cref="SimaiNoteType.Tap"/> note, so it is counted
+        /// once as a tap (or a break when the head is a break), and every <see cref="SimaiNoteType.Slide"/> note counts
+        /// only its path (a break when the path is a break). This gives the same sums as the 2.x model, where a slide
+        /// with a head counted one star plus one slide and a slide without a head only the slide.
+        /// </remarks>
+        /// <param name="chart">The chart whose notes are counted.</param>
+        /// <returns>A task that completes when the sums are set and the outputs are refreshed on the main thread.</returns>
         internal async ValueTask CountNoteSumAsync(SimaiChart chart)
         {
             await Task.Run(() =>
@@ -697,20 +708,7 @@ namespace MajdataPlay.Scenes.Game
                                     HoldSum++;
                                     break;
                                 case SimaiNoteType.Slide:
-                                    if (!note.IsSlideNoHead)
-                                    {
-                                        TapSum++;
-                                    }
-
-                                    if (note.IsSlideBreak)
-                                    {
-                                        BreakSum++;
-                                    }
-                                    else
-                                    {
-                                        SlideSum++;
-                                    }
-
+                                    SlideSum++;
                                     break;
                                 case SimaiNoteType.Touch:
                                     TouchSum++;
@@ -719,26 +717,7 @@ namespace MajdataPlay.Scenes.Game
                         }
                         else
                         {
-                            if (note.Type == SimaiNoteType.Slide)
-                            {
-                                if (!note.IsSlideNoHead)
-                                {
-                                    BreakSum++;
-                                }
-
-                                if (note.IsSlideBreak)
-                                {
-                                    BreakSum++;
-                                }
-                                else
-                                {
-                                    SlideSum++;
-                                }
-                            }
-                            else
-                            {
-                                BreakSum++;
-                            }
+                            BreakSum++;
                         }
                     }
                 }

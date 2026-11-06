@@ -457,9 +457,9 @@ namespace MajdataPlay.Tests.Game.GamePlay.Loading
         public void CreateSlideGroup_RejectsInvalidChains(string content)
         {
             _loader.slidePrefab = CreateSlidePrefabs();
-            var note = CreateFoldedSlide(content);
+            var (slide, note) = CreateFoldedSlide(content);
 
-            var exception = Assert.Throws<TargetInvocationException>(() => PrivateMember.Invoke(_loader, "CreateSlideGroup", Timing(1.0, note), note, new List<NotePoolingInfo?>()));
+            var exception = Assert.Throws<TargetInvocationException>(() => PrivateMember.Invoke(_loader, "CreateSlideGroup", Timing(1.0, slide), note, new List<NotePoolingInfo?>()));
             var syntaxError = exception!.InnerException as InvalidSimaiSyntaxException;
 
             Assert.That(syntaxError, Is.Not.Null);
@@ -476,11 +476,85 @@ namespace MajdataPlay.Tests.Game.GamePlay.Loading
         [TestCase("1K9")]
         public void CreateExtendSlide_RejectsMalformedCodes(string content)
         {
-            var note = CreateFoldedSlide(content);
+            var (slide, note) = CreateFoldedSlide(content);
 
-            var exception = Assert.Throws<TargetInvocationException>(() => PrivateMember.Invoke(_loader, "CreateExtendSlide", Timing(1.0, note), note, new List<NotePoolingInfo?>()));
+            var exception = Assert.Throws<TargetInvocationException>(() => PrivateMember.Invoke(_loader, "CreateExtendSlide", Timing(1.0, slide), note, new List<NotePoolingInfo?>()));
 
             Assert.That(exception!.InnerException, Is.TypeOf<InvalidSimaiSyntaxException>());
+        }
+
+        /// <summary>
+        /// Checks that the star of a slide takes the break, EX and mine flags of its head and that a head makes a tap
+        /// of the same timing point an each note, as with the MajSimai 2.x slide model.
+        /// </summary>
+        /// <param name="fumen">The notes of the timing point; the first note is the head of a slide on key 1.</param>
+        /// <param name="isBreak">Whether the star is a break.</param>
+        /// <param name="isEx">Whether the star is an EX note.</param>
+        /// <param name="isMine">Whether the star is a mine.</param>
+        /// <param name="isEach">Whether the star is an each note.</param>
+        [TestCase("1-5[8:1]/3", false, false, false, true)]
+        [TestCase("1bx-5[8:1]/3", true, true, false, true)]
+        [TestCase("1-5b[8:1]/3", false, false, false, true)]
+        [TestCase("1m-5[8:1]/3", false, false, true, false)]
+        [TestCase("1-5m[8:1]/3", false, false, false, true)]
+        [TestCase("1-5[8:1]", false, false, false, false)]
+        public void CreateStar_TakesTheFlagsOfTheHead(string fumen, bool isBreak, bool isEx, bool isMine, bool isEach)
+        {
+            var timing = ParseTiming(fumen);
+            var head = timing.Notes[0];
+            Assume.That(head.RelatedNotes, Is.Not.Empty);
+            var slide = head.RelatedNotes[0];
+
+            var star = Invoke<TapPoolingInfo>("CreateStar", 1, head, slide.SlideTime, slide.RawContent, timing);
+
+            Assert.That(star.IsBreak, Is.EqualTo(isBreak));
+            Assert.That(star.IsEX, Is.EqualTo(isEx));
+            Assert.That(star.IsMine, Is.EqualTo(isMine));
+            Assert.That(star.IsEach, Is.EqualTo(isEach));
+            Assert.That(star.IsStar, Is.True);
+            Assert.That(star.IsDouble, Is.False);
+            Assert.That(star.StartPos, Is.EqualTo(1));
+            Assert.That(star.QueueInfo.KeyIndex, Is.EqualTo(1));
+            Assert.That(_loader.IsHasTap[0], Is.True);
+        }
+
+        /// <summary>Checks that a tap-head slide (<c>@</c>) still gets a star, as the loader drew it before MajSimai 3.0.</summary>
+        [Test]
+        public void CreateStar_DrawsATapHeadSlideAsAStar()
+        {
+            var timing = ParseTiming("1@-5[8:1]");
+            var head = timing.Notes[0];
+            Assume.That(head.IsTapHeadSlide, Is.True);
+
+            var star = Invoke<TapPoolingInfo>("CreateStar", 1, head, 0.25, "1-5[8:1]", timing);
+
+            Assert.That(star.IsStar, Is.True);
+        }
+
+        /// <summary>Checks that a same-head group and two slides from one key make a double star.</summary>
+        /// <param name="fumen">The notes of the timing point; the first note is the head of a slide on key 1.</param>
+        [TestCase("1-3[8:1]*-5[8:1]")]
+        [TestCase("1-5[8:1]/1-5[8:1]")]
+        public void CreateStar_SameKeySlidesMakeADoubleStar(string fumen)
+        {
+            var timing = ParseTiming(fumen);
+
+            var star = Invoke<TapPoolingInfo>("CreateStar", 1, timing.Notes[0], 0.25, "1-5[8:1]", timing);
+
+            Assert.That(star.IsDouble, Is.True);
+        }
+
+        /// <summary>Checks that a star with an invalid key is reported as a simai syntax error naming the slide text.</summary>
+        [Test]
+        public void CreateStar_InvalidKeyThrowsASyntaxError()
+        {
+            var timing = ParseTiming("1-5[8:1]");
+
+            var exception = Assert.Throws<TargetInvocationException>(() => PrivateMember.Invoke(_loader, "CreateStar", 9, timing.Notes[0], 0.25, "1-5[8:1]", timing));
+            var syntaxError = exception!.InnerException as InvalidSimaiSyntaxException;
+
+            Assert.That(syntaxError, Is.Not.Null);
+            Assert.That(syntaxError!.Content, Is.EqualTo("1-5[8:1]"));
         }
 
         /// <summary>Computes the note appear offset used for taps, holds and each lines at the default appear rate.</summary>
@@ -510,20 +584,31 @@ namespace MajdataPlay.Tests.Game.GamePlay.Loading
             return PrivateMember.Invoke<T>(_loader, name, arguments);
         }
 
-        /// <summary>Creates the folded slide note type used by the slide factories.</summary>
+        /// <summary>Creates the folded note the slide factories take for a slide without a head.</summary>
         /// <param name="content">The slide text.</param>
-        /// <returns>The note.</returns>
-        private static SimaiNote CreateFoldedSlide(string content)
+        /// <returns>The slide and the boxed folded note that wraps it.</returns>
+        private static (SimaiNote Slide, object Folded) CreateFoldedSlide(string content)
         {
+            var slide = new SimaiNote
+            {
+                Type = SimaiNoteType.Slide,
+                StartPosition = 1,
+                RawContent = content,
+                SlideTime = 1,
+                SlideStartTime = 1,
+            };
             var type = typeof(NoteLoader).GetNestedType("FoldedSimaiNote", BindingFlags.NonPublic)!;
-            var note = (SimaiNote)Activator.CreateInstance(type, true)!;
-            note.Type = SimaiNoteType.Slide;
-            note.StartPosition = 1;
-            note.RawContent = content;
-            note.SlideTime = 1;
-            note.SlideStartTime = 1;
-            PrivateMember.SetProperty(note, "Count", 1);
-            return note;
+            var folded = Activator.CreateInstance(type, slide, null, 1)!;
+            return (slide, folded);
+        }
+
+        /// <summary>Parses the notes of one timing point with MajSimai.</summary>
+        /// <param name="fumen">The notes of the timing point, without the comma.</param>
+        /// <returns>The timing point.</returns>
+        private static SimaiTimingPoint ParseTiming(string fumen)
+        {
+            var chart = SimaiParser.ParseChart(("(120){4}" + fumen + ",E").AsSpan());
+            return chart.NoteTimings[0];
         }
 
         /// <summary>Creates placeholder slide prefabs whose child count stands for the number of slide bars.</summary>

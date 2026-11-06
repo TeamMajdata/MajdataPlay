@@ -1,4 +1,5 @@
 using Cysharp.Threading.Tasks;
+using MajdataPlay.Buffers;
 using MajdataPlay.Collections;
 using MajdataPlay.Databases;
 using MajdataPlay.Diagnostics;
@@ -18,8 +19,19 @@ namespace MajdataPlay
 {
     internal class SongDetail : ISongDetail, IDisposable
     {
-        /// <summary>Gets the identity read from, or generated into, the chart directory's <c>.MajdataPlay/id</c> file.</summary>
+        /// <summary>
+        /// Gets the identity read from the chart directory's <c>.MajdataPlay/id</c> file, or derived from the directory's
+        /// location while that file is not written yet (see <see cref="IsIdPersisted"/>).
+        /// </summary>
         public string Id { get; }
+        /// <summary>Gets whether <see cref="Id"/> is stored in the chart directory's marker file.</summary>
+        public bool IsIdPersisted
+        {
+            get
+            {
+                return _isIdPersisted;
+            }
+        }
         public string Title { get; init; } = string.Empty;
         public string Artist { get; init; } = string.Empty;
         public string Description { get; init; } = string.Empty;
@@ -37,8 +49,15 @@ namespace MajdataPlay
         public bool IsPreviewAudioTrackLoaded { get => Cache.AudioSample.ContainsKey(_previewAudioTrackCacheKey); }
         public bool IsMaidataLoaded { get => _maidata != null; }
 
+        /// <summary>The initial read buffer length for a metadata file whose length the backend does not report.</summary>
+        private const int UnknownMetadataLengthBufferSize = 64 * 1024;
+
+        /// <summary>Retains the chart directory and its original backend for writing the identity marker later.</summary>
+        private readonly StorageDirectory _directory;
         /// <summary>Retains the authoritative metadata file and its original backend for subsequent chart parsing.</summary>
         private readonly StorageFile _maidataFile;
+        /// <summary>Records whether <see cref="Id"/> is stored in the marker file; set once <see cref="PersistId"/> has written it.</summary>
+        private volatile bool _isIdPersisted;
         private readonly string _trackPath = string.Empty;
         private readonly string _videoPath = string.Empty;
         private readonly string _coverPath = string.Empty;
@@ -76,7 +95,23 @@ namespace MajdataPlay
         /// <exception cref="System.IO.IOException">The chart directory cannot be enumerated.</exception>
         /// <exception cref="UnauthorizedAccessException">The backend denies chart-directory access.</exception>
         /// <exception cref="NotSupportedException">The backend cannot enumerate chart resources.</exception>
-        public SongDetail(StorageDirectory directory, SimaiMetadata metadata)
+        public SongDetail(StorageDirectory directory, SimaiMetadata metadata) : this(directory, null, metadata)
+        {
+        }
+        /// <summary>Creates song metadata from the chart directory's entries, enumerating them only when they are not supplied.</summary>
+        /// <param name="directory">The authoritative directory handle containing chart resources.</param>
+        /// <param name="entries">The directory's immediate entries from one enumeration, or null to enumerate them here.</param>
+        /// <param name="metadata">The parsed Simai metadata.</param>
+        /// <remarks>
+        /// The identity marker is only read, never written: a chart without one uses
+        /// <see cref="DirectoryIdentity.CreateLocationId(StorageDirectory)"/> until <see cref="PersistId"/> stores it.
+        /// </remarks>
+        /// <exception cref="ArgumentNullException">The directory is null.</exception>
+        /// <exception cref="System.IO.FileNotFoundException">Chart metadata or a supported audio track is missing.</exception>
+        /// <exception cref="System.IO.IOException">The chart directory cannot be enumerated.</exception>
+        /// <exception cref="UnauthorizedAccessException">The backend denies chart-directory access.</exception>
+        /// <exception cref="NotSupportedException">The backend cannot enumerate chart resources.</exception>
+        internal SongDetail(StorageDirectory directory, FileSystemEntry[]? entries, SimaiMetadata metadata)
         {
             // Assigned before anything can throw, because the finalizer still runs when the constructor fails.
             var cacheKeyScope = Cache.CreateKeyScope(nameof(SongDetail));
@@ -87,13 +122,16 @@ namespace MajdataPlay
             {
                 throw new ArgumentNullException(nameof(directory));
             }
-            var files = directory.EnumerateEntries().Where(x => !x.IsDirectory).ToArray();
-            _maidataFile = directory.FindFile(SongStorage.ChartFileName)
+            entries ??= directory.EnumerateEntries().ToArray();
+            var maidataEntry = FindMaidataEntry(entries)
                 ?? throw new System.IO.FileNotFoundException($"The chart does not contain {SongStorage.ChartFileName}.");
-            _trackPath = files.FirstOrDefault(entry => SongStorage.SupportedTrackFileNames.Contains(entry.Name, StringComparer.OrdinalIgnoreCase))?.Location
+            var trackEntry = FindFileEntry(entries, SongStorage.SupportedTrackFileNames)
                 ?? throw new System.IO.FileNotFoundException("The chart does not contain a supported track.");
-            _videoPath = files.FirstOrDefault(entry => SongStorage.SupportedVideoFileNames.Contains(entry.Name, StringComparer.OrdinalIgnoreCase))?.Location ?? string.Empty;
-            _coverPath = files.FirstOrDefault(entry => SongStorage.SupportedCoverFileNames.Contains(entry.Name, StringComparer.OrdinalIgnoreCase))?.Location ?? string.Empty;
+            _directory = directory;
+            _maidataFile = new StorageFile(directory.FileSystem, maidataEntry.Location);
+            _trackPath = trackEntry.Location;
+            _videoPath = FindFileEntry(entries, SongStorage.SupportedVideoFileNames)?.Location ?? string.Empty;
+            _coverPath = FindFileEntry(entries, SongStorage.SupportedCoverFileNames)?.Location ?? string.Empty;
             _maidata = null;
 
             if (string.IsNullOrEmpty(_coverPath))
@@ -101,26 +139,200 @@ namespace MajdataPlay
                 _isEmptyCover = true;
             }
             _simaiMetadata = metadata;
-            Id = ReadOrCreateId(directory);
+            var storedId = ReadStoredId(directory, entries);
+            Id = storedId ?? DirectoryIdentity.CreateLocationId(directory).ToString();
+            _isIdPersisted = storedId is not null;
             Title = metadata.Title;
             Artist = metadata.Artist;
-            Timestamp = _maidataFile.Entry?.LastWriteTimeUtc?.ToLocalTime() ?? DateTime.UnixEpoch;
+            Timestamp = maidataEntry.LastWriteTimeUtc?.ToLocalTime() ?? DateTime.UnixEpoch;
         }
-        /// <summary>Reads the chart directory's persisted identity, creating it when missing.</summary>
-        /// <param name="directory">The chart directory owning the identity marker.</param>
-        /// <returns>The persisted identity, or a GUID kept only in memory when the marker cannot be stored.</returns>
-        private static string ReadOrCreateId(StorageDirectory directory)
+        /// <summary>Checks whether a directory's entries contain both chart metadata and a supported track.</summary>
+        /// <param name="entries">The directory's immediate entries.</param>
+        /// <returns>True when the directory can be loaded as a chart.</returns>
+        /// <exception cref="ArgumentNullException">The entries are null.</exception>
+        internal static bool IsChartDirectory(FileSystemEntry[] entries)
         {
+            if (entries is null)
+            {
+                throw new ArgumentNullException(nameof(entries));
+            }
+            return FindMaidataEntry(entries) is not null && FindFileEntry(entries, SongStorage.SupportedTrackFileNames) is not null;
+        }
+        /// <summary>Reads, parses and creates a chart on the calling thread from one enumeration of its directory.</summary>
+        /// <param name="directory">The authoritative directory handle containing the chart.</param>
+        /// <param name="entries">The directory's immediate entries from one enumeration, or null to enumerate them here.</param>
+        /// <param name="token">The token checked between the blocking read, parse and construction steps.</param>
+        /// <returns>A local song detail initialized from the chart's metadata and original directory handle.</returns>
+        /// <remarks>
+        /// Blocks on storage I/O and parsing without any thread-pool hop, so scan workers can call it directly.
+        /// Synchronous provider operations are checked between calls but cannot be interrupted while blocked.
+        /// </remarks>
+        /// <exception cref="ArgumentNullException">The directory is null.</exception>
+        /// <exception cref="System.IO.FileNotFoundException">The chart does not contain maidata.txt or a supported track.</exception>
+        /// <exception cref="System.IO.IOException">Chart discovery or reading failed.</exception>
+        /// <exception cref="UnauthorizedAccessException">The backend denies chart access.</exception>
+        /// <exception cref="NotSupportedException">The backend cannot read or enumerate chart resources.</exception>
+        /// <exception cref="InvalidSimaiMarkupException">The chart metadata is malformed.</exception>
+        /// <exception cref="OperationCanceledException">Cancellation was observed between steps.</exception>
+        internal static SongDetail Load(StorageDirectory directory, FileSystemEntry[]? entries, CancellationToken token)
+        {
+            if (directory is null)
+            {
+                throw new ArgumentNullException(nameof(directory));
+            }
+            token.ThrowIfCancellationRequested();
+            entries ??= directory.EnumerateEntries().ToArray();
+            var maidataEntry = FindMaidataEntry(entries)
+                ?? throw new System.IO.FileNotFoundException($"The chart does not contain {SongStorage.ChartFileName}.");
+            var maidataFile = new StorageFile(directory.FileSystem, maidataEntry.Location);
+            var metadata = ReadMetadata(maidataFile, maidataEntry.Length, token);
+            token.ThrowIfCancellationRequested();
+            var song = new SongDetail(directory, entries, metadata);
+            if (token.IsCancellationRequested)
+            {
+                song.Dispose();
+                token.ThrowIfCancellationRequested();
+            }
+            return song;
+        }
+        /// <summary>Writes <see cref="Id"/> into the chart directory's marker file when no identity is stored there yet.</summary>
+        /// <remarks>
+        /// Scanning only reads markers, so code that stores <see cref="Id"/> calls this to keep the stored reference valid after
+        /// the folder is renamed or moved. It blocks on the few storage writes of a missing marker and returns at once when the
+        /// identity is already stored. An identity stored by someone else in the meantime is kept on disk; this instance keeps
+        /// its <see cref="Id"/> until the next scan reads the stored one.
+        /// </remarks>
+        /// <exception cref="System.IO.DirectoryNotFoundException">The chart directory no longer exists.</exception>
+        /// <exception cref="UnauthorizedAccessException">Creating or writing the marker was denied.</exception>
+        /// <exception cref="NotSupportedException">The backend cannot create or write the marker.</exception>
+        /// <exception cref="System.IO.IOException">Creating or writing the marker failed.</exception>
+        internal void PersistId()
+        {
+            if (_isIdPersisted)
+            {
+                return;
+            }
+            DirectoryIdentity.GetOrWriteId(_directory, Id);
+            _isIdPersisted = true;
+        }
+        /// <summary>Reads the metadata file into a pooled buffer and parses its fields.</summary>
+        /// <param name="maidataFile">The chart's metadata file.</param>
+        /// <param name="length">The file length reported by enumeration, or null when the backend does not report one.</param>
+        /// <param name="token">The token checked between reads.</param>
+        /// <returns>The parsed metadata, whose hash covers exactly the bytes of the file.</returns>
+        /// <exception cref="System.IO.FileNotFoundException">The metadata file no longer exists.</exception>
+        /// <exception cref="System.IO.IOException">Reading failed.</exception>
+        /// <exception cref="UnauthorizedAccessException">The backend denies reading.</exception>
+        /// <exception cref="NotSupportedException">The file is not readable.</exception>
+        /// <exception cref="InvalidSimaiMarkupException">The metadata is malformed.</exception>
+        /// <exception cref="OperationCanceledException">Cancellation was observed between reads.</exception>
+        internal static SimaiMetadata ReadMetadata(StorageFile maidataFile, long? length, CancellationToken token)
+        {
+            using var stream = maidataFile.OpenRead();
+            // One spare byte lets the final zero-length read finish without growing a buffer of exactly the file's length.
+            var initialLength = length is > 0 and < int.MaxValue ? (int)length.Value + 1 : UnknownMetadataLengthBufferSize;
+            var buffer = Pool<byte>.Rent(initialLength);
             try
             {
-                return DirectoryIdentity.GetOrCreateId(directory);
+                var count = 0;
+                while (true)
+                {
+                    token.ThrowIfCancellationRequested();
+                    if (count == buffer.Length)
+                    {
+                        buffer.Resize(count * 2);
+                    }
+                    var read = stream.Read(buffer.AsArray(), count, buffer.Length - count);
+                    if (read == 0)
+                    {
+                        break;
+                    }
+                    count += read;
+                }
+                using var content = new System.IO.MemoryStream(buffer.AsArray(), 0, count, false);
+                return SimaiParser.ParseMetadata(content);
+            }
+            finally
+            {
+                buffer.Dispose();
+            }
+        }
+        /// <summary>Reads the identity from the chart's marker directory when enumeration found one.</summary>
+        /// <param name="directory">The chart directory.</param>
+        /// <param name="entries">The chart directory's immediate entries.</param>
+        /// <returns>The stored identity, or null when no marker exists or it cannot be read.</returns>
+        private static string? ReadStoredId(StorageDirectory directory, FileSystemEntry[] entries)
+        {
+            var markerEntry = FindEntry(entries, DirectoryIdentity.MarkerDirectoryName, true);
+            if (markerEntry is null)
+            {
+                return null;
+            }
+            try
+            {
+                return DirectoryIdentity.ReadStoredId(new StorageDirectory(directory.FileSystem, markerEntry.Location));
             }
             catch (Exception exception) when (exception is System.IO.IOException or UnauthorizedAccessException or NotSupportedException)
             {
-                // A read-only chart directory stays playable; its identity just does not survive a rescan.
-                MajDebug.LogWarning(nameof(SongDetail), $"Failed to persist the identity of chart '{directory.Location}': {exception.Message}");
-                return Guid.NewGuid().ToString();
+                // The location-derived identity keeps the chart usable; persisting it later reports a lasting failure.
+                MajDebug.LogWarning(nameof(SongDetail), $"Failed to read the identity of chart '{directory.Location}': {exception.Message}");
+                return null;
             }
+        }
+        /// <summary>Finds the chart's metadata file among enumerated entries.</summary>
+        /// <param name="entries">The chart directory's immediate entries.</param>
+        /// <returns>The metadata file entry, or null when the directory has none.</returns>
+        private static FileSystemEntry? FindMaidataEntry(FileSystemEntry[] entries)
+        {
+            return FindEntry(entries, SongStorage.ChartFileName, false);
+        }
+        /// <summary>Finds an entry by name, preferring an exact match and otherwise ignoring case like the platform lookup did.</summary>
+        /// <param name="entries">The directory's immediate entries.</param>
+        /// <param name="name">The requested name.</param>
+        /// <param name="isDirectory">Whether a directory rather than a file is requested.</param>
+        /// <returns>The matching entry, or null when no entry of the requested kind has the name.</returns>
+        /// <remarks>Windows and Android shared storage resolved names without regard to case, so a case-insensitive fallback keeps those charts.</remarks>
+        private static FileSystemEntry? FindEntry(FileSystemEntry[] entries, string name, bool isDirectory)
+        {
+            FileSystemEntry? caseInsensitiveMatch = null;
+            foreach (var entry in entries)
+            {
+                if (entry.IsDirectory != isDirectory)
+                {
+                    continue;
+                }
+                if (string.Equals(entry.Name, name, StringComparison.Ordinal))
+                {
+                    return entry;
+                }
+                if (caseInsensitiveMatch is null && string.Equals(entry.Name, name, StringComparison.OrdinalIgnoreCase))
+                {
+                    caseInsensitiveMatch = entry;
+                }
+            }
+            return caseInsensitiveMatch;
+        }
+        /// <summary>Finds the first file, in enumeration order, whose name is one of the supported names.</summary>
+        /// <param name="entries">The directory's immediate entries.</param>
+        /// <param name="supportedNames">The accepted file names, compared without regard to case.</param>
+        /// <returns>The first matching file entry, or null when there is none.</returns>
+        private static FileSystemEntry? FindFileEntry(FileSystemEntry[] entries, string[] supportedNames)
+        {
+            foreach (var entry in entries)
+            {
+                if (entry.IsDirectory)
+                {
+                    continue;
+                }
+                foreach (var supportedName in supportedNames)
+                {
+                    if (string.Equals(entry.Name, supportedName, StringComparison.OrdinalIgnoreCase))
+                    {
+                        return entry;
+                    }
+                }
+            }
+            return null;
         }
         /// <summary>Reads and parses a chart using the storage facade for its directory location.</summary>
         /// <param name="chartFolder">The chart directory's local path or registered provider location.</param>
@@ -141,12 +353,13 @@ namespace MajdataPlay
             return ParseAsync(FileSystem.Directory.Open(chartFolder), token);
         }
 
-        /// <summary>Reads cancellable metadata bytes and parses them using the supplied directory's original backend.</summary>
+        /// <summary>Reads and parses a chart on a thread-pool thread using the supplied directory's original backend.</summary>
         /// <param name="directory">The authoritative directory handle containing the chart.</param>
-        /// <param name="token">The token passed to metadata reading and checked before and after parsing.</param>
+        /// <param name="token">The token checked between metadata reads and before and after parsing.</param>
         /// <returns>A local song detail initialized from the chart's metadata and original directory handle.</returns>
         /// <remarks>
-        /// Synchronous provider operations are checked between calls but cannot be interrupted while blocked.
+        /// Runs <see cref="Load(StorageDirectory, FileSystemEntry[], CancellationToken)"/> as one work item, so the chart costs a
+        /// single thread-pool hop. Synchronous provider operations are checked between calls but cannot be interrupted while blocked.
         /// MajSimai has no metadata-parser token overload, so parsing completes before a cancellation check is made.
         /// Buffering the original bytes also allows provider streams which do not expose a seekable length.
         /// Subsequent maidata reads retain the original backend; audio, video and cover loading remains path-based.
@@ -165,21 +378,7 @@ namespace MajdataPlay
                 throw new ArgumentNullException(nameof(directory));
             }
             token.ThrowIfCancellationRequested();
-            var maidataFile = directory.FindFile(SongStorage.ChartFileName)
-                ?? throw new System.IO.FileNotFoundException($"The chart does not contain {SongStorage.ChartFileName}.");
-            token.ThrowIfCancellationRequested();
-            var maidataBytes = await maidataFile.ReadAllBytesAsync(token).ConfigureAwait(false);
-            token.ThrowIfCancellationRequested();
-            using var maidataStream = new System.IO.MemoryStream(maidataBytes, false);
-            var metadata = await SimaiParser.ParseMetadataAsync(maidataStream).ConfigureAwait(false);
-            token.ThrowIfCancellationRequested();
-            var song = new SongDetail(directory, metadata);
-            if (token.IsCancellationRequested)
-            {
-                song.Dispose();
-                token.ThrowIfCancellationRequested();
-            }
-            return song;
+            return await Task.Run(() => Load(directory, null, token), token).ConfigureAwait(false);
         }
 
         public async ValueTask PreloadAsync(INetProgress? progress = null, CancellationToken token = default)

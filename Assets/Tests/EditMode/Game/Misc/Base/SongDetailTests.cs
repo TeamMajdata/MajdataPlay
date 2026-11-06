@@ -69,10 +69,13 @@ namespace MajdataPlay.Tests.Game.Misc.Base
             });
         }
 
-        /// <summary>Checks that a chart's identity is generated into its hidden marker file and reused by later scans.</summary>
+        /// <summary>
+        /// Checks that parsing never writes the identity marker, that a chart without one keeps the same location-derived
+        /// identity across parses, and that persisting writes exactly that identity, which later parses then read.
+        /// </summary>
         /// <returns>The test coroutine.</returns>
         [UnityTest]
-        public IEnumerator ParseAsync_PersistsIdentity()
+        public IEnumerator ParseAsync_UsesLocationIdentityUntilPersisted()
         {
             return UniTask.ToCoroutine(async () =>
             {
@@ -82,10 +85,103 @@ namespace MajdataPlay.Tests.Game.Misc.Base
                 using var second = await SongDetail.ParseAsync(directory);
 
                 Assert.That(Guid.TryParse(first.Id, out _), Is.True);
+                Assert.That(first.Id, Is.EqualTo(DirectoryIdentity.CreateLocationId(directory).ToString()));
                 Assert.That(second.Id, Is.EqualTo(first.Id));
-                var idFile = directory.FindFileAt(".MajdataPlay/id")!;
-                Assert.That(idFile.ReadAllText(), Is.EqualTo(first.Id));
-                Assert.That(directory.FindEntry(".MajdataPlay")!.IsHidden, Is.True);
+                Assert.That(first.IsIdPersisted, Is.False);
+                Assert.That(directory.FindEntry(DirectoryIdentity.MarkerDirectoryName), Is.Null);
+
+                first.PersistId();
+
+                Assert.That(first.IsIdPersisted, Is.True);
+                Assert.That(directory.FindFileAt(".MajdataPlay/id")!.ReadAllText(), Is.EqualTo(first.Id));
+                Assert.That(directory.FindEntry(DirectoryIdentity.MarkerDirectoryName)!.IsHidden, Is.True);
+                using var third = await SongDetail.ParseAsync(directory);
+                Assert.That(third.Id, Is.EqualTo(first.Id));
+                Assert.That(third.IsIdPersisted, Is.True);
+            });
+        }
+
+        /// <summary>Checks that a stored identity is read as is and that persisting never replaces it.</summary>
+        /// <returns>The test coroutine.</returns>
+        [UnityTest]
+        public IEnumerator ParseAsync_ReadsStoredIdentity()
+        {
+            return UniTask.ToCoroutine(async () =>
+            {
+                var directory = ChartFixture.CreateChart(_temporary.Directory, "Chart", "Title");
+                DirectoryIdentity.WriteId(directory, "server-id");
+
+                using var song = await SongDetail.ParseAsync(directory);
+                song.PersistId();
+
+                Assert.That(song.Id, Is.EqualTo("server-id"));
+                Assert.That(song.IsIdPersisted, Is.True);
+                Assert.That(directory.FindFileAt(".MajdataPlay/id")!.ReadAllText(), Is.EqualTo("server-id"));
+            });
+        }
+
+        /// <summary>
+        /// Checks that the synchronous pooled read yields the same metadata hash as the upstream stream parser, because
+        /// favorites and playlists are keyed by that hash.
+        /// </summary>
+        /// <returns>The test coroutine.</returns>
+        [UnityTest]
+        public IEnumerator ParseAsync_HashMatchesStreamParser()
+        {
+            return UniTask.ToCoroutine(async () =>
+            {
+                var directory = ChartFixture.CreateChart(_temporary.Directory, "Chart", "中文タイトル");
+                var bytes = directory.FindFile("maidata.txt")!.ReadAllBytes();
+                using var expectedStream = new MemoryStream(bytes, false);
+                var expected = await MajSimai.SimaiParser.ParseMetadataAsync(expectedStream);
+
+                using var song = await SongDetail.ParseAsync(directory);
+
+                Assert.That(song.Title, Is.EqualTo("中文タイトル"));
+                Assert.That(song.Hash, Is.EqualTo(expected.Hash));
+            });
+        }
+
+        /// <summary>
+        /// Checks that metadata larger than the initial buffer is read completely when the backend reports no length, so
+        /// the pooled buffer has to grow, and when the exact length is known.
+        /// </summary>
+        /// <returns>The test coroutine.</returns>
+        [UnityTest]
+        public IEnumerator ReadMetadata_ReadsWholeFileWithAndWithoutLength()
+        {
+            return UniTask.ToCoroutine(async () =>
+            {
+                var directory = ChartFixture.CreateChart(_temporary.Directory, "Chart", "Large", withMaidata: false);
+                var text = ChartFixture.CreateMaidata("Large") + "\n&padding=" + new string('x', 200 * 1024) + "\n";
+                var file = directory.CreateFile("maidata.txt");
+                file.WriteAllText(text);
+                var bytes = file.ReadAllBytes();
+                using var expectedStream = new MemoryStream(bytes, false);
+                var expected = await MajSimai.SimaiParser.ParseMetadataAsync(expectedStream);
+
+                var withoutLength = SongDetail.ReadMetadata(file, null, CancellationToken.None);
+                var withLength = SongDetail.ReadMetadata(file, bytes.Length, CancellationToken.None);
+
+                Assert.That(withoutLength.Title, Is.EqualTo("Large"));
+                Assert.That(withoutLength.Hash, Is.EqualTo(expected.Hash));
+                Assert.That(withLength.Hash, Is.EqualTo(expected.Hash));
+            });
+        }
+
+        /// <summary>Checks that a metadata file whose name differs only in case is still found, as platform lookups did.</summary>
+        /// <returns>The test coroutine.</returns>
+        [UnityTest]
+        public IEnumerator ParseAsync_FindsMetadataIgnoringCase()
+        {
+            return UniTask.ToCoroutine(async () =>
+            {
+                var directory = ChartFixture.CreateChart(_temporary.Directory, "Chart", "Upper", withMaidata: false);
+                directory.CreateFile("MAIDATA.TXT").WriteAllText(ChartFixture.CreateMaidata("Upper"));
+
+                using var song = await SongDetail.ParseAsync(directory);
+
+                Assert.That(song.Title, Is.EqualTo("Upper"));
             });
         }
 

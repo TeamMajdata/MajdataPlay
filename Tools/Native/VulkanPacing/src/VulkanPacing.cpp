@@ -12,6 +12,7 @@
 #include <atomic>
 #include <cstring>
 #include <deque>
+#include <memory>
 #include <mutex>
 #include <utility>
 #include <vector>
@@ -58,8 +59,10 @@ typedef void (VKAPI_PTR* PFN_vkAntiLagUpdateAMD)(VkDevice device, const VkAntiLa
 namespace {
 // Lower than kUnityVulkanInitCallbackMaxPriority, which Unity reserves for the innermost interceptor.
 constexpr int32_t InterceptPriority = 0x40000000;
-// Frame ids waiting for their presentation; more means Unity skipped presentations (e.g. while minimized).
-constexpr size_t MaxPendingFrames = 16;
+// Frame ids waiting for their presentation. Unity's main thread runs at most one frame ahead of its render thread,
+// so more means Unity skipped presentations (e.g. while minimized); the oldest are dropped so that later
+// presentations do not stay paired with frames long past.
+constexpr size_t MaxPendingFrames = 2;
 
 IUnityGraphicsVulkanV2* unityVulkan = nullptr;
 PFN_vkGetInstanceProcAddr nextInstanceProc = nullptr;
@@ -87,6 +90,9 @@ std::mutex presentMutex;
 int swapchainUsers = 0;
 VkDevice trackedDevice = VK_NULL_HANDLE;
 VkSwapchainKHR trackedSwapchain = VK_NULL_HANDLE;
+// The swapchain the tracked one replaced (window resize) until Unity destroys it; Unity may still present its
+// acquired images, and the layer keeps the ids it numbered on it increasing.
+VkSwapchainKHR retiredSwapchain = VK_NULL_HANDLE;
 bool presentIdEnabled = false;
 PFN_vkWaitForPresentKHR waitForPresent = nullptr;
 // One monotonic counter numbers frames begun by the main thread and presentations without such a frame, so
@@ -95,15 +101,28 @@ uint64_t frameCounter = 0;
 uint64_t simulatedFrame = 0;
 std::deque<uint64_t> pendingFrames;
 bool renderSubmitStarted = false;
-// Unity's ids replaced by frame ids for the NVIDIA backend, oldest first, so Unity's own waits can be translated.
-std::deque<std::pair<uint64_t, uint64_t>> replacedIds;
+// Whether the tracked swapchain presented since NVIDIA's last latency sleep; the driver releases one sleep per
+// presentation, so frames without one (e.g. while minimized) are not slept.
+bool presentedSinceSleep = true;
+// Unity's ids that the layer replaced with its frame ids, oldest first, so Unity's own waits can be translated.
+struct ReplacedId {
+    VkSwapchainKHR swapchain;
+    uint64_t unityId;
+    uint64_t frameId;
+};
+std::deque<ReplacedId> replacedIds;
 constexpr size_t MaxReplacedIds = 64;
 // Readable without the lock; a stale pair is rejected by the generation check.
 std::atomic<uint64_t> swapchainGeneration{0};
 std::atomic<uint64_t> lastPresentId{0};
+// Set when a call on Unity's device reports VK_ERROR_DEVICE_LOST, and cleared when Unity creates a new device. A
+// lost device stays lost, so from then on the layer adds no ids, markers or sleeps and never waits in the driver.
+std::atomic<bool> deviceLost{false};
+std::atomic<int> deviceLostCall{MajvkCallNone};
 
-// nvMutex guards nvDevice/nvSwapchain and serializes the NVIDIA latency calls, which take the swapchain, with
-// each other and with swapchain destruction. Those calls never block.
+// nvMutex guards nvDevice/nvSwapchain and serializes the NVIDIA latency calls, which take the swapchain, with each
+// other; swapchain destruction clears nvSwapchain under it first, so no latency call reaches a destroyed swapchain.
+// Those calls never block.
 std::mutex nvMutex;
 VkDevice nvDevice = VK_NULL_HANDLE;
 VkSwapchainKHR nvSwapchain = VK_NULL_HANDLE;
@@ -130,6 +149,88 @@ const VkBaseInStructure* FindStructure(const void* chain, VkStructureType type) 
     for (auto* node = static_cast<const VkBaseInStructure*>(chain); node; node = node->pNext)
         if (node->sType == type) return node;
     return nullptr;
+}
+// Latches a device loss reported by a call, remembering the first call that reported it, and returns the result.
+VkResult Observe(VkResult result, int call) {
+    if (result == VK_ERROR_DEVICE_LOST) {
+        int none = MajvkCallNone;
+        deviceLostCall.compare_exchange_strong(none, call);
+        deviceLost = true;
+    }
+    return result;
+}
+// Returns the index of a swapchain in a presentation, or swapchainCount when it is not presented.
+uint32_t FindSwapchain(const VkPresentInfoKHR* info, VkSwapchainKHR swapchain) {
+    if (swapchain == VK_NULL_HANDLE) return info->swapchainCount;
+    for (uint32_t i = 0; i < info->swapchainCount; ++i)
+        if (info->pSwapchains[i] == swapchain) return i;
+    return info->swapchainCount;
+}
+// Returns the size of a structure that Vulkan (headers 1.3.275) allows in a presentation's pNext chain besides
+// VkPresentIdKHR, or 0 for a type the layer does not know.
+size_t PresentStructureSize(VkStructureType type) {
+    switch (type) {
+    case VK_STRUCTURE_TYPE_DEVICE_GROUP_PRESENT_INFO_KHR: return sizeof(VkDeviceGroupPresentInfoKHR);
+    case VK_STRUCTURE_TYPE_DISPLAY_PRESENT_INFO_KHR: return sizeof(VkDisplayPresentInfoKHR);
+    case VK_STRUCTURE_TYPE_PRESENT_REGIONS_KHR: return sizeof(VkPresentRegionsKHR);
+    case VK_STRUCTURE_TYPE_PRESENT_TIMES_INFO_GOOGLE: return sizeof(VkPresentTimesInfoGOOGLE);
+    case VK_STRUCTURE_TYPE_SWAPCHAIN_PRESENT_FENCE_INFO_EXT: return sizeof(VkSwapchainPresentFenceInfoEXT);
+    case VK_STRUCTURE_TYPE_SWAPCHAIN_PRESENT_MODE_INFO_EXT: return sizeof(VkSwapchainPresentModeInfoEXT);
+    case VK_STRUCTURE_TYPE_FRAME_BOUNDARY_EXT: return sizeof(VkFrameBoundaryEXT);
+    default: return 0;
+    }
+}
+// Builds a presentation chain in which `replacement` takes the place of Unity's VkPresentIdKHR. The structures in
+// front of Unity's are copied into `copies` and the ones behind it are shared, so Unity's memory is never modified.
+// Returns the new chain head, or nullptr when a structure in front of Unity's has a type the layer cannot copy.
+const void* ReplacePresentId(const void* head, const VkPresentIdKHR* unity, VkPresentIdKHR& replacement,
+                             std::vector<std::unique_ptr<unsigned char[]>>& copies) {
+    std::vector<const VkBaseInStructure*> front;
+    const auto* target = reinterpret_cast<const VkBaseInStructure*>(unity);
+    for (auto* node = static_cast<const VkBaseInStructure*>(head); node != target; node = node->pNext) {
+        if (!node || !PresentStructureSize(node->sType)) return nullptr;
+        front.push_back(node);
+    }
+    replacement.pNext = unity->pNext;
+    const void* next = &replacement;
+    // Copied back to front, so each copy can point at the one after it.
+    for (auto structure = front.rbegin(); structure != front.rend(); ++structure) {
+        const size_t size = PresentStructureSize((*structure)->sType);
+        auto copy = std::make_unique<unsigned char[]>(size);
+        std::memcpy(copy.get(), *structure, size);
+        reinterpret_cast<VkBaseOutStructure*>(copy.get())->pNext = static_cast<VkBaseOutStructure*>(const_cast<void*>(next));
+        next = copy.get();
+        copies.push_back(std::move(copy));
+    }
+    return next;
+}
+// Called with presentMutex held. Remembers a replaced Unity id for translating Unity's own waits.
+void RememberUnityId(VkSwapchainKHR swapchain, uint64_t unityId, uint64_t frameId) {
+    replacedIds.push_back({swapchain, unityId, frameId});
+    if (replacedIds.size() > MaxReplacedIds) replacedIds.pop_front();
+}
+// Called with presentMutex held. Forgets the replaced ids of a swapchain handle that was destroyed or reissued.
+void ForgetUnityIds(VkSwapchainKHR swapchain) {
+    for (auto entry = replacedIds.begin(); entry != replacedIds.end();)
+        entry = entry->swapchain == swapchain ? replacedIds.erase(entry) : entry + 1;
+}
+// Called with presentMutex held. Translates the id of Unity's own wait into the frame id the layer presented in its
+// place. An id older than the remembered ones maps to the oldest, which has been presented; an id newer than every
+// replaced one is a presentation still to come and maps to as many frame ids after the newest, which the
+// presentations to come reach no later than Unity's own ids would, because frame ids grow at least as fast.
+uint64_t TranslateUnityId(VkSwapchainKHR swapchain, uint64_t presentId) {
+    const ReplacedId* oldest = nullptr;
+    const ReplacedId* newest = nullptr;
+    const ReplacedId* covering = nullptr;
+    for (const auto& entry : replacedIds) {
+        if (entry.swapchain != swapchain) continue;
+        if (!oldest) oldest = &entry;
+        newest = &entry;
+        if (entry.unityId <= presentId) covering = &entry;
+    }
+    if (!newest) return presentId;
+    if (presentId >= newest->unityId) return newest->frameId + (presentId - newest->unityId);
+    return covering ? covering->frameId : oldest->frameId;
 }
 bool HasName(const std::vector<const char*>& names, const char* name) {
     for (const char* entry : names)
@@ -265,9 +366,11 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDevice(VkPhysicalDevice physical, const VkD
                                            const VkAllocationCallbacks* allocator, VkDevice* device) {
     {
         std::lock_guard<std::mutex> lock(presentMutex);
-        trackedDevice = VK_NULL_HANDLE; trackedSwapchain = VK_NULL_HANDLE; waitForPresent = nullptr;
-        presentIdEnabled = false; pendingFrames.clear(); replacedIds.clear(); renderSubmitStarted = false;
+        trackedDevice = VK_NULL_HANDLE; trackedSwapchain = VK_NULL_HANDLE; retiredSwapchain = VK_NULL_HANDLE;
+        waitForPresent = nullptr; presentIdEnabled = false; pendingFrames.clear(); replacedIds.clear();
+        renderSubmitStarted = false; presentedSinceSleep = true;
         ++swapchainGeneration; lastPresentId = 0;
+        deviceLost = false; deviceLostCall = MajvkCallNone;
     }
     presentWaitStatus = MajvkStatusNotEnabledByUnity;
     lowLatencyStatus = MajvkLowLatencyUnsupported;
@@ -324,8 +427,8 @@ VKAPI_ATTR void VKAPI_CALL DestroyDevice(VkDevice device, const VkAllocationCall
     if (tracked) {
         StopLowLatency(device);
         std::lock_guard<std::mutex> lock(presentMutex);
-        trackedDevice = VK_NULL_HANDLE; trackedSwapchain = VK_NULL_HANDLE; waitForPresent = nullptr;
-        pendingFrames.clear(); replacedIds.clear(); ++swapchainGeneration; lastPresentId = 0;
+        trackedDevice = VK_NULL_HANDLE; trackedSwapchain = VK_NULL_HANDLE; retiredSwapchain = VK_NULL_HANDLE;
+        waitForPresent = nullptr; pendingFrames.clear(); replacedIds.clear(); ++swapchainGeneration; lastPresentId = 0;
         presentWaitStatus = MajvkStatusNoDevice;
         lowLatencyStatus = MajvkLowLatencyNoDevice;
     }
@@ -340,29 +443,49 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateSwapchain(VkDevice device, const VkSwapchai
         std::lock_guard<std::mutex> lock(presentMutex);
         tracked = device == trackedDevice;
     }
-    // NVIDIA's latency calls need swapchains created with latency mode enabled.
+    // NVIDIA's latency calls need swapchains created with latency mode enabled; a lost device gets none of it.
+    const bool nvidia = tracked && !deviceLost.load() && lowLatencyBackend.load() == MajvkBackendNvidia;
     VkSwapchainLatencyCreateInfoNV latency{VK_STRUCTURE_TYPE_SWAPCHAIN_LATENCY_CREATE_INFO_NV, info->pNext, VK_TRUE};
     VkSwapchainCreateInfoKHR copy = *info;
-    const bool nvidia = tracked && lowLatencyBackend.load() == MajvkBackendNvidia &&
-        !FindStructure(info->pNext, VK_STRUCTURE_TYPE_SWAPCHAIN_LATENCY_CREATE_INFO_NV);
-    if (nvidia) copy.pNext = &latency;
-    const VkResult result = create(device, nvidia ? &copy : info, allocator, swapchain);
-    if (result != VK_SUCCESS || !tracked) return result;
-    if (lowLatencyBackend.load() == MajvkBackendNvidia) {
-        // Sleep mode belongs to a swapchain, so every recreated swapchain gets it again.
+    const bool addLatency = nvidia && !FindStructure(info->pNext, VK_STRUCTURE_TYPE_SWAPCHAIN_LATENCY_CREATE_INFO_NV);
+    if (addLatency) copy.pNext = &latency;
+    const VkResult result = Observe(create(device, addLatency ? &copy : info, allocator, swapchain), MajvkCallCreateSwapchain);
+    if (!tracked) return result;
+    if (result != VK_SUCCESS) {
+        // The old swapchain is retired even when its replacement could not be created, so it can no longer be
+        // waited on or slept on; it may still present its acquired images.
+        const VkSwapchainKHR old = info->oldSwapchain;
+        if (old != VK_NULL_HANDLE) {
+            {
+                std::lock_guard<std::mutex> nvLock(nvMutex);
+                if (old == nvSwapchain) nvSwapchain = VK_NULL_HANDLE;
+            }
+            std::lock_guard<std::mutex> lock(presentMutex);
+            if (old == trackedSwapchain) {
+                retiredSwapchain = old; trackedSwapchain = VK_NULL_HANDLE;
+                ++swapchainGeneration; lastPresentId = 0;
+            }
+        }
+        return result;
+    }
+    if (nvidia) {
+        // Sleep mode belongs to a swapchain, so every recreated swapchain gets it again. Without it the driver
+        // never releases a sleep, so a swapchain whose sleep mode failed is not slept on.
         std::lock_guard<std::mutex> lock(nvMutex);
         if (setLatencySleepMode && device == nvDevice) {
-            nvSwapchain = *swapchain;
             VkLatencySleepModeInfoNV mode{VK_STRUCTURE_TYPE_LATENCY_SLEEP_MODE_INFO_NV, nullptr, VK_TRUE, VK_FALSE, 0};
-            setLatencySleepMode(device, *swapchain, &mode);
+            const VkResult set = Observe(setLatencySleepMode(device, *swapchain, &mode), MajvkCallSetLatencySleepMode);
+            nvSwapchain = set == VK_SUCCESS ? *swapchain : VK_NULL_HANDLE;
         }
     }
     std::lock_guard<std::mutex> lock(presentMutex);
     if (device == trackedDevice) {
         // The newest swapchain is the one Unity presents to; a swapchain it replaces may still present until
-        // Unity destroys it, but those presentations are not tracked.
-        // Frames begun before it were meant for the old swapchain or none; new presentations take fresh ids.
-        trackedSwapchain = *swapchain; renderSubmitStarted = false; pendingFrames.clear(); replacedIds.clear();
+        // Unity destroys it, and keeps increasing ids then. Frames already begun keep their ids: they are the
+        // frames Unity presents next, now on the new swapchain.
+        if (info->oldSwapchain != VK_NULL_HANDLE && info->oldSwapchain == trackedSwapchain) retiredSwapchain = trackedSwapchain;
+        trackedSwapchain = *swapchain; renderSubmitStarted = false; presentedSinceSleep = true;
+        ForgetUnityIds(*swapchain);
         ++swapchainGeneration; lastPresentId = 0;
     }
     return result;
@@ -370,20 +493,27 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateSwapchain(VkDevice device, const VkSwapchai
 VKAPI_ATTR void VKAPI_CALL DestroySwapchain(VkDevice device, VkSwapchainKHR swapchain, const VkAllocationCallbacks* allocator) {
     const auto destroy = destroySwapchain.load(std::memory_order_relaxed);
     SwapchainUse use;
-    std::lock_guard<std::mutex> nvLock(nvMutex);
-    if (swapchain != VK_NULL_HANDLE && swapchain == nvSwapchain) nvSwapchain = VK_NULL_HANDLE;
+    {
+        // Once cleared, no latency call can reach the swapchain, so the driver's destruction, which may be slow,
+        // runs without holding the lock the main thread's frame calls need.
+        std::lock_guard<std::mutex> nvLock(nvMutex);
+        if (swapchain != VK_NULL_HANDLE && swapchain == nvSwapchain) nvSwapchain = VK_NULL_HANDLE;
+    }
     {
         std::lock_guard<std::mutex> lock(presentMutex);
         if (swapchain != VK_NULL_HANDLE && swapchain == trackedSwapchain) {
-            trackedSwapchain = VK_NULL_HANDLE; replacedIds.clear();
+            trackedSwapchain = VK_NULL_HANDLE;
             ++swapchainGeneration; lastPresentId = 0;
         }
+        if (swapchain != VK_NULL_HANDLE && swapchain == retiredSwapchain) retiredSwapchain = VK_NULL_HANDLE;
+        ForgetUnityIds(swapchain);
     }
     destroy(device, swapchain, allocator);
 }
 VKAPI_ATTR VkResult VKAPI_CALL QueueSubmit(VkQueue queue, uint32_t count, const VkSubmitInfo* submits, VkFence fence) {
     const auto submit = queueSubmit.load(std::memory_order_relaxed);
-    if (lowLatencyBackend.load() != MajvkBackendNvidia || count == 0) return submit(queue, count, submits, fence);
+    if (deviceLost.load() || lowLatencyBackend.load() != MajvkBackendNvidia || count == 0)
+        return Observe(submit(queue, count, submits, fence), MajvkCallQueueSubmit);
     uint64_t frame = 0;
     bool first = false;
     {
@@ -393,7 +523,7 @@ VKAPI_ATTR VkResult VKAPI_CALL QueueSubmit(VkQueue queue, uint32_t count, const 
             first = !renderSubmitStarted; renderSubmitStarted = true;
         }
     }
-    if (frame == 0) return submit(queue, count, submits, fence);
+    if (frame == 0) return Observe(submit(queue, count, submits, fence), MajvkCallQueueSubmit);
     if (first) {
         std::lock_guard<std::mutex> lock(nvMutex);
         SetMarker(frame, VK_LATENCY_MARKER_RENDERSUBMIT_START_NV);
@@ -406,57 +536,76 @@ VKAPI_ATTR VkResult VKAPI_CALL QueueSubmit(VkQueue queue, uint32_t count, const 
         ids[i] = {VK_STRUCTURE_TYPE_LATENCY_SUBMISSION_PRESENT_ID_NV, submits[i].pNext, frame};
         copies[i].pNext = &ids[i];
     }
-    return submit(queue, count, copies.data(), fence);
+    return Observe(submit(queue, count, copies.data(), fence), MajvkCallQueueSubmit);
 }
 VKAPI_ATTR VkResult VKAPI_CALL QueuePresent(VkQueue queue, const VkPresentInfoKHR* info) {
     const auto present = queuePresent.load(std::memory_order_relaxed);
+    // A lost device shows nothing more; Unity's presentation passes through untouched.
+    if (deviceLost.load()) return Observe(present(queue, info), MajvkCallQueuePresent);
     SwapchainUse use;
-    uint32_t tracked = info->swapchainCount;
+    // The swapchain whose id the layer sets: the tracked one, or else the retired one.
+    uint32_t numbered = info->swapchainCount;
+    bool tracked = false;
     VkSwapchainKHR swapchain = VK_NULL_HANDLE;
     // Zero leaves the other swapchains of a multi-swapchain present without an id.
     std::vector<uint64_t> ids;
     uint64_t frame = 0, trackedId = 0;
     bool submitted = false;
-    const VkPresentIdKHR* replaced = nullptr;
+    VkPresentIdKHR presentId{VK_STRUCTURE_TYPE_PRESENT_ID_KHR, info->pNext, info->swapchainCount, nullptr};
+    std::vector<std::unique_ptr<unsigned char[]>> copies;
+    // The presentation's chain with the layer's ids, or null to present Unity's chain unchanged.
+    const void* chain = nullptr;
     {
         std::lock_guard<std::mutex> lock(presentMutex);
-        if (trackedSwapchain != VK_NULL_HANDLE) {
-            for (uint32_t i = 0; i < info->swapchainCount; ++i)
-                if (info->pSwapchains[i] == trackedSwapchain) { tracked = i; break; }
-        }
-        if (tracked != info->swapchainCount) {
-            swapchain = trackedSwapchain;
-            if (!pendingFrames.empty()) { frame = pendingFrames.front(); pendingFrames.pop_front(); }
-            else frame = ++frameCounter;
-            submitted = renderSubmitStarted; renderSubmitStarted = false;
-            if (presentIdEnabled) {
-                const auto* existing = reinterpret_cast<const VkPresentIdKHR*>(FindStructure(info->pNext, VK_STRUCTURE_TYPE_PRESENT_ID_KHR));
-                const uint64_t unityId = existing && existing->pPresentIds && tracked < existing->swapchainCount ? existing->pPresentIds[tracked] : 0;
-                if (existing && unityId != 0 && lowLatencyBackend.load() == MajvkBackendNvidia &&
-                    info->pNext == existing && existing->swapchainCount == info->swapchainCount) {
-                    // NVIDIA's latency markers must name the presentation with the frame id; take the ids over and
-                    // remember Unity's so that its own waits still find the right presentation.
-                    replaced = existing;
-                    ids.assign(existing->pPresentIds, existing->pPresentIds + existing->swapchainCount);
-                    trackedId = ids[tracked] = frame;
-                    replacedIds.emplace_back(unityId, frame);
-                    if (replacedIds.size() > MaxReplacedIds) replacedIds.pop_front();
-                    presentIdSource = MajvkPresentIdsUnityReplaced;
-                } else if (existing) {
-                    // Unity attaches its own ids when it uses present waiting itself; follow them.
-                    trackedId = unityId;
+        numbered = FindSwapchain(info, trackedSwapchain);
+        tracked = numbered != info->swapchainCount;
+        if (!tracked) numbered = FindSwapchain(info, retiredSwapchain);
+        if (numbered != info->swapchainCount) {
+            swapchain = info->pSwapchains[numbered];
+            if (tracked) {
+                if (!pendingFrames.empty()) { frame = pendingFrames.front(); pendingFrames.pop_front(); }
+                else frame = ++frameCounter;
+                submitted = renderSubmitStarted; renderSubmitStarted = false;
+                presentedSinceSleep = true;
+            } else {
+                frame = ++frameCounter;
+            }
+            const auto* existing = presentIdEnabled
+                ? reinterpret_cast<const VkPresentIdKHR*>(FindStructure(info->pNext, VK_STRUCTURE_TYPE_PRESENT_ID_KHR))
+                : nullptr;
+            const void* replaced = existing && existing->swapchainCount == info->swapchainCount
+                ? ReplacePresentId(info->pNext, existing, presentId, copies)
+                : nullptr;
+            if (replaced) {
+                // Unity attaches its own ids when it uses present waiting itself. The layer numbers every
+                // presentation, so ids keep increasing per swapchain and NVIDIA's latency markers can name them by
+                // frame id; Unity's ids are remembered so that its own waits still find the right presentation.
+                if (existing->pPresentIds) ids.assign(existing->pPresentIds, existing->pPresentIds + info->swapchainCount);
+                else ids.assign(info->swapchainCount, 0);
+                const uint64_t unityId = ids[numbered];
+                ids[numbered] = frame;
+                if (unityId != 0) RememberUnityId(swapchain, unityId, frame);
+                if (tracked) { trackedId = frame; presentIdSource = MajvkPresentIdsUnityReplaced; }
+                chain = replaced;
+            } else if (existing) {
+                // A structure the layer cannot copy sits in front of Unity's ids; follow Unity's id instead.
+                if (tracked && existing->pPresentIds && numbered < existing->swapchainCount) {
+                    trackedId = existing->pPresentIds[numbered];
                     if (trackedId > frameCounter) frameCounter = trackedId;
                     presentIdSource = MajvkPresentIdsUnity;
-                } else {
-                    ids.assign(info->swapchainCount, 0);
-                    trackedId = ids[tracked] = frame;
-                    presentIdSource = MajvkPresentIdsLayer;
                 }
+            } else if (presentIdEnabled && tracked) {
+                ids.assign(info->swapchainCount, 0);
+                trackedId = ids[numbered] = frame;
+                presentIdSource = MajvkPresentIdsLayer;
+                chain = &presentId;
             }
+            presentId.pPresentIds = ids.data();
         }
     }
-    if (tracked == info->swapchainCount) return present(queue, info);
-    const int backend = lowLatencyBackend.load();
+    if (numbered == info->swapchainCount) return Observe(present(queue, info), MajvkCallQueuePresent);
+    // Presentations of the retired swapchain only keep their ids increasing; they are not frames of the backends.
+    const int backend = tracked ? lowLatencyBackend.load() : MajvkBackendNone;
     const uint64_t markerFrame = trackedId ? trackedId : frame;
     if (backend == MajvkBackendNvidia) {
         std::lock_guard<std::mutex> lock(nvMutex);
@@ -467,19 +616,17 @@ VKAPI_ATTR VkResult VKAPI_CALL QueuePresent(VkQueue queue, const VkPresentInfoKH
     } else if (backend == MajvkBackendAmd) {
         AntiLag(VK_ANTI_LAG_STAGE_PRESENT_AMD, frame);
     }
-    // A replaced chain of Unity's is the first structure, so skipping it keeps the rest of Unity's chain intact.
-    VkPresentIdKHR presentId{VK_STRUCTURE_TYPE_PRESENT_ID_KHR, replaced ? replaced->pNext : info->pNext, info->swapchainCount, ids.data()};
     VkPresentInfoKHR copy = *info;
-    copy.pNext = &presentId;
-    const VkResult result = present(queue, ids.empty() ? info : &copy);
+    copy.pNext = chain;
+    const VkResult result = Observe(present(queue, chain ? &copy : info), MajvkCallQueuePresent);
     if (backend == MajvkBackendNvidia) {
         std::lock_guard<std::mutex> lock(nvMutex);
         if (swapchain == nvSwapchain) SetMarker(markerFrame, VK_LATENCY_MARKER_PRESENT_END_NV);
     }
-    const VkResult trackedResult = info->pResults ? info->pResults[tracked] : result;
-    if (trackedId != 0 && (trackedResult == VK_SUCCESS || trackedResult == VK_SUBOPTIMAL_KHR)) {
+    const VkResult trackedResult = info->pResults ? info->pResults[numbered] : result;
+    if (tracked && trackedId != 0 && (trackedResult == VK_SUCCESS || trackedResult == VK_SUBOPTIMAL_KHR)) {
         std::lock_guard<std::mutex> lock(presentMutex);
-        if (info->pSwapchains[tracked] == trackedSwapchain && trackedId > lastPresentId) lastPresentId = trackedId;
+        if (info->pSwapchains[numbered] == trackedSwapchain && trackedId > lastPresentId) lastPresentId = trackedId;
     }
     return result;
 }
@@ -487,32 +634,27 @@ VKAPI_ATTR VkResult VKAPI_CALL AcquireNextImage(VkDevice device, VkSwapchainKHR 
     VkSemaphore semaphore, VkFence fence, uint32_t* index) {
     const auto acquire = acquireNextImage.load(std::memory_order_relaxed);
     SwapchainUse use;
-    return acquire(device, swapchain, timeout, semaphore, fence, index);
+    return Observe(acquire(device, swapchain, timeout, semaphore, fence, index), MajvkCallAcquireNextImage);
 }
 VKAPI_ATTR VkResult VKAPI_CALL AcquireNextImage2(VkDevice device, const VkAcquireNextImageInfoKHR* info, uint32_t* index) {
     const auto acquire = acquireNextImage2.load(std::memory_order_relaxed);
     SwapchainUse use;
-    return acquire(device, info, index);
+    return Observe(acquire(device, info, index), MajvkCallAcquireNextImage);
 }
 // Unity's own present waits share the swapchain with the managed poll.
 VKAPI_ATTR VkResult VKAPI_CALL WaitForPresent(VkDevice device, VkSwapchainKHR swapchain, uint64_t presentId, uint64_t timeout) {
     const auto wait = unityWaitForPresent.load(std::memory_order_relaxed);
-    uint64_t translated = presentId;
+    // Nothing is presented on a lost device any more, so a wait could only end by its timeout, which Unity may
+    // not have bounded; the specification allows reporting the loss instead.
+    if (deviceLost.load()) return VK_ERROR_DEVICE_LOST;
+    uint64_t translated;
     {
-        // Unity waits for its own ids; after the NVIDIA backend replaced them, wait for the matching frame id.
+        // Unity waits for its own ids; the layer presented frame ids in their place.
         std::lock_guard<std::mutex> lock(presentMutex);
-        if (swapchain == trackedSwapchain && !replacedIds.empty()) {
-            const auto& newest = replacedIds.back();
-            if (presentId >= newest.first) translated = newest.second + (presentId - newest.first);
-            else {
-                translated = replacedIds.front().second;
-                for (const auto& entry : replacedIds)
-                    if (entry.first <= presentId) translated = entry.second;
-            }
-        }
+        translated = TranslateUnityId(swapchain, presentId);
     }
     SwapchainUse use;
-    return wait(device, swapchain, translated, timeout);
+    return Observe(wait(device, swapchain, translated, timeout), MajvkCallUnityWaitForPresent);
 }
 
 PFN_vkVoidFunction WrapDeviceFunction(PFN_vkVoidFunction function, const char* name) {
@@ -569,7 +711,7 @@ extern "C" void UNITY_INTERFACE_EXPORT UNITY_INTERFACE_API UnityPluginUnload() {
     unityVulkan = nullptr;
 }
 
-MAJVK_EXPORT int MAJVK_CALL majvk_abi_version() { return 2; }
+MAJVK_EXPORT int MAJVK_CALL majvk_abi_version() { return 3; }
 MAJVK_EXPORT int MAJVK_CALL majvk_present_wait_status() { return presentWaitStatus.load(); }
 MAJVK_EXPORT int MAJVK_CALL majvk_present_wait_query(uint64_t* generation, uint64_t* presentId) {
     if (!generation || !presentId) return -3;
@@ -580,11 +722,12 @@ MAJVK_EXPORT int MAJVK_CALL majvk_present_wait_query(uint64_t* generation, uint6
 }
 MAJVK_EXPORT int MAJVK_CALL majvk_present_wait_poll(uint64_t generation, uint64_t presentId) {
     if (presentWaitStatus.load() != MajvkStatusEnabled) return -2;
+    if (deviceLost.load()) return VK_ERROR_DEVICE_LOST;
     std::unique_lock<std::mutex> lock(presentMutex, std::try_to_lock);
     if (!lock.owns_lock() || swapchainUsers || !waitForPresent) return 0;
     if (trackedSwapchain == VK_NULL_HANDLE || generation != swapchainGeneration.load()) return -1;
     if (presentId == 0 || presentId > lastPresentId.load()) return 0;
-    const VkResult result = waitForPresent(trackedDevice, trackedSwapchain, presentId, 0);
+    const VkResult result = Observe(waitForPresent(trackedDevice, trackedSwapchain, presentId, 0), MajvkCallPresentWaitPoll);
     if (result == VK_SUCCESS || result == VK_SUBOPTIMAL_KHR) return 1;
     if (result == VK_TIMEOUT) return 0;
     return static_cast<int>(result);
@@ -594,13 +737,17 @@ MAJVK_EXPORT int MAJVK_CALL majvk_low_latency_status() { return lowLatencyStatus
 MAJVK_EXPORT int MAJVK_CALL majvk_frame_begin(uint64_t timeoutNanoseconds) {
     const int backend = lowLatencyBackend.load();
     if (backend == MajvkBackendNone) return MajvkFrameInactive;
+    if (deviceLost.load()) return VK_ERROR_DEVICE_LOST;
     uint64_t frame;
+    bool presented;
     {
         std::lock_guard<std::mutex> lock(presentMutex);
         frame = ++frameCounter;
         pendingFrames.push_back(frame);
         if (pendingFrames.size() > MaxPendingFrames) pendingFrames.pop_front();
         simulatedFrame = frame;
+        presented = presentedSinceSleep;
+        presentedSinceSleep = false;
     }
     if (backend == MajvkBackendAmd) {
         AntiLag(VK_ANTI_LAG_STAGE_INPUT_AMD, frame);
@@ -613,15 +760,22 @@ MAJVK_EXPORT int MAJVK_CALL majvk_frame_begin(uint64_t timeoutNanoseconds) {
     {
         std::lock_guard<std::mutex> lock(nvMutex);
         if (nvSwapchain == VK_NULL_HANDLE || !latencySleep) return MajvkFrameSkipped;
+        if (!presented) {
+            // The driver releases one sleep per presentation; without one (e.g. while minimized) the sleep would
+            // only run into the timeout. The frame still starts for the markers.
+            SetMarker(frame, VK_LATENCY_MARKER_SIMULATION_START_NV);
+            SetMarker(frame, VK_LATENCY_MARKER_INPUT_SAMPLE_NV);
+            return MajvkFrameSkipped;
+        }
         device = nvDevice; semaphore = sleepSemaphore; wait = waitSemaphores;
         value = ++sleepValue;
         VkLatencySleepInfoNV sleep{VK_STRUCTURE_TYPE_LATENCY_SLEEP_INFO_NV, nullptr, semaphore, value};
-        const VkResult result = latencySleep(device, nvSwapchain, &sleep);
+        const VkResult result = Observe(latencySleep(device, nvSwapchain, &sleep), MajvkCallLatencySleep);
         if (result != VK_SUCCESS) return static_cast<int>(result);
     }
     // The driver signals the semaphore when the frame should start; wait without holding any lock.
     VkSemaphoreWaitInfo waitInfo{VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO, nullptr, 0, 1, &semaphore, &value};
-    const VkResult waited = wait(device, &waitInfo, timeoutNanoseconds);
+    const VkResult waited = Observe(wait(device, &waitInfo, timeoutNanoseconds), MajvkCallWaitSemaphores);
     if (waited != VK_SUCCESS && waited != VK_TIMEOUT) return static_cast<int>(waited);
     std::lock_guard<std::mutex> lock(nvMutex);
     SetMarker(frame, VK_LATENCY_MARKER_SIMULATION_START_NV);
@@ -630,6 +784,7 @@ MAJVK_EXPORT int MAJVK_CALL majvk_frame_begin(uint64_t timeoutNanoseconds) {
 }
 MAJVK_EXPORT int MAJVK_CALL majvk_frame_end() {
     if (lowLatencyBackend.load() != MajvkBackendNvidia) return lowLatencyBackend.load() == MajvkBackendNone ? MajvkFrameInactive : MajvkFrameSkipped;
+    if (deviceLost.load()) return VK_ERROR_DEVICE_LOST;
     uint64_t frame;
     {
         std::lock_guard<std::mutex> lock(presentMutex);
@@ -642,3 +797,4 @@ MAJVK_EXPORT int MAJVK_CALL majvk_frame_end() {
 }
 MAJVK_EXPORT uint64_t MAJVK_CALL majvk_swapchain_generation() { return swapchainGeneration.load(); }
 MAJVK_EXPORT int MAJVK_CALL majvk_present_id_source() { return presentIdSource.load(); }
+MAJVK_EXPORT int MAJVK_CALL majvk_device_lost_call() { return deviceLostCall.load(); }

@@ -293,6 +293,7 @@ namespace MajdataPlay
             InitPath();
             InitDirectories();
             InitLogger();
+            MajDebugSimaiLogger.Install();
             MigrateLegacyRuntimeDirectory();
             InitRuntimeEnvironment();
             InitSettings();

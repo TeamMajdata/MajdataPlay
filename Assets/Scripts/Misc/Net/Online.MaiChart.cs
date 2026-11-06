@@ -19,8 +19,8 @@ namespace MajdataPlay.Net
     {
         /// <summary>
         /// Accesses the chart APIs of a server, <c>maichart/*</c>: the chart list, its changes and file metadata, and the votes,
-        /// comments and rankings of a chart. Read responses are cached by request URI and dropped after this client changes
-        /// them.
+        /// comments and scores of a chart, plus the rankings of a chart from <c>maiscore/leaderboard/*</c>. Read responses are
+        /// cached by request URI and dropped after this client changes them.
         /// </summary>
         public static class MaiChart
         {
@@ -38,8 +38,10 @@ namespace MajdataPlay.Net
             private const string API_PUT_VOTE = "maichart/{0}/vote";
             /// <summary>The route of the comments of a chart, formatted with the chart identifier; also used to post a comment.</summary>
             private const string API_COMMENTS = "maichart/{0}/comments";
-            /// <summary>The route of the rankings of a chart, formatted with its identifier; also used to send a score.</summary>
-            private const string API_SCORE = "maichart/{0}/score";
+            /// <summary>The route of the rankings of a chart, formatted with the chart identifier.</summary>
+            private const string API_GET_LEADERBOARD = "maiscore/leaderboard/chart/by-id/{0}";
+            /// <summary>The route that stores a score of the current user on a chart, formatted with the chart identifier.</summary>
+            private const string API_POST_SCORE = "maichart/{0}/score";
 
             /// <summary>The number of chart identities per <c>POST maichart/info</c>; the server answers any number in two queries, batches only bound the size of one response.</summary>
             private const int INFO_BATCH_SIZE = 500;
@@ -290,7 +292,7 @@ namespace MajdataPlay.Net
                 return new EndpointResponse<MajNetComment>(rsp);
             }
             /// <summary>
-            /// Fetches the rankings of a chart from <c>GET maichart/{chartId}/score</c>. A response fetched within
+            /// Fetches the rankings of a chart from <c>GET maiscore/leaderboard/chart/by-id/{chartId}</c>. A response fetched within
             /// <see cref="MajEnv.ONLINE_RESPONSE_CACHE_TTL_SEC"/> is reused.
             /// </summary>
             /// <param name="song">The online chart.</param>
@@ -299,7 +301,7 @@ namespace MajdataPlay.Net
             public static async ValueTask<MajNetSongScoreInfo?> GetScoreInfoAsync(OnlineSongDetail song, CancellationToken token = default)
             {
                 await UniTask.SwitchToThreadPool();
-                var uri = BuildChartUri(song.ServerInfo, API_SCORE, song.Id);
+                var uri = BuildChartUri(song.ServerInfo, API_GET_LEADERBOARD, song.Id);
                 return await GetCachedAsync(s_scoreInfos, uri, "chart score info", false, token);
             }
             /// <summary>Sends a score of a chart to <c>POST maichart/{chartId}/score</c> and invalidates the cached rankings.</summary>
@@ -310,7 +312,7 @@ namespace MajdataPlay.Net
             public static async ValueTask<EndpointResponse> PostScoreAsync(OnlineSongDetail song, MaiScore score, CancellationToken token = default)
             {
                 await UniTask.SwitchToThreadPool();
-                var scoreUrl = BuildChartUri(song.ServerInfo, API_SCORE, song.Id);
+                var scoreUrl = BuildChartUri(song.ServerInfo, API_POST_SCORE, song.Id);
                 var json = await SerializeJsonAsync(score);
                 var rsp = default(EndpointResponse);
 
@@ -320,7 +322,7 @@ namespace MajdataPlay.Net
                     if (rsp.IsSuccessfully)
                     {
                         MajDebug.LogDebug(LOG_TAG, rsp);
-                        s_scoreInfos.Remove(scoreUrl);
+                        s_scoreInfos.Remove(BuildChartUri(song.ServerInfo, API_GET_LEADERBOARD, song.Id));
                         return rsp;
                     }
                     else

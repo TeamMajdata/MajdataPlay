@@ -19,7 +19,7 @@ dotnet run --project Tools/Tests/Modules/ResourceStorageValidation/ResourceStora
 The default selects the iOS packaged-file branch. The second command selects the
 Android branch, whose mobile cases read compressed entries from a temporary APK-shaped
 ZIP archive through production `jar:file://...!/assets` storage. Both also compile
-and exercise the Windows restorer against a native package directory. Narrow
+and exercise the desktop restorer against a native package directory. Narrow
 substitutes provide only Unity paths, logging, manifest dictionaries, and a
 `FrameBudget` that never yields. Initial mobile extraction uses the production
 bounded background workers. A test-only completed-copy log hook gates workers to

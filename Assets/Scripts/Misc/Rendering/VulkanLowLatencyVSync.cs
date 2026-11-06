@@ -29,7 +29,7 @@ namespace MajdataPlay.Rendering
     /// are produced slightly slower than the display (see <see cref="VSyncFramePacer"/>), which also keeps the
     /// queue empty and samples input late.
     /// </summary>
-    internal static class LowLatencyVSync
+    internal static class VulkanLowLatencyVSync
     {
         /// <summary>Identifies the frame start system in the player loop.</summary>
         private sealed class PlayerLoopMarker
@@ -76,8 +76,11 @@ namespace MajdataPlay.Rendering
         private static PacingMode _mode;
 
 #if UNITY_STANDALONE_WIN && !UNITY_EDITOR
-        /// <summary>The number of consecutive present waits that failed or timed out before switching to timer pacing.</summary>
-        private const int PresentWaitFailureLimit = 30;
+        /// <summary>The flag of present waiting in <see cref="_layerBackends"/>.</summary>
+        private const int LayerPresentWait = 1;
+
+        /// <summary>The flag of the driver's low-latency mode in <see cref="_layerBackends"/>.</summary>
+        private const int LayerDriver = 2;
 
         /// <summary>The driver low-latency state, or null before it is created or after it was given up.</summary>
         private static DriverLowLatencyPacer? _driverPacer;
@@ -94,17 +97,14 @@ namespace MajdataPlay.Rendering
         /// <summary>Whether present waiting was found unavailable or given up for this session.</summary>
         private static bool _presentWaitUnavailable;
 
-        /// <summary>The number of consecutive present waits that failed or timed out.</summary>
-        private static int _presentWaitFailures;
-
         /// <summary>The last swapchain generation seen, or zero before the first.</summary>
         private static ulong _swapchainGeneration;
 
         /// <summary>Whether the source of presentation ids has been logged.</summary>
         private static bool _presentIdSourceLogged;
 
-        /// <summary>The layer backends used during the previous frame, for logging changes.</summary>
-        private static string _layerBackends = string.Empty;
+        /// <summary>The layer backends used during the previous frame as <see cref="LayerPresentWait"/> and <see cref="LayerDriver"/> flags, for logging changes.</summary>
+        private static int _layerBackends;
 #endif
 
 #if UNITY_EDITOR_WIN || UNITY_STANDALONE_WIN
@@ -136,7 +136,7 @@ namespace MajdataPlay.Rendering
             if (!InsertIntoPhase(ref loop, typeof(TimeUpdate), typeof(PlayerLoopMarker), FrameStartDelegate, true) ||
                 !InsertIntoPhase(ref loop, typeof(PostLateUpdate), typeof(FrameEndMarker), FrameEndDelegate, false))
             {
-                MajDebug.LogError(nameof(LowLatencyVSync), "Failed to insert the pacing steps into the player loop");
+                MajDebug.LogError(nameof(VulkanLowLatencyVSync), "Failed to insert the pacing steps into the player loop");
                 return;
             }
 
@@ -153,7 +153,7 @@ namespace MajdataPlay.Rendering
                 {
                     _mode = PacingMode.None;
                     LastWaitMilliseconds = 0;
-                    MajDebug.LogInfo(nameof(LowLatencyVSync), "Frame pacing stopped");
+                    MajDebug.LogInfo(nameof(VulkanLowLatencyVSync), "Frame pacing stopped");
                 }
                 return;
             }
@@ -187,7 +187,7 @@ namespace MajdataPlay.Rendering
             {
                 if (_swapchainGeneration != 0)
                 {
-                    MajDebug.LogInfo(nameof(LowLatencyVSync), ZString.Format(
+                    MajDebug.LogInfo(nameof(VulkanLowLatencyVSync), ZString.Format(
                         "Swapchain changed (generation {0}); pacing follows the new swapchain", generation));
                 }
                 _swapchainGeneration = generation;
@@ -198,10 +198,10 @@ namespace MajdataPlay.Rendering
                 if (source != 0)
                 {
                     _presentIdSourceLogged = true;
-                    MajDebug.LogInfo(nameof(LowLatencyVSync), source switch
+                    MajDebug.LogInfo(nameof(VulkanLowLatencyVSync), source switch
                     {
                         2 => "Presentation ids come from Unity",
-                        3 => "Presentation ids come from Unity and are replaced with frame ids for the driver's latency markers",
+                        3 => "Presentation ids come from Unity and are replaced with the pacing layer's frame ids",
                         _ => "Presentation ids come from the pacing layer",
                     });
                 }
@@ -219,22 +219,20 @@ namespace MajdataPlay.Rendering
         {
 #if UNITY_STANDALONE_WIN && !UNITY_EDITOR
             var allowed = MajEnv.SystemSettings.Rendering.VulkanLowLatencyVSyncBackend;
-            var presentWait = allowed != LowLatencyVSyncBackendOption.Timer && EnsurePresentWaitPacer();
-            var driver = allowed == LowLatencyVSyncBackendOption.Auto && EnsureDriverPacer();
+            var presentWait = allowed != VulkanLowLatencyVSyncBackendOption.Timer && EnsurePresentWaitPacer();
+            var driver = allowed == VulkanLowLatencyVSyncBackendOption.Auto && EnsureDriverPacer();
             if (!presentWait && !driver)
             {
                 return false;
             }
 
-            var backends = presentWait && driver
-                ? "VK_KHR_present_wait, then " + _driverBackendName
-                : presentWait ? "VK_KHR_present_wait" : _driverBackendName;
+            var backends = (presentWait ? LayerPresentWait : 0) | (driver ? LayerDriver : 0);
             if (_mode != PacingMode.Layer || backends != _layerBackends)
             {
                 _mode = PacingMode.Layer;
                 _layerBackends = backends;
-                MajDebug.LogInfo(nameof(LowLatencyVSync), ZString.Format(
-                    "Frame pacing started: each frame waits for the pacing layer ({0})", backends));
+                MajDebug.LogInfo(nameof(VulkanLowLatencyVSync), ZString.Format(
+                    "Frame pacing started: each frame waits for the pacing layer ({0})", DescribeLayerBackends(backends)));
             }
 
             var waitStart = Stopwatch.GetTimestamp();
@@ -243,7 +241,8 @@ namespace MajdataPlay.Rendering
             {
                 WaitForPresentation(refreshPeriodTicks);
             }
-            if (driver)
+            // Present waiting stops both backends when it finds the device lost.
+            if (driver && _driverPacer is not null)
             {
                 DriveLowLatency(refreshPeriodTicks);
             }
@@ -255,43 +254,75 @@ namespace MajdataPlay.Rendering
         }
 
 #if UNITY_STANDALONE_WIN && !UNITY_EDITOR
-        /// <summary>Waits until the previous frame has been shown, and gives present waiting up after repeated failures.</summary>
+        /// <summary>Waits until the previous frame has been shown, and gives present waiting up when it keeps failing.</summary>
         /// <param name="refreshPeriodTicks">The display refresh period in timestamp ticks.</param>
         private static void WaitForPresentation(long refreshPeriodTicks)
         {
-            var outcome = _presentWaitPacer!.WaitForPreviousFrame(refreshPeriodTicks);
-            switch (outcome)
+            var pacer = _presentWaitPacer!;
+            var outcome = pacer.WaitForPreviousFrame(refreshPeriodTicks);
+            if (outcome == PresentWaitOutcome.DeviceLost)
             {
-                case PresentWaitOutcome.Presented:
-                    _presentWaitFailures = 0;
-                    break;
-                case PresentWaitOutcome.TimedOut:
-                case PresentWaitOutcome.Failed:
-                    if (++_presentWaitFailures >= PresentWaitFailureLimit)
-                    {
-                        MajDebug.LogWarning(nameof(LowLatencyVSync), ZString.Format(
-                            "Present waiting {0} {1} times in a row (last error {2}); giving it up",
-                            outcome == PresentWaitOutcome.TimedOut ? "timed out" : "failed", _presentWaitFailures,
-                            _presentWaitPacer.LastError));
-                        _presentWaitPacer = null;
-                        _presentWaitUnavailable = true;
-                    }
-                    break;
+                StopLayerAfterDeviceLoss();
+                return;
+            }
+            if (pacer.HasGivenUp)
+            {
+                MajDebug.LogWarning(nameof(VulkanLowLatencyVSync), ZString.Format(
+                    "Present waiting failed or timed out in {0} of the last {1} frames (last outcome {2}, last error {3}); giving it up",
+                    pacer.RecentFailures, PacingFailureWindow.WindowSize,
+                    outcome == PresentWaitOutcome.TimedOut ? "timed out" : "failed", pacer.LastError));
+                _presentWaitPacer = null;
+                _presentWaitUnavailable = true;
             }
         }
 
-        /// <summary>Lets the driver's low-latency mode delay the frame, and gives it up after repeated failures.</summary>
+        /// <summary>Lets the driver's low-latency mode delay the frame, and gives it up when it keeps failing.</summary>
         /// <param name="refreshPeriodTicks">The display refresh period in timestamp ticks.</param>
         private static void DriveLowLatency(long refreshPeriodTicks)
         {
-            _driverPacer!.BeginFrame(refreshPeriodTicks, Stopwatch.Frequency);
-            if (_driverPacer.HasGivenUp)
+            var pacer = _driverPacer!;
+            var outcome = pacer.BeginFrame(refreshPeriodTicks, Stopwatch.Frequency);
+            if (outcome == DriverFrameOutcome.DeviceLost)
             {
-                MajDebug.LogWarning(nameof(LowLatencyVSync), ZString.Format(
-                    "{0} failed repeatedly (last result {1}); giving it up", _driverBackendName, _driverPacer.LastError));
+                StopLayerAfterDeviceLoss();
+                return;
+            }
+            if (pacer.HasGivenUp)
+            {
+                MajDebug.LogWarning(nameof(VulkanLowLatencyVSync), ZString.Format(
+                    "{0} failed or timed out in {1} of the last {2} frames (last result {3}); giving it up",
+                    _driverBackendName, pacer.RecentFailures, PacingFailureWindow.WindowSize, pacer.LastError));
                 _driverPacer = null;
                 _driverUnavailable = true;
             }
+        }
+
+        /// <summary>
+        /// Stops both layer backends for this session after the Vulkan device was lost: nothing is shown on a lost
+        /// device any more, so the timer paces the remaining frames. Logs which Vulkan call reported the loss first.
+        /// </summary>
+        private static void StopLayerAfterDeviceLoss()
+        {
+            _presentWaitPacer = null;
+            _presentWaitUnavailable = true;
+            _driverPacer = null;
+            _driverUnavailable = true;
+            MajDebug.LogError(nameof(VulkanLowLatencyVSync), ZString.Format(
+                "The Vulkan device was lost (VK_ERROR_DEVICE_LOST, first reported by {0}); layer pacing stopped for this session",
+                VulkanPacingLayer.DescribeCall(VulkanPacingLayer.GetDeviceLostCall())));
+        }
+
+        /// <summary>Names the layer backends in use, for logs.</summary>
+        /// <param name="backends">The <see cref="LayerPresentWait"/> and <see cref="LayerDriver"/> flags.</param>
+        /// <returns>The backends in the order they run.</returns>
+        private static string DescribeLayerBackends(int backends)
+        {
+            return backends switch
+            {
+                LayerPresentWait | LayerDriver => "VK_KHR_present_wait, then " + _driverBackendName,
+                LayerPresentWait => "VK_KHR_present_wait",
+                _ => _driverBackendName,
+            };
         }
 #endif
 
@@ -313,7 +344,7 @@ namespace MajdataPlay.Rendering
             if (backend == 0)
             {
                 _driverUnavailable = true;
-                MajDebug.LogInfo(nameof(LowLatencyVSync), ZString.Format(
+                MajDebug.LogInfo(nameof(VulkanLowLatencyVSync), ZString.Format(
                     "Driver low-latency mode unavailable ({0})", VulkanPacingLayer.DescribeLowLatencyStatus(status)));
                 return false;
             }
@@ -340,7 +371,7 @@ namespace MajdataPlay.Rendering
             if (status != 0)
             {
                 _presentWaitUnavailable = true;
-                MajDebug.LogInfo(nameof(LowLatencyVSync), ZString.Format(
+                MajDebug.LogInfo(nameof(VulkanLowLatencyVSync), ZString.Format(
                     "Present waiting unavailable ({0})", VulkanPacingLayer.DescribePresentWaitStatus(status)));
                 return false;
             }
@@ -352,10 +383,12 @@ namespace MajdataPlay.Rendering
 
         /// <summary>Converts a refresh rate into a refresh period.</summary>
         /// <param name="refreshRate">The display refresh rate in hertz.</param>
-        /// <returns>The refresh period in timestamp ticks; 60 Hz when the rate is unknown.</returns>
+        /// <returns>The refresh period in timestamp ticks; 60 Hz when the rate is unknown or implausible, which would scale the timeouts.</returns>
         private static long RefreshPeriodTicks(double refreshRate)
         {
-            return refreshRate > 0 ? (long)(Stopwatch.Frequency / refreshRate) : Stopwatch.Frequency / 60;
+            return VSyncFramePacer.IsPlausibleRefreshRate(refreshRate)
+                ? (long)(Stopwatch.Frequency / refreshRate)
+                : Stopwatch.Frequency / 60;
         }
 #endif
 
@@ -366,7 +399,7 @@ namespace MajdataPlay.Rendering
             if (Pacer.SetRefreshRate(refreshRate) || _mode != PacingMode.Timer)
             {
                 Pacer.Restart();
-                MajDebug.LogInfo(nameof(LowLatencyVSync), ZString.Format(
+                MajDebug.LogInfo(nameof(VulkanLowLatencyVSync), ZString.Format(
                     "Frame pacing started: refresh {0:F3}Hz, frame interval {1:F3}ms",
                     refreshRate, TicksToMilliseconds(Pacer.IntervalTicks)));
             }
@@ -383,7 +416,7 @@ namespace MajdataPlay.Rendering
             LastWaitMilliseconds = TicksToMilliseconds(frameStart - waitStart);
             if (Pacer.OnFrameStarted(frameStart, waitTicks))
             {
-                MajDebug.LogInfo(nameof(LowLatencyVSync), ZString.Format(
+                MajDebug.LogInfo(nameof(VulkanLowLatencyVSync), ZString.Format(
                     "The display refreshes slower than reported; frame interval re-measured as {0:F3}ms",
                     TicksToMilliseconds(Pacer.IntervalTicks)));
             }
@@ -440,14 +473,15 @@ namespace MajdataPlay.Rendering
         /// <returns>Whether the thread slept; false means the caller should spin instead.</returns>
         private static bool TrySleep(long ticks)
         {
-            var duration = TimeSpan.FromSeconds(ticks / (double)Stopwatch.Frequency);
+            // TimeSpan.FromSeconds rounds to whole milliseconds on Mono, which would oversleep or skip short sleeps.
+            var duration = TimeSpan.FromTicks(ticks * TimeSpan.TicksPerSecond / Stopwatch.Frequency);
 #if UNITY_EDITOR_WIN || UNITY_STANDALONE_WIN
             if (!_timerCreationAttempted)
             {
                 _timerCreationAttempted = true;
                 if (!HighResolutionWaitableTimer.TryCreate(out _timer))
                 {
-                    MajDebug.LogWarning(nameof(LowLatencyVSync),
+                    MajDebug.LogWarning(nameof(VulkanLowLatencyVSync),
                         "High-resolution waitable timer unavailable; frame pacing spins instead of sleeping");
                 }
             }

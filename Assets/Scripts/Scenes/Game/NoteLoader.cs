@@ -5,6 +5,7 @@ using MajdataPlay.Databases;
 using MajdataPlay.Buffers;
 using MajdataPlay.Collections;
 using MajdataPlay.Diagnostics;
+using MajdataPlay.Extensions;
 using MajdataPlay.Game.Notes;
 using MajdataPlay.IO;
 using MajdataPlay.Numerics;
@@ -331,9 +332,11 @@ namespace MajdataPlay.Scenes.Game
                             randomMappingTableLifeTime = new Range<double>(timing.Timing, timing.Timing, ContainsType.RightOpen);
                         }
                     }
-                    foreach (var note in foldedNotes)
+                    // 星星头（带 RelatedNotes 的 Tap）不在 foldedNotes 中，由它的第一条星星生成
+                    foreach (var foldedNote in foldedNotes)
                     {
                         token.ThrowIfCancellationRequested();
+                        var note = foldedNote.Note;
                         try
                         {
                             switch (note.Type)
@@ -376,36 +379,15 @@ namespace MajdataPlay.Scenes.Game
                                     _poolManager.AddTouch(CreateTouch(note, timing, touchGroupMembers));
                                     break;
                                 case SimaiNoteType.Slide:
-                                    var foldedSlide = note as FoldedSimaiNote;
-                                    foldedSlide ??= new FoldedSimaiNote()
+                                    if (SimaiSlideTranslator.IsSingleSlideCode(foldedNote.RawContent))
                                     {
-                                        Type = note.Type,
-                                        StartPosition = note.StartPosition,
-                                        HoldTime = note.HoldTime,
-                                        IsBreak = note.IsBreak,
-                                        IsEx = note.IsEx,
-                                        IsFakeRotate = note.IsFakeRotate,
-                                        IsForceStar = note.IsForceStar,
-                                        IsHanabi = note.IsHanabi,
-                                        IsSlideBreak = note.IsSlideBreak,
-                                        IsSlideNoHead = note.IsSlideNoHead,
-                                        IsMine = note.IsMine,
-                                        IsMineSlide = note.IsMineSlide,
-                                        RawContent = note.RawContent,
-                                        SlideStartTime = note.SlideStartTime,
-                                        SlideTime = note.SlideTime,
-                                        TouchArea = note.TouchArea,
-                                        Count = 1
-                                    };
-                                    if (SimaiSlideTranslator.IsSingleSlideCode(foldedSlide.RawContent))
-                                    {
-                                        CreateExtendSlide(timing, foldedSlide, eachNotes);
+                                        CreateExtendSlide(timing, foldedNote, eachNotes);
                                     }
                                     else
                                     {
-                                        CreateSlideGroup(timing, foldedSlide, eachNotes); // 星星组，可以包含 slide code 段
+                                        CreateSlideGroup(timing, foldedNote, eachNotes); // 星星组，可以包含 slide code 段
                                     }
-                                    _noteCount += foldedSlide.Count - 1;
+                                    _noteCount += foldedNote.Count - 1;
                                     break;
                             }
                             _noteCount++;
@@ -665,7 +647,18 @@ namespace MajdataPlay.Scenes.Game
                                                       BuildSyntaxErrorMessage(line, column, note.RawContent));
             }
         }
-        TapPoolingInfo CreateStar(int startPos, SimaiNote note, in SimaiTimingPoint timing)
+        /// <summary>
+        /// Creates the star that a slide draws for its head. The break, EX and mine flags come from the head
+        /// <see cref="SimaiNoteType.Tap"/>; the star is always drawn as a star, as it was before MajSimai 3.0.
+        /// </summary>
+        /// <param name="startPos">The key of the star, already rotated and remapped.</param>
+        /// <param name="head">The head note of the slide.</param>
+        /// <param name="slideTime">The duration of the slide part that draws the star, in seconds.</param>
+        /// <param name="rawContent">The text of the slide part, reported when the star cannot be created.</param>
+        /// <param name="timing">The timing point of the slide.</param>
+        /// <returns>The pooling info of the star.</returns>
+        /// <exception cref="InvalidSimaiSyntaxException">Thrown when the star cannot be created.</exception>
+        TapPoolingInfo CreateStar(int startPos, SimaiNote head, double slideTime, string rawContent, in SimaiTimingPoint timing)
         {
             try
             {
@@ -676,9 +669,9 @@ namespace MajdataPlay.Scenes.Game
                 var appearDiff = (-(1 - (scaleRate * 1.225f)) - (4.8f * scaleRate)) / (Math.Abs(speed) * scaleRate);
                 var appearTiming = Math.Min(noteTiming + appearDiff, noteTiming - 0.15f);
                 var sortOrder = _noteSortOrder;
-                var isMine = note.IsMine;
-                var isEach = NoteCreateHelper.IsEachNote(note, SimaiNoteType.Tap, timing.Notes);
-                var isDouble = NoteCreateHelper.IsStarDouble(note, timing.Notes);
+                var isMine = head.IsMine;
+                var isEach = NoteCreateHelper.IsEachNote(head, SimaiNoteType.Tap, timing.Notes);
+                var isDouble = NoteCreateHelper.IsStarDouble(head, timing.Notes);
                 TapQueueInfo? queueInfo = null;
 
                 appearTiming = Math.Min(appearTiming, slideFadeInTiming);
@@ -687,7 +680,8 @@ namespace MajdataPlay.Scenes.Game
                 {
                     _gpManager.FirstNoteAppearTiming = Mathf.Min(_gpManager.FirstNoteAppearTiming, appearTiming);
                 }
-                _noteSortOrder -= NOTE_LAYER_COUNT[note.Type];
+                // 星星占用它所属 slide 的图层数
+                _noteSortOrder -= NOTE_LAYER_COUNT[SimaiNoteType.Slide];
                 _isHasTap[startPos - 1] = true;
 
                 queueInfo = new TapQueueInfo()
@@ -704,12 +698,12 @@ namespace MajdataPlay.Scenes.Game
                     NoteSortOrder = sortOrder,
                     Speed = speed,
                     IsEach = isEach,
-                    IsBreak = note.IsBreak,
-                    IsEX = note.IsEx,
-                    IsMine = note.IsMine,
+                    IsBreak = head.IsBreak,
+                    IsEX = head.IsEx,
+                    IsMine = head.IsMine,
                     IsStar = true,
                     IsDouble = isDouble,
-                    RotateSpeed = -180 / (float)note.SlideTime,
+                    RotateSpeed = -180 / (float)slideTime,
                     QueueInfo = queueInfo ?? TapQueueInfo.Default
                 };
             }
@@ -720,8 +714,8 @@ namespace MajdataPlay.Scenes.Game
                 var column = timing.RawTextPositionX;
                 throw new InvalidSimaiSyntaxException(line,
                                                       column,
-                                                      note.RawContent,
-                                                      BuildSyntaxErrorMessage(line, column, note.RawContent));
+                                                      rawContent,
+                                                      BuildSyntaxErrorMessage(line, column, rawContent));
             }
         }
         TouchPoolingInfo CreateTouch(in SimaiNote note,
@@ -1027,7 +1021,6 @@ namespace MajdataPlay.Scenes.Game
                         }
                         sb.Clear();
                         var slidePart = new SubSlideNote();
-                        slidePart.Type = SimaiNoteType.Slide;
                         slidePart.StartPosition = latestStartIndex;
                         var slideTypeChar = string.Empty;
                         if (SimaiSlideTranslator.IsSlideCodeCommand(noteContent[ptr]))
@@ -1138,16 +1131,8 @@ namespace MajdataPlay.Scenes.Game
                         preprocessSubSlides.Add(slidePart);
                     }
                 }
-                foreach (var subSlide in preprocessSubSlides)
-                {
-                    subSlide.IsBreak = note.IsBreak;
-                    subSlide.IsEx = note.IsEx;
-                    subSlide.IsSlideBreak = note.IsSlideBreak;
-                    subSlide.IsSlideNoHead = true;
-                    subSlide.IsMine = note.IsMine;
-                    subSlide.IsMineSlide = note.IsMineSlide;
-                }
-                preprocessSubSlides[0].IsSlideNoHead = note.IsSlideNoHead;
+                // 只有第一段绘制星星头，其余各段的 break、mine 等标记都取自 note
+                preprocessSubSlides[0].DrawsHead = !note.IsSlideNoHead;
 
                 if (specTimeFlag == 1 || specTimeFlag == 0) // 如果到结束还是1 那说明没有一个指定了时长 报错
                 {
@@ -1355,7 +1340,7 @@ namespace MajdataPlay.Scenes.Game
             var slideShape = NoteCreateHelper.DetectShapeFromText(note.RawContent);
             var isMirror = false;
             var isMine = note.IsMineSlide;
-            var isEach = NoteCreateHelper.IsEachNote(note, timing.Notes);
+            var isEach = NoteCreateHelper.IsEachNote(note.Origin.Note, timing.Notes);
             if (slideShape.StartsWith("-"))
             {
                 isMirror = true;
@@ -1392,11 +1377,11 @@ namespace MajdataPlay.Scenes.Game
             }
 
             var starInfos = new TapPoolingInfo?[multiple];
-            if (!note.IsSlideNoHead)
+            if (note.Head is SimaiNote head)
             {
                 for (var i = 0; i < multiple; i++)
                 {
-                    var starInfo = CreateStar(startPos, note, timing);
+                    var starInfo = CreateStar(startPos, head, note.SlideTime, note.RawContent, timing);
                     _poolManager.AddTap(starInfo);
                     starInfos[i] = starInfo;
                 }
@@ -1404,8 +1389,9 @@ namespace MajdataPlay.Scenes.Game
 
             if (isEach)
             {
-                var slides = NoteCreateHelper.GetEachSlides(note, timing.Notes);
-                var index = slides.FindIndex(x => x == note.Origin) + 1;
+                var slides = NoteCreateHelper.GetEachSlides(note.Origin.Note, timing.Notes);
+                // 自 slide folding 起这里查找的是折叠后的副本，永远找不到，index 恒为 0，经典模式规则从未生效；迁移时保持该行为
+                var index = 0;
                 if (_gpManager is not null && _gpManager.IsClassicMode)
                 {
                     if (index == slides.Length && index % 2 != 0)
@@ -1455,7 +1441,7 @@ namespace MajdataPlay.Scenes.Game
             var startPos = int.Parse(digits[0]);
             var endPos = int.Parse(digits[1]);
             var isMine = note.IsMineSlide;
-            var isEach = NoteCreateHelper.IsEachNote(note, timing.Notes);
+            var isEach = NoteCreateHelper.IsEachNote(note.Origin.Note, timing.Notes);
             endPos = endPos - startPos;
             endPos = endPos < 0 ? endPos + 8 : endPos;
             endPos = endPos > 8 ? endPos - 8 : endPos;
@@ -1471,12 +1457,12 @@ namespace MajdataPlay.Scenes.Game
             slideWifi.SetActive(true);
 
             TapPoolingInfo?[] starInfos = new TapPoolingInfo?[multiple];
-            if (!note.IsSlideNoHead)
+            if (note.Head is SimaiNote head)
             {
 
                 for (var i = 0; i < multiple; i++)
                 {
-                    var _info = CreateStar(startPos, note, timing);
+                    var _info = CreateStar(startPos, head, note.SlideTime, note.RawContent, timing);
                     _poolManager.AddTap(_info);
                     starInfos[i] = _info;
                 }
@@ -1484,8 +1470,9 @@ namespace MajdataPlay.Scenes.Game
 
             if (isEach)
             {
-                var slides = NoteCreateHelper.GetEachSlides(note, timing.Notes);
-                var index = slides.FindIndex(x => x == note.Origin) + 1;
+                var slides = NoteCreateHelper.GetEachSlides(note.Origin.Note, timing.Notes);
+                // 自 slide folding 起这里查找的是折叠后的副本，永远找不到，index 恒为 0，经典模式规则从未生效；迁移时保持该行为
+                var index = 0;
                 if (_gpManager is not null && _gpManager.IsClassicMode)
                 {
                     if (index == slides.Length && index % 2 != 0)
@@ -1594,24 +1581,25 @@ namespace MajdataPlay.Scenes.Game
             var endPos = (int)judgeAreas[judgeAreas.Length - 1].SensorA + 1;
             var multiple = note.Count;
             var isMine = note.IsMineSlide;
-            var isEach = NoteCreateHelper.IsEachNote(note, timing.Notes);
+            var isEach = NoteCreateHelper.IsEachNote(note.Note, timing.Notes);
             var extendSlideObject = Instantiate(slidePrefab[SLIDE_PREFAB_MAP["Ex"]], notes.transform.GetChild(3));
             var extendSlide = extendSlideObject.GetComponent<ExtendSlideDrop>();
             var starInfos = new TapPoolingInfo?[multiple];
 
-            if (!note.IsSlideNoHead)
+            if (note.Head is SimaiNote head)
             {
                 for (var i = 0; i < multiple; i++)
                 {
-                    var _info = CreateStar(startPos, note, timing);
+                    var _info = CreateStar(startPos, head, note.SlideTime, note.RawContent, timing);
                     _poolManager.AddTap(_info);
                     starInfos[i] = _info;
                 }
             }
             if (isEach)
             {
-                var slides = NoteCreateHelper.GetEachSlides(note, timing.Notes);
-                var index = slides.FindIndex(x => x == note) + 1;
+                var slides = NoteCreateHelper.GetEachSlides(note.Note, timing.Notes);
+                // 自 slide folding 起这里查找的是折叠后的副本，永远找不到，index 恒为 0，经典模式规则从未生效；迁移时保持该行为
+                var index = 0;
                 if (_gpManager is not null && _gpManager.IsClassicMode)
                 {
                     if (index == slides.Length && index % 2 != 0)
@@ -1731,10 +1719,25 @@ namespace MajdataPlay.Scenes.Game
             {
                 return sensorIndex.Diff(diff);
             }
+            /// <summary>
+            /// Gets whether a note is part of an each, checked as its own note type.
+            /// </summary>
+            /// <param name="origin">The note to check.</param>
+            /// <param name="notes">The notes of its timing point.</param>
+            /// <returns><see langword="true"/> when the note is an each.</returns>
             public static bool IsEachNote(SimaiNote origin, ReadOnlySpan<SimaiNote> notes)
             {
                 return IsEachNote(origin, origin.Type, notes);
             }
+            /// <summary>
+            /// Gets whether a note is part of an each. A note that is not a slide is an each when its timing point has
+            /// more than one such note that is not a mine; a slide head counts once for its slide and slides never count.
+            /// A slide is an each when its timing point has more than one slide whose path is not a mine.
+            /// </summary>
+            /// <param name="origin">The note to check; a slide head for the star of a slide.</param>
+            /// <param name="type">The note type to check the note as.</param>
+            /// <param name="notes">The notes of its timing point.</param>
+            /// <returns><see langword="true"/> when the note is an each; <see langword="false"/> for a mine or an unknown type.</returns>
             public static bool IsEachNote(SimaiNote origin, SimaiNoteType type, ReadOnlySpan<SimaiNote> notes)
             {
                 switch (type)
@@ -1748,18 +1751,20 @@ namespace MajdataPlay.Scenes.Game
                             {
                                 return false;
                             }
+                            // 带头的星星由它的星星头（Tap）计数一次，星星本体（Slide）不论有无头都不计入
                             var noteCount = notes.Count(x =>
                             {
                                 var isMineNoteOrMineStar = x.IsMine;
-                                var isNoHeadSlide = x.IsSlideNoHead;
+                                var isSlide = x.Type == SimaiNoteType.Slide;
 
-                                return !(isMineNoteOrMineStar || isNoHeadSlide);
+                                return !(isMineNoteOrMineStar || isSlide);
                             });
                             return noteCount > 1;
                         }
                     case SimaiNoteType.Slide:
                         {
-                            if (origin.IsMineSlide)
+                            // Slide 的 IsMine 表示星星本体是否为 mine
+                            if (origin.IsMine)
                             {
                                 return false;
                             }
@@ -1769,12 +1774,19 @@ namespace MajdataPlay.Scenes.Game
                 }
                 return false;
             }
+            /// <summary>
+            /// Gets whether a star is drawn as a double star: its timing point has more than one slide whose path is not a
+            /// mine and that starts from the key of the star.
+            /// </summary>
+            /// <param name="origin">The head of the star.</param>
+            /// <param name="notes">The notes of its timing point.</param>
+            /// <returns><see langword="true"/> when the star is a double star.</returns>
             public static bool IsStarDouble(SimaiNote origin, ReadOnlySpan<SimaiNote> notes)
             {
                 var slideCount = notes.Count(x =>
                 {
                     var isSlide = x.Type == SimaiNoteType.Slide;
-                    var isMineSlide = x.IsMineSlide;
+                    var isMineSlide = x.IsMine;
                     var isSameHead = x.StartPosition == origin.StartPosition;
 
                     return isSlide && !isMineSlide && isSameHead;
@@ -1782,24 +1794,36 @@ namespace MajdataPlay.Scenes.Game
 
                 return slideCount > 1;
             }
+            /// <summary>
+            /// Counts the slides of a timing point whose path is not a mine.
+            /// </summary>
+            /// <param name="origin">The slide being checked.</param>
+            /// <param name="notes">The notes of its timing point.</param>
+            /// <returns>The number of slides whose path is not a mine.</returns>
             public static int GetEachSlideCount(SimaiNote origin, ReadOnlySpan<SimaiNote> notes)
             {
                 var noteCount = notes.Count(x =>
                 {
                     var isSlide = x.Type == SimaiNoteType.Slide;
-                    var isMineSlide = x.IsMineSlide;
+                    var isMineSlide = x.IsMine;
 
                     return isSlide && !isMineSlide;
                 });
 
                 return noteCount;
             }
+            /// <summary>
+            /// Gets the slides of a timing point whose path is not a mine.
+            /// </summary>
+            /// <param name="origin">The slide being checked.</param>
+            /// <param name="notes">The notes of its timing point.</param>
+            /// <returns>The slides whose path is not a mine, in chart order.</returns>
             public static SimaiNote[] GetEachSlides(SimaiNote origin, IEnumerable<SimaiNote> notes)
             {
                 return notes.FindAll(x =>
                 {
                     var isSlide = x.Type == SimaiNoteType.Slide;
-                    var isMineSlide = x.IsMineSlide;
+                    var isMineSlide = x.IsMine;
 
                     return isSlide && !isMineSlide;
                 });
@@ -2343,14 +2367,22 @@ namespace MajdataPlay.Scenes.Game
                         break;
                 }
             }
-            public static SimaiNote[] NoteFolding(SimaiNote[] simaiNotes)
+            /// <summary>
+            /// Turns the notes of a timing point into the notes the loader builds, folding identical slides into one note
+            /// whose <see cref="FoldedSimaiNote.Count"/> is the number of stacked slides when note folding is enabled.
+            /// Slide heads are not built as notes of their own: each slide carries the head it draws (see
+            /// <see cref="ProjectNotes"/>). With folding, the other notes come first in chart order, then the folded slides.
+            /// </summary>
+            /// <param name="simaiNotes">The notes of the timing point.</param>
+            /// <returns>The notes to build, without the slide heads.</returns>
+            public static FoldedSimaiNote[] NoteFolding(SimaiNote[] simaiNotes)
             {
                 if (!USERSETTING_NOTE_FOLDING)
                 {
-                    return simaiNotes;
+                    return ProjectNotes(simaiNotes);
                 }
                 using var buffer = Pool<FoldingSimaiNote>.Rent(4);
-                using var buffer2 = Pool<FoldingSimaiNote>.Rent(4);
+                using var buffer2 = Pool<SimaiNote>.Rent(4);
                 using var buffer3 = Pool<FoldedSimaiNote>.Rent(4);
                 Array.Clear(buffer, 0, buffer.Length);
                 Array.Clear(buffer2, 0, buffer2.Length);
@@ -2361,17 +2393,22 @@ namespace MajdataPlay.Scenes.Game
 
                 foreach (var note in simaiNotes)
                 {
-                    var foldingNote = new FoldingSimaiNote(note);
-                    if (foldingNote.Type == SimaiNoteType.Slide)
+                    if (note.Type == SimaiNoteType.Slide)
                     {
+                        note.TryGetSlideHead(simaiNotes, out var head);
                         buffer.EnsureLength(bufferIndex + 1);
-                        buffer[bufferIndex++] = foldingNote;
+                        buffer[bufferIndex++] = new FoldingSimaiNote(note, head);
+                        continue;
+                    }
+                    else if (note.IsSlideHead())
+                    {
+                        // 星星头由它的第一条星星生成
                         continue;
                     }
                     else
                     {
                         buffer2.EnsureLength(buffer2Index + 1);
-                        buffer2[buffer2Index++] = foldingNote;
+                        buffer2[buffer2Index++] = note;
                         continue;
                     }
                 }
@@ -2388,32 +2425,14 @@ namespace MajdataPlay.Scenes.Game
                     }
                     buffer3.EnsureLength(buffer3Index + 1);
 
-                    buffer3[buffer3Index++] = new()
-                    {
-                        Type = key.Type,
-                        StartPosition = key.StartPosition,
-                        HoldTime = key.HoldTime,
-                        IsBreak = key.IsBreak,
-                        IsEx = key.IsEx,
-                        IsFakeRotate = key.IsFakeRotate,
-                        IsForceStar = key.IsForceStar,
-                        IsHanabi = key.IsHanabi,
-                        IsSlideBreak = key.IsSlideBreak,
-                        IsSlideNoHead = key.IsSlideNoHead,
-                        IsMine = key.IsMine,
-                        IsMineSlide = key.IsMineSlide,
-                        RawContent = key.RawContent,
-                        SlideStartTime = key.SlideStartTime,
-                        SlideTime = key.SlideTime,
-                        TouchArea = key.TouchArea,
-                        Count = slides.Count()
-                    };
+                    // 折叠后的星星使用组内第一条星星及其星星头
+                    buffer3[buffer3Index++] = new FoldedSimaiNote(key.Origin!, key.Head, slides.Count());
                 }
-                var result = new SimaiNote[buffer2Index + buffer3Index];
+                var result = new FoldedSimaiNote[buffer2Index + buffer3Index];
                 var resultIndex = 0;
                 foreach (var note in buffer2.AsSpan(0, buffer2Index))
                 {
-                    result[resultIndex++] = note.Origin!;
+                    result[resultIndex++] = new FoldedSimaiNote(note, null, 1);
                 }
                 foreach (var note in buffer3.AsSpan(0, buffer3Index))
                 {
@@ -2422,77 +2441,64 @@ namespace MajdataPlay.Scenes.Game
 
                 return result;
             }
+            /// <summary>
+            /// Turns the notes of a timing point into the notes the loader builds without folding them, in chart order.
+            /// A slide head (a <see cref="SimaiNoteType.Tap"/> with <see cref="SimaiNote.RelatedNotes"/>) is left out:
+            /// its first related slide carries it and draws it as a star, as a slide with a head did before MajSimai 3.0.
+            /// The later slides of a same-head group and slides written without a head carry no head.
+            /// </summary>
+            /// <param name="simaiNotes">The notes of the timing point.</param>
+            /// <returns>The notes to build, each with a count of 1.</returns>
+            public static FoldedSimaiNote[] ProjectNotes(SimaiNote[] simaiNotes)
+            {
+                var noteCount = 0;
+                foreach (var note in simaiNotes)
+                {
+                    if (!note.IsSlideHead())
+                    {
+                        noteCount++;
+                    }
+                }
+                if (noteCount == 0)
+                {
+                    return Array.Empty<FoldedSimaiNote>();
+                }
+                var result = new FoldedSimaiNote[noteCount];
+                var resultIndex = 0;
+                foreach (var note in simaiNotes)
+                {
+                    if (note.IsSlideHead())
+                    {
+                        continue;
+                    }
+                    note.TryGetSlideHead(simaiNotes, out var head);
+                    result[resultIndex++] = new FoldedSimaiNote(note, head, 1);
+                }
+
+                return result;
+            }
         }
 
+        /// <summary>
+        /// The key that note folding groups slides by. Two slides fold together when they have the same path and timing
+        /// and the same 2.x flags: whether they draw a head, the break, EX, hanabi, fake rotate and force star flags of
+        /// that head, and the break flag of the path. As before MajSimai 3.0, the mine flags are not part of the key.
+        /// </summary>
         readonly struct FoldingSimaiNote
         {
-            public SimaiNoteType Type
-            {
-                get => _origin.Type;
-            }
-            public int StartPosition
-            {
-                get => _origin.StartPosition;
-            }
-            public double HoldTime
-            {
-                get => _origin.HoldTime;
-            }
-            public bool IsBreak
-            {
-                get => _origin.IsBreak;
-            }
-            public bool IsEx
-            {
-                get => _origin.IsEx;
-            }
-            public bool IsFakeRotate
-            {
-                get => _origin.IsFakeRotate;
-            }
-            public bool IsForceStar
-            {
-                get => _origin.IsForceStar;
-            }
-            public bool IsHanabi
-            {
-                get => _origin.IsHanabi;
-            }
-            public bool IsSlideBreak
-            {
-                get => _origin.IsSlideBreak;
-            }
-            public bool IsSlideNoHead
-            {
-                get => _origin.IsSlideNoHead;
-            }
-            public bool IsMine
-            {
-                get => _origin.IsMine;
-            }
-            public bool IsMineSlide
-            {
-                get => _origin.IsMineSlide;
-            }
-            public string RawContent
-            {
-                get => _origin.RawContent;
-            }
-            public double SlideStartTime
-            {
-                get => _origin.SlideStartTime;
-            }
-            public double SlideTime
-            {
-                get => _origin.SlideTime;
-            }
-            public char TouchArea
-            {
-                get => _origin.TouchArea;
-            }
+            /// <summary>
+            /// Gets the slide this key was made from, or <see langword="null"/> for a default instance.
+            /// </summary>
             public SimaiNote? Origin
             {
                 get => _origin;
+            }
+            /// <summary>
+            /// Gets the head the slide draws, or <see langword="null"/> when it draws no head.
+            /// </summary>
+            public SimaiNote? Head
+            {
+                get => _head;
             }
             /// <summary>
             /// Gets whether the folding note wraps a simai note. A default instance, such as a cleared slot of a pooled
@@ -2504,10 +2510,17 @@ namespace MajdataPlay.Scenes.Game
             }
 
             readonly SimaiNote? _origin;
+            readonly SimaiNote? _head;
             readonly int _hashCode;
-            public FoldingSimaiNote(SimaiNote origin, bool? isSlideNoHead = null)
+            /// <summary>
+            /// Creates the folding key of a slide.
+            /// </summary>
+            /// <param name="origin">The slide.</param>
+            /// <param name="head">The head the slide draws, or <see langword="null"/> when it draws no head.</param>
+            public FoldingSimaiNote(SimaiNote origin, SimaiNote? head)
             {
                 _origin = origin;
+                _head = head;
                 var hash1 = HashCode.Combine(
                     _origin.Type,
                     _origin.StartPosition,
@@ -2515,23 +2528,19 @@ namespace MajdataPlay.Scenes.Game
                     _origin.HoldTime,
                     _origin.SlideStartTime,
                     _origin.SlideTime,
-                    _origin.IsBreak,
-                    _origin.IsEx
+                    head?.IsBreak ?? false,
+                    head?.IsEx ?? false
                 );
                 var hash2 = HashCode.Combine(
                     hash1,
-                    _origin.IsHanabi,
-                    _origin.IsSlideBreak,
-                    isSlideNoHead ?? _origin.IsSlideNoHead,
-                    _origin.IsFakeRotate,
-                    _origin.IsForceStar,
+                    head?.IsHanabi ?? false,
+                    _origin.IsBreak, // 2.x IsSlideBreak
+                    head is null, // 2.x IsSlideNoHead
+                    head?.IsFakeRotate ?? false,
+                    head?.IsForceStar ?? false,
                     _origin.TouchArea
                 );
                 _hashCode = hash2;
-            }
-            public static implicit operator FoldingSimaiNote(SimaiNote origin)
-            {
-                return new(origin);
             }
             public static bool operator ==(FoldingSimaiNote left, FoldingSimaiNote right)
             {
@@ -2568,13 +2577,134 @@ namespace MajdataPlay.Scenes.Game
                 return _hashCode;
             }
         }
-        class FoldedSimaiNote : SimaiNote
+        /// <summary>
+        /// A note as the loader builds it. A slide carries the head it draws and how many identical slides were folded
+        /// into it; any other note carries no head and a count of 1. Slide heads are never built as notes of their own.
+        /// The legacy properties give the MajSimai 2.x view of a slide that the slide factories use.
+        /// </summary>
+        readonly struct FoldedSimaiNote
         {
-            public int Count { get; init; }
+            /// <summary>
+            /// Gets the note; for a slide, the slide path.
+            /// </summary>
+            public SimaiNote Note { get; }
+            /// <summary>
+            /// Gets the head <see cref="SimaiNoteType.Tap"/> the slide draws as a star, or <see langword="null"/> for a
+            /// slide written without a head, a later slide of a same-head group, or a note that is not a slide.
+            /// </summary>
+            public SimaiNote? Head { get; }
+            /// <summary>
+            /// Gets how many identical slides were folded into this note, which is the number of stars its head stacks.
+            /// </summary>
+            public int Count { get; }
+            /// <summary>
+            /// Gets the text of the note.
+            /// </summary>
+            public string RawContent
+            {
+                get => Note.RawContent;
+            }
+            /// <summary>
+            /// Gets the time in seconds at which the slide starts moving.
+            /// </summary>
+            public double SlideStartTime
+            {
+                get => Note.SlideStartTime;
+            }
+            /// <summary>
+            /// Gets how long in seconds the slide moves.
+            /// </summary>
+            public double SlideTime
+            {
+                get => Note.SlideTime;
+            }
+            /// <summary>
+            /// Gets whether the slide draws no head (the 2.x <c>IsSlideNoHead</c>).
+            /// </summary>
+            public bool IsSlideNoHead
+            {
+                get => Head is null;
+            }
+            /// <summary>
+            /// Gets whether the slide path is a break (the 2.x <c>IsSlideBreak</c>).
+            /// </summary>
+            public bool IsSlideBreak
+            {
+                get => Note.IsBreak;
+            }
+            /// <summary>
+            /// Gets whether the slide path is a mine (the 2.x <c>IsMineSlide</c>).
+            /// </summary>
+            public bool IsMineSlide
+            {
+                get => Note.IsMine;
+            }
+
+            /// <summary>
+            /// Creates a note to build.
+            /// </summary>
+            /// <param name="note">The note; for a slide, the slide path.</param>
+            /// <param name="head">The head the slide draws, or <see langword="null"/> when it draws none.</param>
+            /// <param name="count">How many identical slides were folded into the note.</param>
+            /// <exception cref="ArgumentNullException">Thrown when <paramref name="note"/> is <see langword="null"/>.</exception>
+            public FoldedSimaiNote(SimaiNote note, SimaiNote? head, int count)
+            {
+                Note = note ?? throw new ArgumentNullException(nameof(note));
+                Head = head;
+                Count = count;
+            }
         }
-        class SubSlideNote : SimaiNote
+        /// <summary>
+        /// A segment of a simai slide, such as <c>1-3[8:1]</c> in <c>1-3[8:1]-5[8:1]</c>. Its flags come from the slide it
+        /// belongs to; only the first segment draws the head of that slide.
+        /// </summary>
+        sealed class SubSlideNote
         {
-            public SimaiNote Origin { get; set; } = new();
+            /// <summary>
+            /// Gets or sets the key the segment starts from.
+            /// </summary>
+            public int StartPosition { get; set; } = 1;
+            /// <summary>
+            /// Gets or sets the text of the segment, such as <c>1-3[8:1]</c>.
+            /// </summary>
+            public string RawContent { get; set; } = string.Empty;
+            /// <summary>
+            /// Gets or sets the time in seconds at which the segment starts moving.
+            /// </summary>
+            public double SlideStartTime { get; set; }
+            /// <summary>
+            /// Gets or sets how long in seconds the segment moves.
+            /// </summary>
+            public double SlideTime { get; set; }
+            /// <summary>
+            /// Gets or sets the slide the segment belongs to.
+            /// </summary>
+            public FoldedSimaiNote Origin { get; set; }
+            /// <summary>
+            /// Gets or sets whether the segment draws the head of its slide.
+            /// </summary>
+            public bool DrawsHead { get; set; }
+            /// <summary>
+            /// Gets the head the segment draws as a star, or <see langword="null"/> when it draws none.
+            /// </summary>
+            public SimaiNote? Head
+            {
+                get => DrawsHead ? Origin.Head : null;
+            }
+            /// <summary>
+            /// Gets whether the slide path is a break (the 2.x <c>IsSlideBreak</c>).
+            /// </summary>
+            public bool IsSlideBreak
+            {
+                get => Origin.IsSlideBreak;
+            }
+            /// <summary>
+            /// Gets whether the slide path is a mine (the 2.x <c>IsMineSlide</c>).
+            /// </summary>
+            public bool IsMineSlide
+            {
+                get => Origin.IsMineSlide;
+            }
         }
         readonly struct CreateSlideResult<T> where T : SlideBase
         {

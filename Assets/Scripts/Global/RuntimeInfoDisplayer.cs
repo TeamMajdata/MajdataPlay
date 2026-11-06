@@ -117,7 +117,7 @@ namespace MajdataPlay
                 return;
             }
 
-            _frameTimingDiagnostics.Tick(currentTime, LowLatencyVSync.LastWaitMilliseconds);
+            _frameTimingDiagnostics.Tick(currentTime, VulkanLowLatencyVSync.LastWaitMilliseconds);
         }
 
         void OnLanguageChanged(object? sender, Language language)

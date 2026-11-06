@@ -91,6 +91,53 @@ namespace MajdataPlay.Tests.Game.Misc.Base
             Assert.That(DirectoryIdentity.GetOrCreateId(_directory), Is.EqualTo("second"));
         }
 
+        /// <summary>Checks that a supplied identity is written only when no identity is stored, and never replaces one.</summary>
+        [Test]
+        public void GetOrWriteId_WritesOnlyWhenMissingOrBlank()
+        {
+            Assert.That(DirectoryIdentity.GetOrWriteId(_directory, "first"), Is.EqualTo("first"));
+            Assert.That(ReadIdFile(), Is.EqualTo("first"));
+            Assert.That(_directory.FindEntry(DirectoryIdentity.MarkerDirectoryName)!.IsHidden, Is.True);
+
+            Assert.That(DirectoryIdentity.GetOrWriteId(_directory, "second"), Is.EqualTo("first"));
+            Assert.That(ReadIdFile(), Is.EqualTo("first"));
+
+            _directory.FindDirectory(DirectoryIdentity.MarkerDirectoryName)!.FindFile(DirectoryIdentity.IdFileName)!.WriteAllText(" ");
+            Assert.That(DirectoryIdentity.GetOrWriteId(_directory, "third"), Is.EqualTo("third"));
+            Assert.That(ReadIdFile(), Is.EqualTo("third"));
+        }
+
+        /// <summary>Checks that reading a marker directory returns trimmed content, null for a missing or blank file, and creates nothing.</summary>
+        [Test]
+        public void ReadStoredId_ReadsWithoutCreating()
+        {
+            var markerDirectory = _directory.CreateDirectory(DirectoryIdentity.MarkerDirectoryName);
+
+            Assert.That(DirectoryIdentity.ReadStoredId(markerDirectory), Is.Null);
+            Assert.That(markerDirectory.FindFile(DirectoryIdentity.IdFileName), Is.Null);
+
+            var idFile = markerDirectory.CreateFile(DirectoryIdentity.IdFileName);
+            idFile.WriteAllText("\t");
+            Assert.That(DirectoryIdentity.ReadStoredId(markerDirectory), Is.Null);
+
+            idFile.WriteAllText(" server-id\n");
+            Assert.That(DirectoryIdentity.ReadStoredId(markerDirectory), Is.EqualTo("server-id"));
+        }
+
+        /// <summary>Checks that a location identity is a GUID, repeatable for one location and different for another.</summary>
+        [Test]
+        public void CreateLocationId_IsStablePerLocation()
+        {
+            var first = DirectoryIdentity.CreateLocationId(_directory);
+            var again = DirectoryIdentity.CreateLocationId(new StorageDirectory(_directory.FileSystem, _directory.Location));
+            var other = DirectoryIdentity.CreateLocationId(_temporary.Directory.CreateDirectory("Other"));
+
+            Assert.That(first, Is.Not.EqualTo(Guid.Empty));
+            Assert.That(again, Is.EqualTo(first));
+            Assert.That(other, Is.Not.EqualTo(first));
+            Assert.That(_directory.FindEntry(DirectoryIdentity.MarkerDirectoryName), Is.Null);
+        }
+
         /// <summary>Checks that invalid arguments are rejected.</summary>
         [Test]
         public void InvalidArguments_Throw()
@@ -98,6 +145,10 @@ namespace MajdataPlay.Tests.Game.Misc.Base
             Assert.Throws<ArgumentNullException>(() => DirectoryIdentity.GetOrCreateId(null!));
             Assert.Throws<ArgumentNullException>(() => DirectoryIdentity.WriteId(_directory, null!));
             Assert.Throws<ArgumentException>(() => DirectoryIdentity.WriteId(_directory, " "));
+            Assert.Throws<ArgumentNullException>(() => DirectoryIdentity.GetOrWriteId(_directory, null!));
+            Assert.Throws<ArgumentException>(() => DirectoryIdentity.GetOrWriteId(_directory, " "));
+            Assert.Throws<ArgumentNullException>(() => DirectoryIdentity.ReadStoredId(null!));
+            Assert.Throws<ArgumentNullException>(() => DirectoryIdentity.CreateLocationId(null!));
         }
     }
 }

@@ -14,3 +14,4 @@ EXPORTS
     majvk_frame_end
     majvk_swapchain_generation
     majvk_present_id_source
+    majvk_device_lost_call

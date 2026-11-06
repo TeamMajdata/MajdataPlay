@@ -354,9 +354,12 @@ namespace MajdataPlay.Tests.Game.Misc.Collections
             });
         }
 
-        /// <summary>Checks that a directory-backed collection persists a stable identity in its hidden marker directory.</summary>
+        /// <summary>
+        /// Checks that constructing a directory-backed collection writes no marker and derives a stable identity from the
+        /// location, and that persisting writes exactly that identity, which later constructions then read.
+        /// </summary>
         [Test]
-        public void DirectoryCollection_PersistsIdentity()
+        public void DirectoryCollection_PersistsLocationIdentityLazily()
         {
             using var temporary = new TemporaryDirectory();
             var directory = temporary.Directory.CreateDirectory("Collection");
@@ -364,27 +367,54 @@ namespace MajdataPlay.Tests.Game.Misc.Collections
             var first = SongCollection.Empty(directory, "Collection");
             var second = new SongCollection(directory, "Collection", Array.Empty<ISongDetail>());
 
-            Assert.That(first.Id, Is.Not.EqualTo(Guid.Empty));
+            Assert.That(first.Id, Is.EqualTo(DirectoryIdentity.CreateLocationId(directory)));
             Assert.That(second.Id, Is.EqualTo(first.Id));
             Assert.That(first.IsVirtual, Is.False);
+            Assert.That(first.IsIdPersisted, Is.False);
             Assert.That(first.Path, Is.EqualTo(directory.Location));
+            Assert.That(directory.FindEntry(".MajdataPlay"), Is.Null);
+
+            first.PersistId();
+
+            Assert.That(first.IsIdPersisted, Is.True);
             var idFile = directory.FindDirectory(".MajdataPlay")!.FindFile("id")!;
             Assert.That(Guid.Parse(idFile.ReadAllText()), Is.EqualTo(first.Id));
+            Assert.That(directory.FindEntry(".MajdataPlay")!.IsHidden, Is.True);
+            var third = SongCollection.Empty(directory, "Collection");
+            Assert.That(third.Id, Is.EqualTo(first.Id));
+            Assert.That(third.IsIdPersisted, Is.True);
         }
 
-        /// <summary>Checks that an unreadable identity marker is replaced by a new identity.</summary>
+        /// <summary>Checks that a marker without a GUID is left alone on construction and replaced when the identity is persisted.</summary>
         [Test]
-        public void DirectoryCollection_ReplacesInvalidIdentity()
+        public void DirectoryCollection_ReplacesInvalidIdentityWhenPersisted()
         {
             using var temporary = new TemporaryDirectory();
             var directory = temporary.Directory.CreateDirectory("Collection");
-            directory.CreateDirectory(".MajdataPlay").CreateFile("id").WriteAllText("not a guid");
+            var idFile = directory.CreateDirectory(".MajdataPlay").CreateFile("id");
+            idFile.WriteAllText("not a guid");
 
             var collection = SongCollection.Empty(directory, "Collection");
 
-            Assert.That(collection.Id, Is.Not.EqualTo(Guid.Empty));
-            var idText = directory.FindDirectory(".MajdataPlay")!.FindFile("id")!.ReadAllText();
-            Assert.That(Guid.Parse(idText), Is.EqualTo(collection.Id));
+            Assert.That(collection.Id, Is.EqualTo(DirectoryIdentity.CreateLocationId(directory)));
+            Assert.That(collection.IsIdPersisted, Is.False);
+            Assert.That(idFile.ReadAllText(), Is.EqualTo("not a guid"));
+
+            collection.PersistId();
+
+            Assert.That(Guid.Parse(idFile.ReadAllText()), Is.EqualTo(collection.Id));
+        }
+
+        /// <summary>Checks that a virtual collection reports its identity as persisted and that persisting it writes nothing.</summary>
+        [Test]
+        public void VirtualCollection_HasNothingToPersist()
+        {
+            var collection = new SongCollection("Virtual", Array.Empty<ISongDetail>());
+
+            collection.PersistId();
+
+            Assert.That(collection.IsVirtual, Is.True);
+            Assert.That(collection.IsIdPersisted, Is.True);
         }
 
         /// <summary>Checks that a collection cannot be bound to a missing directory.</summary>

@@ -16,6 +16,18 @@ namespace MajdataPlay.Tests.Game.Utils
     /// <summary>Verifies the Play-facing radar facade <see cref="ChartRadarService"/> and its snapshot type.</summary>
     public class ChartRadarServiceTests
     {
+        /// <summary>
+        /// A chart that mixes headed, same-head-group, headless (<c>?</c> and <c>!</c>) and marked slides with ordinary notes.
+        /// </summary>
+        private const string MixedSlideChart = "(150){8}1-5[8:1],2,3?-7[8:1],4,5-1[8:1]*-3[8:1]*>8[8:2],6/7," +
+                                               "8!-4[8:1]/1b-5[8:1]m,2x,3$-6[4:1],{16}4,5,6,7,8@-3[8:1],1," +
+                                               "2-6[8:1]/3-7[8:1],4h[8:1],B1,C,5V31[4:1],1-3-5-7[4:3],,,,E";
+
+        /// <summary>
+        /// The tolerance for radar values, which were computed on CoreCLR and are compared on Unity's runtime.
+        /// </summary>
+        private const double RadarValueTolerance = 1e-9;
+
         /// <summary>Checks that a small valid chart is analyzed successfully with every score present.</summary>
         [Test]
         public void Analyze_ValidChart_ReturnsSuccessfulSnapshot()
@@ -36,6 +48,57 @@ namespace MajdataPlay.Tests.Game.Utils
                 Assert.That(snapshot.GetScore(dimension), Is.Not.Null, dimension.ToString());
                 Assert.That(snapshot.GetRawValue(dimension), Is.EqualTo(snapshot.RawValues[RadarOutputDimensions.Key(dimension)]));
             }
+        }
+
+        /// <summary>
+        /// Checks that slides keep the radar values computed with MajSimai 2.2.2, where a slide with a head was one note.
+        /// MajSimai 3 reads that slide as a star head tap followed by its slide, and the radar must not change.
+        /// </summary>
+        /// <param name="fumen">The chart text.</param>
+        /// <param name="fittedConstant">The expected fitted constant.</param>
+        /// <param name="note">The expected raw note value.</param>
+        /// <param name="peak">The expected raw peak value.</param>
+        /// <param name="sweep">The expected raw sweep value.</param>
+        /// <param name="slideTricky">The expected raw slide tricky value.</param>
+        /// <param name="slideSequence">The expected raw slide sequence value.</param>
+        /// <param name="jack">The expected raw jack value.</param>
+        [TestCase("(120){4}1-5[4:1],2,3,E",
+                  10.90238276166452, 2.6666666666666665, 0.7999999999999999, 0d, 0.3653943384499391, 0d, 0d,
+                  TestName = "Analyze_HeadedSlide_KeepsMajSimai2RadarValues")]
+        [TestCase("(120){4}1-5[4:1]*-7[4:1],2,3,E",
+                  10.91190178804231, 2.6666666666666665, 0.7999999999999999, 0d, 0.38809703203998563, 0.07024237842078739, 0d,
+                  TestName = "Analyze_SameHeadGroup_KeepsMajSimai2RadarValues")]
+        [TestCase("(120){4}1?-5[4:1],2,3,E",
+                  10.751763631179315, 2d, 0.6, 0d, 0d, 0d, 0d,
+                  TestName = "Analyze_HeadlessSlideWithQuestionMark_KeepsMajSimai2RadarValues")]
+        [TestCase("(120){4}1!-5[4:1],2,3,E",
+                  10.751763631179315, 2d, 0.6, 0d, 0d, 0d, 0d,
+                  TestName = "Analyze_HeadlessSlideWithExclamationMark_KeepsMajSimai2RadarValues")]
+        [TestCase(MixedSlideChart,
+                  13.286733692704928, 8.728563302430421, 4.392852617380959, 3.651483716701106, 6.298857332207382,
+                  0.9860430530030515, 0d,
+                  TestName = "Analyze_MixedSlides_KeepsMajSimai2RadarValues")]
+        public void Analyze_Slides_KeepMajSimai2RadarValues(string fumen,
+                                                            double fittedConstant,
+                                                            double note,
+                                                            double peak,
+                                                            double sweep,
+                                                            double slideTricky,
+                                                            double slideSequence,
+                                                            double jack)
+        {
+            var chart = SimaiParser.ParseChart(fumen.AsSpan());
+
+            var snapshot = ChartRadarService.Analyze(chart);
+
+            Assert.That(snapshot.IsSuccess, Is.True, string.Join("; ", snapshot.Errors));
+            Assert.That(snapshot.FittedConstant, Is.EqualTo(fittedConstant).Within(RadarValueTolerance));
+            Assert.That(snapshot.GetRawValue(RadarOutputDimension.Note), Is.EqualTo(note).Within(RadarValueTolerance));
+            Assert.That(snapshot.GetRawValue(RadarOutputDimension.Peak), Is.EqualTo(peak).Within(RadarValueTolerance));
+            Assert.That(snapshot.GetRawValue(RadarOutputDimension.Sweep), Is.EqualTo(sweep).Within(RadarValueTolerance));
+            Assert.That(snapshot.GetRawValue(RadarOutputDimension.SlideTricky), Is.EqualTo(slideTricky).Within(RadarValueTolerance));
+            Assert.That(snapshot.GetRawValue(RadarOutputDimension.SlideSequence), Is.EqualTo(slideSequence).Within(RadarValueTolerance));
+            Assert.That(snapshot.GetRawValue(RadarOutputDimension.Jack), Is.EqualTo(jack).Within(RadarValueTolerance));
         }
 
         /// <summary>Checks that the asynchronous facade returns the same result as the synchronous one.</summary>

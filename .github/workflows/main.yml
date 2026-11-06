@@ -151,14 +151,6 @@ jobs:
         working-directory: ${{ github.workspace }}/projects/Android
 
     steps:
-      - name: Clean previous job files while retaining incremental build data
-        working-directory: ${{ github.workspace }}
-        run: |
-          set -euo pipefail
-          if [[ -d "$PROJECT_ROOT/.git" ]]; then
-            git -C "$PROJECT_ROOT" clean -ffdx -e /Library/ -e /Release/
-          fi
-
       - name: Checkout the repository
         uses: actions/checkout@v4
         with:
@@ -166,6 +158,15 @@ jobs:
           submodules: recursive
           fetch-depth: 0
           clean: false
+
+      - name: Clean previous job files while retaining incremental build data
+        working-directory: ${{ github.workspace }}
+        run: |
+          set -euo pipefail
+          # Removed submodules become untracked only after checkout changes HEAD.
+          if [[ -d "$PROJECT_ROOT/.git" ]]; then
+            git -C "$PROJECT_ROOT" clean -ffdx -e /Library/ -e /Release/
+          fi
 
       - name: Prepare the persistent Unity license
         run: python3 Tools/CI/prepare_unity_license.py
@@ -479,7 +480,6 @@ jobs:
       TARGET_PLATFORM: ${{ matrix.platform }}
       CI_PROJECT_PATH: projects/${{ matrix.platform }}
       PROJECT_ROOT: ${{ github.workspace }}/projects/${{ matrix.platform }}
-      CI_KEYCHAIN: majplay-${{ github.run_id }}-${{ github.run_attempt }}
 
     defaults:
       run:
@@ -487,14 +487,6 @@ jobs:
         working-directory: ${{ github.workspace }}/projects/${{ matrix.platform }}
 
     steps:
-      - name: Clean previous job files while retaining incremental build data
-        working-directory: ${{ github.workspace }}
-        run: |
-          set -euo pipefail
-          if [[ -d "$PROJECT_ROOT/.git" ]]; then
-            git -C "$PROJECT_ROOT" clean -ffdx -e /Library/ -e /Release/
-          fi
-
       - name: Checkout the repository
         uses: actions/checkout@v4
         with:
@@ -502,6 +494,15 @@ jobs:
           submodules: recursive
           fetch-depth: 0
           clean: false
+
+      - name: Clean previous job files while retaining incremental build data
+        working-directory: ${{ github.workspace }}
+        run: |
+          set -euo pipefail
+          # Removed submodules become untracked only after checkout changes HEAD.
+          if [[ -d "$PROJECT_ROOT/.git" ]]; then
+            git -C "$PROJECT_ROOT" clean -ffdx -e /Library/ -e /Release/
+          fi
 
       - name: Prepare the persistent Unity license
         run: python3 Tools/CI/prepare_unity_license.py
@@ -543,6 +544,8 @@ jobs:
         id: signing-keychain
         if: ${{ env.TARGET_PLATFORM == 'iOS' }}
         run: |
+          CI_KEYCHAIN="$RUNNER_TEMP/majplay-${{ github.run_id }}-${{ github.run_attempt }}"
+          echo "CI_KEYCHAIN=$CI_KEYCHAIN" >> "$GITHUB_ENV"
           KEYCHAIN_PASSWORD=$(openssl rand -hex 32)
           echo "::add-mask::$KEYCHAIN_PASSWORD"
           echo "password=$KEYCHAIN_PASSWORD" >> "$GITHUB_OUTPUT"
@@ -797,7 +800,7 @@ jobs:
       - name: Remove temporary signing keychain
         if: ${{ always() && env.TARGET_PLATFORM == 'iOS' && steps.signing-keychain.outcome == 'success' }}
         run: |
-          if [[ -f "$HOME/Library/Keychains/$CI_KEYCHAIN.keychain-db" ]]; then
+          if [[ -f "$CI_KEYCHAIN.keychain-db" ]]; then
             security delete-keychain "$CI_KEYCHAIN.keychain"
           fi
 

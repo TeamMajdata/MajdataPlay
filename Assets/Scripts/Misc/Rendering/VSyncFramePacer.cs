@@ -26,6 +26,12 @@ namespace MajdataPlay.Rendering
         /// <summary>The number of frame intervals waited once to empty an already filled presentation queue.</summary>
         internal const int DrainFrameCount = 3;
 
+        /// <summary>The lowest refresh rate taken as real, in hertz; Windows reports 0 or 1 Hz for a hardware default.</summary>
+        internal const double MinPlausibleRefreshRate = 20;
+
+        /// <summary>The highest refresh rate taken as real, in hertz.</summary>
+        internal const double MaxPlausibleRefreshRate = 1000;
+
         /// <summary>The timestamp frequency in ticks per second.</summary>
         private readonly long _ticksPerSecond;
 
@@ -78,13 +84,20 @@ namespace MajdataPlay.Rendering
         /// <summary>Gets whether a refresh rate has been set and frames are paced.</summary>
         public bool IsConfigured => IntervalTicks > 0;
 
+        /// <summary>Checks whether a reported refresh rate can be a real display's, so that timing may rely on it.</summary>
+        /// <param name="refreshRate">The refresh rate in hertz.</param>
+        /// <returns>Whether the rate lies between <see cref="MinPlausibleRefreshRate"/> and <see cref="MaxPlausibleRefreshRate"/>.</returns>
+        public static bool IsPlausibleRefreshRate(double refreshRate)
+        {
+            return refreshRate >= MinPlausibleRefreshRate && refreshRate <= MaxPlausibleRefreshRate;
+        }
+
         /// <summary>Sets the display refresh rate and restarts pacing when it changed.</summary>
         /// <param name="refreshRate">The refresh rate in hertz.</param>
-        /// <returns>Whether the rate was valid and differed from the current one.</returns>
+        /// <returns>Whether the rate was plausible (see <see cref="IsPlausibleRefreshRate"/>) and differed from the current one.</returns>
         public bool SetRefreshRate(double refreshRate)
         {
-            if (refreshRate <= 0 || double.IsNaN(refreshRate) || double.IsInfinity(refreshRate)
-                || refreshRate == _refreshRate)
+            if (!IsPlausibleRefreshRate(refreshRate) || refreshRate == _refreshRate)
             {
                 return false;
             }

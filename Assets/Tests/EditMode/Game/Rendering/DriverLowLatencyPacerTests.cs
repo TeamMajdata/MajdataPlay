@@ -65,9 +65,10 @@ namespace MajdataPlay.Tests.Game.Rendering
             Assert.That(_pacer.BeginFrame(Period60Hz, TicksPerSecond), Is.EqualTo(DriverFrameOutcome.Skipped));
             _driver.BeginResult = DriverLowLatencyPacer.FrameTimedOut;
             Assert.That(_pacer.BeginFrame(Period60Hz, TicksPerSecond), Is.EqualTo(DriverFrameOutcome.TimedOut));
-            _driver.BeginResult = -4;
+            // VK_ERROR_INITIALIZATION_FAILED, an error the backend may recover from.
+            _driver.BeginResult = -3;
             Assert.That(_pacer.BeginFrame(Period60Hz, TicksPerSecond), Is.EqualTo(DriverFrameOutcome.Failed));
-            Assert.That(_pacer.LastError, Is.EqualTo(-4));
+            Assert.That(_pacer.LastError, Is.EqualTo(-3));
 
             _pacer.EndFrame();
             Assert.That(_driver.Ends, Is.EqualTo(1));
@@ -85,26 +86,24 @@ namespace MajdataPlay.Tests.Game.Rendering
             Assert.That(_driver.Timeouts[1], Is.EqualTo(10_000_000UL));
         }
 
-        /// <summary>Checks that the backend is given up after the failure limit and that a success resets the count.</summary>
+        /// <summary>Checks that the backend is given up once failures reach the limit, and that skipped frames do not count.</summary>
         [Test]
         public void RepeatedFailures_GiveTheBackendUp()
         {
-            _driver.BeginResult = -4;
-            for (var i = 0; i < DriverLowLatencyPacer.FailureLimit - 1; i++)
-            {
-                _pacer.BeginFrame(Period60Hz, TicksPerSecond);
-            }
-            _driver.BeginResult = DriverLowLatencyPacer.FrameDone;
-            _pacer.BeginFrame(Period60Hz, TicksPerSecond);
-            Assert.That(_pacer.HasGivenUp, Is.False, "a started frame resets the failure count");
-
             _driver.BeginResult = DriverLowLatencyPacer.FrameSkipped;
-            _pacer.BeginFrame(Period60Hz, TicksPerSecond);
-            _driver.BeginResult = DriverLowLatencyPacer.FrameTimedOut;
-            for (var i = 0; i < DriverLowLatencyPacer.FailureLimit; i++)
+            for (var i = 0; i < PacingFailureWindow.WindowSize; i++)
             {
                 _pacer.BeginFrame(Period60Hz, TicksPerSecond);
             }
+            Assert.That(_pacer.RecentFailures, Is.EqualTo(0), "skipped frames are not judged");
+
+            _driver.BeginResult = DriverLowLatencyPacer.FrameTimedOut;
+            for (var i = 0; i < PacingFailureWindow.FailureLimit - 1; i++)
+            {
+                _pacer.BeginFrame(Period60Hz, TicksPerSecond);
+            }
+            Assert.That(_pacer.HasGivenUp, Is.False);
+            _pacer.BeginFrame(Period60Hz, TicksPerSecond);
 
             Assert.That(_pacer.HasGivenUp, Is.True);
             Assert.That(_pacer.LastError, Is.EqualTo(DriverLowLatencyPacer.FrameTimedOut));
@@ -115,6 +114,29 @@ namespace MajdataPlay.Tests.Game.Rendering
             Assert.That(_driver.Ends, Is.EqualTo(0));
         }
 
+        /// <summary>
+        /// Checks that started frames between timeouts no longer keep a mostly failing backend, and its stalls of up to
+        /// three refresh periods, alive.
+        /// </summary>
+        [Test]
+        public void TimeoutsBetweenStartedFrames_GiveTheBackendUp()
+        {
+            for (var i = 0; i < PacingFailureWindow.FailureLimit - 1; i++)
+            {
+                _driver.BeginResult = DriverLowLatencyPacer.FrameTimedOut;
+                _pacer.BeginFrame(Period60Hz, TicksPerSecond);
+                _driver.BeginResult = DriverLowLatencyPacer.FrameDone;
+                _pacer.BeginFrame(Period60Hz, TicksPerSecond);
+            }
+            Assert.That(_pacer.HasGivenUp, Is.False);
+
+            _driver.BeginResult = DriverLowLatencyPacer.FrameTimedOut;
+            _pacer.BeginFrame(Period60Hz, TicksPerSecond);
+
+            Assert.That(_pacer.HasGivenUp, Is.True);
+            Assert.That(_pacer.RecentFailures, Is.EqualTo(PacingFailureWindow.FailureLimit));
+        }
+
         /// <summary>Checks that an inactive backend is given up at once.</summary>
         [Test]
         public void InactiveBackend_IsGivenUpAtOnce()
@@ -123,6 +145,20 @@ namespace MajdataPlay.Tests.Game.Rendering
 
             Assert.That(_pacer.BeginFrame(Period60Hz, TicksPerSecond), Is.EqualTo(DriverFrameOutcome.Failed));
             Assert.That(_pacer.HasGivenUp, Is.True);
+        }
+
+        /// <summary>Checks that a lost device gives the backend up at once and is reported as such.</summary>
+        [Test]
+        public void DeviceLost_IsGivenUpAtOnce()
+        {
+            _driver.BeginResult = DriverLowLatencyPacer.ErrorDeviceLost;
+
+            Assert.That(_pacer.BeginFrame(Period60Hz, TicksPerSecond), Is.EqualTo(DriverFrameOutcome.DeviceLost));
+            Assert.That(_pacer.HasGivenUp, Is.True);
+            Assert.That(_pacer.LastError, Is.EqualTo(DriverLowLatencyPacer.ErrorDeviceLost));
+            var calls = _driver.Timeouts.Count;
+            Assert.That(_pacer.BeginFrame(Period60Hz, TicksPerSecond), Is.EqualTo(DriverFrameOutcome.Failed));
+            Assert.That(_driver.Timeouts.Count, Is.EqualTo(calls), "the lost device is not called again");
         }
 
         /// <summary>Checks that a non-positive timestamp frequency is rejected.</summary>

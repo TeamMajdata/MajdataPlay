@@ -198,12 +198,46 @@ namespace MajdataPlay.Tests.Game.GamePlay.Loading
             var mine = Note(SimaiNoteType.Tap, 5);
             mine.IsMine = true;
             var noHead = Note(SimaiNoteType.Slide, 6);
-            noHead.IsSlideNoHead = true;
 
             Assert.That(isEach(tap, new[] { tap, other }), Is.True);
             Assert.That(isEach(tap, new[] { tap }), Is.False);
             Assert.That(isEach(tap, new[] { tap, mine, noHead }), Is.False);
             Assert.That(isEach(mine, new[] { mine, tap, other }), Is.False);
+        }
+
+        /// <summary>
+        /// Checks that a slide with a head makes a tap an each note once, through its head, while a slide without a head
+        /// or with a mine head does not, as with the MajSimai 2.x slide model.
+        /// </summary>
+        /// <param name="fumen">The notes of the timing point.</param>
+        /// <param name="expected">Whether the tap on key 1 is an each note.</param>
+        [TestCase("1/2-6[8:1]", true)]
+        [TestCase("1/2?-6[8:1]", false)]
+        [TestCase("1/2!-6[8:1]", false)]
+        [TestCase("1/2m-6[8:1]", false)]
+        [TestCase("1/2-6m[8:1]", true)]
+        [TestCase("1/2-6[8:1]*-7[8:1]", true)]
+        public void IsEachNote_CountsAHeadedSlideOnceThroughItsHead(string fumen, bool expected)
+        {
+            var isEach = CreateDelegate<EachCheck>("IsEachNote", typeof(SimaiNote), typeof(ReadOnlySpan<SimaiNote>));
+            var notes = ParseNotes(fumen);
+            var tap = notes.Single(x => x.Type == SimaiNoteType.Tap && x.RelatedNotes.Length == 0);
+
+            Assert.That(isEach(tap, notes), Is.EqualTo(expected));
+        }
+
+        /// <summary>Checks that two headed slides make each other's stars each notes and that the slide path mine flag is used for slides.</summary>
+        [Test]
+        public void IsEachNote_ForParsedSlidesUsesTheHeadForStarsAndThePathForSlides()
+        {
+            var typedIsEach = CreateDelegate<TypedEachCheck>("IsEachNote", typeof(SimaiNote), typeof(SimaiNoteType), typeof(ReadOnlySpan<SimaiNote>));
+            var notes = ParseNotes("1-5[8:1]/3-7m[8:1]");
+            var heads = notes.Where(x => x.Type == SimaiNoteType.Tap).ToArray();
+            var slides = notes.Where(x => x.Type == SimaiNoteType.Slide).ToArray();
+
+            Assert.That(typedIsEach(heads[0], SimaiNoteType.Tap, notes), Is.True, "Two stars are each notes");
+            Assert.That(typedIsEach(slides[0], SimaiNoteType.Slide, notes), Is.False, "The other slide path is a mine");
+            Assert.That(typedIsEach(slides[1], SimaiNoteType.Slide, notes), Is.False, "A mine slide path is never an each");
         }
 
         /// <summary>Checks each detection for slides and for an unknown note type.</summary>
@@ -215,14 +249,15 @@ namespace MajdataPlay.Tests.Game.GamePlay.Loading
             var slide = Note(SimaiNoteType.Slide, 1);
             var otherSlide = Note(SimaiNoteType.Slide, 5);
             var mineSlide = Note(SimaiNoteType.Slide, 3);
-            mineSlide.IsMineSlide = true;
+            mineSlide.IsMine = true;
             var tap = Note(SimaiNoteType.Tap, 2);
+            var head = Head(slide);
 
             Assert.That(count(slide, new[] { slide, otherSlide, mineSlide, tap }), Is.EqualTo(2));
             Assert.That(typedIsEach(slide, SimaiNoteType.Slide, new[] { slide, otherSlide }), Is.True);
             Assert.That(typedIsEach(slide, SimaiNoteType.Slide, new[] { slide, mineSlide, tap }), Is.False);
             Assert.That(typedIsEach(mineSlide, SimaiNoteType.Slide, new[] { mineSlide, slide, otherSlide }), Is.False);
-            Assert.That(typedIsEach(slide, SimaiNoteType.Tap, new[] { slide, tap }), Is.True, "A slide head counts as a tap");
+            Assert.That(typedIsEach(head, SimaiNoteType.Tap, new[] { head, slide, tap }), Is.True, "A slide head counts as a tap");
             Assert.That(typedIsEach(slide, (SimaiNoteType)99, new[] { slide, otherSlide }), Is.False);
         }
 
@@ -235,11 +270,31 @@ namespace MajdataPlay.Tests.Game.GamePlay.Loading
             var sameKey = Note(SimaiNoteType.Slide, 1);
             var otherKey = Note(SimaiNoteType.Slide, 2);
             var mineSameKey = Note(SimaiNoteType.Slide, 1);
-            mineSameKey.IsMineSlide = true;
+            mineSameKey.IsMine = true;
 
             Assert.That(isDouble(slide, new[] { slide, sameKey }), Is.True);
             Assert.That(isDouble(slide, new[] { slide, otherKey }), Is.False);
             Assert.That(isDouble(slide, new[] { slide, mineSameKey }), Is.False);
+        }
+
+        /// <summary>
+        /// Checks the double star of parsed charts: a same-head group and two slides from one key are double stars, a slide
+        /// from another key or with a mine path is not.
+        /// </summary>
+        /// <param name="fumen">The notes of the timing point.</param>
+        /// <param name="expected">Whether the first star is a double star.</param>
+        [TestCase("1-3[8:1]*-5[8:1]", true)]
+        [TestCase("1-5[8:1]/1-5[8:1]", true)]
+        [TestCase("1-5[8:1]/1?-5[8:1]", true)]
+        [TestCase("1-5[8:1]/2-6[8:1]", false)]
+        [TestCase("1-5[8:1]/1-5m[8:1]", false)]
+        public void IsStarDouble_CountsTheSlidesFromTheKeyOfTheHead(string fumen, bool expected)
+        {
+            var isDouble = CreateDelegate<EachCheck>("IsStarDouble", typeof(SimaiNote), typeof(ReadOnlySpan<SimaiNote>));
+            var notes = ParseNotes(fumen);
+            var head = notes.First(x => x.RelatedNotes.Length != 0);
+
+            Assert.That(isDouble(head, notes), Is.EqualTo(expected));
         }
 
         /// <summary>Checks that the each slides are the non-mine slides of the timing point.</summary>
@@ -248,7 +303,7 @@ namespace MajdataPlay.Tests.Game.GamePlay.Loading
         {
             var slide = Note(SimaiNoteType.Slide, 1);
             var mineSlide = Note(SimaiNoteType.Slide, 3);
-            mineSlide.IsMineSlide = true;
+            mineSlide.IsMine = true;
             var tap = Note(SimaiNoteType.Tap, 4);
             var otherSlide = Note(SimaiNoteType.Slide, 5);
 
@@ -326,18 +381,17 @@ namespace MajdataPlay.Tests.Game.GamePlay.Loading
             var slideB = Slide("1-3[8:1]");
             var different = Slide("1-5[8:1]");
 
-            var folded = PrivateMember.InvokeStatic<SimaiNote[]>(s_helper, "NoteFolding", new object?[] { new[] { slideA, tap, slideB, different } });
+            var folded = Fold(new[] { slideA, tap, slideB, different });
 
             Assert.That(folded, Has.Length.EqualTo(3));
-            Assert.That(folded[0], Is.SameAs(tap));
-            var counts = folded.Skip(1).ToDictionary(x => x.RawContent, x => PrivateMember.GetProperty<int>(x, "Count"));
+            Assert.That(folded[0].Note, Is.SameAs(tap));
+            Assert.That(folded[0].Count, Is.EqualTo(1));
+            var counts = folded.Skip(1).ToDictionary(x => x.Note.RawContent, x => x.Count);
             Assert.That(counts["1-3[8:1]"], Is.EqualTo(2));
             Assert.That(counts["1-5[8:1]"], Is.EqualTo(1));
-            var foldedSlide = folded.Single(x => x.RawContent == "1-3[8:1]");
-            Assert.That(foldedSlide, Is.Not.SameAs(slideA));
-            Assert.That(foldedSlide.Type, Is.EqualTo(SimaiNoteType.Slide));
-            Assert.That(foldedSlide.SlideTime, Is.EqualTo(slideA.SlideTime));
-            Assert.That(foldedSlide.SlideStartTime, Is.EqualTo(slideA.SlideStartTime));
+            var foldedSlide = folded.Single(x => x.Note.RawContent == "1-3[8:1]");
+            Assert.That(foldedSlide.Note, Is.SameAs(slideA), "A folded slide is the first slide of its group");
+            Assert.That(foldedSlide.Head, Is.Null);
         }
 
         /// <summary>Checks that folding a timing point without slides keeps its notes in order.</summary>
@@ -347,9 +401,105 @@ namespace MajdataPlay.Tests.Game.GamePlay.Loading
             var first = Note(SimaiNoteType.Tap, 1);
             var second = Note(SimaiNoteType.Touch, 1);
 
-            var folded = PrivateMember.InvokeStatic<SimaiNote[]>(s_helper, "NoteFolding", new object?[] { new[] { first, second } });
+            var folded = Fold(new[] { first, second });
 
-            Assert.That(folded, Is.EqualTo(new[] { first, second }));
+            Assert.That(folded.Select(x => x.Note), Is.EqualTo(new[] { first, second }));
+            Assert.That(folded.Select(x => x.Head), Is.All.Null);
+        }
+
+        /// <summary>
+        /// Checks that two identical slides with heads, <c>1-5[8:1]/1-5[8:1]</c>, fold into one slide that draws the first
+        /// head twice, and that neither head is built as a tap of its own.
+        /// </summary>
+        [Test]
+        public void NoteFolding_FoldsIdenticalHeadedSlidesIntoOneSlideWithTwoStars()
+        {
+            Assume.That(PrivateMember.GetStaticField<bool>(typeof(NoteLoader), "USERSETTING_NOTE_FOLDING"), Is.True);
+            var notes = ParseNotes("1-5[8:1]/1-5[8:1]");
+
+            var folded = Fold(notes);
+
+            Assert.That(folded, Has.Length.EqualTo(1));
+            Assert.That(folded[0].Note, Is.SameAs(notes[1]));
+            Assert.That(folded[0].Head, Is.SameAs(notes[0]));
+            Assert.That(folded[0].Count, Is.EqualTo(2));
+        }
+
+        /// <summary>
+        /// Checks that slides fold only when they agree on their head: a slide with a head and one without, or slides whose
+        /// head or path break flags differ, stay apart.
+        /// </summary>
+        /// <param name="fumen">Two slides with the same path.</param>
+        [TestCase("1-5[8:1]/1?-5[8:1]")]
+        [TestCase("1b-5[8:1]/1-5[8:1]")]
+        [TestCase("1-5b[8:1]/1-5[8:1]")]
+        [TestCase("1x-5[8:1]/1-5[8:1]")]
+        public void NoteFolding_KeepsSlidesWithDifferentHeadsApart(string fumen)
+        {
+            Assume.That(PrivateMember.GetStaticField<bool>(typeof(NoteLoader), "USERSETTING_NOTE_FOLDING"), Is.True);
+            var notes = ParseNotes(fumen);
+
+            var folded = Fold(notes);
+
+            Assert.That(folded, Has.Length.EqualTo(2));
+            Assert.That(folded.Select(x => x.Note.Type), Is.All.EqualTo(SimaiNoteType.Slide));
+            Assert.That(folded.Select(x => x.Count), Is.All.EqualTo(1));
+        }
+
+        /// <summary>
+        /// Checks the notes the loader builds from a parsed timing point, with and without folding: slide heads are left
+        /// out, a slide written with its head carries it, the later slides of a same-head group and slides written without
+        /// a head carry none, and other notes are kept.
+        /// </summary>
+        /// <param name="fumen">The notes of the timing point.</param>
+        /// <param name="expected">The text of each built note followed by <c>+</c> when it carries a head, in chart order.</param>
+        [TestCase("1-5[8:1]", "1-5[8:1]+")]
+        [TestCase("1?-5[8:1]", "1-5[8:1]")]
+        [TestCase("1!-5[8:1]", "1-5[8:1]")]
+        [TestCase("1@-5[8:1]", "1-5[8:1]+")]
+        [TestCase("1-3[8:1]*-5[8:1]", "1-3[8:1]+ 1-5[8:1]")]
+        [TestCase("3/1-5[8:1]", "3 1-5[8:1]+")]
+        [TestCase("1-5[8:1]/1-5[8:1]", "1-5[8:1]+ 1-5[8:1]+")]
+        public void ProjectNotes_GivesEachSlideTheHeadItDraws(string fumen, string expected)
+        {
+            var notes = ParseNotes(fumen);
+
+            var projected = PrivateMember.InvokeStatic<Array>(s_helper, "ProjectNotes", new object?[] { notes }).Cast<object>().Select(ReadFolded).ToArray();
+            var folded = Fold(notes);
+
+            Assert.That(Describe(projected), Is.EqualTo(expected));
+            Assert.That(projected.Select(x => x.Count), Is.All.EqualTo(1));
+            Assert.That(projected.Any(x => x.Note.RelatedNotes.Length != 0), Is.False, "Slide heads are not built as notes");
+            Assert.That(folded.Any(x => x.Note.RelatedNotes.Length != 0), Is.False, "Slide heads are not built as notes");
+            foreach (var entry in projected.Where(x => x.Head is not null))
+            {
+                Assert.That(entry.Head!.RelatedNotes[0], Is.SameAs(entry.Note), "A slide carries the head whose first slide it is");
+            }
+        }
+
+        /// <summary>Checks that the head relation and the head flags are kept on the folded note of a slide.</summary>
+        [Test]
+        public void NoteFolding_KeepsTheHeadAndThePathFlags()
+        {
+            var notes = ParseNotes("1bm-5[8:1]");
+
+            var folded = Fold(notes).Single();
+
+            Assert.That(folded.Head, Is.SameAs(notes[0]));
+            Assert.That(PrivateMember.GetProperty<bool>(folded.Boxed, "IsSlideNoHead"), Is.False);
+            Assert.That(PrivateMember.GetProperty<bool>(folded.Boxed, "IsSlideBreak"), Is.False, "b before the path marks the head");
+            Assert.That(PrivateMember.GetProperty<bool>(folded.Boxed, "IsMineSlide"), Is.False, "m before the path marks the head");
+            Assert.That(folded.Head!.IsBreak && folded.Head.IsMine, Is.True);
+
+            var breakPath = Fold(ParseNotes("1-5b[8:1]")).Single();
+            var minePath = Fold(ParseNotes("1-5m[8:1]")).Single();
+
+            Assert.That(PrivateMember.GetProperty<bool>(breakPath.Boxed, "IsSlideBreak"), Is.True);
+            Assert.That(PrivateMember.GetProperty<bool>(breakPath.Boxed, "IsMineSlide"), Is.False);
+            Assert.That(breakPath.Head!.IsBreak, Is.False, "b after the path marks the path");
+            Assert.That(PrivateMember.GetProperty<bool>(minePath.Boxed, "IsMineSlide"), Is.True);
+            Assert.That(PrivateMember.GetProperty<bool>(minePath.Boxed, "IsSlideBreak"), Is.False);
+            Assert.That(minePath.Head!.IsMine, Is.False, "m after the path marks the path");
         }
 
         /// <summary>
@@ -367,12 +517,12 @@ namespace MajdataPlay.Tests.Game.GamePlay.Loading
             var chain = Enumerable.Range(1, 12)
                                   .Select(i => Slide($"6-3[64:{i}]"))
                                   .ToArray();
-            PrivateMember.InvokeStatic<SimaiNote[]>(s_helper, "NoteFolding", new object?[] { chord });
+            Fold(chord);
 
-            var folded = PrivateMember.InvokeStatic<SimaiNote[]>(s_helper, "NoteFolding", new object?[] { chain });
+            var folded = Fold(chain);
 
-            Assert.That(folded.Select(x => x.Type), Is.All.EqualTo(SimaiNoteType.Slide));
-            Assert.That(folded.Select(x => x.RawContent), Is.EquivalentTo(chain.Select(x => x.RawContent)));
+            Assert.That(folded.Select(x => x.Note.Type), Is.All.EqualTo(SimaiNoteType.Slide));
+            Assert.That(folded.Select(x => x.Note.RawContent), Is.EquivalentTo(chain.Select(x => x.RawContent)));
         }
 
         /// <summary>Checks the equality of the folding key: identical slides are equal, different slides are not.</summary>
@@ -380,12 +530,12 @@ namespace MajdataPlay.Tests.Game.GamePlay.Loading
         public void FoldingSimaiNote_ComparesByContent()
         {
             var type = typeof(NoteLoader).GetNestedType("FoldingSimaiNote", BindingFlags.NonPublic)!;
-            var a = Activator.CreateInstance(type, Slide("1-3[8:1]"), null)!;
+            var slide = Slide("1-3[8:1]");
+            var a = Activator.CreateInstance(type, slide, null)!;
             var b = Activator.CreateInstance(type, Slide("1-3[8:1]"), null)!;
             var c = Activator.CreateInstance(type, Slide("1-4[8:1]"), null)!;
             var equality = type.GetMethod("op_Equality")!;
             var inequality = type.GetMethod("op_Inequality")!;
-            var implicitConversion = type.GetMethod("op_Implicit")!;
 
             Assert.That(equality.Invoke(null, new[] { a, b }), Is.True);
             Assert.That(inequality.Invoke(null, new[] { a, c }), Is.True);
@@ -393,10 +543,36 @@ namespace MajdataPlay.Tests.Game.GamePlay.Loading
             Assert.That(a.Equals(c), Is.False);
             Assert.That(a.Equals("not a note"), Is.False);
             Assert.That(a.GetHashCode(), Is.EqualTo(b.GetHashCode()));
-            var converted = implicitConversion.Invoke(null, new object[] { Slide("1-3[8:1]") })!;
-            Assert.That(converted.Equals(a), Is.True);
-            Assert.That(PrivateMember.GetProperty<string>(a, "RawContent"), Is.EqualTo("1-3[8:1]"));
-            Assert.That(PrivateMember.GetProperty<SimaiNote>(a, "Origin"), Is.Not.Null);
+            Assert.That(PrivateMember.GetProperty<SimaiNote>(a, "Origin"), Is.SameAs(slide));
+            Assert.That(PrivateMember.GetProperty<SimaiNote?>(a, "Head"), Is.Null);
+        }
+
+        /// <summary>
+        /// Checks that the folding key includes the head relation: slides with equal heads are equal, a slide with a head
+        /// differs from one without, and the break flag of the head and of the path both count.
+        /// </summary>
+        [Test]
+        public void FoldingSimaiNote_ComparesTheHeadOfTheSlide()
+        {
+            var type = typeof(NoteLoader).GetNestedType("FoldingSimaiNote", BindingFlags.NonPublic)!;
+            var slideA = Slide("1-3[8:1]");
+            var slideB = Slide("1-3[8:1]");
+            var headed = Activator.CreateInstance(type, slideA, Head(slideA))!;
+            var otherHeaded = Activator.CreateInstance(type, slideB, Head(slideB))!;
+            var headless = Activator.CreateInstance(type, Slide("1-3[8:1]"), null)!;
+            var breakHead = Head(Slide("1-3[8:1]"));
+            breakHead.IsBreak = true;
+            var breakHeaded = Activator.CreateInstance(type, breakHead.RelatedNotes[0], breakHead)!;
+            var breakPath = Slide("1-3[8:1]");
+            breakPath.IsBreak = true;
+            var breakPathHeaded = Activator.CreateInstance(type, breakPath, Head(breakPath))!;
+
+            Assert.That(headed.Equals(otherHeaded), Is.True);
+            Assert.That(PrivateMember.GetProperty<SimaiNote?>(headed, "Head"), Is.Not.Null);
+            Assert.That(headed.Equals(headless), Is.False, "A slide with a head is not folded with one without");
+            Assert.That(headed.Equals(breakHeaded), Is.False, "The break flag of the head counts");
+            Assert.That(headed.Equals(breakPathHeaded), Is.False, "The break flag of the path counts");
+            Assert.That(breakHeaded.Equals(breakPathHeaded), Is.False, "A break head is not a break path");
         }
 
         /// <summary>Checks that a folding note is valid only when it wraps a simai note, not as a cleared buffer slot.</summary>
@@ -409,6 +585,58 @@ namespace MajdataPlay.Tests.Game.GamePlay.Loading
 
             Assert.That(PrivateMember.GetProperty<bool>(wrapped, "IsValid"), Is.True);
             Assert.That(PrivateMember.GetProperty<bool>(cleared, "IsValid"), Is.False);
+        }
+
+        /// <summary>Folds the notes of a timing point with the loader's note folding.</summary>
+        /// <param name="notes">The notes of the timing point.</param>
+        /// <returns>The notes the loader builds.</returns>
+        private static FoldedEntry[] Fold(SimaiNote[] notes)
+        {
+            var folded = PrivateMember.InvokeStatic<Array>(s_helper, "NoteFolding", new object?[] { notes });
+            return folded.Cast<object>().Select(ReadFolded).ToArray();
+        }
+
+        /// <summary>Reads a folded note of the loader.</summary>
+        /// <param name="boxed">The boxed folded note.</param>
+        /// <returns>The note, its head and its count.</returns>
+        private static FoldedEntry ReadFolded(object boxed)
+        {
+            return new FoldedEntry(boxed,
+                                   PrivateMember.GetProperty<SimaiNote>(boxed, "Note"),
+                                   PrivateMember.GetProperty<SimaiNote?>(boxed, "Head"),
+                                   PrivateMember.GetProperty<int>(boxed, "Count"));
+        }
+
+        /// <summary>Describes folded notes as their text, followed by <c>+</c> for a note that carries a head.</summary>
+        /// <param name="entries">The folded notes.</param>
+        /// <returns>The descriptions separated by spaces.</returns>
+        private static string Describe(IEnumerable<FoldedEntry> entries)
+        {
+            return string.Join(" ", entries.Select(x => x.Head is null ? x.Note.RawContent : x.Note.RawContent + "+"));
+        }
+
+        /// <summary>Parses the notes of one timing point with MajSimai.</summary>
+        /// <param name="fumen">The notes of the timing point, without the comma.</param>
+        /// <returns>The notes of the timing point.</returns>
+        private static SimaiNote[] ParseNotes(string fumen)
+        {
+            var chart = SimaiParser.ParseChart(("(120){4}" + fumen + ",E").AsSpan());
+            return chart.NoteTimings[0].Notes;
+        }
+
+        /// <summary>Creates the star head of slides, in the shape MajSimai 3.x gives it.</summary>
+        /// <param name="slides">The slides of the head; the first one draws it.</param>
+        /// <returns>The head.</returns>
+        private static SimaiNote Head(params SimaiNote[] slides)
+        {
+            var startPosition = slides[0].StartPosition;
+            return new SimaiNote
+            {
+                Type = SimaiNoteType.Tap,
+                StartPosition = startPosition,
+                RawContent = startPosition.ToString(),
+                RelatedNotes = slides,
+            };
         }
 
         /// <summary>Creates a delegate bound to a static helper method.</summary>
@@ -457,6 +685,35 @@ namespace MajdataPlay.Tests.Game.GamePlay.Loading
                 table[key] = ((key - 1 + offset) % 8) + 1;
             }
             return table;
+        }
+
+        /// <summary>A folded note of the loader read through reflection.</summary>
+        private sealed class FoldedEntry
+        {
+            /// <summary>Creates a folded note.</summary>
+            /// <param name="boxed">The boxed folded note.</param>
+            /// <param name="note">The note; for a slide, its path.</param>
+            /// <param name="head">The head the slide draws, if any.</param>
+            /// <param name="count">How many identical slides were folded into the note.</param>
+            public FoldedEntry(object boxed, SimaiNote note, SimaiNote? head, int count)
+            {
+                Boxed = boxed;
+                Note = note;
+                Head = head;
+                Count = count;
+            }
+
+            /// <summary>Gets the boxed folded note.</summary>
+            public object Boxed { get; }
+
+            /// <summary>Gets the note; for a slide, its path.</summary>
+            public SimaiNote Note { get; }
+
+            /// <summary>Gets the head the slide draws, if any.</summary>
+            public SimaiNote? Head { get; }
+
+            /// <summary>Gets how many identical slides were folded into the note.</summary>
+            public int Count { get; }
         }
     }
 }

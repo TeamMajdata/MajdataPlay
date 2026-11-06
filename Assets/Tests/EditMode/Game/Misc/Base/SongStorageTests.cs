@@ -308,6 +308,69 @@ namespace MajdataPlay.Tests.Game.Misc.Base
             });
         }
 
+        /// <summary>
+        /// Checks that identity markers are created lazily: refreshes write none and restore the selection from
+        /// location-derived identities, saving writes markers for exactly the selected collection and chart, and those
+        /// markers then restore the selection after both folders are renamed.
+        /// </summary>
+        /// <returns>The test coroutine.</returns>
+        [UnityTest]
+        public IEnumerator OnSave_WritesIdentityMarkersOnlyForSelection()
+        {
+            return UniTask.ToCoroutine(async () =>
+            {
+                CreateLibrary();
+                var collectionDirectory = _charts.FindDirectory("B-Collection")!;
+                var fourDirectory = collectionDirectory.FindDirectory("Four")!;
+                await SongStorage.InitAsync();
+                await SongStorage.RefreshLocal();
+                var listConfig = MajEnv.RuntimeConfig!.List;
+                var collection = Collection("B-Collection");
+                var four = collection.Single(song => song.Title == "Four");
+                Assert.That(collection.Id, Is.EqualTo(DirectoryIdentity.CreateLocationId(collectionDirectory)));
+                Assert.That(four.Id, Is.EqualTo(DirectoryIdentity.CreateLocationId(fourDirectory).ToString()));
+                Assert.That(HasMarker("A-Collection"), Is.False);
+                Assert.That(HasMarker("B-Collection"), Is.False);
+                Assert.That(HasMarker("B-Collection/Four"), Is.False);
+                listConfig.SelectedDirGuid = collection.Id;
+                listConfig.SelectedSongId = four.Id;
+                SongStorage.CollectionIndex = 0;
+
+                await SongStorage.RefreshLocal();
+
+                Assert.That(SongStorage.WorkingCollection.Name, Is.EqualTo("B-Collection"));
+                Assert.That(SongStorage.WorkingCollection.Current.Title, Is.EqualTo("Four"));
+                Assert.That(HasMarker("B-Collection/Four"), Is.False);
+
+                PrivateMember.InvokeStatic(typeof(SongStorage), "OnSave", null, null);
+
+                Assert.That(collectionDirectory.FindFileAt(".MajdataPlay/id")!.ReadAllText(), Is.EqualTo(collection.Id.ToString()));
+                Assert.That(fourDirectory.FindFileAt(".MajdataPlay/id")!.ReadAllText(), Is.EqualTo(four.Id));
+                Assert.That(HasMarker("A-Collection"), Is.False);
+                Assert.That(HasMarker("B-Collection/Three"), Is.False);
+                Assert.That(SongStorage.WorkingCollection.IsIdPersisted, Is.True);
+                Assert.That(((SongDetail)SongStorage.WorkingCollection.Current).IsIdPersisted, Is.True);
+
+                fourDirectory.Rename("Four-Renamed");
+                collectionDirectory.Rename("C-Collection");
+                SongStorage.CollectionIndex = 0;
+                await SongStorage.RefreshLocal();
+
+                Assert.That(SongStorage.WorkingCollection.Name, Is.EqualTo("C-Collection"));
+                Assert.That(SongStorage.WorkingCollection.Id, Is.EqualTo(collection.Id));
+                Assert.That(SongStorage.WorkingCollection.Current.Title, Is.EqualTo("Four"));
+                Assert.That(SongStorage.WorkingCollection.Current.Id, Is.EqualTo(four.Id));
+            });
+        }
+
+        /// <summary>Checks whether a directory under the chart root has an identity marker.</summary>
+        /// <param name="relativePath">The directory's path relative to the chart root.</param>
+        /// <returns>True when the directory contains a <c>.MajdataPlay</c> marker directory.</returns>
+        private bool HasMarker(string relativePath)
+        {
+            return _charts.FindDirectoryAt(relativePath)!.FindEntry(DirectoryIdentity.MarkerDirectoryName) is not null;
+        }
+
         /// <summary>Checks that unavailable saved content leaves both persisted identities intact.</summary>
         /// <param name="collectionExists">Whether the saved collection is published.</param>
         /// <param name="collectionIsEmpty">Whether the saved collection contains no songs.</param>

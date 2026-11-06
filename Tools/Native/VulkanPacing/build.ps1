@@ -186,7 +186,7 @@ foreach ($target in $Targets) {
     $bytes = [System.IO.File]::ReadAllBytes($dll)
     $manifest = [ordered]@{
         target = $target
-        abi = 1
+        abi = 3
         builtUtc = [DateTime]::UtcNow.ToString('o')
         compiler = @(& $compiler --version)[0]
         cmake = @(& $cmakePath --version)[0]

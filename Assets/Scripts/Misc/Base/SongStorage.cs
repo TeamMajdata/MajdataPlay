@@ -364,6 +364,45 @@ namespace MajdataPlay
             return collection is null ? null : FindSongById(collection, listConfig.SelectedSongId);
         }
 
+        /// <summary>Writes the identity markers of the saved list selection's collection and chart when they are not stored yet.</summary>
+        /// <remarks>
+        /// Identity markers are created lazily: scanning only reads them, and a collection or chart without one uses an
+        /// identity derived from its location, which every scan derives again. The saved selection is the only place these
+        /// identities are stored, so writing the markers of exactly the selected collection and chart keeps the selection
+        /// valid after their folders are renamed or moved, without creating a marker in every chart. Each marker is written
+        /// at most once; a failure is logged, and the location-derived identity keeps restoring the selection as long as the
+        /// folder stays where it is.
+        /// </remarks>
+        internal static void PersistSelectionIds()
+        {
+            var listConfig = MajEnv.RuntimeConfig.List;
+            var collection = Array.Find(Collections, collection => collection.Id == listConfig.SelectedDirGuid);
+            if (collection is null)
+            {
+                return;
+            }
+            try
+            {
+                collection.PersistId();
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or NotSupportedException)
+            {
+                MajDebug.LogWarning(nameof(SongStorage), $"Failed to persist the identity of collection '{collection.Path}': {exception.Message}");
+            }
+            if (FindSongById(collection, listConfig.SelectedSongId) is not SongDetail song)
+            {
+                return;
+            }
+            try
+            {
+                song.PersistId();
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or NotSupportedException)
+            {
+                MajDebug.LogWarning(nameof(SongStorage), $"Failed to persist the identity of chart '{song.Title}': {exception.Message}");
+            }
+        }
+
         /// <summary>Finds a song of a collection by its <see cref="ISongDetail.Id"/>.</summary>
         /// <param name="collection">The collection to search.</param>
         /// <param name="songId">The song identity, or an empty string for no selection.</param>
@@ -867,12 +906,16 @@ namespace MajdataPlay
             }
         }
 
-        /// <summary>Scans each local collection exactly once using bounded workers and index-owned result slots.</summary>
+        /// <summary>Scans every local collection with one scanner, whose worker threads are shared by all collections.</summary>
         /// <param name="rootDirectory">The chart root and its authoritative storage backend.</param>
-        /// <param name="progressReporter">Receives chart parsing progress, including failed candidates.</param>
+        /// <param name="progressReporter">Receives the share of scanned chart directories, including directories without a chart.</param>
         /// <param name="cancellationToken">Cancels enumeration or parsing.</param>
         /// <returns>Every root collection, including empty directories, ordered by name after the entire scan succeeds.</returns>
-        /// <remarks>Collection-level access and identity failures fault the scan rather than publishing a library with missing folders.</remarks>
+        /// <remarks>
+        /// Collection-level access and identity failures fault the scan rather than publishing a library with missing folders.
+        /// Progress is pushed by the scanner's workers rather than polled from the thread pool, so the reported text keeps
+        /// moving even when blocking storage calls elsewhere occupy every thread-pool thread.
+        /// </remarks>
         /// <exception cref="OperationCanceledException">Scanning was canceled.</exception>
         /// <exception cref="IOException">The chart root could not be enumerated.</exception>
         private static Task<List<SongCollection>> GetLocalCollections(StorageDirectory rootDirectory, IProgress<string>? progressReporter, CancellationToken cancellationToken = default)
@@ -883,79 +926,43 @@ namespace MajdataPlay
                 var directories = rootDirectory.EnumerateEntries()
                     .Where(entry => entry.IsDirectory)
                     .ToArray();
-                var results = new SongCollection?[directories.Length];
-                using var scanner = new SongCollectionScanner(cancellationToken);
-                var nextIndex = -1;
-                var workerCount = Math.Min(Math.Max(1, Environment.ProcessorCount), directories.Length);
-                var workers = new Task[workerCount];
-                for (var i = 0; i < workers.Length; i++)
+                var scanningText = "MAJTEXT_SCANNING_CHARTS".i18n();
+                progressReporter?.Report(FormatScanProgress(scanningText, 0d));
+                Action<double>? reportProgress = progressReporter is null
+                    ? null
+                    : progress => progressReporter.Report(FormatScanProgress(scanningText, Math.Min(99.99d, progress * 100d)));
+                using var scanner = new SongCollectionScanner(cancellationToken, reportProgress);
+                var scans = new Task<SongCollection>[directories.Length];
+                for (var i = 0; i < directories.Length; i++)
                 {
-                    workers[i] = Task.CompletedTask;
+                    scans[i] = GetCollection(new StorageDirectory(rootDirectory.FileSystem, directories[i].Location), scanner);
                 }
                 try
                 {
-                    try
-                    {
-                        for (var i = 0; i < workers.Length; i++)
-                        {
-                            workers[i] = Task.Run(async () =>
-                            {
-                                while (true)
-                                {
-                                    cancellationToken.ThrowIfCancellationRequested();
-                                    var index = Interlocked.Increment(ref nextIndex);
-                                    if (index >= directories.Length)
-                                    {
-                                        return;
-                                    }
-                                    var entry = directories[index];
-                                    try
-                                    {
-                                        var directory = new StorageDirectory(rootDirectory.FileSystem, entry.Location);
-                                        results[index] = await GetCollection(directory, scanner).ConfigureAwait(false);
-                                    }
-                                    catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-                                    {
-                                        throw;
-                                    }
-                                    catch (Exception e)
-                                    {
-                                        MajDebug.LogError(nameof(SongStorage), $"[MaiChart Scanner][{entry.Name}]Failed to scan collection: {e}");
-                                        throw;
-                                    }
-                                }
-                            }, cancellationToken);
-                        }
-                        var allTasks = Task.WhenAll(workers);
-                        while (!allTasks.IsCompleted)
-                        {
-                            var discovered = scanner.DiscoveredChartCount;
-                            var processed = scanner.ProcessedChartCount;
-                            var percent = discovered == 0 ? 0f : Math.Min(99.99f, processed * 100f / discovered);
-                            progressReporter?.Report($"{"MAJTEXT_SCANNING_CHARTS".i18n()}...({percent:F2}%)");
-                            await Task.WhenAny(allTasks, Task.Delay(33)).ConfigureAwait(false);
-                        }
-                    }
-                    finally
-                    {
-                        // Observe all started workers before cleanup, even if scheduling or progress reporting fails.
-                        await Task.WhenAll(workers).ConfigureAwait(false);
-                    }
+                    await Task.WhenAll(scans).ConfigureAwait(false);
                     cancellationToken.ThrowIfCancellationRequested();
-                    progressReporter?.Report($"{"MAJTEXT_SCANNING_CHARTS".i18n()}...(100.00%)");
-                    return results.Where(collection => collection is not null)
-                        .Select(collection => collection!)
-                        .OrderBy(collection => collection.Name)
-                        .ToList();
                 }
                 catch
                 {
-                    DisposeUnpublishedCharts(results.Where(collection => collection is not null)
-                                                    .SelectMany(collection => collection!.GetOriginSnapshot())
-                                                    );
+                    // WhenAll has observed every scan, so the charts of the collections that succeeded are no longer shared.
+                    DisposeUnpublishedCharts(scans.Where(scan => scan.Status == TaskStatus.RanToCompletion)
+                                                  .SelectMany(scan => scan.Result.GetOriginSnapshot()));
                     throw;
                 }
+                progressReporter?.Report(FormatScanProgress(scanningText, 100d));
+                return scans.Select(scan => scan.Result)
+                            .OrderBy(collection => collection.Name)
+                            .ToList();
             }, cancellationToken);
+        }
+
+        /// <summary>Formats the chart scanning status shown while local collections are scanned.</summary>
+        /// <param name="scanningText">The localized scanning message.</param>
+        /// <param name="percent">The completed percentage, between 0 and 100.</param>
+        /// <returns>The status text with the percentage rounded to two decimals.</returns>
+        private static string FormatScanProgress(string scanningText, double percent)
+        {
+            return $"{scanningText}...({percent:F2}%)";
         }
 
         /// <summary>Loads local playlist definitions without requiring their requested charts to be available yet.</summary>
@@ -1098,28 +1105,37 @@ namespace MajdataPlay
             }
         }
 
-        /// <summary>Builds one directory-backed collection using the scan's shared parsing budget.</summary>
+        /// <summary>Builds one directory-backed collection on the scanner shared by every collection of the refresh.</summary>
         /// <param name="directory">The collection directory and its authoritative storage backend.</param>
-        /// <param name="scanner">The scanner shared by all collection workers in this scan.</param>
+        /// <param name="scanner">The scanner shared by all collections in this scan.</param>
         /// <returns>The scanned collection, including an empty collection when no charts are present.</returns>
+        /// <remarks>Failures other than cancellation are logged with the collection's location before they fault the refresh.</remarks>
         /// <exception cref="DirectoryNotFoundException">The collection directory no longer exists.</exception>
         /// <exception cref="OperationCanceledException">The scanner's cancellation token was canceled.</exception>
         /// <exception cref="IOException">The directory or its identity marker could not be accessed.</exception>
         private static async Task<SongCollection> GetCollection(StorageDirectory directory, SongCollectionScanner scanner)
         {
-            var entry = directory.Entry;
-            if (entry is null || !entry.IsDirectory)
-            {
-                throw new DirectoryNotFoundException($"Collection directory '{directory.Location}' does not exist.");
-            }
-            var charts = await scanner.ScanAsync(directory).ConfigureAwait(false);
             try
             {
-                return new SongCollection(directory, entry.Name, charts);
+                var entry = directory.Entry;
+                if (entry is null || !entry.IsDirectory)
+                {
+                    throw new DirectoryNotFoundException($"Collection directory '{directory.Location}' does not exist.");
+                }
+                var charts = await scanner.ScanAsync(directory).ConfigureAwait(false);
+                try
+                {
+                    return new SongCollection(directory, entry.Name, charts);
+                }
+                catch
+                {
+                    DisposeUnpublishedCharts(charts);
+                    throw;
+                }
             }
-            catch
+            catch (Exception e) when (e is not OperationCanceledException)
             {
-                DisposeUnpublishedCharts(charts);
+                MajDebug.LogError(nameof(SongStorage), $"[MaiChart Scanner][{directory.Location}]Failed to scan collection: {e}");
                 throw;
             }
         }
@@ -1590,17 +1606,28 @@ namespace MajdataPlay
             });
         }
         #endregion
-        /// <summary>Exports the committed favorites view when the game saves its state.</summary>
+        /// <summary>
+        /// Exports the committed favorites view and writes the identity markers of the saved list selection when the game
+        /// saves its state, which is also when the selection itself is written to the runtime database.
+        /// </summary>
         /// <param name="sender">The source of the save event.</param>
         /// <param name="args">The save event arguments.</param>
         private static void OnSave(object? sender, EventArgs? args)
         {
+            if (!s_isInitialized)
+            {
+                return;
+            }
             try
             {
-                if (!s_isInitialized)
-                {
-                    return;
-                }
+                PersistSelectionIds();
+            }
+            catch (Exception e)
+            {
+                MajDebug.LogException(nameof(SongStorage), e);
+            }
+            try
+            {
                 var hashSet = s_myFavorites.ExportHashSet();
                 var exportDirectory = MajEnv.ChartDirectory;
                 var exportFile = exportDirectory.FindFile(MyFavoriteFileName)

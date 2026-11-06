@@ -4,7 +4,7 @@ using UnityEngine.Scripting;
 #nullable enable
 namespace MajdataPlay.Net.Models
 {
-    /// <summary>The rankings of every difficulty of an online chart, as returned by <c>GET maichart/{chartId}/score</c>.</summary>
+    /// <summary>The rankings of every difficulty of an online chart, as returned by <c>GET maiscore/leaderboard/chart/by-id/{chartId}</c>.</summary>
     [Preserve]
     [JsonObject(NamingStrategyType = typeof(CamelCaseNamingStrategy))]
     public struct MajNetSongScoreInfo

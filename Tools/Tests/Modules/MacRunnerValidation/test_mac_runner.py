@@ -134,6 +134,33 @@ class IosCacheTests(unittest.TestCase):
             self.assertEqual(persistent.stat().st_mtime_ns, original_time)
             self.assertFalse(original_cache.exists())
 
+    def test_append_export_removes_duplicate_phase_references_per_target(self):
+        import json
+        with tempfile.TemporaryDirectory() as temporary:
+            project = Path(temporary) / "MajdataPlay/Unity-iPhone.xcodeproj/project.pbxproj"
+            project.parent.mkdir(parents=True)
+            phase = "C62A2A42F32E085EF849CF0B"
+            sources = "7F4E059C2717216D00A2CBE4"
+            phases = ("buildPhases = (\n"
+                      f"    {sources} /* Sources */,\n"
+                      f"    {phase} /* Run Script */,\n"
+                      f"    {phase} /* Run Script */,\n"
+                      f"    {phase} /* Run Script */,\n"
+                      ");\n"
+                      "buildPhases = (\n"
+                      f"    {phase} /* Shared with another target */,\n"
+                      ");\n")
+            script = 'il2cpp --compile-cpp --cachedirectory=cache "' + IOS_CACHE.ARCHIVE_CACHE + '"'
+            project.write_text(phases + "shellScript = " + json.dumps(script) + ";\n")
+            with redirect_stdout(io.StringIO()):
+                IOS_CACHE.prepare_cache(project, "Release")
+                once = project.read_text()
+                IOS_CACHE.prepare_cache(project, "Release")
+            self.assertEqual(project.read_text(), once)
+            self.assertEqual(once.count(phase), 2)
+            self.assertIn(f"{sources} /* Sources */,\n    {phase} /* Run Script */,", once)
+            self.assertIn(f"{phase} /* Shared with another target */,", once)
+
     def test_unexpected_unity_layout_is_not_silently_accepted(self):
         with tempfile.TemporaryDirectory() as temporary:
             project = Path(temporary) / "project.pbxproj"
@@ -170,11 +197,56 @@ class WorkspaceTests(unittest.TestCase):
 
     def test_signing_keychain_is_unique_and_cleaned_after_failures(self):
         workflow = (ROOT / ".github/workflows/main.yml").read_text(encoding="utf-8")
-        self.assertIn("CI_KEYCHAIN: majplay-${{ github.run_id }}-${{ github.run_attempt }}", workflow)
+        self.assertIn('CI_KEYCHAIN="$RUNNER_TEMP/majplay-${{ github.run_id }}-${{ github.run_attempt }}"',
+                      workflow)
         self.assertIn("keychain: ${{ env.CI_KEYCHAIN }}", workflow)
         cleanup = workflow.split("      - name: Remove temporary signing keychain\n", 1)[1]
         self.assertIn("always()", cleanup.split("        run:", 1)[0])
         self.assertIn('security delete-keychain "$CI_KEYCHAIN.keychain"', cleanup)
+
+    @unittest.skipIf(os.name == "nt", "Run Bash signing cleanup tests on the macOS runner.")
+    def test_signing_cleanup_uses_the_absolute_keychain_path(self):
+        workflow = (ROOT / ".github/workflows/main.yml").read_text(encoding="utf-8")
+        preparation = workflow.split("      - name: Prepare temporary signing keychain\n", 1)[1]
+        preparation = preparation.split("        run: |\n", 1)[1].split("\n\n", 1)[0]
+        preparation = "\n".join(line[10:] for line in preparation.splitlines())
+        preparation = preparation.replace("${{ github.run_id }}", "123")
+        preparation = preparation.replace("${{ github.run_attempt }}", "2")
+        cleanup = workflow.split("      - name: Remove temporary signing keychain\n", 1)[1]
+        script = cleanup.split("        run: |\n", 1)[1].split("\n\n", 1)[0]
+        script = "\n".join(line[10:] for line in script.splitlines())
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            keychain = directory / "runner temp.with spaces/majplay-123-2"
+            keychain.parent.mkdir()
+            database = Path(str(keychain) + ".keychain-db")
+            database.write_text("test")
+            tools = directory / "bin"
+            tools.mkdir()
+            security = tools / "security"
+            security.write_text('#!/bin/bash\nprintf "%s\\n" "$@" > "$SECURITY_CALLS"\n')
+            security.chmod(0o700)
+            calls = directory / "security-calls"
+            github_environment = directory / "github-env"
+            environment = dict(os.environ, CI_KEYCHAIN=str(keychain),
+                               HOME=str(directory / "different-home"), SECURITY_CALLS=str(calls),
+                               RUNNER_TEMP=str(keychain.parent), GITHUB_ENV=str(github_environment),
+                               GITHUB_OUTPUT=str(directory / "github-output"),
+                               PATH=str(tools) + os.pathsep + os.environ["PATH"])
+            subprocess.run(["bash", "-c", preparation], env=environment,
+                           check=True, capture_output=True)
+            self.assertEqual(github_environment.read_text().splitlines(),
+                             ["CI_KEYCHAIN=" + str(keychain)])
+            subprocess.run(["bash", "-c", script], env=environment,
+                           check=True, capture_output=True)
+            self.assertTrue(calls.exists(), "Cleanup must find the keychain outside HOME.")
+            self.assertEqual(calls.read_text().splitlines(),
+                             ["delete-keychain", str(keychain) + ".keychain"])
+            database.unlink()
+            calls.unlink()
+            subprocess.run(["bash", "-c", script], env=environment,
+                           check=True, capture_output=True)
+            self.assertFalse(calls.exists(), "A failed import may not have created a keychain.")
 
     @unittest.skipIf(os.name == "nt", "Run Bash/Perl Android path tests on the macOS runner.")
     def test_android_sdk_paths_are_literal_gradle_strings(self):
@@ -203,6 +275,58 @@ class WorkspaceTests(unittest.TestCase):
         self.assertIn("'-AcceptExternalModificationsToPlayer'", apple_job)
         self.assertIn("clean: false,", apple_job)
         self.assertIn('"Release", "iOS", "DerivedData"', apple_job)
+
+    @unittest.skipIf(os.name == "nt", "Run Bash checkout migration tests on the macOS runner.")
+    def test_checkout_removes_a_submodule_deleted_by_the_new_revision(self):
+        workflow = (ROOT / ".github/workflows/main.yml").read_text(encoding="utf-8")
+        jobs = [workflow.split("  build-android:", 1)[1].split("  build-apple:", 1)[0],
+                workflow.split("  build-apple:", 1)[1].split("  publish-nightly:", 1)[0]]
+        marker = "      - name: Clean previous job files while retaining incremental build data\n"
+        for job in jobs:
+            block = job.split(marker, 1)[1]
+            script = block.split("        run: |\n", 1)[1].split("\n\n", 1)[0]
+            script = "\n".join(line[10:] for line in script.splitlines())
+            with self.subTest(job=job.splitlines()[1]), tempfile.TemporaryDirectory() as temporary:
+                directory = Path(temporary)
+                project = directory / "project"
+                source = directory / "dependency"
+
+                def git(repository, *arguments):
+                    return subprocess.run(["git", "-C", str(repository), *arguments],
+                                          check=True, capture_output=True, text=True).stdout.strip()
+
+                for repository in (project, source):
+                    repository.mkdir()
+                    git(repository, "init")
+                    git(repository, "config", "user.name", "CI validation")
+                    git(repository, "config", "user.email", "ci@example.invalid")
+                (source / "old.asmdef").write_text("{}")
+                git(source, "add", ".")
+                git(source, "commit", "-m", "Old dependency")
+                dependency = "Assets/Plugins/MajSimai"
+                git(project, "-c", "protocol.file.allow=always", "submodule", "add",
+                    str(source), dependency)
+                git(project, "commit", "-m", "Use the submodule")
+                previous = git(project, "rev-parse", "HEAD")
+                git(project, "rm", "--cached", dependency)
+                (project / ".gitmodules").write_text("")
+                git(project, "add", ".gitmodules")
+                git(project, "commit", "-m", "Replace the submodule with a package")
+                current = git(project, "rev-parse", "HEAD")
+                git(project, "checkout", "--force", previous)
+                environment = dict(os.environ, PROJECT_ROOT=str(project))
+                cleanup_first = job.index(marker) < job.index("      - name: Checkout the repository\n")
+                if cleanup_first:
+                    subprocess.run(["bash", "-c", script], env=environment,
+                                   check=True, capture_output=True)
+                git(project, "checkout", "--force", current)
+                self.assertTrue((project / dependency / "old.asmdef").exists())
+                if not cleanup_first:
+                    subprocess.run(["bash", "-c", script], env=environment,
+                                   check=True, capture_output=True)
+                self.assertFalse((project / dependency).exists(),
+                                 "Removed submodules must be cleaned after checkout.")
+                self.assertTrue((project / ".git/modules" / dependency / "HEAD").exists())
 
     @unittest.skipIf(os.name == "nt", "Run Bash checkout cleanup tests on the macOS runner.")
     def test_workflow_cleanup_preserves_git_bee_and_native_builds(self):

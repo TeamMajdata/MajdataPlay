@@ -111,8 +111,8 @@ namespace MajdataPlay
         /// <returns>An operation that completes once the resources are ready; failures are logged so that startup continues.</returns>
         /// <remarks>
         /// Android and iOS extract the packaged resources on the first start and check them against the packaged manifests
-        /// on later starts; Windows restores empty chart and skin roots. The Editor and other platforms read the packaged
-        /// streaming assets directly.
+        /// on later starts. Windows, Linux and macOS restore empty chart and skin roots from the packaged streaming assets
+        /// and read every other resource from them directly. The Editor skips the check.
         /// </remarks>
         /// <exception cref="OperationCanceledException">The token was cancelled.</exception>
         private async UniTask CheckResourcesAsync(ProgressReporter progress, CancellationToken cancellationToken)
@@ -129,7 +129,7 @@ namespace MajdataPlay
                 {
                     await MobileResourceChecker.CheckAsync(progress, budget, cancellationToken);
                 }
-#elif WINDOWS_RUNTIME
+#elif WINDOWS_RUNTIME || LINUX_RUNTIME || OSX_RUNTIME
                 await DesktopResourceChecker.CheckAsync(progress, budget, cancellationToken);
 #else
                 await UniTask.CompletedTask;
@@ -241,7 +241,7 @@ namespace MajdataPlay
             QualitySettings.vSyncCount = SystemSettings.Rendering.VSync ? 1 : 0;
 #endif
             QualitySettings.maxQueuedFrames = SystemSettings.Debug.MaxQueuedFrames;
-            LowLatencyVSync.Install();
+            VulkanLowLatencyVSync.Install();
             DetectHWEncoder();
 #if (!UNITY_EDITOR && UNITY_STANDALONE_WIN)
             if (SystemSettings.Rendering.Topmost)

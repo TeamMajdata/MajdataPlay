@@ -17,9 +17,10 @@ At the start of each frame `LowLatencyVSync` uses, when available:
    stayed near zero and left the VSync queue in place.
 
 When neither is available, **timer pacing** in C# (`VSyncFramePacer`) produces frames slightly slower than the
-display refreshes, so input is sampled late; it needs nothing from this layer. A backend that keeps failing is
-given up and the others continue. The hidden setting `Rendering.VulkanLowLatencyVSyncBackend` (`Auto`, `PresentWait`,
-`Timer`) limits the backends for comparisons.
+display refreshes, so input is sampled late; it needs nothing from this layer. A backend that keeps failing (16
+failed or timed-out frames among its 64 most recent judged frames, `PacingFailureWindow`) is given up and the others
+continue; a lost device (`VK_ERROR_DEVICE_LOST`) stops both layer backends at once. The hidden setting
+`Rendering.VulkanLowLatencyVSyncBackend` (`Auto`, `PresentWait`, `Timer`) limits the backends for comparisons.
 
 ## How it works
 
@@ -36,46 +37,63 @@ given up and the others continue. The hidden setting `Rendering.VulkanLowLatency
   else `VK_AMD_anti_lag` with its feature structure. If the driver rejects that device, Unity's own
   configuration is created instead. Unity's memory is never modified.
 - **Frames.** `majvk_frame_begin` (main thread, before input) numbers a frame and queues the number for the next
-  presentation; `majvk_frame_end` closes the main-thread part. NVIDIA: `vkLatencySleepNV` signals a timeline
-  semaphore that `majvk_frame_begin` waits on, then `SIMULATION_START`/`INPUT_SAMPLE` markers; `SIMULATION_END`
-  at frame end; the first `vkQueueSubmit` of a frame sets `RENDERSUBMIT_START` and every submission carries
-  `VkLatencySubmissionPresentIdNV`; presentation sets `RENDERSUBMIT_END`, `PRESENT_START` and `PRESENT_END`.
-  Swapchains are created with `VkSwapchainLatencyCreateInfoNV` and each new swapchain gets
-  `vkSetLatencySleepModeNV`. AMD: `vkAntiLagUpdateAMD` with the input stage at frame begin and the present stage,
-  for the same frame number, right before presentation; it is called without any lock because the driver may
-  sleep inside it.
+  presentation; `majvk_frame_end` closes the main-thread part. At most two frames stay queued (Unity's main
+  thread runs at most one frame ahead of its render thread), so frames that Unity never presents, e.g. while
+  minimized, do not leave later presentations paired with frames long past. NVIDIA: `vkLatencySleepNV` signals a
+  timeline semaphore that `majvk_frame_begin` waits on, then `SIMULATION_START`/`INPUT_SAMPLE` markers; the
+  driver releases one sleep per presentation, so a frame begun without a presentation since the previous sleep
+  only gets the markers and is reported as skipped. `SIMULATION_END` at frame end; the first `vkQueueSubmit` of a
+  frame sets `RENDERSUBMIT_START` and every submission carries `VkLatencySubmissionPresentIdNV`; presentation sets
+  `RENDERSUBMIT_END`, `PRESENT_START` and `PRESENT_END`. Swapchains are created with
+  `VkSwapchainLatencyCreateInfoNV` and each new swapchain gets `vkSetLatencySleepModeNV`; a swapchain whose sleep
+  mode the driver refuses is not slept on. AMD: `vkAntiLagUpdateAMD` with the input stage at frame begin and the
+  present stage, for the same frame number, right before presentation; it is called without any lock because the
+  driver may sleep inside it.
 - **Swapchains and ids.** `vkCreateSwapchainKHR`, `vkDestroySwapchainKHR`, `vkQueuePresentKHR`, `vkQueueSubmit`,
   `vkAcquireNextImageKHR`, `vkAcquireNextImage2KHR`, `vkDestroyDevice` and Unity's own `vkWaitForPresentKHR` are
   wrapped through both the instance and the device lookup. The newest swapchain of the device is tracked with a
   generation counter: a window resize creates the new swapchain from the old one (tracking moves to the new
-  handle at once and the retired one, which may still present, is ignored), a fullscreen toggle destroys the
-  swapchain first and then creates a new one. Queued frame numbers are dropped on recreation. One monotonic
-  counter numbers frames, so presentation ids keep increasing on every swapchain. When Unity attaches its own
-  `VkPresentIdKHR` chain it is left alone and its ids are followed, except with the NVIDIA backend: its latency
-  markers must name presentations by frame id, so when Unity's chain is the first structure the layer presents a
-  copy with the frame id and translates Unity's own `vkWaitForPresentKHR` calls from Unity's ids to the frame
-  ids. Results of inner layers, such as the FFmpeg bridge's acquisition workaround, pass through unchanged.
+  handle at once; the retired one may still present its acquired images until Unity destroys it), a fullscreen
+  toggle destroys the swapchain first and then creates a new one. The old swapchain is retired even when its
+  replacement cannot be created, so it is no longer waited on then. Queued frame numbers survive recreation: they
+  are the frames Unity presents next, on the new swapchain. One monotonic counter numbers frames, and the layer
+  numbers every presentation of the tracked and the retired swapchain itself, so presentation ids keep
+  increasing on every swapchain (`VUID-VkPresentIdKHR-presentIds-04999`) and NVIDIA's latency markers can name
+  presentations by frame id. When Unity attaches its own `VkPresentIdKHR`, the layer presents a copy of the chain
+  with its frame id in place of Unity's (copying the structures in front of Unity's, so Unity's memory is never
+  modified) and translates Unity's own `vkWaitForPresentKHR` calls from Unity's ids to the frame ids. Only when a
+  structure of a type the layer does not know sits in front of Unity's ids does it follow Unity's id instead.
+  Results of inner layers, such as the FFmpeg bridge's acquisition workaround, pass through unchanged.
+- **Device loss.** The first wrapped or own call that returns `VK_ERROR_DEVICE_LOST` is remembered
+  (`majvk_device_lost_call`). From then on, until Unity creates a new device, the layer passes Unity's calls
+  through without ids, markers or sleeps, `majvk_frame_begin`, `majvk_frame_end` and `majvk_present_wait_poll`
+  return `VK_ERROR_DEVICE_LOST` at once, and Unity's own `vkWaitForPresentKHR` returns `VK_ERROR_DEVICE_LOST`
+  without reaching the driver, because nothing is presented any more and a wait could only end by a timeout that
+  Unity may not have bounded. The managed pacer then stops both layer backends and logs the reporting call.
 - **Synchronization.** `vkWaitForPresentKHR` externally synchronizes the swapchain. Unity's swapchain calls
   register themselves under a lock but run unlocked, so a blocking acquisition never holds it; the present wait
   poll only try-locks the lock and calls the zero-timeout wait while no Unity call is in progress. The NVIDIA
-  calls, which take the swapchain and never block, are serialized with each other and with swapchain destruction.
+  calls, which take the swapchain and never block, are serialized with each other; swapchain destruction removes
+  the swapchain from them under that lock first and then destroys it without holding any lock, so a slow
+  destruction never blocks the main thread's frame calls.
 
-## C ABI (version 2, Cdecl)
+## C ABI (version 3, Cdecl)
 
 | Export | Result |
 | --- | --- |
-| `majvk_abi_version()` | `2` |
+| `majvk_abi_version()` | `3` |
 | `majvk_present_wait_status()` | `0` enabled, `1` no Vulkan device yet, `2` Unity did not enable both features, `3` `vkWaitForPresentKHR` missing |
 | `majvk_present_wait_query(uint64_t* generation, uint64_t* presentId)` | `1`, `-2` when not enabled, `-3` for null arguments |
-| `majvk_present_wait_poll(uint64_t generation, uint64_t presentId)` | `1` shown, `0` pending or busy, `-1` swapchain changed, `-2` not enabled, otherwise a negative `VkResult` |
+| `majvk_present_wait_poll(uint64_t generation, uint64_t presentId)` | `1` shown, `0` pending or busy, `-1` swapchain changed, `-2` not enabled, otherwise a negative `VkResult`; `-4` (`VK_ERROR_DEVICE_LOST`) once the device was lost |
 | `majvk_low_latency_backend()` | `0` none, `1` `VK_NV_low_latency2`, `2` `VK_AMD_anti_lag` |
 | `majvk_low_latency_status()` | `0` active, `1` no device yet, `2` unsupported, `3` rejected by the driver, `4` entry point or timeline semaphore missing |
-| `majvk_frame_begin(uint64_t timeoutNanoseconds)` | `1` started, `0` skipped (no swapchain), `2` the NVIDIA sleep timed out, `-2` no backend, otherwise a negative `VkResult` |
-| `majvk_frame_end()` | `1` recorded, `0` skipped, `-2` no backend |
+| `majvk_frame_begin(uint64_t timeoutNanoseconds)` | `1` started, `0` skipped (no swapchain, or no presentation since the last sleep), `2` the NVIDIA sleep timed out, `-2` no backend, otherwise a negative `VkResult`; `-4` once the device was lost |
+| `majvk_frame_end()` | `1` recorded, `0` skipped, `-2` no backend, `-4` once the device was lost |
 | `majvk_swapchain_generation()` | changes whenever the tracked swapchain is created or destroyed |
-| `majvk_present_id_source()` | `0` none yet, `1` the layer attaches ids, `2` Unity does, `3` Unity does and the NVIDIA backend replaces them |
+| `majvk_present_id_source()` | `0` none yet, `1` the layer attaches ids, `2` Unity does and the layer follows them (unknown structure in front of Unity's ids), `3` Unity does and the layer replaces them |
+| `majvk_device_lost_call()` | `0` not lost, otherwise the call that first reported `VK_ERROR_DEVICE_LOST`: `1` `vkQueueSubmit`, `2` `vkQueuePresentKHR`, `3` `vkAcquireNextImage(2)KHR`, `4` `vkCreateSwapchainKHR`, `5` Unity's `vkWaitForPresentKHR`, `6` the poll's `vkWaitForPresentKHR`, `7` `vkSetLatencySleepModeNV`, `8` `vkLatencySleepNV`, `9` `vkWaitSemaphoresKHR` on the sleep semaphore |
 
-`Assets/Scripts/Misc/Rendering/VulkanPacingLayer.cs` declares these entry points and requires ABI 2. When the
+`Assets/Scripts/Misc/Rendering/VulkanPacingLayer.cs` declares these entry points and requires ABI 3. When the
 layer is missing or outdated, or a backend is unavailable or keeps failing, `LowLatencyVSync` logs the reason
 and continues with the remaining backends or the timer.
 
@@ -95,10 +113,11 @@ the headers lack them. The Unity plug-in API headers in `Unity/` are copied from
 The script looks for llvm-mingw in `-LlvmMingw`, `LLVM_MINGW`, then `Tools/FFmpeg/.build/toolchains` or
 `FFMPEG_BUILD_ROOT/toolchains`; `Tools/FFmpeg/build-dependencies.py` (`ensure_llvm`) fetches and verifies the
 pinned archive. `-Test` builds and runs `tests/VulkanPacingTests.cpp` for the host first. The tests model Unity's
-interceptor registration, the inner layers and a driver, and cover present waiting, window resize, fullscreen
-toggle and out-of-date recreation, the NVIDIA and AMD backends and their fallbacks. They do not cover real
-drivers or presentation timing; pass `-DMAJVK_VULKAN_HEADERS=<newer include>` to CMake to also check them
-against headers that define `VK_AMD_anti_lag`.
+interceptor registration, the inner layers and a driver, and cover present waiting, window resize (including
+presentations of the retired swapchain), fullscreen toggle, out-of-date and failed recreation, the replacement of
+Unity's ids, device loss, the NVIDIA and AMD backends and their fallbacks; the modeled driver rejects present ids
+that do not increase per swapchain. They do not cover real drivers or presentation timing; pass
+`-DMAJVK_VULKAN_HEADERS=<newer include>` to CMake to also check them against headers that define `VK_AMD_anti_lag`.
 
 Each target (`win-x86`, `win-x64`, `win-arm64`) is staged to
 `Assets/Plugins/MajdataPlay/Rendering/Native/Windows/<x86|x86_64|arm64>/` together with a
@@ -153,4 +172,6 @@ of that sweep a run covers. Present waiting samples input right after the previo
   does not use `vkQueueSubmit2` with its Vulkan 1.1 instance).
 - Present waiting needs a driver with both extensions and a Unity version that enables them on its device.
 - The presentation time reported by `vkWaitForPresentKHR` depends on the driver and on Windows composition.
-- The layer tracks one swapchain at a time (the newest), which matches Unity players.
+- The layer tracks one swapchain at a time (the newest) plus the one it retired, which matches Unity players.
+- A device loss caused elsewhere (for example by another plug-in's GPU work) is only seen by the calls that pass
+  through this layer; the layer stops pacing then but cannot prevent or repair the loss.

@@ -336,6 +336,133 @@ namespace MajdataPlay.Tests.Game.Notes.PlayMode
             Assert.That(eachNotes.OfType<TapPoolingInfo>().Single().StartPos, Is.EqualTo(2));
         }
 
+        /// <summary>
+        /// Checks that a parsed slide with a head, a head tap followed by its slide since MajSimai 3.0, builds one slide and
+        /// exactly one star, and no extra tap for the head.
+        /// </summary>
+        /// <returns>The test coroutine.</returns>
+        [UnityTest]
+        public IEnumerator LoadSlides_HeadedSlideSpawnsOneStarAndNoTap()
+        {
+            var eachNotes = LoadSlides("1-4[8:1]");
+            yield return null;
+
+            var slide = SingleExtendSlide();
+            Assert.That(slide.StartPos, Is.EqualTo(1));
+            Assert.That(slide.EndPos, Is.EqualTo(4));
+            Assert.That(slide.Multiple, Is.EqualTo(1));
+            var star = eachNotes.OfType<TapPoolingInfo>().Single();
+            Assert.That(star.IsStar, Is.True);
+            Assert.That(star.IsDouble, Is.False);
+            Assert.That(star.StartPos, Is.EqualTo(1));
+            Assert.That(eachNotes, Has.Count.EqualTo(1));
+            Assert.That(SlideQueue(), Has.Count.EqualTo(1));
+        }
+
+        /// <summary>
+        /// Checks that a same-head group builds both slides but only one double star, drawn by its first slide; the later
+        /// slide has no head, as in the 2.x model.
+        /// </summary>
+        /// <returns>The test coroutine.</returns>
+        [UnityTest]
+        public IEnumerator LoadSlides_SameHeadGroupSpawnsOneDoubleStar()
+        {
+            var eachNotes = LoadSlides("1-3[8:1]*-5[8:1]");
+            yield return null;
+
+            var slides = ExtendSlides();
+            Assert.That(slides, Has.Length.EqualTo(2));
+            Assert.That(slides.Select(x => x.EndPos), Is.EquivalentTo(new[] { 3, 5 }));
+            Assert.That(slides.Select(x => x.IsEach), Is.All.True, "Two slides of one timing point are each slides");
+            var star = eachNotes.OfType<TapPoolingInfo>().Single();
+            Assert.That(star.IsDouble, Is.True);
+            Assert.That(star.IsEach, Is.False, "The head is the only note that is not a slide");
+            Assert.That(SlideQueue(), Has.Count.EqualTo(2));
+        }
+
+        /// <summary>Checks that a slide written without a head builds its slide and no star.</summary>
+        /// <param name="fumen">The slide.</param>
+        /// <returns>The test coroutine.</returns>
+        [UnityTest]
+        [TestCase("1?-4[8:1]", ExpectedResult = null)]
+        [TestCase("1!-4[8:1]", ExpectedResult = null)]
+        public IEnumerator LoadSlides_HeadlessSlideSpawnsNoStar(string fumen)
+        {
+            var eachNotes = LoadSlides(fumen);
+            yield return null;
+
+            var slide = SingleExtendSlide();
+            Assert.That(slide.StartPos, Is.EqualTo(1));
+            Assert.That(slide.EndPos, Is.EqualTo(4));
+            Assert.That(eachNotes, Is.Empty);
+            Assert.That(SlideQueue(), Has.Count.EqualTo(1));
+        }
+
+        /// <summary>Checks that a tap-head slide (<c>@</c>) still spawns one star, as the loader drew it before MajSimai 3.0.</summary>
+        /// <returns>The test coroutine.</returns>
+        [UnityTest]
+        public IEnumerator LoadSlides_TapHeadSlideSpawnsOneStar()
+        {
+            var eachNotes = LoadSlides("1@-4[8:1]");
+            yield return null;
+
+            SingleExtendSlide();
+            var star = eachNotes.OfType<TapPoolingInfo>().Single();
+            Assert.That(star.IsStar, Is.True);
+            Assert.That(eachNotes, Has.Count.EqualTo(1));
+        }
+
+        /// <summary>
+        /// Checks that the break and mine flags written before the slide path mark the star and those written after it mark
+        /// the slide.
+        /// </summary>
+        /// <param name="fumen">The slide.</param>
+        /// <param name="starBreak">Whether the star is a break.</param>
+        /// <param name="starMine">Whether the star is a mine.</param>
+        /// <param name="slideBreak">Whether the slide is a break.</param>
+        /// <param name="slideMine">Whether the slide is a mine.</param>
+        /// <returns>The test coroutine.</returns>
+        [UnityTest]
+        [TestCase("1b-4[8:1]", true, false, false, false, ExpectedResult = null)]
+        [TestCase("1-4b[8:1]", false, false, true, false, ExpectedResult = null)]
+        [TestCase("1m-4[8:1]", false, true, false, false, ExpectedResult = null)]
+        [TestCase("1-4m[8:1]", false, false, false, true, ExpectedResult = null)]
+        public IEnumerator LoadSlides_SplitsBreakAndMineBetweenHeadAndPath(string fumen, bool starBreak, bool starMine, bool slideBreak, bool slideMine)
+        {
+            var eachNotes = LoadSlides(fumen);
+            yield return null;
+
+            var slide = SingleExtendSlide();
+            var star = eachNotes.OfType<TapPoolingInfo>().Single();
+            Assert.That(star.IsBreak, Is.EqualTo(starBreak));
+            Assert.That(star.IsMine, Is.EqualTo(starMine));
+            Assert.That(slide.IsBreak, Is.EqualTo(slideBreak));
+            Assert.That(slide.IsMine, Is.EqualTo(slideMine));
+        }
+
+        /// <summary>
+        /// Checks that two identical slides with heads, <c>1-4[8:1]/1-4[8:1]</c>, fold into one slide with a multiple of 2
+        /// and two stars, and that the heads are not built as taps.
+        /// </summary>
+        /// <returns>The test coroutine.</returns>
+        [UnityTest]
+        public IEnumerator LoadSlides_FoldsIdenticalHeadedSlides()
+        {
+            Assume.That(PrivateMember.GetStaticField<bool>(typeof(NoteLoader), "USERSETTING_NOTE_FOLDING"), Is.True);
+            var eachNotes = LoadSlides("1-4[8:1]/1-4[8:1]");
+            yield return null;
+
+            var slide = SingleExtendSlide();
+            Assert.That(slide.Multiple, Is.EqualTo(2));
+            Assert.That(slide.IsEach, Is.True, "A folded slide is an each slide");
+            var stars = eachNotes.OfType<TapPoolingInfo>().ToArray();
+            Assert.That(stars, Has.Length.EqualTo(2));
+            Assert.That(stars.Select(x => x.IsDouble), Is.All.True);
+            Assert.That(stars.Select(x => x.IsEach), Is.All.True);
+            Assert.That(eachNotes, Has.Count.EqualTo(2));
+            Assert.That(SlideQueue(), Has.Count.EqualTo(1));
+        }
+
         /// <summary>Turns translation off and gives the loader a line3 prefab, the only native shape these tests build.</summary>
         private void UseNativeLine3Prefab()
         {
@@ -348,9 +475,9 @@ namespace MajdataPlay.Tests.Game.Notes.PlayMode
         /// <returns>The notes created for the slide heads.</returns>
         private List<NotePoolingInfo?> CreateSlideGroup(string content)
         {
-            var note = CreateSlideNote(content);
+            var (timing, note) = CreateHeadedSlide(content);
             var eachNotes = new List<NotePoolingInfo?>();
-            PrivateMember.Invoke(_loader, "CreateSlideGroup", new SimaiTimingPoint(0.5, new[] { note }, "test"), note, eachNotes);
+            PrivateMember.Invoke(_loader, "CreateSlideGroup", timing, note, eachNotes);
             return eachNotes;
         }
 
@@ -359,26 +486,67 @@ namespace MajdataPlay.Tests.Game.Notes.PlayMode
         /// <returns>The notes created for the slide heads.</returns>
         private List<NotePoolingInfo?> CreateExtendSlide(string content)
         {
-            var note = CreateSlideNote(content);
+            var (timing, note) = CreateHeadedSlide(content);
             var eachNotes = new List<NotePoolingInfo?>();
-            PrivateMember.Invoke(_loader, "CreateExtendSlide", new SimaiTimingPoint(0.5, new[] { note }, "test"), note, eachNotes);
+            PrivateMember.Invoke(_loader, "CreateExtendSlide", timing, note, eachNotes);
             return eachNotes;
         }
 
-        /// <summary>Creates the folded slide note type used by the slide factories, starting at 1 s and lasting 1 s.</summary>
+        /// <summary>
+        /// Creates a slide with a star head, starting at 1 s and lasting 1 s, in the shape MajSimai 3.x gives it: a head
+        /// tap whose first related note is the slide, followed by the slide.
+        /// </summary>
         /// <param name="content">The slide text.</param>
-        /// <returns>The note.</returns>
-        private static SimaiNote CreateSlideNote(string content)
+        /// <returns>The timing point that holds the head and the slide, and the boxed folded note the slide factories take.</returns>
+        private static (SimaiTimingPoint Timing, object Note) CreateHeadedSlide(string content)
         {
+            var slide = new SimaiNote
+            {
+                Type = SimaiNoteType.Slide,
+                StartPosition = content[0] - '0',
+                RawContent = content,
+                SlideTime = 1,
+                SlideStartTime = 1,
+            };
+            var head = new SimaiNote
+            {
+                Type = SimaiNoteType.Tap,
+                StartPosition = slide.StartPosition,
+                RawContent = content.Substring(0, 1),
+                RelatedNotes = new[] { slide },
+            };
+            var timing = new SimaiTimingPoint(0.5, new[] { head, slide }, "test");
             var type = typeof(NoteLoader).GetNestedType("FoldedSimaiNote", BindingFlags.NonPublic)!;
-            var note = (SimaiNote)Activator.CreateInstance(type, true)!;
-            note.Type = SimaiNoteType.Slide;
-            note.StartPosition = content[0] - '0';
-            note.RawContent = content;
-            note.SlideTime = 1;
-            note.SlideStartTime = 1;
-            PrivateMember.SetProperty(note, "Count", 1);
-            return note;
+            return (timing, Activator.CreateInstance(type, slide, head, 1)!);
+        }
+
+        /// <summary>
+        /// Parses one timing point and builds its slides the way the loader does: its notes are folded, which leaves the
+        /// slide heads out, and every slide is built with the head it carries.
+        /// </summary>
+        /// <param name="fumen">The notes of the timing point, only simai slides, without the comma.</param>
+        /// <returns>The notes created for the slide heads.</returns>
+        private List<NotePoolingInfo?> LoadSlides(string fumen)
+        {
+            var chart = SimaiParser.ParseChart(("(120){4}" + fumen + ",E").AsSpan());
+            var timing = chart.NoteTimings[0];
+            var helper = typeof(NoteLoader).GetNestedType("NoteCreateHelper", BindingFlags.NonPublic)!;
+            var folded = PrivateMember.InvokeStatic<Array>(helper, "NoteFolding", new object?[] { timing.Notes });
+            var eachNotes = new List<NotePoolingInfo?>();
+            foreach (var entry in folded)
+            {
+                var note = PrivateMember.GetProperty<SimaiNote>(entry, "Note");
+                Assert.That(note.Type, Is.EqualTo(SimaiNoteType.Slide), "A slide head is not built as a note of its own");
+                PrivateMember.Invoke(_loader, "CreateSlideGroup", timing, entry, eachNotes);
+            }
+            return eachNotes;
+        }
+
+        /// <summary>Gets the extend slides created under the slide layer.</summary>
+        /// <returns>The slides.</returns>
+        private ExtendSlideDrop[] ExtendSlides()
+        {
+            return _rig.SlideParent.GetComponentsInChildren<ExtendSlideDrop>();
         }
 
         /// <summary>Gets the only extend slide created under the slide layer.</summary>
