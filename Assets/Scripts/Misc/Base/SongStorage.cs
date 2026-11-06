@@ -105,10 +105,6 @@ namespace MajdataPlay
 
         /// <summary>Serializes initialization, collection refreshes, online favorite refreshes and recommendation refreshes.</summary>
         private static readonly SemaphoreSlim s_refreshLock = new(1, 1);
-        /// <summary>Protects <see cref="s_chartIdPersistTask"/>.</summary>
-        private static readonly object s_chartIdPersistLock = new();
-        /// <summary>The last queued pass writing chart identity markers; passes run one after another and never fault.</summary>
-        private static Task s_chartIdPersistTask = Task.CompletedTask;
         /// <summary>Stores local playlist definitions independently of the charts currently available to resolve them.</summary>
         private static LocalPlaylistDefinition[] s_localPlaylistDefinitions = Array.Empty<LocalPlaylistDefinition>();
 
@@ -241,10 +237,6 @@ namespace MajdataPlay
                 PublishSnapshot(snapshot);
                 isPublished = true;
                 RestoreSelection();
-                if (!refreshOnline)
-                {
-                    PersistChartIdsInBackground(snapshot.AllCharts);
-                }
                 await DisposeReplacedChartsAsync(oldCharts, snapshot.AllCharts).ConfigureAwait(false);
                 await DisposeReplacedChartsAsync(oldRecommendCharts, s_recommendCharts).ConfigureAwait(false);
                 MajDebug.LogInfo(nameof(SongStorage), $"Loaded chart count: {TotalChartCount}");
@@ -370,6 +362,45 @@ namespace MajdataPlay
             var listConfig = MajEnv.RuntimeConfig.List;
             var collection = Array.Find(Collections, collection => collection.Id == listConfig.SelectedDirGuid);
             return collection is null ? null : FindSongById(collection, listConfig.SelectedSongId);
+        }
+
+        /// <summary>Writes the identity markers of the saved list selection's collection and chart when they are not stored yet.</summary>
+        /// <remarks>
+        /// Identity markers are created lazily: scanning only reads them, and a collection or chart without one uses an
+        /// identity derived from its location, which every scan derives again. The saved selection is the only place these
+        /// identities are stored, so writing the markers of exactly the selected collection and chart keeps the selection
+        /// valid after their folders are renamed or moved, without creating a marker in every chart. Each marker is written
+        /// at most once; a failure is logged, and the location-derived identity keeps restoring the selection as long as the
+        /// folder stays where it is.
+        /// </remarks>
+        internal static void PersistSelectionIds()
+        {
+            var listConfig = MajEnv.RuntimeConfig.List;
+            var collection = Array.Find(Collections, collection => collection.Id == listConfig.SelectedDirGuid);
+            if (collection is null)
+            {
+                return;
+            }
+            try
+            {
+                collection.PersistId();
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or NotSupportedException)
+            {
+                MajDebug.LogWarning(nameof(SongStorage), $"Failed to persist the identity of collection '{collection.Path}': {exception.Message}");
+            }
+            if (FindSongById(collection, listConfig.SelectedSongId) is not SongDetail song)
+            {
+                return;
+            }
+            try
+            {
+                song.PersistId();
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or NotSupportedException)
+            {
+                MajDebug.LogWarning(nameof(SongStorage), $"Failed to persist the identity of chart '{song.Title}': {exception.Message}");
+            }
         }
 
         /// <summary>Finds a song of a collection by its <see cref="ISongDetail.Id"/>.</summary>
@@ -932,84 +963,6 @@ namespace MajdataPlay
         private static string FormatScanProgress(string scanningText, double percent)
         {
             return $"{scanningText}...({percent:F2}%)";
-        }
-
-        /// <summary>Gets the last queued pass writing chart identity markers, which completes without faulting.</summary>
-        /// <returns>The pass to wait for, for example before deleting the chart root.</returns>
-        internal static Task WaitForChartIdPersistenceAsync()
-        {
-            lock (s_chartIdPersistLock)
-            {
-                return s_chartIdPersistTask;
-            }
-        }
-
-        /// <summary>Queues writing the identity markers of published local charts that still use location-derived identities.</summary>
-        /// <param name="charts">The published charts; online charts and charts with a stored identity are skipped.</param>
-        /// <remarks>
-        /// Writing a marker creates a directory and a file in every new chart, which is slow on Android shared storage, so it
-        /// happens one chart at a time on a dedicated thread after the library is published instead of during the scan. Until a
-        /// chart's marker exists, every scan derives the same identity from its location, so a saved list selection stays valid
-        /// whether or not this pass has reached the chart. Passes stop at application shutdown and log their failures.
-        /// </remarks>
-        private static void PersistChartIdsInBackground(ISongDetail[] charts)
-        {
-            var pending = charts.OfType<SongDetail>()
-                                .Where(chart => !chart.IsIdPersisted)
-                                .ToArray();
-            if (pending.Length == 0)
-            {
-                return;
-            }
-            var cancellationToken = MajEnv.GlobalCT;
-            lock (s_chartIdPersistLock)
-            {
-                // Chaining keeps two refreshes from writing the same marker at once.
-                s_chartIdPersistTask = s_chartIdPersistTask.ContinueWith(_ => PersistChartIds(pending, cancellationToken),
-                                                                         CancellationToken.None,
-                                                                         TaskContinuationOptions.LongRunning,
-                                                                         TaskScheduler.Default);
-            }
-        }
-
-        /// <summary>Writes missing identity markers one chart at a time, logging one summary of all failures.</summary>
-        /// <param name="charts">The charts whose identities are written.</param>
-        /// <param name="cancellationToken">Stops the pass between charts at application shutdown.</param>
-        private static void PersistChartIds(SongDetail[] charts, CancellationToken cancellationToken)
-        {
-            try
-            {
-                var failedCount = 0;
-                Exception? firstFailure = null;
-                foreach (var chart in charts)
-                {
-                    if (cancellationToken.IsCancellationRequested)
-                    {
-                        return;
-                    }
-                    try
-                    {
-                        chart.PersistId();
-                    }
-                    catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or NotSupportedException)
-                    {
-                        failedCount++;
-                        firstFailure ??= exception;
-                    }
-                }
-                if (failedCount > 0)
-                {
-                    MajDebug.LogWarning(nameof(SongStorage), $"Failed to persist the identities of {failedCount} of {charts.Length} charts; their location-derived identities stay in use. First failure: {firstFailure}");
-                }
-                else
-                {
-                    MajDebug.LogDebug(nameof(SongStorage), $"Persisted the identities of {charts.Length} charts.");
-                }
-            }
-            catch (Exception exception)
-            {
-                MajDebug.LogException(nameof(SongStorage), exception);
-            }
         }
 
         /// <summary>Loads local playlist definitions without requiring their requested charts to be available yet.</summary>
@@ -1653,17 +1606,28 @@ namespace MajdataPlay
             });
         }
         #endregion
-        /// <summary>Exports the committed favorites view when the game saves its state.</summary>
+        /// <summary>
+        /// Exports the committed favorites view and writes the identity markers of the saved list selection when the game
+        /// saves its state, which is also when the selection itself is written to the runtime database.
+        /// </summary>
         /// <param name="sender">The source of the save event.</param>
         /// <param name="args">The save event arguments.</param>
         private static void OnSave(object? sender, EventArgs? args)
         {
+            if (!s_isInitialized)
+            {
+                return;
+            }
             try
             {
-                if (!s_isInitialized)
-                {
-                    return;
-                }
+                PersistSelectionIds();
+            }
+            catch (Exception e)
+            {
+                MajDebug.LogException(nameof(SongStorage), e);
+            }
+            try
+            {
                 var hashSet = s_myFavorites.ExportHashSet();
                 var exportDirectory = MajEnv.ChartDirectory;
                 var exportFile = exportDirectory.FindFile(MyFavoriteFileName)

@@ -85,7 +85,7 @@ namespace MajdataPlay.Tests.Game.Misc.Base
                 using var second = await SongDetail.ParseAsync(directory);
 
                 Assert.That(Guid.TryParse(first.Id, out _), Is.True);
-                Assert.That(first.Id, Is.EqualTo(DirectoryIdentity.CreateLocationId(directory)));
+                Assert.That(first.Id, Is.EqualTo(DirectoryIdentity.CreateLocationId(directory).ToString()));
                 Assert.That(second.Id, Is.EqualTo(first.Id));
                 Assert.That(first.IsIdPersisted, Is.False);
                 Assert.That(directory.FindEntry(DirectoryIdentity.MarkerDirectoryName), Is.Null);

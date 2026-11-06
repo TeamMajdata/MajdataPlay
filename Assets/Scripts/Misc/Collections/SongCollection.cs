@@ -15,8 +15,21 @@ namespace MajdataPlay.Collections
     /// <summary>Maintains a song snapshot, its visible ordering and its selection cursor.</summary>
     public class SongCollection : IEnumerable<ISongDetail>, IReadOnlyCollection<ISongDetail>
     {
-        /// <summary>Gets the persistent collection identifier, which is not changed by refreshes.</summary>
+        /// <summary>
+        /// Gets the persistent collection identifier, which is not changed by refreshes. A directory-backed collection reads it
+        /// from its <c>.MajdataPlay/id</c> marker, or derives it from the directory's location while no valid marker exists
+        /// (see <see cref="IsIdPersisted"/>).
+        /// </summary>
         public Guid Id { get; init; } = Guid.Empty;
+
+        /// <summary>Gets whether <see cref="Id"/> needs no further writing: it is stored in the marker, or the collection is virtual.</summary>
+        public bool IsIdPersisted
+        {
+            get
+            {
+                return _isIdPersisted;
+            }
+        }
 
         /// <summary>Gets the original storage handle, or null for a virtual collection.</summary>
         public StorageDirectory? Directory { get; }
@@ -165,6 +178,9 @@ namespace MajdataPlay.Collections
         /// <summary>Stores the filter keyword independently of a caller's mutable options object.</summary>
         private string _filterKeyword = string.Empty;
 
+        /// <summary>Records whether <see cref="Id"/> needs no further writing; starts true for virtual collections.</summary>
+        private volatile bool _isIdPersisted = true;
+
         /// <summary>Creates a virtual collection whose contents are not refreshed from storage.</summary>
         /// <param name="name">The collection's display name.</param>
         /// <param name="pArray">The songs copied into the initial snapshot.</param>
@@ -218,28 +234,51 @@ namespace MajdataPlay.Collections
             {
                 throw new ArgumentException($"Directory '{directory.Location}' does not exist.", nameof(directory));
             }
-            var flagDirectory = DirectoryIdentity.OpenMarkerDirectory(directory);
-            var flagFile = flagDirectory.FindFile(DirectoryIdentity.IdFileName);
-            if (flagFile is not null)
+            var storedId = ReadStoredId(directory);
+            Id = storedId ?? DirectoryIdentity.CreateLocationId(directory);
+            _isIdPersisted = storedId is not null;
+        }
+
+        /// <summary>Writes <see cref="Id"/> into the backing directory's marker file unless it is already stored there.</summary>
+        /// <remarks>
+        /// Constructing a collection only reads the marker, so code that stores <see cref="Id"/> calls this to keep the stored
+        /// reference valid after the folder is renamed or moved. A marker that does not hold a GUID is replaced. Blocks on
+        /// storage I/O for the few writes of a missing marker; virtual collections have nothing to write.
+        /// </remarks>
+        /// <exception cref="DirectoryNotFoundException">The backing directory no longer exists.</exception>
+        /// <exception cref="UnauthorizedAccessException">Creating or writing the marker was denied.</exception>
+        /// <exception cref="NotSupportedException">The backend cannot create or write the marker.</exception>
+        /// <exception cref="IOException">Creating or writing the marker failed.</exception>
+        internal void PersistId()
+        {
+            var directory = Directory;
+            if (_isIdPersisted || directory is null)
             {
-                var guidStr = flagFile.ReadAllText();
-                if (Guid.TryParse(guidStr, out var guid))
-                {
-                    Id = guid;
-                }
-                else
-                {
-                    guid = Guid.NewGuid();
-                    flagFile.WriteAllText(guid.ToString());
-                    Id = guid;
-                }
+                return;
             }
-            else
+            DirectoryIdentity.WriteId(directory, Id.ToString());
+            _isIdPersisted = true;
+        }
+
+        /// <summary>Reads the GUID stored in a collection directory's marker without creating or repairing anything.</summary>
+        /// <param name="directory">The existing backing directory.</param>
+        /// <returns>The stored GUID, or null when the marker is missing, blank or not a GUID.</returns>
+        /// <exception cref="UnauthorizedAccessException">Reading the marker was denied.</exception>
+        /// <exception cref="NotSupportedException">The backend cannot read the marker.</exception>
+        /// <exception cref="IOException">Reading the marker failed.</exception>
+        private static Guid? ReadStoredId(StorageDirectory directory)
+        {
+            var markerDirectory = directory.FindDirectory(DirectoryIdentity.MarkerDirectoryName);
+            if (markerDirectory is null)
             {
-                var guid = Guid.NewGuid();
-                flagDirectory.CreateFile(DirectoryIdentity.IdFileName, "text/plain").WriteAllText(guid.ToString());
-                Id = guid;
+                return null;
             }
+            var storedId = DirectoryIdentity.ReadStoredId(markerDirectory);
+            if (storedId is null || !Guid.TryParse(storedId, out var id))
+            {
+                return null;
+            }
+            return id;
         }
 
         /// <summary>Creates an empty virtual collection.</summary>

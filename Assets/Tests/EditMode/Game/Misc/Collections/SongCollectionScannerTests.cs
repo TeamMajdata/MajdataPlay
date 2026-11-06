@@ -64,7 +64,7 @@ namespace MajdataPlay.Tests.Game.Misc.Collections
                 // Every child directory counts towards progress, including the ones without a chart.
                 Assert.That(scanner.DirectoryCount, Is.EqualTo(5));
                 Assert.That(scanner.ScannedDirectoryCount, Is.EqualTo(5));
-                // Scanning only reads; identity markers are written later by the library's background pass.
+                // Scanning only reads; an identity marker is written only when something stores the identity.
                 Assert.That(collection.FindDirectory("A")!.FindEntry(DirectoryIdentity.MarkerDirectoryName), Is.Null);
             });
         }

@@ -113,13 +113,14 @@ namespace MajdataPlay
 
         /// <summary>Derives a repeatable identity from a directory's location, for directories whose marker is not written yet.</summary>
         /// <param name="directory">The directory whose location is hashed.</param>
-        /// <returns>A GUID string containing the MD5 digest of the location, identical for every scan of the same location.</returns>
+        /// <returns>A GUID containing the MD5 digest of the location, identical for every scan of the same location.</returns>
         /// <remarks>
-        /// Persisting exactly this identity later keeps references taken before the marker existed (such as a saved list
-        /// selection) valid, while the marker then keeps the identity stable when the directory is moved or renamed.
+        /// Markers are created lazily, only when an identity is stored somewhere. Writing exactly this identity then keeps
+        /// references taken before the marker existed valid, while the marker keeps the identity stable when the directory is
+        /// moved or renamed.
         /// </remarks>
         /// <exception cref="ArgumentNullException">The directory is null.</exception>
-        public static string CreateLocationId(StorageDirectory directory)
+        public static Guid CreateLocationId(StorageDirectory directory)
         {
             if (directory is null)
             {
@@ -127,7 +128,7 @@ namespace MajdataPlay
             }
             using var md5 = MD5.Create();
             var digest = md5.ComputeHash(Encoding.UTF8.GetBytes($"directory:{directory.Location}"));
-            return new Guid(digest).ToString();
+            return new Guid(digest);
         }
 
         /// <summary>Persists the supplied identity, leaving the marker file untouched when it already holds that identity.</summary>

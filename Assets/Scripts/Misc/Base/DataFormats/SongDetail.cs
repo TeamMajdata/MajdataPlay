@@ -140,7 +140,7 @@ namespace MajdataPlay
             }
             _simaiMetadata = metadata;
             var storedId = ReadStoredId(directory, entries);
-            Id = storedId ?? DirectoryIdentity.CreateLocationId(directory);
+            Id = storedId ?? DirectoryIdentity.CreateLocationId(directory).ToString();
             _isIdPersisted = storedId is not null;
             Title = metadata.Title;
             Artist = metadata.Artist;
@@ -197,8 +197,10 @@ namespace MajdataPlay
         }
         /// <summary>Writes <see cref="Id"/> into the chart directory's marker file when no identity is stored there yet.</summary>
         /// <remarks>
-        /// Blocks on storage I/O, so it must not run on the main thread. An identity stored by someone else in the meantime
-        /// is kept on disk; this instance keeps its <see cref="Id"/> until the next scan reads the stored one.
+        /// Scanning only reads markers, so code that stores <see cref="Id"/> calls this to keep the stored reference valid after
+        /// the folder is renamed or moved. It blocks on the few storage writes of a missing marker and returns at once when the
+        /// identity is already stored. An identity stored by someone else in the meantime is kept on disk; this instance keeps
+        /// its <see cref="Id"/> until the next scan reads the stored one.
         /// </remarks>
         /// <exception cref="System.IO.DirectoryNotFoundException">The chart directory no longer exists.</exception>
         /// <exception cref="UnauthorizedAccessException">Creating or writing the marker was denied.</exception>

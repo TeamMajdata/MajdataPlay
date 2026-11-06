@@ -132,7 +132,7 @@ namespace MajdataPlay.Tests.Game.Misc.Base
             var again = DirectoryIdentity.CreateLocationId(new StorageDirectory(_directory.FileSystem, _directory.Location));
             var other = DirectoryIdentity.CreateLocationId(_temporary.Directory.CreateDirectory("Other"));
 
-            Assert.That(Guid.TryParse(first, out _), Is.True);
+            Assert.That(first, Is.Not.EqualTo(Guid.Empty));
             Assert.That(again, Is.EqualTo(first));
             Assert.That(other, Is.Not.EqualTo(first));
             Assert.That(_directory.FindEntry(DirectoryIdentity.MarkerDirectoryName), Is.Null);

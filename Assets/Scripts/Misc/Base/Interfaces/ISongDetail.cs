@@ -14,7 +14,11 @@ namespace MajdataPlay
 {
     public interface ISongDetail
     {
-        /// <summary>Gets the chart's identity, persisted in the chart directory's <c>.MajdataPlay/id</c> marker file.</summary>
+        /// <summary>
+        /// Gets the chart's identity. A local chart reads it from its directory's <c>.MajdataPlay/id</c> marker file, which is
+        /// created lazily: until then the identity is derived from the chart's location, and code that stores the identity
+        /// writes the marker so the stored reference survives renaming or moving the folder.
+        /// </summary>
         string Id { get; }
         string Title { get; }
         string Artist { get; }
