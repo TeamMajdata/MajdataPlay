@@ -96,9 +96,11 @@ The archive also uses a fixed `Release/iOS/archive/MajdataPlay.xcarchive` path s
 successive CI runs replace their previous archive instead of accumulating dated
 archives in the runner account's Xcode Organizer directory.
 
-Each iOS job imports signing certificates into a keychain named for its run ID
-and attempt, with a masked random password, and removes that keychain even if a
-later step fails. This avoids the fixed `signing_temp` name colliding on the next
+Each iOS job imports signing certificates into a keychain in the runner temporary
+directory, using an absolute path named for its run ID and attempt and a masked
+random password. An absolute path avoids default keychain-directory resolution
+in the runner service session. Cleanup uses the same absolute path and removes
+the keychain even if a later step fails. This avoids the fixed `signing_temp` name colliding on the next
 job of a persistent runner. The user's login keychain is not deleted.
 
 Run `python3 -B Tools/Tests/Modules/MacRunnerValidation/test_mac_runner.py` on the

@@ -170,11 +170,44 @@ class WorkspaceTests(unittest.TestCase):
 
     def test_signing_keychain_is_unique_and_cleaned_after_failures(self):
         workflow = (ROOT / ".github/workflows/main.yml").read_text(encoding="utf-8")
-        self.assertIn("CI_KEYCHAIN: majplay-${{ github.run_id }}-${{ github.run_attempt }}", workflow)
+        self.assertIn("CI_KEYCHAIN: ${{ runner.temp }}/majplay-${{ github.run_id }}-${{ github.run_attempt }}",
+                      workflow)
         self.assertIn("keychain: ${{ env.CI_KEYCHAIN }}", workflow)
         cleanup = workflow.split("      - name: Remove temporary signing keychain\n", 1)[1]
         self.assertIn("always()", cleanup.split("        run:", 1)[0])
         self.assertIn('security delete-keychain "$CI_KEYCHAIN.keychain"', cleanup)
+
+    @unittest.skipIf(os.name == "nt", "Run Bash signing cleanup tests on the macOS runner.")
+    def test_signing_cleanup_uses_the_absolute_keychain_path(self):
+        workflow = (ROOT / ".github/workflows/main.yml").read_text(encoding="utf-8")
+        cleanup = workflow.split("      - name: Remove temporary signing keychain\n", 1)[1]
+        script = cleanup.split("        run: |\n", 1)[1].split("\n\n", 1)[0]
+        script = "\n".join(line[10:] for line in script.splitlines())
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            keychain = directory / "runner temp.with spaces/majplay-123-2"
+            keychain.parent.mkdir()
+            database = Path(str(keychain) + ".keychain-db")
+            database.write_text("test")
+            tools = directory / "bin"
+            tools.mkdir()
+            security = tools / "security"
+            security.write_text('#!/bin/bash\nprintf "%s\\n" "$@" > "$SECURITY_CALLS"\n')
+            security.chmod(0o700)
+            calls = directory / "security-calls"
+            environment = dict(os.environ, CI_KEYCHAIN=str(keychain),
+                               HOME=str(directory / "different-home"), SECURITY_CALLS=str(calls),
+                               PATH=str(tools) + os.pathsep + os.environ["PATH"])
+            subprocess.run(["bash", "-c", script], env=environment,
+                           check=True, capture_output=True)
+            self.assertTrue(calls.exists(), "Cleanup must find the keychain outside HOME.")
+            self.assertEqual(calls.read_text().splitlines(),
+                             ["delete-keychain", str(keychain) + ".keychain"])
+            database.unlink()
+            calls.unlink()
+            subprocess.run(["bash", "-c", script], env=environment,
+                           check=True, capture_output=True)
+            self.assertFalse(calls.exists(), "A failed import may not have created a keychain.")
 
     @unittest.skipIf(os.name == "nt", "Run Bash/Perl Android path tests on the macOS runner.")
     def test_android_sdk_paths_are_literal_gradle_strings(self):

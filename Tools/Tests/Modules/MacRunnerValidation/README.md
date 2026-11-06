@@ -19,7 +19,9 @@ paths containing hyphens and dots to catch accidental Perl replacement escaping.
 The iOS append option and persistent Xcode build settings are checked as well.
 Cache migration preserves native object contents and timestamps, repeated patching
 is idempotent, and an unexpected generated Xcode phase is rejected. Temporary
-signing keychains use unique names and are cleaned up even after failed jobs.
+signing keychains use absolute paths and unique names and are cleaned up even
+after failed jobs. Cleanup also covers paths containing spaces, a different home
+directory, and an import that did not create a keychain.
 
 This suite does not validate Unity entitlements, network activation, project
 import, IL2CPP output, Xcode signing, or Android/iOS/macOS Player behavior. Run a

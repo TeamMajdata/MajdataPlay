@@ -434,7 +434,7 @@ jobs:
       TARGET_PLATFORM: ${{ matrix.platform }}
       CI_PROJECT_PATH: projects/${{ matrix.platform }}
       PROJECT_ROOT: ${{ github.workspace }}/projects/${{ matrix.platform }}
-      CI_KEYCHAIN: majplay-${{ github.run_id }}-${{ github.run_attempt }}
+      CI_KEYCHAIN: ${{ runner.temp }}/majplay-${{ github.run_id }}-${{ github.run_attempt }}
 
     defaults:
       run:
@@ -706,7 +706,7 @@ jobs:
       - name: Remove temporary signing keychain
         if: ${{ always() && env.TARGET_PLATFORM == 'iOS' && steps.signing-keychain.outcome == 'success' }}
         run: |
-          if [[ -f "$HOME/Library/Keychains/$CI_KEYCHAIN.keychain-db" ]]; then
+          if [[ -f "$CI_KEYCHAIN.keychain-db" ]]; then
             security delete-keychain "$CI_KEYCHAIN.keychain"
           fi
 
