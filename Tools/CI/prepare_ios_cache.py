@@ -10,10 +10,12 @@ import sys
 ARCHIVE_CACHE = "$CONFIGURATION_TEMP_DIR/artifacts"
 PERSISTENT_CACHE = "$PROJECT_DIR/../Il2CppBuildCache/$CONFIGURATION/artifacts"
 SHELL_SCRIPT = re.compile(r'shellScript = ("(?:[^"\\]|\\.)*");')
+BUILD_PHASES = re.compile(r"(\bbuildPhases\s*=\s*\(\n)(.*?)(^[ \t]*\);)", re.MULTILINE | re.DOTALL)
+PHASE_REFERENCE = re.compile(r"^\s*([A-Fa-f0-9]{24})(?:\s*/\*.*?\*/)?\s*,\s*$")
 
 
 def prepare_cache(project_file, configuration):
-    """Patch only the generated IL2CPP phase and migrate its previous cache once."""
+    """Retain IL2CPP objects and remove repeated phase references from append exports."""
     content = project_file.read_text(encoding="utf-8")
     matched = 0
 
@@ -32,6 +34,26 @@ def prepare_cache(project_file, configuration):
     updated = SHELL_SCRIPT.sub(patch_script, content)
     if matched != 1:
         raise RuntimeError("Expected exactly one Unity IL2CPP build phase in the generated Xcode project.")
+    removed = 0
+
+    def deduplicate_phases(match):
+        nonlocal removed
+        seen = set()
+        entries = []
+        for line in match.group(2).splitlines(keepends=True):
+            reference = PHASE_REFERENCE.fullmatch(line)
+            if reference:
+                identifier = reference.group(1)
+                if identifier in seen:
+                    removed += 1
+                    continue
+                seen.add(identifier)
+            entries.append(line)
+        return match.group(1) + "".join(entries) + match.group(3)
+
+    updated = BUILD_PHASES.sub(deduplicate_phases, updated)
+    if removed:
+        print(f"Removed {removed} duplicate Xcode build phase references from append exports.")
     # Both paths are inside this dedicated CI build output, never the user's global cache.
     build_root = project_file.resolve().parent.parent.parent
     source = build_root / (

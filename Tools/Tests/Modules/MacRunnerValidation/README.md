@@ -18,7 +18,9 @@ while retaining their Git object caches. Android SDK/NDK replacement is exercise
 paths containing hyphens and dots to catch accidental Perl replacement escaping.
 The iOS append option and persistent Xcode build settings are checked as well.
 Cache migration preserves native object contents and timestamps, repeated patching
-is idempotent, and an unexpected generated Xcode phase is rejected. Temporary
+is idempotent, repeated build-phase IDs from append exports are removed per
+target without reordering unique phases, and an unexpected generated Xcode phase
+is rejected. Temporary
 signing keychains use absolute paths and unique names and are cleaned up even
 after failed jobs. Cleanup also covers paths containing spaces, a different home
 directory, and an import that did not create a keychain.

@@ -134,6 +134,33 @@ class IosCacheTests(unittest.TestCase):
             self.assertEqual(persistent.stat().st_mtime_ns, original_time)
             self.assertFalse(original_cache.exists())
 
+    def test_append_export_removes_duplicate_phase_references_per_target(self):
+        import json
+        with tempfile.TemporaryDirectory() as temporary:
+            project = Path(temporary) / "MajdataPlay/Unity-iPhone.xcodeproj/project.pbxproj"
+            project.parent.mkdir(parents=True)
+            phase = "C62A2A42F32E085EF849CF0B"
+            sources = "7F4E059C2717216D00A2CBE4"
+            phases = ("buildPhases = (\n"
+                      f"    {sources} /* Sources */,\n"
+                      f"    {phase} /* Run Script */,\n"
+                      f"    {phase} /* Run Script */,\n"
+                      f"    {phase} /* Run Script */,\n"
+                      ");\n"
+                      "buildPhases = (\n"
+                      f"    {phase} /* Shared with another target */,\n"
+                      ");\n")
+            script = 'il2cpp --compile-cpp --cachedirectory=cache "' + IOS_CACHE.ARCHIVE_CACHE + '"'
+            project.write_text(phases + "shellScript = " + json.dumps(script) + ";\n")
+            with redirect_stdout(io.StringIO()):
+                IOS_CACHE.prepare_cache(project, "Release")
+                once = project.read_text()
+                IOS_CACHE.prepare_cache(project, "Release")
+            self.assertEqual(project.read_text(), once)
+            self.assertEqual(once.count(phase), 2)
+            self.assertIn(f"{sources} /* Sources */,\n    {phase} /* Run Script */,", once)
+            self.assertIn(f"{phase} /* Shared with another target */,", once)
+
     def test_unexpected_unity_layout_is_not_silently_accepted(self):
         with tempfile.TemporaryDirectory() as temporary:
             project = Path(temporary) / "project.pbxproj"

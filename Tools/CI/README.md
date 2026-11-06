@@ -21,6 +21,23 @@ The iOS runner deliberately inherits the former Apple work directory to preserve
 absolute paths in its existing IL2CPP cache. The macOS checkout is moved once to
 `_work-macos`; its Git objects and Library are retained.
 
+## iOS signing in a LaunchDaemon
+
+The iOS service must set `SessionCreate` to `true` in its launchd plist so
+Xcode inherits a security audit session with a dynamic keychain search list.
+Without it, certificate import can succeed while archive reports that no signing
+identity exists. Signing in an SSH login does not validate the daemon session.
+Apply this from an administrator terminal while the iOS runner is idle:
+
+```bash
+sudo /usr/bin/plutil -replace SessionCreate -bool true /Library/LaunchDaemons/actions.runner.majplay-ios.plist
+sudo /bin/launchctl bootout system/actions.runner.majplay-ios
+sudo /bin/launchctl bootstrap system /Library/LaunchDaemons/actions.runner.majplay-ios.plist
+```
+
+This changes the service session, retaining the `majplay-ci` account and the
+existing runner identity, environment and storage validation launcher.
+
 ## One-time license directory setup
 
 From an administrator account on the Mac:
@@ -91,7 +108,10 @@ instead. The existing archive cache is moved there once, preserving compiled
 objects and Bee state. The helper checks for the expected generated phase and
 fails explicitly if a later Unity version changes its layout. This patch is
 applied after each Unity export; no tracked Unity assets or installed Editor
-files are patched.
+files are patched. Repeated append exports can add the same build phase ID more
+than once to a target. The helper keeps its first reference, preserving phase
+order and references belonging to other targets, so Xcode does not create
+duplicate archive tasks.
 The archive also uses a fixed `Release/iOS/archive/MajdataPlay.xcarchive` path so
 successive CI runs replace their previous archive instead of accumulating dated
 archives in the runner account's Xcode Organizer directory.
