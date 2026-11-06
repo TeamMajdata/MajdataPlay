@@ -1,6 +1,8 @@
 using MajdataPlay.IO.Storage;
 using System;
 using System.IO;
+using System.Security.Cryptography;
+using System.Text;
 
 #nullable enable
 namespace MajdataPlay
@@ -47,6 +49,30 @@ namespace MajdataPlay
         /// <exception cref="IOException">Reading or writing the marker files failed.</exception>
         public static string GetOrCreateId(StorageDirectory directory)
         {
+            return GetOrWriteId(directory, Guid.NewGuid().ToString());
+        }
+
+        /// <summary>Reads the directory's identity, persisting the supplied identity when none is stored.</summary>
+        /// <param name="directory">The directory whose identity is requested.</param>
+        /// <param name="id">The identity to store when the marker is missing or blank.</param>
+        /// <returns>The stored identity with surrounding whitespace removed, or <paramref name="id"/> after it was written.</returns>
+        /// <remarks>An existing non-blank identity is never replaced, so a marker written elsewhere in the meantime wins.</remarks>
+        /// <exception cref="ArgumentNullException">The directory or identity is null.</exception>
+        /// <exception cref="ArgumentException">The identity is blank.</exception>
+        /// <exception cref="DirectoryNotFoundException">The directory does not exist.</exception>
+        /// <exception cref="UnauthorizedAccessException">Accessing the marker files was denied.</exception>
+        /// <exception cref="NotSupportedException">The backend cannot create or write the marker files.</exception>
+        /// <exception cref="IOException">Reading or writing the marker files failed.</exception>
+        public static string GetOrWriteId(StorageDirectory directory, string id)
+        {
+            if (id is null)
+            {
+                throw new ArgumentNullException(nameof(id));
+            }
+            if (string.IsNullOrWhiteSpace(id))
+            {
+                throw new ArgumentException("A non-blank identity is required.", nameof(id));
+            }
             var markerDirectory = OpenMarkerDirectory(directory);
             var idFile = markerDirectory.FindFile(IdFileName);
             if (idFile is not null)
@@ -57,10 +83,51 @@ namespace MajdataPlay
                     return storedId;
                 }
             }
-            var id = Guid.NewGuid().ToString();
             idFile ??= markerDirectory.CreateFile(IdFileName, "text/plain");
             idFile.WriteAllText(id);
             return id;
+        }
+
+        /// <summary>Reads the identity stored in an existing marker directory without creating or changing anything.</summary>
+        /// <param name="markerDirectory">The directory's existing <c>.MajdataPlay</c> marker directory.</param>
+        /// <returns>The stored identity with surrounding whitespace removed, or null when the marker file is missing or blank.</returns>
+        /// <exception cref="ArgumentNullException">The marker directory is null.</exception>
+        /// <exception cref="DirectoryNotFoundException">The marker directory does not exist.</exception>
+        /// <exception cref="UnauthorizedAccessException">Reading the marker file was denied.</exception>
+        /// <exception cref="NotSupportedException">The backend cannot read the marker file.</exception>
+        /// <exception cref="IOException">Reading the marker file failed.</exception>
+        public static string? ReadStoredId(StorageDirectory markerDirectory)
+        {
+            if (markerDirectory is null)
+            {
+                throw new ArgumentNullException(nameof(markerDirectory));
+            }
+            var idFile = markerDirectory.FindFile(IdFileName);
+            if (idFile is null)
+            {
+                return null;
+            }
+            var storedId = idFile.ReadAllText().Trim();
+            return storedId.Length == 0 ? null : storedId;
+        }
+
+        /// <summary>Derives a repeatable identity from a directory's location, for directories whose marker is not written yet.</summary>
+        /// <param name="directory">The directory whose location is hashed.</param>
+        /// <returns>A GUID string containing the MD5 digest of the location, identical for every scan of the same location.</returns>
+        /// <remarks>
+        /// Persisting exactly this identity later keeps references taken before the marker existed (such as a saved list
+        /// selection) valid, while the marker then keeps the identity stable when the directory is moved or renamed.
+        /// </remarks>
+        /// <exception cref="ArgumentNullException">The directory is null.</exception>
+        public static string CreateLocationId(StorageDirectory directory)
+        {
+            if (directory is null)
+            {
+                throw new ArgumentNullException(nameof(directory));
+            }
+            using var md5 = MD5.Create();
+            var digest = md5.ComputeHash(Encoding.UTF8.GetBytes($"directory:{directory.Location}"));
+            return new Guid(digest).ToString();
         }
 
         /// <summary>Persists the supplied identity, leaving the marker file untouched when it already holds that identity.</summary>

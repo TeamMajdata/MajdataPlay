@@ -98,10 +98,14 @@ namespace MajdataPlay.Tests.Game.Misc.Base
             RecommendStates.Clear();
         }
 
-        /// <summary>Removes the event handler and restores the library; the scope closes the runtime database after its queued writes.</summary>
+        /// <summary>
+        /// Removes the event handler and restores the library; the scope closes the runtime database after its queued writes.
+        /// Identity markers are written by a background pass, which must finish before the temporary charts are deleted.
+        /// </summary>
         [TearDown]
         public void TearDown()
         {
+            Assert.That(SongStorage.WaitForChartIdPersistenceAsync().Wait(TimeSpan.FromSeconds(30)), Is.True);
             RemoveHandler(nameof(GameManager.OnSave), "OnSave");
             foreach (var pair in _savedFields)
             {
@@ -305,6 +309,43 @@ namespace MajdataPlay.Tests.Game.Misc.Base
                 Assert.That(SongStorage.WorkingCollection.Current.Title, Is.EqualTo("Four"));
                 Assert.That(listConfig.SelectedDirGuid, Is.EqualTo(selected.Id));
                 Assert.That(listConfig.SelectedSongId, Is.EqualTo(SongStorage.WorkingCollection.Current.Id));
+            });
+        }
+
+        /// <summary>
+        /// Checks that a selection saved while a chart still used its location-derived identity is restored after the
+        /// background pass writes the marker, and again after the chart folder is renamed, which the marker survives.
+        /// </summary>
+        /// <returns>The test coroutine.</returns>
+        [UnityTest]
+        public IEnumerator RefreshLocal_SelectionSurvivesLazyIdentityMarkers()
+        {
+            return UniTask.ToCoroutine(async () =>
+            {
+                CreateLibrary();
+                var fourDirectory = _charts.FindDirectoryAt("B-Collection/Four")!;
+                await SongStorage.InitAsync();
+                await SongStorage.RefreshLocal();
+                var listConfig = MajEnv.RuntimeConfig!.List;
+                var collection = Collection("B-Collection");
+                var four = collection.Single(song => song.Title == "Four");
+                // The scan wrote nothing, so the identity was derived from the location; the pass stores that same value.
+                Assert.That(four.Id, Is.EqualTo(DirectoryIdentity.CreateLocationId(fourDirectory)));
+                listConfig.SelectedDirGuid = collection.Id;
+                listConfig.SelectedSongId = four.Id;
+
+                await SongStorage.WaitForChartIdPersistenceAsync();
+
+                Assert.That(fourDirectory.FindFileAt(".MajdataPlay/id")!.ReadAllText(), Is.EqualTo(four.Id));
+                Assert.That(Collection("All").OfType<SongDetail>().All(song => song.IsIdPersisted), Is.True);
+                await SongStorage.RefreshLocal();
+                Assert.That(SongStorage.WorkingCollection.Current.Title, Is.EqualTo("Four"));
+                Assert.That(SongStorage.WorkingCollection.Current.Id, Is.EqualTo(four.Id));
+
+                fourDirectory.Rename("Four-Renamed");
+                await SongStorage.RefreshLocal();
+                Assert.That(SongStorage.WorkingCollection.Current.Title, Is.EqualTo("Four"));
+                Assert.That(listConfig.SelectedSongId, Is.EqualTo(four.Id));
             });
         }
 

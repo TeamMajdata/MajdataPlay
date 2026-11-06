@@ -1,5 +1,6 @@
 using System;
 using System.Collections;
+using System.Collections.Concurrent;
 using System.Linq;
 using System.Threading;
 using Cysharp.Threading.Tasks;
@@ -59,6 +60,73 @@ namespace MajdataPlay.Tests.Game.Misc.Collections
                 Assert.That(songs.All(song => song is SongDetail), Is.True);
                 Assert.That(scanner.DiscoveredChartCount, Is.EqualTo(3));
                 Assert.That(scanner.ProcessedChartCount, Is.EqualTo(3));
+                Assert.That(scanner.LoadedChartCount, Is.EqualTo(3));
+                // Every child directory counts towards progress, including the ones without a chart.
+                Assert.That(scanner.DirectoryCount, Is.EqualTo(5));
+                Assert.That(scanner.ScannedDirectoryCount, Is.EqualTo(5));
+                // Scanning only reads; identity markers are written later by the library's background pass.
+                Assert.That(collection.FindDirectory("A")!.FindEntry(DirectoryIdentity.MarkerDirectoryName), Is.Null);
+            });
+        }
+
+        /// <summary>
+        /// Checks that charts load and progress is reported on the scanner's own threads rather than thread-pool threads, and
+        /// that the reported fraction stays within range and never decreases.
+        /// </summary>
+        /// <returns>The test coroutine.</returns>
+        [UnityTest]
+        public IEnumerator ScanAsync_ReportsProgressFromDedicatedThreads()
+        {
+            return UniTask.ToCoroutine(async () =>
+            {
+                var collection = _temporary.Directory.CreateDirectory("Collection");
+                const int chartCount = 24;
+                for (var i = 0; i < chartCount; i++)
+                {
+                    ChartFixture.CreateChart(collection, $"Chart{i:D2}", $"Title{i:D2}");
+                }
+                var reports = new ConcurrentQueue<(double Progress, bool IsThreadPoolThread)>();
+                using var scanner = new SongCollectionScanner(progressChanged: progress =>
+                {
+                    reports.Enqueue((progress, Thread.CurrentThread.IsThreadPoolThread));
+                });
+
+                var songs = await scanner.ScanAsync(collection);
+
+                Assert.That(songs.Length, Is.EqualTo(chartCount));
+                Assert.That(scanner.DirectoryCount, Is.EqualTo(chartCount));
+                Assert.That(scanner.ScannedDirectoryCount, Is.EqualTo(chartCount));
+                var reported = reports.ToArray();
+                Assert.That(reported, Is.Not.Empty);
+                Assert.That(reported.Any(report => report.IsThreadPoolThread), Is.False);
+                Assert.That(reported.Select(report => report.Progress), Is.Ordered);
+                Assert.That(reported.All(report => report.Progress >= 0d && report.Progress <= 1d), Is.True);
+            });
+        }
+
+        /// <summary>Checks that one scanner scans several collections concurrently, keeping each collection's charts apart.</summary>
+        /// <returns>The test coroutine.</returns>
+        [UnityTest]
+        public IEnumerator ScanAsync_ScansCollectionsConcurrently()
+        {
+            return UniTask.ToCoroutine(async () =>
+            {
+                var first = _temporary.Directory.CreateDirectory("First");
+                var second = _temporary.Directory.CreateDirectory("Second");
+                ChartFixture.CreateChart(first, "A", "Alpha");
+                ChartFixture.CreateChart(first, "B", "Beta");
+                ChartFixture.CreateChart(second, "C", "Gamma");
+                second.CreateDirectory("Empty");
+                using var scanner = new SongCollectionScanner();
+
+                var scans = new[] { scanner.ScanAsync(first), scanner.ScanAsync(second), scanner.ScanAsync(_temporary.Directory.CreateDirectory("None")) };
+                var results = await System.Threading.Tasks.Task.WhenAll(scans);
+
+                Assert.That(results[0].Select(song => song.Title), Is.EquivalentTo(new[] { "Alpha", "Beta" }));
+                Assert.That(results[1].Select(song => song.Title), Is.EquivalentTo(new[] { "Gamma" }));
+                Assert.That(results[2], Is.Empty);
+                Assert.That(scanner.DirectoryCount, Is.EqualTo(4));
+                Assert.That(scanner.ScannedDirectoryCount, Is.EqualTo(4));
                 Assert.That(scanner.LoadedChartCount, Is.EqualTo(3));
             });
         }
