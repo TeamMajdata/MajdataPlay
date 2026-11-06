@@ -193,10 +193,72 @@ namespace MajdataPlay.Tests.Game.Rendering
         public void PollError_Fails()
         {
             _source.Latest = 4;
-            _source.PollResult = _ => -4;
+            // VK_ERROR_INITIALIZATION_FAILED, an error present waiting may recover from.
+            _source.PollResult = _ => -3;
 
             Assert.That(_pacer.WaitForPreviousFrame(Period60Hz), Is.EqualTo(PresentWaitOutcome.Failed));
-            Assert.That(_pacer.LastError, Is.EqualTo(-4));
+            Assert.That(_pacer.LastError, Is.EqualTo(-3));
+            Assert.That(_pacer.HasGivenUp, Is.False);
+        }
+
+        /// <summary>Checks that a lost device gives present waiting up at once, without polling again.</summary>
+        [Test]
+        public void DeviceLost_GivesPresentWaitingUpAtOnce()
+        {
+            _source.Latest = 4;
+            _source.PollResult = _ => PresentWaitPacer.ErrorDeviceLost;
+
+            Assert.That(_pacer.WaitForPreviousFrame(Period60Hz), Is.EqualTo(PresentWaitOutcome.DeviceLost));
+            Assert.That(_pacer.LastError, Is.EqualTo(PresentWaitPacer.ErrorDeviceLost));
+            Assert.That(_pacer.HasGivenUp, Is.True);
+
+            var polls = _source.PolledIds.Count;
+            var start = _now;
+            Assert.That(_pacer.WaitForPreviousFrame(Period60Hz), Is.EqualTo(PresentWaitOutcome.Failed));
+            Assert.That(_source.PolledIds.Count, Is.EqualTo(polls));
+            Assert.That(_now, Is.EqualTo(start), "a given-up pacer does not wait");
+        }
+
+        /// <summary>Checks that presentations that keep timing out give present waiting up.</summary>
+        [Test]
+        public void TimeoutsOnNewPresentations_GivePresentWaitingUp()
+        {
+            _source.PollResult = _ => PresentWaitPacer.PollPending;
+            for (var i = 0; i < PacingFailureWindow.FailureLimit; i++)
+            {
+                Assert.That(_pacer.HasGivenUp, Is.False);
+                _source.Latest = (ulong)(10 + i);
+                Assert.That(_pacer.WaitForPreviousFrame(Period60Hz), Is.EqualTo(PresentWaitOutcome.TimedOut));
+            }
+
+            Assert.That(_pacer.HasGivenUp, Is.True);
+            Assert.That(_pacer.RecentFailures, Is.EqualTo(PacingFailureWindow.FailureLimit));
+        }
+
+        /// <summary>
+        /// Checks that shown presentations between timeouts no longer keep present waiting, and its stalls of three
+        /// refresh periods, alive.
+        /// </summary>
+        [Test]
+        public void TimeoutsBetweenShownPresentations_GivePresentWaitingUp()
+        {
+            ulong latest = 10;
+            for (var i = 0; i < PacingFailureWindow.FailureLimit - 1; i++)
+            {
+                _source.Latest = ++latest;
+                _source.PollResult = _ => PresentWaitPacer.PollPending;
+                Assert.That(_pacer.WaitForPreviousFrame(Period60Hz), Is.EqualTo(PresentWaitOutcome.TimedOut));
+                _source.Latest = ++latest;
+                _source.PollResult = _ => PresentWaitPacer.PollPresented;
+                Assert.That(_pacer.WaitForPreviousFrame(Period60Hz), Is.EqualTo(PresentWaitOutcome.Presented));
+            }
+            Assert.That(_pacer.HasGivenUp, Is.False);
+
+            _source.Latest = ++latest;
+            _source.PollResult = _ => PresentWaitPacer.PollPending;
+            Assert.That(_pacer.WaitForPreviousFrame(Period60Hz), Is.EqualTo(PresentWaitOutcome.TimedOut));
+
+            Assert.That(_pacer.HasGivenUp, Is.True);
         }
 
         /// <summary>

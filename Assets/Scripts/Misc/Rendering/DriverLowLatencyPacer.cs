@@ -30,11 +30,15 @@ namespace MajdataPlay.Rendering
 
         /// <summary>The driver reported an error or the backend is no longer active.</summary>
         Failed,
+
+        /// <summary>The GPU device was lost; nothing on it can be paced any more.</summary>
+        DeviceLost,
     }
 
     /// <summary>
     /// Drives the GPU driver's low-latency mode (VK_NV_low_latency2 or VK_AMD_anti_lag) at the start and end of each
-    /// frame, and gives it up after repeated failures so that the caller can fall back to another backend.
+    /// frame, and gives it up when it fails too often (see <see cref="PacingFailureWindow"/>) or the device was lost,
+    /// so that the caller can fall back to another backend.
     /// </summary>
     internal sealed class DriverLowLatencyPacer
     {
@@ -50,14 +54,14 @@ namespace MajdataPlay.Rendering
         /// <summary>The result when no driver low-latency backend is active.</summary>
         internal const int FrameInactive = -2;
 
-        /// <summary>The number of consecutive failed or timed-out frames after which the backend is given up.</summary>
-        internal const int FailureLimit = 30;
+        /// <summary>The result VK_ERROR_DEVICE_LOST: the GPU device was lost.</summary>
+        internal const int ErrorDeviceLost = -4;
 
         /// <summary>The driver.</summary>
         private readonly ILowLatencyDriver _driver;
 
-        /// <summary>The number of consecutive failed or timed-out frames.</summary>
-        private int _failures;
+        /// <summary>The recent failed and timed-out frames.</summary>
+        private readonly PacingFailureWindow _failures = new();
 
         /// <summary>Creates a pacer.</summary>
         /// <param name="driver">The driver.</param>
@@ -72,10 +76,13 @@ namespace MajdataPlay.Rendering
         /// <summary>Gets the result code of the last failed frame.</summary>
         public int LastError { get; private set; }
 
+        /// <summary>Gets the number of failed and timed-out frames among the recent frames, for logs.</summary>
+        public int RecentFailures => _failures.Failures;
+
         /// <summary>Starts a frame through the driver.</summary>
         /// <param name="refreshPeriodTicks">The display refresh period in timestamp ticks, used for the timeout.</param>
         /// <param name="ticksPerSecond">The timestamp frequency in ticks per second.</param>
-        /// <returns>How the frame start ended.</returns>
+        /// <returns>How the frame start ended; <see cref="DriverFrameOutcome.Failed"/> without calling the driver once given up.</returns>
         /// <exception cref="ArgumentOutOfRangeException"><paramref name="ticksPerSecond"/> is not positive.</exception>
         public DriverFrameOutcome BeginFrame(long refreshPeriodTicks, long ticksPerSecond)
         {
@@ -94,13 +101,17 @@ namespace MajdataPlay.Rendering
             switch (result)
             {
                 case FrameDone:
-                    _failures = 0;
+                    _failures.RecordSuccess();
                     return DriverFrameOutcome.Done;
                 case FrameSkipped:
                     return DriverFrameOutcome.Skipped;
                 case FrameTimedOut:
                     RecordFailure(result);
                     return DriverFrameOutcome.TimedOut;
+                case ErrorDeviceLost:
+                    LastError = result;
+                    HasGivenUp = true;
+                    return DriverFrameOutcome.DeviceLost;
                 default:
                     RecordFailure(result);
                     if (result == FrameInactive)
@@ -120,12 +131,13 @@ namespace MajdataPlay.Rendering
             }
         }
 
-        /// <summary>Counts a failed frame and gives the backend up at <see cref="FailureLimit"/>.</summary>
+        /// <summary>Records a failed frame and gives the backend up when the recent frames failed too often.</summary>
         /// <param name="result">The frame result.</param>
         private void RecordFailure(int result)
         {
             LastError = result;
-            if (++_failures >= FailureLimit)
+            _failures.RecordFailure();
+            if (_failures.IsExceeded)
             {
                 HasGivenUp = true;
             }

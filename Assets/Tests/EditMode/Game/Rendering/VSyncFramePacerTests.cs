@@ -59,11 +59,30 @@ namespace MajdataPlay.Tests.Game.Rendering
             Assert.That(pacer.SetRefreshRate(0), Is.False);
             Assert.That(pacer.SetRefreshRate(double.NaN), Is.False);
             Assert.That(pacer.SetRefreshRate(double.PositiveInfinity), Is.False);
+            Assert.That(pacer.SetRefreshRate(1), Is.False, "Windows reports 1 Hz for a hardware default rate");
+            Assert.That(pacer.SetRefreshRate(5000), Is.False);
+            Assert.That(pacer.IsConfigured, Is.False);
             Assert.That(pacer.SetRefreshRate(50), Is.True);
             Assert.That(pacer.IntervalTicks, Is.EqualTo(Interval50Hz));
             Assert.That(pacer.SetRefreshRate(50), Is.False, "an unchanged rate keeps the running state");
             Assert.That(pacer.SetRefreshRate(100), Is.True);
             Assert.That(pacer.IntervalTicks, Is.EqualTo(10_010));
+            Assert.That(pacer.SetRefreshRate(0.5), Is.False);
+            Assert.That(pacer.IntervalTicks, Is.EqualTo(10_010), "an implausible rate keeps the running state");
+        }
+
+        /// <summary>Checks the range of refresh rates taken as real.</summary>
+        [Test]
+        public void IsPlausibleRefreshRate_AcceptsRealDisplayRatesOnly()
+        {
+            Assert.That(VSyncFramePacer.IsPlausibleRefreshRate(VSyncFramePacer.MinPlausibleRefreshRate), Is.True);
+            Assert.That(VSyncFramePacer.IsPlausibleRefreshRate(23.976), Is.True);
+            Assert.That(VSyncFramePacer.IsPlausibleRefreshRate(59.94), Is.True);
+            Assert.That(VSyncFramePacer.IsPlausibleRefreshRate(VSyncFramePacer.MaxPlausibleRefreshRate), Is.True);
+            Assert.That(VSyncFramePacer.IsPlausibleRefreshRate(1), Is.False);
+            Assert.That(VSyncFramePacer.IsPlausibleRefreshRate(VSyncFramePacer.MaxPlausibleRefreshRate + 1), Is.False);
+            Assert.That(VSyncFramePacer.IsPlausibleRefreshRate(double.NaN), Is.False);
+            Assert.That(VSyncFramePacer.IsPlausibleRefreshRate(double.NegativeInfinity), Is.False);
         }
 
         /// <summary>Checks that the first frame waits several intervals to empty an already filled queue, once.</summary>

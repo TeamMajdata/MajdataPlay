@@ -21,7 +21,7 @@ namespace MajdataPlay.Rendering
         internal const int StatusLayerOutdated = -101;
 
         /// <summary>The native ABI version this code requires.</summary>
-        internal const int RequiredAbiVersion = 2;
+        internal const int RequiredAbiVersion = 3;
 
         /// <summary>The backend value for VK_NV_low_latency2.</summary>
         internal const int BackendNvidia = 1;
@@ -92,6 +92,34 @@ namespace MajdataPlay.Rendering
         public static int GetPresentIdSource()
         {
             return Availability != StatusAvailable ? 0 : Native.PresentIdSource();
+        }
+
+        /// <summary>Reads which Vulkan call first reported that Unity's device was lost.</summary>
+        /// <returns>A call code for <see cref="DescribeCall"/>, or zero while the device is not lost or the layer is unavailable.</returns>
+        public static int GetDeviceLostCall()
+        {
+            return Availability != StatusAvailable ? 0 : Native.DeviceLostCall();
+        }
+
+        /// <summary>Names a call returned by <see cref="GetDeviceLostCall"/>.</summary>
+        /// <param name="call">The call code.</param>
+        /// <returns>The Vulkan function, for logs.</returns>
+        public static string DescribeCall(int call)
+        {
+            return call switch
+            {
+                0 => "no call seen by the pacing layer",
+                1 => "vkQueueSubmit",
+                2 => "vkQueuePresentKHR",
+                3 => "vkAcquireNextImageKHR",
+                4 => "vkCreateSwapchainKHR",
+                5 => "Unity's vkWaitForPresentKHR",
+                6 => "the pacing poll's vkWaitForPresentKHR",
+                7 => "vkSetLatencySleepModeNV",
+                8 => "vkLatencySleepNV",
+                9 => "vkWaitSemaphoresKHR on the latency sleep semaphore",
+                _ => "unknown call " + call,
+            };
         }
 
         /// <summary>Describes a status returned by <see cref="GetPresentWaitStatus"/>.</summary>
@@ -193,7 +221,7 @@ namespace MajdataPlay.Rendering
             /// <summary>Checks without blocking whether a presentation has been shown.</summary>
             /// <param name="generation">The generation the id belongs to.</param>
             /// <param name="presentId">The presentation id.</param>
-            /// <returns>One when shown, zero while pending, minus one when the swapchain changed, or another negative error.</returns>
+            /// <returns>One when shown, zero while pending, minus one when the swapchain changed, or another negative error; VK_ERROR_DEVICE_LOST (-4) once the device was lost.</returns>
             [DllImport(Library, CallingConvention = CallingConvention.Cdecl, EntryPoint = "majvk_present_wait_poll")]
             internal static extern int PresentWaitPoll(ulong generation, ulong presentId);
 
@@ -209,7 +237,7 @@ namespace MajdataPlay.Rendering
 
             /// <summary>Starts a frame through the driver's low-latency mode.</summary>
             /// <param name="timeoutNanoseconds">The longest time to block.</param>
-            /// <returns>One when started, zero when skipped, two on timeout, or a negative error.</returns>
+            /// <returns>One when started, zero when skipped, two on timeout, or a negative error; VK_ERROR_DEVICE_LOST (-4) once the device was lost.</returns>
             [DllImport(Library, CallingConvention = CallingConvention.Cdecl, EntryPoint = "majvk_frame_begin")]
             internal static extern int FrameBegin(ulong timeoutNanoseconds);
 
@@ -224,9 +252,14 @@ namespace MajdataPlay.Rendering
             internal static extern ulong SwapchainGeneration();
 
             /// <summary>Reads where presentation ids come from.</summary>
-            /// <returns>Zero for none yet, one for the layer, two for Unity.</returns>
+            /// <returns>Zero for none yet, one for the layer, two for Unity, three for Unity's replaced with frame ids.</returns>
             [DllImport(Library, CallingConvention = CallingConvention.Cdecl, EntryPoint = "majvk_present_id_source")]
             internal static extern int PresentIdSource();
+
+            /// <summary>Reads which Vulkan call first reported that Unity's device was lost.</summary>
+            /// <returns>The call code, or zero while the device is not lost.</returns>
+            [DllImport(Library, CallingConvention = CallingConvention.Cdecl, EntryPoint = "majvk_device_lost_call")]
+            internal static extern int DeviceLostCall();
         }
     }
 }

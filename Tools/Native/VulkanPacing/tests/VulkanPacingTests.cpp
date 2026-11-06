@@ -6,8 +6,11 @@
 #include "IUnityGraphicsVulkan.h"
 #include <cstdio>
 #include <cstdlib>
+#include <chrono>
 #include <cstring>
+#include <functional>
 #include <future>
+#include <map>
 #include <string>
 #include <thread>
 #include <utility>
@@ -60,12 +63,16 @@ struct Driver {
     bool latencyFunctions = true;
     int creates = 0, presentCalls = 0, waitCalls = 0, acquireCalls = 0, swapchainDestroys = 0, semaphoreDestroys = 0;
     std::vector<std::string> lastExtensions;
-    std::vector<VkStructureType> lastChain;
+    std::vector<VkStructureType> lastChain, lastPresentChain;
     bool lastSwapchainLatency = false;
     uintptr_t nextSwapchain = 100;
     VkSwapchainKHR lastPresented = VK_NULL_HANDLE;
     uint64_t lastPresentedId = 0, lastWaitedId = 0, lastWaitTimeout = UINT64_MAX;
+    // Highest present id per swapchain; the specification requires them to increase.
+    std::map<VkSwapchainKHR, uint64_t> presentedIds;
     VkResult presentResult = VK_SUCCESS, waitResult = VK_TIMEOUT, acquireResult = VK_SUBOPTIMAL_KHR, semaphoreWait = VK_SUCCESS;
+    VkResult submitResult = VK_SUCCESS, createSwapchainResult = VK_SUCCESS, sleepModeResult = VK_SUCCESS;
+    std::function<void()> onDestroySwapchain;
     std::vector<VkSwapchainKHR> sleepModes;
     std::vector<std::pair<VkSemaphore, uint64_t>> sleeps, semaphoreWaits;
     std::vector<std::pair<uint64_t, VkLatencyMarkerNV>> markers;
@@ -114,6 +121,7 @@ VKAPI_ATTR VkResult VKAPI_CALL InnerCreateDevice(VkPhysicalDevice physical, cons
 VKAPI_ATTR void VKAPI_CALL InnerDestroyDevice(VkDevice device, const VkAllocationCallbacks*) { REQUIRE(device == testDevice); }
 VKAPI_ATTR VkResult VKAPI_CALL InnerCreateSwapchain(VkDevice device, const VkSwapchainCreateInfoKHR* info, const VkAllocationCallbacks*, VkSwapchainKHR* swapchain) {
     REQUIRE(device == testDevice);
+    if (driver.createSwapchainResult != VK_SUCCESS) return driver.createSwapchainResult;
     driver.lastSwapchainLatency = false;
     for (auto* item = static_cast<const VkBaseInStructure*>(info->pNext); item; item = item->pNext)
         if (item->sType == VK_STRUCTURE_TYPE_SWAPCHAIN_LATENCY_CREATE_INFO_NV)
@@ -121,18 +129,29 @@ VKAPI_ATTR VkResult VKAPI_CALL InnerCreateSwapchain(VkDevice device, const VkSwa
     *swapchain = (VkSwapchainKHR)(driver.nextSwapchain++);
     return VK_SUCCESS;
 }
-VKAPI_ATTR void VKAPI_CALL InnerDestroySwapchain(VkDevice device, VkSwapchainKHR, const VkAllocationCallbacks*) { REQUIRE(device == testDevice); ++driver.swapchainDestroys; }
+VKAPI_ATTR void VKAPI_CALL InnerDestroySwapchain(VkDevice device, VkSwapchainKHR, const VkAllocationCallbacks*) {
+    REQUIRE(device == testDevice);
+    ++driver.swapchainDestroys;
+    if (driver.onDestroySwapchain) driver.onDestroySwapchain();
+}
 VKAPI_ATTR VkResult VKAPI_CALL InnerPresent(VkQueue queue, const VkPresentInfoKHR* info) {
     REQUIRE(queue == testQueue);
     ++driver.presentCalls; driver.lastPresentedId = 0; driver.lastPresented = VK_NULL_HANDLE;
+    driver.lastPresentChain.clear();
+    int presentIdStructures = 0;
     for (auto* item = static_cast<const VkBaseInStructure*>(info->pNext); item; item = item->pNext) {
+        driver.lastPresentChain.push_back(item->sType);
         if (item->sType != VK_STRUCTURE_TYPE_PRESENT_ID_KHR) continue;
+        REQUIRE(++presentIdStructures == 1); // a structure may appear in a chain only once
         auto* ids = reinterpret_cast<const VkPresentIdKHR*>(item);
         REQUIRE(ids->swapchainCount == info->swapchainCount);
         for (uint32_t i = 0; i < ids->swapchainCount; ++i) {
-            if (ids->pPresentIds[i] == 0 || info->pSwapchains[i] == foreignSwapchain) continue;
+            const uint64_t id = ids->pPresentIds[i];
+            if (id == 0 || info->pSwapchains[i] == foreignSwapchain) continue; // the modeled Unity's other swapchain
+            REQUIRE(id > driver.presentedIds[info->pSwapchains[i]]); // VUID-VkPresentIdKHR-presentIds-04999
+            driver.presentedIds[info->pSwapchains[i]] = id;
             REQUIRE(driver.lastPresentedId == 0); // one tracked swapchain per presentation
-            driver.lastPresentedId = ids->pPresentIds[i]; driver.lastPresented = info->pSwapchains[i];
+            driver.lastPresentedId = id; driver.lastPresented = info->pSwapchains[i];
         }
     }
     return driver.presentResult;
@@ -145,7 +164,7 @@ VKAPI_ATTR VkResult VKAPI_CALL InnerSubmit(VkQueue queue, uint32_t count, const 
             if (item->sType == VK_STRUCTURE_TYPE_LATENCY_SUBMISSION_PRESENT_ID_NV) id = reinterpret_cast<const VkLatencySubmissionPresentIdNV*>(item)->presentID;
         driver.submittedIds.push_back(id);
     }
-    return VK_SUCCESS;
+    return driver.submitResult;
 }
 VKAPI_ATTR VkResult VKAPI_CALL InnerWait(VkDevice device, VkSwapchainKHR, uint64_t id, uint64_t timeout) {
     REQUIRE(device == testDevice);
@@ -172,7 +191,7 @@ VKAPI_ATTR VkResult VKAPI_CALL InnerWaitSemaphores(VkDevice, const VkSemaphoreWa
     return driver.semaphoreWait;
 }
 VKAPI_ATTR VkResult VKAPI_CALL InnerSleepMode(VkDevice, VkSwapchainKHR swapchain, const VkLatencySleepModeInfoNV* info) {
-    REQUIRE(info->lowLatencyMode); driver.sleepModes.push_back(swapchain); return VK_SUCCESS;
+    REQUIRE(info->lowLatencyMode); driver.sleepModes.push_back(swapchain); return driver.sleepModeResult;
 }
 VKAPI_ATTR VkResult VKAPI_CALL InnerSleep(VkDevice, VkSwapchainKHR, const VkLatencySleepInfoNV* info) {
     driver.sleeps.push_back({info->signalSemaphore, info->value}); return VK_SUCCESS;
@@ -260,18 +279,29 @@ struct Unity {
         wait = reinterpret_cast<PFN_vkWaitForPresentKHR>(deviceProc(device, "vkWaitForPresentKHR"));
         return result;
     }
-    VkSwapchainKHR Swapchain(VkSwapchainKHR old = VK_NULL_HANDLE) {
+    VkResult CreateSwapchain(VkSwapchainKHR old, VkSwapchainKHR* swapchain) {
         VkSwapchainCreateInfoKHR create{VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR};
         create.oldSwapchain = old;
+        return createSwapchain(device, &create, nullptr, swapchain);
+    }
+    VkSwapchainKHR Swapchain(VkSwapchainKHR old = VK_NULL_HANDLE) {
         VkSwapchainKHR swapchain = VK_NULL_HANDLE;
-        REQUIRE(createSwapchain(device, &create, nullptr, &swapchain) == VK_SUCCESS);
+        REQUIRE(CreateSwapchain(old, &swapchain) == VK_SUCCESS);
         return swapchain;
     }
-    VkResult Present(VkSwapchainKHR swapchain) {
+    VkResult Present(VkSwapchainKHR swapchain, const void* chain = nullptr) {
         const VkSwapchainKHR both[] = {foreignSwapchain, swapchain};
-        VkPresentInfoKHR info{VK_STRUCTURE_TYPE_PRESENT_INFO_KHR};
+        VkPresentInfoKHR info{VK_STRUCTURE_TYPE_PRESENT_INFO_KHR, chain};
         info.swapchainCount = 2; info.pSwapchains = both;
         return present(testQueue, &info);
+    }
+    // Presents with Unity's own VkPresentIdKHR (as Unity 6 does), which the layer must leave untouched in memory.
+    VkResult PresentWithUnityId(VkSwapchainKHR swapchain, uint64_t unityId) {
+        uint64_t ids[] = {0, unityId};
+        const VkPresentIdKHR chain{VK_STRUCTURE_TYPE_PRESENT_ID_KHR, nullptr, 2, ids};
+        const VkResult result = Present(swapchain, &chain);
+        REQUIRE(ids[1] == unityId);
+        return result;
     }
     void Submit() {
         VkSubmitInfo submits[2] = {{VK_STRUCTURE_TYPE_SUBMIT_INFO}, {VK_STRUCTURE_TYPE_SUBMIT_INFO}};
@@ -291,7 +321,8 @@ void VerifyRegistration() {
     IUnityInterfaces interfaces{}; interfaces.GetInterfaceSplit = GetInterface;
     UnityPluginLoad(&interfaces);
     REQUIRE(registered && registeredPriority < kUnityVulkanInitCallbackMaxPriority); // stays outside the innermost layer
-    REQUIRE(majvk_abi_version() == 2 && majvk_present_wait_status() == MajvkStatusNoDevice);
+    REQUIRE(majvk_abi_version() == 3 && majvk_present_wait_status() == MajvkStatusNoDevice);
+    REQUIRE(majvk_device_lost_call() == MajvkCallNone);
     REQUIRE(majvk_low_latency_status() == MajvkLowLatencyNoDevice && majvk_low_latency_backend() == MajvkBackendNone);
     std::puts("PASS: registers below the maximum interceptor priority");
 }
@@ -346,29 +377,27 @@ void VerifyPresentWait() {
     REQUIRE(unity.Present(swapchain) == VK_ERROR_OUT_OF_DATE_KHR && driver.lastPresentedId == first + 2);
     REQUIRE(LatestId() == first + 1); // a failed present is never waited for
     driver.presentResult = VK_SUCCESS;
-    uint64_t unityIds[] = {0, 500};
-    VkPresentIdKHR unityChain{VK_STRUCTURE_TYPE_PRESENT_ID_KHR, nullptr, 2, unityIds};
-    const VkSwapchainKHR both[] = {foreignSwapchain, swapchain};
-    VkPresentInfoKHR own{VK_STRUCTURE_TYPE_PRESENT_INFO_KHR, &unityChain};
-    own.swapchainCount = 2; own.pSwapchains = both;
-    REQUIRE(unity.present(testQueue, &own) == VK_SUCCESS && driver.lastPresentedId == 500); // Unity's ids are left alone
-    REQUIRE(LatestId() == 500 && majvk_present_id_source() == MajvkPresentIdsUnity); // and followed
-    REQUIRE(unity.Present(swapchain) == VK_SUCCESS && driver.lastPresentedId == 501 && majvk_present_id_source() == MajvkPresentIdsLayer);
+    // Unity's own ids, whatever their values, are replaced by the layer's, which keep increasing on the swapchain
+    // even when Unity's are lower than the ones the layer already used.
+    REQUIRE(unity.PresentWithUnityId(swapchain, 500) == VK_SUCCESS && driver.lastPresentedId == first + 3);
+    REQUIRE(LatestId() == first + 3 && majvk_present_id_source() == MajvkPresentIdsUnityReplaced);
+    REQUIRE(unity.Present(swapchain) == VK_SUCCESS && driver.lastPresentedId == first + 4 && majvk_present_id_source() == MajvkPresentIdsLayer);
+    REQUIRE(unity.PresentWithUnityId(swapchain, 2) == VK_SUCCESS && driver.lastPresentedId == first + 5);
+    const uint64_t latest = first + 5;
 
-    // Unity's own waits are forwarded to the driver.
+    // Unity's own waits are forwarded to the driver with the layer's id of the same presentation.
     driver.waitCalls = 0; driver.waitResult = VK_SUCCESS;
-    REQUIRE(unity.wait && unity.wait(unity.device, swapchain, 501, 5) == VK_SUCCESS && driver.waitCalls == 1 && driver.lastWaitTimeout == 5);
+    REQUIRE(unity.wait && unity.wait(unity.device, swapchain, 2, 5) == VK_SUCCESS && driver.waitCalls == 1 && driver.lastWaitTimeout == 5);
+    REQUIRE(driver.lastWaitedId == latest);
     driver.waitCalls = 0;
-    REQUIRE(majvk_present_wait_poll(generation, 502) == 0 && driver.waitCalls == 0); // not presented yet: no driver call
+    REQUIRE(majvk_present_wait_poll(generation, latest + 1) == 0 && driver.waitCalls == 0); // not presented yet: no driver call
     driver.waitResult = VK_TIMEOUT;
-    REQUIRE(majvk_present_wait_poll(generation, 501) == 0 && driver.waitCalls == 1 && driver.lastWaitedId == 501 && driver.lastWaitTimeout == 0);
+    REQUIRE(majvk_present_wait_poll(generation, latest) == 0 && driver.waitCalls == 1 && driver.lastWaitedId == latest && driver.lastWaitTimeout == 0);
     driver.waitResult = VK_SUCCESS;
-    REQUIRE(majvk_present_wait_poll(generation, 501) == 1);
+    REQUIRE(majvk_present_wait_poll(generation, latest) == 1);
     driver.waitResult = VK_SUBOPTIMAL_KHR;
     REQUIRE(majvk_present_wait_poll(generation, first) == 1);
-    driver.waitResult = VK_ERROR_DEVICE_LOST;
-    REQUIRE(majvk_present_wait_poll(generation, 501) == VK_ERROR_DEVICE_LOST);
-    REQUIRE(majvk_present_wait_poll(generation + 1, 501) == -1); // stale generation
+    REQUIRE(majvk_present_wait_poll(generation + 1, latest) == -1); // stale generation
 
     // A Unity swapchain call in progress, such as a blocking acquisition, keeps the poll off the swapchain.
     std::promise<void> entered, release;
@@ -376,14 +405,14 @@ void VerifyPresentWait() {
     std::thread renderThread([&] { uint32_t image = 0; unity.acquire(unity.device, swapchain, UINT64_MAX, VK_NULL_HANDLE, VK_NULL_HANDLE, &image); });
     entered.get_future().wait();
     driver.waitCalls = 0; driver.waitResult = VK_SUCCESS;
-    REQUIRE(majvk_present_wait_poll(generation, 501) == 0 && driver.waitCalls == 0);
+    REQUIRE(majvk_present_wait_poll(generation, latest) == 0 && driver.waitCalls == 0);
     release.set_value(); renderThread.join(); driver.acquireEntered = nullptr;
-    REQUIRE(majvk_present_wait_poll(generation, 501) == 1 && driver.waitCalls == 1);
+    REQUIRE(majvk_present_wait_poll(generation, latest) == 1 && driver.waitCalls == 1);
 
     unity.destroySwapchain(unity.device, swapchain, nullptr);
-    REQUIRE(driver.swapchainDestroys == 1 && majvk_present_wait_poll(generation, 501) == -1);
+    REQUIRE(driver.swapchainDestroys == 1 && majvk_present_wait_poll(generation, latest) == -1);
     REQUIRE(Generation() != generation && LatestId() == 0);
-    std::puts("PASS: present waiting reuses Unity's configuration, ids per swapchain, zero-timeout polls and in-progress Unity calls");
+    std::puts("PASS: present waiting reuses Unity's configuration, replaces Unity's ids, zero-timeout polls and in-progress Unity calls");
 }
 
 // Window resize: Unity creates the new swapchain from the old one, may still present the old one's acquired
@@ -394,6 +423,7 @@ void VerifyResize() {
     REQUIRE(unity.Create() == VK_SUCCESS);
     const VkSwapchainKHR old = unity.Swapchain();
     REQUIRE(unity.Present(old) == VK_SUCCESS);
+    REQUIRE(unity.PresentWithUnityId(old, 1) == VK_SUCCESS);
     const uint64_t oldId = driver.lastPresentedId, oldGeneration = Generation();
     REQUIRE(LatestId() == oldId);
 
@@ -403,7 +433,14 @@ void VerifyResize() {
     REQUIRE(newGeneration != oldGeneration && LatestId() == 0);
     REQUIRE(majvk_present_wait_poll(oldGeneration, oldId) == -1); // waits for the old swapchain end
     REQUIRE(unity.Present(old) == VK_SUCCESS && driver.lastPresentedId == 0 && LatestId() == 0); // retired: untracked
+    // Unity's ids on the retired swapchain are lower than the layer's there; the layer keeps them increasing.
+    REQUIRE(unity.PresentWithUnityId(old, 2) == VK_SUCCESS && driver.lastPresented == old && driver.lastPresentedId > oldId);
+    const uint64_t retiredId = driver.lastPresentedId;
+    REQUIRE(LatestId() == 0 && Generation() == newGeneration);
+    driver.waitResult = VK_SUCCESS;
+    REQUIRE(unity.wait(unity.device, old, 2, 0) == VK_SUCCESS && driver.lastWaitedId == retiredId);
     unity.destroySwapchain(unity.device, old, nullptr);
+    REQUIRE(unity.wait(unity.device, old, 2, 0) == VK_SUCCESS && driver.lastWaitedId == 2); // its ids are forgotten
     REQUIRE(Generation() == newGeneration); // destroying the retired swapchain keeps tracking the new one
     REQUIRE(unity.Present(resized) == VK_SUCCESS && driver.lastPresented == resized && driver.lastPresentedId > oldId);
     const uint64_t newId = driver.lastPresentedId;
@@ -439,7 +476,16 @@ void VerifyFullscreenToggle() {
     const VkSwapchainKHR recreated = unity.Swapchain(fullscreen);
     unity.destroySwapchain(unity.device, fullscreen, nullptr);
     REQUIRE(unity.Present(recreated) == VK_SUCCESS && driver.lastPresented == recreated && LatestId() == driver.lastPresentedId);
-    std::puts("PASS: fullscreen toggle and out-of-date recreation track the new swapchain handle and fresh ids");
+
+    // Creating a replacement can fail; the old swapchain is retired anyway, so it is no longer waited on.
+    const uint64_t beforeFailure = Generation(), shownBefore = LatestId();
+    driver.createSwapchainResult = VK_ERROR_SURFACE_LOST_KHR;
+    VkSwapchainKHR failed = VK_NULL_HANDLE;
+    REQUIRE(unity.CreateSwapchain(recreated, &failed) == VK_ERROR_SURFACE_LOST_KHR);
+    driver.createSwapchainResult = VK_SUCCESS;
+    REQUIRE(Generation() != beforeFailure && LatestId() == 0 && majvk_present_wait_poll(beforeFailure, shownBefore) == -1);
+    REQUIRE(unity.PresentWithUnityId(recreated, 1) == VK_SUCCESS && driver.lastPresentedId > shownBefore && LatestId() == 0);
+    std::puts("PASS: fullscreen toggle, out-of-date and failed recreation track the new swapchain handle and fresh ids");
 }
 
 void VerifyNvidia() {
@@ -481,6 +527,9 @@ void VerifyNvidia() {
 
     const VkSwapchainKHR swapchain = unity.Swapchain();
     REQUIRE(driver.lastSwapchainLatency && driver.sleepModes.size() == 1 && driver.sleepModes[0] == swapchain);
+    // The frame begun before the swapchain existed is the first one Unity presents on it.
+    REQUIRE(unity.Present(swapchain) == VK_SUCCESS);
+    const uint64_t early = driver.lastPresentedId;
     driver.markers.clear();
     REQUIRE(majvk_frame_begin(1000) == MajvkFrameDone);
     REQUIRE(driver.sleeps.size() == 1 && driver.sleeps[0].first == testSemaphore && driver.semaphoreWaits.size() == 1);
@@ -488,7 +537,7 @@ void VerifyNvidia() {
     REQUIRE(driver.markers.size() == 2 && driver.markers[0].second == VK_LATENCY_MARKER_SIMULATION_START_NV &&
             driver.markers[1].second == VK_LATENCY_MARKER_INPUT_SAMPLE_NV);
     const uint64_t frame = driver.markers[0].first;
-    REQUIRE(driver.markers[1].first == frame && majvk_frame_end() == MajvkFrameDone);
+    REQUIRE(frame == early + 1 && driver.markers[1].first == frame && majvk_frame_end() == MajvkFrameDone);
     REQUIRE(driver.markers.back() == std::make_pair(frame, VK_LATENCY_MARKER_SIMULATION_END_NV));
 
     // The render thread's submissions and presentation carry the simulated frame's id.
@@ -501,10 +550,13 @@ void VerifyNvidia() {
             driver.markers[2] == std::make_pair(frame, VK_LATENCY_MARKER_PRESENT_START_NV) &&
             driver.markers[3] == std::make_pair(frame, VK_LATENCY_MARKER_PRESENT_END_NV));
 
-    // Two frames in flight keep their own ids in presentation order.
+    // Two frames in flight keep their own ids in presentation order. The driver releases one sleep per presentation,
+    // so the second frame, begun before anything was presented again, starts without a sleep.
     REQUIRE(majvk_frame_begin(1000) == MajvkFrameDone);
     const uint64_t second = driver.markers.back().first;
-    REQUIRE(majvk_frame_begin(1000) == MajvkFrameDone);
+    const size_t sleptBefore = driver.sleeps.size();
+    REQUIRE(majvk_frame_begin(1000) == MajvkFrameSkipped && driver.sleeps.size() == sleptBefore);
+    REQUIRE(driver.markers.back().second == VK_LATENCY_MARKER_INPUT_SAMPLE_NV);
     const uint64_t third = driver.markers.back().first;
     REQUIRE(second > frame && third > second);
     driver.submittedIds.clear(); unity.Submit();
@@ -533,35 +585,140 @@ void VerifyNvidia() {
     REQUIRE(unity.wait(unity.device, swapchain, 901, 7) == VK_SUCCESS && driver.lastWaitedId == owned + 1);
     REQUIRE(unity.wait(unity.device, swapchain, 903, 7) == VK_SUCCESS && driver.lastWaitedId == owned + 3); // ahead: same step
     REQUIRE(unity.wait(unity.device, swapchain, 899, 7) == VK_SUCCESS && driver.lastWaitedId == owned); // before the first
-    // Unity's chain behind another structure cannot be replaced safely; the layer follows Unity's id then.
+    // Unity's ids behind a structure the layer knows are replaced too: the structures in front are copied.
+    const VkPresentModeKHR modes[] = {VK_PRESENT_MODE_FIFO_KHR, VK_PRESENT_MODE_FIFO_KHR};
+    VkSwapchainPresentModeInfoEXT presentMode{VK_STRUCTURE_TYPE_SWAPCHAIN_PRESENT_MODE_INFO_EXT, &unityChain, 2, modes};
+    unityPresent.pNext = &presentMode;
+    unityIds[1] = 5000;
+    REQUIRE(unity.present(testQueue, &unityPresent) == VK_SUCCESS && driver.lastPresentedId == owned + 2);
+    REQUIRE(majvk_present_id_source() == MajvkPresentIdsUnityReplaced && presentMode.pNext == &unityChain && unityIds[1] == 5000);
+    REQUIRE(driver.lastPresentChain == std::vector<VkStructureType>({VK_STRUCTURE_TYPE_SWAPCHAIN_PRESENT_MODE_INFO_EXT, VK_STRUCTURE_TYPE_PRESENT_ID_KHR}));
+    REQUIRE(unity.wait(unity.device, swapchain, 5000, 7) == VK_SUCCESS && driver.lastWaitedId == owned + 2);
+    // Behind a structure the layer does not know, Unity's ids cannot be replaced safely; the layer follows them.
     VkLatencySubmissionPresentIdNV other{VK_STRUCTURE_TYPE_LATENCY_SUBMISSION_PRESENT_ID_NV, &unityChain, 0};
     unityPresent.pNext = &other;
-    unityIds[1] = 5000;
-    REQUIRE(unity.present(testQueue, &unityPresent) == VK_SUCCESS && driver.lastPresentedId == 5000);
+    unityIds[1] = 6000;
+    REQUIRE(unity.present(testQueue, &unityPresent) == VK_SUCCESS && driver.lastPresentedId == 6000);
     REQUIRE(majvk_present_id_source() == MajvkPresentIdsUnity);
 
     // The sleep semaphore's wait timing out is reported; the sleep values keep increasing.
     driver.semaphoreWait = VK_TIMEOUT;
     REQUIRE(majvk_frame_begin(1000) == MajvkFrameTimedOut && driver.sleeps.back().second > driver.sleeps.front().second);
+    const uint64_t timedOut = driver.markers.back().first;
     driver.semaphoreWait = VK_SUCCESS;
 
-    // Resizing re-applies the sleep mode to the new swapchain and keeps sleeping on it.
+    // Resizing re-applies the sleep mode to the new swapchain and keeps sleeping on it; frames begun before the
+    // resize are presented on the new swapchain with their own ids.
     const VkSwapchainKHR resized = unity.Swapchain(swapchain);
     REQUIRE(driver.lastSwapchainLatency && driver.sleepModes.back() == resized);
     unity.destroySwapchain(unity.device, swapchain, nullptr);
     REQUIRE(majvk_frame_begin(1000) == MajvkFrameDone);
-    REQUIRE(unity.Present(resized) == VK_SUCCESS && driver.lastPresented == resized);
-    // Fullscreen toggle: while no swapchain exists the frame is registered but not slept.
+    const uint64_t afterResize = driver.markers.back().first;
+    REQUIRE(unity.Present(resized) == VK_SUCCESS && driver.lastPresented == resized && driver.lastPresentedId == timedOut);
+    REQUIRE(unity.Present(resized) == VK_SUCCESS && driver.lastPresentedId == afterResize);
+
+    // While Unity presents nothing (e.g. minimized), frames are not slept and only the newest begun frames stay
+    // queued, so presentation resumes with recent frame ids.
+    const size_t sleptBeforeMinimize = driver.sleeps.size();
+    uint64_t lastBegun = 0;
+    for (int i = 0; i < 20; ++i) {
+        REQUIRE(majvk_frame_begin(1000) != MajvkFrameTimedOut);
+        lastBegun = driver.markers.back().first;
+    }
+    REQUIRE(driver.sleeps.size() == sleptBeforeMinimize + 1);
+    REQUIRE(unity.Present(resized) == VK_SUCCESS && driver.lastPresentedId == lastBegun - 1);
+    REQUIRE(unity.Present(resized) == VK_SUCCESS && driver.lastPresentedId == lastBegun);
+
+    // Fullscreen toggle: while no swapchain exists the frame is registered but not slept. The driver destroys the
+    // swapchain without the lock the main thread's frame calls take.
+    driver.onDestroySwapchain = [] {
+        auto end = std::async(std::launch::async, majvk_frame_end);
+        REQUIRE(end.wait_for(std::chrono::seconds(5)) == std::future_status::ready);
+    };
     unity.destroySwapchain(unity.device, resized, nullptr);
+    driver.onDestroySwapchain = nullptr;
     const size_t sleeps = driver.sleeps.size();
     REQUIRE(majvk_frame_begin(1000) == MajvkFrameSkipped && driver.sleeps.size() == sleeps && majvk_frame_end() == MajvkFrameSkipped);
     const VkSwapchainKHR fullscreen = unity.Swapchain();
     REQUIRE(driver.sleepModes.back() == fullscreen && majvk_frame_begin(1000) == MajvkFrameDone && driver.sleeps.size() == sleeps + 1);
+    // A swapchain whose sleep mode the driver refused is not slept on.
+    driver.sleepModeResult = VK_ERROR_INITIALIZATION_FAILED;
+    const VkSwapchainKHR refused = unity.Swapchain(fullscreen);
+    driver.sleepModeResult = VK_SUCCESS;
+    unity.destroySwapchain(unity.device, fullscreen, nullptr);
+    REQUIRE(majvk_frame_begin(1000) == MajvkFrameSkipped && driver.sleeps.size() == sleeps + 1);
+    REQUIRE(unity.Present(refused) == VK_SUCCESS && driver.lastPresented == refused);
 
     unity.destroyDevice(unity.device, nullptr);
     REQUIRE(driver.semaphoreDestroys == 1 && majvk_low_latency_status() == MajvkLowLatencyNoDevice);
     REQUIRE(majvk_low_latency_backend() == MajvkBackendNone && majvk_frame_begin(0) == MajvkFrameInactive);
-    std::puts("PASS: VK_NV_low_latency2 negotiation/fallback, sleep and markers per frame id, submissions, recreation and device destruction");
+    std::puts("PASS: VK_NV_low_latency2 negotiation/fallback, sleeps per presentation, markers per frame id, submissions, recreation and device destruction");
+}
+
+// A lost device stays lost: the layer remembers the first call that reported it, stops adding ids, markers and
+// sleeps, and never waits in the driver again, until Unity creates a new device.
+void VerifyDeviceLost() {
+    driver = Driver{};
+    driver.nvidia = true;
+    Unity unity;
+    REQUIRE(unity.Create() == VK_SUCCESS);
+    const VkSwapchainKHR swapchain = unity.Swapchain();
+    REQUIRE(majvk_frame_begin(1000) == MajvkFrameDone);
+    unity.Submit();
+    REQUIRE(unity.Present(swapchain) == VK_SUCCESS);
+    const uint64_t generation = Generation(), shown = LatestId();
+    REQUIRE(shown != 0 && majvk_device_lost_call() == MajvkCallNone);
+
+    // Unity's submission reports the loss first.
+    REQUIRE(majvk_frame_begin(1000) == MajvkFrameDone);
+    driver.submitResult = VK_ERROR_DEVICE_LOST;
+    VkSubmitInfo submit{VK_STRUCTURE_TYPE_SUBMIT_INFO};
+    REQUIRE(unity.submit(testQueue, 1, &submit, VK_NULL_HANDLE) == VK_ERROR_DEVICE_LOST);
+    REQUIRE(majvk_device_lost_call() == MajvkCallQueueSubmit);
+    driver.presentResult = VK_ERROR_DEVICE_LOST;
+    REQUIRE(unity.Present(swapchain) == VK_ERROR_DEVICE_LOST && driver.lastPresentedId == 0); // passed through, no id
+    REQUIRE(majvk_device_lost_call() == MajvkCallQueueSubmit); // the first call stays reported
+
+    const size_t sleeps = driver.sleeps.size(), markers = driver.markers.size();
+    REQUIRE(majvk_frame_begin(1000) == VK_ERROR_DEVICE_LOST && majvk_frame_end() == VK_ERROR_DEVICE_LOST);
+    driver.submittedIds.clear();
+    REQUIRE(unity.submit(testQueue, 1, &submit, VK_NULL_HANDLE) == VK_ERROR_DEVICE_LOST);
+    REQUIRE(driver.submittedIds == std::vector<uint64_t>({0})); // no latency id
+    REQUIRE(driver.sleeps.size() == sleeps && driver.markers.size() == markers);
+    // Nothing is presented any more, so neither the managed poll nor Unity's own wait reaches the driver.
+    driver.waitCalls = 0; driver.waitResult = VK_SUCCESS;
+    REQUIRE(majvk_present_wait_poll(generation, shown) == VK_ERROR_DEVICE_LOST);
+    REQUIRE(unity.wait(unity.device, swapchain, shown, UINT64_MAX) == VK_ERROR_DEVICE_LOST && driver.waitCalls == 0);
+    // A swapchain created on the lost device gets no latency mode.
+    driver.presentResult = VK_SUCCESS; driver.submitResult = VK_SUCCESS;
+    const size_t modes = driver.sleepModes.size();
+    unity.Swapchain(swapchain);
+    REQUIRE(!driver.lastSwapchainLatency && driver.sleepModes.size() == modes);
+    unity.destroyDevice(unity.device, nullptr);
+
+    // A new device starts over; a loss reported to the layer's own calls is latched as well.
+    Unity next;
+    REQUIRE(next.Create() == VK_SUCCESS && majvk_device_lost_call() == MajvkCallNone);
+    const VkSwapchainKHR fresh = next.Swapchain();
+    REQUIRE(majvk_frame_begin(1000) == MajvkFrameDone);
+    REQUIRE(next.Present(fresh) == VK_SUCCESS);
+    driver.semaphoreWait = VK_ERROR_DEVICE_LOST;
+    REQUIRE(majvk_frame_begin(1000) == VK_ERROR_DEVICE_LOST && majvk_device_lost_call() == MajvkCallWaitSemaphores);
+    driver.semaphoreWait = VK_SUCCESS;
+    REQUIRE(majvk_frame_begin(1000) == VK_ERROR_DEVICE_LOST);
+    next.destroyDevice(next.device, nullptr);
+
+    Unity polled;
+    REQUIRE(polled.Create() == VK_SUCCESS);
+    const VkSwapchainKHR polledSwapchain = polled.Swapchain();
+    REQUIRE(polled.Present(polledSwapchain) == VK_SUCCESS);
+    driver.waitResult = VK_ERROR_DEVICE_LOST;
+    REQUIRE(majvk_present_wait_poll(Generation(), LatestId()) == VK_ERROR_DEVICE_LOST);
+    REQUIRE(majvk_device_lost_call() == MajvkCallPresentWaitPoll);
+    driver.waitCalls = 0;
+    REQUIRE(majvk_present_wait_poll(Generation(), LatestId()) == VK_ERROR_DEVICE_LOST && driver.waitCalls == 0);
+    polled.destroyDevice(polled.device, nullptr);
+    std::puts("PASS: a lost device is latched with the first reporting call; the layer then only passes Unity's calls through");
 }
 
 void VerifyAmd() {
@@ -609,6 +766,7 @@ int main() {
     VerifyResize();
     VerifyFullscreenToggle();
     VerifyNvidia();
+    VerifyDeviceLost();
     VerifyAmd();
     VerifyUnload();
 }

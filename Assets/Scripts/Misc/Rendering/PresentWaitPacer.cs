@@ -36,6 +36,9 @@ namespace MajdataPlay.Rendering
 
         /// <summary>Present waiting reported an error.</summary>
         Failed,
+
+        /// <summary>The GPU device was lost; nothing will be shown any more.</summary>
+        DeviceLost,
     }
 
     /// <summary>
@@ -46,7 +49,8 @@ namespace MajdataPlay.Rendering
     /// With multithreaded rendering the previous frame is usually still being submitted on the render thread when
     /// the next frame starts, so its presentation id does not exist yet. The pacer first waits briefly for that
     /// submission; when none arrives, the latest presentation is the previous frame. If submissions keep missing,
-    /// the brief wait is skipped and only probed occasionally.
+    /// the brief wait is skipped and only probed occasionally. Present waiting is given up when it fails or times out
+    /// too often (see <see cref="PacingFailureWindow"/>) or the device was lost.
     /// </remarks>
     internal sealed class PresentWaitPacer
     {
@@ -61,6 +65,9 @@ namespace MajdataPlay.Rendering
 
         /// <summary>The error recorded when the source stops reporting presentations.</summary>
         internal const int ErrorUnavailable = -2;
+
+        /// <summary>The poll result VK_ERROR_DEVICE_LOST: the GPU device was lost.</summary>
+        internal const int ErrorDeviceLost = -4;
 
         /// <summary>The number of consecutive missed submissions after which the brief submission wait is skipped.</summary>
         internal const int InFlightMissLimit = 8;
@@ -88,6 +95,9 @@ namespace MajdataPlay.Rendering
 
         /// <summary>The shortest presentation timeout.</summary>
         private readonly long _minPresentationTimeoutTicks;
+
+        /// <summary>The recent failed and timed-out waits.</summary>
+        private readonly PacingFailureWindow _failures = new();
 
         /// <summary>The number of consecutive frames whose previous frame was not submitted in time.</summary>
         private int _inFlightMisses;
@@ -126,13 +136,47 @@ namespace MajdataPlay.Rendering
         /// <summary>Gets whether the previous frame's submission is expected to be in flight at frame start.</summary>
         public bool ExpectsInFlightSubmission { get; private set; } = true;
 
-        /// <summary>Gets the error code of the last <see cref="PresentWaitOutcome.Failed"/> outcome.</summary>
+        /// <summary>Gets the error code of the last <see cref="PresentWaitOutcome.Failed"/> or <see cref="PresentWaitOutcome.DeviceLost"/> outcome.</summary>
         public int LastError { get; private set; }
+
+        /// <summary>Gets whether present waiting was given up; the caller should use another backend.</summary>
+        public bool HasGivenUp { get; private set; }
+
+        /// <summary>Gets the number of failed and timed-out waits among the recent frames, for logs.</summary>
+        public int RecentFailures => _failures.Failures;
 
         /// <summary>Waits until the frame rendered before the current one has been shown.</summary>
         /// <param name="refreshPeriodTicks">The display refresh period in ticks, used for the timeouts.</param>
-        /// <returns>How the wait ended.</returns>
+        /// <returns>How the wait ended; <see cref="PresentWaitOutcome.Failed"/> without waiting once given up.</returns>
         public PresentWaitOutcome WaitForPreviousFrame(long refreshPeriodTicks)
+        {
+            if (HasGivenUp)
+            {
+                return PresentWaitOutcome.Failed;
+            }
+
+            var outcome = Wait(refreshPeriodTicks);
+            switch (outcome)
+            {
+                case PresentWaitOutcome.Presented:
+                    _failures.RecordSuccess();
+                    break;
+                case PresentWaitOutcome.TimedOut:
+                case PresentWaitOutcome.Failed:
+                    _failures.RecordFailure();
+                    HasGivenUp = _failures.IsExceeded;
+                    break;
+                case PresentWaitOutcome.DeviceLost:
+                    HasGivenUp = true;
+                    break;
+            }
+            return outcome;
+        }
+
+        /// <summary>Waits until the frame rendered before the current one has been shown, without judging the outcome.</summary>
+        /// <param name="refreshPeriodTicks">The display refresh period in ticks, used for the timeouts.</param>
+        /// <returns>How the wait ended.</returns>
+        private PresentWaitOutcome Wait(long refreshPeriodTicks)
         {
             var start = _getTimestamp();
             if (!_source.TryQuery(out var generation, out var latest))
@@ -192,6 +236,11 @@ namespace MajdataPlay.Rendering
                 if (result == PollSwapchainChanged)
                 {
                     return PresentWaitOutcome.SwapchainChanged;
+                }
+                if (result == ErrorDeviceLost)
+                {
+                    LastError = result;
+                    return PresentWaitOutcome.DeviceLost;
                 }
                 if (result < 0)
                 {

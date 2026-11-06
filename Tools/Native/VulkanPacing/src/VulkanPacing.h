@@ -30,14 +30,26 @@ constexpr int MajvkLowLatencyMissingFunction = 4; // An entry point or the timel
 // Where present ids come from, reported by majvk_present_id_source.
 constexpr int MajvkPresentIdsNone = 0;  // No tracked presentation carried an id yet.
 constexpr int MajvkPresentIdsLayer = 1; // This layer attaches the ids.
-constexpr int MajvkPresentIdsUnity = 2; // Unity attaches its own ids and the layer follows them.
-constexpr int MajvkPresentIdsUnityReplaced = 3; // Unity attaches ids; the NVIDIA backend replaces them with frame ids.
+constexpr int MajvkPresentIdsUnity = 2; // Unity attaches its own ids and the layer follows them (fallback only).
+constexpr int MajvkPresentIdsUnityReplaced = 3; // Unity attaches ids; the layer replaces them with its frame ids.
 
 // Results of majvk_frame_begin and majvk_frame_end.
 constexpr int MajvkFrameDone = 1;
-constexpr int MajvkFrameSkipped = 0;   // No swapchain yet, or the driver had nothing to do.
+constexpr int MajvkFrameSkipped = 0;   // No swapchain yet, no presentation since the last sleep, or nothing to do.
 constexpr int MajvkFrameTimedOut = 2;  // The driver's sleep did not finish within the timeout.
 constexpr int MajvkFrameInactive = -2; // No driver low-latency backend is active.
+
+// The call that first reported VK_ERROR_DEVICE_LOST on Unity's device, reported by majvk_device_lost_call.
+constexpr int MajvkCallNone = 0;                 // The device has not been lost.
+constexpr int MajvkCallQueueSubmit = 1;          // vkQueueSubmit
+constexpr int MajvkCallQueuePresent = 2;         // vkQueuePresentKHR
+constexpr int MajvkCallAcquireNextImage = 3;     // vkAcquireNextImageKHR or vkAcquireNextImage2KHR
+constexpr int MajvkCallCreateSwapchain = 4;      // vkCreateSwapchainKHR
+constexpr int MajvkCallUnityWaitForPresent = 5;  // Unity's own vkWaitForPresentKHR
+constexpr int MajvkCallPresentWaitPoll = 6;      // vkWaitForPresentKHR of majvk_present_wait_poll
+constexpr int MajvkCallSetLatencySleepMode = 7;  // vkSetLatencySleepModeNV
+constexpr int MajvkCallLatencySleep = 8;         // vkLatencySleepNV
+constexpr int MajvkCallWaitSemaphores = 9;       // vkWaitSemaphoresKHR on the NVIDIA sleep semaphore
 
 // Version of the exported C ABI below.
 MAJVK_EXPORT int MAJVK_CALL majvk_abi_version();
@@ -47,7 +59,8 @@ MAJVK_EXPORT int MAJVK_CALL majvk_present_wait_status();
 // Returns 1, -2 when present waiting is not enabled, or -3 for null arguments.
 MAJVK_EXPORT int MAJVK_CALL majvk_present_wait_query(uint64_t* generation, uint64_t* presentId);
 // Polls without blocking. Returns 1 once the id is shown, 0 while pending or while a Unity swapchain call is in
-// progress, -1 when the swapchain changed, -2 when present waiting is not enabled, or a negative VkResult error.
+// progress, -1 when the swapchain changed, -2 when present waiting is not enabled, or a negative VkResult error;
+// after the device was lost it returns VK_ERROR_DEVICE_LOST without calling the driver.
 MAJVK_EXPORT int MAJVK_CALL majvk_present_wait_poll(uint64_t generation, uint64_t presentId);
 // Returns one of the MajvkBackend values.
 MAJVK_EXPORT int MAJVK_CALL majvk_low_latency_backend();
@@ -55,11 +68,16 @@ MAJVK_EXPORT int MAJVK_CALL majvk_low_latency_backend();
 MAJVK_EXPORT int MAJVK_CALL majvk_low_latency_status();
 // Starts a frame on the main thread before input is sampled: registers a new frame id for the next presentation
 // and lets the driver delay the frame (NVIDIA latency sleep, AMD anti-lag input stage). Returns a MajvkFrame value
-// or a negative VkResult error. timeoutNanoseconds bounds the wait for NVIDIA's sleep semaphore.
+// or a negative VkResult error; VK_ERROR_DEVICE_LOST once the device was lost. timeoutNanoseconds bounds the wait
+// for NVIDIA's sleep semaphore.
 MAJVK_EXPORT int MAJVK_CALL majvk_frame_begin(uint64_t timeoutNanoseconds);
-// Ends the main-thread part of the frame started last (NVIDIA simulation end marker). Returns a MajvkFrame value.
+// Ends the main-thread part of the frame started last (NVIDIA simulation end marker). Returns a MajvkFrame value,
+// or VK_ERROR_DEVICE_LOST once the device was lost.
 MAJVK_EXPORT int MAJVK_CALL majvk_frame_end();
 // Returns the generation of the tracked swapchain; it changes whenever a swapchain is created or destroyed.
 MAJVK_EXPORT uint64_t MAJVK_CALL majvk_swapchain_generation();
 // Returns one of the MajvkPresentIds values.
 MAJVK_EXPORT int MAJVK_CALL majvk_present_id_source();
+// Returns the MajvkCall value of the call that first reported VK_ERROR_DEVICE_LOST on Unity's current device, or
+// MajvkCallNone. From then on the layer only passes Unity's calls through.
+MAJVK_EXPORT int MAJVK_CALL majvk_device_lost_call();

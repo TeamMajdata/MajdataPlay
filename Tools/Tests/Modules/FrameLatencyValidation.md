@@ -78,9 +78,14 @@ active and why others are skipped:
   (or only one of the two)
 - `Present waiting unavailable (<reason>)` / `Driver low-latency mode unavailable (<reason>)`
 - `Frame pacing started: refresh ...` when the timer takes over
-- `... failed repeatedly ...; giving it up` / `Present waiting timed out|failed 30 times ...; giving it up`
+- `... failed or timed out in N of the last 64 frames ...; giving it up` (for either backend) once 16 of the
+  64 most recent frames that judged the backend failed or timed out
+- `The Vulkan device was lost (VK_ERROR_DEVICE_LOST, first reported by <call>); layer pacing stopped for this
+  session` (an error): both layer backends stop at once and the timer paces the remaining frames; `<call>` names
+  the Vulkan call that reported the loss first, which helps tell a GPU fault from a pacing problem
 - `Swapchain changed (generation N); pacing follows the new swapchain` after a window resize or fullscreen toggle
-- `Presentation ids come from the pacing layer|Unity`
+- `Presentation ids come from the pacing layer|Unity`, or `... from Unity and are replaced with the pacing layer's
+  frame ids` (the usual case with Unity 6)
 
 Set the hidden option `Rendering.VulkanLowLatencyVSyncBackend` to `PresentWait` (skip the driver mode) or `Timer` to compare
 backends. The Editor always uses timer pacing, because its views present through several swapchains.
