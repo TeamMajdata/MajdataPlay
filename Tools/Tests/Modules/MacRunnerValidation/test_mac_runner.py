@@ -204,6 +204,58 @@ class WorkspaceTests(unittest.TestCase):
         self.assertIn("clean: false,", apple_job)
         self.assertIn('"Release", "iOS", "DerivedData"', apple_job)
 
+    @unittest.skipIf(os.name == "nt", "Run Bash checkout migration tests on the macOS runner.")
+    def test_checkout_removes_a_submodule_deleted_by_the_new_revision(self):
+        workflow = (ROOT / ".github/workflows/main.yml").read_text(encoding="utf-8")
+        jobs = [workflow.split("  build-android:", 1)[1].split("  build-apple:", 1)[0],
+                workflow.split("  build-apple:", 1)[1].split("  publish-nightly:", 1)[0]]
+        marker = "      - name: Clean previous job files while retaining incremental build data\n"
+        for job in jobs:
+            block = job.split(marker, 1)[1]
+            script = block.split("        run: |\n", 1)[1].split("\n\n", 1)[0]
+            script = "\n".join(line[10:] for line in script.splitlines())
+            with self.subTest(job=job.splitlines()[1]), tempfile.TemporaryDirectory() as temporary:
+                directory = Path(temporary)
+                project = directory / "project"
+                source = directory / "dependency"
+
+                def git(repository, *arguments):
+                    return subprocess.run(["git", "-C", str(repository), *arguments],
+                                          check=True, capture_output=True, text=True).stdout.strip()
+
+                for repository in (project, source):
+                    repository.mkdir()
+                    git(repository, "init")
+                    git(repository, "config", "user.name", "CI validation")
+                    git(repository, "config", "user.email", "ci@example.invalid")
+                (source / "old.asmdef").write_text("{}")
+                git(source, "add", ".")
+                git(source, "commit", "-m", "Old dependency")
+                dependency = "Assets/Plugins/MajSimai"
+                git(project, "-c", "protocol.file.allow=always", "submodule", "add",
+                    str(source), dependency)
+                git(project, "commit", "-m", "Use the submodule")
+                previous = git(project, "rev-parse", "HEAD")
+                git(project, "rm", "--cached", dependency)
+                (project / ".gitmodules").write_text("")
+                git(project, "add", ".gitmodules")
+                git(project, "commit", "-m", "Replace the submodule with a package")
+                current = git(project, "rev-parse", "HEAD")
+                git(project, "checkout", "--force", previous)
+                environment = dict(os.environ, PROJECT_ROOT=str(project))
+                cleanup_first = job.index(marker) < job.index("      - name: Checkout the repository\n")
+                if cleanup_first:
+                    subprocess.run(["bash", "-c", script], env=environment,
+                                   check=True, capture_output=True)
+                git(project, "checkout", "--force", current)
+                self.assertTrue((project / dependency / "old.asmdef").exists())
+                if not cleanup_first:
+                    subprocess.run(["bash", "-c", script], env=environment,
+                                   check=True, capture_output=True)
+                self.assertFalse((project / dependency).exists(),
+                                 "Removed submodules must be cleaned after checkout.")
+                self.assertTrue((project / ".git/modules" / dependency / "HEAD").exists())
+
     @unittest.skipIf(os.name == "nt", "Run Bash checkout cleanup tests on the macOS runner.")
     def test_workflow_cleanup_preserves_git_bee_and_native_builds(self):
         workflow = (ROOT / ".github/workflows/main.yml").read_text(encoding="utf-8")

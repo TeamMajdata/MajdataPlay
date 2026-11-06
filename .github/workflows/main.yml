@@ -103,14 +103,6 @@ jobs:
         working-directory: ${{ github.workspace }}/projects/Android
 
     steps:
-      - name: Clean previous job files while retaining incremental build data
-        working-directory: ${{ github.workspace }}
-        run: |
-          set -euo pipefail
-          if [[ -d "$PROJECT_ROOT/.git" ]]; then
-            git -C "$PROJECT_ROOT" clean -ffdx -e /Library/ -e /Release/
-          fi
-
       - name: Checkout the repository
         uses: actions/checkout@v4
         with:
@@ -118,6 +110,15 @@ jobs:
           submodules: recursive
           fetch-depth: 0
           clean: false
+
+      - name: Clean previous job files while retaining incremental build data
+        working-directory: ${{ github.workspace }}
+        run: |
+          set -euo pipefail
+          # Removed submodules become untracked only after checkout changes HEAD.
+          if [[ -d "$PROJECT_ROOT/.git" ]]; then
+            git -C "$PROJECT_ROOT" clean -ffdx -e /Library/ -e /Release/
+          fi
 
       - name: Prepare the persistent Unity license
         run: python3 Tools/CI/prepare_unity_license.py
@@ -441,14 +442,6 @@ jobs:
         working-directory: ${{ github.workspace }}/projects/${{ matrix.platform }}
 
     steps:
-      - name: Clean previous job files while retaining incremental build data
-        working-directory: ${{ github.workspace }}
-        run: |
-          set -euo pipefail
-          if [[ -d "$PROJECT_ROOT/.git" ]]; then
-            git -C "$PROJECT_ROOT" clean -ffdx -e /Library/ -e /Release/
-          fi
-
       - name: Checkout the repository
         uses: actions/checkout@v4
         with:
@@ -456,6 +449,15 @@ jobs:
           submodules: recursive
           fetch-depth: 0
           clean: false
+
+      - name: Clean previous job files while retaining incremental build data
+        working-directory: ${{ github.workspace }}
+        run: |
+          set -euo pipefail
+          # Removed submodules become untracked only after checkout changes HEAD.
+          if [[ -d "$PROJECT_ROOT/.git" ]]; then
+            git -C "$PROJECT_ROOT" clean -ffdx -e /Library/ -e /Release/
+          fi
 
       - name: Prepare the persistent Unity license
         run: python3 Tools/CI/prepare_unity_license.py

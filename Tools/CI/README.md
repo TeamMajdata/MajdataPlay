@@ -60,9 +60,12 @@ runs, so Git reuses repository objects and initialized submodules. The Android
 checkout retains full history because its version code uses `git rev-list`.
 The first run at each new path still downloads a checkout.
 
-Before checkout, `git clean` removes stale job files except root `Library/` and
-`Release/`. Checkout uses `clean: false`, while its normal tracked-file reset
-still discards previous CI modifications to tracked files. This is exclusively
+After checkout, `git clean -ffdx` removes stale job files except root `Library/`
+and `Release/`. Cleaning after the new revision is checked out also removes
+submodules deleted by that revision; cleaning before checkout leaves those
+previously tracked directories in place and can load duplicate Unity assemblies.
+Checkout uses `clean: false`, while its normal tracked-file reset still discards
+previous CI modifications to tracked files. This is exclusively
 for dedicated CI checkouts, not developers' working directories. Git metadata,
 Unity's `Library/Bee`, Android's exported Gradle project and its caches, and
 iOS's exported Xcode project and fixed DerivedData directory persist. Old `out/`
