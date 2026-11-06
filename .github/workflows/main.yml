@@ -434,7 +434,6 @@ jobs:
       TARGET_PLATFORM: ${{ matrix.platform }}
       CI_PROJECT_PATH: projects/${{ matrix.platform }}
       PROJECT_ROOT: ${{ github.workspace }}/projects/${{ matrix.platform }}
-      CI_KEYCHAIN: ${{ runner.temp }}/majplay-${{ github.run_id }}-${{ github.run_attempt }}
 
     defaults:
       run:
@@ -499,6 +498,8 @@ jobs:
         id: signing-keychain
         if: ${{ env.TARGET_PLATFORM == 'iOS' }}
         run: |
+          CI_KEYCHAIN="$RUNNER_TEMP/majplay-${{ github.run_id }}-${{ github.run_attempt }}"
+          echo "CI_KEYCHAIN=$CI_KEYCHAIN" >> "$GITHUB_ENV"
           KEYCHAIN_PASSWORD=$(openssl rand -hex 32)
           echo "::add-mask::$KEYCHAIN_PASSWORD"
           echo "password=$KEYCHAIN_PASSWORD" >> "$GITHUB_OUTPUT"

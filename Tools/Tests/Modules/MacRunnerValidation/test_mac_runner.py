@@ -170,7 +170,7 @@ class WorkspaceTests(unittest.TestCase):
 
     def test_signing_keychain_is_unique_and_cleaned_after_failures(self):
         workflow = (ROOT / ".github/workflows/main.yml").read_text(encoding="utf-8")
-        self.assertIn("CI_KEYCHAIN: ${{ runner.temp }}/majplay-${{ github.run_id }}-${{ github.run_attempt }}",
+        self.assertIn('CI_KEYCHAIN="$RUNNER_TEMP/majplay-${{ github.run_id }}-${{ github.run_attempt }}"',
                       workflow)
         self.assertIn("keychain: ${{ env.CI_KEYCHAIN }}", workflow)
         cleanup = workflow.split("      - name: Remove temporary signing keychain\n", 1)[1]
@@ -180,6 +180,11 @@ class WorkspaceTests(unittest.TestCase):
     @unittest.skipIf(os.name == "nt", "Run Bash signing cleanup tests on the macOS runner.")
     def test_signing_cleanup_uses_the_absolute_keychain_path(self):
         workflow = (ROOT / ".github/workflows/main.yml").read_text(encoding="utf-8")
+        preparation = workflow.split("      - name: Prepare temporary signing keychain\n", 1)[1]
+        preparation = preparation.split("        run: |\n", 1)[1].split("\n\n", 1)[0]
+        preparation = "\n".join(line[10:] for line in preparation.splitlines())
+        preparation = preparation.replace("${{ github.run_id }}", "123")
+        preparation = preparation.replace("${{ github.run_attempt }}", "2")
         cleanup = workflow.split("      - name: Remove temporary signing keychain\n", 1)[1]
         script = cleanup.split("        run: |\n", 1)[1].split("\n\n", 1)[0]
         script = "\n".join(line[10:] for line in script.splitlines())
@@ -195,9 +200,16 @@ class WorkspaceTests(unittest.TestCase):
             security.write_text('#!/bin/bash\nprintf "%s\\n" "$@" > "$SECURITY_CALLS"\n')
             security.chmod(0o700)
             calls = directory / "security-calls"
+            github_environment = directory / "github-env"
             environment = dict(os.environ, CI_KEYCHAIN=str(keychain),
                                HOME=str(directory / "different-home"), SECURITY_CALLS=str(calls),
+                               RUNNER_TEMP=str(keychain.parent), GITHUB_ENV=str(github_environment),
+                               GITHUB_OUTPUT=str(directory / "github-output"),
                                PATH=str(tools) + os.pathsep + os.environ["PATH"])
+            subprocess.run(["bash", "-c", preparation], env=environment,
+                           check=True, capture_output=True)
+            self.assertEqual(github_environment.read_text().splitlines(),
+                             ["CI_KEYCHAIN=" + str(keychain)])
             subprocess.run(["bash", "-c", script], env=environment,
                            check=True, capture_output=True)
             self.assertTrue(calls.exists(), "Cleanup must find the keychain outside HOME.")
