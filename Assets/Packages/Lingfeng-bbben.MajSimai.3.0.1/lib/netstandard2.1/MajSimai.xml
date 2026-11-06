@@ -2420,9 +2420,11 @@
             Gets the MD5 hash of the chart text as a lowercase hex string.
             </summary>
             <remarks>
-            The text is hashed as one line: every white-space character (<see cref="M:System.Char.IsWhiteSpace(System.Char)"/>), line breaks
-            included, is removed, and the UTF-8 bytes of what is left are hashed. Charts that differ only in white space have
-            the same hash. The hash is computed on first access, which is thread safe.
+            The text is hashed as one line without comments: every <c>||</c> comment, from the <c>||</c> up to the end of its
+            line, is removed first; then every white-space character (<see cref="M:System.Char.IsWhiteSpace(System.Char)"/>), spaces, tabs
+            and line breaks included, is removed; and the UTF-8 bytes of what is left are hashed. Charts that differ only in
+            comments or white space have the same hash; <c>||s3/4</c> time signatures are comments too. The hash is computed
+            on first access, which is thread safe.
             </remarks>
         </member>
         <member name="P:MajSimai.SimaiChart.Sha256">
@@ -2430,8 +2432,8 @@
             Gets the SHA-256 hash of the chart text as a lowercase hex string.
             </summary>
             <remarks>
-            The text is hashed the same way as for <see cref="P:MajSimai.SimaiChart.Md5"/>: as one line without white space, in UTF-8. The hash is
-            computed on first access, which is thread safe.
+            The text is hashed the same way as for <see cref="P:MajSimai.SimaiChart.Md5"/>: as one line without comments and white space, in UTF-8.
+            The hash is computed on first access, which is thread safe.
             </remarks>
         </member>
         <member name="M:MajSimai.SimaiChart.Create(System.String,System.String,System.String,MajSimai.SimaiTimingPoint[],MajSimai.Parsing.CommaTiming[])">
@@ -2469,7 +2471,7 @@
             Gets the hashes of the chart text, computing them on first use. When several threads race, all of them return
             the value that was stored first.
             </summary>
-            <returns>The hashes of <see cref="P:MajSimai.SimaiChart.Fumen"/> without white space.</returns>
+            <returns>The hashes of <see cref="P:MajSimai.SimaiChart.Fumen"/> without comments and white space.</returns>
         </member>
         <member name="M:MajSimai.SimaiChart.CopyTimings(System.ReadOnlySpan{MajSimai.SimaiTimingPoint},System.String)">
             <summary>
@@ -3634,11 +3636,32 @@
         </member>
         <member name="M:MajSimai.Utils.ContentHashes.FromFumen(System.ReadOnlySpan{System.Char})">
             <summary>
-            Hashes a chart text as one line: every white-space character (<see cref="M:System.Char.IsWhiteSpace(System.Char)"/>), line breaks
-            included, is removed, and the UTF-8 bytes of what is left are hashed.
+            Hashes a chart text as one line without comments: every <c>||</c> comment, from the <c>||</c> up to the end of
+            its line, is removed first; then every white-space character (<see cref="M:System.Char.IsWhiteSpace(System.Char)"/>), spaces,
+            tabs and line breaks included, is removed; and the UTF-8 bytes of what is left are hashed.
+            </summary>
+            <remarks>
+            Comments are removed before white space because a comment ends at a line break. A <c>||s3/4</c> time signature
+            is written as a comment, so it is removed as well. A single <c>|</c> does not start a comment and is kept.
+            </remarks>
+            <param name="fumen">The chart text.</param>
+            <returns>The hashes of the chart text without comments and white space.</returns>
+        </member>
+        <member name="M:MajSimai.Utils.ContentHashes.NormalizeFumen(System.ReadOnlySpan{System.Char},System.Span{System.Char})">
+            <summary>
+            Writes a chart text without its <c>||</c> comments and white space, the text <see cref="M:MajSimai.Utils.ContentHashes.FromFumen(System.ReadOnlySpan{System.Char})"/> hashes.
             </summary>
             <param name="fumen">The chart text.</param>
-            <returns>The hashes of the chart text without white space.</returns>
+            <param name="destination">Receives the normalized text; it must be at least as long as <paramref name="fumen"/>.</param>
+            <returns>The number of characters written to <paramref name="destination"/>.</returns>
+        </member>
+        <member name="M:MajSimai.Utils.ContentHashes.IsCommentStart(System.ReadOnlySpan{System.Char},System.Int32)">
+            <summary>
+            Checks whether a <c>||</c> comment starts at an index of a chart text.
+            </summary>
+            <param name="fumen">The chart text.</param>
+            <param name="index">The index to check.</param>
+            <returns><see langword="true"/> when the characters at <paramref name="index"/> and after it are both <c>|</c>.</returns>
         </member>
         <member name="M:MajSimai.Utils.ContentHashes.ToHex(System.ReadOnlySpan{System.Byte})">
             <summary>

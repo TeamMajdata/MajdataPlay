@@ -2,13 +2,13 @@
 <package xmlns="http://schemas.microsoft.com/packaging/2012/06/nuspec.xsd">
   <metadata>
     <id>Lingfeng-bbben.MajSimai</id>
-    <version>3.0.0</version>
+    <version>3.0.1</version>
     <authors>bbben,Lezi,Moying</authors>
     <requireLicenseAcceptance>true</requireLicenseAcceptance>
     <license type="expression">GPL-3.0-or-later</license>
     <licenseUrl>https://licenses.nuget.org/GPL-3.0-or-later</licenseUrl>
     <description>Package Description</description>
-    <repository type="git" commit="6d90cc8a2b3f796a3d698ef7cb68de1ffc267175" />
+    <repository type="git" commit="a0a0c64a3e38ed855201acc7d8ca4b846db2f043" />
     <dependencies>
       <group targetFramework="net10.0" />
       <group targetFramework="net5.0" />
