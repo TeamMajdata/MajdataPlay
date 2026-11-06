@@ -188,14 +188,20 @@ class SigningChainTests(unittest.TestCase):
         self.profile = self.directory / "profile.mobileprovision"
         self.intermediate = b"public WWDR certificate fixture"
         self.leaf = b"public distribution certificate fixture"
-        self.download = self.intermediate
+        self.root_certificate = b"public Apple root certificate fixture"
+        self.download = None
         self.existing = ""
         self.decoded_profile = plistlib.dumps({"DeveloperCertificates": [self.leaf]})
         self.identities = f'  1) {hashlib.sha1(self.leaf).hexdigest().upper()} "Test distribution identity"\n'
         self.commands = []
         self.failure = None
-        patch = mock.patch.object(IOS_SIGNING, "WWDR_SHA256",
-                                  hashlib.sha256(self.intermediate).hexdigest())
+        self.certificates = {"AppleWWDRCAG3.cer": self.intermediate,
+                             "AppleRootCA.cer": self.root_certificate}
+        self.downloads = {url: self.certificates[name]
+                          for name, url, fingerprint in IOS_SIGNING.APPLE_CERTIFICATES}
+        chain = tuple((name, url, hashlib.sha256(self.certificates[name]).hexdigest())
+                      for name, url, fingerprint in IOS_SIGNING.APPLE_CERTIFICATES)
+        patch = mock.patch.object(IOS_SIGNING, "APPLE_CERTIFICATES", chain)
         patch.start()
         self.addCleanup(patch.stop)
 
@@ -208,13 +214,24 @@ class SigningChainTests(unittest.TestCase):
             raise subprocess.CalledProcessError(1, command)
         if command[0] == "/usr/bin/curl":
             self.assertIn("=https", command)
-            self.assertEqual(command[-1], IOS_SIGNING.WWDR_URL)
-            output = self.download
+            self.assertIn(command[-1], self.downloads)
+            output = self.download if self.download is not None else self.downloads[command[-1]]
+        elif command[0] == "/usr/bin/xcrun":
+            self.assertEqual(command[1:6], ["clang", "-x", "c", "-", "-o"])
+            self.assertIn("int main(void)", kwargs["input"])
+            Path(command[6]).write_bytes(b"Mach-O signing fixture")
+            output = ""
+        elif command[0] == "/usr/bin/codesign":
+            self.assertTrue(Path(command[-1]).exists())
+            if command[1] == "--force":
+                self.assertEqual(command[3], hashlib.sha1(self.leaf).hexdigest())
+            output = ""
         elif operation == "find-certificate":
             output = self.existing
         elif operation == "add-certificates":
             self.assertEqual(command[3], str(self.keychain))
-            self.assertEqual(Path(command[4]).read_bytes(), self.intermediate)
+            imported = Path(command[4])
+            self.assertEqual(imported.read_bytes(), self.certificates[imported.name])
             output = ""
         elif operation == "cms":
             output = self.decoded_profile
@@ -238,15 +255,20 @@ class SigningChainTests(unittest.TestCase):
         operations = [command[1] for command in self.commands]
         self.assertLess(operations.index("add-certificates"), operations.index("find-identity"))
         self.assertLess(operations.index("find-identity"), operations.index("verify-cert"))
+        self.assertLess(operations.index("verify-cert"), operations.index("clang"))
+        self.assertLess(operations.index("clang"), operations.index("--force"))
+        self.assertLess(operations.index("--force"), operations.index("--verify"))
         self.assertFalse(list(self.directory.glob("majplay-ios-signing-*")))
 
     def test_existing_pinned_intermediate_does_not_download_or_import_again(self):
-        encoded = base64.b64encode(self.intermediate).decode()
-        self.existing = f"-----BEGIN CERTIFICATE-----\n{encoded}\n-----END CERTIFICATE-----\n"
+        self.existing = "".join("-----BEGIN CERTIFICATE-----\n"
+                                + base64.b64encode(certificate).decode()
+                                + "\n-----END CERTIFICATE-----\n"
+                                for certificate in self.certificates.values())
         self.prepare()
         self.assertFalse(any(command[0] == "/usr/bin/curl" for command in self.commands))
         self.assertNotIn("add-certificates", [command[1] for command in self.commands])
-        self.assertEqual(self.commands[-1][1], "verify-cert")
+        self.assertEqual(self.commands[-1][1], "--verify")
 
     def test_unexpected_download_is_rejected_before_keychain_changes(self):
         self.download = b"an unexpected certificate or proxy response"
@@ -278,6 +300,21 @@ class SigningChainTests(unittest.TestCase):
         with self.assertRaises(subprocess.CalledProcessError):
             self.prepare()
         self.assertNotIn("find-identity", [command[1] for command in self.commands])
+
+    def test_an_existing_intermediate_still_requires_the_apple_root(self):
+        encoded = base64.b64encode(self.intermediate).decode()
+        self.existing = f"-----BEGIN CERTIFICATE-----\n{encoded}\n-----END CERTIFICATE-----\n"
+        self.prepare()
+        imported = [Path(command[4]).name for command in self.commands
+                    if command[1] == "add-certificates"]
+        self.assertEqual(imported, ["AppleRootCA.cer"])
+
+    def test_a_real_signing_failure_stops_the_preflight(self):
+        self.failure = "--force"
+        with self.assertRaises(subprocess.CalledProcessError):
+            self.prepare()
+        self.assertNotIn("--verify", [command[1] for command in self.commands])
+        self.assertFalse(list(self.directory.glob("majplay-ios-signing-*")))
 
     def test_workflow_checks_the_signing_chain_before_archiving(self):
         workflow = (ROOT / ".github/workflows/main.yml").read_text(encoding="utf-8")

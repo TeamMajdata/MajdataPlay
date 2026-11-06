@@ -27,10 +27,11 @@ directory, and an import that did not create a keychain.
 
 Signing-chain tests simulate an incomplete temporary keychain, an already
 installed intermediate, a changed download, a missing or mismatched signing
-identity, and certificate verification/import failures. They check that only
-the pinned public intermediate is imported and that the preflight runs after
+identity, certificate verification/import failures, a missing root, and a real
+signing failure after public-chain validation. They check that only the pinned
+public chain certificates are imported and that the preflight runs after
 profile installation and before archive. These checks use public test fixtures
-and fake Security/curl results; actual certificate trust and private-key access
+and fake Security/curl/compiler/codesign results; actual certificate trust and private-key access
 still require a signed build in the runner session.
 
 This suite does not validate Unity entitlements, network activation, project

@@ -11,14 +11,18 @@ import sys
 import tempfile
 
 
-WWDR_URL = "https://www.apple.com/certificateauthority/AppleWWDRCAG3.cer"
-WWDR_SHA256 = "dcf21878c77f4198e4b4614f03d696d89c66c66008d4244e1b99161aac91601f"
+APPLE_CERTIFICATES = (
+    ("AppleWWDRCAG3.cer", "https://www.apple.com/certificateauthority/AppleWWDRCAG3.cer",
+     "dcf21878c77f4198e4b4614f03d696d89c66c66008d4244e1b99161aac91601f"),
+    ("AppleRootCA.cer", "https://www.apple.com/appleca/AppleIncRootCertificate.cer",
+     "b0b1730ecbc7ff4505142c49f1295e6eda6bcaed7e2c68c5be91b5a11001f024"),
+)
 PEM_CERTIFICATE = re.compile(r"-----BEGIN CERTIFICATE-----(.*?)-----END CERTIFICATE-----", re.DOTALL)
 SIGNING_IDENTITY = re.compile(r"^\s*\d+\)\s+([A-Fa-f0-9]{40})\s", re.MULTILINE)
 
 
 def prepare_signing(keychain, profile, temporary_directory, run=subprocess.run):
-    """Install Apple's pinned WWDR G3 intermediate and verify the profile's identity."""
+    """Complete the pinned Apple chain and exercise the profile's private signing key."""
     if not keychain.is_absolute():
         raise ValueError("The temporary signing keychain must have an absolute path.")
     existing = run(["/usr/bin/security", "find-certificate", "-a", "-p", str(keychain)],
@@ -29,20 +33,21 @@ def prepare_signing(keychain, profile, temporary_directory, run=subprocess.run):
     }
     with tempfile.TemporaryDirectory(prefix="majplay-ios-signing-", dir=temporary_directory) as temporary:
         directory = Path(temporary)
-        if WWDR_SHA256 not in fingerprints:
+        for filename, url, fingerprint in APPLE_CERTIFICATES:
+            if fingerprint in fingerprints:
+                print(f"The temporary signing keychain already contains {filename}.")
+                continue
             download = run(["/usr/bin/curl", "--fail", "--silent", "--show-error", "--location",
                             "--proto", "=https", "--proto-redir", "=https", "--retry", "2",
-                            "--connect-timeout", "15", "--max-time", "60", WWDR_URL],
+                            "--connect-timeout", "15", "--max-time", "60", url],
                            check=True, capture_output=True)
-            if hashlib.sha256(download.stdout).hexdigest() != WWDR_SHA256:
-                raise RuntimeError("The downloaded WWDR G3 certificate has an unexpected SHA-256 fingerprint.")
-            intermediate = directory / "AppleWWDRCAG3.cer"
-            intermediate.write_bytes(download.stdout)
-            run(["/usr/bin/security", "add-certificates", "-k", str(keychain), str(intermediate)],
+            if hashlib.sha256(download.stdout).hexdigest() != fingerprint:
+                raise RuntimeError(f"{filename} has an unexpected SHA-256 fingerprint.")
+            downloaded = directory / filename
+            downloaded.write_bytes(download.stdout)
+            run(["/usr/bin/security", "add-certificates", "-k", str(keychain), str(downloaded)],
                 check=True, capture_output=True, text=True)
-            print("Installed the Apple WWDR G3 intermediate into the temporary signing keychain.")
-        else:
-            print("The temporary signing keychain already contains the Apple WWDR G3 intermediate.")
+            print(f"Installed {filename} into the temporary signing keychain.")
 
         decoded = run(["/usr/bin/security", "cms", "-D", "-i", str(profile)],
                       check=True, capture_output=True).stdout
@@ -60,7 +65,14 @@ def prepare_signing(keychain, profile, temporary_directory, run=subprocess.run):
         leaf.write_bytes(certificate)
         run(["/usr/bin/security", "verify-cert", "-c", str(leaf), "-p", "codeSign", "-L",
              "-k", str(keychain)], check=True, capture_output=True, text=True)
-    print("Verified the distribution certificate chain and provisioning-profile signing identity.")
+        probe = directory / "signing-probe"
+        run(["/usr/bin/xcrun", "clang", "-x", "c", "-", "-o", str(probe)],
+            input="int main(void) { return 0; }\n", check=True, capture_output=True, text=True)
+        run(["/usr/bin/codesign", "--force", "--sign", hashlib.sha1(certificate).hexdigest(),
+             "--timestamp=none", str(probe)], check=True, capture_output=True, text=True)
+        run(["/usr/bin/codesign", "--verify", "--strict", str(probe)],
+            check=True, capture_output=True, text=True)
+    print("Verified the distribution chain, profile identity and codesign private-key access.")
 
 
 if __name__ == "__main__":
