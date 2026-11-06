@@ -38,6 +38,22 @@ sudo /bin/launchctl bootstrap system /Library/LaunchDaemons/actions.runner.majpl
 This changes the service session, retaining the `majplay-ci` account and the
 existing runner identity, environment and storage validation launcher.
 
+## iOS signing certificate chain
+
+The distribution certificate is issued by Apple WWDR G3. The PKCS#12 secret
+may omit this intermediate, and a daemon build must not rely on the runner's
+login keychain to supply it. After import and provisioning-profile installation,
+`prepare_ios_signing.py` completes the temporary keychain using Apple's official
+WWDR G3 certificate, checked against its pinned SHA-256 fingerprint. Existing
+copies are reused so an already complete PKCS#12 import stays idempotent.
+
+The helper checks that a valid signing identity matches a developer certificate
+in the installed provisioning profile, then verifies its code-signing chain
+offline against the temporary keychain and macOS trust anchors. A missing
+private key, wrong profile, invalid chain or changed download stops the job
+before the expensive archive. It does not add trust overrides or modify the
+login/system keychains; the intermediate is removed with the temporary keychain.
+
 ## One-time license directory setup
 
 From an administrator account on the Mac:

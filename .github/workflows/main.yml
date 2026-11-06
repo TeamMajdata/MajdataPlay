@@ -526,6 +526,10 @@ jobs:
           fi
           ls -la "$PROFILE_DIR"
 
+      - name: Complete and verify the iOS signing chain
+        if: ${{ env.TARGET_PLATFORM == 'iOS' }}
+        run: python3 Tools/CI/prepare_ios_signing.py
+
       - name: Install fastlane
         if: ${{ env.TARGET_PLATFORM == 'iOS' }}
         run: |

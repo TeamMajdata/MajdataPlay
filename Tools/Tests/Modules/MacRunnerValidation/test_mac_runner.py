@@ -2,6 +2,7 @@
 
 import base64
 from contextlib import redirect_stdout
+import hashlib
 import importlib.util
 import io
 import os
@@ -9,6 +10,7 @@ from pathlib import Path
 import subprocess
 import tempfile
 import unittest
+from unittest import mock
 
 
 ROOT = Path(__file__).resolve().parents[4]
@@ -22,6 +24,11 @@ IOS_SPEC = importlib.util.spec_from_file_location(
 )
 IOS_CACHE = importlib.util.module_from_spec(IOS_SPEC)
 IOS_SPEC.loader.exec_module(IOS_CACHE)
+SIGNING_SPEC = importlib.util.spec_from_file_location(
+    "prepare_ios_signing", ROOT / "Tools/CI/prepare_ios_signing.py"
+)
+IOS_SIGNING = importlib.util.module_from_spec(SIGNING_SPEC)
+SIGNING_SPEC.loader.exec_module(IOS_SIGNING)
 SERIAL = "F4-AAAA-BBBB-CCCC-DDDD-EEEE"
 ENVIRONMENT = {
     "UNITY_SERIAL": SERIAL,
@@ -169,6 +176,119 @@ class IosCacheTests(unittest.TestCase):
             with self.assertRaises(RuntimeError):
                 IOS_CACHE.prepare_cache(project, "Release")
             self.assertEqual(project.read_text(), original)
+
+
+class SigningChainTests(unittest.TestCase):
+    def setUp(self):
+        import plistlib
+        self.temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temporary.cleanup)
+        self.directory = Path(self.temporary.name)
+        self.keychain = self.directory / "runner temp.with spaces/signing.keychain"
+        self.profile = self.directory / "profile.mobileprovision"
+        self.intermediate = b"public WWDR certificate fixture"
+        self.leaf = b"public distribution certificate fixture"
+        self.download = self.intermediate
+        self.existing = ""
+        self.decoded_profile = plistlib.dumps({"DeveloperCertificates": [self.leaf]})
+        self.identities = f'  1) {hashlib.sha1(self.leaf).hexdigest().upper()} "Test distribution identity"\n'
+        self.commands = []
+        self.failure = None
+        patch = mock.patch.object(IOS_SIGNING, "WWDR_SHA256",
+                                  hashlib.sha256(self.intermediate).hexdigest())
+        patch.start()
+        self.addCleanup(patch.stop)
+
+    def run_command(self, command, **kwargs):
+        self.assertTrue(kwargs["check"])
+        self.assertTrue(kwargs["capture_output"])
+        self.commands.append(command)
+        operation = command[1]
+        if operation == self.failure:
+            raise subprocess.CalledProcessError(1, command)
+        if command[0] == "/usr/bin/curl":
+            self.assertIn("=https", command)
+            self.assertEqual(command[-1], IOS_SIGNING.WWDR_URL)
+            output = self.download
+        elif operation == "find-certificate":
+            output = self.existing
+        elif operation == "add-certificates":
+            self.assertEqual(command[3], str(self.keychain))
+            self.assertEqual(Path(command[4]).read_bytes(), self.intermediate)
+            output = ""
+        elif operation == "cms":
+            output = self.decoded_profile
+        elif operation == "find-identity":
+            output = self.identities
+        elif operation == "verify-cert":
+            self.assertIn("-L", command)
+            self.assertEqual(command[-1], str(self.keychain))
+            self.assertEqual(Path(command[3]).read_bytes(), self.leaf)
+            output = "verified"
+        else:
+            self.fail(f"Unexpected signing command: {command}")
+        return subprocess.CompletedProcess(command, 0, stdout=output)
+
+    def prepare(self):
+        with redirect_stdout(io.StringIO()):
+            IOS_SIGNING.prepare_signing(self.keychain, self.profile, self.directory, self.run_command)
+
+    def test_missing_intermediate_is_installed_before_identity_and_chain_checks(self):
+        self.prepare()
+        operations = [command[1] for command in self.commands]
+        self.assertLess(operations.index("add-certificates"), operations.index("find-identity"))
+        self.assertLess(operations.index("find-identity"), operations.index("verify-cert"))
+        self.assertFalse(list(self.directory.glob("majplay-ios-signing-*")))
+
+    def test_existing_pinned_intermediate_does_not_download_or_import_again(self):
+        encoded = base64.b64encode(self.intermediate).decode()
+        self.existing = f"-----BEGIN CERTIFICATE-----\n{encoded}\n-----END CERTIFICATE-----\n"
+        self.prepare()
+        self.assertFalse(any(command[0] == "/usr/bin/curl" for command in self.commands))
+        self.assertNotIn("add-certificates", [command[1] for command in self.commands])
+        self.assertEqual(self.commands[-1][1], "verify-cert")
+
+    def test_unexpected_download_is_rejected_before_keychain_changes(self):
+        self.download = b"an unexpected certificate or proxy response"
+        with self.assertRaisesRegex(RuntimeError, "SHA-256"):
+            self.prepare()
+        self.assertNotIn("add-certificates", [command[1] for command in self.commands])
+        self.assertNotIn("find-identity", [command[1] for command in self.commands])
+        self.assertFalse(list(self.directory.glob("majplay-ios-signing-*")))
+
+    def test_an_unrelated_valid_identity_does_not_match_the_profile(self):
+        self.identities = '  1) ' + 'A' * 40 + ' "Other identity"\n'
+        with self.assertRaisesRegex(RuntimeError, "no valid signing identity"):
+            self.prepare()
+        self.assertNotIn("verify-cert", [command[1] for command in self.commands])
+
+    def test_certificate_without_a_valid_private_key_is_rejected(self):
+        self.identities = "     0 valid identities found\n"
+        with self.assertRaisesRegex(RuntimeError, "no valid signing identity"):
+            self.prepare()
+
+    def test_chain_verification_failure_is_not_treated_as_success(self):
+        self.failure = "verify-cert"
+        with self.assertRaises(subprocess.CalledProcessError):
+            self.prepare()
+        self.assertFalse(list(self.directory.glob("majplay-ios-signing-*")))
+
+    def test_intermediate_import_failure_stops_preparation(self):
+        self.failure = "add-certificates"
+        with self.assertRaises(subprocess.CalledProcessError):
+            self.prepare()
+        self.assertNotIn("find-identity", [command[1] for command in self.commands])
+
+    def test_workflow_checks_the_signing_chain_before_archiving(self):
+        workflow = (ROOT / ".github/workflows/main.yml").read_text(encoding="utf-8")
+        start = workflow.index("      - name: Import Apple certificate\n")
+        profile = workflow.index("      - name: Install provisioning profile\n", start)
+        chain = workflow.index("      - name: Complete and verify the iOS signing chain\n", profile)
+        archive = workflow.index("      - name: Build IPA Release\n", chain)
+        self.assertLess(start, profile)
+        self.assertLess(profile, chain)
+        self.assertLess(chain, archive)
+        self.assertIn("run: python3 Tools/CI/prepare_ios_signing.py", workflow[chain:archive])
 
 
 class WorkspaceTests(unittest.TestCase):

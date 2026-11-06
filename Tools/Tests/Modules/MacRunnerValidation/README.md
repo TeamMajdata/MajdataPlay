@@ -25,6 +25,14 @@ signing keychains use absolute paths and unique names and are cleaned up even
 after failed jobs. Cleanup also covers paths containing spaces, a different home
 directory, and an import that did not create a keychain.
 
+Signing-chain tests simulate an incomplete temporary keychain, an already
+installed intermediate, a changed download, a missing or mismatched signing
+identity, and certificate verification/import failures. They check that only
+the pinned public intermediate is imported and that the preflight runs after
+profile installation and before archive. These checks use public test fixtures
+and fake Security/curl results; actual certificate trust and private-key access
+still require a signed build in the runner session.
+
 This suite does not validate Unity entitlements, network activation, project
 import, IL2CPP output, Xcode signing, or Android/iOS/macOS Player behavior. Run a
 manual `Build Project` workflow twice to validate those build layers and compare
