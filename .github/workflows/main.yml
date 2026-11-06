@@ -1,6 +1,11 @@
 name: Validate iOS signing
 on:
   workflow_dispatch:
+    inputs:
+      keychain_storage:
+        type: choice
+        options: [local, runner-temp]
+        default: local
 permissions:
   contents: read
 jobs:
@@ -21,7 +26,11 @@ jobs:
       - name: Prepare temporary signing keychain
         id: signing-keychain
         run: |
-          CI_KEYCHAIN="$RUNNER_TEMP/majplay-smoke-${{ github.run_id }}-${{ github.run_attempt }}"
+          KEYCHAIN_ROOT="$RUNNER_TEMP"
+          if [[ "${{ inputs.keychain_storage }}" == "local" ]]; then
+            KEYCHAIN_ROOT="$HOME/Library/Keychains"
+          fi
+          CI_KEYCHAIN="$KEYCHAIN_ROOT/majplay-smoke-${{ github.run_id }}-${{ github.run_attempt }}"
           echo "CI_KEYCHAIN=$CI_KEYCHAIN" >> "$GITHUB_ENV"
           KEYCHAIN_PASSWORD=$(openssl rand -hex 32)
           echo "::add-mask::$KEYCHAIN_PASSWORD"
