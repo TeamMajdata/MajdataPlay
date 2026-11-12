@@ -1,9 +1,13 @@
 name: Build Project
 run-name: MajdataPlay build
 
+# RhythmHub launcher (sparkbarry/MajdataHub): dev publishes the Windows and macOS players to its nightly
+# channel (only the latest nightly is kept); a v* tag builds only Windows and macOS and publishes them
+# to its stable channel, without touching Android, iOS or the GitHub nightly release.
 on:
   push:
     branches: [ "dev", "fastlane-ios", "test_workflow", "github-ci" ]
+    tags: [ "v*" ]
   pull_request:
     branches: [ "main" ]
   workflow_dispatch:
@@ -27,11 +31,14 @@ jobs:
     name: Build (Windows/Linux)
     runs-on: ubuntu-latest
     if: ${{ github.event_name == 'push' || github.event_name == 'workflow_dispatch' }}
+    permissions:
+      contents: read
+      id-token: write # RhythmHub upload signs in to AWS through GitHub OIDC
     strategy:
       fail-fast: false
       matrix:
         configuration: [Release]
-        platform: [StandaloneWindows64, StandaloneLinux64]
+        platform: ${{ fromJSON(startsWith(github.ref, 'refs/tags/v') && '["StandaloneWindows64"]' || '["StandaloneWindows64", "StandaloneLinux64"]') }}
 
     env:
       CONFIGURATION: ${{ matrix.configuration }}
@@ -86,10 +93,51 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+      # RhythmHub serves the build unpacked, file by file, so players only download what changed.
+      - name: Prepare RhythmHub release
+        id: rhythmhub
+        if: ${{ env.TARGET_PLATFORM == 'StandaloneWindows64' }}
+        run: |
+          set -euo pipefail
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            channel=stable; prune=false
+          elif [[ "$GITHUB_REF" == refs/heads/dev ]]; then
+            channel=nightly; prune=true
+          else
+            echo "Not dev or a v* tag; skipping RhythmHub."
+            exit 0
+          fi
+          STAGE="$RUNNER_TEMP/rhythmhub"
+          rm -rf "$STAGE" && mkdir -p "$STAGE"
+          sudo chown -R "$USER" "$CONFIGURATION"
+          cp -a "$CONFIGURATION/$TARGET_PLATFORM/." "$STAGE/"
+          # Debug symbols and backup folders are not needed to play.
+          rm -rf "$STAGE"/*_BurstDebugInformation_DoNotShip "$STAGE"/*_BackUpThisFolder_ButDontShipItWithYourGame
+          {
+            echo "channel=$channel"
+            echo "prune=$prune"
+            echo "version=$BUNDLE_VERSION-${GITHUB_SHA::7}"
+            echo "path=$STAGE"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Publish to RhythmHub
+        if: ${{ steps.rhythmhub.outputs.channel != '' }}
+        uses: sparkbarry/MajdataHub/.github/actions/upload-build@main
+        with:
+          game: MajdataPlay
+          platform: Windows
+          version: ${{ steps.rhythmhub.outputs.version }}
+          build-path: ${{ steps.rhythmhub.outputs.path }}
+          entrypoint: MajdataPlay.exe
+          role-arn: ${{ vars.AWS_ROLE_ARN }}
+          channel: ${{ steps.rhythmhub.outputs.channel }}
+          signing-key: ${{ secrets.RHYTHMHUB_SIGNING_KEY }}
+          prune-previous: ${{ steps.rhythmhub.outputs.prune }}
+
   build-android:
     name: Build (Android)
     runs-on: [self-hosted, macOS, ARM64, majplay-android]
-    if: ${{ github.event_name == 'push' || github.event_name == 'workflow_dispatch' }}
+    if: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && !startsWith(github.ref, 'refs/tags/') }}
     env:
       CONFIGURATION: Release
       TARGET_PLATFORM: Android
@@ -418,16 +466,14 @@ jobs:
     name: Build (macOS/iOS)
     runs-on: [self-hosted, macOS, ARM64, "${{ matrix.runnerLabel }}"]
     if: ${{ github.event_name == 'push' || github.event_name == 'workflow_dispatch' }}
+    permissions:
+      contents: read
+      id-token: write # RhythmHub upload signs in to AWS through GitHub OIDC
     strategy:
       fail-fast: false
       matrix:
-        configuration: [Release]
-        platform: [StandaloneOSX, iOS]
-        include:
-          - platform: StandaloneOSX
-            runnerLabel: majplay-apple
-          - platform: iOS
-            runnerLabel: majplay-ios
+        # Tags build macOS only (for RhythmHub stable); iOS and TestFlight stay on branch pushes.
+        include: ${{ fromJSON(startsWith(github.ref, 'refs/tags/v') && '[{"configuration":"Release","platform":"StandaloneOSX","runnerLabel":"majplay-apple"}]' || '[{"configuration":"Release","platform":"StandaloneOSX","runnerLabel":"majplay-apple"},{"configuration":"Release","platform":"iOS","runnerLabel":"majplay-ios"}]') }}
 
     env:
       CONFIGURATION: ${{ matrix.configuration }}
@@ -704,6 +750,53 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+      - name: Prepare RhythmHub release
+        id: rhythmhub
+        if: ${{ env.TARGET_PLATFORM == 'StandaloneOSX' }}
+        run: |
+          set -euo pipefail
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            channel=stable; prune=false
+          elif [[ "$GITHUB_REF" == refs/heads/dev ]]; then
+            channel=nightly; prune=true
+          else
+            echo "Not dev or a v* tag; skipping RhythmHub."
+            exit 0
+          fi
+          # Release/ survives between runs on this self-hosted runner, so require exactly one bundle.
+          # (macOS ships bash 3.2: no mapfile.)
+          found=$(find "$CONFIGURATION" -maxdepth 3 -type d -name MajdataPlay.app -prune)
+          count=$(printf '%s' "$found" | grep -c . || true)
+          if [[ "$count" -ne 1 ]]; then
+            echo "::error::Expected one MajdataPlay.app under $CONFIGURATION, found $count: $found"
+            exit 1
+          fi
+          STAGE="$RUNNER_TEMP/rhythmhub"
+          rm -rf "$STAGE" && mkdir -p "$STAGE"
+          # cp -c clones on APFS: no extra disk space. -p keeps permissions, -R copies symlinks as links;
+          # the code signature lives inside the bundle, so it is preserved.
+          cp -cpR "$found" "$STAGE/"
+          {
+            echo "channel=$channel"
+            echo "prune=$prune"
+            echo "version=$BUNDLE_VERSION-${GITHUB_SHA::7}"
+            echo "path=$STAGE"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Publish to RhythmHub
+        if: ${{ steps.rhythmhub.outputs.channel != '' }}
+        uses: sparkbarry/MajdataHub/.github/actions/upload-build@main
+        with:
+          game: MajdataPlay
+          platform: MacOS
+          version: ${{ steps.rhythmhub.outputs.version }}
+          build-path: ${{ steps.rhythmhub.outputs.path }}
+          entrypoint: MajdataPlay.app
+          role-arn: ${{ vars.AWS_ROLE_ARN }}
+          channel: ${{ steps.rhythmhub.outputs.channel }}
+          signing-key: ${{ secrets.RHYTHMHUB_SIGNING_KEY }}
+          prune-previous: ${{ steps.rhythmhub.outputs.prune }}
+
       - name: Remove temporary signing keychain
         if: ${{ always() && env.TARGET_PLATFORM == 'iOS' && steps.signing-keychain.outcome == 'success' }}
         run: |
@@ -716,7 +809,7 @@ jobs:
     runs-on: ubuntu-latest
     # Manual (workflow_dispatch) runs only produce workflow artifacts and must not
     # move the nightly tag or replace the public nightly release.
-    if: ${{ github.event_name == 'push' }}
+    if: ${{ github.event_name == 'push' && !startsWith(github.ref, 'refs/tags/') }}
     needs: [build, build-android, build-apple]
 
     steps:

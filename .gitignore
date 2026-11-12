@@ -171,3 +171,4 @@ out.log
 /Tools/Tests/FFmpegValidation/bin
 /Tools/Tests/FFmpegValidation/obj
 /Runtime
+machine_description.json.bak

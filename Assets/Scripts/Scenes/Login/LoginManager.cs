@@ -4,6 +4,7 @@ using MajdataPlay.Diagnostics;
 using MajdataPlay.IO;
 using MajdataPlay.Net;
 using MajdataPlay.Net.Models;
+using MajdataPlay.Settings.Sync;
 using QRCoder;
 using System;
 using System.Linq;
@@ -256,6 +257,7 @@ namespace MajdataPlay.Scenes.Login
                                         }
                                         ScoreManager.LoadOnlineScores(userScores);
                                         await UpdateApiEndpointRuntimeConfigAsync(endpoint, userInfo);
+                                        await AttachUserSettingsAsync(endpoint);
                                         break;
                                     }
                                     else if (rsp.StatusCode is HttpStatusCode.Accepted)
@@ -406,6 +408,7 @@ namespace MajdataPlay.Scenes.Login
                                 Hint();
                                 _loading.SetActive(false);
                                 await UpdateApiEndpointRuntimeConfigAsync(endpoint, userInfo);
+                                await AttachUserSettingsAsync(endpoint);
                                 break;
                             }
                         }
@@ -478,6 +481,20 @@ namespace MajdataPlay.Scenes.Login
             await UniTask.Delay(500);
             sceneSwitcher.SwitchScene("List", false);
         }
+        /// <summary>Switches the user settings to the copy of the account, and warns when the local copy stays in use.</summary>
+        /// <param name="endpoint">The endpoint the user just logged in on.</param>
+        /// <returns>A task completing when the settings have a source for this session.</returns>
+        private async UniTask AttachUserSettingsAsync(ApiEndpoint endpoint)
+        {
+            var result = await UserSettingSync.AttachAsync(endpoint);
+            if (result is UserSettingAttachResult.Degraded)
+            {
+                Hint("MAJTEXT_LOGIN_SETTING_SYNC_FAILED".i18n(), true);
+                // Keep the message readable before the login scene fades out to the list.
+                await UniTask.Delay(1500);
+            }
+        }
+
         private async ValueTask<UserData> FetchUserDataAsync(ApiEndpoint endpoint, CancellationToken token = default)
         {
             var fetchProfileRsp = await Online.Account.GetProfileAsync(endpoint, token);
