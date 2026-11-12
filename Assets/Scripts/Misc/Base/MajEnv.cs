@@ -12,6 +12,7 @@ using MajdataPlay.Net.Models;
 using MajdataPlay.Numerics;
 using MajdataPlay.Settings;
 using MajdataPlay.Settings.Runtime;
+using MajdataPlay.Settings.Sync;
 using MajdataPlay.Utils;
 #if UNITY_ANDROID
 using MajdataPlay.Platform.Android;
@@ -200,6 +201,11 @@ namespace MajdataPlay
         public static SystemSetting SystemSettings { get; private set; } = new();
         public static RuntimeConfig RuntimeConfig { get; private set; } = new();
         public static ApiEndpoint[]? ApiEndpoints { get; private set; }
+
+        /// <summary>Gets where <see cref="UserSettings"/> came from and where the next save writes them.</summary>
+        internal static UserSettingSource ActiveUserSettingSource { get; private set; } = UserSettingSource.Local;
+        /// <summary>Gets the account that owns <see cref="UserSettings"/>, or null while the local copy is in use.</summary>
+        internal static ApiEndpoint? UserSettingOwner { get; private set; }
 
         public static CancellationToken GlobalCT
         {
@@ -562,8 +568,7 @@ namespace MajdataPlay
             inputDevice.ButtonRing.DebounceThresholdMs = Math.Max(0, inputDevice.ButtonRing.DebounceThresholdMs);
             inputDevice.TouchPanel.DebounceThresholdMs = Math.Max(0, inputDevice.TouchPanel.DebounceThresholdMs);
 #endif
-            UserSettings.Judge.InnerJudgeDistance = UserSettings.Judge.InnerJudgeDistance.Clamp(0, 1);
-            UserSettings.Judge.OuterJudgeDistance = UserSettings.Judge.OuterJudgeDistance.Clamp(0, 1);
+            SanitizeUserSettings(UserSettings);
             ImportLegacyMachineDescription(systemDocument);
 
             MajDebug.MinLogLevel = SystemSettings.Debug.DebugLevel;
@@ -1015,6 +1020,8 @@ namespace MajdataPlay
         {
             GameManager.OnAppQuit -= OnApplicationQuit;
             GameManager.OnSave -= OnSave;
+            // The final save only queued its upload, so give it a bounded chance to reach the account before the process ends.
+            UserSettingSync.FlushOnQuit();
             SharedHttpClient.CancelPendingRequests();
             SharedHttpClient.Dispose();
 
@@ -1032,12 +1039,25 @@ namespace MajdataPlay
             //listConfig.SelectedDir = SongStorage.CollectionIndex;
 
             var systemJson = Serializer.Json.Serialize(SystemSettings, UserJsonReaderOption);
-            var userJson = Serializer.Json.Serialize(UserSettings, UserJsonReaderOption);
 
-            // A configuration deleted while running is written again on every backend.
-            // system-settings.json goes first: settings.json may still hold the legacy system settings until it is rewritten.
+            // system-settings.json describes this device, so it stays local whatever copy the user settings come from.
+            // It is written first: settings.json may still hold the legacy system settings until it is rewritten.
             SystemSettingsPath = WriteSettingsFile(SystemSettingsFileName, systemJson);
-            UserSettingsPath = WriteSettingsFile(UserSettingsFileName, userJson);
+
+            switch (ActiveUserSettingSource)
+            {
+                case UserSettingSource.Remote:
+                    // The account owns the settings, so the local file keeps the content of the last local session.
+                    UserSettingSync.QueuePush(SerializeUserSettings());
+                    break;
+                case UserSettingSource.Local:
+                    UserSettingsPath = WriteSettingsFile(UserSettingsFileName, Serializer.Json.Serialize(UserSettings, UserJsonReaderOption));
+                    break;
+                case UserSettingSource.Switching:
+                    // A switch owns both copies until it completes, so a save during it must not pick a destination.
+                    break;
+            }
+
             WriteRuntimeConfig(MajDatabase.Runtime, RuntimeConfig);
 
             MajDebug.FlushLog();
@@ -1109,6 +1129,132 @@ namespace MajdataPlay
             {
                 fileStream.Flush(flushToDisk: true);
             }
+        }
+
+        /// <summary>Gets the endpoint that stores the user settings of an account.</summary>
+        /// <returns>
+        /// The first configured endpoint, or null when none is configured. Only that endpoint exchanges user settings, so
+        /// the mirrors of a server never receive them.
+        /// </returns>
+        internal static ApiEndpoint? GetUserSettingEndpoint()
+        {
+            return ApiEndpoints is { Length: > 0 } endpoints ? endpoints[0] : null;
+        }
+
+        /// <summary>Changes where saves write the user settings without replacing the settings in memory.</summary>
+        /// <param name="source">The copy the settings came from.</param>
+        /// <param name="owner">The account owning the settings while <paramref name="source"/> is remote.</param>
+        internal static void SetUserSettingSource(UserSettingSource source, ApiEndpoint? owner)
+        {
+            ActiveUserSettingSource = source;
+            UserSettingOwner = owner;
+        }
+
+        /// <summary>Replaces the user settings in memory and points saves at the copy they came from.</summary>
+        /// <param name="settings">The user settings to use.</param>
+        /// <param name="source">The copy the settings came from.</param>
+        /// <param name="owner">The account owning the settings while <paramref name="source"/> is remote.</param>
+        /// <exception cref="ArgumentNullException"><paramref name="settings"/> is null.</exception>
+        internal static void ApplyUserSettings(UserSetting settings, UserSettingSource source, ApiEndpoint? owner)
+        {
+            if (settings is null)
+            {
+                throw new ArgumentNullException(nameof(settings));
+            }
+            SanitizeUserSettings(settings);
+            UserSettings = settings;
+            SetUserSettingSource(source, owner);
+        }
+
+        /// <summary>Returns to the local user settings after an account is left, so the account copy never reaches settings.json.</summary>
+        internal static void RestoreLocalUserSettings()
+        {
+            ApplyUserSettings(ReadLocalUserSettings(), UserSettingSource.Local, null);
+        }
+
+        /// <summary>Serializes the user settings in the layout the game stores.</summary>
+        /// <returns>
+        /// The settings document, which holds the user categories only. The categories describing the device live in
+        /// system-settings.json and therefore never appear in it.
+        /// </returns>
+        internal static string SerializeUserSettings()
+        {
+            return Serializer.Json.Serialize(UserSettings, UserJsonReaderOption);
+        }
+
+        /// <summary>Reads a user settings document of an account, upgrading the layout of older versions first.</summary>
+        /// <param name="json">The document text received from the account.</param>
+        /// <param name="settings">The settings the document holds, or null when it holds none.</param>
+        /// <returns>Whether the document holds settings, holds none, or cannot be read.</returns>
+        internal static UserSettingReadResult ReadUserSettings(string json, out UserSetting? settings)
+        {
+            settings = null;
+            if (string.IsNullOrWhiteSpace(json) || IsEmptySettingsDocument(json))
+            {
+                return UserSettingReadResult.Empty;
+            }
+            try
+            {
+                // The document of an account holds user settings only, so the system document stays empty.
+                var (user, _) = DeserializeSettings(json, null);
+                if (user is null)
+                {
+                    return UserSettingReadResult.Empty;
+                }
+                settings = user;
+                return UserSettingReadResult.Ok;
+            }
+            catch (Exception e)
+            {
+                MajDebug.LogError(nameof(MajEnv), $"Failed to read the user settings of the account\nException: {e}");
+                return UserSettingReadResult.Invalid;
+            }
+        }
+
+        /// <summary>Checks whether a document holds no settings, which distinguishes an unused account from default settings.</summary>
+        /// <param name="json">The document text.</param>
+        /// <returns>True when the text is empty, the JSON literal null, or an object without members.</returns>
+        private static bool IsEmptySettingsDocument(string json)
+        {
+            try
+            {
+                var document = Serializer.Json.Deserialize<JToken>(json, s_settingsDocumentOption);
+                if (document is null || document.Type == JTokenType.Null)
+                {
+                    return true;
+                }
+                return document is JObject root && !root.HasValues;
+            }
+            catch (JsonException)
+            {
+                // Unreadable text is reported by the caller as an invalid document.
+                return false;
+            }
+        }
+
+        /// <summary>Reads the user settings from settings.json without creating or writing the file.</summary>
+        /// <returns>The stored settings, defaults when the file holds none, and defaults when it cannot be read.</returns>
+        private static UserSetting ReadLocalUserSettings()
+        {
+            var file = RootDirectory.FindFile(UserSettingsFileName);
+            if (file is null)
+            {
+                return new UserSetting();
+            }
+            if (ReadUserSettings(file.ReadAllText(), out var settings) is UserSettingReadResult.Ok && settings is not null)
+            {
+                return settings;
+            }
+            MajDebug.LogWarning(nameof(MajEnv), $"Failed to read {UserSettingsFileName} after leaving the account; the local defaults are used.");
+            return new UserSetting();
+        }
+
+        /// <summary>Keeps the values of the user settings that the game can only use within a range.</summary>
+        /// <param name="settings">The user settings to correct in place.</param>
+        private static void SanitizeUserSettings(UserSetting settings)
+        {
+            settings.Judge.InnerJudgeDistance = settings.Judge.InnerJudgeDistance.Clamp(0, 1);
+            settings.Judge.OuterJudgeDistance = settings.Judge.OuterJudgeDistance.Clamp(0, 1);
         }
 
         /// <summary>Represents the single row holding the persisted <see cref="ListConfig"/> fields in the runtime database.</summary>

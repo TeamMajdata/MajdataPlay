@@ -363,6 +363,7 @@
     "MAJTEXT_LOGIN_LOGIN_FAILED": "Login Failed",
     "MAJTEXT_LOGIN_LOGIN_SUCCESS": "Login successful, fetching user data...",
     "MAJTEXT_LOGIN_SESSION_EXPIRED": "Login session expired",
+    "MAJTEXT_LOGIN_SETTING_SYNC_FAILED": "Failed to sync settings. The local settings are used for this session.",
     "MAJTEXT_LOGIN_UNKNOWN_ERROR": "Unknown error. Please contact the Majdata team.",
     "MAJTEXT_ERR_NO_CHART": "No charts",
     "MAJTEXT_ONLINE_METHOD_NOT_ALLOWED": "Request not allowed (HTTP 405). Try changing your online source or using a proxy.",
