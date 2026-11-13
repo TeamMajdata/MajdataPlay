@@ -55,6 +55,12 @@
                 <string>majnet_username</string>
                 <key>DefaultValue</key>
                 <string></string>
+                <key>KeyboardType</key>
+                <string>Default</string>
+                <key>AutocapitalizationType</key>
+                <string>None</string>
+                <key>AutocorrectionType</key>
+                <string>No</string>
                 <key>IsSecure</key>
                 <false/>
             </dict>
