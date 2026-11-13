@@ -200,7 +200,7 @@ namespace MajdataPlay
         /// <summary>Gets the system settings stored in system-settings.json, which describe this device and stay local.</summary>
         public static SystemSetting SystemSettings { get; private set; } = new();
         public static RuntimeConfig RuntimeConfig { get; private set; } = new();
-        public static ApiEndpoint[]? ApiEndpoints { get; private set; }
+        public static ApiEndpoint[] ApiEndpoints { get; private set; } = Array.Empty<ApiEndpoint>();
 
         /// <summary>Gets where <see cref="UserSettings"/> came from and where the next save writes them.</summary>
         internal static UserSettingSource ActiveUserSettingSource { get; private set; } = UserSettingSource.Local;
