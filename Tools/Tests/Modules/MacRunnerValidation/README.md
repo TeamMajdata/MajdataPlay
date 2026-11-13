@@ -4,6 +4,8 @@ Run on macOS with Python 3, Bash and Git:
 
 ```bash
 python3 -B Tools/Tests/Modules/MacRunnerValidation/test_mac_runner.py
+python3 -B Tools/Tests/Modules/MacRunnerValidation/test_ios_export.py
+python3 -B Tools/Tests/Modules/MacRunnerValidation/test_android_cache.py
 ```
 
 The tests use temporary repositories and fake Unity activation results. They
@@ -24,6 +26,12 @@ is rejected. Temporary
 signing keychains use absolute paths and unique names and are cleaned up even
 after failed jobs. Cleanup also covers paths containing spaces, a different home
 directory, and an import that did not create a keychain.
+
+The mobile export tests cover initial and subsequent iOS exports, including empty
+Xcode directories and paths containing spaces. Android cache tests invalidate
+graphs targeting a previous workspace even when that directory still exists,
+retain current caches and symlink aliases, and reject relative output paths or
+cache symlinks that could remove files outside the export.
 
 This suite does not validate Unity entitlements, network activation, project
 import, IL2CPP output, Xcode signing, or Android/iOS/macOS Player behavior. Run a

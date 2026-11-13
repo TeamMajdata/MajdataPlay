@@ -243,6 +243,9 @@ jobs:
           echo "sdk.dir=$GOOD_SDK" > local.properties
           echo "ndk.dir=$GOOD_NDK" >> local.properties
 
+      - name: Prepare Android IL2CPP caches
+        run: python3 Tools/CI/prepare_android_cache.py "$UNITY_PROJECT_EXPORT_PATH"
+
       - name: Generate Gradle Wrapper
         run: |
           cd ${{ env.UNITY_PROJECT_EXPORT_PATH }}
@@ -520,6 +523,11 @@ jobs:
           echo "BUNDLE_VERSION_CODE=$BUILD_NUMBER" >> $GITHUB_ENV
           echo "Apple build number: $BUILD_NUMBER"
 
+      - name: Select iOS export mode
+        id: ios-export
+        if: ${{ env.TARGET_PLATFORM == 'iOS' }}
+        run: python3 Tools/CI/prepare_ios_export.py "$CONFIGURATION/iOS/MajdataPlay"
+
       - name: Build Release
         uses: game-ci/unity-builder@v4
         with:
@@ -534,7 +542,7 @@ jobs:
           # The macOS player ships Apple silicon only: the x86_64 FFmpeg/libcurl dylibs are
           # Editor-only, and Unity drops ARM64-only plugins from a Universal player.
           buildMethod: ${{ env.TARGET_PLATFORM == 'StandaloneOSX' && 'MajdataPlay.Editor.CustomBuild.BuildRelease' || '' }}
-          customParameters: ${{ env.TARGET_PLATFORM == 'StandaloneOSX' && '-macOSArchitecture ARM64' || '-AcceptExternalModificationsToPlayer' }}
+          customParameters: ${{ env.TARGET_PLATFORM == 'StandaloneOSX' && '-macOSArchitecture ARM64' || steps.ios-export.outputs.custom_parameters }}
 
       - name: Preserve iOS IL2CPP compilation cache
         if: ${{ env.TARGET_PLATFORM == 'iOS' }}

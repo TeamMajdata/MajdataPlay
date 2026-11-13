@@ -112,9 +112,22 @@ files are patched. Repeated append exports can add the same build phase ID more
 than once to a target. The helper keeps its first reference, preserving phase
 order and references belonging to other targets, so Xcode does not create
 duplicate archive tasks.
+
+Before the Unity export, `prepare_ios_export.py` enables append mode only when
+the previous `Unity-iPhone.xcodeproj/project.pbxproj` exists and is nonempty.
+A fresh checkout or an empty export directory uses a normal initial export;
+unconditionally requesting append would fail before Unity creates the project.
 The archive also uses a fixed `Release/iOS/archive/MajdataPlay.xcarchive` path so
 successive CI runs replace their previous archive instead of accumulating dated
 archives in the runner account's Xcode Organizer directory.
+
+The Android export can also contain Bee graphs copied from another disk or
+workspace. `prepare_android_cache.py` checks the library output paths in each
+native `bee.dag.json` before Gradle runs. A relocated graph invalidates only its
+`il2cpp_cache`, leaving the exported project, symbols and Gradle caches intact.
+This prevents IL2CPP from reporting a successful no-op against the old workspace
+while the current export is missing its debug symbols. Matching paths, including
+symlink aliases to the same workspace, retain their native caches.
 
 Each iOS job imports signing certificates into a keychain in the runner temporary
 directory, using an absolute path named for its run ID and attempt and a masked
@@ -123,8 +136,8 @@ in the runner service session. Cleanup uses the same absolute path and removes
 the keychain even if a later step fails. This avoids the fixed `signing_temp` name colliding on the next
 job of a persistent runner. The user's login keychain is not deleted.
 
-Run `python3 -B Tools/Tests/Modules/MacRunnerValidation/test_mac_runner.py` on the
-Mac for isolated licensing/cleanup regression tests. Validate actual activation
+Run `python3 -B -m unittest discover -s Tools/Tests/Modules/MacRunnerValidation`
+on the Mac for isolated licensing, cleanup and mobile export regression tests. Validate actual activation
 and builds with `workflow_dispatch`; dispatches retain artifacts without
 publishing nightly releases, Google Play uploads or TestFlight submissions.
 Android AABs stay on the runner and are not uploaded as workflow artifacts; APK

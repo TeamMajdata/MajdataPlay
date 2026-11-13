@@ -178,8 +178,8 @@ class WorkspaceTests(unittest.TestCase):
         apple_job = workflow.split("  build-apple:", 1)[1].split("  publish-nightly:", 1)[0]
         self.assertIn("runs-on: [self-hosted, macOS, ARM64, majplay-android]", android_job)
         self.assertIn('runs-on: [self-hosted, macOS, ARM64, "${{ matrix.runnerLabel }}"]', apple_job)
-        self.assertIn("platform: StandaloneOSX\n            runnerLabel: majplay-apple", apple_job)
-        self.assertIn("platform: iOS\n            runnerLabel: majplay-ios", apple_job)
+        self.assertRegex(apple_job, r'"platform"\s*:\s*"StandaloneOSX",\s*"runnerLabel"\s*:\s*"majplay-apple"')
+        self.assertRegex(apple_job, r'"platform"\s*:\s*"iOS",\s*"runnerLabel"\s*:\s*"majplay-ios"')
         self.assertNotIn("max-parallel: 1", apple_job)
 
     def test_self_hosted_jobs_use_only_local_caches_and_skip_aab_artifacts(self):
@@ -272,7 +272,8 @@ class WorkspaceTests(unittest.TestCase):
     def test_ios_export_preserves_the_native_incremental_project(self):
         workflow = (ROOT / ".github/workflows/main.yml").read_text(encoding="utf-8")
         apple_job = workflow.split("  build-apple:", 1)[1].split("  publish-nightly:", 1)[0]
-        self.assertIn("'-AcceptExternalModificationsToPlayer'", apple_job)
+        self.assertIn('run: python3 Tools/CI/prepare_ios_export.py "$CONFIGURATION/iOS/MajdataPlay"', apple_job)
+        self.assertIn("steps.ios-export.outputs.custom_parameters", apple_job)
         self.assertIn("clean: false,", apple_job)
         self.assertIn('"Release", "iOS", "DerivedData"', apple_job)
 
