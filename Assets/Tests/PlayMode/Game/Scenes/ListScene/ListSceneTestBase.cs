@@ -1,4 +1,5 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using LitMotion;
 using MajdataPlay.Collections;
@@ -8,6 +9,7 @@ using MajdataPlay.Net.Models;
 using MajdataPlay.Scenes.Game;
 using MajdataPlay.Scenes.List;
 using MajdataPlay.Scenes.List.Models;
+using MajdataPlay.Scenes.Setting;
 using MajdataPlay.Tests.Game.Scenes.PlayMode.Support;
 using MajSimai;
 using NUnit.Framework;
@@ -80,6 +82,8 @@ namespace MajdataPlay.Tests.Game.Scenes.PlayMode.ListScene
             {
                 var level = CreateRect($"Level{i}", root.transform);
                 level.transform.localPosition = new Vector3(i * 10, 0, 0);
+                ((RectTransform)level.transform).pivot = new Vector2(0.5f, -0.35f);
+                level.AddComponent<CanvasGroup>();
                 CreateText("Text", level.transform);
             }
             return root;
@@ -99,6 +103,15 @@ namespace MajdataPlay.Tests.Game.Scenes.PlayMode.ListScene
             PrivateMember.SetField(displayer, "_coverDisplayer", cover);
             PrivateMember.SetField(displayer, "_levelDisplayerListRoot", CreateLevelRoot(displayer.transform));
             PrivateMember.SetField(displayer, "_loadingComponent", CreateRect("Loading", displayer.transform));
+            PrivateMember.SetField(displayer, "_levelRingDisplayer", CreateImage("Ring", displayer.transform));
+            var selected = CreateRect("SelectedLevel", displayer.transform);
+            ((RectTransform)selected.transform).sizeDelta = new Vector2(75f, 75f);
+            ((RectTransform)selected.transform).pivot = new Vector2(0.5f, -1.9f);
+            selected.transform.localRotation = Quaternion.Euler(0f, 0f, 50f);
+            PrivateMember.SetField(displayer, "_selectedLevelGroup", selected.AddComponent<CanvasGroup>());
+            PrivateMember.SetField(displayer, "_selectedLevelTitle", CreateText("Title", selected.transform));
+            PrivateMember.SetField(displayer, "_selectedLevelText", CreateText("Text", selected.transform));
+            PrivateMember.SetField(displayer, "_selectedLevelColor", CreateImage("Background", selected.transform));
             return displayer;
         }
 
@@ -222,14 +235,10 @@ namespace MajdataPlay.Tests.Game.Scenes.PlayMode.ListScene
         protected CenterCoverDisplayer CreateCenterCoverDisplayer(Transform parent)
         {
             var center = AddInactiveUi<CenterCoverDisplayer>("Center", parent);
-            var embedded = CreateRect("Embedded", center.transform);
             var favoriteRoot = CreateRect("Favorite", center.transform);
             var chartVisual = AddInactiveUi<ChartVisualDisplayer>("ChartVisual", center.transform);
             chartVisual.gameObject.AddComponent<RawImage>();
             Activate(chartVisual);
-            PrivateMember.SetField(center, "_levelRingDisplayer", CreateImage("Ring", center.transform));
-            PrivateMember.SetField(center, "_songCoverDisplayer", CreateImage("Cover", embedded.transform));
-            PrivateMember.SetField(center, "_loadingObj", CreateRect("Loading", center.transform));
             PrivateMember.SetField(center, "_scoreDisplayer", CreateScoreDisplayer(center.transform));
             PrivateMember.SetField(center, "_metadataDisplayer", CreateMetadataDisplayer(center.transform));
             PrivateMember.SetField(center, "_chartAnalyzer", chartVisual);
@@ -239,10 +248,6 @@ namespace MajdataPlay.Tests.Game.Scenes.PlayMode.ListScene
             PrivateMember.SetField(center, "_previewPlayer", Objects.Add<PreviewSoundPlayer>("Preview", center.transform));
             PrivateMember.SetField(center, "_favoriteAdder", CreateFavoriteAdder(favoriteRoot.transform));
             PrivateMember.SetField(center, "_bgSongCoverDisplayer", CreateImage("BGCover", center.transform));
-            PrivateMember.SetField(center, "_levelDisplayerListRoot", CreateLevelRoot(center.transform));
-            PrivateMember.SetField(center, "_selectedLevelTitle", CreateText("LevelTitle", center.transform));
-            PrivateMember.SetField(center, "_selectedLevelText", CreateText("LevelText", center.transform));
-            PrivateMember.SetField(center, "_selectedLevelColor", CreateImage("LevelColor", center.transform));
             Activate(center);
             _centers.Add(center);
             return center;
@@ -281,21 +286,74 @@ namespace MajdataPlay.Tests.Game.Scenes.PlayMode.ListScene
             var collectionRoot = CreateRect("Collections", collectionManager.transform);
             for (var i = 0; i < collectionDisplayers; i++)
             {
-                var displayer = AddInactiveUi<CollectionDisplayer>($"Collection{i}", collectionRoot.transform);
-                PrivateMember.SetField(displayer, "_iconDisplayer", CreateImage("Icon", displayer.transform));
-                PrivateMember.SetField(displayer, "_nameDisplayer", CreateText("Name", displayer.transform));
-                displayer.gameObject.SetActive(true);
+                CreateCollectionTab(collectionRoot.transform, $"Collection{i}");
             }
             PrivateMember.SetField(collectionManager, "_collectionListRoot", collectionRoot);
-            PrivateMember.SetField(collectionManager, "_nameDisplayer", CreateText("CollectionName", collectionManager.transform));
-            PrivateMember.SetField(collectionManager, "_iconDisplayer", CreateImage("CollectionIcon", collectionManager.transform));
             PrivateMember.SetField(collectionManager, "_centerCoverDisplayer", center);
             PrivateMember.SetField(collectionManager, "_coverListManager", coverManager);
-            PrivateMember.SetField(collectionManager, "_onlineCollectionIcon", CreateSprite("Online"));
-            PrivateMember.SetField(collectionManager, "_danCollectionIcon", CreateSprite("Dan"));
-            PrivateMember.SetField(collectionManager, "_folderCollectionIcon", CreateSprite("Folder"));
-            PrivateMember.SetField(collectionManager, "_favoriteCollectionIcon", CreateSprite("Favorite"));
             return (coverManager, collectionManager, center);
+        }
+
+        /// <summary>Reads the pooled visual currently assigned to a song index without constructing a second owner.</summary>
+        /// <param name="manager">The active cover list manager.</param>
+        /// <param name="index">The song index whose binding is required.</param>
+        /// <returns>The existing pooled song-cover displayer.</returns>
+        internal static SongCoverDisplayer BoundCover(CoverListManager manager, int index)
+        {
+            var bindings = PrivateMember.GetField<IEnumerable>(manager, "_songCoverBindings");
+            var current = 0;
+            foreach (var binding in bindings)
+            {
+                if (current++ == index)
+                {
+                    var displayer = PrivateMember.GetProperty<SongCoverDisplayer?>(binding, "Displayer");
+                    Assert.That(displayer, Is.Not.Null, "The requested song must have a real pool binding.");
+                    return displayer!;
+                }
+            }
+            Assert.Fail("The requested song index has no binding.");
+            return null!;
+        }
+
+        /// <summary>Creates one real moving category with the same two-background presentation as the Setting menu.</summary>
+        /// <param name="parent">The parent that owns the reusable category tabs.</param>
+        /// <param name="name">The fixture object's stable name.</param>
+        /// <returns>The initialized collection displayer with its presentation, text and icon references.</returns>
+        protected CollectionDisplayer CreateCollectionTab(Transform parent, string name)
+        {
+            var displayer = AddInactiveUi<CollectionDisplayer>(name, parent);
+            ((RectTransform)displayer.transform).sizeDelta = new Vector2(147.83f, 76.8f);
+            var tab = displayer.gameObject.AddComponent<MenuTitleDisplayer>();
+            var unselected = CreateImage("BG", displayer.transform);
+            unselected.color = new Color(0.9058824f, 0.9176471f, 0.9176471f, 1f);
+            var selected = CreateImage("SelectedBackground", displayer.transform);
+            selected.rectTransform.sizeDelta = new Vector2(254.69f, 82.3f);
+            selected.color = new Color(159f / 255f, 176f / 255f, 188f / 255f, 1f);
+            var title = CreateText("Name", parent);
+            title.fontSizeMax = 28f;
+            title.color = Color.gray;
+            title.transform.SetParent(displayer.transform, false);
+            var icon = CreateImage("Icon", displayer.transform);
+            icon.rectTransform.sizeDelta = new Vector2(24f, 24f);
+            icon.rectTransform.anchoredPosition = new Vector2(0f, 16f);
+            PrivateMember.SetField(tab, "_unselectedBackground", unselected);
+            PrivateMember.SetField(tab, "_selectedBackground", selected);
+            PrivateMember.SetField(tab, "_titleDisplayer", title);
+            PrivateMember.SetField(tab, "_selectedTextColor", Color.white);
+            PrivateMember.SetField(tab, "_selectedFontSizeMax", 32f);
+            PrivateMember.SetField(displayer, "_tabDisplayer", tab);
+            PrivateMember.SetField(displayer, "_iconDisplayer", icon);
+            PrivateMember.SetField(displayer, "_nameDisplayer", title);
+            PrivateMember.SetField(displayer, "_onlineCollectionIcon", CreateSprite("Online"));
+            PrivateMember.SetField(displayer, "_onlineCollectionIconColor", Color.cyan);
+            PrivateMember.SetField(displayer, "_danCollectionIcon", CreateSprite("Dan"));
+            PrivateMember.SetField(displayer, "_danCollectionIconColor", Color.magenta);
+            PrivateMember.SetField(displayer, "_folderCollectionIcon", CreateSprite("Folder"));
+            PrivateMember.SetField(displayer, "_folderCollectionIconColor", Color.yellow);
+            PrivateMember.SetField(displayer, "_favoriteCollectionIcon", CreateSprite("Favorite"));
+            PrivateMember.SetField(displayer, "_favoriteCollectionIconColor", Color.red);
+            Activate(displayer);
+            return displayer;
         }
 
         /// <summary>Activates the list managers so Awake runs now and Start on the next frame.</summary>

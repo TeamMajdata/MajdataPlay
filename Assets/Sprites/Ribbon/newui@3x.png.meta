@@ -45,7 +45,7 @@ TextureImporter:
   compressionQuality: 50
   spriteMode: 2
   spriteExtrude: 1
-  spriteMeshType: 1
+  spriteMeshType: 0
   alignment: 0
   spritePivot: {x: 0.5, y: 0.5}
   spritePixelsToUnits: 100
@@ -127,9 +127,9 @@ TextureImporter:
       rect:
         serializedVersion: 2
         x: 202.5
-        y: 11490
+        y: 11481
         width: 594
-        height: 585
+        height: 603
       alignment: 0
       pivot: {x: 0.5, y: 0.5}
       border: {x: 0, y: 0, z: 0, w: 0}
@@ -324,13 +324,13 @@ TextureImporter:
       name: newui@3x_2
       rect:
         serializedVersion: 2
-        x: 1829
-        y: 11900
-        width: 203
-        height: 164
+        x: 1796
+        y: 11854
+        width: 269
+        height: 256
       alignment: 0
       pivot: {x: 0.5, y: 0.5}
-      border: {x: 80, y: 82, z: 80, w: 82}
+      border: {x: 113, y: 128, z: 113, w: 128}
       customData: 
       outline:
       - - {x: 48.50006, y: -72.999756}
@@ -365,13 +365,13 @@ TextureImporter:
       name: newui@3x_3
       rect:
         serializedVersion: 2
-        x: 2165
-        y: 11910
-        width: 155
-        height: 155
+        x: 2130
+        y: 11862
+        width: 225
+        height: 251
       alignment: 0
       pivot: {x: 0.5, y: 0.5}
-      border: {x: 50, y: 50, z: 50, w: 50}
+      border: {x: 85, y: 98, z: 85, w: 98}
       customData: 
       outline:
       - - {x: 72.50006, y: -51}
@@ -397,13 +397,13 @@ TextureImporter:
       name: newui@3x_4
       rect:
         serializedVersion: 2
-        x: 2390
-        y: 11910
-        width: 155
-        height: 155
+        x: 2355
+        y: 11862
+        width: 225
+        height: 251
       alignment: 0
       pivot: {x: 0.5, y: 0.5}
-      border: {x: 50, y: 50, z: 50, w: 50}
+      border: {x: 85, y: 98, z: 85, w: 98}
       customData: 
       outline:
       - - {x: 75.50006, y: -54}
@@ -640,13 +640,13 @@ TextureImporter:
       name: newui@3x_6
       rect:
         serializedVersion: 2
-        x: 1796
-        y: 11489
-        width: 1043
-        height: 260
+        x: 1763
+        y: 11442
+        width: 1109
+        height: 354
       alignment: 0
       pivot: {x: 0.5, y: 0.5}
-      border: {x: 130, y: 130, z: 130, w: 130}
+      border: {x: 163, y: 177, z: 163, w: 177}
       customData: 
       outline:
       - - {x: 456.50006, y: -114.999756}
@@ -687,10 +687,10 @@ TextureImporter:
       name: newui@3x_7
       rect:
         serializedVersion: 2
-        x: 239
-        y: 10928
-        width: 1229
-        height: 296
+        x: 205
+        y: 10883
+        width: 1297
+        height: 386
       alignment: 0
       pivot: {x: 0.5, y: 0.5}
       border: {x: 0, y: 0, z: 0, w: 0}
@@ -765,10 +765,10 @@ TextureImporter:
       name: newui@3x_9
       rect:
         serializedVersion: 2
-        x: 5339
-        y: 10223
-        width: 932
-        height: 932
+        x: 5307
+        y: 10179
+        width: 996
+        height: 1020
       alignment: 0
       pivot: {x: 0.5, y: 0.5}
       border: {x: 0, y: 0, z: 0, w: 0}
@@ -951,10 +951,10 @@ TextureImporter:
       name: newui@3x_10
       rect:
         serializedVersion: 2
-        x: 7106
-        y: 7105
-        width: 4740
-        height: 4740
+        x: 7079
+        y: 7069
+        width: 4794
+        height: 4812
       alignment: 0
       pivot: {x: 0.5, y: 0.5}
       border: {x: 0, y: 0, z: 0, w: 0}
@@ -2028,10 +2028,10 @@ TextureImporter:
       name: newui@3x_13
       rect:
         serializedVersion: 2
-        x: 3590
-        y: 10400
-        width: 494
-        height: 494
+        x: 3556
+        y: 10356
+        width: 562
+        height: 582
       alignment: 0
       pivot: {x: 0.5, y: 0.5}
       border: {x: 0, y: 0, z: 0, w: 0}
@@ -2255,10 +2255,10 @@ TextureImporter:
       name: newui@3x_14
       rect:
         serializedVersion: 2
-        x: 4142
-        y: 10400
-        width: 494
-        height: 494
+        x: 4108
+        y: 10354
+        width: 562
+        height: 586
       alignment: 0
       pivot: {x: 0.5, y: 0.5}
       border: {x: 0, y: 0, z: 0, w: 0}
@@ -2333,10 +2333,10 @@ TextureImporter:
       name: newui@3x_15
       rect:
         serializedVersion: 2
-        x: 241.5
-        y: 8200.5
-        width: 3087
-        height: 1746
+        x: 215.5
+        y: 8159.5
+        width: 3139
+        height: 1828
       alignment: 0
       pivot: {x: 0.5, y: 0.5}
       border: {x: 0, y: 0, z: 0, w: 0}
@@ -2510,10 +2510,10 @@ TextureImporter:
       name: newui@3x_16
       rect:
         serializedVersion: 2
-        x: 3675
-        y: 9021
-        width: 1432.5
-        height: 958.5
+        x: 3637
+        y: 8972
+        width: 1508.5
+        height: 1056.5
       alignment: 0
       pivot: {x: 0.5, y: 0.5}
       border: {x: 0, y: 0, z: 0, w: 0}
@@ -2710,10 +2710,10 @@ TextureImporter:
       name: newui@3x_19
       rect:
         serializedVersion: 2
-        x: 3856.5
-        y: 7651.5
-        width: 2988
-        height: 1143
+        x: 3826.5
+        y: 7609.5
+        width: 3048
+        height: 1227
       alignment: 0
       pivot: {x: 0.5, y: 0.5}
       border: {x: 0, y: 0, z: 0, w: 0}
@@ -2941,10 +2941,10 @@ TextureImporter:
       name: newui@3x_20
       rect:
         serializedVersion: 2
-        x: 362
-        y: 6646
-        width: 1400
-        height: 1400
+        x: 327
+        y: 6600
+        width: 1470
+        height: 1492
       alignment: 0
       pivot: {x: 0.5, y: 0.5}
       border: {x: 0, y: 0, z: 0, w: 0}
@@ -3098,10 +3098,10 @@ TextureImporter:
       name: newui@3x_21
       rect:
         serializedVersion: 2
-        x: 2015
-        y: 6646
-        width: 1400
-        height: 1400
+        x: 1980
+        y: 6600
+        width: 1470
+        height: 1492
       alignment: 0
       pivot: {x: 0.5, y: 0.5}
       border: {x: 0, y: 0, z: 0, w: 0}
@@ -3261,10 +3261,10 @@ TextureImporter:
       name: newui@3x_22
       rect:
         serializedVersion: 2
-        x: 3804
-        y: 5779.5
-        width: 3090
-        height: 1747.5
+        x: 3776
+        y: 5736.5
+        width: 3146
+        height: 1833.5
       alignment: 0
       pivot: {x: 0.5, y: 0.5}
       border: {x: 0, y: 0, z: 0, w: 0}
@@ -3448,10 +3448,10 @@ TextureImporter:
       name: newui@3x_23
       rect:
         serializedVersion: 2
-        x: 243
-        y: 4734
-        width: 3084
-        height: 1743
+        x: 207
+        y: 4685
+        width: 3156
+        height: 1841
       alignment: 0
       pivot: {x: 0.5, y: 0.5}
       border: {x: 0, y: 0, z: 0, w: 0}
@@ -3613,9 +3613,9 @@ TextureImporter:
       rect:
         serializedVersion: 2
         x: 3777
-        y: 2915
+        y: 2867
         width: 3144
-        height: 2713
+        height: 2809
       alignment: 0
       pivot: {x: 0.5, y: 0.5}
       border: {x: 0, y: 0, z: 0, w: 0}
@@ -3937,10 +3937,10 @@ TextureImporter:
       name: newui@3x_25
       rect:
         serializedVersion: 2
-        x: 269
-        y: 3080
-        width: 2927
-        height: 1238
+        x: 237
+        y: 3035
+        width: 2991
+        height: 1328
       alignment: 0
       pivot: {x: 0.5, y: 0.5}
       border: {x: 0, y: 0, z: 0, w: 0}
@@ -4036,13 +4036,13 @@ TextureImporter:
       name: newui@3x_26
       rect:
         serializedVersion: 2
-        x: 554
-        y: 1698
-        width: 3058
-        height: 975
+        x: 522
+        y: 1691
+        width: 3122
+        height: 989
       alignment: 0
       pivot: {x: 0.5, y: 0.5}
-      border: {x: 419, y: 103, z: 187, w: 133}
+      border: {x: 451, y: 110, z: 219, w: 140}
       customData: 
       outline:
       - - {x: -1123, y: -436.5}
@@ -4123,10 +4123,10 @@ TextureImporter:
       name: newui@3x_79
       rect:
         serializedVersion: 2
-        x: 8228
-        y: 1622
-        width: 1861
-        height: 1063
+        x: 8196
+        y: 1588
+        width: 1925
+        height: 1131
       alignment: 0
       pivot: {x: 0.5, y: 0.5}
       border: {x: 0, y: 0, z: 0, w: 0}
@@ -4237,10 +4237,10 @@ TextureImporter:
       name: newui@3x_80
       rect:
         serializedVersion: 2
-        x: 3089
-        y: 1595
-        width: 146
-        height: 77
+        x: 3057
+        y: 1551
+        width: 210
+        height: 141
       alignment: 0
       pivot: {x: 0.5, y: 0.5}
       border: {x: 0, y: 0, z: 0, w: 0}
@@ -4269,13 +4269,13 @@ TextureImporter:
       name: newui@3x_81
       rect:
         serializedVersion: 2
-        x: 1992
-        y: 101
-        width: 1531
-        height: 1401
+        x: 1959
+        y: 54
+        width: 1597
+        height: 1495
       alignment: 0
       pivot: {x: 0.5, y: 0.5}
-      border: {x: 516, y: 0, z: 516, w: 775}
+      border: {x: 549, y: 47, z: 549, w: 822}
       customData: 
       outline:
       - - {x: 739.5, y: -690.99994}
@@ -4302,10 +4302,10 @@ TextureImporter:
       name: newui@3x_82
       rect:
         serializedVersion: 2
-        x: 3659
-        y: 95
-        width: 2789
-        height: 1412
+        x: 3626
+        y: 51
+        width: 2855
+        height: 1500
       alignment: 0
       pivot: {x: 0.5, y: 0.5}
       border: {x: 0, y: 0, z: 0, w: 0}
@@ -4339,10 +4339,10 @@ TextureImporter:
       name: newui@3x_83
       rect:
         serializedVersion: 2
-        x: 6554
-        y: 143
-        width: 3098
-        height: 1400
+        x: 6521
+        y: 98
+        width: 3164
+        height: 1490
       alignment: 0
       pivot: {x: 0.5, y: 0.5}
       border: {x: 0, y: 0, z: 0, w: 0}

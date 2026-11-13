@@ -1,66 +1,26 @@
-﻿using LitMotion;
+using LitMotion;
 using MajdataPlay.Collections;
 using MajdataPlay.Editor;
 using MajdataPlay.Scenes.List.Models;
+using MajdataPlay.Scenes.Setting;
 using MajdataPlay.Settings.Runtime;
 using System;
 using System.Linq;
 using System.Threading.Tasks;
-using TMPro;
 using UnityEngine;
 using UnityEngine.Serialization;
-using UnityEngine.UI;
 #nullable enable
 namespace MajdataPlay.Scenes.List
 {
     public class CollectionListManager : MonoBehaviour
     {
-        const int DISPLAYER_ANIM_DURATION_MS = 250;
-        const float VISIBLE_COLLECTION_DISTANCE = 3f;
+        /// <summary>Defines the collection scroll and navigation-arrow transition duration in seconds.</summary>
+        private const float CollectionTransitionDurationSeconds = 0.25f;
+
+        /// <summary>Limits binding to the category tabs within this index distance of the visible cursor.</summary>
+        private const float VisibleCollectionDistance = 3f;
 
         public SongCollection SelectedCollection => _currentCollection;
-
-        #region icon and color ref
-        [SerializeField]
-        [FormerlySerializedAs("onlineCollectionIcon")]
-        Sprite _onlineCollectionIcon;
-
-        [SerializeField]
-        [FormerlySerializedAs("onlineCollectionIconColor")]
-        Color _onlineCollectionIconColor;
-
-        [SerializeField]
-        [FormerlySerializedAs("folderCollectionIcon")]
-        Sprite _folderCollectionIcon;
-
-        [SerializeField]
-        [FormerlySerializedAs("folderCollectionIconColor")]
-        Color _folderCollectionIconColor;
-
-        [SerializeField]
-        [FormerlySerializedAs("favoriteCollectionIcon")]
-        Sprite _favoriteCollectionIcon;
-
-        [SerializeField]
-        [FormerlySerializedAs("favoriteCollectionIconColor")]
-        Color _favoriteCollectionIconColor;
-
-        [SerializeField]
-        [FormerlySerializedAs("onlineFavoriteCollectionIcon")]
-        Sprite _onlineFavoriteCollectionIcon;
-
-        [SerializeField]
-        [FormerlySerializedAs("onlineFavoriteCollectionIconColor")]
-        Color _onlineFavoriteCollectionIconColor;
-
-        [SerializeField]
-        [FormerlySerializedAs("danCollectionIcon")]
-        Sprite _danCollectionIcon;
-
-        [SerializeField]
-        [FormerlySerializedAs("danCollectionIconColor")]
-        Color _danCollectionIconColor;
-        #endregion
 
         [SerializeField]
         [FormerlySerializedAs("centerCoverDisplayer")]
@@ -74,13 +34,10 @@ namespace MajdataPlay.Scenes.List
         [FormerlySerializedAs("collectionListRoot")]
         GameObject _collectionListRoot;
 
+        /// <summary>Controls only the independent navigation arrows without fading any moving category.</summary>
         [SerializeField]
-        [FormerlySerializedAs("nameDisplayer")]
-        TextMeshProUGUI _nameDisplayer;
-
-        [SerializeField]
-        [FormerlySerializedAs("iconDisplayer")]
-        Image _iconDisplayer;
+        [FormerlySerializedAs("NavigationArrows")]
+        private CanvasGroup? _navigationArrows;
 
         [SerializeField, ReadOnlyField]
         int _selectedDifficulty = 0;
@@ -90,7 +47,11 @@ namespace MajdataPlay.Scenes.List
         [SerializeField, ReadOnlyField]
         float _listCursorPos = 0;
 
-        SongCollection _currentCollection = SongCollection.Empty("Empty");
+        /// <summary>Reuses one harmless selection while storage has no published collections.</summary>
+        private readonly SongCollection _emptyCollection = SongCollection.Empty("Empty");
+
+        /// <summary>Stores the current sorted collection, or the reusable empty selection after initialization.</summary>
+        private SongCollection _currentCollection = null!;
         SongCollection[] _collections = Array.Empty<SongCollection>();
 
         CollectionDisplayer[] _collectionDisplayers = Array.Empty<CollectionDisplayer>();
@@ -110,6 +71,7 @@ namespace MajdataPlay.Scenes.List
 
         void Awake()
         {
+            _currentCollection = _emptyCollection;
             Majdata<CollectionListManager>.Instance = this;
             var collectionListRoot = _collectionListRoot.transform;
             var displayerCount = collectionListRoot.childCount;
@@ -138,12 +100,32 @@ namespace MajdataPlay.Scenes.List
                 }
             }
         }
+        private void OnEnable()
+        {
+            if (_collections.Length > 0)
+            {
+                NormalizeListCursor();
+            }
+        }
+        private void OnDisable()
+        {
+            _scrollMotion.TryCancel();
+            _listCursorPos = _listDesiredPos;
+            SetNavigationAlpha(1f);
+        }
         void OnDestroy()
         {
             _scrollMotion.TryCancel();
         }
         internal void Init()
         {
+            _scrollMotion.TryCancel();
+            // A refreshed snapshot can reuse the same indices for different collections.
+            Array.Fill(_collectionDisplayerIndices, -1);
+            foreach (var displayer in _collectionDisplayers)
+            {
+                displayer.SetActive(false);
+            }
             InitCollectionStorage();
             RestoreContextFromConfiguration();
         }
@@ -178,12 +160,20 @@ namespace MajdataPlay.Scenes.List
         }
         void SlideListTo(int pos, bool disableAnimation, bool forceUpdate)
         {
+            if (_collections.Length == 0)
+            {
+                _listDesiredPos = 0;
+                _currentCollection = _emptyCollection;
+                _scrollMotion.TryCancel();
+                _coverListManager.SetCollection(_currentCollection, false);
+                NormalizeListCursor();
+                return;
+            }
             var oldDesiredPos = _listDesiredPos;
             var crossesBoundary = pos < 0 || pos >= _collections.Length;
             _listDesiredPos = WrapIndex(pos, _collections.Length);
             UpdateSelectedSongCollection();
             UpdateListConfiguration();
-            UpdateCollectionIcon();
             var shouldUpdate = _listDesiredPos != oldDesiredPos || forceUpdate;
             if (!shouldUpdate)
             {
@@ -194,12 +184,11 @@ namespace MajdataPlay.Scenes.List
             if (disableAnimation || crossesBoundary)
             {
                 _scrollMotion.TryCancel();
-                _listCursorPos = _listDesiredPos;
-                UpdateDisplayerPosition();
+                NormalizeListCursor();
             }
             else
             {
-                DisplayerMoveTo(_listDesiredPos, DISPLAYER_ANIM_DURATION_MS / 1000f);
+                DisplayerMoveTo(_listDesiredPos, CollectionTransitionDurationSeconds);
             }
         }
         void SlideToDifficulty(int pos)
@@ -210,6 +199,7 @@ namespace MajdataPlay.Scenes.List
             UpdateSelectedSongCollection();
 
             _centerCoverDisplayer.SetDifficulty(_selectedDifficulty);
+            _coverListManager.SetDifficulty(_selectedDifficulty);
             _coverListManager.SetCollection(_currentCollection, true);
         }
 
@@ -238,19 +228,48 @@ namespace MajdataPlay.Scenes.List
 
         void DisplayerMoveTo(float targetPos, float duration)
         {
+            var startPos = _listCursorPos;
+            var initialArrowAlpha = _navigationArrows != null ? _navigationArrows.alpha : 1f;
             _scrollMotion.TryCancel();
-            _scrollMotion = LMotion.Create(_listCursorPos, targetPos, duration)
+            _scrollMotion = LMotion.Create(0f, 1f, duration)
                                    .WithScheduler(MotionScheduler.PostLateUpdate)
-                                   .WithEase(Ease.OutQuad)
+                                   .WithEase(Ease.Linear)
                                    .WithOnComplete(NormalizeListCursor)
-                                   .Bind(x =>
-                                   {
-                                       _listCursorPos = x;
-                                       UpdateDisplayerPosition();
-                                   });
+                                   .Bind(progress => UpdateScrollPresentation(progress, startPos, targetPos, initialArrowAlpha));
         }
+
+        /// <summary>Uses one transition clock for the original OutQuad scroll and the arrow fade-out/pause/fade-in.</summary>
+        /// <param name="progress">The linear zero-to-one transition time.</param>
+        /// <param name="startPos">The cursor position captured before the previous transition was cancelled.</param>
+        /// <param name="targetPos">The new desired collection position.</param>
+        /// <param name="initialArrowAlpha">The current arrow opacity, retained when a rapid selection interrupts a fade.</param>
+        private void UpdateScrollPresentation(float progress, float startPos, float targetPos, float initialArrowAlpha)
+        {
+            progress = Mathf.Clamp01(progress);
+            var scrollProgress = progress * (2f - progress);
+            _listCursorPos = Mathf.Lerp(startPos, targetPos, scrollProgress);
+            UpdateDisplayerPosition();
+
+            SetNavigationAlpha(MenuTitleDisplayer.GetNavigationAlpha(progress, initialArrowAlpha));
+        }
+
+        /// <summary>Updates the optional navigation-only group while preserving input and category opacity.</summary>
+        /// <param name="alpha">The arrow opacity to apply.</param>
+        private void SetNavigationAlpha(float alpha)
+        {
+            if (_navigationArrows != null)
+            {
+                _navigationArrows.alpha = alpha;
+            }
+        }
+
         void UpdateSelectedSongCollection()
         {
+            if (_collections.Length == 0)
+            {
+                _currentCollection = _emptyCollection;
+                return;
+            }
             switch (_listConfig.SelectedDiff)
             {
                 case ChartLevel.Easy:
@@ -277,7 +296,6 @@ namespace MajdataPlay.Scenes.List
                 default:
                     throw new ArgumentOutOfRangeException("sb");
             }
-            _nameDisplayer.text = _currentCollection.Name;
         }
         void UpdateDisplayerPosition()
         {
@@ -287,10 +305,10 @@ namespace MajdataPlay.Scenes.List
                 return;
             }
 
-            var firstVisibleIndex = Mathf.Max(0, Mathf.CeilToInt(_listCursorPos - VISIBLE_COLLECTION_DISTANCE));
+            var firstVisibleIndex = Mathf.Max(0, Mathf.CeilToInt(_listCursorPos - VisibleCollectionDistance));
             var lastVisibleIndex = Mathf.Min(
                 _collections.Length - 1,
-                Mathf.FloorToInt(_listCursorPos + VISIBLE_COLLECTION_DISTANCE));
+                Mathf.FloorToInt(_listCursorPos + VisibleCollectionDistance));
 
             for (var i = 0; i < displayerCount; i++)
             {
@@ -329,11 +347,12 @@ namespace MajdataPlay.Scenes.List
 
                 var displayer = _collectionDisplayers[i];
                 var distance = collectionIndex - _listCursorPos;
-                displayer.RectTransform.anchoredPosition = GetDisplayerPositionFromDelta(distance);
+                displayer.SetDistance(distance);
             }
         }
         void NormalizeListCursor()
         {
+            SetNavigationAlpha(1f);
             _listCursorPos = _listDesiredPos;
             UpdateDisplayerPosition();
         }
@@ -353,45 +372,6 @@ namespace MajdataPlay.Scenes.List
         {
             _listConfig.SelectedDirGuid = _currentCollection.Id;
         }
-        void UpdateCollectionIcon()
-        {
-            switch (_currentCollection.Type)
-            {
-                case ChartStorageType.List:
-                    if (_currentCollection.IsOnline)
-                    {
-                        _iconDisplayer.enabled = true;
-                        _iconDisplayer.sprite = _onlineCollectionIcon;
-                        _iconDisplayer.color = _onlineCollectionIconColor;
-                    }
-                    else
-                    {
-                        _iconDisplayer.enabled = false;
-                    }
-                    break;
-                case ChartStorageType.Recommend:
-                    _iconDisplayer.enabled = true;
-                    _iconDisplayer.sprite = _onlineCollectionIcon;
-                    _iconDisplayer.color = _onlineCollectionIconColor;
-                    break;
-                case ChartStorageType.Dan:
-                    _iconDisplayer.enabled = true;
-                    _iconDisplayer.sprite = _danCollectionIcon;
-                    _iconDisplayer.color = _danCollectionIconColor;
-                    break;
-                case ChartStorageType.PlayList:
-                    _iconDisplayer.enabled = true;
-                    _iconDisplayer.sprite = _folderCollectionIcon;
-                    _iconDisplayer.color = _folderCollectionIconColor;
-                    break;
-                case ChartStorageType.FavoriteList:
-                    _iconDisplayer.enabled = true;
-                    _iconDisplayer.sprite = _favoriteCollectionIcon;
-                    _iconDisplayer.color = _favoriteCollectionIconColor;
-                    break;
-            }
-        }
-
         void InitCollectionStorage()
         {
             var collections = SongStorage.Collections;
@@ -569,6 +549,10 @@ namespace MajdataPlay.Scenes.List
                 }
                 SlideListTo(index, true, true);
                 SlideToDifficulty((int)_listConfig.SelectedDiff);
+                if (_collections.Length == 0)
+                {
+                    return;
+                }
                 if (string.IsNullOrEmpty(selectedSongId))
                 {
                     _coverListManager.SlideListToHead();
@@ -576,7 +560,7 @@ namespace MajdataPlay.Scenes.List
                 else
                 {
                     // A missing song still moves the cursor to the first song, as an unmatched cursor always has.
-                    var selectedSong = _collections.Length == 0 ? null : SongStorage.FindSongById(_collections[index], selectedSongId);
+                    var selectedSong = SongStorage.FindSongById(_collections[index], selectedSongId);
                     _coverListManager.SetCursor(selectedSong?.Hash ?? string.Empty, true, true);
                 }
             }
@@ -587,24 +571,5 @@ namespace MajdataPlay.Scenes.List
             }
         }
 
-        Vector2 GetDisplayerPositionFromDelta(float delta)
-        {
-            const int X_POS_WITH_DELTA_1 = 240;
-            const int X_POS_WITH_DELTA_2 = 390;
-            const int X_POS_WITH_DELTA_3 = 540;
-            const int X_POS_WITH_DELTA_4 = 690;
-            var absDelta = Mathf.Abs(delta);
-
-            var x = absDelta switch
-            {
-                <= 1f => 240f * absDelta,
-                <= 2f => Mathf.Lerp(X_POS_WITH_DELTA_1, X_POS_WITH_DELTA_2, absDelta - 1f),
-                <= 3f => Mathf.Lerp(X_POS_WITH_DELTA_2, X_POS_WITH_DELTA_3, absDelta - 2f),
-                <= 4f => Mathf.Lerp(X_POS_WITH_DELTA_3, X_POS_WITH_DELTA_4, absDelta - 3f),
-                _ => X_POS_WITH_DELTA_4
-            };
-
-            return new Vector2(Mathf.Sign(delta) * x, 0);
-        }
     }
 }

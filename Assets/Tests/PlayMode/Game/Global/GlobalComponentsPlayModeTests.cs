@@ -80,7 +80,11 @@ namespace MajdataPlay.Tests.Game.Global.PlayMode
                 var renderers = renderer.GetComponentsInChildren<MeshRenderer>(true);
                 Assert.That(renderer.InstanceID2SensorIndexMappingTable, Has.Count.EqualTo(34));
                 Assert.That(renderers[0].enabled, Is.False, "sensors start hidden");
-                Assert.That(renderers[0].sortingOrder, Is.EqualTo(short.MaxValue));
+                foreach (var sensor in renderers)
+                {
+                    Assert.That(sensor.sortingLayerName, Is.EqualTo("Debug"));
+                    Assert.That(sensor.sortingOrder, Is.EqualTo(short.MaxValue));
+                }
 
                 _settings.UserSettings.Display.DisplaySensor = true;
                 _settings.UserSettings.Display.SensorOpacity = 30;

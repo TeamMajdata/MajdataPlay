@@ -52,9 +52,9 @@ namespace MajdataPlay.Tests.Game.Scenes.PlayMode.SettingScene
             Activate(_displayer);
         }
 
-        /// <summary>Checks that Awake centers the title anchors and exposes the title font.</summary>
+        /// <summary>Checks that the displayer retains the authored title anchors and exposes the title font.</summary>
         [Test]
-        public void Awake_CentersTitleAndExposesFont()
+        public void Awake_PreservesTitleAnchorsAndExposesFont()
         {
             Assert.That(_title.rectTransform.anchorMin, Is.EqualTo(new Vector2(0.5f, 0.5f)));
             Assert.That(_title.rectTransform.anchorMax, Is.EqualTo(new Vector2(0.5f, 0.5f)));
@@ -104,6 +104,58 @@ namespace MajdataPlay.Tests.Game.Scenes.PlayMode.SettingScene
             _displayer.SetDistance(0.5f);
             Assert.That(rect.anchoredPosition.x, Is.EqualTo(109f).Within(1e-3f));
             Assert.That(rect.sizeDelta, Is.EqualTo(new Vector2(250, 70)));
+        }
+
+        /// <summary>Checks unchanged selection blends only move the tab and changed blends restore its computed appearance.</summary>
+        [Test]
+        public void SetDistance_UnchangedSelectionBlend_OnlyUpdatesPosition()
+        {
+            _displayer.SetDistance(2f);
+            var rect = (RectTransform)_displayer.transform;
+            var retainedSize = new Vector2(210f, 65f);
+            var retainedUnselectedColor = Color.red;
+            var retainedSelectedColor = Color.green;
+            var retainedScale = new Vector3(0.8f, 0.8f, 1f);
+            rect.sizeDelta = retainedSize;
+            _unselected.color = retainedUnselectedColor;
+            _selected.color = retainedSelectedColor;
+            _title.rectTransform.localScale = retainedScale;
+
+            _displayer.SetDistance(3f);
+
+            Assert.That(rect.anchoredPosition.x, Is.EqualTo(218f + 164f * 2f));
+            Assert.That(rect.sizeDelta, Is.EqualTo(retainedSize));
+            Assert.That(_unselected.color, Is.EqualTo(retainedUnselectedColor));
+            Assert.That(_selected.color, Is.EqualTo(retainedSelectedColor));
+            Assert.That(_title.rectTransform.localScale, Is.EqualTo(retainedScale));
+
+            _displayer.SetDistance(0.5f);
+
+            Assert.That(rect.anchoredPosition.x, Is.EqualTo(109f));
+            Assert.That(rect.sizeDelta, Is.EqualTo(new Vector2(250f, 70f)));
+            Assert.That(_unselected.color.a, Is.EqualTo(0.4f).Within(1e-4f));
+            Assert.That(_selected.color.a, Is.EqualTo(0.25f).Within(1e-4f));
+            Assert.That(_title.rectTransform.localScale.x, Is.EqualTo(1.5f).Within(1e-4f));
+            Assert.That(_title.canvasRenderer.GetColor(), Is.EqualTo(Color.Lerp(Color.gray, Color.white, 0.5f)));
+        }
+
+        /// <summary>Checks the shared navigation-only fade, including a transition interrupted at partial opacity.</summary>
+        /// <param name="progress">The normalized category transition time.</param>
+        /// <param name="initialAlpha">The arrow opacity inherited from the preceding transition.</param>
+        /// <param name="expectedAlpha">The expected arrow opacity without fading category contents.</param>
+        [TestCase(0f, 1f, 1f)]
+        [TestCase(0.1f, 1f, 0.5f)]
+        [TestCase(0.2f, 1f, 0f)]
+        [TestCase(0.5f, 1f, 0f)]
+        [TestCase(0.8f, 1f, 0f)]
+        [TestCase(0.9f, 1f, 0.5f)]
+        [TestCase(1f, 1f, 1f)]
+        [TestCase(0f, 0.4f, 0.4f)]
+        [TestCase(0.1f, 0.4f, 0.2f)]
+        [TestCase(0.9f, 0.4f, 0.5f)]
+        public void NavigationAlpha_KeepsTheSharedFadeAndInterruptedOpacity(float progress, float initialAlpha, float expectedAlpha)
+        {
+            Assert.That(MenuTitleDisplayer.GetNavigationAlpha(progress, initialAlpha), Is.EqualTo(expectedAlpha).Within(0.0001f));
         }
 
         /// <summary>Checks that the title text follows its localization key and language changes while enabled.</summary>

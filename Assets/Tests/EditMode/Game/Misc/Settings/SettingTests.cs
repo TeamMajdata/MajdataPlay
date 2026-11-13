@@ -1,6 +1,7 @@
 using System.Linq;
 using MajdataPlay.Diagnostics;
 using MajdataPlay.i18n;
+using MajdataPlay.Rendering;
 using MajdataPlay.Settings;
 using MajdataPlay.Settings.Runtime;
 using MajdataPlay.Utils;
@@ -61,7 +62,9 @@ namespace MajdataPlay.Tests.Game.Misc.Settings
             Assert.That(user.Touch.TouchSimulationRadius, Is.EqualTo(0.5f));
             Assert.That(user.Touch.TouchCAreaExtraRadius, Is.EqualTo(0.25f));
             Assert.That(system.Common.RecordMode, Is.EqualTo(RecordModeOption.Disable));
-            Assert.That(system.Rendering.RenderQuality, Is.EqualTo(RenderingQualityOption.Performance));
+            Assert.That(system.Rendering.RenderQuality, Is.EqualTo(RenderingQualityOption.Beautiful));
+            Assert.That(system.Rendering.AntiAliasing, Is.EqualTo(RenderingAntialiasingOption.Disabled));
+            Assert.That(system.Rendering.UIOutlineMode, Is.EqualTo(UiOutlineMode.All));
             Assert.That(system.Rendering.DisplayRuntimeInfo, Is.True);
             Assert.That(system.Audio.Bass.BufferLengthMs, Is.EqualTo(1000));
             Assert.That(system.Debug.DebugLevel, Is.EqualTo(LogLevel.Info));
@@ -149,7 +152,7 @@ namespace MajdataPlay.Tests.Game.Misc.Settings
             Assert.That(restoredUser.Touch.TouchRadiusAdjust, Is.EqualTo(0.35f));
             Assert.That(restoredSystem.Common.RecordMode, Is.EqualTo(RecordModeOption.FFmpeg));
             Assert.That(restoredSystem.Rendering.RenderQuality, Is.EqualTo(RenderingQualityOption.Beautiful));
-            Assert.That(restoredSystem.Rendering.AntiAliasing, Is.EqualTo(RenderingAntialiasingOption.MSAA4x));
+            Assert.That(restoredSystem.Rendering.AntiAliasing, Is.EqualTo(RenderingAntialiasingOption.Disabled));
             Assert.That(restoredSystem.Rendering.FPSLimit, Is.EqualTo(144));
 #if UNITY_IOS
             Assert.That(restoredSystem.Network.Online.Enable, Is.False, "the iOS settings app owns the switch");
@@ -230,7 +233,9 @@ namespace MajdataPlay.Tests.Game.Misc.Settings
             Assert.That(user.Display.Skin, Is.EqualTo("default"));
             Assert.That(user.Touch, Is.Not.Null);
             Assert.That(system.Rendering, Is.Not.Null);
-            Assert.That(system.Rendering.RenderQuality, Is.EqualTo(RenderingQualityOption.Performance));
+            Assert.That(system.Rendering.RenderQuality, Is.EqualTo(RenderingQualityOption.Beautiful));
+            Assert.That(system.Rendering.AntiAliasing, Is.EqualTo(RenderingAntialiasingOption.Disabled));
+            Assert.That(system.Rendering.UIOutlineMode, Is.EqualTo(UiOutlineMode.All));
             Assert.That(system.Rendering.FPSLimit, Is.EqualTo(120));
             Assert.That(system.Debug, Is.Not.Null);
         }

@@ -406,6 +406,7 @@ GameObject:
   - component: {fileID: 1514694039}
   - component: {fileID: 1514694041}
   - component: {fileID: 1514694040}
+  - component: {fileID: 900000000000000020}
   m_Layer: 5
   m_Name: Title echo bg
   m_TagString: Untagged
@@ -443,9 +444,9 @@ MonoBehaviour:
   m_GameObject: {fileID: 1514694038}
   m_Enabled: 1
   m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: fe87c0e1cc204ed48ad3b37840f39efc, type: 3}
+  m_Script: {fileID: 11500000, guid: 7c51cc521e1747f0ba99ae9b65785bd5, type: 3}
   m_Name: 
-  m_EditorClassIdentifier: 
+  m_EditorClassIdentifier: MajdataPlay.Core::MajdataPlay.Rendering.QualityUiImage
   m_Material: {fileID: 2100000, guid: 78a3c5eb06624f448a0238577d1de902, type: 2}
   m_Color: {r: 1, g: 1, b: 1, a: 1}
   m_RaycastTarget: 1
@@ -455,7 +456,7 @@ MonoBehaviour:
     m_PersistentCalls:
       m_Calls: []
   m_Sprite: {fileID: -547999258, guid: 04e00e0b72a3d284ebec3f7160996aa1, type: 3}
-  m_Type: 2
+  m_Type: 1
   m_PreserveAspect: 0
   m_FillCenter: 1
   m_FillMethod: 4
@@ -1067,6 +1068,36 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::MajdataPlay.UI.PreviewOnlyCamera
   <RuntimeDatabase>k__BackingField: {fileID: 0}
+--- !u!114 &900000000000000020
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1514694038}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: ef06d39c7c35439cafc6637c942934d4, type: 3}
+  m_Name:
+  m_EditorClassIdentifier:
+  _liquidOnly: 0
+  _liquidEllipse: 0
+  _liquidCapsule: 0
+  _liquidBodyInsets: {x: 0.0197044335, y: 0.0243902439, z: 0.0197044335, w: 0.0243902439}
+  _fillSamplePosition: {x: 0.5, y: 0.5}
+  _backgroundImage: {fileID: 0}
+  _useStrongBlur: 1
+  _isButton: 0
+  _isCategory: 0
+  _reusePanelCaptureOnly: 0
+  _buttonForegroundRoot: {fileID: 0}
+  _fillAlpha: 1
+  _tintStrength: 1
+  _liquidTintStrength: 0
+  _liquidRefractionWidthScale: 2
+  _liquidArtworkBlend: 0.4233333
+  _frostStrength: 0
+  _referenceOpacity: 1
 --- !u!1660057539 &9223372036854775807
 SceneRoots:
   m_ObjectHideFlags: 0

@@ -1,3 +1,4 @@
+using MajdataPlay.Rendering;
 using System;
 using System.Collections.Generic;
 using System.Reflection;
@@ -39,22 +40,35 @@ namespace MajdataPlay.Tests.Game.Misc.Settings
             return (user!, system!);
         }
 
-        /// <summary>Creates a legacy document whose Display category holds the given rendering quality level and render scale.</summary>
-        /// <param name="quality">The legacy quality level, or -1 to leave it out.</param>
-        /// <param name="scale">The legacy render scale, or -1 to leave it out.</param>
+        /// <summary>Creates historical rendering JSON without coupling the old quality names to current option enums.</summary>
+        /// <param name="quality">The historical quality name or numeric value, or null to omit it.</param>
+        /// <param name="scale">The historical render scale, or null to omit it.</param>
+        /// <param name="numericQuality">Whether the quality token is a JSON number instead of a string.</param>
         /// <returns>The JSON text.</returns>
-        private static string LegacyDocument(int quality, int scale)
+        private static string LegacyDocument(string? quality, int? scale, bool numericQuality = false)
         {
             var display = new JObject();
-            if (quality >= 0)
+            if (quality is not null)
             {
-                display["RenderQuality"] = ((RenderQualityOption)quality).ToString();
+                display["RenderQuality"] = numericQuality ? new JValue(int.Parse(quality)) : new JValue(quality);
             }
-            if (scale >= 0)
+            if (scale.HasValue)
             {
-                display["RenderScale"] = scale;
+                display["RenderScale"] = scale.Value;
             }
             return new JObject { ["Display"] = display }.ToString();
+        }
+
+        /// <summary>Checks the complete MRP preset used when historical URP rendering settings are upgraded.</summary>
+        /// <param name="rendering">The upgraded rendering options.</param>
+        private static void AssertBeautifulPreset(RenderingOptions rendering)
+        {
+            Assert.That(rendering.RenderQuality, Is.EqualTo(RenderingQualityOption.Beautiful));
+            Assert.That(rendering.AntiAliasing, Is.EqualTo(RenderingAntialiasingOption.Disabled));
+            Assert.That(rendering.TextureQuality, Is.EqualTo(RenderingTextureQualityOption.High));
+            Assert.That(rendering.RenderScale, Is.EqualTo(100));
+            Assert.That(rendering.OutputMode, Is.EqualTo(RenderingOutputMode.Direct));
+            Assert.That(rendering.UIOutlineMode, Is.EqualTo(UiOutlineMode.All));
         }
 
         /// <summary>Gets the type of a category of the current layout.</summary>
@@ -288,61 +302,50 @@ namespace MajdataPlay.Tests.Game.Misc.Settings
             Assert.That(SettingMigration.Migrate(user, system, CreateSerializer()), Is.False, "migrated documents are current");
         }
 
-        /// <summary>Checks the mapping of the six legacy quality levels and render scales that do not depend on the platform.</summary>
-        /// <param name="quality">The legacy quality, or -1 for none.</param>
-        /// <param name="scale">The legacy render scale, or -1 for none.</param>
-        /// <param name="expectedQuality">The expected preset.</param>
-        /// <param name="expectedAntiAliasing">The expected anti-aliasing.</param>
-        /// <param name="expectedTexture">The expected texture quality.</param>
-        /// <param name="expectedScale">The expected render scale.</param>
-        /// <param name="expectedOutput">The expected output mode.</param>
-        [TestCase(-1, -1, RenderingQualityOption.Performance, RenderingAntialiasingOption.Disabled, RenderingTextureQualityOption.High, 100, RenderingOutputMode.Direct)]
-        [TestCase(0, 100, RenderingQualityOption.EnergySaving, RenderingAntialiasingOption.Disabled, RenderingTextureQualityOption.Medium, 100, RenderingOutputMode.Direct)]
-        [TestCase(0, 80, RenderingQualityOption.Custom, RenderingAntialiasingOption.Disabled, RenderingTextureQualityOption.Medium, 80, RenderingOutputMode.Intermediate)]
-        [TestCase(1, 100, RenderingQualityOption.Performance, RenderingAntialiasingOption.Disabled, RenderingTextureQualityOption.High, 100, RenderingOutputMode.Direct)]
-        [TestCase(2, -1, RenderingQualityOption.Custom, RenderingAntialiasingOption.MSAA2x, RenderingTextureQualityOption.High, 100, RenderingOutputMode.Direct)]
-        [TestCase(3, -1, RenderingQualityOption.Beautiful, RenderingAntialiasingOption.MSAA4x, RenderingTextureQualityOption.High, 100, RenderingOutputMode.Direct)]
-        [TestCase(3, 100, RenderingQualityOption.Beautiful, RenderingAntialiasingOption.MSAA4x, RenderingTextureQualityOption.High, 100, RenderingOutputMode.Direct)]
-        [TestCase(4, 100, RenderingQualityOption.Custom, RenderingAntialiasingOption.MSAA8x, RenderingTextureQualityOption.High, 100, RenderingOutputMode.Direct)]
-        [TestCase(5, 150, RenderingQualityOption.Custom, RenderingAntialiasingOption.MSAA8x, RenderingTextureQualityOption.High, 150, RenderingOutputMode.Intermediate)]
-        [TestCase(3, 50, RenderingQualityOption.Custom, RenderingAntialiasingOption.MSAA4x, RenderingTextureQualityOption.High, 50, RenderingOutputMode.Intermediate)]
-        [TestCase(3, 5, RenderingQualityOption.Custom, RenderingAntialiasingOption.MSAA4x, RenderingTextureQualityOption.High, 10, RenderingOutputMode.Intermediate)]
-        public void Read_MapsLegacyQualityLevels(int quality, int scale, RenderingQualityOption expectedQuality, RenderingAntialiasingOption expectedAntiAliasing,
-                                                 RenderingTextureQualityOption expectedTexture, int expectedScale, RenderingOutputMode expectedOutput)
+        /// <summary>Checks that every historical URP quality, written as its name or number, upgrades to Beautiful.</summary>
+        /// <param name="quality">The historical quality name or number.</param>
+        /// <param name="numericQuality">Whether the stored quality is numeric.</param>
+        /// <param name="scale">An old render scale that must not carry over.</param>
+        [TestCase("VeryLow", false, 80)]
+        [TestCase("Low", false, 100)]
+        [TestCase("Medium", false, 75)]
+        [TestCase("High", false, 100)]
+        [TestCase("VeryHigh", false, 150)]
+        [TestCase("Ultra", false, 200)]
+        [TestCase("0", true, 100)]
+        [TestCase("1", true, 50)]
+        [TestCase("2", true, 100)]
+        [TestCase("3", true, 5)]
+        [TestCase("4", true, 500)]
+        [TestCase("5", true, 150)]
+        public void Read_LegacyUrpQualityUpgradesToBeautiful(string quality, bool numericQuality, int scale)
         {
-            var rendering = Read(LegacyDocument(quality, scale)).System.Rendering;
+            var rendering = Read(LegacyDocument(quality, scale, numericQuality)).System.Rendering;
 
-            Assert.That(rendering.RenderQuality, Is.EqualTo(expectedQuality));
-            Assert.That(rendering.AntiAliasing, Is.EqualTo(expectedAntiAliasing));
-            Assert.That(rendering.TextureQuality, Is.EqualTo(expectedTexture));
-            Assert.That(rendering.RenderScale, Is.EqualTo(expectedScale));
-            Assert.That(rendering.OutputMode, Is.EqualTo(expectedOutput));
+            AssertBeautifulPreset(rendering);
         }
 
-        /// <summary>Checks that a legacy render scale without a quality level completes it with the old platform default.</summary>
-        [Test]
-        public void Read_LegacyScaleUsesPlatformDefaultQuality()
+        /// <summary>Checks that a historical render scale alone is discarded instead of selecting a platform-specific old preset.</summary>
+        /// <param name="scale">The old scale to discard.</param>
+        [TestCase(10)]
+        [TestCase(75)]
+        [TestCase(100)]
+        [TestCase(150)]
+        [TestCase(500)]
+        public void Read_LegacyScaleAloneUpgradesToBeautiful(int scale)
         {
-            var rendering = Read(LegacyDocument(-1, 500)).System.Rendering;
+            var rendering = Read(LegacyDocument(null, scale)).System.Rendering;
 
-            Assert.That(rendering.RenderQuality, Is.EqualTo(RenderingQualityOption.Custom));
-            Assert.That(rendering.RenderScale, Is.EqualTo(200));
-            Assert.That(rendering.OutputMode, Is.EqualTo(RenderingOutputMode.Intermediate));
-#if UNITY_ANDROID || UNITY_IOS
-            Assert.That(rendering.AntiAliasing, Is.EqualTo(RenderingAntialiasingOption.Disabled));
-#else
-            Assert.That(rendering.AntiAliasing, Is.EqualTo(RenderingAntialiasingOption.MSAA2x));
-#endif
+            AssertBeautifulPreset(rendering);
         }
 
-        /// <summary>Checks that a legacy quality level stored as a number is read like its name.</summary>
+        /// <summary>Checks that an empty old Display category uses the same Beautiful preset as a new installation.</summary>
         [Test]
-        public void Read_LegacyNumericQuality()
+        public void Read_EmptyLegacyDisplayUsesBeautiful()
         {
-            var rendering = Read("{\"Display\":{\"RenderQuality\":0}}").System.Rendering;
+            var rendering = Read(LegacyDocument(null, null)).System.Rendering;
 
-            Assert.That(rendering.RenderQuality, Is.EqualTo(RenderingQualityOption.EnergySaving));
-            Assert.That(rendering.TextureQuality, Is.EqualTo(RenderingTextureQualityOption.Medium));
+            AssertBeautifulPreset(rendering);
         }
 
         /// <summary>Checks that legacy keys with null values are read as missing and still removed.</summary>
@@ -357,7 +360,9 @@ namespace MajdataPlay.Tests.Game.Misc.Settings
 
             Assert.That(changed, Is.True);
             Assert.That(((JObject)user["Display"]!).Count, Is.EqualTo(0));
-            Assert.That(rendering.RenderQuality, Is.EqualTo(RenderingQualityOption.Performance));
+            Assert.That(rendering.RenderQuality, Is.EqualTo(RenderingQualityOption.Beautiful));
+            Assert.That(rendering.AntiAliasing, Is.EqualTo(RenderingAntialiasingOption.Disabled));
+            Assert.That(rendering.UIOutlineMode, Is.EqualTo(UiOutlineMode.All));
             Assert.That(rendering.FPSLimit, Is.EqualTo(120));
             Assert.That(rendering.VSync, Is.True);
             Assert.That(rendering.MainScreenScale, Is.EqualTo(1f));
@@ -370,7 +375,7 @@ namespace MajdataPlay.Tests.Game.Misc.Settings
             var rendering = Read("{\"Display\":{\"RenderQuality\":\"High\",\"FPSLimit\":60,\"VSync\":false},\"Rendering\":{\"RenderQuality\":\"Refined\",\"FPSLimit\":90,\"VSync\":true}}").System.Rendering;
 
             Assert.That(rendering.RenderQuality, Is.EqualTo(RenderingQualityOption.Refined));
-            Assert.That(rendering.RenderScale, Is.EqualTo(150));
+            Assert.That(rendering.RenderScale, Is.EqualTo(100));
             Assert.That(rendering.FPSLimit, Is.EqualTo(90));
             Assert.That(rendering.VSync, Is.True);
         }
@@ -385,6 +390,43 @@ namespace MajdataPlay.Tests.Game.Misc.Settings
             Assert.That(rendering.FPSLimit, Is.EqualTo(90));
         }
 
+        /// <summary>Checks that historical URP values do not replace saved MRP presets or custom rendering details.</summary>
+        /// <param name="quality">The existing MRP quality.</param>
+        /// <param name="antiAliasing">The existing anti-aliasing mode.</param>
+        /// <param name="texture">The existing texture precision.</param>
+        /// <param name="scale">The existing scene resolution percentage.</param>
+        /// <param name="output">The existing output mode.</param>
+        [TestCase(RenderingQualityOption.Performance, RenderingAntialiasingOption.Disabled, RenderingTextureQualityOption.High, 100, RenderingOutputMode.Direct)]
+        [TestCase(RenderingQualityOption.Custom, RenderingAntialiasingOption.MSAA2x, RenderingTextureQualityOption.Medium, 75, RenderingOutputMode.Intermediate)]
+        public void Read_CurrentMrpDetailsSurviveLegacyUrpValues(RenderingQualityOption quality, RenderingAntialiasingOption antiAliasing,
+                                                               RenderingTextureQualityOption texture, int scale, RenderingOutputMode output)
+        {
+            var current = new JObject
+            {
+                ["RenderQuality"] = quality.ToString(),
+                ["AntiAliasing"] = antiAliasing.ToString(),
+                ["TextureQuality"] = texture.ToString(),
+                ["RenderScale"] = scale,
+                ["OutputMode"] = output.ToString(),
+                ["UIOutline"] = false,
+                ["MainScreenScale"] = 0.9f
+            };
+            var systemJson = new JObject { ["Rendering"] = current }.ToString();
+            var rendering = Read("{\"Display\":{\"RenderQuality\":\"VeryLow\",\"RenderScale\":20,\"FPSLimit\":60,\"VSync\":false," +
+                                 "\"MainScreenScale\":0.8,\"SubDisplayOffset\":0.3}}", systemJson).System.Rendering;
+
+            Assert.That(rendering.RenderQuality, Is.EqualTo(quality));
+            Assert.That(rendering.AntiAliasing, Is.EqualTo(antiAliasing));
+            Assert.That(rendering.TextureQuality, Is.EqualTo(texture));
+            Assert.That(rendering.RenderScale, Is.EqualTo(scale));
+            Assert.That(rendering.OutputMode, Is.EqualTo(output));
+            Assert.That(rendering.UIOutlineMode, Is.EqualTo(quality == RenderingQualityOption.Performance ? UiOutlineMode.Performance : UiOutlineMode.None));
+            Assert.That(rendering.FPSLimit, Is.EqualTo(60));
+            Assert.That(rendering.VSync, Is.False);
+            Assert.That(rendering.MainScreenScale, Is.EqualTo(0.9f));
+            Assert.That(rendering.SubDisplayOffset, Is.EqualTo(0.3f));
+        }
+
         /// <summary>Checks that legacy frame pacing fills in the keys missing from a newer Rendering category.</summary>
         [Test]
         public void Read_LegacyFramePacingFillsMissingKeys()
@@ -397,14 +439,13 @@ namespace MajdataPlay.Tests.Game.Misc.Settings
             Assert.That(rendering.VSync, Is.False);
         }
 
-        /// <summary>Checks that a null Rendering category is read as missing, so the legacy keys still migrate.</summary>
+        /// <summary>Checks that a null Rendering category upgrades old URP quality while preserving frame pacing.</summary>
         [Test]
         public void Read_NullRenderingMigratesLegacyKeys()
         {
             var rendering = Read("{\"Display\":{\"RenderQuality\":\"VeryHigh\",\"FPSLimit\":30},\"Rendering\":null}").System.Rendering;
 
-            Assert.That(rendering.RenderQuality, Is.EqualTo(RenderingQualityOption.Custom));
-            Assert.That(rendering.AntiAliasing, Is.EqualTo(RenderingAntialiasingOption.MSAA8x));
+            AssertBeautifulPreset(rendering);
             Assert.That(rendering.FPSLimit, Is.EqualTo(30));
         }
 
@@ -412,7 +453,7 @@ namespace MajdataPlay.Tests.Game.Misc.Settings
         [Test]
         public void Read_MigratedSettingsSaveCurrentLayout()
         {
-            var (migratedUser, migratedSystem) = Read(LegacyDocument(5, 150));
+            var (migratedUser, migratedSystem) = Read(LegacyDocument("Ultra", 150));
 
             var userJson = Serializer.Json.Serialize(migratedUser, MajEnv.UserJsonReaderOption);
             var systemJson = Serializer.Json.Serialize(migratedSystem, MajEnv.UserJsonReaderOption);
@@ -423,10 +464,8 @@ namespace MajdataPlay.Tests.Game.Misc.Settings
             Assert.That(((JObject)savedUser["Display"]!).ContainsKey("RenderQuality"), Is.False);
             Assert.That(((JObject)savedUser["Display"]!).ContainsKey("RenderScale"), Is.False);
             Assert.That(savedUser.ContainsKey("Rendering"), Is.False);
-            Assert.That(savedSystem["Rendering"]!["RenderQuality"]!.Value<string>(), Is.EqualTo("Custom"));
-            Assert.That(restored.AntiAliasing, Is.EqualTo(RenderingAntialiasingOption.MSAA8x));
-            Assert.That(restored.RenderScale, Is.EqualTo(150));
-            Assert.That(restored.OutputMode, Is.EqualTo(RenderingOutputMode.Intermediate));
+            Assert.That(savedSystem["Rendering"]!["RenderQuality"]!.Value<string>(), Is.EqualTo("Beautiful"));
+            AssertBeautifulPreset(restored);
         }
 
         /// <summary>Checks that null categories are removed from both documents and reported as a change.</summary>
@@ -605,13 +644,44 @@ namespace MajdataPlay.Tests.Game.Misc.Settings
         }
 #endif
 
-        /// <summary>Checks that a legacy quality level that cannot be read rejects the document, like any other invalid value.</summary>
-        [Test]
-        public void Migrate_InvalidLegacyQualityThrows()
+        /// <summary>Checks that obsolete quality and scale tokens are discarded without parsing or losing unrelated settings.</summary>
+        /// <param name="legacyOptions">The invalid historical rendering tokens.</param>
+        [TestCase("{\"RenderQuality\":\"Bogus\"}")]
+        [TestCase("{\"RenderQuality\":999}")]
+        [TestCase("{\"RenderQuality\":{\"unexpected\":true}}")]
+        [TestCase("{\"RenderScale\":\"not-a-number\"}")]
+        [TestCase("{\"RenderQuality\":[1,2],\"RenderScale\":[50,100]}")]
+        public void Migrate_InvalidObsoleteRenderingValuesAreDiscarded(string legacyOptions)
         {
-            var user = JObject.Parse("{\"Display\":{\"RenderQuality\":\"Bogus\"}}");
+            var display = JObject.Parse(legacyOptions);
+            display["Skin"] = "custom";
+            display["FPSLimit"] = 60;
+            display["VSync"] = false;
+            var user = new JObject { ["Display"] = display, ["Game"] = new JObject { ["TapSpeed"] = 8 } };
+            var system = new JObject();
 
-            Assert.That(() => SettingMigration.Migrate(user, new JObject(), CreateSerializer()), Throws.InstanceOf<JsonException>());
+            var changed = SettingMigration.Migrate(user, system, CreateSerializer());
+            var rendering = system.ToObject<SystemSetting>(CreateSerializer())!.Rendering;
+
+            Assert.That(changed, Is.True);
+            Assert.That(display.ContainsKey("RenderQuality"), Is.False);
+            Assert.That(display.ContainsKey("RenderScale"), Is.False);
+            Assert.That(display["Skin"]!.Value<string>(), Is.EqualTo("custom"));
+            Assert.That(user["Game"]!["TapSpeed"]!.Value<int>(), Is.EqualTo(8));
+            AssertBeautifulPreset(rendering);
+            Assert.That(rendering.FPSLimit, Is.EqualTo(60));
+            Assert.That(rendering.VSync, Is.False);
+        }
+
+        /// <summary>Checks that ignoring obsolete quality does not hide malformed frame pacing values that are still used.</summary>
+        /// <param name="legacyOptions">The invalid frame pacing value.</param>
+        [TestCase("{\"RenderQuality\":\"Bogus\",\"FPSLimit\":\"not-a-number\"}")]
+        [TestCase("{\"RenderScale\":\"discard-me\",\"VSync\":{\"unexpected\":true}}")]
+        public void Read_InvalidLegacyFramePacingStillRejectsTheDocument(string legacyOptions)
+        {
+            var document = new JObject { ["Display"] = JObject.Parse(legacyOptions) }.ToString();
+
+            Assert.That(() => Read(document), Throws.InstanceOf<JsonException>());
         }
 
         /// <summary>Checks the argument validation.</summary>

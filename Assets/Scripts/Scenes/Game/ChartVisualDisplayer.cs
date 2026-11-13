@@ -54,11 +54,16 @@ namespace MajdataPlay.Scenes.Game
             _rawImage = GetComponent<RawImage>();
             _rectTransform = GetComponent<RectTransform>();
             _emptyTexture = new Texture2D(1, 1, TextureFormat.ARGB32, false);
-            _emptyTexture.SetPixel(0, 0, Color.white);
+            // The parent Image owns the board fill; placeholder states must not cover its glass surface.
+            _emptyTexture.SetPixel(0, 0, Color.clear);
             _emptyTexture.Apply();
         }
         private void OnDestroy()
         {
+            if (_emptyTexture != null)
+            {
+                Destroy(_emptyTexture);
+            }
             Majdata<ChartVisualDisplayer>.Free();
         }
         private void LateUpdate()

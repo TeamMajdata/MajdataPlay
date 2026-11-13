@@ -50,8 +50,10 @@ namespace MajdataPlay.Tests.Game.Scenes.PlayMode.SettingScene
             PrivateMember.SetField(MenuTemplate.AddComponent<Menu>(), "_optionPrefab", OptionTemplate);
             TitleTemplate = CreateTitleTemplate();
             Description = CreateText("Description", Canvas);
+            Description.gameObject.AddComponent<Canvas>();
             MenuListRoot = CreateRect("Menus", Canvas);
             TitleListRoot = CreateRect("Titles", Canvas);
+            TitleListRoot.AddComponent<Canvas>();
         }
 
         /// <summary>Creates an option whose name and value texts are its children.</summary>

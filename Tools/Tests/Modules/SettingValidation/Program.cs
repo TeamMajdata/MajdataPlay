@@ -27,6 +27,8 @@ internal static class Program
         Run("shared reflection metadata and eager preparation without retained settings", CachedMetadataAndWarmup);
         Run("eager initialization preserves deserialized note-mask values", PreserveNoteMask);
         Run("rendering presets, manual customization and side-effect-free refresh", RenderingPresetInput);
+        Run("three-level UI mode cycles, MSAA independence and exactly one apply per accepted input", UnifiedUiModeInput);
+        Run("Refined panel style, preset persistence, legacy Custom inheritance and enum input", PvBackdropInput);
         Run("rendering compatibility visibility, navigation and bounded pool", RenderingCompatibilityNavigation);
         Run("advanced rendering unlock, press deduplication and interrupted gestures", RenderingAdvancedUnlock);
         Run("fast physical A8 presses, delayed completion loss and cross-frame held deduplication", RenderingAdvancedPressCadence);
@@ -327,6 +329,102 @@ internal static class Program
         Check(settings.NoteMask == "Outer", "note-mask input did not start from deserialized Inner selection");
     }
 
+    /// <summary>Checks the actual enum enumerator's refresh/input contracts for the unified UI mode.</summary>
+    private static void UnifiedUiModeInput()
+    {
+        var settings = new RenderingOptions
+        {
+            RenderQuality = RenderingQualityOption.Custom,
+            UIOutlineMode = UiOutlineMode.None,
+            AntiAliasing = RenderingAntialiasingOption.MSAA4x
+        };
+        GameManager.RenderingApplies = 0;
+        using var enumerator = new RenderingEnumSettingEnumerator();
+        enumerator.Init(typeof(RenderingOptions).GetProperty(nameof(RenderingOptions.UIOutlineMode)), settings);
+        enumerator.Refresh();
+        enumerator.RefreshLocalization();
+        Check(GameManager.RenderingApplies == 0, "initialization, refresh and localization must not apply UI settings");
+        var changes = 0;
+        foreach (var expected in new[] { UiOutlineMode.Performance, UiOutlineMode.All, UiOutlineMode.GaussianBlur, UiOutlineMode.LiquidGlass, UiOutlineMode.None })
+        {
+            Check(enumerator.MoveNext(), "each next UI mode is an accepted change");
+            changes++;
+            Check(settings.UIOutlineMode == expected && Equals(enumerator.Current, expected), "enum input and label must select all five UI styles");
+            Check(GameManager.RenderingApplies == changes, "each accepted UI input must apply exactly once");
+            Check(settings.AntiAliasing == RenderingAntialiasingOption.MSAA4x, "UI styling cannot change MSAA");
+        }
+        Check(enumerator.MovePrevious() && settings.UIOutlineMode == UiOutlineMode.LiquidGlass, "previous UI style wraps from None to LiquidGlass");
+        Check(GameManager.RenderingApplies == changes + 1, "previous input must apply exactly once");
+        enumerator.Refresh();
+        enumerator.RefreshLocalization();
+        Check(GameManager.RenderingApplies == changes + 1, "passive synchronization cannot repeat Apply");
+        settings.CompatibilityMode = true;
+        Check(settings.GetEffectiveUIOutlineMode() == UiOutlineMode.None && settings.UIOutlineMode == UiOutlineMode.LiquidGlass,
+            "compatibility overrides only the effective UI level");
+    }
+
+    /// <summary>Checks Refined panel-style selection persists without customizing quality or scene/output configuration.</summary>
+    private static void PvBackdropInput()
+    {
+        foreach (var quality in new[] { RenderingQualityOption.EnergySaving, RenderingQualityOption.Performance, RenderingQualityOption.Beautiful, RenderingQualityOption.Refined })
+        {
+            var options = new RenderingOptions { RenderQuality = quality };
+            var expected = quality == RenderingQualityOption.Refined;
+            Check(options.GetEffectiveUIBackdropBlur() == expected, "only Refined requests PV backdrop blur");
+            Check(options.UIBackdropStyle == UiBackdropStyle.GaussianBlur, "missing panel style defaults to Gaussian blur");
+            options.UIBackdropStyle = UiBackdropStyle.LiquidGlass;
+            Check(options.RenderQuality == quality, "panel style must not enter Custom");
+            options.EnterCustomMode();
+            Check(options.GetEffectiveUIBackdropBlur() == expected, "Custom inherits the preset's complete UI style");
+        }
+        var settings = new RenderingOptions { RenderQuality = RenderingQualityOption.Refined };
+        var signature = RenderingSignature(settings);
+        GameManager.RenderingApplies = 0;
+        using var enumerator = new RenderingEnumSettingEnumerator();
+        enumerator.Init(typeof(RenderingOptions).GetProperty(nameof(RenderingOptions.UIBackdropStyle)), settings);
+        enumerator.Refresh();
+        enumerator.RefreshLocalization();
+        Check(GameManager.RenderingApplies == 0, "passive panel-style refresh cannot apply settings");
+        Check(enumerator.MovePrevious() && settings.UIBackdropStyle == UiBackdropStyle.LiquidGlass && GameManager.RenderingApplies == 1,
+            "previous panel-style input wraps and applies once");
+        Check(RenderingSignature(settings) == signature, "panel style cannot change Refined or scene/output parameters");
+        foreach (var language in Language.All)
+        {
+            Localization.Change(language);
+            enumerator.RefreshLocalization();
+            Check(enumerator.LocalizedValueText == Translations.LookupRendering(
+                "MAJSETTING_PROPERTY_UIBackdropStyle_OPTION_LiquidGlass", language), "Liquid Glass label must follow localization");
+        }
+        Localization.Change(Language.English);
+        Check(enumerator.MoveNext() && settings.UIBackdropStyle == UiBackdropStyle.GaussianBlur && GameManager.RenderingApplies == 2,
+            "next panel-style input wraps and applies once");
+        var visibility = SettingReflectionCache.GetVisibility(typeof(RenderingOptions).GetProperty(nameof(RenderingOptions.UIBackdropStyle)));
+        Check(visibility.IsVisible(settings), "Refined exposes panel style without Custom");
+        settings.UIBackdropStyle = UiBackdropStyle.LiquidGlass;
+        foreach (var quality in Enum.GetValues<RenderingQualityOption>())
+        {
+            settings.RenderQuality = quality;
+            Check(visibility.IsVisible(settings) == (quality == RenderingQualityOption.Refined), "panel style is Refined-only");
+            Check(settings.UIBackdropStyle == UiBackdropStyle.LiquidGlass, "preset changes retain the saved panel style");
+            settings.CompatibilityMode = true;
+            Check(!visibility.IsVisible(settings) && !settings.GetEffectiveUIBackdropBlur(), "compatibility hides style and suspends filtering");
+            settings.CompatibilityMode = false;
+        }
+        settings.RenderQuality = RenderingQualityOption.Refined;
+        settings.EnterCustomMode();
+        settings.UIOutlineMode = UiOutlineMode.Performance;
+        Check(!visibility.IsVisible(settings) && !settings.GetEffectiveUIBackdropBlur(),
+            "Custom mixed UI does not capture backdrops");
+        settings.UIOutlineMode = UiOutlineMode.All;
+        Check(!settings.GetEffectiveUIBackdropBlur(), "Custom translucent UI remains ordinary alpha blending");
+        settings.UIOutlineMode = UiOutlineMode.GaussianBlur;
+        Check(settings.GetEffectiveUIBackdropBlur() && settings.GetEffectiveUIBackdropStyle() == UiBackdropStyle.GaussianBlur,
+            "Custom Gaussian style captures backgrounds independently of the saved Refined preference");
+        settings.UIOutlineMode = UiOutlineMode.LiquidGlass;
+        Check(settings.GetEffectiveUIBackdropBlur() && settings.GetEffectiveUIBackdropStyle() == UiBackdropStyle.LiquidGlass,
+            "Custom liquid style selects liquid optics from the unified setting");
+    }
+
     static void RenderingPresetInput()
     {
         foreach (var (quality, expectedBias) in new[]
@@ -345,19 +443,19 @@ internal static class Program
         using var fixture = new Fixture(settings);
         var menu = fixture.Menus[0];
         var properties = SettingReflectionCache.GetVisibleProperties(typeof(RenderingOptions));
-        Check(properties.Length == 13 && properties.Select(property => property.Name).ToHashSet().SetEquals(
-            new[] { "RenderQuality", "AntiAliasing", "TextureQuality", "RenderScale", "OutputMode", "CompatibilityMode", "SystemResolutionScaling", "FPSLimit", "VSync", "SystemScalingStatus", "DisplayBufferResolution", "SceneRenderResolution", "CurrentOutputPath" }),
-            "rendering metadata must retain all thirteen Windows Custom rows, including the read-only output status");
-        Check(Get<int>(menu, "_displayedOptionCount") == 4 && Visible.Length == 2 &&
-            Get<int[]>(menu, "_displayedPropertyIndices").Take(4).Select(i => properties[i].Name).ToHashSet()
-                .SetEquals(new[] { "RenderQuality", "FPSLimit", "VSync", "CompatibilityMode" }),
-            "named presets must expose only quality, FPS, VSync and compatibility");
-        Check(GameManager.RenderingApplies == 0 && RenderingSignature(settings) == "Refined/150/4/High/Intermediate",
+        Check(properties.Length == 22 && properties.Select(property => property.Name).ToHashSet().SetEquals(
+            new[] { "RenderQuality", "AntiAliasing", "TextureQuality", "UIOutlineMode", "UIBackdropStyle", "RenderScale", "OutputMode", "CompatibilityMode", "SystemResolutionScaling", "FPSLimit", "VSync", "SystemScalingStatus", "DisplayBufferResolution", "SceneRenderResolution", "CurrentOutputPath", "DisplayRuntimeInfo", "MainScreenTransform", "MainScreenScale", "MainScreenOffset", "SubDisplayOffset", "SubDisplayScale", "GameplayScreenRotationAngle" }),
+            "rendering metadata must retain twenty-two Windows Custom rows, including the conditional Refined panel-style control");
+        Check(Get<int>(menu, "_displayedOptionCount") == 12 && Visible.Length == 2 &&
+            Get<int[]>(menu, "_displayedPropertyIndices").Take(5).Select(i => properties[i].Name).ToHashSet()
+                .SetEquals(new[] { "RenderQuality", "FPSLimit", "VSync", "UIBackdropStyle", "CompatibilityMode" }),
+            "Refined exposes panel style beside quality, FPS, VSync and compatibility");
+        Check(GameManager.RenderingApplies == 0 && RenderingSignature(settings) == "Refined/100/1/High/Direct",
             "eager enumerator initialization must not apply or overwrite an existing preset");
         Check(Value(View("RenderQuality")) == Translations.LookupRendering("MAJSETTING_PROPERTY_RenderQuality_OPTION_Refined", Language.English),
             "quality selector must show only its localized preset name");
 
-        foreach (var expected in new[] { "EnergySaving/100/1/Medium/Direct", "Performance/100/1/High/Direct", "Beautiful/100/4/High/Direct", "Refined/150/4/High/Intermediate" })
+        foreach (var expected in new[] { "EnergySaving/100/1/Medium/Direct", "Performance/100/1/High/Direct", "Beautiful/100/1/High/Direct", "Refined/100/1/High/Direct" })
         {
             ClickNext(View("RenderQuality"));
             Frame();
@@ -399,13 +497,13 @@ internal static class Program
         Check(GameManager.RenderingApplies == 8, "reverse preset changes must apply once each");
         Check(settings.EnterCustomMode() && !settings.EnterCustomMode(), "entering Custom must be an idempotent state transition");
         Frame();
-        Check(Get<int>(menu, "_displayedOptionCount") == 13 && settings.RenderScale == 150,
-            "Custom must immediately expose eight rows without resetting the prior preset");
+        Check(Get<int>(menu, "_displayedOptionCount") == 21 && settings.RenderScale == 100,
+            "Custom must immediately expose twenty-one rows without resetting the prior preset");
 
         menu.ToOption("AntiAliasing");
         ClickNext(View("AntiAliasing"));
         Frame();
-        Check(settings.AntiAliasing == RenderingAntialiasingOption.MSAA8x && settings.RenderQuality == RenderingQualityOption.Custom && settings.RenderScale == 150,
+        Check(settings.AntiAliasing == RenderingAntialiasingOption.MSAA2x && settings.RenderQuality == RenderingQualityOption.Custom && settings.RenderScale == 100,
             "editing antialiasing must preserve Custom and the current scale");
         menu.ToHead();
         Check(Value(View("RenderQuality")) == Translations.LookupRendering("MAJSETTING_PROPERTY_RenderQuality_OPTION_Custom", Language.English),
@@ -418,7 +516,7 @@ internal static class Program
         Frame();
         menu.ToOption("OutputMode");
         ClickNext(View("OutputMode"));
-        Check(settings.OutputMode == RenderingOutputMode.Direct && GameManager.RenderingApplies == 11,
+        Check(settings.OutputMode == RenderingOutputMode.Intermediate && GameManager.RenderingApplies == 11,
             "output input must change the stored mode and apply exactly once");
 
         var snapshot = RenderingSignature(settings);
@@ -453,7 +551,7 @@ internal static class Program
         {
             menu.ToOption("CompatibilityMode");
             ClickMenuNext(menu);
-            Check(settings.CompatibilityMode && Get<int>(menu, "_displayedOptionCount") == 3,
+            Check(settings.CompatibilityMode && Get<int>(menu, "_displayedOptionCount") == 10,
                 "compatibility must retain only FPS, VSync and its switch");
             Check(Get<OptionData>(View("CompatibilityMode"), "_data").PropertyInfo.Name == "CompatibilityMode",
                 "visibility change lost compatibility selection");
@@ -473,7 +571,7 @@ internal static class Program
                 "compatibility must allow independent FPS edits");
             menu.ToOption("CompatibilityMode");
             ClickMenuNext(menu);
-            Check(!settings.CompatibilityMode && Get<int>(menu, "_displayedOptionCount") == 13 && RenderingSignature(settings) == snapshot,
+            Check(!settings.CompatibilityMode && Get<int>(menu, "_displayedOptionCount") == 21 && RenderingSignature(settings) == snapshot,
                 "compatibility restore lost custom values or controls");
             Check(UObject.InstantiateCount == 4 && Visible.Length <= 3 && Localization.Subscribers == Visible.Length,
                 "common controls must retain bounded pool and subscriptions");
@@ -502,19 +600,19 @@ internal static class Program
                     "fewer than ten independent A8 presses changed quality, applied or saved");
             }
             PressAdvanced(fixture.Manager, button: true, sensor: true);
-            Check(settings.RenderQuality == RenderingQualityOption.Custom && Get<int>(menu, "_displayedOptionCount") == 13,
+            Check(settings.RenderQuality == RenderingQualityOption.Custom && Get<int>(menu, "_displayedOptionCount") == 21,
                 "the tenth independent A8 press must immediately expose Custom controls");
             Check(GameManager.RenderingApplies == 1 && GameManager.SaveRequests == 1 && ReferenceEquals(GameManager.LastSaveRequester, menu),
                 "unlock must immediately apply and request one save before leaving Setting");
             Check(MajInstances.SceneSwitcher.SwitchedScenes.Count == 0 && menu.SelectedIndex == 0,
                 "rendering quality A8 must not jump to Calibrator or move the selection");
-            Check(settings.RenderScale == 100 && settings.AntiAliasing == RenderingAntialiasingOption.MSAA4x && settings.OutputMode == RenderingOutputMode.Direct,
+            Check(settings.RenderScale == 100 && settings.AntiAliasing == RenderingAntialiasingOption.Disabled && settings.OutputMode == RenderingOutputMode.Direct,
                 "unlock must retain the active preset parameters");
             for (var click = 0; click < 20; click++) PressAdvanced(fixture.Manager, true, true);
             Check(GameManager.RenderingApplies == 1 && GameManager.SaveRequests == 1 && MajInstances.SceneSwitcher.SwitchedScenes.Count == 0,
                 "A8 on an already Custom quality row must be consumed without repeat save/apply");
             ClickMenuNext(menu);
-            Check(settings.RenderQuality == RenderingQualityOption.EnergySaving && Get<int>(menu, "_displayedOptionCount") == 4,
+            Check(settings.RenderQuality == RenderingQualityOption.EnergySaving && Get<int>(menu, "_displayedOptionCount") == 11,
                 "leaving Custom through quality selection must immediately restore the two-row page");
         }
 
@@ -573,7 +671,8 @@ internal static class Program
         });
         AssertGestureReset("same-frame category navigation", fixture =>
         {
-            InputManager.PressedButtons.Add(ButtonZone.A2);
+            InputManager.PressedThisFrameSensors.Add(SensorArea.B1);
+            InputManager.PressedSensors.Add(SensorArea.B1);
             QueueAdvancedPress();
             ManagerFrame(fixture.Manager);
             fixture.Manager.PreviousMenu();
@@ -854,8 +953,8 @@ internal static class Program
         menu.ToOption("CompatibilityMode");
         ClickMenuNext(menu);
         ClickMenuNext(menu);
-        Check(Get<int>(menu, "_displayedOptionCount") == 13 && RenderingSignature(settings) == snapshot,
-            "disabling compatibility must restore all thirteen Windows Custom rows and the saved scale");
+        Check(Get<int>(menu, "_displayedOptionCount") == 21 && RenderingSignature(settings) == snapshot,
+            "disabling compatibility must restore all twenty-one Windows Custom rows and the saved scale");
     }
 
     static void PressAdvanced(SettingManager manager, bool button = true, bool sensor = false)
@@ -901,7 +1000,7 @@ internal static class Program
                 "the read-only status must use the enum label/warmup path without accepting either input direction");
         }
         menu.ToOption(nameof(RenderingOptions.CurrentOutputPath));
-        Check(Get<int>(menu, "_displayedOptionCount") == 13 && menu.SelectedIndex == 12,
+        Check(Get<int>(menu, "_displayedOptionCount") == 21 && menu.SelectedIndex == 13,
             "Custom must expose current output status as its seventh row");
         Check(Value(View("CurrentOutputPath")) == Translations.LookupRendering(
             "MAJSETTING_PROPERTY_CurrentOutputPath_OPTION_Unavailable", Language.English),
@@ -983,7 +1082,7 @@ internal static class Program
         menu.ToHead();
         MajRenderDiagnostics.Publish(MajRenderOutputStatus.IntermediateScaled);
         Frame();
-        menu.ToTail();
+        menu.ToOption("CurrentOutputPath");
         Check(Value(View("CurrentOutputPath")) == Translations.LookupRendering(
             "MAJSETTING_PROPERTY_CurrentOutputPath_OPTION_IntermediateScaled", Localization.Current),
             "rebinding the pooled status view missed an offscreen diagnostic change");
@@ -991,11 +1090,11 @@ internal static class Program
         ClickMenuNext(menu);
         MajRenderDiagnostics.Publish(MajRenderOutputStatus.IntermediateRequested);
         Frame();
-        Check(Get<int>(menu, "_displayedOptionCount") == 3 && GameManager.RenderingApplies == 1,
+        Check(Get<int>(menu, "_displayedOptionCount") == 10 && GameManager.RenderingApplies == 1,
             "diagnostic refresh expanded compatibility mode or repeated its Apply");
         ClickMenuNext(menu);
-        menu.ToTail();
-        Check(Get<int>(menu, "_displayedOptionCount") == 13 && settings.RenderQuality == RenderingQualityOption.Custom &&
+        menu.ToOption("CurrentOutputPath");
+        Check(Get<int>(menu, "_displayedOptionCount") == 21 && settings.RenderQuality == RenderingQualityOption.Custom &&
             Value(View("CurrentOutputPath")) == Translations.LookupRendering(
                 "MAJSETTING_PROPERTY_CurrentOutputPath_OPTION_IntermediateRequested", Localization.Current),
             "restoring Custom must restore the status row with its latest accepted result");
@@ -1003,7 +1102,7 @@ internal static class Program
         ClickMenuNext(menu);
         MajRenderDiagnostics.Invalidate();
         Frame();
-        Check(Get<int>(menu, "_displayedOptionCount") == 4,
+        Check(Get<int>(menu, "_displayedOptionCount") == 11,
             "named presets must hide advanced diagnostics");
         Check(UObject.InstantiateCount == 4 && Localization.Subscribers == Visible.Length && GameManager.SaveRequests == 0,
             "status refresh or visibility changes leaked pooled views/subscriptions or caused a save");
@@ -1033,21 +1132,12 @@ internal static class Program
         var legacy = System.Text.Json.JsonSerializer.Deserialize<DisplayOptions>("{\"DisplaySensor\":true,\"SensorStyle\":0,\"SensorOpacity\":30}");
         Check(legacy.DisplaySensor && legacy.SensorStyle == SensorDebugStyle.Brightness && legacy.SensorOpacity == 30 &&
             legacy.SensorPosition == SensorDebugPosition.MainScreen, "existing brightness configurations must remain on the main screen");
-        defaults.SensorStyle = (SensorDebugStyle)999;
-        Check(defaults.SensorStyle == SensorDebugStyle.RedGreen, "invalid numeric style must select the known safe default");
-        defaults.SensorPosition = (SensorDebugPosition)999;
-        Check(defaults.SensorPosition == SensorDebugPosition.MainScreen, "invalid numeric position must select the main screen");
-        var invalid = System.Text.Json.JsonSerializer.Deserialize<DisplayOptions>("{\"SensorStyle\":-1,\"SensorPosition\":-1}");
-        Check(invalid.SensorStyle == SensorDebugStyle.RedGreen && invalid.SensorPosition == SensorDebugPosition.MainScreen,
-            "invalid JSON sensor options must select the existing safe defaults");
-        defaults.SensorOpacity = 1;
-        Check(defaults.SensorOpacity == 10, "opacity minimum was lost when extracting the production settings");
-        defaults.SensorOpacity = 100;
-        Check(defaults.SensorOpacity == 90, "opacity maximum must support ninety percent");
-        defaults.SensorOpacity = int.MaxValue;
-        Check(defaults.SensorOpacity == 90, "external opacity overflow must clamp before rounding");
-        defaults.SensorOpacity = int.MinValue;
-        Check(defaults.SensorOpacity == 10, "external opacity underflow must clamp before rounding");
+        // DisplayOptions now stores raw values; its UI attributes and enumerators own input bounds.
+        var opacityProperty = typeof(DisplayOptions).GetProperty(nameof(DisplayOptions.SensorOpacity));
+        var opacityRange = opacityProperty.GetCustomAttribute<MajdataPlay.Settings.RangeAttribute>();
+        var opacityStep = opacityProperty.GetCustomAttribute<StepAttribute>();
+        Check(opacityRange.Min == 10 && opacityRange.Max == 90 && opacityStep.Value == 10,
+            "sensor opacity UI contract must remain 10 through 90 with a ten-percent step");
         foreach (var percentage in Enumerable.Range(1, 9).Select(index => index * 10))
         {
             defaults.SensorOpacity = percentage;
@@ -1061,15 +1151,6 @@ internal static class Program
             var olderOpacity = System.Text.Json.JsonSerializer.Deserialize<DisplayOptions>("{\"SensorOpacity\":" + percentage + "}");
             Check(olderOpacity.SensorOpacity == percentage, "the expanded range changed an existing saved opacity");
         }
-        var tooHighOpacity = System.Text.Json.JsonSerializer.Deserialize<DisplayOptions>("{\"SensorOpacity\":999}");
-        var tooLowOpacity = System.Text.Json.JsonSerializer.Deserialize<DisplayOptions>("{\"SensorOpacity\":-999}");
-        Check(tooHighOpacity.SensorOpacity == 90 && tooLowOpacity.SensorOpacity == 10,
-            "external JSON opacities must clamp to the expanded range");
-        defaults.SensorOpacity = 85;
-        Check(defaults.SensorOpacity == 90, "opacity halfway between steps must round up within the expanded range");
-        defaults.SensorOpacity = 24;
-        Check(defaults.SensorOpacity == 20, "opacity must still normalize external values to ten percent steps");
-
         var properties = SettingReflectionCache.GetVisibleProperties(typeof(DisplayOptions));
         var names = properties.Select(property => property.Name).ToArray();
         Check(Array.IndexOf(names, nameof(DisplayOptions.SensorPosition)) == Array.IndexOf(names, nameof(DisplayOptions.DisplaySensor)) + 1 &&
@@ -1086,6 +1167,8 @@ internal static class Program
             (SensorDebugPosition)positions[1] == SensorDebugPosition.SubScreen,
             "the cached position enum must contain the main and secondary display regions");
 
+        defaults.SensorStyle = SensorDebugStyle.RedGreen;
+        defaults.SensorPosition = SensorDebugPosition.MainScreen;
         using var fixture = new Fixture(defaults);
         var menu = fixture.Menus[0];
         menu.ToOption(nameof(DisplayOptions.SensorStyle));
@@ -1132,8 +1215,8 @@ internal static class Program
             Check(!opacityData.MovePrevious() && defaults.SensorOpacity == 10, "opacity must stop at the ten-percent lower boundary");
             for (var percentage = 10; percentage <= 90; percentage += 10)
             {
-                Check(Value(View(nameof(DisplayOptions.SensorOpacity))) == percentage + "%",
-                    language.Code + " is missing the localized opacity percentage " + percentage);
+                Check(Value(View(nameof(DisplayOptions.SensorOpacity))) == percentage.ToString(CultureInfo.InvariantCulture),
+                    language.Code + " did not show the raw numeric opacity " + percentage);
                 if (percentage < 90)
                 {
                     ClickNext(View(nameof(DisplayOptions.SensorOpacity)));
@@ -1182,7 +1265,7 @@ internal static class Program
         var getMenus = typeof(SettingManager).GetMethod("GetMenuMetadata", BindingFlags.Static | BindingFlags.NonPublic);
         var categories = ((Array)getMenus.Invoke(null, new object[] { typeof(SettingRoot) })).Cast<object>().Select(value =>
             (string)value.GetType().GetProperty("Name", BindingFlags.Instance | BindingFlags.NonPublic).GetValue(value)).ToArray();
-        Check(categories.SequenceEqual(new[] { "Game", "Judge", "Display", "Volume", "Touch", "Rendering", "Debug" }),
+        Check(categories.SequenceEqual(new[] { "Game", "Judge", "Display", "Volume", "Touch", "Common", "Rendering", "Debug" }),
             "the menus must list the user categories before the system categories and leave out the hidden Audio category");
 
         var settings = new RenderingOptions { CompatibilityMode = true };
@@ -1203,6 +1286,7 @@ internal static class Program
             foreach (var property in properties)
             {
                 var nameKey = "MAJSETTING_PROPERTY_" + property.Name;
+                if (!Translations.IsRenderingKey(nameKey)) continue;
                 var name = Translations.LookupRendering(nameKey, language);
                 var description = Translations.LookupRendering(nameKey + "_DESC", language);
                 Check(!string.IsNullOrWhiteSpace(name) && !string.IsNullOrWhiteSpace(description), language.Code + " is missing " + property.Name + " text");
@@ -1219,7 +1303,7 @@ internal static class Program
                         language.Code + " did not warm unselected label " + key);
                 }
             }
-            Check(Get<int>(menu, "_displayedOptionCount") == 3 && GameManager.RenderingApplies == 0, "localization warmup changed compatibility visibility or applied settings");
+            Check(Get<int>(menu, "_displayedOptionCount") == 10 && GameManager.RenderingApplies == 0, "localization warmup changed compatibility visibility or applied settings");
         }
     }
 
@@ -1273,6 +1357,7 @@ internal static class Program
                 return menu;
             }).ToArray();
             Set(Manager, "_menus", Menus);
+            Set(Manager, "_isMenuDisplayed", Enumerable.Repeat(true, Menus.Length).ToArray());
             // Match SettingManager.Start: prepare all models before input/fade.
             foreach (var menu in Menus) menu.Init();
             Menus[0].ToHead();

@@ -4,6 +4,7 @@ using LitMotion;
 using MajdataPlay.Collections;
 using MajdataPlay.Scenes.List;
 using MajdataPlay.Scenes.List.Models;
+using MajdataPlay.Scenes.Setting;
 using MajdataPlay.Settings;
 using MajdataPlay.Tests.Game.Scenes.PlayMode.Support;
 using NUnit.Framework;
@@ -46,10 +47,23 @@ namespace MajdataPlay.Tests.Game.Scenes.PlayMode.ListScene
         }
 
         /// <summary>Gets the collection name text.</summary>
-        private string Name => PrivateMember.GetField<TextMeshProUGUI>(_collections, "_nameDisplayer").text;
+        private string Name => PrivateMember.GetField<TextMeshProUGUI>(SelectedTab, "_nameDisplayer").text;
 
         /// <summary>Gets the collection icon.</summary>
-        private Image Icon => PrivateMember.GetField<Image>(_collections, "_iconDisplayer");
+        private Image Icon => PrivateMember.GetField<Image>(SelectedTab, "_iconDisplayer");
+
+        /// <summary>Gets the actual pooled tab bound to the current selected collection.</summary>
+        private CollectionDisplayer SelectedTab
+        {
+            get
+            {
+                var indices = PrivateMember.GetField<int[]>(_collections, "_collectionDisplayerIndices");
+                var selectedIndex = PrivateMember.GetField<int>(_collections, "_listDesiredPos");
+                var slot = Array.IndexOf(indices, selectedIndex);
+                Assert.That(slot, Is.GreaterThanOrEqualTo(0), "The selected real tab must be bound before its presentation is inspected.");
+                return PrivateMember.GetField<CollectionDisplayer[]>(_collections, "_collectionDisplayers")[slot];
+            }
+        }
 
         /// <summary>Checks that initialization selects the first collection and its first song when nothing is remembered.</summary>
         /// <returns>The test coroutine.</returns>
@@ -86,7 +100,7 @@ namespace MajdataPlay.Tests.Game.Scenes.PlayMode.ListScene
             Assert.That(_covers.SelectedSong, Is.SameAs(songs[2]));
             Assert.That(MajEnv.RuntimeConfig.List.SelectedDirGuid, Is.EqualTo(second.Id));
             Assert.That(MajEnv.RuntimeConfig.List.SelectedSongId, Is.EqualTo(songs[2].Id));
-            Assert.That(PrivateMember.GetField<TextMeshProUGUI>(_center, "_selectedLevelTitle").text, Is.EqualTo("Master"));
+            Assert.That(PrivateMember.GetField<TextMeshProUGUI>(BoundCover(_covers, 2), "_selectedLevelTitle").text, Is.EqualTo("Master"));
         }
 
         /// <summary>Checks that a missing collection survives initialization until an explicit selection replaces it.</summary>
@@ -176,7 +190,7 @@ namespace MajdataPlay.Tests.Game.Scenes.PlayMode.ListScene
             Assert.That(_collections.SelectedCollection.Name, Is.EqualTo("A"));
         }
 
-        /// <summary>Checks that the difficulty wraps through all seven levels and is remembered.</summary>
+        /// <summary>Checks that each input moves one available difficulty, skipping missing charts and remembering the result.</summary>
         /// <returns>The test coroutine.</returns>
         [UnityTest]
         public IEnumerator SlideDifficulty_WrapsAndIsRemembered()
@@ -184,11 +198,11 @@ namespace MajdataPlay.Tests.Game.Scenes.PlayMode.ListScene
             yield return Ready(CreateCollection("A", CreateSongs("collection-diff", 2)));
 
             _collections.SlideDifficulty(-1);
-            Assert.That(MajEnv.RuntimeConfig!.List.SelectedDiff, Is.EqualTo(ChartLevel.UTAGE));
-            Assert.That(PrivateMember.GetField<TextMeshProUGUI>(_center, "_selectedLevelTitle").text, Is.EqualTo("UTAGE"));
+            Assert.That(MajEnv.RuntimeConfig!.List.SelectedDiff, Is.EqualTo(ChartLevel.ReMaster));
+            Assert.That(PrivateMember.GetField<TextMeshProUGUI>(BoundCover(_covers, 0), "_selectedLevelTitle").text, Is.EqualTo("Re:Master"));
 
             _collections.SlideDifficulty(2);
-            Assert.That(MajEnv.RuntimeConfig.List.SelectedDiff, Is.EqualTo(ChartLevel.Basic));
+            Assert.That(MajEnv.RuntimeConfig.List.SelectedDiff, Is.EqualTo(ChartLevel.Easy));
         }
 
         /// <summary>Checks the collection icon of each collection type.</summary>
@@ -210,6 +224,7 @@ namespace MajdataPlay.Tests.Game.Scenes.PlayMode.ListScene
             foreach (var sprite in expected)
             {
                 _collections.NextCollection();
+                PrivateMember.GetField<MotionHandle>(_collections, "_scrollMotion").TryComplete();
                 Assert.That(Icon.enabled, Is.True, _collections.SelectedCollection.Name);
                 Assert.That(Icon.sprite.name, Is.EqualTo(sprite), _collections.SelectedCollection.Name);
             }
@@ -250,7 +265,10 @@ namespace MajdataPlay.Tests.Game.Scenes.PlayMode.ListScene
             yield return Ready(CreateCollection("Ranked", songs), recommend);
 
             Assert.That(_covers.SelectedSong, Is.SameAs(songs[1]));
-            _collections.SlideDifficulty((int)ChartLevel.Master);
+            for (var step = 0; step < (int)ChartLevel.Master; step++)
+            {
+                _collections.SlideDifficulty(1);
+            }
             _covers.SlideListToHead();
             Assert.That(_covers.SelectedSong, Is.SameAs(songs[2]));
 
@@ -291,7 +309,308 @@ namespace MajdataPlay.Tests.Game.Scenes.PlayMode.ListScene
             Assert.That(indices, Is.EquivalentTo(new[] { 0, 1, 2, 3, -1, -1, -1 }));
             var displayers = PrivateMember.GetField<CollectionDisplayer[]>(_collections, "_collectionDisplayers");
             var third = displayers[Array.IndexOf(indices, 3)];
-            Assert.That(third.RectTransform.anchoredPosition.x, Is.EqualTo(540f).Within(1e-3f));
+            Assert.That(third.RectTransform.anchoredPosition.x, Is.EqualTo(546f).Within(1e-3f));
+        }
+
+        /// <summary>Checks selection belongs to the real moving tab rather than a duplicate fixed overlay or shader occlusion strip.</summary>
+        /// <returns>The initialized list and native selection regression coroutine.</returns>
+        [UnityTest]
+        public IEnumerator Displayers_HighlightTheRealSelectedTabWithoutGlobalOcclusion()
+        {
+            yield return Ready(
+                CreateCollection("A", CreateSongs("collection-real-tab-a", 1)),
+                CreateCollection("B", CreateSongs("collection-real-tab-b", 1)),
+                CreateCollection("C", CreateSongs("collection-real-tab-c", 1)));
+            var selected = SelectedTab;
+            var indices = PrivateMember.GetField<int[]>(_collections, "_collectionDisplayerIndices");
+            var displayers = PrivateMember.GetField<CollectionDisplayer[]>(_collections, "_collectionDisplayers");
+            var adjacent = displayers[Array.IndexOf(indices, 1)];
+            AssertTab(selected, 0f, 1f);
+            AssertTab(adjacent, 218f, 0f);
+            Assert.That(_collections.transform.Find("CollectionName"), Is.Null);
+            Assert.That(_collections.transform.Find("CollectionIcon"), Is.Null);
+            var saved = Shader.GetGlobalVector("_MajCollectionClipRect");
+            AddCleanup(() => Shader.SetGlobalVector("_MajCollectionClipRect", saved));
+            var sentinel = new Vector4(0.13f, 0.87f, 0.07f, 0.42f);
+            Shader.SetGlobalVector("_MajCollectionClipRect", sentinel);
+            _collections.NextCollection();
+            PrivateMember.GetField<MotionHandle>(_collections, "_scrollMotion").TryComplete();
+            _collections.enabled = false;
+            _collections.enabled = true;
+            Assert.That(Shader.GetGlobalVector("_MajCollectionClipRect"), Is.EqualTo(sentinel),
+                "Selection and lifecycle must not publish or clear a global pool-occlusion mask.");
+        }
+
+        /// <summary>Checks halfway motion highlights both real neighbors smoothly and reversing restores the same pooled objects.</summary>
+        /// <returns>The initialized list, native highlighting and reversal regression coroutine.</returns>
+        [UnityTest]
+        public IEnumerator Displayers_InterpolateRealHighlightsAndRestoreThemAfterReversal()
+        {
+            yield return Ready(
+                CreateCollection("A", CreateSongs("collection-tab-reversal-a", 1)),
+                CreateCollection("B", CreateSongs("collection-tab-reversal-b", 1)),
+                CreateCollection("C", CreateSongs("collection-tab-reversal-c", 1)));
+            var indices = PrivateMember.GetField<int[]>(_collections, "_collectionDisplayerIndices");
+            var displayers = PrivateMember.GetField<CollectionDisplayer[]>(_collections, "_collectionDisplayers");
+            var first = displayers[Array.IndexOf(indices, 0)];
+            var second = displayers[Array.IndexOf(indices, 1)];
+            _collections.NextCollection();
+            PrivateMember.SetField(_collections, "_listCursorPos", 0.5f);
+            PrivateMember.Invoke(_collections, "UpdateDisplayerPosition");
+            AssertTab(first, -109f, 0.5f);
+            AssertTab(second, 109f, 0.5f);
+            PrivateMember.GetField<MotionHandle>(_collections, "_scrollMotion").TryComplete();
+            Assert.That(SelectedTab, Is.SameAs(second));
+            AssertTab(first, -218f, 0f);
+            AssertTab(second, 0f, 1f);
+            _collections.PreviousCollection();
+            PrivateMember.GetField<MotionHandle>(_collections, "_scrollMotion").TryComplete();
+            Assert.That(SelectedTab, Is.SameAs(first));
+            AssertTab(first, 0f, 1f);
+            AssertTab(second, 218f, 0f);
+        }
+
+        /// <summary>Checks reversals and reused pool objects keep native positions, colors and authored opacity rather than fading whole tabs.</summary>
+        /// <returns>The initialized list, reversal and reused-object regression coroutine.</returns>
+        [UnityTest]
+        public IEnumerator Displayers_ScrollAndReuseWithoutChangingWholeItemOpacity()
+        {
+            var collections = new SongCollection[9];
+            for (var index = 0; index < collections.Length; index++)
+            {
+                collections[index] = CreateCollection("C" + index, CreateSongs("collection-tabs-reuse" + index, 1));
+            }
+            yield return Ready(collections);
+            var indices = PrivateMember.GetField<int[]>(_collections, "_collectionDisplayerIndices");
+            var displayers = PrivateMember.GetField<CollectionDisplayer[]>(_collections, "_collectionDisplayers");
+            foreach (var displayer in displayers)
+            {
+                Assert.That(displayer.GetComponents<CanvasGroup>(), Is.Empty);
+            }
+            var slot = Array.IndexOf(indices, 0);
+            var reused = displayers[slot];
+            var group = reused.gameObject.AddComponent<CanvasGroup>();
+            group.alpha = 0.42f;
+            group.interactable = false;
+            var icon = PrivateMember.GetField<Image>(reused, "_iconDisplayer");
+            var name = PrivateMember.GetField<TextMeshProUGUI>(reused, "_nameDisplayer");
+            var iconColor = icon.color;
+            var nameColor = name.color;
+            PrivateMember.SetField(_collections, "_listCursorPos", 0.5f);
+            PrivateMember.Invoke(_collections, "UpdateDisplayerPosition");
+            Assert.That(reused.RectTransform.anchoredPosition.x, Is.EqualTo(-109f).Within(0.001f));
+            Assert.That(group.alpha, Is.EqualTo(0.42f));
+            _collections.NextCollection();
+            _collections.PreviousCollection();
+            PrivateMember.GetField<MotionHandle>(_collections, "_scrollMotion").TryComplete();
+            Assert.That(reused.RectTransform.anchoredPosition.x, Is.Zero);
+            Assert.That(group.alpha, Is.EqualTo(0.42f));
+            Assert.That(reused.gameObject.activeSelf, Is.True);
+            PrivateMember.SetField(_collections, "_listCursorPos", 8f);
+            PrivateMember.Invoke(_collections, "UpdateDisplayerPosition");
+            Assert.That(indices[slot], Is.EqualTo(5));
+            Assert.That(displayers[slot], Is.SameAs(reused));
+            Assert.That(reused.RectTransform.anchoredPosition.x, Is.EqualTo(-546f).Within(0.001f));
+            Assert.That(reused.GetComponent<CanvasGroup>(), Is.SameAs(group));
+            Assert.That(group.alpha, Is.EqualTo(0.42f));
+            Assert.That(group.interactable, Is.False);
+            Assert.That(icon.color, Is.EqualTo(iconColor));
+            Assert.That(name.color, Is.EqualTo(nameColor));
+            Assert.That(reused.gameObject.activeSelf, Is.True);
+        }
+
+        /// <summary>Checks navigation opacity shares the scroll clock while preserving the original OutQuad cursor curve.</summary>
+        /// <returns>The initialized navigation and exact transition-time regression coroutine.</returns>
+        [UnityTest]
+        public IEnumerator NavigationArrows_FadeWithTheCollectionMotionWithoutChangingItsEasing()
+        {
+            yield return ReadyNavigationCollections("navigation-timeline");
+            var arrows = BindNavigationArrows();
+            _collections.NextCollection();
+            var motion = PrivateMember.GetField<MotionHandle>(_collections, "_scrollMotion");
+            Assert.That(motion.Duration, Is.EqualTo(0.25f));
+            foreach (var sample in new (double Time, float Alpha, float Cursor)[]
+            {
+                (0, 1f, 0f),
+                (0.0125, 0.84375f, 0.0975f),
+                (0.025, 0.5f, 0.19f),
+                (0.05, 0f, 0.36f),
+                (0.125, 0f, 0.75f),
+                (0.2, 0f, 0.96f),
+                (0.225, 0.5f, 0.99f),
+                (0.25, 1f, 1f)
+            })
+            {
+                motion.Time = sample.Time;
+                Assert.That(arrows.alpha, Is.EqualTo(sample.Alpha).Within(0.0001f), "Arrow opacity at " + sample.Time);
+                Assert.That(PrivateMember.GetField<float>(_collections, "_listCursorPos"),
+                    Is.EqualTo(sample.Cursor).Within(0.0001f), "Collection cursor at " + sample.Time);
+            }
+            Assert.That(_collections.SelectedCollection.Name, Is.EqualTo("B"));
+            AssertTab(SelectedTab, 0f, 1f);
+        }
+
+        /// <summary>Checks a rapid reversal retains the current arrow opacity and cursor rather than flashing fully visible.</summary>
+        /// <returns>The initialized navigation interruption regression coroutine.</returns>
+        [UnityTest]
+        public IEnumerator NavigationArrows_ReverseWithoutRestartingFromFullOpacity()
+        {
+            yield return ReadyNavigationCollections("navigation-reverse");
+            var arrows = BindNavigationArrows();
+            _collections.NextCollection();
+            var interrupted = PrivateMember.GetField<MotionHandle>(_collections, "_scrollMotion");
+            interrupted.Time = 0.025;
+            Assert.That(arrows.alpha, Is.EqualTo(0.5f).Within(0.0001f));
+            _collections.PreviousCollection();
+            var reversed = PrivateMember.GetField<MotionHandle>(_collections, "_scrollMotion");
+            Assert.That(reversed, Is.Not.EqualTo(interrupted));
+            Assert.That(interrupted.IsActive(), Is.False);
+            Assert.That(arrows.alpha, Is.EqualTo(0.5f).Within(0.0001f));
+            reversed.Time = 0;
+            Assert.That(arrows.alpha, Is.EqualTo(0.5f).Within(0.0001f));
+            Assert.That(PrivateMember.GetField<float>(_collections, "_listCursorPos"), Is.EqualTo(0.19f).Within(0.0001f));
+            reversed.Time = 0.025;
+            Assert.That(arrows.alpha, Is.EqualTo(0.25f).Within(0.0001f));
+            Assert.That(PrivateMember.GetField<float>(_collections, "_listCursorPos"), Is.EqualTo(0.1539f).Within(0.0001f));
+            reversed.Time = 0.125;
+            Assert.That(arrows.alpha, Is.Zero);
+            reversed.Time = 0.225;
+            Assert.That(arrows.alpha, Is.EqualTo(0.5f).Within(0.0001f));
+            reversed.TryComplete();
+            Assert.That(arrows.alpha, Is.EqualTo(1f));
+            Assert.That(_collections.SelectedCollection.Name, Is.EqualTo("A"));
+            AssertTab(SelectedTab, 0f, 1f);
+        }
+
+        /// <summary>Checks disabling cancels the pending fade and re-enabling settles the actual selected tab layout.</summary>
+        /// <returns>The initialized navigation lifecycle regression coroutine.</returns>
+        [UnityTest]
+        public IEnumerator NavigationArrows_DisableCancelsFadeAndRestoresTheSelectedLayoutOnEnable()
+        {
+            yield return ReadyNavigationCollections("navigation-disable");
+            var arrows = BindNavigationArrows();
+            _collections.NextCollection();
+            var interrupted = PrivateMember.GetField<MotionHandle>(_collections, "_scrollMotion");
+            interrupted.Time = 0.025;
+            _collections.gameObject.SetActive(false);
+            Assert.That(interrupted.IsActive(), Is.False);
+            Assert.That(arrows.alpha, Is.EqualTo(1f));
+            Assert.That(PrivateMember.GetField<float>(_collections, "_listCursorPos"), Is.EqualTo(1f));
+            Assert.That(interrupted.TryComplete(), Is.False);
+            _collections.gameObject.SetActive(true);
+            Assert.That(arrows.alpha, Is.EqualTo(1f));
+            Assert.That(_collections.SelectedCollection.Name, Is.EqualTo("B"));
+            AssertTab(SelectedTab, 0f, 1f);
+        }
+
+        /// <summary>Checks immediate moves, both wrap directions and idle repeated selection leave navigation visible without an active fade.</summary>
+        /// <returns>The initialized navigation nonanimated-path regression coroutine.</returns>
+        [UnityTest]
+        public IEnumerator NavigationArrows_ImmediateWrapAndUnchangedSelectionStayVisible()
+        {
+            yield return ReadyNavigationCollections("navigation-immediate");
+            var arrows = BindNavigationArrows();
+            _collections.NextCollection();
+            var interrupted = PrivateMember.GetField<MotionHandle>(_collections, "_scrollMotion");
+            interrupted.Time = 0.125;
+            Assert.That(arrows.alpha, Is.Zero);
+            PrivateMember.Invoke(_collections, "SlideListTo", 2, true, false);
+            Assert.That(interrupted.IsActive(), Is.False);
+            Assert.That(arrows.alpha, Is.EqualTo(1f));
+            Assert.That(PrivateMember.GetField<float>(_collections, "_listCursorPos"), Is.EqualTo(2f));
+            _collections.NextCollection();
+            Assert.That(arrows.alpha, Is.EqualTo(1f));
+            Assert.That(PrivateMember.GetField<float>(_collections, "_listCursorPos"), Is.Zero);
+            var idleMotion = PrivateMember.GetField<MotionHandle>(_collections, "_scrollMotion");
+            Assert.That(idleMotion.IsActive(), Is.False);
+            PrivateMember.Invoke(_collections, "SlideListTo", 0, false, false);
+            Assert.That(PrivateMember.GetField<MotionHandle>(_collections, "_scrollMotion"), Is.EqualTo(idleMotion));
+            Assert.That(arrows.alpha, Is.EqualTo(1f));
+            _collections.PreviousCollection();
+            Assert.That(arrows.alpha, Is.EqualTo(1f));
+            Assert.That(PrivateMember.GetField<float>(_collections, "_listCursorPos"), Is.EqualTo(2f));
+            Assert.That(PrivateMember.GetField<MotionHandle>(_collections, "_scrollMotion").IsActive(), Is.False);
+        }
+
+        /// <summary>Checks a refreshed empty snapshot clears the old cover and pooled categories safely.</summary>
+        /// <returns>The storage-refresh regression coroutine.</returns>
+        [UnityTest]
+        public IEnumerator Init_EmptyRefreshClearsSelectionAndAcceptsNavigation()
+        {
+            yield return Ready(CreateCollection("A", CreateSongs("refresh-empty", 1)));
+            PublishCollections(Array.Empty<SongCollection>());
+            _collections.Init();
+            Assert.That(_covers.SelectedSong, Is.Null);
+            Assert.That(_collections.SelectedCollection.IsEmpty, Is.True);
+            foreach (var tab in PrivateMember.GetField<CollectionDisplayer[]>(_collections, "_collectionDisplayers"))
+            {
+                Assert.That(tab.gameObject.activeSelf, Is.False);
+            }
+            Assert.DoesNotThrow(() =>
+            {
+                _collections.NextCollection();
+                _collections.PreviousCollection();
+                _collections.SlideDifficulty(1);
+            });
+        }
+
+        /// <summary>Checks a replacement at the same selected index rebinds tabs and cancels the previous transition.</summary>
+        /// <returns>The same-index refresh regression coroutine.</returns>
+        [UnityTest]
+        public IEnumerator Init_SameIndexRefreshRebindsTheSelectedTab()
+        {
+            yield return Ready(CreateCollection("A", CreateSongs("refresh-old", 1)), CreateCollection("Other", CreateSongs("refresh-other", 1)));
+            _collections.NextCollection();
+            var first = PrivateMember.GetField<MotionHandle>(_collections, "_scrollMotion");
+            first.Time = 0.025;
+            _collections.PreviousCollection();
+            var pending = PrivateMember.GetField<MotionHandle>(_collections, "_scrollMotion");
+            Assert.That(pending.IsActive(), Is.True);
+            PublishCollections(CreateCollection("B", CreateSongs("refresh-new", 1)));
+            _collections.Init();
+            Assert.That(pending.IsActive(), Is.False);
+            Assert.That(pending.TryComplete(), Is.False);
+            Assert.That(PrivateMember.GetField<int>(_collections, "_listDesiredPos"), Is.Zero);
+            Assert.That(Name, Is.EqualTo("B"));
+            Assert.That(_collections.SelectedCollection.Name, Is.EqualTo("B"));
+        }
+
+        /// <summary>Initializes three real collections for the focused navigation transition cases.</summary>
+        /// <param name="prefix">The unique in-memory song identity prefix for this test.</param>
+        /// <returns>The manager initialization coroutine.</returns>
+        private IEnumerator ReadyNavigationCollections(string prefix)
+        {
+            yield return Ready(
+                CreateCollection("A", CreateSongs(prefix + "-a", 1)),
+                CreateCollection("B", CreateSongs(prefix + "-b", 1)),
+                CreateCollection("C", CreateSongs(prefix + "-c", 1)));
+        }
+
+        /// <summary>Binds a group scoped to the independent navigation arrows without changing shared test setup.</summary>
+        /// <returns>The newly bound navigation-only CanvasGroup.</returns>
+        private CanvasGroup BindNavigationArrows()
+        {
+            var arrows = CreateRect("Navigation", _collections.transform).AddComponent<CanvasGroup>();
+            arrows.alpha = 1f;
+            PrivateMember.SetField(_collections, "_navigationArrows", arrows);
+            return arrows;
+        }
+        /// <summary>Checks the native two-background presentation of an actual data-bearing pooled category.</summary>
+        /// <param name="displayer">The real pooled collection tab.</param>
+        /// <param name="position">The expected signed horizontal location.</param>
+        /// <param name="selection">The zero-to-one selected presentation amount.</param>
+        private static void AssertTab(CollectionDisplayer displayer, float position, float selection)
+        {
+            var tab = PrivateMember.GetField<MenuTitleDisplayer>(displayer, "_tabDisplayer");
+            var unselected = PrivateMember.GetField<Image>(tab, "_unselectedBackground");
+            var selected = PrivateMember.GetField<Image>(tab, "_selectedBackground");
+            Assert.That(displayer.RectTransform.anchoredPosition.x, Is.EqualTo(position).Within(0.001f));
+            var expectedSize = Vector2.Lerp(new Vector2(147.83f, 76.8f), new Vector2(254.69f, 82.3f), selection);
+            Assert.That(displayer.RectTransform.sizeDelta.x, Is.EqualTo(expectedSize.x).Within(0.001f));
+            Assert.That(displayer.RectTransform.sizeDelta.y, Is.EqualTo(expectedSize.y).Within(0.001f));
+            Assert.That(unselected.color.a, Is.EqualTo(1f - selection).Within(0.0001f));
+            Assert.That(selected.color.a, Is.EqualTo(selection).Within(0.0001f));
+            Assert.That(displayer.gameObject.activeSelf, Is.True);
         }
 
         /// <summary>Checks the collection tab layout curve.</summary>
@@ -300,12 +619,12 @@ namespace MajdataPlay.Tests.Game.Scenes.PlayMode.ListScene
         public IEnumerator LayoutCurve_InterpolatesBetweenSteps()
         {
             yield return Ready(CreateCollection("A", CreateSongs("collection-curve", 1)));
-
-            Assert.That(PrivateMember.Invoke<Vector2>(_collections, "GetDisplayerPositionFromDelta", 0.5f).x, Is.EqualTo(120f).Within(1e-3f));
-            Assert.That(PrivateMember.Invoke<Vector2>(_collections, "GetDisplayerPositionFromDelta", -1.5f).x, Is.EqualTo(-315f).Within(1e-3f));
-            Assert.That(PrivateMember.Invoke<Vector2>(_collections, "GetDisplayerPositionFromDelta", 2.5f).x, Is.EqualTo(465f).Within(1e-3f));
-            Assert.That(PrivateMember.Invoke<Vector2>(_collections, "GetDisplayerPositionFromDelta", 3.5f).x, Is.EqualTo(615f).Within(1e-3f));
-            Assert.That(PrivateMember.Invoke<Vector2>(_collections, "GetDisplayerPositionFromDelta", 9f).x, Is.EqualTo(690f).Within(1e-3f));
+            var tab = SelectedTab;
+            foreach (var entry in new (float Distance, float Position)[] { (0.5f, 109f), (-1.5f, -300f), (2.5f, 464f), (3.5f, 628f), (9f, 1530f) })
+            {
+                tab.SetDistance(entry.Distance);
+                Assert.That(tab.RectTransform.anchoredPosition.x, Is.EqualTo(entry.Position).Within(0.001f));
+            }
             Assert.That(PrivateMember.InvokeStatic<int>(typeof(CollectionListManager), "WrapIndex", -8, 7), Is.EqualTo(6));
         }
     }

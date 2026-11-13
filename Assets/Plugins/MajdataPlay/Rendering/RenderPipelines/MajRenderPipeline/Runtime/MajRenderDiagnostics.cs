@@ -30,7 +30,9 @@ namespace MajdataPlay.Rendering
         /// <summary>当前屏幕显示区域要求 FinalCopy；原生场景附件及 memoryless 优化仍可保留。</summary>
         IntermediateViewport,
         /// <summary>Camera capture requires a sampleable resolved scene color and final presentation copy.</summary>
-        IntermediateCapture
+        IntermediateCapture,
+        /// <summary>UI backdrop capture requires stored scene attachments and a final presentation copy.</summary>
+        IntermediateBackdrop
     }
 
     [Preserve]

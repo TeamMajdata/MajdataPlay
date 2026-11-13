@@ -30,7 +30,7 @@ namespace MajdataPlay.Tests.SensorDebugValidation
             var material = AssetDatabase.LoadAssetAtPath<Material>("Assets/Models/JudgeAreas.mat");
             Check(material != null && material.shader.name == "Maj/Debug/SensorBorder", "The production material and shader must resolve.");
             Check(!ShaderUtil.ShaderHasError(material!.shader), "The production shader must import without errors.");
-            Check(material!.renderQueue == 3000, "Every sensor style retains transparent rendering.");
+            Check(material!.renderQueue == 5000, "Every sensor style enters the final transparent UI stage above glass and transitions.");
 
             var root = new GameObject("Sensor visualization validation");
             root.SetActive(false);

@@ -1910,6 +1910,7 @@ GameObject:
   - component: {fileID: 325391449}
   - component: {fileID: 325391451}
   - component: {fileID: 325391450}
+  - component: {fileID: 900000000000000018}
   m_Layer: 5
   m_Name: RingCircle
   m_TagString: Untagged
@@ -1945,11 +1946,11 @@ MonoBehaviour:
   m_GameObject: {fileID: 325391448}
   m_Enabled: 1
   m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: fe87c0e1cc204ed48ad3b37840f39efc, type: 3}
+  m_Script: {fileID: 11500000, guid: 7c51cc521e1747f0ba99ae9b65785bd5, type: 3}
   m_Name: 
-  m_EditorClassIdentifier: 
+  m_EditorClassIdentifier: MajdataPlay.Core::MajdataPlay.Rendering.QualityUiImage
   m_Material: {fileID: 2100000, guid: 78a3c5eb06624f448a0238577d1de902, type: 2}
-  m_Color: {r: 1, g: 1, b: 1, a: 1}
+  m_Color: {r: 1, g: 1, b: 1, a: 0.85}
   m_RaycastTarget: 1
   m_RaycastPadding: {x: 0, y: 0, z: 0, w: 0}
   m_Maskable: 1
@@ -3386,6 +3387,7 @@ GameObject:
   - component: {fileID: 585777002}
   - component: {fileID: 585777001}
   - component: {fileID: 910000000000000003}
+  - component: {fileID: 900000000000000002}
   m_Layer: 5
   m_Name: Button5
   m_TagString: Untagged
@@ -3422,9 +3424,9 @@ MonoBehaviour:
   m_GameObject: {fileID: 585776999}
   m_Enabled: 1
   m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: fe87c0e1cc204ed48ad3b37840f39efc, type: 3}
+  m_Script: {fileID: 11500000, guid: 7c51cc521e1747f0ba99ae9b65785bd5, type: 3}
   m_Name: 
-  m_EditorClassIdentifier: 
+  m_EditorClassIdentifier: MajdataPlay.Core::MajdataPlay.Rendering.QualityUiImage
   m_Material: {fileID: 2100000, guid: 78a3c5eb06624f448a0238577d1de902, type: 2}
   m_Color: {r: 1, g: 1, b: 1, a: 1}
   m_RaycastTarget: 1
@@ -9327,6 +9329,7 @@ GameObject:
   - component: {fileID: 1556681023}
   - component: {fileID: 1556681022}
   - component: {fileID: 910000000000000004}
+  - component: {fileID: 900000000000000001}
   m_Layer: 5
   m_Name: Button4
   m_TagString: Untagged
@@ -9363,9 +9366,9 @@ MonoBehaviour:
   m_GameObject: {fileID: 1556681020}
   m_Enabled: 1
   m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: fe87c0e1cc204ed48ad3b37840f39efc, type: 3}
+  m_Script: {fileID: 11500000, guid: 7c51cc521e1747f0ba99ae9b65785bd5, type: 3}
   m_Name: 
-  m_EditorClassIdentifier: 
+  m_EditorClassIdentifier: MajdataPlay.Core::MajdataPlay.Rendering.QualityUiImage
   m_Material: {fileID: 2100000, guid: 78a3c5eb06624f448a0238577d1de902, type: 2}
   m_Color: {r: 1, g: 1, b: 1, a: 1}
   m_RaycastTarget: 1
@@ -13585,6 +13588,89 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::MajdataPlay.UI.PreviewOnlyCamera
   <RuntimeDatabase>k__BackingField: {fileID: 0}
+--- !u!114 &900000000000000001
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1556681020}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: ef06d39c7c35439cafc6637c942934d4, type: 3}
+  m_Name:
+  m_EditorClassIdentifier: MajdataPlay.Core::MajdataPlay.Rendering.UiBackdropPanel
+  _backgroundImage: {fileID: 0}
+  _isButton: 1
+  _isCategory: 0
+  _reusePanelCaptureOnly: 0
+  _liquidOnly: 0
+  _liquidEllipse: 0
+  _liquidCapsule: 0
+  _fillSamplePosition: {x: 0.5, y: 0.5}
+  _buttonForegroundRoot: {fileID: 1924603244}
+  _fillAlpha: 1
+  _tintStrength: 1
+  _liquidTintStrength: 0.9
+  _liquidArtworkBlend: 0.25
+  _frostStrength: 0
+  _referenceOpacity: 1
+--- !u!114 &900000000000000002
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 585776999}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: ef06d39c7c35439cafc6637c942934d4, type: 3}
+  m_Name:
+  m_EditorClassIdentifier: MajdataPlay.Core::MajdataPlay.Rendering.UiBackdropPanel
+  _backgroundImage: {fileID: 0}
+  _isButton: 1
+  _isCategory: 0
+  _reusePanelCaptureOnly: 0
+  _liquidOnly: 0
+  _liquidEllipse: 0
+  _liquidCapsule: 0
+  _fillSamplePosition: {x: 0.5, y: 0.5}
+  _buttonForegroundRoot: {fileID: 806350225}
+  _fillAlpha: 1
+  _tintStrength: 1
+  _liquidTintStrength: 0.9
+  _liquidArtworkBlend: 0.25
+  _frostStrength: 0
+  _referenceOpacity: 1
+--- !u!114 &900000000000000018
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 325391448}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: ef06d39c7c35439cafc6637c942934d4, type: 3}
+  m_Name:
+  m_EditorClassIdentifier: MajdataPlay.Core::MajdataPlay.Rendering.UiBackdropPanel
+  _backgroundImage: {fileID: 0}
+  _useStrongBlur: 1
+  _liquidClippedCircle: 1
+  _isButton: 0
+  _isCategory: 0
+  _reusePanelCaptureOnly: 0
+  _liquidOnly: 0
+  _liquidEllipse: 0
+  _liquidCapsule: 0
+  _fillSamplePosition: {x: 0.5, y: 0.5}
+  _buttonForegroundRoot: {fileID: 0}
+  _fillAlpha: 0.5019608
+  _tintStrength: 0.4
+  _liquidTintStrength: 0
+  _liquidArtworkBlend: 0.4233333
+  _frostStrength: 0.08
+  _referenceOpacity: 0.85
 --- !u!1660057539 &9223372036854775807
 SceneRoots:
   m_ObjectHideFlags: 0

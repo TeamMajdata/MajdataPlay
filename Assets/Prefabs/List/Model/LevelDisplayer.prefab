@@ -68,7 +68,7 @@ MonoBehaviour:
   m_text: 4
   m_isRightToLeft: 0
   m_fontAsset: {fileID: 11400000, guid: dbc58334dc23ba04fbfee4bf5298b6a0, type: 2}
-  m_sharedMaterial: {fileID: -9050617650548543871, guid: dbc58334dc23ba04fbfee4bf5298b6a0, type: 2}
+  m_sharedMaterial: {fileID: 2100000, guid: d788d115deaf4cbc8f0fdd9f0977383c, type: 2}
   m_fontSharedMaterials: []
   m_fontMaterial: {fileID: 0}
   m_fontMaterials: []
@@ -191,9 +191,9 @@ MonoBehaviour:
   m_GameObject: {fileID: 8917252629361479818}
   m_Enabled: 1
   m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: fe87c0e1cc204ed48ad3b37840f39efc, type: 3}
+  m_Script: {fileID: 11500000, guid: 7c51cc521e1747f0ba99ae9b65785bd5, type: 3}
   m_Name: 
-  m_EditorClassIdentifier: UnityEngine.UI::UnityEngine.UI.Image
+  m_EditorClassIdentifier: MajdataPlay.Core::MajdataPlay.Rendering.QualityUiImage
   m_Material: {fileID: 2100000, guid: 1b12dc9204227dc42bb2fc6a3075a021, type: 2}
   m_Color: {r: 0.27058825, g: 0.6901961, b: 1, a: 1}
   m_RaycastTarget: 1
@@ -212,6 +212,7 @@ MonoBehaviour:
   m_FillOrigin: 0
   m_UseSpriteMesh: 0
   m_PixelsPerUnitMultiplier: 1
+  _liquidGlassMaterial: {fileID: 2100000, guid: b6ab1c613be84b36b0525fe4ae1c9aaa, type: 2}
 --- !u!1 &9138515207495692674
 GameObject:
   m_ObjectHideFlags: 0
@@ -222,6 +223,7 @@ GameObject:
   m_Component:
   - component: {fileID: 2801995808127223295}
   - component: {fileID: 362757631690683401}
+  - component: {fileID: 900000000000000900}
   m_Layer: 5
   m_Name: LevelDisplayer
   m_TagString: Untagged
@@ -258,3 +260,15 @@ CanvasRenderer:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 9138515207495692674}
   m_CullTransparentMesh: 1
+--- !u!225 &900000000000000900
+CanvasGroup:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 9138515207495692674}
+  m_Enabled: 1
+  m_Alpha: 1
+  m_Interactable: 1
+  m_BlocksRaycasts: 1
+  m_IgnoreParentGroups: 0

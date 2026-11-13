@@ -286,6 +286,7 @@ GameObject:
   - component: {fileID: 6121348520689801922}
   - component: {fileID: 3072154804911783285}
   - component: {fileID: 7983312345234581846}
+  - component: {fileID: 7983312345234581847}
   m_Layer: 5
   m_Name: ChartVisualDisplayer
   m_TagString: Untagged
@@ -330,9 +331,9 @@ MonoBehaviour:
   m_GameObject: {fileID: 9104549907178675086}
   m_Enabled: 1
   m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: fe87c0e1cc204ed48ad3b37840f39efc, type: 3}
+  m_Script: {fileID: 11500000, guid: 7c51cc521e1747f0ba99ae9b65785bd5, type: 3}
   m_Name: 
-  m_EditorClassIdentifier: 
+  m_EditorClassIdentifier: MajdataPlay.Core::MajdataPlay.Rendering.QualityUiImage
   m_Material: {fileID: 2100000, guid: 78a3c5eb06624f448a0238577d1de902, type: 2}
   m_Color: {r: 1, g: 1, b: 1, a: 1}
   m_RaycastTarget: 1
@@ -351,6 +352,32 @@ MonoBehaviour:
   m_FillOrigin: 0
   m_UseSpriteMesh: 0
   m_PixelsPerUnitMultiplier: 3
+--- !u!114 &7983312345234581847
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 9104549907178675086}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: ef06d39c7c35439cafc6637c942934d4, type: 3}
+  m_Name:
+  m_EditorClassIdentifier: MajdataPlay.Core::MajdataPlay.Rendering.UiBackdropPanel
+  _backgroundImage: {fileID: 0}
+  _useStrongBlur: 1
+  _liquidBodyInsets: {x: 0.13793103, y: 0.19047619, z: 0.13793103, w: 0.0952381}
+  _liquidCornerRadius: 0.24206349
+  _isButton: 0
+  _isCategory: 0
+  _reusePanelCaptureOnly: 1
+  _fillAlpha: 1
+  _tintStrength: 1
+  _liquidTintStrength: 0.42
+  _liquidRefractionWidthScale: 1.5
+  _liquidArtworkBlend: 0.25
+  _frostStrength: 0.02
+  _referenceOpacity: 1
 --- !u!1001 &3742566025250047334
 PrefabInstance:
   m_ObjectHideFlags: 0

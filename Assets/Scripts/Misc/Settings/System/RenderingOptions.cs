@@ -48,6 +48,18 @@ namespace MajdataPlay.Settings
         private RenderingAntialiasingOption _antiAliasing = SettingDefaults.Rendering.AntiAliasing;
         private RenderingTextureQualityOption _textureQuality = SettingDefaults.Rendering.TextureQuality;
         private RenderingOutputMode _outputMode = SettingDefaults.Rendering.OutputMode;
+        /// <summary>Stores the complete UI artwork, compositing and backdrop choice independently of MSAA.</summary>
+        private UiOutlineMode _uiOutlineMode = SettingDefaults.Rendering.UIOutlineMode;
+        /// <summary>Stores the preferred Refined panel effect independently of the selected quality preset.</summary>
+        private UiBackdropStyle _uiBackdropStyle = SettingDefaults.Rendering.UIBackdropStyle;
+        /// <summary>Distinguishes the current saved choice from the legacy migration-only keys.</summary>
+        private bool _hasSerializedUIOutlineMode;
+        /// <summary>Retains the old boolean while reading an existing Custom configuration.</summary>
+        private bool _legacyUIOutline;
+        /// <summary>Retains the old background choice until all legacy keys have been read.</summary>
+        private LegacyUiBackgroundMode _legacyUIBackgroundMode;
+        /// <summary>Retains the retired backdrop flag only while migrating configurations without a unified UI mode.</summary>
+        private bool _legacyUIBackdropBlur;
         private int _renderScale = SettingDefaults.Rendering.RenderScale;
         private int _fpsLimit = SettingDefaults.Rendering.FPSLimit;
         private bool _deserializing;
@@ -121,6 +133,79 @@ namespace MajdataPlay.Settings
                 }
                 _textureQuality = value;
                 MarkCustom();
+            }
+        }
+
+        /// <summary>Gets or sets the complete Custom UI style independently of multisample anti-aliasing.</summary>
+        [ShowInSettingUIWhen(nameof(CompatibilityMode), false)]
+        [ShowInSettingUIWhen(nameof(RenderQuality), RenderingQualityOption.Custom)]
+        [OptionEnumerator(typeof(RenderingEnumSettingEnumerator))]
+        public UiOutlineMode UIOutlineMode
+        {
+            get => _uiOutlineMode;
+            set
+            {
+                if (_deserializing)
+                {
+                    _hasSerializedUIOutlineMode = true;
+                }
+                if (_uiOutlineMode == value)
+                {
+                    return;
+                }
+                _uiOutlineMode = value;
+                MarkCustom();
+            }
+        }
+
+        /// <summary>Gets or sets the Refined panel effect without changing the selected rendering quality.</summary>
+        [ShowInSettingUIWhen(nameof(CompatibilityMode), false)]
+        [ShowInSettingUIWhen(nameof(RenderQuality), RenderingQualityOption.Refined)]
+        [OptionEnumerator(typeof(RenderingEnumSettingEnumerator))]
+        public UiBackdropStyle UIBackdropStyle
+        {
+            get => _uiBackdropStyle;
+            set
+            {
+                _uiBackdropStyle = value;
+                if (!_deserializing && _quality == RenderingQualityOption.Refined)
+                {
+                    _uiOutlineMode = value == UiBackdropStyle.LiquidGlass
+                        ? UiOutlineMode.LiquidGlass : UiOutlineMode.GaussianBlur;
+                }
+            }
+        }
+
+        /// <summary>Reads the retired backdrop flag for legacy migration without writing a second UI control.</summary>
+        [Preserve]
+        [JsonProperty("UIBackdropBlur")]
+        private bool LegacyUIBackdropBlur
+        {
+            set
+            {
+                _legacyUIBackdropBlur = value;
+            }
+        }
+
+        /// <summary>Reads the old boolean UI style without writing it to new settings files.</summary>
+        [Preserve]
+        [JsonProperty("UIOutline")]
+        private bool LegacyUIOutline
+        {
+            set
+            {
+                _legacyUIOutline = value;
+            }
+        }
+
+        /// <summary>Reads the old background choice without exposing or writing a second UI setting.</summary>
+        [Preserve]
+        [JsonProperty("UIBackgroundMode")]
+        private LegacyUiBackgroundMode LegacyUIBackgroundMode
+        {
+            set
+            {
+                _legacyUIBackgroundMode = value;
             }
         }
 
@@ -256,6 +341,35 @@ namespace MajdataPlay.Settings
                     _renderScale == 100 && _outputMode == RenderingOutputMode.Direct);
         }
 
+        /// <summary>Gets the base artwork strategy after applying the temporary compatibility override.</summary>
+        /// <returns>None in compatibility mode; All for either captured-backdrop style; otherwise the saved base strategy.</returns>
+        public UiOutlineMode GetEffectiveUIOutlineMode()
+        {
+            if (CompatibilityMode)
+            {
+                return UiOutlineMode.None;
+            }
+            return _uiOutlineMode switch
+            {
+                UiOutlineMode.GaussianBlur or UiOutlineMode.LiquidGlass => UiOutlineMode.All,
+                _ => _uiOutlineMode
+            };
+        }
+
+        /// <summary>Gets whether the selected UI style requires same-frame captured backdrops.</summary>
+        /// <returns>True only for GaussianBlur or LiquidGlass outside compatibility mode; All remains ordinary alpha blending.</returns>
+        public bool GetEffectiveUIBackdropBlur()
+        {
+            return !CompatibilityMode && (_uiOutlineMode == UiOutlineMode.GaussianBlur || _uiOutlineMode == UiOutlineMode.LiquidGlass);
+        }
+
+        /// <summary>Gets the backdrop effect derived from the active unified UI style.</summary>
+        /// <returns>LiquidGlass for that explicit UI style; GaussianBlur otherwise, including when capture is disabled.</returns>
+        public UiBackdropStyle GetEffectiveUIBackdropStyle()
+        {
+            return _uiOutlineMode == UiOutlineMode.LiquidGlass ? UiBackdropStyle.LiquidGlass : UiBackdropStyle.GaussianBlur;
+        }
+
         private void MarkCustom()
         {
             if (!_deserializing)
@@ -264,25 +378,42 @@ namespace MajdataPlay.Settings
             }
         }
 
+        /// <summary>Applies the selected named preset without replacing manually saved Custom parameters.</summary>
         private void ApplyPreset()
         {
             if (_quality == RenderingQualityOption.Custom)
             {
                 return;
             }
-            _renderScale = _quality == RenderingQualityOption.Refined ? 150 : 100;
-            _antiAliasing = _quality == RenderingQualityOption.Beautiful || _quality == RenderingQualityOption.Refined
-                ? RenderingAntialiasingOption.MSAA4x : RenderingAntialiasingOption.Disabled;
+            _renderScale = 100;
+            _antiAliasing = RenderingAntialiasingOption.Disabled;
             _textureQuality = _quality == RenderingQualityOption.EnergySaving
                 ? RenderingTextureQualityOption.Medium : RenderingTextureQualityOption.High;
-            _outputMode = _quality == RenderingQualityOption.Refined
-                ? RenderingOutputMode.Intermediate : RenderingOutputMode.Direct;
+            _outputMode = RenderingOutputMode.Direct;
+            _uiOutlineMode = _quality switch
+            {
+                RenderingQualityOption.EnergySaving => UiOutlineMode.None,
+                RenderingQualityOption.Performance => UiOutlineMode.Performance,
+                RenderingQualityOption.Refined => _uiBackdropStyle == UiBackdropStyle.LiquidGlass
+                    ? UiOutlineMode.LiquidGlass : UiOutlineMode.GaussianBlur,
+                _ => UiOutlineMode.All
+            };
         }
 
+        /// <summary>Preserves historical missing-field defaults while a saved Custom configuration is read.</summary>
+        /// <param name="context">The serializer's streaming context.</param>
         [OnDeserializing]
         private void OnReading(StreamingContext context)
         {
             _deserializing = true;
+            _hasSerializedUIOutlineMode = false;
+            _legacyUIOutline = false;
+            _legacyUIBackgroundMode = LegacyUiBackgroundMode.OriginalAlpha;
+            _legacyUIBackdropBlur = false;
+            _uiBackdropStyle = SettingDefaults.Rendering.UIBackdropStyle;
+            // Named presets are reapplied by OnRead, so new or empty settings still use Beautiful.
+            // A legacy Custom configuration must not gain MSAA or outlined UI merely by omitting a key.
+            _antiAliasing = RenderingAntialiasingOption.Disabled;
         }
 
         [OnDeserialized]
@@ -306,12 +437,48 @@ namespace MajdataPlay.Settings
             {
                 _outputMode = SettingDefaults.Rendering.OutputMode;
             }
+            if (!Enum.IsDefined(typeof(UiBackdropStyle), _uiBackdropStyle))
+            {
+                _uiBackdropStyle = SettingDefaults.Rendering.UIBackdropStyle;
+            }
+            if (_quality == RenderingQualityOption.Custom)
+            {
+                if (!_hasSerializedUIOutlineMode)
+                {
+                    _uiOutlineMode = _legacyUIOutline ? UiOutlineMode.All
+                        : _legacyUIBackgroundMode == LegacyUiBackgroundMode.OutlinedAlpha
+                            ? UiOutlineMode.Performance : UiOutlineMode.None;
+                    if (_uiOutlineMode == UiOutlineMode.All && _legacyUIBackdropBlur)
+                    {
+                        _uiOutlineMode = _uiBackdropStyle == UiBackdropStyle.LiquidGlass
+                            ? UiOutlineMode.LiquidGlass : UiOutlineMode.GaussianBlur;
+                    }
+                }
+                else if (!Enum.IsDefined(typeof(UiOutlineMode), _uiOutlineMode))
+                {
+                    _uiOutlineMode = UiOutlineMode.None;
+                }
+            }
             _renderScale = Math.Max(10, Math.Min(200, _renderScale));
             ApplyPreset();
             if (_renderScale != 100)
             {
                 _outputMode = RenderingOutputMode.Intermediate;
             }
+        }
+
+        /// <summary>Names values accepted only when reading the retired independent background key.</summary>
+        [Preserve]
+        private enum LegacyUiBackgroundMode
+        {
+            /// <summary>Represents the original alpha-blended background artwork.</summary>
+            OriginalAlpha,
+
+            /// <summary>Represents the performance style's outlined alpha-blended backgrounds.</summary>
+            OutlinedAlpha,
+
+            /// <summary>Represents the no-outline style's hard-cutout backgrounds.</summary>
+            Cutoff
         }
     }
 

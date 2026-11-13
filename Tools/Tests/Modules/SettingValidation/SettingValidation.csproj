@@ -43,7 +43,9 @@
     <Compile Include="../../../../Assets/Scripts/Misc/Settings/Enums/SensorDebugPosition.cs" Link="Production/SensorDebugPosition.cs" />
     <Compile Include="../../../../Assets/Scripts/Misc/Settings/Enums/DJAutoPolicyOption.cs" Link="Production/DJAutoPolicyOption.cs" />
     <Compile Include="../../../../Assets/Scripts/Misc/Settings/Enums/RecordModeOption.cs" Link="Production/RecordModeOption.cs" />
-    <Compile Include="../../../../Assets/Scripts/Misc/Settings/Enums/LowLatencyVSyncBackendOption.cs" Link="Production/LowLatencyVSyncBackendOption.cs" />
+    <Compile Include="../../../../Assets/Scripts/Misc/Settings/Enums/VulkanLowLatencyVSyncBackendOption.cs" Link="Production/VulkanLowLatencyVSyncBackendOption.cs" />
+    <Compile Include="../../../../Assets/Scripts/Misc/Rendering/UiOutlineMode.cs" Link="Production/UiOutlineMode.cs" />
+    <Compile Include="../../../../Assets/Scripts/Misc/Rendering/UiBackdropStyle.cs" Link="Production/UiBackdropStyle.cs" />
     <Compile Include="../../../../Assets/Scripts/Misc/Settings/Enums/GameplayScreenRotationAngleOption.cs" Link="Production/GameplayScreenRotationAngleOption.cs" />
     <Compile Include="../../../../Assets/Scripts/Misc/Settings/Enums/SlidePathStyle.cs" Link="Production/SlidePathStyle.cs" />
     <Compile Include="../../../../Assets/Scripts/Misc/Settings/Enums/TouchFeedbackLevel.cs" Link="Production/TouchFeedbackLevel.cs" />
@@ -56,6 +58,9 @@
     <Compile Include="../../../../Assets/Scripts/Misc/Settings/Interfaces/IOptionEnumerator.cs" Link="Production/IOptionEnumerator.cs" />
     <Compile Include="../../../../Assets/Scripts/Misc/Settings/Attributes/*.cs" Link="Production/%(Filename)%(Extension)" />
     <Compile Include="../../../../Assets/Scripts/Misc/Settings/Runtime/SettingReflectionCache.cs" Link="Production/SettingReflectionCache.cs" />
+    <Compile Include="../../../../Assets/Scripts/Misc/Settings/Runtime/SettingTranslation.cs" Link="Production/SettingTranslation.cs" />
+    <Compile Include="../../../../Assets/Scripts/Misc/Settings/Runtime/SettingValueSelection.cs" Link="Production/SettingValueSelection.cs" />
+    <Compile Include="../../../../Assets/Scripts/Misc/Settings/Runtime/SettingVisibility.cs" Link="Production/SettingVisibility.cs" />
     <Compile Include="../../../../Assets/Scripts/Misc/Settings/Runtime/SettingNumberFolding.cs" Link="Production/SettingNumberFolding.cs" />
     <Compile Include="../../../../Assets/Scripts/Misc/Settings/Runtime/SettingDisabledValues.cs" Link="Production/SettingDisabledValues.cs" />
     <Compile Include="../../../../Assets/Scripts/Misc/Settings/Runtime/SettingPlatformInfo.cs" Link="Production/SettingPlatformInfo.cs" />

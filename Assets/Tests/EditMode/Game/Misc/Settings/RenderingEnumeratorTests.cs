@@ -105,6 +105,32 @@ namespace MajdataPlay.Tests.Game.Misc.Settings
             Assert.That(QualitySettings.vSyncCount, Is.EqualTo(MajEnv.SystemSettings.Rendering.VSync ? 1 : 0));
         }
 
+        /// <summary>Checks the UI selector cycles all five values without altering the saved anti-aliasing mode.</summary>
+        [Test]
+        public void UIOutlineMode_CyclesEveryLevelAndKeepsAntiAliasing()
+        {
+            var options = new RenderingOptions
+            {
+                RenderQuality = RenderingQualityOption.Custom,
+                UIOutlineMode = UiOutlineMode.None,
+                AntiAliasing = RenderingAntialiasingOption.MSAA4x
+            };
+            var enumerator = Create<RenderingEnumSettingEnumerator>(options, nameof(RenderingOptions.UIOutlineMode));
+
+            foreach (var expected in new[] { UiOutlineMode.Performance, UiOutlineMode.All, UiOutlineMode.GaussianBlur, UiOutlineMode.LiquidGlass, UiOutlineMode.None })
+            {
+                Assert.That(enumerator.MoveNext(), Is.True);
+                Assert.That(options.UIOutlineMode, Is.EqualTo(expected));
+                Assert.That(enumerator.Current, Is.EqualTo(expected));
+                Assert.That(options.AntiAliasing, Is.EqualTo(RenderingAntialiasingOption.MSAA4x));
+            }
+            Assert.That(enumerator.MovePrevious(), Is.True);
+            Assert.That(options.UIOutlineMode, Is.EqualTo(UiOutlineMode.LiquidGlass));
+            enumerator.Refresh();
+            enumerator.RefreshLocalization();
+            Assert.That(options.UIOutlineMode, Is.EqualTo(UiOutlineMode.LiquidGlass));
+        }
+
         /// <summary>Checks that the render scale enumerator shows percentages and applies changes.</summary>
         [Test]
         public void RenderScale_ShowsPercentAndSteps()
@@ -136,17 +162,24 @@ namespace MajdataPlay.Tests.Game.Misc.Settings
             Assert.That(options.RenderScale, Is.EqualTo(195));
         }
 
-        /// <summary>Checks that the system resolution scale cannot be edited outside Android players.</summary>
-        [Test]
-        public void SystemResolutionScaling_IsUnsupportedInEditor()
+        /// <summary>Checks the unsupported system-scaling menu preserves saved values without snapping them onto its step grid.</summary>
+        /// <param name="storedValue">The saved percentage, including a value between menu steps.</param>
+        [TestCase(100)]
+        [TestCase(63)]
+        public void SystemResolutionScaling_UnsupportedEditorPreservesStoredValue(int storedValue)
         {
-            var options = new RenderingOptions();
+            var options = new RenderingOptions { SystemResolutionScaling = storedValue };
             var enumerator = Create<RenderingNumberSettingEnumerator>(options, nameof(RenderingOptions.SystemResolutionScaling));
 
+            Assert.That(options.SystemResolutionScaling, Is.EqualTo(storedValue));
             Assert.That(enumerator.MoveNext(), Is.False);
             Assert.That(enumerator.MovePrevious(), Is.False);
-            Assert.That(options.SystemResolutionScaling, Is.EqualTo(100));
+            enumerator.Refresh();
+            enumerator.RefreshLocalization();
+            Assert.That(options.SystemResolutionScaling, Is.EqualTo(storedValue));
+            Assert.That(enumerator.Current, Is.EqualTo((decimal)storedValue));
             Assert.That(enumerator.LocalizedValueText, Does.Not.EndWith("%"));
+            enumerator.Dispose();
         }
 
         /// <summary>Checks that toggling compatibility mode applies the rendering settings.</summary>
@@ -160,6 +193,22 @@ namespace MajdataPlay.Tests.Game.Misc.Settings
             Assert.That(options.CompatibilityMode, Is.True);
             Assert.That(enumerator.MovePrevious(), Is.True);
             Assert.That(options.CompatibilityMode, Is.False);
+        }
+
+        /// <summary>Checks the panel-style enumerator cycles both effects without entering Custom.</summary>
+        [Test]
+        public void UIBackdropStyle_CyclesBothEffectsWithoutChangingQuality()
+        {
+            var options = new RenderingOptions { RenderQuality = RenderingQualityOption.Refined };
+            var enumerator = Create<RenderingEnumSettingEnumerator>(options, nameof(RenderingOptions.UIBackdropStyle));
+
+            Assert.That(enumerator.MoveNext(), Is.True);
+            Assert.That(options.UIBackdropStyle, Is.EqualTo(UiBackdropStyle.LiquidGlass));
+            Assert.That(options.RenderQuality, Is.EqualTo(RenderingQualityOption.Refined));
+            Assert.That(enumerator.MovePrevious(), Is.True);
+            Assert.That(options.UIBackdropStyle, Is.EqualTo(UiBackdropStyle.GaussianBlur));
+            Assert.That(options.RenderQuality, Is.EqualTo(RenderingQualityOption.Refined));
+            enumerator.Dispose();
         }
 
         /// <summary>Checks that refreshing the VSync option applies the engine VSync count only when it changed.</summary>

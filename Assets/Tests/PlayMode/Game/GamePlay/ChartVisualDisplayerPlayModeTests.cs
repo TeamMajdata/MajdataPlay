@@ -59,6 +59,7 @@ namespace MajdataPlay.Tests.Game.GamePlay.PlayMode
 
             AssertIcons(loading: true, help: false, error: false);
             Assert.That(image.texture, Is.Not.Null);
+            AssertTransparentPlaceholder(image);
             yield return null;
         }
 
@@ -76,6 +77,7 @@ namespace MajdataPlay.Tests.Game.GamePlay.PlayMode
 
             AssertIcons(loading: false, help: true, error: false);
             Assert.That(image.texture, Is.SameAs(empty));
+            AssertTransparentPlaceholder(image);
         }
 
         /// <summary>Checks that a chart with notes is drawn as a graph texture.</summary>
@@ -101,16 +103,18 @@ namespace MajdataPlay.Tests.Game.GamePlay.PlayMode
         [UnityTest]
         public IEnumerator SetSongDetail_LoadsTheChartAfterTheDelay()
         {
-            var displayer = CreateDisplayer(out _);
+            var displayer = CreateDisplayer(out var image);
             var song = new GamePlayFakeSongDetail { Maidata = new SimaiFile("Fake", "Fake", 0, "hash", Array.Empty<SimaiChart>(), null) };
 
             displayer.SetSongDeatil(song, ChartLevel.Basic, 0, null, 400);
             RemoveBackgroundTasks();
             AssertIcons(loading: true, help: false, error: false);
+            AssertTransparentPlaceholder(image);
 
             _settings.SetDeltaTime(0.1f);
             yield return null;
             AssertIcons(loading: true, help: false, error: false);
+            AssertTransparentPlaceholder(image);
 
             _settings.SetDeltaTime(1f);
             yield return null;
@@ -118,6 +122,7 @@ namespace MajdataPlay.Tests.Game.GamePlay.PlayMode
 
             Assert.That(song.MaidataRequestCount, Is.EqualTo(1));
             AssertIcons(loading: false, help: true, error: false);
+            AssertTransparentPlaceholder(image);
         }
 
         /// <summary>Checks that a failed maidata load shows the error icon.</summary>
@@ -125,7 +130,7 @@ namespace MajdataPlay.Tests.Game.GamePlay.PlayMode
         [UnityTest]
         public IEnumerator SetSongDetail_ShowsTheErrorIconWhenLoadingFails()
         {
-            var displayer = CreateDisplayer(out _);
+            var displayer = CreateDisplayer(out var image);
             var song = new GamePlayFakeSongDetail();
 
             displayer.SetSongDeatil(song, ChartLevel.Expert);
@@ -134,6 +139,7 @@ namespace MajdataPlay.Tests.Game.GamePlay.PlayMode
             yield return null;
 
             AssertIcons(loading: false, help: false, error: true);
+            AssertTransparentPlaceholder(image);
             Assert.That(task?.Exception, Is.Not.Null, "The failure is observed");
         }
 
@@ -151,6 +157,25 @@ namespace MajdataPlay.Tests.Game.GamePlay.PlayMode
             Assert.That(Majdata<ChartVisualDisplayer>.Instance, Is.Null);
         }
 
+        /// <summary>Checks destruction releases only the owned status texture while a borrowed graph remains alive.</summary>
+        /// <returns>The test coroutine, including deferred Unity destruction.</returns>
+        [UnityTest]
+        public IEnumerator OnDestroy_ReleasesPlaceholderAndPreservesBorrowedGraph()
+        {
+            var displayer = CreateDisplayer(out var image);
+            var placeholder = PrivateMember.GetField<Texture2D>(displayer, "_emptyTexture");
+            var graph = _objects.Track(new Texture2D(2, 2, TextureFormat.RGBA32, false));
+            PrivateMember.Invoke(displayer, "SetTexture", graph);
+            Assert.That(image.texture, Is.SameAs(graph));
+
+            UnityEngine.Object.Destroy(displayer.gameObject);
+            yield return null;
+            yield return null;
+
+            Assert.That(placeholder == null, Is.True, "The displayer owns its status placeholder texture.");
+            Assert.That(graph != null, Is.True, "The external graph owner retains responsibility for cached or borrowed textures.");
+        }
+
         /// <summary>Removes the maidata tasks the displayer registered as list background tasks.</summary>
         /// <returns>The last removed task, or null when none was registered.</returns>
         private static Task? RemoveBackgroundTasks()
@@ -163,6 +188,18 @@ namespace MajdataPlay.Tests.Game.GamePlay.PlayMode
                 tasks.RemoveAt(tasks.Count - 1);
             }
             return last;
+        }
+
+        /// <summary>Checks status-only content leaves the shared glass panel visible instead of painting a white rectangle.</summary>
+        /// <param name="image">The density graph's RawImage while a loading, help or error icon is active.</param>
+        private static void AssertTransparentPlaceholder(RawImage image)
+        {
+            Assert.That(image.texture, Is.TypeOf<Texture2D>());
+            var placeholder = (Texture2D)image.texture;
+            Assert.That(placeholder.width, Is.EqualTo(1));
+            Assert.That(placeholder.height, Is.EqualTo(1));
+            Assert.That(placeholder.GetPixel(0, 0).a, Is.Zero,
+                "The status icon must remain visible without an opaque chart placeholder covering the backdrop.");
         }
 
         /// <summary>Asserts which status icon is shown.</summary>

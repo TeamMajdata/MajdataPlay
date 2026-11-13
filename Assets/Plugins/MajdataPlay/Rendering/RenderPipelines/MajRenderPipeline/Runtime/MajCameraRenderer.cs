@@ -68,6 +68,35 @@ namespace MajdataPlay.Rendering
         /// <summary>Suppresses repeated unsupported-capture warnings for the same camera.</summary>
         private Camera? _unsupportedCaptureCamera;
 
+        /// <summary>Retains the backdrop consumer prepared before the current camera's geometry is culled.</summary>
+        private IMajUiBackdropCapture? _uiBackdropCapture;
+
+        /// <summary>Retains an optional second backdrop stage requested before the current camera's culling.</summary>
+        private IMajUiButtonBackdropCapture? _uiButtonBackdropCapture;
+
+        /// <summary>Retains an optional category capture between boards/background cover and category drawing.</summary>
+        private IMajUiCategoryBackdropCapture? _uiCategoryBackdropCapture;
+
+        /// <summary>Identifies the completed scene prefix passed to a backdrop consumer.</summary>
+        private enum UiBackdropStage
+        {
+            /// <summary>Captures the background before any large board or background cover.</summary>
+            Board,
+            /// <summary>Captures large boards and background cover before categories.</summary>
+            Category,
+            /// <summary>Captures ordinary foreground UI before peripheral buttons.</summary>
+            Peripheral
+        }
+
+        /// <summary>Identifies the camera whose backdrop request last retained ordinary scene attachments.</summary>
+        private Camera? _backdropAttachmentCamera;
+
+        /// <summary>Uses native StoreAndResolve segments only while the current backdrop camera is rendering.</summary>
+        private bool _usingBackdropNativePass;
+
+        /// <summary>Tracks the recorded native segment across optional backdrop filters and exception cleanup.</summary>
+        private bool _backdropNativePassOpen;
+
         internal MajCameraRenderer(Shader finalCopyShader)
         {
             if (finalCopyShader != null && finalCopyShader.isSupported)
@@ -122,6 +151,11 @@ namespace MajdataPlay.Rendering
                         _extensionActive = false;
                         _usingSceneAttachments = false;
                         _captureActions = Array.Empty<Action<RenderTargetIdentifier, CommandBuffer>>();
+                        _uiBackdropCapture = null;
+                        _uiButtonBackdropCapture = null;
+                        _uiCategoryBackdropCapture = null;
+                        _usingBackdropNativePass = false;
+                        _backdropNativePassOpen = false;
                     }
                 }
                 // 各 Render 路径正常返回意味着 Submit 已完成；SDK 清理异常也不能发布成功。
@@ -153,6 +187,9 @@ namespace MajdataPlay.Rendering
             bool resolveToScreen, bool isSingleCamera, float renderScale, MajMSAAMode msaaMode,
             bool forceIntermediateOutput)
         {
+            _uiBackdropCapture = MajUiBackdropBridge.GetActive(_camera);
+            _uiButtonBackdropCapture = MajUiBackdropBridge.GetActiveButtons(_uiBackdropCapture, _camera);
+            _uiCategoryBackdropCapture = MajUiBackdropBridge.GetActiveCategories(_uiBackdropCapture, _camera);
             PrepareGeometry();
             if (!Cull())
             {
@@ -161,6 +198,13 @@ namespace MajdataPlay.Rendering
 
             _context.SetupCameraProperties(_camera);
             bool canUseIntermediate = CanUseIndependentTarget(isSingleCamera);
+            if (!canUseIntermediate)
+            {
+                _uiBackdropCapture = null;
+                _uiButtonBackdropCapture = null;
+                _uiCategoryBackdropCapture = null;
+            }
+            var backdropIntermediate = _uiBackdropCapture != null;
             _captureActions = MajCameraCaptureBridge.GetCaptureActions(_camera);
             var captureRequested = _captureActions.Length != 0;
             var captureIntermediate = captureRequested && canUseIntermediate;
@@ -210,17 +254,30 @@ namespace MajdataPlay.Rendering
             // 复杂模型会在内部切 RT/读颜色；仅其相机转普通 Store 路径，MSAA 样本数不降低。
             // 原生屏幕附件必须与实际显示缓冲同尺寸；相机尺寸若被引擎裁切，保留普通兼容路径。
             // 偏移仍可在 local RT 内用原生 Pass 绘制，最后以完整屏幕 viewport 复制。
-            bool nativePass = canUseIntermediate && optimizeAttachments && !extensionIntermediate
+            bool nativePass = canUseIntermediate && optimizeAttachments && !extensionIntermediate && !backdropIntermediate
                 && MajFinalCopyMapping.SupportsNativeScreenTarget(_camera.rect, outputWidth, outputHeight,
                     _outputSurfaceWidth, _outputSurfaceHeight);
             DisableNativePassForEditorGizmos(ref nativePass);
+            // Native segments preserve configured color samples and stencil between menu prefixes.
+            bool nativeBackdropPass = canUseIntermediate && backdropIntermediate && optimizeAttachments && !extensionIntermediate
+                && SystemInfo.graphicsDeviceType == GraphicsDeviceType.Vulkan && SystemInfo.supportsStoreAndResolveAction;
+            DisableNativePassForEditorGizmos(ref nativeBackdropPass);
 
             // 缩放属于画质功能，不和附件丢弃开关绑定。非原生路径保留深度，仍画缩放 RT。
             // 长屏的 100% / 1x 默认保留直绘；缩放、MSAA 或明确选择兼容输出时使用中间颜色。
             // 关闭原生附件优化也不能顺带关闭预设的 MSAA。
             bool useSceneAttachments = (canUseIntermediate
-                && (nativePass || isScaled || requestedSamples > 1 || forceIntermediateOutput || captureIntermediate))
+                && (nativePass || isScaled || requestedSamples > 1 || forceIntermediateOutput || captureIntermediate || backdropIntermediate))
                 || extensionIntermediate;
+            if (!ReferenceEquals(_backdropAttachmentCamera, null) &&
+                (_backdropAttachmentCamera == null || (_backdropAttachmentCamera == _camera && !backdropIntermediate)))
+            {
+                if (!useSceneAttachments)
+                {
+                    _attachments.ReleaseTargets();
+                }
+                _backdropAttachmentCamera = null;
+            }
             if (!ReferenceEquals(_captureAttachmentCamera, null)
                 && MajCameraCaptureBridge.GetCaptureActions(_captureAttachmentCamera!).Length == 0)
             {
@@ -258,6 +315,10 @@ namespace MajdataPlay.Rendering
                 {
                     _captureAttachmentCamera = _camera;
                 }
+                if (useSceneAttachments && backdropIntermediate)
+                {
+                    _backdropAttachmentCamera = _camera;
+                }
             }
 
             if (useSceneAttachments)
@@ -273,12 +334,21 @@ namespace MajdataPlay.Rendering
                         if (!_attachments.UsesIntermediateColor)
                             return _attachments.ResolvesToScreen ? MajRenderOutputStatus.DirectResolve : MajRenderOutputStatus.Direct;
                     }
+                    else if (nativeBackdropPass)
+                    {
+                        RenderBackdropNative(useDynamicBatching, useGPUInstancing,
+                            outputWidth, outputHeight, sceneWidth, sceneHeight);
+                    }
                     else
                         RenderIntermediateCompatible(useDynamicBatching, useGPUInstancing,
                             outputWidth, outputHeight, sceneWidth, sceneHeight);
                     if (captureIntermediate)
                     {
                         return MajRenderOutputStatus.IntermediateCapture;
+                    }
+                    if (backdropIntermediate)
+                    {
+                        return MajRenderOutputStatus.IntermediateBackdrop;
                     }
                     // 偏移 MSAA 不再直接 Resolve 到显示缓冲，避免 RT/display viewport Y 约定不同。
                     // 仍保留原生场景的 memoryless / Resolve-only，不误报成硬件不支持 MSAA。
@@ -445,6 +515,57 @@ namespace MajdataPlay.Rendering
             }
         }
 
+        /// <summary>Resolves each completed UI prefix in its native store action while retaining multisample contents.</summary>
+        /// <param name="useDynamicBatching">Whether ordinary renderer lists may batch compatible geometry.</param>
+        /// <param name="useGPUInstancing">Whether ordinary renderer lists may use GPU instancing.</param>
+        /// <param name="outputWidth">The unscaled camera output width.</param>
+        /// <param name="outputHeight">The unscaled camera output height.</param>
+        /// <param name="sceneWidth">The actual intermediate scene width.</param>
+        /// <param name="sceneHeight">The actual intermediate scene height.</param>
+        private void RenderBackdropNative(bool useDynamicBatching, bool useGPUInstancing,
+            int outputWidth, int outputHeight, int sceneWidth, int sceneHeight)
+        {
+            _usingBackdropNativePass = true;
+            try
+            {
+                _attachments.BeginBackdropScene(_buffer, GetBackgroundColor());
+                _backdropNativePassOpen = true;
+                _buffer.SetViewProjectionMatrices(_camera.worldToCameraMatrix, _camera.projectionMatrix);
+                SetShaderGlobals(outputWidth, outputHeight, sceneWidth, sceneHeight);
+                RecordGeometry(useDynamicBatching, useGPUInstancing);
+                _buffer.EndRenderPass();
+                _backdropNativePassOpen = false;
+                // The last segment already resolved into ordinary scene color. Recording and presentation stay outside it.
+                RecordCaptureActions();
+                SetFinalCopySource();
+                SetCameraOutputTarget();
+                RecordFinalCopy();
+                if (sceneWidth != outputWidth || sceneHeight != outputHeight)
+                {
+                    SetScreenGlobals(outputWidth, outputHeight, outputWidth, outputHeight);
+                }
+            }
+            finally
+            {
+                try
+                {
+                    if (_backdropNativePassOpen)
+                    {
+                        _buffer.EndRenderPass();
+                        _backdropNativePassOpen = false;
+                    }
+                    _buffer.SetGlobalFloat(AlphaToMaskAvailableId, 0f);
+                    ExecuteBuffer();
+                    _context.Submit();
+                }
+                finally
+                {
+                    _backdropNativePassOpen = false;
+                    _usingBackdropNativePass = false;
+                }
+            }
+        }
+
         private void RenderIntermediateCompatible(bool useDynamicBatching, bool useGPUInstancing,
             int outputWidth, int outputHeight, int sceneWidth, int sceneHeight)
         {
@@ -604,10 +725,146 @@ namespace MajdataPlay.Rendering
                 try { _buffer.DrawRendererList(_context.CreateSkyboxRendererList(_camera)); }
                 finally { EndDebugSample("MRP.Skybox"); }
             }
-            DrawCameraExtension();
             // Camera/World Space Canvas 在这个 RendererList 中，保留 SortingLayer/CanvasOrder。
-            DrawGeometry(RenderQueueRange.transparent, SortingCriteria.CommonTransparent,
-                useDynamicBatching, useGPUInstancing, "MRP.Transparent");
+            if (_uiBackdropCapture != null && _usingSceneAttachments)
+            {
+                var backgroundQueues = new RenderQueueRange
+                {
+                    lowerBound = RenderQueueRange.transparent.lowerBound,
+                    upperBound = MajUiBackdropBridge.BackgroundQueueUpperBound
+                };
+                DrawGeometry(backgroundQueues, SortingCriteria.CommonTransparent,
+                    useDynamicBatching, useGPUInstancing, "MRP.BackgroundUI");
+                RecordUiBackdrop(UiBackdropStage.Board);
+                // The first source contains the PV/background only. Live2D and other camera
+                // extensions render afterwards and cannot leak into the board's glass background.
+                DrawCameraExtension();
+                var boardQueues = new RenderQueueRange
+                {
+                    lowerBound = MajUiBackdropBridge.BoardQueue,
+                    upperBound = MajUiBackdropBridge.CategoryBackgroundQueue - 1
+                };
+                DrawGeometry(boardQueues, SortingCriteria.CommonTransparent,
+                    useDynamicBatching, useGPUInstancing, "MRP.BoardUI");
+                var coverQueues = new RenderQueueRange
+                {
+                    lowerBound = MajUiBackdropBridge.CategoryBackgroundQueue,
+                    upperBound = MajUiBackdropBridge.CategoryBackgroundQueueUpperBound
+                };
+                DrawGeometry(coverQueues, SortingCriteria.CommonTransparent,
+                    useDynamicBatching, useGPUInstancing, "MRP.BackgroundSongCover");
+                if (_uiCategoryBackdropCapture != null)
+                {
+                    RecordUiBackdrop(UiBackdropStage.Category);
+                }
+                var categoryQueues = new RenderQueueRange
+                {
+                    lowerBound = MajUiBackdropBridge.CategoryQueue,
+                    upperBound = (int)RenderQueue.Transparent - 1
+                };
+                DrawGeometry(categoryQueues, SortingCriteria.CommonTransparent,
+                    useDynamicBatching, useGPUInstancing, "MRP.CategoryUI");
+                if (_uiButtonBackdropCapture != null)
+                {
+                    var ordinaryQueues = new RenderQueueRange
+                    {
+                        lowerBound = (int)RenderQueue.Transparent,
+                        upperBound = MajUiBackdropBridge.ButtonBodyQueue - 1
+                    };
+                    DrawGeometry(ordinaryQueues, SortingCriteria.CommonTransparent,
+                        useDynamicBatching, useGPUInstancing, "MRP.UIBeforeButtons");
+                    RecordUiBackdrop(UiBackdropStage.Peripheral);
+                    var buttonQueues = new RenderQueueRange
+                    {
+                        lowerBound = MajUiBackdropBridge.ButtonBodyQueue,
+                        upperBound = MajUiBackdropBridge.ButtonBodyQueue
+                    };
+                    DrawGeometry(buttonQueues, SortingCriteria.CommonTransparent,
+                        useDynamicBatching, useGPUInstancing, "MRP.ButtonBodies");
+                    var glyphQueues = new RenderQueueRange
+                    {
+                        lowerBound = MajUiBackdropBridge.ButtonGlyphQueueLowerBound,
+                        upperBound = RenderQueueRange.transparent.upperBound
+                    };
+                    DrawGeometry(glyphQueues, SortingCriteria.CommonTransparent,
+                        useDynamicBatching, useGPUInstancing, "MRP.ForegroundUI");
+                }
+                else
+                {
+                    var foregroundQueues = new RenderQueueRange
+                    {
+                        lowerBound = (int)RenderQueue.Transparent,
+                        upperBound = RenderQueueRange.transparent.upperBound
+                    };
+                    DrawGeometry(foregroundQueues, SortingCriteria.CommonTransparent,
+                        useDynamicBatching, useGPUInstancing, "MRP.ForegroundUI");
+                }
+            }
+            else
+            {
+                DrawCameraExtension();
+                DrawGeometry(RenderQueueRange.transparent, SortingCriteria.CommonTransparent,
+                    useDynamicBatching, useGPUInstancing, "MRP.Transparent");
+            }
+        }
+
+        /// <summary>Resolves a completed background prefix and restores scene attachments before later UI continues.</summary>
+        /// <param name="stage">The board, category or peripheral prefix that has just finished drawing.</param>
+        private void RecordUiBackdrop(UiBackdropStage stage)
+        {
+            var nativeSegment = _usingBackdropNativePass;
+            if (nativeSegment)
+            {
+                _buffer.EndRenderPass();
+                _backdropNativePassOpen = false;
+            }
+            else
+            {
+                _attachments.ResolveCompatible(_buffer);
+            }
+            var sampleName = stage switch
+            {
+                UiBackdropStage.Category => "MRP.UICategoryBackdropCapture",
+                UiBackdropStage.Peripheral => "MRP.UIButtonBackdropCapture",
+                _ => "MRP.UIBackdropCapture"
+            };
+            BeginDebugSample(sampleName);
+            try
+            {
+                if (stage == UiBackdropStage.Peripheral)
+                {
+                    _uiButtonBackdropCapture!.RecordButtons(_buffer, _camera, _attachments.ResolvedColor);
+                }
+                else if (stage == UiBackdropStage.Category)
+                {
+                    _uiCategoryBackdropCapture!.RecordCategories(_buffer, _camera, _attachments.ResolvedColor);
+                }
+                else
+                {
+                    _uiBackdropCapture!.Record(_buffer, _camera, _attachments.ResolvedColor);
+                }
+            }
+            catch (Exception exception)
+            {
+                // An optional filter failure must not skip foreground UI, final recording, or presentation.
+                Debug.LogException(exception, _camera);
+            }
+            finally
+            {
+                EndDebugSample(sampleName);
+                if (nativeSegment)
+                {
+                    _attachments.BeginBackdropScene(_buffer, GetBackgroundColor(), preserveContents: true);
+                    _backdropNativePassOpen = true;
+                }
+                else
+                {
+                    _attachments.SetCompatibleSceneTarget(_buffer, preserveContents: true);
+                }
+                _buffer.SetViewProjectionMatrices(_camera.worldToCameraMatrix, _camera.projectionMatrix);
+                SetShaderGlobals(_outputWidth, _outputHeight,
+                    _attachments.DepthStencil.width, _attachments.DepthStencil.height);
+            }
         }
 
         private void DrawCameraExtension()
@@ -801,6 +1058,10 @@ namespace MajdataPlay.Rendering
             RestoreScreenSamples();
             _cameraExtension?.Dispose();
             _cameraExtension = null;
+            _uiBackdropCapture = null;
+            _uiButtonBackdropCapture = null;
+            _uiCategoryBackdropCapture = null;
+            _backdropAttachmentCamera = null;
             _attachments.Dispose();
             if (_finalCopyMaterial != null)
             {

@@ -10,8 +10,14 @@ namespace MajdataPlay.Scenes.Setting
 {
     public sealed class MenuTitleDisplayer : MonoBehaviour
     {
-        private const float X_POS_STEP = 164f;
-        private const float X_POS_WITH_DELTA_1 = 218f;
+        /// <summary>Separates adjacent unselected category titles outside the central selected interval.</summary>
+        private const float UnselectedTitleSpacing = 164f;
+
+        /// <summary>Separates the selected title from its nearest neighboring category.</summary>
+        private const float SelectedTitleSpacing = 218f;
+
+        /// <summary>Reserves the first and last fifth of a category transition for its navigation arrows.</summary>
+        private const float NavigationFadeFraction = 0.2f;
 
         [SerializeField]
         [FormerlySerializedAs("_unselectedBackground")]
@@ -40,12 +46,14 @@ namespace MajdataPlay.Scenes.Setting
         private Color _unselectedBackgroundColor;
         private Color _selectedBackgroundColor;
         private Color _unselectedTextColor;
-        private float _unselectedFontSizeMax;
         private float _selectedTitleScale = 1f;
         private Func<string>? _localizedTitleProvider;
         private string? _displayedTitle;
         private SettingTextTint _textTint = null!;
         private bool _isLocalizationSubscribed;
+
+        /// <summary>The last selection blend applied to the backgrounds and title.</summary>
+        private float _lastSelectedAmount = float.NaN;
 
         internal TMP_FontAsset Font => _titleDisplayer.font;
 
@@ -55,19 +63,10 @@ namespace MajdataPlay.Scenes.Setting
             _titleRectTransform = _titleDisplayer.rectTransform;
             _unselectedSize = _rectTransform.rect.size;
             _selectedSize = _selectedBackground.rectTransform.rect.size;
-            // A stretch-anchored title changes its width whenever the background
-            // expands, causing TMP to parse and auto-size it on every motion frame.
-            var titleSize = _titleRectTransform.rect.size;
-            var titlePosition = _titleRectTransform.localPosition;
-            _titleRectTransform.anchorMin = new Vector2(0.5f, 0.5f);
-            _titleRectTransform.anchorMax = new Vector2(0.5f, 0.5f);
-            _titleRectTransform.sizeDelta = titleSize;
-            _titleRectTransform.localPosition = titlePosition;
             _unselectedBackgroundColor = _unselectedBackground.color;
             _selectedBackgroundColor = _selectedBackground.color;
             _unselectedTextColor = _titleDisplayer.color;
-            _unselectedFontSizeMax = _titleDisplayer.fontSizeMax;
-            _selectedTitleScale = _selectedFontSizeMax / Mathf.Max(1f, _unselectedFontSizeMax);
+            _selectedTitleScale = _selectedFontSizeMax / Mathf.Max(1f, _titleDisplayer.fontSizeMax);
             _textTint = new SettingTextTint(_titleDisplayer);
         }
 
@@ -132,6 +131,11 @@ namespace MajdataPlay.Scenes.Setting
             var selectedAmount = 1f - Mathf.Clamp01(absDistance);
 
             _rectTransform.anchoredPosition = new Vector2(GetHorizontalPosition(distance, absDistance), 0);
+            if (_lastSelectedAmount == selectedAmount)
+            {
+                return;
+            }
+            _lastSelectedAmount = selectedAmount;
             _rectTransform.sizeDelta = Vector2.Lerp(_unselectedSize, _selectedSize, selectedAmount);
 
             _unselectedBackground.color = WithAlpha(
@@ -153,6 +157,23 @@ namespace MajdataPlay.Scenes.Setting
             {
                 gameObject.SetActive(isVisible);
             }
+        }
+
+        /// <summary>Fades shared category arrows out before the scroll and back in as the selected title settles.</summary>
+        /// <param name="progress">The linear zero-to-one category transition progress.</param>
+        /// <param name="initialArrowAlpha">The arrow opacity retained when a new transition interrupts the previous one.</param>
+        /// <returns>The navigation-only opacity, without fading the moving category titles.</returns>
+        internal static float GetNavigationAlpha(float progress, float initialArrowAlpha)
+        {
+            if (progress < NavigationFadeFraction)
+            {
+                return initialArrowAlpha * (1f - Mathf.SmoothStep(0f, 1f, progress / NavigationFadeFraction));
+            }
+            if (progress > 1f - NavigationFadeFraction)
+            {
+                return Mathf.SmoothStep(0f, 1f, (progress - (1f - NavigationFadeFraction)) / NavigationFadeFraction);
+            }
+            return 0f;
         }
 
         private void OnLanguageChanged(object? sender, Language language)
@@ -177,10 +198,10 @@ namespace MajdataPlay.Scenes.Setting
         {
             if (absDistance <= 1f)
             {
-                return X_POS_WITH_DELTA_1 * distance;
+                return SelectedTitleSpacing * distance;
             }
 
-            return Mathf.Sign(distance) * (X_POS_WITH_DELTA_1 + (X_POS_STEP * (absDistance - 1f)));
+            return Mathf.Sign(distance) * (SelectedTitleSpacing + (UnselectedTitleSpacing * (absDistance - 1f)));
         }
 
         private static Color WithAlpha(Color color, float alpha)

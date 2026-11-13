@@ -359,6 +359,9 @@ namespace MajdataPlay.Rendering
         private float _appliedAdaptiveModeThreshold;
 
         private int _appliedSortingLayerID;
+
+        /// <summary>Caches the last applied layer name so Players only resolve a layer ID when sorting changes.</summary>
+        private string _appliedSortingLayerName = string.Empty;
         private int _appliedSortingOrder;
 
         private Material _appliedMaterial;
@@ -425,7 +428,12 @@ namespace MajdataPlay.Rendering
                 MarkGeometryDirty();
             }
 
+#if UNITY_EDITOR
+            // Editor layer definitions can change without modifying this component's serialized name.
             if (_appliedSortingLayerID != SortingLayer.NameToID(_sortingLayerName))
+#else
+            if (_appliedSortingLayerName != _sortingLayerName)
+#endif
             {
                 MarkSortingDirty();
             }
@@ -724,6 +732,7 @@ namespace MajdataPlay.Rendering
             _meshRenderer.sortingOrder = _sortingOrder;
 
             _appliedSortingLayerID = sortingLayerID;
+            _appliedSortingLayerName = _sortingLayerName;
             _appliedSortingOrder = _sortingOrder;
         }
 

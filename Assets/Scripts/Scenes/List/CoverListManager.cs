@@ -8,10 +8,8 @@ using MajdataPlay.Net;
 using MajdataPlay.Numerics;
 using MajdataPlay.Scenes.List.Models;
 using MajdataPlay.Settings.Runtime;
-using MajdataPlay.Threading;
 using System;
 using System.Collections.Generic;
-using System.Threading.Tasks;
 using TMPro;
 using UnityEngine;
 using UnityEngine.Serialization;
@@ -21,18 +19,6 @@ namespace MajdataPlay.Scenes.List
     public class CoverListManager : MonoBehaviour
     {
         public ISongDetail? SelectedSong { get; private set; } = null;
-        public float PreloadCooldownTimer
-        {
-            get
-            {
-                return _preloadCooldownTimer;
-            }
-        }
-
-        [SerializeField]
-        [FormerlySerializedAs("songCoverDisplayerPrefab")]
-        GameObject _songCoverDisplayerPrefab;
-
         [SerializeField]
         [FormerlySerializedAs("centerCoverDisplayer")]
         CenterCoverDisplayer _centerCoverDisplayer;
@@ -70,8 +56,6 @@ namespace MajdataPlay.Scenes.List
         [SerializeField, ReadOnlyField]
         float _listCursorPos = 0;
 
-        float _preloadCooldownTimer = 0.5f;
-        bool _isNeedPreload = false;
         bool _isEmptyCollection = true;
         int _scrollMotionVersion = 0;
         int _firstVisibleCoverIndex = 0;
@@ -80,18 +64,13 @@ namespace MajdataPlay.Scenes.List
         int _lastVisibleThumbnailIndex = -1;
         bool _hasPendingBindings = false;
 
-        ListManager _listManager;
-        PreviewSoundPlayer _previewSoundPlayer;
         TextMeshProUGUI _emptyCollectionMessageDisplayer = null!;
 
         SongCollection _currentCollection = SongCollection.Empty("Empty");
 
-        SongCoverDisplayer[] _songCoverDisplayers = Array.Empty<SongCoverDisplayer>();
-        ThumbnailDisplayer[] _songThumbnailDisplayers = Array.Empty<ThumbnailDisplayer>();
 
         MotionHandle _scrollMotion;
 
-        readonly PooledList<ISongDetail> _songDetails = new();
         readonly PooledList<SongCoverBinding> _songCoverBindings = new();
         readonly PooledList<SongThumbnailBinding> _songThumbnailBindings = new();
 
@@ -110,46 +89,41 @@ namespace MajdataPlay.Scenes.List
         void Awake()
         {
             Majdata<CoverListManager>.Instance = this;
-            _previewSoundPlayer = GetComponent<PreviewSoundPlayer>();
+            _selectedDifficulty = (int)_listConfig.SelectedDiff;
             _emptyCollectionMessageDisplayer = _emptyCollectionNotice.GetComponentInChildren<TextMeshProUGUI>(true);
             Localization.OnLanguageChanged += OnLanguageChanged;
             UpdateEmptyCollectionMessage();
         }
         void Start()
         {
-            _listManager = Majdata<ListManager>.Instance!;
             var songCoverListRoot = _songCoverListRoot.transform;
             var coverDisplayerCount = songCoverListRoot.childCount;
-            _songCoverDisplayers = new SongCoverDisplayer[coverDisplayerCount];
             for (var i = 0; i < coverDisplayerCount; i++)
             {
                 var displayerTransform = songCoverListRoot.GetChild(i);
                 var displayer = displayerTransform.GetComponent<SongCoverDisplayer>();
-                displayer.SetActive(false);
                 if (displayer is null)
                 {
                     throw new InvalidOperationException($"Child {i} of {_songCoverListRoot.name} does not have a SongCoverDisplayer component.");
-                }                
-                _songCoverDisplayers[i] = displayer;
+                }
+                displayer.SetActive(false);
                 _idleSongCoverDisplayer.Enqueue(displayer);
             }
 
             var thumbnailListRoot = _thumbnailListRoot.transform;
             var thumbnailDisplayerCount = thumbnailListRoot.childCount;
-            _songThumbnailDisplayers = new ThumbnailDisplayer[thumbnailDisplayerCount];
             for (var i = 0; i < thumbnailDisplayerCount; i++)
             {
                 var displayerTransform = thumbnailListRoot.GetChild(i);
                 var displayer = displayerTransform.GetComponent<ThumbnailDisplayer>();
-                displayer.SetActive(false);
                 if (displayer is null)
                 {
                     throw new InvalidOperationException($"Child {i} of {_thumbnailListRoot.name} does not have a ThumbnailDisplayer component.");
                 }
-                _songThumbnailDisplayers[i] = displayer;
+                displayer.SetActive(false);
                 _idleSongThumbnailDisplayer.Enqueue(displayer);
             }
-            _centerCoverDisplayer.SetEmbeddedCoverVisible(false);
+            _centerCoverDisplayer.SetSelectionDetailsVisible(false);
         }
         void OnDestroy()
         {
@@ -181,6 +155,27 @@ namespace MajdataPlay.Scenes.List
             _emptyCollectionMessageDisplayer.text = "MAJTEXT_LIST_EMPTY_COLLECTION".i18n();
         }
         #endregion
+
+        /// <summary>Updates the difficulty decoration on each bound cover without replacing its renderer or artwork.</summary>
+        /// <param name="difficulty">The selected chart difficulty shared by the visible cover row.</param>
+        internal void SetDifficulty(int difficulty)
+        {
+            if (_selectedDifficulty == difficulty)
+            {
+                return;
+            }
+            _selectedDifficulty = difficulty;
+            var bindings = _songCoverBindings.AsSpan();
+            for (var index = _firstVisibleCoverIndex; index <= _lastVisibleCoverIndex; index++)
+            {
+                var displayer = bindings[index].Displayer;
+                if (displayer != null)
+                {
+                    displayer.SetDifficulty(difficulty);
+                }
+            }
+        }
+
         internal void SetCollection(SongCollection collection, bool keepCursor)
         {
             if(collection is null)
@@ -217,7 +212,6 @@ namespace MajdataPlay.Scenes.List
                     {
                         SongDetail = songDetail
                     };
-                    _songDetails.Add(songDetail);
                     _songCoverBindings.Add(coverBinding);
                     _songThumbnailBindings.Add(thumbnailBinding);
                 }
@@ -308,7 +302,7 @@ namespace MajdataPlay.Scenes.List
 
             
             var shouldUpdateDisplayer = _listDesiredPos != oldDesiredPos || forceUpdate;
-            SelectedSong = _songDetails[_listDesiredPos];
+            SelectedSong = _songCoverBindings.AsSpan()[_listDesiredPos].SongDetail;
             _progressDisplayer.text = $"{_listDesiredPos + 1}/<size=70%>{_songCount}";
             UpdateListConfiguration();
             if (disableAnimation)
@@ -320,19 +314,19 @@ namespace MajdataPlay.Scenes.List
                     UpdateDisplayerBinding(loadDelayMS);
                     UpdateDisplayerPosition();
                 }
-                UpdateCenterDisplayer(loadDelayMS);
+                UpdateSelectionDetails(loadDelayMS);
             }
             else
             {
                 if (shouldUpdateDisplayer)
                 {
                     RecommendImpressions.Blur();
-                    _centerCoverDisplayer.SetEmbeddedCoverVisible(false);
+                    _centerCoverDisplayer.SetSelectionDetailsVisible(false);
                     DisplayerMoveTo(
                         _listDesiredPos,
                         DISPLAYER_ANIM_DURATION_MS / 1000f,
                         loadDelayMS,
-                        () => UpdateCenterDisplayer(loadDelayMS));
+                        () => UpdateSelectionDetails(loadDelayMS));
                 }
             }            
         }
@@ -357,7 +351,6 @@ namespace MajdataPlay.Scenes.List
             _lastVisibleThumbnailIndex = -1;
             _hasPendingBindings = false;
             _songCount = 0;
-            _songDetails.Clear();
             _songCoverBindings.Clear();
             _songThumbnailBindings.Clear();
         }
@@ -406,19 +399,14 @@ namespace MajdataPlay.Scenes.List
                                        UpdateDisplayerPosition();
                                    });
         }
-        void UpdateCenterDisplayer(int loadDelayMS)
+        void UpdateSelectionDetails(int loadDelayMS)
         {
-            _centerCoverDisplayer.SetSongDetail(SelectedSong!, loadDelayMS, GetSelectedCoverSpriteSnapshot());
-            _centerCoverDisplayer.SetEmbeddedCoverVisible(true);
+            _centerCoverDisplayer.SetSongDetail(SelectedSong!, loadDelayMS);
+            _centerCoverDisplayer.SetSelectionDetailsVisible(true);
             // The scroll has settled; the dwell of a recommended song starts now
             RecommendImpressions.Focus(_currentCollection, SelectedSong);
         }
-        Sprite? GetSelectedCoverSpriteSnapshot()
-        {
-            var coverDisplayer = _songCoverBindings.AsSpan()[_listDesiredPos].Displayer;
 
-            return coverDisplayer?.CurrentCoverSprite;
-        }
         void UpdateDisplayerBinding(int loadDelayMS)
         {
             if (_isEmptyCollection)
@@ -470,6 +458,7 @@ namespace MajdataPlay.Scenes.List
                 if (_idleSongCoverDisplayer.TryDequeue(out var displayer))
                 {
                     binding.Displayer = displayer;
+                    displayer.SetDifficulty(_selectedDifficulty);
                     displayer.SetSongDetail(binding.SongDetail, loadDelayMS);
                     displayer.SetActive(true);
                 }
@@ -575,50 +564,6 @@ namespace MajdataPlay.Scenes.List
             _currentCollection.SetCursor(hash);
             SlideListTo(_currentCollection.Index, disableAnimation, forceUpdate, DISPLAYER_ANIM_DURATION_MS);
         }
-        //async Task AnalyzeAndUpdateBpmLedAsync(ISongDetail songDetail, ChartLevel level)
-        //{
-        //    await chartAnalyzer.AnalyzeAndDrawGraphAsync(songDetail, level);
-        //    if (!IsChartList || !ReferenceEquals(_currentCollection.Current, songDetail) || _listConfig.SelectedDiff != level)
-        //    {
-        //        return;
-        //    }
-
-        //    var bpm = chartAnalyzer.LastAnalyzeBpm;
-        //    if (chartAnalyzer.LastAnalyzeIsEmpty)
-        //    {
-        //        CabinetLed.SetButtonLight(Color.red, 3);
-        //        CabinetLed.SetCabinetLight(1.0f);
-        //        return;
-        //    }
-        //    CabinetLed.SetButtonLight(Color.green, 3);
-        //    CabinetLed.SetCabinetLight(1.0f);
-        //    while (IsChartList &&
-        //           ReferenceEquals(_currentCollection.Current, songDetail) &&
-        //           _listConfig.SelectedDiff == level &&
-        //           _previewSoundPlayer.IsPreviewPending(songDetail) &&
-        //           !_previewSoundPlayer.IsPreviewPlaying(songDetail))
-        //    {
-        //        await UniTask.Yield();
-        //    }
-        //    if (!IsChartList ||
-        //        !ReferenceEquals(_currentCollection.Current, songDetail) ||
-        //        _listConfig.SelectedDiff != level ||
-        //        !_previewSoundPlayer.IsPreviewPlaying(songDetail))
-        //    {
-        //        return;
-        //    }
-        //    if (bpm <= 0f)
-        //    {
-        //        CabinetLed.SetButtonLight(Color.green, 3);
-        //        CabinetLed.SetCabinetLight(1.0f);
-        //        return;
-        //    }
-
-        //    var halfNoteMs = 120000f / bpm;
-        //    CabinetLed.SetSineFunc(3, Color.green, (long)halfNoteMs);
-        //    CabinetLed.SetCabinetLightSineFunc(1.0f, (long)(halfNoteMs * 2));
-        //}
-
         Vector2 GetCoverDisplayerPositionFromDelta(float delta)
         {
             const int X_POS_STEP = 169;
@@ -680,47 +625,24 @@ namespace MajdataPlay.Scenes.List
                 return new Vector2((posStartAt + middle) * Mathf.Sign(delta), 0);
             }
         }
-        struct SongCoverBinding
+        /// <summary>Associates one song with its optional pooled foreground cover.</summary>
+        private struct SongCoverBinding
         {
-            public ISongDetail SongDetail { get; set; }
-            public SongCoverDisplayer? Displayer { get; set; }
-            public ValueTask? PreloadTask { get; set; }
-
-
-            public SongCoverBinding(ISongDetail songDetail, SongCoverDisplayer? displayer)
-            {
-                SongDetail = songDetail;
-                Displayer = displayer;
-                PreloadTask = null;
-            }
-            public void PreloadAsync()
-            {
-                if(PreloadTask is ValueTask task)
-                {
-                    if(!task.IsCompleted || task.IsCompletedSuccessfully)
-                    {
-                        return;
-                    }
-                }
-                var preloadTask = SongDetail.PreloadAsync();
-                if(!preloadTask.IsCompleted)
-                {
-                    ListManager.AllBackgroundTasks.Add(preloadTask.AsTask().Register($"[{nameof(CoverListManager)}]Song detail preload"));
-                }
-                PreloadTask = preloadTask;
-            }
-        }
-        struct SongThumbnailBinding
-        {
+            /// <summary>Gets the song assigned to this list position.</summary>
             public ISongDetail SongDetail { get; init; }
-            public ThumbnailDisplayer? Displayer { get; set; }
-            public ValueTask? PreloadTask { get; set; }
 
-            public SongThumbnailBinding(SongDetail songDetail, ThumbnailDisplayer? displayer)
-            {
-                SongDetail = songDetail;
-                Displayer = displayer;
-            }
+            /// <summary>Gets or sets the pooled cover while this position is visible.</summary>
+            public SongCoverDisplayer? Displayer { get; set; }
+        }
+
+        /// <summary>Associates one song with its optional pooled thumbnail.</summary>
+        private struct SongThumbnailBinding
+        {
+            /// <summary>Gets the song assigned to this list position.</summary>
+            public ISongDetail SongDetail { get; init; }
+
+            /// <summary>Gets or sets the pooled thumbnail while this position is visible.</summary>
+            public ThumbnailDisplayer? Displayer { get; set; }
         }
     }
 }
