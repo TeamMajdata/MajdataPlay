@@ -6,6 +6,7 @@ using UnityEditor.SceneManagement;
 using UnityEngine;
 using UnityEngine.Rendering;
 using UnityEngine.Sprites;
+using UnityEngine.UI;
 #nullable enable
 
 namespace MajdataPlay.Editor.Rendering
@@ -268,35 +269,72 @@ namespace MajdataPlay.Editor.Rendering
             return contours;
         }
 
-        /// <summary>Deduplicates panel descriptors while retaining disabled authored states.</summary>
+        /// <summary>Collects panel descriptors and every authored Sprite Swap state from disposable preview contents.</summary>
         /// <param name="root">The disposable prefab or scene root.</param><param name="contours">The accumulated distinct shapes.</param>
         private static void Collect(GameObject root, List<BakeSource> contours)
         {
             foreach (var panel in root.GetComponentsInChildren<UiBackdropPanel>(true))
             {
-                if (!panel.TryGetOpticalContour(out var contour))
-                {
-                    continue;
-                }
-                var sprite = panel.GetComponent<QualityUiImage>().overrideSprite;
-                var outerUv = DataUtility.GetOuterUV(sprite);
-                if (UiAtlasMeshGenerator.TryGetLegacy(sprite, out var legacy, out var originalUv))
-                {
-                    sprite = legacy;
-                    outerUv = originalUv;
-                }
-                var existing = contours.Find(item => item.Contour.Matches(contour));
-                if (existing != null)
-                {
-                    if (contour.AlphaContourThreshold > 0f &&
-                        (existing.Sprite.texture != sprite.texture || existing.OuterUv != outerUv))
-                    {
-                        throw new InvalidOperationException($"Ambiguous artwork contour source: {contour.SpriteName}.");
-                    }
-                    continue;
-                }
-                contours.Add(new BakeSource(contour, sprite, outerUv));
+                CollectPanel(panel, contours);
             }
+            foreach (var selectable in root.GetComponentsInChildren<Selectable>(true))
+            {
+                if (selectable.transition != Selectable.Transition.SpriteSwap ||
+                    selectable.targetGraphic is not QualityUiImage image ||
+                    !image.TryGetComponent<UiBackdropPanel>(out var panel))
+                {
+                    continue;
+                }
+                var originalOverride = image.overrideSprite;
+                try
+                {
+                    var states = selectable.spriteState;
+                    foreach (var sprite in new[] { image.sprite, states.highlightedSprite, states.pressedSprite,
+                        states.selectedSprite, states.disabledSprite })
+                    {
+                        if (sprite == null)
+                        {
+                            continue;
+                        }
+                        image.overrideSprite = sprite;
+                        CollectPanel(panel, contours);
+                    }
+                }
+                finally
+                {
+                    image.overrideSprite = originalOverride;
+                }
+            }
+        }
+
+        /// <summary>Deduplicates one effective Sprite contour while retaining its original artwork and sampling bounds.</summary>
+        /// <param name="panel">The temporary panel with its currently effective Sprite.</param>
+        /// <param name="contours">The distinct geometry and source records accumulated for the bake.</param>
+        /// <exception cref="InvalidOperationException">Matching artwork contours resolve to inconsistent original textures or bounds.</exception>
+        private static void CollectPanel(UiBackdropPanel panel, List<BakeSource> contours)
+        {
+            if (!panel.TryGetOpticalContour(out var contour))
+            {
+                return;
+            }
+            var sprite = panel.GetComponent<QualityUiImage>().overrideSprite;
+            var outerUv = DataUtility.GetOuterUV(sprite);
+            if (UiAtlasMeshGenerator.TryGetLegacy(sprite, out var legacy, out var originalUv))
+            {
+                sprite = legacy;
+                outerUv = originalUv;
+            }
+            var existing = contours.Find(item => item.Contour.Matches(contour));
+            if (existing != null)
+            {
+                if (contour.AlphaContourThreshold > 0f &&
+                    (existing.Sprite.texture != sprite.texture || existing.OuterUv != outerUv))
+                {
+                    throw new InvalidOperationException($"Ambiguous artwork contour source: {contour.SpriteName}.");
+                }
+                return;
+            }
+            contours.Add(new BakeSource(contour, sprite, outerUv));
         }
 
         /// <summary>Retains imported source artwork after its disposable scene or prefab preview closes.</summary>

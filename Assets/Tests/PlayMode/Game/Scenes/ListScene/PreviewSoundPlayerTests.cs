@@ -145,7 +145,7 @@ namespace MajdataPlay.Tests.Game.Scenes.PlayMode.ListScene
             yield return PlayAndWait(song, sample);
 
             _source.Cancel();
-            yield return WaitUntil(() => !_player.IsPreviewPending(song), 5f);
+            yield return WaitUntil(() => !_player.IsPreviewPending(song) && sample.PauseCount > 0 && !sample.IsLoop, 5f);
 
             Assert.That(_player.IsPreviewPlaying(song), Is.False);
             Assert.That(sample.PauseCount, Is.GreaterThanOrEqualTo(1));

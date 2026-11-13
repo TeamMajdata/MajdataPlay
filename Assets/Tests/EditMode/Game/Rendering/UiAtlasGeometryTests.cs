@@ -67,6 +67,75 @@ namespace MajdataPlay.Tests.Game.Rendering
             _expanded.Clear();
         }
 
+        /// <summary>Checks offline baking covers every Sprite Swap state without changing a target's effective Sprite or source mapping.</summary>
+        [Test]
+        public void GlassBaker_CollectsSpriteSwapStatesAndRestoresTheTarget()
+        {
+            var buttonObject = Track(new GameObject("Sprite Swap contour owner", typeof(RectTransform)));
+            buttonObject.SetActive(false);
+            buttonObject.transform.SetParent(_canvas.transform, false);
+            var button = buttonObject.AddComponent<Button>();
+            var normal = _expanded["newui@3x_3"];
+            var originalOverride = _expanded["newui@3x_8"];
+            var image = CreateImage<QualityUiImage>(normal, Image.Type.Sliced, false, 440f, 88f);
+            image.transform.SetParent(buttonObject.transform, false);
+            image.gameObject.AddComponent<UiBackdropPanel>();
+            button.targetGraphic = image;
+            button.transition = Selectable.Transition.SpriteSwap;
+            var states = new SpriteState
+            {
+                highlightedSprite = _expanded["newui@3x_4"],
+                pressedSprite = _expanded["newui@3x_5"],
+                selectedSprite = _expanded["newui@3x_6"],
+                disabledSprite = _expanded["newui@3x_7"]
+            };
+            button.spriteState = states;
+            image.overrideSprite = originalOverride;
+            var rect = image.rectTransform.rect;
+            var collector = typeof(MajdataPlay.Editor.Rendering.UiGlassOpticsAtlasBaker)
+                .GetMethod("Collect", BindingFlags.Static | BindingFlags.NonPublic)!;
+            var contours = (System.Collections.IList)Activator.CreateInstance(collector.GetParameters()[1].ParameterType)!;
+
+            collector.Invoke(null, new object[] { _canvas.gameObject, contours });
+
+            Assert.That(contours.Count, Is.EqualTo(6), "Keep the effective override, normal and all four non-null Sprite Swap states.");
+            var names = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var source in contours)
+            {
+                var type = source.GetType();
+                var contour = (UiGlassOpticsAtlas.Contour)type.GetProperty("Contour", BindingFlags.Instance | BindingFlags.NonPublic)!
+                    .GetValue(source)!;
+                var sprite = (Sprite)type.GetProperty("Sprite", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(source)!;
+                var outerUv = (Vector4)type.GetProperty("OuterUv", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(source)!;
+                var index = IndexOf(contour.SpriteName);
+                Assert.That(sprite, Is.SameAs(_layout.LegacySprites[index]));
+                Assert.That(outerUv, Is.EqualTo(_layout.OriginalOuterUVs[index]));
+                Assert.That(names.Add(contour.SpriteName), Is.True);
+            }
+            Assert.That(names, Is.EquivalentTo(new[] { "newui@3x_3", "newui@3x_4", "newui@3x_5",
+                "newui@3x_6", "newui@3x_7", "newui@3x_8" }));
+            Assert.That(image.sprite, Is.SameAs(normal));
+            Assert.That(image.overrideSprite, Is.SameAs(originalOverride));
+            Assert.That(image.rectTransform.rect, Is.EqualTo(rect));
+            Assert.That(button.spriteState, Is.EqualTo(states));
+
+            states.pressedSprite = states.highlightedSprite;
+            states.disabledSprite = null!;
+            button.spriteState = states;
+            image.overrideSprite = originalOverride;
+            collector.Invoke(null, new object[] { _canvas.gameObject, contours });
+            Assert.That(contours.Count, Is.EqualTo(6), "Duplicate and absent state sprites must not append descriptors.");
+            Assert.That(image.overrideSprite, Is.SameAs(originalOverride));
+
+            button.transition = Selectable.Transition.ColorTint;
+            states.selectedSprite = _expanded["newui@3x_9"];
+            button.spriteState = states;
+            image.overrideSprite = originalOverride;
+            collector.Invoke(null, new object[] { _canvas.gameObject, contours });
+            Assert.That(contours.Count, Is.EqualTo(6), "Inactive Sprite Swap settings must not bake unrelated states.");
+            Assert.That(image.overrideSprite, Is.SameAs(originalOverride));
+        }
+
         /// <summary>Checks every original vertex, UV, channel and triangle index without outlined margins.</summary>
         /// <param name="type">The Unity Image geometry type.</param>
         /// <param name="preserveAspect">Whether native aspect preservation is enabled.</param>

@@ -100,12 +100,12 @@ namespace MajdataPlay.Tests.Game.Rendering
             var entries = (UiGlassOpticsAtlas.Entry[])typeof(UiGlassOpticsAtlas).GetField("_entries", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(atlas)!;
             Assert.That(entries.Length, Is.GreaterThanOrEqualTo(4), "The actual menu consumers must not produce an empty or trivial atlas.");
             var hasOption = false;
-            var hasCategory = false;
+            var hasUserInfo = false;
             foreach (var entry in entries)
             {
                 var contour = entry.Contour;
                 hasOption |= contour.SpriteName == "newui@3x_16";
-                hasCategory |= contour.SpriteName == "newui@3x_6";
+                hasUserInfo |= contour.SpriteName == "newui@3x_26";
                 var sourceUvToLocal = new Vector4(333f, 777f, -12f, 34f);
                 Assert.That(atlas.TryResolve(in contour, sourceUvToLocal, out var mapping, out var clamp, out var decode), Is.True);
                 Assert.That(decode, Is.EqualTo(entry.Decode));
@@ -149,7 +149,7 @@ namespace MajdataPlay.Tests.Game.Rendering
                     contour.Corners, contour.Shape, contour.Circle, contour.ClipSmoothness);
                 Assert.That(atlas.TryResolve(in changed, sourceUvToLocal, out _, out _, out _), Is.False, "An unknown geometry must disable refraction rather than use an unrelated tile.");
             }
-            Assert.That(hasOption && hasCategory, Is.True);
+            Assert.That(hasOption && hasUserInfo, Is.True);
             TestContext.WriteLine($"OPTICS_PROFILE maxError={maximumError:F7} entries={entries.Length}");
         }
 
@@ -342,8 +342,8 @@ namespace MajdataPlay.Tests.Game.Rendering
                         path + ": every explicitly opted-in settlement panel must participate in baked-contour coverage.");
                 }
             }
-            Assert.That(total, Is.EqualTo(43));
-            Assert.That(matched, Is.EqualTo(41));
+            Assert.That(total, Is.EqualTo(45));
+            Assert.That(matched, Is.EqualTo(43));
             Assert.That(procedural, Is.EqualTo(2));
             TestContext.WriteLine($"OPTICS_AUTHORED total={total} matched={matched} proceduralFallback={procedural}");
 #else
@@ -363,11 +363,11 @@ namespace MajdataPlay.Tests.Game.Rendering
             var capture = CreateProbeCapture(64, false);
             UiOutlineTheme.Configure(UiOutlineMode.All);
             UiPvBackdropBlur.Configure(true, UiBackdropStyle.LiquidGlass);
-            foreach (var spriteName in new[] { "newui@3x_6", "newui@3x_16" })
+            foreach (var spriteName in new[] { "newui@3x_26", "newui@3x_16" })
             {
                 var panel = CreateAuthoredPanel(canvas, spriteName);
                 var image = panel.GetComponent<QualityUiImage>();
-                foreach (var type in spriteName == "newui@3x_6" ? new[] { Image.Type.Simple, Image.Type.Sliced } : new[] { Image.Type.Simple })
+                foreach (var type in spriteName == "newui@3x_26" ? new[] { Image.Type.Simple, Image.Type.Sliced } : new[] { Image.Type.Simple })
                 {
                     image.type = type;
                     image.rectTransform.localRotation = Quaternion.Euler(0f, 0f, 17f);
@@ -761,7 +761,7 @@ namespace MajdataPlay.Tests.Game.Rendering
             }
         }
 
-        /// <summary>Checks actual selected and procedural unselected categories retain optics, native masking and animated coverage.</summary>
+        /// <summary>Checks both extents of the single native category retain optics, masking and animated coverage.</summary>
         /// <returns>The two-prefab, two-state native/stencil and real GPU regression.</returns>
         [UnityTest]
         [Category("GPU")]
@@ -822,20 +822,17 @@ namespace MajdataPlay.Tests.Game.Rendering
                         Assert.That(panel.RefractionReady, Is.True);
                         foreach (var material in new[] { owned, rendered })
                         {
-                            Assert.That(material.GetFloat("_LiquidNativeContourReady"), Is.EqualTo(selected ? 0f : 1f));
-                            Assert.That(material.GetFloat("_LiquidContourReady"), Is.EqualTo(selected ? 1f : 0f));
+                            Assert.That(material.GetFloat("_LiquidNativeContourReady"), Is.EqualTo(1f));
+                            Assert.That(material.GetFloat("_LiquidContourReady"), Is.Zero);
                             Assert.That(material.GetFloat("_LiquidRefractionReady"), Is.EqualTo(1f));
                             Assert.That(material.IsKeywordEnabled(UiBackdropPanel.LiquidStyleKeyword), Is.True);
                         }
-                        if (!selected)
+                        Assert.That(image.sprite, Is.Null);
+                        var expectedRadius = Mathf.Min(40f, Mathf.Min(extent.x, extent.y) * 0.5f);
+                        Assert.That(owned.GetVector("_LiquidGlassCorners"), Is.EqualTo(Vector4.one * expectedRadius));
+                        foreach (var radius in new[] { "_RadiusTL", "_RadiusTR", "_RadiusBL", "_RadiusBR" })
                         {
-                            Assert.That(image.sprite, Is.Null);
-                            var expectedRadius = Mathf.Min(40f, Mathf.Min(extent.x, extent.y) * 0.5f);
-                            Assert.That(owned.GetVector("_LiquidGlassCorners"), Is.EqualTo(Vector4.one * expectedRadius));
-                            foreach (var radius in new[] { "_RadiusTL", "_RadiusTR", "_RadiusBL", "_RadiusBR" })
-                            {
-                                Assert.That(owned.GetFloat(radius), Is.EqualTo(40f), "Authored corner values stay unchanged while the shader clamps them to the live extent.");
-                            }
+                            Assert.That(owned.GetFloat(radius), Is.EqualTo(40f), "Authored corner values stay unchanged while the shader clamps them to the live extent.");
                         }
                         var probe = _objects.Track(new Material(rendered));
                         probe.SetInt("_StencilComp", (int)CompareFunction.Always);
@@ -861,7 +858,7 @@ namespace MajdataPlay.Tests.Game.Rendering
                         var fallback = Draw(image, probe, mesh, target, resolved, reader, 1, axisAligned: true);
                         AssertAlphaEqual(highlighted, fallback, "The optical branch cannot change the native clipping silhouette.");
                         probe.SetFloat("_LiquidRefractionReady", 1f);
-                        var requiredContour = selected ? "_LiquidContourReady" : "_LiquidNativeContourReady";
+                        const string requiredContour = "_LiquidNativeContourReady";
                         foreach (var disabled in new[] { requiredContour, "_LiquidProfileReady" })
                         {
                             probe.SetFloat(disabled, 0f);
@@ -919,13 +916,10 @@ namespace MajdataPlay.Tests.Game.Rendering
             canvas.renderMode = RenderMode.ScreenSpaceOverlay;
             UiOutlineTheme.Configure(UiOutlineMode.All);
             UiPvBackdropBlur.Configure(true, UiBackdropStyle.LiquidGlass);
-            var unselected = CreateAuthoredCategory(canvas, setting: true, selected: false);
             var selected = CreateAuthoredCategory(canvas, setting: false, selected: true);
             yield return null;
             Canvas.ForceUpdateCanvases();
-            var minimumWidth = unselected.GetComponent<QualityUiImage>().material.GetVector("_LiquidGlassOptics").x;
-            var maximumWidth = selected.GetComponent<QualityUiImage>().material.GetVector("_LiquidGlassOptics").x;
-            unselected.gameObject.SetActive(false);
+            var categoryWidth = selected.GetComponent<QualityUiImage>().material.GetVector("_LiquidGlassOptics").x;
             selected.gameObject.SetActive(false);
             var capture = CreateProbeCapture(128, false);
             const int size = 512;
@@ -946,7 +940,8 @@ namespace MajdataPlay.Tests.Game.Rendering
                 var material = _objects.Track(new Material(image.materialForRendering));
                 material.SetInt("_StencilComp", (int)CompareFunction.Always);
                 var optics = material.GetVector("_LiquidGlassOptics");
-                Assert.That(optics.x, Is.InRange(minimumWidth, maximumWidth), "Compare the actual authored category and adjustment sizes, not only their serialized multipliers.");
+                Assert.That(optics.x, Is.InRange(categoryWidth * 0.95f, categoryWidth * 1.05f),
+                    "Adjustment lenses remain comparable to the category while retaining their independently authored body height.");
                 Assert.That(material.GetFloat("_LiquidRefractionTail"), Is.Zero, "Sharing RT3 cannot opt adjustment capsules into the outer-key lens tail.");
                 var previousOptics = optics;
                 previousOptics.x /= 0.75f;
@@ -964,7 +959,7 @@ namespace MajdataPlay.Tests.Game.Rendering
                 material.SetVector("_LiquidGlassOptics", optics);
                 var gaussianTuned = Draw(image, material, mesh, target, resolved, reader, 1, axisAligned: true);
                 Assert.That(MaximumPixelDifference(gaussianPrevious, gaussianTuned, 4), Is.Zero, "The liquid-only tuning must not alter Gaussian appearance.");
-                TestContext.WriteLine($"ADJUSTMENT_LENS sprite={spriteName} band={optics.x:F6} categoryRange={minimumWidth:F6}..{maximumWidth:F6} changedRGB={difference:F8}");
+                TestContext.WriteLine($"ADJUSTMENT_LENS sprite={spriteName} band={optics.x:F6} categoryBand={categoryWidth:F6} changedRGB={difference:F8}");
                 panel.gameObject.SetActive(false);
             }
         }
@@ -1726,7 +1721,7 @@ namespace MajdataPlay.Tests.Game.Rendering
             var mask = _objects.Create("Baked contour stencil parent", canvas.transform);
             mask.AddComponent<Image>();
             mask.AddComponent<Mask>().showMaskGraphic = false;
-            var panel = CreateAuthoredPanel(canvas, "newui@3x_6");
+            var panel = CreateAuthoredPanel(canvas, "newui@3x_26");
             var image = panel.GetComponent<QualityUiImage>();
             image.transform.SetParent(mask.transform, false);
             UiOutlineTheme.Configure(UiOutlineMode.All);
@@ -1819,7 +1814,7 @@ namespace MajdataPlay.Tests.Game.Rendering
                     Assert.That(UiGlassOpticsAtlas.Load(), Is.SameAs((contourSupported && linearSupported) || profileSupported ? atlas : null));
                     Assert.That(atlas.ProfileTexture != null, Is.EqualTo(profileSupported));
                     Assert.That(atlas.DistanceTexture != null, Is.EqualTo(contourSupported && linearSupported));
-                    var panel = CreateAuthoredPanel(canvas, "newui@3x_6");
+                    var panel = CreateAuthoredPanel(canvas, "newui@3x_26");
                     var image = panel.GetComponent<QualityUiImage>();
                     image.transform.SetParent(mask.transform, false);
                     yield return null;
@@ -1981,7 +1976,7 @@ namespace MajdataPlay.Tests.Game.Rendering
         /// <summary>Copies an actual category body without instantiating its unrelated scene controllers.</summary>
         /// <param name="canvas">The isolated native UGUI root.</param>
         /// <param name="setting">Whether to use the Setting menu rather than the List collection prefab.</param>
-        /// <param name="selected">Whether to copy the selected Sprite body rather than its procedural peer.</param>
+        /// <param name="selected">Whether to apply the selected width and tint to the same authored native body.</param>
         /// <returns>The active copied production panel, preserving authored Image and optical settings.</returns>
         private UiBackdropPanel CreateAuthoredCategory(Canvas canvas, bool setting, bool selected)
         {
@@ -1990,10 +1985,10 @@ namespace MajdataPlay.Tests.Game.Rendering
             var image = child.AddComponent<QualityUiImage>();
             var panel = child.AddComponent<UiBackdropPanel>();
 #if UNITY_EDITOR
-            var prefab = AssetDatabase.LoadAssetAtPath<GameObject>(setting
-                ? "Assets/Prefabs/Setting/MenuTitleDisplayer.prefab" : "Assets/Prefabs/List/Model/CollectionDisplayer.prefab");
+            var path = setting ? "Assets/Prefabs/Setting/MenuTitleDisplayer.prefab" : "Assets/Prefabs/List/Model/CollectionDisplayer.prefab";
+            var prefab = AssetDatabase.LoadAssetAtPath<GameObject>(path);
             Assert.That(prefab, Is.Not.Null);
-            var source = selected ? prefab.transform.Find("SelectedBackground") : setting ? prefab.transform : prefab.transform.Find("BG");
+            var source = setting ? prefab.transform : prefab.transform.Find("BG");
             Assert.That(source, Is.Not.Null);
             EditorUtility.CopySerialized(source.GetComponent<QualityUiImage>(), image);
             EditorUtility.CopySerialized(source.GetComponent<UiBackdropPanel>(), panel);
@@ -2001,6 +1996,19 @@ namespace MajdataPlay.Tests.Game.Rendering
             image.rectTransform.anchorMin = image.rectTransform.anchorMax = Vector2.one * 0.5f;
             image.rectTransform.pivot = Vector2.one * 0.5f;
             image.rectTransform.sizeDelta = ((RectTransform)source).rect.size;
+            if (selected)
+            {
+                // The narrow rendering runner omits menu controllers, so read their authored state
+                // without instantiating scene services or substituting a second selected body.
+                var yaml = MajdataPlay.IO.Storage.FileSystem.File.Open(path).ReadAllText();
+                var width = Regex.Match(yaml, @"_selectedWidth: (?<v>[^\r\n]+)");
+                var tint = Regex.Match(yaml, @"_selectedBackgroundColor: \{r: (?<r>[^,]+), g: (?<g>[^,]+), b: (?<b>[^,]+), a: (?<a>[^}]+)\}");
+                Assert.That(width.Success && tint.Success, Is.True);
+                var culture = System.Globalization.CultureInfo.InvariantCulture;
+                image.rectTransform.sizeDelta = new Vector2(float.Parse(width.Groups["v"].Value, culture), image.rectTransform.sizeDelta.y);
+                image.color = new Color(float.Parse(tint.Groups["r"].Value, culture), float.Parse(tint.Groups["g"].Value, culture),
+                    float.Parse(tint.Groups["b"].Value, culture), float.Parse(tint.Groups["a"].Value, culture));
+            }
             Assert.That(image.rectTransform.sizeDelta.x, Is.GreaterThan(1f));
             Assert.That(image.rectTransform.sizeDelta.y, Is.GreaterThan(1f));
 #else
@@ -2048,7 +2056,7 @@ namespace MajdataPlay.Tests.Game.Rendering
             Assert.That(maximum, Is.Zero, message);
         }
 
-        /// <summary>Creates a native control from the actual selected-category prefab or current Setting value-plate data.</summary>
+        /// <summary>Creates a native control from the current user-info prefab or Setting value-plate data.</summary>
         /// <param name="canvas">The isolated native UGUI root.</param>
         /// <param name="spriteName">The authored Sprite whose real policy should be used.</param>
         /// <returns>The active production panel component.</returns>
@@ -2060,11 +2068,10 @@ namespace MajdataPlay.Tests.Game.Rendering
             var panel = child.AddComponent<UiBackdropPanel>();
             var authoredAdjustmentSize = Vector2.zero;
 #if UNITY_EDITOR
-            if (spriteName == "newui@3x_6" || spriteName == "newui@3x_26")
+            if (spriteName == "newui@3x_26")
             {
-                var prefab = AssetDatabase.LoadAssetAtPath<GameObject>(spriteName == "newui@3x_26"
-                    ? "Assets/Prefabs/UI/UserInfo.prefab" : "Assets/Prefabs/List/Model/CollectionDisplayer.prefab");
-                var source = spriteName == "newui@3x_26" ? prefab.transform : prefab.transform.Find("SelectedBackground");
+                var prefab = AssetDatabase.LoadAssetAtPath<GameObject>("Assets/Prefabs/UI/UserInfo.prefab");
+                var source = prefab.transform;
                 EditorUtility.CopySerialized(source.GetComponent<QualityUiImage>(), image);
                 EditorUtility.CopySerialized(source.GetComponent<UiBackdropPanel>(), panel);
                 typeof(UiBackdropPanel).GetField("_buttonForegroundRoot", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(panel, null);
@@ -2103,7 +2110,6 @@ namespace MajdataPlay.Tests.Game.Rendering
             image.rectTransform.anchorMin = image.rectTransform.anchorMax = Vector2.one * 0.5f;
             image.rectTransform.pivot = Vector2.one * 0.5f;
             image.rectTransform.sizeDelta = authoredAdjustmentSize != Vector2.zero ? authoredAdjustmentSize :
-                spriteName == "newui@3x_6" ? new Vector2(200f, 64f) :
                 spriteName == "newui@3x_22" ? new Vector2(1028f, 590f) :
                 spriteName == "newui@3x_26" ? new Vector2(395.22f, 106.13f) : new Vector2(200f, 140f);
             child.SetActive(true);
@@ -2222,6 +2228,98 @@ namespace MajdataPlay.Tests.Game.Rendering
             reader.ReadPixels(new Rect(0, 0, target.width, target.height), 0, 0);
             reader.Apply(false, false);
             return reader.GetPixels();
+        }
+
+        /// <summary>Checks the login board follows its actual clipped-arc artwork instead of a generic rounded rectangle.</summary>
+        [Test]
+        [Category("GPU")]
+        public void LoginWindow_UsesBakedArtworkContour()
+        {
+            var atlas = LoadAtlas();
+            var entries = (UiGlassOpticsAtlas.Entry[])typeof(UiGlassOpticsAtlas)
+                .GetField("_entries", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(atlas)!;
+            var matches = 0;
+            foreach (var entry in entries)
+            {
+                if (entry.Contour.SpriteName != "newui@3x_23")
+                {
+                    continue;
+                }
+                matches++;
+                Assert.That(entry.Contour.AlphaContourThreshold, Is.EqualTo(0.5f),
+                    "Precompute the original image silhouette, including the long side arcs and flat caps.");
+            }
+            Assert.That(matches, Is.EqualTo(1));
+        }
+
+        /// <summary>Checks login input focus uses baked normal and selected outlines without losing either glass style.</summary>
+        /// <returns>The real quality-image material, focus-sprite and style-switch lifecycle regression.</returns>
+        [UnityTest]
+        public IEnumerator LoginInputs_FocusSpriteRetainsBothGlassStyles()
+        {
+#if UNITY_EDITOR
+            var atlas = LoadAtlas();
+            var canvas = _objects.Add<Canvas>();
+            canvas.renderMode = RenderMode.ScreenSpaceOverlay;
+            var child = _objects.Create("Authored login input", canvas.transform);
+            child.SetActive(false);
+            var image = child.AddComponent<QualityUiImage>();
+            var panel = child.AddComponent<UiBackdropPanel>();
+            var source = AssetDatabase.LoadAssetAtPath<Material>("Assets/Rendering/Materials/UI/Default.mat");
+            image.material = source;
+            image.type = Image.Type.Sliced;
+            image.pixelsPerUnitMultiplier = 3f;
+            image.rectTransform.sizeDelta = new Vector2(400f, 80f);
+            Sprite? focused = null;
+            foreach (var asset in AssetDatabase.LoadAllAssetsAtPath("Assets/Sprites/Ribbon/newui@3x.png"))
+            {
+                if (asset is Sprite sprite)
+                {
+                    if (sprite.name == "newui@3x_3")
+                    {
+                        image.sprite = sprite;
+                    }
+                    else if (sprite.name == "newui@3x_4")
+                    {
+                        focused = sprite;
+                    }
+                }
+            }
+            Assert.That(image.sprite, Is.Not.Null);
+            Assert.That(focused, Is.Not.Null);
+            var yaml = MajdataPlay.IO.Storage.FileSystem.File.Open("Assets/Scenes/Login.unity").ReadAllText();
+            var body = Regex.Match(yaml, @"^--- !u!114 &900000000000000101\r?\n(?<body>.*?)(?=^--- |\z)",
+                RegexOptions.Multiline | RegexOptions.Singleline).Groups["body"].Value;
+            Assert.That(body, Is.Not.Empty);
+            ApplyAuthoredFields(panel, body);
+            UiOutlineTheme.Configure(UiOutlineMode.All);
+            child.SetActive(true);
+            foreach (var style in new[] { UiBackdropStyle.GaussianBlur, UiBackdropStyle.LiquidGlass })
+            {
+                UiPvBackdropBlur.Configure(true, style);
+                foreach (var state in new[] { focused!, image.sprite })
+                {
+                    image.overrideSprite = state;
+                    yield return null;
+                    Canvas.ForceUpdateCanvases();
+                    Assert.That(panel.SourceRole, Is.EqualTo(UiBackdropSourceRole.Category));
+                    Assert.That(image.material.renderQueue, Is.EqualTo(source.renderQueue));
+                    Assert.That(image.material.shader.name, Is.EqualTo("Maj/UI/PV Glass"));
+                    Assert.That(image.material.GetFloat("_BackdropIsNativeControl"), Is.EqualTo(1f));
+                    Assert.That(panel.TryGetOpticalContour(out var contour), Is.True);
+                    Assert.That(atlas.TryResolve(in contour, Vector4.one, out _, out _, out _), Is.True,
+                        "The selected input background needs its own baked source identity.");
+                    Assert.That(panel.RefractionReady, Is.EqualTo(style == UiBackdropStyle.LiquidGlass && UiGlassOpticsAtlas.SupportsContourFiltering));
+                    Assert.That(image.SourceMaterial, Is.SameAs(source));
+                    Assert.That(image.rectTransform.sizeDelta, Is.EqualTo(new Vector2(400f, 80f)));
+                }
+            }
+            UiPvBackdropBlur.Configure(false);
+            Assert.That(image.material, Is.SameAs(source));
+#else
+            Assert.Ignore("This regression loads the authored login input and Ribbon sprites.");
+            yield break;
+#endif
         }
 
         /// <summary>Resets runtime-only resources and baked lookup caches without changing imported assets.</summary>

@@ -14,6 +14,11 @@ namespace MajdataPlay.Rendering
         [FormerlySerializedAs("CaptureBeforeBackdrop")]
         private bool _captureBeforeBackdrop;
 
+        /// <summary>Draws explicit background artwork before camera extensions while preserving the active UI shader.</summary>
+        [SerializeField]
+        [FormerlySerializedAs("DrawBeforeCameraExtension")]
+        private bool _drawBeforeCameraExtension;
+
         /// <summary>Selects an optional authored material only while liquid-glass rendering is enabled.</summary>
         [SerializeField]
         [FormerlySerializedAs("LiquidGlassMaterial")]
@@ -33,7 +38,7 @@ namespace MajdataPlay.Rendering
         /// <summary>Retains the optional large-panel effect without per-rebuild component searches.</summary>
         private UiBackdropPanel? _backdropPanel;
 
-        /// <summary>Retains the board owner that draws this blue ring after the PV snapshot.</summary>
+        /// <summary>Retains the board owner that includes this blue ring in the background capture.</summary>
         private UiBackdropPanel? _backdropBackgroundPanel;
 
         /// <summary>Owns this Image's queue-only background variant without editing its source material.</summary>
@@ -103,10 +108,14 @@ namespace MajdataPlay.Rendering
                         ? _liquidGlassMaterial : UiOutlineTheme.GetMaterial(original);
                     if (_backdropBackgroundPanel != null)
                     {
-                        return _backdropBackgroundPanel.ResolveBackgroundMaterial(themed);
+                        var background = _backdropBackgroundPanel.ResolveBackgroundMaterial(themed);
+                        if (background != themed)
+                        {
+                            return background;
+                        }
                     }
                     var resolved = _backdropPanel != null ? _backdropPanel.ResolveMaterial(themed) : themed;
-                    return ResolveCaptureMaterial(resolved);
+                    return ResolveOrderedMaterial(resolved);
                 }
                 return original;
             }
@@ -251,7 +260,7 @@ namespace MajdataPlay.Rendering
         internal void RefreshMaterialSelection()
         {
             RefreshLiquidFrameCaptureRegistration();
-            if (!_captureBeforeBackdrop || !UiPvBackdropBlur.Enabled || !isActiveAndEnabled)
+            if (!isActiveAndEnabled || (!_drawBeforeCameraExtension && (!_captureBeforeBackdrop || !UiPvBackdropBlur.Enabled)))
             {
                 ReleaseCaptureMaterial();
             }
@@ -305,12 +314,12 @@ namespace MajdataPlay.Rendering
             }
         }
 
-        /// <summary>Places the song cover after boards and before category capture without changing its shader.</summary>
+        /// <summary>Orders explicit background artwork or the song-cover prefix without changing the active shader.</summary>
         /// <param name="source">The material selected by the normal UI styling and panel policy.</param>
-        /// <returns>A component-owned queue-only variant while filtering is enabled; otherwise the unchanged source.</returns>
-        private Material ResolveCaptureMaterial(Material source)
+        /// <returns>The component-owned queue variant while its ordering policy is active; otherwise the unchanged source.</returns>
+        private Material ResolveOrderedMaterial(Material source)
         {
-            if (!_captureBeforeBackdrop || !UiPvBackdropBlur.Enabled || !isActiveAndEnabled)
+            if (!isActiveAndEnabled || (!_drawBeforeCameraExtension && (!_captureBeforeBackdrop || !UiPvBackdropBlur.Enabled)))
             {
                 ReleaseCaptureMaterial();
                 return source;
@@ -320,7 +329,7 @@ namespace MajdataPlay.Rendering
                 ReleaseCaptureMaterial();
                 _captureMaterial = new Material(source)
                 {
-                    name = source.name + " (Before Categories)",
+                    name = source.name + " (Ordered UI)",
                     hideFlags = HideFlags.HideAndDontSave
                 };
                 _captureSource = source;
@@ -329,7 +338,8 @@ namespace MajdataPlay.Rendering
             {
                 _captureMaterial.CopyPropertiesFromMaterial(source);
             }
-            _captureMaterial.renderQueue = MajUiBackdropBridge.CategoryBackgroundQueue;
+            _captureMaterial.renderQueue = _drawBeforeCameraExtension
+                ? (int)UnityEngine.Rendering.RenderQueue.GeometryLast : MajUiBackdropBridge.CategoryBackgroundQueue;
             return _captureMaterial;
         }
 
