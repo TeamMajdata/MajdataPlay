@@ -4,6 +4,9 @@ Shader "Maj/UI/Rounded Rect"
     {
         [PerRendererData] _MainTex ("Sprite Texture", 2D) = "white" {}
         _Color ("Tint", Color) = (1,1,1,1)
+        [HideInInspector] _MajUIOpaque ("Opaque UI", Float) = 0
+        [HideInInspector] _MajUISrcBlend ("Source Blend", Float) = 5
+        [HideInInspector] _MajUIDstBlend ("Destination Blend", Float) = 10
         
         _RadiusTL ("Top Left Radius", Float) = 0
         _RadiusTR ("Top Right Radius", Float) = 0
@@ -32,7 +35,7 @@ Shader "Maj/UI/Rounded Rect"
         }
 
         Stencil { Ref [_Stencil] Comp [_StencilComp] Pass [_StencilOp] ReadMask [_StencilReadMask] WriteMask [_StencilWriteMask] }
-        Cull Off Lighting Off ZWrite Off ZTest [unity_GUIZTestMode] Blend SrcAlpha OneMinusSrcAlpha ColorMask [_ColorMask]
+        Cull Off Lighting Off ZWrite Off ZTest [unity_GUIZTestMode] Blend [_MajUISrcBlend] [_MajUIDstBlend] ColorMask [_ColorMask]
 
         Pass
         {
@@ -65,6 +68,7 @@ Shader "Maj/UI/Rounded Rect"
 
             half4 _Color;
             half4 _TextureSampleAdd;
+            float _MajUIOpaque;
             
             float _RadiusTL, _RadiusTR, _RadiusBL, _RadiusBR;
             sampler2D _MainTex;
@@ -100,7 +104,24 @@ Shader "Maj/UI/Rounded Rect"
                 float aa = max(length(float2(ddx(dist), ddy(dist))), 1e-3);
                 float alpha = smoothstep(aa, -aa, dist);
 
-                half4 color = (MAJ_SAMPLE_TEX2D(_MainTex, IN.texcoord) + _TextureSampleAdd) * IN.color;
+                float4 sampled = MAJ_SAMPLE_TEX2D(_MainTex, IN.texcoord) + _TextureSampleAdd;
+                if (_MajUIOpaque > 0.5)
+                {
+                    // Runtime-owned opaque UI variants retain the procedural rounded silhouette.
+                    // Texture opacity selects the shape; tint/CanvasGroup alpha only controls visibility.
+                    clip(alpha - 0.5);
+                    clip(sampled.a - 0.1h);
+                    clip(IN.color.a - 0.001h);
+
+                    #ifdef UNITY_UI_ALPHACLIP
+                    // Keep native stencil-mask alpha clipping when UGUI requests that structural pass.
+                    clip(sampled.a * IN.color.a * alpha - 0.001h);
+                    #endif
+
+                    return half4(sampled.rgb * IN.color.rgb, 1.0h);
+                }
+
+                half4 color = sampled * IN.color;
                 color.a *= alpha;
 
                 #ifdef UNITY_UI_ALPHACLIP

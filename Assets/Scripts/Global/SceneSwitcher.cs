@@ -4,10 +4,9 @@ using LitMotion;
 using LitMotion.Extensions;
 using MajdataPlay.Diagnostics;
 using MajdataPlay.IO;
-#if UNITY_ANDROID && !UNITY_EDITOR
 using MajdataPlay.Rendering;
-#endif
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 using TMPro;
@@ -79,6 +78,8 @@ namespace MajdataPlay
         [SerializeField]
         private Canvas _transitionOverlayCanvas = null!;
         private Graphic[] _maskDecorations = Array.Empty<Graphic>();
+        /// <summary>Retains only explicitly bound transition modifiers for paired cleanup.</summary>
+        private readonly List<UiTransitionOverlay> _transitionOverlays = new();
         private float _maskProgress;
         private bool _isClosingTransition;
 
@@ -131,6 +132,14 @@ namespace MajdataPlay
         {
             SceneManager.activeSceneChanged -= OnUnitySceneChanged;
             CancelTransitionMotions();
+            foreach (var overlay in _transitionOverlays)
+            {
+                if (overlay != null)
+                {
+                    overlay.Unbind();
+                }
+            }
+            _transitionOverlays.Clear();
             if (_transitionOverlayCanvas != null)
             {
                 Destroy(_transitionOverlayCanvas.gameObject);
@@ -267,21 +276,48 @@ namespace MajdataPlay
                     .Where(graphic => graphic != _mainImage)
                     .ToArray();
             }
-            return _mainMaskRect != null
+            var resolved = _mainMaskRect != null
                 && _mainImage != null
                 && _overlayImage != null
                 && _loadingText != null;
+            if (resolved)
+            {
+                BindTransitionGraphic(_mainImage);
+                BindTransitionGraphic(_overlayImage);
+                BindTransitionGraphic(_loadingText);
+                foreach (var decoration in _maskDecorations)
+                {
+                    BindTransitionGraphic(decoration);
+                }
+            }
+            return resolved;
         }
 
+        /// <summary>Binds only artwork that actually participates in the transition, never the legacy sub-display background.</summary>
+        /// <param name="graphic">The explicitly referenced transition image, decoration or loading label.</param>
+        private void BindTransitionGraphic(Graphic graphic)
+        {
+            if (graphic == null || graphic == _subImage)
+            {
+                return;
+            }
+            var overlay = UiTransitionOverlay.Ensure(graphic);
+            if (!_transitionOverlays.Contains(overlay))
+            {
+                _transitionOverlays.Add(overlay);
+            }
+        }
+
+        /// <summary>Validates optional dedicated-Canvas ownership after binding the actual transition graphics.</summary>
         private void BindTransitionOverlay()
         {
-            if (!ResolveTransitionReferences() || _transitionOverlayCanvas == null)
+            if (!ResolveTransitionReferences())
             {
                 MajDebug.LogError("Scene transition overlay is not configured.");
                 return;
             }
 
-            if (_mainMaskRect.GetComponentInParent<Canvas>() != _transitionOverlayCanvas)
+            if (_transitionOverlayCanvas != null && _mainMaskRect.GetComponentInParent<Canvas>() != _transitionOverlayCanvas)
             {
                 MajDebug.LogError("Scene transition UI is not serialized under the configured overlay canvas.");
             }

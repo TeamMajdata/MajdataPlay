@@ -379,6 +379,8 @@ namespace MajdataPlay
             if (baseline >= 0 && QualitySettings.GetQualityLevel() != baseline)
                 QualitySettings.SetQualityLevel(baseline, true);
             var parameters = MajEnv.SystemSettings.Rendering.GetEffectiveParameters();
+            UiOutlineTheme.Configure(MajEnv.SystemSettings.Rendering.GetEffectiveUIOutlineMode());
+            UiPvBackdropBlur.Configure(MajEnv.SystemSettings.Rendering.GetEffectiveUIBackdropBlur(), MajEnv.SystemSettings.Rendering.GetEffectiveUIBackdropStyle());
             // 保留完整 mip 链；纹理精度是采样 LOD 的 +0/+1/+2，而不是最高可用 mip 的下限。
             if (QualitySettings.globalTextureMipmapLimit != 0)
                 QualitySettings.globalTextureMipmapLimit = 0;

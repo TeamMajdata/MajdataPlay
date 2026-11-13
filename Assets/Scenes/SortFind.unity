@@ -798,9 +798,9 @@ MonoBehaviour:
   m_GameObject: {fileID: 658895489}
   m_Enabled: 1
   m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: fe87c0e1cc204ed48ad3b37840f39efc, type: 3}
+  m_Script: {fileID: 11500000, guid: 7c51cc521e1747f0ba99ae9b65785bd5, type: 3}
   m_Name: 
-  m_EditorClassIdentifier: 
+  m_EditorClassIdentifier: MajdataPlay.Core::MajdataPlay.Rendering.QualityUiImage
   m_Material: {fileID: 2100000, guid: 78a3c5eb06624f448a0238577d1de902, type: 2}
   m_Color: {r: 1, g: 1, b: 1, a: 1}
   m_RaycastTarget: 1
@@ -1190,7 +1190,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: fe87c0e1cc204ed48ad3b37840f39efc, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  m_Material: {fileID: 2100000, guid: 78a3c5eb06624f448a0238577d1de902, type: 2}
+  m_Material: {fileID: 2100000, guid: 513eb930203f49f98ef3bb3471909a97, type: 2}
   m_Color: {r: 1, g: 1, b: 1, a: 1}
   m_RaycastTarget: 1
   m_RaycastPadding: {x: 0, y: 0, z: 0, w: 0}
@@ -1251,6 +1251,7 @@ GameObject:
   - component: {fileID: 1237316696}
   - component: {fileID: 1237316695}
   - component: {fileID: 1237316697}
+  - component: {fileID: 900000000000000013}
   m_Layer: 5
   m_Name: OkButton
   m_TagString: Untagged
@@ -1287,9 +1288,9 @@ MonoBehaviour:
   m_GameObject: {fileID: 1237316693}
   m_Enabled: 1
   m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: fe87c0e1cc204ed48ad3b37840f39efc, type: 3}
+  m_Script: {fileID: 11500000, guid: 7c51cc521e1747f0ba99ae9b65785bd5, type: 3}
   m_Name: 
-  m_EditorClassIdentifier: 
+  m_EditorClassIdentifier: MajdataPlay.Core::MajdataPlay.Rendering.QualityUiImage
   m_Material: {fileID: 2100000, guid: 78a3c5eb06624f448a0238577d1de902, type: 2}
   m_Color: {r: 1, g: 1, b: 1, a: 1}
   m_RaycastTarget: 1
@@ -1500,6 +1501,7 @@ GameObject:
   - component: {fileID: 1660259405}
   - component: {fileID: 1660259407}
   - component: {fileID: 1660259406}
+  - component: {fileID: 1660259408}
   m_Layer: 5
   m_Name: window
   m_TagString: Untagged
@@ -1535,11 +1537,11 @@ MonoBehaviour:
   m_GameObject: {fileID: 1660259404}
   m_Enabled: 1
   m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: fe87c0e1cc204ed48ad3b37840f39efc, type: 3}
+  m_Script: {fileID: 11500000, guid: 7c51cc521e1747f0ba99ae9b65785bd5, type: 3}
   m_Name: 
-  m_EditorClassIdentifier: 
+  m_EditorClassIdentifier: MajdataPlay.Core::MajdataPlay.Rendering.QualityUiImage
   m_Material: {fileID: 2100000, guid: 78a3c5eb06624f448a0238577d1de902, type: 2}
-  m_Color: {r: 1, g: 1, b: 1, a: 1}
+  m_Color: {r: 1, g: 1, b: 1, a: 0.85}
   m_RaycastTarget: 1
   m_RaycastPadding: {x: 0, y: 0, z: 0, w: 0}
   m_Maskable: 1
@@ -1610,9 +1612,9 @@ MonoBehaviour:
   m_GameObject: {fileID: 1662593948}
   m_Enabled: 1
   m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: fe87c0e1cc204ed48ad3b37840f39efc, type: 3}
+  m_Script: {fileID: 11500000, guid: 7c51cc521e1747f0ba99ae9b65785bd5, type: 3}
   m_Name: 
-  m_EditorClassIdentifier: 
+  m_EditorClassIdentifier: MajdataPlay.Core::MajdataPlay.Rendering.QualityUiImage
   m_Material: {fileID: 2100000, guid: 78a3c5eb06624f448a0238577d1de902, type: 2}
   m_Color: {r: 1, g: 1, b: 1, a: 1}
   m_RaycastTarget: 1
@@ -1651,6 +1653,7 @@ GameObject:
   - component: {fileID: 1688309039}
   - component: {fileID: 1688309038}
   - component: {fileID: 1688309040}
+  - component: {fileID: 900000000000000012}
   m_Layer: 5
   m_Name: RightBtn
   m_TagString: Untagged
@@ -1686,9 +1689,9 @@ MonoBehaviour:
   m_GameObject: {fileID: 1688309036}
   m_Enabled: 1
   m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: fe87c0e1cc204ed48ad3b37840f39efc, type: 3}
+  m_Script: {fileID: 11500000, guid: 7c51cc521e1747f0ba99ae9b65785bd5, type: 3}
   m_Name: 
-  m_EditorClassIdentifier: 
+  m_EditorClassIdentifier: MajdataPlay.Core::MajdataPlay.Rendering.QualityUiImage
   m_Material: {fileID: 2100000, guid: 78a3c5eb06624f448a0238577d1de902, type: 2}
   m_Color: {r: 1, g: 1, b: 1, a: 1}
   m_RaycastTarget: 1
@@ -2026,6 +2029,7 @@ GameObject:
   - component: {fileID: 2122532830}
   - component: {fileID: 2122532829}
   - component: {fileID: 2122532831}
+  - component: {fileID: 900000000000000011}
   m_Layer: 5
   m_Name: LeftBtn
   m_TagString: Untagged
@@ -2061,9 +2065,9 @@ MonoBehaviour:
   m_GameObject: {fileID: 2122532827}
   m_Enabled: 1
   m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: fe87c0e1cc204ed48ad3b37840f39efc, type: 3}
+  m_Script: {fileID: 11500000, guid: 7c51cc521e1747f0ba99ae9b65785bd5, type: 3}
   m_Name: 
-  m_EditorClassIdentifier: 
+  m_EditorClassIdentifier: MajdataPlay.Core::MajdataPlay.Rendering.QualityUiImage
   m_Material: {fileID: 2100000, guid: 78a3c5eb06624f448a0238577d1de902, type: 2}
   m_Color: {r: 1, g: 1, b: 1, a: 1}
   m_RaycastTarget: 1
@@ -2112,6 +2116,87 @@ MonoBehaviour:
   HoldCircle: {fileID: 0}
   StartColor: {r: 1, g: 1, b: 1, a: 1}
   EndColor: {r: 0, g: 1, b: 0, a: 1}
+--- !u!114 &900000000000000011
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2122532827}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: ef06d39c7c35439cafc6637c942934d4, type: 3}
+  m_Name:
+  m_EditorClassIdentifier: MajdataPlay.Core::MajdataPlay.Rendering.UiBackdropPanel
+  _backgroundImage: {fileID: 0}
+  _isButton: 0
+  _isCategory: 0
+  _reusePanelCaptureOnly: 0
+  _liquidOnly: 1
+  _liquidEllipse: 0
+  _liquidCapsule: 1
+  _fillSamplePosition: {x: 0.25, y: 0.5}
+  _buttonForegroundRoot: {fileID: 0}
+  _fillAlpha: 1
+  _tintStrength: 1
+  _liquidTintStrength: 0.9
+  _liquidArtworkBlend: 0.25
+  _frostStrength: 0
+  _referenceOpacity: 1
+--- !u!114 &900000000000000012
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1688309036}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: ef06d39c7c35439cafc6637c942934d4, type: 3}
+  m_Name:
+  m_EditorClassIdentifier: MajdataPlay.Core::MajdataPlay.Rendering.UiBackdropPanel
+  _backgroundImage: {fileID: 0}
+  _isButton: 0
+  _isCategory: 0
+  _reusePanelCaptureOnly: 0
+  _liquidOnly: 1
+  _liquidEllipse: 0
+  _liquidCapsule: 1
+  _fillSamplePosition: {x: 0.25, y: 0.5}
+  _buttonForegroundRoot: {fileID: 0}
+  _fillAlpha: 1
+  _tintStrength: 1
+  _liquidTintStrength: 0.9
+  _liquidArtworkBlend: 0.25
+  _frostStrength: 0
+  _referenceOpacity: 1
+--- !u!114 &900000000000000013
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1237316693}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: ef06d39c7c35439cafc6637c942934d4, type: 3}
+  m_Name:
+  m_EditorClassIdentifier: MajdataPlay.Core::MajdataPlay.Rendering.UiBackdropPanel
+  _backgroundImage: {fileID: 0}
+  _isButton: 1
+  _isCategory: 0
+  _reusePanelCaptureOnly: 0
+  _liquidOnly: 0
+  _liquidEllipse: 1
+  _liquidCapsule: 0
+  _fillSamplePosition: {x: 0.5, y: 0.5}
+  _buttonForegroundRoot: {fileID: 1237316694}
+  _fillAlpha: 1
+  _tintStrength: 1
+  _liquidTintStrength: 0.9
+  _liquidArtworkBlend: 0.25
+  _frostStrength: 0
+  _referenceOpacity: 1
 --- !u!1660057539 &9223372036854775807
 SceneRoots:
   m_ObjectHideFlags: 0
@@ -2120,3 +2205,25 @@ SceneRoots:
   - {fileID: 314479826}
   - {fileID: 233425711}
   - {fileID: 721730196}
+--- !u!114 &1660259408
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1660259404}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: ef06d39c7c35439cafc6637c942934d4, type: 3}
+  m_Name:
+  m_EditorClassIdentifier: MajdataPlay.Core::MajdataPlay.Rendering.UiBackdropPanel
+  _backgroundImage: {fileID: 1662593950}
+  _useStrongBlur: 1
+  _liquidClippedCircle: 1
+  _fillAlpha: 0.5019608
+  _tintStrength: 0.4
+  _liquidTintStrength: 0
+  _liquidArtworkBlend: 0.4233333
+  _liquidRefractionWidthScale: 2
+  _frostStrength: 0.08
+  _referenceOpacity: 0.85

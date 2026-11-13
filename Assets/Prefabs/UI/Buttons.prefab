@@ -56,9 +56,9 @@ MonoBehaviour:
   m_GameObject: {fileID: 162027289803103054}
   m_Enabled: 0
   m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: fe87c0e1cc204ed48ad3b37840f39efc, type: 3}
+  m_Script: {fileID: 11500000, guid: 7c51cc521e1747f0ba99ae9b65785bd5, type: 3}
   m_Name: 
-  m_EditorClassIdentifier: 
+  m_EditorClassIdentifier: MajdataPlay.Core::MajdataPlay.Rendering.QualityUiImage
   m_Material: {fileID: 2100000, guid: 1b12dc9204227dc42bb2fc6a3075a021, type: 2}
   m_Color: {r: 1, g: 1, b: 1, a: 1}
   m_RaycastTarget: 1
@@ -228,6 +228,7 @@ GameObject:
   - component: {fileID: 6830717155286528815}
   - component: {fileID: 4832462261381300944}
   - component: {fileID: 8655079017024877619}
+  - component: {fileID: 8655079017024877620}
   m_Layer: 5
   m_Name: BG
   m_TagString: Untagged
@@ -271,9 +272,9 @@ MonoBehaviour:
   m_GameObject: {fileID: 1522717484513879587}
   m_Enabled: 1
   m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: fe87c0e1cc204ed48ad3b37840f39efc, type: 3}
+  m_Script: {fileID: 11500000, guid: 7c51cc521e1747f0ba99ae9b65785bd5, type: 3}
   m_Name: 
-  m_EditorClassIdentifier: 
+  m_EditorClassIdentifier: MajdataPlay.Core::MajdataPlay.Rendering.QualityUiImage
   m_Material: {fileID: 2100000, guid: 1b12dc9204227dc42bb2fc6a3075a021, type: 2}
   m_Color: {r: 1, g: 1, b: 1, a: 1}
   m_RaycastTarget: 1
@@ -464,6 +465,7 @@ GameObject:
   - component: {fileID: 2068044025733862448}
   - component: {fileID: 3617277931134520000}
   - component: {fileID: 3061586214258133880}
+  - component: {fileID: 3061586214258133881}
   m_Layer: 5
   m_Name: BG
   m_TagString: Untagged
@@ -507,9 +509,9 @@ MonoBehaviour:
   m_GameObject: {fileID: 3817368060744782412}
   m_Enabled: 1
   m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: fe87c0e1cc204ed48ad3b37840f39efc, type: 3}
+  m_Script: {fileID: 11500000, guid: 7c51cc521e1747f0ba99ae9b65785bd5, type: 3}
   m_Name: 
-  m_EditorClassIdentifier: 
+  m_EditorClassIdentifier: MajdataPlay.Core::MajdataPlay.Rendering.QualityUiImage
   m_Material: {fileID: 2100000, guid: 1b12dc9204227dc42bb2fc6a3075a021, type: 2}
   m_Color: {r: 1, g: 1, b: 1, a: 1}
   m_RaycastTarget: 1
@@ -539,6 +541,7 @@ GameObject:
   - component: {fileID: 1969903034701191930}
   - component: {fileID: 6379667171687672091}
   - component: {fileID: 1589196009147436766}
+  - component: {fileID: 1589196009147436767}
   m_Layer: 5
   m_Name: BG
   m_TagString: Untagged
@@ -582,9 +585,9 @@ MonoBehaviour:
   m_GameObject: {fileID: 4176348605813342604}
   m_Enabled: 1
   m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: fe87c0e1cc204ed48ad3b37840f39efc, type: 3}
+  m_Script: {fileID: 11500000, guid: 7c51cc521e1747f0ba99ae9b65785bd5, type: 3}
   m_Name: 
-  m_EditorClassIdentifier: 
+  m_EditorClassIdentifier: MajdataPlay.Core::MajdataPlay.Rendering.QualityUiImage
   m_Material: {fileID: 2100000, guid: 1b12dc9204227dc42bb2fc6a3075a021, type: 2}
   m_Color: {r: 1, g: 1, b: 1, a: 1}
   m_RaycastTarget: 1
@@ -614,6 +617,7 @@ GameObject:
   - component: {fileID: 3019422086051706046}
   - component: {fileID: 2528033351144271390}
   - component: {fileID: 4854234884495665086}
+  - component: {fileID: 4854234884495665087}
   m_Layer: 5
   m_Name: BG
   m_TagString: Untagged
@@ -657,9 +661,9 @@ MonoBehaviour:
   m_GameObject: {fileID: 6072054348898539193}
   m_Enabled: 1
   m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: fe87c0e1cc204ed48ad3b37840f39efc, type: 3}
+  m_Script: {fileID: 11500000, guid: 7c51cc521e1747f0ba99ae9b65785bd5, type: 3}
   m_Name: 
-  m_EditorClassIdentifier: 
+  m_EditorClassIdentifier: MajdataPlay.Core::MajdataPlay.Rendering.QualityUiImage
   m_Material: {fileID: 2100000, guid: 1b12dc9204227dc42bb2fc6a3075a021, type: 2}
   m_Color: {r: 1, g: 1, b: 1, a: 1}
   m_RaycastTarget: 1
@@ -748,6 +752,7 @@ GameObject:
   - component: {fileID: 2421306254071354976}
   - component: {fileID: 58946731035812509}
   - component: {fileID: 8983832068243600664}
+  - component: {fileID: 8983832068243600665}
   m_Layer: 5
   m_Name: BG
   m_TagString: Untagged
@@ -791,9 +796,9 @@ MonoBehaviour:
   m_GameObject: {fileID: 6736008371130375902}
   m_Enabled: 1
   m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: fe87c0e1cc204ed48ad3b37840f39efc, type: 3}
+  m_Script: {fileID: 11500000, guid: 7c51cc521e1747f0ba99ae9b65785bd5, type: 3}
   m_Name: 
-  m_EditorClassIdentifier: 
+  m_EditorClassIdentifier: MajdataPlay.Core::MajdataPlay.Rendering.QualityUiImage
   m_Material: {fileID: 2100000, guid: 1b12dc9204227dc42bb2fc6a3075a021, type: 2}
   m_Color: {r: 1, g: 1, b: 1, a: 1}
   m_RaycastTarget: 1
@@ -882,6 +887,7 @@ GameObject:
   - component: {fileID: 1466169500025057958}
   - component: {fileID: 211550576299119317}
   - component: {fileID: 7024678684790401054}
+  - component: {fileID: 7024678684790401055}
   m_Layer: 5
   m_Name: BG
   m_TagString: Untagged
@@ -925,9 +931,9 @@ MonoBehaviour:
   m_GameObject: {fileID: 7019301452283207196}
   m_Enabled: 1
   m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: fe87c0e1cc204ed48ad3b37840f39efc, type: 3}
+  m_Script: {fileID: 11500000, guid: 7c51cc521e1747f0ba99ae9b65785bd5, type: 3}
   m_Name: 
-  m_EditorClassIdentifier: 
+  m_EditorClassIdentifier: MajdataPlay.Core::MajdataPlay.Rendering.QualityUiImage
   m_Material: {fileID: 2100000, guid: 1b12dc9204227dc42bb2fc6a3075a021, type: 2}
   m_Color: {r: 1, g: 1, b: 1, a: 1}
   m_RaycastTarget: 1
@@ -957,6 +963,7 @@ GameObject:
   - component: {fileID: 8322506468092769446}
   - component: {fileID: 1696031458337381875}
   - component: {fileID: 5208406972733417818}
+  - component: {fileID: 5208406972733417819}
   m_Layer: 5
   m_Name: BG
   m_TagString: Untagged
@@ -1000,9 +1007,9 @@ MonoBehaviour:
   m_GameObject: {fileID: 7363465160704956588}
   m_Enabled: 1
   m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: fe87c0e1cc204ed48ad3b37840f39efc, type: 3}
+  m_Script: {fileID: 11500000, guid: 7c51cc521e1747f0ba99ae9b65785bd5, type: 3}
   m_Name: 
-  m_EditorClassIdentifier: 
+  m_EditorClassIdentifier: MajdataPlay.Core::MajdataPlay.Rendering.QualityUiImage
   m_Material: {fileID: 2100000, guid: 1b12dc9204227dc42bb2fc6a3075a021, type: 2}
   m_Color: {r: 1, g: 1, b: 1, a: 1}
   m_RaycastTarget: 1
@@ -1091,6 +1098,7 @@ GameObject:
   - component: {fileID: 3947141255674884928}
   - component: {fileID: 673353541461073337}
   - component: {fileID: 6210024136466343177}
+  - component: {fileID: 6210024136466343178}
   m_Layer: 5
   m_Name: BG
   m_TagString: Untagged
@@ -1134,9 +1142,9 @@ MonoBehaviour:
   m_GameObject: {fileID: 8647454759223846741}
   m_Enabled: 1
   m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: fe87c0e1cc204ed48ad3b37840f39efc, type: 3}
+  m_Script: {fileID: 11500000, guid: 7c51cc521e1747f0ba99ae9b65785bd5, type: 3}
   m_Name: 
-  m_EditorClassIdentifier: 
+  m_EditorClassIdentifier: MajdataPlay.Core::MajdataPlay.Rendering.QualityUiImage
   m_Material: {fileID: 2100000, guid: 1b12dc9204227dc42bb2fc6a3075a021, type: 2}
   m_Color: {r: 1, g: 1, b: 1, a: 1}
   m_RaycastTarget: 1
@@ -1155,3 +1163,171 @@ MonoBehaviour:
   m_FillOrigin: 0
   m_UseSpriteMesh: 0
   m_PixelsPerUnitMultiplier: 1
+--- !u!114 &1589196009147436767
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 4176348605813342604}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: ef06d39c7c35439cafc6637c942934d4, type: 3}
+  m_Name:
+  m_EditorClassIdentifier: MajdataPlay.Core::MajdataPlay.Rendering.UiBackdropPanel
+  _backgroundImage: {fileID: 0}
+  _isButton: 1
+  _buttonForegroundRoot: {fileID: 6810160531474592926}
+  _fillAlpha: 1
+  _tintStrength: 1
+  _liquidTintStrength: 0.9
+  _liquidArtworkBlend: 0.25
+  _frostStrength: 0
+  _referenceOpacity: 1
+--- !u!114 &3061586214258133881
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 3817368060744782412}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: ef06d39c7c35439cafc6637c942934d4, type: 3}
+  m_Name:
+  m_EditorClassIdentifier: MajdataPlay.Core::MajdataPlay.Rendering.UiBackdropPanel
+  _backgroundImage: {fileID: 0}
+  _isButton: 1
+  _buttonForegroundRoot: {fileID: 4199555747613242968}
+  _fillAlpha: 1
+  _tintStrength: 1
+  _liquidTintStrength: 0.9
+  _liquidArtworkBlend: 0.25
+  _frostStrength: 0
+  _referenceOpacity: 1
+--- !u!114 &8655079017024877620
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1522717484513879587}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: ef06d39c7c35439cafc6637c942934d4, type: 3}
+  m_Name:
+  m_EditorClassIdentifier: MajdataPlay.Core::MajdataPlay.Rendering.UiBackdropPanel
+  _backgroundImage: {fileID: 0}
+  _isButton: 1
+  _buttonForegroundRoot: {fileID: 4468836004500238116}
+  _fillAlpha: 1
+  _tintStrength: 1
+  _liquidTintStrength: 0.9
+  _liquidArtworkBlend: 0.25
+  _frostStrength: 0
+  _referenceOpacity: 1
+--- !u!114 &8983832068243600665
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 6736008371130375902}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: ef06d39c7c35439cafc6637c942934d4, type: 3}
+  m_Name:
+  m_EditorClassIdentifier: MajdataPlay.Core::MajdataPlay.Rendering.UiBackdropPanel
+  _backgroundImage: {fileID: 0}
+  _isButton: 1
+  _buttonForegroundRoot: {fileID: 8647141364730774082}
+  _fillAlpha: 1
+  _tintStrength: 1
+  _liquidTintStrength: 0.9
+  _liquidArtworkBlend: 0.25
+  _frostStrength: 0
+  _referenceOpacity: 1
+--- !u!114 &7024678684790401055
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 7019301452283207196}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: ef06d39c7c35439cafc6637c942934d4, type: 3}
+  m_Name:
+  m_EditorClassIdentifier: MajdataPlay.Core::MajdataPlay.Rendering.UiBackdropPanel
+  _backgroundImage: {fileID: 0}
+  _isButton: 1
+  _buttonForegroundRoot: {fileID: 7303350980742751906}
+  _fillAlpha: 1
+  _tintStrength: 1
+  _liquidTintStrength: 0.9
+  _liquidArtworkBlend: 0.25
+  _frostStrength: 0
+  _referenceOpacity: 1
+--- !u!114 &5208406972733417819
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 7363465160704956588}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: ef06d39c7c35439cafc6637c942934d4, type: 3}
+  m_Name:
+  m_EditorClassIdentifier: MajdataPlay.Core::MajdataPlay.Rendering.UiBackdropPanel
+  _backgroundImage: {fileID: 0}
+  _isButton: 1
+  _buttonForegroundRoot: {fileID: 2580898142328090850}
+  _fillAlpha: 1
+  _tintStrength: 1
+  _liquidTintStrength: 0.9
+  _liquidArtworkBlend: 0.25
+  _frostStrength: 0
+  _referenceOpacity: 1
+--- !u!114 &4854234884495665087
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 6072054348898539193}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: ef06d39c7c35439cafc6637c942934d4, type: 3}
+  m_Name:
+  m_EditorClassIdentifier: MajdataPlay.Core::MajdataPlay.Rendering.UiBackdropPanel
+  _backgroundImage: {fileID: 0}
+  _isButton: 1
+  _buttonForegroundRoot: {fileID: 4663637404496672841}
+  _fillAlpha: 1
+  _tintStrength: 1
+  _liquidTintStrength: 0.9
+  _liquidArtworkBlend: 0.25
+  _frostStrength: 0
+  _referenceOpacity: 1
+--- !u!114 &6210024136466343178
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 8647454759223846741}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: ef06d39c7c35439cafc6637c942934d4, type: 3}
+  m_Name:
+  m_EditorClassIdentifier: MajdataPlay.Core::MajdataPlay.Rendering.UiBackdropPanel
+  _backgroundImage: {fileID: 0}
+  _isButton: 1
+  _buttonForegroundRoot: {fileID: 1313652657973330144}
+  _fillAlpha: 1
+  _tintStrength: 1
+  _liquidTintStrength: 0.9
+  _liquidArtworkBlend: 0.25
+  _frostStrength: 0
+  _referenceOpacity: 1

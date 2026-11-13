@@ -9,8 +9,8 @@ using UnityEngine.Rendering;
 namespace MajdataPlay.Rendering
 {
     /// <summary>
-    /// 单主相机的附件生命周期。分辨率/样本数不变时复用 RT 和描述数组；不在每帧分配。
-    /// 场景深度/Stencil 仅在一个原生 Pass 内使用，MSAA 颜色只 Resolve，不保存多采样结果。
+    /// Owns reusable scene attachments and native-pass descriptors without allocating each frame.
+    /// Ordinary native scenes discard transient samples; backdrop segments retain samples and stencil between captures.
     /// </summary>
     internal sealed class MajCameraAttachments : IDisposable
     {
@@ -22,6 +22,9 @@ namespace MajdataPlay.Rendering
         // Native Pass 接口使用 UTF-8 C 字符串，保留末尾 NUL；只在类型初始化时编码一次。
         private static readonly byte[] ScenePassName = System.Text.Encoding.UTF8.GetBytes("MRP.Scene\0");
         private static readonly byte[] FinalCopyPassName = System.Text.Encoding.UTF8.GetBytes("MRP.FinalCopy\0");
+
+        /// <summary>Names the persistent native segments used between UI backdrop captures.</summary>
+        private static readonly byte[] BackdropPassName = System.Text.Encoding.UTF8.GetBytes("MRP.BackdropScene\0");
 
         private NativeArray<AttachmentDescriptor> _sceneAttachments =
             new NativeArray<AttachmentDescriptor>(2, Allocator.Persistent);
@@ -179,24 +182,6 @@ namespace MajdataPlay.Rendering
                 ReleaseTextures();
                 _allocationFailed = true;
             }
-            // Android MSAA 兼容调查：仅在附件重建时记录，不在稳定帧执行或拼接字符串。
-            // prepared 只代表资源创建通过，不能证明驱动实际执行 Resolve 后的画面正确。
-            if (Application.platform == RuntimePlatform.Android && requestedSamples > 1)
-            {
-                Debug.Log($"[MRP.Attachments] prepared={ready}; device={SystemInfo.deviceModel}; "
-                    + $"gpu={SystemInfo.graphicsDeviceName}; api={SystemInfo.graphicsDeviceType}; "
-                    + $"driver={SystemInfo.graphicsDeviceVersion}; colorSpace={colorSpace}; "
-                    + $"size={width}x{height}; requestedMSAA={requestedSamples}; actualMSAA={Samples}; "
-                    + $"color={colorFormat}; depth={depthFormat}; directResolve={ResolvesToScreen}; "
-                    + $"intermediateColor={UsesIntermediateColor}; "
-                    + $"resolveTarget={(ResolvesToScreen ? (UseDisplayResolveTarget ? "DisplayColorBuffer" : "CameraTarget") : "IntermediateColor")}; "
-                    + $"memorylessDepth={(_depthStencil != null ? _depthStencil.memorylessMode.ToString() : "missing")}; "
-                    + $"memorylessMSAA={(_msaaColor != null ? _msaaColor.memorylessMode.ToString() : "missing")}; "
-                    + $"actualDepthFormat={(_depthStencil != null ? _depthStencil.depthStencilFormat.ToString() : "missing")}; "
-                    + $"depthBindMS={(_depthStencil != null && _depthStencil.bindTextureMS)}; "
-                    + $"colorBindMS={(_msaaColor != null && _msaaColor.bindTextureMS)}; "
-                    + $"backBufferMSAACap={SystemInfo.supportsMultisampledBackBuffer}; screenMSAARequest={Screen.msaaSamples}");
-            }
             return ready;
         }
 
@@ -244,6 +229,41 @@ namespace MajdataPlay.Rendering
             _sceneAttachments[0] = color;
             _sceneAttachments[1] = depth;
             buffer.BeginRenderPass(_width, _height, Samples, _sceneAttachments, 1, _subPasses, ScenePassName);
+            buffer.SetViewport(new Rect(0f, 0f, _width, _height));
+        }
+
+        /// <summary>Begins a native scene segment that preserves samples and stencil for the next backdrop stage.</summary>
+        /// <param name="buffer">The command stream recording this segment and its subsequent capture.</param>
+        /// <param name="background">The initial scene color, used only for the first segment.</param>
+        /// <param name="preserveContents">Whether to load all per-sample color and depth/stencil from the previous segment.</param>
+        /// <remarks>Requires non-memoryless intermediate attachments and a supported StoreAndResolve action for MSAA.</remarks>
+        internal void BeginBackdropScene(CommandBuffer buffer, Color background, bool preserveContents = false)
+        {
+            var color = new AttachmentDescriptor(_colorFormat);
+            color.ConfigureTarget(SceneColor, preserveContents, true);
+            if (Samples > 1)
+            {
+                color.ConfigureResolveTarget(_resolvedColor!);
+                color.storeAction = RenderBufferStoreAction.StoreAndResolve;
+            }
+            else
+            {
+                color.storeAction = RenderBufferStoreAction.Store;
+            }
+            if (!preserveContents)
+            {
+                color.ConfigureClear(background);
+            }
+            var depth = new AttachmentDescriptor(_depthFormat);
+            depth.ConfigureTarget(_depthStencil!, preserveContents, true);
+            if (!preserveContents)
+            {
+                depth.ConfigureClear(Color.clear, 1f, 0);
+            }
+            depth.storeAction = RenderBufferStoreAction.Store;
+            _sceneAttachments[0] = color;
+            _sceneAttachments[1] = depth;
+            buffer.BeginRenderPass(_width, _height, Samples, _sceneAttachments, 1, _subPasses, BackdropPassName);
             buffer.SetViewport(new Rect(0f, 0f, _width, _height));
         }
 

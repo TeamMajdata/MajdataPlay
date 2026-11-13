@@ -2094,7 +2094,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: fe87c0e1cc204ed48ad3b37840f39efc, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  m_Material: {fileID: 2100000, guid: 78a3c5eb06624f448a0238577d1de902, type: 2}
+  m_Material: {fileID: 2100000, guid: 513eb930203f49f98ef3bb3471909a97, type: 2}
   m_Color: {r: 1, g: 1, b: 1, a: 1}
   m_RaycastTarget: 1
   m_RaycastPadding: {x: 0, y: 0, z: 0, w: 0}
@@ -4239,6 +4239,7 @@ GameObject:
   - component: {fileID: 800014809}
   - component: {fileID: 800014811}
   - component: {fileID: 800014810}
+  - component: {fileID: 900000000000000085}
   m_Layer: 5
   m_Name: BG
   m_TagString: Untagged
@@ -4274,9 +4275,9 @@ MonoBehaviour:
   m_GameObject: {fileID: 800014808}
   m_Enabled: 1
   m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: fe87c0e1cc204ed48ad3b37840f39efc, type: 3}
+  m_Script: {fileID: 11500000, guid: 7c51cc521e1747f0ba99ae9b65785bd5, type: 3}
   m_Name: 
-  m_EditorClassIdentifier: UnityEngine.UI::UnityEngine.UI.Image
+  m_EditorClassIdentifier: MajdataPlay.Core::MajdataPlay.Rendering.QualityUiImage
   m_Material: {fileID: 2100000, guid: 78a3c5eb06624f448a0238577d1de902, type: 2}
   m_Color: {r: 1, g: 1, b: 1, a: 1}
   m_RaycastTarget: 1
@@ -14322,6 +14323,28 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::MajdataPlay.UI.PreviewOnlyCamera
   <RuntimeDatabase>k__BackingField: {fileID: 0}
+--- !u!114 &900000000000000085
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 800014808}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: ef06d39c7c35439cafc6637c942934d4, type: 3}
+  m_Name:
+  m_EditorClassIdentifier: MajdataPlay.Core::MajdataPlay.Rendering.UiBackdropPanel
+  _useStrongBlur: 1
+  _liquidBodyInsets: {x: 0.00954198473, y: 0.00110578695, z: 0.00954198473, w: 0.00663472171}
+  _fillAlpha: 0.8
+  _tintStrength: 0.4
+  _liquidTintStrength: 0
+  _liquidArtworkContour: 1
+  _liquidArtworkBlend: 0.8
+  _liquidRefractionWidthScale: 2
+  _frostStrength: 0.08
+  _referenceOpacity: 1
 --- !u!1660057539 &9223372036854775807
 SceneRoots:
   m_ObjectHideFlags: 0

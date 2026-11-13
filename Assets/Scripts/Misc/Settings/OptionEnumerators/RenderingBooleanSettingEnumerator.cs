@@ -20,8 +20,8 @@ public sealed class RenderingBooleanSettingEnumerator : DefaultBooleanEnumerator
             return false;
         }
 
-        // Compatibility is a temporary override; the settings model retains
-        // the selected preset / custom values while this switch is enabled.
+        // Apply boolean rendering choices once after a real edit. Compatibility
+        // remains a temporary override without replacing the stored custom values.
         GameManager.ApplyRenderingSettings();
         return true;
     }

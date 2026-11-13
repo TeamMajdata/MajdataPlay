@@ -1,5 +1,6 @@
 using UnityEngine.Scripting;
 using MajdataPlay.i18n;
+#nullable enable
 
 namespace MajdataPlay.Settings.OptionEnumerators;
 
@@ -9,8 +10,13 @@ public sealed class RenderingNumberSettingEnumerator : DefaultNumberEnumerator, 
     [Preserve]
     public RenderingNumberSettingEnumerator() { }
 
+    /// <summary>Initializes percentage labels without normalizing saved values on unsupported platforms.</summary>
     protected override void InitInternal()
     {
+        if (UnsupportedSystemScaling)
+        {
+            IsReadOnly = true;
+        }
         base.InitInternal();
         AppendPercent();
     }

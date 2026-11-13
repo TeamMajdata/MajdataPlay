@@ -23,9 +23,6 @@ Shader "Maj/Effects/BrightnessAdjustAnimate"
 			Blend SrcAlpha OneMinusSrcAlpha
 			HLSLPROGRAM
 			sampler2D _MainTex;
-			half _Brightness;
-			half _Saturation;
-			half _Contrast;
 
 			//vert和frag函数
 			#pragma vertex vert

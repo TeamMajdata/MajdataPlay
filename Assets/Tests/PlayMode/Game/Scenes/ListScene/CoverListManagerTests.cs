@@ -11,6 +11,7 @@ using NUnit.Framework;
 using TMPro;
 using UnityEngine;
 using UnityEngine.TestTools;
+using UnityEngine.UI;
 
 #nullable enable
 namespace MajdataPlay.Tests.Game.Scenes.PlayMode.ListScene
@@ -52,9 +53,9 @@ namespace MajdataPlay.Tests.Game.Scenes.PlayMode.ListScene
         private int ActiveCovers()
         {
             var count = 0;
-            foreach (var displayer in PrivateMember.GetField<SongCoverDisplayer[]>(_covers, "_songCoverDisplayers"))
+            foreach (Transform child in PrivateMember.GetField<GameObject>(_covers, "_songCoverListRoot").transform)
             {
-                if (displayer.gameObject.activeSelf)
+                if (child.gameObject.activeSelf && child.GetComponent<SongCoverDisplayer>() != null)
                 {
                     count++;
                 }
@@ -92,6 +93,8 @@ namespace MajdataPlay.Tests.Game.Scenes.PlayMode.ListScene
             Assert.That(Progress, Is.EqualTo("6/<size=70%>10"));
             Assert.That(MajEnv.RuntimeConfig!.List.SelectedSongId, Is.EqualTo(songs[5].Id));
             Assert.That(ActiveCovers(), Is.EqualTo(7));
+            Assert.That(BoundCover(_covers, 5).transform.Find("BG").GetComponent<Image>().enabled, Is.True);
+            Assert.That(PrivateMember.GetField<Image>(BoundCover(_covers, 5), "_coverDisplayer").enabled, Is.True);
             var metadata = PrivateMember.GetField<ChartMetadataDisplayer>(_center, "_metadataDisplayer");
             Assert.That(PrivateMember.GetField<TextMeshProUGUI>(metadata, "_title").text, Is.EqualTo(songs[5].Title));
         }
@@ -114,6 +117,50 @@ namespace MajdataPlay.Tests.Game.Scenes.PlayMode.ListScene
             Assert.That(PrivateMember.GetField<float>(_covers, "_listCursorPos"), Is.EqualTo(3f));
             var metadata = PrivateMember.GetField<ChartMetadataDisplayer>(_center, "_metadataDisplayer");
             Assert.That(PrivateMember.GetField<TextMeshProUGUI>(metadata, "_title").text, Is.EqualTo(songs[3].Title));
+        }
+
+        /// <summary>Checks interrupted scrolling keeps the existing pooled artwork visible and cannot restore stale selection details.</summary>
+        /// <returns>The single-owner animation, interruption and return-to-center regression.</returns>
+        [UnityTest]
+        public IEnumerator SlideList_InterruptedMotionKeepsTheSamePooledCoverAndFrame()
+        {
+            yield return Ready();
+            var songs = CreateSongs("cover-single-owner", 10);
+            foreach (var song in songs)
+            {
+                song.Cover = CreateSprite(song.Hash);
+            }
+            _covers.SetCollection(CreateCollection("Ten", songs), false);
+            var first = BoundCover(_covers, 0);
+            var next = BoundCover(_covers, 1);
+            var frame = next.transform.Find("BG").GetComponent<Image>();
+            var image = PrivateMember.GetField<Image>(next, "_coverDisplayer");
+            _covers.SlideList(1);
+            var previous = PrivateMember.GetField<MotionHandle>(_covers, "_scrollMotion");
+            previous.Time = 0.04f;
+            Assert.That(first.transform.Find("BG").GetComponent<Image>().enabled, Is.True);
+            Assert.That(PrivateMember.GetField<Image>(first, "_coverDisplayer").enabled, Is.True);
+            Assert.That(frame.enabled && image.enabled, Is.True);
+            Assert.That(BoundCover(_covers, 1), Is.SameAs(next));
+
+            _covers.SlideList(2);
+            Assert.That(previous.IsActive(), Is.False);
+            var current = PrivateMember.GetField<MotionHandle>(_covers, "_scrollMotion");
+            current.Time = 0.03f;
+            current.TryComplete();
+            Assert.That(previous.TryComplete(), Is.False);
+            var metadata = PrivateMember.GetField<ChartMetadataDisplayer>(_center, "_metadataDisplayer");
+            Assert.That(PrivateMember.GetField<TextMeshProUGUI>(metadata, "_title").text, Is.EqualTo(songs[3].Title));
+            Assert.That(_center.transform.Find("Embedded"), Is.Null);
+
+            _covers.SlideList(-2, disableAnimation: true);
+            Assert.That(BoundCover(_covers, 1), Is.SameAs(next));
+            Assert.That(next.transform.Find("BG").GetComponent<Image>(), Is.SameAs(frame));
+            Assert.That(PrivateMember.GetField<Image>(next, "_coverDisplayer"), Is.SameAs(image));
+            Assert.That(frame.rectTransform.sizeDelta.x, Is.EqualTo(365f).Within(0.001f));
+            Assert.That(image.rectTransform.sizeDelta.x, Is.EqualTo(285f).Within(0.001f));
+            yield return WaitUntil(() => image.sprite == songs[1].Cover);
+            Assert.That(frame.enabled && image.enabled, Is.True);
         }
 
         /// <summary>Checks that the head, tail, cursor and random selection move within the collection.</summary>

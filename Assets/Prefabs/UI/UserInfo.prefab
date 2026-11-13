@@ -192,9 +192,9 @@ MonoBehaviour:
   m_GameObject: {fileID: 1907493351016743792}
   m_Enabled: 1
   m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: fe87c0e1cc204ed48ad3b37840f39efc, type: 3}
+  m_Script: {fileID: 11500000, guid: 7c51cc521e1747f0ba99ae9b65785bd5, type: 3}
   m_Name: 
-  m_EditorClassIdentifier: 
+  m_EditorClassIdentifier: MajdataPlay.Core::MajdataPlay.Rendering.QualityUiImage
   m_Material: {fileID: 2100000, guid: 78a3c5eb06624f448a0238577d1de902, type: 2}
   m_Color: {r: 1, g: 1, b: 1, a: 1}
   m_RaycastTarget: 1
@@ -224,6 +224,7 @@ GameObject:
   - component: {fileID: 8922793658067106272}
   - component: {fileID: 7077246475226241649}
   - component: {fileID: 4988950831640157351}
+  - component: {fileID: 4988950831640157352}
   - component: {fileID: 388329679936947428}
   m_Layer: 5
   m_Name: UserInfo
@@ -270,9 +271,9 @@ MonoBehaviour:
   m_GameObject: {fileID: 1921975258035971271}
   m_Enabled: 1
   m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: fe87c0e1cc204ed48ad3b37840f39efc, type: 3}
+  m_Script: {fileID: 11500000, guid: 7c51cc521e1747f0ba99ae9b65785bd5, type: 3}
   m_Name: 
-  m_EditorClassIdentifier: 
+  m_EditorClassIdentifier: MajdataPlay.Core::MajdataPlay.Rendering.QualityUiImage
   m_Material: {fileID: 2100000, guid: 78a3c5eb06624f448a0238577d1de902, type: 2}
   m_Color: {r: 1, g: 1, b: 1, a: 1}
   m_RaycastTarget: 1
@@ -291,6 +292,33 @@ MonoBehaviour:
   m_FillOrigin: 0
   m_UseSpriteMesh: 0
   m_PixelsPerUnitMultiplier: 9
+--- !u!114 &4988950831640157352
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1921975258035971271}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: ef06d39c7c35439cafc6637c942934d4, type: 3}
+  m_Name:
+  m_EditorClassIdentifier: MajdataPlay.Core::MajdataPlay.Rendering.UiBackdropPanel
+  _backgroundImage: {fileID: 0}
+  _useStrongBlur: 1
+  _liquidBodyInsets: {x: 0.06932636, y: 0.04512821, z: 0.01275343, w: 0.02564103}
+  _liquidCornerRadius: 0.0625641
+  _liquidOriginalArtworkLeft: {x: 0.1406141269, y: 0.0098103336}
+  _isButton: 0
+  _isCategory: 0
+  _reusePanelCaptureOnly: 1
+  _fillAlpha: 1
+  _tintStrength: 1
+  _liquidTintStrength: 0.42
+  _liquidRefractionWidthScale: 1.5
+  _liquidArtworkBlend: 0.25
+  _frostStrength: 0.02
+  _referenceOpacity: 1
 --- !u!114 &388329679936947428
 MonoBehaviour:
   m_ObjectHideFlags: 0

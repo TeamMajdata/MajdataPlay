@@ -1,9 +1,6 @@
-﻿using MajdataPlay.Collections;
+using MajdataPlay.Collections;
+using MajdataPlay.Scenes.Setting;
 using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 using TMPro;
 using UnityEngine;
 using UnityEngine.Serialization;
@@ -66,9 +63,13 @@ namespace MajdataPlay.Scenes.List.Models
         [FormerlySerializedAs("nameDisplayer")]
         TextMeshProUGUI _nameDisplayer;
 
+        /// <summary>Reuses the settings carousel's moving background and selection presentation.</summary>
+        [SerializeField]
+        [FormerlySerializedAs("TabDisplayer")]
+        private MenuTitleDisplayer _tabDisplayer = null!;
+
         RectTransform _rectTransform;
         RectTransform _nameRectTransform;
-        SongCollection? _bindingCollection;
 
         void Awake()
         {
@@ -82,10 +83,8 @@ namespace MajdataPlay.Scenes.List.Models
             {
                 throw new ArgumentNullException(nameof(collection));
             }
-            _bindingCollection = collection;
-
             _nameDisplayer.text = collection.Name;
-            _nameRectTransform.anchoredPosition = new Vector2(0, -25);
+            _nameRectTransform.anchoredPosition = new Vector2(0, -17);
             SetCollectionIcon(collection);
         }
 
@@ -127,6 +126,13 @@ namespace MajdataPlay.Scenes.List.Models
                     _iconDisplayer.color = _favoriteCollectionIconColor;
                     break;
             }
+        }
+
+        /// <summary>Moves this category and blends its selected appearance using the settings carousel.</summary>
+        /// <param name="distance">The category index relative to the animated selection cursor.</param>
+        internal void SetDistance(float distance)
+        {
+            _tabDisplayer.SetDistance(distance);
         }
 
         public void SetActive(bool state)

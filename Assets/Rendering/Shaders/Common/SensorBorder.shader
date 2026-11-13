@@ -8,15 +8,15 @@ Shader "Maj/Debug/SensorBorder"
     }
     SubShader
     {
-        Tags { "Queue"="Transparent" "RenderType"="Transparent" "IgnoreProjector"="True" }
+        Tags { "Queue"="Overlay+1000" "RenderType"="Transparent" "IgnoreProjector"="True" }
         Pass
         {
             Name "Sensor Inward Border"
             Tags { "LightMode"="SRPDefaultUnlit" }
             Cull Off
             ZWrite Off
-            // 半透明调试边框不写深度；沿用 Debug 排序。
-            ZTest LEqual
+            // Draw debug regions after all UI stages, including transitions, without depth occlusion.
+            ZTest Always
             Blend SrcAlpha OneMinusSrcAlpha, One OneMinusSrcAlpha
             HLSLPROGRAM
             #pragma target 3.0

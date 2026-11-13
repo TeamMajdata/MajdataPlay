@@ -2,6 +2,7 @@ using System;
 using System.Collections;
 using System.Threading.Tasks;
 using Cysharp.Threading.Tasks;
+using MajdataPlay.Rendering;
 using MajdataPlay.Scenes.Game.Notes.Skins;
 using NUnit.Framework;
 using TMPro;
@@ -105,6 +106,40 @@ namespace MajdataPlay.Tests.Game.Global.PlayMode
             Assert.That(_overlayImage.color.a, Is.EqualTo(0f));
             Assert.That(_decoration.color.a, Is.EqualTo(0f));
             Assert.That(_mainImage.rectTransform.localScale.x, Is.EqualTo(1.01f).Within(1e-4f));
+        }
+
+        /// <summary>Checks explicit transition graphics bind without the obsolete Canvas hint and never promote the ordinary sub-display background.</summary>
+        [Test]
+        public void TransitionBinding_UsesExplicitGraphicsWhenLegacyCanvasHintIsNull()
+        {
+            var graphics = new Graphic[] { _mainImage, _decoration, _overlayImage, _loadingText };
+            foreach (var graphic in graphics)
+            {
+                graphic.gameObject.SetActive(true);
+                var helper = graphic.GetComponent<UiTransitionOverlay>();
+                if (helper != null)
+                {
+                    helper.Unbind();
+                }
+            }
+            PrivateMember.SetField(_switcher, "_transitionOverlayCanvas", null);
+            try
+            {
+                typeof(SceneSwitcher).GetMethod("BindTransitionOverlay",
+                    System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!
+                    .Invoke(_switcher, null);
+                foreach (var graphic in graphics)
+                {
+                    Assert.That(graphic.GetComponent<UiTransitionOverlay>(), Is.Not.Null);
+                    Assert.That(graphic.materialForRendering.renderQueue, Is.EqualTo(4000));
+                }
+                Assert.That(_subImage.GetComponent<UiTransitionOverlay>(), Is.Null);
+                Assert.That(_subImage.materialForRendering.renderQueue, Is.Not.EqualTo(4000));
+            }
+            finally
+            {
+                PrivateMember.SetField(_switcher, "_transitionOverlayCanvas", _overlayCanvas);
+            }
         }
 
         /// <summary>Checks that closing and opening animate to the covered and open states.</summary>

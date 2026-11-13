@@ -7,6 +7,7 @@ using System.IO;
 using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
+using System.Threading;
 using System.Threading.Tasks;
 
 namespace UnityEngine
@@ -50,8 +51,18 @@ namespace UnityEngine
             results.AddRange(gameObject.Descendants().Where(x => includeInactive || x.activeInHierarchy).SelectMany(x => x.Components).OfType<T>());
         }
     }
-    public class MonoBehaviour : Component { }
+    public class MonoBehaviour : Component
+    {
+        /// <summary>Provides an uncancelled lifetime for this harness, which has no Unity player loop.</summary>
+        public CancellationToken destroyCancellationToken => CancellationToken.None;
+    }
     public class Canvas : Component { }
+    /// <summary>Stores arrow opacity without modelling Unity Canvas composition.</summary>
+    public class CanvasGroup : Component
+    {
+        /// <summary>Gets or sets the opacity supplied by production navigation callbacks.</summary>
+        public float alpha { get; set; } = 1f;
+    }
     public class CanvasRenderer : Component
     {
         Color _color = Color.white;
@@ -151,6 +162,15 @@ namespace UnityEngine
     {
         public static float Clamp01(float x) => Math.Clamp(x, 0, 1);
         public static float Clamp(float x, float min, float max) => Math.Clamp(x, min, max);
+        /// <summary>Interpolates a scalar for production category motion callbacks.</summary>
+        /// <param name="a">The starting value.</param>
+        /// <param name="b">The ending value.</param>
+        /// <param name="t">The interpolation amount.</param>
+        /// <returns>The interpolated value with the amount clamped to zero through one.</returns>
+        public static float Lerp(float a, float b, float t)
+        {
+            return a + (b - a) * Clamp01(t);
+        }
         public static int FloorToInt(float x) => (int)Math.Floor(x);
         public static int CeilToInt(float x) => (int)Math.Ceiling(x);
         public static int Max(int a, int b) => Math.Max(a, b);
@@ -175,6 +195,27 @@ namespace Newtonsoft.Json
     // Attribute presence is checked here; JSON serialization is verified separately with real Newtonsoft.
     [AttributeUsage(AttributeTargets.Property | AttributeTargets.Field)]
     public sealed class JsonIgnoreAttribute : Attribute { }
+    /// <summary>Represents the JSON-name annotation; real JSON behavior is validated with Newtonsoft separately.</summary>
+    [AttributeUsage(AttributeTargets.Property | AttributeTargets.Field)]
+    public sealed class JsonPropertyAttribute : Attribute
+    {
+        /// <summary>Accepts the serialized property name used by the production model.</summary>
+        /// <param name="name">The JSON property name.</param>
+        public JsonPropertyAttribute(string name)
+        {
+        }
+    }
+}
+namespace MajdataPlay.Recording
+{
+    /// <summary>Isolates settings-menu close callbacks from the recording backend.</summary>
+    internal static class Recorder
+    {
+        /// <summary>Accepts the production settings-change notification without starting a recorder.</summary>
+        internal static void OnSettingsChanged()
+        {
+        }
+    }
 }
 namespace TMPro
 {
@@ -214,7 +255,7 @@ namespace TMPro
 }
 namespace LitMotion
 {
-    public enum Ease { OutQuad }
+    public enum Ease { OutQuad, Linear }
     public static class MotionScheduler { public static readonly object PostLateUpdate = new(); }
     public sealed class Motion
     {
@@ -254,24 +295,119 @@ namespace LitMotion
         }
     }
 }
+#nullable enable
 namespace Cysharp.Threading.Tasks
 {
-    public static class UniTask { public static Task DelayFrame(int frames) => Task.CompletedTask; }
-    [AsyncMethodBuilder(typeof(UniTaskVoidBuilder))]
-    public readonly struct UniTaskVoid { public void Forget() { } }
-    public struct UniTaskVoidBuilder
+    /// <summary>Adapts completed framework tasks to the production async signature without simulating Unity frames.</summary>
+    [AsyncMethodBuilder(typeof(UniTaskMethodBuilder))]
+    public readonly struct UniTask
     {
-        AsyncTaskMethodBuilder _builder;
-        public static UniTaskVoidBuilder Create() => new() { _builder = AsyncTaskMethodBuilder.Create() };
-        public UniTaskVoid Task => default;
-        public void Start<T>(ref T state) where T : IAsyncStateMachine => _builder.Start(ref state);
-        public void SetStateMachine(IAsyncStateMachine state) => _builder.SetStateMachine(state);
-        public void SetResult() => _builder.SetResult();
-        public void SetException(Exception error) => throw error;
-        public void AwaitOnCompleted<TA, TS>(ref TA awaiter, ref TS state) where TA : INotifyCompletion where TS : IAsyncStateMachine => _builder.AwaitOnCompleted(ref awaiter, ref state);
-        public void AwaitUnsafeOnCompleted<TA, TS>(ref TA awaiter, ref TS state) where TA : ICriticalNotifyCompletion where TS : IAsyncStateMachine => _builder.AwaitUnsafeOnCompleted(ref awaiter, ref state);
+        /// <summary>Stores the completed or cancelled operation represented by this test adapter.</summary>
+        private readonly Task? _task;
+
+        /// <summary>Wraps a framework task returned by the test async builder.</summary>
+        /// <param name="task">The operation to expose to production callers.</param>
+        internal UniTask(Task task)
+        {
+            _task = task;
+        }
+
+        /// <summary>Completes a frame delay immediately while respecting an already cancelled token.</summary>
+        /// <param name="frames">The production delay length; frame advancement is outside this harness.</param>
+        /// <param name="cancellationToken">The cancellation state supplied by production initialization.</param>
+        /// <returns>A completed or cancelled operation.</returns>
+        public static UniTask DelayFrame(int frames, CancellationToken cancellationToken = default)
+        {
+            return new UniTask(cancellationToken.IsCancellationRequested
+                ? Task.FromCanceled(cancellationToken) : Task.CompletedTask);
+        }
+
+        /// <summary>Exposes the framework awaiter to production async methods.</summary>
+        /// <returns>The awaiter for this operation, or a completed default operation.</returns>
+        public TaskAwaiter GetAwaiter()
+        {
+            return (_task ?? Task.CompletedTask).GetAwaiter();
+        }
+
+        /// <summary>Observes test failures while treating lifecycle cancellation as normal completion.</summary>
+        public void Forget()
+        {
+            var task = _task ?? Task.CompletedTask;
+            if (!task.IsCanceled)
+            {
+                task.GetAwaiter().GetResult();
+            }
+        }
+    }
+
+    /// <summary>Forwards the production task-like method signature to the framework async builder.</summary>
+    public struct UniTaskMethodBuilder
+    {
+        /// <summary>Runs the actual C# state machine for this standalone adapter.</summary>
+        private AsyncTaskMethodBuilder _builder;
+
+        /// <summary>Creates a framework-backed builder.</summary>
+        /// <returns>A builder ready to start its async state machine.</returns>
+        public static UniTaskMethodBuilder Create()
+        {
+            return new UniTaskMethodBuilder { _builder = AsyncTaskMethodBuilder.Create() };
+        }
+
+        /// <summary>Gets the operation returned to the production caller.</summary>
+        public UniTask Task => new UniTask(_builder.Task);
+
+        /// <summary>Starts the generated state machine.</summary>
+        /// <typeparam name="T">The compiler-generated state machine type.</typeparam>
+        /// <param name="state">The state machine to start.</param>
+        public void Start<T>(ref T state) where T : IAsyncStateMachine
+        {
+            _builder.Start(ref state);
+        }
+
+        /// <summary>Associates the generated state machine with the framework builder.</summary>
+        /// <param name="state">The state machine being associated.</param>
+        public void SetStateMachine(IAsyncStateMachine state)
+        {
+            _builder.SetStateMachine(state);
+        }
+
+        /// <summary>Completes the operation successfully.</summary>
+        public void SetResult()
+        {
+            _builder.SetResult();
+        }
+
+        /// <summary>Records a failure for the caller's Forget observation.</summary>
+        /// <param name="error">The exception raised by production initialization.</param>
+        public void SetException(Exception error)
+        {
+            _builder.SetException(error);
+        }
+
+        /// <summary>Schedules a safe awaiter continuation through the framework builder.</summary>
+        /// <typeparam name="TA">The awaiter type.</typeparam>
+        /// <typeparam name="TS">The state machine type.</typeparam>
+        /// <param name="awaiter">The operation being awaited.</param>
+        /// <param name="state">The state machine to continue.</param>
+        public void AwaitOnCompleted<TA, TS>(ref TA awaiter, ref TS state)
+            where TA : INotifyCompletion where TS : IAsyncStateMachine
+        {
+            _builder.AwaitOnCompleted(ref awaiter, ref state);
+        }
+
+        /// <summary>Schedules a critical awaiter continuation through the framework builder.</summary>
+        /// <typeparam name="TA">The awaiter type.</typeparam>
+        /// <typeparam name="TS">The state machine type.</typeparam>
+        /// <param name="awaiter">The operation being awaited.</param>
+        /// <param name="state">The state machine to continue.</param>
+        public void AwaitUnsafeOnCompleted<TA, TS>(ref TA awaiter, ref TS state)
+            where TA : ICriticalNotifyCompletion where TS : IAsyncStateMachine
+        {
+            _builder.AwaitUnsafeOnCompleted(ref awaiter, ref state);
+        }
     }
 }
+#nullable restore
 namespace Cysharp.Text
 {
     public readonly struct Utf16PreparedFormat<T>
@@ -310,6 +446,21 @@ namespace MajdataPlay.i18n
         public static event EventHandler<Language> OnLanguageChanged;
         public static int Subscribers => OnLanguageChanged?.GetInvocationList().Length ?? 0;
         public static void Change(Language language) { Current = language; OnLanguageChanged?.Invoke(null, language); }
+        /// <summary>Uses real rendering translations while retaining the existing narrow general-label behavior.</summary>
+        public static bool TryFindLocalizedText(string key, out string text)
+        {
+            if (Translations.IsRenderingKey(key) || key.Contains("_OPTION_", StringComparison.Ordinal))
+            {
+                return Translations.Tryi18n(key, out text);
+            }
+            text = Translations.i18n(key);
+            return true;
+        }
+
+        /// <summary>Accepts missing-key diagnostics without introducing a production logging backend.</summary>
+        public static void ReportMissingTranslation(string key, string fallbackKeys = null, bool isNumericValue = false)
+        {
+        }
     }
 }
 namespace MajdataPlay.Extensions { public static class Placeholder { } }
@@ -323,11 +474,11 @@ namespace MajdataPlay.Collections
         public static int FindIndex<T>(this T[] source, Predicate<T> predicate) => Array.FindIndex(source, predicate);
     }
 }
-namespace MajdataPlay.Diagnostics { public static class MajDebug { public static void LogWarning(string message) { } public static void LogError(string message) { } } }
+namespace MajdataPlay.Diagnostics { public static class MajDebug { public static void LogWarning(string message) { } public static void LogError(string message) { } public static void LogWarning(string tag, string message) { } public static void LogError(string tag, string message) { } } }
 namespace MajdataPlay { public static class MajTimeline { public static float DeltaTime = 1f / 60; } }
 namespace MajdataPlay.IO
 {
-    public enum SensorArea { A1, A8, E4, B4, B3, E6, B5, B6 }
+    public enum SensorArea { A1, A8, E4, B4, B3, E6, B5, B6, B1, B8 }
     public enum ButtonZone { A1, A2, A3, A4, A5, A6, A7, A8 }
     public enum SwitchStatus { On }
     public static class InputManager
@@ -377,18 +528,50 @@ namespace MajdataPlay.Settings.Runtime
 namespace MajdataPlay.Settings
 {
     public enum OffsetUnitOption { Frame, Second }
-    public class UserSetting { public GameOptions Game { get; } = new(); public JudgeOptions Judge { get; } = new(); public DisplayOptions Display { get; } = new(); public SFXVolume Volume { get; } = new(); public TouchOptions Touch { get; } = new(); }
+    public class UserSetting { public GameOptions Game { get; } = new(); public JudgeOptions Judge { get; } = new(); public DisplayOptions Display { get; } = new(); public VolumeOptions Volume { get; } = new(); public TouchOptions Touch { get; } = new(); }
     public class SystemSetting { public CommonOptions Common { get; } = new(); public RenderingOptions Rendering { get; } = new(); [HideInSettingUI] public AudioOptions Audio { get; } = new(); public DebugOptions Debug { get; } = new(); }
     public class AudioOptions { public bool ForceMono { get; set; } }
     public class ChartSetting { [ChartDiscoveryProbe] public int ChartSpeed { get; set; } }
     public class GameOptions { public float SlideFadeInOffset { get; set; } }
     public class JudgeOptions { public float AudioOffset { get; set; } public float JudgeOffset { get; set; } public float AnswerOffset { get; set; } public float TouchPanelOffset { get; set; } public OffsetUnitOption OffsetUnit { get; set; } }
-    public class SFXVolume { public float Answer { get; set; } public float Tap { get; set; } public float Ex { get; set; } public float Break { get; set; } public float Slide { get; set; } public float Touch { get; set; } public float Hanabi { get; set; } public float Voice { get; set; } }
-    public static class ChartSettingStorage { public static object GetSetting(string hash) => new GameOptions(); public static void ConvertUnitToSecond() { } public static void ConvertUnitToFrame() { } }
+    public class VolumeOptions { public float Answer { get; set; } public float Tap { get; set; } public float Ex { get; set; } public float Break { get; set; } public float Slide { get; set; } public float Touch { get; set; } public float Hanabi { get; set; } public float Voice { get; set; } }
+    public static class ChartSettingStorage { public static object GetSetting(object song) => new GameOptions(); public static void ConvertUnitToSecond() { } public static void ConvertUnitToFrame() { } }
 }
 namespace MajdataPlay.Scenes.Setting
 {
-    public class MenuTitleDisplayer : UnityEngine.MonoBehaviour { public TMPro.TMP_FontAsset Font; public void Initialize(string key) { } public void SetVisible(bool value) { } public void SetDistance(float value) { } }
+    /// <summary>Isolates category text and animation rendering from production menu-state checks.</summary>
+    public class MenuTitleDisplayer : UnityEngine.MonoBehaviour
+    {
+        /// <summary>Provides the font used by production menu text preparation.</summary>
+        public TMPro.TMP_FontAsset Font;
+
+        /// <summary>Accepts the production title provider without rendering a category title.</summary>
+        /// <param name="title">The localized title provider.</param>
+        public void Initialize(Func<string> title)
+        {
+        }
+
+        /// <summary>Accepts production category visibility without rendering a hierarchy.</summary>
+        /// <param name="value">The visibility requested by the menu.</param>
+        public void SetVisible(bool value)
+        {
+        }
+
+        /// <summary>Accepts the category's relative cursor position without modelling UI geometry.</summary>
+        /// <param name="value">The relative category position.</param>
+        public void SetDistance(float value)
+        {
+        }
+
+        /// <summary>Leaves visual arrow animation outside this standalone menu-state harness.</summary>
+        /// <param name="progress">The production animation clock, which this stub does not render.</param>
+        /// <param name="initialArrowAlpha">The opacity retained by this visual stub.</param>
+        /// <returns>The existing opacity without simulating the production fade profile.</returns>
+        internal static float GetNavigationAlpha(float progress, float initialArrowAlpha)
+        {
+            return initialArrowAlpha;
+        }
+    }
 }
 namespace MajdataPlay
 {
@@ -402,6 +585,15 @@ namespace MajdataPlay
         public static RunningMode Mode;
     }
     public static class MajInstances { public static IO.AudioManager AudioManager = new(); public static SceneSwitcher SceneSwitcher = new(); }
+    /// <summary>Does not select a chart while validating standalone settings menus.</summary>
+    internal static class SongStorage
+    {
+        /// <summary>Returns no selected chart; chart storage is outside this fixture.</summary>
+        internal static object FindSelectedSong()
+        {
+            return null;
+        }
+    }
     public sealed class SceneSwitcher
     {
         public readonly List<string> SwitchedScenes = new();
@@ -421,7 +613,7 @@ namespace MajdataPlay
         static readonly Dictionary<string, Dictionary<string, string>> _renderingTranslations = new();
         // Keep old stub behavior for unrelated tests; rendering uses the four actual project tables.
         public static bool IsRenderingKey(string value) => value == "MAJSETTING_CATEGORY_Rendering" ||
-            new[] { "RenderQuality", "AntiAliasing", "TextureQuality", "RenderScale", "OutputMode", "CompatibilityMode", "SystemResolutionScaling", "FPSLimit", "VSync", "SystemScalingStatus", "DisplayBufferResolution", "SceneRenderResolution", "CurrentOutputPath", "SensorPosition", "SensorStyle", "SensorOpacity", "DisplaySensor" }
+            new[] { "RenderQuality", "AntiAliasing", "TextureQuality", "UIOutlineMode", "UIBackdropStyle", "RenderScale", "OutputMode", "CompatibilityMode", "SystemResolutionScaling", "FPSLimit", "VSync", "SystemScalingStatus", "DisplayBufferResolution", "SceneRenderResolution", "CurrentOutputPath", "SensorPosition", "SensorStyle", "SensorOpacity", "DisplaySensor" }
                 .Any(property => value == "MAJSETTING_PROPERTY_" + property || value.StartsWith("MAJSETTING_PROPERTY_" + property + "_", StringComparison.Ordinal));
         public static string LookupRendering(string value, global::MajdataPlay.i18n.Language language)
         {
