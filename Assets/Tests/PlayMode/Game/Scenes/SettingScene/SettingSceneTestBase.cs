@@ -74,11 +74,16 @@ namespace MajdataPlay.Tests.Game.Scenes.PlayMode.SettingScene
         {
             var root = CreateRect("TitleTemplate", Templates);
             var displayer = root.AddComponent<MenuTitleDisplayer>();
-            PrivateMember.SetField(displayer, "_unselectedBackground", CreateImage("Unselected", root.transform));
-            var selected = CreateImage("Selected", root.transform);
-            selected.rectTransform.sizeDelta = new Vector2(300, 80);
-            PrivateMember.SetField(displayer, "_selectedBackground", selected);
-            PrivateMember.SetField(displayer, "_titleDisplayer", CreateText("Text", root.transform));
+            PrivateMember.SetField(displayer, "_background", CreateImage("Background", root.transform));
+            PrivateMember.SetField(displayer, "_selectedWidth", 300f);
+            var viewport = (RectTransform)CreateRect("Viewport", root.transform).transform;
+            viewport.sizeDelta = new Vector2(139.83f, 40f);
+            viewport.gameObject.AddComponent<RectMask2D>();
+            var title = CreateText("Text", root.transform);
+            title.fontSize = 26f;
+            title.transform.SetParent(viewport, false);
+            PrivateMember.SetField(displayer, "_titleDisplayer", title);
+            PrivateMember.SetField(displayer, "_titleViewport", viewport);
             return displayer;
         }
 

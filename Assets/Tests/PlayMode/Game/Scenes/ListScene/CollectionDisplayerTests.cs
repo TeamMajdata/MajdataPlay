@@ -23,7 +23,7 @@ namespace MajdataPlay.Tests.Game.Scenes.PlayMode.ListScene
         /// <summary>The collection name text.</summary>
         private TextMeshProUGUI _name = null!;
 
-        /// <summary>The same two-background presenter used by Setting category tabs.</summary>
+        /// <summary>The same single-background presenter used by Setting category tabs.</summary>
         private MenuTitleDisplayer _tab = null!;
 
         /// <summary>The icon sprites by role.</summary>
@@ -88,7 +88,7 @@ namespace MajdataPlay.Tests.Game.Scenes.PlayMode.ListScene
 
             Assert.That(_name.text, Is.EqualTo("Name List"));
             Assert.That(_icon.enabled, Is.False);
-            Assert.That(_name.rectTransform.anchoredPosition, Is.EqualTo(Vector2.zero));
+            Assert.That(PrivateMember.GetField<RectTransform>(_tab, "_titleViewport").anchoredPosition, Is.EqualTo(Vector2.zero));
         }
 
         /// <summary>Checks the icon, color and name offset of each icon-bearing collection type.</summary>
@@ -110,7 +110,7 @@ namespace MajdataPlay.Tests.Game.Scenes.PlayMode.ListScene
                 Assert.That(_icon.enabled, Is.True, collection.Type.ToString());
                 Assert.That(_icon.sprite, Is.SameAs(sprite), collection.Type.ToString());
                 Assert.That(_icon.color, Is.EqualTo(color), collection.Type.ToString());
-                Assert.That(_name.rectTransform.anchoredPosition, Is.EqualTo(new Vector2(0, -17)), collection.Type.ToString());
+                Assert.That(PrivateMember.GetField<RectTransform>(_tab, "_titleViewport").anchoredPosition, Is.EqualTo(new Vector2(0f, -17f)), collection.Type.ToString());
             }
         }
 
@@ -166,53 +166,66 @@ namespace MajdataPlay.Tests.Game.Scenes.PlayMode.ListScene
             Assert.That(displayer.gameObject.activeSelf, Is.True);
         }
 
-        /// <summary>Checks the real data-bearing tab moves and changes its selected appearance without duplicating its name or icon.</summary>
+        /// <summary>Checks one body changes width and color while the native icon rises outside it and the title centers.</summary>
         [Test]
         public void SetDistance_MovesAndHighlightsTheActualCollectionTab()
         {
             _displayer.SetCollection(Collection(ChartStorageType.FavoriteList));
             var iconColor = _icon.color;
-            var unselected = PrivateMember.GetField<Image>(_tab, "_unselectedBackground");
-            var selected = PrivateMember.GetField<Image>(_tab, "_selectedBackground");
+            var background = PrivateMember.GetField<Image>(_tab, "_background");
+            var viewport = PrivateMember.GetField<RectTransform>(_tab, "_titleViewport");
             _displayer.SetDistance(0f);
             Assert.That(_displayer.RectTransform.anchoredPosition, Is.EqualTo(Vector2.zero));
-            Assert.That(_displayer.RectTransform.sizeDelta, Is.EqualTo(new Vector2(254.69f, 82.3f)));
-            Assert.That(unselected.color.a, Is.Zero);
-            Assert.That(selected.color.a, Is.EqualTo(1f));
-            Assert.That(_name.rectTransform.localScale.x, Is.EqualTo(32f / 28f).Within(0.0001f));
+            Assert.That(_displayer.RectTransform.sizeDelta, Is.EqualTo(new Vector2(254.69f, 76.8f)));
+            Assert.That(background.color, Is.EqualTo(Color.blue));
+            Assert.That(_name.fontSize, Is.EqualTo(32f));
+            Assert.That(_name.rectTransform.localScale, Is.EqualTo(Vector3.one));
             Assert.That(_name.canvasRenderer.GetColor(), Is.EqualTo(Color.white));
-            Assert.That(_icon.rectTransform.sizeDelta, Is.EqualTo(new Vector2(24f, 24f)));
-            Assert.That(_icon.rectTransform.anchoredPosition, Is.EqualTo(new Vector2(0f, 16f)));
-            Assert.That(_name.rectTransform.anchoredPosition, Is.EqualTo(new Vector2(0f, -17f)));
+            Assert.That(_icon.rectTransform.sizeDelta, Is.EqualTo(new Vector2(48f, 48f)));
+            Assert.That(viewport.rect.width, Is.EqualTo(156f).Within(0.001f));
+            Assert.That(_name.rectTransform.rect.width, Is.EqualTo(156f).Within(0.001f));
+            Assert.That(_icon.rectTransform.anchoredPosition, Is.EqualTo(new Vector2(0f, 62f)));
+            Assert.That(viewport.anchoredPosition, Is.EqualTo(Vector2.zero));
+            Assert.That(_name.rectTransform.anchoredPosition, Is.EqualTo(Vector2.zero));
+            Assert.That(_displayer.GetComponentsInChildren<Image>(true), Has.Length.EqualTo(2));
+
             _displayer.SetDistance(1f);
             Assert.That(_displayer.RectTransform.anchoredPosition.x, Is.EqualTo(218f));
             Assert.That(_displayer.RectTransform.sizeDelta, Is.EqualTo(new Vector2(147.83f, 76.8f)));
-            Assert.That(unselected.color.a, Is.EqualTo(1f));
-            Assert.That(selected.color.a, Is.Zero);
+            Assert.That(background.color, Is.EqualTo(Color.white));
             Assert.That(_name.canvasRenderer.GetColor(), Is.EqualTo(Color.gray));
+            Assert.That(_name.fontSize, Is.EqualTo(26f));
+            Assert.That(_icon.rectTransform.sizeDelta, Is.EqualTo(new Vector2(24f, 24f)));
+            Assert.That(viewport.rect.width, Is.EqualTo(139.83f).Within(0.001f));
+            Assert.That(viewport.anchoredPosition, Is.EqualTo(new Vector2(0f, -17f)));
+            Assert.That(_icon.rectTransform.anchoredPosition, Is.EqualTo(new Vector2(0f, 16f)));
             Assert.That(_icon.color, Is.EqualTo(iconColor));
             Assert.That(_name.text, Is.EqualTo("Name FavoriteList"));
         }
 
-        /// <summary>Checks both directions interpolate the same two backgrounds and restore the selected appearance after reversal.</summary>
+        /// <summary>Checks either direction blends the same body and restores icon and title positions after reversal.</summary>
         [Test]
         public void SetDistance_InterpolatesSymmetricallyAndRestoresSelection()
         {
-            var unselected = PrivateMember.GetField<Image>(_tab, "_unselectedBackground");
-            var selected = PrivateMember.GetField<Image>(_tab, "_selectedBackground");
+            _displayer.SetCollection(Collection(ChartStorageType.FavoriteList));
+            var background = PrivateMember.GetField<Image>(_tab, "_background");
+            var viewport = PrivateMember.GetField<RectTransform>(_tab, "_titleViewport");
             foreach (var distance in new[] { -0.5f, 0.5f })
             {
                 _displayer.SetDistance(distance);
                 Assert.That(_displayer.RectTransform.anchoredPosition.x, Is.EqualTo(218f * distance).Within(0.0001f));
                 Assert.That(_displayer.RectTransform.sizeDelta.x, Is.EqualTo(201.26f).Within(0.0001f));
-                Assert.That(_displayer.RectTransform.sizeDelta.y, Is.EqualTo(79.55f).Within(0.0001f));
-                Assert.That(unselected.color.a, Is.EqualTo(0.5f));
-                Assert.That(selected.color.a, Is.EqualTo(0.5f));
-                Assert.That(_displayer.gameObject.activeSelf, Is.True);
+                Assert.That(_displayer.RectTransform.sizeDelta.y, Is.EqualTo(76.8f).Within(0.0001f));
+                Assert.That(background.color, Is.EqualTo(Color.Lerp(Color.white, Color.blue, 0.5f)));
+                Assert.That(_icon.rectTransform.anchoredPosition, Is.EqualTo(new Vector2(0f, 39f)));
+                Assert.That(_icon.rectTransform.sizeDelta, Is.EqualTo(new Vector2(36f, 36f)));
+                Assert.That(viewport.rect.width, Is.EqualTo(147.915f).Within(0.001f));
+                Assert.That(_name.fontSize, Is.EqualTo(29f));
+                Assert.That(viewport.anchoredPosition, Is.EqualTo(new Vector2(0f, -8.5f)));
             }
             _displayer.SetDistance(0f);
-            Assert.That(_displayer.RectTransform.anchoredPosition, Is.EqualTo(Vector2.zero));
-            Assert.That(selected.color.a, Is.EqualTo(1f));
+            Assert.That(background.color, Is.EqualTo(Color.blue));
+            Assert.That(_icon.rectTransform.anchoredPosition.y, Is.EqualTo(62f));
             Assert.That(_displayer.GetComponents<CanvasGroup>(), Is.Empty);
         }
 
@@ -229,23 +242,29 @@ namespace MajdataPlay.Tests.Game.Scenes.PlayMode.ListScene
             var displayer = AddInactiveUi<CollectionDisplayer>(name, canvas);
             ((RectTransform)displayer.transform).sizeDelta = new Vector2(147.83f, 76.8f);
             tab = displayer.gameObject.AddComponent<MenuTitleDisplayer>();
-            var unselected = CreateImage("BG", displayer.transform);
-            unselected.color = Color.white;
-            var selected = CreateImage("SelectedBackground", displayer.transform);
-            selected.rectTransform.sizeDelta = new Vector2(254.69f, 82.3f);
-            selected.color = Color.blue;
+            var background = CreateImage("BG", displayer.transform);
+            background.color = Color.white;
+            var viewport = (RectTransform)CreateRect("TitleViewport", displayer.transform).transform;
+            viewport.sizeDelta = new Vector2(139.83f, 40f);
+            viewport.anchoredPosition = new Vector2(0f, -17f);
+            viewport.gameObject.AddComponent<RectMask2D>();
             title = CreateText("Name", canvas);
-            title.fontSizeMax = 28f;
+            title.fontSize = 26f;
             title.color = Color.gray;
-            title.transform.SetParent(displayer.transform, false);
+            title.rectTransform.sizeDelta = viewport.sizeDelta;
+            title.transform.SetParent(viewport, false);
             icon = CreateImage("Icon", displayer.transform);
             icon.rectTransform.sizeDelta = new Vector2(24f, 24f);
             icon.rectTransform.anchoredPosition = new Vector2(0f, 16f);
-            PrivateMember.SetField(tab, "_unselectedBackground", unselected);
-            PrivateMember.SetField(tab, "_selectedBackground", selected);
+            PrivateMember.SetField(tab, "_background", background);
+            PrivateMember.SetField(tab, "_selectedBackgroundColor", Color.blue);
+            PrivateMember.SetField(tab, "_selectedWidth", 254.69f);
             PrivateMember.SetField(tab, "_titleDisplayer", title);
+            PrivateMember.SetField(tab, "_titleViewport", viewport);
             PrivateMember.SetField(tab, "_selectedTextColor", Color.white);
-            PrivateMember.SetField(tab, "_selectedFontSizeMax", 32f);
+            PrivateMember.SetField(tab, "_selectedFontSize", 32f);
+            PrivateMember.SetField(tab, "_iconTransform", icon.rectTransform);
+            PrivateMember.SetField(tab, "_selectedIconPosition", new Vector2(0f, 62f));
             PrivateMember.SetField(displayer, "_tabDisplayer", tab);
             PrivateMember.SetField(displayer, "_iconDisplayer", icon);
             PrivateMember.SetField(displayer, "_nameDisplayer", title);

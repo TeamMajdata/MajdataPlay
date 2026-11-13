@@ -69,12 +69,10 @@ namespace MajdataPlay.Scenes.List.Models
         private MenuTitleDisplayer _tabDisplayer = null!;
 
         RectTransform _rectTransform;
-        RectTransform _nameRectTransform;
 
         void Awake()
         {
             _rectTransform = GetComponent<RectTransform>();
-            _nameRectTransform = _nameDisplayer.GetComponent<RectTransform>();
         }
 
         internal void SetCollection(SongCollection collection)
@@ -84,8 +82,9 @@ namespace MajdataPlay.Scenes.List.Models
                 throw new ArgumentNullException(nameof(collection));
             }
             _nameDisplayer.text = collection.Name;
-            _nameRectTransform.anchoredPosition = new Vector2(0, -17);
             SetCollectionIcon(collection);
+            _tabDisplayer.SetHasIcon(_iconDisplayer.enabled);
+            _tabDisplayer.RefreshTitle();
         }
 
         void SetCollectionIcon(SongCollection collection)
@@ -102,7 +101,6 @@ namespace MajdataPlay.Scenes.List.Models
                     else
                     {
                         _iconDisplayer.enabled = false;
-                        _nameRectTransform.anchoredPosition = Vector2.zero;
                     }
                     break;
                 case ChartStorageType.Recommend:

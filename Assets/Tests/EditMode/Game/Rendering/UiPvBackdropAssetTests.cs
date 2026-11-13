@@ -233,7 +233,7 @@ namespace MajdataPlay.Tests.Game.Rendering
             var paths = new Dictionary<string, int>
             {
                 { "Assets/Scenes/Calibrator.unity", 3 },
-                { "Assets/Scenes/Login.unity", 3 },
+                { "Assets/Scenes/Login.unity", 7 },
                 { "Assets/Scenes/Title.unity", 1 },
                 { "Assets/Scenes/Practice.unity", 7 },
                 { "Assets/Scenes/SortFind.unity", 4 },
@@ -241,8 +241,8 @@ namespace MajdataPlay.Tests.Game.Rendering
                 { "Assets/Prefabs/UI/Buttons.prefab", 8 },
                 { "Assets/Prefabs/UI/UserInfo.prefab", 1 },
                 { "Assets/Prefabs/UI/ChartVisualDisplayer.prefab", 1 },
-                { "Assets/Prefabs/Setting/MenuTitleDisplayer.prefab", 2 },
-                { "Assets/Prefabs/List/Model/CollectionDisplayer.prefab", 2 },
+                { "Assets/Prefabs/Setting/MenuTitleDisplayer.prefab", 1 },
+                { "Assets/Prefabs/List/Model/CollectionDisplayer.prefab", 1 },
                 { "Assets/Prefabs/List/Main_Display_ribbon.prefab", 1 }
             };
             var creamIds = new HashSet<string> { "5019321880153334813", "1053645856", "1660259408",
@@ -300,7 +300,7 @@ namespace MajdataPlay.Tests.Game.Rendering
                 Assert.That(inFile, Is.EqualTo(entry.Value), entry.Key + ": preserve this asset's original number of glass components.");
                 total += inFile;
             }
-            Assert.That(total, Is.EqualTo(38));
+            Assert.That(total, Is.EqualTo(40));
             Assert.That(creams, Is.EqualTo(5));
             Assert.That(tops, Is.EqualTo(2));
             Assert.That(strongPanels, Is.EqualTo(9));
@@ -683,10 +683,60 @@ namespace MajdataPlay.Tests.Game.Rendering
             }
         }
 
+        /// <summary>Checks login plates retain native nine-slice geometry while the two circular keys use the final capture.</summary>
+        /// <param name="imageId">The existing quality-aware image identifier.</param>
+        /// <param name="panelId">The statically authored glass component identifier.</param>
+        /// <param name="peripheral">Whether this is a circular external key rather than a native input or QR plate.</param>
+        [TestCase("1998670342", "900000000000000101", false)]
+        [TestCase("486500992", "900000000000000102", false)]
+        [TestCase("583075179", "900000000000000103", false)]
+        [TestCase("640682228", "900000000000000104", false)]
+        [TestCase("86439850", "900000000000000003", true)]
+        [TestCase("256638719", "900000000000000004", true)]
+        public void LoginSurfaces_UseBothStylesWithoutChangingInputAndQrGraphics(string imageId, string panelId, bool peripheral)
+        {
+            var text = FileSystem.File.Open("Assets/Scenes/Login.unity").ReadAllText();
+            var image = Regex.Match(text, @"^--- !u!114 &" + imageId + @"\r?\n(?<body>.*?)(?=^--- |\z)",
+                RegexOptions.Multiline | RegexOptions.Singleline).Groups["body"].Value;
+            var panel = Regex.Match(text, @"^--- !u!114 &" + panelId + @"\r?\n(?<body>.*?)(?=^--- |\z)",
+                RegexOptions.Multiline | RegexOptions.Singleline).Groups["body"].Value;
+            var ownerId = Regex.Match(image, @"m_GameObject: \{fileID: (?<id>-?\d+)\}").Groups["id"].Value;
+            var owner = Regex.Match(text, @"^--- !u!1 &" + ownerId + @"\r?\n(?<body>.*?)(?=^--- |\z)",
+                RegexOptions.Multiline | RegexOptions.Singleline).Groups["body"].Value;
+            Assert.That(image, Does.Contain("guid: 7c51cc521e1747f0ba99ae9b65785bd5"));
+            Assert.That(image, Does.Contain("guid: 78a3c5eb06624f448a0238577d1de902"), "Ordinary presets retain the original source material.");
+            Assert.That(image, Does.Contain("m_Type: " + (peripheral ? "0" : "1")));
+            Assert.That(owner, Does.Contain("component: {fileID: " + panelId + "}"));
+            Assert.That(panel, Does.Contain("m_GameObject: {fileID: " + ownerId + "}"));
+            Assert.That(panel, Does.Contain("_liquidOnly: 0"));
+            Assert.That(panel, Does.Contain("_isButton: " + (peripheral ? "1" : "0")));
+            Assert.That(panel, Does.Contain("_isCategory: 0"), "Native nine-slice corners are independent of carousel capsule geometry.");
+            Assert.That(panel, Does.Not.Contain("_useStrongBlur: 1"));
+            Assert.That(panel, Does.Contain("_fillAlpha: 1"));
+            if (peripheral)
+            {
+                var rectId = imageId == "86439850" ? "86439849" : "256638718";
+                Assert.That(panel, Does.Contain("_buttonForegroundRoot: {fileID: " + rectId + "}"));
+            }
+            else
+            {
+                Assert.That(panel, Does.Contain("_buttonForegroundRoot: {fileID: 0}"));
+                Assert.That(panel, Does.Contain("_liquidBodyInsets:"));
+            }
+            if (imageId == "1998670342" || imageId == "486500992")
+            {
+                Assert.That(image, Does.Contain("m_Sprite: {fileID: 2079732121"));
+                var inputId = imageId == "1998670342" ? "1998670344" : "486500994";
+                var input = Regex.Match(text, @"^--- !u!114 &" + inputId + @"\r?\n(?<body>.*?)(?=^--- |\z)",
+                    RegexOptions.Multiline | RegexOptions.Singleline).Groups["body"].Value;
+                Assert.That(input, Does.Contain("m_TargetGraphic: {fileID: " + imageId + "}"));
+                Assert.That(input, Does.Contain("m_SelectedSprite: {fileID: 739469296"));
+            }
+        }
+
         /// <summary>Checks all explicitly identified menu buttons and remaining plates opt into Liquid without altering Gaussian coverage.</summary>
         /// <param name="path">The scene containing the authored controls.</param>
         /// <param name="imageIds">The exact preserved quality-aware Image identifiers that gain Liquid Glass.</param>
-        [TestCase("Assets/Scenes/Login.unity", "86439850,256638719")]
         [TestCase("Assets/Scenes/Practice.unity", "1426382402,2027712564,1244187158,1472799756,189428624,158197088,325391450")]
         [TestCase("Assets/Scenes/SortFind.unity", "2122532829,1688309038")]
         public void LiquidOnlyControls_KeepNativeOrderAndSampleUndecoratedFill(string path, string imageIds)
@@ -814,22 +864,20 @@ namespace MajdataPlay.Tests.Game.Rendering
             Assert.That(disabledRootImage.GetComponent<UiBackdropPanel>(), Is.Null);
         }
 
-        /// <summary>Checks real category groups retain native artwork and sorting while sharing the existing first panel snapshot.</summary>
+        /// <summary>Checks each category uses one fixed-cap body and shares the existing category snapshot.</summary>
         /// <param name="path">The shared category prefab.</param>
         /// <param name="bodyPath">The body child path, or an empty string for its root Image.</param>
-        /// <param name="foregroundPath">The explicit sharp hierarchy, an empty root path, or a dash for no separate foreground.</param>
-        /// <param name="spriteName">The original Sprite name, or an empty string for procedural corners.</param>
-        /// <param name="count">The exact number of category bodies in this prefab.</param>
-        [TestCase("Assets/Prefabs/Setting/MenuTitleDisplayer.prefab", "", "Title", "", 2)]
-        [TestCase("Assets/Prefabs/Setting/MenuTitleDisplayer.prefab", "SelectedBackground", "-", "newui@3x_6", 2)]
-        [TestCase("Assets/Prefabs/List/Model/CollectionDisplayer.prefab", "BG", "", "", 2)]
-        [TestCase("Assets/Prefabs/List/Model/CollectionDisplayer.prefab", "SelectedBackground", "-", "newui@3x_6", 2)]
+        /// <param name="foregroundPath">The explicit sharp hierarchy, or an empty string for the complete root.</param>
+        [TestCase("Assets/Prefabs/Setting/MenuTitleDisplayer.prefab", "", "TitleViewport")]
+        [TestCase("Assets/Prefabs/List/Model/CollectionDisplayer.prefab", "BG", "")]
         public void CategoryBackgrounds_KeepWholeGroupsTogetherWhileReusingThePanelSnapshot(string path, string bodyPath,
-            string foregroundPath, string spriteName, int count)
+            string foregroundPath)
         {
             var prefab = AssetDatabase.LoadAssetAtPath<UnityEngine.GameObject>(path);
             Assert.That(prefab, Is.Not.Null);
-            Assert.That(prefab!.GetComponentsInChildren<UiBackdropPanel>(true).Length, Is.EqualTo(count));
+            Assert.That(prefab!.GetComponentsInChildren<UiBackdropPanel>(true).Length, Is.EqualTo(1));
+            Assert.That(prefab.transform.Find("SelectedBackground"), Is.Null,
+                "Selection must resize and tint the existing body instead of crossfading two backgrounds.");
             var body = bodyPath.Length == 0 ? prefab.transform : prefab.transform.Find(bodyPath);
             Assert.That(body, Is.Not.Null);
             var image = body.GetComponent<QualityUiImage>();
@@ -837,16 +885,9 @@ namespace MajdataPlay.Tests.Game.Rendering
             Assert.That(image, Is.Not.Null);
             Assert.That(panel, Is.Not.Null);
             Assert.That(image.color.a, Is.EqualTo(1f));
-            Assert.That(image.SourceMaterial.shader.name, Is.EqualTo(spriteName.Length == 0
-                ? "Maj/UI/Rounded Rect" : spriteName == "newui@3x_6" ? "Maj/UI/Default" : "Maj/Common/Opaque"));
-            if (spriteName.Length == 0)
-            {
-                Assert.That(image.sprite, Is.Null);
-            }
-            else
-            {
-                Assert.That(image.sprite.name, Is.EqualTo(spriteName));
-            }
+            Assert.That(image.SourceMaterial.shader.name, Is.EqualTo("Maj/UI/Rounded Rect"));
+            Assert.That(image.sprite, Is.Null);
+            Assert.That(image.type, Is.EqualTo(UnityEngine.UI.Image.Type.Simple));
             var properties = new SerializedObject(panel);
             Assert.That(properties.FindProperty("_isButton").boolValue, Is.False);
             Assert.That(properties.FindProperty("_isCategory").boolValue, Is.True);
@@ -859,17 +900,79 @@ namespace MajdataPlay.Tests.Game.Rendering
             Assert.That(properties.FindProperty("_liquidTintStrength").floatValue, Is.EqualTo(0.9f));
             Assert.That(properties.FindProperty("_liquidArtworkBlend").floatValue, Is.EqualTo(0.25f));
             var insets = properties.FindProperty("_liquidBodyInsets").vector4Value;
-            var expectedInsets = spriteName == "newui@3x_6"
-                ? new UnityEngine.Vector4(0.0038350911f, 0.0153846154f, 0.0038350911f, 0.0153846154f)
-                : UnityEngine.Vector4.zero;
-            for (var axis = 0; axis < 4; axis++)
-            {
-                Assert.That(insets[axis], Is.EqualTo(expectedInsets[axis]).Within(0.000001f),
-                    "Setting and List must align the same selected artwork body instead of highlighting its transparent slice padding.");
-            }
-            var expectedRoot = foregroundPath == "-" ? null
-                : foregroundPath.Length == 0 ? prefab.transform : prefab.transform.Find(foregroundPath);
+            Assert.That(insets, Is.EqualTo(UnityEngine.Vector4.zero),
+                "The native body has no transparent atlas padding that could shift its optical contour.");
+            var expectedRoot = foregroundPath.Length == 0 ? prefab.transform : prefab.transform.Find(foregroundPath);
             Assert.That(properties.FindProperty("_buttonForegroundRoot").objectReferenceValue, Is.SameAs(expectedRoot));
+            var yaml = FileSystem.File.Open(path).ReadAllText();
+            var title = Regex.Match(yaml, @"^--- !u!114 &857430918264730004\r?\n(?<body>.*?)(?=^--- |\z)",
+                RegexOptions.Multiline | RegexOptions.Singleline).Groups["body"].Value;
+            Assert.That(title, Does.Contain("guid: 64704fb03abf4531a01420ed392c5264"));
+            Assert.That(AssetDatabase.TryGetGUIDAndLocalFileIdentifier(image, out _, out long imageId), Is.True);
+            Assert.That(title, Does.Contain("_background: {fileID: " + imageId + "}"));
+            Assert.That(title, Does.Contain("_selectedWidth: 254.69"));
+            Assert.That(title, Does.Contain("_selectedBackgroundColor: {r: 0.62352943, g: 0.6901961, b: 0.7372549, a: 1}"));
+        }
+
+        /// <summary>Checks category titles have an authored clipping viewport and never shrink or ellipsize selected text.</summary>
+        /// <param name="path">The shared category prefab.</param>
+        /// <param name="titleName">The original title child's name.</param>
+        /// <param name="hasIcon">Whether this category has a separate icon that rises above its selected body.</param>
+        [TestCase("Assets/Prefabs/Setting/MenuTitleDisplayer.prefab", "Title", false)]
+        [TestCase("Assets/Prefabs/List/Model/CollectionDisplayer.prefab", "Name", true)]
+        public void CategoryTitles_KeepFixedFontSizesAndAnAuthoredMarqueeViewport(string path, string titleName, bool hasIcon)
+        {
+            var prefab = AssetDatabase.LoadAssetAtPath<UnityEngine.GameObject>(path);
+            Assert.That(prefab, Is.Not.Null);
+            var viewport = prefab!.transform.Find("TitleViewport");
+            Assert.That(viewport, Is.Not.Null);
+            Assert.That(viewport.childCount, Is.EqualTo(1), "One existing text moves inside its static viewport.");
+            Assert.That(viewport.GetComponent<UnityEngine.UI.RectMask2D>(), Is.Not.Null);
+            var text = viewport.Find(titleName).GetComponent<TMPro.TextMeshProUGUI>();
+            Assert.That(text, Is.Not.Null);
+            Assert.That(prefab.GetComponentsInChildren<TMPro.TextMeshProUGUI>(true).Length, Is.EqualTo(1));
+            Assert.That(text.fontSize, Is.EqualTo(26f));
+            Assert.That(text.enableAutoSizing, Is.False);
+            Assert.That(text.overflowMode, Is.EqualTo(TMPro.TextOverflowModes.Overflow));
+            Assert.That(text.rectTransform.localScale, Is.EqualTo(UnityEngine.Vector3.one));
+            var yaml = FileSystem.File.Open(path).ReadAllText();
+            var presentation = Regex.Match(yaml, @"^--- !u!114 &857430918264730004\r?\n(?<body>.*?)(?=^--- |\z)",
+                RegexOptions.Multiline | RegexOptions.Singleline).Groups["body"].Value;
+            Assert.That(AssetDatabase.TryGetGUIDAndLocalFileIdentifier(text, out _, out long textId), Is.True);
+            Assert.That(AssetDatabase.TryGetGUIDAndLocalFileIdentifier(viewport, out _, out long viewportId), Is.True);
+            Assert.That(presentation, Does.Contain("_titleDisplayer: {fileID: " + textId + "}"));
+            Assert.That(presentation, Does.Contain("_titleViewport: {fileID: " + viewportId + "}"));
+            Assert.That(presentation, Does.Contain("_selectedFontSize: 32"));
+            Assert.That(presentation, Does.Contain("_unselectedTitleInset: 4"));
+            Assert.That(presentation, Does.Contain("_selectedTitleInset: 49.345"));
+            Assert.That(((UnityEngine.RectTransform)viewport).rect.width, Is.EqualTo(139.83f).Within(0.001f));
+            Assert.That(text.rectTransform.rect.width, Is.EqualTo(((UnityEngine.RectTransform)viewport).rect.width));
+            var selectedWidth = float.Parse(Regex.Match(presentation, @"_selectedWidth: (?<value>[^\r\n]+)")
+                .Groups["value"].Value, CultureInfo.InvariantCulture);
+            var selectedInset = float.Parse(Regex.Match(presentation, @"_selectedTitleInset: (?<value>[^\r\n]+)")
+                .Groups["value"].Value, CultureInfo.InvariantCulture);
+            Assert.That(selectedWidth - 2f * selectedInset, Is.EqualTo(156f).Within(0.001f));
+            Assert.That((selectedWidth - 2f * selectedInset) * 0.5f, Is.LessThanOrEqualTo(80f - 2f),
+                "Both category rows retain two design units between the text viewport and the existing arrows' inner edges.");
+            if (hasIcon)
+            {
+                var iconRect = (UnityEngine.RectTransform)prefab.transform.Find("Icon");
+                Assert.That(AssetDatabase.TryGetGUIDAndLocalFileIdentifier(iconRect, out _, out long iconId), Is.True);
+                Assert.That(presentation, Does.Contain("_iconTransform: {fileID: " + iconId + "}"));
+                Assert.That(iconRect.sizeDelta, Is.EqualTo(new UnityEngine.Vector2(24f, 24f)));
+                Assert.That(presentation, Does.Contain("_selectedIconSizeMultiplier: 2"));
+                var selectedIconY = Regex.Match(presentation, @"_selectedIconPosition: \{x: [^,]+, y: (?<value>[^}]+)\}");
+                Assert.That(selectedIconY.Success, Is.True);
+                var selectedIconBottom = float.Parse(selectedIconY.Groups["value"].Value, CultureInfo.InvariantCulture)
+                    - iconRect.rect.height;
+                Assert.That(selectedIconBottom,
+                    Is.GreaterThanOrEqualTo(((UnityEngine.RectTransform)prefab.transform).rect.height * 0.5f - 1f),
+                    "The doubled icon rests at the unchanged body's upper edge without moving the category row.");
+            }
+            else
+            {
+                Assert.That(presentation, Does.Contain("_iconTransform: {fileID: 0}"));
+            }
         }
 
         /// <summary>Checks the real List carousel owns its selected style without a fixed duplicate name, icon, bar or shader-mask binding.</summary>
@@ -889,13 +992,12 @@ namespace MajdataPlay.Tests.Game.Rendering
             {
                 Assert.That(((UnityEngine.RectTransform)row).sizeDelta, Is.EqualTo(new UnityEngine.Vector2(147.83f, 76.8f)));
                 var normal = row.Find("BG").GetComponent<QualityUiImage>();
-                var selected = row.Find("SelectedBackground").GetComponent<QualityUiImage>();
                 Assert.That(normal.SourceMaterial.shader.name, Is.EqualTo("Maj/UI/Rounded Rect"));
                 Assert.That(normal.sprite, Is.Null);
-                Assert.That(selected.sprite.name, Is.EqualTo("newui@3x_6"));
-                Assert.That(row.Find("Name"), Is.Not.Null);
+                Assert.That(row.Find("SelectedBackground"), Is.Null);
+                Assert.That(row.Find("TitleViewport/Name"), Is.Not.Null);
                 Assert.That(row.Find("Icon"), Is.Not.Null);
-                Assert.That(row.GetComponentsInChildren<UiBackdropPanel>(true).Length, Is.EqualTo(2));
+                Assert.That(row.GetComponentsInChildren<UiBackdropPanel>(true).Length, Is.EqualTo(1));
             }
             var yaml = FileSystem.File.Open(path).ReadAllText();
             Assert.That(yaml, Does.Not.Contain("_selectedCollectionBar"));

@@ -595,21 +595,20 @@ namespace MajdataPlay.Tests.Game.Scenes.PlayMode.ListScene
             PrivateMember.SetField(_collections, "_navigationArrows", arrows);
             return arrows;
         }
-        /// <summary>Checks the native two-background presentation of an actual data-bearing pooled category.</summary>
+        /// <summary>Checks the native single-background presentation of an actual data-bearing pooled category.</summary>
         /// <param name="displayer">The real pooled collection tab.</param>
         /// <param name="position">The expected signed horizontal location.</param>
         /// <param name="selection">The zero-to-one selected presentation amount.</param>
         private static void AssertTab(CollectionDisplayer displayer, float position, float selection)
         {
             var tab = PrivateMember.GetField<MenuTitleDisplayer>(displayer, "_tabDisplayer");
-            var unselected = PrivateMember.GetField<Image>(tab, "_unselectedBackground");
-            var selected = PrivateMember.GetField<Image>(tab, "_selectedBackground");
+            var background = PrivateMember.GetField<Image>(tab, "_background");
             Assert.That(displayer.RectTransform.anchoredPosition.x, Is.EqualTo(position).Within(0.001f));
-            var expectedSize = Vector2.Lerp(new Vector2(147.83f, 76.8f), new Vector2(254.69f, 82.3f), selection);
+            var expectedSize = new Vector2(Mathf.Lerp(147.83f, 254.69f, selection), 76.8f);
             Assert.That(displayer.RectTransform.sizeDelta.x, Is.EqualTo(expectedSize.x).Within(0.001f));
             Assert.That(displayer.RectTransform.sizeDelta.y, Is.EqualTo(expectedSize.y).Within(0.001f));
-            Assert.That(unselected.color.a, Is.EqualTo(1f - selection).Within(0.0001f));
-            Assert.That(selected.color.a, Is.EqualTo(selection).Within(0.0001f));
+            var expectedColor = Color.Lerp(new Color(0.9058824f, 0.9176471f, 0.9176471f, 1f), new Color(159f / 255f, 176f / 255f, 188f / 255f, 1f), selection);
+            Assert.That(background.color, Is.EqualTo(expectedColor));
             Assert.That(displayer.gameObject.activeSelf, Is.True);
         }
 

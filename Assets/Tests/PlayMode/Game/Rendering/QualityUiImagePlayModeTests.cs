@@ -676,7 +676,7 @@ namespace MajdataPlay.Tests.Game.Rendering
             Assert.That(panel.color, Is.EqualTo(tint));
         }
 
-        /// <summary>Checks the actual Setting scene and selected-title artwork follows all modes without manual background flags.</summary>
+        /// <summary>Checks actual Setting scene alpha artwork follows all modes without manual background flags.</summary>
         /// <returns>The lifecycle test coroutine.</returns>
         [UnityTest]
         public IEnumerator SettingAlphaAssets_ApplyAllModesFromTheirSourceMaterials()
@@ -698,14 +698,6 @@ namespace MajdataPlay.Tests.Game.Rendering
                 panel.sprite = FindImportedSprite(long.Parse(sprite.Groups[1].Value));
                 panels.Add(panel);
             }
-            var title = AssetDatabase.LoadAssetAtPath<GameObject>("Assets/Prefabs/Setting/MenuTitleDisplayer.prefab");
-            Assert.That(title, Is.Not.Null);
-            var selected = title.transform.Find("SelectedBackground").GetComponent<QualityUiImage>();
-            Assert.That(selected, Is.Not.Null);
-            var selectedImage = CreateImage(selected.SourceMaterial);
-            selectedImage.sprite = selected.sprite;
-            selectedImage.type = selected.type;
-            panels.Add(selectedImage);
             ParentToBackgroundCanvas(panels.ToArray());
 
             foreach (var mode in new[] { UiOutlineMode.None, UiOutlineMode.Performance, UiOutlineMode.All })
@@ -732,7 +724,7 @@ namespace MajdataPlay.Tests.Game.Rendering
                 }
             }
 #else
-            Assert.Ignore("This regression reads the actual Setting scene and selected-title assets.");
+            Assert.Ignore("This regression reads the actual Setting scene assets.");
             yield break;
 #endif
         }
@@ -793,6 +785,67 @@ namespace MajdataPlay.Tests.Game.Rendering
             Assert.Ignore("This regression loads the actual rounded Setting material.");
             yield break;
 #endif
+        }
+
+        /// <summary>Checks explicit background ordering preserves each UI shader and survives glass changes and pooling.</summary>
+        /// <returns>The real Image enable, material-selection and queue-restoration lifecycle coroutine.</returns>
+        [UnityTest]
+        public IEnumerator DrawBeforeCameraExtension_KeepsRingBehindLive2DInEveryStyle()
+        {
+            var image = CreateImage(_cutout);
+            var originalQueue = _cutout.renderQueue;
+            image.sprite = FindImportedSprite(1055266389L);
+            typeof(QualityUiImage).GetField("_drawBeforeCameraExtension", BindingFlags.Instance | BindingFlags.NonPublic)!
+                .SetValue(image, true);
+            var board = CreateImage(_cutout);
+            board.gameObject.SetActive(false);
+            var panel = board.gameObject.AddComponent<UiBackdropPanel>();
+            typeof(UiBackdropPanel).GetField("_backgroundImage", BindingFlags.Instance | BindingFlags.NonPublic)!
+                .SetValue(panel, image);
+            ParentToBackgroundCanvas(image, board);
+            var position = image.rectTransform.anchoredPosition;
+            var size = image.rectTransform.sizeDelta;
+            var sprite = image.sprite;
+
+            foreach (var mode in new[] { UiOutlineMode.None, UiOutlineMode.Performance, UiOutlineMode.All })
+            {
+                UiPvBackdropBlur.Configure(false);
+                UiOutlineTheme.Configure(mode);
+                image.RefreshMaterialSelection();
+                yield return null;
+                Canvas.ForceUpdateCanvases();
+                var material = image.material;
+                var expectedShader = mode == UiOutlineMode.All ? "Maj/UI/Atlas Alpha" : "Maj/Common/Opaque";
+                Assert.That(material.renderQueue, Is.EqualTo((int)UnityEngine.Rendering.RenderQueue.GeometryLast));
+                Assert.That(material.shader.name, Is.EqualTo(expectedShader));
+#if UNITY_EDITOR
+                var shader = FileSystem.File.Open(AssetDatabase.GetAssetPath(material.shader)).ReadAllText();
+                Assert.That(shader, Does.Contain(mode == UiOutlineMode.All ? "ZWrite Off" : "ZWrite On"));
+#endif
+                Assert.That(image.SourceMaterial, Is.SameAs(_cutout));
+                Assert.That(image.sprite, Is.SameAs(sprite));
+                Assert.That(image.rectTransform.anchoredPosition, Is.EqualTo(position));
+                Assert.That(image.rectTransform.sizeDelta, Is.EqualTo(size));
+                image.enabled = false;
+                Assert.That(typeof(QualityUiImage).GetField("_captureMaterial", BindingFlags.Instance | BindingFlags.NonPublic)!
+                    .GetValue(image), Is.Null);
+                image.enabled = true;
+                Assert.That(image.material.renderQueue, Is.EqualTo((int)UnityEngine.Rendering.RenderQueue.GeometryLast));
+            }
+
+            UiOutlineTheme.Configure(UiOutlineMode.All);
+            board.gameObject.SetActive(true);
+            foreach (var style in new[] { UiBackdropStyle.GaussianBlur, UiBackdropStyle.LiquidGlass })
+            {
+                UiPvBackdropBlur.Configure(true, style);
+                Assert.That(image.material.renderQueue, Is.EqualTo(MajUiBackdropBridge.BackgroundQueueUpperBound));
+                Assert.That(image.material.shader.name, Is.EqualTo("Maj/UI/Atlas Alpha"));
+            }
+            UiPvBackdropBlur.Configure(false);
+            Assert.That(image.material.renderQueue, Is.EqualTo((int)UnityEngine.Rendering.RenderQueue.GeometryLast));
+            board.gameObject.SetActive(false);
+            Assert.That(image.material.renderQueue, Is.EqualTo((int)UnityEngine.Rendering.RenderQueue.GeometryLast));
+            Assert.That(_cutout.renderQueue, Is.EqualTo(originalQueue));
         }
 
         /// <summary>Checks the blur switch rebuilds only opted-in background materials even when the UI mode stays unchanged.</summary>
