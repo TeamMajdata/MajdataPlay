@@ -1,6 +1,8 @@
 using System;
+using System.IO;
 using System.Linq;
 using System.Net;
+using System.Reflection;
 using MajdataPlay.Diagnostics;
 using MajdataPlay.IO.Storage;
 using MajdataPlay.Net;
@@ -334,6 +336,56 @@ namespace MajdataPlay.Tests.Game.Misc.Base
             Assert.That(_root.FindFile("system-settings.json.bak"), Is.Null);
         }
 
+        /// <summary>Checks that a save writes both files through temporary siblings and leaves no temporary file behind.</summary>
+        [Test]
+        public void OnSave_ReplacesFilesWithoutTemporaryLeftovers()
+        {
+            Step("InitSettings");
+            MajEnv.UserSettings.Game.TapSpeed = 9.5f;
+
+            Step("OnSave", null, null);
+
+            Assert.That(_root.FindFile("settings.json.tmp"), Is.Null);
+            Assert.That(_root.FindFile("system-settings.json.tmp"), Is.Null);
+            var userFile = _root.FindFile("settings.json")!;
+            var saved = JObject.Parse(userFile.ReadAllText());
+            Assert.That(saved["Game"]!["TapSpeed"]!.Value<float>(), Is.EqualTo(9.5f));
+            Assert.That(MajEnv.UserSettingsPath.Location, Is.EqualTo(userFile.Location));
+        }
+
+        /// <summary>Checks that a save discards the temporary file an interrupted earlier save left behind.</summary>
+        [Test]
+        public void OnSave_DiscardsInterruptedSaveTemporaryFile()
+        {
+            Step("InitSettings");
+            MajEnv.UserSettings.Game.TapSpeed = 6.5f;
+            _root.CreateFile("settings.json.tmp").WriteAllText("{ \"Game\": ");
+            _root.CreateFile("system-settings.json.tmp").WriteAllText("{ \"Debug\": ");
+
+            Step("OnSave", null, null);
+
+            Assert.That(_root.FindFile("settings.json.tmp"), Is.Null);
+            Assert.That(_root.FindFile("system-settings.json.tmp"), Is.Null);
+            var saved = JObject.Parse(_root.FindFile("settings.json")!.ReadAllText());
+            Assert.That(saved["Game"]!["TapSpeed"]!.Value<float>(), Is.EqualTo(6.5f));
+        }
+
+        /// <summary>Checks that a save which cannot write its temporary file leaves the live settings.json unchanged.</summary>
+        [Test]
+        public void OnSave_KeepsLiveFileWhenTemporaryFileCannotBeCreated()
+        {
+            Step("InitSettings");
+            var live = _root.FindFile("settings.json")!.ReadAllText();
+            MajEnv.UserSettings.Game.TapSpeed = 9.5f;
+            // A directory occupying the temporary name fails the write before the live file is replaced.
+            _root.CreateDirectory("settings.json.tmp");
+
+            var thrown = Assert.Throws<TargetInvocationException>(() => Step("OnSave", null, null));
+
+            Assert.That(thrown!.InnerException, Is.InstanceOf<IOException>());
+            Assert.That(_root.FindFile("settings.json")!.ReadAllText(), Is.EqualTo(live));
+        }
+
         /// <summary>Opens runtime.db with a separate connection.</summary>
         /// <returns>The open connection, which the caller disposes.</returns>
         private static SQLiteConnection OpenStoredRuntimeDatabase()
@@ -585,16 +637,19 @@ namespace MajdataPlay.Tests.Game.Misc.Base
             Assert.That(directory.Exists, Is.False);
         }
 
-        /// <summary>Checks that the file helper finds an existing file or creates a missing one.</summary>
+        /// <summary>Checks that the settings writer creates a missing file and replaces an existing one at the same location.</summary>
         [Test]
-        public void FindOrCreateFile_ReusesExistingFile()
+        public void WriteSettingsFile_CreatesAndReplacesInPlace()
         {
-            var created = PrivateMember.InvokeStatic<StorageFile>(typeof(MajEnv), "FindOrCreateFile", _root, "new.json");
-            created.WriteAllText("content");
-            var found = PrivateMember.InvokeStatic<StorageFile>(typeof(MajEnv), "FindOrCreateFile", _root, "new.json");
+            var created = PrivateMember.InvokeStatic<StorageFile>(typeof(MajEnv), "WriteSettingsFile", "written.json", "first");
+            Assert.That(created.Exists, Is.True);
+            Assert.That(created.ReadAllText(), Is.EqualTo("first"));
 
-            Assert.That(found.Location, Is.EqualTo(created.Location));
-            Assert.That(found.ReadAllText(), Is.EqualTo("content"));
+            var replaced = PrivateMember.InvokeStatic<StorageFile>(typeof(MajEnv), "WriteSettingsFile", "written.json", "second");
+
+            Assert.That(replaced.Location, Is.EqualTo(created.Location));
+            Assert.That(replaced.ReadAllText(), Is.EqualTo("second"));
+            Assert.That(_root.FindFile("written.json.tmp"), Is.Null);
         }
     }
 }

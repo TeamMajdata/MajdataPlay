@@ -6,6 +6,7 @@ using MajdataPlay.IO;
 using MajdataPlay.Net;
 using MajdataPlay.Scenes.Game;
 using MajdataPlay.Settings.Runtime;
+using MajdataPlay.Settings.Sync;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -640,6 +641,8 @@ namespace MajdataPlay.Scenes.List
             {
                 await UniTask.Yield();
             }
+            // Leaving the account brings back the local settings the account copy replaced.
+            await UserSettingSync.DetachAsync();
             sceneSwitcher.SetLoadingText(string.Empty);
             await UniTask.Delay(1000);
             sceneSwitcher.SwitchScene("Login");

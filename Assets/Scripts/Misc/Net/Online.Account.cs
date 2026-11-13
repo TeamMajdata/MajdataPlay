@@ -43,7 +43,7 @@ namespace MajdataPlay.Net
             private const int CODE_LOGIN_FAILED_USER_BANNED = 12;
 
             /// <summary>
-            /// Logs a user in with <c>POST account/login</c>, sending the SHA-256 digest of the password. A user already
+            /// Logs a user in with <c>POST account/login</c>, sending the MD5 digest of the password. A user already
             /// logged in on the endpoint is not logged in again.
             /// </summary>
             /// <param name="apiEndpoint">The endpoint to log in to.</param>

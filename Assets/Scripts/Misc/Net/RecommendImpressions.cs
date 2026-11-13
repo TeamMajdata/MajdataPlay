@@ -17,16 +17,16 @@ namespace MajdataPlay.Net
     {
         // Same as the website: the server only attributes conversions to impressions it has already recorded.
         // Starting a game sends at once anyway.
-        const int FLUSH_DELAY_MS = 1000;
+        private const int FlushDelayMs = 1000;
 
-        readonly static Dictionary<ApiEndpoint, TrackerEntry> _entries = new();
-        static TrackerEntry? _focused;
+        private static readonly Dictionary<ApiEndpoint, TrackerEntry> s_entries = new();
+        private static TrackerEntry? s_focused;
         // The shared HTTP handler is disposed on quit
-        static bool _isQuitting = false;
+        private static bool s_isQuitting = false;
 
         static RecommendImpressions()
         {
-            GameManager.OnAppQuit += (_, _) => _isQuitting = true;
+            GameManager.OnAppQuit += (_, _) => s_isQuitting = true;
         }
         /// <summary>
         /// The song has settled in the center of the list
@@ -34,10 +34,10 @@ namespace MajdataPlay.Net
         public static void Focus(SongCollection collection, ISongDetail? song)
         {
             var entry = GetEntry(collection, song);
-            if (entry != _focused)
+            if (entry != s_focused)
             {
-                _focused?.Tracker.Blur();
-                _focused = entry;
+                s_focused?.Tracker.Blur();
+                s_focused = entry;
             }
             entry?.Tracker.Focus(song!.Hash);
         }
@@ -46,8 +46,8 @@ namespace MajdataPlay.Net
         /// </summary>
         public static void Blur()
         {
-            _focused?.Tracker.Blur();
-            _focused = null;
+            s_focused?.Tracker.Blur();
+            s_focused = null;
         }
         /// <summary>
         /// The player starts the song. It counts without dwell and is sent at once, or once
@@ -80,21 +80,21 @@ namespace MajdataPlay.Net
         /// </summary>
         public static void Suspend()
         {
-            _focused?.Tracker.Suspend();
+            s_focused?.Tracker.Suspend();
             FlushAll();
         }
         public static void Resume()
         {
-            _focused?.Tracker.Resume();
+            s_focused?.Tracker.Resume();
         }
         public static void FlushAll()
         {
-            foreach (var entry in _entries.Values)
+            foreach (var entry in s_entries.Values)
             {
                 entry.Tracker.Flush();
             }
         }
-        static TrackerEntry? GetEntry(SongCollection collection, ISongDetail? song)
+        private static TrackerEntry? GetEntry(SongCollection collection, ISongDetail? song)
         {
             if (song is null || collection is not OnlineSongCollection { Type: ChartStorageType.Recommend } recommendCollection)
             {
@@ -102,10 +102,10 @@ namespace MajdataPlay.Net
             }
             var endpoint = recommendCollection.Source;
             var generation = SongStorage.GetRecommendGeneration(endpoint);
-            if (!_entries.TryGetValue(endpoint, out var entry))
+            if (!s_entries.TryGetValue(endpoint, out var entry))
             {
                 entry = new TrackerEntry(endpoint, generation);
-                _entries[endpoint] = entry;
+                s_entries[endpoint] = entry;
             }
             else if (entry.Generation != generation)
             {
@@ -115,7 +115,7 @@ namespace MajdataPlay.Net
             }
             return entry;
         }
-        static async UniTaskVoid SendAsync(ApiEndpoint endpoint, string[] chartHashes, Task? sendAfter)
+        private static async UniTaskVoid SendAsync(ApiEndpoint endpoint, string[] chartHashes, Task? sendAfter)
         {
             try
             {
@@ -138,7 +138,7 @@ namespace MajdataPlay.Net
                 MajDebug.LogException(e);
             }
         }
-        sealed class TrackerEntry
+        private sealed class TrackerEntry
         {
             public ImpressionTracker Tracker { get; }
             public int Generation { get; set; }
@@ -147,7 +147,7 @@ namespace MajdataPlay.Net
             /// </summary>
             public Task? SendAfter { get; set; }
 
-            readonly ApiEndpoint _endpoint;
+            private readonly ApiEndpoint _endpoint;
 
             public TrackerEntry(ApiEndpoint endpoint, int generation)
             {
@@ -155,18 +155,18 @@ namespace MajdataPlay.Net
                 Generation = generation;
                 Tracker = new ImpressionTracker(() => Time.realtimeSinceStartupAsDouble, Send, () => FlushLaterAsync().Forget());
             }
-            void Send(string[] chartHashes)
+            private void Send(string[] chartHashes)
             {
                 // Impressions belong to the logged-in user; after logout the server would reject them anyway
-                if (_isQuitting || !_endpoint.RuntimeConfig.IsLoggedIn)
+                if (s_isQuitting || !_endpoint.RuntimeConfig.IsLoggedIn)
                 {
                     return;
                 }
                 SendAsync(_endpoint, chartHashes, SendAfter).Forget();
             }
-            async UniTaskVoid FlushLaterAsync()
+            private async UniTaskVoid FlushLaterAsync()
             {
-                await UniTask.Delay(FLUSH_DELAY_MS, DelayType.Realtime);
+                await UniTask.Delay(FlushDelayMs, DelayType.Realtime);
                 Tracker.Flush();
             }
         }
