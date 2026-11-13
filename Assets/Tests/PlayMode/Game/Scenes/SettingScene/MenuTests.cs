@@ -255,7 +255,8 @@ namespace MajdataPlay.Tests.Game.Scenes.PlayMode.SettingScene
             rendering.EnterCustomMode();
             var menu = CreateMenu(_manager, rendering);
 
-            Assert.That(DisplayedCount(menu), Is.EqualTo(SettingReflectionCache.GetVisibleProperties(typeof(RenderingOptions)).Length));
+            // Custom chooses effects through UIOutlineMode, so the Refined-only UIBackdropStyle row stays hidden.
+            Assert.That(DisplayedCount(menu), Is.EqualTo(21));
         }
 
         /// <summary>Checks that leaving compatibility mode restores the custom rows it hid and keeps the selected row.</summary>

@@ -322,7 +322,7 @@ Copy-Item -LiteralPath (Join-Path $root 'Assets/Tests/PlayMode/Game/Rendering/Ui
 Copy-Item -LiteralPath (Join-Path $root 'Assets/Tests/Shared/TestObjects.cs') -Destination $playTests
 @{
     name = 'MajdataPlay.Tests.Game'
-    references = @('UnityEngine.TestRunner', 'UnityEditor.TestRunner', 'MajdataPlay.Core', 'UnityEngine.UI', 'Unity.TextMeshPro')
+    references = @('UnityEngine.TestRunner', 'UnityEditor.TestRunner', 'MajdataPlay.Core', 'MajdataPlay.Core.Editor', 'UnityEngine.UI', 'Unity.TextMeshPro')
     includePlatforms = @('Editor')
     overrideReferences = $true
     precompiledReferences = @('nunit.framework.dll')

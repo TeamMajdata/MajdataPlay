@@ -315,7 +315,7 @@ namespace MajdataPlay.Tests.Game.Scenes.PlayMode.ListScene
             return null!;
         }
 
-        /// <summary>Creates one real moving category with the same two-background presentation as the Setting menu.</summary>
+        /// <summary>Creates one real moving category with the same single-background presentation as the Setting menu.</summary>
         /// <param name="parent">The parent that owns the reusable category tabs.</param>
         /// <param name="name">The fixture object's stable name.</param>
         /// <returns>The initialized collection displayer with its presentation, text and icon references.</returns>
@@ -324,23 +324,29 @@ namespace MajdataPlay.Tests.Game.Scenes.PlayMode.ListScene
             var displayer = AddInactiveUi<CollectionDisplayer>(name, parent);
             ((RectTransform)displayer.transform).sizeDelta = new Vector2(147.83f, 76.8f);
             var tab = displayer.gameObject.AddComponent<MenuTitleDisplayer>();
-            var unselected = CreateImage("BG", displayer.transform);
-            unselected.color = new Color(0.9058824f, 0.9176471f, 0.9176471f, 1f);
-            var selected = CreateImage("SelectedBackground", displayer.transform);
-            selected.rectTransform.sizeDelta = new Vector2(254.69f, 82.3f);
-            selected.color = new Color(159f / 255f, 176f / 255f, 188f / 255f, 1f);
+            var background = CreateImage("BG", displayer.transform);
+            background.color = new Color(0.9058824f, 0.9176471f, 0.9176471f, 1f);
+            var viewport = (RectTransform)CreateRect("TitleViewport", displayer.transform).transform;
+            viewport.sizeDelta = new Vector2(139.83f, 40f);
+            viewport.anchoredPosition = new Vector2(0f, -17f);
+            viewport.gameObject.AddComponent<RectMask2D>();
             var title = CreateText("Name", parent);
-            title.fontSizeMax = 28f;
+            title.fontSize = 26f;
             title.color = Color.gray;
-            title.transform.SetParent(displayer.transform, false);
+            title.rectTransform.sizeDelta = viewport.sizeDelta;
+            title.transform.SetParent(viewport, false);
             var icon = CreateImage("Icon", displayer.transform);
             icon.rectTransform.sizeDelta = new Vector2(24f, 24f);
             icon.rectTransform.anchoredPosition = new Vector2(0f, 16f);
-            PrivateMember.SetField(tab, "_unselectedBackground", unselected);
-            PrivateMember.SetField(tab, "_selectedBackground", selected);
+            PrivateMember.SetField(tab, "_background", background);
+            PrivateMember.SetField(tab, "_selectedBackgroundColor", new Color(159f / 255f, 176f / 255f, 188f / 255f, 1f));
+            PrivateMember.SetField(tab, "_selectedWidth", 254.69f);
             PrivateMember.SetField(tab, "_titleDisplayer", title);
+            PrivateMember.SetField(tab, "_titleViewport", viewport);
             PrivateMember.SetField(tab, "_selectedTextColor", Color.white);
-            PrivateMember.SetField(tab, "_selectedFontSizeMax", 32f);
+            PrivateMember.SetField(tab, "_selectedFontSize", 32f);
+            PrivateMember.SetField(tab, "_iconTransform", icon.rectTransform);
+            PrivateMember.SetField(tab, "_selectedIconPosition", new Vector2(0f, 62f));
             PrivateMember.SetField(displayer, "_tabDisplayer", tab);
             PrivateMember.SetField(displayer, "_iconDisplayer", icon);
             PrivateMember.SetField(displayer, "_nameDisplayer", title);

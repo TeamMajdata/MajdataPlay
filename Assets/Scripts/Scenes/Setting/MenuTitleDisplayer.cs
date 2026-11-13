@@ -8,6 +8,7 @@ using UnityEngine.UI;
 #nullable enable
 namespace MajdataPlay.Scenes.Setting
 {
+    /// <summary>Animates one category body, its title and optional icon without creating runtime UI.</summary>
     public sealed class MenuTitleDisplayer : MonoBehaviour
     {
         /// <summary>Separates adjacent unselected category titles outside the central selected interval.</summary>
@@ -19,42 +20,136 @@ namespace MajdataPlay.Scenes.Setting
         /// <summary>Reserves the first and last fifth of a category transition for its navigation arrows.</summary>
         private const float NavigationFadeFraction = 0.2f;
 
-        [SerializeField]
-        [FormerlySerializedAs("_unselectedBackground")]
-        private Image _unselectedBackground = null!;
+        /// <summary>Pauses a selected overflowing title before scrolling and at either end.</summary>
+        private const float TitleScrollPauseSeconds = 0.8f;
 
-        [SerializeField]
-        [FormerlySerializedAs("_selectedBackground")]
-        private Image _selectedBackground = null!;
+        /// <summary>Moves overflowing selected titles in authored UI units per second.</summary>
+        private const float TitleScrollSpeed = 36f;
 
+        /// <summary>Colors the same fixed-cap body throughout selection changes.</summary>
         [SerializeField]
-        [FormerlySerializedAs("_titleDisplayer")]
+        [FormerlySerializedAs("Background")]
+        private Image _background = null!;
+
+        /// <summary>Defines the selected tint of the same background image.</summary>
+        [SerializeField]
+        [FormerlySerializedAs("SelectedBackgroundColor")]
+        private Color _selectedBackgroundColor = Color.white;
+
+        /// <summary>Defines the selected body width while preserving its authored height and end caps.</summary>
+        [SerializeField]
+        [FormerlySerializedAs("SelectedWidth")]
+        private float _selectedWidth = 254.69f;
+
+        /// <summary>Displays the localized setting title or bound collection name.</summary>
+        [SerializeField]
+        [FormerlySerializedAs("TitleDisplayer")]
         private TextMeshProUGUI _titleDisplayer = null!;
 
+        /// <summary>Clips the authored title child independently of its scrolling and selection movement.</summary>
         [SerializeField]
-        [FormerlySerializedAs("_selectedTextColor")]
+        [FormerlySerializedAs("TitleViewport")]
+        private RectTransform _titleViewport = null!;
+
+        /// <summary>Leaves equal text padding on both sides of an unselected body.</summary>
+        [SerializeField]
+        [FormerlySerializedAs("UnselectedTitleInset")]
+        private float _unselectedTitleInset = 4f;
+
+        /// <summary>Reserves space for the navigation arrows on both sides of a selected title.</summary>
+        [SerializeField]
+        [FormerlySerializedAs("SelectedTitleInset")]
+        private float _selectedTitleInset = 49.345f;
+
+        /// <summary>Defines the title tint when this category is selected.</summary>
+        [SerializeField]
+        [FormerlySerializedAs("SelectedTextColor")]
         private Color _selectedTextColor = Color.white;
 
+        /// <summary>Defines the selected font size while retaining the authored text transform.</summary>
         [SerializeField]
-        [FormerlySerializedAs("_selectedFontSizeMax")]
-        private float _selectedFontSizeMax = 32f;
+        [FormerlySerializedAs("SelectedFontSize")]
+        private float _selectedFontSize = 32f;
 
+        /// <summary>Optionally moves the List collection icon outside the selected body.</summary>
+        [SerializeField]
+        [FormerlySerializedAs("IconTransform")]
+        private RectTransform? _iconTransform;
+
+        /// <summary>Defines the icon's selected position in its authored parent coordinates.</summary>
+        [SerializeField]
+        [FormerlySerializedAs("SelectedIconPosition")]
+        private Vector2 _selectedIconPosition = new(0f, 62f);
+
+        /// <summary>Enlarges the existing icon dimensions as it rises above the selected body.</summary>
+        [SerializeField]
+        [FormerlySerializedAs("SelectedIconSizeMultiplier")]
+        private float _selectedIconSizeMultiplier = 2f;
+
+        /// <summary>Caches the category's authored root.</summary>
         private RectTransform _rectTransform = null!;
+
+        /// <summary>Caches the single title child that moves inside the clipping viewport.</summary>
         private RectTransform _titleRectTransform = null!;
+
+        /// <summary>Retains the unselected width and constant body height.</summary>
         private Vector2 _unselectedSize;
-        private Vector2 _selectedSize;
+
+        /// <summary>Retains the unselected title viewport position for categories with icons.</summary>
+        private Vector2 _unselectedViewportPosition;
+
+        /// <summary>Retains the title's authored position before any scrolling.</summary>
+        private Vector2 _titleOriginPosition;
+
+        /// <summary>Retains the icon's inside-body position before selection.</summary>
+        private Vector2 _unselectedIconPosition;
+
+        /// <summary>Retains the icon's unselected dimensions for reversible resizing.</summary>
+        private Vector2 _unselectedIconSize;
+
+        /// <summary>Retains the unselected body tint.</summary>
         private Color _unselectedBackgroundColor;
-        private Color _selectedBackgroundColor;
+
+        /// <summary>Retains the unselected title tint.</summary>
         private Color _unselectedTextColor;
-        private float _selectedTitleScale = 1f;
+
+        /// <summary>Retains the common unselected font size before animating selection.</summary>
+        private float _unselectedFontSize;
+
+        /// <summary>Provides the setting title for the current language, when applicable.</summary>
         private Func<string>? _localizedTitleProvider;
+
+        /// <summary>Avoids reassigning unchanged localized text.</summary>
         private string? _displayedTitle;
+
+        /// <summary>Applies title colors to its main and fallback renderers without recoloring glyph meshes.</summary>
         private SettingTextTint _textTint = null!;
+
+        /// <summary>Tracks the language subscription across visibility and destruction.</summary>
         private bool _isLocalizationSubscribed;
 
-        /// <summary>The last selection blend applied to the backgrounds and title.</summary>
+        /// <summary>Tracks whether the current collection actually displays its optional icon.</summary>
+        private bool _hasIcon;
+
+        /// <summary>Defers overflow measurement until a selected title settles or its content changes.</summary>
+        private bool _titleLayoutDirty = true;
+
+        /// <summary>Stores half of the selected title's measured horizontal overflow.</summary>
+        private float _titleScrollLimit;
+
+        /// <summary>Stores the title's current horizontal scrolling offset.</summary>
+        private float _titleScrollOffset;
+
+        /// <summary>Tracks the pause remaining before the next scrolling segment.</summary>
+        private float _titleScrollPause = TitleScrollPauseSeconds;
+
+        /// <summary>Chooses the next edge visited by an overflowing title.</summary>
+        private int _titleScrollDirection = -1;
+
+        /// <summary>The last selection blend applied to the body, title and icon.</summary>
         private float _lastSelectedAmount = float.NaN;
 
+        /// <summary>Gets the authored title font for prewarming localized glyphs.</summary>
         internal TMP_FontAsset Font => _titleDisplayer.font;
 
         private void Awake()
@@ -62,11 +157,19 @@ namespace MajdataPlay.Scenes.Setting
             _rectTransform = (RectTransform)transform;
             _titleRectTransform = _titleDisplayer.rectTransform;
             _unselectedSize = _rectTransform.rect.size;
-            _selectedSize = _selectedBackground.rectTransform.rect.size;
-            _unselectedBackgroundColor = _unselectedBackground.color;
-            _selectedBackgroundColor = _selectedBackground.color;
+            _unselectedViewportPosition = _titleViewport.anchoredPosition;
+            _titleOriginPosition = _titleRectTransform.anchoredPosition;
+            _unselectedBackgroundColor = _background.color;
             _unselectedTextColor = _titleDisplayer.color;
-            _selectedTitleScale = _selectedFontSizeMax / Mathf.Max(1f, _titleDisplayer.fontSizeMax);
+            _unselectedFontSize = _titleDisplayer.fontSize;
+            _titleDisplayer.enableAutoSizing = false;
+            _titleDisplayer.textWrappingMode = TextWrappingModes.NoWrap;
+            _titleDisplayer.overflowMode = TextOverflowModes.Ellipsis;
+            if (_iconTransform != null)
+            {
+                _unselectedIconPosition = _iconTransform.anchoredPosition;
+                _unselectedIconSize = _iconTransform.sizeDelta;
+            }
             _textTint = new SettingTextTint(_titleDisplayer);
         }
 
@@ -78,11 +181,13 @@ namespace MajdataPlay.Scenes.Setting
                 _isLocalizationSubscribed = true;
             }
             UpdateLocalizedText();
+            RefreshTitle();
         }
 
         private void OnDisable()
         {
             UnsubscribeLocalization();
+            ResetTitleScroll();
         }
 
         private void OnDestroy()
@@ -91,18 +196,43 @@ namespace MajdataPlay.Scenes.Setting
             _textTint?.Dispose();
         }
 
-        private void UnsubscribeLocalization()
+        private void OnRectTransformDimensionsChange()
         {
-            if (_isLocalizationSubscribed)
+            _titleLayoutDirty = true;
+        }
+
+        private void Update()
+        {
+            if (_lastSelectedAmount < 1f || float.IsNaN(_lastSelectedAmount))
             {
-                Localization.OnLanguageChanged -= OnLanguageChanged;
-                _isLocalizationSubscribed = false;
+                return;
+            }
+            if (_titleLayoutDirty)
+            {
+                var titleWidth = _titleDisplayer.GetPreferredValues(_titleDisplayer.text, Mathf.Infinity, Mathf.Infinity).x;
+                _titleScrollLimit = Mathf.Max(0f, (titleWidth - _titleViewport.rect.width) * 0.5f);
+                _titleLayoutDirty = false;
+            }
+            if (_titleScrollLimit <= 0f)
+            {
+                return;
+            }
+            if (_titleScrollPause > 0f)
+            {
+                _titleScrollPause -= Time.unscaledDeltaTime;
+                return;
+            }
+            var target = _titleScrollDirection * _titleScrollLimit;
+            _titleScrollOffset = Mathf.MoveTowards(_titleScrollOffset, target, TitleScrollSpeed * Time.unscaledDeltaTime);
+            _titleRectTransform.anchoredPosition = _titleOriginPosition + new Vector2(_titleScrollOffset, 0f);
+            if (_titleScrollOffset == target)
+            {
+                _titleScrollDirection = -_titleScrollDirection;
+                _titleScrollPause = TitleScrollPauseSeconds;
             }
         }
 
-        /// <summary>
-        /// Shows the translation of a fixed localization key and follows language changes.
-        /// </summary>
+        /// <summary>Shows the translation of a fixed localization key and follows language changes.</summary>
         /// <param name="localizationKey">The localization key of the title; an empty key leaves the current text in place.</param>
         internal void Initialize(string localizationKey)
         {
@@ -114,9 +244,7 @@ namespace MajdataPlay.Scenes.Setting
             Initialize(() => localizationKey.i18n());
         }
 
-        /// <summary>
-        /// Shows a title computed for the current language and recomputes it on every language change.
-        /// </summary>
+        /// <summary>Shows a computed localized title and recomputes it on language changes.</summary>
         /// <param name="localizedTitleProvider">Returns the localized title for the current language.</param>
         /// <exception cref="ArgumentNullException"><paramref name="localizedTitleProvider"/> is null.</exception>
         internal void Initialize(Func<string> localizedTitleProvider)
@@ -125,32 +253,49 @@ namespace MajdataPlay.Scenes.Setting
             UpdateLocalizedText();
         }
 
+        /// <summary>Restarts scrolling after the existing title text is changed by its collection binding.</summary>
+        internal void RefreshTitle()
+        {
+            _titleLayoutDirty = true;
+            ResetTitleScroll();
+        }
+
+        /// <summary>Reserves the inside-body icon row only for collections that actually show an icon.</summary>
+        /// <param name="hasIcon">Whether the collection's native icon image is enabled.</param>
+        internal void SetHasIcon(bool hasIcon)
+        {
+            _hasIcon = hasIcon;
+            ApplyTitleViewportLayout(float.IsNaN(_lastSelectedAmount) ? 0f : _lastSelectedAmount);
+        }
+
+        /// <summary>Moves and resizes the same body while blending its title and optional icon presentation.</summary>
+        /// <param name="distance">The category index relative to the animated selection cursor.</param>
         internal void SetDistance(float distance)
         {
             var absDistance = Mathf.Abs(distance);
             var selectedAmount = 1f - Mathf.Clamp01(absDistance);
-
-            _rectTransform.anchoredPosition = new Vector2(GetHorizontalPosition(distance, absDistance), 0);
+            _rectTransform.anchoredPosition = new Vector2(GetHorizontalPosition(distance, absDistance), 0f);
             if (_lastSelectedAmount == selectedAmount)
             {
                 return;
             }
             _lastSelectedAmount = selectedAmount;
-            _rectTransform.sizeDelta = Vector2.Lerp(_unselectedSize, _selectedSize, selectedAmount);
-
-            _unselectedBackground.color = WithAlpha(
-                _unselectedBackgroundColor,
-                _unselectedBackgroundColor.a * (1f - selectedAmount));
-            _selectedBackground.color = WithAlpha(
-                _selectedBackgroundColor,
-                _selectedBackgroundColor.a * selectedAmount);
-
-            var textColor = Color.Lerp(_unselectedTextColor, _selectedTextColor, selectedAmount);
-            _textTint.SetColor(textColor);
-            var titleScale = Mathf.Lerp(1f, _selectedTitleScale, selectedAmount);
-            _titleRectTransform.localScale = new Vector3(titleScale, titleScale, 1f);
+            _rectTransform.sizeDelta = new Vector2(Mathf.Lerp(_unselectedSize.x, _selectedWidth, selectedAmount), _unselectedSize.y);
+            _background.color = Color.Lerp(_unselectedBackgroundColor, _selectedBackgroundColor, selectedAmount);
+            _textTint.SetColor(Color.Lerp(_unselectedTextColor, _selectedTextColor, selectedAmount));
+            _titleDisplayer.fontSize = Mathf.Lerp(_unselectedFontSize, _selectedFontSize, selectedAmount);
+            _titleDisplayer.overflowMode = selectedAmount == 1f ? TextOverflowModes.Overflow : TextOverflowModes.Ellipsis;
+            ApplyTitleViewportLayout(selectedAmount);
+            if (_iconTransform != null)
+            {
+                _iconTransform.anchoredPosition = Vector2.Lerp(_unselectedIconPosition, _selectedIconPosition, selectedAmount);
+                _iconTransform.sizeDelta = _unselectedIconSize * Mathf.Lerp(1f, _selectedIconSizeMultiplier, selectedAmount);
+            }
+            RefreshTitle();
         }
 
+        /// <summary>Activates or hides this authored category without creating display objects.</summary>
+        /// <param name="isVisible">Whether this category belongs to the current visible window.</param>
         internal void SetVisible(bool isVisible)
         {
             if (gameObject.activeSelf != isVisible)
@@ -159,7 +304,7 @@ namespace MajdataPlay.Scenes.Setting
             }
         }
 
-        /// <summary>Fades shared category arrows out before the scroll and back in as the selected title settles.</summary>
+        /// <summary>Fades shared category arrows out before scrolling and back in as the selected title settles.</summary>
         /// <param name="progress">The linear zero-to-one category transition progress.</param>
         /// <param name="initialArrowAlpha">The arrow opacity retained when a new transition interrupts the previous one.</param>
         /// <returns>The navigation-only opacity, without fading the moving category titles.</returns>
@@ -176,11 +321,46 @@ namespace MajdataPlay.Scenes.Setting
             return 0f;
         }
 
+        /// <summary>Fits the authored title to the current body width while keeping scrolling and vertical movement independent.</summary>
+        /// <param name="selectedAmount">The zero-to-one selection blend.</param>
+        private void ApplyTitleViewportLayout(float selectedAmount)
+        {
+            var unselectedPosition = _hasIcon ? _unselectedViewportPosition : Vector2.zero;
+            _titleViewport.anchoredPosition = Vector2.Lerp(unselectedPosition, Vector2.zero, selectedAmount);
+            var inset = Mathf.Lerp(_unselectedTitleInset, _selectedTitleInset, selectedAmount);
+            var width = Mathf.Max(0f, _rectTransform.rect.width - 2f * inset);
+            _titleViewport.sizeDelta = new Vector2(width, _titleViewport.sizeDelta.y);
+            _titleRectTransform.sizeDelta = new Vector2(width, _titleRectTransform.sizeDelta.y);
+        }
+
+        /// <summary>Restores the centered title and its initial scrolling pause without changing typography.</summary>
+        private void ResetTitleScroll()
+        {
+            _titleScrollOffset = 0f;
+            _titleScrollDirection = -1;
+            _titleScrollPause = TitleScrollPauseSeconds;
+            if (_titleRectTransform != null)
+            {
+                _titleRectTransform.anchoredPosition = _titleOriginPosition;
+            }
+        }
+
+        /// <summary>Stops receiving language changes after this category is hidden or destroyed.</summary>
+        private void UnsubscribeLocalization()
+        {
+            if (_isLocalizationSubscribed)
+            {
+                Localization.OnLanguageChanged -= OnLanguageChanged;
+                _isLocalizationSubscribed = false;
+            }
+        }
+
         private void OnLanguageChanged(object? sender, Language language)
         {
             UpdateLocalizedText();
         }
 
+        /// <summary>Publishes changed localized text and invalidates only the selected title's overflow cache.</summary>
         private void UpdateLocalizedText()
         {
             if (_localizedTitleProvider is not null)
@@ -190,24 +370,22 @@ namespace MajdataPlay.Scenes.Setting
                 {
                     _titleDisplayer.text = title;
                     _displayedTitle = title;
+                    RefreshTitle();
                 }
             }
         }
 
+        /// <summary>Maps the animated category distance onto the shared selected and neighboring spacing.</summary>
+        /// <param name="distance">The signed category distance from the selection cursor.</param>
+        /// <param name="absDistance">The absolute category distance.</param>
+        /// <returns>The category's horizontal position in its authored parent.</returns>
         private static float GetHorizontalPosition(float distance, float absDistance)
         {
             if (absDistance <= 1f)
             {
                 return SelectedTitleSpacing * distance;
             }
-
             return Mathf.Sign(distance) * (SelectedTitleSpacing + (UnselectedTitleSpacing * (absDistance - 1f)));
-        }
-
-        private static Color WithAlpha(Color color, float alpha)
-        {
-            color.a = alpha;
-            return color;
         }
     }
 }
