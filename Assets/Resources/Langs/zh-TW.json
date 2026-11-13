@@ -365,6 +365,7 @@
     "MAJTEXT_LOGIN_LOGIN_FAILED": "登入失敗",
     "MAJTEXT_LOGIN_LOGIN_SUCCESS": "登入成功，正在取得使用者資料中...",
     "MAJTEXT_LOGIN_SESSION_EXPIRED": "帳號身分資訊已過期",
+    "MAJTEXT_LOGIN_SETTING_SYNC_FAILED": "設定同步失敗，本次使用本機設定",
     "MAJTEXT_LOGIN_UNKNOWN_ERROR": "發生未知錯誤, 請聯絡開發團隊",
     "MAJTEXT_ERR_NO_CHART": "沒有可用的譜面",
     "MAJTEXT_ONLINE_METHOD_NOT_ALLOWED": "發生了405錯誤, 請檢察網路或使用代理伺服器",

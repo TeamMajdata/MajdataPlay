@@ -12,6 +12,7 @@ using MajdataPlay.Net.Models;
 using MajdataPlay.Numerics;
 using MajdataPlay.Settings;
 using MajdataPlay.Settings.Runtime;
+using MajdataPlay.Settings.Sync;
 using MajdataPlay.Utils;
 #if UNITY_ANDROID
 using MajdataPlay.Platform.Android;
@@ -199,7 +200,12 @@ namespace MajdataPlay
         /// <summary>Gets the system settings stored in system-settings.json, which describe this device and stay local.</summary>
         public static SystemSetting SystemSettings { get; private set; } = new();
         public static RuntimeConfig RuntimeConfig { get; private set; } = new();
-        public static ApiEndpoint[]? ApiEndpoints { get; private set; }
+        public static ApiEndpoint[] ApiEndpoints { get; private set; } = Array.Empty<ApiEndpoint>();
+
+        /// <summary>Gets where <see cref="UserSettings"/> came from and where the next save writes them.</summary>
+        internal static UserSettingSource ActiveUserSettingSource { get; private set; } = UserSettingSource.Local;
+        /// <summary>Gets the account that owns <see cref="UserSettings"/>, or null while the local copy is in use.</summary>
+        internal static ApiEndpoint? UserSettingOwner { get; private set; }
 
         public static CancellationToken GlobalCT
         {
@@ -227,6 +233,8 @@ namespace MajdataPlay
         private const string UserSettingsFileName = "settings.json";
         /// <summary>The system settings file name inside <see cref="RootDirectory"/>.</summary>
         private const string SystemSettingsFileName = "system-settings.json";
+        /// <summary>The suffix of the temporary sibling a settings file is written to before it replaces the live file.</summary>
+        private const string SettingsTempSuffix = ".tmp";
         /// <summary>The name of <see cref="RuntimeDirectory"/> inside <see cref="PersistentDirectory"/>, and of the legacy runtime directory inside <see cref="CacheDirectory"/>.</summary>
         private const string RuntimeDirectoryName = "Runtime";
         /// <summary>The legacy runtime configuration file name inside <see cref="RuntimeDirectory"/>, imported into the runtime database.</summary>
@@ -560,8 +568,7 @@ namespace MajdataPlay
             inputDevice.ButtonRing.DebounceThresholdMs = Math.Max(0, inputDevice.ButtonRing.DebounceThresholdMs);
             inputDevice.TouchPanel.DebounceThresholdMs = Math.Max(0, inputDevice.TouchPanel.DebounceThresholdMs);
 #endif
-            UserSettings.Judge.InnerJudgeDistance = UserSettings.Judge.InnerJudgeDistance.Clamp(0, 1);
-            UserSettings.Judge.OuterJudgeDistance = UserSettings.Judge.OuterJudgeDistance.Clamp(0, 1);
+            SanitizeUserSettings(UserSettings);
             ImportLegacyMachineDescription(systemDocument);
 
             MajDebug.MinLogLevel = SystemSettings.Debug.DebugLevel;
@@ -591,7 +598,7 @@ namespace MajdataPlay
                 return;
             }
             SystemSettings.Network.Online.Machine = machine;
-            WriteText(SystemSettingsPath, Serializer.Json.Serialize(SystemSettings, UserJsonReaderOption));
+            SystemSettingsPath = WriteSettingsFile(SystemSettingsFileName, Serializer.Json.Serialize(SystemSettings, UserJsonReaderOption));
             BackupLegacyMachineDescription(legacyFile);
         }
 
@@ -697,9 +704,7 @@ namespace MajdataPlay
         /// <exception cref="IOException">The file could not be created or written.</exception>
         private static StorageFile CreateSettingsFile(string name, object settings)
         {
-            var file = RootDirectory.CreateFile(name, JsonMimeType);
-            WriteText(file, Serializer.Json.Serialize(settings, UserJsonReaderOption));
-            return file;
+            return WriteSettingsFile(name, Serializer.Json.Serialize(settings, UserJsonReaderOption));
         }
 
         /// <summary>Parses the text of a settings file into its JSON document.</summary>
@@ -1015,6 +1020,8 @@ namespace MajdataPlay
         {
             GameManager.OnAppQuit -= OnApplicationQuit;
             GameManager.OnSave -= OnSave;
+            // The final save only queued its upload, so give it a bounded chance to reach the account before the process ends.
+            UserSettingSync.FlushOnQuit();
             SharedHttpClient.CancelPendingRequests();
             SharedHttpClient.Dispose();
 
@@ -1032,19 +1039,78 @@ namespace MajdataPlay
             //listConfig.SelectedDir = SongStorage.CollectionIndex;
 
             var systemJson = Serializer.Json.Serialize(SystemSettings, UserJsonReaderOption);
-            var userJson = Serializer.Json.Serialize(UserSettings, UserJsonReaderOption);
 
-            // Re-resolve the files so a configuration deleted while running is recreated on every backend.
-            // system-settings.json goes first: settings.json may still hold the legacy system settings until it is rewritten.
-            SystemSettingsPath = FindOrCreateFile(RootDirectory, SystemSettingsFileName);
-            WriteText(SystemSettingsPath, systemJson);
-            UserSettingsPath = FindOrCreateFile(RootDirectory, UserSettingsFileName);
-            WriteText(UserSettingsPath, userJson);
+            // system-settings.json describes this device, so it stays local whatever copy the user settings come from.
+            // It is written first: settings.json may still hold the legacy system settings until it is rewritten.
+            SystemSettingsPath = WriteSettingsFile(SystemSettingsFileName, systemJson);
+
+            switch (ActiveUserSettingSource)
+            {
+                case UserSettingSource.Remote:
+                    // The account owns the settings, so the local file keeps the content of the last local session.
+                    UserSettingSync.QueuePush(SerializeUserSettings());
+                    break;
+                case UserSettingSource.Local:
+                    UserSettingsPath = WriteSettingsFile(UserSettingsFileName, Serializer.Json.Serialize(UserSettings, UserJsonReaderOption));
+                    break;
+                case UserSettingSource.Switching:
+                    // A switch owns both copies until it completes, so a save during it must not pick a destination.
+                    break;
+            }
+
             WriteRuntimeConfig(MajDatabase.Runtime, RuntimeConfig);
 
             MajDebug.FlushLog();
         }
 
+        /// <summary>Writes a settings file through a temporary sibling so an interrupted save never leaves a truncated file.</summary>
+        /// <param name="name">The settings file name inside <see cref="RootDirectory"/>.</param>
+        /// <param name="text">The UTF-8 text to write without a byte order mark.</param>
+        /// <returns>The live settings file holding <paramref name="text"/>.</returns>
+        /// <remarks>
+        /// The text is written to <c>name.tmp</c>, flushed to the disk, and only then made the live file in one backend
+        /// operation. A local backend replaces an existing file atomically, so a reader always sees either the previous
+        /// document or the new one, never a partially written file. A provider backend without atomic replacement streams
+        /// the text into the live file instead, which can still leave partial content there. A failed write leaves the live
+        /// file untouched and removes the temporary file.
+        /// </remarks>
+        /// <exception cref="UnauthorizedAccessException">Creating, writing, or replacing the file was denied.</exception>
+        /// <exception cref="NotSupportedException">The backend cannot create, move, or replace the file.</exception>
+        /// <exception cref="IOException">The file could not be created, written, or replaced.</exception>
+        private static StorageFile WriteSettingsFile(string name, string text)
+        {
+            var tempName = name + SettingsTempSuffix;
+            // A temporary file left behind by an interrupted save never holds the live settings.
+            RootDirectory.FindFile(tempName)?.Delete();
+            var temp = RootDirectory.CreateFile(tempName, JsonMimeType);
+            try
+            {
+                WriteText(temp, text);
+                var live = RootDirectory.FindFile(name);
+                return live is null
+                    ? FileSystem.File.Move(temp.Location, RootDirectory.Location, name)
+                    : FileSystem.File.Replace(temp.Location, live.Location);
+            }
+            catch
+            {
+                TryDeleteFile(temp);
+                throw;
+            }
+        }
+
+        /// <summary>Deletes a temporary file whose content was abandoned, logging instead of rethrowing a failure.</summary>
+        /// <param name="file">The temporary file to delete; an already missing file is ignored.</param>
+        private static void TryDeleteFile(StorageFile file)
+        {
+            try
+            {
+                file.Delete();
+            }
+            catch (Exception e)
+            {
+                MajDebug.LogWarning(nameof(MajEnv), $"Failed to delete the temporary file {file.Location}: {e.Message}");
+            }
+        }
 
         /// <summary>Replaces an existing configuration file's content through one storage output stream.</summary>
         /// <param name="file">The existing configuration file on any backend.</param>
@@ -1057,19 +1123,138 @@ namespace MajdataPlay
             using var stream = FileSystem.File.OpenWrite(file.Location, overwrite: true);
             using var writer = new StreamWriter(stream, new UTF8Encoding(false));
             writer.Write(text);
+            writer.Flush();
+            // The text must reach the disk before the replacement publishes it, so a power loss cannot publish an empty file.
+            if (stream is FileStream fileStream)
+            {
+                fileStream.Flush(flushToDisk: true);
+            }
         }
 
-        /// <summary>Finds a JSON configuration file in a directory, or creates it empty so it can be written on any backend.</summary>
-        /// <param name="directory">The existing directory owning the configuration file.</param>
-        /// <param name="name">The configuration file name.</param>
-        /// <returns>The existing or newly created file handle.</returns>
-        /// <exception cref="DirectoryNotFoundException">The directory does not exist.</exception>
-        /// <exception cref="UnauthorizedAccessException">Querying or creating the file was denied.</exception>
-        /// <exception cref="NotSupportedException">The directory's backend cannot create files.</exception>
-        /// <exception cref="IOException">Querying or creating the file failed.</exception>
-        private static StorageFile FindOrCreateFile(StorageDirectory directory, string name)
+        /// <summary>Gets the endpoint that stores the user settings of an account.</summary>
+        /// <returns>
+        /// The first configured endpoint, or null when none is configured. Only that endpoint exchanges user settings, so
+        /// the mirrors of a server never receive them.
+        /// </returns>
+        internal static ApiEndpoint? GetUserSettingEndpoint()
         {
-            return directory.FindFile(name) ?? directory.CreateFile(name, JsonMimeType);
+            return ApiEndpoints is { Length: > 0 } endpoints ? endpoints[0] : null;
+        }
+
+        /// <summary>Changes where saves write the user settings without replacing the settings in memory.</summary>
+        /// <param name="source">The copy the settings came from.</param>
+        /// <param name="owner">The account owning the settings while <paramref name="source"/> is remote.</param>
+        internal static void SetUserSettingSource(UserSettingSource source, ApiEndpoint? owner)
+        {
+            ActiveUserSettingSource = source;
+            UserSettingOwner = owner;
+        }
+
+        /// <summary>Replaces the user settings in memory and points saves at the copy they came from.</summary>
+        /// <param name="settings">The user settings to use.</param>
+        /// <param name="source">The copy the settings came from.</param>
+        /// <param name="owner">The account owning the settings while <paramref name="source"/> is remote.</param>
+        /// <exception cref="ArgumentNullException"><paramref name="settings"/> is null.</exception>
+        internal static void ApplyUserSettings(UserSetting settings, UserSettingSource source, ApiEndpoint? owner)
+        {
+            if (settings is null)
+            {
+                throw new ArgumentNullException(nameof(settings));
+            }
+            SanitizeUserSettings(settings);
+            UserSettings = settings;
+            SetUserSettingSource(source, owner);
+        }
+
+        /// <summary>Returns to the local user settings after an account is left, so the account copy never reaches settings.json.</summary>
+        internal static void RestoreLocalUserSettings()
+        {
+            ApplyUserSettings(ReadLocalUserSettings(), UserSettingSource.Local, null);
+        }
+
+        /// <summary>Serializes the user settings in the layout the game stores.</summary>
+        /// <returns>
+        /// The settings document, which holds the user categories only. The categories describing the device live in
+        /// system-settings.json and therefore never appear in it.
+        /// </returns>
+        internal static string SerializeUserSettings()
+        {
+            return Serializer.Json.Serialize(UserSettings, UserJsonReaderOption);
+        }
+
+        /// <summary>Reads a user settings document of an account, upgrading the layout of older versions first.</summary>
+        /// <param name="json">The document text received from the account.</param>
+        /// <param name="settings">The settings the document holds, or null when it holds none.</param>
+        /// <returns>Whether the document holds settings, holds none, or cannot be read.</returns>
+        internal static UserSettingReadResult ReadUserSettings(string json, out UserSetting? settings)
+        {
+            settings = null;
+            if (string.IsNullOrWhiteSpace(json) || IsEmptySettingsDocument(json))
+            {
+                return UserSettingReadResult.Empty;
+            }
+            try
+            {
+                // The document of an account holds user settings only, so the system document stays empty.
+                var (user, _) = DeserializeSettings(json, null);
+                if (user is null)
+                {
+                    return UserSettingReadResult.Empty;
+                }
+                settings = user;
+                return UserSettingReadResult.Ok;
+            }
+            catch (Exception e)
+            {
+                MajDebug.LogError(nameof(MajEnv), $"Failed to read the user settings of the account\nException: {e}");
+                return UserSettingReadResult.Invalid;
+            }
+        }
+
+        /// <summary>Checks whether a document holds no settings, which distinguishes an unused account from default settings.</summary>
+        /// <param name="json">The document text.</param>
+        /// <returns>True when the text is empty, the JSON literal null, or an object without members.</returns>
+        private static bool IsEmptySettingsDocument(string json)
+        {
+            try
+            {
+                var document = Serializer.Json.Deserialize<JToken>(json, s_settingsDocumentOption);
+                if (document is null || document.Type == JTokenType.Null)
+                {
+                    return true;
+                }
+                return document is JObject root && !root.HasValues;
+            }
+            catch (JsonException)
+            {
+                // Unreadable text is reported by the caller as an invalid document.
+                return false;
+            }
+        }
+
+        /// <summary>Reads the user settings from settings.json without creating or writing the file.</summary>
+        /// <returns>The stored settings, defaults when the file holds none, and defaults when it cannot be read.</returns>
+        private static UserSetting ReadLocalUserSettings()
+        {
+            var file = RootDirectory.FindFile(UserSettingsFileName);
+            if (file is null)
+            {
+                return new UserSetting();
+            }
+            if (ReadUserSettings(file.ReadAllText(), out var settings) is UserSettingReadResult.Ok && settings is not null)
+            {
+                return settings;
+            }
+            MajDebug.LogWarning(nameof(MajEnv), $"Failed to read {UserSettingsFileName} after leaving the account; the local defaults are used.");
+            return new UserSetting();
+        }
+
+        /// <summary>Keeps the values of the user settings that the game can only use within a range.</summary>
+        /// <param name="settings">The user settings to correct in place.</param>
+        private static void SanitizeUserSettings(UserSetting settings)
+        {
+            settings.Judge.InnerJudgeDistance = settings.Judge.InnerJudgeDistance.Clamp(0, 1);
+            settings.Judge.OuterJudgeDistance = settings.Judge.OuterJudgeDistance.Clamp(0, 1);
         }
 
         /// <summary>Represents the single row holding the persisted <see cref="ListConfig"/> fields in the runtime database.</summary>

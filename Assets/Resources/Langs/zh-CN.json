@@ -467,6 +467,7 @@
     "MAJTEXT_LOGIN_LOGIN_FAILED": "登录失败",
     "MAJTEXT_LOGIN_LOGIN_SUCCESS": "登录成功，获取用户数据…",
     "MAJTEXT_LOGIN_SESSION_EXPIRED": "账号身份信息已过期",
+    "MAJTEXT_LOGIN_SETTING_SYNC_FAILED": "设置同步失败，本次使用本地设置",
     "MAJTEXT_LOGIN_UNKNOWN_ERROR": "未知错误，请联系开发团队",
     "MAJTEXT_NEW_VERSION_AVAILABLE": "发现新版本",
     "MAJTEXT_ONLINE_ACCESS_FORBIDDEN": "访问被拒，请检查邮箱验证",

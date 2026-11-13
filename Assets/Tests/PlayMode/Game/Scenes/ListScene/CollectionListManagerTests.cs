@@ -190,7 +190,7 @@ namespace MajdataPlay.Tests.Game.Scenes.PlayMode.ListScene
             Assert.That(_collections.SelectedCollection.Name, Is.EqualTo("A"));
         }
 
-        /// <summary>Checks that the difficulty wraps through all seven levels and is remembered.</summary>
+        /// <summary>Checks that each input moves one available difficulty, skipping missing charts and remembering the result.</summary>
         /// <returns>The test coroutine.</returns>
         [UnityTest]
         public IEnumerator SlideDifficulty_WrapsAndIsRemembered()
@@ -198,11 +198,11 @@ namespace MajdataPlay.Tests.Game.Scenes.PlayMode.ListScene
             yield return Ready(CreateCollection("A", CreateSongs("collection-diff", 2)));
 
             _collections.SlideDifficulty(-1);
-            Assert.That(MajEnv.RuntimeConfig!.List.SelectedDiff, Is.EqualTo(ChartLevel.UTAGE));
-            Assert.That(PrivateMember.GetField<TextMeshProUGUI>(BoundCover(_covers, 0), "_selectedLevelTitle").text, Is.EqualTo("UTAGE"));
+            Assert.That(MajEnv.RuntimeConfig!.List.SelectedDiff, Is.EqualTo(ChartLevel.ReMaster));
+            Assert.That(PrivateMember.GetField<TextMeshProUGUI>(BoundCover(_covers, 0), "_selectedLevelTitle").text, Is.EqualTo("Re:Master"));
 
             _collections.SlideDifficulty(2);
-            Assert.That(MajEnv.RuntimeConfig.List.SelectedDiff, Is.EqualTo(ChartLevel.Basic));
+            Assert.That(MajEnv.RuntimeConfig.List.SelectedDiff, Is.EqualTo(ChartLevel.Easy));
         }
 
         /// <summary>Checks the collection icon of each collection type.</summary>
@@ -265,7 +265,10 @@ namespace MajdataPlay.Tests.Game.Scenes.PlayMode.ListScene
             yield return Ready(CreateCollection("Ranked", songs), recommend);
 
             Assert.That(_covers.SelectedSong, Is.SameAs(songs[1]));
-            _collections.SlideDifficulty((int)ChartLevel.Master);
+            for (var step = 0; step < (int)ChartLevel.Master; step++)
+            {
+                _collections.SlideDifficulty(1);
+            }
             _covers.SlideListToHead();
             Assert.That(_covers.SelectedSong, Is.SameAs(songs[2]));
 

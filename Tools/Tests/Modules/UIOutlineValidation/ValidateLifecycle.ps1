@@ -290,7 +290,9 @@ foreach ($relative in @(
     'Assets/Sprites/1080Circle_Rev.png',
     'Assets/Sprites/Ribbon/icons.png',
     'Assets/Sprites/Ribbon/heart_empty.png',
-    'Assets/Sprites/List/comment.png'
+    'Assets/Sprites/List/comment.png',
+    'Assets/Sprites/Result/ResultBackground.png',
+    'Assets/Sprites/Result/ResultPanel.png'
 ))
 {
     Copy-ProductionFile $relative

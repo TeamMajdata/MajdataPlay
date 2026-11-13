@@ -394,6 +394,7 @@
     "MAJTEXT_LOGIN_LOGIN_FAILED": "ログインに失敗しました",
     "MAJTEXT_LOGIN_LOGIN_SUCCESS": "ログイン成功 ユーザーデータを取得中……",
     "MAJTEXT_LOGIN_SESSION_EXPIRED": "ログインセッションの有効期限が切れました。",
+    "MAJTEXT_LOGIN_SETTING_SYNC_FAILED": "設定の同期に失敗しました。今回はローカルの設定を使用します。",
     "MAJTEXT_LOGIN_UNKNOWN_ERROR": "不明なエラーが発生しました。開発チームにお問い合わせください。",
     "MAJTEXT_ONLINE_METHOD_NOT_ALLOWED": "405 Method Not Allowed バグの可能性が高いためサポートに報告してください。",
     "MAJTEXT_ONLINE_USERNAME_OR_PASSWORD_INCORRECT": "ユーザー名またはパスワードが間違っています。",

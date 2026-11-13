@@ -367,9 +367,9 @@ namespace MajdataPlay.Tests.Game.Rendering
             Assert.That(panel, Does.Not.Contain("_liquidTintColor:"));
         }
 
-        /// <summary>Checks refraction-width multipliers are confined to the five explicitly requested large cards.</summary>
+        /// <summary>Checks width multipliers are confined to the requested large cards and two Setting adjustment capsules.</summary>
         /// <param name="path">The exact authored scene or prefab.</param>
-        /// <param name="panelId">The only panel component allowed to override its width in this asset.</param>
+        /// <param name="panelId">The requested large-card component in this asset.</param>
         /// <param name="expectedScale">The requested multiplier over the existing role-specific width.</param>
         [TestCase("Assets/Scenes/Setting.unity", "1053645856", 2f)]
         [TestCase("Assets/Prefabs/List/Main_Display_ribbon.prefab", "5019321880153334813", 2f)]
@@ -387,8 +387,24 @@ namespace MajdataPlay.Tests.Game.Rendering
             var scale = Regex.Match(panel, @"^  _liquidRefractionWidthScale: (?<value>[^\r\n]+)\r?$", RegexOptions.Multiline);
             Assert.That(scale.Success, Is.True);
             Assert.That(float.Parse(scale.Groups["value"].Value, CultureInfo.InvariantCulture), Is.EqualTo(expectedScale));
-            Assert.That(Regex.Matches(text, @"^  _liquidRefractionWidthScale:", RegexOptions.Multiline).Count, Is.EqualTo(1),
-                "Other controls and inner plates in the same asset must keep the default width.");
+            var expectedOverrideCount = 1;
+            if (path == "Assets/Scenes/Setting.unity")
+            {
+                foreach (var adjustmentId in new[] { "900000000000000014", "900000000000000015" })
+                {
+                    var adjustments = Regex.Matches(text, @"^--- !u!114 &" + adjustmentId +
+                        @"\r?\n(?<body>.*?)(?=^--- |\z)", RegexOptions.Multiline | RegexOptions.Singleline);
+                    Assert.That(adjustments.Count, Is.EqualTo(1), "Each authorized adjustment component must remain unique.");
+                    var adjustment = adjustments[0].Groups["body"].Value;
+                    Assert.That(adjustment, Does.Contain("guid: ef06d39c7c35439cafc6637c942934d4"));
+                    var adjustmentScale = Regex.Match(adjustment, @"^  _liquidRefractionWidthScale: (?<value>[^\r\n]+)\r?$", RegexOptions.Multiline);
+                    Assert.That(adjustmentScale.Success, Is.True);
+                    Assert.That(float.Parse(adjustmentScale.Groups["value"].Value, CultureInfo.InvariantCulture), Is.EqualTo(0.75f));
+                }
+                expectedOverrideCount += 2;
+            }
+            Assert.That(Regex.Matches(text, @"^  _liquidRefractionWidthScale:", RegexOptions.Multiline).Count, Is.EqualTo(expectedOverrideCount),
+                "Only the requested large card and Setting adjustment capsules may override their widths.");
         }
 
         /// <summary>Checks the peripheral ring and unrelated practice/calibration panels retain their unmodified widths.</summary>

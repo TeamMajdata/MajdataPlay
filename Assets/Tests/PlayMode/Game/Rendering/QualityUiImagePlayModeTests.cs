@@ -836,7 +836,7 @@ namespace MajdataPlay.Tests.Game.Rendering
             Canvas.ForceUpdateCanvases();
             var captured = image.canvasRenderer.GetMaterial();
             Assert.That(captured, Is.Not.SameAs(source));
-            Assert.That(captured.renderQueue, Is.EqualTo(MajUiBackdropBridge.BackgroundQueueUpperBound));
+            Assert.That(captured.renderQueue, Is.EqualTo(MajUiBackdropBridge.CategoryBackgroundQueue));
             Assert.That(captured.shader, Is.SameAs(source.shader));
             Assert.That(captured.GetColor("_Color"), Is.EqualTo(source.GetColor("_Color")));
             Assert.That(captured.GetFloat("_Stencil"), Is.EqualTo(7f));
@@ -876,7 +876,7 @@ namespace MajdataPlay.Tests.Game.Rendering
             UiOutlineTheme.Configure(UiOutlineMode.All);
             UiPvBackdropBlur.Configure(true);
             var first = image.material;
-            Assert.That(first.renderQueue, Is.EqualTo(MajUiBackdropBridge.BackgroundQueueUpperBound));
+            Assert.That(first.renderQueue, Is.EqualTo(MajUiBackdropBridge.CategoryBackgroundQueue));
             source.SetColor("_Color", Color.magenta);
             Assert.That(image.material, Is.SameAs(first));
             Assert.That(first.GetColor("_Color"), Is.EqualTo(Color.magenta));
@@ -886,7 +886,7 @@ namespace MajdataPlay.Tests.Game.Rendering
 
             Assert.That(second, Is.Not.SameAs(first));
             Assert.That(second.GetColor("_Color"), Is.EqualTo(Color.cyan));
-            Assert.That(second.renderQueue, Is.EqualTo(MajUiBackdropBridge.BackgroundQueueUpperBound));
+            Assert.That(second.renderQueue, Is.EqualTo(MajUiBackdropBridge.CategoryBackgroundQueue));
             Assert.That(image.SourceMaterial, Is.SameAs(replacement));
             yield return null;
             yield return null;
@@ -901,7 +901,7 @@ namespace MajdataPlay.Tests.Game.Rendering
             image.enabled = true;
             var third = image.material;
 
-            Assert.That(third.renderQueue, Is.EqualTo(MajUiBackdropBridge.BackgroundQueueUpperBound));
+            Assert.That(third.renderQueue, Is.EqualTo(MajUiBackdropBridge.CategoryBackgroundQueue));
             Assert.That(third.shader, Is.SameAs(replacement.shader));
             UnityEngine.Object.Destroy(image.gameObject);
             yield return null;

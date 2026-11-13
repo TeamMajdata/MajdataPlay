@@ -1,4 +1,28 @@
-# Android graphics state capture
+# Rendering runtime
+
+## Ownership and maintenance
+
+`UiOutlineTheme` selects artwork and material policy; `QualityUiImage` preserves
+the authored Image geometry and supplies clearcoat metadata. `UiBackdropPanel`
+binds each visible surface to one capture role, while `UiPvBackdropBlur` owns the
+six reusable work textures. The MRP bridge orders captures but does not own UI
+objects or their resources. `UiGlassOpticsAtlas` reads prebaked optical data;
+the Editor baker is the only contour-generation path.
+
+Keep capture roles, fallback behavior and resource release explicit. Do not add
+parallel quality switches or runtime UI layout. `CoverDecorationGlass` serves
+only the late List frame; its hidden `_Frame` property identifies its capture
+role and is not a second rendering mode. Difficulty rings and badges use the
+ordinary material path. Unreferenced experimental materials are not retained.
+
+`AtlasLayout`, `OutlineTheme` and `GlassOpticsAtlas` under
+`Assets/Resources/Rendering/UI` are required runtime assets, with stable metadata.
+They must ship with source changes: a normal Unity import/build does not bake
+them automatically. They are distinct from local font atlases and Editor caches.
+
+UI validation commands and isolation limits are in
+[`UIOutlineValidation`](../../../../Tools/Tests/Modules/UIOutlineValidation/README.md).
+The Android graphics-state capture workflow follows below.
 
 ## Settlement surfaces and offline contour maintenance
 

@@ -1,5 +1,24 @@
 # Maj liquid glass design and reference history
 
+## Implementation boundaries
+
+Artwork selection, capture ownership and optical shading have separate owners:
+`UiOutlineTheme`, `UiPvBackdropBlur` and the glass shaders. Surfaces choose one
+existing capture role through `UiBackdropPanel`; they do not allocate their own
+scene copies. The six-target pool persists across menu and Game transitions.
+Missing resources disable the relevant optical operation rather than running
+another distance-field or refraction implementation each frame.
+
+The List cover shader is dedicated to its late circular clearcoat. Its hidden
+`_Frame` property is a registration marker, not a selectable GPU mode. Removed
+ring/badge glass materials and their old shader paths have no replacement branch:
+those elements keep their ordinary rendering. The current frame lighting,
+transmission, coverage and order described below remain the reference behavior.
+
+Prebaked layout, theme and optics assets are runtime dependencies and are
+committed with their metadata. Font caches, local configuration, test outputs
+and build products are not part of this implementation.
+
 ## Current controls and audit boundary
 
 Refined's **Rendering Style** row (formerly Panel Style) retains its Gaussian /
