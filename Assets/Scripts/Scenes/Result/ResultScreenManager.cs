@@ -1,3 +1,4 @@
+using MajdataPlay.Net.Models;
 using MajdataPlay.IO;
 using TMPro;
 using UnityEngine;
@@ -179,7 +180,7 @@ namespace MajdataPlay.Scenes.Result
             var totalJudgeRecord = JudgeDetail.UnpackJudgeRecord(result.JudgeRecord.TotalJudgeInfo);
             var song = result.SongDetail;
             var historyResult = ScoreManager.GetScore(song, listConfig.SelectedDiff);
-            var score = MaiScore.CreateFromResult(result, result.Level);
+            var score = song is OnlineSongDetail ? OnlineMaiScore.CreateFromResult(result, result.Level) : null;
             var diffColor = RuntimeDatabase.DifficultyColors[(int)_gameInfo.CurrentLevel];
             _levelCircleDisplayer.color = diffColor;
             _levelBGDisplayer.color = diffColor;

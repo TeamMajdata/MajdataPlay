@@ -377,7 +377,7 @@ namespace MajdataPlay.Tests.Game.Scenes.PlayMode.MiscScenes
         {
             using var directory = new TemporaryDirectory();
             var local = CreateSender();
-            local.Init(new FakeSongDetail("majtest-interaction-local"), new MaiScore());
+            local.Init(new FakeSongDetail("majtest-interaction-local"), new OnlineMaiScore());
             var localPost = local.SendScoreAsync();
             Assert.That(localPost.IsCompleted, Is.True);
             Assert.That(localPost.IsFaulted, Is.False);
@@ -385,7 +385,7 @@ namespace MajdataPlay.Tests.Game.Scenes.PlayMode.MiscScenes
             Assert.That(PrivateMember.GetField<bool>(local, "_isInited"), Is.False);
 
             var guest = CreateSender();
-            guest.Init(OnlineSong(directory, NetAuthMethodOption.None), new MaiScore());
+            guest.Init(OnlineSong(directory, NetAuthMethodOption.None), new OnlineMaiScore());
             var guestPost = guest.SendScoreAsync();
             Assert.That(guestPost.IsCompleted, Is.True);
             Assert.That(guestPost.IsFaulted, Is.False);
@@ -400,12 +400,12 @@ namespace MajdataPlay.Tests.Game.Scenes.PlayMode.MiscScenes
             using var directory = new TemporaryDirectory();
             var sender = CreateSender();
             var song = OnlineSong(directory, NetAuthMethodOption.Plain);
-            var score = new MaiScore();
+            var score = new OnlineMaiScore();
             sender.Init(song, score);
             Assert.That(PrivateMember.GetField<bool>(sender, "_isInited"), Is.True);
             Assert.That(PrivateMember.GetField<bool>(sender, "_isLocalOrGuest"), Is.False);
             Assert.That(PrivateMember.GetField<OnlineSongDetail>(sender, "_onlineDetail"), Is.SameAs(song));
-            Assert.That(PrivateMember.GetField<MaiScore>(sender, "_score"), Is.SameAs(score));
+            Assert.That(PrivateMember.GetField<OnlineMaiScore>(sender, "_score"), Is.SameAs(score));
 
             PrivateMember.SetField(sender, "_isScorePosted", true);
             var post = sender.SendScoreAsync();

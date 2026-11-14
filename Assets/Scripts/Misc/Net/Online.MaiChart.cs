@@ -5,11 +5,13 @@ using MajdataPlay.Collections;
 using MajdataPlay.Diagnostics;
 using MajdataPlay.Net.Models;
 using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
 using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Net;
 using System.Net.Http;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 #nullable enable
@@ -28,6 +30,8 @@ namespace MajdataPlay.Net
             private const string API_GET_LIST = "maichart/list";
             /// <summary>The route of the metadata and files of several charts.</summary>
             private const string API_POST_INFO = "maichart/info";
+            /// <summary>The route of the metadata, files and level hashes of one chart.</summary>
+            private const string API_GET_INFO = "maichart/{0}/info";
             /// <summary>The route of the charts that changed within a time range.</summary>
             private const string API_GET_CHANGES = "maichart/changes";
             /// <summary>The format of the moments in the query of <c>GET maichart/changes</c>: UTC with milliseconds, the precision the server stores.</summary>
@@ -40,8 +44,10 @@ namespace MajdataPlay.Net
             private const string API_COMMENTS = "maichart/{0}/comments";
             /// <summary>The route of the rankings of a chart, formatted with the chart identifier.</summary>
             private const string API_GET_LEADERBOARD = "maiscore/leaderboard/chart/by-id/{0}";
-            /// <summary>The route that stores a score of the current user on a chart, formatted with the chart identifier.</summary>
-            private const string API_POST_SCORE = "maichart/{0}/score";
+            /// <summary>The route that stores a score by level hash.</summary>
+            private const string API_POST_SCORE = "maiscore/level/{0}";
+            /// <summary>The legacy route that stores a score by chart identifier and difficulty.</summary>
+            private const string API_POST_LEGACY_SCORE = "maichart/{0}/score";
 
             /// <summary>The number of chart identities per <c>POST maichart/info</c>; the server answers any number in two queries, batches only bound the size of one response.</summary>
             private const int INFO_BATCH_SIZE = 500;
@@ -152,6 +158,31 @@ namespace MajdataPlay.Net
                 }
 
                 return infos.ToArray();
+            }
+            /// <summary>Fetches the metadata, files and level hashes of one chart from <c>GET maichart/{chartId}/info</c>.</summary>
+            /// <param name="apiEndpoint">The endpoint serving the chart.</param>
+            /// <param name="chartId">The chart identifier.</param>
+            /// <param name="token">The token canceling the request.</param>
+            /// <returns>The chart info, or null when the endpoint does not provide the chart or the request failed.</returns>
+            public static async ValueTask<MajNetChartInfo?> GetInfoAsync(ApiEndpoint apiEndpoint, string chartId, CancellationToken token = default)
+            {
+                await UniTask.SwitchToThreadPool();
+                var uri = BuildChartUri(apiEndpoint, API_GET_INFO, chartId);
+                for (var i = 0; i < MajEnv.HttpRequestMaxRetry; i++)
+                {
+                    var rsp = await GetAsync(uri, token);
+                    var exception = default(Exception?);
+                    if (rsp.IsSuccessfully && rsp.TryDeserialize<MajNetChartInfo>(out var info, out exception) && info is not null)
+                    {
+                        return info;
+                    }
+                    MajDebug.LogError(LOG_TAG, $"[Online] Failed to get chart info: {exception?.Message ?? rsp.StatusCode?.ToString() ?? "Unknown error"}");
+                    if (!ShouldRetry(rsp))
+                    {
+                        break;
+                    }
+                }
+                return null;
             }
             /// <summary>
             /// Fetches the charts that were uploaded, modified or deleted within a time range from
@@ -304,25 +335,61 @@ namespace MajdataPlay.Net
                 var uri = BuildChartUri(song.ServerInfo, API_GET_LEADERBOARD, song.Id);
                 return await GetCachedAsync(s_scoreInfos, uri, "chart score info", false, token);
             }
-            /// <summary>Sends a score of a chart to <c>POST maichart/{chartId}/score</c> and invalidates the cached rankings.</summary>
+            /// <summary>Sends a score by level hash, falling back to the legacy chart route only when the new route is unsupported.</summary>
             /// <param name="song">The online chart.</param>
-            /// <param name="score">The score.</param>
+            /// <param name="score">The online submission and its level routing information.</param>
             /// <param name="token">The token canceling the request.</param>
             /// <returns>The response of the last attempt.</returns>
-            public static async ValueTask<EndpointResponse> PostScoreAsync(OnlineSongDetail song, MaiScore score, CancellationToken token = default)
+            public static async ValueTask<EndpointResponse> PostScoreAsync(OnlineSongDetail song, OnlineMaiScore score, CancellationToken token = default)
             {
                 await UniTask.SwitchToThreadPool();
-                var scoreUrl = BuildChartUri(song.ServerInfo, API_POST_SCORE, song.Id);
-                var json = await SerializeJsonAsync(score);
+                var rsp = default(EndpointResponse);
+                if (!string.IsNullOrEmpty(score.LevelHash))
+                {
+                    var uri = BuildLevelScoreUri(song.ServerInfo, score.LevelHash);
+                    var json = await SerializeJsonAsync(score);
+                    rsp = await SendScoreAsync(uri, json, token);
+                    if (!IsScoreRouteUnsupported(rsp))
+                    {
+                        InvalidateScoreInfo(song, rsp);
+                        return rsp;
+                    }
+                }
+                if (token.IsCancellationRequested)
+                {
+                    return CreateCanceledResponse(HttpMethod.Post, BuildChartUri(song.ServerInfo, API_POST_LEGACY_SCORE, song.Id), token);
+                }
+
+                MajDebug.LogWarning(LOG_TAG, $"[Online] Submitting score through the legacy API at {song.ServerInfo.Url}: the level hash or level score route is unavailable.");
+                var legacyScore = new OnlineLegacyMaiScore
+                {
+                    Hash = song.Hash,
+                    ChartLevel = score.ChartLevel,
+                    Acc = score.Acc,
+                    DXScore = score.DXScore,
+                    ComboState = score.ComboState
+                };
+                var legacyUri = BuildChartUri(song.ServerInfo, API_POST_LEGACY_SCORE, song.Id);
+                var legacyJson = await SerializeJsonAsync(legacyScore);
+                rsp = await SendScoreAsync(legacyUri, legacyJson, token);
+                InvalidateScoreInfo(song, rsp);
+                return rsp;
+            }
+            /// <summary>Sends a serialized score, retrying only unanswered requests.</summary>
+            /// <param name="uri">The submission route.</param>
+            /// <param name="json">The serialized online submission.</param>
+            /// <param name="token">The token canceling the submission.</param>
+            /// <returns>The response of the last attempt.</returns>
+            private static async ValueTask<EndpointResponse> SendScoreAsync(Uri uri, string json, CancellationToken token)
+            {
                 var rsp = default(EndpointResponse);
 
                 for (var i = 0; i < MajEnv.HttpRequestMaxRetry; i++)
                 {
-                    rsp = await PostAsync(scoreUrl, CreateJsonContent(json), token);
+                    rsp = await PostAsync(uri, CreateJsonContent(json), token);
                     if (rsp.IsSuccessfully)
                     {
                         MajDebug.LogDebug(LOG_TAG, rsp);
-                        s_scoreInfos.Remove(BuildChartUri(song.ServerInfo, API_GET_LEADERBOARD, song.Id));
                         return rsp;
                     }
                     else
@@ -336,6 +403,41 @@ namespace MajdataPlay.Net
                 }
 
                 return rsp;
+            }
+            /// <summary>Determines whether the level score route is missing rather than rejecting this particular score.</summary>
+            /// <param name="rsp">The response of the level score route.</param>
+            /// <returns>True for an unsupported route; false for transport failures or a structured API rejection.</returns>
+            private static bool IsScoreRouteUnsupported(EndpointResponse rsp)
+            {
+                if (rsp.StatusCode is HttpStatusCode.MethodNotAllowed or HttpStatusCode.NotImplemented)
+                {
+                    return true;
+                }
+                if (rsp.StatusCode is not HttpStatusCode.NotFound)
+                {
+                    return false;
+                }
+                try
+                {
+                    // A new server returns an API code for a stale level hash or unknown chart. Such a rejection
+                    // must reach the caller instead of submitting the same play through a different identity.
+                    var body = JObject.Parse(Encoding.UTF8.GetString(rsp.AsSpan()));
+                    return body["code"] is null;
+                }
+                catch (JsonException)
+                {
+                    return true;
+                }
+            }
+            /// <summary>Drops the chart rankings after a score was accepted.</summary>
+            /// <param name="song">The chart on which the play was counted.</param>
+            /// <param name="rsp">The submission response.</param>
+            private static void InvalidateScoreInfo(OnlineSongDetail song, EndpointResponse rsp)
+            {
+                if (rsp.IsSuccessfully)
+                {
+                    s_scoreInfos.Remove(BuildChartUri(song.ServerInfo, API_GET_LEADERBOARD, song.Id));
+                }
             }
             /// <summary>
             /// Returns a live cached response, or fetches it with GET and caches it. Callers asking for the same URI while it
@@ -444,6 +546,17 @@ namespace MajdataPlay.Net
                     json.WriteEndArray();
                 }
                 return writer.ToString();
+            }
+            /// <summary>Builds the submission URI from the level's hexadecimal hash.</summary>
+            /// <param name="endpoint">The endpoint accepting the score.</param>
+            /// <param name="levelHash">The level hash used as one path segment.</param>
+            /// <returns>The URI of the level score submission.</returns>
+            private static Uri BuildLevelScoreUri(ApiEndpoint endpoint, string levelHash)
+            {
+                using var sb = ZString.CreateStringBuilder(true);
+                sb.AppendFormat(API_POST_SCORE, Uri.EscapeDataString(levelHash));
+
+                return new Uri(endpoint.Url, sb.ToString());
             }
             /// <summary>Builds the URI of a chart API.</summary>
             /// <param name="endpoint">The endpoint serving the chart.</param>
