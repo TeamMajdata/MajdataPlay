@@ -109,8 +109,7 @@ namespace MajdataPlay.Tests.Game.Misc.Base
 
             var score = MaiScore.CreateFromResult(in result, ChartLevel.Expert);
 
-            Assert.That(score.ChartLevel, Is.EqualTo(ChartLevel.Expert));
-            Assert.That(score.Hash, Is.EqualTo("hash-a"));
+            Assert.That(score.LevelHash, Is.EqualTo("hash-a:3"));
             Assert.That(score.PlayCount, Is.EqualTo(0));
             Assert.That(score.Acc == result.Acc, Is.True);
             Assert.That(score.DXScore, Is.EqualTo(900));
@@ -128,8 +127,7 @@ namespace MajdataPlay.Tests.Game.Misc.Base
         {
             var score = new MaiScore();
 
-            Assert.That(score.ChartLevel, Is.EqualTo(ChartLevel.Easy));
-            Assert.That(score.Hash, Is.Null);
+            Assert.That(score.LevelHash, Is.Empty);
             Assert.That(score.PlayCount, Is.EqualTo(0));
             Assert.That(score.JudgeDetail, Is.Null);
             Assert.That(score.Timestamp, Is.EqualTo(DateTime.MinValue));
@@ -145,18 +143,16 @@ namespace MajdataPlay.Tests.Game.Misc.Base
             var all = new[] { scores.Easy, scores.Basic, scores.Advance, scores.Expert, scores.Master, scores.ReMaster, scores.UTAGE };
             for (var i = 0; i < all.Length; i++)
             {
-                Assert.That(all[i].Hash, Is.EqualTo("hash-b"));
-                Assert.That(all[i].ChartLevel, Is.EqualTo((ChartLevel)i));
+                Assert.That(all[i].LevelHash, Is.EqualTo("hash-b:" + i));
                 Assert.That(all[i].PlayCount, Is.EqualTo(0));
             }
         }
 
-        /// <summary>Checks that song score buckets require a hash.</summary>
+        /// <summary>Checks that song score buckets require song metadata.</summary>
         [Test]
-        public void SongScoresCreate_EmptyHash_Throws()
+        public void SongScoresCreate_NullSong_Throws()
         {
-            Assert.Throws<ArgumentNullException>(() => SongScores.Create(string.Empty));
-            Assert.Throws<ArgumentNullException>(() => SongScores.Create((string)null!));
+            Assert.Throws<ArgumentNullException>(() => SongScores.Create(null!));
         }
     }
 }

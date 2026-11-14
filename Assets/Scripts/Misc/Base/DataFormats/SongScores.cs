@@ -1,74 +1,46 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
-#nullable enable
-namespace MajdataPlay;
-internal readonly struct SongScores
-{
-    public required MaiScore Easy { get; init; }
-    public required MaiScore Basic { get; init; }
-    public required MaiScore Advance { get; init; }
-    public required MaiScore Expert { get; init; }
-    public required MaiScore Master { get; init; }
-    public required MaiScore ReMaster { get; init; }
-    public required MaiScore UTAGE { get; init; }
+using System;
 
-    public static SongScores Create(ISongDetail songDetail)
+#nullable enable
+namespace MajdataPlay
+{
+    /// <summary>Groups the seven difficulty records displayed for a song.</summary>
+    internal readonly struct SongScores
     {
-        return Create(songDetail.Hash);
-    }
-    public static SongScores Create(string hash)
-    {
-        if(string.IsNullOrEmpty(hash))
+        /// <summary>Gets the easy chart's score.</summary>
+        public required MaiScore Easy { get; init; }
+        /// <summary>Gets the basic chart's score.</summary>
+        public required MaiScore Basic { get; init; }
+        /// <summary>Gets the advance chart's score.</summary>
+        public required MaiScore Advance { get; init; }
+        /// <summary>Gets the expert chart's score.</summary>
+        public required MaiScore Expert { get; init; }
+        /// <summary>Gets the master chart's score.</summary>
+        public required MaiScore Master { get; init; }
+        /// <summary>Gets the remaster chart's score.</summary>
+        public required MaiScore ReMaster { get; init; }
+        /// <summary>Gets the utage chart's score.</summary>
+        public required MaiScore UTAGE { get; init; }
+
+        /// <summary>Creates empty score records using each difficulty's own level hash.</summary>
+        /// <param name="songDetail">The song whose difficulty hashes identify the scores.</param>
+        /// <returns>Empty score records for the song's seven difficulties.</returns>
+        /// <exception cref="ArgumentNullException">The song is null.</exception>
+        public static SongScores Create(ISongDetail songDetail)
         {
-            throw new ArgumentNullException(nameof(hash));
-        }
-        return new SongScores()
-        {
-            Easy = new MaiScore()
+            if (songDetail is null)
             {
-                Hash = hash,
-                ChartLevel = ChartLevel.Easy,
-                PlayCount = 0
-            },
-            Basic = new MaiScore()
-            {
-                Hash = hash,
-                ChartLevel = ChartLevel.Basic,
-                PlayCount = 0
-            },
-            Advance = new MaiScore()
-            {
-                Hash = hash,
-                ChartLevel = ChartLevel.Advance,
-                PlayCount = 0
-            },
-            Expert = new MaiScore()
-            {
-                Hash = hash,
-                ChartLevel = ChartLevel.Expert,
-                PlayCount = 0
-            },
-            Master = new MaiScore()
-            {
-                Hash = hash,
-                ChartLevel = ChartLevel.Master,
-                PlayCount = 0
-            },
-            ReMaster = new MaiScore()
-            {
-                Hash = hash,
-                ChartLevel = ChartLevel.ReMaster,
-                PlayCount = 0
-            },
-            UTAGE = new MaiScore()
-            {
-                Hash = hash,
-                ChartLevel = ChartLevel.UTAGE,
-                PlayCount = 0
+                throw new ArgumentNullException(nameof(songDetail));
             }
-        };
+            return new SongScores
+            {
+                Easy = new MaiScore { LevelHash = songDetail.GetLevelHash(ChartLevel.Easy) ?? string.Empty },
+                Basic = new MaiScore { LevelHash = songDetail.GetLevelHash(ChartLevel.Basic) ?? string.Empty },
+                Advance = new MaiScore { LevelHash = songDetail.GetLevelHash(ChartLevel.Advance) ?? string.Empty },
+                Expert = new MaiScore { LevelHash = songDetail.GetLevelHash(ChartLevel.Expert) ?? string.Empty },
+                Master = new MaiScore { LevelHash = songDetail.GetLevelHash(ChartLevel.Master) ?? string.Empty },
+                ReMaster = new MaiScore { LevelHash = songDetail.GetLevelHash(ChartLevel.ReMaster) ?? string.Empty },
+                UTAGE = new MaiScore { LevelHash = songDetail.GetLevelHash(ChartLevel.UTAGE) ?? string.Empty },
+            };
+        }
     }
 }
