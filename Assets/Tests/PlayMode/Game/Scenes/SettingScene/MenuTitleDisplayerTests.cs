@@ -85,7 +85,7 @@ namespace MajdataPlay.Tests.Game.Scenes.PlayMode.SettingScene
             Assert.That(_displayer.GetComponentsInChildren<Image>(true), Has.Length.EqualTo(1));
         }
 
-        /// <summary>Checks an unselected category restores fixed-size ellipsis typography and the original body tint.</summary>
+        /// <summary>Checks an unselected category restores fixed-size clipped typography and the original body tint.</summary>
         [Test]
         public void SetDistance_One_ShowsUnselectedStyle()
         {
@@ -97,7 +97,7 @@ namespace MajdataPlay.Tests.Game.Scenes.PlayMode.SettingScene
             Assert.That(_background.color, Is.EqualTo(new Color(1f, 1f, 1f, 0.8f)));
             Assert.That(_title.fontSize, Is.EqualTo(22f));
             Assert.That(_viewport.rect.width, Is.EqualTo(192f).Within(0.001f));
-            Assert.That(_title.overflowMode, Is.EqualTo(TextOverflowModes.Ellipsis));
+            Assert.That(_title.overflowMode, Is.EqualTo(TextOverflowModes.Overflow));
             Assert.That(_title.rectTransform.localScale, Is.EqualTo(Vector3.one));
             Assert.That(_title.canvasRenderer.GetColor(), Is.EqualTo(Color.gray));
         }
@@ -138,7 +138,44 @@ namespace MajdataPlay.Tests.Game.Scenes.PlayMode.SettingScene
             Assert.That(_title.rectTransform.localScale, Is.EqualTo(Vector3.one));
         }
 
-        /// <summary>Checks a selected long title scrolls inside existing UI and resets to static ellipsis when unselected.</summary>
+        /// <summary>Checks long titles retain their beginning through enlargement without switching overflow modes.</summary>
+        [Test]
+        public void TransitionOverflow_KeepsTheBeginningWithoutEllipsis()
+        {
+            _title.text = "A considerably longer collection name than this title viewport can display";
+            _displayer.RefreshTitle();
+            foreach (var distance in new[] { 1f, 0.5f, 0.001f, 0f })
+            {
+                _displayer.SetDistance(distance);
+                Canvas.ForceUpdateCanvases();
+                _title.ForceMeshUpdate();
+
+                Assert.That(_title.overflowMode, Is.EqualTo(TextOverflowModes.Overflow));
+                Assert.That(_title.horizontalAlignment, Is.EqualTo(HorizontalAlignmentOptions.Left));
+                Assert.That(_title.isTextTruncated, Is.False);
+                Assert.That(_title.rectTransform.anchoredPosition, Is.EqualTo(Vector2.zero));
+                Assert.That(_title.textInfo.characterInfo[0].origin,
+                    Is.EqualTo(_title.rectTransform.rect.xMin).Within(0.01f));
+                Assert.That(_title.canvasRenderer.hasRectClipping, Is.True);
+            }
+        }
+
+        /// <summary>Checks titles that fit retain centered alignment throughout selection changes.</summary>
+        [Test]
+        public void ShortTitle_StaysCenteredThroughoutSelection()
+        {
+            _title.text = "Short";
+            _displayer.RefreshTitle();
+            foreach (var distance in new[] { 1f, 0.5f, 0.001f, 0f })
+            {
+                _displayer.SetDistance(distance);
+
+                Assert.That(_title.horizontalAlignment, Is.EqualTo(HorizontalAlignmentOptions.Center));
+                Assert.That(_title.rectTransform.anchoredPosition, Is.EqualTo(Vector2.zero));
+            }
+        }
+
+        /// <summary>Checks selected scrolling pauses at the beginning and resets when leaving, reselecting or renaming.</summary>
         /// <returns>The title-scrolling coroutine.</returns>
         [UnityTest]
         public IEnumerator SelectedOverflow_ScrollsWithoutCreatingUiAndResetsOnLeave()
@@ -147,7 +184,9 @@ namespace MajdataPlay.Tests.Game.Scenes.PlayMode.SettingScene
             _displayer.RefreshTitle();
             var count = _displayer.GetComponentsInChildren<RectTransform>(true).Length;
             _displayer.SetDistance(0f);
-            yield return new WaitForSecondsRealtime(1.1f);
+            yield return new WaitForSecondsRealtime(0.2f);
+            Assert.That(_title.rectTransform.anchoredPosition, Is.EqualTo(Vector2.zero));
+            yield return new WaitForSecondsRealtime(0.9f);
             Assert.That(_title.rectTransform.anchoredPosition.x, Is.LessThan(0f));
             Assert.That(_title.overflowMode, Is.EqualTo(TextOverflowModes.Overflow));
             Assert.That(_title.rectTransform.localScale, Is.EqualTo(Vector3.one));
@@ -156,11 +195,55 @@ namespace MajdataPlay.Tests.Game.Scenes.PlayMode.SettingScene
 
             _displayer.SetDistance(1f);
             Assert.That(_title.rectTransform.anchoredPosition, Is.EqualTo(Vector2.zero));
-            Assert.That(_title.overflowMode, Is.EqualTo(TextOverflowModes.Ellipsis));
+            Assert.That(_title.overflowMode, Is.EqualTo(TextOverflowModes.Overflow));
             Assert.That(_title.fontSize, Is.EqualTo(22f));
             yield return new WaitForSecondsRealtime(0.1f);
             Assert.That(_title.rectTransform.anchoredPosition, Is.EqualTo(Vector2.zero));
             Assert.That(_title.rectTransform.localScale, Is.EqualTo(Vector3.one));
+
+            _displayer.SetDistance(0f);
+            Assert.That(_title.rectTransform.anchoredPosition, Is.EqualTo(Vector2.zero));
+            _title.text = "A renamed collection whose title is still longer than the selected viewport";
+            _displayer.RefreshTitle();
+            _title.ForceMeshUpdate();
+            Assert.That(_title.horizontalAlignment, Is.EqualTo(HorizontalAlignmentOptions.Left));
+            Assert.That(_title.textInfo.characterInfo[0].origin,
+                Is.EqualTo(_title.rectTransform.rect.xMin).Within(0.01f));
+            yield return new WaitForSecondsRealtime(0.1f);
+            Assert.That(_title.rectTransform.anchoredPosition, Is.EqualTo(Vector2.zero));
+        }
+
+        /// <summary>Checks scrolling reaches the last characters and returns to the first characters.</summary>
+        /// <returns>The two endpoint transitions without waiting through the complete long title.</returns>
+        [UnityTest]
+        public IEnumerator SelectedOverflow_ReachesTheEndAndReturnsToTheBeginning()
+        {
+            _title.text = "A considerably longer collection name than this title viewport can display";
+            _displayer.RefreshTitle();
+            _displayer.SetDistance(0f);
+            Canvas.ForceUpdateCanvases();
+            _title.ForceMeshUpdate();
+            yield return null;
+
+            var overflow = _title.preferredWidth - _viewport.rect.width;
+            PrivateMember.SetField(_displayer, "_titleScrollOffset", -overflow + 0.0001f);
+            PrivateMember.SetField(_displayer, "_titleScrollPause", 0f);
+            yield return null;
+
+            var lastCharacter = _title.textInfo.characterInfo[_title.textInfo.characterCount - 1];
+            Assert.That(lastCharacter.xAdvance + _title.rectTransform.anchoredPosition.x,
+                Is.EqualTo(_viewport.rect.xMax).Within(0.05f));
+            var endPosition = _title.rectTransform.anchoredPosition;
+            yield return null;
+            Assert.That(_title.rectTransform.anchoredPosition, Is.EqualTo(endPosition));
+
+            PrivateMember.SetField(_displayer, "_titleScrollOffset", -0.0001f);
+            PrivateMember.SetField(_displayer, "_titleScrollPause", 0f);
+            yield return null;
+
+            Assert.That(_title.rectTransform.anchoredPosition, Is.EqualTo(Vector2.zero));
+            Assert.That(_title.textInfo.characterInfo[0].origin,
+                Is.EqualTo(_viewport.rect.xMin).Within(0.01f));
         }
 
         /// <summary>Checks the shared navigation-only fade, including a transition interrupted at partial opacity.</summary>

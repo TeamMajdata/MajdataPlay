@@ -169,6 +169,9 @@ namespace MajdataPlay.Scenes.Title
             await ScanObjectStoreAsync(cancellationToken);
             await SongStorage.InitAsync(cancellationToken);
             await SongStorage.RefreshLocal(progress, cancellationToken);
+            await ScoreManager.MigrateLegacyScoresAsync(
+                SongStorage.Collections.SelectMany(collection => collection.GetOriginSnapshot()).Where(song => !song.IsOnline),
+                cancellationToken);
         }
 
         /// <summary>Indexes the stored online objects, so cached charts can be listed offline, and deletes the objects nothing references any more.</summary>

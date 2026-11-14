@@ -1,4 +1,4 @@
-﻿using MajdataPlay.Scenes.Game;
+using MajdataPlay.Scenes.Game;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Serialization;
 using System;
@@ -14,13 +14,17 @@ namespace MajdataPlay.Net.Models
         /// <summary>Gets the achievement of the score.</summary>
         public Accurate Acc { get; init; }
         /// <summary>Gets the DX score.</summary>
-        public uint DXScore { get; init; }
+        public long DXScore { get; init; }
         /// <summary>Gets the difficulty the score was played on.</summary>
         public ChartLevel ChartLevel { get; init; }
         /// <summary>Gets the combo state of the score.</summary>
         public ComboState ComboState { get; init; }
         /// <summary>Gets the hash of the chart.</summary>
         public string Hash { get; init; }
+        /// <summary>Gets the level hash the score belongs to, or null when an older endpoint omitted it.</summary>
+        public string LevelHash { get; init; }
+        /// <summary>Gets the chart the score is displayed on, or null when an older endpoint omitted it.</summary>
+        public MajnetSongDetail? ChartInfo { get; init; }
         /// <summary>Gets the moment the score was played.</summary>
         public DateTime Timestamp { get; init; }
     }

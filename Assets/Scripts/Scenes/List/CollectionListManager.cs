@@ -400,6 +400,7 @@ namespace MajdataPlay.Scenes.List
                         Id = collection.Id,
                         DanInfo = collection.DanInfo,
                         Type = collection.Type,
+                        IsVirtual = collection.IsVirtual,
                     };
                 }
 

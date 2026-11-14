@@ -230,6 +230,30 @@ namespace MajdataPlay.Tests.Game.Scenes.PlayMode.ListScene
             }
         }
 
+        /// <summary>Checks display snapshots preserve folder identity without giving the aggregate list a folder icon.</summary>
+        /// <returns>The initialized list and category navigation coroutine.</returns>
+        [UnityTest]
+        public IEnumerator Init_PreservesLocalDirectoryIconsWithoutAddingOneToAll()
+        {
+            using var temporary = new TemporaryDirectory();
+            var directory = temporary.Directory.CreateDirectory("Folder");
+            var songs = CreateSongs("collection-folder-icon", 1);
+            var folder = new SongCollection(directory, "Folder", songs);
+            yield return Ready(folder, new SongCollection("All", songs));
+
+            Assert.That(_collections.SelectedCollection.IsVirtual, Is.False);
+            Assert.That(Icon.enabled, Is.True);
+            Assert.That(Icon.sprite.name, Is.EqualTo("Folder"));
+            _collections.NextCollection();
+            PrivateMember.GetField<MotionHandle>(_collections, "_scrollMotion").TryComplete();
+            Assert.That(_collections.SelectedCollection.IsVirtual, Is.True);
+            Assert.That(Icon.enabled, Is.False);
+            _collections.PreviousCollection();
+            PrivateMember.GetField<MotionHandle>(_collections, "_scrollMotion").TryComplete();
+            Assert.That(Icon.enabled, Is.True);
+            Assert.That(Icon.sprite.name, Is.EqualTo("Folder"));
+        }
+
         /// <summary>Checks that favorites keep their instance and online collections keep their source.</summary>
         /// <returns>The test coroutine.</returns>
         [UnityTest]

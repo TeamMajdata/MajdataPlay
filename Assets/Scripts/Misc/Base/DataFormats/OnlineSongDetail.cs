@@ -29,6 +29,8 @@ namespace MajdataPlay
         public string Description { get; init; } = string.Empty;
         public ReadOnlySpan<string> Designers { get => _designers; }
         public ReadOnlySpan<string> Levels { get => _levels; }
+        /// <summary>Gets the level hashes reported by the server or computed from the downloaded chart.</summary>
+        public ReadOnlySpan<string?> LevelHashes => _record.LevelHashes;
         public ReadOnlySpan<string> Tags { get => _tags; }
         public ChartStorageLocation Location { get; } = ChartStorageLocation.Online;
         public DateTime Timestamp { get; init; }
@@ -325,6 +327,7 @@ namespace MajdataPlay
                     var maidata = await SimaiParser.ParseAsync(metadata).ConfigureAwait(false);
                     token.ThrowIfCancellationRequested();
                     _maidata = maidata;
+                    _record.SetLevelHashes(SongDetailExtensions.GetLevelHashes(metadata));
                     return _maidata;
                 }
             }

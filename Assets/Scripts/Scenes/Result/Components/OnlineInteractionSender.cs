@@ -1,6 +1,7 @@
 using Cysharp.Threading.Tasks;
 using MajdataPlay.IO;
 using MajdataPlay.Net;
+using MajdataPlay.Net.Models;
 using MajdataPlay.Scenes.Result.Components.Indicators;
 using Nito.AsyncEx;
 using System.Net;
@@ -18,7 +19,7 @@ namespace MajdataPlay.Scenes.Result.Components
         ScoreUploadIndicator _scoreUploadIndicator;
 
         OnlineSongDetail? _onlineDetail;
-        MaiScore? _score;
+        OnlineMaiScore? _score;
 
         bool _isLocalOrGuest = false;
         bool _isInited = false;
@@ -27,7 +28,10 @@ namespace MajdataPlay.Scenes.Result.Components
         readonly AsyncLock _sendScoreLock = new();
         readonly CancellationTokenSource _cts = new();
 
-        public void Init(ISongDetail song, MaiScore score)
+        /// <summary>Prepares one online score for manual submission within this component's lifetime.</summary>
+        /// <param name="song">The chart that was played.</param>
+        /// <param name="score">The online submission, or null for a local chart.</param>
+        public void Init(ISongDetail song, OnlineMaiScore? score)
         {
             if (song is not OnlineSongDetail onlineDetail)
             {
@@ -70,7 +74,7 @@ namespace MajdataPlay.Scenes.Result.Components
             {
                 return;
             }
-            var cts = CancellationTokenSource.CreateLinkedTokenSource(token, _cts.Token);
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(token, _cts.Token);
             token = cts.Token;
             await using (UniTask.ReturnToCurrentSynchronizationContext())
             {

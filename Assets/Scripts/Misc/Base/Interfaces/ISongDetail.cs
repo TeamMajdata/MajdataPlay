@@ -25,6 +25,8 @@ namespace MajdataPlay
         string Description { get; }
         ReadOnlySpan<string> Designers { get; }
         ReadOnlySpan<string> Levels { get; }
+        /// <summary>Gets the normalized inote SHA-256 hashes indexed by level; a missing or unknown level has no hash.</summary>
+        ReadOnlySpan<string?> LevelHashes { get; }
         ReadOnlySpan<string> Tags { get; }
         ChartStorageLocation Location { get; }
         DateTime Timestamp { get; }

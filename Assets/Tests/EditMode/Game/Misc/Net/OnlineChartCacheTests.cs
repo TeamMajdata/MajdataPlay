@@ -133,6 +133,52 @@ namespace MajdataPlay.Tests.Game.Misc.Net
             return MajDatabase.Runtime.Read(connection => connection.ExecuteScalar<int>("SELECT COUNT(*) FROM OnlineChartCache"));
         }
 
+        /// <summary>Checks that level hashes survive cached reloads and are replaced when the server reports an edited chart.</summary>
+        /// <returns>The test coroutine.</returns>
+        [UnityTest]
+        public IEnumerator SyncAsync_PersistsAndInvalidatesLevelHashes()
+        {
+            return UniTask.ToCoroutine(async () =>
+            {
+                var chart = Chart("level-hashes");
+                var firstHash = new string('a', 64);
+                var secondHash = new string('b', 64);
+                var infos = new Dictionary<string, MajNetChartInfo>
+                {
+                    [chart.Id] = new MajNetChartInfo
+                    {
+                        Metadata = chart,
+                        LevelHashes = new string?[] { null, null, null, null, firstHash, null, null },
+                    },
+                };
+                var records = await _cache.SyncAsync(_endpoint, new[] { chart }, infos);
+                var record = records[chart.Id];
+                Assert.That(record.LevelHashes[4], Is.EqualTo(firstHash));
+                Assert.That(_cache.GetOrCreateRecord(_endpoint, chart).LevelHashes[4], Is.EqualTo(firstHash));
+
+                // An older endpoint omitting levelHashes must retain hashes already learned for the same file revision.
+                await _cache.SyncAsync(_endpoint, new[] { chart }, null);
+                Assert.That(_cache.GetOrCreateRecord(_endpoint, chart).LevelHashes[4], Is.EqualTo(firstHash));
+
+                var hashes = new string?[] { null, null, null, null, secondHash, null, null };
+                record.SetLevelHashes(hashes);
+                hashes[4] = firstHash;
+                await MajDatabase.Runtime.WaitForWritesAsync();
+                Assert.That(record.LevelHashes[4], Is.EqualTo(secondHash));
+                Assert.That(_cache.GetOrCreateRecord(_endpoint, chart).LevelHashes[4], Is.EqualTo(secondHash));
+
+                var edited = Chart(chart.Id, "edited-file-hash");
+                var updated = await _cache.SyncAsync(_endpoint, new[] { edited }, null);
+                Assert.That(updated[chart.Id].LevelHashes.IsEmpty, Is.True);
+                Assert.That(_cache.GetOrCreateRecord(_endpoint, edited).LevelHashes.IsEmpty, Is.True);
+
+                // A parse finishing on an old record after a chart refresh cannot write old hashes into the new revision.
+                record.SetLevelHashes(new string?[] { null, null, null, null, new string('c', 64), null, null });
+                await MajDatabase.Runtime.WaitForWritesAsync();
+                Assert.That(_cache.GetOrCreateRecord(_endpoint, edited).LevelHashes.IsEmpty, Is.True);
+            });
+        }
+
         /// <summary>
         /// Checks that the table is unique on the chart identity and the server, and that endpoints whose servers report
         /// no identifier are keyed by their URLs.
@@ -499,6 +545,35 @@ namespace MajdataPlay.Tests.Game.Misc.Net
 
                 _cache.ResolveServer(_endpoint, new MajNetServerInfo { Id = "majnet" });
                 Assert.That(await ReadColumnAsync("Server", "1"), Is.EqualTo("majnet"));
+            });
+        }
+
+        /// <summary>Checks that adding level hash storage forces one full info refresh while preserving later sync points.</summary>
+        /// <returns>The test coroutine.</returns>
+        [UnityTest]
+        public IEnumerator InitializeAsync_LevelHashUpgradeInvalidatesSyncPointOnce()
+        {
+            return UniTask.ToCoroutine(async () =>
+            {
+                var endpoint = OnlineChartCache.GetEndpointKey(_endpoint);
+                var first = new DateTime(2026, 11, 1, 0, 0, 0, DateTimeKind.Utc);
+                MajDatabase.Runtime.Write(connection =>
+                {
+                    connection.CreateTable<LegacyChartRow>();
+                    connection.Insert(new LegacyChartRow { ChartId = "old-chart", Endpoint = endpoint });
+                    connection.Execute("CREATE TABLE OnlineChartChangeQueries (Server TEXT PRIMARY KEY, LastQueryToTicks INTEGER, LastFullSyncTicks INTEGER, UpdatedAtTicks INTEGER)");
+                    connection.Execute("INSERT INTO OnlineChartChangeQueries VALUES (?, ?, ?, ?)", endpoint, first.Ticks, first.Ticks, first.Ticks);
+                });
+
+                await _cache.InitializeAsync();
+
+                Assert.That(_cache.GetSyncPoint(_endpoint), Is.Null);
+                Assert.That(CountRows(), Is.EqualTo(1));
+                var second = first.AddDays(1);
+                await _cache.SyncAsync(_endpoint, new[] { Chart("old-chart") }, null, second);
+                var nextSession = new OnlineChartCache(ObjectStore.Shared, true);
+                await nextSession.InitializeAsync();
+                Assert.That(nextSession.GetSyncPoint(_endpoint)!.Value.ChangesTo, Is.EqualTo(second));
             });
         }
 

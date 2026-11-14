@@ -37,6 +37,8 @@ namespace MajdataPlay
         public string Description { get; init; } = string.Empty;
         public ReadOnlySpan<string> Designers { get => _simaiMetadata.Designers; }
         public ReadOnlySpan<string> Levels { get => _simaiMetadata.Levels; }
+        /// <summary>Gets the normalized inote SHA-256 hashes computed during metadata scanning.</summary>
+        public ReadOnlySpan<string?> LevelHashes => _levelHashes;
         public ReadOnlySpan<string> Tags { get => ReadOnlySpan<string>.Empty; }
         public string Hash { get => _simaiMetadata.Hash; }
         public DateTime Timestamp { get; init; }
@@ -73,6 +75,8 @@ namespace MajdataPlay
         private readonly string _previewAudioTrackCacheKey;
         private SimaiFile? _maidata = null;
         private SimaiMetadata _simaiMetadata;
+        /// <summary>Stores one normalized inote hash per level without parsing note timings during scanning.</summary>
+        private readonly string?[] _levelHashes;
 
         private volatile int _preloadJoinState = 0;
 
@@ -139,6 +143,7 @@ namespace MajdataPlay
                 _isEmptyCover = true;
             }
             _simaiMetadata = metadata;
+            _levelHashes = SongDetailExtensions.GetLevelHashes(metadata);
             var storedId = ReadStoredId(directory, entries);
             Id = storedId ?? DirectoryIdentity.CreateLocationId(directory).ToString();
             _isIdPersisted = storedId is not null;

@@ -134,10 +134,10 @@ namespace MajdataPlay.Tests.Game.Scenes.PlayMode.Support
             var collections = SongStorage.Collections;
             _restoreActions.Add(() => PrivateMember.SetStaticProperty(typeof(SongStorage), nameof(SongStorage.Collections), collections));
 
-            SnapshotDictionaryKeys(typeof(ScoreManager), "_buckets");
+            SnapshotDictionaryKeys(typeof(ScoreManager), "s_buckets");
             SnapshotDictionaryKeys(typeof(ChartSettingStorage), "_storage");
-            var onlineBuckets = PrivateMember.GetStaticField<object?>(typeof(ScoreManager), "_onlineBuckets");
-            _restoreActions.Add(() => PrivateMember.SetStaticField(typeof(ScoreManager), "_onlineBuckets", onlineBuckets));
+            var onlineBuckets = PrivateMember.GetStaticField<object?>(typeof(ScoreManager), "s_onlineBuckets");
+            _restoreActions.Add(() => PrivateMember.SetStaticField(typeof(ScoreManager), "s_onlineBuckets", onlineBuckets));
 
             SnapshotSingleton<GameManager>();
             SnapshotSingleton<SkinManager>();

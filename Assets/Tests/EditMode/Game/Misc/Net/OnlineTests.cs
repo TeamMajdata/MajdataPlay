@@ -8,6 +8,8 @@ using System.Threading.Tasks;
 using Cysharp.Threading.Tasks;
 using MajdataPlay.Net;
 using MajdataPlay.Net.Models;
+using MajdataPlay.Diagnostics;
+using MajdataPlay.Scenes.Game;
 using MajdataPlay.Tests;
 using MajdataPlay.Tests.Game.Misc.Support;
 using Newtonsoft.Json.Linq;
@@ -163,6 +165,11 @@ namespace MajdataPlay.Tests.Game.Misc.Net
                     (HttpStatusCode.Unauthorized, "{}", "MAJTEXT_ONLINE_USERNAME_OR_PASSWORD_INCORRECT"),
                     (HttpStatusCode.Forbidden, "{\"code\":11}", "MAJTEXT_ONLINE_ACCOUNT_PENDING_VERIFICATION"),
                     (HttpStatusCode.Forbidden, "{\"code\":12}", "MAJTEXT_ONLINE_ACCOUNT_BANNED"),
+                    (HttpStatusCode.Forbidden, "{\"code\":60004}", "MAJTEXT_ONLINE_ACCOUNT_PENDING_VERIFICATION"),
+                    (HttpStatusCode.Forbidden, "{\"code\":60005}", "MAJTEXT_ONLINE_ACCOUNT_BANNED"),
+                    (HttpStatusCode.Forbidden, "{\"code\":69999}", "MAJTEXT_ONLINE_ACCESS_FORBIDDEN"),
+                    (HttpStatusCode.Forbidden, "{}", "MAJTEXT_ONLINE_ACCESS_FORBIDDEN"),
+                    (HttpStatusCode.Forbidden, "{\"code\":null}", "MAJTEXT_ONLINE_ACCESS_FORBIDDEN"),
                     (HttpStatusCode.Forbidden, "not json", "MAJTEXT_ONLINE_ACCESS_FORBIDDEN"),
                 };
                 foreach (var (status, body, message) in cases)
@@ -186,13 +193,19 @@ namespace MajdataPlay.Tests.Game.Misc.Net
         {
             return UniTask.ToCoroutine(async () =>
             {
-                _http.RespondWith(HttpStatusCode.Forbidden, "{\"code\":0}");
+                foreach (var code in new[] { 60001, 0 })
+                {
+                    SetStatistic("IsUserLoggedIn", false);
+                    _http.RespondWith(HttpStatusCode.Forbidden, "{\"code\":" + code + "}");
+                    var before = _http.Requests.Length;
 
-                var response = await Online.Account.LoginAsync(_endpoint, "user", "pass");
+                    var response = await Online.Account.LoginAsync(_endpoint, "user", "pass");
 
-                Assert.That(response.IsSuccessfully, Is.True);
-                Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.OK));
-                Assert.That(_endpoint.RuntimeConfig.IsLoggedIn, Is.True);
+                    Assert.That(response.IsSuccessfully, Is.True, "Business code: " + code);
+                    Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.OK));
+                    Assert.That(_endpoint.RuntimeConfig.IsLoggedIn, Is.True);
+                    Assert.That(_http.Requests.Length - before, Is.EqualTo(1));
+                }
             });
         }
 
@@ -235,6 +248,14 @@ namespace MajdataPlay.Tests.Game.Misc.Net
                 Assert.That(scores.Single().Hash, Is.EqualTo("h"));
                 Assert.That(scores.Single().DXScore, Is.EqualTo(12u));
                 Assert.That(scores.Single().ChartLevel, Is.EqualTo(ChartLevel.Master));
+                Assert.That(scores.Single().LevelHash, Is.Null, "Released endpoints omit the level identity.");
+
+                var levelHash = new string('a', 64);
+                _http.RespondWith(HttpStatusCode.OK, "[{\"hash\":\"h\",\"levelHash\":\"" + levelHash + "\",\"dxScore\":4294967296,\"chartLevel\":4,\"chartInfo\":{\"id\":\"chart\"}}]");
+                var currentScore = (await Online.Account.GetScoresAsync(_endpoint)).Single();
+                Assert.That(currentScore.LevelHash, Is.EqualTo(levelHash));
+                Assert.That(currentScore.ChartInfo!.Id, Is.EqualTo("chart"));
+                Assert.That(currentScore.DXScore, Is.EqualTo(4294967296L));
 
                 _http.RespondWith(HttpStatusCode.Unauthorized);
                 Assert.That(await Online.Account.GetScoresAsync(_endpoint), Is.Empty);
@@ -470,6 +491,7 @@ namespace MajdataPlay.Tests.Game.Misc.Net
                     var infos = new JArray(ids.Select(id => new JObject
                     {
                         ["metadata"] = new JObject { ["id"] = id, ["hash"] = "h" },
+                        ["levelHashes"] = new JArray(null, new string('b', 64), null, null, null, null, null),
                         ["resources"] = new JObject
                         {
                             ["maidata"] = new JObject
@@ -505,6 +527,29 @@ namespace MajdataPlay.Tests.Game.Misc.Net
                 Assert.That(resources.Maidata.Sha256, Is.EqualTo(new string('a', 64)));
                 Assert.That(resources.Maidata.Length, Is.EqualTo(3));
                 Assert.That(resources.Track, Is.Null);
+                Assert.That(infos[7].LevelHashes, Is.EqualTo(new string?[] { null, new string('b', 64), null, null, null, null, null }));
+            });
+        }
+
+        /// <summary>Checks single-chart metadata and level identities, including responses from older endpoints.</summary>
+        /// <returns>The test coroutine.</returns>
+        [UnityTest]
+        public IEnumerator GetInfoAsync_ReadsLevelHashesAndAcceptsLegacyInfo()
+        {
+            return UniTask.ToCoroutine(async () =>
+            {
+                var levelHash = new string('c', 64);
+                var chartId = Guid.NewGuid().ToString();
+                _http.RespondWith(HttpStatusCode.OK, "{\"metadata\":{\"id\":\"" + chartId + "\"},\"resources\":{},\"levelHashes\":[null,\"" + levelHash + "\",null,null,null,null,null]}");
+                var info = await Online.MaiChart.GetInfoAsync(_endpoint, chartId);
+                Assert.That(info!.LevelHashes[1], Is.EqualTo(levelHash));
+                Assert.That(info.LevelHashes[0], Is.Null);
+                Assert.That(_http.Requests.Single().Uri.AbsolutePath, Is.EqualTo($"/api/maichart/{chartId}/info"));
+
+                _http.RespondWith(HttpStatusCode.OK, "{\"metadata\":{\"id\":\"" + chartId + "\"},\"resources\":{}}");
+                Assert.That((await Online.MaiChart.GetInfoAsync(_endpoint, chartId))!.LevelHashes, Is.Empty);
+                _http.RespondWith(HttpStatusCode.NotFound);
+                Assert.That(await Online.MaiChart.GetInfoAsync(_endpoint, Guid.NewGuid().ToString()), Is.Null);
             });
         }
 
@@ -1023,10 +1068,15 @@ namespace MajdataPlay.Tests.Game.Misc.Net
                 Assert.That(_http.Requests[0].Method, Is.EqualTo(HttpMethod.Get));
                 Assert.That(_http.Requests[0].Uri.AbsolutePath, Is.EqualTo($"/api/maiscore/leaderboard/chart/by-id/{song.Id}"));
 
-                var posted = await Online.MaiChart.PostScoreAsync(song, new MaiScore { Hash = "h", DXScore = 10 });
+                var levelHash = new string('a', 64);
+                var score = new OnlineMaiScore { ChartId = song.Id, LevelHash = levelHash, DXScore = 10 };
+                var posted = await Online.MaiChart.PostScoreAsync(song, score);
                 Assert.That(posted.IsSuccessfully, Is.True);
                 Assert.That(_http.Requests[1].Method, Is.EqualTo(HttpMethod.Post));
-                Assert.That(_http.Requests[1].Uri.AbsolutePath, Is.EqualTo($"/api/maichart/{song.Id}/score"));
+                Assert.That(_http.Requests[1].Uri.AbsolutePath, Is.EqualTo($"/api/maiscore/level/{levelHash}"));
+                var body = JObject.Parse(_http.Requests[1].Body);
+                Assert.That(body.Properties().Select(property => property.Name), Is.EquivalentTo(new[] { "chartId", "acc", "dxScore", "comboState" }));
+                Assert.That((string?)body["chartId"], Is.EqualTo(song.Id));
                 await Online.MaiChart.GetScoreInfoAsync(song);
                 Assert.That(_http.Requests.Length, Is.EqualTo(3));
                 Assert.That(_http.Requests[2].Uri.AbsolutePath, Is.EqualTo($"/api/maiscore/leaderboard/chart/by-id/{song.Id}"));
@@ -1034,11 +1084,134 @@ namespace MajdataPlay.Tests.Game.Misc.Net
                 Online.ClearResponseCache();
                 _http.RespondWith(HttpStatusCode.Unauthorized);
                 Assert.That(await Online.MaiChart.GetScoreInfoAsync(song), Is.Null);
-                Assert.That((await Online.MaiChart.PostScoreAsync(song, new MaiScore())).IsSuccessfully, Is.False);
+                Assert.That((await Online.MaiChart.PostScoreAsync(song, score)).IsSuccessfully, Is.False);
                 _http.RespondWith(HttpStatusCode.ServiceUnavailable);
                 Assert.That(await Online.MaiChart.GetScoreInfoAsync(song), Is.Null);
-                Assert.That((await Online.MaiChart.PostScoreAsync(song, new MaiScore())).StatusCode, Is.EqualTo(HttpStatusCode.ServiceUnavailable));
+                Assert.That((await Online.MaiChart.PostScoreAsync(song, score)).StatusCode, Is.EqualTo(HttpStatusCode.ServiceUnavailable));
             });
+        }
+
+        /// <summary>Checks the legacy request body and warning when an endpoint lacks the level score route.</summary>
+        /// <returns>The test coroutine.</returns>
+        [UnityTest]
+        public IEnumerator PostScoreAsync_UnsupportedRouteUsesLegacyBodyAndWarns()
+        {
+            return UniTask.ToCoroutine(async () =>
+            {
+                using var song = CreateSong();
+                var score = new OnlineMaiScore
+                {
+                    ChartId = song.Id,
+                    LevelHash = new string('a', 64),
+                    ChartLevel = ChartLevel.Master,
+                    DXScore = 42,
+                    ComboState = ComboState.FC
+                };
+                var warningsBefore = CountQueuedLegacyScoreWarnings();
+                var cases = new (HttpStatusCode Status, string Body)[]
+                {
+                    (HttpStatusCode.NotFound, string.Empty),
+                    (HttpStatusCode.MethodNotAllowed, string.Empty),
+                    (HttpStatusCode.NotImplemented, string.Empty),
+                    (HttpStatusCode.NotFound, "{\"code\":40400}"),
+                    (HttpStatusCode.NotFound, "{\"code\":\"40400\"}"),
+                };
+                foreach (var (status, responseBody) in cases)
+                {
+                    _http.Responder = request => request.RequestUri!.AbsolutePath.Contains("maiscore/level/")
+                        ? StubHttpScope.Respond(status, responseBody)
+                        : StubHttpScope.Respond(HttpStatusCode.OK, string.Empty);
+                    var before = _http.Requests.Length;
+                    Assert.That((await Online.MaiChart.PostScoreAsync(song, score)).IsSuccessfully, Is.True);
+                    Assert.That(_http.Requests.Length - before, Is.EqualTo(2));
+                    var legacy = _http.Requests.Last();
+                    Assert.That(legacy.Uri.AbsolutePath, Is.EqualTo($"/api/maichart/{song.Id}/score"));
+                    var body = JObject.Parse(legacy.Body);
+                    Assert.That(body.Properties().Select(property => property.Name), Is.EquivalentTo(new[] { "hash", "chartLevel", "acc", "dxScore", "comboState" }));
+                    Assert.That((string?)body["hash"], Is.EqualTo(song.Hash));
+                    Assert.That((int?)body["chartLevel"], Is.EqualTo((int)ChartLevel.Master));
+                    Assert.That((long?)body["dxScore"], Is.EqualTo(42));
+                }
+                Assert.That(CountQueuedLegacyScoreWarnings() - warningsBefore, Is.EqualTo(cases.Length));
+            });
+        }
+
+        /// <summary>Checks that a score rejection and transport failures do not cause a second legacy submission.</summary>
+        /// <returns>The test coroutine.</returns>
+        [UnityTest]
+        public IEnumerator PostScoreAsync_RejectedLevelDoesNotUseLegacyRoute()
+        {
+            return UniTask.ToCoroutine(async () =>
+            {
+                using var song = CreateSong();
+                var score = new OnlineMaiScore { ChartId = song.Id, LevelHash = new string('a', 64) };
+                foreach (var status in new[] { HttpStatusCode.NotFound, HttpStatusCode.BadRequest, HttpStatusCode.Unauthorized, HttpStatusCode.Forbidden, HttpStatusCode.ServiceUnavailable })
+                {
+                    _http.RespondWith(status, "{\"code\":13,\"message\":\"No such level on server\"}");
+                    var before = _http.Requests.Length;
+                    Assert.That((await Online.MaiChart.PostScoreAsync(song, score)).StatusCode, Is.EqualTo(status));
+                    Assert.That(_http.Requests.Length - before, Is.EqualTo(1));
+                }
+
+                _http.Responder = _ => throw new HttpRequestException("offline");
+                Assert.That((await Online.MaiChart.PostScoreAsync(song, score)).ErrorCode, Is.EqualTo(HttpErrorCode.Unreachable));
+                Assert.That(_http.Requests.All(request => request.Uri.AbsolutePath.Contains("maiscore/level/")), Is.True);
+            });
+        }
+
+        /// <summary>Checks old endpoints without level hashes and cancellation before submission.</summary>
+        /// <returns>The test coroutine.</returns>
+        [UnityTest]
+        public IEnumerator PostScoreAsync_WithoutLevelHashUsesLegacyRoute()
+        {
+            return UniTask.ToCoroutine(async () =>
+            {
+                using var song = CreateSong();
+                var warningsBefore = CountQueuedLegacyScoreWarnings();
+                _http.RespondWith(HttpStatusCode.OK);
+                var score = new OnlineMaiScore { ChartId = song.Id, ChartLevel = ChartLevel.Basic };
+                Assert.That((await Online.MaiChart.PostScoreAsync(song, score)).IsSuccessfully, Is.True);
+                Assert.That(_http.Requests.Single().Uri.AbsolutePath, Is.EqualTo($"/api/maichart/{song.Id}/score"));
+                Assert.That(CountQueuedLegacyScoreWarnings() - warningsBefore, Is.EqualTo(1));
+
+                using var cancellation = new CancellationTokenSource();
+                cancellation.Cancel();
+                Assert.That((await Online.MaiChart.PostScoreAsync(song, score, cancellation.Token)).ErrorCode, Is.EqualTo(HttpErrorCode.Canceled));
+                Assert.That(_http.Requests.Length, Is.EqualTo(1));
+            });
+        }
+
+        /// <summary>Counts queued warnings about submitting a score through an older API.</summary>
+        /// <returns>The number of queued warnings for legacy score submissions.</returns>
+        private static int CountQueuedLegacyScoreWarnings()
+        {
+            var logs = PrivateMember.GetStaticField<IEnumerable>(typeof(MajDebug), "s_logQueue");
+            return logs.Cast<object>().Count(log =>
+                PrivateMember.GetProperty<LogLevel>(log, "Level") == LogLevel.Warning
+                && PrivateMember.GetProperty<object>(log, "Condition").ToString()!.Contains("Submitting score through the legacy API"));
+        }
+
+        /// <summary>Checks that the submission captures the played level identity without persisting local score fields.</summary>
+        [Test]
+        public void OnlineMaiScore_CreateFromResultUsesPlayedLevel()
+        {
+            using var song = CreateSong();
+            var levelHash = new string('b', 64);
+            song.Record.SetLevelHashes(new string?[] { null, null, null, null, levelHash, null, null });
+            var result = new GameResult
+            {
+                SongDetail = song,
+                DXScore = 42,
+                ComboState = ComboState.AP
+            };
+
+            var score = OnlineMaiScore.CreateFromResult(result, ChartLevel.Master);
+
+            Assert.That(score.ChartId, Is.EqualTo(song.Id));
+            Assert.That(score.LevelHash, Is.EqualTo(levelHash));
+            Assert.That(score.ChartLevel, Is.EqualTo(ChartLevel.Master));
+            Assert.That(score.DXScore, Is.EqualTo(42));
+            Assert.That(score.ComboState, Is.EqualTo(ComboState.AP));
         }
 
         /// <summary>Checks that a missing avatar identifier or avatar file yields no sprite.</summary>

@@ -69,6 +69,33 @@ namespace MajdataPlay.Tests.Game.Misc.Base
             });
         }
 
+        /// <summary>Checks that scanning computes the server's normalized level identity without loading note timings.</summary>
+        /// <returns>The test coroutine.</returns>
+        [UnityTest]
+        public IEnumerator ParseAsync_LevelHashIgnoresMetadataCommentsAndWhitespace()
+        {
+            return UniTask.ToCoroutine(async () =>
+            {
+                var firstDirectory = ChartFixture.CreateChart(_temporary.Directory, "First", "First title");
+                var secondDirectory = ChartFixture.CreateChart(_temporary.Directory, "Second", "Second title");
+                secondDirectory.FindFile("maidata.txt")!.WriteAllText(
+                    "&title=Second title\n&lv_5=14\n&inote_5=(120){4}\n1,2,||comment\n3, 4, E\n");
+                using var first = await SongDetail.ParseAsync(firstDirectory);
+                using var second = await SongDetail.ParseAsync(secondDirectory);
+                using var stream = firstDirectory.FindFile("maidata.txt")!.OpenRead();
+                var expected = await MajSimai.SimaiParser.ParseAsync(stream);
+
+                Assert.That(first.Hash, Is.Not.EqualTo(second.Hash));
+                Assert.That(first.LevelHashes.Length, Is.EqualTo(7));
+                Assert.That(first.GetLevelHash(ChartLevel.Master), Is.EqualTo(expected.Charts[4].Sha256));
+                Assert.That(second.GetLevelHash(ChartLevel.Master), Is.EqualTo(first.GetLevelHash(ChartLevel.Master)));
+                Assert.That(first.GetLevelHash(ChartLevel.Easy), Is.Null);
+                Assert.That(first.IsMaidataLoaded, Is.False);
+                Assert.That(second.IsMaidataLoaded, Is.False);
+                Assert.Throws<ArgumentOutOfRangeException>(() => first.GetLevelHash((ChartLevel)7));
+            });
+        }
+
         /// <summary>
         /// Checks that parsing never writes the identity marker, that a chart without one keeps the same location-derived
         /// identity across parses, and that persisting writes exactly that identity, which later parses then read.

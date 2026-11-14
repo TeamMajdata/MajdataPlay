@@ -80,15 +80,35 @@ namespace MajdataPlay.Tests.Game.Scenes.PlayMode.ListScene
             Assert.That(_displayer.RectTransform, Is.SameAs(_displayer.transform));
         }
 
-        /// <summary>Checks that a local list hides the icon and centers the name.</summary>
+        /// <summary>Checks that a virtual local list hides the icon and centers the name.</summary>
         [Test]
-        public void LocalList_HidesIconAndCentersName()
+        public void VirtualLocalList_HidesIconAndCentersName()
         {
             _displayer.SetCollection(Collection(ChartStorageType.List));
 
             Assert.That(_name.text, Is.EqualTo("Name List"));
             Assert.That(_icon.enabled, Is.False);
             Assert.That(PrivateMember.GetField<RectTransform>(_tab, "_titleViewport").anchoredPosition, Is.EqualTo(Vector2.zero));
+        }
+
+        /// <summary>Checks local folders retain their icon through selection and pooled reuse after an aggregate list.</summary>
+        [Test]
+        public void LocalDirectory_ShowsFolderIconThroughSelectionAndReuse()
+        {
+            var folder = new SongCollection("Folder", Array.Empty<ISongDetail>()) { IsVirtual = false };
+            foreach (var distance in new[] { 0f, 1f })
+            {
+                _displayer.SetCollection(Collection(ChartStorageType.List));
+                Assert.That(_icon.enabled, Is.False);
+                _displayer.SetCollection(folder);
+                _displayer.SetDistance(distance);
+
+                Assert.That(_icon.enabled, Is.True);
+                Assert.That(_icon.sprite, Is.SameAs(_folder));
+                Assert.That(_icon.color, Is.EqualTo(Color.yellow));
+                Assert.That(_icon.rectTransform.anchoredPosition.y, Is.EqualTo(distance == 0f ? 62f : 16f));
+                Assert.That(_icon.rectTransform.sizeDelta.x, Is.EqualTo(distance == 0f ? 48f : 24f));
+            }
         }
 
         /// <summary>Checks the icon, color and name offset of each icon-bearing collection type.</summary>
@@ -196,7 +216,7 @@ namespace MajdataPlay.Tests.Game.Scenes.PlayMode.ListScene
             Assert.That(_name.canvasRenderer.GetColor(), Is.EqualTo(Color.gray));
             Assert.That(_name.fontSize, Is.EqualTo(22f));
             Assert.That(_icon.rectTransform.sizeDelta, Is.EqualTo(new Vector2(24f, 24f)));
-            Assert.That(viewport.rect.width, Is.EqualTo(139.83f).Within(0.001f));
+            Assert.That(viewport.rect.width, Is.EqualTo(111.83f).Within(0.001f));
             Assert.That(viewport.anchoredPosition, Is.EqualTo(new Vector2(0f, -17f)));
             Assert.That(_icon.rectTransform.anchoredPosition, Is.EqualTo(new Vector2(0f, 16f)));
             Assert.That(_icon.color, Is.EqualTo(iconColor));
@@ -219,7 +239,7 @@ namespace MajdataPlay.Tests.Game.Scenes.PlayMode.ListScene
                 Assert.That(background.color, Is.EqualTo(Color.Lerp(Color.white, Color.blue, 0.5f)));
                 Assert.That(_icon.rectTransform.anchoredPosition, Is.EqualTo(new Vector2(0f, 39f)));
                 Assert.That(_icon.rectTransform.sizeDelta, Is.EqualTo(new Vector2(36f, 36f)));
-                Assert.That(viewport.rect.width, Is.EqualTo(147.915f).Within(0.001f));
+                Assert.That(viewport.rect.width, Is.EqualTo(133.915f).Within(0.001f));
                 Assert.That(_name.fontSize, Is.EqualTo(27f));
                 Assert.That(viewport.anchoredPosition, Is.EqualTo(new Vector2(0f, -8.5f)));
             }
@@ -227,6 +247,30 @@ namespace MajdataPlay.Tests.Game.Scenes.PlayMode.ListScene
             Assert.That(background.color, Is.EqualTo(Color.blue));
             Assert.That(_icon.rectTransform.anchoredPosition.y, Is.EqualTo(62f));
             Assert.That(_displayer.GetComponents<CanvasGroup>(), Is.Empty);
+        }
+
+        /// <summary>Checks a long unselected title starts at its beginning and retains the capsule's clipping viewport.</summary>
+        [Test]
+        public void LongUnselectedTitle_ClipsFromTheBeginningWithinTheInsetViewport()
+        {
+            _displayer.SetCollection(new SongCollection("CiRCLE PLUS A considerably longer collection name",
+                Array.Empty<ISongDetail>()) { Type = ChartStorageType.PlayList });
+            _displayer.SetDistance(0f);
+            _displayer.SetDistance(1f);
+            Canvas.ForceUpdateCanvases();
+            _name.ForceMeshUpdate();
+
+            Assert.That(_name.fontSize, Is.EqualTo(22f));
+            Assert.That(_name.enableAutoSizing, Is.False);
+            Assert.That(_name.overflowMode, Is.EqualTo(TextOverflowModes.Overflow));
+            Assert.That(_name.horizontalAlignment, Is.EqualTo(HorizontalAlignmentOptions.Left));
+            Assert.That(_name.isTextTruncated, Is.False);
+            Assert.That(_name.canvasRenderer.hasRectClipping, Is.True);
+            Assert.That(_name.rectTransform.rect.width, Is.EqualTo(111.83f).Within(0.001f));
+            var bounds = _name.rectTransform.rect;
+            Assert.That(_name.textInfo.characterInfo[0].origin, Is.EqualTo(bounds.xMin).Within(0.01f));
+            Assert.That(_name.preferredWidth, Is.GreaterThan(bounds.width),
+                "The complete title remains available; the existing RectMask2D clips its overflow.");
         }
 
         /// <summary>Builds an inactive collection with the real Setting presenter initialized after its text defaults.</summary>
@@ -245,7 +289,7 @@ namespace MajdataPlay.Tests.Game.Scenes.PlayMode.ListScene
             var background = CreateImage("BG", displayer.transform);
             background.color = Color.white;
             var viewport = (RectTransform)CreateRect("TitleViewport", displayer.transform).transform;
-            viewport.sizeDelta = new Vector2(139.83f, 40f);
+            viewport.sizeDelta = new Vector2(111.83f, 40f);
             viewport.anchoredPosition = new Vector2(0f, -17f);
             viewport.gameObject.AddComponent<RectMask2D>();
             title = CreateText("Name", canvas);
@@ -261,6 +305,7 @@ namespace MajdataPlay.Tests.Game.Scenes.PlayMode.ListScene
             PrivateMember.SetField(tab, "_selectedWidth", 254.69f);
             PrivateMember.SetField(tab, "_titleDisplayer", title);
             PrivateMember.SetField(tab, "_titleViewport", viewport);
+            PrivateMember.SetField(tab, "_unselectedTitleInset", 18f);
             PrivateMember.SetField(tab, "_selectedTextColor", Color.white);
             PrivateMember.SetField(tab, "_selectedFontSize", 32f);
             PrivateMember.SetField(tab, "_iconTransform", icon.rectTransform);

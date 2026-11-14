@@ -255,7 +255,7 @@ namespace MajdataPlay.Scenes.Login
                                             userInfo = userData.Profile;
                                             userScores = userData.Scores;
                                         }
-                                        ScoreManager.LoadOnlineScores(userScores);
+                                        ScoreManager.LoadOnlineScores(endpoint, userScores);
                                         await UpdateApiEndpointRuntimeConfigAsync(endpoint, userInfo);
                                         await AttachUserSettingsAsync(endpoint);
                                         break;
@@ -404,7 +404,7 @@ namespace MajdataPlay.Scenes.Login
                                     userInfo = getUserInfoTask.Result.Profile;
                                     userScores = getUserInfoTask.Result.Scores;
                                 }
-                                ScoreManager.LoadOnlineScores(userScores);
+                                ScoreManager.LoadOnlineScores(endpoint, userScores);
                                 Hint();
                                 _loading.SetActive(false);
                                 await UpdateApiEndpointRuntimeConfigAsync(endpoint, userInfo);
@@ -444,7 +444,7 @@ namespace MajdataPlay.Scenes.Login
             {
                 MajInstances.SceneSwitcher.SetLoadingText(e);
             };
-            var task = SongStorage.RefreshOnline(progress);
+            var task = RefreshOnlineScoresAndChartsAsync(progress);
             while (!task.IsCompleted)
             {
                 await UniTask.Yield();
@@ -481,6 +481,17 @@ namespace MajdataPlay.Scenes.Login
             await UniTask.Delay(500);
             sceneSwitcher.SwitchScene("List", false);
         }
+        /// <summary>Refreshes all endpoint lists before resolving old local and signed-in online score identities.</summary>
+        /// <param name="progress">Reports chart-list refresh progress.</param>
+        /// <returns>A task completing after the lists and their legacy scores have been refreshed.</returns>
+        private static async Task RefreshOnlineScoresAndChartsAsync(IProgress<string> progress)
+        {
+            var token = Application.exitCancellationToken;
+            await SongStorage.RefreshOnline(progress, token);
+            await ScoreManager.MigrateLegacyScoresAsync(
+                SongStorage.Collections.SelectMany(collection => collection.GetOriginSnapshot()).Where(song => song.IsOnline), token);
+        }
+
         /// <summary>Switches the user settings to the copy of the account, and warns when the local copy stays in use.</summary>
         /// <param name="endpoint">The endpoint the user just logged in on.</param>
         /// <returns>A task completing when the settings have a source for this session.</returns>

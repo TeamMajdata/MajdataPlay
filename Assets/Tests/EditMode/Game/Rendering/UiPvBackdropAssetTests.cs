@@ -1124,9 +1124,11 @@ namespace MajdataPlay.Tests.Game.Rendering
             Assert.That(presentation, Does.Contain("_titleDisplayer: {fileID: " + textId + "}"));
             Assert.That(presentation, Does.Contain("_titleViewport: {fileID: " + viewportId + "}"));
             Assert.That(presentation, Does.Contain("_selectedFontSize: 32"));
-            Assert.That(presentation, Does.Contain("_unselectedTitleInset: 4"));
+            var unselectedInset = hasIcon ? 18f : 4f;
+            Assert.That(presentation, Does.Contain("_unselectedTitleInset: " + unselectedInset.ToString(CultureInfo.InvariantCulture)));
             Assert.That(presentation, Does.Contain("_selectedTitleInset: 49.345"));
-            Assert.That(((UnityEngine.RectTransform)viewport).rect.width, Is.EqualTo(139.83f).Within(0.001f));
+            var unselectedWidth = ((UnityEngine.RectTransform)prefab.transform).rect.width - 2f * unselectedInset;
+            Assert.That(((UnityEngine.RectTransform)viewport).rect.width, Is.EqualTo(unselectedWidth).Within(0.001f));
             Assert.That(text.rectTransform.rect.width, Is.EqualTo(((UnityEngine.RectTransform)viewport).rect.width));
             var selectedWidth = float.Parse(Regex.Match(presentation, @"_selectedWidth: (?<value>[^\r\n]+)")
                 .Groups["value"].Value, CultureInfo.InvariantCulture);

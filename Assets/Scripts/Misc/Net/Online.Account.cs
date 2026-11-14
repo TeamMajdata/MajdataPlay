@@ -35,12 +35,12 @@ namespace MajdataPlay.Net
             /// <summary>The route that ends the login session.</summary>
             private const string API_POST_LOGOUT = "account/logout";
 
-            /// <summary>The <see cref="NetStatus.Code"/> of a 403 login response whose session cookie is still valid.</summary>
-            private const int CODE_ALREADY_LOGGED_IN = 0;
-            /// <summary>The <see cref="NetStatus.Code"/> of a 403 login response for an account whose email is not verified.</summary>
-            private const int CODE_LOGIN_FAILED_PENDING_VERIFICATION = 11;
-            /// <summary>The <see cref="NetStatus.Code"/> of a 403 login response for a banned account.</summary>
-            private const int CODE_LOGIN_FAILED_USER_BANNED = 12;
+            /// <summary>The pre-renumbering code of a 403 login response whose session cookie is still valid.</summary>
+            private const int LegacyAlreadyLoggedInCode = 0;
+            /// <summary>The pre-renumbering code of a 403 login response for an account whose email is not verified.</summary>
+            private const int LegacyLoginFailedPendingVerificationCode = 11;
+            /// <summary>The pre-renumbering code of a 403 login response for a banned account.</summary>
+            private const int LegacyLoginFailedUserBannedCode = 12;
 
             /// <summary>
             /// Logs a user in with <c>POST account/login</c>, sending the MD5 digest of the password. A user already
@@ -107,7 +107,14 @@ namespace MajdataPlay.Net
                     var code = Serializer.Json.TryDeserialize<NetStatus>(Encoding.UTF8.GetString(rsp.AsSpan()), out var status, out _, _defaultJsonSerializerSettings)
                         ? status.Code
                         : null;
-                    if (code == CODE_ALREADY_LOGGED_IN)
+                    var returnCode = code switch
+                    {
+                        LegacyAlreadyLoggedInCode => ApiReturnCode.AlreadyLoggedIn,
+                        LegacyLoginFailedPendingVerificationCode => ApiReturnCode.LoginFailedPendingVerification,
+                        LegacyLoginFailedUserBannedCode => ApiReturnCode.LoginFailedUserBanned,
+                        _ => (ApiReturnCode?)code,
+                    };
+                    if (returnCode == ApiReturnCode.AlreadyLoggedIn)
                     {
                         // The session cookie is still valid on the server
                         using (await statistic.LockAsync())
@@ -125,10 +132,10 @@ namespace MajdataPlay.Net
                             Message = string.Empty
                         };
                     }
-                    rsp = WithMessage(rsp, code switch
+                    rsp = WithMessage(rsp, returnCode switch
                     {
-                        CODE_LOGIN_FAILED_PENDING_VERIFICATION => "MAJTEXT_ONLINE_ACCOUNT_PENDING_VERIFICATION",
-                        CODE_LOGIN_FAILED_USER_BANNED => "MAJTEXT_ONLINE_ACCOUNT_BANNED",
+                        ApiReturnCode.LoginFailedPendingVerification => "MAJTEXT_ONLINE_ACCOUNT_PENDING_VERIFICATION",
+                        ApiReturnCode.LoginFailedUserBanned => "MAJTEXT_ONLINE_ACCOUNT_BANNED",
                         _ => "MAJTEXT_ONLINE_ACCESS_FORBIDDEN"
                     });
                 }

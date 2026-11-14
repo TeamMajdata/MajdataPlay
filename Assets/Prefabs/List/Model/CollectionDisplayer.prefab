@@ -58,8 +58,6 @@ MonoBehaviour:
   _folderCollectionIconColor: {r: 0.36078432, g: 0.30980393, b: 0.28627452, a: 1}
   _favoriteCollectionIcon: {fileID: -1836983295, guid: 736513dcbc18dec438227ea2c0cb9831, type: 3}
   _favoriteCollectionIconColor: {r: 0.84276724, g: 0.11766719, b: 0, a: 1}
-  _onlineFavoriteCollectionIcon: {fileID: -1815173495, guid: 736513dcbc18dec438227ea2c0cb9831, type: 3}
-  _onlineFavoriteCollectionIconColor: {r: 0.36078432, g: 0.30980393, b: 0.28627452, a: 1}
   _danCollectionIcon: {fileID: 21300000, guid: 86c38e90f487d99449d39adbb70e9bb3, type: 3}
   _danCollectionIconColor: {r: 0.36078432, g: 0.30980393, b: 0.28627452, a: 1}
   _iconDisplayer: {fileID: 7350579639491559817}
@@ -176,7 +174,7 @@ RectTransform:
   m_AnchorMin: {x: 0.5, y: 0.5}
   m_AnchorMax: {x: 0.5, y: 0.5}
   m_AnchoredPosition: {x: 0, y: 0}
-  m_SizeDelta: {x: 139.83, y: 40}
+  m_SizeDelta: {x: 111.83, y: 40}
   m_Pivot: {x: 0.5, y: 0.5}
 --- !u!222 &286287338398358437
 CanvasRenderer:
@@ -397,7 +395,7 @@ MonoBehaviour:
   _iconTransform: {fileID: 89895129141421081}
   _selectedIconPosition: {x: 0, y: 62}
   _selectedIconSizeMultiplier: 2
-  _unselectedTitleInset: 4
+  _unselectedTitleInset: 18
   _selectedTitleInset: 49.345
 --- !u!1 &857430918264730010
 GameObject:
@@ -434,7 +432,7 @@ RectTransform:
   m_AnchorMin: {x: 0.5, y: 0.5}
   m_AnchorMax: {x: 0.5, y: 0.5}
   m_AnchoredPosition: {x: 0, y: -17}
-  m_SizeDelta: {x: 139.83, y: 40}
+  m_SizeDelta: {x: 111.83, y: 40}
   m_Pivot: {x: 0.5, y: 0.5}
 --- !u!114 &857430918264730012
 MonoBehaviour:

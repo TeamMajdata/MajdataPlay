@@ -15,7 +15,7 @@ namespace MajdataPlay.Settings
 
             public const bool VulkanLowLatencyVSync = true;
 
-            public const VulkanLowLatencyVSyncBackendOption VulkanLowLatencyVSyncBackend = VulkanLowLatencyVSyncBackendOption.Auto;
+            public const VulkanLowLatencyVSyncBackendOption VulkanLowLatencyVSyncBackend = VulkanLowLatencyVSyncBackendOption.Timer;
 
             /// <summary>Leaves MSAA disabled for new settings; Custom can opt into a sample count explicitly.</summary>
             public const RenderingAntialiasingOption AntiAliasing = RenderingAntialiasingOption.Disabled;

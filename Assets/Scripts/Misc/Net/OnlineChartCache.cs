@@ -699,6 +699,31 @@ namespace MajdataPlay.Net
             }
         }
 
+        /// <summary>Queues the level hashes learned by parsing a downloaded chart.</summary>
+        /// <param name="record">The chart record owning the hashes.</param>
+        /// <param name="hashes">The immutable hash snapshot indexed by chart level.</param>
+        /// <remarks>A failure is logged; writes are dropped after the runtime database closes.</remarks>
+        internal void QueueLevelHashWrite(OnlineChartRecord record, string?[] hashes)
+        {
+            var json = Serializer.Json.Serialize(hashes);
+            var updatedAt = DateTime.UtcNow.Ticks;
+            var sql = $"UPDATE {TableName} SET {nameof(OnlineChartRow.LevelHashes)} = ?, {nameof(OnlineChartRow.UpdatedAtTicks)} = ? " +
+                      $"WHERE {nameof(OnlineChartRow.ChartId)} = ? AND {nameof(OnlineChartRow.Server)} = ? AND {nameof(OnlineChartRow.ChartHash)} = ?";
+            try
+            {
+                var database = MajDatabase.Runtime;
+                ObserveWriteAsync(database.WriteAsync(connection => connection.Execute(sql, json, updatedAt, record.ChartId, record.Server, record.ChartHash))).Forget();
+            }
+            catch (ObjectDisposedException)
+            {
+                // The next chart read computes the hashes again after shutdown.
+            }
+            catch (Exception exception)
+            {
+                MajDebug.LogException(nameof(OnlineChartCache), exception);
+            }
+        }
+
         /// <summary>Creates the tables and their indexes once, upgrading a chart table keyed by endpoint URL.</summary>
         /// <exception cref="SQLiteException">The tables could not be created or upgraded.</exception>
         private void EnsureTable()
@@ -709,10 +734,18 @@ namespace MajdataPlay.Net
             }
             MajDatabase.Runtime.Write(static connection =>
             {
+                var chartColumns = connection.GetTableInfo(TableName);
+                var needsLevelHashRefresh = chartColumns.Count > 0
+                    && chartColumns.All(column => column.Name != nameof(OnlineChartRow.LevelHashes));
                 RenameLegacyEndpointColumn(connection);
                 connection.CreateTable<OnlineChartRow>();
                 connection.CreateTable<OnlineServerRow>();
                 connection.CreateTable<ChangeQueryRow>();
+                if (needsLevelHashRefresh)
+                {
+                    // A changes-only refresh would never request level hashes for unchanged charts in the old cache.
+                    connection.DeleteAll<ChangeQueryRow>();
+                }
             });
             Volatile.Write(ref _isTableReady, 1);
         }
@@ -791,6 +824,21 @@ namespace MajdataPlay.Net
                 isChanged = true;
             }
             var chartHash = chart.Hash ?? string.Empty;
+            var levelHashes = info?.LevelHashes;
+            if (levelHashes is { Length: > 0 })
+            {
+                var hashesJson = Serializer.Json.Serialize(OnlineChartRecord.NormalizeLevelHashes(levelHashes));
+                if (row.LevelHashes != hashesJson)
+                {
+                    row.LevelHashes = hashesJson;
+                    isChanged = true;
+                }
+            }
+            else if (row.ChartHash != chartHash && !string.IsNullOrEmpty(row.LevelHashes))
+            {
+                row.LevelHashes = string.Empty;
+                isChanged = true;
+            }
             var resources = info?.Resources;
             if (resources is not null)
             {
@@ -906,7 +954,13 @@ namespace MajdataPlay.Net
         /// <returns>The record.</returns>
         private OnlineChartRecord CreateRecord(OnlineChartRow row, MajNetChartInfo? info, bool isPersistent)
         {
-            var record = new OnlineChartRecord(this, row.Server, row.ChartId, row.IsResolved, isPersistent, row.IsDeletedOnServer);
+            var record = new OnlineChartRecord(this, row.Server, row.ChartId, row.ChartHash, row.IsResolved, isPersistent, row.IsDeletedOnServer);
+            if (!string.IsNullOrEmpty(row.LevelHashes)
+                && Serializer.Json.TryDeserialize<string?[]>(row.LevelHashes, out var hashes, out _)
+                && hashes is not null)
+            {
+                record.LoadLevelHashes(hashes);
+            }
             foreach (var kind in s_kinds)
             {
                 record.Load(kind, GetDigest(row, kind), info?.Resources?.Get(kind)?.Url);
@@ -1005,6 +1059,8 @@ namespace MajdataPlay.Net
             public string ChartHash { get; set; } = string.Empty;
             /// <summary>Gets or sets the chart metadata of the chart list as JSON, which lists the chart offline.</summary>
             public string Detail { get; set; } = string.Empty;
+            /// <summary>Gets or sets the seven normalized inote hashes as JSON, empty while unknown.</summary>
+            public string LevelHashes { get; set; } = string.Empty;
             /// <summary>Gets or sets whether the digests came from the info API, so a missing digest means a missing file.</summary>
             public bool IsResolved { get; set; }
             /// <summary>Gets or sets the MD5 digest of the chart file.</summary>
