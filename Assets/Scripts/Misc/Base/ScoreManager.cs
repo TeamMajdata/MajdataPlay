@@ -6,7 +6,6 @@ using MajdataPlay.Json;
 using MajdataPlay.Net.Models;
 using MajdataPlay.Scenes.Game;
 using MajdataPlay.Scenes.Game.Notes;
-using MajdataPlay.Utils;
 using Newtonsoft.Json;
 using SQLite;
 using System;
@@ -20,18 +19,18 @@ namespace MajdataPlay
 #nullable enable
     internal static class ScoreManager
     {
-        static bool _isInited = false;
+        private static bool s_isInited = false;
 
-        static SpinLock _lock = new();
+        private static SpinLock s_lock = new();
 
-        static Dictionary<string, SongScores>? _onlineBuckets = null;
+        private static Dictionary<string, SongScores>? s_onlineBuckets = null;
 
-        readonly static Dictionary<string, SongScores> _buckets = new();
+        private static readonly Dictionary<string, SongScores> s_buckets = new();
 
         /// <summary>The legacy JSON score file name consumed by the one-time migration.</summary>
-        const string LegacyDatabaseFileName = "MajDatabase.db.db.db.db.db.db.db.db.db.db.db.db.db.db.db.db.db.db.db.db.db.db.db.db.db.db.db.db";
+        private const string LegacyDatabaseFileName = "MajDatabase.db.db.db.db.db.db.db.db.db.db.db.db.db.db.db.db.db.db.db.db.db.db.db.db.db.db.db.db";
 
-        readonly static JsonSerializerSettings _jsonReadSettings = new()
+        private static readonly JsonSerializerSettings s_jsonReadSettings = new()
         {
             ObjectCreationHandling = ObjectCreationHandling.Replace,
             Converters = new List<JsonConverter>
@@ -48,7 +47,7 @@ namespace MajdataPlay
         /// </remarks>
         internal static async UniTask InitAsync()
         {
-            if (_isInited)
+            if (s_isInited)
             {
                 return;
             }
@@ -83,7 +82,7 @@ namespace MajdataPlay
                             }
                         }
                     }
-                }                
+                }
 
                 // Load from SQLite, together with all JudgeInfoRecords for an id→JudgeInfo lookup
                 var (rows, allJudgeRecords) = await database.ReadAsync(static connection =>
@@ -95,7 +94,7 @@ namespace MajdataPlay
                 var grouped = rows.Select(x => x.ToMaiScore(judgeInfoLookup)).GroupBy(x => x.Hash);
                 foreach (var group in grouped)
                 {
-                    var hash = group.Key;
+                    var hash = group.Key!;
                     if (string.IsNullOrEmpty(hash))
                     {
                         continue;
@@ -115,9 +114,9 @@ namespace MajdataPlay
                     loadedBuckets.Add(hash, scores);
                 }
                 PublishLoadedBuckets(loadedBuckets);
-                _isInited = true;
+                s_isInited = true;
             }
-            catch(Exception e)
+            catch (Exception e)
             {
                 MajDebug.LogError(e);
             }
@@ -127,7 +126,7 @@ namespace MajdataPlay
             }
         }
 
-        
+
 
         public static MaiScore GetScore(ISongDetail song, ChartLevel level)
         {
@@ -189,7 +188,7 @@ namespace MajdataPlay
                 record.Timestamp = DateTime.Now;
                 record.PlayCount++;
 
-                if (!_isInited)
+                if (!s_isInited)
                 {
                     MajDebug.LogWarning(nameof(ScoreManager), "The score database is not ready, so the score is kept in memory only.");
                     return false;
@@ -235,12 +234,12 @@ namespace MajdataPlay
 
         public static void LoadOnlineScores(ReadOnlySpan<MajNetAccountSongScore> scores)
         {
-            ref var @lock = ref _lock;
+            ref var @lock = ref s_lock;
             var isLocked = false;
             try
             {
                 @lock.Enter(ref isLocked);
-                _onlineBuckets = new();
+                s_onlineBuckets = new();
                 if (scores.IsEmpty)
                 {
                     return;
@@ -248,10 +247,10 @@ namespace MajdataPlay
                 for (var i = 0; i < scores.Length; i++)
                 {
                     var score = scores[i];
-                    if (!_onlineBuckets.TryGetValue(score.Hash, out var scoreRecord))
+                    if (!s_onlineBuckets.TryGetValue(score.Hash, out var scoreRecord))
                     {
                         scoreRecord = SongScores.Create(score.Hash);
-                        _onlineBuckets.Add(score.Hash, scoreRecord);
+                        s_onlineBuckets.Add(score.Hash, scoreRecord);
                     }
                     var maiScore = default(MaiScore);
                     maiScore = score.ChartLevel switch
@@ -282,12 +281,12 @@ namespace MajdataPlay
         }
         public static void UnloadOnlineScores()
         {
-            ref var @lock = ref _lock;
+            ref var @lock = ref s_lock;
             var isLocked = false;
             try
             {
                 @lock.Enter(ref isLocked);
-                _onlineBuckets = null;
+                s_onlineBuckets = null;
             }
             finally
             {
@@ -299,7 +298,7 @@ namespace MajdataPlay
         }
 
 
-        static MaiScore GetOrCreate(Dictionary<ChartLevel, MaiScore> dict, string hash, ChartLevel level)
+        private static MaiScore GetOrCreate(Dictionary<ChartLevel, MaiScore> dict, string hash, ChartLevel level)
         {
             return dict.TryGetValue(level, out var score)
                 ? score
@@ -313,16 +312,16 @@ namespace MajdataPlay
         /// <summary>Replaces the local score buckets with the scores loaded from the database.</summary>
         /// <param name="loadedBuckets">The loaded scores keyed by chart hash.</param>
         /// <remarks>A bucket created in memory before initialization is replaced by the stored one of the same chart.</remarks>
-        static void PublishLoadedBuckets(Dictionary<string, SongScores> loadedBuckets)
+        private static void PublishLoadedBuckets(Dictionary<string, SongScores> loadedBuckets)
         {
-            ref var @lock = ref _lock;
+            ref var @lock = ref s_lock;
             var isLocked = false;
             try
             {
                 @lock.Enter(ref isLocked);
                 foreach (var pair in loadedBuckets)
                 {
-                    _buckets[pair.Key] = pair.Value;
+                    s_buckets[pair.Key] = pair.Value;
                 }
             }
             finally
@@ -337,7 +336,7 @@ namespace MajdataPlay
         /// <param name="connection">The open score database connection.</param>
         /// <returns>True when the score table exists; otherwise false.</returns>
         /// <exception cref="SQLiteException">The schema could not be queried.</exception>
-        static bool HasScoreTable(SQLiteConnection connection)
+        private static bool HasScoreTable(SQLiteConnection connection)
         {
             var tableCount = connection.ExecuteScalar<int>(
                 "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'MajScores'");
@@ -347,14 +346,14 @@ namespace MajdataPlay
         /// <param name="database">The score database whose tables are ready.</param>
         /// <param name="legacyPath">The existing legacy score file to read.</param>
         /// <returns>Whether every legacy score was imported successfully; a failed import leaves the database unchanged.</returns>
-        static async Task<bool> MigrateFromJsonAsync(MajDatabaseHandle database, StorageFile legacyPath)
+        private static async Task<bool> MigrateFromJsonAsync(MajDatabaseHandle database, StorageFile legacyPath)
         {
             try
             {
                 var json = await legacyPath.ReadAllTextAsync();
                 // Fix legacy typo: "JudgeDeatil" → "JudgeDetail"
                 json = json.Replace("\"JudgeDeatil\"", "\"JudgeDetail\"");
-                var scores = JsonConvert.DeserializeObject<List<MaiScore>>(json, _jsonReadSettings);
+                var scores = JsonConvert.DeserializeObject<List<MaiScore>>(json, s_jsonReadSettings);
                 if (scores is null || scores.Count == 0)
                 {
                     return true; // nothing to migrate
@@ -402,7 +401,7 @@ namespace MajdataPlay
                 return false;
             }
         }
-        static void UpdateJudgeInfoDB(this SQLiteConnection conn, int? majScoreID, JudgeInfoRecordDB record)
+        private static void UpdateJudgeInfoDB(this SQLiteConnection conn, int? majScoreID, JudgeInfoRecordDB record)
         {
             if (majScoreID is int id)
             {
@@ -414,17 +413,17 @@ namespace MajdataPlay
                 conn.Insert(record);
             }
         }
-        static SongScores CheckAndGetSongScores(string hash, bool isOnline)
+        private static SongScores CheckAndGetSongScores(string hash, bool isOnline)
         {
-            ref var @lock = ref _lock;
+            ref var @lock = ref s_lock;
             var isLocked = false;
             try
             {
                 @lock.Enter(ref isLocked);
-                var buckets = _buckets;
-                if (isOnline && _onlineBuckets is not null)
+                var buckets = s_buckets;
+                if (isOnline && s_onlineBuckets is not null)
                 {
-                    buckets = _onlineBuckets;
+                    buckets = s_onlineBuckets;
                 }
                 if (!buckets.TryGetValue(hash, out var records))
                 {
@@ -443,7 +442,7 @@ namespace MajdataPlay
         }
 
         [Table("MajScores")]
-        class MajScoreDB
+        private class MajScoreDB
         {
             [PrimaryKey]
             public string Key { get; set; } = string.Empty;
@@ -500,7 +499,7 @@ namespace MajdataPlay
                 };
             }
 
-            static JudgeInfo ResolveJudgeInfo(int? fkId, Dictionary<int, JudgeInfo> lookup)
+            private static JudgeInfo ResolveJudgeInfo(int? fkId, Dictionary<int, JudgeInfo> lookup)
             {
                 return fkId.HasValue && lookup.TryGetValue(fkId.Value, out var info) ? info : JudgeInfo.Empty;
             }
@@ -528,7 +527,7 @@ namespace MajdataPlay
         }
 
         [Table("JudgeInfoRecords")]
-        class JudgeInfoRecordDB
+        private class JudgeInfoRecordDB
         {
             [PrimaryKey, AutoIncrement]
             public int Id { get; set; }
