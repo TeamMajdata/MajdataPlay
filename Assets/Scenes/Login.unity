@@ -1980,7 +1980,6 @@ GameObject:
   - component: {fileID: 583075178}
   - component: {fileID: 583075180}
   - component: {fileID: 583075179}
-  - component: {fileID: 900000000000000103}
   m_Layer: 5
   m_Name: QRTitle
   m_TagString: Untagged
@@ -2195,7 +2194,6 @@ GameObject:
   - component: {fileID: 640682229}
   - component: {fileID: 640682228}
   - component: {fileID: 640682230}
-  - component: {fileID: 900000000000000104}
   m_Layer: 5
   m_Name: QRContainer
   m_TagString: Untagged
@@ -4159,62 +4157,6 @@ MonoBehaviour:
   _liquidEllipse: 0
   _liquidCapsule: 0
   _liquidBodyInsets: {x: 0.0258064516, y: 0.0258064516, z: 0.0258064516, w: 0.0258064516}
-  _fillSamplePosition: {x: 0.5, y: 0.5}
-  _backgroundImage: {fileID: 0}
-  _isButton: 0
-  _isCategory: 0
-  _reusePanelCaptureOnly: 0
-  _buttonForegroundRoot: {fileID: 0}
-  _fillAlpha: 1
-  _tintStrength: 1
-  _liquidTintStrength: 0.9
-  _liquidArtworkBlend: 0.25
-  _frostStrength: 0
-  _referenceOpacity: 1
---- !u!114 &900000000000000103
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 583075177}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: ef06d39c7c35439cafc6637c942934d4, type: 3}
-  m_Name:
-  m_EditorClassIdentifier: MajdataPlay.Core::MajdataPlay.Rendering.UiBackdropPanel
-  _liquidOnly: 0
-  _liquidEllipse: 0
-  _liquidCapsule: 0
-  _liquidBodyInsets: {x: 0.0197044335, y: 0.0243902439, z: 0.0197044335, w: 0.0243902439}
-  _fillSamplePosition: {x: 0.5, y: 0.5}
-  _backgroundImage: {fileID: 0}
-  _isButton: 0
-  _isCategory: 0
-  _reusePanelCaptureOnly: 0
-  _buttonForegroundRoot: {fileID: 0}
-  _fillAlpha: 1
-  _tintStrength: 1
-  _liquidTintStrength: 0.9
-  _liquidArtworkBlend: 0.25
-  _frostStrength: 0
-  _referenceOpacity: 1
---- !u!114 &900000000000000104
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 640682226}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: ef06d39c7c35439cafc6637c942934d4, type: 3}
-  m_Name:
-  m_EditorClassIdentifier: MajdataPlay.Core::MajdataPlay.Rendering.UiBackdropPanel
-  _liquidOnly: 0
-  _liquidEllipse: 0
-  _liquidCapsule: 0
-  _liquidBodyInsets: {x: 0.0197044335, y: 0.0243902439, z: 0.0197044335, w: 0.0243902439}
   _fillSamplePosition: {x: 0.5, y: 0.5}
   _backgroundImage: {fileID: 0}
   _isButton: 0

@@ -10741,6 +10741,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: ef06d39c7c35439cafc6637c942934d4, type: 3}
   m_Name:
   m_EditorClassIdentifier: MajdataPlay.Core::MajdataPlay.Rendering.UiBackdropPanel
+  _liquidForegroundRoot: {fileID: 3374659970506328570}
   _backgroundImage: {fileID: 5136493199664605945}
   _useStrongBlur: 1
   _liquidClippedCircle: 1

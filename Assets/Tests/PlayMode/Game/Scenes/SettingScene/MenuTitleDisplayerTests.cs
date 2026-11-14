@@ -41,7 +41,7 @@ namespace MajdataPlay.Tests.Game.Scenes.PlayMode.SettingScene
             _viewport.gameObject.AddComponent<RectMask2D>();
             _title = CreateText("TitleText", canvas);
             _title.color = Color.gray;
-            _title.fontSize = 26f;
+            _title.fontSize = 22f;
             _title.rectTransform.sizeDelta = _viewport.sizeDelta;
             _title.transform.SetParent(_viewport, false);
             PrivateMember.SetField(_displayer, "_background", _background);
@@ -95,7 +95,7 @@ namespace MajdataPlay.Tests.Game.Scenes.PlayMode.SettingScene
             Assert.That(rect.anchoredPosition.x, Is.EqualTo(218f).Within(1e-3f));
             Assert.That(rect.sizeDelta, Is.EqualTo(new Vector2(200f, 60f)));
             Assert.That(_background.color, Is.EqualTo(new Color(1f, 1f, 1f, 0.8f)));
-            Assert.That(_title.fontSize, Is.EqualTo(26f));
+            Assert.That(_title.fontSize, Is.EqualTo(22f));
             Assert.That(_viewport.rect.width, Is.EqualTo(192f).Within(0.001f));
             Assert.That(_title.overflowMode, Is.EqualTo(TextOverflowModes.Ellipsis));
             Assert.That(_title.rectTransform.localScale, Is.EqualTo(Vector3.one));
@@ -133,7 +133,7 @@ namespace MajdataPlay.Tests.Game.Scenes.PlayMode.SettingScene
             _displayer.SetDistance(0.5f);
             Assert.That(rect.sizeDelta, Is.EqualTo(new Vector2(250f, 60f)));
             Assert.That(_background.color, Is.EqualTo(Color.Lerp(new Color(1f, 1f, 1f, 0.8f), new Color(0f, 0f, 1f, 0.5f), 0.5f)));
-            Assert.That(_title.fontSize, Is.EqualTo(29f));
+            Assert.That(_title.fontSize, Is.EqualTo(27f));
             Assert.That(_viewport.rect.width, Is.EqualTo(196.655f).Within(0.001f));
             Assert.That(_title.rectTransform.localScale, Is.EqualTo(Vector3.one));
         }
@@ -157,7 +157,7 @@ namespace MajdataPlay.Tests.Game.Scenes.PlayMode.SettingScene
             _displayer.SetDistance(1f);
             Assert.That(_title.rectTransform.anchoredPosition, Is.EqualTo(Vector2.zero));
             Assert.That(_title.overflowMode, Is.EqualTo(TextOverflowModes.Ellipsis));
-            Assert.That(_title.fontSize, Is.EqualTo(26f));
+            Assert.That(_title.fontSize, Is.EqualTo(22f));
             yield return new WaitForSecondsRealtime(0.1f);
             Assert.That(_title.rectTransform.anchoredPosition, Is.EqualTo(Vector2.zero));
             Assert.That(_title.rectTransform.localScale, Is.EqualTo(Vector3.one));

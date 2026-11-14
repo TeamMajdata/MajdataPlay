@@ -204,7 +204,7 @@ namespace MajdataPlay.Tests.Game.Rendering
                     Assert.That(strength.Success, Is.True, "Liquid color policy must be explicit on this exact authored plate.");
                     var isCream = spriteId == "936887466";
                     var calibratedBoard = path == "Assets/Scenes/Setting.unity" || path == "Assets/Scenes/SortFind.unity"
-                        || path == "Assets/Scenes/Calibrator.unity"
+                        || path == "Assets/Scenes/Calibrator.unity" || path == "Assets/Scenes/Practice.unity"
                         || path == "Assets/Prefabs/List/Main_Display_ribbon.prefab";
                     Assert.That(float.Parse(strength.Groups["value"].Value, CultureInfo.InvariantCulture),
                         Is.EqualTo(calibratedBoard ? 0f : isCream ? 0.23f : 0.42f).Within(0.00001f));
@@ -233,10 +233,10 @@ namespace MajdataPlay.Tests.Game.Rendering
             var paths = new Dictionary<string, int>
             {
                 { "Assets/Scenes/Calibrator.unity", 3 },
-                { "Assets/Scenes/Login.unity", 7 },
+                { "Assets/Scenes/Login.unity", 5 },
                 { "Assets/Scenes/Title.unity", 1 },
-                { "Assets/Scenes/Practice.unity", 7 },
-                { "Assets/Scenes/SortFind.unity", 4 },
+                { "Assets/Scenes/Practice.unity", 8 },
+                { "Assets/Scenes/SortFind.unity", 3 },
                 { "Assets/Scenes/Setting.unity", 5 },
                 { "Assets/Prefabs/UI/Buttons.prefab", 8 },
                 { "Assets/Prefabs/UI/UserInfo.prefab", 1 },
@@ -247,11 +247,13 @@ namespace MajdataPlay.Tests.Game.Rendering
             };
             var creamIds = new HashSet<string> { "5019321880153334813", "1053645856", "1660259408",
                 "900000000000000018", "900000000000000019" };
-            var topIds = new HashSet<string> { "4988950831640157352", "7983312345234581847" };
-            var calibratedIds = new HashSet<string> { "5019321880153334813", "1053645856", "1660259408", "900000000000000018" };
+            var topIds = new HashSet<string> { "4988950831640157352", "7983312345234581847", "900000000000000022" };
+            var calibratedIds = new HashSet<string> { "5019321880153334813", "1053645856", "1660259408",
+                "900000000000000018", "900000000000000019" };
             var strongIds = new HashSet<string> { "5019321880153334813", "1053645856", "1660259408",
                 "900000000000000017", "4988950831640157352", "7983312345234581847",
-                "900000000000000020", "900000000000000021", "900000000000000018" };
+                "900000000000000020", "900000000000000021", "900000000000000018",
+                "900000000000000019", "900000000000000022" };
             var panelGuid = AssetDatabase.AssetPathToGUID("Assets/Scripts/Misc/Rendering/UiBackdropPanel.cs");
             var total = 0;
             var creams = 0;
@@ -286,7 +288,7 @@ namespace MajdataPlay.Tests.Game.Rendering
                     if (strongIds.Contains(id))
                     {
                         Assert.That(strongRoute.Count, Is.EqualTo(1));
-                        Assert.That(strongRoute[0].Groups["value"].Value, Is.EqualTo("1"), "The nine boards, including calibration, both top cards and startup plates, must use the drawn-background RT1.");
+                        Assert.That(strongRoute[0].Groups["value"].Value, Is.EqualTo("1"), "Large boards, chart strips and startup plates must use the drawn-background RT1.");
                         strongPanels++;
                     }
                     else
@@ -300,10 +302,10 @@ namespace MajdataPlay.Tests.Game.Rendering
                 Assert.That(inFile, Is.EqualTo(entry.Value), entry.Key + ": preserve this asset's original number of glass components.");
                 total += inFile;
             }
-            Assert.That(total, Is.EqualTo(40));
+            Assert.That(total, Is.EqualTo(38));
             Assert.That(creams, Is.EqualTo(5));
-            Assert.That(tops, Is.EqualTo(2));
-            Assert.That(strongPanels, Is.EqualTo(9));
+            Assert.That(tops, Is.EqualTo(3));
+            Assert.That(strongPanels, Is.EqualTo(11));
         }
 
         /// <summary>Checks the loading plate uses one sliced optical surface and the calibrated large-board color policy.</summary>
@@ -367,7 +369,7 @@ namespace MajdataPlay.Tests.Game.Rendering
             Assert.That(panel, Does.Not.Contain("_liquidTintColor:"));
         }
 
-        /// <summary>Checks width multipliers are confined to the requested large cards and two Setting adjustment capsules.</summary>
+        /// <summary>Checks width multipliers remain confined to the authored cards and adjustment capsules.</summary>
         /// <param name="path">The exact authored scene or prefab.</param>
         /// <param name="panelId">The requested large-card component in this asset.</param>
         /// <param name="expectedScale">The requested multiplier over the existing role-specific width.</param>
@@ -376,6 +378,8 @@ namespace MajdataPlay.Tests.Game.Rendering
         [TestCase("Assets/Scenes/SortFind.unity", "1660259408", 2f)]
         [TestCase("Assets/Prefabs/UI/UserInfo.prefab", "4988950831640157352", 1.5f)]
         [TestCase("Assets/Prefabs/UI/ChartVisualDisplayer.prefab", "7983312345234581847", 1.5f)]
+        [TestCase("Assets/Scenes/Practice.unity", "900000000000000019", 2f)]
+        [TestCase("Assets/Scenes/Practice.unity", "900000000000000022", 1.5f)]
         public void LiquidRefractionWidth_OnlyRequestedCardsOverrideTheirExistingBand(string path, string panelId, float expectedScale)
         {
             var text = FileSystem.File.Open(path).ReadAllText();
@@ -403,20 +407,23 @@ namespace MajdataPlay.Tests.Game.Rendering
                 }
                 expectedOverrideCount += 2;
             }
+            else if (path == "Assets/Scenes/Practice.unity")
+            {
+                expectedOverrideCount = 8;
+            }
             Assert.That(Regex.Matches(text, @"^  _liquidRefractionWidthScale:", RegexOptions.Multiline).Count, Is.EqualTo(expectedOverrideCount),
-                "Only the requested large card and Setting adjustment capsules may override their widths.");
+                "Only the explicitly authored cards and adjustment capsules may override their widths.");
         }
 
-        /// <summary>Checks the peripheral ring and unrelated practice/calibration panels retain their unmodified widths.</summary>
+        /// <summary>Checks the peripheral ring and unrelated calibration panels retain their unmodified widths.</summary>
         /// <param name="path">The authored asset excluded from the requested width change.</param>
         [TestCase("Assets/Prefabs/UI/Buttons.prefab")]
-        [TestCase("Assets/Scenes/Practice.unity")]
         [TestCase("Assets/Scenes/Calibrator.unity")]
         public void LiquidRefractionWidth_ExcludedAssetsKeepTheirDefaultBand(string path)
         {
             var text = FileSystem.File.Open(path).ReadAllText();
             Assert.That(text, Does.Not.Contain("_liquidRefractionWidthScale:"),
-                "The five-card request must not change the outer eight buttons or unrelated large panels.");
+                "The card-specific widths must not change the outer eight buttons or unrelated calibration panels.");
         }
 
         /// <summary>Checks only the two visible submonitor white plates reuse an existing panel capture without starting one.</summary>
@@ -603,9 +610,9 @@ namespace MajdataPlay.Tests.Game.Rendering
             Assert.That(count, Is.EqualTo(1));
         }
 
-        /// <summary>Checks Search confirmation uses the standard peripheral source while navigation keeps its native foreground ownership.</summary>
+        /// <summary>Checks Search authors only Practice-style A4/A5 controls and preserves the board and navigation capture policies.</summary>
         [Test]
-        public void SortFind_ConfirmationUsesStandardPeripheralAndNavigationRemainsNative()
+        public void SortFind_UsesPracticePeripheralConfirmationAndCancelWithoutChangingNavigation()
         {
             var text = FileSystem.File.Open("Assets/Scenes/SortFind.unity").ReadAllText();
             var backgroundBindings = Regex.Matches(text, @"_backgroundImage: \{fileID: (?<id>-?[1-9]\d*)\}");
@@ -617,19 +624,54 @@ namespace MajdataPlay.Tests.Game.Rendering
                 var body = component.Groups["body"].Value;
                 if (body.Contains("guid: " + panelGuid) && !body.Contains("_liquidOnly: 1"))
                 {
-                    Assert.That(body.Contains("m_GameObject: {fileID: 1660259404}") ||
-                        body.Contains("m_GameObject: {fileID: 1237316693}"), Is.True,
-                        "Only the background and standard confirmation button participate in Gaussian glass.");
+                    Assert.That(body, Does.Contain("m_GameObject: {fileID: 1660259404}"),
+                        "The new peripheral bodies inherit their existing shared-prefab policies.");
                 }
             }
-            var confirmation = Regex.Match(text, @"^--- !u!114 &900000000000000013\r?\n(?<body>.*?)(?=^--- |\z)",
+            var instance = Regex.Match(text, @"^--- !u!1001 &362213379\r?\n(?<body>.*?)(?=^--- |\z)",
                 RegexOptions.Multiline | RegexOptions.Singleline).Groups["body"].Value;
-            Assert.That(confirmation, Does.Contain("_isButton: 1"));
-            Assert.That(confirmation, Does.Contain("_liquidOnly: 0"));
-            Assert.That(confirmation, Does.Contain("_liquidEllipse: 1"));
-            Assert.That(confirmation, Does.Contain("_liquidCapsule: 0"));
-            Assert.That(confirmation, Does.Contain("_buttonForegroundRoot: {fileID: 1237316694}"));
-            foreach (var componentId in new[] { "1237316695", "1688309038", "2122532829" })
+            Assert.That(instance, Does.Contain("m_SourcePrefab: {fileID: 100100000, guid: 246320a2741b25248ab6e94bc499d92a, type: 3}"));
+            Assert.That(instance, Does.Contain("m_TransformParent: {fileID: 1127180454}"));
+            var removed = Regex.Match(instance, @"m_RemovedGameObjects:(?<body>.*?)    m_AddedGameObjects:",
+                RegexOptions.Singleline).Groups["body"].Value;
+            Assert.That(Regex.Matches(removed, @"fileID:").Count, Is.EqualTo(6));
+            foreach (var removedId in new[] { "6765661420530731545", "1494683800915637128", "3383897936242902499",
+                "504485935048825702", "6380678675710360550", "162027289803103054" })
+            {
+                Assert.That(removed, Does.Contain("fileID: " + removedId + ","));
+            }
+            var main = Regex.Match(text, @"^--- !u!224 &1127180454\r?\n(?<body>.*?)(?=^--- |\z)",
+                RegexOptions.Multiline | RegexOptions.Singleline).Groups["body"].Value;
+            Assert.That(main, Does.Contain("{fileID: 362213380}"));
+            Assert.That(text, Does.Not.Contain("m_Name: OkButton"));
+            Assert.That(text, Does.Not.Contain("BindSensor: 15000000"), "The obsolete D5 confirmation graphic must be removed.");
+            Assert.That(text, Does.Not.Contain("{fileID: 1237316694}"));
+            var buttons = FileSystem.File.Open("Assets/Prefabs/UI/Buttons.prefab").ReadAllText();
+            foreach (var control in new[]
+            {
+                ("5317505558870171490", "03000000", "8983832068243600665", "8647141364730774082", "846669334", "846669335",
+                    "21300000, guid: 5b820f37f0cf96e4eb82a0384a4ae8d4"),
+                ("7142667378218051414", "04000000", "7024678684790401055", "7303350980742751906", "1380209031", "1380209032",
+                    "1951789352, guid: 736513dcbc18dec438227ea2c0cb9831")
+            })
+            {
+                var binding = Regex.Match(buttons, @"^--- !u!114 &" + control.Item1 + @"\r?\n(?<body>.*?)(?=^--- |\z)",
+                    RegexOptions.Multiline | RegexOptions.Singleline).Groups["body"].Value;
+                Assert.That(binding, Does.Contain("BindButton: " + control.Item2));
+                var panel = Regex.Match(buttons, @"^--- !u!114 &" + control.Item3 + @"\r?\n(?<body>.*?)(?=^--- |\z)",
+                    RegexOptions.Multiline | RegexOptions.Singleline).Groups["body"].Value;
+                Assert.That(panel, Does.Contain("_isButton: 1"));
+                Assert.That(panel, Does.Not.Contain("_liquidOnly: 1"), "Both Gaussian and Liquid reuse the standard peripheral source.");
+                Assert.That(panel, Does.Contain("_buttonForegroundRoot: {fileID: " + control.Item4 + "}"));
+                Assert.That(instance, Does.Contain("targetCorrespondingSourceObject: {fileID: " + control.Item4 + ","));
+                Assert.That(instance, Does.Contain("addedObject: {fileID: " + control.Item5 + "}"));
+                var icon = Regex.Match(text, @"^--- !u!114 &" + control.Item6 + @"\r?\n(?<body>.*?)(?=^--- |\z)",
+                    RegexOptions.Multiline | RegexOptions.Singleline).Groups["body"].Value;
+                Assert.That(icon, Does.Contain("guid: fe87c0e1cc204ed48ad3b37840f39efc"));
+                Assert.That(icon, Does.Contain("m_Sprite: {fileID: " + control.Item7 + ", type: 3}"));
+                Assert.That(icon, Does.Contain("m_Color: {r: 0.85882354, g: 0.7529412, b: 0.52156866, a: 1}"));
+            }
+            foreach (var componentId in new[] { "1688309038", "2122532829" })
             {
                 var body = Regex.Match(text, @"^--- !u!114 &" + componentId +
                     @"\r?\n(?<body>.*?)(?=^--- |\z)", RegexOptions.Multiline | RegexOptions.Singleline)
@@ -642,10 +684,30 @@ namespace MajdataPlay.Tests.Game.Rendering
                 var material = AssetDatabase.LoadAssetAtPath<UnityEngine.Material>(AssetDatabase.GUIDToAssetPath(materialGuid));
                 Assert.That(material, Is.Not.Null);
                 Assert.That(material!.renderQueue, Is.GreaterThan(MajUiBackdropBridge.BackgroundQueueUpperBound),
-                    "Search confirmation and navigation controls must remain after the background capture.");
+                    "Search navigation controls must remain after the background capture.");
             }
         }
 
+        /// <summary>Checks the Search input's own nested Canvas has a raycaster without changing its keyboard settings.</summary>
+        [Test]
+        public void SortFind_MainDisplayRaycasterKeepsNestedSearchInputClickable()
+        {
+            var text = FileSystem.File.Open("Assets/Scenes/SortFind.unity").ReadAllText();
+            var main = Regex.Match(text, @"^--- !u!1 &1127180453\r?\n(?<body>.*?)(?=^--- |\z)",
+                RegexOptions.Multiline | RegexOptions.Singleline).Groups["body"].Value;
+            Assert.That(main, Does.Contain("component: {fileID: 1127180458}"));
+            Assert.That(main, Does.Contain("component: {fileID: 900000000000000120}"));
+            var raycaster = Regex.Match(text, @"^--- !u!114 &900000000000000120\r?\n(?<body>.*?)(?=^--- |\z)",
+                RegexOptions.Multiline | RegexOptions.Singleline).Groups["body"].Value;
+            Assert.That(raycaster, Does.Contain("m_GameObject: {fileID: 1127180453}"));
+            Assert.That(raycaster, Does.Contain("guid: dc42784cf147c0c48a680349fa168899"));
+            Assert.That(raycaster, Does.Contain("m_Enabled: 1"));
+            Assert.That(raycaster, Does.Contain("m_BlockingObjects: 0"));
+            Assert.That(text, Does.Contain("m_TargetGraphic: {fileID: 658895492}"));
+            Assert.That(text, Does.Contain("m_HideMobileInput: 1"));
+            Assert.That(text, Does.Contain("m_HideSoftKeyboard: 0"));
+            Assert.That(text, Does.Contain("m_DeselectOnBackgroundClick: 1"));
+        }
         /// <summary>Checks calibration reuses the established Board/Peripheral policies without replacing its existing artwork or geometry.</summary>
         /// <param name="panelId">The existing glass component identifier.</param>
         /// <param name="ownerId">The unchanged scene GameObject identifier.</param>
@@ -683,17 +745,64 @@ namespace MajdataPlay.Tests.Game.Rendering
             }
         }
 
+        /// <summary>Checks the existing comment bubble and text share one explicit liquid-only foreground policy.</summary>
+        [Test]
+        public void LiquidOrdering_BindsCommentForeground()
+        {
+            var list = FileSystem.File.Open("Assets/Prefabs/List/Main_Display_ribbon.prefab").ReadAllText();
+            var board = Regex.Match(list, @"^--- !u!114 &5019321880153334813\r?\n(?<body>.*?)(?=^--- |\z)",
+                RegexOptions.Multiline | RegexOptions.Singleline).Groups["body"].Value;
+            Assert.That(board, Does.Contain("_liquidForegroundRoot: {fileID: 3374659970506328570}"));
+            var comment = Regex.Match(list, @"^--- !u!224 &3374659970506328570\r?\n(?<body>.*?)(?=^--- |\z)",
+                RegexOptions.Multiline | RegexOptions.Singleline).Groups["body"].Value;
+            Assert.That(comment, Does.Contain("m_GameObject: {fileID: 5216211417724343022}"));
+            Assert.That(comment, Does.Contain("{fileID: 6427247033723599783}"), "The same group includes the spoken text and its bubble.");
+
+        }
+
+        /// <summary>Checks QR title and container stay ordinary white panels and the QR remains a native RawImage.</summary>
+        [Test]
+        public void LoginQrGraphics_KeepOriginalWhitePanelsAndNativeRawImage()
+        {
+            var login = FileSystem.File.Open("Assets/Scenes/Login.unity").ReadAllText();
+            var panelGuid = AssetDatabase.AssetPathToGUID("Assets/Scripts/Misc/Rendering/UiBackdropPanel.cs");
+            Assert.That(panelGuid, Is.Not.Empty);
+            foreach (var imageId in new[] { "583075179", "640682228" })
+            {
+                var image = Regex.Match(login, @"^--- !u!114 &" + imageId + @"\r?\n(?<body>.*?)(?=^--- |\z)",
+                    RegexOptions.Multiline | RegexOptions.Singleline).Groups["body"].Value;
+                Assert.That(image, Does.Contain("guid: 7c51cc521e1747f0ba99ae9b65785bd5"));
+                Assert.That(image, Does.Contain("m_Material: {fileID: 2100000, guid: 78a3c5eb06624f448a0238577d1de902, type: 2}"));
+                Assert.That(image, Does.Contain("m_Color: {r: 1, g: 1, b: 1, a: 1}"));
+                Assert.That(image, Does.Contain("m_Type: 1"), "Preserve the original sliced white artwork.");
+                Assert.That(image, Does.Contain("m_Sprite: {fileID: -547999258, guid: 04e00e0b72a3d284ebec3f7160996aa1"));
+                var owner = Regex.Match(image, @"m_GameObject: \{fileID: (?<id>-?\d+)\}").Groups["id"].Value;
+                Assert.That(owner, Is.Not.Empty);
+                foreach (Match component in s_components.Matches(login))
+                {
+                    var body = component.Groups["body"].Value;
+                    Assert.That(body.Contains("guid: " + panelGuid) && body.Contains("m_GameObject: {fileID: " + owner + "}"),
+                        Is.False, "Neither QR backing plate may opt into either glass style.");
+                }
+            }
+            var qr = Regex.Match(login, @"^--- !u!114 &1359979665\r?\n(?<body>.*?)(?=^--- |\z)",
+                RegexOptions.Multiline | RegexOptions.Singleline).Groups["body"].Value;
+            Assert.That(qr, Does.Contain("m_Script: {fileID: 11500000, guid: 1344c3c82d62a2a41a3576d8abb8e3ea, type: 3}"));
+            Assert.That(qr, Does.Contain("m_Material: {fileID: 2100000, guid: 78a3c5eb06624f448a0238577d1de902, type: 2}"),
+                "All presets retain the original black-and-white QR material.");
+            Assert.That(qr, Does.Not.Contain("_liquidGlassMaterial:"));
+            Assert.That(login, Does.Not.Contain("_liquidCaptureSource:"));
+        }
+
         /// <summary>Checks login plates retain native nine-slice geometry while the two circular keys use the final capture.</summary>
         /// <param name="imageId">The existing quality-aware image identifier.</param>
         /// <param name="panelId">The statically authored glass component identifier.</param>
-        /// <param name="peripheral">Whether this is a circular external key rather than a native input or QR plate.</param>
+        /// <param name="peripheral">Whether this is a circular external key rather than a native input plate.</param>
         [TestCase("1998670342", "900000000000000101", false)]
         [TestCase("486500992", "900000000000000102", false)]
-        [TestCase("583075179", "900000000000000103", false)]
-        [TestCase("640682228", "900000000000000104", false)]
         [TestCase("86439850", "900000000000000003", true)]
         [TestCase("256638719", "900000000000000004", true)]
-        public void LoginSurfaces_UseBothStylesWithoutChangingInputAndQrGraphics(string imageId, string panelId, bool peripheral)
+        public void LoginSurfaces_UseBothStylesWithoutChangingInputGraphics(string imageId, string panelId, bool peripheral)
         {
             var text = FileSystem.File.Open("Assets/Scenes/Login.unity").ReadAllText();
             var image = Regex.Match(text, @"^--- !u!114 &" + imageId + @"\r?\n(?<body>.*?)(?=^--- |\z)",
@@ -734,10 +843,82 @@ namespace MajdataPlay.Tests.Game.Rendering
             }
         }
 
+        /// <summary>Checks Practice boards and adjustment arrows share their established both-style role policies.</summary>
+        [Test]
+        public void PracticeSurfaces_ReuseListSettingAndChartPoliciesWithoutReplacingGraphics()
+        {
+            var text = FileSystem.File.Open("Assets/Scenes/Practice.unity").ReadAllText();
+            var controls = new[]
+            {
+                (Image: "325391450", Panel: "900000000000000019", Sprite: "936887466"),
+                (Image: "1426382402", Panel: "900000000000000005", Sprite: "200455113"),
+                (Image: "2027712564", Panel: "900000000000000006", Sprite: "170564351"),
+                (Image: "1244187158", Panel: "900000000000000007", Sprite: "200455113"),
+                (Image: "1472799756", Panel: "900000000000000008", Sprite: "200455113"),
+                (Image: "189428624", Panel: "900000000000000009", Sprite: "170564351"),
+                (Image: "158197088", Panel: "900000000000000010", Sprite: "170564351"),
+                (Image: "659019541", Panel: "900000000000000022", Sprite: "1073801904")
+            };
+            foreach (var control in controls)
+            {
+                var board = control.Image == "325391450";
+                var chart = control.Image == "659019541";
+                var panel = Regex.Match(text, @"^--- !u!114 &" + control.Panel + @"\r?\n(?<body>.*?)(?=^--- |\z)",
+                    RegexOptions.Multiline | RegexOptions.Singleline).Groups["body"].Value;
+                var image = Regex.Match(text, @"^--- !u!114 &" + control.Image + @"\r?\n(?<body>.*?)(?=^--- |\z)",
+                    RegexOptions.Multiline | RegexOptions.Singleline).Groups["body"].Value;
+                Assert.That(panel, Does.Contain("guid: ef06d39c7c35439cafc6637c942934d4"));
+                Assert.That(panel, Does.Contain("_liquidOnly: 0"), "Both Gaussian and liquid glass must activate this role.");
+                Assert.That(image, Does.Contain("guid: 7c51cc521e1747f0ba99ae9b65785bd5"));
+                Assert.That(image, Does.Contain("m_Material: {fileID: 2100000, guid: 78a3c5eb06624f448a0238577d1de902, type: 2}"));
+                Assert.That(image, Does.Contain("m_Sprite: {fileID: " + control.Sprite + ", guid: 04e00e0b72a3d284ebec3f7160996aa1, type: 3}"));
+                Assert.That(image, Does.Contain("m_Color: {r: 1, g: 1, b: 1, a: " + (board ? "0.85" : "1") + "}"));
+                var ownerId = Regex.Match(image, @"m_GameObject: \{fileID: (?<id>-?\d+)\}").Groups["id"].Value;
+                Assert.That(ownerId, Is.Not.Empty);
+                Assert.That(panel, Does.Contain("m_GameObject: {fileID: " + ownerId + "}"));
+                var owner = Regex.Match(text, @"^--- !u!1 &" + ownerId + @"\r?\n(?<body>.*?)(?=^--- |\z)",
+                    RegexOptions.Multiline | RegexOptions.Singleline).Groups["body"].Value;
+                Assert.That(owner, Does.Contain("component: {fileID: " + control.Panel + "}"));
+                var baselinePath = board ? "Assets/Prefabs/List/Main_Display_ribbon.prefab"
+                    : chart ? "Assets/Prefabs/UI/ChartVisualDisplayer.prefab" : "Assets/Scenes/Setting.unity";
+                var baselineId = board ? "5019321880153334813" : chart ? "7983312345234581847" : "900000000000000014";
+                var baselineText = FileSystem.File.Open(baselinePath).ReadAllText();
+                var baseline = Regex.Match(baselineText, @"^--- !u!114 &" + baselineId + @"\r?\n(?<body>.*?)(?=^--- |\z)",
+                    RegexOptions.Multiline | RegexOptions.Singleline).Groups["body"].Value;
+                foreach (var field in new[] { "_fillAlpha", "_tintStrength", "_liquidTintStrength", "_liquidArtworkBlend",
+                    "_liquidRefractionWidthScale", "_frostStrength", "_referenceOpacity" })
+                {
+                    var expected = Regex.Match(baseline, @"^  " + field + @": (?<value>[^\r\n]+)", RegexOptions.Multiline);
+                    var actual = Regex.Match(panel, @"^  " + field + @": (?<value>[^\r\n]+)", RegexOptions.Multiline);
+                    Assert.That(expected.Success && actual.Success, Is.True, control.Panel + ": " + field);
+                    Assert.That(actual.Groups["value"].Value, Is.EqualTo(expected.Groups["value"].Value), control.Panel + ": " + field);
+                }
+                if (board || chart)
+                {
+                    Assert.That(panel, Does.Contain("_useStrongBlur: 1"));
+                    Assert.That(panel, Does.Contain("_reusePanelCaptureOnly: " + (chart ? "1" : "0")));
+                }
+                else
+                {
+                    Assert.That(panel, Does.Contain("_usePeripheralBackdrop: 1"));
+                    Assert.That(panel, Does.Contain("_liquidCapsule: 1"));
+                    Assert.That(panel, Does.Contain("_fillSamplePosition: {x: 0.25, y: 0.5}"));
+                    Assert.That(panel, Does.Not.Contain("_useStrongBlur: 1"));
+                }
+                if (chart)
+                {
+                    foreach (var field in new[] { "_liquidBodyInsets", "_liquidCornerRadius" })
+                    {
+                        var expected = Regex.Match(baseline, @"^  " + field + @": (?<value>[^\r\n]+)", RegexOptions.Multiline);
+                        Assert.That(panel, Does.Contain(field + ": " + expected.Groups["value"].Value));
+                    }
+                }
+            }
+        }
+
         /// <summary>Checks all explicitly identified menu buttons and remaining plates opt into Liquid without altering Gaussian coverage.</summary>
         /// <param name="path">The scene containing the authored controls.</param>
         /// <param name="imageIds">The exact preserved quality-aware Image identifiers that gain Liquid Glass.</param>
-        [TestCase("Assets/Scenes/Practice.unity", "1426382402,2027712564,1244187158,1472799756,189428624,158197088,325391450")]
         [TestCase("Assets/Scenes/SortFind.unity", "2122532829,1688309038")]
         public void LiquidOnlyControls_KeepNativeOrderAndSampleUndecoratedFill(string path, string imageIds)
         {
@@ -931,7 +1112,7 @@ namespace MajdataPlay.Tests.Game.Rendering
             var text = viewport.Find(titleName).GetComponent<TMPro.TextMeshProUGUI>();
             Assert.That(text, Is.Not.Null);
             Assert.That(prefab.GetComponentsInChildren<TMPro.TextMeshProUGUI>(true).Length, Is.EqualTo(1));
-            Assert.That(text.fontSize, Is.EqualTo(26f));
+            Assert.That(text.fontSize, Is.EqualTo(22f));
             Assert.That(text.enableAutoSizing, Is.False);
             Assert.That(text.overflowMode, Is.EqualTo(TMPro.TextOverflowModes.Overflow));
             Assert.That(text.rectTransform.localScale, Is.EqualTo(UnityEngine.Vector3.one));

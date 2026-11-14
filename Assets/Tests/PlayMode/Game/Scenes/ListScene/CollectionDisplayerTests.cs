@@ -194,7 +194,7 @@ namespace MajdataPlay.Tests.Game.Scenes.PlayMode.ListScene
             Assert.That(_displayer.RectTransform.sizeDelta, Is.EqualTo(new Vector2(147.83f, 76.8f)));
             Assert.That(background.color, Is.EqualTo(Color.white));
             Assert.That(_name.canvasRenderer.GetColor(), Is.EqualTo(Color.gray));
-            Assert.That(_name.fontSize, Is.EqualTo(26f));
+            Assert.That(_name.fontSize, Is.EqualTo(22f));
             Assert.That(_icon.rectTransform.sizeDelta, Is.EqualTo(new Vector2(24f, 24f)));
             Assert.That(viewport.rect.width, Is.EqualTo(139.83f).Within(0.001f));
             Assert.That(viewport.anchoredPosition, Is.EqualTo(new Vector2(0f, -17f)));
@@ -220,7 +220,7 @@ namespace MajdataPlay.Tests.Game.Scenes.PlayMode.ListScene
                 Assert.That(_icon.rectTransform.anchoredPosition, Is.EqualTo(new Vector2(0f, 39f)));
                 Assert.That(_icon.rectTransform.sizeDelta, Is.EqualTo(new Vector2(36f, 36f)));
                 Assert.That(viewport.rect.width, Is.EqualTo(147.915f).Within(0.001f));
-                Assert.That(_name.fontSize, Is.EqualTo(29f));
+                Assert.That(_name.fontSize, Is.EqualTo(27f));
                 Assert.That(viewport.anchoredPosition, Is.EqualTo(new Vector2(0f, -8.5f)));
             }
             _displayer.SetDistance(0f);
@@ -249,7 +249,7 @@ namespace MajdataPlay.Tests.Game.Scenes.PlayMode.ListScene
             viewport.anchoredPosition = new Vector2(0f, -17f);
             viewport.gameObject.AddComponent<RectMask2D>();
             title = CreateText("Name", canvas);
-            title.fontSize = 26f;
+            title.fontSize = 22f;
             title.color = Color.gray;
             title.rectTransform.sizeDelta = viewport.sizeDelta;
             title.transform.SetParent(viewport, false);

@@ -331,7 +331,7 @@ namespace MajdataPlay.Tests.Game.Scenes.PlayMode.ListScene
             viewport.anchoredPosition = new Vector2(0f, -17f);
             viewport.gameObject.AddComponent<RectMask2D>();
             var title = CreateText("Name", parent);
-            title.fontSize = 26f;
+            title.fontSize = 22f;
             title.color = Color.gray;
             title.rectTransform.sizeDelta = viewport.sizeDelta;
             title.transform.SetParent(viewport, false);
