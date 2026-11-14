@@ -327,7 +327,7 @@ namespace MajdataPlay.Tests.Game.Scenes.PlayMode.ListScene
             var background = CreateImage("BG", displayer.transform);
             background.color = new Color(0.9058824f, 0.9176471f, 0.9176471f, 1f);
             var viewport = (RectTransform)CreateRect("TitleViewport", displayer.transform).transform;
-            viewport.sizeDelta = new Vector2(139.83f, 40f);
+            viewport.sizeDelta = new Vector2(111.83f, 40f);
             viewport.anchoredPosition = new Vector2(0f, -17f);
             viewport.gameObject.AddComponent<RectMask2D>();
             var title = CreateText("Name", parent);
@@ -343,6 +343,7 @@ namespace MajdataPlay.Tests.Game.Scenes.PlayMode.ListScene
             PrivateMember.SetField(tab, "_selectedWidth", 254.69f);
             PrivateMember.SetField(tab, "_titleDisplayer", title);
             PrivateMember.SetField(tab, "_titleViewport", viewport);
+            PrivateMember.SetField(tab, "_unselectedTitleInset", 18f);
             PrivateMember.SetField(tab, "_selectedTextColor", Color.white);
             PrivateMember.SetField(tab, "_selectedFontSize", 32f);
             PrivateMember.SetField(tab, "_iconTransform", icon.rectTransform);

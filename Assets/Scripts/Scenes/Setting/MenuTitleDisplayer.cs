@@ -131,11 +131,11 @@ namespace MajdataPlay.Scenes.Setting
         /// <summary>Tracks whether the current collection actually displays its optional icon.</summary>
         private bool _hasIcon;
 
-        /// <summary>Defers overflow measurement until a selected title settles or its content changes.</summary>
+        /// <summary>Defers layout refreshes caused by external RectTransform dimension changes.</summary>
         private bool _titleLayoutDirty = true;
 
-        /// <summary>Stores half of the selected title's measured horizontal overflow.</summary>
-        private float _titleScrollLimit;
+        /// <summary>Caches how far an overflowing title must move to reveal its end.</summary>
+        private float _titleOverflowWidth;
 
         /// <summary>Stores the title's current horizontal scrolling offset.</summary>
         private float _titleScrollOffset;
@@ -143,8 +143,8 @@ namespace MajdataPlay.Scenes.Setting
         /// <summary>Tracks the pause remaining before the next scrolling segment.</summary>
         private float _titleScrollPause = TitleScrollPauseSeconds;
 
-        /// <summary>Chooses the next edge visited by an overflowing title.</summary>
-        private int _titleScrollDirection = -1;
+        /// <summary>Chooses whether the next scrolling segment reveals the end or the beginning of the title.</summary>
+        private bool _titleScrollTowardsEnd = true;
 
         /// <summary>The last selection blend applied to the body, title and icon.</summary>
         private float _lastSelectedAmount = float.NaN;
@@ -164,7 +164,7 @@ namespace MajdataPlay.Scenes.Setting
             _unselectedFontSize = _titleDisplayer.fontSize;
             _titleDisplayer.enableAutoSizing = false;
             _titleDisplayer.textWrappingMode = TextWrappingModes.NoWrap;
-            _titleDisplayer.overflowMode = TextOverflowModes.Ellipsis;
+            _titleDisplayer.overflowMode = TextOverflowModes.Overflow;
             if (_iconTransform != null)
             {
                 _unselectedIconPosition = _iconTransform.anchoredPosition;
@@ -203,17 +203,11 @@ namespace MajdataPlay.Scenes.Setting
 
         private void Update()
         {
-            if (_lastSelectedAmount < 1f || float.IsNaN(_lastSelectedAmount))
-            {
-                return;
-            }
             if (_titleLayoutDirty)
             {
-                var titleWidth = _titleDisplayer.GetPreferredValues(_titleDisplayer.text, Mathf.Infinity, Mathf.Infinity).x;
-                _titleScrollLimit = Mathf.Max(0f, (titleWidth - _titleViewport.rect.width) * 0.5f);
-                _titleLayoutDirty = false;
+                RefreshTitle();
             }
-            if (_titleScrollLimit <= 0f)
+            if (_lastSelectedAmount < 1f || float.IsNaN(_lastSelectedAmount) || _titleOverflowWidth <= 0f)
             {
                 return;
             }
@@ -222,12 +216,12 @@ namespace MajdataPlay.Scenes.Setting
                 _titleScrollPause -= Time.unscaledDeltaTime;
                 return;
             }
-            var target = _titleScrollDirection * _titleScrollLimit;
+            var target = _titleScrollTowardsEnd ? -_titleOverflowWidth : 0f;
             _titleScrollOffset = Mathf.MoveTowards(_titleScrollOffset, target, TitleScrollSpeed * Time.unscaledDeltaTime);
             _titleRectTransform.anchoredPosition = _titleOriginPosition + new Vector2(_titleScrollOffset, 0f);
             if (_titleScrollOffset == target)
             {
-                _titleScrollDirection = -_titleScrollDirection;
+                _titleScrollTowardsEnd = !_titleScrollTowardsEnd;
                 _titleScrollPause = TitleScrollPauseSeconds;
             }
         }
@@ -253,10 +247,14 @@ namespace MajdataPlay.Scenes.Setting
             UpdateLocalizedText();
         }
 
-        /// <summary>Restarts scrolling after the existing title text is changed by its collection binding.</summary>
+        /// <summary>Fits short titles centrally and restarts clipped long titles at their beginning after content or layout changes.</summary>
         internal void RefreshTitle()
         {
-            _titleLayoutDirty = true;
+            var titleWidth = _titleDisplayer.GetPreferredValues(_titleDisplayer.text, Mathf.Infinity, Mathf.Infinity).x;
+            _titleOverflowWidth = Mathf.Max(0f, titleWidth - _titleViewport.rect.width);
+            _titleDisplayer.horizontalAlignment = _titleOverflowWidth > 0f
+                ? HorizontalAlignmentOptions.Left : HorizontalAlignmentOptions.Center;
+            _titleLayoutDirty = false;
             ResetTitleScroll();
         }
 
@@ -284,7 +282,6 @@ namespace MajdataPlay.Scenes.Setting
             _background.color = Color.Lerp(_unselectedBackgroundColor, _selectedBackgroundColor, selectedAmount);
             _textTint.SetColor(Color.Lerp(_unselectedTextColor, _selectedTextColor, selectedAmount));
             _titleDisplayer.fontSize = Mathf.Lerp(_unselectedFontSize, _selectedFontSize, selectedAmount);
-            _titleDisplayer.overflowMode = selectedAmount == 1f ? TextOverflowModes.Overflow : TextOverflowModes.Ellipsis;
             ApplyTitleViewportLayout(selectedAmount);
             if (_iconTransform != null)
             {
@@ -333,11 +330,11 @@ namespace MajdataPlay.Scenes.Setting
             _titleRectTransform.sizeDelta = new Vector2(width, _titleRectTransform.sizeDelta.y);
         }
 
-        /// <summary>Restores the centered title and its initial scrolling pause without changing typography.</summary>
+        /// <summary>Restores the title's beginning and initial scrolling pause without changing typography or alignment.</summary>
         private void ResetTitleScroll()
         {
             _titleScrollOffset = 0f;
-            _titleScrollDirection = -1;
+            _titleScrollTowardsEnd = true;
             _titleScrollPause = TitleScrollPauseSeconds;
             if (_titleRectTransform != null)
             {
@@ -355,12 +352,15 @@ namespace MajdataPlay.Scenes.Setting
             }
         }
 
+        /// <summary>Refreshes the localized title when the active language changes.</summary>
+        /// <param name="sender">The localization service publishing the change.</param>
+        /// <param name="language">The newly selected language.</param>
         private void OnLanguageChanged(object? sender, Language language)
         {
             UpdateLocalizedText();
         }
 
-        /// <summary>Publishes changed localized text and invalidates only the selected title's overflow cache.</summary>
+        /// <summary>Publishes changed localized text, refreshes its layout and restarts scrolling at the beginning.</summary>
         private void UpdateLocalizedText()
         {
             if (_localizedTitleProvider is not null)
