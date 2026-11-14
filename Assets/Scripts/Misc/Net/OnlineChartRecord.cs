@@ -1,4 +1,5 @@
 using System;
+using System.Threading;
 
 #nullable enable
 namespace MajdataPlay.Net
@@ -16,6 +17,8 @@ namespace MajdataPlay.Net
     {
         /// <summary>Gets the server-assigned identity of the chart.</summary>
         public string ChartId { get; }
+        /// <summary>Gets the whole-file chart hash whose revision supplied this record.</summary>
+        public string ChartHash { get; }
         /// <summary>Gets the server key: the identifier of the server serving the chart, or else its endpoint's URL.</summary>
         public string Server { get; }
         /// <summary>Gets whether the digests came from the <c>maichart/info</c> API, so a missing digest means a missing file.</summary>
@@ -27,6 +30,11 @@ namespace MajdataPlay.Net
         public bool IsDeletedOnServer { get; }
         /// <summary>Gets the cache owning the record, which also owns the object store.</summary>
         public OnlineChartCache Cache { get; }
+        /// <summary>Gets the normalized inote SHA-256 hashes indexed by chart level, or an empty span while unknown.</summary>
+        public ReadOnlySpan<string?> LevelHashes => Volatile.Read(ref _levelHashes);
+
+        /// <summary>Stores an immutable snapshot of the seven level hashes; replaced atomically when the chart is read.</summary>
+        private string?[] _levelHashes = Array.Empty<string?>();
 
         /// <summary>The number of resource kinds.</summary>
         private const int KindCount = (int)OnlineChartResourceKind.Thumbnail + 1;
@@ -42,15 +50,17 @@ namespace MajdataPlay.Net
         /// <param name="cache">The cache owning the record.</param>
         /// <param name="server">The server key.</param>
         /// <param name="chartId">The chart identity.</param>
+        /// <param name="chartHash">The whole-file hash identifying this chart revision.</param>
         /// <param name="isResolved">Whether the digests came from the info API.</param>
         /// <param name="isPersistent">Whether digest changes are written to the runtime database.</param>
         /// <param name="isDeletedOnServer">Whether the server deleted the chart.</param>
         /// <exception cref="ArgumentNullException">An argument is null.</exception>
-        internal OnlineChartRecord(OnlineChartCache cache, string server, string chartId, bool isResolved, bool isPersistent, bool isDeletedOnServer = false)
+        internal OnlineChartRecord(OnlineChartCache cache, string server, string chartId, string chartHash, bool isResolved, bool isPersistent, bool isDeletedOnServer = false)
         {
             Cache = cache ?? throw new ArgumentNullException(nameof(cache));
             Server = server ?? throw new ArgumentNullException(nameof(server));
             ChartId = chartId ?? throw new ArgumentNullException(nameof(chartId));
+            ChartHash = chartHash ?? throw new ArgumentNullException(nameof(chartHash));
             IsResolved = isResolved;
             _isPersistent = isPersistent;
             IsDeletedOnServer = isDeletedOnServer;
@@ -120,6 +130,71 @@ namespace MajdataPlay.Net
                 _digests[(int)kind] = digest;
                 _urls[(int)kind] = url;
             }
+        }
+
+        /// <summary>Records level hashes learned from the chart info API or downloaded inote text.</summary>
+        /// <param name="hashes">The hashes indexed by chart level, with null for missing levels.</param>
+        /// <remarks>A persistent record queues the new snapshot for storage; write failures are logged.</remarks>
+        public void SetLevelHashes(ReadOnlySpan<string?> hashes)
+        {
+            var snapshot = NormalizeLevelHashes(hashes);
+            lock (_digests)
+            {
+                if (AreLevelHashesEqual(_levelHashes, snapshot))
+                {
+                    return;
+                }
+                Volatile.Write(ref _levelHashes, snapshot);
+                if (_isPersistent)
+                {
+                    Cache.QueueLevelHashWrite(this, snapshot);
+                }
+            }
+        }
+
+        /// <summary>Loads the hashes of a cached row without writing them back to storage.</summary>
+        /// <param name="hashes">The cached hashes indexed by chart level.</param>
+        internal void LoadLevelHashes(ReadOnlySpan<string?> hashes)
+        {
+            Volatile.Write(ref _levelHashes, NormalizeLevelHashes(hashes));
+        }
+
+        /// <summary>Compares level hash snapshots while allowing absent chart levels on every runtime.</summary>
+        /// <param name="first">The current hash snapshot.</param>
+        /// <param name="second">The incoming hash snapshot.</param>
+        /// <returns>True when both snapshots have the same length and ordinal values, including null slots.</returns>
+        private static bool AreLevelHashesEqual(ReadOnlySpan<string?> first, ReadOnlySpan<string?> second)
+        {
+            if (first.Length != second.Length)
+            {
+                return false;
+            }
+            for (var index = 0; index < first.Length; index++)
+            {
+                if (!string.Equals(first[index], second[index], StringComparison.Ordinal))
+                {
+                    return false;
+                }
+            }
+            return true;
+        }
+
+        /// <summary>Copies supported level hashes, replacing malformed values with missing hashes.</summary>
+        /// <param name="hashes">The supplied hashes indexed by chart level.</param>
+        /// <returns>Seven normalized slots, or an empty array when no hashes were supplied.</returns>
+        internal static string?[] NormalizeLevelHashes(ReadOnlySpan<string?> hashes)
+        {
+            if (hashes.IsEmpty)
+            {
+                return Array.Empty<string?>();
+            }
+            var snapshot = new string?[7];
+            for (var index = 0; index < snapshot.Length && index < hashes.Length; index++)
+            {
+                var hash = hashes[index];
+                snapshot[index] = ObjectStore.IsDigest(hash) ? hash : null;
+            }
+            return snapshot;
         }
     }
 

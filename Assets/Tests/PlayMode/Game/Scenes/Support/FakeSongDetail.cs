@@ -27,6 +27,7 @@ namespace MajdataPlay.Tests.Game.Scenes.PlayMode.Support
         public FakeSongDetail(string hash, string title = "Title", params string[] levels)
         {
             Hash = hash;
+            LevelHashValues = CreateLevelHashes(Hash);
             Title = title;
             _designers = new string[7];
             _levels = new string[7];
@@ -51,6 +52,25 @@ namespace MajdataPlay.Tests.Game.Scenes.PlayMode.Support
 
         /// <summary>Gets the level labels indexed by chart level.</summary>
         public ReadOnlySpan<string> Levels => _levels;
+
+        /// <summary>Gets or sets the content hashes supplied by a score test.</summary>
+        public string?[] LevelHashValues { get; set; }
+
+        /// <summary>Gets the hashes indexed by chart level.</summary>
+        public ReadOnlySpan<string?> LevelHashes => LevelHashValues;
+
+        /// <summary>Creates distinct deterministic content identities for every fake chart level.</summary>
+        /// <param name="hash">The song identity.</param>
+        /// <returns>Seven content identities indexed by chart level.</returns>
+        private static string?[] CreateLevelHashes(string hash)
+        {
+            var hashes = new string?[7];
+            for (var index = 0; index < hashes.Length; index++)
+            {
+                hashes[index] = hash + ":" + index;
+            }
+            return hashes;
+        }
 
         /// <summary>Gets an empty tag list for the in-memory song.</summary>
         public ReadOnlySpan<string> Tags => ReadOnlySpan<string>.Empty;

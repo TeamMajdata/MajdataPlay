@@ -265,6 +265,10 @@ namespace MajdataPlay.Tests.Game.Misc.Base
                 Assert.That(song.Record.TryGetDigest(OnlineChartResourceKind.Maidata, out var digest), Is.True);
                 Assert.That(digest.Sha256, Is.EqualTo(Sha256(s_chart)));
                 Assert.That(await ReadColumnAsync("MaidataSha256", song.Id), Is.EqualTo(Sha256(s_chart)));
+                Assert.That(song.GetLevelHash(ChartLevel.Master), Is.EqualTo(chart.Charts[4].Sha256));
+                Assert.That(song.GetLevelHash(ChartLevel.Easy), Is.Null);
+                var restored = _cache.GetOrCreateRecord(_endpoint, Detail(id: song.Id));
+                Assert.That(restored.LevelHashes[4], Is.EqualTo(chart.Charts[4].Sha256));
             });
         }
 
