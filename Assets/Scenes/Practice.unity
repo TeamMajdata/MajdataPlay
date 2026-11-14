@@ -5214,6 +5214,7 @@ GameObject:
   - component: {fileID: 659019540}
   - component: {fileID: 659019542}
   - component: {fileID: 659019541}
+  - component: {fileID: 900000000000000022}
   m_Layer: 5
   m_Name: Image
   m_TagString: Untagged
@@ -20855,11 +20856,13 @@ MonoBehaviour:
   m_EditorClassIdentifier: MajdataPlay.Core::MajdataPlay.Rendering.UiBackdropPanel
   _backgroundImage: {fileID: 0}
   _isButton: 0
+  _usePeripheralBackdrop: 1
   _isCategory: 0
   _reusePanelCaptureOnly: 0
-  _liquidOnly: 1
+  _liquidOnly: 0
   _liquidEllipse: 0
   _liquidCapsule: 1
+  _liquidRefractionWidthScale: 0.75
   _fillSamplePosition: {x: 0.25, y: 0.5}
   _buttonForegroundRoot: {fileID: 0}
   _fillAlpha: 1
@@ -20882,11 +20885,13 @@ MonoBehaviour:
   m_EditorClassIdentifier: MajdataPlay.Core::MajdataPlay.Rendering.UiBackdropPanel
   _backgroundImage: {fileID: 0}
   _isButton: 0
+  _usePeripheralBackdrop: 1
   _isCategory: 0
   _reusePanelCaptureOnly: 0
-  _liquidOnly: 1
+  _liquidOnly: 0
   _liquidEllipse: 0
   _liquidCapsule: 1
+  _liquidRefractionWidthScale: 0.75
   _fillSamplePosition: {x: 0.25, y: 0.5}
   _buttonForegroundRoot: {fileID: 0}
   _fillAlpha: 1
@@ -20909,11 +20914,13 @@ MonoBehaviour:
   m_EditorClassIdentifier: MajdataPlay.Core::MajdataPlay.Rendering.UiBackdropPanel
   _backgroundImage: {fileID: 0}
   _isButton: 0
+  _usePeripheralBackdrop: 1
   _isCategory: 0
   _reusePanelCaptureOnly: 0
-  _liquidOnly: 1
+  _liquidOnly: 0
   _liquidEllipse: 0
   _liquidCapsule: 1
+  _liquidRefractionWidthScale: 0.75
   _fillSamplePosition: {x: 0.25, y: 0.5}
   _buttonForegroundRoot: {fileID: 0}
   _fillAlpha: 1
@@ -20936,11 +20943,13 @@ MonoBehaviour:
   m_EditorClassIdentifier: MajdataPlay.Core::MajdataPlay.Rendering.UiBackdropPanel
   _backgroundImage: {fileID: 0}
   _isButton: 0
+  _usePeripheralBackdrop: 1
   _isCategory: 0
   _reusePanelCaptureOnly: 0
-  _liquidOnly: 1
+  _liquidOnly: 0
   _liquidEllipse: 0
   _liquidCapsule: 1
+  _liquidRefractionWidthScale: 0.75
   _fillSamplePosition: {x: 0.25, y: 0.5}
   _buttonForegroundRoot: {fileID: 0}
   _fillAlpha: 1
@@ -20963,11 +20972,13 @@ MonoBehaviour:
   m_EditorClassIdentifier: MajdataPlay.Core::MajdataPlay.Rendering.UiBackdropPanel
   _backgroundImage: {fileID: 0}
   _isButton: 0
+  _usePeripheralBackdrop: 1
   _isCategory: 0
   _reusePanelCaptureOnly: 0
-  _liquidOnly: 1
+  _liquidOnly: 0
   _liquidEllipse: 0
   _liquidCapsule: 1
+  _liquidRefractionWidthScale: 0.75
   _fillSamplePosition: {x: 0.25, y: 0.5}
   _buttonForegroundRoot: {fileID: 0}
   _fillAlpha: 1
@@ -20990,11 +21001,13 @@ MonoBehaviour:
   m_EditorClassIdentifier: MajdataPlay.Core::MajdataPlay.Rendering.UiBackdropPanel
   _backgroundImage: {fileID: 0}
   _isButton: 0
+  _usePeripheralBackdrop: 1
   _isCategory: 0
   _reusePanelCaptureOnly: 0
-  _liquidOnly: 1
+  _liquidOnly: 0
   _liquidEllipse: 0
   _liquidCapsule: 1
+  _liquidRefractionWidthScale: 0.75
   _fillSamplePosition: {x: 0.25, y: 0.5}
   _buttonForegroundRoot: {fileID: 0}
   _fillAlpha: 1
@@ -21016,21 +21029,50 @@ MonoBehaviour:
   m_Name:
   m_EditorClassIdentifier: MajdataPlay.Core::MajdataPlay.Rendering.UiBackdropPanel
   _backgroundImage: {fileID: 0}
+  _useStrongBlur: 1
   _liquidClippedCircle: 1
   _isButton: 0
   _isCategory: 0
   _reusePanelCaptureOnly: 0
-  _liquidOnly: 1
+  _liquidOnly: 0
   _liquidEllipse: 0
   _liquidCapsule: 0
   _fillSamplePosition: {x: 0.5, y: 0.5}
   _buttonForegroundRoot: {fileID: 0}
   _fillAlpha: 0.5019608
   _tintStrength: 0.4
-  _liquidTintStrength: 0.23
-  _liquidArtworkBlend: 0.25
+  _liquidTintStrength: 0
+  _liquidArtworkBlend: 0.4233333
+  _liquidRefractionWidthScale: 2
   _frostStrength: 0.08
   _referenceOpacity: 0.85
+--- !u!114 &900000000000000022
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 659019539}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: ef06d39c7c35439cafc6637c942934d4, type: 3}
+  m_Name:
+  m_EditorClassIdentifier: MajdataPlay.Core::MajdataPlay.Rendering.UiBackdropPanel
+  _backgroundImage: {fileID: 0}
+  _liquidOnly: 0
+  _useStrongBlur: 1
+  _liquidBodyInsets: {x: 0.13793103, y: 0.19047619, z: 0.13793103, w: 0.0952381}
+  _liquidCornerRadius: 0.24206349
+  _isButton: 0
+  _isCategory: 0
+  _reusePanelCaptureOnly: 1
+  _fillAlpha: 1
+  _tintStrength: 1
+  _liquidTintStrength: 0.42
+  _liquidRefractionWidthScale: 1.5
+  _liquidArtworkBlend: 0.25
+  _frostStrength: 0.02
+  _referenceOpacity: 1
 --- !u!1660057539 &9223372036854775807
 SceneRoots:
   m_ObjectHideFlags: 0

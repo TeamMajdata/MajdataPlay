@@ -6,6 +6,7 @@ using System.Text.RegularExpressions;
 using MajdataPlay.IO.Storage;
 using MajdataPlay.Rendering;
 using NUnit.Framework;
+using TMPro;
 using UnityEngine;
 using UnityEngine.EventSystems;
 using UnityEngine.TestTools;
@@ -963,6 +964,139 @@ namespace MajdataPlay.Tests.Game.Rendering
             Assert.That(source != null && replacement != null, Is.True, "Borrowed source materials must survive the Image.");
             Assert.That(source.renderQueue, Is.EqualTo(3000));
             Assert.That(replacement.renderQueue, Is.EqualTo(3040));
+        }
+
+        /// <summary>Checks explicit liquid foregrounds work for a Board owner and restore authored state outside liquid glass.</summary>
+        /// <returns>The style, source-state and pooled-owner lifecycle regression.</returns>
+        [UnityTest]
+        public IEnumerator LiquidExplicitForeground_RestoresQueuesAcrossStylesAndPooling()
+        {
+            var shader = Shader.Find("Maj/UI/Default");
+            Assert.That(shader, Is.Not.Null);
+            var source = _objects.Track(new Material(shader) { renderQueue = 3031 });
+            source.SetColor("_Color", Color.cyan);
+            source.SetFloat("_Stencil", 3f);
+            var canvas = _objects.Add<Canvas>();
+            canvas.renderMode = RenderMode.ScreenSpaceOverlay;
+            var owner = CreateImage(_cutout);
+            owner.gameObject.SetActive(false);
+            owner.transform.SetParent(canvas.transform, false);
+            var panel = owner.gameObject.AddComponent<UiBackdropPanel>();
+            typeof(UiBackdropPanel).GetField("_useStrongBlur", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(panel, true);
+            var bubbles = _objects.Create("Authored comments", canvas.transform);
+            var bubble = _objects.Add<Image>("Comment", bubbles.transform);
+            bubble.material = source;
+            bubble.sprite = _sprites[0];
+            bubble.color = new Color(0.2f, 0.4f, 0.7f, 0.6f);
+            var color = bubble.color;
+            var size = bubble.rectTransform.sizeDelta;
+            typeof(UiBackdropPanel).GetField("_liquidForegroundRoot", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(panel, bubbles.transform);
+            owner.gameObject.SetActive(true);
+            yield return null;
+            Assert.That(panel.SourceRole, Is.EqualTo(UiBackdropSourceRole.Board));
+            var helper = bubble.GetComponent<UiBackdropForeground>();
+            Assert.That(helper, Is.Not.Null, "A Board owner must bind its explicit layer even without the legacy foreground root.");
+            UiPvBackdropBlur.Configure(true, UiBackdropStyle.GaussianBlur);
+            Assert.That(bubble.materialForRendering, Is.SameAs(source));
+
+            UiPvBackdropBlur.Configure(true, UiBackdropStyle.LiquidGlass);
+            var variant = bubble.materialForRendering;
+            Assert.That(variant.renderQueue, Is.EqualTo(3503));
+            Assert.That(variant.shader, Is.SameAs(source.shader));
+            Assert.That(variant.GetColor("_Color"), Is.EqualTo(Color.cyan));
+            Assert.That(variant.GetFloat("_Stencil"), Is.EqualTo(3f));
+            Assert.That(bubble.sprite, Is.SameAs(_sprites[0]));
+            Assert.That(bubble.color, Is.EqualTo(color));
+            Assert.That(bubble.rectTransform.sizeDelta, Is.EqualTo(size));
+            Assert.That(bubble.material, Is.SameAs(source));
+            Assert.That(source.renderQueue, Is.EqualTo(3031));
+
+            UiPvBackdropBlur.Configure(true, UiBackdropStyle.GaussianBlur);
+            Assert.That(bubble.materialForRendering, Is.SameAs(source));
+            yield return null;
+            yield return null;
+            Assert.That(variant == null, Is.True);
+            UiPvBackdropBlur.Configure(true, UiBackdropStyle.LiquidGlass);
+            var pooledVariant = bubble.materialForRendering;
+            panel.enabled = false;
+            Assert.That(helper!.IsBoundTo(panel), Is.False);
+            Assert.That(bubble.materialForRendering, Is.SameAs(source));
+            yield return null;
+            Assert.That(pooledVariant == null, Is.True);
+            panel.enabled = true;
+            Assert.That(bubble.GetComponent<UiBackdropForeground>(), Is.SameAs(helper));
+            Assert.That(bubble.materialForRendering.renderQueue, Is.EqualTo(3503));
+            UiPvBackdropBlur.Configure(false);
+            Assert.That(bubble.materialForRendering, Is.SameAs(source));
+        }
+
+        /// <summary>Checks explicit liquid queues reach later TMP fallback submeshes while legacy category foregrounds keep their stage.</summary>
+        /// <returns>The TMP event, dual-style, ownership and native-material cleanup regression.</returns>
+        [UnityTest]
+        public IEnumerator LiquidExplicitText_PropagatesToNewFallbacksWithoutChangingLegacyForegrounds()
+        {
+            var font = Resources.Load<TMP_FontAsset>("Fonts & Materials/LiberationSans SDF");
+            Assert.That(font, Is.Not.Null);
+            var source = _objects.Track(new Material(font!.material) { renderQueue = 3000 });
+            var fallbackSource = _objects.Track(new Material(source));
+            fallbackSource.SetFloat("_Stencil", 7f);
+            var canvas = _objects.Add<Canvas>();
+            canvas.renderMode = RenderMode.ScreenSpaceOverlay;
+            var owner = CreateImage(_cutout);
+            owner.gameObject.SetActive(false);
+            owner.transform.SetParent(canvas.transform, false);
+            var panel = owner.gameObject.AddComponent<UiBackdropPanel>();
+            typeof(UiBackdropPanel).GetField("_isCategory", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(panel, true);
+            var nativeRoot = _objects.Create("Legacy category foreground", canvas.transform);
+            var native = _objects.Add<Image>("Native category icon", nativeRoot.transform);
+            native.material = _cutout;
+            var comments = _objects.Create("Authored liquid comment foreground", canvas.transform);
+            var textObject = _objects.Create("Comment text", comments.transform);
+            textObject.SetActive(false);
+            var text = textObject.AddComponent<TextMeshProUGUI>();
+            text.font = font;
+            text.fontSharedMaterial = source;
+            text.text = "Comment";
+            text.rectTransform.sizeDelta = new Vector2(400f, 100f);
+            textObject.SetActive(true);
+            text.ForceMeshUpdate();
+            typeof(UiBackdropPanel).GetField("_buttonForegroundRoot", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(panel, nativeRoot.transform);
+            typeof(UiBackdropPanel).GetField("_liquidForegroundRoot", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(panel, comments.transform);
+            owner.gameObject.SetActive(true);
+            UiPvBackdropBlur.Configure(true, UiBackdropStyle.GaussianBlur);
+            yield return null;
+            Assert.That(native.materialForRendering.renderQueue, Is.EqualTo(MajUiBackdropBridge.CategoryQueue));
+            Assert.That(text.materialForRendering, Is.SameAs(source));
+            var helper = text.GetComponent<UiBackdropForeground>();
+            Assert.That(helper, Is.Not.Null);
+            var submesh = TMP_SubMeshUI.AddSubTextObject(text, new MaterialReference(1, font, null!, fallbackSource, 0f));
+            _objects.Track(submesh.gameObject);
+            TMPro_EventManager.ON_TEXT_CHANGED(text);
+            Assert.That(submesh.materialForRendering, Is.SameAs(fallbackSource));
+
+            UiPvBackdropBlur.Configure(true, UiBackdropStyle.LiquidGlass);
+            var variant = text.materialForRendering;
+            var fallbackVariant = submesh.materialForRendering;
+            Assert.That(variant.renderQueue, Is.EqualTo(3503));
+            Assert.That(fallbackVariant.renderQueue, Is.EqualTo(3503));
+            Assert.That(fallbackVariant.shader, Is.SameAs(fallbackSource.shader));
+            Assert.That(fallbackVariant.GetFloat("_Stencil"), Is.EqualTo(7f));
+            Assert.That(fallbackVariant.GetTexture("_MainTex"), Is.SameAs(fallbackSource.GetTexture("_MainTex")));
+            Assert.That(submesh.sharedMaterial, Is.SameAs(fallbackSource));
+            Assert.That(native.materialForRendering.renderQueue, Is.EqualTo(MajUiBackdropBridge.CategoryQueue));
+            UiPvBackdropBlur.Configure(true, UiBackdropStyle.GaussianBlur);
+            Assert.That(text.materialForRendering, Is.SameAs(source));
+            Assert.That(submesh.materialForRendering, Is.SameAs(fallbackSource));
+            UiPvBackdropBlur.Configure(true, UiBackdropStyle.LiquidGlass);
+            panel.enabled = false;
+            Assert.That(helper!.IsBoundTo(panel), Is.False);
+            Assert.That(text.materialForRendering, Is.SameAs(source));
+            Assert.That(submesh.materialForRendering, Is.SameAs(fallbackSource));
+            yield return null;
+            yield return null;
+            Assert.That(variant == null && fallbackVariant == null, Is.True);
+            Assert.That(source.renderQueue, Is.EqualTo(3000));
+            Assert.That(fallbackSource.renderQueue, Is.EqualTo(3000));
         }
 
         /// <summary>Finds an imported atlas slice by the identifier stored in an authored Setting scene Image.</summary>

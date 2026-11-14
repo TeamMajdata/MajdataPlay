@@ -298,6 +298,49 @@ namespace MajdataPlay.Tests.Game.Rendering
                     var resumedMenuSamples = (int)attachments.GetType().GetProperty("Samples", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(attachments)!;
                     Assert.That(resumedMenuSamples, Is.EqualTo(samples),
                         "Re-entering a backdrop menu must continue to respect configured MSAA.");
+                    // EditMode cannot activate the Play-only Graphic material modifiers. Use their
+                    // resolved queues here to check actual native capture and draw boundaries.
+                    // Companion asset/PlayMode tests cover the authored bindings and style gating.
+                    MajCameraRenderExtensions.Unregister(factory);
+                    for (var index = 0; index < markers.Length; index++)
+                    {
+                        markers[index].enabled = false;
+                    }
+                    camera.backgroundColor = Color.red;
+                    ring.GetComponent<MeshRenderer>().enabled = false;
+                    ringRenderer.enabled = false;
+                    badge.GetComponent<MeshRenderer>().enabled = false;
+                    transition.GetComponent<MeshRenderer>().enabled = false;
+                    var foregroundQueue = (int)typeof(UiBackdropPanel)
+                        .GetField("LiquidForegroundQueue", BindingFlags.NonPublic | BindingFlags.Static)!.GetRawConstantValue()!;
+                    Assert.That(foregroundQueue, Is.EqualTo(3503));
+                    var commentSource = UnityEditor.AssetDatabase.LoadAssetAtPath<Material>("Assets/Rendering/Materials/UI/[UI]Opaque.mat");
+                    Assert.That(commentSource, Is.Not.Null);
+                    var bubbleMaterial = objects.Track(new Material(commentSource));
+                    bubbleMaterial.SetTexture("_MainTex", Texture2D.whiteTexture);
+                    bubbleMaterial.SetColor("_Color", Color.magenta);
+                    CreateMarker(objects, mesh, bubbleMaterial, "Comment bubble foreground", new Vector2(-0.25f, 0f), 0.06f);
+                    var commentTextMaterial = objects.Track(new Material(commentSource));
+                    commentTextMaterial.SetTexture("_MainTex", Texture2D.whiteTexture);
+                    commentTextMaterial.SetColor("_Color", Color.yellow);
+                    CreateMarker(objects, mesh, commentTextMaterial, "Comment text foreground", new Vector2(-0.25f, 0.25f), 0.06f);
+                    foreach (var liquid in new[] { true, false })
+                    {
+                        bubbleMaterial.renderQueue = liquid ? foregroundQueue : commentSource.renderQueue;
+                        commentTextMaterial.renderQueue = liquid ? foregroundQueue : commentSource.renderQueue;
+                        frameRenderer.enabled = true;
+                        coverRenderer.enabled = true;
+                        camera.Render();
+                        AssertColor(Read(prefixes[2], reader, 24, 32), liquid ? Color.red : Color.magenta,
+                            "Only liquid comment bubbles move out of RT3 and retain their original queue otherwise.");
+                        AssertColor(Read(prefixes[2], reader, 24, 40), liquid ? Color.red : Color.yellow,
+                            "The comment text must follow the same liquid-only foreground contract as its bubble.");
+                        AssertColor(Read(final, reader, 24, 32), liquid ? Color.magenta : coverColor,
+                            "Liquid comments must cover both queue-3500 glass and queue-3501 full-resolution covers.");
+                        AssertColor(Read(final, reader, 24, 40), liquid ? Color.yellow : coverColor,
+                            "Liquid comment text must stay above its cover; Gaussian keeps the original order.");
+                    }
+                    Assert.That(commentSource.renderQueue, Is.EqualTo(2000));
                 }
                 finally
                 {
@@ -318,6 +361,26 @@ namespace MajdataPlay.Tests.Game.Rendering
                     Shader.SetGlobalVector("_MajUiButtonClipUvX", oldClip);
                 }
             }
+        }
+
+        /// <summary>Adds a native draw marker without substituting the renderer's queue splitting.</summary>
+        /// <param name="objects">The fixture-owned Unity object collection.</param>
+        /// <param name="mesh">The shared unit quad.</param>
+        /// <param name="material">The resolved native material whose queue is under test.</param>
+        /// <param name="name">The diagnostic marker name.</param>
+        /// <param name="position">The center in the fixture camera's world plane.</param>
+        /// <param name="scale">The uniform half-size of the quad.</param>
+        /// <returns>The native renderer whose visibility can isolate individual stages.</returns>
+        private static MeshRenderer CreateMarker(TestObjects objects, Mesh mesh, Material material, string name, Vector2 position, float scale)
+        {
+            var marker = objects.Create(name);
+            marker.layer = 5;
+            marker.transform.position = position;
+            marker.transform.localScale = new Vector3(scale, scale, 1f);
+            marker.AddComponent<MeshFilter>().sharedMesh = mesh;
+            var renderer = marker.AddComponent<MeshRenderer>();
+            renderer.sharedMaterial = material;
+            return renderer;
         }
 
         /// <summary>Reads the center of a completed real render target.</summary>

@@ -28,6 +28,9 @@ namespace MajdataPlay.Rendering
         /// <summary>Identifies the layout-owned circle used by the early black display mask.</summary>
         private const string MainDisplayName = "Main_Display";
 
+        /// <summary>Keeps explicitly authored liquid overlays after the cover and score labels.</summary>
+        private const int LiquidForegroundQueue = 3503;
+
         /// <summary>Selects the bounded liquid optical program independently of global scene-source state.</summary>
         internal const string LiquidStyleKeyword = "MAJ_UI_LIQUID_GLASS";
 
@@ -134,6 +137,11 @@ namespace MajdataPlay.Rendering
         [SerializeField]
         [FormerlySerializedAs("ButtonForegroundRoot")]
         private Transform? _buttonForegroundRoot;
+
+        /// <summary>Keeps an authored overlay hierarchy clear and late only while liquid glass is active.</summary>
+        [SerializeField]
+        [FormerlySerializedAs("LiquidForegroundRoot")]
+        private Transform? _liquidForegroundRoot;
 
         /// <summary>Normalizes the original translucent fill into complete glass coverage.</summary>
         [SerializeField]
@@ -315,7 +323,7 @@ namespace MajdataPlay.Rendering
         /// <summary>Retains the source name used by offline contour descriptors.</summary>
         private string _opticalSpriteName = string.Empty;
 
-        /// <summary>Retains only the foreground modifiers discovered within the explicit button root.</summary>
+        /// <summary>Retains only queue modifiers bound to the panel's explicitly authored native and liquid layers.</summary>
         private readonly List<UiBackdropForeground> _foreground = new(2);
 
         /// <summary>Gets whether this panel consumes the final snapshot after categories have rendered.</summary>
@@ -915,27 +923,52 @@ namespace MajdataPlay.Rendering
             }
         }
 
-        /// <summary>Discovers only this button's existing native Graphics once when its owner is enabled.</summary>
+        /// <summary>Binds authored native foregrounds and explicit liquid-only layers once per enabled owner lifetime.</summary>
         private void BindForeground()
         {
             UnbindForeground();
-            if ((SourceRole != UiBackdropSourceRole.Peripheral && !IsCategory) || _buttonForegroundRoot == null)
+            if (SourceRole == UiBackdropSourceRole.Peripheral || IsCategory)
+            {
+                BindRoot(_buttonForegroundRoot);
+            }
+            BindRoot(_liquidForegroundRoot, LiquidForegroundQueue, true);
+        }
+
+        /// <summary>Applies one queue policy to the existing Graphics inside an explicitly authored hierarchy.</summary>
+        /// <param name="root">The authored hierarchy, or null when this panel has no such layer.</param>
+        /// <param name="renderQueueOverride">The explicit queue, or minus one for the owner's native foreground stage.</param>
+        /// <param name="liquidOnly">Whether Gaussian and disabled effects retain the original materials.</param>
+        private void BindRoot(Transform? root, int renderQueueOverride = -1, bool liquidOnly = false)
+        {
+            if (root == null)
             {
                 return;
             }
-            foreach (var graphic in _buttonForegroundRoot.GetComponentsInChildren<Graphic>(true))
+            foreach (var graphic in root.GetComponentsInChildren<Graphic>(true))
             {
-                if (graphic == _image || graphic.GetComponent<UiBackdropPanel>() != null)
-                {
-                    continue;
-                }
-                var foreground = graphic.GetComponent<UiBackdropForeground>();
-                if (foreground == null)
-                {
-                    foreground = graphic.gameObject.AddComponent<UiBackdropForeground>();
-                    foreground.hideFlags = HideFlags.DontSave;
-                }
-                foreground.Bind(this);
+                BindGraphic(graphic, renderQueueOverride, liquidOnly);
+            }
+        }
+
+        /// <summary>Reuses one queue-only modifier without replacing the Graphic, material source or layout.</summary>
+        /// <param name="graphic">The existing Graphic, excluding this or another backdrop body.</param>
+        /// <param name="renderQueueOverride">The explicit queue, or minus one for the owner's native foreground stage.</param>
+        /// <param name="liquidOnly">Whether the queue policy applies only to liquid glass.</param>
+        private void BindGraphic(Graphic? graphic, int renderQueueOverride = -1, bool liquidOnly = false)
+        {
+            if (graphic == null || graphic == _image || graphic.GetComponent<UiBackdropPanel>() != null)
+            {
+                return;
+            }
+            var foreground = graphic.GetComponent<UiBackdropForeground>();
+            if (foreground == null)
+            {
+                foreground = graphic.gameObject.AddComponent<UiBackdropForeground>();
+                foreground.hideFlags = HideFlags.DontSave;
+            }
+            foreground.Bind(this, renderQueueOverride, liquidOnly);
+            if (!_foreground.Contains(foreground))
+            {
                 _foreground.Add(foreground);
             }
         }

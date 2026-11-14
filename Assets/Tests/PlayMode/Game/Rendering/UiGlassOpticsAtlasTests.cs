@@ -342,8 +342,8 @@ namespace MajdataPlay.Tests.Game.Rendering
                         path + ": every explicitly opted-in settlement panel must participate in baked-contour coverage.");
                 }
             }
-            Assert.That(total, Is.EqualTo(45));
-            Assert.That(matched, Is.EqualTo(43));
+            Assert.That(total, Is.EqualTo(43));
+            Assert.That(matched, Is.EqualTo(41));
             Assert.That(procedural, Is.EqualTo(2));
             TestContext.WriteLine($"OPTICS_AUTHORED total={total} matched={matched} proceduralFallback={procedural}");
 #else

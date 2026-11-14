@@ -6,20 +6,26 @@ using UnityEngine.UI;
 
 namespace MajdataPlay.Rendering
 {
-    /// <summary>Preserves native category order or keeps a button's Image, SVG and TMP foreground above its body.</summary>
+    /// <summary>Applies an authored panel's queue-only policy to existing overlays and native foreground Graphics.</summary>
     /// <remarks>Instances are bound at runtime and retained for pooling; no source material or serialized asset is changed.</remarks>
     [AddComponentMenu("")]
     [DisallowMultipleComponent]
     [RequireComponent(typeof(Graphic))]
     public sealed class UiBackdropForeground : MonoBehaviour, IMaterialModifier
     {
-        /// <summary>Identifies the active button whose visibility and quality policy own this helper.</summary>
+        /// <summary>Identifies the active panel whose lifetime and quality policy own this Graphic's queue variant.</summary>
         private UiBackdropPanel? _owner;
+
+        /// <summary>Overrides the native owner stage only for an explicitly authored overlay layer.</summary>
+        private int _renderQueueOverride = -1;
+
+        /// <summary>Leaves ordinary and Gaussian materials unchanged for a liquid-only explicit layer.</summary>
+        private bool _liquidOnly;
 
         /// <summary>Retains the native Graphic without restricting its concrete renderer type.</summary>
         private Graphic? _graphic;
 
-        /// <summary>Identifies a bound category label whose native fallback submeshes can be created later.</summary>
+        /// <summary>Identifies a bound label whose native fallback submeshes can be created later.</summary>
         private TMP_Text? _text;
 
         /// <summary>Pairs TMP notifications only while this explicitly bound label is enabled.</summary>
@@ -66,15 +72,19 @@ namespace MajdataPlay.Rendering
         }
 
         /// <summary>Assigns or clears a runtime owner and restores the original material when unbound.</summary>
-        /// <param name="owner">The active button panel, or null when its enabled lifetime ends.</param>
-        internal void Bind(UiBackdropPanel? owner)
+        /// <param name="owner">The active panel, or null when its enabled lifetime ends.</param>
+        /// <param name="renderQueueOverride">The explicit queue, or minus one to follow the owner's native foreground stage.</param>
+        /// <param name="liquidOnly">Whether ordinary and Gaussian styles must use the unchanged native material.</param>
+        internal void Bind(UiBackdropPanel? owner, int renderQueueOverride = -1, bool liquidOnly = false)
         {
-            if (ReferenceEquals(_owner, owner))
+            if (ReferenceEquals(_owner, owner) && _renderQueueOverride == renderQueueOverride && _liquidOnly == liquidOnly)
             {
                 return;
             }
             ReleaseDescendants();
             _owner = owner;
+            _renderQueueOverride = renderQueueOverride;
+            _liquidOnly = liquidOnly;
             _graphic ??= GetComponent<Graphic>();
             _text = _graphic as TMP_Text;
             UpdateTextSubscription();
@@ -174,7 +184,7 @@ namespace MajdataPlay.Rendering
                         foreground = submesh.gameObject.AddComponent<UiBackdropForeground>();
                         foreground.hideFlags = HideFlags.DontSave;
                     }
-                    foreground.Bind(owner);
+                    foreground.Bind(owner, _renderQueueOverride, _liquidOnly);
                     if (!_descendants.Contains(foreground))
                     {
                         _descendants.Add(foreground);
@@ -217,15 +227,15 @@ namespace MajdataPlay.Rendering
             _descendants.Clear();
         }
 
-        /// <summary>Preserves native materials and masks while selecting the owner's category or button stage.</summary>
+        /// <summary>Preserves native materials and masks while applying the current native or explicit layer policy.</summary>
         /// <param name="baseMaterial">The native Graphic's material after preceding material modifiers.</param>
-        /// <returns>A reusable queue-only clone for an active category or button, or the unchanged native material.</returns>
+        /// <returns>A reusable queue-only clone when the owner and style permit it, or the unchanged native material.</returns>
         public Material GetModifiedMaterial(Material baseMaterial)
         {
             var owner = _owner;
             if (!Application.isPlaying || !isActiveAndEnabled || owner == null || !owner.isActiveAndEnabled ||
-                !owner.SupportsCurrentStyle ||
-                (owner.SourceRole != UiBackdropSourceRole.Peripheral && !owner.IsCategory) ||
+                !owner.SupportsCurrentStyle || (_liquidOnly && !UiPvBackdropBlur.IsLiquidGlass) ||
+                (_renderQueueOverride < 0 && owner.SourceRole != UiBackdropSourceRole.Peripheral && !owner.IsCategory) ||
                 !UiPvBackdropBlur.Enabled || baseMaterial == null)
             {
                 ReleaseMaterial();
@@ -246,8 +256,8 @@ namespace MajdataPlay.Rendering
                 // Native TMP/SVG or stencil modifiers may update the same source object during a material rebuild.
                 _material.CopyPropertiesFromMaterial(baseMaterial);
             }
-            _material.renderQueue = owner.IsCategory ? MajUiBackdropBridge.CategoryQueue
-                : MajUiBackdropBridge.ButtonGlyphQueueLowerBound;
+            _material.renderQueue = _renderQueueOverride >= 0 ? _renderQueueOverride
+                : owner.IsCategory ? MajUiBackdropBridge.CategoryQueue : MajUiBackdropBridge.ButtonGlyphQueueLowerBound;
             return _material;
         }
 

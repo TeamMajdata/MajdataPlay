@@ -6,13 +6,13 @@ namespace MajdataPlay.Settings
     {
         public CommonOptions Common { get; init; } = new();
 
+        [JsonIgnore]
+        public ModOptions Mod { get; init; } = new();
+
         public RenderingOptions Rendering { get; init; } = new();
 
         [HideInSettingUI]
         public SoundOptions Audio { get; init; } = new();
-
-        [JsonIgnore]
-        public ModOptions Mod { get; init; } = new();
 
         [ShowInSettingUIWhen($"{nameof(SettingRoot.System)}.{nameof(Common)}.{nameof(CommonOptions.RecordMode)}", RecordModeOption.FFmpeg)]
         public FFmpegEncodingOptions Encoding { get; init; } = new();
