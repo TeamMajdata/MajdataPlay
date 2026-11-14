@@ -165,6 +165,11 @@ namespace MajdataPlay.Tests.Game.Misc.Net
                     (HttpStatusCode.Unauthorized, "{}", "MAJTEXT_ONLINE_USERNAME_OR_PASSWORD_INCORRECT"),
                     (HttpStatusCode.Forbidden, "{\"code\":11}", "MAJTEXT_ONLINE_ACCOUNT_PENDING_VERIFICATION"),
                     (HttpStatusCode.Forbidden, "{\"code\":12}", "MAJTEXT_ONLINE_ACCOUNT_BANNED"),
+                    (HttpStatusCode.Forbidden, "{\"code\":60004}", "MAJTEXT_ONLINE_ACCOUNT_PENDING_VERIFICATION"),
+                    (HttpStatusCode.Forbidden, "{\"code\":60005}", "MAJTEXT_ONLINE_ACCOUNT_BANNED"),
+                    (HttpStatusCode.Forbidden, "{\"code\":69999}", "MAJTEXT_ONLINE_ACCESS_FORBIDDEN"),
+                    (HttpStatusCode.Forbidden, "{}", "MAJTEXT_ONLINE_ACCESS_FORBIDDEN"),
+                    (HttpStatusCode.Forbidden, "{\"code\":null}", "MAJTEXT_ONLINE_ACCESS_FORBIDDEN"),
                     (HttpStatusCode.Forbidden, "not json", "MAJTEXT_ONLINE_ACCESS_FORBIDDEN"),
                 };
                 foreach (var (status, body, message) in cases)
@@ -188,13 +193,19 @@ namespace MajdataPlay.Tests.Game.Misc.Net
         {
             return UniTask.ToCoroutine(async () =>
             {
-                _http.RespondWith(HttpStatusCode.Forbidden, "{\"code\":0}");
+                foreach (var code in new[] { 60001, 0 })
+                {
+                    SetStatistic("IsUserLoggedIn", false);
+                    _http.RespondWith(HttpStatusCode.Forbidden, "{\"code\":" + code + "}");
+                    var before = _http.Requests.Length;
 
-                var response = await Online.Account.LoginAsync(_endpoint, "user", "pass");
+                    var response = await Online.Account.LoginAsync(_endpoint, "user", "pass");
 
-                Assert.That(response.IsSuccessfully, Is.True);
-                Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.OK));
-                Assert.That(_endpoint.RuntimeConfig.IsLoggedIn, Is.True);
+                    Assert.That(response.IsSuccessfully, Is.True, "Business code: " + code);
+                    Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.OK));
+                    Assert.That(_endpoint.RuntimeConfig.IsLoggedIn, Is.True);
+                    Assert.That(_http.Requests.Length - before, Is.EqualTo(1));
+                }
             });
         }
 
@@ -1097,10 +1108,18 @@ namespace MajdataPlay.Tests.Game.Misc.Net
                     ComboState = ComboState.FC
                 };
                 var warningsBefore = CountQueuedLegacyScoreWarnings();
-                foreach (var status in new[] { HttpStatusCode.NotFound, HttpStatusCode.MethodNotAllowed, HttpStatusCode.NotImplemented })
+                var cases = new (HttpStatusCode Status, string Body)[]
+                {
+                    (HttpStatusCode.NotFound, string.Empty),
+                    (HttpStatusCode.MethodNotAllowed, string.Empty),
+                    (HttpStatusCode.NotImplemented, string.Empty),
+                    (HttpStatusCode.NotFound, "{\"code\":40400}"),
+                    (HttpStatusCode.NotFound, "{\"code\":\"40400\"}"),
+                };
+                foreach (var (status, responseBody) in cases)
                 {
                     _http.Responder = request => request.RequestUri!.AbsolutePath.Contains("maiscore/level/")
-                        ? StubHttpScope.Respond(status, string.Empty)
+                        ? StubHttpScope.Respond(status, responseBody)
                         : StubHttpScope.Respond(HttpStatusCode.OK, string.Empty);
                     var before = _http.Requests.Length;
                     Assert.That((await Online.MaiChart.PostScoreAsync(song, score)).IsSuccessfully, Is.True);
@@ -1113,7 +1132,7 @@ namespace MajdataPlay.Tests.Game.Misc.Net
                     Assert.That((int?)body["chartLevel"], Is.EqualTo((int)ChartLevel.Master));
                     Assert.That((long?)body["dxScore"], Is.EqualTo(42));
                 }
-                Assert.That(CountQueuedLegacyScoreWarnings() - warningsBefore, Is.EqualTo(3));
+                Assert.That(CountQueuedLegacyScoreWarnings() - warningsBefore, Is.EqualTo(cases.Length));
             });
         }
 

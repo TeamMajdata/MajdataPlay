@@ -404,9 +404,9 @@ namespace MajdataPlay.Net
 
                 return rsp;
             }
-            /// <summary>Determines whether the level score route is missing rather than rejecting this particular score.</summary>
+            /// <summary>Determines whether a level score response selects the legacy compatibility route.</summary>
             /// <param name="rsp">The response of the level score route.</param>
-            /// <returns>True for an unsupported route; false for transport failures or a structured API rejection.</returns>
+            /// <returns>True when the legacy route should be tried; false for other responses.</returns>
             private static bool IsScoreRouteUnsupported(EndpointResponse rsp)
             {
                 if (rsp.StatusCode is HttpStatusCode.MethodNotAllowed or HttpStatusCode.NotImplemented)
@@ -419,10 +419,10 @@ namespace MajdataPlay.Net
                 }
                 try
                 {
-                    // A new server returns an API code for a stale level hash or unknown chart. Such a rejection
-                    // must reach the caller instead of submitting the same play through a different identity.
+                    // A missing code or NoSuchItem selects the compatibility route.
                     var body = JObject.Parse(Encoding.UTF8.GetString(rsp.AsSpan()));
-                    return body["code"] is null;
+                    var returnCode = body["code"];
+                    return returnCode is null || returnCode.ToString() == ((int)ApiReturnCode.ApiNotSupported).ToString(CultureInfo.InvariantCulture);
                 }
                 catch (JsonException)
                 {
