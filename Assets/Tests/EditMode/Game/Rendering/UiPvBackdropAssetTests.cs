@@ -1095,6 +1095,28 @@ namespace MajdataPlay.Tests.Game.Rendering
             Assert.That(title, Does.Contain("_selectedBackgroundColor: {r: 0.62352943, g: 0.6901961, b: 0.7372549, a: 1}"));
         }
 
+        /// <summary>Checks cutout List icons retain native foreground order when backdrop captures are disabled.</summary>
+        [Test]
+        public void ListCategoryIcons_KeepCutoutMaterialsAfterTheirOpaqueBackground()
+        {
+            var prefab = AssetDatabase.LoadAssetAtPath<UnityEngine.GameObject>("Assets/Prefabs/List/Model/CollectionDisplayer.prefab");
+            Assert.That(prefab, Is.Not.Null);
+            var background = prefab!.transform.Find("BG").GetComponent<QualityUiImage>();
+            var icon = prefab.transform.Find("Icon").GetComponent<QualityUiImage>();
+            var material = AssetDatabase.LoadAssetAtPath<UnityEngine.Material>("Assets/Rendering/Materials/UI/CategoryIconCutout.mat");
+            var globalCutout = AssetDatabase.LoadAssetAtPath<UnityEngine.Material>("Assets/Rendering/Materials/UI/[UI]Opaque.mat");
+
+            Assert.That(material, Is.Not.Null);
+            Assert.That(globalCutout, Is.Not.Null);
+            Assert.That(icon.SourceMaterial, Is.SameAs(material));
+            Assert.That(material!.shader.name, Is.EqualTo("Maj/Common/Opaque"));
+            Assert.That(material.renderQueue, Is.EqualTo(3000));
+            Assert.That(material.renderQueue, Is.EqualTo(background.SourceMaterial.renderQueue));
+            Assert.That(icon.transform.parent, Is.SameAs(background.transform.parent));
+            Assert.That(icon.transform.GetSiblingIndex(), Is.GreaterThan(background.transform.GetSiblingIndex()));
+            Assert.That(globalCutout!.renderQueue, Is.EqualTo(2000), "Other opaque UI must retain its early depth pass.");
+        }
+
         /// <summary>Checks category titles have an authored clipping viewport and never shrink or ellipsize selected text.</summary>
         /// <param name="path">The shared category prefab.</param>
         /// <param name="titleName">The original title child's name.</param>
