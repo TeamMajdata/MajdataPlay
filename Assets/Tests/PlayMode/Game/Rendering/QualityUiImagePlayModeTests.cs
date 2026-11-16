@@ -3,8 +3,10 @@ using System.Collections;
 using System.Collections.Generic;
 using System.Reflection;
 using System.Text.RegularExpressions;
+using MajdataPlay.Collections;
 using MajdataPlay.IO.Storage;
 using MajdataPlay.Rendering;
+using MajdataPlay.Scenes.List.Models;
 using NUnit.Framework;
 using TMPro;
 using UnityEngine;
@@ -540,6 +542,7 @@ namespace MajdataPlay.Tests.Game.Rendering
             {
                 "Assets/Rendering/Materials/UI/[UI]Opaque.mat",
                 "Assets/Rendering/Materials/UI/[UI]RingLine.mat",
+                "Assets/Rendering/Materials/UI/CategoryIconCutout.mat",
                 "Assets/Rendering/Materials/UI/List/[List]CoverLevelBackground.mat"
             })
             {
@@ -566,6 +569,59 @@ namespace MajdataPlay.Tests.Game.Rendering
             }
 #else
             Assert.Ignore("This regression loads authored legacy materials in Editor Play Mode.");
+            yield break;
+#endif
+        }
+
+        /// <summary>Checks authored category icons follow their background without changing cutout or filtered rendering policies.</summary>
+        /// <returns>The real prefab material-selection and backdrop-stage lifecycle regression.</returns>
+        [UnityTest]
+        public IEnumerator ListCategoryIcons_RetainForegroundOrderAcrossRenderingStyles()
+        {
+#if UNITY_EDITOR
+            var prefab = AssetDatabase.LoadAssetAtPath<GameObject>("Assets/Prefabs/List/Model/CollectionDisplayer.prefab");
+            Assert.That(prefab, Is.Not.Null);
+            var canvas = _objects.Add<Canvas>();
+            canvas.renderMode = RenderMode.ScreenSpaceOverlay;
+            var instance = _objects.Track(UnityEngine.Object.Instantiate(prefab, canvas.transform));
+            instance.GetComponent<CollectionDisplayer>().SetCollection(new SongCollection("Folder", Array.Empty<ISongDetail>())
+            {
+                Type = ChartStorageType.PlayList
+            });
+            var background = instance.transform.Find("BG").GetComponent<QualityUiImage>();
+            var icon = instance.transform.Find("Icon").GetComponent<QualityUiImage>();
+            var source = icon.SourceMaterial;
+            UiPvBackdropBlur.Configure(false);
+            foreach (var mode in new[] { UiOutlineMode.None, UiOutlineMode.Performance, UiOutlineMode.All })
+            {
+                UiOutlineTheme.Configure(mode);
+                yield return null;
+                Canvas.ForceUpdateCanvases();
+
+                var material = icon.materialForRendering;
+                Assert.That(icon.enabled, Is.True);
+                Assert.That(material.renderQueue, Is.EqualTo(background.materialForRendering.renderQueue));
+                Assert.That(material.renderQueue, Is.EqualTo(3000));
+                Assert.That(material.shader.name, Is.EqualTo(mode == UiOutlineMode.All
+                    ? "Maj/UI/Atlas Alpha" : "Maj/Common/Opaque"));
+                Assert.That(icon.SourceMaterial, Is.SameAs(source));
+            }
+            foreach (var style in new[] { UiBackdropStyle.GaussianBlur, UiBackdropStyle.LiquidGlass })
+            {
+                UiPvBackdropBlur.Configure(true, style);
+                yield return null;
+                Canvas.ForceUpdateCanvases();
+
+                Assert.That(icon.materialForRendering.renderQueue, Is.EqualTo(MajUiBackdropBridge.CategoryQueue));
+                Assert.That(background.materialForRendering.renderQueue, Is.EqualTo(MajUiBackdropBridge.CategoryQueue));
+            }
+            UiPvBackdropBlur.Configure(false);
+            UiOutlineTheme.Configure(UiOutlineMode.None);
+            yield return null;
+            Assert.That(icon.materialForRendering, Is.SameAs(source));
+            Assert.That(source.renderQueue, Is.EqualTo(3000));
+#else
+            Assert.Ignore("This regression loads the authored List category prefab in Editor Play Mode.");
             yield break;
 #endif
         }
