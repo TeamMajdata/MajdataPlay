@@ -96,6 +96,110 @@ namespace MajdataPlay.Platform.Android
             }
 #endif
         }
+        /// <summary>Requests a package-scoped refresh preference on Xiaomi, Redmi, and POCO devices.</summary>
+        /// <param name="targetFrameRate">The Unity frame limit; nonpositive values use its mobile default of 30 FPS.</param>
+        public static void RequestXiaomiRefreshRate(int targetFrameRate)
+        {
+#if ANDROID_RUNTIME
+            try
+            {
+                var manufacturer = Build.Manufacturer;
+                if (!string.Equals(manufacturer, "Xiaomi", StringComparison.OrdinalIgnoreCase) &&
+                    !string.Equals(manufacturer, "Redmi", StringComparison.OrdinalIgnoreCase) &&
+                    !string.Equals(manufacturer, "POCO", StringComparison.OrdinalIgnoreCase))
+                {
+                    return;
+                }
+
+                using var activity = CurrentActivity;
+                activity.RunOnUiThread(new AndroidJavaRunnable(() => ApplyXiaomiRefreshRate(targetFrameRate)));
+            }
+            catch (Exception ex)
+            {
+                using var javaException = ex as JavaInvocationException;
+                MajDebug.LogWarning(nameof(AndroidRuntime), $"Xiaomi refresh rate preference unavailable: {ex.Message}");
+            }
+#endif
+        }
+#if ANDROID_RUNTIME
+        /// <summary>Applies the display mode and PowerKeeper override on Android's UI thread.</summary>
+        /// <param name="targetFrameRate">The current Unity frame limit.</param>
+        private static void ApplyXiaomiRefreshRate(int targetFrameRate)
+        {
+            try
+            {
+                using var activity = CurrentActivity;
+                using var window = activity.GetWindow();
+                using var windowManager = activity.GetWindowManager();
+                using var display = windowManager?.GetDefaultDisplay();
+                using var currentMode = display?.GetMode();
+                if (window is null || display is null || currentMode is null)
+                {
+                    return;
+                }
+
+                var requestedRate = targetFrameRate > 0 ? targetFrameRate : 30;
+                var width = currentMode.GetPhysicalWidth();
+                var height = currentMode.GetPhysicalHeight();
+                var bestModeId = currentMode.GetModeId();
+                var bestRate = currentMode.GetRefreshRate();
+                var bestDistance = Math.Abs(bestRate - requestedRate);
+                var modes = display.GetSupportedModes();
+                if (modes is not null)
+                {
+                    try
+                    {
+                        foreach (var mode in modes)
+                        {
+                            if (mode is null || mode.GetPhysicalWidth() != width || mode.GetPhysicalHeight() != height)
+                            {
+                                continue;
+                            }
+
+                            var rate = mode.GetRefreshRate();
+                            var distance = Math.Abs(rate - requestedRate);
+                            if (distance < bestDistance - 0.001f ||
+                                (Math.Abs(distance - bestDistance) < 0.001f && rate > bestRate))
+                            {
+                                bestModeId = mode.GetModeId();
+                                bestRate = rate;
+                                bestDistance = distance;
+                            }
+                        }
+                    }
+                    finally
+                    {
+                        foreach (var mode in modes)
+                        {
+                            mode?.Dispose();
+                        }
+                    }
+                }
+
+                using var attributes = window.GetAttributes();
+                if (attributes is null)
+                {
+                    return;
+                }
+                attributes.PreferredDisplayModeId = bestModeId;
+                attributes.PreferredRefreshRate = requestedRate;
+                window.SetAttributes(attributes);
+
+                // PowerKeeper's default 60 Hz game policy can override the window request.
+                // Send the selected mode's rate so 144 Hz displays are not capped at 120 Hz.
+                using var request = new Intent("com.xiaomi.joyose.OVERRIDE_GAME_FRESHRATE");
+                request.SetPackage("com.miui.powerkeeper")?.Dispose();
+                request.PutExtra("override_pkg_name", activity.GetPackageName())?.Dispose();
+                request.PutExtra("override_freshrate", (int)Math.Round(bestRate))?.Dispose();
+                activity.SendBroadcast(request);
+            }
+            catch (Exception ex)
+            {
+                using var javaException = ex as JavaInvocationException;
+                MajDebug.LogWarning(nameof(AndroidRuntime), $"Xiaomi refresh rate preference unavailable: {ex.Message}");
+            }
+        }
+#endif
         /// <summary>Forwards the borrowed Java intent to managed subscribers.</summary>
         /// <param name="intent">The intent borrowed for the callback duration.</param>
         private static void Android_OnNewIntent(AndroidJavaObject intent)
