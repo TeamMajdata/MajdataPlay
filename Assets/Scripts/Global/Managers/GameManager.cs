@@ -367,9 +367,14 @@ namespace MajdataPlay
 #if UNITY_STANDALONE || UNITY_EDITOR
             QualitySettings.vSyncCount = renderingOptions.VSync ? 1 : 0;
 #endif
-            Application.targetFrameRate = renderingOptions.FPSLimit;
+            SetFrameRate(renderingOptions.FPSLimit);
+        }
+
+        public static void SetFrameRate(int fps)
+        {
+            Application.targetFrameRate = fps;
 #if ANDROID_RUNTIME
-            AndroidRuntime.RequestXiaomiRefreshRate(Application.targetFrameRate);
+            AndroidRuntime.SetFrameRate(fps);
 #endif
         }
 
@@ -443,7 +448,6 @@ namespace MajdataPlay
                 }
             }
 #endif
-            Application.targetFrameRate = SystemSettings.Rendering.FPSLimit;
         }
 
 #if UNITY_STANDALONE_OSX && !UNITY_EDITOR
@@ -538,7 +542,7 @@ namespace MajdataPlay
             // PowerKeeper may reload its per-game refresh policy while we are in the background.
             if (focus)
             {
-                AndroidRuntime.RequestXiaomiRefreshRate(Application.targetFrameRate);
+                SetFrameRate(SystemSettings.Rendering.FPSLimit);
             }
 #endif
             if (OnAppFocus is not null)

@@ -33,33 +33,6 @@ namespace MajdataPlay.Platform.Android
             }
         }
 
-        /// <summary>Asks Android to use a display refresh rate that can present the requested frame rate.</summary>
-        /// <param name="frameRate">
-        /// The display refresh rate to request in frames per second. A value of zero or less asks for
-        /// the fastest refresh rate the display offers.
-        /// </param>
-        /// <remarks>
-        /// The request keeps the current display resolution and applies to the current activity's window
-        /// and surface. It is posted to Android's UI thread and remains best effort: the system may refuse
-        /// it for power, thermal, or vendor-specific reasons. This method does not change Unity's
-        /// <see cref="Application.targetFrameRate"/>.
-        /// </remarks>
-        /// <exception cref="ArgumentOutOfRangeException"><paramref name="frameRate"/> is NaN or infinite.</exception>
-        /// <exception cref="InvalidOperationException">The Android activity has not been created, or JNI cannot allocate a reference or frame.</exception>
-        /// <exception cref="PlatformNotSupportedException">Execution is outside an Android player.</exception>
-        /// <exception cref="AndroidJavaException">Unity cannot resolve the Java helper class or its method.</exception>
-        /// <exception cref="JavaInvocationException">Java rejects the request.</exception>
-        public static void SetFrameRate(float frameRate)
-        {
-            if (float.IsNaN(frameRate) || float.IsInfinity(frameRate))
-            {
-                throw new ArgumentOutOfRangeException(nameof(frameRate), frameRate, "The frame rate must be a finite number.");
-            }
-            using var activity = CurrentActivity;
-            MajDebug.LogInfo(nameof(AndroidRuntime), $"Requesting display refresh rate: {frameRate} Hz");
-            SurfaceRefreshRate.Request(activity, frameRate);
-        }
-
         /// <summary>Gets whether metadata and all production activity callbacks initialized successfully.</summary>
         public static bool IsInitialized { get; private set; }
         /// <summary>Gets the installed application's Android version code after initialization.</summary>
@@ -123,11 +96,40 @@ namespace MajdataPlay.Platform.Android
                 MajDebug.LogError($"[{nameof(AndroidRuntime)}] Init failed: {ex}");
             }
         }
+
+        /// <summary>Asks Android to use a display refresh rate that can present the requested frame rate.</summary>
+        /// <param name="frameRate">
+        /// The display refresh rate to request in frames per second. A value of zero or less asks for
+        /// the fastest refresh rate the display offers.
+        /// </param>
+        /// <remarks>
+        /// The request keeps the current display resolution and applies to the current activity's window
+        /// and surface. It is posted to Android's UI thread and remains best effort: the system may refuse
+        /// it for power, thermal, or vendor-specific reasons. This method does not change Unity's
+        /// <see cref="Application.targetFrameRate"/>.
+        /// </remarks>
+        /// <exception cref="ArgumentOutOfRangeException"><paramref name="frameRate"/> is NaN or infinite.</exception>
+        /// <exception cref="InvalidOperationException">The Android activity has not been created, or JNI cannot allocate a reference or frame.</exception>
+        /// <exception cref="PlatformNotSupportedException">Execution is outside an Android player.</exception>
+        /// <exception cref="AndroidJavaException">Unity cannot resolve the Java helper class or its method.</exception>
+        /// <exception cref="JavaInvocationException">Java rejects the request.</exception>
+        public static void SetFrameRate(float frameRate)
+        {
+            if (float.IsNaN(frameRate) || float.IsInfinity(frameRate))
+            {
+                throw new ArgumentOutOfRangeException(nameof(frameRate), frameRate, "The frame rate must be a finite number.");
+            }
+            using var activity = CurrentActivity;
+            MajDebug.LogInfo(nameof(AndroidRuntime), $"Requesting display refresh rate: {frameRate} Hz");
+            SurfaceRefreshRate.Request(activity, frameRate);
+            // OEM special
+            RequestXiaomiRefreshRate((int)frameRate);
+        }
+
         /// <summary>Requests a package-scoped refresh preference on Xiaomi, Redmi, and POCO devices.</summary>
         /// <param name="targetFrameRate">The Unity frame limit; nonpositive values use its mobile default of 30 FPS.</param>
-        public static void RequestXiaomiRefreshRate(int targetFrameRate)
+        private static void RequestXiaomiRefreshRate(int targetFrameRate)
         {
-#if ANDROID_RUNTIME
             try
             {
                 var manufacturer = Build.Manufacturer;
@@ -146,9 +148,7 @@ namespace MajdataPlay.Platform.Android
                 using var javaException = ex as JavaInvocationException;
                 MajDebug.LogWarning(nameof(AndroidRuntime), $"Xiaomi refresh rate preference unavailable: {ex.Message}");
             }
-#endif
         }
-#if ANDROID_RUNTIME
         /// <summary>Applies the display mode and PowerKeeper override on Android's UI thread.</summary>
         /// <param name="targetFrameRate">The current Unity frame limit.</param>
         private static void ApplyXiaomiRefreshRate(int targetFrameRate)
@@ -226,7 +226,6 @@ namespace MajdataPlay.Platform.Android
                 MajDebug.LogWarning(nameof(AndroidRuntime), $"Xiaomi refresh rate preference unavailable: {ex.Message}");
             }
         }
-#endif
         /// <summary>Forwards the borrowed Java intent to managed subscribers.</summary>
         /// <param name="intent">The intent borrowed for the callback duration.</param>
         private static void Android_OnNewIntent(AndroidJavaObject intent)
