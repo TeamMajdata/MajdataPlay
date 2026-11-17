@@ -17,7 +17,7 @@ Simai is a maimai chart discription language developed by [Celeca](https://twitt
 ## Supported platforms
 
 - Windows
-- [Linux](https://github.com/LingFeng-bbben/MajdataPlay/wiki/%E5%B9%B3%E5%8F%B0%E7%9B%B8%E5%85%B3#linux) (Partially Supported)
+- [Linux](https://docs.majdata.net/en/majdataplay/install#linux) (Partially Supported)
 - macOS
 - Android
 - iOS
