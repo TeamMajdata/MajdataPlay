@@ -559,7 +559,7 @@ namespace MajdataPlay.Scenes.Game
             catch (InvalidSimaiMarkupException syntaxE)
             {
                 await UniTask.SwitchToMainThread();
-                MajInstances.SceneSwitcher.SetLoadingText($"{"Invalid syntax".i18n()}\n(at L{syntaxE.Line}:C{syntaxE.Column}) \"{syntaxE.Content}\"\n{syntaxE.Message}", Color.red);
+                MajInstances.SceneSwitcher.SetLoadingText($"{"MAJTEXT_ERR_INVALID_SYNTAX".i18n()}\n(at L{syntaxE.Line}:C{syntaxE.Column}) \"{syntaxE.Content}\"\n{syntaxE.Message}", Color.red);
                 MajDebug.LogError(syntaxE);
                 return;
             }
@@ -928,7 +928,7 @@ namespace MajdataPlay.Scenes.Game
             {
                 token.ThrowIfCancellationRequested();
                 await UniTask.SwitchToMainThread();
-                _sceneSwitcher.SetLoadingText($"{"Waiting for recorder".i18n()}...");
+                _sceneSwitcher.SetLoadingText($"{"MAJTEXT_WAITING_FOR_RECORDER".i18n()}...");
                 await UniTask.Yield();
             }
             token.ThrowIfCancellationRequested();
@@ -1467,7 +1467,7 @@ namespace MajdataPlay.Scenes.Game
             var wait4Recorder = Recording.Recorder.StopRecordAsync();
             while (!wait4Recorder.IsCompleted)
             {
-                _sceneSwitcher.SetLoadingText($"{"Waiting for recorder".i18n()}...");
+                _sceneSwitcher.SetLoadingText($"{"MAJTEXT_WAITING_FOR_RECORDER".i18n()}...");
                 await UniTask.Yield();
             }
             MajInstances.SceneSwitcher.FadeIn();
@@ -1619,7 +1619,7 @@ namespace MajdataPlay.Scenes.Game
             var wait4Recorder = Recording.Recorder.StopRecordAsync();
             while (!wait4Recorder.IsCompleted)
             {
-                _sceneSwitcher.SetLoadingText($"{"Waiting for recorder".i18n()}...");
+                _sceneSwitcher.SetLoadingText($"{"MAJTEXT_WAITING_FOR_RECORDER".i18n()}...");
                 await UniTask.Yield();
             }
             _sceneSwitcher.SetLoadingText(string.Empty);
