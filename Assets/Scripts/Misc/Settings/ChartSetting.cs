@@ -1,4 +1,4 @@
-﻿using MajdataPlay.Settings.OptionEnumerators;
+using MajdataPlay.Settings.OptionEnumerators;
 using MajdataPlay.Settings.Runtime;
 using System;
 using System.Collections.Generic;
@@ -25,7 +25,7 @@ namespace MajdataPlay.Settings
         public float TrackVolumeOffset { get; set; } = SettingDefaults.Chart.TrackVolumeOffset;
         public bool DisableVideoBG { get; set; } = SettingDefaults.Chart.DisableVideoBG;
         [Optional]
-        [UseTranslation(TranslationTarget.OptionValue)]
+        [UseGeneralTranslation(TranslationTarget.OptionValue)]
         public bool? SlideSkipping { get; set; } = SettingDefaults.Chart.SlideSkipping;
     }
 }
